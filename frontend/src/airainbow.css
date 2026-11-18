@@ -28,45 +28,37 @@
 
   --ai-card-bg-top: #ffffff;
   --ai-card-bg-bot: #fcfcfd;
-  --ai-border-base: rgba(15, 23, 42, 0.085);
+  --ai-border-base: rgba(15, 23, 42, 0.1);
   --ai-card-shadow:
     0 1px 2px rgba(15, 23, 42, 0.04),
-    0 6px 18px rgba(15, 23, 42, 0.035),
-    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+    0 6px 18px rgba(15, 23, 42, 0.05);
   --ai-card-shadow-hover:
-    0 3px 8px rgba(15, 23, 42, 0.055),
-    0 14px 32px rgba(15, 23, 42, 0.075),
-    inset 0 1px 0 rgba(255, 255, 255, 0.95);
+    0 3px 8px rgba(15, 23, 42, 0.06),
+    0 12px 28px rgba(15, 23, 42, 0.09);
 
   --ai-ctl-bg: #ffffff;
   --ai-ctl-bg-hover: #f7f8fb;
-  --ai-ctl-border: rgba(15, 23, 42, 0.095);
-  --ai-ctl-border-hover: rgba(15, 23, 42, 0.17);
-  --ai-ctl-shadow:
-    0 1px 2px rgba(15, 23, 42, 0.045),
-    inset 0 1px 0 rgba(255, 255, 255, 0.92);
+  --ai-ctl-border: rgba(15, 23, 42, 0.12);
+  --ai-ctl-border-hover: rgba(15, 23, 42, 0.22);
+  --ai-ctl-shadow: 0 1px 2px rgba(15, 23, 42, 0.045);
 }
 
 body[arco-theme="dark"] {
-  --ai-card-bg-top: #1c1e26;
-  --ai-card-bg-bot: #171920;
-  --ai-border-base: rgba(255, 255, 255, 0.11);
+  --ai-card-bg-top: #1a1c24;
+  --ai-card-bg-bot: #161820;
+  --ai-border-base: rgba(255, 255, 255, 0.12);
   --ai-card-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.28),
-    0 8px 22px rgba(0, 0, 0, 0.22),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    0 1px 2px rgba(0, 0, 0, 0.3),
+    0 8px 22px rgba(0, 0, 0, 0.26);
   --ai-card-shadow-hover:
-    0 4px 12px rgba(0, 0, 0, 0.34),
-    0 16px 36px rgba(0, 0, 0, 0.3),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    0 4px 12px rgba(0, 0, 0, 0.36),
+    0 14px 32px rgba(0, 0, 0, 0.32);
 
   --ai-ctl-bg: rgba(255, 255, 255, 0.065);
   --ai-ctl-bg-hover: rgba(255, 255, 255, 0.11);
   --ai-ctl-border: rgba(255, 255, 255, 0.12);
   --ai-ctl-border-hover: rgba(255, 255, 255, 0.22);
-  --ai-ctl-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.25),
-    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  --ai-ctl-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
 }
 
 @keyframes ai-flow {
@@ -110,9 +102,9 @@ body[arco-theme="dark"] {
     0 1px 2px rgba(15, 23, 42, 0.06);
 }
 
-body[arco-theme="dark"] :root .ap-brand-mark,
-body[arco-theme="dark"] :root .ad-mark,
-body[arco-theme="dark"] :root .ad-avatar {
+body[arco-theme="dark"] .ap-brand-mark,
+body[arco-theme="dark"] .ad-mark,
+body[arco-theme="dark"] .ad-avatar {
   box-shadow:
     0 4px 14px -2px rgba(0, 0, 0, 0.5),
     0 0 0 1px rgba(255, 255, 255, 0.08);
@@ -127,39 +119,29 @@ body[arco-theme="dark"] :root .ad-avatar {
   isolation: isolate;
   display: grid;
   place-items: center;
-  border: 1px solid rgba(99, 102, 241, 0.15);
-  background: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.96) 0%,
-    rgba(241, 243, 255, 0.92) 100%
-  );
+  border: 1px solid color-mix(in srgb, var(--brand) 22%, var(--line));
+  background: var(--surface);
   box-shadow:
-    0 16px 36px -8px rgba(79, 70, 229, 0.22),
-    0 4px 10px -2px rgba(15, 23, 42, 0.06),
-    inset 0 1px 0 #ffffff;
+    0 12px 28px -8px rgba(67, 56, 202, 0.2),
+    0 3px 8px -2px rgba(15, 23, 42, 0.05);
   animation: none;
 }
 
-body[arco-theme="dark"] :root .ap-orb,
-body[arco-theme="dark"] :root .fc-start-orb,
-body[arco-theme="dark"] :root .fw-hero-orb,
-body[arco-theme="dark"] :root .ad-empty-mark {
-  border-color: rgba(255, 255, 255, 0.13);
-  background: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.1) 0%,
-    rgba(255, 255, 255, 0.04) 100%
-  );
+body[arco-theme="dark"] .ap-orb,
+body[arco-theme="dark"] .fc-start-orb,
+body[arco-theme="dark"] .fw-hero-orb,
+body[arco-theme="dark"] .ad-empty-mark {
+  border-color: rgba(129, 140, 248, 0.28);
+  background: var(--surface-2);
   box-shadow:
-    0 18px 40px -8px rgba(0, 0, 0, 0.56),
-    0 4px 12px rgba(79, 70, 229, 0.22),
-    inset 0 1px 0 rgba(255, 255, 255, 0.14);
+    0 14px 32px -8px rgba(0, 0, 0, 0.52),
+    0 4px 12px rgba(99, 102, 241, 0.18);
 }
 
 :root .ap-orb {
   width: 64px;
   height: 64px;
-  border-radius: 20px;
+  border-radius: 16px;
 }
 
 :root .fc-start-orb,
@@ -167,7 +149,7 @@ body[arco-theme="dark"] :root .ad-empty-mark {
 :root .ad-empty-mark {
   width: 56px;
   height: 56px;
-  border-radius: 18px;
+  border-radius: 14px;
 }
 
 :root .ap-orb::after,
@@ -220,25 +202,25 @@ body[arco-theme="dark"] :root .ad-empty-mark {
   position: relative;
   isolation: isolate;
   border: 1px solid transparent;
-  border-radius: 24px;
+  border-radius: 16px;
   background: none;
   box-shadow: var(--ai-card-shadow);
   transform-origin: center center;
   transition:
-    transform 0.38s var(--spring),
-    box-shadow 0.28s var(--ease-out);
+    transform 0.28s var(--spring),
+    box-shadow 0.24s var(--ease-out);
 }
 
 :root .ad-compose {
-  border-radius: 20px;
+  border-radius: 14px;
 }
 
 :root .ap-compose.fc-compose:not(.start-box) {
-  border-radius: 16px;
+  border-radius: 12px;
 }
 
 :root .ap-compose.fc-compose.start-box {
-  border-radius: 24px;
+  border-radius: 16px;
 }
 
 :root .ap-compose::before,
@@ -354,8 +336,8 @@ body[arco-theme="dark"] :root .ad-empty-mark {
     --ai-ptr 0.28s ease;
 }
 
-body[arco-theme="dark"] :root .ap-compose::after,
-body[arco-theme="dark"] :root .ad-compose::after {
+body[arco-theme="dark"] .ap-compose::after,
+body[arco-theme="dark"] .ad-compose::after {
   opacity: 0.72;
 }
 
@@ -405,14 +387,13 @@ body[arco-theme="dark"] :root .ad-compose::after {
 
 :root .ap-hero .ap-compose:not(.off):is(:hover, :focus-within, :has(.arco-dropdown-open), :has(.arco-popover-open)),
 :root .fc.start .fc-compose.start-box:not(.off):is(:hover, :focus-within, :has(.arco-dropdown-open), :has(.arco-popover-open)) {
-  transform: translateY(-1.5px) scale(1.008);
+  transform: translateY(-1px);
   box-shadow: var(--ai-card-shadow-hover);
 }
 
 :root .ap-foot .ap-compose:not(.off):is(:hover, :focus-within, :has(.arco-dropdown-open), :has(.arco-popover-open)),
 :root .ad-compose:not(.off):is(:hover, :focus-within, :has(.arco-dropdown-open), :has(.arco-popover-open)),
 :root .fc-compose:not(.start-box):not(.off):is(:hover, :focus-within, :has(.arco-dropdown-open), :has(.arco-popover-open)) {
-  transform: translateY(-1px) scale(1.004);
   box-shadow: var(--ai-card-shadow-hover);
 }
 
@@ -848,13 +829,13 @@ body[arco-theme="dark"] :root .ad-compose::after {
   box-shadow: none;
 }
 
-body[arco-theme="dark"] :root :is(.ap-compose, .ad-compose) .tm-tog.think.on {
+body[arco-theme="dark"] :is(.ap-compose, .ad-compose) .tm-tog.think.on {
   color: #c4b5fd;
   border-color: rgba(167, 139, 250, 0.3);
   background: rgba(167, 139, 250, 0.18);
 }
 
-body[arco-theme="dark"] :root :is(.ap-compose, .ad-compose) .tm-tog.web.on {
+body[arco-theme="dark"] :is(.ap-compose, .ad-compose) .tm-tog.web.on {
   color: #7dd3fc;
   border-color: rgba(56, 189, 248, 0.3);
   background: rgba(56, 189, 248, 0.17);
@@ -879,9 +860,9 @@ body[arco-theme="dark"] :root :is(.ap-compose, .ad-compose) .tm-tog.web.on {
 :root .ap-compose .ap-send:not(:disabled),
 :root .ad-compose .ad-send:not(:disabled),
 :root .ap-compose .ad-send:not(:disabled) {
-  color: var(--surface);
-  background: var(--ink);
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.18);
+  color: #ffffff;
+  background: var(--brand);
+  box-shadow: 0 2px 8px rgba(67, 56, 202, 0.28);
 }
 
 :root .ap-compose .ap-send:disabled:not(.stop),

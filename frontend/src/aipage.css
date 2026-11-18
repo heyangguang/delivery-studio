@@ -4,7 +4,7 @@
   display: grid;
   grid-template-columns: 284px minmax(0, 1fr);
   height: calc(100vh - 52px);
-  background: var(--surface);
+  background: var(--bg);
 }
 
 /* ---------------------------------------------------------------- side */
@@ -349,17 +349,12 @@
   width: 64px;
   height: 64px;
   margin-bottom: 6px;
-  border-radius: 20px;
-  border: 1px solid rgba(99, 102, 241, 0.15);
-  background: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.96) 0%,
-    rgba(241, 243, 255, 0.92) 100%
-  );
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--brand) 22%, var(--line));
+  background: var(--surface);
   box-shadow:
-    0 16px 36px -8px rgba(79, 70, 229, 0.22),
-    0 4px 10px -2px rgba(15, 23, 42, 0.06),
-    inset 0 1px 0 #ffffff;
+    0 12px 28px -8px rgba(67, 56, 202, 0.2),
+    0 3px 8px -2px rgba(15, 23, 42, 0.05);
 }
 .ap-hero h1 {
   margin: 0;
@@ -391,17 +386,17 @@
   gap: 12px;
   padding: 12px 14px;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 10px;
   color: var(--ink);
   font: inherit;
   text-align: left;
   background: var(--surface);
   cursor: pointer;
   transition:
-    border-color 0.15s,
-    background 0.15s,
-    transform 0.15s var(--ease-out),
-    box-shadow 0.15s;
+    border-color 0.16s,
+    background 0.16s,
+    transform 0.16s var(--ease-out),
+    box-shadow 0.16s;
 }
 .ap-suggest button:hover:not(:disabled) {
   border-color: var(--brand-line);
@@ -533,7 +528,7 @@
 
 /* composer */
 .ap-compose {
-  border-radius: 26px;
+  border-radius: 16px;
 }
 .ap-compose.off {
   background: var(--surface-2);

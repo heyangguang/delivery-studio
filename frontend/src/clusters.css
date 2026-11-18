@@ -105,20 +105,20 @@
   margin: 0;
   padding: 12px 16px;
   border: 1px solid var(--line);
-  border-radius: 13px;
+  border-radius: 10px;
   color: var(--ink);
-  background: linear-gradient(
-    110deg,
-    color-mix(in srgb, var(--holder-accent) 3%, var(--surface)),
-    var(--surface) 48%
-  );
+  background: var(--surface);
   font: inherit;
   text-align: left;
   cursor: pointer;
   transition:
-    border-color 0.2s,
-    box-shadow 0.2s,
-    transform 0.22s var(--spring);
+    border-color 0.18s ease,
+    box-shadow 0.2s ease,
+    transform 0.2s var(--spring);
+}
+.cl-holder:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--holder-accent) 36%, var(--line));
 }
 .cl-holder.has-issue {
   --holder-accent: var(--bad);

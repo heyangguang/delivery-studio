@@ -114,11 +114,11 @@
   justify-content: space-between;
   height: 36px;
   padding: 0 10px;
-  border-radius: 9px;
+  border-radius: 7px;
   font-size: 13.5px;
   font-weight: 500;
   color: var(--ink-2);
-  transition: background-color 0.15s, color 0.15s;
+  transition: background-color 0.15s, color 0.15s, box-shadow 0.15s;
 }
 .rail-group > button:hover:not(:disabled) {
   background: var(--hover);
@@ -127,7 +127,7 @@
   background: var(--surface);
   color: var(--ink);
   font-weight: 600;
-  box-shadow: var(--shadow-sm), 0 0 0 1px var(--line);
+  box-shadow: inset 3px 0 0 var(--brand), var(--shadow-sm), 0 0 0 1px var(--line);
 }
 .rail-group > button:disabled {
   opacity: 0.4;
@@ -149,14 +149,14 @@
   padding: 0 4px;
 }
 .rail-tags .arco-tag {
-  height: 28px;
-  padding: 0 11px;
-  border-radius: 14px;
-  font-size: 13px;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 5px;
+  font-size: 12.5px;
   color: var(--ink-2);
   background: var(--surface);
   border: 1px solid var(--line-strong);
-  transition: background-color 0.15s, border-color 0.15s, color 0.15s, transform 0.18s var(--spring);
+  transition: background-color 0.15s, border-color 0.15s, color 0.15s, transform 0.16s var(--spring);
 }
 .rail-tags .arco-tag .arco-tag-content {
   display: inline-flex;
@@ -168,7 +168,7 @@
   background: var(--surface);
 }
 .rail-tags .arco-tag:active {
-  transform: scale(0.96);
+  transform: scale(0.98);
 }
 .rail-tags .arco-tag-checked,
 .rail-tags .arco-tag-checked:hover {
@@ -411,18 +411,18 @@
   flex-direction: column;
   gap: 12px;
   padding: 18px 18px 14px;
-  border-radius: 16px;
+  border-radius: 11px;
   background: var(--surface);
   border: 1px solid var(--line);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.028);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
   transition:
-    transform 0.3s cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow 0.32s cubic-bezier(0.22, 1, 0.36, 1),
-    border-color 0.22s ease;
+    transform 0.24s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.26s cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 0.18s ease;
 }
 .tile2:hover {
-  transform: translateY(-1.5px);
-  border-color: color-mix(in srgb, var(--brand) 28%, var(--line));
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--brand) 30%, var(--line));
   box-shadow:
     0 14px 34px -12px rgba(15, 23, 42, 0.068),
     0 4px 10px -3px rgba(15, 23, 42, 0.03);
@@ -460,7 +460,7 @@
   content: "";
   position: absolute;
   inset: 0;
-  border-radius: 16px;
+  border-radius: 11px;
 }
 .tile2-link:focus-visible {
   box-shadow: none;
@@ -491,8 +491,9 @@
   gap: 4px;
   margin: 0;
   padding: 10px 12px;
-  border-radius: 10px;
-  background: var(--sunken);
+  border-radius: 7px;
+  background: var(--surface-2);
+  border: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
 }
 .tile2-facts > div {
   display: grid;
@@ -517,8 +518,8 @@
   color: var(--ink-2);
   background: var(--surface-2);
   border: 1px solid color-mix(in srgb, var(--line) 85%, transparent);
-  border-radius: 999px;
-  padding: 1.5px 9px;
+  border-radius: 5px;
+  padding: 1.5px 8px;
 }
 .tile2-foot {
   display: flex;
@@ -552,10 +553,11 @@
 .catalog {
   display: flex;
   flex-direction: column;
-  border-radius: 14px;
+  border-radius: 10px;
   background: var(--surface);
   border: 1px solid var(--line);
   overflow: hidden;
+  box-shadow: var(--shadow-sm);
 }
 .cat-row {
   position: relative;
@@ -614,8 +616,9 @@
   margin: 0;
   padding: 10px 12px;
   list-style: none;
-  border-radius: 10px;
-  background: var(--sunken);
+  border-radius: 7px;
+  background: var(--surface-2);
+  border: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
 }
 .tile2-caps li {
   display: grid;

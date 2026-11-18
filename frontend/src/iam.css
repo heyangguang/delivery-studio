@@ -65,7 +65,7 @@
   width: 100%;
   padding: 9px 10px;
   border: 0;
-  border-radius: 10px;
+  border-radius: 7px;
   color: var(--ink);
   font: 13.5px var(--sans);
   text-align: left;
@@ -73,13 +73,14 @@
 }
 .iam-roles button {
   cursor: pointer;
-  transition: background 0.15s;
+  transition: background 0.15s, box-shadow 0.15s;
 }
 .iam-roles button:hover {
   background: var(--hover);
 }
 .iam-roles button.on {
-  background: var(--brand-soft);
+  background: var(--surface);
+  box-shadow: inset 3px 0 0 var(--brand), var(--shadow-sm), 0 0 0 1px var(--line);
 }
 .iam-roles button:focus-visible {
   outline: none;
@@ -107,7 +108,7 @@
   place-items: center;
   width: 30px;
   height: 30px;
-  border-radius: 9px;
+  border-radius: 7px;
   color: var(--brand-ink);
   background: var(--brand-soft);
 }
@@ -198,7 +199,8 @@
 }
 .iam-mod {
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 10px;
+  background: var(--surface);
   overflow: hidden;
 }
 .iam-mod-h {
@@ -392,18 +394,21 @@
   gap: 10px;
   padding: 10px 12px;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 8px;
+  background: var(--surface);
   cursor: pointer;
   transition:
     border-color 0.15s,
-    background 0.15s;
+    background 0.15s,
+    box-shadow 0.15s;
 }
 .iam-pick:hover {
   background: var(--hover);
 }
 .iam-pick.on {
   border-color: var(--brand-line);
-  background: var(--brand-soft);
+  background: var(--surface-2);
+  box-shadow: inset 3px 0 0 var(--brand), var(--shadow-sm);
 }
 .iam-pick > span {
   display: flex;
@@ -432,10 +437,12 @@
 }
 .iam-eff-scope {
   margin: 0 0 4px;
-  padding: 8px 12px;
-  border-radius: 9px;
+  padding: 9px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
   font-size: 13px;
-  background: var(--brand-soft);
+  background: var(--surface-2);
+  box-shadow: inset 3px 0 0 var(--brand);
 }
 .iam-eff-g {
   display: grid;
@@ -455,10 +462,11 @@
 }
 .iam-eff-ps em {
   padding: 1px 8px;
-  border-radius: 6px;
-  font-size: 12.5px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  font-size: 12px;
   font-style: normal;
-  background: var(--sunken);
+  background: var(--surface);
 }
 @media (max-width: 900px) {
   .iam-split,

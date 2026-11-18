@@ -2036,6 +2036,8 @@ function ChatWindow({
         <div className="ad-tools">
           {scope.kind === "job" && mode !== "min" && !expanded && (
             <Tooltip
+              position="bottom"
+              triggerProps={{ autoFitPosition: false }}
               content={bi(
                 "新对话（针对整个交付，不关联步骤）",
                 "New chat (about the whole delivery)",
@@ -2055,6 +2057,8 @@ function ChatWindow({
           )}
           {scope.kind === "comp" && mode !== "min" && (
             <Tooltip
+              position="bottom"
+              triggerProps={{ autoFitPosition: false }}
               content={bi(
                 "这个组件以前的对话（发布或放弃草稿后留下的）",
                 "Past conversations for this component (kept after publishing or discarding drafts)",
@@ -2071,7 +2075,12 @@ function ChatWindow({
             </Tooltip>
           )}
           {mode !== "min" && (msgs || []).length > 0 && (
-            <Tooltip content={bi("清空这段对话", "Clear conversation")} mini>
+            <Tooltip
+              position="br"
+              triggerProps={{ autoFitPosition: false }}
+              content={bi("清空这段对话", "Clear conversation")}
+              mini
+            >
               <button
                 type="button"
                 onClick={restart}
@@ -2083,7 +2092,12 @@ function ChatWindow({
             </Tooltip>
           )}
           {mode === "min" ? (
-            <Tooltip content={bi("展开", "Expand")} mini>
+            <Tooltip
+              position="tr"
+              triggerProps={{ autoFitPosition: false }}
+              content={bi("展开", "Expand")}
+              mini
+            >
               <button
                 type="button"
                 onClick={() => setMode("open")}
@@ -2094,7 +2108,12 @@ function ChatWindow({
             </Tooltip>
           ) : (
             <>
-              <Tooltip content={bi("最小化到底部", "Minimize to bottom")} mini>
+              <Tooltip
+                position="br"
+                triggerProps={{ autoFitPosition: false }}
+                content={bi("最小化到底部", "Minimize to bottom")}
+                mini
+              >
                 <button
                   type="button"
                   onClick={() => setMode("min")}
@@ -2104,6 +2123,8 @@ function ChatWindow({
                 </button>
               </Tooltip>
               <Tooltip
+                position="br"
+                triggerProps={{ autoFitPosition: false }}
                 content={
                   expanded ? bi("缩小", "Compact") : bi("放大", "Expand")
                 }
@@ -2124,6 +2145,8 @@ function ChatWindow({
             </>
           )}
           <Tooltip
+            position={mode === "min" ? "tr" : "br"}
+            triggerProps={{ autoFitPosition: false }}
             content={bi(
               "关闭（Esc），对话会保留",
               "Close (Esc); conversation is kept",

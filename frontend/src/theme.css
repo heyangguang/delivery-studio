@@ -206,6 +206,7 @@ body {
    page stops the width (and everything centred in it) from jumping when moving between them. */
 html {
   overflow-y: auto;
+  overflow-x: clip;
   scrollbar-gutter: stable;
   scroll-padding-top: 64px;
 }

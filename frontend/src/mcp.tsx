@@ -29,6 +29,7 @@ import {
 } from "./shared";
 import { go } from "./router";
 import { Segmented } from "./ui";
+import { bi, useLang } from "./i18n";
 import "./respage.css";
 
 /* Outside services the assistant can call (MCP over HTTP): the platform's, kept by those with AI settings, and each
@@ -47,6 +48,7 @@ type Server = {
   checked?: string;
   error?: string;
   server_name?: string;
+  tool_count?: number;
   mine?: boolean;
   brief?: boolean;
 };
@@ -71,6 +73,7 @@ const host = (u: string) => {
 };
 
 export function MCPPage({ selected }: { selected?: string }) {
+  useLang();
   const narrow = useMedia("(max-width: 900px)");
   const admin = can("ai.settings");
   const initMe = cached<{ servers: Server[] }>("/api/me/mcp");
@@ -109,7 +112,7 @@ export function MCPPage({ selected }: { selected?: string }) {
                     allow_write: false,
                     tools: null,
                     brief: true,
-                    server_name: `${m.tools} 个工具`,
+                    tool_count: m.tools,
                   }) as Server,
               ),
           ),
@@ -145,7 +148,7 @@ export function MCPPage({ selected }: { selected?: string }) {
     setBusy("refresh");
     try {
       await api(`${base(s)}/${s.id}/refresh`, { method: "POST" });
-      Message.success("已重新读取工具");
+      Message.success(bi("已重新读取工具", "Tools refreshed"));
     } catch (e) {
       err(e);
     } finally {
@@ -175,7 +178,12 @@ export function MCPPage({ selected }: { selected?: string }) {
       });
       setEdit(null);
       await api(`${b}/${r.id}/refresh`, { method: "POST" }).catch((e) =>
-        Message.warning(`已保存，但读取工具失败：${(e as Error).message}`),
+        Message.warning(
+          bi(
+            `已保存，但读取工具失败：${(e as Error).message}`,
+            `Saved, but failed to fetch tools: ${(e as Error).message}`,
+          ),
+        ),
       );
       await load();
       go({ name: "mcp", id: r.id }, { replace: true });
@@ -187,11 +195,15 @@ export function MCPPage({ selected }: { selected?: string }) {
   };
   const remove = (s: Server) =>
     Modal.confirm({
-      title: `移除「${s.name}」？`,
+      title: bi(`移除「${s.name}」？`, `Remove "${s.name}"?`),
       content: s.mine
-        ? "你的对话不会再调用它。"
-        : "所有人的对话都不会再调用它。",
-      okText: "移除",
+        ? bi("你的对话不会再调用它。", "Your chats will no longer use it.")
+        : bi(
+            "所有人的对话都不会再调用它。",
+            "No one's chats will use it anymore.",
+          ),
+      okText: bi("移除", "Remove"),
+      cancelText: bi("取消", "Cancel"),
       okButtonProps: { status: "danger" },
       onOk: async () => {
         try {
@@ -228,10 +240,10 @@ export function MCPPage({ selected }: { selected?: string }) {
   return (
     <div className="md-split">
       {(!narrow || !selected) && (
-        <aside className="md-list" aria-label="MCP 服务">
+        <aside className="md-list" aria-label={bi("MCP 服务", "MCP servers")}>
           <div className="list-head">
             <div className="list-title">
-              <h1>MCP 服务</h1>
+              <h1>{bi("MCP 服务", "MCP servers")}</h1>
               {canAdd && (
                 <Button
                   type="primary"
@@ -239,27 +251,35 @@ export function MCPPage({ selected }: { selected?: string }) {
                   icon={<IconPlus />}
                   onClick={startNew}
                 >
-                  接入
+                  {bi("接入", "Connect")}
                 </Button>
               )}
             </div>
             <Input
               prefix={<IconSearch />}
               allowClear
-              placeholder="搜索服务"
+              placeholder={bi("搜索服务", "Search servers")}
               value={q}
               onChange={setQ}
-              aria-label="搜索服务"
+              aria-label={bi("搜索服务", "Search servers")}
             />
             <Segmented<Kind>
               size="sm"
-              label="来源"
+              label={bi("来源", "Source")}
               value={kind}
               onChange={setKind}
               options={[
-                { value: "all", label: "全部", count: all.length },
-                { value: "mine", label: "我的", count: mine?.length || 0 },
-                { value: "platform", label: "平台", count: platform.length },
+                { value: "all", label: bi("全部", "All"), count: all.length },
+                {
+                  value: "mine",
+                  label: bi("我的", "Mine"),
+                  count: mine?.length || 0,
+                },
+                {
+                  value: "platform",
+                  label: bi("平台", "Platform"),
+                  count: platform.length,
+                },
               ]}
             />
           </div>
@@ -272,18 +292,22 @@ export function MCPPage({ selected }: { selected?: string }) {
               <IconExclamationCircle className="bad" />
               <p>{error}</p>
               <Button size="small" icon={<IconRefresh />} onClick={load}>
-                重试
+                {bi("重试", "Retry")}
               </Button>
             </div>
           ) : shown.length === 0 ? (
             <div className="list-state">
-              <p>{t ? "没有匹配的服务" : "还没有接入服务"}</p>
+              <p>
+                {t
+                  ? bi("没有匹配的服务", "No matching servers")
+                  : bi("还没有接入服务", "No servers connected yet")}
+              </p>
             </div>
           ) : (
             <div
               className="list-body rp-list"
               role="listbox"
-              aria-label="MCP 服务"
+              aria-label={bi("MCP 服务", "MCP servers")}
             >
               {(["mine", "platform"] as const).map((g) => {
                 const rows = shown.filter((s) => (g === "mine") === !!s.mine);
@@ -291,7 +315,9 @@ export function MCPPage({ selected }: { selected?: string }) {
                 return (
                   <React.Fragment key={g}>
                     <div className="rp-group">
-                      {g === "mine" ? "我的服务" : "平台服务"}
+                      {g === "mine"
+                        ? bi("我的服务", "My servers")
+                        : bi("平台服务", "Platform servers")}
                     </div>
                     {rows.map((s) => {
                       const n = (s.tools || []).filter(
@@ -321,11 +347,19 @@ export function MCPPage({ selected }: { selected?: string }) {
                             <b>{s.name}</b>
                             <small>
                               {s.brief
-                                ? s.server_name
+                                ? s.tool_count !== undefined
+                                  ? bi(
+                                      `${s.tool_count} 个工具`,
+                                      `${s.tool_count} tool${s.tool_count === 1 ? "" : "s"}`,
+                                    )
+                                  : s.server_name
                                 : s.error
                                   ? s.error
                                   : s.checked
-                                    ? `${host(s.url)} · ${n} 个工具`
+                                    ? bi(
+                                        `${host(s.url)} · ${n} 个工具`,
+                                        `${host(s.url)} · ${n} tool${n === 1 ? "" : "s"}`,
+                                      )
                                     : host(s.url)}
                             </small>
                           </span>
@@ -334,10 +368,10 @@ export function MCPPage({ selected }: { selected?: string }) {
                               className={`rp-dot ${s.error ? "bad" : !s.enabled || !s.checked ? "idle" : ""}`}
                               aria-label={
                                 s.error
-                                  ? "连接失败"
+                                  ? bi("连接失败", "Connection failed")
                                   : s.enabled
-                                    ? "可用"
-                                    : "已停用"
+                                    ? bi("可用", "Available")
+                                    : bi("已停用", "Disabled")
                               }
                             />
                           )}
@@ -361,7 +395,7 @@ export function MCPPage({ selected }: { selected?: string }) {
                 icon={<IconArrowLeft />}
                 onClick={() => go({ name: "mcp" })}
               >
-                MCP 服务
+                {bi("MCP 服务", "MCP servers")}
               </Button>
             )}
             {cur ? (
@@ -388,9 +422,9 @@ export function MCPPage({ selected }: { selected?: string }) {
               />
             ) : selected && mine ? (
               <div className="detail-none enter">
-                <h2>找不到这个服务</h2>
+                <h2>{bi("找不到这个服务", "Server not found")}</h2>
                 <Button onClick={() => go({ name: "mcp" }, { replace: true })}>
-                  返回
+                  {bi("返回", "Back")}
                 </Button>
               </div>
             ) : (
@@ -398,17 +432,24 @@ export function MCPPage({ selected }: { selected?: string }) {
                 <span className="rp-ic xl k-mcp">
                   <IconLink />
                 </span>
-                <h2>让 AI 查你们自己的系统</h2>
+                <h2>{bi("让 AI 查你们自己的系统", "Let AI query your systems")}</h2>
                 <p>
-                  接入监控、工单、CMDB 这类系统提供的 MCP 服务（HTTP 方式），AI
-                  对话时就能调用它们查数据。个人接入的只给自己的对话用，而且只开放声明为只读的工具。
+                  {bi(
+                    "接入监控、工单、CMDB 这类系统提供的 MCP 服务（HTTP 方式），AI 对话时就能调用它们查数据。个人接入的只给自己的对话用，而且只开放声明为只读的工具。",
+                    "Connect HTTP MCP servers from monitoring, ticketing, or CMDB systems so the assistant can look up live data in chat. Personal servers are private to your chats and expose only read-only tools.",
+                  )}
                 </p>
                 {canAdd ? (
                   <Button type="primary" icon={<IconPlus />} onClick={startNew}>
-                    接入一个服务
+                    {bi("接入一个服务", "Connect a server")}
                   </Button>
                 ) : (
-                  <p className="faint small">管理员关闭了个人接入外部服务。</p>
+                  <p className="faint small">
+                    {bi(
+                      "管理员关闭了个人接入外部服务。",
+                      "Administrators have disabled personal MCP connections.",
+                    )}
+                  </p>
                 )}
                 {admin && (
                   <label className="rp-switch rp-allow">
@@ -416,9 +457,15 @@ export function MCPPage({ selected }: { selected?: string }) {
                       size="small"
                       checked={allowMine}
                       onChange={setAllowUsers}
-                      aria-label="允许每个人接入自己的服务"
+                      aria-label={bi(
+                        "允许每个人接入自己的服务",
+                        "Allow users to connect personal servers",
+                      )}
                     />
-                    允许每个人接入自己的服务
+                    {bi(
+                      "允许每个人接入自己的服务",
+                      "Allow users to connect personal servers",
+                    )}
                   </label>
                 )}
               </div>
@@ -428,9 +475,18 @@ export function MCPPage({ selected }: { selected?: string }) {
       )}
       <Modal
         visible={!!edit}
-        title={edit?.id ? "编辑服务" : "接入 MCP 服务"}
+        title={
+          edit?.id
+            ? bi("编辑服务", "Edit server")
+            : bi("接入 MCP 服务", "Connect MCP server")
+        }
         onCancel={() => setEdit(null)}
-        okText={edit?.id ? "保存" : "接入并读取工具"}
+        okText={
+          edit?.id
+            ? bi("保存", "Save")
+            : bi("接入并读取工具", "Connect & load tools")
+        }
+        cancelText={bi("取消", "Cancel")}
         confirmLoading={busy === "save"}
         okButtonProps={{ disabled: !edit?.name.trim() || !edit?.url.trim() }}
         onOk={save}
@@ -439,51 +495,61 @@ export function MCPPage({ selected }: { selected?: string }) {
           <div className="st-form">
             {admin && !edit.id && (
               <div className="st-field">
-                <span>给谁用</span>
+                <span>{bi("给谁用", "Availability")}</span>
                 <Segmented<string>
                   size="sm"
-                  label="给谁用"
+                  label={bi("给谁用", "Availability")}
                   value={edit.mine ? "mine" : "platform"}
                   onChange={(v) => setEdit({ ...edit, mine: v === "mine" })}
                   options={[
                     ...(allowMine
-                      ? [{ value: "mine", label: "只给我自己" }]
+                      ? [{ value: "mine", label: bi("只给我自己", "Only me") }]
                       : []),
-                    { value: "platform", label: "所有人（平台服务）" },
+                    {
+                      value: "platform",
+                      label: bi("所有人（平台服务）", "Everyone (platform)"),
+                    },
                   ]}
                 />
               </div>
             )}
             <div className="st-field">
-              <span>名称</span>
+              <span>{bi("名称", "Name")}</span>
               <Input
                 value={edit.name}
                 onChange={(v) => setEdit({ ...edit, name: v })}
-                placeholder="监控平台"
+                placeholder={bi("监控平台", "Monitoring platform")}
                 maxLength={40}
-                aria-label="名称"
+                aria-label={bi("名称", "Name")}
               />
             </div>
             <div className="st-field">
-              <span>地址</span>
+              <span>{bi("地址", "URL")}</span>
               <Input
                 value={edit.url}
                 onChange={(v) => setEdit({ ...edit, url: v })}
                 placeholder="https://mcp.example.com/mcp"
-                aria-label="地址"
+                aria-label={bi("地址", "URL")}
               />
-              <small>Streamable HTTP 方式的 MCP 服务地址。</small>
+              <small>
+                {bi(
+                  "Streamable HTTP 方式的 MCP 服务地址。",
+                  "Streamable HTTP endpoint for the MCP server.",
+                )}
+              </small>
             </div>
             <div className="st-field">
-              <span>访问令牌（可选）</span>
+              <span>{bi("访问令牌（可选）", "Access token (optional)")}</span>
               <Input.Password
                 value={edit.token}
                 onChange={(v) => setEdit({ ...edit, token: v })}
                 placeholder={
-                  edit.token_enc ? "已保存，留空保持不变" : "以 Bearer 方式发送"
+                  edit.token_enc
+                    ? bi("已保存，留空保持不变", "Saved; leave blank to keep")
+                    : bi("以 Bearer 方式发送", "Sent as Bearer token")
                 }
                 autoComplete="new-password"
-                aria-label="访问令牌"
+                aria-label={bi("访问令牌", "Access token")}
               />
             </div>
           </div>
@@ -512,11 +578,19 @@ function ServerView({
   remove: () => void;
   edit: () => void;
 }) {
+  useLang();
   const off = new Set(s.disabled_tools || []);
   const tools = s.tools || [];
   const offered = tools.filter(
     (t) => !off.has(t.name) && (t.read_only || (!s.mine && s.allow_write)),
   ).length;
+  const briefCount =
+    s.tool_count !== undefined
+      ? bi(
+          `${s.tool_count} 个工具`,
+          `${s.tool_count} tool${s.tool_count === 1 ? "" : "s"}`,
+        )
+      : s.server_name;
   return (
     <article className="rp-doc enter" key={s.id}>
       <header className="rp-head">
@@ -526,22 +600,31 @@ function ServerView({
         <div className="rp-head-t">
           <h1>{s.name}</h1>
           {s.brief ? (
-            <p>平台接入的服务，{s.server_name}。由管理员维护。</p>
+            <p>
+              {bi(
+                `平台接入的服务，${briefCount}。由管理员维护。`,
+                `Platform-connected server (${briefCount}). Managed by administrators.`,
+              )}
+            </p>
           ) : (
             <div className="rp-meta">
               <span className="mono">{s.url}</span>
-              {s.server_name && <span>服务名 {s.server_name}</span>}
+              {s.server_name && (
+                <span>{bi(`服务名 ${s.server_name}`, `Server: ${s.server_name}`)}</span>
+              )}
               {s.error ? (
                 <span className="bad">
                   <IconExclamationCircle /> {s.error}
                 </span>
               ) : s.checked ? (
                 <span title={fullTime(s.checked)}>
-                  {tools.length} 个工具，开放给 AI {offered} 个 ·{" "}
-                  {ago(s.checked)}检查
+                  {bi(
+                    `${tools.length} 个工具，开放给 AI ${offered} 个 · ${ago(s.checked)}检查`,
+                    `${tools.length} tool${tools.length === 1 ? "" : "s"}, ${offered} enabled for AI · checked ${ago(s.checked)}`,
+                  )}
                 </span>
               ) : (
-                <span>还没有连接</span>
+                <span>{bi("还没有连接", "Not connected yet")}</span>
               )}
             </div>
           )}
@@ -553,25 +636,25 @@ function ServerView({
               loading={busy === "refresh"}
               onClick={refresh}
             >
-              重新读取
+              {bi("重新读取", "Refresh")}
             </Button>
             <Button icon={<IconEdit />} onClick={edit}>
-              编辑
+              {bi("编辑", "Edit")}
             </Button>
             <Button
               status="danger"
               icon={<IconDelete />}
               onClick={remove}
-              aria-label="移除"
+              aria-label={bi("移除", "Remove")}
             />
             <label className="rp-switch">
               <Switch
                 size="small"
                 checked={s.enabled}
                 onChange={(v) => put({ enabled: v })}
-                aria-label="启用"
+                aria-label={bi("启用", "Enable")}
               />
-              {s.enabled ? "已启用" : "已停用"}
+              {s.enabled ? bi("已启用", "Enabled") : bi("已停用", "Disabled")}
             </label>
           </span>
         )}
@@ -581,13 +664,19 @@ function ServerView({
           <div className="rp-main">
             <section className="rp-sec">
               <h2>
-                工具 <em className="num">{tools.length}</em>
+                {bi("工具", "Tools")} <em className="num">{tools.length}</em>
               </h2>
               {tools.length === 0 ? (
                 <p className="faint small">
                   {s.checked
-                    ? "这个服务没有提供工具。"
-                    : "还没有读取到工具，点「重新读取」。"}
+                    ? bi(
+                        "这个服务没有提供工具。",
+                        "This server provides no tools.",
+                      )
+                    : bi(
+                        "还没有读取到工具，点「重新读取」。",
+                        "No tools fetched yet; click Refresh.",
+                      )}
                 </p>
               ) : (
                 <ul className="mcp-tools">
@@ -606,16 +695,16 @@ function ServerView({
                                 : [...off, t.name],
                             })
                           }
-                          aria-label={`开放 ${t.name}`}
+                          aria-label={bi(`开放 ${t.name}`, `Enable ${t.name}`)}
                         />
                         <span className="mcp-tool-t">
                           <b className="mono">{t.name}</b>
                           {t.description && <small>{t.description}</small>}
                         </span>
                         {t.read_only ? (
-                          <em className="mcp-ro">只读</em>
+                          <em className="mcp-ro">{bi("只读", "Read-only")}</em>
                         ) : (
-                          <em className="mcp-rw">可能修改</em>
+                          <em className="mcp-rw">{bi("可能修改", "May write")}</em>
                         )}
                       </li>
                     );
@@ -630,13 +719,23 @@ function ServerView({
                     size="small"
                     checked={s.allow_write}
                     onChange={(v) => put({ allow_write: v })}
-                    aria-label="也开放可能修改的工具"
+                    aria-label={bi(
+                      "也开放可能修改的工具",
+                      "Also allow tools that may modify state",
+                    )}
                   />
                   <span>
-                    <b>也开放可能修改系统的工具</b>
+                    <b>
+                      {bi(
+                        "也开放可能修改系统的工具",
+                        "Also allow tools that may modify systems",
+                      )}
+                    </b>
                     <small>
-                      开启后 AI
-                      可以直接调用它们，平台不会再让人确认；只在你信任这个服务、且工具本身有权限控制时开启。
+                      {bi(
+                        "开启后 AI 可以直接调用它们，平台不会再让人确认；只在你信任这个服务、且工具本身有权限控制时开启。",
+                        "When enabled, the assistant can invoke them directly without asking for confirmation; only enable if you trust this server and its own access controls.",
+                      )}
                     </small>
                   </span>
                 </label>
@@ -645,17 +744,34 @@ function ServerView({
           </div>
           <aside className="rp-side">
             <dl>
-              <dt>给谁用</dt>
-              <dd>{s.mine ? "只给我自己的对话" : "所有人的对话"}</dd>
-              <dt>访问令牌</dt>
-              <dd>{s.token_enc ? "已保存（加密）" : "没有"}</dd>
-              <dt>能做什么</dt>
+              <dt>{bi("给谁用", "Availability")}</dt>
               <dd>
                 {s.mine
-                  ? "个人接入的服务只开放声明为只读的工具。"
+                  ? bi("只给我自己的对话", "Only my chats")
+                  : bi("所有人的对话", "Everyone's chats")}
+              </dd>
+              <dt>{bi("访问令牌", "Access token")}</dt>
+              <dd>
+                {s.token_enc
+                  ? bi("已保存（加密）", "Saved (encrypted)")
+                  : bi("没有", "None")}
+              </dd>
+              <dt>{bi("能做什么", "Capabilities")}</dt>
+              <dd>
+                {s.mine
+                  ? bi(
+                      "个人接入的服务只开放声明为只读的工具。",
+                      "Personal servers expose only tools declared as read-only.",
+                    )
                   : s.allow_write
-                    ? "开放了可能修改系统的工具。"
-                    : "默认只开放声明为只读的工具，保持「AI 只读不改」。"}
+                    ? bi(
+                        "开放了可能修改系统的工具。",
+                        "Tools that may modify systems are enabled.",
+                      )
+                    : bi(
+                        "默认只开放声明为只读的工具，保持「AI 只读不改」。",
+                        "By default only read-only tools are exposed, preserving read-only safety.",
+                      )}
               </dd>
             </dl>
           </aside>

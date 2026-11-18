@@ -440,7 +440,7 @@ func (s *storeServer) assistantChat(w http.ResponseWriter, r *http.Request, user
 		turnCtx := ext.bindCtx(effortCtx(r.Context(), in.Options), ev)
 		reply, tl, err := s.aiToolLoop(turnCtx, p, msgs, tools, nil, ev, run, &none)
 		u := usageFrom(p, reply)
-		u.User, u.IP, u.Feature, u.Job, u.Target, u.Session, u.Tools = user.User, clientIP(r), feature, c.Ctx.ID, firstNonEmptyStr(c.Ctx.Name, "AI 助手"), id, len(tl)
+		u.User, u.IP, u.Feature, u.Job, u.Target, u.Session, u.Tools = user.User, clientIP(r), feature, c.Ctx.ID, firstNonEmptyStr(c.Ctx.Name, tr(reqLang(r), "AI 助手", "AI Assistant")), id, len(tl)
 		u.MS, u.OK, u.Failover = time.Since(start).Milliseconds(), err == nil, i > 0
 		if err != nil {
 			u.Error = truncRunes(err.Error(), 200)
@@ -455,11 +455,11 @@ func (s *storeServer) assistantChat(w http.ResponseWriter, r *http.Request, user
 			return
 		}
 		if i+1 < len(providers) {
-			ev.send(map[string]any{"t": "notice", "v": "「" + p.Name + " · " + p.Model + "」失败，改用备用模型"})
+			ev.send(map[string]any{"t": "notice", "v": tr(reqLang(r), "「"+p.Name+" · "+p.Model+"」失败，改用备用模型", "\""+p.Name+" · "+p.Model+"\" failed; switching to backup model")})
 		}
 	}
 	if lastErr != nil {
-		ev.send(map[string]any{"t": "error", "v": lastErr.Error()})
+		ev.send(map[string]any{"t": "error", "v": localizeGoMessage(reqLang(r), lastErr.Error())})
 		return
 	}
 	answer := aiMsg{Role: "assistant", Text: final.Text, Tools: used, Steps: final.Steps, MS: final.TotalMS, Ask: final.Ask, Files: final.Files, At: time.Now().UTC().Format(time.RFC3339)}
@@ -476,7 +476,7 @@ func (s *storeServer) assistantChat(w http.ResponseWriter, r *http.Request, user
 	c.Archived = false // carrying on a conversation brings it back
 	s.learnLater(user.User, in.Message, final.Text)
 	if err := s.saveChat(user.User, c); err != nil {
-		ev.send(map[string]any{"t": "error", "v": "对话无法保存"})
+		ev.send(map[string]any{"t": "error", "v": tr(reqLang(r), "对话无法保存", "Failed to save conversation")})
 		return
 	}
 	ev.send(map[string]any{"t": "done", "model": tried.Model, "in": final.In, "out": final.Out, "title": c.Title})

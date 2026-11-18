@@ -72,7 +72,7 @@ func (s *storeServer) workbench(w http.ResponseWriter, r *http.Request, session 
 		s.adminOnly(w, session, func() { s.crossCheckAPI(w, r) })
 		return true
 	case len(parts) == 1 && parts[0] == "templates" && r.Method == "GET":
-		s.writeJSON(w, 200, skeletonKinds)
+		s.writeJSON(w, 200, localizedSkeletonKinds(wLang(w)))
 		return true
 	case len(parts) == 1 && parts[0] == "ansible" && r.Method == "GET":
 		s.writeJSON(w, 200, s.ansible())
@@ -366,7 +366,7 @@ func (s *storeServer) draftAction(w http.ResponseWriter, r *http.Request, sessio
 	}
 	switch action {
 	case "check":
-		s.writeJSON(w, 200, checkComponent(s.plat, name, set).ignoring(s.compIgnored(name)))
+		s.writeJSON(w, 200, localizeCompCheck(wLang(w), checkComponent(s.plat, name, set).ignoring(s.compIgnored(name))))
 	case "ignore":
 		// a warning the person has looked at and decided is fine, or taking that back
 		in := struct {
@@ -393,10 +393,10 @@ func (s *storeServer) draftAction(w http.ResponseWriter, r *http.Request, sessio
 			return
 		}
 		s.auditReq(r, "component-warning-ignore", session.User, name+" "+key+map[bool]string{true: " 取消", false: ""}[in.Undo])
-		s.writeJSON(w, 200, checkComponent(s.plat, name, set).ignoring(s.compIgnored(name)))
+		s.writeJSON(w, 200, localizeCompCheck(wLang(w), checkComponent(s.plat, name, set).ignoring(s.compIgnored(name))))
 	case "preview":
 		live, _, _ := cs.liveSet(name)
-		s.writeJSON(w, 200, previewComponent(s.plat, s.ansible(), name, set, live, req.previewReq))
+		s.writeJSON(w, 200, localizePreviewResp(wLang(w), previewComponent(s.plat, s.ansible(), name, set, live, req.previewReq)))
 	case "diff":
 		live, _, _ := cs.liveSet(name)
 		type fileDiff struct {
@@ -427,7 +427,14 @@ func (s *storeServer) draftAction(w http.ResponseWriter, r *http.Request, sessio
 				configurationProblems = mwpack.ValidateConfiguration(c)
 			}
 		}
-		s.writeJSON(w, 200, map[string]any{"diffs": out, "updated": draftMeta.Updated, "delivery_modes": modes, "automatic_problems": problems, "configuration_problems": configurationProblems})
+		lang := wLang(w)
+		s.writeJSON(w, 200, map[string]any{
+			"diffs":                  out,
+			"updated":                draftMeta.Updated,
+			"delivery_modes":         modes,
+			"automatic_problems":     localizeMWProblems(lang, problems),
+			"configuration_problems": localizeMWProblems(lang, configurationProblems),
+		})
 	case "note":
 		// a revision note written from what actually changed, for the person to keep or edit
 		live, _, _ := cs.liveSet(name)
@@ -453,8 +460,12 @@ func (s *storeServer) draftAction(w http.ResponseWriter, r *http.Request, sessio
 			return
 		}
 		pr := providers[0]
+		noteSys := tr(wLang(w),
+			"你根据组件草稿相对已发布版本的差异，写一句修订说明给运维同事看：改了什么、为什么（能从改动看出来的话）。中文，不超过 80 字，不要列文件名，不要加引号和前缀，只输出这句话。",
+			"Write one concise revision note for operations engineers explaining what changed between the component draft and published version and why. In English, under 160 characters, omit filenames, quotes, and prefixes; output only the sentence.",
+		)
 		rep, err := s.aiChat(r.Context(), pr, []aiMessage{
-			{Role: "system", Content: "你根据组件草稿相对已发布版本的差异，写一句修订说明给运维同事看：改了什么、为什么（能从改动看出来的话）。中文，不超过 80 字，不要列文件名，不要加引号和前缀，只输出这句话。"},
+			{Role: "system", Content: noteSys},
 			{Role: "user", Content: "组件：" + name + "\n" + aiScrub(truncRunes(b.String(), 12000))},
 		}, nil, nil)
 		u := usageFrom(pr, rep)
@@ -468,7 +479,7 @@ func (s *storeServer) draftAction(w http.ResponseWriter, r *http.Request, sessio
 	case "render":
 		out, err := renderTemplate(s.plat, s.ansible(), name, set, req.Template, req.previewReq, req.Host)
 		if err != nil {
-			s.writeJSON(w, 200, map[string]any{"ok": false, "error": err.Error()})
+			s.writeJSON(w, 200, map[string]any{"ok": false, "error": localizeGoMessage(wLang(w), err.Error())})
 			return
 		}
 		s.writeJSON(w, 200, map[string]any{"ok": true, "text": out})
@@ -526,7 +537,8 @@ func (s *storeServer) publish(w http.ResponseWriter, r *http.Request, session st
 	}
 	res := checkComponent(s.plat, name, set)
 	if !res.OK {
-		s.writeJSON(w, 422, map[string]any{"error": fmt.Sprintf("还有 %d 处错误，不能发布", res.Errors), "check": res})
+		lang := wLang(w)
+		s.writeJSON(w, 422, map[string]any{"error": localizeGoMessage(lang, fmt.Sprintf("还有 %d 处错误，不能发布", res.Errors)), "check": localizeCompCheck(lang, res)})
 		return
 	}
 	if name == sharedPlatformName {
@@ -890,7 +902,8 @@ func (s *storeServer) setVersionStatus(w http.ResponseWriter, r *http.Request, s
 	set[file] = []byte(strings.Join(lines, "\n"))
 	res := checkComponent(s.plat, name, set)
 	if !res.OK {
-		s.writeJSON(w, 422, map[string]any{"error": fmt.Sprintf("还有 %d 处错误，不能发布", res.Errors), "check": res})
+		lang := wLang(w)
+		s.writeJSON(w, 422, map[string]any{"error": localizeGoMessage(lang, fmt.Sprintf("还有 %d 处错误，不能发布", res.Errors)), "check": localizeCompCheck(lang, res)})
 		return
 	}
 	done, err := cs.installLive(name, set, s.plat.reload)
@@ -899,10 +912,11 @@ func (s *storeServer) setVersionStatus(w http.ResponseWriter, r *http.Request, s
 		return
 	}
 	done()
-	label := map[string]string{"draft": "草稿", "verifying": "待验证", "published": "已发布"}[req.Status]
-	msg := "版本 " + ver + " 状态改为「" + label + "」"
+	lang := wLang(w)
+	label := map[string]string{"draft": tr(lang, "草稿", "Draft"), "verifying": tr(lang, "待验证", "Verifying"), "published": tr(lang, "已发布", "Published")}[req.Status]
+	msg := tr(lang, "版本 "+ver+" 状态改为「"+label+"」", "Version "+ver+" status set to "+label)
 	if note != "" {
-		msg += "：" + note
+		msg += tr(lang, "：", ": ") + note
 	}
 	rev, err := cs.recordPublish(name, prev, set, session.User, msg)
 	if err != nil {

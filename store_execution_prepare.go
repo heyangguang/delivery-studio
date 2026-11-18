@@ -206,7 +206,7 @@ func (s *storeServer) handleExecutionPreparation(w http.ResponseWriter, r *http.
 			return true
 		}
 		s.auditReq(r, "execution-node-authorize", session.User, n.ID+" "+j.ID)
-		s.writeJSON(w, 200, executionNodeOptionFor(n, context))
+		s.writeJSON(w, 200, localizeExecutionOption(wLang(w), executionNodeOptionFor(n, context)))
 		return true
 	}
 	if !executionNodeAllows(n, context) {

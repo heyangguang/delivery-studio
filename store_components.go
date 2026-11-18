@@ -62,7 +62,7 @@ func (s *storeServer) handleComponents(w http.ResponseWriter, r *http.Request, s
 		if e != nil {
 			s.fail(w, 422, e.Error())
 		} else {
-			s.writeJSON(w, 200, c)
+			s.writeJSON(w, 200, mwpack.LocalizeHostContract(wLang(w), c))
 		}
 		return
 	}
@@ -115,6 +115,7 @@ type componentListing struct {
 
 // listComponents shows every component, including those that cannot be generated yet and customer-operated ones.
 func (s *storeServer) listComponents(w http.ResponseWriter) {
+	lang := wLang(w)
 	cs := s.comps()
 	brokenByName := map[string]string{}
 	for _, b := range s.plat.brokenList() {
@@ -125,7 +126,7 @@ func (s *storeServer) listComponents(w http.ResponseWriter) {
 	for _, e := range s.plat.entriesWith(true) {
 		inCatalog[e.Name] = true
 		item := componentListing{
-			catalogEntry: e,
+			catalogEntry: localizeCatalogEntry(lang, e),
 			Source:       s.componentSource(e.Name),
 			HasDraft:     cs.hasDraft(e.Name),
 			Rev:          cs.liveRev(e.Name),
@@ -149,7 +150,7 @@ func (s *storeServer) listComponents(w http.ResponseWriter) {
 			if !d.IsDir() || strings.HasPrefix(d.Name(), ".") || d.Name() == sharedPlatformName || known[d.Name()] || !cs.hasDraft(d.Name()) {
 				continue
 			}
-			e := catalogEntry{Info: mwpack.Info{Name: d.Name(), Title: d.Name(), Category: "草稿", Summary: "尚未发布的新组件", Versions: []mwpack.VerInfo{}, Roles: []mwpack.RoleSpec{}}, Versions: []versionEntry{}, Materials: []catalogMaterial{}, Reason: "尚未发布"}
+			e := catalogEntry{Info: mwpack.Info{Name: d.Name(), Title: d.Name(), Category: tr(lang, "草稿", "Draft"), Summary: tr(lang, "尚未发布的新组件", "Unpublished new component"), Versions: []mwpack.VerInfo{}, Roles: []mwpack.RoleSpec{}}, Versions: []versionEntry{}, Materials: []catalogMaterial{}, Reason: tr(lang, "尚未发布", "Not published yet")}
 			out = append(out, componentListing{catalogEntry: e, Source: "draft", HasDraft: true})
 		}
 	}
@@ -159,7 +160,7 @@ func (s *storeServer) listComponents(w http.ResponseWriter) {
 		if inCatalog[b.Name] {
 			continue
 		}
-		e := catalogEntry{Info: mwpack.Info{Name: b.Name, Title: b.Name, Category: "无法载入", Summary: "这个自定义组件无法载入，已被跳过：" + b.Error, Versions: []mwpack.VerInfo{}, Roles: []mwpack.RoleSpec{}}, Versions: []versionEntry{}, Materials: []catalogMaterial{}, Reason: b.Error}
+		e := catalogEntry{Info: mwpack.Info{Name: b.Name, Title: b.Name, Category: tr(lang, "无法载入", "Load Error"), Summary: tr(lang, "这个自定义组件无法载入，已被跳过：", "This custom component failed to load and was skipped: ") + b.Error, Versions: []mwpack.VerInfo{}, Roles: []mwpack.RoleSpec{}}, Versions: []versionEntry{}, Materials: []catalogMaterial{}, Reason: b.Error}
 		out = append(out, componentListing{catalogEntry: e, Source: "custom", Broken: true, Problem: b.Error})
 	}
 	s.writeJSON(w, 200, out)
@@ -190,6 +191,7 @@ func (s *storeServer) componentManifest(w http.ResponseWriter, name string) {
 		s.fail(w, 422, "清单无法解析："+err.Error())
 		return
 	}
+	value = mwpack.LocalizeYAMLValue(wLang(w), value)
 	b, err := yaml.Marshal(value)
 	if err != nil {
 		s.fail(w, 500, "清单不可读")

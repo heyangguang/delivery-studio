@@ -93,12 +93,16 @@ import {
   HistoryDots,
   parseClusterUrlCompat,
 } from "./clusters";
+import { bi, catLabel, useLang, withLang } from "./i18n";
 
 export type LoadState = "loading" | "error" | "ready";
 
 /* ---------- detail cache: switching is instant for anything already seen or hovered ---------- */
 
 const detailCache = new Map<string, JobDetail>();
+if (typeof window !== "undefined") {
+  window.addEventListener("mh-lang-change", () => detailCache.clear());
+}
 const inflight = new Set<string>();
 const jobApiPath = (id: string) => `/api/jobs/${encodeURIComponent(id)}`;
 export const cachedDetail = (id: string) =>
@@ -141,10 +145,10 @@ const DF0: DF = {
   group: "day",
 };
 const RANGE_LABEL: Record<Range, string> = {
-  all: "不限",
-  today: "今天",
-  "7d": "近 7 天",
-  "30d": "近 30 天",
+  get all() { return bi("不限", "Any time"); },
+  get today() { return bi("今天", "Today"); },
+  get "7d"() { return bi("近 7 天", "Last 7d"); },
+  get "30d"() { return bi("近 30 天", "Last 30d"); },
 };
 
 const sinceOf = (r: Range) => {
@@ -187,6 +191,7 @@ function FilterPanel({
   jobs: Job[];
   close: () => void;
 }) {
+  useLang();
   const [q, setQ] = useState("");
   const counts = useMemo(() => {
     const m = new Map<string, number>();
@@ -196,23 +201,23 @@ function FilterPanel({
     return m;
   }, [jobs, f]);
   const shown = apps.filter((a) =>
-    `${a.name} ${a.category || ""}`
+    `${a.name} ${a.category || ""} ${catLabel(a.category)}`
       .toLowerCase()
       .includes(q.trim().toLowerCase()),
   );
   return (
-    <div className="fpanel" role="dialog" aria-label="筛选交付">
+    <div className="fpanel" role="dialog" aria-label={bi("筛选交付", "Filter deliveries")}>
       <section>
-        <h4>应用</h4>
+        <h4>{bi("应用", "Application")}</h4>
         {apps.length > 6 && (
           <Input
             size="small"
             allowClear
             prefix={<IconSearch />}
-            placeholder="找应用"
+            placeholder={bi("找应用", "Find app")}
             value={q}
             onChange={setQ}
-            aria-label="在应用中查找"
+            aria-label={bi("在应用中查找", "Filter applications")}
           />
         )}
         <div className="fpanel-apps">
@@ -235,14 +240,14 @@ function FilterPanel({
               </span>
             </Checkbox>
           ))}
-          {!shown.length && <span className="muted small">没有匹配的应用</span>}
+          {!shown.length && <span className="muted small">{bi("没有匹配的应用", "No matching applications")}</span>}
         </div>
       </section>
       <section>
-        <h4>创建时间</h4>
+        <h4>{bi("创建时间", "Created")}</h4>
         <Segmented<Range>
           size="sm"
-          label="创建时间"
+          label={bi("创建时间", "Created")}
           value={f.range}
           onChange={(v) => set({ range: v })}
           options={(Object.keys(RANGE_LABEL) as Range[]).map((v) => ({
@@ -252,30 +257,30 @@ function FilterPanel({
         />
       </section>
       <section>
-        <h4>排序</h4>
+        <h4>{bi("排序", "Sort")}</h4>
         <Segmented<Sort>
           size="sm"
-          label="排序"
+          label={bi("排序", "Sort")}
           value={f.sort}
           onChange={(v) => set({ sort: v })}
           options={[
-            { value: "new", label: "最新" },
-            { value: "old", label: "最早" },
-            { value: "name", label: "名称" },
+            { value: "new", label: bi("最新", "Newest") },
+            { value: "old", label: bi("最早", "Oldest") },
+            { value: "name", label: bi("名称", "Name") },
           ]}
         />
       </section>
       <section>
-        <h4>分组</h4>
+        <h4>{bi("分组", "Group by")}</h4>
         <Segmented<Group>
           size="sm"
-          label="分组"
+          label={bi("分组", "Group by")}
           value={f.sort === "name" && f.group === "day" ? "none" : f.group}
           onChange={(v) => set({ group: v })}
           options={[
-            { value: "day", label: "按日期", disabled: f.sort === "name" },
-            { value: "app", label: "按应用" },
-            { value: "none", label: "不分组" },
+            { value: "day", label: bi("按日期", "Date"), disabled: f.sort === "name" },
+            { value: "app", label: bi("按应用", "Application") },
+            { value: "none", label: bi("不分组", "None") },
           ]}
         />
       </section>
@@ -286,10 +291,10 @@ function FilterPanel({
             set({ apps: [], range: "all", sort: "new", group: "day" })
           }
         >
-          恢复默认
+          {bi("恢复默认", "Reset")}
         </button>
         <Button size="small" type="primary" onClick={close}>
-          完成
+          {bi("完成", "Done")}
         </Button>
       </footer>
     </div>
@@ -353,6 +358,7 @@ export function DeliveriesPage({
   section?: string;
   apps: AppInfo[];
 }) {
+  const lang = useLang();
   const narrow = useMedia("(max-width: 900px)");
   const conn = useConnectivity();
   const [stored, setF] = useStored<DF>("mh-del-filters", DF0);
@@ -380,7 +386,7 @@ export function DeliveriesPage({
   };
   useEffect(() => {
     if (load !== "loading") loadClusters();
-  }, [jobs, load]);
+  }, [jobs, load, lang]);
   // something on the cluster page changed the cluster without a new delivery (its roadmap)
   useEffect(() => {
     const f = () => loadClusters();
@@ -519,9 +525,12 @@ export function DeliveriesPage({
     return (
       <div className="page-empty enter">
         <PackagesArt />
-        <h1>还没有交付</h1>
+        <h1>{bi("还没有交付", "No deliveries yet")}</h1>
         <p>
-          选择应用和拓扑、填写节点与入口，平台会为每台机器生成上传包和对应的执行手册，支持离线手工部署或授权执行节点自动部署。
+          {bi(
+            "选择应用和拓扑、填写节点与入口，平台会为每台机器生成上传包和对应的执行手册，支持离线手工部署或授权执行节点自动部署。",
+            "Choose an app and topology, specify hosts and endpoints, and generate per-host upload packages and runbooks for manual offline or automated node execution.",
+          )}
         </p>
         <div className="row-gap">
           {can("delivery.create") && (
@@ -531,16 +540,16 @@ export function DeliveriesPage({
               icon={<IconPlus />}
               onClick={() => go({ name: "new" })}
             >
-              新建集群交付
+              {bi("新建集群交付", "New Cluster Delivery")}
             </Button>
           )}
           <Button size="large" onClick={() => go({ name: "apps" })}>
-            浏览应用
+            {bi("浏览应用", "Browse Apps")}
           </Button>
         </div>
         {!app && (
           <p className="muted small">
-            当前没有离线材料齐全的应用，请联系管理员
+            {bi("当前没有离线材料齐全的应用，请联系管理员", "No apps with complete offline artifacts; contact your administrator")}
           </p>
         )}
       </div>
@@ -555,12 +564,12 @@ export function DeliveriesPage({
       {showList && (
         <aside
           className="md-list"
-          aria-label="集群列表"
+          aria-label={bi("集群列表", "Cluster list")}
           aria-hidden={isImmersiveRehearsal || undefined}
         >
           <div className="list-head">
             <div className="list-title">
-              <h1>交付</h1>
+              <h1>{bi("交付", "Deliveries")}</h1>
               {can("delivery.create") && (
                 <Button
                   type="primary"
@@ -568,7 +577,7 @@ export function DeliveriesPage({
                   icon={<IconPlus />}
                   onClick={() => go({ name: "new" })}
                 >
-                  新建
+                  {bi("新建", "New")}
                 </Button>
               )}
             </div>
@@ -581,7 +590,7 @@ export function DeliveriesPage({
                 prefix={<IconSearch />}
                 suffix={!f.q ? <Kbd>/</Kbd> : undefined}
                 allowClear
-                placeholder="搜索集群、应用"
+                placeholder={bi("搜索集群、应用", "Search clusters or apps")}
                 value={f.q}
                 onChange={(v) => set({ q: v })}
                 onKeyDown={(e) => {
@@ -590,7 +599,7 @@ export function DeliveriesPage({
                   if (e.key === "Escape")
                     (set({ q: "" }), (e.target as HTMLInputElement).blur());
                 }}
-                aria-label="搜索集群"
+                aria-label={bi("搜索集群", "Search clusters")}
               />
               <Popover
                 className="fpanel-pop"
@@ -613,7 +622,7 @@ export function DeliveriesPage({
                 <Button
                   className={`filter-btn ${extra ? "on" : ""}`}
                   icon={<IconFilter />}
-                  aria-label={`筛选${extra ? `，已设置 ${extra} 项` : ""}`}
+                  aria-label={bi(`筛选${extra ? `，已设置 ${extra} 项` : ""}`, `Filter${extra ? ` (${extra} active)` : ""}`)}
                   aria-expanded={panel}
                 >
                   {extra > 0 && <em className="num">{extra}</em>}
@@ -622,19 +631,21 @@ export function DeliveriesPage({
             </div>
             <Segmented<Status>
               size="sm"
-              label="按状态筛选"
+              label={bi("按状态筛选", "Filter by status")}
               value={f.status}
               onChange={(v) => set({ status: v })}
               options={[
-                { value: "all", label: "全部", count: statusCounts.all },
+                { value: "all", label: bi("全部", "All"), count: statusCounts.all },
                 {
                   value: "generated",
-                  label: "待执行",
+                  label: bi("待执行", "Ready"),
                   count: statusCounts.generated,
                 },
-                ...(statusCounts.configuration || f.status === "configuration" ? [{value:"configuration" as const,label:"仅配置",count:statusCounts.configuration}] : []),
-                { value: "done", label: "运行中", count: statusCounts.done },
-                { value: "failed", label: "失败", count: statusCounts.failed },
+                ...(statusCounts.configuration || f.status === "configuration"
+                  ? [{ value: "configuration" as const, label: bi("仅配置", "Config"), count: statusCounts.configuration }]
+                  : []),
+                { value: "done", label: bi("运行中", "Running"), count: statusCounts.done },
+                { value: "failed", label: bi("失败", "Failed"), count: statusCounts.failed },
               ]}
             />
             {(f.apps.length > 0 || f.range !== "all") && (
@@ -660,10 +671,10 @@ export function DeliveriesPage({
             )}
             {filtered && cload === "ready" && (
               <div className="result-line num" aria-live="polite">
-                显示 {list.length} / {rows.length} 个集群
+                {bi(`显示 ${list.length} / ${rows.length} 个集群`, `Showing ${list.length} of ${rows.length} ${rows.length === 1 ? "cluster" : "clusters"}`)}
                 {list.length > 0 && (
                   <button className="link quiet" onClick={clear}>
-                    清除筛选
+                    {bi("清除筛选", "Clear filters")}
                   </button>
                 )}
               </div>
@@ -673,11 +684,11 @@ export function DeliveriesPage({
                 <StatusDot state={conn === "offline" ? "failed" : "deviated"} />
                 <span>
                   {conn === "offline"
-                    ? "网络已断开，当前显示本地缓存"
-                    : "服务暂时不可达，当前显示本地缓存"}
+                    ? bi("网络已断开，当前显示本地缓存", "Offline — showing cached data")
+                    : bi("服务暂时不可达，当前显示本地缓存", "Server unreachable — showing cached data")}
                 </span>
                 <button type="button" className="link quiet" onClick={refresh}>
-                  重试
+                  {bi("重试", "Retry")}
                 </button>
               </div>
             )}
@@ -720,25 +731,25 @@ export function DeliveriesPage({
           ) : cload === "error" ? (
             <div className="detail-none enter" role="alert">
               <IconExclamationCircle className="bad" />
-              <h2>集群列表读取失败</h2>
-              <p>无法获取最新集群状态，请检查网络连接后重试。</p>
+              <h2>{bi("集群列表读取失败", "Failed to load clusters")}</h2>
+              <p>{bi("无法获取最新集群状态，请检查网络连接后重试。", "Unable to retrieve cluster status. Check your connection and retry.")}</p>
               <Button icon={<IconRefresh />} onClick={refresh}>
-                重试
+                {bi("重试", "Retry")}
               </Button>
             </div>
           ) : selected ? (
             <div className="detail-none enter">
-              <h2>找不到这个集群</h2>
-              <p>它可能已被删除，或属于其他账户。</p>
+              <h2>{bi("找不到这个集群", "Cluster not found")}</h2>
+              <p>{bi("它可能已被删除，或属于其他账户。", "It may have been deleted or belong to another account.")}</p>
               <Button
                 onClick={() => go({ name: "deliveries" }, { replace: true })}
               >
-                返回列表
+                {bi("返回列表", "Back to List")}
               </Button>
             </div>
           ) : (
             <div className="detail-none">
-              <p>没有符合条件的集群</p>
+              <p>{bi("没有符合条件的集群", "No matching clusters")}</p>
             </div>
           )}
         </section>
@@ -770,6 +781,7 @@ function JobList({
   appMap: Map<string, AppInfo>;
   multiApp: boolean;
 }) {
+  useLang();
   const box = useRef<HTMLDivElement>(null);
   const [ind, setInd] = useState<{ y: number; h: number } | null>(null);
   useLayoutEffect(() => {
@@ -802,19 +814,19 @@ function JobList({
     return (
       <div className="list-state">
         <IconExclamationCircle className="bad" />
-        <p>交付记录加载失败</p>
+        <p>{bi("交付记录加载失败", "Failed to load deliveries")}</p>
         <Button size="small" icon={<IconRefresh />} onClick={reload}>
-          重试
+          {bi("重试", "Retry")}
         </Button>
       </div>
     );
   if (!jobs.length)
     return (
       <div className="list-state">
-        <p>没有匹配的集群</p>
+        <p>{bi("没有匹配的集群", "No matching clusters")}</p>
         {filtered && (
           <Button size="small" onClick={clear}>
-            清除筛选
+            {bi("清除筛选", "Clear filters")}
           </Button>
         )}
       </div>
@@ -847,7 +859,7 @@ function JobList({
     g.items.push(j);
   }
   return (
-    <div className="list-body" ref={box} role="listbox" aria-label="集群">
+    <div className="list-body" ref={box} role="listbox" aria-label={bi("集群", "Clusters")}>
       {ind && (
         <span
           className="row-indicator"
@@ -856,7 +868,7 @@ function JobList({
         />
       )}
       {groups.map((g) => (
-        <div key={g.key || "all"} role="group" aria-label={g.key || "全部"}>
+        <div key={g.key || "all"} role="group" aria-label={g.key || bi("全部", "All")}>
           {mode !== "none" && (
             <div className="list-day">
               {g.label}
@@ -867,7 +879,9 @@ function JobList({
             const a = appMap.get(j.app_id);
             const c = j.c;
             const st = clusterStatus(c);
-            const stLabel = st.label.replace(/^首次部署/, "部署");
+            const stLabel = st.label
+              .replace(/^首次部署/, bi("部署", "Deploy"))
+              .replace(/^Initial Deploy\b/, "Deploy");
             const bad = st.dot === "failed";
             return (
               <a
@@ -983,7 +997,10 @@ function groupFiles(files: JobFile[]): Grouped {
 /** The on-site progress of a delivery. */
 const runNote = (j: Job) =>
   j.state === "succeeded" && ((j.run_done || 0) > 0 || (j.run_failed || 0) > 0)
-    ? ` · 现场 ${j.run_done || 0}${j.run_total ? `/${j.run_total}` : ""} 步${j.run_failed ? `，${j.run_failed} 步失败` : ""}`
+    ? bi(
+        ` · 现场 ${j.run_done || 0}${j.run_total ? `/${j.run_total}` : ""} 步${j.run_failed ? `，${j.run_failed} 步失败` : ""}`,
+        ` · On-site ${j.run_done || 0}${j.run_total ? `/${j.run_total}` : ""} steps${j.run_failed ? `, ${j.run_failed} failed` : ""}`,
+      )
     : "";
 
 /** One delivery of a cluster — its first deployment or a plan — with its files, runbook and the engineer's report. */
@@ -1002,6 +1019,7 @@ export function DeliveryDetail({
   embedded?: boolean;
   revisionBar?: React.ReactNode;
 }) {
+  const lang = useLang();
   const cached = detailCache.get(id) || null;
   const [d, setD] = useState<JobDetail | null>(cached);
   const [state, setState] = useState<"loading" | "missing" | "error" | "ready">(
@@ -1025,7 +1043,9 @@ export function DeliveryDetail({
         onChanged();
         if (r.job.state === "succeeded")
           Message.success(
-            `${r.job.cluster_id} 的${r.job.delivery_mode === "configuration" ? "配置交付" : "部署材料"}已生成`,
+            r.job.delivery_mode === "configuration"
+              ? bi(`${r.job.cluster_id} 的配置交付已生成`, `Config delivery for ${r.job.cluster_id} is ready`)
+              : bi(`${r.job.cluster_id} 的部署材料已生成`, `Deployment bundle for ${r.job.cluster_id} is ready`),
           );
       }
       wasRunning.current = running(r.job.state);
@@ -1040,7 +1060,7 @@ export function DeliveryDetail({
   };
   useEffect(() => {
     fetchDetail();
-  }, [id]);
+  }, [id, lang]);
   useEffect(() => {
     if (!d || !running(d.job.state)) return;
     const t = setInterval(fetchDetail, 1000);
@@ -1050,9 +1070,9 @@ export function DeliveryDetail({
   const toPlans = () =>
     go({ name: "deliveries", id: cluster.id, tab: "plans" }, { replace: true });
   const back = embedded ? null : (
-    <nav className="cl-crumb" aria-label="返回部署">
+    <nav className="cl-crumb" aria-label={bi("返回部署", "Back to deployments")}>
       <button type="button" className="cl-return" onClick={toPlans}>
-        <IconArrowLeft /> 部署
+        <IconArrowLeft /> {bi("部署", "Deploy")}
       </button>
       <span className="cl-crumb-sep" aria-hidden>
         /
@@ -1075,22 +1095,22 @@ export function DeliveryDetail({
     return (
       <div className="detail-none enter">
         {back}
-        <h2>找不到这份交付</h2>
-        <p>它可能已被删除，或属于其他账户。</p>
-        {!embedded && <Button onClick={toPlans}>返回部署</Button>}
+        <h2>{bi("找不到这份交付", "Delivery not found")}</h2>
+        <p>{bi("它可能已被删除，或属于其他账户。", "It may have been deleted or belong to another account.")}</p>
+        {!embedded && <Button onClick={toPlans}>{bi("返回部署", "Back to Deploy")}</Button>}
       </div>
     );
   if (state === "error" || !d)
     return (
       <div className="detail-none enter">
         {back}
-        <h2>详情加载失败</h2>
+        <h2>{bi("详情加载失败", "Failed to load details")}</h2>
         <p>{message}</p>
         <Button
           icon={<IconRefresh />}
           onClick={() => (setState("loading"), fetchDetail())}
         >
-          重试
+          {bi("重试", "Retry")}
         </Button>
       </div>
     );
@@ -1105,19 +1125,25 @@ export function DeliveryDetail({
     Modal.confirm({
       title:
         job.delivery_mode === "configuration"
-          ? "删除这份配置交付？"
-          : "删除这份部署交付？",
+          ? bi("删除这份配置交付？", "Delete this config delivery?")
+          : bi("删除这份部署交付？", "Delete this delivery?"),
       content:
         job.outcome === "done" || job.outcome === "deviated"
-          ? "它已经确认完成，是集群当前状态的来源。删除后不会改动任何目标服务器；只在确实没有执行过时删除。"
-          : "只删除平台上保存的证书、私钥和交付文件，不会连接或改动任何目标服务器。",
-      okText: "删除",
+          ? bi(
+              "它已经确认完成，是集群当前状态的来源。删除后不会改动任何目标服务器；只在确实没有执行过时删除。",
+              "This delivery is marked completed and represents the cluster's current baseline. Deleting it will not alter target hosts; only delete if it was never executed.",
+            )
+          : bi(
+              "只删除平台上保存的证书、私钥和交付文件，不会连接或改动任何目标服务器。",
+              "Only removes certificates, keys, and bundle files stored on the platform; target hosts are untouched.",
+            ),
+      okText: bi("删除", "Delete"),
       okButtonProps: { status: "danger" },
       onOk: async () => {
         try {
           await api(`/api/jobs/${job.id}`, { method: "DELETE" });
           detailCache.delete(job.id);
-          Message.success("已删除");
+          Message.success(bi("已删除", "Deleted"));
           await onChanged();
           go(
             cluster.plans.length > 1
@@ -1152,7 +1178,7 @@ export function DeliveryDetail({
   const params = (input?.instances || []).flatMap((i) =>
     Object.entries(i.params || {}).map(
       ([k, v]) =>
-        [`${i.id}.${k}`, Array.isArray(v) ? v.join("、") : String(v)] as [
+        [`${i.id}.${k}`, Array.isArray(v) ? v.join(bi("、", ", ")) : String(v)] as [
           string,
           string,
         ],
@@ -1164,7 +1190,7 @@ export function DeliveryDetail({
 
   const reviewStart = {
     key: "review",
-    title: "对话",
+    title: bi("对话", "Chat"),
     context: `${job.cluster_id} · ${job.app_name}`,
   };
   const ph = planPhase(job);
@@ -1185,7 +1211,7 @@ export function DeliveryDetail({
         body: JSON.stringify({ outcome: "", note: "" }),
       });
       await saved(j);
-      Message.success("已改回待执行");
+      Message.success(bi("已改回待执行", "Reverted to ready"));
     } catch (e) {
       err(e);
     } finally {
@@ -1196,12 +1222,12 @@ export function DeliveryDetail({
     job.marked && job.outcome ? (
       <Tooltip content={fullTime(job.marked)} mini>
         <span>
-          {job.marked_by || "管理员"} {ago(job.marked)}
+          {job.marked_by || bi("管理员", "Admin")} {ago(job.marked)}
           {job.outcome === "void"
-            ? " 作废"
+            ? bi(" 作废", " voided")
             : job.outcome === "failed"
-              ? " 记为失败"
-              : " 确认"}
+              ? bi(" 记为失败", " marked failed")
+              : bi(" 确认", " confirmed")}
         </span>
       </Tooltip>
     ) : null;
@@ -1210,7 +1236,7 @@ export function DeliveryDetail({
       {(spec || plan) && (
         <Button
           icon={<IconFile />}
-          aria-label="查看这份交付的配置"
+          aria-label={bi("查看这份交付的配置", "View delivery configuration")}
           onClick={() =>
             go({
               name: "deliveries",
@@ -1220,7 +1246,7 @@ export function DeliveryDetail({
             })
           }
         >
-          部署配置
+          {bi("部署配置", "Configuration")}
         </Button>
       )}
       {canRevise && (
@@ -1230,7 +1256,7 @@ export function DeliveryDetail({
             go({ name: "new", app: job.app_id, revise: job.id })
           }
         >
-          修订部署配置
+          {bi("修订部署配置", "Revise Config")}
         </Button>
       )}
       {job.state === "failed" && input && can("delivery.create") && (
@@ -1239,7 +1265,7 @@ export function DeliveryDetail({
           icon={<IconEdit />}
           onClick={() => go({ name: "new", app: job.app_id, from: job.id })}
         >
-          修改后重新生成
+          {bi("修改后重新生成", "Edit & Rebuild")}
         </Button>
       )}
       {job.state === "succeeded" && <ReviewButton />}
@@ -1247,10 +1273,10 @@ export function DeliveryDetail({
         <Button
           type="primary"
           icon={<IconCloudDownload />}
-          href={`/api/jobs/${job.id}/archive`}
+          href={withLang(`/api/jobs/${job.id}/archive`)}
           download={`delivery-${job.cluster_id || job.id.slice(0, 8)}.zip`}
         >
-          下载完整交付包
+          {bi("下载完整交付包", "Download Bundle")}
         </Button>
       )}
       <Dropdown
@@ -1270,16 +1296,16 @@ export function DeliveryDetail({
           >
             {job.state !== "failed" && input && can("delivery.create") && (
               <Menu.Item key="clone">
-                <IconEdit /> 以此配置新建集群
+                <IconEdit /> {bi("以此配置新建集群", "Clone to New Cluster")}
               </Menu.Item>
             )}
             {canUndoConfirm && (
               <Menu.Item key="undo" disabled={undoingOutcome}>
-                <IconUndo /> 撤销确认
+                <IconUndo /> {bi("撤销确认", "Undo Confirmation")}
               </Menu.Item>
             )}
             <Menu.Item key="copy">
-              <IconCopy /> 复制集群标识
+              <IconCopy /> {bi("复制集群标识", "Copy Cluster ID")}
             </Menu.Item>
             {can("delivery.delete") && (
               <Menu.Item
@@ -1287,13 +1313,13 @@ export function DeliveryDetail({
                 disabled={!done || later}
                 className="danger-item"
               >
-                <IconDelete /> 删除交付
+                <IconDelete /> {bi("删除交付", "Delete Delivery")}
               </Menu.Item>
             )}
           </Menu>
         }
       >
-        <Button icon={<IconMore />} aria-label="更多操作" />
+        <Button icon={<IconMore />} aria-label={bi("更多操作", "More actions")} />
       </Dropdown>
     </>
   );
@@ -1308,11 +1334,14 @@ export function DeliveryDetail({
                 <div>
                   <b>
                     {job.state === "queued"
-                      ? "等待空闲的生成位"
-                      : "正在生成交付材料"}
+                      ? bi("等待空闲的生成位", "Queued for build slot")
+                      : bi("正在生成交付材料", "Building delivery artifacts")}
                   </b>
                   <span>
-                    只在平台内校验和打包，不会连接目标服务器。可以离开此页，完成后列表会更新。
+                    {bi(
+                      "只在平台内校验和打包，不会连接目标服务器。可以离开此页，完成后列表会更新。",
+                      "Validates and packages offline without touching target hosts. You may leave this page.",
+                    )}
                   </span>
                 </div>
               </div>
@@ -1324,8 +1353,8 @@ export function DeliveryDetail({
               <div className="callout c-bad">
                 <IconExclamationCircle />
                 <div>
-                  <b>生成未完成</b>
-                  <span className="pre">{job.error || "没有返回具体原因"}</span>
+                  <b>{bi("生成未完成", "Build failed")}</b>
+                  <span className="pre">{job.error || bi("没有返回具体原因", "No details returned")}</span>
                 </div>
               </div>
               <StageTrack job={job} />
@@ -1335,9 +1364,18 @@ export function DeliveryDetail({
           {job.state === "succeeded" && (
             <section className="dsec">
               <h2 className="dsec-title">
-                交付文件
+                {bi("交付文件", "Delivery Files")}
                 <span className="dsec-note num">
-                  {files0.length} 个文件 · {size(totalBytes)} · {plan?.delivery_mode === "configuration" ? "仅生成配置，审核后应用" : `逐台上传到 ${plan?.upload_dir || "/tmp/mw-upload"}`}
+                  {files0.length === 1
+                    ? bi("1 个文件", "1 file")
+                    : bi(`${files0.length} 个文件`, `${files0.length} files`)}{" "}
+                  · {size(totalBytes)} ·{" "}
+                  {plan?.delivery_mode === "configuration"
+                    ? bi("仅生成配置，审核后应用", "Config only; apply after review")
+                    : bi(
+                        `逐台上传到 ${plan?.upload_dir || "/tmp/mw-upload"}`,
+                        `Upload per host to ${plan?.upload_dir || "/tmp/mw-upload"}`,
+                      )}
                 </span>
               </h2>
               <div className="uplist">
@@ -1350,7 +1388,7 @@ export function DeliveryDetail({
                     <div className="up" key={n.index}>
                       <div className="up-who">
                         <span className={`role-chip ${isCtl ? "p" : ""}`}>
-                          {isCtl ? (executorHost ? "执行" : "控制") : "机器"}
+                          {isCtl ? (executorHost ? bi("执行", "Exec") : bi("控制", "Ctrl")) : bi("机器", "Host")}
                         </span>
                         <div>
                           <b>
@@ -1381,7 +1419,7 @@ export function DeliveryDetail({
 
           {job.state === "succeeded" && plan && plan.delivery_mode!=="configuration" && (
             <section className="dsec">
-              <h2 className="dsec-title">现场执行</h2>
+              <h2 className="dsec-title">{bi("现场执行", "On-site Execution")}</h2>
               <ExecutionPanel key={job.id} jobId={job.id} cluster={job.cluster_id} />
               <SyncCard
                 key={job.id}
@@ -1406,7 +1444,7 @@ export function DeliveryDetail({
           )}
           {job.state === "succeeded" && (!plan || plan.delivery_mode==="configuration") && g.docs.length > 0 && (
             <section className="dsec">
-              <h2 className="dsec-title">手册</h2>
+              <h2 className="dsec-title">{bi("手册", "Runbook Docs")}</h2>
               <div className="up-files">
                 {g.docs.map((f) => (
                   <FileLink key={f.name} f={f} />
@@ -1417,15 +1455,15 @@ export function DeliveryDetail({
 
           {!input && job.state === "succeeded" && files0.length === 0 && (
             <section className="dsec">
-              <p className="muted">这份交付没有可下载的文件。</p>
+              <p className="muted">{bi("这份交付没有可下载的文件。", "No downloadable files in this delivery.")}</p>
             </section>
           )}
         </div>
 
         {input && (
-          <aside className="detail-side" aria-label="集群配置">
+          <aside className="detail-side" aria-label={bi("集群配置", "Cluster configuration")}>
             <section className="side-sec">
-              <h2 className="dsec-title">集群</h2>
+              <h2 className="dsec-title">{bi("集群", "Cluster")}</h2>
               <ExecutionHostSummary host={executorHost} />
               {plan && (
                 <InstanceGraph
@@ -1436,13 +1474,13 @@ export function DeliveryDetail({
               )}
               <dl className="side-facts">
                 <div>
-                  <dt>机器</dt>
-                  <dd>{input.hosts.length} 台</dd>
+                  <dt>{bi("机器", "Hosts")}</dt>
+                  <dd>{input.hosts.length === 1 ? bi("1 台", "1 host") : bi(`${input.hosts.length} 台`, `${input.hosts.length} hosts`)}</dd>
                 </div>
                 <div>
-                  <dt>{executorHost ? "独立执行机" : "集群内执行机"}</dt>
+                  <dt>{executorHost ? bi("独立执行机", "Standalone executor") : bi("集群内执行机", "In-cluster executor")}</dt>
                   <dd className="mono">
-                    {controllerName || input.controller || "自动"}
+                    {controllerName || input.controller || bi("自动", "Auto")}
                   </dd>
                 </div>
                 {(
@@ -1462,19 +1500,19 @@ export function DeliveryDetail({
                     <dd>
                       {i.title} {i.version}
                       {"auto" in i && i.auto ? (
-                        <span className="flag info">自动</span>
+                        <span className="flag info">{bi("自动", "Auto")}</span>
                       ) : null}
                       {"status" in i && i.status && i.status !== "published" ? (
-                        <span className="flag warn">待验证</span>
+                        <span className="flag warn">{bi("待验证", "Unverified")}</span>
                       ) : null}
                     </dd>
                   </div>
                 ))}
                 {input.hosts.some((h) => h.initialize) && (
                   <div>
-                    <dt>数据盘</dt>
+                    <dt>{bi("数据盘", "Data disk")}</dt>
                     <dd>
-                      <span className="warn">格式化空盘</span>
+                      <span className="warn">{bi("格式化空盘", "Format empty disk")}</span>
                     </dd>
                   </div>
                 )}
@@ -1483,7 +1521,7 @@ export function DeliveryDetail({
             {params.length > 0 && (
               <section className="side-sec">
                 <h2 className="dsec-title">
-                  定制参数{" "}
+                  {bi("定制参数", "Custom Parameters")}{" "}
                   <span className="dsec-count num">{params.length}</span>
                 </h2>
                 <div className="kvlist">
@@ -1498,15 +1536,17 @@ export function DeliveryDetail({
             )}
             {job.state === "succeeded" && g.records.length > 0 && (
               <section className="side-sec">
-                <h2 className="dsec-title">生成记录</h2>
+                <h2 className="dsec-title">{bi("生成记录", "Build Logs")}</h2>
                 {job.logs.length > 0 && (
                   <details className="gen-log">
                     <summary>
-                      生成过程{" "}
+                      {bi("生成过程", "Build trace")}{" "}
                       <span className="faint small">
-                        {job.logs.length} 行
+                        {job.logs.length === 1
+                          ? bi("1 行", "1 line")
+                          : bi(`${job.logs.length} 行`, `${job.logs.length} lines`)}
                         {job.updated
-                          ? ` · 用时 ${duration(job.created, job.updated)}`
+                          ? bi(` · 用时 ${duration(job.created, job.updated)}`, ` · Took ${duration(job.created, job.updated)}`)
                           : ""}
                       </span>
                     </summary>
@@ -1530,9 +1570,13 @@ export function DeliveryDetail({
   );
 
   const deployLabel =
-    job.delivery_mode === "configuration" ? "配置交付" : "部署手册";
+    job.delivery_mode === "configuration"
+      ? bi("配置交付", "Config Delivery")
+      : bi("部署手册", "Deployment Runbook");
   const standaloneLabel =
-    job.delivery_mode === "configuration" ? "配置交付" : "集群部署";
+    job.delivery_mode === "configuration"
+      ? bi("配置交付", "Config Delivery")
+      : bi("集群部署", "Cluster Deployment");
 
   if (embedded) {
     return (
@@ -1549,14 +1593,14 @@ export function DeliveryDetail({
             </div>
             <div className="cl-deploy-meta">
               {job.owner && job.owner !== meName() && (
-                <span>{job.owner} 生成</span>
+                <span>{bi(`${job.owner} 生成`, `Built by ${job.owner}`)}</span>
               )}
               <Tooltip content={fullTime(job.created)} mini>
-                <span>创建于 {ago(job.created)}</span>
+                <span>{bi(`创建于 ${ago(job.created)}`, `Created ${ago(job.created)}`)}</span>
               </Tooltip>
               {done && job.updated && (
                 <span className="num">
-                  耗时 {duration(job.created, job.updated)}
+                  {bi(`耗时 ${duration(job.created, job.updated)}`, `Duration ${duration(job.created, job.updated)}`)}
                 </span>
               )}
               {confirmedMeta}
@@ -1598,21 +1642,21 @@ export function DeliveryDetail({
         </div>
         <div className="detail-meta">
           {job.owner && job.owner !== meName() && (
-            <span className="row-owner">{job.owner} 生成</span>
+            <span className="row-owner">{bi(`${job.owner} 生成`, `Built by ${job.owner}`)}</span>
           )}
           <span>
             {job.app_name} {job.version}
           </span>
           <Tooltip content={fullTime(job.created)} mini>
-            <span>创建于 {ago(job.created)}</span>
+            <span>{bi(`创建于 ${ago(job.created)}`, `Created ${ago(job.created)}`)}</span>
           </Tooltip>
           {done && job.updated && (
-            <span className="num">用时 {duration(job.created, job.updated)}</span>
+            <span className="num">{bi(`用时 ${duration(job.created, job.updated)}`, `Took ${duration(job.created, job.updated)}`)}</span>
           )}
           {confirmedMeta}
           <span className="mono faint">#{job.id.slice(0, 8)}</span>
         </div>
-        <SchemeInfo scheme={job.scheme} detail label="部署方案" />
+        <SchemeInfo scheme={job.scheme} detail label={bi("部署方案", "Deployment scheme")} />
         {job.state === "succeeded" &&
           plan?.delivery_mode !== "configuration" &&
           job.delivery_mode !== "configuration" && (
@@ -1673,6 +1717,7 @@ function SyncCard({
   uploadDir: string;
   onSynced: () => Promise<void>;
 }) {
+  useLang();
   const [pv, setPv] = useState<SyncPreview | null>(null);
   const [syncError, setSyncError] = useState("");
   const [retry, setRetry] = useState(0);
@@ -1697,23 +1742,29 @@ function SyncCard({
   }, [job.id, syncs.length, retry, requested]);
   const run = () =>
     Modal.confirm({
-      title: "采用这次组件更新？",
+      title: bi("采用这次组件更新？", "Adopt component update?"),
       content: (
         <div className="sync-confirm">
           <p>
-            这会更新本交付的自动化文件和手册，软件包不变。受影响步骤的新版本不再沿用原来的完成状态，需要重新核对；原执行记录保留在历史版本中，未受影响步骤保持原状。
+            {bi(
+              "这会更新本交付的自动化文件和手册，软件包不变。受影响步骤的新版本不再沿用原来的完成状态，需要重新核对；原执行记录保留在历史版本中，未受影响步骤保持原状。",
+              "Updates automation files and runbook for this delivery while keeping packages unchanged. Changed steps reset their completion status for re-verification while preserving prior records; unaffected steps stay as-is.",
+            )}
           </p>
           <p>
-            此操作不会连接机器或自动执行命令。更新包需要你另行应用；请核对实际变化后决定补做哪些操作，不要直接重跑初始化、数据盘等已完成步骤。
+            {bi(
+              "此操作不会连接机器或自动执行命令。更新包需要你另行应用；请核对实际变化后决定补做哪些操作，不要直接重跑初始化、数据盘等已完成步骤。",
+              "Does not connect to hosts or execute commands. Apply the update archive manually and review actual changes before deciding which steps to re-run—never blindly re-run initialization or disk formatting.",
+            )}
           </p>
         </div>
       ),
-      okText: "采用更新并生成更新包",
+      okText: bi("采用更新并生成更新包", "Adopt & Generate Update"),
       onOk: async () => {
         setBusy(true);
         try {
           await api(`/api/jobs/${job.id}/sync`, { method: "POST" });
-          Message.success("已同步，按下面的说明把更新包放到控制节点");
+          Message.success(bi("已同步，按下面的说明把更新包放到控制节点", "Synced; upload the update package to the controller per instructions below"));
           await onSynced();
         } catch (e) {
           err(e);
@@ -1774,8 +1825,25 @@ function SyncCard({
         <div className="sync-pend sync-optional">
           <div className="sync-head">
             <div className="sync-text" role="status" aria-live="polite">
-              <b>{syncError ? "暂时无法检查更新" : !requested ? "组件更新 · 按需检查" : !pv ? "正在检查可选更新…" : pv.blocked ? "当前交付暂不能同步" : "当前没有可选更新"}</b>
-              <span>{syncError ? "检查未完成，当前交付和执行记录保持不变。" : pv?.blocked || (requested && !pv ? "正在比较新版内容，不影响你查看或继续当前交付。" : "继续使用已保存的版本；检查更新不会改动集群或执行记录。")}</span>
+              <b>
+                {syncError
+                  ? bi("暂时无法检查更新", "Unable to check updates")
+                  : !requested
+                    ? bi("组件更新 · 按需检查", "Component Updates · Check on demand")
+                    : !pv
+                      ? bi("正在检查可选更新…", "Checking for updates…")
+                      : pv.blocked
+                        ? bi("当前交付暂不能同步", "Sync currently unavailable")
+                        : bi("当前没有可选更新", "No updates available")}
+              </b>
+              <span>
+                {syncError
+                  ? bi("检查未完成，当前交付和执行记录保持不变。", "Check incomplete; delivery and execution records remain unchanged.")
+                  : pv?.blocked ||
+                    (requested && !pv
+                      ? bi("正在比较新版内容，不影响你查看或继续当前交付。", "Comparing component version without interrupting your current delivery.")
+                      : bi("继续使用已保存的版本；检查更新不会改动集群或执行记录。", "Continue using the saved version; checking does not modify the cluster or execution records."))}
+              </span>
             </div>
             <div className="sync-head-actions">
               {rehearsalClusterId && (
@@ -1789,34 +1857,51 @@ function SyncCard({
                     })
                   }
                 >
-                  前往变更演练
+                  {bi("前往变更演练", "Go to Rehearsal")}
                 </Button>
               )}
               <Button loading={requested && !pv && !syncError} onClick={() => { setRequested(true); setRetry((n) => n + 1); }}>
-                {requested ? "重新检查" : "检查可选更新"}
+                {requested ? bi("重新检查", "Check Again") : bi("检查可选更新", "Check Updates")}
               </Button>
             </div>
           </div>
-          {syncError && <details><summary>错误详情</summary><p>{syncError}</p></details>}
+          {syncError && <details><summary>{bi("错误详情", "Error details")}</summary><p>{syncError}</p></details>}
         </div>
       )}
       {pv?.available && (
         <div className="sync-pend">
           <div className="sync-head">
             <div className="sync-text">
-              <b>组件有新版本</b>
-              <span>你的交付尚未更新，已完成的执行记录保留。系统没有自动执行任何命令。</span>
+              <b>{bi("组件有新版本", "Component update available")}</b>
+              <span>{bi("你的交付尚未更新，已完成的执行记录保留。系统没有自动执行任何命令。", "Your delivery is not updated yet; completed records are preserved and no commands were executed.")}</span>
               <span>
-                {pv.steps.length > 0 ? <>新版与当前版本有 {pv.steps.length} 个步骤存在差异，不代表要全部重跑。</> : "自动化文件有更新，未检测到执行步骤受影响。"}
+                {pv.steps.length > 0
+                  ? bi(
+                      `新版与当前版本有 ${pv.steps.length} 个步骤存在差异，不代表要全部重跑。`,
+                      `${pv.steps.length} ${pv.steps.length === 1 ? "step differs" : "steps differ"} from the new version; not all require re-running.`,
+                    )
+                  : bi("自动化文件有更新，未检测到执行步骤受影响。", "Automation files updated; no execution steps affected.")}
               </span>
             </div>
             <Button onClick={() => setOpen(!open)} aria-expanded={open}>
-              {open ? "收起更新详情" : "查看更新详情"}
+              {open ? bi("收起更新详情", "Hide Update Details") : bi("查看更新详情", "View Update Details")}
             </Button>
           </div>
           {open && <>
-          <p className="sync-rule">当前集群不会自动更新，已有执行记录仍然保留。下面是采用新版后需要复核的范围，不是要求全部重跑。</p>
-          {legacySteps && <p className="sync-rule">下方当前交付按旧版阶段执行；此处预览的是同步后的独立步骤。同步后执行列表会按相同名称和数量展开，旧阶段记录保留，不会自动视作每个新步骤已完成。</p>}
+          <p className="sync-rule">
+            {bi(
+              "当前集群不会自动更新，已有执行记录仍然保留。下面是采用新版后需要复核的范围，不是要求全部重跑。",
+              "The cluster will not update automatically and existing records stay intact. Below is the scope to review after syncing—not everything needs to be re-run.",
+            )}
+          </p>
+          {legacySteps && (
+            <p className="sync-rule">
+              {bi(
+                "下方当前交付按旧版阶段执行；此处预览的是同步后的独立步骤。同步后执行列表会按相同名称和数量展开，旧阶段记录保留，不会自动视作每个新步骤已完成。",
+                "This delivery currently uses legacy phase steps; previewing expanded individual steps after sync. Legacy phase records are preserved and will not automatically mark new steps complete.",
+              )}
+            </p>
+          )}
           <div className="sync-phases">
             {(pv.phases || []).map((ph) => (
               <section
@@ -1827,8 +1912,8 @@ function SyncCard({
                   {ph.label}
                   <span className="sync-count">
                     {ph.changed.length
-                      ? `${ph.changed.length} / ${ph.total} 个步骤内容有变化`
-                      : `${ph.total} 个步骤都不受影响`}
+                      ? bi(`${ph.changed.length} / ${ph.total} 个步骤内容有变化`, `${ph.changed.length} / ${ph.total} steps changed`)
+                      : bi(`${ph.total} 个步骤都不受影响`, `All ${ph.total} steps unaffected`)}
                   </span>
                 </h4>
                 {ph.changed.map((c) => (
@@ -1836,11 +1921,11 @@ function SyncCard({
                     <div className="sync-step-top">
                       {legacySteps ? <span>{c.title}</span> : <button className="wb-link" onClick={() => window.dispatchEvent(new CustomEvent("mh-runbook-focus", { detail: { key: c.key, title: c.title } }))}>{c.title}</button>}
                       {c.new ? (
-                        <em className="new">新增步骤</em>
+                        <em className="new">{bi("新增步骤", "New step")}</em>
                       ) : c.recorded ? (
-                        <em>已执行 · 采用更新后需复核</em>
+                        <em>{bi("已执行 · 采用更新后需复核", "Executed · Needs review after sync")}</em>
                       ) : (
-                        <em className="soft">还没执行过</em>
+                        <em className="soft">{bi("还没执行过", "Not executed yet")}</em>
                       )}
                     </div>
                     {(() => {
@@ -1848,7 +1933,7 @@ function SyncCard({
                       return (
                         <details className="sync-why">
                           <summary>
-                            查看技术差异 · {lines.length} 条
+                            {bi(`查看技术差异 · ${lines.length} 条`, `Technical diff · ${lines.length}`)}
                           </summary>
                           <ul>
                             {lines.map((l) => (
@@ -1862,7 +1947,7 @@ function SyncCard({
                 ))}
                 {ph.same && ph.same.length > 0 && ph.changed.length > 0 && (
                   <details className="sync-same">
-                    <summary>另外 {ph.same.length} 个不受影响，结果保留</summary>
+                    <summary>{bi(`另外 ${ph.same.length} 个不受影响，结果保留`, `${ph.same.length} unaffected (records preserved)`)}</summary>
                     <ul>
                       {ph.same.map((t) => (
                         <li key={t}>{t}</li>
@@ -1875,7 +1960,10 @@ function SyncCard({
           </div>
           <details className="sync-files">
             <summary>
-              涉及 {pv.files.length + (pv.removed?.length || 0)} 个自动化文件
+              {bi(
+                `涉及 ${pv.files.length + (pv.removed?.length || 0)} 个自动化文件`,
+                `${pv.files.length + (pv.removed?.length || 0)} automation files affected`,
+              )}
             </summary>
             <ul className="mono">
               {pv.files.map((f) => (
@@ -1883,18 +1971,20 @@ function SyncCard({
               ))}
               {(pv.removed || []).map((f) => (
                 <li key={f}>
-                  <s>{f}</s>（删除）
+                  <s>{f}</s>{bi("（删除）", " (deleted)")}
                 </li>
               ))}
             </ul>
           </details>
           <p className="sync-rule">
-            差异分析覆盖任务、脚本和变量。内容有变化不等于必须重跑；无法证明行为相同的步骤会标记为待复核。
-            如果你核对后认为某一步不受影响，可以在同步后的步骤里确认，理由会记入报告。
+            {bi(
+              "差异分析覆盖任务、脚本和变量。内容有变化不等于必须重跑；无法证明行为相同的步骤会标记为待复核。如果你核对后认为某一步不受影响，可以在同步后的步骤里确认，理由会记入报告。",
+              "Diff analysis covers tasks, scripts, and variables. Changed content does not automatically require re-running; steps that cannot be proven identical are flagged for review and can be marked unaffected with a reason.",
+            )}
           </p>
           {can("delivery.create") && <div className="sync-actions">
-            <span>采用后会更新交付文件，并保留原执行记录；不会自动执行。</span>
-            <Button type="primary" loading={busy} onClick={run}>采用更新…</Button>
+            <span>{bi("采用后会更新交付文件，并保留原执行记录；不会自动执行。", "Adopting updates delivery files while preserving execution records; nothing executes automatically.")}</span>
+            <Button type="primary" loading={busy} onClick={run}>{bi("采用更新…", "Adopt Update…")}</Button>
           </div>}
           </>}
         </div>
@@ -1903,27 +1993,31 @@ function SyncCard({
         <div className="sync-done">
           <b>
             {last.kind === "patch"
-              ? `第 ${last.n} 次修改自动化文件`
-              : `第 ${last.n} 次同步`}{" "}
+              ? bi(`第 ${last.n} 次修改自动化文件`, `Patch #${last.n} to automation files`)
+              : bi(`第 ${last.n} 次同步`, `Sync #${last.n}`)}{" "}
             · {last.by} {ago(last.at)}
           </b>
           <span>
             {last.kind === "patch" && last.reason ? `${last.reason}　` : ""}
-            把更新包上传到控制节点的 {uploadDir}
-            ，执行下面的命令覆盖项目文件
             {last.kind === "patch"
-              ? "（包里是这份交付改过的全部文件），然后继续。"
-              : "，然后从出问题的那一步继续。改动过的步骤里保留了旧版本和记录。"}
+              ? bi(
+                  `把更新包上传到控制节点的 ${uploadDir}，执行下面的命令覆盖项目文件（包里是这份交付改过的全部文件），然后继续。`,
+                  `Upload the update package to ${uploadDir} on the controller, run the command below to overwrite project files, then continue.`,
+                )
+              : bi(
+                  `把更新包上传到控制节点的 ${uploadDir}，执行下面的命令覆盖项目文件，然后从出问题的那一步继续。改动过的步骤里保留了旧版本和记录。`,
+                  `Upload the update package to ${uploadDir} on the controller, run the command below to overwrite project files, then resume from the failed step. Prior versions and records are preserved.`,
+                )}
           </span>
           {upd && (
             <div className="rstep-files">
-              <a href={upd.url} download={upd.name} className="fchip">
+              <a href={withLang(upd.url)} download={upd.name} className="fchip">
                 <IconDownload />
                 <span className="mono">{upd.name}</span>
                 <span className="faint num">{size(upd.bytes)}</span>
               </a>
               {sumFile && (
-                <a href={sumFile.url} download={sumFile.name} className="fchip">
+                <a href={withLang(sumFile.url)} download={sumFile.name} className="fchip">
                   <IconDownload />
                   <span className="mono">{sumFile.name}</span>
                   <span className="faint num">{size(sumFile.bytes)}</span>
@@ -1943,10 +2037,10 @@ function SyncCard({
           >
             {copiedCmd ? (
               <>
-                <IconCheck /> 已复制
+                <IconCheck /> {bi("已复制", "Copied")}
               </>
             ) : (
-              "复制命令"
+              bi("复制命令", "Copy command")
             )}
           </button>
         </div>
@@ -1957,6 +2051,7 @@ function SyncCard({
 
 /** Opens the page's assistant on the review of this delivery. */
 function ReviewButton() {
+  useLang();
   const dock = useAIDock();
   if (!dock?.available("review") || !can("ai.use")) return null;
   return (
@@ -1967,16 +2062,17 @@ function ReviewButton() {
       onClick={() =>
         dock.open({
           key: `review:${Math.random().toString(36).slice(2, 10)}`,
-          title: "新对话",
+          title: bi("新对话", "New Chat"),
         })
       }
     >
-      向 AI 提问
+      {bi("向 AI 提问", "Ask AI")}
     </Button>
   );
 }
 
 function FileLink({ f, quiet }: { f: JobFile; quiet?: boolean }) {
+  useLang();
   if (!can("delivery.download"))
     return (
       <span className={`file ${quiet ? "quiet" : ""}`}>
@@ -1988,9 +2084,9 @@ function FileLink({ f, quiet }: { f: JobFile; quiet?: boolean }) {
   return (
     <a
       className={`file ${quiet ? "quiet" : ""}`}
-      href={f.url}
+      href={withLang(f.url)}
       download={f.name}
-      title={`下载 ${f.name}`}
+      title={bi(`下载 ${f.name}`, `Download ${f.name}`)}
     >
       {quiet ? <IconFile /> : <IconDownload />}
       <span className="file-name">{f.name}</span>

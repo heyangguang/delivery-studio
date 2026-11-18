@@ -35,6 +35,7 @@ import {
 } from "./shared";
 import type { DeliveryPlan, JobFile, PlanStep } from "./shared";
 import { Segmented } from "./ui";
+import { bi, useLang, withLang } from "./i18n";
 
 const KEYWORDS = new Set([
   "if",
@@ -108,6 +109,7 @@ export function Terminal({
   compact?: boolean;
   plain?: boolean;
 }) {
+  useLang();
   const [copied, setCopied] = useState(false);
   const [copiedLine, setCopiedLine] = useState<number | null>(null);
   const [expanded, setExpanded] = useState(false);
@@ -127,7 +129,9 @@ export function Terminal({
         <span className="term-who">
           {host ? `root@${host}` : plain ? "manifest" : "bash"}
           {lines.length > 4 && (
-            <em className="term-lines num">{lines.length} 行</em>
+            <em className="term-lines num">
+              {bi(`${lines.length} 行`, `${lines.length} lines`)}
+            </em>
           )}
         </span>
         <button
@@ -138,10 +142,10 @@ export function Terminal({
             setCopied(true);
             setTimeout(() => setCopied(false), 1600);
           }}
-          aria-label="复制全部命令"
+          aria-label={bi("复制全部命令", "Copy all commands")}
         >
           {copied ? <IconCheck /> : <IconCopy />}
-          <span>{copied ? "已复制" : "复制"}</span>
+          <span>{copied ? bi("已复制", "Copied") : bi("复制", "Copy")}</span>
         </button>
       </div>
       <pre className="term-body">
@@ -183,7 +187,9 @@ export function Terminal({
                       );
                     }}
                     aria-label={
-                      lineDone ? "已复制这一行" : `复制这一行：${l.trim()}`
+                      lineDone
+                        ? bi("已复制这一行", "Line copied")
+                        : bi(`复制这一行：${l.trim()}`, `Copy line: ${l.trim()}`)
                     }
                     tabIndex={-1}
                   >
@@ -206,8 +212,11 @@ export function Terminal({
           <IconDown className={expanded ? "open" : ""} />
           <span className="num">
             {expanded
-              ? "收起长内容"
-              : `展开其余 ${lines.length - TERM_FOLD_PREVIEW} 行（共 ${lines.length} 行）`}
+              ? bi("收起长内容", "Collapse")
+              : bi(
+                  `展开其余 ${lines.length - TERM_FOLD_PREVIEW} 行（共 ${lines.length} 行）`,
+                  `Show remaining ${lines.length - TERM_FOLD_PREVIEW} lines (${lines.length} total)`,
+                )}
           </span>
         </button>
       )}
@@ -216,9 +225,10 @@ export function Terminal({
 }
 
 function CodeChip({ value }: { value: string }) {
+  useLang();
   const [copied, setCopied] = useState(false);
   return (
-    <Tooltip content={copied ? "已复制" : "点击复制"} mini position="top">
+    <Tooltip content={copied ? bi("已复制", "Copied") : bi("点击复制", "Click to copy")} mini position="top">
       <button
         type="button"
         className={`chip-code ${copied ? "copied" : ""}`}
@@ -264,7 +274,7 @@ type RStep = {
   code: string;
   files: JobFile[];
   /** How to get back, per changing step it covers (a deploy phase covers several). */
-  rollback?: { title: string; text: string }[];
+  rollback?: { title: string; text: string; noRollback?: boolean }[];
 };
 type Tab = {
   id: string;
@@ -276,10 +286,10 @@ type Tab = {
 };
 
 const EFFECT: Record<string, string> = {
-  "read-only": "只读",
-  change: "修改",
-  disruptive: "会中断服务",
-  destructive: "不可撤销",
+  get "read-only"() { return bi("只读", "Read-only"); },
+  get change() { return bi("修改", "Change"); },
+  get disruptive() { return bi("会中断服务", "Disruptive"); },
+  get destructive() { return bi("不可撤销", "Destructive"); },
 };
 const DANGER = new Set(["destructive"]);
 
@@ -292,7 +302,7 @@ const stepOf = (
   key,
   title: (s.instance ? `[${s.instance}] ` : "") + s.title,
   lead: s.desc,
-  detail: s.expect ? `通过标准：${s.expect}` : undefined,
+  detail: s.expect ? bi(`通过标准：${s.expect}`, `Expected: ${s.expect}`) : undefined,
   effect: s.effect,
   hosts: s.hosts.length > 3 ? [s.hosts[0]] : s.hosts,
   code: cd ? `cd ${cd}\n${s.command}` : s.command,
@@ -303,8 +313,11 @@ const stepOf = (
       : undefined,
 });
 
-const NO_ROLLBACK =
-  "组件没有声明。先停下，保留现场和输出，联系平台维护人员，不要自行尝试撤销。";
+const noRollbackMsg = () =>
+  bi(
+    "组件没有声明。先停下，保留现场和输出，联系平台维护人员，不要自行尝试撤销。",
+    "Not declared by component. Stop, preserve outputs and state, and contact platform maintainers instead of attempting manual rollback.",
+  );
 
 function buildTabs(
   plan: DeliveryPlan,
@@ -339,7 +352,7 @@ function buildTabs(
   };
   tabs.push({
     id: "prepare",
-    label: "环境准备",
+    label: bi("环境准备", "Environment Prep"),
     doc: doc("00-"),
     steps: (plan.prepare || []).map((s, i) =>
       stepOf(s, "", (plan.step_format || 0) >= 2 && s.id ? s.id : "prepare-" + i, attach(s)),
@@ -348,15 +361,18 @@ function buildTabs(
   });
   tabs.push({
     id: "deploy",
-    label: "部署",
+    label: bi("部署", "Deploy"),
     doc: doc("01-"),
-    lead: "全部在控制节点的 root 终端完成。每一步的 Ansible 输出末尾必须是 failed=0、unreachable=0 才继续下一步；失败或中断时保留日志，不要删锁、不要删数据目录。",
+    lead: bi(
+      "全部在控制节点的 root 终端完成。每一步的 Ansible 输出末尾必须是 failed=0、unreachable=0 才继续下一步；失败或中断时保留日志，不要删锁、不要删数据目录。",
+      "Run all commands as root on the controller. Proceed only when Ansible reports failed=0 and unreachable=0; on failure, keep logs and do not delete locks or data directories.",
+    ),
     steps: [
       {
         key: "deploy-bootstrap",
-        title: "离线安装 Ansible 并核对清单",
-        lead: "引导脚本只使用随包的离线材料，不访问外网。",
-        detail: "清单应列出全部机器和各实例的分组。",
+        title: bi("离线安装 Ansible 并核对清单", "Install Offline Ansible & Verify Inventory"),
+        lead: bi("引导脚本只使用随包的离线材料，不访问外网。", "Bootstrap uses bundled offline artifacts only with no internet access."),
+        detail: bi("清单应列出全部机器和各实例的分组。", "Inventory should list all hosts and instance groups."),
         effect: "change",
         hosts: [plan.controller],
         code: `cd ${cd.replace(/\/projects\/[^/]+\/?$/, "")}\nbash bootstrap/bootstrap-ansible.sh\ncd ${cd}\n../../bin/ansible-inventory -i inventory/hosts.yml --graph`,
@@ -364,12 +380,12 @@ function buildTabs(
       },
       ...plan.deploy.flatMap((ph): RStep[] => (plan.step_format || 0) >= 2 ? ph.steps.map((s) => stepOf(s, cd, ph.phase + "/" + (s.instance ? "instance-" + s.instance : "platform") + "/" + s.id, [])) : [{
         key: `deploy-${ph.phase}`,
-        title: `阶段：${ph.title}`,
+        title: bi(`阶段：${ph.title}`, `Phase: ${ph.title}`),
         lead: ph.steps
           .map((s) => `${s.instance ? `[${s.instance}] ` : ""}${s.title}`)
-          .join("；"),
+          .join(bi("；", "; ")),
         detail: ph.steps.some((s) => s.effect === "disruptive")
-          ? "包含会短暂中断连接的步骤，应在应用接入前的窗口执行。"
+          ? bi("包含会短暂中断连接的步骤，应在应用接入前的窗口执行。", "Includes steps that briefly interrupt connections; run prior to application cutover.")
           : undefined,
         effect: ph.steps.some((s) => s.effect === "destructive")
           ? "destructive"
@@ -385,7 +401,8 @@ function buildTabs(
           .filter((x) => x.effect !== "read-only")
           .map((x) => ({
             title: `${x.instance ? `[${x.instance}] ` : ""}${x.title}`,
-            text: x.rollback || NO_ROLLBACK,
+            text: x.rollback || noRollbackMsg(),
+            noRollback: !x.rollback,
           })),
       }]),
     ],
@@ -426,32 +443,38 @@ function buildTabs(
           i.component === "postgresql" && i.params.tls === false
         ).map((i) => ({
           id: (plan.instances.find((m) => m.managed_context === i.id)?.id || i.id) + "/tls-negative",
-          title: "TLS 连接安全验证",
-          reason: "未启用 TLS",
+          title: bi("TLS 连接安全验证", "TLS Security Verification"),
+          reason: bi("未启用 TLS", "TLS disabled"),
         })) : []),
       ],
     });
   };
   list(
     "tests",
-    "功能测试",
+    bi("功能测试", "Functional Tests"),
     plan.tests || [],
     "02-",
-    "逐项执行；标为“会中断服务”的项目应在应用接入前的窗口做。每项必须 failed=0 才继续。",
+    bi(
+      "逐项执行；标为“会中断服务”的项目应在应用接入前的窗口做。每项必须 failed=0 才继续。",
+      "Run each test; execute Disruptive tests before application traffic. Ensure failed=0 before proceeding.",
+    ),
   );
   list(
     "endpoint",
-    "入口测试",
+    bi("入口测试", "Endpoint Tests"),
     plan.endpoint_tests || [],
     "03-",
-    "先在入口（负载均衡）处完成配置，再逐项执行。",
+    bi("先在入口（负载均衡）处完成配置，再逐项执行。", "Configure the frontend load balancer first, then run each check."),
   );
   list(
     "cleanup",
-    "清理",
+    bi("清理", "Cleanup"),
     plan.cleanup || [],
     "04-",
-    "只处理本集群的测试资源，逐项执行，失败就停下，不要手工删除生产目录。",
+    bi(
+      "只处理本集群的测试资源，逐项执行，失败就停下，不要手工删除生产目录。",
+      "Cleans only test resources for this cluster; stop on failure and never manually delete production directories.",
+    ),
   );
   return tabs.filter((tab) => tab.steps.length > 0 || tab.notes.length > 0);
 }
@@ -504,8 +527,8 @@ function withAmendments(
         effect: a.step.effect,
         lead: [
           old.lead,
-          `已修改：${a.reason}`,
-          a.step.rollback ? `回退：${a.step.rollback}` : "",
+          bi(`已修改：${a.reason}`, `Modified: ${a.reason}`),
+          a.step.rollback ? bi(`回退：${a.step.rollback}`, `Rollback: ${a.step.rollback}`) : "",
         ]
           .filter(Boolean)
           .join("\n"),
@@ -518,12 +541,12 @@ function withAmendments(
         title: a.step.title,
         lead: [
           a.step.desc,
-          a.step.rollback ? `回退：${a.step.rollback}` : "",
-          `缘由：${a.reason}`,
+          a.step.rollback ? bi(`回退：${a.step.rollback}`, `Rollback: ${a.step.rollback}`) : "",
+          bi(`缘由：${a.reason}`, `Reason: ${a.reason}`),
         ]
           .filter(Boolean)
           .join("\n"),
-        detail: a.step.expect ? `通过标准：${a.step.expect}` : undefined,
+        detail: a.step.expect ? bi(`通过标准：${a.step.expect}`, `Expected: ${a.step.expect}`) : undefined,
         effect: a.step.effect,
         hosts: a.step.hosts,
         code: cd ? `cd ${cd}\n${a.step.command}` : a.step.command,
@@ -637,13 +660,13 @@ type Ev = {
   state: string;
 };
 const STATE_LABEL: Record<string, string> = {
-  "ai-accepted": "采纳 AI 补充步骤",
-  "ai-rejected": "拒绝 AI 提案",
-  done: "完成",
-  failed: "失败",
-  skipped: "跳过",
-  resolved: "完成（遇到问题已解决）",
-  "": "清除记录",
+  get "ai-accepted"() { return bi("采纳 AI 补充步骤", "Adopted AI step"); },
+  get "ai-rejected"() { return bi("拒绝 AI 提案", "Dismissed AI proposal"); },
+  get done() { return bi("完成", "Completed"); },
+  get failed() { return bi("失败", "Failed"); },
+  get skipped() { return bi("跳过", "Skipped"); },
+  get resolved() { return bi("完成（遇到问题已解决）", "Completed (issue resolved)"); },
+  get ""() { return bi("清除记录", "Cleared"); },
 };
 
 export function Runbook({
@@ -657,11 +680,12 @@ export function Runbook({
   jobId: string;
   files: JobFile[];
 }) {
+  const lang = useLang();
   const [amends, setAmends] = useState<Amendment[]>([]);
-  const base = useMemo(() => buildTabs(plan, docs, files), [plan, docs, files]);
+  const base = useMemo(() => buildTabs(plan, docs, files), [plan, docs, files, lang]);
   const tabs = useMemo(
     () => withAmendments(base, amends, plan),
-    [base, amends, plan],
+    [base, amends, plan, lang],
   );
   const initialSavedTab = readSavedTab(jobId, tabs);
   const [tab, setTab] = useState<string>(initialSavedTab ?? tabs[0].id);
@@ -833,7 +857,7 @@ export function Runbook({
       prefill,
       key: `step:${key}`,
       title: s.title,
-      context: `现场排障 · ${t.label}`,
+      context: bi(`现场排障 · ${t.label}`, `On-site troubleshooting · ${t.label}`),
       step: {
         title: s.title,
         phase: t.label,
@@ -849,9 +873,9 @@ export function Runbook({
 
   const withdraw = (id: string, title: string) =>
     Modal.confirm({
-      title: `撤销「${title}」？`,
-      content: "这一步会从手册和交付文档里移除，已记录的结果保留在执行记录中。",
-      okText: "撤销",
+      title: bi(`撤销「${title}」？`, `Withdraw "${title}"?`),
+      content: bi("这一步会从手册和交付文档里移除，已记录的结果保留在执行记录中。", "Removes this step from the runbook and docs while keeping logged results in history."),
+      okText: bi("撤销", "Withdraw"),
       onOk: async () => {
         try {
           await api(`/api/jobs/${jobId}/ai/proposals/amendment/${id}`, {
@@ -930,7 +954,10 @@ export function Runbook({
         }
       }
       Message.success(
-        `导入 ${r.imported.length} 份日志，对上了 ${r.matched} 个步骤${(r.skipped?.length ?? 0) ? `；${r.skipped?.length ?? 0} 个文件不是执行日志，已忽略` : ""}`,
+        bi(
+          `导入 ${r.imported.length} 份日志，对上了 ${r.matched} 个步骤${(r.skipped?.length ?? 0) ? `；${r.skipped?.length ?? 0} 个文件不是执行日志，已忽略` : ""}`,
+          `Imported ${r.imported.length} ${r.imported.length === 1 ? "log" : "logs"}, matched ${r.matched} ${r.matched === 1 ? "step" : "steps"}${(r.skipped?.length ?? 0) ? `; ignored ${r.skipped?.length ?? 0} non-log files` : ""}`,
+        ),
       );
     } catch (e) {
       err(e);
@@ -1053,7 +1080,7 @@ export function Runbook({
         <div className="rb-head">
           <div
             className="rb-progress"
-            aria-label={`现场进度 ${finished} / ${total}`}
+            aria-label={bi(`现场进度 ${finished} / ${total}`, `On-site progress ${finished} / ${total}`)}
           >
             <div className="rb-meter" aria-hidden>
               <span
@@ -1062,25 +1089,30 @@ export function Runbook({
             </div>
             <span className="num">
               {finished === total
-                ? "全部步骤已完成"
-                : `已完成 ${finished} / ${total} 步`}
+                ? bi("全部步骤已完成", "All steps completed")
+                : bi(`已完成 ${finished} / ${total} 步`, `${finished} / ${total} steps done`)}
             </span>
             {failed > 0 && (
-              <span className="rb-failed num">{failed} 步失败</span>
+              <span className="rb-failed num">
+                {failed === 1 ? bi("1 步失败", "1 failed") : bi(`${failed} 步失败`, `${failed} failed`)}
+              </span>
             )}
             <span className="faint small">
               {sync === "error"
-                ? "记录暂时无法同步"
+                ? bi("记录暂时无法同步", "Unable to sync records")
                 : sync === "loading"
-                  ? "同步中…"
-                  : "执行记录保存在平台，交付的所有者都能看到"}
+                  ? bi("同步中…", "Syncing…")
+                  : bi("执行记录保存在平台，交付的所有者都能看到", "Progress is saved on the platform for all delivery owners")}
             </span>
           </div>
           <div className="rb-actions">
             {can("delivery.run") && (
               <>
                 <Tooltip
-                  content="把控制节点项目目录 logs/ 下的日志（.log，或整个目录打成 .zip / .tar.gz）传上来，平台自动写好各步的结果和输出"
+                  content={bi(
+                    "把控制节点项目目录 logs/ 下的日志（.log，或整个目录打成 .zip / .tar.gz）传上来，平台自动写好各步的结果和输出",
+                    "Upload logs (.log, .zip, or .tar.gz) from the controller's logs/ directory to auto-populate step statuses and outputs",
+                  )}
                   mini
                 >
                   <Button
@@ -1089,7 +1121,7 @@ export function Runbook({
                     icon={<IconUpload />}
                     onClick={() => pickLogs.current?.click()}
                   >
-                    上传执行日志
+                    {bi("上传执行日志", "Upload Logs")}
                   </Button>
                 </Tooltip>
                 <input
@@ -1107,41 +1139,44 @@ export function Runbook({
                 className="link quiet"
                 onClick={() => {
                   const m = Modal.confirm({
-                    title: "清除执行结果？",
+                    title: bi("清除执行结果？", "Clear execution results?"),
                     content: (
                       <div className="rb-clear">
                         <p>
-                          所有步骤会回到“未执行”。你写下的说明、粘贴的输出、上传的截图和执行日志都会
-                          <b>保留</b>，重新标记结果后还在原来的步骤下。
+                          {bi("所有步骤会回到“未执行”。你写下的说明、粘贴的输出、上传的截图和执行日志都会", "All steps will reset to pending. Your notes, pasted output, screenshots, and imported logs will be ")}
+                          <b>{bi("保留", "preserved")}</b>
+                          {bi("，重新标记结果后还在原来的步骤下。", " under their original steps.")}
                         </p>
                         <p className="faint small">
-                          想把这些也删掉？
+                          {bi("想把这些也删掉？", "Delete those too? ")}
                           <button
                             type="button"
                             className="link quiet danger"
                             onClick={() => {
                               m.close();
                               Modal.confirm({
-                                title: "连输出和截图一起删除？",
-                                content:
+                                title: bi("连输出和截图一起删除？", "Delete outputs and screenshots too?"),
+                                content: bi(
                                   "说明、粘贴的输出、截图和导入的日志都会删除，不能恢复。",
-                                okText: "全部删除",
+                                  "Notes, pasted outputs, screenshots, and imported logs will be permanently deleted.",
+                                ),
+                                okText: bi("全部删除", "Delete All"),
                                 okButtonProps: { status: "danger" },
                                 onOk: () => clearAll(true),
                               });
                             }}
                           >
-                            全部删除…
+                            {bi("全部删除…", "Delete everything…")}
                           </button>
                         </p>
                       </div>
                     ),
-                    okText: "只清除结果",
+                    okText: bi("只清除结果", "Clear Results Only"),
                     onOk: () => clearAll(false),
                   });
                 }}
               >
-                清除记录
+                {bi("清除记录", "Clear Records")}
               </button>
             )}
             {next && (
@@ -1152,19 +1187,19 @@ export function Runbook({
                 onClick={goNext}
               >
                 {!can("delivery.run")
-                  ? "查看执行步骤"
+                  ? bi("查看执行步骤", "View Steps")
                   : failed
-                    ? "回到出错的一步"
+                    ? bi("回到出错的一步", "Jump to Failed Step")
                     : finished
-                      ? "继续下一步"
-                      : "从第一步开始"}
+                      ? bi("继续下一步", "Next Step")
+                      : bi("从第一步开始", "Start Step 1")}
               </Button>
             )}
           </div>
         </div>
         {logs.length > 0 && (
           <details className="rb-logs">
-            <summary>已导入 {logs.length} 份执行日志</summary>
+            <summary>{bi(`已导入 ${logs.length} 份执行日志`, `${logs.length} imported ${logs.length === 1 ? "log" : "logs"}`)}</summary>
             <ul>
               {logs.map((l) => (
                 <li key={l.file}>
@@ -1172,14 +1207,14 @@ export function Runbook({
                     className={`rb-log-r ${l.result === "PASSED" ? "ok" : "bad"}`}
                   >
                     {l.result === "PASSED"
-                      ? "通过"
+                      ? bi("通过", "PASSED")
                       : l.result === "FAILED"
-                        ? "失败"
-                        : "未结束"}
+                        ? bi("失败", "FAILED")
+                        : bi("未结束", "INCOMPLETE")}
                   </span>
                   <span className="mono small">{l.file}</span>
                   <span className="faint small">
-                    {l.step ? `→ ${l.step}` : "没有对上手册里的步骤"}
+                    {l.step ? `→ ${l.step}` : bi("没有对上手册里的步骤", "No matching runbook step")}
                   </span>
                   {can("delivery.run") && (
                     <button
@@ -1187,7 +1222,7 @@ export function Runbook({
                       className="link quiet"
                       onClick={() => dropLog(l.file)}
                     >
-                      移除
+                      {bi("移除", "Remove")}
                     </button>
                   )}
                 </li>
@@ -1199,7 +1234,7 @@ export function Runbook({
         <div className="rb-tabs">
           <Segmented
             size="md"
-            label="手册"
+            label={bi("手册", "Runbook")}
             value={showRecord ? "record" : cur.id}
             onChange={switchTo}
             options={[
@@ -1234,14 +1269,14 @@ export function Runbook({
               }),
               {
                 value: "record",
-                label: "执行记录",
+                label: bi("执行记录", "History"),
                 count: events.length || undefined,
               },
             ]}
           />
           {!showRecord && cur.doc && (
-            <a className="rb-dl" href={cur.doc.url} download={cur.doc.name}>
-              <IconDownload /> 下载此篇
+            <a className="rb-dl" href={withLang(cur.doc.url)} download={cur.doc.name}>
+              <IconDownload /> {bi("下载此篇", "Download MD")}
             </a>
           )}
         </div>
@@ -1256,13 +1291,15 @@ export function Runbook({
               finished={finished}
               failed={failed}
             />
-            <AIReports reports={reports} where={`交付 ${plan.cluster}`} />
+            <AIReports reports={reports} where={bi(`交付 ${plan.cluster}`, `Delivery ${plan.cluster}`)} />
           </>
         ) : (
           <div className={`rb-phase dir-${dir}`} key={cur.id}>
             <div className="rb-phase-head">
               <h3>{cur.label}</h3>
-              <span className="faint small num">{cur.steps.length} 步</span>
+              <span className="faint small num">
+                {cur.steps.length === 1 ? bi("1 步", "1 step") : bi(`${cur.steps.length} 步`, `${cur.steps.length} steps`)}
+              </span>
             </div>
             {cur.lead && (
               <p className="rb-lead">
@@ -1289,7 +1326,10 @@ export function Runbook({
                       type="button"
                       role="checkbox"
                       aria-checked={isDone}
-                      aria-label={`第 ${k + 1} 步${isDone ? "，已完成" : isFailed ? "，失败" : ""}`}
+                      aria-label={bi(
+                        `第 ${k + 1} 步${isDone ? "，已完成" : isFailed ? "，失败" : ""}`,
+                        `Step ${k + 1}${isDone ? ", completed" : isFailed ? ", failed" : ""}`,
+                      )}
                       className="rstep-check"
                       onClick={() => toggle(cur.id, s.key)}
                     >
@@ -1307,7 +1347,7 @@ export function Runbook({
                         {s.hosts.length > 0 && (
                           <span
                             className="hosts"
-                            aria-label={`执行机器：${s.hosts.join("，")}`}
+                            aria-label={bi(`执行机器：${s.hosts.join("，")}`, `Target hosts: ${s.hosts.join(", ")}`)}
                           >
                             {s.hosts.map((h, i) => (
                               <React.Fragment key={h}>
@@ -1330,13 +1370,16 @@ export function Runbook({
                         {aiStatus.enabled && s.ai && (
                           <span
                             className="rstep-ai-badge"
-                            title={`${s.ai.by} 采纳的 AI 提案，已写入交付文档${s.ai.changed ? "；原命令见步骤下方" : ""}`}
+                            title={bi(
+                              `${s.ai.by} 采纳的 AI 提案，已写入交付文档${s.ai.changed ? "；原命令见步骤下方" : ""}`,
+                              `AI proposal accepted by ${s.ai.by} and saved to docs${s.ai.changed ? "; original command shown below" : ""}`,
+                            )}
                           >
-                            {s.ai.changed ? "AI 修改" : "AI 补充"}
+                            {s.ai.changed ? bi("AI 修改", "AI Edited") : bi("AI 补充", "AI Added")}
                           </span>
                         )}
                         {danger ? (
-                          <span className="tag-danger">不可撤销</span>
+                          <span className="tag-danger">{bi("不可撤销", "Destructive")}</span>
                         ) : (
                           <span className={`rstep-effect e-${s.effect}`}>
                             {EFFECT[s.effect] || s.effect}
@@ -1346,15 +1389,15 @@ export function Runbook({
                           <span
                             className={isFailed ? "tag-danger" : "tag-next"}
                           >
-                            {isFailed ? "失败，处理后重试" : "下一步"}
+                            {isFailed ? bi("失败，处理后重试", "Failed · retry after fix") : bi("下一步", "Next")}
                           </span>
                         )}
                         {r?.state === "skipped" && (
-                          <span className="rstep-effect">已跳过</span>
+                          <span className="rstep-effect">{bi("已跳过", "Skipped")}</span>
                         )}
                         {r?.state === "resolved" && (
                           <span className="rstep-effect e-resolved">
-                            已解决
+                            {bi("已解决", "Resolved")}
                           </span>
                         )}
                         {isDone && (
@@ -1370,7 +1413,7 @@ export function Runbook({
                             aria-expanded={expanded}
                           >
                             <IconDown className={expanded ? "rstep-chevron-open" : ""} />
-                            {expanded ? "收起" : "展开"}
+                            {expanded ? bi("收起", "Collapse") : bi("展开", "Expand")}
                           </button>
                         )}
                       </div>
@@ -1387,9 +1430,9 @@ export function Runbook({
                           {s.rollback && s.rollback.length > 0 && (
                             <details className="rstep-rb">
                               <summary>
-                                出了问题怎么退回
+                                {bi("出了问题怎么退回", "Rollback guidance")}
                                 {s.rollback.length > 1
-                                  ? `（${s.rollback.length} 步）`
+                                  ? bi(`（${s.rollback.length} 步）`, ` (${s.rollback.length} steps)`)
                                   : ""}
                               </summary>
                               {s.rollback.length === 1 &&
@@ -1401,7 +1444,7 @@ export function Runbook({
                                     <li
                                       key={i}
                                       className={
-                                        r.text === NO_ROLLBACK ? "none" : ""
+                                        r.noRollback ? "none" : ""
                                       }
                                     >
                                       <b>{r.title}</b>
@@ -1417,7 +1460,7 @@ export function Runbook({
                               {s.files.map((f) => (
                                 <a
                                   key={f.name}
-                                  href={f.url}
+                                  href={withLang(f.url)}
                                   download={f.name}
                                   className="fchip"
                                 >
@@ -1449,7 +1492,7 @@ export function Runbook({
                           )}
                           {s.ai?.before && (
                             <details className="rstep-before">
-                              <summary>修改前的命令</summary>
+                              <summary>{bi("修改前的命令", "Original command")}</summary>
                               <Terminal code={s.ai.before} host={s.hosts[0]} />
                             </details>
                           )}
@@ -1481,7 +1524,7 @@ export function Runbook({
                                   onClick={() => withdraw(s.ai!.id, s.title)}
                                 >
                                   <IconClose />{" "}
-                                  {s.ai.changed ? "撤销这处修改" : "撤销这一步"}
+                                  {s.ai.changed ? bi("撤销这处修改", "Revert edit") : bi("撤销这一步", "Remove step")}
                                 </button>
                               )}
                           </div>
@@ -1496,11 +1539,15 @@ export function Runbook({
                   <details key={cur.id}>
                     <summary>
                       <IconDown className="rb-skipped-arrow" />
-                      <strong>{cur.id === "cleanup" ? "未执行的步骤" : "未执行的测试"}</strong>
-                      <span className="rb-skipped-count">{cur.notes.length} 项</span>
-                      <span className="rb-skipped-toggle"><span className="when-closed">查看原因</span><span className="when-open">收起</span></span>
+                      <strong>{cur.id === "cleanup" ? bi("未执行的步骤", "Skipped steps") : bi("未执行的测试", "Skipped tests")}</strong>
+                      <span className="rb-skipped-count">
+                        {cur.notes.length === 1
+                          ? bi("1 项", "1 item")
+                          : bi(`${cur.notes.length} 项`, `${cur.notes.length} items`)}
+                      </span>
+                      <span className="rb-skipped-toggle"><span className="when-closed">{bi("查看原因", "Show reason")}</span><span className="when-open">{bi("收起", "Hide")}</span></span>
                     </summary>
-                    <p className="rb-skipped-help">以下项目不适用于本次配置，无需执行。</p>
+                    <p className="rb-skipped-help">{bi("以下项目不适用于本次配置，无需执行。", "The following items do not apply to this configuration and require no action.")}</p>
                     <ul className="rb-skipped-list">
                       {cur.notes.map((note, i) => (
                         <li key={note.id + i}>
@@ -1518,7 +1565,7 @@ export function Runbook({
                 className="rb-nextphase"
                 onClick={() => switchTo(tabs[idx + 1].id)}
               >
-                <span>下一篇</span>
+                <span>{bi("下一篇", "Next section")}</span>
                 <b>{tabs[idx + 1].label}</b>
               </button>
             )}
@@ -1550,6 +1597,7 @@ function ResultBar({
   ) => Promise<void>;
   askAI?: (prefill?: string) => void;
 }) {
+  useLang();
   const [mode, setMode] = useState<"" | Rec["state"]>("");
   const [note, setNote] = useState("");
   const [log, setLog] = useState("");
@@ -1576,7 +1624,10 @@ function ResultBar({
       close();
       if (thenAsk && askAI)
         askAI(
-          `这一步执行失败了。${note.trim() ? "现象：" + note.trim() + "\n" : ""}${log.trim() ? "终端输出：\n```\n" + log.trim().slice(-6000) + "\n```" : ""}\n请帮我分析原因和下一步。`,
+          bi(
+            `这一步执行失败了。${note.trim() ? "现象：" + note.trim() + "\n" : ""}${log.trim() ? "终端输出：\n```\n" + log.trim().slice(-6000) + "\n```" : ""}\n请帮我分析原因和下一步。`,
+            `This step failed. ${note.trim() ? "Symptom: " + note.trim() + "\n" : ""}${log.trim() ? "Terminal output:\n```\n" + log.trim().slice(-6000) + "\n```" : ""}\nPlease analyze the root cause and next steps.`,
+          ),
         );
     } finally {
       setBusy("");
@@ -1591,17 +1642,17 @@ function ResultBar({
         <div className="rb-form-h">
           <b>
             {mode === "failed"
-              ? "记录失败"
+              ? bi("记录失败", "Record Failure")
               : mode === "skipped"
-                ? "跳过这一步"
-                : "记录完成"}
+                ? bi("跳过这一步", "Skip Step")
+                : bi("记录完成", "Record Completion")}
           </b>
           <span className="faint small">
             {mode === "failed"
-              ? "把报错贴进来，之后谁打开这份交付都能看到当时的现场"
+              ? bi("把报错贴进来，之后谁打开这份交付都能看到当时的现场", "Paste the error output so anyone viewing this delivery sees what happened")
               : mode === "skipped"
-                ? "写一句为什么跳过"
-                : "可以附上输出，留作凭据"}
+                ? bi("写一句为什么跳过", "Briefly explain why this step was skipped")
+                : bi("可以附上输出，留作凭据", "Optionally attach terminal output as evidence")}
           </span>
         </div>
         {mode !== "done" && (
@@ -1611,10 +1662,10 @@ function ResultBar({
             maxLength={500}
             placeholder={
               mode === "failed"
-                ? "一句话说明现象，例如：解包时提示空间不足"
-                : "为什么跳过"
+                ? bi("一句话说明现象，例如：解包时提示空间不足", "Briefly describe the issue, e.g., insufficient disk space on unpack")
+                : bi("为什么跳过", "Reason for skipping")
             }
-            aria-label="说明"
+            aria-label={bi("说明", "Notes")}
             autoFocus={mode === "skipped"}
           />
         )}
@@ -1624,18 +1675,21 @@ function ResultBar({
             spellCheck={false}
             value={log}
             onChange={(e) => setLog(e.target.value)}
-            placeholder="粘贴终端输出（可选，最多 64 KiB；通常最后几十行就够）。也可以直接粘贴或拖入截图"
-            aria-label="终端输出"
+            placeholder={bi(
+              "粘贴终端输出（可选，最多 64 KiB；通常最后几十行就够）。也可以直接粘贴或拖入截图",
+              "Paste terminal output (optional, max 64 KiB; last few dozen lines usually suffice). You can also paste or drop screenshots",
+            )}
+            aria-label={bi("终端输出", "Terminal output")}
             autoFocus
           />
         )}
         {mode !== "skipped" && <Shots shots={shots} />}
         {new Blob([log]).size > 64 << 10 && (
-          <span className="bad small">输出超过 64 KiB，请只保留关键部分</span>
+          <span className="bad small">{bi("输出超过 64 KiB，请只保留关键部分", "Output exceeds 64 KiB; trim to key lines")}</span>
         )}
         <div className="rec-actions">
           <Button size="small" onClick={close}>
-            取消
+            {bi("取消", "Cancel")}
           </Button>
           <Button
             size="small"
@@ -1644,7 +1698,7 @@ function ResultBar({
             disabled={tooBig}
             onClick={() => submit(false)}
           >
-            保存
+            {bi("保存", "Save")}
           </Button>
           {mode === "failed" && askAI && (
             <Button
@@ -1654,7 +1708,7 @@ function ResultBar({
               disabled={tooBig}
               onClick={() => submit(true)}
             >
-              <Spark size={12} /> 保存并让 AI 分析
+              <Spark size={12} /> {bi("保存并让 AI 分析", "Save & Ask AI")}
             </Button>
           )}
         </div>
@@ -1671,7 +1725,7 @@ function ResultBar({
             className="rstep-log"
             onClick={() => open(r.state)}
           >
-            <IconEdit /> 修改
+            <IconEdit /> {bi("修改", "Edit")}
           </button>
           {r.state === "failed" && askAI && (
             <button
@@ -1679,11 +1733,14 @@ function ResultBar({
               className="rstep-log rstep-ai"
               onClick={() =>
                 askAI(
-                  `这一步执行失败了。${r.note ? "现象：" + r.note + "\n" : ""}${r.log ? "终端输出：\n```\n" + r.log.slice(-6000) + "\n```" : ""}\n请帮我分析原因和下一步。`,
+                  bi(
+                    `这一步执行失败了。${r.note ? "现象：" + r.note + "\n" : ""}${r.log ? "终端输出：\n```\n" + r.log.slice(-6000) + "\n```" : ""}\n请帮我分析原因和下一步。`,
+                    `This step failed. ${r.note ? "Symptom: " + r.note + "\n" : ""}${r.log ? "Terminal output:\n```\n" + r.log.slice(-6000) + "\n```" : ""}\nPlease analyze the root cause and next steps.`,
+                  ),
                 )
               }
             >
-              <Spark size={13} /> 让 AI 分析这次失败
+              <Spark size={13} /> {bi("让 AI 分析这次失败", "Analyze failure with AI")}
             </button>
           )}
           {r.state !== "failed" && askAI && (
@@ -1692,7 +1749,7 @@ function ResultBar({
               className="rstep-log rstep-ai"
               onClick={() => askAI()}
             >
-              <Spark size={13} /> 有疑问，问 AI
+              <Spark size={13} /> {bi("有疑问，问 AI", "Ask AI")}
             </button>
           )}
         </div>
@@ -1705,12 +1762,15 @@ function ResultBar({
         <div className="rb-kept">
           <StepRecord r={r} />
           <span className="faint small">
-            结果已清除，上面写下的内容还在；重新标记结果时会带上它。
+            {bi(
+              "结果已清除，上面写下的内容还在；重新标记结果时会带上它。",
+              "Status cleared; notes and attachments above are preserved and will stay when re-marked.",
+            )}
           </span>
         </div>
       )}
-      <div className="rb-bar" role="group" aria-label="记录这一步的结果">
-        <span className="rb-q">执行结果</span>
+      <div className="rb-bar" role="group" aria-label={bi("记录这一步的结果", "Record step result")}>
+        <span className="rb-q">{bi("执行结果", "Result")}</span>
         <button
           type="button"
           className="rb-btn ok"
@@ -1724,24 +1784,24 @@ function ResultBar({
             }
           }}
         >
-          <IconCheck /> 成功
+          <IconCheck /> {bi("成功", "Pass")}
         </button>
         <button
           type="button"
           className="rb-btn bad"
           onClick={() => open("failed")}
         >
-          <IconClose /> 失败…
+          <IconClose /> {bi("失败…", "Fail…")}
         </button>
         <button
           type="button"
           className="rb-btn"
           onClick={() => open("skipped")}
         >
-          跳过…
+          {bi("跳过…", "Skip…")}
         </button>
         <button type="button" className="rb-link" onClick={() => open("done")}>
-          附上输出
+          {bi("附上输出", "Attach output")}
         </button>
         {askAI && (
           <button
@@ -1749,7 +1809,7 @@ function ResultBar({
             className="rstep-log rstep-ai rb-ask"
             onClick={() => askAI()}
           >
-            <Spark size={13} /> 遇到问题，问 AI
+            <Spark size={13} /> {bi("遇到问题，问 AI", "Stuck? Ask AI")}
           </button>
         )}
       </div>
@@ -1771,11 +1831,11 @@ function useShots() {
     const pics = files.filter((f) => f.type.startsWith("image/"));
     if (!pics.length) return;
     if (pics.some((f) => !SHOT_TYPES.test(f.type)))
-      return Message.warning("图片需要是 png、jpg、gif 或 webp");
+      return Message.warning(bi("图片需要是 png、jpg、gif 或 webp", "Images must be PNG, JPG, GIF, or WebP"));
     if (names.length + pics.length > 8)
-      return Message.warning("每一步最多附 8 张图片");
+      return Message.warning(bi("每一步最多附 8 张图片", "Maximum 8 screenshots per step"));
     if (pics.some((f) => f.size > 4 << 20))
-      return Message.warning("每张图片不能超过 4 MiB");
+      return Message.warning(bi("每张图片不能超过 4 MiB", "Each image must be under 4 MiB"));
     setBusy((n) => n + pics.length);
     for (const f of pics) {
       try {
@@ -1833,6 +1893,7 @@ function ShotList({
   names: string[];
   remove?: (n: string) => void;
 }) {
+  useLang();
   const job = React.useContext(JobIdContext);
   return (
     <div className="shots">
@@ -1842,11 +1903,11 @@ function ShotList({
             href={`/api/jobs/${job}/progress/img/${n}`}
             target="_blank"
             rel="noreferrer"
-            title="在新标签页打开原图"
+            title={bi("在新标签页打开原图", "Open full image in new tab")}
           >
             <img
               src={`/api/jobs/${job}/progress/img/${n}`}
-              alt={`截图 ${i + 1}`}
+              alt={bi(`截图 ${i + 1}`, `Screenshot ${i + 1}`)}
               loading="lazy"
             />
           </a>
@@ -1854,7 +1915,7 @@ function ShotList({
             <button
               type="button"
               className="shot-x"
-              aria-label={`移除截图 ${i + 1}`}
+              aria-label={bi(`移除截图 ${i + 1}`, `Remove screenshot ${i + 1}`)}
               onClick={() => remove(n)}
             >
               <IconClose />
@@ -1867,6 +1928,7 @@ function ShotList({
 }
 
 function Shots({ shots }: { shots: ReturnType<typeof useShots> }) {
+  useLang();
   const pick = React.useRef<HTMLInputElement>(null);
   return (
     <div className="shots-box">
@@ -1874,7 +1936,7 @@ function Shots({ shots }: { shots: ReturnType<typeof useShots> }) {
         <div className="shots-row">
           <ShotList names={shots.names} remove={shots.remove} />
           {shots.busy > 0 && (
-            <span className="faint small">正在上传 {shots.busy} 张…</span>
+            <span className="faint small">{bi(`正在上传 ${shots.busy} 张…`, `Uploading ${shots.busy}…`)}</span>
           )}
         </div>
       )}
@@ -1883,8 +1945,8 @@ function Shots({ shots }: { shots: ReturnType<typeof useShots> }) {
         className="shots-add"
         onClick={() => pick.current?.click()}
       >
-        <IconImage /> 添加截图
-        <span className="faint">　点击选择，或在这里粘贴 / 拖入</span>
+        <IconImage /> {bi("添加截图", "Add Screenshot")}
+        <span className="faint">　{bi("点击选择，或在这里粘贴 / 拖入", "Click to browse, or paste / drop here")}</span>
       </button>
       <input
         ref={pick}
@@ -1928,33 +1990,39 @@ function OldStep({
   stepKey: string;
   onKept: () => void;
 }) {
+  useLang();
   const [open, setOpen] = useState(false);
   // a person's call that the change does not touch this step: it is recorded with their name and reason
   const keep = () => {
     let reason = "";
     Modal.confirm({
-      title: "确认这一步不受这次同步影响？",
+      title: bi("确认这一步不受这次同步影响？", "Confirm this step is unaffected?"),
       content: (
         <div className="sync-confirm">
           <p>
-            平台没法证明改动碰不到它，所以划掉了旧结果。如果你核对过确实无关，可以让旧结果重新生效。
-            这个决定会连同你的名字和理由记在交付里，写进报告。
+            {bi(
+              "平台没法证明改动碰不到它，所以划掉了旧结果。如果你核对过确实无关，可以让旧结果重新生效。这个决定会连同你的名字和理由记在交付里，写进报告。",
+              "The platform cannot prove the change doesn't reach this step, so the prior result was crossed out. If you verified it's unaffected, restore it with your name and reason.",
+            )}
           </p>
           <Input.TextArea
             autoSize={{ minRows: 2, maxRows: 5 }}
-            placeholder="为什么不受影响，例如：只改了入口测试里的函数，这个测试不会执行"
+            placeholder={bi(
+              "为什么不受影响，例如：只改了入口测试里的函数，这个测试不会执行",
+              "Why unaffected, e.g., only helper in endpoint test changed; this step won't run it",
+            )}
             onChange={(v) => (reason = v)}
           />
         </div>
       ),
-      okText: "确认不受影响",
+      okText: bi("确认不受影响", "Confirm Unaffected"),
       onOk: async () => {
         try {
           await api(`/api/jobs/${jobId}/sync/keep`, {
             method: "POST",
             body: JSON.stringify({ key: stepKey, sync: o.sync, reason }),
           });
-          Message.success("已记录，旧结果重新生效");
+          Message.success(bi("已记录，旧结果重新生效", "Recorded; previous result restored"));
           onKept();
         } catch (e) {
           err(e);
@@ -1971,13 +2039,13 @@ function OldStep({
         onClick={() => setOpen(!open)}
         aria-expanded={open}
       >
-        <span className="rstep-old-tag">旧版本</span>
+        <span className="rstep-old-tag">{bi("旧版本", "Previous")}</span>
         <s>{o.title}</s>
         <span className="faint small">
-          第 {o.sync} 次按最新组件同步前 ·{" "}
-          {o.record.state ? STATE_LABEL[o.record.state] : "有记录"}
+          {bi(`第 ${o.sync} 次按最新组件同步前 · `, `Before sync #${o.sync} · `)}
+          {o.record.state ? STATE_LABEL[o.record.state] : bi("有记录", "Has record")}
         </span>
-        <span className="link quiet small">{open ? "收起" : "展开"}</span>
+        <span className="link quiet small">{open ? bi("收起", "Collapse") : bi("展开", "Expand")}</span>
       </button>
       {open && (
         <div className="rstep-old-body">
@@ -1989,7 +2057,7 @@ function OldStep({
         <div className="rstep-old-why">
           {o.why && (
             <div className="rstep-old-reasons">
-              <b>为什么要重新执行：</b>
+              <b>{bi("为什么要重新执行：", "Why re-verification is needed:")}</b>
               <ul>
                 {o.why
                   .split("\n")
@@ -2002,7 +2070,7 @@ function OldStep({
           )}
           {can("delivery.run") && (
             <button type="button" className="link" onClick={keep}>
-              我核对过，不受影响
+              {bi("我核对过，不受影响", "Verified unaffected")}
             </button>
           )}
         </div>
@@ -2012,13 +2080,14 @@ function OldStep({
 }
 
 function StepRecord({ r }: { r: Rec }) {
+  useLang();
   const [show, setShow] = useState(() => r.state === "failed" && Boolean(r.log));
   const [logCopied, setLogCopied] = useState(false);
   const logLines = r.log ? r.log.replace(/\s+$/, "").split("\n").length : 0;
   return (
     <div className={`rec rec-${r.state}`}>
       <div className="rec-top">
-        <b>{r.state ? STATE_LABEL[r.state] : "没有标记结果"}</b>
+        <b>{r.state ? STATE_LABEL[r.state] : bi("没有标记结果", "Unmarked")}</b>
         <span className="faint small">
           {r.by} · <time title={fullTime(r.at)}>{ago(r.at)}</time>
         </span>
@@ -2030,8 +2099,11 @@ function StepRecord({ r }: { r: Rec }) {
             aria-expanded={show}
           >
             {show
-              ? "收起输出"
-              : `查看输出（${logLines} 行 · ${size(new Blob([r.log]).size)}）`}
+              ? bi("收起输出", "Hide output")
+              : bi(
+                  `查看输出（${logLines} 行 · ${size(new Blob([r.log]).size)}）`,
+                  `View output (${logLines} lines · ${size(new Blob([r.log]).size)})`,
+                )}
           </button>
         )}
       </div>
@@ -2049,7 +2121,7 @@ function StepRecord({ r }: { r: Rec }) {
             }}
           >
             {logCopied ? <IconCheck /> : <IconCopy />}{" "}
-            {logCopied ? "已复制" : "复制"}
+            {logCopied ? bi("已复制", "Copied") : bi("复制", "Copy")}
           </button>
           <pre className="mono">{r.log}</pre>
         </div>
@@ -2067,6 +2139,7 @@ function StepForm({
   onSave: (state: Rec["state"], note: string, log: string) => Promise<void>;
   onCancel: () => void;
 }) {
+  useLang();
   const [state, setState] = useState<Rec["state"]>(initial?.state || "done");
   const [note, setNote] = useState(initial?.note || "");
   const [log, setLog] = useState(initial?.log || "");
@@ -2080,9 +2153,9 @@ function StepForm({
         value={state}
         onChange={setState}
         options={[
-          { value: "done", label: "完成" },
-          { value: "failed", label: "失败" },
-          { value: "skipped", label: "跳过" },
+          { value: "done", label: bi("完成", "Done") },
+          { value: "failed", label: bi("失败", "Failed") },
+          { value: "skipped", label: bi("跳过", "Skipped") },
         ]}
       />
       <Input
@@ -2090,26 +2163,29 @@ function StepForm({
         onChange={setNote}
         maxLength={500}
         placeholder={
-          state === "failed" ? "出了什么问题（可选）" : "备注（可选）"
+          state === "failed" ? bi("出了什么问题（可选）", "What went wrong (optional)") : bi("备注（可选）", "Note (optional)")
         }
-        aria-label="备注"
+        aria-label={bi("备注", "Note")}
       />
       <textarea
         className="rec-area mono"
         spellCheck={false}
         value={log}
         onChange={(e) => setLog(e.target.value)}
-        placeholder="把这一步的终端输出粘贴在这里（可选，最多 64 KiB），日后排查失败时能直接看到当时的现场"
-        aria-label="输出"
+        placeholder={bi(
+          "把这一步的终端输出粘贴在这里（可选，最多 64 KiB），日后排查失败时能直接看到当时的现场",
+          "Paste terminal output here (optional, max 64 KiB) for future troubleshooting",
+        )}
+        aria-label={bi("输出", "Output")}
       />
       {tooBig && (
         <span className="bad small">
-          输出超过 64 KiB，请只保留关键部分（通常是最后几十行）
+          {bi("输出超过 64 KiB，请只保留关键部分（通常是最后几十行）", "Output exceeds 64 KiB; keep only the essential lines")}
         </span>
       )}
       <div className="rec-actions">
         <Button size="small" onClick={onCancel}>
-          取消
+          {bi("取消", "Cancel")}
         </Button>
         <Button
           size="small"
@@ -2125,7 +2201,7 @@ function StepForm({
             }
           }}
         >
-          保存记录
+          {bi("保存记录", "Save")}
         </Button>
       </div>
     </div>
@@ -2148,22 +2224,26 @@ function RecordView({
   finished: number;
   failed: number;
 }) {
+  useLang();
   const list = [...events].reverse();
   if (!list.length)
     return (
       <div className="rb-phase">
         <p className="muted">
-          还没有执行记录。在每一步下面点“记录结果或粘贴输出”，或直接勾选，之后这里会按时间列出谁在什么时候做了什么。
+          {bi(
+            "还没有执行记录。在每一步下面点“记录结果或粘贴输出”，或直接勾选，之后这里会按时间列出谁在什么时候做了什么。",
+            "No execution records yet. Mark steps or attach outputs below to build an audit timeline.",
+          )}
         </p>
       </div>
     );
   return (
     <div className="rb-phase">
       <div className="rb-phase-head">
-        <h3>执行记录</h3>
+        <h3>{bi("执行记录", "Execution History")}</h3>
         <span className="faint small num">
-          完成 {finished} / {total}
-          {failed ? ` · 失败 ${failed}` : ""}
+          {bi(`完成 ${finished} / ${total}`, `Done ${finished} / ${total}`)}
+          {failed ? bi(` · 失败 ${failed}`, ` · Failed ${failed}`) : ""}
         </span>
       </div>
       <ol className="rec-tl">

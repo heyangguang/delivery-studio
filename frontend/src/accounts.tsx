@@ -46,11 +46,13 @@ import {
   RolePicker,
   RolesPane,
   TeamsPane,
+  roleTitle,
   useIAM,
 } from "./iam";
+import { bi, getLang, useLang } from "./i18n";
 
 export const roleName = (r: string) =>
-  r === "admin" ? "管理员" : "交付使用者";
+  r === "admin" ? bi("管理员", "Admin") : bi("交付使用者", "Delivery User");
 
 const AccIcons = {
   roles: (
@@ -178,6 +180,7 @@ export function AccountsPage({
   me: Session;
   selected?: string;
 }) {
+  useLang();
   const narrow = useMedia("(max-width: 900px)");
   const initUsers = cached<Account[]>("/api/users");
   const [users, setUsers] = useState<Account[]>(() => initUsers ?? []);
@@ -217,8 +220,11 @@ export function AccountsPage({
     iam?.grants[u.username]?.roles || u.roles || [];
   const roleNames = (u: Account) =>
     rolesOf(u)
-      .map((id) => iam?.roles.find((r) => r.id === id)?.name || id)
-      .join("、");
+      .map((id) => {
+        const found = iam?.roles.find((r) => r.id === id);
+        return found ? roleTitle(found) : id;
+      })
+      .join(bi("、", ", "));
   const list = useMemo(
     () =>
       users.filter(
@@ -289,7 +295,9 @@ export function AccountsPage({
   if (me.role !== "admin")
     return (
       <div className="page-empty enter">
-        <h1>只有管理员可以管理账户</h1>
+        <h1>
+          {bi("只有管理员可以管理账户", "Administrator access required")}
+        </h1>
       </div>
     );
 
@@ -303,7 +311,10 @@ export function AccountsPage({
   return (
     <div className="md-split">
       {(!narrow || !selected) && (
-        <aside className="md-list" aria-label="账户列表">
+        <aside
+          className="md-list"
+          aria-label={bi("账户列表", "Account list")}
+        >
           <div className="list-head">
             <div className="list-title">
               <h1>IAM</h1>
@@ -314,7 +325,7 @@ export function AccountsPage({
                   icon={<IconPlus />}
                   onClick={() => go({ name: "accounts", id: "+new" })}
                 >
-                  添加用户
+                  {bi("添加用户", "Add User")}
                 </Button>
               )}
             </div>
@@ -326,7 +337,7 @@ export function AccountsPage({
               prefix={<IconSearch />}
               suffix={!query ? <Kbd>/</Kbd> : undefined}
               allowClear
-              placeholder="搜索用户名"
+              placeholder={bi("搜索用户名", "Search username")}
               value={query}
               onChange={setQuery}
               onKeyDown={(e) => {
@@ -335,35 +346,44 @@ export function AccountsPage({
                   (e.target as HTMLElement).blur();
                 }
               }}
-              aria-label="搜索用户名"
+              aria-label={bi("搜索用户名", "Search username")}
             />
             <nav className="sx-nav" aria-label="IAM">
               {[
                 {
                   id: "~roles",
                   icon: AccIcons.roles,
-                  title: "角色",
+                  title: bi("角色", "Roles"),
                   sub: iam
-                    ? `${iam.roles.length} 个角色 · 每个能做什么`
-                    : "每个角色能做什么",
+                    ? bi(
+                        `${iam.roles.length} 个角色 · 每个能做什么`,
+                        `${iam.roles.length} roles · permissions & scope`,
+                      )
+                    : bi("每个角色能做什么", "Permissions & scope"),
                 },
                 {
                   id: "~teams",
                   icon: AccIcons.teams,
-                  title: "团队",
+                  title: bi("团队", "Teams"),
                   sub: iam
                     ? iam.teams.length
-                      ? `${iam.teams.length} 个团队`
-                      : "还没有团队"
-                    : "一起看、一起做交付",
+                      ? bi(
+                          `${iam.teams.length} 个团队`,
+                          `${iam.teams.length} ${iam.teams.length === 1 ? "team" : "teams"}`,
+                        )
+                      : bi("还没有团队", "No teams yet")
+                    : bi("一起看、一起做交付", "Collaborate on deliveries"),
                 },
                 ...(can("audit.view")
                   ? [
                       {
                         id: "~audit",
                         icon: AccIcons.audit,
-                        title: "操作审计",
-                        sub: "谁、何时、对什么、做了什么",
+                        title: bi("操作审计", "Audit Log"),
+                        sub: bi(
+                          "谁、何时、对什么、做了什么",
+                          "Who did what, when, and where",
+                        ),
                       },
                     ]
                   : []),
@@ -372,8 +392,11 @@ export function AccountsPage({
                       {
                         id: "~deleted",
                         icon: AccIcons.deleted,
-                        title: "已删除的账户",
-                        sub: `${iam.deleted.length} 个 · 交付可以再转交`,
+                        title: bi("已删除的账户", "Deleted Accounts"),
+                        sub: bi(
+                          `${iam.deleted.length} 个 · 交付可以再转交`,
+                          `${iam.deleted.length} · reassign deliveries`,
+                        ),
                       },
                     ]
                   : []),
@@ -403,26 +426,35 @@ export function AccountsPage({
                 ))}
             </nav>
             <div className="iam-users-h">
-              用户 <em className="num">{users.length}</em>
+              {bi("用户", "Users")} <em className="num">{users.length}</em>
             </div>
             {iam && (
               <Select
                 size="small"
                 value={filter}
                 onChange={setFilter}
-                aria-label="按角色筛选"
+                aria-label={bi("按角色筛选", "Filter by role")}
                 triggerProps={{
                   autoFitPosition: true,
                   autoAlignPopupWidth: false,
                   autoAlignPopupMinWidth: true,
                 }}
                 options={[
-                  { value: "all", label: `所有角色（${users.length}）` },
+                  {
+                    value: "all",
+                    label: bi(
+                      `所有角色（${users.length}）`,
+                      `All Roles (${users.length})`,
+                    ),
+                  },
                   ...iam.roles
                     .filter((r) => r.holders)
                     .map((r) => ({
                       value: r.id,
-                      label: `${r.name}（${r.holders}）`,
+                      label: bi(
+                        `${roleTitle(r)}（${r.holders}）`,
+                        `${roleTitle(r)} (${r.holders})`,
+                      ),
                     })),
                 ]}
               />
@@ -442,23 +474,27 @@ export function AccountsPage({
           ) : load === "error" && !users.length ? (
             <div className="list-state">
               <IconExclamationCircle className="bad" />
-              <p>{message || "账户加载失败"}</p>
+              <p>{message || bi("账户加载失败", "Failed to load accounts")}</p>
               <Button size="small" icon={<IconRefresh />} onClick={reload}>
-                重试
+                {bi("重试", "Retry")}
               </Button>
             </div>
           ) : !list.length ? (
             <div className="list-state">
-              <p>没有匹配的账户</p>
+              <p>{bi("没有匹配的账户", "No matching accounts")}</p>
               <Button
                 size="small"
                 onClick={() => (setQuery(""), setFilter("all"))}
               >
-                清除筛选
+                {bi("清除筛选", "Clear Filters")}
               </Button>
             </div>
           ) : (
-            <div className="list-body" role="listbox" aria-label="账户">
+            <div
+              className="list-body"
+              role="listbox"
+              aria-label={bi("账户", "Accounts")}
+            >
               {list.map((u) => (
                 <a
                   key={u.username}
@@ -480,21 +516,28 @@ export function AccountsPage({
                       <span className="row-name sans">
                         {u.username}
                         {u.username === me.username && (
-                          <span className="you">你</span>
+                          <span className="you">{bi("你", "You")}</span>
                         )}
                       </span>
                       {!!u.active && (
                         <span className="sbadge s-running small-badge">
-                          {u.active} 生成中
+                          {bi(`${u.active} 生成中`, `${u.active} building`)}
                         </span>
                       )}
-                      {u.disabled && <span className="acc-off sm">已停用</span>}
+                      {u.disabled && (
+                        <span className="acc-off sm">
+                          {bi("已停用", "Disabled")}
+                        </span>
+                      )}
                     </div>
                     <div className="row-sub">
                       {roleNames(u) || roleName(u.role)} ·{" "}
                       {u.deliveries
-                        ? `${u.deliveries} 份交付 · ${ago(u.last_delivery!)}`
-                        : "还没有交付"}
+                        ? bi(
+                            `${u.deliveries} 份交付 · ${ago(u.last_delivery!)}`,
+                            `${u.deliveries} ${u.deliveries === 1 ? "delivery" : "deliveries"} · ${ago(u.last_delivery!)}`,
+                          )
+                        : bi("还没有交付", "No deliveries")}
                     </div>
                   </div>
                 </a>
@@ -552,11 +595,11 @@ export function AccountsPage({
             />
           ) : selected && load === "ready" ? (
             <div className="detail-none enter">
-              <h2>找不到这个账户</h2>
+              <h2>{bi("找不到这个账户", "Account not found")}</h2>
               <Button
                 onClick={() => go({ name: "accounts" }, { replace: true })}
               >
-                返回账户列表
+                {bi("返回账户列表", "Back to Accounts")}
               </Button>
             </div>
           ) : null}
@@ -603,6 +646,7 @@ function AccountDetail({
   changed: () => void;
   users: Account[];
 }) {
+  useLang();
   const aiStatus = useAIStatus();
   const { iam } = useIAM();
   const [act, setAct] = useState<Activity | null>(null);
@@ -633,7 +677,7 @@ function AccountDetail({
         body: JSON.stringify(body),
       });
       if (r.password) setPassword(r.password);
-      else Message.success("已保存");
+      else Message.success(bi("已保存", "Saved"));
       changed();
       load();
     } catch (e) {
@@ -651,8 +695,14 @@ function AccountDetail({
       });
       Message.success(
         r.moved
-          ? `已删除，${r.moved} 份交付交给了 ${moveTo}`
-          : "已删除，交付和操作记录都保留着",
+          ? bi(
+              `已删除，${r.moved} 份交付交给了 ${moveTo}`,
+              `Deleted; transferred ${r.moved} ${r.moved === 1 ? "delivery" : "deliveries"} to ${moveTo}`,
+            )
+          : bi(
+              "已删除，交付和操作记录都保留着",
+              "Deleted; delivery and audit records preserved",
+            ),
       );
       setRemoving(false);
       changed();
@@ -676,6 +726,7 @@ function AccountDetail({
       title,
       content,
       okText: ok,
+      cancelText: bi("取消", "Cancel"),
       okButtonProps: danger ? { status: "danger" } : undefined,
       onOk: f,
     });
@@ -700,15 +751,20 @@ function AccountDetail({
         <div className="iam-user-t">
           <h1>
             {u.username}
-            {self && <span className="you">你</span>}
-            {u.disabled && <span className="acc-off">已停用</span>}
+            {self && <span className="you">{bi("你", "You")}</span>}
+            {u.disabled && (
+              <span className="acc-off">{bi("已停用", "Disabled")}</span>
+            )}
           </h1>
           <span className="me-chips">
-            {(g?.roles || []).map((id) => (
-              <span key={id} className="me-chip role">
-                {iam?.roles.find((r) => r.id === id)?.name || id}
-              </span>
-            ))}
+            {(g?.roles || []).map((id) => {
+              const found = iam?.roles.find((r) => r.id === id);
+              return (
+                <span key={id} className="me-chip role">
+                  {found ? roleTitle(found) : id}
+                </span>
+              );
+            })}
             {(g?.teams || []).map((id) => (
               <span key={id} className="me-chip team">
                 {iam?.teams.find((t) => t.id === id)?.name || id}
@@ -717,21 +773,31 @@ function AccountDetail({
           </span>
           <p className="iam-user-facts">
             <span>
-              <b className="num">{u.deliveries ?? 0}</b> 份交付
-              {u.active ? `（${u.active} 份生成中）` : ""}
+              <b className="num">{u.deliveries ?? 0}</b>{" "}
+              {bi(
+                "份交付",
+                (u.deliveries ?? 0) === 1 ? "delivery" : "deliveries",
+              )}
+              {u.active
+                ? bi(`（${u.active} 份生成中）`, ` (${u.active} building)`)
+                : ""}
             </span>
             {aiStatus.enabled && (
               <span>
-                本月 AI <b className="num">{act ? act.ai.calls : "—"}</b> 次 ·{" "}
+                {bi("本月 AI", "AI this month")}{" "}
+                <b className="num">{act ? act.ai.calls : "—"}</b>{" "}
+                {bi("次", act?.ai.calls === 1 ? "call" : "calls")} ·{" "}
                 <b className="num">
-                  {act ? (act.ai.in + act.ai.out).toLocaleString("en-US") : "—"}
+                  {act ? (act.ai.in + act.ai.out).toLocaleString(getLang()) : "—"}
                 </b>{" "}
-                Token · 约 <b className="num">{cost}</b>
+                {bi("Token", "tokens")} · {bi("约", "Est.")}{" "}
+                <b className="num">{cost}</b>
               </span>
             )}
             {act?.storage && (
               <span>
-                存储 <b className="num">{bytesText(act.storage.used)}</b> /{" "}
+                {bi("存储", "Storage")}{" "}
+                <b className="num">{bytesText(act.storage.used)}</b> /{" "}
                 {bytesText(act.storage.quota)}
                 {can("settings.storage") && (
                   <button
@@ -739,13 +805,18 @@ function AccountDetail({
                     className="iam-link"
                     onClick={() => editQuota(u.username, act.storage!, load)}
                   >
-                    调整额度
+                    {bi("调整额度", "Adjust Quota")}
                   </button>
                 )}
               </span>
             )}
             {u.last_delivery && (
-              <span>最近一次交付 {ago(u.last_delivery)}</span>
+              <span>
+                {bi(
+                  `最近一次交付 ${ago(u.last_delivery)}`,
+                  `Last delivery ${ago(u.last_delivery)}`,
+                )}
+              </span>
             )}
           </p>
         </div>
@@ -756,14 +827,20 @@ function AccountDetail({
               icon={<IconLock />}
               onClick={() =>
                 confirm(
-                  `重置 ${u.username} 的密码？`,
-                  "会生成一个新密码，只显示一次；对方当前的登录会失效。",
-                  "重置",
+                  bi(
+                    `重置 ${u.username} 的密码？`,
+                    `Reset password for ${u.username}?`,
+                  ),
+                  bi(
+                    "会生成一个新密码，只显示一次；对方当前的登录会失效。",
+                    "Generates a new password shown only once; all existing sessions for this user will be signed out.",
+                  ),
+                  bi("重置", "Reset"),
                   () => patch("pw", { reset_password: true }),
                 )
               }
             >
-              重置密码
+              {bi("重置密码", "Reset Password")}
             </Button>
             {!self &&
               (u.disabled ? (
@@ -771,22 +848,25 @@ function AccountDetail({
                   loading={busy === "dis"}
                   onClick={() => patch("dis", { disabled: false })}
                 >
-                  启用
+                  {bi("启用", "Enable")}
                 </Button>
               ) : (
                 <Button
                   loading={busy === "dis"}
                   onClick={() =>
                     confirm(
-                      `停用 ${u.username}？`,
-                      "停用后不能登录，当前登录立即失效；交付和记录都保留，随时可以再启用。",
-                      "停用",
+                      bi(`停用 ${u.username}？`, `Disable ${u.username}?`),
+                      bi(
+                        "停用后不能登录，当前登录立即失效；交付和记录都保留，随时可以再启用。",
+                        "User cannot sign in and active sessions end immediately; deliveries and logs are preserved and the account can be re-enabled anytime.",
+                      ),
+                      bi("停用", "Disable"),
                       () => patch("dis", { disabled: true }),
                       true,
                     )
                   }
                 >
-                  停用
+                  {bi("停用", "Disable")}
                 </Button>
               ))}
             {!self && (
@@ -795,32 +875,32 @@ function AccountDetail({
                 icon={<IconDelete />}
                 onClick={() => (setMoveTo(""), setRemoving(true))}
               >
-                删除
+                {bi("删除", "Delete")}
               </Button>
             )}
           </span>
         )}
         {!manage && (
           <span className="iam-ro-pill" role="status">
-            只读浏览
+            {bi("只读浏览", "Read-only")}
           </span>
         )}
       </header>
       <UnderlineTabs
         className="iam-utabs"
-        label="账户详情分区"
+        label={bi("账户详情分区", "Account detail tabs")}
         value={tab}
         onChange={(v) => setTab(v as "access" | "activity")}
         items={[
           {
             value: "access",
-            label: "角色与权限",
+            label: bi("角色与权限", "Roles & Permissions"),
             count: (g?.roles?.length || 0) || undefined,
             icon: AccIcons.roles,
           },
           {
             value: "activity",
-            label: "活动记录",
+            label: bi("活动记录", "Activity"),
             count: act ? act.jobs.length + act.events.length : undefined,
             icon: AccIcons.activity,
           },
@@ -837,11 +917,13 @@ function AccountDetail({
       ) : (
         <div className="iam-user-act">
           <section>
-            <h2>最近的交付</h2>
+            <h2>{bi("最近的交付", "Recent Deliveries")}</h2>
             {!act ? (
               <Skeleton animation text={{ rows: 3 }} />
             ) : act.jobs.length === 0 ? (
-              <p className="me-empty">还没有交付。</p>
+              <p className="me-empty">
+                {bi("还没有交付。", "No deliveries yet.")}
+              </p>
             ) : (
               <ul className="me-rows">
                 {act.jobs.map((j) => (
@@ -866,7 +948,10 @@ function AccountDetail({
                         <b className="mono">{j.cluster_id}</b>
                         <small>
                           {j.app_name} {j.version.split("·")[0].trim()}
-                          {` · ${planTitle(j).replace(/首次部署/g, "集群部署")}`}
+                          {` · ${bi(
+                            planTitle(j).replace(/首次部署/g, "集群部署"),
+                            planTitle(j).replace(/Initial Deploy/g, "Cluster Deploy"),
+                          )}`}
                         </small>
                       </span>
                       <time className="faint small" title={fullTime(j.created)}>
@@ -879,11 +964,16 @@ function AccountDetail({
             )}
           </section>
           <section>
-            <h2>最近 30 天的操作</h2>
+            <h2>{bi("最近 30 天的操作", "Activity (Last 30 Days)")}</h2>
             {!act ? (
               <Skeleton animation text={{ rows: 5 }} />
             ) : act.events.length === 0 ? (
-              <p className="me-empty">这段时间没有操作记录。</p>
+              <p className="me-empty">
+                {bi(
+                  "这段时间没有操作记录。",
+                  "No activity during this period.",
+                )}
+              </p>
             ) : (
               <ol className="me-tl">
                 {act.events.map((e, i) => (
@@ -910,7 +1000,8 @@ function AccountDetail({
                 size="small"
                 onClick={() => go({ name: "accounts", id: "~audit" })}
               >
-                在操作审计里查看全部 <IconRight />
+                {bi("在操作审计里查看全部", "View all in Audit Log")}{" "}
+                <IconRight />
               </Button>
             )}
           </section>
@@ -918,31 +1009,40 @@ function AccountDetail({
       )}
       <Modal
         visible={!!password}
-        title={`${u.username} 的新密码`}
+        title={bi(`${u.username} 的新密码`, `New Password for ${u.username}`)}
         onCancel={() => setPassword("")}
         footer={null}
       >
-        <p className="muted small">只显示这一次，请发给对方。</p>
+        <p className="muted small">
+          {bi(
+            "只显示这一次，请发给对方。",
+            "Shown only once—please share securely with the user.",
+          )}
+        </p>
         <div className="acc-pw">
           <code>{password}</code>
           <Button
             icon={<IconCopy />}
             onClick={() => {
               copy(
-                `平台地址：${location.origin}\n用户名：${u.username}\n新密码：${password}`,
+                bi(
+                  `平台地址：${location.origin}\n用户名：${u.username}\n新密码：${password}`,
+                  `Platform URL: ${location.origin}\nUsername: ${u.username}\nNew Password: ${password}`,
+                ),
               );
-              Message.success("已复制登录信息");
+              Message.success(bi("已复制登录信息", "Credentials copied"));
             }}
           >
-            复制登录信息
+            {bi("复制登录信息", "Copy Credentials")}
           </Button>
         </div>
       </Modal>
       <Modal
         visible={removing}
-        title={`删除账户 ${u.username}？`}
+        title={bi(`删除账户 ${u.username}？`, `Delete account ${u.username}?`)}
         onCancel={() => setRemoving(false)}
-        okText="删除账户"
+        okText={bi("删除账户", "Delete Account")}
+        cancelText={bi("取消", "Cancel")}
         okButtonProps={{ status: "danger" }}
         confirmLoading={busy === "del"}
         onOk={remove}
@@ -950,14 +1050,23 @@ function AccountDetail({
         <div className="st-form">
           <p className="iam-del-lead">
             {aiStatus.enabled
-              ? "删除后不能登录，这个用户名以后也不能再用。会一起删掉的：密码和登录、AI 对话、个人的技能、MCP 服务和资料。会保留的：交付记录、操作审计。"
-              : "删除后不能登录，这个用户名以后也不能再用。会一起删掉的：密码和登录、个人存储资料。会保留的：交付记录、操作审计。"}
+              ? bi(
+                  "删除后不能登录，这个用户名以后也不能再用。会一起删掉的：密码和登录、AI 对话、个人的技能、MCP 服务和资料。会保留的：交付记录、操作审计。",
+                  "Once deleted, this user cannot sign in and the username cannot be reused. Removed: password, sessions, AI chats, personal skills, MCP servers, and files. Preserved: deliveries and audit logs.",
+                )
+              : bi(
+                  "删除后不能登录，这个用户名以后也不能再用。会一起删掉的：密码和登录、个人存储资料。会保留的：交付记录、操作审计。",
+                  "Once deleted, this user cannot sign in and the username cannot be reused. Removed: password, sessions, and personal storage files. Preserved: deliveries and audit logs.",
+                )}
           </p>
           <div className="st-field">
             <span>
               {u.deliveries
-                ? `他名下的 ${u.deliveries} 份交付交给谁`
-                : "名下没有交付"}
+                ? bi(
+                    `他名下的 ${u.deliveries} 份交付交给谁`,
+                    `Transfer ${u.deliveries} ${u.deliveries === 1 ? "delivery" : "deliveries"} to`,
+                  )
+                : bi("名下没有交付", "No deliveries under this account")}
             </span>
             {!!u.deliveries && (
               <Select
@@ -971,17 +1080,19 @@ function AccountDetail({
                 options={[
                   {
                     value: "",
-                    label:
+                    label: bi(
                       "先不转交（能看全部交付的人仍能看到，以后可以再转交）",
+                      "Do not transfer now (global-scope users can still view and transfer later)",
+                    ),
                   },
                   ...users
                     .filter((x) => x.username !== u.username && !x.disabled)
                     .map((x) => ({
                       value: x.username,
-                      label: `交给 ${x.username}`,
+                      label: bi(`交给 ${x.username}`, `Transfer to ${x.username}`),
                     })),
                 ]}
-                aria-label="交给谁"
+                aria-label={bi("交给谁", "Transfer to")}
               />
             )}
           </div>
@@ -1002,6 +1113,7 @@ function AddAccount({
   refresh: () => Promise<void>;
   done: (name: string) => Promise<void>;
 }) {
+  useLang();
   const [name, setName] = useState("");
   const { iam } = useIAM();
   const [roles, setRoles] = useState<string[]>(["engineer"]);
@@ -1017,9 +1129,12 @@ function AddAccount({
   const nameError = !name
     ? ""
     : !NAME.test(name)
-      ? "小写字母开头，只含小写字母、数字和 -"
+      ? bi(
+          "小写字母开头，只含小写字母、数字和 -",
+          "Must start with a lowercase letter and contain only a–z, 0–9, and -",
+        )
       : taken(name)
-        ? "这个用户名已存在"
+        ? bi("这个用户名已存在", "This username already exists")
         : "";
   const pwShort = password.length < 12;
 
@@ -1036,8 +1151,11 @@ function AddAccount({
         name,
         password,
         role: roles
-          .map((id) => iam?.roles.find((r) => r.id === id)?.name || id)
-          .join("、"),
+          .map((id) => {
+            const found = iam?.roles.find((r) => r.id === id);
+            return found ? roleTitle(found) : id;
+          })
+          .join(bi("、", ", ")),
       });
       refresh();
     } catch (e) {
@@ -1048,7 +1166,10 @@ function AddAccount({
   };
 
   if (created) {
-    const text = `平台地址：${location.origin}\n用户名：${created.name}\n初始密码：${created.password}`;
+    const text = bi(
+      `平台地址：${location.origin}\n用户名：${created.name}\n初始密码：${created.password}`,
+      `Platform URL: ${location.origin}\nUsername: ${created.name}\nInitial Password: ${created.password}`,
+    );
     return (
       <article className="detail acc-detail enter">
         <header className="acc-hero">
@@ -1056,24 +1177,26 @@ function AddAccount({
             <IconCheck />
           </span>
           <div>
-            <h1>已创建 {created.name}</h1>
+            <h1>{bi(`已创建 ${created.name}`, `Created ${created.name}`)}</h1>
             <span className="role-tag">{created.role}</span>
           </div>
         </header>
         <section className="dsec">
-          <h2 className="dsec-title">发给对方的登录信息</h2>
+          <h2 className="dsec-title">
+            {bi("发给对方的登录信息", "Credentials to Share")}
+          </h2>
           <div className="cred">
             <dl>
               <div>
-                <dt>平台地址</dt>
+                <dt>{bi("平台地址", "Platform URL")}</dt>
                 <dd className="mono">{location.origin}</dd>
               </div>
               <div>
-                <dt>用户名</dt>
+                <dt>{bi("用户名", "Username")}</dt>
                 <dd className="mono">{created.name}</dd>
               </div>
               <div>
-                <dt>初始密码</dt>
+                <dt>{bi("初始密码", "Initial Password")}</dt>
                 <dd className="mono">{created.password}</dd>
               </div>
             </dl>
@@ -1082,15 +1205,20 @@ function AddAccount({
               icon={<IconCopy />}
               onClick={() => copy(text)}
             >
-              复制登录信息
+              {bi("复制登录信息", "Copy Credentials")}
             </Button>
           </div>
           <p className="warn small">
-            离开此页后不能再次查看密码，请通过安全渠道发送。
+            {bi(
+              "离开此页后不能再次查看密码，请通过安全渠道发送。",
+              "This password cannot be viewed again after leaving this page—send via a secure channel.",
+            )}
           </p>
         </section>
         <div className="row-gap">
-          <Button onClick={() => done(created.name)}>查看账户</Button>
+          <Button onClick={() => done(created.name)}>
+            {bi("查看账户", "View Account")}
+          </Button>
           <Button
             type="text"
             onClick={() => {
@@ -1100,7 +1228,7 @@ function AddAccount({
               done("+new");
             }}
           >
-            继续添加
+            {bi("继续添加", "Add Another")}
           </Button>
         </div>
       </article>
@@ -1116,7 +1244,7 @@ function AddAccount({
           icon={<IconArrowLeft />}
           onClick={() => go({ name: "accounts" })}
         >
-          账户
+          {bi("账户", "Accounts")}
         </Button>
       )}
       <header className="acc-hero">
@@ -1124,8 +1252,13 @@ function AddAccount({
           <IconPlus />
         </span>
         <div>
-          <h1>添加账户</h1>
-          <span className="muted small">创建后把登录信息发给对方</span>
+          <h1>{bi("添加账户", "Create Account")}</h1>
+          <span className="muted small">
+            {bi(
+              "创建后把登录信息发给对方",
+              "Share the sign-in credentials with the user after creation",
+            )}
+          </span>
         </div>
       </header>
       <form
@@ -1137,25 +1270,29 @@ function AddAccount({
       >
         <div className="frow">
           <label className="frow-label" htmlFor="acc-name">
-            用户名
+            {bi("用户名", "Username")}
           </label>
           <Input
             id="acc-name"
             value={name}
             onChange={(v) => setName(v.trim())}
-            placeholder="zhang-san"
+            placeholder={bi("zhang-san", "jane-doe")}
             autoComplete="off"
             autoFocus
             status={nameError ? "error" : undefined}
-            aria-label="用户名"
+            aria-label={bi("用户名", "Username")}
             className="mono-in"
           />
           <span className={`frow-hint ${nameError ? "bad" : ""}`}>
-            {nameError || "小写字母开头，只含小写字母、数字和 -"}
+            {nameError ||
+              bi(
+                "小写字母开头，只含小写字母、数字和 -",
+                "Start with a lowercase letter; lowercase letters, digits, and - only",
+              )}
           </span>
         </div>
         <div className="frow">
-          <span className="frow-label">角色</span>
+          <span className="frow-label">{bi("角色", "Roles")}</span>
           {iam ? (
             <RolePicker iam={iam} value={roles} onChange={setRoles} />
           ) : (
@@ -1164,23 +1301,23 @@ function AddAccount({
         </div>
         {iam && iam.teams.length > 0 && (
           <div className="frow">
-            <span className="frow-label">团队</span>
+            <span className="frow-label">{bi("团队", "Teams")}</span>
             <Select
               mode="multiple"
               value={teams}
               onChange={setTeams}
               triggerProps={{ autoFitPosition: true }}
-              placeholder="可以不选"
+              placeholder={bi("可以不选", "Optional")}
               options={iam.teams.map((t) => ({ value: t.id, label: t.name }))}
               allowClear
-              aria-label="团队"
+              aria-label={bi("团队", "Teams")}
               style={{ maxWidth: 520 }}
             />
           </div>
         )}
         <div className="frow">
           <label className="frow-label" htmlFor="acc-pw">
-            初始密码
+            {bi("初始密码", "Initial Password")}
           </label>
           <div className="pw-row">
             <Input.Password
@@ -1190,22 +1327,28 @@ function AddAccount({
               visibilityToggle
               defaultVisibility
               autoComplete="new-password"
-              aria-label="初始密码"
+              aria-label={bi("初始密码", "Initial password")}
               className="mono-in"
               status={pwShort ? "error" : undefined}
             />
             <Button
               icon={<IconSync />}
               onClick={() => setPassword(generate())}
-              aria-label="重新生成密码"
+              aria-label={bi("重新生成密码", "Regenerate password")}
             >
-              重新生成
+              {bi("重新生成", "Regenerate")}
             </Button>
           </div>
           <span className={`frow-hint ${pwShort ? "bad" : ""}`}>
             {pwShort
-              ? `至少 12 位，当前 ${password.length} 位`
-              : `${password.length} 位，创建后显示一次以便发送`}
+              ? bi(
+                  `至少 12 位，当前 ${password.length} 位`,
+                  `Minimum 12 characters (currently ${password.length})`,
+                )
+              : bi(
+                  `${password.length} 位，创建后显示一次以便发送`,
+                  `${password.length} characters; shown once after creation`,
+                )}
           </span>
         </div>
         <div className="login-error" role="alert">
@@ -1218,14 +1361,14 @@ function AddAccount({
             loading={busy}
             disabled={!name || !!nameError || pwShort || roles.length === 0}
           >
-            创建账户
+            {bi("创建账户", "Create Account")}
           </Button>
           <Button
             onClick={() =>
               history.length > 1 ? history.back() : go({ name: "accounts" })
             }
           >
-            取消
+            {bi("取消", "Cancel")}
           </Button>
         </div>
       </form>

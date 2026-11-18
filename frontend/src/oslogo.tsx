@@ -1,4 +1,5 @@
 import React from "react";
+import { bi, getLang, useLang } from "./i18n";
 
 /* Marks for the operating systems a delivery targets, so systems are told apart at a glance instead of by reading.
    Drawn simply in each distribution's colours; ids follow mwpack/platforms.go. */
@@ -12,11 +13,22 @@ export const osKind = (id: string) =>
         ? "redhat"
         : "linux";
 
-/** "RedHat 系 9（RHEL / Rocky / Alma）(amd64)" → "RHEL 9 系"; "Ubuntu 24.04 (amd64)" → "Ubuntu 24.04". */
+/** Formats a platform title in the active UI language. */
+export const osTitle = (title: string) => {
+  if (getLang() !== "en-US") return title;
+  return title
+    .replace(/^RedHat\s*系\s*(\d+)/, "RHEL $1 family")
+    .replace(/（/g, " (")
+    .replace(/）/g, ")")
+    .replace(/\s+/g, " ")
+    .trim();
+};
+
+/** "RedHat 系 9（RHEL / Rocky / Alma）(amd64)" → "RHEL 9 系" / "RHEL 9 family"; "Ubuntu 24.04 (amd64)" → "Ubuntu 24.04". */
 export const osShort = (title: string) => {
   const t = title.replace(/\s*\((amd64|arm64)\)\s*$/, "");
-  const el = /^RedHat 系\s*(\d+)/.exec(t);
-  if (el) return `RHEL ${el[1]} 系`;
+  const el = /^RedHat(?:\s*系|\s*family)?\s*(\d+)/i.exec(t);
+  if (el) return bi(`RHEL ${el[1]} 系`, `RHEL ${el[1]} family`);
   return t.replace(/（.*?）/, "").trim();
 };
 /** The distributions a family covers, when the title names them. */
@@ -99,8 +111,9 @@ export function OsName({
   title: string;
   size?: number;
 }) {
+  useLang();
   return (
-    <span className="os-name" title={title}>
+    <span className="os-name" title={osTitle(title)}>
       <OsLogo id={id} size={size} />
       <span>{osShort(title)}</span>
     </span>

@@ -1,18 +1,19 @@
 import { isMap, isSeq, Scalar } from "yaml";
 import {parseManifest, type Doc, type Path} from "./wbdoc";
+import { bi } from "./i18n";
 
 type Reference = {path: Path; file: string; node: any; identity?: string; expanded?: any; parent?: any};
 export function expandFiles(files: Record<string,string>) {
  const refs: Reference[]=[];const seen=new Set<string>();let total=0;
  const load=(file:string,path:Path,depth:number):any=>{
-  if(depth>12||seen.has(file))throw new Error(file+"：循环引用或重复归属");seen.add(file);
-  if(files[file]===undefined)throw new Error(file+"：引用文件不存在");
-  total+=files[file].length;if(total>8*1024*1024)throw new Error("清单过大");
+  if(depth>12||seen.has(file))throw new Error(file+bi("：循环引用或重复归属", ": circular reference or duplicate ownership"));seen.add(file);
+  if(files[file]===undefined)throw new Error(file+bi("：引用文件不存在", ": referenced file does not exist"));
+  total+=files[file].length;if(total>8*1024*1024)throw new Error(bi("清单过大", "Manifest is too large"));
   const doc=parseManifest(files[file]);if(doc.errors.length)throw new Error(file+"："+doc.errors[0].message);
   const walk=(node:any,p:Path,parent?:any):any=>{
    if(isMap(node)&&node.has("$file")){
     const ref=String(node.get("$file"));
-    if(node.items.length!==1||!/^manifest\/[A-Za-z0-9_.@+/-]+\.yaml$/.test(ref)||ref.includes(".."))throw new Error(file+"：无效 $file 引用");
+    if(node.items.length!==1||!/^manifest\/[A-Za-z0-9_.@+/-]+\.yaml$/.test(ref)||ref.includes(".."))throw new Error(file+bi("：无效 $file 引用", ": invalid $file reference"));
     const entry:Reference={path:p,file:ref,node:node.clone(),parent};refs.push(entry);
     const loaded=load(ref,p,depth+1);entry.expanded=loaded;if(isMap(loaded)&&loaded.has("id"))entry.identity=String(loaded.get("id"));return loaded;
    }

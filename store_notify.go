@@ -219,7 +219,7 @@ func (s *storeServer) handleSettings(w http.ResponseWriter, r *http.Request, ses
 	case rest == "templates" || strings.HasPrefix(rest, "templates/"):
 		s.handleNotifyTemplates(w, r, session, parts[1:])
 	case rest == "channels" && r.Method == "GET":
-		s.writeJSON(w, 200, map[string]any{"channels": s.channels(), "kinds": notifyKinds, "log": s.notifyLog()})
+		s.writeJSON(w, 200, map[string]any{"channels": s.channels(), "kinds": localizedNotifyKinds(wLang(w)), "log": s.notifyLog()})
 	case rest == "channels" && r.Method == "POST", len(parts) == 2 && parts[0] == "channels" && r.Method == "PUT":
 		var in notifyChannel
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<14)).Decode(&in); err != nil {

@@ -349,7 +349,7 @@ func (s *storeServer) handleWebSettings(w http.ResponseWriter, r *http.Request, 
 	case len(parts) == 1 && r.Method == "GET":
 		ws := s.webSettings()
 		ws.KeyEnc = map[bool]string{true: "set", false: ""}[ws.KeyEnc != ""]
-		s.writeJSON(w, 200, map[string]any{"web": ws, "providers": webProviders})
+		s.writeJSON(w, 200, map[string]any{"web": ws, "providers": localizedWebProviders(wLang(w), webProviders)})
 	case len(parts) == 1 && r.Method == "PUT":
 		var in struct {
 			aiWeb

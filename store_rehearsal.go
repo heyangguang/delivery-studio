@@ -324,6 +324,42 @@ var (
 	}
 )
 
+var rehearsalProbeRulesEn = map[string]string{
+	"包含文件或磁盘修改/删除命令":                        "Contains file or disk write/delete commands",
+	"包含目录、文件写入或权限变更命令":                     "Contains directory, file write, or permission-change commands",
+	"包含 sed -i 原地修改文件操作":                   "Contains in-place file edit (sed -i)",
+	"包含 systemctl 服务状态变更操作":                "Contains systemctl service state transition command",
+	"包含 service 服务启停操作":                    "Contains service start/stop/restart command",
+	"包含进程终止或机器重启/关机指令":                    "Contains process kill or host reboot/shutdown command",
+	"包含 sysctl -w 内核参数修改操作":                "Contains sysctl -w kernel tuning write",
+	"包含系统软件包安装/升级/卸载操作":                    "Contains OS package install/upgrade/remove command",
+	"包含底层包安装或卸载操作":                         "Contains low-level package install/remove command",
+	"采集脚本不允许调用 ansible-playbook":           "Probe script must not invoke ansible-playbook",
+	"包含 patronictl 集群控制/切换动作":              "Contains patronictl cluster mutation/switchover command",
+	"包含 etcdctl 数据写入或成员变更动作":               "Contains etcdctl write or membership change command",
+	"包含 redis-cli 状态或配置修改动作":               "Contains redis-cli state or config mutation command",
+	"包含 pg_ctl 数据库启停或升主动作":                 "Contains pg_ctl database start/stop/promote command",
+	"包含数据库写操作或变更控制语句":                      "Contains database write or DDL/DCL statement",
+	"包含向文件写入的重定向操作（仅允许重定向到 /dev/null 或标准流）": "Contains file output redirection (only /dev/null or stdout/stderr allowed)",
+	"采集脚本内容为空":                             "Probe script is empty",
+}
+
+func validateReadOnlyProbeScriptLang(script, lang string) (bool, []string) {
+	ok, warns := validateReadOnlyProbeScript(script)
+	if !isEnLang(lang) || len(warns) == 0 {
+		return ok, warns
+	}
+	out := make([]string, len(warns))
+	for i, w := range warns {
+		if en, has := rehearsalProbeRulesEn[w]; has {
+			out[i] = en
+		} else {
+			out[i] = w
+		}
+	}
+	return ok, out
+}
+
 // validateReadOnlyProbeScript statically checks that a generated inspection script contains zero mutating shell/SQL commands.
 func validateReadOnlyProbeScript(script string) (bool, []string) {
 	trimmed := strings.TrimSpace(script)
@@ -544,6 +580,33 @@ func extractLiveJSONThinking(raw string) (thinking string, phase string) {
 	return thinking, phase
 }
 
+func parseRehearsalStreamMetaLang(raw, lang string) (thinking string, phase string) {
+	thinking, phase = extractLiveJSONThinking(raw)
+	if !isEnLang(lang) || phase == "" {
+		return thinking, phase
+	}
+	enPhase := map[string]string{
+		"正在编排测试环境分步演练序列（预检 / 执行 / 验收 / 回退）…": "Orchestrating staged staging rehearsal plan (precheck / execute / verify / rollback)...",
+		"正在逐台对比初始交付基线与生产现场真实状态…":             "Comparing initial baseline against live production node state...",
+		"正在编写 100% 纯只读现场采集探针脚本…":              "Generating 100% read-only live discovery probe script...",
+		"正在提炼维护窗口与高可用边界澄清问题…":                "Extracting maintenance window and HA scope questions...",
+		"正在生成可直接采纳的修订命令提案…":                  "Drafting directly applicable command fix proposal...",
+		"正在分析测试环境报错根因…":                      "Analyzing staging error root cause...",
+	}[phase]
+	if enPhase != "" {
+		return thinking, enPhase
+	}
+	return thinking, phase
+}
+
+func (s *storeServer) rehearsalCheckAILang(user string, needVision bool, pick, lang string) ([]aiProvider, int, error) {
+	providers, status, err := s.rehearsalCheckAI(user, needVision, pick)
+	if err != nil && isEnLang(lang) {
+		return nil, status, fmt.Errorf("%s", localizeGoMessage(lang, err.Error()))
+	}
+	return providers, status, err
+}
+
 func (s *storeServer) rehearsalCheckAI(user string, needVision bool, pick string) ([]aiProvider, int, error) {
 	st := s.aiLoad()
 	if !st.Enabled {
@@ -684,33 +747,34 @@ func (s *storeServer) rehearsalRunAI(
 		preSteps[i] = st
 	}
 
+	lang := reqLang(r)
 	firstProv := ""
 	firstModel := ""
 	if len(providers) > 0 {
-		firstProv = firstNonEmptyStr(providers[0].Name, "模型网关")
+		firstProv = firstNonEmptyStr(providers[0].Name, tr(lang, "模型网关", "Model Gateway"))
 		firstModel = providers[0].Model
 	}
 	connectStep := rehearsalTraceStep{
 		ID:     "connect-model",
 		Kind:   "connect",
-		Title:  "连接模型网关与投递上下文",
-		Detail: fmt.Sprintf("正在连接 %s · %s 并投递脱敏上下文…", firstProv, firstModel),
+		Title:  tr(lang, "连接模型网关与投递上下文", "Connect Model Gateway & Dispatch Context"),
+		Detail: tr(lang, fmt.Sprintf("正在连接 %s · %s 并投递脱敏上下文…", firstProv, firstModel), fmt.Sprintf("Connecting to %s · %s and dispatching scrubbed context...", firstProv, firstModel)),
 		OK:     true,
 		Status: "running",
 	}
 	thinkStep := rehearsalTraceStep{
 		ID:     "model-think",
 		Kind:   "think",
-		Title:  firstNonEmptyStr(spec.ThinkTitle, "推演集群拓扑与变更风险"),
-		Detail: "等待模型通道返回首包后展开推演",
+		Title:  firstNonEmptyStr(spec.ThinkTitle, tr(lang, "推演集群拓扑与变更风险", "Analyze Topology & Change Risks")),
+		Detail: tr(lang, "等待模型通道返回首包后展开推演", "Waiting for first token from model stream..."),
 		OK:     true,
 		Status: "pending",
 	}
 	synthStep := rehearsalTraceStep{
 		ID:     firstNonEmptyStr(spec.SynthID, "synth-output"),
 		Kind:   firstNonEmptyStr(spec.SynthKind, "synthesize"),
-		Title:  firstNonEmptyStr(spec.SynthTitle, "生成结构化演练结果"),
-		Detail: firstNonEmptyStr(spec.SynthWait, "等待风险推演完成后编排输出"),
+		Title:  firstNonEmptyStr(spec.SynthTitle, tr(lang, "生成结构化演练结果", "Build Structured Rehearsal Output")),
+		Detail: firstNonEmptyStr(spec.SynthWait, tr(lang, "等待风险推演完成后编排输出", "Waiting for risk analysis before structuring output")),
 		OK:     true,
 		Status: "pending",
 	}
@@ -733,14 +797,14 @@ func (s *storeServer) rehearsalRunAI(
 		if len(imageDataURLs) > 0 && p.Vision == "no" {
 			msgs[1] = aiMessage{Role: "user", Content: sendPrompt + fmt.Sprintf("\n（附带 %d 张现场截图，备用模型不支持视觉识别）", len(imageDataURLs))}
 		}
-		provLabel := firstNonEmptyStr(p.Name, "模型网关")
+		provLabel := firstNonEmptyStr(p.Name, tr(lang, "模型网关", "Model Gateway"))
 		connectStep.Status = "running"
 		connectStep.OK = true
 		connectStep.Diag = nil
 		if i > 0 {
-			connectStep.Detail = fmt.Sprintf("正在切换备用节点 %s · %s 重试连接…", provLabel, p.Model)
+			connectStep.Detail = tr(lang, fmt.Sprintf("正在切换备用节点 %s · %s 重试连接…", provLabel, p.Model), fmt.Sprintf("Failing over to %s · %s and retrying...", provLabel, p.Model))
 		} else {
-			connectStep.Detail = fmt.Sprintf("正在连接 %s · %s 并投递脱敏上下文…", provLabel, p.Model)
+			connectStep.Detail = tr(lang, fmt.Sprintf("正在连接 %s · %s 并投递脱敏上下文…", provLabel, p.Model), fmt.Sprintf("Connecting to %s · %s and dispatching scrubbed context...", provLabel, p.Model))
 		}
 		if ev != nil {
 			ev.send(map[string]any{"t": "meta", "model": p.Model, "provider": p.Name, "failover": i > 0})
@@ -775,10 +839,10 @@ func (s *storeServer) rehearsalRunAI(
 			connectStep.Status = "done"
 			connectStep.OK = true
 			connectStep.MS = ttft
-			connectStep.Detail = fmt.Sprintf("%s · %s 首包响应 %s", provLabel, p.Model, fmtTraceMS(ttft))
+			connectStep.Detail = tr(lang, fmt.Sprintf("%s · %s 首包响应 %s", provLabel, p.Model, fmtTraceMS(ttft)), fmt.Sprintf("%s · %s first token in %s", provLabel, p.Model, fmtTraceMS(ttft)))
 
 			thinkStep.Status = "running"
-			thinkStep.Detail = firstNonEmptyStr(spec.ThinkWait, "正在结合集群拓扑与运行参数展开风险推演…")
+			thinkStep.Detail = firstNonEmptyStr(spec.ThinkWait, tr(lang, "正在结合集群拓扑与运行参数展开风险推演…", "Evaluating cluster topology and runtime risks..."))
 			if ev != nil {
 				ev.send(map[string]any{"t": "step", "step": connectStep})
 				ev.send(map[string]any{"t": "step", "step": thinkStep})
@@ -791,7 +855,7 @@ func (s *storeServer) rehearsalRunAI(
 			if gotFirstToken || ev == nil {
 				return
 			}
-			connectStep.Detail = fmt.Sprintf("网关已握手（%s），正在等待 %s 首包生成…", fmtTraceMS(connMS), p.Model)
+			connectStep.Detail = tr(lang, fmt.Sprintf("网关已握手（%s），正在等待 %s 首包生成…", fmtTraceMS(connMS), p.Model), fmt.Sprintf("Gateway connected (%s); awaiting first token from %s...", fmtTraceMS(connMS), p.Model))
 			ev.send(map[string]any{"t": "step", "step": connectStep})
 			ev.send(map[string]any{"t": "phase", "v": connectStep.Detail})
 		})
@@ -807,9 +871,15 @@ func (s *storeServer) rehearsalRunAI(
 			lastBeatAt = time.Now()
 			waitMS := max(1, time.Since(start).Milliseconds())
 			if connHandsMS > 0 {
-				connectStep.Detail = fmt.Sprintf("网关流式通道活跃（握手 %s · 已收 %d 帧，%s），%s 正在深度思考推演…", fmtTraceMS(connHandsMS), beatCount, fmtTraceMS(waitMS), p.Model)
+				connectStep.Detail = tr(lang,
+					fmt.Sprintf("网关流式通道活跃（握手 %s · 已收 %d 帧，%s），%s 正在深度思考推演…", fmtTraceMS(connHandsMS), beatCount, fmtTraceMS(waitMS), p.Model),
+					fmt.Sprintf("Stream active (handshake %s · %d frames, %s); %s reasoning...", fmtTraceMS(connHandsMS), beatCount, fmtTraceMS(waitMS), p.Model),
+				)
 			} else {
-				connectStep.Detail = fmt.Sprintf("网关流式通道活跃（已收 %d 帧，%s），%s 正在深度思考推演…", beatCount, fmtTraceMS(waitMS), p.Model)
+				connectStep.Detail = tr(lang,
+					fmt.Sprintf("网关流式通道活跃（已收 %d 帧，%s），%s 正在深度思考推演…", beatCount, fmtTraceMS(waitMS), p.Model),
+					fmt.Sprintf("Stream active (%d frames, %s); %s reasoning...", beatCount, fmtTraceMS(waitMS), p.Model),
+				)
 			}
 			ev.send(map[string]any{"t": "step", "step": connectStep})
 			ev.send(map[string]any{"t": "phase", "v": connectStep.Detail})
@@ -841,7 +911,7 @@ func (s *storeServer) rehearsalRunAI(
 			if red != nil {
 				curRaw = red.back(curRaw)
 			}
-			jt, ph := extractLiveJSONThinking(curRaw)
+			jt, ph := parseRehearsalStreamMetaLang(curRaw, lang)
 			if nativeThinking.Len() == 0 && len(jt) > sentJSONThinkLen {
 				chunk := jt[sentJSONThinkLen:]
 				sentJSONThinkLen = len(jt)
@@ -853,7 +923,7 @@ func (s *storeServer) rehearsalRunAI(
 					thinkStep.Status = "done"
 					thinkStep.OK = true
 					thinkStep.MS = max(1, time.Since(firstTokenAt).Milliseconds())
-					thinkStep.Detail = "已完成集群拓扑与高可用风险推演"
+					thinkStep.Detail = tr(lang, "已完成集群拓扑与高可用风险推演", "Completed cluster topology & HA risk analysis")
 					ev.send(map[string]any{"t": "step", "step": thinkStep})
 				}
 				if synthStartedAt.IsZero() {
@@ -906,7 +976,7 @@ func (s *storeServer) rehearsalRunAI(
 					thinkStep.Status = "done"
 					thinkStep.OK = true
 					thinkStep.MS = max(1, time.Since(firstTokenAt).Milliseconds())
-					thinkStep.Detail = "已完成集群拓扑与高可用风险推演"
+					thinkStep.Detail = tr(lang, "已完成集群拓扑与高可用风险推演", "Completed cluster topology & HA risk analysis")
 				}
 				err = &aiCallError{Msg: vErr.Error(), Diag: &dCopy, Err: vErr}
 			}
@@ -954,7 +1024,7 @@ func (s *storeServer) rehearsalRunAI(
 				thinkStep.Status = "done"
 				thinkStep.OK = true
 				thinkStep.MS = max(1, time.Since(firstTokenAt).Milliseconds())
-				thinkStep.Detail = "已完成集群拓扑与高可用风险推演"
+				thinkStep.Detail = tr(lang, "已完成集群拓扑与高可用风险推演", "Completed cluster topology & HA risk analysis")
 				if ev != nil {
 					ev.send(map[string]any{"t": "step", "step": thinkStep})
 				}
@@ -995,7 +1065,7 @@ func (s *storeServer) rehearsalRunAI(
 		}
 		if i+1 < len(providers) {
 			if ev != nil {
-				ev.send(map[string]any{"t": "phase", "v": "主模型响应异常，正在自动切换备用模型重试…"})
+				ev.send(map[string]any{"t": "phase", "v": tr(lang, "主模型响应异常，正在自动切换备用模型重试…", "Primary model failed; failing over to backup provider...")})
 			}
 			continue
 		}
@@ -1013,7 +1083,7 @@ func (s *storeServer) rehearsalRunAI(
 		trace.Diag = finalDiag
 
 		failMS := max(1, time.Since(start).Milliseconds())
-		failSummary := truncRunes(cleanUpstreamErrText(err.Error()), 160)
+		failSummary := truncRunes(cleanUpstreamErrText(localizeGoMessage(lang, err.Error())), 160)
 		if !gotFirstToken {
 			connectStep.Status = "error"
 			connectStep.OK = false
@@ -1056,6 +1126,7 @@ func finishRehearsalResp(w http.ResponseWriter, ev *sse, status int, rh changeRe
 }
 
 func failRehearsalResp(s *storeServer, w http.ResponseWriter, ev *sse, code int, msg string, diags ...*aiCallDiag) {
+	msg = localizeGoMessage(wLang(w), msg)
 	var diag *aiCallDiag
 	for _, d := range diags {
 		if d != nil {
@@ -1194,13 +1265,14 @@ func (s *storeServer) createRehearsal(w http.ResponseWriter, r *http.Request, se
 		s.fail(w, 400, "提交的内容格式不对或图片超过大小限制")
 		return
 	}
+	lang := reqLang(r)
 	goal := strings.TrimSpace(in.Goal)
 	title := strings.TrimSpace(in.Title)
 	if len([]rune(goal)) < 4 || len([]rune(goal)) > 4000 {
 		s.fail(w, 400, "请填写清楚变更诉求（4～4000 字）")
 		return
 	}
-	providers, code, err := s.rehearsalCheckAI(session.User, len(in.Images) > 0, in.Model)
+	providers, code, err := s.rehearsalCheckAILang(session.User, len(in.Images) > 0, in.Model, lang)
 	if err != nil {
 		s.fail(w, code, err.Error())
 		return
@@ -1219,17 +1291,17 @@ func (s *storeServer) createRehearsal(w http.ResponseWriter, r *http.Request, se
 	if f.Plan != nil {
 		hostCount = len(f.Plan.Hosts)
 	}
-	guardDetail := "自动剥离敏感口令与私钥字段，仅向模型提供架构拓扑与运行参数基线"
+	guardDetail := tr(lang, "自动剥离敏感口令与私钥字段，仅向模型提供架构拓扑与运行参数基线", "Automatically stripped passwords and private keys; sending only architecture topology and runtime parameters")
 	if len(imgNames) > 0 {
-		guardDetail += fmt.Sprintf("（附带 %d 张参考截图）", len(imgNames))
+		guardDetail += tr(lang, fmt.Sprintf("（附带 %d 张参考截图）", len(imgNames)), fmt.Sprintf(" (with %d reference image(s))", len(imgNames)))
 	}
 	pipeSpec := rehearsalPipelineSpec{
 		PreSteps: []rehearsalTraceStep{
 			{
 				ID:     "read-baseline",
 				Kind:   "inspect",
-				Title:  "读取集群初始交付基线",
-				Detail: fmt.Sprintf("%s %s · %d 台节点 · 基线交付 %s", f.Current.AppName, f.Current.Version, hostCount, truncRunes(f.Current.ID, 8)),
+				Title:  tr(lang, "读取集群初始交付基线", "Load initial cluster delivery baseline"),
+				Detail: fmt.Sprintf("%s %s · %s · %s %s", f.Current.AppName, f.Current.Version, tr(lang, fmt.Sprintf("%d 台节点", hostCount), fmt.Sprintf("%d host(s)", hostCount)), tr(lang, "基线交付", "Baseline"), truncRunes(f.Current.ID, 8)),
 				MS:     max(1, time.Since(inspectStart).Milliseconds()),
 				OK:     true,
 				Status: "done",
@@ -1237,19 +1309,19 @@ func (s *storeServer) createRehearsal(w http.ResponseWriter, r *http.Request, se
 			{
 				ID:     "scrub-context",
 				Kind:   "guard",
-				Title:  "敏感凭据脱敏与边界检查",
+				Title:  tr(lang, "敏感凭据脱敏与边界检查", "Scrub credentials and validate boundary"),
 				Detail: guardDetail,
 				MS:     1,
 				OK:     true,
 				Status: "done",
 			},
 		},
-		ThinkTitle: "研判变更诉求与集群高可用边界",
-		ThinkWait:  "正在结合集群拓扑与运行参数展开风险推演…",
+		ThinkTitle: tr(lang, "研判变更诉求与集群高可用边界", "Analyze change intent & HA boundaries"),
+		ThinkWait:  tr(lang, "正在结合集群拓扑与运行参数展开风险推演…", "Evaluating cluster topology and runtime parameters for risks..."),
 		SynthID:    "build-scope",
 		SynthKind:  "synthesize",
-		SynthTitle: "生成变更边界澄清清单",
-		SynthWait:  "等待风险推演完成后提炼维护窗口与前提问题",
+		SynthTitle: tr(lang, "生成变更边界澄清清单", "Generate change scope checklist"),
+		SynthWait:  tr(lang, "等待风险推演完成后提炼维护窗口与前提问题", "Synthesizing maintenance window and prerequisite questions..."),
 	}
 
 	prompt := "【集群初始交付基线】\n" + baseline + "\n\n【用户本次变更诉求】\n" + goal
@@ -1275,18 +1347,18 @@ func (s *storeServer) createRehearsal(w http.ResponseWriter, r *http.Request, se
 		title = truncRunes(strings.TrimSpace(parsed.Title), 60)
 	}
 	if title == "" {
-		title = truncRunes(f.Current.AppName+" 变更演练", 60)
+		title = truncRunes(f.Current.AppName+tr(lang, " 变更演练", " Change Rehearsal"), 60)
 	}
-	qs := normalizeScopeQuestions(parsed.Questions)
+	qs := normalizeScopeQuestionsLang(parsed.Questions, lang)
 	summary := truncRunes(strings.TrimSpace(parsed.ScopeSummary), 300)
 	if trace.Thinking == "" {
-		trace.Thinking = firstNonEmptyStr(strings.TrimSpace(parsed.Thinking), fmt.Sprintf("已核对集群 %s（%s %s）初始拓扑与参数基线，提炼出 %d 个变更窗口与高可用约束澄清项。", f.ID, f.Current.AppName, f.Current.Version, len(qs)))
+		trace.Thinking = firstNonEmptyStr(strings.TrimSpace(parsed.Thinking), tr(lang, fmt.Sprintf("已核对集群 %s（%s %s）初始拓扑与参数基线，提炼出 %d 个变更窗口与高可用约束澄清项。", f.ID, f.Current.AppName, f.Current.Version, len(qs)), fmt.Sprintf("Checked baseline topology & parameters for cluster %s (%s %s), extracting %d scope clarification question(s).", f.ID, f.Current.AppName, f.Current.Version, len(qs))))
 	}
 	finalizeTraceSynth(
 		&trace,
 		ev,
 		"build-scope",
-		fmt.Sprintf("已提炼 %d 个现场前提问题，确认后自动生成纯只读探针", len(qs)),
+		tr(lang, fmt.Sprintf("已提炼 %d 个现场前提问题，确认后自动生成纯只读探针", len(qs)), fmt.Sprintf("Extracted %d prerequisite question(s); ready to generate read-only probe", len(qs))),
 		true,
 		max(1, time.Since(parseStart).Milliseconds()),
 	)
@@ -1322,6 +1394,10 @@ func (s *storeServer) createRehearsal(w http.ResponseWriter, r *http.Request, se
 }
 
 func normalizeScopeQuestions(in []rehearsalScopeQuestion) []rehearsalScopeQuestion {
+	return normalizeScopeQuestionsLang(in, "zh-CN")
+}
+
+func normalizeScopeQuestionsLang(in []rehearsalScopeQuestion, lang string) []rehearsalScopeQuestion {
 	var out []rehearsalScopeQuestion
 	for i, q := range in {
 		if i >= 4 {
@@ -1354,8 +1430,25 @@ func normalizeScopeQuestions(in []rehearsalScopeQuestion) []rehearsalScopeQuesti
 	}
 	if len(out) == 0 {
 		out = []rehearsalScopeQuestion{
-			{ID: "q1", Label: "窗口与闪断", Question: "本次生产变更可接受的维护窗口与业务闪断要求？", Options: []string{"低峰期滚动变更，控制在秒级闪断", "计划停机窗口执行，允许短暂中断", "必须零停机在线操作，不触发切主"}},
-			{ID: "q2", Label: "离线包就绪", Question: "离线变更所需的软件包或新增节点是否已在内网就绪？", Options: []string{"已在内网就绪，可直接校验兼容性", "尚未完备，需在方案中列出所需清单"}},
+			{
+				ID:       "q1",
+				Label:    tr(lang, "窗口与闪断", "Window & Impact"),
+				Question: tr(lang, "本次生产变更可接受的维护窗口与业务闪断要求？", "What maintenance window and brief interruption policy apply to this production change?"),
+				Options: []string{
+					tr(lang, "低峰期滚动变更，控制在秒级闪断", "Off-peak rolling change within sub-second failover"),
+					tr(lang, "计划停机窗口执行，允许短暂中断", "Scheduled maintenance window; brief downtime acceptable"),
+					tr(lang, "必须零停机在线操作，不触发切主", "Zero-downtime online change without primary switchover"),
+				},
+			},
+			{
+				ID:       "q2",
+				Label:    tr(lang, "离线包就绪", "Artifacts Ready"),
+				Question: tr(lang, "离线变更所需的软件包或新增节点是否已在内网就绪？", "Are required offline packages or new nodes already staged in the intranet?"),
+				Options: []string{
+					tr(lang, "已在内网就绪，可直接校验兼容性", "Staged in intranet; ready to verify compatibility"),
+					tr(lang, "尚未完备，需在方案中列出所需清单", "Not staged yet; include artifact checklist in SOP"),
+				},
+			},
 		}
 	}
 	return out
@@ -1393,7 +1486,8 @@ func (s *storeServer) submitRehearsalScope(w http.ResponseWriter, r *http.Reques
 		s.fail(w, 404, "演练会话不存在")
 		return
 	}
-	providers, code, err := s.rehearsalCheckAI(session.User, false, in.Model)
+	lang := reqLang(r)
+	providers, code, err := s.rehearsalCheckAILang(session.User, false, in.Model, lang)
 	if err != nil {
 		s.fail(w, code, err.Error())
 		return
@@ -1429,8 +1523,8 @@ func (s *storeServer) submitRehearsalScope(w http.ResponseWriter, r *http.Reques
 			{
 				ID:     "align-scope",
 				Kind:   "inspect",
-				Title:  "锁定变更边界与窗口约束",
-				Detail: fmt.Sprintf("已对齐 %d/%d 项前提条件，结合组件巡检字典编排探针", answeredCount, len(rh.ScopeQuestions)),
+				Title:  tr(lang, "锁定变更边界与窗口约束", "Lock change scope & window constraints"),
+				Detail: tr(lang, fmt.Sprintf("已对齐 %d/%d 项前提条件，结合组件巡检字典编排探针", answeredCount, len(rh.ScopeQuestions)), fmt.Sprintf("Aligned %d/%d prerequisite(s); designing probe from component audit catalog", answeredCount, len(rh.ScopeQuestions))),
 				MS:     max(1, time.Since(inspectStart).Milliseconds()),
 				OK:     true,
 				Status: "done",
@@ -1438,19 +1532,19 @@ func (s *storeServer) submitRehearsalScope(w http.ResponseWriter, r *http.Reques
 			{
 				ID:     "inject-ro-policy",
 				Kind:   "guard",
-				Title:  "注入纯只读安全红线规则",
-				Detail: "锁定零修改、零服务控制、零文件重定向及凭据过滤约束",
+				Title:  tr(lang, "注入纯只读安全红线规则", "Inject strict read-only safety guardrails"),
+				Detail: tr(lang, "锁定零修改、零服务控制、零文件重定向及凭据过滤约束", "Enforcing zero mutation, zero service control, zero write redirects, and credential masking"),
 				MS:     1,
 				OK:     true,
 				Status: "done",
 			},
 		},
-		ThinkTitle: "设计生产现场纯只读采集策略",
-		ThinkWait:  "正在结合组件架构设计现场角色、版本与关键参数采集指标…",
+		ThinkTitle: tr(lang, "设计生产现场纯只读采集策略", "Design read-only live inspection strategy"),
+		ThinkWait:  tr(lang, "正在结合组件架构设计现场角色、版本与关键参数采集指标…", "Selecting role, version, and parameter inspection probes..."),
 		SynthID:    "readonly-ast-guard",
 		SynthKind:  "guard",
-		SynthTitle: "生成探针与静态安全红线扫描",
-		SynthWait:  "等待脚本编写完成后执行 15 类高危写操作静态扫描",
+		SynthTitle: tr(lang, "生成探针与静态安全红线扫描", "Generate probe & run static safety audit"),
+		SynthWait:  tr(lang, "等待脚本编写完成后执行 15 类高危写操作静态扫描", "Awaiting script completion to run 15-category write-mutation static checks..."),
 		Validate: func(outText string) error {
 			var chk struct {
 				ProbeScript string `json:"probe_script"`
@@ -1459,7 +1553,7 @@ func (s *storeServer) submitRehearsalScope(w http.ResponseWriter, r *http.Reques
 				_ = json.Unmarshal([]byte(raw), &chk)
 			}
 			if strings.TrimSpace(chk.ProbeScript) == "" {
-				return fmt.Errorf("模型未能生成有效的只读采集脚本（响应可能被截断或未输出完整 JSON），请重试")
+				return fmt.Errorf("%s", tr(lang, "模型未能生成有效的只读采集脚本（响应可能被截断或未输出完整 JSON），请重试", "Model did not return a valid read-only probe script (truncated or incomplete JSON); please retry"))
 			}
 			return nil
 		},
@@ -1485,13 +1579,13 @@ func (s *storeServer) submitRehearsalScope(w http.ResponseWriter, r *http.Reques
 		failRehearsalResp(s, w, ev, 502, "模型未能生成有效的只读采集脚本，请重试", trace.Diag)
 		return
 	}
-	safe, warns := validateReadOnlyProbeScript(script)
+	safe, warns := validateReadOnlyProbeScriptLang(script, lang)
 	if trace.Thinking == "" {
-		trace.Thinking = firstNonEmptyStr(strings.TrimSpace(parsed.Thinking), fmt.Sprintf("已结合已确认的 %d 项边界约束定制 %s 现场只读状态采集脚本，覆盖角色、版本、关键参数与系统资源检查。", answeredCount, f.Current.AppName))
+		trace.Thinking = firstNonEmptyStr(strings.TrimSpace(parsed.Thinking), tr(lang, fmt.Sprintf("已结合已确认的 %d 项边界约束定制 %s 现场只读状态采集脚本，覆盖角色、版本、关键参数与系统资源检查。", answeredCount, f.Current.AppName), fmt.Sprintf("Tailored read-only live probe script for %s against %d confirmed constraint(s), checking roles, versions, key parameters, and host resources.", f.Current.AppName, answeredCount)))
 	}
-	guardDetail := "已通过 15 类高危写命令、服务控制与文件写入重定向静态扫描（100% 纯只读）"
+	guardDetail := tr(lang, "已通过 15 类高危写命令、服务控制与文件写入重定向静态扫描（100% 纯只读）", "Passed all 15 static safety checks for mutating commands, service controls, and file write redirects (100% read-only)")
 	if !safe {
-		guardDetail = fmt.Sprintf("静态扫描发现 %d 项疑似写操作告警，请人工审阅脚本", len(warns))
+		guardDetail = tr(lang, fmt.Sprintf("静态扫描发现 %d 项疑似写操作告警，请人工审阅脚本", len(warns)), fmt.Sprintf("Static audit flagged %d potential write warning(s); manual review required", len(warns)))
 	}
 	finalizeTraceSynth(
 		&trace,
@@ -1596,7 +1690,8 @@ func (s *storeServer) submitRehearsalProbe(w http.ResponseWriter, r *http.Reques
 		s.fail(w, 404, "演练会话不存在")
 		return
 	}
-	providers, code, err := s.rehearsalCheckAI(session.User, len(in.Images) > 0, in.Model)
+	lang := reqLang(r)
+	providers, code, err := s.rehearsalCheckAILang(session.User, len(in.Images) > 0, in.Model, lang)
 	if err != nil {
 		s.fail(w, code, err.Error())
 		return
@@ -1634,20 +1729,21 @@ func (s *storeServer) submitRehearsalProbe(w http.ResponseWriter, r *http.Reques
 
 	var evidenceParts []string
 	if probeOut != "" {
-		evidenceParts = append(evidenceParts, fmt.Sprintf("回显文本 %d 行", strings.Count(probeOut, "\n")+1))
+		lines := strings.Count(probeOut, "\n") + 1
+		evidenceParts = append(evidenceParts, tr(lang, fmt.Sprintf("回显文本 %d 行", lines), fmt.Sprintf("%d line(s) of probe output", lines)))
 	}
 	if len(imgNames) > 0 {
-		evidenceParts = append(evidenceParts, fmt.Sprintf("现场截图 %d 张", len(imgNames)))
+		evidenceParts = append(evidenceParts, tr(lang, fmt.Sprintf("现场截图 %d 张", len(imgNames)), fmt.Sprintf("%d screenshot(s)", len(imgNames))))
 	}
 	if manual != "" {
-		evidenceParts = append(evidenceParts, "人工现状说明")
+		evidenceParts = append(evidenceParts, tr(lang, "人工现状说明", "Manual status notes"))
 	}
 	pipeSpec := rehearsalPipelineSpec{
 		PreSteps: []rehearsalTraceStep{
 			{
 				ID:     "parse-probe",
 				Kind:   "inspect",
-				Title:  "解析现场采集证据与交付基线",
+				Title:  tr(lang, "解析现场采集证据与交付基线", "Parse live evidence & delivery baseline"),
 				Detail: strings.Join(evidenceParts, " · "),
 				MS:     1,
 				OK:     true,
@@ -1656,19 +1752,19 @@ func (s *storeServer) submitRehearsalProbe(w http.ResponseWriter, r *http.Reques
 			{
 				ID:     "scrub-probe",
 				Kind:   "guard",
-				Title:  "现场回显敏感凭据二次脱敏",
-				Detail: "自动擦除回显中的口令、密钥与连接串，对齐初始交付规格",
+				Title:  tr(lang, "现场回显敏感凭据二次脱敏", "Scrub credentials from probe output"),
+				Detail: tr(lang, "自动擦除回显中的口令、密钥与连接串，对齐初始交付规格", "Automatically wiped passwords, keys, and connection strings before baseline comparison"),
 				MS:     1,
 				OK:     true,
 				Status: "done",
 			},
 		},
-		ThinkTitle: "逐节点比对拓扑角色与参数漂移",
-		ThinkWait:  "正在逐台比对初始交付基线与生产现场真实状态…",
+		ThinkTitle: tr(lang, "逐节点比对拓扑角色与参数漂移", "Compare per-node topology roles & config drift"),
+		ThinkWait:  tr(lang, "正在逐台比对初始交付基线与生产现场真实状态…", "Comparing initial baseline specs against live production state..."),
 		SynthID:    "build-rehearsal-plan",
 		SynthKind:  "synthesize",
-		SynthTitle: "完成漂移诊断与分步演练编排",
-		SynthWait:  "等待漂移研判完成后编排测试环境预检/执行/验收/回退步骤",
+		SynthTitle: tr(lang, "完成漂移诊断与分步演练编排", "Complete drift diagnosis & staged rehearsal plan"),
+		SynthWait:  tr(lang, "等待漂移研判完成后编排测试环境预检/执行/验收/回退步骤", "Compiling precheck, execute, verify, and rollback steps from drift findings..."),
 		Validate: func(outText string) error {
 			var chk struct {
 				Steps []rehearsalStep `json:"steps"`
@@ -1676,8 +1772,8 @@ func (s *storeServer) submitRehearsalProbe(w http.ResponseWriter, r *http.Reques
 			if raw := extractJSON(outText); raw != "" {
 				_ = json.Unmarshal([]byte(raw), &chk)
 			}
-			if len(normalizeRehearsalSteps(chk.Steps)) == 0 {
-				return fmt.Errorf("模型未能生成有效的测试演练步骤（响应可能被截断或未输出完整 JSON），请重试")
+			if len(normalizeRehearsalStepsLang(chk.Steps, lang)) == 0 {
+				return fmt.Errorf("%s", tr(lang, "模型未能生成有效的测试演练步骤（响应可能被截断或未输出完整 JSON），请重试", "Model failed to return valid staging rehearsal steps (truncated or incomplete JSON); please retry"))
 			}
 			return nil
 		},
@@ -1697,14 +1793,14 @@ func (s *storeServer) submitRehearsalProbe(w http.ResponseWriter, r *http.Reques
 	if raw := extractJSON(text); raw != "" {
 		_ = json.Unmarshal([]byte(raw), &parsed)
 	}
-	steps := normalizeRehearsalSteps(parsed.Steps)
+	steps := normalizeRehearsalStepsLang(parsed.Steps, lang)
 	if len(steps) == 0 {
 		failRehearsalResp(s, w, ev, 502, "模型未能生成有效的测试演练步骤，请检查回显或截图内容后重试", trace.Diag)
 		return
 	}
 	drift := parsed.Drift
 	if drift == nil {
-		drift = &rehearsalDrift{Summary: "已依据录入的现场信息生成测试环境演练步骤", Hosts: []rehearsalDriftHost{}}
+		drift = &rehearsalDrift{Summary: tr(lang, "已依据录入的现场信息生成测试环境演练步骤", "Generated staging rehearsal steps from provided live state information"), Hosts: []rehearsalDriftHost{}}
 	}
 	if drift.Hosts == nil {
 		drift.Hosts = []rehearsalDriftHost{}
@@ -1716,7 +1812,10 @@ func (s *storeServer) submitRehearsalProbe(w http.ResponseWriter, r *http.Reques
 		&trace,
 		ev,
 		"build-rehearsal-plan",
-		fmt.Sprintf("%s · 生成 %d 个可验证演练步骤", map[bool]string{true: "识别到现场漂移", false: "拓扑与基线一致"}[drift.Drifted], len(steps)),
+		fmt.Sprintf("%s · %s", map[bool]string{
+			true:  tr(lang, "识别到现场漂移", "Live drift detected"),
+			false: tr(lang, "拓扑与基线一致", "Matches baseline topology"),
+		}[drift.Drifted], tr(lang, fmt.Sprintf("生成 %d 个可验证演练步骤", len(steps)), fmt.Sprintf("Generated %d verifiable rehearsal step(s)", len(steps)))),
 		true,
 		max(1, time.Since(parseStart).Milliseconds()),
 	)
@@ -1752,6 +1851,10 @@ func (s *storeServer) submitRehearsalProbe(w http.ResponseWriter, r *http.Reques
 }
 
 func normalizeRehearsalSteps(in []rehearsalStep) []rehearsalStep {
+	return normalizeRehearsalStepsLang(in, "zh-CN")
+}
+
+func normalizeRehearsalStepsLang(in []rehearsalStep, lang string) []rehearsalStep {
 	validPhase := map[string]bool{"precheck": true, "execute": true, "verify": true, "rollback": true}
 	var out []rehearsalStep
 	seenID := map[string]bool{}
@@ -1775,11 +1878,11 @@ func normalizeRehearsalSteps(in []rehearsalStep) []rehearsalStep {
 		seenID[id] = true
 		role := strings.TrimSpace(st.TargetRole)
 		if role == "" {
-			role = "目标节点"
+			role = tr(lang, "目标节点", "Target Host")
 		}
 		expect := strings.TrimSpace(st.Expect)
 		if expect == "" {
-			expect = "命令退出码为 0，输出符合预期"
+			expect = tr(lang, "命令退出码为 0，输出符合预期", "Command exits 0 with expected output")
 		}
 		out = append(out, rehearsalStep{
 			ID:         id,
@@ -1848,7 +1951,7 @@ func (s *storeServer) patchRehearsalStep(w http.ResponseWriter, r *http.Request,
 			st.Revisions = append(st.Revisions, rehearsalStepRevision{
 				At:         nowStamp(),
 				By:         session.User,
-				Diagnosis:  "工程师在测试环境手动调整命令",
+				Diagnosis:  tr(reqLang(r), "工程师在测试环境手动调整命令", "Command manually adjusted in staging"),
 				OldCommand: st.Command,
 				NewCommand: nextCmd,
 			})
@@ -1920,7 +2023,8 @@ func (s *storeServer) troubleshootRehearsalStep(w http.ResponseWriter, r *http.R
 		s.fail(w, 404, "演练步骤不存在")
 		return
 	}
-	providers, code, err := s.rehearsalCheckAI(session.User, len(in.Images) > 0, in.Model)
+	lang := reqLang(r)
+	providers, code, err := s.rehearsalCheckAILang(session.User, len(in.Images) > 0, in.Model, lang)
 	if err != nil {
 		s.fail(w, code, err.Error())
 		return
@@ -1947,8 +2051,8 @@ func (s *storeServer) troubleshootRehearsalStep(w http.ResponseWriter, r *http.R
 			{
 				ID:     "inspect-step-err",
 				Kind:   "inspect",
-				Title:  "定位受阻步骤与报错证据",
-				Detail: fmt.Sprintf("步骤 #%d「%s」· 执行对象：%s", target.Order, target.Title, target.TargetRole),
+				Title:  tr(lang, "定位受阻步骤与报错证据", "Locate blocked step & error evidence"),
+				Detail: tr(lang, fmt.Sprintf("步骤 #%d「%s」· 执行对象：%s", target.Order, target.Title, target.TargetRole), fmt.Sprintf("Step #%d \"%s\" · Target: %s", target.Order, target.Title, target.TargetRole)),
 				MS:     1,
 				OK:     true,
 				Status: "done",
@@ -1956,19 +2060,19 @@ func (s *storeServer) troubleshootRehearsalStep(w http.ResponseWriter, r *http.R
 			{
 				ID:     "scrub-err-context",
 				Kind:   "guard",
-				Title:  "报错回显脱敏与上下文封装",
-				Detail: "剥离报错输出中的敏感凭据，锁定演练步骤预期判据",
+				Title:  tr(lang, "报错回显脱敏与上下文封装", "Scrub error output & package context"),
+				Detail: tr(lang, "剥离报错输出中的敏感凭据，锁定演练步骤预期判据", "Stripped sensitive credentials from error logs and anchored expected pass criteria"),
 				MS:     1,
 				OK:     true,
 				Status: "done",
 			},
 		},
-		ThinkTitle: "诊断报错信号与环境根因推理",
-		ThinkWait:  "正在提取终端报错信号并定位配置、权限或环境根因…",
+		ThinkTitle: tr(lang, "诊断报错信号与环境根因推理", "Diagnose error signals & root cause"),
+		ThinkWait:  tr(lang, "正在提取终端报错信号并定位配置、权限或环境根因…", "Extracting terminal error signals to isolate configuration, permission, or environment root causes..."),
 		SynthID:    "propose-fix",
 		SynthKind:  "synthesize",
-		SynthTitle: "生成命令修订提案",
-		SynthWait:  "等待根因明确后生成就地替换或前置步骤命令",
+		SynthTitle: tr(lang, "生成命令修订提案", "Draft command fix proposal"),
+		SynthWait:  tr(lang, "等待根因明确后生成就地替换或前置步骤命令", "Drafting in-place command fix or prerequisite step once root cause is clear..."),
 		Validate: func(outText string) error {
 			var chk struct {
 				rehearsalStepProposal
@@ -1977,7 +2081,7 @@ func (s *storeServer) troubleshootRehearsalStep(w http.ResponseWriter, r *http.R
 				_ = json.Unmarshal([]byte(raw), &chk)
 			}
 			if strings.TrimSpace(chk.Command) == "" || strings.TrimSpace(chk.Diagnosis) == "" {
-				return fmt.Errorf("模型未能给出有效的修正命令提案（响应可能被截断或格式不完整），请重试")
+				return fmt.Errorf("%s", tr(lang, "模型未能给出有效的修正命令提案（响应可能被截断或格式不完整），请重试", "Model failed to return a valid fix proposal (truncated or incomplete JSON); please retry"))
 			}
 			return nil
 		},
@@ -2013,7 +2117,10 @@ func (s *storeServer) troubleshootRehearsalStep(w http.ResponseWriter, r *http.R
 		&trace,
 		ev,
 		"propose-fix",
-		map[string]string{"replace": "就地修正本步命令", "insert_before": "在此步骤前插入前置准备步骤"}[prop.Action],
+		map[string]string{
+			"replace":       tr(lang, "就地修正本步命令", "Update step command in place"),
+			"insert_before": tr(lang, "在此步骤前插入前置准备步骤", "Insert prerequisite step before this step"),
+		}[prop.Action],
 		true,
 		max(1, time.Since(parseStart).Milliseconds()),
 	)
@@ -2027,7 +2134,7 @@ func (s *storeServer) troubleshootRehearsalStep(w http.ResponseWriter, r *http.R
 	}
 	savedErr := errOut
 	if savedErr == "" && len(imgNames) > 0 {
-		savedErr = fmt.Sprintf("（已上传 %d 张报错截图）", len(imgNames))
+		savedErr = tr(lang, fmt.Sprintf("（已上传 %d 张报错截图）", len(imgNames)), fmt.Sprintf("(Uploaded %d error screenshot(s))", len(imgNames)))
 	}
 	for i := range cur.Steps {
 		if cur.Steps[i].ID == sid {
@@ -2073,6 +2180,7 @@ func (s *storeServer) applyRehearsalProposal(w http.ResponseWriter, r *http.Requ
 		s.fail(w, 409, "当前步骤没有待采纳的排障提案")
 		return
 	}
+	lang := reqLang(r)
 	st := rh.Steps[idx]
 	prop := *st.Proposal
 	now := nowStamp()
@@ -2081,10 +2189,10 @@ func (s *storeServer) applyRehearsalProposal(w http.ResponseWriter, r *http.Requ
 		inserted := rehearsalStep{
 			ID:         newID,
 			Phase:      st.Phase,
-			Title:      firstNonEmptyStr(truncRunes(strings.TrimSpace(prop.Title), 120), "前置准备："+st.Title),
+			Title:      firstNonEmptyStr(truncRunes(strings.TrimSpace(prop.Title), 120), tr(lang, "前置准备：", "Prerequisite: ")+st.Title),
 			TargetRole: firstNonEmptyStr(strings.TrimSpace(prop.TargetRole), st.TargetRole),
 			Command:    prop.Command,
-			Expect:     firstNonEmptyStr(strings.TrimSpace(prop.Expect), "命令执行成功，无报错"),
+			Expect:     firstNonEmptyStr(strings.TrimSpace(prop.Expect), tr(lang, "命令执行成功，无报错", "Command succeeds with no errors")),
 			RiskNote:   strings.TrimSpace(prop.RiskNote),
 			Rollback:   strings.TrimSpace(prop.Rollback),
 			Status:     "pending",
@@ -2093,7 +2201,7 @@ func (s *storeServer) applyRehearsalProposal(w http.ResponseWriter, r *http.Requ
 			At:           now,
 			By:           session.User,
 			ErrorSnippet: truncRunes(st.LastError, 300),
-			Diagnosis:    "插入前置步骤「" + inserted.Title + "」：" + prop.Diagnosis,
+			Diagnosis:    tr(lang, "插入前置步骤「"+inserted.Title+"」："+prop.Diagnosis, "Inserted prerequisite step \""+inserted.Title+"\": "+prop.Diagnosis),
 			OldCommand:   st.Command,
 			NewCommand:   prop.Command,
 		})
@@ -2182,17 +2290,21 @@ func (s *storeServer) finalizeRehearsal(w http.ResponseWriter, r *http.Request, 
 
 	// Pre-populate editable overview & signoff sections on first finalize so the generated SOP is immediately complete
 	// for Word export while remaining editable in the cluster's Documents center.
+	lang := reqLang(r)
 	saved := s.docLoad(f.ID, docID)
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	if _, exists := saved.Sections["overview"]; !exists {
 		overview := rh.Goal
 		if rh.ScopeSummary != "" {
-			overview += "\n边界说明：" + rh.ScopeSummary
+			overview += tr(lang, "\n边界说明：", "\nScope Summary: ") + rh.ScopeSummary
 		}
 		saved.Sections["overview"] = docSection{Text: overview, Source: "user", Confirmed: true, By: session.User, At: now, Basis: f.Current.ID}
 	}
 	if _, exists := saved.Sections["signoff"]; !exists {
-		signoff := fmt.Sprintf("本方案已由 %s 在测试环境完成全部必测步骤演练并核验通过。生产执行窗口内如遇单步超出预期耗时 2 倍或核心业务指标异常，立即按第 5 节应急回退预案执行回退。", session.User)
+		signoff := tr(lang,
+			fmt.Sprintf("本方案已由 %s 在测试环境完成全部必测步骤演练并核验通过。生产执行窗口内如遇单步超出预期耗时 2 倍或核心业务指标异常，立即按第 5 节应急回退预案执行回退。", session.User),
+			fmt.Sprintf("All required rehearsal steps have been validated and verified in staging by %s. During production execution, if any step exceeds 2x expected duration or critical business KPIs degrade, immediately execute Section 5 rollback procedures.", session.User),
+		)
 		saved.Sections["signoff"] = docSection{Text: signoff, Source: "user", Confirmed: true, By: session.User, At: now, Basis: f.Current.ID}
 	}
 	_ = s.docSave(f.ID, docID, saved)
@@ -2204,6 +2316,7 @@ func (s *storeServer) finalizeRehearsal(w http.ResponseWriter, r *http.Request, 
 // buildRehearsalSOP renders a finalized rehearsal session into a formal clusterDoc ("change" kind) for preview,
 // section editing, and .docx Word export.
 func (s *storeServer) buildRehearsalSOP(f clusterFacts, rid string) (*clusterDoc, bool) {
+	lang := f.Lang
 	rh, ok := s.loadRehearsal(f.ID, rid)
 	if !ok || rh.Stage != "finalized" {
 		return nil, false
@@ -2211,62 +2324,62 @@ func (s *storeServer) buildRehearsalSOP(f clusterFacts, rid string) (*clusterDoc
 	d := &clusterDoc{
 		ID:       "sop-" + rh.ID,
 		Kind:     "change",
-		Title:    "生产变更实施方案",
+		Title:    tr(lang, "生产变更实施方案", "Production Change SOP"),
 		Subtitle: rh.Title,
 		Cluster:  f.ID,
 		Job:      rh.BaseJobID,
 		Cover: f.cover(
-			[2]string{"变更主题", rh.Title},
-			[2]string{"演练负责人", rh.Owner},
-			[2]string{"定稿时间", stamp(rh.UpdatedAt)},
+			[2]string{tr(lang, "变更主题", "Change Topic"), rh.Title},
+			[2]string{tr(lang, "演练负责人", "Rehearsal Owner"), rh.Owner},
+			[2]string{tr(lang, "定稿时间", "Finalized"), stamp(rh.UpdatedAt)},
 		),
 	}
 	b := &docBuilder{}
-	b.section(1, "overview", "1 变更目标与维护窗口", "本次变更的业务背景、目标、计划维护窗口起止时间及审批单号。", true)
+	b.section(1, "overview", tr(lang, "1 变更目标与维护窗口", "1 Change Objective & Maintenance Window"), tr(lang, "本次变更的业务背景、目标、计划维护窗口起止时间及审批单号。", "Business context, objectives, planned maintenance window start/end, and approval ticket ID."), true)
 
-	b.h(1, "2 生产现状核对与漂移诊断")
+	b.h(1, tr(lang, "2 生产现状核对与漂移诊断", "2 Production Baseline & Drift Diagnosis"))
 	var scopeItems []string
 	for _, q := range rh.ScopeQuestions {
 		if strings.TrimSpace(q.Answer) != "" {
-			scopeItems = append(scopeItems, q.Question+"："+q.Answer)
+			scopeItems = append(scopeItems, q.Question+tr(lang, "：", ": ")+q.Answer)
 		}
 	}
 	if rh.ExtraScope != "" {
-		scopeItems = append(scopeItems, "补充说明："+rh.ExtraScope)
+		scopeItems = append(scopeItems, tr(lang, "补充说明：", "Additional Scope: ")+rh.ExtraScope)
 	}
 	if len(scopeItems) > 0 {
-		b.h(2, "2.1 已确认的变更边界")
+		b.h(2, tr(lang, "2.1 已确认的变更边界", "2.1 Confirmed Change Scope"))
 		b.list(scopeItems)
 	}
 	if rh.Drift != nil {
-		b.h(2, "2.2 生产现场拓扑与漂移核查")
+		b.h(2, tr(lang, "2.2 生产现场拓扑与漂移核查", "2.2 Live Topology & Drift Check"))
 		b.note(rh.Drift.Summary)
 		if len(rh.Drift.Hosts) > 0 {
 			var rows [][]string
 			for _, h := range rh.Drift.Hosts {
-				rows = append(rows, []string{h.Name, h.IP, firstNonEmptyStr(h.InitialRole, "—"), firstNonEmptyStr(h.ActualRole, "—"), firstNonEmptyStr(h.Version, f.Current.Version), firstNonEmptyStr(h.Status, "正常")})
+				rows = append(rows, []string{h.Name, h.IP, firstNonEmptyStr(h.InitialRole, "—"), firstNonEmptyStr(h.ActualRole, "—"), firstNonEmptyStr(h.Version, f.Current.Version), firstNonEmptyStr(h.Status, tr(lang, "正常", "Healthy"))})
 			}
-			b.table([]string{"节点", "生产 IP", "初始交付角色", "现场当前角色", "版本", "运行状态"}, rows)
+			b.table([]string{tr(lang, "节点", "Host"), tr(lang, "生产 IP", "Prod IP"), tr(lang, "初始交付角色", "Initial Role"), tr(lang, "现场当前角色", "Live Role"), tr(lang, "版本", "Version"), tr(lang, "运行状态", "Status")}, rows)
 		} else {
-			topology(b, f.Plan)
+			topology(b, f.Plan, lang)
 		}
 		if len(rh.Drift.ParamDiffs) > 0 {
 			var rows [][]string
 			for _, p := range rh.Drift.ParamDiffs {
 				rows = append(rows, []string{p.Key, p.Initial, p.Actual, p.Risk})
 			}
-			b.h(3, "现场参数差异")
-			b.table([]string{"参数", "初始交付值", "现场当前值", "影响与风险说明"}, rows)
+			b.h(3, tr(lang, "现场参数差异", "Live Parameter Diffs"))
+			b.table([]string{tr(lang, "参数", "Parameter"), tr(lang, "初始交付值", "Initial Value"), tr(lang, "现场当前值", "Live Value"), tr(lang, "影响与风险说明", "Impact & Risk")}, rows)
 		}
 		if len(rh.Drift.Risks) > 0 {
-			b.h(3, "识别到的变更风险点")
+			b.h(3, tr(lang, "识别到的变更风险点", "Identified Change Risks"))
 			b.list(rh.Drift.Risks)
 		}
 	} else {
-		topology(b, f.Plan)
+		topology(b, f.Plan, lang)
 	}
 
-	b.h(1, "3 测试环境演练验证记录")
+	b.h(1, tr(lang, "3 测试环境演练验证记录", "3 Staging Rehearsal Verification"))
 	passed, skipped, revTotal := 0, 0, 0
 	for _, st := range rh.Steps {
 		revTotal += len(st.Revisions)
@@ -2280,20 +2393,20 @@ func (s *storeServer) buildRehearsalSOP(f clusterFacts, rid string) (*clusterDoc
 			skipped++
 		}
 	}
-	summary := fmt.Sprintf("测试环境共实测通过 %d 个步骤", passed)
+	summary := tr(lang, fmt.Sprintf("测试环境共实测通过 %d 个步骤", passed), fmt.Sprintf("Verified %d step(s) in staging", passed))
 	if skipped > 0 {
-		summary += fmt.Sprintf("，跳过 %d 个可选/不适用步骤", skipped)
+		summary += tr(lang, fmt.Sprintf("，跳过 %d 个可选/不适用步骤", skipped), fmt.Sprintf(", skipped %d optional/N/A step(s)", skipped))
 	}
 	if revTotal > 0 {
-		summary += fmt.Sprintf("，演练过程中累计排障与打磨修正命令 %d 次", revTotal)
+		summary += tr(lang, fmt.Sprintf("，演练过程中累计排障与打磨修正命令 %d 次", revTotal), fmt.Sprintf(", with %d command revision(s) refined during rehearsal", revTotal))
 	}
-	summary += "。"
+	summary += tr(lang, "。", ".")
 	if rh.TestEnvNote != "" {
-		summary += " 测试环境说明：" + rh.TestEnvNote
+		summary += tr(lang, " 测试环境说明：", " Staging notes: ") + rh.TestEnvNote
 	}
 	b.p(summary)
 
-	b.h(1, "4 生产变更分步实施步骤（SOP）")
+	b.h(1, tr(lang, "4 生产变更分步实施步骤（SOP）", "4 Production Change Procedure (SOP)"))
 	writePhase := func(subTitle, phase string) {
 		var list []rehearsalStep
 		for _, st := range rh.Steps {
@@ -2306,32 +2419,32 @@ func (s *storeServer) buildRehearsalSOP(f clusterFacts, rid string) (*clusterDoc
 		}
 		b.h(2, subTitle)
 		for i, st := range list {
-			b.h(3, fmt.Sprintf("%d) %s（执行对象：%s）", i+1, st.Title, st.TargetRole))
+			b.h(3, tr(lang, fmt.Sprintf("%d) %s（执行对象：%s）", i+1, st.Title, st.TargetRole), fmt.Sprintf("%d) %s (Target: %s)", i+1, st.Title, st.TargetRole)))
 			var meta []string
 			if st.Elapsed != "" {
-				meta = append(meta, "演练实测耗时："+st.Elapsed)
+				meta = append(meta, tr(lang, "演练实测耗时：", "Measured duration: ")+st.Elapsed)
 			}
 			if st.Note != "" {
-				meta = append(meta, "演练实测备注："+st.Note)
+				meta = append(meta, tr(lang, "演练实测备注：", "Verification note: ")+st.Note)
 			}
 			if st.RiskNote != "" {
-				meta = append(meta, "注意事项："+st.RiskNote)
+				meta = append(meta, tr(lang, "注意事项：", "Caution: ")+st.RiskNote)
 			}
 			if len(meta) > 0 {
-				b.p(strings.Join(meta, " ｜ "))
+				b.p(strings.Join(meta, " | "))
 			}
 			b.code(st.Command)
-			b.p("成功判据：" + st.Expect)
+			b.p(tr(lang, "成功判据：", "Pass Criteria: ") + st.Expect)
 			if st.Rollback != "" {
-				b.note("本步即时回退：" + st.Rollback)
+				b.note(tr(lang, "本步即时回退：", "Step Rollback: ") + st.Rollback)
 			}
 		}
 	}
-	writePhase("4.1 变更前预检", "precheck")
-	writePhase("4.2 核心变更执行", "execute")
-	writePhase("4.3 变更后验收", "verify")
+	writePhase(tr(lang, "4.1 变更前预检", "4.1 Pre-Change Checks"), "precheck")
+	writePhase(tr(lang, "4.2 核心变更执行", "4.2 Core Change Execution"), "execute")
+	writePhase(tr(lang, "4.3 变更后验收", "4.3 Post-Change Verification"), "verify")
 
-	b.h(1, "5 应急回退预案")
+	b.h(1, tr(lang, "5 应急回退预案", "5 Emergency Rollback Plan"))
 	var rollbacks []rehearsalStep
 	for _, st := range rh.Steps {
 		if st.Phase == "rollback" {
@@ -2340,28 +2453,28 @@ func (s *storeServer) buildRehearsalSOP(f clusterFacts, rid string) (*clusterDoc
 	}
 	if len(rollbacks) > 0 {
 		for i, st := range rollbacks {
-			b.h(2, fmt.Sprintf("5.%d %s（执行对象：%s）", i+1, st.Title, st.TargetRole))
+			b.h(2, tr(lang, fmt.Sprintf("5.%d %s（执行对象：%s）", i+1, st.Title, st.TargetRole), fmt.Sprintf("5.%d %s (Target: %s)", i+1, st.Title, st.TargetRole)))
 			if st.RiskNote != "" {
-				b.p("触发条件与说明：" + st.RiskNote)
+				b.p(tr(lang, "触发条件与说明：", "Trigger & notes: ") + st.RiskNote)
 			}
 			b.code(st.Command)
-			b.p("回退确认判据：" + st.Expect)
+			b.p(tr(lang, "回退确认判据：", "Rollback Verification: ") + st.Expect)
 		}
 	} else {
 		var inlineRB []string
 		for _, st := range rh.Steps {
 			if st.Rollback != "" {
-				inlineRB = append(inlineRB, st.Title+"："+st.Rollback)
+				inlineRB = append(inlineRB, st.Title+tr(lang, "：", ": ")+st.Rollback)
 			}
 		}
 		if len(inlineRB) > 0 {
 			b.list(inlineRB)
 		} else {
-			b.p("按各执行步骤下方标注的单步回退方式逆序恢复服务与配置。")
+			b.p(tr(lang, "按各执行步骤下方标注的单步回退方式逆序恢复服务与配置。", "Restore services and configuration in reverse order using each step's inline rollback procedure."))
 		}
 	}
 
-	b.section(1, "signoff", "6 回退红线与审批签字", "回退触发红线、窗口负责人、执行人与复核人签字确认。", true)
+	b.section(1, "signoff", tr(lang, "6 回退红线与审批签字", "6 Rollback Triggers & Sign-Off"), tr(lang, "回退触发红线、窗口负责人、执行人与复核人签字确认。", "Rollback trigger thresholds and sign-off from change lead, executor, and reviewer."), true)
 	d.Blocks = b.blocks
 	return d, true
 }

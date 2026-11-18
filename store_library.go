@@ -190,11 +190,13 @@ type platformView struct {
 }
 
 func (s *storeServer) libraryOverview(w http.ResponseWriter) {
+	lang := wLang(w)
 	var pl []platformView
 	for _, p := range mwpack.Platforms {
+		p.Title = mwpack.LocalizePlatformTitle(lang, p.Title)
 		var info *RuntimeInfo
 		if r, ok := s.plat.py.Default(p.ID); ok {
-			info = &RuntimeInfo{File: "软件库 · " + r.ID, Ansible: r.Ansible, Python: r.Python, Controller: p.Title, Packages: []RuntimePackage{}}
+			info = &RuntimeInfo{File: tr(lang, "软件库 · ", "Library · ") + r.ID, Ansible: r.Ansible, Python: r.Python, Controller: p.Title, Packages: []RuntimePackage{}}
 			for _, w := range r.Wheels {
 				info.Packages = append(info.Packages, RuntimePackage{w.Name, w.Version})
 				info.Size += w.Size

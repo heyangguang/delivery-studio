@@ -1,5 +1,6 @@
 import { AppGlyph } from "./ui";
 import { COLORS, ICONS, iconShape } from "./glyphs";
+import { bi, useLang } from "./i18n";
 
 /** Choose a component's logo and tint, with the result drawn as it will look in the lists. */
 export function StylePicker({
@@ -15,6 +16,7 @@ export function StylePicker({
   color?: string;
   onChange: (icon: string, color: string) => void;
 }) {
+  useLang();
   const cur = { icon: icon || "", color: color || "" };
   return (
     <div className="wb-style">
@@ -42,7 +44,7 @@ export function StylePicker({
         />
       </div>
       <div className="wb-style-pick">
-        <div className="wb-swatches" role="radiogroup" aria-label="颜色">
+        <div className="wb-swatches" role="radiogroup" aria-label={bi("颜色", "Color")}>
           {COLORS.map((c) => (
             <button
               type="button"
@@ -58,17 +60,17 @@ export function StylePicker({
           ))}
         </div>
         {[
-          ["通用", ICONS.filter((i) => !i.group)],
-          ["常见中间件", ICONS.filter((i) => i.group)],
-        ].map(([title, list]) => (
-          <div key={title as string}>
-            <div className="wb-icons-title">{title as string}</div>
+          { key: "general", title: bi("通用", "General"), list: ICONS.filter((i) => !i.group) },
+          { key: "middleware", title: bi("常见中间件", "Common Middleware"), list: ICONS.filter((i) => i.group) },
+        ].map(({ key, title, list }) => (
+          <div key={key}>
+            <div className="wb-icons-title">{title}</div>
             <div
               className="wb-icons"
               role="radiogroup"
-              aria-label={`${title as string}图标`}
+              aria-label={bi(`${title}图标`, `${title} icons`)}
             >
-              {(list as typeof ICONS).map((i) => (
+              {list.map((i) => (
                 <button
                   type="button"
                   key={i.id}

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -134,10 +135,84 @@ func (s *storeServer) auditQuery(q map[string][]string) (rows []auditEvent, user
 	return rows, sortedKeys(seen), actions, kinds
 }
 
+var auditResourceEn = map[string]string{
+	"交付":     "Deliveries",
+	"用户":     "Users",
+	"角色":     "Roles",
+	"团队":     "Teams",
+	"已删除的用户": "Deleted Users",
+	"组件":     "Components",
+	"运行环境":   "Runtimes",
+	"软件库":    "Library",
+	"变更演练":   "Rehearsals",
+	"集群":     "Clusters",
+	"MCP 服务": "MCP Servers",
+	"AI 用量":  "AI Usage",
+	"AI 设置":  "AI Settings",
+	"执行节点":   "Execution Nodes",
+	"沙箱设置":   "Sandbox Settings",
+	"存储设置":   "Storage Settings",
+	"交付文档设置": "Report Settings",
+	"通知设置":   "Notifications",
+	"AI 对话":  "AI Chats",
+	"知识库提交":  "KB Submissions",
+	"团队知识库":  "Team KB",
+	"我的知识库":  "Personal KB",
+	"我的会话":   "My Sessions",
+	"我的账户":   "My Account",
+	"会话审计":   "Session Audit",
+	"操作审计":   "Action Audit",
+	"部署规格":   "Deployment Spec",
+	"登录":     "Authentication",
+	"其他":     "Other",
+}
+
+func auditResourceLabel(lang, typ string) string {
+	if !isEnLang(lang) {
+		return typ
+	}
+	if en, ok := auditResourceEn[typ]; ok {
+		return en
+	}
+	return typ
+}
+
+var (
+	reAuditBytes  = regexp.MustCompile(`（(\d+) 字节，内容不记录）`)
+	reAuditBin    = regexp.MustCompile(`（(\d+) 字节的二进制内容，不记录）`)
+	reAuditImages = regexp.MustCompile(`（(\d+) 张图片，内容不记录）`)
+	reAuditMore   = regexp.MustCompile(`…另 (\d+) 项`)
+	reAuditChars  = regexp.MustCompile(`…（共 (\d+) 字）`)
+)
+
+func localizeAuditRequestText(lang, s string) string {
+	if !isEnLang(lang) || s == "" {
+		return s
+	}
+	s = strings.ReplaceAll(s, "参数 ", "Params ")
+	s = strings.ReplaceAll(s, "（文件内容，不记录）", "(file content omitted)")
+	s = reAuditBytes.ReplaceAllString(s, " ($1 bytes, omitted)")
+	s = reAuditBin.ReplaceAllString(s, "($1 bytes binary, omitted)")
+	s = reAuditImages.ReplaceAllString(s, "($1 images, omitted)")
+	s = reAuditMore.ReplaceAllString(s, "...+$1 more")
+	s = reAuditChars.ReplaceAllString(s, "...($1 chars total)")
+	return s
+}
+
+func localizeAuditRow(lang string, e auditEvent) auditEvent {
+	if !isEnLang(lang) {
+		return e
+	}
+	e.Error = localizeGoMessage(lang, e.Error)
+	e.Request = localizeAuditRequestText(lang, e.Request)
+	return e
+}
+
 func (s *storeServer) handleAudit(w http.ResponseWriter, r *http.Request, session storeSession) {
 	if !s.need(w, session.User, "audit.view") {
 		return
 	}
+	lang := wLang(w)
 	q := r.URL.Query()
 	rows, users, actions, kinds := s.auditQuery(q)
 	if strings.HasSuffix(r.URL.Path, "/export") {
@@ -146,13 +221,18 @@ func (s *storeServer) handleAudit(w http.ResponseWriter, r *http.Request, sessio
 		w.Header().Set("Content-Disposition", `attachment; filename="audit-`+time.Now().Format("20060102-150405")+`.csv"`)
 		cw := csv.NewWriter(w)
 		_, _ = w.Write([]byte("\xEF\xBB\xBF")) // so spreadsheet programs read it as UTF-8
-		_ = cw.Write([]string{"时间", "用户", "来源 IP", "浏览器", "动作", "资源类型", "资源编号", "资源名称", "方法", "路径", "请求内容", "结果", "状态码", "错误", "耗时（毫秒）", "会话编号", "会话时长（秒）"})
+		hdr := []string{"时间", "用户", "来源 IP", "浏览器", "动作", "资源类型", "资源编号", "资源名称", "方法", "路径", "请求内容", "结果", "状态码", "错误", "耗时（毫秒）", "会话编号", "会话时长（秒）"}
+		if isEnLang(lang) {
+			hdr = []string{"Time", "User", "Source IP", "User Agent", "Action", "Resource Type", "Resource ID", "Resource Name", "Method", "Path", "Request", "Result", "Status Code", "Error", "Duration (ms)", "Session ID", "Session Duration (s)"}
+		}
+		_ = cw.Write(hdr)
 		for _, e := range rows {
+			e = localizeAuditRow(lang, e)
 			res := auditResource{}
 			if e.Resource != nil {
 				res = *e.Resource
 			}
-			_ = cw.Write([]string{e.Time, e.User, e.IP, e.Agent, e.Action, res.Type, res.ID, res.Name, e.Method, e.Path, e.Request, e.Result, strconv.Itoa(e.Status), e.Error, strconv.FormatInt(e.MS, 10), e.SessionID, strconv.FormatInt(e.DurationSec, 10)})
+			_ = cw.Write([]string{e.Time, e.User, e.IP, e.Agent, e.Action, auditResourceLabel(lang, res.Type), res.ID, res.Name, e.Method, e.Path, e.Request, e.Result, strconv.Itoa(e.Status), e.Error, strconv.FormatInt(e.MS, 10), e.SessionID, strconv.FormatInt(e.DurationSec, 10)})
 		}
 		cw.Flush()
 		return
@@ -166,5 +246,9 @@ func (s *storeServer) handleAudit(w http.ResponseWriter, r *http.Request, sessio
 		page = 1
 	}
 	start := min((page-1)*size, len(rows))
-	s.writeJSON(w, 200, map[string]any{"rows": rows[start:min(start+size, len(rows))], "total": len(rows), "page": page, "size": size, "users": users, "actions": actions, "resources": kinds})
+	outRows := make([]auditEvent, 0, min(start+size, len(rows))-start)
+	for _, e := range rows[start:min(start+size, len(rows))] {
+		outRows = append(outRows, localizeAuditRow(lang, e))
+	}
+	s.writeJSON(w, 200, map[string]any{"rows": outRows, "total": len(rows), "page": page, "size": size, "users": users, "actions": actions, "resources": kinds})
 }

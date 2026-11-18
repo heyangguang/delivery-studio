@@ -18,6 +18,8 @@ import { jinja2 } from "@codemirror/legacy-modes/mode/jinja2";
 import { tags as t } from "@lezer/highlight";
 import { parseDocument } from "yaml";
 import type { Problem } from "./wbdoc";
+import { getLang, useLang } from "./i18n";
+import type { Lang as UILang } from "./i18n";
 
 /* One editor for every file of a component. Colours come from the app's CSS variables, so light and dark follow the
    rest of the page; problems are shown as markers on the line they belong to. */
@@ -195,6 +197,43 @@ function yamlSyntax(text: string): Diagnostic[] {
   }));
 }
 
+const cmPhrases = (l: UILang) =>
+  l === "en-US"
+    ? {
+        Find: "Find",
+        Replace: "Replace",
+        next: "next",
+        previous: "previous",
+        all: "all",
+        "match case": "match case",
+        regexp: "regexp",
+        "by word": "by word",
+        replace: "replace",
+        "replace all": "replace all",
+        close: "close",
+        "current match": "current match",
+        "on line": "on line",
+        "Go to line": "Go to line",
+        go: "go",
+      }
+    : {
+        Find: "查找",
+        Replace: "替换",
+        next: "下一个",
+        previous: "上一个",
+        all: "全部",
+        "match case": "区分大小写",
+        regexp: "正则",
+        "by word": "全词",
+        replace: "替换",
+        "replace all": "全部替换",
+        close: "关闭",
+        "current match": "当前",
+        "on line": "第",
+        "Go to line": "跳到行",
+        go: "跳转",
+      };
+
 export function CodeEditor({
   value,
   lang,
@@ -214,6 +253,7 @@ export function CodeEditor({
   jumpTo?: { line: number; n: number };
   label: string;
 }) {
+  const uiLang = useLang();
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const cb = useRef({ onChange, onSave });
@@ -221,6 +261,7 @@ export function CodeEditor({
   const lint = useRef<Problem[]>([]);
   lint.current = problems;
   const ro = useRef(new Compartment());
+  const uiComp = useRef(new Compartment());
 
   useEffect(() => {
     const v = new EditorView({
@@ -235,23 +276,10 @@ export function CodeEditor({
           langFor(lang),
           lintGutter(),
           indentUnit.of("  "),
-          EditorState.phrases.of({
-            Find: "查找",
-            Replace: "替换",
-            next: "下一个",
-            previous: "上一个",
-            all: "全部",
-            "match case": "区分大小写",
-            regexp: "正则",
-            "by word": "全词",
-            replace: "替换",
-            "replace all": "全部替换",
-            close: "关闭",
-            "current match": "当前",
-            "on line": "第",
-            "Go to line": "跳到行",
-            go: "跳转",
-          }),
+          uiComp.current.of([
+            EditorState.phrases.of(cmPhrases(getLang())),
+            EditorView.contentAttributes.of({ "aria-label": label }),
+          ]),
           keymap.of([
             indentWithTab,
             {
@@ -267,7 +295,6 @@ export function CodeEditor({
             EditorState.readOnly.of(!!readOnly),
             EditorView.editable.of(!readOnly),
           ]),
-          EditorView.contentAttributes.of({ "aria-label": label }),
           EditorView.updateListener.of((u) => {
             if (u.docChanged) cb.current.onChange?.(u.state.doc.toString());
           }),
@@ -279,6 +306,15 @@ export function CodeEditor({
     // the editor is created once per file (the parent keys it by path)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    view.current?.dispatch({
+      effects: uiComp.current.reconfigure([
+        EditorState.phrases.of(cmPhrases(uiLang)),
+        EditorView.contentAttributes.of({ "aria-label": label }),
+      ]),
+    });
+  }, [uiLang, label]);
 
   useEffect(() => {
     view.current?.dispatch({

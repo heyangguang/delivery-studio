@@ -1,4 +1,5 @@
 import type { FlowView, InstanceView } from './shared';
+import { bi } from './i18n';
 
 export type DisplayInstance = InstanceView & { embedded?: boolean };
 export const componentOrder: Record<string, number> = { postgresql: 0, etcd: 1, patroni: 2 };
@@ -39,8 +40,8 @@ export function displayFlows(instances: InstanceView[]) {
 }
 
 export function hostStorage(host?: { disk?: string; params?: Record<string, unknown> }) {
-  if (!host) return { label: '未记录', path: '' };
+  if (!host) return { label: bi('未记录', 'Not recorded'), path: '' };
   const root = typeof host.params?.data_root === 'string' ? host.params.data_root : '/data';
-  if (host.params?.storage_mode === 'system_directory') return { label: '系统盘目录', path: root };
-  return { label: host.disk || '已有挂载目录', path: root };
+  if (host.params?.storage_mode === 'system_directory') return { label: bi('系统盘目录', 'System disk dir'), path: root };
+  return { label: host.disk || bi('已有挂载目录', 'Mounted directory'), path: root };
 }

@@ -326,7 +326,7 @@ func (s *storeServer) handleSync(w http.ResponseWriter, r *http.Request, session
 	switch r.Method {
 	case "GET":
 		pv, _, _ := s.previewSync(j)
-		s.writeJSON(w, 200, map[string]any{"preview": pv, "syncs": j.Syncs})
+		s.writeJSON(w, 200, map[string]any{"preview": localizeSyncPreview(wLang(w), pv), "syncs": j.Syncs})
 	case "POST":
 		pv, b, old := s.previewSync(j)
 		if pv.Blocked != "" || !pv.Available {

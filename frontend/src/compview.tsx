@@ -24,6 +24,7 @@ import { StatusBadge, UnderlineTabs } from "./ui";
 import { styleOf } from "./glyphs";
 import { TopoArt } from "./topoart";
 import { Terminal } from "./runbook";
+import { bi, useLang } from "./i18n";
 
 const CvIcons: Record<string, React.ReactNode> = {
   versions: (
@@ -190,25 +191,34 @@ const CvIcons: Record<string, React.ReactNode> = {
    A rail on the right keeps the shape of the component and a table of contents in view. */
 
 type Any = Record<string, any>;
-const PHASES: [string, string][] = [
-  ["preflight", "预检"],
-  ["install", "安装"],
-  ["configure", "配置"],
-  ["start", "启动"],
-  ["provision", "初始化"],
-  ["verify", "复核"],
+const getPhases = (): [string, string][] => [
+  ["preflight", bi("预检", "Preflight")],
+  ["install", bi("安装", "Install")],
+  ["configure", bi("配置", "Configure")],
+  ["start", bi("启动", "Start")],
+  ["provision", bi("初始化", "Provision")],
+  ["verify", bi("复核", "Verify")],
 ];
-const EFFECT: Record<string, [string, string]> = {
-  "read-only": ["只读", "ok"],
-  change: ["修改", ""],
-  disruptive: ["中断服务", "bad"],
-  destructive: ["删除数据", "bad"],
+const effectInfo = (eff?: string): [string, string] => {
+  switch (eff || "change") {
+    case "read-only":
+      return [bi("只读", "Read-only"), "ok"];
+    case "change":
+      return [bi("修改", "Modify"), ""];
+    case "disruptive":
+      return [bi("中断服务", "Disruptive"), "bad"];
+    case "destructive":
+      return [bi("删除数据", "Destructive"), "bad"];
+    default:
+      return [eff || "", ""];
+  }
 };
-const VERSION_STATE: Record<string, [string, string]> = {
-  published: ["done", "已发布"],
-  verifying: ["queued", "待验证"],
-  draft: ["idle", "草稿"],
-};
+const versionState = (s: string): [string, string] =>
+  s === "published"
+    ? ["done", bi("已发布", "Published")]
+    : s === "verifying"
+      ? ["queued", bi("待验证", "Verifying")]
+      : ["idle", bi("草稿", "Draft")];
 const show = (v: unknown) =>
   v === undefined || v === null || v === "" ? "—" : String(v);
 type Rev = {
@@ -228,10 +238,11 @@ const Steps = memo(function Steps({
   steps: Any[];
   start?: number;
 }) {
+  useLang();
   return (
     <ol className="cv-steps">
       {steps.map((s, i) => {
-        const [label, tone] = EFFECT[s.effect || "change"] || [s.effect, ""];
+        const [label, tone] = effectInfo(s.effect);
         return (
           <li key={i}>
             <span className="cv-n">{start + i}</span>
@@ -249,12 +260,17 @@ const Steps = memo(function Steps({
                   </span>
                 ) : s.tasks ? (
                   <span className="faint small">
-                    {s.tasks.length} 个内联任务
+                    {bi(`${s.tasks.length} 个内联任务`, `${s.tasks.length} inline task(s)`)}
                   </span>
                 ) : null}
               </div>
               {s.desc && <p>{s.desc}</p>}
-              {s.expect && <p className="cv-expect">成功的样子：{s.expect}</p>}
+              {s.expect && (
+                <p className="cv-expect">
+                  {bi("成功的样子：", "Expected: ")}
+                  {s.expect}
+                </p>
+              )}
             </div>
           </li>
         );
@@ -263,17 +279,27 @@ const Steps = memo(function Steps({
   );
 });
 
-const STATUS_CHOICES: { v: string; label: string; hint: string }[] = [
-  { v: "draft", label: "草稿", hint: "还没验证过，只给自己试" },
+const statusChoices = (): { v: string; label: string; hint: string }[] => [
+  {
+    v: "draft",
+    label: bi("草稿", "Draft"),
+    hint: bi("还没验证过，只给自己试", "Unverified; for personal testing only"),
+  },
   {
     v: "verifying",
-    label: "待验证",
-    hint: "能生成交付，但还没有在空环境真正部署过；用它生成交付时会提示“不要用于生产”",
+    label: bi("待验证", "Verifying"),
+    hint: bi(
+      "能生成交付，但还没有在空环境真正部署过；用它生成交付时会提示“不要用于生产”",
+      "Generates deliveries, not yet verified on a clean environment; warns \"Do not use in production\"",
+    ),
   },
   {
     v: "published",
-    label: "已发布",
-    hint: "已经在空环境真正部署并跑通了测试，可以用于生产",
+    label: bi("已发布", "Published"),
+    hint: bi(
+      "已经在空环境真正部署并跑通了测试，可以用于生产",
+      "Deployed on a clean environment and passed tests; ready for production",
+    ),
   },
 ];
 
@@ -290,10 +316,12 @@ function VersionStatus({
   tone: string;
   label: string;
 }) {
+  useLang();
   const [open, setOpen] = useState(false);
   const [status, setStatus] = useState(v.status);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
+  const choices = statusChoices();
   const save = async () => {
     setBusy(true);
     try {
@@ -302,7 +330,10 @@ function VersionStatus({
         { method: "POST", body: JSON.stringify({ status, note }) },
       );
       Message.success(
-        `版本 ${v.id} 已改为「${STATUS_CHOICES.find((c) => c.v === status)?.label}」`,
+        bi(
+          `版本 ${v.id} 已改为「${choices.find((c) => c.v === status)?.label}」`,
+          `Version ${v.id} updated to "${choices.find((c) => c.v === status)?.label}"`,
+        ),
       );
       setOpen(false);
       window.dispatchEvent(new Event("mh-apps-changed"));
@@ -319,20 +350,20 @@ function VersionStatus({
         <button
           type="button"
           className="cv-vedit"
-          aria-label={`修改版本 ${v.id} 的状态`}
+          aria-label={bi(`修改版本 ${v.id} 的状态`, `Change status of version ${v.id}`)}
           onClick={() => {
             setStatus(v.status);
             setNote("");
             setOpen(true);
           }}
         >
-          <IconEdit /> 改状态
+          <IconEdit /> {bi("改状态", "Set status")}
         </button>
       )}
       <Modal
         visible={open}
-        title={`版本 ${v.id} 的状态`}
-        okText="保存"
+        title={bi(`版本 ${v.id} 的状态`, `Version ${v.id} Status`)}
+        okText={bi("保存", "Save")}
         confirmLoading={busy}
         onOk={save}
         onCancel={() => !busy && setOpen(false)}
@@ -347,7 +378,7 @@ function VersionStatus({
           onChange={setStatus}
           className="cv-vradio"
         >
-          {STATUS_CHOICES.map((c) => (
+          {choices.map((c) => (
             <Radio key={c.v} value={c.v}>
               <b>{c.label}</b>
               <span className="faint small"> {c.hint}</span>
@@ -356,7 +387,9 @@ function VersionStatus({
         </Radio.Group>
         <label className="cv-vnote">
           <span>
-            {status === "published" ? "在哪验证的（必填）" : "说明（可选）"}
+            {status === "published"
+              ? bi("在哪验证的（必填）", "Verification details (required)")
+              : bi("说明（可选）", "Notes (optional)")}
           </span>
           <Input.TextArea
             value={note}
@@ -365,13 +398,19 @@ function VersionStatus({
             autoSize={{ minRows: 2, maxRows: 4 }}
             placeholder={
               status === "published"
-                ? "例如：2026-10-27 在三台全新 Ubuntu 24.04 上部署并通过全部测试"
+                ? bi(
+                    "例如：2026-10-27 在三台全新 Ubuntu 24.04 上部署并通过全部测试",
+                    "e.g. 2026-10-27 deployed on 3 fresh Ubuntu 24.04 hosts and passed all tests",
+                  )
                 : ""
             }
           />
         </label>
         <p className="faint small">
-          保存后会记为这个组件的一次修订，可以在工作台的历史里看到是谁、什么时候、因为什么改的。
+          {bi(
+            "保存后会记为这个组件的一次修订，可以在工作台的历史里看到是谁、什么时候、因为什么改的。",
+            "Saved as a component revision recording who changed it, when, and why in workbench history.",
+          )}
         </p>
       </Modal>
     </>
@@ -391,6 +430,7 @@ export function ComponentPanes({
   error: string;
   onRetry?: () => void;
 }) {
+  const lang = useLang();
   const revsUrl = `/api/components/${encodeURIComponent(entry.id)}/revisions`;
   const [revs, setRevs] = useState<Rev[] | null>(
     () => cached<Rev[]>(revsUrl) ?? null,
@@ -406,23 +446,23 @@ export function ComponentPanes({
     if (yaml === null) return {value:null as Any | null,error:""};
     try {
       const value=parse(yaml);
-      if(!value || typeof value!=="object" || Array.isArray(value))throw new Error("清单应为一个对象");
+      if(!value || typeof value!=="object" || Array.isArray(value))throw new Error(bi("清单应为一个对象", "Manifest must be a mapping object"));
       const checkReferences=(v:any):void=>{
         if(!v || typeof v!=="object")return;
-        if(Object.prototype.hasOwnProperty.call(v,"$file"))throw new Error("清单引用尚未展开，请刷新页面；如仍有问题，请在组件编辑器检查引用文件");
+        if(Object.prototype.hasOwnProperty.call(v,"$file"))throw new Error(bi("清单引用尚未展开，请刷新页面；如仍有问题，请在组件编辑器检查引用文件", "Manifest references are not expanded; refresh the page or inspect referenced files in the editor"));
         Object.values(v).forEach(checkReferences);
       };
       checkReferences(value);
       for(const key of ["requires","params","roles","versions","tests","cleanup","endpoints","ports","secrets","inputs","flows","groups"]){
-        if(value[key]!=null && !Array.isArray(value[key]))throw new Error(key+" 应为列表，请在组件编辑器修正");
+        if(value[key]!=null && !Array.isArray(value[key]))throw new Error(key+bi(" 应为列表，请在组件编辑器修正", " must be a list; fix in the component editor"));
       }
       for(const key of ["lifecycle"]){
-        if(value[key]!=null && (typeof value[key]!=="object" || Array.isArray(value[key])))throw new Error(key+" 应为阶段映射");
-        for(const steps of Object.values(value[key] || {}))if(!Array.isArray(steps))throw new Error(key+" 的阶段应为步骤列表");
+        if(value[key]!=null && (typeof value[key]!=="object" || Array.isArray(value[key])))throw new Error(key+bi(" 应为阶段映射", " must be a phase map"));
+        for(const steps of Object.values(value[key] || {}))if(!Array.isArray(steps))throw new Error(key+bi(" 的阶段应为步骤列表", " phases must be step lists"));
       }
       return {value:value as Any,error:""};
     } catch(e) {return {value:null as Any | null,error:String(e instanceof Error?e.message:e)};}
-  }, [yaml]);
+  }, [yaml, lang]);
   const c=manifest.value;
   const draftOnly = entry.source === "draft";
   useEffect(() => {
@@ -436,33 +476,33 @@ export function ComponentPanes({
         setRevs(revList);
       })
       .catch(() => setRevs((prev) => prev ?? []));
-  }, [admin, draftOnly, entry.id, entry.source, revsUrl]);
+  }, [admin, draftOnly, entry.id, entry.source, revsUrl, lang]);
 
   const lifecycle: Record<string, Any[]> = c?.lifecycle || {};
   const params: Any[] = c?.params || [];
   const stepCount = Object.values(lifecycle).reduce((n, l) => n + l.length, 0);
   const external = entry.kind === "external" || c?.kind === "external";
   const sections: [string, string, number | undefined][] = [
-    ["versions", "版本", entry.versions.length],
+    ["versions", bi("版本", "Versions"), entry.versions.length],
     ...(external
       ? []
-      : ([["flow", "部署流程", stepCount]] as [string, string, number][])),
-    ["params", "参数", params.length],
+      : ([["flow", bi("部署流程", "Deploy Flow"), stepCount]] as [string, string, number][])),
+    ["params", bi("参数", "Parameters"), params.length],
     [
       "tests",
-      "验证与清理",
+      bi("验证与清理", "Tests & Cleanup"),
       (c?.tests?.length || 0) + (c?.cleanup?.length || 0),
     ],
     [
       "links",
-      "入口与关系",
+      bi("入口与关系", "Endpoints & Relations"),
       (c?.endpoints?.length || 0) +
         (c?.requires?.length || 0) +
         (c?.ports?.length || 0),
     ],
     [
       "about",
-      "能力与限制",
+      bi("能力与限制", "Capabilities & Limits"),
       (c?.detail?.capabilities?.length || 0) +
         (c?.detail?.limits?.length || 0) || undefined,
     ],
@@ -471,19 +511,19 @@ export function ComponentPanes({
       : ([
           [
             "ops",
-            "运维知识",
+            bi("运维知识", "Operations"),
             (entry.operations?.checks?.length || 0) +
               (entry.operations?.faults?.length || 0) || undefined,
           ],
         ] as [string, string, number | undefined][])),
     ...(admin
-      ? ([["revs", "修订", revs?.length]] as [
+      ? ([["revs", bi("修订", "Revisions"), revs?.length]] as [
           string,
           string,
           number | undefined,
         ][])
       : []),
-    ["source", "清单源码", yaml ? yaml.split("\n").length : undefined],
+    ["source", bi("清单源码", "Manifest Source"), yaml ? yaml.split("\n").length : undefined],
   ];
 
   // the table of contents follows the reader
@@ -569,7 +609,7 @@ export function ComponentPanes({
   if (loadErr) {
     if (entry.broken && !c) return null;
     const missingShared =
-      /\$file|common|shared|公共|引用|not found|no such file|不存在/i.test(
+      /\$file|common|shared|reference|missing|公共|引用|not found|no such file|不存在/i.test(
         loadErr,
       );
     return (
@@ -577,11 +617,17 @@ export function ComponentPanes({
         <div className="cv-err-head">
           <IconExclamationCircle className="cv-err-ic" />
           <div>
-            <b>组件清单暂时无法载入</b>
+            <b>{bi("组件清单暂时无法载入", "Component manifest failed to load")}</b>
             <p>
               {missingShared
-                ? "检测到清单引用或共享流程文件缺失，请确认平台公共流程（platform-shared）或组件内的被引用文件是否存在。"
-                : "清单语法或字段结构未通过校验，请在组件编辑器中检查修正后重新载入。"}
+                ? bi(
+                    "检测到清单引用或共享流程文件缺失，请确认平台公共流程（platform-shared）或组件内的被引用文件是否存在。",
+                    "Missing manifest reference or shared flow file; verify platform-shared and referenced files in this component.",
+                  )
+                : bi(
+                    "清单语法或字段结构未通过校验，请在组件编辑器中检查修正后重新载入。",
+                    "Manifest syntax or schema validation failed; fix it in the component editor and reload.",
+                  )}
             </p>
           </div>
         </div>
@@ -589,7 +635,7 @@ export function ComponentPanes({
         <div className="cv-err-acts">
           {onRetry && (
             <Button size="small" icon={<IconRefresh />} onClick={onRetry}>
-              重新载入
+              {bi("重新载入", "Reload")}
             </Button>
           )}
           {admin && (
@@ -601,7 +647,7 @@ export function ComponentPanes({
                 go({ name: "components", id: entry.id, edit: "overview" })
               }
             >
-              打开编辑器排障
+              {bi("打开编辑器排障", "Open Editor")}
             </Button>
           )}
           {admin && (
@@ -616,7 +662,7 @@ export function ComponentPanes({
                 })
               }
             >
-              检查平台公共流程
+              {bi("检查平台公共流程", "Check Platform Shared Flows")}
             </Button>
           )}
         </div>
@@ -687,12 +733,13 @@ export function ComponentPanes({
   };
   const lit = (id: string) => (flash?.id === id ? "lit" : "");
   const st = styleOf(entry.id, entry.category, entry.icon, entry.color);
+  const phases = getPhases();
 
   return (
     <div className="cv-wrap" ref={box}>
       <UnderlineTabs
         className="cv-utabs"
-        label="组件详情分区"
+        label={bi("组件详情分区", "Component detail sections")}
         value={active}
         onChange={jump}
         items={sections.map(([id, label, count]) => ({
@@ -705,11 +752,10 @@ export function ComponentPanes({
       <div className="cv2">
         <div className="cv2-main">
           <section id="cv-versions" className={`cv-sec ${lit("cv-versions")}`}>
-          <h2>版本</h2>
+          <h2>{bi("版本", "Versions")}</h2>
           <ul className="cv-versions">
             {entry.versions.map((v) => {
-              const [tone, label] =
-                VERSION_STATE[v.status] || VERSION_STATE.draft;
+              const [tone, label] = versionState(v.status);
               return (
                 <li key={v.id}>
                   <b className="mono">{v.id}</b>
@@ -730,17 +776,19 @@ export function ComponentPanes({
                           <OsLogo id={p} size={13} /> {p.replace("-amd64", "")}
                           {k
                             ? k.deployable
-                              ? " · 可生成"
+                              ? bi(" · 可生成", " · Ready")
                               : k.ready
-                                ? " · 缺运行环境"
-                                : ` · 缺 ${k.missing?.length ?? ""} 个包`
+                                ? bi(" · 缺运行环境", " · Missing runtime")
+                                : bi(` · 缺 ${k.missing?.length ?? ""} 个包`, ` · Missing ${k.missing?.length ?? ""} pkg(s)`)
                             : ""}
                         </span>
                       );
                     })}
                     {!v.platforms?.length && (
                       <span className="faint small">
-                        {external ? "不安装到机器上" : "没有声明支持的系统"}
+                        {external
+                          ? bi("不安装到机器上", "Not installed on hosts")
+                          : bi("没有声明支持的系统", "No supported OS declared")}
                       </span>
                     )}
                   </span>
@@ -753,14 +801,16 @@ export function ComponentPanes({
         {!external && (
           <section id="cv-flow" className={`cv-sec ${lit("cv-flow")}`}>
             <h2>
-              部署流程
+              {bi("部署流程", "Deployment Flow")}
               <span className="cv-sub">
-                平台按这些步骤生成 Ansible
-                脚本和部署手册，每一步都会出现在交付的手册里
+                {bi(
+                  "平台按这些步骤生成 Ansible 脚本和部署手册，每一步都会出现在交付的手册里",
+                  "The platform generates Ansible playbooks and runbooks from these steps; every step appears in the delivery handbook",
+                )}
               </span>
             </h2>
-            <ol className="cv-pipe" aria-label="部署阶段">
-              {PHASES.map(([id, label]) => {
+            <ol className="cv-pipe" aria-label={bi("部署阶段", "Deployment phases")}>
+              {phases.map(([id, label]) => {
                 const n = lifecycle[id]?.length || 0;
                 return (
                   <li
@@ -773,16 +823,18 @@ export function ComponentPanes({
                       onClick={() => jumpPhase(id)}
                     >
                       <b>{label}</b>
-                      <span>{n ? `${n} 步` : "—"}</span>
+                      <span>{n ? bi(`${n} 步`, `${n} step(s)`) : "—"}</span>
                     </button>
                   </li>
                 );
               })}
             </ol>
             {stepCount === 0 && (
-              <p className="muted">这个组件没有声明部署步骤。</p>
+              <p className="muted">
+                {bi("这个组件没有声明部署步骤。", "No deployment steps declared for this component.")}
+              </p>
             )}
-            {PHASES.filter(([id]) => lifecycle[id]?.length).map(
+            {phases.filter(([id]) => lifecycle[id]?.length).map(
               ([id, label]) => (
                 <div
                   className={`cv-phase ${lit(`cv-ph-${id}`)}`}
@@ -802,9 +854,12 @@ export function ComponentPanes({
 
         <section id="cv-params" className={`cv-sec ${lit("cv-params")}`}>
           <h2>
-            参数
+            {bi("参数", "Parameters")}
             <span className="cv-sub">
-              新建集群时可以调整；超出范围或不满足规则会被拦下
+              {bi(
+                "新建集群时可以调整；超出范围或不满足规则会被拦下",
+                "Configurable when creating a cluster; out-of-range or rule violations are blocked",
+              )}
             </span>
           </h2>
           <Params c={c} />
@@ -812,44 +867,52 @@ export function ComponentPanes({
 
         <section id="cv-tests" className={`cv-sec ${lit("cv-tests")}`}>
           <h2>
-            验证与清理
+            {bi("验证与清理", "Tests & Cleanup")}
             <span className="cv-sub">
-              部署完成后交给人执行的验收，以及拆除时的步骤
+              {bi(
+                "部署完成后交给人执行的验收，以及拆除时的步骤",
+                "Post-deploy acceptance checks for operators and teardown cleanup steps",
+              )}
             </span>
           </h2>
           {c.tests?.length > 0 && (
             <div className="cv-phase">
-              <h3>功能测试</h3>
+              <h3>{bi("功能测试", "Functional Tests")}</h3>
               <Steps steps={c.tests} />
             </div>
           )}
           {c.cleanup?.length > 0 && (
             <div className="cv-phase">
-              <h3>清理</h3>
+              <h3>{bi("清理", "Cleanup")}</h3>
               <Steps steps={c.cleanup} />
             </div>
           )}
           {!c.tests?.length && !c.cleanup?.length && (
-            <p className="muted">这个组件没有声明验收测试和清理步骤。</p>
+            <p className="muted">
+              {bi("这个组件没有声明验收测试和清理步骤。", "No verification tests or cleanup steps declared.")}
+            </p>
           )}
         </section>
 
         <section id="cv-links" className={`cv-sec ${lit("cv-links")}`}>
-          <h2>入口与关系</h2>
+          <h2>{bi("入口与关系", "Endpoints & Relations")}</h2>
           <Links c={c} />
         </section>
 
         <section id="cv-about" className={`cv-sec ${lit("cv-about")}`}>
-          <h2>能力与限制</h2>
+          <h2>{bi("能力与限制", "Capabilities & Limits")}</h2>
           <About c={c} />
         </section>
 
         {!external && (
           <section id="cv-ops" className={`cv-sec ${lit("cv-ops")}`}>
             <h2>
-              运维知识
+              {bi("运维知识", "Operations")}
               <span className="cv-sub">
-                写进每个集群的运维交接文档，按实际拓扑和参数展开
+                {bi(
+                  "写进每个集群的运维交接文档，按实际拓扑和参数展开",
+                  "Included in each cluster's handover runbook, rendered with actual topology and parameters",
+                )}
               </span>
             </h2>
             <Ops o={entry.operations} />
@@ -858,28 +921,31 @@ export function ComponentPanes({
 
         {admin && (
           <section id="cv-revs" className={`cv-sec ${lit("cv-revs")}`}>
-            <h2>修订</h2>
+            <h2>{bi("修订", "Revisions")}</h2>
             {revs === null ? (
               <Skeleton animation text={{ rows: 3 }} />
             ) : revs.length === 0 ? (
               <p className="muted">
-                还没有修订。通过工作台发布或导入组件包后，每一次都会留下一条。
+                {bi(
+                  "还没有修订。通过工作台发布或导入组件包后，每一次都会留下一条。",
+                  "No revisions yet. Publishing from the workbench or importing a component pack records one.",
+                )}
               </p>
             ) : (
               <ol className="cv-revs">
                 {revs.slice(0, 6).map((r) => (
                   <li key={r.rev}>
-                    <b>修订 {r.rev}</b>
-                    <span>{r.note || "（无说明）"}</span>
+                    <b>{bi(`修订 ${r.rev}`, `Rev ${r.rev}`)}</b>
+                    <span>{r.note || bi("（无说明）", "(No note)")}</span>
                     <small className="faint">
                       {r.user} · {ago(r.time)} ·{" "}
                       {[
-                        r.added && `新增 ${r.added}`,
-                        r.changed && `修改 ${r.changed}`,
-                        r.removed && `删除 ${r.removed}`,
+                        r.added && bi(`新增 ${r.added}`, `Added ${r.added}`),
+                        r.changed && bi(`修改 ${r.changed}`, `Modified ${r.changed}`),
+                        r.removed && bi(`删除 ${r.removed}`, `Deleted ${r.removed}`),
                       ]
                         .filter(Boolean)
-                        .join("，") || "无文件变化"}
+                        .join(bi("，", ", ")) || bi("无文件变化", "No file changes")}
                     </small>
                   </li>
                 ))}
@@ -890,9 +956,12 @@ export function ComponentPanes({
 
         <section id="cv-source" className={`cv-sec ${lit("cv-source")}`}>
           <h2>
-            清单源码
+            {bi("清单源码", "Manifest Source")}
             <span className="cv-sub">
-              component.yaml · 平台代码里没有任何应用特例
+              {bi(
+                "component.yaml · 平台代码里没有任何应用特例",
+                "component.yaml · Zero app-specific hardcoding in platform code",
+              )}
             </span>
             <button
               type="button"
@@ -900,7 +969,7 @@ export function ComponentPanes({
               aria-expanded={srcOpen}
               onClick={() => setSrcOpen((o) => !o)}
             >
-              {srcOpen ? "收起" : "展开查看"}
+              {srcOpen ? bi("收起", "Collapse") : bi("展开查看", "Expand")}
             </button>
           </h2>
           {srcOpen &&
@@ -917,7 +986,8 @@ export function ComponentPanes({
       <aside className="cv2-rail">
         {!external && (entry.plans?.[1] || entry.plans?.[0]) && (
           <div className="cv-rail-cap">
-            典型部署：{(entry.plans?.[1] || entry.plans?.[0])!.name}
+            {bi("典型部署：", "Typical topology: ")}
+            {(entry.plans?.[1] || entry.plans?.[0])!.name}
             {(entry.plans?.[1] || entry.plans?.[0])!.spec
               ? ` · ${(entry.plans?.[1] || entry.plans?.[0])!.spec}`
               : ""}
@@ -945,16 +1015,19 @@ export function ComponentPanes({
         <dl className="cv-facts">
           {!external && (
             <div>
-              <dt>角色</dt>
+              <dt>{bi("角色", "Roles")}</dt>
               <dd>
                 {entry.roles.map((r) => (
                   <span key={r.name}>
                     {r.title || r.name}{" "}
                     <em>
                       {r.max && r.min === r.max
-                        ? `固定 ${r.min} 台`
-                        : `${r.min} 台起，常用 ${r.default ?? r.min} 台`}
-                      {r.odd ? "，建议奇数" : ""}
+                        ? bi(`固定 ${r.min} 台`, `Fixed ${r.min}`)
+                        : bi(
+                            `${r.min} 台起，常用 ${r.default ?? r.min} 台`,
+                            `≥ ${r.min}, default ${r.default ?? r.min}`,
+                          )}
+                      {r.odd ? bi("，建议奇数", ", odd advised") : ""}
                     </em>
                   </span>
                 ))}
@@ -963,7 +1036,7 @@ export function ComponentPanes({
           )}
           {(c.flows || []).length > 0 && (
             <div>
-              <dt>数据流</dt>
+              <dt>{bi("数据流", "Data Flows")}</dt>
               <dd>
                 {(c.flows as Any[]).map((f) => (
                   <span key={f.id}>{f.title || f.id}</span>
@@ -973,18 +1046,22 @@ export function ComponentPanes({
           )}
           {(entry.provides || []).length > 0 && (
             <div>
-              <dt>提供</dt>
-              <dd className="mono">{entry.provides!.join("、")}</dd>
+              <dt>{bi("提供", "Provides")}</dt>
+              <dd className="mono">{entry.provides!.join(", ")}</dd>
             </div>
           )}
           {(c.requires || []).length > 0 && (
             <div>
-              <dt>依赖</dt>
+              <dt>{bi("依赖", "Requires")}</dt>
               <dd>
                 {(c.requires as Any[]).map((r) => (
                   <span key={r.capability}>
                     <span className="mono">{r.capability}</span>
-                    {r.default_impl && <em>默认 {r.default_impl}</em>}
+                    {r.default_impl && (
+                      <em>
+                        {bi(`默认 ${r.default_impl}`, `default ${r.default_impl}`)}
+                      </em>
+                    )}
                   </span>
                 ))}
               </dd>
@@ -992,18 +1069,18 @@ export function ComponentPanes({
           )}
           {(c.ports || []).length > 0 && (
             <div>
-              <dt>端口</dt>
+              <dt>{bi("端口", "Ports")}</dt>
               <dd className="mono">
                 {(c.ports as Any[])
                   .map((p) => show(p.value).replace(/^=params\./, ""))
-                  .join("、")}
+                  .join(", ")}
               </dd>
             </div>
           )}
         </dl>
         <nav
           className="cv-toc"
-          aria-label="本页内容"
+          aria-label={bi("本页内容", "On this page")}
           ref={tocRef as React.RefObject<HTMLElement>}
           style={
             {
@@ -1040,6 +1117,7 @@ export function ComponentPanes({
 
 /** A component the customer operates: the platform only produces its configuration sheet. */
 function ExternalArt() {
+  useLang();
   return (
     <div className="cv-ext">
       <svg viewBox="0 0 300 120" aria-hidden>
@@ -1052,7 +1130,7 @@ function ExternalArt() {
           className="ext-box dim"
         />
         <text x="39" y="64" textAnchor="middle" className="ext-t">
-          客户端
+          {bi("客户端", "Client")}
         </text>
         <path d="M72 60h44" className="ext-wire" />
         <rect
@@ -1064,10 +1142,10 @@ function ExternalArt() {
           className="ext-box lead"
         />
         <text x="160" y="58" textAnchor="middle" className="ext-t b">
-          负载均衡
+          {bi("负载均衡", "Load Balancer")}
         </text>
         <text x="160" y="74" textAnchor="middle" className="ext-t">
-          客户运维
+          {bi("客户运维", "Customer Ops")}
         </text>
         <path
           d="M204 60c22 0 22-34 44-34M204 60h44M204 60c22 0 22 34 44 34"
@@ -1099,30 +1177,43 @@ function ExternalArt() {
         />
       </svg>
       <p>
-        平台不在机器上安装它，只生成一份要在它上面配置的监听、后端和健康检查清单。
+        {bi(
+          "平台不在机器上安装它，只生成一份要在它上面配置的监听、后端和健康检查清单。",
+          "Not installed by the platform; generates listener, backend, and health-check configuration sheets instead.",
+        )}
       </p>
     </div>
   );
 }
 
 const Params = memo(function Params({ c }: { c: Any }) {
+  useLang();
   const groups: Any[] = c.groups || [];
   const params: Any[] = c.params || [];
   const sets = groups
     .map((g) => ({ g, list: params.filter((p) => p.group === g.id) }))
     .filter((x) => x.list.length);
   const loose = params.filter((p) => !groups.some((g) => g.id === p.group));
-  if (loose.length) sets.push({ g: { id: "_", label: "其他" }, list: loose });
+  if (loose.length)
+    sets.push({ g: { id: "_", label: bi("其他", "Other") }, list: loose });
   const [open, setOpen] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(sets.slice(0, 2).map(({ g }) => [g.id, true])),
   );
-  if (!params.length) return <p className="muted">这个组件没有可调的参数。</p>;
+  if (!params.length)
+    return (
+      <p className="muted">
+        {bi("这个组件没有可调的参数。", "This component has no configurable parameters.")}
+      </p>
+    );
   const allOpen = sets.every(({ g }) => open[g.id]);
   return (
     <>
       <div className="cv-bar">
         <span className="faint small">
-          {params.length} 项，分 {sets.length} 组
+          {bi(
+            `${params.length} 项，分 ${sets.length} 组`,
+            `${params.length} param(s) in ${sets.length} group(s)`,
+          )}
         </span>
         <button
           type="button"
@@ -1135,7 +1226,7 @@ const Params = memo(function Params({ c }: { c: Any }) {
             )
           }
         >
-          {allOpen ? "全部收起" : "全部展开"}
+          {allOpen ? bi("全部收起", "Collapse all") : bi("全部展开", "Expand all")}
         </button>
       </div>
       <div className="cv-groups">
@@ -1154,7 +1245,7 @@ const Params = memo(function Params({ c }: { c: Any }) {
                 <i>{list.length}</i>
                 {!on && (
                   <span className="cv-peek">
-                    {list.map((p) => p.label || p.key).join("、")}
+                    {list.map((p) => p.label || p.key).join(bi("、", ", "))}
                   </span>
                 )}
               </button>
@@ -1178,15 +1269,15 @@ const Params = memo(function Params({ c }: { c: Any }) {
                           : p.min !== undefined || p.max !== undefined
                             ? `${show(p.min)} – ${show(p.max)}`
                             : p.pattern
-                              ? "有格式要求"
+                              ? bi("有格式要求", "Pattern constrained")
                               : ""}
                         <span className="cv-flags">
-                          {p.required && <span className="flag">必填</span>}
+                          {p.required && <span className="flag">{bi("必填", "Required")}</span>}
                           {p.restart && (
-                            <span className="flag cv-mute">改后重启</span>
+                            <span className="flag cv-mute">{bi("改后重启", "Restart")}</span>
                           )}
                           {p.advanced && (
-                            <span className="flag cv-mute">高级</span>
+                            <span className="flag cv-mute">{bi("高级", "Advanced")}</span>
                           )}
                         </span>
                       </span>
@@ -1203,50 +1294,55 @@ const Params = memo(function Params({ c }: { c: Any }) {
 });
 
 const Links = memo(function Links({ c }: { c: Any }) {
+  useLang();
   const rows: [string, string, string, string][] = [
     ...((c.endpoints || []) as Any[]).map(
       (e): [string, string, string, string] => [
-        "对外入口",
+        bi("对外入口", "Endpoint"),
         e.title || e.name,
-        `${e.protocol} · 端口 ${show(e.port).replace(/^=params\./, "")}`,
+        `${e.protocol} · ${bi("端口", "port")} ${show(e.port).replace(/^=params\./, "")}`,
         e.note || "",
       ],
     ),
     ...((c.requires || []) as Any[]).map(
       (r): [string, string, string, string] => [
-        "依赖",
+        bi("依赖", "Requires"),
         r.capability,
         r.default_impl
-          ? `没指定时自动加入 ${r.default_impl}`
-          : "部署时要指定由谁来提供",
-        r.when ? `当 ${r.when} 时需要` : "",
+          ? bi(`没指定时自动加入 ${r.default_impl}`, `Defaults to ${r.default_impl} if unset`)
+          : bi("部署时要指定由谁来提供", "Provider must be selected at deploy"),
+        r.when ? bi(`当 ${r.when} 时需要`, `Required when ${r.when}`) : "",
       ],
     ),
     ...((c.ports || []) as Any[]).map((p): [string, string, string, string] => [
-      "占用端口",
+      bi("占用端口", "Port"),
       p.name,
-      show(p.value).replace(/^=params\./, "参数 "),
+      show(p.value).replace(/^=params\./, bi("参数 ", "param ")),
       "",
     ]),
     ...((c.secrets || []) as Any[]).map(
       (x): [string, string, string, string] => [
-        "自动生成的密钥",
+        bi("自动生成的密钥", "Generated Secret"),
         x.name,
-        x.length ? `${x.length} 位` : "",
+        x.length ? bi(`${x.length} 位`, `${x.length} chars`) : "",
         "",
       ],
     ),
     ...((c.inputs || []) as Any[]).map(
       (x): [string, string, string, string] => [
-        "需要上传",
+        bi("需要上传", "Required Upload"),
         x.label || x.name,
-        x.kind === "tls-bundle" ? "TLS 证书包" : x.kind,
+        x.kind === "tls-bundle" ? bi("TLS 证书包", "TLS Bundle") : x.kind,
         "",
       ],
     ),
   ];
   if (!rows.length)
-    return <p className="muted">这个组件没有声明入口、依赖或端口。</p>;
+    return (
+      <p className="muted">
+        {bi("这个组件没有声明入口、依赖或端口。", "No endpoints, dependencies, or ports declared.")}
+      </p>
+    );
   return (
     <ul className="cv-links">
       {rows.map(([k, name, v, note], i) => (
@@ -1263,18 +1359,23 @@ const Links = memo(function Links({ c }: { c: Any }) {
 
 /** The author's operations knowledge: what to check every day, routine tasks, typical problems, where the logs are. */
 function Ops({ o }: { o?: Any }) {
+  useLang();
   const aiStatus = useAIStatus();
   if (!o || !(o.checks?.length || o.tasks?.length || o.faults?.length))
     return (
       <p className="muted">
-        这个组件还没有写运维知识。在工作台的清单里补上
-        operations（巡检、常见操作、典型问题、日志位置），交接文档就会带上
-        {aiStatus.enabled ? "；也可以让组件 AI 起草。" : "。"}
+        {bi(
+          "这个组件还没有写运维知识。在工作台的清单里补上 operations（巡检、常见操作、典型问题、日志位置），交接文档就会带上",
+          "No operations knowledge written yet. Add operations (checks, tasks, faults, log locations) to the manifest in the workbench to include it in handover docs",
+        )}
+        {aiStatus.enabled
+          ? bi("；也可以让组件 AI 起草。", "; or ask Component AI to draft it.")
+          : "."}
       </p>
     );
   const when = (w?: string) =>
     w ? (
-      <span className="cv-when" title="只在这个条件成立的集群里出现">
+      <span className="cv-when" title={bi("只在这个条件成立的集群里出现", "Shown only in clusters matching this condition")}>
         {w}
       </span>
     ) : null;
@@ -1283,13 +1384,13 @@ function Ops({ o }: { o?: Any }) {
       {o.overview && <p className="cv-ops-lead">{o.overview}</p>}
       {(
         [
-          ["日常巡检", o.checks],
-          ["常见操作", o.tasks],
-        ] as [string, Any[]][]
+          ["checks", bi("日常巡检", "Routine Checks"), o.checks],
+          ["tasks", bi("常见操作", "Common Tasks"), o.tasks],
+        ] as [string, string, Any[]][]
       )
-        .filter(([, l]) => l?.length)
-        .map(([h, l]) => (
-          <div key={h} className="cv-ops-g">
+        .filter(([, , l]) => l?.length)
+        .map(([k, h, l]) => (
+          <div key={k} className="cv-ops-g">
             <h3>
               {h} <em className="num">{l.length}</em>
             </h3>
@@ -1298,10 +1399,16 @@ function Ops({ o }: { o?: Any }) {
                 <li key={x.title}>
                   <b>{x.title}</b>
                   {when(x.when)}
-                  {x.hosts && <span className="faint small">在{x.hosts}</span>}
+                  {x.hosts && (
+                    <span className="faint small">
+                      {bi(`在 ${x.hosts}`, `on ${x.hosts}`)}
+                    </span>
+                  )}
                   {x.cmd && <code className="cv-ops-cmd">{x.cmd}</code>}
                   {(x.expect || x.note) && (
-                    <small>{x.expect ? `正常：${x.expect}` : x.note}</small>
+                    <small>
+                      {x.expect ? `${bi("正常：", "Expected: ")}${x.expect}` : x.note}
+                    </small>
                   )}
                 </li>
               ))}
@@ -1311,14 +1418,19 @@ function Ops({ o }: { o?: Any }) {
       {o.faults?.length > 0 && (
         <div className="cv-ops-g">
           <h3>
-            典型问题 <em className="num">{o.faults.length}</em>
+            {bi("典型问题", "Typical Faults")} <em className="num">{o.faults.length}</em>
           </h3>
           <ul>
             {o.faults.map((x: Any) => (
               <li key={x.title}>
                 <b>{x.title}</b>
                 {when(x.when)}
-                {x.symptom && <small>现象：{x.symptom}</small>}
+                {x.symptom && (
+                  <small>
+                    {bi("现象：", "Symptom: ")}
+                    {x.symptom}
+                  </small>
+                )}
                 <ol>
                   {(x.steps || []).map((st: string, i: number) => (
                     <li key={i}>{st}</li>
@@ -1331,7 +1443,8 @@ function Ops({ o }: { o?: Any }) {
       )}
       {o.logs?.length > 0 && (
         <p className="faint small">
-          日志与文件：{o.logs.map((l: Any) => `${l.name} ${l.text}`).join("；")}
+          {bi("日志与文件：", "Logs & files: ")}
+          {o.logs.map((l: Any) => `${l.name} ${l.text}`).join("; ")}
         </p>
       )}
     </div>
@@ -1339,10 +1452,15 @@ function Ops({ o }: { o?: Any }) {
 }
 
 function About({ c }: { c: Any }) {
+  useLang();
   const caps: Any[] = c.detail?.capabilities || [];
   const limits: string[] = c.detail?.limits || [];
   if (!caps.length && !limits.length)
-    return <p className="muted">没有填写能力与限制的说明。</p>;
+    return (
+      <p className="muted">
+        {bi("没有填写能力与限制的说明。", "No capabilities or limitations documented.")}
+      </p>
+    );
   return (
     <dl className="cv-caps">
       {caps.map((x, i) => (
@@ -1353,7 +1471,7 @@ function About({ c }: { c: Any }) {
       ))}
       {limits.map((x, i) => (
         <div key={`l${i}`} className="limit">
-          <dt>限制</dt>
+          <dt>{bi("限制", "Limit")}</dt>
           <dd>{x}</dd>
         </div>
       ))}

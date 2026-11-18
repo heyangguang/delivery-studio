@@ -51,9 +51,10 @@ import {
 } from "./audit";
 import type { AuditSessionRow } from "./audit";
 import { Avatar } from "./accounts";
-import { EffectivePerms } from "./iam";
+import { EffectivePerms, roleTitle } from "./iam";
 import type { Perm } from "./iam";
 import { Markdown } from "./aimd";
+import { bi, getLang, useLang } from "./i18n";
 import "./me.css";
 
 /* My account: who I am, what I did lately, and what my own conversations with the assistant draw on — my skills, my
@@ -95,8 +96,20 @@ type Activity = {
 };
 
 const SECTIONS = [
-  { id: "", title: "概览", icon: <IconUser /> },
-  { id: "security", title: "登录与安全", icon: <IconLock /> },
+  {
+    id: "",
+    get title() {
+      return bi("概览", "Overview");
+    },
+    icon: <IconUser />,
+  },
+  {
+    id: "security",
+    get title() {
+      return bi("登录与安全", "Sign-in & Security");
+    },
+    icon: <IconLock />,
+  },
 ];
 
 export function MePage({
@@ -106,6 +119,7 @@ export function MePage({
   me: Session;
   section?: string;
 }) {
+  const lang = useLang();
   const aiStatus = useAIStatus();
   const [info, setInfo] = useState<Me | null>(
     () => cached<Me>("/api/me") ?? null,
@@ -142,7 +156,7 @@ export function MePage({
   useEffect(() => {
     const el = tabs.current?.querySelector<HTMLElement>(`[data-k="${cur}"]`);
     if (el) setBar({ x: el.offsetLeft, w: el.offsetWidth });
-  }, [cur, info]);
+  }, [cur, info, lang]);
   const open = (id: string) =>
     go({ name: "me", id: id || undefined }, { replace: true });
 
@@ -155,7 +169,7 @@ export function MePage({
           <span className="me-chips">
             {(info?.access?.roles || []).map((r) => (
               <span key={r} className="me-chip role">
-                {r}
+                {roleTitle({ name: r })}
               </span>
             ))}
             {(info?.access?.teams || []).map((t) => (
@@ -165,9 +179,17 @@ export function MePage({
             ))}
             {act && (
               <span className="me-facts-inline">
-                {act.jobs.length ? `${act.jobs.length} 份交付` : "还没有交付"}
+                {act.jobs.length
+                  ? bi(
+                      `${act.jobs.length} 份交付`,
+                      `${act.jobs.length} ${act.jobs.length === 1 ? "delivery" : "deliveries"}`,
+                    )
+                  : bi("还没有交付", "No deliveries yet")}
                 {aiStatus.enabled && act.ai.calls
-                  ? ` · 本月问了 AI ${act.ai.calls} 次`
+                  ? bi(
+                      ` · 本月问了 AI ${act.ai.calls} 次`,
+                      ` · ${act.ai.calls} AI ${act.ai.calls === 1 ? "query" : "queries"} this month`,
+                    )
                   : ""}
               </span>
             )}
@@ -175,7 +197,7 @@ export function MePage({
         </div>
         <span className="me-hero-acts">
           <Button icon={<IconLock />} onClick={() => open("security")}>
-            修改密码
+            {bi("修改密码", "Change Password")}
           </Button>
           {can("iam.user|iam.role|iam.team|audit.view") && (
             <Button onClick={() => go({ name: "accounts" })}>
@@ -187,7 +209,7 @@ export function MePage({
       <div
         className="me-tabs"
         role="tablist"
-        aria-label="我的账户"
+        aria-label={bi("我的账户", "My Account")}
         ref={tabs}
         onKeyDown={(e) => {
           const i = SECTIONS.findIndex((s) => s.id === cur);
@@ -239,6 +261,7 @@ export function MePage({
 /* ---------------------------------------------------------------- overview */
 
 function Overview({ info, act }: { info: Me | null; act: Activity | null }) {
+  useLang();
   const aiStatus = useAIStatus();
   const cost = act
     ? `${act.currency === "USD" ? "$" : "¥"}${act.ai.cost >= 1 ? act.ai.cost.toFixed(2) : act.ai.cost.toFixed(4)}`
@@ -248,42 +271,46 @@ function Overview({ info, act }: { info: Me | null; act: Activity | null }) {
       to: { name: "kb", id: "~my" } as const,
       icon: <IconStorage />,
       k: "k-doc",
-      title: "我的资料",
+      title: bi("我的资料", "My Files"),
       n: info?.kb,
-      unit: "份",
-      empty: "现场资料、网络规划、过往问题",
+      unit: (n: number) => bi(`${n} 份`, `${n} ${n === 1 ? "item" : "items"}`),
+      empty: bi(
+        "现场资料、网络规划、过往问题",
+        "Site docs, network plans & past issues",
+      ),
     },
     {
       to: { name: "skills" } as const,
       icon: <IconBook />,
       k: "k-built",
-      title: "我的技能",
+      title: bi("我的技能", "My Skills"),
       n: info?.skills,
-      unit: "个",
-      empty: "写给 AI 照着做的手册",
+      unit: (n: number) => bi(`${n} 个`, `${n} ${n === 1 ? "skill" : "skills"}`),
+      empty: bi("写给 AI 照着做的手册", "Playbooks for the AI assistant"),
     },
     {
       to: { name: "mcp" } as const,
       icon: <IconLink />,
       k: "k-mcp",
-      title: "我的 MCP 服务",
+      title: bi("我的 MCP 服务", "My MCP Servers"),
       n: info?.mcp,
-      unit: "个",
+      unit: (n: number) =>
+        bi(`${n} 个`, `${n} ${n === 1 ? "server" : "servers"}`),
       empty:
         info && !info.user_mcp
-          ? "管理员没有开放个人接入"
-          : "让 AI 查你常用的系统",
+          ? bi("管理员没有开放个人接入", "Personal MCP disabled by admin")
+          : bi("让 AI 查你常用的系统", "Connect AI to your own systems"),
     },
   ];
   return (
     <div className="me-ov enter">
       <div className="me-main">
         <section className="me-sec">
-          <h2>最近的集群</h2>
+          <h2>{bi("最近的集群", "Recent Clusters")}</h2>
           {!act ? (
             <Skeleton animation text={{ rows: 3 }} />
           ) : act.jobs.length === 0 ? (
-            <p className="me-empty">还没有交付。</p>
+            <p className="me-empty">{bi("还没有交付。", "No deliveries yet.")}</p>
           ) : (
             <ul className="me-rows">
               {act.jobs
@@ -310,8 +337,11 @@ function Overview({ info, act }: { info: Me | null; act: Activity | null }) {
                         <span className="me-row-t">
                           <b className="mono">{j.cluster_id}</b>
                           <small>
-                            {j.app_name} {j.version.split("·")[0].trim()} ·
-                            最近：{planTitle(j)} {PLAN_PHASE[ph].label}
+                            {j.app_name} {j.version.split("·")[0].trim()} ·{" "}
+                            {bi(
+                              `最近：${planTitle(j)} ${PLAN_PHASE[ph].label}`,
+                              `Latest: ${planTitle(j)} · ${PLAN_PHASE[ph].label}`,
+                            )}
                           </small>
                         </span>
                         <time
@@ -329,11 +359,16 @@ function Overview({ info, act }: { info: Me | null; act: Activity | null }) {
           )}
         </section>
         <section className="me-sec">
-          <h2>最近的操作</h2>
+          <h2>{bi("最近的操作", "Recent Activity")}</h2>
           {!act ? (
             <Skeleton animation text={{ rows: 4 }} />
           ) : act.events.length === 0 ? (
-            <p className="me-empty">最近 30 天没有操作记录。</p>
+            <p className="me-empty">
+              {bi(
+                "最近 30 天没有操作记录。",
+                "No activity in the last 30 days.",
+              )}
+            </p>
           ) : (
             <ol className="me-tl">
               {act.events.slice(0, 12).map((e, i) => (
@@ -356,15 +391,15 @@ function Overview({ info, act }: { info: Me | null; act: Activity | null }) {
         {aiStatus.enabled && (
           <>
             <section className="me-sec">
-              <h2>AI 用到的我的资源</h2>
+              <h2>{bi("AI 用到的我的资源", "My AI Resources")}</h2>
               <ul className="me-res">
                 {res.map((o) => (
-                  <li key={o.title}>
+                  <li key={o.k}>
                     <button type="button" onClick={() => go(o.to)}>
                       <span className={`rp-ic ${o.k}`}>{o.icon}</span>
                       <span className="me-row-t">
                         <b>{o.title}</b>
-                        <small>{o.n ? `${o.n} ${o.unit}` : o.empty}</small>
+                        <small>{o.n ? o.unit(o.n) : o.empty}</small>
                       </span>
                       <IconRight className="me-chev" />
                     </button>
@@ -373,22 +408,23 @@ function Overview({ info, act }: { info: Me | null; act: Activity | null }) {
               </ul>
             </section>
             <section className="me-sec">
-              <h2>本月用 AI</h2>
+              <h2>{bi("本月用 AI", "AI Usage This Month")}</h2>
               {!act ? (
                 <Skeleton animation text={{ rows: 1 }} />
               ) : (
                 <p className="me-facts">
                   <span>
-                    <b className="num">{act.ai.calls}</b> 次
+                    <b className="num">{act.ai.calls}</b>{" "}
+                    {bi("次", act.ai.calls === 1 ? "call" : "calls")}
                   </span>
                   <span>
                     <b className="num">
-                      {(act.ai.in + act.ai.out).toLocaleString("en-US")}
+                      {(act.ai.in + act.ai.out).toLocaleString(getLang())}
                     </b>{" "}
-                    Token
+                    {bi("Token", "tokens")}
                   </span>
                   <span>
-                    约 <b className="num">{cost}</b>
+                    {bi("约", "Est.")} <b className="num">{cost}</b>
                   </span>
                 </p>
               )}
@@ -396,7 +432,7 @@ function Overview({ info, act }: { info: Me | null; act: Activity | null }) {
           </>
         )}
         <section className="me-sec">
-          <h2>我能做什么</h2>
+          <h2>{bi("我能做什么", "My Permissions")}</h2>
           {info?.access ? (
             <EffectivePerms
               iam={{
@@ -420,6 +456,7 @@ function Overview({ info, act }: { info: Me | null; act: Activity | null }) {
 /* ---------------------------------------------------------------- sign-in and password */
 
 function SecurityView({ me, act }: { me: Session; act: Activity | null }) {
+  useLang();
   const conn = useConnectivity();
   const [cur, setCur] = useState("");
   const [next, setNext] = useState("");
@@ -439,7 +476,12 @@ function SecurityView({ me, act }: { me: Session; act: Activity | null }) {
         setSessData(d);
         setSessErr("");
       })
-      .catch((e) => setSessErr((e as Error).message || "加载已登录设备失败"));
+      .catch((e) =>
+        setSessErr(
+          (e as Error).message ||
+            bi("加载已登录设备失败", "Failed to load active sessions"),
+        ),
+      );
   };
   useEffect(() => {
     loadSessions();
@@ -449,7 +491,7 @@ function SecurityView({ me, act }: { me: Session; act: Activity | null }) {
       await api(`/api/me/sessions/${encodeURIComponent(id)}`, {
         method: "DELETE",
       });
-      Message.success("已退出该设备");
+      Message.success(bi("已退出该设备", "Device signed out"));
       loadSessions();
     } catch (e) {
       err(e);
@@ -467,7 +509,12 @@ function SecurityView({ me, act }: { me: Session; act: Activity | null }) {
           }),
         ),
       );
-      Message.success(`已退出其他 ${others.length} 台设备`);
+      Message.success(
+        bi(
+          `已退出其他 ${others.length} 台设备`,
+          `Signed out ${others.length} other ${others.length === 1 ? "device" : "devices"}`,
+        ),
+      );
       loadSessions();
     } catch (e) {
       err(e);
@@ -484,7 +531,12 @@ function SecurityView({ me, act }: { me: Session; act: Activity | null }) {
         method: "POST",
         body: JSON.stringify({ current: cur, next }),
       });
-      Message.success("密码已修改；你在其他地方的登录已退出");
+      Message.success(
+        bi(
+          "密码已修改；你在其他地方的登录已退出",
+          "Password updated; all other active sessions have been signed out",
+        ),
+      );
       setCur("");
       setNext("");
       setAgain("");
@@ -514,12 +566,18 @@ function SecurityView({ me, act }: { me: Session; act: Activity | null }) {
           className="me-offline"
           content={
             conn === "offline"
-              ? "当前处于离线状态，恢复连接后可刷新或管理已登录设备。"
-              : "暂无法连接到平台服务，请确认服务正常后重试。"
+              ? bi(
+                  "当前处于离线状态，恢复连接后可刷新或管理已登录设备。",
+                  "You are offline. Reconnect to refresh or manage active devices.",
+                )
+              : bi(
+                  "暂无法连接到平台服务，请确认服务正常后重试。",
+                  "Unable to reach the platform service. Please verify and retry.",
+                )
           }
           action={
             <Button size="mini" onClick={loadSessions}>
-              重新检测
+              {bi("重新检测", "Retry")}
             </Button>
           }
         />
@@ -528,20 +586,26 @@ function SecurityView({ me, act }: { me: Session; act: Activity | null }) {
       <section className="me-sec me-sess-sec">
         <div className="me-sess-head">
           <div>
-            <h2>已登录设备</h2>
+            <h2>{bi("已登录设备", "Active Devices")}</h2>
             <p className="faint small">
-              管理当前账号在线的浏览器或终端，并可随时远程退出其他设备。
+              {bi(
+                "管理当前账号在线的浏览器或终端，并可随时远程退出其他设备。",
+                "Manage browsers and terminals currently signed in to your account, or remotely sign out other devices.",
+              )}
             </p>
           </div>
           <div className="me-sess-acts">
             {sessData && (
               <span className="me-sess-sum num">
-                {activeDevs.length} 台在线
+                {bi(`${activeDevs.length} 台在线`, `${activeDevs.length} online`)}
               </span>
             )}
             {otherCount > 0 && (
               <Popconfirm
-                title={`确定退出除本机之外的其他 ${otherCount} 台设备？`}
+                title={bi(
+                  `确定退出除本机之外的其他 ${otherCount} 台设备？`,
+                  `Sign out all ${otherCount} other ${otherCount === 1 ? "device" : "devices"}?`,
+                )}
                 onOk={revokeOthers}
               >
                 <Button
@@ -549,7 +613,7 @@ function SecurityView({ me, act }: { me: Session; act: Activity | null }) {
                   loading={sessBusy}
                   icon={<IconPoweroff />}
                 >
-                  退出其他设备
+                  {bi("退出其他设备", "Sign Out Other Devices")}
                 </Button>
               </Popconfirm>
             )}
@@ -564,7 +628,7 @@ function SecurityView({ me, act }: { me: Session; act: Activity | null }) {
             content={sessErr}
             action={
               <Button size="mini" onClick={loadSessions}>
-                重试
+                {bi("重试", "Retry")}
               </Button>
             }
           />
@@ -574,12 +638,16 @@ function SecurityView({ me, act }: { me: Session; act: Activity | null }) {
           <Skeleton animation text={{ rows: 3 }} />
         ) : activeDevs.length === 0 ? (
           <div className="me-dev-empty">
-            <Empty description="暂无活跃设备记录" />
+            <Empty description={bi("暂无活跃设备记录", "No active devices")} />
           </div>
         ) : (
-          <ul className="me-rows me-dev-list" aria-label="已登录设备">
+          <ul
+            className="me-rows me-dev-list"
+            aria-label={bi("已登录设备", "Active devices")}
+          >
             {activeDevs.map((s) => {
-              const dev = browser(s.agent) || "浏览器会话";
+              const dev =
+                browser(s.agent) || bi("浏览器会话", "Browser Session");
               return (
                 <li
                   key={s.id}
@@ -590,21 +658,30 @@ function SecurityView({ me, act }: { me: Session; act: Activity | null }) {
                     <span className="me-dev-title">
                       <b>{dev}</b>
                       {s.current && (
-                        <span className="me-cur-tag">当前设备</span>
+                        <span className="me-cur-tag">
+                          {bi("当前设备", "This Device")}
+                        </span>
                       )}
                     </span>
                     <small className="num">
-                      {s.ip || "未知来源"} · 登录于 {stamp(s.created_at)} ·
-                      已在线 {formatDuration(s.duration_seconds)}（活跃{" "}
-                      {formatDuration(s.active_seconds)}）
+                      {s.ip || bi("未知来源", "Unknown IP")} ·{" "}
+                      {bi(
+                        `登录于 ${stamp(s.created_at)} · 已在线 ${formatDuration(s.duration_seconds)}（活跃 ${formatDuration(s.active_seconds)}）`,
+                        `Signed in ${stamp(s.created_at)} · Online ${formatDuration(s.duration_seconds)} (active ${formatDuration(s.active_seconds)})`,
+                      )}
                     </small>
                   </span>
                   <div className="me-dev-act">
                     {s.current ? (
-                      <span className="me-using">正在使用</span>
+                      <span className="me-using">
+                        {bi("正在使用", "In use")}
+                      </span>
                     ) : (
                       <Popconfirm
-                        title="退出该设备的登录状态？"
+                        title={bi(
+                          "退出该设备的登录状态？",
+                          "Sign out this device?",
+                        )}
                         onOk={() => revokeOwn(s.id)}
                       >
                         <Button
@@ -612,7 +689,7 @@ function SecurityView({ me, act }: { me: Session; act: Activity | null }) {
                           status="danger"
                           icon={<IconPoweroff />}
                         >
-                          退出
+                          {bi("退出", "Sign Out")}
                         </Button>
                       </Popconfirm>
                     )}
@@ -625,7 +702,7 @@ function SecurityView({ me, act }: { me: Session; act: Activity | null }) {
       </section>
       <div className="me-cols">
         <section className="me-sec">
-          <h2>修改密码</h2>
+          <h2>{bi("修改密码", "Change Password")}</h2>
           <form
             className="me-pw"
             onSubmit={(e) => {
@@ -642,37 +719,44 @@ function SecurityView({ me, act }: { me: Session; act: Activity | null }) {
               readOnly
             />
             <label>
-              <span>当前密码</span>
+              <span>{bi("当前密码", "Current Password")}</span>
               <Input.Password
                 value={cur}
                 onChange={setCur}
                 autoComplete="current-password"
-                aria-label="当前密码"
+                aria-label={bi("当前密码", "Current password")}
               />
             </label>
             <label>
-              <span>新密码</span>
+              <span>{bi("新密码", "New Password")}</span>
               <Input.Password
                 value={next}
                 onChange={setNext}
                 autoComplete="new-password"
                 status={short ? "warning" : undefined}
-                aria-label="新密码"
+                aria-label={bi("新密码", "New password")}
               />
               <small className={short ? "warn" : "faint"}>
-                至少 12 个字符；改完后你在其他地方的登录会退出
+                {bi(
+                  "至少 12 个字符；改完后你在其他地方的登录会退出",
+                  "At least 12 characters; changing it signs out all other sessions",
+                )}
               </small>
             </label>
             <label>
-              <span>再输一次</span>
+              <span>{bi("再输一次", "Confirm New Password")}</span>
               <Input.Password
                 value={again}
                 onChange={setAgain}
                 autoComplete="new-password"
                 status={differ ? "error" : undefined}
-                aria-label="再输一次新密码"
+                aria-label={bi("再输一次新密码", "Confirm new password")}
               />
-              {differ && <small className="bad">两次输入不一样</small>}
+              {differ && (
+                <small className="bad">
+                  {bi("两次输入不一样", "Passwords do not match")}
+                </small>
+              )}
             </label>
             <Button
               type="primary"
@@ -680,17 +764,22 @@ function SecurityView({ me, act }: { me: Session; act: Activity | null }) {
               loading={busy}
               disabled={!cur || next.length < 12 || next !== again}
             >
-              修改密码
+              {bi("修改密码", "Update Password")}
             </Button>
           </form>
         </section>
         <section className="me-sec">
-          <h2>最近登录记录</h2>
+          <h2>{bi("最近登录记录", "Recent Sign-ins")}</h2>
           {!act ? (
             <Skeleton animation text={{ rows: 4 }} />
           ) : signins.length === 0 &&
             (sessData?.history || []).length === 0 ? (
-            <p className="faint small">最近 30 天没有登录记录。</p>
+            <p className="faint small">
+              {bi(
+                "最近 30 天没有登录记录。",
+                "No sign-in activity in the last 30 days.",
+              )}
+            </p>
           ) : (
             <ul className="me-rows me-logins">
               {signins.map((e, i) => (
@@ -707,7 +796,10 @@ function SecurityView({ me, act }: { me: Session; act: Activity | null }) {
                     <small className="mono">
                       {e.ip || "—"}
                       {e.duration_sec && e.duration_sec > 0
-                        ? ` · 时长 ${formatDuration(e.duration_sec)}`
+                        ? bi(
+                            ` · 时长 ${formatDuration(e.duration_sec)}`,
+                            ` · duration ${formatDuration(e.duration_sec)}`,
+                          )
                         : ""}
                     </small>
                   </span>
@@ -724,12 +816,15 @@ function SecurityView({ me, act }: { me: Session; act: Activity | null }) {
                     <span className="me-dot" aria-hidden />
                     <span className="me-row-t">
                       <b>
-                        {browser(h.agent) || "历史设备"} · {reason}
+                        {browser(h.agent) || bi("历史设备", "Previous Device")}{" "}
+                        · {reason}
                       </b>
                       <small className="mono">
-                        {h.ip || "—"} · 在线{" "}
-                        {formatDuration(h.duration_seconds)}（活跃{" "}
-                        {formatDuration(h.active_seconds)}）
+                        {h.ip || "—"} ·{" "}
+                        {bi(
+                          `在线 ${formatDuration(h.duration_seconds)}（活跃 ${formatDuration(h.active_seconds)}）`,
+                          `Online ${formatDuration(h.duration_seconds)} (active ${formatDuration(h.active_seconds)})`,
+                        )}
                       </small>
                     </span>
                     <time

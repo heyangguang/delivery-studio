@@ -1,6 +1,7 @@
 import React from "react";
 import { Input, InputNumber, Select, Switch } from "@arco-design/web-react";
 import type { HostSpec } from "./shared";
+import { bi, useLang } from "./i18n";
 export type HostParam = {
   key: string;
   label: string;
@@ -79,6 +80,7 @@ export function HostParameterFields({
   disabled?: boolean;
   index: number;
 }) {
+  useLang();
   const hidden = hiddenHostFields(host, contract);
   return (
     <div
@@ -88,7 +90,7 @@ export function HostParameterFields({
         .filter((p) => !hidden.has("params." + p.key))
         .map((p) => {
           const value = hostValue(host, contract, "params." + p.key);
-          const label = "机器 " + (index + 1) + " " + p.label;
+          const label = bi(`机器 ${index + 1} ${p.label}`, `Host ${index + 1} ${p.label}`);
           return (
             <div
               key={p.key}
@@ -113,7 +115,7 @@ export function HostParameterFields({
                   onChange={(v) =>
                     onChange(changeHostParam(host, contract, p.key, v))
                   }
-                /><span>{value === true ? "开启" : "关闭"}</span></div>
+                /><span>{value === true ? bi("开启", "On") : bi("关闭", "Off")}</span></div>
               ) : p.type === "int" ? (
                 <InputNumber
                   aria-label={label}

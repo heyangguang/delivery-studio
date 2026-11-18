@@ -1037,7 +1037,7 @@ func stepKind(name string) string {
 func (s *storeServer) handleAIExt(w http.ResponseWriter, r *http.Request, session storeSession, parts []string) {
 	switch {
 	case parts[0] == "skills" && len(parts) == 1 && r.Method == "GET":
-		s.writeJSON(w, 200, map[string]any{"skills": s.skills(true)})
+		s.writeJSON(w, 200, map[string]any{"skills": localizedSkills(wLang(w), s.skills(true))})
 	case parts[0] == "skills" && len(parts) == 1 && r.Method == "PUT":
 		var in skillSettings
 		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<20)).Decode(&in) != nil || len(in.Custom) > 100 || len(in.Overrides) > 50 {

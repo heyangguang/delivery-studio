@@ -1,4 +1,5 @@
 import type { AppInfo, AppPlan } from "./shared";
+import { bi, useLang } from "./i18n";
 
 /* The banner picture of a component: its roles as rows of machines, its declared data flows as moving lines. It is
    drawn from the component's own roles, flows and ready-made plan; nothing here knows any particular product. */
@@ -15,6 +16,7 @@ export function TopoArt({
   plan?: AppPlan;
   compact?: boolean;
 }) {
+  useLang();
   const W = compact ? 360 : 520;
   const roles = (app.roles || [])
     .map((r) => ({
@@ -50,7 +52,7 @@ export function TopoArt({
       className="topo-art"
       viewBox={`0 0 ${W} ${H}`}
       role="img"
-      aria-label={`${app.name} 的典型部署`}
+      aria-label={bi(`${app.name} 的典型部署`, `Typical deployment of ${app.name}`)}
     >
       {!compact && (
         <rect
@@ -64,7 +66,7 @@ export function TopoArt({
       )}
       {!compact && (
         <text x="26" y="36" className="ta-title">
-          {plan ? plan.name : "典型部署"}
+          {plan ? plan.name : bi("典型部署", "Reference Topology")}
         </text>
       )}
       {!compact && plan?.spec && (
@@ -133,7 +135,7 @@ export function TopoArt({
             y={y(i) + nodeH / 2 + 14}
             className="ta-sub"
           >
-            {r.n} 台
+            {bi(`${r.n} 台`, `${r.n} ${r.n === 1 ? "host" : "hosts"}`)}
           </text>
           {Array.from({ length: shown(r.n) }, (_, j) => (
             <g key={j} transform={`translate(${x(r.n, j)} ${y(i)})`}>

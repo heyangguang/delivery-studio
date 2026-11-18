@@ -21,10 +21,183 @@ import {
 import { api, can, err, fullTime } from "./shared";
 import { go } from "./router";
 import { UnderlineTabs } from "./ui";
+import { bi, biv, useLang } from "./i18n";
 import "./iam.css";
 
 const normPermDesc = (s?: string) =>
   s ? s.replace(/首次部署/g, "集群部署") : "";
+
+const MODULE_EN: Record<string, string> = {
+  交付: "Delivery",
+  组件: "Components",
+  软件库: "Software Library",
+  AI: "AI",
+  知识库: "Knowledge Base",
+  IAM: "IAM",
+  设置: "Settings",
+};
+
+const PERM_EN: Record<string, [string, string]> = {
+  "delivery.view": [
+    "View deliveries & clusters",
+    "View delivery list, details, runbooks, and execution logs; visibility follows role data scope",
+  ],
+  "delivery.create": [
+    "Create deliveries",
+    "Fill specs and generate cluster deployment or config delivery packages",
+  ],
+  "delivery.download": [
+    "Download delivery bundles",
+    "Download full delivery archives and individual files",
+  ],
+  "delivery.run": [
+    "Execute & log steps",
+    "Record step results, mark deployment outcome, and accept AI runbook amendments",
+  ],
+  "delivery.delete": [
+    "Delete deliveries",
+    "Delete deliveries and their generated materials",
+  ],
+  "report.edit": [
+    "Edit documents",
+    "Edit and confirm delivery reports, handover docs, change plans, and RCA docs; run AI draft & check",
+  ],
+  "report.export": [
+    "Export documents",
+    "Export cluster documents to Word, individually or combined",
+  ],
+  "component.edit": [
+    "Edit components",
+    "Create and edit drafts, fork components, and use Component AI in Workbench",
+  ],
+  "component.publish": [
+    "Publish components",
+    "Publish drafts, restore revisions, revert built-in versions, and delete components",
+  ],
+  "component.import": ["Import components", "Import component packages"],
+  "library.manage": [
+    "Manage software library",
+    "Download, import, and delete packages; update, import, and export repo indexes",
+  ],
+  "library.runtime": [
+    "Manage runtimes",
+    "Build, import, and set default Ansible runtimes; upload Python packages",
+  ],
+  "ai.use": [
+    "Use AI features",
+    "AI assistant, troubleshooting, change rehearsal, delivery review, and smart fill",
+  ],
+  "ai.settings": [
+    "AI settings",
+    "Global AI switch, model providers, assignments, pricing, web search, skills, and MCP servers",
+  ],
+  "ai.usage": [
+    "View AI usage",
+    "View all users' AI invocation logs, usage, and cost",
+  ],
+  "kb.view": [
+    "Use team knowledge base",
+    "Browse team KB articles; AI queries it during responses",
+  ],
+  "kb.submit": [
+    "Submit to team KB",
+    "Submit docs or troubleshooting notes to the team KB for review",
+  ],
+  "kb.manage": [
+    "Manage team KB",
+    "Approve or reject submissions, and edit or delete team KB entries",
+  ],
+  "iam.user": [
+    "Manage users",
+    "Add users, reset passwords, disable/enable accounts, and assign roles and teams",
+  ],
+  "iam.role": [
+    "Manage roles",
+    "Create and edit role permissions and data scopes",
+  ],
+  "iam.team": ["Manage teams", "Create teams and update membership"],
+  "audit.view": [
+    "View audit log",
+    "View platform-wide activity and session audit logs",
+  ],
+  "execution.manage": [
+    "Manage execution nodes",
+    "Enroll execution nodes, scope clusters/hosts, and pause or resume nodes",
+  ],
+  "delivery.execute": [
+    "Start automated execution",
+    "Authorize execution after host/step checks, pause, resume, and close runs",
+  ],
+  "settings.notify": [
+    "Notification settings",
+    "Configure notification channels, rules, and templates",
+  ],
+  "settings.report": [
+    "Report templates",
+    "Configure organization name, classification, headers/footers, and cover notes for Word exports",
+  ],
+  "settings.storage": [
+    "Storage settings",
+    "Configure default per-user storage quota and max file upload size",
+  ],
+  "settings.sandbox": [
+    "Code sandbox settings",
+    "Enable/disable AI code sandbox, set time/memory limits, and run self-checks",
+  ],
+};
+
+const BUILTIN_ROLE_EN: Record<string, [string, string]> = {
+  sysadmin: [
+    "System Admin",
+    "Full platform administration: users, roles, settings, components, and library across all deliveries",
+  ],
+  engineer: [
+    "Delivery Engineer",
+    "Create, download, and execute own deliveries, and use Change Rehearsal & troubleshooting AI when enabled",
+  ],
+  maintainer: [
+    "Component Maintainer",
+    "Maintain components and software library: edit/publish components, prepare packages and runtimes",
+  ],
+  auditor: [
+    "Read-Only Auditor",
+    "Read-only visibility across all deliveries, audit logs, and AI usage",
+  ],
+  系统管理员: [
+    "System Admin",
+    "Full platform administration: users, roles, settings, components, and library across all deliveries",
+  ],
+  交付工程师: [
+    "Delivery Engineer",
+    "Create, download, and execute own deliveries, and use Change Rehearsal & troubleshooting AI when enabled",
+  ],
+  组件维护者: [
+    "Component Maintainer",
+    "Maintain components and software library: edit/publish components, prepare packages and runtimes",
+  ],
+  只读审计员: [
+    "Read-Only Auditor",
+    "Read-only visibility across all deliveries, audit logs, and AI usage",
+  ],
+};
+
+export const permModule = (m: string) => bi(m, MODULE_EN[m] || m);
+export const permTitle = (p: { id: string; title: string }) =>
+  bi(p.title, PERM_EN[p.id]?.[0] || p.title);
+export const permDesc = (p: { id: string; desc?: string }) =>
+  bi(normPermDesc(p.desc), PERM_EN[p.id]?.[1] || normPermDesc(p.desc));
+export const roleTitle = (r: { id?: string; name: string }) =>
+  bi(
+    r.name,
+    (r.id && BUILTIN_ROLE_EN[r.id]?.[0]) ||
+      BUILTIN_ROLE_EN[r.name]?.[0] ||
+      r.name,
+  );
+export const roleDesc = (r: { id?: string; desc?: string }) =>
+  bi(
+    normPermDesc(r.desc),
+    (r.id && BUILTIN_ROLE_EN[r.id]?.[1]) || normPermDesc(r.desc),
+  );
 
 const IAMIcons = {
   roleEdit: (
@@ -153,17 +326,60 @@ export type IAM = {
   deleted?: Deleted[];
 };
 
-export const SCOPES: { id: string; title: string; hint: string }[] = [
-  { id: "own", title: "仅自己", hint: "只看得到自己建的交付和集群" },
-  { id: "team", title: "所在团队", hint: "自己的，加上同一团队里其他人的" },
-  { id: "all", title: "全部", hint: "平台上所有人的" },
+export const SCOPES: {
+  id: string;
+  readonly title: string;
+  readonly hint: string;
+}[] = [
+  {
+    id: "own",
+    get title() {
+      return bi("仅自己", "Own Only");
+    },
+    get hint() {
+      return bi(
+        "只看得到自己建的交付和集群",
+        "Can view only deliveries and clusters they created",
+      );
+    },
+  },
+  {
+    id: "team",
+    get title() {
+      return bi("所在团队", "Team");
+    },
+    get hint() {
+      return bi(
+        "自己的，加上同一团队里其他人的",
+        "Can view own deliveries plus those of teammates",
+      );
+    },
+  },
+  {
+    id: "all",
+    get title() {
+      return bi("全部", "All");
+    },
+    get hint() {
+      return bi(
+        "平台上所有人的",
+        "Can view all deliveries across the platform",
+      );
+    },
+  },
 ];
 export const scopeName = (s: string) =>
   SCOPES.find((x) => x.id === s)?.title || s;
 
 let memo: IAM | null = null;
+if (typeof window !== "undefined") {
+  window.addEventListener("mh-lang-change", () => {
+    memo = null;
+  });
+}
 /** The IAM catalogue and state, shared by the pages that need it. */
 export function useIAM() {
+  const lang = useLang();
   const [d, setD] = useState<IAM | null>(memo);
   const load = () =>
     api<IAM>("/api/iam")
@@ -174,7 +390,7 @@ export function useIAM() {
       .catch(err);
   useEffect(() => {
     load();
-  }, []);
+  }, [lang]);
   return { iam: d, reload: load, set: (x: IAM) => ((memo = x), setD(x)) };
 }
 
@@ -211,35 +427,57 @@ export function EffectivePerms({
   perms: Set<string>;
   scope: string;
 }) {
+  useLang();
   const groups = modules(iam.perms)
     .map(
       ([m, ps]) => [m, ps.filter((p) => perms.has(p.id))] as [string, Perm[]],
     )
     .filter(([, ps]) => ps.length);
   if (!groups.length)
-    return <p className="faint small">没有任何权限：只能管理自己的账户。</p>;
+    return (
+      <p className="faint small">
+        {bi(
+          "没有任何权限：只能管理自己的账户。",
+          "No permissions granted: can only manage own account.",
+        )}
+      </p>
+    );
   return (
     <div className="iam-eff">
       {perms.has("delivery.view") && (
         <p className="iam-eff-scope">
-          能看到{" "}
-          <b>
-            {scope === "all"
-              ? "所有人"
-              : scope === "team"
-                ? "自己和同团队"
-                : "自己"}
-          </b>{" "}
-          的交付和集群
+          {biv(
+            <>
+              能看到{" "}
+              <b>
+                {scope === "all"
+                  ? "所有人"
+                  : scope === "team"
+                    ? "自己和同团队"
+                    : "自己"}
+              </b>{" "}
+              的交付和集群
+            </>,
+            <>
+              Can view deliveries and clusters for{" "}
+              <b>
+                {scope === "all"
+                  ? "everyone"
+                  : scope === "team"
+                    ? "self & team"
+                    : "self only"}
+              </b>
+            </>,
+          )}
         </p>
       )}
       {groups.map(([m, ps]) => (
         <div key={m} className="iam-eff-g">
-          <span>{m}</span>
+          <span>{permModule(m)}</span>
           <span className="iam-eff-ps">
             {ps.map((p) => (
-              <em key={p.id} title={normPermDesc(p.desc)}>
-                {p.title}
+              <em key={p.id} title={permDesc(p)}>
+                {permTitle(p)}
               </em>
             ))}
           </span>
@@ -259,8 +497,9 @@ export function RolePicker({
   value: string[];
   onChange: (v: string[]) => void;
 }) {
+  useLang();
   return (
-    <div className="iam-picks" role="group" aria-label="角色">
+    <div className="iam-picks" role="group" aria-label={bi("角色", "Roles")}>
       {iam.roles.map((r) => {
         const on = value.includes(r.id);
         return (
@@ -273,11 +512,13 @@ export function RolePicker({
             />
             <span>
               <b>
-                {r.name}
-                {r.builtin && <small className="iam-tag">内置</small>}
+                {roleTitle(r)}
+                {r.builtin && (
+                  <small className="iam-tag">{bi("内置", "Built-in")}</small>
+                )}
                 <small className="iam-scope">{scopeName(r.scope)}</small>
               </b>
-              {r.desc && <small>{normPermDesc(r.desc)}</small>}
+              {r.desc && <small>{roleDesc(r)}</small>}
             </span>
           </label>
         );
@@ -296,6 +537,7 @@ export function GrantEditor({
   iam: IAM;
   onSaved: () => void;
 }) {
+  useLang();
   const g = iam.grants[user] || { roles: [], teams: [] };
   const [roles, setRoles] = useState(g.roles);
   const [teams, setTeams] = useState(g.teams);
@@ -316,7 +558,12 @@ export function GrantEditor({
         method: "PUT",
         body: JSON.stringify({ roles, teams }),
       });
-      Message.success("已保存，对方的下一次操作就按新权限执行");
+      Message.success(
+        bi(
+          "已保存，对方的下一次操作就按新权限执行",
+          "Saved; new permissions apply on the user's next action",
+        ),
+      );
       onSaved();
     } catch (e) {
       err(e);
@@ -328,33 +575,40 @@ export function GrantEditor({
     <div className="iam-grant">
       <div className="iam-grant-cols">
         <section>
-          <h3>角色</h3>
+          <h3>{bi("角色", "Roles")}</h3>
           {editable ? (
             <RolePicker iam={iam} value={roles} onChange={setRoles} />
           ) : (
             <p>
               {roles
-                .map((id) => iam.roles.find((r) => r.id === id)?.name || id)
-                .join("、")}
+                .map((id) => {
+                  const found = iam.roles.find((r) => r.id === id);
+                  return found ? roleTitle(found) : id;
+                })
+                .join(bi("、", ", "))}
             </p>
           )}
-          <h3 className="iam-gap">团队</h3>
+          <h3 className="iam-gap">{bi("团队", "Teams")}</h3>
           {editable ? (
             <Select
               mode="multiple"
               value={teams}
               onChange={setTeams}
               triggerProps={{ autoFitPosition: true }}
-              placeholder={iam.teams.length ? "选择团队" : "还没有团队"}
+              placeholder={
+                iam.teams.length
+                  ? bi("选择团队", "Select teams")
+                  : bi("还没有团队", "No teams yet")
+              }
               options={iam.teams.map((t) => ({ value: t.id, label: t.name }))}
               allowClear
-              aria-label="团队"
+              aria-label={bi("团队", "Teams")}
             />
           ) : (
             <p>
               {teams
                 .map((id) => iam.teams.find((t) => t.id === id)?.name || id)
-                .join("、") || "不在任何团队"}
+                .join(bi("、", ", ")) || bi("不在任何团队", "No team memberships")}
             </p>
           )}
           {editable && (
@@ -365,24 +619,30 @@ export function GrantEditor({
                 disabled={!dirty || roles.length === 0}
                 onClick={save}
               >
-                保存角色和团队
+                {bi("保存角色和团队", "Save Roles & Teams")}
               </Button>
               {dirty && (
                 <Button
                   type="text"
                   onClick={() => (setRoles(g.roles), setTeams(g.teams))}
                 >
-                  还原
+                  {bi("还原", "Reset")}
                 </Button>
               )}
               {roles.length === 0 && (
-                <span className="bad small">至少给一个角色</span>
+                <span className="bad small">
+                  {bi("至少给一个角色", "Select at least one role")}
+                </span>
               )}
             </div>
           )}
         </section>
         <section>
-          <h3>{dirty ? "保存后能做什么" : "能做什么"}</h3>
+          <h3>
+            {dirty
+              ? bi("保存后能做什么", "Effective Permissions After Save")
+              : bi("能做什么", "Effective Permissions")}
+          </h3>
           <EffectivePerms iam={iam} perms={eff.perms} scope={eff.scope} />
         </section>
       </div>
@@ -401,6 +661,7 @@ type Draft = {
 };
 
 export function RolesPane({ narrow }: { narrow: boolean }) {
+  useLang();
   const { iam, set } = useIAM();
   const [sel, setSel] = useState("");
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -452,7 +713,12 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
       const made = next.roles.find((r) => r.name === draft.name);
       setDraft(null);
       if (made) setSel(made.id);
-      Message.success("已保存，有这个角色的人下一次操作就按新权限执行");
+      Message.success(
+        bi(
+          "已保存，有这个角色的人下一次操作就按新权限执行",
+          "Saved; updated permissions take effect on holders' next actions",
+        ),
+      );
     } catch (e) {
       err(e);
     } finally {
@@ -461,11 +727,15 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
   };
   const remove = (r: Role) =>
     Modal.confirm({
-      title: `删除角色「${r.name}」？`,
+      title: bi(`删除角色「${r.name}」？`, `Delete role “${r.name}”?`),
       content: r.holders
-        ? `有 ${r.holders} 个人有这个角色，删除后他们会失去它带来的权限。`
-        : "没有人有这个角色。",
-      okText: "删除",
+        ? bi(
+            `有 ${r.holders} 个人有这个角色，删除后他们会失去它带来的权限。`,
+            `${r.holders} user(s) hold this role and will lose its permissions.`,
+          )
+        : bi("没有人有这个角色。", "No users currently hold this role."),
+      okText: bi("删除", "Delete"),
+      cancelText: bi("取消", "Cancel"),
       okButtonProps: { status: "danger" },
       onOk: async () => {
         try {
@@ -492,9 +762,12 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
       )}
       <header className="iam-h">
         <div>
-          <h1>角色</h1>
+          <h1>{bi("角色", "Roles")}</h1>
           <p>
-            角色是一组权限，加上它能看到谁的交付。一个人可以有多个角色，权限合在一起算。内置角色不能改，可以复制一份再改。
+            {bi(
+              "角色是一组权限，加上它能看到谁的交付。一个人可以有多个角色，权限合在一起算。内置角色不能改，可以复制一份再改。",
+              "A role bundles permissions with a delivery visibility scope. Users can hold multiple roles (permissions combine). Built-in roles are read-only—duplicate one to customize.",
+            )}
           </p>
         </div>
         {editable && (
@@ -513,26 +786,26 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
                 })
               )}
             >
-              新建角色
+              {bi("新建角色", "New Role")}
             </Button>
           </span>
         )}
       </header>
       <UnderlineTabs
         className="iam-subtabs"
-        label="角色管理视图"
+        label={bi("角色管理视图", "Role views")}
         value={compare ? "compare" : "edit"}
         onChange={(v) => setCompare(v === "compare")}
         items={[
           {
             value: "edit",
-            label: "角色配置",
+            label: bi("角色配置", "Role Configuration"),
             count: iam.roles.length,
             icon: IAMIcons.roleEdit,
           },
           {
             value: "compare",
-            label: "权限对比矩阵",
+            label: bi("权限对比矩阵", "Permission Matrix"),
             count: iam.perms.length,
             icon: IAMIcons.roleMatrix,
           },
@@ -543,10 +816,10 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
           <table className="iam-cmp">
             <thead>
               <tr>
-                <th>权限</th>
+                <th>{bi("权限", "Permission")}</th>
                 {iam.roles.map((r) => (
                   <th key={r.id}>
-                    {r.name}
+                    {roleTitle(r)}
                     <small>{scopeName(r.scope)}</small>
                   </th>
                 ))}
@@ -556,20 +829,20 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
               {modules(iam.perms).map(([m, ps]) => (
                 <React.Fragment key={m}>
                   <tr className="iam-cmp-m">
-                    <td colSpan={iam.roles.length + 1}>{m}</td>
+                    <td colSpan={iam.roles.length + 1}>{permModule(m)}</td>
                   </tr>
                   {ps.map((p) => (
                     <tr key={p.id}>
-                      <td title={normPermDesc(p.desc)}>{p.title}</td>
+                      <td title={permDesc(p)}>{permTitle(p)}</td>
                       {iam.roles.map((r) => (
                         <td
                           key={r.id}
                           className={r.perms.includes(p.id) ? "yes" : "no"}
                         >
                           {r.perms.includes(p.id) ? (
-                            <IconCheck aria-label="有" />
+                            <IconCheck aria-label={bi("有", "Granted")} />
                           ) : (
-                            <span aria-label="没有">·</span>
+                            <span aria-label={bi("没有", "Not granted")}>·</span>
                           )}
                         </td>
                       ))}
@@ -582,7 +855,11 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
         </div>
       ) : (
         <div className="iam-split">
-          <ul className="iam-roles" role="listbox" aria-label="角色">
+          <ul
+            className="iam-roles"
+            role="listbox"
+            aria-label={bi("角色", "Roles")}
+          >
             {iam.roles.map((r) => (
               <li key={r.id}>
                 <button
@@ -598,10 +875,12 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
                     {r.builtin ? <IconLock /> : <IconUserGroup />}
                   </span>
                   <span>
-                    <b>{r.name}</b>
+                    <b>{roleTitle(r)}</b>
                     <small>
-                      {r.perms.length} 项权限 · {scopeName(r.scope)} ·{" "}
-                      {r.holders} 人
+                      {bi(
+                        `${r.perms.length} 项权限 · ${scopeName(r.scope)} · ${r.holders} 人`,
+                        `${r.perms.length} perms · ${scopeName(r.scope)} · ${r.holders} ${r.holders === 1 ? "user" : "users"}`,
+                      )}
                     </small>
                   </span>
                 </button>
@@ -614,8 +893,8 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
                     <IconPlus />
                   </span>
                   <span>
-                    <b>{draft.name || "新角色"}</b>
-                    <small>还没保存</small>
+                    <b>{draft.name || bi("新角色", "New Role")}</b>
+                    <small>{bi("还没保存", "Unsaved")}</small>
                   </span>
                 </button>
               </li>
@@ -627,11 +906,19 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
                 {locked ? (
                   <div>
                     <h2>
-                      {cur.name}
-                      {role?.builtin && <small className="iam-tag">内置</small>}
+                      {role && cur.id === role.id ? roleTitle(role) : cur.name}
+                      {role?.builtin && (
+                        <small className="iam-tag">
+                          {bi("内置", "Built-in")}
+                        </small>
+                      )}
                     </h2>
                     {cur.desc && (
-                      <p className="muted">{normPermDesc(cur.desc)}</p>
+                      <p className="muted">
+                        {role && cur.id === role.id
+                          ? roleDesc(role)
+                          : normPermDesc(cur.desc)}
+                      </p>
                     )}
                   </div>
                 ) : (
@@ -639,16 +926,22 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
                     <Input
                       value={cur.name}
                       onChange={(v) => setDraft({ ...cur, name: v })}
-                      placeholder="角色名，例如：一组交付工程师"
+                      placeholder={bi(
+                        "角色名，例如：一组交付工程师",
+                        "Role name, e.g., Team A Delivery Engineer",
+                      )}
                       maxLength={30}
-                      aria-label="角色名"
+                      aria-label={bi("角色名", "Role name")}
                     />
                     <Input
                       value={cur.desc}
                       onChange={(v) => setDraft({ ...cur, desc: v })}
-                      placeholder="一句话说明这个角色是做什么的"
+                      placeholder={bi(
+                        "一句话说明这个角色是做什么的",
+                        "Brief description of what this role is for",
+                      )}
                       maxLength={200}
-                      aria-label="说明"
+                      aria-label={bi("说明", "Description")}
                     />
                   </div>
                 )}
@@ -658,14 +951,17 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
                       icon={<IconCopy />}
                       onClick={() =>
                         setDraft({
-                          name: `${role.name}（副本）`,
-                          desc: role.desc || "",
+                          name: bi(
+                            `${roleTitle(role)}（副本）`,
+                            `${roleTitle(role)} (Copy)`,
+                          ),
+                          desc: roleDesc(role) || "",
                           perms: role.perms,
                           scope: role.scope,
                         })
                       }
                     >
-                      复制为新角色
+                      {bi("复制为新角色", "Duplicate")}
                     </Button>
                   )}
                   {editable && role && !role.builtin && !draft && (
@@ -673,7 +969,7 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
                       status="danger"
                       icon={<IconDelete />}
                       onClick={() => remove(role)}
-                      aria-label="删除角色"
+                      aria-label={bi("删除角色", "Delete role")}
                     />
                   )}
                 </span>
@@ -681,12 +977,23 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
               {locked && (
                 <p className="iam-ro-hint" role="status">
                   {!editable
-                    ? "当前账户无角色管理权限，仅可查看角色配置。"
-                    : "内置角色不可直接修改；可点击右上角「复制为新角色」后按需调整权限。"}
+                    ? bi(
+                        "当前账户无角色管理权限，仅可查看角色配置。",
+                        "Read-only: your account lacks permission to manage roles.",
+                      )
+                    : bi(
+                        "内置角色不可直接修改；可点击右上角「复制为新角色」后按需调整权限。",
+                        "Built-in roles cannot be edited directly; click “Duplicate” at top right to create an editable copy.",
+                      )}
                 </p>
               )}
               <div className="iam-sec">
-                <h3>能看到谁的交付和集群</h3>
+                <h3>
+                  {bi(
+                    "能看到谁的交付和集群",
+                    "Delivery & Cluster Visibility Scope",
+                  )}
+                </h3>
                 <Radio.Group
                   type="button"
                   value={cur.scope}
@@ -701,12 +1008,16 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
                 </Radio.Group>
                 <p className="faint small">
                   {SCOPES.find((s) => s.id === cur.scope)?.hint}
-                  ；只对有「查看交付和集群」的人生效。
+                  {bi(
+                    "；只对有「查看交付和集群」的人生效。",
+                    "; applies only to users with “View deliveries & clusters”.",
+                  )}
                 </p>
               </div>
               <div className="iam-sec">
                 <h3>
-                  权限 <em className="num">{cur.perms.length}</em>
+                  {bi("权限", "Permissions")}{" "}
+                  <em className="num">{cur.perms.length}</em>
                 </h3>
                 <div className="iam-tree">
                   {modules(iam.perms).map(([m, ps]) => {
@@ -725,7 +1036,7 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
                               )
                             }
                           />
-                          <b>{m}</b>
+                          <b>{permModule(m)}</b>
                           <small>
                             {n} / {ps.length}
                           </small>
@@ -736,44 +1047,53 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
                               key={p.id}
                               className={`iam-perm ${cur.perms.includes(p.id) ? "on" : ""}`}
                             >
-                                <Checkbox
-                                  checked={cur.perms.includes(p.id)}
-                                  disabled={locked}
-                                  onChange={(v) => toggle([p.id], v)}
-                                />
-                                <span>
-                                  <b>{p.title}</b>
-                                  <small>{normPermDesc(p.desc)}</small>
-                                </span>
-                              </label>
-                            ))}
-                          </div>
+                              <Checkbox
+                                checked={cur.perms.includes(p.id)}
+                                disabled={locked}
+                                onChange={(v) => toggle([p.id], v)}
+                              />
+                              <span>
+                                <b>{permTitle(p)}</b>
+                                <small>{permDesc(p)}</small>
+                              </span>
+                            </label>
+                          ))}
                         </div>
-                      );
-                    })}
-                  </div>
+                      </div>
+                    );
+                  })}
                 </div>
-                {dirty && (
-                  <div className="iam-save">
-                    <span className="faint small">你只能授出自己有的权限。</span>
-                    <Button onClick={() => setDraft(null)}>取消</Button>
-                    <Button
-                      type="primary"
-                      loading={busy}
-                      disabled={!draft!.name.trim()}
-                      onClick={save}
-                    >
-                      {draft!.id ? "保存" : "创建角色"}
-                    </Button>
-                  </div>
-                )}
-              </section>
-            )}
-          </div>
-        )}
-      </article>
-    );
-  }
+              </div>
+              {dirty && (
+                <div className="iam-save">
+                  <span className="faint small">
+                    {bi(
+                      "你只能授出自己有的权限。",
+                      "You can only grant permissions that you hold yourself.",
+                    )}
+                  </span>
+                  <Button onClick={() => setDraft(null)}>
+                    {bi("取消", "Cancel")}
+                  </Button>
+                  <Button
+                    type="primary"
+                    loading={busy}
+                    disabled={!draft!.name.trim()}
+                    onClick={save}
+                  >
+                    {draft!.id
+                      ? bi("保存", "Save")
+                      : bi("创建角色", "Create Role")}
+                  </Button>
+                </div>
+              )}
+            </section>
+          )}
+        </div>
+      )}
+    </article>
+  );
+}
 
   /* ---------------------------------------------------------------- teams */
 
@@ -784,6 +1104,7 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
     narrow: boolean;
     users: string[];
   }) {
+    useLang();
     const { iam, set } = useIAM();
     const [edit, setEdit] = useState<{
       id?: string;
@@ -816,7 +1137,7 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
           ),
         );
         setEdit(null);
-        Message.success("已保存");
+        Message.success(bi("已保存", "Saved"));
       } catch (e) {
         err(e);
       } finally {
@@ -837,9 +1158,12 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
         )}
         <header className="iam-h">
           <div>
-            <h1>团队</h1>
+            <h1>{bi("团队", "Teams")}</h1>
             <p>
-              同一团队的人，如果角色的数据范围是「所在团队」，就能看到彼此的交付和集群，一起执行和处理。
+              {bi(
+                "同一团队的人，如果角色的数据范围是「所在团队」，就能看到彼此的交付和集群，一起执行和处理。",
+                "Members of the same team with “Team” scope can view and collaborate on each other's deliveries and clusters.",
+              )}
             </p>
           </div>
           {editable && (
@@ -848,26 +1172,26 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
               icon={<IconPlus />}
               onClick={() => setEdit({ name: "", desc: "", members: [] })}
             >
-              新建团队
+              {bi("新建团队", "New Team")}
             </Button>
           )}
         </header>
         {iam.teams.length > 0 && (
           <UnderlineTabs
             className="iam-subtabs"
-            label="团队筛选"
+            label={bi("团队筛选", "Team filter")}
             value={tab}
             onChange={(v) => setTab(v as "all" | "active" | "empty")}
             items={[
               {
                 value: "all",
-                label: "全部团队",
+                label: bi("全部团队", "All Teams"),
                 count: iam.teams.length,
                 icon: IAMIcons.teamAll,
               },
               {
                 value: "active",
-                label: "已有成员",
+                label: bi("已有成员", "With Members"),
                 count: activeCount,
                 icon: IAMIcons.teamActive,
               },
@@ -875,7 +1199,7 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
                 ? [
                     {
                       value: "empty",
-                      label: "待添加成员",
+                      label: bi("待添加成员", "Empty"),
                       count: emptyCount,
                       icon: IAMIcons.teamEmpty,
                     },
@@ -887,15 +1211,20 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
         {iam.teams.length === 0 ? (
           <div className="iam-empty">
             <IconUserGroup />
-            <b>还没有团队</b>
-            <span>按负责的项目或现场分组，组内的交付就能一起看、一起做。</span>
+            <b>{bi("还没有团队", "No teams yet")}</b>
+            <span>
+              {bi(
+                "按负责的项目或现场分组，组内的交付就能一起看、一起做。",
+                "Group users by project or site so teammates can share and operate deliveries together.",
+              )}
+            </span>
           </div>
         ) : shownTeams.length === 0 ? (
           <div className="iam-empty">
             <IconUserGroup />
-            <b>当前筛选下没有团队</b>
+            <b>{bi("当前筛选下没有团队", "No teams match this filter")}</b>
             <Button size="small" onClick={() => setTab("all")}>
-              查看全部团队
+              {bi("查看全部团队", "Show All Teams")}
             </Button>
           </div>
         ) : (
@@ -908,7 +1237,13 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
                 </span>
                 <span>
                   <b>{t.name}</b>
-                  <small>{t.desc || `${t.members.length} 人`}</small>
+                  <small>
+                    {t.desc ||
+                      bi(
+                        `${t.members.length} 人`,
+                        `${t.members.length} ${t.members.length === 1 ? "member" : "members"}`,
+                      )}
+                  </small>
                 </span>
                 {editable && (
                   <span className="row-gap">
@@ -923,18 +1258,25 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
                         })
                       }
                     >
-                      编辑
+                      {bi("编辑", "Edit")}
                     </Button>
                     <Button
                       size="small"
                       status="danger"
                       icon={<IconDelete />}
-                      aria-label="删除团队"
+                      aria-label={bi("删除团队", "Delete team")}
                       onClick={() =>
                         Modal.confirm({
-                          title: `删除团队「${t.name}」？`,
-                          content: "成员不会被删除，只是不再同属这个团队。",
-                          okText: "删除",
+                          title: bi(
+                            `删除团队「${t.name}」？`,
+                            `Delete team “${t.name}”?`,
+                          ),
+                          content: bi(
+                            "成员不会被删除，只是不再同属这个团队。",
+                            "User accounts will not be deleted; they will simply no longer belong to this team.",
+                          ),
+                          okText: bi("删除", "Delete"),
+                          cancelText: bi("取消", "Cancel"),
                           okButtonProps: { status: "danger" },
                           onOk: async () => {
                             try {
@@ -968,7 +1310,9 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
                     </a>
                   ))
                 ) : (
-                  <span className="faint small">还没有成员</span>
+                  <span className="faint small">
+                    {bi("还没有成员", "No members yet")}
+                  </span>
                 )}
               </div>
             </li>
@@ -977,9 +1321,10 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
       )}
       <Modal
         visible={!!edit}
-        title={edit?.id ? "编辑团队" : "新建团队"}
+        title={edit?.id ? bi("编辑团队", "Edit Team") : bi("新建团队", "New Team")}
         onCancel={() => setEdit(null)}
-        okText="保存"
+        okText={bi("保存", "Save")}
+        cancelText={bi("取消", "Cancel")}
         confirmLoading={busy}
         okButtonProps={{ disabled: !edit?.name.trim() }}
         onOk={save}
@@ -987,35 +1332,35 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
         {edit && (
           <div className="st-form">
             <div className="st-field">
-              <span>团队名</span>
+              <span>{bi("团队名", "Team Name")}</span>
               <Input
                 value={edit.name}
                 onChange={(v) => setEdit({ ...edit, name: v })}
-                placeholder="华东交付一组"
+                placeholder={bi("华东交付一组", "e.g., Delivery Team East")}
                 maxLength={30}
-                aria-label="团队名"
+                aria-label={bi("团队名", "Team name")}
               />
             </div>
             <div className="st-field">
-              <span>说明（可选）</span>
+              <span>{bi("说明（可选）", "Description (Optional)")}</span>
               <Input
                 value={edit.desc}
                 onChange={(v) => setEdit({ ...edit, desc: v })}
                 maxLength={200}
-                aria-label="说明"
+                aria-label={bi("说明", "Description")}
               />
             </div>
             <div className="st-field">
-              <span>成员</span>
+              <span>{bi("成员", "Members")}</span>
               <Select
                 mode="multiple"
                 value={edit.members}
                 onChange={(v) => setEdit({ ...edit, members: v })}
                 triggerProps={{ autoFitPosition: true }}
                 options={sorted.map((u) => ({ value: u, label: u }))}
-                placeholder="选择成员"
+                placeholder={bi("选择成员", "Select members")}
                 allowClear
-                aria-label="成员"
+                aria-label={bi("成员", "Members")}
               />
             </div>
           </div>
@@ -1034,6 +1379,7 @@ export function DeletedPane({
   users: { username: string; disabled?: boolean }[];
   narrow: boolean;
 }) {
+  useLang();
   const { iam, reload } = useIAM();
   const [pick, setPick] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState("");
@@ -1047,7 +1393,12 @@ export function DeletedPane({
         `/api/iam/deleted/${d.username}/move`,
         { method: "POST", body: JSON.stringify({ move_to: to }) },
       );
-      Message.success(`${r.moved} 份交付已交给 ${to}`);
+      Message.success(
+        bi(
+          `${r.moved} 份交付已交给 ${to}`,
+          `Transferred ${r.moved} ${r.moved === 1 ? "delivery" : "deliveries"} to ${to}`,
+        ),
+      );
       reload();
     } catch (e) {
       err(e);
@@ -1069,9 +1420,12 @@ export function DeletedPane({
       )}
       <header className="iam-h">
         <div>
-          <h1>已删除的账户</h1>
+          <h1>{bi("已删除的账户", "Deleted Accounts")}</h1>
           <p>
-            这些用户名不会再分配给别人。他们名下还留着的交付，能看全部交付的人仍然看得到，也可以交给现在的同事接手。
+            {bi(
+              "这些用户名不会再分配给别人。他们名下还留着的交付，能看全部交付的人仍然看得到，也可以交给现在的同事接手。",
+              "These usernames cannot be reused. Remaining deliveries are still visible to users with global scope and can be reassigned to an active user.",
+            )}
           </p>
         </div>
       </header>
@@ -1084,20 +1438,31 @@ export function DeletedPane({
               <span className="iam-del-name">
                 <b className="mono">{d.username}</b>
                 <small>
-                  {d.by} 在 {fullTime(d.at)} 删除
+                  {bi(
+                    `${d.by} 在 ${fullTime(d.at)} 删除`,
+                    `Deleted by ${d.by} on ${fullTime(d.at)}`,
+                  )}
                   {d.moved
-                    ? ` · ${d.moved_n || 0} 份交付已交给 ${d.moved}`
+                    ? bi(
+                        ` · ${d.moved_n || 0} 份交付已交给 ${d.moved}`,
+                        ` · ${d.moved_n || 0} transferred to ${d.moved}`,
+                      )
                     : ""}
                 </small>
               </span>
               <span className="iam-del-jobs">
-                {d.jobs ? `名下还有 ${d.jobs} 份交付` : "名下没有交付"}
+                {d.jobs
+                  ? bi(
+                      `名下还有 ${d.jobs} 份交付`,
+                      `${d.jobs} ${d.jobs === 1 ? "delivery" : "deliveries"} remaining`,
+                    )
+                  : bi("名下没有交付", "No deliveries")}
               </span>
               {d.jobs > 0 && can("iam.user") && (
                 <span className="row-gap">
                   <Select
                     style={{ minWidth: 200 }}
-                    placeholder="交给谁"
+                    placeholder={bi("交给谁", "Transfer to")}
                     value={pick[d.username]}
                     onChange={(v) => setPick({ ...pick, [d.username]: v })}
                     triggerProps={{
@@ -1109,7 +1474,7 @@ export function DeletedPane({
                     options={users
                       .filter((u) => !u.disabled)
                       .map((u) => ({ value: u.username, label: u.username }))}
-                    aria-label="交给谁"
+                    aria-label={bi("交给谁", "Transfer to")}
                   />
                   <Button
                     type="primary"
@@ -1117,7 +1482,7 @@ export function DeletedPane({
                     disabled={!pick[d.username]}
                     onClick={() => move(d)}
                   >
-                    转交
+                    {bi("转交", "Transfer")}
                   </Button>
                 </span>
               )}

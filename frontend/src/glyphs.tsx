@@ -1,4 +1,50 @@
 import React from "react";
+import { bi, canonicalCat } from "./i18n";
+
+const ICON_EN: Record<string, string> = {
+  database: "Database",
+  kv: "Key-Value & Coordination",
+  cache: "Cache",
+  queue: "Queue",
+  storage: "Storage",
+  search: "Search",
+  balance: "Load Balancer",
+  gateway: "Gateway & Proxy",
+  vip: "HA & Virtual IP",
+  cloud: "Cloud & External Service",
+  server: "Service",
+  cluster: "Cluster",
+  monitor: "Monitoring",
+  key: "Security & Keys",
+  container: "Container & Generic",
+  network: "Network",
+  file: "Files & Config",
+  bell: "Notifications",
+  redis: "Redis & In-Memory",
+  mysql: "MySQL & Relational",
+  kafka: "Kafka & Streaming",
+  mongodb: "MongoDB & Document",
+  rabbitmq: "RabbitMQ & Messaging",
+  elasticsearch: "Elasticsearch & Search",
+  zookeeper: "ZooKeeper & Coordination",
+  minio: "MinIO & Object Storage",
+  prometheus: "Prometheus & Metrics",
+  grafana: "Grafana & Dashboards",
+  kubernetes: "Kubernetes & Orchestration",
+  docker: "Docker & Containers",
+};
+
+const COLOR_EN: Record<string, string> = {
+  indigo: "Indigo",
+  blue: "Blue",
+  teal: "Teal",
+  green: "Green",
+  amber: "Amber",
+  coral: "Coral",
+  red: "Red",
+  pink: "Pink",
+  slate: "Slate",
+};
 
 /* The logos a component can wear. Every glyph is drawn in a 40×40 box in white on a tinted tile, in the same line
    weight as the rest of the interface. The ids here must equal mwpack.ComponentIcons / ComponentColors (a Go test
@@ -451,6 +497,18 @@ export const COLORS: {
   },
 ];
 
+export const iconLabel = (id: string, fallback?: string): string =>
+  bi(
+    fallback || ICONS.find((i) => i.id === id)?.label || id,
+    ICON_EN[id] || fallback || id,
+  );
+
+export const colorLabel = (id: string, fallback?: string): string =>
+  bi(
+    fallback || COLORS.find((c) => c.id === id)?.label || id,
+    COLOR_EN[id] || fallback || id,
+  );
+
 /** What a component without its own icon or colour gets, by category. */
 const BY_CATEGORY: Record<string, [string, string]> = {
   数据库: ["database", "blue"],
@@ -480,7 +538,7 @@ export function styleOf(
 ): { icon: string; color: (typeof COLORS)[number] } {
   const reg = registry.get(id);
   // grey is reserved for "not available yet" (see AppGlyph muted); an unknown category gets a real colour
-  const [di, dc] = BY_CATEGORY[category || ""] || ["container", "indigo"];
+  const [di, dc] = BY_CATEGORY[canonicalCat(category)] || ["container", "indigo"];
   const iconId =
     [icon, reg?.icon].find((x) => x && ICONS.some((i) => i.id === x)) || di;
   const colorId =
@@ -491,3 +549,23 @@ export function styleOf(
 export const iconShape = (id: string) =>
   (ICONS.find((i) => i.id === id) || ICONS.find((i) => i.id === "container")!)
     .shape;
+
+for (const it of ICONS) {
+  const zh = it.label;
+  Object.defineProperty(it, "label", {
+    enumerable: true,
+    get() {
+      return bi(zh, ICON_EN[it.id] || zh);
+    },
+  });
+}
+
+for (const col of COLORS) {
+  const zh = col.label;
+  Object.defineProperty(col, "label", {
+    enumerable: true,
+    get() {
+      return bi(zh, COLOR_EN[col.id] || zh);
+    },
+  });
+}

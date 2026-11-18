@@ -1,5 +1,6 @@
 import "./platformparams.css";
 import { useWb } from "./wbdoc";
+import { bi, useLang } from "./i18n";
 import React from "react";
 import {
   Button,
@@ -24,6 +25,7 @@ export function PlatformParameters({
   onChange: (text: string) => void;
   onSource: (line?: number) => void;
 }) {
+  useLang();
   const { problems } = useWb();
   const fileProblems = problems.filter((p) => p.file === CONTRACT_FILE);
   const doc = parseDocument(text);
@@ -43,7 +45,10 @@ export function PlatformParameters({
   )
     return (
       <div className="note warn">
-        参数定义无法解析，请到文件页修正 {CONTRACT_FILE}。
+        {bi(
+          `参数定义无法解析，请到文件页修正 ${CONTRACT_FILE}。`,
+          `Unable to parse parameter definitions; please fix ${CONTRACT_FILE} on the Files tab.`,
+        )}
       </div>
     );
   const save = (next: HostContract) => onChange(stringify(next));
@@ -53,9 +58,9 @@ export function PlatformParameters({
       parameters: c.parameters.map((x, j) => (j === i ? { ...x, ...p } : x)),
     });
   const fields = [
-    { value: "disk", label: "磁盘设备" },
-    { value: "partition", label: "分区" },
-    { value: "initialize", label: "初始化磁盘" },
+    { value: "disk", label: bi("磁盘设备", "Disk Device") },
+    { value: "partition", label: bi("分区", "Partition") },
+    { value: "initialize", label: bi("初始化磁盘", "Initialize Disk") },
     ...c.parameters.map((p) => ({
       value: "params." + p.key,
       label: p.label || p.key,
@@ -70,10 +75,10 @@ export function PlatformParameters({
     const type = field === "initialize" ? "bool" : p?.type || "string";
     return type === "bool" ? (
       <span className="pp-switch"><Switch
-        aria-label={"值 " + field}
+        aria-label={bi("值 ", "Value ") + field}
         checked={v === true}
         onChange={change}
-      /><span>{v === true ? "开启" : "关闭"}</span></span>
+      /><span>{v === true ? bi("开启", "On") : bi("关闭", "Off")}</span></span>
     ) : type === "enum" ? (
       <Select
         value={String(v ?? "")}
@@ -86,14 +91,14 @@ export function PlatformParameters({
       <Input
         value={String(v ?? "")}
         onChange={change}
-        placeholder="空字符串表示不填写"
+        placeholder={bi("空字符串表示不填写", "Empty string means unset")}
       />
     );
   };
   const condition = (v: Condition, change: (v: Condition) => void) => (
     <div className="pp-condition">
       <Select
-        aria-label="规则字段"
+        aria-label={bi("规则字段", "Rule field")}
         value={v.field}
         options={fields}
         onChange={(field) =>
@@ -114,28 +119,39 @@ export function PlatformParameters({
     <div className="pp-editor">
       {fileProblems.length > 0 && (
         <div className="pp-errors" role="alert">
-          <strong>有 {fileProblems.length} 项需要处理</strong>
+          <strong>
+            {bi(
+              `有 ${fileProblems.length} 项需要处理`,
+              `${fileProblems.length} issue(s) to resolve`,
+            )}
+          </strong>
           {fileProblems.map((p, i) => (
             <button key={i} onClick={() => onSource(p.line)}>
               {p.message}
-              <span>定位到源码{p.line ? " · 第 " + p.line + " 行" : ""} →</span>
+              <span>
+                {bi("定位到源码", "Go to source")}
+                {p.line ? bi(` · 第 ${p.line} 行`, ` · Line ${p.line}`) : ""} →
+              </span>
             </button>
           ))}
         </div>
       )}
       <div>
-        <h2>公共参数</h2>
+        <h2>{bi("公共参数", "Platform Parameters")}</h2>
         <p className="muted">
-          设置用户创建交付时可以填写的内容。发布后，表单与部署校验同步生效。
+          {bi(
+            "设置用户创建交付时可以填写的内容。发布后，表单与部署校验同步生效。",
+            "Define fields users fill in when creating a delivery. Once published, both the form and deployment validation update together.",
+          )}
           <button className="pp-source" onClick={() => onSource()}>
-            查看参数定义 →
+            {bi("查看参数定义 →", "View definition →")}
           </button>
         </p>
       </div>
       {c.parameters.map((p, i) => (
         <section key={i} className="pp-card">
           <div className="pp-card-head">
-            <strong>{p.label || "新参数"}</strong>
+            <strong>{p.label || bi("新参数", "New parameter")}</strong>
             <Button
               type="text"
               status="danger"
@@ -146,36 +162,36 @@ export function PlatformParameters({
                 })
               }
             >
-              删除参数
+              {bi("删除参数", "Delete parameter")}
             </Button>
           </div>
           <div className="fgrid">
             <div className="frow">
-              参数键
+              {bi("参数键", "Parameter Key")}
               <Input
-                aria-label={"参数键 " + (i + 1)}
+                aria-label={bi("参数键 ", "Parameter key ") + (i + 1)}
                 value={p.key}
                 onChange={(key) => update(i, { key })}
               />
             </div>
             <div className="frow">
-              显示名称
+              {bi("显示名称", "Display Label")}
               <Input
-                aria-label={"参数名称 " + (i + 1)}
+                aria-label={bi("参数名称 ", "Parameter label ") + (i + 1)}
                 value={p.label}
                 onChange={(label) => update(i, { label })}
               />
             </div>
             <div className="frow">
-              类型
+              {bi("类型", "Type")}
               <Select
                 value={p.type}
                 options={[
-                  { value: "string", label: "文本" },
- { value: "path", label: "目录路径" },
-                  { value: "int", label: "整数" },
-                  { value: "bool", label: "开关" },
-                  { value: "enum", label: "选项" },
+                  { value: "string", label: bi("文本", "Text") },
+                  { value: "path", label: bi("目录路径", "Directory path") },
+                  { value: "int", label: bi("整数", "Integer") },
+                  { value: "bool", label: bi("开关", "Toggle") },
+                  { value: "enum", label: bi("选项", "Select") },
                 ]}
                 onChange={(type) =>
                   update(i, {
@@ -189,7 +205,7 @@ export function PlatformParameters({
               />
             </div>
             <div className="frow">
-              默认值
+              {bi("默认值", "Default Value")}
               {valueInput("params." + p.key, p.default, (v) =>
                 update(i, { default: v }),
               )}
@@ -197,14 +213,14 @@ export function PlatformParameters({
             {p.type === "int" && (
               <>
                 <div className="frow">
-                  最小值
+                  {bi("最小值", "Minimum")}
                   <InputNumber
                     value={p.min}
                     onChange={(min) => update(i, { min })}
                   />
                 </div>
                 <div className="frow">
-                  最大值
+                  {bi("最大值", "Maximum")}
                   <InputNumber
                     value={p.max}
                     onChange={(max) => update(i, { max })}
@@ -216,16 +232,16 @@ export function PlatformParameters({
           {p.type === "enum" && (
             <div className="pp-options">
               <div className="pp-options-head">
-                <span>保存值</span>
-                <span>显示名称</span>
-                <span>操作</span>
+                <span>{bi("保存值", "Stored Value")}</span>
+                <span>{bi("显示名称", "Display Label")}</span>
+                <span>{bi("操作", "Action")}</span>
               </div>
               {(p.options || []).map((o, j) => (
                 <div key={j} className="pp-option">
                   <Input
-                    aria-label="选项值"
+                    aria-label={bi("选项值", "Option value")}
                     value={o.value}
-                    placeholder="保存的值"
+                    placeholder={bi("保存的值", "Stored value")}
                     onChange={(value) =>
                       update(i, {
                         options: p.options!.map((x, k) =>
@@ -235,9 +251,9 @@ export function PlatformParameters({
                     }
                   />
                   <Input
-                    aria-label="选项名称"
+                    aria-label={bi("选项名称", "Option label")}
                     value={o.label}
-                    placeholder="用户看到的名称"
+                    placeholder={bi("用户看到的名称", "Label shown to users")}
                     onChange={(label) =>
                       update(i, {
                         options: p.options!.map((x, k) =>
@@ -249,14 +265,14 @@ export function PlatformParameters({
                   <Button
                     type="text"
                     status="danger"
-                    aria-label={"删除选项 " + (j + 1)}
+                    aria-label={bi("删除选项 ", "Delete option ") + (j + 1)}
                     onClick={() =>
                       update(i, {
                         options: p.options!.filter((_, k) => k !== j),
                       })
                     }
                   >
-                    删除
+                    {bi("删除", "Delete")}
                   </Button>
                 </div>
               ))}
@@ -267,12 +283,12 @@ export function PlatformParameters({
                   })
                 }
               >
-                添加选项
+                {bi("添加选项", "Add option")}
               </Button>
             </div>
           )}
           <div className="frow">
-            填写说明
+            {bi("填写说明", "Help Text")}
             <Input.TextArea
               value={p.help || ""}
               onChange={(help) => update(i, { help })}
@@ -292,12 +308,15 @@ export function PlatformParameters({
           })
         }
       >
-        添加公共参数
+        {bi("添加公共参数", "Add Platform Parameter")}
       </Button>
       <div>
-        <h2>联动与校验规则</h2>
+        <h2>{bi("联动与校验规则", "Dependency & Validation Rules")}</h2>
         <p className="muted">
-          条件满足时检查要求值。隐藏字段会在用户切换选项时自动改为要求值；接口提交的冲突值仍会报错。规则不会执行脚本。
+          {bi(
+            "条件满足时检查要求值。隐藏字段会在用户切换选项时自动改为要求值；接口提交的冲突值仍会报错。规则不会执行脚本。",
+            "Checks required values when conditions match. Hidden fields auto-update to the required value on toggle; conflicting API submissions still fail. Rules never execute scripts.",
+          )}
         </p>
       </div>
       {c.rules.map((r, i) => {
@@ -309,24 +328,27 @@ export function PlatformParameters({
         return (
           <section key={i} className="pp-card pp-rule">
             <div className="pp-card-head">
-              <strong>规则 {i + 1}</strong>
-              <span className="muted">{r.id || "未命名"}</span>
+              <strong>{bi(`规则 ${i + 1}`, `Rule ${i + 1}`)}</strong>
+              <span className="muted">{r.id || bi("未命名", "Untitled")}</span>
             </div>
             {(r.hide || []).includes("initialize") &&
               (r.require || []).some(
                 (v) => v.field === "initialize" && v.equals === true,
               ) && (
                 <div className="pp-rule-error" role="alert">
-                  初始化磁盘不能在隐藏后自动开启。请将下方“初始化磁盘”的要求值改为“关闭”，或移除对它的隐藏设置。
+                  {bi(
+                    "初始化磁盘不能在隐藏后自动开启。请将下方“初始化磁盘”的要求值改为“关闭”，或移除对它的隐藏设置。",
+                    "Initialize disk cannot auto-enable while hidden. Set the required value of \"Initialize Disk\" below to \"Off\", or remove it from hidden fields.",
+                  )}
                 </div>
               )}
             <div className="frow">
-              规则标识
+              {bi("规则标识", "Rule ID")}
               <Input value={r.id} onChange={(id) => updateRule({ id })} />
             </div>
-            <strong>当以下字段等于</strong>
+            <strong>{bi("当以下字段等于", "When field equals")}</strong>
             {condition(r.when, (when) => updateRule({ when }))}
-            <strong>必须满足</strong>
+            <strong>{bi("必须满足", "Must satisfy")}</strong>
             {(r.require || []).map((v, j) => (
               <div key={j}>
                 {condition(v, (value) =>
@@ -343,7 +365,7 @@ export function PlatformParameters({
                     })
                   }
                 >
-                  移除条件
+                  {bi("移除条件", "Remove condition")}
                 </Button>
               </div>
             ))}
@@ -357,10 +379,10 @@ export function PlatformParameters({
                 })
               }
             >
-              添加要求
+              {bi("添加要求", "Add requirement")}
             </Button>
             <div className="frow">
-              隐藏并自动设置的字段
+              {bi("隐藏并自动设置的字段", "Hide & auto-set fields")}
               <Select
                 mode="multiple"
                 value={r.hide || []}
@@ -371,7 +393,7 @@ export function PlatformParameters({
               />
             </div>
             <div className="frow">
-              冲突提示
+              {bi("冲突提示", "Conflict Message")}
               <Input
                 value={r.message}
                 onChange={(message) => updateRule({ message })}
@@ -384,7 +406,7 @@ export function PlatformParameters({
                 save({ ...c, rules: c.rules.filter((_, j) => j !== i) })
               }
             >
-              删除规则
+              {bi("删除规则", "Delete rule")}
             </Button>
           </section>
         );
@@ -407,7 +429,7 @@ export function PlatformParameters({
           })
         }
       >
-        添加规则
+        {bi("添加规则", "Add Rule")}
       </Button>
     </div>
   );

@@ -799,12 +799,17 @@ func (s *storeServer) handleAuditSessions(w http.ResponseWriter, r *http.Request
 	})
 
 	if rest == "export" {
+		lang := wLang(w)
 		s.auditReq(r, "audit-sessions-export", session.User, fmt.Sprint(len(filtered)))
 		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 		w.Header().Set("Content-Disposition", `attachment; filename="audit-sessions-`+time.Now().Format("20060102-150405")+`.csv"`)
 		cw := csv.NewWriter(w)
 		_, _ = w.Write([]byte("\xEF\xBB\xBF"))
-		_ = cw.Write([]string{"会话编号", "用户", "角色", "状态", "结束原因", "登录时间", "最后活跃时间", "到期/结束时间", "总在线时长（秒）", "活跃操作时长（秒）", "请求数", "来源 IP", "浏览器", "认证方式"})
+		hdr := []string{"会话编号", "用户", "角色", "状态", "结束原因", "登录时间", "最后活跃时间", "到期/结束时间", "总在线时长（秒）", "活跃操作时长（秒）", "请求数", "来源 IP", "浏览器", "认证方式"}
+		if isEnLang(lang) {
+			hdr = []string{"Session ID", "User", "Role", "Status", "End Reason", "Login Time", "Last Active", "Expires / Ended", "Total Online (s)", "Active Duration (s)", "Requests", "Source IP", "User Agent", "Auth Method"}
+		}
+		_ = cw.Write(hdr)
 		for _, row := range filtered {
 			endTime := row.EndedAt
 			if endTime == "" {

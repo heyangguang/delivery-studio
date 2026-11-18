@@ -240,5 +240,13 @@ func (s *storeServer) crossCheckAPI(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, 400, e.Error())
 		return
 	}
-	s.writeJSON(w, 200, s.crossCheck(in.Names))
+	res := s.crossCheck(in.Names)
+	if lang := wLang(w); isEnLang(lang) && len(res.Results) > 0 {
+		out := make([]string, len(res.Results))
+		for i, item := range res.Results {
+			out[i] = localizeGoMessage(lang, item)
+		}
+		res.Results = out
+	}
+	s.writeJSON(w, 200, res)
 }

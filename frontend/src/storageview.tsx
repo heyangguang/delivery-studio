@@ -9,6 +9,7 @@ import {
 import { IconEdit } from "@arco-design/web-react/icon";
 import { api, cached, can, err, putCached, useAIStatus } from "./shared";
 import { UsageBar, bytesText } from "./myfiles";
+import { bi, useLang } from "./i18n";
 import "./storageview.css";
 
 /* Settings → Storage: how much room each person gets for the files they keep and attach in conversations. */
@@ -34,7 +35,7 @@ export function editQuota(
     ? +(current.quota / (1 << 30)).toFixed(2)
     : undefined;
   Modal.confirm({
-    title: `${user} 的存储额度`,
+    title: bi(`${user} 的存储额度`, `Storage quota for ${user}`),
     content: (
       <div className="sv-q">
         <InputNumber
@@ -42,21 +43,25 @@ export function editQuota(
           max={100000}
           precision={2}
           defaultValue={v}
-          placeholder="留空 = 用默认额度"
+          placeholder={bi("留空 = 用默认额度", "Blank = default quota")}
           suffix="GB"
           onChange={(x) =>
             (v = x === undefined || x === null ? undefined : Number(x))
           }
           style={{ width: "100%" }}
-          aria-label="额度（GB）"
+          aria-label={bi("额度（GB）", "Quota (GB)")}
           autoFocus
         />
         <small>
-          留空表示使用平台的默认额度；填 0 表示不让这个账户再存新文件。
+          {bi(
+            "留空表示使用平台的默认额度；填 0 表示不让这个账户再存新文件。",
+            "Leave blank to use the platform default; enter 0 to block new file uploads for this account.",
+          )}
         </small>
       </div>
     ),
-    okText: "保存",
+    okText: bi("保存", "Save"),
+    cancelText: bi("取消", "Cancel"),
     onOk: async () => {
       try {
         await api(`/api/users/${encodeURIComponent(user)}/quota`, {
@@ -64,7 +69,9 @@ export function editQuota(
           body: JSON.stringify({ gb: v === undefined ? -1 : v }),
         });
         Message.success(
-          v === undefined ? "已改回默认额度" : `已调整为 ${v} GB`,
+          v === undefined
+            ? bi("已改回默认额度", "Reverted to default quota")
+            : bi(`已调整为 ${v} GB`, `Updated to ${v} GB`),
         );
         done();
       } catch (e) {
@@ -76,6 +83,7 @@ export function editQuota(
 }
 
 export function StorageView() {
+  useLang();
   const initStorage = cached<Data>("/api/settings/storage");
   const [d, setD] = useState<Data | null>(() => initStorage ?? null);
   const [gb, setGb] = useState(() => initStorage?.settings.default_gb ?? 20);
@@ -108,7 +116,7 @@ export function StorageView() {
           max_file_mb: mb,
         }),
       });
-      Message.success("已保存");
+      Message.success(bi("已保存", "Saved"));
       load();
     } catch (e) {
       err(e);
@@ -126,25 +134,31 @@ export function StorageView() {
     <article className="sx-page st-main enter">
       <header className="sx-page-h">
         <div>
-          <h1>存储空间</h1>
+          <h1>{bi("存储空间", "Storage")}</h1>
           <p>
             {aiStatus.enabled
-              ? "每个人都有自己的存储空间，存放自己上传的文件、图片和文档，在 AI 对话里发送的附件也会存进去。这里设置默认额度，也可以给某个人单独调整。"
-              : "每个人都有自己的存储空间，存放自己上传的文件、图片和文档。这里设置默认额度，也可以给某个人单独调整。"}
+              ? bi(
+                  "每个人都有自己的存储空间，存放自己上传的文件、图片和文档，在 AI 对话里发送的附件也会存进去。这里设置默认额度，也可以给某个人单独调整。",
+                  "Each user has personal storage for uploaded files, images, and documents, including AI chat attachments. Set default quotas here or adjust per user.",
+                )
+              : bi(
+                  "每个人都有自己的存储空间，存放自己上传的文件、图片和文档。这里设置默认额度，也可以给某个人单独调整。",
+                  "Each user has personal storage for uploaded files, images, and documents. Set default quotas here or adjust per user.",
+                )}
           </p>
         </div>
         <Button type="primary" loading={busy} disabled={!dirty} onClick={save}>
-          保存
+          {bi("保存", "Save")}
         </Button>
       </header>
-      {!d && <div className="st-skel" aria-label="载入中" />}
+      {!d && <div className="st-skel" aria-label={bi("载入中", "Loading")} />}
       {d && (
         <>
           <section className="sx-sec">
-            <h2>默认设置</h2>
+            <h2>{bi("默认设置", "Default Settings")}</h2>
             <div className="sv-fields">
               <label>
-                <span>每人默认额度</span>
+                <span>{bi("每人默认额度", "Default quota per user")}</span>
                 <InputNumber
                   min={0.1}
                   max={100000}
@@ -152,11 +166,11 @@ export function StorageView() {
                   value={gb}
                   onChange={(v) => setGb(Number(v) || 20)}
                   suffix="GB"
-                  aria-label="每人默认额度"
+                  aria-label={bi("每人默认额度", "Default quota per user")}
                 />
               </label>
               <label>
-                <span>单个文件上限</span>
+                <span>{bi("单个文件上限", "Max file size")}</span>
                 <InputNumber
                   min={1}
                   max={102400}
@@ -164,36 +178,38 @@ export function StorageView() {
                   value={mb}
                   onChange={(v) => setMb(Number(v) || 200)}
                   suffix="MB"
-                  aria-label="单个文件上限"
+                  aria-label={bi("单个文件上限", "Max file size")}
                 />
               </label>
             </div>
             <p className="faint small">
-              已使用 {bytesText(d.total_used)}
-              （所有账户合计）。调低默认额度不会删除任何文件，只是超出额度的人不能再上传。
+              {bi(
+                `已使用 ${bytesText(d.total_used)}（所有账户合计）。调低默认额度不会删除任何文件，只是超出额度的人不能再上传。`,
+                `${bytesText(d.total_used)} used across all accounts. Lowering the default quota does not delete existing files, but prevents new uploads once exceeded.`,
+              )}
             </p>
           </section>
           <section className="sx-sec">
             <div className="sv-h">
-              <h2>每个人的使用情况</h2>
+              <h2>{bi("每个人的使用情况", "Usage by User")}</h2>
               <Input
                 allowClear
-                placeholder="按账户名筛选"
+                placeholder={bi("按账户名筛选", "Filter by username")}
                 value={q}
                 onChange={setQ}
                 style={{ width: 200 }}
-                aria-label="按账户名筛选"
+                aria-label={bi("按账户名筛选", "Filter by username")}
               />
             </div>
             <div
               className="sv-table"
               role="table"
-              aria-label="每个人的使用情况"
+              aria-label={bi("每个人的使用情况", "Usage by user")}
             >
               <div className="sv-row head" role="row">
-                <span>账户</span>
-                <span>已用 / 额度</span>
-                <span>额度来源</span>
+                <span>{bi("账户", "Account")}</span>
+                <span>{bi("已用 / 额度", "Used / Quota")}</span>
+                <span>{bi("额度来源", "Source")}</span>
                 <span />
               </div>
               {rows.map((r) => (
@@ -201,7 +217,9 @@ export function StorageView() {
                   <b>{r.user}</b>
                   <UsageBar u={{ used: r.used, quota: r.quota, max_file: 0 }} />
                   <span className="faint small">
-                    {r.override !== undefined ? "单独设置" : "默认"}
+                    {r.override !== undefined
+                      ? bi("单独设置", "Custom")
+                      : bi("默认", "Default")}
                   </span>
                   {can("settings.storage") && (
                     <Button
@@ -215,13 +233,15 @@ export function StorageView() {
                         )
                       }
                     >
-                      调整
+                      {bi("调整", "Adjust")}
                     </Button>
                   )}
                 </div>
               ))}
               {rows.length === 0 && (
-                <p className="faint small">没有匹配的账户。</p>
+                <p className="faint small">
+                  {bi("没有匹配的账户。", "No matching accounts.")}
+                </p>
               )}
             </div>
           </section>

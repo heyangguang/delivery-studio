@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   Checkbox,
@@ -41,6 +41,7 @@ import {
 } from "./shared";
 import type { AIStatus } from "./shared";
 import { UnderlineTabs } from "./ui";
+import { bi, useLang } from "./i18n";
 import { PROVIDER_LOGOS } from "./providerlogos";
 import { ProviderLogo } from "./ailogo";
 export { ProviderLogo } from "./ailogo";
@@ -138,12 +139,42 @@ export type AIModel = {
 
 /** The thinking depths a person can be offered; each is passed on as the request's reasoning_effort. */
 export const EFFORTS = [
-  { id: "low", name: "低" },
-  { id: "medium", name: "中" },
-  { id: "high", name: "高" },
-  { id: "xhigh", name: "很高" },
-  { id: "max", name: "最高" },
-  { id: "ultra", name: "ultra" },
+  {
+    id: "low",
+    get name() {
+      return bi("低", "Low");
+    },
+  },
+  {
+    id: "medium",
+    get name() {
+      return bi("中", "Medium");
+    },
+  },
+  {
+    id: "high",
+    get name() {
+      return bi("高", "High");
+    },
+  },
+  {
+    id: "xhigh",
+    get name() {
+      return bi("很高", "Very high");
+    },
+  },
+  {
+    id: "max",
+    get name() {
+      return bi("最高", "Max");
+    },
+  },
+  {
+    id: "ultra",
+    get name() {
+      return bi("极高", "Ultra");
+    },
+  },
 ];
 export type AIProvider = {
   id: string;
@@ -185,28 +216,42 @@ type AISettings = {
   feature_list: { ID: string; Title: string; Help: string }[];
 };
 
-const GROUPS: [string, string][] = [
-  ["intl", "国际"],
-  ["cn", "国内"],
-  ["local", "本地模型"],
-  ["soon", "即将支持"],
+const getGroups = (): [string, string][] => [
+  ["intl", bi("国际", "Global")],
+  ["cn", bi("国内", "China")],
+  ["local", bi("本地模型", "Local")],
+  ["soon", bi("即将支持", "Coming soon")],
 ];
 
 const cap = (m: AIModel, k: "tools" | "vision") => {
   const v = m[k];
-  const label = k === "tools" ? "工具调用" : "看图";
+  const label = k === "tools" ? bi("工具调用", "Tools") : bi("看图", "Vision");
   if (v === "yes") return <span className="ai-cap yes">{label}</span>;
-  if (v === "no") return <span className="ai-cap no">不支持{label}</span>;
+  if (v === "no")
+    return (
+      <span className="ai-cap no">
+        {k === "tools" ? bi("不支持工具调用", "No tools") : bi("不支持看图", "No vision")}
+      </span>
+    );
   if (k === "vision" && m.declared === "yes")
     return (
       <span
         className="ai-cap decl"
-        title="供应商的模型列表声明支持，测试后才确认"
+        title={bi(
+          "供应商的模型列表声明支持，测试后才确认",
+          "Declared by provider model list; run test to verify",
+        )}
       >
-        看图（声明）
+        {bi("看图（声明）", "Vision (declared)")}
       </span>
     );
-  return <span className="ai-cap unk">{label}未测</span>;
+  return (
+    <span className="ai-cap unk">
+      {k === "tools"
+        ? bi("工具调用未测", "Tools untested")
+        : bi("看图未测", "Vision untested")}
+    </span>
+  );
 };
 
 const ctxText = (n?: number) =>
@@ -242,6 +287,7 @@ function ModelDiagPopover({
   onSwitchToChat?: () => void;
   children: React.ReactNode;
 }) {
+  useLang();
   const diag = m.test_diag;
   const isBad = !m.test_ok;
   const isWarn = !!m.test_ok && !!m.test_warn;
@@ -253,9 +299,11 @@ function ModelDiagPopover({
     diag?.http_status != null
       ? diag.http_status > 0
         ? `HTTP ${diag.http_status}`
-        : "网络未连通"
+        : bi("网络未连通", "Network unreachable")
       : "",
-    diag?.upstream_status ? `上游状态 ${diag.upstream_status}` : "",
+    diag?.upstream_status
+      ? bi(`上游状态 ${diag.upstream_status}`, `Upstream ${diag.upstream_status}`)
+      : "",
     diag?.reason_code ? reasonCodeLabel(diag.reason_code) : "",
   ].filter(Boolean);
   const latency = diag?.ms ?? m.test_ms;
@@ -278,16 +326,17 @@ function ModelDiagPopover({
             >
               {isBad ? (
                 <>
-                  <IconCloseCircleFill /> 测试未通过
+                  <IconCloseCircleFill /> {bi("测试未通过", "Test failed")}
                 </>
               ) : isWarn ? (
                 <>
-                  <IconExclamationCircleFill /> 连通
-                  {m.test_ms ? ` ${m.test_ms} ms` : ""} · 兼容告警
+                  <IconExclamationCircleFill /> {bi("连通", "Reachable")}
+                  {m.test_ms ? ` ${m.test_ms} ms` : ""} ·{" "}
+                  {bi("兼容告警", "Compat warning")}
                 </>
               ) : (
                 <>
-                  <IconCheckCircleFill /> 连通
+                  <IconCheckCircleFill /> {bi("连通", "Connected")}
                   {m.test_ms ? ` ${m.test_ms} ms` : ""}
                 </>
               )}
@@ -303,10 +352,10 @@ function ModelDiagPopover({
                 copy(
                   formatAICallDiag(diag, {
                     title: isBad
-                      ? "模型连通测试失败诊断"
+                      ? bi("模型连通测试失败诊断", "Model connectivity test failure diagnostics")
                       : isWarn
-                        ? "模型连通测试兼容告警"
-                        : "模型连通测试诊断",
+                        ? bi("模型连通测试兼容告警", "Model connectivity compatibility warning")
+                        : bi("模型连通测试诊断", "Model connectivity test diagnostics"),
                     provider: providerName,
                     model: m.id,
                     testedAt: m.tested ? fullTime(m.tested) : undefined,
@@ -317,24 +366,29 @@ function ModelDiagPopover({
                 )
               }
             >
-              <IconCopy /> 复制诊断
+              <IconCopy /> {bi("复制诊断", "Copy diagnostics")}
             </button>
           </div>
 
           {isBad && m.test_err && (
             <div className="ai-diag-alert bad">
-              <b>错误摘要</b>
+              <b>{bi("错误摘要", "Error summary")}</b>
               <p>{m.test_err}</p>
               {suggestChat && (
                 <small>
-                  当前供应商配置为 Responses 接口；若使用 Magpie / OneAPI
-                  等中转网关，建议切换为「Chat Completions（通用）」。
+                  {bi(
+                    "当前供应商配置为 Responses 接口；若使用 Magpie / OneAPI 等中转网关，建议切换为「Chat Completions（通用）」。",
+                    "This provider uses the Responses API; if routing via Magpie / OneAPI or similar gateways, switch to Chat Completions (standard).",
+                  )}
                 </small>
               )}
               {suggestChat && onSwitchToChat && (
                 <div>
                   <Button size="small" type="outline" onClick={onSwitchToChat}>
-                    切换为 Chat Completions（通用）
+                    {bi(
+                      "切换为 Chat Completions（通用）",
+                      "Switch to Chat Completions (standard)",
+                    )}
                   </Button>
                 </div>
               )}
@@ -343,17 +397,21 @@ function ModelDiagPopover({
 
           {isWarn && m.test_warn && (
             <div className="ai-diag-alert warn">
-              <b>网关协议兼容告警</b>
+              <b>{bi("网关协议兼容告警", "Gateway protocol compatibility warning")}</b>
               <p>{m.test_warn}</p>
               <small>
-                建议将该供应商的「接口方式」改为「Chat
-                Completions（通用）」，避免每次调用先走 Responses
-                空流再自动回退重试。
+                {bi(
+                  "建议将该供应商的「接口方式」改为「Chat Completions（通用）」，避免每次调用先走 Responses 空流再自动回退重试。",
+                  "Consider switching API mode to Chat Completions (standard) so requests don't try Responses first and fall back on every call.",
+                )}
               </small>
               {onSwitchToChat && providerApi === "responses" && (
                 <div>
                   <Button size="small" type="outline" onClick={onSwitchToChat}>
-                    切换为 Chat Completions（通用）
+                    {bi(
+                      "切换为 Chat Completions（通用）",
+                      "Switch to Chat Completions (standard)",
+                    )}
                   </Button>
                 </div>
               )}
@@ -363,12 +421,13 @@ function ModelDiagPopover({
           <dl className="ai-diag-dl">
             {(diag?.endpoint || diag?.api) && (
               <>
-                <dt>协议端点</dt>
+                <dt>{bi("协议端点", "Endpoint")}</dt>
                 <dd>
                   <span className="mono">{diag.endpoint || diag.api}</span>
                   {diag.fallback_used && (
                     <span className="ai-diag-fb">
-                      已回退 <span className="mono">{diag.fallback_used}</span>
+                      {bi("已回退", "Fallback")}{" "}
+                      <span className="mono">{diag.fallback_used}</span>
                     </span>
                   )}
                 </dd>
@@ -376,13 +435,13 @@ function ModelDiagPopover({
             )}
             {statusParts.length > 0 && (
               <>
-                <dt>HTTP 状态</dt>
+                <dt>{bi("HTTP 状态", "HTTP status")}</dt>
                 <dd>{statusParts.join(" · ")}</dd>
               </>
             )}
             {(latency != null || m.tested) && (
               <>
-                <dt>耗时</dt>
+                <dt>{bi("耗时", "Latency")}</dt>
                 <dd className="num">
                   {latency != null ? `${latency} ms` : "—"}
                   {m.tested ? (
@@ -395,27 +454,38 @@ function ModelDiagPopover({
               <>
                 <dt>Token</dt>
                 <dd className="num">
-                  输入 {diag?.in_tokens ?? 0}
+                  {bi(`输入 ${diag?.in_tokens ?? 0}`, `In ${diag?.in_tokens ?? 0}`)}
                   {diag?.cached_tokens != null
-                    ? ` · 缓存 ${diag.cached_tokens}`
+                    ? bi(
+                        ` · 缓存 ${diag.cached_tokens}`,
+                        ` · Cached ${diag.cached_tokens}`,
+                      )
                     : ""}
-                  {` · 输出 ${diag?.out_tokens ?? 0}`}
+                  {bi(
+                    ` · 输出 ${diag?.out_tokens ?? 0}`,
+                    ` · Out ${diag?.out_tokens ?? 0}`,
+                  )}
                 </dd>
               </>
             )}
             {diag?.response_id && (
               <>
-                <dt>响应 ID</dt>
+                <dt>{bi("响应 ID", "Response ID")}</dt>
                 <dd className="mono">{diag.response_id}</dd>
               </>
             )}
             {diag?.sse_events && diag.sse_events.length > 0 && (
               <>
-                <dt>SSE 事件</dt>
+                <dt>{bi("SSE 事件", "SSE events")}</dt>
                 <dd>
                   <span className="mono">{diag.sse_events.join(" → ")}</span>
                   {diag.keepalives ? (
-                    <span className="faint">{`（心跳 ${diag.keepalives} 次）`}</span>
+                    <span className="faint">
+                      {bi(
+                        `（心跳 ${diag.keepalives} 次）`,
+                        ` (${diag.keepalives} keepalive${diag.keepalives === 1 ? "" : "s"})`,
+                      )}
+                    </span>
                   ) : null}
                 </dd>
               </>
@@ -425,7 +495,10 @@ function ModelDiagPopover({
           {diag?.attempts && diag.attempts.length > 0 && (
             <div className="ai-diag-sec">
               <div className="ai-diag-sec-t">
-                重试与回退链路（{diag.attempts.length} 次）
+                {bi(
+                  `重试与回退链路（${diag.attempts.length} 次）`,
+                  `Retry & fallback trace (${diag.attempts.length})`,
+                )}
               </div>
               <ol className="ai-diag-attempts">
                 {diag.attempts.map((a, idx) => (
@@ -435,17 +508,31 @@ function ModelDiagPopover({
                     <span
                       className={`ai-diag-att-st ${a.http_status && a.http_status >= 200 && a.http_status < 300 ? "ok" : "bad"}`}
                     >
-                      {a.http_status ? `HTTP ${a.http_status}` : "连接失败"}
+                      {a.http_status
+                        ? `HTTP ${a.http_status}`
+                        : bi("连接失败", "Connection failed")}
                     </span>
                     <span className="num">{a.ms} ms</span>
                     {(a.in_tokens != null || a.out_tokens != null) && (
                       <span className="num">
                         ↓{a.in_tokens ?? 0}
-                        {a.cached_tokens ? ` 缓${a.cached_tokens}` : ""} ↑
-                        {a.out_tokens ?? 0}
+                        {a.cached_tokens
+                          ? bi(
+                              ` 缓${a.cached_tokens}`,
+                              ` c:${a.cached_tokens}`,
+                            )
+                          : ""}{" "}
+                        ↑{a.out_tokens ?? 0}
                       </span>
                     )}
-                    {a.upstream_status && <span>状态 {a.upstream_status}</span>}
+                    {a.upstream_status && (
+                      <span>
+                        {bi(
+                          `状态 ${a.upstream_status}`,
+                          `Status ${a.upstream_status}`,
+                        )}
+                      </span>
+                    )}
                     {a.response_id && (
                       <code className="faint">{a.response_id}</code>
                     )}
@@ -462,7 +549,9 @@ function ModelDiagPopover({
 
           {diag?.request_summary && (
             <div className="ai-diag-sec">
-              <div className="ai-diag-sec-t">请求参数摘要</div>
+              <div className="ai-diag-sec-t">
+                {bi("请求参数摘要", "Request summary")}
+              </div>
               <pre className="ai-diag-raw">
                 {prettyDiagPayload(diag.request_summary)}
               </pre>
@@ -471,7 +560,9 @@ function ModelDiagPopover({
 
           {diag?.response_raw && (
             <div className="ai-diag-sec">
-              <div className="ai-diag-sec-t">网关原始响应</div>
+              <div className="ai-diag-sec-t">
+                {bi("网关原始响应", "Gateway raw response")}
+              </div>
               <pre className="ai-diag-raw">
                 {prettyDiagPayload(diag.response_raw)}
               </pre>
@@ -480,8 +571,10 @@ function ModelDiagPopover({
 
           {!diag && (
             <p className="ai-diag-empty faint">
-              在「管理模型」中重新点击测试按钮，可采集网关端点、HTTP
-              状态、响应 ID 与原始返回帧。
+              {bi(
+                "在「管理模型」中重新点击测试按钮，可采集网关端点、HTTP 状态、响应 ID 与原始返回帧。",
+                "Click Test again inside Manage models to capture the endpoint, HTTP status, response ID, and raw frames.",
+              )}
             </p>
           )}
         </div>
@@ -502,10 +595,14 @@ function IconPick({
   presets: Preset[];
   set: (f: Partial<AIProvider>) => void;
 }) {
+  useLang();
   const [open, setOpen] = useState(false);
   const upload = (f?: File) => {
     if (!f) return;
-    if (f.size > 150 << 10) return Message.warning("图片不能超过 150 KiB");
+    if (f.size > 150 << 10)
+      return Message.warning(
+        bi("图片不能超过 150 KiB", "Image cannot exceed 150 KiB"),
+      );
     const r = new FileReader();
     r.onload = () => {
       set({ icon: String(r.result) });
@@ -522,9 +619,9 @@ function IconPick({
       content={
         <div className="ip">
           <div className="ip-h">
-            <b>图标</b>
+            <b>{bi("图标", "Icon")}</b>
             <label className="ip-up">
-              上传图片…
+              {bi("上传图片…", "Upload image…")}
               <input
                 type="file"
                 accept="image/png,image/jpeg,image/webp,image/svg+xml"
@@ -538,7 +635,7 @@ function IconPick({
                 className="ip-clear"
                 onClick={() => set({ icon: "" })}
               >
-                去掉图标
+                {bi("去掉图标", "Clear icon")}
               </button>
             )}
           </div>
@@ -554,7 +651,10 @@ function IconPick({
                       set({ icon: `preset:${x.id}` }),
                       setOpen(false)
                     )}
-                    aria-label={`使用 ${x.name} 的图标`}
+                    aria-label={bi(
+                      `使用 ${x.name} 的图标`,
+                      `Use ${x.name} icon`,
+                    )}
                   >
                     <ProviderLogo preset={x.id} name={x.name} size={22} />
                   </button>
@@ -562,7 +662,7 @@ function IconPick({
               ))}
           </div>
           <div className="ip-h">
-            <b>没有图标时的颜色</b>
+            <b>{bi("没有图标时的颜色", "Fallback badge color")}</b>
           </div>
           <div className="ip-sw">
             {SWATCHES.map((c) => (
@@ -577,14 +677,18 @@ function IconPick({
                     icon: p.icon?.startsWith("preset:") ? "" : p.icon,
                   })
                 }
-                aria-label={`颜色 ${c}`}
+                aria-label={bi(`颜色 ${c}`, `Color ${c}`)}
               />
             ))}
           </div>
         </div>
       }
     >
-      <button type="button" className="ip-btn" aria-label="选择图标">
+      <button
+        type="button"
+        className="ip-btn"
+        aria-label={bi("选择图标", "Choose icon")}
+      >
         <ProviderLogo
           preset={p.preset || ""}
           name={p.name}
@@ -670,6 +774,7 @@ function ProviderModal({
   close: () => void;
   saved: (p: AIProvider, auto?: boolean) => Promise<void> | void;
 }) {
+  useLang();
   const [step, setStep] = useState<"pick" | "form">("pick");
   const [savedProvider, setSavedProvider] = useState<AIProvider | null>(edit);
   const [p, setP] = useState<Partial<AIProvider>>({});
@@ -738,7 +843,12 @@ function ProviderModal({
       setRemote(r.models || []);
       setTab("remote");
       if (!r.models?.length)
-        Message.warning("供应商没有返回模型，请手填模型名");
+        Message.warning(
+          bi(
+            "供应商没有返回模型，请手填模型名",
+            "Provider returned no models—enter model IDs manually",
+          ),
+        );
     } catch (e) {
       err(e);
     } finally {
@@ -756,15 +866,15 @@ function ProviderModal({
 
   const persistProvider = async (auto: boolean): Promise<AIProvider | null> => {
     if (!p.name?.trim()) {
-      Message.warning("请先填写供应商名称");
+      Message.warning(bi("请先填写供应商名称", "Enter a provider name first"));
       return null;
     }
     if (!p.url?.trim()) {
-      Message.warning("请先填写接口地址");
+      Message.warning(bi("请先填写接口地址", "Enter the endpoint URL first"));
       return null;
     }
     if (!models.some((m) => m.enabled)) {
-      Message.warning("请至少启用一个模型");
+      Message.warning(bi("请至少启用一个模型", "Enable at least one model"));
       return null;
     }
     setBusy(true);
@@ -797,10 +907,15 @@ function ProviderModal({
     const r = await persistProvider(false);
     if (!r) return;
     if (edit || hadSavedId) {
-      Message.success("已保存");
+      Message.success(bi("已保存", "Saved"));
       close();
     } else {
-      Message.success("已保存，现在可以逐个测试模型");
+      Message.success(
+        bi(
+          "已保存，现在可以逐个测试模型",
+          "Saved; you can now test models one by one",
+        ),
+      );
     }
   };
 
@@ -880,21 +995,23 @@ function ProviderModal({
     [remote, filter],
   );
   const needsAutoSave = !curId || isDirty;
+  const groups = getGroups();
   return (
     <Modal
       visible={open}
       onCancel={close}
       title={
         edit
-          ? "编辑供应商"
+          ? bi("编辑供应商", "Edit provider")
           : step === "pick"
-            ? "选择模型供应商"
-            : `添加 ${preset?.name || ""}`
+            ? bi("选择模型供应商", "Choose model provider")
+            : bi(`添加 ${preset?.name || ""}`, `Add ${preset?.name || ""}`)
       }
       footer={step === "pick" ? null : undefined}
       onOk={save}
       confirmLoading={busy}
-      okText="保存"
+      okText={bi("保存", "Save")}
+      cancelText={bi("取消", "Cancel")}
       okButtonProps={{
         disabled:
           !p.name?.trim() ||
@@ -905,7 +1022,7 @@ function ProviderModal({
     >
       {step === "pick" ? (
         <div className="ai-picker">
-          {GROUPS.map(([g, label]) => {
+          {groups.map(([g, label]) => {
             const items = presets.filter((x) => x.group === g);
             if (!items.length) return null;
             return (
@@ -933,15 +1050,20 @@ function ProviderModal({
             className="ai-custom"
             onClick={() => pick(presets.find((x) => x.id === "custom")!)}
           >
-            <IconPlus /> <b>自定义供应商</b>
-            <span>任意 OpenAI 兼容的地址，里面可以管理很多模型</span>
+            <IconPlus /> <b>{bi("自定义供应商", "Custom provider")}</b>
+            <span>
+              {bi(
+                "任意 OpenAI 兼容的地址，里面可以管理很多模型",
+                "Any OpenAI-compatible endpoint with multiple models",
+              )}
+            </span>
           </button>
         </div>
       ) : (
         <div className="st-form">
           <div className="ai-two">
             <div className="st-field">
-              <span>名称与图标</span>
+              <span>{bi("名称与图标", "Name & icon")}</span>
               <div className="ai-namerow">
                 <IconPick
                   p={p}
@@ -953,9 +1075,11 @@ function ProviderModal({
                   onChange={(v) => setP({ ...p, name: v })}
                   maxLength={40}
                   placeholder={
-                    p.preset === "custom" ? "例如：公司内网网关" : ""
+                    p.preset === "custom"
+                      ? bi("例如：公司内网网关", "e.g. Internal AI gateway")
+                      : ""
                   }
-                  aria-label="名称"
+                  aria-label={bi("名称", "Name")}
                 />
               </div>
             </div>
@@ -966,9 +1090,12 @@ function ProviderModal({
                 onChange={setKey}
                 placeholder={
                   savedProvider?.key_set
-                    ? `已保存（…${savedProvider.key_last4 || ""}），留空保持不变`
+                    ? bi(
+                        `已保存（…${savedProvider.key_last4 || ""}），留空保持不变`,
+                        `Saved (…${savedProvider.key_last4 || ""}); leave blank to keep`,
+                      )
                     : p.private
-                      ? "本地模型可留空"
+                      ? bi("本地模型可留空", "Optional for local models")
                       : ""
                 }
                 autoComplete="new-password"
@@ -977,58 +1104,76 @@ function ProviderModal({
             </div>
           </div>
           <div className="st-field">
-            <span>接口地址</span>
+            <span>{bi("接口地址", "Base URL")}</span>
             <Input
               value={p.url}
               onChange={(v) => setP({ ...p, url: v })}
               placeholder="https://…/v1"
-              aria-label="接口地址"
+              aria-label={bi("接口地址", "Base URL")}
             />
             <small>
               {preset?.hint ||
-                "OpenAI 兼容接口的根地址，平台会请求其下的 /chat/completions；密钥加密保存，保存后不再显示。"}
+                bi(
+                  "OpenAI 兼容接口的根地址，平台会请求其下的 /chat/completions；密钥加密保存，保存后不再显示。",
+                  "Base URL of an OpenAI-compatible API (/chat/completions will be appended); keys are stored encrypted and never displayed again.",
+                )}
             </small>
           </div>
           <div className="st-field">
-            <span>接口方式</span>
+            <span>{bi("接口方式", "API mode")}</span>
             <Select
               value={p.api || "chat"}
               onChange={(v) => setP({ ...p, api: v === "chat" ? "" : v })}
-              aria-label="接口方式"
+              aria-label={bi("接口方式", "API mode")}
               triggerProps={{ autoFitPosition: true }}
             >
               <Select.Option value="chat">
-                Chat Completions（通用）
+                {bi("Chat Completions（通用）", "Chat Completions (standard)")}
               </Select.Option>
               <Select.Option value="responses">
-                Responses（能显示模型的思考摘要）
+                {bi(
+                  "Responses（能显示模型的思考摘要）",
+                  "Responses (supports reasoning summaries)",
+                )}
               </Select.Option>
             </Select>
             <small>
-              Responses 适用于原生 OpenAI 推理模型；若通过 Magpie / OneAPI
-              等中转网关接入 Claude、DeepSeek、通义等模型，建议保持「Chat
-              Completions（通用）」（Responses
-              返回空流时平台也会自动回退重试）。
+              {bi(
+                "Responses 适用于原生 OpenAI 推理模型；若通过 Magpie / OneAPI 等中转网关接入 Claude、DeepSeek、通义等模型，建议保持「Chat Completions（通用）」（Responses 返回空流时平台也会自动回退重试）。",
+                "Responses works best for native OpenAI reasoning models; for gateways like Magpie / OneAPI serving Claude, DeepSeek, or Qwen, keep Chat Completions (standard) (empty Responses streams also fall back automatically).",
+              )}
             </small>
           </div>
 
           <div className="ai-models">
             <div className="ai-models-h">
-              <b>模型</b>
+              <b>{bi("模型", "Models")}</b>
               <span className="faint small">
                 {models.length
-                  ? `已添加 ${models.length} 个，启用 ${models.filter((m) => m.enabled).length} 个`
-                  : "还没有模型"}
+                  ? bi(
+                      `已添加 ${models.length} 个，启用 ${models.filter((m) => m.enabled).length} 个`,
+                      `${models.length} added, ${models.filter((m) => m.enabled).length} enabled`,
+                    )
+                  : bi("还没有模型", "No models yet")}
               </span>
               <span className="ai-sp" />
               {models.some((m) => m.enabled) && (
                 <Tooltip
                   content={
                     !canSave
-                      ? "请先填写名称、接口地址并启用至少一个模型"
+                      ? bi(
+                          "请先填写名称、接口地址并启用至少一个模型",
+                          "Enter name, URL, and enable at least one model first",
+                        )
                       : needsAutoSave
-                        ? "自动保存当前更改并测试所有已启用模型"
-                        : "逐个测试所有已启用模型的连通、工具调用与看图能力"
+                        ? bi(
+                            "自动保存当前更改并测试所有已启用模型",
+                            "Auto-save changes and test all enabled models",
+                          )
+                        : bi(
+                            "逐个测试所有已启用模型的连通、工具调用与看图能力",
+                            "Test connectivity, tool calling, and vision on every enabled model",
+                          )
                   }
                   mini
                 >
@@ -1039,7 +1184,7 @@ function ProviderModal({
                     disabled={busy || !canSave}
                     onClick={() => void testAll()}
                   >
-                    测试全部
+                    {bi("测试全部", "Test all")}
                   </Button>
                 </Tooltip>
               )}
@@ -1050,24 +1195,24 @@ function ProviderModal({
                 onClick={fetchModels}
                 disabled={!p.url?.trim()}
               >
-                获取模型列表
+                {bi("获取模型列表", "Fetch models")}
               </Button>
             </div>
             <UnderlineTabs
               className="ai-modal-tabs"
-              label="模型来源"
+              label={bi("模型来源", "Model source")}
               value={tab}
               onChange={setTab}
               items={[
                 {
                   value: "mine",
-                  label: "已添加",
+                  label: bi("已添加", "Added"),
                   count: models.length,
                   icon: AITabIcons.mine,
                 },
                 {
                   value: "remote",
-                  label: "供应商列表",
+                  label: bi("供应商列表", "Provider catalog"),
                   count: remote.length || undefined,
                   icon: AITabIcons.remote,
                 },
@@ -1079,7 +1224,7 @@ function ProviderModal({
                   <Input
                     size="small"
                     allowClear
-                    placeholder="筛选模型"
+                    placeholder={bi("筛选模型", "Filter models")}
                     value={filter}
                     onChange={setFilter}
                     onKeyDown={(e) => {
@@ -1089,19 +1234,22 @@ function ProviderModal({
                       }
                     }}
                     style={{ width: 200 }}
-                    aria-label="筛选模型"
+                    aria-label={bi("筛选模型", "Filter models")}
                   />
                   <Button
                     size="small"
                     onClick={() => shown.forEach(addModel)}
                     disabled={!shown.length}
                   >
-                    全部添加
+                    {bi("全部添加", "Add all")}
                   </Button>
                 </div>
                 {remote.length === 0 ? (
                   <p className="faint small">
-                    点「获取模型列表」读取这个供应商提供的模型。
+                    {bi(
+                      "点「获取模型列表」读取这个供应商提供的模型。",
+                      "Click Fetch models to query available models from this provider.",
+                    )}
                   </p>
                 ) : (
                   <div className="ai-chips">
@@ -1121,7 +1269,9 @@ function ProviderModal({
                         {has(m.id) ? <IconCheck /> : <IconPlus />}
                         <span>{chipModelName(m, remote)}</span>
                         {m.context ? <em>{ctxText(m.context)}</em> : null}
-                        {m.declared === "yes" && <em className="v">看图</em>}
+                        {m.declared === "yes" && (
+                          <em className="v">{bi("看图", "Vision")}</em>
+                        )}
                       </button>
                     ))}
                   </div>
@@ -1134,13 +1284,16 @@ function ProviderModal({
                     size="small"
                     value={newId}
                     onChange={setNewId}
-                    placeholder="添加模型 ID，回车确认"
+                    placeholder={bi(
+                      "添加模型 ID，回车确认",
+                      "Add model ID, press Enter",
+                    )}
                     onPressEnter={() =>
                       newId.trim() &&
                       (addModel({ id: newId.trim(), enabled: true }),
                       setNewId(""))
                     }
-                    aria-label="添加模型 ID"
+                    aria-label={bi("添加模型 ID", "Add model ID")}
                   />
                   <Button
                     size="small"
@@ -1150,21 +1303,32 @@ function ProviderModal({
                       setNewId("")
                     )}
                   >
-                    添加模型
+                    {bi("添加模型", "Add model")}
                   </Button>
                 </div>
                 {models.length > 0 && (
-                  <div className="ai-mtable" role="table" aria-label="模型">
+                  <div
+                    className="ai-mtable"
+                    role="table"
+                    aria-label={bi("模型", "Models")}
+                  >
                     <div className="ai-mrow head" role="row">
                       <span />
-                      <span>模型</span>
-                      <span>能力</span>
-                      <span title="用户在对话输入框里能选的思考档位">
-                        思考档位
+                      <span>{bi("模型", "Model")}</span>
+                      <span>{bi("能力", "Capabilities")}</span>
+                      <span
+                        title={bi(
+                          "用户在对话输入框里能选的思考档位",
+                          "Thinking tiers users can choose in chat",
+                        )}
+                      >
+                        {bi("思考档位", "Thinking")}
                       </span>
-                      <span title="每百万 Token">输入价</span>
-                      <span>缓存价</span>
-                      <span>输出价</span>
+                      <span title={bi("每百万 Token", "Per 1M tokens")}>
+                        {bi("输入价", "Input")}
+                      </span>
+                      <span>{bi("缓存价", "Cached")}</span>
+                      <span>{bi("输出价", "Output")}</span>
                       <span />
                     </div>
                     {models.map((m) => (
@@ -1177,7 +1341,7 @@ function ProviderModal({
                           size="small"
                           checked={m.enabled}
                           onChange={(v) => patch(m.id, { enabled: v })}
-                          aria-label={`启用 ${m.id}`}
+                          aria-label={bi(`启用 ${m.id}`, `Enable ${m.id}`)}
                         />
                         <span className="ai-mname">
                           <b title={m.id}>{m.name || m.id}</b>
@@ -1185,9 +1349,12 @@ function ProviderModal({
                           {m.price_default && !m.price_in && !m.price_out && (
                             <small
                               className="ai-defprice"
-                              title={`${m.price_default.vendor} 官方价（每百万 Token，输入 / 缓存 / 输出）`}
+                              title={bi(
+                                `${m.price_default.vendor} 官方价（每百万 Token，输入 / 缓存 / 输出）`,
+                                `${m.price_default.vendor} list price (per 1M tokens: input / cached / output)`,
+                              )}
                             >
-                              官方价{" "}
+                              {bi("官方价", "List")}{" "}
                               {m.price_default.currency === "USD" ? "$" : "¥"}
                               {m.price_default.in} / {m.price_default.cached} /{" "}
                               {m.price_default.out}
@@ -1202,7 +1369,7 @@ function ProviderModal({
                                 >
                                   <IconCloseCircleFill />
                                   <span>
-                                    {m.test_err || "测试未通过"}
+                                    {m.test_err || bi("测试未通过", "Test failed")}
                                     {m.tested ? ` · ${ago(m.tested)}` : ""}
                                   </span>
                                 </span>
@@ -1213,7 +1380,10 @@ function ProviderModal({
                                   onSwitchToChat={() => {
                                     setP({ ...p, api: "" });
                                     Message.info(
-                                      "已切换为 Chat Completions（通用），可直接重新测试或点击右下角「保存」",
+                                      bi(
+                                        "已切换为 Chat Completions（通用），可直接重新测试或点击右下角「保存」",
+                                        "Switched to Chat Completions (standard); test again or click Save below",
+                                      ),
                                     );
                                   }}
                                 >
@@ -1221,7 +1391,7 @@ function ProviderModal({
                                     type="button"
                                     className="ai-diag-trig bad"
                                   >
-                                    诊断详情
+                                    {bi("诊断详情", "Diagnostics")}
                                   </button>
                                 </ModelDiagPopover>
                               </div>
@@ -1234,7 +1404,10 @@ function ProviderModal({
                                   onSwitchToChat={() => {
                                     setP({ ...p, api: "" });
                                     Message.info(
-                                      "已切换为 Chat Completions（通用），可直接重新测试或点击右下角「保存」",
+                                      bi(
+                                        "已切换为 Chat Completions（通用），可直接重新测试或点击右下角「保存」",
+                                        "Switched to Chat Completions (standard); test again or click Save below",
+                                      ),
                                     );
                                   }}
                                 >
@@ -1244,12 +1417,12 @@ function ProviderModal({
                                   >
                                     <IconExclamationCircleFill />
                                     <span>
-                                      连通
-                                      {m.test_ms ? ` ${m.test_ms} ms` : ""} ·
-                                      兼容告警
+                                      {bi("连通", "Reachable")}
+                                      {m.test_ms ? ` ${m.test_ms} ms` : ""} ·{" "}
+                                      {bi("兼容告警", "Compat warning")}
                                       {m.tested ? ` · ${ago(m.tested)}` : ""}
                                     </span>
-                                    <em>诊断详情</em>
+                                    <em>{bi("诊断详情", "Diagnostics")}</em>
                                   </button>
                                 </ModelDiagPopover>
                               </div>
@@ -1259,7 +1432,8 @@ function ProviderModal({
                                   className="ok"
                                   title={m.tested ? fullTime(m.tested) : ""}
                                 >
-                                  <IconCheckCircleFill /> 连通 {m.test_ms} ms
+                                  <IconCheckCircleFill />{" "}
+                                  {bi("连通", "Connected")} {m.test_ms} ms
                                   {m.tested ? ` · ${ago(m.tested)}` : ""}
                                 </small>
                                 {m.test_diag && (
@@ -1272,7 +1446,7 @@ function ProviderModal({
                                       type="button"
                                       className="ai-diag-trig subtle"
                                     >
-                                      详情
+                                      {bi("详情", "Details")}
                                     </button>
                                   </ModelDiagPopover>
                                 )}
@@ -1294,9 +1468,12 @@ function ProviderModal({
                           triggerProps={{ autoFitPosition: true }}
                           content={
                             <div className="ai-eff">
-                              <b>可选的思考档位</b>
+                              <b>{bi("可选的思考档位", "Allowed thinking tiers")}</b>
                               <small>
-                                用户在输入框里选，选到哪档，就把对应的参数（reasoning_effort）传给模型；模型不认的档位不会有效果，也不会报错。
+                                {bi(
+                                  "用户在输入框里选，选到哪档，就把对应的参数（reasoning_effort）传给模型；模型不认的档位不会有效果，也不会报错。",
+                                  "Selected in the chat box and passed as reasoning_effort; unsupported tiers are safely ignored by the model.",
+                                )}
                               </small>
                               <Checkbox.Group
                                 value={m.efforts ?? EFFORTS.map((e) => e.id)}
@@ -1312,7 +1489,10 @@ function ProviderModal({
                                   label:
                                     e.name === e.id
                                       ? e.id
-                                      : `${e.name}（${e.id}）`,
+                                      : bi(
+                                          `${e.name}（${e.id}）`,
+                                          `${e.name} (${e.id})`,
+                                        ),
                                 }))}
                                 direction="vertical"
                               />
@@ -1326,7 +1506,7 @@ function ProviderModal({
                                   })
                                 }
                               >
-                                恢复默认（全部）
+                                {bi("恢复默认（全部）", "Reset to all")}
                               </Button>
                             </div>
                           }
@@ -1334,13 +1514,13 @@ function ProviderModal({
                           <button
                             type="button"
                             className="ai-eff-btn"
-                            aria-label={`${m.id} 思考档位`}
+                            aria-label={bi(`${m.id} 思考档位`, `${m.id} thinking tiers`)}
                           >
                             {m.efforts === undefined
-                              ? "全部 6 档"
+                              ? bi("全部 6 档", "All 6")
                               : m.efforts.length
-                                ? `${m.efforts.length} 档`
-                                : "不提供"}
+                                ? bi(`${m.efforts.length} 档`, `${m.efforts.length} tiers`)
+                                : bi("不提供", "None")}
                           </button>
                         </Popover>
                         <InputNumber
@@ -1355,7 +1535,7 @@ function ProviderModal({
                           placeholder={
                             m.price_default ? String(m.price_default.in) : "—"
                           }
-                          aria-label={`${m.id} 输入价`}
+                          aria-label={bi(`${m.id} 输入价`, `${m.id} input price`)}
                         />
                         <InputNumber
                           size="small"
@@ -1369,9 +1549,9 @@ function ProviderModal({
                           placeholder={
                             m.price_default
                               ? String(m.price_default.cached)
-                              : "同输入"
+                              : bi("同输入", "Same as input")
                           }
-                          aria-label={`${m.id} 缓存价`}
+                          aria-label={bi(`${m.id} 缓存价`, `${m.id} cached price`)}
                         />
                         <InputNumber
                           size="small"
@@ -1385,16 +1565,25 @@ function ProviderModal({
                           placeholder={
                             m.price_default ? String(m.price_default.out) : "—"
                           }
-                          aria-label={`${m.id} 输出价`}
+                          aria-label={bi(`${m.id} 输出价`, `${m.id} output price`)}
                         />
                         <span className="ai-macts">
                           <Tooltip
                             content={
                               !canSave
-                                ? "请先填写名称、地址并启用至少一个模型"
+                                ? bi(
+                                    "请先填写名称、地址并启用至少一个模型",
+                                    "Enter name, URL, and enable at least one model first",
+                                  )
                                 : needsAutoSave
-                                  ? "自动保存当前更改并测试连通、工具调用与看图"
-                                  : "测试连通、工具调用、看图"
+                                  ? bi(
+                                      "自动保存当前更改并测试连通、工具调用与看图",
+                                      "Auto-save changes and test connectivity, tools & vision",
+                                    )
+                                  : bi(
+                                      "测试连通、工具调用、看图",
+                                      "Test connectivity, tools & vision",
+                                    )
                             }
                             mini
                           >
@@ -1408,7 +1597,7 @@ function ProviderModal({
                                 !canSave
                               }
                               onClick={() => void test(m.id)}
-                              aria-label={`测试 ${m.id}`}
+                              aria-label={bi(`测试 ${m.id}`, `Test ${m.id}`)}
                             />
                           </Tooltip>
                           <Button
@@ -1418,13 +1607,16 @@ function ProviderModal({
                             onClick={() =>
                               setModels((x) => x.filter((y) => y.id !== m.id))
                             }
-                            aria-label={`移除 ${m.id}`}
+                            aria-label={bi(`移除 ${m.id}`, `Remove ${m.id}`)}
                           />
                         </span>
                       </div>
                     ))}
                     <p className="ai-note">
-                      留空就用平台内置的官方价格（见「模型价格」页）；在这里填的价格优先，币种见「更多设置」。看图要点测试才能确认。
+                      {bi(
+                        "留空就用平台内置的官方价格（见「模型价格」页）；在这里填的价格优先，币种见「更多设置」。看图要点测试才能确认。",
+                        "Leave blank to use built-in official rates (see Model Pricing); prices entered here override defaults using the currency under More settings. Vision requires running a test to confirm.",
+                      )}
                     </p>
                   </div>
                 )}
@@ -1438,53 +1630,56 @@ function ProviderModal({
             onClick={() => setMore(!more)}
             aria-expanded={more}
           >
-            更多设置 {more ? "▾" : "▸"}
+            {bi("更多设置", "More settings")} {more ? "▾" : "▸"}
           </button>
           {more && (
             <div className="ai-moreform">
               {p.preset === "azure" && (
                 <div className="st-field">
-                  <span>API 版本</span>
+                  <span>{bi("API 版本", "API version")}</span>
                   <Input
                     value={p.api_version}
                     onChange={(v) => setP({ ...p, api_version: v })}
                     placeholder="2024-10-21"
-                    aria-label="API 版本"
+                    aria-label={bi("API 版本", "API version")}
                   />
                 </div>
               )}
               <div className="ai-three">
                 <label>
-                  超时（秒）
+                  {bi("超时（秒）", "Timeout (sec)")}
                   <InputNumber
                     min={10}
                     max={600}
                     value={p.timeout_sec || 120}
                     onChange={(v) => setP({ ...p, timeout_sec: Number(v) })}
-                    aria-label="超时"
+                    aria-label={bi("超时", "Timeout")}
                   />
                 </label>
                 <label>
-                  单次输出上限（Token，0 不限）
+                  {bi(
+                    "单次输出上限（Token，0 不限）",
+                    "Max output tokens (0 = unlimited)",
+                  )}
                   <InputNumber
                     min={0}
                     max={200000}
                     step={500}
                     value={p.max_tokens || 0}
                     onChange={(v) => setP({ ...p, max_tokens: Number(v) })}
-                    aria-label="输出上限"
+                    aria-label={bi("输出上限", "Max output tokens")}
                   />
                 </label>
                 <label>
-                  价格币种
+                  {bi("价格币种", "Currency")}
                   <Select
                     value={p.currency || "CNY"}
                     onChange={(v) => setP({ ...p, currency: v })}
                     options={[
-                      { value: "CNY", label: "人民币 ¥" },
-                      { value: "USD", label: "美元 $" },
+                      { value: "CNY", label: bi("人民币 ¥", "CNY ¥") },
+                      { value: "USD", label: bi("美元 $", "USD $") },
                     ]}
-                    aria-label="币种"
+                    aria-label={bi("币种", "Currency")}
                     triggerProps={{ autoFitPosition: true }}
                   />
                 </label>
@@ -1495,7 +1690,10 @@ function ProviderModal({
                   checked={!!p.private}
                   onChange={(v) => setP({ ...p, private: v })}
                 />{" "}
-                部署在本单位内网，数据不出网
+                {bi(
+                  "部署在本单位内网，数据不出网",
+                  "Hosted on internal network; data never leaves intranet",
+                )}
               </label>
             </div>
           )}
@@ -1545,6 +1743,7 @@ function AssignModelPicker({
   onChange: (v: string) => void;
   label: string;
 }) {
+  useLang();
   const [open, setOpen] = useState(false);
   const cur = useMemo(() => {
     if (!value) return null;
@@ -1598,7 +1797,7 @@ function AssignModelPicker({
           <button
             type="button"
             className="ai-mp-clear"
-            aria-label={`清空${label}`}
+            aria-label={bi(`清空${label}`, `Clear ${label}`)}
             title={clearLabel}
             onClick={(e) => {
               e.preventDefault();
@@ -1629,7 +1828,10 @@ function AssignModelPicker({
         <div className="ai-mp-pop" role="listbox" aria-label={label}>
           {groups.length === 0 ? (
             <div className="ai-mp-empty">
-              暂无已启用模型，请先在供应商中添加并启用模型
+              {bi(
+                "暂无已启用模型，请先在供应商中添加并启用模型",
+                "No enabled models yet; add and enable models under a provider first",
+              )}
             </div>
           ) : (
             <>
@@ -1687,8 +1889,12 @@ function AssignModelPicker({
                           <small className="mono">{m.id}</small>
                         </span>
                         <span className="ai-mp-opt-caps">
-                          {m.vision === "yes" && <em>看图</em>}
-                          {m.tools === "no" && <em className="no">无工具</em>}
+                          {m.vision === "yes" && (
+                            <em>{bi("看图", "Vision")}</em>
+                          )}
+                          {m.tools === "no" && (
+                            <em className="no">{bi("无工具", "No tools")}</em>
+                          )}
                         </span>
                         {isOn && <IconCheck className="ai-mp-check" />}
                       </button>
@@ -1707,6 +1913,7 @@ function AssignModelPicker({
 }
 
 export function AISettingsView() {
+  const lang = useLang();
   const canEdit = can("ai.settings");
   const globalStatus = useAIStatus();
   const [d, setD] = useState<AISettings | null>(() =>
@@ -1732,9 +1939,12 @@ export function AISettingsView() {
         return null;
       });
   };
+  const prevLang = useRef(lang);
   useEffect(() => {
-    void load();
-  }, [canEdit]); // eslint-disable-line react-hooks/exhaustive-deps
+    const langChanged = prevLang.current !== lang;
+    prevLang.current = lang;
+    void load(langChanged);
+  }, [canEdit, lang]); // eslint-disable-line react-hooks/exhaustive-deps
   const validRefs = useMemo(() => {
     const s = new Set<string>();
     for (const p of d?.providers || []) {
@@ -1823,10 +2033,14 @@ export function AISettingsView() {
   };
   const remove = (p: AIProvider) =>
     Modal.confirm({
-      title: `删除「${p.name}」？`,
-      content: "用到它的功能会改用备用或其他可用的模型。",
+      title: bi(`删除「${p.name}」？`, `Delete "${p.name}"?`),
+      content: bi(
+        "用到它的功能会改用备用或其他可用的模型。",
+        "Features using it will fall back to backup or other available models.",
+      ),
       okButtonProps: { status: "danger" },
-      okText: "删除",
+      okText: bi("删除", "Delete"),
+      cancelText: bi("取消", "Cancel"),
       onOk: async () => {
         try {
           await api(`/api/settings/ai/providers/${p.id}`, { method: "DELETE" });
@@ -1897,12 +2111,17 @@ export function AISettingsView() {
       await refreshAIStatus();
       if (enabled) {
         if (res.enabled) {
-          Message.success("AI 能力套件已启用");
+          Message.success(bi("AI 能力套件已启用", "AI suite enabled"));
         } else {
-          Message.info("AI 套件总开关已开启，请先配置并启用模型供应商");
+          Message.info(
+            bi(
+              "AI 套件总开关已开启，请先配置并启用模型供应商",
+              "AI master switch is on; add and enable a model provider next",
+            ),
+          );
         }
       } else {
-        Message.info("AI 能力套件已停用");
+        Message.info(bi("AI 能力套件已停用", "AI suite disabled"));
       }
     } catch (e) {
       setD(prev);
@@ -1930,10 +2149,12 @@ export function AISettingsView() {
     <article className="sx-page st-main ai-settings enter">
       <header className="sx-page-h">
         <div>
-          <h1>AI 套件与模型</h1>
+          <h1>{bi("AI 套件与模型", "AI suite & models")}</h1>
           <p>
-            AI
-            只读取、分析和建议，不会直接改动任何东西。密码、密钥、证书不会发给模型。
+            {bi(
+              "AI 只读取、分析和建议，不会直接改动任何东西。密码、密钥、证书不会发给模型。",
+              "AI only reads, analyzes, and recommends—it never directly modifies anything. Passwords, keys, and certificates are never sent to models.",
+            )}
           </p>
         </div>
       </header>
@@ -1941,7 +2162,7 @@ export function AISettingsView() {
         <>
           <section
             className={`ai-master-card ${suiteLive ? "is-on" : suitePending ? "is-warn" : "is-off"}`}
-            aria-label="AI 能力套件总开关"
+            aria-label={bi("AI 能力套件总开关", "AI suite master switch")}
           >
             <div className="ai-master-main">
               <span className="ai-master-icon" aria-hidden>
@@ -1949,21 +2170,25 @@ export function AISettingsView() {
               </span>
               <div className="ai-master-copy">
                 <div className="ai-master-title-row">
-                  <strong>AI 能力套件总开关</strong>
+                  <strong>
+                    {bi("AI 能力套件总开关", "AI suite master switch")}
+                  </strong>
                   <span
                     className={`ai-master-pill ${suiteLive ? "is-on" : suitePending ? "is-warn" : "is-off"}`}
                   >
                     <i />
                     {suiteLive
-                      ? "已启用"
+                      ? bi("已启用", "Enabled")
                       : suitePending
-                        ? "已开启 · 待配置模型"
-                        : "未启用"}
+                        ? bi("已开启 · 待配置模型", "On · Needs models")
+                        : bi("未启用", "Disabled")}
                   </span>
                 </div>
                 <p>
-                  统一控制全平台的 AI 助手、知识库、技能、MCP
-                  服务、组件辅助编写与已运行集群的变更演练。
+                  {bi(
+                    "统一控制全平台的 AI 助手、知识库、技能、MCP 服务、组件辅助编写与已运行集群的变更演练。",
+                    "Master control for AI Assistant, Knowledge Base, Skills, MCP servers, Component authoring AI, and Change Rehearsal.",
+                  )}
                 </p>
               </div>
             </div>
@@ -1971,14 +2196,20 @@ export function AISettingsView() {
               <Switch
                 checked={masterChecked}
                 disabled
-                checkedText="已启用"
-                uncheckedText="未启用"
-                aria-label="启用 AI 能力套件（只读）"
+                checkedText={bi("已启用", "On")}
+                uncheckedText={bi("未启用", "Off")}
+                aria-label={bi(
+                  "启用 AI 能力套件（只读）",
+                  "Enable AI suite (read-only)",
+                )}
               />
             </div>
           </section>
           <div className="ai-readonly-note" role="status">
-            当前账号仅具备只读查看权限；如需启停 AI 能力套件、管理模型供应商或调整数据安全边界，请联系拥有「AI 设置」权限的管理员。
+            {bi(
+              "当前账号仅具备只读查看权限；如需启停 AI 能力套件、管理模型供应商或调整数据安全边界，请联系拥有「AI 设置」权限的管理员。",
+              "Your account has read-only access here; contact an administrator with AI Settings permission to toggle the AI suite, manage providers, or adjust data boundaries.",
+            )}
           </div>
         </>
       ) : (
@@ -1992,12 +2223,12 @@ export function AISettingsView() {
                 onClick={() => void load(true)}
                 style={{ marginLeft: 12 }}
               >
-                重试
+                {bi("重试", "Retry")}
               </Button>
             </div>
           )}
           {!d && !error && (
-            <div className="ai-skel" aria-label="载入中">
+            <div className="ai-skel" aria-label={bi("载入中", "Loading")}>
               <Skeleton
                 animation
                 text={{
@@ -2011,7 +2242,7 @@ export function AISettingsView() {
             <>
               <section
                 className={`ai-master-card ${suiteLive ? "is-on" : suitePending ? "is-warn" : "is-off"}`}
-                aria-label="AI 能力套件总开关"
+                aria-label={bi("AI 能力套件总开关", "AI suite master switch")}
               >
                 <div className="ai-master-main">
                   <span className="ai-master-icon" aria-hidden>
@@ -2019,21 +2250,28 @@ export function AISettingsView() {
                   </span>
                   <div className="ai-master-copy">
                     <div className="ai-master-title-row">
-                      <strong>AI 能力套件总开关</strong>
+                      <strong>
+                        {bi("AI 能力套件总开关", "AI suite master switch")}
+                      </strong>
                       <span
                         className={`ai-master-pill ${suiteLive ? "is-on" : suitePending ? "is-warn" : "is-off"}`}
                       >
                         <i />
                         {suiteLive
-                          ? `已启用 · ${activeModelsCount} 个可用模型`
+                          ? bi(
+                              `已启用 · ${activeModelsCount} 个可用模型`,
+                              `Enabled · ${activeModelsCount} active model${activeModelsCount === 1 ? "" : "s"}`,
+                            )
                           : suitePending
-                            ? "已开启 · 待配置模型"
-                            : "未启用"}
+                            ? bi("已开启 · 待配置模型", "On · Needs models")
+                            : bi("未启用", "Disabled")}
                       </span>
                     </div>
                     <p>
-                      统一控制全平台的 AI 助手、知识库、技能、MCP
-                      服务、组件辅助编写与已运行集群的变更演练。右上角状态栏向全体成员只读展示当前套件状态。
+                      {bi(
+                        "统一控制全平台的 AI 助手、知识库、技能、MCP 服务、组件辅助编写与已运行集群的变更演练。右上角状态栏向全体成员只读展示当前套件状态。",
+                        "Master control for AI Assistant, Knowledge Base, Skills, MCP servers, Component authoring AI, and Change Rehearsal. The top bar displays live status to all users.",
+                      )}
                     </p>
                   </div>
                 </div>
@@ -2042,39 +2280,46 @@ export function AISettingsView() {
                     checked={d.enabled}
                     loading={toggling}
                     onChange={flipMaster}
-                    checkedText="已启用"
-                    uncheckedText="未启用"
-                    aria-label="启用 AI 能力套件"
+                    checkedText={bi("已启用", "On")}
+                    uncheckedText={bi("未启用", "Off")}
+                    aria-label={bi("启用 AI 能力套件", "Enable AI suite")}
                   />
                 </div>
               </section>
               {!d.enabled && (
                 <div className="ai-paused-note" role="status">
-                  当前总开关处于关闭状态，全平台 AI 入口已收起；下方供应商与功能模型预设可正常编辑保存，开启总开关后立即生效。
+                  {bi(
+                    "当前总开关处于关闭状态，全平台 AI 入口已收起；下方供应商与功能模型预设可正常编辑保存，开启总开关后立即生效。",
+                    "The master switch is currently off and all AI entry points are hidden; you can still configure providers and model assignments below and turn the switch on anytime.",
+                  )}
                 </div>
               )}
               <UnderlineTabs
                 className="ai-view-tabs"
-                label="AI 设置分类"
+                label={bi("AI 设置分类", "AI settings sections")}
                 value={pane}
                 onChange={setPane}
                 items={[
-                  { value: "all", label: "全部设置", icon: AITabIcons.all },
+                  {
+                    value: "all",
+                    label: bi("全部设置", "All"),
+                    icon: AITabIcons.all,
+                  },
                   {
                     value: "providers",
-                    label: "供应商与可选模型",
+                    label: bi("供应商与可选模型", "Providers & models"),
                     count: d.providers.length,
                     icon: AITabIcons.remote,
                   },
                   {
                     value: "features",
-                    label: "场景默认模型",
+                    label: bi("场景默认模型", "Feature defaults"),
                     count: d.feature_list.length,
                     icon: AITabIcons.features,
                   },
                   {
                     value: "boundary",
-                    label: "数据边界",
+                    label: bi("数据边界", "Data boundary"),
                     icon: AITabIcons.boundary,
                   },
                 ]}
@@ -2083,22 +2328,23 @@ export function AISettingsView() {
                 <>
                   <section className="sx-sec">
                     <div className="ai-sec-h">
-                      <h2>模型供应商</h2>
+                      <h2>{bi("模型供应商", "Model providers")}</h2>
                       <Button
                         type="primary"
                         icon={<IconPlus />}
                         onClick={() => setModal({ edit: null })}
                       >
-                        添加供应商
+                        {bi("添加供应商", "Add provider")}
                       </Button>
                     </div>
                     {d.providers.length === 0 ? (
                       <div className="st-empty">
-                        <b>还没有供应商</b>
+                        <b>{bi("还没有供应商", "No providers yet")}</b>
                         <span>
-                          支持 OpenAI、DeepSeek、通义、Kimi、智谱、火山方舟等所有
-                          OpenAI 兼容的服务，也可以接 Ollama、vLLM
-                          等本地模型。一个供应商里可以管理很多模型。
+                          {bi(
+                            "支持 OpenAI、DeepSeek、通义、Kimi、智谱、火山方舟等所有 OpenAI 兼容的服务，也可以接 Ollama、vLLM 等本地模型。一个供应商里可以管理很多模型。",
+                            "Supports OpenAI, DeepSeek, Qwen, Kimi, Zhipu, Volcano Engine, and any OpenAI-compatible API, plus local engines like Ollama and vLLM.",
+                          )}
                         </span>
                       </div>
                     ) : (
@@ -2117,13 +2363,17 @@ export function AISettingsView() {
                               <div className="ai-pinfo">
                                 <b>
                                   {p.name}
-                                  {p.private && <em className="ai-tag">内网</em>}
+                                  {p.private && (
+                                    <em className="ai-tag">
+                                      {bi("内网", "Private")}
+                                    </em>
+                                  )}
                                 </b>
                                 <small className="mono">{p.url}</small>
                                 <span className="ai-pmodels">
                                   {on.length === 0 ? (
                                     <small className="faint">
-                                      没有启用的模型
+                                      {bi("没有启用的模型", "No enabled models")}
                                     </small>
                                   ) : (
                                     on.slice(0, 6).map((m) => {
@@ -2149,7 +2399,10 @@ export function AISettingsView() {
                                                 await load(true);
                                                 await refreshAIStatus();
                                                 Message.success(
-                                                  "已切换为 Chat Completions（通用）",
+                                                  bi(
+                                                    "已切换为 Chat Completions（通用）",
+                                                    "Switched to Chat Completions (standard)",
+                                                  ),
                                                 );
                                               } catch (e) {
                                                 err(e);
@@ -2169,12 +2422,18 @@ export function AISettingsView() {
                                             <button
                                               type="button"
                                               className="ai-pm is-bad"
-                                              title={`${m.id} · ${m.test_err || "测试未通过，点击查看诊断详情"}`}
+                                              title={`${m.id} · ${
+                                                m.test_err ||
+                                                bi(
+                                                  "测试未通过，点击查看诊断详情",
+                                                  "Test failed; click for diagnostics",
+                                                )
+                                              }`}
                                             >
                                               <IconCloseCircleFill className="bad" />
                                               <span>{pmLabel}</span>
                                               <u className="ai-pm-act bad">
-                                                诊断详情
+                                                {bi("诊断详情", "Diagnostics")}
                                               </u>
                                             </button>
                                           </ModelDiagPopover>
@@ -2197,11 +2456,11 @@ export function AISettingsView() {
                                               <IconExclamationCircleFill className="warn" />
                                               <span>{pmLabel}</span>
                                               <u className="ai-pm-act warn">
-                                                连通
+                                                {bi("连通", "Reachable")}
                                                 {m.test_ms
                                                   ? ` ${m.test_ms}ms`
                                                   : ""}{" "}
-                                                · 兼容告警
+                                                · {bi("兼容告警", "Compat warn")}
                                               </u>
                                             </button>
                                           </ModelDiagPopover>
@@ -2218,12 +2477,15 @@ export function AISettingsView() {
                                             <button
                                               type="button"
                                               className="ai-pm is-ok"
-                                              title={`${m.id} · 连通 ${m.test_ms} ms · 点击查看诊断`}
+                                              title={bi(
+                                                `${m.id} · 连通 ${m.test_ms} ms · 点击查看诊断`,
+                                                `${m.id} · Connected ${m.test_ms} ms · Click for diagnostics`,
+                                              )}
                                             >
                                               <IconCheckCircleFill className="ok" />
                                               <span>{pmLabel}</span>
                                               {m.vision === "yes" && (
-                                                <em>看图</em>
+                                                <em>{bi("看图", "Vision")}</em>
                                               )}
                                             </button>
                                           </ModelDiagPopover>
@@ -2235,8 +2497,14 @@ export function AISettingsView() {
                                           className="ai-pm"
                                           title={
                                             m.tested && m.test_ok
-                                              ? `${m.id} · 连通 ${m.test_ms} ms`
-                                              : `${m.id} · 还没有测试`
+                                              ? bi(
+                                                  `${m.id} · 连通 ${m.test_ms} ms`,
+                                                  `${m.id} · Connected ${m.test_ms} ms`,
+                                                )
+                                              : bi(
+                                                  `${m.id} · 还没有测试`,
+                                                  `${m.id} · Not tested yet`,
+                                                )
                                           }
                                         >
                                           {m.tested && m.test_ok ? (
@@ -2245,14 +2513,19 @@ export function AISettingsView() {
                                             <i className="ai-dot" />
                                           )}
                                           <span>{pmLabel}</span>
-                                          {m.vision === "yes" && <em>看图</em>}
+                                          {m.vision === "yes" && (
+                                            <em>{bi("看图", "Vision")}</em>
+                                          )}
                                         </span>
                                       );
                                     })
                                   )}
                                   {on.length > 6 && (
                                     <small className="faint">
-                                      另 {on.length - 6} 个
+                                      {bi(
+                                        `另 ${on.length - 6} 个`,
+                                        `+${on.length - 6} more`,
+                                      )}
                                     </small>
                                   )}
                                 </span>
@@ -2260,7 +2533,10 @@ export function AISettingsView() {
                               <Switch
                                 checked={p.enabled}
                                 onChange={() => toggle(p)}
-                                aria-label={`启用 ${p.name}`}
+                                aria-label={bi(
+                                  `启用 ${p.name}`,
+                                  `Enable ${p.name}`,
+                                )}
                               />
                               <div className="ai-acts">
                                 <Button
@@ -2268,14 +2544,14 @@ export function AISettingsView() {
                                   icon={<IconEdit />}
                                   onClick={() => setModal({ edit: p })}
                                 >
-                                  管理模型
+                                  {bi("管理模型", "Manage models")}
                                 </Button>
                                 <Button
                                   size="small"
                                   status="danger"
                                   icon={<IconDelete />}
                                   onClick={() => remove(p)}
-                                  aria-label="删除"
+                                  aria-label={bi("删除", "Delete")}
                                 />
                               </div>
                             </li>
@@ -2287,15 +2563,18 @@ export function AISettingsView() {
                   <section className="sx-sec">
                     <div className="ai-sec-h ai-um-top">
                       <div>
-                        <h2>用户可以选的模型</h2>
+                        <h2>{bi("用户可以选的模型", "User-selectable models")}</h2>
                         <small className="faint">
-                          勾选的模型会出现在对话输入框旁的模型菜单里；不勾选，大家就用下面为每个功能设定的模型。
+                          {bi(
+                            "勾选的模型会出现在对话输入框旁的模型菜单里；不勾选，大家就用下面为每个功能设定的模型。",
+                            "Checked models appear in the chat model picker; if none are checked, users use each feature's default model below.",
+                          )}
                         </small>
                       </div>
                       {allEnabledRefs.length > 0 && (
                         <div className="ai-um-acts">
                           <span className="ai-um-cnt num">
-                            已选{" "}
+                            {bi("已选", "Selected")}{" "}
                             {
                               (d.user_models || []).filter((r) =>
                                 selectableRefs.has(r),
@@ -2322,7 +2601,7 @@ export function AISettingsView() {
                               })
                             }
                           >
-                            全选已启用模型
+                            {bi("全选已启用模型", "Select all enabled")}
                           </Button>
                           <Button
                             size="small"
@@ -2333,13 +2612,18 @@ export function AISettingsView() {
                             }
                             onClick={() => put({ ...d, user_models: [] })}
                           >
-                            清空
+                            {bi("清空", "Clear")}
                           </Button>
                         </div>
                       )}
                     </div>
                     {optionGroups.length === 0 ? (
-                      <p className="faint small">先添加供应商并启用模型。</p>
+                      <p className="faint small">
+                        {bi(
+                          "先添加供应商并启用模型。",
+                          "Add a provider and enable models first.",
+                        )}
+                      </p>
                     ) : (
                       <div className="ai-um">
                         {optionGroups.map(({ p, models }) => (
@@ -2386,13 +2670,13 @@ export function AISettingsView() {
                                     )}
                                     <small>
                                       {m.vision === "yes"
-                                        ? "看图 · "
+                                        ? bi("看图 · ", "Vision · ")
                                         : m.vision === "no"
-                                          ? "不能看图 · "
+                                          ? bi("不能看图 · ", "No vision · ")
                                           : ""}
                                       {m.tools === "no"
-                                        ? "不支持工具"
-                                        : "工具调用"}
+                                        ? bi("不支持工具", "No tools")
+                                        : bi("工具调用", "Tools")}
                                     </small>
                                   </span>
                                 </label>
@@ -2407,7 +2691,9 @@ export function AISettingsView() {
               )}
               {showFeatures && (
                 <section className="sx-sec">
-                  <h2>每个功能默认用的模型</h2>
+                  <h2>
+                    {bi("每个功能默认用的模型", "Default models per feature")}
+                  </h2>
                   <div className="ds-set">
                     {d.feature_list.map((f) => {
                       const x = d.features[f.ID] || { enabled: true };
@@ -2428,22 +2714,29 @@ export function AISettingsView() {
                             <small>{f.Help}</small>
                             {blind && (
                               <small className="ai-warn">
-                                主模型
                                 {main.m!.vision === "no"
-                                  ? "不能看图"
-                                  : "还没确认能不能看图"}
-                                ：
-                                {main.m!.vision === "no"
-                                  ? "排障时截图不可用，用户只能贴文字"
-                                  : "到「管理模型」里测试一下"}
+                                  ? bi(
+                                      "主模型不能看图：排障时截图不可用，用户只能贴文字",
+                                      "Primary model has no vision: screenshots disabled in troubleshooting, text only",
+                                    )
+                                  : bi(
+                                      "主模型还没确认能不能看图：到「管理模型」里测试一下",
+                                      "Primary model vision support is unverified: test it in Manage models",
+                                    )}
                               </small>
                             )}
                           </div>
                           <div className="ai-assign">
                             {picker(
                               x.primary,
-                              "主模型（缺省自动匹配）",
-                              "恢复缺省（取第一个可用模型）",
+                              bi(
+                                "主模型（缺省自动匹配）",
+                                "Primary (auto-select)",
+                              ),
+                              bi(
+                                "恢复缺省（取第一个可用模型）",
+                                "Reset to default (first available)",
+                              ),
                               "start",
                               (v) =>
                                 put({
@@ -2453,12 +2746,15 @@ export function AISettingsView() {
                                     [f.ID]: { ...x, primary: v },
                                   },
                                 }),
-                              `${f.Title}主模型`,
+                              bi(`${f.Title}主模型`, `${f.Title} primary model`),
                             )}
                             {picker(
                               x.backup,
-                              "备用模型（主模型失败时）",
-                              "不设备用模型",
+                              bi(
+                                "备用模型（主模型失败时）",
+                                "Fallback (on failure)",
+                              ),
+                              bi("不设备用模型", "No fallback model"),
                               "end",
                               (v) =>
                                 put({
@@ -2468,7 +2764,7 @@ export function AISettingsView() {
                                     [f.ID]: { ...x, backup: v },
                                   },
                                 }),
-                              `${f.Title}备用模型`,
+                              bi(`${f.Title}备用模型`, `${f.Title} fallback model`),
                             )}
                             <Switch
                               checked={x.enabled}
@@ -2481,7 +2777,7 @@ export function AISettingsView() {
                                   },
                                 })
                               }
-                              aria-label={`启用${f.Title}`}
+                              aria-label={bi(`启用${f.Title}`, `Enable ${f.Title}`)}
                             />
                           </div>
                         </div>
@@ -2492,38 +2788,54 @@ export function AISettingsView() {
               )}
               {showBoundary && (
                 <section className="sx-sec">
-                  <h2>数据边界</h2>
+                  <h2>{bi("数据边界", "Data boundary")}</h2>
                   <div className="ds-set">
                     <div className="ds-set-row">
                       <div>
-                        <b>替换 IP 和主机名</b>
+                        <b>{bi("替换 IP 和主机名", "Mask IPs & hostnames")}</b>
                         <small>
-                          发给模型前换成代号，答案里再还原。开启后回答不再逐字显示。默认关闭，因为现场排障需要真实名称。
+                          {bi(
+                            "发给模型前换成代号，答案里再还原。开启后回答不再逐字显示。默认关闭，因为现场排障需要真实名称。",
+                            "Replace with placeholders before sending and restore in replies. Disables token streaming when on. Off by default since troubleshooting needs real hostnames.",
+                          )}
                         </small>
                       </div>
                       <Switch
                         checked={d.redact_hosts}
                         onChange={(v) => put({ ...d, redact_hosts: v })}
-                        aria-label="替换 IP 和主机名"
+                        aria-label={bi(
+                          "替换 IP 和主机名",
+                          "Mask IPs & hostnames",
+                        )}
                       />
                     </div>
                     <div className="ds-set-row">
                       <div>
-                        <b>只允许私有模型</b>
+                        <b>{bi("只允许私有模型", "Private models only")}</b>
                         <small>
-                          只使用标记为「内网」的供应商，数据不会发往公网。
+                          {bi(
+                            "只使用标记为「内网」的供应商，数据不会发往公网。",
+                            "Restrict to providers marked Private so data never leaves the intranet.",
+                          )}
                         </small>
                       </div>
                       <Switch
                         checked={d.private_only}
                         onChange={(v) => put({ ...d, private_only: v })}
-                        aria-label="只允许私有模型"
+                        aria-label={bi("只允许私有模型", "Private models only")}
                       />
                     </div>
                     <div className="ds-set-row">
                       <div>
-                        <b>每人每月次数上限</b>
-                        <small>按调用次数统计，0 为不限制。</small>
+                        <b>
+                          {bi("每人每月次数上限", "Monthly per-user call limit")}
+                        </b>
+                        <small>
+                          {bi(
+                            "按调用次数统计，0 为不限制。",
+                            "Counted by API calls; 0 means unlimited.",
+                          )}
+                        </small>
                       </div>
                       <InputNumber
                         style={{ width: 120 }}
@@ -2534,13 +2846,15 @@ export function AISettingsView() {
                           setD({ ...d, monthly_limit: Number(v) })
                         }
                         onBlur={() => put(d)}
-                        aria-label="每月次数上限"
+                        aria-label={bi("每月次数上限", "Monthly call limit")}
                       />
                     </div>
                   </div>
                   <p className="ai-never">
-                    永远不会发送：密码、私钥、证书、凭据文件，以及交付里的
-                    secrets 目录。命中这些模式的内容在发出前就被替换为［已隐去］。
+                    {bi(
+                      "永远不会发送：密码、私钥、证书、凭据文件，以及交付里的 secrets 目录。命中这些模式的内容在发出前就被替换为［已隐去］。",
+                      "Never sent: passwords, private keys, certificates, credential files, and delivery secrets directories. Matching patterns are redacted before transmission.",
+                    )}
                   </p>
                 </section>
               )}

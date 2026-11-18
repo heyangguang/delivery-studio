@@ -11,6 +11,7 @@ import { AIEmblem, Bubble, LiveBubble, Spark } from "./aichat";
 import type { Msg } from "./aichat";
 import { Composer, ConfirmCard, ORDER } from "./formchat";
 import type { Attach, Change, FormAI } from "./formchat";
+import { bi, useLang } from "./i18n";
 import "./formwork.css";
 
 /* The assistant's workspace for a new delivery. Once someone chooses to be helped, the step list steps aside and the
@@ -47,6 +48,7 @@ export function AIStageBar({
   onGenerate: () => void;
   onNew?: () => void;
 }) {
+  useLang();
   const working = fa.run?.active ? fa.run.stage : "";
   return (
     <div className="fw-bar">
@@ -55,12 +57,16 @@ export function AIStageBar({
           type="button"
           className="fw-back"
           onClick={onBack}
-          aria-label="返回"
+          aria-label={bi("返回", "Back")}
         >
           <IconArrowLeft />
         </button>
-        <span className="fw-bar-title">创建交付</span>
-        <div className="fw-tabs" role="tablist" aria-label="对话与表单步骤">
+        <span className="fw-bar-title">{bi("创建交付", "New delivery")}</span>
+        <div
+          className="fw-tabs"
+          role="tablist"
+          aria-label={bi("对话与表单步骤", "Chat and form steps")}
+        >
           <button
             type="button"
             role="tab"
@@ -69,7 +75,7 @@ export function AIStageBar({
             onClick={() => onView("chat")}
           >
             <Spark size={14} rainbow />
-            AI 对话
+            {bi("AI 对话", "AI Chat")}
             {fa.busy && <i className="fw-live" aria-hidden />}
           </button>
           <span className="fw-sep" aria-hidden />
@@ -95,13 +101,16 @@ export function AIStageBar({
                 </span>
                 {x.title}
                 {working === x.id ? (
-                  <i className="fw-live" aria-label="AI 正在填写这一步" />
+                  <i
+                    className="fw-live"
+                    aria-label={bi("AI 正在填写这一步", "AI is filling this step")}
+                  />
                 ) : (
                   fa.sections.has(x.id) && (
                     <span
                       className="fc-navdot"
-                      title="AI 改过，等你确认"
-                      aria-label="AI 改过"
+                      title={bi("AI 改过，等你确认", "Edited by AI, pending review")}
+                      aria-label={bi("AI 改过", "Edited by AI")}
                     />
                   )
                 )}
@@ -112,14 +121,14 @@ export function AIStageBar({
         <div className="fw-end">
           {onNew && (
             <button type="button" className="fw-ghost" onClick={onNew}>
-              重新开始
+              {bi("重新开始", "Start over")}
             </button>
           )}
           <button type="button" className="fw-ghost" onClick={onForm}>
-            自己填
+            {bi("自己填", "Edit manually")}
           </button>
           <Button type="primary" onClick={onGenerate}>
-            核对并生成
+            {bi("核对并生成", "Review & generate")}
           </Button>
         </div>
       </div>
@@ -143,6 +152,7 @@ function Changes({
   titles: Record<string, string>;
   onGo: (s: string) => void;
 }) {
+  useLang();
   return (
     <dl className="fw-changes">
       {ORDER.filter((x) => changes.some((c) => c.section === x)).map((x) => (
@@ -152,7 +162,7 @@ function Changes({
               type="button"
               className="link quiet"
               onClick={() => onGo(x)}
-              title={`打开「${titles[x] || x}」`}
+              title={bi(`打开「${titles[x] || x}」`, `Open "${titles[x] || x}"`)}
             >
               {titles[x] || x}
               <IconRight />
@@ -181,6 +191,7 @@ function RunCard({
   fa: FormAI;
   titles: Record<string, string>;
 }) {
+  useLang();
   const r = fa.run;
   if (!r || !r.active) return null;
   const stages = ORDER.filter((x) => r.all.some((c) => c.section === x));
@@ -194,16 +205,19 @@ function RunCard({
       className="fw-run"
       role="status"
       aria-live="polite"
-      aria-label={`AI 正在填写表单，${done} / ${total}`}
+      aria-label={bi(
+        `AI 正在填写表单，${done} / ${total}`,
+        `AI is filling the form, ${done} / ${total}`,
+      )}
     >
       <div className="fw-run-h">
         <Spark size={16} rainbow />
-        <b>AI 正在填写表单</b>
+        <b>{bi("AI 正在填写表单", "AI is filling the form")}</b>
         <span className="num faint">
           {done} / {total}
         </span>
         <button type="button" className="link quiet" onClick={fa.skipRun}>
-          跳过动画，直接完成
+          {bi("跳过动画，直接完成", "Skip animation & apply")}
         </button>
       </div>
       <div className="fw-run-meter" aria-hidden>
@@ -233,7 +247,10 @@ function RunCard({
         ))}
       </ul>
       <p className="fw-run-note">
-        表单暂时锁定，写完就能继续编辑；也可以点上面的步骤去看它被填写。
+        {bi(
+          "表单暂时锁定，写完就能继续编辑；也可以点上面的步骤去看它被填写。",
+          "Form temporarily locked while filling; you can edit again once done, or click a step above to watch.",
+        )}
       </p>
     </div>
   );
@@ -248,6 +265,7 @@ function Filled({
   titles: Record<string, string>;
   onGo: (s: string) => void;
 }) {
+  useLang();
   const [open, setOpen] = useState(false);
   const changes = (m.form?.changes || []) as Change[];
   return (
@@ -255,8 +273,12 @@ function Filled({
       <div className="fw-filled-row">
         <IconCheckCircleFill />
         <span>
-          {m.form?.target_component ? "已切换部署组件" : "填进了表单"}
-          {m.form?.summary ? `：${m.form.summary}` : ""}
+          {m.form?.target_component
+            ? bi("已切换部署组件", "Switched component")
+            : bi("填进了表单", "Applied to form")}
+          {m.form?.summary
+            ? bi(`：${m.form.summary}`, `: ${m.form.summary}`)
+            : ""}
         </span>
         {changes.length > 0 ? (
           <button
@@ -265,7 +287,9 @@ function Filled({
             onClick={() => setOpen(!open)}
             aria-expanded={open}
           >
-            {open ? "收起" : `看改了 ${changes.length} 处`}
+            {open
+              ? bi("收起", "Collapse")
+              : bi(`看改了 ${changes.length} 处`, `View ${changes.length} changes`)}
           </button>
         ) : (
           <button
@@ -273,7 +297,7 @@ function Filled({
             className="link quiet"
             onClick={() => onGo("basics")}
           >
-            去看看
+            {bi("去看看", "View")}
           </button>
         )}
       </div>
@@ -298,6 +322,7 @@ export function FormWorkspace({
   focus?: boolean;
   attach?: Attach;
 }) {
+  useLang();
   const list = useRef<HTMLDivElement>(null);
   const [stick, setStick] = useState(true);
   const lastForm = (() => {
@@ -333,10 +358,12 @@ export function FormWorkspace({
               <span className="fw-hero-orb" aria-hidden>
                 <AIEmblem size={44} />
               </span>
-              <h2>说说你要的集群</h2>
+              <h2>{bi("说说你要的集群", "Describe your cluster")}</h2>
               <p>
-                AI
-                帮你把表填好。你说得越具体越好：机器和地址、几主几从、有没有入口域名、盘要不要格式化。
+                {bi(
+                  "AI 帮你把表填好。你说得越具体越好：机器和地址、几主几从、有没有入口域名、盘要不要格式化。",
+                  "AI will fill out the form for you. Be specific about hosts and IPs, primary/replica counts, ingress domains, and whether disks should be formatted.",
+                )}
               </p>
             </div>
           )}
@@ -380,7 +407,7 @@ export function FormWorkspace({
                   className="link"
                   onClick={() => (fa.setError(null), fa.send(fa.error!.retry!))}
                 >
-                  重试
+                  {bi("重试", "Retry")}
                 </button>
               )}
             </div>
@@ -398,7 +425,7 @@ export function FormWorkspace({
               })
             )}
           >
-            回到最新
+            {bi("回到最新", "Jump to latest")}
           </button>
         )}
       </div>

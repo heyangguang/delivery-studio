@@ -20,6 +20,7 @@ import {
   IconUndo,
 } from "@arco-design/web-react/icon";
 import { api, can, useAIStatusLite, useConnectivity } from "./shared";
+import { bi, useLang } from "./i18n";
 import { draftKey, formChatKey } from "./formdraft";
 import type { Deployment, InstanceSpec, Schema } from "./shared";
 import { AIEmblem, Bubble, Spark, newLive, stepLabel, streamChat } from "./aichat";
@@ -84,13 +85,13 @@ const newId = () =>
 const wait = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
 const show = (v: unknown) =>
   Array.isArray(v)
-    ? v.join("、")
+    ? v.join(bi("、", ", "))
     : v === true
-      ? "开启"
+      ? bi("开启", "On")
       : v === false
-        ? "关闭"
+        ? bi("关闭", "Off")
         : v === undefined || v === null || v === ""
-          ? "默认"
+          ? bi("默认", "Default")
           : String(v);
 
 /** JSON with sorted keys, so two specifications that only differ in key order compare equal. */
@@ -132,46 +133,56 @@ export function diffForm(
   const add = (path: string, section: string, label: string, detail: string) =>
     out.push({ path, section, label, detail });
   if ((prev.id || "") !== (next.id || ""))
-    add("id", "basics", "集群标识", next.id || "（空）");
+    add("id", "basics", bi("集群标识", "Cluster ID"), next.id || bi("（空）", "(empty)"));
   if ((prev.title || "") !== (next.title || ""))
-    add("title", "basics", "说明", next.title || "（空）");
+    add("title", "basics", bi("说明", "Description"), next.title || bi("（空）", "(empty)"));
   if ((prev.platform || "") !== (next.platform || ""))
-    add("platform", "basics", "操作系统", next.platform || "");
+    add("platform", "basics", bi("操作系统", "OS"), next.platform || "");
   const pm = prev.instances.find((i) => i.component === app);
   const nm = next.instances.find((i) => i.component === app);
   if (nm && pm && (pm.version || "") !== (nm.version || ""))
-    add("version", "basics", "版本", nm.version || "");
+    add("version", "basics", bi("版本", "Version"), nm.version || "");
   next.hosts.forEach((h, i) => {
     const p = prev.hosts[i];
     if (!p || !same(hostKey(p), hostKey(h)))
       add(
         `hosts[${i}]`,
         "hosts",
-        "机器",
-        `${h.name} ${h.ip || "（IP 待填）"}${h.initialize ? ` · 格式化 ${h.disk}` : ""}`,
+        bi("机器", "Hosts"),
+        `${h.name} ${h.ip || bi("（IP 待填）", "(IP pending)")}${
+          h.initialize ? bi(` · 格式化 ${h.disk}`, ` · Format ${h.disk}`) : ""
+        }`,
       );
   });
   // fewer machines than before; machines only renamed in place are changes, not removals
-  if (prev.hosts.length > next.hosts.length)
+  if (prev.hosts.length > next.hosts.length) {
+    const removedCount = prev.hosts.length - next.hosts.length;
+    const removedNames = prev.hosts.slice(next.hosts.length).map((h) => h.name);
     add(
       "",
       "hosts",
-      "机器",
-      `少了 ${prev.hosts.length - next.hosts.length} 台：${prev.hosts
-        .slice(next.hosts.length)
-        .map((h) => h.name)
-        .join("、")}`,
+      bi("机器", "Hosts"),
+      bi(
+        `少了 ${removedCount} 台：${removedNames.join("、")}`,
+        `Removed ${removedCount}: ${removedNames.join(", ")}`,
+      ),
     );
+  }
   if ((prev.controller || "") !== (next.controller || ""))
-    add("controller", "hosts", "控制节点", next.controller || "自动选择");
+    add(
+      "controller",
+      "hosts",
+      bi("控制节点", "Control node"),
+      next.controller || bi("自动选择", "Auto"),
+    );
   const roleText = (inst: InstanceSpec, sc?: Schema) =>
     Object.entries(inst.placement || {})
       .filter(([, hs]) => hs.length)
       .map(
         ([r, hs]) =>
-          `${sc?.roles.find((x) => x.name === r)?.title || r} ${hs.join("、")}`,
+          `${sc?.roles.find((x) => x.name === r)?.title || r} ${hs.join(bi("、", ", "))}`,
       )
-      .join("；");
+      .join(bi("；", "; "));
   for (const inst of next.instances) {
     const sc = schemaOf(inst.component, inst.version);
     const p = prev.instances.find((x) => x.id === inst.id);
@@ -186,12 +197,12 @@ export function diffForm(
           .join(" · ");
         const binds = (inst.binds || [])
           .map((b) => `${b.listen ?? ""} → ${b.endpoint}`)
-          .join("，");
+          .join(bi("，", ", "));
         add(
           `instances[${inst.id}]`,
           "access",
-          "入口",
-          [title, where, binds].filter(Boolean).join("："),
+          bi("入口", "Access"),
+          [title, where, binds].filter(Boolean).join(bi("：", ": ")),
         );
       }
       continue;
@@ -200,14 +211,14 @@ export function diffForm(
       add(
         `instances[${inst.id}].placement`,
         "placement",
-        `加入 ${title}`,
+        bi(`加入 ${title}`, `Add ${title}`),
         roleText(inst, sc),
       );
     else if (!same(p.placement || {}, inst.placement || {}))
       add(
         `instances[${inst.id}].placement`,
         "placement",
-        `${title} 的放置`,
+        bi(`${title} 的放置`, `${title} placement`),
         roleText(inst, sc),
       );
     const keys = new Set([
@@ -229,8 +240,9 @@ export function diffForm(
       add(
         "",
         "params",
-        `${title} 的扩展`,
-        (inst.addons || []).map((a) => a.id).join("、") || "无",
+        bi(`${title} 的扩展`, `${title} addons`),
+        (inst.addons || []).map((a) => a.id).join(bi("、", ", ")) ||
+          bi("无", "None"),
       );
   }
   for (const p of prev.instances) {
@@ -239,7 +251,7 @@ export function diffForm(
     add(
       "",
       isEntry(sc) ? "access" : "placement",
-      "去掉",
+      bi("去掉", "Remove"),
       sc?.title || p.component,
     );
   }
@@ -330,6 +342,7 @@ export function useFormAI(o: {
     target?: { instance: string; name: string },
   ) => void;
 }) {
+  const lang = useLang();
   const on = useAIStatusLite("form") && can("ai.use") && o.enabled;
   const [saved, setSaved] = useState<Saved>(() => {
     try {
@@ -417,7 +430,7 @@ export function useFormAI(o: {
       saved.snapshot
         ? diffForm(saved.snapshot, o.dep, o.schemaOf, o.app.id)
         : [],
-    [saved.snapshot, o.dep, o.schemaOf, o.app.id],
+    [saved.snapshot, o.dep, o.schemaOf, o.app.id, lang],
   );
   const marks = useMemo(
     () => new Set(changes.map((c) => c.path).filter(Boolean)),
@@ -639,7 +652,11 @@ export function useFormAI(o: {
         if (cur.text || cur.steps.length || filled)
           setMsgs((m) => [
             ...m,
-            { ...done(), text: cur.text + (stopped ? "\n\n（已停止）" : "") },
+            {
+              ...done(),
+              text:
+                cur.text + (stopped ? bi("\n\n（已停止）", "\n\n(Stopped)") : ""),
+            },
           ]);
         if (!stopped)
           setError({
@@ -656,7 +673,9 @@ export function useFormAI(o: {
 
   const confirm = useCallback(() => {
     setSaved((s) => ({ ...s, snapshot: null }));
-    Message.success("已确认，表单保留这些内容");
+    Message.success(
+      bi("已确认，表单保留这些内容", "Confirmed; changes kept in form"),
+    );
   }, []);
   const undo = useCallback(() => {
     const snap = snapRef.current;
@@ -666,7 +685,12 @@ export function useFormAI(o: {
       ...snap,
     });
     setSaved((s) => ({ ...s, snapshot: null }));
-    Message.info("已撤销，表单回到 AI 改动之前");
+    Message.info(
+      bi(
+        "已撤销，表单回到 AI 改动之前",
+        "Undone; form restored to before AI edits",
+      ),
+    );
   }, []);
   const fresh = useCallback(() => {
     abort.current?.abort();
@@ -730,20 +754,38 @@ export function useAIMarks(
   }, [pane, marks, watchKey]);
 }
 
-const EXAMPLES: Record<string, string[]> = {
+const getExamples = (): Record<string, string[]> => ({
   postgresql: [
-    "三台机器 172.30.2.44、172.30.2.50、172.30.2.61，一主两从，网段就是这些机器的网段",
-    "再加一个云 ELB 入口，域名 pg.example.com，解析到 172.30.2.120，端口 5434",
-    "这三台都是新盘 /dev/vdb，需要格式化",
+    bi(
+      "三台机器 172.30.2.44、172.30.2.50、172.30.2.61，一主两从，网段就是这些机器的网段",
+      "3 hosts 172.30.2.44, 172.30.2.50, 172.30.2.61, 1 primary 2 replicas, same subnet as hosts",
+    ),
+    bi(
+      "再加一个云 ELB 入口，域名 pg.example.com，解析到 172.30.2.120，端口 5434",
+      "Add a cloud ELB access point: domain pg.example.com resolving to 172.30.2.120 on port 5434",
+    ),
+    bi(
+      "这三台都是新盘 /dev/vdb，需要格式化",
+      "All 3 hosts have fresh /dev/vdb disks that need formatting",
+    ),
   ],
   redis: [
-    "三台机器 10.0.1.11-13，一主两从加哨兵，最大内存 6GB",
-    "单节点，开发测试用，内存 2GB",
+    bi(
+      "三台机器 10.0.1.11-13，一主两从加哨兵，最大内存 6GB",
+      "3 hosts 10.0.1.11-13, 1 primary 2 replicas with Sentinel, maxmemory 6GB",
+    ),
+    bi(
+      "单节点，开发测试用，内存 2GB",
+      "Single node for dev/test, 2GB memory",
+    ),
   ],
   etcd: [
-    "三台机器 10.0.1.11、10.0.1.12、10.0.1.13 组成 etcd 集群，数据盘 /dev/vdb",
+    bi(
+      "三台机器 10.0.1.11、10.0.1.12、10.0.1.13 组成 etcd 集群，数据盘 /dev/vdb",
+      "3-node etcd cluster on 10.0.1.11, 10.0.1.12, 10.0.1.13 with data disk /dev/vdb",
+    ),
   ],
-};
+});
 
 /** A placeholder that types out real examples one after another, so the box shows what to say without a row of chips.
  *  Still when the person asked for less motion. */
@@ -762,10 +804,11 @@ function useTypedHint(lines: string[], idle: string, run: boolean) {
     let ci = 0;
     let dir = 1;
     let t = 0;
+    const prefix = bi("试试：", "Try: ");
     const tick = () => {
       const line = lines[li];
       ci += dir;
-      setText("试试：" + line.slice(0, ci));
+      setText(prefix + line.slice(0, ci));
       let next = dir > 0 ? 45 : 14;
       if (dir > 0 && ci >= line.length) {
         dir = -1;
@@ -818,19 +861,23 @@ export function Composer({
   /** Put the cursor in the box when it appears. */
   focus?: boolean;
 }) {
+  const lang = useLang();
   const net = useConnectivity();
   const online = net === "online";
   const [input, setInput] = useState("");
   const [focus, setFocus] = useState(false);
   const box = useRef<HTMLTextAreaElement>(null);
-  const examples = EXAMPLES[fa.app.id] || [];
+  const examples = useMemo(
+    () => getExamples()[fa.app.id] || [],
+    [fa.app.id, lang],
+  );
   const work = variant === "work";
   const open = !!variant && (variant === "start" || work || focus || !!input);
   const hint = useTypedHint(
     examples,
     fa.started
-      ? "接着说，或者回答上面的问题…"
-      : "说说你要的集群，AI 帮你填这张表",
+      ? bi("接着说，或者回答上面的问题…", "Continue, or answer the question above…")
+      : bi("说说你要的集群，AI 帮你填这张表", "Describe the cluster you need—AI will fill the form"),
     !fa.started && !open,
   );
   useLayoutEffect(() => {
@@ -880,7 +927,12 @@ export function Composer({
     if (fresh) setTold(note);
     const files = attach?.take?.() || [];
     Promise.resolve(onSend?.()).then(() =>
-      fa.send(text || "我上传了文件，请帮我处理。", files, fresh),
+      fa.send(
+        text ||
+          bi("我上传了文件，请帮我处理。", "I uploaded files—please process them."),
+        files,
+        fresh,
+      ),
     );
   };
   return (
@@ -925,7 +977,7 @@ export function Composer({
               <span title={f.name}>{f.name}</span>
               <button
                 type="button"
-                aria-label={`移除 ${f.name}`}
+                aria-label={bi(`移除 ${f.name}`, `Remove ${f.name}`)}
                 onClick={() => attach.remove(f.id)}
               >
                 <IconClose />
@@ -934,7 +986,11 @@ export function Composer({
           ))}
         </div>
       )}
-      {dragging && <div className="fc-drop">松开即可添加文件</div>}
+      {dragging && (
+        <div className="fc-drop">
+          {bi("松开即可添加文件", "Drop to attach files")}
+        </div>
+      )}
       <div className="fc-row">
         <span className="fc-orb" aria-hidden>
           <Spark size={16} rainbow />
@@ -954,8 +1010,8 @@ export function Composer({
               go();
             } else if (e.key === "Escape") box.current?.blur();
           }}
-          placeholder={!online ? "网络已断开" : hint}
-          aria-label="对 AI 说你要的集群"
+          placeholder={!online ? bi("网络已断开", "Network disconnected") : hint}
+          aria-label={bi("对 AI 说你要的集群", "Describe your cluster to AI")}
           disabled={!online}
         />
         {!open && !fa.busy && <kbd className="fc-kbd">/</kbd>}
@@ -964,7 +1020,7 @@ export function Composer({
             type="button"
             className="ad-send stop"
             onClick={fa.stopAnswer}
-            aria-label="停止"
+            aria-label={bi("停止", "Stop")}
           >
             <IconRecordStop />
           </button>
@@ -975,8 +1031,11 @@ export function Composer({
             disabled={
               (!input.trim() && !attach?.waiting) || !online || attach?.busy
             }
-            aria-label="发送"
-            title="发送（Enter 发送 · Shift+Enter 换行）"
+            aria-label={bi("发送", "Send")}
+            title={bi(
+              "发送（Enter 发送 · Shift+Enter 换行）",
+              "Send (Enter to send · Shift+Enter for new line)",
+            )}
           >
             <IconSend />
           </button>
@@ -988,13 +1047,16 @@ export function Composer({
             {attach && (
               <>
                 <Tooltip
-                  content="添加任何文件：证书、私钥、p7b、报错截图、配置（也可以拖进来或粘贴）。AI 会自己看、自己整理放进表单；私钥内容不会发给 AI"
+                  content={bi(
+                    "添加任何文件：证书、私钥、p7b、报错截图、配置（也可以拖进来或粘贴）。AI 会自己看、自己整理放进表单；私钥内容不会发给 AI",
+                    "Attach any file: certs, private keys, p7b, error screenshots, configs (or drag/paste). AI will inspect and fill the form; private key contents are never sent to AI",
+                  )}
                   mini
                 >
                   <button
                     type="button"
                     className="fc-attach"
-                    aria-label="添加文件"
+                    aria-label={bi("添加文件", "Attach files")}
                     onClick={() => pick.current?.click()}
                   >
                     <IconAttachment />
@@ -1014,7 +1076,12 @@ export function Composer({
               </>
             )}
             <ModelPicker pick={fa.model} compact />
-            <span className="fc-hint">不要写密码，平台会生成</span>
+            <span className="fc-hint">
+              {bi(
+                "不要写密码，平台会生成",
+                "Don't include passwords—the platform generates them",
+              )}
+            </span>
           </div>
           {!fa.started && examples.length > 0 && (
             <div className="fc-chips">
@@ -1049,20 +1116,26 @@ export function FormChat({
   onSend?: () => Promise<unknown> | void;
   attach?: Attach;
 }) {
+  useLang();
   if (!fa.on) return null;
   return (
-    <section className="fc start" aria-label="AI 填表">
+    <section className="fc start" aria-label={bi("AI 填表", "AI form fill")}>
       <header className="fc-start-head">
         <span className="fc-start-orb" aria-hidden>
           <AIEmblem size={44} />
         </span>
         <h2>{start.title}</h2>
-        <p>说说你要的集群，AI 帮你把表填好；也可以自己按步骤填写。</p>
+        <p>
+          {bi(
+            "说说你要的集群，AI 帮你把表填好；也可以自己按步骤填写。",
+            "Describe the cluster you want and AI will fill out the form, or fill it out step by step yourself.",
+          )}
+        </p>
       </header>
       <Composer fa={fa} variant="start" onSend={onSend} attach={attach} />
       <button type="button" className="fc-start-form" onClick={start.onForm}>
-        <span className="fc-start-or">或者</span>
-        <b>自己按步骤填写</b>
+        <span className="fc-start-or">{bi("或者", "Or")}</span>
+        <b>{bi("自己按步骤填写", "Fill step by step manually")}</b>
         <span className="fc-start-steps">{start.steps.join(" → ")}</span>
         <span className="fc-start-go" aria-hidden>
           →
@@ -1084,6 +1157,7 @@ export function ConfirmCard({
   blocking: number;
   issues: string[];
 }) {
+  useLang();
   const [list, setList] = useState(false);
   const card = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -1101,32 +1175,39 @@ export function ConfirmCard({
       className={`fc-card ${list ? "open" : ""}`}
       ref={card}
       role="group"
-      aria-label="确认 AI 的改动"
+      aria-label={bi("确认 AI 的改动", "Confirm AI changes")}
     >
       <div className="fc-card-row">
         <Spark size={15} rainbow />
-        <b>AI 改了 {fa.pending} 处</b>
+        <b>
+          {bi(
+            `AI 改了 ${fa.pending} 处`,
+            `AI edited ${fa.pending} field${fa.pending === 1 ? "" : "s"}`,
+          )}
+        </b>
         <button
           type="button"
           className="fc-card-more"
           onClick={() => setList(!list)}
           aria-expanded={list}
         >
-          {list ? "收起" : "看改了什么"}
+          {list ? bi("收起", "Collapse") : bi("看改了什么", "View changes")}
         </button>
         <span
           className={`fc-check ${blocking ? "bad" : "ok"}`}
-          title={issues.join("；")}
+          title={issues.join(bi("；", "; "))}
         >
           {blocking ? <IconExclamationCircleFill /> : <IconCheckCircleFill />}
-          {blocking ? `还差 ${blocking} 项` : "校验通过"}
+          {blocking
+            ? bi(`还差 ${blocking} 项`, `${blocking} remaining`)
+            : bi("校验通过", "Valid")}
         </span>
         <span className="fc-card-btns">
           <Button size="small" icon={<IconUndo />} onClick={fa.undo}>
-            撤销
+            {bi("撤销", "Undo")}
           </Button>
           <Button size="small" type="primary" onClick={fa.confirm}>
-            确认
+            {bi("确认", "Confirm")}
           </Button>
         </span>
       </div>
@@ -1153,7 +1234,8 @@ export function ConfirmCard({
           </dl>
           {blocking > 0 && (
             <p className="fc-todo">
-              生成前还要：{issues.slice(0, 4).join("；")}
+              {bi("生成前还要：", "Required before generating: ")}
+              {issues.slice(0, 4).join(bi("；", "; "))}
             </p>
           )}
         </div>

@@ -588,7 +588,7 @@ func (s *storeServer) aiToolLoop(ctx context.Context, p aiProvider, msgs []aiMes
 		flushThinking()
 		if reply.Reasoning > 0 && !thought {
 			// some models think but keep what they thought to themselves; say that it happened and how long it took
-			total.Steps = append(total.Steps, aiStep{Kind: "think", Summary: fmt.Sprintf("用了 %d 个思考 token，这个模型不公开思考内容", reply.Reasoning), MS: reply.FirstMS})
+			total.Steps = append(total.Steps, aiStep{Kind: "think", Summary: tr(ctxLang(ctx), fmt.Sprintf("用了 %d 个思考 token，这个模型不公开思考内容", reply.Reasoning), fmt.Sprintf("Used %d reasoning tokens (hidden by model)", reply.Reasoning)), MS: reply.FirstMS})
 			ev.send(map[string]any{"t": "thought-hidden", "n": reply.Reasoning, "ms": reply.FirstMS})
 		}
 		if err != nil {
@@ -618,7 +618,7 @@ func (s *storeServer) aiToolLoop(ctx context.Context, p aiProvider, msgs []aiMes
 					ev.send(map[string]any{"t": "ask", "v": ask})
 					return total, used, nil
 				}
-				msgs = append(msgs, aiMessage{Role: "tool", ToolCallID: call.ID, Content: "没有有效的问题。"})
+				msgs = append(msgs, aiMessage{Role: "tool", ToolCallID: call.ID, Content: tr(ctxLang(ctx), "没有有效的问题。", "No valid questions.")})
 				continue
 			}
 			used = append(used, name)

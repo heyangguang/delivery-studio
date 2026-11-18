@@ -67,13 +67,19 @@ import type {
 } from "./shared";
 import { AppGlyph, InstanceGraph, Segmented, Smooth, StatusBadge } from "./ui";
 import { FLUSH_INPUTS_EVENT, ParamField, Row, showValue } from "./fields";
+import { bi, biv, catLabel, getLang, useLang, type Lang } from "./i18n";
 
 /* ---------------------------------------------------------------- schema cache */
 
 const schemas = new Map<string, Promise<Schema>>();
-const schemaKey = (c: string, v?: string) => `${c}@${v || ""}`;
-function loadSchema(component: string, version?: string): Promise<Schema> {
-  const k = schemaKey(component, version);
+const schemaKey = (c: string, v?: string, l: Lang = getLang()) =>
+  `${c}@${v || ""}:${l}`;
+function loadSchema(
+  component: string,
+  version?: string,
+  lang: Lang = getLang(),
+): Promise<Schema> {
+  const k = schemaKey(component, version, lang);
   let p = schemas.get(k);
   if (!p) {
     p = api<Schema>(
@@ -86,21 +92,24 @@ function loadSchema(component: string, version?: string): Promise<Schema> {
 }
 /** Schemas for every instance of the deployment, loaded once each. */
 function useSchemas(insts: { component: string; version?: string }[]) {
+  const lang = useLang();
   const [loaded, setLoaded] = useState<Record<string, Schema>>({});
-  const key = insts.map((i) => schemaKey(i.component, i.version)).join("|");
+  const key = insts.map((i) => `${i.component}@${i.version || ""}`).join("|");
   useEffect(() => {
     let live = true;
     for (const i of insts) {
-      const k = schemaKey(i.component, i.version);
-      loadSchema(i.component, i.version)
+      const k = schemaKey(i.component, i.version, lang);
+      loadSchema(i.component, i.version, lang)
         .then((s) => live && setLoaded((m) => (m[k] ? m : { ...m, [k]: s })))
         .catch(() => {});
     }
     return () => {
       live = false;
     };
-  }, [key]);
-  return (c: string, v?: string) => loaded[schemaKey(c, v)];
+  }, [key, lang]);
+  const otherLang: Lang = lang === "en-US" ? "zh-CN" : "en-US";
+  return (c: string, v?: string) =>
+    loaded[schemaKey(c, v, lang)] || loaded[schemaKey(c, v, otherLang)];
 }
 
 /* ---------------------------------------------------------------- deployment helpers */
@@ -232,31 +241,46 @@ function clean(d: Deployment): Deployment {
 
 /* ---------------------------------------------------------------- sections */
 
-const SECTIONS: { id: string; title: string; lead: string }[] = [
+const getSections = (): { id: string; title: string; lead: string }[] => [
   {
     id: "basics",
-    title: "集群与架构方案",
-    lead: "命名集群，选择系统版本与高可用部署方案",
+    title: bi("集群与架构方案", "Cluster & Scheme"),
+    lead: bi(
+      "命名集群，选择系统版本与高可用部署方案",
+      "Name the cluster and select OS, version, and HA deployment scheme",
+    ),
   },
   {
     id: "hosts",
-    title: "主机与执行通道",
-    lead: "填写目标机器 IPv4、数据盘与控制节点免密执行通道",
+    title: bi("主机与执行通道", "Hosts & Execution"),
+    lead: bi(
+      "填写目标机器 IPv4、数据盘与控制节点免密执行通道",
+      "Enter target IPv4 addresses, data disks, and passwordless execution path",
+    ),
   },
   {
     id: "placement",
-    title: "角色与拓扑放置",
-    lead: "核对各角色节点分布，平台自动补齐依赖组件",
+    title: bi("角色与拓扑放置", "Roles & Topology"),
+    lead: bi(
+      "核对各角色节点分布，平台自动补齐依赖组件",
+      "Review role placement per host; dependencies are added automatically",
+    ),
   },
   {
     id: "params",
-    title: "关键参数",
-    lead: "按需调整核心运行参数，未改动项保持推荐默认值",
+    title: bi("关键参数", "Parameters"),
+    lead: bi(
+      "按需调整核心运行参数，未改动项保持推荐默认值",
+      "Tune core runtime parameters; unchanged settings keep recommended defaults",
+    ),
   },
   {
     id: "access",
-    title: "入口与证书",
-    lead: "配置负载均衡、虚拟 IP 与传输加密证书",
+    title: bi("入口与证书", "Access & TLS"),
+    lead: bi(
+      "配置负载均衡、虚拟 IP 与传输加密证书",
+      "Configure load balancing, virtual IPs, and TLS certificates",
+    ),
   },
 ];
 
@@ -293,14 +317,25 @@ function sectionOf(
     : "placement";
 }
 
-const TAB_LABEL: Record<string, string> = {
-  base: "基础",
-  ha: "高可用",
-  database: "数据库",
-  backup: "备份",
-  os: "系统",
-  main: "参数",
-  addons: "扩展",
+const tabLabel = (tab: string): string => {
+  switch (tab) {
+    case "base":
+      return bi("基础", "Basic");
+    case "ha":
+      return bi("高可用", "HA");
+    case "database":
+      return bi("数据库", "Database");
+    case "backup":
+      return bi("备份", "Backup");
+    case "os":
+      return bi("系统", "OS");
+    case "main":
+      return bi("参数", "Parameters");
+    case "addons":
+      return bi("扩展", "Extensions");
+    default:
+      return tab;
+  }
 };
 
 /* ---------------------------------------------------------------- wizard */
@@ -320,6 +355,7 @@ type NewDeliveryProps = {
 
 /** Decide whether this entry continues a draft before mounting either the form or its assistant. */
 export function NewDelivery(props: NewDeliveryProps) {
+  useLang();
   const { app, jobs = [], jobsLoading, back } = props;
   const scope = draftScope(props);
   const [entry, setEntry] = useState(() => {
@@ -371,51 +407,80 @@ export function NewDelivery(props: NewDeliveryProps) {
   if (submittedDraft || (!entry.chosen && entry.draft && jobsLoading))
     return (
       <div className="center-fill">
-        <Spin aria-label="检查未完成的配置" />
+        <Spin
+          aria-label={bi("检查未完成的配置", "Checking unfinished configuration")}
+        />
       </div>
     );
   if (entry.draft && !entry.chosen)
     return (
-      <section className="wz-resume" aria-label="选择继续填写或新建">
+      <section
+        className="wz-resume"
+        aria-label={bi("选择继续填写或新建", "Resume draft or start new")}
+      >
         <Button
           type="text"
           className="back"
           icon={<IconArrowLeft />}
           onClick={back}
         >
-          返回
+          {bi("返回", "Back")}
         </Button>
         <header>
           <AppGlyph id={app.id} category={app.category} size={40} />
           <div>
-            <h1>继续上次的配置，还是新建一份？</h1>
-            <p>上次未完成的 {app.name} 配置已保留，选择这次要做的事。</p>
+            <h1>
+              {bi(
+                "继续上次的配置，还是新建一份？",
+                "Continue your previous draft, or start fresh?",
+              )}
+            </h1>
+            <p>
+              {bi(
+                `上次未完成的 ${app.name} 配置已保留，选择这次要做的事。`,
+                `Your unfinished ${app.name} configuration was saved. Choose how to proceed.`,
+              )}
+            </p>
           </div>
         </header>
         <div className="wz-resume-draft">
           <IconFile />
           <div>
-            <b>{entry.draft.dep.id || "未命名集群"}</b>
+            <b>{entry.draft.dep.id || bi("未命名集群", "Unnamed cluster")}</b>
             <span>
-              {entry.draft.dep.hosts.length} 台机器
+              {bi(
+                `${entry.draft.dep.hosts.length} 台机器`,
+                `${entry.draft.dep.hosts.length} ${entry.draft.dep.hosts.length === 1 ? "host" : "hosts"}`,
+              )}
               {entry.draft.updated
-                ? ` · ${ago(entry.draft.updated)}保存`
-                : " · 未完成的配置"}
+                ? bi(
+                    ` · ${ago(entry.draft.updated)}保存`,
+                    ` · Saved ${ago(entry.draft.updated)}`,
+                  )
+                : bi(" · 未完成的配置", " · Unfinished draft")}
             </span>
           </div>
         </div>
         <div className="wz-resume-actions">
           <Button onClick={() => setEntry((e) => ({ ...e, chosen: true }))}>
-            继续填写
+            {bi("继续填写", "Resume draft")}
           </Button>
           <Button type="primary" onClick={fresh}>
-            {props.from || props.revise ? "重新填写" : "新建一份"}
+            {props.from || props.revise
+              ? bi("重新填写", "Reset & reload")
+              : bi("新建一份", "Start new")}
           </Button>
         </div>
         <p className="wz-resume-note">
           {props.from || props.revise
-            ? "重新填写会清空这份草稿，并重新载入来源配置。"
-            : "新建一份会清空这份未完成的配置，从空白表单开始。"}
+            ? bi(
+                "重新填写会清空这份草稿，并重新载入来源配置。",
+                "Resetting clears this draft and reloads the source configuration.",
+              )
+            : bi(
+                "新建一份会清空这份未完成的配置，从空白表单开始。",
+                "Starting new clears this unfinished draft and begins from a blank form.",
+              )}
         </p>
       </section>
     );
@@ -437,6 +502,7 @@ const FrozenSection = React.memo(
     hidden: boolean;
     render: () => React.ReactNode;
   }) {
+    useLang();
     return <>{render()}</>;
   },
   (prev, next) => prev.hidden && next.hidden,
@@ -459,6 +525,7 @@ function DeliveryForm({
   resume: FormDraft | null;
   onRestart: () => void;
 }) {
+  const lang = useLang();
   const submitted = useRef(false);
   const [dep, setDep] = useState<Deployment>(
     () =>
@@ -472,7 +539,7 @@ function DeliveryForm({
   const [files, setFiles] = useState<Record<string, File | undefined>>({});
   const [res, setRes] = useState<Resolution | null>(null);
   const [resolving, setResolving] = useState(false);
-  const sections = SECTIONS;
+  const sections = useMemo(() => getSections(), [lang]);
   const initialSection = sections.some((s) => s.id === resume?.section)
     ? resume!.section!
     : sections[0].id;
@@ -500,13 +567,11 @@ function DeliveryForm({
     api<HostContract>("/api/components/platform-shared/parameters")
       .then(setHostContract)
       .catch(err);
-  }, []);
+  }, [lang]);
   const [origin, setOrigin] = useState<{
     kind: "draft" | "job" | "revise";
     label: string;
-  } | null>(
-    resume ? { kind: "draft", label: resume.dep.id || "未命名" } : null,
-  );
+  } | null>(resume ? { kind: "draft", label: resume.dep.id || "" } : null);
   // the first deployment being revised, to say what the revision changes
   const [revBase, setRevBase] = useState<Deployment | null>(null);
   const [lbCatalog, setLbCatalog] = useState<AppInfo[]>([]);
@@ -516,7 +581,7 @@ function DeliveryForm({
 
   const schemaOf = useSchemas(dep.instances);
 
-  // Resumed workflows keep their edits; fresh copies start from their source delivery.
+  const pickedInitForApp = useRef("");
   useEffect(() => {
     api<AppInfo[]>("/api/catalog?fronts=1")
       .then((all) =>
@@ -526,6 +591,8 @@ function DeliveryForm({
     api<LibraryOverview>("/api/library")
       .then((o) => {
         setLib(o);
+        if (pickedInitForApp.current === app.id) return;
+        pickedInitForApp.current = app.id;
         // A fresh deployment starts on a system that can actually be deployed.
         setDep((d) => {
           if (resume || from || revise || d.id || d.instances.length !== 1)
@@ -556,6 +623,10 @@ function DeliveryForm({
         });
       })
       .catch(() => {});
+  }, [lang, app.id]);
+
+  // Resumed workflows keep their edits; fresh copies start from their source delivery.
+  useEffect(() => {
     if (from || revise) {
       api<JobDetail>(`/api/jobs/${from || revise}`)
         .then((d) => {
@@ -591,7 +662,7 @@ function DeliveryForm({
             .find((m) => m.form?.deployment)?.form?.deployment;
           if (saved?.instances?.some((i) => i.component === app.id)) {
             setDep(saved);
-            setOrigin({ kind: "draft", label: saved.id || "未命名" });
+            setOrigin({ kind: "draft", label: saved.id || "" });
           }
         })
         .catch(err)
@@ -636,7 +707,7 @@ function DeliveryForm({
       clearTimeout(t);
       ac.abort();
     };
-  }, [dep, ready, appsTick, review]);
+  }, [dep, ready, appsTick, review, lang]);
 
   const pv: PlanView | undefined = res?.plan;
   const issues: Issue[] = pv?.issues || [];
@@ -722,13 +793,17 @@ function DeliveryForm({
     );
     if (obsolete.length) {
       Modal.confirm({
-        title: "切换部署方案？",
-        content:
+        title: bi("切换部署方案？", "Switch deployment scheme?"),
+        content: bi(
           "将移除原方案中已自行指定的组件配置：" +
-          obsolete.map((i) => i.id).join("、") +
-          "。新方案会重新计算依赖，并移除不再使用的机器；仍被其他组件使用的机器会保留。",
-        okText: "切换方案",
-        cancelText: "保留当前方案",
+            obsolete.map((i) => i.id).join("、") +
+            "。新方案会重新计算依赖，并移除不再使用的机器；仍被其他组件使用的机器会保留。",
+          "Explicitly configured components from the previous scheme will be removed: " +
+            obsolete.map((i) => i.id).join(", ") +
+            ". The new scheme will recalculate dependencies and remove unused hosts; hosts still used by other components will be kept.",
+        ),
+        okText: bi("切换方案", "Switch scheme"),
+        cancelText: bi("保留当前方案", "Keep current"),
         onOk: () => changePlan(p, new Set(obsolete.map((i) => i.id))),
       });
       return;
@@ -746,15 +821,19 @@ function DeliveryForm({
     const dropped = dep.hosts.filter((h) => !retained.has(h.name) && !!h.ip);
     if (dropped.length) {
       Modal.confirm({
-        title: "确认调整机器数量",
-        content:
+        title: bi("确认调整机器数量", "Confirm host count change"),
+        content: bi(
           "切换到「" +
-          p.name +
-          "」将从当前配置移除：" +
-          dropped.map((h) => h.name + "（" + h.ip + "）").join("、") +
-          "。这只修改部署表单，不会操作这些机器。",
-        okText: "切换并移除",
-        cancelText: "保留当前方案",
+            p.name +
+            "」将从当前配置移除：" +
+            dropped.map((h) => h.name + "（" + h.ip + "）").join("、") +
+            "。这只修改部署表单，不会操作这些机器。",
+          `Switching to "${p.name}" will remove from this configuration: ` +
+            dropped.map((h) => `${h.name} (${h.ip})`).join(", ") +
+            ". This only updates the form and will not touch the machines.",
+        ),
+        okText: bi("切换并移除", "Switch & remove"),
+        cancelText: bi("保留当前方案", "Keep current"),
         onOk: () => commitPlan(p, remove),
       });
       return;
@@ -796,14 +875,25 @@ function DeliveryForm({
   }
   function startOver() {
     Modal.confirm({
-      title: from ? "重新填写这份配置？" : "新建一份交付？",
+      title: from
+        ? bi("重新填写这份配置？", "Reset this configuration?")
+        : bi("新建一份交付？", "Start a new delivery?"),
       content: from
-        ? "当前草稿将被清空，重新载入来源交付的配置。"
+        ? bi(
+            "当前草稿将被清空，重新载入来源交付的配置。",
+            "The current draft will be cleared and reloaded from the source delivery.",
+          )
         : chat
-          ? "结束这次对话的填表，返回新建入口。"
-          : "当前未完成的配置将被清空，从空白表单开始。",
-      okText: from ? "重新填写" : "新建一份",
-      cancelText: "继续当前配置",
+          ? bi(
+              "结束这次对话的填表，返回新建入口。",
+              "End this assistant session and return to the new-delivery entry.",
+            )
+          : bi(
+              "当前未完成的配置将被清空，从空白表单开始。",
+              "The current unfinished draft will be cleared to start from a blank form.",
+            ),
+      okText: from ? bi("重新填写", "Reset") : bi("新建一份", "Start new"),
+      cancelText: bi("继续当前配置", "Keep editing"),
       onOk: () => {
         submitted.current = true;
         onRestart();
@@ -876,7 +966,11 @@ function DeliveryForm({
   function fillIPs() {
     const first = dep.hosts[0]?.ip;
     if (!first || !ipv4(first))
-      return err(new Error("请先填写第一台机器的 IP"));
+      return err(
+        new Error(
+          bi("请先填写第一台机器的 IP", "Enter the IPv4 of the first host first"),
+        ),
+      );
     const o = first.split(".").map(Number);
     const base = ((o[0] * 256 + o[1]) * 256 + o[2]) * 256 + o[3];
     setDep((d) => ({
@@ -1081,7 +1175,9 @@ function DeliveryForm({
     const changedKey = (d: ParamDef) => inst.params?.[d.key] !== undefined;
     const q = opts.tabbed ? query.trim().toLowerCase() : "";
     const filterChanged = Boolean(opts.tabbed && opts.onlyChanged);
-    const groups = sc.groups.length ? sc.groups : [{ id: "", label: "参数" }];
+    const groups = sc.groups.length
+      ? sc.groups
+      : [{ id: "", label: bi("参数", "Parameters") }];
     const tabsOrder: string[] = [];
     groups.forEach((g) => {
       const t = (g as { tab?: string }).tab || "main";
@@ -1130,8 +1226,14 @@ function DeliveryForm({
           <div className="wz-tune-meta">
             <span className="muted small num">
               {filterChanged && !q
-                ? `已修改 ${found.length} 项参数`
-                : `找到 ${found.length} 项匹配参数`}
+                ? bi(
+                    `已修改 ${found.length} 项参数`,
+                    `${found.length} modified ${found.length === 1 ? "parameter" : "parameters"}`,
+                  )
+                : bi(
+                    `找到 ${found.length} 项匹配参数`,
+                    `${found.length} matching ${found.length === 1 ? "parameter" : "parameters"}`,
+                  )}
             </span>
             {found.length === 0 && (
               <button
@@ -1142,7 +1244,7 @@ function DeliveryForm({
                   setOnlyChanged(false);
                 }}
               >
-                清除筛选
+                {bi("清除筛选", "Clear filters")}
               </button>
             )}
           </div>
@@ -1171,7 +1273,9 @@ function DeliveryForm({
                 onClick={() => setAdvanced((a) => ({ ...a, [k]: !a[k] }))}
                 aria-expanded={!!advanced[k]}
               >
-                {advanced[k] ? "收起高级参数" : `显示高级参数 ${adv.length}`}
+                {advanced[k]
+                  ? bi("收起高级参数", "Hide advanced")
+                  : bi(`显示高级参数 ${adv.length}`, `Show advanced (${adv.length})`)}
               </button>
             )}
           </div>
@@ -1194,14 +1298,14 @@ function DeliveryForm({
           <div className="tune-bar">
             <Segmented
               size="sm"
-              label="参数分类"
+              label={bi("参数分类", "Parameter categories")}
               value={active}
               onChange={opts.tabState![1]}
               options={tabsOrder.map((t) => ({
                 value: t,
                 label: (
                   <>
-                    {TAB_LABEL[t] || t}
+                    {tabLabel(t)}
                     {t !== "addons" && tabChanged(t) > 0 && (
                       <em className="mark-n num">{tabChanged(t)}</em>
                     )}
@@ -1235,8 +1339,14 @@ function DeliveryForm({
       <div className="addons">
         <p className="muted small">
           {scope.name === "database"
-            ? "集群刚建好时还没有业务库，所以默认装进 template1：以后新建的数据库自动带上这个扩展，不用再逐个库处理。已存在的扩展保留，不自动升级。"
-            : `按${scope.name}安装。已存在的保留，不自动升级。`}
+            ? bi(
+                "集群刚建好时还没有业务库，所以默认装进 template1：以后新建的数据库自动带上这个扩展，不用再逐个库处理。已存在的扩展保留，不自动升级。",
+                "No business databases exist yet at setup, so extensions install into template1 by default—new databases inherit them automatically. Existing extensions are kept without auto-upgrade.",
+              )
+            : bi(
+                `按${scope.name}安装。已存在的保留，不自动升级。`,
+                `Installed per ${scope.name}. Existing extensions are kept without auto-upgrade.`,
+              )}
         </p>
         {sc.addons.items.map((a) => {
           const sel = inst.addons?.find((x) => x.id === a.id);
@@ -1257,8 +1367,12 @@ function DeliveryForm({
                   aria-label={a.title || a.id}
                 />
                 <b>{a.title || a.id}</b>
-                {a.builtin && <span className="flag">通常已存在</span>}
-                {a.restart && <span className="flag">需重启</span>}
+                {a.builtin && (
+                  <span className="flag">{bi("通常已存在", "Usually built-in")}</span>
+                )}
+                {a.restart && (
+                  <span className="flag">{bi("需重启", "Requires restart")}</span>
+                )}
               </label>
               {sel && scope.name === "database" && (
                 <AddonTarget
@@ -1286,7 +1400,14 @@ function DeliveryForm({
     const sc = schemaOf(inst.component, inst.version);
     if (!sc) return <Spin />;
     if (sc.kind === "external")
-      return <p className="muted small">由客户自行运维，不放置到机器上。</p>;
+      return (
+        <p className="muted small">
+          {bi(
+            "由客户自行运维，不放置到机器上。",
+            "Customer-managed; not placed on hosts.",
+          )}
+        </p>
+      );
     const contract = instView(inst.id)?.contract;
     const selectedScheme = app.plans?.find(
       (p) => p.contract?.when === contract?.when,
@@ -1303,18 +1424,21 @@ function DeliveryForm({
       <div className="place">
         {contract?.series === "basic" && (
           <p className="muted small">
-            基础系列只放置一个节点；需要从节点请先切换部署方案。
+            {bi(
+              "基础系列只放置一个节点；需要从节点请先切换部署方案。",
+              "Basic tier places only one node; switch deployment scheme to add replicas.",
+            )}
           </p>
         )}
         {allowedRoles.map((r) => {
           const cur = inst.placement?.[r.name] || [];
           const range = r.max
             ? r.min === r.max
-              ? `固定 ${r.min} 台`
-              : `${r.min}–${r.max} 台`
+              ? bi(`固定 ${r.min} 台`, `Exact ${r.min}`)
+              : bi(`${r.min}–${r.max} 台`, `${r.min}–${r.max} hosts`)
             : r.min
-              ? `至少 ${r.min} 台`
-              : "可不放置";
+              ? bi(`至少 ${r.min} 台`, `Min ${r.min}`)
+              : bi("可不放置", "Optional");
           const bad = issueFor(`instances[${inst.id}].placement.${r.name}`);
           return (
             <div className={`place-row ${bad ? "is-bad" : ""}`} key={r.name}>
@@ -1324,13 +1448,13 @@ function DeliveryForm({
                   <span
                     className={`wz-role-cnt num ${bad ? "bad" : cur.length > 0 ? "ok" : ""}`}
                   >
-                    已选 {cur.length} 台
+                    {bi(`已选 ${cur.length} 台`, `${cur.length} selected`)}
                   </span>
                 </div>
                 <small>
                   {range}
-                  {r.odd ? " · 建议奇数" : ""}
-                  {r.exclusive ? " · 独占机器" : ""}
+                  {r.odd ? bi(" · 建议奇数", " · Odd preferred") : ""}
+                  {r.exclusive ? bi(" · 独占机器", " · Exclusive host") : ""}
                 </small>
               </div>
               <Select
@@ -1341,7 +1465,7 @@ function DeliveryForm({
                   value: h.name,
                   label: `${h.name}${h.ip ? ` (${h.ip})` : ""}`,
                 }))}
-                placeholder="选择机器"
+                placeholder={bi("选择机器", "Select hosts")}
                 onChange={(v) =>
                   edit(inst.id, (i) => ({
                     ...i,
@@ -1351,7 +1475,10 @@ function DeliveryForm({
                     },
                   }))
                 }
-                aria-label={`${inst.id} ${r.title || r.name} 放置`}
+                aria-label={bi(
+                  `${inst.id} ${r.title || r.name} 放置`,
+                  `${inst.id} ${r.title || r.name} placement`,
+                )}
                 status={bad ? "error" : undefined}
               />
               {bad && <span className="place-bad">{bad}</span>}
@@ -1368,13 +1495,13 @@ function DeliveryForm({
       (i.endpoints || []).forEach((e) =>
         out.push({
           value: `${i.id}.${e.name}`,
-          label: `${i.id}.${e.name} · ${e.title}${e.lb === "none" ? "（不适合放在负载均衡后）" : ""}`,
+          label: `${i.id}.${e.name} · ${e.title}${e.lb === "none" ? bi("（不适合放在负载均衡后）", " (not suitable behind LB)") : ""}`,
           disabled: e.lb === "none",
         }),
       ),
     );
     return out;
-  }, [pv]);
+  }, [pv, lang]);
 
   function frontCard(inst: InstanceSpec) {
     const sc = schemaOf(inst.component, inst.version);
@@ -1382,7 +1509,11 @@ function DeliveryForm({
     return (
       <div className="front" key={inst.id} data-ai={`instances[${inst.id}]`}>
         <div className="front-head">
-          <AppGlyph id={inst.component} category="负载均衡" size={28} />
+          <AppGlyph
+            id={inst.component}
+            category={catLabel("Load Balancing")}
+            size={28}
+          />
           <div>
             <b>{sc?.title || inst.component}</b>
             <small className="mono">
@@ -1393,7 +1524,11 @@ function DeliveryForm({
           {view && (
             <StatusBadge
               state={view.status === "published" ? "done" : "queued"}
-              label={view.status === "published" ? "已发布" : "待验证"}
+              label={
+                view.status === "published"
+                  ? bi("已发布", "Published")
+                  : bi("待验证", "Pending")
+              }
             />
           )}
           <Button
@@ -1401,10 +1536,10 @@ function DeliveryForm({
             status="danger"
             icon={<IconDelete />}
             onClick={() => removeInstance(inst.id)}
-            aria-label={`删除入口 ${inst.id}`}
+            aria-label={bi(`删除入口 ${inst.id}`, `Remove entrypoint ${inst.id}`)}
           />
         </div>
-        <h5>代理的端点</h5>
+        <h5>{bi("代理的端点", "Proxied Endpoints")}</h5>
         <div className="binds">
           {(inst.binds || []).map((b, i) => (
             <div className="bind-row" key={i}>
@@ -1424,12 +1559,15 @@ function DeliveryForm({
                     ),
                   }))
                 }
-                aria-label="代理的端点"
+                aria-label={bi("代理的端点", "Proxied endpoint")}
               />
               <Input
                 className="mono-in"
                 value={b.listen ? String(b.listen) : ""}
-                placeholder="监听端口（留空同后端）"
+                placeholder={bi(
+                  "监听端口（留空同后端）",
+                  "Listen port (blank = backend)",
+                )}
                 onChange={(v) =>
                   edit(inst.id, (x) => ({
                     ...x,
@@ -1440,7 +1578,7 @@ function DeliveryForm({
                     ),
                   }))
                 }
-                aria-label="监听端口"
+                aria-label={bi("监听端口", "Listen port")}
               />
               <Button
                 type="text"
@@ -1451,7 +1589,7 @@ function DeliveryForm({
                     binds: (x.binds || []).filter((_, j) => j !== i),
                   }))
                 }
-                aria-label="移除"
+                aria-label={bi("移除", "Remove")}
               />
               {issueFor(`instances[${inst.id}].binds[${i}]`) && (
                 <span className="place-bad">
@@ -1475,7 +1613,7 @@ function DeliveryForm({
               }))
             }
           >
-            + 添加端点
+            {bi("+ 添加端点", "+ Add endpoint")}
           </button>
           {errors
             .filter((e) => e.path === `instances[${inst.id}].binds`)
@@ -1487,21 +1625,29 @@ function DeliveryForm({
         </div>
         {sc?.kind !== "external" && (
           <>
-            <h5>放置</h5>
+            <h5>{bi("放置", "Placement")}</h5>
             {placementEditor(inst)}
             <button className="link" onClick={() => addHost(inst.id)}>
-              + 为它添加一台新机器
+              {bi("+ 为它添加一台新机器", "+ Add a new host for this")}
             </button>
           </>
         )}
-        <h5>参数</h5>
+        <h5>{bi("参数", "Parameters")}</h5>
         {paramsPanel(inst.id)}
         {autoInstances
           .filter((a) => a.auto_reason?.includes(sc?.title || inst.component))
           .map((a) => (
             <div key={a.id} className="note">
-              平台已自动加入 <b>{a.title}</b>（{a.id}）：{a.auto_reason}
-              ，与它同机部署。
+              {biv(
+                <>
+                  平台已自动加入 <b>{a.title}</b>（{a.id}）：{a.auto_reason}
+                  ，与它同机部署。
+                </>,
+                <>
+                  Auto-added <b>{a.title}</b> ({a.id}): {a.auto_reason},
+                  co-located on the same hosts.
+                </>,
+              )}
             </div>
           ))}
       </div>
@@ -1512,7 +1658,7 @@ function DeliveryForm({
     <div className="cert-row" key={key}>
       <div>
         <b>{label}</b>
-        <span>{required ? "必需" : "可选"}</span>
+        <span>{required ? bi("必需", "Required") : bi("可选", "Optional")}</span>
       </div>
       <Upload
         autoUpload={false}
@@ -1535,13 +1681,21 @@ function DeliveryForm({
         onChange={(list) => {
           const picked = list[0]?.originFile;
           if (picked && picked.size > 2 * 1024 * 1024)
-            return err(new Error("单个文件不超过 2 MiB"));
+            return err(
+              new Error(
+                bi("单个文件不超过 2 MiB", "File size must not exceed 2 MiB"),
+              ),
+            );
           setFiles((o) => ({ ...o, [key]: picked }));
         }}
       >
         {!files[key] && (
-          <Button size="small" icon={<IconPlus />} aria-label={`选择${label}`}>
-            选择文件
+          <Button
+            size="small"
+            icon={<IconPlus />}
+            aria-label={bi(`选择${label}`, `Select ${label}`)}
+          >
+            {bi("选择文件", "Choose file")}
           </Button>
         )}
       </Upload>
@@ -1558,7 +1712,7 @@ function DeliveryForm({
     );
   const revised = useMemo(
     () => (revBase ? diffForm(revBase, dep, schemaOf, app.id) : []),
-    [revBase, dep, schemaOf, app.id],
+    [revBase, dep, schemaOf, app.id, lang],
   );
   const missingUploads = revise
     ? []
@@ -1651,11 +1805,19 @@ function DeliveryForm({
               })
             ) {
               Message.warning(
-                "浏览器暂时无法保存草稿，将从已保存的对话恢复配置",
+                bi(
+                  "浏览器暂时无法保存草稿，将从已保存的对话恢复配置",
+                  "Unable to save draft locally; configuration will restore from chat history",
+                ),
               );
             }
             navigate({ name: "new", app: target, chat: conversation });
-            Message.success("已切换组件，需求与对话已保留");
+            Message.success(
+              bi(
+                "已切换组件，需求与对话已保留",
+                "Switched component; requirements and chat history kept",
+              ),
+            );
           },
     draftScope: scope,
     canPersist: () => !submitted.current,
@@ -1732,10 +1894,10 @@ function DeliveryForm({
      assistant looks inside (a p7b, a bundle, a key), works out what belongs where, and puts the result into the form's
      certificate slots. Private keys are only read on the server, never shown to the model. */
   const SLOT_LABEL: Record<string, string> = {
-    certificate: "证书",
-    private_key: "私钥",
-    ca_cert: "CA 证书",
-    intermediates: "中间证书",
+    certificate: bi("证书", "Certificate"),
+    private_key: bi("私钥", "Private key"),
+    ca_cert: bi("CA 证书", "CA cert"),
+    intermediates: bi("中间证书", "Intermediates"),
   };
   const certTarget = (pv?.inputs || [])[0];
   const [chatFiles, setChatFiles] = useState<FileNode[]>([]);
@@ -1743,14 +1905,21 @@ function DeliveryForm({
   const addChatFiles = async (picked: File[]) => {
     const ok = picked.filter((f) => {
       if (f.size > 4 * 1024 * 1024) {
-        Message.warning(`${f.name} 超过 4 MiB，没有添加`);
+        Message.warning(
+          bi(
+            `${f.name} 超过 4 MiB，没有添加`,
+            `${f.name} exceeds 4 MiB and was not added`,
+          ),
+        );
         return false;
       }
       return true;
     });
     if (!ok.length) return;
     if (chatFiles.length + ok.length > 8)
-      return void Message.warning("一条消息最多附带 8 个文件");
+      return void Message.warning(
+        bi("一条消息最多附带 8 个文件", "Up to 8 files per message"),
+      );
     setChatUp((n) => n + ok.length);
     try {
       const r = await uploadFiles(ok, "", "chat");
@@ -1789,7 +1958,7 @@ function DeliveryForm({
           ...chatFiles.map((f) => ({
             id: "f:" + f.id,
             name: f.name,
-            slot: "待发送",
+            slot: bi("待发送", "Pending"),
           })),
           ...Object.keys(SLOT_LABEL)
             .filter((part) => slotFile(part))
@@ -1829,10 +1998,13 @@ function DeliveryForm({
           if (have.length) {
             const chk = certTarget && certChecks[certTarget.instance];
             out.push(
-              `表单里已有：${have.map((part) => `${SLOT_LABEL[part]} ${slotFile(part)!.name}`).join("、")}${chk && !chk.busy ? `；平台核对：${chk.ok ? "证书与域名匹配" : chk.error || "未通过"}` : ""}`,
+              bi(
+                `表单里已有：${have.map((part) => `${SLOT_LABEL[part]} ${slotFile(part)!.name}`).join("、")}${chk && !chk.busy ? `；平台核对：${chk.ok ? "证书与域名匹配" : chk.error || "未通过"}` : ""}`,
+                `Already in form: ${have.map((part) => `${SLOT_LABEL[part]} ${slotFile(part)!.name}`).join(", ")}${chk && !chk.busy ? `; check: ${chk.ok ? "certificate matches domain" : chk.error || "failed"}` : ""}`,
+              ),
             );
           }
-          return out.length ? `（${out.join("。")}）` : "";
+          return out.length ? bi(`（${out.join("。")}）`, ` (${out.join(". ")})`) : "";
         },
       }
     : undefined;
@@ -1972,7 +2144,9 @@ function DeliveryForm({
     window.dispatchEvent(new Event(FLUSH_INPUTS_EVENT));
     if (!fa.pending) return setReview(true);
     fa.nudge();
-    Message.info("先确认或撤销 AI 的改动");
+    Message.info(
+      bi("先确认或撤销 AI 的改动", "Confirm or undo AI changes first"),
+    );
   };
   const pickPlatform = (id: string) =>
     setDep((d) => {
@@ -1990,19 +2164,32 @@ function DeliveryForm({
   const versionNote = (id: string) => {
     const v = app.versions.find((x) => x.id === id);
     const cv = v?.coverage?.[platform];
-    if (v?.status !== "published") return "尚未在空环境验证，不要用于生产";
+    if (v?.status !== "published")
+      return bi(
+        "尚未在空环境验证，不要用于生产",
+        "Not yet verified on a clean environment; do not use in production",
+      );
     return dep.delivery_mode !== "configuration" && cv && !cv.ready
-      ? `软件库缺 ${cv.missing?.length ?? 0} 个软件包`
-      : "已发布";
+      ? bi(
+          `软件库缺 ${cv.missing?.length ?? 0} 个软件包`,
+          `${cv.missing?.length ?? 0} missing ${cv.missing?.length === 1 ? "package" : "packages"} in Software Library`,
+        )
+      : bi("已发布", "Published");
   };
   const idFormatHint = !dep.id
     ? ""
     : !/^[a-z]/.test(dep.id)
-      ? "需以小写英文字母（a-z）开头"
+      ? bi(
+          "需以小写英文字母（a-z）开头",
+          "Must start with a lowercase letter (a–z)",
+        )
       : dep.id.length > 41
-        ? "标识长度不超过 41 个字符"
+        ? bi("标识长度不超过 41 个字符", "Must be 41 characters or fewer")
         : !idOk.test(dep.id)
-          ? "仅支持小写英文字母、数字与连字符（-）"
+          ? bi(
+              "仅支持小写英文字母、数字与连字符（-）",
+              "Only lowercase letters, digits, and hyphens (-) are allowed",
+            )
           : "";
 
   const hostNameCounts = new Map<string, number>();
@@ -2015,11 +2202,19 @@ function DeliveryForm({
     (h) => ipv4(h.ip) && (hostIpCounts.get(h.ip) || 0) === 1,
   ).length;
   const hostLocalIssue = (h: HostSpec, i: number): string | undefined => {
-    if (!h.name.trim()) return "请填写机器名称";
-    if ((hostNameCounts.get(h.name) || 0) > 1) return `机器名称 ${h.name} 重复`;
-    if (h.ip && !ipv4(h.ip)) return "IPv4 地址格式不正确（示例：10.0.1.11）";
+    if (!h.name.trim()) return bi("请填写机器名称", "Enter host name");
+    if ((hostNameCounts.get(h.name) || 0) > 1)
+      return bi(`机器名称 ${h.name} 重复`, `Duplicate host name: ${h.name}`);
+    if (h.ip && !ipv4(h.ip))
+      return bi(
+        "IPv4 地址格式不正确（示例：10.0.1.11）",
+        "Invalid IPv4 address (e.g. 10.0.1.11)",
+      );
     if (h.ip && ipv4(h.ip) && (hostIpCounts.get(h.ip) || 0) > 1)
-      return `IPv4 地址 ${h.ip} 与其他机器重复`;
+      return bi(
+        `IPv4 地址 ${h.ip} 与其他机器重复`,
+        `Duplicate IPv4 address: ${h.ip}`,
+      );
     return issueFor(`hosts[${i}]`);
   };
 
@@ -2038,15 +2233,54 @@ function DeliveryForm({
   const bodies: Record<string, React.ReactNode> = {
     basics: (
       <>
-        <Row label="交付内容" hint="先生成可审核的材料。选择自动执行、步骤和机器，在生成后的交付页面确认。" wide>
-          <Select aria-label="交付内容" value={dep.delivery_mode||"offline"} onChange={v=>set({delivery_mode:v})} triggerProps={{autoFitPosition:true,autoAlignPopupWidth:false,autoAlignPopupMinWidth:true}} options={[
-            {value:"offline",label:"生成部署材料（离线手动执行 / 已授权的自动执行）",disabled:!!mainSchema?.delivery_modes && !mainSchema.delivery_modes.some(m=>m==="offline"||m==="automatic")},
-            {value:"configuration",label:"仅生成配置文件，不部署",disabled:!mainSchema?.delivery_modes?.includes("configuration")}
-          ]}/>
+        <Row
+          label={bi("交付内容", "Delivery mode")}
+          hint={bi(
+            "先生成可审核的材料。选择自动执行、步骤和机器，在生成后的交付页面确认。",
+            "Generate reviewable materials first. Choose auto-execution, steps, and targets on the delivery page.",
+          )}
+          wide
+        >
+          <Select
+            aria-label={bi("交付内容", "Delivery mode")}
+            value={dep.delivery_mode || "offline"}
+            onChange={(v) => set({ delivery_mode: v })}
+            triggerProps={{
+              autoFitPosition: true,
+              autoAlignPopupWidth: false,
+              autoAlignPopupMinWidth: true,
+            }}
+            options={[
+              {
+                value: "offline",
+                label: bi(
+                  "生成部署材料（离线手动执行 / 已授权的自动执行）",
+                  "Deployment bundle (offline manual / authorized auto-execution)",
+                ),
+                disabled:
+                  !!mainSchema?.delivery_modes &&
+                  !mainSchema.delivery_modes.some(
+                    (m) => m === "offline" || m === "automatic",
+                  ),
+              },
+              {
+                value: "configuration",
+                label: bi(
+                  "仅生成配置文件，不部署",
+                  "Config files only (no deployment)",
+                ),
+                disabled:
+                  !mainSchema?.delivery_modes?.includes("configuration"),
+              },
+            ]}
+          />
         </Row>
         <Row
-          label="集群标识"
-          hint="集群的唯一标识；小写字母开头，只包含小写字母、数字与连字符"
+          label={bi("集群标识", "Cluster ID")}
+          hint={bi(
+            "集群的唯一标识；小写字母开头，只包含小写字母、数字与连字符",
+            "Unique cluster identifier; starts with a lowercase letter, using lowercase letters, digits, and hyphens",
+          )}
           wide
           ai="id"
         >
@@ -2056,7 +2290,7 @@ function DeliveryForm({
               value={dep.id}
               onChange={(v) => set({ id: v.trim() })}
               placeholder="pg-order-prod"
-              aria-label="集群标识"
+              aria-label={bi("集群标识", "Cluster ID")}
               autoFocus={!origin}
               disabled={!!revise}
               status={
@@ -2065,7 +2299,7 @@ function DeliveryForm({
             />
             {dep.id && !idFormatHint && !idTaken && (
               <span className="wz-id-ok">
-                <IconCheck /> 可用
+                <IconCheck /> {bi("可用", "Available")}
               </span>
             )}
           </div>
@@ -2076,24 +2310,36 @@ function DeliveryForm({
           )}
           {!idFormatHint && idTaken && (
             <div className="field-warn" role="alert">
-              集群标识 {dep.id} 已被使用，请更换一个标识。
+              {bi(
+                `集群标识 ${dep.id} 已被使用，请更换一个标识。`,
+                `Cluster ID "${dep.id}" is already in use; choose another.`,
+              )}
             </div>
           )}
         </Row>
         <div className="fgrid">
           <Row
             ai="platform"
-            label="操作系统"
+            label={bi("操作系统", "OS Platform")}
             hint={
               dep.delivery_mode === "configuration"
-                ? "配置文件按这个系统和组件版本生成；不需要安装运行环境"
+                ? bi(
+                    "配置文件按这个系统和组件版本生成；不需要安装运行环境",
+                    "Configs are rendered for this OS and version; no execution runtime needed",
+                  )
                 : deployableIds.includes(platform)
-                ? "所有机器必须是这个系统；软件包按它从软件库取"
-                : "这个系统还没有 Ansible 运行环境，暂时不能生成交付"
+                  ? bi(
+                      "所有机器必须是这个系统；软件包按它从软件库取",
+                      "All hosts must run this OS; packages are fetched for it from the Software Library",
+                    )
+                  : bi(
+                      "这个系统还没有 Ansible 运行环境，暂时不能生成交付",
+                      "No Ansible runtime available for this OS yet; cannot generate delivery",
+                    )
             }
           >
             <Segmented
-              label="操作系统"
+              label={bi("操作系统", "OS Platform")}
               value={platform}
               onChange={pickPlatform}
               options={(platformChoices.length
@@ -2107,12 +2353,12 @@ function DeliveryForm({
             />
           </Row>
           <Row
-            label="版本"
+            label={bi("版本", "Version")}
             hint={versionNote(main?.version || app.version)}
             ai="version"
           >
             <Segmented
-              label="版本"
+              label={bi("版本", "Version")}
               value={main?.version || app.version}
               onChange={pickVersion}
               options={versionsFor(app, platform).map((v) => ({
@@ -2121,24 +2367,38 @@ function DeliveryForm({
               }))}
             />
           </Row>
-          <Row label="说明（可选）" hint="显示在交付列表里" ai="title">
+          <Row
+            label={bi("说明（可选）", "Description (optional)")}
+            hint={bi("显示在交付列表里", "Shown in the deliveries list")}
+            ai="title"
+          >
             <Input
               value={dep.title || ""}
               onChange={(v) => set({ title: v })}
-              placeholder="订单库生产集群"
-              aria-label="说明"
+              placeholder={bi("订单库生产集群", "Orders production cluster")}
+              aria-label={bi("说明", "Description")}
             />
           </Row>
         </div>
         {!!app.plans?.length && (
-          <section className="wz-sub" aria-label="部署架构方案">
+          <section
+            className="wz-sub"
+            aria-label={bi("部署架构方案", "Deployment scheme")}
+          >
             <div className="wz-sub-top">
-              <h3>部署架构方案</h3>
+              <h3>{bi("部署架构方案", "Deployment Scheme")}</h3>
               <span className="muted small">
-                切换方案将自动同步所需机器台数与角色拓扑
+                {bi(
+                  "切换方案将自动同步所需机器台数与角色拓扑",
+                  "Switching scheme syncs host count and role topology automatically",
+                )}
               </span>
             </div>
-            <div className="plans" role="radiogroup" aria-label="常用方案">
+            <div
+              className="plans"
+              role="radiogroup"
+              aria-label={bi("常用方案", "Preset schemes")}
+            >
               {app.plans.map((p) => {
                 const isSelected = p.contract
                   ? instView(main?.id || "")?.contract?.when === p.contract.when
@@ -2155,17 +2415,22 @@ function DeliveryForm({
                   >
                     <span className="plan-meta">
                       {nodeCount > 0 && (
-                        <span className="plan-tag num">{nodeCount} 台节点</span>
+                        <span className="plan-tag num">
+                          {bi(
+                            `${nodeCount} 台节点`,
+                            `${nodeCount} ${nodeCount === 1 ? "node" : "nodes"}`,
+                          )}
+                        </span>
                       )}
                       {p.contract && (
                         <span
                           className={`plan-ha ${p.contract.failover === "automatic" ? "ok" : ""}`}
                         >
                           {p.contract.failover === "automatic"
-                            ? "自动切换"
+                            ? bi("自动切换", "Auto failover")
                             : p.contract.failover === "manual"
-                              ? "人工切换"
-                              : "无故障切换"}
+                              ? bi("人工切换", "Manual failover")
+                              : bi("无故障切换", "No failover")}
                         </span>
                       )}
                     </span>
@@ -2186,10 +2451,17 @@ function DeliveryForm({
                   onClick={() => setPlan("")}
                 >
                   <span className="plan-meta">
-                    <span className="plan-tag">自由组合</span>
+                    <span className="plan-tag">
+                      {bi("自由组合", "Flexible")}
+                    </span>
                   </span>
-                  <strong>自定义</strong>
-                  <span>按需调整机器数量与角色放置</span>
+                  <strong>{bi("自定义", "Custom")}</strong>
+                  <span>
+                    {bi(
+                      "按需调整机器数量与角色放置",
+                      "Adjust host count and role placement freely",
+                    )}
+                  </span>
                 </button>
               )}
             </div>
@@ -2202,7 +2474,9 @@ function DeliveryForm({
                   <div className="wz-contract-note" role="note">
                     <p>{contract.read_access}</p>
                     {contract.limitations.length > 0 && (
-                      <p className="muted">{contract.limitations.join("；")}</p>
+                      <p className="muted">
+                        {contract.limitations.join(bi("；", "; "))}
+                      </p>
                     )}
                   </div>
                 );
@@ -2221,26 +2495,37 @@ function DeliveryForm({
               <IconCheck />
             )}
             <span>
-              IPv4 已填写 <b>{readyIpCount}</b> / {dep.hosts.length} 台
+              {biv(
+                <>
+                  IPv4 已填写 <b>{readyIpCount}</b> / {dep.hosts.length} 台
+                </>,
+                <>
+                  IPv4 ready: <b>{readyIpCount}</b> / {dep.hosts.length}
+                </>,
+              )}
             </span>
           </span>
           <div className="row-gap">
             {dep.hosts.length > 1 && (
               <button type="button" className="link" onClick={fillIPs}>
-                按首台 IP 依次补全空白
+                {bi("按首台 IP 依次补全空白", "Auto-fill from first IP")}
               </button>
             )}
             <Button size="small" icon={<IconPlus />} onClick={() => addHost()}>
-              添加机器
+              {bi("添加机器", "Add host")}
             </Button>
           </div>
         </div>
-        <div className="host-table" role="table" aria-label="机器">
+        <div
+          className="host-table"
+          role="table"
+          aria-label={bi("机器", "Hosts")}
+        >
           <div className="hosts-head" role="row">
-            <span>名称</span>
+            <span>{bi("名称", "Name")}</span>
             <span>IPv4</span>
-            <span>数据盘</span>
-            <span>初始化</span>
+            <span>{bi("数据盘", "Data disk")}</span>
+            <span>{bi("初始化", "Initialize")}</span>
             <span />
           </div>
           {dep.hosts.map((h, i) => {
@@ -2261,7 +2546,7 @@ function DeliveryForm({
                   value={h.name}
                   onChange={(v) => setHost(i, { name: v.trim() })}
                   className="mono-in"
-                  aria-label={`机器 ${i + 1} 名称`}
+                  aria-label={bi(`机器 ${i + 1} 名称`, `Host ${i + 1} name`)}
                   status={
                     badName || (issueFor(`hosts[${i}]`) && !badIp)
                       ? "error"
@@ -2273,19 +2558,19 @@ function DeliveryForm({
                   onChange={(v) => setHost(i, { ip: v.trim() })}
                   placeholder={`10.0.1.${11 + i}`}
                   className="mono-in"
-                  aria-label={`机器 ${i + 1} IPv4`}
+                  aria-label={bi(`机器 ${i + 1} IPv4`, `Host ${i + 1} IPv4`)}
                   status={badIp ? "error" : undefined}
                 />
                 {hiddenHostFields(h, hostContract).has("disk") ? (
                   <span className="muted">
                     {hostValue(h, hostContract, "params.storage_mode") ===
                     "system_directory"
-                      ? "系统盘目录 " +
+                      ? bi("系统盘目录 ", "System dir ") +
                         String(
                           hostValue(h, hostContract, "params.data_root") ||
                             "/data",
                         )
-                      : "无需独立数据盘"}
+                      : bi("无需独立数据盘", "No separate data disk")}
                   </span>
                 ) : (
                   <Select
@@ -2305,18 +2590,27 @@ function DeliveryForm({
                       "/dev/sdc",
                       "/dev/nvme1n1",
                     ]}
-                    placeholder="无数据盘"
-                    aria-label={`机器 ${i + 1} 数据盘`}
+                    placeholder={bi("无数据盘", "No data disk")}
+                    aria-label={bi(
+                      `机器 ${i + 1} 数据盘`,
+                      `Host ${i + 1} data disk`,
+                    )}
                   />
                 )}
                 {hiddenHostFields(h, hostContract).has("initialize") ? (
-                  <span className="muted">不初始化</span>
+                  <span className="muted">{bi("不初始化", "Skip init")}</span>
                 ) : (
                   <Tooltip
                     content={
                       h.initialize
-                        ? "会格式化这块盘，仅用于全新空盘"
-                        : "关闭时使用已有挂载：" +
+                        ? bi(
+                            "会格式化这块盘，仅用于全新空盘",
+                            "Formats this disk; use only on brand-new empty disks",
+                          )
+                        : bi(
+                            "关闭时使用已有挂载：",
+                            "When off, uses existing mount: ",
+                          ) +
                           String(
                             hostValue(h, hostContract, "params.data_root") ||
                               "/data",
@@ -2329,7 +2623,10 @@ function DeliveryForm({
                         size="small"
                         checked={!!h.initialize}
                         onChange={(v) => setHost(i, { initialize: v })}
-                        aria-label={`机器 ${i + 1} 初始化数据盘`}
+                        aria-label={bi(
+                          `机器 ${i + 1} 初始化数据盘`,
+                          `Initialize data disk for host ${i + 1}`,
+                        )}
                       />
                     </span>
                   </Tooltip>
@@ -2340,7 +2637,7 @@ function DeliveryForm({
                   icon={<IconDelete />}
                   disabled={dep.hosts.length <= 1}
                   onClick={() => removeHost(i)}
-                  aria-label={`删除机器 ${h.name}`}
+                  aria-label={bi(`删除机器 ${h.name}`, `Remove host ${h.name}`)}
                 />
                 <HostParameterFields
                   host={h}
@@ -2357,7 +2654,10 @@ function DeliveryForm({
         </div>
         {dep.hosts.some((h) => h.initialize) && (
           <div className="note warn">
-            已选择初始化数据盘：会对所列设备分区并格式化，盘上有任何签名、分区或数据时会停止。
+            {bi(
+              "已选择初始化数据盘：会对所列设备分区并格式化，盘上有任何签名、分区或数据时会停止。",
+              "Disk initialization enabled: listed devices will be partitioned and formatted; aborts if any signature, partition, or data exists.",
+            )}
           </div>
         )}
         {dep.delivery_mode !== "configuration" && (
@@ -2390,8 +2690,11 @@ function DeliveryForm({
           );
         })}
         {autoInstances.filter((a) => !specInst(a.id)).length > 0 && (
-          <section className="wz-sub" aria-label="自动加入的组件">
-            <h3>平台自动加入</h3>
+          <section
+            className="wz-sub"
+            aria-label={bi("自动加入的组件", "Auto-added components")}
+          >
+            <h3>{bi("平台自动加入", "Auto-Added by Platform")}</h3>
             {autoInstances
               .filter((a) => !specInst(a.id))
               .map((a) => (
@@ -2403,26 +2706,36 @@ function DeliveryForm({
                     </span>
                     <small>{a.auto_reason}</small>
                     <small>
-                      放置：
+                      {bi("放置：", "Placement: ")}
                       {Object.entries(a.roles)
-                        .map(([r, hs]) => `${r}：${(hs || []).join("、")}`)
-                        .join("；")}
+                        .map(([r, hs]) =>
+                          bi(
+                            `${r}：${(hs || []).join("、")}`,
+                            `${r}: ${(hs || []).join(", ")}`,
+                          ),
+                        )
+                        .join(bi("；", "; "))}
                     </small>
                   </div>
                   {a.managed_context ? (
                     <span className="muted small">
-                      由 {a.managed_context}{" "}
-                      的部署方案管理，节点与配置随数据库同步
+                      {bi(
+                        `由 ${a.managed_context} 的部署方案管理，节点与配置随数据库同步`,
+                        `Managed by ${a.managed_context}'s scheme; nodes and config sync with the database`,
+                      )}
                     </span>
                   ) : (
                     <Button size="small" onClick={() => takeOver(a)}>
-                      自行指定
+                      {bi("自行指定", "Customize")}
                     </Button>
                   )}
                 </div>
               ))}
             <p className="muted small">
-              需要独立机器、不同端口或不同版本时，点“自行指定”把它变成一个可编辑的实例。
+              {bi(
+                "需要独立机器、不同端口或不同版本时，点“自行指定”把它变成一个可编辑的实例。",
+                'When you need dedicated hosts, custom ports, or a different version, click "Customize" to edit it as an explicit instance.',
+              )}
             </p>
           </section>
         )}
@@ -2433,7 +2746,12 @@ function DeliveryForm({
             i !== main &&
             !schemaOf(i.component, i.version)?.provides?.includes("l4-lb"),
         ).length > 0 && (
-          <p className="muted small">已自行指定的组件可以在“关键参数”一步调整。</p>
+          <p className="muted small">
+            {bi(
+              "已自行指定的组件可以在“关键参数”一步调整。",
+              'Customized components can be tuned in the "Parameters" step.',
+            )}
+          </p>
         )}
       </>
     ),
@@ -2442,7 +2760,7 @@ function DeliveryForm({
         <div className="wz-tune-top">
           {paramInsts.length > 1 && (
             <Segmented
-              label="组件"
+              label={bi("组件", "Component")}
               value={activeParamId}
               onChange={setFocusInst}
               options={paramInsts.map((i) => ({
@@ -2459,17 +2777,20 @@ function DeliveryForm({
                 onClick={() => setOnlyChanged((v) => !v)}
                 aria-pressed={onlyChanged}
               >
-                仅看已改 ({activeParamChangedCount})
+                {bi("仅看已改", "Modified only")} ({activeParamChangedCount})
               </button>
             )}
             <Input
               allowClear
               prefix={<IconSearch />}
               className="tune-search"
-              placeholder="搜索参数，如 shared_buffers"
+              placeholder={bi(
+                "搜索参数，如 shared_buffers",
+                "Search parameters, e.g. shared_buffers",
+              )}
               value={query}
               onChange={setQuery}
-              aria-label="搜索参数"
+              aria-label={bi("搜索参数", "Search parameters")}
             />
           </div>
         </div>
@@ -2483,12 +2804,13 @@ function DeliveryForm({
     ),
     access: (
       <>
-        <section className="wz-sub" aria-label="入口">
-          <h3>入口（负载均衡）</h3>
+        <section className="wz-sub" aria-label={bi("入口", "Access")}>
+          <h3>{bi("入口（负载均衡）", "Access (Load Balancing)")}</h3>
           <p className="muted small">
-            应用通过一个稳定的入口连接。可以用本平台部署的 HAProxy、Nginx（可加
-            keepalived 虚拟 IP），也可以由客户的云 ELB
-            提供，平台只给出配置清单。
+            {bi(
+              "应用通过一个稳定的入口连接。可以用本平台部署的 HAProxy、Nginx（可加 keepalived 虚拟 IP），也可以由客户的云 ELB 提供，平台只给出配置清单。",
+              "Applications connect through a stable entrypoint. Deploy HAProxy or Nginx (optionally with a keepalived VIP) via this platform, or use your cloud ELB where the platform outputs the target configuration.",
+            )}
           </p>
           {lbInstances.map(frontCard)}
           <div className="row-gap">
@@ -2500,38 +2822,41 @@ function DeliveryForm({
                 onClick={() => addFront(lb)}
                 title={lb.available ? undefined : lb.reason}
               >
-                添加 {lb.name}
+                {bi(`添加 ${lb.name}`, `Add ${lb.name}`)}
               </Button>
             ))}
           </div>
         </section>
         {(pv?.inputs.length || 0) > 0 && (
-          <section className="wz-sub" aria-label="证书">
-            <h3>证书</h3>
+          <section className="wz-sub" aria-label={bi("证书", "Certificates")}>
+            <h3>{bi("证书", "TLS Certificates")}</h3>
             {pv!.inputs.map((inp) => (
               <div className="certs" key={`${inp.instance}/${inp.name}`}>
                 <p className="muted small">
-                  <b>{inp.instance}</b> · {inp.label}。PEM 或 P7B
-                  均可，私钥要是没有加密的 PEM 格式；私钥只会放进控制节点的包。
+                  <b>{inp.instance}</b> · {inp.label}
+                  {bi(
+                    "。PEM 或 P7B 均可，私钥要是没有加密的 PEM 格式；私钥只会放进控制节点的包。",
+                    ". Accepts PEM or P7B; private key must be unencrypted PEM and is packaged only for the control node.",
+                  )}
                 </p>
                 <div className="cert-list">
                   {upload(
                     uploadKey(inp.instance, inp.name, "certificate"),
-                    "服务器证书",
+                    bi("服务器证书", "Server certificate"),
                     true,
                   )}
                   {upload(
                     uploadKey(inp.instance, inp.name, "private_key"),
-                    "私钥（未加密 PEM）",
+                    bi("私钥（未加密 PEM）", "Private key (unencrypted PEM)"),
                     true,
                   )}
                   {upload(
                     uploadKey(inp.instance, inp.name, "ca_cert"),
-                    "根 CA",
+                    bi("根 CA", "Root CA"),
                   )}
                   {upload(
                     uploadKey(inp.instance, inp.name, "intermediates"),
-                    "中间证书链",
+                    bi("中间证书链", "Intermediate chain"),
                   )}
                 </div>
                 {certChecks[inp.instance] && (
@@ -2540,17 +2865,26 @@ function DeliveryForm({
                     role="status"
                   >
                     {certChecks[inp.instance].busy ? (
-                      <span>正在检查证书…</span>
+                      <span>{bi("正在检查证书…", "Checking certificate…")}</span>
                     ) : certChecks[inp.instance].ok ? (
                       <>
                         <IconCheckCircleFill />
                         <span>
-                          证书和私钥是一对，证书链有效
+                          {bi(
+                            "证书和私钥是一对，证书链有效",
+                            "Certificate and key match; chain is valid",
+                          )}
                           {certChecks[inp.instance].domain
-                            ? `，包含入口域名 ${certChecks[inp.instance].domain}`
+                            ? bi(
+                                `，包含入口域名 ${certChecks[inp.instance].domain}`,
+                                `, covers domain ${certChecks[inp.instance].domain}`,
+                              )
                             : ""}
                           {certChecks[inp.instance].not_after
-                            ? ` · 有效期至 ${certChecks[inp.instance].not_after!.slice(0, 10)}`
+                            ? bi(
+                                ` · 有效期至 ${certChecks[inp.instance].not_after!.slice(0, 10)}`,
+                                ` · Expires ${certChecks[inp.instance].not_after!.slice(0, 10)}`,
+                              )
                             : ""}
                         </span>
                       </>
@@ -2578,11 +2912,32 @@ function DeliveryForm({
     !Object.values(files).some(Boolean) &&
     cleanDepStr === pristineStr;
   const sum: Record<string, string> = {
-    basics: `${dep.id || "未命名"} · ${main?.version || ""}`,
-    hosts: `${dep.hosts.length} 台 · IPv4 ${readyIpCount}/${dep.hosts.length}`,
-    placement: `${pv?.instances.filter((i) => !i.external).length ?? dep.instances.length} 个实例${autoInstances.length ? ` · 自动 ${autoInstances.length}` : ""}`,
-    params: `${dep.instances.reduce((n, i) => n + Object.keys(i.params || {}).length, 0)} 项已调整`,
-    access: lbInstances.length ? `${lbInstances.length} 个入口` : "未配置入口",
+    basics: `${dep.id || bi("未命名", "Unnamed")} · ${main?.version || ""}`,
+    hosts: bi(
+      `${dep.hosts.length} 台 · IPv4 ${readyIpCount}/${dep.hosts.length}`,
+      `${dep.hosts.length} ${dep.hosts.length === 1 ? "host" : "hosts"} · IPv4 ${readyIpCount}/${dep.hosts.length}`,
+    ),
+    placement: (() => {
+      const n =
+        pv?.instances.filter((i) => !i.external).length ?? dep.instances.length;
+      return bi(
+        `${n} 个实例${autoInstances.length ? ` · 自动 ${autoInstances.length}` : ""}`,
+        `${n} ${n === 1 ? "instance" : "instances"}${autoInstances.length ? ` · ${autoInstances.length} auto` : ""}`,
+      );
+    })(),
+    params: (() => {
+      const n = dep.instances.reduce(
+        (c, i) => c + Object.keys(i.params || {}).length,
+        0,
+      );
+      return bi(`${n} 项已调整`, `${n} tuned`);
+    })(),
+    access: lbInstances.length
+      ? bi(
+          `${lbInstances.length} 个入口`,
+          `${lbInstances.length} ${lbInstances.length === 1 ? "entry" : "entries"}`,
+        )
+      : bi("未配置入口", "No entrypoint"),
   };
 
   const idx = order.indexOf(sec);
@@ -2601,15 +2956,15 @@ function DeliveryForm({
           </button>
         ) : (
           <div key={i} className="issue-src">
-            <span className="issue-sec">原交付</span>
+            <span className="issue-sec">{bi("原交付", "Source")}</span>
             {x.message}
           </div>
         );
       })}
       {certBad.map(([inst, c]) => (
         <button key={`cert-${inst}`} onClick={() => openSection("access")}>
-          <span className="issue-sec">入口与证书</span>
-          {inst} 的证书：{c.error}
+          <span className="issue-sec">{bi("入口与证书", "Access & TLS")}</span>
+          {bi(`${inst} 的证书：${c.error}`, `${inst} cert: ${c.error}`)}
         </button>
       ))}
       {missingUploads
@@ -2619,12 +2974,17 @@ function DeliveryForm({
             key={`${i.instance}${p}`}
             onClick={() => openSection("access")}
           >
-            <span className="issue-sec">入口与证书</span>
-            上传 {i.instance} 的{p === "certificate" ? "服务器证书" : "私钥"}
+            <span className="issue-sec">{bi("入口与证书", "Access & TLS")}</span>
+            {bi(
+              `上传 ${i.instance} 的${p === "certificate" ? "服务器证书" : "私钥"}`,
+              `Upload ${p === "certificate" ? "server certificate" : "private key"} for ${i.instance}`,
+            )}
           </button>
         ))}
       {limit && totalBlocking > limit && (
-        <span className="more">还有 {totalBlocking - limit} 项</span>
+        <span className="more">
+          {bi(`还有 ${totalBlocking - limit} 项`, `${totalBlocking - limit} more`)}
+        </span>
       )}
     </div>
   );
@@ -2646,22 +3006,28 @@ function DeliveryForm({
   const secTitles = Object.fromEntries(sections.map((x) => [x.id, x.title]));
   const issueTexts = [
     ...errors.map((x) => x.message),
-    ...certBad.map(([inst, c]) => `${inst} 的证书：${c.error}`),
-    ...missingUploads.map(
-      ({ i, p }) =>
+    ...certBad.map(([inst, c]) =>
+      bi(`${inst} 的证书：${c.error}`, `${inst} cert: ${c.error}`),
+    ),
+    ...missingUploads.map(({ i, p }) =>
+      bi(
         `上传 ${i.instance} 的${p === "certificate" ? "服务器证书" : "私钥"}`,
+        `Upload ${p === "certificate" ? "server certificate" : "private key"} for ${i.instance}`,
+      ),
     ),
   ];
 
   const previewBody = (
     <>
       <div className="preview-head">
-        <span>交付预览</span>
-        <strong className="mono">{dep.id || "未命名集群"}</strong>
+        <span>{bi("交付预览", "Delivery Preview")}</span>
+        <strong className="mono">
+          {dep.id || bi("未命名集群", "Unnamed cluster")}
+        </strong>
         {/* checking with the server: a dot in a fixed place, never a row that comes and goes */}
         <i
           className={`pv-sync ${resolving ? "on" : ""}`}
-          title={resolving ? "正在核对" : undefined}
+          title={resolving ? bi("正在核对", "Checking…") : undefined}
           aria-hidden
         />
       </div>
@@ -2685,15 +3051,15 @@ function DeliveryForm({
               <span>
                 {i.title} {i.version}
               </span>
-              {i.auto && <span className="flag info">自动</span>}
+              {i.auto && <span className="flag info">{bi("自动", "Auto")}</span>}
               {i.status !== "published" && (
-                <span className="flag warn">待验证</span>
+                <span className="flag warn">{bi("待验证", "Unverified")}</span>
               )}
               {/* an entry's address in full, on its own line: the diagram has room only for a shortened one */}
               {Object.values(i.fronts || {}).map((f) =>
                 f.address ? (
                   <small key={f.address + f.listen} className="pinst-addr mono">
-                    入口 {`${f.address}:${f.listen}`}
+                    {bi("入口", "Entry")} {`${f.address}:${f.listen}`}
                   </small>
                 ) : null,
               )}
@@ -2703,10 +3069,10 @@ function DeliveryForm({
       </Smooth>
       <Smooth>
         <div className="pfiles">
-          <span className="pfiles-h">将生成</span>
+          <span className="pfiles-h">{bi("将生成", "Artifacts")}</span>
           {dep.delivery_mode === "configuration" ? (
             <div className="pfile">
-              <span className="role-chip">配置</span>
+              <span className="role-chip">{bi("配置", "Config")}</span>
               <span className="mono">configuration.zip</span>
             </div>
           ) : (
@@ -2717,9 +3083,9 @@ function DeliveryForm({
                 >
                   {h.name === pv?.controller
                     ? dep.execution_host
-                      ? "执行"
-                      : "控制"
-                    : "业务"}
+                      ? bi("执行", "Exec")
+                      : bi("控制", "Ctrl")
+                    : bi("业务", "Node")}
                 </span>
                 <span className="mono">{pkgName(i)}</span>
               </div>
@@ -2727,7 +3093,7 @@ function DeliveryForm({
           )}
           {res?.packages && res.packages.total > 0 && (
             <div className="pfile">
-              <span className="role-chip">软件</span>
+              <span className="role-chip">{bi("软件", "Pkg")}</span>
               <span className="mono">
                 packages-{res.packages.platform}.tar.gz
               </span>
@@ -2736,34 +3102,46 @@ function DeliveryForm({
                   className="bad small"
                   href={`#/library/${res.packages.platform}`}
                 >
-                  缺 {res.packages.missing.length} 个，去软件库
+                  {bi(
+                    `缺 ${res.packages.missing.length} 个，去软件库`,
+                    `${res.packages.missing.length} missing — open Library`,
+                  )}
                 </a>
               ) : (
                 <span className="faint num">
-                  {res.packages.total} 个软件包版本
+                  {bi(
+                    `${res.packages.total} 个软件包版本`,
+                    `${res.packages.total} package versions`,
+                  )}
                 </span>
               )}
             </div>
           )}
           {art.map((a) => (
             <div key={a.file} className="pfile">
-              <span className="role-chip">材料</span>
+              <span className="role-chip">{bi("材料", "Asset")}</span>
               <span className="mono">{a.file}</span>
               {a.present ? (
                 a.bytes ? (
                   <span className="faint num">{size(a.bytes)}</span>
                 ) : null
               ) : (
-                <span className="bad small">材料库缺失</span>
+                <span className="bad small">{bi("材料库缺失", "Missing asset")}</span>
               )}
             </div>
           ))}
           <div className="pfile">
-            <span className="role-chip">手册</span>
+            <span className="role-chip">{bi("手册", "Docs")}</span>
             <span>
               {dep.delivery_mode === "configuration"
-                ? "配置交付说明 · 部署规格"
-                : `环境准备 · 部署 · 功能测试${lbInstances.length ? " · 入口测试" : ""} · 清理`}
+                ? bi(
+                    "配置交付说明 · 部署规格",
+                    "Config guide · Deployment spec",
+                  )
+                : bi(
+                    `环境准备 · 部署 · 功能测试${lbInstances.length ? " · 入口测试" : ""} · 清理`,
+                    `Preflight · Deploy · Smoke test${lbInstances.length ? " · Entry test" : ""} · Cleanup`,
+                  )}
             </span>
           </div>
         </div>
@@ -2771,11 +3149,16 @@ function DeliveryForm({
       <Smooth>
         {pv?.phases && (
           <div className="pphases">
-            <span className="pfiles-h">部署阶段</span>
+            <span className="pfiles-h">{bi("部署阶段", "Deployment Phases")}</span>
             {pv.phases.map((ph) => (
               <div key={ph.phase} className="pphase">
                 <b>{ph.title}</b>
-                <small>{ph.steps.length} 步</small>
+                <small>
+                  {bi(
+                    `${ph.steps.length} 步`,
+                    `${ph.steps.length} ${ph.steps.length === 1 ? "step" : "steps"}`,
+                  )}
+                </small>
               </div>
             ))}
           </div>
@@ -2791,23 +3174,27 @@ function DeliveryForm({
         )}
         {untouched ? (
           <div className="preview-idle">
-            填写后，这里会告诉你还缺什么，以及能不能生成。
+            {bi(
+              "填写后，这里会告诉你还缺什么，以及能不能生成。",
+              "As you fill out the form, missing items and readiness appear here.",
+            )}
           </div>
         ) : totalBlocking > 0 ? (
           <div className="preview-issues">
             <div className="pi-head">
-              <IconExclamationCircleFill /> 待完善 {totalBlocking}
+              <IconExclamationCircleFill />{" "}
+              {bi(`待完善 ${totalBlocking}`, `${totalBlocking} to fix`)}
             </div>
             {issueList(5)}
           </div>
         ) : (
           <div className="preview-ready">
-            <IconCheckCircleFill /> 可以生成
+            <IconCheckCircleFill /> {bi("可以生成", "Ready to generate")}
           </div>
         )}
       </Smooth>
       <Button type="primary" long size="large" onClick={reviewNow}>
-        核对并生成
+        {bi("核对并生成", "Review & generate")}
       </Button>
     </>
   );
@@ -2816,19 +3203,22 @@ function DeliveryForm({
     <div
       className={`wz ${withPreview ? "" : "no-preview"} ${aiFocus ? "ai-focus" : ""} ${aiChat ? "ai-chat" : ""}`}
     >
-      <aside className="wz-side" aria-label="配置分区">
+      <aside
+        className="wz-side"
+        aria-label={bi("配置分区", "Configuration sections")}
+      >
         <Button
           type="text"
           className="back"
           icon={<IconArrowLeft />}
           onClick={back}
         >
-          返回
+          {bi("返回", "Back")}
         </Button>
         <div className="wz-id">
           <AppGlyph id={app.id} category={app.category} size={36} />
           <div className="wz-id-main">
-            <h1>新建 {app.name} 集群</h1>
+            <h1>{bi(`新建 ${app.name} 集群`, `New ${app.name} Cluster`)}</h1>
             <span>{app.platform}</span>
           </div>
           {!from && !revise && (
@@ -2837,30 +3227,38 @@ function DeliveryForm({
               className="wz-switch-app"
               onClick={() => navigate({ name: "new" })}
             >
-              切换组件
+              {bi("切换组件", "Switch app")}
             </button>
           )}
         </div>
         <div className="wz-origin wz-draft-state">
           <span>
             {draftError
-              ? "浏览器暂时无法保存草稿"
+              ? bi("浏览器暂时无法保存草稿", "Unable to save draft locally")
               : origin?.kind === "revise"
-                ? `正在修订 ${origin.label} 待执行的部署交付，生成后原交付自动作废`
+                ? bi(
+                    `正在修订 ${origin.label} 待执行的部署交付，生成后原交付自动作废`,
+                    `Revising pending delivery ${origin.label}; the original will be voided once generated`,
+                  )
                 : origin?.kind === "job"
-                  ? `基于 ${origin.label}`
+                  ? bi(`基于 ${origin.label}`, `Based on ${origin.label}`)
                   : origin?.kind === "draft"
-                    ? "正在继续上次的配置"
-                    : "未完成的配置会自动保留"}
+                    ? bi("正在继续上次的配置", "Resuming saved draft")
+                    : bi(
+                        "未完成的配置会自动保留",
+                        "Unfinished progress is saved automatically",
+                      )}
           </span>
           {origin &&
             origin.kind !== "revise" &&
             (pv?.inputs.length || 0) > 0 && (
-              <span className="faint">证书需重新选择</span>
+              <span className="faint">
+                {bi("证书需重新选择", "Re-select TLS certificates")}
+              </span>
             )}
           {!revise && (
             <button className="link" onClick={startOver}>
-              {from ? "重新填写" : "新建一份"}
+              {from ? bi("重新填写", "Reset") : bi("新建一份", "Start new")}
             </button>
           )}
         </div>
@@ -2894,12 +3292,16 @@ function DeliveryForm({
                 {fa.sections.has(x.id) && (
                   <span
                     className="fc-navdot"
-                    title="AI 改过，等你确认"
-                    aria-label="AI 改过"
+                    title={bi("AI 改过，等你确认", "Edited by AI, pending review")}
+                    aria-label={bi("AI 改过", "Edited by AI")}
                   />
                 )}
                 <span className="sr-only">
-                  {untouched ? "还没填写" : n ? `${n} 项待完善` : "已完成"}
+                  {untouched
+                    ? bi("还没填写", "Not started")
+                    : n
+                      ? bi(`${n} 项待完善`, `${n} to fix`)
+                      : bi("已完成", "Complete")}
                 </span>
               </button>
             );
@@ -2912,17 +3314,17 @@ function DeliveryForm({
             setYamlOpen(true);
           }}
         >
-          <IconCode /> 查看 / 导入 / 导出 YAML
+          <IconCode /> {bi("查看 / 导入 / 导出 YAML", "View / Import / Export YAML")}
         </button>
         <div className="wz-keys">
           <span>
             <kbd>Alt</kbd>
             <kbd>↑</kbd>
-            <kbd>↓</kbd> 切换分区
+            <kbd>↓</kbd> {bi("切换分区", "Switch section")}
           </span>
           <span>
             <kbd>{/Mac/.test(navigator.platform) ? "⌘" : "Ctrl"}</kbd>
-            <kbd>↵</kbd> 下一步
+            <kbd>↵</kbd> {bi("下一步", "Next step")}
           </span>
         </div>
       </aside>
@@ -2964,7 +3366,7 @@ function DeliveryForm({
               onClick={() => setMode("ai")}
             >
               <Spark size={14} rainbow />
-              AI 帮我填
+              {bi("AI 帮我填", "Fill with AI")}
             </button>
           )}
           <span
@@ -2978,11 +3380,11 @@ function DeliveryForm({
                   goIssue(errors.find((x) => issueSection(x) === sec)!)
                 }
               >
-                {secIssues(sec)} 项待完善
+                {bi(`${secIssues(sec)} 项待完善`, `${secIssues(sec)} to fix`)}
               </button>
             ) : (
               <>
-                <IconCheck /> 已完成
+                <IconCheck /> {bi("已完成", "Complete")}
               </>
             )}
           </span>
@@ -2992,7 +3394,7 @@ function DeliveryForm({
             <FormChat
               fa={fa}
               start={{
-                title: `新建 ${app.name} 集群`,
+                title: bi(`新建 ${app.name} 集群`, `New ${app.name} Cluster`),
                 steps: sections.map((x) => x.title),
                 onForm: () => setMode("form"),
               }}
@@ -3036,37 +3438,40 @@ function DeliveryForm({
               onClick={() => setAiView("chat")}
             >
               <Spark size={14} rainbow />
-              回到 AI 对话
+              {bi("回到 AI 对话", "Back to AI Chat")}
             </Button>
           )}
           <span className="muted small wz-foot-state">
             {untouched
               ? fa.on
-                ? "按步骤填写，或让 AI 帮你填"
-                : "按步骤填写"
+                ? bi("按步骤填写，或让 AI 帮你填", "Fill step by step, or let AI assist")
+                : bi("按步骤填写", "Fill step by step")
               : totalBlocking
-                ? `共 ${totalBlocking} 项待完善`
-                : "配置完整，可以生成"}
+                ? bi(
+                    `共 ${totalBlocking} 项待完善`,
+                    `${totalBlocking} ${totalBlocking === 1 ? "item" : "items"} to fix`,
+                  )
+                : bi("配置完整，可以生成", "Ready to generate")}
           </span>
           {sections.length > 1 && (
             <Button disabled={idx === 0} onClick={() => step(-1)}>
-              上一步
+              {bi("上一步", "Previous")}
             </Button>
           )}
           {nextSec ? (
             <Button type="primary" onClick={() => step(1)}>
-              下一步：{nextSec.title}
+              {bi(`下一步：${nextSec.title}`, `Next: ${nextSec.title}`)}
             </Button>
           ) : (
             <Button type="primary" onClick={reviewNow}>
-              核对并生成
+              {bi("核对并生成", "Review & generate")}
             </Button>
           )}
         </footer>
       </main>
 
       {withPreview && (
-        <aside className="wz-preview" aria-label="交付预览">
+        <aside className="wz-preview" aria-label={bi("交付预览", "Delivery preview")}>
           {previewBody}
         </aside>
       )}
@@ -3088,13 +3493,16 @@ function DeliveryForm({
             }
           >
             {untouched
-              ? "还没填写"
+              ? bi("还没填写", "Not started")
               : totalBlocking
-                ? `待完善 ${totalBlocking} 项`
-                : `${dep.hosts.length} 台 · ${pv?.instances.length ?? 0} 个实例`}
+                ? bi(`待完善 ${totalBlocking} 项`, `${totalBlocking} to fix`)
+                : bi(
+                    `${dep.hosts.length} 台 · ${pv?.instances.length ?? 0} 个实例`,
+                    `${dep.hosts.length} ${dep.hosts.length === 1 ? "host" : "hosts"} · ${pv?.instances.length ?? 0} inst`,
+                  )}
           </button>
           <Button type="primary" onClick={reviewNow}>
-            核对并生成
+            {bi("核对并生成", "Review & generate")}
           </Button>
         </div>
       )}
@@ -3111,240 +3519,301 @@ function DeliveryForm({
         width={narrow ? "100%" : 640}
         visible={review}
         onCancel={() => setReview(false)}
-        title={`核对 ${dep.id || "未命名集群"}`}
+        title={bi(
+          `核对 ${dep.id || "未命名集群"}`,
+          `Review ${dep.id || "Unnamed cluster"}`,
+        )}
         footer={
           <div className="review-foot">
             <span className="muted small">
               {dep.delivery_mode === "configuration"
-                ? "仅生成配置文件包，不连接目标服务器"
-                : "生成部署材料与手册，随后进入部署页启动执行"}
+                ? bi(
+                    "仅生成配置文件包，不连接目标服务器",
+                    "Generates configuration bundle only; no target connection",
+                  )
+                : bi(
+                    "生成部署材料与手册，随后进入部署页启动执行",
+                    "Generates deployment bundles & runbook, then opens the job page",
+                  )}
             </span>
             <div className="row-gap">
-              <Button onClick={() => setReview(false)}>继续修改</Button>
+              <Button onClick={() => setReview(false)}>
+                {bi("继续修改", "Keep editing")}
+              </Button>
               <Button
                 type="primary"
                 loading={busy}
                 disabled={totalBlocking > 0 || !pv?.ok || fa.busy || fa.playing}
                 onClick={generate}
               >
-                {revise ? "生成修订版" : "生成交付"}
+                {revise
+                  ? bi("生成修订版", "Generate revision")
+                  : bi("生成交付", "Generate delivery")}
               </Button>
             </div>
           </div>
         }
       >
         {review && (
-        <div className="review">
-          {revise && revBase && (
-            <div className="review-block">
-              <h4>这次改了什么 {revised.length}</h4>
-              {revised.length === 0 ? (
-                <p className="muted small">还没有改动。</p>
-              ) : (
-                revised.map((c, i) => (
-                  <div className="review-change" key={i}>
-                    <b>{c.label}</b>
-                    <span>{c.detail}</span>
-                  </div>
-                ))
-              )}
-              <p className="muted small">
-                生成后，原待执行的部署交付自动作废；新交付按修订后的配置部署，并列出差异项。
-              </p>
-            </div>
-          )}
-          {totalBlocking > 0 && (
-            <div className="review-block">
-              <h4 className="bad">还有 {totalBlocking} 项需要处理</h4>
-              {issueList()}
-            </div>
-          )}
-          {warnings.length > 0 && (
-            <div className="review-block">
-              <h4>提示 {warnings.length}</h4>
-              {warnings.map((w, i) => (
-                <div className="note warn" key={i}>
-                  {w.message}
-                </div>
-              ))}
-            </div>
-          )}
-          {!withPreview && pv && (
-            <div className="review-block">
-              <InstanceGraph
-                hosts={dep.hosts}
-                instances={pv.instances}
-                controller={pv.controller}
-                layout="row"
-              />
-            </div>
-          )}
-          <div className="review-block">
-            <h4>机器</h4>
-            <ExecutionHostSummary host={dep.execution_host} />
-            <table className="rtable">
-              <tbody>
-                {plannedHosts.map((h) => (
-                  <tr key={h.name} className={h.initialize ? "chg" : ""}>
-                    <th>
-                      <span className="mono">{h.name}</span>
-                      {h.name === pv?.controller ? " · 控制" : ""}
-                    </th>
-                    <td className="mono small">
-                      {h.ip || "—"} ·{" "}
-                      {h.params?.storage_mode === "system_directory"
-                        ? "系统盘目录 " + String(hostValue(h, hostContract, "params.data_root") || "/data")
-                        : h.disk
-                          ? h.initialize
-                            ? `${h.disk}（初始化）`
-                            : `${h.disk}（沿用 ${String(hostValue(h, hostContract, "params.data_root") || "/data")}）`
-                          : "无数据盘"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="review-block">
-            <h4>组件实例</h4>
-            <table className="rtable">
-              <tbody>
-                {(pv?.instances || []).map((i) => (
-                  <tr key={i.id} className={i.auto ? "chg" : ""}>
-                    <th>
-                      <span className="mono">{i.id}</span> {i.title} {i.version}
-                      {i.auto && <span className="flag info">自动</span>}
-                    </th>
-                    <td className="small">
-                      {i.external
-                        ? "客户自行运维"
-                        : Object.entries(i.roles)
-                            .filter(([, hs]) => (hs || []).length)
-                            .map(([r, hs]) => `${r}：${(hs || []).join("、")}`)
-                            .join("；")}
-                      {i.auto && (
-                        <>
-                          <br />
-                          <span className="muted">{i.auto_reason}</span>
-                        </>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {dep.instances.map((inst) => {
-            const sc = schemaOf(inst.component, inst.version);
-            const view = instView(inst.id);
-            const changed = (sc?.params || []).filter(
-              (d) =>
-                inst.params?.[d.key] !== undefined &&
-                view?.visible?.[d.key] !== false,
-            );
-            return (
-              <div className="review-block" key={inst.id}>
+          <div className="review">
+            {revise && revBase && (
+              <div className="review-block">
                 <h4>
-                  {inst.id} 定制参数 {changed.length}
+                  {bi(
+                    `这次改了什么 ${revised.length}`,
+                    `Changes in this revision (${revised.length})`,
+                  )}
                 </h4>
-                {changed.length ? (
-                  <table className="rtable">
-                    <thead>
-                      <tr>
-                        <th>参数</th>
-                        <th>默认</th>
-                        <th>本次</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {changed.map((d) => (
-                        <tr key={d.key} className="chg">
-                          <th>
-                            {d.label} <code>{d.key}</code>{" "}
-                            {d.restart && <span className="flag">重启</span>}
-                          </th>
-                          <td className="old mono">
-                            {typeof d.default === "string" &&
-                            d.default.startsWith("=")
-                              ? "按规则"
-                              : showValue(d.default)}
-                          </td>
-                          <td className="mono">
-                            {showValue(view?.params?.[d.key])}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                ) : (
-                  <p className="muted">全部使用默认值</p>
-                )}
-                {!!inst.addons?.length && (
-                  <p className="small">
-                    扩展：
-                    {inst.addons
-                      .map(
-                        (a) =>
-                          `${a.id}（${(a.databases?.length ? a.databases : sc?.addons?.scope.defaults || []).join("、")}）`,
-                      )
-                      .join("；")}
+                {revised.length === 0 ? (
+                  <p className="muted small">
+                    {bi("还没有改动。", "No changes yet.")}
                   </p>
-                )}
-              </div>
-            );
-          })}
-          <div className="review-block">
-            <h4>
-              {dep.delivery_mode === "configuration"
-                ? "配置交付文件"
-                : "上传到各机器"}
-            </h4>
-            <table className="rtable">
-              <tbody>
-                {dep.delivery_mode === "configuration" ? (
-                  <tr>
-                    <th>配置包</th>
-                    <td>
-                      configuration.zip · 按实例和机器分开保存，由现场人员审核应用
-                    </td>
-                  </tr>
                 ) : (
-                  packageHosts.map((h, i) => (
-                    <tr key={i}>
+                  revised.map((c, i) => (
+                    <div className="review-change" key={i}>
+                      <b>{c.label}</b>
+                      <span>{c.detail}</span>
+                    </div>
+                  ))
+                )}
+                <p className="muted small">
+                  {bi(
+                    "生成后，原待执行的部署交付自动作废；新交付按修订后的配置部署，并列出差异项。",
+                    "Once generated, the original pending delivery is voided automatically; the new delivery deploys with these revised settings and highlights diffs.",
+                  )}
+                </p>
+              </div>
+            )}
+            {totalBlocking > 0 && (
+              <div className="review-block">
+                <h4 className="bad">
+                  {bi(
+                    `还有 ${totalBlocking} 项需要处理`,
+                    `${totalBlocking} ${totalBlocking === 1 ? "item" : "items"} still need attention`,
+                  )}
+                </h4>
+                {issueList()}
+              </div>
+            )}
+            {warnings.length > 0 && (
+              <div className="review-block">
+                <h4>
+                  {bi(`提示 ${warnings.length}`, `Warnings (${warnings.length})`)}
+                </h4>
+                {warnings.map((w, i) => (
+                  <div className="note warn" key={i}>
+                    {w.message}
+                  </div>
+                ))}
+              </div>
+            )}
+            {!withPreview && pv && (
+              <div className="review-block">
+                <InstanceGraph
+                  hosts={dep.hosts}
+                  instances={pv.instances}
+                  controller={pv.controller}
+                  layout="row"
+                />
+              </div>
+            )}
+            <div className="review-block">
+              <h4>{bi("机器", "Hosts")}</h4>
+              <ExecutionHostSummary host={dep.execution_host} />
+              <table className="rtable">
+                <tbody>
+                  {plannedHosts.map((h) => (
+                    <tr key={h.name} className={h.initialize ? "chg" : ""}>
                       <th>
                         <span className="mono">{h.name}</span>
+                        {h.name === pv?.controller
+                          ? bi(" · 控制", " · Ctrl")
+                          : ""}
                       </th>
                       <td className="mono small">
-                        {pkgName(i)}
-                        {h.name === pv?.controller &&
-                          res?.packages &&
-                          res.packages.total > 0 && (
-                            <>
-                              <br />
-                              packages-{res.packages.platform}.tar.gz
-                            </>
-                          )}
-                        {h.name === pv?.controller &&
-                          art.map((a) => (
-                            <React.Fragment key={a.file}>
-                              <br />
-                              {a.file}
-                            </React.Fragment>
-                          ))}
-                        {h.name === pv?.controller && (
+                        {h.ip || "—"} ·{" "}
+                        {h.params?.storage_mode === "system_directory"
+                          ? bi("系统盘目录 ", "System dir ") +
+                            String(
+                              hostValue(h, hostContract, "params.data_root") ||
+                                "/data",
+                            )
+                          : h.disk
+                            ? h.initialize
+                              ? bi(`${h.disk}（初始化）`, `${h.disk} (init)`)
+                              : bi(
+                                  `${h.disk}（沿用 ${String(hostValue(h, hostContract, "params.data_root") || "/data")}）`,
+                                  `${h.disk} (reuse ${String(hostValue(h, hostContract, "params.data_root") || "/data")})`,
+                                )
+                            : bi("无数据盘", "No data disk")}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="review-block">
+              <h4>{bi("组件实例", "Component Instances")}</h4>
+              <table className="rtable">
+                <tbody>
+                  {(pv?.instances || []).map((i) => (
+                    <tr key={i.id} className={i.auto ? "chg" : ""}>
+                      <th>
+                        <span className="mono">{i.id}</span> {i.title}{" "}
+                        {i.version}
+                        {i.auto && (
+                          <span className="flag info">{bi("自动", "Auto")}</span>
+                        )}
+                      </th>
+                      <td className="small">
+                        {i.external
+                          ? bi("客户自行运维", "Customer-managed")
+                          : Object.entries(i.roles)
+                              .filter(([, hs]) => (hs || []).length)
+                              .map(([r, hs]) =>
+                                bi(
+                                  `${r}：${(hs || []).join("、")}`,
+                                  `${r}: ${(hs || []).join(", ")}`,
+                                ),
+                              )
+                              .join(bi("；", "; "))}
+                        {i.auto && (
                           <>
                             <br />
-                            SHA256SUMS
+                            <span className="muted">{i.auto_reason}</span>
                           </>
                         )}
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {dep.instances.map((inst) => {
+              const sc = schemaOf(inst.component, inst.version);
+              const view = instView(inst.id);
+              const changed = (sc?.params || []).filter(
+                (d) =>
+                  inst.params?.[d.key] !== undefined &&
+                  view?.visible?.[d.key] !== false,
+              );
+              return (
+                <div className="review-block" key={inst.id}>
+                  <h4>
+                    {bi(
+                      `${inst.id} 定制参数 ${changed.length}`,
+                      `${inst.id} Tuned Parameters (${changed.length})`,
+                    )}
+                  </h4>
+                  {changed.length ? (
+                    <table className="rtable">
+                      <thead>
+                        <tr>
+                          <th>{bi("参数", "Parameter")}</th>
+                          <th>{bi("默认", "Default")}</th>
+                          <th>{bi("本次", "Value")}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {changed.map((d) => (
+                          <tr key={d.key} className="chg">
+                            <th>
+                              {d.label} <code>{d.key}</code>{" "}
+                              {d.restart && (
+                                <span className="flag">
+                                  {bi("重启", "Restart")}
+                                </span>
+                              )}
+                            </th>
+                            <td className="old mono">
+                              {typeof d.default === "string" &&
+                              d.default.startsWith("=")
+                                ? bi("按规则", "Computed")
+                                : showValue(d.default)}
+                            </td>
+                            <td className="mono">
+                              {showValue(view?.params?.[d.key])}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <p className="muted">
+                      {bi("全部使用默认值", "All parameters use default values")}
+                    </p>
+                  )}
+                  {!!inst.addons?.length && (
+                    <p className="small">
+                      {bi("扩展：", "Extensions: ")}
+                      {inst.addons
+                        .map((a) =>
+                          bi(
+                            `${a.id}（${(a.databases?.length ? a.databases : sc?.addons?.scope.defaults || []).join("、")}）`,
+                            `${a.id} (${(a.databases?.length ? a.databases : sc?.addons?.scope.defaults || []).join(", ")})`,
+                          ),
+                        )
+                        .join(bi("；", "; "))}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+            <div className="review-block">
+              <h4>
+                {dep.delivery_mode === "configuration"
+                  ? bi("配置交付文件", "Configuration Artifacts")
+                  : bi("上传到各机器", "Bundles per Host")}
+              </h4>
+              <table className="rtable">
+                <tbody>
+                  {dep.delivery_mode === "configuration" ? (
+                    <tr>
+                      <th>{bi("配置包", "Config bundle")}</th>
+                      <td>
+                        {bi(
+                          "configuration.zip · 按实例和机器分开保存，由现场人员审核应用",
+                          "configuration.zip · Organized by instance and host for on-site review",
+                        )}
+                      </td>
+                    </tr>
+                  ) : (
+                    packageHosts.map((h, i) => (
+                      <tr key={i}>
+                        <th>
+                          <span className="mono">{h.name}</span>
+                        </th>
+                        <td className="mono small">
+                          {pkgName(i)}
+                          {h.name === pv?.controller &&
+                            res?.packages &&
+                            res.packages.total > 0 && (
+                              <>
+                                <br />
+                                packages-{res.packages.platform}.tar.gz
+                              </>
+                            )}
+                          {h.name === pv?.controller &&
+                            art.map((a) => (
+                              <React.Fragment key={a.file}>
+                                <br />
+                                {a.file}
+                              </React.Fragment>
+                            ))}
+                          {h.name === pv?.controller && (
+                            <>
+                              <br />
+                              SHA256SUMS
+                            </>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
         )}
       </Drawer>
     </div>
@@ -3366,6 +3835,7 @@ function YamlDrawer({
   onApply: (d: Deployment) => void;
   narrow: boolean;
 }) {
+  useLang();
   const [text, setText] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -3406,17 +3876,20 @@ function YamlDrawer({
       width={narrow ? "100%" : 640}
       visible={open}
       onCancel={onClose}
-      title="部署规格（YAML）"
+      title={bi("部署规格（YAML）", "Deployment Spec (YAML)")}
       footer={
         <div className="review-foot">
           <span className="muted small">
-            表单和 YAML 是同一份数据；导入会替换当前表单内容
+            {bi(
+              "表单和 YAML 是同一份数据；导入会替换当前表单内容",
+              "Form and YAML share the same model; importing replaces current form fields",
+            )}
           </span>
           <div className="row-gap">
-            <Button onClick={() => copy(text)}>复制</Button>
-            <Button onClick={download}>下载</Button>
+            <Button onClick={() => copy(text)}>{bi("复制", "Copy")}</Button>
+            <Button onClick={download}>{bi("下载", "Download")}</Button>
             <Button type="primary" loading={busy} onClick={apply}>
-              导入并应用
+              {bi("导入并应用", "Import & apply")}
             </Button>
           </div>
         </div>
@@ -3428,7 +3901,7 @@ function YamlDrawer({
         spellCheck={false}
         value={text}
         onChange={(e) => setText(e.target.value)}
-        aria-label="部署规格 YAML"
+        aria-label={bi("部署规格 YAML", "Deployment YAML specification")}
       />
     </Drawer>
   );
@@ -3449,6 +3922,7 @@ function AddonTarget({
   label: string;
   onChange: (v: string[]) => void;
 }) {
+  useLang();
   const same = (a: string[], b: string[]) =>
     a.length === b.length && a.every((x) => b.includes(x));
   const mode: TargetMode =
@@ -3468,15 +3942,20 @@ function AddonTarget({
           if (m === "all") onChange([]);
           else if (m === "pg") onChange(["postgres"]);
         }}
-        label={`${label} 装在哪里`}
+        label={bi(`${label} 装在哪里`, `Target databases for ${label}`)}
         options={[
-          { value: "all", label: "新建的库都带上" },
-          { value: "pg", label: "只装 postgres 库" },
-          { value: "custom", label: "指定数据库" },
+          { value: "all", label: bi("新建的库都带上", "All new databases") },
+          { value: "pg", label: bi("只装 postgres 库", "postgres DB only") },
+          { value: "custom", label: bi("指定数据库", "Specific databases") },
         ]}
       />
       {shown === "all" && (
-        <span className="faint small">装进 {defaults.join("、")}（推荐）</span>
+        <span className="faint small">
+          {bi(
+            `装进 ${defaults.join("、")}（推荐）`,
+            `Install into ${defaults.join(", ")} (recommended)`,
+          )}
+        </span>
       )}
       {shown === "custom" && (
         <Select
@@ -3484,9 +3963,12 @@ function AddonTarget({
           allowCreate
           value={value}
           triggerProps={{ autoFitPosition: true }}
-          placeholder="输入数据库名后回车；这些库在部署时必须已经存在"
+          placeholder={bi(
+            "输入数据库名后回车；这些库在部署时必须已经存在",
+            "Type database name and press Enter; databases must exist at deploy time",
+          )}
           onChange={(v) => onChange((v as string[]).map((x) => x.trim()))}
-          aria-label={`${label} 目标数据库`}
+          aria-label={bi(`${label} 目标数据库`, `Target databases for ${label}`)}
         />
       )}
     </div>

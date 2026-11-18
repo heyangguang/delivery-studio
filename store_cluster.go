@@ -272,17 +272,18 @@ func (s *storeServer) clusters(w http.ResponseWriter, r *http.Request, session s
 		views = append(views, v)
 	}
 	s.mu.Unlock()
+	lang := wLang(w)
 	for i := range views {
 		v := &views[i]
 		if dep := s.readSpec(v.Current); dep != nil {
 			v.DeliveryMode = dep.DeliveryMode
 		}
 		if v.DeliveryMode == "configuration" {
-			v.Blocked = "本次仅交付配置文件；生成成功不代表已安装或验证现场服务"
+			v.Blocked = tr(lang, "本次仅交付配置文件；生成成功不代表已安装或验证现场服务", "Configuration-only delivery: generation succeeded, but on-site installation and runtime checks have not run.")
 		}
 		for n := range v.Plans {
 			entry := &v.Plans[n]
-			entry.Scheme = s.deliveryScheme(entry.ID, v.AppID, entry.Scheme)
+			entry.Scheme = mwpack.LocalizeSchemeSummary(lang, s.deliveryScheme(entry.ID, v.AppID, entry.Scheme))
 		}
 		if v.Current == "" {
 			continue
@@ -290,7 +291,7 @@ func (s *storeServer) clusters(w http.ResponseWriter, r *http.Request, session s
 		if d := s.readSpec(v.Current); d != nil {
 			v.Hosts, v.Platform = len(d.Hosts), d.Platform
 		}
-		v.Scheme = s.deliveryScheme(v.Current, v.AppID, v.Scheme)
+		v.Scheme = mwpack.LocalizeSchemeSummary(lang, s.deliveryScheme(v.Current, v.AppID, v.Scheme))
 		v.Version = s.deliveryAppVersion(v.Current, v.AppID, v.Version)
 	}
 	sort.Slice(views, func(a, b int) bool { return views[a].Updated > views[b].Updated })

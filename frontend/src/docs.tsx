@@ -41,6 +41,7 @@ import type { ClusterDoc, ClusterView, DocBlock } from "./shared";
 import { go } from "./router";
 import { Segmented } from "./ui";
 import { Spark, useAIStatus } from "./aichat";
+import { bi, useLang, withLang } from "./i18n";
 import "./docs.css";
 
 /* The documents of a cluster (store_docs.go): the delivery report, the operations handover, a change report per plan
@@ -48,23 +49,33 @@ import "./docs.css";
    assistant draft and then confirm — are edited in place on the page. Everything exports to Word, one file each or
    merged into one. */
 
-const KIND: Record<ClusterDoc["kind"], { icon: string; group: string }> = {
-  delivery: { icon: "报", group: "集群文档" },
-  kt: { icon: "交", group: "集群文档" },
-  change: { icon: "变", group: "变更实施方案" },
-  rca: { icon: "因", group: "根因分析" },
-  assess: { icon: "评", group: "评估" },
+const KIND: Record<ClusterDoc["kind"], { icon: string; groupKey: string; group: string }> = {
+  delivery: { get icon() { return bi("报", "R"); }, groupKey: "cluster", get group() { return bi("集群文档", "Cluster Docs"); } },
+  kt: { get icon() { return bi("交", "H"); }, groupKey: "cluster", get group() { return bi("集群文档", "Cluster Docs"); } },
+  change: { get icon() { return bi("变", "C"); }, groupKey: "change", get group() { return bi("变更实施方案", "Change Plans"); } },
+  rca: { get icon() { return bi("因", "A"); }, groupKey: "rca", get group() { return bi("根因分析", "Root-Cause Analysis"); } },
+  assess: { get icon() { return bi("评", "E"); }, groupKey: "assess", get group() { return bi("评估", "Assessments"); } },
 };
 
 function docState(d: ClusterDoc, aiOn = false): { label: string; tone: string } {
   if (d.drafts)
     return {
-      label: aiOn ? `${d.drafts} 段 AI 草稿待确认` : `${d.drafts} 段草稿待确认`,
+      label: aiOn
+        ? bi(`${d.drafts} 段 AI 草稿待确认`, `${d.drafts} AI ${d.drafts === 1 ? "draft" : "drafts"} pending`)
+        : bi(`${d.drafts} 段草稿待确认`, `${d.drafts} ${d.drafts === 1 ? "draft" : "drafts"} pending`),
       tone: aiOn ? "ai" : "todo",
     };
-  if (d.stale) return { label: `${d.stale} 节可能过时`, tone: "warn" };
-  if (d.empty) return { label: `${d.empty} 节待填写`, tone: "todo" };
-  return { label: d.sections ? "已完成" : "无需填写", tone: "ok" };
+  if (d.stale)
+    return {
+      label: bi(`${d.stale} 节可能过时`, `${d.stale} ${d.stale === 1 ? "section" : "sections"} possibly stale`),
+      tone: "warn",
+    };
+  if (d.empty)
+    return {
+      label: bi(`${d.empty} 节待填写`, `${d.empty} ${d.empty === 1 ? "section" : "sections"} to fill`),
+      tone: "todo",
+    };
+  return { label: d.sections ? bi("已完成", "Complete") : bi("无需填写", "Ready"), tone: "ok" };
 }
 
 /** What an execution report shows and exports: the steps written as commands, as the playbooks, or both, and the results. */
@@ -91,46 +102,55 @@ function ReportOptions({
   setView: (v: ReportView) => void;
   compact?: boolean;
 }) {
+  useLang();
   return (
     <div className={`dc-ropts ${compact ? "compact" : ""}`}>
       <div className="dc-ropt">
-        <span className="dc-ropt-l">报告内容</span>
-        <Segmented value={view.detail?"detail":"summary"} onChange={v=>setView({...view,detail:v==="detail"})} label="报告内容" options={[{value:"summary",label:"结果摘要"},{value:"detail",label:"摘要与详细证据"}]}/>
+        <span className="dc-ropt-l">{bi("报告内容", "Report detail")}</span>
+        <Segmented
+          value={view.detail ? "detail" : "summary"}
+          onChange={(v) => setView({ ...view, detail: v === "detail" })}
+          label={bi("报告内容", "Report detail")}
+          options={[
+            { value: "summary", label: bi("结果摘要", "Summary") },
+            { value: "detail", label: bi("摘要与详细证据", "Summary & Evidence") },
+          ]}
+        />
       </div>
       {view.detail && <div className="dc-ropt">
-        <span className="dc-ropt-l">步骤内容</span>
+        <span className="dc-ropt-l">{bi("步骤内容", "Steps")}</span>
         <Segmented<ReportView["steps"]>
           value={view.steps}
           onChange={(steps) => setView({ ...view, steps })}
-          label="步骤写法"
+          label={bi("步骤写法", "Step format")}
           options={[
-            { value: "cmd", label: "命令版" },
-            { value: "auto", label: "Playbook 步骤" },
-            { value: "both", label: "两种都要" },
+            { value: "cmd", label: bi("命令版", "Commands") },
+            { value: "auto", label: bi("Playbook 步骤", "Playbooks") },
+            { value: "both", label: bi("两种都要", "Both") },
           ]}
         />
         <span className="faint small">
           {view.steps === "cmd"
-            ? "计划中的命令与执行位置，实际结果以证据为准"
+            ? bi("计划中的命令与执行位置，实际结果以证据为准", "Planned commands and targets; actual outcomes come from evidence")
             : view.steps === "auto"
-              ? "计划中的 Playbook 和任务，实际结果以证据为准"
-              : "每一步先写自动化执行，再写分机器的命令"}
+              ? bi("计划中的 Playbook 和任务，实际结果以证据为准", "Planned playbooks and tasks; actual outcomes come from evidence")
+              : bi("每一步先写自动化执行，再写分机器的命令", "Lists automation execution first, followed by per-host commands")}
         </span>
       </div>}{view.detail && <div className="dc-ropt">
-        <span className="dc-ropt-l">执行结果</span>
+        <span className="dc-ropt-l">{bi("执行结果", "Execution results")}</span>
         <Segmented<"yes" | "no">
           value={view.results ? "yes" : "no"}
           onChange={(v) => setView({ ...view, results: v === "yes" })}
-          label="执行结果"
+          label={bi("执行结果", "Execution results")}
           options={[
-            { value: "yes", label: "带上现场结果" },
-            { value: "no", label: "只要执行步骤" },
+            { value: "yes", label: bi("带上现场结果", "Include on-site results") },
+            { value: "no", label: bi("只要执行步骤", "Steps only") },
           ]}
         />
         <span className="faint small">
           {view.results
-            ? "包含执行节点回传的证据，以及现场人员补充的记录"
-            : "不含现场记录，可当作操作手册交给下一个现场"}
+            ? bi("包含执行节点回传的证据，以及现场人员补充的记录", "Includes execution node evidence and notes added on-site")
+            : bi("不含现场记录，可当作操作手册交给下一个现场", "Excludes on-site records; suitable as a reusable runbook")}
         </span>
       </div>}
     </div>
@@ -160,6 +180,7 @@ export function prefetchClusterDocs(clusterId: string) {
 }
 
 export function DocsTab({ c, doc }: { c: ClusterView; doc?: string }) {
+  const lang = useLang();
   const listUrl = docsListPath(c.id);
   const [list, setList] = useState<ClusterDoc[] | null>(
     () => cached<ClusterDoc[]>(listUrl) ?? null,
@@ -192,7 +213,7 @@ export function DocsTab({ c, doc }: { c: ClusterView; doc?: string }) {
     else setList(null);
     setError("");
     void load();
-  }, [c.id, c.updated]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [c.id, c.updated, lang]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (doc)
     return (
@@ -222,9 +243,9 @@ export function DocsTab({ c, doc }: { c: ClusterView; doc?: string }) {
       <section className="dsec dc-home">
         {error ? (
           <div className="list-state">
-            <p>文档加载失败：{error}</p>
+            <p>{bi("文档加载失败：", "Failed to load docs: ")}{error}</p>
             <Button size="small" onClick={() => (setError(""), load())}>
-              重试
+              {bi("重试", "Retry")}
             </Button>
           </div>
         ) : (
@@ -239,8 +260,8 @@ export function DocsTab({ c, doc }: { c: ClusterView; doc?: string }) {
     d.kind === "change" || d.kind === "rca" || d.kind === "assess"
       ? d.subtitle || ""
       : d.kind === "kt"
-        ? "交给日常运维：巡检、常见操作、排查手段"
-        : "架构留存：拓扑、版本与集群部署记录";
+        ? bi("交给日常运维：巡检、常见操作、排查手段", "For daily ops: health checks, routine tasks, troubleshooting")
+        : bi("架构留存：拓扑、版本与集群部署记录", "Architecture archive: topology, versions, and deployment records");
   const filteredList = list.filter((d) => {
     if (onlyTodo && todoDocs.length > 0 && d.drafts + d.empty + d.stale === 0)
       return false;
@@ -253,21 +274,27 @@ export function DocsTab({ c, doc }: { c: ClusterView; doc?: string }) {
       return false;
     return true;
   });
-  const groups = ["集群文档", "变更实施方案", "根因分析", "评估"]
-    .map((g) => ({
-      g,
-      items: filteredList.filter((d) => KIND[d.kind].group === g),
+  const groupDefs = [
+    { key: "cluster", label: bi("集群文档", "Cluster Docs") },
+    { key: "change", label: bi("变更实施方案", "Change Plans") },
+    { key: "rca", label: bi("根因分析", "Root-Cause Analysis") },
+    { key: "assess", label: bi("评估", "Assessments") },
+  ];
+  const groups = groupDefs
+    .map((gd) => ({
+      g: gd.label,
+      items: filteredList.filter((d) => KIND[d.kind].groupKey === gd.key),
     }))
     .filter((x) => x.items.length);
   return (
     <section className="dsec dc-home">
       <div className="dc-home-h">
         <p className="muted small">
-          事实（拓扑、版本、执行记录）由平台整理，始终和集群一致；
+          {bi("事实（拓扑、版本、执行记录）由平台整理，始终和集群一致；", "Facts (topology, versions, execution records) are kept in sync with the cluster automatically; ")}
           {canAI
-            ? "概述、风险、结论这类文字由你填写，或让 AI 起草后确认。"
-            : "概述、风险、结论这类文字按实际情况逐节填写并确认。"}
-          {todo > 0 ? `还有 ${todo} 处待处理。` : ""}
+            ? bi("概述、风险、结论这类文字由你填写，或让 AI 起草后确认。", "narrative sections like overview, risks, and conclusions can be written by you or drafted by AI.")
+            : bi("概述、风险、结论这类文字按实际情况逐节填写并确认。", "fill in narrative sections such as overview, risks, and conclusions as needed.")}
+          {todo > 0 ? bi(`还有 ${todo} 处待处理。`, ` ${todo} pending.`) : ""}
         </p>
         <span className="dc-home-acts">
           {can("report.edit") && <StartAssess c={c} aiOn={canAI} />}
@@ -278,7 +305,7 @@ export function DocsTab({ c, doc }: { c: ClusterView; doc?: string }) {
               icon={<IconDownload />}
               onClick={() => setExporting(list.map((d) => d.id))}
             >
-              导出 Word…
+              {bi("导出 Word…", "Export Word…")}
             </Button>
           )}
         </span>
@@ -287,20 +314,20 @@ export function DocsTab({ c, doc }: { c: ClusterView; doc?: string }) {
       list.length >= 4 ? (
         <div className="dc-filter-bar">
           {todoDocs.length > 0 && todoDocs.length < list.length ? (
-            <div className="dc-filter-pills" role="group" aria-label="文档筛选">
+            <div className="dc-filter-pills" role="group" aria-label={bi("文档筛选", "Filter documents")}>
               <button
                 type="button"
                 className={`dc-filter-pill ${!onlyTodo ? "on" : ""}`}
                 onClick={() => setOnlyTodo(false)}
               >
-                全部 <em>{list.length}</em>
+                {bi("全部", "All")} <em>{list.length}</em>
               </button>
               <button
                 type="button"
                 className={`dc-filter-pill ${onlyTodo ? "on" : ""}`}
                 onClick={() => setOnlyTodo(true)}
               >
-                待完善 <em>{todoDocs.length}</em>
+                {bi("待完善", "Needs work")} <em>{todoDocs.length}</em>
               </button>
             </div>
           ) : (
@@ -314,8 +341,8 @@ export function DocsTab({ c, doc }: { c: ClusterView; doc?: string }) {
               prefix={<IconSearch />}
               value={docQuery}
               onChange={setDocQuery}
-              placeholder="搜索文档标题或说明…"
-              aria-label="搜索运维文档"
+              placeholder={bi("搜索文档标题或说明…", "Search doc titles or descriptions…")}
+              aria-label={bi("搜索运维文档", "Search docs")}
             />
           )}
         </div>
@@ -346,7 +373,7 @@ export function DocsTab({ c, doc }: { c: ClusterView; doc?: string }) {
                     </span>
                     <span className={`dc-st dc-st-${st.tone}`}>{st.label}</span>
                     <span className="dc-row-time faint small num">
-                      {d.updated ? `${ago(d.updated)}编辑` : ""}
+                      {d.updated ? bi(`${ago(d.updated)}编辑`, `Edited ${ago(d.updated)}`) : ""}
                     </span>
                     <IconRight className="faint" />
                   </a>
@@ -357,7 +384,7 @@ export function DocsTab({ c, doc }: { c: ClusterView; doc?: string }) {
         ))
       ) : (
         <div className="list-state">
-          <p>没有匹配的文档</p>
+          <p>{bi("没有匹配的文档", "No matching documents")}</p>
           <Button
             size="small"
             onClick={() => {
@@ -365,7 +392,7 @@ export function DocsTab({ c, doc }: { c: ClusterView; doc?: string }) {
               setOnlyTodo(false);
             }}
           >
-            显示全部文档
+            {bi("显示全部文档", "Show All Docs")}
           </Button>
         </div>
       )}
@@ -406,6 +433,7 @@ function DocView({
   onChanged: () => void;
   onExport: (ids: string[]) => void;
 }) {
+  const lang = useLang();
   const itemUrl = docItemPath(c.id, id);
   const [d, setD] = useState<ClusterDoc | null>(
     () => cached<ClusterDoc>(itemUrl) ?? null,
@@ -433,7 +461,7 @@ function DocView({
     return () => {
       alive = false;
     };
-  }, [c.id, id, itemUrl]);
+  }, [c.id, id, itemUrl, lang]);
   const update = (nd: ClusterDoc) => {
     putCached(itemUrl, nd);
     setD(nd);
@@ -447,7 +475,7 @@ function DocView({
         { method: "POST" },
       );
       setFindings(r.findings);
-      if (!r.findings.length) Message.success("没有发现问题");
+      if (!r.findings.length) Message.success(bi("没有发现问题", "No issues found"));
     } catch (e) {
       err(e);
     } finally {
@@ -468,13 +496,13 @@ function DocView({
   }, [c.id, prev?.id, next?.id]);
   return (
     <div className="dc-view">
-      <nav className="cl-crumb" aria-label="位置">
+      <nav className="cl-crumb" aria-label={bi("位置", "Breadcrumb")}>
         <button
           type="button"
           className="link quiet"
           onClick={() => openDoc(c, undefined, true)}
         >
-          <IconArrowLeft /> 全部文档
+          <IconArrowLeft /> {bi("全部文档", "All Docs")}
         </button>
         <span className="cl-switch">
           <Button
@@ -482,21 +510,21 @@ function DocView({
             disabled={!prev}
             onClick={() => prev && openDoc(c, prev.id, true)}
           >
-            上一份
+            {bi("上一份", "Previous")}
           </Button>
           <Button
             size="mini"
             disabled={!next}
             onClick={() => next && openDoc(c, next.id, true)}
           >
-            下一份
+            {bi("下一份", "Next")}
           </Button>
         </span>
       </nav>
       {!d ? (
         error ? (
           <div className="detail-none">
-            <h2>打不开这份文档</h2>
+            <h2>{bi("打不开这份文档", "Unable to open document")}</h2>
             <p>{error}</p>
           </div>
         ) : (
@@ -519,7 +547,10 @@ function DocView({
             <div className="dc-bar-acts">
               {canAI && (
                 <Tooltip
-                  content="让 AI 对照执行记录，检查文字有没有和事实矛盾、回避问题或遗漏"
+                  content={bi(
+                    "让 AI 对照执行记录，检查文字有没有和事实矛盾、回避问题或遗漏",
+                    "Have AI cross-check prose against execution records for contradictions or omissions",
+                  )}
                   mini
                 >
                   <Button
@@ -529,7 +560,7 @@ function DocView({
                     loading={checking}
                     onClick={check}
                   >
-                    AI 检查
+                    {bi("AI 检查", "AI Review")}
                   </Button>
                 </Tooltip>
               )}
@@ -537,15 +568,15 @@ function DocView({
                 <ToKB c={c} d={d} />
               )}
               {d.manual && can("report.edit") && (
-                <Tooltip content={`删除这份${d.title}和其中写好的内容`} mini>
+                <Tooltip content={bi(`删除这份${d.title}和其中写好的内容`, `Delete this ${d.title} and all its content`)} mini>
                   <Button
                     icon={<IconDelete />}
-                    aria-label={`删除这份${d.title}`}
+                    aria-label={bi(`删除这份${d.title}`, `Delete ${d.title}`)}
                     onClick={() =>
                       Modal.confirm({
-                        title: `删除这份${d.title}？`,
-                        content: "写好的内容会一起删除，不能恢复。",
-                        okText: "删除",
+                        title: bi(`删除这份${d.title}？`, `Delete this ${d.title}?`),
+                        content: bi("写好的内容会一起删除，不能恢复。", "Written content will be permanently deleted."),
+                        okText: bi("删除", "Delete"),
                         okButtonProps: { status: "danger" },
                         onOk: async () => {
                           try {
@@ -569,21 +600,26 @@ function DocView({
                   icon={<IconDownload />}
                   onClick={() => onExport([d.id])}
                 >
-                  导出 Word
+                  {bi("导出 Word", "Export Word")}
                 </Button>
               )}
             </div>
           </header>
           {findings && findings.length > 0 && (
-            <div className="dc-findings" role="region" aria-label="AI 检查结果">
+            <div className="dc-findings" role="region" aria-label={bi("AI 检查结果", "AI review findings")}>
               <div className="dc-findings-h">
-                <b>AI 检查发现 {findings.length} 处可以改进</b>
+                <b>
+                  {bi(
+                    `AI 检查发现 ${findings.length} 处可以改进`,
+                    `AI review found ${findings.length} ${findings.length === 1 ? "suggestion" : "suggestions"}`,
+                  )}
+                </b>
                 <button
                   type="button"
                   className="link quiet"
                   onClick={() => setFindings(null)}
                 >
-                  收起
+                  {bi("收起", "Dismiss")}
                 </button>
               </div>
               {findings.map((f, k) => (
@@ -595,7 +631,7 @@ function DocView({
                   <div>
                     <b>{f.section}</b>
                     <span>{f.problem}</span>
-                    {f.suggest && <small>建议：{f.suggest}</small>}
+                    {f.suggest && <small>{bi("建议：", "Suggestion: ")}{f.suggest}</small>}
                   </div>
                 </div>
               ))}
@@ -625,6 +661,7 @@ function Paper({
   canAI: boolean;
   onSaved: (d: ClusterDoc) => void;
 }) {
+  useLang();
   const visibleBlocks = (d.blocks || []).filter(
     (b) => (!b.detail || view.detail) && keeps(b.variant, view),
   );
@@ -653,8 +690,8 @@ function Paper({
   return (
     <>
       {outline.length >= 2 && (
-        <nav className="dc-outline" aria-label="文档章节导航">
-          <span className="dc-outline-label">章节</span>
+        <nav className="dc-outline" aria-label={bi("文档章节导航", "Document sections")}>
+          <span className="dc-outline-label">{bi("章节", "Sections")}</span>
           {outline.map((item) => (
             <button
               key={item.id}
@@ -707,16 +744,17 @@ function Paper({
 }
 
 function DocCodeBlock({ text }: { text: string }) {
+  useLang();
   const [copied, setCopied] = useState(false);
   return (
     <div className="dc-code-wrap">
       <pre className="dc-code">{text}</pre>
       {text.trim() && (
-        <Tooltip content={copied ? "已复制" : "复制代码"} mini>
+        <Tooltip content={copied ? bi("已复制", "Copied") : bi("复制代码", "Copy code")} mini>
           <button
             type="button"
             className={`dc-code-copy ${copied ? "copied" : ""}`}
-            aria-label={copied ? "已复制代码" : "复制代码"}
+            aria-label={copied ? bi("已复制代码", "Code copied") : bi("复制代码", "Copy code")}
             onClick={() => {
               copy(text);
               setCopied(true);
@@ -816,11 +854,11 @@ function Block({
               href={`/api/jobs/${b.job}/progress/img/${n}`}
               target="_blank"
               rel="noreferrer"
-              title="在新标签页打开原图"
+              title={bi("在新标签页打开原图", "Open full image in new tab")}
             >
               <img
                 src={`/api/jobs/${b.job}/progress/img/${n}`}
-                alt={`现场截图 ${i + 1}`}
+                alt={bi(`现场截图 ${i + 1}`, `Screenshot ${i + 1}`)}
                 loading="lazy"
               />
             </a>
@@ -882,6 +920,7 @@ function Section({
   canAI: boolean;
   onSaved: (d: ClusterDoc) => void;
 }) {
+  useLang();
   const [edit, setEdit] = useState(false);
   const [text, setText] = useState(b.text || "");
   const [asking, setAsking] = useState(false);
@@ -931,7 +970,7 @@ function Section({
       setQuestions([]);
       onSaved(r);
       setAsk("");
-      Message.info("AI 起草好了，请核对后确认");
+      Message.info(bi("AI 起草好了，请核对后确认", "AI draft ready; review and confirm"));
     } catch (e) {
       err(e);
     } finally {
@@ -965,14 +1004,17 @@ function Section({
             {draft ? (
               aiOn ? (
                 <>
-                  <Spark /> AI 草稿 · 待确认
+                  <Spark /> {bi("AI 草稿 · 待确认", "AI Draft · Unconfirmed")}
                 </>
               ) : (
-                <>草稿 · 待确认</>
+                <>{bi("草稿 · 待确认", "Draft · Unconfirmed")}</>
               )
             ) : (
               <>
-                <IconCheck /> {b.source === "ai" && aiOn ? "AI 起草，已确认" : "已填写"}
+                <IconCheck />{" "}
+                {b.source === "ai" && aiOn
+                  ? bi("AI 起草，已确认", "AI-drafted, confirmed")
+                  : bi("已填写", "Completed")}
               </>
             )}
           </span>
@@ -987,12 +1029,12 @@ function Section({
                 loading={busy === "save"}
                 onClick={() => save(b.text || "", true)}
               >
-                确认
+                {bi("确认", "Confirm")}
               </Button>
             )}
             {has && (
               <Button size="mini" icon={<IconEdit />} onClick={startEdit}>
-                编辑
+                {bi("编辑", "Edit")}
               </Button>
             )}
             {b.ai && canAI && (
@@ -1003,7 +1045,7 @@ function Section({
                 icon={<Spark size={12} rainbow />}
                 onClick={() => setAsking((x) => !x)}
               >
-                {has ? "重新起草" : "AI 起草"}
+                {has ? bi("重新起草", "Redraft") : bi("AI 起草", "AI Draft")}
               </Button>
             )}
           </span>
@@ -1015,23 +1057,29 @@ function Section({
             size="small"
             value={ask}
             onChange={setAsk}
-            placeholder="补充要求（可选），例如：写得简短些；强调备份还没有定时任务"
+            placeholder={bi(
+              "补充要求（可选），例如：写得简短些；强调备份还没有定时任务",
+              "Additional instructions (optional), e.g., keep it brief; note backups have no cron yet",
+            )}
             onPressEnter={() => runDraft()}
             autoFocus
-            aria-label="给 AI 的补充要求"
+            aria-label={bi("给 AI 的补充要求", "Instructions for AI")}
           />
           <Button size="small" type="primary" onClick={() => runDraft()}>
-            开始起草
+            {bi("开始起草", "Generate Draft")}
           </Button>
           <Button size="small" onClick={() => setAsking(false)}>
-            取消
+            {bi("取消", "Cancel")}
           </Button>
         </div>
       )}
       {has && b.stale && !edit && busy !== "draft" && (
         <div className="dc-stale">
           <span>
-            集群在这之后完成了{b.stale}，这一节可能已经不符合现在的样子。
+            {bi(
+              `集群在这之后完成了${b.stale}，这一节可能已经不符合现在的样子。`,
+              `Cluster completed ${b.stale} afterwards; this section may be out of date.`,
+            )}
           </span>
           {may && (
             <span className="dc-stale-acts">
@@ -1041,7 +1089,7 @@ function Section({
                 disabled={busy === "save"}
                 onClick={() => save(b.text || "", true)}
               >
-                仍然适用
+                {bi("仍然适用", "Still accurate")}
               </button>
               {b.ai && canAI && (
                 <button
@@ -1049,7 +1097,7 @@ function Section({
                   className="link"
                   onClick={() => runDraft()}
                 >
-                  按现在的集群重新起草
+                  {bi("按现在的集群重新起草", "Redraft for current state")}
                 </button>
               )}
             </span>
@@ -1057,9 +1105,9 @@ function Section({
         </div>
       )}
       {questions.length > 0 && busy !== "draft" && (
-        <div className="dc-qs" role="group" aria-label="AI 的提问">
+        <div className="dc-qs" role="group" aria-label={bi("AI 的提问", "AI questions")}>
           <span className="dc-qs-h">
-            <Spark /> 写这一节之前，AI 需要你补充：
+            <Spark /> {bi("写这一节之前，AI 需要你补充：", "Before drafting, AI needs a few details:")}
           </span>
           {questions.map((q, i) => (
             <div key={q.question} className="dc-q">
@@ -1082,14 +1130,14 @@ function Section({
                   (q.options || []).includes(answers[i]) ? "" : answers[i] || ""
                 }
                 onChange={(v) => setAnswers((a) => ({ ...a, [i]: v }))}
-                placeholder="或者自己写"
-                aria-label={`回答：${q.question}`}
+                placeholder={bi("或者自己写", "Or write your own")}
+                aria-label={bi(`回答：${q.question}`, `Answer: ${q.question}`)}
               />
             </div>
           ))}
           <div className="dc-qs-foot">
             <Button size="small" onClick={() => setQuestions([])}>
-              先不写
+              {bi("先不写", "Skip")}
             </Button>
             <Button
               size="small"
@@ -1104,7 +1152,7 @@ function Section({
                 )
               }
             >
-              回答并起草
+              {bi("回答并起草", "Answer & Draft")}
             </Button>
           </div>
         </div>
@@ -1112,7 +1160,7 @@ function Section({
       {busy === "draft" ? (
         <div className="dc-drafting" aria-live="polite">
           <span>
-            <Spark /> AI 正在阅读平台整理的事实并起草…
+            <Spark /> {bi("AI 正在阅读平台整理的事实并起草…", "AI is reading cluster facts and drafting…")}
           </span>
           <Skeleton
             animation
@@ -1131,10 +1179,13 @@ function Section({
           />
           <div className="dc-edit-foot">
             <span className="faint small">
-              空行分段，"- " 开头为列表，**文字** 加粗；导出 Word 时保持一致。
+              {bi(
+                '空行分段，"- " 开头为列表，**文字** 加粗；导出 Word 时保持一致。',
+                'Blank lines for paragraphs, "- " for bullets, **bold** for emphasis; preserved in Word export.',
+              )}
             </span>
             <Button size="small" onClick={() => setEdit(false)}>
-              取消
+              {bi("取消", "Cancel")}
             </Button>
             <Button
               size="small"
@@ -1142,7 +1193,7 @@ function Section({
               loading={busy === "save"}
               onClick={() => save(text, true)}
             >
-              保存
+              {bi("保存", "Save")}
             </Button>
           </div>
         </div>
@@ -1156,7 +1207,7 @@ function Section({
           {may && (
             <span className="dc-empty-acts">
               <button type="button" className="link" onClick={startEdit}>
-                自己填写
+                {bi("自己填写", "Write manually")}
               </button>
               {b.ai && canAI && (
                 <button
@@ -1164,7 +1215,7 @@ function Section({
                   className="link"
                   onClick={() => setAsking(true)}
                 >
-                  让 AI 起草
+                  {bi("让 AI 起草", "Draft with AI")}
                 </button>
               )}
             </span>
@@ -1203,6 +1254,7 @@ function ExportDialog({
   aiOn: boolean;
   close: () => void;
 }) {
+  const lang = useLang();
   const [sel, setSel] = useState<string[]>([]);
   const [merge, setMerge] = useState<"one" | "each">("one");
   const [front, setFront] = useState(true);
@@ -1217,7 +1269,7 @@ function ExportDialog({
         .then(setTplSummary)
         .catch(() => {});
     }
-  }, [pick]);
+  }, [pick, lang]);
   const chosen = list.filter((d) => sel.includes(d.id));
   const drafts = chosen.reduce((n, d) => n + d.drafts, 0);
   const empty = chosen.reduce((n, d) => n + d.empty, 0);
@@ -1228,7 +1280,7 @@ function ExportDialog({
   return (
     <Modal
       visible={!!pick}
-      title="导出 Word"
+      title={bi("导出 Word", "Export Word")}
       onCancel={close}
       className="dc-export"
       footer={
@@ -1239,22 +1291,22 @@ function ExportDialog({
               className="link quiet dc-tpl"
               onClick={() => (close(), go({ name: "settings", id: "report" }))}
             >
-              模板与公文规范
+              {bi("模板与公文规范", "Templates & Formatting")}
             </button>
           )}
-          <Button onClick={close}>取消</Button>
+          <Button onClick={close}>{bi("取消", "Cancel")}</Button>
           <Button
             type="primary"
             icon={<IconDownload />}
             disabled={!sel.length}
             onClick={() => {
-              window.location.href = url;
+              window.location.href = withLang(url);
               close();
             }}
           >
             {sel.length > 1 && merge === "each"
-              ? `下载 ${sel.length} 个文件（zip）`
-              : "下载"}
+              ? bi(`下载 ${sel.length} 个文件（zip）`, `Download ${sel.length} files (.zip)`)
+              : bi("下载", "Download")}
           </Button>
         </>
       }
@@ -1262,11 +1314,14 @@ function ExportDialog({
       {tplSummary && (
         <div className="dc-ex-tpl">
           <span>
-            当前版式：
+            {bi("当前版式：", "Layout: ")}
             <b>
               {tplSummary.use_template && tplSummary.template
-                ? `自定义模板（${tplSummary.template}）`
-                : `${tplSummary.theme_name || "深青标准"} · 企业公文规范 ${tplSummary.doc_version || "V1.0"}`}
+                ? bi(`自定义模板（${tplSummary.template}）`, `Custom template (${tplSummary.template})`)
+                : bi(
+                    `${tplSummary.theme_name || "深青标准"} · 企业公文规范 ${tplSummary.doc_version || "V1.0"}`,
+                    `${tplSummary.theme_name || "Teal Standard"} · Doc Standard ${tplSummary.doc_version || "V1.0"}`,
+                  )}
             </b>
             {tplSummary.org ? ` · ${tplSummary.org}` : ""}
           </span>
@@ -1276,12 +1331,12 @@ function ExportDialog({
               className="link small"
               onClick={() => (close(), go({ name: "settings", id: "report" }))}
             >
-              调整版式
+              {bi("调整版式", "Customize")}
             </button>
           )}
         </div>
       )}
-      <div className="dc-ex-list" role="group" aria-label="要导出的文档">
+      <div className="dc-ex-list" role="group" aria-label={bi("要导出的文档", "Documents to export")}>
         {list.map((d) => (
           <Checkbox
             key={d.id}
@@ -1318,42 +1373,52 @@ function ExportDialog({
           <Segmented<"one" | "each">
             value={merge}
             onChange={setMerge}
-            label="导出方式"
+            label={bi("导出方式", "Export mode")}
             options={[
-              { value: "one", label: "合并成一个 Word" },
-              { value: "each", label: "每份一个文件" },
+              { value: "one", label: bi("合并成一个 Word", "Merge into one .docx") },
+              { value: "each", label: bi("每份一个文件", "One file per doc") },
             ]}
           />
           <span className="faint small">
             {merge === "one"
-              ? "统一封面和目录，按所选顺序排列"
-              : "每份文档独立成一个 Word，打包下载"}
+              ? bi("统一封面和目录，按所选顺序排列", "Unified cover and TOC in selected order")
+              : bi("每份文档独立成一个 Word，打包下载", "Separate .docx files bundled in a .zip")}
           </span>
         </div>
       )}
       {reports && <ReportOptions view={view} setView={setView} compact />}
       <div className="dc-ex-front">
         <Checkbox checked={front} onChange={setFront}>
-          使用标准公文版式（含封面、罗马页码目录与版本控制页）
+          {bi(
+            "使用标准公文版式（含封面、罗马页码目录与版本控制页）",
+            "Use standard document layout (cover page, Roman-numeral TOC, revision history)",
+          )}
         </Checkbox>
       </div>
       {(drafts > 0 || empty > 0) && (
         <p className="dc-ex-warn">
-          <IconFile /> 所选文档还有
+          <IconFile />{" "}
+          {bi("所选文档还有", "Selected documents still have ")}
           {[
-            drafts ? (aiOn ? ` ${drafts} 段 AI 草稿没确认` : ` ${drafts} 段草稿没确认`) : "",
-            empty ? ` ${empty} 节没填写` : "",
+            drafts
+              ? aiOn
+                ? bi(` ${drafts} 段 AI 草稿没确认`, `${drafts} unconfirmed AI ${drafts === 1 ? "draft" : "drafts"}`)
+                : bi(` ${drafts} 段草稿没确认`, `${drafts} unconfirmed ${drafts === 1 ? "draft" : "drafts"}`)
+              : "",
+            empty
+              ? bi(` ${empty} 节没填写`, `${empty} empty ${empty === 1 ? "section" : "sections"}`)
+              : "",
           ]
             .filter(Boolean)
-            .join("、")}
-          。可以照常导出：
+            .join(bi("、", " and "))}
+          {bi("。可以照常导出：", ". You can still export: ")}
           {[
-            drafts ? "草稿按现在的内容写入" : "",
-            empty ? "没填写的会标为“未填写”" : "",
+            drafts ? bi("草稿按现在的内容写入", "drafts are included as written") : "",
+            empty ? bi("没填写的会标为“未填写”", "empty sections are marked as unfilled") : "",
           ]
             .filter(Boolean)
-            .join("，")}
-          。
+            .join(bi("，", "; "))}
+          {bi("。", ".")}
         </p>
       )}
     </Modal>
@@ -1362,6 +1427,7 @@ function ExportDialog({
 
 /** Sends a root-cause analysis or verified change SOP to the team knowledge base, where it is reviewed before the assistant can use it. */
 function ToKB({ c, d }: { c: ClusterView; d: ClusterDoc }) {
+  useLang();
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [text, setText] = useState("");
@@ -1390,7 +1456,13 @@ function ToKB({ c, d }: { c: ClusterView; d: ClusterDoc }) {
         .filter(Boolean)
         .join("\n\n");
       setText(
-        [`适用：${c.app_name}（集群 ${c.id}，${d.subtitle || "变更实施方案"}）`, sopBody]
+        [
+          bi(
+            `适用：${c.app_name}（集群 ${c.id}，${d.subtitle || "变更实施方案"}）`,
+            `Applies to: ${c.app_name} (Cluster ${c.id}, ${d.subtitle || "Change Plan"})`,
+          ),
+          sopBody,
+        ]
           .filter(Boolean)
           .join("\n\n"),
       );
@@ -1404,21 +1476,27 @@ function ToKB({ c, d }: { c: ClusterView; d: ClusterDoc }) {
         b.level === 2 &&
         all
           .slice(0, i)
-          .some((x) => x.kind === "h" && x.text?.includes("失败的步骤")),
+          .some((x) => x.kind === "h" && (x.text?.includes("失败的步骤") || /failed steps?/i.test(x.text || ""))),
     );
     const step = (failed?.text || "")
-      .replace(/^阶段：/, "")
+      .replace(/^(?:阶段：|Phase:\s*)/i, "")
       .replace(/^\[[^\]]+\]\s*/, "");
     setTitle(
-      `${c.app_name} ${d.subtitle || "交付"}${step ? `在「${step}」` : ""}失败的原因与处理`,
+      bi(
+        `${c.app_name} ${d.subtitle || "交付"}${step ? `在「${step}」` : ""}失败的原因与处理`,
+        `${c.app_name} ${d.subtitle || "delivery"} failure${step ? ` at "${step}"` : ""}: cause & resolution`,
+      ),
     );
     setText(
       [
-        `适用：${c.app_name}（集群 ${c.id}，${d.subtitle}）`,
-        sec("symptom") && `## 现象\n${sec("symptom")}`,
-        sec("cause") && `## 根因\n${sec("cause")}`,
-        sec("handling") && `## 处理\n${sec("handling")}`,
-        sec("improve") && `## 以后怎么避免\n${sec("improve")}`,
+        bi(
+          `适用：${c.app_name}（集群 ${c.id}，${d.subtitle}）`,
+          `Applies to: ${c.app_name} (Cluster ${c.id}, ${d.subtitle})`,
+        ),
+        sec("symptom") && `## ${bi("现象", "Symptom")}\n${sec("symptom")}`,
+        sec("cause") && `## ${bi("根因", "Root Cause")}\n${sec("cause")}`,
+        sec("handling") && `## ${bi("处理", "Resolution")}\n${sec("handling")}`,
+        sec("improve") && `## ${bi("以后怎么避免", "Prevention")}\n${sec("improve")}`,
       ]
         .filter(Boolean)
         .join("\n\n"),
@@ -1435,10 +1513,10 @@ function ToKB({ c, d }: { c: ClusterView; d: ClusterDoc }) {
           title,
           text,
           team,
-          source: `${isChange ? "变更实施方案" : "根因分析报告"} · ${c.id} · ${d.subtitle || d.title}`,
+          source: `${isChange ? bi("变更实施方案", "Change Plan") : bi("根因分析报告", "RCA Report")} · ${c.id} · ${d.subtitle || d.title}`,
         }),
       });
-      Message.success("已提交到团队知识库，审核通过后 AI 回答时就能查到");
+      Message.success(bi("已提交到团队知识库，审核通过后 AI 回答时就能查到", "Submitted to team KB; available to AI once approved"));
       setOpen(false);
     } catch (e) {
       err(e);
@@ -1451,25 +1529,25 @@ function ToKB({ c, d }: { c: ClusterView; d: ClusterDoc }) {
       <Tooltip
         content={
           isChange
-            ? "把经测试环境演练通过的变更实施方案沉淀为团队知识库经验"
+            ? bi("把经测试环境演练通过的变更实施方案沉淀为团队知识库经验", "Save this verified change plan to the team knowledge base")
             : ready
-              ? "把现象、根因和处理办法整理成一条经验，审核后进入团队知识库"
-              : "先写好「根因分析」一节"
+              ? bi("把现象、根因和处理办法整理成一条经验，审核后进入团队知识库", "Package symptom, root cause, and resolution into a KB entry for review")
+              : bi("先写好「根因分析」一节", "Complete the Root Cause section first")
         }
         mini
       >
         <span>
           <Button icon={<IconBook />} disabled={!ready} onClick={start}>
-            存入知识库
+            {bi("存入知识库", "Save to KB")}
           </Button>
         </span>
       </Tooltip>
       <Modal
         visible={open}
-        title="存入团队知识库"
+        title={bi("存入团队知识库", "Save to Team Knowledge Base")}
         onCancel={() => setOpen(false)}
         onOk={send}
-        okText="提交审核"
+        okText={bi("提交审核", "Submit for Review")}
         okButtonProps={{
           loading: busy,
           disabled: !title.trim() || !text.trim(),
@@ -1478,40 +1556,42 @@ function ToKB({ c, d }: { c: ClusterView; d: ClusterDoc }) {
       >
         <div className="dc-kb-form">
           <label>
-            <span>标题</span>
+            <span>{bi("标题", "Title")}</span>
             <Input
               value={title}
               onChange={setTitle}
               maxLength={120}
-              aria-label="标题"
+              aria-label={bi("标题", "Title")}
             />
           </label>
           {teams.length > 0 && (
             <label>
-              <span>提交到</span>
+              <span>{bi("提交到", "Submit to")}</span>
               <Segmented<string>
                 value={team}
                 onChange={setTeam}
-                label="提交到"
+                label={bi("提交到", "Submit to")}
                 options={[
                   ...teams.map((t) => ({ value: t.id, label: t.name })),
-                  { value: "", label: "全平台" },
+                  { value: "", label: bi("全平台", "Platform-wide") },
                 ]}
               />
             </label>
           )}
           <label>
-            <span>内容</span>
+            <span>{bi("内容", "Content")}</span>
             <Input.TextArea
               value={text}
               onChange={setText}
               autoSize={{ minRows: 8, maxRows: 18 }}
-              aria-label="内容"
+              aria-label={bi("内容", "Content")}
             />
           </label>
           <p className="faint small">
-            提交后由知识库管理员审核；通过后，大家用 AI
-            排障时遇到相同问题就能查到这条经验。
+            {bi(
+              "提交后由知识库管理员审核；通过后，大家用 AI 排障时遇到相同问题就能查到这条经验。",
+              "Reviewed by KB admins; once approved, AI troubleshooting can reference it for similar issues.",
+            )}
           </p>
         </div>
       </Modal>
@@ -1521,6 +1601,7 @@ function ToKB({ c, d }: { c: ClusterView; d: ClusterDoc }) {
 
 /** Starts a root-cause analysis by hand: for one of the cluster's plans, or for an incident outside any plan. */
 function StartRCA({ c }: { c: ClusterView }) {
+  useLang();
   const [open, setOpen] = useState(false);
   const [what, setWhat] = useState<string>("incident");
   const [title, setTitle] = useState("");
@@ -1549,14 +1630,14 @@ function StartRCA({ c }: { c: ClusterView }) {
         icon={<IconPlus />}
         onClick={() => (setWhat("incident"), setTitle(""), setOpen(true))}
       >
-        根因分析
+        {bi("根因分析", "Root-Cause Analysis")}
       </Button>
       <Modal
         visible={open}
-        title="发起根因分析"
+        title={bi("发起根因分析", "New Root-Cause Analysis")}
         onCancel={() => setOpen(false)}
         onOk={start}
-        okText="开始写"
+        okText={bi("开始写", "Create")}
         okButtonProps={{
           loading: busy,
           disabled: what === "incident" && !title.trim(),
@@ -1564,9 +1645,12 @@ function StartRCA({ c }: { c: ClusterView }) {
         className="dc-rca-new"
       >
         <p className="muted small">
-          分析什么？部署执行失败时平台已经自动建好了；这里用于交付完成后运行中才暴露的问题，或者和部署过程无关的集群故障。
+          {bi(
+            "分析什么？部署执行失败时平台已经自动建好了；这里用于交付完成后运行中才暴露的问题，或者和部署过程无关的集群故障。",
+            "Failed deployments already generate an RCA automatically; use this for post-delivery runtime issues or unrelated cluster incidents.",
+          )}
         </p>
-        <div className="dc-rca-opts" role="radiogroup" aria-label="分析对象">
+        <div className="dc-rca-opts" role="radiogroup" aria-label={bi("分析对象", "Target")}>
           <button
             type="button"
             role="radio"
@@ -1574,8 +1658,8 @@ function StartRCA({ c }: { c: ClusterView }) {
             className={`dc-rca-opt ${what === "incident" ? "on" : ""}`}
             onClick={() => setWhat("incident")}
           >
-            <b>集群故障</b>
-            <span>和部署交付无关，例如运行中主库切换、节点掉线</span>
+            <b>{bi("集群故障", "Cluster Incident")}</b>
+            <span>{bi("和部署交付无关，例如运行中主库切换、节点掉线", "Unrelated to deployment, e.g., unexpected failover or node offline")}</span>
           </button>
           {plans.map((p) => (
             <button
@@ -1587,7 +1671,7 @@ function StartRCA({ c }: { c: ClusterView }) {
               onClick={() => setWhat(p.id)}
             >
               <b>
-                {p.delivery_mode === "configuration" ? "配置交付" : "集群部署"}
+                {p.delivery_mode === "configuration" ? bi("配置交付", "Config Delivery") : bi("集群部署", "Cluster Deployment")}
               </b>
               <span>
                 {PLAN_PHASE[planPhase(p)].label} · {ago(p.created)}
@@ -1599,9 +1683,9 @@ function StartRCA({ c }: { c: ClusterView }) {
           <Input
             value={title}
             onChange={setTitle}
-            placeholder="给这次故障起个名字，例如：10 月 27 日主库切换后写入中断"
+            placeholder={bi("给这次故障起个名字，例如：10 月 27 日主库切换后写入中断", "Name this incident, e.g., Write outage after Oct 27 primary failover")}
             maxLength={80}
-            aria-label="故障名称"
+            aria-label={bi("故障名称", "Incident title")}
             autoFocus
           />
         )}
@@ -1612,15 +1696,20 @@ function StartRCA({ c }: { c: ClusterView }) {
 
 /** Asks for an assessment of the cluster: is it big enough (capacity), or which architecture fits (selection). */
 function StartAssess({ c, aiOn }: { c: ClusterView; aiOn: boolean }) {
+  useLang();
   const [open, setOpen] = useState(false);
   const [type, setType] = useState<"capacity" | "selection">("capacity");
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
   const examples = {
-    capacity:
+    capacity: bi(
       "例如：双十一订单量预计是平时的 5 倍，现在一主两从够不够？不够要怎么扩？",
-    selection:
+      "e.g., Peak traffic will be 5x normal; is 1 primary + 2 replicas enough, or how should we scale?",
+    ),
+    selection: bi(
       "例如：应用直连三个节点，要不要在前面加负载均衡？HAProxy 和 Nginx 选哪个？",
+      "e.g., Apps connect directly to 3 nodes; should we add HAProxy or Nginx in front?",
+    ),
   };
   const start = async () => {
     setBusy(true);
@@ -1640,14 +1729,14 @@ function StartAssess({ c, aiOn }: { c: ClusterView; aiOn: boolean }) {
   return (
     <>
       <Button icon={<IconPlus />} onClick={() => (setQ(""), setOpen(true))}>
-        评估
+        {bi("评估", "Assessment")}
       </Button>
       <Modal
         visible={open}
-        title="新建评估"
+        title={bi("新建评估", "New Assessment")}
         onCancel={() => setOpen(false)}
         onOk={start}
-        okText="开始评估"
+        okText={bi("开始评估", "Create")}
         okButtonProps={{ loading: busy, disabled: !q.trim() }}
         className="dc-rca-new"
       >
@@ -1655,10 +1744,10 @@ function StartAssess({ c, aiOn }: { c: ClusterView; aiOn: boolean }) {
           <Segmented<"capacity" | "selection">
             value={type}
             onChange={setType}
-            label="评估类型"
+            label={bi("评估类型", "Assessment type")}
             options={[
-              { value: "capacity", label: "容量评估" },
-              { value: "selection", label: "选型建议" },
+              { value: "capacity", label: bi("容量评估", "Capacity") },
+              { value: "selection", label: bi("选型建议", "Architecture") },
             ]}
           />
           <Input.TextArea
@@ -1667,13 +1756,13 @@ function StartAssess({ c, aiOn }: { c: ClusterView; aiOn: boolean }) {
             placeholder={examples[type]}
             autoSize={{ minRows: 3, maxRows: 8 }}
             maxLength={1000}
-            aria-label="要回答的问题"
+            aria-label={bi("要回答的问题", "Question")}
             autoFocus
           />
           <p className="muted small">
             {aiOn
-              ? "平台会把集群的拓扑、规格和经历带进评估；业务量、机器配置这些平台不知道的，AI 起草时会先问你。"
-              : "平台会把集群的拓扑、规格和经历整理进评估模板，创建后逐节填写业务量、机器配置与评估结论。"}
+              ? bi("平台会把集群的拓扑、规格和经历带进评估；业务量、机器配置这些平台不知道的，AI 起草时会先问你。", "Platform includes cluster topology, specs, and history; AI will ask about workload and hardware sizing before drafting.")
+              : bi("平台会把集群的拓扑、规格和经历整理进评估模板，创建后逐节填写业务量、机器配置与评估结论。", "Platform prepares a template with cluster topology, specs, and history for you to fill in workload and sizing details.")}
           </p>
         </div>
       </Modal>

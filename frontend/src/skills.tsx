@@ -29,6 +29,7 @@ import { api, cached, can, copy, err, putCached, useMedia } from "./shared";
 import { go } from "./router";
 import { DocToc, StructuredDoc, extractDocSections } from "./docrender";
 import { Segmented } from "./ui";
+import { bi, useLang } from "./i18n";
 import "./respage.css";
 
 /* Skills: structured operational manuals + optional air-gapped sandbox scripts (Python 3).
@@ -73,19 +74,27 @@ type Draft = {
 const NAME = /^[a-z][a-z0-9-]{1,40}$/;
 const SCRIPT_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,36}\.py$/;
 
-const SCRIPT_TEMPLATES: {
+type ScriptTemplate = {
   label: string;
   name: string;
   description: string;
   code: string;
-}[] = [
+};
+
+const getScriptTemplates = (): ScriptTemplate[] => [
   {
-    label: "参数容量核算",
+    label: bi("参数容量核算", "Parameter sizing"),
     name: "calc_params.py",
-    description: "读取 args 中的机器规格或业务并发参数，输出配置推荐值与安全水位校验",
+    description: bi(
+      "读取 args 中的机器规格或业务并发参数，输出配置推荐值与安全水位校验",
+      "Read host specs or concurrency args and output recommended config values and safety checks",
+    ),
     code: `import json, sys
 
-# 参数由平台通过 /in/_args.json 注入；沙箱无网络且仅只读挂载运行环境
+# ${bi(
+      "参数由平台通过 /in/_args.json 注入；沙箱无网络且仅只读挂载运行环境",
+      "Args are injected via /in/_args.json; sandbox is offline with read-only runtime mount",
+    )}
 args = json.load(open(sys.argv[1], encoding="utf-8")) if len(sys.argv) > 1 else {}
 memory_gb = float(args.get("memory_gb", 16))
 max_conn = int(args.get("max_connections", 200))
@@ -99,15 +108,21 @@ print(json.dumps(result, ensure_ascii=False, indent=2))
 `,
   },
   {
-    label: "现场快照/日志解析",
+    label: bi("现场快照/日志解析", "Snapshot / log parser"),
     name: "parse_snapshot.py",
-    description: "解析用户上传到当前会话存储空间的巡检文本或 args.raw_text，提取异常指标",
+    description: bi(
+      "解析用户上传到当前会话存储空间的巡检文本或 args.raw_text，提取异常指标",
+      "Parse inspection logs uploaded in chat or args.raw_text to extract anomalies",
+    ),
     code: `import json, os, re, sys
 
 args = json.load(open(sys.argv[1], encoding="utf-8")) if len(sys.argv) > 1 else {}
 lines = str(args.get("raw_text", "")).splitlines()
 
-# 仅可读取当前对话用户本人通过 files 传入的文件（位于 /in，不含 _ 前缀内部文件）
+# ${bi(
+      "仅可读取当前对话用户本人通过 files 传入的文件（位于 /in，不含 _ 前缀内部文件）",
+      "Only user-attached files in /in (excluding internal _-prefixed files) are readable",
+    )}
 for fn in sorted(os.listdir("/in")):
     if not fn.startswith("_"):
         with open(os.path.join("/in", fn), encoding="utf-8", errors="ignore") as f:
@@ -118,9 +133,12 @@ print(json.dumps({"total_lines": len(lines), "hit_count": len(errors), "samples"
 `,
   },
   {
-    label: "CSV 表格质检",
+    label: bi("CSV 表格质检", "CSV table check"),
     name: "inspect_table.py",
-    description: "扫描 /in 下的 CSV 文件，核算行数、字段空值率与重复项摘要",
+    description: bi(
+      "扫描 /in 下的 CSV 文件，核算行数、字段空值率与重复项摘要",
+      "Scan CSV files under /in and summarize row counts, columns, and completeness",
+    ),
     code: `import csv, json, os, sys
 
 summary = []
@@ -161,6 +179,7 @@ function uniqueForkName(base: string, isTaken: (n: string) => boolean): string {
 }
 
 export function SkillsPage({ selected }: { selected?: string }) {
+  useLang();
   const narrow = useMedia("(max-width: 900px)");
   const admin = can("ai.settings");
   const initMe = cached<{ skills: Skill[]; platform: Skill[] }>("/api/me/skills");
@@ -316,7 +335,7 @@ export function SkillsPage({ selected }: { selected?: string }) {
         ]);
       }
       setDraft(null);
-      Message.success("已保存");
+      Message.success(bi("已保存", "Saved"));
       go(
         {
           name: "skills",
@@ -333,10 +352,16 @@ export function SkillsPage({ selected }: { selected?: string }) {
 
   const resetBuiltin = (s: Skill) =>
     Modal.confirm({
-      title: `恢复内置技能「${s.title}」为平台默认？`,
-      content:
+      title: bi(
+        `恢复内置技能「${s.title}」为平台默认？`,
+        `Reset built-in skill "${s.title}" to defaults?`,
+      ),
+      content: bi(
         "将清除当前对正文与随附脚本的定制修改，恢复为平台出厂内置版本。",
-      okText: "恢复默认",
+        "This discards your customizations to the document and attached scripts and restores the built-in version.",
+      ),
+      okText: bi("恢复默认", "Reset"),
+      cancelText: bi("取消", "Cancel"),
       okButtonProps: { status: "warning" },
       onOk: async () => {
         try {
@@ -345,7 +370,9 @@ export function SkillsPage({ selected }: { selected?: string }) {
               x.name === s.name ? { ...x, customized: false } : x,
             ),
           );
-          Message.success("已恢复平台内置默认内容");
+          Message.success(
+            bi("已恢复平台内置默认内容", "Restored built-in defaults"),
+          );
         } catch (e) {
           err(e);
         }
@@ -354,9 +381,15 @@ export function SkillsPage({ selected }: { selected?: string }) {
 
   const remove = (s: Skill) =>
     Modal.confirm({
-      title: `删除技能「${s.title}」？`,
-      content: s.mine ? "只影响你自己的对话。" : "所有人的对话都不会再用到它。",
-      okText: "删除",
+      title: bi(`删除技能「${s.title}」？`, `Delete skill "${s.title}"?`),
+      content: s.mine
+        ? bi("只影响你自己的对话。", "Only affects your own chats.")
+        : bi(
+            "所有人的对话都不会再用到它。",
+            "No one's chats will use it anymore.",
+          ),
+      okText: bi("删除", "Delete"),
+      cancelText: bi("取消", "Cancel"),
       okButtonProps: { status: "danger" },
       onOk: async () => {
         try {
@@ -416,7 +449,7 @@ export function SkillsPage({ selected }: { selected?: string }) {
     setDraft({
       scope: "mine",
       name: nextName,
-      title: `${s.title}（个人定制）`.slice(0, 40),
+      title: bi(`${s.title}（个人定制）`, `${s.title} (Personal)`).slice(0, 40),
       description: s.description,
       content: s.content || "",
       scripts: (s.scripts || []).map((sc) => ({
@@ -445,36 +478,44 @@ export function SkillsPage({ selected }: { selected?: string }) {
   return (
     <div className="md-split">
       {(!narrow || !selected) && (
-        <aside className="md-list" aria-label="技能">
+        <aside className="md-list" aria-label={bi("技能", "Skills")}>
           <div className="list-head">
             <div className="list-title">
-              <h1>技能</h1>
+              <h1>{bi("技能", "Skills")}</h1>
               <Button
                 type="primary"
                 size="small"
                 icon={<IconPlus />}
                 onClick={startNew}
               >
-                新建
+                {bi("新建", "New")}
               </Button>
             </div>
             <Input
               prefix={<IconSearch />}
               allowClear
-              placeholder="搜索技能或脚本"
+              placeholder={bi("搜索技能或脚本", "Search skills or scripts")}
               value={q}
               onChange={setQ}
-              aria-label="搜索技能"
+              aria-label={bi("搜索技能", "Search skills")}
             />
             <Segmented<Kind>
               size="sm"
-              label="来源"
+              label={bi("来源", "Scope")}
               value={kind}
               onChange={setKind}
               options={[
-                { value: "all", label: "全部", count: counts.all },
-                { value: "mine", label: "我的", count: counts.mine },
-                { value: "platform", label: "平台", count: counts.platform },
+                { value: "all", label: bi("全部", "All"), count: counts.all },
+                {
+                  value: "mine",
+                  label: bi("我的", "Mine"),
+                  count: counts.mine,
+                },
+                {
+                  value: "platform",
+                  label: bi("平台", "Platform"),
+                  count: counts.platform,
+                },
               ]}
             />
           </div>
@@ -487,33 +528,45 @@ export function SkillsPage({ selected }: { selected?: string }) {
               <IconExclamationCircle className="bad" />
               <p>{error}</p>
               <Button size="small" icon={<IconRefresh />} onClick={load}>
-                重试
+                {bi("重试", "Retry")}
               </Button>
             </div>
           ) : shown.length === 0 ? (
             <div className="list-state">
               <p>
                 {t
-                  ? "没有匹配的技能"
+                  ? bi("没有匹配的技能", "No matching skills")
                   : kind === "mine"
-                    ? "你还没有自己的技能"
-                    : "没有技能"}
+                    ? bi("你还没有自己的技能", "You have no personal skills yet")
+                    : bi("没有技能", "No skills")}
               </p>
               {kind === "mine" && !t && (
                 <Button size="small" type="primary" onClick={startNew}>
-                  写一个
+                  {bi("写一个", "Create one")}
                 </Button>
               )}
             </div>
           ) : (
-            <div className="list-body rp-list" role="listbox" aria-label="技能">
+            <div
+              className="list-body rp-list"
+              role="listbox"
+              aria-label={bi("技能", "Skills")}
+            >
               {(["mine", "platform"] as const).map((g) => {
                 const rows = shown.filter((s) => (g === "mine") === !!s.mine);
                 if (!rows.length) return null;
                 return (
                   <React.Fragment key={g}>
                     <div className="rp-group">
-                      {g === "mine" ? "我的技能（仅个人会话）" : "平台技能（全员共享）"}
+                      {g === "mine"
+                        ? bi(
+                            "我的技能（仅个人会话）",
+                            "My skills (personal chats only)",
+                          )
+                        : bi(
+                            "平台技能（全员共享）",
+                            "Platform skills (shared)",
+                          )}
                     </div>
                     {rows.map((s) => {
                       const scCount = s.scripts?.length || 0;
@@ -544,15 +597,22 @@ export function SkillsPage({ selected }: { selected?: string }) {
                           </span>
                           <span className="rp-flags">
                             {scCount > 0 && (
-                              <em className="rp-flag script" title="含沙箱脚本">
-                                脚本 ×{scCount}
+                              <em
+                                className="rp-flag script"
+                                title={bi("含沙箱脚本", "Includes sandbox scripts")}
+                              >
+                                {bi(`脚本 ×${scCount}`, `Scripts ×${scCount}`)}
                               </em>
                             )}
                             {s.customized && (
-                              <em className="rp-flag cust">已定制</em>
+                              <em className="rp-flag cust">
+                                {bi("已定制", "Customized")}
+                              </em>
                             )}
                             {s.enabled === false && (
-                              <em className="rp-flag">已停用</em>
+                              <em className="rp-flag">
+                                {bi("已停用", "Disabled")}
+                              </em>
                             )}
                           </span>
                         </a>
@@ -575,7 +635,7 @@ export function SkillsPage({ selected }: { selected?: string }) {
                 icon={<IconArrowLeft />}
                 onClick={() => go({ name: "skills" })}
               >
-                技能
+                {bi("技能", "Skills")}
               </Button>
             )}
             {editing && draft ? (
@@ -616,26 +676,31 @@ export function SkillsPage({ selected }: { selected?: string }) {
                         className={`rp-scope-pill ${cur.mine ? "mine" : cur.builtin ? "built" : "org"}`}
                       >
                         {cur.mine
-                          ? "个人隔离技能"
+                          ? bi("个人隔离技能", "Personal isolated skill")
                           : cur.builtin
                             ? cur.customized
-                              ? "平台内置 · 已定制"
-                              : "平台内置"
-                            : "平台自建技能"}
+                              ? bi(
+                                  "平台内置 · 已定制",
+                                  "Built-in · Customized",
+                                )
+                              : bi("平台内置", "Platform built-in")
+                            : bi("平台自建技能", "Platform custom skill")}
                       </span>
                     </div>
                     <p>{cur.description}</p>
                   </div>
                   <span className="rp-acts">
                     <Button icon={<IconEye />} onClick={() => setRaw(!raw)}>
-                      {raw ? "看排版" : "看原文"}
+                      {raw
+                        ? bi("看排版", "Formatted")
+                        : bi("看原文", "Raw source")}
                     </Button>
                     {!cur.mine && (
                       <Button
                         icon={<IconCopy />}
                         onClick={() => forkToMine(cur)}
                       >
-                        复制为个人技能
+                        {bi("复制为个人技能", "Fork to mine")}
                       </Button>
                     )}
                     {(cur.mine || admin) && (
@@ -643,7 +708,7 @@ export function SkillsPage({ selected }: { selected?: string }) {
                         icon={<IconEdit />}
                         onClick={() => startEdit(cur)}
                       >
-                        编辑
+                        {bi("编辑", "Edit")}
                       </Button>
                     )}
                     {admin && cur.builtin && cur.customized && (
@@ -651,7 +716,7 @@ export function SkillsPage({ selected }: { selected?: string }) {
                         icon={<IconRefresh />}
                         onClick={() => resetBuiltin(cur)}
                       >
-                        恢复默认
+                        {bi("恢复默认", "Reset default")}
                       </Button>
                     )}
                     {(cur.mine || (admin && !cur.builtin)) && (
@@ -659,7 +724,7 @@ export function SkillsPage({ selected }: { selected?: string }) {
                         status="danger"
                         icon={<IconDelete />}
                         onClick={() => remove(cur)}
-                        aria-label="删除"
+                        aria-label={bi("删除", "Delete")}
                       />
                     )}
                     {admin && !cur.mine && (
@@ -668,9 +733,11 @@ export function SkillsPage({ selected }: { selected?: string }) {
                           size="small"
                           checked={cur.enabled !== false}
                           onChange={(v) => toggle(cur, v)}
-                          aria-label="对所有人启用"
+                          aria-label={bi("对所有人启用", "Enable for everyone")}
                         />
-                        {cur.enabled !== false ? "已启用" : "已停用"}
+                        {cur.enabled !== false
+                          ? bi("已启用", "Enabled")
+                          : bi("已停用", "Disabled")}
                       </label>
                     )}
                   </span>
@@ -679,7 +746,7 @@ export function SkillsPage({ selected }: { selected?: string }) {
                   <div className="rp-main">
                     {raw ? (
                       <pre className="kb-raw mono">
-                        {cur.content || "（没有内容）"}
+                        {cur.content || bi("（没有内容）", "(No content)")}
                       </pre>
                     ) : (
                       <StructuredDoc
@@ -700,55 +767,111 @@ export function SkillsPage({ selected }: { selected?: string }) {
                       <div className="rp-sec-box-h">
                         {cur.mine ? <IconLock /> : <IconSafe />}
                         <span>
-                          {cur.mine ? "个人权限隔离边界" : "平台零穿透安全边界"}
+                          {cur.mine
+                            ? bi("个人权限隔离边界", "Personal isolation boundary")
+                            : bi(
+                                "平台零穿透安全边界",
+                                "Zero-escalation platform boundary",
+                              )}
                         </span>
                       </div>
                       <ul>
                         {cur.mine ? (
                           <>
-                            <li>仅你本人的对话可见与调用，其他成员不可见。</li>
-                            <li>不可覆盖同名平台内置安全规范技能。</li>
                             <li>
-                              脚本运行于平台内置隔离沙箱（≤60s / 1GB），只能读写你本人的资料文件，网络与执行权限按沙箱策略受控。
+                              {bi(
+                                "仅你本人的对话可见与调用，其他成员不可见。",
+                                "Visible and callable only in your own chats; hidden from other users.",
+                              )}
+                            </li>
+                            <li>
+                              {bi(
+                                "不可覆盖同名平台内置安全规范技能。",
+                                "Cannot shadow built-in platform safety skills of the same name.",
+                              )}
+                            </li>
+                            <li>
+                              {bi(
+                                "脚本运行于平台内置隔离沙箱（≤60s / 1GB），只能读写你本人的资料文件，网络与执行权限按沙箱策略受控。",
+                                "Scripts run in an isolated sandbox (≤60s / 1 GB), accessing only your own files under sandbox network & execution policies.",
+                              )}
                             </li>
                           </>
                         ) : (
                           <>
-                            <li>仅具备 AI 设置权限的管理员可修改或启停。</li>
                             <li>
-                              调用时严格降权绑定<b>当前提问者本人身份</b>，零跨用户数据穿透。
+                              {bi(
+                                "仅具备 AI 设置权限的管理员可修改或启停。",
+                                "Only admins with AI Settings permission can edit or toggle.",
+                              )}
                             </li>
                             <li>
-                              随附脚本复用平台统一代码沙箱隔离执行，绝不直连宿主机或受管生产节点；如需外网须按沙箱策略授权。
+                              {bi(
+                                "调用时严格降权绑定",
+                                "Strictly scoped at runtime to ",
+                              )}
+                              <b>
+                                {bi("当前提问者本人身份", "the asking user's identity")}
+                              </b>
+                              {bi("，零跨用户数据穿透。", "—zero cross-user data leakage.")}
+                            </li>
+                            <li>
+                              {bi(
+                                "随附脚本复用平台统一代码沙箱隔离执行，绝不直连宿主机或受管生产节点；如需外网须按沙箱策略授权。",
+                                "Attached scripts run in the unified sandbox—never directly on the host or managed nodes; outbound network requires policy approval.",
+                              )}
                             </li>
                           </>
                         )}
                       </ul>
                     </div>
                     <dl>
-                      <dt>标识</dt>
+                      <dt>{bi("标识", "Identifier")}</dt>
                       <dd className="mono">{cur.name}</dd>
-                      <dt>来源与范围</dt>
+                      <dt>{bi("来源与范围", "Source & scope")}</dt>
                       <dd>
                         {cur.mine
-                          ? "个人编写 · 仅在我的对话中生效"
+                          ? bi(
+                              "个人编写 · 仅在我的对话中生效",
+                              "Personal · Active only in my chats",
+                            )
                           : cur.builtin
                             ? cur.customized
-                              ? "平台内置（已由管理员定制）· 全员可用"
-                              : "平台内置 · 全员可用"
-                            : "本单位编写 · 全员可用"}
+                              ? bi(
+                                  "平台内置（已由管理员定制）· 全员可用",
+                                  "Built-in (customized by admin) · Shared",
+                                )
+                              : bi(
+                                  "平台内置 · 全员可用",
+                                  "Platform built-in · Shared",
+                                )
+                            : bi("本单位编写 · 全员可用", "Organization · Shared")}
                       </dd>
-                      <dt>随附沙箱脚本</dt>
+                      <dt>{bi("随附沙箱脚本", "Sandbox scripts")}</dt>
                       <dd>
                         {cur.scripts && cur.scripts.length > 0
-                          ? `${cur.scripts.length} 个 Python 脚本（调用平台统一沙箱隔离执行）`
-                          : "纯规范文档（可点击「编辑」挂载计算或解析脚本）"}
+                          ? bi(
+                              `${cur.scripts.length} 个 Python 脚本（调用平台统一沙箱隔离执行）`,
+                              `${cur.scripts.length} Python script${cur.scripts.length === 1 ? "" : "s"} (isolated sandbox)`,
+                            )
+                          : bi(
+                              "纯规范文档（可点击「编辑」挂载计算或解析脚本）",
+                              "Doc-only skill (click Edit to attach calculation or parsing scripts)",
+                            )}
                       </dd>
-                      <dt>AI 怎么用它</dt>
+                      <dt>{bi("AI 怎么用它", "How AI uses it")}</dt>
                       <dd>
-                        对话时 AI 先看到一句话说明；相关时通过{" "}
-                        <code className="mono">use_skill</code> 读取全文，并在沙箱开启时按需调用{" "}
-                        <code className="mono">run_skill_script</code>。
+                        {bi(
+                          "对话时 AI 先看到一句话说明；相关时通过 ",
+                          "In chat, AI sees the summary first; when relevant it loads the full doc via ",
+                        )}
+                        <code className="mono">use_skill</code>
+                        {bi(
+                          " 读取全文，并在沙箱开启时按需调用 ",
+                          " and invokes ",
+                        )}
+                        <code className="mono">run_skill_script</code>
+                        {bi("。", " when sandbox is enabled.")}
                       </dd>
                     </dl>
                   </aside>
@@ -756,11 +879,11 @@ export function SkillsPage({ selected }: { selected?: string }) {
               </article>
             ) : selected && selected !== "~new" && mine ? (
               <div className="detail-none enter">
-                <h2>找不到这个技能</h2>
+                <h2>{bi("找不到这个技能", "Skill not found")}</h2>
                 <Button
                   onClick={() => go({ name: "skills" }, { replace: true })}
                 >
-                  返回
+                  {bi("返回", "Back")}
                 </Button>
               </div>
             ) : (
@@ -768,12 +891,20 @@ export function SkillsPage({ selected }: { selected?: string }) {
                 <span className="rp-ic xl k-built">
                   <IconBook />
                 </span>
-                <h2>结构化操作手册与安全沙箱脚本</h2>
+                <h2>
+                  {bi(
+                    "结构化操作手册与安全沙箱脚本",
+                    "Structured playbooks & isolated sandbox scripts",
+                  )}
+                </h2>
                 <p>
-                  把团队规范、排查规程写成技能，并可挂载参数核算、日志解析或表格质检脚本。平台技能全员共享但严格按调用者身份隔离文件权限；个人技能仅在自己的会话中生效。
+                  {bi(
+                    "把团队规范、排查规程写成技能，并可挂载参数核算、日志解析或表格质检脚本。平台技能全员共享但严格按调用者身份隔离文件权限；个人技能仅在自己的会话中生效。",
+                    "Turn team standards and runbooks into skills, optionally backed by sizing, log parsing, or table check scripts. Platform skills are shared with strict per-user file isolation; personal skills apply only to your chats.",
+                  )}
                 </p>
                 <Button type="primary" icon={<IconPlus />} onClick={startNew}>
-                  写一个技能
+                  {bi("写一个技能", "Write a skill")}
                 </Button>
               </div>
             )}
@@ -805,6 +936,7 @@ function SkillScriptsPanel({
   canEdit: boolean;
   onEdit: () => void;
 }) {
+  useLang();
   const scripts = skill.scripts || [];
   const [openMap, setOpenMap] = useState<Record<string, boolean>>(() =>
     scripts[0] ? { [scripts[0].name]: true } : {},
@@ -829,7 +961,10 @@ function SkillScriptsPanel({
     setOpenMap((m) => ({ ...m, [name]: !m[name] }));
 
   return (
-    <section className="rp-scripts-sec" aria-label="随附沙箱脚本">
+    <section
+      className="rp-scripts-sec"
+      aria-label={bi("随附沙箱脚本", "Attached sandbox scripts")}
+    >
       <header className="rp-scripts-head">
         <div className="rp-scripts-title">
           <span className="rp-scripts-ic">
@@ -837,16 +972,22 @@ function SkillScriptsPanel({
           </span>
           <div>
             <h2>
-              随附可执行沙箱脚本 <em>{scripts.length}</em>
+              {bi("随附可执行沙箱脚本", "Attached sandbox scripts")}{" "}
+              <em>{scripts.length}</em>
             </h2>
             <p>
-              调用平台统一代码沙箱隔离执行（默认断网；声明需要网络的脚本须按沙箱策略经客户授权后联网，仍禁止访问本机服务与宿主机目录），仅能读取<b>当前对话发起人自己</b>存储空间中的输入文件。
+              {bi(
+                "调用平台统一代码沙箱隔离执行（默认断网；声明需要网络的脚本须按沙箱策略经客户授权后联网，仍禁止访问本机服务与宿主机目录），仅能读取",
+                "Executed in the unified sandbox (offline by default; network-flagged scripts require user approval per policy and still block host/loopback access), reading only ",
+              )}
+              <b>{bi("当前对话发起人自己", "the current user's own")}</b>
+              {bi("存储空间中的输入文件。", " input files.")}
             </p>
           </div>
         </div>
         {canEdit && (
           <Button size="small" icon={<IconEdit />} onClick={onEdit}>
-            管理脚本
+            {bi("管理脚本", "Manage scripts")}
           </Button>
         )}
       </header>
@@ -868,11 +1009,14 @@ function SkillScriptsPanel({
                     className={`rp-script-tag ${sc.network ? "net" : ""}`}
                   >
                     {sc.network
-                      ? "Python 3 · 联网需授权"
-                      : "Python 3 · 隔离沙箱"}
+                      ? bi(
+                          "Python 3 · 联网需授权",
+                          "Python 3 · Net w/ approval",
+                        )
+                      : bi("Python 3 · 隔离沙箱", "Python 3 · Isolated sandbox")}
                   </span>
                   <span className="rp-script-lines num">
-                    {codeLines.length} 行
+                    {bi(`${codeLines.length} 行`, `${codeLines.length} lines`)}
                   </span>
                 </div>
                 {sc.description ? (
@@ -892,10 +1036,10 @@ function SkillScriptsPanel({
                           e.stopPropagation();
                           downloadScript(sc.name, sc.code);
                         }}
-                        title="下载脚本源码"
+                        title={bi("下载脚本源码", "Download script")}
                       >
                         <IconDownload />
-                        <span>下载</span>
+                        <span>{bi("下载", "Download")}</span>
                       </button>
                       <button
                         type="button"
@@ -913,7 +1057,9 @@ function SkillScriptsPanel({
                       >
                         {copiedName === sc.name ? <IconCheck /> : <IconCopy />}
                         <span>
-                          {copiedName === sc.name ? "已复制" : "复制"}
+                          {copiedName === sc.name
+                            ? bi("已复制", "Copied")
+                            : bi("复制", "Copy")}
                         </span>
                       </button>
                     </>
@@ -922,8 +1068,16 @@ function SkillScriptsPanel({
                     type="button"
                     className={`rp-script-chev ${open ? "open" : ""}`}
                     aria-expanded={open}
-                    aria-label={open ? `收起 ${sc.name}` : `展开 ${sc.name}`}
-                    title={open ? "收起脚本源码" : "展开脚本源码"}
+                    aria-label={
+                      open
+                        ? bi(`收起 ${sc.name}`, `Collapse ${sc.name}`)
+                        : bi(`展开 ${sc.name}`, `Expand ${sc.name}`)
+                    }
+                    title={
+                      open
+                        ? bi("收起脚本源码", "Collapse script")
+                        : bi("展开脚本源码", "Expand script")
+                    }
                     onClick={(e) => {
                       e.stopPropagation();
                       toggleScript(sc.name);
@@ -972,30 +1126,47 @@ function SkillEditor({
   save: () => void;
   cancel: () => void;
 }) {
+  const lang = useLang();
   const [preview, setPreview] = useState(false);
 
   const nameErr = !draft.name
     ? ""
     : !NAME.test(draft.name)
-      ? "小写字母开头，只用小写字母、数字和 -（2–41 字符）"
+      ? bi(
+          "小写字母开头，只用小写字母、数字和 -（2–41 字符）",
+          "Start with a lowercase letter; use lowercase letters, digits, and - (2–41 chars)",
+        )
       : taken(draft.name)
-        ? "这个标识已被平台或你的其他技能占用（个人技能不能覆盖平台技能名）"
+        ? bi(
+            "这个标识已被平台或你的其他技能占用（个人技能不能覆盖平台技能名）",
+            "Identifier already used by a platform or personal skill (personal skills cannot shadow platform names)",
+          )
         : "";
 
   const scriptErrors = useMemo(() => {
     const seen = new Set<string>();
     return draft.scripts.map((sc) => {
       const fn = sc.name.trim();
-      if (!fn) return "请填写脚本文件名（如 calc_params.py）";
+      if (!fn)
+        return bi(
+          "请填写脚本文件名（如 calc_params.py）",
+          "Enter script filename (e.g. calc_params.py)",
+        );
       if (!SCRIPT_NAME.test(fn))
-        return "需以字母或数字开头，仅含字母、数字、_ 或 -，且以 .py 结尾（禁止以 _ 开头或包含路径）";
-      if (seen.has(fn)) return `脚本文件名重复：${fn}`;
+        return bi(
+          "需以字母或数字开头，仅含字母、数字、_ 或 -，且以 .py 结尾（禁止以 _ 开头或包含路径）",
+          "Must start with letter/digit, contain only letters, digits, _, or -, and end with .py (no leading _ or paths)",
+        );
+      if (seen.has(fn))
+        return bi(`脚本文件名重复：${fn}`, `Duplicate script filename: ${fn}`);
       seen.add(fn);
-      if (!sc.code.trim()) return "脚本代码不能为空";
-      if (sc.code.length > 64 << 10) return "单个脚本不能超过 64 KiB";
+      if (!sc.code.trim())
+        return bi("脚本代码不能为空", "Script code cannot be empty");
+      if (sc.code.length > 64 << 10)
+        return bi("单个脚本不能超过 64 KiB", "Single script cannot exceed 64 KiB");
       return "";
     });
-  }, [draft.scripts]);
+  }, [draft.scripts, lang]);
 
   const hasScriptErr = scriptErrors.some(Boolean);
   const ok =
@@ -1006,9 +1177,12 @@ function SkillEditor({
     draft.content.trim() &&
     !hasScriptErr;
 
-  const addScript = (tpl?: (typeof SCRIPT_TEMPLATES)[number]) => {
+  const templates = getScriptTemplates();
+  const addScript = (tpl?: ScriptTemplate) => {
     if (draft.scripts.length >= 8) {
-      Message.warning("单个技能最多挂载 8 个脚本");
+      Message.warning(
+        bi("单个技能最多挂载 8 个脚本", "A skill can attach at most 8 scripts"),
+      );
       return;
     }
     const used = new Set(draft.scripts.map((s) => s.name.trim()));
@@ -1054,37 +1228,61 @@ function SkillEditor({
         <div>
           <h1>
             {draft.builtin
-              ? `编辑内置技能 · ${draft.name}`
+              ? bi(
+                  `编辑内置技能 · ${draft.name}`,
+                  `Edit built-in skill · ${draft.name}`,
+                )
               : draft.orig
-                ? "编辑技能"
-                : "新建技能"}
+                ? bi("编辑技能", "Edit skill")
+                : bi("新建技能", "New skill")}
           </h1>
           <p className="rp-edit-sub">
             {draft.scope === "mine"
-              ? "个人技能：仅在你本人的会话中可见与运行，严格隔离跨用户文件与平台资源。"
+              ? bi(
+                  "个人技能：仅在你本人的会话中可见与运行，严格隔离跨用户文件与平台资源。",
+                  "Personal skill: visible and runnable only in your own chats, isolated from other users' files and platform resources.",
+                )
               : draft.builtin
-                ? "正在定制平台内置技能：保存后对全员生效，随时可一键「恢复默认」。"
-                : "平台共享技能：对全员可用，脚本执行时自动降权绑定当前提问者本人存储空间。"}
+                ? bi(
+                    "正在定制平台内置技能：保存后对全员生效，随时可一键「恢复默认」。",
+                    "Customizing a built-in skill: applies to everyone after saving; click Reset default anytime to revert.",
+                  )
+                : bi(
+                    "平台共享技能：对全员可用，脚本执行时自动降权绑定当前提问者本人存储空间。",
+                    "Shared platform skill: available to everyone; scripts run scoped strictly to the asking user's storage.",
+                  )}
           </p>
         </div>
         <span className="rp-acts">
-          <Button onClick={cancel}>取消</Button>
+          <Button onClick={cancel}>{bi("取消", "Cancel")}</Button>
           <Button type="primary" loading={busy} disabled={!ok} onClick={save}>
-            保存
+            {bi("保存", "Save")}
           </Button>
         </span>
       </header>
 
       {admin && !draft.orig && (
         <div className="rp-field">
-          <span>作用域与权限边界</span>
+          <span>{bi("作用域与权限边界", "Scope & isolation boundary")}</span>
           <Segmented<"mine" | "platform">
-            label="给谁用"
+            label={bi("给谁用", "Availability")}
             value={draft.scope}
             onChange={(v) => setDraft({ ...draft, scope: v })}
             options={[
-              { value: "mine", label: "个人技能（仅我自己可见与调用）" },
-              { value: "platform", label: "平台技能（全员共享 · 调用者降权隔离）" },
+              {
+                value: "mine",
+                label: bi(
+                  "个人技能（仅我自己可见与调用）",
+                  "Personal (only visible & callable by me)",
+                ),
+              },
+              {
+                value: "platform",
+                label: bi(
+                  "平台技能（全员共享 · 调用者降权隔离）",
+                  "Platform (shared · caller-isolated)",
+                ),
+              },
             ]}
           />
         </div>
@@ -1092,17 +1290,17 @@ function SkillEditor({
 
       <div className="rp-grid2">
         <div className="rp-field">
-          <span>名称</span>
+          <span>{bi("名称", "Title")}</span>
           <Input
             value={draft.title}
             onChange={(v) => setDraft({ ...draft, title: v })}
-            placeholder="本单位变更规范"
+            placeholder={bi("本单位变更规范", "Org change policy")}
             maxLength={40}
-            aria-label="名称"
+            aria-label={bi("名称", "Title")}
           />
         </div>
         <div className="rp-field">
-          <span>标识</span>
+          <span>{bi("标识", "Identifier")}</span>
           <Input
             className="mono"
             value={draft.name}
@@ -1110,43 +1308,58 @@ function SkillEditor({
             placeholder="change-window"
             disabled={!!draft.orig}
             status={nameErr ? "error" : undefined}
-            aria-label="标识"
+            aria-label={bi("标识", "Identifier")}
           />
           <small className={nameErr ? "bad" : ""}>
-            {nameErr || "小写字母开头，只用小写字母、数字和 -"}
+            {nameErr ||
+              bi(
+                "小写字母开头，只用小写字母、数字和 -",
+                "Start with a lowercase letter; use lowercase letters, digits, and - only",
+              )}
           </small>
         </div>
       </div>
 
       <div className="rp-field">
-        <span>一句话说明（AI 靠它判断什么时候读这个技能）</span>
+        <span>
+          {bi(
+            "一句话说明（AI 靠它判断什么时候读这个技能）",
+            "One-line summary (tells the assistant when to load this skill)",
+          )}
+        </span>
         <Input
           value={draft.description}
           onChange={(v) => setDraft({ ...draft, description: v })}
           maxLength={300}
-          placeholder="变更窗口、审批要求和回退规范；回答涉及上线或变更时使用"
-          aria-label="说明"
+          placeholder={bi(
+            "变更窗口、审批要求和回退规范；回答涉及上线或变更时使用",
+            "Change windows, approval rules, and rollback standards; read for go-live or change questions",
+          )}
+          aria-label={bi("说明", "Summary")}
         />
       </div>
 
       <div className="rp-field">
         <span className="rp-field-h">
-          操作规范正文（Markdown · 自动结构化排版）
+          {bi(
+            "操作规范正文（Markdown · 自动结构化排版）",
+            "Playbook body (Markdown · auto-structured layout)",
+          )}
           <Segmented<string>
             size="sm"
-            label="视图"
+            label={bi("视图", "View")}
             value={preview ? "p" : "e"}
             onChange={(v) => setPreview(v === "p")}
             options={[
-              { value: "e", label: "编辑源码" },
-              { value: "p", label: "排版预览" },
+              { value: "e", label: bi("编辑源码", "Edit source") },
+              { value: "p", label: bi("排版预览", "Preview") },
             ]}
           />
         </span>
         {preview ? (
           <div className="rp-preview">
             <StructuredDoc
-              text={draft.content || "（还没有内容）"}
+              text={draft.content || bi("（还没有内容）", "(No content)")}
               docTitle={draft.title}
               idPrefix="sk-preview"
             />
@@ -1156,27 +1369,43 @@ function SkillEditor({
             className="mono"
             value={draft.content}
             onChange={(v) => setDraft({ ...draft, content: v })}
-            placeholder="建议使用 ## 二级标题划分章节（如 ## 适用边界、## 核查步骤、## 处置要求），AI 与阅读界面都会更清晰。"
+            placeholder={bi(
+              "建议使用 ## 二级标题划分章节（如 ## 适用边界、## 核查步骤、## 处置要求），AI 与阅读界面都会更清晰。",
+              "Use ## headings to organize sections (e.g. ## Scope, ## Checks, ## Actions) for clearer AI and reader parsing.",
+            )}
             autoSize={{ minRows: 12, maxRows: 30 }}
-            aria-label="内容"
+            aria-label={bi("内容", "Content")}
           />
         )}
-        <small>严禁写入明文口令、Token 或私钥，检测到敏感凭据将拒绝保存。</small>
+        <small>
+          {bi(
+            "严禁写入明文口令、Token 或私钥，检测到敏感凭据将拒绝保存。",
+            "Never include plaintext passwords, tokens, or private keys; saves containing credentials are rejected.",
+          )}
+        </small>
       </div>
 
       <div className="rp-scripts-editor">
         <div className="rp-scripts-ed-h">
           <div>
             <h3>
-              <IconCode /> 随附可执行沙箱脚本（可选 · {draft.scripts.length}/8）
+              <IconCode />{" "}
+              {bi(
+                `随附可执行沙箱脚本（可选 · ${draft.scripts.length}/8）`,
+                `Attached sandbox scripts (optional · ${draft.scripts.length}/8)`,
+              )}
             </h3>
             <p>
-              当技能不仅需要文字规程，还需要精确参数核算、快照解析或表格质检时，可挂载 Python 3 脚本供 AI 调用{" "}
-              <code className="mono">run_skill_script</code> 执行。
+              {bi(
+                "当技能不仅需要文字规程，还需要精确参数核算、快照解析或表格质检时，可挂载 Python 3 脚本供 AI 调用 ",
+                "Attach Python 3 scripts when the skill needs deterministic sizing, log parsing, or table checks via ",
+              )}
+              <code className="mono">run_skill_script</code>
+              {bi(" 执行。", ".")}
             </p>
           </div>
           <div className="rp-tpl-btns">
-            {SCRIPT_TEMPLATES.map((tpl) => (
+            {templates.map((tpl) => (
               <Button
                 key={tpl.name}
                 size="small"
@@ -1187,7 +1416,7 @@ function SkillEditor({
               </Button>
             ))}
             <Button size="small" type="outline" onClick={() => addScript()}>
-              空白脚本
+              {bi("空白脚本", "Blank script")}
             </Button>
           </div>
         </div>
@@ -1197,15 +1426,31 @@ function SkillEditor({
           <div>
             <b>
               {draft.scope === "mine"
-                ? "个人脚本安全沙箱约束："
-                : "平台脚本防权限穿透约束："}
+                ? bi("个人脚本安全沙箱约束：", "Personal script sandbox limits: ")
+                : bi(
+                    "平台脚本防权限穿透约束：",
+                    "Platform script isolation boundary: ",
+                  )}
             </b>
             <span>
-              脚本调用平台统一代码沙箱隔离执行（只读{" "}
-              <code>/rt</code>、禁止访问本机回环服务/宿主机目录/集群凭据，默认断网，开启外网权限后按平台策略由客户授权）；
+              {bi(
+                "脚本调用平台统一代码沙箱隔离执行（只读 ",
+                "Scripts run in the unified sandbox (read-only ",
+              )}
+              <code>/rt</code>
+              {bi(
+                "、禁止访问本机回环服务/宿主机目录/集群凭据，默认断网，开启外网权限后按平台策略由客户授权）；",
+                ", no loopback/host/cluster-credential access, offline by default with policy-gated outbound network); ",
+              )}
               {draft.scope === "mine"
-                ? "仅你本人的会话可触发，单次运行上限 60 秒 / 1 GB 内存 / 32 进程，仅能读写你自己的资料空间。"
-                : "任何成员在对话中触发时，输入 /in 与输出 /out 均强制限定在该成员本人的个人存储空间内，绝不穿透访问管理员或其他成员的文件与交付。"}
+                ? bi(
+                    "仅你本人的会话可触发，单次运行上限 60 秒 / 1 GB 内存 / 32 进程，仅能读写你自己的资料空间。",
+                    "callable only from your chats, capped at 60s / 1 GB RAM / 32 procs, with access only to your own files.",
+                  )
+                : bi(
+                    "任何成员在对话中触发时，输入 /in 与输出 /out 均强制限定在该成员本人的个人存储空间内，绝不穿透访问管理员或其他成员的文件与交付。",
+                    "whenever any user invokes it, /in and /out are bound strictly to that caller's own storage—never accessing admins' or other users' files or deliveries.",
+                  )}
             </span>
           </div>
         </div>
@@ -1216,7 +1461,7 @@ function SkillEditor({
               <div key={idx} className="rp-script-ed-card">
                 <div className="rp-script-ed-top">
                   <div className="rp-field">
-                    <span>脚本文件名（.py）</span>
+                    <span>{bi("脚本文件名（.py）", "Script filename (.py)")}</span>
                     <Input
                       className="mono"
                       value={sc.name}
@@ -1227,11 +1472,19 @@ function SkillEditor({
                     />
                   </div>
                   <div className="rp-field rp-script-ed-desc">
-                    <span>用途与入参说明（展示给 AI 与阅读者）</span>
+                    <span>
+                      {bi(
+                        "用途与入参说明（展示给 AI 与阅读者）",
+                        "Purpose & args description (shown to AI and readers)",
+                      )}
+                    </span>
                     <Input
                       value={sc.description || ""}
                       onChange={(v) => updateScript(idx, { description: v })}
-                      placeholder="例如：读取 args.memory_gb 与 max_connections，输出内存参数核算 JSON"
+                      placeholder={bi(
+                        "例如：读取 args.memory_gb 与 max_connections，输出内存参数核算 JSON",
+                        "e.g. Read args.memory_gb and max_connections, print recommended memory JSON",
+                      )}
                       maxLength={200}
                     />
                   </div>
@@ -1239,7 +1492,7 @@ function SkillEditor({
                     status="danger"
                     type="text"
                     icon={<IconDelete />}
-                    aria-label="移除脚本"
+                    aria-label={bi("移除脚本", "Remove script")}
                     onClick={() => removeScript(idx)}
                   />
                 </div>
@@ -1250,7 +1503,10 @@ function SkillEditor({
                     onChange={(v) => updateScript(idx, { network: v })}
                   />
                   <span>
-                    需要访问外部网络（默认离线隔离；开启后运行时按平台沙箱网络策略征得客户授权）
+                    {bi(
+                      "需要访问外部网络（默认离线隔离；开启后运行时按平台沙箱网络策略征得客户授权）",
+                      "Requires outbound network access (offline by default; subject to sandbox network approval at runtime)",
+                    )}
                   </span>
                 </label>
                 {scriptErrors[idx] && (
@@ -1264,11 +1520,18 @@ function SkillEditor({
                   placeholder='import json, sys\nargs = json.load(open(sys.argv[1], encoding="utf-8"))\nprint(json.dumps(args))'
                 />
                 <small className="rp-script-hint">
-                  约定：<code className="mono">sys.argv[1]</code> 为{" "}
-                  <code className="mono">/in/_args.json</code>；用户传入文件位于{" "}
-                  <code className="mono">/in/</code>；生成给用户下载的文件写到{" "}
-                  <code className="mono">/out/</code>；用{" "}
-                  <code className="mono">print()</code> 输出结论给 AI。
+                  {bi("约定：", "Convention: ")}
+                  <code className="mono">sys.argv[1]</code>{" "}
+                  {bi("为", "is")} <code className="mono">/in/_args.json</code>
+                  {bi("；用户传入文件位于", "; input files are in")}{" "}
+                  <code className="mono">/in/</code>
+                  {bi(
+                    "；生成给用户下载的文件写到",
+                    "; write downloadable outputs to",
+                  )}{" "}
+                  <code className="mono">/out/</code>
+                  {bi("；用", "; use")} <code className="mono">print()</code>{" "}
+                  {bi("输出结论给 AI。", "to return output to AI.")}
                 </small>
               </div>
             ))}

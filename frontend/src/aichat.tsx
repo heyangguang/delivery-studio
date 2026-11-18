@@ -46,6 +46,7 @@ import {
 } from "@arco-design/web-react/icon";
 import { reportDoc, useSubmitKB } from "./kb";
 import { go } from "./router";
+import { bi, getLang, useLang, withLang } from "./i18n";
 import {
   ago,
   api,
@@ -116,13 +117,30 @@ export type AICallDiag = {
 export type ChatStreamError = Error & { diag?: AICallDiag };
 
 const REASON_LABELS: Record<string, string> = {
-  empty_output: "空输出 (empty_output)",
-  http_error: "HTTP 错误 (http_error)",
-  sse_error: "流式事件异常 (sse_error)",
-  incomplete: "输出未完成 (incomplete)",
-  invalid_output: "结构化输出不完整 (invalid_output)",
-  network_error: "网络连接异常 (network_error)",
-  timeout: "请求超时 (timeout)",
+  get empty_output() {
+    return bi("空输出 (empty_output)", "Empty output (empty_output)");
+  },
+  get http_error() {
+    return bi("HTTP 错误 (http_error)", "HTTP error (http_error)");
+  },
+  get sse_error() {
+    return bi("流式事件异常 (sse_error)", "SSE stream error (sse_error)");
+  },
+  get incomplete() {
+    return bi("输出未完成 (incomplete)", "Incomplete output (incomplete)");
+  },
+  get invalid_output() {
+    return bi(
+      "结构化输出不完整 (invalid_output)",
+      "Invalid structured output (invalid_output)",
+    );
+  },
+  get network_error() {
+    return bi("网络连接异常 (network_error)", "Network error (network_error)");
+  },
+  get timeout() {
+    return bi("请求超时 (timeout)", "Request timeout (timeout)");
+  },
 };
 
 export const reasonCodeLabel = (code?: string) =>
@@ -161,54 +179,87 @@ export function formatAICallDiag(
   },
 ): string {
   const lines: string[] = [];
-  if (meta?.title) lines.push(`【${meta.title}】`);
-  if (meta?.callId) lines.push(`调用编号: ${meta.callId}`);
+  if (meta?.title) lines.push(bi(`【${meta.title}】`, `[${meta.title}]`));
+  if (meta?.callId)
+    lines.push(bi(`调用编号: ${meta.callId}`, `Call ID: ${meta.callId}`));
   const prov = meta?.provider || diag?.provider;
   const mod = meta?.model || diag?.model;
   if (prov || mod)
-    lines.push(`模型: ${[prov, mod].filter(Boolean).join(" / ")}`);
-  if (meta?.testedAt) lines.push(`时间: ${meta.testedAt}`);
-  if (meta?.warn) lines.push(`兼容告警: ${meta.warn}`);
-  if (meta?.error) lines.push(`错误信息: ${meta.error}`);
+    lines.push(
+      bi(
+        `模型: ${[prov, mod].filter(Boolean).join(" / ")}`,
+        `Model: ${[prov, mod].filter(Boolean).join(" / ")}`,
+      ),
+    );
+  if (meta?.testedAt)
+    lines.push(bi(`时间: ${meta.testedAt}`, `Time: ${meta.testedAt}`));
+  if (meta?.warn)
+    lines.push(bi(`兼容告警: ${meta.warn}`, `Compatibility warning: ${meta.warn}`));
+  if (meta?.error)
+    lines.push(bi(`错误信息: ${meta.error}`, `Error: ${meta.error}`));
   const ep = diag?.endpoint || meta?.endpoint;
-  if (ep) lines.push(`协议端点: ${ep}`);
-  if (diag?.api) lines.push(`接口方式: ${diag.api}`);
-  if (diag?.fallback_used) lines.push(`协议回退: ${diag.fallback_used}`);
+  if (ep) lines.push(bi(`协议端点: ${ep}`, `Endpoint: ${ep}`));
+  if (diag?.api) lines.push(bi(`接口方式: ${diag.api}`, `API mode: ${diag.api}`));
+  if (diag?.fallback_used)
+    lines.push(
+      bi(`协议回退: ${diag.fallback_used}`, `Fallback: ${diag.fallback_used}`),
+    );
   const st = diag?.http_status ?? meta?.httpStatus;
   if (st != null || diag?.upstream_status || diag?.reason_code) {
     const parts = [
-      st != null ? (st > 0 ? `HTTP ${st}` : "网络未连通") : "",
-      diag?.upstream_status ? `上游状态=${diag.upstream_status}` : "",
-      diag?.reason_code ? `原因=${reasonCodeLabel(diag.reason_code)}` : "",
+      st != null
+        ? st > 0
+          ? `HTTP ${st}`
+          : bi("网络未连通", "Network unreachable")
+        : "",
+      diag?.upstream_status
+        ? bi(`上游状态=${diag.upstream_status}`, `upstream=${diag.upstream_status}`)
+        : "",
+      diag?.reason_code
+        ? bi(
+            `原因=${reasonCodeLabel(diag.reason_code)}`,
+            `reason=${reasonCodeLabel(diag.reason_code)}`,
+          )
+        : "",
     ].filter(Boolean);
-    if (parts.length) lines.push(`状态: ${parts.join(" · ")}`);
+    if (parts.length)
+      lines.push(bi(`状态: ${parts.join(" · ")}`, `Status: ${parts.join(" · ")}`));
   }
   const rid = diag?.response_id || meta?.responseId;
-  if (rid) lines.push(`响应 ID: ${rid}`);
+  if (rid) lines.push(bi(`响应 ID: ${rid}`, `Response ID: ${rid}`));
   const latency = diag?.ms ?? meta?.ms;
-  if (latency != null) lines.push(`耗时: ${latency} ms`);
+  if (latency != null)
+    lines.push(bi(`耗时: ${latency} ms`, `Latency: ${latency} ms`));
   if (
     diag?.in_tokens != null ||
     diag?.out_tokens != null ||
     diag?.cached_tokens != null
   ) {
     lines.push(
-      `Token: 输入 ${diag?.in_tokens ?? 0} / 缓存 ${diag?.cached_tokens ?? 0} / 输出 ${diag?.out_tokens ?? 0}`,
+      bi(
+        `Token: 输入 ${diag?.in_tokens ?? 0} / 缓存 ${diag?.cached_tokens ?? 0} / 输出 ${diag?.out_tokens ?? 0}`,
+        `Tokens: in ${diag?.in_tokens ?? 0} / cached ${diag?.cached_tokens ?? 0} / out ${diag?.out_tokens ?? 0}`,
+      ),
     );
   }
   if (diag?.sse_events?.length) {
     lines.push(
-      `SSE 事件: ${diag.sse_events.join(" -> ")}${diag.keepalives ? ` (心跳 ${diag.keepalives})` : ""}`,
+      bi(
+        `SSE 事件: ${diag.sse_events.join(" -> ")}${diag.keepalives ? ` (心跳 ${diag.keepalives})` : ""}`,
+        `SSE events: ${diag.sse_events.join(" -> ")}${diag.keepalives ? ` (keepalives ${diag.keepalives})` : ""}`,
+      ),
     );
   }
   if (diag?.attempts?.length) {
-    lines.push("尝试链路:");
+    lines.push(bi("尝试链路:", "Attempt trace:"));
     diag.attempts.forEach((a, idx) => {
       const segs = [
         `  #${idx + 1}`,
         `[${a.api}]`,
         a.endpoint,
-        a.http_status ? `HTTP ${a.http_status}` : "连接失败",
+        a.http_status
+          ? `HTTP ${a.http_status}`
+          : bi("连接失败", "Connection failed"),
         `${a.ms} ms`,
         a.in_tokens != null || a.out_tokens != null
           ? `in=${a.in_tokens ?? 0}${a.cached_tokens ? `/cache=${a.cached_tokens}` : ""}/out=${a.out_tokens ?? 0}`
@@ -221,10 +272,20 @@ export function formatAICallDiag(
     });
   }
   if (diag?.request_summary) {
-    lines.push(`请求参数摘要:\n${prettyDiagPayload(diag.request_summary)}`);
+    lines.push(
+      bi(
+        `请求参数摘要:\n${prettyDiagPayload(diag.request_summary)}`,
+        `Request summary:\n${prettyDiagPayload(diag.request_summary)}`,
+      ),
+    );
   }
   if (diag?.response_raw) {
-    lines.push(`网关原始响应:\n${prettyDiagPayload(diag.response_raw)}`);
+    lines.push(
+      bi(
+        `网关原始响应:\n${prettyDiagPayload(diag.response_raw)}`,
+        `Gateway raw response:\n${prettyDiagPayload(diag.response_raw)}`,
+      ),
+    );
   }
   return lines.join("\n");
 }
@@ -336,56 +397,143 @@ type Scope =
   | { kind: "comp"; name: string; beforeSend?: () => Promise<unknown> };
 
 const PHASE: Record<string, string> = {
-  prepare: "环境准备",
-  deploy: "部署",
-  tests: "功能测试",
-  endpoint: "入口测试",
-  cleanup: "清理",
+  get prepare() {
+    return bi("环境准备", "Environment setup");
+  },
+  get deploy() {
+    return bi("部署", "Deploy");
+  },
+  get tests() {
+    return bi("功能测试", "Functional tests");
+  },
+  get endpoint() {
+    return bi("入口测试", "Endpoint tests");
+  },
+  get cleanup() {
+    return bi("清理", "Cleanup");
+  },
 };
 const EFFECT: Record<string, string> = {
-  "read-only": "只读",
-  change: "修改",
-  disruptive: "会中断服务",
-  destructive: "不可撤销",
+  get "read-only"() {
+    return bi("只读", "Read-only");
+  },
+  get change() {
+    return bi("修改", "Modify");
+  },
+  get disruptive() {
+    return bi("会中断服务", "Disruptive");
+  },
+  get destructive() {
+    return bi("不可撤销", "Destructive");
+  },
 };
 const OP: Record<string, string> = {
-  add: "新增",
-  change: "修改",
-  delete: "删除",
+  get add() {
+    return bi("新增", "Add");
+  },
+  get change() {
+    return bi("修改", "Modify");
+  },
+  get delete() {
+    return bi("删除", "Delete");
+  },
 };
 const TOOL: Record<string, string> = {
-  list_deliveries: "交付列表",
-  delivery_info: "交付概况",
-  runbook: "执行手册",
-  execution_record: "执行记录",
-  list_files: "项目文件列表",
-  read_file: "项目文件",
-  propose_step: "步骤提案",
-  propose_change: "修改提案",
-  component_guide: "设计指南",
-  list_components: "现有组件",
-  example_component: "参考组件",
-  draft_files: "草稿文件列表",
-  draft_read: "草稿文件",
-  run_check: "平台检查",
-  propose_files: "改动提案",
+  get list_deliveries() {
+    return bi("交付列表", "Deliveries");
+  },
+  get delivery_info() {
+    return bi("交付概况", "Delivery overview");
+  },
+  get runbook() {
+    return bi("执行手册", "Runbook");
+  },
+  get execution_record() {
+    return bi("执行记录", "Execution record");
+  },
+  get list_files() {
+    return bi("项目文件列表", "Project file list");
+  },
+  get read_file() {
+    return bi("项目文件", "Project file");
+  },
+  get propose_step() {
+    return bi("步骤提案", "Step proposal");
+  },
+  get propose_change() {
+    return bi("修改提案", "Change proposal");
+  },
+  get component_guide() {
+    return bi("设计指南", "Design guide");
+  },
+  get list_components() {
+    return bi("现有组件", "Components");
+  },
+  get example_component() {
+    return bi("参考组件", "Reference component");
+  },
+  get draft_files() {
+    return bi("草稿文件列表", "Draft file list");
+  },
+  get draft_read() {
+    return bi("草稿文件", "Draft file");
+  },
+  get run_check() {
+    return bi("平台检查", "Platform check");
+  },
+  get propose_files() {
+    return bi("改动提案", "File proposal");
+  },
 };
 const DOING: Record<string, string> = {
-  list_deliveries: "查看你的交付",
-  delivery_info: "查看交付概况",
-  runbook: "阅读执行手册",
-  execution_record: "查看执行记录",
-  list_files: "浏览项目文件",
-  read_file: "读取项目文件",
-  propose_step: "整理步骤提案，平台校验中",
-  propose_change: "整理修改提案，平台校验中",
-  component_guide: "查阅设计指南",
-  list_components: "查看现有组件",
-  example_component: "参考现有组件",
-  draft_files: "查看草稿",
-  draft_read: "读取草稿文件",
-  run_check: "运行平台检查",
-  propose_files: "提交改动，平台检查与试生成中",
+  get list_deliveries() {
+    return bi("查看你的交付", "Listing deliveries");
+  },
+  get delivery_info() {
+    return bi("查看交付概况", "Checking delivery overview");
+  },
+  get runbook() {
+    return bi("阅读执行手册", "Reading runbook");
+  },
+  get execution_record() {
+    return bi("查看执行记录", "Reading execution record");
+  },
+  get list_files() {
+    return bi("浏览项目文件", "Browsing project files");
+  },
+  get read_file() {
+    return bi("读取项目文件", "Reading project file");
+  },
+  get propose_step() {
+    return bi("整理步骤提案，平台校验中", "Validating step proposal");
+  },
+  get propose_change() {
+    return bi("整理修改提案，平台校验中", "Validating change proposal");
+  },
+  get component_guide() {
+    return bi("查阅设计指南", "Reading design guide");
+  },
+  get list_components() {
+    return bi("查看现有组件", "Listing components");
+  },
+  get example_component() {
+    return bi("参考现有组件", "Checking reference component");
+  },
+  get draft_files() {
+    return bi("查看草稿", "Listing draft files");
+  },
+  get draft_read() {
+    return bi("读取草稿文件", "Reading draft file");
+  },
+  get run_check() {
+    return bi("运行平台检查", "Running platform check");
+  },
+  get propose_files() {
+    return bi(
+      "提交改动，平台检查与试生成中",
+      "Submitting changes & running dry-run check",
+    );
+  },
 };
 
 /** A conversation about the whole delivery (as many as people start), not about one step. */
@@ -424,6 +572,7 @@ export function AIDock({
   onChanged?: () => void;
   children: React.ReactNode;
 }) {
+  useLang();
   const status = useAIStatus();
   // closed: only the launcher shows (an open conversation keeps running behind it); min: a bar at the bottom
   const [mode, setMode] = useState<"closed" | "open" | "min">("closed");
@@ -545,10 +694,14 @@ export function AIDock({
           type="button"
           className={`ad-launch ${busy ? "busy" : ""} ${atEnd && !busy ? "mini" : ""}`}
           onClick={() => setOpen(true)}
-          aria-label="打开 AI 助手（Ctrl+J）"
+          aria-label={bi("打开 AI 助手（Ctrl+J）", "Open AI Assistant (Ctrl+J)")}
         >
           <Spark rainbow />
-          <span>{busy ? "AI 正在回答…" : "AI 助手"}</span>
+          <span>
+            {busy
+              ? bi("AI 正在回答…", "AI is replying…")
+              : bi("AI 助手", "AI Assistant")}
+          </span>
           {!busy && <kbd>⌘J</kbd>}
         </button>
       )}
@@ -595,6 +748,7 @@ function CompHistory({
   close: () => void;
   base: string;
 }) {
+  useLang();
   const [list, setList] = useState<HistoryItem[] | null>(null);
   const [pick, setPick] = useState("");
   const [detail, setDetail] = useState<{
@@ -633,24 +787,37 @@ function CompHistory({
       width={Math.min(760, window.innerWidth)}
       visible={open}
       onCancel={close}
-      title={pick ? "以前的对话" : "这个组件以前的对话"}
+      title={
+        pick
+          ? bi("以前的对话", "Previous conversation")
+          : bi("这个组件以前的对话", "Past conversations for this component")
+      }
       footer={null}
       className="ad-hist"
     >
       {!pick ? (
         list === null ? null : list.length === 0 ? (
           <p className="faint">
-            还没有。发布修订、放弃草稿或清空对话时，当时的对话会存在这里。
+            {bi(
+              "还没有。发布修订、放弃草稿或清空对话时，当时的对话会存在这里。",
+              "None yet. Conversations are archived here when you publish, discard a draft, or clear chat.",
+            )}
           </p>
         ) : (
           <ul className="ad-hist-list">
             {list.map((h) => (
               <li key={h.id}>
                 <button type="button" onClick={() => setPick(h.id)}>
-                  <b>{h.title || "（没有文字）"}</b>
+                  <b>{h.title || bi("（没有文字）", "(No text)")}</b>
                   <span className="faint small">
-                    {h.label} · {fullTime(h.at)} · {h.messages} 条
-                    {h.accepted ? ` · 采纳了 ${h.accepted} 个改动` : ""}
+                    {h.label} · {fullTime(h.at)} ·{" "}
+                    {bi(`${h.messages} 条`, `${h.messages} msgs`)}
+                    {h.accepted
+                      ? bi(
+                          ` · 采纳了 ${h.accepted} 个改动`,
+                          ` · ${h.accepted} accepted`,
+                        )
+                      : ""}
                   </span>
                 </button>
               </li>
@@ -660,7 +827,7 @@ function CompHistory({
       ) : (
         <>
           <button type="button" className="link" onClick={() => setPick("")}>
-            ← 返回列表
+            {bi("← 返回列表", "← Back to list")}
           </button>
           <div className="ad-hist-msgs">
             {(detail?.messages || []).map((m, i) => (
@@ -688,19 +855,26 @@ class WindowBoundary extends React.Component<
 > {
   state = { error: "" };
   static getDerivedStateFromError(e: Error) {
-    return { error: e.message || "出错了" };
+    return { error: e.message || bi("出错了", "Something went wrong") };
   }
   render() {
     if (!this.state.error) return this.props.children;
     return (
-      <section className="ad-win ad-broken" role="dialog" aria-label="AI 助手">
-        <p>AI 窗口出错了：{this.state.error}</p>
+      <section
+        className="ad-win ad-broken"
+        role="dialog"
+        aria-label={bi("AI 助手", "AI Assistant")}
+      >
+        <p>
+          {bi("AI 窗口出错了：", "AI window error: ")}
+          {this.state.error}
+        </p>
         <div>
           <Button size="small" onClick={() => this.setState({ error: "" })}>
-            重试
+            {bi("重试", "Retry")}
           </Button>
           <Button size="small" type="text" onClick={this.props.onClose}>
-            关闭
+            {bi("关闭", "Close")}
           </Button>
         </div>
       </section>
@@ -930,7 +1104,8 @@ export const readFile = (f: File) =>
   new Promise<string>((ok, bad) => {
     const r = new FileReader();
     r.onload = () => ok(String(r.result));
-    r.onerror = () => bad(new Error("图片无法读取"));
+    r.onerror = () =>
+      bad(new Error(bi("图片无法读取", "Unable to read image")));
     r.readAsDataURL(f);
   });
 
@@ -1005,6 +1180,7 @@ function ChatWindow({
   onChanged: () => void;
   available: (key: string) => boolean;
 }) {
+  useLang();
   const status = useAIStatus();
   const net = useConnectivity();
   const base =
@@ -1231,7 +1407,10 @@ function ChatWindow({
         const last = (s.messages || [])[(s.messages || []).length - 1];
         if (scope.kind === "comp" && !s.running && last?.role === "user")
           setError({
-            text: "上一次提问没有得到回答（回答中途断了，可能是服务刚更新过）",
+            text: bi(
+              "上一次提问没有得到回答（回答中途断了，可能是服务刚更新过）",
+              "The previous message received no reply (stream interrupted, possibly due to a service restart)",
+            ),
             retry: last.text,
           });
         if (s.running) {
@@ -1240,7 +1419,10 @@ function ChatWindow({
             t0: s.running_since
               ? Date.parse(s.running_since) || Date.now()
               : Date.now(),
-            notice: "这段对话还在回答，写完会自动显示在这里",
+            notice: bi(
+              "这段对话还在回答，写完会自动显示在这里",
+              "This reply is still generating; it will appear here automatically once done",
+            ),
           });
           setRemote(true);
         }
@@ -1326,11 +1508,18 @@ function ChatWindow({
     if (!pics.length) return;
     if (!images) return;
     if (noVision)
-      return Message.warning("当前模型看不了图片，请把报错文字贴进来");
+      return Message.warning(
+        bi(
+          "当前模型看不了图片，请把报错文字贴进来",
+          "Current model doesn't support images—paste error text instead",
+        ),
+      );
     if (imgs.length + pics.length > 3)
-      return Message.warning("一次最多 3 张图片");
+      return Message.warning(bi("一次最多 3 张图片", "At most 3 images at once"));
     if (pics.some((f) => f.size > 4 << 20))
-      return Message.warning("图片不能超过 4 MiB");
+      return Message.warning(
+        bi("图片不能超过 4 MiB", "Image size cannot exceed 4 MiB"),
+      );
     try {
       const data = await Promise.all(pics.map(readFile));
       setImgs((x) => [...x, ...data]);
@@ -1421,7 +1610,10 @@ function ChatWindow({
       if (cur.text || cur.made.length || cur.steps.length)
         setMsgs((m) => [
           ...(m || []),
-          { ...done(), text: cur.text + (stopped ? "\n\n（已停止）" : "") },
+          {
+            ...done(),
+            text: cur.text + (stopped ? bi("\n\n（已停止）", "\n\n(Stopped)") : ""),
+          },
         ]);
       if (!stopped) {
         const diag =
@@ -1479,8 +1671,14 @@ function ChatWindow({
       )
         Message.success(
           scope.kind === "comp"
-            ? "已写入草稿，工作台已重新检查"
-            : "已写入执行手册和交付文档",
+            ? bi(
+                "已写入草稿，工作台已重新检查",
+                "Applied to draft; workbench re-checked",
+              )
+            : bi(
+                "已写入执行手册和交付文档",
+                "Applied to runbook and delivery docs",
+              ),
         );
       await loadProps();
       onChanged();
@@ -1530,8 +1728,14 @@ function ChatWindow({
       onChanged();
       Message.success(
         toKB && rep.kb_id
-          ? "已写入执行记录，并存进你自己的知识库（只有你能看到；要给团队用，在记录里点「发布到团队」）"
-          : "已写入执行记录，交付报告里会出现这一段",
+          ? bi(
+              "已写入执行记录，并存进你自己的知识库（只有你能看到；要给团队用，在记录里点「发布到团队」）",
+              "Saved to execution record and your personal KB (private; click 'Publish to team' on the record to share)",
+            )
+          : bi(
+              "已写入执行记录，交付报告里会出现这一段",
+              "Saved to execution record; it will appear in the delivery report",
+            ),
       );
     } catch (e) {
       err(e);
@@ -1543,9 +1747,13 @@ function ChatWindow({
   const [history, setHistory] = useState(false);
   const restart = () =>
     Modal.confirm({
-      title: "清空这段对话？",
-      content: "对话内容会删除；已采纳的提案和写入执行记录的内容不受影响。",
-      okText: "清空",
+      title: bi("清空这段对话？", "Clear this conversation?"),
+      content: bi(
+        "对话内容会删除；已采纳的提案和写入执行记录的内容不受影响。",
+        "Chat messages will be deleted; accepted proposals and saved execution records are kept.",
+      ),
+      okText: bi("清空", "Clear"),
+      cancelText: bi("取消", "Cancel"),
       okButtonProps: { status: "danger" },
       onOk: async () => {
         try {
@@ -1561,7 +1769,7 @@ function ChatWindow({
 
   const savedSessScroll = useRef<number | null>(null);
   const normDeployCopy = (s?: string) =>
-    s ? s.replace(/首次部署/g, "集群部署") : s;
+    s ? s.replace(/首次部署/g, bi("集群部署", "Cluster deploy")) : s;
   const pick = (t: AITarget) => {
     if (sessListRef.current)
       savedSessScroll.current = sessListRef.current.scrollTop;
@@ -1577,17 +1785,17 @@ function ChatWindow({
   const hello =
     target.hello ||
     (scope.kind === "comp"
-      ? HELLO_COMP
+      ? getHelloComp()
       : isGeneral(target.key)
-        ? HELLO_REVIEW
-        : HELLO_STEP);
+        ? getHelloReview()
+        : getHelloStep());
   const suggestions =
     target.suggestions ||
     (scope.kind === "comp"
-      ? SUGGEST_COMP
+      ? getSuggestComp()
       : isGeneral(target.key)
-        ? SUGGEST_REVIEW
-        : SUGGEST_STEP);
+        ? getSuggestReview()
+        : getSuggestStep());
   const answered = (msgs || []).some((m) => m.role === "assistant");
   // the "solved?" line shows while it is new; once put away it shrinks to a small button in the box's toolbar, so the
   // way to write the conversation up is still there when it turns out to be needed
@@ -1603,7 +1811,11 @@ function ChatWindow({
       setListOpen(false);
       return;
     }
-    pick({ key: newGeneral(), title: "新对话", context: start.context });
+    pick({
+      key: newGeneral(),
+      title: bi("新对话", "New chat"),
+      context: start.context,
+    });
   };
   // the list: what was asked about the whole delivery, then what was asked on a step; a conversation not yet written in
   // is not in it (it would come and go as the person moves between conversations)
@@ -1622,19 +1834,19 @@ function ChatWindow({
   const groups = [
     {
       id: "all",
-      label: "整个交付",
+      label: bi("整个交付", "Whole delivery"),
       items: shownSessions.filter((x) => isGeneral(x.key)),
     },
     {
       id: "step",
-      label: "现场排障",
+      label: bi("现场排障", "Troubleshooting"),
       items: shownSessions.filter((x) => !isGeneral(x.key)),
     },
   ].filter((g) => g.items.length);
   const sideList = scope.kind === "job" && (
-    <nav className="ad-sessions" aria-label="对话">
+    <nav className="ad-sessions" aria-label={bi("对话", "Conversations")}>
       <div className="ad-side-top">
-        <b>对话</b>
+        <b>{bi("对话", "Chats")}</b>
         <button
           type="button"
           className="ad-new"
@@ -1642,7 +1854,7 @@ function ChatWindow({
           onClick={startGeneral}
         >
           <IconPlus aria-hidden />
-          新对话
+          {bi("新对话", "New chat")}
         </button>
       </div>
       {sessions.length > 0 && (
@@ -1651,13 +1863,13 @@ function ChatWindow({
           <input
             value={find}
             onChange={(e) => setFind(e.target.value)}
-            placeholder="搜索对话"
-            aria-label="搜索对话"
+            placeholder={bi("搜索对话", "Search chats")}
+            aria-label={bi("搜索对话", "Search chats")}
           />
           {find && (
             <button
               type="button"
-              aria-label="清除搜索"
+              aria-label={bi("清除搜索", "Clear search")}
               onClick={() => setFind("")}
             >
               <IconClose />
@@ -1687,7 +1899,9 @@ function ChatWindow({
                         : {
                             key: s.key,
                             title: s.title,
-                            context: general ? start.context : "现场排障",
+                            context: general
+                              ? start.context
+                              : bi("现场排障", "Troubleshooting"),
                           },
                     )
                   }
@@ -1700,7 +1914,7 @@ function ChatWindow({
                     <b>{normDeployCopy(s.title)}</b>
                     <small>
                       {s.running
-                        ? "正在回答…"
+                        ? bi("正在回答…", "Replying…")
                         : s.updated
                           ? ago(s.updated)
                           : ""}
@@ -1712,11 +1926,16 @@ function ChatWindow({
           </section>
         ))}
         {sessions.length > 0 && groups.length === 0 && (
-          <p className="ad-sess-none">没有匹配的对话</p>
+          <p className="ad-sess-none">
+            {bi("没有匹配的对话", "No matching conversations")}
+          </p>
         )}
         {sessions.length === 0 && (
           <p className="ad-sess-none">
-            还没有对话。点「新对话」问点什么，或在某一步点「问 AI」。
+            {bi(
+              "还没有对话。点「新对话」问点什么，或在某一步点「问 AI」。",
+              "No conversations yet. Click New chat to ask something, or click Ask AI on any step.",
+            )}
           </p>
         )}
       </div>
@@ -1732,7 +1951,7 @@ function ChatWindow({
       }
       aria-hidden={mode === "closed" || undefined}
       role="dialog"
-      aria-label={`AI 助手：${target.title}`}
+      aria-label={bi(`AI 助手：${target.title}`, `AI Assistant: ${target.title}`)}
       onKeyDown={(e) => {
         if (e.key === "Escape" && !e.defaultPrevented) {
           // a menu that is open takes the key first; the window stays
@@ -1769,7 +1988,14 @@ function ChatWindow({
         onDoubleClick={(e) =>
           !(e.target as HTMLElement).closest(".ad-tools") && setPos(null)
         }
-        title={expanded ? undefined : "拖动可移动窗口，双击回到右下角"}
+        title={
+          expanded
+            ? undefined
+            : bi(
+                "拖动可移动窗口，双击回到右下角",
+                "Drag to move; double-click to reset position",
+              )
+        }
       >
         <span className="ad-mark">
           <AIEmblem size={28} />
@@ -1781,7 +2007,7 @@ function ChatWindow({
               className="ad-switch"
               onClick={() => !wasDrag.current && setListOpen((v) => !v)}
               aria-expanded={listOpen}
-              aria-label="切换对话"
+              aria-label={bi("切换对话", "Switch conversation")}
             >
               <b>{normDeployCopy(target.title)}</b>
               <IconDown className={listOpen ? "ad-flip" : ""} />
@@ -1794,26 +2020,33 @@ function ChatWindow({
           <small>
             {busy && mode === "min" ? (
               <span className="ad-busy">
-                <i className="ad-pulse" aria-hidden /> 正在回答…
+                <i className="ad-pulse" aria-hidden />{" "}
+                {bi("正在回答…", "Replying…")}
               </span>
             ) : (
               normDeployCopy(target.context) ||
               (isGeneral(target.key)
-                ? "关于整个交付"
+                ? bi("关于整个交付", "About this delivery")
                 : scope.kind === "comp"
-                  ? "组件工作台"
-                  : "现场排障")
+                  ? bi("组件工作台", "Component workbench")
+                  : bi("现场排障", "Troubleshooting"))
             )}
           </small>
         </div>
         <div className="ad-tools">
           {scope.kind === "job" && mode !== "min" && !expanded && (
-            <Tooltip content="新对话（针对整个交付，不关联步骤）" mini>
+            <Tooltip
+              content={bi(
+                "新对话（针对整个交付，不关联步骤）",
+                "New chat (about the whole delivery)",
+              )}
+              mini
+            >
               <button
                 type="button"
                 className="ad-whole"
                 onClick={startGeneral}
-                aria-label="新对话"
+                aria-label={bi("新对话", "New chat")}
                 disabled={!available("review")}
               >
                 <IconMessage />
@@ -1822,24 +2055,27 @@ function ChatWindow({
           )}
           {scope.kind === "comp" && mode !== "min" && (
             <Tooltip
-              content="这个组件以前的对话（发布或放弃草稿后留下的）"
+              content={bi(
+                "这个组件以前的对话（发布或放弃草稿后留下的）",
+                "Past conversations for this component (kept after publishing or discarding drafts)",
+              )}
               mini
             >
               <button
                 type="button"
                 onClick={() => setHistory(true)}
-                aria-label="历史对话"
+                aria-label={bi("历史对话", "Chat history")}
               >
                 <IconHistory />
               </button>
             </Tooltip>
           )}
           {mode !== "min" && (msgs || []).length > 0 && (
-            <Tooltip content="清空这段对话" mini>
+            <Tooltip content={bi("清空这段对话", "Clear conversation")} mini>
               <button
                 type="button"
                 onClick={restart}
-                aria-label="清空这段对话"
+                aria-label={bi("清空这段对话", "Clear conversation")}
                 disabled={busy}
               >
                 <IconDelete />
@@ -1847,39 +2083,58 @@ function ChatWindow({
             </Tooltip>
           )}
           {mode === "min" ? (
-            <Tooltip content="展开" mini>
+            <Tooltip content={bi("展开", "Expand")} mini>
               <button
                 type="button"
                 onClick={() => setMode("open")}
-                aria-label="展开窗口"
+                aria-label={bi("展开窗口", "Restore window")}
               >
                 <IconUp />
               </button>
             </Tooltip>
           ) : (
             <>
-              <Tooltip content="最小化到底部" mini>
+              <Tooltip content={bi("最小化到底部", "Minimize to bottom")} mini>
                 <button
                   type="button"
                   onClick={() => setMode("min")}
-                  aria-label="最小化窗口"
+                  aria-label={bi("最小化窗口", "Minimize window")}
                 >
                   <IconMinus />
                 </button>
               </Tooltip>
-              <Tooltip content={expanded ? "缩小" : "放大"} mini>
+              <Tooltip
+                content={
+                  expanded ? bi("缩小", "Compact") : bi("放大", "Expand")
+                }
+                mini
+              >
                 <button
                   type="button"
                   onClick={() => setExpanded(!expanded)}
-                  aria-label={expanded ? "缩小窗口" : "放大窗口"}
+                  aria-label={
+                    expanded
+                      ? bi("缩小窗口", "Compact window")
+                      : bi("放大窗口", "Expand window")
+                  }
                 >
                   {expanded ? <IconShrink /> : <IconExpand />}
                 </button>
               </Tooltip>
             </>
           )}
-          <Tooltip content="关闭（Esc），对话会保留" mini>
-            <button type="button" onClick={onClose} aria-label="关闭 AI 助手">
+          <Tooltip
+            content={bi(
+              "关闭（Esc），对话会保留",
+              "Close (Esc); conversation is kept",
+            )}
+            mini
+          >
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label={bi("关闭 AI 助手", "Close AI Assistant")}
+            >
               <IconClose />
             </button>
           </Tooltip>
@@ -1908,7 +2163,10 @@ function ChatWindow({
             aria-busy={busy}
           >
             {msgs === null ? (
-              <div className="ad-loading" aria-label="正在载入对话">
+              <div
+                className="ad-loading"
+                aria-label={bi("正在载入对话", "Loading conversation")}
+              >
                 <i />
                 <i />
                 <i />
@@ -1972,7 +2230,9 @@ function ChatWindow({
                         aria-expanded={errDiagOpen}
                         onClick={() => setErrDiagOpen((v) => !v)}
                       >
-                        {errDiagOpen ? "收起网关诊断" : "展开网关诊断"}
+                        {errDiagOpen
+                          ? bi("收起网关诊断", "Hide diagnostics")
+                          : bi("展开网关诊断", "Show diagnostics")}
                         <IconDown className={errDiagOpen ? "ad-flip" : ""} />
                       </button>
                     )}
@@ -1983,7 +2243,7 @@ function ChatWindow({
                         onClick={() => send(error.retry)}
                         disabled={busy}
                       >
-                        重试
+                        {bi("重试", "Retry")}
                       </Button>
                     )}
                   </div>
@@ -1998,7 +2258,7 @@ function ChatWindow({
                 type="button"
                 className="ad-down"
                 onClick={toBottom}
-                aria-label="回到最新"
+                aria-label={bi("回到最新", "Jump to latest")}
               >
                 <IconArrowDown />
               </button>
@@ -2008,7 +2268,10 @@ function ChatWindow({
           {showSolved && (
             <div className="ad-solved">
               <span>
-                问题解决了？把经过整理成记录，写进这份交付的执行记录。
+                {bi(
+                  "问题解决了？把经过整理成记录，写进这份交付的执行记录。",
+                  "Issue resolved? Summarize it into this delivery's execution record.",
+                )}
               </span>
               <Button
                 size="mini"
@@ -2016,12 +2279,12 @@ function ChatWindow({
                 loading={resolving}
                 onClick={resolve}
               >
-                已解决，写入记录
+                {bi("已解决，写入记录", "Resolved, save record")}
               </Button>
               <button
                 type="button"
                 className="ad-solved-x"
-                aria-label="先不用，收起这一行"
+                aria-label={bi("先不用，收起这一行", "Dismiss for now")}
                 onClick={() => putAway((msgs || []).length)}
               >
                 <IconClose />
@@ -2046,10 +2309,16 @@ function ChatWindow({
               <div className="ad-thumbs">
                 {imgs.map((im, i) => (
                   <span key={i}>
-                    <img src={im} alt={`待发送的截图 ${i + 1}`} />
+                    <img
+                      src={im}
+                      alt={bi(
+                        `待发送的截图 ${i + 1}`,
+                        `Pending screenshot ${i + 1}`,
+                      )}
+                    />
                     <button
                       type="button"
-                      aria-label="移除这张图片"
+                      aria-label={bi("移除这张图片", "Remove image")}
                       onClick={() => setImgs(imgs.filter((_, k) => k !== i))}
                     >
                       <IconClose />
@@ -2076,18 +2345,33 @@ function ChatWindow({
               placeholder={
                 !on
                   ? can("ai.settings")
-                    ? "AI 未开启，可在「设置 → AI」中开启"
-                    : "AI 未开启，请联系管理员启用"
+                    ? bi(
+                        "AI 未开启，可在「设置 → AI」中开启",
+                        "AI is off—enable it in Settings → AI",
+                      )
+                    : bi(
+                        "AI 未开启，请联系管理员启用",
+                        "AI is off—contact an administrator",
+                      )
                   : offline
-                    ? "网络已断开"
+                    ? bi("网络已断开", "Network disconnected")
                     : scope.kind === "comp"
-                      ? "说说要怎么改这个组件…"
+                      ? bi(
+                          "说说要怎么改这个组件…",
+                          "Describe how to update this component…",
+                        )
                       : images && !noVision
-                        ? "贴上报错、描述现象，或粘贴截图…"
-                        : "贴上报错文字，或描述现象…"
+                        ? bi(
+                            "贴上报错、描述现象，或粘贴截图…",
+                            "Paste errors, describe symptoms, or paste screenshots…",
+                          )
+                        : bi(
+                            "贴上报错文字，或描述现象…",
+                            "Paste error text or describe symptoms…",
+                          )
               }
               disabled={!on || offline}
-              aria-label="消息"
+              aria-label={bi("消息", "Message")}
             />
             <div className="ad-bar">
               <ToolMenu
@@ -2097,13 +2381,24 @@ function ChatWindow({
               />
               {images &&
                 (noVision ? (
-                  <Tooltip content="当前模型看不了图片。请把报错文字贴进来，或请管理员换一个支持看图的模型。">
+                  <Tooltip
+                    content={bi(
+                      "当前模型看不了图片。请把报错文字贴进来，或请管理员换一个支持看图的模型。",
+                      "Current model has no vision. Paste error text instead, or ask an admin to switch to a vision model.",
+                    )}
+                  >
                     <span className="ad-attach off" aria-disabled>
                       <IconImage />
                     </span>
                   </Tooltip>
                 ) : (
-                  <Tooltip content="添加截图（也可以直接粘贴或拖进来）" mini>
+                  <Tooltip
+                    content={bi(
+                      "添加截图（也可以直接粘贴或拖进来）",
+                      "Attach screenshot (or paste/drop directly)",
+                    )}
+                    mini
+                  >
                     <label className="ad-attach">
                       <IconImage />
                       <input
@@ -2119,11 +2414,17 @@ function ChatWindow({
                   </Tooltip>
                 ))}
               {solvedChip && (
-                <Tooltip content="问题解决了？整理成记录写进执行记录" mini>
+                <Tooltip
+                  content={bi(
+                    "问题解决了？整理成记录写进执行记录",
+                    "Issue resolved? Save a summary to the execution record",
+                  )}
+                  mini
+                >
                   <button
                     type="button"
                     className="ad-attach ad-solve-chip"
-                    aria-label="整理成记录"
+                    aria-label={bi("整理成记录", "Save as record")}
                     disabled={resolving}
                     onClick={resolve}
                   >
@@ -2137,8 +2438,8 @@ function ChatWindow({
                   type="button"
                   className="ad-send stop"
                   onClick={stop}
-                  aria-label="停止生成"
-                  title="停止生成"
+                  aria-label={bi("停止生成", "Stop")}
+                  title={bi("停止生成", "Stop")}
                 >
                   <IconRecordStop />
                 </button>
@@ -2147,8 +2448,11 @@ function ChatWindow({
                   type="submit"
                   className="ad-send"
                   disabled={(!input.trim() && !imgs.length) || !on || offline}
-                  aria-label="发送"
-                  title="发送（Enter 发送 · Shift+Enter 换行）"
+                  aria-label={bi("发送", "Send")}
+                  title={bi(
+                    "发送（Enter 发送 · Shift+Enter 换行）",
+                    "Send (Enter to send · Shift+Enter for new line)",
+                  )}
                 >
                   <IconSend />
                 </button>
@@ -2157,7 +2461,11 @@ function ChatWindow({
           </form>
         </div>
       </div>
-      {drag && <div className="ad-drop">松开即可添加截图</div>}
+      {drag && (
+        <div className="ad-drop">
+          {bi("松开即可添加截图", "Drop to attach screenshots")}
+        </div>
+      )}
       {scope.kind === "comp" && (
         <CompHistory
           open={history}
@@ -2168,21 +2476,21 @@ function ChatWindow({
       {submitNode}
       <Modal
         visible={!!draft}
-        title="整理成记录"
+        title={bi("整理成记录", "Save as record")}
         className="ad-wu-modal"
         onCancel={() => !saving && setDraft(null)}
         maskClosable={false}
         footer={
           <>
             <Button onClick={() => setDraft(null)} disabled={!!saving}>
-              先不写入
+              {bi("先不写入", "Cancel")}
             </Button>
             <Button
               loading={saving === "kb"}
               disabled={!!saving && saving !== "kb"}
               onClick={() => confirmDraft(true)}
             >
-              写入并存入知识库
+              {bi("写入并存入知识库", "Save & add to KB")}
             </Button>
             <Button
               type="primary"
@@ -2190,7 +2498,7 @@ function ChatWindow({
               disabled={!!saving && saving !== "save"}
               onClick={() => confirmDraft(false)}
             >
-              写入记录
+              {bi("写入记录", "Save record")}
             </Button>
           </>
         }
@@ -2198,14 +2506,16 @@ function ChatWindow({
         {draft && (
           <div className="ad-wu">
             <p className="ad-wu-lead">
-              AI
-              根据对话整理的草稿，可以直接修改。写入后出现在这份交付的执行记录、交付报告和变更报告里。
+              {bi(
+                "AI 根据对话整理的草稿，可以直接修改。写入后出现在这份交付的执行记录、交付报告和变更报告里。",
+                "Draft generated by AI from this chat—feel free to edit. Once saved, it appears in the execution record, delivery report, and change report.",
+              )}
             </p>
             {(
               [
-                ["symptom", "现象", 2, 5, false],
-                ["cause", "原因", 2, 6, false],
-                ["fix", "处理经过", 3, 8, false],
+                ["symptom", bi("现象", "Symptom"), 2, 5, false],
+                ["cause", bi("原因", "Root cause"), 2, 6, false],
+                ["fix", bi("处理经过", "Resolution"), 3, 8, false],
               ] as const
             ).map(([k, label, min, max, mono]) => (
               <section key={k} className={"ad-wu-f ad-wu-" + k}>
@@ -2220,23 +2530,27 @@ function ChatWindow({
               </section>
             ))}
             {draft.fix && (
-              <p className="ad-wu-tip">命令用 ``` 围起来，会按代码显示。</p>
+              <p className="ad-wu-tip">
+                {bi(
+                  "命令用 ``` 围起来，会按代码显示。",
+                  "Wrap commands in ``` to render as code blocks.",
+                )}
+              </p>
             )}
-            <details className="ad-wu-more" >
-              <summary>关键证据</summary>
+            <details className="ad-wu-more">
+              <summary>{bi("关键证据", "Key evidence")}</summary>
               <Input.TextArea
                 className="mono"
                 autoSize={{ minRows: 2, maxRows: 8 }}
                 value={draft.evidence || ""}
                 onChange={(v) => setDraft({ ...draft, evidence: v })}
-                aria-label="关键证据"
+                aria-label={bi("关键证据", "Key evidence")}
               />
             </details>
-            <details
-              className="ad-wu-more"
-              
-            >
-              <summary>还要跟进的事（一行一条）</summary>
+            <details className="ad-wu-more">
+              <summary>
+                {bi("还要跟进的事（一行一条）", "Follow-ups (one per line)")}
+              </summary>
               <Input.TextArea
                 autoSize={{ minRows: 2, maxRows: 6 }}
                 value={(draft.followups || []).join("\n")}
@@ -2246,7 +2560,7 @@ function ChatWindow({
                     followups: v.split("\n").filter((x) => x.trim()),
                   })
                 }
-                aria-label="还要跟进的事"
+                aria-label={bi("还要跟进的事", "Follow-ups")}
               />
             </details>
             <div className="ad-wu-opts">
@@ -2255,13 +2569,19 @@ function ChatWindow({
                   checked={draft.changed}
                   onChange={(v) => setDraft({ ...draft, changed: v })}
                 >
-                  这说明交付本身需要修改
+                  {bi(
+                    "这说明交付本身需要修改",
+                    "This indicates the delivery itself needs changes",
+                  )}
                 </Checkbox>
               </label>
               {target.key.startsWith("step:") && (
                 <label>
                   <Checkbox checked={markStep} onChange={setMarkStep}>
-                    已核对执行结果，同时将这一步标记为完成
+                    {bi(
+                      "已核对执行结果，同时将这一步标记为完成",
+                      "Verified output; also mark this step as completed",
+                    )}
                   </Checkbox>
                 </label>
               )}
@@ -2273,36 +2593,52 @@ function ChatWindow({
   );
 }
 
-const HELLO_REVIEW =
-  "我会先读这份交付的执行手册和项目文件，再按严重程度指出问题：组件组合、单点、参数风险、步骤顺序和验证是否完备。也可以直接问你关心的事。";
-const SUGGEST_REVIEW = [
-  "评审这份交付，按严重程度列出问题",
-  "这套集群有没有单点？",
-  "上线前还缺哪些检查？",
+const getHelloReview = () =>
+  bi(
+    "我会先读这份交付的执行手册和项目文件，再按严重程度指出问题：组件组合、单点、参数风险、步骤顺序和验证是否完备。也可以直接问你关心的事。",
+    "I'll inspect this delivery's runbook and project files, then highlight issues by severity—component mix, SPOFs, parameter risks, step order, and verification gaps. Or ask anything directly.",
+  );
+const getSuggestReview = () => [
+  bi(
+    "评审这份交付，按严重程度列出问题",
+    "Review this delivery and list issues by severity",
+  ),
+  bi("这套集群有没有单点？", "Does this cluster have any single points of failure?"),
+  bi("上线前还缺哪些检查？", "What pre-launch checks are missing?"),
 ];
-const HELLO_STEP =
-  "这一步遇到报错，把它贴过来或直接粘贴截图；对这一步有疑问、想确认风险，也可以直接问。我会自己去看执行手册、项目文件和之前的执行记录，告诉你原因和下一步；需要改手册时会给出提案，你确认后才写进交付。";
-const SUGGEST_STEP = [
-  "这一步会做什么？有什么风险？",
-  "执行前要先确认什么？",
-  "如果失败了怎么回退？",
+const getHelloStep = () =>
+  bi(
+    "这一步遇到报错，把它贴过来或直接粘贴截图；对这一步有疑问、想确认风险，也可以直接问。我会自己去看执行手册、项目文件和之前的执行记录，告诉你原因和下一步；需要改手册时会给出提案，你确认后才写进交付。",
+    "Paste errors or screenshots here if this step failed, or ask about risks. I'll inspect the runbook, project files, and logs to explain the cause and next steps, and propose runbook edits for your approval when needed.",
+  );
+const getSuggestStep = () => [
+  bi(
+    "这一步会做什么？有什么风险？",
+    "What does this step do and what are the risks?",
+  ),
+  bi("执行前要先确认什么？", "What should I verify before running this step?"),
+  bi("如果失败了怎么回退？", "How do I roll back if this step fails?"),
 ];
-const HELLO_COMP =
-  "可以让我起草或补全这个组件、修复检查报出的错误、解释参数，或者评审风险。改动会先过平台检查和试生成，你采纳后才写入草稿，发布仍由你来做。";
-const SUGGEST_COMP = [
-  "看看这个组件还缺什么",
-  "修复检查报出的错误",
-  "评审这个组件的风险",
+const getHelloComp = () =>
+  bi(
+    "可以让我起草或补全这个组件、修复检查报出的错误、解释参数，或者评审风险。改动会先过平台检查和试生成，你采纳后才写入草稿，发布仍由你来做。",
+    "Ask me to draft or complete this component, fix check errors, explain parameters, or review risks. Changes pass platform validation and dry-run before applying to your draft; publishing stays in your hands.",
+  );
+const getSuggestComp = () => [
+  bi("看看这个组件还缺什么", "Check what's missing in this component"),
+  bi("修复检查报出的错误", "Fix the validation errors"),
+  bi("评审这个组件的风险", "Review risks in this component"),
 ];
 
 function StepContext({ step }: { step: Record<string, unknown> }) {
+  useLang();
   const title = String(step.title || "");
   const phase = step.phase ? String(step.phase) : "";
   const effect = String(step.effect || "");
   const hosts = Array.isArray(step.hosts) ? (step.hosts as string[]) : [];
   return (
     <div className="ad-ctx">
-      <span className="ad-ctx-l">正在处理</span>
+      <span className="ad-ctx-l">{bi("正在处理", "Step")}</span>
       <b title={title}>{title}</b>
       {phase && <span className="ad-tag">{phase}</span>}
       {effect && (
@@ -2322,6 +2658,7 @@ function ChatErrorDiag({
   diag: AICallDiag;
   errText: string;
 }) {
+  useLang();
   const hasTokens =
     diag.in_tokens != null ||
     diag.out_tokens != null ||
@@ -2330,16 +2667,18 @@ function ChatErrorDiag({
     diag.http_status != null
       ? diag.http_status > 0
         ? `HTTP ${diag.http_status}`
-        : "网络未连通"
+        : bi("网络未连通", "Network unreachable")
       : "",
-    diag.upstream_status ? `上游 ${diag.upstream_status}` : "",
+    diag.upstream_status
+      ? bi(`上游 ${diag.upstream_status}`, `Upstream ${diag.upstream_status}`)
+      : "",
     diag.reason_code ? reasonCodeLabel(diag.reason_code) : "",
   ].filter(Boolean);
   return (
     <div className="ad-err-diag">
       <div className="ad-err-diag-h">
         <span className="ad-err-diag-meta">
-          <b>网关诊断明细</b>
+          <b>{bi("网关诊断明细", "Gateway diagnostics")}</b>
           {(diag.provider || diag.model) && (
             <small>
               {diag.provider && <span>{diag.provider}</span>}
@@ -2349,7 +2688,8 @@ function ChatErrorDiag({
           )}
           {diag.fallback_used && (
             <em className="ad-err-fb">
-              已回退 <span className="mono">{diag.fallback_used}</span>
+              {bi("已回退", "Fallback")}{" "}
+              <span className="mono">{diag.fallback_used}</span>
             </em>
           )}
         </span>
@@ -2359,31 +2699,31 @@ function ChatErrorDiag({
           onClick={() =>
             copy(
               formatAICallDiag(diag, {
-                title: "AI 对话网关诊断",
+                title: bi("AI 对话网关诊断", "AI Chat Gateway Diagnostics"),
                 error: errText,
               }),
             )
           }
         >
-          <IconCopy /> 复制诊断
+          <IconCopy /> {bi("复制诊断", "Copy diagnostics")}
         </button>
       </div>
       <dl className="ad-err-dl">
         {(diag.endpoint || diag.api) && (
           <>
-            <dt>协议端点</dt>
+            <dt>{bi("协议端点", "Endpoint")}</dt>
             <dd className="mono">{diag.endpoint || diag.api}</dd>
           </>
         )}
         {statusParts.length > 0 && (
           <>
-            <dt>HTTP 状态</dt>
+            <dt>{bi("HTTP 状态", "HTTP status")}</dt>
             <dd>{statusParts.join(" · ")}</dd>
           </>
         )}
         {diag.ms != null && (
           <>
-            <dt>耗时</dt>
+            <dt>{bi("耗时", "Latency")}</dt>
             <dd className="num">{diag.ms} ms</dd>
           </>
         )}
@@ -2391,25 +2731,38 @@ function ChatErrorDiag({
           <>
             <dt>Token</dt>
             <dd className="num">
-              输入 {diag.in_tokens ?? 0}
-              {diag.cached_tokens != null ? ` · 缓存 ${diag.cached_tokens}` : ""}
-              {` · 输出 ${diag.out_tokens ?? 0}`}
+              {bi(`输入 ${diag.in_tokens ?? 0}`, `In ${diag.in_tokens ?? 0}`)}
+              {diag.cached_tokens != null
+                ? bi(
+                    ` · 缓存 ${diag.cached_tokens}`,
+                    ` · Cached ${diag.cached_tokens}`,
+                  )
+                : ""}
+              {bi(
+                ` · 输出 ${diag.out_tokens ?? 0}`,
+                ` · Out ${diag.out_tokens ?? 0}`,
+              )}
             </dd>
           </>
         )}
         {diag.response_id && (
           <>
-            <dt>响应 ID</dt>
+            <dt>{bi("响应 ID", "Response ID")}</dt>
             <dd className="mono">{diag.response_id}</dd>
           </>
         )}
         {diag.sse_events && diag.sse_events.length > 0 && (
           <>
-            <dt>SSE 事件</dt>
+            <dt>{bi("SSE 事件", "SSE events")}</dt>
             <dd>
               <span className="mono">{diag.sse_events.join(" → ")}</span>
               {diag.keepalives ? (
-                <span className="faint">{`（心跳 ${diag.keepalives} 次）`}</span>
+                <span className="faint">
+                  {bi(
+                    `（心跳 ${diag.keepalives} 次）`,
+                    ` (${diag.keepalives} keepalive${diag.keepalives === 1 ? "" : "s"})`,
+                  )}
+                </span>
               ) : null}
             </dd>
           </>
@@ -2418,7 +2771,10 @@ function ChatErrorDiag({
       {diag.attempts && diag.attempts.length > 0 && (
         <div className="ad-err-sec">
           <div className="ad-err-sec-t">
-            尝试链路（{diag.attempts.length} 次）
+            {bi(
+              `尝试链路（${diag.attempts.length} 次）`,
+              `Attempt trace (${diag.attempts.length})`,
+            )}
           </div>
           <ol className="ad-err-attempts">
             {diag.attempts.map((a, idx) => (
@@ -2428,17 +2784,28 @@ function ChatErrorDiag({
                 <span
                   className={`ad-err-att-st ${a.http_status && a.http_status >= 200 && a.http_status < 300 ? "ok" : "bad"}`}
                 >
-                  {a.http_status ? `HTTP ${a.http_status}` : "连接失败"}
+                  {a.http_status
+                    ? `HTTP ${a.http_status}`
+                    : bi("连接失败", "Connection failed")}
                 </span>
                 <span className="num">{a.ms} ms</span>
                 {(a.in_tokens != null || a.out_tokens != null) && (
                   <span className="num">
                     ↓{a.in_tokens ?? 0}
-                    {a.cached_tokens ? ` 缓${a.cached_tokens}` : ""} ↑
-                    {a.out_tokens ?? 0}
+                    {a.cached_tokens
+                      ? bi(` 缓${a.cached_tokens}`, ` c:${a.cached_tokens}`)
+                      : ""}{" "}
+                    ↑{a.out_tokens ?? 0}
                   </span>
                 )}
-                {a.upstream_status && <span>状态 {a.upstream_status}</span>}
+                {a.upstream_status && (
+                  <span>
+                    {bi(
+                      `状态 ${a.upstream_status}`,
+                      `Status ${a.upstream_status}`,
+                    )}
+                  </span>
+                )}
                 {a.response_id && <code className="faint">{a.response_id}</code>}
                 {(a.reason || a.request_note) && (
                   <span className="ad-err-att-why">
@@ -2452,7 +2819,9 @@ function ChatErrorDiag({
       )}
       {diag.request_summary && (
         <div className="ad-err-sec">
-          <div className="ad-err-sec-t">请求参数摘要</div>
+          <div className="ad-err-sec-t">
+            {bi("请求参数摘要", "Request summary")}
+          </div>
           <pre className="ad-err-raw">
             {prettyDiagPayload(diag.request_summary)}
           </pre>
@@ -2460,7 +2829,9 @@ function ChatErrorDiag({
       )}
       {diag.response_raw && (
         <div className="ad-err-sec">
-          <div className="ad-err-sec-t">网关原始响应</div>
+          <div className="ad-err-sec-t">
+            {bi("网关原始响应", "Gateway raw response")}
+          </div>
           <pre className="ad-err-raw">
             {prettyDiagPayload(diag.response_raw)}
           </pre>
@@ -2480,20 +2851,21 @@ export async function streamChat(
   onProposal?: (id: string) => Promise<unknown>,
   onOther?: (e: { t: string; v?: unknown; target?: unknown }) => void,
 ) {
-  const r = await fetch(url, {
+  const r = await fetch(withLang(url), {
     method: "POST",
     credentials: "same-origin",
     signal,
     headers: {
       "Content-Type": "application/json",
       "X-CSRF-Token": csrfToken(),
+      "X-Lang": getLang(),
     },
     body: JSON.stringify(body),
   });
   if (!r.ok || !r.body) {
     const d = await r.json().catch(() => ({}));
     const errObj = new Error(
-      d.error || `请求失败（${r.status}）`,
+      d.error || bi(`请求失败（${r.status}）`, `Request failed (${r.status})`),
     ) as ChatStreamError;
     if (d && typeof d === "object" && d.diag) {
       errObj.diag = d.diag as AICallDiag;
@@ -2533,7 +2905,10 @@ export async function streamChat(
         case "thought-hidden":
           cur.steps.push({
             kind: "think",
-            summary: `用了 ${e.n} 个思考 token，这个模型不公开思考内容`,
+            summary: bi(
+              `用了 ${e.n} 个思考 token，这个模型不公开思考内容`,
+              `Used ${e.n} thinking tokens (reasoning hidden by model)`,
+            ),
             ms: e.ms,
           });
           break;
@@ -2597,7 +2972,9 @@ export async function streamChat(
           await onProposal?.(e.v);
           break;
         case "error": {
-          const errObj = new Error(e.v || "模型调用失败") as ChatStreamError;
+          const errObj = new Error(
+            e.v || bi("模型调用失败", "Model call failed"),
+          ) as ChatStreamError;
           if (e.diag) errObj.diag = e.diag as AICallDiag;
           throw errObj;
         }
@@ -2612,6 +2989,7 @@ export async function streamChat(
 
 /** Conversations kept before steps were recorded only know which tools were used. */
 function Activity({ tools }: { tools: string[] }) {
+  useLang();
   const counts = new Map<string, number>();
   tools.forEach((t) => counts.set(t, (counts.get(t) || 0) + 1));
   const looked = [...counts.entries()].filter(
@@ -2620,10 +2998,10 @@ function Activity({ tools }: { tools: string[] }) {
   if (!looked.length) return null;
   return (
     <div className="ad-act">
-      <IconCheck /> 查看了{" "}
+      <IconCheck /> {bi("查看了", "Checked")}{" "}
       {looked
         .map(([t, n]) => (n > 1 ? `${TOOL[t] || t} ×${n}` : TOOL[t] || t))
-        .join("、")}
+        .join(bi("、", ", "))}
     </div>
   );
 }
@@ -2645,6 +3023,7 @@ export function Bubble({
   decide: (id: string, v: "accept" | "reject") => void;
   comp: boolean;
 }) {
+  useLang();
   const [copied, setCopied] = useState(false);
   if (m.role === "user")
     return (
@@ -2655,14 +3034,18 @@ export function Bubble({
               <a
                 key={k}
                 href={
-                  im.startsWith("data:") ? undefined : `${jobBase}/img/${im}`
+                  im.startsWith("data:")
+                    ? undefined
+                    : withLang(`${jobBase}/img/${im}`)
                 }
                 target="_blank"
                 rel="noreferrer"
               >
                 <img
-                  src={im.startsWith("data:") ? im : `${jobBase}/img/${im}`}
-                  alt={`截图 ${k + 1}`}
+                  src={
+                    im.startsWith("data:") ? im : withLang(`${jobBase}/img/${im}`)
+                  }
+                  alt={bi(`截图 ${k + 1}`, `Screenshot ${k + 1}`)}
                 />
               </a>
             ))}
@@ -2675,13 +3058,13 @@ export function Bubble({
                 <a
                   key={f.id}
                   className="img"
-                  href={`/api/me/files/${f.id}/raw`}
+                  href={withLang(`/api/me/files/${f.id}/raw`)}
                   target="_blank"
                   rel="noreferrer"
                   title={f.name}
                 >
                   <img
-                    src={`/api/me/files/${f.id}/raw`}
+                    src={withLang(`/api/me/files/${f.id}/raw`)}
                     alt={f.name}
                     loading="lazy"
                   />
@@ -2690,7 +3073,7 @@ export function Bubble({
                 <a
                   key={f.id}
                   className="doc"
-                  href={`/api/me/files/${f.id}/raw?download=1`}
+                  href={withLang(`/api/me/files/${f.id}/raw?download=1`)}
                   title={f.name}
                 >
                   <IconFile />
@@ -2746,7 +3129,8 @@ export function Bubble({
               window.setTimeout(() => setCopied(false), 1400);
             }}
           >
-            {copied ? <IconCheck /> : <IconCopy />} {copied ? "已复制" : "复制"}
+            {copied ? <IconCheck /> : <IconCopy />}{" "}
+            {copied ? bi("已复制", "Copied") : bi("复制", "Copy")}
           </button>
           {m.at && (
             <time title={fullTime(m.at)} className="ad-time">
@@ -2767,6 +3151,7 @@ export function AskCard({
   ask: Ask;
   answer?: (text: string) => void;
 }) {
+  useLang();
   const [pick, setPick] = useState<Record<number, string[]>>({});
   const [other, setOther] = useState<Record<number, string>>({});
   const [otherOpen, setOtherOpen] = useState<Record<number, boolean>>({});
@@ -2784,7 +3169,7 @@ export function AskCard({
         .map(
           (_, i) =>
             (ask.questions.length > 1 ? String(i + 1) + ". " : "") +
-            value(i, p, o).join("、"),
+            value(i, p, o).join(bi("、", ", ")),
         )
         .join("\n"),
     );
@@ -2805,7 +3190,7 @@ export function AskCard({
     <div
       className={`ad-ask ${live ? "" : "done"}`}
       role="group"
-      aria-label="AI 的提问"
+      aria-label={bi("AI 的提问", "Questions from AI")}
     >
       {ask.questions.map((q, qi) => (
         <fieldset key={qi} disabled={!live}>
@@ -2814,7 +3199,7 @@ export function AskCard({
               {ask.questions.length > 1 ? qi + 1 : "?"}
             </span>
             {q.question}
-            {q.multi && <small>可多选</small>}
+            {q.multi && <small>{bi("可多选", "Multi-select")}</small>}
           </legend>
           {(q.options || []).length > 0 && (
             <div
@@ -2864,17 +3249,20 @@ export function AskCard({
                   }
                   placeholder={
                     (q.options || []).length
-                      ? "补充或填写其他现场情况…"
-                      : "写下你的回答…"
+                      ? bi(
+                          "补充或填写其他现场情况…",
+                          "Add details or specify another option…",
+                        )
+                      : bi("写下你的回答…", "Type your answer…")
                   }
-                  aria-label={`${q.question} 自己写`}
+                  aria-label={bi(`${q.question} 自己写`, `${q.question} custom answer`)}
                 />
                 {instant && other[qi]?.trim() && (
                   <button
                     type="button"
                     className="ad-ask-go"
                     onClick={() => submit()}
-                    aria-label="发送这个回答"
+                    aria-label={bi("发送这个回答", "Submit answer")}
                   >
                     <IconSend />
                   </button>
@@ -2887,7 +3275,7 @@ export function AskCard({
                       setOtherOpen((prev) => ({ ...prev, [qi]: false }))
                     }
                   >
-                    收起
+                    {bi("收起", "Collapse")}
                   </button>
                 )}
               </div>
@@ -2900,7 +3288,7 @@ export function AskCard({
                 }
               >
                 <IconPlus />
-                <span>其他情况 / 自由说明</span>
+                <span>{bi("其他情况 / 自由说明", "Other / custom note")}</span>
               </button>
             ))}
         </fieldset>
@@ -2913,7 +3301,7 @@ export function AskCard({
             disabled={!ready}
             onClick={() => submit()}
           >
-            提交回答
+            {bi("提交回答", "Submit answers")}
           </Button>
         </div>
       )}
@@ -2923,17 +3311,22 @@ export function AskCard({
 
 /** What the assistant made for the person: documents and pictures kept in "我的资料 / AI 生成". */
 export function MadeFiles({ files }: { files: MsgFile[] }) {
+  useLang();
   return (
-    <div className="ad-made" aria-label="AI 生成的文件">
+    <div className="ad-made" aria-label={bi("AI 生成的文件", "Files generated by AI")}>
       {files.map((f) => (
         <a
           key={f.id}
-          href={`/api/me/files/${f.id}/raw?download=1`}
+          href={withLang(`/api/me/files/${f.id}/raw?download=1`)}
           className="ad-made-i"
-          title="下载"
+          title={bi("下载", "Download")}
         >
           {f.mime?.startsWith("image/") ? (
-            <img src={`/api/me/files/${f.id}/raw`} alt="" loading="lazy" />
+            <img
+              src={withLang(`/api/me/files/${f.id}/raw`)}
+              alt=""
+              loading="lazy"
+            />
           ) : (
             <IconFile />
           )}
@@ -2945,7 +3338,7 @@ export function MadeFiles({ files }: { files: MsgFile[] }) {
                   ? `${(f.size / (1 << 20)).toFixed(1)} MB`
                   : `${Math.max(1, Math.round(f.size / 1024))} KB`
                 : ""}{" "}
-              · 已存入「我的资料」
+              {bi("· 已存入「我的资料」", "· Saved to My Files")}
             </small>
           </span>
           <IconDownload />
@@ -2956,6 +3349,7 @@ export function MadeFiles({ files }: { files: MsgFile[] }) {
 }
 
 export function SandboxConfirmCard({ req }: { req: SandboxConfirm }) {
+  useLang();
   const [busy, setBusy] = useState("");
   const [done, setDone] = useState("");
   const [showCode, setShowCode] = useState(
@@ -2986,31 +3380,49 @@ export function SandboxConfirmCard({ req }: { req: SandboxConfirm }) {
         <IconCheck />
         <span>
           {done === "deny"
-            ? "已拒绝本次沙箱执行"
+            ? bi("已拒绝本次沙箱执行", "Sandbox execution denied")
             : done === "allow_offline"
-              ? "已授权离线沙箱执行"
+              ? bi("已授权离线沙箱执行", "Approved offline sandbox execution")
               : done === "allow_session"
-                ? "已授权本会话内沙箱执行"
+                ? bi(
+                    "已授权本会话内沙箱执行",
+                    "Approved sandbox execution for this chat",
+                  )
                 : canNet
-                  ? "已授权联网沙箱执行"
-                  : "已授权沙箱执行"}
+                  ? bi(
+                      "已授权联网沙箱执行",
+                      "Approved sandbox execution with network",
+                    )
+                  : bi("已授权沙箱执行", "Approved sandbox execution")}
         </span>
       </div>
     );
   }
 
   return (
-    <div className="ad-sbc" role="region" aria-label="沙箱运行授权">
+    <div
+      className="ad-sbc"
+      role="region"
+      aria-label={bi("沙箱运行授权", "Sandbox execution approval")}
+    >
       <div className="ad-sbc-h">
         <span className="ad-sbc-ic">
           <IconSafe />
         </span>
         <div className="ad-sbc-title">
-          <b>{req.title || "请求在隔离沙箱中运行代码"}</b>
+          <b>
+            {req.title ||
+              bi(
+                "请求在隔离沙箱中运行代码",
+                "Request to run code in isolated sandbox",
+              )}
+          </b>
           {req.purpose && <small>{req.purpose}</small>}
         </div>
         <span className={`ad-sbc-tag ${canNet ? "net" : ""}`}>
-          {canNet ? "请求外网" : "离线隔离"}
+          {canNet
+            ? bi("请求外网", "Network requested")
+            : bi("离线隔离", "Offline isolated")}
         </span>
       </div>
       {(req.reasons || []).length > 0 && (
@@ -3022,7 +3434,7 @@ export function SandboxConfirmCard({ req }: { req: SandboxConfirm }) {
       )}
       {req.files && req.files.length > 0 && (
         <div className="ad-sbc-files">
-          <span>只读挂载文件：</span>
+          <span>{bi("只读挂载文件：", "Read-only input files: ")}</span>
           {req.files.map((f) => (
             <code key={f} className="mono">
               {f}
@@ -3032,7 +3444,7 @@ export function SandboxConfirmCard({ req }: { req: SandboxConfirm }) {
       )}
       {req.workspace && (
         <div className="ad-sbc-files">
-          <span>只读工作区：</span>
+          <span>{bi("只读工作区：", "Read-only workspace: ")}</span>
           <code className="mono">{req.workspace} → /workspace</code>
         </div>
       )}
@@ -3048,11 +3460,11 @@ export function SandboxConfirmCard({ req }: { req: SandboxConfirm }) {
             <span>
               {showCode
                 ? req.kind === "shell"
-                  ? "收起待执行命令"
-                  : "收起待执行代码"
+                  ? bi("收起待执行命令", "Hide command")
+                  : bi("收起待执行代码", "Hide code")
                 : req.kind === "shell"
-                  ? "查看待执行命令"
-                  : "查看待执行代码"}
+                  ? bi("查看待执行命令", "View command")
+                  : bi("查看待执行代码", "View code")}
             </span>
             <IconDown className={showCode ? "ad-flip" : ""} />
           </button>
@@ -3067,7 +3479,9 @@ export function SandboxConfirmCard({ req }: { req: SandboxConfirm }) {
           disabled={busy !== ""}
           onClick={() => submit("allow")}
         >
-          {canNet ? "允许联网运行" : "允许运行"}
+          {canNet
+            ? bi("允许联网运行", "Allow with network")
+            : bi("允许运行", "Allow")}
         </Button>
         {canNet && (
           <Button
@@ -3076,7 +3490,7 @@ export function SandboxConfirmCard({ req }: { req: SandboxConfirm }) {
             disabled={busy !== ""}
             onClick={() => submit("allow_offline")}
           >
-            仅离线运行
+            {bi("仅离线运行", "Run offline only")}
           </Button>
         )}
         {!canNet && (
@@ -3086,7 +3500,7 @@ export function SandboxConfirmCard({ req }: { req: SandboxConfirm }) {
             disabled={busy !== ""}
             onClick={() => submit("allow_session")}
           >
-            本会话不再询问
+            {bi("本会话不再询问", "Allow for this chat")}
           </Button>
         )}
         <Button
@@ -3097,7 +3511,7 @@ export function SandboxConfirmCard({ req }: { req: SandboxConfirm }) {
           disabled={busy !== ""}
           onClick={() => submit("deny")}
         >
-          拒绝
+          {bi("拒绝", "Deny")}
         </Button>
       </div>
     </div>
@@ -3117,6 +3531,7 @@ export function LiveBubble({
   decide: (id: string, v: "accept" | "reject") => void;
   comp: boolean;
 }) {
+  useLang();
   return (
     <div className="ad-msg ai live">
       <span className="ad-avatar thinking" aria-hidden>
@@ -3162,24 +3577,53 @@ function SuggestCard({
   busy: boolean;
   decide: (id: string, v: "accept" | "reject") => void;
 }) {
+  useLang();
   const comp = s.after_title || "";
   const openWorkbench = () => {
     const child = window.open("about:blank", "_blank");
     if (!child) {
-      Message.warning("浏览器拦截了新标签页，请允许弹出窗口后重试；当前交付已保留。");
+      Message.warning(
+        bi(
+          "浏览器拦截了新标签页，请允许弹出窗口后重试；当前交付已保留。",
+          "Pop-up blocked by browser; allow pop-ups and retry (current delivery is preserved).",
+        ),
+      );
       return false;
     }
     try {
-      child.sessionStorage.setItem("mh-wb-prefill", JSON.stringify({
-        name: comp,
-        text: ["这次交付遇到一个组件应预先检查的问题。", "问题：" + s.reason, "建议：" + s.step.title, "详情：" + (s.step.desc || ""), "请先读当前组件的相关文件，用 edits 提议最小修改并通过检查；不要直接发布。"].join("\n"),
-      }));
+      child.sessionStorage.setItem(
+        "mh-wb-prefill",
+        JSON.stringify({
+          name: comp,
+          text: bi(
+            [
+              "这次交付遇到一个组件应预先检查的问题。",
+              "问题：" + s.reason,
+              "建议：" + s.step.title,
+              "详情：" + (s.step.desc || ""),
+              "请先读当前组件的相关文件，用 edits 提议最小修改并通过检查；不要直接发布。",
+            ].join("\n"),
+            [
+              "This delivery hit an issue the component should pre-check.",
+              "Issue: " + s.reason,
+              "Suggestion: " + s.step.title,
+              "Details: " + (s.step.desc || ""),
+              "Read the relevant component files first, propose minimal edits that pass checks, and do not publish directly.",
+            ].join("\n"),
+          ),
+        }),
+      );
       child.opener = null;
       child.location.replace(window.location.origin + window.location.pathname + "#/components/" + encodeURIComponent(comp) + "/edit/overview");
       return true;
     } catch {
       child.close();
-      Message.error("无法打开组件工作台，请重试；当前交付未离开。");
+      Message.error(
+        bi(
+          "无法打开组件工作台，请重试；当前交付未离开。",
+          "Unable to open Component Workbench; please retry.",
+        ),
+      );
       return false;
     }
   };
@@ -3190,37 +3634,56 @@ function SuggestCard({
   return (
     <article className={`ad-card s-${s.status}`}>
       <header>
-        <span className="ad-card-k">组件改进建议</span>
+        <span className="ad-card-k">
+          {bi("组件改进建议", "Component improvement")}
+        </span>
         <span className="ad-card-m">{comp}</span>
       </header>
       <p className="ad-card-t">{s.step.title}</p>
       {s.step.desc && <p className="ad-card-d">{s.step.desc}</p>}
       <dl className="ad-card-dl">
-        <dt>缘由</dt>
+        <dt>{bi("缘由", "Reason")}</dt>
         <dd>{s.reason}</dd>
       </dl>
       {done ? (
         <div className={`ad-card-done ad-suggest-done s-${s.status}`}>
-          <span className="ad-suggest-status">{s.status === "accepted"
-            ? `${s.decided_by} 已转到组件工作台处理`
-            : `${s.decided_by} 认为不需要`}</span>
-          {s.status === "accepted" && can("component.edit") && <Button size="small" type="text" onClick={openWorkbench}>新标签页打开组件工作台</Button>}
+          <span className="ad-suggest-status">
+            {s.status === "accepted"
+              ? bi(
+                  `${s.decided_by} 已转到组件工作台处理`,
+                  `${s.decided_by} opened in Component Workbench`,
+                )
+              : bi(
+                  `${s.decided_by} 认为不需要`,
+                  `${s.decided_by} dismissed`,
+                )}
+          </span>
+          {s.status === "accepted" && can("component.edit") && (
+            <Button size="small" type="text" onClick={openWorkbench}>
+              {bi("新标签页打开组件工作台", "Open Component Workbench")}
+            </Button>
+          )}
         </div>
       ) : (
         <div className="ad-card-acts">
           {can("component.edit") ? (
             <Button size="small" type="primary" loading={busy} onClick={take}>
-              新标签页打开，让 AI 起草
+              {bi("新标签页打开，让 AI 起草", "Open in new tab for AI draft")}
             </Button>
           ) : (
-            <span className="faint small">需要有组件编辑权限的人处理</span>
+            <span className="faint small">
+              {bi(
+                "需要有组件编辑权限的人处理",
+                "Requires component edit permission",
+              )}
+            </span>
           )}
           <Button
             size="small"
             disabled={busy}
             onClick={() => decide(s.id, "reject")}
           >
-            不需要
+            {bi("不需要", "Dismiss")}
           </Button>
         </div>
       )}
@@ -3240,6 +3703,7 @@ function FileCard({
   decide: (id: string, v: "accept" | "reject") => void;
   feedback?: (text: string) => void;
 }) {
+  useLang();
   const [rejecting, setRejecting] = useState(false);
   const [why, setWhy] = useState("");
   const f = s.file;
@@ -3247,38 +3711,55 @@ function FileCard({
   return (
     <article className={`ad-card s-${s.status}`}>
       <header>
-        <span className="ad-card-k">修改自动化文件</span>
-        <span className="ad-card-m">只改这一份交付</span>
+        <span className="ad-card-k">
+          {bi("修改自动化文件", "Edit automation file")}
+        </span>
+        <span className="ad-card-m">
+          {bi("只改这一份交付", "This delivery only")}
+        </span>
       </header>
       <p className="ad-card-t">
         <code>{f?.path}</code>
-        {f?.new && <span className="ad-tag">新增</span>}
+        {f?.new && <span className="ad-tag">{bi("新增", "New")}</span>}
       </p>
-      {f?.diff && <CodeBlock text={f.diff} caption="差异" />}
+      {f?.diff && <CodeBlock text={f.diff} caption={bi("差异", "Diff")} />}
       <dl className="ad-card-dl">
-        <dt>缘由</dt>
+        <dt>{bi("缘由", "Reason")}</dt>
         <dd>{s.reason}</dd>
       </dl>
       {done ? (
         <div className={`ad-card-done s-${s.status}`}>
           <span className="ad-card-verdict">
             {s.status === "accepted" ? <IconCheck /> : null}
-            <span>{s.decided_by} {s.status === "accepted" ? "已采纳" : "已拒绝"}</span>
+            <span>
+              {s.decided_by}{" "}
+              {s.status === "accepted"
+                ? bi("已采纳", "accepted")
+                : bi("已拒绝", "rejected")}
+            </span>
           </span>
           {s.status === "accepted" && (
             <span className="ad-card-where">
-              已生成更新包，在页面「现场执行」上方按提示放到控制节点，之后这份交付的自动化就是改过的样子。
+              {bi(
+                "已生成更新包，在页面「现场执行」上方按提示放到控制节点，之后这份交付的自动化就是改过的样子。",
+                "Update bundle generated—follow the instructions above Field Execution to place it on the control node.",
+              )}
             </span>
           )}
         </div>
       ) : rejecting ? (
         <div className="ad-card-why">
-          <b>不采纳的原因？告诉 AI，它会据此调整</b>
+          <b>
+            {bi(
+              "不采纳的原因？告诉 AI，它会据此调整",
+              "Why reject? Tell AI so it can adjust",
+            )}
+          </b>
           <Input.TextArea
             value={why}
             onChange={setWhy}
             autoSize={{ minRows: 2, maxRows: 5 }}
-            aria-label="不采纳的原因"
+            aria-label={bi("不采纳的原因", "Reason for rejection")}
           />
           <div className="ad-card-acts">
             <Button
@@ -3288,20 +3769,25 @@ function FileCard({
               onClick={() => {
                 decide(s.id, "reject");
                 setRejecting(false);
-                feedback?.(`我没有采纳这个文件修改：${why.trim()}`);
+                feedback?.(
+                  bi(
+                    `我没有采纳这个文件修改：${why.trim()}`,
+                    `I rejected this file edit: ${why.trim()}`,
+                  ),
+                );
               }}
             >
-              发给 AI
+              {bi("发给 AI", "Send to AI")}
             </Button>
             <Button size="small" onClick={() => decide(s.id, "reject")}>
-              只拒绝
+              {bi("只拒绝", "Reject only")}
             </Button>
             <Button
               size="small"
               type="text"
               onClick={() => setRejecting(false)}
             >
-              取消
+              {bi("取消", "Cancel")}
             </Button>
           </div>
         </div>
@@ -3313,7 +3799,7 @@ function FileCard({
             loading={busy}
             onClick={() => decide(s.id, "accept")}
           >
-            采纳，生成更新包
+            {bi("采纳，生成更新包", "Accept & build update")}
           </Button>
           <Button
             size="small"
@@ -3322,7 +3808,7 @@ function FileCard({
               feedback ? setRejecting(true) : decide(s.id, "reject")
             }
           >
-            不采纳
+            {bi("不采纳", "Reject")}
           </Button>
         </div>
       )}
@@ -3330,10 +3816,19 @@ function FileCard({
   );
 }
 
-const WHY_NOT = [
-  "命令不对，我来补充说明",
-  "不是这个原因，请继续排查",
-  "我想手动处理，只告诉我步骤和风险",
+const getWhyNot = () => [
+  bi(
+    "命令不对，我来补充说明",
+    "Command is wrong—let me clarify",
+  ),
+  bi(
+    "不是这个原因，请继续排查",
+    "Wrong root cause—keep investigating",
+  ),
+  bi(
+    "我想手动处理，只告诉我步骤和风险",
+    "I'll handle it manually—just tell me the steps and risks",
+  ),
 ];
 
 export function Card({
@@ -3353,29 +3848,45 @@ export function Card({
   /** Sends the person's words to the assistant, so a refused card leads to a better one rather than a dead end. */
   feedback?: (text: string) => void;
 }) {
+  useLang();
   const [rejecting, setRejecting] = useState(false);
   const [why, setWhy] = useState("");
   const done = p.status !== "pending";
   const verdict =
     p.status === "accepted"
-      ? `${p.decided_by} 已采纳`
+      ? bi(`${p.decided_by} 已采纳`, `${p.decided_by} accepted`)
       : p.status === "rejected"
-        ? `${p.decided_by} 已拒绝`
+        ? bi(`${p.decided_by} 已拒绝`, `${p.decided_by} rejected`)
         : p.status === "withdrawn"
-          ? "已撤销"
+          ? bi("已撤销", "Withdrawn")
           : "";
   const reject = (text: string) => {
     decide(p.id, "reject");
     setRejecting(false);
-    if (feedback && text.trim()) feedback(`我没有采纳这个提案：${text.trim()}`);
+    if (feedback && text.trim())
+      feedback(
+        bi(
+          `我没有采纳这个提案：${text.trim()}`,
+          `I rejected this proposal: ${text.trim()}`,
+        ),
+      );
   };
   const acts =
     !done && rejecting ? (
       <div className="ad-card-why">
-        <b>不采纳的原因？告诉 AI，它会据此调整</b>
+        <b>
+          {bi(
+            "不采纳的原因？告诉 AI，它会据此调整",
+            "Why reject? Tell AI so it can adjust",
+          )}
+        </b>
         <div className="ad-card-opts">
-          {WHY_NOT.map((o) => (
-            <button key={o} type="button" onClick={() => setWhy(o + "：")}>
+          {getWhyNot().map((o) => (
+            <button
+              key={o}
+              type="button"
+              onClick={() => setWhy(o + bi("：", ": "))}
+            >
               {o}
             </button>
           ))}
@@ -3384,8 +3895,11 @@ export function Card({
           value={why}
           onChange={setWhy}
           autoSize={{ minRows: 2, maxRows: 5 }}
-          placeholder="写下你的想法，例如现场的实际情况、你想怎么做"
-          aria-label="不采纳的原因"
+          placeholder={bi(
+            "写下你的想法，例如现场的实际情况、你想怎么做",
+            "Explain the situation on site or what you'd prefer",
+          )}
+          aria-label={bi("不采纳的原因", "Reason for rejection")}
         />
         <div className="ad-card-acts">
           <Button
@@ -3394,13 +3908,13 @@ export function Card({
             disabled={!why.trim()}
             onClick={() => reject(why)}
           >
-            发给 AI
+            {bi("发给 AI", "Send to AI")}
           </Button>
           <Button size="small" onClick={() => reject("")}>
-            只拒绝，不说明
+            {bi("只拒绝，不说明", "Reject silently")}
           </Button>
           <Button size="small" type="text" onClick={() => setRejecting(false)}>
-            取消
+            {bi("取消", "Cancel")}
           </Button>
         </div>
       </div>
@@ -3412,7 +3926,9 @@ export function Card({
           loading={busy}
           onClick={() => decide(p.id, "accept")}
         >
-          {comp ? "采纳，写入草稿" : "采纳，写入交付"}
+          {comp
+            ? bi("采纳，写入草稿", "Accept to draft")
+            : bi("采纳，写入交付", "Accept to delivery")}
         </Button>
         <Button
           size="small"
@@ -3421,7 +3937,7 @@ export function Card({
             feedback ? setRejecting(true) : decide(p.id, "reject")
           }
         >
-          不采纳
+          {bi("不采纳", "Reject")}
         </Button>
       </div>
     ) : (
@@ -3430,19 +3946,31 @@ export function Card({
           {p.status === "accepted" ? <IconCheck /> : null}
           <span>{verdict}</span>
         </span>
-        {p.status === "accepted" && <span className="ad-card-result">
-          {comp ? "已写入草稿" : "已写入执行手册和交付文档"}
-        </span>}
+        {p.status === "accepted" && (
+          <span className="ad-card-result">
+            {comp
+              ? bi("已写入草稿", "Applied to draft")
+              : bi("已写入执行手册和交付文档", "Applied to runbook & delivery docs")}
+          </span>
+        )}
         {p.status === "accepted" && !comp && (
           <span className="ad-card-where">
-            在「{PHASE[(p as StepProposal).phase] || (p as StepProposal).phase}
-            」阶段
-            {(p as StepProposal).kind === "replace"
-              ? `的「${(p as StepProposal).step.title}」这一步`
-              : (p as StepProposal).after_title
-                ? `「${(p as StepProposal).after_title}」之后`
-                : "的末尾"}
-            ，由你在现场执行。
+            {bi(
+              `在「${PHASE[(p as StepProposal).phase] || (p as StepProposal).phase}」阶段${
+                (p as StepProposal).kind === "replace"
+                  ? `的「${(p as StepProposal).step.title}」这一步`
+                  : (p as StepProposal).after_title
+                    ? `「${(p as StepProposal).after_title}」之后`
+                    : "的末尾"
+              }，由你在现场执行。`,
+              `In phase "${PHASE[(p as StepProposal).phase] || (p as StepProposal).phase}"${
+                (p as StepProposal).kind === "replace"
+                  ? ` (step "${(p as StepProposal).step.title}")`
+                  : (p as StepProposal).after_title
+                    ? ` after "${(p as StepProposal).after_title}"`
+                    : " at end of phase"
+              }, ready for execution.`,
+            )}
             <button
               type="button"
               className="link"
@@ -3454,7 +3982,7 @@ export function Card({
                 )
               }
             >
-              去看这一步
+              {bi("去看这一步", "View step")}
             </button>
           </span>
         )}
@@ -3465,8 +3993,13 @@ export function Card({
     return (
       <article className={`ad-card s-${c.status}`}>
         <header>
-          <span className="ad-card-k">改动提案</span>
-          <span className="ad-card-m">{c.files.length} 个文件</span>
+          <span className="ad-card-k">{bi("改动提案", "Edit proposal")}</span>
+          <span className="ad-card-m">
+            {bi(
+              `${c.files.length} 个文件`,
+              `${c.files.length} file${c.files.length === 1 ? "" : "s"}`,
+            )}
+          </span>
         </header>
         <p className="ad-card-t">{c.summary}</p>
         <ul className="ad-files">
@@ -3477,32 +4010,46 @@ export function Card({
                   <span className={`ad-op o-${f.op}`}>{OP[f.op] || f.op}</span>
                   <code>{f.path}</code>
                 </summary>
-                {f.diff && <CodeBlock text={f.diff} caption="差异" />}
+                {f.diff && <CodeBlock text={f.diff} caption={bi("差异", "Diff")} />}
               </details>
             </li>
           ))}
         </ul>
         {c.trial && (
           <p className="ad-card-ok">
-            <IconCheck /> 平台检查通过 · {c.trial}
+            <IconCheck /> {bi("平台检查通过", "Platform check passed")} · {c.trial}
           </p>
         )}
         {c.warnings && c.warnings.length > 0 && (
           <details className="ad-card-warn">
-            <summary>仍有 {c.warnings.length} 条提示需要留意</summary>
+            <summary>
+              {bi(
+                `仍有 ${c.warnings.length} 条提示需要留意`,
+                `${c.warnings.length} warning${c.warnings.length === 1 ? "" : "s"} to review`,
+              )}
+            </summary>
             <ul>
               {c.warnings.map((w) => (
                 <li key={w}>
                   <span>{w.replace(/^- /, "")}</span>
                   {ask && (
-                    <Tooltip content="问 AI：这条提示要不要处理" mini>
+                    <Tooltip
+                      content={bi(
+                        "问 AI：这条提示要不要处理",
+                        "Ask AI whether this warning needs action",
+                      )}
+                      mini
+                    >
                       <button
                         type="button"
                         className="cs-q"
-                        aria-label="问 AI 这条提示"
+                        aria-label={bi("问 AI 这条提示", "Ask AI about this warning")}
                         onClick={() =>
                           ask(
-                            `请解释这条提示：它是什么意思、对这个组件有没有影响、需不需要处理、怎么处理。\n${w.replace(/^- /, "")}`,
+                            bi(
+                              `请解释这条提示：它是什么意思、对这个组件有没有影响、需不需要处理、怎么处理。\n${w.replace(/^- /, "")}`,
+                              `Explain this warning: what does it mean, does it impact the component, should it be fixed, and how?\n${w.replace(/^- /, "")}`,
+                            ),
                           )
                         }
                       >
@@ -3528,14 +4075,16 @@ export function Card({
   return (
     <article className={`ad-card s-${s.status}`}>
       <header>
-        <span className="ad-card-k">{change ? "修改这一步" : "新增一步"}</span>
+        <span className="ad-card-k">
+          {change ? bi("修改这一步", "Modify step") : bi("新增一步", "Add step")}
+        </span>
         <span className="ad-card-m">
           {PHASE[s.phase] || s.phase}
           {change
             ? ""
             : s.after_title
-              ? ` · 放在「${s.after_title}」之后`
-              : " · 放在阶段末尾"}
+              ? bi(` · 放在「${s.after_title}」之后`, ` · after "${s.after_title}"`)
+              : bi(" · 放在阶段末尾", " · at end of phase")}
         </span>
       </header>
       <p className="ad-card-t">
@@ -3547,22 +4096,25 @@ export function Card({
       {s.step.desc && <p className="ad-card-d">{s.step.desc}</p>}
       <CodeBlock
         text={s.step.command}
-        caption={`在 ${s.step.hosts.join("、")} 上执行`}
+        caption={bi(
+          `在 ${s.step.hosts.join("、")} 上执行`,
+          `Run on ${s.step.hosts.join(", ")}`,
+        )}
       />
       <dl className="ad-card-dl">
         {s.step.expect && (
           <>
-            <dt>通过标准</dt>
+            <dt>{bi("通过标准", "Expected")}</dt>
             <dd>{s.step.expect}</dd>
           </>
         )}
         {s.step.rollback && (
           <>
-            <dt>回退</dt>
+            <dt>{bi("回退", "Rollback")}</dt>
             <dd>{s.step.rollback}</dd>
           </>
         )}
-        <dt>缘由</dt>
+        <dt>{bi("缘由", "Reason")}</dt>
         <dd>{s.reason}</dd>
       </dl>
       {s.warnings && s.warnings.length > 0 && (
@@ -3587,21 +4139,24 @@ export function AIReports({
   reports: AIReport[];
   where?: string;
 }) {
+  useLang();
   const ai = useAIStatus();
   const [openSubmit, submitNode] = useSubmitKB();
   if (!ai.enabled || !reports.length) return null;
   return (
-    <section className="ad-reports" aria-label="AI 辅助处理">
+    <section className="ad-reports" aria-label={bi("AI 辅助处理", "AI-assisted resolutions")}>
       {submitNode}
       <h3>
-        <Spark /> AI 辅助处理
+        <Spark /> {bi("AI 辅助处理", "AI-assisted resolutions")}
       </h3>
       {reports.map((r) => (
         <article key={r.session} className="ad-report">
           <header>
             <b>{r.title}</b>
             {r.changed && (
-              <span className="ad-tag e-destructive">交付需要修改</span>
+              <span className="ad-tag e-destructive">
+                {bi("交付需要修改", "Delivery requires changes")}
+              </span>
             )}
             <span className="ad-report-by" title={fullTime(r.at)}>
               {r.by} · {ago(r.at)}
@@ -3612,44 +4167,47 @@ export function AIReports({
                 className="ad-report-kb"
                 onClick={() => go({ name: "kb", id: `my-${r.kb_id}` })}
               >
-                已存入我的知识库
+                {bi("已存入我的知识库", "Saved to my KB")}
               </button>
             )}
             {can("kb.submit") && (
               <button
                 type="button"
                 className="ad-report-kb"
-                title="提交后由管理员审核，通过才进入团队知识库"
+                title={bi(
+                  "提交后由管理员审核，通过才进入团队知识库",
+                  "Requires admin review before entering the team KB",
+                )}
                 onClick={() =>
                   openSubmit(
                     reportDoc(r, where ? `${where} · ${r.title}` : r.title),
                   )
                 }
               >
-                发布到团队（需审核）
+                {bi("发布到团队（需审核）", "Publish to team (needs review)")}
               </button>
             )}
           </header>
           <dl>
-            <dt>现象</dt>
+            <dt>{bi("现象", "Symptom")}</dt>
             <dd>{r.symptom}</dd>
             {r.evidence && (
               <>
-                <dt>证据</dt>
+                <dt>{bi("证据", "Evidence")}</dt>
                 <dd>
                   <code>{r.evidence}</code>
                 </dd>
               </>
             )}
-            <dt>原因</dt>
+            <dt>{bi("原因", "Root cause")}</dt>
             <dd>{r.cause}</dd>
-            <dt>处理</dt>
+            <dt>{bi("处理", "Resolution")}</dt>
             <dd>
               <Markdown text={r.fix} />
             </dd>
             {r.followups && r.followups.length > 0 && (
               <>
-                <dt>待跟进</dt>
+                <dt>{bi("待跟进", "Follow-ups")}</dt>
                 <dd>
                   <ul>
                     {r.followups.map((f) => (

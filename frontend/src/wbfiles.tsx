@@ -26,6 +26,7 @@ import { CodeEditor } from "./wbcode";
 import type { Lang } from "./wbcode";
 import { useWb } from "./wbdoc";
 import type { Problem } from "./wbdoc";
+import { bi, useLang } from "./i18n";
 
 export type RenderFn = (
   path: string,
@@ -83,6 +84,7 @@ function Finder({
   files: Record<string, string>;
   open: (path: string, line?: number) => void;
 }) {
+  useLang();
   const [q, setQ] = useState("");
   const [inText, setInText] = useState(false);
   const box = useRef<HTMLInputElement>(null);
@@ -168,25 +170,33 @@ function Finder({
               setQ("");
             }
           }}
-          placeholder={inText ? "在全部文件里搜索内容" : "查找文件"}
-          aria-label={inText ? "搜索文件内容" : "查找文件"}
+          placeholder={
+            inText
+              ? bi("在全部文件里搜索内容", "Search across all files")
+              : bi("查找文件", "Find file")
+          }
+          aria-label={
+            inText
+              ? bi("搜索文件内容", "Search file contents")
+              : bi("查找文件", "Find file")
+          }
         />
         <kbd>{inText ? "⇧Ctrl F" : "Ctrl P"}</kbd>
       </div>
-      <div className="wb-find-seg" role="group" aria-label="查找范围">
+      <div className="wb-find-seg" role="group" aria-label={bi("查找范围", "Search scope")}>
         <button
           type="button"
           className={!inText ? "on" : ""}
           onClick={() => setInText(false)}
         >
-          文件名
+          {bi("文件名", "File name")}
         </button>
         <button
           type="button"
           className={inText ? "on" : ""}
           onClick={() => setInText(true)}
         >
-          文件内容
+          {bi("文件内容", "Contents")}
         </button>
       </div>
       {t && !inText && (
@@ -209,16 +219,18 @@ function Finder({
             </li>
           ))}
           {byName.length === 0 && (
-            <li className="wb-find-none">没有这个文件</li>
+            <li className="wb-find-none">{bi("没有这个文件", "No matching files")}</li>
           )}
         </ul>
       )}
       {t && inText && (
         <ul className="wb-find-list text">
           {t.length < 2 ? (
-            <li className="wb-find-none">至少输入两个字</li>
+            <li className="wb-find-none">
+              {bi("至少输入两个字", "Enter at least 2 characters")}
+            </li>
           ) : inside.length === 0 ? (
-            <li className="wb-find-none">没有找到</li>
+            <li className="wb-find-none">{bi("没有找到", "No matches")}</li>
           ) : (
             inside.map((f) => (
               <li key={f.path}>
@@ -286,6 +298,7 @@ function Tree({
   flagged: Map<string, "error" | "warning">;
   depth?: number;
 }) {
+  useLang();
   const { aiFiles } = useWb();
   const [closed, setClosed] = useState<Record<string, boolean>>({});
   return (
@@ -330,13 +343,13 @@ function Tree({
                 className={`wb-dot ${flagged.get(n.path)}`}
                 aria-label={
                   flagged.get(n.path) === "error"
-                    ? "有错误，打开文件查看说明"
-                    : "有警告，打开文件查看说明"
+                    ? bi("有错误，打开文件查看说明", "Has errors; open file for details")
+                    : bi("有警告，打开文件查看说明", "Has warnings; open file for details")
                 }
                 title={
                   flagged.get(n.path) === "error"
-                    ? "有错误，打开文件查看顶部说明"
-                    : "有提醒，打开文件查看顶部说明"
+                    ? bi("有错误，打开文件查看顶部说明", "Has errors; open file to view details")
+                    : bi("有提醒，打开文件查看顶部说明", "Has warnings; open file to view details")
                 }
               />
             )}
@@ -352,11 +365,14 @@ function Tree({
 type Kind = "task" | "template" | "file" | "defaults";
 const STARTER: Record<Kind, (role: string, name: string) => string> = {
   task: (_r, n) =>
-    `# ${n}：在目标机器上执行的 Ansible 任务。\n# 可用变量见上方「变量速查」，如 {{ mw.params.xxx }}、{{ mw_hosts[inventory_hostname].ip }}。\n- name: 示例任务\n  ansible.builtin.debug:\n    msg: "${n} on {{ inventory_hostname }}"\n`,
+    bi(
+      `# ${n}：在目标机器上执行的 Ansible 任务。\n# 可用变量见上方「变量速查」，如 {{ mw.params.xxx }}、{{ mw_hosts[inventory_hostname].ip }}。\n- name: 示例任务\n  ansible.builtin.debug:\n    msg: "${n} on {{ inventory_hostname }}"\n`,
+      `# ${n}: Ansible tasks executed on target hosts.\n# See Variable Reference above for variables such as {{ mw.params.xxx }} and {{ mw_hosts[inventory_hostname].ip }}.\n- name: Example task\n  ansible.builtin.debug:\n    msg: "${n} on {{ inventory_hostname }}"\n`,
+    ),
   template: () =>
     "# Managed by Middleware Hub for {{ mw_cluster.id }}/{{ mw.id }}. Do not edit by hand.\n",
   file: () => "",
-  defaults: () => "# 角色默认变量\n",
+  defaults: () => bi("# 角色默认变量\n", "# Role default variables\n"),
 };
 
 function NewFile({
@@ -370,6 +386,7 @@ function NewFile({
   roles: string[];
   create: (path: string, text: string) => void;
 }) {
+  useLang();
   const [kind, setKind] = useState<Kind>("task");
   const [role, setRole] = useState("");
   const [name, setName] = useState("");
@@ -389,17 +406,17 @@ function NewFile({
     (kind === "defaults" || /^[A-Za-z0-9._@+-]+$/.test(name)) &&
     !path.includes("..");
   const names: Record<Kind, [string, string]> = {
-    task: ["任务文件", "如 install、configure"],
-    template: ["配置模板", "如 redis.conf.j2"],
-    file: ["静态文件", "如 limits.conf"],
-    defaults: ["默认变量", ""],
+    task: [bi("任务文件", "Task file"), bi("如 install、configure", "e.g. install, configure")],
+    template: [bi("配置模板", "Config template"), bi("如 redis.conf.j2", "e.g. redis.conf.j2")],
+    file: [bi("静态文件", "Static file"), bi("如 limits.conf", "e.g. limits.conf")],
+    defaults: [bi("默认变量", "Default vars"), ""],
   };
   return (
     <Modal
       visible={open}
       onCancel={close}
-      title="新建文件"
-      okText="创建"
+      title={bi("新建文件", "New File")}
+      okText={bi("创建", "Create")}
       okButtonProps={{ disabled: !valid }}
       onOk={() => {
         create(path, STARTER[kind](role, name));
@@ -419,30 +436,30 @@ function NewFile({
           }))}
         />
         <div className="wb-field w-l">
-          <span className="wb-flabel">放进哪个角色目录</span>
+          <span className="wb-flabel">{bi("放进哪个角色目录", "Target role directory")}</span>
           <Select
             showSearch
             allowCreate
             value={role || undefined}
-            placeholder="选择，或输入新名字"
+            placeholder={bi("选择，或输入新名字", "Select or enter a new name")}
             options={roles.map((r) => ({ value: r, label: r }))}
             onChange={setRole}
-            aria-label="角色目录"
+            aria-label={bi("角色目录", "Role directory")}
           />
         </div>
         {kind !== "defaults" && (
           <div className="wb-field w-l">
-            <span className="wb-flabel">文件名</span>
+            <span className="wb-flabel">{bi("文件名", "File name")}</span>
             <Input
               value={name}
               onChange={setName}
               placeholder={names[kind][1]}
-              aria-label="文件名"
+              aria-label={bi("文件名", "File name")}
             />
           </div>
         )}
         <p className="wb-fhint">
-          将创建 <code>{valid ? path : "…"}</code>
+          {bi("将创建", "Will create")} <code>{valid ? path : "…"}</code>
         </p>
       </div>
     </Modal>
@@ -452,30 +469,34 @@ function NewFile({
 /* ---------------------------------------------------------------- cheat sheet */
 
 function CheatPanel({ close }: { close: () => void }) {
+  useLang();
   const { ops } = useWb();
   const js = ops.js;
   const [q, setQ] = useState("");
   const rows: [string, string][] = [
-    ["mw.id", "这个实例的名字"],
-    ["mw.version", "选用的版本"],
+    ["mw.id", bi("这个实例的名字", "Name of this instance")],
+    ["mw.version", bi("选用的版本", "Selected version")],
     ...((js.params || []) as any[]).map((p): [string, string] => [
       `mw.params.${p.key}`,
-      `${p.label || p.key}（${p.type}）`,
+      `${p.label || p.key} (${p.type})`,
     ]),
     ...((js.roles || []) as any[]).map((r): [string, string] => [
       `mw.roles.${r.name}`,
-      `${r.title || r.name}：这个角色的机器名列表`,
+      bi(
+        `${r.title || r.name}：这个角色的机器名列表`,
+        `${r.title || r.name}: host list for this role`,
+      ),
     ]),
     ...((js.secrets || []) as any[]).map((s): [string, string] => [
       `mw.secrets.${s.name}`,
-      "自动生成的密钥",
+      bi("自动生成的密钥", "Auto-generated secret"),
     ]),
-    ["mw.packages", "本版本的软件包（每项有 name、version、spec）"],
-    ["inventory_hostname", "当前这台机器的名字"],
-    ["mw_hosts[inventory_hostname].ip", "当前机器的 IP"],
-    ["mw_hosts", "所有机器：名字 → {ip, ...}"],
-    ["mw_cluster.id", "这次交付的编号"],
-    ["mw_platform", "目标系统（ubuntu 或 el9）"],
+    ["mw.packages", bi("本版本的软件包（每项有 name、version、spec）", "Packages for this version (each with name, version, spec)")],
+    ["inventory_hostname", bi("当前这台机器的名字", "Current target host name")],
+    ["mw_hosts[inventory_hostname].ip", bi("当前机器的 IP", "IP of the current host")],
+    ["mw_hosts", bi("所有机器：名字 → {ip, ...}", "All hosts: name → {ip, ...}")],
+    ["mw_cluster.id", bi("这次交付的编号", "ID of this delivery")],
+    ["mw_platform", bi("目标系统（ubuntu 或 el9）", "Target OS (ubuntu or el9)")],
   ];
   const t = q.trim().toLowerCase();
   const shown = rows.filter(
@@ -484,39 +505,43 @@ function CheatPanel({ close }: { close: () => void }) {
   const copy = async (k: string) => {
     try {
       await navigator.clipboard.writeText(`{{ ${k} }}`);
-      Message.success("已复制，粘贴到文件里即可");
+      Message.success(bi("已复制，粘贴到文件里即可", "Copied; paste into your file"));
     } catch {
       Message.info(`{{ ${k} }}`);
     }
   };
   return (
-    <aside className="wb-cheat" aria-label="变量速查">
+    <aside className="wb-cheat" aria-label={bi("变量速查", "Variable Reference")}>
       <header>
-        <b>变量速查</b>
+        <b>{bi("变量速查", "Variable Reference")}</b>
         <Button size="mini" type="text" onClick={close}>
-          关闭
+          {bi("关闭", "Close")}
         </Button>
       </header>
       <Input
         allowClear
         size="small"
-        placeholder="按名字或说明筛选"
+        placeholder={bi("按名字或说明筛选", "Filter by name or description")}
         value={q}
         onChange={setQ}
-        aria-label="筛选变量"
+        aria-label={bi("筛选变量", "Filter variables")}
       />
       <ul>
         {shown.map(([k, d]) => (
           <li key={k}>
-            <button type="button" onClick={() => copy(k)} title="点击复制">
+            <button type="button" onClick={() => copy(k)} title={bi("点击复制", "Click to copy")}>
               <code>{`{{ ${k} }}`}</code>
               <span>{d}</span>
             </button>
           </li>
         ))}
-        {shown.length === 0 && <li className="muted small">没有匹配的变量</li>}
+        {shown.length === 0 && (
+          <li className="muted small">{bi("没有匹配的变量", "No matching variables")}</li>
+        )}
       </ul>
-      <p className="wb-fhint">点一行复制，然后粘贴到任务文件或模板里。</p>
+      <p className="wb-fhint">
+        {bi("点一行复制，然后粘贴到任务文件或模板里。", "Click a row to copy, then paste into a task file or template.")}
+      </p>
     </aside>
   );
 }
@@ -539,6 +564,7 @@ export function FilesTab(p: {
   ansibleReady: boolean;
   ansibleWhy: string;
 }) {
+  useLang();
   const { problems, tasks, ops, ignoreWarning } = useWb();
   const paths = useMemo(
     () => [...Object.keys(p.files), ...p.binaries].sort(),
@@ -569,9 +595,12 @@ export function FilesTab(p: {
   const askProblem = (x: Problem) =>
     dock?.open({
       key: "comp",
-      title: "组件工作台",
-      context: "组件工作台",
-      prefill: `请解释这条检查提示：它是什么意思、对这个组件有没有实际影响、需不需要处理、怎么改（需要改就提议最小的局部修改）。\n${x.file}${x.line ? `:${x.line}` : ""} [${x.severity === "error" ? "错误" : "提示"}] ${x.message}`,
+      title: bi("组件工作台", "Component Workbench"),
+      context: bi("组件工作台", "Component Workbench"),
+      prefill: bi(
+        `请解释这条检查提示：它是什么意思、对这个组件有没有实际影响、需不需要处理、怎么改（需要改就提议最小的局部修改）。\n${x.file}${x.line ? `:${x.line}` : ""} [${x.severity === "error" ? "错误" : "提示"}] ${x.message}`,
+        `Please explain this check finding: what it means, whether it actually affects this component, whether it needs fixing, and the minimal local edit if needed.\n${x.file}${x.line ? `:${x.line}` : ""} [${x.severity === "error" ? "Error" : "Warning"}] ${x.message}`,
+      ),
     });
   const roleNames = Array.from(
     new Set(
@@ -582,9 +611,9 @@ export function FilesTab(p: {
   const text = p.files[p.active];
   return (
     <div className="wb-files">
-      <aside className="wb-tree" aria-label="文件">
+      <aside className="wb-tree" aria-label={bi("文件", "Files")}>
         <div className="wb-tree-head">
-          <b>文件</b>
+          <b>{bi("文件", "Files")}</b>
           {!p.readOnly && (
             <Button
               size="mini"
@@ -592,7 +621,7 @@ export function FilesTab(p: {
               icon={<IconPlus />}
               onClick={() => setNewOpen(true)}
             >
-              新建
+              {bi("新建", "New")}
             </Button>
           )}
         </div>
@@ -606,17 +635,21 @@ export function FilesTab(p: {
           />
         </div>
         <p className="wb-fhint wb-tree-note">
-          component.yaml 的内容也可以在其他页签用表单改。roles/
-          下是在目标机器上执行的任务，templates/ 是配置模板。
+          {bi(
+            "component.yaml 的内容也可以在其他页签用表单改。roles/ 下是在目标机器上执行的任务，templates/ 是配置模板。",
+            "component.yaml can also be edited via forms on other tabs. roles/ holds tasks executed on target hosts; templates/ holds config templates.",
+          )}
         </p>
       </aside>
       <div className="wb-editor">
         {!p.active || (text === undefined && !isBinary) ? (
-          <div className="wb-editor-empty">从左边选一个文件，或新建一个。</div>
+          <div className="wb-editor-empty">
+            {bi("从左边选一个文件，或新建一个。", "Select a file on the left or create a new one.")}
+          </div>
         ) : (
           <>
             <div className="wb-editor-bar">
-              <nav className="wb-crumbs" aria-label="路径">
+              <nav className="wb-crumbs" aria-label={bi("路径", "Path")}>
                 {p.active.split("/").map((seg, i, all) => (
                   <React.Fragment key={i}>
                     {i > 0 && <span className="sep">/</span>}
@@ -629,8 +662,10 @@ export function FilesTab(p: {
               <span className="wb-grow" />
               {here.length > 0 && (
                 <span className="wb-fhint">
-                  {here.filter((x) => x.severity === "error").length} 个错误 ·{" "}
-                  {here.filter((x) => x.severity === "warning").length} 个警告
+                  {bi(
+                    `${here.filter((x) => x.severity === "error").length} 个错误 · ${here.filter((x) => x.severity === "warning").length} 个警告`,
+                    `${here.filter((x) => x.severity === "error").length} error(s) · ${here.filter((x) => x.severity === "warning").length} warning(s)`,
+                  )}
                 </span>
               )}
               <Button
@@ -639,7 +674,7 @@ export function FilesTab(p: {
                 onClick={() => setCheat((c) => !c)}
                 aria-pressed={cheat}
               >
-                变量速查
+                {bi("变量速查", "Variables")}
               </Button>
               {!p.readOnly && p.active !== "component.yaml" && !isBinary && (
                 <Button
@@ -650,22 +685,25 @@ export function FilesTab(p: {
                     setRenaming(true);
                   }}
                 >
-                  重命名
+                  {bi("重命名", "Rename")}
                 </Button>
               )}
               {!p.readOnly && p.active !== "component.yaml" && (
-                <Tooltip content="删除这个文件">
+                <Tooltip content={bi("删除这个文件", "Delete this file")}>
                   <Button
                     size="mini"
                     type="text"
                     status="danger"
                     icon={<IconDelete />}
-                    aria-label="删除文件"
+                    aria-label={bi("删除文件", "Delete file")}
                     onClick={() =>
                       Modal.confirm({
-                        title: `删除 ${p.active}？`,
-                        content: "只影响草稿，发布前随时可以从修订里找回。",
-                        okText: "删除",
+                        title: bi(`删除 ${p.active}？`, `Delete ${p.active}?`),
+                        content: bi(
+                          "只影响草稿，发布前随时可以从修订里找回。",
+                          "Only affects this draft; you can restore from revisions before publishing.",
+                        ),
+                        okText: bi("删除", "Delete"),
                         okButtonProps: { status: "danger" },
                         onOk: () => p.remove(p.active),
                       })
@@ -677,7 +715,7 @@ export function FilesTab(p: {
             {here.length > 0 && !isBinary && (
               <ul
                 className="wb-probs wb-probs-visible"
-                aria-label="这个文件的检查结果"
+                aria-label={bi("这个文件的检查结果", "Check findings for this file")}
               >
                 {here.map((x, i) => (
                   <li key={i} className={x.severity}>
@@ -687,11 +725,11 @@ export function FilesTab(p: {
                       className="wb-prob-at"
                       onClick={() => x.line && openAt(p.active, x.line)}
                     >
-                      {x.line ? `第 ${x.line} 行` : "整个文件"}
+                      {x.line ? bi(`第 ${x.line} 行`, `Line ${x.line}`) : bi("整个文件", "Whole file")}
                     </button>
                     <span className="wb-prob-msg">
                       <strong>
-                        {x.severity === "error" ? "错误：" : "提示："}
+                        {x.severity === "error" ? bi("错误：", "Error: ") : bi("提示：", "Notice: ")}
                       </strong>
                       {x.message}
                     </span>
@@ -701,18 +739,18 @@ export function FilesTab(p: {
                         <button
                           type="button"
                           className="wb-prob-ign"
-                          title="看过了、确认没问题：以后不再提醒"
+                          title={bi("看过了、确认没问题：以后不再提醒", "Reviewed and confirmed safe: dismiss future warnings")}
                           onClick={() => ignoreWarning(x)}
                         >
-                          忽略
+                          {bi("忽略", "Ignore")}
                         </button>
                       )}
                     {!!dock?.available("comp") && (
-                      <Tooltip content="问 AI 这条提示" mini>
+                      <Tooltip content={bi("问 AI 这条提示", "Ask AI about this issue")} mini>
                         <button
                           type="button"
                           className="wb-prob-q"
-                          aria-label="问 AI 这条提示"
+                          aria-label={bi("问 AI 这条提示", "Ask AI about this issue")}
                           onClick={() => askProblem(x)}
                         >
                           <IconQuestionCircle />
@@ -725,7 +763,7 @@ export function FilesTab(p: {
             )}
             {isBinary ? (
               <div className="wb-editor-empty">
-                这是二进制文件，不能在这里编辑。
+                {bi("这是二进制文件，不能在这里编辑。", "Binary file; cannot be edited here.")}
               </div>
             ) : (
               <div className="wb-editor-main">
@@ -763,8 +801,8 @@ export function FilesTab(p: {
       <Modal
         visible={renaming}
         onCancel={() => setRenaming(false)}
-        title="重命名 / 移动文件"
-        okText="确定"
+        title={bi("重命名 / 移动文件", "Rename / Move File")}
+        okText={bi("确定", "OK")}
         okButtonProps={{
           disabled:
             !/^(roles|templates|files)\/[A-Za-z0-9._@+-]+(\/[A-Za-z0-9._@+-]+)*$/.test(
@@ -781,16 +819,18 @@ export function FilesTab(p: {
       >
         <div className="wb-newfile">
           <div className="wb-field w-l">
-            <span className="wb-flabel">新路径</span>
+            <span className="wb-flabel">{bi("新路径", "New Path")}</span>
             <Input
               className="wb-mono"
               value={target}
               onChange={setTarget}
-              aria-label="新路径"
+              aria-label={bi("新路径", "New path")}
             />
             <span className="wb-fhint">
-              要放在 roles/、templates/ 或 files/
-              目录下。改了角色目录名的话，别忘了同步改步骤里的 run.role。
+              {bi(
+                "要放在 roles/、templates/ 或 files/ 目录下。改了角色目录名的话，别忘了同步改步骤里的 run.role。",
+                "Must be placed under roles/, templates/, or files/. If you rename a role directory, remember to update run.role in your steps.",
+              )}
             </span>
           </div>
         </div>
@@ -821,6 +861,7 @@ function RenderPane({
   why: string;
   presets: { id: string; name: string }[];
 }) {
+  useLang();
   const [preset, setPreset] = useState("");
   const [host, setHost] = useState("");
   const [busy, setBusy] = useState(false);
@@ -842,28 +883,31 @@ function RenderPane({
   return (
     <div className="wb-render">
       <div className="wb-render-bar">
-        <b>渲染预览</b>
+        <b>{bi("渲染预览", "Render Preview")}</b>
         <span className="wb-fhint">
-          用样例机器和这个组件的默认参数，让 Ansible 真的把模板渲染一遍
+          {bi(
+            "用样例机器和这个组件的默认参数，让 Ansible 真的把模板渲染一遍",
+            "Renders this template via Ansible using sample hosts and the component's defaults",
+          )}
         </span>
         <span className="wb-grow" />
         <Select
           size="small"
           allowClear
           style={{ width: 150 }}
-          placeholder="方案：默认"
+          placeholder={bi("方案：默认", "Scheme: default")}
           value={preset || undefined}
           options={presets.map((x) => ({ value: x.id, label: x.name || x.id }))}
           onChange={(v) => setPreset(v || "")}
-          aria-label="方案"
+          aria-label={bi("方案", "Scheme")}
         />
         <Input
           size="small"
           style={{ width: 110 }}
-          placeholder="机器：host1"
+          placeholder={bi("机器：host1", "Host: host1")}
           value={host}
           onChange={setHost}
-          aria-label="样例机器"
+          aria-label={bi("样例机器", "Sample host")}
         />
         <Tooltip content={ready ? "" : why} disabled={ready}>
           <span>
@@ -875,7 +919,7 @@ function RenderPane({
               disabled={!ready}
               onClick={run}
             >
-              渲染
+              {bi("渲染", "Render")}
             </Button>
           </span>
         </Tooltip>

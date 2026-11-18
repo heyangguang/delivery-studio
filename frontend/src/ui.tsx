@@ -11,10 +11,12 @@ import { IconCheck, IconClose } from "@arco-design/web-react/icon";
 import { running, states, useMedia } from "./shared";
 import type { InstanceView, Job } from "./shared";
 import { iconShape, styleOf } from "./glyphs";
+import { bi, canonicalCat, useLang } from "./i18n";
 
 /* ---------- identity ---------- */
 
 export function BrandMark({ size = 26 }: { size?: number }) {
+  useLang();
   const uid = useId().replace(/[^a-zA-Z0-9]/g, "");
   const bgId = `bm-bg-${uid}`;
   const glowId = `bm-gl-${uid}`;
@@ -97,7 +99,7 @@ const TINTS: Record<string, [string, string]> = {
   搜索: ["#f4b552", "#c47a12"],
 };
 export const tintOf = (category?: string): [string, string] =>
-  TINTS[category || ""] || ["#9a9aa2", "#6e6e76"];
+  TINTS[canonicalCat(category)] || ["#9a9aa2", "#6e6e76"];
 
 /** Component logo: its own icon and colour when it declares them, otherwise the category's default. */
 export function AppGlyph({
@@ -155,7 +157,10 @@ export function FilterChip({
       size={size}
       closable
       onClose={onClose}
-      __closeIconProps={{ "aria-label": `移除筛选：${label}`, title: "移除" }}
+      __closeIconProps={{
+        "aria-label": bi(`移除筛选：${label}`, `Remove filter: ${label}`),
+        title: bi("移除", "Remove"),
+      }}
     >
       {children ?? label}
     </Tag>
@@ -613,7 +618,7 @@ export function UnderlineTabs<T extends string>({
               <em className="utabs-count num">{it.count}</em>
             )}
             {it.badge}
-            {it.error && <span className="utabs-err" aria-label="存在异常" />}
+            {it.error && <span className="utabs-err" aria-label={bi("存在异常", "Has issues")} />}
           </button>
         );
       })}
@@ -698,6 +703,7 @@ export const InstanceGraph = React.memo(function InstanceGraph({
   controller?: string;
   layout?: "row" | "stack";
 }) {
+  useLang();
   const uid = useId().replace(/[^a-zA-Z0-9]/g, "");
   const calm = useMedia("(prefers-reduced-motion: reduce)");
   const real = displayInstances(instances).filter(i=>!i.external);
@@ -909,7 +915,7 @@ export const InstanceGraph = React.memo(function InstanceGraph({
           d,
           halo: d,
           kind: "front",
-          title: "客户端经入口转发到后端",
+          title: bi("客户端经入口转发到后端", "Client -> Entrypoint -> Backend"),
         });
       });
   });
@@ -934,14 +940,18 @@ export const InstanceGraph = React.memo(function InstanceGraph({
         cls:
           f.kind === "mesh" ? "link-mesh" : `link-wal ${f.sync ? "sync" : ""}`,
         text: f.title,
-        tag: f.sync ? "同步" : f.kind === "replication" ? "异步" : "",
+        tag: f.sync
+          ? bi("同步", "Sync")
+          : f.kind === "replication"
+            ? bi("异步", "Async")
+            : "",
       })),
     ...(fronts.length
       ? [
           {
             key: "front",
             cls: "link-live",
-            text: "客户端 → 入口 → 后端",
+            text: bi("客户端 → 入口 → 后端", "Client → Entry → Backend"),
             tag: "",
           },
         ]
@@ -954,7 +964,10 @@ export const InstanceGraph = React.memo(function InstanceGraph({
         viewBox={`0 0 ${W} ${H}`}
         style={stack ? undefined : { minWidth: Math.min(W, 520) }}
         role="img"
-        aria-label={`${used.length} 台机器，${real.length} 个组件实例，${flows.length + fronts.length} 条连接`}
+        aria-label={bi(
+          `${used.length} 台机器，${real.length} 个组件实例，${flows.length + fronts.length} 条连接`,
+          `${used.length} hosts, ${real.length} instances, ${flows.length + fronts.length} links`,
+        )}
       >
         <defs>
           {["wal", "wal-sync", "live"].map((k) => (
@@ -978,7 +991,7 @@ export const InstanceGraph = React.memo(function InstanceGraph({
           const cx = stack ? x0 + bw / 2 : W / 2;
           return (
             <g key={k} className="topo-elb">
-              <title>{`${f.external ? "外部入口" : "入口"} ${f.label}`}</title>
+              <title>{`${f.external ? bi("外部入口", "External entry") : bi("入口", "Entrypoint")} ${f.label}`}</title>
               <rect
                 x={cx - w / 2}
                 y={y}
@@ -987,12 +1000,12 @@ export const InstanceGraph = React.memo(function InstanceGraph({
                 rx={6}
               />
               <text x={cx} y={y + 21} textAnchor="middle">
-                <tspan className="t-k">{f.external ? "外部" : "入口"}</tspan>
+                <tspan className="t-k">{f.external ? bi("外部", "EXT") : bi("入口", "VIP")}</tspan>
                 {/* the pill has a fixed width: a long domain is shortened in the middle, never spilled over the wires */}
                 <tspan dx="6">
                   {clipMid(
                     f.label,
-                    w - 44 - labelWidth(f.external ? "外部" : "入口"),
+                    w - 44 - labelWidth(f.external ? bi("外部", "EXT") : bi("入口", "VIP")),
                     8,
                   )}
                 </tspan>
@@ -1036,7 +1049,7 @@ export const InstanceGraph = React.memo(function InstanceGraph({
                 >
                   <rect width={30} height={15} rx={4} />
                   <text x={15} y={11} textAnchor="middle">
-                    控制
+                    {bi("控制", "Ctrl")}
                   </text>
                 </g>
               )}
@@ -1155,7 +1168,7 @@ export const InstanceGraph = React.memo(function InstanceGraph({
           })}
       </svg>
       {legend.length > 0 && (
-        <ul className="ig-legend" aria-label="连线说明">
+        <ul className="ig-legend" aria-label={bi("连线说明", "Topology legend")}>
           {legend.map((l) => (
             <li key={l.key}>
               <svg width="30" height="8" aria-hidden>
@@ -1173,15 +1186,16 @@ export const InstanceGraph = React.memo(function InstanceGraph({
 
 /* ---------- generation stages ---------- */
 
-const STAGES = [
-  "校验规格与离线材料",
-  "生成手册与结构化步骤",
-  "打包各机器",
-  "复制离线材料",
-  "计算校验清单",
+const STAGE_PAIRS: [string, string][] = [
+  ["校验规格与离线材料", "Validate spec & offline artifacts"],
+  ["生成手册与结构化步骤", "Render handbook & playbooks"],
+  ["打包各机器", "Package per-host bundles"],
+  ["复制离线材料", "Stage offline packages"],
+  ["计算校验清单", "Compute checksums"],
 ];
 
 export function StageTrack({ job }: { job: Job }) {
+  useLang();
   const seen: Record<number, string> = {};
   for (const l of job.logs) {
     const m = /^\[(\d)\/5\]\s*(.*)$/.exec(l);
@@ -1190,7 +1204,8 @@ export function StageTrack({ job }: { job: Job }) {
   const reached = Math.max(-1, ...Object.keys(seen).map(Number));
   return (
     <ol className="stages">
-      {STAGES.map((title, i) => {
+      {STAGE_PAIRS.map(([zh, en], i) => {
+        const title = bi(zh, en);
         let st = "todo";
         if (job.state === "succeeded" || i < reached) st = "done";
         else if (i === reached)

@@ -1,3 +1,5 @@
+import { bi } from "./i18n";
+
 export type ExecutionNode = {
   kind?: "independent" | "embedded";
   protocol?: number;
@@ -37,9 +39,9 @@ export const isExecutionNodeOnline = (node: ExecutionNode) =>
   Date.now() - Date.parse(node.last_seen) < 35000;
 
 export function nodeConnection(node: ExecutionNode) {
-  if (node.disabled) return { key: "disabled", label: "已暂停接单" };
-  if (isExecutionNodeOnline(node)) return { key: "online", label: "已连接" };
+  if (node.disabled) return { key: "disabled", label: bi("已暂停接单", "Paused") };
+  if (isExecutionNodeOnline(node)) return { key: "online", label: bi("已连接", "Connected") };
   return node.last_seen
-    ? { key: "offline", label: "连接中断" }
-    : { key: "waiting", label: "等待连接" };
+    ? { key: "offline", label: bi("连接中断", "Disconnected") }
+    : { key: "waiting", label: bi("等待连接", "Waiting") };
 }

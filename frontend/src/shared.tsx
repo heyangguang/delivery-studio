@@ -9,6 +9,7 @@ export type DeploymentScheme = {
 };
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { Message } from "@arco-design/web-react";
+import { bi, biv, getLang, withLang } from "./i18n";
 
 export type Session = {
   username: string;
@@ -71,7 +72,7 @@ export const roleRange = (r: RoleSpec) =>
     ? r.min === r.max
       ? `${r.min}`
       : `${r.min}–${r.max}`
-    : `${r.min} 台起`;
+    : bi(`${r.min} 台起`, `≥ ${r.min} nodes`);
 export type RoleCount = { role: string; count: number };
 export type AppPlan = {
   contract?: {
@@ -698,6 +699,18 @@ export const clearAuth = () => {
 
 export const formatDuration = (sec?: number): string => {
   const s = Math.max(0, Math.floor(sec || 0));
+  if (getLang() === "en-US") {
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    const remS = s % 60;
+    if (m < 60) return remS > 0 ? `${m}m ${remS}s` : `${m}m`;
+    const h = Math.floor(m / 60);
+    const remM = m % 60;
+    if (h < 24) return remM > 0 ? `${h}h ${remM}m` : `${h}h`;
+    const d = Math.floor(h / 24);
+    const remH = h % 24;
+    return remH > 0 ? `${d}d ${remH}h` : `${d}d`;
+  }
   if (s < 60) return `${s} 秒`;
   const m = Math.floor(s / 60);
   const remS = s % 60;
@@ -732,6 +745,7 @@ export async function api<T>(
   options: RequestInit = {},
 ): Promise<T> {
   const headers = new Headers(options.headers);
+  if (!headers.has("X-Lang")) headers.set("X-Lang", getLang());
   if (options.body && !(options.body instanceof FormData))
     headers.set("Content-Type", "application/json");
   if (bearerToken && path !== "/api/login" && !headers.has("Authorization"))
@@ -746,7 +760,9 @@ export async function api<T>(
     if (options.signal?.aborted) throw e;
     setReachable(false);
     throw new ApiError(
-      navigator.onLine ? "无法连接到服务，请稍后重试" : "网络已断开",
+      navigator.onLine
+        ? bi("无法连接到服务，请稍后重试", "Unable to connect to the server; please try again later")
+        : bi("网络已断开", "Network disconnected"),
       0,
     );
   }
@@ -756,7 +772,11 @@ export async function api<T>(
   try {
     d = text ? JSON.parse(text) : {};
   } catch {
-    if (!r.ok) throw new ApiError(`服务暂时不可用（${r.status}）`, r.status);
+    if (!r.ok)
+      throw new ApiError(
+        bi(`服务暂时不可用（${r.status}）`, `Service temporarily unavailable (${r.status})`),
+        r.status,
+      );
     return text as unknown as T;
   }
   if (r.status === 401 && path !== "/api/login") {
@@ -764,7 +784,11 @@ export async function api<T>(
     if (path !== "/api/session") onUnauthorized();
   }
   if (!r.ok)
-    throw new ApiError(d.error || `请求失败（${r.status}）`, r.status, d);
+    throw new ApiError(
+      d.error || bi(`请求失败（${r.status}）`, `Request failed (${r.status})`),
+      r.status,
+      d,
+    );
   return d;
 }
 
@@ -772,25 +796,32 @@ export async function api<T>(
 export async function fetchText(url: string): Promise<string> {
   let r: Response;
   try {
-    r = await fetch(url, { credentials: "same-origin" });
+    r = await fetch(withLang(url), {
+      credentials: "same-origin",
+      headers: { "X-Lang": getLang() },
+    });
   } catch {
     setReachable(false);
-    throw new ApiError("无法连接到服务", 0);
+    throw new ApiError(bi("无法连接到服务", "Unable to reach the service"), 0);
   }
-  if (!r.ok) throw new ApiError(`文件读取失败（${r.status}）`, r.status);
+  if (!r.ok)
+    throw new ApiError(
+      bi(`文件读取失败（${r.status}）`, `Failed to read file (${r.status})`),
+      r.status,
+    );
   return r.text();
 }
 
 /* ---------- formatting ---------- */
 
 export const states: Record<string, string> = {
-  queued: "排队中",
-  running: "生成中",
-  succeeded: "已生成",
-  generated: "已生成",
-  configuration: "配置已生成",
-  done: "完成",
-  failed: "失败",
+  get queued() { return bi("排队中", "Queued"); },
+  get running() { return bi("生成中", "Generating"); },
+  get succeeded() { return bi("已生成", "Generated"); },
+  get generated() { return bi("已生成", "Generated"); },
+  get configuration() { return bi("配置已生成", "Config ready"); },
+  get done() { return bi("完成", "Done"); },
+  get failed() { return bi("失败", "Failed"); },
 };
 export const running = (s: string) => s === "queued" || s === "running";
 /** What a delivery is called to its owner: generated, then whatever they report after deploying. */
@@ -929,44 +960,50 @@ export const planPhase = (
           ? "running"
           : "ready";
 export const PLAN_PHASE: Record<PlanPhase, { label: string; dot: string }> = {
-  generating: { label: "生成中", dot: "running" },
-  genfailed: { label: "生成失败", dot: "failed" },
-  configured: { label: "配置已生成", dot: "generated" },
-  ready: { label: "待执行", dot: "generated" },
-  running: { label: "执行中", dot: "running" },
-  done: { label: "已完成", dot: "done" },
-  deviated: { label: "完成有偏差", dot: "warn" },
-  failed: { label: "失败待处理", dot: "failed" },
-  void: { label: "已作废", dot: "void" },
+  generating: { get label() { return bi("生成中", "Generating"); }, dot: "running" },
+  genfailed: { get label() { return bi("生成失败", "Build failed"); }, dot: "failed" },
+  configured: { get label() { return bi("配置已生成", "Config ready"); }, dot: "generated" },
+  ready: { get label() { return bi("待执行", "Ready to run"); }, dot: "generated" },
+  running: { get label() { return bi("执行中", "Executing"); }, dot: "running" },
+  done: { get label() { return bi("已完成", "Completed"); }, dot: "done" },
+  deviated: { get label() { return bi("完成有偏差", "Completed w/ drift"); }, dot: "warn" },
+  failed: { get label() { return bi("失败待处理", "Failed"); }, dot: "failed" },
+  void: { get label() { return bi("已作废", "Void"); }, dot: "void" },
 };
 /** "首次部署" or "配置交付" for a first deployment. */
 export const planTitle = (p: { delivery_mode?: string }) =>
-  p.delivery_mode === "configuration" ? "配置交付" : "首次部署";
+  p.delivery_mode === "configuration"
+    ? bi("配置交付", "Config Delivery")
+    : bi("首次部署", "Initial Deploy");
 /** The cluster's state in a few words, for its row and header. */
 export function clusterStatus(c: ClusterView): {
   label: string;
   dot: string;
   holder?: PlanEntry;
 } {
-  if (c.delivery_mode === "configuration" && c.current) return {label:"配置已生成",dot:"generated"};
+  if (c.delivery_mode === "configuration" && c.current)
+    return { label: bi("配置已生成", "Config ready"), dot: "generated" };
   const holder = c.plans.find((p) => p.id === c.holder);
   if (holder) {
     const ph = planPhase(holder);
     const what = planTitle(holder);
     if (ph === "generating")
-      return { label: `${what}生成中`, dot: "running", holder };
+      return { label: bi(`${what}生成中`, `${what} generating`), dot: "running", holder };
     if (ph === "failed")
-      return { label: `${what}失败待处理`, dot: "failed", holder };
+      return { label: bi(`${what}失败待处理`, `${what} failed`), dot: "failed", holder };
     return {
-      label: `${what}${ph === "running" ? "执行中" : "待执行"}`,
+      label: bi(
+        `${what}${ph === "running" ? "执行中" : "待执行"}`,
+        `${what} ${ph === "running" ? "executing" : "ready"}`,
+      ),
       dot: ph === "running" ? "running" : "generated",
       holder,
     };
   }
-  if (c.head) return { label: "运行中", dot: "done" };
+  if (c.head) return { label: bi("运行中", "Running"), dot: "done" };
   if (c.plans.some((p) => p.state === "failed"))
-    return { label: "生成失败", dot: "failed" };
-  return { label: "已作废", dot: "void" };
+    return { label: bi("生成失败", "Build failed"), dot: "failed" };
+  return { label: bi("已作废", "Void"), dot: "void" };
 }
 export const err = (e: unknown) =>
   Message.error({ content: (e as Error).message, duration: 4000 });
@@ -985,15 +1022,22 @@ export const clock = (s: string) => {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
 export const fullTime = (s: string) =>
-  new Date(s).toLocaleString("zh-CN", { hour12: false });
+  new Date(s).toLocaleString(getLang(), { hour12: false });
 export function dayLabel(s: string) {
   const d = new Date(s);
   const today = new Date();
   const start = (x: Date) =>
     new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
   const diff = Math.round((start(today) - start(d)) / 86400000);
-  if (diff === 0) return "今天";
-  if (diff === 1) return "昨天";
+  if (diff === 0) return bi("今天", "Today");
+  if (diff === 1) return bi("昨天", "Yesterday");
+  if (getLang() === "en-US") {
+    return d.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      ...(d.getFullYear() !== today.getFullYear() ? { year: "numeric" } : {}),
+    });
+  }
   if (d.getFullYear() === today.getFullYear())
     return `${d.getMonth() + 1}月${d.getDate()}日`;
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
@@ -1003,9 +1047,15 @@ export function ago(s: string) {
     0,
     Math.round((Date.now() - new Date(s).getTime()) / 1000),
   );
-  if (sec < 45) return "刚刚";
-  if (sec < 3600) return `${Math.round(sec / 60)} 分钟前`;
-  if (sec < 86400) return `${Math.round(sec / 3600)} 小时前`;
+  if (sec < 45) return bi("刚刚", "just now");
+  if (sec < 3600) {
+    const m = Math.round(sec / 60);
+    return bi(`${m} 分钟前`, `${m}m ago`);
+  }
+  if (sec < 86400) {
+    const h = Math.round(sec / 3600);
+    return bi(`${h} 小时前`, `${h}h ago`);
+  }
   return `${dayLabel(s)} ${clock(s)}`;
 }
 export function duration(a: string, b: string) {
@@ -1013,7 +1063,10 @@ export function duration(a: string, b: string) {
     0,
     Math.round((new Date(b).getTime() - new Date(a).getTime()) / 1000),
   );
-  return sec < 60 ? `${sec} 秒` : `${Math.floor(sec / 60)} 分 ${sec % 60} 秒`;
+  return biv(
+    sec < 60 ? `${sec} 秒` : `${Math.floor(sec / 60)} 分 ${sec % 60} 秒`,
+    sec < 60 ? `${sec}s` : `${Math.floor(sec / 60)}m ${sec % 60}s`,
+  );
 }
 
 /* ---------- small hooks ---------- */
@@ -1094,6 +1147,9 @@ export function dropCached(prefix: string) {
     if (k.startsWith(prefix)) memo.delete(k);
   }
 }
+if (typeof window !== "undefined") {
+  window.addEventListener("mh-lang-change", () => memo.clear());
+}
 
 /** Fetches a GET and keeps the answer for the tab; asking again while it is on its way shares the same request. */
 export function fetchCached<T>(path: string): Promise<T> {
@@ -1163,14 +1219,14 @@ export async function copy(text: string) {
     document.execCommand("copy");
     t.remove();
   }
-  Message.success({ content: "已复制", duration: 1200 });
+  Message.success({ content: bi("已复制", "Copied"), duration: 1200 });
 }
 
 export const platformShort = (id?: string) =>
   !id
     ? ""
     : id === "pypi"
-      ? "Python 包"
+      ? bi("Python 包", "Python packages")
       : id.startsWith("el")
         ? "RHEL " + id.slice(2, 3)
         : id.startsWith("ubuntu")

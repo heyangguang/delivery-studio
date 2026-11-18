@@ -37,6 +37,7 @@ import {
   IconUpload,
 } from "@arco-design/web-react/icon";
 import { go } from "./router";
+import { bi, useLang } from "./i18n";
 import {
   ago,
   api,
@@ -78,7 +79,11 @@ import "./aipage.css";
 type Ctx = { kind: "" | "job" | "comp" | "form"; id: string; name: string };
 /** What a conversation is tied to, in a word: a delivery, a component, or a new delivery being filled in. */
 const ctxWord = (k: string) =>
-  k === "job" ? "交付" : k === "form" ? "新建交付" : "组件";
+  k === "job"
+    ? bi("交付", "Delivery")
+    : k === "form"
+      ? bi("新建交付", "New delivery")
+      : bi("组件", "Component");
 type ChatRow = {
   id: string;
   title: string;
@@ -97,8 +102,10 @@ type Linked = {
   plan?: string;
 };
 
-const normPlanLabel = (s?: string) =>
-  s === "首次部署" ? "集群部署" : s ? s.replace(/首次部署/g, "集群部署") : s;
+const normPlanLabel = (s?: string) => {
+  const lbl = bi("集群部署", "Cluster deploy");
+  return s === "首次部署" ? lbl : s ? s.replace(/首次部署/g, lbl) : s;
+};
 type Chat = ChatRow & { messages: Msg[] };
 type JobSession = {
   key: string;
@@ -115,7 +122,8 @@ const newId = () =>
     b.toString(16).padStart(2, "0"),
   ).join("");
 
-const dayKey = (s: string) => {
+type DayBucket = "today" | "yesterday" | "week" | "older";
+const dayKey = (s: string): DayBucket => {
   const d = new Date(s);
   const t = new Date();
   const diff = Math.round(
@@ -124,46 +132,72 @@ const dayKey = (s: string) => {
       86400000,
   );
   return diff <= 0
-    ? "今天"
+    ? "today"
     : diff === 1
-      ? "昨天"
+      ? "yesterday"
       : diff < 7
-        ? "最近 7 天"
-        : "更早";
+        ? "week"
+        : "older";
+};
+const DAY_LABEL: Record<DayBucket, string> = {
+  get today() {
+    return bi("今天", "Today");
+  },
+  get yesterday() {
+    return bi("昨天", "Yesterday");
+  },
+  get week() {
+    return bi("最近 7 天", "Last 7 days");
+  },
+  get older() {
+    return bi("更早", "Older");
+  },
 };
 const greeting = () => {
   const h = new Date().getHours();
   return h < 6
-    ? "夜深了"
+    ? bi("夜深了", "Working late")
     : h < 11
-      ? "早上好"
+      ? bi("早上好", "Good morning")
       : h < 13
-        ? "中午好"
+        ? bi("中午好", "Good afternoon")
         : h < 18
-          ? "下午好"
-          : "晚上好";
+          ? bi("下午好", "Good afternoon")
+          : bi("晚上好", "Good evening");
 };
 
-const SUGGEST = [
+const getSuggest = () => [
   {
     icon: <IconCheckCircle />,
-    t: "查看我最近的交付进度与验收情况",
-    d: "读取所有交付的执行状态",
+    t: bi(
+      "查看我最近的交付进度与验收情况",
+      "Check status & acceptance of my recent deliveries",
+    ),
+    d: bi("读取所有交付的执行状态", "Inspect execution status across deliveries"),
   },
   {
     icon: <IconBug />,
-    t: "帮我看看最近一次部署失败的原因",
-    d: "结合执行记录与手册",
+    t: bi(
+      "帮我看看最近一次部署失败的原因",
+      "Help diagnose why the latest deployment failed",
+    ),
+    d: bi("结合执行记录与手册", "Analyze execution logs and runbooks"),
   },
   {
     icon: <IconStorage />,
-    t: "Patroni 高可用的 PostgreSQL 上线前要检查什么？",
-    d: "参考组件与运维技能",
+    t: bi(
+      "Patroni 高可用的 PostgreSQL 上线前要检查什么？",
+      "Pre-flight checklist for Patroni HA PostgreSQL?",
+    ),
+    d: bi("参考组件与运维技能", "Using component specs & ops skills"),
   },
   {
     icon: <IconBook />,
-    t: "etcd 报 database space exceeded 怎么处理？",
-    d: "按步骤给出排查与修复",
+    t: bi(
+      "etcd 报 database space exceeded 怎么处理？",
+      "How to fix etcd database space exceeded?",
+    ),
+    d: bi("按步骤给出排查与修复", "Step-by-step diagnosis & remediation"),
   },
 ];
 
@@ -182,19 +216,20 @@ function Outline({
   messages: Msg[];
   list: React.RefObject<HTMLDivElement | null>;
 }) {
+  const lang = useLang();
   const turns = useMemo(() => {
     const out: { prompt: string; reply: string }[] = [];
     messages.forEach((m, i) => {
       if (m.role === "user")
         out.push({
-          prompt: plain(m.text) || "（只发了附件）",
+          prompt: plain(m.text) || bi("（只发了附件）", "(Attachments only)"),
           reply: plain(
             messages[i + 1]?.role === "assistant" ? messages[i + 1].text : "",
           ),
         });
     });
     return out;
-  }, [messages]);
+  }, [messages, lang]);
   const [active, setActive] = useState(() => Math.max(0, turns.length - 1));
   const [hover, setHover] = useState<number | null>(null);
   const pinned = useRef<{
@@ -344,7 +379,7 @@ function Outline({
   return (
     <nav
       className="ap-outline"
-      aria-label="对话目录"
+      aria-label={bi("对话目录", "Conversation outline")}
       onMouseLeave={() => setHover(null)}
     >
       {turns.slice(first).map((t, k) => {
@@ -354,7 +389,10 @@ function Outline({
             <button
               type="button"
               className={i === active ? "on" : ""}
-              aria-label={`第 ${i + 1} 个问题：${t.prompt.slice(0, 30)}`}
+              aria-label={bi(
+                `第 ${i + 1} 个问题：${t.prompt.slice(0, 30)}`,
+                `Turn ${i + 1}: ${t.prompt.slice(0, 30)}`,
+              )}
               aria-current={i === active ? "true" : undefined}
               onMouseEnter={() => setHover(i)}
               onFocus={() => setHover(i)}
@@ -391,6 +429,7 @@ export function AIPage({
   comp?: string;
   jobs: Job[];
 }) {
+  useLang();
   const status = useAIStatus();
   const net = useConnectivity();
   const linkedMode = !!(job && sessionKey);
@@ -437,7 +476,7 @@ export function AIPage({
   const initialRevealed = useRef(false);
   const orderSeeded = useRef(false);
   const topRank = useRef(0);
-  const chatSlots = useRef<Map<string, { rank: number; group: string }>>(
+  const chatSlots = useRef<Map<string, { rank: number; group: DayBucket }>>(
     new Map(),
   );
   const clusterRanks = useRef<Map<string, number>>(new Map());
@@ -588,7 +627,10 @@ export function AIPage({
               t0: s.running_since
                 ? Date.parse(s.running_since) || Date.now()
                 : Date.now(),
-              notice: "这段对话还在回答，写完会自动显示在这里",
+              notice: bi(
+                "这段对话还在回答，写完会自动显示在这里",
+                "This reply is still generating; it will appear here automatically once done",
+              ),
             });
             setRemote(true);
           }
@@ -716,13 +758,18 @@ export function AIPage({
     const list = Array.from(files);
     if (!list.length) return;
     if (atts.length + list.length > 8)
-      return Message.warning("一条消息最多附带 8 个文件");
+      return Message.warning(
+        bi("一条消息最多附带 8 个文件", "At most 8 files per message"),
+      );
     if (
       list.some((f) => f.type.startsWith("image/")) &&
       model.current?.vision === "no"
     )
       Message.warning(
-        "当前模型看不了图片：图片会存进「我的资料」，但 AI 读不到画面内容",
+        bi(
+          "当前模型看不了图片：图片会存进「我的资料」，但 AI 读不到画面内容",
+          "Current model doesn't support images: files will be saved to My Files, but AI cannot inspect image contents",
+        ),
       );
     setUploading((n) => n + list.length);
     try {
@@ -741,10 +788,13 @@ export function AIPage({
     if (!pics.length || !linkedMode) return;
     if (model.current?.vision === "no")
       return Message.warning(
-        "当前模型看不了图片，请把报错文字贴进来，或换一个能看图的模型",
+        bi(
+          "当前模型看不了图片，请把报错文字贴进来，或换一个能看图的模型",
+          "Current model doesn't support vision—paste error text instead or switch to a vision-capable model",
+        ),
       );
     if (imgs.length + pics.length > 3)
-      return Message.warning("一次最多 3 张图片");
+      return Message.warning(bi("一次最多 3 张图片", "At most 3 images at once"));
     try {
       const data = await Promise.all(pics.map(readFile));
       setImgs((x) => [...x, ...data]);
@@ -912,7 +962,7 @@ export function AIPage({
       if (cur.text || cur.steps.length) {
         push({
           ...finished(),
-          text: cur.text + (stopped ? "\n\n（已停止）" : ""),
+          text: cur.text + (stopped ? bi("\n\n（已停止）", "\n\n(Stopped)") : ""),
         });
         if (!linkedMode && !chatId) {
           promotedId.current = id;
@@ -965,7 +1015,10 @@ export function AIPage({
     setDeciding(pid);
     try {
       await api(`${jobBase}/proposals/${pid}/${verb}`, { method: "POST" });
-      if (verb === "accept") Message.success("已写入执行手册和交付文档");
+      if (verb === "accept")
+        Message.success(
+          bi("已写入执行手册和交付文档", "Applied to runbook and delivery docs"),
+        );
       await loadProps();
     } catch (e) {
       err(e);
@@ -980,16 +1033,27 @@ export function AIPage({
         method: "POST",
         body: JSON.stringify({ key: sessionKey, to_kb: true }),
       });
-      const where = `交付 ${jobRow?.cluster_id || job} · ${title}`;
+      const where = bi(
+        `交付 ${jobRow?.cluster_id || job} · ${title}`,
+        `Delivery ${jobRow?.cluster_id || job} · ${title}`,
+      );
       (can("kb.submit") ? Modal.confirm : Modal.success)({
-        title: "已写入这份交付的执行记录",
+        title: bi(
+          "已写入这份交付的执行记录",
+          "Saved to this delivery's execution record",
+        ),
         content: (
           <Markdown
-            text={`**现象**　${rep.symptom}\n\n**原因**　${rep.cause}\n\n**处理**\n\n${rep.fix}`}
+            text={bi(
+              `**现象**　${rep.symptom}\n\n**原因**　${rep.cause}\n\n**处理**\n\n${rep.fix}`,
+              `**Symptom:** ${rep.symptom}\n\n**Root cause:** ${rep.cause}\n\n**Resolution:**\n\n${rep.fix}`,
+            )}
           />
         ),
-        okText: can("kb.submit") ? "发布到团队（需审核）" : "好",
-        cancelText: "只留在我的知识库",
+        okText: can("kb.submit")
+          ? bi("发布到团队（需审核）", "Publish to team (needs review)")
+          : bi("好", "OK"),
+        cancelText: bi("只留在我的知识库", "Keep in my KB only"),
         onOk: () => {
           if (can("kb.submit")) openSubmit(reportDoc(rep, where));
         },
@@ -1003,9 +1067,13 @@ export function AIPage({
 
   const remove = (c: ChatRow) =>
     Modal.confirm({
-      title: `删除「${c.title}」？`,
-      content: "对话内容会删除，不能恢复。",
-      okText: "删除",
+      title: bi(`删除「${c.title}」？`, `Delete "${c.title}"?`),
+      content: bi(
+        "对话内容会删除，不能恢复。",
+        "This conversation will be deleted and cannot be recovered.",
+      ),
+      okText: bi("删除", "Delete"),
+      cancelText: bi("取消", "Cancel"),
       okButtonProps: { status: "danger" },
       onOk: async () => {
         try {
@@ -1020,17 +1088,18 @@ export function AIPage({
   const rename = (c: ChatRow) => {
     let title = c.title;
     Modal.confirm({
-      title: "重命名对话",
+      title: bi("重命名对话", "Rename conversation"),
       content: (
         <Input
           defaultValue={c.title}
           maxLength={60}
           onChange={(v) => (title = v)}
-          aria-label="对话标题"
+          aria-label={bi("对话标题", "Conversation title")}
           autoFocus
         />
       ),
-      okText: "保存",
+      okText: bi("保存", "Save"),
+      cancelText: bi("取消", "Cancel"),
       onOk: async () => {
         try {
           await api(`/api/ai/chats/${c.id}`, {
@@ -1053,7 +1122,12 @@ export function AIPage({
         body: JSON.stringify({ archived: on }),
       });
       Message.success(
-        on ? "已归档，可以在列表底部的「已归档」里找到" : "已取消归档",
+        on
+          ? bi(
+              "已归档，可以在列表底部的「已归档」里找到",
+              "Archived; find it under Archived at the bottom of the list",
+            )
+          : bi("已取消归档", "Unarchived"),
       );
       if (on && c.id === chatId) go({ name: "ai" });
       loadList();
@@ -1066,7 +1140,7 @@ export function AIPage({
     !needle ||
     (c.title + " " + (c.ctx?.name || "")).toLowerCase().includes(needle);
   const rankOfChat = (c: ChatRow) => chatSlots.current.get(c.id)?.rank ?? 0;
-  const groupOfChat = (c: ChatRow) =>
+  const groupOfChat = (c: ChatRow): DayBucket =>
     chatSlots.current.get(c.id)?.group || dayKey(c.updated);
   const mine = useMemo(
     () =>
@@ -1083,12 +1157,12 @@ export function AIPage({
     [rows, needle],
   ); // eslint-disable-line react-hooks/exhaustive-deps
   const groups = useMemo(() => {
-    const m = new Map<string, ChatRow[]>();
+    const m = new Map<DayBucket, ChatRow[]>();
     mine.forEach((c) => {
       const g = groupOfChat(c);
       m.set(g, [...(m.get(g) || []), c]);
     });
-    return ["今天", "昨天", "最近 7 天", "更早"]
+    return (["today", "yesterday", "week", "older"] as DayBucket[])
       .filter((k) => m.has(k))
       .map((k) => [k, m.get(k)!] as const);
   }, [mine]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1198,8 +1272,11 @@ export function AIPage({
     return out;
   })();
   const title = linkedMode
-    ? js?.title || (isGeneral(sessionKey) ? "对话" : "现场排障")
-    : chat?.title || "新对话";
+    ? js?.title ||
+      (isGeneral(sessionKey)
+        ? bi("对话", "Chat")
+        : bi("现场排障", "Troubleshooting"))
+    : chat?.title || bi("新对话", "New chat");
   const answered = messages.some((m) => m.role === "assistant");
   const ctxChip = linkedMode
     ? { kind: "job", id: job!, name: jobRow?.cluster_id || job!.slice(0, 8) }
@@ -1209,13 +1286,16 @@ export function AIPage({
   const formBack = ctx.kind === "form" && (
     <div className="ap-formback">
       <span>
-        这段对话是在新建 {ctx.name} 时边聊边填表的，要接着填请回到表单页面。
+        {bi(
+          `这段对话是在新建 ${ctx.name} 时边聊边填表的，要接着填请回到表单页面。`,
+          `This conversation was started while creating ${ctx.name}; return to the form to continue filling it.`,
+        )}
       </span>
       <Button
         type="primary"
         onClick={() => go({ name: "new", app: ctx.id, chat: chatId })}
       >
-        回到表单继续
+        {bi("回到表单继续", "Back to form")}
       </Button>
     </div>
   );
@@ -1237,10 +1317,13 @@ export function AIPage({
         <div className="ap-thumbs">
           {imgs.map((im, i) => (
             <span key={i}>
-              <img src={im} alt={`待发送的截图 ${i + 1}`} />
+              <img
+                src={im}
+                alt={bi(`待发送的截图 ${i + 1}`, `Pending screenshot ${i + 1}`)}
+              />
               <button
                 type="button"
-                aria-label="移除这张图片"
+                aria-label={bi("移除这张图片", "Remove image")}
                 onClick={() => setImgs(imgs.filter((_, k) => k !== i))}
               >
                 <IconClose />
@@ -1257,7 +1340,7 @@ export function AIPage({
               <em>{a.name}</em>
               <button
                 type="button"
-                aria-label={`移除 ${a.name}`}
+                aria-label={bi(`移除 ${a.name}`, `Remove ${a.name}`)}
                 onClick={() => setAtts(atts.filter((x) => x.id !== a.id))}
               >
                 <IconClose />
@@ -1265,7 +1348,12 @@ export function AIPage({
             </span>
           ))}
           {uploading > 0 && (
-            <span className="ap-att wait">正在上传 {uploading} 个文件…</span>
+            <span className="ap-att wait">
+              {bi(
+                `正在上传 ${uploading} 个文件…`,
+                `Uploading ${uploading} file${uploading === 1 ? "" : "s"}…`,
+              )}
+            </span>
           )}
         </div>
       )}
@@ -1283,18 +1371,30 @@ export function AIPage({
         placeholder={
           !on
             ? can("ai.settings")
-              ? "AI 未开启，可在「设置 → AI」中开启"
-              : "AI 未开启，请联系管理员启用"
+              ? bi(
+                  "AI 未开启，可在「设置 → AI」中开启",
+                  "AI is off—enable it in Settings → AI",
+                )
+              : bi(
+                  "AI 未开启，请联系管理员启用",
+                  "AI is off—contact an administrator",
+                )
             : offline
-              ? "网络已断开"
+              ? bi("网络已断开", "Network disconnected")
               : linkedMode
-                ? "继续这段对话，可以贴报错或截图…"
+                ? bi(
+                    "继续这段对话，可以贴报错或截图…",
+                    "Continue this thread, paste logs or screenshots…",
+                  )
                 : ctx.kind
-                  ? `问问关于 ${ctx.name} 的事…`
-                  : "有什么想问的？"
+                  ? bi(
+                      `问问关于 ${ctx.name} 的事…`,
+                      `Ask anything about ${ctx.name}…`,
+                    )
+                  : bi("有什么想问的？", "What would you like to ask?")
         }
         disabled={!on || offline}
-        aria-label="消息"
+        aria-label={bi("消息", "Message")}
       />
       <div className="ap-bar">
         <ToolMenu
@@ -1327,8 +1427,8 @@ export function AIPage({
                       })
                 }
               >
-                <Menu.Item key="none">不关联</Menu.Item>
-                <Menu.ItemGroup title="关联一份交付">
+                <Menu.Item key="none">{bi("不关联", "Unlink")}</Menu.Item>
+                <Menu.ItemGroup title={bi("关联一份交付", "Link a delivery")}>
                   {doneJobs.map((j) => (
                     <Menu.Item key={j.id}>
                       {j.cluster_id}{" "}
@@ -1342,16 +1442,27 @@ export function AIPage({
             <button
               type="button"
               className={`ap-chipbtn ${ctx.kind ? "on" : ""}`}
-              aria-label="关联交付"
+              aria-label={bi("关联交付", "Link delivery")}
             >
               <IconPlus />{" "}
-              {ctx.kind ? `${ctxWord(ctx.kind)} ${ctx.name}` : "关联交付"}
+              {ctx.kind
+                ? `${ctxWord(ctx.kind)} ${ctx.name}`
+                : bi("关联交付", "Link delivery")}
             </button>
           </Dropdown>
         )}
         {linkedMode && (
-          <Tooltip content="添加截图（也可以粘贴）" mini>
-            <label className="ap-icon" aria-label="添加截图">
+          <Tooltip
+            content={bi(
+              "添加截图（也可以粘贴）",
+              "Attach screenshot (or paste)",
+            )}
+            mini
+          >
+            <label
+              className="ap-icon"
+              aria-label={bi("添加截图", "Attach screenshot")}
+            >
               <IconImage />
               <input
                 type="file"
@@ -1370,8 +1481,8 @@ export function AIPage({
               type="button"
               className="ap-send stop"
               onClick={stopRun}
-              aria-label="停止生成"
-              title="停止生成"
+              aria-label={bi("停止生成", "Stop")}
+              title={bi("停止生成", "Stop")}
             >
               <IconRecordStop />
             </button>
@@ -1385,8 +1496,11 @@ export function AIPage({
                 offline ||
                 uploading > 0
               }
-              aria-label="发送"
-              title="发送（Enter 发送 · Shift+Enter 换行）"
+              aria-label={bi("发送", "Send")}
+              title={bi(
+                "发送（Enter 发送 · Shift+Enter 换行）",
+                "Send (Enter to send · Shift+Enter for new line)",
+              )}
             >
               <IconSend />
             </button>
@@ -1396,21 +1510,22 @@ export function AIPage({
     </form>
   );
 
+  const suggest = getSuggest();
   return (
     <div className={`ap ${side ? "side-open" : ""}`}>
-      <aside className="ap-side" aria-label="对话">
+      <aside className="ap-side" aria-label={bi("对话", "Conversations")}>
         <div className="ap-side-top">
           <div className="ap-brand">
             <span className="ap-brand-mark">
               <AIEmblem size={24} />
             </span>
-            <b>AI 助手</b>
-            <Tooltip content="新对话" mini>
+            <b>{bi("AI 助手", "AI Assistant")}</b>
+            <Tooltip content={bi("新对话", "New chat")} mini>
               <button
                 type="button"
                 className="ap-new"
                 onClick={() => keepSideScroll(startNewChat)}
-                aria-label="新对话"
+                aria-label={bi("新对话", "New chat")}
               >
                 <IconEdit />
               </button>
@@ -1419,7 +1534,7 @@ export function AIPage({
           <Input
             allowClear
             prefix={<IconSearch />}
-            placeholder="搜索对话"
+            placeholder={bi("搜索对话", "Search chats")}
             value={q}
             onChange={setQ}
             onKeyDown={(e) => {
@@ -1428,22 +1543,29 @@ export function AIPage({
                 (e.target as HTMLElement).blur();
               }
             }}
-            aria-label="搜索对话"
+            aria-label={bi("搜索对话", "Search chats")}
           />
         </div>
         <div className="ap-rows" ref={sideRows}>
-          {rows === null && <div className="ap-skel" aria-label="载入中" />}
+          {rows === null && (
+            <div className="ap-skel" aria-label={bi("载入中", "Loading")} />
+          )}
           {rows &&
             mine.length === 0 &&
             archived.length === 0 &&
             byDelivery.length === 0 && (
               <p className="ap-none">
-                {needle ? "没有匹配的对话" : "还没有对话，从右边开始吧。"}
+                {needle
+                  ? bi("没有匹配的对话", "No matching conversations")
+                  : bi(
+                      "还没有对话，从右边开始吧。",
+                      "No conversations yet—start on the right.",
+                    )}
               </p>
             )}
           {groups.map(([g, items]) => (
             <section key={g}>
-              <h3>{g}</h3>
+              <h3>{DAY_LABEL[g]}</h3>
               {items.map((c) => (
                 <div
                   key={c.id}
@@ -1458,7 +1580,7 @@ export function AIPage({
                     }
                     aria-current={c.id === chatId ? "page" : undefined}
                   >
-                    <b>{normPlanLabel(c.title) || "新对话"}</b>
+                    <b>{normPlanLabel(c.title) || bi("新对话", "New chat")}</b>
                     {c.ctx?.name && (
                       <small>
                         {ctxWord(c.ctx.kind)} · {normPlanLabel(c.ctx.name)}
@@ -1480,13 +1602,13 @@ export function AIPage({
                         }
                       >
                         <Menu.Item key="rename">
-                          <IconEdit /> 重命名
+                          <IconEdit /> {bi("重命名", "Rename")}
                         </Menu.Item>
                         <Menu.Item key="arch">
-                          <IconStorage /> 归档
+                          <IconStorage /> {bi("归档", "Archive")}
                         </Menu.Item>
                         <Menu.Item key="del" className="danger-item">
-                          <IconDelete /> 删除
+                          <IconDelete /> {bi("删除", "Delete")}
                         </Menu.Item>
                       </Menu>
                     }
@@ -1494,7 +1616,10 @@ export function AIPage({
                     <button
                       type="button"
                       className="ap-more"
-                      aria-label={`${c.title} 的更多操作`}
+                      aria-label={bi(
+                        `${c.title} 的更多操作`,
+                        `More actions for ${c.title}`,
+                      )}
                     >
                       <IconMore />
                     </button>
@@ -1512,7 +1637,7 @@ export function AIPage({
                   aria-expanded={showArch || !!needle}
                   onClick={() => setShowArch(!showArch)}
                 >
-                  已归档 · {archived.length}
+                  {bi("已归档", "Archived")} · {archived.length}
                 </button>
               </h3>
               {(showArch || !!needle) &&
@@ -1530,7 +1655,9 @@ export function AIPage({
                       }
                       aria-current={c.id === chatId ? "page" : undefined}
                     >
-                      <b>{normPlanLabel(c.title) || "新对话"}</b>
+                      <b>
+                        {normPlanLabel(c.title) || bi("新对话", "New chat")}
+                      </b>
                       <small>{ago(c.updated)}</small>
                     </button>
                     <Dropdown
@@ -1544,10 +1671,10 @@ export function AIPage({
                           }
                         >
                           <Menu.Item key="un">
-                            <IconStorage /> 取消归档
+                            <IconStorage /> {bi("取消归档", "Unarchive")}
                           </Menu.Item>
                           <Menu.Item key="del" className="danger-item">
-                            <IconDelete /> 删除
+                            <IconDelete /> {bi("删除", "Delete")}
                           </Menu.Item>
                         </Menu>
                       }
@@ -1555,7 +1682,10 @@ export function AIPage({
                       <button
                         type="button"
                         className="ap-more"
-                        aria-label={`${c.title} 的更多操作`}
+                        aria-label={bi(
+                          `${c.title} 的更多操作`,
+                          `More actions for ${c.title}`,
+                        )}
                       >
                         <IconMore />
                       </button>
@@ -1566,7 +1696,7 @@ export function AIPage({
           )}
           {byDelivery.length > 0 && (
             <section>
-              <h3>交付里的对话</h3>
+              <h3>{bi("交付里的对话", "Delivery threads")}</h3>
               {byDelivery.map(([jid, items]) => (
                 <div key={jid} className="ap-dgroup">
                   <div className="ap-dhead">
@@ -1599,7 +1729,9 @@ export function AIPage({
                           >
                             <b>
                               <span className={`ap-kind k-${l.kind}`}>
-                                {l.kind === "review" ? "评审" : "排障"}
+                                {l.kind === "review"
+                                  ? bi("评审", "Review")
+                                  : bi("排障", "Troubleshoot")}
                               </span>
                               {normPlanLabel(l.title)}
                             </b>
@@ -1620,7 +1752,7 @@ export function AIPage({
             className={prefsMode ? "on" : ""}
             onClick={() => keepSideScroll(() => go({ name: "ai", id: "~prefs" }))}
           >
-            <IconSettings /> 个性化
+            <IconSettings /> {bi("个性化", "Personalization")}
           </button>
         </div>
       </aside>
@@ -1648,7 +1780,11 @@ export function AIPage({
           attach(e.dataTransfer.files);
         }}
       >
-        {drop && <div className="ap-dropzone">松开，把文件添加到这条消息</div>}
+        {drop && (
+          <div className="ap-dropzone">
+            {bi("松开，把文件添加到这条消息", "Drop to attach files to this message")}
+          </div>
+        )}
         {prefsMode ? (
           <AIPrefs onBack={() => go({ name: "ai" })} />
         ) : (
@@ -1658,12 +1794,12 @@ export function AIPage({
                 type="button"
                 className="ap-menu"
                 onClick={() => setSide(!side)}
-                aria-label="对话列表"
+                aria-label={bi("对话列表", "Conversation list")}
               >
                 <IconMenuFold />
               </button>
               <div className="ap-title">
-                <b>{started || linkedMode ? title : "新对话"}</b>
+                <b>{started || linkedMode ? title : bi("新对话", "New chat")}</b>
                 {ctxChip.kind && (started || linkedMode) && (
                   <button
                     type="button"
@@ -1681,7 +1817,9 @@ export function AIPage({
                 )}
                 {linkedMode && (
                   <span className="ap-badge">
-                    {isGeneral(sessionKey) ? "对话" : "现场排障"}
+                    {isGeneral(sessionKey)
+                      ? bi("对话", "Chat")
+                      : bi("现场排障", "Troubleshooting")}
                   </span>
                 )}
               </div>
@@ -1701,13 +1839,16 @@ export function AIPage({
                       }
                     >
                       <Menu.Item key="rename">
-                        <IconEdit /> 重命名
+                        <IconEdit /> {bi("重命名", "Rename")}
                       </Menu.Item>
                       <Menu.Item key="arch">
-                        <IconStorage /> {chat.archived ? "取消归档" : "归档"}
+                        <IconStorage />{" "}
+                        {chat.archived
+                          ? bi("取消归档", "Unarchive")
+                          : bi("归档", "Archive")}
                       </Menu.Item>
                       <Menu.Item key="del" className="danger-item">
-                        <IconDelete /> 删除
+                        <IconDelete /> {bi("删除", "Delete")}
                       </Menu.Item>
                     </Menu>
                   }
@@ -1715,7 +1856,7 @@ export function AIPage({
                   <button
                     type="button"
                     className="ap-more on"
-                    aria-label="更多操作"
+                    aria-label={bi("更多操作", "More actions")}
                   >
                     <IconMore />
                   </button>
@@ -1725,7 +1866,7 @@ export function AIPage({
 
             {js?.step && (
               <div className="ap-step">
-                <span>正在处理</span>
+                <span>{bi("正在处理", "Step")}</span>
                 <b>{String(js.step.title || "")}</b>
                 {js.step.phase ? <em>{String(js.step.phase)}</em> : null}
                 {Array.isArray(js.step.hosts) && (
@@ -1741,12 +1882,21 @@ export function AIPage({
                     <AIEmblem size={52} />
                   </span>
                   <h1>
-                    {greeting()}，{me.username}
+                    {bi(
+                      `${greeting()}，${me.username}`,
+                      `${greeting()}, ${me.username}`,
+                    )}
                   </h1>
                   <p>
                     {ctx.kind
-                      ? `关于 ${ctx.name}，想了解什么？`
-                      : "我可以读你的交付、执行手册和项目文件，也会用平台里的运维技能来回答。"}
+                      ? bi(
+                          `关于 ${ctx.name}，想了解什么？`,
+                          `What would you like to know about ${ctx.name}?`,
+                        )
+                      : bi(
+                          "我可以读你的交付、执行手册和项目文件，也会用平台里的运维技能来回答。",
+                          "I can inspect your deliveries, runbooks, and project files, and apply platform ops skills to answer.",
+                        )}
                   </p>
                   {composer}
                   {error && (
@@ -1755,7 +1905,7 @@ export function AIPage({
                     </div>
                   )}
                   <div className="ap-suggest">
-                    {SUGGEST.map((s) => (
+                    {suggest.map((s) => (
                       <button
                         key={s.t}
                         type="button"
@@ -1772,7 +1922,7 @@ export function AIPage({
                   </div>
                   {doneJobs.length > 0 && !ctx.kind && (
                     <div className="ap-recent">
-                      <span>就某份交付提问</span>
+                      <span>{bi("就某份交付提问", "Ask about a delivery")}</span>
                       {doneJobs.slice(0, 4).map((j) => (
                         <button
                           key={j.id}
@@ -1793,8 +1943,14 @@ export function AIPage({
                   {!on && (
                     <p className="ap-off">
                       {can("ai.settings")
-                        ? "AI 助手尚未开启，可在「设置 → AI」中开启并配置模型。"
-                        : "AI 助手尚未开启，请联系管理员启用。"}
+                        ? bi(
+                            "AI 助手尚未开启，可在「设置 → AI」中开启并配置模型。",
+                            "AI Assistant is disabled; enable it and configure models in Settings → AI.",
+                          )
+                        : bi(
+                            "AI 助手尚未开启，请联系管理员启用。",
+                            "AI Assistant is disabled; contact an administrator to enable it.",
+                          )}
                     </p>
                   )}
                 </div>
@@ -1817,14 +1973,22 @@ export function AIPage({
                 >
                   <div className="ap-col">
                     {loading && (
-                      <div className="ad-loading" aria-label="载入中">
+                      <div
+                        className="ad-loading"
+                        aria-label={bi("载入中", "Loading")}
+                      >
                         <i />
                         <i />
                         <i />
                       </div>
                     )}
                     {!loading && linkedMode && messages.length === 0 && (
-                      <p className="ap-none">这段对话还没有内容。</p>
+                      <p className="ap-none">
+                        {bi(
+                          "这段对话还没有内容。",
+                          "No messages in this conversation yet.",
+                        )}
+                      </p>
                     )}
                     {messages.map((m, i) => (
                       <Bubble
@@ -1863,7 +2027,7 @@ export function AIPage({
                             onClick={() => send(error.retry)}
                             disabled={busy}
                           >
-                            重试
+                            {bi("重试", "Retry")}
                           </Button>
                         )}
                       </div>
@@ -1880,7 +2044,7 @@ export function AIPage({
                         behavior: "smooth",
                       })
                     }
-                    aria-label="回到最新"
+                    aria-label={bi("回到最新", "Jump to latest")}
                   >
                     <IconArrowDown />
                   </button>
@@ -1893,7 +2057,10 @@ export function AIPage({
                       <div className="ap-solved">
                         <IconCheckCircle />
                         <span>
-                          问题解决了？把经过整理成记录，写进这份交付的执行记录。
+                          {bi(
+                            "问题解决了？把经过整理成记录，写进这份交付的执行记录。",
+                            "Issue resolved? Summarize the resolution into this delivery's execution record.",
+                          )}
                         </span>
                         <Button
                           size="small"
@@ -1901,7 +2068,7 @@ export function AIPage({
                           loading={resolving}
                           onClick={resolve}
                         >
-                          已解决，写入记录
+                          {bi("已解决，写入记录", "Resolved, save record")}
                         </Button>
                       </div>
                     )}

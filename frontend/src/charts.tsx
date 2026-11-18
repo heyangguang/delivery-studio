@@ -1,4 +1,5 @@
 import React, { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { bi, useLang } from "./i18n";
 
 /* The two charts the platform needs: a stacked bar series over time, and horizontal bars for a ranking. Marks are thin
    with a 2px gap between stacked parts, the grid is quiet, one axis only, and every chart has a table view. */
@@ -33,7 +34,7 @@ export function StackedBars({
   tick,
   label,
   height = 190,
-  emptyText = "这段时间没有数据",
+  emptyText,
 }: {
   points: Point[];
   series: Series[];
@@ -43,6 +44,8 @@ export function StackedBars({
   height?: number;
   emptyText?: string;
 }) {
+  useLang();
+  const emptyLabel = emptyText ?? bi("这段时间没有数据", "No data in this period");
   const [hover, setHover] = useState<number | null>(null);
   const [table, setTable] = useState(false);
   const [off, setOff] = useState<Record<string, boolean>>({});
@@ -106,7 +109,7 @@ export function StackedBars({
           className="ch-view"
           onClick={() => setTable(!table)}
         >
-          {table ? "看图表" : "看表格"}
+          {table ? bi("看图表", "Chart") : bi("看表格", "Table")}
         </button>
       </div>
       {table ? (
@@ -114,7 +117,7 @@ export function StackedBars({
           <table>
             <thead>
               <tr>
-                <th>时间</th>
+                <th>{bi("时间", "Time")}</th>
                 {series.map((s) => (
                   <th key={s.id}>{s.label}</th>
                 ))}
@@ -134,7 +137,7 @@ export function StackedBars({
         </div>
       ) : !any ? (
         <div className="ch-empty" style={{ height }}>
-          {emptyText}
+          {emptyLabel}
         </div>
       ) : (
         <div className="ch-plot" ref={box} onMouseLeave={() => setHover(null)}>
@@ -254,16 +257,18 @@ export function HBars({
   rows,
   format,
   color = "var(--brand)",
-  empty = "没有数据",
+  empty,
 }: {
   rows: Bar[];
   format: (n: number) => string;
   color?: string;
   empty?: string;
 }) {
+  useLang();
+  const emptyLabel = empty ?? bi("没有数据", "No data");
   const max = Math.max(0, ...rows.map((r) => r.value));
   if (!rows.length || max <= 0)
-    return <div className="ch-empty small">{empty}</div>;
+    return <div className="ch-empty small">{emptyLabel}</div>;
   return (
     <ul className="hb">
       {rows.map((r) => (

@@ -3,6 +3,7 @@ import { go } from "./router";
 import type { Session } from "./shared";
 import { can, useAIStatus, useMedia } from "./shared";
 import { UnderlineTabs } from "./ui";
+import { bi, useLang } from "./i18n";
 import { ExecutionNodes } from "./execution-nodes";
 import { AISettingsView } from "./aisettings";
 import { CostView, UsageView } from "./aiusage";
@@ -105,107 +106,171 @@ const SetIcons = {
 };
 
 const SECTIONS: {
-  group: string;
+  id: string;
+  readonly group: string;
   items: {
     id: string;
-    title: string;
-    hint: string;
+    readonly title: string;
+    readonly hint: string;
     icon: React.ReactNode;
     perm?: string;
   }[];
 }[] = [
   {
-    group: "通知",
+    id: "notify",
+    get group() {
+      return bi("通知", "Notifications");
+    },
     items: [
       {
         id: "channels",
-        title: "通知渠道",
-        hint: "消息发到哪里",
+        get title() {
+          return bi("通知渠道", "Channels");
+        },
+        get hint() {
+          return bi("消息发到哪里", "Where alerts are sent");
+        },
         icon: SetIcons.channels,
         perm: "settings.notify",
       },
       {
         id: "templates",
-        title: "通知模板",
-        hint: "消息怎么写",
+        get title() {
+          return bi("通知模板", "Templates");
+        },
+        get hint() {
+          return bi("消息怎么写", "Message content & format");
+        },
         icon: SetIcons.templates,
         perm: "settings.notify",
       },
     ],
   },
   {
+    id: "ai",
     group: "AI",
     items: [
       {
         id: "ai",
-        title: "AI 套件与模型",
-        hint: "套件启用开关、供应商、数据边界",
+        get title() {
+          return bi("AI 套件与模型", "AI Suite & Models");
+        },
+        get hint() {
+          return bi(
+            "套件启用开关、供应商、数据边界",
+            "Master switch, providers & data boundaries",
+          );
+        },
         icon: SetIcons.ai,
         perm: "ai.settings|ai.usage",
       },
       {
         id: "ai-usage",
-        title: "用量明细",
-        hint: "每一次模型调用",
+        get title() {
+          return bi("用量明细", "Usage Logs");
+        },
+        get hint() {
+          return bi("每一次模型调用", "Every model invocation");
+        },
         icon: SetIcons.usage,
         perm: "ai.usage",
       },
       {
         id: "ai-cost",
-        title: "用量与成本",
-        hint: "趋势、排行、估算费用",
+        get title() {
+          return bi("用量与成本", "Usage & Cost");
+        },
+        get hint() {
+          return bi("趋势、排行、估算费用", "Trends, rankings & estimated cost");
+        },
         icon: SetIcons.cost,
         perm: "ai.usage",
       },
       {
         id: "ai-web",
-        title: "联网搜索",
-        hint: "搜索服务与访问范围",
+        get title() {
+          return bi("联网搜索", "Web Search");
+        },
+        get hint() {
+          return bi("搜索服务与访问范围", "Search engine & access scope");
+        },
         icon: SetIcons.web,
         perm: "ai.settings",
       },
       {
         id: "ai-prices",
-        title: "模型价格",
-        hint: "官方默认价与自定义",
+        get title() {
+          return bi("模型价格", "Model Pricing");
+        },
+        get hint() {
+          return bi("官方默认价与自定义", "Built-in rates & overrides");
+        },
         icon: SetIcons.prices,
         perm: "ai.settings",
       },
     ],
   },
   {
-    group: "平台",
+    id: "platform",
+    get group() {
+      return bi("平台", "Platform");
+    },
     items: [
       {
         id: "report",
-        title: "报告模板",
-        hint: "导出 Word 的封面、页眉页脚",
+        get title() {
+          return bi("报告模板", "Report Template");
+        },
+        get hint() {
+          return bi(
+            "导出 Word 的封面、页眉页脚",
+            "Word cover, headers & footers",
+          );
+        },
         icon: SetIcons.report,
         perm: "settings.report",
       },
       {
         id: "storage",
-        title: "存储空间",
-        hint: "每个人的额度与用量",
+        get title() {
+          return bi("存储空间", "Storage");
+        },
+        get hint() {
+          return bi("每个人的额度与用量", "Per-user quotas & usage");
+        },
         icon: SetIcons.storage,
         perm: "settings.storage",
       },
       {
         id: "sandbox",
-        title: "代码沙箱",
-        hint: "让 AI 在隔离环境里运行代码",
+        get title() {
+          return bi("代码沙箱", "Code Sandbox");
+        },
+        get hint() {
+          return bi(
+            "让 AI 在隔离环境里运行代码",
+            "Run AI code in isolation",
+          );
+        },
         icon: SetIcons.sandbox,
         perm: "settings.sandbox",
       },
     ],
   },
   {
-    group: "自动执行",
+    id: "exec",
+    get group() {
+      return bi("自动执行", "Automation");
+    },
     items: [
       {
         id: "execution-nodes",
-        title: "执行节点",
-        hint: "授权范围、连接与运行",
+        get title() {
+          return bi("执行节点", "Execution Nodes");
+        },
+        get hint() {
+          return bi("授权范围、连接与运行", "Scope, connection & runs");
+        },
         icon: SetIcons.nodes,
         perm: "execution.manage",
       },
@@ -228,6 +293,7 @@ export function SettingsPage({
   me: Session;
   selected?: string;
 }) {
+  useLang();
   const aiStatus = useAIStatus();
   const narrow = useMedia("(max-width: 900px)");
   // only the sections this person may open are shown at all; AI-only subpages hide when global AI is off
@@ -295,8 +361,13 @@ export function SettingsPage({
   if (!items.length)
     return (
       <div className="detail-none enter">
-        <h2>你没有可以查看的平台设置</h2>
-        <p>需要查看或调整通知、AI 与平台资源配置时，请联系管理员分配相应角色。</p>
+        <h2>{bi("你没有可以查看的平台设置", "No settings accessible")}</h2>
+        <p>
+          {bi(
+            "需要查看或调整通知、AI 与平台资源配置时，请联系管理员分配相应角色。",
+            "Contact an administrator to assign a role if you need access to notification, AI, or platform settings.",
+          )}
+        </p>
       </div>
     );
   const body =
@@ -329,7 +400,7 @@ export function SettingsPage({
         <div className="st-mobile-bar">
           <UnderlineTabs
             className="st-subtabs"
-            label="平台设置分区"
+            label={bi("平台设置分区", "Platform settings sections")}
             value={view}
             onChange={switchView}
             items={items.map((i) => ({
@@ -340,10 +411,10 @@ export function SettingsPage({
           />
         </div>
       ) : (
-        <aside className="st-nav" aria-label="平台设置" ref={nav}>
-          <h1>平台设置</h1>
+        <aside className="st-nav" aria-label={bi("平台设置", "Settings")} ref={nav}>
+          <h1>{bi("平台设置", "Settings")}</h1>
           {groups.map((g) => (
-            <div key={g.group} className="st-nav-grp">
+            <div key={g.id} className="st-nav-grp">
               <div className="st-nav-g">{g.group}</div>
               {g.items.map((i) => (
                 <button
@@ -366,10 +437,13 @@ export function SettingsPage({
       )}
       <div className="st-body">
         {!narrow && activeGroup && activeGroup.items.length > 1 && (
-          <div className="st-group-bar" key={activeGroup.group}>
+          <div className="st-group-bar" key={activeGroup.id}>
             <UnderlineTabs
               className="st-subtabs"
-              label={`${activeGroup.group}设置`}
+              label={bi(
+                `${activeGroup.group}设置`,
+                `${activeGroup.group} Settings`,
+              )}
               value={view}
               onChange={switchView}
               items={activeGroup.items.map((i) => ({

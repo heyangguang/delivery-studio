@@ -34,6 +34,7 @@ import {
 } from "./shared";
 import { go } from "./router";
 import { Segmented } from "./ui";
+import { bi, getLang, useLang } from "./i18n";
 import { DocToc, StructuredDoc, extractDocSections } from "./docrender";
 import { FileIcon, FileView, MyFiles, UsageBar, bytesText } from "./myfiles";
 import type { FileNode, Usage } from "./myfiles";
@@ -87,11 +88,17 @@ const kib = (n: number) =>
     ? `${(n / (1 << 20)).toFixed(1)} MiB`
     : n >= 1024
       ? `${(n / 1024).toFixed(1)} KiB`
-      : `${n} 字节`;
+      : bi(`${n} 字节`, `${n} B`);
 const STATUS: Record<string, string> = {
-  pending: "等待审核",
-  approved: "已入库",
-  rejected: "未通过",
+  get pending() {
+    return bi("等待审核", "Pending");
+  },
+  get approved() {
+    return bi("已入库", "Approved");
+  },
+  get rejected() {
+    return bi("未通过", "Rejected");
+  },
 };
 
 /** The teams a document can be meant for: those of the person, or every team for someone who manages the base. */
@@ -118,12 +125,18 @@ export function reportDoc(
   },
   where?: string,
 ) {
-  const parts = [`## 现象\n\n${r.symptom}`];
-  if (r.evidence) parts.push(`## 证据\n\n\`\`\`\n${r.evidence}\n\`\`\``);
-  parts.push(`## 原因\n\n${r.cause}`, `## 处理\n\n${r.fix}`);
+  const parts = [`## ${bi("现象", "Symptom")}\n\n${r.symptom}`];
+  if (r.evidence)
+    parts.push(`## ${bi("证据", "Evidence")}\n\n\`\`\`\n${r.evidence}\n\`\`\``);
+  parts.push(
+    `## ${bi("原因", "Root cause")}\n\n${r.cause}`,
+    `## ${bi("处理", "Resolution")}\n\n${r.fix}`,
+  );
   if (r.followups?.length)
-    parts.push(`## 待跟进\n\n${r.followups.map((f) => `- ${f}`).join("\n")}`);
-  if (where) parts.push(`> 来自 ${where}`);
+    parts.push(
+      `## ${bi("待跟进", "Follow-ups")}\n\n${r.followups.map((f) => `- ${f}`).join("\n")}`,
+    );
+  if (where) parts.push(`> ${bi(`来自 ${where}`, `Source: ${where}`)}`);
   return { title: r.title, text: parts.join("\n\n"), source: where || "" };
 }
 
@@ -132,6 +145,7 @@ export function useSubmitKB(): [
   (pre?: { title?: string; text?: string; source?: string }) => void,
   React.ReactNode,
 ] {
+  useLang();
   const [draft, setDraft] = useState<{
     title: string;
     text: string;
@@ -156,7 +170,12 @@ export function useSubmitKB(): [
         body: JSON.stringify(draft),
       });
       setDraft(null);
-      Message.success("已提交，审核通过后进入团队知识库");
+      Message.success(
+        bi(
+          "已提交，审核通过后进入团队知识库",
+          "Submitted; it will be added to the team KB once approved",
+        ),
+      );
     } catch (e) {
       err(e);
     } finally {
@@ -166,9 +185,10 @@ export function useSubmitKB(): [
   const node = (
     <Modal
       visible={!!draft}
-      title="提交到团队知识库"
+      title={bi("提交到团队知识库", "Submit to team knowledge base")}
       onCancel={() => setDraft(null)}
-      okText="提交审核"
+      okText={bi("提交审核", "Submit for review")}
+      cancelText={bi("取消", "Cancel")}
       confirmLoading={busy}
       okButtonProps={{ disabled: !draft?.title.trim() || !draft?.text.trim() }}
       onOk={submit}
@@ -177,32 +197,36 @@ export function useSubmitKB(): [
       {draft && (
         <div className="st-form">
           <p className="muted small kb-sub-lead">
-            审核通过后，大家和 AI
-            都能用到它。可以先改得更通用一些：去掉只和这一次有关的细节，写清楚什么情况下会遇到。口令、私钥这类内容会在交给
-            AI 前被去掉。
+            {bi(
+              "审核通过后，大家和 AI 都能用到它。可以先改得更通用一些：去掉只和这一次有关的细节，写清楚什么情况下会遇到。口令、私钥这类内容会在交给 AI 前被去掉。",
+              "Once approved, everyone and the assistant can use it. You can generalize it first by removing one-off details and clarifying when it applies. Passwords and private keys are stripped before AI sees it.",
+            )}
           </p>
           <div className="st-field">
-            <span>标题</span>
+            <span>{bi("标题", "Title")}</span>
             <Input
               value={draft.title}
               onChange={(v) => setDraft({ ...draft, title: v })}
               maxLength={120}
-              placeholder="例如：etcd 频繁选主，原因是成员用了机械盘"
-              aria-label="标题"
+              placeholder={bi(
+                "例如：etcd 频繁选主，原因是成员用了机械盘",
+                "e.g. Frequent etcd leader elections caused by HDD storage",
+              )}
+              aria-label={bi("标题", "Title")}
             />
           </div>
           <div className="st-field">
-            <span>内容（Markdown）</span>
+            <span>{bi("内容（Markdown）", "Content (Markdown)")}</span>
             <Input.TextArea
               className="mono"
               value={draft.text}
               onChange={(v) => setDraft({ ...draft, text: v })}
               autoSize={{ minRows: 10, maxRows: 24 }}
-              aria-label="内容"
+              aria-label={bi("内容", "Content")}
             />
           </div>
           <div className="st-field">
-            <span>给谁用</span>
+            <span>{bi("给谁用", "Audience")}</span>
             <Select
               value={draft.team}
               onChange={(v) => setDraft({ ...draft, team: v })}
@@ -212,15 +236,20 @@ export function useSubmitKB(): [
                 autoAlignPopupMinWidth: true,
               }}
               options={[
-                { value: "", label: "全平台" },
+                { value: "", label: bi("全平台", "All platform users") },
                 ...teams.map((t) => ({
                   value: t.id,
-                  label: `团队：${t.name}`,
+                  label: bi(`团队：${t.name}`, `Team: ${t.name}`),
                 })),
               ]}
-              aria-label="给谁用"
+              aria-label={bi("给谁用", "Audience")}
             />
-            <small>审核的人可以再调整。</small>
+            <small>
+              {bi(
+                "审核的人可以再调整。",
+                "Reviewers can adjust this before approval.",
+              )}
+            </small>
           </div>
         </div>
       )}
@@ -238,6 +267,7 @@ const docKey = (scope: Scope, id: string) =>
   scope === "mine" ? `my-${id}` : id;
 
 export function KnowledgePage({ selected }: { selected?: string }) {
+  useLang();
   const narrow = useMedia("(max-width: 900px)");
   const initFiles = cached<{ nodes: FileNode[]; usage: Usage }>(
     "/api/me/files?recent=1",
@@ -302,7 +332,9 @@ export function KnowledgePage({ selected }: { selected?: string }) {
   const nav = (id?: string) =>
     go({ name: "kb", id }, { replace: !narrow && !!selected });
   const teamName = (id?: string) =>
-    !id ? "全平台" : teams.find((t) => t.id === id)?.name || "某个团队";
+    !id
+      ? bi("全平台", "All platform")
+      : teams.find((t) => t.id === id)?.name || bi("某个团队", "Team");
   const docs: Doc[] | null =
     scope === "mine" ? (own ? [] : null) : home?.docs || null;
   const total = useMemo(
@@ -335,10 +367,10 @@ export function KnowledgePage({ selected }: { selected?: string }) {
   return (
     <div className="md-split">
       {(!narrow || !selected) && (
-        <aside className="md-list kb-side" aria-label="知识库">
+        <aside className="md-list kb-side" aria-label={bi("知识库", "Knowledge base")}>
           <div className="list-head">
             <div className="list-title">
-              <h1>知识库</h1>
+              <h1>{bi("知识库", "Knowledge base")}</h1>
               {scope === "mine" ? null : home?.can_manage ? (
                 <Button
                   type="primary"
@@ -346,7 +378,7 @@ export function KnowledgePage({ selected }: { selected?: string }) {
                   icon={<IconPlus />}
                   onClick={() => nav("~new")}
                 >
-                  新建
+                  {bi("新建", "New")}
                 </Button>
               ) : home?.can_submit ? (
                 <Button
@@ -355,14 +387,14 @@ export function KnowledgePage({ selected }: { selected?: string }) {
                   icon={<IconSend />}
                   onClick={() => openSubmit()}
                 >
-                  提交资料
+                  {bi("提交资料", "Submit doc")}
                 </Button>
               ) : null}
             </div>
             {teamOK && (
               <Segmented<Scope>
                 size="sm"
-                label="资料范围"
+                label={bi("资料范围", "Scope")}
                 value={scope}
                 onChange={(v) => {
                   setScope(v);
@@ -372,10 +404,10 @@ export function KnowledgePage({ selected }: { selected?: string }) {
                 options={[
                   {
                     value: "team",
-                    label: "团队资料",
+                    label: bi("团队资料", "Team KB"),
                     count: home?.docs.length,
                   },
-                  { value: "mine", label: "我的资料" },
+                  { value: "mine", label: bi("我的资料", "My files") },
                 ]}
               />
             )}
@@ -383,14 +415,19 @@ export function KnowledgePage({ selected }: { selected?: string }) {
               prefix={<IconSearch />}
               allowClear
               placeholder={
-                scope === "mine" ? "搜索我的资料内容" : "搜索团队资料内容"
+                scope === "mine"
+                  ? bi("搜索我的资料内容", "Search my files")
+                  : bi("搜索团队资料内容", "Search team KB")
               }
               value={q}
               onChange={setQ}
-              aria-label="搜索资料"
+              aria-label={bi("搜索资料", "Search documents")}
             />
             {scope === "team" && (home?.can_manage || home?.can_submit) && (
-              <nav className="sx-nav" aria-label="审核与提交">
+              <nav
+                className="sx-nav"
+                aria-label={bi("审核与提交", "Reviews & submissions")}
+              >
                 {home?.can_manage && (
                   <button
                     type="button"
@@ -401,11 +438,14 @@ export function KnowledgePage({ selected }: { selected?: string }) {
                       <IconCheck />
                     </span>
                     <span className="sx-nav-t">
-                      <b>待审核</b>
+                      <b>{bi("待审核", "Pending review")}</b>
                       <small>
                         {home.pending
-                          ? `${home.pending} 份等你处理`
-                          : "没有待审核的"}
+                          ? bi(
+                              `${home.pending} 份等你处理`,
+                              `${home.pending} awaiting review`,
+                            )
+                          : bi("没有待审核的", "None pending")}
                       </small>
                     </span>
                     {!!home.pending && (
@@ -423,11 +463,14 @@ export function KnowledgePage({ selected }: { selected?: string }) {
                       <IconSend />
                     </span>
                     <span className="sx-nav-t">
-                      <b>我的提交</b>
+                      <b>{bi("我的提交", "My submissions")}</b>
                       <small>
                         {home.mine.length
-                          ? `${home.mine.length} 份 · ${home.mine.filter((x) => x.status === "pending").length} 份待审核`
-                          : "还没有提交过"}
+                          ? bi(
+                              `${home.mine.length} 份 · ${home.mine.filter((x) => x.status === "pending").length} 份待审核`,
+                              `${home.mine.length} total · ${home.mine.filter((x) => x.status === "pending").length} pending`,
+                            )
+                          : bi("还没有提交过", "None yet")}
                       </small>
                     </span>
                   </button>
@@ -442,7 +485,7 @@ export function KnowledgePage({ selected }: { selected?: string }) {
           ) : hits ? (
             hits.length === 0 ? (
               <div className="list-state">
-                <p>没有找到相关内容</p>
+                <p>{bi("没有找到相关内容", "No matching content found")}</p>
               </div>
             ) : (
               <div className="list-body rp-list">
@@ -459,7 +502,9 @@ export function KnowledgePage({ selected }: { selected?: string }) {
                     <span className="rp-t">
                       <b>
                         {h.title}{" "}
-                        <small className="faint">第 {h.part} 段</small>
+                        <small className="faint">
+                          {bi(`第 ${h.part} 段`, `Section ${h.part}`)}
+                        </small>
                       </b>
                       <small className="kb-snip">{h.text.slice(0, 140)}</small>
                     </span>
@@ -478,12 +523,19 @@ export function KnowledgePage({ selected }: { selected?: string }) {
                   <IconStorage />
                 </span>
                 <span className="rp-t">
-                  <b>全部资料</b>
-                  <small>文件夹、文档、图片和文件</small>
+                  <b>{bi("全部资料", "All files")}</b>
+                  <small>
+                    {bi(
+                      "文件夹、文档、图片和文件",
+                      "Folders, docs, images, and files",
+                    )}
+                  </small>
                 </span>
               </button>
               <UsageBar u={usage} />
-              {(own || []).length > 0 && <div className="rp-group">最近</div>}
+              {(own || []).length > 0 && (
+                <div className="rp-group">{bi("最近", "Recent")}</div>
+              )}
               {(own || []).slice(0, 12).map((n) => (
                 <a
                   key={n.id}
@@ -506,12 +558,19 @@ export function KnowledgePage({ selected }: { selected?: string }) {
             </div>
           ) : docs.length === 0 ? (
             <div className="list-state">
-              <p>团队知识库还是空的。</p>
+              <p>{bi("团队知识库还是空的。", "Team knowledge base is empty.")}</p>
             </div>
           ) : (
-            <div className="list-body rp-list" role="listbox" aria-label="资料">
+            <div
+              className="list-body rp-list"
+              role="listbox"
+              aria-label={bi("资料", "Documents")}
+            >
               <div className="rp-group">
-                {docs.length} 份 · {kib(total)}
+                {bi(
+                  `${docs.length} 份 · ${kib(total)}`,
+                  `${docs.length} doc${docs.length === 1 ? "" : "s"} · ${kib(total)}`,
+                )}
               </div>
               {docs.map((d) => (
                 <a
@@ -548,7 +607,7 @@ export function KnowledgePage({ selected }: { selected?: string }) {
                 icon={<IconArrowLeft />}
                 onClick={() => go({ name: "kb" })}
               >
-                知识库
+                {bi("知识库", "Knowledge base")}
               </Button>
             )}
             {view === "review" ? (
@@ -586,7 +645,7 @@ export function KnowledgePage({ selected }: { selected?: string }) {
                             openSubmit({
                               title: d.title,
                               text: d.text,
-                              source: "我的资料",
+                              source: bi("我的资料", "My Files"),
                             })
                         : undefined
                     }
@@ -611,7 +670,7 @@ export function KnowledgePage({ selected }: { selected?: string }) {
                         openSubmit({
                           title: d.title,
                           text: d.text,
-                          source: "我的资料",
+                          source: bi("我的资料", "My Files"),
                         })
                     : undefined
                 }
@@ -630,11 +689,17 @@ export function KnowledgePage({ selected }: { selected?: string }) {
                 <span className="rp-ic xl k-doc">
                   <IconStorage />
                 </span>
-                <h2>团队一起积累的现场知识</h2>
+                <h2>
+                  {bi(
+                    "团队一起积累的现场知识",
+                    "Shared operational knowledge built by your team",
+                  )}
+                </h2>
                 <p>
-                  机房和网络规划、变更规范、过往故障和处理办法。所有人和 AI
-                  对话时，AI
-                  都会先在这里找，回答里会说明出自哪份资料。排障解决后可以一键把经过提交进来，审核通过就入库。
+                  {bi(
+                    "机房和网络规划、变更规范、过往故障和处理办法。所有人和 AI 对话时，AI 都会先在这里找，回答里会说明出自哪份资料。排障解决后可以一键把经过提交进来，审核通过就入库。",
+                    "DC & network plans, change policies, past incidents, and fixes. The assistant searches here first during chats and cites which document it used. After resolving an incident, submit the report in one click for review and inclusion.",
+                  )}
                 </p>
                 {home?.can_submit && (
                   <Button
@@ -642,7 +707,7 @@ export function KnowledgePage({ selected }: { selected?: string }) {
                     icon={<IconSend />}
                     onClick={() => openSubmit()}
                   >
-                    提交一份资料
+                    {bi("提交一份资料", "Submit a document")}
                   </Button>
                 )}
               </div>
@@ -674,6 +739,7 @@ function DocView({
   gone: () => void;
   share?: (d: Doc) => void;
 }) {
+  useLang();
   const [d, setD] = useState<Doc | null>(null);
   const [missing, setMissing] = useState(false);
   const [raw, setRaw] = useState(false);
@@ -694,8 +760,13 @@ function DocView({
   if (missing)
     return (
       <div className="detail-none enter">
-        <h2>找不到这份资料</h2>
-        <p>它可能已被删除，或只给某个团队用。</p>
+        <h2>{bi("找不到这份资料", "Document not found")}</h2>
+        <p>
+          {bi(
+            "它可能已被删除，或只给某个团队用。",
+            "It may have been deleted or restricted to another team.",
+          )}
+        </p>
       </div>
     );
   if (!d) return <Skeleton animation text={{ rows: 8 }} />;
@@ -722,39 +793,52 @@ function DocView({
         <div className="rp-head-t">
           <h1>{d.title}</h1>
           <div className="rp-meta">
-            <span>{scope === "mine" ? "我的资料" : teamName(d.team)}</span>
             <span>
-              <time title={fullTime(d.updated)}>{ago(d.updated)}更新</time>
+              {scope === "mine"
+                ? bi("我的资料", "My files")
+                : teamName(d.team)}
+            </span>
+            <span>
+              <time title={fullTime(d.updated)}>
+                {bi(`${ago(d.updated)}更新`, `Updated ${ago(d.updated)}`)}
+              </time>
             </span>
             <span>{kib(d.size)}</span>
           </div>
         </div>
         <span className="rp-acts">
           <Button icon={<IconEye />} onClick={() => setRaw(!raw)}>
-            {raw ? "看排版" : "看原文"}
+            {raw ? bi("看排版", "Formatted") : bi("看原文", "Raw source")}
           </Button>
           {share && (
             <Button icon={<IconSend />} onClick={() => share(d)}>
-              提交到团队
+              {bi("提交到团队", "Submit to team")}
             </Button>
           )}
           {manage && (
             <>
               <Button icon={<IconEdit />} onClick={() => setEditing(true)}>
-                编辑
+                {bi("编辑", "Edit")}
               </Button>
               <Button
                 status="danger"
                 icon={<IconDelete />}
-                aria-label="删除"
+                aria-label={bi("删除", "Delete")}
                 onClick={() =>
                   Modal.confirm({
-                    title: `删除「${d.title}」？`,
+                    title: bi(`删除「${d.title}」？`, `Delete "${d.title}"?`),
                     content:
                       scope === "mine"
-                        ? "删除后 AI 不会再用到它。"
-                        : "删除后所有人和 AI 都不会再用到它。",
-                    okText: "删除",
+                        ? bi(
+                            "删除后 AI 不会再用到它。",
+                            "Once deleted, the assistant will no longer use it.",
+                          )
+                        : bi(
+                            "删除后所有人和 AI 都不会再用到它。",
+                            "Once deleted, neither users nor the assistant will see it.",
+                          ),
+                    okText: bi("删除", "Delete"),
+                    cancelText: bi("取消", "Cancel"),
                     okButtonProps: { status: "danger" },
                     onOk: async () => {
                       try {
@@ -786,34 +870,37 @@ function DocView({
         <aside className="rp-side">
           {!raw && <DocToc sections={docSections} />}
           <dl>
-            <dt>给谁用</dt>
+            <dt>{bi("给谁用", "Audience")}</dt>
             <dd>
               {scope === "mine"
-                ? "只有我的对话"
+                ? bi("只有我的对话", "Only my chats")
                 : d.team
-                  ? `团队「${teamName(d.team)}」`
-                  : "全平台所有人"}
+                  ? bi(`团队「${teamName(d.team)}」`, `Team "${teamName(d.team)}"`)
+                  : bi("全平台所有人", "Everyone on platform")}
             </dd>
             {scope === "team" && (
               <>
-                <dt>提交</dt>
+                <dt>{bi("提交", "Author")}</dt>
                 <dd>
                   {d.by}
-                  {d.editor && d.editor !== d.by ? `，${d.editor} 审核` : ""}
+                  {d.editor && d.editor !== d.by
+                    ? bi(`，${d.editor} 审核`, `, reviewed by ${d.editor}`)
+                    : ""}
                 </dd>
               </>
             )}
             {(d.source || d.name) && (
               <>
-                <dt>来源</dt>
+                <dt>{bi("来源", "Source")}</dt>
                 <dd>{d.source || d.name}</dd>
               </>
             )}
-            <dt>AI 怎么用它</dt>
+            <dt>{bi("AI 怎么用它", "How AI uses it")}</dt>
             <dd>
-              对话时 AI
-              先在知识库里搜索相关片段，需要时读全文；口令和私钥会在交给 AI
-              前被去掉。
+              {bi(
+                "对话时 AI 先在知识库里搜索相关片段，需要时读全文；口令和私钥会在交给 AI 前被去掉。",
+                "In chat, the assistant searches relevant snippets first and reads the full document when needed; passwords and private keys are stripped first.",
+              )}
             </dd>
           </dl>
         </aside>
@@ -837,6 +924,7 @@ function DocEditor({
   onDone: (id: string) => void;
   onCancel?: () => void;
 }) {
+  useLang();
   const [title, setTitle] = useState(doc?.title || "");
   const [text, setText] = useState(doc?.text || "");
   const [team, setTeam] = useState(doc?.team || "");
@@ -856,7 +944,7 @@ function DocEditor({
             method: "POST",
             body,
           });
-      Message.success("已保存");
+      Message.success(bi("已保存", "Saved"));
       onDone((r as Doc).id || (r as { added?: Doc[] }).added?.[0]?.id || "");
     } catch (e) {
       err(e);
@@ -869,37 +957,40 @@ function DocEditor({
       <header className="rp-edit-h">
         <h1>
           {doc
-            ? "编辑资料"
+            ? bi("编辑资料", "Edit document")
             : scope === "mine"
-              ? "写一份我的资料"
-              : "新建团队资料"}
+              ? bi("写一份我的资料", "New personal document")
+              : bi("新建团队资料", "New team document")}
         </h1>
         <span className="rp-acts">
-          {onCancel && <Button onClick={onCancel}>取消</Button>}
+          {onCancel && <Button onClick={onCancel}>{bi("取消", "Cancel")}</Button>}
           <Button
             type="primary"
             loading={busy}
             disabled={!title.trim() || !text.trim()}
             onClick={save}
           >
-            保存
+            {bi("保存", "Save")}
           </Button>
         </span>
       </header>
       <div className="rp-grid2">
         <div className="rp-field">
-          <span>标题</span>
+          <span>{bi("标题", "Title")}</span>
           <Input
             value={title}
             onChange={setTitle}
-            placeholder="例如：一号机房网络规划"
+            placeholder={bi(
+              "例如：一号机房网络规划",
+              "e.g. DC-1 network architecture",
+            )}
             maxLength={120}
-            aria-label="标题"
+            aria-label={bi("标题", "Title")}
           />
         </div>
         {scope === "team" ? (
           <div className="rp-field">
-            <span>给谁用</span>
+            <span>{bi("给谁用", "Audience")}</span>
             <Select
               value={team}
               onChange={setTeam}
@@ -909,13 +1000,13 @@ function DocEditor({
                 autoAlignPopupMinWidth: true,
               }}
               options={[
-                { value: "", label: "全平台" },
+                { value: "", label: bi("全平台", "All platform users") },
                 ...teams.map((t) => ({
                   value: t.id,
-                  label: `团队：${t.name}`,
+                  label: bi(`团队：${t.name}`, `Team: ${t.name}`),
                 })),
               ]}
-              aria-label="给谁用"
+              aria-label={bi("给谁用", "Audience")}
             />
           </div>
         ) : (
@@ -927,7 +1018,7 @@ function DocEditor({
                   icon={<IconUpload />}
                   onClick={() => file.current?.click()}
                 >
-                  从文件读取内容
+                  {bi("从文件读取内容", "Load from file")}
                 </Button>
                 <input
                   ref={file}
@@ -938,7 +1029,9 @@ function DocEditor({
                     const f = e.target.files?.[0];
                     if (!f) return;
                     if (f.size > 1 << 20)
-                      return Message.warning("单份资料不能超过 1 MiB");
+                      return Message.warning(
+                        bi("单份资料不能超过 1 MiB", "Max file size is 1 MiB"),
+                      );
                     setText(await f.text());
                     if (!title) setTitle(f.name.replace(/\.[^.]+$/, ""));
                     e.target.value = "";
@@ -951,22 +1044,22 @@ function DocEditor({
       </div>
       <div className="rp-field">
         <span className="rp-field-h">
-          内容（Markdown）
+          {bi("内容（Markdown）", "Content (Markdown)")}
           <Segmented<string>
             size="sm"
-            label="视图"
+            label={bi("视图", "View")}
             value={preview ? "p" : "e"}
             onChange={(v) => setPreview(v === "p")}
             options={[
-              { value: "e", label: "编辑" },
-              { value: "p", label: "预览" },
+              { value: "e", label: bi("编辑", "Edit") },
+              { value: "p", label: bi("预览", "Preview") },
             ]}
           />
         </span>
         {preview ? (
           <div className="rp-preview">
             <StructuredDoc
-              text={text || "（还没有内容）"}
+              text={text || bi("（还没有内容）", "(No content yet)")}
               docTitle={title}
               idPrefix="kb-preview"
             />
@@ -976,14 +1069,19 @@ function DocEditor({
             className="mono"
             value={text}
             onChange={setText}
-            placeholder="粘贴或写下内容，支持 Markdown。"
+            placeholder={bi(
+              "粘贴或写下内容，支持 Markdown。",
+              "Paste or write content in Markdown.",
+            )}
             autoSize={{ minRows: 16, maxRows: 40 }}
-            aria-label="内容"
+            aria-label={bi("内容", "Content")}
           />
         )}
         <small>
-          {text.length.toLocaleString("en-US")} 字 · 口令、私钥这类内容会在交给
-          AI 前被去掉
+          {bi(
+            `${text.length.toLocaleString(getLang())} 字 · 口令、私钥这类内容会在交给 AI 前被去掉`,
+            `${text.length.toLocaleString(getLang())} chars · Passwords and private keys are stripped before AI sees it`,
+          )}
         </small>
       </div>
     </div>
@@ -997,6 +1095,7 @@ function ReviewView({
   teams: Team[];
   changed: () => void;
 }) {
+  useLang();
   const [subs, setSubs] = useState<Sub[] | null>(null);
   const [cur, setCur] = useState<Sub | null>(null);
   const [edit, setEdit] = useState<{
@@ -1032,7 +1131,12 @@ function ReviewView({
         body: JSON.stringify(edit),
       });
       Message.success(
-        verb === "approve" ? "已入库" : "已退回，提交的人能看到你的说明",
+        verb === "approve"
+          ? bi("已入库", "Approved & added to KB")
+          : bi(
+              "已退回，提交的人能看到你的说明",
+              "Rejected; the submitter will see your note",
+            ),
       );
       setCur(null);
       setEdit(null);
@@ -1049,10 +1153,12 @@ function ReviewView({
     <div className="kb-review enter">
       <header className="iam-h">
         <div>
-          <h1>待审核</h1>
+          <h1>{bi("待审核", "Pending review")}</h1>
           <p>
-            通过后进入团队知识库，所有人（或选定的团队）和 AI
-            都会用到。可以先改标题和内容，让它对别人也有用。
+            {bi(
+              "通过后进入团队知识库，所有人（或选定的团队）和 AI 都会用到。可以先改标题和内容，让它对别人也有用。",
+              "Approved items enter the team knowledge base for everyone (or the selected team) and AI. You can refine the title and content before approving.",
+            )}
           </p>
         </div>
         <label className="sec-check">
@@ -1061,7 +1167,7 @@ function ReviewView({
             checked={showDone}
             onChange={(e) => setShowDone(e.target.checked)}
           />{" "}
-          也显示审核过的
+          {bi("也显示审核过的", "Show reviewed")}
         </label>
       </header>
       {!subs ? (
@@ -1069,7 +1175,7 @@ function ReviewView({
       ) : list.length === 0 ? (
         <div className="iam-empty">
           <IconCheck />
-          <b>没有待审核的提交</b>
+          <b>{bi("没有待审核的提交", "No pending submissions")}</b>
         </div>
       ) : (
         <div className="kb-rv">
@@ -1096,13 +1202,17 @@ function ReviewView({
           </ul>
           {cur && edit ? (
             <section className="kb-rv-ed">
-              {cur.source && <p className="faint small">来源：{cur.source}</p>}
+              {cur.source && (
+                <p className="faint small">
+                  {bi(`来源：${cur.source}`, `Source: ${cur.source}`)}
+                </p>
+              )}
               <Input
                 className="kb-title-in"
                 value={edit.title}
                 onChange={(v) => setEdit({ ...edit, title: v })}
                 disabled={cur.status !== "pending"}
-                aria-label="标题"
+                aria-label={bi("标题", "Title")}
               />
               <Input.TextArea
                 className="mono kb-text-in"
@@ -1110,7 +1220,7 @@ function ReviewView({
                 onChange={(v) => setEdit({ ...edit, text: v })}
                 disabled={cur.status !== "pending"}
                 autoSize={{ minRows: 12, maxRows: 30 }}
-                aria-label="内容"
+                aria-label={bi("内容", "Content")}
               />
               {cur.status === "pending" ? (
                 <div className="kb-rv-acts">
@@ -1123,20 +1233,23 @@ function ReviewView({
                       autoAlignPopupMinWidth: true,
                     }}
                     options={[
-                      { value: "", label: "给全平台" },
+                      { value: "", label: bi("给全平台", "All platform") },
                       ...teams.map((t) => ({
                         value: t.id,
-                        label: `只给团队：${t.name}`,
+                        label: bi(`只给团队：${t.name}`, `Team only: ${t.name}`),
                       })),
                     ]}
-                    aria-label="给谁用"
+                    aria-label={bi("给谁用", "Audience")}
                   />
                   <Input
                     value={edit.note}
                     onChange={(v) => setEdit({ ...edit, note: v })}
-                    placeholder="说明（退回时告诉对方原因）"
+                    placeholder={bi(
+                      "说明（退回时告诉对方原因）",
+                      "Note (explain reason if rejecting)",
+                    )}
                     maxLength={500}
-                    aria-label="说明"
+                    aria-label={bi("说明", "Note")}
                   />
                   <Button
                     status="danger"
@@ -1144,7 +1257,7 @@ function ReviewView({
                     loading={busy === "reject"}
                     onClick={() => decide("reject")}
                   >
-                    退回
+                    {bi("退回", "Reject")}
                   </Button>
                   <Button
                     type="primary"
@@ -1153,19 +1266,21 @@ function ReviewView({
                     disabled={!edit.title.trim() || !edit.text.trim()}
                     onClick={() => decide("approve")}
                   >
-                    通过并入库
+                    {bi("通过并入库", "Approve & publish")}
                   </Button>
                 </div>
               ) : (
                 <p className="faint small">
-                  {cur.reviewer} {ago(cur.reviewed_at || cur.at)}
+                  {cur.reviewer} · {ago(cur.reviewed_at || cur.at)} ·{" "}
                   {STATUS[cur.status]}
-                  {cur.note ? `：${cur.note}` : ""}
+                  {cur.note ? bi(`：${cur.note}`, `: ${cur.note}`) : ""}
                 </p>
               )}
             </section>
           ) : (
-            <p className="faint kb-rv-hint">从左边选一份来审核。</p>
+            <p className="faint kb-rv-hint">
+              {bi("从左边选一份来审核。", "Select a submission on the left to review.")}
+            </p>
           )}
         </div>
       )}
@@ -1180,19 +1295,30 @@ function MineView({
   subs: Sub[];
   teamName: (id?: string) => string;
 }) {
+  useLang();
   return (
     <div className="enter">
       <header className="iam-h">
         <div>
-          <h1>我的提交</h1>
-          <p>提交后由能管理知识库的人审核；通过后会出现在团队资料里。</p>
+          <h1>{bi("我的提交", "My submissions")}</h1>
+          <p>
+            {bi(
+              "提交后由能管理知识库的人审核；通过后会出现在团队资料里。",
+              "Submissions are reviewed by KB managers; approved ones appear in the team knowledge base.",
+            )}
+          </p>
         </div>
       </header>
       {subs.length === 0 ? (
         <div className="iam-empty">
           <IconSend />
-          <b>还没有提交过</b>
-          <span>排障解决后，可以把经过一键提交到团队知识库。</span>
+          <b>{bi("还没有提交过", "No submissions yet")}</b>
+          <span>
+            {bi(
+              "排障解决后，可以把经过一键提交到团队知识库。",
+              "After resolving an issue, you can submit the write-up to the team KB in one click.",
+            )}
+          </span>
         </div>
       ) : (
         <ul className="kb-mine">
@@ -1214,9 +1340,15 @@ function MineView({
                   <b>{x.title}</b>
                 )}
                 <small>
-                  {ago(x.at)}提交 · {teamName(x.team)}
-                  {x.reviewer ? ` · ${x.reviewer} 审核` : ""}
-                  {x.note ? `：${x.note}` : ""}
+                  {bi(`${ago(x.at)}提交`, `Submitted ${ago(x.at)}`)} ·{" "}
+                  {teamName(x.team)}
+                  {x.reviewer
+                    ? bi(
+                        ` · ${x.reviewer} 审核`,
+                        ` · reviewed by ${x.reviewer}`,
+                      )
+                    : ""}
+                  {x.note ? bi(`：${x.note}`, `: ${x.note}`) : ""}
                 </small>
               </span>
             </li>

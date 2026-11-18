@@ -9,6 +9,7 @@ import {
 } from "@arco-design/web-react";
 import { IconUndo } from "@arco-design/web-react/icon";
 import type { ParamDef } from "./shared";
+import { bi, useLang } from "./i18n";
 
 export const FLUSH_INPUTS_EVENT = "mh-flush-inputs";
 const EMPTY_STRINGS: string[] = [];
@@ -124,6 +125,7 @@ export function SizeInput({
   onChange: (v: string) => void;
   label: string;
 }) {
+  useLang();
   const m = /^([0-9]*)(kB|MB|GB|TB)$/.exec(value) || ["", "", "MB"];
   return (
     <div className="size-in">
@@ -138,7 +140,7 @@ export function SizeInput({
         value={m[2]}
         onChange={(u) => onChange(`${m[1] || 0}${u}`)}
         options={UNITS}
-        aria-label={`${label} 单位`}
+        aria-label={bi(`${label} 单位`, `${label} unit`)}
       />
     </div>
   );
@@ -154,11 +156,11 @@ export const isExpr = (v: unknown) =>
   typeof v === "string" && v.startsWith("=");
 export const showValue = (v: unknown): string =>
   Array.isArray(v)
-    ? v.join("、")
+    ? v.join(bi("、", ", "))
     : v === true
-      ? "开启"
+      ? bi("开启", "On")
       : v === false
-        ? "关闭"
+        ? bi("关闭", "Off")
         : v === undefined || v === null || v === ""
           ? "—"
           : String(v);
@@ -190,6 +192,7 @@ export const ParamField = React.memo(function ParamField({
   onParamChange?: (id: string, key: string, v: unknown) => void;
   onParamReset?: (id: string, key: string) => void;
 }) {
+  useLang();
   const commit = useCallback(
     (v: unknown) => {
       if (onParamChange && instanceId !== undefined)
@@ -260,7 +263,7 @@ export const ParamField = React.memo(function ParamField({
           animation={false}
           tokenSeparators={CIDR_SEPARATORS}
           value={list}
-          placeholder="10.20.0.0/16，输入后回车"
+          placeholder={bi("10.20.0.0/16，输入后回车", "10.20.0.0/16, press Enter")}
           status={bad ? "error" : undefined}
           validate={(inputVal, curVals) => {
             const s = (inputVal || "").trim();
@@ -309,28 +312,28 @@ export const ParamField = React.memo(function ParamField({
       <div className="param-text">
         <div className="param-label">
           <label>{d.label}</label>
-          {d.restart && <span className="flag">重启生效</span>}
-          {d.required && <span className="flag req">必填</span>}
+          {d.restart && <span className="flag">{bi("重启生效", "Restart req.")}</span>}
+          {d.required && <span className="flag req">{bi("必填", "Required")}</span>}
         </div>
         <div className="param-key">
           <code>{d.key}</code>
           <span className={bad ? "bad" : ""}>
-            {bad || d.hint || (def ? `默认 ${def}` : "")}
+            {bad || d.hint || (def ? bi(`默认 ${def}`, `Default ${def}`) : "")}
           </span>
           {changed && was !== undefined && (
             <span className="param-was">
-              原来 <s>{was || "（空）"}</s> → 现在 <b>{showValue(value)}</b>
+              {bi("原来", "Was")} <s>{was || bi("（空）", "(empty)")}</s> → {bi("现在", "Now")} <b>{showValue(value)}</b>
             </span>
           )}
         </div>
       </div>
       <div className="param-control">
         {control}
-        <Tooltip content={def ? `恢复默认 ${def}` : "恢复默认"} mini>
+        <Tooltip content={def ? bi(`恢复默认 ${def}`, `Reset to ${def}`) : bi("恢复默认", "Reset to default")} mini>
           <button
             className={`reset ${changed ? "" : "hidden"}`}
             onClick={doReset}
-            aria-label={`${d.label} 恢复默认`}
+            aria-label={bi(`${d.label} 恢复默认`, `Reset ${d.label} to default`)}
             tabIndex={changed ? 0 : -1}
           >
             <IconUndo />

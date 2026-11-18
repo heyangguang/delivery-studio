@@ -27,6 +27,17 @@ var skeletonKinds = []skeletonKind{
 	{"cluster", "对等成员", "成员互相组网、地位平等，通常 3 台起（如 etcd、Kafka、ZooKeeper）。", "node"},
 }
 
+func localizedSkeletonKinds(lang string) []skeletonKind {
+	if !isEnLang(lang) {
+		return skeletonKinds
+	}
+	return []skeletonKind{
+		{"single", "Single Role", "No primary/replica split: every host runs the same independent role (e.g., nginx, node_exporter).", "server"},
+		{"primary-replica", "Primary + Replicas", "One primary plus 0 or more replicas. Supports 0 replicas for standalone tests (like PostgreSQL).", "primary, replica"},
+		{"cluster", "Peer Cluster", "Equal peer members forming a quorum or cluster, typically 3+ nodes (e.g., etcd, Kafka, ZooKeeper).", "node"},
+	}
+}
+
 type skeletonOpts struct {
 	Name    string `json:"name"`
 	Title   string `json:"title"`

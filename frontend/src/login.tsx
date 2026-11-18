@@ -3,6 +3,7 @@ import { Button, Checkbox, Dropdown, Input, Menu, Tooltip } from "@arco-design/w
 import { api, setAuthToken, setCsrf, useConnectivity, type Session } from "./shared";
 import { BrandMark, Smooth } from "./ui";
 import { AIEmblem, Spark } from "./aichat";
+import { useI18n } from "./i18n";
 import "./login.css";
 
 type LoginVersionInfo = {
@@ -35,31 +36,46 @@ type AskItem = {
 };
 
 /* rolling showcase of real Middleware Hub AI workflows */
-const ASKS: AskItem[] = [
+const ASKS: (AskItem & { tagEn: string; askEn: string; hintEn: string })[] = [
   {
     tag: "沙箱排障",
+    tagEn: "Sandbox Debug",
     ask: "帮我排查 PostgreSQL 主从复制延迟原因",
+    askEn: "Diagnose PostgreSQL replication lag",
     hint: "只读挂载 $MW_WORKSPACE，定位 WAL 重放滞后并生成调优建议",
+    hintEn: "Mounts $MW_WORKSPACE read-only to isolate WAL replay lag and propose tuning",
   },
   {
     tag: "变更预审",
+    tagEn: "Change Review",
     ask: "这次参数变更会影响哪些集群节点？",
+    askEn: "Which cluster nodes are impacted by this parameter change?",
     hint: "比对参数基线与拓扑角色，预演滚动变更范围后待人工确认",
+    hintEn: "Compares parameter baselines and topology roles for rolling rehearsal before sign-off",
   },
   {
     tag: "离线闭包",
+    tagEn: "Offline Bundle",
     ask: "生成信创 ARM64 集群的离线安装包",
+    askEn: "Build offline package bundle for ARM64 cluster",
     hint: "联动本地软件库校验 RPM 与系统依赖，自动匹配完整离线闭包",
+    hintEn: "Resolves full RPM & system dependency closures against the local package library",
   },
   {
     tag: "基线核验",
+    tagEn: "Baseline Check",
     ask: "检查目标机器的端口占用与内核参数",
+    askEn: "Verify port availability and kernel sysctls on targets",
     hint: "并行扫描执行环境基线项，标出冲突端口与系统调优缺口",
+    hintEn: "Scans execution baselines in parallel to highlight port conflicts and sysctl gaps",
   },
   {
     tag: "交付手册",
+    tagEn: "Runbook Draft",
     ask: "基于本次执行证据起草标准实施手册",
+    askEn: "Draft enterprise delivery handbook from run evidence",
     hint: "汇总脱敏拓扑、配置清单与多机验收回执，输出标准 Word 文档",
+    hintEn: "Compiles redacted topology, configs, and host verification results into a .docx manual",
   },
 ];
 
@@ -104,6 +120,12 @@ const IcAlert = () => (
   <Svg size={14}>
     <circle cx="8" cy="8" r="6" />
     <path d="M8 5v3.4M8 10.8v.1" />
+  </Svg>
+);
+const IcGlobe = () => (
+  <Svg size={14}>
+    <circle cx="8" cy="8" r="6" />
+    <path d="M2.3 8h11.4M8 2c1.8 1.9 1.8 10.1 0 12M8 2c-1.8 1.9-1.8 10.1 0 12" />
   </Svg>
 );
 const IcTheme = ({ pref, dark }: { pref: ThemePref; dark: boolean }) =>
@@ -253,6 +275,7 @@ function PanelArt() {
 }
 
 function IntroPanel() {
+  const { bi } = useI18n();
   const [i, setI] = useState(0);
   useEffect(() => {
     if (reduceMotion()) return;
@@ -267,14 +290,14 @@ function IntroPanel() {
   }));
 
   return (
-    <aside className="ib-panel" aria-label="AI 交付工作台介绍">
+    <aside className="ib-panel" aria-label={bi("AI 交付工作台介绍", "AI Delivery Workbench Overview")}>
       <PanelArt />
 
       <div className="ib-ask" aria-hidden="true">
         <div className="ib-ask-eyebrow">
           <AIEmblem size={20} />
           <span>Middleware Hub AI</span>
-          <em>隔离沙箱 · 只读诊断</em>
+          <em>{bi("隔离沙箱 · 只读诊断", "Isolated Sandbox · Read-Only")}</em>
         </div>
 
         <div className="ib-ask-box">
@@ -282,10 +305,10 @@ function IntroPanel() {
             <Spark size={15} rainbow />
           </span>
           <span className="ib-ask-pill" key={`tag-${i}`}>
-            {cur.tag}
+            {bi(cur.tag, cur.tagEn)}
           </span>
           <span className="ib-ask-text" key={`txt-${i}`}>
-            {cur.ask}
+            {bi(cur.ask, cur.askEn)}
             <i className="ib-caret" />
           </span>
           <span className="ib-ask-send">
@@ -295,7 +318,7 @@ function IntroPanel() {
 
         <div className="ib-ask-hint" key={`hint-${i}`}>
           <i />
-          <span>{cur.hint}</span>
+          <span>{bi(cur.hint, cur.hintEn)}</span>
         </div>
 
         <ul className="ib-ask-more" key={`more-${i}`}>
@@ -307,8 +330,8 @@ function IntroPanel() {
                 className="ib-more-btn"
                 onClick={() => setI(item.idx)}
               >
-                <span className="ib-more-tag">{item.tag}</span>
-                <span className="ib-more-ask">{item.ask}</span>
+                <span className="ib-more-tag">{bi(item.tag, item.tagEn)}</span>
+                <span className="ib-more-ask">{bi(item.ask, item.askEn)}</span>
               </button>
             </li>
           ))}
@@ -316,8 +339,13 @@ function IntroPanel() {
       </div>
 
       <div className="ib-caption" aria-hidden="true">
-        <b>AI 交付助手</b>
-        <span>在隔离沙箱中排障、预审变更与起草交付手册，所有写入操作均需人工核准</span>
+        <b>{bi("AI 交付助手", "AI Delivery Assistant")}</b>
+        <span>
+          {bi(
+            "在隔离沙箱中排障、预审变更与起草交付手册，所有写入操作均需人工核准",
+            "Troubleshoot, rehearse changes, and draft handbooks inside isolated sandboxes with human approval",
+          )}
+        </span>
       </div>
     </aside>
   );
@@ -332,6 +360,7 @@ export function Login({
   versionInfo?: LoginVersionInfo;
   theme?: LoginThemeControl;
 }) {
+  const { lang, setLang, bi } = useI18n();
   const [name, setName] = useState(() => {
     try {
       return localStorage.getItem(REMEMBER_KEY) || "";
@@ -404,8 +433,8 @@ export function Login({
     if (busy) return;
     const u = (domValue(nameRef, "username") || name).trim();
     const p = domValue(pwRef, "password") || pw;
-    if (!u) return fail("name", "请输入账号");
-    if (!p) return fail("pw", "请输入密码");
+    if (!u) return fail("name", bi("请输入账号", "Please enter username"));
+    if (!p) return fail("pw", bi("请输入密码", "Please enter password"));
     setErr(null);
     setPhase("verifying");
     try {
@@ -426,13 +455,18 @@ export function Login({
     } catch (ex) {
       setPhase("idle");
       setPw("");
-      fail("pw", (ex as Error).message || "账号或密码不正确");
+      fail("pw", (ex as Error).message || bi("账号或密码不正确", "Incorrect username or password"));
     }
   };
 
   const secure = typeof window !== "undefined" && window.location.protocol === "https:";
   const host = typeof window !== "undefined" ? window.location.host : "";
-  const themeLabel = theme?.pref === "system" ? "跟随系统" : theme?.dark ? "深色" : "浅色";
+  const themeLabel =
+    theme?.pref === "system"
+      ? bi("跟随系统", "System")
+      : theme?.dark
+        ? bi("深色", "Dark")
+        : bi("浅色", "Light");
   const d = (n: number) => ({ "--d": n }) as React.CSSProperties;
 
   return (
@@ -445,27 +479,50 @@ export function Login({
           {conn === "online" ? (
             <span className="ib-top-item ib-ver">
               <i className="ib-dot" />
-              {versionInfo?.version ? `v${versionInfo.version}` : "服务在线"}
+              {versionInfo?.version ? `v${versionInfo.version}` : bi("服务在线", "Online")}
             </span>
           ) : (
             <button type="button" className="ib-top-item is-bad" onClick={retry} disabled={probing}>
               <i className="ib-dot" />
-              {probing ? "正在检测…" : conn === "offline" ? "网络已断开 · 重试" : "服务不可达 · 重试"}
+              {probing
+                ? bi("正在检测…", "Checking…")
+                : conn === "offline"
+                  ? bi("网络已断开 · 重试", "Offline · Retry")
+                  : bi("服务不可达 · 重试", "Unreachable · Retry")}
             </button>
           )}
+          <Dropdown
+            position="br"
+            trigger="click"
+            droplist={
+              <Menu selectedKeys={[lang]} onClickMenuItem={(k) => setLang(k as "zh-CN" | "en-US")}>
+                <Menu.Item key="zh-CN">简体中文</Menu.Item>
+                <Menu.Item key="en-US">English</Menu.Item>
+              </Menu>
+            }
+          >
+            <button
+              type="button"
+              className="ib-top-item"
+              aria-label={bi("切换语言", "Switch language")}
+            >
+              <IcGlobe />
+              {lang === "en-US" ? "English" : "简体中文"}
+            </button>
+          </Dropdown>
           {theme && (
             <Dropdown
               position="br"
               trigger="click"
               droplist={
                 <Menu selectedKeys={[theme.pref]} onClickMenuItem={(k) => theme.choose(k as ThemePref)}>
-                  <Menu.Item key="system">跟随系统</Menu.Item>
-                  <Menu.Item key="light">浅色</Menu.Item>
-                  <Menu.Item key="dark">深色</Menu.Item>
+                  <Menu.Item key="system">{bi("跟随系统", "System")}</Menu.Item>
+                  <Menu.Item key="light">{bi("浅色", "Light")}</Menu.Item>
+                  <Menu.Item key="dark">{bi("深色", "Dark")}</Menu.Item>
                 </Menu>
               }
             >
-              <button type="button" className="ib-top-item" aria-label={`外观：${themeLabel}`}>
+              <button type="button" className="ib-top-item" aria-label={bi(`外观：${themeLabel}`, `Theme: ${themeLabel}`)}>
                 <IcTheme pref={theme.pref} dark={theme.dark} />
                 {themeLabel}
               </button>
@@ -486,25 +543,32 @@ export function Login({
               <BrandMark size={40} />
             </div>
             <h1 className="ib-title ib-in" style={d(1)}>
-              登录 Middleware <b>Hub</b>
+              {bi("登录 Middleware", "Sign in to Middleware")} <b>Hub</b>
             </h1>
             <p className="ib-sub ib-in" style={d(2)}>
-              还没有账号？请联系平台管理员开通
+              {bi(
+                "还没有账号？请联系平台管理员开通",
+                "Don't have an account? Contact your platform administrator",
+              )}
             </p>
 
             {conn !== "online" && (
               <div className="ib-banner" role="alert">
                 <IcAlert />
-                <span>{conn === "offline" ? "网络已断开，恢复后即可登录" : "暂时无法连接到平台服务"}</span>
+                <span>
+                  {conn === "offline"
+                    ? bi("网络已断开，恢复后即可登录", "Network disconnected; sign in once reconnected")
+                    : bi("暂时无法连接到平台服务", "Unable to reach the platform service")}
+                </span>
                 <button type="button" onClick={retry} disabled={probing}>
-                  {probing ? "正在重试…" : "重试"}
+                  {probing ? bi("正在重试…", "Retrying…") : bi("重试", "Retry")}
                 </button>
               </div>
             )}
 
             <form className="ib-form" onSubmit={submit} noValidate>
               <div className="ib-field ib-in" style={d(3)}>
-                <label htmlFor="ib-username">账号</label>
+                <label htmlFor="ib-username">{bi("账号", "Username")}</label>
                 <Input
                   ref={nameRef}
                   id="ib-username"
@@ -512,7 +576,7 @@ export function Login({
                   autoComplete="username"
                   autoCapitalize="off"
                   spellCheck={false}
-                  placeholder="用户名"
+                  placeholder={bi("用户名", "Enter username")}
                   value={name}
                   disabled={phase === "entering"}
                   error={err?.field === "name"}
@@ -526,13 +590,13 @@ export function Login({
               </div>
 
               <div className="ib-field ib-in" style={d(4)}>
-                <label htmlFor="ib-password">密码</label>
+                <label htmlFor="ib-password">{bi("密码", "Password")}</label>
                 <Input.Password
                   ref={pwRef}
                   id="ib-password"
                   name="password"
                   autoComplete="current-password"
-                  placeholder="密码"
+                  placeholder={bi("密码", "Enter password")}
                   value={pw}
                   disabled={phase === "entering"}
                   error={err?.field === "pw"}
@@ -555,7 +619,7 @@ export function Login({
                   ) : capsOn ? (
                     <span className="ib-msg is-warn" id="ib-caps" role="status">
                       <IcAlert />
-                      大写锁定已开启
+                      {bi("大写锁定已开启", "Caps Lock is on")}
                     </span>
                   ) : null}
                 </Smooth>
@@ -570,7 +634,13 @@ export function Login({
                 loading={phase === "verifying"}
                 disabled={conn === "offline"}
               >
-                <span>{phase === "entering" ? "已验证" : phase === "verifying" ? "正在验证" : "登录"}</span>
+                <span>
+                  {phase === "entering"
+                    ? bi("已验证", "Verified")
+                    : phase === "verifying"
+                      ? bi("正在验证", "Signing in")
+                      : bi("登录", "Sign in")}
+                </span>
                 {phase !== "verifying" && (
                   <span className="ib-submit-ic">{phase === "entering" ? <IcCheck /> : <IcArrow />}</span>
                 )}
@@ -578,28 +648,46 @@ export function Login({
             </form>
 
             <div className="ib-after ib-in" style={d(6)}>
-              <Tooltip position="right" content="请联系平台管理员在「IAM → 用户」中重置密码">
+              <Tooltip
+                position="right"
+                content={bi(
+                  "请联系平台管理员在「IAM → 用户」中重置密码",
+                  "Ask your platform administrator to reset your password in IAM -> Users",
+                )}
+              >
                 <button type="button" className="ib-link">
-                  忘记密码？
+                  {bi("忘记密码？", "Forgot password?")}
                 </button>
               </Tooltip>
               <Checkbox checked={remember} onChange={setRemember}>
-                记住账号
+                {bi("记住账号", "Remember username")}
               </Checkbox>
             </div>
 
             <div className="ib-meta ib-in" style={d(7)}>
-              <Tooltip content={secure ? "连接已加密" : "当前未加密，建议使用 https:// 地址访问"}>
+              <Tooltip
+                content={bi(
+                  secure ? "连接已加密" : "当前未加密，建议使用 https:// 地址访问",
+                  secure ? "Encrypted TLS connection" : "Unencrypted connection; HTTPS is recommended",
+                )}
+              >
                 <span className={`ib-host${secure ? "" : " is-plain"}`}>
                   <IcLock />
                   {host}
                 </span>
               </Tooltip>
-              <span>会话有效期 8 小时，登录与关键操作记入审计日志</span>
+              <span>
+                {bi(
+                  "会话有效期 8 小时，登录与关键操作记入审计日志",
+                  "Sessions expire after 8h · Sign-ins & actions are audited",
+                )}
+              </span>
             </div>
           </div>
 
-          <footer className="ib-foot">© {new Date().getFullYear()} Middleware Hub · 仅限授权人员访问</footer>
+          <footer className="ib-foot">
+            © {new Date().getFullYear()} Middleware Hub · {bi("仅限授权人员访问", "Authorized Access Only")}
+          </footer>
         </main>
 
         <IntroPanel />

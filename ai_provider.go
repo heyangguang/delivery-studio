@@ -751,10 +751,34 @@ func (s *storeServer) aiTransportErrorDiag(
 
 // aiChat runs one model turn. onText receives streamed text as it arrives.
 // aiChat sends one conversation turn to a provider. Network failures come back in words a person can act on.
+func withEnPromptDirective(msgs []aiMessage) []aiMessage {
+	const directive = "\n\n[Interface Language: English (en-US)]\nRespond strictly in natural, concise English (including headings, explanations, checklists, questions, step titles, descriptions, risk notes, and rollback plans). Keep CLI commands, hostnames, paths, YAML keys, and identifiers exact."
+	out := make([]aiMessage, 0, len(msgs)+1)
+	injected := false
+	for _, m := range msgs {
+		if m.Role == "system" && !injected {
+			if s, ok := m.Content.(string); ok {
+				m.Content = s + directive
+				injected = true
+			}
+		}
+		out = append(out, m)
+	}
+	if !injected {
+		out = append([]aiMessage{{Role: "system", Content: strings.TrimSpace(directive)}}, out...)
+	}
+	return out
+}
+
 func (s *storeServer) aiChat(ctx context.Context, p aiProvider, msgs []aiMessage, tools []aiToolDef, onText func(string)) (aiReply, error) {
-	r, err := s.aiChatOnce(ctx, p, msgs, tools, onText)
+	lang := ctxLang(ctx)
+	sendMsgs := msgs
+	if isEnLang(lang) {
+		sendMsgs = withEnPromptDirective(msgs)
+	}
+	r, err := s.aiChatOnce(ctx, p, sendMsgs, tools, onText)
 	if err != nil {
-		err = aiFriendly(err, p)
+		err = aiFriendlyLang(err, p, lang)
 		if d := aiDiagFromErr(err); d != nil {
 			r.Diag = d
 		}
@@ -762,31 +786,48 @@ func (s *storeServer) aiChat(ctx context.Context, p aiProvider, msgs []aiMessage
 	return r, err
 }
 
-// aiFriendly turns transport errors into a sentence that says what is wrong and where to look, without dropping Diag.
-func aiFriendly(err error, p aiProvider) error {
+func aiFriendly(err error, p aiProvider) error { return aiFriendlyLang(err, p, "") }
+
+// aiFriendlyLang turns transport errors into a sentence that says what is wrong and where to look, without dropping Diag.
+func aiFriendlyLang(err error, p aiProvider, lang string) error {
 	if err == nil {
 		return nil
 	}
 	origDiag := aiDiagFromErr(err)
 	msg := cleanUpstreamErrText(err.Error())
-	where := "「" + firstNonEmptyStr(p.Name, p.URL) + "」"
+	where := tr(lang, "「"+firstNonEmptyStr(p.Name, p.URL)+"」", fmt.Sprintf("%q", firstNonEmptyStr(p.Name, p.URL)))
 	friendly := msg
 	reasonCode := ""
 	switch {
 	case strings.Contains(msg, "connection refused"):
-		friendly = fmt.Sprintf("连不上模型服务%s：对方没有在监听，可能服务没有启动或地址端口不对。请检查 设置 → AI 里的地址，或稍后再试", where)
+		friendly = tr(lang,
+			fmt.Sprintf("连不上模型服务%s：对方没有在监听，可能服务没有启动或地址端口不对。请检查 设置 → AI 里的地址，或稍后再试", where),
+			fmt.Sprintf("Cannot connect to model provider %s: connection refused (service may not be running or host/port is wrong). Check Settings -> AI.", where),
+		)
 		reasonCode = "network_error"
 	case strings.Contains(msg, "no such host"):
-		friendly = fmt.Sprintf("找不到模型服务%s的地址：域名解析失败。请检查 设置 → AI 里的地址", where)
+		friendly = tr(lang,
+			fmt.Sprintf("找不到模型服务%s的地址：域名解析失败。请检查 设置 → AI 里的地址", where),
+			fmt.Sprintf("Cannot resolve hostname for model provider %s. Verify URL in Settings -> AI.", where),
+		)
 		reasonCode = "network_error"
 	case strings.Contains(msg, "i/o timeout") || strings.Contains(msg, "context deadline exceeded") || strings.Contains(msg, "Client.Timeout"):
-		friendly = fmt.Sprintf("模型服务%s响应超时。可能网络不通或服务太忙，请稍后再试", where)
+		friendly = tr(lang,
+			fmt.Sprintf("模型服务%s响应超时。可能网络不通或服务太忙，请稍后再试", where),
+			fmt.Sprintf("Model provider %s timed out. Check network connectivity or retry shortly.", where),
+		)
 		reasonCode = "timeout"
 	case strings.Contains(msg, "no route to host") || strings.Contains(msg, "network is unreachable"):
-		friendly = fmt.Sprintf("到模型服务%s的网络不通。请检查平台所在机器能否访问它", where)
+		friendly = tr(lang,
+			fmt.Sprintf("到模型服务%s的网络不通。请检查平台所在机器能否访问它", where),
+			fmt.Sprintf("Network unreachable to model provider %s from platform host.", where),
+		)
 		reasonCode = "network_error"
 	case strings.Contains(msg, "certificate"):
-		friendly = fmt.Sprintf("模型服务%s的证书校验失败：%s", where, truncRunes(msg, 120))
+		friendly = tr(lang,
+			fmt.Sprintf("模型服务%s的证书校验失败：%s", where, truncRunes(msg, 120)),
+			fmt.Sprintf("TLS certificate verification failed for %s: %s", where, truncRunes(msg, 120)),
+		)
 		reasonCode = "network_error"
 	}
 	if origDiag != nil {

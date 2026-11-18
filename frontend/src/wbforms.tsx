@@ -19,6 +19,7 @@ import {
 } from "@arco-design/web-react/icon";
 import { aiTouched, get, isEmpty, useWb } from "./wbdoc";
 import type { Path } from "./wbdoc";
+import { bi, useLang } from "./i18n";
 
 /* Form building blocks of the component workbench. Every field writes straight into the manifest through the shared
    ops, so there is no "apply" step and the YAML source tab is always current. */
@@ -67,6 +68,7 @@ export function Field({
   path: Path;
   item: any;
 }) {
+  useLang();
   const { ops, readOnly, params, roles, aiMarks } = useWb();
   const v = item?.[spec.key];
   const p = [...path, spec.key];
@@ -115,7 +117,7 @@ export function Field({
           disabled={readOnly}
           allowClear={!spec.required}
           value={v === undefined || v === null ? undefined : String(v)}
-          placeholder={spec.placeholder || "请选择"}
+          placeholder={spec.placeholder || bi("请选择", "Select")}
           options={opts}
           onChange={(x) => set(x)}
           aria-label={spec.label}
@@ -129,7 +131,7 @@ export function Field({
           disabled={readOnly}
           allowClear
           value={Array.isArray(v) ? v : []}
-          placeholder={spec.placeholder || "请选择"}
+          placeholder={spec.placeholder || bi("请选择", "Select")}
           options={opts}
           onChange={(x) => set(x)}
           aria-label={spec.label}
@@ -143,7 +145,7 @@ export function Field({
           allowClear
           saveOnBlur
           value={Array.isArray(v) ? v.map(String) : []}
-          placeholder={spec.placeholder || "输入后回车"}
+          placeholder={spec.placeholder || bi("输入后回车", "Type and press Enter")}
           onChange={(x) => set(x.length ? x : undefined)}
           aria-label={spec.label}
         />
@@ -169,7 +171,7 @@ export function Field({
             disabled={readOnly}
             allowClear
             value={v == null ? "" : String(v)}
-            placeholder={spec.placeholder || "例如 params.replicas > 0"}
+            placeholder={spec.placeholder || bi("例如 params.replicas > 0", "e.g. params.replicas > 0")}
             onChange={set}
             aria-label={spec.label}
           />
@@ -205,7 +207,7 @@ export function Field({
     >
       <span className="wb-flabel" onClick={focus}>
         {spec.label}
-        {spec.required && <i className="req">必填</i>}
+        {spec.required && <i className="req">{bi("必填", "Required")}</i>}
       </span>
       {control}
       {spec.hint && <span className="wb-fhint">{spec.hint}</span>}
@@ -223,6 +225,7 @@ function ExprChips({
   roles: string[];
   onPick: (s: string) => void;
 }) {
+  useLang();
   const [open, setOpen] = useState(false);
   const items = [
     ...params.map((x) => `params.${x.key}`),
@@ -238,7 +241,7 @@ function ExprChips({
         onClick={() => setOpen(!open)}
         aria-expanded={open}
       >
-        {open ? <IconDown /> : <IconRight />} 可用变量
+        {open ? <IconDown /> : <IconRight />} {bi("可用变量", "Available variables")}
       </button>
       {open && (
         <span className="wb-chips-list">
@@ -304,6 +307,7 @@ export type ListProps = {
 };
 
 export function ListEditor(p: ListProps) {
+  useLang();
   const { ops, readOnly, aiMarks } = useWb();
   const items: any[] = get(ops.js, p.path) || [];
   const [open, setOpen] = useState<Record<number, boolean>>({});
@@ -325,7 +329,9 @@ export function ListEditor(p: ListProps) {
   return (
     <div className="wb-list">
       {items.length === 0 && (
-        <div className="wb-empty">{p.empty || `还没有${p.noun}`}</div>
+        <div className="wb-empty">
+          {p.empty || bi(`还没有${p.noun}`, `No ${p.noun.toLowerCase()} yet`)}
+        </div>
       )}
       {items.map((item, i) => {
         if (p.visibleIndex !== undefined && p.visibleIndex !== i) return null;
@@ -371,31 +377,31 @@ export function ListEditor(p: ListProps) {
               </button>
               {!readOnly && (
                 <span className="wb-item-actions">
-                  <Tooltip content="上移">
+                  <Tooltip content={bi("上移", "Move up")}>
                     <Button
                       size="mini"
                       type="text"
-                      aria-label="上移"
+                      aria-label={bi("上移", "Move up")}
                       disabled={i === 0}
                       icon={<IconArrowUp />}
                       onClick={() => ops.move(p.path, i, i - 1)}
                     />
                   </Tooltip>
-                  <Tooltip content="下移">
+                  <Tooltip content={bi("下移", "Move down")}>
                     <Button
                       size="mini"
                       type="text"
-                      aria-label="下移"
+                      aria-label={bi("下移", "Move down")}
                       disabled={i === items.length - 1}
                       icon={<IconArrowDown />}
                       onClick={() => ops.move(p.path, i, i + 1)}
                     />
                   </Tooltip>
-                  <Tooltip content="复制">
+                  <Tooltip content={bi("复制", "Duplicate")}>
                     <Button
                       size="mini"
                       type="text"
-                      aria-label="复制"
+                      aria-label={bi("复制", "Duplicate")}
                       icon={<IconCopy />}
                       onClick={() => {
                         ops.add(
@@ -407,12 +413,12 @@ export function ListEditor(p: ListProps) {
                       }}
                     />
                   </Tooltip>
-                  <Tooltip content="删除">
+                  <Tooltip content={bi("删除", "Delete")}>
                     <Button
                       size="mini"
                       type="text"
                       status="danger"
-                      aria-label="删除"
+                      aria-label={bi("删除", "Delete")}
                       icon={<IconDelete />}
                       onClick={() => ops.remove(p.path, i)}
                     />
@@ -437,7 +443,7 @@ export function ListEditor(p: ListProps) {
           icon={<IconPlus />}
           onClick={add}
         >
-          添加{p.noun}
+          {bi(`添加${p.noun}`, `Add ${p.noun}`)}
         </Button>
       )}
     </div>
@@ -476,14 +482,17 @@ export function Section({
 export function MapEditor({
   path,
   value,
-  keyLabel = "名称",
-  valueLabel = "值",
+  keyLabel,
+  valueLabel,
 }: {
   path: Path;
   value: Record<string, unknown> | undefined;
   keyLabel?: string;
   valueLabel?: string;
 }) {
+  useLang();
+  const kLabel = keyLabel ?? bi("名称", "Name");
+  const vLabel = valueLabel ?? bi("值", "Value");
   const { ops, readOnly } = useWb();
   const fromValue = () =>
     Object.entries(value || {}).map(([k, v]) => [k, v] as [string, unknown]);
@@ -515,7 +524,7 @@ export function MapEditor({
             disabled={readOnly}
             className="wb-mono"
             value={k}
-            placeholder={keyLabel}
+            placeholder={kLabel}
             onChange={(x) =>
               write(rows.map((e, j) => (j === i ? [x, e[1]] : e)))
             }
@@ -524,7 +533,7 @@ export function MapEditor({
             disabled={readOnly}
             className="wb-mono"
             value={isEmpty(v) && v !== 0 && v !== false ? "" : String(v)}
-            placeholder={valueLabel}
+            placeholder={vLabel}
             onChange={(x) =>
               write(rows.map((e, j) => (j === i ? [e[0], looseValue(x)] : e)))
             }
@@ -534,7 +543,7 @@ export function MapEditor({
               size="mini"
               type="text"
               status="danger"
-              aria-label="删除"
+              aria-label={bi("删除", "Delete")}
               icon={<IconDelete />}
               onClick={() => write(rows.filter((_, j) => j !== i))}
             />
@@ -548,7 +557,7 @@ export function MapEditor({
           icon={<IconPlus />}
           onClick={() => write([...rows, ["", ""]])}
         >
-          添加
+          {bi("添加", "Add")}
         </Button>
       )}
     </div>

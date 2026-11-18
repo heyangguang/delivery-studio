@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"middleware-deployer/mwpack"
 	"net/http"
 	"net/url"
 	"os"
@@ -27,8 +28,9 @@ func (s *storeServer) listJobs(w http.ResponseWriter, session storeSession) {
 	}
 	s.mu.Unlock()
 	sort.Slice(jobs, func(i, j int) bool { return jobs[i].Created > jobs[j].Created })
+	lang := wLang(w)
 	for i := range jobs {
-		jobs[i].Scheme = s.deliveryScheme(jobs[i].ID, jobs[i].AppID, jobs[i].Scheme)
+		jobs[i].Scheme = mwpack.LocalizeSchemeSummary(lang, s.deliveryScheme(jobs[i].ID, jobs[i].AppID, jobs[i].Scheme))
 	}
 	s.writeJSON(w, 200, jobs)
 }
@@ -211,8 +213,9 @@ func (s *storeServer) handleJob(w http.ResponseWriter, r *http.Request, session 
 				}
 			}
 		}
-		j.Scheme = s.deliveryScheme(j.ID, j.AppID, j.Scheme)
-		s.writeJSON(w, 200, map[string]any{"job": j, "files": files, "spec": s.jobSpec(id), "plan": s.jobPlan(id), "lineage": s.lineageOf(j)})
+		lang := wLang(w)
+		j.Scheme = mwpack.LocalizeSchemeSummary(lang, s.deliveryScheme(j.ID, j.AppID, j.Scheme))
+		s.writeJSON(w, 200, map[string]any{"job": j, "files": files, "spec": s.jobSpec(id), "plan": mwpack.LocalizePlanJSON(lang, s.jobPlan(id)), "lineage": s.lineageOf(j)})
 		return
 	}
 	if j.State != "succeeded" {

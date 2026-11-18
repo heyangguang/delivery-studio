@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { OsLogo } from "./oslogo";
+import { OsLogo, osTitle } from "./oslogo";
 import {
   Button,
   Drawer,
@@ -64,6 +64,7 @@ import { TaskCard } from "./libtask";
 import { go } from "./router";
 import { UnderlineTabs } from "./ui";
 import { Terminal } from "./runbook";
+import { bi, biv, getLang, useLang, withLang } from "./i18n";
 
 const FAMILY: Record<string, string> = { apt: "apt · .deb", rpm: "dnf · .rpm" };
 
@@ -143,7 +144,10 @@ const LibIcons = {
 /** "RedHat 系 9（RHEL / Rocky / Alma）(amd64)" → name, the distributions it covers, architecture. */
 const splitTitle = (t: string) => {
   const m = /^(.*?)\s*(?:（(.*?)）)?\s*(?:\((.*?)\))?\s*$/.exec(t);
-  return { name: m?.[1] || t, variant: m?.[2] || "", arch: m?.[3] || "" };
+  let name = m?.[1] || t;
+  const el = /^RedHat(?:\s*系|\s*family)?\s*(\d+)/i.exec(name);
+  if (el) name = bi(`RedHat 系 ${el[1]}`, `RHEL ${el[1]} family`);
+  return { name, variant: m?.[2] || "", arch: m?.[3] || "" };
 };
 
 /** A plain mark for a family of systems: a ring of three for apt systems, a box for rpm systems. */
@@ -201,6 +205,7 @@ export function LibraryPage({
   me: Session;
   selected?: string;
 }) {
+  useLang();
   const narrow = useMedia("(max-width: 900px)");
   const admin = can("library.manage");
   const [ov, setOv] = useState<LibraryOverview | null>(
@@ -281,22 +286,25 @@ export function LibraryPage({
   return (
     <div className="md-split">
       {(!narrow || !selected) && (
-        <aside className="md-list" aria-label="操作系统">
+        <aside className="md-list" aria-label={bi("操作系统", "Operating systems")}>
           <div className="list-head">
             <div className="list-title">
-              <h1>软件库</h1>
+              <h1>{bi("软件库", "Software Library")}</h1>
               {admin && (
                 <Button
                   size="small"
                   icon={<IconSettings />}
                   onClick={() => setSourcesOpen(true)}
                 >
-                  软件源
+                  {bi("软件源", "Sources")}
                 </Button>
               )}
             </div>
             <p className="muted small lib-intro">
-              交付里的软件包都从这里取：按操作系统分库，部署时不需要联网。
+              {bi(
+                "交付里的软件包都从这里取：按操作系统分库，部署时不需要联网。",
+                "All offline packages for deliveries are pulled from here, organized by OS so deployments require no internet.",
+              )}
             </p>
           </div>
           {load === "loading" && !ov ? (
@@ -316,13 +324,17 @@ export function LibraryPage({
           ) : load === "error" && !ov ? (
             <div className="list-state">
               <IconExclamationCircle className="bad" />
-              <p>{message || "软件库加载失败"}</p>
+              <p>{message || bi("软件库加载失败", "Failed to load software library")}</p>
               <Button size="small" icon={<IconRefresh />} onClick={reload}>
-                重试
+                {bi("重试", "Retry")}
               </Button>
             </div>
           ) : (
-            <div className="list-body" role="listbox" aria-label="操作系统">
+            <div
+              className="list-body"
+              role="listbox"
+              aria-label={bi("操作系统", "Operating systems")}
+            >
               <a
                 href="#/library/ansible"
                 role="option"
@@ -341,10 +353,15 @@ export function LibraryPage({
                 </span>
                 <div className="row-main">
                   <div className="row-top">
-                    <span className="row-name sans">Ansible 运行环境</span>
+                    <span className="row-name sans">
+                      {bi("Ansible 运行环境", "Ansible Runtimes")}
+                    </span>
                   </div>
                   <div className="row-sub">
-                    控制节点上的离线 Ansible，各系统共用
+                    {bi(
+                      "控制节点上的离线 Ansible，各系统共用",
+                      "Offline Ansible for control nodes, shared across OS targets",
+                    )}
                   </div>
                 </div>
               </a>
@@ -376,11 +393,18 @@ export function LibraryPage({
                         <span
                           className={`plat-state ${p.deployable ? "ok" : "warn"}`}
                         >
-                          {p.deployable ? "可生成交付" : "暂无运行环境"}
+                          {p.deployable
+                            ? bi("可生成交付", "Ready")
+                            : bi("暂无运行环境", "No runtime")}
                         </span>
                         <span>
                           {" "}
-                          · {p.stats.closures} 个软件包 · {size(p.stats.bytes)}
+                          ·{" "}
+                          {bi(
+                            `${p.stats.closures} 个软件包`,
+                            `${p.stats.closures} ${p.stats.closures === 1 ? "package" : "packages"}`,
+                          )}{" "}
+                          · {size(p.stats.bytes)}
                         </span>
                       </div>
                     </div>
@@ -406,11 +430,11 @@ export function LibraryPage({
             />
           ) : selected && load === "ready" ? (
             <div className="detail-none enter">
-              <h2>没有这个操作系统</h2>
+              <h2>{bi("没有这个操作系统", "OS not found")}</h2>
               <Button
                 onClick={() => go({ name: "library" }, { replace: true })}
               >
-                返回
+                {bi("返回", "Back")}
               </Button>
             </div>
           ) : null}
@@ -441,6 +465,7 @@ function PlatformDetail({
   narrow: boolean;
   changed: () => void;
 }) {
+  useLang();
   const [rows, setRows] = useState<ClosureRow[] | null>(
     () => cached<ClosuresReply>(closuresPath(p.id))?.closures ?? null,
   );
@@ -493,12 +518,14 @@ function PlatformDetail({
             reloadRows();
             x.state === "done"
               ? Message.success(
-                  x.kind === "index" ? "索引已更新" : "软件包已入库",
+                  x.kind === "index"
+                    ? bi("索引已更新", "Index updated")
+                    : bi("软件包已入库", "Packages stored"),
                 )
               : Message.error(
                   x.kind === "index"
-                    ? "更新索引失败，详情见日志"
-                    : "获取失败，详情见日志",
+                    ? bi("更新索引失败，详情见日志", "Index update failed; see logs")
+                    : bi("获取失败，详情见日志", "Fetch failed; see logs"),
                 );
           }
         })
@@ -511,11 +538,20 @@ function PlatformDetail({
 
   const remove = (r: ClosureRow) =>
     Modal.confirm({
-      title: `从软件库删除 ${r.request.name} ${r.request.version}？`,
+      title: bi(
+        `从软件库删除 ${r.request.name} ${r.request.version}？`,
+        `Delete ${r.request.name} ${r.request.version} from library?`,
+      ),
       content: r.used_by?.length
-        ? `${r.used_by.join("、")} 需要它：删除后这些组件在 ${p.title} 上不能生成交付，直到重新获取或导入。已生成的交付不受影响。`
-        : "删除后释放它独占的文件；已生成的交付不受影响。",
-      okText: "删除",
+        ? bi(
+            `${r.used_by.join("、")} 需要它：删除后这些组件在 ${p.title} 上不能生成交付，直到重新获取或导入。已生成的交付不受影响。`,
+            `Required by ${r.used_by.join(", ")}. Deliveries for these components on ${osTitle(p.title)} will be blocked until re-fetched or imported. Existing deliveries are unaffected.`,
+          )
+        : bi(
+            "删除后释放它独占的文件；已生成的交付不受影响。",
+            "Frees files exclusively used by this package; existing deliveries are unaffected.",
+          ),
+      okText: bi("删除", "Delete"),
       okButtonProps: { status: "danger" },
       onOk: async () => {
         try {
@@ -527,7 +563,7 @@ function PlatformDetail({
               version: r.request.version,
             }),
           });
-          Message.success("已删除");
+          Message.success(bi("已删除", "Deleted"));
           changed();
           reloadRows();
         } catch (e) {
@@ -563,13 +599,21 @@ function PlatformDetail({
       err(e);
     }
   };
-  const exportHref = `/api/library/export?platform=${encodeURIComponent(p.id)}${chosen.map((k) => `&pkg=${encodeURIComponent(k)}`).join("")}`;
+  const exportHref = withLang(
+    `/api/library/export?platform=${encodeURIComponent(p.id)}${chosen.map((k) => `&pkg=${encodeURIComponent(k)}`).join("")}`,
+  );
   const [guideOpen, setGuideOpen] = useState(false);
   const exportAll = () => {
-    if (!rows?.length) return Message.info("软件库里还没有软件包可以导出");
+    if (!rows?.length)
+      return Message.info(
+        bi("软件库里还没有软件包可以导出", "No packages in library to export"),
+      );
     window.location.href = exportHref;
     Message.info(
-      `已开始下载 library-${p.id}.tar.gz：拷到不能联网的平台，在那边的软件库页点“更多 → 导入软件包”选择它`,
+      bi(
+        `已开始下载 library-${p.id}.tar.gz：拷到不能联网的平台，在那边的软件库页点“更多 → 导入软件包”选择它`,
+        `Downloading library-${p.id}.tar.gz. Transfer it to an air-gapped instance and choose "More → Import packages" on its Library page.`,
+      ),
     );
   };
   const menu = (
@@ -583,14 +627,16 @@ function PlatformDetail({
       }}
     >
       <Menu.Item key="import" disabled={ov.busy}>
-        <IconUpload /> 导入软件包
+        <IconUpload /> {bi("导入软件包", "Import packages")}
       </Menu.Item>
       <Menu.Item key="export" disabled={!rows?.length}>
         <IconDownload />{" "}
-        {chosen.length ? `导出所选 ${chosen.length} 项` : "导出全部软件包"}
+        {chosen.length
+          ? bi(`导出所选 ${chosen.length} 项`, `Export selected (${chosen.length})`)
+          : bi("导出全部软件包", "Export all packages")}
       </Menu.Item>
       <Menu.Item key="guide">
-        <IconQuestionCircle /> 离线使用指引
+        <IconQuestionCircle /> {bi("离线使用指引", "Offline workflow guide")}
       </Menu.Item>
     </Menu>
   );
@@ -608,7 +654,7 @@ function PlatformDetail({
           icon={<IconArrowLeft />}
           onClick={() => go({ name: "library" })}
         >
-          软件库
+          {bi("软件库", "Library")}
         </Button>
       )}
       <header className="lib-head">
@@ -621,8 +667,11 @@ function PlatformDetail({
             <span className="lib-tag">{FAMILY[p.family]}</span>
             <span className={`plat-state pill ${p.deployable ? "ok" : "warn"}`}>
               {p.deployable
-                ? "可生成离线交付"
-                : "还没有 Ansible 运行环境，暂时不能生成交付"}
+                ? bi("可生成离线交付", "Ready for offline delivery")
+                : bi(
+                    "还没有 Ansible 运行环境，暂时不能生成交付",
+                    "No Ansible runtime selected; cannot build deliveries yet",
+                  )}
             </span>
           </div>
         </div>
@@ -634,7 +683,7 @@ function PlatformDetail({
               onClick={() => setFetchOpen(true)}
               disabled={ov.busy}
             >
-              添加软件版本
+              {bi("添加软件版本", "Add packages")}
             </Button>
             <Dropdown
               droplist={menu}
@@ -642,7 +691,7 @@ function PlatformDetail({
               position="br"
               triggerProps={{ autoFitPosition: true }}
             >
-              <Button icon={<IconMore />} aria-label="更多操作" />
+              <Button icon={<IconMore />} aria-label={bi("更多操作", "More actions")} />
             </Dropdown>
           </div>
         ) : (
@@ -654,33 +703,39 @@ function PlatformDetail({
                 icon={<IconQuestionCircle />}
                 onClick={() => setGuideOpen(true)}
               >
-                离线使用指引
+                {bi("离线使用指引", "Offline guide")}
               </Button>
             )}
             <span className="lib-ro-pill" role="status">
-              只读浏览
+              {bi("只读浏览", "Read-only")}
             </span>
           </div>
         )}
       </header>
 
-      <div className="lib-kpis" aria-label="当前系统软件库概览">
+      <div className="lib-kpis" aria-label={bi("当前系统软件库概览", "OS library overview")}>
         {p.direct && (
           <button
             type="button"
             className="lib-kpi"
             onClick={() => setSec("source")}
           >
-            <span className="lib-kpi-k">软件源索引</span>
+            <span className="lib-kpi-k">{bi("软件源索引", "Source Index")}</span>
             <b className="lib-kpi-v num">
               {p.index.files.length > 0
-                ? `${p.index.packages.toLocaleString()} 个版本`
-                : "尚未拉取"}
+                ? bi(
+                    `${p.index.packages.toLocaleString(getLang())} 个版本`,
+                    `${p.index.packages.toLocaleString(getLang())} versions`,
+                  )
+                : bi("尚未拉取", "Not fetched")}
             </b>
             <span className="lib-kpi-s">
               {p.index.files.length > 0
-                ? `${new Set(p.index.files.map((f) => f.source)).size} 个软件源 · 更新于 ${ago(p.index.updated || "")}`
-                : "联网刷新或从外网导入"}
+                ? bi(
+                    `${new Set(p.index.files.map((f) => f.source)).size} 个软件源 · 更新于 ${ago(p.index.updated || "")}`,
+                    `${new Set(p.index.files.map((f) => f.source)).size} sources · updated ${ago(p.index.updated || "")}`,
+                  )
+                : bi("联网刷新或从外网导入", "Fetch online or import bundle")}
             </span>
           </button>
         )}
@@ -689,14 +744,23 @@ function PlatformDetail({
           className={`lib-kpi ${missing.length > 0 ? "is-warn" : ""}`}
           onClick={() => setSec("packages")}
         >
-          <span className="lib-kpi-k">已入库软件包</span>
+          <span className="lib-kpi-k">{bi("已入库软件包", "Stored Packages")}</span>
           <b className="lib-kpi-v num">
-            {rows?.length ?? p.stats.closures} 项
+            {bi(
+              `${rows?.length ?? p.stats.closures} 项`,
+              `${rows?.length ?? p.stats.closures} items`,
+            )}
           </b>
           <span className="lib-kpi-s">
             {missing.length > 0
-              ? `${missing.length} 项待下载 · ${size(p.stats.bytes)}`
-              : `${p.stats.files} 个文件 · ${size(p.stats.bytes)}`}
+              ? bi(
+                  `${missing.length} 项待下载 · ${size(p.stats.bytes)}`,
+                  `${missing.length} missing · ${size(p.stats.bytes)}`,
+                )
+              : bi(
+                  `${p.stats.files} 个文件 · ${size(p.stats.bytes)}`,
+                  `${p.stats.files} ${p.stats.files === 1 ? "file" : "files"} · ${size(p.stats.bytes)}`,
+                )}
           </span>
         </button>
         <button
@@ -708,41 +772,46 @@ function PlatformDetail({
               : go({ name: "library", id: "ansible" })
           }
         >
-          <span className="lib-kpi-k">Ansible 运行环境</span>
+          <span className="lib-kpi-k">{bi("Ansible 运行环境", "Ansible Runtime")}</span>
           <b className="lib-kpi-v mono">
             {p.runtime
               ? `ansible-core ${p.runtime.ansible || "?"}`
-              : "未选定"}
+              : bi("未选定", "Unset")}
           </b>
           <span className="lib-kpi-s">
             {p.runtime
-              ? `${p.runtime.packages.length} 个离线包 · ${size(p.runtime.size)}`
-              : "点此前往运行环境库配置"}
+              ? bi(
+                  `${p.runtime.packages.length} 个离线包 · ${size(p.runtime.size)}`,
+                  `${p.runtime.packages.length} wheels · ${size(p.runtime.size)}`,
+                )
+              : bi("点此前往运行环境库配置", "Click to configure runtime")}
           </span>
         </button>
         <div className={`lib-kpi static ${p.deployable ? "is-ok" : "is-warn"}`}>
-          <span className="lib-kpi-k">离线交付状态</span>
+          <span className="lib-kpi-k">{bi("离线交付状态", "Delivery Readiness")}</span>
           <b className="lib-kpi-v">
-            {p.deployable ? "就绪 · 可生成交付" : "待补齐环境"}
+            {p.deployable
+              ? bi("就绪 · 可生成交付", "Ready to build")
+              : bi("待补齐环境", "Needs runtime")}
           </b>
           <span className="lib-kpi-s">
             {p.deployable
-              ? "目标机与控制节点均无需联网"
-              : "缺少 Ansible 离线运行环境"}
+              ? bi("目标机与控制节点均无需联网", "Air-gapped targets & controller")
+              : bi("缺少 Ansible 离线运行环境", "Missing offline Ansible runtime")}
           </span>
         </div>
       </div>
 
       <UnderlineTabs
         className="lib-utabs"
-        label="软件库分区"
+        label={bi("软件库分区", "Library sections")}
         value={!p.direct && sec === "source" ? "all" : sec}
         onChange={(v) => setSec(v as typeof sec)}
         items={[
-          { value: "all", label: "全部概览", icon: LibIcons.all },
+          { value: "all", label: bi("全部概览", "Overview"), icon: LibIcons.all },
           {
             value: "packages",
-            label: "已入库软件包",
+            label: bi("已入库软件包", "Packages"),
             count: rows?.length ?? p.stats.closures,
             icon: LibIcons.packages,
           },
@@ -750,7 +819,7 @@ function PlatformDetail({
             ? [
                 {
                   value: "source",
-                  label: "软件源索引",
+                  label: bi("软件源索引", "Source Index"),
                   count: p.index.files.length ? p.index.packages : undefined,
                   icon: LibIcons.source,
                 },
@@ -758,7 +827,7 @@ function PlatformDetail({
             : []),
           {
             value: "runtime",
-            label: "Ansible 运行环境",
+            label: bi("Ansible 运行环境", "Runtime"),
             icon: LibIcons.runtime,
           },
         ]}
@@ -785,19 +854,21 @@ function PlatformDetail({
 
         {((!p.direct && sec === "source" ? "all" : sec) === "all" ||
           sec === "packages") && (
-          <section className="lp" aria-label="库里的软件包">
+          <section className="lp" aria-label={bi("库里的软件包", "Packages in library")}>
           <div className="lp-head">
             <span className="lp-ic" aria-hidden>
               <IconStorage />
             </span>
             <div className="lp-htext">
               <div className="lp-trow">
-                <b className="lp-title">库里的软件包</b>
+                <b className="lp-title">{bi("库里的软件包", "Packages in Library")}</b>
                 <span className="lp-count num">{rows?.length ?? 0}</span>
               </div>
               <span className="lp-sub">
-                {p.stats.files} 个文件 · {size(p.stats.bytes)} ·
-                点开一项，看它装的时候会带上哪些依赖包
+                {bi(
+                  `${p.stats.files} 个文件 · ${size(p.stats.bytes)} · 点开一项，看它装的时候会带上哪些依赖包`,
+                  `${p.stats.files} ${p.stats.files === 1 ? "file" : "files"} · ${size(p.stats.bytes)} · expand a package to inspect its dependency tree`,
+                )}
               </span>
             </div>
           </div>
@@ -812,7 +883,12 @@ function PlatformDetail({
           {missing.length > 0 && (
             <div className="lp-body lp-missing">
               <div>
-                <b>组件需要、库里还没有的 {missing.length} 个</b>
+                <b>
+                  {bi(
+                    `组件需要、库里还没有的 ${missing.length} 个`,
+                    `${missing.length} required ${missing.length === 1 ? "package" : "packages"} missing from library`,
+                  )}
+                </b>
                 <div className="missing">
                   {missing.map((m) => (
                     <span className="mono small" key={keyOf(m)}>
@@ -828,7 +904,7 @@ function PlatformDetail({
                   disabled={ov.busy}
                   onClick={() => startFetch(missing)}
                 >
-                  全部下载
+                  {bi("全部下载", "Download all")}
                 </Button>
               )}
             </div>
@@ -842,7 +918,7 @@ function PlatformDetail({
                 icon={<IconRefresh />}
                 onClick={() => reloadRows(true)}
               >
-                重试
+                {bi("重试", "Retry")}
               </Button>
             </div>
           ) : rows === null ? (
@@ -855,12 +931,20 @@ function PlatformDetail({
           ) : !rows.length ? (
             <div className="lib-empty">
               <p>
-                <b>这个系统的软件库还是空的</b>
+                <b>
+                  {bi(
+                    "这个系统的软件库还是空的",
+                    "No packages in library for this OS",
+                  )}
+                </b>
               </p>
               <p className="muted small">
                 {admin
-                  ? "能联网就直接添加；不能联网，先在能联网的平台准备好再导入进来。"
-                  : "请管理员先准备软件包。"}
+                  ? bi(
+                      "能联网就直接添加；不能联网，先在能联网的平台准备好再导入进来。",
+                      "Fetch directly if online, or prepare on an online instance and import here.",
+                    )
+                  : bi("请管理员先准备软件包。", "Ask an administrator to prepare packages.")}
               </p>
               {admin && (
                 <div className="row-gap">
@@ -870,14 +954,14 @@ function PlatformDetail({
                     icon={<IconPlus />}
                     onClick={() => setFetchOpen(true)}
                   >
-                    添加软件版本
+                    {bi("添加软件版本", "Add packages")}
                   </Button>
                   <Button
                     size="small"
                     icon={<IconUpload />}
                     onClick={() => setImportKind("packages")}
                   >
-                    导入软件包
+                    {bi("导入软件包", "Import packages")}
                   </Button>
                   {p.direct && (
                     <Button
@@ -886,7 +970,7 @@ function PlatformDetail({
                       icon={<IconBook />}
                       onClick={() => setGuideOpen(true)}
                     >
-                      离线使用指南
+                      {bi("离线使用指南", "Offline guide")}
                     </Button>
                   )}
                 </div>
@@ -902,7 +986,9 @@ function PlatformDetail({
               setChosen={setChosen}
               remove={remove}
               exportHref={(k) =>
-                `/api/library/export?platform=${encodeURIComponent(p.id)}&pkg=${encodeURIComponent(k)}`
+                withLang(
+                  `/api/library/export?platform=${encodeURIComponent(p.id)}&pkg=${encodeURIComponent(k)}`,
+                )
               }
             />
           )}
@@ -959,6 +1045,7 @@ function SourcesDrawer({
   narrow: boolean;
   changed: () => void;
 }) {
+  useLang();
   const [data, setData] = useState<{
     effective: PackageSource[];
     custom: string;
@@ -992,7 +1079,7 @@ function SourcesDrawer({
         body: JSON.stringify({ yaml: text }),
       });
       setData(r);
-      Message.success("软件源已保存");
+      Message.success(bi("软件源已保存", "Sources saved"));
       changed();
     } catch (e) {
       setError((e as Error).message);
@@ -1005,31 +1092,45 @@ function SourcesDrawer({
       width={narrow ? "100%" : 720}
       visible={open}
       onCancel={onClose}
-      title="软件源"
+      title={bi("软件源", "Package Sources")}
       footer={
         <div className="review-foot">
           <span className="muted small">
-            只影响以后“获取软件包”；库里已有的不变
+            {bi(
+              "只影响以后“获取软件包”；库里已有的不变",
+              "Affects future package fetches only; stored packages stay untouched",
+            )}
           </span>
           <div className="row-gap">
             <Button onClick={() => setText(data?.builtin || "")}>
-              以内置列表为底稿
+              {bi("以内置列表为底稿", "Use built-in as draft")}
             </Button>
             <Button type="primary" loading={busy} onClick={save}>
-              保存
+              {bi("保存", "Save")}
             </Button>
           </div>
         </div>
       }
     >
       <p className="muted small">
-        平台内置了各系统官方源。下面的“自定义”会按 <code>id</code>{" "}
-        覆盖同名内置源：把地址改成内网镜像、或加 <code>disabled: true</code>{" "}
-        关掉某个源，也可以新增。获取软件包时始终验证签名，所以{" "}
-        <code>key_file</code> 必填。
+        {biv(
+          <>
+            平台内置了各系统官方源。下面的“自定义”会按 <code>id</code>{" "}
+            覆盖同名内置源：把地址改成内网镜像、或加 <code>disabled: true</code>{" "}
+            关掉某个源，也可以新增。获取软件包时始终验证签名，所以{" "}
+            <code>key_file</code> 必填。
+          </>,
+          <>
+            Official OS sources are built in. Custom entries below override
+            matching built-in sources by <code>id</code> (for example, to use an
+            internal mirror or set <code>disabled: true</code>), or add new
+            ones. Signature verification is always enforced, so{" "}
+            <code>key_file</code> is required.
+          </>,
+        )}
       </p>
       {error && <div className="note warn">{error}</div>}
-      <h4>当前生效</h4>
+      <h4>{bi("当前生效", "Active Sources")}</h4>
       <table className="rtable">
         <tbody>
           {(data?.effective || []).map((s) => (
@@ -1039,36 +1140,38 @@ function SourcesDrawer({
                 <div className="small faint">{s.title}</div>
               </th>
               <td className="small">
-                {s.platforms.join("、")}
+                {s.platforms.join(bi("、", ", "))}
                 <div className="mono faint">{s.url || s.baseurl}</div>
               </td>
               <td>
                 {s.disabled ? (
-                  <span className="flag">已停用</span>
+                  <span className="flag">{bi("已停用", "Disabled")}</span>
                 ) : s.builtin ? (
-                  <span className="flag">内置</span>
+                  <span className="flag">{bi("内置", "Built-in")}</span>
                 ) : (
-                  <span className="flag warn">自定义</span>
+                  <span className="flag warn">{bi("自定义", "Custom")}</span>
                 )}
               </td>
             </tr>
           ))}
         </tbody>
       </table>
-      <h4>自定义（YAML）</h4>
+      <h4>{bi("自定义（YAML）", "Custom (YAML)")}</h4>
       <textarea
         className="yaml-edit mono"
         spellCheck={false}
         value={text}
         onChange={(e) => setText(e.target.value)}
-        aria-label="自定义软件源 YAML"
+        aria-label={bi("自定义软件源 YAML", "Custom sources YAML")}
         placeholder={
           "- id: ubuntu-noble\n  platforms: [ubuntu-24.04-amd64]\n  kind: apt\n  url: https://mirrors.example.com/ubuntu\n  suites: [noble, noble-updates, noble-security]\n  components: [main, universe]\n  key_file: ubuntu-archive-keyring.gpg"
         }
       />
       {data?.builtin && (
         <details>
-          <summary className="small muted">查看内置列表</summary>
+          <summary className="small muted">
+            {bi("查看内置列表", "View built-in sources")}
+          </summary>
           <Terminal code={data.builtin} host="sources.yaml" />
         </details>
       )}

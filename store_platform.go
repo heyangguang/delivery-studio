@@ -30,7 +30,7 @@ func (s *storeServer) componentSchema(w http.ResponseWriter, r *http.Request, na
 		s.fail(w, 404, err.Error())
 		return
 	}
-	s.writeJSON(w, 200, sc)
+	s.writeJSON(w, 200, mwpack.LocalizeSchema(wLang(w), sc))
 }
 
 func (s *storeServer) readDeployment(w http.ResponseWriter, r *http.Request) (*mwpack.Deployment, bool) {
@@ -99,7 +99,7 @@ func (s *storeServer) resolve(w http.ResponseWriter, r *http.Request, session st
 			plan.Inputs = nil
 		}
 	}
-	view := plan.View()
+	view := mwpack.LocalizePlanView(wLang(w), plan.View())
 	if d.DeliveryMode == "configuration" {
 		view.Artifacts = []mwpack.ArtifactView{}
 		view.Phases = nil

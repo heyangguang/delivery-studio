@@ -1,7 +1,8 @@
 import React from "react";
 import type {DeploymentScheme} from "./shared";
+import { bi, useLang } from "./i18n";
 
-export function schemeName(scheme?: DeploymentScheme) {return scheme?.name || "历史方案待核对";}
+export function schemeName(scheme?: DeploymentScheme) {return scheme?.name || bi("历史方案待核对", "Legacy scheme (unverified)");}
 export function sameScheme(a?: DeploymentScheme, b?: DeploymentScheme): boolean {
  if(!a || !b)return !a && !b;
  if(a===b)return true;
@@ -10,17 +11,32 @@ export function sameScheme(a?: DeploymentScheme, b?: DeploymentScheme): boolean 
   ca.mechanism===cb.mechanism && ca.failover===cb.failover && ca.read_access===cb.read_access &&
   ca.limitations.length===cb.limitations.length && ca.limitations.every((v,i)=>v===cb.limitations[i]);
 }
-export function SchemeInfo({scheme, detail=false, label="部署方案"}:{scheme?: DeploymentScheme;detail?: boolean;label?: string}) {
- if(!scheme)return <section className="scheme-summary is-empty" aria-label={label}><div className="scheme-head"><span className="scheme-dot" aria-hidden /><strong>部署架构待核对</strong></div><div className="scheme-limit">旧交付未保存方案信息，请在下方节点拓扑或“配置”中查看原始部署记录。</div></section>;
+export function SchemeInfo({scheme, detail=false, label}:{scheme?: DeploymentScheme;detail?: boolean;label?: string}) {
+ useLang();
+ const resolvedLabel = label ?? bi("部署方案", "Deployment scheme");
+ if(!scheme)return <section className="scheme-summary is-empty" aria-label={resolvedLabel}><div className="scheme-head"><span className="scheme-dot" aria-hidden /><strong>{bi("部署架构待核对", "Architecture unverified")}</strong></div><div className="scheme-limit">{bi("旧交付未保存方案信息，请在下方节点拓扑或“配置”中查看原始部署记录。", "Legacy delivery has no saved scheme metadata; inspect the topology below or the Config tab for raw records.")}</div></section>;
  const contract=scheme.contract;
- const failover=({none:"不提供故障切换",manual:"人工切换",automatic:"自动故障切换"} as Record<string,string>)[contract.failover] || contract.failover;
- const summary=[scheme.topology,contract.mechanism,failover].filter(Boolean).join("；");
- if(!detail)return <span title={summary}>{label}：<strong>{scheme.name}</strong>{scheme.nodes>0 ? " · "+scheme.nodes+" 个应用节点" : ""}</span>;
+ const failover=({
+  none: bi("不提供故障切换", "No failover"),
+  manual: bi("人工切换", "Manual failover"),
+  automatic: bi("自动故障切换", "Automatic failover"),
+ } as Record<string,string>)[contract.failover] || contract.failover;
+ const summary=[scheme.topology,contract.mechanism,failover].filter(Boolean).join(bi("；", "; "));
+ const nodeText = scheme.nodes === 1 ? bi("1 个应用节点", "1 app node") : bi(`${scheme.nodes} 个应用节点`, `${scheme.nodes} app nodes`);
+ if(!detail)return <span title={summary}>{resolvedLabel}{bi("：", ": ")}<strong>{scheme.name}</strong>{scheme.nodes>0 ? ` · ${nodeText}` : ""}</span>;
  const facets=[contract.mechanism,failover,contract.read_access].filter(Boolean);
  const hasEvidence=scheme.source==="delivery-evidence" && Boolean(scheme.evidence?.length);
  const hasLimits=contract.limitations?.length>0;
- return <section className="scheme-summary" aria-label={label}>
-  <div className="scheme-head"><span className="scheme-dot" aria-hidden /><strong>{label.includes("目标") ? "目标部署架构" : label.includes("当前") ? "当前部署架构" : label.includes("此配置") ? "此配置对应部署架构" : "部署架构"}：{scheme.name}</strong>{scheme.nodes>0 && <span className="scheme-node-pill num">{scheme.nodes} 个应用节点</span>}</div>
+ const archTitle =
+  resolvedLabel.includes("目标") || /\btarget\b/i.test(resolvedLabel)
+   ? bi("目标部署架构", "Target architecture")
+   : resolvedLabel.includes("当前") || /\bactive\b|\bcurrent\b/i.test(resolvedLabel)
+    ? bi("当前部署架构", "Active architecture")
+    : resolvedLabel.includes("此配置") || /this config/i.test(resolvedLabel)
+     ? bi("此配置对应部署架构", "Config architecture")
+     : bi("部署架构", "Architecture");
+ return <section className="scheme-summary" aria-label={resolvedLabel}>
+  <div className="scheme-head"><span className="scheme-dot" aria-hidden /><strong>{archTitle}{bi("：", ": ")}{scheme.name}</strong>{scheme.nodes>0 && <span className="scheme-node-pill num">{nodeText}</span>}</div>
   {(scheme.topology || facets.length>0) && (
    <div className="scheme-pills">
     {scheme.topology && <span className="scheme-pill is-topo">{scheme.topology}</span>}
@@ -29,8 +45,8 @@ export function SchemeInfo({scheme, detail=false, label="部署方案"}:{scheme?
   )}
   {(hasEvidence || hasLimits) && (
    <div className="scheme-foot">
-    {hasEvidence && <div className="scheme-limit">根据历史交付识别 · {scheme.evidence?.join("；")}</div>}
-    {hasLimits && <div className="scheme-limit">适用限制：{contract.limitations.join("；")}</div>}
+    {hasEvidence && <div className="scheme-limit">{bi("根据历史交付识别 · ", "Inferred from delivery evidence · ")}{scheme.evidence?.join(bi("；", "; "))}</div>}
+    {hasLimits && <div className="scheme-limit">{bi("适用限制：", "Limitations: ")}{contract.limitations.join(bi("；", "; "))}</div>}
    </div>
   )}
  </section>;

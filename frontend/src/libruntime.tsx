@@ -25,6 +25,7 @@ import { ago, api, err, size } from "./shared";
 import type { ApiError, FetchTask } from "./shared";
 import { go } from "./router";
 import { TaskCard } from "./libtask";
+import { bi, useLang, withLang } from "./i18n";
 import "./settings.css";
 import "./libruntime.css";
 
@@ -55,7 +56,11 @@ type State = {
   python: string;
 };
 
-const short = (t: string) => t.replace(/\s*[\(（].*$/, "");
+const short = (t: string) => {
+  const s = t.replace(/\s*[\(（].*$/, "").trim();
+  const el = /^RedHat(?:\s*系|\s*family)?\s*(\d+)/i.exec(s);
+  return el ? bi(`RHEL ${el[1]} 系`, `RHEL ${el[1]} family`) : s;
+};
 
 function NewRuntime({
   open,
@@ -68,6 +73,7 @@ function NewRuntime({
   st: State;
   started: (t: FetchTask) => void;
 }) {
+  useLang();
   const [versions, setVersions] = useState<string[] | null>(null);
   const [verErr, setVerErr] = useState("");
   const [ansible, setAnsible] = useState("");
@@ -97,7 +103,12 @@ function NewRuntime({
       const m = /^\s*([A-Za-z0-9._-]+)\s*==\s*([0-9][^\s]*)\s*$/.exec(line);
       if (m) p[m[1]] = m[2];
       else if (line.trim())
-        return Message.error(`看不懂这一行：${line.trim()}（写成 包名==版本）`);
+        return Message.error(
+          bi(
+            `看不懂这一行：${line.trim()}（写成 包名==版本）`,
+            `Invalid line: ${line.trim()} (expected pkg==version)`,
+          ),
+        );
     }
     setBusy(true);
     try {
@@ -117,58 +128,69 @@ function NewRuntime({
     <Modal
       visible={open}
       onCancel={close}
-      title="新建运行环境"
+      title={bi("新建运行环境", "New Runtime")}
       onOk={submit}
-      okText="开始准备"
+      okText={bi("开始准备", "Build")}
       confirmLoading={busy}
       okButtonProps={{ disabled: !ansible }}
     >
       <div className="st-form">
         <div className="st-field">
-          <span>ansible-core 版本</span>
+          <span>{bi("ansible-core 版本", "ansible-core version")}</span>
           {versions && versions.length > 0 ? (
             <Select
               value={ansible}
               onChange={setAnsible}
               options={versions}
               showSearch
-              aria-label="ansible-core 版本"
+              aria-label={bi("ansible-core 版本", "ansible-core version")}
             />
           ) : (
             <Input
               value={ansible}
               onChange={setAnsible}
               placeholder="2.20.10"
-              aria-label="ansible-core 版本"
+              aria-label={bi("ansible-core 版本", "ansible-core version")}
             />
           )}
           <small>
             {verErr
-              ? `读不到 PyPI（${verErr}），只能用软件库里已有的包，手动填写版本。`
-              : `控制节点 Python ${st.python}；依赖由 pip 自动解析。`}
+              ? bi(
+                  `读不到 PyPI（${verErr}），只能用软件库里已有的包，手动填写版本。`,
+                  `Unable to reach PyPI (${verErr}); enter a version manually using packages already in the library.`,
+                )
+              : bi(
+                  `控制节点 Python ${st.python}；依赖由 pip 自动解析。`,
+                  `Controller Python ${st.python}; dependencies resolved automatically by pip.`,
+                )}
           </small>
         </div>
         <div className="st-field">
-          <span>固定某些包的版本（可选）</span>
+          <span>{bi("固定某些包的版本（可选）", "Pin package versions (optional)")}</span>
           <Input.TextArea
             value={pins}
             onChange={setPins}
             placeholder={"pip==26.2\njinja2==3.1.6"}
             autoSize={{ minRows: 2, maxRows: 5 }}
-            aria-label="固定版本"
+            aria-label={bi("固定版本", "Pin versions")}
           />
-          <small>每行一个 包名==版本，用于显式锁定依赖版本。</small>
+          <small>
+            {bi(
+              "每行一个 包名==版本，用于显式锁定依赖版本。",
+              "One pkg==version per line to explicitly lock dependency versions.",
+            )}
+          </small>
         </div>
         <div className="st-field row">
-          <span>只用软件库里已有的包（不联网）</span>
+          <span>{bi("只用软件库里已有的包（不联网）", "Use library packages only (offline)")}</span>
           <Switch
             checked={offline}
             onChange={setOffline}
-            aria-label="只用软件库里已有的包"
+            aria-label={bi("只用软件库里已有的包", "Use library packages only")}
           />
         </div>
         <div className="st-field">
-          <span>准备好后设为默认</span>
+          <span>{bi("准备好后设为默认", "Set as default when ready")}</span>
           <Checkbox.Group
             value={defs}
             onChange={setDefs}
@@ -177,7 +199,12 @@ function NewRuntime({
               label: <OsName id={p.id} title={p.title} size={16} />,
             }))}
           />
-          <small>设为默认后，这个系统新生成的交付都带它。</small>
+          <small>
+            {bi(
+              "设为默认后，这个系统新生成的交付都带它。",
+              "New deliveries for selected OS platforms will use this runtime by default.",
+            )}
+          </small>
         </div>
       </div>
     </Modal>
@@ -197,6 +224,7 @@ function groupRuntimes(list: RuntimeView[]): [RuntimeView, RuntimeView[]][] {
 }
 
 function Twins({ children }: { children: React.ReactNode }) {
+  useLang();
   const [open, setOpen] = useState(false);
   const n = React.Children.count(children);
   return (
@@ -207,7 +235,11 @@ function Twins({ children }: { children: React.ReactNode }) {
         aria-expanded={open}
         onClick={() => setOpen(!open)}
       >
-        同一版本的另 {n} 个构建 <IconDown className={open ? "flip" : ""} />
+        {bi(
+          `同一版本的另 ${n} 个构建`,
+          `${n} other ${n === 1 ? "build" : "builds"} of this version`,
+        )}{" "}
+        <IconDown className={open ? "flip" : ""} />
       </button>
       {open && <ul className="rtl">{children}</ul>}
     </li>
@@ -226,6 +258,7 @@ function RuntimeRow({
   onTask?: (t: FetchTask) => void;
   changed: () => void;
 }) {
+  useLang();
   const [open, setOpen] = useState(false);
   const setDefault = async (pl: string) => {
     try {
@@ -233,7 +266,7 @@ function RuntimeRow({
         method: "PUT",
         body: JSON.stringify({ platform: pl, runtime: r.id }),
       });
-      Message.success("已设为默认");
+      Message.success(bi("已设为默认", "Set as default"));
       changed();
     } catch (e) {
       err(e);
@@ -241,8 +274,12 @@ function RuntimeRow({
   };
   const remove = () =>
     Modal.confirm({
-      title: `删除运行环境 ${r.id}？`,
-      content: "已经生成的交付不受影响；它的 wheel 仍保留在软件库里。",
+      title: bi(`删除运行环境 ${r.id}？`, `Delete runtime ${r.id}?`),
+      content: bi(
+        "已经生成的交付不受影响；它的 wheel 仍保留在软件库里。",
+        "Existing deliveries are unaffected; its wheels remain in the library.",
+      ),
+      okText: bi("删除", "Delete"),
       okButtonProps: { status: "danger" },
       onOk: async () => {
         try {
@@ -262,10 +299,16 @@ function RuntimeRow({
     const ov = new Map(o.wheels.map((w) => [w.name, w.version]));
     const diff = r.wheels
       .filter((w) => ov.get(w.name) !== w.version)
-      .map((w) => `${w.name} ${ov.get(w.name) ?? "无"}→${w.version}`);
+      .map((w) => `${w.name} ${ov.get(w.name) ?? bi("无", "none")}→${w.version}`);
     return diff.length
-      ? `与 ${o.id.slice(0, 8)} 的区别：${diff.slice(0, 3).join("，")}${diff.length > 3 ? " 等" : ""}`
-      : `与 ${o.id.slice(0, 8)} 内容相同`;
+      ? bi(
+          `与 ${o.id.slice(0, 8)} 的区别：${diff.slice(0, 3).join("，")}${diff.length > 3 ? " 等" : ""}`,
+          `Differs from ${o.id.slice(0, 8)}: ${diff.slice(0, 3).join(", ")}${diff.length > 3 ? ", etc." : ""}`,
+        )
+      : bi(
+          `与 ${o.id.slice(0, 8)} 内容相同`,
+          `Same contents as ${o.id.slice(0, 8)}`,
+        );
   })();
   return (
     <li
@@ -284,8 +327,12 @@ function RuntimeRow({
           <span className="rtl-name">
             <b>ansible-core {r.ansible}</b>
             <small>
-              <span className="mono">{r.id}</span> · {r.wheels.length} 个包 ·{" "}
-              {size(r.size)} · {ago(r.created)}
+              <span className="mono">{r.id}</span> ·{" "}
+              {bi(
+                `${r.wheels.length} 个包`,
+                `${r.wheels.length} ${r.wheels.length === 1 ? "pkg" : "pkgs"}`,
+              )}{" "}
+              · {size(r.size)} · {ago(r.created)}
               {r.note ? ` · ${r.note}` : ""}
               {twin ? ` · ${twin}` : ""}
             </small>
@@ -294,7 +341,8 @@ function RuntimeRow({
             {r.default.map((pl) => (
               <span key={pl} className="cm cm-mod">
                 <OsLogo id={pl} size={13} />{" "}
-                {short(st.platforms.find((p) => p.id === pl)?.title || pl)} 默认
+                {short(st.platforms.find((p) => p.id === pl)?.title || pl)}{" "}
+                {bi("默认", "default")}
               </span>
             ))}
           </span>
@@ -311,7 +359,9 @@ function RuntimeRow({
                     k === "del"
                       ? remove()
                       : k === "export"
-                        ? (location.href = `/api/library/python/export?ids=${r.id}`)
+                        ? (location.href = withLang(
+                            `/api/library/python/export?ids=${r.id}`,
+                          ))
                         : setDefault(k)
                   }
                 >
@@ -319,17 +369,22 @@ function RuntimeRow({
                     .filter((p) => !r.default.includes(p.id))
                     .map((p) => (
                       <Menu.Item key={p.id}>
-                        设为 {short(p.title)} 的默认
+                        {bi(
+                          `设为 ${short(p.title)} 的默认`,
+                          `Set default for ${short(p.title)}`,
+                        )}
                       </Menu.Item>
                     ))}
-                  <Menu.Item key="export">导出（带去内网）</Menu.Item>
+                  <Menu.Item key="export">
+                    {bi("导出（带去内网）", "Export (for air-gapped)")}
+                  </Menu.Item>
                   <Menu.Item key="del" disabled={r.default.length > 0}>
-                    删除
+                    {bi("删除", "Delete")}
                   </Menu.Item>
                 </Menu>
               }
             >
-              <Button icon={<IconMore />} aria-label="更多操作" />
+              <Button icon={<IconMore />} aria-label={bi("更多操作", "More actions")} />
             </Dropdown>
           </span>
         )}
@@ -342,12 +397,12 @@ function RuntimeRow({
               <span className="mono faint">{w.version}</span>
               <span className="faint small">
                 {w.via === "pypi"
-                  ? "来自 PyPI"
+                  ? bi("来自 PyPI", "From PyPI")
                   : w.via === "imported"
-                    ? "导入"
+                    ? bi("导入", "Imported")
                     : w.via === "runtime-archive"
-                      ? "原运行环境"
-                      : "软件库"}
+                      ? bi("原运行环境", "Original runtime")
+                      : bi("软件库", "Library")}
               </span>
             </li>
           ))}
@@ -365,6 +420,7 @@ export function RuntimesView({
   admin: boolean;
   narrow: boolean;
 }) {
+  useLang();
   const [st, setSt] = useState<State | null>(null);
   const [task, setTask] = useState<FetchTask | null>(null);
   const [creating, setCreating] = useState(false);
@@ -385,8 +441,10 @@ export function RuntimesView({
           if (x.state !== "running") {
             load();
             x.state === "done"
-              ? Message.success("运行环境已准备好")
-              : Message.error("准备没有完成，详情见下方");
+              ? Message.success(bi("运行环境已准备好", "Runtime is ready"))
+              : Message.error(
+                  bi("准备没有完成，详情见下方", "Build incomplete; see details below"),
+                );
           }
         })
         .catch(() => undefined);
@@ -399,10 +457,13 @@ export function RuntimesView({
       const f = new FormData();
       f.set("pack", file);
       await api("/api/library/python/import", { method: "POST", body: f });
-      Message.success("已导入");
+      Message.success(bi("已导入", "Imported"));
       load();
     } catch (e) {
-      Modal.error({ title: "导入失败", content: (e as ApiError).message });
+      Modal.error({
+        title: bi("导入失败", "Import failed"),
+        content: (e as ApiError).message,
+      });
     } finally {
       setImporting(false);
     }
@@ -416,15 +477,17 @@ export function RuntimesView({
           icon={<IconArrowLeft />}
           onClick={() => go({ name: "library" })}
         >
-          软件库
+          {bi("软件库", "Library")}
         </Button>
       )}
       <header className="sx-page-h">
         <div>
-          <h1>Ansible 运行环境</h1>
+          <h1>{bi("Ansible 运行环境", "Ansible Runtimes")}</h1>
           <p>
-            交付里带给控制节点的离线 Ansible。由软件库里的 Python
-            包（wheel）按版本组成，生成交付时当场拼装。
+            {bi(
+              "交付里带给控制节点的离线 Ansible。由软件库里的 Python 包（wheel）按版本组成，生成交付时当场拼装。",
+              "Offline Ansible bundled for the control node in each delivery. Assembled on demand from Python wheels stored in the library.",
+            )}
           </p>
         </div>
         {admin && (
@@ -439,22 +502,22 @@ export function RuntimesView({
               }
             >
               <Button icon={<IconImport />} loading={importing}>
-                导入
+                {bi("导入", "Import")}
               </Button>
             </Upload>
             <Button
               icon={<IconExport />}
-              href="/api/library/python/export"
+              href={withLang("/api/library/python/export")}
               disabled={!st?.runtimes.length}
             >
-              全部导出
+              {bi("全部导出", "Export all")}
             </Button>
             <Button
               type="primary"
               icon={<IconPlus />}
               onClick={() => setCreating(true)}
             >
-              新建运行环境
+              {bi("新建运行环境", "New Runtime")}
             </Button>
           </span>
         )}
@@ -462,7 +525,7 @@ export function RuntimesView({
       {task && <TaskCard task={task} onClose={() => setTask(null)} />}
       {st && (
         <section className="sx-sec">
-          <h2>各系统使用的运行环境</h2>
+          <h2>{bi("各系统使用的运行环境", "Default Runtime per OS")}</h2>
           <ul className="rtl-defs">
             {st.platforms.map((p) => {
               const r = st.runtimes.find((x) => x.id === st.defaults[p.id]);
@@ -478,7 +541,10 @@ export function RuntimesView({
                     </span>
                   ) : (
                     <span className="warn">
-                      还没有，暂时不能为这个系统生成交付
+                      {bi(
+                        "还没有，暂时不能为这个系统生成交付",
+                        "Not configured yet; deliveries cannot be built for this OS",
+                      )}
                     </span>
                   )}
                 </li>
@@ -489,13 +555,15 @@ export function RuntimesView({
       )}
       <section className="sx-sec">
         <h2>
-          全部运行环境{" "}
+          {bi("全部运行环境", "All Runtimes")}{" "}
           <em className="faint num">{st?.runtimes.length ?? ""}</em>
         </h2>
         {st && st.runtimes.length === 0 ? (
           <div className="sx-empty">
-            还没有运行环境。点「新建运行环境」从 PyPI
-            准备，或导入联网平台导出的包。
+            {bi(
+              "还没有运行环境。点「新建运行环境」从 PyPI 准备，或导入联网平台导出的包。",
+              'No runtimes yet. Click "New Runtime" to build from PyPI, or import a bundle exported from an online instance.',
+            )}
           </div>
         ) : (
           <ul className="rtl">

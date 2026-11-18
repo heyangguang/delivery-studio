@@ -20,6 +20,8 @@ import {
   Tooltip,
 } from "@arco-design/web-react";
 import zhCN from "@arco-design/web-react/es/locale/zh-CN";
+import enUS from "@arco-design/web-react/es/locale/en-US";
+import { I18nProvider, bi, getLang, useI18n, useLang } from "./i18n";
 import {
   IconCheck,
   IconDesktop,
@@ -143,11 +145,16 @@ class PageBoundary extends React.Component<
     if (STALE.test(this.state.error.message))
       return (
         <div className="detail-none enter" role="status">
-          <h2>平台刚刚更新了</h2>
-          <p>这个页面需要载入新版本，刷新一下就好，你正在做的内容不会丢。</p>
+          <h2>{bi("平台刚刚更新了", "Platform Just Updated")}</h2>
+          <p>
+            {bi(
+              "这个页面需要载入新版本，刷新一下就好，你正在做的内容不会丢。",
+              "This page needs to load the updated build. Refresh to continue without losing your work.",
+            )}
+          </p>
           <div className="row-gap">
             <Button type="primary" onClick={() => location.reload()}>
-              载入新版本
+              {bi("载入新版本", "Load New Version")}
             </Button>
           </div>
         </div>
@@ -155,12 +162,14 @@ class PageBoundary extends React.Component<
     return (
       <div className="detail-none enter" role="alert">
         <IconExclamationCircle style={{ fontSize: 28, color: "var(--bad)" }} />
-        <h2>这个页面出错了</h2>
+        <h2>{bi("这个页面出错了", "Something Went Wrong")}</h2>
         <p>{this.state.error.message}</p>
         <div className="row-gap">
-          <Button onClick={() => go({ name: "deliveries" })}>回到交付</Button>
+          <Button onClick={() => go({ name: "deliveries" })}>
+            {bi("回到交付", "Back to Deliveries")}
+          </Button>
           <Button type="primary" onClick={() => location.reload()}>
-            重新加载
+            {bi("重新加载", "Reload")}
           </Button>
         </div>
       </div>
@@ -292,7 +301,7 @@ function NavTabs({
   }, [active, ready]);
 
   return (
-    <nav className="tabs" ref={ref} aria-label="主导航">
+    <nav className="tabs" ref={ref} aria-label={bi("主导航", "Main navigation")}>
       {bar && (
         <span
           className={`tabs-bar${ready ? " ready" : ""}`}
@@ -360,6 +369,7 @@ function writeSeenRelease(v: string) {
 /** The platform was updated while this page was open: nothing breaks, the page says so and lets the person choose when
  *  to load the new version. The service being briefly away during the update is not shown as an outage. */
 function useVersionWatch() {
+  const lang = useLang();
   const first = useRef("");
   const [current, setCurrent] = useState<VersionPayload | null>(null);
   const [freshInfo, setFreshInfo] = useState<VersionPayload | null>(null);
@@ -370,7 +380,10 @@ function useVersionWatch() {
     let live = true;
     const look = () => {
       if (document.visibilityState === "hidden") return;
-      fetch("/api/version", { cache: "no-store" })
+      fetch("/api/version", {
+        cache: "no-store",
+        headers: { "X-Lang": getLang() },
+      })
         .then((r) => (r.ok ? r.json() : null))
         .then((d: VersionPayload | null) => {
           if (!live || !d?.version) return;
@@ -379,6 +392,8 @@ function useVersionWatch() {
             setCurrent(d);
           } else if (d.version !== first.current) {
             setFreshInfo(d);
+          } else {
+            setCurrent(d);
           }
         })
         .catch(() => undefined);
@@ -393,7 +408,7 @@ function useVersionWatch() {
       document.removeEventListener("visibilitychange", look);
       window.removeEventListener("online", look);
     };
-  }, []);
+  }, [lang]);
 
   const fresh = freshInfo?.version || "";
   const unread = Boolean(
@@ -428,24 +443,28 @@ function UpdatePill({
   hide: () => void;
   onViewNotes: () => void;
 }) {
+  const { bi } = useI18n();
   if (!fresh || hidden) return null;
   return (
     <div className="net-pill upd" role="status">
       <span className="sdot" />
-      平台已更新到 v{fresh}。想体验新功能，刷新一下就行；你正在做的内容不受影响
+      {bi(
+        `平台已更新到 v${fresh}。想体验新功能，刷新一下就行；你正在做的内容不受影响`,
+        `Platform updated to v${fresh}. Refresh to switch — your in-progress work stays intact`,
+      )}
       <button type="button" className="net-pill-link" onClick={onViewNotes}>
-        更新公告
+        {bi("更新公告", "Release Notes")}
       </button>
       <Button size="mini" type="primary" onClick={() => location.reload()}>
-        刷新
+        {bi("刷新", "Refresh")}
       </Button>
       <button
         type="button"
         className="net-pill-x"
         onClick={hide}
-        aria-label="稍后再说"
+        aria-label={bi("稍后再说", "Later")}
       >
-        稍后
+        {bi("稍后", "Later")}
       </button>
     </div>
   );
@@ -462,6 +481,7 @@ function ReleaseNotesModal({
   info: VersionPayload | null;
   freshInfo: VersionPayload | null;
 }) {
+  const { bi } = useI18n();
   const display = freshInfo || info;
   const notes = display?.notes || [];
   const runningVer = info?.version || "";
@@ -535,22 +555,22 @@ function ReleaseNotesModal({
         <div className="rn-head-title">
           <BrandMark size={28} />
           <div>
-            <h2>版本与更新公告</h2>
+            <h2>{bi("版本与更新公告", "Versions & Release Notes")}</h2>
             <div className="rn-head-sub">
               {runningVer ? (
                 <>
-                  当前运行 <code className="mono">v{runningVer}</code>
-                  {info?.released_at ? ` · 发布于 ${info.released_at}` : ""}
+                  {bi("当前运行", "Running")} <code className="mono">v{runningVer}</code>
+                  {info?.released_at ? bi(` · 发布于 ${info.released_at}`, ` · Released ${info.released_at}`) : ""}
                 </>
               ) : (
-                "平台版本信息"
+                bi("平台版本信息", "Platform Version")
               )}
             </div>
           </div>
         </div>
         {hasFresh && (
           <Button size="small" type="primary" onClick={() => location.reload()}>
-            刷新升级到 v{freshVer}
+            {bi(`刷新升级到 v${freshVer}`, `Reload for v${freshVer}`)}
           </Button>
         )}
       </div>
@@ -559,8 +579,8 @@ function ReleaseNotesModal({
         <>
           <div className="rn-bar">
             <span className="rn-bar-count">
-              发布时间轴 · 共 {notes.length} 个版本
-              {query ? `（匹配 ${visibleNotes.length} 项）` : ""}
+              {bi(`发布时间轴 · 共 ${notes.length} 个版本`, `Release timeline · ${notes.length} versions`)}
+              {query ? bi(`（匹配 ${visibleNotes.length} 项）`, ` (${visibleNotes.length} matched)`) : ""}
             </span>
             <div className="rn-bar-acts">
               {notes.length >= 6 && (
@@ -570,8 +590,8 @@ function ReleaseNotesModal({
                     type="search"
                     value={q}
                     onChange={(e) => setQ(e.target.value)}
-                    placeholder="筛选版本或更新内容"
-                    aria-label="筛选版本或更新内容"
+                    placeholder={bi("筛选版本或更新内容", "Filter versions or release notes")}
+                    aria-label={bi("筛选版本或更新内容", "Filter versions or release notes")}
                   />
                 </label>
               )}
@@ -582,14 +602,14 @@ function ReleaseNotesModal({
                   onClick={toggleAll}
                   aria-pressed={allExpanded}
                 >
-                  {allExpanded ? "仅看近期" : "全部展开"}
+                  {allExpanded ? bi("仅看近期", "Collapse old") : bi("全部展开", "Expand all")}
                 </button>
               )}
             </div>
           </div>
 
           {visibleNotes.length > 0 ? (
-            <div className="rn-tl" role="list" aria-label="版本发布时间轴">
+            <div className="rn-tl" role="list" aria-label={bi("版本发布时间轴", "Release timeline")}>
               {visibleNotes.map((n) => {
                 const isFreshNode = Boolean(freshVer && n.version === freshVer);
                 const isRunningNode = n.version === runningVer;
@@ -619,11 +639,11 @@ function ReleaseNotesModal({
                         <div className="rn-card-top">
                           <span className="rn-ver mono">v{n.version}</span>
                           {isFreshNode ? (
-                            <span className="rn-tag is-fresh">新版本待刷新</span>
+                            <span className="rn-tag is-fresh">{bi("新版本待刷新", "Reload available")}</span>
                           ) : isRunningNode ? (
-                            <span className="rn-tag">当前版本</span>
+                            <span className="rn-tag">{bi("当前版本", "Current")}</span>
                           ) : isLatestNode ? (
-                            <span className="rn-tag">最新</span>
+                            <span className="rn-tag">{bi("最新", "Latest")}</span>
                           ) : null}
                           {n.date && (
                             <time className="rn-tl-mdate mono" dateTime={n.date}>
@@ -632,7 +652,9 @@ function ReleaseNotesModal({
                           )}
                           <span className="rn-tl-meta">
                             {count > 0 && (
-                              <span className="rn-tl-cnt">{count} 项更新</span>
+                              <span className="rn-tl-cnt">
+                                {bi(`${count} 项更新`, `${count} ${count === 1 ? "change" : "changes"}`)}
+                              </span>
                             )}
                             {count > 0 && (
                               <svg
@@ -669,21 +691,29 @@ function ReleaseNotesModal({
               })}
             </div>
           ) : (
-            <p className="muted rn-empty">未找到匹配 “{q.trim()}” 的版本记录。</p>
+            <p className="muted rn-empty">
+              {bi(`未找到匹配 “${q.trim()}” 的版本记录。`, `No release notes match "${q.trim()}".`)}
+            </p>
           )}
         </>
       ) : (
         <p className="muted">
-          当前运行版本 v{runningVer || "未知"}，暂无额外更新说明。
+          {bi(
+            `当前运行版本 v${runningVer || "未知"}，暂无额外更新说明。`,
+            `Running v${runningVer || "unknown"}; no additional release notes available.`,
+          )}
         </p>
       )}
 
       <div className="rn-foot">
         <span className="faint small">
-          版本说明随平台服务端一起发布，平滑更新时原有任务与草稿保留。
+          {bi(
+            "版本说明随平台服务端一起发布，平滑更新时原有任务与草稿保留。",
+            "Release notes are served with the backend binary; seamless upgrades preserve active jobs & drafts.",
+          )}
         </span>
         <Button type="primary" onClick={onClose}>
-          知道了
+          {bi("知道了", "Close")}
         </Button>
       </div>
     </Modal>
@@ -691,6 +721,7 @@ function ReleaseNotesModal({
 }
 
 function ConnectivityPill({ onBack }: { onBack: () => void }) {
+  const { bi } = useI18n();
   const status = useConnectivity();
   // an update restarts the service for a few seconds; only a longer silence is worth telling anyone about
   const [long, setLong] = useState(false);
@@ -727,10 +758,10 @@ function ConnectivityPill({ onBack }: { onBack: () => void }) {
     >
       <span className="sdot" />
       {status === "offline"
-        ? "网络已断开，恢复后自动刷新"
+        ? bi("网络已断开，恢复后自动刷新", "Network offline; auto-refreshing once reconnected")
         : status === "unreachable"
-          ? "暂时连不上服务，正在重试"
-          : "已恢复连接"}
+          ? bi("暂时连不上服务，正在重试", "Server unreachable; retrying")
+          : bi("已恢复连接", "Connection restored")}
     </div>
   );
 }
@@ -742,16 +773,17 @@ function AIStatusBadge({
   status: AIStatus;
   canManage: boolean;
 }) {
+  const { bi } = useI18n();
   const on = status.enabled;
   const pendingCfg = !!status.master_enabled && !status.configured;
   const stateCls = on ? "is-on" : pendingCfg ? "is-warn" : "is-off";
-  const statusWord = on ? "已启用" : pendingCfg ? "待配置" : "未启用";
-  const shortSub = on ? "" : pendingCfg ? " · 待配" : " · 未启";
+  const statusWord = on ? bi("已启用", "Enabled") : pendingCfg ? bi("待配置", "Setup needed") : bi("未启用", "Disabled");
+  const shortSub = on ? "" : pendingCfg ? bi(" · 待配", " · Setup") : bi(" · Off", " · Off");
   const readonlyTip = on
-    ? "平台 AI 套件已启用（当前账户只读，由管理员在平台设置中维护）"
+    ? bi("平台 AI 套件已启用（当前账户只读，由管理员在平台设置中维护）", "Platform AI suite is enabled (read-only; managed in Platform Settings)")
     : pendingCfg
-      ? "平台 AI 套件待管理员完成模型配置（只读）"
-      : "平台 AI 套件未启用（当前账户只读，需管理员在平台设置中开启）";
+      ? bi("平台 AI 套件待管理员完成模型配置（只读）", "Platform AI suite awaits model setup by an administrator")
+      : bi("平台 AI 套件未启用（当前账户只读，需管理员在平台设置中开启）", "Platform AI suite is disabled (read-only; ask an admin to enable it)");
   const warmAISettings = () => {
     if (!cached("/api/settings/ai"))
       void fetchCached("/api/settings/ai").catch(() => undefined);
@@ -774,7 +806,7 @@ function AIStatusBadge({
         <span
           className={`ai-quick-toggle is-readonly ${stateCls}`}
           role="status"
-          aria-label={`AI 套件${statusWord}（只读）`}
+          aria-label={bi(`AI 套件${statusWord}（只读）`, `AI Suite ${statusWord} (read-only)`)}
         >
           {content}
         </span>
@@ -785,20 +817,40 @@ function AIStatusBadge({
     <button
       type="button"
       className={`ai-quick-toggle is-interactive ${stateCls}`}
-      title={`平台 AI 套件${statusWord} · 点击前往设置`}
+      title={bi(`平台 AI 套件${statusWord} · 点击前往设置`, `AI Suite ${statusWord} · Click to configure`)}
       onPointerEnter={warmAISettings}
       onClick={(e) => {
         e.currentTarget.blur();
         go({ name: "settings", id: "ai" });
       }}
-      aria-label={`AI 套件${statusWord}，前往平台设置管理`}
+      aria-label={bi(`AI 套件${statusWord}，前往平台设置管理`, `AI Suite ${statusWord}, open settings`)}
     >
       {content}
     </button>
   );
 }
 
+function GlobeIcon() {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="8" cy="8" r="6" />
+      <path d="M2.3 8h11.4M8 2c1.8 1.9 1.8 10.1 0 12M8 2c-1.8 1.9-1.8 10.1 0 12" />
+    </svg>
+  );
+}
+
 function App() {
+  const { lang, setLang, bi } = useI18n();
   const aiStatus = useAIStatus();
   const aiOn = aiStatus.enabled;
   const [user, setUserRaw] = useState<Session | null>(null);
@@ -900,7 +952,7 @@ function App() {
   useEffect(() => {
     setUnauthorizedHandler(() => {
       setUser((u) => {
-        if (u) Message.info("登录已过期，请重新登录");
+        if (u) Message.info(bi("登录已过期，请重新登录", "Session expired; please sign in again"));
         return null;
       });
     });
@@ -930,7 +982,7 @@ function App() {
     setAppsLoad("loading");
     loadApps();
     loadJobs();
-  }, [user]);
+  }, [user, lang, loadApps, loadJobs]);
   // Warm AI settings & assistant threads right after initial paint so first clicks open instantly without mid-transition skeleton reflow.
   useEffect(() => {
     if (!user) return;
@@ -1004,22 +1056,26 @@ function App() {
   }, [route.name, canCreateDelivery, palette]);
 
   useEffect(() => {
+    if (!user) {
+      document.title = bi("登录 · Middleware Hub", "Sign in · Middleware Hub");
+      return;
+    }
     const titles: Record<Route["name"], string> = {
-      deliveries: "交付",
-      settings: "平台设置",
-      ai: "AI 助手",
-      new: "新建集群",
-      apps: "应用",
-      components: "组件",
-      library: "软件库",
+      deliveries: bi("交付", "Deliveries"),
+      settings: bi("平台设置", "Settings"),
+      ai: bi("AI 助手", "AI Assistant"),
+      new: bi("新建集群", "New Cluster"),
+      apps: bi("应用", "Apps"),
+      components: bi("组件", "Components"),
+      library: bi("软件库", "Library"),
       accounts: "IAM",
-      me: "我的账户",
-      kb: "知识库",
-      skills: "技能",
-      mcp: "MCP 服务",
+      me: bi("我的账户", "My Account"),
+      kb: bi("知识库", "Knowledge Base"),
+      skills: bi("技能", "Skills"),
+      mcp: bi("MCP 服务", "MCP"),
     };
     document.title = `${titles[route.name]} · Middleware Hub`;
-  }, [route.name]);
+  }, [route.name, lang, user]);
 
   const logout = async () => {
     try {
@@ -1043,10 +1099,10 @@ function App() {
     return (
       <div className="center-fill full boot-error">
         <IconExclamationCircle />
-        <h2>无法连接到服务</h2>
+        <h2>{bi("无法连接到服务", "Unable to Reach Service")}</h2>
         <p>{bootError}</p>
         <Button type="primary" onClick={boot}>
-          重试
+          {bi("重试", "Retry")}
         </Button>
         <ConnectivityPill onBack={boot} />
       </div>
@@ -1065,25 +1121,25 @@ function App() {
       ? [
           {
             key: "deliveries" as const,
-            label: "交付",
+            label: bi("交付", "Deliveries"),
             to: { name: "deliveries" } as Route,
           },
         ]
       : []),
-    { key: "apps", label: "应用", to: { name: "apps" } },
-    { key: "components", label: "组件", to: { name: "components" } },
-    { key: "library", label: "软件库", to: { name: "library" } },
+    { key: "apps", label: bi("应用", "Apps"), to: { name: "apps" } },
+    { key: "components", label: bi("组件", "Components"), to: { name: "components" } },
+    { key: "library", label: bi("软件库", "Library"), to: { name: "library" } },
     ...(aiOn && !!aiStatus.features?.assistant && can("ai.use")
       ? [{ key: "ai" as const, label: "AI", to: { name: "ai" } as Route }]
       : []),
     ...(aiOn && can("ai.use")
-      ? [{ key: "kb" as const, label: "知识库", to: { name: "kb" } as Route }]
+      ? [{ key: "kb" as const, label: bi("知识库", "Knowledge"), to: { name: "kb" } as Route }]
       : []),
     ...(aiOn && can("ai.use")
       ? [
           {
             key: "skills" as const,
-            label: "技能",
+            label: bi("技能", "Skills"),
             to: { name: "skills" } as Route,
           },
         ]
@@ -1106,7 +1162,7 @@ function App() {
       ? [
           {
             key: "settings" as const,
-            label: "设置",
+            label: bi("设置", "Settings"),
             to: { name: "settings" } as Route,
           },
         ]
@@ -1201,9 +1257,9 @@ function App() {
     };
     page = !can("delivery.create") ? (
       <div className="detail-none enter">
-        <h2>你没有新建集群的权限</h2>
-        <p>需要的话，请联系能管理用户的人给你相应的角色。</p>
-        <Button onClick={() => go({ name: "apps" })}>查看应用</Button>
+        <h2>{bi("你没有新建集群的权限", "No permission to create clusters")}</h2>
+        <p>{bi("需要的话，请联系能管理用户的人给你相应的角色。", "Contact an administrator to assign the required role.")}</p>
+        <Button onClick={() => go({ name: "apps" })}>{bi("查看应用", "Browse Apps")}</Button>
       </div>
     ) : !route.app ? (
       <NewDeliveryPicker
@@ -1218,13 +1274,17 @@ function App() {
       </div>
     ) : !app || !app.available ? (
       <div className="detail-none enter">
-        <h2>{app ? `${app.name} 暂时不能生成交付` : "找不到这个应用"}</h2>
-        <p>{app?.reason || "应用目录中没有这一项。"}</p>
+        <h2>
+          {app
+            ? bi(`${app.name} 暂时不能生成交付`, `${app.name} is currently unavailable`)
+            : bi("找不到这个应用", "Application not found")}
+        </h2>
+        <p>{app?.reason || bi("应用目录中没有这一项。", "This application was not found in the catalog.")}</p>
         <div className="row-gap">
           <Button type="primary" onClick={() => go({ name: "new" })}>
-            选择其他组件
+            {bi("选择其他组件", "Choose another component")}
           </Button>
-          <Button onClick={() => go({ name: "apps" })}>查看应用</Button>
+          <Button onClick={() => go({ name: "apps" })}>{bi("查看应用", "Browse Apps")}</Button>
         </div>
       </div>
     ) : (
@@ -1259,10 +1319,10 @@ function App() {
   return (
     <div className={`shell route-${route.name}`}>
       <a className="skip" href="#main">
-        跳到主要内容
+        {bi("跳到主要内容", "Skip to main content")}
       </a>
       <header className="topbar">
-        <a className="brand" href="#/" aria-label="Middleware Hub 首页">
+        <a className="brand" href="#/" aria-label={bi("Middleware Hub 首页", "Middleware Hub Home")}>
           <BrandMark />
           <span>Middleware Hub</span>
         </a>
@@ -1273,13 +1333,13 @@ function App() {
             type="button"
             className="search-trigger"
             onClick={() => setPalette(true)}
-            aria-label="搜索与跳转"
+            aria-label={bi("搜索与跳转", "Search and jump")}
             aria-haspopup="dialog"
             aria-expanded={palette}
             aria-keyshortcuts={isMac ? "Meta+K" : "Control+K"}
           >
             <IconSearch className="search-trigger-ic" />
-            <span className="search-trigger-txt">搜索或跳转</span>
+            <span className="search-trigger-txt">{bi("搜索或跳转", "Search or jump")}</span>
             <span className="search-trigger-keys" aria-hidden>
               <kbd>{isMac ? "⌘" : "Ctrl"}</kbd>
               <kbd>K</kbd>
@@ -1290,8 +1350,14 @@ function App() {
               position="bottom"
               content={
                 verWatch.unread
-                  ? `当前版本 v${verWatch.current.version} · 有新版本更新公告`
-                  : `查看版本 v${verWatch.current.version} 与更新公告`
+                  ? bi(
+                      `当前版本 v${verWatch.current.version} · 有新版本更新公告`,
+                      `Running v${verWatch.current.version} · New release notes available`,
+                    )
+                  : bi(
+                      `查看版本 v${verWatch.current.version} 与更新公告`,
+                      `View v${verWatch.current.version} & release notes`,
+                    )
               }
               mini
             >
@@ -1299,7 +1365,10 @@ function App() {
                 type="button"
                 className={`ver-pill${verWatch.unread ? " is-new" : ""}`}
                 onClick={openChangelog}
-                aria-label={`平台版本 v${verWatch.current.version}，点击查看更新公告`}
+                aria-label={bi(
+                  `平台版本 v${verWatch.current.version}，点击查看更新公告`,
+                  `Platform v${verWatch.current.version}, view release notes`,
+                )}
               >
                 <span className="mono">v{verWatch.current.version}</span>
                 {verWatch.unread && (
@@ -1313,6 +1382,39 @@ function App() {
             position="br"
             droplist={
               <Menu
+                onClickMenuItem={(k) => setLang(k as "zh-CN" | "en-US")}
+                selectedKeys={[lang]}
+              >
+                <Menu.Item key="zh-CN">
+                  <span className="menu-row">
+                    <span>简体中文</span>
+                    {lang === "zh-CN" && <IconCheck className="menu-check" />}
+                  </span>
+                </Menu.Item>
+                <Menu.Item key="en-US">
+                  <span className="menu-row">
+                    <span>English</span>
+                    {lang === "en-US" && <IconCheck className="menu-check" />}
+                  </span>
+                </Menu.Item>
+              </Menu>
+            }
+          >
+            <button
+              type="button"
+              className="lang-pill"
+              aria-label={bi("切换界面语言", "Switch language")}
+              title={bi("切换界面语言（中文 / English）", "Switch language (中文 / English)")}
+            >
+              <GlobeIcon />
+              <span>{lang === "en-US" ? "EN" : "中文"}</span>
+            </button>
+          </Dropdown>
+          <Dropdown
+            trigger="click"
+            position="br"
+            droplist={
+              <Menu
                 onClickMenuItem={(k) => {
                   if (k === "vt") (setTransitions(!vtOn), setVtOn(!vtOn));
                   else theme.choose(k as ThemePref);
@@ -1321,9 +1423,9 @@ function App() {
               >
                 {(
                   [
-                    ["light", "浅色外观", IconSun],
-                    ["dark", "深色外观", IconMoon],
-                    ["system", "跟随系统", IconDesktop],
+                    ["light", bi("浅色外观", "Light"), IconSun],
+                    ["dark", bi("深色外观", "Dark"), IconMoon],
+                    ["system", bi("跟随系统", "System"), IconDesktop],
                   ] as const
                 ).map(([k, l, I]) => (
                   <Menu.Item key={k}>
@@ -1339,7 +1441,7 @@ function App() {
                     <div className="menu-sep" role="separator" />
                     <Menu.Item key="vt">
                       <span className="menu-row">
-                        <span>页面转场动画</span>
+                        <span>{bi("页面转场动画", "Page Transitions")}</span>
                         {vtOn && <IconCheck className="menu-check" />}
                       </span>
                     </Menu.Item>
@@ -1351,8 +1453,8 @@ function App() {
             <button
               type="button"
               className="icon-btn"
-              aria-label="切换外观"
-              title="外观设置"
+              aria-label={bi("切换外观", "Switch appearance")}
+              title={bi("外观设置", "Appearance")}
             >
               <ThemeIcon />
             </button>
@@ -1377,26 +1479,28 @@ function App() {
                 <div className="menu-me">
                   <b>{user.username}</b>
                   <span>
-                    {user.role_names?.join("、") ||
-                      (user.role === "admin" ? "管理员" : "交付使用者")}
+                    {user.role_names?.join(bi("、", ", ")) ||
+                      (user.role === "admin"
+                        ? bi("管理员", "Administrator")
+                        : bi("交付使用者", "Operator"))}
                   </span>
                 </div>
                 <Menu.Item key="me">
                   <span className="menu-row">
                     <IconUser />
-                    <span>我的账户</span>
+                    <span>{bi("我的账户", "My Account")}</span>
                   </span>
                 </Menu.Item>
                 <Menu.Item key="pw">
                   <span className="menu-row">
                     <IconLock />
-                    <span>修改密码</span>
+                    <span>{bi("修改密码", "Change Password")}</span>
                   </span>
                 </Menu.Item>
                 <Menu.Item key="changelog">
                   <span className="menu-row">
                     <IconNotification />
-                    <span>版本与更新公告</span>
+                    <span>{bi("版本与更新公告", "Release Notes")}</span>
                     {verWatch.current?.version && (
                       <span className="menu-ver mono">
                         v{verWatch.current.version}
@@ -1411,7 +1515,7 @@ function App() {
                 <Menu.Item key="out" className="danger-item">
                   <span className="menu-row">
                     <IconPoweroff />
-                    <span>退出登录</span>
+                    <span>{bi("退出登录", "Sign out")}</span>
                   </span>
                 </Menu.Item>
               </Menu>
@@ -1420,7 +1524,7 @@ function App() {
             <button
               type="button"
               className={`me${route.name === "me" ? " on" : ""}`}
-              aria-label={`账户 ${user.username}`}
+              aria-label={bi(`账户 ${user.username}`, `Account ${user.username}`)}
             >
               <span className={`avatar ${user.role}`}>
                 {user.username.slice(0, 1).toUpperCase()}
@@ -1471,11 +1575,20 @@ function App() {
   );
 }
 
+function Root() {
+  const lang = useLang();
+  return (
+    <ConfigProvider
+      locale={lang === "en-US" ? enUS : zhCN}
+      componentConfig={{ Button: { size: "default" } }}
+    >
+      <App />
+    </ConfigProvider>
+  );
+}
+
 createRoot(document.getElementById("root")!).render(
-  <ConfigProvider
-    locale={zhCN}
-    componentConfig={{ Button: { size: "default" } }}
-  >
-    <App />
-  </ConfigProvider>,
+  <I18nProvider>
+    <Root />
+  </I18nProvider>,
 );

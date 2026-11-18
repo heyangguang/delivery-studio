@@ -13,119 +13,195 @@ import (
 )
 
 const (
-	version            = "1.0.257-dev"
+	version            = "1.0.258-dev"
 	currentReleaseDate = "2026-11-18"
 )
 
 type releaseNote struct {
-	Version    string   `json:"version"`
-	Date       string   `json:"date"`
-	Title      string   `json:"title"`
-	Highlights []string `json:"highlights"`
+	Version      string   `json:"version"`
+	Date         string   `json:"date"`
+	Title        string   `json:"title"`
+	TitleEn      string   `json:"-"`
+	Highlights   []string `json:"highlights"`
+	HighlightsEn []string `json:"-"`
 }
 
 var platformReleaseNotes = []releaseNote{
 	{
+		Version: "1.0.258-dev",
+		Date:    "2026-11-18",
+		Title:   "全栈中英双语国际化体系与实时无感语言切换",
+		TitleEn: "Full-Stack Chinese/English Bilingual Experience & Live Language Switching",
+		Highlights: []string{
+			"前端控制台全量双语改造：覆盖登录页、交付、应用、组件工作台、软件库、AI 助手、知识库、技能、MCP、变更演练、IAM、审计与平台设置等 84 个模块及组件库本地化；首次访问自动识别浏览器语言（zh-CN / en-US），支持在登录页右上角、顶栏与 Cmd+K 命令面板实时无刷新切换。",
+			"组件目录、部署编排与 Word 文档双语化：8 大内置中间件目录元数据、系列契约、预设、参数、交付计划及全部 Word (.docx) 交付手册、变更 SOP、交接、故障复盘与标准模板随 X-Lang / lang 请求头自动切换中英文，并新增自动化防遗漏校验。",
+			"后端 API、审计导出与 AI 上下文联动：全量服务接口报错、成分校验与同步影响分析、执行与准备检查、通知模板、安全沙箱、审计/会话 CSV 导出以及 AI 对话与变更演练系统提示词均支持实时按用户界面语言输出对应语言。",
+		},
+		HighlightsEn: []string{
+			"Complete Frontend Bilingual Coverage: Localized all 84 UI modules and Arco Design components across Login, Deliveries, Apps, Component Workbench, Software Library, AI Assistant, Knowledge Base, Skills, MCP, Change Rehearsal, IAM, Audit Trail, and Platform Settings, with automatic browser language detection and reload-free live switching from Login, Topbar, and Cmd+K Palette.",
+			"Bilingual Catalog, Orchestration & Word (.docx) Exports: Built-in middleware catalog metadata, series contracts, presets, parameters, execution plans, and all Word (.docx) reports (delivery handbooks, change SOPs, KT, RCA, incident reports, and starter templates) dynamically adapt to the active language via X-Lang / lang.",
+			"Full Backend API & AI Language Alignment: Localized HTTP error responses, component validation and sync impact analysis, execution readiness checks, notification templates, sandbox diagnostics, audit/session CSV exports, and AI / Change Rehearsal response languages with automated zero-leakage tests.",
+		},
+	},
+	{
 		Version: "1.0.257-dev",
 		Date:    "2026-11-18",
 		Title:   "企业级控制台视觉重构、全站通透顶栏与演练工具条一体化",
+		TitleEn: "Enterprise Console Visual Overhaul, Unified Frosted Topbar & Rehearsal Toolbar Harmonization",
 		Highlights: []string{
 			"升级企业级色彩与交互质感：收敛主品牌靛蓝（#4338ca）与中性灰底色层级，精简全局顶部导航与二级页签，去除冗余卡片重阴影、侧边装饰折痕与角标刺点，全面提升信息密度与专业观感。",
 			"统一全站磨砂顶栏与左侧导航对齐：将全局顶部栏的半透明滚动穿透质感扩展至所有一级视图与详情页，对齐 10 个核心页面的 304px 左侧栏几何规范与细滑滚动条；预热 AI 会话与配置请求并精简切换动画，消除首次打开 AI 助手时的卡顿感。",
 			"重构「变更演练」上下文工具条与修正吸顶定位：去掉生硬灰底长条，改为与画布融为一体的磨砂通透工具条，统一 7px 圆角与 30px 控件高度，进入专注演练自动回顶，并修复详情页容器内吸顶元素的双倍偏移。",
+		},
+		HighlightsEn: []string{
+			"Refined enterprise color and interaction craft: deepened the primary indigo accent (#4338ca) and neutral slate surfaces, streamlined global top navigation and secondary tabs, and removed heavy card shadows, side notch creases, and corner dots.",
+			"Unified frosted topbar translucency and 304px sidebar geometry: extended translucent scroll-under glass across all primary views and detail panes, aligned left sidebar widths and slim scrollbars across 10 core routes, and pre-warmed AI endpoints to eliminate first-click transition jank.",
+			"Harmonized the Change Rehearsal context toolbar and sticky offsets: replaced the opaque bar with a canvas-integrated frosted toolbar with unified 7px radii and 30px controls, auto-scrolled to top on focus entry, and removed duplicate 52px sticky insets inside detail containers.",
 		},
 	},
 	{
 		Version: "1.0.256-dev",
 		Date:    "2026-11-15",
 		Title:   "精简登录体验与升级现代 PaaS 操作审计、设备会话管理视图",
+		TitleEn: "Streamlined Sign-In Experience, Modern PaaS Audit Trail & Device Session Management",
 		Highlights: []string{
 			"优化登录界面：移除冗余的会话时长选项，改为由平台默认 8 小时安全策略自动托管；采用无缝桌面分栏画布、自定义矢量拓扑插画与轻量化弹簧过渡动效，全面适配浅色与深色模式及减弱动画偏好。",
 			"重塑「IAM → 操作审计」信息架构：去除密集卡片墙，改为连续数据条与左成员概览 + 右会话流水的主从分栏结构，支持「登录与在线」和「操作记录」之间的双向会话追踪与一键返回，完善骨架屏、空筛选复位、错误重试与离线提示。",
 			"升级「我的账户 → 登录与安全」设备管理列表：采用通透的对象行列表展示所有已登录设备与活跃时长，支持单设备确认退出及一键退出全部其他设备。",
+		},
+		HighlightsEn: []string{
+			"Streamlined login experience: removed redundant session TTL selectors in favor of platform-managed 8-hour defaults, introduced a seamless split desktop canvas with vector topology illustrations and light spring transitions supporting light/dark themes and reduced motion.",
+			"Redesigned IAM Audit Trail architecture: replaced dense card walls with continuous data strips and a member-overview / session-stream master-detail layout supporting bidirectional tracing between active sessions and action logs, skeletons, filter reset, retries, and offline indicators.",
+			"Upgraded Account -> Sign-in & Security device list: clean object rows showing signed-in devices and active durations with per-device revocation and one-click sign-out for all other sessions.",
 		},
 	},
 	{
 		Version: "1.0.255-dev",
 		Date:    "2026-11-15",
 		Title:   "全新登录页、标准 Bearer JWT 认证与完整会话时长审计",
+		TitleEn: "Redesigned Login, Standard Bearer JWT Authentication & Session Duration Auditing",
 		Highlights: []string{
 			"重构平台登录页：升级深色交互式节点拓扑展示面板与卡片式令牌认证表单，修复暗色侧栏版本标签对比度问题，并支持登录时选择会话令牌有效期（8 小时 / 24 小时 / 7 天）。",
 			"认证机制升级为标准 HS256 Bearer JWT 令牌 + 有状态可撤销会话库：支持 Authorization: Bearer 鉴权（严格优先级，拒绝无效令牌回退 Cookie）、重启密钥与会话保留，并继续兼容同源浏览器导出下载所需的 HttpOnly Cookie 与 CSRF 保护。",
 			"新增全周期在线与登录时长审计（IAM → 操作与会话审计）：实时追踪在线用户、单会话总在线时长与活跃操作时长、历史会话归档、失败登录统计与 CSV 导出；支持管理员在审计面板按会话 ID 追溯操作轨迹并强制下线任意设备，同时在「我的账户 → 登录与安全」展示个人多端活跃令牌与一键注销。",
 			"排查修复剩余跨页与技能/组件运维指南中的旧版「方案」遗留措辞（统一指向「交付」与「变更演练」），补全操作审计动作中文映射（修订、同步、自动执行、变更演练、沙箱、会话注销/过期等）及细粒度设置审计资源分类。",
 		},
+		HighlightsEn: []string{
+			"Redesigned login page with interactive node topology showcase, card token sign-in, contrast fixes, and configurable session lifetimes.",
+			"Upgraded auth to standard HS256 Bearer JWT tokens backed by a stateful revocable session store with strict Bearer priority, restart key/session persistence, and same-origin HttpOnly cookie + CSRF compatibility for browser downloads.",
+			"Added full-lifecycle online & session duration auditing in IAM Audit with real-time presence, active duration tracking, archived history, failed sign-in stats, CSV export, per-session action drill-down, and remote device revocation.",
+			"Aligned remaining cross-page copy with the Delivery & Change Rehearsal model and expanded audit action and resource labels.",
+		},
 	},
 	{
 		Version: "1.0.254-dev",
 		Date:    "2026-11-15",
 		Title:   "统一「首次部署 + 变更演练」平台模型文案并新增同步拦截直达入口",
+		TitleEn: "Unified First-Deployment + Change Rehearsal Terminology & Direct Sync Gate Shortcuts",
 		Highlights: []string{
 			"更新交付详情页同步校验提示：已完成或软件包存在差异的交付不再提示「请生成方案」或「升级、补丁方案」，改为明确引导前往集群「变更演练」实施运行期调整。",
 			"同步提示卡片新增「前往变更演练」快捷操作按钮：当已完成交付触发同步拦截且当前集群支持变更演练时，可直接从拦截横幅一键跳转至对应集群的变更演练标签页。",
 			"全面清理前后端与 AI 助手/文档生成提示词中遗留的「方案」旧工作流表述（包括执行结果确认、集群配置档案、根因/评估文档模板、权限说明与软件库引导文案），统一与当前「交付 + 变更演练」流程保持一致（部署架构选择与变更演练 SOP 文案不受影响）。",
+		},
+		HighlightsEn: []string{
+			"Updated delivery sync validation guidance so completed or diverged deliveries clearly direct engineers to Cluster Change Rehearsal for runtime changes.",
+			"Added a direct 'Go to Change Rehearsal' shortcut on sync-blocked banners when the cluster supports Change Rehearsal.",
+			"Standardized cross-stack copy, AI prompts, and document templates around the Delivery + Change Rehearsal workflow.",
 		},
 	},
 	{
 		Version: "1.0.253-dev",
 		Date:    "2026-11-15",
 		Title:   "软件库详情页与同步任务终端视图视觉重构",
+		TitleEn: "Software Library Detail Redesign & Console Log Viewer for Sync Tasks",
 		Highlights: []string{
 			"重构软件库系统详情页：新增顶部能力概览指标卡（软件源索引、已入库闭包、Ansible 运行环境、离线交付状态，支持一键跳转分区），恢复并统一各功能卡片的圆角与立体层级，并为已索引软件源增加分源与发行代号概览芯片。",
 			"重绘同步与下载任务面板（TaskCard）：升级为语义状态顶栏与统计标签（已更新 / 沿用本地 / 用时），明细区域支持按结果筛选与分组折叠，每条步骤拆解为套组/组件徽标、版本量与大小标签及分段迷你进度条，消除“7/9”与纯文本列表的晦涩观感。",
 			"同步输出日志升级为深色控制台终端视图：提供带行号槽与语义着色（READ / GET / SKIP / DONE / ERROR 高亮路径与文件大小）、自动换行切换及一键复制纯净文本功能，大幅提升日志可读性。",
+		},
+		HighlightsEn: []string{
+			"Redesigned OS detail pages in Software Library with top capability KPIs (Source Index, Stored Closures, Ansible Runtime, Offline Delivery Readiness), section jump links, and distro/codename source chips.",
+			"Redesigned TaskCard sync panels with semantic status headers, result filter pills, collapsible groups, component/size metadata, and segmented mini progress bars.",
+			"Upgraded sync task output logs into a dark console viewer with line-number gutters, semantic highlighting (READ/GET/SKIP/DONE/ERROR), wrap toggle, and clean copy.",
 		},
 	},
 	{
 		Version: "1.0.252-dev",
 		Date:    "2026-11-15",
 		Title:   "修复版本公告搜索框及复合输入容器的双层聚焦紫框问题",
+		TitleEn: "Fixed Double Focus Rings in Release Notes Search & Composite Input Containers",
 		Highlights: []string{
 			"清除 .rn-search 内部输入框触发全局 :focus-visible 时叠加的多余紫色内框，并优化外框悬停与聚焦反馈为单一克制的微光边框。",
 			"同步补齐 .wb-find-box 与 .tp2-code 复合输入容器内部 input/textarea 的 :focus/:focus-visible 阴影抑制，避免复合控件出现双层聚焦框。",
+		},
+		HighlightsEn: []string{
+			"Suppressed inner :focus-visible rings inside .rn-search so hover and focus feedback renders cleanly on the outer border.",
+			"Aligned inner focus suppression across .wb-find-box and .tp2-code composite inputs.",
 		},
 	},
 	{
 		Version: "1.0.251-dev",
 		Date:    "2026-11-15",
 		Title:   "全新 Middleware Hub 品牌标志视觉升级",
+		TitleEn: "New Middleware Hub BrandMark & Favicon Identity",
 		Highlights: []string{
 			"重绘平台主 Logo（BrandMark）及浏览器标签页图标（Favicon）：采用立体双折翼几何「M」架构符号搭配青白流光核心节点与深靛高光微质感圆角底标，全面替换顶栏、登录页与版本弹窗中的旧版拓扑树图标。",
+		},
+		HighlightsEn: []string{
+			"Introduced the sculpted double-wing geometric 'M' BrandMark and browser favicon with cyan-core diamond node across the topbar, login screen, and release notes modal.",
 		},
 	},
 	{
 		Version: "1.0.250-dev",
 		Date:    "2026-11-15",
 		Title:   "企业标准 Word 交付手册排版引擎、配色主题与可编辑模板支持",
+		TitleEn: "Enterprise Word (.docx) Delivery Handbook Engine, Color Themes & Custom Templates",
 		Highlights: []string{
 			"重构平台内置 Word（.docx）排版引擎：拆分为独立的前置罗马页码分节（I, II, ... 含封面横幅与角标页码、点状引导线目录、★文档属性与★文档变更过程版本控制页）与正文连续阿拉伯页码分节（第 N 页居中页脚与标准页眉）。",
 			"全面规范正文章节与元素版式：统一「第1章 / 1.1 / 1.1.1」层级编号并清理双重序号，升级全宽固定比例表格（自动重复表头与防断行）、灰色底纹代码块（区分可执行命令、斜体蓝灰注释与红色警示注释）、左侧强调线提示框及✓成功判据缩进样式。",
 			"报告模板设置页新增 4 套企业配色主题（深青标准、经典藏蓝、科技靛紫、石墨深灰）、封面项目标语与版本号/作者/审核人字段、自定义封面横幅上传及一键下载预置占位符的可编辑标准模板（.docx）；同步升级自定义模板引擎（安全替换嵌套文本框、支持中文内置样式名映射与已有目录去重）并在导出弹窗支持按需开关前置公文页。",
+		},
+		HighlightsEn: []string{
+			"Rebuilt the Word (.docx) typesetting engine with separate Roman-numeral front-matter sections (cover banner, dotted TOC, document properties, revision history) and continuous Arabic-numeral body sections.",
+			"Standardized chapter hierarchy, fixed-width repeating-header tables, shaded code blocks distinguishing executable commands from notes/warnings, accent callouts, and acceptance criteria blocks.",
+			"Added 4 corporate color themes, customizable cover metadata/banners, downloadable placeholder templates (.docx), and nested-textbox-safe custom template rendering.",
 		},
 	},
 	{
 		Version: "1.0.249-dev",
 		Date:    "2026-11-15",
 		Title:   "部署架构卡片排版修复与配置页重复展示清理",
+		TitleEn: "Fixed Scheme Summary Card Layout & Deduplicated Config Architecture Cards",
 		Highlights: []string{
 			"修复部署架构摘要卡片（.scheme-summary）与通用提示样式冲突导致的左侧紫线压字、底色错位及网格宽度未铺满问题。",
 			"集群「配置」页当查看方案与集群当前部署架构一致时自动省略重复架构卡片，仅在切换到不同架构的历史方案或草稿时展示差异卡片。",
+		},
+		HighlightsEn: []string{
+			"Resolved CSS conflicts on .scheme-summary cards causing overlapping left borders, misaligned backgrounds, and clipped grid widths.",
+			"Automatically hid redundant scheme summary cards in Cluster Config when viewing the active deployment architecture.",
 		},
 	},
 	{
 		Version: "1.0.248-dev",
 		Date:    "2026-11-15",
 		Title:   "版本公告时间轴、文档导读视觉统一与体验细节优化",
+		TitleEn: "Release Timeline Modal, Unified Overview Callouts & UX Polish",
 		Highlights: []string{
 			"版本与更新公告弹窗升级为时间轴视图：左侧展示发布日期轨道与版本节点状态，支持历史版本折叠、一键全部展开及多版本筛选。",
 			"统一 AI 技能与知识库详情页排版：「导读」卡片改为与正文章节一致的标题栏与卡片结构，消除仅有重复一级标题时的空白导读框，并对齐卡片上下边距、加粗高亮与目录跳转反馈。",
 			"修复 AI 技能随附沙箱脚本面板折叠箭头点击无响应及长文档渲染卡顿问题，并优化顶部版本入口与状态标签布局。",
+		},
+		HighlightsEn: []string{
+			"Upgraded Release Notes modal to an interactive timeline with date tracks, expand/collapse controls, and keyword filtering.",
+			"Aligned AI Skill and Knowledge Base detail cards and overview callouts, eliminating empty overview placeholders.",
+			"Fixed sandbox script collapse toggles and smooth scrolling on long skill documents.",
 		},
 	},
 	{
 		Version: "1.0.247-dev",
 		Date:    "2026-11-15",
 		Title:   "隔离 Shell 沙箱、分级授权、执行手册位置记忆与界面打磨",
+		TitleEn: "Isolated Shell Sandbox, Tiered Approvals, Runbook Position Memory & UI Polish",
 		Highlights: []string{
 			"AI 代码沙箱新增跨平台隔离 Shell / CLI 执行能力（run_shell），支持在交付或组件排错时按需将脱敏工程只读挂载到 /workspace（$MW_WORKSPACE）。",
 			"代码沙箱支持执行权限分级（ask 每次确认 / auto 智能风险分级 / open 隔离内免询问）与外网访问策略分级（deny / ask / allow），支持对话内实时授权，并兼容 Windows 无管理员权限解压运行环境。",
@@ -133,24 +209,41 @@ var platformReleaseNotes = []releaseNote{
 			"同步更新 9 项内置 AI 技能（补充内置脚本 run_skill_script 引导、扫描版 PDF 识图、沙箱解析与只读工作区规范）。",
 			"平台顶栏、用户菜单及登录页新增当前版本号展示与更新公告弹窗。",
 		},
+		HighlightsEn: []string{
+			"Added cross-platform isolated Shell/CLI execution (run_shell) with optional read-only sanitized /workspace mounts.",
+			"Added tiered execution approval modes (ask/auto/open) and egress policies (deny/ask/allow) with in-chat interactive authorization.",
+			"Added per-delivery stage position memory in the Execution Runbook for seamless resumption.",
+			"Updated 9 built-in AI skills and introduced topbar/login version badges and the release notes viewer.",
+		},
 	},
 	{
 		Version: "1.0.244-dev",
 		Date:    "2026-11-11",
 		Title:   "自动执行节点、目标 Agent 接入与执行证据链",
+		TitleEn: "Execution Nodes, Ephemeral Target Agents & Execution Evidence Trail",
 		Highlights: []string{
 			"支持接入独立管理机或集群内执行机；独立管理机采用按集群隔离的目录与软件源端口，不占用业务节点数或数据盘。",
 			"支持已有 root SSH 及通过堡垒机逐机安装短期目标 Agent，私钥仅保留在执行机，Agent 仅写入所需专用公钥并支持撤销回执。",
 			"新增执行前准备检查、固定快照运行、断线本地保存后补传以及交付报告逐次尝试与机器结果证据。",
+		},
+		HighlightsEn: []string{
+			"Added dedicated controller and in-cluster execution nodes with per-cluster isolated storage and package repo ports.",
+			"Added ephemeral target agent onboarding via SSH or bastion hosts, keeping private keys on execution nodes with revocable access.",
+			"Added pre-execution readiness checks, snapshot runs, offline reconnect buffering, and per-host attempt evidence in reports.",
 		},
 	},
 	{
 		Version: "1.0.213-dev",
 		Date:    "2026-11-03",
 		Title:   "步骤归属标准化、草稿兼容性与变更预览同步",
+		TitleEn: "Standardized Step Ownership, Draft Compatibility & Impact Preview Sync",
 		Highlights: []string{
 			"细化组件私有动作与公共运行库归属校验，工作台支持跨文件联动检查与现有草稿兼容迁移。",
 			"支持预览组件变更影响范围后再同步至当前交付并生成更新包，既有交付与未同步现场不受影响。",
+		},
+		HighlightsEn: []string{
+			"Refined component-private action vs. platform-shared runtime validation with cross-file checks in Workbench.",
+			"Added component change impact previews before syncing changes into existing deliveries and generating update bundles.",
 		},
 	},
 }

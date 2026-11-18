@@ -635,7 +635,7 @@ func (s *storeServer) handleSandboxSettings(w http.ResponseWriter, r *http.Reque
 				out["packages"] = strings.Fields(string(b))
 			}
 		}
-		s.writeJSON(w, 200, out)
+		s.writeJSON(w, 200, localizeSandboxPayload(wLang(w), out))
 	case r.URL.Path == "/api/settings/sandbox" && r.Method == "PUT":
 		var in struct {
 			Enabled    bool   `json:"enabled"`
@@ -671,7 +671,7 @@ func (s *storeServer) handleSandboxSettings(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		s.auditReq(r, "sandbox-settings", session.User, fmt.Sprintf("%s · 执行:%s · 网络:%s", map[bool]string{true: "开启", false: "关闭"}[st.Enabled], st.ExecPolicy, st.NetPolicy))
-		s.writeJSON(w, 200, map[string]any{"settings": st})
+		s.writeJSON(w, 200, localizeSandboxPayload(wLang(w), map[string]any{"settings": st}))
 	case r.URL.Path == "/api/settings/sandbox/check" && r.Method == "POST":
 		st := s.runSandboxCheck(r.Context())
 		s.auditReq(r, "sandbox-check", session.User, map[bool]string{true: "通过", false: "未通过"}[st.Passed])
@@ -693,7 +693,7 @@ func (s *storeServer) handleSandboxSettings(w http.ResponseWriter, r *http.Reque
 				out["packages"] = strings.Fields(string(b))
 			}
 		}
-		s.writeJSON(w, 200, out)
+		s.writeJSON(w, 200, localizeSandboxPayload(wLang(w), out))
 	default:
 		s.fail(w, 404, "接口不存在")
 	}

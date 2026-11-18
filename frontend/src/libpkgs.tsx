@@ -8,9 +8,19 @@ import {
 } from "@arco-design/web-react/icon";
 import { ago, size } from "./shared";
 import type { ClosureRow } from "./shared";
+import { bi, biv, getLang, useLang } from "./i18n";
 
 type Sort = "recent" | "name" | "size";
 const keyOf = (r: ClosureRow) => `${r.request.name}=${r.request.version}`;
+
+const viaLabel = (via?: string) => {
+  if (!via) return "";
+  if (getLang() !== "en-US") return via;
+  if (via === "软件源索引直取（已验签）") return "Fetched from signed index";
+  if (via.startsWith("容器 ")) return `Container ${via.slice(3)}`;
+  if (via === "导入") return "Imported";
+  return via;
+};
 
 /** The size of one package inside a closure: its file in the pool is named "<package>_<version>_<arch>.deb". */
 const fileSize = (r: ClosureRow, name: string) =>
@@ -39,6 +49,7 @@ export function PackageList({
   remove: (r: ClosureRow) => void;
   exportHref: (k: string) => string;
 }) {
+  useLang();
   const [q, setQ] = useState("");
   const [sort, setSort] = useState<Sort>("recent");
   const [open, setOpen] = useState<string[]>([]);
@@ -68,10 +79,13 @@ export function PackageList({
         <Input
           allowClear
           prefix={<IconSearch />}
-          placeholder="按软件包、依赖或组件筛选"
+          placeholder={bi(
+            "按软件包、依赖或组件筛选",
+            "Filter by package, dependency, or component",
+          )}
           value={q}
           onChange={setQ}
-          aria-label="筛选软件包"
+          aria-label={bi("筛选软件包", "Filter packages")}
           style={{ flex: "1 1 240px", maxWidth: 380 }}
         />
         <Select
@@ -79,36 +93,39 @@ export function PackageList({
           value={sort}
           onChange={setSort}
           options={[
-            { value: "recent", label: "最近入库" },
-            { value: "name", label: "按名称" },
-            { value: "size", label: "按大小" },
+            { value: "recent", label: bi("最近入库", "Recently added") },
+            { value: "name", label: bi("按名称", "By name") },
+            { value: "size", label: bi("按大小", "By size") },
           ]}
-          aria-label="排序"
-          style={{ width: 120 }}
+          aria-label={bi("排序", "Sort")}
+          style={{ width: biv(120, 148) }}
         />
         <Button
           type="text"
           size="small"
           onClick={() => setOpen(allOpen ? [] : list.map(keyOf))}
         >
-          {allOpen ? "全部收起" : "全部展开"}
+          {allOpen ? bi("全部收起", "Collapse all") : bi("全部展开", "Expand all")}
         </Button>
       </div>
       {list.length === 0 ? (
         <p className="muted small pk-none">
-          没有匹配“{q.trim()}”的软件包。可以按软件包名、依赖包名或组件名找。
+          {bi(
+            `没有匹配“${q.trim()}”的软件包。可以按软件包名、依赖包名或组件名找。`,
+            `No packages matching "${q.trim()}". Search by package name, dependency, or component.`,
+          )}
         </p>
       ) : (
         <ul
           className={`pk-list ${admin ? "" : "plain"}`}
-          aria-label="库里的软件包"
+          aria-label={bi("库里的软件包", "Packages in library")}
         >
           <li className="pk-head small" aria-hidden>
             {admin && <span />}
-            <span>软件包</span>
-            <span>被谁使用</span>
-            <span className="num">依赖与大小</span>
-            <span>入库</span>
+            <span>{bi("软件包", "Package")}</span>
+            <span>{bi("被谁使用", "Used by")}</span>
+            <span className="num">{bi("依赖与大小", "Deps & size")}</span>
+            <span>{bi("入库", "Added")}</span>
             {admin && <span />}
           </li>
           {list.map((r) => {
@@ -135,7 +152,7 @@ export function PackageList({
                             : c.filter((x) => x !== k),
                         )
                       }
-                      aria-label={`选择 ${k}`}
+                      aria-label={bi(`选择 ${k}`, `Select ${k}`)}
                     />
                   )}
                   <button
@@ -158,31 +175,43 @@ export function PackageList({
                         </span>
                       ))
                     ) : (
-                      <span className="faint">暂无组件使用</span>
+                      <span className="faint">
+                        {bi("暂无组件使用", "Unused")}
+                      </span>
                     )}
                     {!r.intact && (
                       <span className="flag bad">
-                        文件缺失或损坏，需重新下载
+                        {bi(
+                          "文件缺失或损坏，需重新下载",
+                          "Files missing or corrupted; re-download required",
+                        )}
                       </span>
                     )}
                   </div>
                   <div className="pk-meta num small">
-                    <b>{deps.length ? `${deps.length} 个依赖` : "无依赖"}</b>
+                    <b>
+                      {deps.length
+                        ? bi(
+                            `${deps.length} 个依赖`,
+                            `${deps.length} ${deps.length === 1 ? "dep" : "deps"}`,
+                          )
+                        : bi("无依赖", "No deps")}
+                    </b>
                     <span className="faint"> · {size(r.bytes)}</span>
                   </div>
-                  <div className="pk-time small faint" title={r.via}>
+                  <div className="pk-time small faint" title={viaLabel(r.via)}>
                     {ago(r.fetched)}
                   </div>
                   {admin && (
                     <div className="pk-act">
-                      <Tooltip content="从软件库删除" mini>
+                      <Tooltip content={bi("从软件库删除", "Remove from library")} mini>
                         <Button
                           type="text"
                           status="danger"
                           size="mini"
                           icon={<IconDelete />}
                           onClick={() => remove(r)}
-                          aria-label={`删除 ${k}`}
+                          aria-label={bi(`删除 ${k}`, `Delete ${k}`)}
                           disabled={busy}
                         />
                       </Tooltip>
@@ -193,8 +222,14 @@ export function PackageList({
                   <div className="pk-detail" id={`pk-${k}`}>
                     <p className="small muted pk-lead">
                       {deps.length
-                        ? `装 ${r.request.name} 时，会一起装下面 ${deps.length} 个依赖包（目标系统上没有的才会下载）：`
-                        : `${r.request.name} 在干净的系统上不需要额外的依赖包。`}
+                        ? bi(
+                            `装 ${r.request.name} 时，会一起装下面 ${deps.length} 个依赖包（目标系统上没有的才会下载）：`,
+                            `Installing ${r.request.name} includes these ${deps.length} ${deps.length === 1 ? "dependency" : "dependencies"} (downloaded only if missing on target):`,
+                          )
+                        : bi(
+                            `${r.request.name} 在干净的系统上不需要额外的依赖包。`,
+                            `${r.request.name} requires no additional dependencies on a clean system.`,
+                          )}
                     </p>
                     <ul className="pk-deps">
                       {[...r.packages]
@@ -223,9 +258,16 @@ export function PackageList({
                     </ul>
                     <div className="pk-foot small muted">
                       <span>
-                        {r.files.length} 个文件 · {size(r.bytes)} · {r.via}
+                        {bi(
+                          `${r.files.length} 个文件`,
+                          `${r.files.length} ${r.files.length === 1 ? "file" : "files"}`,
+                        )}{" "}
+                        · {size(r.bytes)} · {viaLabel(r.via)}
                         {r.sources?.length
-                          ? ` · 软件源 ${r.sources.join("、")}`
+                          ? bi(
+                              ` · 软件源 ${r.sources.join("、")}`,
+                              ` · Sources: ${r.sources.join(", ")}`,
+                            )
                           : ""}
                       </span>
                       {admin && (
@@ -234,7 +276,7 @@ export function PackageList({
                           icon={<IconDownload />}
                           href={exportHref(k)}
                         >
-                          只导出这一项
+                          {bi("只导出这一项", "Export this only")}
                         </Button>
                       )}
                     </div>

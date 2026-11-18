@@ -595,7 +595,18 @@ func (s *storeServer) handleExecutions(w http.ResponseWriter, r *http.Request, s
 			preps = append(preps, p)
 		}
 		sort.Slice(preps, func(a, b int) bool { return preps[a].Created > preps[b].Created })
-		s.writeJSON(w, 200, map[string]any{"runs": runs, "nodes": nodes, "steps": s.executionChoices(j.ID), "revision": s.executionRevision(j.ID), "targets": context.Hosts, "executor": map[string]any{"ip": context.ControllerIP, "kind": executionKind(context), "host": context.ExecutionHost, "runtime_root": context.RuntimeRoot}, "preparations": preps})
+		lang := wLang(w)
+		for i := range runs {
+			runs[i] = localizeExecutionRun(lang, runs[i])
+		}
+		for i := range nodes {
+			nodes[i] = localizeExecutionOption(lang, nodes[i])
+		}
+		for i := range preps {
+			preps[i] = localizeExecutionPrep(lang, preps[i])
+		}
+		steps := localizeExecutionChoices(lang, s.executionChoices(j.ID))
+		s.writeJSON(w, 200, map[string]any{"runs": runs, "nodes": nodes, "steps": steps, "revision": s.executionRevision(j.ID), "targets": context.Hosts, "executor": map[string]any{"ip": context.ControllerIP, "kind": executionKind(context), "host": context.ExecutionHost, "runtime_root": context.RuntimeRoot}, "preparations": preps})
 		return
 	}
 	if len(parts) == 3 && parts[1] == "logs" && r.Method == "GET" {

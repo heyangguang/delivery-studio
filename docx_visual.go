@@ -108,8 +108,12 @@ func toTemplatePlaceholders(s string) string {
 // {{version}}, {{date}}, {{project}}, {{author}}, {{reviewer}}, {{slogan}}, {{confidential}} and {{content}} so organizations
 // can adjust artwork or fonts in Word/WPS and upload it back cleanly.
 func starterTemplateDocx(rs reportSettings) ([]byte, error) {
+	return starterTemplateDocxLang(rs, "")
+}
+
+func starterTemplateDocxLang(rs reportSettings, lang string) ([]byte, error) {
 	theme := themeOf(rs.Theme)
-	front := newDocxWriter(theme, "rIdF")
+	front := newDocxWriterLang(theme, "rIdF", lang)
 	cover := docxCover{
 		Org:          firstNonEmptyStr(rs.Org, "{{org}}"),
 		Project:      firstNonEmptyStr(toTemplatePlaceholders(rs.Project), "{{project}}"),
@@ -121,6 +125,7 @@ func starterTemplateDocx(rs reportSettings) ([]byte, error) {
 		Confidential: firstNonEmptyStr(rs.Confidential, "{{confidential}}"),
 		Note:         toTemplatePlaceholders(rs.Note),
 		Cluster:      "{{cluster}}",
+		Lang:         lang,
 	}
 	front.cover(cover)
 
@@ -133,20 +138,22 @@ func starterTemplateDocx(rs reportSettings) ([]byte, error) {
 		Author:   "{{author}}",
 		Reviewer: "{{reviewer}}",
 		Cluster:  "{{cluster}}",
-		History:  [][4]string{{"{{version}}", "{{date}}", "{{author}}", "模板基线导出"}, {"", "", "", ""}},
+		History:  [][4]string{{"{{version}}", "{{date}}", "{{author}}", tr(lang, "模板基线导出", "Starter template baseline")}, {"", "", "", ""}},
+		Lang:     lang,
 	})
 
-	body := newDocxWriter(theme, "rIdMw")
+	body := newDocxWriterLang(theme, "rIdMw", lang)
 	body.para("", "{{content}}")
 
 	meta := docxBuildMeta{
-		Title:        firstNonEmptyStr(rs.Project, "标准交付手册模板"),
+		Title:        firstNonEmptyStr(rs.Project, tr(lang, "标准交付手册模板", "Standard Delivery Handbook Template")),
 		Header:       toTemplatePlaceholders(firstNonEmptyStr(rs.Header, "{{cluster}} · {{title}}")),
 		Footer:       toTemplatePlaceholders(firstNonEmptyStr(rs.Footer, "{{org}}")),
 		FrontOrg:     firstNonEmptyStr(rs.Org, "{{org}}"),
 		Author:       firstNonEmptyStr(rs.Author, "Middleware Hub"),
 		Theme:        theme,
 		HasFrontSect: true,
+		Lang:         lang,
 	}
 	return docxFileDual(front, body, meta)
 }

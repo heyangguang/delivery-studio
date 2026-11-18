@@ -9,6 +9,7 @@ import {
   IconSave,
 } from "@arco-design/web-react/icon";
 import { api, copy, err } from "./shared";
+import { bi, useLang } from "./i18n";
 import { uploadFiles } from "./myfiles";
 import type { FileNode } from "./myfiles";
 
@@ -224,6 +225,7 @@ export function Tex({ src, block }: { src: string; block?: boolean }) {
 }
 
 export function Inline({ text }: { text: string }) {
+  useLang();
   const parts = text.split(INLINE);
   return (
     <>
@@ -253,7 +255,8 @@ export function Inline({ text }: { text: string }) {
               rel="noreferrer noopener"
               className="md-img-link"
             >
-              {im?.[1] || "图片"}（图片，点开查看）
+              {im?.[1] || bi("图片", "Image")}
+              {bi("（图片，点开查看）", " (image, click to view)")}
             </a>
           );
         }
@@ -286,18 +289,24 @@ const LANG: Record<string, string> = {
   bash: "Shell",
   sh: "Shell",
   shell: "Shell",
-  console: "终端",
+  get console() {
+    return bi("终端", "Terminal");
+  },
   yaml: "YAML",
   yml: "YAML",
   json: "JSON",
   sql: "SQL",
   ini: "INI",
-  conf: "配置",
+  get conf() {
+    return bi("配置", "Config");
+  },
   jinja: "Jinja",
   j2: "Jinja",
   python: "Python",
   py: "Python",
-  diff: "差异",
+  get diff() {
+    return bi("差异", "Diff");
+  },
 };
 
 const EXT: Record<string, string> = {
@@ -325,12 +334,17 @@ const stamp = () => new Date().toISOString().slice(0, 10).replace(/-/g, "");
 async function scriptFolder(): Promise<string> {
   const top = await api<{ nodes: FileNode[] }>("/api/me/files");
   const have = top.nodes.find(
-    (n) => n.kind === "folder" && n.name === "AI 脚本",
+    (n) =>
+      n.kind === "folder" &&
+      (n.name === "AI 脚本" || n.name === "AI Scripts"),
   );
   if (have) return have.id;
   const made = await api<FileNode>("/api/me/files", {
     method: "POST",
-    body: JSON.stringify({ kind: "folder", name: "AI 脚本" }),
+    body: JSON.stringify({
+      kind: "folder",
+      name: bi("AI 脚本", "AI Scripts"),
+    }),
   });
   return made.id;
 }
@@ -344,6 +358,7 @@ export function CodeBlock({
   lang?: string;
   caption?: string;
 }) {
+  useLang();
   const [done, setDone] = useState(false);
   const [saving, setSaving] = useState(false);
   const ext = EXT[(lang || "").toLowerCase()];
@@ -368,7 +383,12 @@ export function CodeBlock({
     try {
       const r = await uploadFiles([file()], await scriptFolder());
       if (r.added.length)
-        Message.success(`已保存到「我的资料 / AI 脚本」：${r.added[0].name}`);
+        Message.success(
+          bi(
+            `已保存到「我的资料 / AI 脚本」：${r.added[0].name}`,
+            `Saved to "My Files / AI Scripts": ${r.added[0].name}`,
+          ),
+        );
       r.failed.forEach((m) => Message.warning(m));
     } catch (e) {
       err(e);
@@ -380,21 +400,28 @@ export function CodeBlock({
     <figure className="md-code">
       <figcaption>
         <span>
-          {caption || LANG[(lang || "").toLowerCase()] || lang || "命令"}
+          {caption ||
+            LANG[(lang || "").toLowerCase()] ||
+            lang ||
+            bi("命令", "Command")}
         </span>
         <span className="md-code-acts">
           {keep && (
             <>
-              <button type="button" onClick={download} aria-label="下载为文件">
-                <IconDownload /> 下载
+              <button
+                type="button"
+                onClick={download}
+                aria-label={bi("下载为文件", "Download as file")}
+              >
+                <IconDownload /> {bi("下载", "Download")}
               </button>
               <button
                 type="button"
                 onClick={save}
                 disabled={saving}
-                aria-label="保存到我的资料"
+                aria-label={bi("保存到我的资料", "Save to My Files")}
               >
-                <IconSave /> 保存
+                <IconSave /> {bi("保存", "Save")}
               </button>
             </>
           )}
@@ -405,10 +432,10 @@ export function CodeBlock({
               setDone(true);
               window.setTimeout(() => setDone(false), 1400);
             }}
-            aria-label="复制代码"
+            aria-label={bi("复制代码", "Copy code")}
           >
             {done ? <IconCheck /> : <IconCopy />}
-            {done ? "已复制" : "复制"}
+            {done ? bi("已复制", "Copied") : bi("复制", "Copy")}
           </button>
         </span>
       </figcaption>
@@ -495,7 +522,11 @@ function Blocks({ blocks }: { blocks: Block[] }) {
                     checked={/^\[[xX]\]/.test(it.text)}
                     readOnly
                     tabIndex={-1}
-                    aria-label={/^\[[xX]\]/.test(it.text) ? "已完成" : "未完成"}
+                    aria-label={
+                      /^\[[xX]\]/.test(it.text)
+                        ? bi("已完成", "Completed")
+                        : bi("未完成", "Incomplete")
+                    }
                   />
                 )}
                 <Inline text={it.text.replace(/^\[[ xX]\]\s/, "")} />
@@ -529,6 +560,7 @@ export const Markdown = React.memo(function Markdown({
   text: string;
   className?: string;
 }) {
+  useLang();
   const blocks = React.useMemo(() => parseMd(text), [text]);
   return (
     <div className={`md ${className || ""}`}>

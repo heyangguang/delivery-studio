@@ -470,7 +470,7 @@ func (s *storeServer) writeJSON(w http.ResponseWriter, status int, v any) {
 	json.NewEncoder(w).Encode(v)
 }
 func (s *storeServer) fail(w http.ResponseWriter, status int, message string) {
-	s.writeJSON(w, status, map[string]string{"error": message})
+	s.writeJSON(w, status, map[string]string{"error": localizeGoMessage(wLang(w), message)})
 }
 
 // audit records something the platform did on its own or outside a request (a delivery finishing, a reminder).
@@ -515,6 +515,9 @@ func (s *storeServer) writeAudit(event auditEvent) {
 }
 
 func (s *storeServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	lang := reqLang(r)
+	r = withLangContext(r, lang)
+	w = &langResponseWriter{ResponseWriter: w, lang: lang}
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")
@@ -541,7 +544,7 @@ func (s *storeServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.writeJSON(w, 200, map[string]any{
 			"version":     version,
 			"released_at": currentReleaseDate,
-			"notes":       platformReleaseNotes,
+			"notes":       releaseNotesFor(lang),
 		})
 		return
 	}
@@ -605,7 +608,7 @@ func (s *storeServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == "/api/logout" && r.Method == "POST":
 		s.logout(w, r, session)
 	case r.URL.Path == "/api/catalog" && r.Method == "GET":
-		s.writeJSON(w, 200, s.plat.entriesWith(r.URL.Query().Get("fronts") == "1"))
+		s.writeJSON(w, 200, localizeCatalogEntries(wLang(w), s.plat.entriesWith(r.URL.Query().Get("fronts") == "1")))
 	case r.URL.Path == "/api/components" || strings.HasPrefix(r.URL.Path, "/api/components/"):
 		s.handleComponents(w, r, session)
 	case r.URL.Path == "/api/library/python" || strings.HasPrefix(r.URL.Path, "/api/library/python/"):

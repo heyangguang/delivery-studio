@@ -13,6 +13,7 @@ import {
   IconFolder,
 } from "@arco-design/web-react/icon";
 import { cached, can, fetchCached, useAIStatus } from "./shared";
+import { bi, useLang } from "./i18n";
 import "./aitools.css";
 
 /* What a person switches on for their messages, the way chat apps put it behind a "+": think harder, search the
@@ -130,20 +131,44 @@ function Globe() {
 
 /** The "+" menu and, beside it, what is switched on. */
 const LEVELS: Record<string, string> = {
-  low: "低",
-  medium: "中",
-  high: "高",
-  xhigh: "很高",
-  max: "最高",
-  ultra: "极高",
+  get low() {
+    return bi("低", "Low");
+  },
+  get medium() {
+    return bi("中", "Medium");
+  },
+  get high() {
+    return bi("高", "High");
+  },
+  get xhigh() {
+    return bi("很高", "Very high");
+  },
+  get max() {
+    return bi("最高", "Max");
+  },
+  get ultra() {
+    return bi("极高", "Ultra");
+  },
 };
 const LEVEL_HINT: Record<string, string> = {
-  low: "想得少，回答快",
-  medium: "平衡速度与深度",
-  high: "想得比较深",
-  xhigh: "想得很深，明显更慢",
-  max: "想到最深，慢",
-  ultra: "最深的一档，最慢，费用也最高",
+  get low() {
+    return bi("想得少，回答快", "Thinks less, replies faster");
+  },
+  get medium() {
+    return bi("平衡速度与深度", "Balances speed and depth");
+  },
+  get high() {
+    return bi("想得比较深", "Thinks fairly deeply");
+  },
+  get xhigh() {
+    return bi("想得很深，明显更慢", "Thinks very deeply, noticeably slower");
+  },
+  get max() {
+    return bi("想到最深，慢", "Deepest reasoning, slower");
+  },
+  get ultra() {
+    return bi("最深的一档，最慢，费用也最高", "Maximum tier, slowest and highest cost");
+  },
 };
 
 /** How deep the model should think: a few pills, shallowest to deepest. Only the depths the model offers are there; the
@@ -157,11 +182,12 @@ function ThinkPills({
   value: string;
   onChange: (v: string) => void;
 }) {
+  useLang();
   const validLevels = (levels || []).filter((l) => LEVELS[l]);
   const active = value && validLevels.includes(value) ? value : "";
   const stops = ["", ...validLevels];
   return (
-    <div className="thk" role="group" aria-label="思考深度">
+    <div className="thk" role="group" aria-label={bi("思考深度", "Thinking depth")}>
       <div className="thk-row">
         {stops.map((s) => (
           <button
@@ -171,11 +197,15 @@ function ThinkPills({
             onClick={() => onChange(s)}
             aria-pressed={s === active}
           >
-            {s ? LEVELS[s] : "默认"}
+            {s ? LEVELS[s] : bi("默认", "Default")}
           </button>
         ))}
       </div>
-      <small>{active ? LEVEL_HINT[active] : "不指定，用模型自己的默认"}</small>
+      <small>
+        {active
+          ? LEVEL_HINT[active]
+          : bi("不指定，用模型自己的默认", "Unspecified; use model default")}
+      </small>
     </div>
   );
 }
@@ -206,6 +236,7 @@ export function ThinkLevel({
   value: string;
   onChange: (v: string) => void;
 }) {
+  useLang();
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<PopPos>("tl");
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -236,10 +267,13 @@ export function ThinkLevel({
         type="button"
         className={`tm-tog think ${active ? "on" : ""}`}
         aria-expanded={open}
-        title="思考深度：让模型想多深"
+        title={bi("思考深度：让模型想多深", "Thinking depth: how hard the model thinks")}
       >
         <IconBulb />
-        <span>思考{active ? ` · ${LEVELS[active]}` : ""}</span>
+        <span>
+          {bi("思考", "Think")}
+          {active ? ` · ${LEVELS[active]}` : ""}
+        </span>
       </button>
     </Popover>
   );
@@ -257,6 +291,7 @@ export function ToolMenu({
   attach?: { upload: () => void; pick: () => void };
   compact?: boolean;
 }) {
+  useLang();
   const { options: o, pref, update, opts } = t;
   const [open, setOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
@@ -270,7 +305,7 @@ export function ToolMenu({
     <div
       className="tm"
       role="dialog"
-      aria-label="工具"
+      aria-label={bi("工具", "Tools")}
       style={{ maxHeight: room }}
     >
       {attach && (
@@ -284,8 +319,13 @@ export function ToolMenu({
               <IconUpload />
             </span>
             <span className="tm-t">
-              <b>上传文件或图片</b>
-              <small>也可以直接拖进来或粘贴；会存进「我的资料」</small>
+              <b>{bi("上传文件或图片", "Upload file or image")}</b>
+              <small>
+                {bi(
+                  "也可以直接拖进来或粘贴；会存进「我的资料」",
+                  "Or drag and drop / paste directly; saved to My Files",
+                )}
+              </small>
             </span>
           </button>
           <button
@@ -297,8 +337,8 @@ export function ToolMenu({
               <IconFolder />
             </span>
             <span className="tm-t">
-              <b>从我的资料选择</b>
-              <small>用之前传过的文件</small>
+              <b>{bi("从我的资料选择", "Choose from My Files")}</b>
+              <small>{bi("用之前传过的文件", "Use previously uploaded files")}</small>
             </span>
           </button>
         </div>
@@ -309,7 +349,7 @@ export function ToolMenu({
             <IconBulb />
           </span>
           <span className="tm-t">
-            <b>思考深度</b>
+            <b>{bi("思考深度", "Thinking depth")}</b>
             <ThinkPills
               levels={levels}
               value={pref.think}
@@ -323,13 +363,22 @@ export function ToolMenu({
           <Globe />
         </span>
         <span className="tm-t">
-          <b>联网搜索</b>
+          <b>{bi("联网搜索", "Web search")}</b>
           <small>
             {o?.web
-              ? "平台和交付里查不到时，去网上找官方文档、版本说明、报错含义"
+              ? bi(
+                  "平台和交付里查不到时，去网上找官方文档、版本说明、报错含义",
+                  "Search official docs, release notes, and error meanings online when not found locally",
+                )
               : can("ai.settings")
-                ? "尚未开启联网搜索（可在 设置 → AI → 联网搜索 开启）"
-                : "管理员尚未开启联网搜索"}
+                ? bi(
+                    "尚未开启联网搜索（可在 设置 → AI → 联网搜索 开启）",
+                    "Web search is off (enable in Settings → AI → Web search)",
+                  )
+                : bi(
+                    "管理员尚未开启联网搜索",
+                    "Web search has not been enabled by an administrator",
+                  )}
           </small>
         </span>
         <Switch
@@ -337,7 +386,7 @@ export function ToolMenu({
           checked={opts.web}
           disabled={!o?.web}
           onChange={(v) => update({ web: v })}
-          aria-label="联网搜索"
+          aria-label={bi("联网搜索", "Web search")}
         />
       </label>
       {(o?.kb || 0) + (o?.kb_team || 0) > 0 && (
@@ -346,22 +395,31 @@ export function ToolMenu({
             <IconStorage />
           </span>
           <span className="tm-t">
-            <b>知识库</b>
+            <b>{bi("知识库", "Knowledge base")}</b>
             <small>
-              {[
-                o!.kb ? `你的 ${o!.kb} 份资料` : "",
-                o!.kb_team ? `团队的 ${o!.kb_team} 份资料` : "",
-              ]
-                .filter(Boolean)
-                .join("和")}
-              里先找相关内容
+              {bi(
+                `${[
+                  o!.kb ? `你的 ${o!.kb} 份资料` : "",
+                  o!.kb_team ? `团队的 ${o!.kb_team} 份资料` : "",
+                ]
+                  .filter(Boolean)
+                  .join("和")}里先找相关内容`,
+                `Search ${[
+                  o!.kb ? `your ${o!.kb} doc${o!.kb === 1 ? "" : "s"}` : "",
+                  o!.kb_team
+                    ? `team's ${o!.kb_team} doc${o!.kb_team === 1 ? "" : "s"}`
+                    : "",
+                ]
+                  .filter(Boolean)
+                  .join(" and ")} first`,
+              )}
             </small>
           </span>
           <Switch
             size="small"
             checked={!pref.noKB}
             onChange={(v) => update({ noKB: !v })}
-            aria-label="使用知识库"
+            aria-label={bi("使用知识库", "Use knowledge base")}
           />
         </label>
       )}
@@ -371,15 +429,27 @@ export function ToolMenu({
             <IconCode />
           </span>
           <span className="tm-t">
-            <b>沙箱代码每次询问</b>
+            <b>{bi("沙箱代码每次询问", "Ask before sandbox code")}</b>
             <small>
               {o.sandbox_exec_policy === "ask"
-                ? "平台已统一开启每次询问授权"
+                ? bi(
+                    "平台已统一开启每次询问授权",
+                    "Platform enforces confirmation before every execution",
+                  )
                 : pref.sandboxAsk
-                  ? "每次运行 Python 或技能脚本前先征得我同意"
+                  ? bi(
+                      "每次运行 Python 或技能脚本前先征得我同意",
+                      "Ask my permission before each Python or skill script run",
+                    )
                   : o.sandbox_exec_policy === "open"
-                    ? "当前按平台开放策略运行，开启后改为每次问我"
-                    : "当前按 AI 风险分级自动判断，开启后改为每次问我"}
+                    ? bi(
+                        "当前按平台开放策略运行，开启后改为每次问我",
+                        "Currently runs under open policy; turn on to ask every time",
+                      )
+                    : bi(
+                        "当前按 AI 风险分级自动判断，开启后改为每次问我",
+                        "Currently auto-decided by risk level; turn on to ask every time",
+                      )}
             </small>
           </span>
           <Switch
@@ -387,7 +457,7 @@ export function ToolMenu({
             checked={o.sandbox_exec_policy === "ask" || !!pref.sandboxAsk}
             disabled={o.sandbox_exec_policy === "ask"}
             onChange={(v) => update({ sandboxAsk: v })}
-            aria-label="沙箱代码每次询问"
+            aria-label={bi("沙箱代码每次询问", "Ask before sandbox code")}
           />
         </label>
       )}
@@ -403,9 +473,12 @@ export function ToolMenu({
               <IconBook />
             </span>
             <span className="tm-t">
-              <b>技能</b>
+              <b>{bi("技能", "Skills")}</b>
               <small>
-                用 {skillsOn} / {o!.skills.length} 个运维技能
+                {bi(
+                  `用 ${skillsOn} / ${o!.skills.length} 个运维技能`,
+                  `Using ${skillsOn} / ${o!.skills.length} ops skills`,
+                )}
               </small>
             </span>
             <IconDown className={skillsOpen ? "tm-flip" : ""} />
@@ -414,7 +487,7 @@ export function ToolMenu({
             <div className="tm-list">
               <div className="tm-all">
                 <button type="button" onClick={() => update({ skillsOff: [] })}>
-                  全部启用
+                  {bi("全部启用", "Enable all")}
                 </button>
                 <button
                   type="button"
@@ -422,7 +495,7 @@ export function ToolMenu({
                     update({ skillsOff: o!.skills.map((s) => s.name) })
                   }
                 >
-                  全部不用
+                  {bi("全部不用", "Disable all")}
                 </button>
               </div>
               {o!.skills.map((s) => (
@@ -439,7 +512,10 @@ export function ToolMenu({
                     }
                   />
                   <span>
-                    {s.title} {s.mine && <em className="tm-mine">我的</em>}
+                    {s.title}{" "}
+                    {s.mine && (
+                      <em className="tm-mine">{bi("我的", "Mine")}</em>
+                    )}
                   </span>
                 </label>
               ))}
@@ -449,7 +525,9 @@ export function ToolMenu({
       )}
       {(o?.mcp.length || 0) > 0 && (
         <div className="tm-sec">
-          <div className="tm-cap">外部服务（MCP）</div>
+          <div className="tm-cap">
+            {bi("外部服务（MCP）", "External services (MCP)")}
+          </div>
           {o!.mcp.map((m) => (
             <label key={m.id} className="tm-row">
               <span className="tm-ic mcp">
@@ -457,9 +535,15 @@ export function ToolMenu({
               </span>
               <span className="tm-t">
                 <b>
-                  {m.name} {m.mine && <em className="tm-mine">我的</em>}
+                  {m.name}{" "}
+                  {m.mine && <em className="tm-mine">{bi("我的", "Mine")}</em>}
                 </b>
-                <small>{m.tools} 个工具</small>
+                <small>
+                  {bi(
+                    `${m.tools} 个工具`,
+                    `${m.tools} tool${m.tools === 1 ? "" : "s"}`,
+                  )}
+                </small>
               </span>
               <Switch
                 size="small"
@@ -471,7 +555,7 @@ export function ToolMenu({
                       : [...pref.mcpOff, m.id],
                   })
                 }
-                aria-label={`使用 ${m.name}`}
+                aria-label={bi(`使用 ${m.name}`, `Use ${m.name}`)}
               />
             </label>
           ))}
@@ -504,7 +588,7 @@ export function ToolMenu({
           type="button"
           ref={btn}
           className={`tm-btn ${open ? "on" : ""} ${compact && (pref.think || opts.web) ? "lit" : ""}`}
-          aria-label="工具与选项"
+          aria-label={bi("工具与选项", "Tools & options")}
           aria-expanded={open}
         >
           <IconPlus />
@@ -524,15 +608,24 @@ export function ToolMenu({
             disabled={!o?.web}
             title={
               o?.web
-                ? "平台和交付里查不到时，去网上找官方文档、版本说明、报错含义"
+                ? bi(
+                    "平台和交付里查不到时，去网上找官方文档、版本说明、报错含义",
+                    "Search official docs, release notes, and error meanings online when not found locally",
+                  )
                 : can("ai.settings")
-                  ? "尚未开启联网搜索（可在 设置 → AI → 联网搜索 开启）"
-                  : "管理员尚未开启联网搜索"
+                  ? bi(
+                      "尚未开启联网搜索（可在 设置 → AI → 联网搜索 开启）",
+                      "Web search is off (enable in Settings → AI → Web search)",
+                    )
+                  : bi(
+                      "管理员尚未开启联网搜索",
+                      "Web search has not been enabled by an administrator",
+                    )
             }
             onClick={() => update({ web: !pref.web })}
           >
             <Globe />
-            <span>联网</span>
+            <span>{bi("联网", "Web")}</span>
           </button>
         </>
       )}

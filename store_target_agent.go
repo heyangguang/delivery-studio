@@ -53,10 +53,11 @@ func (s *storeServer) handleTargetAgents(w http.ResponseWriter, r *http.Request,
 		return false
 	}
 	if r.Method == "GET" {
+		lang := wLang(w)
 		out := []targetAgent{}
 		for _, a := range d.Agents {
 			if a.Job == j.ID {
-				out = append(out, publicTargetAgent(a))
+				out = append(out, localizeTargetAgent(lang, publicTargetAgent(a)))
 			}
 		}
 		sort.Slice(out, func(i, k int) bool { return out[i].Created > out[k].Created })
@@ -115,7 +116,7 @@ func (s *storeServer) handleTargetAgents(w http.ResponseWriter, r *http.Request,
 			return true
 		}
 		s.auditReq(r, "target-agent-revoke", session.User, a.ID)
-		s.writeJSON(w, 200, publicTargetAgent(a))
+		s.writeJSON(w, 200, localizeTargetAgent(wLang(w), publicTargetAgent(a)))
 		return true
 	}
 	if r.Method != "POST" {

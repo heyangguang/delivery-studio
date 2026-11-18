@@ -1,5 +1,6 @@
 import React, { useMemo } from "react";
 import { Markdown } from "./aimd";
+import { bi, useLang } from "./i18n";
 
 export type DocSectionTone =
   | "neutral"
@@ -190,16 +191,16 @@ function classifySectionTone(title: string): {
   badge?: string;
 } {
   const t = title.trim();
-  if (/^(现象|症状|故障现象|报错|异常表现|问题概述)/.test(t))
-    return { tone: "warn", badge: "现象" };
-  if (/^(证据|日志|现场证据|排查证据|核查依据|采集结果)/.test(t))
-    return { tone: "info", badge: "证据" };
-  if (/^(原因|根因|根本原因|原因分析)/.test(t))
-    return { tone: "cause", badge: "根因" };
-  if (/^(处理|修复|解决方案|处置步骤|恢复步骤|处置与验证)/.test(t))
-    return { tone: "ok", badge: "处置" };
-  if (/^(待跟进|红线|禁忌|高危|风险提示|安全约束)/.test(t))
-    return { tone: "danger", badge: "注意" };
+  if (/^(现象|症状|故障现象|报错|异常表现|问题概述)|^(symptoms?|observations?|errors?|anomal|issue overview)/i.test(t))
+    return { tone: "warn", badge: bi("现象", "Symptom") };
+  if (/^(证据|日志|现场证据|排查证据|核查依据|采集结果)|^(evidence|logs?|diagnostics?|collected|verification basis)/i.test(t))
+    return { tone: "info", badge: bi("证据", "Evidence") };
+  if (/^(原因|根因|根本原因|原因分析)|^(causes?|root cause|analysis)/i.test(t))
+    return { tone: "cause", badge: bi("根因", "Cause") };
+  if (/^(处理|修复|解决方案|处置步骤|恢复步骤|处置与验证)|^(handling|remediation|fix|resolution|recovery|mitigation|steps)/i.test(t))
+    return { tone: "ok", badge: bi("处置", "Action") };
+  if (/^(待跟进|红线|禁忌|高危|风险提示|安全约束)|^(follow-?up|red lines?|taboo|high risk|risk|warnings?|safety|constraints?)/i.test(t))
+    return { tone: "danger", badge: bi("注意", "Caution") };
   return { tone: "neutral" };
 }
 
@@ -302,13 +303,14 @@ export function StructuredDoc({
   idPrefix?: string;
   className?: string;
 }) {
+  const lang = useLang();
   const parsed = useMemo(
     () => extractDocSections(text, docTitle, idPrefix),
-    [text, docTitle, idPrefix],
+    [text, docTitle, idPrefix, lang],
   );
 
   if (!parsed.normalized) {
-    return <div className="rp-sdoc-empty">（暂无内容）</div>;
+    return <div className="rp-sdoc-empty">{bi("（暂无内容）", "(No content)")}</div>;
   }
 
   if (parsed.sections.length === 0) {
@@ -324,7 +326,7 @@ export function StructuredDoc({
   return (
     <div className={`rp-sdoc ${className}`.trim()}>
       {parsed.intro && (
-        <section className="rp-sdoc-sec rp-sdoc-intro" aria-label="导读">
+        <section className="rp-sdoc-sec rp-sdoc-intro" aria-label={bi("导读", "Overview")}>
           <header className="rp-sdoc-sec-h">
             <span className="rp-sdoc-num tone-intro" aria-hidden>
               <svg viewBox="0 0 16 16" fill="none">
@@ -345,7 +347,7 @@ export function StructuredDoc({
                 />
               </svg>
             </span>
-            <h2>导读</h2>
+            <h2>{bi("导读", "Overview")}</h2>
           </header>
           <div className="rp-sdoc-sec-b">
             <Markdown text={parsed.intro} className="rp-md rp-sdoc-md" />
@@ -368,7 +370,7 @@ export function StructuredDoc({
             {sec.body ? (
               <Markdown text={sec.body} className="rp-md rp-sdoc-md" />
             ) : (
-              <p className="rp-sdoc-muted">（本节无补充正文）</p>
+              <p className="rp-sdoc-muted">{bi("（本节无补充正文）", "(No additional content)")}</p>
             )}
           </div>
         </section>
@@ -379,17 +381,19 @@ export function StructuredDoc({
 
 export function DocToc({
   sections,
-  title = "章节目录",
+  title,
 }: {
   sections: DocSection[];
   title?: string;
 }) {
+  useLang();
+  const resolvedTitle = title ?? bi("章节目录", "Contents");
   if (sections.length < 2) return null;
   return (
-    <nav className="rp-toc" aria-label={title}>
+    <nav className="rp-toc" aria-label={resolvedTitle}>
       <div className="rp-toc-title">
-        <span>{title}</span>
-        <em>{sections.length} 节</em>
+        <span>{resolvedTitle}</span>
+        <em>{sections.length === 1 ? bi("1 节", "1 sec") : bi(`${sections.length} 节`, `${sections.length} secs`)}</em>
       </div>
       <ol className="rp-toc-list">
         {sections.map((sec) => (

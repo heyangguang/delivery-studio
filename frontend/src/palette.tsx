@@ -32,6 +32,7 @@ import { go } from "./router";
 import type { Route } from "./router";
 import { AppGlyph, StatusDot, TabIcon } from "./ui";
 import { Spark } from "./aichat";
+import { catLabel, useI18n } from "./i18n";
 
 type Item = {
   id: string;
@@ -96,6 +97,7 @@ function PaletteBody({
   dark,
   actions,
 }: PaletteProps) {
+  const { lang, setLang, bi } = useI18n();
   const [q, setQ] = useState("");
   const [i, setI] = useState(0);
   const input = useRef<HTMLInputElement>(null);
@@ -114,14 +116,18 @@ function PaletteBody({
     const s = q.trim().toLowerCase();
     const tokens = s ? s.split(/\s+/).filter(Boolean) : [];
 
+    const newGroup = bi("新建部署", "New Deployment");
+    const pageGroup = bi("前往页面", "Go to Page");
+    const prefGroup = bi("账户与偏好", "Account & Preferences");
+
     const base: Item[] = [
       ...apps
         .filter((a) => a.available && can("delivery.create"))
         .map<Item>((a) => ({
           id: `new-${a.id}`,
-          group: "新建部署",
-          label: `新建 ${a.name} 集群`,
-          hint: a.category || "向导",
+          group: newGroup,
+          label: bi(`新建 ${a.name} 集群`, `New ${a.name} cluster`),
+          hint: catLabel(a.category) || bi("向导", "Wizard"),
           icon: <IconPlus />,
           run: () => actions.create(a.id),
           keywords: `new create deploy 新建 创建 部署 ${a.id} ${(a.tags || []).join(" ")}`,
@@ -130,9 +136,9 @@ function PaletteBody({
         ? [
             {
               id: "go-d",
-              group: "前往页面",
-              label: "交付",
-              hint: "集群与部署工作台",
+              group: pageGroup,
+              label: bi("交付", "Deliveries"),
+              hint: bi("集群与部署工作台", "Clusters & deliveries console"),
               icon: <IconList />,
               run: () => actions.nav("deliveries"),
               keywords: "deliveries jobs clusters 集群 交付 部署 列表",
@@ -141,27 +147,27 @@ function PaletteBody({
         : []),
       {
         id: "go-a",
-        group: "前往页面",
-        label: "应用",
-        hint: "中间件目录",
+        group: pageGroup,
+        label: bi("应用", "Applications"),
+        hint: bi("中间件目录", "Middleware catalog"),
         icon: <IconApps />,
         run: () => actions.nav("apps"),
         keywords: "apps catalog store 应用 目录 中间件",
       },
       {
         id: "go-c",
-        group: "前往页面",
-        label: "组件",
-        hint: "组件包与编排规范",
+        group: pageGroup,
+        label: bi("组件", "Components"),
+        hint: bi("组件包与编排规范", "Component packs & orchestration specs"),
         icon: <TabIcon name="layers" size={15} />,
         run: () => actions.nav("components"),
         keywords: "components workbench import 组件 工坊 导入 组件包 yaml",
       },
       {
         id: "go-l",
-        group: "前往页面",
-        label: "软件库",
-        hint: "离线安装包与系统源",
+        group: pageGroup,
+        label: bi("软件库", "Library"),
+        hint: bi("离线安装包与系统源", "Offline packages & OS repositories"),
         icon: <TabIcon name="packages" size={15} />,
         run: () => actions.nav("library"),
         keywords: "library packages 软件包 离线包 软件源 mirror 镜像 rpm deb",
@@ -170,9 +176,9 @@ function PaletteBody({
         ? [
             {
               id: "go-ai",
-              group: "前往页面",
-              label: "AI 助手",
-              hint: "智能排障与对话",
+              group: pageGroup,
+              label: bi("AI 助手", "AI Assistant"),
+              hint: bi("智能排障与对话", "Troubleshooting & chat"),
               icon: <Spark size={15} rainbow />,
               run: () => actions.nav("ai"),
               keywords: "ai assistant chat 助手 问答 对话",
@@ -183,27 +189,27 @@ function PaletteBody({
         ? [
             {
               id: "go-kb",
-              group: "前往页面",
-              label: "知识库",
-              hint: "运维经验沉淀",
+              group: pageGroup,
+              label: bi("知识库", "Knowledge Base"),
+              hint: bi("运维经验沉淀", "Operational runbooks & notes"),
               icon: <IconBook />,
               run: () => actions.nav("kb"),
               keywords: "kb knowledge 知识库 经验 文档",
             },
             {
               id: "go-skills",
-              group: "前往页面",
-              label: "技能",
-              hint: "自动化诊断与操作技能",
+              group: pageGroup,
+              label: bi("技能", "Skills"),
+              hint: bi("自动化诊断与操作技能", "Diagnostic & automation skills"),
               icon: <Spark size={15} />,
               run: () => actions.nav("skills"),
               keywords: "skills 技能",
             },
             {
               id: "go-mcp",
-              group: "前往页面",
-              label: "MCP 服务",
-              hint: "外部工具连接",
+              group: pageGroup,
+              label: bi("MCP 服务", "MCP Servers"),
+              hint: bi("外部工具连接", "External tool integrations"),
               icon: <TabIcon name="terminal" size={15} />,
               run: () => actions.nav("mcp"),
               keywords: "mcp 工具 服务 连接",
@@ -214,9 +220,9 @@ function PaletteBody({
         ? [
             {
               id: "go-u",
-              group: "前往页面",
+              group: pageGroup,
               label: "IAM",
-              hint: "用户、角色、团队与审计",
+              hint: bi("用户、角色、团队与审计", "Users, roles, teams & audit"),
               icon: <IconUserGroup />,
               run: () => actions.nav("accounts"),
               keywords: "iam accounts users roles teams audit 用户 角色 团队 权限 审计",
@@ -229,9 +235,9 @@ function PaletteBody({
         ? [
             {
               id: "go-set",
-              group: "前往页面",
-              label: "平台设置",
-              hint: "通知、存储、执行节点与报告模板",
+              group: pageGroup,
+              label: bi("平台设置", "Platform Settings"),
+              hint: bi("通知、存储、执行节点与报告模板", "Notifications, storage, nodes & templates"),
               icon: <IconSettings />,
               run: () => actions.nav("settings"),
               keywords:
@@ -243,9 +249,9 @@ function PaletteBody({
         ? [
             {
               id: "go-ai-settings",
-              group: "前往页面",
-              label: "AI 套件与模型设置",
-              hint: "平台设置",
+              group: pageGroup,
+              label: bi("AI 套件与模型设置", "AI Suite & Model Settings"),
+              hint: bi("平台设置", "Platform Settings"),
               icon: <Spark size={15} rainbow={aiOn} />,
               run: () => go({ name: "settings", id: "ai" }),
               keywords: "ai toggle switch 开启 启用 关闭 套件 模型 供应商 设置 演练",
@@ -254,35 +260,46 @@ function PaletteBody({
         : []),
       {
         id: "go-me",
-        group: "账户与偏好",
-        label: "我的账户",
-        hint: "个人信息与权限概览",
+        group: prefGroup,
+        label: bi("我的账户", "My Account"),
+        hint: bi("个人信息与权限概览", "Profile & permissions"),
         icon: <IconUser />,
         run: () => go({ name: "me" }),
         keywords: "me profile account 我的 账户 个人",
       },
       {
         id: "go-pw",
-        group: "账户与偏好",
-        label: "修改密码",
-        hint: "账户安全",
+        group: prefGroup,
+        label: bi("修改密码", "Change Password"),
+        hint: bi("账户安全", "Account security"),
         icon: <IconLock />,
         run: () => go({ name: "me", id: "security" }),
         keywords: "password security 密码 安全 修改密码",
       },
       {
+        id: "lang",
+        group: prefGroup,
+        label: lang === "en-US" ? "切换语言为简体中文" : "Switch Language to English",
+        hint: lang === "en-US" ? "Current: English" : "当前：简体中文",
+        icon: <span className="mono" style={{ fontSize: 11, fontWeight: 700 }}>{lang === "en-US" ? "中" : "EN"}</span>,
+        run: () => setLang(lang === "en-US" ? "zh-CN" : "en-US"),
+        keywords: "language locale lang chinese english 中文 英文 语言 切换",
+      },
+      {
         id: "theme",
-        group: "账户与偏好",
-        label: dark ? "切换到浅色外观" : "切换到深色外观",
-        hint: dark ? "当前深色" : "当前浅色",
+        group: prefGroup,
+        label: dark
+          ? bi("切换到浅色外观", "Switch to Light Appearance")
+          : bi("切换到深色外观", "Switch to Dark Appearance"),
+        hint: dark ? bi("当前深色", "Current: Dark") : bi("当前浅色", "Current: Light"),
         icon: dark ? <IconSun /> : <IconMoon />,
         run: actions.theme,
         keywords: "theme dark light appearance 主题 外观 深色 浅色 暗黑 明亮",
       },
       {
         id: "out",
-        group: "账户与偏好",
-        label: "退出登录",
+        group: prefGroup,
+        label: bi("退出登录", "Sign out"),
         icon: <IconPoweroff />,
         run: actions.logout,
         keywords: "logout signout 退出 注销",
@@ -304,7 +321,7 @@ function PaletteBody({
       const stText = states[ph] || ph;
       return {
         id: `cl-${j.cluster_id}`,
-        group: s ? "集群" : "最近的集群",
+        group: s ? bi("集群", "Clusters") : bi("最近的集群", "Recent Clusters"),
         label: j.cluster_id,
         hint: `${j.app_name} · ${stText} · ${dayLabel(j.created)}`,
         icon: <StatusDot state={ph} />,
@@ -316,19 +333,19 @@ function PaletteBody({
 
     if (!s) {
       return [
-        ...base.filter((b) => b.group === "新建部署").slice(0, 4),
+        ...base.filter((b) => b.group === newGroup).slice(0, 4),
         ...clusterItems.slice(0, 5),
-        ...base.filter((b) => b.group !== "新建部署"),
+        ...base.filter((b) => b.group !== newGroup),
       ];
     }
 
     // Deep links to cluster tabs when searching
     const configItems: Item[] =
-      /配置|参数|端口|conf|config|yaml|ini/.test(s)
+      /配置|参数|端口|conf|config|yaml|ini|param|port/.test(s)
         ? latestClusters.map((j) => ({
             id: `cfg-${j.cluster_id}`,
-            group: "集群配置",
-            label: `${j.cluster_id} · 配置`,
+            group: bi("集群配置", "Cluster Config"),
+            label: bi(`${j.cluster_id} · 配置`, `${j.cluster_id} · Config`),
             hint: `${j.app_name} ${j.version || ""}`.trim(),
             icon: <TabIcon name="config" size={14} />,
             run: () =>
@@ -342,10 +359,12 @@ function PaletteBody({
       .sort((a, b) => b.created.localeCompare(a.created))
       .map((j) => {
         const modeLabel =
-          j.delivery_mode === "configuration" ? "配置交付" : "部署";
+          j.delivery_mode === "configuration"
+            ? bi("配置交付", "Config Delivery")
+            : bi("部署", "Deploy");
         return {
           id: `job-${j.id}`,
-          group: "部署记录",
+          group: bi("部署记录", "Deployments"),
           label: `${j.cluster_id} · ${modeLabel}`,
           hint: `${dayLabel(j.created)} ${clock(j.created)}`,
           icon: <StatusDot state={phaseOf(j)} />,
@@ -362,14 +381,14 @@ function PaletteBody({
       });
 
     const docItems: Item[] =
-      /报告|交接|文档|运维|kt|rca|report|doc|word/.test(s)
+      /报告|交接|文档|运维|kt|rca|report|doc|word|handover/.test(s)
         ? latestClusters
             .filter((j) => j.state === "succeeded" || phaseOf(j) === "done")
             .flatMap<Item>((j) => {
               const report: Item = {
                 id: `doc-d-${j.cluster_id}`,
-                group: "集群文档",
-                label: `${j.cluster_id} · 交付报告`,
+                group: bi("集群文档", "Cluster Docs"),
+                label: bi(`${j.cluster_id} · 交付报告`, `${j.cluster_id} · Delivery Report`),
                 hint: j.app_name,
                 icon: <IconFile />,
                 run: () =>
@@ -383,8 +402,8 @@ function PaletteBody({
               };
               const kt: Item = {
                 id: `doc-k-${j.cluster_id}`,
-                group: "集群文档",
-                label: `${j.cluster_id} · 运维交接文档`,
+                group: bi("集群文档", "Cluster Docs"),
+                label: bi(`${j.cluster_id} · 运维交接文档`, `${j.cluster_id} · Ops Handover`),
                 hint: j.app_name,
                 icon: <IconFile />,
                 run: () =>
@@ -394,9 +413,9 @@ function PaletteBody({
                     tab: "docs",
                     doc: "kt",
                   }),
-                keywords: `运维 交接 文档 kt doc ${j.cluster_id} ${j.app_name}`,
+                keywords: `运维 交接 文档 kt doc handover ${j.cluster_id} ${j.app_name}`,
               };
-              return /交接|运维|kt/.test(s) ? [kt, report] : [report, kt];
+              return /交接|运维|kt|handover/.test(s) ? [kt, report] : [report, kt];
             })
         : [];
 
@@ -404,7 +423,7 @@ function PaletteBody({
       aiOn &&
       !!aiStatus.features?.change_rehearsal &&
       can("ai.use") &&
-      /演练|变更|升级|扩容|缩容|调参|切换|高可用|sop|rehearsal/.test(s)
+      /演练|变更|升级|扩容|缩容|调参|切换|高可用|sop|rehearsal|change|upgrade|scale/.test(s)
         ? latestClusters
             .filter(
               (j) =>
@@ -412,8 +431,8 @@ function PaletteBody({
             )
             .map((j) => ({
               id: `rh-${j.cluster_id}`,
-              group: "变更演练",
-              label: `${j.cluster_id} · 变更演练`,
+              group: bi("变更演练", "Change Rehearsal"),
+              label: bi(`${j.cluster_id} · 变更演练`, `${j.cluster_id} · Rehearsal`),
               hint: `${j.app_name} ${j.version || ""}`.trim(),
               icon: <Spark size={14} rainbow />,
               run: () =>
@@ -428,9 +447,9 @@ function PaletteBody({
 
     const appItems: Item[] = apps.map((a) => ({
       id: `app-${a.id}`,
-      group: "应用目录",
-      label: a.available ? a.name : `${a.name}（暂未开放）`,
-      hint: [a.category, a.version].filter(Boolean).join(" · "),
+      group: bi("应用目录", "App Catalog"),
+      label: a.available ? a.name : bi(`${a.name}（暂未开放）`, `${a.name} (Unavailable)`),
+      hint: [catLabel(a.category), a.version].filter(Boolean).join(" · "),
       icon: (
         <AppGlyph
           id={a.id}
@@ -441,7 +460,7 @@ function PaletteBody({
         />
       ),
       run: () => actions.openApp(a.id),
-      keywords: `app 应用 ${a.id} ${a.name} ${a.category || ""} ${(a.tags || []).join(" ")}`,
+      keywords: `app 应用 ${a.id} ${a.name} ${a.category || ""} ${catLabel(a.category)} ${(a.tags || []).join(" ")}`,
     }));
 
     const pick = (pool: Item[], limit: number) =>
@@ -467,6 +486,7 @@ function PaletteBody({
     apps,
     admin,
     dark,
+    lang,
     aiOn,
     aiStatus.features?.assistant,
     aiStatus.features?.change_rehearsal,
@@ -498,7 +518,7 @@ function PaletteBody({
         className="pal"
         role="dialog"
         aria-modal="true"
-        aria-label="全局搜索与快速跳转"
+        aria-label={bi("全局搜索与快速跳转", "Global search & quick jump")}
         onKeyDown={(e) => {
           if (e.key === "Escape") {
             e.preventDefault();
@@ -514,8 +534,11 @@ function PaletteBody({
             autoFocus
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="搜索集群、应用、配置与部署，或跳转页面…"
-            aria-label="搜索集群、应用或页面"
+            placeholder={bi(
+              "搜索集群、应用、配置与部署，或跳转页面…",
+              "Search clusters, apps, configs, deployments, or jump to a page…",
+            )}
+            aria-label={bi("搜索集群、应用或页面", "Search clusters, apps, or pages")}
             aria-activedescendant={
               activeIdx >= 0 && items[activeIdx]
                 ? `pal-${items[activeIdx].id}`
@@ -562,7 +585,7 @@ function PaletteBody({
             }}
           />
           {loading && (
-            <span className="pal-spin" aria-label="正在同步数据">
+            <span className="pal-spin" aria-label={bi("正在同步数据", "Syncing data")}>
               <Spin size={14} />
             </span>
           )}
@@ -574,7 +597,7 @@ function PaletteBody({
                 setQ("");
                 input.current?.focus();
               }}
-              aria-label="清空搜索词"
+              aria-label={bi("清空搜索词", "Clear search query")}
             >
               <IconClose />
             </button>
@@ -587,8 +610,14 @@ function PaletteBody({
             <IconWifi />
             <span>
               {net === "offline"
-                ? "网络已断开，当前仅在已缓存的集群与目录中检索"
-                : "暂时无法连接服务，当前显示最近缓存的数据"}
+                ? bi(
+                    "网络已断开，当前仅在已缓存的集群与目录中检索",
+                    "Offline: searching only cached clusters and catalog entries",
+                  )
+                : bi(
+                    "暂时无法连接服务，当前显示最近缓存的数据",
+                    "Service unreachable: showing recently cached data",
+                  )}
             </span>
           </div>
         )}
@@ -597,17 +626,20 @@ function PaletteBody({
           {items.length === 0 && loading ? (
             <div className="pal-empty" role="status">
               <Spin size={20} />
-              <b>正在载入集群与应用目录…</b>
-              <span>请稍候，载入完成后将自动匹配结果</span>
+              <b>{bi("正在载入集群与应用目录…", "Loading clusters and app catalog…")}</b>
+              <span>{bi("请稍候，载入完成后将自动匹配结果", "Results will appear once loading finishes")}</span>
             </div>
           ) : items.length === 0 ? (
             <div className="pal-empty" role="status">
               <span className="pal-empty-ic" aria-hidden>
                 <IconSearch />
               </span>
-              <b>未找到与「{q.trim()}」匹配的结果</b>
+              <b>{bi(`未找到与「${q.trim()}」匹配的结果`, `No matches for "${q.trim()}"`)}</b>
               <span>
-                试试搜索集群名称、中间件类型、配置、部署、变更演练或系统设置
+                {bi(
+                  "试试搜索集群名称、中间件类型、配置、部署、变更演练或系统设置",
+                  "Try searching a cluster name, middleware, config, deploy, rehearsal, or settings",
+                )}
               </span>
               {q && (
                 <button
@@ -618,7 +650,7 @@ function PaletteBody({
                     input.current?.focus();
                   }}
                 >
-                  清空搜索词
+                  {bi("清空搜索词", "Clear query")}
                 </button>
               )}
             </div>
@@ -669,17 +701,19 @@ function PaletteBody({
           <div className="pal-foot-keys">
             <span>
               <kbd>↑</kbd>
-              <kbd>↓</kbd> 选择
+              <kbd>↓</kbd> {bi("选择", "Select")}
             </span>
             <span>
-              <kbd>↵</kbd> 打开
+              <kbd>↵</kbd> {bi("打开", "Open")}
             </span>
             <span>
-              <kbd>Esc</kbd> 关闭
+              <kbd>Esc</kbd> {bi("关闭", "Close")}
             </span>
           </div>
           {q.trim() && items.length > 0 && (
-            <span className="pal-foot-count num">{items.length} 项匹配</span>
+            <span className="pal-foot-count num">
+              {bi(`${items.length} 项匹配`, `${items.length} matches`)}
+            </span>
           )}
         </div>
       </div>

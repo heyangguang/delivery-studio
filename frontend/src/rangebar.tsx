@@ -1,6 +1,7 @@
 import React from "react";
 import { DatePicker } from "@arco-design/web-react";
 import { Segmented } from "./ui";
+import { bi, useLang } from "./i18n";
 
 export type Range = { preset: string; from: string; to: string };
 
@@ -47,21 +48,22 @@ export function RangeBar({
   value: Range;
   onChange: (r: Range) => void;
 }) {
+  useLang();
   return (
     <div className="au-range">
       <Segmented
         size="lg"
-        label="时间范围"
+        label={bi("时间范围", "Time range")}
         value={value.preset}
         onChange={(v) =>
           onChange(v === "custom" ? { ...value, preset: "custom" } : rangeOf(v))
         }
         options={[
-          { value: "today", label: "今天" },
-          { value: "24h", label: "24 小时" },
-          { value: "7d", label: "7 天" },
-          { value: "30d", label: "30 天" },
-          { value: "custom", label: "自定义" },
+          { value: "today", label: bi("今天", "Today") },
+          { value: "24h", label: bi("24 小时", "24h") },
+          { value: "7d", label: bi("7 天", "7d") },
+          { value: "30d", label: bi("30 天", "30d") },
+          { value: "custom", label: bi("自定义", "Custom") },
         ]}
       />
       {value.preset === "custom" ? (
@@ -80,7 +82,7 @@ export function RangeBar({
               onChange(rangeOf("custom", c));
             }
           }}
-          aria-label="自定义时间范围"
+          aria-label={bi("自定义时间范围", "Custom time range")}
         />
       ) : null}
     </div>

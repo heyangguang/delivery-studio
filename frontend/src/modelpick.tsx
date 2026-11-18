@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Popover, Tooltip } from "@arco-design/web-react";
 import { IconCheck, IconDown } from "@arco-design/web-react/icon";
 import { cached, fetchCached, useAIStatus } from "./shared";
+import { bi, useLang } from "./i18n";
 import { ProviderLogo } from "./ailogo";
 import "./aiwork.css";
 
@@ -126,6 +127,7 @@ export function ModelPicker({
   pick: ReturnType<typeof useModelPick>;
   compact?: boolean;
 }) {
+  useLang();
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<PopPlacement>("tl");
   const [maxH, setMaxH] = useState(380);
@@ -140,7 +142,9 @@ export function ModelPicker({
   const cur = pick.current;
   if (pick.models.length === 0 && !cur) return null;
   const selected = pick.ref || pick.defaultRef || cur?.ref || "";
-  const curText = cur ? disambiguatedLabel(cur, pick.models) : "选择模型";
+  const curText = cur
+    ? disambiguatedLabel(cur, pick.models)
+    : bi("选择模型", "Select model");
   const hasMenu = pick.models.length > 1;
   const label = (
     <button
@@ -149,7 +153,9 @@ export function ModelPicker({
       className={`mp ${compact ? "compact" : ""} ${hasMenu ? "" : "static"} ${open ? "on" : ""}`}
       aria-expanded={hasMenu ? open : undefined}
       aria-label={
-        hasMenu ? `模型：${curText}，点击切换` : `当前模型：${curText}`
+        hasMenu
+          ? bi(`模型：${curText}，点击切换`, `Model: ${curText}, click to switch`)
+          : bi(`当前模型：${curText}`, `Current model: ${curText}`)
       }
     >
       {cur && (
@@ -199,7 +205,7 @@ export function ModelPicker({
         <div
           className="mp-menu"
           role="listbox"
-          aria-label="选择模型"
+          aria-label={bi("选择模型", "Select model")}
           style={{ maxHeight: maxH }}
         >
           {groups.map(([provider, items]) => (
@@ -231,12 +237,18 @@ export function ModelPicker({
                         <b>{disambiguatedLabel(m, pick.models)}</b>
                         <small>
                           <span className="mono">{m.model}</span>
-                          {m.ref === pick.defaultRef ? " · 默认" : ""}
+                          {m.ref === pick.defaultRef
+                            ? bi(" · 默认", " · Default")
+                            : ""}
                         </small>
                       </span>
                       <span className="mp-caps">
-                        {m.vision === "yes" && <em>看图</em>}
-                        {m.tools === "no" && <em className="no">无工具</em>}
+                        {m.vision === "yes" && (
+                          <em>{bi("看图", "Vision")}</em>
+                        )}
+                        {m.tools === "no" && (
+                          <em className="no">{bi("无工具", "No tools")}</em>
+                        )}
                       </span>
                       {isOn && <IconCheck className="mp-on" />}
                     </span>

@@ -13,6 +13,44 @@ import {
 } from "@arco-design/web-react/icon";
 import { copy, size } from "./shared";
 import type { FetchTask, TaskStep } from "./shared";
+import { bi, getLang, useLang } from "./i18n";
+
+function txStep(s: string): string {
+  if (!s || getLang() !== "en-US") return s;
+  const exact: Record<string, string> = {
+    软件包: "Packages",
+    软件包清单: "Package index",
+    仓库清单与签名: "Repo metadata & signature",
+    发布清单与签名: "Release manifest & signature",
+    "解析依赖并下载 wheel": "Resolve deps & download wheels",
+    存入软件库: "Save to library",
+    下载并校验: "Downloading & verifying",
+    读取并验证签名: "Reading & verifying signature",
+    已校验: "Verified",
+    签名有效: "Signature valid",
+    库里已有: "In library",
+    没有变化: "No changes",
+    其他: "Other",
+  };
+  if (exact[s]) return exact[s];
+  let m = /^(.+?)\s*·\s*发布清单与签名$/.exec(s);
+  if (m) return `${m[1]} · Release manifest & signature`;
+  m = /^下载\s+(.+)$/.exec(s);
+  if (m) return `Downloading ${m[1]}`;
+  m = /^运行环境\s+(.+)$/.exec(s);
+  if (m) return `Runtime ${m[1]}`;
+  m = /^已入库\s*·\s*(\d+)\s*个文件$/.exec(s);
+  if (m) return `Stored · ${m[1]} ${m[1] === "1" ? "file" : "files"}`;
+  m = /^(\d[\d,]*)\s*个版本$/.exec(s);
+  if (m) return `${m[1]} ${m[1] === "1" ? "version" : "versions"}`;
+  m = /^(\d+)\s*个\s*wheel$/i.exec(s);
+  if (m) return `${m[1]} ${m[1] === "1" ? "wheel" : "wheels"}`;
+  m = /^(\d+)\s*个软件包\s*·\s*(.+)$/.exec(s);
+  if (m) return `${m[1]} ${m[1] === "1" ? "package" : "packages"} · ${m[2]}`;
+  m = /^(\d+)\s*个文件$/.exec(s);
+  if (m) return `${m[1]} ${m[1] === "1" ? "file" : "files"}`;
+  return s;
+}
 
 const finished = (s: TaskStep) => s.state === "done" || s.state === "skipped";
 
@@ -71,19 +109,36 @@ function WrapGlyph() {
 }
 
 function StepMark({ s }: { s: TaskStep["state"] }) {
+  useLang();
   if (s === "done")
-    return <IconCheckCircleFill className="tk-ic s-done" aria-label="完成" />;
+    return (
+      <IconCheckCircleFill
+        className="tk-ic s-done"
+        aria-label={bi("完成", "Done")}
+      />
+    );
   if (s === "failed")
-    return <IconCloseCircleFill className="tk-ic s-fail" aria-label="失败" />;
+    return (
+      <IconCloseCircleFill
+        className="tk-ic s-fail"
+        aria-label={bi("失败", "Failed")}
+      />
+    );
   if (s === "running")
-    return <IconLoading spin className="tk-ic s-run" aria-label="进行中" />;
+    return (
+      <IconLoading
+        spin
+        className="tk-ic s-run"
+        aria-label={bi("进行中", "Running")}
+      />
+    );
   if (s === "skipped")
     return (
-      <span className="tk-ic s-skip" aria-label="沿用本地">
+      <span className="tk-ic s-skip" aria-label={bi("沿用本地", "Cached")}>
         –
       </span>
     );
-  return <span className="tk-ic s-wait" aria-label="等待" />;
+  return <span className="tk-ic s-wait" aria-label={bi("等待", "Pending")} />;
 }
 
 /** Break step labels like "noble-updates · main 软件包清单" into suite/component pills. */
@@ -93,20 +148,20 @@ function renderStepLabel(s: TaskStep) {
   if (dotIdx > 0) {
     const scope = raw.slice(0, dotIdx).trim();
     const rest = raw.slice(dotIdx + 3).trim();
-    const pkgMatch = /^(\S+)\s+(软件包清单)$/.exec(rest);
+    const pkgMatch = /^(\S+)\s+(软件包清单|Package index)$/i.exec(rest);
     if (pkgMatch) {
       return (
         <span className="tk-label">
           <span className="tk-tag suite mono">{scope}</span>
           <span className="tk-tag comp mono">{pkgMatch[1]}</span>
-          <span className="tk-title-txt">{pkgMatch[2]}</span>
+          <span className="tk-title-txt">{txStep(pkgMatch[2])}</span>
         </span>
       );
     }
     return (
       <span className="tk-label">
         <span className="tk-tag suite mono">{scope}</span>
-        <span className="tk-title-txt">{rest}</span>
+        <span className="tk-title-txt">{txStep(rest)}</span>
       </span>
     );
   }
@@ -123,7 +178,7 @@ function renderStepLabel(s: TaskStep) {
   }
   return (
     <span className="tk-label">
-      <span className="tk-title-txt">{raw}</span>
+      <span className="tk-title-txt">{txStep(raw)}</span>
     </span>
   );
 }
@@ -137,7 +192,7 @@ function renderStepMeta(s: TaskStep, withSize: boolean) {
     return (
       <span className="tk-meta">
         {detail && <span className="tk-fail-msg">{detail}</span>}
-        <span className="tk-badge bad">失败</span>
+        <span className="tk-badge bad">{bi("失败", "Failed")}</span>
       </span>
     );
   }
@@ -145,7 +200,9 @@ function renderStepMeta(s: TaskStep, withSize: boolean) {
   if (s.state === "running") {
     return (
       <span className="tk-meta">
-        <span className="tk-badge run">{detail || "处理中"}</span>
+        <span className="tk-badge run">
+          {detail ? txStep(detail) : bi("处理中", "Processing")}
+        </span>
       </span>
     );
   }
@@ -155,25 +212,25 @@ function renderStepMeta(s: TaskStep, withSize: boolean) {
       ? detail
           .split("·")
           .map((p) => p.trim())
-          .filter((p) => p && !/^没有变化$/i.test(p))
+          .filter((p) => p && !/^(没有变化|No changes)$/i.test(p))
       : [];
     return (
       <span className="tk-meta">
         {parts.map((p, idx) => (
           <span key={idx} className="tk-chip num">
-            {p}
+            {txStep(p)}
           </span>
         ))}
         {sz && <span className="tk-chip num sz">{sz}</span>}
-        <span className="tk-badge skip">沿用本地</span>
+        <span className="tk-badge skip">{bi("沿用本地", "Cached")}</span>
       </span>
     );
   }
 
-  if (detail === "签名有效") {
+  if (detail === "签名有效" || detail === "Signature valid") {
     return (
       <span className="tk-meta">
-        <span className="tk-badge ok">签名有效</span>
+        <span className="tk-badge ok">{bi("签名有效", "Signature valid")}</span>
       </span>
     );
   }
@@ -186,28 +243,30 @@ function renderStepMeta(s: TaskStep, withSize: boolean) {
     : [];
 
   if (s.state === "done" && parts.length > 0) {
-    const verPart = parts.find((p) => /个版本|wheel/.test(p));
+    const verPart = parts.find((p) => /个版本|wheel|version/i.test(p));
     const sizePart = parts.find((p) => /\b(B|KB|MB|GB)\b/i.test(p));
     const otherParts = parts.filter((p) => p !== verPart && p !== sizePart);
     return (
       <span className="tk-meta">
-        {verPart && <span className="tk-chip num">{verPart}</span>}
+        {verPart && <span className="tk-chip num">{txStep(verPart)}</span>}
         {(sizePart || sz) && (
           <span className="tk-chip num sz">{sizePart || sz}</span>
         )}
         {otherParts.map((p, idx) => (
           <span key={idx} className="tk-badge ok">
-            {p}
+            {txStep(p)}
           </span>
         ))}
-        {!otherParts.length && <span className="tk-badge ok">已更新</span>}
+        {!otherParts.length && (
+          <span className="tk-badge ok">{bi("已更新", "Updated")}</span>
+        )}
       </span>
     );
   }
 
   return (
     <span className="tk-meta">
-      {detail && <span className="tk-detail">{detail}</span>}
+      {detail && <span className="tk-detail">{txStep(detail)}</span>}
       {sz && <span className="tk-chip num sz">{sz}</span>}
     </span>
   );
@@ -238,6 +297,7 @@ function SourceGroupCard({
   collapsed: boolean;
   onToggle: () => void;
 }) {
+  useLang();
   const doneCount = group.items.filter((x) => x.state === "done").length;
   const skipCount = group.items.filter((x) => x.state === "skipped").length;
   const failCount = group.items.filter((x) => x.state === "failed").length;
@@ -267,10 +327,10 @@ function SourceGroupCard({
         >
           <IconDown className={`tk-gchev ${collapsed ? "is-shut" : ""}`} />
           <StepMark s={groupState} />
-          <b className="tk-gtitle">{group.title}</b>
+          <b className="tk-gtitle">{txStep(group.title)}</b>
           <span className="tk-gmeta">
             {group.head?.detail ? (
-              <span className="tk-chip">{group.head.detail}</span>
+              <span className="tk-chip">{txStep(group.head.detail)}</span>
             ) : (
               <>
                 <span className="tk-gbar" aria-hidden="true">
@@ -294,16 +354,27 @@ function SourceGroupCard({
                   )}
                 </span>
                 {doneCount > 0 && (
-                  <span className="tk-gpill ok num">{doneCount} 更新</span>
+                  <span className="tk-gpill ok num">
+                    {bi(`${doneCount} 更新`, `${doneCount} updated`)}
+                  </span>
                 )}
                 {skipCount > 0 && (
-                  <span className="tk-gpill skip num">{skipCount} 沿用</span>
+                  <span className="tk-gpill skip num">
+                    {bi(`${skipCount} 沿用`, `${skipCount} cached`)}
+                  </span>
                 )}
                 {failCount > 0 && (
-                  <span className="tk-gpill bad num">{failCount} 失败</span>
+                  <span className="tk-gpill bad num">
+                    {bi(`${failCount} 失败`, `${failCount} failed`)}
+                  </span>
                 )}
                 {!doneCount && !skipCount && !failCount && (
-                  <span className="tk-gpill num">{group.items.length} 项</span>
+                  <span className="tk-gpill num">
+                    {bi(
+                      `${group.items.length} 项`,
+                      `${group.items.length} ${group.items.length === 1 ? "item" : "items"}`,
+                    )}
+                  </span>
                 )}
               </>
             )}
@@ -320,13 +391,13 @@ function SourceGroupCard({
 /** Classify & highlight console log lines for fast visual scanning while preserving raw clipboard output. */
 function renderLogLine(line: string, lineNo: number) {
   const trimmed = line.trim();
-  const isErr = /失败|错误|拒绝|不一致|\berror\b|\bfailed\b/i.test(trimmed);
-  const isOk = !isErr && /(索引已更新|已入库|已准备好|同步完成)/.test(trimmed);
+  const isErr = /失败|错误|拒绝|不一致|\berror\b|\bfailed\b|\brefused\b|\bmismatch\b/i.test(trimmed);
+  const isOk = !isErr && /(索引已更新|已入库|已准备好|同步完成|\bIndex updated\b|\bStored\b)/i.test(trimmed);
   const isSkip =
-    !isErr && /(没有变化|沿用本地|库里已有)/.test(trimmed);
-  const isDl = !isErr && !isSkip && /^下载\s+/.test(trimmed);
+    !isErr && /(没有变化|沿用本地|库里已有|\bNo changes\b|\bCached\b)/i.test(trimmed);
+  const isDl = !isErr && !isSkip && /^(下载|Downloading)\s+/i.test(trimmed);
   const isPhase =
-    !isErr && !isOk && !isSkip && !isDl && /^(读取|在\s+\S+\s+容器|解析)/.test(trimmed);
+    !isErr && !isOk && !isSkip && !isDl && /^(读取|在\s+\S+\s+容器|解析|Reading|Resolving)/i.test(trimmed);
 
   const kind = isErr
     ? "is-err"
@@ -437,6 +508,7 @@ export function TaskCard({
   task: FetchTask;
   onClose?: () => void;
 }) {
+  const lang = useLang();
   const steps = task.steps || [];
   const isPy = task.kind === "python";
   const isIndex = task.kind === "index" || isPy;
@@ -491,26 +563,29 @@ export function TaskCard({
 
   const title = isPy
     ? running
-      ? "正在准备运行环境"
+      ? bi("正在准备运行环境", "Building runtime")
       : failed
-        ? "运行环境没有准备好"
-        : "运行环境已准备好"
+        ? bi("运行环境没有准备好", "Runtime build failed")
+        : bi("运行环境已准备好", "Runtime ready")
     : isIndex
       ? running
-        ? "正在更新软件源索引"
+        ? bi("正在更新软件源索引", "Updating source index")
         : failed
-          ? "更新软件源索引没有完成"
-          : "软件源索引已更新"
+          ? bi("更新软件源索引没有完成", "Source index update failed")
+          : bi("软件源索引已更新", "Source index updated")
       : running
-        ? `正在下载 ${task.packages.length} 个软件版本`
+        ? bi(
+            `正在下载 ${task.packages.length} 个软件版本`,
+            `Downloading ${task.packages.length} ${task.packages.length === 1 ? "package" : "packages"}`,
+          )
         : failed
-          ? "下载没有完成"
-          : "下载完成";
+          ? bi("下载没有完成", "Download failed")
+          : bi("下载完成", "Download complete");
 
   const groups: TaskGroup[] = useMemo(() => {
     if (isIndex) {
       const grouped = steps.reduce<Record<string, TaskStep[]>>((m, s) => {
-        (m[s.group || "其他"] ||= []).push(s);
+        (m[s.group || bi("其他", "Other")] ||= []).push(s);
         return m;
       }, {});
       return Object.entries(grouped).map(([gTitle, items]) => ({
@@ -528,7 +603,7 @@ export function TaskCard({
       }));
     }
     return [{ key: "all", title: "", items: steps }];
-  }, [isIndex, steps, reqs, files]);
+  }, [isIndex, steps, reqs, files, lang]);
 
   const visibleGroups = useMemo(() => {
     if (filter === "all" || running) return groups;
@@ -551,8 +626,9 @@ export function TaskCard({
       return (
         <span className="tk-sub muted">
           {now
-            ? `${now.label}${now.detail ? " · " + now.detail : ""}`
-            : task.logs[task.logs.length - 1]?.trim() || "准备中…"}
+            ? `${txStep(now.label)}${now.detail ? " · " + txStep(now.detail) : ""}`
+            : task.logs[task.logs.length - 1]?.trim() ||
+              bi("准备中…", "Preparing…")}
         </span>
       );
     }
@@ -562,12 +638,12 @@ export function TaskCard({
           <span className="tk-stat bad">
             <i />
             {bad
-              ? `${bad.label}：${bad.detail || task.error || "失败"}`
-              : task.error || "操作失败"}
+              ? `${txStep(bad.label)}${bi("：", ": ")}${bad.detail ? txStep(bad.detail) : task.error || bi("失败", "Failed")}`
+              : task.error || bi("操作失败", "Operation failed")}
           </span>
           {secs > 0 && (
             <span className="tk-stat time num">
-              <ClockGlyph /> 用时 {secs} 秒
+              <ClockGlyph /> {bi(`用时 ${secs} 秒`, `${secs}s elapsed`)}
             </span>
           )}
         </div>
@@ -582,11 +658,11 @@ export function TaskCard({
       return (
         <div className="tk-summary-pills">
           <span className="tk-stat ok">
-            <i /> {pySummary || "已完成"}
+            <i /> {pySummary ? txStep(pySummary) : bi("已完成", "Completed")}
           </span>
           {secs > 0 && (
             <span className="tk-stat time num">
-              <ClockGlyph /> 用时 {secs} 秒
+              <ClockGlyph /> {bi(`用时 ${secs} 秒`, `${secs}s elapsed`)}
             </span>
           )}
         </div>
@@ -596,16 +672,16 @@ export function TaskCard({
       return (
         <div className="tk-summary-pills">
           <span className="tk-stat ok num">
-            <i /> {doneSteps.length} 项已更新
+            <i /> {bi(`${doneSteps.length} 项已更新`, `${doneSteps.length} updated`)}
           </span>
           {skipped.length > 0 && (
             <span className="tk-stat skip num">
-              <i /> {skipped.length} 项沿用本地
+              <i /> {bi(`${skipped.length} 项沿用本地`, `${skipped.length} cached`)}
             </span>
           )}
           {secs > 0 && (
             <span className="tk-stat time num">
-              <ClockGlyph /> 用时 {secs} 秒
+              <ClockGlyph /> {bi(`用时 ${secs} 秒`, `${secs}s elapsed`)}
             </span>
           )}
         </div>
@@ -615,16 +691,20 @@ export function TaskCard({
     return (
       <div className="tk-summary-pills">
         <span className="tk-stat ok num">
-          <i /> {downloaded.length} 个文件已下载（{size(dlBytes)}）
+          <i />{" "}
+          {bi(
+            `${downloaded.length} 个文件已下载（${size(dlBytes)}）`,
+            `${downloaded.length} ${downloaded.length === 1 ? "file" : "files"} downloaded (${size(dlBytes)})`,
+          )}
         </span>
         {skipped.length > 0 && (
           <span className="tk-stat skip num">
-            <i /> {skipped.length} 个库中已有
+            <i /> {bi(`${skipped.length} 个库中已有`, `${skipped.length} in library`)}
           </span>
         )}
         {secs > 0 && (
           <span className="tk-stat time num">
-            <ClockGlyph /> 用时 {secs} 秒
+            <ClockGlyph /> {bi(`用时 ${secs} 秒`, `${secs}s elapsed`)}
           </span>
         )}
       </div>
@@ -663,7 +743,7 @@ export function TaskCard({
               aria-expanded={open}
             >
               <IconList />
-              <span>明细</span>
+              <span>{bi("明细", "Details")}</span>
               <em className="num">{detailCount}</em>
               <IconDown className={open ? "tk-flip" : ""} />
             </button>
@@ -676,7 +756,7 @@ export function TaskCard({
               aria-expanded={raw}
             >
               <IconCode />
-              <span>原始日志</span>
+              <span>{bi("原始日志", "Raw logs")}</span>
               {task.logs.length > 0 && (
                 <em className="num">{task.logs.length}</em>
               )}
@@ -690,7 +770,7 @@ export function TaskCard({
               className="tk-close"
               icon={<IconClose />}
               onClick={onClose}
-              aria-label="关闭这条记录"
+              aria-label={bi("关闭这条记录", "Dismiss this task")}
             />
           )}
         </div>
@@ -703,7 +783,7 @@ export function TaskCard({
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={percent}
-          aria-label="总进度"
+          aria-label={bi("总进度", "Overall progress")}
         >
           <i style={{ width: `${Math.max(3, percent)}%` }} />
         </div>
@@ -714,13 +794,17 @@ export function TaskCard({
           {!running &&
             (groups.length > 1 || (doneSteps.length > 0 && skipped.length > 0)) && (
               <div className="tk-dbar">
-                <div className="tk-dfilters" role="group" aria-label="按结果筛选">
+                <div
+                  className="tk-dfilters"
+                  role="group"
+                  aria-label={bi("按结果筛选", "Filter by status")}
+                >
                   <button
                     type="button"
                     className={`tk-df ${filter === "all" ? "on" : ""}`}
                     onClick={() => setFilter("all")}
                   >
-                    全部 <em className="num">{detailCount}</em>
+                    {bi("全部", "All")} <em className="num">{detailCount}</em>
                   </button>
                   {doneSteps.length > 0 && (
                     <button
@@ -728,7 +812,8 @@ export function TaskCard({
                       className={`tk-df ${filter === "done" ? "on" : ""}`}
                       onClick={() => setFilter("done")}
                     >
-                      已更新 <em className="num">{doneSteps.length}</em>
+                      {bi("已更新", "Updated")}{" "}
+                      <em className="num">{doneSteps.length}</em>
                     </button>
                   )}
                   {skipped.length > 0 && (
@@ -737,7 +822,8 @@ export function TaskCard({
                       className={`tk-df ${filter === "skipped" ? "on" : ""}`}
                       onClick={() => setFilter("skipped")}
                     >
-                      沿用本地 <em className="num">{skipped.length}</em>
+                      {bi("沿用本地", "Cached")}{" "}
+                      <em className="num">{skipped.length}</em>
                     </button>
                   )}
                   {failedSteps.length > 0 && (
@@ -746,7 +832,8 @@ export function TaskCard({
                       className={`tk-df bad ${filter === "failed" ? "on" : ""}`}
                       onClick={() => setFilter("failed")}
                     >
-                      失败 <em className="num">{failedSteps.length}</em>
+                      {bi("失败", "Failed")}{" "}
+                      <em className="num">{failedSteps.length}</em>
                     </button>
                   )}
                 </div>
@@ -764,7 +851,9 @@ export function TaskCard({
                       setCollapsed(next);
                     }}
                   >
-                    {allCollapsed ? "全部展开" : "全部收起"}
+                    {allCollapsed
+                      ? bi("全部展开", "Expand all")
+                      : bi("全部收起", "Collapse all")}
                   </button>
                 )}
               </div>
@@ -795,10 +884,15 @@ export function TaskCard({
                 <i />
               </span>
               <span className="tk-log-title">
-                <IconCode /> 同步输出日志
+                <IconCode /> {bi("同步输出日志", "Sync output log")}
               </span>
               {task.logs.length > 0 && (
-                <em className="tk-log-cnt num">{task.logs.length} 行</em>
+                <em className="tk-log-cnt num">
+                  {bi(
+                    `${task.logs.length} 行`,
+                    `${task.logs.length} ${task.logs.length === 1 ? "line" : "lines"}`,
+                  )}
+                </em>
               )}
             </div>
             <div className="tk-log-tools">
@@ -806,10 +900,17 @@ export function TaskCard({
                 type="button"
                 className={`tk-log-btn ${wrap ? "on" : ""}`}
                 onClick={() => setWrap((w) => !w)}
-                title={wrap ? "当前自动换行，点击改为横向滚动" : "点击开启自动换行"}
+                title={
+                  wrap
+                    ? bi(
+                        "当前自动换行，点击改为横向滚动",
+                        "Line wrap enabled; click for horizontal scroll",
+                      )
+                    : bi("点击开启自动换行", "Enable line wrap")
+                }
               >
                 <WrapGlyph />
-                <span>换行</span>
+                <span>{bi("换行", "Wrap")}</span>
               </button>
               {task.logs.length > 0 && (
                 <button
@@ -822,7 +923,9 @@ export function TaskCard({
                   }}
                 >
                   {copied ? <IconCheck /> : <IconCopy />}
-                  <span>{copied ? "已复制" : "复制"}</span>
+                  <span>
+                    {copied ? bi("已复制", "Copied") : bi("复制", "Copy")}
+                  </span>
                 </button>
               )}
             </div>
@@ -831,14 +934,16 @@ export function TaskCard({
             className={`tk-log-body mono ${wrap ? "wrap" : ""}`}
             ref={logRef}
             role="log"
-            aria-label="原始日志"
+            aria-label={bi("原始日志", "Raw logs")}
           >
             {task.logs.length ? (
               task.logs.map((l, idx) => renderLogLine(l, idx))
             ) : (
               <div className="tk-log-ln is-plain">
                 <span className="tk-ln-no num">1</span>
-                <span className="tk-ln-msg tk-lmute">准备中…</span>
+                <span className="tk-ln-msg tk-lmute">
+                  {bi("准备中…", "Preparing…")}
+                </span>
               </div>
             )}
           </div>

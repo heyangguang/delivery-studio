@@ -90,7 +90,7 @@ func (s *storeServer) compose(event string, vars map[string]string, link string)
 func (s *storeServer) handleNotifyTemplates(w http.ResponseWriter, r *http.Request, session storeSession, parts []string) {
 	switch {
 	case len(parts) == 0 && r.Method == "GET":
-		s.writeJSON(w, 200, map[string]any{"events": notifyEvents, "custom": s.notifyTemplates()})
+		s.writeJSON(w, 200, map[string]any{"events": localizedNotifyEvents(wLang(w), notifyEvents), "custom": s.notifyTemplates()})
 	case len(parts) == 1 && r.Method == "PUT":
 		ev, ok := notifyEventByID(parts[0])
 		if !ok {
@@ -148,7 +148,7 @@ func (s *storeServer) handleNotifyTemplates(w http.ResponseWriter, r *http.Reque
 			}
 			vars["channel"] = c.Name
 			m := s.compose(ev.ID, vars, s.cfg.PublicURL)
-			m.Title = "【示例】" + m.Title
+			m.Title = tr(wLang(w), "【示例】", "[Sample] ") + m.Title
 			err := sendTo(c, m)
 			a := notifyAttempt{At: nowStamp(), Channel: c.ID, Name: c.Name, Event: ev.ID, Title: m.Title, OK: err == nil}
 			if err != nil {

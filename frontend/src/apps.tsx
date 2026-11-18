@@ -52,8 +52,17 @@ import {
   UnderlineTabs,
   tintOf,
 } from "./ui";
+import { bi, canonicalCat, catLabel, getLang, useLang } from "./i18n";
 
 import type { LoadState } from "./deliveries";
+
+const isAllCat = (c?: string) => !c || c === "全部" || c === "All";
+const catKey = (c?: string) => canonicalCat(c) || "其他";
+const displayCat = (c?: string, fallback?: string) => {
+  if (!c) return fallback ?? bi("中间件", "Middleware");
+  if (c === "其他" || c.toLowerCase() === "other") return bi("其他", "Other");
+  return catLabel(c);
+};
 
 const shortVersion = (v: string) => v.split("·")[0].trim();
 const platformParts = (p: string) => p.split("/").map((x) => x.trim());
@@ -125,6 +134,7 @@ function PlanGlyph({ topology }: { topology: AppPlan["topology"] }) {
 }
 
 function Plans({ app, plans }: { app: AppInfo; plans: AppPlan[] }) {
+  useLang();
   const off = !app.available || !can("delivery.create");
   return (
     <div className="plan-cards">
@@ -142,13 +152,13 @@ function Plans({ app, plans }: { app: AppInfo; plans: AppPlan[] }) {
           <span className="plan-card-go">
             {off ? (
               !app.available ? (
-                "暂未开放"
+                bi("暂未开放", "Unavailable")
               ) : (
                 ""
               )
             ) : (
               <>
-                用此方案新建 <IconRight />
+                {bi("用此方案新建", "Use this plan")} <IconRight />
               </>
             )}
           </span>
@@ -165,19 +175,24 @@ function Plans({ app, plans }: { app: AppInfo; plans: AppPlan[] }) {
           <i />
           <i />
         </span>
-        <span className="plan-card-tag">自由组合</span>
-        <strong>自定义</strong>
-        <span className="plan-card-spec">节点、复制、加密与参数逐项决定</span>
+        <span className="plan-card-tag">{bi("自由组合", "Custom")}</span>
+        <strong>{bi("自定义", "Custom")}</strong>
+        <span className="plan-card-spec">
+          {bi(
+            "节点、复制、加密与参数逐项决定",
+            "Configure nodes, replication, TLS & parameters manually",
+          )}
+        </span>
         <span className="plan-card-go">
           {off ? (
             !app.available ? (
-              "暂未开放"
+              bi("暂未开放", "Unavailable")
             ) : (
               ""
             )
           ) : (
             <>
-              从空白开始 <IconRight />
+              {bi("从空白开始", "Start from scratch")} <IconRight />
             </>
           )}
         </span>
@@ -207,40 +222,48 @@ const DEFAULTS: Filters = {
   view: "wide",
 };
 const isDefault = (f: Filters) =>
-  !f.q && f.cat === "全部" && !f.tags.length && !f.only && !f.mine;
-const SORTS: { value: Filters["sort"]; label: string }[] = [
-  { value: "rec", label: "推荐" },
-  { value: "recent", label: "最近使用" },
-  { value: "name", label: "名称" },
+  !f.q && isAllCat(f.cat) && !f.tags.length && !f.only && !f.mine;
+
+const getSorts = (
+  lang: string,
+): { value: Filters["sort"]; label: string; sig: string }[] => [
+  { value: "rec", label: bi("推荐", "Recommended"), sig: lang },
+  { value: "recent", label: bi("最近使用", "Recently used"), sig: lang },
+  { value: "name", label: bi("名称", "Name"), sig: lang },
 ];
 
-const VIEWS: { value: Filters["view"]; label: React.ReactNode }[] = [
+const getViews = (
+  lang: string,
+): { value: Filters["view"]; label: React.ReactNode; sig: string }[] => [
   {
     value: "wide",
     label: (
       <>
         <IconLayout />
-        <span className="seg-text">详细</span>
+        <span className="seg-text">{bi("详细", "Detailed")}</span>
       </>
     ),
+    sig: lang,
   },
   {
     value: "grid",
     label: (
       <>
         <IconApps />
-        <span className="seg-text">网格</span>
+        <span className="seg-text">{bi("网格", "Grid")}</span>
       </>
     ),
+    sig: lang,
   },
   {
     value: "list",
     label: (
       <>
         <IconList />
-        <span className="seg-text">列表</span>
+        <span className="seg-text">{bi("列表", "List")}</span>
       </>
     ),
+    sig: lang,
   },
 ];
 
@@ -261,12 +284,12 @@ function matchApp(a: AppInfo, f: Filters, usage: Usage, skip?: "cat" | "tags") {
   const q = f.q.trim().toLowerCase();
   if (
     q &&
-    !`${a.name} ${a.version} ${a.category || ""} ${a.description} ${a.detail?.tagline || ""} ${(a.tags || []).join(" ")}`
+    !`${a.name} ${a.version} ${a.category || ""} ${catLabel(a.category)} ${a.description} ${a.detail?.tagline || ""} ${(a.tags || []).join(" ")}`
       .toLowerCase()
       .includes(q)
   )
     return false;
-  if (skip !== "cat" && f.cat !== "全部" && (a.category || "其他") !== f.cat)
+  if (skip !== "cat" && !isAllCat(f.cat) && catKey(a.category) !== catKey(f.cat))
     return false;
   if (skip !== "tags" && f.tags.some((t) => !(a.tags || []).includes(t)))
     return false;
@@ -298,11 +321,12 @@ function showDeliveriesOf(app: string) {
 const badge = (a: AppInfo) => (
   <StatusBadge
     state={a.available ? "succeeded" : "queued"}
-    label={a.available ? "可生成" : "暂未开放"}
+    label={a.available ? bi("可生成", "Ready") : bi("暂未开放", "Unavailable")}
   />
 );
 
 function AppTile({ a, usage }: { a: AppInfo; usage: Usage }) {
+  useLang();
   const used = usage.get(a.id);
   const plans = plansOf(a);
   const caps = (a.detail?.capabilities || []).map((c) => c.name);
@@ -327,20 +351,22 @@ function AppTile({ a, usage }: { a: AppInfo; usage: Usage }) {
               }}
               aria-hidden
             />
-            {a.category || "中间件"} · {shortVersion(a.version)}
+            {displayCat(a.category)} · {shortVersion(a.version)}
           </span>
         </div>
       </div>
       <p>{tagline(a)}</p>
       <dl className="tile2-facts">
         <div>
-          <dt>方案</dt>
+          <dt>{bi("方案", "Plans")}</dt>
           <dd title={plans.map((p) => p.name).join(" · ")}>
-            {plans.length ? plans.map((p) => p.name).join(" · ") : "按需组合"}
+            {plans.length
+              ? plans.map((p) => p.name).join(" · ")
+              : bi("按需组合", "Customizable")}
           </dd>
         </div>
         <div>
-          <dt>能力</dt>
+          <dt>{bi("能力", "Features")}</dt>
           <dd title={caps.join(" · ")}>
             {caps.length ? caps.join(" · ") : (a.tags || []).join(" · ") || "—"}
           </dd>
@@ -349,7 +375,14 @@ function AppTile({ a, usage }: { a: AppInfo; usage: Usage }) {
       <div className="tile2-foot">
         <span className="tile2-meta num">
           <span>{a.detail?.scale || a.platform}</span>
-          {used ? <span>我的交付 {used.count}</span> : null}
+          {used ? (
+            <span>
+              {bi(
+                `我的交付 ${used.count}`,
+                `${used.count} ${used.count === 1 ? "delivery" : "deliveries"}`,
+              )}
+            </span>
+          ) : null}
         </span>
         {a.available && can("delivery.create") ? (
           <Button
@@ -357,9 +390,9 @@ function AppTile({ a, usage }: { a: AppInfo; usage: Usage }) {
             size="small"
             icon={<IconPlus />}
             onClick={() => go({ name: "new", app: a.id })}
-            aria-label={`新建 ${a.name} 集群`}
+            aria-label={bi(`新建 ${a.name} 集群`, `New ${a.name} cluster`)}
           >
-            新建集群
+            {bi("新建集群", "New cluster")}
           </Button>
         ) : a.available ? null : (
           badge(a)
@@ -370,6 +403,7 @@ function AppTile({ a, usage }: { a: AppInfo; usage: Usage }) {
 }
 
 function AppRow({ a, usage }: { a: AppInfo; usage: Usage }) {
+  useLang();
   const used = usage.get(a.id);
   const plans = plansOf(a);
   const caps = (a.detail?.capabilities || []).map((c) => c.name);
@@ -395,7 +429,7 @@ function AppRow({ a, usage }: { a: AppInfo; usage: Usage }) {
           <span
             className="cat-caps small"
             title={(a.detail?.capabilities || [])
-              .map((c) => `${c.name}：${c.text}`)
+              .map((c) => `${c.name}${bi("：", ": ")}${c.text}`)
               .join("\n")}
           >
             {caps.slice(0, 4).join(" · ")}
@@ -403,7 +437,12 @@ function AppRow({ a, usage }: { a: AppInfo; usage: Usage }) {
         )}
         <div className="cat-tags">
           {plans.length > 0 && (
-            <span className="cat-plans">{plans.length} 个方案</span>
+            <span className="cat-plans">
+              {bi(
+                `${plans.length} 个方案`,
+                `${plans.length} ${plans.length === 1 ? "plan" : "plans"}`,
+              )}
+            </span>
           )}
           {(a.tags || []).slice(0, 3).map((t) => (
             <span key={t}>{t}</span>
@@ -411,9 +450,16 @@ function AppRow({ a, usage }: { a: AppInfo; usage: Usage }) {
         </div>
       </div>
       <div className="cat-side">
-        <span className="muted small">{a.category || "中间件"}</span>
+        <span className="muted small">{displayCat(a.category)}</span>
         <span className="muted small">{a.detail?.scale || a.platform}</span>
-        {used && <span className="muted small num">我的交付 {used.count}</span>}
+        {used && (
+          <span className="muted small num">
+            {bi(
+              `我的交付 ${used.count}`,
+              `${used.count} ${used.count === 1 ? "delivery" : "deliveries"}`,
+            )}
+          </span>
+        )}
       </div>
       {badge(a)}
       {a.available && can("delivery.create") ? (
@@ -421,9 +467,9 @@ function AppRow({ a, usage }: { a: AppInfo; usage: Usage }) {
           size="small"
           icon={<IconPlus />}
           onClick={() => go({ name: "new", app: a.id })}
-          aria-label={`新建 ${a.name} 集群`}
+          aria-label={bi(`新建 ${a.name} 集群`, `New ${a.name} cluster`)}
         >
-          新建
+          {bi("新建", "New")}
         </Button>
       ) : (
         <span className="cat-gap" />
@@ -434,6 +480,7 @@ function AppRow({ a, usage }: { a: AppInfo; usage: Usage }) {
 
 /** A catalog entry with everything needed to act on it: its plans start a delivery, its recent deliveries open. */
 function AppWide({ a, mine }: { a: AppInfo; mine: Job[] }) {
+  useLang();
   const plans = plansOf(a);
   const canCreate = can("delivery.create");
   const [accent] = styleOf(a.id, a.category, a.icon, a.color).color.hero;
@@ -465,11 +512,15 @@ function AppWide({ a, mine }: { a: AppInfo; mine: Job[] }) {
             <div className="wide-subline">
               <span className="wide-ver">{shortVersion(a.version)}</span>
               <span className="wide-dot">·</span>
-              <span>{a.category || "中间件"}</span>
+              <span>{displayCat(a.category)}</span>
               <span className="wide-dot">·</span>
               <span>{a.detail?.scale || a.platform}</span>
             </div>
-            <p>{a.available ? tagline(a) : a.reason || "暂未开放，敬请期待"}</p>
+            <p>
+              {a.available
+                ? tagline(a)
+                : a.reason || bi("暂未开放，敬请期待", "Not yet available")}
+            </p>
             {(a.tags?.length || 0) > 0 && (
               <div className="tile2-tags">
                 {(a.tags || []).slice(0, 5).map((t) => (
@@ -480,7 +531,7 @@ function AppWide({ a, mine }: { a: AppInfo; mine: Job[] }) {
           </div>
         </div>
         {(a.detail?.capabilities?.length || 0) > 0 && (
-          <dl className="wide-caps" aria-label="能力要点">
+          <dl className="wide-caps" aria-label={bi("能力要点", "Key capabilities")}>
             {a.detail!.capabilities!.slice(0, 3).map((c) => (
               <div key={c.name}>
                 <dt>{c.name}</dt>
@@ -495,9 +546,9 @@ function AppWide({ a, mine }: { a: AppInfo; mine: Job[] }) {
               type="primary"
               icon={<IconPlus />}
               onClick={() => go({ name: "new", app: a.id })}
-              aria-label={`新建 ${a.name} 集群`}
+              aria-label={bi(`新建 ${a.name} 集群`, `New ${a.name} cluster`)}
             >
-              新建
+              {bi("新建", "New")}
             </Button>
           )}
           <Button
@@ -505,7 +556,7 @@ function AppWide({ a, mine }: { a: AppInfo; mine: Job[] }) {
             type="text"
             onClick={() => go({ name: "apps", id: a.id })}
           >
-            详情 <IconRight />
+            {bi("详情", "Details")} <IconRight />
           </Button>
         </div>
       </div>
@@ -516,9 +567,9 @@ function AppWide({ a, mine }: { a: AppInfo; mine: Job[] }) {
           {plans.length > 0 && (
             <div className="wide-col">
               <h3>
-                <span>从架构方案起步</span>
+                <span>{bi("从架构方案起步", "Start from a blueprint")}</span>
                 {!recent.length && a.available && (
-                  <em>尚未创建该应用交付</em>
+                  <em>{bi("尚未创建该应用交付", "No deliveries yet")}</em>
                 )}
               </h3>
               <ul className="wide-plans">
@@ -527,7 +578,10 @@ function AppWide({ a, mine }: { a: AppInfo; mine: Job[] }) {
                     <button
                       disabled={!a.available || !canCreate}
                       onClick={() => go({ name: "new", app: a.id, plan: p.id })}
-                      aria-label={`用${p.name}方案新建 ${a.name} 集群`}
+                      aria-label={bi(
+                        `用${p.name}方案新建 ${a.name} 集群`,
+                        `New ${a.name} cluster with ${p.name}`,
+                      )}
                     >
                       <span className="wide-plan-well">
                         <PlanGlyph topology={p.topology} />
@@ -549,7 +603,8 @@ function AppWide({ a, mine }: { a: AppInfo; mine: Job[] }) {
           {recent.length > 0 && (
             <div className="wide-col jobs">
               <h3>
-                我的交付 <em className="num">{mine.length}</em>
+                {bi("我的交付", "My deliveries")}{" "}
+                <em className="num">{mine.length}</em>
               </h3>
               <ul className="wide-jobs">
                 {recent.map((j) => (
@@ -580,6 +635,7 @@ function JobTimeline({
   apps?: Map<string, AppInfo>;
   empty: React.ReactNode;
 }) {
+  useLang();
   if (!jobs.length) return <div className="side-empty">{empty}</div>;
   return (
     <Timeline className="job-tl">
@@ -620,6 +676,7 @@ export function AppsPage({
   selected?: string;
   jobs: Job[];
 }) {
+  const lang = useLang();
   const [f, setF] = useStored<Filters>("mh-apps-filters", DEFAULTS);
   const set = (p: Partial<Filters>) => setF((c) => ({ ...c, ...p }));
   const usage = useMemo(() => usageOf(jobs), [jobs]);
@@ -649,16 +706,20 @@ export function AppsPage({
     apps
       .filter((a) => matchApp(a, f, usage, "cat"))
       .forEach((a) =>
-        m.set(a.category || "其他", (m.get(a.category || "其他") || 0) + 1),
+        m.set(catKey(a.category), (m.get(catKey(a.category)) || 0) + 1),
       );
     const all = new Map<string, number>();
     apps.forEach((a) =>
-      all.set(a.category || "其他", (all.get(a.category || "其他") || 0) + 1),
+      all.set(catKey(a.category), (all.get(catKey(a.category)) || 0) + 1),
     );
     return [...all.keys()]
-      .sort((a, b) => all.get(b)! - all.get(a)! || a.localeCompare(b))
+      .sort(
+        (a, b) =>
+          all.get(b)! - all.get(a)! ||
+          displayCat(a).localeCompare(displayCat(b), getLang()),
+      )
       .map((c) => [c, m.get(c) || 0] as [string, number]);
-  }, [apps, f.q, f.tags, f.only, f.mine, usage]);
+  }, [apps, f.q, f.tags, f.only, f.mine, usage, lang]);
   const tags = useMemo(() => {
     const m = new Map<string, number>();
     apps
@@ -668,12 +729,13 @@ export function AppsPage({
       );
     f.tags.forEach((t) => m.has(t) || m.set(t, 0));
     return [...m.entries()]
-      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], getLang()))
       .slice(0, 16);
-  }, [apps, f.q, f.cat, f.only, f.mine, f.tags, usage]);
+  }, [apps, f.q, f.cat, f.only, f.mine, f.tags, usage, lang]);
   const list = useMemo(() => {
     const l = apps.filter((a) => matchApp(a, f, usage));
-    const byName = (a: AppInfo, b: AppInfo) => a.name.localeCompare(b.name);
+    const byName = (a: AppInfo, b: AppInfo) =>
+      a.name.localeCompare(b.name, getLang());
     return l.sort(
       f.sort === "name"
         ? byName
@@ -687,7 +749,7 @@ export function AppsPage({
               (usage.get(b.id)?.count || 0) - (usage.get(a.id)?.count || 0) ||
               byName(a, b),
     );
-  }, [apps, f, usage]);
+  }, [apps, f, usage, lang]);
 
   const app = apps.find((a) => a.id === selected);
   if (selected) {
@@ -710,10 +772,10 @@ export function AppsPage({
       );
     return (
       <div className="detail-none enter">
-        <h2>找不到这个应用</h2>
-        <p>应用目录中没有这一项。</p>
+        <h2>{bi("找不到这个应用", "App not found")}</h2>
+        <p>{bi("应用目录中没有这一项。", "This application is not in the catalog.")}</p>
         <Button onClick={() => go({ name: "apps" }, { replace: true })}>
-          返回应用
+          {bi("返回应用", "Back to Apps")}
         </Button>
       </div>
     );
@@ -724,7 +786,7 @@ export function AppsPage({
   const byCat = (() => {
     const m = new Map<string, AppInfo[]>();
     list.forEach((a) =>
-      m.set(a.category || "其他", [...(m.get(a.category || "其他") || []), a]),
+      m.set(catKey(a.category), [...(m.get(catKey(a.category)) || []), a]),
     );
     const entries = [...m.entries()];
     if (f.sort !== "rec") return entries;
@@ -733,7 +795,7 @@ export function AppsPage({
         y[1].filter((a) => a.available).length -
           x[1].filter((a) => a.available).length ||
         y[1].length - x[1].length ||
-        x[0].localeCompare(y[0]),
+        displayCat(x[0]).localeCompare(displayCat(y[0]), getLang()),
     );
   })();
   const totalApps = cats.length ? apps.length : 0;
@@ -762,10 +824,10 @@ export function AppsPage({
     );
 
   const rail = (
-    <aside className="store-rail" aria-label="筛选应用">
+    <aside className="store-rail" aria-label={bi("筛选应用", "Filter apps")}>
       <div className="list-head">
         <div className="list-title">
-          <h1>应用</h1>
+          <h1>{bi("应用", "Apps")}</h1>
         </div>
         <Input
           ref={(r) => {
@@ -775,24 +837,24 @@ export function AppsPage({
           prefix={<IconSearch />}
           suffix={!f.q ? <Kbd>/</Kbd> : undefined}
           allowClear
-          placeholder="搜索名称、标签、说明"
+          placeholder={bi("搜索名称、标签、说明", "Search name, tags, description")}
           value={f.q}
           onChange={(v) => set({ q: v })}
           onKeyDown={(e) => {
             if (e.key === "Escape")
               (set({ q: "" }), (e.target as HTMLInputElement).blur());
           }}
-          aria-label="搜索应用"
+          aria-label={bi("搜索应用", "Search apps")}
         />
       </div>
       <div className="store-rail-body">
-        <nav className="rail-group" aria-label="分类">
-        <h3>分类</h3>
+        <nav className="rail-group" aria-label={bi("分类", "Categories")}>
+        <h3>{bi("分类", "Categories")}</h3>
         <button
-          className={f.cat === "全部" ? "on" : ""}
+          className={isAllCat(f.cat) ? "on" : ""}
           onClick={() => set({ cat: "全部" })}
         >
-          <span>全部</span>
+          <span>{bi("全部", "All")}</span>
           <em className="num">
             {apps.filter((a) => matchApp(a, f, usage, "cat")).length}
           </em>
@@ -800,9 +862,9 @@ export function AppsPage({
         {cats.map(([c, n]) => (
           <button
             key={c}
-            className={f.cat === c ? "on" : ""}
+            className={!isAllCat(f.cat) && catKey(f.cat) === c ? "on" : ""}
             onClick={() => set({ cat: c })}
-            disabled={!n && f.cat !== c}
+            disabled={!n && catKey(f.cat) !== c}
           >
             <span className="rail-cat">
               <i
@@ -811,15 +873,19 @@ export function AppsPage({
                 }}
                 aria-hidden
               />
-              {c}
+              {displayCat(c, bi("其他", "Other"))}
             </span>
             <em className="num">{n}</em>
           </button>
         ))}
       </nav>
       {tags.length > 0 && (
-        <div className="rail-group" role="group" aria-label="标签">
-          <h3>标签</h3>
+        <div
+          className="rail-group"
+          role="group"
+          aria-label={bi("标签", "Tags")}
+        >
+          <h3>{bi("标签", "Tags")}</h3>
           <div className="rail-tags">
             {tags.map(([t, n]) => {
               const on = f.tags.includes(t);
@@ -856,21 +922,25 @@ export function AppsPage({
           </div>
         </div>
       )}
-      <div className="rail-group" role="group" aria-label="范围">
-        <h3>范围</h3>
+      <div
+        className="rail-group"
+        role="group"
+        aria-label={bi("范围", "Scope")}
+      >
+        <h3>{bi("范围", "Scope")}</h3>
         <Checkbox
           className="rail-check"
           checked={f.only}
           onChange={(c) => set({ only: c })}
         >
-          只看可生成
+          {bi("只看可生成", "Ready only")}
         </Checkbox>
         <Checkbox
           className="rail-check"
           checked={f.mine}
           onChange={(c) => set({ mine: c })}
         >
-          我用过的
+          {bi("我用过的", "Used by me")}
         </Checkbox>
       </div>
       </div>
@@ -883,40 +953,56 @@ export function AppsPage({
       <main className="store-main">
         <header className="store-bar">
           <div>
-            <h2>{f.cat === "全部" ? "全部应用" : f.cat}</h2>
+            <h2>
+              {isAllCat(f.cat)
+                ? bi("全部应用", "All Apps")
+                : displayCat(f.cat, bi("其他", "Other"))}
+            </h2>
             <p className="muted small num" aria-live="polite">
               {load === "ready"
                 ? plain
-                  ? `共 ${totalApps} 个应用，${apps.filter((a) => a.available).length} 个可生成`
-                  : `${list.length} / ${apps.length} 个应用`
-                : "正在加载…"}
+                  ? bi(
+                      `共 ${totalApps} 个应用，${apps.filter((a) => a.available).length} 个可生成`,
+                      `${totalApps} ${totalApps === 1 ? "app" : "apps"}, ${apps.filter((a) => a.available).length} ready`,
+                    )
+                  : bi(
+                      `${list.length} / ${apps.length} 个应用`,
+                      `${list.length} of ${apps.length} apps`,
+                    )
+                : bi("正在加载…", "Loading…")}
             </p>
           </div>
           <div className="store-bar-tools">
             <Segmented
-              label="排序"
+              label={bi("排序", "Sort")}
               value={f.sort}
               onChange={(v) => set({ sort: v })}
-              options={SORTS}
+              options={getSorts(lang)}
             />
             <Segmented
-              label="显示方式"
+              label={bi("显示方式", "View")}
               value={f.view}
               onChange={(v) => set({ view: v })}
-              options={VIEWS}
+              options={getViews(lang)}
             />
           </div>
         </header>
 
         {!plain && (
-          <div className="active-filters" aria-label="已选筛选">
+          <div
+            className="active-filters"
+            aria-label={bi("已选筛选", "Active filters")}
+          >
             {f.q && (
               <FilterChip label={f.q} onClose={() => set({ q: "" })}>
-                “{f.q}”
+                {bi(`“${f.q}”`, `"${f.q}"`)}
               </FilterChip>
             )}
-            {f.cat !== "全部" && (
-              <FilterChip label={f.cat} onClose={() => set({ cat: "全部" })} />
+            {!isAllCat(f.cat) && (
+              <FilterChip
+                label={displayCat(f.cat, bi("其他", "Other"))}
+                onClose={() => set({ cat: "全部" })}
+              />
             )}
             {f.tags.map((t) => (
               <FilterChip
@@ -927,18 +1013,18 @@ export function AppsPage({
             ))}
             {f.only && (
               <FilterChip
-                label="只看可生成"
+                label={bi("只看可生成", "Ready only")}
                 onClose={() => set({ only: false })}
               />
             )}
             {f.mine && (
               <FilterChip
-                label="我用过的"
+                label={bi("我用过的", "Used by me")}
                 onClose={() => set({ mine: false })}
               />
             )}
             <button className="link" onClick={clear}>
-              清除全部
+              {bi("清除全部", "Clear all")}
             </button>
           </div>
         )}
@@ -953,27 +1039,37 @@ export function AppsPage({
         ) : load === "error" && !apps.length ? (
           <div className="list-state">
             <IconExclamationCircle className="bad" />
-            <p>应用目录加载失败</p>
+            <p>{bi("应用目录加载失败", "Failed to load app catalog")}</p>
             <Button size="small" icon={<IconRefresh />} onClick={reload}>
-              重试
+              {bi("重试", "Retry")}
             </Button>
           </div>
         ) : !apps.length ? (
           <div className="list-state">
-            <p>应用目录为空，需要管理员在服务端添加应用</p>
+            <p>
+              {bi(
+                "应用目录为空，需要管理员在服务端添加应用",
+                "App catalog is empty; an administrator must add components on the server.",
+              )}
+            </p>
           </div>
         ) : (
           <>
             {!list.length ? (
               <div className="list-state big">
                 <IconSearch />
-                <p>没有符合条件的应用</p>
+                <p>{bi("没有符合条件的应用", "No matching apps")}</p>
                 <span className="muted small">
                   {f.q
-                    ? "试试更短的关键词，或去掉标签和范围限制"
-                    : "放宽筛选条件看看"}
+                    ? bi(
+                        "试试更短的关键词，或去掉标签和范围限制",
+                        "Try a shorter keyword or clear tag and scope filters",
+                      )
+                    : bi("放宽筛选条件看看", "Try broadening your filters")}
                 </span>
-                <Button onClick={clear}>清除全部筛选</Button>
+                <Button onClick={clear}>
+                  {bi("清除全部筛选", "Clear all filters")}
+                </Button>
               </div>
             ) : f.view === "grid" ? (
               // One aligned grid; every tile says its category, so no lane is left half empty.
@@ -983,7 +1079,11 @@ export function AppsPage({
             ) : grouped ? (
               <>
                 {byCat.map(([c, items]) => (
-                  <section className="store-sec" key={c} aria-label={c}>
+                  <section
+                    className="store-sec"
+                    key={c}
+                    aria-label={displayCat(c, bi("其他", "Other"))}
+                  >
                     <h2 className="dsec-title">
                       <i
                         className="cat-dot"
@@ -992,10 +1092,14 @@ export function AppsPage({
                         }}
                         aria-hidden
                       />
-                      {c} <span className="dsec-count num">{items.length}</span>
+                      {displayCat(c, bi("其他", "Other"))}{" "}
+                      <span className="dsec-count num">{items.length}</span>
                       {items.some((a) => !a.available) && (
                         <span className="dsec-note">
-                          {items.filter((a) => a.available).length} 个可生成
+                          {bi(
+                            `${items.filter((a) => a.available).length} 个可生成`,
+                            `${items.filter((a) => a.available).length} ready`,
+                          )}
                         </span>
                       )}
                     </h2>
@@ -1106,38 +1210,39 @@ const ProdIcons: Record<PaneId, React.ReactNode> = {
     </svg>
   ),
 };
-const PANES: [PaneId, string, React.ReactNode][] = [
-  ["plans", "方案", ProdIcons.plans],
-  ["contents", "交付内容", ProdIcons.contents],
-  ["caps", "能力与边界", ProdIcons.caps],
-  ["materials", "版本与材料", ProdIcons.materials],
-  ["jobs", "我的交付", ProdIcons.jobs],
+const getPanes = (): [PaneId, string, React.ReactNode][] => [
+  ["plans", bi("方案", "Plans"), ProdIcons.plans],
+  ["contents", bi("交付内容", "Contents"), ProdIcons.contents],
+  ["caps", bi("能力与边界", "Capabilities"), ProdIcons.caps],
+  ["materials", bi("版本与材料", "Versions & Materials"), ProdIcons.materials],
+  ["jobs", bi("我的交付", "My Deliveries"), ProdIcons.jobs],
 ];
 
 /** An icon for a delivery item, picked from what it is. */
 const contentIcon = (name: string) =>
-  /仓库/.test(name) ? (
+  /仓库|repo/i.test(name) ? (
     <IconStorage />
-  ) : /手册/.test(name) ? (
+  ) : /手册|runbook|guide|manual/i.test(name) ? (
     <IconBook />
-  ) : /校验|证书/.test(name) ? (
+  ) : /校验|证书|checksum|verify|cert|sha256/i.test(name) ? (
     <IconSafe />
-  ) : /Ansible|自动化/.test(name) ? (
+  ) : /Ansible|自动化|playbook|automation/i.test(name) ? (
     <IconCode />
-  ) : /包/.test(name) ? (
+  ) : /包|archive|package|bundle/i.test(name) ? (
     <IconArchive />
   ) : (
     <IconFile />
   );
 
 function Product({ app, jobs }: { app: AppInfo; jobs: Job[] }) {
+  useLang();
   const d = app.detail;
   const plans = plansOf(app);
   const [os] = platformParts(app.platform);
   const offline = app.materials?.find((m) => m.kind === "offline");
   const wide = useMedia("(min-width: 1101px)");
   const [tab, setTab] = useState<PaneId>("plans");
-  const shown = PANES.filter(([id]) =>
+  const shown = getPanes().filter(([id]) =>
     id === "plans"
       ? plans.length || !app.available
       : id === "contents"
@@ -1162,18 +1267,18 @@ function Product({ app, jobs }: { app: AppInfo; jobs: Job[] }) {
     ),
   ];
   const info: [string, React.ReactNode][] = [
-    ["规模", d?.scale || "—"],
-    ["版本", app.versions.map((v) => v.id).join(" · ") || "—"],
-    ["系统", os || "—"],
+    [bi("规模", "Scale"), d?.scale || "—"],
+    [bi("版本", "Versions"), app.versions.map((v) => v.id).join(" · ") || "—"],
+    [bi("系统", "OS"), os || "—"],
     [
-      "软件库",
+      bi("软件库", "Library"),
       ready.length
-        ? `${ready.length} 个系统可生成`
+        ? bi(`${ready.length} 个系统可生成`, `Ready on ${ready.length} OS`)
         : offline
           ? size(offline.bytes)
-          : "还没备齐",
+          : bi("还没备齐", "Incomplete"),
     ],
-    ["我的交付", String(jobs.length)],
+    [bi("我的交付", "Deliveries"), String(jobs.length)],
   ];
 
   return (
@@ -1185,7 +1290,8 @@ function Product({ app, jobs }: { app: AppInfo; jobs: Job[] }) {
           icon={<IconArrowLeft />}
           onClick={() => go({ name: "apps" })}
         >
-          应用{app.category ? ` · ${app.category}` : ""}
+          {bi("应用", "Apps")}
+          {app.category ? ` · ${displayCat(app.category)}` : ""}
         </Button>
         <header
           className={`product-banner ${app.available ? "" : "off"}`}
@@ -1200,7 +1306,7 @@ function Product({ app, jobs }: { app: AppInfo; jobs: Job[] }) {
                 muted={!app.available}
               />
               <div>
-                <span className="feature-cat">{app.category || "中间件"}</span>
+                <span className="feature-cat">{displayCat(app.category)}</span>
                 <h1>{app.name}</h1>
                 <span className="product-ver">{app.version}</span>
               </div>
@@ -1222,11 +1328,13 @@ function Product({ app, jobs }: { app: AppInfo; jobs: Job[] }) {
                   disabled={!app.available}
                   onClick={() => go({ name: "new", app: app.id })}
                 >
-                  新建集群
+                  {bi("新建集群", "New Cluster")}
                 </Button>
               )}
               {!app.available && (
-                <span className="product-off">{app.reason || "暂不可用"}</span>
+                <span className="product-off">
+                  {app.reason || bi("暂不可用", "Unavailable")}
+                </span>
               )}
             </div>
           </div>
@@ -1246,7 +1354,7 @@ function Product({ app, jobs }: { app: AppInfo; jobs: Job[] }) {
           <div className="product-main">
             <UnderlineTabs
               className="product-utabs"
-              label="应用详情分区"
+              label={bi("应用详情分区", "App details sections")}
               value={pane}
               onChange={(v) => setTab(v as PaneId)}
               items={shown.map(([id, label, icon]) => ({
@@ -1268,9 +1376,17 @@ function Product({ app, jobs }: { app: AppInfo; jobs: Job[] }) {
               <div className="callout c-run">
                 <IconExclamationCircle />
                 <div>
-                  <b>这个应用还不能生成交付</b>
+                  <b>
+                    {bi(
+                      "这个应用还不能生成交付",
+                      "This app is not ready for delivery yet",
+                    )}
+                  </b>
                   <span>
-                    这个应用暂未开放新建。下面是计划支持的范围，验证通过后开放。
+                    {bi(
+                      "这个应用暂未开放新建。下面是计划支持的范围，验证通过后开放。",
+                      "Creation is not open yet. Planned scope is shown below and will open once verified.",
+                    )}
                   </span>
                 </div>
               </div>
@@ -1284,11 +1400,14 @@ function Product({ app, jobs }: { app: AppInfo; jobs: Job[] }) {
             {pane === "plans" && plans.length > 0 && (
               <section className="store-sec" id="p-plans">
                 <h2 className="dsec-title">
-                  方案{" "}
+                  {bi("方案", "Plans")}{" "}
                   <span className="dsec-note">
                     {app.available
-                      ? "选一个起点，之后每一项都能改"
-                      : "计划提供的起点"}
+                      ? bi(
+                          "选一个起点，之后每一项都能改",
+                          "Pick a starting point; everything can be customized later",
+                        )
+                      : bi("计划提供的起点", "Planned starting points")}
                   </span>
                 </h2>
                 <Plans app={app} plans={plans} />
@@ -1297,7 +1416,9 @@ function Product({ app, jobs }: { app: AppInfo; jobs: Job[] }) {
 
             {pane === "contents" && !!d?.includes?.length && (
               <section className="store-sec" id="p-contents">
-                <h2 className="dsec-title">每次交付包含</h2>
+                <h2 className="dsec-title">
+                  {bi("每次交付包含", "Included in each delivery")}
+                </h2>
                 <ul className="contents">
                   {d.includes.map((c) => (
                     <li key={c.name}>
@@ -1318,7 +1439,9 @@ function Product({ app, jobs }: { app: AppInfo; jobs: Job[] }) {
               (!!d?.capabilities?.length || !!d?.limits?.length) && (
                 <section className="store-sec" id="p-caps">
                   <h2 className="dsec-title">
-                    {app.available ? "能力与边界" : "计划能力与边界"}
+                    {app.available
+                      ? bi("能力与边界", "Capabilities & Scope")
+                      : bi("计划能力与边界", "Planned Capabilities & Scope")}
                   </h2>
                   {!!d?.capabilities?.length && (
                     <dl className="caps2">
@@ -1332,7 +1455,7 @@ function Product({ app, jobs }: { app: AppInfo; jobs: Job[] }) {
                   )}
                   {!!d?.limits?.length && (
                     <div className="limits2">
-                      <b>不在范围内</b>
+                      <b>{bi("不在范围内", "Out of scope")}</b>
                       <ul>
                         {d.limits.map((l) => (
                           <li key={l}>
@@ -1348,20 +1471,22 @@ function Product({ app, jobs }: { app: AppInfo; jobs: Job[] }) {
 
             {pane === "materials" && (
               <section className="store-sec" id="p-materials">
-                <h2 className="dsec-title">版本与材料</h2>
+                <h2 className="dsec-title">
+                  {bi("版本与材料", "Versions & Materials")}
+                </h2>
                 <div className="spec-rows">
                   {app.versions.map((v) => (
                     <div key={v.id}>
-                      <span>版本</span>
+                      <span>{bi("版本", "Version")}</span>
                       <b>{v.id}</b>
                       <span
                         className={v.status === "published" ? "faint" : "warn"}
                       >
                         {v.status === "published"
-                          ? "已发布"
+                          ? bi("已发布", "Published")
                           : v.status === "verifying"
-                            ? "待验证"
-                            : "草稿"}
+                            ? bi("待验证", "Verifying")
+                            : bi("草稿", "Draft")}
                         {Object.entries(v.coverage || {}).map(([pl, cv]) => (
                           <a
                             key={pl}
@@ -1370,49 +1495,65 @@ function Product({ app, jobs }: { app: AppInfo; jobs: Job[] }) {
                             title={
                               cv.ready
                                 ? cv.deployable
-                                  ? "软件库已备齐"
-                                  : "软件包已备齐，但这个系统还没有 Ansible 运行环境"
-                                : `软件库缺 ${cv.missing?.length ?? 0} 个软件包`
+                                  ? bi("软件库已备齐", "Packages ready in library")
+                                  : bi(
+                                      "软件包已备齐，但这个系统还没有 Ansible 运行环境",
+                                      "Packages ready, but no Ansible runtime selected for this OS",
+                                    )
+                                : bi(
+                                    `软件库缺 ${cv.missing?.length ?? 0} 个软件包`,
+                                    `Missing ${cv.missing?.length ?? 0} packages in library`,
+                                  )
                             }
                             style={{ marginLeft: 6 }}
                           >
-                            {pl}：
+                            {pl}
+                            {bi("：", ": ")}
                             {cv.ready
                               ? cv.deployable
-                                ? "可生成"
-                                : "无运行环境"
-                              : `缺 ${cv.missing?.length ?? 0} 个包`}
+                                ? bi("可生成", "Ready")
+                                : bi("无运行环境", "No runtime")
+                              : bi(
+                                  `缺 ${cv.missing?.length ?? 0} 个包`,
+                                  `Missing ${cv.missing?.length ?? 0}`,
+                                )}
                           </a>
                         ))}
                       </span>
                     </div>
                   ))}
                   <div>
-                    <span>平台</span>
+                    <span>{bi("平台", "Platforms")}</span>
                     <b>{app.platform}</b>
                     <span />
                   </div>
                   {plans.map((p) => (
                     <div key={p.id}>
-                      <span>常用方案</span>
+                      <span>{bi("常用方案", "Preset plans")}</span>
                       <b>{p.name}</b>
                       <span className="faint">{p.spec}</span>
                     </div>
                   ))}
                   {(app.materials || []).map((m) => (
                     <div key={m.kind}>
-                      <span>离线材料</span>
+                      <span>{bi("离线材料", "Offline bundle")}</span>
                       <b className="mono material-name">{m.name}</b>
                       <span className="num faint">
-                        {size(m.bytes)} · 更新于 {dayLabel(m.updated)}
+                        {size(m.bytes)} ·{" "}
+                        {bi(
+                          `更新于 ${dayLabel(m.updated)}`,
+                          `updated ${dayLabel(m.updated)}`,
+                        )}
                       </span>
                     </div>
                   ))}
                   {!app.materials?.length && (
                     <div>
-                      <span>材料</span>
+                      <span>{bi("材料", "Materials")}</span>
                       <b className="faint">
-                        {app.available ? "—" : "开放后提供"}
+                        {app.available
+                          ? "—"
+                          : bi("开放后提供", "Available upon release")}
                       </b>
                       <span />
                     </div>
@@ -1424,13 +1565,14 @@ function Product({ app, jobs }: { app: AppInfo; jobs: Job[] }) {
             {pane === "jobs" && (
               <section className="store-sec" id="p-jobs">
                 <h2 className="dsec-title">
-                  我的交付 <span className="dsec-count num">{jobs.length}</span>
+                  {bi("我的交付", "My Deliveries")}{" "}
+                  <span className="dsec-count num">{jobs.length}</span>
                   {jobs.length > 0 && (
                     <button
                       className="link small side-more"
                       onClick={() => showDeliveriesOf(app.id)}
                     >
-                      在交付中查看 <IconRight />
+                      {bi("在交付中查看", "View in Deliveries")} <IconRight />
                     </button>
                   )}
                 </h2>
@@ -1439,8 +1581,14 @@ function Product({ app, jobs }: { app: AppInfo; jobs: Job[] }) {
                   empty={
                     <span className="muted small">
                       {app.available
-                        ? "还没有用这个应用生成过交付。"
-                        : "开放后，这里会列出你的交付。"}
+                        ? bi(
+                            "还没有用这个应用生成过交付。",
+                            "No deliveries created with this app yet.",
+                          )
+                        : bi(
+                            "开放后，这里会列出你的交付。",
+                            "Your deliveries will appear here once released.",
+                          )}
                     </span>
                   }
                 />
@@ -1457,7 +1605,7 @@ function Product({ app, jobs }: { app: AppInfo; jobs: Job[] }) {
                 icon={<IconPlus />}
                 onClick={() => go({ name: "new", app: app.id })}
               >
-                新建 {app.name} 集群
+                {bi(`新建 ${app.name} 集群`, `New ${app.name} Cluster`)}
               </Button>
             )}
             <Menu
@@ -1465,7 +1613,7 @@ function Product({ app, jobs }: { app: AppInfo; jobs: Job[] }) {
               mode={wide ? "vertical" : "horizontal"}
               selectedKeys={[pane]}
               onClickMenuItem={(k) => setTab(k as PaneId)}
-              aria-label="应用信息"
+              aria-label={bi("应用信息", "App navigation")}
             >
               {shown.map(([id, label, icon]) => (
                 <Menu.Item key={id}>

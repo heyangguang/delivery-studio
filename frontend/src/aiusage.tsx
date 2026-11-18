@@ -8,6 +8,7 @@ import {
   IconSearch,
 } from "@arco-design/web-react/icon";
 import { api, cached, copy, money, num, putCached, stamp } from "./shared";
+import { bi, useLang } from "./i18n";
 import {
   formatAICallDiag,
   prettyDiagPayload,
@@ -78,13 +79,27 @@ type Stats = {
 };
 
 const FEATURE: Record<string, string> = {
-  change_rehearsal: "变更演练",
-  review: "交付评审",
-  troubleshoot: "现场排障",
-  component: "组件工作台",
-  assistant: "AI 助手",
-  form: "智能填表",
-  docs: "文档起草",
+  get change_rehearsal() {
+    return bi("变更演练", "Change rehearsal");
+  },
+  get review() {
+    return bi("交付评审", "Delivery review");
+  },
+  get troubleshoot() {
+    return bi("现场排障", "Troubleshooting");
+  },
+  get component() {
+    return bi("组件工作台", "Component workbench");
+  },
+  get assistant() {
+    return bi("AI 助手", "AI Assistant");
+  },
+  get form() {
+    return bi("智能填表", "Smart form fill");
+  },
+  get docs() {
+    return bi("文档起草", "Doc drafting");
+  },
 };
 
 function isSuspectZeroTruncated(u: Usage): boolean {
@@ -153,6 +168,7 @@ function FilterBar({
   users: string[];
   models: string[];
 }) {
+  useLang();
   return (
     <div className="au-filters">
       <RangeBar value={f.range} onChange={f.setRange} />
@@ -160,35 +176,35 @@ function FilterBar({
         <Input
           allowClear
           prefix={<IconSearch />}
-          placeholder="搜索用户、IP、对象、错误…"
+          placeholder={bi("搜索用户、IP、对象、错误…", "Search user, IP, target, error…")}
           value={f.q}
           onChange={f.setQ}
           style={{ width: 240 }}
-          aria-label="搜索"
+          aria-label={bi("搜索", "Search")}
         />
         <Select
           allowClear
-          placeholder="用户"
+          placeholder={bi("用户", "User")}
           value={f.user || undefined}
           onChange={(v) => f.setUser(v || "")}
           options={users.map((u) => ({ value: u, label: u }))}
           style={{ width: 148 }}
           triggerProps={{ autoAlignPopupWidth: false, autoFitPosition: true }}
-          aria-label="用户"
+          aria-label={bi("用户", "User")}
         />
         <Select
           allowClear
-          placeholder="模型"
+          placeholder={bi("模型", "Model")}
           value={f.model || undefined}
           onChange={(v) => f.setModel(v || "")}
           options={models.map((m) => ({ value: m, label: m }))}
           style={{ width: 236 }}
           triggerProps={{ autoAlignPopupWidth: false, autoFitPosition: true }}
-          aria-label="模型"
+          aria-label={bi("模型", "Model")}
         />
         <Select
           allowClear
-          placeholder="功能"
+          placeholder={bi("功能", "Feature")}
           value={f.feature || undefined}
           onChange={(v) => f.setFeature(v || "")}
           options={Object.entries(FEATURE).map(([value, label]) => ({
@@ -197,20 +213,20 @@ function FilterBar({
           }))}
           style={{ width: 144 }}
           triggerProps={{ autoAlignPopupWidth: false, autoFitPosition: true }}
-          aria-label="功能"
+          aria-label={bi("功能", "Feature")}
         />
         <Select
           allowClear
-          placeholder="状态"
+          placeholder={bi("状态", "Status")}
           value={f.status || undefined}
           onChange={(v) => f.setStatus(v || "")}
           options={[
-            { value: "ok", label: "成功" },
-            { value: "error", label: "失败" },
+            { value: "ok", label: bi("成功", "Success") },
+            { value: "error", label: bi("失败", "Failed") },
           ]}
           style={{ width: 116 }}
           triggerProps={{ autoAlignPopupWidth: false, autoFitPosition: true }}
-          aria-label="状态"
+          aria-label={bi("状态", "Status")}
         />
       </div>
     </div>
@@ -218,29 +234,30 @@ function FilterBar({
 }
 
 function Tokens({ u }: { u: Usage }) {
+  useLang();
   const total = u.in + u.out;
   return (
     <Tooltip
       position="left"
       content={
         <dl className="au-tip">
-          <dt>输入 Token</dt>
+          <dt>{bi("输入 Token", "Input tokens")}</dt>
           <dd>{num(u.in)}</dd>
-          <dt>输出 Token</dt>
+          <dt>{bi("输出 Token", "Output tokens")}</dt>
           <dd>{num(u.out)}</dd>
           {!!u.cached && (
             <>
-              <dt>缓存读取 Token</dt>
+              <dt>{bi("缓存读取 Token", "Cached read tokens")}</dt>
               <dd>{num(u.cached)}</dd>
             </>
           )}
           {!!u.reasoning && (
             <>
-              <dt>推理 Token</dt>
+              <dt>{bi("推理 Token", "Reasoning tokens")}</dt>
               <dd>{num(u.reasoning)}</dd>
             </>
           )}
-          <dt className="sum">总 Token</dt>
+          <dt className="sum">{bi("总 Token", "Total tokens")}</dt>
           <dd className="sum">{num(total)}</dd>
         </dl>
       }
@@ -252,7 +269,7 @@ function Tokens({ u }: { u: Usage }) {
         </span>
         {!!u.cached && (
           <small>
-            缓存 {num(u.cached)} <IconInfoCircle />
+            {bi("缓存", "Cached")} {num(u.cached)} <IconInfoCircle />
           </small>
         )}
       </span>
@@ -261,6 +278,7 @@ function Tokens({ u }: { u: Usage }) {
 }
 
 function UsageMore({ u }: { u: Usage }) {
+  useLang();
   const diag = u.diag;
   const httpStatus = u.http_status ?? diag?.http_status;
   const responseId = u.response_id || diag?.response_id;
@@ -280,7 +298,7 @@ function UsageMore({ u }: { u: Usage }) {
 
   return (
     <dl className="au-more">
-      <dt>调用编号</dt>
+      <dt>{bi("调用编号", "Call ID")}</dt>
       <dd className="au-dd-head">
         <span className="mono">{u.id}</span>
         {canCopy && (
@@ -290,7 +308,7 @@ function UsageMore({ u }: { u: Usage }) {
             onClick={() =>
               copy(
                 formatAICallDiag(diag, {
-                  title: "AI 用量调用诊断",
+                  title: bi("AI 用量调用诊断", "AI Usage Call Diagnostics"),
                   callId: u.id,
                   provider: u.provider,
                   model: u.model,
@@ -304,31 +322,34 @@ function UsageMore({ u }: { u: Usage }) {
               )
             }
           >
-            <IconCopy /> 复制诊断
+            <IconCopy /> {bi("复制诊断", "Copy diagnostics")}
           </button>
         )}
       </dd>
-      <dt>调用结果</dt>
+      <dt>{bi("调用结果", "Outcome")}</dt>
       <dd className="au-dd-inline">
         {!u.ok ? (
-          <span className="au-state-pill bad">失败</span>
+          <span className="au-state-pill bad">{bi("失败", "Failed")}</span>
         ) : suspectTrunc ? (
-          <span className="au-state-pill warn">疑似中途截断 (0 Token)</span>
+          <span className="au-state-pill warn">
+            {bi("疑似中途截断 (0 Token)", "Suspected truncation (0 tokens)")}
+          </span>
         ) : (
-          <span className="au-state-pill ok">成功</span>
+          <span className="au-state-pill ok">{bi("成功", "Success")}</span>
         )}
         {u.ok && diag?.fallback_used && (
           <span className="au-fb-badge">
-            协议自动回退 <span className="mono">{diag.fallback_used}</span>
+            {bi("协议自动回退", "Protocol fallback")}{" "}
+            <span className="mono">{diag.fallback_used}</span>
           </span>
         )}
         {!u.ok && u.error && <span className="bad">{u.error}</span>}
       </dd>
-      <dt>接口</dt>
+      <dt>{bi("接口", "Endpoint")}</dt>
       <dd className="mono">{endpoint}</dd>
       {(httpStatus != null || diag?.upstream_status || diag?.reason_code) && (
         <>
-          <dt>HTTP 状态</dt>
+          <dt>{bi("HTTP 状态", "HTTP status")}</dt>
           <dd className="au-dd-inline">
             {httpStatus != null && (
               <span
@@ -340,11 +361,18 @@ function UsageMore({ u }: { u: Usage }) {
                       : "warn"
                 }`}
               >
-                {httpStatus > 0 ? `HTTP ${httpStatus}` : "网络未连通"}
+                {httpStatus > 0
+                  ? `HTTP ${httpStatus}`
+                  : bi("网络未连通", "Network unreachable")}
               </span>
             )}
             {diag?.upstream_status && (
-              <span>上游状态 {diag.upstream_status}</span>
+              <span>
+                {bi(
+                  `上游状态 ${diag.upstream_status}`,
+                  `Upstream status ${diag.upstream_status}`,
+                )}
+              </span>
             )}
             {diag?.reason_code && (
               <span className="faint">{reasonCodeLabel(diag.reason_code)}</span>
@@ -354,60 +382,71 @@ function UsageMore({ u }: { u: Usage }) {
       )}
       {responseId && (
         <>
-          <dt>上游响应 ID</dt>
+          <dt>{bi("上游响应 ID", "Upstream response ID")}</dt>
           <dd className="mono">{responseId}</dd>
         </>
       )}
       {diag?.fallback_used && (
         <>
-          <dt>协议回退</dt>
+          <dt>{bi("协议回退", "Protocol fallback")}</dt>
           <dd>
             <span className="au-fb-badge">
-              已回退 <span className="mono">{diag.fallback_used}</span>
+              {bi("已回退", "Fell back to")}{" "}
+              <span className="mono">{diag.fallback_used}</span>
             </span>
           </dd>
         </>
       )}
-      <dt>轮次</dt>
+      <dt>{bi("轮次", "Rounds")}</dt>
       <dd>
-        {u.rounds || 1} 次模型调用，{u.tools || 0} 次工具调用
+        {bi(
+          `${u.rounds || 1} 次模型调用，${u.tools || 0} 次工具调用`,
+          `${u.rounds || 1} model call${(u.rounds || 1) === 1 ? "" : "s"}, ${u.tools || 0} tool call${(u.tools || 0) === 1 ? "" : "s"}`,
+        )}
       </dd>
       {showTokRow && (
         <>
-          <dt>Token 明细</dt>
+          <dt>{bi("Token 明细", "Token breakdown")}</dt>
           <dd className="num">
-            输入 {num(inTok)}
-            {cachedTok != null ? ` · 缓存 ${num(cachedTok)}` : ""}
-            {` · 输出 ${num(outTok)}`}
+            {bi(`输入 ${num(inTok)}`, `In ${num(inTok)}`)}
+            {cachedTok != null
+              ? bi(` · 缓存 ${num(cachedTok)}`, ` · Cached ${num(cachedTok)}`)
+              : ""}
+            {bi(` · 输出 ${num(outTok)}`, ` · Out ${num(outTok)}`)}
           </dd>
         </>
       )}
       {!!u.reasoning && (
         <>
-          <dt>推理 Token</dt>
+          <dt>{bi("推理 Token", "Reasoning tokens")}</dt>
           <dd>{num(u.reasoning)}</dd>
         </>
       )}
       {diag?.sse_events && diag.sse_events.length > 0 && (
         <>
-          <dt>SSE 事件</dt>
+          <dt>{bi("SSE 事件", "SSE events")}</dt>
           <dd>
             <span className="mono">{diag.sse_events.join(" → ")}</span>
             {diag.keepalives ? (
-              <span className="faint">{`（心跳 ${diag.keepalives} 次）`}</span>
+              <span className="faint">
+                {bi(
+                  `（心跳 ${diag.keepalives} 次）`,
+                  ` (${diag.keepalives} keepalive${diag.keepalives === 1 ? "" : "s"})`,
+                )}
+              </span>
             ) : null}
           </dd>
         </>
       )}
       {u.error && (
         <>
-          <dt>错误</dt>
+          <dt>{bi("错误", "Error")}</dt>
           <dd className="bad au-err-msg">{u.error}</dd>
         </>
       )}
       {diag?.attempts && diag.attempts.length > 0 && (
         <>
-          <dt>尝试链路</dt>
+          <dt>{bi("尝试链路", "Attempts")}</dt>
           <dd className="au-dd-block">
             <ol className="au-attempts">
               {diag.attempts.map((a, idx) => (
@@ -417,17 +456,31 @@ function UsageMore({ u }: { u: Usage }) {
                   <span
                     className={`au-att-st ${a.http_status && a.http_status >= 200 && a.http_status < 300 ? "ok" : "bad"}`}
                   >
-                    {a.http_status ? `HTTP ${a.http_status}` : "连接失败"}
+                    {a.http_status
+                      ? `HTTP ${a.http_status}`
+                      : bi("连接失败", "Connection failed")}
                   </span>
                   <span className="num">{secs(a.ms)}</span>
                   {(a.in_tokens != null || a.out_tokens != null) && (
                     <span className="num">
                       ↓{num(a.in_tokens ?? 0)}
-                      {a.cached_tokens ? ` 缓${num(a.cached_tokens)}` : ""} ↑
-                      {num(a.out_tokens ?? 0)}
+                      {a.cached_tokens
+                        ? bi(
+                            ` 缓${num(a.cached_tokens)}`,
+                            ` c:${num(a.cached_tokens)}`,
+                          )
+                        : ""}{" "}
+                      ↑{num(a.out_tokens ?? 0)}
                     </span>
                   )}
-                  {a.upstream_status && <span>状态 {a.upstream_status}</span>}
+                  {a.upstream_status && (
+                    <span>
+                      {bi(
+                        `状态 ${a.upstream_status}`,
+                        `Status ${a.upstream_status}`,
+                      )}
+                    </span>
+                  )}
                   {a.response_id && (
                     <code className="faint">{a.response_id}</code>
                   )}
@@ -444,16 +497,16 @@ function UsageMore({ u }: { u: Usage }) {
       )}
       {diag?.request_summary && (
         <>
-          <dt>请求摘要</dt>
+          <dt>{bi("请求摘要", "Request summary")}</dt>
           <dd className="au-dd-block">
             <div className="au-raw-box">
               <div className="au-raw-bar">
-                <span>请求参数摘要</span>
+                <span>{bi("请求参数摘要", "Request parameter summary")}</span>
                 <button
                   type="button"
                   onClick={() => copy(prettyDiagPayload(diag.request_summary))}
                 >
-                  <IconCopy /> 复制
+                  <IconCopy /> {bi("复制", "Copy")}
                 </button>
               </div>
               <pre className="au-raw">
@@ -465,16 +518,21 @@ function UsageMore({ u }: { u: Usage }) {
       )}
       {diag?.response_raw && (
         <>
-          <dt>原始响应</dt>
+          <dt>{bi("原始响应", "Raw response")}</dt>
           <dd className="au-dd-block">
             <div className="au-raw-box">
               <div className="au-raw-bar">
-                <span>网关原始响应 / 关键帧</span>
+                <span>
+                  {bi(
+                    "网关原始响应 / 关键帧",
+                    "Gateway raw response / key frames",
+                  )}
+                </span>
                 <button
                   type="button"
                   onClick={() => copy(prettyDiagPayload(diag.response_raw))}
                 >
-                  <IconCopy /> 复制
+                  <IconCopy /> {bi("复制", "Copy")}
                 </button>
               </div>
               <pre className="au-raw">
@@ -491,6 +549,7 @@ function UsageMore({ u }: { u: Usage }) {
 /* ---------------------------------------------------------------- detail */
 
 export function UsageView() {
+  useLang();
   const f = useFilters();
   const [page, setPage] = useState(1);
   const size = 30;
@@ -539,27 +598,37 @@ export function UsageView() {
     <article className="sx-page st-main enter">
       <header className="sx-page-h">
         <div>
-          <h1>用量明细</h1>
+          <h1>{bi("用量明细", "Usage log")}</h1>
           <p>
-            每一次模型调用：谁、在哪个交付或组件里、用了哪个模型、多少
-            Token、花了多久。
+            {bi(
+              "每一次模型调用：谁、在哪个交付或组件里、用了哪个模型、多少 Token、花了多久。",
+              "Every model call: who ran it, which delivery or component it served, which model was used, token counts, and latency.",
+            )}
           </p>
         </div>
       </header>
       <FilterBar f={f} users={d?.users || []} models={d?.models || []} />
       {error && <div className="note warn">{error}</div>}
-      <div className="au-count">{d ? `${num(d.total)} 条` : "载入中…"}</div>
-      <div className="au-table" role="table" aria-label="模型调用">
+      <div className="au-count">
+        {d
+          ? bi(`${num(d.total)} 条`, `${num(d.total)} records`)
+          : bi("载入中…", "Loading…")}
+      </div>
+      <div
+        className="au-table"
+        role="table"
+        aria-label={bi("模型调用", "Model calls")}
+      >
         <div className="au-head" role="row">
-          <span>时间</span>
-          <span>状态</span>
-          <span>用户</span>
-          <span>功能与对象</span>
-          <span>模型</span>
+          <span>{bi("时间", "Time")}</span>
+          <span>{bi("状态", "Status")}</span>
+          <span>{bi("用户", "User")}</span>
+          <span>{bi("功能与对象", "Feature & target")}</span>
+          <span>{bi("模型", "Model")}</span>
           <span>Token</span>
-          <span>耗时</span>
-          <span>费用</span>
-          <span>来源 IP</span>
+          <span>{bi("耗时", "Latency")}</span>
+          <span>{bi("费用", "Cost")}</span>
+          <span>{bi("来源 IP", "Source IP")}</span>
         </div>
         {d?.rows.map((u) => {
           const suspectTrunc = isSuspectZeroTruncated(u);
@@ -575,16 +644,25 @@ export function UsageView() {
               <span className="au-time num">{stamp(u.at)}</span>
               <span className="au-status-cell">
                 {!u.ok ? (
-                  <span className="au-state-pill bad" title={u.error || "调用失败"}>
-                    <IconCloseCircleFill /> 失败
+                  <span
+                    className="au-state-pill bad"
+                    title={u.error || bi("调用失败", "Call failed")}
+                  >
+                    <IconCloseCircleFill /> {bi("失败", "Failed")}
                   </span>
                 ) : suspectTrunc ? (
-                  <span className="au-state-pill warn" title="达到旧版 120s 上限截断且未返回 Token 计量">
-                    截断
+                  <span
+                    className="au-state-pill warn"
+                    title={bi(
+                      "达到旧版 120s 上限截断且未返回 Token 计量",
+                      "Truncated at legacy 120s timeout with no token usage returned",
+                    )}
+                  >
+                    {bi("截断", "Truncated")}
                   </span>
                 ) : (
                   <span className="au-state-pill ok">
-                    <IconCheckCircleFill /> 成功
+                    <IconCheckCircleFill /> {bi("成功", "OK")}
                   </span>
                 )}
               </span>
@@ -597,9 +675,9 @@ export function UsageView() {
                 <b className="mono au-model-id">{u.model}</b>
                 <small>
                   {u.provider}
-                  {u.failover ? " · 备用" : ""}
-                  {u.diag?.fallback_used ? " · 协议回退" : ""}
-                  {u.stream ? " · 流式" : ""}
+                  {u.failover ? bi(" · 备用", " · Failover") : ""}
+                  {u.diag?.fallback_used ? bi(" · 协议回退", " · Fallback") : ""}
+                  {u.stream ? bi(" · 流式", " · Stream") : ""}
                 </small>
               </span>
               {u.ok || u.in || u.out || u.diag?.in_tokens ? (
@@ -616,10 +694,10 @@ export function UsageView() {
               )}
               <span className="au-time2">
                 <span>
-                  <small>首字</small> {secs(u.first_ms)}
+                  <small>{bi("首字", "TTFT")}</small> {secs(u.first_ms)}
                 </span>
                 <span>
-                  <small>总耗时</small> {secs(u.ms)}
+                  <small>{bi("总耗时", "Total")}</small> {secs(u.ms)}
                 </span>
               </span>
               <span className="au-cost num">
@@ -634,7 +712,9 @@ export function UsageView() {
           );
         })}
         {d && d.rows.length === 0 && (
-          <div className="au-empty">这个范围里没有调用记录。</div>
+          <div className="au-empty">
+            {bi("这个范围里没有调用记录。", "No usage records in this range.")}
+          </div>
         )}
       </div>
       {d && d.total > size && (
@@ -671,6 +751,7 @@ const Tile = ({
 );
 
 export function CostView() {
+  useLang();
   const f = useFilters();
   const statsUrl = `/api/settings/ai/usage/stats?${f.qs()}`;
   const metaUrl = `/api/settings/ai/usage?${f.qs({ size: 1 })}`;
@@ -752,20 +833,35 @@ export function CostView() {
       key: a.key,
       label: label ? label(a) : a.key,
       value: value(a),
-      sub: `${num(a.calls)} 次 · ${num(a.in + a.out)} Token${a.cost ? ` · ${money(a.cost, cur)}` : ""}`,
+      sub: bi(
+        `${num(a.calls)} 次 · ${num(a.in + a.out)} Token${a.cost ? ` · ${money(a.cost, cur)}` : ""}`,
+        `${num(a.calls)} call${a.calls === 1 ? "" : "s"} · ${num(a.in + a.out)} tokens${a.cost ? ` · ${money(a.cost, cur)}` : ""}`,
+      ),
     }));
   return (
     <article className="sx-page st-main enter">
       <header className="sx-page-h">
         <div>
-          <h1>用量与成本</h1>
+          <h1>{bi("用量与成本", "Usage & cost")}</h1>
           <p>
-            费用按官方公布的 API
-            价格（或你在「模型价格」里设的价格）估算，只是估算，以厂商账单为准。
-            {s ? `按${s.currency === "USD" ? "美元" : "人民币"}显示。` : ""}
-            <a href="#/settings/ai-prices">调整价格与汇率</a>
+            {bi(
+              "费用按官方公布的 API 价格（或你在「模型价格」里设的价格）估算，只是估算，以厂商账单为准。",
+              "Costs are estimated from official API pricing (or your overrides in Model Pricing) and are for reference only; refer to vendor bills.",
+            )}
+            {s
+              ? bi(
+                  `按${s.currency === "USD" ? "美元" : "人民币"}显示。`,
+                  ` Shown in ${s.currency === "USD" ? "USD" : "CNY"}. `,
+                )
+              : ""}
+            <a href="#/settings/ai-prices">
+              {bi("调整价格与汇率", "Adjust pricing & rate")}
+            </a>
             {!hasCost && s && s.total.calls > 0
-              ? " 这段时间的调用没有匹配到价格，请在模型价格页添加。"
+              ? bi(
+                  " 这段时间的调用没有匹配到价格，请在模型价格页添加。",
+                  " No pricing matched calls in this period—add rates on the Model Pricing page.",
+                )
               : ""}
           </p>
         </div>
@@ -776,43 +872,58 @@ export function CostView() {
         <>
           <div className="au-kpis">
             <Tile
-              label="估算费用"
+              label={bi("估算费用", "Estimated cost")}
               value={hasCost ? money(tot.cost, cur) : "—"}
               sub={
                 hasCost
-                  ? `平均每次 ${money(tot.cost / Math.max(1, tot.calls), cur)}`
-                  : "未设置单价"
+                  ? bi(
+                      `平均每次 ${money(tot.cost / Math.max(1, tot.calls), cur)}`,
+                      `Avg ${money(tot.cost / Math.max(1, tot.calls), cur)} / call`,
+                    )
+                  : bi("未设置单价", "No pricing configured")
               }
             />
             <Tile
-              label="调用次数"
+              label={bi("调用次数", "Calls")}
               value={num(tot.calls)}
               sub={
                 tot.errors
-                  ? `${num(tot.errors)} 次失败（${((tot.errors / tot.calls) * 100).toFixed(1)}%）`
-                  : "全部成功"
+                  ? bi(
+                      `${num(tot.errors)} 次失败（${((tot.errors / tot.calls) * 100).toFixed(1)}%）`,
+                      `${num(tot.errors)} failed (${((tot.errors / tot.calls) * 100).toFixed(1)}%)`,
+                    )
+                  : bi("全部成功", "All succeeded")
               }
             />
             <Tile
-              label="Token 总量"
+              label={bi("Token 总量", "Total tokens")}
               value={num(tot.in + tot.out)}
-              sub={`输入 ${num(tot.in)} · 输出 ${num(tot.out)}`}
+              sub={bi(
+                `输入 ${num(tot.in)} · 输出 ${num(tot.out)}`,
+                `In ${num(tot.in)} · Out ${num(tot.out)}`,
+              )}
             />
             <Tile
-              label="缓存命中"
+              label={bi("缓存命中", "Cache hit")}
               value={
                 tot.in ? `${((tot.cached / tot.in) * 100).toFixed(1)}%` : "—"
               }
-              sub={`读取 ${num(tot.cached)} Token`}
+              sub={bi(
+                `读取 ${num(tot.cached)} Token`,
+                `${num(tot.cached)} cached tokens`,
+              )}
             />
             <Tile
-              label="平均首字"
+              label={bi("平均首字", "Avg TTFT")}
               value={
                 tot.first_n ? secs(Math.round(tot.first_ms / tot.first_n)) : "—"
               }
               sub={
                 tot.calls
-                  ? `平均总耗时 ${secs(Math.round(tot.ms / tot.calls))}`
+                  ? bi(
+                      `平均总耗时 ${secs(Math.round(tot.ms / tot.calls))}`,
+                      `Avg latency ${secs(Math.round(tot.ms / tot.calls))}`,
+                    )
                   : ""
               }
             />
@@ -820,16 +931,28 @@ export function CostView() {
 
           <section className="sx-sec">
             <div className="au-sec-h">
-              <h2>{s.hourly ? "按小时" : "按天"}</h2>
-              <div className="au-seg" role="group" aria-label="口径">
+              <h2>
+                {s.hourly
+                  ? bi("按小时", "Hourly")
+                  : bi("按天", "Daily")}
+              </h2>
+              <div
+                className="au-seg"
+                role="group"
+                aria-label={bi("口径", "Metric")}
+              >
                 <button
                   type="button"
                   className={by === "cost" ? "on" : ""}
                   onClick={() => setBy("cost")}
                   disabled={!hasCost}
-                  title={hasCost ? undefined : "先在供应商里设置单价"}
+                  title={
+                    hasCost
+                      ? undefined
+                      : bi("先在供应商里设置单价", "Configure pricing first")
+                  }
                 >
-                  费用
+                  {bi("费用", "Cost")}
                 </button>
                 <button
                   type="button"
@@ -843,25 +966,33 @@ export function CostView() {
             <StackedBars
               points={points}
               label={
-                by === "cost" ? "每段时间的估算费用" : "每段时间的 Token 用量"
+                by === "cost"
+                  ? bi("每段时间的估算费用", "Estimated cost over time")
+                  : bi("每段时间的 Token 用量", "Token usage over time")
               }
               format={fmt}
               tick={by === "cost" ? fmtCost : compact}
               series={
                 by === "cost"
-                  ? [{ id: "cost", label: "估算费用", color: "var(--brand)" }]
+                  ? [
+                      {
+                        id: "cost",
+                        label: bi("估算费用", "Estimated cost"),
+                        color: "var(--brand)",
+                      },
+                    ]
                   : [
                       {
                         id: "fresh",
-                        label: "输入（未缓存）",
+                        label: bi("输入（未缓存）", "Input (uncached)"),
                         color: "#6250d6",
                       },
                       {
                         id: "cached",
-                        label: "输入（缓存命中）",
+                        label: bi("输入（缓存命中）", "Input (cached)"),
                         color: "#1baf7a",
                       },
-                      { id: "out", label: "输出", color: "#eb6834" },
+                      { id: "out", label: bi("输出", "Output"), color: "#eb6834" },
                     ]
               }
             />
@@ -869,22 +1000,22 @@ export function CostView() {
 
           <div className="au-cols">
             <section className="sx-sec">
-              <h2>按模型</h2>
+              <h2>{bi("按模型", "By model")}</h2>
               <HBars rows={bars(s.by_model)} format={fmt} />
             </section>
             <section className="sx-sec">
-              <h2>按用户</h2>
+              <h2>{bi("按用户", "By user")}</h2>
               <HBars rows={bars(s.by_user)} format={fmt} />
             </section>
             <section className="sx-sec">
-              <h2>按功能</h2>
+              <h2>{bi("按功能", "By feature")}</h2>
               <HBars
                 rows={bars(s.by_feature, (a) => FEATURE[a.key] || a.key)}
                 format={fmt}
               />
             </section>
             <section className="sx-sec">
-              <h2>按交付与组件</h2>
+              <h2>{bi("按交付与组件", "By delivery & component")}</h2>
               <HBars
                 rows={bars(s.by_target, (a) => a.label || a.key)}
                 format={fmt}

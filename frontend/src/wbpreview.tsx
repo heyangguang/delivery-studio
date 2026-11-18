@@ -10,6 +10,7 @@ import { api, size } from "./shared";
 import type { PlanView } from "./shared";
 import { InstanceGraph, Segmented } from "./ui";
 import type { Problem } from "./wbdoc";
+import { bi, useLang } from "./i18n";
 
 /* ---------------------------------------------------------------- checks */
 
@@ -39,12 +40,18 @@ export function ProblemList({
     source: boolean,
   ) => void;
 }) {
+  useLang();
   if (!check)
-    return <p className="muted">还没有检查过。保存草稿后会自动检查。</p>;
+    return (
+      <p className="muted">
+        {bi("还没有检查过。保存草稿后会自动检查。", "Not checked yet. Saves trigger an automatic check.")}
+      </p>
+    );
   const groups = new Map<string, Problem[]>();
+  const overall = bi("（整体）", "(Overall)");
   check.problems.forEach((p) =>
-    groups.set(p.file || "（整体）", [
-      ...(groups.get(p.file || "（整体）") || []),
+    groups.set(p.file || overall, [
+      ...(groups.get(p.file || overall) || []),
       p,
     ]),
   );
@@ -55,12 +62,17 @@ export function ProblemList({
         <b>
           {check.ok
             ? check.warnings
-              ? `没有错误，${check.warnings} 个提醒`
-              : "全部通过"
-            : `${check.errors} 处错误${check.warnings ? `，${check.warnings} 个提醒` : ""}`}
+              ? bi(`没有错误，${check.warnings} 个提醒`, `No errors, ${check.warnings} warning(s)`)
+              : bi("全部通过", "All checks passed")
+            : bi(
+                `${check.errors} 处错误${check.warnings ? `，${check.warnings} 个提醒` : ""}`,
+                `${check.errors} error(s)${check.warnings ? `, ${check.warnings} warning(s)` : ""}`,
+              )}
         </b>
         {stale && (
-          <span className="muted small">（之后又改过，稍后自动重查）</span>
+          <span className="muted small">
+            {bi("（之后又改过，稍后自动重查）", "(edited since; re-checking soon)")}
+          </span>
         )}
       </div>
       {[...groups.entries()].map(([file, list]) => (
@@ -88,17 +100,17 @@ export function ProblemList({
                   className="wb-link wb-problem-src"
                   onClick={() => open(p.file!, p.line, p.path, true)}
                 >
-                  源码第 {p.line} 行
+                  {bi(`源码第 ${p.line} 行`, `Source line ${p.line}`)}
                 </button>
               ) : null}
               {p.severity === "warning" && ignore && (
                 <button
                   type="button"
                   className="wb-link wb-problem-src"
-                  title="看过了、确认没问题：以后不再提醒"
+                  title={bi("看过了、确认没问题：以后不再提醒", "Reviewed and confirmed safe: dismiss future warnings")}
                   onClick={() => ignore(p)}
                 >
-                  忽略
+                  {bi("忽略", "Ignore")}
                 </button>
               )}
             </div>
@@ -106,11 +118,13 @@ export function ProblemList({
         </section>
       ))}
       {check.problems.length === 0 && (
-        <p className="muted small">没有发现问题。</p>
+        <p className="muted small">{bi("没有发现问题。", "No issues found.")}</p>
       )}
       {(check.ignored || []).length > 0 && (
         <details className="wb-ignored">
-          <summary>已忽略的提醒 {check.ignored!.length}</summary>
+          <summary>
+            {bi(`已忽略的提醒 ${check.ignored!.length}`, `Ignored warnings (${check.ignored!.length})`)}
+          </summary>
           {check.ignored!.map((p, i) => (
             <div className="wb-problem warning" key={i}>
               <span className="wb-problem-main muted">
@@ -123,7 +137,7 @@ export function ProblemList({
                   className="wb-link wb-problem-src"
                   onClick={() => ignore(p, true)}
                 >
-                  恢复提醒
+                  {bi("恢复提醒", "Restore warning")}
                 </button>
               )}
             </div>
@@ -302,12 +316,14 @@ type Custom = {
   params: Record<string, string>;
 };
 
-const STATUS: Record<string, string> = {
-  added: "新增",
-  changed: "有变化",
-  removed: "已移除",
-  same: "无变化",
-};
+const fileDiffStatus = (s: string) =>
+  s === "added"
+    ? bi("新增", "Added")
+    : s === "changed"
+      ? bi("有变化", "Changed")
+      : s === "removed"
+        ? bi("已移除", "Removed")
+        : bi("无变化", "Unchanged");
 type View = "overview" | "graph" | "steps" | "handbook" | "files" | "syntax";
 
 export function PreviewDrawer({
@@ -323,6 +339,7 @@ export function PreviewDrawer({
   flush: () => Promise<void>;
   openFile: (p: string) => void;
 }) {
+  const lang = useLang();
   const [req, setReq] = useState({ version: "", preset: "", platform: "", delivery_mode: "" });
   const [data, setData] = useState<Preview | null>(null);
   const [busy, setBusy] = useState(false);
@@ -378,7 +395,7 @@ export function PreviewDrawer({
     if (open) run();
     return () => { requestID.current++; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, lang]);
   const set = (k: keyof typeof req) => (v: string) => {
     const next = { ...req, [k]: v || "" };
     setReq(next);
@@ -414,21 +431,21 @@ export function PreviewDrawer({
       visible={open}
       onCancel={close}
       footer={null}
-      title="试生成"
+      title={bi("试生成", "Trial Generate")}
       unmountOnExit
     >
       <div className="wb-pv">
         {(data || error) && (
           <div className="wb-pv-bar">
             {data?.delivery_modes?.includes("configuration") && <div className="wb-pv-ctl">
-              <span>交付内容</span>
-              <Select size="small" aria-label="试生成交付内容" style={{width:160}} value={req.delivery_mode || data.sample?.delivery_mode || "offline"} onChange={set("delivery_mode")} options={[
-                {value:"offline",label:"部署材料",disabled:!data.delivery_modes.some(m=>m==="offline"||m==="automatic")},
-                {value:"configuration",label:"仅生成配置文件"}
+              <span>{bi("交付内容", "Delivery Mode")}</span>
+              <Select size="small" aria-label={bi("试生成交付内容", "Trial delivery mode")} style={{width:160}} value={req.delivery_mode || data.sample?.delivery_mode || "offline"} onChange={set("delivery_mode")} options={[
+                {value:"offline",label:bi("部署材料", "Deploy Bundle"),disabled:!data.delivery_modes.some(m=>m==="offline"||m==="automatic")},
+                {value:"configuration",label:bi("仅生成配置文件", "Config Files Only")}
               ]}/>
             </div>}
             <div className="wb-pv-ctl">
-              <span>版本</span>
+              <span>{bi("版本", "Version")}</span>
               <Select
                 size="small"
                 value={req.version || data?.sample?.version}
@@ -438,15 +455,15 @@ export function PreviewDrawer({
                 }))}
                 onChange={set("version")}
                 style={{ width: 110 }}
-                aria-label="版本"
+                aria-label={bi("版本", "Version")}
               />
             </div>
             <div className="wb-pv-ctl">
-              <span>方案</span>
+              <span>{bi("方案", "Scheme")}</span>
               <Select
                 size="small"
                 allowClear
-                placeholder="默认台数"
+                placeholder={bi("默认台数", "Default counts")}
                 value={req.preset || undefined}
                 options={(data?.presets || []).map((p) => ({
                   value: p.id,
@@ -454,11 +471,11 @@ export function PreviewDrawer({
                 }))}
                 onChange={set("preset")}
                 style={{ width: 170 }}
-                aria-label="方案"
+                aria-label={bi("方案", "Scheme")}
               />
             </div>
             <div className="wb-pv-ctl">
-              <span>系统</span>
+              <span>{bi("系统", "OS")}</span>
               <Select
                 size="small"
                 value={req.platform || data?.sample?.platform}
@@ -468,7 +485,7 @@ export function PreviewDrawer({
                 }))}
                 onChange={set("platform")}
                 style={{ width: 170 }}
-                aria-label="系统"
+                aria-label={bi("系统", "OS")}
               />
             </div>
             <span className="wb-grow" />
@@ -479,12 +496,15 @@ export function PreviewDrawer({
               loading={busy}
               onClick={() => run()}
             >
-              重新生成
+              {bi("重新生成", "Regenerate")}
             </Button>
           </div>
         )}
         <p className="wb-pv-lead">
-          按草稿生成一套样例交付，走和真实交付完全相同的流程，但不碰任何机器。
+          {bi(
+            "按草稿生成一套样例交付，走和真实交付完全相同的流程，但不碰任何机器。",
+            "Generates a sample delivery from the draft using the exact same pipeline without touching any hosts.",
+          )}
         </p>
         {data && data.roles.length > 0 && (
           <div className="wb-sample">
@@ -495,10 +515,10 @@ export function PreviewDrawer({
               onClick={openSetup}
             >
               {setup
-                ? "收起样例设置"
+                ? bi("收起样例设置", "Hide sample settings")
                 : custom
-                  ? "样例：已手动调整 · 修改"
-                  : "调整样例：机器怎么放、改哪些参数"}
+                  ? bi("样例：已手动调整 · 修改", "Sample: customized · Edit")
+                  : bi("调整样例：机器怎么放、改哪些参数", "Customize sample: host placement & parameters")}
             </button>
             {setup && custom && (
               <SampleEditor
@@ -519,7 +539,7 @@ export function PreviewDrawer({
         {error && <p className="bad">{error}</p>}
         {!data && busy && (
           <div className="wb-pv-wait">
-            <Spin /> 正在生成…
+            <Spin /> {bi("正在生成…", "Generating...")}
           </div>
         )}
         {data && (
@@ -532,22 +552,22 @@ export function PreviewDrawer({
               <>
                 <div className="wb-pv-tabs">
                   <Segmented<View>
-                    label="结果"
+                    label={bi("结果", "Result")}
                     value={view}
                     onChange={setView}
                     options={[
-                      { value: "overview", label: "概览" },
-                      { value: "graph", label: "拓扑" },
-                      { value: "steps", label: "步骤" },
-                      { value: "handbook", label: "手册" },
+                      { value: "overview", label: bi("概览", "Overview") },
+                      { value: "graph", label: bi("拓扑", "Topology") },
+                      { value: "steps", label: bi("步骤", "Steps") },
+                      { value: "handbook", label: bi("手册", "Runbooks") },
                       {
                         value: "files",
-                        label: "文件与差异",
+                        label: bi("文件与差异", "Files & Diffs"),
                         count: data.compared ? data.changes : undefined,
                       },
                       {
                         value: "syntax",
-                        label: "Ansible 检查",
+                        label: bi("Ansible 检查", "Ansible Check"),
                         count: syntaxFail || undefined,
                       },
                     ]}
@@ -557,54 +577,67 @@ export function PreviewDrawer({
                   <div className="wb-pv-view">
                     <dl className="wb-facts">
                       <div>
-                        <dt>样例</dt>
+                        <dt>{bi("样例", "Sample")}</dt>
                         <dd>
-                          实例 <b className="mono">{data.sample?.instance}</b> ·
-                          版本 {data.sample?.version} · {data.sample?.platform}
+                          {bi("实例", "Instance")} <b className="mono">{data.sample?.instance}</b> ·{" "}
+                          {bi("版本", "v")}{data.sample?.version} · {data.sample?.platform}
                         </dd>
                       </div>
                       <div>
-                        <dt>机器</dt>
+                        <dt>{bi("机器", "Hosts")}</dt>
                         <dd>
                           {Object.entries(data.sample?.placement || {})
-                            .map(([r, h]) => `${r}：${h.join("、")}`)
-                            .join("；")}
+                            .map(([r, h]) => `${r}: ${h.join(", ")}`)
+                            .join("; ")}
                         </dd>
                       </div>
                       <div>
-                        <dt>生成结果</dt>
+                        <dt>{bi("生成结果", "Output")}</dt>
                         <dd>
-                          {data.files.length} 个文件，
-                          {data.plan?.phases?.reduce(
-                            (n, p) => n + p.steps.length,
-                            0,
-                          ) ?? 0}{" "}
-                          个部署步骤
+                          {bi(
+                            `${data.files.length} 个文件，${data.plan?.phases?.reduce((n, p) => n + p.steps.length, 0) ?? 0} 个部署步骤`,
+                            `${data.files.length} files, ${data.plan?.phases?.reduce((n, p) => n + p.steps.length, 0) ?? 0} deploy steps`,
+                          )}
                         </dd>
                       </div>
                       <div>
-                        <dt>和已发布版本相比</dt>
+                        <dt>{bi("和已发布版本相比", "Vs. Published")}</dt>
                         <dd>
                           {data.compared
                             ? data.changes
-                              ? `${data.changes} 个生成文件不同（在「文件与差异」里看）`
-                              : "生成结果完全相同"
-                            : "没有已发布的版本可比（这是一个新组件）"}
+                              ? bi(
+                                  `${data.changes} 个生成文件不同（在「文件与差异」里看）`,
+                                  `${data.changes} generated file(s) changed (see Files & Diffs)`,
+                                )
+                              : bi("生成结果完全相同", "Generated output is identical")
+                            : bi(
+                                "没有已发布的版本可比（这是一个新组件）",
+                                "No published version to compare against (new component)",
+                              )}
                         </dd>
                       </div>
                       <div>
-                        <dt>Ansible 检查</dt>
+                        <dt>{bi("Ansible 检查", "Ansible Check")}</dt>
                         <dd>
-                          {data.sample?.delivery_mode === "configuration" ? "本次仅生成配置文件，不需要执行脚本检查" : data.ansible.ready ? (
+                          {data.sample?.delivery_mode === "configuration" ? (
+                            bi(
+                              "本次仅生成配置文件，不需要执行脚本检查",
+                              "Config-only delivery; playbook syntax check skipped",
+                            )
+                          ) : data.ansible.ready ? (
                             syntaxFail ? (
                               <span className="bad">
-                                {syntaxFail} 个 playbook 语法有误
+                                {bi(
+                                  `${syntaxFail} 个 playbook 语法有误`,
+                                  `${syntaxFail} playbook(s) have syntax errors`,
+                                )}
                               </span>
                             ) : (
                               <span className="ok">
-                                {data.syntax.length} 个 playbook
-                                语法全部通过（ansible-core{" "}
-                                {data.ansible.version}）
+                                {bi(
+                                  `${data.syntax.length} 个 playbook 语法全部通过（ansible-core ${data.ansible.version}）`,
+                                  `All ${data.syntax.length} playbook(s) passed syntax check (ansible-core ${data.ansible.version})`,
+                                )}
                               </span>
                             )
                           ) : (
@@ -615,7 +648,7 @@ export function PreviewDrawer({
                     </dl>
                     {data.issues.length > 0 && (
                       <div className="wb-pv-issues">
-                        <h3>样例交付的提示</h3>
+                        <h3>{bi("样例交付的提示", "Sample Delivery Notices")}</h3>
                         {data.issues.map((i, k) => (
                           <div className={`issue-line ${i.severity}`} key={k}>
                             {i.path && <code>{i.path}</code>}
@@ -637,8 +670,10 @@ export function PreviewDrawer({
                       />
                     )}
                     <p className="muted small">
-                      拓扑图来自你声明的角色和数据流。数据流画不出来，通常是
-                      flows 里的 from/to 角色名写错，或 when 条件不成立。
+                      {bi(
+                        "拓扑图来自你声明的角色和数据流。数据流画不出来，通常是 flows 里的 from/to 角色名写错，或 when 条件不成立。",
+                        "Topology comes from your declared roles and flows. Missing arrows usually mean a mismatched from/to role name in flows or an unmet when condition.",
+                      )}
                     </p>
                   </div>
                 )}
@@ -659,24 +694,28 @@ export function PreviewDrawer({
                               <b>{s.title}</b>
                               <span className={`flag eff-${s.effect}`}>
                                 {{
-                                  "read-only": "只读",
-                                  change: "修改",
-                                  disruptive: "中断服务",
-                                  destructive: "删除数据",
+                                  "read-only": bi("只读", "Read-only"),
+                                  change: bi("修改", "Modify"),
+                                  disruptive: bi("中断服务", "Disruptive"),
+                                  destructive: bi("删除数据", "Destructive"),
                                 }[s.effect] || s.effect}
                               </span>
                               <span className="faint small">
-                                {s.hosts?.join("、")}
+                                {s.hosts?.join(", ")}
                               </span>
                             </div>
                             {s.desc && <p>{s.desc}</p>}
                             {s.expect && (
                               <p className="muted small">
-                                成功的样子：{s.expect}
+                                {bi("成功的样子：", "Expected: ")}
+                                {s.expect}
                               </p>
                             )}
                             {s.skipped && (
-                              <p className="warn small">不执行：{s.skipped}</p>
+                              <p className="warn small">
+                                {bi("不执行：", "Skipped: ")}
+                                {s.skipped}
+                              </p>
                             )}
                           </div>
                         ))}
@@ -712,11 +751,16 @@ export function PreviewDrawer({
                           checked={onlyChanged}
                           onChange={(e) => setOnlyChanged(e.target.checked)}
                         />{" "}
-                        只看有变化的（{data.changes} / {data.files.length}）
+                        {bi(
+                          `只看有变化的（${data.changes} / ${data.files.length}）`,
+                          `Changed only (${data.changes} / ${data.files.length})`,
+                        )}
                       </label>
                     )}
                     {files.length === 0 && (
-                      <p className="muted">生成结果和已发布版本完全相同。</p>
+                      <p className="muted">
+                        {bi("生成结果和已发布版本完全相同。", "Generated output matches the published version.")}
+                      </p>
                     )}
                     {files.map((f) => (
                       <details
@@ -728,7 +772,7 @@ export function PreviewDrawer({
                           <span className="mono">{f.path}</span>
                           {data.compared && (
                             <i className={`wb-st ${f.status}`}>
-                              {STATUS[f.status]}
+                              {fileDiffStatus(f.status)}
                             </i>
                           )}
                           <em>{size(f.size)}</em>
@@ -738,7 +782,7 @@ export function PreviewDrawer({
                         ) : f.status === "same" ||
                           f.status === "removed" ? null : (
                           <p className="muted small">
-                            新文件，内容见下载的交付。
+                            {bi("新文件，内容见下载的交付。", "New file; see the downloaded delivery bundle.")}
                           </p>
                         )}
                         {f.path.startsWith("roles/") &&
@@ -748,7 +792,7 @@ export function PreviewDrawer({
                               className="wb-link"
                               onClick={() => openFile(f.path)}
                             >
-                              在编辑器中打开
+                              {bi("在编辑器中打开", "Open in editor")}
                             </button>
                           )}
                       </details>
@@ -762,10 +806,15 @@ export function PreviewDrawer({
                     ) : (
                       <>
                         <p className="muted small">
-                          用 ansible-core {data.ansible.version}（
-                          {data.ansible.where}）对每个生成的 playbook 做{" "}
+                          {bi(
+                            `用 ansible-core ${data.ansible.version}（${data.ansible.where}）对每个生成的 playbook 做 `,
+                            `Runs `,
+                          )}
                           <code>--syntax-check</code>
-                          ：能发现缩进、关键字、任务结构的错误；不会连接任何机器，也不会检查模板里的变量是否存在。
+                          {bi(
+                            "：能发现缩进、关键字、任务结构的错误；不会连接任何机器，也不会检查模板里的变量是否存在。",
+                            ` on every generated playbook via ansible-core ${data.ansible.version} (${data.ansible.where}). Catches indentation, keyword, and task structure issues without connecting to hosts or verifying template variables.`,
+                          )}
                         </p>
                         {data.syntax.map((s) => (
                           <details
@@ -778,7 +827,7 @@ export function PreviewDrawer({
                               <i
                                 className={`wb-st ${s.ok ? "added" : "removed"}`}
                               >
-                                {s.ok ? "通过" : "有误"}
+                                {s.ok ? bi("通过", "Pass") : bi("有误", "Error")}
                               </i>
                             </summary>
                             {s.output && (
@@ -819,6 +868,7 @@ function SampleEditor({
   reset: () => void;
   busy: boolean;
 }) {
+  useLang();
   const hostNames = Array.from(
     { length: value.hosts },
     (_, i) => `host${i + 1}`,
@@ -865,12 +915,12 @@ function SampleEditor({
   return (
     <div className="wb-sample-body">
       <div className="wb-sample-sec">
-        <h4>机器与角色</h4>
+        <h4>{bi("机器与角色", "Hosts & Roles")}</h4>
         <div className="wb-sample-hosts">
-          <span>机器数</span>
+          <span>{bi("机器数", "Hosts")}</span>
           <Button
             size="mini"
-            aria-label="减少一台"
+            aria-label={bi("减少一台", "Remove a host")}
             disabled={value.hosts <= 1}
             onClick={() => setHosts(value.hosts - 1)}
           >
@@ -879,7 +929,7 @@ function SampleEditor({
           <b className="num">{value.hosts}</b>
           <Button
             size="mini"
-            aria-label="增加一台"
+            aria-label={bi("增加一台", "Add a host")}
             disabled={value.hosts >= LAST_N}
             onClick={() => setHosts(value.hosts + 1)}
           >
@@ -899,7 +949,7 @@ function SampleEditor({
               {h}
             </span>
           ))}
-          <span className="faint small">台数要求</span>
+          <span className="faint small">{bi("台数要求", "Required")}</span>
           {data.roles.map((r) => {
             const n = (value.placement[r.name] || []).length;
             const bad = n < r.min || (r.max > 0 && n > r.max);
@@ -920,7 +970,7 @@ function SampleEditor({
                       type="checkbox"
                       checked={has(r.name, h)}
                       onChange={() => toggle(r.name, h)}
-                      aria-label={`${r.title || r.name} 放在 ${h}`}
+                      aria-label={bi(`${r.title || r.name} 放在 ${h}`, `Place ${r.title || r.name} on ${h}`)}
                     />
                   </span>
                 ))}
@@ -938,7 +988,7 @@ function SampleEditor({
         </div>
       </div>
       <div className="wb-sample-sec">
-        <h4>参数（不改的用默认值）</h4>
+        <h4>{bi("参数（不改的用默认值）", "Parameters (unset uses default)")}</h4>
         {rows.map(([k, v], i) => {
           const def = data.params.find((p) => p.key === k);
           dup.add(k);
@@ -948,15 +998,15 @@ function SampleEditor({
                 size="small"
                 showSearch
                 value={k || undefined}
-                placeholder="选择参数"
+                placeholder={bi("选择参数", "Select parameter")}
                 options={data.params
                   .filter((p) => p.key === k || !(k in value.params) || true)
                   .map((p) => ({
                     value: p.key,
-                    label: `${p.label || p.key}（${p.key}）`,
+                    label: `${p.label || p.key} (${p.key})`,
                   }))}
                 onChange={(nk) => setRow(i, nk, "")}
-                aria-label="参数"
+                aria-label={bi("参数", "Parameter")}
               />
               {def?.type === "enum" && def.options ? (
                 <Select
@@ -964,18 +1014,18 @@ function SampleEditor({
                   value={v || undefined}
                   options={def.options.map((o) => ({ value: o, label: o }))}
                   onChange={(nv) => setRow(i, k, nv)}
-                  aria-label="值"
+                  aria-label={bi("值", "Value")}
                 />
               ) : def?.type === "bool" ? (
                 <Select
                   size="small"
                   value={v || undefined}
                   options={[
-                    { value: "true", label: "开" },
-                    { value: "false", label: "关" },
+                    { value: "true", label: bi("开", "On") },
+                    { value: "false", label: bi("关", "Off") },
                   ]}
                   onChange={(nv) => setRow(i, k, nv)}
-                  aria-label="值"
+                  aria-label={bi("值", "Value")}
                 />
               ) : (
                 <input
@@ -983,11 +1033,11 @@ function SampleEditor({
                   value={v}
                   placeholder={
                     def?.default !== undefined
-                      ? `默认 ${String(def.default)}`
-                      : "值"
+                      ? bi(`默认 ${String(def.default)}`, `Default ${String(def.default)}`)
+                      : bi("值", "Value")
                   }
                   onChange={(e) => setRow(i, k, e.target.value)}
-                  aria-label="值"
+                  aria-label={bi("值", "Value")}
                 />
               )}
               <Button
@@ -1001,7 +1051,7 @@ function SampleEditor({
                   })
                 }
               >
-                删除
+                {bi("删除", "Delete")}
               </Button>
             </div>
           );
@@ -1014,15 +1064,15 @@ function SampleEditor({
             onChange({ ...value, params: { ...value.params, "": "" } })
           }
         >
-          + 改一个参数
+          {bi("+ 改一个参数", "+ Override parameter")}
         </Button>
       </div>
       <div className="wb-sample-actions">
         <Button size="small" onClick={reset}>
-          恢复自动摆放
+          {bi("恢复自动摆放", "Reset auto placement")}
         </Button>
         <Button size="small" type="primary" loading={busy} onClick={run}>
-          按这个样例生成
+          {bi("按这个样例生成", "Generate with sample")}
         </Button>
       </div>
     </div>

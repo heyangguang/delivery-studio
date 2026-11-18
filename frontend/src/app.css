@@ -113,12 +113,26 @@ html:not([data-vt-ok]) .main {
   height: 52px;
   display: flex;
   align-items: center;
-  gap: 24px;
-  padding: 0 20px;
+  gap: 20px;
+  padding: 0 18px;
   background: rgba(255, 255, 255, 0.86);
   backdrop-filter: saturate(180%) blur(16px);
   -webkit-backdrop-filter: saturate(180%) blur(16px);
   border-bottom: 1px solid var(--line);
+}
+:lang(en) .topbar {
+  gap: 14px;
+  padding: 0 14px;
+}
+:lang(en) .tabs a {
+  padding: 0 8.5px;
+  font-size: 13px;
+}
+:lang(en) .search-trigger {
+  min-width: 134px;
+}
+:lang(en) .top-right {
+  gap: 6px;
 }
 .brand {
   display: inline-flex;
@@ -448,12 +462,17 @@ html:not([data-vt-ok]) .main {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
 }
 .list-title h1 {
   margin: 0;
   font-size: 20px;
   font-weight: 700;
   letter-spacing: -0.02em;
+  min-width: 0;
+}
+:lang(en) .list-title h1 {
+  font-size: 18px;
 }
 .list-head .seg {
   width: 100%;
@@ -3450,7 +3469,8 @@ body[arco-theme="dark"] .scheme-summary {
 }
 
 /* ---------- platform version & changelog ---------- */
-.ver-pill {
+.ver-pill,
+.lang-pill {
   appearance: none;
   border: 1px solid var(--line);
   background: transparent;
@@ -3473,13 +3493,26 @@ body[arco-theme="dark"] .scheme-summary {
     color 0.16s ease,
     transform 0.16s var(--spring);
 }
-.ver-pill:hover {
+.lang-pill {
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 0 8px;
+  gap: 5px;
+}
+.ver-pill:hover,
+.lang-pill:hover {
   color: var(--ink);
   border-color: var(--line-strong);
   background: var(--hover);
 }
-.ver-pill:active {
+.ver-pill:active,
+.lang-pill:active {
   transform: scale(0.985);
+}
+.lang-pill:focus-visible,
+.ver-pill:focus-visible {
+  box-shadow: var(--ring);
 }
 .ver-pill.is-new {
   border-color: var(--brand-line);

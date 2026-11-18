@@ -28,7 +28,7 @@ const (
 )
 
 var (
-	reHeadingPrefix = regexp.MustCompile(`^(?:第\s*\d+\s*章[\s\x{3000}.:：、]*|\d+(?:\.\d+){0,3}[\s\x{3000}).、:：]+)`)
+	reHeadingPrefix = regexp.MustCompile(`^(?:第\s*\d+\s*章[\s\x{3000}.:：、]*|Chapter\s+\d+[\s.:]*|\d+(?:\.\d+){0,3}[\s\x{3000}).、:：]+)`)
 )
 
 // docxWriter accumulates WordprocessingML body elements and embedded media for one document section.
@@ -37,6 +37,7 @@ type docxWriter struct {
 	media          []docxMedia
 	theme          docxTheme
 	ridPrefix      string
+	lang           string
 	c1, c2, c3, c4 int
 	autoNum        bool
 	headings       [][2]string // ordered list of rendered {levelStr, formattedTitle} for TOC preview sync
@@ -44,12 +45,17 @@ type docxWriter struct {
 
 // newDocxWriter creates an auto-numbered corporate docxWriter bound to theme and a relationship ID prefix.
 func newDocxWriter(theme docxTheme, ridPrefix string) *docxWriter {
+	return newDocxWriterLang(theme, ridPrefix, "")
+}
+
+func newDocxWriterLang(theme docxTheme, ridPrefix, lang string) *docxWriter {
 	if theme.Primary == "" {
 		theme = docxThemes["teal"]
 	}
 	return &docxWriter{
 		theme:     theme,
 		ridPrefix: firstNonEmptyStr(ridPrefix, "rIdMw"),
+		lang:      lang,
 		autoNum:   true,
 	}
 }
@@ -290,7 +296,7 @@ func (w *docxWriter) heading(level int, text string) {
 		case 1:
 			w.c1++
 			w.c2, w.c3, w.c4 = 0, 0, 0
-			display = fmt.Sprintf("第%d章  %s", w.c1, clean)
+			display = tr(w.lang, fmt.Sprintf("第%d章  %s", w.c1, clean), fmt.Sprintf("Chapter %d  %s", w.c1, clean))
 		case 2:
 			if w.c1 == 0 {
 				w.c1 = 1
@@ -346,10 +352,14 @@ func (w *docxWriter) text(s string) {
 		case strings.HasPrefix(t, "✓") || strings.HasPrefix(t, "✔") ||
 			strings.HasPrefix(t, "成功判据：") || strings.HasPrefix(t, "成功判据:") ||
 			strings.HasPrefix(t, "回退确认判据：") || strings.HasPrefix(t, "回退确认判据:") ||
-			strings.HasPrefix(t, "判据：") || strings.HasPrefix(t, "判据:"):
+			strings.HasPrefix(t, "判据：") || strings.HasPrefix(t, "判据:") ||
+			strings.HasPrefix(t, "Pass Criteria:") || strings.HasPrefix(t, "Rollback Verification:") ||
+			strings.HasPrefix(t, "Criteria:"):
 			w.writeCriteriaLine(t)
 		case strings.HasPrefix(t, "注意：") || strings.HasPrefix(t, "注意:") ||
-			strings.HasPrefix(t, "警告：") || strings.HasPrefix(t, "警告:"):
+			strings.HasPrefix(t, "警告：") || strings.HasPrefix(t, "警告:") ||
+			strings.HasPrefix(t, "Note:") || strings.HasPrefix(t, "Caution:") ||
+			strings.HasPrefix(t, "Warning:"):
 			w.writeCautionLine(t)
 		case strings.HasPrefix(t, "- ") || strings.HasPrefix(t, "* "):
 			body := strings.TrimSpace(t[2:])
@@ -413,7 +423,9 @@ func (w *docxWriter) note(text string) {
 	accent := th.Primary
 	fill := th.NoteFill
 	ink := "334155"
-	isWarn := strings.Contains(t, "注意") || strings.Contains(t, "风险") || strings.Contains(t, "严禁") || strings.Contains(t, "失败") || strings.Contains(t, "不可逆")
+	upperT := strings.ToUpper(t)
+	isWarn := strings.Contains(t, "注意") || strings.Contains(t, "风险") || strings.Contains(t, "严禁") || strings.Contains(t, "失败") || strings.Contains(t, "不可逆") ||
+		strings.Contains(upperT, "WARNING") || strings.Contains(upperT, "CAUTION") || strings.Contains(upperT, "RISK") || strings.Contains(upperT, "DO NOT") || strings.Contains(upperT, "IRREVERSIBLE") || strings.Contains(upperT, "FAILED")
 	if isWarn {
 		accent = "B91C1C"
 		fill = "FEF2F2"
@@ -457,7 +469,7 @@ func (w *docxWriter) struck(head, text string, items []string) {
 		w.b.WriteString(`<w:p><w:pPr><w:spacing w:before="80" w:after="40"/></w:pPr><w:r><w:rPr><w:b/>`)
 		w.b.WriteString(strike)
 		w.b.WriteString(`</w:rPr><w:t xml:space="preserve">`)
-		w.b.WriteString(esc(head + "（已归档/失效）"))
+		w.b.WriteString(esc(head + tr(w.lang, "（已归档/失效）", " (Superseded / Archived)")))
 		w.b.WriteString(`</w:t></w:r></w:p>`)
 	}
 	for _, s := range append([]string{text}, items...) {
@@ -471,8 +483,9 @@ func (w *docxWriter) struck(head, text string, items []string) {
 }
 
 func isCautionComment(comment string) bool {
-	for _, kw := range []string{"注意", "警告", "WARN", "严禁", "务必", "不可逆", "必须确认", "慎用"} {
-		if strings.Contains(comment, kw) {
+	upper := strings.ToUpper(comment)
+	for _, kw := range []string{"注意", "警告", "WARN", "严禁", "务必", "不可逆", "必须确认", "慎用", "CAUTION", "CRITICAL", "DO NOT", "MUST CONFIRM"} {
+		if strings.Contains(comment, kw) || strings.Contains(upper, kw) {
 			return true
 		}
 	}
@@ -719,11 +732,11 @@ func (w *docxWriter) bannerPicture(data []byte, spaceAfter int) bool {
 
 // toc builds the formal corporate table of contents page with dotted right tab leaders.
 func (w *docxWriter) toc(heads [][2]string) {
-	w.para("TOCHeading", "目录")
+	w.para("TOCHeading", tr(w.lang, "目录", "Table of Contents"))
 	w.b.WriteString(`<w:p><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> TOC \o "1-3" \h \z \u </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r></w:p>`)
 	if len(heads) == 0 {
 		heads = [][2]string{
-			{"1", "第1章  正文（在 Word / WPS 中右键“更新域”生成页码）"},
+			{"1", tr(w.lang, "第1章  正文（在 Word / WPS 中右键“更新域”生成页码）", "Chapter 1  Body (Right-click TOC in Word / LibreOffice -> Update Field)")},
 		}
 	}
 	for _, h := range heads {
@@ -752,11 +765,13 @@ type docxCover struct {
 	Facts        [][2]string
 	BannerData   []byte
 	CustomBanner bool
+	Lang         string
 }
 
 func (w *docxWriter) cover(c docxCover) {
 	th := w.th()
-	slogan := firstNonEmptyStr(c.Slogan, "标准化部署与高可用运维体系")
+	lang := firstNonEmptyStr(c.Lang, w.lang)
+	slogan := firstNonEmptyStr(c.Slogan, tr(lang, "标准化部署与高可用运维体系", "Standardized Deployment & High-Availability Operations"))
 	org := strings.TrimSpace(c.Org)
 	project := strings.TrimSpace(c.Project)
 
@@ -800,16 +815,16 @@ func (w *docxWriter) cover(c docxCover) {
 	ver := firstNonEmptyStr(c.DocVersion, "V1.0")
 	dt := firstNonEmptyStr(c.Date, time.Now().Format("2006-01-02"))
 	w.b.WriteString(`<w:p><w:pPr><w:spacing w:before="2100" w:after="80"/></w:pPr>`)
-	fmt.Fprintf(&w.b, `<w:r><w:rPr><w:sz w:val="22"/><w:color w:val="%s"/></w:rPr><w:t xml:space="preserve">版    本：%s</w:t></w:r></w:p>`, th.Ink, esc(ver))
+	fmt.Fprintf(&w.b, `<w:r><w:rPr><w:sz w:val="22"/><w:color w:val="%s"/></w:rPr><w:t xml:space="preserve">%s%s</w:t></w:r></w:p>`, th.Ink, tr(lang, "版    本：", "Version: "), esc(ver))
 	w.b.WriteString(`<w:p><w:pPr><w:spacing w:before="20" w:after="80"/></w:pPr>`)
-	fmt.Fprintf(&w.b, `<w:r><w:rPr><w:sz w:val="22"/><w:color w:val="%s"/></w:rPr><w:t xml:space="preserve">日    期：%s</w:t></w:r></w:p>`, th.Ink, esc(dt))
+	fmt.Fprintf(&w.b, `<w:r><w:rPr><w:sz w:val="22"/><w:color w:val="%s"/></w:rPr><w:t xml:space="preserve">%s%s</w:t></w:r></w:p>`, th.Ink, tr(lang, "日    期：", "Date: "), esc(dt))
 	if strings.TrimSpace(c.Cluster) != "" {
 		w.b.WriteString(`<w:p><w:pPr><w:spacing w:before="20" w:after="80"/></w:pPr>`)
-		fmt.Fprintf(&w.b, `<w:r><w:rPr><w:sz w:val="22"/><w:color w:val="%s"/></w:rPr><w:t xml:space="preserve">目标集群：%s</w:t></w:r></w:p>`, th.Ink, esc(c.Cluster))
+		fmt.Fprintf(&w.b, `<w:r><w:rPr><w:sz w:val="22"/><w:color w:val="%s"/></w:rPr><w:t xml:space="preserve">%s%s</w:t></w:r></w:p>`, th.Ink, tr(lang, "目标集群：", "Target Cluster: "), esc(c.Cluster))
 	}
 	if strings.TrimSpace(c.Confidential) != "" {
 		w.b.WriteString(`<w:p><w:pPr><w:spacing w:before="20" w:after="80"/></w:pPr>`)
-		fmt.Fprintf(&w.b, `<w:r><w:rPr><w:sz w:val="22"/><w:color w:val="475569"/></w:rPr><w:t xml:space="preserve">密    级：%s</w:t></w:r></w:p>`, esc(c.Confidential))
+		fmt.Fprintf(&w.b, `<w:r><w:rPr><w:sz w:val="22"/><w:color w:val="475569"/></w:rPr><w:t xml:space="preserve">%s%s</w:t></w:r></w:p>`, tr(lang, "密    级：", "Classification: "), esc(c.Confidential))
 	}
 	if strings.TrimSpace(c.Note) != "" {
 		w.b.WriteString(`<w:p><w:pPr><w:spacing w:before="140" w:after="0"/></w:pPr>`)
@@ -825,38 +840,40 @@ type docxVersionControl struct {
 	Cluster, Confidential                           string
 	Facts                                           [][2]string
 	History                                         [][4]string
+	Lang                                            string
 }
 
 func (w *docxWriter) versionControl(vc docxVersionControl) {
 	th := w.th()
+	lang := firstNonEmptyStr(vc.Lang, w.lang)
 	// Thick horizontal corporate divider matching standard template page header bar.
 	fmt.Fprintf(&w.b, `<w:p><w:pPr><w:pBdr><w:bottom w:val="single" w:sz="24" w:space="1" w:color="%s"/></w:pBdr><w:spacing w:before="0" w:after="200"/></w:pPr></w:p>`, th.Primary)
-	fmt.Fprintf(&w.b, `<w:p><w:pPr><w:spacing w:before="80" w:after="220"/><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="32"/><w:color w:val="%s"/></w:rPr><w:t>版本控制信息</w:t></w:r></w:p>`, th.Ink)
+	fmt.Fprintf(&w.b, `<w:p><w:pPr><w:spacing w:before="80" w:after="220"/><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="32"/><w:color w:val="%s"/></w:rPr><w:t>%s</w:t></w:r></w:p>`, th.Ink, tr(lang, "版本控制信息", "Document Control"))
 
 	// ★ 文档属性
-	fmt.Fprintf(&w.b, `<w:p><w:pPr><w:keepNext/><w:spacing w:before="80" w:after="90"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="22"/><w:color w:val="%s"/></w:rPr><w:t xml:space="preserve">★  文档属性</w:t></w:r></w:p>`, th.Primary)
+	fmt.Fprintf(&w.b, `<w:p><w:pPr><w:keepNext/><w:spacing w:before="80" w:after="90"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="22"/><w:color w:val="%s"/></w:rPr><w:t xml:space="preserve">%s</w:t></w:r></w:p>`, th.Primary, tr(lang, "★  文档属性", "★  Document Properties"))
 
 	var attrRows [][]string
 	attrRows = append(attrRows,
-		[]string{"项目名称", firstNonEmptyStr(vc.Project, vc.Cluster, "—")},
-		[]string{"文档标题", firstNonEmptyStr(vc.Title, "—")},
-		[]string{"文档版本号", firstNonEmptyStr(vc.Version, "V1.0")},
-		[]string{"版本日期", firstNonEmptyStr(vc.Date, time.Now().Format("2006-01-02"))},
-		[]string{"作    者", firstNonEmptyStr(vc.Author, "Middleware Hub")},
-		[]string{"审 核 人", firstNonEmptyStr(vc.Reviewer, "—")},
+		[]string{tr(lang, "项目名称", "Project Name"), firstNonEmptyStr(vc.Project, vc.Cluster, "—")},
+		[]string{tr(lang, "文档标题", "Document Title"), firstNonEmptyStr(vc.Title, "—")},
+		[]string{tr(lang, "文档版本号", "Document Version"), firstNonEmptyStr(vc.Version, "V1.0")},
+		[]string{tr(lang, "版本日期", "Release Date"), firstNonEmptyStr(vc.Date, time.Now().Format("2006-01-02"))},
+		[]string{tr(lang, "作    者", "Author"), firstNonEmptyStr(vc.Author, "Middleware Hub")},
+		[]string{tr(lang, "审 核 人", "Reviewer"), firstNonEmptyStr(vc.Reviewer, "—")},
 	)
 	if strings.TrimSpace(vc.Confidential) != "" {
-		attrRows = append(attrRows, []string{"密级标识", vc.Confidential})
+		attrRows = append(attrRows, []string{tr(lang, "密级标识", "Classification"), vc.Confidential})
 	}
 	for _, kv := range vc.Facts {
 		if strings.TrimSpace(kv[0]) != "" && strings.TrimSpace(kv[1]) != "" {
 			attrRows = append(attrRows, []string{kv[0], kv[1]})
 		}
 	}
-	w.tableWithWidths([]string{"属性", "内容"}, attrRows, []int{2300, docxBodyWidth - 2300}, 0, false)
+	w.tableWithWidths([]string{tr(lang, "属性", "Property"), tr(lang, "内容", "Value")}, attrRows, []int{2300, docxBodyWidth - 2300}, 0, false)
 
 	// ★ 文档变更过程
-	fmt.Fprintf(&w.b, `<w:p><w:pPr><w:keepNext/><w:spacing w:before="220" w:after="90"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="22"/><w:color w:val="%s"/></w:rPr><w:t xml:space="preserve">★  文档变更过程</w:t></w:r></w:p>`, th.Primary)
+	fmt.Fprintf(&w.b, `<w:p><w:pPr><w:keepNext/><w:spacing w:before="220" w:after="90"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="22"/><w:color w:val="%s"/></w:rPr><w:t xml:space="preserve">%s</w:t></w:r></w:p>`, th.Primary, tr(lang, "★  文档变更过程", "★  Revision History"))
 
 	var histRows [][]string
 	for _, r := range vc.History {
@@ -864,11 +881,11 @@ func (w *docxWriter) versionControl(vc docxVersionControl) {
 	}
 	if len(histRows) == 0 {
 		histRows = [][]string{
-			{firstNonEmptyStr(vc.Version, "V1.0"), firstNonEmptyStr(vc.Date, time.Now().Format("2006-01-02")), firstNonEmptyStr(vc.Author, "Middleware Hub"), "文档生成与基线归档"},
+			{firstNonEmptyStr(vc.Version, "V1.0"), firstNonEmptyStr(vc.Date, time.Now().Format("2006-01-02")), firstNonEmptyStr(vc.Author, "Middleware Hub"), tr(lang, "文档生成与基线归档", "Document generated and baselined")},
 			{"", "", "", ""},
 		}
 	}
-	w.tableWithWidths([]string{"版本", "更新日期", "更新人", "主要更新内容"}, histRows, []int{1200, 1550, 1550, docxBodyWidth - 4300}, -1, false)
+	w.tableWithWidths([]string{tr(lang, "版本", "Version"), tr(lang, "更新日期", "Date"), tr(lang, "更新人", "Updated By"), tr(lang, "主要更新内容", "Summary")}, histRows, []int{1200, 1550, 1550, docxBodyWidth - 4300}, -1, false)
 }
 
 func stylesXML(t docxTheme) string {
@@ -909,6 +926,7 @@ type docxBuildMeta struct {
 	Author       string
 	Theme        docxTheme
 	HasFrontSect bool
+	Lang         string
 }
 
 func headerBodyXML(text string) string {
@@ -947,13 +965,23 @@ func footerRomanBadgeXML(org string, t docxTheme) string {
 }
 
 func footerArabicXML(text string) string {
+	return footerArabicXMLLang(text, "")
+}
+
+func footerArabicXMLLang(text, lang string) string {
 	label := strings.TrimSpace(text)
 	prefix := ""
 	if label != "" {
 		prefix = esc(label + "      ")
 	}
+	pageBefore := "第 "
+	pageAfter := " 页"
+	if isEnLang(lang) {
+		pageBefore = "Page "
+		pageAfter = ""
+	}
 	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p><w:pPr><w:pStyle w:val="Footer"/><w:pBdr><w:top w:val="single" w:sz="4" w:space="4" w:color="CBD5E1"/></w:pBdr><w:jc w:val="center"/></w:pPr><w:r><w:t xml:space="preserve">%s第 </w:t></w:r><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> PAGE </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>1</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r><w:r><w:t xml:space="preserve"> 页</w:t></w:r></w:p></w:ftr>`, prefix)
+<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p><w:pPr><w:pStyle w:val="Footer"/><w:pBdr><w:top w:val="single" w:sz="4" w:space="4" w:color="CBD5E1"/></w:pBdr><w:jc w:val="center"/></w:pPr><w:r><w:t xml:space="preserve">%s%s</w:t></w:r><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> PAGE </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>1</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r><w:r><w:t xml:space="preserve">%s</w:t></w:r></w:p></w:ftr>`, prefix, pageBefore, pageAfter)
 }
 
 const docxSettingsXML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -1025,7 +1053,7 @@ func docxFileDual(front, body *docxWriter, meta docxBuildMeta) ([]byte, error) {
 			struct{ name, body string }{"word/header1.xml", headerEmptyXML()},
 			struct{ name, body string }{"word/footer1.xml", footerRomanBadgeXML(meta.FrontOrg, meta.Theme)},
 			struct{ name, body string }{"word/header2.xml", headerBodyXML(meta.Header)},
-			struct{ name, body string }{"word/footer2.xml", footerArabicXML(meta.Footer)},
+			struct{ name, body string }{"word/footer2.xml", footerArabicXMLLang(meta.Footer, meta.Lang)},
 		)
 	} else {
 		if front != nil {
@@ -1038,7 +1066,7 @@ func docxFileDual(front, body *docxWriter, meta docxBuildMeta) ([]byte, error) {
 
 		parts = append(parts,
 			struct{ name, body string }{"word/header1.xml", headerBodyXML(meta.Header)},
-			struct{ name, body string }{"word/footer1.xml", footerArabicXML(meta.Footer)},
+			struct{ name, body string }{"word/footer1.xml", footerArabicXMLLang(meta.Footer, meta.Lang)},
 		)
 	}
 	docRels.WriteString(imgRels)
@@ -1086,6 +1114,10 @@ func docxFileDual(front, body *docxWriter, meta docxBuildMeta) ([]byte, error) {
 
 // docxFile is the single-section helper preserved for minimal exports and template-building callers.
 func docxFile(body *docxWriter, title, header, footer, author string) ([]byte, error) {
+	lang := ""
+	if body != nil {
+		lang = body.lang
+	}
 	return docxFileDual(nil, body, docxBuildMeta{
 		Title:        title,
 		Header:       header,
@@ -1093,5 +1125,6 @@ func docxFile(body *docxWriter, title, header, footer, author string) ([]byte, e
 		Author:       author,
 		Theme:        body.th(),
 		HasFrontSect: false,
+		Lang:         lang,
 	})
 }

@@ -42,6 +42,7 @@ import { Terminal } from "./runbook";
 import { ForkModal, NewComponentModal } from "./wbdialogs";
 import { ComponentPanes } from "./compview";
 import { registerStyles } from "./glyphs";
+import { bi, canonicalCat, catLabel, useLang, withLang } from "./i18n";
 
 type Entry = AppInfo & {
   source: "builtin" | "custom" | "override" | "draft";
@@ -62,25 +63,31 @@ type Validation = {
   versions?: { id: string; status: string }[];
 };
 
-const SOURCE: Record<string, string> = {
-  builtin: "内置",
-  custom: "自定义",
-  override: "已修改",
-  draft: "未发布",
-};
-const SOURCE_HELP: Record<string, string> = {
-  override:
-    "这是内置组件，你改过并发布了自己的版本，平台现在用的是你的版本。要回到原样，打开它点「恢复内置」。",
-  custom: "你自己创建或导入的组件。",
-  draft: "还没有发布的新组件，只有草稿。",
-};
-const VERSION_STATE: Record<string, [string, string]> = {
-  published: ["done", "已发布"],
-  verifying: ["queued", "待验证"],
-  draft: ["idle", "草稿"],
-};
+const sourceLabel = (s: string) =>
+  s === "builtin"
+    ? bi("内置", "Built-in")
+    : s === "custom"
+      ? bi("自定义", "Custom")
+      : s === "override"
+        ? bi("已修改", "Modified")
+        : s === "draft"
+          ? bi("未发布", "Unpublished")
+          : s;
+const sourceHelp = (s: string) =>
+  s === "override"
+    ? bi(
+        "这是内置组件，你改过并发布了自己的版本，平台现在用的是你的版本。要回到原样，打开它点「恢复内置」。",
+        "This built-in component has a published custom override. Click Reset to Built-in to revert.",
+      )
+    : s === "custom"
+      ? bi("你自己创建或导入的组件。", "A component you created or imported.")
+      : s === "draft"
+        ? bi("还没有发布的新组件，只有草稿。", "An unpublished new component with only a draft.")
+        : "";
 
-const TEMPLATE = `schema: mwpack/v1
+const getTemplate = () =>
+  bi(
+    `schema: mwpack/v1
 component: my-app            # 小写字母开头，与目录名一致
 short: app                   # 表单默认给实例起的名字
 title: 我的应用
@@ -129,7 +136,58 @@ tests:
     tasks:
       - name: 连接服务端口
         ansible.builtin.wait_for: {port: "{{ mw.params.port }}", timeout: 5}
-`;
+`,
+    `schema: mwpack/v1
+component: my-app            # lowercase start, matches directory name
+short: app                   # default instance prefix in deploy form
+title: My App
+category: Other
+summary: Short one-line summary
+provides: []
+
+roles:
+  - {name: node, title: Node, min: 1, max: 5, default: 1}
+
+params:
+  - {key: port, label: Service Port, type: port, default: 8080}
+
+ports:
+  - {name: service, value: =params.port}
+
+versions:
+  - id: "1.0"
+    status: draft            # draft -> verifying -> published
+    platforms: [ubuntu-24.04-amd64]
+    packages: [{name: my-app}]
+    artifacts:
+      - {name: offline-repo, kind: apt-repo, root: offline-repo, file: offline-repo.tar.gz}
+
+lifecycle:
+  install:
+    - id: packages
+      title: Install packages
+      tasks:
+        - name: Install
+          ansible.builtin.apt:
+            name: "{{ mw.packages | map(attribute='spec') | list }}"
+            state: present
+            update_cache: false
+  start:
+    - id: start
+      title: Start service
+      tasks:
+        - name: Start
+          ansible.builtin.systemd: {name: my-app, enabled: true, state: started}
+
+tests:
+  - id: port
+    title: Port reachable
+    effect: read-only
+    tasks:
+      - name: Connect to service port
+        ansible.builtin.wait_for: {port: "{{ mw.params.port }}", timeout: 5}
+`,
+  );
 
 export function ComponentsPage({
   me,
@@ -138,6 +196,7 @@ export function ComponentsPage({
   me: Session;
   selected?: string;
 }) {
+  const lang = useLang();
   const narrow = useMedia("(max-width: 900px)");
   const admin = can("component.edit");
   const [list, setList] = useState<Entry[]>(
@@ -170,7 +229,7 @@ export function ComponentsPage({
     };
     window.addEventListener("mw-components-changed", changed);
     return () => window.removeEventListener("mw-components-changed", changed);
-  }, []);
+  }, [lang]);
 
   const q = query.trim().toLowerCase();
   const shown = useMemo(
@@ -178,19 +237,24 @@ export function ComponentsPage({
       list.filter(
         (c) =>
           !q ||
-          `${c.id} ${c.name} ${c.category} ${c.description}`
+          `${c.id} ${c.name} ${c.category} ${catLabel(c.category)} ${c.description}`
             .toLowerCase()
             .includes(q),
       ),
-    [list, q],
+    [list, q, lang],
   );
   const groups = useMemo(() => {
     const m = new Map<string, Entry[]>();
-    shown.forEach((c) =>
-      m.set(c.category || "其他", [...(m.get(c.category || "其他") || []), c]),
-    );
-    return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  }, [shown]);
+    shown.forEach((c) => {
+      const k = canonicalCat(c.category) || "__other__";
+      m.set(k, [...(m.get(k) || []), c]);
+    });
+    const labelOf = (k: string) =>
+      k === "__other__" ? bi("其他", "Other") : catLabel(k);
+    return [...m.entries()]
+      .map(([k, items]) => [labelOf(k), items, k] as const)
+      .sort((a, b) => a[0].localeCompare(b[0]));
+  }, [shown, lang]);
 
   // Desktop always shows a detail; pick the first one when nothing is selected. Not something the user asked for, so no transition.
   useEffect(() => {
@@ -241,19 +305,20 @@ export function ComponentsPage({
   return (
     <div className="md-split">
       {(!narrow || !selected) && (
-        <aside className="md-list" aria-label="组件列表">
+        <aside className="md-list" aria-label={bi("组件列表", "Component list")}>
           <div className="list-head">
             <div className="list-title">
-              <h1>组件</h1>
+              <h1>{bi("组件", "Components")}</h1>
               {(admin || can("component.import")) && (
-                <span className="row-gap">
+                <span className="row-gap" style={{ gap: 6, flexShrink: 0 }}>
                   {can("component.import") && (
                     <Button
                       size="small"
                       icon={<IconUpload />}
                       onClick={() => setOpen(true)}
+                      style={{ padding: "0 8px" }}
                     >
-                      导入
+                      {bi("导入", "Import")}
                     </Button>
                   )}
                   {admin && (
@@ -262,8 +327,9 @@ export function ComponentsPage({
                       size="small"
                       icon={<IconPlus />}
                       onClick={() => setCreate(true)}
+                      style={{ padding: "0 8px" }}
                     >
-                      新建
+                      {bi("新建", "New")}
                     </Button>
                   )}
                 </span>
@@ -277,7 +343,7 @@ export function ComponentsPage({
               prefix={<IconSearch />}
               suffix={!query ? <Kbd>/</Kbd> : undefined}
               allowClear
-              placeholder="搜索组件"
+              placeholder={bi("搜索组件", "Search components")}
               value={query}
               onChange={setQuery}
               onKeyDown={(e) => {
@@ -286,14 +352,14 @@ export function ComponentsPage({
                   (e.target as HTMLElement).blur();
                 }
               }}
-              aria-label="搜索组件"
+              aria-label={bi("搜索组件", "Search components")}
             />
             {admin && (
               <a
                 className="list-guide"
                 href="#/components/platform-shared/edit/files"
               >
-                <IconCode /> 平台公共流程
+                <IconCode /> {bi("平台公共流程", "Platform Shared Flows")}
               </a>
             )}
             <a
@@ -304,7 +370,7 @@ export function ComponentsPage({
                 go({ name: "components", id: "guide" });
               }}
             >
-              <IconBook /> 怎么编写和修改组件
+              <IconBook /> {bi("怎么编写和修改组件", "How to build & customize")}
             </a>
           </div>
           {load === "loading" && !list.length ? (
@@ -325,22 +391,22 @@ export function ComponentsPage({
           ) : load === "error" && !list.length ? (
             <div className="list-state">
               <IconExclamationCircle className="bad" />
-              <p>{message || "组件加载失败"}</p>
+              <p>{message || bi("组件加载失败", "Failed to load components")}</p>
               <Button size="small" icon={<IconRefresh />} onClick={reload}>
-                重试
+                {bi("重试", "Retry")}
               </Button>
             </div>
           ) : !shown.length ? (
             <div className="list-state">
-              <p>没有匹配的组件</p>
+              <p>{bi("没有匹配的组件", "No matching components")}</p>
               <Button size="small" onClick={() => setQuery("")}>
-                清除搜索
+                {bi("清除搜索", "Clear search")}
               </Button>
             </div>
           ) : (
-            <div className="list-body" role="listbox" aria-label="组件">
-              {groups.map(([cat, items]) => (
-                <React.Fragment key={cat}>
+            <div className="list-body" role="listbox" aria-label={bi("组件", "Components")}>
+              {groups.map(([cat, items, rawCat]) => (
+                <React.Fragment key={rawCat}>
                   <div className="list-day">{cat}</div>
                   {items.map((c) => (
                     <a
@@ -377,21 +443,21 @@ export function ComponentsPage({
                           <div className="cr-meta">
                             {c.broken
                               ? c.source === "override"
-                                ? "已回退内置版，编辑或恢复内置可修复"
-                                : "已跳过，修复或删除后恢复"
-                              : "尚未发布"}
+                                ? bi("已回退内置版，编辑或恢复内置可修复", "Fell back to built-in; edit or reset to fix")
+                                : bi("已跳过，修复或删除后恢复", "Skipped; fix or delete to recover")
+                              : bi("尚未发布", "Unpublished")}
                           </div>
                         ) : (
                           <div className="cr-meta">
                             <span
                               className={`cr-state ${c.available ? "ok" : c.kind === "external" ? "ext" : "bad"}`}
-                              title={c.available ? "可以生成交付" : c.reason}
+                              title={c.available ? bi("可以生成交付", "Ready to generate deliveries") : c.reason}
                             >
                               {c.available
                                 ? c.kind === "external"
-                                  ? "只出配置"
-                                  : "可生成"
-                                : "缺软件包"}
+                                  ? bi("只出配置", "Config only")
+                                  : bi("可生成", "Ready")
+                                : bi("缺软件包", "Missing pkgs")}
                             </span>
                             {c.roles.length > 0 && (
                               <span
@@ -399,7 +465,14 @@ export function ComponentsPage({
                                 title={c.roles
                                   .map(
                                     (r) =>
-                                      `${r.title || r.name}：${r.max && r.min === r.max ? `固定 ${r.min} 台` : `${r.min} 台起，常用 ${r.default ?? r.min} 台`}${r.odd ? "，建议奇数" : ""}`,
+                                      `${r.title || r.name}: ${
+                                        r.max && r.min === r.max
+                                          ? bi(`固定 ${r.min} 台`, `Fixed ${r.min}`)
+                                          : bi(
+                                              `${r.min} 台起，常用 ${r.default ?? r.min} 台`,
+                                              `≥ ${r.min}, default ${r.default ?? r.min}`,
+                                            )
+                                      }${r.odd ? bi("，建议奇数", ", odd advised") : ""}`,
                                   )
                                   .join("\n")}
                               >
@@ -408,8 +481,8 @@ export function ComponentsPage({
                                     (r) =>
                                       `${r.title || r.name} ${r.default ?? r.min}`,
                                   )
-                                  .join(" + ")}{" "}
-                                台起步
+                                  .join(" + ")}
+                                {bi(" 台起步", "+ nodes")}
                               </span>
                             )}
                           </div>
@@ -435,11 +508,11 @@ export function ComponentsPage({
             />
           ) : selected && load === "ready" ? (
             <div className="detail-none enter">
-              <h2>找不到这个组件</h2>
+              <h2>{bi("找不到这个组件", "Component not found")}</h2>
               <Button
                 onClick={() => go({ name: "components" }, { replace: true })}
               >
-                返回组件列表
+                {bi("返回组件列表", "Back to Components")}
               </Button>
             </div>
           ) : null}
@@ -462,19 +535,23 @@ export function ComponentsPage({
 
 /** What is different about a component: whether the built-in one was changed, and whether there are unpublished edits. */
 function CompMarks({ c }: { c: Entry }) {
+  useLang();
+  const draftTip = bi(
+    "有改动还没发布，在发布之前新建集群和生成交付都还用原来的内容",
+    "Unpublished changes exist; new clusters and deliveries still use the published version",
+  );
   if (c.broken) {
     return (
       <>
         <span className="cm cm-bad">
-          {c.source === "override" ? "覆盖版有误" : "无法载入"}
+          {c.source === "override"
+            ? bi("覆盖版有误", "Override error")
+            : bi("无法载入", "Load error")}
         </span>
         {c.has_draft && (
-          <span
-            className="cm cm-draft"
-            title="有改动还没发布，在发布之前新建集群和生成交付都还用原来的内容"
-          >
+          <span className="cm cm-draft" title={draftTip}>
             <i />
-            未发布
+            {bi("未发布", "Unpublished")}
           </span>
         )}
       </>
@@ -483,19 +560,18 @@ function CompMarks({ c }: { c: Entry }) {
   return (
     <>
       {c.source === "custom" && (
-        <span className="cm cm-own" title={SOURCE_HELP.custom}>
+        <span className="cm cm-own" title={sourceHelp("custom")}>
           <IconCode />
-          {SOURCE.custom}
+          {sourceLabel("custom")}
         </span>
       )}
-      {c.source === "draft" && <span className="cm cm-draft">草稿</span>}
+      {c.source === "draft" && (
+        <span className="cm cm-draft">{bi("草稿", "Draft")}</span>
+      )}
       {c.has_draft && c.source !== "draft" && (
-        <span
-          className="cm cm-draft"
-          title="有改动还没发布，在发布之前新建集群和生成交付都还用原来的内容"
-        >
+        <span className="cm cm-draft" title={draftTip}>
           <i />
-          未发布
+          {bi("未发布", "Unpublished")}
         </span>
       )}
     </>
@@ -513,6 +589,7 @@ function ComponentDetail({
   narrow: boolean;
   changed: () => void;
 }) {
+  const lang = useLang();
   const [yaml, setYaml] = useState<string | null>(
     () =>
       cached<{ yaml: string }>(`/api/components/${c.id}/manifest`)?.yaml ??
@@ -531,23 +608,34 @@ function ComponentDetail({
   };
   useEffect(() => {
     loadManifest(false);
-  }, [c.id, c.source]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [c.id, c.source, lang]); // eslint-disable-line react-hooks/exhaustive-deps
   const [fork, setFork] = useState(false);
   const edit = () => go({ name: "components", id: c.id, edit: "overview" });
   const remove = () =>
     Modal.confirm({
       title:
-        c.source === "override" ? `恢复内置的 ${c.name}？` : `删除 ${c.name}？`,
+        c.source === "override"
+          ? bi(`恢复内置的 ${c.name}？`, `Reset ${c.name} to built-in?`)
+          : bi(`删除 ${c.name}？`, `Delete ${c.name}?`),
       content:
         c.source === "override"
-          ? "你的覆盖版本和未发布的草稿会被移除，恢复为内置的同名组件（历史修订仍可查看）。已生成的交付不受影响。"
-          : "删除后不能再用它生成新的交付，草稿和修订历史也一并删除；已生成的交付不受影响。",
-      okText: c.source === "override" ? "恢复内置" : "删除",
+          ? bi(
+              "你的覆盖版本和未发布的草稿会被移除，恢复为内置的同名组件（历史修订仍可查看）。已生成的交付不受影响。",
+              "Your override and unpublished draft will be removed, restoring the built-in component (revision history stays viewable). Existing deliveries are unaffected.",
+            )
+          : bi(
+              "删除后不能再用它生成新的交付，草稿和修订历史也一并删除；已生成的交付不受影响。",
+              "Deletes this component, its draft, and revision history; existing deliveries are unaffected.",
+            ),
+      okText:
+        c.source === "override"
+          ? bi("恢复内置", "Reset to Built-in")
+          : bi("删除", "Delete"),
       okButtonProps: { status: "danger" },
       onOk: async () => {
         try {
           await api(`/api/components/${c.id}`, { method: "DELETE" });
-          Message.success("已删除");
+          Message.success(bi("已删除", "Deleted"));
           changed();
           go({ name: "components" }, { replace: true });
         } catch (e) {
@@ -564,7 +652,7 @@ function ComponentDetail({
           icon={<IconArrowLeft />}
           onClick={() => go({ name: "components" })}
         >
-          组件
+          {bi("组件", "Components")}
         </Button>
       )}
       <header className="detail-head flat">
@@ -582,12 +670,14 @@ function ComponentDetail({
           <div className="row-gap">
             <CompMarks c={c} />
             {c.provides?.map((p) => (
-              <span className="flag" key={p} title="提供的能力">
-                提供 {p}
+              <span className="flag" key={p} title={bi("提供的能力", "Provided capability")}>
+                {bi(`提供 ${p}`, `Provides ${p}`)}
               </span>
             ))}
             {c.kind === "external" && (
-              <span className="flag warn">由客户运维，平台只出配置清单</span>
+              <span className="flag warn">
+                {bi("由客户运维，平台只出配置清单", "Customer-managed; platform outputs config only")}
+              </span>
             )}
           </div>
         </div>
@@ -595,35 +685,35 @@ function ComponentDetail({
           {admin && c.source === "builtin" && (
             <>
               <Button type="primary" icon={<IconEdit />} onClick={edit}>
-                修改…
+                {bi("修改…", "Modify...")}
               </Button>
               <Button icon={<IconCopy />} onClick={() => setFork(true)}>
-                复制为自定义组件
+                {bi("复制为自定义组件", "Copy as Custom")}
               </Button>
             </>
           )}
           {admin && c.source !== "builtin" && (
             <Button type="primary" icon={<IconEdit />} onClick={edit}>
-              {c.has_draft ? "继续编辑草稿" : "编辑"}
+              {c.has_draft ? bi("继续编辑草稿", "Resume Draft") : bi("编辑", "Edit")}
             </Button>
           )}
           {c.source !== "draft" && (
             <Button
               icon={<IconDownload />}
-              href={`/api/components/${c.id}/pack`}
+              href={withLang(`/api/components/${c.id}/pack`)}
               download={`${c.id}.tar.gz`}
             >
-              导出组件包
+              {bi("导出组件包", "Export Pack")}
             </Button>
           )}
           {can("component.publish") && c.source === "override" && (
             <Button icon={<IconUndo />} onClick={remove}>
-              恢复内置
+              {bi("恢复内置", "Reset to Built-in")}
             </Button>
           )}
           {can("component.publish") && c.source === "custom" && (
             <Button status="danger" icon={<IconDelete />} onClick={remove}>
-              删除
+              {bi("删除", "Delete")}
             </Button>
           )}
         </div>
@@ -631,18 +721,24 @@ function ComponentDetail({
 
       {c.source === "draft" && (
         <div className="note">
-          这是一个还没有发布的新组件，只有草稿。
+          {bi("这是一个还没有发布的新组件，只有草稿。", "This new component is an unpublished draft.")}
           {admin
-            ? "继续编辑，检查、试生成之后发布，它才会出现在可用的组件里。"
-            : "由管理员编辑并发布后才能使用。"}
+            ? bi(
+                "继续编辑，检查、试生成之后发布，它才会出现在可用的组件里。",
+                "Continue editing, check, trial-generate, and publish to make it available in the catalog.",
+              )
+            : bi("由管理员编辑并发布后才能使用。", "Available after an administrator edits and publishes it.")}
         </div>
       )}
       {c.has_draft && c.source !== "draft" && (
         <div className="note">
-          这个组件有一份未发布的草稿，不影响现在生成的交付。
+          {bi(
+            "这个组件有一份未发布的草稿，不影响现在生成的交付。",
+            "This component has an unpublished draft; current deliveries are unaffected.",
+          )}
           {admin && (
             <button type="button" className="wb-link" onClick={edit}>
-              继续编辑
+              {bi("继续编辑", "Resume editing")}
             </button>
           )}
         </div>
@@ -654,17 +750,26 @@ function ComponentDetail({
             <div>
               <b>
                 {c.source === "override"
-                  ? "自定义覆盖版本无法载入，当前已回退使用内置版本"
-                  : "自定义组件清单无法载入，当前已跳过"}
+                  ? bi("自定义覆盖版本无法载入，当前已回退使用内置版本", "Custom override failed to load; reverted to built-in version")
+                  : bi("自定义组件清单无法载入，当前已跳过", "Custom component manifest failed to load; skipped")}
               </b>
               <p>
-                {/\$file|common|shared|公共|引用|not found|no such file|不存在/i.test(
+                {/\$file|common|shared|reference|missing|公共|引用|not found|no such file|不存在/i.test(
                   c.problem || "",
                 )
-                  ? "检测到引用的共享流程或外部片段缺失，请检查平台公共流程（platform-shared）或组件内的引用文件。"
+                  ? bi(
+                      "检测到引用的共享流程或外部片段缺失，请检查平台公共流程（platform-shared）或组件内的引用文件。",
+                      "Missing shared flow or external fragment reference; check platform-shared or referenced files inside the component.",
+                    )
                   : c.source === "override"
-                    ? "请进入编辑器修正后重新发布，或点击右上角「恢复内置」回到内置原样。"
-                    : "请进入编辑器或修正组件清单后重新导入，不影响其他组件运行。"}
+                    ? bi(
+                        "请进入编辑器修正后重新发布，或点击右上角「恢复内置」回到内置原样。",
+                        "Fix and republish in the editor, or click Reset to Built-in above.",
+                      )
+                    : bi(
+                        "请进入编辑器或修正组件清单后重新导入，不影响其他组件运行。",
+                        "Open the editor or fix and re-import the manifest; other components are unaffected.",
+                      )}
               </p>
             </div>
           </div>
@@ -677,7 +782,7 @@ function ComponentDetail({
                 icon={<IconEdit />}
                 onClick={edit}
               >
-                {c.has_draft ? "继续编辑草稿" : "打开编辑器修复"}
+                {c.has_draft ? bi("继续编辑草稿", "Resume Draft") : bi("打开编辑器修复", "Fix in Editor")}
               </Button>
             )}
             {admin && (
@@ -692,7 +797,7 @@ function ComponentDetail({
                   })
                 }
               >
-                检查平台公共流程
+                {bi("检查平台公共流程", "Check Platform Shared Flows")}
               </Button>
             )}
             <Button
@@ -703,7 +808,7 @@ function ComponentDetail({
                 loadManifest(true);
               }}
             >
-              重新检测
+              {bi("重新检测", "Re-check")}
             </Button>
           </div>
         </div>
@@ -735,14 +840,19 @@ function ImportDrawer({
   narrow: boolean;
   done: (name: string) => Promise<void>;
 }) {
+  const lang = useLang();
   const [mode, setMode] = useState<"pack" | "yaml">("pack");
   const [file, setFile] = useState<File | undefined>();
-  const [text, setText] = useState(TEMPLATE);
+  const [text, setText] = useState(getTemplate);
+  const [edited, setEdited] = useState(false);
   const [result, setResult] = useState<Validation | null>(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     if (open) setResult(null);
   }, [open]);
+  useEffect(() => {
+    if (!edited) setText(getTemplate());
+  }, [lang, edited]);
 
   const validate = async () => {
     setBusy(true);
@@ -765,7 +875,7 @@ function ImportDrawer({
     try {
       let r: Validation;
       if (mode === "pack") {
-        if (!file) return err(new Error("请选择组件包"));
+        if (!file) return err(new Error(bi("请选择组件包", "Please select a component pack")));
         const f = new FormData();
         f.set("pack", file);
         r = await api<Validation>("/api/components/import", {
@@ -778,7 +888,7 @@ function ImportDrawer({
           body: JSON.stringify({ yaml: text }),
         });
       }
-      Message.success(`已导入 ${r.name || "组件"}`);
+      Message.success(bi(`已导入 ${r.name || "组件"}`, `Imported ${r.name || "component"}`));
       await done(r.name || "");
     } catch (e) {
       // A refused manifest answers 422 with the full list of problems.
@@ -796,16 +906,19 @@ function ImportDrawer({
       width={narrow ? "100%" : 680}
       visible={open}
       onCancel={onClose}
-      title="导入组件"
+      title={bi("导入组件", "Import Component")}
       footer={
         <div className="review-foot">
           <span className="muted small">
-            导入后立即可用于新的交付；已生成的交付不受影响
+            {bi(
+              "导入后立即可用于新的交付；已生成的交付不受影响",
+              "Available immediately for new deliveries after import; existing deliveries are unaffected",
+            )}
           </span>
           <div className="row-gap">
             {mode === "yaml" && (
               <Button loading={busy} onClick={validate}>
-                校验
+                {bi("校验", "Validate")}
               </Button>
             )}
             <Button
@@ -814,31 +927,39 @@ function ImportDrawer({
               disabled={mode === "pack" ? !file : !text.trim()}
               onClick={submit}
             >
-              导入
+              {bi("导入", "Import")}
             </Button>
           </div>
         </div>
       }
     >
       <Segmented
-        label="导入方式"
+        label={bi("导入方式", "Import Method")}
         value={mode}
         onChange={(m) => {
           setMode(m);
           setResult(null);
         }}
         options={[
-          { value: "pack", label: "上传组件包" },
-          { value: "yaml", label: "粘贴清单 YAML" },
+          { value: "pack", label: bi("上传组件包", "Upload Component Pack") },
+          { value: "yaml", label: bi("粘贴清单 YAML", "Paste Manifest YAML") },
         ]}
       />
       {mode === "pack" ? (
         <div className="import-body">
           <p className="muted small">
-            .tar.gz 或 .zip，含 <code>component.yaml</code>，可带{" "}
-            <code>roles/</code>（Ansible 角色）、<code>templates/</code>
-            （配置模板）、<code>files/</code>
-            。可先在“组件”页导出一个现有组件作为样板。
+            {bi(".tar.gz 或 .zip，含 ", ".tar.gz or .zip containing ")}
+            <code>component.yaml</code>
+            {bi("，可带 ", ", optionally with ")}
+            <code>roles/</code>
+            {bi("（Ansible 角色）、", " (Ansible roles), ")}
+            <code>templates/</code>
+            {bi("（配置模板）、", " (config templates), and ")}
+            <code>files/</code>
+            {bi(
+              "。可先在“组件”页导出一个现有组件作为样板。",
+              ". Export an existing component from Components as a starting example.",
+            )}
           </p>
           <Upload
             drag
@@ -858,22 +979,26 @@ function ImportDrawer({
                 : []
             }
             onChange={(l) => setFile(l[0]?.originFile)}
-            tip="单个包不超过 8 MiB"
+            tip={bi("单个包不超过 8 MiB", "Max 8 MiB per pack")}
           />
         </div>
       ) : (
         <div className="import-body">
           <p className="muted small">
-            只含 component.yaml
-            的纯声明式组件可以直接粘贴；需要配置模板或自写角色时请用组件包。步骤只允许
-            ansible.builtin 里的安全模块，不允许 shell 和 ignore_errors。
+            {bi(
+              "只含 component.yaml 的纯声明式组件可以直接粘贴；需要配置模板或自写角色时请用组件包。步骤只允许 ansible.builtin 里的安全模块，不允许 shell 和 ignore_errors。",
+              "Declarative-only components with just component.yaml can be pasted directly; use a component pack if you need templates or custom roles. Steps allow only safe ansible.builtin modules; shell and ignore_errors are disallowed.",
+            )}
           </p>
           <textarea
             className="yaml-edit mono"
             spellCheck={false}
             value={text}
-            onChange={(e) => setText(e.target.value)}
-            aria-label="组件清单 YAML"
+            onChange={(e) => {
+              setEdited(true);
+              setText(e.target.value);
+            }}
+            aria-label={bi("组件清单 YAML", "Component manifest YAML")}
           />
         </div>
       )}
@@ -881,11 +1006,15 @@ function ImportDrawer({
         <div className="import-result">
           {result.ok ? (
             <div className="note">
-              校验通过{result.name ? `：${result.name}` : ""}。
+              {bi("校验通过", "Validation passed")}
+              {result.name ? `: ${result.name}` : ""}.
             </div>
           ) : (
             <div className="note warn">
-              有 {errors.length} 处错误，不能导入。
+              {bi(
+                `有 ${errors.length} 处错误，不能导入。`,
+                `${errors.length} error(s) found; cannot import.`,
+              )}
             </div>
           )}
           {[...errors, ...warns].map((p, i) => (

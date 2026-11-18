@@ -22,6 +22,7 @@ import {
   IconUpload,
 } from "@arco-design/web-react/icon";
 import { ago, api, err, useAIStatus } from "./shared";
+import { bi, useLang, withLang } from "./i18n";
 import "./myfiles.css";
 
 /* A person's storage space: folders, documents and files of any kind. What they attach in a conversation is kept here
@@ -50,9 +51,10 @@ export const bytesText = (n: number) =>
       ? `${(n / (1 << 20)).toFixed(1)} MB`
       : n >= 1024
         ? `${Math.round(n / 1024)} KB`
-        : `${n} 字节`;
+        : bi(`${n} 字节`, `${n} B`);
 export const isImage = (n: { mime?: string }) => !!n.mime?.startsWith("image/");
-export const rawUrl = (id: string) => `/api/me/files/${id}/raw`;
+export const rawUrl = (id: string, download = false) =>
+  withLang(`/api/me/files/${id}/raw${download ? "?download=1" : ""}`);
 
 /** Puts files into the storage space; `chat` marks what came from a conversation. */
 export async function uploadFiles(
@@ -96,19 +98,26 @@ export function FileIcon({ n, size = 36 }: { n: FileNode; size?: number }) {
 }
 
 export function UsageBar({ u }: { u: Usage | null }) {
+  useLang();
   if (!u) return null;
   const pct = u.quota > 0 ? Math.min(100, (u.used / u.quota) * 100) : 0;
   return (
     <div
       className={`mf-usage ${pct >= 90 ? "full" : ""}`}
       role="img"
-      aria-label={`已用 ${bytesText(u.used)}，共 ${bytesText(u.quota)}`}
+      aria-label={bi(
+        `已用 ${bytesText(u.used)}，共 ${bytesText(u.quota)}`,
+        `Used ${bytesText(u.used)} of ${bytesText(u.quota)}`,
+      )}
     >
       <div className="mf-usage-bar">
         <i style={{ width: `${Math.max(pct, u.used > 0 ? 1 : 0)}%` }} />
       </div>
       <span>
-        已用 {bytesText(u.used)} / {bytesText(u.quota)}
+        {bi(
+          `已用 ${bytesText(u.used)} / ${bytesText(u.quota)}`,
+          `${bytesText(u.used)} / ${bytesText(u.quota)} used`,
+        )}
       </span>
     </div>
   );
@@ -148,14 +157,15 @@ function Crumbs({
   path: FileNode[];
   onGo: (id: string) => void;
 }) {
+  useLang();
   return (
-    <nav className="mf-crumbs" aria-label="所在位置">
+    <nav className="mf-crumbs" aria-label={bi("所在位置", "Location")}>
       <button
         type="button"
         onClick={() => onGo("")}
         aria-current={path.length === 0 ? "page" : undefined}
       >
-        全部资料
+        {bi("全部资料", "All files")}
       </button>
       {path.map((p, i) => (
         <React.Fragment key={p.id}>
@@ -185,6 +195,7 @@ function FolderPicker({
   onClose: () => void;
   onPick: (parent: string) => void;
 }) {
+  useLang();
   const [at, setAt] = useState("");
   const [data] = useListing(at);
   useEffect(() => {
@@ -196,9 +207,13 @@ function FolderPicker({
   return (
     <Modal
       visible={visible}
-      title={`移动「${moving?.name || ""}」`}
+      title={bi(
+        `移动「${moving?.name || ""}」`,
+        `Move "${moving?.name || ""}"`,
+      )}
       onCancel={onClose}
-      okText="移动到这里"
+      okText={bi("移动到这里", "Move here")}
+      cancelText={bi("取消", "Cancel")}
       onOk={() => onPick(at)}
       style={{ width: 460, maxWidth: "96vw" }}
     >
@@ -214,7 +229,9 @@ function FolderPicker({
           </li>
         ))}
         {data && folders.length === 0 && (
-          <li className="mf-pick-none">这里没有子文件夹</li>
+          <li className="mf-pick-none">
+            {bi("这里没有子文件夹", "No subfolders here")}
+          </li>
         )}
       </ul>
     </Modal>
@@ -222,6 +239,7 @@ function FolderPicker({
 }
 
 export function MyFiles({ open }: { open: (n: FileNode) => void }) {
+  useLang();
   const [parent, setParent] = useState("");
   const [q, setQ] = useState("");
   const [data, load] = useListing(parent, q.trim());
@@ -235,7 +253,13 @@ export function MyFiles({ open }: { open: (n: FileNode) => void }) {
     setBusy(true);
     try {
       const r = await uploadFiles(files, parent);
-      if (r.added.length) Message.success(`已放入 ${r.added.length} 个文件`);
+      if (r.added.length)
+        Message.success(
+          bi(
+            `已放入 ${r.added.length} 个文件`,
+            `Uploaded ${r.added.length} file${r.added.length === 1 ? "" : "s"}`,
+          ),
+        );
       r.failed.forEach((m) => Message.warning(m));
     } catch (e) {
       err(e);
@@ -261,7 +285,8 @@ export function MyFiles({ open }: { open: (n: FileNode) => void }) {
           autoFocus
         />
       ),
-      okText: "好",
+      okText: bi("好", "OK"),
+      cancelText: bi("取消", "Cancel"),
       onOk: async () => {
         try {
           await ok(v.trim());
@@ -274,14 +299,14 @@ export function MyFiles({ open }: { open: (n: FileNode) => void }) {
     });
   };
   const newFolder = () =>
-    ask("新建文件夹", "", (name) =>
+    ask(bi("新建文件夹", "New folder"), "", (name) =>
       api("/api/me/files", {
         method: "POST",
         body: JSON.stringify({ kind: "folder", name, parent }),
       }),
     );
   const rename = (n: FileNode) =>
-    ask("重命名", n.name, (name) =>
+    ask(bi("重命名", "Rename"), n.name, (name) =>
       api(`/api/me/files/${n.id}`, {
         method: "PATCH",
         body: JSON.stringify({ name }),
@@ -289,12 +314,16 @@ export function MyFiles({ open }: { open: (n: FileNode) => void }) {
     );
   const remove = (n: FileNode) =>
     Modal.confirm({
-      title: `删除「${n.name}」？`,
+      title: bi(`删除「${n.name}」？`, `Delete "${n.name}"?`),
       content:
         n.kind === "folder"
-          ? "文件夹和里面的所有内容都会删除，不能恢复。"
-          : "删除后不能恢复。",
-      okText: "删除",
+          ? bi(
+              "文件夹和里面的所有内容都会删除，不能恢复。",
+              "This folder and everything inside it will be permanently deleted.",
+            )
+          : bi("删除后不能恢复。", "This cannot be undone."),
+      okText: bi("删除", "Delete"),
+      cancelText: bi("取消", "Cancel"),
       okButtonProps: { status: "danger" },
       onOk: async () => {
         try {
@@ -342,16 +371,22 @@ export function MyFiles({ open }: { open: (n: FileNode) => void }) {
     >
       <header className="mf-head">
         <div>
-          <h2>我的资料</h2>
+          <h2>{bi("我的资料", "My Files")}</h2>
           <p>
             {aiStatus.enabled
-              ? "你自己的文档、图片和文件。和 AI 对话时发送的文件也会存在这里，AI 可以查阅其中的文字内容。"
-              : "你自己的文档、图片、配置和现场文件。"}
+              ? bi(
+                  "你自己的文档、图片和文件。和 AI 对话时发送的文件也会存在这里，AI 可以查阅其中的文字内容。",
+                  "Your own documents, images, and files. Files sent in AI chats are stored here too, and the assistant can read text inside them.",
+                )
+              : bi(
+                  "你自己的文档、图片、配置和现场文件。",
+                  "Your own documents, images, configs, and site files.",
+                )}
           </p>
         </div>
         <span className="mf-actions">
           <Button icon={<IconFolderAdd />} onClick={newFolder}>
-            新建文件夹
+            {bi("新建文件夹", "New folder")}
           </Button>
           <Button
             icon={<IconEdit />}
@@ -366,7 +401,7 @@ export function MyFiles({ open }: { open: (n: FileNode) => void }) {
               })
             }
           >
-            写文档
+            {bi("写文档", "New doc")}
           </Button>
           <Button
             type="primary"
@@ -374,7 +409,7 @@ export function MyFiles({ open }: { open: (n: FileNode) => void }) {
             loading={busy}
             onClick={() => pick.current?.click()}
           >
-            上传
+            {bi("上传", "Upload")}
           </Button>
         </span>
         <input
@@ -390,7 +425,9 @@ export function MyFiles({ open }: { open: (n: FileNode) => void }) {
       </header>
       <div className="mf-bar">
         {searching ? (
-          <span className="mf-found">搜索「{q.trim()}」</span>
+          <span className="mf-found">
+            {bi(`搜索「${q.trim()}」`, `Search "${q.trim()}"`)}
+          </span>
         ) : (
           <Crumbs path={data?.path || []} onGo={setParent} />
         )}
@@ -398,10 +435,10 @@ export function MyFiles({ open }: { open: (n: FileNode) => void }) {
           className="mf-search"
           prefix={<IconSearch />}
           allowClear
-          placeholder="按名称搜索"
+          placeholder={bi("按名称搜索", "Search by name")}
           value={q}
           onChange={setQ}
-          aria-label="按名称搜索"
+          aria-label={bi("按名称搜索", "Search by name")}
         />
         <UsageBar u={data?.usage || null} />
       </div>
@@ -410,15 +447,22 @@ export function MyFiles({ open }: { open: (n: FileNode) => void }) {
           <span className="mf-ic mf-folder mf-big">
             <IconFolder />
           </span>
-          <b>{searching ? "没有名称匹配的文件" : "这里还是空的"}</b>
+          <b>
+            {searching
+              ? bi("没有名称匹配的文件", "No files match that name")
+              : bi("这里还是空的", "Nothing here yet")}
+          </b>
           <p>
             {searching
-              ? "换个关键词试试。"
-              : "把文件拖到这个区域，或点右上角的「上传」。图片、PDF、Word、Excel、日志和配置文件都可以。"}
+              ? bi("换个关键词试试。", "Try another keyword.")
+              : bi(
+                  "把文件拖到这个区域，或点右上角的「上传」。图片、PDF、Word、Excel、日志和配置文件都可以。",
+                  "Drag files here or click Upload above. Images, PDF, Word, Excel, logs, and config files are all supported.",
+                )}
           </p>
         </div>
       ) : (
-        <ul className="mf-list" aria-label="文件列表">
+        <ul className="mf-list" aria-label={bi("文件列表", "File list")}>
           {nodes.map((n) => (
             <li key={n.id} className="mf-row">
               <button
@@ -432,8 +476,10 @@ export function MyFiles({ open }: { open: (n: FileNode) => void }) {
                 <span className="mf-name">
                   <b>{n.name}</b>
                   <small>
-                    {n.kind === "folder" ? "文件夹" : bytesText(n.size)}
-                    {n.source === "chat" && " · 来自对话"}
+                    {n.kind === "folder"
+                      ? bi("文件夹", "Folder")
+                      : bytesText(n.size)}
+                    {n.source === "chat" && bi(" · 来自对话", " · From chat")}
                     {n.kind === "file" && !n.text && !isImage(n) && n.note
                       ? ` · ${n.note}`
                       : ""}
@@ -450,23 +496,23 @@ export function MyFiles({ open }: { open: (n: FileNode) => void }) {
                       if (k === "rename") rename(n);
                       else if (k === "move") setMoving(n);
                       else if (k === "down")
-                        window.open(rawUrl(n.id) + "?download=1", "_blank");
+                        window.open(rawUrl(n.id, true), "_blank");
                       else remove(n);
                     }}
                   >
                     <Menu.Item key="rename">
-                      <IconEdit /> 重命名
+                      <IconEdit /> {bi("重命名", "Rename")}
                     </Menu.Item>
                     <Menu.Item key="move">
-                      <IconFolder /> 移动到…
+                      <IconFolder /> {bi("移动到…", "Move to…")}
                     </Menu.Item>
                     {n.kind !== "folder" && (
                       <Menu.Item key="down">
-                        <IconDownload /> 下载
+                        <IconDownload /> {bi("下载", "Download")}
                       </Menu.Item>
                     )}
                     <Menu.Item key="del" className="danger-item">
-                      <IconDelete /> 删除
+                      <IconDelete /> {bi("删除", "Delete")}
                     </Menu.Item>
                   </Menu>
                 }
@@ -474,7 +520,10 @@ export function MyFiles({ open }: { open: (n: FileNode) => void }) {
                 <button
                   type="button"
                   className="mf-more"
-                  aria-label={`${n.name} 的更多操作`}
+                  aria-label={bi(
+                    `${n.name} 的更多操作`,
+                    `More actions for ${n.name}`,
+                  )}
                 >
                   <IconMore />
                 </button>
@@ -485,11 +534,18 @@ export function MyFiles({ open }: { open: (n: FileNode) => void }) {
       )}
       {drag && (
         <div className="mf-drop">
-          松开即可上传到「
-          {data?.path.length
-            ? data.path[data.path.length - 1].name
-            : "全部资料"}
-          」
+          {bi(
+            `松开即可上传到「${
+              data?.path.length
+                ? data.path[data.path.length - 1].name
+                : "全部资料"
+            }」`,
+            `Drop to upload to "${
+              data?.path.length
+                ? data.path[data.path.length - 1].name
+                : "All files"
+            }"`,
+          )}
         </div>
       )}
       <FolderPicker
@@ -512,6 +568,7 @@ export function FileView({
   changed: () => void;
   gone: () => void;
 }) {
+  useLang();
   const aiStatus = useAIStatus();
   const [d, setD] = useState<{
     node: FileNode;
@@ -537,25 +594,27 @@ export function FileView({
         <div>
           <h2>{n.name}</h2>
           <p>
-            {bytesText(n.size)} · {n.mime || "文件"} · 更新于 {ago(n.updated)}
-            {n.source === "chat" && " · 来自对话"}
+            {bytesText(n.size)} · {n.mime || bi("文件", "File")} ·{" "}
+            {bi(`更新于 ${ago(n.updated)}`, `Updated ${ago(n.updated)}`)}
+            {n.source === "chat" && bi(" · 来自对话", " · From chat")}
           </p>
         </div>
         <span className="mf-actions">
           <Button
             icon={<IconDownload />}
-            onClick={() => window.open(rawUrl(n.id) + "?download=1", "_blank")}
+            onClick={() => window.open(rawUrl(n.id, true), "_blank")}
           >
-            下载
+            {bi("下载", "Download")}
           </Button>
           <Button
             status="danger"
             icon={<IconDelete />}
             onClick={() =>
               Modal.confirm({
-                title: `删除「${n.name}」？`,
-                content: "删除后不能恢复。",
-                okText: "删除",
+                title: bi(`删除「${n.name}」？`, `Delete "${n.name}"?`),
+                content: bi("删除后不能恢复。", "This cannot be undone."),
+                okText: bi("删除", "Delete"),
+                cancelText: bi("取消", "Cancel"),
                 okButtonProps: { status: "danger" },
                 onOk: async () => {
                   try {
@@ -569,7 +628,7 @@ export function FileView({
               })
             }
           >
-            删除
+            {bi("删除", "Delete")}
           </Button>
         </span>
       </header>
@@ -580,9 +639,19 @@ export function FileView({
       )}
       {d.text ? (
         <section className="mf-text">
-          <h3>提取出的文字{d.truncated ? "（只显示开头一部分）" : ""}</h3>
+          <h3>
+            {bi("提取出的文字", "Extracted text")}
+            {d.truncated
+              ? bi("（只显示开头一部分）", " (showing beginning only)")
+              : ""}
+          </h3>
           {aiStatus.enabled && (
-            <p className="faint small">AI 查阅这份文件时读到的就是下面的文字。</p>
+            <p className="faint small">
+              {bi(
+                "AI 查阅这份文件时读到的就是下面的文字。",
+                "This is the text the assistant reads when inspecting this file.",
+              )}
+            </p>
           )}
           <pre>{d.text}</pre>
         </section>
@@ -591,8 +660,14 @@ export function FileView({
           <p className="mf-note">
             {n.note ||
               (aiStatus.enabled
-                ? "这个文件里没有可以提取的文字，AI 查不到它的内容。"
-                : "这个文件里没有可以提取的文字预览。")}
+                ? bi(
+                    "这个文件里没有可以提取的文字，AI 查不到它的内容。",
+                    "No extractable text in this file; the assistant cannot read its contents.",
+                  )
+                : bi(
+                    "这个文件里没有可以提取的文字预览。",
+                    "No extractable text preview available for this file.",
+                  ))}
           </p>
         )
       )}
@@ -612,6 +687,7 @@ export function FilePicker({
   onPick: (n: FileNode[]) => void;
   images?: boolean;
 }) {
+  useLang();
   const [parent, setParent] = useState("");
   const [q, setQ] = useState("");
   const [data] = useListing(parent, q.trim());
@@ -630,9 +706,14 @@ export function FilePicker({
   return (
     <Modal
       visible={visible}
-      title="从我的资料选择"
+      title={bi("从我的资料选择", "Choose from My Files")}
       onCancel={onClose}
-      okText={chosen.length ? `添加 ${chosen.length} 个` : "添加"}
+      okText={
+        chosen.length
+          ? bi(`添加 ${chosen.length} 个`, `Add ${chosen.length}`)
+          : bi("添加", "Add")
+      }
+      cancelText={bi("取消", "Cancel")}
       okButtonProps={{ disabled: !chosen.length }}
       onOk={() => onPick(chosen)}
       style={{ width: 520, maxWidth: "96vw" }}
@@ -640,10 +721,10 @@ export function FilePicker({
       <Input
         prefix={<IconSearch />}
         allowClear
-        placeholder="按名称搜索"
+        placeholder={bi("按名称搜索", "Search by name")}
         value={q}
         onChange={setQ}
-        aria-label="按名称搜索"
+        aria-label={bi("按名称搜索", "Search by name")}
       />
       {!q.trim() && <Crumbs path={data?.path || []} onGo={setParent} />}
       <ul className="mf-pick tall">
@@ -687,7 +768,9 @@ export function FilePicker({
         ))}
         {data && nodes.length === 0 && (
           <li className="mf-pick-none">
-            {q.trim() ? "没有匹配的文件" : "这里没有可选的文件"}
+            {q.trim()
+              ? bi("没有匹配的文件", "No matching files")
+              : bi("这里没有可选的文件", "No selectable files here")}
           </li>
         )}
       </ul>

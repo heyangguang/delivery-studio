@@ -65,6 +65,7 @@ import { AIDock, Spark, useAIStatus } from "./aichat";
 import { ClusterConfig } from "./clusterconfig";
 import { ClusterRehearsal, launchRehearsalIntent } from "./rehearsal";
 import type { RehearsalPresetKind } from "./rehearsal";
+import { bi, useLang } from "./i18n";
 import "./clusters.css";
 
 /* A cluster is deployed once; its tabs show the overview, saved configuration,
@@ -227,7 +228,10 @@ export function parseClusterUrlCompat(clusterId?: string): ClusterTabCompat {
 
 const runText = (p: PlanEntry) =>
   (p.run_done || 0) + (p.run_failed || 0) > 0
-    ? `现场 ${p.run_done || 0}${p.run_total ? `/${p.run_total}` : ""} 步${p.run_failed ? `，${p.run_failed} 步失败` : ""}`
+    ? bi(
+        `现场 ${p.run_done || 0}${p.run_total ? `/${p.run_total}` : ""} 步${p.run_failed ? `，${p.run_failed} 步失败` : ""}`,
+        `On-site ${p.run_done || 0}${p.run_total ? `/${p.run_total}` : ""} steps${p.run_failed ? `, ${p.run_failed} failed` : ""}`,
+      )
     : "";
 
 export function ClusterDetail({
@@ -257,6 +261,7 @@ export function ClusterDetail({
   rehearsalFocus?: boolean;
   onRehearsalFocusChange?: (v: boolean) => void;
 }) {
+  const lang = useLang();
   const locKey = useSyncExternalStore(
     subscribeLocation,
     getLocationKey,
@@ -310,7 +315,9 @@ export function ClusterDetail({
   ]);
 
   const st = clusterStatus(c);
-  const stLabel = st.label.replace(/^首次部署/, "部署");
+  const stLabel = st.label
+    .replace(/^首次部署/, bi("部署", "Deploy"))
+    .replace(/^Initial Deploy\b/, "Deploy");
   const app = appMap.get(c.app_id);
   const owner = c.owner && c.owner !== meName() ? c.owner : "";
   const entry = resolvedPlan
@@ -346,7 +353,7 @@ export function ClusterDetail({
         setRehearsals(r);
       })
       .catch(() => setRehearsals((prev) => prev ?? []));
-  }, [c.id, canRehearse, rehearsalsUrl]);
+  }, [c.id, canRehearse, rehearsalsUrl, lang]);
 
   useEffect(() => {
     refreshRehearsals();
@@ -366,21 +373,21 @@ export function ClusterDetail({
   const tabKey = effectiveTab || "overview";
   const rhCount = rehearsals ? rehearsals.length : 0;
   const tabItems = [
-    { value: "overview", label: "概览", icon: <TabOverviewIcon /> },
-    { value: "config", label: "配置", icon: <TabConfigIcon /> },
-    { value: "plans", label: "部署", icon: <TabDeployIcon /> },
+    { value: "overview", label: bi("概览", "Overview"), icon: <TabOverviewIcon /> },
+    { value: "config", label: bi("配置", "Config"), icon: <TabConfigIcon /> },
+    { value: "plans", label: bi("部署", "Deploy"), icon: <TabDeployIcon /> },
     ...(canRehearse
       ? [
           {
             value: "rehearsal",
-            label: "变更演练",
+            label: bi("变更演练", "Rehearsals"),
             count: rhCount > 0 ? rhCount : undefined,
             icon: <TabRehearsalIcon />,
           },
         ]
       : []),
     ...(hasDocs
-      ? [{ value: "docs", label: "文档", icon: <TabDocsIcon /> }]
+      ? [{ value: "docs", label: bi("文档", "Docs"), icon: <TabDocsIcon /> }]
       : []),
   ];
   const prevTabIdx = useRef(0);
@@ -423,7 +430,7 @@ export function ClusterDetail({
   const page = (
     <article
       className={`detail enter ${isFocusedRehearsal ? "rh-detail-focused" : ""}`}
-      aria-label={`集群 ${c.id}`}
+      aria-label={bi(`集群 ${c.id}`, `Cluster ${c.id}`)}
     >
       <div
         className={`cl-chrome-shell ${isFocusedRehearsal ? "collapsed" : ""}`}
@@ -439,7 +446,7 @@ export function ClusterDetail({
                 go({ name: "deliveries" })
               }
             >
-              集群列表
+              {bi("集群列表", "Clusters")}
             </Button>
           )}
           <header className="detail-head">
@@ -448,20 +455,24 @@ export function ClusterDetail({
               <StatusBadge state={st.dot} label={stLabel} />
             </div>
             <div className="detail-meta">
-              {owner && <span className="row-owner">{owner} 的集群</span>}
+              {owner && <span className="row-owner">{bi(`${owner} 的集群`, `${owner}'s cluster`)}</span>}
               <span>
                 {c.app_name} {c.version}
               </span>
               {c.platform && <span>{platformShort(c.platform)}</span>}
-              {c.hosts > 0 && <span className="num">{c.hosts} 台机器</span>}
+              {c.hosts > 0 && (
+                <span className="num">
+                  {c.hosts === 1 ? bi("1 台机器", "1 host") : bi(`${c.hosts} 台机器`, `${c.hosts} hosts`)}
+                </span>
+              )}
               <Tooltip content={fullTime(c.created)} mini>
-                <span>创建于 {ago(c.created)}</span>
+                <span>{bi(`创建于 ${ago(c.created)}`, `Created ${ago(c.created)}`)}</span>
               </Tooltip>
             </div>
             <SchemeInfo
               scheme={c.scheme}
               detail
-              label={c.head ? "当前运行方案" : "目标部署方案"}
+              label={c.head ? bi("当前运行方案", "Active scheme") : bi("目标部署方案", "Target scheme")}
             />
             <div className="detail-actions">
               <Dropdown
@@ -470,18 +481,18 @@ export function ClusterDetail({
                 droplist={
                   <Menu onClickMenuItem={(k) => k === "copy" && copy(c.id)}>
                     <Menu.Item key="copy">
-                      <IconCopy /> 复制集群标识
+                      <IconCopy /> {bi("复制集群标识", "Copy Cluster ID")}
                     </Menu.Item>
                   </Menu>
                 }
               >
-                <Button icon={<IconMore />} aria-label="更多操作" />
+                <Button icon={<IconMore />} aria-label={bi("更多操作", "More actions")} />
               </Dropdown>
             </div>
           </header>
           <UnderlineTabs
             className="cl-utabs"
-            label="集群视图"
+            label={bi("集群视图", "Cluster views")}
             value={tabKey}
             items={tabItems}
             onHover={(next) => {
@@ -568,7 +579,7 @@ export function ClusterDetail({
       scope={{ kind: "job", jobId: dockPlan?.id || c.id }}
       start={{
         key: "review",
-        title: "集群问答",
+        title: bi("集群问答", "Cluster Q&A"),
         context: `${c.id} · ${c.app_name}`,
       }}
       hidden={hideDock}
@@ -590,6 +601,7 @@ function InitialDeploymentView({
   narrow: boolean;
   reload: () => Promise<void>;
 }) {
+  useLang();
   const primary =
     c.plans.find((p) => p.id === (c.holder || c.current)) || c.plans[0];
   const active =
@@ -598,7 +610,7 @@ function InitialDeploymentView({
   if (!active) {
     return (
       <section className="dsec">
-        <p className="muted">当前集群尚无部署材料。</p>
+        <p className="muted">{bi("当前集群尚无部署材料。", "No deployment artifacts for this cluster yet.")}</p>
       </section>
     );
   }
@@ -608,9 +620,9 @@ function InitialDeploymentView({
     <div
       className="cl-init-drafts"
       role="navigation"
-      aria-label="当前生效交付与历史草稿"
+      aria-label={bi("当前生效交付与历史草稿", "Active delivery and archived drafts")}
     >
-      <span>当前生效交付与归档草稿：</span>
+      <span>{bi("当前生效交付与归档草稿：", "Active delivery & archived drafts:")}</span>
       <div className="cl-init-draft-pills">
         {c.plans.map((p) => {
           const ph = planPhase(p);
@@ -626,7 +638,7 @@ function InitialDeploymentView({
               }
             >
               <StatusDot state={PLAN_PHASE[ph].dot} />
-              <span>{isBase ? "当前交付" : `${PLAN_PHASE[ph].label}草稿`}</span>
+              <span>{isBase ? bi("当前交付", "Active delivery") : bi(`${PLAN_PHASE[ph].label}草稿`, `${PLAN_PHASE[ph].label} draft`)}</span>
               <span className="mono faint">#{p.id.slice(0, 6)}</span>
             </button>
           );
@@ -655,6 +667,7 @@ function InlineCopyBtn({
   value: string;
   label: string;
 }) {
+  useLang();
   const [copied, setCopied] = useState(false);
   const timer = useRef<number | null>(null);
   useEffect(
@@ -664,11 +677,11 @@ function InlineCopyBtn({
     [],
   );
   return (
-    <Tooltip content={copied ? "已复制" : `复制${label}`} mini>
+    <Tooltip content={copied ? bi("已复制", "Copied") : bi(`复制${label}`, `Copy ${label}`)} mini>
       <button
         type="button"
         className={`cl-inline-copy ${copied ? "copied" : ""}`}
-        aria-label={`复制${label} ${value}`}
+        aria-label={bi(`复制${label} ${value}`, `Copy ${label} ${value}`)}
         onClick={(e) => {
           e.stopPropagation();
           copy(value);
@@ -684,7 +697,7 @@ function InlineCopyBtn({
 }
 
 function rehearsalStageShort(r: ChangeRehearsal): string {
-  if (r.stage === "finalized") return "方案已定稿";
+  if (r.stage === "finalized") return bi("方案已定稿", "Finalized");
   if (r.stage === "rehearsing") {
     const req = (r.steps || []).filter(
       (s) => !s.optional && s.phase !== "rollback",
@@ -692,10 +705,10 @@ function rehearsalStageShort(r: ChangeRehearsal): string {
     const done = req.filter(
       (s) => s.status === "passed" || s.status === "skipped",
     ).length;
-    return req.length > 0 ? `测试演练 ${done}/${req.length}` : "测试演练";
+    return req.length > 0 ? bi(`测试演练 ${done}/${req.length}`, `Rehearsing ${done}/${req.length}`) : bi("测试演练", "Rehearsing");
   }
-  if (r.stage === "probing") return "现场采集";
-  return "边界确认";
+  if (r.stage === "probing") return bi("现场采集", "Probing");
+  return bi("边界确认", "Scoping");
 }
 
 function Overview({
@@ -708,6 +721,7 @@ function Overview({
   canRehearse: boolean;
   rehearsals: ChangeRehearsal[] | null;
 }) {
+  useLang();
   const holder = c.plans.find((p) => p.id === c.holder);
   const current = c.plans.find((p) => p.id === c.current);
   const basePlan = current || holder || c.plans[0];
@@ -727,7 +741,10 @@ function Overview({
       {canReviseHolder && (
         <div className="cl-revise">
           <span>
-            部署尚未确认完成：如机器地址或参数有误，可修订配置并重新生成交付包（原草稿自动作废）。
+            {bi(
+              "部署尚未确认完成：如机器地址或参数有误，可修订配置并重新生成交付包（原草稿自动作废）。",
+              "Deployment not yet confirmed: if host IPs or parameters need changes, revise the config and rebuild (the current draft will be voided).",
+            )}
           </span>
           <Button
             size="small"
@@ -739,7 +756,7 @@ function Overview({
               })
             }
           >
-            修订配置
+            {bi("修订配置", "Revise Config")}
           </Button>
         </div>
       )}
@@ -750,17 +767,17 @@ function Overview({
         <Now key={current.id} c={c} p={current} />
       ) : (
         <section className="dsec">
-          <p className="muted">尚无已生成的交付材料。</p>
+          <p className="muted">{bi("尚无已生成的交付材料。", "No generated delivery artifacts yet.")}</p>
         </section>
       )}
       {basePlan && (
         <section className="dsec cl-ledger-sec">
-          <h2 className="dsec-title">基线与变更记录</h2>
+          <h2 className="dsec-title">{bi("基线与变更记录", "Baseline & Change Ledger")}</h2>
           <div className="cl-ledger">
             <div className="cl-ledger-row">
               <div className="cl-ledger-main">
                 <div className="cl-ledger-title-line">
-                  <span className="cl-ledger-tag">初始部署基线</span>
+                  <span className="cl-ledger-tag">{bi("初始部署基线", "Initial Baseline")}</span>
                   <StatusBadge
                     state={PLAN_PHASE[planPhase(basePlan)].dot}
                     label={PLAN_PHASE[planPhase(basePlan)].label}
@@ -781,7 +798,10 @@ function Overview({
                     <span className="mono faint num">
                       #{basePlan.id.slice(0, 8)} · {ago(basePlan.created)}
                       {c.plans.length > 1
-                        ? ` · 归档 ${c.plans.length - 1} 份草稿`
+                        ? bi(
+                            ` · 归档 ${c.plans.length - 1} 份草稿`,
+                            ` · ${c.plans.length - 1} archived ${c.plans.length - 1 === 1 ? "draft" : "drafts"}`,
+                          )
                         : ""}
                     </span>
                   </span>
@@ -790,8 +810,8 @@ function Overview({
                   (basePlan.marked_by && basePlan.marked)) && (
                   <p className="cl-ledger-note">
                     {basePlan.outcome_note
-                      ? `现场说明：${basePlan.outcome_note}`
-                      : `${basePlan.marked_by} 于 ${ago(basePlan.marked!)}确认部署完成`}
+                      ? bi(`现场说明：${basePlan.outcome_note}`, `On-site note: ${basePlan.outcome_note}`)
+                      : bi(`${basePlan.marked_by} 于 ${ago(basePlan.marked!)}确认部署完成`, `${basePlan.marked_by} confirmed completion ${ago(basePlan.marked!)}`)}
                   </p>
                 )}
               </div>
@@ -805,7 +825,7 @@ function Overview({
                   )
                 }
               >
-                查看部署手册 <IconRight />
+                {bi("查看部署手册", "View Runbook")} <IconRight />
               </button>
             </div>
 
@@ -813,11 +833,11 @@ function Overview({
               <div className="cl-ledger-group">
                 <div className="cl-ledger-subhead">
                   <div className="cl-ledger-subhead-left">
-                    <span className="cl-ledger-tag">变更演练记录</span>
+                    <span className="cl-ledger-tag">{bi("变更演练记录", "Change Rehearsals")}</span>
                     <span className="dsec-count num">{rhList.length}</span>
                     {finalizedCount > 0 && (
                       <span className="cl-ledger-subnote num">
-                        已定稿 {finalizedCount} 份生产方案
+                        {bi(`已定稿 ${finalizedCount} 份生产方案`, `${finalizedCount} finalized`)}
                       </span>
                     )}
                   </div>
@@ -831,7 +851,7 @@ function Overview({
                       )
                     }
                   >
-                    {rhList.length > 0 ? "全部演练" : "新建演练"} <IconRight />
+                    {rhList.length > 0 ? bi("全部演练", "All Rehearsals") : bi("新建演练", "New Rehearsal")} <IconRight />
                   </button>
                 </div>
                 {rhList.length > 0 ? (
@@ -868,7 +888,10 @@ function Overview({
                   </ul>
                 ) : (
                   <p className="cl-ledger-empty">
-                    暂无变更演练记录，支持版本升级、节点扩缩容、参数调优与主备切换。
+                    {bi(
+                      "暂无变更演练记录，支持版本升级、节点扩缩容、参数调优与主备切换。",
+                      "No change rehearsals yet. Supports version upgrades, scaling, parameter tuning, and failover.",
+                    )}
                   </p>
                 )}
               </div>
@@ -881,10 +904,10 @@ function Overview({
 }
 
 const QUICK_INTENTS: { kind: RehearsalPresetKind; label: string }[] = [
-  { kind: "upgrade", label: "版本升级" },
-  { kind: "scale", label: "节点扩缩" },
-  { kind: "tune", label: "参数调优" },
-  { kind: "switch", label: "主备切换" },
+  { kind: "upgrade", get label() { return bi("版本升级", "Upgrade"); } },
+  { kind: "scale", get label() { return bi("节点扩缩", "Scale"); } },
+  { kind: "tune", get label() { return bi("参数调优", "Tune"); } },
+  { kind: "switch", get label() { return bi("主备切换", "Failover"); } },
 ];
 
 function RehearsalQuickStrip({
@@ -894,6 +917,7 @@ function RehearsalQuickStrip({
   c: ClusterView;
   rehearsals: ChangeRehearsal[] | null;
 }) {
+  useLang();
   const active = (rehearsals || []).find((x) => x.stage !== "finalized");
 
   if (active) {
@@ -905,12 +929,12 @@ function RehearsalQuickStrip({
     ).length;
     const stageText =
       active.stage === "rehearsing" && req.length > 0
-        ? `测试演练 ${done}/${req.length}`
+        ? bi(`测试演练 ${done}/${req.length}`, `Rehearsing ${done}/${req.length}`)
         : active.stage === "probing"
-          ? "待录入现场只读探针"
-          : "待确认变更边界";
+          ? bi("待录入现场只读探针", "Awaiting read-only probes")
+          : bi("待确认变更边界", "Awaiting scope confirmation");
     return (
-      <div className="cl-rh-strip" role="region" aria-label="进行中的变更演练">
+      <div className="cl-rh-strip" role="region" aria-label={bi("进行中的变更演练", "Active change rehearsal")}>
         <div className="cl-rh-strip-left">
           <b>
             <Spark size={14} /> {active.title}
@@ -932,14 +956,14 @@ function RehearsalQuickStrip({
               })
             }
           >
-            继续演练 <IconRight />
+            {bi("继续演练", "Continue")} <IconRight />
           </button>
           <button
             type="button"
             className="cl-rh-chip"
             onClick={() => launchRehearsalIntent(c.id)}
           >
-            新建演练
+            {bi("新建演练", "New Rehearsal")}
           </button>
         </div>
       </div>
@@ -947,13 +971,16 @@ function RehearsalQuickStrip({
   }
 
   return (
-    <div className="cl-rh-strip" role="region" aria-label="日常变更演练">
+    <div className="cl-rh-strip" role="region" aria-label={bi("日常变更演练", "Change rehearsal")}>
       <div className="cl-rh-strip-left">
         <b>
-          <Spark size={14} /> 变更演练
+          <Spark size={14} /> {bi("变更演练", "Change Rehearsal")}
         </b>
         <span className="cl-rh-strip-sub">
-          只读采集现场状态，先在测试环境逐步验证再输出实施方案
+          {bi(
+            "只读采集现场状态，先在测试环境逐步验证再输出实施方案",
+            "Collect read-only site state and verify step-by-step in staging before finalizing a plan",
+          )}
         </span>
       </div>
       <div className="cl-rh-intents">
@@ -980,32 +1007,33 @@ function HolderCard({
   c: ClusterView;
   p: PlanEntry;
 }) {
+  useLang();
   const ph = planPhase(p);
-  const title = p.delivery_mode === "configuration" ? "配置交付" : "集群部署";
+  const title = p.delivery_mode === "configuration" ? bi("配置交付", "Config Delivery") : bi("集群部署", "Cluster Deployment");
   const total = Math.max(0, p.run_total || 0);
   const done = Math.max(0, p.run_done || 0);
   const failed = Math.max(0, p.run_failed || 0);
   const hasIssue = ph === "failed" || ph === "genfailed" || failed > 0;
   const complete = total > 0 && done >= total && !hasIssue;
   const progress = total > 0 ? Math.min(100, (done / total) * 100) : 0;
-  const status = complete ? "待确认" : PLAN_PHASE[ph].label;
+  const status = complete ? bi("待确认", "Awaiting confirmation") : PLAN_PHASE[ph].label;
   const action =
     ph === "generating"
-      ? "查看进度"
+      ? bi("查看进度", "View Progress")
       : hasIssue
-        ? "查看问题"
+        ? bi("查看问题", "Inspect Issue")
         : complete
-          ? "确认结果"
+          ? bi("确认结果", "Confirm Outcome")
           : ph === "ready"
-            ? "开始执行"
-            : "继续执行";
+            ? bi("开始执行", "Start")
+            : bi("继续执行", "Continue");
   const detail =
     ph === "generating"
-      ? (p.stage || "正在生成交付材料").replace(/^\[\d\/5\]\s*/, "")
+      ? (p.stage || bi("正在生成交付材料", "Generating delivery artifacts")).replace(/^\[\d\/5\]\s*/, "")
       : ph === "genfailed"
-        ? p.error || "交付材料尚未生成完成"
+        ? p.error || bi("交付材料尚未生成完成", "Delivery build incomplete")
         : ph === "failed"
-          ? p.outcome_note || "已记为失败，请查看执行记录"
+          ? p.outcome_note || bi("已记为失败，请查看执行记录", "Marked as failed; see execution records")
           : "";
   return (
     <button
@@ -1014,7 +1042,10 @@ function HolderCard({
       onClick={() => openPlan(c, p.id)}
       onPointerEnter={() => prefetchDetail(p.id)}
       onFocus={() => prefetchDetail(p.id)}
-      aria-label={`${title}，${status}${total ? `，现场已完成 ${done} / ${total} 步` : ""}，${action}`}
+      aria-label={bi(
+        `${title}，${status}${total ? `，现场已完成 ${done} / ${total} 步` : ""}，${action}`,
+        `${title}, ${status}${total ? `, ${done} / ${total} on-site steps done` : ""}, ${action}`,
+      )}
     >
       <span className="cl-holder-meter" aria-hidden>
         <svg viewBox="0 0 48 48" className="cl-holder-ring">
@@ -1053,14 +1084,16 @@ function HolderCard({
             </span>
           ) : total ? (
             <span className="cl-holder-count">
-              现场进度 <b className="num">{done}</b>
-              <span className="num"> / {total} 步</span>
+              {bi("现场进度", "On-site progress")} <b className="num">{done}</b>
+              <span className="num"> / {total}{bi(" 步", " steps")}</span>
             </span>
           ) : (
-            <span>待开始现场执行</span>
+            <span>{bi("待开始现场执行", "Ready for on-site execution")}</span>
           )}
           {failed > 0 && (
-            <span className="cl-holder-fail num">{failed} 步失败</span>
+            <span className="cl-holder-fail num">
+              {failed === 1 ? bi("1 步失败", "1 step failed") : bi(`${failed} 步失败`, `${failed} steps failed`)}
+            </span>
           )}
         </span>
       </span>
@@ -1076,6 +1109,7 @@ function HolderCard({
 
 /** The cluster as it is now: the topology, endpoints, and profile of the active baseline. */
 function Now({ c, p }: { c: ClusterView; p: PlanEntry }) {
+  const lang = useLang();
   const [d, setD] = useState<JobDetail | null>(() => cachedDetail(p.id));
   const [loadError, setLoadError] = useState("");
   const [retry, setRetry] = useState(0);
@@ -1090,12 +1124,12 @@ function Now({ c, p }: { c: ClusterView; p: PlanEntry }) {
         if (live) setD(r);
       })
       .catch((e) => {
-        if (live) setLoadError(e.message || "读取失败");
+        if (live) setLoadError(e.message || bi("读取失败", "Load failed"));
       });
     return () => {
       live = false;
     };
-  }, [p.id, retry]);
+  }, [p.id, retry, lang]);
   const plan = d?.plan;
   const input = d?.spec?.deployment;
   const finished = p.outcome === "done" || p.outcome === "deviated";
@@ -1103,29 +1137,29 @@ function Now({ c, p }: { c: ClusterView; p: PlanEntry }) {
     <section className="dsec">
       <h2 className="dsec-title">
         {c.delivery_mode === "configuration"
-          ? "集群配置拓扑"
-          : "运行拓扑与连接"}
+          ? bi("集群配置拓扑", "Configuration Topology")
+          : bi("运行拓扑与连接", "Topology & Connections")}
         <span className="dsec-note">
-          {finished ? "已确认运行基线" : "待执行部署交付"}
+          {finished ? bi("已确认运行基线", "Confirmed baseline") : bi("待执行部署交付", "Pending deployment")}
         </span>
         <button
           type="button"
           className="dsec-link link"
           onClick={() => go({ name: "deliveries", id: c.id, tab: "config" })}
         >
-          查看配置 <IconRight />
+          {bi("查看配置", "View Config")} <IconRight />
         </button>
       </h2>
       {loadError ? (
         <div className="cl-load-err" role="alert">
           <IconExclamationCircle />
-          <span>集群信息读取失败：{loadError}</span>
+          <span>{bi("集群信息读取失败：", "Failed to load cluster info: ")}{loadError}</span>
           <Button
             size="small"
             icon={<IconRefresh />}
             onClick={() => setRetry((x) => x + 1)}
           >
-            重试
+            {bi("重试", "Retry")}
           </Button>
         </div>
       ) : !d ? (
@@ -1159,6 +1193,7 @@ function HostTable({
   plan: NonNullable<JobDetail["plan"]>;
   input?: NonNullable<JobDetail["spec"]>["deployment"];
 }) {
+  useLang();
   const specs = (input?.hosts || []) as {
     name: string;
     disk?: string;
@@ -1177,10 +1212,10 @@ function HostTable({
     <table className="cl-hosts">
       <thead>
         <tr>
-          <th>机器</th>
-          <th>地址</th>
-          <th>数据存储</th>
-          <th>运行角色</th>
+          <th>{bi("机器", "Host")}</th>
+          <th>{bi("地址", "Address")}</th>
+          <th>{bi("数据存储", "Storage")}</th>
+          <th>{bi("运行角色", "Roles")}</th>
         </tr>
       </thead>
       <tbody>
@@ -1188,12 +1223,12 @@ function HostTable({
           <tr key={r.name}>
             <td>
               <b>{r.name}</b>
-              {r.name === plan.controller && <em>控制</em>}
+              {r.name === plan.controller && <em>{bi("控制", "Ctrl")}</em>}
             </td>
             <td className="mono">
               <span className="cl-copy-cell">
                 <span>{r.ip}</span>
-                <InlineCopyBtn value={r.ip} label={`${r.name} 地址`} />
+                <InlineCopyBtn value={r.ip} label={bi(`${r.name} 地址`, `${r.name} IP`)} />
               </span>
             </td>
             <td>
@@ -1210,29 +1245,29 @@ function HostTable({
 }
 
 const PARAM_LABEL: Record<string, string> = {
-  tls: "传输加密",
-  tde: "存储加密",
-  client_cidr: "允许的客户端网段",
-  extra_client_cidrs: "另外的客户端网段",
-  replication: "复制方式",
-  backup_retention_full: "全量备份保留",
-  persistence: "持久化",
-  maxmemory: "最大内存",
-  data_dir: "数据目录",
-  pg_port: "数据库端口",
-  redis_port: "Redis 端口",
-  max_connections: "最大连接数",
+  get tls() { return bi("传输加密", "TLS encryption"); },
+  get tde() { return bi("存储加密", "Storage encryption (TDE)"); },
+  get client_cidr() { return bi("允许的客户端网段", "Allowed client CIDRs"); },
+  get extra_client_cidrs() { return bi("另外的客户端网段", "Extra client CIDRs"); },
+  get replication() { return bi("复制方式", "Replication mode"); },
+  get backup_retention_full() { return bi("全量备份保留", "Full backup retention"); },
+  get persistence() { return bi("持久化", "Persistence"); },
+  get maxmemory() { return bi("最大内存", "Max memory"); },
+  get data_dir() { return bi("数据目录", "Data directory"); },
+  get pg_port() { return bi("数据库端口", "Database port"); },
+  get redis_port() { return bi("Redis 端口", "Redis port"); },
+  get max_connections() { return bi("最大连接数", "Max connections"); },
 };
 const SECRET_PARAM_RE =
   /(password|passwd|pwd|secret|token|requirepass|access_key|secret_key|auth_key|private_key|admin_pass|repl_pass|superuser_pass)/i;
 
 const showParam = (v: unknown) =>
   v === true
-    ? "开启"
+    ? bi("开启", "On")
     : v === false
-      ? "关闭"
+      ? bi("关闭", "Off")
       : Array.isArray(v)
-        ? v.join("、")
+        ? v.join(bi("、", ", "))
         : String(v);
 
 /** What is worth knowing about the cluster at a glance, in groups: connection & credentials, composition, key parameters, and delivery status. */
@@ -1247,13 +1282,14 @@ function ClusterProfile({
   plan?: JobDetail["plan"];
   input?: NonNullable<JobDetail["spec"]>["deployment"];
 }) {
+  useLang();
   const [shownSecrets, setShownSecrets] = useState<Record<string, boolean>>({});
   const insts = plan?.instances || [];
   const real = displayInstances(insts).filter((i) => !i.external);
   const defaultIp = plan?.hosts?.[0]?.ip || input?.hosts?.[0]?.ip || "";
   const entries = insts.flatMap((i) =>
     Object.values(i.fronts || {}).map((f) => ({
-      label: f.external ? "外部入口" : "访问入口",
+      label: f.external ? bi("外部入口", "External entry") : bi("访问入口", "Entrypoint"),
       addr: f.address
         ? `${f.address}:${f.listen}`
         : defaultIp
@@ -1313,13 +1349,13 @@ function ClusterProfile({
   const roleLine = (i: (typeof insts)[number]) =>
     Object.entries(i.roles || {})
       .filter(([, hs]) => hs.length)
-      .map(([r, hs]) => `${i.role_titles?.[r] || r} ${hs.join("、")}`)
+      .map(([r, hs]) => `${i.role_titles?.[r] || r} ${hs.join(bi("、", ", "))}`)
       .join(" · ");
   return (
     <div className="cl-profile">
       {(entries.length > 0 || ports.length > 0 || secrets.length > 0) && (
         <section>
-          <h3>连接与凭据</h3>
+          <h3>{bi("连接与凭据", "Endpoints & Credentials")}</h3>
           <dl className="cl-prof-kv">
             {entries.map((e) => (
               <React.Fragment key={e.addr}>
@@ -1334,7 +1370,7 @@ function ClusterProfile({
             ))}
             {ports.length > 0 && (
               <>
-                <dt>监听端口</dt>
+                <dt>{bi("监听端口", "Listen ports")}</dt>
                 <dd className="mono">{ports.join(" · ")}</dd>
               </>
             )}
@@ -1346,11 +1382,11 @@ function ClusterProfile({
                   <dd className="mono">
                     <span className="cl-copy-cell right">
                       <span>{shown ? s.value : "••••••••"}</span>
-                      <Tooltip content={shown ? "隐藏凭据" : "显示凭据"} mini>
+                      <Tooltip content={shown ? bi("隐藏凭据", "Hide credential") : bi("显示凭据", "Show credential")} mini>
                         <button
                           type="button"
                           className="cl-inline-copy"
-                          aria-label={`${shown ? "隐藏" : "显示"} ${s.label}`}
+                          aria-label={`${shown ? bi("隐藏", "Hide") : bi("显示", "Show")} ${s.label}`}
                           aria-pressed={shown}
                           onClick={() =>
                             setShownSecrets((prev) => ({
@@ -1372,7 +1408,7 @@ function ClusterProfile({
         </section>
       )}
       <section>
-        <h3>组成</h3>
+        <h3>{bi("组成", "Components")}</h3>
         <ul className="cl-prof-list">
           {real.map((i) => (
             <li key={i.id}>
@@ -1381,24 +1417,28 @@ function ClusterProfile({
                   {i.title} {i.version}
                 </b>
                 {i.embedded ? (
-                  <span className="flag info">内置管理</span>
+                  <span className="flag info">{bi("内置管理", "Embedded")}</span>
                 ) : (
-                  i.auto && <span className="flag info">自动加入</span>
+                  i.auto && <span className="flag info">{bi("自动加入", "Auto-added")}</span>
                 )}
                 {i.status !== "published" && (
-                  <span className="flag warn">待验证</span>
+                  <span className="flag warn">{bi("待验证", "Unverified")}</span>
                 )}
               </div>
-              <small>{roleLine(i) || i.hosts.join("、")}</small>
+              <small>{roleLine(i) || i.hosts.join(bi("、", ", "))}</small>
             </li>
           ))}
           {(input?.hosts.length ?? c.hosts) > 0 && (
             <li>
               <div>
-                <b className="num">{input?.hosts.length ?? c.hosts} 台机器</b>
+                <b className="num">
+                  {(input?.hosts.length ?? c.hosts) === 1
+                    ? bi("1 台机器", "1 host")
+                    : bi(`${input?.hosts.length ?? c.hosts} 台机器`, `${input?.hosts.length ?? c.hosts} hosts`)}
+                </b>
               </div>
               <small>
-                {plan?.execution_host ? "独立执行机" : "集群内执行机"}{" "}
+                {plan?.execution_host ? bi("独立执行机", "Standalone executor") : bi("集群内执行机", "In-cluster executor")}{" "}
                 {plan?.controller || input?.controller || "—"}
               </small>
             </li>
@@ -1407,7 +1447,7 @@ function ClusterProfile({
       </section>
       {picks.length > 0 && (
         <section>
-          <h3>关键配置</h3>
+          <h3>{bi("关键配置", "Key Parameters")}</h3>
           <dl className="cl-prof-kv">
             {picks.map((k) => (
               <React.Fragment key={k}>
@@ -1429,16 +1469,16 @@ function ClusterProfile({
         </section>
       )}
       <section>
-        <h3>交付信息</h3>
+        <h3>{bi("交付信息", "Delivery Info")}</h3>
         <dl className="cl-prof-kv">
-          <dt>负责人</dt>
+          <dt>{bi("负责人", "Owner")}</dt>
           <dd>{c.owner}</dd>
-          <dt>部署状态</dt>
+          <dt>{bi("部署状态", "Status")}</dt>
           <dd>
             {PLAN_PHASE[planPhase(p)].label} ·{" "}
             <span className="mono">#{p.id.slice(0, 8)}</span>
           </dd>
-          <dt>创建</dt>
+          <dt>{bi("创建", "Created")}</dt>
           <dd>{ago(c.created)}</dd>
         </dl>
       </section>
@@ -1448,18 +1488,19 @@ function ClusterProfile({
 
 /** The cluster's plans as a row of dots, oldest first: what happened to it at a glance. */
 export function HistoryDots({ c }: { c: ClusterView }) {
+  useLang();
   const plans = [...c.plans].reverse().slice(-8);
   if (plans.length < 2) return null;
   const labelOf = (p: PlanEntry) =>
-    p.delivery_mode === "configuration" ? "配置交付" : "部署交付";
+    p.delivery_mode === "configuration" ? bi("配置交付", "Config delivery") : bi("部署交付", "Deploy delivery");
   return (
     <span
       className="cl-hist"
       aria-label={
-        `${c.plans.length} 份交付记录：` +
+        bi(`${c.plans.length} 份交付记录：`, `${c.plans.length} deliveries: `) +
         plans
-          .map((p) => labelOf(p) + PLAN_PHASE[planPhase(p)].label)
-          .join("，")
+          .map((p) => `${labelOf(p)} ${PLAN_PHASE[planPhase(p)].label}`)
+          .join(bi("，", ", "))
       }
     >
       {plans.map((p) => (

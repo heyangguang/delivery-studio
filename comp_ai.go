@@ -813,16 +813,16 @@ func (s *storeServer) compChat(w http.ResponseWriter, r *http.Request, user stor
 			return
 		}
 		if i+1 < len(providers) {
-			ev.send(map[string]any{"t": "notice", "v": "「" + p.Name + " · " + p.Model + "」失败，改用备用模型"})
+			ev.send(map[string]any{"t": "notice", "v": tr(reqLang(r), "「"+p.Name+" · "+p.Model+"」失败，改用备用模型", "\""+p.Name+" · "+p.Model+"\" failed; switching to backup model")})
 		}
 	}
 	if lastErr != nil {
-		ev.send(map[string]any{"t": "error", "v": lastErr.Error()})
+		ev.send(map[string]any{"t": "error", "v": localizeGoMessage(reqLang(r), lastErr.Error())})
 		return
 	}
 	ss.Messages = append(ss.Messages, aiMsg{Role: "assistant", Text: final.Text, Tools: used, Steps: final.Steps, MS: final.TotalMS, Proposals: made, Ask: final.Ask, Files: final.Files, At: time.Now().UTC().Format(time.RFC3339)})
 	if err := writeJSONFile(path, ss); err != nil {
-		ev.send(map[string]any{"t": "error", "v": "对话无法保存"})
+		ev.send(map[string]any{"t": "error", "v": tr(reqLang(r), "对话无法保存", "Failed to save conversation")})
 		return
 	}
 	s.learnLater(user.User, in.Message, final.Text)

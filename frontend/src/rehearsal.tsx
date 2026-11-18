@@ -73,6 +73,7 @@ import { Segmented, Smooth } from "./ui";
 import { Spark } from "./aichat";
 import { ModelPicker, useModelPick } from "./modelpick";
 import { ThinkLevel, useAIOptions } from "./aitools";
+import { bi, biv, getLang, useLang, withLang } from "./i18n";
 import "./rehearsal.css";
 
 export type RehearsalPresetKind = "upgrade" | "scale" | "tune" | "switch";
@@ -113,32 +114,64 @@ const STAGE_META: Record<
   { short: string; title: string; sub: string }
 > = {
   scoping: {
-    short: "边界对齐",
-    title: "变更诉求与边界对齐",
-    sub: "确认维护窗口与高可用约束",
+    get short() {
+      return bi("边界对齐", "Scope Alignment");
+    },
+    get title() {
+      return bi("变更诉求与边界对齐", "Change Scope & Boundary");
+    },
+    get sub() {
+      return bi("确认维护窗口与高可用约束", "Confirm maintenance window & HA");
+    },
   },
   probing: {
-    short: "只读探针",
-    title: "现场只读采集与漂移识别",
-    sub: "零修改采集生产真实角色与参数",
+    get short() {
+      return bi("只读探针", "Read-Only Probe");
+    },
+    get title() {
+      return bi("现场只读采集与漂移识别", "Live Probe & Drift Detection");
+    },
+    get sub() {
+      return bi("零修改采集生产真实角色与参数", "Collect live roles & params safely");
+    },
   },
   rehearsing: {
-    short: "测试演练",
-    title: "测试环境分步验证",
-    sub: "逐步实测耗时并就地排障修订",
+    get short() {
+      return bi("测试演练", "Test Rehearsal");
+    },
+    get title() {
+      return bi("测试环境分步验证", "Step-by-Step Verification");
+    },
+    get sub() {
+      return bi("逐步实测耗时并就地排障修订", "Measure timings & fix inline");
+    },
   },
   finalized: {
-    short: "生产 SOP",
-    title: "生产变更实施方案",
-    sub: "映射生产节点并导出 Word",
+    get short() {
+      return bi("生产 SOP", "Production SOP");
+    },
+    get title() {
+      return bi("生产变更实施方案", "Production Change SOP");
+    },
+    get sub() {
+      return bi("映射生产节点并导出 Word", "Map prod nodes & export Word");
+    },
   },
 };
 
 const PHASE_LABEL: Record<RehearsalStep["phase"], string> = {
-  precheck: "预检",
-  execute: "执行",
-  verify: "验收",
-  rollback: "回退",
+  get precheck() {
+    return bi("预检", "Precheck");
+  },
+  get execute() {
+    return bi("执行", "Execute");
+  },
+  get verify() {
+    return bi("验收", "Verify");
+  },
+  get rollback() {
+    return bi("回退", "Rollback");
+  },
 };
 
 const isMac =
@@ -171,40 +204,55 @@ function buildInitialPipelineSteps(kind: LivePipelineKind): RehearsalTraceStep[]
       {
         id: "align-scope",
         kind: "inspect",
-        title: "锁定变更边界与窗口约束",
-        detail: "对齐维护窗口前提，装载组件巡检规则字典…",
+        title: bi("锁定变更边界与窗口约束", "Lock scope & window constraints"),
+        detail: bi(
+          "对齐维护窗口前提，装载组件巡检规则字典…",
+          "Aligning window constraints & loading check rules…",
+        ),
         ok: true,
         status: "running",
       },
       {
         id: "inject-ro-policy",
         kind: "guard",
-        title: "注入纯只读安全红线规则",
-        detail: "锁定零修改、零服务控制、零文件重定向及凭据过滤约束",
+        title: bi("注入纯只读安全红线规则", "Inject read-only safety guardrails"),
+        detail: bi(
+          "锁定零修改、零服务控制、零文件重定向及凭据过滤约束",
+          "Enforcing zero-write, zero-restart, zero-redirect & secret masking",
+        ),
         ok: true,
         status: "pending",
       },
       {
         id: "connect-model",
         kind: "connect",
-        title: "连接模型网关与投递上下文",
-        detail: "等待前序安全校验完成后建立模型流式连接",
+        title: bi("连接模型网关与投递上下文", "Connect model gateway & send context"),
+        detail: bi(
+          "等待前序安全校验完成后建立模型流式连接",
+          "Waiting for safety checks before opening AI stream",
+        ),
         ok: true,
         status: "pending",
       },
       {
         id: "model-think",
         kind: "think",
-        title: "设计生产现场纯只读采集策略",
-        detail: "等待模型通道返回首包后展开推演",
+        title: bi("设计生产现场纯只读采集策略", "Design read-only live probe strategy"),
+        detail: bi(
+          "等待模型通道返回首包后展开推演",
+          "Waiting for first token from model stream",
+        ),
         ok: true,
         status: "pending",
       },
       {
         id: "readonly-ast-guard",
         kind: "guard",
-        title: "生成探针与静态安全红线扫描",
-        detail: "等待脚本编写完成后执行 15 类高危写操作静态扫描",
+        title: bi("生成探针与静态安全红线扫描", "Generate probe & run safety AST scan"),
+        detail: bi(
+          "等待脚本编写完成后执行 15 类高危写操作静态扫描",
+          "Scanning generated script against 15 write-op rules",
+        ),
         ok: true,
         status: "pending",
       },
@@ -215,40 +263,55 @@ function buildInitialPipelineSteps(kind: LivePipelineKind): RehearsalTraceStep[]
       {
         id: "parse-probe",
         kind: "inspect",
-        title: "解析现场采集证据与交付基线",
-        detail: "提取现场回显/截图与集群初始交付拓扑…",
+        title: bi("解析现场采集证据与交付基线", "Parse probe evidence & baseline"),
+        detail: bi(
+          "提取现场回显/截图与集群初始交付拓扑…",
+          "Extracting probe outputs, images & initial topology…",
+        ),
         ok: true,
         status: "running",
       },
       {
         id: "scrub-probe",
         kind: "guard",
-        title: "现场回显敏感凭据二次脱敏",
-        detail: "自动擦除回显中的口令、密钥与连接串",
+        title: bi("现场回显敏感凭据二次脱敏", "Second-pass secret scrubbing"),
+        detail: bi(
+          "自动擦除回显中的口令、密钥与连接串",
+          "Redacting passwords, keys & DSNs in probe output",
+        ),
         ok: true,
         status: "pending",
       },
       {
         id: "connect-model",
         kind: "connect",
-        title: "连接模型网关与投递上下文",
-        detail: "等待脱敏完成后建立模型流式连接",
+        title: bi("连接模型网关与投递上下文", "Connect model gateway & send context"),
+        detail: bi(
+          "等待脱敏完成后建立模型流式连接",
+          "Waiting for redaction before opening AI stream",
+        ),
         ok: true,
         status: "pending",
       },
       {
         id: "model-think",
         kind: "think",
-        title: "逐节点比对拓扑角色与参数漂移",
-        detail: "等待模型通道返回首包后展开推演",
+        title: bi("逐节点比对拓扑角色与参数漂移", "Compare node roles & param drift"),
+        detail: bi(
+          "等待模型通道返回首包后展开推演",
+          "Waiting for first token from model stream",
+        ),
         ok: true,
         status: "pending",
       },
       {
         id: "build-rehearsal-plan",
         kind: "synthesize",
-        title: "完成漂移诊断与分步演练编排",
-        detail: "等待漂移研判完成后编排预检/执行/验收/回退步骤",
+        title: bi("完成漂移诊断与分步演练编排", "Build drift report & rehearsal plan"),
+        detail: bi(
+          "等待漂移研判完成后编排预检/执行/验收/回退步骤",
+          "Structuring precheck, execute, verify & rollback steps",
+        ),
         ok: true,
         status: "pending",
       },
@@ -259,40 +322,55 @@ function buildInitialPipelineSteps(kind: LivePipelineKind): RehearsalTraceStep[]
       {
         id: "inspect-step-err",
         kind: "inspect",
-        title: "定位受阻步骤与报错证据",
-        detail: "读取当前演练步骤命令、判据与报错输出…",
+        title: bi("定位受阻步骤与报错证据", "Inspect failed step & error evidence"),
+        detail: bi(
+          "读取当前演练步骤命令、判据与报错输出…",
+          "Loading step command, criteria & error output…",
+        ),
         ok: true,
         status: "running",
       },
       {
         id: "scrub-err-context",
         kind: "guard",
-        title: "报错回显脱敏与上下文封装",
-        detail: "剥离报错输出中的敏感凭据，锁定演练步骤边界",
+        title: bi("报错回显脱敏与上下文封装", "Scrub secrets & package error context"),
+        detail: bi(
+          "剥离报错输出中的敏感凭据，锁定演练步骤边界",
+          "Masking credentials & locking step context",
+        ),
         ok: true,
         status: "pending",
       },
       {
         id: "connect-model",
         kind: "connect",
-        title: "连接模型网关与投递上下文",
-        detail: "等待脱敏完成后建立模型流式连接",
+        title: bi("连接模型网关与投递上下文", "Connect model gateway & send context"),
+        detail: bi(
+          "等待脱敏完成后建立模型流式连接",
+          "Waiting for redaction before opening AI stream",
+        ),
         ok: true,
         status: "pending",
       },
       {
         id: "model-think",
         kind: "think",
-        title: "诊断报错信号与环境根因推理",
-        detail: "等待模型通道返回首包后展开推演",
+        title: bi("诊断报错信号与环境根因推理", "Diagnose error & analyze root cause"),
+        detail: bi(
+          "等待模型通道返回首包后展开推演",
+          "Waiting for first token from model stream",
+        ),
         ok: true,
         status: "pending",
       },
       {
         id: "propose-fix",
         kind: "synthesize",
-        title: "生成命令修订提案",
-        detail: "等待根因明确后生成就地替换或前置步骤命令",
+        title: bi("生成命令修订提案", "Generate command fix proposal"),
+        detail: bi(
+          "等待根因明确后生成就地替换或前置步骤命令",
+          "Proposing in-place replacement or pre-step command",
+        ),
         ok: true,
         status: "pending",
       },
@@ -302,40 +380,55 @@ function buildInitialPipelineSteps(kind: LivePipelineKind): RehearsalTraceStep[]
     {
       id: "read-baseline",
       kind: "inspect",
-      title: "读取集群初始交付基线",
-      detail: "装载集群节点拓扑、组件版本与运行方案基线…",
+      title: bi("读取集群初始交付基线", "Read initial delivery baseline"),
+      detail: bi(
+        "装载集群节点拓扑、组件版本与运行方案基线…",
+        "Loading cluster topology, versions & scheme baseline…",
+      ),
       ok: true,
       status: "running",
     },
     {
       id: "scrub-context",
       kind: "guard",
-      title: "敏感凭据脱敏与边界检查",
-      detail: "自动剥离敏感口令与私钥字段，锁定只读边界",
+      title: bi("敏感凭据脱敏与边界检查", "Scrub credentials & check boundaries"),
+      detail: bi(
+        "自动剥离敏感口令与私钥字段，锁定只读边界",
+        "Stripping passwords & private keys, locking read-only boundary",
+      ),
       ok: true,
       status: "pending",
     },
     {
       id: "connect-model",
       kind: "connect",
-      title: "连接模型网关与投递上下文",
-      detail: "等待脱敏完成后建立模型流式连接",
+      title: bi("连接模型网关与投递上下文", "Connect model gateway & send context"),
+      detail: bi(
+        "等待脱敏完成后建立模型流式连接",
+        "Waiting for redaction before opening AI stream",
+      ),
       ok: true,
       status: "pending",
     },
     {
       id: "model-think",
       kind: "think",
-      title: "研判变更诉求与集群高可用边界",
-      detail: "等待模型通道返回首包后展开推演",
+      title: bi("研判变更诉求与集群高可用边界", "Assess change goal & HA constraints"),
+      detail: bi(
+        "等待模型通道返回首包后展开推演",
+        "Waiting for first token from model stream",
+      ),
       ok: true,
       status: "pending",
     },
     {
       id: "build-scope",
       kind: "synthesize",
-      title: "生成变更边界澄清清单",
-      detail: "等待风险推演完成后提炼维护窗口与前提问题",
+      title: bi("生成变更边界澄清清单", "Generate scope alignment checklist"),
+      detail: bi(
+        "等待风险推演完成后提炼维护窗口与前提问题",
+        "Summarizing maintenance window & prerequisite questions",
+      ),
       ok: true,
       status: "pending",
     },
@@ -363,14 +456,18 @@ function createInitialLiveState(
 
 function cleanClientErrText(raw: string): string {
   let s = (raw || "").trim();
-  if (!s) return "AI 模型通道调用中断，请稍后重试";
+  const fallback = bi(
+    "AI 模型通道调用中断，请稍后重试",
+    "AI model channel interrupted; please try again later",
+  );
+  if (!s) return fallback;
   // Strip empty proxy JSON tails such as `: {"error":{"code":"server_error","message":""}}`
   s = s.replace(
     /[:\s]*\{\s*"error"\s*:\s*\{[^}]*"message"\s*:\s*""[^}]*\}\s*\}\s*$/i,
     "",
   );
   s = s.replace(/[:\s]*\{\s*\}\s*$/, "").trim();
-  return s || "AI 模型通道调用中断，请稍后重试";
+  return s || fallback;
 }
 
 function extractDiagFromError(rawErr: unknown): AICallDiag | undefined {
@@ -388,7 +485,7 @@ function markLiveStateError(prev: LiveAIState, rawErr: unknown): LiveAIState {
   const msg = cleanClientErrText(
     rawErr instanceof Error
       ? rawErr.message
-      : String(rawErr || "AI 模型通道调用中断"),
+      : String(rawErr || bi("AI 模型通道调用中断", "AI model channel interrupted")),
   );
   const bodyDiag = extractDiagFromError(rawErr);
   const stepDiag = [...prev.steps]
@@ -467,16 +564,32 @@ function parseAIErrorGuide(
   ) {
     const inPart =
       typeof diag?.in_tokens === "number" && diag.in_tokens > 0
-        ? `已接收 ${diag.in_tokens.toLocaleString("en-US")} 输入 Token${
-            diag.cached_tokens
-              ? `（缓存 ${diag.cached_tokens.toLocaleString("en-US")}）`
-              : ""
-          }`
-        : "已返回成功状态码";
+        ? bi(
+            `已接收 ${diag.in_tokens.toLocaleString("en-US")} 输入 Token${
+              diag.cached_tokens
+                ? `（缓存 ${diag.cached_tokens.toLocaleString("en-US")}）`
+                : ""
+            }`,
+            `received ${diag.in_tokens.toLocaleString("en-US")} input tokens${
+              diag.cached_tokens
+                ? ` (${diag.cached_tokens.toLocaleString("en-US")} cached)`
+                : ""
+            }`,
+          )
+        : bi("已返回成功状态码", "returned success status");
     return {
-      badge: `HTTP ${httpStatus || 200} · 空输出响应 (0 Token)`,
-      summary: `上游模型网关${inPart}，但响应体 output: [] 为空，未生成任何有效输出 Token。`,
-      hint: "常见于中转网关（如 Magpie / OneAPI）在 Responses 协议下转译 Claude 等非 OpenAI 模型时丢失输出流，或上游渠道中途断流、欠费截断。建议前往「设置 → AI」将该供应商接口方式改为「Chat Completions（通用）」，或检查上游渠道额度后重试。",
+      badge: bi(
+        `HTTP ${httpStatus || 200} · 空输出响应 (0 Token)`,
+        `HTTP ${httpStatus || 200} · Empty output (0 tokens)`,
+      ),
+      summary: bi(
+        `上游模型网关${inPart}，但响应体 output: [] 为空，未生成任何有效输出 Token。`,
+        `Upstream gateway ${inPart}, but output: [] was empty with 0 tokens generated.`,
+      ),
+      hint: bi(
+        "常见于中转网关（如 Magpie / OneAPI）在 Responses 协议下转译 Claude 等非 OpenAI 模型时丢失输出流，或上游渠道中途断流、欠费截断。建议前往「设置 → AI」将该供应商接口方式改为「Chat Completions（通用）」，或检查上游渠道额度后重试。",
+        "Often caused by proxy gateways (e.g. Magpie / OneAPI) dropping streams when translating non-OpenAI models via Responses API, or upstream truncation/quota limits. Switch the provider API mode to Chat Completions in Settings → AI or check upstream quota and retry.",
+      ),
       suggestSettings: true,
     };
   }
@@ -494,11 +607,23 @@ function parseAIErrorGuide(
   ) {
     const afterFallback = Boolean(diag?.attempts && diag.attempts.length > 1);
     return {
-      badge: `HTTP ${httpStatus || 402} · 额度或计费受限`,
+      badge: bi(
+        `HTTP ${httpStatus || 402} · 额度或计费受限`,
+        `HTTP ${httpStatus || 402} · Quota or billing limit`,
+      ),
       summary: afterFallback
-        ? `平台自动回退兼容重试后，上游模型渠道返回 HTTP ${httpStatus || 402} 配额或计费限制（Payment Required）。`
-        : `上游模型网关返回 HTTP ${httpStatus || 402} 配额或计费限制（Payment Required），当前渠道未能接收推演请求。`,
-      hint: "您填写的变更诉求与截图已完整保留。请核查网关下游渠道余额，或前往「设置 → AI」切换其他可用模型后点击「重新发起」。",
+        ? bi(
+            `平台自动回退兼容重试后，上游模型渠道返回 HTTP ${httpStatus || 402} 配额或计费限制（Payment Required）。`,
+            `After automatic fallback retry, upstream returned HTTP ${httpStatus || 402} (Payment Required).`,
+          )
+        : bi(
+            `上游模型网关返回 HTTP ${httpStatus || 402} 配额或计费限制（Payment Required），当前渠道未能接收推演请求。`,
+            `Upstream gateway returned HTTP ${httpStatus || 402} (Payment Required); the channel rejected the request.`,
+          ),
+      hint: bi(
+        "您填写的变更诉求与截图已完整保留。请核查网关下游渠道余额，或前往「设置 → AI」切换其他可用模型后点击「重新发起」。",
+        "Your change goal and screenshots are preserved. Check channel balance or switch models in Settings → AI, then click Retry.",
+      ),
       suggestSettings: true,
     };
   }
@@ -516,10 +641,16 @@ function parseAIErrorGuide(
   ) {
     return {
       badge: httpStatus
-        ? `HTTP ${httpStatus} · 模型鉴权未通过`
-        : "模型鉴权未通过",
-      summary: `上游模型网关返回 ${httpStatus ? `HTTP ${httpStatus} ` : ""}鉴权拒绝，当前访问密钥无效或无权调用该模型。`,
-      hint: "请前往「设置 → AI」核对模型供应商密钥与变更演练绑定模型，保存后点击「重新发起」。",
+        ? bi(`HTTP ${httpStatus} · 模型鉴权未通过`, `HTTP ${httpStatus} · Auth failed`)
+        : bi("模型鉴权未通过", "Authentication failed"),
+      summary: bi(
+        `上游模型网关返回 ${httpStatus ? `HTTP ${httpStatus} ` : ""}鉴权拒绝，当前访问密钥无效或无权调用该模型。`,
+        `Upstream gateway rejected ${httpStatus ? `(HTTP ${httpStatus}) ` : ""}authentication; API key is invalid or lacks model access.`,
+      ),
+      hint: bi(
+        "请前往「设置 → AI」核对模型供应商密钥与变更演练绑定模型，保存后点击「重新发起」。",
+        "Verify the provider API key and bound model in Settings → AI, save, and click Retry.",
+      ),
       suggestSettings: true,
     };
   }
@@ -533,9 +664,18 @@ function parseAIErrorGuide(
     errMsg.includes("并发")
   ) {
     return {
-      badge: `HTTP ${httpStatus || 429} · 网关并发限流`,
-      summary: `上游模型通道返回 HTTP ${httpStatus || 429} 速率或并发保护限制。`,
-      hint: "稍候几秒即可点击「重新发起」重试，或在「设置 → AI」中配置备用模型节点。",
+      badge: bi(
+        `HTTP ${httpStatus || 429} · 网关并发限流`,
+        `HTTP ${httpStatus || 429} · Rate limited`,
+      ),
+      summary: bi(
+        `上游模型通道返回 HTTP ${httpStatus || 429} 速率或并发保护限制。`,
+        `Upstream channel returned HTTP ${httpStatus || 429} rate or concurrency limit.`,
+      ),
+      hint: bi(
+        "稍候几秒即可点击「重新发起」重试，或在「设置 → AI」中配置备用模型节点。",
+        "Wait a few seconds and click Retry, or configure a fallback model in Settings → AI.",
+      ),
       suggestSettings: true,
     };
   }
@@ -548,38 +688,70 @@ function parseAIErrorGuide(
   ) {
     return {
       badge: httpStatus
-        ? `HTTP ${httpStatus} · 端点或模型未找到`
-        : "模型标识未找到",
-      summary: `上游网关返回 ${httpStatus ? `HTTP ${httpStatus}` : "404"}，未找到目标接口路径或当前配置的模型标识。`,
-      hint: "请前往「设置 → AI」检查模型名称与 Base URL；若使用中转网关且不支持 /responses，建议切换接口方式为「Chat Completions（通用）」。",
+        ? bi(`HTTP ${httpStatus} · 端点或模型未找到`, `HTTP ${httpStatus} · Endpoint or model not found`)
+        : bi("模型标识未找到", "Model ID not found"),
+      summary: bi(
+        `上游网关返回 ${httpStatus ? `HTTP ${httpStatus}` : "404"}，未找到目标接口路径或当前配置的模型标识。`,
+        `Upstream gateway returned ${httpStatus ? `HTTP ${httpStatus}` : "404"}; endpoint path or configured model ID was not found.`,
+      ),
+      hint: bi(
+        "请前往「设置 → AI」检查模型名称与 Base URL；若使用中转网关且不支持 /responses，建议切换接口方式为「Chat Completions（通用）」。",
+        "Check the model name and Base URL in Settings → AI; if your proxy does not support /responses, switch API mode to Chat Completions.",
+      ),
       suggestSettings: true,
     };
   }
 
   if (reasonCode === "incomplete") {
     return {
-      badge: `${httpStatus ? `HTTP ${httpStatus} · ` : ""}模型输出截断`,
-      summary: `上游模型在完成完整结构化输出前提前中止（状态：${diag?.upstream_status || "incomplete"}）。`,
-      hint: "常见于网关单次最大输出 Token 限制偏小或响应中途断流；可直接点击「重新发起」或在「设置 → AI」切换模型。",
+      badge: bi(
+        `${httpStatus ? `HTTP ${httpStatus} · ` : ""}模型输出截断`,
+        `${httpStatus ? `HTTP ${httpStatus} · ` : ""}Output truncated`,
+      ),
+      summary: bi(
+        `上游模型在完成完整结构化输出前提前中止（状态：${diag?.upstream_status || "incomplete"}）。`,
+        `Upstream model stopped before completing structured output (status: ${diag?.upstream_status || "incomplete"}).`,
+      ),
+      hint: bi(
+        "常见于网关单次最大输出 Token 限制偏小或响应中途断流；可直接点击「重新发起」或在「设置 → AI」切换模型。",
+        "Usually caused by low max-output token limits or mid-stream drops. Click Retry or switch models in Settings → AI.",
+      ),
       suggestSettings: true,
     };
   }
 
   if (reasonCode === "invalid_output") {
     return {
-      badge: `${httpStatus ? `HTTP ${httpStatus} · ` : ""}返回格式不完整`,
-      summary:
+      badge: bi(
+        `${httpStatus ? `HTTP ${httpStatus} · ` : ""}返回格式不完整`,
+        `${httpStatus ? `HTTP ${httpStatus} · ` : ""}Malformed output`,
+      ),
+      summary: bi(
         "上游模型已返回文本，但未包含完整可解析的 JSON 结果（可能输出中途截断或模型未按结构化要求输出）。",
-      hint: "您的输入已完整保留；可展开下方「查看网关原始诊断报文」查看模型实际输出，或直接点击「重新发起」重试。",
+        "Model returned text without complete parseable JSON (output may be truncated or unstructured).",
+      ),
+      hint: bi(
+        "您的输入已完整保留；可展开下方「查看网关原始诊断报文」查看模型实际输出，或直接点击「重新发起」重试。",
+        "Your input is preserved; expand Raw Gateway Diagnostics below to inspect output, or click Retry.",
+      ),
       suggestSettings: true,
     };
   }
 
   if (reasonCode === "sse_error") {
     return {
-      badge: `${httpStatus ? `HTTP ${httpStatus} · ` : ""}SSE 流式帧报错`,
-      summary: "模型网关建立流式连接后，在推送 SSE 事件流中途返回了上游错误帧。",
-      hint: "可展开下方「查看网关原始诊断报文」定位上游具体错误内容，修复或切换模型后点击「重新发起」。",
+      badge: bi(
+        `${httpStatus ? `HTTP ${httpStatus} · ` : ""}SSE 流式帧报错`,
+        `${httpStatus ? `HTTP ${httpStatus} · ` : ""}SSE stream error`,
+      ),
+      summary: bi(
+        "模型网关建立流式连接后，在推送 SSE 事件流中途返回了上游错误帧。",
+        "Gateway opened stream but returned an upstream error frame mid-stream.",
+      ),
+      hint: bi(
+        "可展开下方「查看网关原始诊断报文」定位上游具体错误内容，修复或切换模型后点击「重新发起」。",
+        "Expand Raw Gateway Diagnostics below for upstream details, then fix or switch model and click Retry.",
+      ),
       suggestSettings: true,
     };
   }
@@ -590,31 +762,58 @@ function parseAIErrorGuide(
     errCode === 0 ||
     httpStatus === 504 ||
     lower.includes("timeout") ||
+    lower.includes("timed out") ||
+    lower.includes("unable to connect") ||
+    lower.includes("disconnected") ||
     errMsg.includes("超时") ||
     errMsg.includes("无法连接") ||
     errMsg.includes("断开")
   ) {
     return {
-      badge: `${httpStatus ? `HTTP ${httpStatus} · ` : ""}网关连接超时或中断`,
-      summary: "连接上游模型服务超时或网络层中断，本次推演已安全中止。",
-      hint: "您输入的变更内容已完整保留；确认模型网关网络可达后点击「重新发起」即可继续。",
+      badge: bi(
+        `${httpStatus ? `HTTP ${httpStatus} · ` : ""}网关连接超时或中断`,
+        `${httpStatus ? `HTTP ${httpStatus} · ` : ""}Connection timeout or drop`,
+      ),
+      summary: bi(
+        "连接上游模型服务超时或网络层中断，本次推演已安全中止。",
+        "Connection to upstream AI service timed out or dropped; run safely aborted.",
+      ),
+      hint: bi(
+        "您输入的变更内容已完整保留；确认模型网关网络可达后点击「重新发起」即可继续。",
+        "Your inputs are preserved; ensure gateway connectivity and click Retry.",
+      ),
       suggestSettings: true,
     };
   }
 
   if (httpStatus && httpStatus >= 400) {
     return {
-      badge: `HTTP ${httpStatus} · 网关错误响应`,
-      summary: `上游模型网关返回 HTTP ${httpStatus}${diag?.endpoint ? `（${diag.endpoint}）` : ""}，本次推演未完成落库。`,
-      hint: "您填写的内容均已保留；可展开下方「查看网关原始诊断报文」核查上游具体报错，或前往「设置 → AI」切换模型重试。",
+      badge: bi(
+        `HTTP ${httpStatus} · 网关错误响应`,
+        `HTTP ${httpStatus} · Gateway error`,
+      ),
+      summary: bi(
+        `上游模型网关返回 HTTP ${httpStatus}${diag?.endpoint ? `（${diag.endpoint}）` : ""}，本次推演未完成落库。`,
+        `Upstream gateway returned HTTP ${httpStatus}${diag?.endpoint ? ` (${diag.endpoint})` : ""}; nothing was saved.`,
+      ),
+      hint: bi(
+        "您填写的内容均已保留；可展开下方「查看网关原始诊断报文」核查上游具体报错，或前往「设置 → AI」切换模型重试。",
+        "Your inputs are preserved; expand Raw Gateway Diagnostics or switch models in Settings → AI.",
+      ),
       suggestSettings: true,
     };
   }
 
   return {
-    badge: "模型通道调用异常",
-    summary: "模型网关未返回可解析的演练结果，本次推演未写入残缺记录。",
-    hint: "您填写的内容均已保留，可直接点击「重新发起」重试；若持续报错请查看网关诊断详情或在「设置 → AI」切换可用模型。",
+    badge: bi("模型通道调用异常", "Model channel error"),
+    summary: bi(
+      "模型网关未返回可解析的演练结果，本次推演未写入残缺记录。",
+      "Gateway returned no parseable result; no partial record was saved.",
+    ),
+    hint: bi(
+      "您填写的内容均已保留，可直接点击「重新发起」重试；若持续报错请查看网关诊断详情或在「设置 → AI」切换可用模型。",
+      "Your inputs are preserved. Click Retry, or check diagnostics / switch model in Settings → AI.",
+    ),
     suggestSettings: true,
   };
 }
@@ -639,12 +838,13 @@ function describeAttemptOutcome(att: AIAttemptDiag): string {
     att.out_tokens === 0 &&
     typeof att.in_tokens === "number"
   ) {
-    return "空响应 (0 Token)";
+    return bi("空响应 (0 Token)", "Empty (0 tokens)");
   }
   if (att.http_status === 402) return "Payment Required";
-  if (att.http_status === 401 || att.http_status === 403) return "鉴权拒绝";
-  if (att.http_status === 429) return "速率受限";
-  if (att.http_status === 404) return "端点未找到";
+  if (att.http_status === 401 || att.http_status === 403)
+    return bi("鉴权拒绝", "Auth denied");
+  if (att.http_status === 429) return bi("速率受限", "Rate limited");
+  if (att.http_status === 404) return bi("端点未找到", "Not found");
   if (att.upstream_status) return att.upstream_status;
   return "";
 }
@@ -667,13 +867,16 @@ async function streamRehearsalAPI(
         "Content-Type": "application/json",
         Accept: "text/event-stream",
         "X-CSRF-Token": csrfToken(),
+        "X-Lang": getLang(),
       },
       body: JSON.stringify(body),
     });
   } catch (e) {
     if (signal?.aborted) throw e;
     throw new ApiError(
-      navigator.onLine ? "无法连接到服务，请稍后重试" : "网络已断开",
+      navigator.onLine
+        ? bi("无法连接到服务，请稍后重试", "Unable to connect to the server; please try again later")
+        : bi("网络已断开", "Network disconnected"),
       0,
     );
   }
@@ -685,12 +888,17 @@ async function streamRehearsalAPI(
     try {
       parsed = txt ? (JSON.parse(txt) as Record<string, unknown>) : {};
     } catch {
-      if (!res.ok) throw new ApiError(`服务暂时不可用（${res.status}）`, res.status);
+      if (!res.ok) {
+        throw new ApiError(
+          bi(`服务暂时不可用（${res.status}）`, `Service temporarily unavailable (${res.status})`),
+          res.status,
+        );
+      }
     }
     if (!res.ok) {
       throw new ApiError(
         (typeof parsed.error === "string" && parsed.error) ||
-          `请求失败（${res.status}）`,
+          bi(`请求失败（${res.status}）`, `Request failed (${res.status})`),
         res.status,
         parsed,
       );
@@ -758,7 +966,9 @@ async function streamRehearsalAPI(
       finalResult = ev.rehearsal as ChangeRehearsal;
     } else if (kind === "error") {
       const msg =
-        typeof ev.v === "string" && ev.v ? ev.v : "AI 处理中断，请稍后重试";
+        typeof ev.v === "string" && ev.v
+          ? ev.v
+          : bi("AI 处理中断，请稍后重试", "AI processing interrupted; please try again later");
       const code = typeof ev.code === "number" ? ev.code : 502;
       const diag =
         ev.diag && typeof ev.diag === "object"
@@ -786,7 +996,13 @@ async function streamRehearsalAPI(
     }
   }
   if (!finalResult) {
-    throw new ApiError("连接在生成完成前中断，请重试", 502);
+    throw new ApiError(
+      bi(
+        "连接在生成完成前中断，请重试",
+        "Connection closed before generation completed; please retry",
+      ),
+      502,
+    );
   }
   return finalResult;
 }
@@ -810,7 +1026,7 @@ function readFileAsDataURL(file: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const r = new FileReader();
     r.onload = () => resolve(String(r.result || ""));
-    r.onerror = () => reject(new Error("读取图片失败"));
+    r.onerror = () => reject(new Error(bi("读取图片失败", "Failed to read image")));
     r.readAsDataURL(file);
   });
 }
@@ -819,17 +1035,27 @@ function loadImageElement(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error("解码图片失败"));
+    img.onerror = () => reject(new Error(bi("解码图片失败", "Failed to decode image")));
     img.src = src;
   });
 }
 
 async function prepareDraftImage(file: File): Promise<DraftImage> {
   if (!ALLOWED_IMAGE_MIME.test(file.type)) {
-    throw new Error(`不支持的图片格式：${file.name || file.type}`);
+    throw new Error(
+      bi(
+        `不支持的图片格式：${file.name || file.type}`,
+        `Unsupported image format: ${file.name || file.type}`,
+      ),
+    );
   }
   if (file.size > 18 * 1024 * 1024) {
-    throw new Error(`图片 ${file.name} 过大，请控制在 18 MiB 以内`);
+    throw new Error(
+      bi(
+        `图片 ${file.name} 过大，请控制在 18 MiB 以内`,
+        `Image ${file.name} exceeds 18 MiB limit`,
+      ),
+    );
   }
   const rawUrl = await readFileAsDataURL(file);
   const img = await loadImageElement(rawUrl);
@@ -844,7 +1070,7 @@ async function prepareDraftImage(file: File): Promise<DraftImage> {
   ) {
     return {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      name: file.name || "剪贴板截图.png",
+      name: file.name || bi("剪贴板截图.png", "clipboard-screenshot.png"),
       dataUrl: rawUrl,
       width: w,
       height: h,
@@ -860,7 +1086,12 @@ async function prepareDraftImage(file: File): Promise<DraftImage> {
   canvas.height = targetH;
   const ctx = canvas.getContext("2d");
   if (!ctx) {
-    throw new Error("浏览器不支持图片画布压缩");
+    throw new Error(
+      bi(
+        "浏览器不支持图片画布压缩",
+        "Browser canvas image compression unavailable",
+      ),
+    );
   }
   ctx.drawImage(img, 0, 0, targetW, targetH);
 
@@ -874,11 +1105,16 @@ async function prepareDraftImage(file: File): Promise<DraftImage> {
   }
   const finalBytes = Math.round(((outUrl.length - outUrl.indexOf(",") - 1) * 3) / 4);
   if (finalBytes > MAX_IMAGE_BYTES) {
-    throw new Error(`图片 ${file.name} 压缩后仍超过 4 MiB，请裁剪关键区域后重试`);
+    throw new Error(
+      bi(
+        `图片 ${file.name} 压缩后仍超过 4 MiB，请裁剪关键区域后重试`,
+        `Image ${file.name} still exceeds 4 MiB after compression; crop key region and retry`,
+      ),
+    );
   }
   return {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    name: file.name || "剪贴板截图.webp",
+    name: file.name || bi("剪贴板截图.webp", "clipboard-screenshot.webp"),
     dataUrl: outUrl,
     width: targetW,
     height: targetH,
@@ -897,9 +1133,13 @@ function extractClipboardImageFiles(e: React.ClipboardEvent): File[] {
         const named =
           f.name && f.name !== "image.png"
             ? f
-            : new File([f], `截图-${new Date().toTimeString().slice(0, 8).replace(/:/g, "")}.${ext}`, {
-                type: f.type,
-              });
+            : new File(
+                [f],
+                `${bi("截图", "screenshot")}-${new Date().toTimeString().slice(0, 8).replace(/:/g, "")}.${ext}`,
+                {
+                  type: f.type,
+                },
+              );
         out.push(named);
       }
     }
@@ -1082,19 +1322,21 @@ function tokenizeBashLine(line: string): BashToken[] {
 
 function CopyCodeBtn({
   text,
-  label = "复制",
+  label,
   className = "",
 }: {
   text: string;
   label?: string;
   className?: string;
 }) {
+  useLang();
   const [done, setDone] = useState(false);
   useEffect(() => {
     if (!done) return;
     const t = setTimeout(() => setDone(false), 1600);
     return () => clearTimeout(t);
   }, [done]);
+  const btnLabel = label ?? bi("复制", "Copy");
   return (
     <button
       type="button"
@@ -1105,7 +1347,7 @@ function CopyCodeBtn({
       }}
     >
       {done ? <IconCheck /> : <IconCopy />}
-      <span>{done ? "已复制" : label}</span>
+      <span>{done ? bi("已复制", "Copied") : btnLabel}</span>
     </button>
   );
 }
@@ -1114,7 +1356,7 @@ function ShellCodeBlock({
   code,
   title,
   compact = false,
-  copyLabel = "复制",
+  copyLabel,
   onDownload,
   onEdit,
 }: {
@@ -1125,6 +1367,7 @@ function ShellCodeBlock({
   onDownload?: () => void;
   onEdit?: () => void;
 }) {
+  useLang();
   const [expanded, setExpanded] = useState(false);
   const lines = useMemo(() => {
     const clean = code.replace(/\r\n/g, "\n").replace(/\n$/, "");
@@ -1144,7 +1387,12 @@ function ShellCodeBlock({
           >
             {title}
           </span>
-          <span className="rh-code-lines num">{lines.length} 行</span>
+          <span className="rh-code-lines num">
+            {bi(
+              `${lines.length} 行`,
+              lines.length === 1 ? "1 line" : `${lines.length} lines`,
+            )}
+          </span>
         </div>
         <div className="rh-code-acts">
           {collapsible && (
@@ -1154,7 +1402,7 @@ function ShellCodeBlock({
               onClick={() => setExpanded((v) => !v)}
             >
               {expanded ? <IconShrink /> : <IconExpand />}
-              <span>{expanded ? "收起" : `展开全部`}</span>
+              <span>{expanded ? bi("收起", "Collapse") : bi("展开全部", "Expand all")}</span>
             </button>
           )}
           <CopyCodeBtn text={code} label={copyLabel} />
@@ -1165,13 +1413,13 @@ function ShellCodeBlock({
               onClick={onDownload}
             >
               <IconDownload />
-              <span>下载 .sh</span>
+              <span>{bi("下载 .sh", "Download .sh")}</span>
             </button>
           )}
           {onEdit && (
             <button type="button" className="rh-code-btn" onClick={onEdit}>
               <IconEdit />
-              <span>微调</span>
+              <span>{bi("微调", "Edit")}</span>
             </button>
           )}
         </div>
@@ -1219,7 +1467,7 @@ function fmtElapsedMs(ms?: number) {
 }
 
 function fmtStepDuration(ms?: number) {
-  if (!ms || ms < 30) return "已就绪";
+  if (!ms || ms < 30) return bi("已就绪", "Ready");
   if (ms < 1000) return `${ms}ms`;
   const sec = ms / 1000;
   if (sec < 60) return `${sec.toFixed(1)}s`;
@@ -1229,15 +1477,27 @@ function fmtStepDuration(ms?: number) {
 function pendingHintForStep(st: RehearsalTraceStep): string {
   switch (st.kind) {
     case "guard":
-      return "等待基线上下文读取完成后执行脱敏与安全红线校验";
+      return bi(
+        "等待基线上下文读取完成后执行脱敏与安全红线校验",
+        "Waiting for baseline read to scrub secrets & run safety checks",
+      );
     case "connect":
-      return "等待前序安全校验完成后建立模型流式通道";
+      return bi(
+        "等待前序安全校验完成后建立模型流式通道",
+        "Waiting for safety checks to open AI model stream",
+      );
     case "think":
-      return "等待模型网关返回首包 Token 后展开实时推演";
+      return bi(
+        "等待模型网关返回首包 Token 后展开实时推演",
+        "Waiting for first token from model gateway",
+      );
     case "synthesize":
-      return "等待架构风险推演完成后编排结构化结果";
+      return bi(
+        "等待架构风险推演完成后编排结构化结果",
+        "Waiting for analysis to structure final output",
+      );
     default:
-      return "等待前序环节完成";
+      return bi("等待前序环节完成", "Waiting for previous step");
   }
 }
 
@@ -1301,49 +1561,96 @@ function RehearsalStageCartoon({
   waitSec?: number;
   errorBadge?: string;
 }) {
+  useLang();
   const actMeta: Record<
     CartoonScene,
     { tag: string; headline: string; sub: string }
   > = {
     inspect: {
-      tag: "ACT 01 · 基线扫描",
-      headline: stepTitle || "扫描集群初始交付拓扑与参数基线",
+      tag: bi("ACT 01 · 基线扫描", "ACT 01 · BASELINE SCAN"),
+      headline:
+        stepTitle ||
+        bi(
+          "扫描集群初始交付拓扑与参数基线",
+          "Scanning initial delivery topology & baseline params",
+        ),
       sub:
         stepDetail ||
-        "逐节点提取主从角色、端口与关键配置，构建演练数字沙盘",
+        bi(
+          "逐节点提取主从角色、端口与关键配置，构建演练数字沙盘",
+          "Extracting node roles, ports & key configs to build rehearsal sandbox",
+        ),
     },
     guard: {
-      tag: "ACT 02 · 安全脱敏",
-      headline: stepTitle || "敏感凭据自动剥离与只读红线锁定",
+      tag: bi("ACT 02 · 安全脱敏", "ACT 02 · REDACTION"),
+      headline:
+        stepTitle ||
+        bi(
+          "敏感凭据自动剥离与只读红线锁定",
+          "Stripping credentials & locking read-only guardrails",
+        ),
       sub:
         stepDetail ||
-        "口令、私钥与连接串在本地安检门全部擦除，仅放行架构元数据",
+        bi(
+          "口令、私钥与连接串在本地安检门全部擦除，仅放行架构元数据",
+          "Passwords, keys & DSNs scrubbed locally; only topology metadata passes",
+        ),
     },
     connect: {
-      tag: "ACT 03 · 网关握手",
-      headline: stepTitle || "平台底座正在与 AI 模型网关双向握手",
+      tag: bi("ACT 03 · 网关握手", "ACT 03 · GATEWAY HANDSHAKE"),
+      headline:
+        stepTitle ||
+        bi(
+          "平台底座正在与 AI 模型网关双向握手",
+          "Handshaking with AI model gateway",
+        ),
       sub:
         stepDetail ||
-        `正在向 ${provider || "模型网关"}${model ? ` (${model})` : ""} 投递脱敏基线并等待首包响应${waitSec ? ` · ${waitSec.toFixed(1)}s` : ""}`,
+        bi(
+          `正在向 ${provider || "模型网关"}${model ? ` (${model})` : ""} 投递脱敏基线并等待首包响应${waitSec ? ` · ${waitSec.toFixed(1)}s` : ""}`,
+          `Sending redacted baseline to ${provider || "model gateway"}${model ? ` (${model})` : ""} and awaiting first token${waitSec ? ` · ${waitSec.toFixed(1)}s` : ""}`,
+        ),
     },
     think: {
-      tag: "ACT 04 · 沙盘推演",
-      headline: stepTitle || "握手已建立 · 正在推演高可用变更路径",
+      tag: bi("ACT 04 · 沙盘推演", "ACT 04 · REASONING"),
+      headline:
+        stepTitle ||
+        bi(
+          "握手已建立 · 正在推演高可用变更路径",
+          "Connected · Reasoning HA-safe change path",
+        ),
       sub:
         stepDetail ||
-        "遵循「从库先行、主库守卫、随时可回退」原则逐节点模拟变更影响",
+        bi(
+          "遵循「从库先行、主库守卫、随时可回退」原则逐节点模拟变更影响",
+          "Simulating impact node-by-node: replicas first, primary guarded, always reversible",
+        ),
     },
     synthesize: {
-      tag: "ACT 05 · 方案签章",
-      headline: stepTitle || "编排结构化演练清单并加盖安全校验章",
+      tag: bi("ACT 05 · 方案签章", "ACT 05 · FINALIZING"),
+      headline:
+        stepTitle ||
+        bi(
+          "编排结构化演练清单并加盖安全校验章",
+          "Structuring runbook & stamping safety verification",
+        ),
       sub:
         stepDetail ||
-        "收敛模型推演结论，完成静态安全红线复核与可执行步骤封装",
+        bi(
+          "收敛模型推演结论，完成静态安全红线复核与可执行步骤封装",
+          "Consolidating findings, verifying safety rules & packaging executable steps",
+        ),
     },
     error: {
-      tag: errorBadge || "通道熔断保护",
-      headline: "模型网关握手中断 · 本地安全熔断已介入",
-      sub: "生产与测试数据零改动，您填写的变更诉求与截图已完整保留，可随时重试",
+      tag: errorBadge || bi("通道熔断保护", "CIRCUIT BREAKER"),
+      headline: bi(
+        "模型网关握手中断 · 本地安全熔断已介入",
+        "Gateway handshake interrupted · Safety breaker active",
+      ),
+      sub: bi(
+        "生产与测试数据零改动，您填写的变更诉求与截图已完整保留，可随时重试",
+        "Zero changes made; your inputs and screenshots are preserved for retry",
+      ),
     },
   };
 
@@ -1422,7 +1729,9 @@ function RehearsalStageCartoon({
               <rect x="240" y="21" width="82" height="42" rx="10" className="ct-hub-pod" />
               <circle cx="258" cy="42" r="8" className="ct-pod-ring" />
               <path d="M255 42l2.2 2.2 4.5-4.6" className="ct-pod-check" />
-              <text x="294" y="39" textAnchor="middle" className="ct-pod-title">基线快照</text>
+              <text x="294" y="39" textAnchor="middle" className="ct-pod-title">
+                {bi("基线快照", "Baseline")}
+              </text>
               <text x="294" y="52" textAnchor="middle" className="ct-pod-sub">READY</text>
             </g>
           </svg>
@@ -1446,11 +1755,15 @@ function RehearsalStageCartoon({
             {/* Outgoing Sanitized Safe Pills (Gate -> Right) */}
             <g className="ct-clean-pill p1">
               <rect x="192" y="29" width="76" height="26" rx="6" className="ct-pill-ok" />
-              <text x="230" y="45" textAnchor="middle" className="ct-pill-ok-txt">••• 已脱敏 ✓</text>
+              <text x="230" y="45" textAnchor="middle" className="ct-pill-ok-txt">
+                {bi("••• 已脱敏 ✓", "Redacted ✓")}
+              </text>
             </g>
             <g className="ct-clean-pill p2">
               <rect x="196" y="29" width="72" height="26" rx="6" className="ct-pill-ok" />
-              <text x="232" y="45" textAnchor="middle" className="ct-pill-ok-txt">RO 只读 ✓</text>
+              <text x="232" y="45" textAnchor="middle" className="ct-pill-ok-txt">
+                {bi("RO 只读 ✓", "Read-Only ✓")}
+              </text>
             </g>
 
             {/* Central Security Shield Gate */}
@@ -1481,14 +1794,18 @@ function RehearsalStageCartoon({
             <g className="ct-endpoint left">
               <rect x="12" y="20" width="52" height="48" rx="10" className="ct-hub-pod" />
               <text x="38" y="41" textAnchor="middle" className="ct-pod-title">HUB</text>
-              <text x="38" y="54" textAnchor="middle" className="ct-pod-sub">平台底座</text>
+              <text x="38" y="54" textAnchor="middle" className="ct-pod-sub">
+                {bi("平台底座", "Platform")}
+              </text>
             </g>
 
             {/* Right AI Gateway Station Badge */}
             <g className="ct-endpoint right">
               <rect x="276" y="20" width="52" height="48" rx="10" className="ct-gw-pod" />
               <text x="302" y="41" textAnchor="middle" className="ct-pod-title">AI GW</text>
-              <text x="302" y="54" textAnchor="middle" className="ct-pod-sub">模型网关</text>
+              <text x="302" y="54" textAnchor="middle" className="ct-pod-sub">
+                {bi("模型网关", "Gateway")}
+              </text>
             </g>
 
             {/* Left Articulated Arm & Hand Reaching to Clasp */}
@@ -1535,7 +1852,9 @@ function RehearsalStageCartoon({
             <g className="ct-hs-locked">
               <rect x="12" y="10" width="76" height="20" rx="10" className="ct-pill-ok" />
               <path d="M23 20l2.5 2.5 5-5" className="ct-pod-check" />
-              <text x="55" y="23.5" textAnchor="middle" className="ct-pill-ok-txt">握手已连通</text>
+              <text x="55" y="23.5" textAnchor="middle" className="ct-pill-ok-txt">
+                {bi("握手已连通", "Connected")}
+              </text>
             </g>
 
             {/* HA Cluster Topology Sandbox */}
@@ -1544,19 +1863,25 @@ function RehearsalStageCartoon({
             <g className="ct-sim-node n1">
               <rect x="46" y="42" width="68" height="28" rx="7" className="ct-node-box" />
               <circle cx="58" cy="56" r="3.5" className="ct-led ok" />
-              <text x="86" y="59.5" textAnchor="middle" className="ct-sim-lbl">从库 01</text>
+              <text x="86" y="59.5" textAnchor="middle" className="ct-sim-lbl">
+                {bi("从库 01", "Rep 01")}
+              </text>
             </g>
 
             <g className="ct-sim-node n2">
               <rect x="136" y="42" width="68" height="28" rx="7" className="ct-node-box" />
               <circle cx="148" cy="56" r="3.5" className="ct-led ok" />
-              <text x="176" y="59.5" textAnchor="middle" className="ct-sim-lbl">从库 02</text>
+              <text x="176" y="59.5" textAnchor="middle" className="ct-sim-lbl">
+                {bi("从库 02", "Rep 02")}
+              </text>
             </g>
 
             <g className="ct-sim-node n3">
               <rect x="226" y="40" width="84" height="32" rx="8" className="ct-hub-pod" />
               <circle cx="240" cy="56" r="4" className="ct-led brand" />
-              <text x="275" y="59.5" textAnchor="middle" className="ct-pod-title">主库守卫</text>
+              <text x="275" y="59.5" textAnchor="middle" className="ct-pod-title">
+                {bi("主库守卫", "Primary")}
+              </text>
             </g>
 
             {/* Roaming AI Reasoning Probe */}
@@ -1586,7 +1911,9 @@ function RehearsalStageCartoon({
             <g className="ct-stamp-badge">
               <rect x="224" y="30" width="68" height="32" rx="8" className="ct-pill-ok" />
               <text x="258" y="45" textAnchor="middle" className="ct-pill-ok-txt">SAFE ✓</text>
-              <text x="258" y="56" textAnchor="middle" className="ct-mini-ok">安全校验通过</text>
+              <text x="258" y="56" textAnchor="middle" className="ct-mini-ok">
+                {bi("安全校验通过", "Verified")}
+              </text>
             </g>
           </svg>
         )}
@@ -1595,8 +1922,12 @@ function RehearsalStageCartoon({
           <svg viewBox="0 0 340 84" fill="none" className="rh-cartoon-svg">
             {/* Retracted Endpoints */}
             <rect x="18" y="22" width="66" height="42" rx="9" className="ct-hub-pod" />
-            <text x="51" y="41" textAnchor="middle" className="ct-pod-title">草稿完好</text>
-            <text x="51" y="54" textAnchor="middle" className="ct-mini-ok">已保护 ✓</text>
+            <text x="51" y="41" textAnchor="middle" className="ct-pod-title">
+              {bi("草稿完好", "Draft OK")}
+            </text>
+            <text x="51" y="54" textAnchor="middle" className="ct-mini-ok">
+              {bi("已保护 ✓", "Saved ✓")}
+            </text>
 
             <line x1="88" y1="43" x2="136" y2="43" className="ct-broken-line" />
             <line x1="204" y1="43" x2="252" y2="43" className="ct-broken-line" />
@@ -1610,8 +1941,12 @@ function RehearsalStageCartoon({
             <path d="M170 34v10M170 49.5h.01" className="ct-err-bang" />
 
             <rect x="256" y="22" width="66" height="42" rx="9" className="ct-err-pod" />
-            <text x="289" y="41" textAnchor="middle" className="ct-err-pod-title">AI 网关</text>
-            <text x="289" y="54" textAnchor="middle" className="ct-err-pod-sub">响应受阻</text>
+            <text x="289" y="41" textAnchor="middle" className="ct-err-pod-title">
+              {bi("AI 网关", "AI GW")}
+            </text>
+            <text x="289" y="54" textAnchor="middle" className="ct-err-pod-sub">
+              {bi("响应受阻", "Blocked")}
+            </text>
           </svg>
         )}
       </div>
@@ -1953,6 +2288,7 @@ function RehearsalAIProcess({
   onRetry?: () => void;
   onDismiss?: () => void;
 }) {
+  useLang();
   const [open, setOpen] = useState(defaultOpen || Boolean(live));
   const [rawDiagOpen, setRawDiagOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
@@ -2160,14 +2496,20 @@ function RehearsalAIProcess({
                 <Spark size={14} rainbow />
               </span>
             )}
-            <b>{hasError ? "AI 推演通道受阻" : live.title}</b>
+            <b>{hasError ? bi("AI 推演通道受阻", "AI Pipeline Interrupted") : live.title}</b>
             {steps.length > 0 && (
               <span
                 className={`rh-ai-stage-pill num ${hasError ? "is-error" : ""}`}
               >
                 {hasError
-                  ? `中断于阶段 ${stageHumanIdx}/${steps.length}`
-                  : `阶段 ${stageHumanIdx}/${steps.length}`}
+                  ? bi(
+                      `中断于阶段 ${stageHumanIdx}/${steps.length}`,
+                      `Stopped at ${stageHumanIdx}/${steps.length}`,
+                    )
+                  : bi(
+                      `阶段 ${stageHumanIdx}/${steps.length}`,
+                      `Stage ${stageHumanIdx}/${steps.length}`,
+                    )}
               </span>
             )}
             {(live.provider || live.model) && (
@@ -2188,14 +2530,19 @@ function RehearsalAIProcess({
                     <span className="rh-ai-chip-sep" aria-hidden>
                       ·
                     </span>
-                    <span className="rh-ai-chip-fb">备用节点</span>
+                    <span className="rh-ai-chip-fb">
+                      {bi("备用节点", "Fallback")}
+                    </span>
                   </>
                 )}
               </span>
             )}
             {live.chars > 0 && showThinkingConsole && (
               <span className="rh-ai-chip num">
-                已输出 {live.chars.toLocaleString("en-US")} 字
+                {bi(
+                  `已输出 ${live.chars.toLocaleString("en-US")} 字`,
+                  `${live.chars.toLocaleString("en-US")} chars`,
+                )}
               </span>
             )}
           </div>
@@ -2208,10 +2555,10 @@ function RehearsalAIProcess({
                 type="button"
                 className="rh-ai-stop"
                 onClick={onAbort}
-                title="停止当前生成"
+                title={bi("停止当前生成", "Stop generation")}
               >
                 <IconRecordStop />
-                <span>停止</span>
+                <span>{bi("停止", "Stop")}</span>
               </button>
             )}
             {hasError && onDismiss && (
@@ -2219,7 +2566,7 @@ function RehearsalAIProcess({
                 type="button"
                 className="rh-ai-dismiss-top"
                 onClick={onDismiss}
-                title="收起提示"
+                title={bi("收起提示", "Dismiss")}
               >
                 <IconClose />
               </button>
@@ -2271,7 +2618,10 @@ function RehearsalAIProcess({
                   const displayDetail =
                     vStatus === "pending"
                       ? hasError
-                        ? "因前序模型连接受阻，本环节未执行"
+                        ? bi(
+                            "因前序模型连接受阻，本环节未执行",
+                            "Skipped due to upstream connection failure",
+                          )
                         : pendingHintForStep(st)
                       : st.detail || "";
 
@@ -2313,16 +2663,19 @@ function RehearsalAIProcess({
                             {vStatus === "done"
                               ? fmtStepDuration(st.ms)
                               : vStatus === "error"
-                                ? "连接受阻"
+                                ? bi("连接受阻", "Blocked")
                                 : vStatus === "warn"
-                                  ? "需留意"
+                                  ? bi("需留意", "Warning")
                                   : vStatus === "running"
                                     ? st.id === "connect-model"
-                                      ? `握手 ${stepWaitSec.toFixed(1)}s`
-                                      : "进行中"
+                                      ? bi(
+                                          `握手 ${stepWaitSec.toFixed(1)}s`,
+                                          `Handshake ${stepWaitSec.toFixed(1)}s`,
+                                        )
+                                      : bi("进行中", "Running")
                                     : hasError
-                                      ? "已中止"
-                                      : "待执行"}
+                                      ? bi("已中止", "Aborted")
+                                      : bi("待执行", "Pending")}
                           </span>
                         </div>
                         {displayDetail && (
@@ -2366,7 +2719,7 @@ function RehearsalAIProcess({
                   <div className="rh-stage-live-head">
                     <span className="rh-stage-live-k">
                       <span className="rh-stage-live-dot" aria-hidden />
-                      <span>通道实时动态</span>
+                      <span>{bi("通道实时动态", "Live Channel Status")}</span>
                     </span>
                     {(live.provider || live.model) && (
                       <span className="rh-stage-live-chan">
@@ -2385,12 +2738,18 @@ function RehearsalAIProcess({
                   <p className="rh-stage-live-msg">
                     {live.phase ||
                       currentStep?.detail ||
-                      "正在准备集群架构上下文并建立流式推演通道…"}
+                      bi(
+                        "正在准备集群架构上下文并建立流式推演通道…",
+                        "Preparing cluster architecture context & opening AI stream…",
+                      )}
                   </p>
                   <Smooth>
                     {isSlowHandshake && (
                       <div className="rh-pstep-slow">
-                        已等待 {Math.floor(stepWaitSec)}s 暂未收到正文首字（开启深度思考或中转网关自动重试上游渠道时，首包等待 20～90s 属正常现象；若使用中转网关调用 Claude 等非 OpenAI 模型，建议在「设置 → AI」将接口方式设为 Chat Completions 以直连流式输出）。
+                        {bi(
+                          `已等待 ${Math.floor(stepWaitSec)}s 暂未收到正文首字（开启深度思考或中转网关自动重试上游渠道时，首包等待 20～90s 属正常现象；若使用中转网关调用 Claude 等非 OpenAI 模型，建议在「设置 → AI」将接口方式设为 Chat Completions 以直连流式输出）。`,
+                          `Waiting ${Math.floor(stepWaitSec)}s for first token (20–90s is normal with deep reasoning or proxy retries; for non-OpenAI models via proxy gateways, try setting API mode to Chat Completions in Settings → AI).`,
+                        )}
                       </div>
                     )}
                   </Smooth>
@@ -2410,7 +2769,12 @@ function RehearsalAIProcess({
                       strokeLinejoin="round"
                     />
                   </svg>
-                  <span>自动剥离口令与私钥 · 仅投递架构拓扑与非敏感参数</span>
+                  <span>
+                    {bi(
+                      "自动剥离口令与私钥 · 仅投递架构拓扑与非敏感参数",
+                      "Passwords & keys scrubbed · Topology & non-sensitive params only",
+                    )}
+                  </span>
                 </div>
               </div>
             )}
@@ -2422,7 +2786,10 @@ function RehearsalAIProcess({
                     <span className="rh-ai-err-tag">{errGuide.badge}</span>
                     {diag?.fallback_used && (
                       <span className="rh-ai-err-fb">
-                        已尝试兼容回退 {diag.fallback_used}
+                        {bi(
+                          `已尝试兼容回退 ${diag.fallback_used}`,
+                          `Fallback tried: ${diag.fallback_used}`,
+                        )}
                       </span>
                     )}
                   </div>
@@ -2430,10 +2797,13 @@ function RehearsalAIProcess({
                     type="button"
                     className="rh-err-copy-btn"
                     onClick={() => void copy(formatDiagReport(live, diag))}
-                    title="复制完整脱敏诊断 JSON"
+                    title={bi(
+                      "复制完整脱敏诊断 JSON",
+                      "Copy full redacted diagnostic JSON",
+                    )}
                   >
                     <IconCopy />
-                    <span>复制完整诊断</span>
+                    <span>{bi("复制完整诊断", "Copy Diagnostics")}</span>
                   </button>
                 </div>
 
@@ -2451,7 +2821,7 @@ function RehearsalAIProcess({
                   <dl className="rh-err-telemetry">
                     {diag.endpoint && (
                       <div className="rh-err-kv is-wide">
-                        <dt>协议端点</dt>
+                        <dt>{bi("协议端点", "Endpoint")}</dt>
                         <dd className="mono">{diag.endpoint}</dd>
                       </div>
                     )}
@@ -2459,11 +2829,11 @@ function RehearsalAIProcess({
                       diag.upstream_status ||
                       diag.reason_code) && (
                       <div className="rh-err-kv">
-                        <dt>HTTP 状态</dt>
+                        <dt>{bi("HTTP 状态", "HTTP Status")}</dt>
                         <dd className="num">
                           {diag.http_status && diag.http_status > 0
                             ? `HTTP ${diag.http_status}`
-                            : "网络层中断"}
+                            : bi("网络层中断", "Network error")}
                           {diag.upstream_status
                             ? ` · ${diag.upstream_status}`
                             : ""}
@@ -2472,29 +2842,33 @@ function RehearsalAIProcess({
                     )}
                     {Boolean(diag.ms && diag.ms > 0) && (
                       <div className="rh-err-kv">
-                        <dt>耗时</dt>
+                        <dt>{bi("耗时", "Duration")}</dt>
                         <dd className="num">{fmtStepDuration(diag.ms)}</dd>
                       </div>
                     )}
                     {hasTokens && (
                       <div className="rh-err-kv">
-                        <dt>Token 计量</dt>
+                        <dt>{bi("Token 计量", "Tokens")}</dt>
                         <dd className="num">
-                          输入 {(diag.in_tokens ?? 0).toLocaleString("en-US")} · 缓存{" "}
-                          {(diag.cached_tokens ?? 0).toLocaleString("en-US")} · 输出{" "}
-                          {(diag.out_tokens ?? 0).toLocaleString("en-US")}
+                          {bi(
+                            `输入 ${(diag.in_tokens ?? 0).toLocaleString("en-US")} · 缓存 ${(diag.cached_tokens ?? 0).toLocaleString("en-US")} · 输出 ${(diag.out_tokens ?? 0).toLocaleString("en-US")}`,
+                            `In ${(diag.in_tokens ?? 0).toLocaleString("en-US")} · Cached ${(diag.cached_tokens ?? 0).toLocaleString("en-US")} · Out ${(diag.out_tokens ?? 0).toLocaleString("en-US")}`,
+                          )}
                         </dd>
                       </div>
                     )}
                     {diag.response_id && (
                       <div className="rh-err-kv">
-                        <dt>上游响应 ID</dt>
+                        <dt>{bi("上游响应 ID", "Upstream ID")}</dt>
                         <dd>
                           <button
                             type="button"
                             className="rh-err-copy-id mono"
                             onClick={() => void copy(diag.response_id!)}
-                            title="点击复制上游响应 ID"
+                            title={bi(
+                              "点击复制上游响应 ID",
+                              "Click to copy upstream response ID",
+                            )}
                           >
                             <span>{diag.response_id}</span>
                             <IconCopy />
@@ -2504,7 +2878,7 @@ function RehearsalAIProcess({
                     )}
                     {hasSSE && (
                       <div className="rh-err-kv is-wide">
-                        <dt>SSE 事件链</dt>
+                        <dt>{bi("SSE 事件链", "SSE Events")}</dt>
                         <dd
                           className={
                             diag.sse_events && diag.sse_events.length > 0
@@ -2514,7 +2888,7 @@ function RehearsalAIProcess({
                         >
                           {diag.sse_events && diag.sse_events.length > 0
                             ? diag.sse_events.join(" → ")
-                            : "无数据帧"}
+                            : bi("无数据帧", "No data frames")}
                           {diag.keepalives
                             ? ` (${diag.keepalives} keepalive)`
                             : ""}
@@ -2527,7 +2901,10 @@ function RehearsalAIProcess({
                 {hasAttempts && diag?.attempts && (
                   <div className="rh-err-attempts">
                     <span className="rh-err-sec-k">
-                      自动重试与回退链路（{diag.attempts.length} 次尝试）
+                      {bi(
+                        `自动重试与回退链路（${diag.attempts.length} 次尝试）`,
+                        `Retry & fallback chain (${diag.attempts.length} attempts)`,
+                      )}
                     </span>
                     <ol className="rh-err-attempt-list">
                       {diag.attempts.map((att, aIdx) => {
@@ -2535,17 +2912,24 @@ function RehearsalAIProcess({
                         const httpLabel =
                           att.http_status && att.http_status > 0
                             ? `HTTP ${att.http_status}`
-                            : "网络中断";
+                            : bi("网络中断", "Network error");
                         const isBad = !att.http_status || att.http_status >= 400;
                         const hasAttTok =
                           typeof att.in_tokens === "number" ||
                           typeof att.out_tokens === "number";
                         const tokPart = hasAttTok
-                          ? `输入 ${(att.in_tokens ?? 0).toLocaleString("en-US")}${
-                              att.cached_tokens
-                                ? ` (缓存 ${att.cached_tokens.toLocaleString("en-US")})`
-                                : ""
-                            } / 输出 ${(att.out_tokens ?? 0).toLocaleString("en-US")}`
+                          ? bi(
+                              `输入 ${(att.in_tokens ?? 0).toLocaleString("en-US")}${
+                                att.cached_tokens
+                                  ? ` (缓存 ${att.cached_tokens.toLocaleString("en-US")})`
+                                  : ""
+                              } / 输出 ${(att.out_tokens ?? 0).toLocaleString("en-US")}`,
+                              `In ${(att.in_tokens ?? 0).toLocaleString("en-US")}${
+                                att.cached_tokens
+                                  ? ` (${att.cached_tokens.toLocaleString("en-US")} cached)`
+                                  : ""
+                              } / Out ${(att.out_tokens ?? 0).toLocaleString("en-US")}`,
+                            )
                           : "";
                         return (
                           <li
@@ -2586,14 +2970,16 @@ function RehearsalAIProcess({
                         {diag.request_summary && (
                           <div className="rh-err-raw-pane">
                             <div className="rh-err-raw-head">
-                              <span>请求参数摘要（已脱敏）</span>
+                              <span>
+                                {bi("请求参数摘要（已脱敏）", "Request Summary (Redacted)")}
+                              </span>
                               <button
                                 type="button"
                                 className="rh-err-raw-mini-copy"
                                 onClick={() => void copy(diag.request_summary!)}
                               >
                                 <IconCopy />
-                                <span>复制</span>
+                                <span>{bi("复制", "Copy")}</span>
                               </button>
                             </div>
                             <pre className="rh-err-pre mono">
@@ -2604,14 +2990,16 @@ function RehearsalAIProcess({
                         {diag.response_raw && (
                           <div className="rh-err-raw-pane">
                             <div className="rh-err-raw-head">
-                              <span>网关原始响应 / SSE 报文</span>
+                              <span>
+                                {bi("网关原始响应 / SSE 报文", "Raw Gateway Response / SSE")}
+                              </span>
                               <button
                                 type="button"
                                 className="rh-err-raw-mini-copy"
                                 onClick={() => void copy(diag.response_raw!)}
                               >
                                 <IconCopy />
-                                <span>复制</span>
+                                <span>{bi("复制", "Copy")}</span>
                               </button>
                             </div>
                             <pre className="rh-err-pre mono">
@@ -2632,7 +3020,7 @@ function RehearsalAIProcess({
                       icon={<IconRefresh />}
                       onClick={onRetry}
                     >
-                      重新发起
+                      {bi("重新发起", "Retry")}
                     </Button>
                   )}
                   {errGuide.suggestSettings && can("ai.settings|ai.usage") && (
@@ -2642,14 +3030,14 @@ function RehearsalAIProcess({
                         type="secondary"
                         onClick={() => go({ name: "settings", id: "ai" })}
                       >
-                        前往 AI 设置切换模型
+                        {bi("前往 AI 设置切换模型", "Switch Model in AI Settings")}
                       </Button>
                       <Button
                         size="small"
                         type="secondary"
                         onClick={() => go({ name: "settings", id: "ai-usage" })}
                       >
-                        查看 AI 用量明细
+                        {bi("查看 AI 用量明细", "View AI Usage")}
                       </Button>
                     </>
                   )}
@@ -2662,15 +3050,15 @@ function RehearsalAIProcess({
                     >
                       <span>
                         {rawDiagOpen
-                          ? "收起网关原始诊断报文"
-                          : "查看网关原始诊断报文"}
+                          ? bi("收起网关原始诊断报文", "Hide Raw Gateway Diagnostics")
+                          : bi("查看网关原始诊断报文", "View Raw Gateway Diagnostics")}
                       </span>
                       {rawDiagOpen ? <IconUp /> : <IconDown />}
                     </button>
                   )}
                   {onDismiss && (
                     <Button size="small" type="text" onClick={onDismiss}>
-                      收起提示
+                      {bi("收起提示", "Dismiss")}
                     </Button>
                   )}
                 </div>
@@ -2682,10 +3070,12 @@ function RehearsalAIProcess({
                 <div className="rh-ai-think-label">
                   <span className="rh-ai-think-label-left">
                     <IconBulb />
-                    <span>AI 实时思考推演</span>
+                    <span>{bi("AI 实时思考推演", "AI Live Reasoning")}</span>
                   </span>
                   {activePlayIdx >= 4 && (
-                    <span className="rh-ai-think-done-tag">推演已收敛</span>
+                    <span className="rh-ai-think-done-tag">
+                      {bi("推演已收敛", "Converged")}
+                    </span>
                   )}
                 </div>
                 <div className="rh-ai-think-box" ref={thinkBoxRef}>
@@ -2696,7 +3086,10 @@ function RehearsalAIProcess({
                     />
                   ) : (
                     <p className="rh-ai-think-wait">
-                      已接收模型流式通道，正在解码架构风险与变更边界推演…
+                      {bi(
+                        "已接收模型流式通道，正在解码架构风险与变更边界推演…",
+                        "Stream connected; decoding architecture risks & boundary analysis…",
+                      )}
                       <span className="rh-ai-caret" aria-hidden />
                     </p>
                   )}
@@ -2814,15 +3207,15 @@ function RehearsalAIProcess({
         className={`rh-ai-meta-item ${steps.every((s) => s.ok) ? "is-ok" : ""}`}
       >
         {steps.every((s) => s.ok)
-          ? `${steps.length} 步通过`
-          : `${steps.length} 步记录`}
+          ? bi(`${steps.length} 步通过`, `${steps.length} passed`)
+          : bi(`${steps.length} 步记录`, `${steps.length} steps`)}
       </span>,
     );
   }
   if (dur) {
     metaItems.push(
       <span key="dur" className="rh-ai-meta-item num">
-        耗时 {dur}
+        {bi(`耗时 ${dur}`, dur)}
       </span>,
     );
   }
@@ -2839,11 +3232,11 @@ function RehearsalAIProcess({
       <div className="rh-ai-think-label">
         <span className="rh-ai-think-label-left">
           <IconBulb />
-          <span>AI 架构研判与思考路径</span>
+          <span>{bi("AI 架构研判与思考路径", "AI Reasoning & Risk Assessment")}</span>
         </span>
         {thinkStepCount >= 2 && (
           <span className="rh-ai-think-count num">
-            {thinkStepCount} 项研判要点
+            {bi(`${thinkStepCount} 项研判要点`, `${thinkStepCount} key points`)}
           </span>
         )}
       </div>
@@ -2885,17 +3278,20 @@ function RehearsalAIProcess({
           {fallbackUsed && (
             <span
               className="rh-ai-chip is-fallback"
-              title={`上游 Responses 协议返回空内容或不兼容，已自动降级完成调用（${fallbackUsed}）`}
+              title={bi(
+                `上游 Responses 协议返回空内容或不兼容，已自动降级完成调用（${fallbackUsed}）`,
+                `Upstream Responses API returned empty or unsupported output; fell back automatically (${fallbackUsed})`,
+              )}
             >
               {fallbackUsed.includes("chat")
-                ? "已自动回退兼容 Chat Completions"
-                : `已自动兼容回退 (${fallbackUsed})`}
+                ? bi("已自动回退兼容 Chat Completions", "Fallback to Chat Completions")
+                : bi(`已自动兼容回退 (${fallbackUsed})`, `Auto fallback (${fallbackUsed})`)}
             </span>
           )}
         </div>
         <div className="rh-ai-head-right">
           <span className="rh-ai-toggle-txt">
-            {open ? "收起推演" : "查看完整推演"}
+            {open ? bi("收起推演", "Collapse") : bi("查看完整推演", "View reasoning")}
           </span>
           {open ? <IconUp /> : <IconDown />}
         </div>
@@ -2963,6 +3359,7 @@ function ImageLightbox({
   onClose: () => void;
   onIndexChange: (next: number) => void;
 }) {
+  useLang();
   if (index === null || !items[index]) return null;
   const cur = items[index];
   return (
@@ -2991,14 +3388,14 @@ function ImageLightbox({
               disabled={index <= 0}
               onClick={() => onIndexChange(index - 1)}
             >
-              上一张
+              {bi("上一张", "Previous")}
             </Button>
             <Button
               size="small"
               disabled={index >= items.length - 1}
               onClick={() => onIndexChange(index + 1)}
             >
-              下一张
+              {bi("下一张", "Next")}
             </Button>
           </div>
         )}
@@ -3014,22 +3411,28 @@ function DraftImageStrip({
   images: DraftImage[];
   onRemove: (id: string) => void;
 }) {
+  useLang();
   const [previewIdx, setPreviewIdx] = useState<number | null>(null);
   if (!images.length) return null;
   const lbItems = images.map((im, idx) => ({
     src: im.dataUrl,
-    label: `${im.name}（${im.sizeKB} KB）` || `待发送截图 ${idx + 1}`,
+    label: im.name
+      ? `${im.name} (${im.sizeKB} KB)`
+      : bi(`待发送截图 ${idx + 1}`, `Draft screenshot ${idx + 1}`),
   }));
   return (
     <>
-      <div className="rh-img-strip" aria-label="已粘贴或选择的截图">
+      <div
+        className="rh-img-strip"
+        aria-label={bi("已粘贴或选择的截图", "Attached screenshots")}
+      >
         {images.map((im, idx) => (
           <div key={im.id} className="rh-img-thumb">
             <button
               type="button"
               className="rh-img-open"
               onClick={() => setPreviewIdx(idx)}
-              title="点击放大查看截图"
+              title={bi("点击放大查看截图", "Click to zoom")}
             >
               <img src={im.dataUrl} alt={im.name} />
             </button>
@@ -3040,7 +3443,7 @@ function DraftImageStrip({
             <button
               type="button"
               className="rh-img-rm"
-              aria-label={`移除 ${im.name}`}
+              aria-label={bi(`移除 ${im.name}`, `Remove ${im.name}`)}
               onClick={() => onRemove(im.id)}
             >
               <IconClose />
@@ -3062,24 +3465,26 @@ function SavedImageGallery({
   clusterId,
   rehearsalId,
   names,
-  label = "现场截图",
+  label,
 }: {
   clusterId: string;
   rehearsalId: string;
   names?: string[];
   label?: string;
 }) {
+  useLang();
   const [previewIdx, setPreviewIdx] = useState<number | null>(null);
   if (!names || names.length === 0) return null;
+  const heading = label ?? bi("现场截图", "Screenshots");
   const items = names.map((n, i) => ({
     src: rehearsalImgUrl(clusterId, rehearsalId, n),
-    label: `${label} ${i + 1}（${n}）`,
+    label: `${heading} ${i + 1} (${n})`,
   }));
   return (
     <>
       <div className="rh-saved-imgs">
         <span className="rh-saved-imgs-k">
-          <IconImage /> {label}（{names.length}）
+          <IconImage /> {heading} ({names.length})
         </span>
         <div className="rh-img-strip">
           {items.map((it, idx) => (
@@ -3088,12 +3493,14 @@ function SavedImageGallery({
                 type="button"
                 className="rh-img-open"
                 onClick={() => setPreviewIdx(idx)}
-                title="点击放大查看截图"
+                title={bi("点击放大查看截图", "Click to zoom")}
               >
                 <img src={it.src} alt={it.label} loading="lazy" />
               </button>
               <span className="rh-img-caption">
-                <span className="rh-img-name">截图 {idx + 1}</span>
+                <span className="rh-img-name">
+                  {bi(`截图 ${idx + 1}`, `Image ${idx + 1}`)}
+                </span>
               </span>
             </div>
           ))}
@@ -3122,6 +3529,7 @@ function DeliveryBaselineAside({
   onClose: () => void;
   onReturnToDelivery: (tab?: "overview" | "config" | "plans" | "docs") => void;
 }) {
+  const lang = useLang();
   const jobPath = c.current
     ? `/api/jobs/${encodeURIComponent(c.current)}`
     : "";
@@ -3178,9 +3586,11 @@ function DeliveryBaselineAside({
     return hosts.map((h) => ({
       name: h.name,
       ip: h.ip,
-      roles: (roleByHost.get(h.name) || []).join(" / ") || "集群节点",
+      roles:
+        (roleByHost.get(h.name) || []).join(" / ") ||
+        bi("集群节点", "Cluster Node"),
     }));
-  }, [detail]);
+  }, [detail, lang]);
 
   const endpoints = useMemo(() => {
     const out: { label: string; addr: string }[] = [];
@@ -3212,10 +3622,13 @@ function DeliveryBaselineAside({
   }, [detail]);
 
   return (
-    <aside className="rh-delivery-aside" aria-label="集群初始交付基线">
+    <aside
+      className="rh-delivery-aside"
+      aria-label={bi("集群初始交付基线", "Cluster Initial Delivery Baseline")}
+    >
       <div className="rh-aside-head">
         <div>
-          <b>当前交付基线</b>
+          <b>{bi("当前交付基线", "Delivery Baseline")}</b>
           <span className="faint small">
             {c.app_name} {c.version}
             {c.platform ? ` · ${platformShort(c.platform)}` : ""}
@@ -3225,8 +3638,8 @@ function DeliveryBaselineAside({
           type="button"
           className="rh-aside-close"
           onClick={onClose}
-          aria-label="收起交付基线面板"
-          title="收起面板 (Esc)"
+          aria-label={bi("收起交付基线面板", "Close delivery baseline panel")}
+          title={bi("收起面板 (Esc)", "Close panel (Esc)")}
         >
           <IconClose />
         </button>
@@ -3234,13 +3647,22 @@ function DeliveryBaselineAside({
 
       <div className="rh-aside-scroll">
         <div className="rh-aside-sec">
-          <SchemeInfo scheme={c.scheme} detail label="当前部署架构" />
+          <SchemeInfo
+            scheme={c.scheme}
+            detail
+            label={bi("当前部署架构", "Current deployment architecture")}
+          />
         </div>
 
         <div className="rh-aside-sec">
           <div className="rh-aside-sec-title">
-            <span>初始节点与角色拓扑</span>
-            <span className="num faint">{hostRows.length || c.hosts} 台</span>
+            <span>{bi("初始节点与角色拓扑", "Initial Nodes & Roles")}</span>
+            <span className="num faint">
+              {bi(
+                `${hostRows.length || c.hosts} 台`,
+                `${hostRows.length || c.hosts} nodes`,
+              )}
+            </span>
           </div>
           {loading && hostRows.length === 0 ? (
             <Skeleton animation text={{ rows: 3 }} />
@@ -3257,7 +3679,7 @@ function DeliveryBaselineAside({
                       type="button"
                       className="rh-aside-ip mono"
                       onClick={() => void copy(h.ip)}
-                      title="点击复制节点 IP"
+                      title={bi("点击复制节点 IP", "Click to copy node IP")}
                     >
                       <span>{h.ip}</span>
                       <IconCopy />
@@ -3267,14 +3689,19 @@ function DeliveryBaselineAside({
               ))}
             </ul>
           ) : (
-            <p className="muted small">共 {c.hosts} 台节点（点击下方可查看完整配置）</p>
+            <p className="muted small">
+              {bi(
+                `共 ${c.hosts} 台节点（点击下方可查看完整配置）`,
+                `${c.hosts} nodes total (view full config below)`,
+              )}
+            </p>
           )}
         </div>
 
         {endpoints.length > 0 && (
           <div className="rh-aside-sec">
             <div className="rh-aside-sec-title">
-              <span>服务端口与入口</span>
+              <span>{bi("服务端口与入口", "Service Ports & Endpoints")}</span>
             </div>
             <div className="rh-aside-kv">
               {endpoints.map((ep) => (
@@ -3290,7 +3717,7 @@ function DeliveryBaselineAside({
         {customParams.length > 0 && (
           <div className="rh-aside-sec">
             <div className="rh-aside-sec-title">
-              <span>交付关键参数</span>
+              <span>{bi("交付关键参数", "Key Delivery Parameters")}</span>
             </div>
             <div className="rh-aside-kv">
               {customParams.map((p) => (
@@ -3305,32 +3732,32 @@ function DeliveryBaselineAside({
 
         <div className="rh-aside-sec">
           <div className="rh-aside-sec-title">
-            <span>跳转集群页面</span>
+            <span>{bi("跳转集群页面", "Cluster Navigation")}</span>
           </div>
           <div className="rh-aside-nav">
             <button
               type="button"
               onClick={() => onReturnToDelivery("overview")}
             >
-              集群概览 <IconRight />
+              {bi("集群概览", "Cluster Overview")} <IconRight />
             </button>
             <button
               type="button"
               onClick={() => onReturnToDelivery("config")}
             >
-              部署配置 <IconRight />
+              {bi("部署配置", "Deploy Config")} <IconRight />
             </button>
             <button
               type="button"
               onClick={() => onReturnToDelivery("plans")}
             >
-              查看部署手册 <IconRight />
+              {bi("查看部署手册", "Deployment Runbook")} <IconRight />
             </button>
             <button
               type="button"
               onClick={() => onReturnToDelivery("docs")}
             >
-              集群文档 <IconRight />
+              {bi("集群文档", "Cluster Docs")} <IconRight />
             </button>
           </div>
         </div>
@@ -3342,8 +3769,15 @@ function DeliveryBaselineAside({
 /* ---------- Bespoke Business SVG Visuals ---------- */
 
 function RehearsalPipelineArt() {
+  useLang();
   return (
-    <div className="rh-pipe" aria-label="变更演练四阶段流程：边界对齐、只读探针、测试演练、生产 SOP">
+    <div
+      className="rh-pipe"
+      aria-label={bi(
+        "变更演练四阶段流程：边界对齐、只读探针、测试演练、生产 SOP",
+        "4-stage change rehearsal flow: Scope Alignment, Read-Only Probe, Test Rehearsal, Production SOP",
+      )}
+    >
       <div className="rh-pipe-node">
         <span className="rh-pipe-ic">
           <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden>
@@ -3358,9 +3792,10 @@ function RehearsalPipelineArt() {
         </span>
         <div>
           <b>
-            <i className="num">01</i>边界对齐
+            <i className="num">01</i>
+            {bi("边界对齐", "Scope Alignment")}
           </b>
-          <small>目标与窗口</small>
+          <small>{bi("目标与窗口", "Goal & window")}</small>
         </div>
       </div>
       <svg className="rh-pipe-wire" viewBox="0 0 36 12" fill="none" aria-hidden>
@@ -3392,9 +3827,10 @@ function RehearsalPipelineArt() {
         </span>
         <div>
           <b>
-            <i className="num">02</i>只读探针
+            <i className="num">02</i>
+            {bi("只读探针", "Read-Only Probe")}
           </b>
-          <small>识别现场漂移</small>
+          <small>{bi("识别现场漂移", "Detect live drift")}</small>
         </div>
       </div>
       <svg className="rh-pipe-wire" viewBox="0 0 36 12" fill="none" aria-hidden>
@@ -3429,9 +3865,10 @@ function RehearsalPipelineArt() {
         </span>
         <div>
           <b>
-            <i className="num">03</i>测试演练
+            <i className="num">03</i>
+            {bi("测试演练", "Test Rehearsal")}
           </b>
-          <small>逐步实测打磨</small>
+          <small>{bi("逐步实测打磨", "Verify & refine")}</small>
         </div>
       </div>
       <svg className="rh-pipe-wire" viewBox="0 0 36 12" fill="none" aria-hidden>
@@ -3461,9 +3898,10 @@ function RehearsalPipelineArt() {
         </span>
         <div>
           <b>
-            <i className="num">04</i>生产 SOP
+            <i className="num">04</i>
+            {bi("生产 SOP", "Production SOP")}
           </b>
-          <small>导出 Word 审批</small>
+          <small>{bi("导出 Word 审批", "Export Word SOP")}</small>
         </div>
       </div>
     </div>
@@ -3571,50 +4009,65 @@ function PresetGlyph({ kind }: { kind: RehearsalPresetKind }) {
 /* ---------- Presets helper ---------- */
 
 export function buildPresets(c: ClusterView) {
-  const hostPhrase = c.hosts > 0 ? `现有 ${c.hosts} 台节点` : "现有集群拓扑";
+  const hostPhrase =
+    c.hosts > 0
+      ? bi(`现有 ${c.hosts} 台节点`, `the existing ${c.hosts} nodes`)
+      : bi("现有集群拓扑", "the current cluster topology");
   return [
     {
       kind: "upgrade" as RehearsalPresetKind,
-      label: "版本平滑升级",
-      sub: "从库先行 · 最小闪断",
-      title: `${c.app_name} 小版本平滑升级`,
-      goal: `将集群 ${c.id} 的 ${c.app_name}（基线版本 ${c.version}）平滑升级到目标小版本，优先从节点滚动先行、最后无损切主，控制业务闪断在秒级以内。`,
+      label: bi("版本平滑升级", "Rolling Upgrade"),
+      sub: bi("从库先行 · 最小闪断", "Replicas first · Minimal blip"),
+      title: bi(`${c.app_name} 小版本平滑升级`, `${c.app_name} Minor Rolling Upgrade`),
+      goal: bi(
+        `将集群 ${c.id} 的 ${c.app_name}（基线版本 ${c.version}）平滑升级到目标小版本，优先从节点滚动先行、最后无损切主，控制业务闪断在秒级以内。`,
+        `Perform a rolling minor upgrade of ${c.app_name} on cluster ${c.id} (baseline ${c.version}) to the target patch version: upgrade replicas first, then switchover primary cleanly within sub-second disruption.`,
+      ),
     },
     {
       kind: "scale" as RehearsalPresetKind,
-      label: "在线节点扩缩",
-      sub: "接入复制 · 读写不断",
-      title: `${c.app_name} 在线扩容备节点`,
-      goal: `在${hostPhrase}基础上在线新增 1 台只读备节点并接入复制拓扑，全程不中断主节点读写服务。`,
+      label: bi("在线节点扩缩", "Online Scaling"),
+      sub: bi("接入复制 · 读写不断", "Join replication · Zero downtime"),
+      title: bi(`${c.app_name} 在线扩容备节点`, `${c.app_name} Online Replica Scale-Out`),
+      goal: bi(
+        `在${hostPhrase}基础上在线新增 1 台只读备节点并接入复制拓扑，全程不中断主节点读写服务。`,
+        `Add 1 read-only replica node on top of ${hostPhrase} and join it to the replication topology without interrupting primary read/write traffic.`,
+      ),
     },
     {
       kind: "tune" as RehearsalPresetKind,
-      label: "运行参数调优",
-      sub: "核对现值 · 热更或重启",
-      title: `${c.app_name} 关键参数调优`,
-      goal: `调整集群 ${c.id} 关键连接或内存参数，先核对现场当前生效值，明确动态热加载或滚动重启顺序，并准备回退命令。`,
+      label: bi("运行参数调优", "Parameter Tuning"),
+      sub: bi("核对现值 · 热更或重启", "Check live · Reload or restart"),
+      title: bi(`${c.app_name} 关键参数调优`, `${c.app_name} Parameter Tuning`),
+      goal: bi(
+        `调整集群 ${c.id} 关键连接或内存参数，先核对现场当前生效值，明确动态热加载或滚动重启顺序，并准备回退命令。`,
+        `Tune key connection or memory parameters on cluster ${c.id}: verify live active values first, determine hot-reload vs rolling restart order, and prepare rollback commands.`,
+      ),
     },
     {
       kind: "switch" as RehearsalPresetKind,
-      label: "主备切换演练",
-      sub: "计划切主 · 连通验证",
-      title: `${c.app_name} 计划内主备切换演练`,
-      goal: `在维护窗口内对集群 ${c.id} 执行一次计划内主备切换与回切演练，验证业务入口切换耗时并沉淀标准操作手册。`,
+      label: bi("主备切换演练", "Failover Drill"),
+      sub: bi("计划切主 · 连通验证", "Planned switchover · Verify"),
+      title: bi(`${c.app_name} 计划内主备切换演练`, `${c.app_name} Planned Failover Drill`),
+      goal: bi(
+        `在维护窗口内对集群 ${c.id} 执行一次计划内主备切换与回切演练，验证业务入口切换耗时并沉淀标准操作手册。`,
+        `Execute a planned primary/replica switchover and switchback drill on cluster ${c.id} within the maintenance window, verify endpoint switchover time, and produce a standard SOP.`,
+      ),
     },
   ];
 }
 
 function stepSummary(item: ChangeRehearsal) {
   const steps = item.steps || [];
-  if (item.stage === "finalized") return "已定稿 SOP";
+  if (item.stage === "finalized") return bi("已定稿 SOP", "Finalized SOP");
   if (item.stage === "rehearsing" && steps.length > 0) {
     const req = steps.filter((s) => !s.optional && s.phase !== "rollback");
     const done = req.filter(
       (s) => s.status === "passed" || s.status === "skipped",
     ).length;
-    return `演练 ${done}/${req.length}`;
+    return bi(`演练 ${done}/${req.length}`, `Step ${done}/${req.length}`);
   }
-  return STAGE_META[item.stage]?.short || "进行中";
+  return STAGE_META[item.stage]?.short || bi("进行中", "In progress");
 }
 
 /* ---------- Main Cluster Rehearsal Workbench ---------- */
@@ -3639,6 +4092,7 @@ export function ClusterRehearsal({
   onFocusChange?: (v: boolean) => void;
   onListUpdated?: () => void;
 }) {
+  const lang = useLang();
   const listUrl = rehearsalsListPath(c.id);
   const [list, setList] = useState<ChangeRehearsal[] | null>(
     () => initialList ?? cached<ChangeRehearsal[]>(listUrl) ?? null,
@@ -3718,7 +4172,7 @@ export function ClusterRehearsal({
 
   const presets = useMemo(
     () => buildPresets(c),
-    [c.id, c.app_name, c.version, c.hosts],
+    [c.id, c.app_name, c.version, c.hosts, lang],
   );
 
   // Auto-grow launcher textarea height smoothly when populated; clear inline height when empty so CSS spring controls idle/hover expansion
@@ -3810,7 +4264,7 @@ export function ClusterRehearsal({
           );
         }
       } catch (e) {
-        setLoadErr((e as Error).message || "读取失败");
+        setLoadErr((e as Error).message || bi("读取失败", "Failed to load"));
       }
     },
     [c.id, listUrl, rehearsalId, creating],
@@ -3845,13 +4299,21 @@ export function ClusterRehearsal({
     if (!arr.length) return;
     if (effectiveNoVision) {
       Message.warning(
-        "当前所选模型不支持识别图片，请在输入栏底部切换支持看图的模型",
+        bi(
+          "当前所选模型不支持识别图片，请在输入栏底部切换支持看图的模型",
+          "Selected model does not support images; switch to a vision-capable model below",
+        ),
       );
       return;
     }
     const room = MAX_IMAGES - goalImages.length;
     if (room <= 0) {
-      Message.warning(`单次最多附加 ${MAX_IMAGES} 张截图`);
+      Message.warning(
+        bi(
+          `单次最多附加 ${MAX_IMAGES} 张截图`,
+          `Up to ${MAX_IMAGES} screenshots allowed per batch`,
+        ),
+      );
       return;
     }
     const added: DraftImage[] = [];
@@ -3870,11 +4332,17 @@ export function ClusterRehearsal({
   if (c.delivery_mode === "configuration" || !c.head) {
     return (
       <section className="dsec rh-guard">
-        <b>当前集群暂不支持变更演练</b>
+        <b>{bi("当前集群暂不支持变更演练", "Change rehearsal unavailable for this cluster")}</b>
         <p className="muted">
           {c.delivery_mode === "configuration"
-            ? "此记录仅生成配置文件，不代表现场已安装运行的集群。"
-            : "请先完成集群部署并确认运行结果，再基于运行基线发起变更演练。"}
+            ? bi(
+                "此记录仅生成配置文件，不代表现场已安装运行的集群。",
+                "This record only generated config files and does not represent a running cluster.",
+              )
+            : bi(
+                "请先完成集群部署并确认运行结果，再基于运行基线发起变更演练。",
+                "Complete cluster deployment and confirm its run status before launching a change rehearsal.",
+              )}
         </p>
         <div className="row-gap">
           {c.delivery_mode !== "configuration" && (
@@ -3887,7 +4355,7 @@ export function ClusterRehearsal({
                 )
               }
             >
-              查看部署详情
+              {bi("查看部署详情", "View Deployment")}
             </Button>
           )}
           <Button
@@ -3895,7 +4363,7 @@ export function ClusterRehearsal({
               go({ name: "deliveries", id: c.id }, { replace: true })
             }
           >
-            返回集群概览
+            {bi("返回集群概览", "Back to Overview")}
           </Button>
         </div>
       </section>
@@ -3906,10 +4374,10 @@ export function ClusterRehearsal({
     return (
       <section className="dsec rh-state" role="alert">
         <IconExclamationCircle className="bad" />
-        <b>演练记录读取失败</b>
+        <b>{bi("演练记录读取失败", "Failed to load rehearsals")}</b>
         <p className="muted small">{loadErr}</p>
         <Button icon={<IconRefresh />} onClick={() => void loadList(true)}>
-          重试
+          {bi("重试", "Retry")}
         </Button>
       </section>
     );
@@ -3944,8 +4412,14 @@ export function ClusterRehearsal({
     setLiveCreate(
       createInitialLiveState(
         "create",
-        "AI 正在研判变更诉求与集群高可用边界",
-        "正在读取集群基线并建立模型连接…",
+        bi(
+          "AI 正在研判变更诉求与集群高可用边界",
+          "AI is analyzing change goal & HA boundaries",
+        ),
+        bi(
+          "正在读取集群基线并建立模型连接…",
+          "Loading cluster baseline & connecting to AI model…",
+        ),
         pick.current,
       ),
     );
@@ -4011,7 +4485,7 @@ export function ClusterRehearsal({
   const baselineFacts = [
     `${c.app_name} ${c.version}`,
     schemeName(c.scheme),
-    c.hosts > 0 ? `${c.hosts} 台机器` : "",
+    c.hosts > 0 ? bi(`${c.hosts} 台机器`, `${c.hosts} hosts`) : "",
     c.platform ? platformShort(c.platform) : "",
   ].filter(Boolean);
 
@@ -4054,9 +4528,15 @@ export function ClusterRehearsal({
   };
 
   const sessionDroplist = (
-    <div className="rh-sess-menu" role="listbox" aria-label="切换演练记录">
+    <div
+      className="rh-sess-menu"
+      role="listbox"
+      aria-label={bi("切换演练记录", "Switch rehearsal")}
+    >
       <div className="rh-sess-menu-head">
-        <span className="num">演练记录（{list.length}）</span>
+        <span className="num">
+          {bi(`演练记录（${list.length}）`, `Rehearsals (${list.length})`)}
+        </span>
         <button
           type="button"
           className="rh-sess-menu-new"
@@ -4066,7 +4546,7 @@ export function ClusterRehearsal({
             requestAnimationFrame(() => goalRef.current?.focus());
           }}
         >
-          <IconPlus /> 新建演练
+          <IconPlus /> {bi("新建演练", "New Rehearsal")}
         </button>
       </div>
       {showLedgerSearch && (
@@ -4076,14 +4556,14 @@ export function ClusterRehearsal({
             type="search"
             value={ledgerQuery}
             onChange={(e) => setLedgerQuery(e.target.value)}
-            placeholder="搜索演练标题或诉求…"
-            aria-label="搜索演练记录"
+            placeholder={bi("搜索演练标题或诉求…", "Search title or goal…")}
+            aria-label={bi("搜索演练记录", "Search rehearsals")}
           />
           {ledgerQuery && (
             <button
               type="button"
               onClick={() => setLedgerQuery("")}
-              aria-label="清空搜索"
+              aria-label={bi("清空搜索", "Clear search")}
             >
               <IconClose />
             </button>
@@ -4093,7 +4573,7 @@ export function ClusterRehearsal({
       <div className="rh-sess-menu-list">
         {filteredSessions.length === 0 ? (
           <div className="rh-ledger-empty-filter">
-            <span>无匹配演练记录</span>
+            <span>{bi("无匹配演练记录", "No matching rehearsals")}</span>
             <button
               type="button"
               className="link small"
@@ -4102,7 +4582,7 @@ export function ClusterRehearsal({
                 setLedgerFilter("all");
               }}
             >
-              重置
+              {bi("重置", "Reset")}
             </button>
           </div>
         ) : (
@@ -4147,7 +4627,10 @@ export function ClusterRehearsal({
               type="button"
               className="rh-nav-pill back"
               onClick={() => handleReturnToDelivery()}
-              title="收起专注模式，显示左侧交付集群列表与顶部标签"
+              title={bi(
+                "收起专注模式，显示左侧交付集群列表与顶部标签",
+                "Exit focus mode and show cluster list & tabs",
+              )}
             >
               <svg
                 width="14"
@@ -4164,7 +4647,7 @@ export function ClusterRehearsal({
                   strokeLinejoin="round"
                 />
               </svg>
-              <span>交付视图</span>
+              <span>{bi("交付视图", "Delivery View")}</span>
             </button>
           ) : (
             <button
@@ -4177,10 +4660,13 @@ export function ClusterRehearsal({
                   .querySelector(".md-detail")
                   ?.scrollTo({ top: 0, behavior: "smooth" });
               }}
-              title="隐藏周围交付列表，展开演练记录栏与专注工作台"
+              title={bi(
+                "隐藏周围交付列表，展开演练记录栏与专注工作台",
+                "Hide delivery list and expand rehearsal ledger & workspace",
+              )}
             >
               <IconExpand />
-              <span>专注演练</span>
+              <span>{bi("专注演练", "Focus Mode")}</span>
             </button>
           )}
 
@@ -4189,7 +4675,7 @@ export function ClusterRehearsal({
               type="button"
               className="rh-nav-pill ledger-toggle"
               onClick={() => setLedgerCollapsed(false)}
-              title="展开左侧演练记录栏"
+              title={bi("展开左侧演练记录栏", "Expand rehearsal ledger")}
             >
               <svg
                 width="14"
@@ -4220,7 +4706,7 @@ export function ClusterRehearsal({
                   strokeLinejoin="round"
                 />
               </svg>
-              <span>展开记录栏</span>
+              <span>{bi("展开记录栏", "Show Ledger")}</span>
             </button>
           )}
 
@@ -4237,8 +4723,11 @@ export function ClusterRehearsal({
           {!narrow && (!hasSessions || ledgerOpen) && (
             <span className="rh-ledger-crumb num">
               {hasSessions
-                ? `共 ${list.length} 次记录 · ${finalizedSessions.length} 份已定稿`
-                : "尚无演练记录"}
+                ? bi(
+                    `共 ${list.length} 次记录 · ${finalizedSessions.length} 份已定稿`,
+                    `${list.length} sessions · ${finalizedSessions.length} finalized`,
+                  )
+                : bi("尚无演练记录", "No rehearsals yet")}
             </span>
           )}
 
@@ -4253,7 +4742,7 @@ export function ClusterRehearsal({
                 <button
                   type="button"
                   className="rh-sess-trigger"
-                  aria-label="切换演练记录"
+                  aria-label={bi("切换演练记录", "Switch rehearsal")}
                 >
                   <span
                     className={`rh-sdot st-${activeSessionSummary?.stage || "scoping"}`}
@@ -4261,8 +4750,8 @@ export function ClusterRehearsal({
                   />
                   <span className="rh-sess-trigger-txt">
                     {showLauncher
-                      ? "切换历史演练"
-                      : activeSessionSummary?.title || "切换演练"}
+                      ? bi("切换历史演练", "Switch Rehearsal")
+                      : activeSessionSummary?.title || bi("切换演练", "Switch Rehearsal")}
                   </span>
                   <span className="rh-sess-count num">{list.length}</span>
                   <IconDown />
@@ -4284,10 +4773,10 @@ export function ClusterRehearsal({
                 }}
               >
                 {creating ? (
-                  <>返回当前演练</>
+                  <>{bi("返回当前演练", "Back to Session")}</>
                 ) : (
                   <>
-                    <IconPlus /> 新建
+                    <IconPlus /> {bi("新建", "New")}
                   </>
                 )}
               </button>
@@ -4301,7 +4790,11 @@ export function ClusterRehearsal({
             className={`rh-nav-pill aside-toggle ${deliveryOpen ? "on" : ""}`}
             onClick={() => setDeliveryOpen((v) => !v)}
             aria-expanded={deliveryOpen}
-            title={deliveryOpen ? "收起交付基线 (Esc)" : "查看当前交付基线"}
+            title={
+              deliveryOpen
+                ? bi("收起交付基线 (Esc)", "Close baseline (Esc)")
+                : bi("查看当前交付基线", "View delivery baseline")
+            }
           >
             <svg
               width="14"
@@ -4325,8 +4818,14 @@ export function ClusterRehearsal({
                 strokeWidth="1.4"
               />
             </svg>
-            <span>{deliveryOpen ? "收起交付基线" : "查看交付基线"}</span>
-            {c.hosts > 0 && <em className="num">{c.hosts} 节点</em>}
+            <span>
+              {deliveryOpen
+                ? bi("收起交付基线", "Hide Baseline")
+                : bi("查看交付基线", "Baseline")}
+            </span>
+            {c.hosts > 0 && (
+              <em className="num">{bi(`${c.hosts} 节点`, `${c.hosts} nodes`)}</em>
+            )}
           </button>
         </div>
       </div>
@@ -4341,10 +4840,13 @@ export function ClusterRehearsal({
             className="rh-ledger-shell"
             aria-hidden={!ledgerOpen}
           >
-            <aside className="rh-ledger-rail" aria-label="演练记录">
+            <aside
+              className="rh-ledger-rail"
+              aria-label={bi("演练记录", "Rehearsal Ledger")}
+            >
               <div className="rh-ledger-head">
                 <div className="rh-ledger-head-title">
-                  <b>演练记录</b>
+                  <b>{bi("演练记录", "Rehearsals")}</b>
                   <span className="rh-ledger-cnt num">{list.length}</span>
                 </div>
                 <div className="rh-ledger-head-acts">
@@ -4364,11 +4866,11 @@ export function ClusterRehearsal({
                       }}
                     >
                       {creating ? (
-                        <span>返回</span>
+                        <span>{bi("返回", "Back")}</span>
                       ) : (
                         <>
                           <IconPlus />
-                          <span>新建</span>
+                          <span>{bi("新建", "New")}</span>
                         </>
                       )}
                     </button>
@@ -4377,8 +4879,8 @@ export function ClusterRehearsal({
                     type="button"
                     className="rh-ledger-collapse"
                     onClick={() => setLedgerCollapsed(true)}
-                    aria-label="收起演练记录栏"
-                    title="收起演练记录栏"
+                    aria-label={bi("收起演练记录栏", "Collapse rehearsal ledger")}
+                    title={bi("收起演练记录栏", "Collapse rehearsal ledger")}
                   >
                     <svg
                       width="14"
@@ -4422,14 +4924,14 @@ export function ClusterRehearsal({
                         type="search"
                         value={ledgerQuery}
                         onChange={(e) => setLedgerQuery(e.target.value)}
-                        placeholder="搜索演练记录…"
-                        aria-label="搜索演练记录"
+                        placeholder={bi("搜索演练记录…", "Search rehearsals…")}
+                        aria-label={bi("搜索演练记录", "Search rehearsals")}
                       />
                       {ledgerQuery && (
                         <button
                           type="button"
                           onClick={() => setLedgerQuery("")}
-                          aria-label="清空搜索"
+                          aria-label={bi("清空搜索", "Clear search")}
                         >
                           <IconClose />
                         </button>
@@ -4440,7 +4942,7 @@ export function ClusterRehearsal({
                     <div
                       className="rh-ledger-tabs"
                       role="tablist"
-                      aria-label="按演练状态筛选"
+                      aria-label={bi("按演练状态筛选", "Filter rehearsals by status")}
                     >
                       <button
                         type="button"
@@ -4449,7 +4951,7 @@ export function ClusterRehearsal({
                         className={ledgerFilter === "all" ? "on" : ""}
                         onClick={() => setLedgerFilter("all")}
                       >
-                        <span>全部</span>
+                        <span>{bi("全部", "All")}</span>
                         <i className="num">{list.length}</i>
                       </button>
                       <button
@@ -4459,7 +4961,7 @@ export function ClusterRehearsal({
                         className={ledgerFilter === "active" ? "on" : ""}
                         onClick={() => setLedgerFilter("active")}
                       >
-                        <span>进行中</span>
+                        <span>{bi("进行中", "Active")}</span>
                         <i className="num">{inProgressSessions.length}</i>
                       </button>
                       <button
@@ -4469,7 +4971,7 @@ export function ClusterRehearsal({
                         className={ledgerFilter === "finalized" ? "on" : ""}
                         onClick={() => setLedgerFilter("finalized")}
                       >
-                        <span>已定稿</span>
+                        <span>{bi("已定稿", "Finalized")}</span>
                         <i className="num">{finalizedSessions.length}</i>
                       </button>
                     </div>
@@ -4480,23 +4982,25 @@ export function ClusterRehearsal({
               <div className="rh-ledger-body">
                 {showLauncher && (
                   <div className="rh-ledger-group">
-                    <span className="rh-ledger-gtitle">当前草稿</span>
+                    <span className="rh-ledger-gtitle">
+                      {bi("当前草稿", "Current Draft")}
+                    </span>
                     <div className="rh-ledger-card on is-draft">
                       <div className="rh-ledger-card-top">
                         <span className="rh-sdot is-draft-dot" aria-hidden />
-                        <b>{title.trim() || "新建变更演练"}</b>
+                        <b>{title.trim() || bi("新建变更演练", "New Change Rehearsal")}</b>
                       </div>
                       <div className="rh-ledger-card-meta">
                         <span className="rh-ledger-pill draft">
                           {liveCreate?.error
-                            ? "通道受阻 · 待重试"
+                            ? bi("通道受阻 · 待重试", "Blocked · Retry")
                             : creatingBusy
-                              ? "AI 推演中…"
+                              ? bi("AI 推演中…", "AI thinking…")
                               : activePresetMeta
                                 ? activePresetMeta.label
-                                : "待录入诉求"}
+                                : bi("待录入诉求", "Enter goal")}
                         </span>
-                        <span>未保存</span>
+                        <span>{bi("未保存", "Unsaved")}</span>
                       </div>
                     </div>
                   </div>
@@ -4505,7 +5009,10 @@ export function ClusterRehearsal({
                 {visibleInProgress.length > 0 && (
                   <div className="rh-ledger-group">
                     <span className="rh-ledger-gtitle num">
-                      进行中 ({visibleInProgress.length})
+                      {bi(
+                        `进行中 (${visibleInProgress.length})`,
+                        `In Progress (${visibleInProgress.length})`,
+                      )}
                     </span>
                     {visibleInProgress.map((item) => {
                       const on = !showLauncher && item.id === activeId;
@@ -4538,7 +5045,10 @@ export function ClusterRehearsal({
                 {visibleFinalized.length > 0 && (
                   <div className="rh-ledger-group">
                     <span className="rh-ledger-gtitle num">
-                      已定稿 ({visibleFinalized.length})
+                      {bi(
+                        `已定稿 (${visibleFinalized.length})`,
+                        `Finalized (${visibleFinalized.length})`,
+                      )}
                     </span>
                     {visibleFinalized.map((item) => {
                       const on = !showLauncher && item.id === activeId;
@@ -4555,7 +5065,7 @@ export function ClusterRehearsal({
                           </div>
                           <div className="rh-ledger-card-meta">
                             <span className="rh-ledger-pill st-finalized">
-                              生产 SOP 已归档
+                              {bi("生产 SOP 已归档", "SOP Archived")}
                             </span>
                             <span className="num">{ago(item.updated_at)}</span>
                           </div>
@@ -4567,7 +5077,9 @@ export function ClusterRehearsal({
 
                 {hasSessions && filteredSessions.length === 0 && (
                   <div className="rh-ledger-empty-filter">
-                    <span>未找到匹配的演练记录</span>
+                    <span>
+                      {bi("未找到匹配的演练记录", "No matching rehearsals found")}
+                    </span>
                     <button
                       type="button"
                       className="link small"
@@ -4576,13 +5088,15 @@ export function ClusterRehearsal({
                         setLedgerFilter("all");
                       }}
                     >
-                      清除筛选条件
+                      {bi("清除筛选条件", "Clear filters")}
                     </button>
                   </div>
                 )}
 
                 {!hasSessions && (
-                  <p className="rh-ledger-empty-hint">尚无已归档记录</p>
+                  <p className="rh-ledger-empty-hint">
+                    {bi("尚无已归档记录", "No archived rehearsals yet")}
+                  </p>
                 )}
               </div>
             </aside>
@@ -4593,13 +5107,15 @@ export function ClusterRehearsal({
           {loadErr && (
             <div className="rh-sync-err" role="status">
               <IconExclamationCircle />
-              <span>演练记录同步失败：{loadErr}</span>
+              <span>
+                {bi(`演练记录同步失败：${loadErr}`, `Failed to sync rehearsals: ${loadErr}`)}
+              </span>
               <button
                 type="button"
                 className="link small"
                 onClick={() => void loadList(false)}
               >
-                重试
+                {bi("重试", "Retry")}
               </button>
             </div>
           )}
@@ -4607,7 +5123,10 @@ export function ClusterRehearsal({
           {offline && (
             <div className="rh-offline" role="status">
               <span className="sdot s-warn" />
-              网络已断开：已加载的采集脚本与命令仍可查看复制，连接恢复后可继续提交。
+              {bi(
+                "网络已断开：已加载的采集脚本与命令仍可查看复制，连接恢复后可继续提交。",
+                "Network disconnected: loaded scripts and commands remain readable; submit once back online.",
+              )}
             </div>
           )}
 
@@ -4618,9 +5137,13 @@ export function ClusterRehearsal({
               <div className="rh-launch-top">
                 <div className="rh-launch-title">
                   <h2>
-                    <Spark size={18} rainbow /> 新建变更演练
+                    <Spark size={18} rainbow />{" "}
+                    {bi("新建变更演练", "New Change Rehearsal")}
                   </h2>
-                  <div className="rh-baseline-pills" aria-label="集群基线">
+                  <div
+                    className="rh-baseline-pills"
+                    aria-label={bi("集群基线", "Cluster baseline")}
+                  >
                     {baselineFacts.map((f) => (
                       <span key={f} className="rh-base-pill">
                         {f}
@@ -4635,7 +5158,7 @@ export function ClusterRehearsal({
                       <div
                         className="rh-preset-grid rh-presets"
                         role="group"
-                        aria-label="常见变更场景"
+                        aria-label={bi("常见变更场景", "Common change presets")}
                       >
                         {presets.map((p) => {
                           const active = pickedPreset === p.kind;
@@ -4696,8 +5219,11 @@ export function ClusterRehearsal({
                     disabled={creatingBusy}
                     onChange={(e) => setTitle(e.target.value)}
                     maxLength={100}
-                    placeholder="演练标题（可选，留空由 AI 按诉求自动归纳命名）"
-                    aria-label="演练标题"
+                    placeholder={bi(
+                      "演练标题（可选，留空由 AI 按诉求自动归纳命名）",
+                      "Rehearsal title (optional — AI auto-names from goal if blank)",
+                    )}
+                    aria-label={bi("演练标题", "Rehearsal title")}
                   />
                   {(title || goal || goalImages.length > 0) && !creatingBusy && (
                     <button
@@ -4710,8 +5236,8 @@ export function ClusterRehearsal({
                         setGoalImages([]);
                         goalRef.current?.focus();
                       }}
-                      aria-label="清空输入"
-                      title="清空"
+                      aria-label={bi("清空输入", "Clear input")}
+                      title={bi("清空", "Clear")}
                     >
                       <IconClose />
                     </button>
@@ -4731,8 +5257,11 @@ export function ClusterRehearsal({
                       void startNew();
                     }
                   }}
-                  placeholder="写明变更目标（目标版本、新增节点或待调参数）、可接受的业务闪断窗口与测试环境情况；支持直接 Ctrl+V 粘贴架构图或工单截图…"
-                  aria-label="变更诉求"
+                  placeholder={bi(
+                    "写明变更目标（目标版本、新增节点或待调参数）、可接受的业务闪断窗口与测试环境情况；支持直接 Ctrl+V 粘贴架构图或工单截图…",
+                    "Describe your change goal (target version, new nodes, or params), acceptable disruption window, and staging env; Ctrl+V to paste diagrams or screenshots…",
+                  )}
+                  aria-label={bi("变更诉求", "Change goal")}
                 />
 
                 {goalImages.length > 0 && (
@@ -4768,12 +5297,18 @@ export function ClusterRehearsal({
                       onClick={() => goalFileInputRef.current?.click()}
                       title={
                         effectiveNoVision
-                          ? "当前所选模型不支持图片识别，可切换支持看图的模型"
-                          : "上传或直接 Ctrl+V 粘贴截图"
+                          ? bi(
+                              "当前所选模型不支持图片识别，可切换支持看图的模型",
+                              "Selected model does not support images; switch to a vision model",
+                            )
+                          : bi(
+                              "上传或直接 Ctrl+V 粘贴截图",
+                              "Upload or Ctrl+V paste screenshots",
+                            )
                       }
                     >
                       <IconImage />
-                      <span>粘贴/添加截图</span>
+                      <span>{bi("粘贴/添加截图", "Paste / Add Image")}</span>
                     </button>
                     <span className="rh-safety-note">
                       <svg
@@ -4790,7 +5325,12 @@ export function ClusterRehearsal({
                           strokeLinejoin="round"
                         />
                       </svg>
-                      <span>只读探针 · 零直连生产</span>
+                      <span>
+                        {bi(
+                          "只读探针 · 零直连生产",
+                          "Read-only probe · Zero direct prod writes",
+                        )}
+                      </span>
                     </span>
                   </div>
                   <div className="rh-compose-submit">
@@ -4812,14 +5352,20 @@ export function ClusterRehearsal({
                       }
                       title={
                         isMac
-                          ? "⌘ + Enter 对齐变更边界 · Enter 换行"
-                          : "Ctrl + Enter 对齐变更边界 · Enter 换行"
+                          ? bi(
+                              "⌘ + Enter 对齐变更边界 · Enter 换行",
+                              "⌘ + Enter Align scope · Enter newline",
+                            )
+                          : bi(
+                              "Ctrl + Enter 对齐变更边界 · Enter 换行",
+                              "Ctrl + Enter Align scope · Enter newline",
+                            )
                       }
                       loading={creatingBusy}
                       disabled={!goal.trim() || offline}
                       onClick={() => void startNew()}
                     >
-                      对齐变更边界
+                      {bi("对齐变更边界", "Align Scope")}
                     </Button>
                   </div>
                 </div>
@@ -4878,7 +5424,7 @@ export function ClusterRehearsal({
         <Modal
           visible
           footer={null}
-          title="当前交付基线"
+          title={bi("当前交付基线", "Delivery Baseline")}
           onCancel={() => setDeliveryOpen(false)}
           style={{ width: "min(94vw, 480px)" }}
         >
@@ -4930,15 +5476,23 @@ function buildVersionPlaceholder(
 ): string {
   const base = (baselineVersion || "").trim();
   const next = suggestNextVersion(base);
-  const extra = withPkgOrNode ? "，可附包或节点说明" : "";
+  const extra = withPkgOrNode
+    ? bi("，可附包或节点说明", ", optional pkg/node note")
+    : "";
   if (base && next) {
-    return `当前基线 ${base}，填写目标版本号（如 ${next}${extra}），回车确认…`;
+    return bi(
+      `当前基线 ${base}，填写目标版本号（如 ${next}${extra}），回车确认…`,
+      `Baseline ${base}; enter target version (e.g. ${next}${extra}), press Enter…`,
+    );
   }
-  return `填写已确定的目标版本号（如 16.6 / 7.2.5${extra}），回车确认…`;
+  return bi(
+    `填写已确定的目标版本号（如 16.6 / 7.2.5${extra}），回车确认…`,
+    `Enter confirmed target version (e.g. 16.6 / 7.2.5${extra}), press Enter…`,
+  );
 }
 
 const UNDECIDED_HEAD_RE =
-  /待定|未定|不明|未知|不清|不确定|尚未|暂未|暂无|暂不|未明确|未就绪|未准备|未到位|未规划|未分配|无独立|无测试|无演练|无需|不需要|不涉及|不指定|不升级|不变更|保持现状|按默认|保守|先确认|先核实|先评估|先排查|待确认|待评估|待规划|待申请|自动择优/;
+  /待定|未定|不明|未知|不清|不确定|尚未|暂未|暂无|暂不|未明确|未就绪|未准备|未到位|未规划|未分配|无独立|无测试|无演练|无需|不需要|不涉及|不指定|不升级|不变更|保持现状|按默认|保守|先确认|先核实|先评估|先排查|待确认|待评估|待规划|待申请|自动择优|\b(?:tbd|undecided|unknown|unclear|not\s+(?:yet|ready|decided|set|needed|applicable)|none|no\s+test|default|conservative|verify\s+first)\b/i;
 
 function inferScopeSupplement(
   q: ScopeQuestion,
@@ -4948,41 +5502,56 @@ function inferScopeSupplement(
   baselineVersion?: string,
 ): ScopeSupplementSpec | null {
   if (explicitHint) {
-    if (/版本|小版本|大版本|补丁|镜像|tag/i.test(explicitHint)) {
+    if (/版本|小版本|大版本|补丁|镜像|tag|version|patch|release|image/i.test(explicitHint)) {
       return {
-        tag: "目标版本",
-        badge: "填版本号",
+        tag: bi("目标版本", "Target Version"),
+        badge: bi("填版本号", "Enter version"),
         placeholder: buildVersionPlaceholder(baselineVersion, false),
       };
     }
-    if (/参数|配置|阈值|配额|连接|内存/i.test(explicitHint)) {
+    if (/参数|配置|阈值|配额|连接|内存|param|config|threshold|quota|connection|memory/i.test(explicitHint)) {
       return {
-        tag: "目标参数",
-        badge: "填目标值",
-        placeholder:
+        tag: bi("目标参数", "Target Param"),
+        badge: bi("填目标值", "Enter value"),
+        placeholder: bi(
           "填写待调参数名与目标值（如 max_connections=1000），回车确认…",
+          "Enter parameter & target value (e.g. max_connections=1000), press Enter…",
+        ),
       };
     }
-    if (/节点|主机|机器|ip|地址|实例/i.test(explicitHint)) {
+    if (/节点|主机|机器|ip|地址|实例|node|host|server|address|instance/i.test(explicitHint)) {
       return {
-        tag: "节点信息",
-        badge: "填节点信息",
-        placeholder:
+        tag: bi("节点信息", "Node Info"),
+        badge: bi("填节点信息", "Enter node"),
+        placeholder: bi(
           "填写新增或目标节点 IP / 主机名（如 10.0.1.14），回车确认…",
+          "Enter new or target node IP / hostname (e.g. 10.0.1.14), press Enter…",
+        ),
       };
     }
-    if (/窗口|时段|时间|排期/i.test(explicitHint)) {
+    if (/窗口|时段|时间|排期|window|schedule|slot|time/i.test(explicitHint)) {
       return {
-        tag: "维护时段",
-        badge: "填时间窗",
-        placeholder:
+        tag: bi("维护时段", "Window"),
+        badge: bi("填时间窗", "Enter window"),
+        placeholder: bi(
           "填写已排定的变更时间窗（如周六 02:00-04:00），回车确认…",
+          "Enter scheduled maintenance window (e.g. Sat 02:00-04:00), press Enter…",
+        ),
       };
     }
     return {
-      tag: explicitHint.length <= 6 ? explicitHint : "补充说明",
-      badge: explicitHint.length <= 4 ? `填${explicitHint}` : "补充说明",
-      placeholder: `填写具体${explicitHint}，回车确认…`,
+      tag: bi(
+        explicitHint.length <= 6 ? explicitHint : "补充说明",
+        explicitHint.length <= 16 ? explicitHint : "Details",
+      ),
+      badge: bi(
+        explicitHint.length <= 4 ? `填${explicitHint}` : "补充说明",
+        explicitHint.length <= 14 ? `Enter ${explicitHint}` : "Add details",
+      ),
+      placeholder: bi(
+        `填写具体${explicitHint}，回车确认…`,
+        `Specify ${explicitHint}, press Enter…`,
+      ),
     };
   }
 
@@ -4999,15 +5568,15 @@ function inferScopeSupplement(
 
   // 1. Target version / patch upgrade decided
   const optExplicitVersionDecided =
-    /(?:版本|小版本|大版本|补丁|镜像)(?:已定|已明确|明确|已确定|确定|已锁定|锁定|已选定|指定)|(?:已确定|已锁定|已明确|指定).*(?:版本|补丁|镜像)/.test(
+    /(?:版本|小版本|大版本|补丁|镜像)(?:已定|已明确|明确|已确定|确定|已锁定|锁定|已选定|指定)|(?:已确定|已锁定|已明确|指定).*(?:版本|补丁|镜像)|(?:target\s+)?(?:version|patch|image)\s+(?:confirmed|locked|selected|decided)/i.test(
       cleanBase,
     );
   const qAsksTargetVersion =
-    /(?:目标|升级|计划|待升|新|跨|小|大|补丁).*版本|版本.*(?:准备|就绪|哪一步|明确|确定|定了吗|是什么|多少)|升级到/.test(
+    /(?:目标|升级|计划|待升|新|跨|小|大|补丁).*版本|版本.*(?:准备|就绪|哪一步|明确|确定|定了吗|是什么|多少)|升级到|target\s+version|upgrade\s+to/i.test(
       qText,
     );
   const optVersionAffirmative =
-    /全部就绪|均已就绪|都已就绪|全面就绪|目标明确|目标已定|版本已定|版本明确|已就绪|已备妥|已到位|已在内网|包已就绪|直接升级|已准备/.test(
+    /全部就绪|均已就绪|都已就绪|全面就绪|目标明确|目标已定|版本已定|版本明确|已就绪|已备妥|已到位|已在内网|包已就绪|直接升级|已准备|\ball\s+ready\b|\bversion\s+(?:confirmed|ready)\b/i.test(
       cleanBase,
     );
   const versionNegated = /(?:版本|目标)(?:待定|未定|不明|未明确|尚未|暂未)/.test(
@@ -5018,26 +5587,26 @@ function inferScopeSupplement(
     (optExplicitVersionDecided || (qAsksTargetVersion && optVersionAffirmative))
   ) {
     const alsoHasPkgOrNode =
-      /离线包|安装包|节点/.test(qText) &&
-      /全部就绪|均已就绪|包与节点/.test(cleanBase);
+      /离线包|安装包|节点|package|node/i.test(qText) &&
+      /全部就绪|均已就绪|包与节点|all\s+ready/i.test(cleanBase);
     return {
-      tag: "目标版本",
-      badge: "填版本号",
+      tag: bi("目标版本", "Target Version"),
+      badge: bi("填版本号", "Enter version"),
       placeholder: buildVersionPlaceholder(baselineVersion, alsoHasPkgOrNode),
     };
   }
 
   // 2. Parameter / threshold / quota target decided
   const optExplicitParamDecided =
-    /(?:参数|配置项|阈值|配额|目标值)(?:已定|已明确|明确|已确定|指定)|(?:已确定|已明确|指定).*(?:参数|阈值|配额|目标值)/.test(
+    /(?:参数|配置项|阈值|配额|目标值)(?:已定|已明确|明确|已确定|指定)|(?:已确定|已明确|指定).*(?:参数|阈值|配额|目标值)|(?:param|threshold|quota|target\s+value)\s+(?:confirmed|decided|set)/i.test(
       cleanBase,
     );
   const qAsksTargetParam =
-    /(?:待调|调整|修改|目标|计划).*(?:参数|阈值|配额|目标值)|(?:参数|阈值|配额).*(?:目标值|明确|已定|哪些|多少|调到)/.test(
+    /(?:待调|调整|修改|目标|计划).*(?:参数|阈值|配额|目标值)|(?:参数|阈值|配额).*(?:目标值|明确|已定|哪些|多少|调到)|target\s+(?:param|config|value)/i.test(
       qText,
     );
   const optParamAffirmative =
-    /参数已定|目标值已定|目标明确|目标已定|全部就绪|方案已定|已确定|已明确|指定参数/.test(
+    /参数已定|目标值已定|目标明确|目标已定|全部就绪|方案已定|已确定|已明确|指定参数|\bparam.*ready\b/i.test(
       cleanBase,
     );
   const paramNegated = /(?:参数|阈值|目标值)(?:待定|未定|不明|未明确|尚未|暂未)/.test(
@@ -5048,72 +5617,84 @@ function inferScopeSupplement(
     (optExplicitParamDecided || (qAsksTargetParam && optParamAffirmative))
   ) {
     return {
-      tag: "目标参数",
-      badge: "填目标值",
-      placeholder:
+      tag: bi("目标参数", "Target Param"),
+      badge: bi("填目标值", "Enter value"),
+      placeholder: bi(
         "填写待调参数名与目标值（如 max_connections=1000），回车确认…",
+        "Enter parameter & target value (e.g. max_connections=1000), press Enter…",
+      ),
     };
   }
 
   // 3. Scale-out / replacement node IP or host ready
   const optExplicitNodeDecided =
-    /(?:节点|机器|主机|备库|从库|实例|IP)(?:已定|已就绪|已到位|已分配|已准备|已备妥|已明确|指定)|(?:指定|已分配|已准备).*(?:节点|机器|主机|IP)/i.test(
+    /(?:节点|机器|主机|备库|从库|实例|IP)(?:已定|已就绪|已到位|已分配|已准备|已备妥|已明确|指定)|(?:指定|已分配|已准备).*(?:节点|机器|主机|IP)|\b(?:node|host|ip)\s+(?:ready|assigned|confirmed)\b/i.test(
       cleanBase,
     );
   const qAsksNodeReady =
-    /(?:新增|扩容|缩容|替换|下线|新|待加|目标).*(?:节点|机器|主机|备库|从库)|(?:节点|机器|主机).*(?:准备|就绪|到位|分配|哪一步|IP)/i.test(
+    /(?:新增|扩容|缩容|替换|下线|新|待加|目标).*(?:节点|机器|主机|备库|从库)|(?:节点|机器|主机).*(?:准备|就绪|到位|分配|哪一步|IP)|\b(?:new|target|replica)\s+(?:node|host)\b/i.test(
       qText,
     );
   const isTestEnvOnly =
-    /测试环境|演练环境|沙箱|本地验证/.test(qText) &&
-    !/扩容|缩容|生产新增/.test(qText);
+    /测试环境|演练环境|沙箱|本地验证|staging|sandbox|test\s+env/i.test(qText) &&
+    !/扩容|缩容|生产新增|scale/i.test(qText);
   if (
     !isTestEnvOnly &&
     (optExplicitNodeDecided ||
       (qAsksNodeReady &&
-        /全部就绪|均已就绪|已就绪|已到位|已分配|已备妥|机器已/.test(cleanBase)))
+        /全部就绪|均已就绪|已就绪|已到位|已分配|已备妥|机器已|\ball\s+ready\b/i.test(cleanBase)))
   ) {
     return {
-      tag: "节点信息",
-      badge: "填节点信息",
-      placeholder:
+      tag: bi("节点信息", "Node Info"),
+      badge: bi("填节点信息", "Enter node"),
+      placeholder: bi(
         "填写新增或目标节点 IP / 主机名（如 10.0.1.14），回车确认…",
+        "Enter new or target node IP / hostname (e.g. 10.0.1.14), press Enter…",
+      ),
     };
   }
 
   // 4. Specific scheduled maintenance window
   if (
-    /(?:窗口|时段|时间|排期)(?:已定|已排定|已确定|已批复)|指定(?:维护|变更)?(?:窗口|时段|时间)/.test(
+    /(?:窗口|时段|时间|排期)(?:已定|已排定|已确定|已批复)|指定(?:维护|变更)?(?:窗口|时段|时间)|\b(?:window|schedule)\s+(?:confirmed|scheduled|approved)\b/i.test(
       cleanBase,
     )
   ) {
     return {
-      tag: "维护时段",
-      badge: "填时间窗",
-      placeholder:
+      tag: bi("维护时段", "Window"),
+      badge: bi("填时间窗", "Enter window"),
+      placeholder: bi(
         "填写已排定的变更时间窗（如周六 02:00-04:00），回车确认…",
+        "Enter scheduled maintenance window (e.g. Sat 02:00-04:00), press Enter…",
+      ),
     };
   }
 
   // 5. Custom external VIP / proxy / domain
   if (
-    /外部.*(?:代理|负载均衡|VIP)|自建.*(?:代理|负载均衡)|自定义(?:域名|VIP|入口)|指定.*(?:VIP|域名|入口)/i.test(
+    /外部.*(?:代理|负载均衡|VIP)|自建.*(?:代理|负载均衡)|自定义(?:域名|VIP|入口)|指定.*(?:VIP|域名|入口)|external\s+(?:proxy|vip|lb)|custom\s+(?:vip|domain|endpoint)/i.test(
       cleanBase,
     )
   ) {
     return {
-      tag: "接入入口",
-      badge: "填入口信息",
-      placeholder: "填写外部 VIP、域名或负载均衡组件说明，回车确认…",
+      tag: bi("接入入口", "Endpoint"),
+      badge: bi("填入口信息", "Enter endpoint"),
+      placeholder: bi(
+        "填写外部 VIP、域名或负载均衡组件说明，回车确认…",
+        "Enter external VIP, domain, or load balancer details, press Enter…",
+      ),
     };
   }
 
   // 6. General explicit "X已定 / 已指定"
   if (/(?:已定|已指定|指定目标)$/.test(headline)) {
     return {
-      tag: "具体目标",
-      badge: "填具体项",
-      placeholder: "填写已确定的具体目标或约束值，回车确认…",
+      tag: bi("具体目标", "Target"),
+      badge: bi("填具体项", "Specify"),
+      placeholder: bi(
+        "填写已确定的具体目标或约束值，回车确认…",
+        "Enter confirmed target or constraint value, press Enter…",
+      ),
     };
   }
 
@@ -5124,14 +5705,18 @@ function inferQuestionTopic(q: ScopeQuestion, index: number): string {
   const explicit = (q.label || "").trim();
   if (explicit) return explicit;
   const text = q.question || "";
-  if (/版本|离线包|安装包|兼容|扩展|升级包/i.test(text)) return "版本与离线包";
-  if (/主从|拓扑|复制|巡检|漂移|健康|实例|stanza|etcd|sentinel|patroni/i.test(text)) {
-    return "拓扑与现状";
+  if (/版本|离线包|安装包|兼容|扩展|升级包|version|package|upgrade|compat/i.test(text))
+    return bi("版本与离线包", "Version & Packages");
+  if (/主从|拓扑|复制|巡检|漂移|健康|实例|stanza|etcd|sentinel|patroni|topolog|replic|drift|health|primary|standby/i.test(text)) {
+    return bi("拓扑与现状", "Topology & State");
   }
-  if (/窗口|闪断|中断|重连|入口|vip|排空|停机/i.test(text)) return "窗口与连接";
-  if (/备份|回退|回滚|演练环境|测试环境|虚拟机/i.test(text)) return "备份与演练";
-  if (/容量|内存|磁盘|连接数|参数|配置/i.test(text)) return "容量与参数";
-  return `边界项 0${index + 1}`;
+  if (/窗口|闪断|中断|重连|入口|vip|排空|停机|window|downtime|disrupt|drain|reconnect/i.test(text))
+    return bi("窗口与连接", "Window & Traffic");
+  if (/备份|回退|回滚|演练环境|测试环境|虚拟机|backup|rollback|test\s*env|staging|sandbox/i.test(text))
+    return bi("备份与演练", "Backup & Staging");
+  if (/容量|内存|磁盘|连接数|参数|配置|capacity|memory|disk|connection|param|config/i.test(text))
+    return bi("容量与参数", "Capacity & Params");
+  return bi(`边界项 0${index + 1}`, `Scope 0${index + 1}`);
 }
 
 function parseScopeOption(
@@ -5143,11 +5728,11 @@ function parseScopeOption(
   let cleanBase = trimmed;
   let explicitHint = "";
   const supMatch = trimmed.match(
-    /[（(]\s*(?:请)?(?:补充|填写|注明|输入)([^）)]*)[）)]\s*$/,
+    /[（(]\s*(?:(?:请)?(?:补充|填写|注明|输入)|(?:please\s+)?(?:specify|enter|provide|note|fill\s+in))\s*([^）)]*)[）)]\s*$/i,
   );
   if (supMatch) {
     cleanBase = trimmed.slice(0, supMatch.index).trim();
-    explicitHint = (supMatch[1] || "细节").trim();
+    explicitHint = (supMatch[1] || bi("细节", "details")).trim();
   }
   const parts = cleanBase
     .split(/[，,]\s*/)
@@ -5155,12 +5740,13 @@ function parseScopeOption(
     .filter(Boolean);
   let headline = cleanBase;
   let sub = "";
+  const sep = bi("，", ", ");
   if (parts.length >= 3 && parts[0].length <= 4) {
     headline = `${parts[0]} · ${parts[1]}`;
-    sub = parts.slice(2).join("，");
+    sub = parts.slice(2).join(sep);
   } else if (parts.length > 1) {
     headline = parts[0];
-    sub = parts.slice(1).join("，");
+    sub = parts.slice(1).join(sep);
   }
   const supplement = inferScopeSupplement(
     q,
@@ -5187,10 +5773,19 @@ function matchOptionAnswer(
   if (a === opt.raw || a === opt.cleanBase) {
     return { matched: true, detail: "" };
   }
-  const pfx = `${opt.cleanBase}（`;
-  if (a !== opt.raw && a.startsWith(pfx) && a.endsWith("）")) {
-    const inner = a.slice(pfx.length, -1);
-    const colonMatch = inner.match(/^[\u4e00-\u9fa5A-Za-z]{1,8}[：:]([\s\S]*)$/);
+  const pfxZh = `${opt.cleanBase}（`;
+  if (a !== opt.raw && a.startsWith(pfxZh) && a.endsWith("）")) {
+    const inner = a.slice(pfxZh.length, -1);
+    const colonMatch = inner.match(/^[^：:]{1,24}[：:]\s?([\s\S]*)$/);
+    return {
+      matched: true,
+      detail: colonMatch ? colonMatch[1] : inner,
+    };
+  }
+  const pfxEn = `${opt.cleanBase} (`;
+  if (a !== opt.raw && a.startsWith(pfxEn) && a.endsWith(")")) {
+    const inner = a.slice(pfxEn.length, -1);
+    const colonMatch = inner.match(/^[^：:]{1,24}[：:]\s?([\s\S]*)$/);
     return {
       matched: true,
       detail: colonMatch ? colonMatch[1] : inner,
@@ -5233,6 +5828,7 @@ function ScopeAlignmentDeck({
   freshReveal?: boolean;
   baselineVersion?: string;
 }) {
+  const lang = useLang();
   const [expandAll, setExpandAll] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(() => {
     const firstUnanswered = questions.find(
@@ -5272,7 +5868,7 @@ function ScopeAlignmentDeck({
       );
     }
     return m;
-  }, [questions, baselineVersion]);
+  }, [questions, baselineVersion, lang]);
 
   const answeredCount = useMemo(
     () => questions.filter((q) => Boolean((answers[q.id] || "").trim())).length,
@@ -5319,6 +5915,11 @@ function ScopeAlignmentDeck({
     });
   };
 
+  const formatSupplement = (base: string, tag: string, detail: string) =>
+    getLang() === "en-US"
+      ? `${base} (${tag}: ${detail})`
+      : `${base}（${tag}：${detail}）`;
+
   const selectPresetOption = (q: ScopeQuestion, opt: ParsedScopeOpt) => {
     if (disabled) return;
     const cur = answers[q.id] || "";
@@ -5337,7 +5938,7 @@ function ScopeAlignmentDeck({
     }
     const nextVal =
       opt.supplement && carryDetail
-        ? `${opt.cleanBase}（${opt.supplement.tag}：${carryDetail}）`
+        ? formatSupplement(opt.cleanBase, opt.supplement.tag, carryDetail)
         : opt.cleanBase;
     const nextAnswers = { ...answers, [q.id]: nextVal };
     delete prevPresetRef.current[q.id];
@@ -5392,10 +5993,14 @@ function ScopeAlignmentDeck({
     detailRaw: string,
     trimEdges = false,
   ) => {
-    const sanitized = detailRaw.replace(/[（）]/g, "");
+    const sanitized = detailRaw.replace(/[（）()]/g, "");
     const finalDetail = trimEdges ? sanitized.trim() : sanitized;
     const nextVal = finalDetail.trim()
-      ? `${opt.cleanBase}（${opt.supplement?.tag || "补充"}：${finalDetail}）`
+      ? formatSupplement(
+          opt.cleanBase,
+          opt.supplement?.tag || bi("补充", "Note"),
+          finalDetail,
+        )
       : opt.cleanBase;
     setAnswers((prev) => ({ ...prev, [q.id]: nextVal }));
   };
@@ -5406,9 +6011,12 @@ function ScopeAlignmentDeck({
         className={`rh-sec-head rh-scope-sec-head ${freshReveal ? "is-fresh-head" : ""}`}
       >
         <div>
-          <h3>确认变更边界与窗口约束</h3>
+          <h3>{bi("确认变更边界与窗口约束", "Confirm Scope & Window Constraints")}</h3>
           <p>
-            点选最贴近现场的前提即可生成纯只读探针；暂未确认的维度将自动按生产保守策略兜底。
+            {bi(
+              "点选最贴近现场的前提即可生成纯只读探针；暂未确认的维度将自动按生产保守策略兜底。",
+              "Select options matching your environment to build a read-only probe; unspecified items default to safe production settings.",
+            )}
           </p>
         </div>
         {questions.length > 0 && (
@@ -5427,8 +6035,14 @@ function ScopeAlignmentDeck({
               </span>
               <span className="num">
                 {allAligned
-                  ? `已对齐 ${answeredCount}/${questions.length}`
-                  : `已确认 ${answeredCount}/${questions.length}`}
+                  ? bi(
+                      `已对齐 ${answeredCount}/${questions.length}`,
+                      `Aligned ${answeredCount}/${questions.length}`,
+                    )
+                  : bi(
+                      `已确认 ${answeredCount}/${questions.length}`,
+                      `Confirmed ${answeredCount}/${questions.length}`,
+                    )}
               </span>
             </span>
             {questions.length > 1 && (
@@ -5450,7 +6064,7 @@ function ScopeAlignmentDeck({
                   });
                 }}
               >
-                {expandAll ? "逐项收起" : "展开全部"}
+                {expandAll ? bi("逐项收起", "Collapse all") : bi("展开全部", "Expand all")}
               </button>
             )}
           </div>
@@ -5519,7 +6133,10 @@ function ScopeAlignmentDeck({
                     <span className="rh-scope-preview">{q.question}</span>
                   ) : (
                     <span className="rh-scope-pos num">
-                      第 {qi + 1} / {questions.length} 项
+                      {bi(
+                        `第 ${qi + 1} / ${questions.length} 项`,
+                        `${qi + 1} of ${questions.length}`,
+                      )}
                     </span>
                   )}
                 </div>
@@ -5527,10 +6144,12 @@ function ScopeAlignmentDeck({
                   {isAnswered ? (
                     <span className="rh-scope-ans-pill" title={curAns}>
                       <span className="rh-scope-ans-txt">{summaryChip}</span>
-                      {!isOpen && <em>修改</em>}
+                      {!isOpen && <em>{bi("修改", "Edit")}</em>}
                     </span>
                   ) : !isOpen ? (
-                    <span className="rh-scope-pending-pill">待点选</span>
+                    <span className="rh-scope-pending-pill">
+                      {bi("待点选", "Pending")}
+                    </span>
                   ) : null}
                   <IconDown
                     className={`rh-scope-chev ${isOpen ? "open" : ""}`}
@@ -5593,7 +6212,10 @@ function ScopeAlignmentDeck({
                                     >
                                       {selected
                                         ? matchedDetail.trim() ||
-                                          `请${po.supplement.badge}`
+                                          bi(
+                                            `请${po.supplement.badge}`,
+                                            po.supplement.badge,
+                                          )
                                         : po.supplement.badge}
                                     </i>
                                   )}
@@ -5612,7 +6234,9 @@ function ScopeAlignmentDeck({
                           <span className="rh-inline-tag">
                             <IconEdit />
                             <span>
-                              {parsedOpts.length > 0 ? "自由说明" : "现场说明"}
+                              {parsedOpts.length > 0
+                                ? bi("自由说明", "Custom")
+                                : bi("现场说明", "Notes")}
                             </span>
                           </span>
                           <input
@@ -5657,8 +6281,14 @@ function ScopeAlignmentDeck({
                                 cancelCustomEditor(q.id, isCustomVal);
                               }
                             }}
-                            placeholder="直接简述现场实际安排或特殊约束…"
-                            aria-label={`${q.question} 自定义说明`}
+                            placeholder={bi(
+                              "直接简述现场实际安排或特殊约束…",
+                              "Briefly describe your arrangement or constraints…",
+                            )}
+                            aria-label={bi(
+                              `${q.question} 自定义说明`,
+                              `${q.question} custom answer`,
+                            )}
                           />
                           <div className="rh-inline-acts">
                             {parsedOpts.length > 0 && (
@@ -5671,7 +6301,7 @@ function ScopeAlignmentDeck({
                                   cancelCustomEditor(q.id, isCustomVal)
                                 }
                               >
-                                取消
+                                {bi("取消", "Cancel")}
                               </button>
                             )}
                             <button
@@ -5682,7 +6312,9 @@ function ScopeAlignmentDeck({
                               onClick={() => confirmCustomEditor(q.id)}
                             >
                               <span>
-                                {nextId && !expandAll ? "确认下一项" : "确认"}
+                                {nextId && !expandAll
+                                  ? bi("确认下一项", "Confirm & Next")
+                                  : bi("确认", "Confirm")}
                               </span>
                               {nextId && !expandAll && <IconRight />}
                             </button>
@@ -5693,7 +6325,7 @@ function ScopeAlignmentDeck({
                           <div className="rh-custom-saved-main">
                             <span className="rh-inline-tag">
                               <IconEdit />
-                              <span>已填自定义</span>
+                              <span>{bi("已填自定义", "Custom")}</span>
                             </span>
                             <span
                               className="rh-custom-saved-text"
@@ -5712,7 +6344,7 @@ function ScopeAlignmentDeck({
                                 openCustomEditor(q.id, rawAns, false)
                               }
                             >
-                              修改
+                              {bi("修改", "Edit")}
                             </button>
                             <button
                               type="button"
@@ -5727,7 +6359,7 @@ function ScopeAlignmentDeck({
                                 }));
                               }}
                             >
-                              清除
+                              {bi("清除", "Clear")}
                             </button>
                             {!expandAll && (
                               <button
@@ -5737,7 +6369,9 @@ function ScopeAlignmentDeck({
                                 onClick={() => advanceFrom(q.id)}
                               >
                                 <span>
-                                  {nextId ? "继续下一项" : "完成确认"}
+                                  {nextId
+                                    ? bi("继续下一项", "Next")
+                                    : bi("完成确认", "Done")}
                                 </span>
                                 {nextId && <IconRight />}
                               </button>
@@ -5808,7 +6442,7 @@ function ScopeAlignmentDeck({
                                 openCustomEditor(q.id, rawAns, true)
                               }
                             >
-                              自由说明
+                              {bi("自由说明", "Custom")}
                             </button>
                             {!expandAll && (
                               <button
@@ -5829,11 +6463,11 @@ function ScopeAlignmentDeck({
                                 <span>
                                   {matchedDetail.trim()
                                     ? nextId
-                                      ? "确认下一项"
-                                      : "完成确认"
+                                      ? bi("确认下一项", "Confirm & Next")
+                                      : bi("完成确认", "Done")
                                     : nextId
-                                      ? "下一项"
-                                      : "收起"}
+                                      ? bi("下一项", "Next")
+                                      : bi("收起", "Collapse")}
                                 </span>
                                 {nextId && <IconRight />}
                               </button>
@@ -5857,7 +6491,7 @@ function ScopeAlignmentDeck({
                               }
                             >
                               <IconEdit />
-                              <span>其他现场情况（自由说明）</span>
+                              <span>{bi("其他现场情况（自由说明）", "Other (custom note)")}</span>
                             </button>
                           ) : (
                             <span />
@@ -5874,9 +6508,9 @@ function ScopeAlignmentDeck({
                                 <span>
                                   {isAnswered
                                     ? nextId
-                                      ? "继续下一项"
-                                      : "收起"
-                                    : "暂不指定，按保守默认"}
+                                      ? bi("继续下一项", "Next")
+                                      : bi("收起", "Collapse")
+                                    : bi("暂不指定，按保守默认", "Skip (safe default)")}
                                 </span>
                                 {nextId && <IconRight />}
                               </button>
@@ -5911,8 +6545,13 @@ function ScopeAlignmentDeck({
               onClick={() => setExtraOpen(true)}
             >
               <IconPlus />
-              <span>补充其他现场背景说明</span>
-              <small>如近期发生过主备切换、演练节点数量差异等（可选）</small>
+              <span>{bi("补充其他现场背景说明", "Add extra environment context")}</span>
+              <small>
+                {bi(
+                  "如近期发生过主备切换、演练节点数量差异等（可选）",
+                  "e.g., recent failover or staging node differences (optional)",
+                )}
+              </small>
             </button>
           ) : (
             <div className="rh-extra-editor">
@@ -5921,7 +6560,8 @@ function ScopeAlignmentDeck({
                   className="rh-field-label"
                   htmlFor={`extra-${rehearsalId}`}
                 >
-                  补充现场背景 <span className="faint">（可选）</span>
+                  {bi("补充现场背景", "Extra Context")}{" "}
+                  <span className="faint">{bi("（可选）", "(optional)")}</span>
                 </label>
                 {!extraScope.trim() && (
                   <button
@@ -5929,7 +6569,7 @@ function ScopeAlignmentDeck({
                     className="rh-inline-cancel"
                     onClick={() => setExtraOpen(false)}
                   >
-                    收起
+                    {bi("收起", "Collapse")}
                   </button>
                 )}
               </div>
@@ -5939,8 +6579,11 @@ function ScopeAlignmentDeck({
                 disabled={disabled}
                 onChange={setExtraScope}
                 autoSize={{ minRows: 2, maxRows: 5 }}
-                placeholder="例如：生产近期发生过一次主备切换；测试环境为 2 台同系统虚拟机…"
-                aria-label="补充约束说明"
+                placeholder={bi(
+                  "例如：生产近期发生过一次主备切换；测试环境为 2 台同系统虚拟机…",
+                  "e.g., Production had a failover recently; staging uses 2 matching VMs…",
+                )}
+                aria-label={bi("补充约束说明", "Extra constraints")}
               />
             </div>
           )}
@@ -5966,60 +6609,68 @@ type ParsedProbeNote = {
 function parseProbeNote(raw: string): ParsedProbeNote {
   const clean = (raw || "").trim().replace(/^[-*•\d.、)）\s]+/, "");
   let tone: ProbeNoteTone = "exec";
-  let tag = "执行要点";
+  let tag = bi("执行要点", "Exec Note");
   let priority = 0;
 
   if (
-    /认证|密码|口令|凭据|密钥|AUTH\b|TOKEN\b|_USER\b|ACL\b|脱敏|bash\s+-x|不要把密码|勿写/i.test(
+    /认证|密码|口令|凭据|密钥|AUTH\b|TOKEN\b|_USER\b|ACL\b|脱敏|bash\s+-x|不要把密码|勿写|password|credential|secret|redact|mask/i.test(
       clean,
     )
   ) {
     tone = "auth";
-    tag = "凭据与安全";
+    tag = bi("凭据与安全", "Security");
     priority = 0;
   } else if (
-    /连接本机|默认.*连接|127\.0\.0\.1|localhost|:\d{4,5}\b|TLS\b|SSL\b|监控名|mymaster|socket|非默认端口/i.test(
+    /连接本机|默认.*连接|127\.0\.0\.1|localhost|:\d{4,5}\b|TLS\b|SSL\b|监控名|mymaster|socket|非默认端口|connect|port/i.test(
       clean,
     )
   ) {
     tone = "conn";
-    tag = "连接与端口";
+    tag = bi("连接与端口", "Connection");
     priority = 0;
   } else if (
-    /分别使用|节点.*执行|执行脚本|运行脚本|同一时间段|任意.*节点|每台节点|不生成任何文件|终端输出|截图反馈/i.test(
+    /分别使用|节点.*执行|执行脚本|运行脚本|同一时间段|任意.*节点|每台节点|不生成任何文件|终端输出|截图反馈|each\s+node|every\s+node|run.*script|terminal\s+output|screenshot/i.test(
       clean,
     )
   ) {
     tone = "exec";
-    tag = "执行范围";
+    tag = bi("执行范围", "Scope");
     priority = 0;
   } else if (
-    /持久化|appendonly|aof_|save=|maxmemory|内存|磁盘|容量|字节|RDB/i.test(clean)
+    /持久化|appendonly|aof_|save=|maxmemory|内存|磁盘|容量|字节|RDB|persistence|memory|disk|capacity/i.test(clean)
   ) {
     tone = "judge";
-    tag = "基线核对";
+    tag = bi("基线核对", "Baseline");
     priority = 1;
   } else if (
-    /主从|主库|从库|漂移|Sentinel|哨兵|quorum|CKQUORUM|s_down|o_down|复制|lag|Leader|Follower|Patroni/i.test(
+    /主从|主库|从库|漂移|Sentinel|哨兵|quorum|CKQUORUM|s_down|o_down|复制|lag|Leader|Follower|Patroni|primary|replica|standby|drift/i.test(
       clean,
     )
   ) {
     tone = "judge";
-    tag = "拓扑判据";
+    tag = bi("拓扑判据", "Topology");
     priority = 1;
   }
 
   let headline = clean;
   let detail = "";
   const periodIdx = clean.indexOf("。");
+  const enPeriodIdx = periodIdx >= 0 ? -1 : clean.indexOf(". ");
   if (periodIdx >= 8 && periodIdx < clean.length - 1) {
     headline = clean.slice(0, periodIdx).trim();
     detail = clean.slice(periodIdx + 1).trim();
+  } else if (enPeriodIdx >= 16 && enPeriodIdx < clean.length - 2) {
+    headline = clean.slice(0, enPeriodIdx + 1).trim();
+    detail = clean.slice(enPeriodIdx + 2).trim();
   } else {
     const semiIdx = clean.indexOf("；");
+    const enSemiIdx = semiIdx >= 0 ? -1 : clean.indexOf("; ");
     if (semiIdx >= 10 && semiIdx < clean.length - 1) {
       headline = clean.slice(0, semiIdx).trim();
       detail = clean.slice(semiIdx + 1).trim();
+    } else if (enSemiIdx >= 16 && enSemiIdx < clean.length - 2) {
+      headline = clean.slice(0, enSemiIdx + 1).trim();
+      detail = clean.slice(enSemiIdx + 2).trim();
     }
   }
 
@@ -6098,6 +6749,7 @@ function ProbeExecutionKit({
   hasEchoInput: boolean;
   onDownload: () => void;
 }) {
+  const lang = useLang();
   const [codeOpen, setCodeOpen] = useState(() => !probeSafe);
   const [moreNotesOpen, setMoreNotesOpen] = useState(false);
 
@@ -6122,7 +6774,7 @@ function ProbeExecutionKit({
       primaryNotes: parsed.slice(0, splitCount),
       extraNotes: parsed.slice(splitCount),
     };
-  }, [notes]);
+  }, [notes, lang]);
 
   const shownNotes = moreNotesOpen
     ? [...primaryNotes, ...extraNotes]
@@ -6140,7 +6792,12 @@ function ProbeExecutionKit({
           </span>
           <div className="rh-probe-kit-titles">
             <div className="rh-probe-kit-row">
-              <b>在生产节点运行只读采集探针</b>
+              <b>
+                {bi(
+                  "在生产节点运行只读采集探针",
+                  "Run Read-Only Probe on Production Nodes",
+                )}
+              </b>
               <span className={`rh-shield-pill ${probeSafe ? "ok" : "warn"}`}>
                 <svg
                   width="13"
@@ -6165,11 +6822,17 @@ function ProbeExecutionKit({
                     />
                   )}
                 </svg>
-                {probeSafe ? "纯只读校验通过" : "请人工复核只读性"}
+                {probeSafe
+                  ? bi("纯只读校验通过", "Read-Only Verified")
+                  : bi("请人工复核只读性", "Manual Review Needed")}
               </span>
               {script && (
                 <span className="rh-probe-file-chip mono">
-                  {fileName} · {lineCount} 行
+                  {fileName} ·{" "}
+                  {bi(
+                    `${lineCount} 行`,
+                    lineCount === 1 ? "1 line" : `${lineCount} lines`,
+                  )}
                 </span>
               )}
             </div>
@@ -6180,7 +6843,7 @@ function ProbeExecutionKit({
           <div className="rh-probe-kit-acts">
             <CopyCodeBtn
               text={script}
-              label="复制采集脚本"
+              label={bi("复制采集脚本", "Copy Script")}
               className="is-primary-ctl"
             />
             <button
@@ -6189,7 +6852,7 @@ function ProbeExecutionKit({
               onClick={onDownload}
             >
               <IconDownload />
-              <span>下载 .sh</span>
+              <span>{bi("下载 .sh", "Download .sh")}</span>
             </button>
             <button
               type="button"
@@ -6197,7 +6860,11 @@ function ProbeExecutionKit({
               aria-expanded={codeOpen}
               onClick={() => setCodeOpen((v) => !v)}
             >
-              <span>{codeOpen ? "收起源码" : "查看脚本"}</span>
+              <span>
+                {codeOpen
+                  ? bi("收起源码", "Hide Script")
+                  : bi("查看脚本", "View Script")}
+              </span>
               <IconDown className={`rh-kit-chev ${codeOpen ? "open" : ""}`} />
             </button>
           </div>
@@ -6240,8 +6907,11 @@ function ProbeExecutionKit({
             >
               <span>
                 {moreNotesOpen
-                  ? "收起补充核查判据"
-                  : `展开其余 ${extraNotes.length} 条采集核查判据`}
+                  ? bi("收起补充核查判据", "Hide additional check notes")
+                  : bi(
+                      `展开其余 ${extraNotes.length} 条采集核查判据`,
+                      `Show ${extraNotes.length} more check notes`,
+                    )}
               </span>
               <IconDown
                 className={`rh-kit-chev ${moreNotesOpen ? "open" : ""}`}
@@ -6261,7 +6931,7 @@ function ProbeExecutionKit({
               <ShellCodeBlock
                 code={script}
                 title={fileName}
-                copyLabel="复制脚本"
+                copyLabel={bi("复制脚本", "Copy Script")}
                 onDownload={onDownload}
               />
             </div>
@@ -6297,6 +6967,7 @@ function RehearsalSessionView({
   onListChanged: () => Promise<void>;
   onEngageFocus?: () => void;
 }) {
+  useLang();
   const [r, setR] = useState<ChangeRehearsal | null>(
     () => initialSession || null,
   );
@@ -6402,7 +7073,7 @@ function RehearsalSessionView({
         setTestEnvOpen(true);
       }
     } catch (e) {
-      setLoadErr((e as Error).message || "读取失败");
+      setLoadErr((e as Error).message || bi("读取失败", "Failed to load"));
     } finally {
       setLoading(false);
     }
@@ -6450,14 +7121,16 @@ function RehearsalSessionView({
 
     for (const tf of txtFiles.slice(0, 1)) {
       if (tf.size > 2 * 1024 * 1024) {
-        Message.warning("回显文本文件请控制在 2 MiB 以内");
+        Message.warning(
+          bi("回显文本文件请控制在 2 MiB 以内", "Output text file must be under 2 MiB"),
+        );
         continue;
       }
       const reader = new FileReader();
       reader.onload = () => {
         setProbeMode("paste");
         setProbeOut(String(reader.result || ""));
-        Message.success(`已载入 ${tf.name}`);
+        Message.success(bi(`已载入 ${tf.name}`, `Loaded ${tf.name}`));
       };
       reader.readAsText(tf);
     }
@@ -6465,13 +7138,21 @@ function RehearsalSessionView({
     if (!imgFiles.length) return;
     if (noVision) {
       Message.warning(
-        "当前所选模型不支持识别截图，请粘贴文字回显或在下方切换支持看图的模型",
+        bi(
+          "当前所选模型不支持识别截图，请粘贴文字回显或在下方切换支持看图的模型",
+          "Selected model does not support images; paste text output or switch to a vision model below",
+        ),
       );
       return;
     }
     const room = MAX_IMAGES - probeImages.length;
     if (room <= 0) {
-      Message.warning(`单次最多上传 ${MAX_IMAGES} 张回显截图`);
+      Message.warning(
+        bi(
+          `单次最多上传 ${MAX_IMAGES} 张回显截图`,
+          `Up to ${MAX_IMAGES} screenshots allowed`,
+        ),
+      );
       return;
     }
     const added: DraftImage[] = [];
@@ -6484,7 +7165,9 @@ function RehearsalSessionView({
     }
     if (added.length > 0) {
       setProbeImages((prev) => [...prev, ...added]);
-      Message.success(`已添加 ${added.length} 张回显截图`);
+      Message.success(
+        bi(`已添加 ${added.length} 张回显截图`, `Added ${added.length} screenshot(s)`),
+      );
     }
   };
 
@@ -6506,11 +7189,13 @@ function RehearsalSessionView({
     return (
       <div className="rh-state" role="alert">
         <IconExclamationCircle className="bad" />
-        <b>无法打开该演练记录</b>
-        <p className="muted small">{loadErr || "记录不存在或已被删除"}</p>
+        <b>{bi("无法打开该演练记录", "Unable to open rehearsal")}</b>
+        <p className="muted small">
+          {loadErr || bi("记录不存在或已被删除", "Record does not exist or was deleted")}
+        </p>
         <div className="row-gap">
           <Button icon={<IconRefresh />} onClick={() => void load(true)}>
-            重试
+            {bi("重试", "Retry")}
           </Button>
           <Button
             onClick={() =>
@@ -6520,7 +7205,7 @@ function RehearsalSessionView({
               )
             }
           >
-            返回演练列表
+            {bi("返回演练列表", "Back to Rehearsals")}
           </Button>
         </div>
       </div>
@@ -6542,8 +7227,11 @@ function RehearsalSessionView({
     setLiveScope(
       createInitialLiveState(
         "scope",
-        "AI 正在定制生产只读采集探针",
-        "正在锁定只读安全红线并建立模型连接…",
+        bi("AI 正在定制生产只读采集探针", "AI is building read-only production probe"),
+        bi(
+          "正在锁定只读安全红线并建立模型连接…",
+          "Locking read-only safety guardrails & connecting…",
+        ),
         pick.current,
       ),
     );
@@ -6569,7 +7257,12 @@ function RehearsalSessionView({
       setFreshTraceStage("scope");
       switchStage(next.stage, true);
       void onListChanged();
-      Message.success("已生成只读状态采集脚本并通过静态安全扫描");
+      Message.success(
+        bi(
+          "已生成只读状态采集脚本并通过静态安全扫描",
+          "Read-only probe generated and passed static safety scan",
+        ),
+      );
     } catch (e) {
       if (ac.signal.aborted) {
         setLiveScope(null);
@@ -6592,8 +7285,14 @@ function RehearsalSessionView({
     setLiveProbe(
       createInitialLiveState(
         "probe",
-        "AI 正在比对现场漂移并编排演练步骤",
-        "正在脱敏现场证据并建立模型连接…",
+        bi(
+          "AI 正在比对现场漂移并编排演练步骤",
+          "AI is analyzing live drift & planning rehearsal steps",
+        ),
+        bi(
+          "正在脱敏现场证据并建立模型连接…",
+          "Redacting live evidence & connecting to AI model…",
+        ),
         pick.current,
       ),
     );
@@ -6631,7 +7330,12 @@ function RehearsalSessionView({
       setFreshTraceStage("probe");
       switchStage(next.stage, true);
       void onListChanged();
-      Message.success("已完成漂移分析并生成测试演练步骤");
+      Message.success(
+        bi(
+          "已完成漂移分析并生成测试演练步骤",
+          "Drift analysis complete; rehearsal steps generated",
+        ),
+      );
     } catch (e) {
       if (ac.signal.aborted) {
         setLiveProbe(null);
@@ -6658,7 +7362,12 @@ function RehearsalSessionView({
       setFreshTraceStage("finalized");
       switchStage("finalized", true);
       void onListChanged();
-      Message.success("《生产变更实施方案》已存入集群文档");
+      Message.success(
+        bi(
+          "《生产变更实施方案》已存入集群文档",
+          "Production Change SOP saved to Cluster Docs",
+        ),
+      );
     } catch (e) {
       err(e);
     } finally {
@@ -6672,7 +7381,7 @@ function RehearsalSessionView({
         `/api/clusters/${encodeURIComponent(c.id)}/rehearsals/${encodeURIComponent(r.id)}`,
         { method: "DELETE" },
       );
-      Message.success("已删除演练记录");
+      Message.success(bi("已删除演练记录", "Rehearsal deleted"));
       await onListChanged();
       go(
         { name: "deliveries", id: c.id, tab: "rehearsal" },
@@ -6732,12 +7441,16 @@ function RehearsalSessionView({
         <div className="rh-shead-main">
           <div className="rh-shead-title">
             <h2>{r.title}</h2>
-            <span className="faint small">更新于 {ago(r.updated_at)}</span>
+            <span className="faint small">
+              {bi(`更新于 ${ago(r.updated_at)}`, `Updated ${ago(r.updated_at)}`)}
+            </span>
           </div>
           <p className="rh-shead-goal">{renderThinkingInline(r.goal)}</p>
           {r.scope_summary && r.scope_summary.trim() !== r.goal.trim() && (
             <div className="rh-shead-summary">
-              <span className="rh-shead-sum-tag">收敛边界</span>
+              <span className="rh-shead-sum-tag">
+                {bi("收敛边界", "Scope Summary")}
+              </span>
               <span className="rh-shead-sum-txt">
                 {renderThinkingInline(r.scope_summary)}
               </span>
@@ -6748,15 +7461,22 @@ function RehearsalSessionView({
               clusterId={c.id}
               rehearsalId={r.id}
               names={r.goal_images}
-              label="诉求参考截图"
+              label={bi("诉求参考截图", "Reference Screenshots")}
             />
           )}
         </div>
         <Popconfirm
           position="br"
-          title={`确认删除演练「${r.title}」？`}
-          content="已定稿的实施方案仍会保留在集群文档中。"
-          okText="删除"
+          title={bi(
+            `确认删除演练「${r.title}」？`,
+            `Delete rehearsal "${r.title}"?`,
+          )}
+          content={bi(
+            "已定稿的实施方案仍会保留在集群文档中。",
+            "Finalized SOP documents will remain in Cluster Docs.",
+          )}
+          okText={bi("删除", "Delete")}
+          cancelText={bi("取消", "Cancel")}
           okButtonProps={{ status: "danger" }}
           onOk={removeSession}
         >
@@ -6765,9 +7485,9 @@ function RehearsalSessionView({
             type="text"
             status="danger"
             icon={<IconDelete />}
-            aria-label="删除演练"
+            aria-label={bi("删除演练", "Delete rehearsal")}
           >
-            删除
+            {bi("删除", "Delete")}
           </Button>
         </Popconfirm>
       </header>
@@ -6775,7 +7495,7 @@ function RehearsalSessionView({
       <nav
         className="rh-stages"
         ref={stageNavRef}
-        aria-label="变更演练阶段"
+        aria-label={bi("变更演练阶段", "Change rehearsal stages")}
         onKeyDown={(e) => {
           if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
           const unlocked = STAGE_ORDER.filter((_, idx) => idx <= maxIdx);
@@ -6820,7 +7540,10 @@ function RehearsalSessionView({
                 <b>{STAGE_META[st].short}</b>
                 <small>
                   {st === "rehearsing" && requiredSteps.length > 0
-                    ? `必测 ${doneRequired}/${requiredSteps.length}`
+                    ? bi(
+                        `必测 ${doneRequired}/${requiredSteps.length}`,
+                        `Required ${doneRequired}/${requiredSteps.length}`,
+                      )
                     : STAGE_META[st].sub}
                 </small>
               </span>
@@ -6847,7 +7570,10 @@ function RehearsalSessionView({
             {r.traces?.create && (
               <RehearsalAIProcess
                 trace={r.traces.create}
-                title="AI 诉求研判与边界分析过程"
+                title={bi(
+                  "AI 诉求研判与边界分析过程",
+                  "AI Goal Analysis & Scope Alignment",
+                )}
                 defaultOpen={freshTraceStage === "create"}
               />
             )}
@@ -6883,7 +7609,10 @@ function RehearsalSessionView({
                 />
                 <ModelPicker pick={pick} compact />
                 <span className="rh-foot-note">
-                  仅生成静态只读采集命令，零重启与写操作
+                  {bi(
+                    "仅生成静态只读采集命令，零重启与写操作",
+                    "Generates static read-only commands only; zero restarts or writes",
+                  )}
                 </span>
               </div>
               <div className="rh-compose-submit">
@@ -6892,12 +7621,18 @@ function RehearsalSessionView({
                   shape="round"
                   className={`ai-pill ${!offline ? "ai-pill-primary" : ""}`}
                   icon={<Spark size={14} rainbow={offline} />}
-                  title={isMac ? "⌘ + Enter 提交" : "Ctrl + Enter 提交"}
+                  title={
+                    isMac
+                      ? bi("⌘ + Enter 提交", "⌘ + Enter Submit")
+                      : bi("Ctrl + Enter 提交", "Ctrl + Enter Submit")
+                  }
                   loading={scopeBusy}
                   disabled={offline}
                   onClick={() => void submitScope()}
                 >
-                  {r.probe_script ? "重新生成只读探针" : "生成只读采集脚本"}
+                  {r.probe_script
+                    ? bi("重新生成只读探针", "Regenerate Probe")
+                    : bi("生成只读采集脚本", "Generate Probe")}
                 </Button>
               </div>
             </div>
@@ -6924,7 +7659,10 @@ function RehearsalSessionView({
             {r.traces?.scope && (
               <RehearsalAIProcess
                 trace={r.traces.scope}
-                title="AI 只读探针设计与安全扫描过程"
+                title={bi(
+                  "AI 只读探针设计与安全扫描过程",
+                  "AI Probe Design & Safety Scan",
+                )}
                 defaultOpen={false}
               />
             )}
@@ -6949,17 +7687,26 @@ function RehearsalSessionView({
                     {hasProbeInput ? <IconCheck /> : 2}
                   </span>
                   <div className="rh-echo-ws-titles">
-                    <b>回填现场采集结果</b>
+                    <b>{bi("回填现场采集结果", "Submit Live Probe Output")}</b>
                     <span
                       className={`rh-echo-status-pill ${hasProbeInput ? "is-ready" : ""}`}
                     >
                       {hasProbeInput
                         ? probeMode === "paste" && probeOut.trim()
-                          ? `已录入 ${probeOut.trim().split("\n").length} 行回显${probeImages.length > 0 ? ` · ${probeImages.length} 张截图` : ""}`
+                          ? bi(
+                              `已录入 ${probeOut.trim().split("\n").length} 行回显${probeImages.length > 0 ? ` · ${probeImages.length} 张截图` : ""}`,
+                              `${probeOut.trim().split("\n").length} lines entered${probeImages.length > 0 ? ` · ${probeImages.length} image(s)` : ""}`,
+                            )
                           : probeImages.length > 0
-                            ? `已添加 ${probeImages.length} 张终端截图`
-                            : "已填写现状说明"
-                        : "当前核心操作 · 粘贴回显或终端截图"}
+                            ? bi(
+                                `已添加 ${probeImages.length} 张终端截图`,
+                                `${probeImages.length} screenshot(s) added`,
+                              )
+                            : bi("已填写现状说明", "Status notes entered")
+                        : bi(
+                            "当前核心操作 · 粘贴回显或终端截图",
+                            "Next step · Paste probe output or screenshots",
+                          )}
                     </span>
                   </div>
                 </div>
@@ -6978,7 +7725,12 @@ function RehearsalSessionView({
                       strokeLinejoin="round"
                     />
                   </svg>
-                  <span>口令与密钥自动二次脱敏 · 识别主从与参数漂移</span>
+                  <span>
+                    {bi(
+                      "口令与密钥自动二次脱敏 · 识别主从与参数漂移",
+                      "Auto-redacts credentials · Detects role & parameter drift",
+                    )}
+                  </span>
                 </span>
               </div>
 
@@ -7012,12 +7764,18 @@ function RehearsalSessionView({
                   <div className="rh-probe-head">
                     <Segmented<"paste" | "manual">
                       size="sm"
-                      label="录入现场状态方式"
+                      label={bi("录入现场状态方式", "Probe input mode")}
                       value={probeMode}
                       onChange={setProbeMode}
                       options={[
-                        { value: "paste", label: "粘贴回显或截图" },
-                        { value: "manual", label: "手动说明现状" },
+                        {
+                          value: "paste",
+                          label: bi("粘贴回显或截图", "Paste Output / Images"),
+                        },
+                        {
+                          value: "manual",
+                          label: bi("手动说明现状", "Describe Manually"),
+                        },
                       ]}
                     />
                     <div className="rh-probe-upload-btns">
@@ -7040,13 +7798,19 @@ function RehearsalSessionView({
                         disabled={probeBusy || noVision}
                         title={
                           noVision
-                            ? "当前所选模型不支持图片识别，可在下方切换支持看图的模型"
-                            : "上传或直接 Ctrl+V 粘贴回显截图"
+                            ? bi(
+                                "当前所选模型不支持图片识别，可在下方切换支持看图的模型",
+                                "Selected model does not support images; switch to a vision model below",
+                              )
+                            : bi(
+                                "上传或直接 Ctrl+V 粘贴回显截图",
+                                "Upload or Ctrl+V paste output screenshots",
+                              )
                         }
                         onClick={() => probeImgInputRef.current?.click()}
                       >
                         <IconImage />
-                        <span>上传回显截图</span>
+                        <span>{bi("上传回显截图", "Upload Image")}</span>
                       </button>
                       {probeMode === "paste" && (
                         <Upload
@@ -7064,7 +7828,7 @@ function RehearsalSessionView({
                             disabled={probeBusy}
                           >
                             <IconUpload />
-                            <span>上传 .log / .txt</span>
+                            <span>{bi("上传 .log / .txt", "Upload .log / .txt")}</span>
                           </button>
                         </Upload>
                       )}
@@ -7081,7 +7845,7 @@ function RehearsalSessionView({
                               : setManualState("")
                           }
                         >
-                          清空文本
+                          {bi("清空文本", "Clear")}
                         </button>
                       )}
                     </div>
@@ -7094,8 +7858,11 @@ function RehearsalSessionView({
                       onChange={setProbeOut}
                       autoSize={{ minRows: 9, maxRows: 20 }}
                       className="mono rh-echo-area"
-                      placeholder="将生产节点执行采集脚本后的终端回显粘贴至此（多台节点输出可直接合并粘贴），或直接按 Ctrl+V 粘贴堡垒机/终端截图…"
-                      aria-label="探针回显输出"
+                      placeholder={bi(
+                        "将生产节点执行采集脚本后的终端回显粘贴至此（多台节点输出可直接合并粘贴），或直接按 Ctrl+V 粘贴堡垒机/终端截图…",
+                        "Paste terminal output from running the probe script on production nodes (you can combine multiple nodes), or press Ctrl+V to paste screenshots…",
+                      )}
+                      aria-label={bi("探针回显输出", "Probe terminal output")}
                     />
                   ) : (
                     <Input.TextArea
@@ -7103,8 +7870,11 @@ function RehearsalSessionView({
                       disabled={probeBusy}
                       onChange={setManualState}
                       autoSize={{ minRows: 8, maxRows: 16 }}
-                      placeholder="简述生产集群当前真实拓扑、版本号与配置现状（也可配合 Ctrl+V 粘贴监控或终端截图），例如：目前 node-2 为主节点，node-1 / node-3 为从节点；当前版本 7.2.4…"
-                      aria-label="手动说明生产现状"
+                      placeholder={bi(
+                        "简述生产集群当前真实拓扑、版本号与配置现状（也可配合 Ctrl+V 粘贴监控或终端截图），例如：目前 node-2 为主节点，node-1 / node-3 为从节点；当前版本 7.2.4…",
+                        "Describe current live topology, version, and active config (you can also Ctrl+V screenshots), e.g., node-2 is primary, node-1 / node-3 are replicas; version 7.2.4…",
+                      )}
+                      aria-label={bi("手动说明生产现状", "Manual production state description")}
                     />
                   )}
 
@@ -7128,8 +7898,8 @@ function RehearsalSessionView({
                           className="rh-field-label"
                           htmlFor={`tenv-${r.id}`}
                         >
-                          测试演练环境节点映射{" "}
-                          <span className="faint">（可选）</span>
+                          {bi("测试演练环境节点映射", "Staging Node Mapping")}{" "}
+                          <span className="faint">{bi("（可选）", "(optional)")}</span>
                         </label>
                         {!testEnvNote.trim() && (
                           <button
@@ -7137,7 +7907,7 @@ function RehearsalSessionView({
                             className="rh-inline-cancel"
                             onClick={() => setTestEnvOpen(false)}
                           >
-                            收起
+                            {bi("收起", "Collapse")}
                           </button>
                         )}
                       </div>
@@ -7146,8 +7916,11 @@ function RehearsalSessionView({
                         value={testEnvNote}
                         disabled={probeBusy}
                         onChange={setTestEnvNote}
-                        placeholder="例如：测试环境机器为 192.168.56.11~13，操作系统及架构与生产一致"
-                        aria-label="测试环境说明"
+                        placeholder={bi(
+                          "例如：测试环境机器为 192.168.56.11~13，操作系统及架构与生产一致",
+                          "e.g., Staging hosts: 192.168.56.11–13, matching OS & arch",
+                        )}
+                        aria-label={bi("测试环境说明", "Staging environment note")}
                       />
                     </div>
                   )}
@@ -7162,11 +7935,15 @@ function RehearsalSessionView({
                           onClick={() => setTestEnvOpen(true)}
                         >
                           <IconPlus />
-                          <span>映射测试演练节点（可选）</span>
+                          <span>
+                            {bi("映射测试演练节点（可选）", "Map Staging Nodes (optional)")}
+                          </span>
                         </button>
                       )}
                       <span className="rh-foot-note">
-                        {isMac ? "⌘ + Enter 提交分析" : "Ctrl + Enter 提交分析"}
+                        {isMac
+                          ? bi("⌘ + Enter 提交分析", "⌘ + Enter Analyze")
+                          : bi("Ctrl + Enter 提交分析", "Ctrl + Enter Analyze")}
                       </span>
                     </div>
                     <div className="rh-compose-submit">
@@ -7186,12 +7963,16 @@ function RehearsalSessionView({
                             rainbow={offline || !hasProbeInput}
                           />
                         }
-                        title={isMac ? "⌘ + Enter 提交" : "Ctrl + Enter 提交"}
+                        title={
+                          isMac
+                            ? bi("⌘ + Enter 提交", "⌘ + Enter Submit")
+                            : bi("Ctrl + Enter 提交", "Ctrl + Enter Submit")
+                        }
                         loading={probeBusy}
                         disabled={offline || !hasProbeInput}
                         onClick={() => void submitProbe()}
                       >
-                        识别漂移并生成演练步骤
+                        {bi("识别漂移并生成演练步骤", "Analyze Drift & Plan Steps")}
                       </Button>
                     </div>
                   </div>
@@ -7202,7 +7983,7 @@ function RehearsalSessionView({
                     clusterId={c.id}
                     rehearsalId={r.id}
                     names={r.probe_images}
-                    label="已归档现场回显截图"
+                    label={bi("已归档现场回显截图", "Archived Probe Screenshots")}
                   />
                 )}
               </div>
@@ -7226,7 +8007,10 @@ function RehearsalSessionView({
             {r.traces?.probe && (
               <RehearsalAIProcess
                 trace={r.traces.probe}
-                title="AI 现场漂移比对与演练编排思考"
+                title={bi(
+                  "AI 现场漂移比对与演练编排思考",
+                  "AI Drift Comparison & Plan Synthesis",
+                )}
                 defaultOpen={freshTraceStage === "probe"}
               />
             )}
@@ -7234,7 +8018,7 @@ function RehearsalSessionView({
             {r.drift && (
               <section
                 className={`rh-drift-sec ${r.drift.drifted ? "is-drifted" : ""}`}
-                aria-label="基线与现场比对"
+                aria-label={bi("基线与现场比对", "Baseline vs Live Comparison")}
               >
                 <div className="rh-drift-top">
                   <div className="rh-drift-title">
@@ -7243,11 +8027,19 @@ function RehearsalSessionView({
                     />
                     <b>
                       {r.drift.drifted
-                        ? "检测到现场状态与初始交付存在漂移"
-                        : "现场状态与初始交付基线一致"}
+                        ? bi(
+                            "检测到现场状态与初始交付存在漂移",
+                            "Live state drifted from initial baseline",
+                          )
+                        : bi(
+                            "现场状态与初始交付基线一致",
+                            "Live state matches initial baseline",
+                          )}
                     </b>
                     <span className="rh-drift-tag">
-                      {r.drift.drifted ? "已按现场拓扑对齐" : "基线一致"}
+                      {r.drift.drifted
+                        ? bi("已按现场拓扑对齐", "Aligned to Live State")
+                        : bi("基线一致", "Baseline Matched")}
                     </span>
                   </div>
                   {r.drift.summary && (
@@ -7262,11 +8054,11 @@ function RehearsalSessionView({
                     <table className="rh-drift-tbl">
                       <thead>
                         <tr>
-                          <th>节点</th>
-                          <th>地址</th>
-                          <th>角色比对（初始 → 现场）</th>
-                          <th>版本</th>
-                          <th>运行状态</th>
+                          <th>{bi("节点", "Node")}</th>
+                          <th>{bi("地址", "Address")}</th>
+                          <th>{bi("角色比对（初始 → 现场）", "Role (Initial → Live)")}</th>
+                          <th>{bi("版本", "Version")}</th>
+                          <th>{bi("运行状态", "Status")}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -7297,7 +8089,7 @@ function RehearsalSessionView({
                               <td className="mono">
                                 {h.version || c.version}
                               </td>
-                              <td>{h.status || "正常"}</td>
+                              <td>{h.status || bi("正常", "Healthy")}</td>
                             </tr>
                           );
                         })}
@@ -7308,7 +8100,9 @@ function RehearsalSessionView({
 
                 {(r.drift.param_diffs || []).length > 0 && (
                   <div className="rh-pdiffs">
-                    <span className="rh-pdiffs-k">参数变化</span>
+                    <span className="rh-pdiffs-k">
+                      {bi("参数变化", "Parameter Drift")}
+                    </span>
                     <div className="rh-pdiffs-list">
                       {r.drift.param_diffs!.map((p) => (
                         <span key={p.key} className="rh-pdiff-chip">
@@ -7336,7 +8130,7 @@ function RehearsalSessionView({
                     clusterId={c.id}
                     rehearsalId={r.id}
                     names={r.probe_images}
-                    label="现场采集回显截图"
+                    label={bi("现场采集回显截图", "Live Probe Screenshots")}
                   />
                 )}
               </section>
@@ -7364,33 +8158,48 @@ function RehearsalSessionView({
                 </svg>
                 <div>
                   <b className="num">
-                    必测步骤 {doneRequired} / {requiredSteps.length}
+                    {bi(
+                      `必测步骤 ${doneRequired} / ${requiredSteps.length}`,
+                      `Required ${doneRequired} / ${requiredSteps.length}`,
+                    )}
                   </b>
                   <span className="muted small">
                     {gateReady
-                      ? "全部必测步骤已验证，可定稿生成生产实施方案"
-                      : "在测试环境逐条验证耗时；遇到报错可粘贴文本或截图就地排障"}
+                      ? bi(
+                          "全部必测步骤已验证，可定稿生成生产实施方案",
+                          "All required steps verified; ready to finalize Production SOP",
+                        )
+                      : bi(
+                          "在测试环境逐条验证耗时；遇到报错可粘贴文本或截图就地排障",
+                          "Verify each step in staging and record timings; paste errors/screenshots to troubleshoot inline",
+                        )}
                   </span>
                 </div>
               </div>
               <div className="rh-gate-right">
                 <Segmented<string>
-                  label="阶段筛选"
+                  label={bi("阶段筛选", "Phase filter")}
                   value={phaseFilter}
                   onChange={setPhaseFilter}
                   options={[
-                    { value: "all", label: "全部", count: steps.length },
-                    { value: "precheck", label: "预检" },
-                    { value: "execute", label: "执行" },
-                    { value: "verify", label: "验收" },
-                    { value: "rollback", label: "回退" },
+                    { value: "all", label: bi("全部", "All"), count: steps.length },
+                    { value: "precheck", label: bi("预检", "Precheck") },
+                    { value: "execute", label: bi("执行", "Execute") },
+                    { value: "verify", label: bi("验收", "Verify") },
+                    { value: "rollback", label: bi("回退", "Rollback") },
                   ]}
                 />
                 <Tooltip
                   content={
                     gateReady
-                      ? "将已验证命令与实测耗时映射回生产节点并生成实施方案"
-                      : `完成剩余 ${requiredSteps.length - doneRequired} 个必测步骤后可定稿`
+                      ? bi(
+                          "将已验证命令与实测耗时映射回生产节点并生成实施方案",
+                          "Map verified commands & timings back to production nodes and generate SOP",
+                        )
+                      : bi(
+                          `完成剩余 ${requiredSteps.length - doneRequired} 个必测步骤后可定稿`,
+                          `Complete remaining ${requiredSteps.length - doneRequired} required step(s) to finalize`,
+                        )
                   }
                   mini
                 >
@@ -7402,7 +8211,7 @@ function RehearsalSessionView({
                       loading={busyFinalize}
                       onClick={() => void finalizeSOP()}
                     >
-                      定稿实施方案
+                      {bi("定稿实施方案", "Finalize SOP")}
                     </Button>
                   </span>
                 </Tooltip>
@@ -7411,7 +8220,10 @@ function RehearsalSessionView({
 
             {shownSteps.length === 0 ? (
               <div className="rh-empty-filter muted small">
-                该阶段下暂无步骤，切换到「全部」查看完整演练清单。
+                {bi(
+                  "该阶段下暂无步骤，切换到「全部」查看完整演练清单。",
+                  "No steps in this phase; switch to All to view the full checklist.",
+                )}
               </div>
             ) : (
               <ol className="rh-timeline">
@@ -7496,35 +8308,53 @@ function RehearsalSessionView({
               </div>
               <div className="rh-doc-body">
                 <div className="rh-doc-top">
-                  <span className="rh-doc-badge">已定稿</span>
+                  <span className="rh-doc-badge">{bi("已定稿", "Finalized")}</span>
                   <span className="mono faint small">
                     {r.doc_id || `sop-${r.id}`}
                   </span>
                 </div>
-                <h3>{r.title} · 生产变更实施方案</h3>
+                <h3>
+                  {bi(
+                    `${r.title} · 生产变更实施方案`,
+                    `${r.title} · Production Change SOP`,
+                  )}
+                </h3>
                 <p className="muted">
-                  已将测试环境验证通过的步骤、实测耗时与回退预案映射回集群{" "}
-                  <b className="mono">{c.id}</b> 的生产节点拓扑，并归档至集群文档。
+                  {biv(
+                    <>
+                      已将测试环境验证通过的步骤、实测耗时与回退预案映射回集群{" "}
+                      <b className="mono">{c.id}</b> 的生产节点拓扑，并归档至集群文档。
+                    </>,
+                    <>
+                      Mapped verified steps, measured durations, and rollback
+                      procedures onto production topology for cluster{" "}
+                      <b className="mono">{c.id}</b> and archived to Cluster Docs.
+                    </>,
+                  )}
                 </p>
                 <dl className="rh-doc-facts">
                   <div>
-                    <dt>验证步骤</dt>
-                    <dd className="num">{steps.length} 步</dd>
+                    <dt>{bi("验证步骤", "Steps")}</dt>
+                    <dd className="num">
+                      {bi(`${steps.length} 步`, `${steps.length}`)}
+                    </dd>
                   </div>
                   <div>
-                    <dt>必测通过</dt>
+                    <dt>{bi("必测通过", "Required Passed")}</dt>
                     <dd className="num">
                       {doneRequired}/{requiredSteps.length}
                     </dd>
                   </div>
                   {totalRevisions > 0 && (
                     <div>
-                      <dt>排障修订</dt>
-                      <dd className="num">{totalRevisions} 次</dd>
+                      <dt>{bi("排障修订", "Revisions")}</dt>
+                      <dd className="num">
+                        {bi(`${totalRevisions} 次`, `${totalRevisions}`)}
+                      </dd>
                     </div>
                   )}
                   <div>
-                    <dt>目标组件</dt>
+                    <dt>{bi("目标组件", "Component")}</dt>
                     <dd>
                       {c.app_name} {c.version}
                     </dd>
@@ -7544,17 +8374,19 @@ function RehearsalSessionView({
                         })
                       }
                     >
-                      打开文档审阅 <IconRight />
+                      {bi("打开文档审阅", "Open Document")} <IconRight />
                     </Button>
                   )}
                   {r.doc_id && can("report.export") && (
                     <Button
                       icon={<IconDownload />}
                       onClick={() => {
-                        window.location.href = `/api/clusters/${encodeURIComponent(c.id)}/export?docs=${encodeURIComponent(r.doc_id!)}`;
+                        window.location.href = withLang(
+                          `/api/clusters/${encodeURIComponent(c.id)}/export?docs=${encodeURIComponent(r.doc_id!)}`,
+                        );
                       }}
                     >
-                      导出 Word (.docx)
+                      {bi("导出 Word (.docx)", "Export Word (.docx)")}
                     </Button>
                   )}
                   <Button
@@ -7564,7 +8396,7 @@ function RehearsalSessionView({
                     disabled={offline}
                     onClick={() => void finalizeSOP()}
                   >
-                    重新同步生成
+                    {bi("重新同步生成", "Re-sync SOP")}
                   </Button>
                 </div>
               </div>
@@ -7603,6 +8435,7 @@ function StepRow({
   onUpdated: (r: ChangeRehearsal) => void;
   onEngageFocus?: () => void;
 }) {
+  useLang();
   const [elapsed, setElapsed] = useState(step.elapsed || "");
   const [note, setNote] = useState(step.note || "");
   const [editingCmd, setEditingCmd] = useState(false);
@@ -7632,13 +8465,21 @@ function StepRow({
     if (!imgs.length) return;
     if (noVision) {
       Message.warning(
-        "当前所选模型不支持识别截图，请粘贴报错文本或在下方切换支持看图的模型",
+        bi(
+          "当前所选模型不支持识别截图，请粘贴报错文本或在下方切换支持看图的模型",
+          "Selected model does not support images; paste error text or switch to a vision model below",
+        ),
       );
       return;
     }
     const room = MAX_IMAGES - errImages.length;
     if (room <= 0) {
-      Message.warning(`单次最多附加 ${MAX_IMAGES} 张报错截图`);
+      Message.warning(
+        bi(
+          `单次最多附加 ${MAX_IMAGES} 张报错截图`,
+          `Up to ${MAX_IMAGES} error screenshots allowed`,
+        ),
+      );
       return;
     }
     const added: DraftImage[] = [];
@@ -7692,8 +8533,14 @@ function StepRow({
     setLiveTrouble(
       createInitialLiveState(
         "troubleshoot",
-        "AI 正在诊断测试环境报错并推演修正命令",
-        "正在封装报错上下文并建立模型连接…",
+        bi(
+          "AI 正在诊断测试环境报错并推演修正命令",
+          "AI is diagnosing staging error & proposing a fix",
+        ),
+        bi(
+          "正在封装报错上下文并建立模型连接…",
+          "Packaging error context & connecting to AI model…",
+        ),
         pick.current,
       ),
     );
@@ -7737,7 +8584,9 @@ function StepRow({
       });
       onUpdated(next);
       setTroubleOpen(false);
-      Message.success("已更新步骤命令，请在测试环境复测");
+      Message.success(
+        bi("已更新步骤命令，请在测试环境复测", "Step command updated; please re-test in staging"),
+      );
     } catch (e) {
       err(e);
     } finally {
@@ -7748,12 +8597,12 @@ function StepRow({
   const num = step.order || index;
   const statusInfo =
     step.status === "passed"
-      ? { label: "实测通过", cls: "passed" }
+      ? { label: bi("实测通过", "Passed"), cls: "passed" }
       : step.status === "failed"
-        ? { label: "执行受阻", cls: "failed" }
+        ? { label: bi("执行受阻", "Blocked"), cls: "failed" }
         : step.status === "skipped"
-          ? { label: "已跳过", cls: "skipped" }
-          : { label: "待演练", cls: "pending" };
+          ? { label: bi("已跳过", "Skipped"), cls: "skipped" }
+          : { label: bi("待演练", "Pending"), cls: "pending" };
 
   return (
     <li
@@ -7786,7 +8635,7 @@ function StepRow({
             {step.target_role && (
               <code className="rh-target mono">{step.target_role}</code>
             )}
-            {step.optional && <Tag size="small">可选</Tag>}
+            {step.optional && <Tag size="small">{bi("可选", "Optional")}</Tag>}
           </div>
           <span className={`rh-status-pill ${statusInfo.cls}`}>
             {statusInfo.label}
@@ -7812,7 +8661,7 @@ function StepRow({
               onChange={setCmdDraft}
               autoSize={{ minRows: 3, maxRows: 12 }}
               className="mono"
-              aria-label="编辑步骤命令"
+              aria-label={bi("编辑步骤命令", "Edit step command")}
             />
             <div className="row-gap">
               <Button
@@ -7823,7 +8672,7 @@ function StepRow({
                   void patchStep({ command: cmdDraft, status: "pending" })
                 }
               >
-                保存命令
+                {bi("保存命令", "Save Command")}
               </Button>
               <Button
                 size="small"
@@ -7832,14 +8681,14 @@ function StepRow({
                   setEditingCmd(false);
                 }}
               >
-                取消
+                {bi("取消", "Cancel")}
               </Button>
             </div>
           </div>
         ) : (
           <ShellCodeBlock
             code={step.command}
-            title="执行命令"
+            title={bi("执行命令", "Command")}
             compact
             onEdit={() => setEditingCmd(true)}
           />
@@ -7847,18 +8696,21 @@ function StepRow({
 
         <dl className="rh-step-facts">
           <div>
-            <dt>预期判据</dt>
-            <dd>{step.expect || "返回码为 0 且服务状态正常"}</dd>
+            <dt>{bi("预期判据", "Expected")}</dt>
+            <dd>
+              {step.expect ||
+                bi("返回码为 0 且服务状态正常", "Exit code 0 & healthy service status")}
+            </dd>
           </div>
           {step.risk_note && (
             <div>
-              <dt>注意事项</dt>
+              <dt>{bi("注意事项", "Caution")}</dt>
               <dd className="warn-ink">{step.risk_note}</dd>
             </div>
           )}
           {step.rollback && (
             <div>
-              <dt>回退方式</dt>
+              <dt>{bi("回退方式", "Rollback")}</dt>
               <dd className="mono">{step.rollback}</dd>
             </div>
           )}
@@ -7902,14 +8754,15 @@ function StepRow({
                 >
                   <div className="rh-trouble-head">
                     <b>
-                      <IconExclamationCircle /> 测试环境报错诊断
+                      <IconExclamationCircle />{" "}
+                      {bi("测试环境报错诊断", "Staging Error Troubleshooting")}
                     </b>
                     <button
                       type="button"
                       className="link small"
                       onClick={() => setTroubleOpen(false)}
                     >
-                      收起
+                      {bi("收起", "Collapse")}
                     </button>
                   </div>
                   <Input.TextArea
@@ -7918,8 +8771,11 @@ function StepRow({
                     onChange={setErrText}
                     autoSize={{ minRows: 3, maxRows: 8 }}
                     className="mono"
-                    placeholder="粘贴测试机器上的报错输出，或直接按 Ctrl+V 粘贴报错终端截图（敏感信息自动脱敏）…"
-                    aria-label="步骤报错输出"
+                    placeholder={bi(
+                      "粘贴测试机器上的报错输出，或直接按 Ctrl+V 粘贴报错终端截图（敏感信息自动脱敏）…",
+                      "Paste error output from staging host, or press Ctrl+V to paste terminal screenshots (secrets auto-redacted)…",
+                    )}
+                    aria-label={bi("步骤报错输出", "Step error output")}
                   />
                   {(errImages.length > 0 ||
                     (step.error_images && step.error_images.length > 0)) && (
@@ -7937,7 +8793,7 @@ function StepRow({
                           clusterId={c.id}
                           rehearsalId={rehearsalId}
                           names={step.error_images}
-                          label="报错截图"
+                          label={bi("报错截图", "Error Screenshots")}
                         />
                       )}
                     </div>
@@ -7963,13 +8819,21 @@ function StepRow({
                         disabled={troubleBusy || noVision}
                         title={
                           noVision
-                            ? "当前所选模型不支持图片识别，可切换支持看图的模型"
-                            : "上传或直接 Ctrl+V 粘贴报错截图"
+                            ? bi(
+                                "当前所选模型不支持图片识别，可切换支持看图的模型",
+                                "Selected model does not support images; switch to a vision model",
+                              )
+                            : bi(
+                                "上传或直接 Ctrl+V 粘贴报错截图",
+                                "Upload or Ctrl+V paste error screenshots",
+                              )
                         }
                         onClick={() => errImgInputRef.current?.click()}
                       >
                         <IconImage />
-                        <span>粘贴/上传报错截图</span>
+                        <span>
+                          {bi("粘贴/上传报错截图", "Paste / Upload Error Image")}
+                        </span>
                       </button>
                       <ThinkLevel
                         levels={pick.current?.effort}
@@ -7993,14 +8857,18 @@ function StepRow({
                             }
                           />
                         }
-                        title={isMac ? "⌘ + Enter 诊断" : "Ctrl + Enter 诊断"}
+                        title={
+                          isMac
+                            ? bi("⌘ + Enter 诊断", "⌘ + Enter Diagnose")
+                            : bi("Ctrl + Enter 诊断", "Ctrl + Enter Diagnose")
+                        }
                         loading={troubleBusy}
                         disabled={
                           (!errText.trim() && errImages.length === 0) || offline
                         }
                         onClick={() => void askTroubleshoot()}
                       >
-                        诊断并生成修正命令
+                        {bi("诊断并生成修正命令", "Diagnose & Propose Fix")}
                       </Button>
                     </div>
                   </div>
@@ -8020,7 +8888,7 @@ function StepRow({
               {!liveTrouble && step.trouble_trace && (
                 <RehearsalAIProcess
                   trace={step.trouble_trace}
-                  title="AI 报错根因推理过程"
+                  title={bi("AI 报错根因推理过程", "AI Root Cause Analysis")}
                   defaultOpen={freshTrouble}
                 />
               )}
@@ -8033,8 +8901,11 @@ function StepRow({
                     <b>
                       <Spark size={14} rainbow />{" "}
                       {step.proposal.action === "insert_before"
-                        ? `建议插入前置步骤：${step.proposal.title || "前置准备"}`
-                        : "建议原位更新此步命令"}
+                        ? bi(
+                            `建议插入前置步骤：${step.proposal.title || "前置准备"}`,
+                            `Insert prerequisite step: ${step.proposal.title || "Prerequisite"}`,
+                          )
+                        : bi("建议原位更新此步命令", "Update this step's command in place")}
                     </b>
                   </div>
                   <div className="rh-proposal-diag">
@@ -8045,7 +8916,7 @@ function StepRow({
                   </div>
                   <ShellCodeBlock
                     code={step.proposal.command}
-                    title="修正后命令"
+                    title={bi("修正后命令", "Revised Command")}
                     compact
                   />
                   <div className="row-gap">
@@ -8056,7 +8927,7 @@ function StepRow({
                       loading={busy === "apply"}
                       onClick={() => void applyProposal()}
                     >
-                      采纳并重新验证
+                      {bi("采纳并重新验证", "Accept & Re-test")}
                     </Button>
                   </div>
                 </div>
@@ -8067,7 +8938,12 @@ function StepRow({
 
         {(step.revisions || []).length > 0 && (
           <details className="rh-rev-log">
-            <summary>已打磨修订 {step.revisions!.length} 次</summary>
+            <summary>
+              {bi(
+                `已打磨修订 ${step.revisions!.length} 次`,
+                `Revised ${step.revisions!.length} time(s)`,
+              )}
+            </summary>
             <ul>
               {step.revisions!.map((rv, i) => (
                 <li key={i}>
@@ -8091,8 +8967,8 @@ function StepRow({
                   void patchStep({ elapsed });
                 }
               }}
-              placeholder="耗时 如 45s"
-              aria-label="实测耗时"
+              placeholder={bi("耗时 如 45s", "Duration e.g. 45s")}
+              aria-label={bi("实测耗时", "Measured duration")}
             />
             <Input
               size="small"
@@ -8104,8 +8980,11 @@ function StepRow({
                   void patchStep({ note });
                 }
               }}
-              placeholder="实测备注（将同步写入生产实施方案）"
-              aria-label="实测备注"
+              placeholder={bi(
+                "实测备注（将同步写入生产实施方案）",
+                "Notes (synced into Production SOP)",
+              )}
+              aria-label={bi("实测备注", "Verification notes")}
             />
           </div>
           <div className="rh-step-actions">
@@ -8116,7 +8995,7 @@ function StepRow({
               onClick={() => void patchStep({ status: "passed" })}
             >
               <IconCheck />
-              <span>通过</span>
+              <span>{bi("通过", "Pass")}</span>
             </button>
             <button
               type="button"
@@ -8124,7 +9003,7 @@ function StepRow({
               onClick={() => setTroubleOpen((v) => !v)}
             >
               <Spark size={13} />
-              <span>报错排障</span>
+              <span>{bi("报错排障", "Troubleshoot")}</span>
             </button>
             <button
               type="button"
@@ -8132,7 +9011,7 @@ function StepRow({
               className={`rh-act-btn skip ${step.status === "skipped" ? "on" : ""}`}
               onClick={() => void patchStep({ status: "skipped" })}
             >
-              <span>跳过</span>
+              <span>{bi("跳过", "Skip")}</span>
             </button>
           </div>
         </div>

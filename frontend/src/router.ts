@@ -189,6 +189,16 @@ function kindOf(a: Route, b: Route): Kind {
     (a.name === "settings" || a.name === "ai" || a.name === "me")
   )
     return "pane";
+  // Switching between different top-level sections is a calm horizontal swap;
+  // only intra-section drill-downs or the creation wizard slide forward/back.
+  if (
+    a.name !== b.name &&
+    a.name !== "new" &&
+    b.name !== "new" &&
+    !(a.name === "components" && a.edit !== undefined) &&
+    !(b.name === "components" && b.edit !== undefined)
+  )
+    return "swap";
   const [da, db] = [depth(a), depth(b)];
   return db > da ? "forward" : db < da ? "back" : "swap";
 }

@@ -2,7 +2,7 @@
 .ap {
   position: relative;
   display: grid;
-  grid-template-columns: 284px minmax(0, 1fr);
+  grid-template-columns: var(--rail-w) minmax(0, 1fr);
   height: calc(100vh - 52px);
   background: var(--bg);
 }
@@ -13,36 +13,52 @@
   flex-direction: column;
   min-height: 0;
   border-right: 1px solid var(--line);
-  background: var(--surface-2);
+  background: var(--rail);
 }
 .ap-side-top {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 14px 12px 6px;
+  padding: 20px 16px 14px;
+  border-bottom: 1px solid var(--line);
 }
 .ap-brand {
   display: flex;
   align-items: center;
   gap: 9px;
-  height: 32px;
-  padding: 0 2px 0 4px;
+  height: 28px;
+  padding: 0;
 }
 .ap-brand b {
   flex: 1;
-  font-size: 15px;
-  font-weight: 650;
-  letter-spacing: -0.01em;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
 }
 .ap-brand-mark {
   display: grid;
+  flex: none;
   place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 7.8px;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
   box-shadow:
-    0 4px 11px -2px rgba(79, 70, 229, 0.36),
+    0 3px 9px -2px rgba(67, 56, 202, 0.34),
     0 1px 2px rgba(15, 23, 42, 0.08);
+}
+.ap-side-top .arco-input-inner-wrapper {
+  height: 34px;
+  border-radius: 7px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+}
+.ap-side-top .arco-input-inner-wrapper:hover:not(.arco-input-inner-wrapper-disabled):not(.arco-input-inner-wrapper-focus) {
+  border-color: color-mix(in srgb, var(--brand) 40%, var(--line-strong));
+}
+.ap-side-top .arco-input-inner-wrapper-focus {
+  border-color: var(--brand);
+  box-shadow: var(--ring);
 }
 .ap-brand-mark svg,
 .ap-new svg,
@@ -76,7 +92,7 @@
 .ap-rows {
   flex: 1;
   min-height: 0;
-  padding: 4px 8px 20px;
+  padding: 6px 12px 20px;
   overflow: auto;
   overscroll-behavior: contain;
   overflow-anchor: none;

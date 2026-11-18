@@ -1,19 +1,28 @@
 /* Platform settings. Prefix st- */
 .st-page {
   display: grid;
-  grid-template-columns: 260px minmax(0, 1fr);
+  grid-template-columns: var(--rail-w) minmax(0, 1fr);
   min-height: calc(100vh - 52px);
   background: var(--surface);
 }
 .st-nav {
-  padding: 18px 10px;
+  position: sticky;
+  top: 52px;
+  height: calc(100vh - 52px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 20px 16px 24px;
   border-right: 1px solid var(--line);
-  background: var(--surface-2);
+  background: var(--rail);
 }
 .st-nav h1 {
-  margin: 0 6px 14px;
+  margin: 0 0 14px;
+  padding: 0 0 14px;
+  border-bottom: 1px solid var(--line);
   font-size: 20px;
   font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.3;
 }
 .st-nav .sx-nav-i {
   width: 100%;
@@ -235,6 +244,8 @@
     align-content: start;
   }
   .st-nav {
+    position: static;
+    height: auto;
     display: flex;
     flex-direction: row;
     align-items: flex-start;

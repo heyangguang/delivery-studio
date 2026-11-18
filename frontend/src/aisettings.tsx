@@ -33,6 +33,7 @@ import {
   can,
   copy,
   err,
+  fetchCached,
   fullTime,
   putCached,
   refreshAIStatus,
@@ -1717,9 +1718,9 @@ export function AISettingsView() {
   const [pane, setPane] = useState<
     "all" | "providers" | "features" | "boundary"
   >("all");
-  const load = () => {
+  const load = (fresh = false) => {
     if (!canEdit) return Promise.resolve(null);
-    return api<AISettings>("/api/settings/ai")
+    return (fresh ? api : fetchCached)<AISettings>("/api/settings/ai")
       .then((r) => {
         putCached("/api/settings/ai", r);
         setD(r);
@@ -1829,7 +1830,7 @@ export function AISettingsView() {
       onOk: async () => {
         try {
           await api(`/api/settings/ai/providers/${p.id}`, { method: "DELETE" });
-          await load();
+          await load(true);
           await refreshAIStatus();
         } catch (e) {
           err(e);
@@ -1842,7 +1843,7 @@ export function AISettingsView() {
         method: "PUT",
         body: JSON.stringify({ ...p, enabled: !p.enabled }),
       });
-      await load();
+      await load(true);
       await refreshAIStatus();
     } catch (e) {
       err(e);
@@ -1988,7 +1989,7 @@ export function AISettingsView() {
               <Button
                 size="small"
                 icon={<IconRefresh />}
-                onClick={() => void load()}
+                onClick={() => void load(true)}
                 style={{ marginLeft: 12 }}
               >
                 重试
@@ -2145,7 +2146,7 @@ export function AISettingsView() {
                                                     }),
                                                   },
                                                 );
-                                                await load();
+                                                await load(true);
                                                 await refreshAIStatus();
                                                 Message.success(
                                                   "已切换为 Chat Completions（通用）",
@@ -2554,10 +2555,10 @@ export function AISettingsView() {
           edit={modal?.edit || null}
           close={() => {
             setModal(null);
-            void load().then(() => refreshAIStatus());
+            void load(true).then(() => refreshAIStatus());
           }}
           saved={async () => {
-            await load();
+            await load(true);
             await refreshAIStatus();
           }}
         />

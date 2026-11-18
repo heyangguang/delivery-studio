@@ -37,7 +37,17 @@ import {
   IconUpload,
 } from "@arco-design/web-react/icon";
 import { go } from "./router";
-import { ago, api, can, err, useConnectivity, useMedia } from "./shared";
+import {
+  ago,
+  api,
+  cached,
+  can,
+  err,
+  fetchCached,
+  putCached,
+  useConnectivity,
+  useMedia,
+} from "./shared";
 import { reportDoc, useSubmitKB } from "./kb";
 import type { Job, Session } from "./shared";
 import { FileIcon, FilePicker, uploadFiles } from "./myfiles";
@@ -393,8 +403,13 @@ export function AIPage({
   const model = useModelPick(feature);
   const tools = useAIOptions();
   const narrowBar = useMedia("(max-width: 700px)");
-  const [rows, setRows] = useState<ChatRow[] | null>(null);
-  const [linked, setLinked] = useState<Linked[]>([]);
+  const initChats = cached<{ chats: ChatRow[]; linked: Linked[] }>(
+    "/api/ai/chats",
+  );
+  const [rows, setRows] = useState<ChatRow[] | null>(
+    () => initChats?.chats ?? null,
+  );
+  const [linked, setLinked] = useState<Linked[]>(() => initChats?.linked ?? []);
   const [q, setQ] = useState("");
   const [chat, setChat] = useState<Chat | null>(null);
   const [js, setJs] = useState<JobSession | null>(null);
@@ -448,52 +463,81 @@ export function AIPage({
   const jobBase = job ? `/api/jobs/${job}/ai` : "";
   const jobRow = jobs.find((j) => j.id === job);
 
-  const loadList = useCallback(() => {
-    api<{ chats: ChatRow[]; linked: Linked[] }>("/api/ai/chats")
-      .then((r) => {
-        const chats = r.chats || [];
-        const lnk = r.linked || [];
-        if (!orderSeeded.current) {
-          chats.forEach((c, idx) =>
+  const applyChatList = useCallback(
+    (r: { chats?: ChatRow[]; linked?: Linked[] }) => {
+      const chats = r.chats || [];
+      const lnk = r.linked || [];
+      if (!orderSeeded.current) {
+        chats.forEach((c, idx) =>
+          chatSlots.current.set(c.id, {
+            rank: idx,
+            group: dayKey(c.updated),
+          }),
+        );
+        lnk.forEach((l, idx) => {
+          if (!clusterRanks.current.has(l.cluster))
+            clusterRanks.current.set(l.cluster, clusterRanks.current.size);
+          if (!planRanks.current.has(l.job))
+            planRanks.current.set(l.job, planRanks.current.size);
+          linkedRanks.current.set(`${l.job}\0${l.key}`, idx);
+        });
+        orderSeeded.current = true;
+      } else {
+        for (let i = chats.length - 1; i >= 0; i--) {
+          const c = chats[i];
+          if (!chatSlots.current.has(c.id))
             chatSlots.current.set(c.id, {
-              rank: idx,
+              rank: --topRank.current,
               group: dayKey(c.updated),
-            }),
-          );
-          lnk.forEach((l, idx) => {
-            if (!clusterRanks.current.has(l.cluster))
-              clusterRanks.current.set(l.cluster, clusterRanks.current.size);
-            if (!planRanks.current.has(l.job))
-              planRanks.current.set(l.job, planRanks.current.size);
-            linkedRanks.current.set(`${l.job}\0${l.key}`, idx);
-          });
-          orderSeeded.current = true;
-        } else {
-          for (let i = chats.length - 1; i >= 0; i--) {
-            const c = chats[i];
-            if (!chatSlots.current.has(c.id))
-              chatSlots.current.set(c.id, {
-                rank: --topRank.current,
-                group: dayKey(c.updated),
-              });
-          }
-          for (let i = lnk.length - 1; i >= 0; i--) {
-            const l = lnk[i];
-            const lk = `${l.job}\0${l.key}`;
-            if (!clusterRanks.current.has(l.cluster))
-              clusterRanks.current.set(l.cluster, --topRank.current);
-            if (!planRanks.current.has(l.job))
-              planRanks.current.set(l.job, --topRank.current);
-            if (!linkedRanks.current.has(lk))
-              linkedRanks.current.set(lk, --topRank.current);
-          }
+            });
         }
-        setRows(chats);
-        setLinked(lnk);
-      })
-      .catch(() => setRows((prev) => prev ?? []));
-  }, []);
-  useEffect(loadList, [loadList]);
+        for (let i = lnk.length - 1; i >= 0; i--) {
+          const l = lnk[i];
+          const lk = `${l.job}\0${l.key}`;
+          if (!clusterRanks.current.has(l.cluster))
+            clusterRanks.current.set(l.cluster, --topRank.current);
+          if (!planRanks.current.has(l.job))
+            planRanks.current.set(l.job, --topRank.current);
+          if (!linkedRanks.current.has(lk))
+            linkedRanks.current.set(lk, --topRank.current);
+        }
+      }
+      setRows(chats);
+      setLinked(lnk);
+    },
+    [],
+  );
+
+  if (initChats && !orderSeeded.current) {
+    (initChats.chats || []).forEach((c, idx) =>
+      chatSlots.current.set(c.id, { rank: idx, group: dayKey(c.updated) }),
+    );
+    (initChats.linked || []).forEach((l, idx) => {
+      if (!clusterRanks.current.has(l.cluster))
+        clusterRanks.current.set(l.cluster, clusterRanks.current.size);
+      if (!planRanks.current.has(l.job))
+        planRanks.current.set(l.job, planRanks.current.size);
+      linkedRanks.current.set(`${l.job}\0${l.key}`, idx);
+    });
+    orderSeeded.current = true;
+  }
+
+  const loadList = useCallback(
+    (fresh = true) => {
+      (fresh ? api : fetchCached)<{ chats: ChatRow[]; linked: Linked[] }>(
+        "/api/ai/chats",
+      )
+        .then((r) => {
+          putCached("/api/ai/chats", r);
+          applyChatList(r);
+        })
+        .catch(() => setRows((prev) => prev ?? []));
+    },
+    [applyChatList],
+  );
+  useEffect(() => {
+    loadList(false);
+  }, [loadList]);
 
   const loadProps = useCallback(() => {
     if (!jobBase) return Promise.resolve();
@@ -1358,7 +1402,7 @@ export function AIPage({
         <div className="ap-side-top">
           <div className="ap-brand">
             <span className="ap-brand-mark">
-              <AIEmblem size={28} />
+              <AIEmblem size={24} />
             </span>
             <b>AI 助手</b>
             <Tooltip content="新对话" mini>

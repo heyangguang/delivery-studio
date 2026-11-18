@@ -763,24 +763,30 @@ export function AppsPage({
 
   const rail = (
     <aside className="store-rail" aria-label="筛选应用">
-      <Input
-        ref={(r) => {
-          search.current =
-            (r as unknown as { dom?: HTMLInputElement })?.dom ?? null;
-        }}
-        prefix={<IconSearch />}
-        suffix={!f.q ? <Kbd>/</Kbd> : undefined}
-        allowClear
-        placeholder="搜索名称、标签、说明"
-        value={f.q}
-        onChange={(v) => set({ q: v })}
-        onKeyDown={(e) => {
-          if (e.key === "Escape")
-            (set({ q: "" }), (e.target as HTMLInputElement).blur());
-        }}
-        aria-label="搜索应用"
-      />
-      <nav className="rail-group" aria-label="分类">
+      <div className="list-head">
+        <div className="list-title">
+          <h1>应用</h1>
+        </div>
+        <Input
+          ref={(r) => {
+            search.current =
+              (r as unknown as { dom?: HTMLInputElement })?.dom ?? null;
+          }}
+          prefix={<IconSearch />}
+          suffix={!f.q ? <Kbd>/</Kbd> : undefined}
+          allowClear
+          placeholder="搜索名称、标签、说明"
+          value={f.q}
+          onChange={(v) => set({ q: v })}
+          onKeyDown={(e) => {
+            if (e.key === "Escape")
+              (set({ q: "" }), (e.target as HTMLInputElement).blur());
+          }}
+          aria-label="搜索应用"
+        />
+      </div>
+      <div className="store-rail-body">
+        <nav className="rail-group" aria-label="分类">
         <h3>分类</h3>
         <button
           className={f.cat === "全部" ? "on" : ""}
@@ -867,6 +873,7 @@ export function AppsPage({
           我用过的
         </Checkbox>
       </div>
+      </div>
     </aside>
   );
 
@@ -876,7 +883,7 @@ export function AppsPage({
       <main className="store-main">
         <header className="store-bar">
           <div>
-            <h1>应用</h1>
+            <h2>{f.cat === "全部" ? "全部应用" : f.cat}</h2>
             <p className="muted small num" aria-live="polite">
               {load === "ready"
                 ? plain

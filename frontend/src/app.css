@@ -387,7 +387,7 @@ html:not([data-vt-ok]) .main {
 /* ---------- master / detail ---------- */
 .md-split {
   display: grid;
-  grid-template-columns: 340px minmax(0, 1fr);
+  grid-template-columns: var(--rail-w) minmax(0, 1fr);
   height: calc(100vh - 52px);
   overflow: hidden;
   transition: grid-template-columns 0.42s cubic-bezier(0.32, 0.72, 0, 1);
@@ -407,7 +407,7 @@ html:not([data-vt-ok]) .main {
 }
 @media (min-width: 901px) {
   .md-split > .md-list > * {
-    min-width: 339px;
+    min-width: calc(var(--rail-w) - 1px);
   }
   .md-split.rh-immersive {
     grid-template-columns: 0px minmax(0, 1fr);
@@ -2884,9 +2884,6 @@ body[arco-theme="dark"] .login-policy-box {
   .search-trigger-ic {
     font-size: 16px;
     color: inherit;
-  }
-  .md-split {
-    grid-template-columns: 300px minmax(0, 1fr);
   }
   .detail {
     padding: 24px 24px 56px;

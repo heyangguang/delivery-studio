@@ -1,5 +1,5 @@
 const AI_SURFACE_SEL =
-  ".ap-compose, .ad-compose, .rh-compose, .rh-probe-box, .rh-trouble, .ai-pill, .ad-launch, .fc-callai, .fw-chatbtn, .rstep-ai, .ai-quick-toggle.is-interactive.is-on";
+  ".ap-compose, .ad-compose, .rh-compose, .rh-probe-box, .rh-trouble, .ai-pill, .ad-launch, .fc-callai, .fw-chatbtn, .rstep-ai";
 
 let installed = false;
 

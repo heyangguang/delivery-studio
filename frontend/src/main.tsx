@@ -104,9 +104,11 @@ import {
 import type { Route } from "./router";
 import {
   api,
+  cached,
   can,
   clearAuth,
   err,
+  fetchCached,
   refreshAIStatus,
   resetAIStatus,
   running,
@@ -750,6 +752,10 @@ function AIStatusBadge({
     : pendingCfg
       ? "平台 AI 套件待管理员完成模型配置（只读）"
       : "平台 AI 套件未启用（当前账户只读，需管理员在平台设置中开启）";
+  const warmAISettings = () => {
+    if (!cached("/api/settings/ai"))
+      void fetchCached("/api/settings/ai").catch(() => undefined);
+  };
   const content = (
     <>
       <span className="ai-quick-ic" aria-hidden>
@@ -776,20 +782,19 @@ function AIStatusBadge({
     );
   }
   return (
-    <Tooltip
-      mini
-      position="bottom"
-      content={`平台 AI 套件${statusWord} · 点击前往设置`}
+    <button
+      type="button"
+      className={`ai-quick-toggle is-interactive ${stateCls}`}
+      title={`平台 AI 套件${statusWord} · 点击前往设置`}
+      onPointerEnter={warmAISettings}
+      onClick={(e) => {
+        e.currentTarget.blur();
+        go({ name: "settings", id: "ai" });
+      }}
+      aria-label={`AI 套件${statusWord}，前往平台设置管理`}
     >
-      <button
-        type="button"
-        className={`ai-quick-toggle is-interactive ${stateCls}`}
-        onClick={() => go({ name: "settings", id: "ai" })}
-        aria-label={`AI 套件${statusWord}，前往平台设置管理`}
-      >
-        {content}
-      </button>
-    </Tooltip>
+      {content}
+    </button>
   );
 }
 
@@ -926,6 +931,17 @@ function App() {
     loadApps();
     loadJobs();
   }, [user]);
+  // Warm AI settings & assistant threads right after initial paint so first clicks open instantly without mid-transition skeleton reflow.
+  useEffect(() => {
+    if (!user) return;
+    const t = window.setTimeout(() => {
+      if (can("ai.settings"))
+        void fetchCached("/api/settings/ai").catch(() => undefined);
+      if (aiOn && can("ai.use"))
+        void fetchCached("/api/ai/chats").catch(() => undefined);
+    }, 150);
+    return () => window.clearTimeout(t);
+  }, [user, aiOn]);
   // something that changes the components (a version's status) asks for the list again
   useEffect(() => {
     const on = () => loadApps();

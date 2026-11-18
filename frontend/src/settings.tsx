@@ -251,8 +251,13 @@ export function SettingsPage({
     0,
     items.findIndex((i) => i.id === view),
   );
-  const prevIdxRef = useRef(curIdx);
-  const paneDir = curIdx >= prevIdxRef.current ? "fwd" : "back";
+  const prevIdxRef = useRef<number | null>(null);
+  const paneDir =
+    prevIdxRef.current === null
+      ? ""
+      : curIdx >= prevIdxRef.current
+        ? "fwd"
+        : "back";
   useEffect(() => {
     prevIdxRef.current = curIdx;
   }, [curIdx]);
@@ -375,7 +380,10 @@ export function SettingsPage({
             />
           </div>
         )}
-        <div className={`st-pane st-pane-${paneDir}`} key={view}>
+        <div
+          className={`st-pane${paneDir ? ` st-pane-${paneDir}` : ""}`}
+          key={view}
+        >
           {body}
         </div>
       </div>

@@ -387,6 +387,18 @@ func init() {
 		{regexp.MustCompile(`^变量 (.+?) 有改动$`), func(_ string, m []string) string {
 			return "Variables changed: " + localizeSyncVarParts(m[1])
 		}},
+		{regexp.MustCompile(`^(?:修复漏洞|安全修复)[：:]\s*(.+)$`), func(lang string, m []string) string {
+			return "Security fix: " + localizeGoMessage(lang, m[1])
+		}},
+		{regexp.MustCompile(`^(?:修复漏洞|安全修复)$`), func(_ string, _ []string) string {
+			return "Security fix"
+		}},
+		{regexp.MustCompile(`^升级[：:]\s*(.+)$`), func(lang string, m []string) string {
+			return "Upgrade: " + localizeGoMessage(lang, m[1])
+		}},
+		{regexp.MustCompile(`^固定版本[：:]\s*(.+)$`), func(lang string, m []string) string {
+			return "Pinned versions: " + localizeGoMessage(lang, m[1])
+		}},
 		{regexp.MustCompile(`^([^：]+)：(.+)$`), func(lang string, m []string) string {
 			rest := localizeGoMessage(lang, m[2])
 			if rest != m[2] {

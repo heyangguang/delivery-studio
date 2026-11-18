@@ -58,6 +58,7 @@ func TestLocalizeGoMessageCoverage(t *testing.T) {
 	samples := []string{
 		"演练会话不存在",
 		"保存失败，请稍后重试",
+		"修复漏洞: pip 25.3->26.2.0",
 		"没有「管理账户、角色和团队」权限",
 		"已有同名组件：demo-app",
 		"还有 3 处错误，不能发布",
@@ -113,12 +114,14 @@ func TestHTTPEnglishEndpointsNoCJK(t *testing.T) {
 		"/api/components/keepalived/manifest?lang=en-US",
 		"/api/components/nginx/manifest?lang=en-US",
 		"/api/components/external-lb/manifest?lang=en-US",
+		"/api/settings/ai",
 		"/api/settings/ai/web",
 		"/api/settings/ai/skills",
 		"/api/settings/templates",
 		"/api/settings/channels",
 		"/api/settings/sandbox",
 		"/api/library",
+		"/api/library/python",
 	}
 	for _, ep := range endpoints {
 		w := storeRequestLang(s, "GET", ep, langEnUS, cookie)

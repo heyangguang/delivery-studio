@@ -58,8 +58,19 @@ type State = {
 
 const short = (t: string) => {
   const s = t.replace(/\s*[\(（].*$/, "").trim();
-  const el = /^RedHat(?:\s*系|\s*family)?\s*(\d+)/i.exec(s);
+  const el =
+    /^(?:Red\s*Hat|RedHat|RHEL)\s*(?:系|family)?\s*(\d+)(?:\s*family)?/i.exec(
+      s,
+    );
   return el ? bi(`RHEL ${el[1]} 系`, `RHEL ${el[1]} family`) : s;
+};
+
+const platMeta = (t: string) => {
+  const am = /\s*[（(](amd64|arm64|x86_64|aarch64|ppc64le|s390x)[）)]\s*$/i.exec(t);
+  return {
+    name: short(t),
+    arch: am ? am[1].toLowerCase() : "",
+  };
 };
 
 function NewRuntime({
@@ -231,17 +242,19 @@ function Twins({ children }: { children: React.ReactNode }) {
     <li className="rtl-twins">
       <button
         type="button"
-        className="link quiet"
+        className="rtl-twins-btn"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
       >
-        {bi(
-          `同一版本的另 ${n} 个构建`,
-          `${n} other ${n === 1 ? "build" : "builds"} of this version`,
-        )}{" "}
-        <IconDown className={open ? "flip" : ""} />
+        <span>
+          {bi(
+            `展开同版本另 ${n} 个构建`,
+            `${n} other ${n === 1 ? "build" : "builds"} of this version`,
+          )}
+        </span>
+        <IconDown className={`so-caret ${open ? "flip" : ""}`} />
       </button>
-      {open && <ul className="rtl">{children}</ul>}
+      {open && <ul className="rtl rtl-nested">{children}</ul>}
     </li>
   );
 }
@@ -325,28 +338,38 @@ function RuntimeRow({
             <IconCode />
           </span>
           <span className="rtl-name">
-            <b>ansible-core {r.ansible}</b>
-            <small>
-              <span className="mono">{r.id}</span> ·{" "}
+            <span className="rtl-title-line">
+              <b>ansible-core {r.ansible}</b>
+              <code className="rtl-id mono" title={r.id}>
+                {r.id.slice(0, 12)}
+              </code>
+              {r.default.map((pl) => (
+                <span key={pl} className="rtl-os-badge">
+                  <OsLogo id={pl} size={12} />
+                  {short(st.platforms.find((p) => p.id === pl)?.title || pl)}{" "}
+                  {bi("默认", "Default")}
+                </span>
+              ))}
+            </span>
+            <small className="rtl-meta-line">
               {bi(
                 `${r.wheels.length} 个包`,
                 `${r.wheels.length} ${r.wheels.length === 1 ? "pkg" : "pkgs"}`,
               )}{" "}
               · {size(r.size)} · {ago(r.created)}
-              {r.note ? ` · ${r.note}` : ""}
-              {twin ? ` · ${twin}` : ""}
+              {r.python ? ` · Python ${r.python}` : ""}
             </small>
-          </span>
-          <span className="rtl-def">
-            {r.default.map((pl) => (
-              <span key={pl} className="cm cm-mod">
-                <OsLogo id={pl} size={13} />{" "}
-                {short(st.platforms.find((p) => p.id === pl)?.title || pl)}{" "}
-                {bi("默认", "default")}
+            {(r.note || twin) && (
+              <span className="rtl-note-row">
+                {r.note && <span className="rtl-note-chip">{r.note}</span>}
+                {twin && <span className="rtl-diff-chip">{twin}</span>}
               </span>
-            ))}
+            )}
           </span>
-          <IconDown className="so-caret" />
+          <span className="rtl-expand-pill" aria-hidden>
+            {open ? bi("收起", "Hide") : bi("查看依赖包", "Wheels")}
+            <IconDown className="so-caret" />
+          </span>
         </button>
         {admin && (
           <span className="rtl-acts">
@@ -384,29 +407,44 @@ function RuntimeRow({
                 </Menu>
               }
             >
-              <Button icon={<IconMore />} aria-label={bi("更多操作", "More actions")} />
+              <Button
+                type="text"
+                size="small"
+                className="rtl-more-btn"
+                icon={<IconMore />}
+                aria-label={bi("更多操作", "More actions")}
+              />
             </Dropdown>
           </span>
         )}
       </div>
       {open && (
-        <ul className="rtl-wheels">
-          {r.wheels.map((w) => (
-            <li key={w.file}>
-              <span className="mono rtl-w">{w.name}</span>
-              <span className="mono faint">{w.version}</span>
-              <span className="faint small">
-                {w.via === "pypi"
-                  ? bi("来自 PyPI", "From PyPI")
-                  : w.via === "imported"
-                    ? bi("导入", "Imported")
-                    : w.via === "runtime-archive"
-                      ? bi("原运行环境", "Original runtime")
-                      : bi("软件库", "Library")}
-              </span>
-            </li>
-          ))}
-        </ul>
+        <div className="rtl-wheels-wrap">
+          <div className="rtl-wheels-head" aria-hidden>
+            <span>{bi("Python 包", "Package")}</span>
+            <span>{bi("版本", "Version")}</span>
+            <span>{bi("来源", "Source")}</span>
+          </div>
+          <ul className="rtl-wheels">
+            {r.wheels.map((w) => (
+              <li key={w.file}>
+                <span className="mono rtl-w">{w.name}</span>
+                <span className="mono rtl-ver">{w.version}</span>
+                <span className="rtl-via">
+                  <span className={`rtl-via-tag via-${w.via || "lib"}`}>
+                    {w.via === "pypi"
+                      ? bi("来自 PyPI", "From PyPI")
+                      : w.via === "imported"
+                        ? bi("导入", "Imported")
+                        : w.via === "runtime-archive"
+                          ? bi("原运行环境", "Original runtime")
+                          : bi("软件库", "Library")}
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
     </li>
   );
@@ -420,7 +458,7 @@ export function RuntimesView({
   admin: boolean;
   narrow: boolean;
 }) {
-  useLang();
+  const lang = useLang();
   const [st, setSt] = useState<State | null>(null);
   const [task, setTask] = useState<FetchTask | null>(null);
   const [creating, setCreating] = useState(false);
@@ -431,7 +469,7 @@ export function RuntimesView({
       .catch(() => undefined);
   useEffect(() => {
     load();
-  }, []);
+  }, [lang]);
   useEffect(() => {
     if (!task || task.state !== "running") return;
     const t = setInterval(() => {
@@ -529,23 +567,43 @@ export function RuntimesView({
           <ul className="rtl-defs">
             {st.platforms.map((p) => {
               const r = st.runtimes.find((x) => x.id === st.defaults[p.id]);
+              const meta = platMeta(p.title);
               return (
-                <li key={p.id}>
-                  <b>
-                    <OsName id={p.id} title={p.title} />
-                  </b>
-                  {r ? (
-                    <span>
-                      ansible-core {r.ansible}{" "}
-                      <span className="mono faint">{r.id}</span>
+                <li key={p.id} className={`rtl-def-card ${r ? "ok" : "miss"}`}>
+                  <div className="rtl-def-top">
+                    <OsLogo id={p.id} size={28} />
+                    <div className="rtl-def-os">
+                      <b>{meta.name}</b>
+                      {meta.arch && (
+                        <span className="rtl-arch mono">{meta.arch}</span>
+                      )}
+                    </div>
+                    <span className={`rtl-def-badge ${r ? "ok" : "warn"}`}>
+                      {r
+                        ? bi("默认已配置", "Default active")
+                        : bi("未设置", "Unconfigured")}
                     </span>
+                  </div>
+                  {r ? (
+                    <div className="rtl-def-meta">
+                      <span className="rtl-def-ver">
+                        ansible-core {r.ansible}
+                      </span>
+                      <code className="rtl-id mono" title={r.id}>
+                        {r.id.slice(0, 10)}
+                      </code>
+                      <span className="rtl-def-size">
+                        {bi(`${r.wheels.length} 个包`, `${r.wheels.length} pkgs`)}{" "}
+                        · {size(r.size)}
+                      </span>
+                    </div>
                   ) : (
-                    <span className="warn">
+                    <div className="rtl-def-empty warn">
                       {bi(
-                        "还没有，暂时不能为这个系统生成交付",
+                        "还没有设置默认运行环境，暂时不能为这个系统生成交付",
                         "Not configured yet; deliveries cannot be built for this OS",
                       )}
-                    </span>
+                    </div>
                   )}
                 </li>
               );

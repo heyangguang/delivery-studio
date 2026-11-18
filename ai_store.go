@@ -179,6 +179,65 @@ var aiFeatures = []struct{ ID, Title, Help string }{
 	{"docs", "文档起草", "在集群的文档里起草说明文字（概述、风险、结论、根因等），检查文字和执行记录是否一致；由你确认后才算数"},
 }
 
+var aiFeaturesEn = map[string][2]string{
+	"change_rehearsal": {"Change Rehearsal", "Run read-only discovery probes and step-by-step staging rehearsals on delivered clusters to produce a field-verified production change SOP"},
+	"troubleshoot":     {"Troubleshooting", "Paste errors or screenshots during runbook execution to diagnose and resolve issues together with AI"},
+	"assistant":        {"AI Assistant", "Unified chat workspace: ask questions anytime and attach a delivery or component for context-aware answers"},
+	"form":             {"Smart Form Fill", "Chat with AI while creating a delivery: it inspects components, fills specs into the form, and leaves final confirmation to you"},
+	"component":        {"Component Workbench", "Collaborate in Component Workbench to draft, fix, complete, and review components; edits pass platform checks before saving to draft"},
+	"review":           {"Delivery Review", "Open from Delivery Details to let AI review the delivery plan and answer follow-up questions"},
+	"docs":             {"Doc Drafting", "Draft narrative sections (overview, risks, conclusions, root cause) in cluster documents and check consistency with execution logs; finalized only upon your approval"},
+}
+
+func localizedAIFeatures(lang string) []struct{ ID, Title, Help string } {
+	out := append([]struct{ ID, Title, Help string }(nil), aiFeatures...)
+	if !isEnLang(lang) {
+		return out
+	}
+	for i := range out {
+		if pair, ok := aiFeaturesEn[out[i].ID]; ok {
+			out[i].Title, out[i].Help = pair[0], pair[1]
+		}
+	}
+	return out
+}
+
+func localizedAIPresets(lang string) []aiPreset {
+	out := append([]aiPreset(nil), aiPresets...)
+	if !isEnLang(lang) {
+		return out
+	}
+	enPresets := map[string]struct{ Name, URL, Hint string }{
+		"azure":    {"Azure OpenAI", "https://<resource>.openai.azure.com/openai/deployments/<deployment>", "Include /deployments/<deployment> in URL; enter deployment name as model ID"},
+		"qwen":     {"Qwen / Alibaba Model Studio", "", ""},
+		"kimi":     {"Kimi (Moonshot)", "", ""},
+		"zhipu":    {"Zhipu GLM / Z.ai", "", ""},
+		"stepfun":  {"StepFun", "", ""},
+		"mimo":     {"Xiaomi MiMo", "", "See vendor documentation for endpoint URL"},
+		"qianfan":  {"Baidu Qianfan", "", ""},
+		"hunyuan":  {"Tencent Hunyuan", "", ""},
+		"huawei":   {"Huawei Cloud", "", "See Huawei Cloud ModelArts docs for endpoint URL"},
+		"ark":      {"Volcengine Ark", "", ""},
+		"ollama":   {"Ollama (Local)", "", ""},
+		"lmstudio": {"LM Studio (Local)", "", ""},
+		"custom":   {"Custom Provider", "", "Any OpenAI-compatible base URL"},
+	}
+	for i := range out {
+		if trp, ok := enPresets[out[i].ID]; ok {
+			if trp.Name != "" {
+				out[i].Name = trp.Name
+			}
+			if trp.URL != "" {
+				out[i].URL = trp.URL
+			}
+			if trp.Hint != "" {
+				out[i].Hint = trp.Hint
+			}
+		}
+	}
+	return out
+}
+
 type aiPreset struct {
 	ID      string `json:"id"`
 	Name    string `json:"name"`
@@ -626,12 +685,24 @@ func (s *storeServer) handleAISettings(w http.ResponseWriter, r *http.Request, s
 	}
 	switch {
 	case rest == "" && r.Method == "GET":
+		lang := wLang(w)
 		st := s.aiLoad()
 		views := make([]providerView, 0, len(st.Providers))
 		for _, p := range st.Providers {
-			views = append(views, s.aiView(p))
+			v := s.aiView(p)
+			if isEnLang(lang) {
+				for i := range v.Models {
+					if v.Models[i].TestErr != "" {
+						v.Models[i].TestErr = localizeGoMessage(lang, v.Models[i].TestErr)
+					}
+					if v.Models[i].TestWarn != "" {
+						v.Models[i].TestWarn = localizeGoMessage(lang, v.Models[i].TestWarn)
+					}
+				}
+			}
+			views = append(views, v)
 		}
-		s.writeJSON(w, 200, map[string]any{"enabled": st.Enabled, "providers": views, "features": st.Features, "redact_hosts": st.RedactHosts, "private_only": st.PrivateOnly, "monthly_limit": st.MonthlyLimit, "user_models": nz(st.UserModels), "no_user_mcp": st.NoUserMCP, "presets": aiPresets, "feature_list": aiFeatures})
+		s.writeJSON(w, 200, map[string]any{"enabled": st.Enabled, "providers": views, "features": st.Features, "redact_hosts": st.RedactHosts, "private_only": st.PrivateOnly, "monthly_limit": st.MonthlyLimit, "user_models": nz(st.UserModels), "no_user_mcp": st.NoUserMCP, "presets": localizedAIPresets(lang), "feature_list": localizedAIFeatures(lang)})
 	case rest == "user-mcp" && r.Method == "PUT":
 		var in struct {
 			Allowed bool `json:"allowed"`

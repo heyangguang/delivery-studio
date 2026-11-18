@@ -1006,11 +1006,14 @@
 }
 .caps2 div {
   display: grid;
-  grid-template-columns: 76px minmax(0, 1fr);
+  grid-template-columns: 88px minmax(0, 1fr);
   gap: 12px;
   padding: 12px 0;
   border-bottom: 1px solid var(--line);
   font-size: 13.5px;
+}
+:root[lang^="en"] .caps2 div {
+  grid-template-columns: minmax(136px, 156px) minmax(0, 1fr);
 }
 .caps2 dt {
   font-weight: 600;
@@ -1778,16 +1781,18 @@
   gap: 20px;
 }
 .wide-head .wide-id {
-  flex: 1 1 360px;
+  flex: 1 1 320px;
   min-width: 0;
 }
 /* what the application does, in a calm structured spec card beside its name */
 .wide-caps {
   position: relative;
-  display: flex;
-  flex: 1.25 1 320px;
-  flex-direction: column;
-  gap: 7px;
+  display: grid;
+  grid-template-columns: minmax(76px, auto) minmax(0, 1fr);
+  flex: 1.35 1 350px;
+  align-content: start;
+  column-gap: 14px;
+  row-gap: 7px;
   min-width: 0;
   margin: 0;
   padding: 11px 16px;
@@ -1797,14 +1802,33 @@
 }
 .wide-caps > div {
   display: grid;
-  grid-template-columns: 74px minmax(0, 1fr);
-  gap: 12px;
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
   align-items: baseline;
 }
 .wide-caps dt {
+  max-width: 175px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 12px;
   font-weight: 600;
   color: var(--mute);
+}
+@supports not (grid-template-columns: subgrid) {
+  .wide-caps {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+  }
+  .wide-caps > div {
+    display: grid;
+    grid-template-columns: minmax(84px, auto) minmax(0, 1fr);
+    gap: 14px;
+  }
+  :root[lang^="en"] .wide-caps > div {
+    grid-template-columns: 142px minmax(0, 1fr);
+  }
 }
 .wide-caps dd {
   margin: 0;

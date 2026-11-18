@@ -39,10 +39,12 @@ func (s *storeServer) handlePython(w http.ResponseWriter, r *http.Request, sessi
 	}
 	switch {
 	case rest == "" && r.Method == "GET":
+		lang := wLang(w)
 		wheels, runtimes, defaults := s.plat.py.State()
 		views := []pyRuntimeView{}
 		for _, rt := range runtimes {
 			v := pyRuntimeView{PyRuntime: rt, Default: []string{}}
+			v.Note = localizeGoMessage(lang, v.Note)
 			for pl, id := range defaults {
 				if id == rt.ID {
 					v.Default = append(v.Default, pl)
@@ -62,7 +64,7 @@ func (s *storeServer) handlePython(w http.ResponseWriter, r *http.Request, sessi
 		})
 		var pls []map[string]string
 		for _, def := range mwpack.Platforms {
-			pls = append(pls, map[string]string{"id": def.ID, "title": def.Title})
+			pls = append(pls, map[string]string{"id": def.ID, "title": mwpack.LocalizePlatformTitle(lang, def.Title)})
 		}
 		s.writeJSON(w, 200, map[string]any{"runtimes": views, "wheels": len(wheels), "defaults": defaults, "platforms": pls, "python": pkglib.PyPython})
 	case rest == "versions" && r.Method == "GET":

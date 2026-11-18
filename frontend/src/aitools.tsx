@@ -171,21 +171,108 @@ const LEVEL_HINT: Record<string, string> = {
   },
 };
 
-/** How deep the model should think: a few pills, shallowest to deepest. Only the depths the model offers are there; the
- *  first is the model's own default. The choice is sent as the request's reasoning_effort. */
+const DEPTH_BARS: Record<string, number> = {
+  "": 0,
+  low: 1,
+  medium: 2,
+  high: 3,
+  xhigh: 4,
+  max: 4,
+  ultra: 4,
+};
+
+function DepthBars({ tier }: { tier: string }) {
+  const lit = DEPTH_BARS[tier] ?? 0;
+  const peak = tier === "max" || tier === "ultra";
+  if (lit === 0) {
+    return (
+      <span className="thk-ic auto" aria-hidden>
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
+          <circle cx="8" cy="8" r="5" stroke="currentColor" strokeWidth="1.4" strokeDasharray="2.4 2" />
+          <circle cx="8" cy="8" r="1.8" fill="currentColor" />
+        </svg>
+      </span>
+    );
+  }
+  return (
+    <span className={`thk-ic ${peak ? "peak" : ""}`} aria-hidden>
+      <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
+        {[
+          { x: 2, h: 4, i: 1 },
+          { x: 5.5, h: 6.5, i: 2 },
+          { x: 9, h: 9, i: 3 },
+          { x: 12.5, h: 11.5, i: 4 },
+        ].map((b) => (
+          <rect
+            key={b.i}
+            x={b.x}
+            y={13.5 - b.h}
+            width="2.1"
+            height={b.h}
+            rx="1"
+            fill="currentColor"
+            opacity={b.i <= lit ? (peak ? 1 : 0.92) : 0.2}
+          />
+        ))}
+      </svg>
+    </span>
+  );
+}
+
+/** How deep the model should think: compact vertical selector for the popover, or wrapping pills inside the "+" panel. */
 function ThinkPills({
   levels,
   value,
   onChange,
+  layout = "wrap",
 }: {
   levels?: string[];
   value: string;
   onChange: (v: string) => void;
+  layout?: "list" | "wrap";
 }) {
   useLang();
   const validLevels = (levels || []).filter((l) => LEVELS[l]);
   const active = value && validLevels.includes(value) ? value : "";
   const stops = ["", ...validLevels];
+  if (layout === "list") {
+    return (
+      <div className="thk thk-pop-panel" role="radiogroup" aria-label={bi("思考深度", "Thinking depth")}>
+        <div className="thk-head">
+          <span>{bi("思考深度", "Thinking depth")}</span>
+          <em>{bi("按任务复杂度调节", "Adjust reasoning depth")}</em>
+        </div>
+        <div className="thk-list">
+          {stops.map((s) => {
+            const on = s === active;
+            const label = s ? LEVELS[s] : bi("默认", "Default");
+            const hint = s
+              ? LEVEL_HINT[s]
+              : bi("不指定，用模型自己的默认", "Unspecified; use model default");
+            return (
+              <button
+                key={s || "default"}
+                type="button"
+                role="radio"
+                aria-checked={on}
+                className={`thk-opt ${on ? "on" : ""} ${s === "max" || s === "ultra" ? "is-high" : ""}`}
+                onClick={() => onChange(s)}
+              >
+                <DepthBars tier={s} />
+                <span className="thk-opt-main">
+                  <b>{label}</b>
+                  <small>{hint}</small>
+                </span>
+                <span className="thk-opt-check" aria-hidden>
+                  {on && <IconCheck />}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="thk" role="group" aria-label={bi("思考深度", "Thinking depth")}>
       <div className="thk-row">
@@ -219,9 +306,9 @@ function computePopPos(
 ): PopPos {
   if (!el) return "tl";
   const r = el.getBoundingClientRect();
-  const below = window.innerHeight - r.bottom;
-  const above = r.top;
-  const down = below >= estHeight || below >= above;
+  const below = window.innerHeight - r.bottom - 12;
+  const above = r.top - 12;
+  const down = below >= estHeight || (below > above && below >= 200);
   const rightSpace = window.innerWidth - r.left;
   const alignRight = rightSpace < estWidth && r.right > rightSpace;
   return `${down ? "b" : "t"}${alignRight ? "r" : "l"}` as PopPos;
@@ -249,13 +336,22 @@ export function ThinkLevel({
       position={pos}
       popupVisible={open}
       onVisibleChange={(v) => {
-        if (v) setPos(computePopPos(btnRef.current, 110, 360));
+        if (v) {
+          setPos(
+            computePopPos(
+              btnRef.current,
+              Math.min(430, (validLevels.length + 1) * 50 + 48),
+              296,
+            ),
+          );
+        }
         setOpen(v);
       }}
       className="tm-pop think-pop"
       triggerProps={{ autoFitPosition: false }}
       content={
         <ThinkPills
+          layout="list"
           levels={validLevels}
           value={active}
           onChange={(v) => (onChange(v), setOpen(false))}

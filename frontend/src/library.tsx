@@ -35,6 +35,7 @@ import {
   cached,
   err,
   fetchCached,
+  putCached,
   size,
   typing,
   useDelayed,
@@ -141,13 +142,31 @@ const LibIcons = {
   ),
 };
 
-/** "RedHat 系 9（RHEL / Rocky / Alma）(amd64)" → name, the distributions it covers, architecture. */
+/** "RedHat 系 9（RHEL / Rocky / Alma）(amd64)" / "RedHat 9 family (RHEL / Rocky / Alma) (amd64)" → name, variant, arch. */
 const splitTitle = (t: string) => {
-  const m = /^(.*?)\s*(?:（(.*?)）)?\s*(?:\((.*?)\))?\s*$/.exec(t);
-  let name = m?.[1] || t;
-  const el = /^RedHat(?:\s*系|\s*family)?\s*(\d+)/i.exec(name);
-  if (el) name = bi(`RedHat 系 ${el[1]}`, `RHEL ${el[1]} family`);
-  return { name, variant: m?.[2] || "", arch: m?.[3] || "" };
+  let rest = t.trim();
+  let arch = "";
+  const am = /\s*[（(]([^（）()]+)[）)]\s*$/.exec(rest);
+  if (
+    am &&
+    (/^(amd64|arm64|x86_64|aarch64|ppc64le|s390x)$/i.test(am[1].trim()) ||
+      /[（(][^（）()]+[）)]/.test(rest.slice(0, am.index)))
+  ) {
+    arch = am[1].trim();
+    rest = rest.slice(0, am.index).trim();
+  }
+  let variant = "";
+  const vm = /\s*[（(]([^（）()]+)[）)]\s*$/.exec(rest);
+  if (vm) {
+    variant = vm[1].trim();
+    rest = rest.slice(0, vm.index).trim();
+  }
+  const el =
+    /^(?:Red\s*Hat|RedHat|RHEL)\s*(?:系|family)?\s*(\d+)(?:\s*family)?/i.exec(
+      rest,
+    );
+  const name = el ? bi(`RedHat 系 ${el[1]}`, `RHEL ${el[1]} family`) : rest;
+  return { name, variant, arch };
 };
 
 /** A plain mark for a family of systems: a ring of three for apt systems, a box for rpm systems. */
@@ -205,7 +224,7 @@ export function LibraryPage({
   me: Session;
   selected?: string;
 }) {
-  useLang();
+  const lang = useLang();
   const narrow = useMedia("(max-width: 900px)");
   const admin = can("library.manage");
   const [ov, setOv] = useState<LibraryOverview | null>(
@@ -217,9 +236,10 @@ export function LibraryPage({
   const [message, setMessage] = useState("");
   const [sourcesOpen, setSourcesOpen] = useState(false);
 
-  const reload = () =>
-    fetchCached<LibraryOverview>("/api/library")
+  const reload = (fresh?: unknown) =>
+    (fresh === true ? api : fetchCached)<LibraryOverview>("/api/library")
       .then((r) => {
+        putCached("/api/library", r);
         setOv(r);
         setLoad("ready");
       })
@@ -227,13 +247,18 @@ export function LibraryPage({
         setMessage((e as Error).message);
         setLoad((s) => (s === "ready" ? s : "error"));
       });
+  const prevLang = useRef(lang);
   useEffect(() => {
-    reload();
+    const langChanged = prevLang.current !== lang;
+    prevLang.current = lang;
+    reload(langChanged);
     // the list of the system that will be shown is fetched alongside the overview, not after it
-    fetchCached(
-      closuresPath(selected || ov?.default_platform || "ubuntu-24.04-amd64"),
-    ).catch(() => {});
-  }, []);
+    if (!langChanged) {
+      fetchCached(
+        closuresPath(selected || ov?.default_platform || "ubuntu-24.04-amd64"),
+      ).catch(() => {});
+    }
+  }, [lang]);
   // A fetch or import in progress changes the library under us; keep the numbers fresh while it runs.
   useEffect(() => {
     if (!ov?.busy) return;

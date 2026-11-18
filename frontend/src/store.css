@@ -107,13 +107,14 @@
 }
 .rail-group > button {
   all: unset;
+  position: relative;
   box-sizing: border-box;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: space-between;
   height: 36px;
-  padding: 0 10px;
+  padding: 0 10px 0 14px;
   border-radius: 7px;
   font-size: 13.5px;
   font-weight: 500;
@@ -127,7 +128,17 @@
   background: var(--surface);
   color: var(--ink);
   font-weight: 600;
-  box-shadow: inset 3px 0 0 var(--brand), var(--shadow-sm), 0 0 0 1px var(--line);
+  box-shadow: var(--shadow-sm), 0 0 0 1px var(--line);
+}
+.rail-group > button.on::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 9px;
+  bottom: 9px;
+  width: 2.5px;
+  border-radius: 2px;
+  background: var(--brand);
 }
 .rail-group > button:disabled {
   opacity: 0.4;

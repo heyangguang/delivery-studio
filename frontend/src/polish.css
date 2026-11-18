@@ -22,24 +22,19 @@ body[arco-theme="dark"] .md-detail.sx-detail {
   background: color-mix(in srgb, var(--surface) 88%, transparent);
   backdrop-filter: saturate(160%) blur(14px);
   -webkit-backdrop-filter: saturate(160%) blur(14px);
-  box-shadow: 0 1px 0 color-mix(in srgb, var(--line) 88%, transparent);
 }
 body[arco-theme="dark"] .topbar {
   background: color-mix(in srgb, var(--surface) 86%, transparent);
 }
 
-/* the current top tab: machined gliding surface pill + bottom brand indicator rail */
+/* the current top tab: pure flush bottom rail on the header seam */
 .tabs-bar {
-  background: color-mix(in srgb, var(--surface) 95%, var(--sunken));
-  box-shadow:
-    0 1px 3px rgba(15, 23, 42, 0.08),
-    0 0 0 1px color-mix(in srgb, var(--brand) 18%, var(--line));
+  background: var(--brand);
+  box-shadow: 0 -1px 6px color-mix(in srgb, var(--brand) 26%, transparent);
 }
 body[arco-theme="dark"] .tabs-bar {
-  background: rgba(255, 255, 255, 0.08);
-  box-shadow:
-    0 2px 8px rgba(0, 0, 0, 0.36),
-    0 0 0 1px rgba(129, 140, 248, 0.24);
+  background: var(--brand);
+  box-shadow: 0 -1px 8px color-mix(in srgb, var(--brand) 36%, transparent);
 }
 .tabs a.on {
   color: var(--ink);
@@ -107,13 +102,13 @@ body[arco-theme="dark"] .tabs-bar {
   background: var(--surface);
   box-shadow:
     0 2px 8px -2px rgba(15, 23, 42, 0.08),
-    0 0 0 1px color-mix(in srgb, var(--brand) 28%, var(--line));
+    0 0 0 1px var(--line-strong);
 }
 body[arco-theme="dark"] .row-indicator {
   background: var(--surface-2);
   box-shadow:
     0 4px 14px rgba(0, 0, 0, 0.38),
-    0 0 0 1px color-mix(in srgb, var(--brand) 36%, var(--line));
+    0 0 0 1px var(--line-strong);
 }
 
 /* Tactile optical depth across controls, cards & topology hosts (clean elevation without glossy bevels) */
@@ -220,9 +215,10 @@ body[arco-theme="dark"] .ig-card-rim {
   margin: 2px -6px 0;
 }
 
-/* side navigation inside pages: clean slate highlight + crisp brand rail */
+/* side navigation inside pages: clean elevated surface with detached inset brand bar */
 .sx-nav-i {
-  padding: 8px 10px;
+  position: relative;
+  padding: 8px 10px 8px 14px;
   border-radius: 7px;
 }
 .sx-nav-ic {
@@ -232,7 +228,17 @@ body[arco-theme="dark"] .ig-card-rim {
   background: var(--surface);
   color: var(--ink);
   font-weight: 600;
-  box-shadow: inset 3px 0 0 var(--brand), var(--shadow-sm);
+  box-shadow: var(--shadow-sm), 0 0 0 1px var(--line);
+}
+.sx-nav-i.on::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 9px;
+  bottom: 9px;
+  width: 2.5px;
+  border-radius: 2px;
+  background: var(--brand);
 }
 
 /* pages inside a detail pane share one rhythm */
@@ -299,7 +305,6 @@ body[arco-theme="dark"] .ig-card-rim {
 .ai-um-m.on {
   border-color: var(--brand-line);
   background: var(--surface-2);
-  box-shadow: inset 3px 0 0 var(--brand);
 }
 
 /* ---------------------------------------------------------------- continuous sections instead of boxes in boxes */
@@ -830,12 +835,7 @@ body[arco-theme="dark"] .arco-trigger-popup .arco-menu {
 .app-row:not(.on),
 .iam-roles button:not(.on),
 .sx-nav-i:not(.on) {
-  transition: background-color 0.14s ease, color 0.14s ease, box-shadow 0.16s ease;
-}
-.app-row:not(.on):hover,
-.iam-roles button:not(.on):hover,
-.sx-nav-i:not(.on):hover {
-  box-shadow: inset 2.5px 0 0 var(--brand-line);
+  transition: background-color 0.14s ease, color 0.14s ease;
 }
 
 @media (prefers-reduced-motion: reduce) {

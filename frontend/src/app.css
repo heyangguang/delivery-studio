@@ -170,8 +170,8 @@ html:not([data-vt-ok]) .main {
   justify-content: center;
   height: 32px;
   white-space: nowrap;
-  padding: 0 12px;
-  border-radius: 7px;
+  padding: 0 11px;
+  border-radius: 6px;
   color: var(--mute);
   text-decoration: none;
   font-size: 13.5px;
@@ -184,8 +184,6 @@ html:not([data-vt-ok]) .main {
 }
 .tabs a:hover {
   color: var(--ink);
-}
-.tabs a:not(.on):hover {
   background: var(--hover);
 }
 .tabs a:active {
@@ -195,34 +193,24 @@ html:not([data-vt-ok]) .main {
   color: var(--ink);
   font-weight: 600;
 }
+.tabs a.on:hover {
+  background: transparent;
+}
 .tabs-bar {
   position: absolute;
   left: 0;
-  top: 50%;
-  height: 32px;
-  margin-top: -16px;
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--surface) 92%, var(--sunken));
-  box-shadow:
-    0 1px 3px rgba(15, 23, 42, 0.08),
-    0 0 0 1px color-mix(in srgb, var(--brand) 18%, var(--line));
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--brand);
+  box-shadow: 0 -1px 6px color-mix(in srgb, var(--brand) 26%, transparent);
   pointer-events: none;
   will-change: transform, width;
 }
-.tabs-bar::after {
-  content: "";
-  position: absolute;
-  left: 10px;
-  right: 10px;
-  bottom: 0;
-  height: 2px;
-  border-radius: 2px;
-  background: var(--brand);
-}
 .tabs-bar.ready {
   transition:
-    transform 0.32s var(--spring),
-    width 0.32s var(--spring);
+    transform 0.3s var(--spring),
+    width 0.3s var(--spring);
 }
 .top-right {
   margin-left: auto;
@@ -483,20 +471,15 @@ html:not([data-vt-ok]) .main {
   display: flex;
   gap: 11px;
   align-items: flex-start;
-  padding: 10px 10px 10px 12px;
+  padding: 10px 10px 10px 14px;
   border-radius: 8px;
   color: inherit;
   text-decoration: none;
   cursor: pointer;
-  transition:
-    background-color 0.15s ease,
-    box-shadow 0.16s ease;
+  transition: background-color 0.15s ease;
 }
 .row:hover {
   background: var(--hover);
-}
-.row:not(.on):hover {
-  box-shadow: inset 2.5px 0 0 var(--brand-line);
 }
 .row.on:hover {
   background: transparent;
@@ -511,18 +494,18 @@ html:not([data-vt-ok]) .main {
   top: 0;
   border-radius: 8px;
   background: var(--surface);
-  box-shadow: var(--shadow-sm), 0 0 0 1px color-mix(in srgb, var(--brand) 26%, var(--line));
+  box-shadow: var(--shadow-sm), 0 0 0 1px color-mix(in srgb, var(--brand) 22%, var(--line));
   transition: transform 0.34s var(--spring), height 0.34s var(--spring);
   z-index: 0;
 }
 .row-indicator::before {
   content: "";
   position: absolute;
-  left: 0;
+  left: 4px;
   top: 10px;
   bottom: 10px;
-  width: 3px;
-  border-radius: 0 2px 2px 0;
+  width: 2.5px;
+  border-radius: 2px;
   background: var(--brand);
 }
 .row-main {
@@ -568,6 +551,16 @@ html:not([data-vt-ok]) .main {
 .app-row.on {
   background: var(--surface);
   box-shadow: var(--shadow-sm), 0 0 0 1px var(--line);
+}
+.app-row.on::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 10px;
+  bottom: 10px;
+  width: 2.5px;
+  border-radius: 2px;
+  background: var(--brand);
 }
 .app-row .row-name {
   font-size: 14px;
@@ -876,11 +869,12 @@ html:not([data-vt-ok]) .main {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 5px;
   height: 22px;
-  padding: 0 9px 0 8px;
-  border-radius: 999px;
-  font-size: 12px;
+  padding: 0 8px 0 7px;
+  border: 1px solid color-mix(in srgb, var(--c) 24%, transparent);
+  border-radius: 5px;
+  font-size: 11.5px;
   font-weight: 600;
   line-height: 1;
   color: var(--c);
@@ -900,7 +894,7 @@ html:not([data-vt-ok]) .main {
   box-sizing: border-box;
   height: 34px;
   padding: 2px;
-  border-radius: 10px;
+  border-radius: 7px;
   background: var(--sunken);
   border: 1px solid var(--line);
   max-width: 100%;
@@ -3386,16 +3380,16 @@ html[data-vt="swap"]::view-transition-new(root) {
   gap: 9px;
   margin: 14px 0;
   padding: 13px 16px;
-  border: 1px solid var(--line-strong);
+  border: 1px solid color-mix(in srgb, var(--brand) 22%, var(--line));
   border-radius: 9px;
   background: var(--surface-2);
-  box-shadow: inset 3px 0 0 var(--brand), var(--shadow-sm);
+  box-shadow: var(--shadow-sm);
   line-height: 1.55;
 }
 body[arco-theme="dark"] .scheme-summary {
-  border-color: var(--line-strong);
+  border-color: color-mix(in srgb, var(--brand) 28%, var(--line));
   background: var(--surface-2);
-  box-shadow: inset 3px 0 0 var(--brand), var(--shadow-sm);
+  box-shadow: var(--shadow-sm);
 }
 .detail-head > .scheme-summary {
   grid-column: 1 / -1;

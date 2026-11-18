@@ -593,8 +593,15 @@ export function AIDock({
     if (prevIdRef.current !== id) {
       prevIdRef.current = id;
       setTarget(start);
+      return;
     }
-  }, [id, start]);
+    setTarget((cur) =>
+      cur.key === start.key &&
+      (cur.title !== start.title || cur.context !== start.context)
+        ? { ...cur, ...start }
+        : cur,
+    );
+  }, [id, start.key, start.title, start.context]);
   // at the foot of a long page the button shrinks to its mark, so it does not sit on the last lines
   const [atEnd, setAtEnd] = useState(false);
   useEffect(() => {
@@ -1768,8 +1775,29 @@ function ChatWindow({
     });
 
   const savedSessScroll = useRef<number | null>(null);
-  const normDeployCopy = (s?: string) =>
-    s ? s.replace(/首次部署/g, bi("集群部署", "Cluster deploy")) : s;
+  const normDeployCopy = (s?: string) => {
+    if (!s) return s;
+    const t = s.trim();
+    const pairs: Record<string, [string, string]> = {
+      集群问答: ["集群问答", "Cluster Q&A"],
+      "Cluster Q&A": ["集群问答", "Cluster Q&A"],
+      新对话: ["新对话", "New chat"],
+      "New chat": ["新对话", "New chat"],
+      "New Chat": ["新对话", "New Chat"],
+      交付评审: ["交付评审", "Delivery review"],
+      "Delivery review": ["交付评审", "Delivery review"],
+      "Delivery Review": ["交付评审", "Delivery review"],
+      关于整个交付: ["关于整个交付", "About this delivery"],
+      "About this delivery": ["关于整个交付", "About this delivery"],
+      现场排障: ["现场排障", "Troubleshooting"],
+      Troubleshooting: ["现场排障", "Troubleshooting"],
+      组件工作台: ["组件工作台", "Component workbench"],
+      "Component workbench": ["组件工作台", "Component workbench"],
+      "Component Workbench": ["组件工作台", "Component workbench"],
+    };
+    if (pairs[t]) return bi(pairs[t][0], pairs[t][1]);
+    return s.replace(/首次部署/g, bi("集群部署", "Cluster deploy"));
+  };
   const pick = (t: AITarget) => {
     if (sessListRef.current)
       savedSessScroll.current = sessListRef.current.scrollTop;

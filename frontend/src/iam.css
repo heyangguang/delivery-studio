@@ -49,7 +49,7 @@
 }
 .iam-roles {
   position: sticky;
-  top: 12px;
+  top: 64px;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -294,6 +294,11 @@
   font-weight: 600;
   text-align: center;
   background: var(--surface);
+}
+@media (min-width: 901px) {
+  .md-detail .iam-cmp th {
+    top: 52px;
+  }
 }
 .iam-cmp th:first-child,
 .iam-cmp td:first-child {

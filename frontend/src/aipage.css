@@ -7,6 +7,34 @@
   background: var(--bg);
 }
 
+@media (min-width: 901px) {
+  .ap {
+    margin-top: -52px;
+    height: 100vh;
+  }
+  .ap-side {
+    margin-top: 52px;
+    height: calc(100vh - 52px);
+  }
+  .ap-main {
+    height: 100vh;
+  }
+  .ap-head {
+    margin-top: 52px;
+    position: relative;
+    z-index: 6;
+    background: color-mix(in srgb, var(--surface) 84%, transparent);
+    backdrop-filter: saturate(180%) blur(16px);
+    -webkit-backdrop-filter: saturate(180%) blur(16px);
+    border-bottom: 1px solid color-mix(in srgb, var(--line) 65%, transparent);
+  }
+  .ap-head + .ap-list {
+    margin-top: -104px;
+    padding-top: 104px;
+    scroll-padding-top: 116px;
+  }
+}
+
 /* ---------------------------------------------------------------- side */
 .ap-side {
   display: flex;

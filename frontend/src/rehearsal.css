@@ -80,10 +80,15 @@ body[arco-theme="dark"] {
   gap: 10px 14px;
   padding: 10px 0 12px;
   margin-bottom: 18px;
-  background: color-mix(in srgb, var(--bg) 94%, var(--surface));
+  background: color-mix(in srgb, var(--surface) 86%, transparent);
   backdrop-filter: saturate(180%) blur(16px);
   -webkit-backdrop-filter: saturate(180%) blur(16px);
   border-bottom: 1px solid var(--line);
+}
+@media (min-width: 901px) {
+  .md-detail .rh-topbar {
+    top: 52px;
+  }
 }
 
 .rh-topbar-left,

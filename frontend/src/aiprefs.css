@@ -4,6 +4,11 @@
   min-height: 0;
   overflow: auto;
 }
+@media (min-width: 901px) {
+  .pf {
+    padding-top: 52px;
+  }
+}
 .pf-in {
   max-width: 720px;
   margin: 0 auto;

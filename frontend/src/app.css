@@ -406,6 +406,21 @@ html:not([data-vt-ok]) .main {
     border-color 0.28s ease;
 }
 @media (min-width: 901px) {
+  .md-split {
+    margin-top: -52px;
+    height: 100vh;
+  }
+  .md-split > .md-list {
+    margin-top: 52px;
+    height: calc(100vh - 52px);
+  }
+  .md-split > .md-detail {
+    padding-top: 52px;
+    scroll-padding-top: 64px;
+  }
+  .md-detail .detail-side {
+    top: 52px;
+  }
   .md-split > .md-list > * {
     min-width: calc(var(--rail-w) - 1px);
   }

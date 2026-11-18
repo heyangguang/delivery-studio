@@ -207,6 +207,7 @@ body {
 html {
   overflow-y: auto;
   scrollbar-gutter: stable;
+  scroll-padding-top: 64px;
 }
 @media (max-width: 1180px) {
   :root,
@@ -217,34 +218,49 @@ html {
 .list-body,
 .ap-rows,
 .st-nav,
-.store-rail {
+.store-rail,
+.md-detail,
+.ap-list,
+.pf {
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--ink) 16%, transparent) transparent;
 }
 .list-body::-webkit-scrollbar,
 .ap-rows::-webkit-scrollbar,
 .st-nav::-webkit-scrollbar,
-.store-rail::-webkit-scrollbar {
+.store-rail::-webkit-scrollbar,
+.md-detail::-webkit-scrollbar,
+.ap-list::-webkit-scrollbar,
+.pf::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 .list-body::-webkit-scrollbar-track,
 .ap-rows::-webkit-scrollbar-track,
 .st-nav::-webkit-scrollbar-track,
-.store-rail::-webkit-scrollbar-track {
+.store-rail::-webkit-scrollbar-track,
+.md-detail::-webkit-scrollbar-track,
+.ap-list::-webkit-scrollbar-track,
+.pf::-webkit-scrollbar-track {
   background: transparent;
 }
 .list-body::-webkit-scrollbar-thumb,
 .ap-rows::-webkit-scrollbar-thumb,
 .st-nav::-webkit-scrollbar-thumb,
-.store-rail::-webkit-scrollbar-thumb {
+.store-rail::-webkit-scrollbar-thumb,
+.md-detail::-webkit-scrollbar-thumb,
+.ap-list::-webkit-scrollbar-thumb,
+.pf::-webkit-scrollbar-thumb {
   border-radius: 999px;
   background: color-mix(in srgb, var(--ink) 16%, transparent);
 }
 .list-body::-webkit-scrollbar-thumb:hover,
 .ap-rows::-webkit-scrollbar-thumb:hover,
 .st-nav::-webkit-scrollbar-thumb:hover,
-.store-rail::-webkit-scrollbar-thumb:hover {
+.store-rail::-webkit-scrollbar-thumb:hover,
+.md-detail::-webkit-scrollbar-thumb:hover,
+.ap-list::-webkit-scrollbar-thumb:hover,
+.pf::-webkit-scrollbar-thumb:hover {
   background: color-mix(in srgb, var(--ink) 28%, transparent);
 }
 body {

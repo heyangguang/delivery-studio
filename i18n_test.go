@@ -177,3 +177,20 @@ func TestHTTPEnglishEndpointsNoCJK(t *testing.T) {
 		}
 	}
 }
+
+func TestProgressTitleLocalization(t *testing.T) {
+	samples := []string{
+		"Deploy · 生成并保存密码",
+		"部署 · 核对机器与系统",
+		"部署 · 数据盘",
+		"功能测试 · [pg-ha-dcs] 集群健康与领导者",
+		"按最新组件同步（第 3 次）：4 个文件、3 个步骤有变化",
+		"修改了交付的自动化文件 roles/mw_preflight/tasks/main.yml",
+	}
+	for _, s := range samples {
+		got := localizeProgressTitle(langEnUS, s)
+		if got == "" || containsCJKRune(got) {
+			t.Errorf("localizeProgressTitle(%q) failed: %q", s, got)
+		}
+	}
+}

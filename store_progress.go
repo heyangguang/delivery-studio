@@ -5,12 +5,15 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
+
+	"middleware-deployer/mwpack"
 )
 
 // The execution record of a delivery: what happened on site, step by step. The platform never connects to the
@@ -96,6 +99,72 @@ func (e progressError) Error() string { return string(e) }
 
 const errProgressFull = progressError("执行记录太大了（超过 3 MiB），请清理较长的输出")
 
+var (
+	reSyncEventTitle  = regexp.MustCompile(`^按最新组件同步（第 (\d+) 次）：(\d+) 个文件、(\d+) 个步骤有变化$`)
+	rePatchEventTitle = regexp.MustCompile(`^修改了交付的自动化文件 (.+)$`)
+)
+
+func localizeProgressTitle(lang, title string) string {
+	if !isEnLang(lang) || title == "" {
+		return title
+	}
+	if m := reSyncEventTitle.FindStringSubmatch(title); m != nil {
+		return fmt.Sprintf("Synced with latest components (#%s): %s file(s), %s step(s) changed", m[1], m[2], m[3])
+	}
+	if m := rePatchEventTitle.FindStringSubmatch(title); m != nil {
+		return "Modified delivery automation file " + m[1]
+	}
+	if sec, rest, ok := strings.Cut(title, " · "); ok {
+		secEn := map[string]string{
+			"部署":    "Deploy",
+			"环境准备":  "Prepare",
+			"功能测试":  "Functional Tests",
+			"入口测试":  "Endpoint Tests",
+			"清理":    "Cleanup",
+			"变更后检查": "Post-change Checks",
+			"执行":    "Run",
+		}[strings.TrimSpace(sec)]
+		if secEn == "" {
+			secEn = mwpack.TranslateCatalogText(lang, strings.TrimSpace(sec))
+		}
+		return secEn + " · " + mwpack.TranslateCatalogText(lang, strings.TrimSpace(rest))
+	}
+	if out := mwpack.TranslateCatalogText(lang, title); out != title {
+		return out
+	}
+	return localizeGoMessage(lang, title)
+}
+
+func localizeProgressDoc(lang string, doc progressDoc) progressDoc {
+	if !isEnLang(lang) {
+		return doc
+	}
+	if len(doc.Events) > 0 {
+		evs := make([]progressEvent, len(doc.Events))
+		for i, ev := range doc.Events {
+			ev.Title = localizeProgressTitle(lang, ev.Title)
+			if ev.By == "执行节点" {
+				ev.By = "Execution node"
+			}
+			evs[i] = ev
+		}
+		doc.Events = evs
+	}
+	if len(doc.Superseded) > 0 {
+		sup := make(map[string][]supersededRecord, len(doc.Superseded))
+		for k, list := range doc.Superseded {
+			cp := make([]supersededRecord, len(list))
+			for i, r := range list {
+				r.Title = localizeProgressTitle(lang, r.Title)
+				cp[i] = r
+			}
+			sup[k] = cp
+		}
+		doc.Superseded = sup
+	}
+	return doc
+}
+
 // handleProgress serves /api/jobs/{id}/progress for a delivery whose files exist.
 func (s *storeServer) handleProgress(w http.ResponseWriter, r *http.Request, session storeSession, id string) {
 	switch r.Method {
@@ -103,6 +172,7 @@ func (s *storeServer) handleProgress(w http.ResponseWriter, r *http.Request, ses
 		s.mu.Lock()
 		doc := s.readProgress(id)
 		s.mu.Unlock()
+		doc = localizeProgressDoc(wLang(w), doc)
 		s.writeJSON(w, 200, map[string]any{"steps": doc.Steps, "events": doc.Events, "reports": doc.Reports, "amendments": s.loadAmendments(id), "superseded": doc.Superseded})
 	case "PUT":
 		var body struct {

@@ -837,7 +837,7 @@ export function Runbook({
       live = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jobId]);
+  }, [jobId, lang]);
 
   // the assistant changed the record (an accepted proposal, a write-up): read it again
   useEffect(() => {
@@ -850,7 +850,7 @@ export function Runbook({
     window.addEventListener(AI_CHANGED, on);
     return () => window.removeEventListener(AI_CHANGED, on);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jobId]);
+  }, [jobId, lang]);
   const askAI = (t: Tab, s: RStep, prefill?: string) => {
     const key = keyOf(t.id, s.key);
     dock?.open({
@@ -2247,23 +2247,28 @@ function RecordView({
         </span>
       </div>
       <ol className="rec-tl">
-        {list.map((e, i) => (
-          <li key={i} className={`s-${e.state || "clear"}`}>
-            <i aria-hidden />
-            <div>
-              <b>{e.title || titleOf(e.key)}</b>
-              <span className="rec-chip">
-                {STATE_LABEL[e.state] ?? e.state}
-              </span>
-              <span className="faint small">
-                {e.by} · <time title={fullTime(e.at)}>{ago(e.at)}</time>
-              </span>
-              {e.state === "failed" && rec[e.key]?.note && (
-                <p>{rec[e.key].note}</p>
-              )}
-            </div>
-          </li>
-        ))}
+        {list.map((e, i) => {
+          const resolved = e.key ? titleOf(e.key) : "";
+          const heading =
+            resolved && resolved !== e.key ? resolved : e.title || e.key;
+          return (
+            <li key={i} className={`s-${e.state || "clear"}`}>
+              <i aria-hidden />
+              <div>
+                <b>{heading}</b>
+                <span className="rec-chip">
+                  {STATE_LABEL[e.state] ?? e.state}
+                </span>
+                <span className="faint small">
+                  {e.by} · <time title={fullTime(e.at)}>{ago(e.at)}</time>
+                </span>
+                {e.state === "failed" && rec[e.key]?.note && (
+                  <p>{rec[e.key].note}</p>
+                )}
+              </div>
+            </li>
+          );
+        })}
       </ol>
     </div>
   );

@@ -42,8 +42,17 @@ func init() {
 	{regexp.MustCompile(`^把各机器的上传包与控制节点的离线材料通过堡垒机上传到 (.+)，然后在控制节点核对哈希。$`), func(_ string, m []string) string {
 		return fmt.Sprintf("Upload per-host archives and controller offline materials via bastion to %s, then verify checksums on the controller.", m[1])
 	}},
+	{regexp.MustCompile(`^把本方案的上传包与离线材料通过堡垒机上传到 (.+)，然后在控制节点核对哈希。$`), func(_ string, m []string) string {
+		return fmt.Sprintf("Upload delivery bundles and offline artifacts via bastion to %s, then verify checksums on the controller.", m[1])
+	}},
 	{regexp.MustCompile(`^解包并准备 (.+)$`), func(_ string, m []string) string {
 		return fmt.Sprintf("Unpack and prepare %s", m[1])
+	}},
+	{regexp.MustCompile(`^上传包 (.+?) 及同名 \.sha256。只解出本方案的项目 projects/([^ ]+) 和 Ansible 引导文件，已有的项目与集群不受影响；本方案的项目已存在时命令会停止。$`), func(_ string, m []string) string {
+		return fmt.Sprintf("Upload bundle %s and matching .sha256. Extracts only project projects/%s and Ansible bootstrap files without affecting existing projects or clusters; stops if project directory already exists.", m[1], m[2])
+	}},
+	{regexp.MustCompile(`^把上一份方案项目（([^）]+)）的 secrets/ 原样复制到本方案的项目，保持权限。密码必须与运行中的集群一致，不会重新生成。$`), func(_ string, m []string) string {
+		return fmt.Sprintf("Copy secrets/ verbatim from %s to this project while preserving permissions. Secrets must match the running cluster and are not regenerated.", m[1])
 	}},
 	{regexp.MustCompile(`^上传包 (.+?) 及同名 \.sha256；已有部署目录时命令会停止，不覆盖旧环境。(.*)$`), func(_ string, m []string) string {
 		extra := ""
@@ -188,6 +197,21 @@ func init() {
 		}
 		return fmt.Sprintf("%s status is \"%s\" (not yet verified on a clean environment); do not use in production", m[1], st)
 	}},
+	{regexp.MustCompile(`^当前实例由 ([^ ]+) 管理；([^ ]+) 不单独执行此项，.+$`), func(_ string, m []string) string {
+		return fmt.Sprintf("Managed by %s; %s does not run this check separately—see the managing component's checks", m[1], m[2])
+	}},
+	{regexp.MustCompile(`^每台机器原来的软件源都移到了备份目录（.*?），要恢复就把备份里的文件移回原处，删除 ([^ ]+) 的源文件，再刷新软件包列表。控制节点上的仓库服务用 (.+?) 停掉。$`), func(_ string, m []string) string {
+		return fmt.Sprintf("Original package repos were moved to a backup directory (see Old sources saved to in step output). To roll back, restore backed-up files, remove %s repo files, refresh package metadata, and stop the controller repo service via %s.", m[1], m[2])
+	}},
+	{regexp.MustCompile(`^仅在本步骤修改过的节点，以 Ansible blockinfile 删除本实例受管块：(.+?)。保留其他条目，.+$`), func(_ string, m []string) string {
+		return fmt.Sprintf("On nodes modified by this step only, remove this instance's managed block via Ansible blockinfile (%s) while preserving other entries; re-verify host resolution and endpoint ports afterward.", m[1])
+	}},
+	{regexp.MustCompile(`^\[([^\]]+)\]\s*(.+)$`), func(lang string, m []string) string {
+		return "[" + m[1] + "] " + TranslateCatalogText(lang, m[2])
+	}},
+	{regexp.MustCompile(`^阶段[：:]\s*(.+)$`), func(lang string, m []string) string {
+		return "Phase: " + TranslateCatalogText(lang, m[1])
+	}},
 	{regexp.MustCompile(`^(.+?) 需要(.+)$`), func(lang string, m []string) string {
 		return fmt.Sprintf("%s requires %s", TranslateCatalogText(lang, strings.TrimSpace(m[1])), TranslateCatalogText(lang, strings.TrimSpace(m[2])))
 	}},
@@ -292,6 +316,7 @@ func LocalizePlanStep(lang string, st *PlanStep) *PlanStep {
 	cp.Title = TranslateCatalogText(lang, cp.Title)
 	cp.Desc = TranslateCatalogText(lang, cp.Desc)
 	cp.Expect = TranslateCatalogText(lang, cp.Expect)
+	cp.Rollback = TranslateCatalogText(lang, cp.Rollback)
 	cp.Skipped = TranslateCatalogText(lang, cp.Skipped)
 	return &cp
 }

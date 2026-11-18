@@ -230,9 +230,12 @@ func (s *storeServer) executionRevision(job string) string {
 	return digest(append(s.jobPlan(job), b...))
 }
 func (s *storeServer) executionChoices(job string) []executionChoice {
+	return s.executionChoicesLang(job, "")
+}
+func (s *storeServer) executionChoicesLang(job, lang string) []executionChoice {
 	var out []executionChoice
 	prog := s.readProgress(job)
-	for _, tab := range s.runbookSteps(job) {
+	for _, tab := range s.runbookStepsLang(job, lang) {
 		for _, st := range tab.Steps {
 			c := executionChoice{Key: st.Key, Title: st.Title, Phase: tab.Label, Effect: st.Effect, Hosts: st.Hosts, State: prog.Steps[st.Key].State}
 			switch {
@@ -605,7 +608,7 @@ func (s *storeServer) handleExecutions(w http.ResponseWriter, r *http.Request, s
 		for i := range preps {
 			preps[i] = localizeExecutionPrep(lang, preps[i])
 		}
-		steps := localizeExecutionChoices(lang, s.executionChoices(j.ID))
+		steps := localizeExecutionChoices(lang, s.executionChoicesLang(j.ID, lang))
 		s.writeJSON(w, 200, map[string]any{"runs": runs, "nodes": nodes, "steps": steps, "revision": s.executionRevision(j.ID), "targets": context.Hosts, "executor": map[string]any{"ip": context.ControllerIP, "kind": executionKind(context), "host": context.ExecutionHost, "runtime_root": context.RuntimeRoot}, "preparations": preps})
 		return
 	}

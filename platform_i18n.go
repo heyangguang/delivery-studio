@@ -179,6 +179,7 @@ func localizeExecutionChoices(lang string, in []executionChoice) []executionChoi
 	}
 	out := make([]executionChoice, len(in))
 	for i, c := range in {
+		c.Title = mwpack.TranslateCatalogText(lang, c.Title)
 		c.Phase = mwpack.TranslateCatalogText(lang, c.Phase)
 		c.Reason = localizeGoMessage(lang, c.Reason)
 		out[i] = c
@@ -200,6 +201,7 @@ func localizeExecutionRun(lang string, r executionRun) executionRun {
 	}
 	steps := make([]executionStep, len(r.Steps))
 	for i, st := range r.Steps {
+		st.Title = mwpack.TranslateCatalogText(lang, st.Title)
 		st.Message = localizeGoMessage(lang, st.Message)
 		steps[i] = st
 	}

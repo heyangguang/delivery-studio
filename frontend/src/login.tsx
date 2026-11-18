@@ -276,24 +276,34 @@ function PanelArt() {
 
 function IntroPanel() {
   const { bi } = useI18n();
-  const [i, setI] = useState(0);
-  useEffect(() => {
-    if (reduceMotion()) return;
-    const t = window.setTimeout(() => setI((n) => (n + 1) % ASKS.length), 2400);
-    return () => window.clearTimeout(t);
-  }, [i]);
+  const [slot, setSlot] = useState({ cur: 0, prev: -1 });
+  const [paused, setPaused] = useState(false);
 
-  const cur = ASKS[i];
-  const rest = [1, 2, 3].map((k) => ({
-    idx: (i + k) % ASKS.length,
-    ...ASKS[(i + k) % ASKS.length],
-  }));
+  const select = (next: number) => {
+    setSlot((s) => (s.cur === next ? s : { cur: next, prev: s.cur }));
+  };
+
+  useEffect(() => {
+    if (reduceMotion() || paused) return;
+    const t = window.setTimeout(() => {
+      setSlot((s) => ({ cur: (s.cur + 1) % ASKS.length, prev: s.cur }));
+    }, 3400);
+    return () => window.clearTimeout(t);
+  }, [slot.cur, paused]);
+
+  const { cur, prev } = slot;
+  const n = ASKS.length;
 
   return (
     <aside className="ib-panel" aria-label={bi("AI 交付工作台介绍", "AI Delivery Workbench Overview")}>
       <PanelArt />
 
-      <div className="ib-ask" aria-hidden="true">
+      <div
+        className="ib-ask"
+        aria-hidden="true"
+        onMouseEnter={() => setPaused(true)}
+        onMouseLeave={() => setPaused(false)}
+      >
         <div className="ib-ask-eyebrow">
           <AIEmblem size={20} />
           <span>Middleware Hub AI</span>
@@ -304,37 +314,58 @@ function IntroPanel() {
           <span className="ib-ask-spark">
             <Spark size={15} rainbow />
           </span>
-          <span className="ib-ask-pill" key={`tag-${i}`}>
-            {bi(cur.tag, cur.tagEn)}
-          </span>
-          <span className="ib-ask-text" key={`txt-${i}`}>
-            {bi(cur.ask, cur.askEn)}
-            <i className="ib-caret" />
-          </span>
+          <div className="ib-ask-viewport">
+            {ASKS.map((item, idx) => {
+              const cls =
+                idx === cur ? "is-cur" : idx === prev ? "is-prev" : "is-idle";
+              return (
+                <div key={idx} className={`ib-ask-row ${cls}`}>
+                  <span className="ib-ask-pill">{bi(item.tag, item.tagEn)}</span>
+                  <span className="ib-ask-text">
+                    <span className="ib-ask-str">{bi(item.ask, item.askEn)}</span>
+                    <i className="ib-caret" />
+                  </span>
+                </div>
+              );
+            })}
+          </div>
           <span className="ib-ask-send">
             <IcSend />
           </span>
         </div>
 
-        <div className="ib-ask-hint" key={`hint-${i}`}>
+        <div className="ib-ask-hint">
           <i />
-          <span>{bi(cur.hint, cur.hintEn)}</span>
+          <div className="ib-hint-viewport">
+            {ASKS.map((item, idx) => {
+              const cls =
+                idx === cur ? "is-cur" : idx === prev ? "is-prev" : "is-idle";
+              return (
+                <span key={idx} className={`ib-hint-row ${cls}`}>
+                  {bi(item.hint, item.hintEn)}
+                </span>
+              );
+            })}
+          </div>
         </div>
 
-        <ul className="ib-ask-more" key={`more-${i}`}>
-          {rest.map((item) => (
-            <li key={item.idx}>
-              <button
-                type="button"
-                tabIndex={-1}
-                className="ib-more-btn"
-                onClick={() => setI(item.idx)}
-              >
-                <span className="ib-more-tag">{bi(item.tag, item.tagEn)}</span>
-                <span className="ib-more-ask">{bi(item.ask, item.askEn)}</span>
-              </button>
-            </li>
-          ))}
+        <ul className="ib-ask-more">
+          {ASKS.map((item, idx) => {
+            const pos = (idx - cur + n) % n;
+            return (
+              <li key={idx} className={`ib-more-slot is-pos-${pos}`}>
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  className="ib-more-btn"
+                  onClick={() => select(idx)}
+                >
+                  <span className="ib-more-tag">{bi(item.tag, item.tagEn)}</span>
+                  <span className="ib-more-ask">{bi(item.ask, item.askEn)}</span>
+                </button>
+              </li>
+            );
+          })}
         </ul>
       </div>
 

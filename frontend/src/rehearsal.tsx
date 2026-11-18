@@ -4173,6 +4173,9 @@ export function ClusterRehearsal({
               onClick={() => {
                 setLedgerCollapsed(false);
                 onFocusChange?.(true);
+                document
+                  .querySelector(".md-detail")
+                  ?.scrollTo({ top: 0, behavior: "smooth" });
               }}
               title="隐藏周围交付列表，展开演练记录栏与专注工作台"
             >

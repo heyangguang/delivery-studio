@@ -208,7 +208,7 @@
 }
 .rp-side {
   position: sticky;
-  top: 76px;
+  top: 24px;
   align-self: start;
 }
 .rp-side dl {

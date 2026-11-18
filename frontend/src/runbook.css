@@ -94,11 +94,6 @@ body[arco-theme="dark"] .term {
   margin: -4px 0 -4px;
   background: linear-gradient(var(--surface) 78%, transparent);
 }
-@media (min-width: 901px) {
-  .md-detail .rb-tabs {
-    top: 52px;
-  }
-}
 .rb-tabs .seg {
   flex: 0 1 auto;
   max-width: 100%;

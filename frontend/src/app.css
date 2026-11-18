@@ -418,9 +418,6 @@ html:not([data-vt-ok]) .main {
     padding-top: 52px;
     scroll-padding-top: 64px;
   }
-  .md-detail .detail-side {
-    top: 52px;
-  }
   .md-split > .md-list > * {
     min-width: calc(var(--rail-w) - 1px);
   }

@@ -984,7 +984,7 @@ export const InstanceGraph = React.memo(function InstanceGraph({
                 y={y}
                 width={w}
                 height={pillH}
-                rx={pillH / 2}
+                rx={6}
               />
               <text x={cx} y={y + 21} textAnchor="middle">
                 <tspan className="t-k">{f.external ? "外部" : "入口"}</tspan>
@@ -1016,9 +1016,9 @@ export const InstanceGraph = React.memo(function InstanceGraph({
                 y={2}
                 width={c.w}
                 height={c.h}
-                rx={12}
+                rx={8}
               />
-              <rect className="ig-card-body" width={c.w} height={c.h} rx={12} />
+              <rect className="ig-card-body" width={c.w} height={c.h} rx={8} />
               <line
                 className="ig-card-rim"
                 x1={10}
@@ -1034,7 +1034,7 @@ export const InstanceGraph = React.memo(function InstanceGraph({
                   transform={`translate(${stack ? 14 : c.w - 44} ${stack ? 31 : 8})`}
                   className="ig-badge"
                 >
-                  <rect width={30} height={15} rx={7.5} />
+                  <rect width={30} height={15} rx={4} />
                   <text x={15} y={11} textAnchor="middle">
                     控制
                   </text>
@@ -1057,7 +1057,7 @@ export const InstanceGraph = React.memo(function InstanceGraph({
                       : `translate(10 ${top0 + k * PITCH})`
                   }
                 >
-                  <rect width={CW} height={CH} rx={CH / 2} />
+                  <rect width={CW} height={CH} rx={5} />
                   <text x={10} y={CH / 2 + 4}>
                     {clip(chipLabel(ch), CW - 18)}
                   </text>

@@ -564,6 +564,42 @@ body[arco-theme="dark"] .ad-compose::after {
     linear-gradient(var(--brand-line), var(--brand-line)) border-box;
 }
 
+:root .topbar .ai-quick-toggle.is-interactive.is-on {
+  border-radius: 7px;
+  color: #e0e7ff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+
+:root .topbar .ai-quick-toggle.is-interactive.is-on::before {
+  background:
+    linear-gradient(
+      180deg,
+      rgba(99, 102, 241, 0.26),
+      rgba(67, 56, 202, 0.2)
+    ) padding-box,
+    radial-gradient(
+      var(--ai-spot) circle at calc(var(--mx) - var(--ai-off)) var(--my),
+      color-mix(in srgb, #4285f4 calc(var(--ai-ptr) * 0.92), transparent),
+      transparent 68%
+    ) border-box,
+    radial-gradient(
+      var(--ai-spot) circle at calc(var(--mx) + var(--ai-off)) var(--my),
+      color-mix(in srgb, #ea4335 calc(var(--ai-ptr) * 0.86), transparent),
+      transparent 68%
+    ) border-box,
+    radial-gradient(
+      var(--ai-spot) circle at var(--mx) calc(var(--my) - var(--ai-off) * 0.55),
+      color-mix(in srgb, #fbbc04 calc(var(--ai-ptr) * 0.82), transparent),
+      transparent 68%
+    ) border-box,
+    radial-gradient(
+      var(--ai-spot) circle at var(--mx) calc(var(--my) + var(--ai-off) * 0.55),
+      color-mix(in srgb, #34a853 calc(var(--ai-ptr) * 0.86), transparent),
+      transparent 68%
+    ) border-box,
+    linear-gradient(rgba(129, 140, 248, 0.42), rgba(129, 140, 248, 0.42)) border-box;
+}
+
 :root .ai-pill::after,
 :root .ad-launch::after,
 :root .fc-callai::after,

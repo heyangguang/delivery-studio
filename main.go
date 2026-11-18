@@ -1,0 +1,488 @@
+package main
+
+import (
+	"context"
+	"flag"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"middleware-deployer/mwpack"
+	"middleware-deployer/pkglib"
+)
+
+const (
+	version            = "1.0.256-dev"
+	currentReleaseDate = "2026-11-15"
+)
+
+type releaseNote struct {
+	Version    string   `json:"version"`
+	Date       string   `json:"date"`
+	Title      string   `json:"title"`
+	Highlights []string `json:"highlights"`
+}
+
+var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.256-dev",
+		Date:    "2026-11-15",
+		Title:   "精简登录体验与升级现代 PaaS 操作审计、设备会话管理视图",
+		Highlights: []string{
+			"优化登录界面：移除冗余的会话时长选项，改为由平台默认 8 小时安全策略自动托管；采用无缝桌面分栏画布、自定义矢量拓扑插画与轻量化弹簧过渡动效，全面适配浅色与深色模式及减弱动画偏好。",
+			"重塑「IAM → 操作审计」信息架构：去除密集卡片墙，改为连续数据条与左成员概览 + 右会话流水的主从分栏结构，支持「登录与在线」和「操作记录」之间的双向会话追踪与一键返回，完善骨架屏、空筛选复位、错误重试与离线提示。",
+			"升级「我的账户 → 登录与安全」设备管理列表：采用通透的对象行列表展示所有已登录设备与活跃时长，支持单设备确认退出及一键退出全部其他设备。",
+		},
+	},
+	{
+		Version: "1.0.255-dev",
+		Date:    "2026-11-15",
+		Title:   "全新登录页、标准 Bearer JWT 认证与完整会话时长审计",
+		Highlights: []string{
+			"重构平台登录页：升级深色交互式节点拓扑展示面板与卡片式令牌认证表单，修复暗色侧栏版本标签对比度问题，并支持登录时选择会话令牌有效期（8 小时 / 24 小时 / 7 天）。",
+			"认证机制升级为标准 HS256 Bearer JWT 令牌 + 有状态可撤销会话库：支持 Authorization: Bearer 鉴权（严格优先级，拒绝无效令牌回退 Cookie）、重启密钥与会话保留，并继续兼容同源浏览器导出下载所需的 HttpOnly Cookie 与 CSRF 保护。",
+			"新增全周期在线与登录时长审计（IAM → 操作与会话审计）：实时追踪在线用户、单会话总在线时长与活跃操作时长、历史会话归档、失败登录统计与 CSV 导出；支持管理员在审计面板按会话 ID 追溯操作轨迹并强制下线任意设备，同时在「我的账户 → 登录与安全」展示个人多端活跃令牌与一键注销。",
+			"排查修复剩余跨页与技能/组件运维指南中的旧版「方案」遗留措辞（统一指向「交付」与「变更演练」），补全操作审计动作中文映射（修订、同步、自动执行、变更演练、沙箱、会话注销/过期等）及细粒度设置审计资源分类。",
+		},
+	},
+	{
+		Version: "1.0.254-dev",
+		Date:    "2026-11-15",
+		Title:   "统一「首次部署 + 变更演练」平台模型文案并新增同步拦截直达入口",
+		Highlights: []string{
+			"更新交付详情页同步校验提示：已完成或软件包存在差异的交付不再提示「请生成方案」或「升级、补丁方案」，改为明确引导前往集群「变更演练」实施运行期调整。",
+			"同步提示卡片新增「前往变更演练」快捷操作按钮：当已完成交付触发同步拦截且当前集群支持变更演练时，可直接从拦截横幅一键跳转至对应集群的变更演练标签页。",
+			"全面清理前后端与 AI 助手/文档生成提示词中遗留的「方案」旧工作流表述（包括执行结果确认、集群配置档案、根因/评估文档模板、权限说明与软件库引导文案），统一与当前「交付 + 变更演练」流程保持一致（部署架构选择与变更演练 SOP 文案不受影响）。",
+		},
+	},
+	{
+		Version: "1.0.253-dev",
+		Date:    "2026-11-15",
+		Title:   "软件库详情页与同步任务终端视图视觉重构",
+		Highlights: []string{
+			"重构软件库系统详情页：新增顶部能力概览指标卡（软件源索引、已入库闭包、Ansible 运行环境、离线交付状态，支持一键跳转分区），恢复并统一各功能卡片的圆角与立体层级，并为已索引软件源增加分源与发行代号概览芯片。",
+			"重绘同步与下载任务面板（TaskCard）：升级为语义状态顶栏与统计标签（已更新 / 沿用本地 / 用时），明细区域支持按结果筛选与分组折叠，每条步骤拆解为套组/组件徽标、版本量与大小标签及分段迷你进度条，消除“7/9”与纯文本列表的晦涩观感。",
+			"同步输出日志升级为深色控制台终端视图：提供带行号槽与语义着色（READ / GET / SKIP / DONE / ERROR 高亮路径与文件大小）、自动换行切换及一键复制纯净文本功能，大幅提升日志可读性。",
+		},
+	},
+	{
+		Version: "1.0.252-dev",
+		Date:    "2026-11-15",
+		Title:   "修复版本公告搜索框及复合输入容器的双层聚焦紫框问题",
+		Highlights: []string{
+			"清除 .rn-search 内部输入框触发全局 :focus-visible 时叠加的多余紫色内框，并优化外框悬停与聚焦反馈为单一克制的微光边框。",
+			"同步补齐 .wb-find-box 与 .tp2-code 复合输入容器内部 input/textarea 的 :focus/:focus-visible 阴影抑制，避免复合控件出现双层聚焦框。",
+		},
+	},
+	{
+		Version: "1.0.251-dev",
+		Date:    "2026-11-15",
+		Title:   "全新 Middleware Hub 品牌标志视觉升级",
+		Highlights: []string{
+			"重绘平台主 Logo（BrandMark）及浏览器标签页图标（Favicon）：采用立体双折翼几何「M」架构符号搭配青白流光核心节点与深靛高光微质感圆角底标，全面替换顶栏、登录页与版本弹窗中的旧版拓扑树图标。",
+		},
+	},
+	{
+		Version: "1.0.250-dev",
+		Date:    "2026-11-15",
+		Title:   "企业标准 Word 交付手册排版引擎、配色主题与可编辑模板支持",
+		Highlights: []string{
+			"重构平台内置 Word（.docx）排版引擎：拆分为独立的前置罗马页码分节（I, II, ... 含封面横幅与角标页码、点状引导线目录、★文档属性与★文档变更过程版本控制页）与正文连续阿拉伯页码分节（第 N 页居中页脚与标准页眉）。",
+			"全面规范正文章节与元素版式：统一「第1章 / 1.1 / 1.1.1」层级编号并清理双重序号，升级全宽固定比例表格（自动重复表头与防断行）、灰色底纹代码块（区分可执行命令、斜体蓝灰注释与红色警示注释）、左侧强调线提示框及✓成功判据缩进样式。",
+			"报告模板设置页新增 4 套企业配色主题（深青标准、经典藏蓝、科技靛紫、石墨深灰）、封面项目标语与版本号/作者/审核人字段、自定义封面横幅上传及一键下载预置占位符的可编辑标准模板（.docx）；同步升级自定义模板引擎（安全替换嵌套文本框、支持中文内置样式名映射与已有目录去重）并在导出弹窗支持按需开关前置公文页。",
+		},
+	},
+	{
+		Version: "1.0.249-dev",
+		Date:    "2026-11-15",
+		Title:   "部署架构卡片排版修复与配置页重复展示清理",
+		Highlights: []string{
+			"修复部署架构摘要卡片（.scheme-summary）与通用提示样式冲突导致的左侧紫线压字、底色错位及网格宽度未铺满问题。",
+			"集群「配置」页当查看方案与集群当前部署架构一致时自动省略重复架构卡片，仅在切换到不同架构的历史方案或草稿时展示差异卡片。",
+		},
+	},
+	{
+		Version: "1.0.248-dev",
+		Date:    "2026-11-15",
+		Title:   "版本公告时间轴、文档导读视觉统一与体验细节优化",
+		Highlights: []string{
+			"版本与更新公告弹窗升级为时间轴视图：左侧展示发布日期轨道与版本节点状态，支持历史版本折叠、一键全部展开及多版本筛选。",
+			"统一 AI 技能与知识库详情页排版：「导读」卡片改为与正文章节一致的标题栏与卡片结构，消除仅有重复一级标题时的空白导读框，并对齐卡片上下边距、加粗高亮与目录跳转反馈。",
+			"修复 AI 技能随附沙箱脚本面板折叠箭头点击无响应及长文档渲染卡顿问题，并优化顶部版本入口与状态标签布局。",
+		},
+	},
+	{
+		Version: "1.0.247-dev",
+		Date:    "2026-11-15",
+		Title:   "隔离 Shell 沙箱、分级授权、执行手册位置记忆与界面打磨",
+		Highlights: []string{
+			"AI 代码沙箱新增跨平台隔离 Shell / CLI 执行能力（run_shell），支持在交付或组件排错时按需将脱敏工程只读挂载到 /workspace（$MW_WORKSPACE）。",
+			"代码沙箱支持执行权限分级（ask 每次确认 / auto 智能风险分级 / open 隔离内免询问）与外网访问策略分级（deny / ask / allow），支持对话内实时授权，并兼容 Windows 无管理员权限解压运行环境。",
+			"执行手册新增阶段位置记忆与智能续接：记录每个交付最后停留或正在进行的阶段，切换页面或重新进入后直接回到上次位置，不再退回第一步。",
+			"同步更新 9 项内置 AI 技能（补充内置脚本 run_skill_script 引导、扫描版 PDF 识图、沙箱解析与只读工作区规范）。",
+			"平台顶栏、用户菜单及登录页新增当前版本号展示与更新公告弹窗。",
+		},
+	},
+	{
+		Version: "1.0.244-dev",
+		Date:    "2026-11-11",
+		Title:   "自动执行节点、目标 Agent 接入与执行证据链",
+		Highlights: []string{
+			"支持接入独立管理机或集群内执行机；独立管理机采用按集群隔离的目录与软件源端口，不占用业务节点数或数据盘。",
+			"支持已有 root SSH 及通过堡垒机逐机安装短期目标 Agent，私钥仅保留在执行机，Agent 仅写入所需专用公钥并支持撤销回执。",
+			"新增执行前准备检查、固定快照运行、断线本地保存后补传以及交付报告逐次尝试与机器结果证据。",
+		},
+	},
+	{
+		Version: "1.0.213-dev",
+		Date:    "2026-11-03",
+		Title:   "步骤归属标准化、草稿兼容性与变更预览同步",
+		Highlights: []string{
+			"细化组件私有动作与公共运行库归属校验，工作台支持跨文件联动检查与现有草稿兼容迁移。",
+			"支持预览组件变更影响范围后再同步至当前交付并生成更新包，既有交付与未同步现场不受影响。",
+		},
+	},
+}
+
+func usage() {
+	fmt.Fprint(os.Stderr, `Middleware Hub — 中间件交付平台
+
+  middleware-hub store serve --config 配置.json          启动共享服务
+  middleware-hub execution-node --config 节点配置.json   启动控制节点执行器，领取已授权步骤
+  middleware-hub store user-add --data 目录 --username 名 --role admin|operator --password-stdin
+  middleware-hub catalog check [--components 目录]       校验组件清单（含内置组件）
+  middleware-hub render --spec 规格.yml --out 目录 --library 软件库目录 --runtime Ansible运行环境.tar.gz [--components 目录] [--cert-dir 目录]
+                                                         不启动服务，直接按规格生成完整交付
+  middleware-hub library list|sources|index-update|index-export|index-import|search|versions|fetch|fetch-all|verify|export|import --library 软件库目录 [--platform 系统]
+                                                         准备软件库（需要 Docker 和网络）、在机器之间搬运
+  middleware-hub version
+`)
+}
+
+func main() {
+	if err := run(os.Args[1:]); err != nil {
+		fmt.Fprintln(os.Stderr, "停止：", err)
+		os.Exit(1)
+	}
+}
+
+func run(args []string) error {
+	if len(args) == 0 {
+		usage()
+		return nil
+	}
+	switch args[0] {
+	case "target-agent":
+		return targetAgentCommand(args[1:])
+	case "execution-node":
+		return executionNodeCommand(args[1:])
+	case "store":
+		return storeCommand(args[1:])
+	case "catalog":
+		return catalogCommand(args[1:])
+	case "render":
+		return renderCommand(args[1:])
+	case "library":
+		return libraryCommand(args[1:])
+	case "sandbox-child":
+		return sandboxCommand(args[1:])
+	case "version":
+		fmt.Println(version)
+		return nil
+	}
+	usage()
+	return fmt.Errorf("未知命令 %q", args[0])
+}
+
+func catalogCommand(args []string) error {
+	f := flag.NewFlagSet("catalog", flag.ContinueOnError)
+	dir := f.String("components", "", "额外或覆盖的组件目录")
+	if len(args) == 0 || args[0] != "check" {
+		return fmt.Errorf("用法：catalog check [--components 目录]")
+	}
+	if err := f.Parse(args[1:]); err != nil {
+		return err
+	}
+	plat, err := loadPlatform(platformConfig{ComponentsDir: *dir})
+	if err != nil {
+		return err
+	}
+	for _, e := range plat.cat().Infos() {
+		var vs []string
+		for _, v := range e.Versions {
+			vs = append(vs, v.ID+"（"+statusText(v.Status)+"）")
+		}
+		fmt.Printf("%-14s %-24s %s\n", e.Name, e.Title, strings.Join(vs, "、"))
+	}
+	fmt.Println("组件清单校验通过。")
+	return nil
+}
+
+func statusText(s string) string {
+	switch s {
+	case "published":
+		return "已发布"
+	case "verifying":
+		return "待验证"
+	}
+	return "草稿"
+}
+
+// renderCommand turns a deployment spec into a delivery without the web service: for implementers who prepare
+// specs offline, and for checking a spec before it is submitted.
+func renderCommand(args []string) error {
+	f := flag.NewFlagSet("render", flag.ContinueOnError)
+	spec := f.String("spec", "", "部署规格 YAML/JSON")
+	out := f.String("out", "", "交付输出目录（须不存在）")
+	library := f.String("library", "", "软件库目录")
+	artifacts := f.String("artifacts", "", "其他离线文件目录（可选）")
+	runtime := f.String("runtime", "", "离线 Ansible 运行环境 tar.gz（旁边须有 .sha256），用于 Ubuntu 24.04")
+	components := f.String("components", "", "额外或覆盖的组件目录")
+	certs := f.String("cert-dir", "", "TLS 材料目录：<实例>/<输入名>/{server.crt,server.key,ca.crt}")
+	if err := f.Parse(args); err != nil {
+		return err
+	}
+	if *spec == "" || *out == "" {
+		return fmt.Errorf("render 需要 --spec、--out；部署材料还需要 --library、--runtime")
+	}
+	plat, err := loadPlatform(platformConfig{ComponentsDir: *components, ArtifactsDir: *artifacts, LibraryDir: *library, Runtimes: map[string]string{mwpack.DefaultPlatform: *runtime}})
+	if err != nil {
+		return err
+	}
+	data, err := os.ReadFile(*spec)
+	if err != nil {
+		return err
+	}
+	dep, err := mwpack.ParseDeployment(data)
+	if err != nil {
+		return err
+	}
+	if dep.DeliveryMode != "configuration" && (*library == "" || *runtime == "") {
+		return fmt.Errorf("生成部署材料需要 --library、--runtime")
+	}
+	plan := mwpack.Solve(plat.cat(), dep)
+	if err := mwpack.ValidateDeliveryMode(plan); err != nil {
+		return err
+	}
+	if len(plan.Errors()) == 0 && dep.DeliveryMode != "configuration" {
+		plan.Issues = append(plan.Issues, plat.readiness(plan)...)
+	}
+	for _, i := range plan.Issues {
+		fmt.Fprintf(os.Stderr, "%s %s %s\n", map[string]string{"error": "错误", "warning": "提示"}[i.Severity], i.Path, i.Message)
+	}
+	if err := plan.Err(); err != nil {
+		return fmt.Errorf("规格有错误，未生成")
+	}
+	if dep.DeliveryMode == "configuration" {
+		if _, e := os.Lstat(*out); !os.IsNotExist(e) {
+			return fmt.Errorf("交付输出目录须不存在")
+		}
+		return generateConfiguration(plan, *out)
+	}
+	materials := map[string][]byte{}
+	if *certs != "" {
+		for _, in := range plan.Inputs {
+			for _, name := range []string{"server.crt", "server.key", "ca.crt"} {
+				b, err := os.ReadFile(filepath.Join(*certs, in.Instance, in.Name, name))
+				if err != nil {
+					return fmt.Errorf("缺少 %s：%v", in.Label, err)
+				}
+				materials[in.Instance+"/"+in.Name+"/"+name] = b
+			}
+		}
+	}
+	opt := mwpack.RenderOptions{Artifacts: plat.artifactsFor(plan), Materials: materials}
+	var repo *pkglib.RepoArchive
+	if plan.NeedsPackages() {
+		if repo, err = plat.lib.Assemble(plan.Platform, plan.Requests()); err != nil {
+			return err
+		}
+		opt.PackageRepo = &mwpack.PackageRepo{File: repo.File, SHA256: repo.SHA256, Size: repo.Size}
+	}
+	bundle, err := mwpack.Render(plan, opt)
+	if err != nil {
+		return err
+	}
+	return packageDelivery(bundle, plat, repo, *out, func(m string) { fmt.Println(m) })
+}
+
+type listFlag []string
+
+func (l *listFlag) String() string     { return strings.Join(*l, ",") }
+func (l *listFlag) Set(v string) error { *l = append(*l, v); return nil }
+
+func parseRequests(list []string) ([]mwpack.PackageRequest, error) {
+	var out []mwpack.PackageRequest
+	for _, v := range list {
+		name, ver, ok := strings.Cut(v, "=")
+		if !ok || name == "" || ver == "" {
+			return nil, fmt.Errorf("软件包 %q 须写成 名称=版本", v)
+		}
+		out = append(out, mwpack.PackageRequest{Name: name, Version: ver})
+	}
+	return out, nil
+}
+
+// libraryCommand prepares and moves the package library: the one place that needs containers and a network.
+func libraryCommand(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("用法：library list|sources|index-update|index-export|index-import|search|versions|fetch|fetch-all|verify|export|import")
+	}
+	f := flag.NewFlagSet("library "+args[0], flag.ContinueOnError)
+	dir := f.String("library", "", "软件库目录")
+	srcFile := f.String("sources", "", "管理员的软件源文件（可选）")
+	platformID := f.String("platform", mwpack.DefaultPlatform, "操作系统 id")
+	pkg := f.String("package", "", "软件包名（versions 用）")
+	components := f.String("components", "", "额外或覆盖的组件目录")
+	out := f.String("out", "", "导出文件")
+	var pkgs listFlag
+	f.Var(&pkgs, "pkg", "名称=版本，可重复")
+	if err := f.Parse(args[1:]); err != nil {
+		return err
+	}
+	if *dir == "" {
+		return fmt.Errorf("需要 --library")
+	}
+	plat, err := loadPlatform(platformConfig{ComponentsDir: *components, LibraryDir: *dir, SourcesFile: *srcFile})
+	if err != nil {
+		return err
+	}
+	def, ok := mwpack.PlatformByID(*platformID)
+	if !ok && args[0] != "import" && args[0] != "sources" && args[0] != "list" {
+		return fmt.Errorf("未知的操作系统 %q", *platformID)
+	}
+	plat.fetcher.Log = func(m string) { fmt.Println(m) }
+	ctx := context.Background()
+	switch args[0] {
+	case "list":
+		for _, p := range mwpack.Platforms {
+			st := plat.lib.Stats(p.ID)
+			fmt.Printf("%s：%d 个软件包版本，%d 个文件，%.1f MB\n", p.ID, st.Closures, st.Files, float64(st.Bytes)/1048576)
+			for _, c := range plat.lib.List(p.ID) {
+				fmt.Printf("  %-34s %-34s %2d 个文件  %s\n", c.Request.Name, c.Request.Version, len(c.Files), c.Via)
+			}
+		}
+	case "sources":
+		for _, s := range plat.sources.Load().List {
+			fmt.Printf("%-22s %-5s %s %s\n", s.ID, s.Kind, strings.Join(s.Platforms, ","), firstNonEmpty(s.URL, s.BaseURL))
+		}
+	case "index-export":
+		if *out == "" {
+			return fmt.Errorf("index-export 需要 --out")
+		}
+		w, err := os.OpenFile(*out, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err != nil {
+			return err
+		}
+		defer w.Close()
+		return plat.idx.Export(w, def.ID)
+	case "index-import":
+		if f.NArg() != 1 {
+			return fmt.Errorf("index-import 需要一个索引包文件")
+		}
+		r, err := os.Open(f.Arg(0))
+		if err != nil {
+			return err
+		}
+		defer r.Close()
+		st, err := plat.idx.Import(r, def, plat.sources.Load())
+		if err != nil {
+			return err
+		}
+		fmt.Printf("索引已导入：%d 个软件包版本\n", st.Packages)
+	case "index-update":
+		return plat.idx.Update(ctx, def, plat.sources.Load(), pkglib.LogReporter(plat.fetcher.Log))
+	case "search":
+		if f.NArg() != 1 {
+			return fmt.Errorf("search 需要一个关键词")
+		}
+		hits, err := plat.idx.Search(def, f.Arg(0), 30)
+		if err != nil {
+			return err
+		}
+		for _, h := range hits {
+			fmt.Printf("%-40s %-32s %2d 个版本  %s\n", h.Name, h.Latest, h.Versions, h.Desc)
+		}
+	case "versions":
+		if plat.idx.Ready(def.ID) {
+			list, err := plat.idx.Versions(def, *pkg)
+			if err != nil {
+				return err
+			}
+			for _, p := range list {
+				fmt.Println(p.Version)
+			}
+			return nil
+		}
+		return fmt.Errorf("还没有 %s 的软件源索引：先运行 library index-update，或用 library index-import 导入", def.ID)
+	case "fetch", "fetch-all":
+		var reqs []mwpack.PackageRequest
+		if args[0] == "fetch-all" {
+			reqs = plat.cat().AllPackages(def.ID)
+		} else if reqs, err = parseRequests(pkgs); err != nil {
+			return err
+		}
+		var todo []mwpack.PackageRequest
+		for _, r := range reqs {
+			if !plat.lib.Has(def.ID, r) {
+				todo = append(todo, r)
+			}
+		}
+		fmt.Printf("需要 %d 个，库里已有 %d 个，要获取 %d 个\n", len(reqs), len(reqs)-len(todo), len(todo))
+		if len(todo) == 0 {
+			return nil
+		}
+		if !plat.idx.Ready(def.ID) {
+			return fmt.Errorf("还没有 %s 的软件源索引：先运行 library index-update，或用 library index-import 导入", def.ID)
+		}
+		return plat.idx.FetchDirect(ctx, plat.lib, def, plat.sources.Load(), todo, pkglib.LogReporter(plat.fetcher.Log))
+	case "verify":
+		reqs, err := parseRequests(pkgs)
+		if err != nil {
+			return err
+		}
+		repo, err := plat.lib.Assemble(def, reqs)
+		if err != nil {
+			return err
+		}
+		return plat.fetcher.VerifyInstall(ctx, def, repo.Path, reqs)
+	case "export":
+		reqs, err := parseRequests(pkgs)
+		if err != nil || *out == "" {
+			return fmt.Errorf("export 需要 --pkg 和 --out")
+		}
+		w, err := os.OpenFile(*out, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err != nil {
+			return err
+		}
+		defer w.Close()
+		return plat.lib.Export(w, def.ID, reqs)
+	case "import":
+		if f.NArg() != 1 {
+			return fmt.Errorf("import 需要一个软件库包文件")
+		}
+		r, err := os.Open(f.Arg(0))
+		if err != nil {
+			return err
+		}
+		defer r.Close()
+		res, err := plat.lib.Import(r)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("已导入 %d 个软件包版本，新增 %d 个文件\n", res.Closures, res.Files)
+	default:
+		return fmt.Errorf("未知的子命令 %q", args[0])
+	}
+	return nil
+}
+
+func firstNonEmpty(a ...string) string {
+	for _, x := range a {
+		if x != "" {
+			return x
+		}
+	}
+	return ""
+}

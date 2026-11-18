@@ -1,0 +1,20 @@
+overview: keepalived 用 VRRP 协议让虚拟 IP ${params.vip} 始终落在一台健康的机器上。任一时刻只能有一台持有虚拟 IP；两台同时持有（脑裂）通常是 VRRP 组播被网络拦截。
+checks:
+    - title: 服务与虚拟 IP
+      hosts: 每台机器
+      cmd: systemctl is-active keepalived && (ip -br addr | grep -w ${params.vip} || echo 虚拟 IP 不在本机)
+      expect: 都是 active；只有一台显示虚拟 IP
+tasks:
+    - title: 手动把虚拟 IP 切到另一台
+      cmd: systemctl restart keepalived
+      note: 在当前持有虚拟 IP 的机器上执行，虚拟 IP 会漂到另一台，连接会短暂中断
+faults:
+    - title: 两台机器同时持有虚拟 IP
+      symptom: 应用连接时好时坏，两台机器都能看到虚拟 IP
+      steps:
+        - 检查两台机器之间 VRRP（IP 协议号 112）是否被防火墙或安全组拦截
+        - 修复网络后重启备机上的 keepalived
+      cmd: journalctl -u keepalived -n 100 --no-pager
+logs:
+    - {name: 服务日志, text: journalctl -u keepalived}
+    - {name: 配置文件, text: /etc/keepalived/keepalived.conf}

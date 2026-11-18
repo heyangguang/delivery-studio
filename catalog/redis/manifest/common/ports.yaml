@@ -1,0 +1,2 @@
+- {name: redis, value: =params.redis_port}
+- {name: sentinel, value: =params.sentinel_port, when: count(roles.replica) > 0}

@@ -1,0 +1,247 @@
+/* Skills and MCP services. Prefixes ex- and mc- */
+.ex-n {
+  margin-left: 4px;
+  color: var(--faint);
+  font-size: 13px;
+  font-style: normal;
+  font-weight: 500;
+}
+.ex-list,
+.mc-list {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--line);
+}
+.ex-list > li,
+.mc-list > li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.ex-list > li.off .ex-main,
+.mc-list > li.off .mc-head .ex-t {
+  opacity: 0.5;
+}
+.ex-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px 4px;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  background: none;
+  cursor: pointer;
+}
+.ex-main:focus-visible {
+  outline: none;
+  border-radius: 8px;
+  box-shadow: var(--ring);
+}
+.ex-ic {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  font-size: 16px;
+  color: #a35b00;
+  background: var(--warn-soft);
+}
+.ex-ic.c {
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+}
+.ex-ic.m {
+  color: var(--ok);
+  background: var(--ok-soft);
+}
+.ex-t {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.ex-t b {
+  font-weight: 600;
+}
+.ex-t b code {
+  margin-left: 6px;
+  color: var(--faint);
+  font: 11.5px var(--mono);
+}
+.ex-t small {
+  overflow: hidden;
+  color: var(--mute);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+}
+.ex-t .bad {
+  color: var(--bad);
+}
+.ex-acts {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ex-body {
+  grid-column: 1 / -1;
+  max-height: 420px;
+  margin: 0 0 14px 46px;
+  padding: 14px 18px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  font-size: 13.5px;
+  background: var(--surface-2);
+}
+.mc-list > li {
+  grid-template-columns: 1fr;
+  padding: 12px 4px;
+}
+.mc-head {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+.mc-tools {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 6px 18px;
+  margin: 10px 0 0 46px;
+}
+.mc-tool,
+.mc-write {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 6px 0;
+  font-size: 13px;
+  cursor: pointer;
+}
+.mc-tool.locked {
+  opacity: 0.55;
+  cursor: default;
+}
+.mc-tool > span,
+.mc-write > span {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  min-width: 0;
+}
+.mc-tool code {
+  font: 12.5px var(--mono);
+}
+.mc-tool small,
+.mc-write small {
+  flex-basis: 100%;
+  color: var(--mute);
+  font-size: 12px;
+}
+.mc-tool em {
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-style: normal;
+}
+.mc-tool em.ro {
+  color: var(--ok);
+  background: var(--ok-soft);
+}
+.mc-tool em.rw {
+  color: var(--bad);
+  background: var(--bad-soft);
+}
+.mc-write {
+  grid-column: 1 / -1;
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--line);
+}
+@media (max-width: 760px) {
+  .ex-body,
+  .mc-tools {
+    margin-left: 0;
+  }
+}
+/* web search settings */
+.wb-provs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+.wb-provs button {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  background: var(--surface);
+  cursor: pointer;
+}
+.wb-provs button:hover {
+  border-color: var(--brand-line);
+}
+.wb-provs button.on {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+  box-shadow: var(--ring);
+}
+.wb-provs small {
+  color: var(--mute);
+  font-size: 12px;
+}
+.wb-form {
+  max-width: 640px;
+  margin-top: 16px;
+}
+.wb-test {
+  display: flex;
+  gap: 8px;
+  max-width: 640px;
+  margin-top: 10px;
+}
+.wb-res {
+  max-width: 860px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.wb-res li {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+.wb-res a {
+  color: var(--brand-ink);
+  font-weight: 550;
+}
+.wb-res small {
+  display: block;
+  overflow: hidden;
+  color: var(--ok);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wb-res p {
+  margin: 2px 0 0;
+  color: var(--ink-2);
+  font-size: 13px;
+}
+.st-field .arco-textarea {
+  resize: none;
+}

@@ -1,0 +1,21 @@
+# Everything below is derived from the instance (mw) and evaluated where it is used, so it always follows the plan.
+rd_ha: "{{ (mw.roles.replica | length) > 0 }}"
+rd_primary: "{{ mw.roles.primary | first }}"
+rd_primary_ip: "{{ mw_hosts[rd_primary].ip }}"
+rd_ip: "{{ mw_hosts[inventory_hostname].ip }}"
+rd_port: "{{ mw.params.redis_port }}"
+rd_sport: "{{ mw.params.sentinel_port | default(26379) }}"
+rd_master: "{{ mw.params.master_name | default('mymaster') }}"
+rd_dir: "{{ (mw_hosts[inventory_hostname].params.data_root | default('/data')) ~ mw.params.data_dir[5:] }}"
+rd_state: "/var/lib/mwctl/{{ mw_cluster.id }}/{{ mw.id }}"
+rd_nodes: "{{ mw.hosts | list }}"
+rd_replica_count: "{{ mw.roles.replica | length }}"
+rd_persist: "{{ mw.params.persistence }}"
+
+# Where every machine of the instance can be reached, name to address.
+rd_ips: "{% for h in mw.hosts %}{{ mw_hosts[h].ip }}{{ ',' if not loop.last }}{% endfor %}"
+
+# redis-cli against this machine; the password travels in the environment so it never shows in a process list.
+rd_cli: "{{ ['redis-cli', '-h', '127.0.0.1', '-p', rd_port | string] }}"
+rd_env:
+  REDISCLI_AUTH: "{{ mw.secrets.redis }}"

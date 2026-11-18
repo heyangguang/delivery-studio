@@ -1,0 +1,21 @@
+id: ha-check
+title: 高可用状态
+desc: 只有一个主库、从库全部在流复制、各成员时间线一致、复制连接按设置使用 TLS，并复查归档和 TDE 开关。
+effect: read-only
+hosts: first:primary
+when: count(roles.replica) > 0
+skip: 单节点没有高可用状态可查
+expect: 一个主库加全部从库在流复制。
+inputs:
+    timeout:
+        type: int
+        value: 7200
+preconditions:
+    - mw_step_inputs.timeout > 0
+postconditions:
+    - pg_test_result.rc == 0
+run:
+    role: patroni
+    tasks: test_ha_check
+    vars:
+        pg_test: ha-check

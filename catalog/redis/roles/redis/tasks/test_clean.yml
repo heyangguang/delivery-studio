@@ -1,0 +1,47 @@
+- name: 找到当前主库
+  ansible.builtin.include_tasks: _find_master.yml
+
+- name: 测试键（不删除）
+  ansible.builtin.command:
+    argv: [redis-cli, -h, "{{ rd_master_ip }}", -p, "{{ rd_port }}", EXISTS, "ha:check", "ha:failover"]
+  environment: "{{ rd_env }}"
+  register: rd_exists
+  changed_when: false
+  when: rd_clean == 'inspect'
+  no_log: true
+
+- name: 数据集大小（不删除）
+  ansible.builtin.command:
+    argv: [redis-cli, -h, "{{ rd_master_ip }}", -p, "{{ rd_port }}", DBSIZE]
+  environment: "{{ rd_env }}"
+  register: rd_dbsize
+  changed_when: false
+  when: rd_clean == 'inspect'
+  no_log: true
+
+- name: 盘点结果
+  ansible.builtin.debug:
+    msg: "主库 {{ rd_master_ip }}：测试键 {{ rd_exists.stdout | trim }} 个，数据集共 {{ rd_dbsize.stdout | trim }} 个键"
+  when: rd_clean == 'inspect'
+
+- name: 删除验收测试键（只删这两个）
+  ansible.builtin.command:
+    argv: [redis-cli, -h, "{{ rd_master_ip }}", -p, "{{ rd_port }}", DEL, "ha:check", "ha:failover"]
+  environment: "{{ rd_env }}"
+  changed_when: true
+  when: rd_clean == 'clean-keys'
+  no_log: true
+
+- name: 清理后的数据集大小
+  ansible.builtin.command:
+    argv: [redis-cli, -h, "{{ rd_master_ip }}", -p, "{{ rd_port }}", DBSIZE]
+  environment: "{{ rd_env }}"
+  register: rd_after_clean
+  changed_when: false
+  when: rd_clean == 'clean-keys'
+  no_log: true
+
+- name: 清理结果
+  ansible.builtin.debug:
+    msg: "主库 {{ rd_master_ip }} 现在共 {{ rd_after_clean.stdout | trim }} 个键（新部署的集群应为 0；有业务数据时以实际为准）"
+  when: rd_clean == 'clean-keys'

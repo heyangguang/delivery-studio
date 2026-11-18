@@ -1,0 +1,11 @@
+- {key: client_port, group: network, label: 客户端端口, type: port, default: 2379}
+- {key: peer_port, group: network, label: 成员间通信端口, type: port, default: 2380}
+- {key: data_dir, group: storage, label: 数据目录, type: string, default: /data/etcd, pattern: '^/data/[A-Za-z0-9_./-]+$', hint: 使用 /data 前缀作为数据根目录占位；实际路径随各机器的挂载点变化, restart: true}
+- {key: auto_compaction_retention, group: storage, label: 自动压缩保留（小时）, type: int, default: 1, min: 1, max: 720}
+- {key: quota_backend_bytes, group: storage, label: 后端存储配额, type: size, default: 8GB, min: 256MB, max: 8GB, hint: etcd 官方建议不超过 8GB}
+- {key: max_snapshots, group: storage, label: 保留快照数, type: int, default: 5, min: 1, max: 100, advanced: true}
+- {key: max_wals, group: storage, label: 保留 WAL 数, type: int, default: 5, min: 1, max: 100, advanced: true}
+- {key: heartbeat_interval, group: tuning, label: 心跳间隔, type: int, unit: ms, default: 100, min: 10, max: 5000, restart: true}
+- {key: election_timeout, group: tuning, label: 选举超时, type: int, unit: ms, default: 1000, min: 100, max: 50000, restart: true}
+- {key: nofile, group: tuning, label: 最大打开文件数, type: int, default: 65536, min: 1024, max: 1048576, advanced: true}
+- {key: log_level, group: logging, label: 日志级别, type: enum, options: [debug, info, warn, error], default: info}

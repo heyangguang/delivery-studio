@@ -1,0 +1,36 @@
+overview: HAProxy 把应用的连接转发到后端，并按健康检查自动摘除不可用的后端。它本身不保存数据，重启只会让现有连接断开重连。配置由平台生成，后端变化请通过集群「变更演练」或修订重新生成配置包，不要手工改配置文件。
+checks:
+    - title: 服务与配置
+      hosts: 每台负载均衡机器
+      cmd: systemctl is-active haproxy && haproxy -c -f /etc/haproxy/haproxy.cfg
+      expect: active；Configuration file is valid
+    - title: 后端状态
+      when: params.stats_enabled
+      hosts: 每台负载均衡机器
+      cmd: curl -s "http://127.0.0.1:${params.stats_port}/;csv" | cut -d, -f1,2,18 | column -ts,
+      expect: 每个后端都是 UP（主从入口中只有当前主库在写入入口里是 UP，属于正常）
+    - title: 虚拟 IP 位置
+      when: "params.ha == 'keepalived'"
+      hosts: 每台负载均衡机器
+      cmd: ip -br addr show ${params.vip_interface} | grep -w ${params.vip} || echo 不在本机
+      expect: 只有一台机器持有 ${params.vip}
+tasks:
+    - title: 平滑重载配置
+      cmd: haproxy -c -f /etc/haproxy/haproxy.cfg && systemctl reload haproxy
+      note: 先检查配置再重载，已有连接不受影响
+faults:
+    - title: 应用连不上入口
+      symptom: 连接被拒绝或超时
+      steps:
+        - 确认 haproxy 进程在运行、监听端口存在：ss -ltnp | grep haproxy
+        - 有虚拟 IP 时确认它在某台机器上，并且应用能 ping 通
+        - 看后端是否全部 DOWN：后端全挂时入口会拒绝连接，问题在后端服务本身
+      cmd: journalctl -u haproxy -n 100 --no-pager
+    - title: 后端被反复摘除又恢复
+      symptom: 日志里频繁出现 is DOWN / is UP
+      steps:
+        - 看后端服务的健康检查端口是否偶发超时（网络抖动、后端负载高）
+        - 主从切换期间短时出现属于正常
+logs:
+    - {name: 服务日志, text: journalctl -u haproxy}
+    - {name: 配置文件, text: /etc/haproxy/haproxy.cfg}

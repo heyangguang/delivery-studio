@@ -1,0 +1,50 @@
+# Managed by Middleware Hub for {{ mw_cluster.id }}/{{ mw.id }}. Do not edit by hand.
+global
+    log /dev/log local0
+    maxconn {{ mw.params.maxconn }}
+    user haproxy
+    group haproxy
+    daemon
+
+defaults
+    log global
+    mode tcp
+    option tcplog
+    option dontlognull
+    timeout connect {{ mw.params.timeout_connect }}s
+    timeout client {{ mw.params.timeout_client }}m
+    timeout server {{ mw.params.timeout_server }}m
+{% if mw.params.stats_enabled %}
+
+frontend stats
+    mode http
+    bind 127.0.0.1:{{ mw.params.stats_port }}
+    stats enable
+    stats uri /
+    stats refresh 5s
+{% endif %}
+{% for b in mw.binds %}
+
+# {{ b.target }}
+listen {{ b.name }}
+    bind *:{{ b.listen }}
+    mode {{ b.endpoint.protocol }}
+{% if b.check.type == 'http' %}
+    option httpchk
+    http-check send meth GET uri {{ b.check.path }}
+    http-check expect status {{ b.check.status }}
+{% elif b.check.type == 'tcp-script' %}
+    option tcp-check
+{% if b.check.send %}
+    tcp-check send {{ b.check.send }}
+{% endif %}
+{% if b.check.expect %}
+    tcp-check expect string {{ b.check.expect }}
+{% endif %}
+{% endif %}
+    default-server inter {{ mw.params.check_interval }}s fall {{ mw.params.check_fall }} rise {{ mw.params.check_rise }} on-marked-down shutdown-sessions
+{% for be in b.endpoint.backends %}
+    server {{ be.host }} {{ be.ip }}:{{ be.port }} check{% if b.check.type == 'http' %} port {{ b.check.port }}{% endif %}
+
+{% endfor %}
+{% endfor %}

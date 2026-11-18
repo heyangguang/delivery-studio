@@ -1,0 +1,4 @@
+- id: packages
+  title: 安装 Nginx 与 stream 模块
+  effect: change
+  run: {role: nginx, tasks: install}

@@ -1,0 +1,24 @@
+- id: health
+  title: 核对各节点状态
+  desc: 角色、TLS、TDE、归档和 TCP 认证；不改动数据。
+  effect: read-only
+  expect: 每个节点的实际设置与计划一致。
+  run:
+    role: postgresql
+    tasks: health
+  when: params.deployment_mode in ['legacy', 'single']
+- id: topology
+  title: 复核拓扑
+  effect: read-only
+  hosts: first:primary
+  when: params.deployment_mode in ['legacy', 'single'] && (count(roles.replica) > 0)
+  run:
+    role: postgresql
+    tasks: topology
+- id: native-health
+  title: 核对主从角色与 WAL 流复制
+  effect: read-only
+  when: params.deployment_mode == 'replication'
+  run:
+    role: postgresql
+    tasks: native_health

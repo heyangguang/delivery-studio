@@ -1,0 +1,148 @@
+# Run from the controller/test client; every probe and hosts edit is delegated explicitly.
+# Probe all nodes before making any change. No cached success token is used.
+- name: 查询每台数据库的实际主从身份（不使用部署时的角色判断）
+  ansible.builtin.command:
+    argv: "{{ pg_psql + ['-d', 'postgres', '-c', \"SELECT CASE WHEN pg_is_in_recovery() THEN '从库' ELSE '主库' END\"] }}"
+  delegate_to: "{{ item }}"
+  loop: "{{ (mw.roles.primary + mw.roles.replica) | unique | list }}"
+  register: pg_front_node_roles
+  changed_when: false
+
+- name: 显示当前数据库主从身份
+  ansible.builtin.debug:
+    msg: "{{ item.item }}：当前是{{ item.stdout | trim }}"
+  loop: "{{ pg_front_node_roles.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: 检查全节点入口配置、系统解析及 hosts 冲突
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - -c
+      - |
+        import ipaddress, json, re, socket, sys
+        from pathlib import Path
+        host, expected, port = sys.argv[1:]
+        if not host or not port.isdigit() or not 1 <= int(port) <= 65535:
+            raise SystemExit('入口地址或端口无效，必须明确配置 writer 入口')
+        try:
+            ipaddress.ip_address(host)
+            domain = False
+        except ValueError:
+            domain = True
+            if len(host) > 253 or not all(re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?', label) for label in host.rstrip('.').split('.')):
+                raise SystemExit('入口域名格式无效：' + host)
+        expected = expected.strip()
+        if expected:
+            try:
+                addr = ipaddress.ip_address(expected)
+            except ValueError:
+                raise SystemExit('显式 resolve_ip 不是有效 IP：' + expected)
+            if addr.is_unspecified or addr.is_multicast or addr.is_loopback or addr.is_link_local:
+                raise SystemExit('resolve_ip 必须是有效的入口单播地址：' + expected)
+            expected = str(addr)
+        matches = []
+        if domain:
+            for number, line in enumerate(Path('/etc/hosts').read_text().splitlines(), 1):
+                fields = line.split('#', 1)[0].split()
+                if len(fields) >= 2 and host.lower().rstrip('.') in [x.lower().rstrip('.') for x in fields[1:]]:
+                    try:
+                        mapped = str(ipaddress.ip_address(fields[0]))
+                    except ValueError:
+                        raise SystemExit('无效 hosts 映射，第 %d 行：%s' % (number, line))
+                    matches.append((mapped, number, line))
+            conflicts = [m for m in matches if expected and m[0] != expected]
+            if conflicts or len({m[0] for m in matches}) > 1:
+                raise SystemExit('入口 hosts 映射冲突，禁止覆盖；resolve_ip=%s，条目=%s' % (expected or '未配置', matches))
+        error = ''
+        try:
+            actual = sorted({str(ipaddress.ip_address(r[4][0])) for r in socket.getaddrinfo(host, int(port), socket.AF_UNSPEC, socket.SOCK_STREAM)})
+        except socket.gaierror as exc:
+            actual = []
+            error = str(exc)
+        if actual and domain and expected and set(actual) != {expected}:
+            raise SystemExit('系统解析与显式 resolve_ip 不符；host=%s expected=%s actual=%s；请修复解析，禁止覆盖' % (host, expected, actual))
+        if not actual and (not domain or not expected):
+            raise SystemExit('入口系统解析失败：%s %s；请配置 DNS 或明确有效的 resolve_ip，禁止猜测地址' % (host, error))
+        if not actual and matches:
+            raise SystemExit('已有同 IP hosts 映射但系统仍不能解析，请检查 NSS/hosts 配置：%s %s' % (matches, error))
+        print(json.dumps({'host': host, 'expected': expected, 'actual': actual, 'needs_hosts': not bool(actual), 'error': error}, ensure_ascii=False))
+      - "{{ mw.fronts.writer.address | default('') }}"
+      - "{{ mw.fronts.writer.resolve_ip | default('') }}"
+      - "{{ mw.fronts.writer.listen | default(0) | string }}"
+  delegate_to: "{{ item }}"
+  loop: "{{ (mw.roles.primary + mw.roles.replica + groups['controller'] + [inventory_hostname]) | unique | list }}"
+  register: pg_front_probes
+  changed_when: false
+
+- name: 仅解析失败时备份并补充显式 IP 映射（不覆盖原有条目）
+  ansible.builtin.blockinfile:
+    path: /etc/hosts
+    marker: "# {mark} MW PG {{ pg_scope }} writer entry"
+    block: "{{ (item.stdout | from_json).expected }} {{ (item.stdout | from_json).host }}"
+    backup: true
+    state: present
+  delegate_to: "{{ item.item }}"
+  loop: "{{ pg_front_probes.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: (item.stdout | from_json).needs_hosts
+  register: pg_front_hosts_changes
+
+- name: 记录受管映射、标记及实际备份路径
+  ansible.builtin.debug:
+    msg:
+      - "节点={{ item.item.item }}，备份={{ item.backup_file | default('未修改') }}"
+      - "标记=# {mark} MW PG {{ pg_scope }} writer entry"
+      - "映射={{ (item.item.stdout | from_json).expected }} {{ (item.item.stdout | from_json).host }}"
+  loop: "{{ pg_front_hosts_changes.results }}"
+  loop_control:
+    label: "{{ item.item.item }}"
+  when: item.changed | default(false)
+
+- name: 逐节点复验系统解析及入口 TCP 端口（主库自身回流失败仅提示，其余失败禁止切主）
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - -c
+      - |
+        import ipaddress, socket, sys
+        host, expected, port, node, role = sys.argv[1:]
+        actual = sorted({str(ipaddress.ip_address(r[4][0])) for r in socket.getaddrinfo(host, int(port), socket.AF_UNSPEC, socket.SOCK_STREAM)})
+        if not actual:
+            raise SystemExit('入口系统解析无结果：' + host)
+        try:
+            ipaddress.ip_address(host)
+            domain = False
+        except ValueError:
+            domain = True
+        if domain and expected and set(actual) != {str(ipaddress.ip_address(expected.strip()))}:
+            raise SystemExit('复验解析与 resolve_ip 不符：%s expected=%s actual=%s' % (host, expected, actual))
+        # Use the system resolver and hostname, as libpq/Python entry tests do.
+        # A TCP failure never leads to a hosts edit.
+        try:
+            with socket.create_connection((host, int(port)), timeout=10) as conn:
+                peer = conn.getpeername()
+        except OSError as exc:
+            if role == '主库':
+                print('SKIP 节点=%s 身份=主库；系统解析正常，主库经 ELB 回到自身连接未通过，此回流路径不作为入口验收条件，不阻断后续测试；由从库验证入口连通性、数据库登录及 TLS。host=%s port=%s resolved=%s；回流探测信息=%s' % (node, host, port, actual, exc))
+                sys.exit(0)
+            raise SystemExit('域名/IP 解析正常。%s（%s）连接入口 %s:%s 失败，请检查入口监听和网络；禁止因连接失败修改 hosts 或继续切主测试。解析地址=%s，错误=%s' % (node, role, host, port, actual, exc))
+        print('PASS 节点=%s 身份=%s host=%s port=%s resolved=%s peer=%s；解析和 TCP 通过，后续仍须检查数据库登录和 TLS 证书' % (node, role, host, port, actual, peer))
+      - "{{ mw.fronts.writer.address | default('') }}"
+      - "{{ mw.fronts.writer.resolve_ip | default('') }}"
+      - "{{ mw.fronts.writer.listen | default(0) | string }}"
+      - "{{ item }}"
+      - "{{ (pg_front_node_roles.results | selectattr('item', 'equalto', item) | map(attribute='stdout') | first | trim) if item in (mw.roles.primary + mw.roles.replica) else '检查客户端' }}"
+  delegate_to: "{{ item }}"
+  loop: "{{ (mw.roles.primary + mw.roles.replica + groups['controller'] + [inventory_hostname]) | unique | list }}"
+  register: pg_front_verified
+  changed_when: false
+
+- name: 输出全节点入口前置检查结果
+  ansible.builtin.debug:
+    msg: "{{ item.item }}：{{ item.stdout }}"
+  loop: "{{ pg_front_verified.results }}"
+  loop_control:
+    label: "{{ item.item }}"

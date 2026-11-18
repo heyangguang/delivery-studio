@@ -1,0 +1,21 @@
+- name: 各端点状态
+  ansible.builtin.command:
+    argv:
+      - etcdctl
+      - --endpoints={{ etcd_endpoints }}
+      - endpoint
+      - status
+      - --write-out=json
+  register: etcd_status
+  changed_when: false
+
+- name: 全部端点认同同一个领导者
+  ansible.builtin.assert:
+    that:
+      - leaders | length == 1
+      - leaders | first | int != 0
+    fail_msg: "各端点报告的领导者不一致或没有领导者：{{ leaders }}"
+    success_msg: "领导者成员 ID {{ leaders | first }}"
+  vars:
+    status: "{{ etcd_status.stdout | from_json }}"
+    leaders: "{{ status | map(attribute='Status') | map(attribute='leader') | unique | list }}"

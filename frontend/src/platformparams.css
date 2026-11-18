@@ -1,0 +1,189 @@
+.pp-editor {
+  max-width: 1080px;
+  margin: 0 auto;
+  display: grid;
+  gap: 20px;
+  color: var(--ink);
+}
+.pp-editor h2 {
+  font-size: 18px;
+  line-height: 1.4;
+  margin: 0 0 8px;
+  font-weight: 650;
+}
+.pp-editor p {
+  margin: 0;
+  line-height: 1.7;
+  font-size: 13px;
+}
+.pp-source {
+  border: 0;
+  background: none;
+  color: var(--brand-ink);
+  cursor: pointer;
+  padding: 0 0 0 12px;
+  font: inherit;
+}
+.pp-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  padding: 20px;
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+.pp-card-head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.pp-card-head strong {
+  font-size: 15px;
+}
+.pp-card-head > .muted {
+  font: 12px var(--mono);
+  overflow-wrap: anywhere;
+}
+.pp-editor .fgrid,
+.pp-condition {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px 24px;
+}
+.pp-editor .frow {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.pp-editor .arco-input-wrapper,
+.pp-editor .arco-input-inner-wrapper,
+.pp-editor .arco-select,
+.pp-editor .arco-input-number {
+  width: 100%;
+  min-width: 0;
+}
+.pp-editor .arco-textarea {
+  min-height: 64px;
+  border-radius: 10px;
+}
+.pp-options {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  background: var(--surface-2);
+  border-radius: 9px;
+}
+.pp-option,
+.pp-options-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 64px;
+  gap: 12px;
+  align-items: center;
+}
+.pp-options-head {
+  font-size: 12px;
+  color: var(--mute);
+  padding: 0 8px;
+}
+.pp-options > .arco-btn {
+  justify-self: start;
+}
+.pp-switch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  font-size: 13px;
+}
+.pp-errors {
+  border: 1px solid var(--danger, #d42d3c);
+  border-radius: 10px;
+  padding: 14px 16px;
+  background: var(--danger-soft, #fff3f3);
+  display: grid;
+  gap: 8px;
+  color: var(--danger, #c62737);
+}
+.pp-errors button {
+  border: 0;
+  background: transparent;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  display: grid;
+  gap: 4px;
+  overflow-wrap: anywhere;
+}
+.pp-errors button span {
+  font-size: 12px;
+  text-decoration: underline;
+}
+.pp-rule-error {
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--danger-soft, #fff3f3);
+  color: var(--danger, #c62737);
+  line-height: 1.6;
+  font-size: 13px;
+}
+.pp-rule > .arco-btn {
+  justify-self: start;
+}
+.wb-probs.wb-probs-visible {
+  flex: none;
+  max-height: 180px;
+  padding: 12px 16px;
+  border-top: 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+}
+.wb-probs-visible li {
+  align-items: flex-start;
+}
+.wb-probs-visible .wb-prob-msg {
+  flex: 1;
+  line-height: 1.6;
+}
+.wb-probs-visible .wb-dot {
+  margin-top: 6px;
+}
+.wb-probs-visible .error .wb-prob-msg {
+  color: var(--danger, #c62737);
+}
+@media (max-width: 640px) {
+  .pp-card {
+    padding: 14px;
+  }
+  .pp-editor .fgrid,
+  .pp-condition {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .pp-option,
+  .pp-options-head {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 44px;
+    gap: 6px;
+  }
+  .pp-option .arco-btn {
+    padding: 0 4px;
+  }
+  .pp-card-head {
+    flex-wrap: wrap;
+  }
+  .pp-editor {
+    gap: 16px;
+  }
+  .pp-source {
+    display: block;
+    padding: 6px 0 0;
+  }
+}

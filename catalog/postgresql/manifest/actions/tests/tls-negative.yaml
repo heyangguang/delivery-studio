@@ -1,0 +1,22 @@
+id: tls-negative
+title: TLS 策略与负向验证
+desc: 先检查执行节点与当前主库；高可用集群中若相同，先计划切主并验证复制及入口跟随，可能短暂中断连接，结束后不自动回切。单节点要求入口支持自身回流。随后按入口验收 sslmode 验证入口及每个节点，域名校验名称与连接 IP 分离，节点使用数据库端口。verify-full 按 dns、ip 或 both 验证身份；verify-ca 不测试名称拒绝；require、prefer、allow 不强加 CA 或身份校验。当前服务端启用 TLS 时拒绝明文。
+scope: endpoint:writer
+effect: disruptive
+hosts: first:primary
+when: params.deployment_mode in ['legacy', 'single'] && (params.tls)
+skip: 未启用 TLS
+expect: 所选模式和身份的正向连接全部成功；verify-ca 与 verify-full 的错误 CA 须因证书链校验失败被拒绝，verify-full 的错误名称须因身份不匹配被拒绝；明文须因 pg_hba 明文策略被拒绝。网络、超时、认证及未知错误均失败；不适用项明确记录跳过。
+inputs:
+    timeout:
+        type: int
+        value: 7200
+preconditions:
+    - mw_step_inputs.timeout > 0
+postconditions:
+    - pg_test_result.rc == 0
+run:
+    role: postgresql
+    tasks: test_tls_negative
+    vars:
+        pg_test: tls-negative

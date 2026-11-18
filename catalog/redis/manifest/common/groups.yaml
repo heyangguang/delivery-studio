@@ -1,0 +1,8 @@
+- {id: network, label: 端口与访问, tab: base}
+- {id: security, label: 认证, tab: base}
+- {id: memory, label: 内存, tab: database}
+- {id: persistence, label: 持久化, tab: database}
+- {id: replication, label: 复制, tab: ha}
+- {id: sentinel, label: 哨兵, tab: ha}
+- {id: logging, label: 日志, tab: database}
+- {id: os, label: 操作系统基线, tab: os}

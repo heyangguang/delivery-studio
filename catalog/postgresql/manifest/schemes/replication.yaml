@@ -1,0 +1,28 @@
+id: replication
+contract:
+    when: params.deployment_mode == 'replication'
+    series: replication
+    failover: manual
+    mechanism: PostgreSQL 原生异步流复制
+    read_access: 主库读写，从库只读
+    sharding: false
+    limitations:
+        - 人工切换前必须隔离旧主；异步复制可能丢失尚未同步的数据
+        - 当前未提供此方案的升级、扩缩容和配置变更流程
+    acceptance:
+        - postgresql/native-replication
+    operations:
+        - deploy
+name: 原生主从方案
+tag: 人工切换
+spec: PostgreSQL 原生复制 · 1 主 1 从起 · 人工切换
+roles:
+    - role: primary
+      count: 1
+    - role: replica
+      count: 1
+params:
+    deployment_mode: replication
+    replication: async
+    tls: false
+    tde: false

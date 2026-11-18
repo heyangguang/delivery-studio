@@ -1,0 +1,47 @@
+# Managed by Middleware Hub for {{ mw_cluster.id }}/{{ mw.id }}.
+# Redis rewrites this file at run time (a failover adds replicaof), so the platform writes it once and never again.
+# ---- 网络 ----
+bind {{ mw.params.bind }}
+protected-mode yes
+port {{ rd_port }}
+tcp-backlog {{ mw.params.tcp_backlog }}
+timeout {{ mw.params.client_timeout }}
+tcp-keepalive {{ mw.params.tcp_keepalive }}
+# ---- 进程与日志 ----
+daemonize no
+supervised systemd
+pidfile /run/redis/redis-server.pid
+loglevel {{ mw.params.loglevel }}
+logfile {{ rd_dir }}/log/redis-server.log
+databases {{ mw.params.databases }}
+# ---- 内存 ----
+maxmemory {{ mw.params.maxmemory_bytes }}
+maxmemory-policy {{ mw.params.maxmemory_policy }}
+maxmemory-samples {{ mw.params.maxmemory_samples }}
+# ---- 持久化 ----
+{% if rd_persist == 'rdb' %}
+save 3600 1 300 100 60 10000
+appendonly no
+{% elif rd_persist == 'aof' %}
+save ""
+appendonly yes
+{% else %}
+save ""
+appendonly no
+{% endif %}
+stop-writes-on-bgsave-error yes
+appendfsync everysec
+# ---- 目录 ----
+dir {{ rd_dir }}/data
+# ---- 复制 ----
+{% if rd_ha | bool and inventory_hostname != rd_primary %}
+replicaof {{ rd_primary_ip }} {{ rd_port }}
+{% endif %}
+replica-serve-stale-data yes
+replica-read-only yes
+repl-diskless-sync {{ 'yes' if mw.params.repl_diskless_sync else 'no' }}
+repl-backlog-size {{ mw.params.repl_backlog_size_bytes }}
+replica-priority {{ mw.params.replica_priority }}
+# ---- 认证 ----
+requirepass {{ mw.secrets.redis }}
+masterauth {{ mw.secrets.redis }}

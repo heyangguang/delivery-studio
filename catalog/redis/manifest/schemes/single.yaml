@@ -1,0 +1,20 @@
+id: single
+contract:
+    when: count(roles.replica) == 0
+    series: basic
+    failover: none
+    mechanism: Redis 单机
+    read_access: 单节点读写
+    sharding: false
+    limitations:
+        - 默认仅作缓存，不持久化；重启会丢失内存数据
+    acceptance:
+        - redis/auth
+        - redis/persistence-off
+    operations:
+        - deploy
+name: 基础系列
+tag: 开发测试
+spec: 单节点 Redis · 2C4G · 无自动故障切换
+roles: [{role: primary, count: 1}]
+params: {maxmemory: 3GB}

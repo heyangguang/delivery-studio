@@ -1,0 +1,10 @@
+- name: 核对网卡存在
+  ansible.builtin.command: ip -o link show {{ mw.params.interface }}
+  changed_when: false
+
+- name: 写入 keepalived 配置
+  ansible.builtin.template:
+    src: keepalived.conf.j2
+    dest: /etc/keepalived/keepalived.conf
+    mode: '0600'
+  no_log: true

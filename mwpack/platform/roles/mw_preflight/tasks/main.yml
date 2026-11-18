@@ -1,0 +1,131 @@
+- name: 数据存储方式必须有对应实现
+  ansible.builtin.assert:
+    that: mw_hosts[inventory_hostname].params.storage_mode in ['dedicated_disk', 'system_directory']
+    fail_msg: 当前公共流程不支持所选数据存储方式，请维护者同时补齐实现与契约。
+
+- name: 主机名应与计划一致
+  ansible.builtin.command: hostname
+  register: mw_hostname
+  changed_when: false
+
+- name: 核对主机名
+  ansible.builtin.assert:
+    that: mw_hostname.stdout | trim == inventory_hostname
+    fail_msg: "主机名是 {{ mw_hostname.stdout | trim }}，计划为 {{ inventory_hostname }}。请先完成免密准备步骤（会设置主机名与 hosts）。"
+
+- name: 本机地址
+  ansible.builtin.command: hostname -I
+  register: mw_addrs
+  changed_when: false
+
+- name: 计划中的 IP 应是本机地址
+  ansible.builtin.assert:
+    that: mw_hosts[inventory_hostname].ip in mw_addrs.stdout.split()
+    fail_msg: "{{ mw_hosts[inventory_hostname].ip }} 不是本机地址（本机：{{ mw_addrs.stdout | trim }}）"
+
+- name: 读取系统信息
+  ansible.builtin.slurp:
+    src: /etc/os-release
+  register: mw_os
+
+- name: 机器架构
+  ansible.builtin.command: uname -m
+  register: mw_uname
+  changed_when: false
+
+- name: 系统与架构应符合本次选择的平台
+  ansible.builtin.assert:
+    that:
+      - mw_os_id in mw_platform.os_ids
+      - mw_os_version == mw_platform.version or mw_os_version.startswith(mw_platform.version ~ '.')
+      - mw_uname.stdout | trim == ('x86_64' if mw_platform.arch == 'amd64' else 'aarch64')
+    fail_msg: >-
+      当前系统是 {{ mw_os_id }} {{ mw_os_version }}（{{ mw_uname.stdout | trim }}），本次交付按 {{ mw_platform.id }} 生成：
+      软件包只适用于这个系统。请换成对应系统的机器，或在平台里重新选择系统后重新生成。
+  vars:
+    mw_os_id: "{{ (mw_os.content | b64decode | regex_search('(?m)^ID=\"?([A-Za-z0-9_.-]+)', '\\1') | first) }}"
+    mw_os_version: "{{ (mw_os.content | b64decode | regex_search('(?m)^VERSION_ID=\"?([0-9.]+)', '\\1') | first) }}"
+
+# IPv4 only, like the trust script: for the machine's own name the myhostname resolver also returns the IPv6
+# link-local address, ahead of the IPv4 one, on every Ubuntu with IPv6 on.
+- name: 各机器名称应能解析为计划中的 IP
+  ansible.builtin.command: getent ahostsv4 {{ item.key }}
+  register: mw_resolve
+  changed_when: false
+  failed_when: mw_resolve.rc != 0 or (mw_resolve.stdout_lines | map('regex_replace', '\\s.*$', '') | unique | list) != [item.value.ip]
+  loop: "{{ mw_hosts | dict2items }}"
+  loop_control:
+    label: "{{ item.key }} -> {{ item.value.ip }}"
+
+- name: 校验数据路径及父目录（只读）
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - |
+        import os, pathlib, sys
+        target = pathlib.Path(sys.argv[1])
+        for p in [target, *target.parents]:
+            if p.is_symlink():
+                raise SystemExit("数据路径不能经过符号链接: " + str(p))
+            if p.exists() and not p.is_dir():
+                raise SystemExit("数据路径父级不是目录: " + str(p))
+        print(next(str(p) for p in [target, *target.parents] if p.exists()))
+      - "{{ mw_hosts[inventory_hostname].params.data_root | default('/data') }}"
+  register: mw_data_ancestor
+  changed_when: false
+  when: mw_hosts[inventory_hostname].data
+
+- name: 数据盘状态（只读）
+  ansible.builtin.command: findmnt -nro SOURCE,FSTYPE --mountpoint {{ mw_hosts[inventory_hostname].params.data_root | default('/data') }}
+  register: mw_data_mount
+  changed_when: false
+  failed_when: false
+  when: mw_hosts[inventory_hostname].params.storage_mode == "dedicated_disk" and mw_hosts[inventory_hostname].data
+
+- name: 未选择初始化时 /data 必须已挂载
+  ansible.builtin.assert:
+    that: mw_data_mount.rc == 0
+    fail_msg: "{{ mw_hosts[inventory_hostname].params.data_root | default('/data') }} 没有挂载。请手工准备数据盘，或在部署规格里为 {{ inventory_hostname }} 选择初始化。"
+  when: mw_hosts[inventory_hostname].params.storage_mode == "dedicated_disk" and mw_hosts[inventory_hostname].data and not mw_hosts[inventory_hostname].initialize
+
+- name: 选择初始化时设备必须存在
+  ansible.builtin.command: test -b {{ mw_hosts[inventory_hostname].disk }}
+  changed_when: false
+  when: mw_hosts[inventory_hostname].params.storage_mode == "dedicated_disk" and mw_hosts[inventory_hostname].data and mw_hosts[inventory_hostname].initialize
+
+- name: 普通目录模式不允许磁盘初始化
+  ansible.builtin.assert:
+    that:
+      - not mw_hosts[inventory_hostname].initialize
+      - mw_hosts[inventory_hostname].disk | length == 0
+      - mw_hosts[inventory_hostname].partition | length == 0
+    fail_msg: 系统盘目录模式不能指定磁盘、分区或初始化。
+  when: mw_hosts[inventory_hostname].params.storage_mode == "system_directory"
+
+- name: 检查普通数据目录（只读）
+  ansible.builtin.stat:
+    path: "{{ mw_hosts[inventory_hostname].params.data_root | default('/data') }}"
+    follow: false
+  register: mw_data_directory
+  when: mw_hosts[inventory_hostname].data and mw_hosts[inventory_hostname].params.storage_mode == "system_directory"
+
+- name: 已有数据路径必须是普通目录而不是符号链接
+  ansible.builtin.assert:
+    that:
+      - not mw_data_directory.stat.exists or (mw_data_directory.stat.isdir | default(false) and not mw_data_directory.stat.islnk | default(false))
+    fail_msg: /data 必须不存在或为普通目录，不能是文件或符号链接。
+  when: mw_hosts[inventory_hostname].data and mw_hosts[inventory_hostname].params.storage_mode == "system_directory"
+
+- name: 检查数据目录可用空间（只读）
+  ansible.builtin.command:
+    argv: [df, -Pm, "{{ mw_data_ancestor.stdout | trim }}"]
+  register: mw_directory_space
+  changed_when: false
+  when: mw_hosts[inventory_hostname].data and mw_hosts[inventory_hostname].params.storage_mode == "system_directory"
+
+- name: 数据目录空间必须满足要求
+  ansible.builtin.assert:
+    that: (mw_directory_space.stdout_lines[-1].split()[3] | int) >= (mw_hosts[inventory_hostname].params.data_min_free_mb | int)
+    fail_msg: 数据目录可用空间不足，请释放空间或调整公共参数中的最低空间要求。
+  when: mw_hosts[inventory_hostname].data and mw_hosts[inventory_hostname].params.storage_mode == "system_directory"

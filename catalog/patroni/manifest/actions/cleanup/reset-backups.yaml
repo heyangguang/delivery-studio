@@ -1,0 +1,20 @@
+id: reset-backups
+title: 可选：放弃全部备份历史
+desc: 仅限尚未上线、确认备份只用于本轮测试时执行。会删除本集群的 pgBackRest stanza 并重建，之后没有任何可恢复的备份；若要保留历史，跳过本项并先定好正式备份方案。有隔离实例未停止时会拒绝。
+effect: destructive
+confirm:
+    - discard_all_backup_history
+serial: 1
+inputs:
+    timeout:
+        type: int
+        value: 7200
+preconditions:
+    - mw_step_inputs.timeout > 0
+postconditions:
+    - pg_test_result.rc == 0
+run:
+    role: patroni
+    tasks: test_reset_backups
+    vars:
+        pg_test: reset-backups

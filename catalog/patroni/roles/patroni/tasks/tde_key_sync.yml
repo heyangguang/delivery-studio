@@ -1,0 +1,43 @@
+# The same key file must exist on every node, or a promoted replica could not read encrypted data.
+- name: 从主库取回密钥文件
+  ansible.builtin.fetch:
+    src: /etc/postgresql/keys/pg_tde_keyfile
+    dest: "{{ mw_secret_dir }}/{{ mw.id }}/pg_tde_keyfile"
+    flat: true
+  delegate_to: "{{ pg_primary }}"
+  run_once: true
+  no_log: true
+
+- name: 复制到每个从库（已一致则不改动）
+  ansible.builtin.copy:
+    src: "{{ mw_secret_dir }}/{{ mw.id }}/pg_tde_keyfile"
+    dest: /etc/postgresql/keys/pg_tde_keyfile
+    owner: postgres
+    group: postgres
+    mode: '0600'
+  when: inventory_hostname != pg_primary
+  no_log: true
+
+- name: 各节点的密钥文件指纹
+  ansible.builtin.stat:
+    path: /etc/postgresql/keys/pg_tde_keyfile
+    checksum_algorithm: sha256
+  register: pg_keyfile_sum
+
+- name: 密钥文件在所有节点必须一致
+  ansible.builtin.assert:
+    that: (ansible_play_hosts | map('extract', hostvars, ['pg_keyfile_sum', 'stat', 'checksum']) | unique | list | length) == 1
+    fail_msg: 各节点的 /etc/postgresql/keys/pg_tde_keyfile 内容不一致；从库提升为主库后将读不了加密数据
+  run_once: true
+
+- name: 状态目录
+  ansible.builtin.file:
+    path: "{{ pg_state }}"
+    state: directory
+    mode: '0700'
+
+- name: 记录密钥文件指纹（用于日后核对备份与恢复）
+  ansible.builtin.copy:
+    dest: "{{ pg_state }}/pg_tde_keyfile.sha256"
+    content: "{{ pg_keyfile_sum.stat.checksum }}  /etc/postgresql/keys/pg_tde_keyfile\n"
+    mode: '0600'

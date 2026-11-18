@@ -1,0 +1,147 @@
+- id: tde-key
+  title: 创建 TDE 主密钥
+  desc: 在主库创建 pg_tde 扩展、注册本地密钥文件并创建服务器主密钥；已存在的密钥一律保留，丢失的密钥不会被重建。
+  effect: change
+  hosts: first:primary
+  when: params.deployment_mode in ['legacy', 'single'] && (params.tde)
+  run:
+    role: postgresql
+    tasks: tde_key
+- id: tde-key-sync
+  title: 把同一把密钥同步到全部节点
+  desc: 从主库取回密钥文件，复制到每个从库；这样任何节点接管后都能解密。
+  effect: change
+  when: params.deployment_mode in ['legacy', 'single'] && (params.tde && count(roles.replica) > 0)
+  run:
+    role: postgresql
+    tasks: tde_key_sync
+- id: tde-enable
+  title: 开启 TDE 与 WAL 加密
+  desc: 为各数据库设置密钥，并把 default_table_access_method、强制加密和 WAL 加密写入集群配置。
+  effect: change
+  hosts: first:primary
+  when: params.deployment_mode in ['legacy', 'single'] && (params.tde)
+  run:
+    role: postgresql
+    tasks: tde_enable
+- id: restart-tde
+  title: 滚动重启使 TDE 生效
+  desc: 逐台重启；配置已一致的节点会跳过。重启期间连接会短暂中断。
+  effect: disruptive
+  serial: 1
+  when: params.deployment_mode in ['legacy', 'single'] && (params.tde)
+  run:
+    role: postgresql
+    tasks: restart
+    vars:
+        pg_restart_keys:
+            - pg_tde.wal_encrypt
+- id: addons
+  title: 安装数据库扩展
+  desc: 在所选数据库中创建扩展；已存在的保留，不自动升级。默认装进 postgres 和 template1：以后新建的数据库都会带上；若指定其他数据库，它们必须已经存在。
+  effect: change
+  hosts: first:primary
+  when: params.deployment_mode in ['legacy', 'single'] && (count(addons) > 0)
+  run:
+    role: postgresql
+    tasks: addons
+- id: app-user
+  title: 创建业务管理账户
+  effect: change
+  hosts: first:primary
+  when: params.deployment_mode in ['legacy', 'single'] && (params.app_user != '')
+  run:
+    role: postgresql
+    tasks: app_user
+- id: backup-config
+  title: 配置 pgBackRest 并创建 stanza
+  desc: 每个节点写入 pgBackRest 配置；主库创建 stanza。这里只配置策略，不做备份，也不创建定时任务。
+  effect: change
+  run:
+    role: postgresql
+    tasks: backup_config
+  when: params.deployment_mode in ['legacy', 'single']
+- id: archive-enable
+  title: 开启 WAL 归档
+  effect: change
+  hosts: first:primary
+  run:
+    role: postgresql
+    tasks: archive_enable
+  when: params.deployment_mode in ['legacy', 'single']
+- id: restart-archive
+  title: 滚动重启使归档生效
+  desc: 逐台重启；配置已一致的节点会跳过。
+  effect: disruptive
+  serial: 1
+  run:
+    role: postgresql
+    tasks: restart
+    vars:
+        pg_restart_keys:
+            - archive_mode
+  when: params.deployment_mode in ['legacy', 'single']
+- id: archive-check
+  title: 检查归档
+  effect: read-only
+  hosts: first:primary
+  expect: pgBackRest check 通过。
+  run:
+    role: postgresql
+    tasks: archive_check
+  when: params.deployment_mode in ['legacy', 'single']
+- id: native-addons
+  title: 安装数据库扩展
+  desc: 在所选数据库中创建扩展；已存在的保留，不自动升级。默认装进 postgres 和 template1：以后新建的数据库都会带上；若指定其他数据库，它们必须已经存在。
+  effect: change
+  hosts: first:primary
+  when: params.deployment_mode == 'replication' && count(addons) > 0
+  run:
+    role: postgresql
+    tasks: native_addons
+- id: native-app-user
+  title: 创建业务管理账户
+  effect: change
+  hosts: first:primary
+  when: params.deployment_mode == 'replication' && params.app_user != ''
+  run:
+    role: postgresql
+    tasks: native_app_user
+- id: native-backup-config
+  title: 配置 pgBackRest 并创建 stanza
+  desc: 每个节点写入 pgBackRest 配置；主库创建 stanza。这里只配置策略，不做备份，也不创建定时任务。
+  effect: change
+  run:
+    role: postgresql
+    tasks: native_backup_config
+  when: params.deployment_mode == 'replication'
+- id: native-archive-enable
+  title: 开启 WAL 归档
+  effect: change
+  hosts: primary
+  run:
+    role: postgresql
+    tasks: native_archive_enable
+  when: params.deployment_mode == 'replication'
+- id: native-restart-archive
+  title: 滚动重启使归档生效
+  desc: 逐台重启；配置已一致的节点会跳过。
+  effect: disruptive
+  serial: 1
+  run:
+    role: postgresql
+    tasks: native_restart
+    vars:
+        pg_restart_keys:
+            - archive_mode
+  when: params.deployment_mode == 'replication'
+  hosts: primary
+- id: native-archive-check
+  title: 检查归档
+  effect: read-only
+  hosts: primary
+  expect: pgBackRest check 通过。
+  run:
+    role: postgresql
+    tasks: native_archive_check
+  when: params.deployment_mode == 'replication'

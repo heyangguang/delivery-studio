@@ -1,0 +1,18 @@
+id: backup-info
+title: 查看备份结果
+desc: 执行上一步后预期备份数为 0，pgBackRest 显示 no valid backups 属正常；仓库里可能已有新的归档 WAL，不要求目录为空。
+effect: read-only
+serial: 1
+inputs:
+    timeout:
+        type: int
+        value: 7200
+preconditions:
+    - mw_step_inputs.timeout > 0
+postconditions:
+    - pg_test_result.rc == 0
+run:
+    role: patroni
+    tasks: test_backup_info
+    vars:
+        pg_test: backup-info

@@ -1,0 +1,48 @@
+# Read-only. With rd_expect_planned the sentinel must still name the planned primary (first deployment); after a
+# failover it may name any machine of the instance, so the verify phase does not insist on it.
+- name: 找到当前主库
+  ansible.builtin.include_tasks: _find_master.yml
+
+- name: 首次部署时主库应是计划的主库
+  ansible.builtin.assert:
+    that: rd_master_ip == rd_primary_ip
+    fail_msg: "哨兵报告的主库是 {{ rd_master_ip }}，计划的主库是 {{ rd_primary_ip }}"
+  when: rd_expect_planned | default(false) | bool
+
+- name: 主库的复制状态
+  ansible.builtin.command:
+    argv: [redis-cli, -h, "{{ rd_master_ip }}", -p, "{{ rd_port }}", INFO, replication]
+  environment: "{{ rd_env }}"
+  register: rd_minfo
+  changed_when: false
+  until: >-
+    'role:master' in rd_minfo.stdout and
+    ('connected_slaves:' ~ rd_replica_count) in rd_minfo.stdout
+  retries: 60
+  delay: 2
+  no_log: true
+
+- name: 哨兵信息
+  ansible.builtin.command:
+    argv: [redis-cli, -h, 127.0.0.1, -p, "{{ rd_sport }}", SENTINEL, master, "{{ rd_master }}"]
+  register: rd_sminfo
+  changed_when: false
+  until: >-
+    'num-other-sentinels' in rd_sminfo.stdout_lines and
+    (rd_sminfo.stdout_lines[rd_sminfo.stdout_lines.index('num-other-sentinels') + 1] | int) == (rd_nodes | length) - 1
+  retries: 30
+  delay: 3
+
+- name: 仲裁检查
+  ansible.builtin.command:
+    argv: [redis-cli, -h, 127.0.0.1, -p, "{{ rd_sport }}", SENTINEL, ckquorum, "{{ rd_master }}"]
+  register: rd_quorum
+  changed_when: false
+  until: rd_quorum.stdout | trim is match('OK')
+  retries: 20
+  delay: 3
+
+- name: 结论
+  ansible.builtin.assert:
+    that: rd_quorum.stdout | trim is match('OK')
+    success_msg: "主库 {{ rd_master_ip }}，{{ rd_replica_count }} 个从库在线，{{ rd_nodes | length }} 个哨兵互相发现并满足仲裁"

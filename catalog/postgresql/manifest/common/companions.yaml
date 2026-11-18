@@ -1,0 +1,4 @@
+- id: ha
+  component: patroni
+  capability: postgresql-database
+  when: params.deployment_mode == 'patroni'

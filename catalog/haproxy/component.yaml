@@ -1,0 +1,49 @@
+schema: mwpack/v1
+component: haproxy
+short: lb
+title: HAProxy
+category: 负载均衡
+icon: balance
+color: blue
+summary: 四层 TCP 负载均衡，支持 HTTP 与自定义健康检查，可配 keepalived 虚拟 IP 做高可用。
+tags: [负载均衡, 高可用]
+provides: [l4-lb]
+detail:
+    presets:
+        - {$file: manifest/schemes/single.yaml}
+        - {$file: manifest/schemes/ha.yaml}
+    tagline: 按后端真实角色转发，主库故障时自动摘除
+    scale: 常见 2 台起
+    capabilities:
+        - {name: 健康检查, text: TCP、HTTP（如 Patroni /primary）、自定义收发}
+        - {name: 高可用, text: 与 keepalived 配合提供虚拟 IP}
+        - {name: 放置, text: 可部署在独立机器，也可与被代理的服务同机}
+    limits:
+        - 只做四层透传，不终止 TLS
+        - 不做读写分离，读写端点由被代理服务各自提供
+lb:
+    protocols: [tcp]
+    health: [tcp, http, tcp-script]
+operations: {$file: manifest/common/operations.yaml}
+roles: {$file: manifest/common/roles.yaml}
+groups: {$file: manifest/common/groups.yaml}
+requires: {$file: manifest/common/requires.yaml}
+params: {$file: manifest/common/params.yaml}
+rules: {$file: manifest/common/rules.yaml}
+ports: {$file: manifest/common/ports.yaml}
+versions: {$file: manifest/common/versions.yaml}
+lifecycle:
+    install: {$file: manifest/actions/lifecycle/install.yaml}
+    configure: {$file: manifest/actions/lifecycle/configure.yaml}
+    start: {$file: manifest/actions/lifecycle/start.yaml}
+    verify: {$file: manifest/actions/lifecycle/verify.yaml}
+tests:
+    - {$file: manifest/actions/tests/listening.yaml}
+    - {$file: manifest/actions/tests/backends-reachable.yaml}
+# Explicit shared implementation dependencies; all other source files are private.
+shared_files:
+    - roles/haproxy/tasks/configure.yml
+    - roles/haproxy/tasks/install.yml
+    - roles/haproxy/tasks/listening.yml
+    - roles/haproxy/tasks/start.yml
+    - roles/haproxy/templates/haproxy.cfg.j2

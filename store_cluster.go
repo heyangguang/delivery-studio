@@ -1,0 +1,333 @@
+package main
+
+import (
+	"fmt"
+	"net/http"
+	"sort"
+	"strings"
+	"time"
+
+	"middleware-deployer/mwpack"
+)
+
+// A cluster is what the people using the platform think in: one cluster id, deployed once and then changed by plans
+// (upgrade, patch, scale out, scale in). Every one of them is a job with the same cluster id; Seq orders them. The
+// platform never connects to the cluster, so its state is what the engineers report back:
+//
+//   - a job holds the cluster from the moment it is generated until its outcome is reported as done, done with
+//     deviations, or void; while one does, no other plan can be made for the cluster;
+//   - the next plan always starts from the cluster's head: the newest job reported done.
+//
+// Jobs whose generation failed, and voided jobs, take no part.
+
+// Outcomes an engineer reports for a generated job.
+const (
+	outcomeDone     = "done"     // carried out as written
+	outcomeDeviated = "deviated" // carried out, but not exactly as written; the note says how
+	outcomeFailed   = "failed"   // stopped part way; the job still holds the cluster until it is settled
+	outcomeVoid     = "void"     // not carried out, or rolled back; the cluster is as it was before
+)
+
+// live says whether a job takes part in its cluster's history.
+func (j storeJob) live() bool { return j.State != "failed" && j.Outcome != outcomeVoid }
+
+// finished says whether a job's result is in: what it did is now the cluster's state.
+func (j storeJob) finished() bool {
+	return j.State == "succeeded" && (j.Outcome == outcomeDone || j.Outcome == outcomeDeviated)
+}
+
+// holds says whether a job keeps the cluster busy: being generated, or generated and not settled yet.
+func (j storeJob) holds() bool { return j.live() && !j.finished() }
+
+// clusterOf lists the jobs of one cluster, oldest first. The caller holds s.mu.
+func (s *storeServer) clusterOf(cluster string) []storeJob {
+	var out []storeJob
+	for _, j := range s.jobs {
+		if j.ClusterID == cluster {
+			out = append(out, j)
+		}
+	}
+	sortJobs(out)
+	return out
+}
+
+func sortJobs(js []storeJob) {
+	sort.Slice(js, func(a, b int) bool {
+		if js[a].Seq != js[b].Seq {
+			return js[a].Seq < js[b].Seq
+		}
+		return js[a].Created < js[b].Created
+	})
+}
+
+// clusterHead is the job the next plan starts from: the newest finished one.
+func clusterHead(jobs []storeJob) (storeJob, bool) {
+	for i := len(jobs) - 1; i >= 0; i-- {
+		if jobs[i].live() && jobs[i].finished() {
+			return jobs[i], true
+		}
+	}
+	return storeJob{}, false
+}
+
+// clusterHolder is the job that keeps the cluster busy, if any.
+func clusterHolder(jobs []storeJob) (storeJob, bool) {
+	for i := len(jobs) - 1; i >= 0; i-- {
+		if jobs[i].holds() {
+			return jobs[i], true
+		}
+	}
+	return storeJob{}, false
+}
+
+// clusterCurrent is the job that describes the cluster as it is now: the head, or before anything is finished the
+// newest generated job that is still live (the deployment that is about to happen).
+func clusterCurrent(jobs []storeJob) (storeJob, bool) {
+	if h, ok := clusterHead(jobs); ok {
+		return h, true
+	}
+	for i := len(jobs) - 1; i >= 0; i-- {
+		if jobs[i].live() && jobs[i].State == "succeeded" {
+			return jobs[i], true
+		}
+	}
+	return storeJob{}, false
+}
+
+// currentJobs is, for every cluster, the id of the job that describes it now. Security and anything else that asks
+// "what is running out there" look at these only; an earlier deployment a plan has replaced is history. The caller
+// holds s.mu.
+func (s *storeServer) currentJobs() map[string]bool {
+	by := map[string][]storeJob{}
+	for _, j := range s.jobs {
+		by[j.ClusterID] = append(by[j.ClusterID], j)
+	}
+	out := map[string]bool{}
+	for _, js := range by {
+		sortJobs(js)
+		if c, ok := clusterCurrent(js); ok {
+			out[c.ID] = true
+		}
+	}
+	return out
+}
+
+// clusterTaken says why a first deployment cannot use a cluster id: some live job already has it. The caller holds
+// s.mu.
+func (s *storeServer) clusterTaken(cluster string) string {
+	for _, j := range s.jobs {
+		if j.ClusterID == cluster && j.live() {
+			return "集群标识 " + cluster + " 已经被使用。一个集群只做一次首次部署；如需对已运行集群做升级、扩缩容或调参，请在集群详情的「变更演练」中生成实施方案"
+		}
+	}
+	return ""
+}
+
+// markOutcome records what the engineer reports for a job. The returned message is empty on success; code is the
+// HTTP status otherwise.
+func (s *storeServer) markOutcome(id, user, outcome, note string) (storeJob, int, string) {
+	note = strings.TrimSpace(note)
+	switch outcome {
+	case "", outcomeDone, outcomeFailed:
+	case outcomeDeviated, outcomeVoid:
+		if len([]rune(note)) < 2 {
+			return storeJob{}, 400, map[string]string{outcomeDeviated: "请写明实际做法和原交付有什么不同", outcomeVoid: "请写明为什么作废，以及集群现在是否保持原样"}[outcome]
+		}
+	default:
+		return storeJob{}, 400, "状态只能是待执行、完成、有偏差、失败或作废"
+	}
+	if len([]rune(note)) > 2000 {
+		return storeJob{}, 400, "说明最多 2000 字"
+	}
+	s.jobPersistMu.Lock()
+	defer s.jobPersistMu.Unlock()
+	s.mu.Lock()
+	j := s.jobs[id]
+	switch {
+	case j.DeliveryMode == "configuration" && outcome != "" && outcome != outcomeVoid:
+		s.mu.Unlock()
+		return j, 409, "仅配置交付不能登记为现场部署结果；配置生成不代表已安装或验证服务"
+	case j.State != "succeeded":
+		s.mu.Unlock()
+		return j, 409, "交付材料生成成功后才能确认结果"
+	case j.Outcome == outcomeVoid:
+		s.mu.Unlock()
+		return j, 409, "已作废的交付不能再改；要做同样的事，请重新生成一份"
+	case j.Outcome == outcome && note == j.OutcomeNote:
+		s.mu.Unlock()
+		return j, 200, ""
+	}
+	j.Outcome, j.OutcomeNote, j.Marked, j.MarkedBy = outcome, note, "", ""
+	if outcome != "" {
+		j.Marked, j.MarkedBy = time.Now().UTC().Format(time.RFC3339Nano), user
+	}
+	s.mu.Unlock()
+	if err := s.persistJob(j); err != nil {
+		return j, 500, "状态无法保存，请联系管理员"
+	}
+	s.mu.Lock()
+	s.jobs[id] = j
+	s.mu.Unlock()
+	return j, 200, ""
+}
+
+// planEntry is one job as the cluster page lists it.
+type planEntry struct {
+	DeliveryMode string                `json:"delivery_mode,omitempty"`
+	Scheme       *mwpack.SchemeSummary `json:"scheme,omitempty"`
+	ID           string                `json:"id"`
+	Seq          int                   `json:"seq"`
+	Owner        string                `json:"owner"`
+	Version      string                `json:"version"`
+	State        string                `json:"state"`
+	Stage        string                `json:"stage,omitempty"`
+	Error        string                `json:"error,omitempty"`
+	Outcome      string                `json:"outcome,omitempty"`
+	OutcomeNote  string                `json:"outcome_note,omitempty"`
+	Marked       string                `json:"marked,omitempty"`
+	MarkedBy     string                `json:"marked_by,omitempty"`
+	RunDone      int                   `json:"run_done,omitempty"`
+	RunFailed    int                   `json:"run_failed,omitempty"`
+	RunTotal     int                   `json:"run_total,omitempty"`
+	Revises      string                `json:"revises,omitempty"`
+	RevisedBy    string                `json:"revised_by,omitempty"`
+	Created      string                `json:"created"`
+	Updated      string                `json:"updated,omitempty"`
+}
+
+// clusterView is one cluster: its first deployment, revision history, and state.
+type clusterView struct {
+	DeliveryMode string                `json:"delivery_mode,omitempty"`
+	Scheme       *mwpack.SchemeSummary `json:"scheme,omitempty"`
+	ID           string                `json:"id"`
+	AppID        string                `json:"app_id"`
+	AppName      string                `json:"app_name"`
+	Owner        string                `json:"owner"`
+	// Version, Platform and Hosts describe the cluster as it is now (see clusterCurrent).
+	Version  string      `json:"version"`
+	Platform string      `json:"platform,omitempty"`
+	Hosts    int         `json:"hosts"`
+	Created  string      `json:"created"`
+	Updated  string      `json:"updated"`
+	Current  string      `json:"current,omitempty"`
+	Head     string      `json:"head,omitempty"`
+	Holder   string      `json:"holder,omitempty"`
+	Plans    []planEntry `json:"plans"` // newest first
+	Blocked  string      `json:"blocked,omitempty"`
+}
+
+func entryOf(j storeJob) planEntry {
+	return planEntry{j.DeliveryMode, j.Scheme, j.ID, j.Seq, j.Owner, j.Version, j.State, j.Stage, j.Error, j.Outcome, j.OutcomeNote, j.Marked, j.MarkedBy, j.RunDone, j.RunFailed, j.RunTotal, j.Revises, j.RevisedBy, j.Created, j.Updated}
+}
+
+// clusters lists the clusters the user can see.
+func (s *storeServer) clusters(w http.ResponseWriter, r *http.Request, session storeSession) {
+	vis := s.visibleJobs(session.User)
+	only := r.URL.Query().Get("id")
+	s.mu.Lock()
+	by := map[string][]storeJob{}
+	for _, j := range s.jobs {
+		if only == "" || j.ClusterID == only {
+			by[j.ClusterID] = append(by[j.ClusterID], j)
+		}
+	}
+	var views []clusterView
+	for id, jobs := range by {
+		sortJobs(jobs)
+		seen := false
+		for _, j := range jobs {
+			seen = seen || vis(j.Owner)
+		}
+		if !seen {
+			continue
+		}
+		first := jobs[0]
+		for _, j := range jobs {
+			if j.Seq == 0 && j.live() {
+				first = j
+				break
+			}
+		}
+		v := clusterView{Scheme: first.Scheme, ID: id, AppID: first.AppID, AppName: first.AppName, Owner: first.Owner, Version: first.Version, Created: first.Created, Plans: []planEntry{}}
+		for i := len(jobs) - 1; i >= 0; i-- {
+			j := jobs[i]
+			v.Plans = append(v.Plans, entryOf(j))
+			if u := firstNonEmptyStr(j.Updated, j.Created); u > v.Updated {
+				v.Updated = u
+			}
+		}
+		if c, ok := clusterCurrent(jobs); ok {
+			v.Current = c.ID
+			v.Scheme = c.Scheme
+			if c.AppID == v.AppID {
+				v.Version = c.Version
+			}
+		}
+		if h, ok := clusterHead(jobs); ok {
+			v.Head = h.ID
+		}
+		if h, ok := clusterHolder(jobs); ok {
+			v.Holder = h.ID
+		}
+		views = append(views, v)
+	}
+	s.mu.Unlock()
+	for i := range views {
+		v := &views[i]
+		if dep := s.readSpec(v.Current); dep != nil {
+			v.DeliveryMode = dep.DeliveryMode
+		}
+		if v.DeliveryMode == "configuration" {
+			v.Blocked = "本次仅交付配置文件；生成成功不代表已安装或验证现场服务"
+		}
+		for n := range v.Plans {
+			entry := &v.Plans[n]
+			entry.Scheme = s.deliveryScheme(entry.ID, v.AppID, entry.Scheme)
+		}
+		if v.Current == "" {
+			continue
+		}
+		if d := s.readSpec(v.Current); d != nil {
+			v.Hosts, v.Platform = len(d.Hosts), d.Platform
+		}
+		v.Scheme = s.deliveryScheme(v.Current, v.AppID, v.Scheme)
+		v.Version = s.deliveryAppVersion(v.Current, v.AppID, v.Version)
+	}
+	sort.Slice(views, func(a, b int) bool { return views[a].Updated > views[b].Updated })
+	if views == nil {
+		views = []clusterView{}
+	}
+	s.writeJSON(w, 200, views)
+}
+
+// clusterHistoryText is a cluster's history in words, for the assistant.
+func (s *storeServer) clusterHistoryText(cluster string) string {
+	s.mu.Lock()
+	jobs := s.clusterOf(cluster)
+	s.mu.Unlock()
+	cur, _ := clusterCurrent(jobs)
+	holder, busy := clusterHolder(jobs)
+	var b strings.Builder
+	fmt.Fprintf(&b, "集群 %s，共 %d 份交付记录（旧的在前）。\n", cluster, len(jobs))
+	for _, j := range jobs {
+		state := outcomeNames[j.Outcome]
+		if j.State != "succeeded" {
+			state = map[string]string{"failed": "生成失败", "queued": "生成中", "running": "生成中"}[j.State]
+		}
+		fmt.Fprintf(&b, "- %s（编号 %s，%s 由 %s 生成）：%s", jobTitle(j), j.ID, day(j.Created), j.Owner, state)
+		if j.ID == cur.ID {
+			b.WriteString("【当前状态以它为准】")
+		}
+		if j.OutcomeNote != "" {
+			b.WriteString("；现场说明：" + j.OutcomeNote)
+		}
+		if j.RunTotal > 0 {
+			fmt.Fprintf(&b, "；现场记录 %d/%d 步，%d 步失败", j.RunDone, j.RunTotal, j.RunFailed)
+		}
+		b.WriteString("\n")
+	}
+	if busy {
+		fmt.Fprintf(&b, "待确认结果的交付：%s。\n", jobTitle(holder))
+	}
+	return b.String()
+}

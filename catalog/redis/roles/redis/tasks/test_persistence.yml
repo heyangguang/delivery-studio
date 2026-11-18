@@ -1,0 +1,30 @@
+- name: 读取持久化设置
+  ansible.builtin.command:
+    argv: "{{ rd_cli + ['CONFIG', 'GET', item] }}"
+  environment: "{{ rd_env }}"
+  loop: [save, appendonly, repl-diskless-sync]
+  register: rd_p
+  changed_when: false
+  no_log: true
+
+- name: 持久化状态
+  ansible.builtin.command:
+    argv: "{{ rd_cli + ['INFO', 'persistence'] }}"
+  environment: "{{ rd_env }}"
+  register: rd_pi
+  changed_when: false
+  no_log: true
+
+- name: 数据目录里的 AOF 目录
+  ansible.builtin.stat:
+    path: "{{ rd_dir }}/data/appendonlydir"
+  register: rd_aofdir
+
+- name: 设置应与计划一致
+  ansible.builtin.assert:
+    that:
+      - (rd_persist != 'none') or ((rd_p.results[0].stdout_lines | length < 2 or rd_p.results[0].stdout_lines[1] == '') and rd_p.results[1].stdout_lines[1] == 'no' and 'aof_enabled:0' in rd_pi.stdout and not rd_aofdir.stat.exists)
+      - (rd_persist != 'rdb') or (rd_p.results[0].stdout_lines[1] != '' and rd_p.results[1].stdout_lines[1] == 'no')
+      - (rd_persist != 'aof') or (rd_p.results[1].stdout_lines[1] == 'yes' and 'aof_enabled:1' in rd_pi.stdout)
+      - (not rd_ha | bool) or rd_p.results[2].stdout_lines[1] == ('yes' if mw.params.repl_diskless_sync else 'no')
+    success_msg: "{{ inventory_hostname }}：持久化方式 {{ rd_persist }} 的设置与计划一致"

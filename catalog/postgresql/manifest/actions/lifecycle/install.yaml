@@ -1,0 +1,15 @@
+- id: packages
+  title: 安装 PostgreSQL 相关软件包
+  desc: 屏蔽默认的 postgresql 服务并禁止自动创建默认集群，安装期间临时屏蔽 etcd 与 patroni，随后创建数据、配置与备份目录。
+  effect: change
+  run:
+    role: postgresql
+    tasks: install
+- id: os-baseline
+  title: 写入内核参数与资源限额基线
+  desc: sysctl、limits 和透明大页设置，只写入文件并生效，不重启机器。
+  effect: change
+  when: params.apply_baseline
+  run:
+    role: postgresql
+    tasks: os_baseline

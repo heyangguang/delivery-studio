@@ -1,0 +1,17 @@
+# Waits until this machine's instance answers a password-authenticated PING.
+- name: 等待端口监听
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ rd_port | int }}"
+    timeout: 120
+
+- name: 用密码 PING
+  ansible.builtin.command:
+    argv: "{{ rd_cli + ['PING'] }}"
+  environment: "{{ rd_env }}"
+  register: rd_ping
+  changed_when: false
+  until: rd_ping.rc == 0 and rd_ping.stdout | trim == 'PONG'
+  retries: 30
+  delay: 2
+  no_log: true

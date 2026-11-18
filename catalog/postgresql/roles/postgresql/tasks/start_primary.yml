@@ -1,0 +1,10 @@
+- name: 启动 Patroni（首次启动会初始化数据库）
+  ansible.builtin.systemd:
+    name: patroni
+    enabled: true
+    state: started
+
+- name: 等待初始主库就绪
+  ansible.builtin.include_tasks: _wait_ready.yml
+  vars:
+    pg_want_primary: true

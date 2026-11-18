@@ -1,0 +1,8 @@
+# Native streaming replication: no Patroni or DCS owns this file.
+data_directory = '{{ pg_data }}'
+hba_file = '/etc/middleware/{{ pg_scope }}/pg_hba.conf'
+listen_addresses = '*'
+port = {{ pg_port }}
+{% for key, value in (pg_parameters | dictsort) %}
+{{ key }} = '{{ value | string | replace("'", "''") }}'
+{% endfor %}

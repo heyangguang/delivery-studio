@@ -1,0 +1,31 @@
+- name: 数据库密钥已设置的标记
+  ansible.builtin.stat:
+    path: "{{ pg_state }}/tde-databases-ready"
+  register: pg_tde_marker
+
+- name: 为各数据库设置密钥
+  ansible.builtin.command:
+    argv: "{{ pg_psql + ['-d', item, '-c', \"CREATE EXTENSION IF NOT EXISTS pg_tde; SELECT pg_tde_set_key_using_global_key_provider('principal-key','file-vault');\"] }}"
+  loop: "{{ ['template1', 'postgres'] }}"
+  when: not pg_tde_marker.stat.exists
+  changed_when: true
+
+- name: 核对各数据库密钥
+  ansible.builtin.command:
+    argv: "{{ pg_psql + ['-d', item, '-c', 'SELECT pg_tde_verify_key()'] }}"
+  loop: "{{ ['template1', 'postgres'] }}"
+  changed_when: false
+
+- name: 记录
+  ansible.builtin.copy:
+    dest: "{{ pg_state }}/tde-databases-ready"
+    content: "{{ pg_scope }}\n"
+    mode: '0600'
+
+- name: 写入 TDE 集群设置
+  ansible.builtin.include_tasks: _patch.yml
+  vars:
+    pg_patch_settings:
+      default_table_access_method: tde_heap
+      pg_tde.enforce_encryption: "on"
+      pg_tde.wal_encrypt: "on"

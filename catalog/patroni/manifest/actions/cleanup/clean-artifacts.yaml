@@ -1,0 +1,18 @@
+id: clean-artifacts
+title: 删除隔离实例、测试备份和产物目录
+desc: 停止仍在运行的隔离实例，删除恢复目录、独立物理备份、PITR 目录和测试日志。发现占用或异常时停止，保留现场先排查，不要直接 rm。
+effect: destructive
+serial: 1
+inputs:
+    timeout:
+        type: int
+        value: 7200
+preconditions:
+    - mw_step_inputs.timeout > 0
+postconditions:
+    - pg_test_result.rc == 0
+run:
+    role: patroni
+    tasks: test_clean_artifacts
+    vars:
+        pg_test: clean-artifacts

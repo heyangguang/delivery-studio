@@ -1,0 +1,21 @@
+id: pitr-switchover
+title: 跨主库时间点恢复
+desc: 先切主，在新主库上写入数据并记下时间点，再从各节点的归档仓库收集旧主、新主的 WAL 和 history，恢复到该时间点。两个主库写入的数据都应存在，时间点之后的应不存在；结束后回切。
+effect: disruptive
+hosts: first:primary
+when: params.deployment_mode in ['legacy', 'single'] && (count(roles.replica) > 0)
+skip: 单节点没有主库切换可测
+expect: 各节点仓库是本地的，所以这一步会经 SSH 把需要的 WAL 集中到控制节点的临时目录。
+inputs:
+    timeout:
+        type: int
+        value: 7200
+preconditions:
+    - mw_step_inputs.timeout > 0
+postconditions:
+    - pg_test_result.rc == 0
+run:
+    role: postgresql
+    tasks: test_pitr_switchover
+    vars:
+        pg_test: pitr-switchover

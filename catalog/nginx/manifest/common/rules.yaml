@@ -1,0 +1,1 @@
+- {id: vip-needs-two, expr: "params.ha != 'keepalived' || count(roles.balancer) >= 2", message: 使用 keepalived 虚拟 IP 至少需要 2 台负载均衡机器}

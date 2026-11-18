@@ -1,0 +1,12 @@
+- id: health
+  title: 核对各节点状态
+  desc: 服务运行、能用密码连接、没有密码连接被拒、内存与持久化设置和计划一致；不改动数据。
+  effect: read-only
+  expect: 每个节点的实际设置与计划一致。
+  run: {role: redis, tasks: health}
+- id: topology
+  title: 复核拓扑
+  effect: read-only
+  hosts: first:primary
+  when: count(roles.replica) > 0
+  run: {role: redis, tasks: topology}

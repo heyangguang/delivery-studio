@@ -1,0 +1,24 @@
+# Installs mw.packages (exact versions) from the delivery's offline repository, whatever the family of the system.
+# Recommended/weak dependencies are not installed: the library holds exactly what was resolved without them.
+- name: 软件包规格
+  ansible.builtin.set_fact:
+    mw_pkg_specs: "{{ mw_package_list | default(mw.packages) | map(attribute='spec') | list }}"
+
+- name: 安装软件包（apt）
+  ansible.builtin.apt:
+    name: "{{ mw_pkg_specs }}"
+    state: present
+    update_cache: false
+    install_recommends: false
+    lock_timeout: 180
+  environment:
+    NEEDRESTART_MODE: l
+  when: mw_pkg_family == 'apt' and mw_pkg_specs | length > 0
+
+- name: 安装软件包（dnf）
+  ansible.builtin.dnf:
+    name: "{{ mw_pkg_specs }}"
+    state: present
+    install_weak_deps: false
+    lock_timeout: 180
+  when: mw_pkg_family == 'rpm' and mw_pkg_specs | length > 0

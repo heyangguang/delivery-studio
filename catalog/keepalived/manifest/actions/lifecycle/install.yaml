@@ -1,0 +1,4 @@
+- id: packages
+  title: 安装 keepalived
+  effect: change
+  run: {role: keepalived, tasks: install}

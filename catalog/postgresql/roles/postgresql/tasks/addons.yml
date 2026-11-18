@@ -1,0 +1,35 @@
+- name: 目标数据库必须已存在
+  ansible.builtin.command:
+    argv: "{{ pg_psql + ['-d', 'postgres', '-c', \"SELECT count(*) FROM pg_database WHERE datname='\" ~ item.1 ~ \"'\"] }}"
+  register: pg_db_exists
+  failed_when: pg_db_exists.stdout | trim != '1'
+  changed_when: false
+  loop: "{{ mw.addons | subelements('targets') }}"
+  loop_control:
+    label: "{{ item.0.id }} → {{ item.1 }}"
+
+- name: 创建扩展（已存在的保留，不自动升级）
+  ansible.builtin.command:
+    argv: "{{ pg_psql + ['-d', item.1, '-c', 'CREATE EXTENSION IF NOT EXISTS \"' ~ item.0.id ~ '\"'] }}"
+  loop: "{{ mw.addons | subelements('targets') }}"
+  loop_control:
+    label: "{{ item.0.id }} → {{ item.1 }}"
+  changed_when: true
+
+- name: 核对扩展版本
+  ansible.builtin.command:
+    argv: "{{ pg_psql + ['-d', item.1, '-c', \"SELECT extversion FROM pg_extension WHERE extname='\" ~ item.0.id ~ \"'\"] }}"
+  register: pg_ext_version
+  failed_when: pg_ext_version.stdout | trim == ''
+  changed_when: false
+  loop: "{{ mw.addons | subelements('targets') }}"
+  loop_control:
+    label: "{{ item.0.id }} → {{ item.1 }}"
+
+- name: template1 中的扩展会被以后新建的数据库继承
+  ansible.builtin.debug:
+    msg: "{{ item.0.id }} 已装入 template1：以后用该模板新建的数据库都会带上它，已有数据库不受影响。"
+  loop: "{{ mw.addons | subelements('targets') }}"
+  loop_control:
+    label: "{{ item.0.id }}"
+  when: item.1 == 'template1'

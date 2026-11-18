@@ -1,0 +1,19 @@
+# Managed by Middleware Hub for {{ mw_cluster.id }}/{{ mw.id }}. Do not edit by hand.
+name: {{ inventory_hostname }}
+data-dir: {{ (mw_hosts[inventory_hostname].params.data_root | default('/data')) ~ mw.params.data_dir[5:] }}
+listen-client-urls: http://{{ mw_hosts[inventory_hostname].ip }}:{{ mw.params.client_port }},http://127.0.0.1:{{ mw.params.client_port }}
+advertise-client-urls: http://{{ mw_hosts[inventory_hostname].ip }}:{{ mw.params.client_port }}
+listen-peer-urls: http://{{ mw_hosts[inventory_hostname].ip }}:{{ mw.params.peer_port }}
+initial-advertise-peer-urls: http://{{ mw_hosts[inventory_hostname].ip }}:{{ mw.params.peer_port }}
+initial-cluster: {{ etcd_initial_cluster }}
+initial-cluster-token: {{ mw_cluster.id }}-{{ mw.id }}
+initial-cluster-state: {{ etcd_cluster_state | default("new") }}
+auto-compaction-mode: periodic
+auto-compaction-retention: "{{ mw.params.auto_compaction_retention }}"
+quota-backend-bytes: {{ mw.params.quota_backend_bytes_bytes }}
+heartbeat-interval: {{ mw.params.heartbeat_interval }}
+election-timeout: {{ mw.params.election_timeout }}
+max-snapshots: {{ mw.params.max_snapshots }}
+max-wals: {{ mw.params.max_wals }}
+logger: zap
+log-level: {{ mw.params.log_level }}

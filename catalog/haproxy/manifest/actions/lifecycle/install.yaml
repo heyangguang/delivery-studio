@@ -1,0 +1,4 @@
+- id: packages
+  title: 安装 HAProxy
+  effect: change
+  run: {role: haproxy, tasks: install}

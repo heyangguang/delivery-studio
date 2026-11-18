@@ -1,0 +1,21 @@
+id: five
+name: 高可用系列 · 5 成员
+tag: 核心业务
+spec: 5 台 · 容忍 2 台故障
+roles:
+    - role: member
+      count: 5
+contract:
+    when: count(roles.member) == 5
+    series: ha
+    failover: automatic
+    mechanism: etcd Raft 共识
+    read_access: 通过任意健康成员访问；写入需要多数派
+    sharding: false
+    limitations:
+        - 多数成员失效时无法写入；成员数量不代表数据分片
+    acceptance:
+        - etcd/health
+        - etcd/put-get
+    operations:
+        - deploy

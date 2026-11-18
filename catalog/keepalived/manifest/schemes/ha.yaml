@@ -1,0 +1,21 @@
+id: ha
+name: 高可用系列
+spec: 2 台起 · VIP 自动漂移
+roles:
+    - role: node
+      count: 2
+params: {}
+contract:
+    when: count(roles.node) >= 2
+    series: ha
+    failover: automatic
+    mechanism: keepalived VRRP
+    read_access: 通过入口访问后端；不提供数据存储或分片
+    sharding: false
+    limitations:
+        - 网络必须允许绑定和漂移 VIP；连接在切换期间可能中断
+    acceptance:
+        - keepalived/vip-holder
+        - keepalived/vip-failover
+    operations:
+        - deploy

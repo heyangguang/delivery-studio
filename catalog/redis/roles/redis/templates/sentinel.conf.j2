@@ -1,0 +1,17 @@
+# Managed by Middleware Hub for {{ mw_cluster.id }}/{{ mw.id }}.
+# Sentinel rewrites this file at run time (myid, known-replica, known-sentinel), so the platform writes it once.
+port {{ rd_sport }}
+bind 0.0.0.0
+protected-mode no
+daemonize no
+supervised systemd
+pidfile /run/sentinel/redis-sentinel.pid
+loglevel {{ mw.params.loglevel }}
+logfile {{ rd_dir }}/log/redis-sentinel.log
+dir {{ rd_dir }}/data
+sentinel monitor {{ rd_master }} {{ rd_primary_ip }} {{ rd_port }} {{ mw.params.sentinel_quorum }}
+sentinel auth-pass {{ rd_master }} {{ mw.secrets.redis }}
+sentinel down-after-milliseconds {{ rd_master }} {{ mw.params.sentinel_down_after_ms }}
+sentinel parallel-syncs {{ rd_master }} {{ mw.params.sentinel_parallel_syncs }}
+sentinel failover-timeout {{ rd_master }} {{ mw.params.sentinel_failover_timeout_ms }}
+sentinel deny-scripts-reconfig yes

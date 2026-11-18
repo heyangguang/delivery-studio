@@ -1,0 +1,68 @@
+- name: 读取已记录的初始集群
+  ansible.builtin.slurp:
+    src: "{{ etcd_marker }}"
+  register: etcd_recorded
+  failed_when: false
+  vars:
+    etcd_marker: /var/lib/mwctl/{{ mw_cluster.id }}/{{ mw.id }}/initial-cluster
+
+- name: 初始成员不可改变
+  ansible.builtin.assert:
+    that:
+      - etcd_recorded.content is not defined or (etcd_recorded.content | b64decode | trim) == etcd_initial_cluster
+    fail_msg: >-
+      etcd 已用另一组初始成员组建过（{{ (etcd_recorded.content | default('') | b64decode | trim) }}），
+      本次计划为 {{ etcd_initial_cluster }}。不要改动已有成员；成员变更须按 etcd 官方流程单独处理。
+
+- name: 数据目录里已有未归属的成员数据时停止
+  ansible.builtin.stat:
+    path: "{{ (mw_hosts[inventory_hostname].params.data_root | default('/data')) ~ mw.params.data_dir[5:] }}/member"
+  register: etcd_member
+
+- name: 核对数据目录归属
+  ansible.builtin.assert:
+    that: etcd_recorded.content is defined or not etcd_member.stat.exists
+    fail_msg: "{{ (mw_hosts[inventory_hostname].params.data_root | default('/data')) ~ mw.params.data_dir[5:] }}/member 已存在但本平台没有记录，拒绝覆盖：请先确认它属于哪个集群。"
+
+- name: 创建状态目录
+  ansible.builtin.file:
+    path: /var/lib/mwctl/{{ mw_cluster.id }}/{{ mw.id }}
+    state: directory
+    mode: '0700'
+
+- name: 写入 etcd 配置
+  ansible.builtin.template:
+    src: etcd.conf.yaml.j2
+    dest: /etc/etcd/etcd.conf.yaml
+    owner: etcd
+    group: etcd
+    mode: '0600'
+
+- name: 创建 systemd 覆盖目录
+  ansible.builtin.file:
+    path: /etc/systemd/system/etcd.service.d
+    state: directory
+    mode: '0755'
+
+- name: 指定配置文件与资源限制
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/etcd.service.d/middleware.conf
+    mode: '0644'
+    content: |
+      [Service]
+      ExecStart=
+      ExecStart=/usr/bin/etcd --config-file=/etc/etcd/etcd.conf.yaml
+      LimitNOFILE={{ mw.params.nofile }}
+      Restart=on-failure
+      RestartSec=3
+      TimeoutStartSec=infinity
+
+- name: 重新加载 systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: 记录初始集群
+  ansible.builtin.copy:
+    dest: /var/lib/mwctl/{{ mw_cluster.id }}/{{ mw.id }}/initial-cluster
+    mode: '0600'
+    content: "{{ etcd_initial_cluster }}\n"

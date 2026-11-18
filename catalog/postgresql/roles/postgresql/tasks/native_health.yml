@@ -1,0 +1,27 @@
+- name: 核对节点主从身份
+  ansible.builtin.command:
+    argv: >-
+      {{ pg_psql + ['-d', 'postgres', '-c', 'SELECT pg_is_in_recovery()'] }}
+  register: native_role
+  changed_when: false
+  failed_when: (native_role.stdout | trim) != ('f' if inventory_hostname == pg_primary else 't')
+- name: 主库核对全部从库流复制连接
+  ansible.builtin.command:
+    argv: >-
+      {{ pg_psql + ['-d', 'postgres', '-c', "SELECT count(*) FROM pg_stat_replication WHERE state='streaming'"] }}
+  register: native_streaming
+  changed_when: false
+  until: (native_streaming.stdout | trim | int) == (mw.roles.replica | length)
+  retries: 60
+  delay: 2
+  when: inventory_hostname == pg_primary
+- name: 从库核对 WAL 接收进程
+  ansible.builtin.command:
+    argv: >-
+      {{ pg_psql + ['-d', 'postgres', '-c', "SELECT count(*) FROM pg_stat_wal_receiver WHERE status='streaming'"] }}
+  register: native_receiver
+  changed_when: false
+  until: native_receiver.stdout | trim == '1'
+  retries: 60
+  delay: 2
+  when: inventory_hostname != pg_primary

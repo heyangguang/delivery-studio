@@ -1,0 +1,5 @@
+- id: packages
+  title: 安装 etcd 软件包
+  desc: 安装期间临时屏蔽服务，避免安装包用默认配置启动；随后创建数据与配置目录。
+  effect: change
+  run: {role: etcd, tasks: install}

@@ -1,0 +1,11 @@
+- name: 复制软件源脚本
+  ansible.builtin.copy:
+    src: "{{ 'mw-apt-setup.sh' if mw_pkg_family == 'apt' else 'mw-dnf-setup.sh' }}"
+    dest: /usr/local/sbin/mw-repo-setup.sh
+    mode: '0700'
+
+- name: 改用离线软件源
+  ansible.builtin.command:
+    argv: "{{ ['/usr/local/sbin/mw-repo-setup.sh', mw_cluster.id, mw_hosts[mw_cluster.controller].ip] + (mw_repos | map(attribute='port') | map('string') | list) }}"
+  register: mw_repo_setup
+  changed_when: "'configured' in mw_repo_setup.stdout"

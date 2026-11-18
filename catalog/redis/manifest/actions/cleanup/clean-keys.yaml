@@ -1,0 +1,6 @@
+id: clean-keys
+title: 删除测试键
+desc: 在当前主库删除验收时写入的 ha:check 与 ha:failover，只删这两个键，不会触碰其他数据。
+effect: change
+hosts: first:primary
+run: {role: redis, tasks: test_clean, vars: {rd_clean: clean-keys}}

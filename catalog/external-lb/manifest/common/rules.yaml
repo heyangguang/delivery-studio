@@ -1,0 +1,3 @@
+- id: address-format
+  expr: "params.mode == 'ip' ? params.address matches '^([0-9]{1,3}\\\\.){3}[0-9]{1,3}$' : params.address matches '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$'"
+  message: 域名模式须输入完整的小写域名（含点，不能是 IP）；IP 模式须输入有效 IPv4

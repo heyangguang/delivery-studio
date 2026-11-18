@@ -1,0 +1,415 @@
+/* The "+" tool menu of a conversation. Prefix tm- */
+.tm-btn {
+  position: relative;
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  color: var(--ink-2);
+  font-size: 15px;
+  background: transparent;
+  cursor: pointer;
+  transition:
+    transform 0.2s var(--spring),
+    background 0.15s;
+}
+.tm-btn:hover {
+  background: var(--hover);
+}
+.tm-btn.on {
+  background: var(--sunken);
+}
+.tm-btn.on svg {
+  transform: rotate(45deg);
+}
+.tm-btn svg {
+  transition: transform 0.2s var(--spring);
+}
+/* something is switched on inside the menu */
+.tm-btn.lit::after {
+  content: "";
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--brand);
+  box-shadow: 0 0 0 2px var(--surface);
+}
+.tm-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+.tm-pop .arco-popover-content {
+  padding: 6px;
+}
+.tm {
+  width: 320px;
+  max-height: min(420px, 55vh);
+  overflow: auto;
+}
+.tm-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 8px;
+  border: 0;
+  border-radius: 10px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  background: none;
+  cursor: pointer;
+}
+.tm-row:hover {
+  background: var(--hover);
+}
+.tm-row.dis {
+  cursor: default;
+}
+.tm-row.dis .tm-t b {
+  color: var(--mute);
+}
+.tm-head > svg {
+  color: var(--faint);
+  font-size: 12px;
+  transition: transform 0.2s var(--ease-out);
+}
+.tm-head > svg.tm-flip {
+  transform: rotate(180deg);
+}
+.tm-ic {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  font-size: 15px;
+}
+.tm-ic.think {
+  color: #8b5cf6;
+  background: rgba(139, 92, 246, 0.1);
+}
+.tm-ic.web {
+  color: #0a84ff;
+  background: rgba(10, 132, 255, 0.1);
+}
+.tm-ic.skill {
+  color: #c27500;
+  background: var(--warn-soft);
+}
+.tm-ic.mcp {
+  color: var(--ok);
+  background: var(--ok-soft);
+}
+.tm-t {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.4;
+}
+.tm-t b {
+  font-size: 13.5px;
+  font-weight: 550;
+}
+.tm-t small {
+  color: var(--mute);
+  font-size: 12px;
+}
+.tm-sec {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+.tm-cap {
+  padding: 6px 8px 2px;
+  color: var(--faint);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.tm-list {
+  padding: 2px 8px 6px 48px;
+}
+.tm-all {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+.tm-all button {
+  padding: 0;
+  border: 0;
+  color: var(--brand-ink);
+  font: 12px var(--sans);
+  background: none;
+  cursor: pointer;
+}
+.tm-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 13px;
+  cursor: pointer;
+}
+.tm-chip {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 4px 0 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 550;
+  animation: ad-pop-in 0.25s var(--spring) both;
+}
+.tm-chip.think {
+  color: #7c3aed;
+  background: rgba(139, 92, 246, 0.1);
+}
+.tm-chip.web {
+  color: #0a6fd6;
+  background: rgba(10, 132, 255, 0.1);
+}
+.tm-chip button {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: inherit;
+  font-size: 10px;
+  background: none;
+  cursor: pointer;
+  opacity: 0.7;
+}
+.tm-chip button:hover {
+  opacity: 1;
+  background: rgba(0, 0, 0, 0.06);
+}
+@media (prefers-reduced-motion: reduce) {
+  .tm-btn,
+  .tm-chip {
+    transition: none;
+    animation: none;
+  }
+}
+.tm-ic.kb {
+  color: #0a6fd6;
+  background: rgba(10, 132, 255, 0.1);
+}
+.tm-ic.sandbox {
+  color: #0d9488;
+  background: rgba(13, 148, 136, 0.12);
+}
+.tm-mine {
+  margin-left: 4px;
+  padding: 0 5px;
+  border-radius: 4px;
+  color: var(--brand-ink);
+  font-size: 10.5px;
+  font-style: normal;
+  font-weight: 600;
+  background: var(--brand-soft);
+}
+
+/* thinking depth: a few pills */
+.thk {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.thk-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 3px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.thk-pill {
+  flex: none;
+  height: 24px;
+  padding: 0 10px;
+  font: 550 12.5px var(--sans);
+  color: var(--ink-2);
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    background 0.15s,
+    box-shadow 0.15s;
+}
+.thk-pill:hover {
+  color: var(--ink);
+}
+.thk-pill.on {
+  color: var(--brand-ink);
+  background: var(--surface);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.1),
+    0 0 0 1px var(--line);
+}
+.thk-pill:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+.thk small {
+  padding-left: 4px;
+  overflow: hidden;
+  color: var(--faint);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.think-pop .thk {
+  width: max-content;
+  min-width: 240px;
+  max-width: calc(100vw - 28px);
+  padding: 4px;
+}
+.think-pop .thk-row {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.think-pop .thk-row::-webkit-scrollbar {
+  display: none;
+}
+.think-pop .thk-pill {
+  padding: 0 9px;
+  white-space: nowrap;
+}
+.tm-think {
+  align-items: flex-start;
+  cursor: default;
+}
+.tm-think .tm-t {
+  flex: 1;
+  min-width: 0;
+  gap: 6px;
+}
+.tm-think .thk small {
+  white-space: normal;
+}
+.tm-think:hover {
+  background: none;
+}
+.ai-eff {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 260px;
+}
+.ai-eff small {
+  color: var(--mute);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.ai-eff-btn {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  color: var(--ink-2);
+  font: 500 12.5px/1 var(--sans);
+  background: var(--surface);
+  cursor: pointer;
+}
+.ai-eff-btn:hover {
+  border-color: var(--brand-line);
+  color: var(--brand-ink);
+}
+.tm-ic.upl {
+  color: #7a5bd0;
+  background: rgba(122, 91, 208, 0.1);
+}
+.tm-attach {
+  margin-bottom: 4px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+}
+
+/* Self-contained toggle pills (.tm-tog) so standalone <ThinkLevel> works outside aipage/aichat */
+.tm-tog {
+  display: inline-flex;
+  line-height: 1.2;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 11px 0 9px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--mute);
+  font: 550 12.5px var(--sans);
+  white-space: nowrap;
+  background: transparent;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    color 0.15s,
+    transform 0.16s var(--spring);
+}
+.tm-tog svg {
+  display: block;
+  flex: none;
+  font-size: 14px;
+}
+.tm-tog:hover:not(:disabled) {
+  color: var(--ink);
+  background: var(--hover);
+}
+.tm-tog:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.tm-tog:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.tm-tog:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+.tm-tog.think.on {
+  color: #6d28d9;
+  border-color: rgba(139, 92, 246, 0.22);
+  background: rgba(139, 92, 246, 0.11);
+}
+.tm-tog.web.on {
+  color: #0969da;
+  border-color: rgba(10, 132, 255, 0.22);
+  background: rgba(10, 132, 255, 0.11);
+}
+body[arco-theme="dark"] .tm-tog.think.on {
+  color: #c4b5fd;
+  border-color: rgba(167, 139, 250, 0.28);
+  background: rgba(167, 139, 250, 0.18);
+}
+body[arco-theme="dark"] .tm-tog.web.on {
+  color: #7dd3fc;
+  border-color: rgba(56, 189, 248, 0.28);
+  background: rgba(56, 189, 248, 0.17);
+}
+@media (prefers-reduced-motion: reduce) {
+  .tm-tog {
+    transition: none;
+  }
+}

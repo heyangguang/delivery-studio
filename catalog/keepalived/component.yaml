@@ -1,0 +1,44 @@
+schema: mwpack/v1
+component: keepalived
+short: vip
+title: keepalived
+category: 网络
+icon: vip
+color: indigo
+summary: VRRP 虚拟 IP，让负载均衡本身也高可用。
+tags: [高可用, VIP]
+provides: [vip]
+detail:
+    presets:
+        - {$file: manifest/schemes/single.yaml}
+        - {$file: manifest/schemes/ha.yaml}
+    tagline: 两台负载均衡共用一个虚拟 IP，一台故障 VIP 自动漂移
+    scale: 常见 2 台
+    capabilities:
+        - {name: 单播 VRRP, text: 使用单播对端，适合不允许组播的云网络}
+        - {name: 服务联动, text: 被保护的服务进程消失时主动放弃 VIP}
+    limits:
+        - 通常作为负载均衡的依赖自动加入，也可单独部署
+        - 云厂商网络可能不允许自行绑定 VIP，需先确认
+operations: {$file: manifest/common/operations.yaml}
+roles: {$file: manifest/common/roles.yaml}
+groups: {$file: manifest/common/groups.yaml}
+params: {$file: manifest/common/params.yaml}
+secrets: {$file: manifest/common/secrets.yaml}
+rules: {$file: manifest/common/rules.yaml}
+versions: {$file: manifest/common/versions.yaml}
+lifecycle:
+    install: {$file: manifest/actions/lifecycle/install.yaml}
+    configure: {$file: manifest/actions/lifecycle/configure.yaml}
+    start: {$file: manifest/actions/lifecycle/start.yaml}
+    verify: {$file: manifest/actions/lifecycle/verify.yaml}
+tests:
+    - {$file: manifest/actions/tests/vip-holder.yaml}
+    - {$file: manifest/actions/tests/vip-failover.yaml}
+# Explicit shared implementation dependencies; all other source files are private.
+shared_files:
+    - roles/keepalived/tasks/configure.yml
+    - roles/keepalived/tasks/holder.yml
+    - roles/keepalived/tasks/install.yml
+    - roles/keepalived/tasks/start.yml
+    - roles/keepalived/templates/keepalived.conf.j2

@@ -1,0 +1,28 @@
+- id: bootstrap-primary
+  title: 启动初始主库
+  desc: 首次由 Patroni 完成初始化；若 DCS 里已有 initialize 键，Patroni 不会重新初始化，绝不覆盖已有数据目录。
+  effect: change
+  hosts: first:primary
+  when: count(roles.replica) > 0
+  run:
+    role: patroni
+    tasks: start_primary
+- id: join-replicas
+  title: 从库加入复制
+  desc: 其余节点启动 Patroni，从主库基础备份并开始流复制。
+  effect: change
+  hosts: replica
+  when: count(roles.replica) > 0
+  run:
+    role: patroni
+    tasks: start_replica
+- id: topology
+  title: 核对拓扑
+  desc: 恰好一个主库，所有从库都在流复制。
+  effect: read-only
+  hosts: first:primary
+  when: count(roles.replica) > 0
+  expect: 流复制中的从库数等于计划。
+  run:
+    role: patroni
+    tasks: topology

@@ -1,0 +1,6 @@
+id: persistence-off
+title: 持久化设置
+desc: 核对 save、appendonly、无盘复制和数据目录，确认与计划的持久化方式一致。
+effect: read-only
+expect: 设置与计划一致；不持久化时没有 appendonlydir。
+run: {role: redis, tasks: test_persistence}

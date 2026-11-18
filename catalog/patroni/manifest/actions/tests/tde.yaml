@@ -1,0 +1,21 @@
+id: tde
+title: TDE 加密有效性
+desc: 建一张加密表和一张普通对照表，写入同样的标记数据，并直接检查数据文件：加密表里不能读到明文，对照表里必须读到。
+effect: change
+hosts: first:primary
+when: params.tde
+skip: 未启用 TDE
+expect: 两个条件同时成立才算通过；只验证加密表而没有对照，结论不可信。
+inputs:
+    timeout:
+        type: int
+        value: 7200
+preconditions:
+    - mw_step_inputs.timeout > 0
+postconditions:
+    - pg_test_result.rc == 0
+run:
+    role: patroni
+    tasks: test_tde
+    vars:
+        pg_test: tde

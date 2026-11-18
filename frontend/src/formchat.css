@@ -1,0 +1,836 @@
+/* Filling the new-delivery form by talking to the assistant. Prefix fc-.
+   A slim line under the step's title that opens when used (the AI page's message box, .ap-compose, with its rainbow
+   edge), the conversation just above it, one slim bar to confirm what changed, a glow around the form while the
+   assistant works, and a rainbow sweep over each field it writes. */
+
+.fc {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 2px 0 24px;
+}
+.fc.on {
+  padding-bottom: 22px;
+  border-bottom: 1px solid var(--line);
+}
+
+/* ---- the line ---- */
+.fc .fc-compose {
+  border-radius: 14px;
+  transition: box-shadow 0.3s;
+}
+.fc .fc-compose:not(.open) {
+  box-shadow: none;
+}
+.fc-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 7px 7px 7px 12px;
+}
+.fc-orb {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  transition: transform 0.45s var(--spring);
+}
+.fc-compose.open .fc-orb,
+.fc.busy .fc-orb {
+  transform: rotate(-12deg) scale(1.06);
+}
+.fc.busy .fc-orb svg {
+  animation: fc-spin 2.4s var(--spring) infinite;
+}
+.fc .fc-compose textarea,
+.fc .fc-compose textarea:focus,
+.fc .fc-compose textarea:focus-visible {
+  flex: 1;
+  min-width: 0;
+  min-height: 30px;
+  max-height: 200px;
+  padding: 5px 0;
+  font-size: 14.5px;
+  line-height: 20px;
+  transition: min-height 0.45s var(--spring);
+}
+.fc .fc-compose.open textarea {
+  min-height: 52px;
+}
+.fc .fc-compose:not(.open) textarea::placeholder {
+  color: var(--mute);
+}
+.fc .ad-send {
+  width: 30px;
+  height: 30px;
+  font-size: 13px;
+}
+.fc .fc-compose:not(.open) .ad-send:disabled {
+  opacity: 0;
+  transform: scale(0.6);
+  pointer-events: none;
+}
+.fc-kbd {
+  align-self: center;
+  min-width: 20px;
+  padding: 0 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  color: var(--faint);
+  font: 500 11px/18px var(--mono);
+  text-align: center;
+  margin-right: 4px;
+}
+
+/* what opens under the line: tools and examples, sliding open on a spring */
+.fc-fold {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 0.45s var(--spring),
+    opacity 0.25s;
+}
+.fc-fold > div {
+  min-height: 0;
+  overflow: hidden;
+}
+.fc-compose.open > .fc-fold,
+.fc-card.open > .fc-fold {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+.fc-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 14px 12px 52px;
+}
+.fc-hint {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--faint);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-align: right;
+}
+.fc-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 12px 12px 52px;
+}
+.fc-chips button {
+  max-width: 100%;
+  padding: 5px 11px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.5;
+  text-align: left;
+  background: var(--surface-2);
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    background 0.15s,
+    transform 0.25s var(--spring);
+}
+.fc-chips button:hover:not(:disabled) {
+  border-color: var(--brand-line);
+  background: var(--brand-soft);
+  transform: translateY(-1px);
+}
+
+/* ---- the conversation ---- */
+.fc-convo {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  animation: fc-in 0.35s var(--ease-out) backwards;
+}
+.fc-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 22px;
+  font-size: 12.5px;
+}
+.fc-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ai-rb);
+  background-size: 300% 100%;
+}
+.fc-dot.live {
+  animation:
+    ai-flow 2s linear infinite,
+    fc-pulse 1.4s ease-in-out infinite;
+}
+.fc-meta {
+  flex: 1;
+  color: var(--mute);
+}
+/* the words of what it is doing, with light passing over them */
+.fc-now {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-weight: 550;
+  color: transparent;
+  background: linear-gradient(
+    90deg,
+    var(--mute) 0%,
+    var(--mute) 40%,
+    var(--ink) 50%,
+    var(--mute) 60%,
+    var(--mute) 100%
+  );
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: fc-shimmer 1.8s linear infinite;
+}
+.fc-bar .link {
+  font-size: 12.5px;
+}
+.fc-list {
+  padding: 4px 2px 0;
+}
+.fc-list.all {
+  max-height: min(50vh, 460px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.fc-list .ad-msg {
+  margin-bottom: 10px;
+  animation: fc-in 0.35s var(--ease-out) backwards;
+}
+.fc-stream {
+  margin: 0 0 8px 34px;
+  font-size: 14px;
+}
+.fc-filled {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: -2px 0 8px 34px;
+  color: var(--ok);
+  font-size: 12.5px;
+}
+.fc-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 4px 0 8px;
+  padding: 9px 12px;
+  border-radius: var(--r);
+  color: var(--bad);
+  font-size: 13px;
+  background: var(--bad-soft);
+}
+.fc-error span {
+  flex: 1;
+}
+
+/* ---- the confirmation: one slim bar, the list opens from it ---- */
+.fc-card {
+  position: relative;
+  border-radius: 12px;
+  background: var(--surface);
+  animation: fc-in 0.35s var(--ease-out) backwards;
+}
+.fc-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  padding: 1px;
+  border-radius: inherit;
+  background: var(--ai-rb);
+  background-size: 300% 100%;
+  animation: ai-flow 9s linear infinite;
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0.75;
+  pointer-events: none;
+}
+.fc-card.fc-nudge {
+  animation: fc-nudge 0.6s var(--spring);
+}
+.fc-card-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  padding: 9px 10px 9px 14px;
+}
+.fc-card-row b {
+  font-size: 13.5px;
+}
+.fc-card-more {
+  padding: 0;
+  border: 0;
+  color: var(--brand-ink);
+  font: inherit;
+  font-size: 12.5px;
+  background: none;
+  cursor: pointer;
+}
+.fc-card-more:hover {
+  text-decoration: underline;
+}
+.fc-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  font-size: 12.5px;
+}
+.fc-check.ok {
+  color: var(--ok);
+}
+.fc-check.bad {
+  color: var(--warn);
+}
+.fc-card-list {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px 14px;
+  margin: 0;
+  padding: 2px 14px 10px 39px;
+  font-size: 13px;
+}
+.fc-card-list dt {
+  color: var(--mute);
+  white-space: nowrap;
+}
+.fc-card-list dd {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.fc-card-list em {
+  color: var(--mute);
+  font-style: normal;
+}
+.fc-todo {
+  margin: 0;
+  padding: 0 14px 12px 39px;
+  color: var(--warn);
+  font-size: 12.5px;
+}
+
+/* ---- the glow around the form while the assistant works on it ---- */
+.wz-pane {
+  position: relative;
+}
+.fc-glow {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.6s ease;
+}
+.fc-glow.on {
+  opacity: 1;
+}
+.fc-glow::before,
+.fc-glow::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--ai-rb);
+  background-size: 300% 100%;
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+/* a hairline at the edge */
+.fc-glow::before {
+  padding: 1.5px;
+  opacity: 0.9;
+}
+/* and a faint light just inside it */
+.fc-glow::after {
+  padding: 5px;
+  filter: blur(8px);
+  opacity: 0.28;
+}
+.fc-glow.on::before,
+.fc-glow.on::after {
+  animation: ai-flow 3.5s linear infinite;
+}
+
+/* ---- the step's lead now sits next to its title ---- */
+.wz-pane-lead {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--mute);
+  font-size: 13px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 640px) {
+  .fc-hint,
+  .wz-pane-lead {
+    display: none;
+  }
+  .fc-tools,
+  .fc-chips {
+    padding-left: 12px;
+  }
+}
+
+/* ---- the marks on the form ---- */
+/* a field the assistant changed, until the change is confirmed */
+[data-ai][data-ai-on] {
+  position: relative;
+}
+[data-ai][data-ai-on]::before {
+  content: "";
+  position: absolute;
+  top: 10px;
+  left: -10px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ai-rb);
+  background-size: 300% 100%;
+  box-shadow: 0 0 0 3px rgba(155, 114, 242, 0.14);
+  pointer-events: none;
+}
+.host-row[data-ai-on] {
+  border-radius: var(--r-sm);
+  background: linear-gradient(90deg, var(--brand-soft), transparent 70%);
+}
+/* the moment it is written: a band of the rainbow passes over the field, then it settles */
+[data-ai][data-ai-flash] {
+  position: relative;
+}
+[data-ai][data-ai-flash]::after {
+  content: "";
+  position: absolute;
+  inset: -4px -6px;
+  z-index: 1;
+  border-radius: 10px;
+  background: linear-gradient(
+    100deg,
+    transparent 0%,
+    rgba(66, 133, 244, 0.16) 30%,
+    rgba(155, 114, 242, 0.2) 45%,
+    rgba(234, 67, 53, 0.14) 60%,
+    transparent 80%
+  );
+  background-size: 250% 100%;
+  box-shadow: 0 0 0 1px rgba(155, 114, 242, 0.25);
+  pointer-events: none;
+  animation: fc-sweep 1.2s var(--ease-out) forwards;
+}
+@keyframes fc-sweep {
+  0% {
+    opacity: 0;
+    background-position: 100% 0;
+  }
+  20% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    background-position: -50% 0;
+  }
+}
+/* the steps of the form the assistant touched */
+.fc-navdot {
+  width: 7px;
+  height: 7px;
+  margin-left: auto;
+  border-radius: 50%;
+  background: var(--ai-rb);
+  background-size: 300% 100%;
+  animation: ai-flow 6s linear infinite;
+}
+
+/* the "AI" marker that travels to each field it writes */
+.fc-cursor {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform 0.42s var(--spring),
+    opacity 0.25s;
+}
+.fc-cursor.on {
+  opacity: 1;
+}
+.fc-cursor-dot {
+  width: 10px;
+  height: 10px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: var(--ai-rb-soft);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+.fc-cursor-tag {
+  padding: 1px 7px;
+  border-radius: 9px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  background: var(--ai-rb-soft);
+  box-shadow: 0 2px 10px rgba(66, 133, 244, 0.35);
+}
+
+@keyframes fc-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+@keyframes fc-nudge {
+  0%,
+  100% {
+    transform: none;
+  }
+  25% {
+    transform: translateX(-4px);
+  }
+  50% {
+    transform: translateX(4px);
+  }
+  75% {
+    transform: translateX(-2px);
+  }
+}
+@keyframes fc-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -150% 0;
+  }
+}
+@keyframes fc-pulse {
+  50% {
+    transform: scale(0.65);
+    opacity: 0.6;
+  }
+}
+@keyframes fc-spin {
+  50% {
+    transform: rotate(180deg) scale(0.9);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fc-card,
+  .fc-card::before,
+  .fc-convo,
+  .fc-list .ad-msg,
+  .fc-now,
+  .fc-dot.live,
+  .fc-navdot,
+  .fc.busy .fc-orb svg,
+  .fc-glow.on::before,
+  .fc-glow.on::after,
+  [data-ai][data-ai-flash]::after {
+    animation: none;
+  }
+  .fc-now {
+    color: var(--mute);
+    background: none;
+  }
+  .fc-fold,
+  .fc-orb,
+  .fc .fc-compose textarea {
+    transition: none;
+  }
+  .fc-cursor {
+    display: none;
+  }
+}
+
+/* ---- the first screen of a new cluster: the assistant's box, or fill it in yourself ---- */
+.wz-pane-head[hidden],
+.wz-pane-foot[hidden] {
+  display: none;
+}
+.fc.start {
+  align-items: stretch;
+  gap: 16px;
+  width: min(720px, 100%);
+  margin: clamp(24px, 9vh, 96px) auto 40px;
+  animation: fc-in 0.45s var(--ease-out) backwards;
+}
+.fc-start-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  text-align: center;
+}
+.fc-start-orb {
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  margin-bottom: 6px;
+  border: 1px solid rgba(99, 102, 241, 0.15);
+  border-radius: 18px;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.96) 0%,
+    rgba(241, 243, 255, 0.92) 100%
+  );
+  box-shadow:
+    0 14px 32px -8px rgba(79, 70, 229, 0.22),
+    0 3px 8px -2px rgba(15, 23, 42, 0.06),
+    inset 0 1px 0 #ffffff;
+}
+.fc-start-head h2 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.fc-start-head p {
+  margin: 0;
+  color: var(--mute);
+  font-size: 14px;
+}
+/* the box itself is larger here; it is the same box that later sits at the top of the form, and moves there */
+/* named only while the page switches to the assistant (html.fc-vt): a permanent name makes the browser lift the box above
+   the old page during any route change, so it showed before its page and overlapped the previous one */
+html.fc-vt .fc .fc-compose {
+  view-transition-name: fc-box;
+}
+.fc.start .fc-compose textarea,
+.fc.start .fc-compose textarea:focus,
+.fc.start .fc-compose textarea:focus-visible {
+  min-height: 76px;
+  font-size: 16px;
+  line-height: 24px;
+}
+.fc.start .fc-row {
+  padding: 12px 12px 6px 16px;
+}
+.fc.start .fc-orb {
+  width: 34px;
+  height: 34px;
+}
+.fc.start .ad-send {
+  width: 36px;
+  height: 36px;
+}
+/* the other way: a quiet line under the box, the steps it leads through, an arrow that moves under the pointer */
+.fc-start-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  margin-top: 8px;
+  padding: 14px 18px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  background: var(--surface);
+  cursor: pointer;
+  transition:
+    border-color 0.2s,
+    background 0.2s,
+    transform 0.3s var(--spring);
+}
+.fc-start-form:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-2);
+}
+.fc-start-form:active {
+  transform: scale(0.99);
+}
+.fc-start-form:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+.fc-start-or {
+  color: var(--faint);
+  font-size: 12.5px;
+}
+.fc-start-form b {
+  font-size: 14px;
+  font-weight: 600;
+}
+.fc-start-steps {
+  flex: 1;
+  min-width: 0;
+  color: var(--mute);
+  font-size: 12.5px;
+}
+.fc-start-go {
+  color: var(--mute);
+  font-size: 16px;
+  transition: transform 0.3s var(--spring);
+}
+.fc-start-form:hover .fc-start-go {
+  color: var(--ink);
+  transform: translateX(4px);
+}
+.fc-putaway {
+  align-self: flex-end;
+  font-size: 12.5px;
+}
+
+/* calling the assistant up from the form */
+.fc-callai {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 13px 0 11px;
+  color: var(--ink-2);
+  font: 550 12.5px var(--sans);
+  cursor: pointer;
+}
+.fc-callai:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+::view-transition-group(fc-box) {
+  animation-duration: 0.5s;
+  animation-timing-function: var(--spring);
+}
+@media (prefers-reduced-motion: reduce) {
+  .fc.start,
+  .fc-start-orb,
+  .fc-callai:hover {
+    animation: none;
+  }
+}
+@media (max-width: 640px) {
+  .fc.start {
+    margin-top: 16px;
+  }
+  .fc-start-steps {
+    flex-basis: 100%;
+    order: 3;
+  }
+  .fc-start-go {
+    margin-left: auto;
+  }
+}
+
+/* ---- moving between the first screen and the form (html.fc-vt only while it happens) ----
+   Nothing overlaps: the step list and the preview hold still, what was on the page leaves first, the box flies to its
+   new place without its text stretching, and the form rises in as the box lands. */
+html.fc-vt .wz-side {
+  view-transition-name: fc-side;
+}
+html.fc-vt .wz-preview {
+  view-transition-name: fc-preview;
+}
+html.fc-vt::view-transition-group(fc-side),
+html.fc-vt::view-transition-group(fc-preview),
+html.fc-vt::view-transition-old(fc-side),
+html.fc-vt::view-transition-old(fc-preview),
+html.fc-vt::view-transition-new(fc-side),
+html.fc-vt::view-transition-new(fc-preview) {
+  animation: none;
+}
+html.fc-vt::view-transition-old(fc-side),
+html.fc-vt::view-transition-old(fc-preview) {
+  opacity: 0;
+}
+html.fc-vt::view-transition-old(root) {
+  animation: fc-vt-out 0.16s ease-out both;
+}
+html.fc-vt::view-transition-new(root) {
+  animation: fc-vt-in 0.36s var(--ease-out) 0.22s both;
+}
+html.fc-vt::view-transition-group(fc-box) {
+  animation-duration: 0.52s;
+  animation-timing-function: var(--spring);
+}
+/* the box's two pictures keep their own size and are cut, not stretched, while it changes shape */
+html.fc-vt::view-transition-old(fc-box),
+html.fc-vt::view-transition-new(fc-box) {
+  height: 100%;
+  object-fit: none;
+  object-position: left top;
+  overflow: clip;
+}
+/* the old picture leaves at once: what flies is already the box it becomes */
+html.fc-vt::view-transition-old(fc-box) {
+  animation: fc-vt-out 0.08s linear both;
+}
+html.fc-vt::view-transition-new(fc-box) {
+  animation: none;
+}
+@keyframes fc-vt-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes fc-vt-fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes fc-vt-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+
+.fc-card-btns {
+  display: inline-flex;
+  flex: none;
+  gap: 8px;
+}
+@media (max-width: 640px) {
+  .fc-card-row {
+    row-gap: 8px;
+  }
+  .fc-card-btns {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}

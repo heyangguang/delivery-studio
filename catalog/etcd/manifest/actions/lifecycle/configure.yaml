@@ -1,0 +1,5 @@
+- id: config
+  title: 写入 etcd 配置
+  desc: 写入成员配置与 systemd 覆盖项。首次写入后，初始集群成员不可再改，否则停止。
+  effect: change
+  run: {role: etcd, tasks: configure}

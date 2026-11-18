@@ -1,0 +1,1 @@
+- {id: single-node, expr: 'count(roles.node) >= 2', message: VIP 高可用至少需要 2 台机器, warn: true}

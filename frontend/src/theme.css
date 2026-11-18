@@ -1,0 +1,821 @@
+/* Tokens. Brand is an indigo accent; status colours (--ok / --warn / --bad / --run) are shared across badges,
+   progress tracks, tables, and topology graphs. Surfaces stay neutral and crisp in both light and dark modes. */
+:root,
+body {
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #f7f8fa;
+  --surface-3: #f1f3f7;
+  --sunken: #eef0f5;
+  --rail: #f6f7fa;
+  --hover: rgba(15, 23, 42, 0.042);
+  --press: rgba(15, 23, 42, 0.076);
+  --line: rgba(15, 23, 42, 0.08);
+  --line-strong: rgba(15, 23, 42, 0.14);
+  --ink: #16181d;
+  --ink-2: #363942;
+  --mute: #666a75;
+  --faint: #8b909c;
+
+  --brand: #5856d6;
+  --brand-ink: #4543b8;
+  --brand-soft: rgba(88, 86, 214, 0.095);
+  --brand-line: rgba(88, 86, 214, 0.3);
+
+  --ok: #18864b;
+  --ok-soft: rgba(24, 134, 75, 0.11);
+  --ok-line: rgba(24, 134, 75, 0.28);
+
+  --warn: #b25900;
+  --warn-soft: rgba(245, 158, 11, 0.13);
+  --warn-line: rgba(178, 89, 0, 0.28);
+
+  --bad: #d92d20;
+  --bad-soft: rgba(217, 45, 32, 0.1);
+  --bad-line: rgba(217, 45, 32, 0.28);
+
+  --run: #2563eb;
+  --run-soft: rgba(37, 99, 235, 0.11);
+  --run-line: rgba(37, 99, 235, 0.3);
+
+  --idle: #8b909c;
+  --idle-soft: rgba(139, 144, 156, 0.13);
+  --idle-line: rgba(139, 144, 156, 0.26);
+
+  --code-bg: #f4f5f8;
+  --term-bg: #16181f;
+  --term-head: #1f222c;
+  --term-ink: #e8ecf4;
+  --term-mute: #949cb0;
+  --term-line: rgba(255, 255, 255, 0.08);
+  --panel: var(--surface);
+  --ink-1: var(--ink);
+  --ink-3: var(--faint);
+  --glass: rgba(255, 255, 255, 0.82);
+  --glass-strong: rgba(252, 252, 254, 0.94);
+  --rim: inset 0 1px 0 rgba(255, 255, 255, 0.78);
+  --rim-strong: inset 0 1px 0 rgba(255, 255, 255, 0.94);
+  --shadow-sm:
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
+    0 1px 2px rgba(15, 23, 42, 0.05),
+    0 1px 1px rgba(15, 23, 42, 0.03);
+  --shadow-md:
+    inset 0 1px 0 rgba(255, 255, 255, 0.85),
+    0 10px 28px -6px rgba(15, 23, 42, 0.09),
+    0 2px 6px rgba(15, 23, 42, 0.05);
+  --shadow-lg:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 24px 64px -12px rgba(15, 23, 42, 0.16),
+    0 4px 12px rgba(15, 23, 42, 0.06);
+  --ring: 0 0 0 3px rgba(88, 86, 214, 0.24);
+  --r-sm: 7px;
+  --r: 10px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 18px;
+  --spring: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", "Noto Sans CJK SC", sans-serif;
+  --mono: "SF Mono", ui-monospace, "JetBrains Mono", "Cascadia Mono", Menlo, Consolas, "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", "Noto Sans CJK SC", monospace;
+
+  --arcoblue-1: 240, 240, 253;
+  --arcoblue-2: 222, 221, 250;
+  --arcoblue-3: 196, 195, 245;
+  --arcoblue-4: 160, 158, 238;
+  --arcoblue-5: 120, 118, 228;
+  --arcoblue-6: 88, 86, 214;
+  --arcoblue-7: 70, 68, 186;
+  --arcoblue-8: 54, 52, 150;
+  --arcoblue-9: 40, 38, 112;
+  --arcoblue-10: 27, 26, 76;
+  --primary-1: var(--arcoblue-1);
+  --primary-2: var(--arcoblue-2);
+  --primary-3: var(--arcoblue-3);
+  --primary-4: var(--arcoblue-4);
+  --primary-5: var(--arcoblue-5);
+  --primary-6: var(--arcoblue-6);
+  --primary-7: var(--arcoblue-7);
+  --color-bg-1: var(--surface);
+  --color-bg-2: var(--surface);
+  --color-bg-3: var(--surface-2);
+  --color-bg-popup: #ffffff;
+  --border-radius-small: 5px;
+  --border-radius-medium: 10px;
+  --border-radius-large: 16px;
+  color-scheme: light;
+}
+
+:root[arco-theme="dark"],
+body[arco-theme="dark"] {
+  --bg: #111215;
+  --surface: #16171b;
+  --surface-2: #1c1e24;
+  --surface-3: #23262e;
+  --sunken: #0c0d10;
+  --rail: #131418;
+  --hover: rgba(255, 255, 255, 0.05);
+  --press: rgba(255, 255, 255, 0.09);
+  --line: rgba(255, 255, 255, 0.085);
+  --line-strong: rgba(255, 255, 255, 0.15);
+  --ink: #f3f4f6;
+  --ink-2: #d1d4dc;
+  --mute: #9ca1ad;
+  --faint: #737885;
+
+  --brand: #8180f5;
+  --brand-ink: #a5a4fa;
+  --brand-soft: rgba(129, 128, 245, 0.16);
+  --brand-line: rgba(129, 128, 245, 0.4);
+
+  --ok: #3ddc84;
+  --ok-soft: rgba(61, 220, 132, 0.15);
+  --ok-line: rgba(61, 220, 132, 0.35);
+
+  --warn: #ffb340;
+  --warn-soft: rgba(255, 179, 64, 0.15);
+  --warn-line: rgba(255, 179, 64, 0.36);
+
+  --bad: #ff6961;
+  --bad-soft: rgba(255, 105, 97, 0.15);
+  --bad-line: rgba(255, 105, 97, 0.36);
+
+  --run: #60a5fa;
+  --run-soft: rgba(96, 165, 250, 0.16);
+  --run-line: rgba(96, 165, 250, 0.38);
+
+  --idle: #8e939e;
+  --idle-soft: rgba(142, 147, 158, 0.18);
+  --idle-line: rgba(142, 147, 158, 0.32);
+
+  --code-bg: #101115;
+  --term-bg: #0d0e12;
+  --term-head: #14161d;
+  --term-ink: #ebedf5;
+  --term-mute: #8d94a8;
+  --term-line: rgba(255, 255, 255, 0.08);
+  --panel: var(--surface);
+  --ink-1: var(--ink);
+  --ink-3: var(--faint);
+  --glass: rgba(22, 23, 27, 0.82);
+  --glass-strong: rgba(28, 30, 36, 0.94);
+  --rim: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  --rim-strong: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  --shadow-sm:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 1px 2px rgba(0, 0, 0, 0.45);
+  --shadow-md:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 10px 30px rgba(0, 0, 0, 0.52),
+    0 0 0 1px rgba(255, 255, 255, 0.06);
+  --shadow-lg:
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 24px 64px rgba(0, 0, 0, 0.68),
+    0 0 0 1px rgba(255, 255, 255, 0.08);
+  --ring: 0 0 0 3px rgba(129, 128, 245, 0.34);
+
+  --arcoblue-1: 33, 33, 64;
+  --arcoblue-2: 43, 43, 88;
+  --arcoblue-3: 58, 57, 124;
+  --arcoblue-4: 79, 78, 170;
+  --arcoblue-5: 126, 124, 240;
+  --arcoblue-6: 104, 102, 228;
+  --arcoblue-7: 132, 130, 240;
+  --arcoblue-8: 182, 181, 249;
+  --arcoblue-9: 209, 208, 251;
+  --arcoblue-10: 234, 234, 253;
+  --color-bg-1: var(--surface);
+  --color-bg-2: var(--surface);
+  --color-bg-3: var(--surface-2);
+  --color-bg-4: var(--surface-3);
+  --color-bg-popup: #1f2128;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+/* Some pages scroll the whole document and some only scroll inside their panes. Keeping the scrollbar's room on every
+   page stops the width (and everything centred in it) from jumping when moving between them. */
+html {
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+body {
+  width: auto !important;
+}
+pre,
+code,
+kbd,
+samp,
+.mono,
+.arco-typography code,
+.arco-typography pre,
+.arco-typography kbd {
+  font-family: var(--mono);
+  font-feature-settings: "zero" 0;
+}
+.num,
+.sbadge,
+.dsec-count,
+.lp-count,
+.seg-count,
+.utabs-count {
+  font-variant-numeric: tabular-nums;
+}
+::selection {
+  background: var(--brand-soft);
+}
+:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+  border-radius: var(--r-sm);
+}
+button {
+  font: inherit;
+  color: inherit;
+}
+kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 19px;
+  height: 19px;
+  padding: 0 5px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--mute);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  box-shadow: 0 1px 0 var(--line);
+  border-radius: 5px;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ---- Arco Design component adaptation ---- */
+.arco-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  gap: 6px;
+  font-weight: 500;
+  line-height: 1.2;
+  transition:
+    transform 0.18s var(--spring),
+    background-color 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+.arco-btn > .arco-icon + span,
+.arco-btn > span + .arco-icon,
+.arco-btn > .arco-btn-loading-icon + span,
+.arco-btn > svg + span,
+.arco-btn > span + svg {
+  margin-left: 0;
+}
+.arco-btn > svg,
+.arco-btn > .arco-icon {
+  display: block;
+  flex: none;
+}
+.arco-btn.arco-btn-size-mini {
+  height: 24px;
+  padding: 0 9px;
+  font-size: 12px;
+}
+.arco-btn.arco-btn-size-mini:not(.arco-btn-circle):not(.arco-btn-round) {
+  border-radius: 7px;
+}
+.arco-btn.arco-btn-size-small {
+  height: 28px;
+  padding: 0 11px;
+  font-size: 12.5px;
+}
+.arco-btn.arco-btn-size-small:not(.arco-btn-circle):not(.arco-btn-round) {
+  border-radius: 8px;
+}
+.arco-btn:not(.arco-btn-size-small):not(.arco-btn-size-mini):not(.arco-btn-size-large) {
+  height: 34px;
+  padding: 0 14px;
+  font-size: 13.5px;
+}
+.arco-btn:not(.arco-btn-size-small):not(.arco-btn-size-mini):not(.arco-btn-size-large):not(.arco-btn-circle):not(.arco-btn-round) {
+  border-radius: 10px;
+}
+.arco-btn.arco-btn-size-large {
+  height: 38px;
+  padding: 0 18px;
+  font-size: 14px;
+}
+.arco-btn.arco-btn-size-large:not(.arco-btn-circle):not(.arco-btn-round) {
+  border-radius: 10px;
+}
+.arco-btn.arco-btn-size-mini.arco-btn-icon-only {
+  width: 24px;
+  padding: 0;
+}
+.arco-btn.arco-btn-size-small.arco-btn-icon-only {
+  width: 28px;
+  padding: 0;
+}
+.arco-btn:not(.arco-btn-size-small):not(.arco-btn-size-mini):not(.arco-btn-size-large).arco-btn-icon-only {
+  width: 34px;
+  padding: 0;
+}
+.arco-btn.arco-btn-size-large.arco-btn-icon-only {
+  width: 38px;
+  padding: 0;
+}
+.arco-btn.arco-btn-circle {
+  border-radius: 50%;
+  padding: 0;
+}
+.arco-btn.arco-btn-round {
+  border-radius: 999px;
+}
+.arco-btn:not(.arco-btn-disabled):not(.arco-btn-loading):active {
+  transform: scale(0.97);
+}
+.arco-btn:focus-visible {
+  box-shadow: var(--ring);
+}
+.arco-btn-primary:not(.arco-btn-disabled) {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    0 2px 6px -1px rgba(var(--arcoblue-6), 0.3),
+    0 1px 2px rgba(var(--arcoblue-8), 0.28);
+  transition:
+    transform 0.2s var(--spring),
+    box-shadow 0.2s ease,
+    filter 0.16s ease;
+}
+.arco-btn-primary:not(.arco-btn-disabled):hover {
+  transform: translate3d(0, -0.5px, 0);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.26),
+    0 6px 14px -3px rgba(var(--arcoblue-6), 0.36),
+    0 1px 2px rgba(var(--arcoblue-8), 0.3);
+}
+.arco-btn-primary:not(.arco-btn-disabled):active {
+  transform: scale(0.985);
+}
+.arco-btn-secondary:not(.arco-btn-disabled):not(.arco-btn-status-danger),
+body[arco-theme="dark"] .arco-btn-secondary:not(.arco-btn-disabled):not(.arco-btn-status-danger) {
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  color: var(--ink);
+  box-shadow: var(--shadow-sm);
+  transition:
+    transform 0.2s var(--spring),
+    border-color 0.18s ease,
+    background-color 0.18s ease,
+    box-shadow 0.2s ease;
+}
+.arco-btn-secondary:not(.arco-btn-disabled):not(.arco-btn-status-danger):hover,
+body[arco-theme="dark"] .arco-btn-secondary:not(.arco-btn-disabled):not(.arco-btn-status-danger):hover {
+  background: var(--surface-raised);
+  border-color: color-mix(in srgb, var(--brand) 28%, var(--line-strong));
+  box-shadow: var(--shadow-sm);
+}
+.arco-btn-secondary:not(.arco-btn-disabled):not(.arco-btn-status-danger):active,
+body[arco-theme="dark"] .arco-btn-secondary:not(.arco-btn-disabled):not(.arco-btn-status-danger):active {
+  transform: scale(0.985);
+}
+.arco-btn-secondary:not(.arco-btn-disabled):not(.arco-btn-status-danger):hover,
+body[arco-theme="dark"] .arco-btn-secondary:not(.arco-btn-disabled):not(.arco-btn-status-danger):hover {
+  background: var(--hover);
+  border-color: color-mix(in srgb, var(--brand) 38%, var(--line-strong));
+}
+.arco-btn-secondary.arco-btn-disabled:not(.arco-btn-status-danger),
+.arco-btn-secondary.arco-btn-disabled:not(.arco-btn-status-danger):hover,
+body[arco-theme="dark"] .arco-btn-secondary.arco-btn-disabled:not(.arco-btn-status-danger),
+body[arco-theme="dark"] .arco-btn-secondary.arco-btn-disabled:not(.arco-btn-status-danger):hover {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  color: var(--faint);
+}
+.arco-btn-secondary.arco-btn-status-danger:not(.arco-btn-disabled),
+body[arco-theme="dark"] .arco-btn-secondary.arco-btn-status-danger:not(.arco-btn-disabled) {
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--bad) 30%, var(--line-strong));
+  color: var(--bad);
+}
+.arco-btn-secondary.arco-btn-status-danger:not(.arco-btn-disabled):hover {
+  background: var(--bad-soft);
+  border-color: color-mix(in srgb, var(--bad) 58%, var(--line-strong));
+  color: var(--bad);
+}
+.arco-btn-secondary.arco-btn-status-danger.arco-btn-disabled,
+.arco-btn-secondary.arco-btn-status-danger.arco-btn-disabled:hover {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  color: color-mix(in srgb, var(--bad) 45%, var(--faint));
+}
+
+.arco-input-inner-wrapper,
+.arco-select-view,
+.arco-picker,
+.arco-input-tag {
+  box-sizing: border-box;
+}
+
+/* Unified control heights & corner radii: default 34px / 10px, small 28px / 8px, mini 24px / 7px, large 38px / 10px */
+.arco-input-inner-wrapper:not(.arco-input-size-small):not(.arco-input-size-mini):not(.arco-input-size-large):not(.arco-input-inner-wrapper-small):not(.arco-input-inner-wrapper-mini):not(.arco-input-inner-wrapper-large),
+input.arco-input:not(.arco-input-size-small):not(.arco-input-size-mini):not(.arco-input-size-large),
+.arco-select:not(.arco-select-size-small):not(.arco-select-size-mini):not(.arco-select-size-large):not(.arco-select-multiple) .arco-select-view,
+.arco-input-number:not(.arco-input-number-size-small):not(.arco-input-number-size-mini):not(.arco-input-number-size-large) .arco-input-inner-wrapper,
+.arco-picker:not(.arco-picker-size-small):not(.arco-picker-size-mini):not(.arco-picker-size-large) {
+  height: 34px;
+  min-height: 34px;
+  border-radius: 10px;
+}
+.arco-select.arco-select-multiple:not(.arco-select-size-small):not(.arco-select-size-mini):not(.arco-select-size-large) .arco-select-view,
+.arco-input-tag:not(.arco-input-tag-size-small):not(.arco-input-tag-size-mini):not(.arco-input-tag-size-large) {
+  height: auto;
+  min-height: 34px;
+  border-radius: 10px;
+}
+
+.arco-input-inner-wrapper.arco-input-size-small,
+.arco-input-inner-wrapper.arco-input-inner-wrapper-small,
+.arco-input-group-wrapper-small .arco-input-inner-wrapper,
+input.arco-input.arco-input-size-small,
+.arco-select.arco-select-size-small:not(.arco-select-multiple) .arco-select-view,
+.arco-input-number.arco-input-number-size-small .arco-input-inner-wrapper,
+.arco-picker.arco-picker-size-small {
+  height: 28px;
+  min-height: 28px;
+  border-radius: 8px;
+}
+.arco-select.arco-select-multiple.arco-select-size-small .arco-select-view,
+.arco-input-tag.arco-input-tag-size-small {
+  height: auto;
+  min-height: 28px;
+  border-radius: 8px;
+}
+
+.arco-input-inner-wrapper.arco-input-size-mini,
+.arco-input-inner-wrapper.arco-input-inner-wrapper-mini,
+.arco-input-group-wrapper-mini .arco-input-inner-wrapper,
+input.arco-input.arco-input-size-mini,
+.arco-select.arco-select-size-mini:not(.arco-select-multiple) .arco-select-view,
+.arco-input-number.arco-input-number-size-mini .arco-input-inner-wrapper,
+.arco-picker.arco-picker-size-mini {
+  height: 24px;
+  min-height: 24px;
+  border-radius: 7px;
+}
+.arco-select.arco-select-multiple.arco-select-size-mini .arco-select-view,
+.arco-input-tag.arco-input-tag-size-mini {
+  height: auto;
+  min-height: 24px;
+  border-radius: 7px;
+}
+
+.arco-input-inner-wrapper.arco-input-size-large,
+.arco-input-inner-wrapper.arco-input-inner-wrapper-large,
+.arco-input-group-wrapper-large .arco-input-inner-wrapper,
+input.arco-input.arco-input-size-large,
+.arco-select.arco-select-size-large:not(.arco-select-multiple) .arco-select-view,
+.arco-input-number.arco-input-number-size-large .arco-input-inner-wrapper,
+.arco-picker.arco-picker-size-large {
+  height: 38px;
+  min-height: 38px;
+  border-radius: 10px;
+}
+.arco-select.arco-select-multiple.arco-select-size-large .arco-select-view,
+.arco-input-tag.arco-input-tag-size-large {
+  height: auto;
+  min-height: 38px;
+  border-radius: 10px;
+}
+
+.arco-textarea,
+textarea.arco-textarea,
+.arco-input-textarea {
+  border-radius: 10px;
+  resize: none;
+}
+
+/* Preserve joined seams for Input.Group, addBefore/addAfter, and Input.Search */
+.arco-input-group > :first-child {
+  border-top-left-radius: 10px;
+  border-bottom-left-radius: 10px;
+}
+.arco-input-group > :last-child {
+  border-top-right-radius: 10px;
+  border-bottom-right-radius: 10px;
+}
+.arco-input-group-wrapper-small .arco-input-group > :first-child,
+.arco-input-number-size-small .arco-input-group > :first-child {
+  border-top-left-radius: 8px;
+  border-bottom-left-radius: 8px;
+}
+.arco-input-group-wrapper-small .arco-input-group > :last-child,
+.arco-input-number-size-small .arco-input-group > :last-child {
+  border-top-right-radius: 8px;
+  border-bottom-right-radius: 8px;
+}
+.arco-input-group-wrapper-mini .arco-input-group > :first-child,
+.arco-input-number-size-mini .arco-input-group > :first-child {
+  border-top-left-radius: 7px;
+  border-bottom-left-radius: 7px;
+}
+.arco-input-group-wrapper-mini .arco-input-group > :last-child,
+.arco-input-number-size-mini .arco-input-group > :last-child {
+  border-top-right-radius: 7px;
+  border-bottom-right-radius: 7px;
+}
+.arco-input-group > .arco-input-inner-wrapper:not(:first-child),
+.arco-input-group > input.arco-input:not(:first-child),
+.arco-input-group.arco-input-group-compact > *:not(:first-child),
+.arco-input-group.arco-input-group-compact > *:not(:first-child) .arco-select-view,
+.arco-input-group.arco-input-group-compact > *:not(:first-child) .arco-input-inner-wrapper {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+.arco-input-group > .arco-input-inner-wrapper:not(:last-child),
+.arco-input-group > input.arco-input:not(:last-child),
+.arco-input-group.arco-input-group-compact > *:not(:last-child),
+.arco-input-group.arco-input-group-compact > *:not(:last-child) .arco-select-view,
+.arco-input-group.arco-input-group-compact > *:not(:last-child) .arco-input-inner-wrapper {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.arco-input-group-addafter .arco-select.arco-select-single .arco-select-view,
+.arco-input-group-addbefore .arco-select.arco-select-single .arco-select-view {
+  height: 100%;
+  min-height: 0;
+  border-radius: 0;
+}
+
+.arco-input-inner-wrapper,
+input.arco-input:not(.arco-input-inner-wrapper *),
+.arco-select:not(.arco-select-no-border) .arco-select-view,
+.arco-input-tag,
+.arco-input-number .arco-input-inner-wrapper,
+.arco-picker,
+.arco-textarea,
+body[arco-theme="dark"] .arco-input-inner-wrapper,
+body[arco-theme="dark"] input.arco-input:not(.arco-input-inner-wrapper *),
+body[arco-theme="dark"] .arco-select:not(.arco-select-no-border) .arco-select-view,
+body[arco-theme="dark"] .arco-input-tag,
+body[arco-theme="dark"] .arco-input-number .arco-input-inner-wrapper,
+body[arco-theme="dark"] .arco-picker,
+body[arco-theme="dark"] .arco-textarea {
+  background: var(--surface) !important;
+  border: 1px solid var(--line-strong) !important;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease !important;
+}
+.arco-input-inner-wrapper input.arco-input,
+.arco-input-inner-wrapper .arco-input,
+.arco-input-number .arco-input-inner-wrapper .arco-input,
+.arco-picker .arco-picker-input input,
+.arco-select-view .arco-select-view-input,
+body[arco-theme="dark"] .arco-input-inner-wrapper input.arco-input,
+body[arco-theme="dark"] .arco-input-inner-wrapper .arco-input,
+body[arco-theme="dark"] .arco-input-number .arco-input-inner-wrapper .arco-input,
+body[arco-theme="dark"] .arco-picker .arco-picker-input input,
+body[arco-theme="dark"] .arco-select-view .arco-select-view-input {
+  height: 100% !important;
+  min-height: 0 !important;
+  border-radius: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.arco-select-multiple .arco-input-tag {
+  min-height: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.arco-input-group-addafter .arco-select .arco-select-view,
+.arco-input-group-addbefore .arco-select .arco-select-view {
+  border-color: transparent !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.arco-input-inner-wrapper:hover:not(.arco-input-inner-wrapper-disabled):not(.arco-input-inner-wrapper-focus),
+.arco-select:not(.arco-select-no-border):not(.arco-select-disabled):not(.arco-select-focused) .arco-select-view:hover,
+.arco-input-tag:hover:not(.arco-input-tag-disabled):not(.arco-input-tag-focus),
+.arco-picker:hover:not(.arco-picker-disabled):not(.arco-picker-focused),
+.arco-textarea:hover:not(.arco-textarea-disabled):not(:focus),
+input.arco-input:not(.arco-input-inner-wrapper *):hover:not(.arco-input-disabled):not(:focus) {
+  border-color: color-mix(in srgb, var(--brand) 38%, var(--line-strong)) !important;
+}
+.arco-input-inner-wrapper-focus,
+.arco-input-inner-wrapper:focus-within:not(.arco-input-inner-wrapper-disabled),
+.arco-input-focus,
+.arco-input-tag.arco-input-tag-focus,
+.arco-select:not(.arco-select-no-border).arco-select-focused .arco-select-view,
+.arco-picker-focused,
+.arco-textarea:focus,
+input.arco-input:not(.arco-input-inner-wrapper *):focus {
+  border-color: var(--brand) !important;
+  box-shadow: var(--ring) !important;
+}
+.arco-input-inner-wrapper .arco-input:focus-visible,
+.arco-input-inner-wrapper input.arco-input:focus,
+.arco-input-tag input:focus-visible,
+.arco-picker input:focus-visible,
+.arco-select-view input:focus-visible {
+  border: 0 !important;
+  box-shadow: none !important;
+}
+.arco-input-inner-wrapper-error,
+input.arco-input.arco-input-error:not(.arco-input-inner-wrapper *),
+.arco-select-error .arco-select-view,
+.arco-input-tag-error,
+.arco-textarea-error {
+  border-color: var(--bad) !important;
+}
+.arco-input-inner-wrapper-error.arco-input-inner-wrapper-focus,
+.arco-input-inner-wrapper-error:focus-within,
+input.arco-input.arco-input-error:not(.arco-input-inner-wrapper *):focus,
+.arco-select-error.arco-select-focused .arco-select-view,
+.arco-input-tag-error.arco-input-tag-focus,
+.arco-textarea-error:focus {
+  box-shadow: 0 0 0 3px var(--bad-soft) !important;
+}
+.arco-input-disabled,
+.arco-input-inner-wrapper-disabled,
+.arco-select-disabled .arco-select-view,
+.arco-select-view-disabled,
+.arco-picker-disabled,
+.arco-textarea-disabled {
+  background: var(--sunken) !important;
+}
+
+.arco-switch {
+  transition: background-color 0.22s var(--ease-out);
+}
+.arco-switch-checked {
+  background: var(--ok) !important;
+}
+body[arco-theme="dark"] .arco-switch-checked {
+  background: #30d158 !important;
+}
+
+.arco-drawer,
+.arco-modal {
+  background: var(--surface);
+}
+.arco-modal {
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+body[arco-theme="dark"] .arco-modal {
+  border-color: var(--line-strong);
+}
+.arco-modal-header {
+  border-bottom: 1px solid var(--line);
+}
+.arco-modal-footer {
+  border-top: 1px solid var(--line);
+}
+.arco-modal-mask,
+.arco-drawer-mask {
+  background: rgba(10, 12, 18, 0.34);
+  backdrop-filter: blur(3px);
+}
+body[arco-theme="dark"] .arco-modal-mask,
+body[arco-theme="dark"] .arco-drawer-mask {
+  background: rgba(0, 0, 0, 0.54);
+}
+.arco-drawer {
+  box-shadow: var(--shadow-lg);
+}
+.arco-drawer-header {
+  border-bottom: 1px solid var(--line);
+}
+.arco-drawer-footer {
+  border-top: 1px solid var(--line);
+}
+
+.arco-dropdown-menu,
+.arco-select-popup,
+.arco-trigger-popup .arco-menu,
+.arco-picker-container,
+.arco-popover-popup-content,
+.arco-trigger-popup .arco-popconfirm-content {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+}
+body[arco-theme="dark"] .arco-dropdown-menu,
+body[arco-theme="dark"] .arco-select-popup,
+body[arco-theme="dark"] .arco-trigger-popup .arco-menu,
+body[arco-theme="dark"] .arco-picker-container,
+body[arco-theme="dark"] .arco-popover-popup-content,
+body[arco-theme="dark"] .arco-trigger-popup .arco-popconfirm-content {
+  background: var(--color-bg-popup);
+  border-color: var(--line-strong);
+}
+.arco-dropdown-menu,
+.arco-select-popup,
+.arco-trigger-popup .arco-menu {
+  padding: 5px;
+  max-width: calc(100vw - 24px);
+}
+.arco-dropdown-menu {
+  overflow-x: hidden;
+  max-height: min(340px, calc(100vh - 80px));
+}
+.arco-select-popup .arco-select-popup-inner {
+  padding: 0;
+  max-height: min(280px, calc(100vh - 80px));
+}
+.arco-select-popup .arco-select-option,
+.arco-dropdown-menu .arco-dropdown-menu-item,
+.arco-dropdown-menu .arco-dropdown-menu-pop-header,
+.arco-trigger-popup .arco-menu .arco-menu-item {
+  border-radius: 8px;
+  margin: 1px 0;
+  padding: 7px 10px;
+  height: auto;
+  min-height: 32px;
+  line-height: 18px;
+  font-size: 13px;
+  color: var(--ink);
+  background-color: transparent;
+  transition: background-color 0.14s ease, color 0.14s ease;
+}
+.arco-select-popup .arco-select-option-selected,
+.arco-dropdown-menu .arco-dropdown-menu-item.arco-dropdown-menu-selected,
+.arco-trigger-popup .arco-menu .arco-menu-item.arco-menu-selected {
+  color: var(--brand-ink) !important;
+  background-color: var(--brand-soft) !important;
+  font-weight: 600;
+}
+
+/* Continuous hairline tables */
+.arco-table .arco-table-th {
+  background: transparent;
+  color: var(--faint);
+  font-size: 12px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--line);
+}
+.arco-table .arco-table-td {
+  background: transparent;
+  border-bottom: 1px solid var(--line);
+}
+.arco-table .arco-table-tr:hover .arco-table-td {
+  background: var(--hover) !important;
+}
+
+.arco-message {
+  border-radius: 999px;
+  box-shadow: var(--shadow-md);
+  border: 1px solid var(--line-strong);
+  background: var(--glass-strong);
+  backdrop-filter: saturate(180%) blur(20px);
+}
+.arco-tooltip-content {
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.45;
+  box-shadow: var(--shadow-md);
+}
+.arco-upload-list-item-name-text {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

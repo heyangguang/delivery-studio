@@ -1,0 +1,181 @@
+- name: 演练前的主库
+  ansible.builtin.include_tasks: _find_master.yml
+
+- name: 记下旧主
+  ansible.builtin.set_fact:
+    rd_old_ip: "{{ rd_master_ip }}"
+    rd_old_name: "{{ rd_master_name }}"
+
+# Manual 2.1: record the state before the drill. Every sentinel must name the same master, and the master must be
+# connected to all its replicas.
+- name: 演练前状态：每个哨兵报告的主库都应是当前主库
+  ansible.builtin.command:
+    argv: [redis-cli, -h, "{{ item }}", -p, "{{ rd_sport }}", SENTINEL, get-master-addr-by-name, "{{ rd_master }}"]
+  register: rd_pre
+  changed_when: false
+  failed_when: rd_old_ip not in rd_pre.stdout_lines[0:1]
+  loop: "{{ rd_ips.split(',') }}"
+
+- name: 演练前状态：主库连着全部从库
+  ansible.builtin.command:
+    argv: [redis-cli, -h, "{{ rd_old_ip }}", -p, "{{ rd_port }}", INFO, replication]
+  environment: "{{ rd_env }}"
+  register: rd_pre_info
+  changed_when: false
+  failed_when: "('role:master' not in rd_pre_info.stdout) or (('connected_slaves:' ~ rd_replica_count) not in rd_pre_info.stdout)"
+  no_log: true
+
+- name: 演练前状态：数据盘与内存
+  ansible.builtin.shell: df -h {{ rd_dir }}; free -h
+  register: rd_pre_res
+  changed_when: false
+
+- name: 演练前哨兵视图（主库、从库数、哨兵数、仲裁）
+  ansible.builtin.command:
+    argv: [redis-cli, -h, 127.0.0.1, -p, "{{ rd_sport }}", SENTINEL, master, "{{ rd_master }}"]
+  register: rd_snap0
+  changed_when: false
+
+- name: 记下哨兵日志现在的行数（之后只看演练期间的事件）
+  ansible.builtin.shell: wc -l < {{ rd_dir }}/log/redis-sentinel.log
+  register: rd_log0
+  changed_when: false
+
+- name: 在旧主写入演练前的键
+  ansible.builtin.command:
+    argv: [redis-cli, -h, "{{ rd_old_ip }}", -p, "{{ rd_port }}", SET, "ha:check", "v1"]
+  environment: "{{ rd_env }}"
+  changed_when: true
+  no_log: true
+
+- name: 停止旧主的实例（哨兵不停，模拟主库宕机）
+  ansible.builtin.systemd:
+    name: redis-server
+    state: stopped
+  delegate_to: "{{ rd_old_name }}"
+
+- name: 记下停止旧主的时刻
+  ansible.builtin.command: date +%s
+  register: rd_t0
+  changed_when: false
+
+# From here on the stopped instance is NOT started again unless a new master has been elected: with nothing persisted it
+# would come back empty, and the replicas would copy that emptiness from it.
+- name: 等待哨兵选出新主
+  ansible.builtin.command:
+    argv: [redis-cli, -h, 127.0.0.1, -p, "{{ rd_sport }}", SENTINEL, get-master-addr-by-name, "{{ rd_master }}"]
+  register: rd_new
+  changed_when: false
+  until: rd_new.rc == 0 and (rd_new.stdout_lines | length) >= 2 and rd_new.stdout_lines[0] != rd_old_ip
+  retries: 150
+  delay: 2
+
+- name: 记下选出新主的时刻
+  ansible.builtin.command: date +%s
+  register: rd_t1
+  changed_when: false
+
+- name: 新主
+  ansible.builtin.set_fact:
+    rd_new_ip: "{{ rd_new.stdout_lines[0] }}"
+    rd_elect_s: "{{ (rd_t1.stdout | int) - (rd_t0.stdout | int) }}"
+
+- name: 选主耗时
+  ansible.builtin.debug:
+    msg: "旧主 {{ rd_old_ip }} 停止后 {{ rd_elect_s }} 秒，哨兵选出新主 {{ rd_new_ip }}（判定下线的无响应时间 {{ mw.params.sentinel_down_after_ms }} ms）"
+
+- name: 新主可写
+  ansible.builtin.command:
+    argv: [redis-cli, -h, "{{ rd_new_ip }}", -p, "{{ rd_port }}", SET, "ha:failover", "v1"]
+  environment: "{{ rd_env }}"
+  register: rd_w
+  changed_when: true
+  failed_when: rd_w.stdout | trim != 'OK'
+  retries: 10
+  delay: 3
+  until: rd_w.stdout | trim == 'OK'
+  no_log: true
+
+# Manual 2.2: the events appear in order +sdown, +odown, +vote-for-leader, +switch-master (other events may sit in
+# between). Only what happened since the drill began is read; an event this sentinel did not log is not required.
+- name: 哨兵日志里事件应按 +sdown → +odown → +vote-for-leader → +switch-master 的顺序出现
+  ansible.builtin.shell: |
+    tail -n +{{ (rd_log0.stdout | trim | int) + 1 }} {{ rd_dir }}/log/redis-sentinel.log | awk '/\+sdown master/ && !a {a=NR} /\+odown master/ && !b {b=NR} /\+vote-for-leader/ && !c {c=NR} /\+switch-master/ && !d {d=NR} END {print a+0, b+0, c+0, d+0}'
+  register: rd_ord
+  changed_when: false
+  until: rd_ord.stdout.split() | length == 4 and (rd_ord.stdout.split()[3] | int) > 0
+  retries: 12
+  delay: 5
+
+- name: 事件顺序核对
+  ansible.builtin.assert:
+    that:
+      - (rd_ord.stdout.split() | map('int') | list)[0] > 0
+      - (rd_ord.stdout.split() | map('int') | select('gt', 0) | list) == (rd_ord.stdout.split() | map('int') | select('gt', 0) | sort | list)
+    success_msg: "事件首次出现的行（演练开始后）：+sdown {{ rd_ord.stdout.split()[0] }}，+odown {{ rd_ord.stdout.split()[1] }}，+vote-for-leader {{ rd_ord.stdout.split()[2] }}，+switch-master {{ rd_ord.stdout.split()[3] }}（0 表示这个哨兵没有记到）"
+    fail_msg: "哨兵日志事件顺序不对（行号 +sdown/+odown/+vote-for-leader/+switch-master）：{{ rd_ord.stdout }}"
+
+# Manual 2.2: the new master is writable and has one replica fewer (the old master is still down).
+- name: 新主的复制状态：role:master，旧主未恢复所以少一个从库
+  ansible.builtin.command:
+    argv: [redis-cli, -h, "{{ rd_new_ip }}", -p, "{{ rd_port }}", INFO, replication]
+  environment: "{{ rd_env }}"
+  register: rd_mid
+  changed_when: false
+  until: "('role:master' in rd_mid.stdout) and (('connected_slaves:' ~ (rd_replica_count | int - 1)) in rd_mid.stdout)"
+  retries: 20
+  delay: 3
+  no_log: true
+
+- name: 哨兵日志最近 30 行（存档）
+  ansible.builtin.command: "tail -30 {{ rd_dir }}/log/redis-sentinel.log"
+  register: rd_log
+  changed_when: false
+
+- name: 启动旧主（此时它已被哨兵替换）
+  ansible.builtin.systemd:
+    name: redis-server
+    state: started
+  delegate_to: "{{ rd_old_name }}"
+
+- name: 旧主应降为从库并追平
+  ansible.builtin.command:
+    argv: [redis-cli, -h, "{{ rd_old_ip }}", -p, "{{ rd_port }}", INFO, replication]
+  environment: "{{ rd_env }}"
+  register: rd_oi
+  changed_when: false
+  until: >-
+    'role:slave' in rd_oi.stdout and ('master_host:' ~ rd_new_ip) in rd_oi.stdout and 'master_link_status:up' in rd_oi.stdout
+  retries: 30
+  delay: 3
+  no_log: true
+
+# Manual 2.3: the sentinel rewrites the old master's config (CONFIG REWRITE), so redis.conf now names the new master.
+- name: 旧主的 redis.conf 里 replicaof 已指向新主（哨兵写入，不是手工配置）
+  ansible.builtin.command: grep -E '^replicaof' /etc/redis/redis.conf
+  register: rd_conf
+  changed_when: false
+  failed_when: rd_new_ip not in rd_conf.stdout
+  delegate_to: "{{ rd_old_name }}"
+
+- name: 旧主上读到新主写入的键
+  ansible.builtin.command:
+    argv: [redis-cli, -h, "{{ rd_old_ip }}", -p, "{{ rd_port }}", GET, "ha:failover"]
+  environment: "{{ rd_env }}"
+  register: rd_oget
+  changed_when: false
+  until: rd_oget.stdout | trim == 'v1'
+  retries: 15
+  delay: 2
+  no_log: true
+
+- name: 拓扑复原为一主多从
+  ansible.builtin.command:
+    argv: [redis-cli, -h, "{{ rd_new_ip }}", -p, "{{ rd_port }}", INFO, replication]
+  environment: "{{ rd_env }}"
+  register: rd_ni
+  changed_when: false
+  until: "('connected_slaves:' ~ rd_replica_count) in rd_ni.stdout"
+  retries: 30
+  delay: 3
+  no_log: true

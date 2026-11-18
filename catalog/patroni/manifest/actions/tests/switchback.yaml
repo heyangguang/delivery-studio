@@ -1,0 +1,21 @@
+id: switchback
+title: 回切主库
+desc: 把主库切回控制节点；已经在控制节点时什么也不做。后面的备份恢复类测试都要求控制节点是主库。
+effect: disruptive
+hosts: first:primary
+when: count(roles.replica) > 0
+skip: 单节点没有主从可回切
+expect: 必须通过后再执行后面的测试。
+inputs:
+    timeout:
+        type: int
+        value: 7200
+preconditions:
+    - mw_step_inputs.timeout > 0
+postconditions:
+    - pg_test_result.rc == 0
+run:
+    role: patroni
+    tasks: test_switchback
+    vars:
+        pg_test: switchback

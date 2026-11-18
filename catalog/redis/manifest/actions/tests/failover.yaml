@@ -1,0 +1,9 @@
+id: failover
+title: 自动故障转移
+desc: 停止当前主库的实例，等待哨兵选出新主；在新主写入；再启动旧主，确认它被降为从库并追平数据，拓扑复原为一主多从。
+effect: disruptive
+hosts: first:primary
+when: count(roles.replica) > 0
+skip: 单节点没有故障转移
+expect: 新主在超时内产生并可写；旧主恢复后是从库且读到新主写入的数据。
+run: {role: redis, tasks: test_failover}

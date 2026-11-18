@@ -1,0 +1,38 @@
+- name: 状态目录
+  ansible.builtin.file:
+    path: "{{ pg_state }}"
+    state: directory
+    mode: '0700'
+
+- name: 读取已记录的部署标识
+  ansible.builtin.slurp:
+    src: "{{ pg_state }}/scope"
+  register: pg_recorded
+  failed_when: false
+
+- name: 数据目录归属检查
+  ansible.builtin.stat:
+    path: "{{ pg_data }}/PG_VERSION"
+  register: pg_has_data
+
+- name: 拒绝改动不属于本部署的数据目录或另一套部署
+  ansible.builtin.assert:
+    that:
+      - (pg_recorded.content is defined and (pg_recorded.content | b64decode | trim) == pg_scope) or not pg_has_data.stat.exists
+    fail_msg: >-
+      {{ pg_data }} 已有 PostgreSQL 数据，但本平台没有记录它属于 {{ pg_scope }}（记录为：{{ (pg_recorded.content | default('') | b64decode | trim) or '无' }}）。
+      拒绝在未确认归属的数据上初始化，请先核对它属于哪个集群。
+
+- name: 记录部署标识
+  ansible.builtin.copy:
+    dest: "{{ pg_state }}/scope"
+    content: "{{ pg_scope }}\n"
+    mode: '0600'
+
+- name: 写入 Patroni 配置
+  ansible.builtin.include_tasks: configure_patroni.yml
+  when: pg_ha | bool
+
+- name: 创建并配置单节点数据库
+  ansible.builtin.include_tasks: configure_single.yml
+  when: not (pg_ha | bool)

@@ -1,0 +1,68 @@
+# Controller only: verify the repository archive, unpack it, and serve it over HTTP on the controller address. Every
+# plan has its own directory (the cluster id, or the cluster id and plan number); the service is pointed at the newest
+# one and restarted, and the earlier directories stay, so going back means pointing it at the earlier one again.
+- name: 软件仓库包应已上传
+  ansible.builtin.stat:
+    path: "{{ mw_upload_dir }}/{{ item.file }}"
+    checksum_algorithm: sha256
+    get_checksum: true
+  register: mw_repo_archives
+  loop: "{{ mw_repos }}"
+  loop_control:
+    label: "{{ item.file }}"
+
+- name: 核对软件仓库包存在与哈希
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.item.sha256 == '' or item.stat.checksum == item.item.sha256
+    fail_msg: "{{ mw_upload_dir }}/{{ item.item.file }} 缺失或 SHA256 与交付清单不符"
+  loop: "{{ mw_repo_archives.results }}"
+  loop_control:
+    label: "{{ item.item.file }}"
+
+- name: 创建仓库目录
+  ansible.builtin.file:
+    path: "/opt/middleware-repositories/{{ mw_cluster.project | default(mw_cluster.id) }}"
+    state: directory
+    mode: '0755'
+
+- name: 解包软件仓库
+  ansible.builtin.unarchive:
+    src: "{{ mw_upload_dir }}/{{ item.file }}"
+    dest: "/opt/middleware-repositories/{{ mw_cluster.project | default(mw_cluster.id) }}"
+    remote_src: true
+    creates: "/opt/middleware-repositories/{{ mw_cluster.project | default(mw_cluster.id) }}/{{ item.root }}/.mw-repo"
+    extra_opts: ['--no-same-owner']
+  loop: "{{ mw_repos }}"
+  loop_control:
+    label: "{{ item.file }}"
+
+- name: 仓库标记应存在
+  ansible.builtin.stat:
+    path: "/opt/middleware-repositories/{{ mw_cluster.project | default(mw_cluster.id) }}/{{ item.root }}/.mw-repo"
+  register: mw_repo_index
+  failed_when: not mw_repo_index.stat.exists
+  loop: "{{ mw_repos }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: 提供仓库的 systemd 服务
+  register: mw_repo_unit
+  ansible.builtin.template:
+    src: repo.service.j2
+    dest: "/etc/systemd/system/mw-repo-{{ mw_cluster.id }}-{{ item.name }}.service"
+    mode: '0644'
+  loop: "{{ mw_repos }}"
+  loop_control:
+    label: "{{ item.name }}:{{ item.port }}"
+
+- name: 启动仓库服务（指向本次的仓库目录）
+  ansible.builtin.systemd:
+    name: "mw-repo-{{ mw_cluster.id }}-{{ item.name }}"
+    enabled: true
+    state: "{{ 'restarted' if mw_repo_unit.changed else 'started' }}"
+    daemon_reload: true
+  loop: "{{ mw_repos }}"
+  loop_control:
+    label: "{{ item.name }}"

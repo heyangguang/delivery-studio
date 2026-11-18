@@ -1,0 +1,11 @@
+- name: 启动 redis-sentinel（必须在全部实例都启动之后）
+  ansible.builtin.systemd:
+    name: redis-sentinel
+    enabled: true
+    state: started
+
+- name: 等待哨兵端口
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ rd_sport | int }}"
+    timeout: 120

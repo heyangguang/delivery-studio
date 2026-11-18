@@ -1,0 +1,4 @@
+- name: 安装软件包
+  ansible.builtin.include_role:
+    name: mw_packages
+    tasks_from: install

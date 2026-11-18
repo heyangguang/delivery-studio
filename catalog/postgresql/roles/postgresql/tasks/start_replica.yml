@@ -1,0 +1,8 @@
+- name: 启动 Patroni
+  ansible.builtin.systemd:
+    name: patroni
+    enabled: true
+    state: started
+
+- name: 等待从库就绪
+  ansible.builtin.include_tasks: _wait_ready.yml

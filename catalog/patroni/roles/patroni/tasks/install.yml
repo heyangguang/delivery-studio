@@ -1,0 +1,72 @@
+- name: /data 应已挂载
+  ansible.builtin.command: mountpoint -q {{ mw_hosts[inventory_hostname].params.data_root | default('/data') }}
+  changed_when: false
+  when: (mw_hosts[inventory_hostname].params | default({})).get("storage_mode", "dedicated_disk") == "dedicated_disk"
+
+- name: 普通数据目录应已准备好
+  ansible.builtin.command: test -d {{ mw_hosts[inventory_hostname].params.data_root | default('/data') }}
+  changed_when: false
+  when: (mw_hosts[inventory_hostname].params | default({})).get("storage_mode", "dedicated_disk") == "system_directory"
+
+- name: /dev/shm 容量（TDE 的归档与恢复在这里解密 WAL）
+  ansible.builtin.shell: "df -Pm /dev/shm | awk 'NR==2{print $2}'"
+  register: pg_shm
+  changed_when: false
+  failed_when: mw.params.tde and (pg_shm.stdout | trim | int) < 256
+  when: mw.params.tde
+
+- name: 屏蔽默认的 postgresql 服务
+  ansible.builtin.command: systemctl mask postgresql.service
+  changed_when: false
+
+- name: 创建 postgresql-common 配置目录
+  ansible.builtin.file:
+    path: /etc/postgresql-common
+    state: directory
+    mode: '0755'
+
+- name: 禁止安装时自动创建默认集群
+  ansible.builtin.copy:
+    dest: /etc/postgresql-common/createcluster.conf
+    content: "create_main_cluster = false\n"
+    mode: '0644'
+
+- name: 临时屏蔽 etcd 与 patroni
+  ansible.builtin.command: systemctl mask --runtime etcd.service patroni.service
+  changed_when: false
+  when: pg_ha | bool
+
+- name: 安装软件包
+  block:
+    - name: 安装 PostgreSQL 相关软件包
+      ansible.builtin.include_role:
+        name: mw_packages
+        tasks_from: install
+  always:
+    - name: 取消临时屏蔽
+      ansible.builtin.command: systemctl unmask --runtime etcd.service patroni.service
+      changed_when: false
+      when: pg_ha | bool
+
+- name: 创建数据、配置与备份目录
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: '0700'
+  loop:
+    - "{{ mw_hosts[inventory_hostname].params.data_root | default('/data') }}/pg"
+    - "{{ mw_hosts[inventory_hostname].params.data_root | default('/data') }}/pg/17"
+    - /etc/pgbackrest
+    - /etc/pki/pg
+    - /etc/postgresql/keys
+    - /var/run/postgresql
+    - /var/log/pgbackrest
+    - "{{ pg_repo }}"
+    - /etc/patroni
+
+- name: 核对 Patroni 能导入 etcd3 与 OpenSSL（只读）
+  ansible.builtin.command: /usr/bin/python3 -c "import patroni.dcs.etcd3, OpenSSL.SSL"
+  changed_when: false
+  when: pg_ha | bool

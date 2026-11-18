@@ -1,0 +1,33 @@
+# Managed by Middleware Hub for {{ mw_cluster.id }}/{{ mw.id }}. Do not edit by hand.
+{% if mw_pkg_family == 'apt' %}
+user www-data;
+{% else %}
+user nginx;
+{% endif %}
+worker_processes auto;
+pid /run/nginx.pid;
+{% if mw_pkg_family == 'apt' %}
+include /etc/nginx/modules-enabled/*.conf;
+{% else %}
+include /usr/share/nginx/modules/*.conf;
+{% endif %}
+
+events {
+    worker_connections {{ mw.params.worker_connections }};
+}
+
+stream {
+{% for b in mw.binds %}
+    upstream {{ b.name | replace('-', '_') }} {
+{% for be in b.endpoint.backends %}
+        server {{ be.ip }}:{{ be.port }} max_fails={{ mw.params.max_fails }} fail_timeout={{ mw.params.fail_timeout }}s;
+{% endfor %}
+    }
+    server {
+        listen {{ b.listen }};
+        proxy_pass {{ b.name | replace('-', '_') }};
+        proxy_connect_timeout {{ mw.params.proxy_connect_timeout }}s;
+        proxy_timeout {{ mw.params.proxy_timeout }}m;
+    }
+{% endfor %}
+}

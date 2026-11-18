@@ -1,0 +1,21 @@
+id: standard
+contract:
+    when: count(roles.replica) > 0
+    series: ha
+    failover: automatic
+    mechanism: Redis Sentinel
+    read_access: 主节点读写，从节点只读
+    sharding: false
+    limitations:
+        - 客户端必须支持 Sentinel；不支持 Redis Cluster 分片
+        - 默认不持久化，必须接受缓存数据丢失风险
+    acceptance:
+        - redis/failover
+        - redis/replication
+    operations:
+        - deploy
+name: 高可用系列
+tag: 推荐
+spec: 1 主 2 从 + 3 哨兵 · 自动切换 · 不分片
+roles: [{role: primary, count: 1}, {role: replica, count: 2}]
+params: {maxmemory: 6GB, sentinel_quorum: 2}

@@ -1,0 +1,8 @@
+id: native-replication
+expect: 主库报告所有从库 streaming，从库处于恢复模式且 WAL receiver 为 streaming。
+title: 普通主从流复制验收（只读）
+effect: read-only
+when: params.deployment_mode == 'replication'
+run:
+    role: postgresql
+    tasks: native_health

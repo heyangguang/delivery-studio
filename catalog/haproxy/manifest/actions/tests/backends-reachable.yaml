@@ -1,0 +1,6 @@
+id: backends-reachable
+title: 后端可达
+desc: 从每台负载均衡机器逐个连接后端的服务端口。
+effect: read-only
+expect: 每台负载均衡机器都能连上全部后端服务端口（备库的健康检查端口返回非 200 属正常，这里只测连通）。
+run: {role: haproxy, tasks: backends}

@@ -1,0 +1,21 @@
+id: single
+name: 基础系列
+spec: 1 台 · 无故障切换
+roles:
+    - role: balancer
+      count: 1
+params:
+    ha: none
+contract:
+    when: count(roles.balancer) == 1 && params.ha == 'none'
+    series: basic
+    failover: none
+    mechanism: nginx 单节点
+    read_access: 通过入口访问后端；不提供数据存储或分片
+    sharding: false
+    limitations:
+        - 单节点故障会中断入口服务
+    acceptance:
+        - nginx/listening
+    operations:
+        - deploy

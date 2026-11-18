@@ -1,0 +1,16 @@
+- name: 读取本机网卡地址
+  ansible.builtin.command: ip -4 -o addr show dev {{ mw.params.interface }}
+  register: ka_addr
+  changed_when: false
+  retries: 10
+  delay: 2
+  until: ka_addr.rc == 0
+
+- name: 恰好一台机器持有 VIP
+  ansible.builtin.assert:
+    that: holders | length == 1
+    fail_msg: "持有 VIP {{ mw.params.vip }} 的机器有 {{ holders | length }} 台：{{ holders }}"
+    success_msg: "VIP {{ mw.params.vip }} 由 {{ holders | first }} 持有"
+  run_once: true
+  vars:
+    holders: "{{ ansible_play_hosts | map('extract', hostvars) | selectattr('ka_addr.stdout', 'search', mw.params.vip ~ '/') | map(attribute='inventory_hostname') | list }}"

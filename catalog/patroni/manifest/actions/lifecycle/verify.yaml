@@ -1,0 +1,16 @@
+- id: health
+  title: 核对各节点状态
+  desc: 角色、TLS、TDE、归档和 TCP 认证；不改动数据。
+  effect: read-only
+  expect: 每个节点的实际设置与计划一致。
+  run:
+    role: patroni
+    tasks: health
+- id: topology
+  title: 复核拓扑
+  effect: read-only
+  hosts: first:primary
+  when: count(roles.replica) > 0
+  run:
+    role: patroni
+    tasks: topology

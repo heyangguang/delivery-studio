@@ -1,0 +1,4 @@
+- id: listening
+  title: 核对监听端口
+  effect: read-only
+  run: {role: haproxy, tasks: listening}

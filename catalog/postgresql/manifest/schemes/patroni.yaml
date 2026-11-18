@@ -1,0 +1,30 @@
+id: patroni
+contract:
+    when: params.deployment_mode == 'patroni'
+    series: ha
+    failover: automatic
+    mechanism: Patroni + etcd
+    read_access: 主库读写，从库只读
+    sharding: false
+    limitations:
+        - 自动切换依赖 DCS 仲裁与健康副本
+        - 当前未提供拆分方案的升级、扩缩容和配置变更流程
+    acceptance:
+        - patroni/failover
+        - patroni/ha-check
+    operations:
+        - deploy
+name: Patroni 主从方案
+tag: 自动切换
+spec: Patroni 自动切换 · 1 主多从 · 平台部署 etcd
+roles:
+    - role: primary
+      count: 1
+    - role: replica
+      count: 2
+params:
+    deployment_mode: patroni
+    replication: quorum
+    sync_ack_count: 1
+    tls: false
+    tde: false

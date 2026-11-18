@@ -1,0 +1,66 @@
+- name: 服务应在运行
+  ansible.builtin.command:
+    argv: "{{ ['systemctl', 'is-active', 'redis-server'] + (['redis-sentinel'] if rd_ha | bool else []) }}"
+  register: rd_active
+  changed_when: false
+  failed_when: rd_active.rc != 0
+
+- name: 等待就绪
+  ansible.builtin.include_tasks: _wait_ready.yml
+
+- name: 读取实际设置
+  ansible.builtin.command:
+    argv: "{{ rd_cli + ['CONFIG', 'GET', item] }}"
+  environment: "{{ rd_env }}"
+  loop: [maxmemory, maxmemory-policy, save, appendonly]
+  register: rd_cfg
+  changed_when: false
+  no_log: true
+
+- name: 版本与角色
+  ansible.builtin.command:
+    argv: "{{ rd_cli + ['INFO'] }}"
+  environment: "{{ rd_env }}"
+  register: rd_info
+  changed_when: false
+  no_log: true
+
+- name: 不带密码的连接必须被拒
+  ansible.builtin.command:
+    argv: "{{ rd_cli + ['PING'] }}"
+  environment:
+    REDISCLI_AUTH: ''
+  register: rd_noauth
+  changed_when: false
+  failed_when: false
+
+- name: 实际设置应与计划一致
+  ansible.builtin.assert:
+    that:
+      - rd_cfg.results[0].stdout_lines[1] | int == mw.params.maxmemory_bytes | int
+      - rd_cfg.results[1].stdout_lines[1] == mw.params.maxmemory_policy
+      - (rd_persist != 'none') or ((rd_cfg.results[2].stdout_lines | length < 2 or rd_cfg.results[2].stdout_lines[1] == '') and rd_cfg.results[3].stdout_lines[1] == 'no')
+      - (rd_persist != 'aof') or rd_cfg.results[3].stdout_lines[1] == 'yes'
+      - "'redis_version:7.2.' in rd_info.stdout"
+      - "'role:master' in rd_info.stdout or 'role:slave' in rd_info.stdout"
+      - "'NOAUTH' in (rd_noauth.stdout ~ rd_noauth.stderr)"
+    fail_msg: >-
+      设置与计划不一致：maxmemory={{ rd_cfg.results[0].stdout_lines[1] }}，策略={{ rd_cfg.results[1].stdout_lines[1] }}，
+      持久化={{ rd_persist }}，无密码连接的结果={{ rd_noauth.stdout }}{{ rd_noauth.stderr }}
+    success_msg: "{{ inventory_hostname }}：服务、认证、内存与持久化设置均符合计划"
+
+- name: 机器上的 swap
+  ansible.builtin.command: swapon --show --noheadings
+  register: rd_swapnow
+  changed_when: false
+
+- name: 提示 swap 的状态
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }}：{% if (rd_swapnow.stdout | trim) == '' %}没有 swap。{% else %}存在 swap（{{ rd_swapnow.stdout | trim }}）。
+      {% if mw.params.disable_swap %}计划要求关闭却仍有 swap，请检查。{% else %}本次计划没有选择关闭 swap；Redis 官方建议无 swap，内存被换出会让延迟骤增。{% endif %}{% endif %}
+
+- name: 选择了关闭 swap 时不得还有 swap
+  ansible.builtin.assert:
+    that: not (mw.params.disable_swap | bool) or (rd_swapnow.stdout | trim) == ''
+    fail_msg: 计划选择了关闭 swap，但机器上仍有 swap

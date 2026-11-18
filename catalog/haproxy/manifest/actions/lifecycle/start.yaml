@@ -1,0 +1,4 @@
+- id: start
+  title: 启动 HAProxy
+  effect: change
+  run: {role: haproxy, tasks: start}

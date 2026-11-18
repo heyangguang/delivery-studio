@@ -1,0 +1,8 @@
+- id: "7.2"
+  status: verifying
+  platforms: [ubuntu-24.04-amd64]
+  packages:
+    - {name: redis-server, version: "6:7.2.16-1rl1~noble1"}
+    - {name: redis-sentinel, version: "6:7.2.16-1rl1~noble1", when: count(roles.replica) > 0}
+    - {name: redis-tools, version: "6:7.2.16-1rl1~noble1"}
+    - {name: logrotate, version: "3.21.0-2build1"}

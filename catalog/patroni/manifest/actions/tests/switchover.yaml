@@ -1,0 +1,21 @@
+id: switchover
+title: 计划切换
+desc: 把主库计划切换到一台从库，核对切换前已提交的数据都在新主库上，再切回来。会短暂中断连接。
+effect: disruptive
+hosts: first:primary
+when: count(roles.replica) > 0
+skip: 单节点没有可切换的从库
+expect: 切换前后写入的数据必须全部保留。
+inputs:
+    timeout:
+        type: int
+        value: 7200
+preconditions:
+    - mw_step_inputs.timeout > 0
+postconditions:
+    - pg_test_result.rc == 0
+run:
+    role: patroni
+    tasks: test_switchover
+    vars:
+        pg_test: switchover

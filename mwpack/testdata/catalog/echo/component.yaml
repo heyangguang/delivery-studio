@@ -1,0 +1,125 @@
+schema: mwpack/v1
+component: echo
+short: svc
+title: 回显服务（测试用）
+category: 测试
+summary: 只用于验证平台的测试组件。
+provides: [echo-endpoint]
+data_volume: false
+
+roles:
+  - {name: primary, title: 主, min: 1, max: 1, default: 1, initial: true, exclusive: true}
+  - {name: replica, title: 从, min: 0, max: 4, default: 1, exclusive: true}
+
+groups:
+  - {id: net, label: 网络}
+
+params:
+  - {key: port, group: net, label: 服务端口, type: port, default: 7000}
+  - {key: probe_port, group: net, label: 探测端口, type: port, default: 7001}
+  - {key: mode, label: 模式, type: enum, options: [fast, safe], default: fast}
+  - {key: safe_level, label: 安全级别, type: int, default: 1, min: 1, max: 3, when: "params.mode == 'safe'"}
+
+rules:
+  - {id: safe-needs-replica, expr: "params.mode != 'safe' || count(roles.replica) >= 1", message: safe 模式至少需要 1 个从节点}
+
+ports:
+  - {name: service, value: =params.port}
+  - {name: probe, value: =params.probe_port}
+
+endpoints:
+  - name: writer
+    title: 写入入口
+    protocol: tcp
+    port: =params.port
+    backends: [primary, replica]
+    health: {type: http, port: =params.probe_port, path: /primary, status: 200}
+    lb: allowed
+  - name: bus
+    title: 直连入口
+    protocol: tcp
+    port: =params.port
+    backends: [primary]
+    health: {type: tcp}
+    lb: none
+    note: 客户端需要直连各节点
+
+versions:
+  - id: "1.0"
+    status: published
+    platforms: [ubuntu-24.04-amd64]
+    packages: [{name: netcat-openbsd, version: "1.226-1ubuntu2"}]
+
+lifecycle:
+  install:
+    - id: packages
+      title: 安装 netcat
+      effect: change
+      tasks:
+        - name: 安装软件包
+          ansible.builtin.apt:
+            name: "{{ mw.packages | map(attribute='spec') | list }}"
+            state: present
+            update_cache: false
+  configure:
+    - id: config
+      title: 写入回显服务配置
+      effect: change
+      tasks:
+        - name: 渲染配置
+          ansible.builtin.template:
+            src: echo.conf.j2
+            dest: /etc/echo.conf
+            mode: '0644'
+  start:
+    - id: serve
+      title: 启动回显服务
+      effect: change
+      hosts: primary
+      tasks:
+        - name: 写标记
+          ansible.builtin.copy:
+            dest: /etc/echo-service
+            content: "{{ mw.params.port }}\n"
+            mode: '0644'
+
+tests:
+  - id: reachable
+    title: 端口可达
+    effect: read-only
+    expect: 端口可连。
+    tasks:
+      - name: 连接服务端口
+        ansible.builtin.wait_for:
+          port: "{{ mw.params.port }}"
+          timeout: 5
+  - id: replica-sync
+    title: 从节点同步
+    effect: change
+    when: count(roles.replica) > 0
+    skip: 没有从节点
+    hosts: replica
+    tasks:
+      - name: 占位
+        ansible.builtin.debug:
+          msg: sync
+  - id: via-front
+    title: 经入口写入
+    scope: endpoint:writer
+    effect: change
+    hosts: first:primary
+    tasks:
+      - name: 经入口连接
+        ansible.builtin.wait_for:
+          host: "{{ mw.fronts.writer.address }}"
+          port: "{{ mw.fronts.writer.listen }}"
+          timeout: 5
+
+cleanup:
+  - id: inspect
+    title: 盘点测试资源
+    effect: read-only
+    tasks:
+      - name: 列出
+        ansible.builtin.debug:
+          msg: inspect

@@ -1,0 +1,48 @@
+- name: 记录切换前的地址
+  ansible.builtin.command: ip -4 -o addr show dev {{ mw.params.interface }}
+  register: ka_before
+  changed_when: false
+
+- name: 确认切换前恰好一台持有 VIP
+  ansible.builtin.assert:
+    that: before_holders | length == 1
+    fail_msg: "切换前持有者为 {{ before_holders }}，请先确认 VIP 正常"
+  run_once: true
+  vars:
+    before_holders: "{{ ansible_play_hosts | map('extract', hostvars) | selectattr('ka_before.stdout', 'search', mw.params.vip ~ '/') | map(attribute='inventory_hostname') | list }}"
+
+- name: 切换并恢复
+  block:
+    - name: 停止持有者的 keepalived
+      ansible.builtin.systemd:
+        name: keepalived
+        state: stopped
+      when: mw.params.vip ~ '/' in ka_before.stdout
+
+    - name: 等待 VIP 漂移
+      ansible.builtin.pause:
+        seconds: 12
+      run_once: true
+
+    - name: 读取切换后的地址
+      ansible.builtin.command: ip -4 -o addr show dev {{ mw.params.interface }}
+      register: ka_after
+      changed_when: false
+
+    - name: VIP 应已转移到另一台
+      ansible.builtin.assert:
+        that:
+          - after_holders | length == 1
+          - after_holders | first != before_holders | first
+        fail_msg: "切换后持有者 {{ after_holders }}，切换前 {{ before_holders }}"
+        success_msg: "VIP 从 {{ before_holders | first }} 漂移到 {{ after_holders | first }}"
+      run_once: true
+      vars:
+        before_holders: "{{ ansible_play_hosts | map('extract', hostvars) | selectattr('ka_before.stdout', 'search', mw.params.vip ~ '/') | map(attribute='inventory_hostname') | list }}"
+        after_holders: "{{ ansible_play_hosts | map('extract', hostvars) | selectattr('ka_after.stdout', 'search', mw.params.vip ~ '/') | map(attribute='inventory_hostname') | list }}"
+  always:
+    - name: 恢复 keepalived
+      ansible.builtin.systemd:
+        name: keepalived
+        state: started
+        enabled: true

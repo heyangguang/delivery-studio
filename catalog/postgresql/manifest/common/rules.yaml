@@ -1,0 +1,46 @@
+- id: clonefrom-node
+  expr: count(roles.replica) == 0 || params.clonefrom_node == '' || params.clonefrom_node in roles.primary || params.clonefrom_node in roles.replica
+  message: 优先克隆来源节点必须是本实例主库或从库的部署机器名；不指定时请留空
+- id: sync-count
+  expr: count(roles.replica) == 0 || params.replication != 'quorum' || params.sync_ack_count <= count(roles.replica)
+  message: 同步确认数不能超过从库数量
+- id: patroni-timing
+  expr: count(roles.replica) == 0 || params.patroni_loop_wait + 2 * params.patroni_retry_timeout <= params.patroni_ttl
+  message: Patroni 须满足 循环间隔 + 2 × 重试超时 ≤ TTL
+- id: wal-size
+  expr: size(params.min_wal_size) <= size(params.max_wal_size)
+  message: 最小 WAL 大小不能超过最大 WAL 大小
+- id: cache-size
+  expr: size(params.shared_buffers) <= size(params.effective_cache_size)
+  message: 共享缓冲区不应超过有效缓存估算
+- id: senders
+  expr: params.max_wal_senders >= count(roles.replica) + 3 && params.max_replication_slots >= count(roles.replica) + 3
+  message: WAL 发送进程与复制槽上限至少为 从库数 + 3
+- id: dirty
+  expr: '!params.apply_baseline || params.vm_dirty_background_ratio < params.vm_dirty_ratio'
+  message: vm.dirty_background_ratio 须小于 vm.dirty_ratio
+- id: app-user-reserved
+  expr: '!(params.app_user in [''postgres'', ''replicator'', ''rewind_user''])'
+  message: 业务管理账户不能与系统账户同名
+- id: cidr-count
+  expr: count(params.extra_client_cidrs) <= 8
+  message: 额外放通的网段最多 8 个
+- id: ports-differ
+  expr: count(roles.replica) == 0 || params.pg_port != params.restapi_port
+  message: PostgreSQL 与 Patroni REST 端口不能相同
+- id: two-nodes
+  expr: count(roles.replica) != 1
+  message: 一主一从只有 2 个 etcd 成员：失去任何一台都会丢失多数派，无法自动选主。建议至少 1 主 2 从，或把 etcd 单独部署在 3 台机器上
+  warn: true
+- id: single-topology
+  expr: params.deployment_mode != 'single' || count(roles.replica) == 0
+  message: 单机方案不能添加从库，请改选主从复制或自动高可用方案
+- id: replication-topology
+  expr: params.deployment_mode != 'replication' || count(roles.replica) >= 1
+  message: 普通主从方案至少需要一个从库
+- id: replication-options
+  expr: params.deployment_mode != 'replication' || (!params.tde && params.replication == 'async')
+  message: 普通主从首批支持无 TDE 的异步流复制，同步复制及 TDE 组合尚未验证
+- id: patroni-topology
+  expr: params.deployment_mode != 'patroni' || count(roles.replica) >= 1
+  message: 自动高可用至少需要一主一从；若只选两台 PG，请独立提供至少三个 etcd 节点

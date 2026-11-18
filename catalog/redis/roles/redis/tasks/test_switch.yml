@@ -1,0 +1,64 @@
+- name: 切换前的主库
+  ansible.builtin.include_tasks: _find_master.yml
+
+- name: 记下切换前的主库
+  ansible.builtin.set_fact:
+    rd_before_ip: "{{ rd_master_ip }}"
+
+- name: 记下哨兵日志现在的 switch-master 条数
+  ansible.builtin.shell: grep -c switch-master {{ rd_dir }}/log/redis-sentinel.log || true
+  register: rd_sw0
+  changed_when: false
+
+- name: 触发一次哨兵切换
+  ansible.builtin.command:
+    argv: [redis-cli, -h, 127.0.0.1, -p, "{{ rd_sport }}", SENTINEL, failover, "{{ rd_master }}"]
+  register: rd_fo
+  changed_when: true
+  failed_when: "'OK' not in rd_fo.stdout"
+
+- name: 等待主库改变
+  ansible.builtin.command:
+    argv: [redis-cli, -h, 127.0.0.1, -p, "{{ rd_sport }}", SENTINEL, get-master-addr-by-name, "{{ rd_master }}"]
+  register: rd_after
+  changed_when: false
+  until: rd_after.rc == 0 and (rd_after.stdout_lines | length) >= 2 and rd_after.stdout_lines[0] != rd_before_ip
+  retries: 40
+  delay: 3
+
+- name: 哨兵日志应出现新的 +switch-master（手册 2.4）
+  ansible.builtin.shell: grep -c switch-master {{ rd_dir }}/log/redis-sentinel.log || true
+  register: rd_sw1
+  changed_when: false
+  until: (rd_sw1.stdout | trim | int) > (rd_sw0.stdout | trim | int)
+  retries: 10
+  delay: 3
+
+- name: 哨兵日志里的切换事件（存档）
+  ansible.builtin.shell: grep -E 'switch-master|elected-leader|failover-state' {{ rd_dir }}/log/redis-sentinel.log | tail -8
+  register: rd_swlog
+  changed_when: false
+
+- name: 其余机器都改挂新主
+  ansible.builtin.command:
+    argv: [redis-cli, -h, "{{ item }}", -p, "{{ rd_port }}", INFO, replication]
+  environment: "{{ rd_env }}"
+  register: rd_ri
+  changed_when: false
+  until: >-
+    'role:slave' in rd_ri.stdout and ('master_host:' ~ rd_after.stdout_lines[0]) in rd_ri.stdout and 'master_link_status:up' in rd_ri.stdout
+  retries: 30
+  delay: 3
+  loop: "{{ rd_ips.split(',') | difference([rd_after.stdout_lines[0]]) }}"
+  no_log: true
+
+- name: 新主连着全部从库
+  ansible.builtin.command:
+    argv: [redis-cli, -h, "{{ rd_after.stdout_lines[0] }}", -p, "{{ rd_port }}", INFO, replication]
+  environment: "{{ rd_env }}"
+  register: rd_mi
+  changed_when: false
+  until: "('connected_slaves:' ~ rd_replica_count) in rd_mi.stdout"
+  retries: 30
+  delay: 3
+  no_log: true

@@ -1,0 +1,170 @@
+/* AI personalization page. Prefix pf-. */
+.pf {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.pf-in {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 24px clamp(16px, 3vw, 32px) 72px;
+}
+.pf header {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.pf h1 {
+  flex: 1;
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+}
+.pf-back {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 10px;
+  color: var(--ink-2);
+  background: none;
+  cursor: pointer;
+}
+.pf-back:hover {
+  background: var(--hover);
+}
+.pf-state {
+  min-width: 64px;
+  color: var(--faint);
+  font-size: 12.5px;
+  text-align: right;
+}
+.pf-state.saved {
+  color: var(--ok);
+}
+.pf section {
+  padding: 22px 0 6px;
+}
+.pf section + section {
+  border-top: 1px solid var(--line);
+}
+.pf h2 {
+  margin: 0 0 4px;
+  font-size: 16px;
+  font-weight: 700;
+}
+.pf-lead {
+  margin: 0 0 8px;
+  color: var(--mute);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.pf-row {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 56px;
+  padding: 8px 0;
+}
+.pf-lab {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.pf-lab b,
+.pf-block b,
+.pf-mem-h b {
+  font-size: 14px;
+  font-weight: 600;
+}
+.pf-lab small,
+.pf-block small {
+  color: var(--mute);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.pf-ctl {
+  flex: none;
+  width: 190px;
+}
+.pf-ctl .arco-switch {
+  display: block;
+  margin-left: auto;
+}
+.pf-block {
+  display: grid;
+  gap: 4px;
+  padding: 10px 0 14px;
+}
+.pf-block .arco-textarea-wrapper {
+  margin-top: 6px;
+}
+.pf-mem {
+  margin: 4px 0 18px;
+}
+.pf-mem-h {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 0;
+}
+.pf-mem-h .arco-btn {
+  margin-left: auto;
+}
+.pf-mem ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.pf-mem li {
+  display: flex;
+  gap: 4px;
+  align-items: flex-start;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+.pf-mem li span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.pf-mem li small {
+  display: block;
+  color: var(--faint);
+  font-size: 11.5px;
+}
+.pf-mem li button {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--mute);
+  background: none;
+  cursor: pointer;
+}
+.pf-mem li button:hover {
+  background: var(--hover);
+}
+.pf-none {
+  margin: 0;
+  padding: 10px 0;
+  color: var(--faint);
+  font-size: 13px;
+  line-height: 1.7;
+}
+@media (max-width: 640px) {
+  .pf-row {
+    flex-wrap: wrap;
+  }
+  .pf-ctl {
+    width: 100%;
+  }
+}

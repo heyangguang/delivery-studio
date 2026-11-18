@@ -1,0 +1,11 @@
+- name: 归档必须在当前主库上检查
+  ansible.builtin.command:
+    argv: "{{ pg_psql + ['-d', 'postgres', '-c', 'SELECT pg_is_in_recovery()'] }}"
+  register: pg_recovery
+  changed_when: false
+  failed_when: pg_recovery.stdout | trim != 'f'
+
+- name: pgBackRest check
+  ansible.builtin.command:
+    argv: "{{ pg_backrest + ['check'] }}"
+  changed_when: false

@@ -1,0 +1,9 @@
+id: vip-failover
+title: VIP 漂移
+desc: 停止当前持有者的 keepalived，确认 VIP 在 15 秒内出现在另一台机器，再恢复。
+effect: disruptive
+when: count(roles.node) >= 2
+skip: 单节点没有可漂移的对端
+expect: VIP 转移到另一台机器，恢复后仍恰好一台持有。
+hosts: all
+run: {role: keepalived, tasks: test_failover}

@@ -1,0 +1,1535 @@
+/* Syntax colours, tuned per theme (Xcode-like, low saturation), scoped to .term. */
+.term {
+  --tk-cmd: #1d1d1f;
+  --tk-k: #9b2393;
+  --tk-s: #b5361b;
+  --tk-v: #3e48c4;
+  --tk-f: #0f68a0;
+  --tk-n: #1c00cf;
+  --tk-c: #707f8c;
+  --tk-o: #8e8e93;
+  --rb-term-bg: #fbfbfd;
+  --rb-term-bar: #f2f2f5;
+}
+body[arco-theme="dark"] .term {
+  --tk-cmd: #f5f5f7;
+  --tk-k: #ff7ab2;
+  --tk-s: #ff8170;
+  --tk-v: #b8a8ff;
+  --tk-f: #6bdfff;
+  --tk-n: #d9c97c;
+  --tk-c: #7f8c98;
+  --tk-o: #a1a1a6;
+  --rb-term-bg: #141417;
+  --rb-term-bar: #1c1c20;
+}
+
+.rb {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.rb-state,
+.rb-loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 0;
+  color: var(--mute);
+}
+.rb-loading {
+  display: block;
+}
+
+/* progress + resume */
+.rb-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.rb-progress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  font-weight: 550;
+}
+.rb-meter {
+  width: 140px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--sunken);
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.rb-meter span {
+  display: block;
+  height: 100%;
+  background: var(--ok);
+  border-radius: 3px;
+  transform-origin: left;
+  transition: transform 0.6s var(--spring);
+}
+.rb-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.link.quiet {
+  color: var(--mute);
+  font-weight: 400;
+}
+
+/* phase switcher */
+.rb-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  margin: -4px 0 -4px;
+  background: linear-gradient(var(--bg) 78%, transparent);
+}
+.rb-tabs .seg {
+  flex: 0 1 auto;
+  max-width: 100%;
+  overflow-x: auto;
+  height: 36px;
+  padding: 3px;
+  border-radius: 10px;
+}
+.rb-tabs .seg button {
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 7px;
+  font-size: 13px;
+}
+.rb-tabs .seg button.on {
+  color: var(--ink);
+  font-weight: 600;
+}
+.rb-tabs .seg-thumb {
+  top: 3px;
+  bottom: 3px;
+  border-radius: 7px;
+}
+.rb-tab-n {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1;
+  color: var(--mute);
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+  border: 0;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+.rb-tab-n svg {
+  width: 11px;
+  height: 11px;
+  stroke-width: 2.4;
+}
+.rb-tabs .seg button.on .rb-tab-n:not(.ok):not(.bad) {
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+}
+.rb-tab-n.part {
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+}
+.rb-tab-n.ok {
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 15%, transparent);
+}
+.rb-tab-n.bad {
+  color: var(--bad);
+  background: var(--bad-soft);
+}
+.rb-tab-prog {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--mute);
+  margin-left: 1px;
+}
+.rb-dl {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--mute);
+  text-decoration: none;
+  white-space: nowrap;
+  border-radius: 6px;
+  padding: 2px 4px;
+}
+.rb-dl:hover {
+  color: var(--brand-ink);
+}
+
+/* phase body; slides in from the side it was chosen from */
+.rb-phase {
+  animation: rb-in 0.42s var(--spring) backwards;
+}
+.rb-phase.dir-1 {
+  --from: 18px;
+}
+.rb-phase.dir--1 {
+  --from: -18px;
+}
+@keyframes rb-in {
+  from {
+    opacity: 0;
+    transform: translateX(var(--from, 0));
+  }
+}
+.rb-phase-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 6px 0 14px;
+}
+.rb-phase-head h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.rb-tag {
+  font-size: 12px;
+  color: var(--mute);
+  background: var(--sunken);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 7px;
+}
+.rb-phase-head .faint {
+  margin-left: auto;
+}
+
+/* step timeline */
+.rsteps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.rstep {
+  --dot: 26px;
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--dot) minmax(0, 1fr);
+  gap: 14px;
+  padding: 0 0 22px;
+}
+.rstep:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  left: calc(var(--dot) / 2 - 1px);
+  top: calc(var(--dot) + 4px);
+  bottom: 4px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--line);
+  transition: background-color 0.4s;
+}
+.rstep.done:not(:last-child)::before {
+  background: color-mix(in srgb, var(--ok) 40%, transparent);
+}
+.rstep.failed:not(:last-child)::before {
+  background: color-mix(in srgb, var(--bad) 36%, transparent);
+}
+.rstep.rstep-flash {
+  border-radius: var(--r-sm);
+  background: var(--brand-soft);
+  box-shadow: 0 0 0 6px var(--brand-soft);
+}
+.rstep-check {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  width: var(--dot);
+  height: var(--dot);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--mute);
+  background: var(--surface);
+  border: 1.5px solid var(--line-strong);
+  transition: background-color 0.25s, border-color 0.25s, color 0.25s, transform 0.25s var(--spring), box-shadow 0.3s;
+}
+.rstep-check:hover {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+.rstep-check:active {
+  transform: scale(0.9);
+}
+.rstep-check:focus-visible {
+  box-shadow: var(--ring);
+}
+.rstep.current .rstep-check {
+  border-color: var(--brand);
+  color: var(--brand-ink);
+  box-shadow: 0 0 0 4px var(--brand-soft);
+}
+.rstep.done .rstep-check {
+  background: var(--ok);
+  border-color: var(--ok);
+  color: #fff;
+  animation: pop 0.42s var(--spring);
+}
+.rstep-main {
+  min-width: 0;
+  padding-top: 2px;
+}
+.rstep-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  min-height: 22px;
+}
+.rstep-head b {
+  font-size: 14px;
+  font-weight: 600;
+}
+.rstep-head b.mono {
+  font-size: 13.5px;
+}
+.rstep.done .rstep-head b {
+  color: var(--mute);
+}
+.rstep-sum {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 46ch;
+  font-weight: 500 !important;
+}
+.host {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 9px 0 7px;
+  border-radius: 11px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-2);
+  background: var(--sunken);
+  border: 1px solid var(--line);
+}
+.hosts {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.hosts-then {
+  color: var(--faint);
+  font-size: 12px;
+}
+.host-ip {
+  color: var(--mute);
+  margin-left: 2px;
+}
+.host.p .host-ip {
+  color: var(--brand-ink);
+  opacity: 0.75;
+}
+.host i {
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+  background: var(--faint);
+}
+.host.p {
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+  border-color: var(--brand-line);
+}
+.host.p i {
+  background: var(--brand);
+}
+.tag-next,
+.tag-danger {
+  font-size: 11px;
+  font-weight: 650;
+  border-radius: 5px;
+  padding: 1px 6px;
+}
+.tag-next {
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+}
+.tag-danger {
+  color: var(--bad);
+  background: var(--bad-soft);
+}
+.rstep-toggle {
+  all: unset;
+  cursor: pointer;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--mute);
+  border-radius: 5px;
+  padding: 0 4px;
+}
+.rstep-toggle:hover {
+  color: var(--ink);
+}
+.rstep-toggle:focus-visible {
+  box-shadow: var(--ring);
+}
+.rstep-toggle svg {
+  transition: transform 0.3s var(--spring);
+}
+.rstep-toggle svg.rstep-chevron-open {
+  transform: rotate(180deg);
+}
+
+/* Collapse via grid rows: animates height without measuring. */
+.rstep-fold {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.42s var(--spring), opacity 0.3s;
+  opacity: 0;
+}
+.rstep-fold.open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+.rstep-fold > div {
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.rstep-fold.open > div {
+  padding: 6px 8px 12px;
+  margin: 0 -8px -12px;
+}
+.rstep-lead {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.75;
+  color: var(--ink-2);
+  max-width: 80ch;
+}
+.rstep-detail {
+  margin: -4px 0 0;
+  font-size: 13px;
+  color: var(--mute);
+}
+.rstep.danger .rstep-lead {
+  color: var(--bad);
+}
+.chip-code {
+  all: unset;
+  cursor: copy;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 1px 6px;
+  margin: 0 2px;
+  border-radius: 5px;
+  color: var(--ink);
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  overflow-wrap: anywhere;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+.chip-code:hover {
+  border-color: var(--brand-line);
+  background: var(--brand-soft);
+}
+.chip-code:focus-visible {
+  box-shadow: var(--ring);
+}
+.rstep-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.fchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  height: 26px;
+  padding: 0 10px 0 8px;
+  border-radius: 7px;
+  font-size: 12px;
+  text-decoration: none;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  transition: border-color 0.15s, transform 0.18s var(--spring);
+}
+.fchip:hover {
+  border-color: var(--brand);
+}
+.fchip:active {
+  transform: scale(0.97);
+}
+.fchip > svg {
+  color: var(--brand);
+  flex: none;
+}
+.fchip .faint {
+  flex: none;
+  white-space: nowrap;
+}
+.fchip .mono {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* terminal */
+.term {
+  border-radius: 10px;
+  background: var(--rb-term-bg, var(--term-bg));
+  border: 1px solid var(--line-strong);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  max-width: 980px;
+}
+.term-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 32px;
+  padding: 0 6px 0 12px;
+  background: var(--rb-term-bar, var(--sunken));
+  border-bottom: 1px solid var(--line);
+}
+.term-dots {
+  display: inline-flex;
+  gap: 5px;
+}
+.term-dots i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+.term-who {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--mute);
+}
+.term-lines {
+  font-style: normal;
+  font-family: var(--sans);
+  font-size: 11px;
+  color: var(--faint);
+}
+.term-copy {
+  all: unset;
+  cursor: pointer;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 550;
+  color: var(--ink-2);
+  transition: background-color 0.15s, color 0.2s;
+}
+.term-copy:hover {
+  background: var(--hover);
+}
+.term-copy:focus-visible {
+  box-shadow: var(--ring);
+}
+.term-copy.done {
+  color: var(--ok);
+}
+.term-copy.done svg {
+  animation: pop 0.36s var(--spring);
+}
+.term-body {
+  margin: 0;
+  padding: 10px 0 12px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--tk-cmd);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  tab-size: 2;
+}
+.term-body code {
+  font-family: inherit;
+}
+.term-more {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  height: 30px;
+  padding: 0 12px;
+  border-top: 1px solid var(--line);
+  background: var(--rb-term-bar, var(--sunken));
+  color: var(--mute);
+  font-family: var(--sans);
+  font-size: 12px;
+  transition: color 0.15s, background-color 0.15s;
+}
+.term-more:hover {
+  color: var(--brand-ink);
+  background: var(--hover);
+}
+.term-more:focus-visible {
+  box-shadow: var(--ring);
+}
+.term-more svg {
+  width: 12px;
+  height: 12px;
+  transition: transform 0.22s var(--spring);
+}
+.term-more svg.open {
+  transform: rotate(180deg);
+}
+/* each line wraps with a hanging indent so continuations read as one command */
+.ln {
+  position: relative;
+  display: block;
+  padding: 0 44px 0 calc(14px + 2ch);
+  text-indent: -2ch;
+}
+.ln:hover {
+  background: var(--hover);
+}
+.ln-copy {
+  all: unset;
+  cursor: pointer;
+  position: absolute;
+  right: 10px;
+  top: 2px;
+  width: 22px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 5px;
+  text-indent: 0;
+  color: var(--mute);
+  opacity: 0;
+  transition: opacity 0.15s, background-color 0.15s, color 0.15s;
+}
+.ln:hover .ln-copy,
+.ln-copy.done {
+  opacity: 1;
+}
+.ln-copy:hover {
+  background: var(--press);
+  color: var(--ink);
+}
+.ln-copy.done {
+  color: var(--ok);
+  background: var(--ok-soft);
+}
+.chip-code.copied {
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 35%, var(--line));
+  background: var(--ok-soft);
+}
+.rb-lead {
+  margin: -4px 0 16px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--mute);
+  max-width: 84ch;
+}
+.rstep-effect {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 550;
+  color: var(--mute);
+  background: var(--sunken);
+}
+.rstep-effect.e-change {
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+}
+.rstep-effect.e-disruptive {
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+.rstep-effect.e-resolved {
+  color: var(--ok);
+  background: var(--ok-soft);
+}
+.tk-cmd {
+  color: var(--tk-cmd);
+  font-weight: 650;
+}
+.tk-k {
+  color: var(--tk-k);
+  font-weight: 600;
+}
+.tk-s {
+  color: var(--tk-s);
+}
+.tk-v {
+  color: var(--tk-v);
+}
+.tk-f {
+  color: var(--tk-f);
+}
+.tk-n {
+  color: var(--tk-n);
+}
+.tk-c {
+  color: var(--tk-c);
+  font-style: italic;
+}
+.tk-o {
+  color: var(--tk-o);
+}
+
+/* facts, notes, tables inside a phase */
+/* configuration recap, folded: it repeats the delivery's own summary */
+.rb-summary {
+  margin: 0 0 18px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+.rb-summary summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 10px;
+}
+.rb-summary summary::-webkit-details-marker {
+  display: none;
+}
+.rb-summary summary:focus-visible {
+  box-shadow: var(--ring);
+}
+.rb-summary .chev {
+  color: var(--faint);
+  transform: rotate(-90deg);
+  transition: transform 0.3s var(--spring);
+}
+.rb-summary[open] .chev {
+  transform: none;
+}
+.rb-summary dl {
+  margin: 0;
+  padding: 0 14px 10px;
+  animation: fade 0.25s var(--ease-out);
+}
+.rb-summary dl > div {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+.rb-summary dt {
+  font-size: 12px;
+  color: var(--mute);
+  padding-top: 1px;
+}
+.rb-summary dd {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.rb-pairs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  font-size: 12.5px;
+  font-family: var(--mono);
+}
+.rb-pairs em {
+  font-style: normal;
+  font-family: var(--sans);
+  color: var(--faint);
+  margin-right: 6px;
+}
+.rb-pairs s {
+  margin-right: 2px;
+}
+.rb-note {
+  display: flex;
+  gap: 10px;
+  margin: 0 0 18px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--mute);
+}
+.rb-note p {
+  margin: 0;
+  max-width: 84ch;
+}
+.rb-note.caution {
+  padding: 10px 14px;
+  border-radius: 10px;
+  color: var(--ink-2);
+  background: var(--warn-soft);
+}
+.rb-note.caution > svg {
+  flex: none;
+  margin-top: 4px;
+  color: var(--warn);
+}
+.rb-table {
+  margin: 0 0 18px;
+  overflow-x: auto;
+}
+.rb-table table {
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.rb-table th,
+.rb-table td {
+  text-align: left;
+  padding: 6px 18px 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+.rb-table th {
+  color: var(--mute);
+  font-weight: 500;
+}
+.rb-nextphase {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  align-self: flex-end;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  margin-top: 6px;
+  padding: 0 14px 0 16px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  font-size: 13px;
+  transition:
+    border-color 0.2s,
+    background 0.2s,
+    transform 0.2s var(--spring);
+}
+.rb-nextphase:hover {
+  border-color: var(--brand-line);
+  background: var(--brand-soft);
+}
+.rb-nextphase:active {
+  transform: scale(0.97);
+}
+.rb-nextphase:focus-visible {
+  box-shadow: var(--ring);
+}
+.rb-nextphase span {
+  color: var(--mute);
+}
+.rb-nextphase b {
+  font-weight: 650;
+  color: var(--brand-ink);
+}
+.rb-nextphase b::after {
+  content: " →";
+}
+
+@media (max-width: 900px) {
+  .rb-tabs {
+    top: 52px;
+  }
+  .rb-dl {
+    display: none;
+  }
+  .rstep {
+    --dot: 24px;
+    gap: 10px;
+  }
+  .ln {
+    padding-right: 14px;
+  }
+  .ln-copy {
+    display: none;
+  }
+  .rb-meter {
+    width: 90px;
+  }
+}
+
+/* ---- execution record ---- */
+.rb-failed {
+  color: var(--bad);
+  background: var(--bad-soft);
+  border-radius: 4px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+.rstep.failed .rstep-check {
+  background: var(--bad);
+  border-color: var(--bad);
+  color: #fff;
+}
+.rstep-log {
+  all: unset;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  font-size: 12.5px;
+  color: var(--brand-ink);
+}
+.rstep-log:not(.rstep-ai):hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.rstep-log.rstep-ai,
+.rstep-log.rstep-ai:hover {
+  text-decoration: none;
+}
+.rstep-log:focus-visible {
+  box-shadow: var(--ring);
+  border-radius: 4px;
+}
+.rec {
+  margin-top: 10px;
+  padding: 9px 12px;
+  border-left: 3px solid var(--ok);
+  background: var(--ok-soft);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  font-size: 13px;
+}
+.rec-failed {
+  border-color: var(--bad);
+  background: var(--bad-soft);
+}
+.rec-skipped {
+  border-color: var(--faint);
+  background: var(--sunken);
+}
+.rec-top {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.rec-top .link {
+  margin-left: auto;
+}
+.rec p {
+  margin: 4px 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.rec-log {
+  margin-top: 8px;
+  position: relative;
+}
+.rec-log .link {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+}
+.rec-log pre {
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.55;
+  background: var(--code-bg);
+  border-radius: var(--r-sm);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.rec-form {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 720px;
+}
+.rec-area {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 110px;
+  resize: vertical;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.55;
+  border: 1px solid var(--line-strong);
+  background: var(--code-bg);
+  color: var(--ink);
+}
+.rec-area:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: var(--ring);
+}
+.rec-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.rec-tl {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0 0 0 4px;
+  display: flex;
+  flex-direction: column;
+}
+.rec-tl li {
+  position: relative;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 10px;
+  padding-bottom: 16px;
+}
+.rec-tl li::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 14px;
+  bottom: -2px;
+  width: 1px;
+  background: var(--line-strong);
+}
+.rec-tl li:last-child::before {
+  display: none;
+}
+.rec-tl i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  margin-top: 5px;
+  background: var(--ok);
+}
+.rec-tl .s-failed i {
+  background: var(--bad);
+}
+.rec-tl .s-skipped i,
+.rec-tl .s-clear i {
+  background: var(--faint);
+}
+.rec-tl b {
+  font-size: 13.5px;
+  margin-right: 8px;
+}
+.rec-chip {
+  font-size: 11.5px;
+  margin-right: 8px;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+.s-failed .rec-chip {
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+.s-skipped .rec-chip,
+.s-clear .rec-chip {
+  background: var(--sunken);
+  color: var(--mute);
+}
+.rec-tl p {
+  margin: 3px 0 0;
+  font-size: 12.5px;
+  color: var(--mute);
+}
+
+.gen-log {
+  margin-bottom: 10px;
+  font-size: 13px;
+}
+.gen-log summary {
+  cursor: pointer;
+  padding: 4px 0;
+}
+.gen-log ol {
+  margin: 6px 0 4px;
+  padding-left: 20px;
+  color: var(--mute);
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+.rstep-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+}
+.rstep-acts > .rstep-log {
+  margin-top: 10px;
+}
+.rstep-acts > .rec-form {
+  flex: 1 1 100%;
+}
+.rstep-ai-badge {
+  padding: 1px 7px;
+  border-radius: 4px;
+  font-size: 11.5px;
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+}
+.rstep-before {
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: var(--mute);
+}
+.rstep-before summary {
+  cursor: pointer;
+}
+/* how a step went */
+.rb-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+}
+.rb-q {
+  margin-right: 4px;
+  color: var(--mute);
+  font-size: 12.5px;
+}
+.rb-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  color: var(--ink-2);
+  font: 12.5px var(--sans);
+  background: var(--surface);
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    transform 0.12s var(--ease-out);
+}
+.rb-btn:hover:not(:disabled) {
+  border-color: var(--ink-2);
+}
+.rb-btn:active:not(:disabled) {
+  transform: scale(0.96);
+}
+.rb-btn.ok:hover:not(:disabled) {
+  border-color: var(--ok);
+  color: var(--ok);
+  background: var(--ok-soft);
+}
+.rb-btn.bad:hover {
+  border-color: var(--bad);
+  color: var(--bad);
+  background: var(--bad-soft);
+}
+.rb-btn:focus-visible,
+.rb-link:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+.rb-link {
+  padding: 0 6px;
+  border: 0;
+  color: var(--mute);
+  font: 12.5px var(--sans);
+  background: none;
+  cursor: pointer;
+}
+.rb-link:hover {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.rb-bar .rb-ask {
+  margin: 0 0 0 auto;
+}
+.rb-form {
+  display: flex;
+  flex: 1 1 100%;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--ok);
+  border-radius: 0 12px 12px 0;
+  background: var(--surface-2);
+  animation: ad-rise 0.22s var(--ease-out) both;
+}
+.rb-form.m-failed {
+  border-left-color: var(--bad);
+}
+.rb-form.m-skipped {
+  border-left-color: var(--idle);
+}
+.rb-form-h {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+.rb-done {
+  flex: 1 1 100%;
+}
+.rb-done-acts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin-top: 8px;
+}
+.rb-done-acts .rstep-log {
+  margin-top: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .rb-form {
+    animation: none;
+  }
+}
+
+/* how to get back from a step: closed by default, so it is there when needed without crowding the runbook */
+.rstep-rb {
+  margin-top: 6px;
+  font-size: 13px;
+}
+.rstep-rb summary {
+  width: fit-content;
+  color: var(--mute);
+  cursor: pointer;
+  list-style: none;
+}
+.rstep-rb summary::before {
+  content: "↩ ";
+}
+.rstep-rb summary:hover {
+  color: var(--ink);
+}
+.rstep-rb[open] summary {
+  color: var(--ink);
+  font-weight: 600;
+}
+.rstep-rb p,
+.rstep-rb ul {
+  margin: 6px 0 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--rail);
+  color: var(--ink-2);
+  line-height: 1.65;
+}
+.rstep-rb ul {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.rstep-rb li {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.rstep-rb li.none span {
+  color: var(--warn);
+}
+
+/* screenshots next to a step's output */
+.rb-form.dragging {
+  outline: 2px dashed var(--brand);
+  outline-offset: 4px;
+  border-radius: var(--r-sm);
+}
+.shots-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.shots-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.shots-add {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--ink-2);
+  background: transparent;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+.shots-add:hover {
+  color: var(--brand);
+  border-color: var(--brand);
+}
+.shots-add:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+.shots {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.shots-row .shots {
+  margin-top: 0;
+}
+.shot {
+  position: relative;
+}
+.shot img {
+  display: block;
+  height: 84px;
+  max-width: 180px;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+}
+.rec .shot img {
+  height: 110px;
+  max-width: 240px;
+}
+.shot a:focus-visible img {
+  box-shadow: var(--ring);
+}
+.shot-x {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  font-size: 11px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  cursor: pointer;
+}
+.shot-x:hover {
+  color: var(--bad);
+  border-color: var(--bad);
+}
+
+.rb-logs {
+  margin: 0 0 12px;
+  font-size: 13px;
+}
+.rb-logs summary {
+  cursor: pointer;
+  color: var(--ink-2);
+}
+.rb-logs ul {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.rb-logs li {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.rb-log-r {
+  font-size: 12px;
+  font-weight: 600;
+}
+.rb-log-r.ok {
+  color: var(--ok);
+}
+.rb-log-r.bad {
+  color: var(--bad);
+}
+
+.rec-resolved {
+  border-color: var(--ok);
+  background: var(--ok-soft);
+}
+.rec- {
+  border-color: var(--faint);
+  background: var(--sunken);
+}
+.rb-kept {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.rb-clear p {
+  margin: 0 0 8px;
+}
+.link.danger {
+  color: var(--bad);
+}
+
+/* the version of a step a sync replaced */
+.rstep-old {
+  margin: 8px 0 10px;
+  border-left: 3px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+.rstep-old-head {
+  all: unset;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.rstep-old-head s {
+  color: var(--faint);
+}
+.rstep-old-head .link {
+  margin-left: auto;
+}
+.rstep-old-tag {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--mute);
+  background: var(--sunken, var(--hover));
+}
+.rstep-old-body {
+  padding: 0 12px 10px;
+  opacity: 0.75;
+}
+.rstep-old-body pre,
+.rstep-old-body .rec p {
+  text-decoration: line-through;
+  text-decoration-color: var(--faint);
+}
+.rstep-old-why {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+  padding: 0 12px 9px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+.rstep-old-why b {
+  font-weight: 600;
+}
+.rstep-old-reasons {
+  flex: 1 1 100%;
+}
+.rstep-old-reasons ul {
+  margin: 2px 0 0;
+  padding-left: 18px;
+}
+
+/* Inapplicable steps are reference information, separate from execution actions. */
+.rb-note.rb-skipped { margin: 20px 0 16px; padding: 0; list-style: none; }
+.rb-skipped details { border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); overflow: hidden; }
+.rb-skipped summary { display: flex; align-items: center; gap: 8px; padding: 14px 16px; cursor: pointer; list-style: none; font-size: 13px; color: var(--ink-2); }
+.rb-skipped summary::-webkit-details-marker { display: none; }
+.rb-skipped summary:focus-visible { outline: 2px solid var(--brand-ink); outline-offset: -3px; }
+.rb-skipped-arrow { flex: none; transform: rotate(-90deg); transition: transform .15s; }
+.rb-skipped details[open] .rb-skipped-arrow { transform: rotate(0); }
+.rb-skipped-count { flex: none; white-space: nowrap; color: var(--mute); font-size: 12px; }
+.rb-skipped-toggle { margin-left: auto; flex: none; white-space: nowrap; color: var(--brand-ink); }
+.rb-skipped .when-open, .rb-skipped details[open] .when-closed { display: none; }
+.rb-skipped details[open] .when-open { display: inline; }
+.rb-skipped .rb-skipped-help { margin: 0; padding: 0 16px 12px; color: var(--mute); font-size: 12px; line-height: 1.6; }
+.rb-skipped-list { padding: 0 16px 4px; margin: 0; list-style: none; }
+.rb-skipped-list > li { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(0, 2fr); gap: 12px 20px; padding: 12px 0; border-top: 1px solid var(--line); align-items: start; }
+.rb-skipped-name { display: grid; gap: 3px; min-width: 0; }
+.rb-skipped-name strong { color: var(--ink-2); font-size: 13px; font-weight: 500; }
+.rb-skipped-name code { font-size: 11px; color: var(--mute); overflow-wrap: anywhere; }
+.rb-skipped-list > li > p { margin: 0; font-size: 13px; color: var(--mute); line-height: 1.6; overflow-wrap: anywhere; }
+@media (max-width: 640px) {
+ .rb-skipped summary { padding: 12px; gap: 6px; flex-wrap: wrap; }
+ .rb-skipped-list > li { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+}
+.rb-note.rb-skipped { display: block; }
+
+.rstep-toggle { flex-shrink: 0; white-space: nowrap; min-height: 28px; padding: 0 8px; gap: 6px; }
+.rstep-toggle > svg { width: 14px; height: 14px; flex: none; padding: 0; border: 0; background: transparent; }
+
+@media (prefers-reduced-motion: reduce) {
+  .rb-phase,
+  .rstep.done .rstep-check,
+  .term-copy.done svg,
+  .rb-summary dl,
+  .rb-form {
+    animation: none;
+  }
+  .rb-tab-n,
+  .rb-meter span,
+  .rstep:not(:last-child)::before,
+  .rstep-check,
+  .rstep-toggle svg,
+  .rstep-fold,
+  .chip-code,
+  .fchip,
+  .term-copy,
+  .term-more,
+  .term-more svg,
+  .ln-copy,
+  .rb-summary .chev,
+  .rb-nextphase,
+  .rb-btn,
+  .rb-skipped-arrow {
+    transition: none;
+  }
+}

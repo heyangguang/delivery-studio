@@ -1,0 +1,64 @@
+schema: mwpack/v1
+component: redis
+short: redis
+title: Redis
+category: 缓存
+icon: cache
+color: red
+summary: Redis 7.2（官方仓库）。没有从库时是单节点；有从库时是一主多从加哨兵（Sentinel）高可用，哨兵与实例同机运行。默认不持久化，按缓存使用。
+tags: [缓存, 高可用, 哨兵]
+provides: [kv-endpoint]
+data_volume: true
+detail:
+    tagline: 一主二从加三哨兵，故障时自动切换
+    scale: 1 主 + 任意从库
+    capabilities:
+        - {name: 拓扑, text: 1 主 0–4 从；有从库时每台同时运行一个哨兵，主库故障由哨兵多数派授权后自动切换}
+        - {name: 复制, text: 从库直连主库异步复制，只读；默认无盘复制，不因复制落盘}
+        - {name: 内存, text: 设置内存上限与淘汰策略，默认 allkeys-lru，按缓存使用}
+        - {name: 持久化, text: 默认不持久化，可选 RDB 或 AOF；不持久化时节点重启即清空数据}
+        - {name: 认证, text: 一个随机密码，同时用于客户端认证、复制认证和哨兵连实例，保存在控制节点}
+        - {name: 日志, text: 按天切割，保留天数与单文件上限可调}
+    includes:
+        - {name: 部署与验收手册, text: 命令已按本次配置填好，含故障转移、手动切换、日志切割等验收}
+        - {name: 离线软件仓库, text: 现场无需外网}
+    limits:
+        - 默认不持久化：任意节点重启即清空该节点全部数据，部署前须与业务确认接受缓存语义
+        - 不持久化时，含主库的机器重启前必须先停止服务并确认哨兵已指向其他节点，否则主库以空数据回归会清空整个集群
+        - 哨兵没有单独的密码，靠网络隔离保护 26379 端口，请只对集群节点、应用网段和运维网段放行
+        - 哨兵与实例会改写各自的配置文件（哨兵追加节点信息，故障切换后实例配置里出现 replicaof），重跑部署不会覆盖已有配置
+        - 当前版本不支持集群分片（Redis Cluster）与 TLS
+    presets:
+        - {$file: manifest/schemes/single.yaml}
+        - {$file: manifest/schemes/standard.yaml}
+operations: {$file: manifest/common/operations.yaml}
+roles: {$file: manifest/common/roles.yaml}
+flows:
+    - {id: replication, title: 主从复制, kind: replication, from: primary, to: replica, when: "count(roles.replica) > 0", sync: "false"}
+groups: {$file: manifest/common/groups.yaml}
+params: {$file: manifest/common/params.yaml}
+rules: {$file: manifest/common/rules.yaml}
+ports: {$file: manifest/common/ports.yaml}
+secrets: {$file: manifest/common/secrets.yaml}
+versions: {$file: manifest/common/versions.yaml}
+lifecycle:
+    install: {$file: manifest/actions/lifecycle/install.yaml}
+    configure: {$file: manifest/actions/lifecycle/configure.yaml}
+    start: {$file: manifest/actions/lifecycle/start.yaml}
+    verify: {$file: manifest/actions/lifecycle/verify.yaml}
+tests:
+    - {$file: manifest/actions/tests/replication.yaml}
+    - {$file: manifest/actions/tests/auth.yaml}
+    - {$file: manifest/actions/tests/persistence-off.yaml}
+    - {$file: manifest/actions/tests/failover.yaml}
+    - {$file: manifest/actions/tests/manual-switch.yaml}
+    - {$file: manifest/actions/tests/logrotate.yaml}
+cleanup:
+    - {$file: manifest/actions/cleanup/inspect.yaml}
+    - {$file: manifest/actions/cleanup/clean-keys.yaml}
+# Explicit shared implementation dependencies; all other source files are private.
+shared_files:
+    - roles/redis/tasks/_find_master.yml
+    - roles/redis/tasks/_wait_ready.yml
+    - roles/redis/tasks/test_clean.yml
+    - roles/redis/tasks/topology.yml

@@ -1,0 +1,19 @@
+id: full-backup
+title: pgBackRest 全量备份
+desc: 在初始主库节点用 pgBackRest 建立一次真实的全量备份；该节点须是当前主库，备份仓库在各节点本地。
+effect: change
+hosts: first:primary
+expect: 备份时间随数据量增长。
+inputs:
+    timeout:
+        type: int
+        value: 7200
+preconditions:
+    - mw_step_inputs.timeout > 0
+postconditions:
+    - pg_test_result.rc == 0
+run:
+    role: patroni
+    tasks: test_full_backup
+    vars:
+        pg_test: full-backup

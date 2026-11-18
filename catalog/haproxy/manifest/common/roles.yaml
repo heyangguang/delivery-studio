@@ -1,0 +1,1 @@
+- {name: balancer, title: 负载均衡, min: 1, default: 2}

@@ -1,0 +1,11 @@
+# Managed by Middleware Hub for {{ mw_cluster.id }}/{{ mw.id }}. Do not edit by hand.
+{{ rd_dir }}/log/redis-server.log {{ rd_dir }}/log/redis-sentinel.log {
+    daily
+    rotate {{ mw.params.logrotate_days }}
+    maxsize {{ mw.params.logrotate_maxsize_bytes }}
+    missingok
+    notifempty
+    compress
+    delaycompress
+    create 0660 redis redis
+}

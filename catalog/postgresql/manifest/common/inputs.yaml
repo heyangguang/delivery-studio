@@ -1,0 +1,4 @@
+- name: tls
+  label: 服务器证书、私钥与 CA
+  kind: tls-bundle
+  when: params.tls

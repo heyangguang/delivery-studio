@@ -1,0 +1,25 @@
+schema: mwpack/v1
+component: external-lb
+short: elb
+title: 外部负载均衡（云 ELB / 硬件）
+category: 负载均衡
+icon: cloud
+color: amber
+summary: 由客户或云平台运维的负载均衡。本平台不部署它，只生成需要在其上配置的监听、后端与健康检查清单。
+tags: [负载均衡, 外部]
+kind: external
+provides: [l4-lb]
+detail:
+    tagline: 你来配置，我们给出逐项清单
+    capabilities:
+        - {name: 配置单, text: 前端地址、后端列表、健康检查、放通端口全部列出}
+        - {name: 验收, text: 部署后可对该入口做连通与切换验证}
+    limits:
+        - 平台不调用云 API，不会创建或修改任何监听
+lb:
+    protocols: [tcp, http]
+    health: [tcp, http, tcp-script]
+groups: {$file: manifest/common/groups.yaml}
+params: {$file: manifest/common/params.yaml}
+rules: {$file: manifest/common/rules.yaml}
+versions: {$file: manifest/common/versions.yaml}

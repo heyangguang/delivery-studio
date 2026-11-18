@@ -1,0 +1,519 @@
+- key: deployment_mode
+  label: 部署方案
+  type: enum
+  options:
+    - legacy
+    - single
+    - replication
+    - patroni
+  default: legacy
+  group: replication
+  hint: single：单机；replication：原生流复制、人工切换；patroni：自动高可用；legacy：仅用于保持旧交付行为。
+- key: pg_port
+  group: network
+  label: PostgreSQL 端口
+  type: port
+  default: 5432
+  restart: true
+- key: restapi_port
+  group: network
+  label: Patroni REST 端口
+  type: port
+  default: 8008
+  when: params.deployment_mode in ['legacy', 'patroni'] && count(roles.replica) > 0
+- key: client_cidr
+  group: network
+  label: 允许访问的客户端网段
+  type: cidr
+  required: true
+  hint: 写入 pg_hba，例如应用所在网段 10.0.1.0/24
+- key: extra_client_cidrs
+  group: network
+  label: 额外放通的网段
+  type: cidr-list
+  advanced: true
+  hint: 最多 8 个
+- key: replication
+  group: replication
+  label: 复制策略
+  type: enum
+  options:
+    - async
+    - quorum
+  default: quorum
+  when: params.deployment_mode in ['legacy', 'patroni'] && count(roles.replica) > 0
+  hint: quorum 为仲裁同步：至少确认数个从库确认才提交
+- key: sync_ack_count
+  group: replication
+  label: 同步确认数
+  type: int
+  default: 1
+  min: 1
+  max: 16
+  when: count(roles.replica) > 0 && params.replication == 'quorum'
+- key: sync_strict
+  group: replication
+  label: 严格同步
+  type: bool
+  default: false
+  when: count(roles.replica) > 0 && params.replication == 'quorum'
+  hint: 开启后从库不足时主库停止写入，宁可不可用也不丢数据
+- key: clonefrom_node
+  group: replication
+  label: 优先克隆来源节点
+  type: string
+  default: ''
+  pattern: ^$|^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$
+  when: params.deployment_mode in ['legacy', 'patroni'] && count(roles.replica) > 0
+  hint: 填写本实例的部署机器名（不是 IP）；留空不指定。仅该节点设置 clonefrom=true，健康时供其他节点优先获取基础备份；不改变已有流复制关系，不影响选主优先级
+- key: synchronous_commit
+  group: replication
+  label: 同步提交级别
+  type: enum
+  options:
+    - 'on'
+    - remote_apply
+    - remote_write
+    - local
+  default: 'on'
+  when: count(roles.replica) > 0 && params.replication == 'quorum'
+- key: patroni_ttl
+  group: patroni
+  label: 主库租约 TTL
+  type: int
+  unit: s
+  default: 30
+  min: 20
+  max: 120
+  when: params.deployment_mode in ['legacy', 'patroni'] && count(roles.replica) > 0
+- key: patroni_loop_wait
+  group: patroni
+  label: 循环间隔
+  type: int
+  unit: s
+  default: 10
+  min: 1
+  max: 30
+  when: params.deployment_mode in ['legacy', 'patroni'] && count(roles.replica) > 0
+- key: patroni_retry_timeout
+  group: patroni
+  label: 重试超时
+  type: int
+  unit: s
+  default: 10
+  min: 3
+  max: 30
+  when: params.deployment_mode in ['legacy', 'patroni'] && count(roles.replica) > 0
+- key: maximum_lag_on_failover
+  group: patroni
+  label: 故障切换允许的最大复制落后
+  type: int
+  unit: 字节
+  default: 1048576
+  min: 1
+  max: 1073741824
+  when: params.deployment_mode in ['legacy', 'patroni'] && count(roles.replica) > 0
+- key: tls
+  group: security
+  label: 启用 TLS
+  type: bool
+  default: true
+  hint: 需要客户提供证书、私钥和 CA
+- key: ssl_min_protocol_version
+  group: security
+  label: 最低 TLS 版本
+  type: enum
+  options:
+    - TLSv1.2
+    - TLSv1.3
+  default: TLSv1.2
+  when: params.tls
+- key: test_sslmode
+  group: security
+  label: 入口验收 sslmode
+  type: enum
+  options:
+    - disable
+    - allow
+    - prefer
+    - require
+    - verify-ca
+    - verify-full
+  default: verify-full
+  when: params.tls
+  hint: 仅控制入口功能验收客户端；verify-ca 校验 CA，verify-full 另校验身份。服务端启用 TLS 时仍拒绝明文，disable 将无法通过正向验收
+- key: test_tls_identity
+  group: security
+  label: 证书身份验收对象
+  type: enum
+  options:
+    - dns
+    - ip
+    - both
+  default: dns
+  when: params.tls && params.test_sslmode == 'verify-full'
+  hint: dns 验证指定域名；ip 验证入口 IP 和各节点 IP；both 分别验证两者。证书须覆盖所选身份；其他 sslmode 不检查身份
+- key: test_tls_name
+  group: security
+  label: 验收证书域名
+  type: string
+  default: ''
+  pattern: ^$|^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$
+  when: params.tls && params.test_sslmode == 'verify-full' && params.test_tls_identity != 'ip'
+  hint: 留空使用入口地址且必须为域名；节点直连也使用此名称校验证书，以节点 IP 建立连接
+- key: tde
+  group: security
+  label: 启用 TDE（透明数据加密）
+  type: bool
+  default: true
+  hint: 对表数据与 WAL 加密；密钥保存在本地文件，丢失无法恢复
+  when: params.deployment_mode != 'replication'
+- key: key_provider
+  group: security
+  label: TDE 密钥来源
+  type: enum
+  options:
+    - local-file
+  default: local-file
+  when: params.tde
+  hint: Vault 与云 KMS 暂未支持
+- key: app_user
+  group: security
+  label: 业务管理账户
+  type: string
+  pattern: ^[a-z_][a-z0-9_]{0,30}$
+  hint: 留空则不创建；密码自动生成并保存在控制节点
+- key: idle_in_transaction_session_timeout
+  group: security
+  label: 空闲事务超时
+  type: int
+  unit: ms
+  default: 0
+  min: 0
+  max: 86400000
+  advanced: true
+  hint: 0 不限制
+- key: max_connections
+  group: resource
+  label: 最大连接数
+  type: int
+  default: 800
+  min: 20
+  max: 10000
+  restart: true
+  hint: 按应用连接池总量设置
+- key: shared_buffers
+  group: resource
+  label: 共享缓冲区
+  type: size
+  default: 2GB
+  min: 128MB
+  max: 1TB
+  restart: true
+  hint: 建议内存的 25%
+- key: effective_cache_size
+  group: resource
+  label: 有效缓存估算
+  type: size
+  default: 6GB
+  min: 128MB
+  max: 4TB
+  hint: 建议内存的 50%–75%
+- key: maintenance_work_mem
+  group: resource
+  label: 维护操作内存
+  type: size
+  default: 256MB
+  min: 16MB
+  max: 8GB
+  hint: 约内存 / 16，不超过 1GB 为宜
+- key: work_mem
+  group: resource
+  label: 排序/哈希内存
+  type: size
+  default: 8MB
+  min: 64kB
+  max: 2GB
+  hint: 按单操作分配，注意与连接数相乘
+- key: wal_keep_size
+  group: wal
+  label: WAL 保留量
+  type: size
+  default: 1GB
+  min: 0MB
+  max: 1TB
+  hint: 备库中断后的追赶窗口
+- key: min_wal_size
+  group: wal
+  label: 最小 WAL 大小
+  type: size
+  default: 1GB
+  min: 32MB
+  max: 1TB
+- key: max_wal_size
+  group: wal
+  label: 最大 WAL 大小
+  type: size
+  default: 4GB
+  min: 64MB
+  max: 4TB
+  hint: 写入峰值越高越大
+- key: checkpoint_completion_target
+  group: wal
+  label: 检查点平滑系数
+  type: float
+  default: 0.9
+  min: 0.1
+  max: 1
+- key: archive_timeout
+  group: wal
+  label: 强制归档间隔
+  type: int
+  unit: s
+  default: 600
+  min: 60
+  max: 3600
+  hint: 影响 PITR 的最大数据丢失窗口
+- key: max_wal_senders
+  group: repl-tune
+  label: WAL 发送进程
+  type: int
+  default: 10
+  min: 4
+  max: 100
+  restart: true
+  hint: 不少于从库数 + 3
+- key: max_replication_slots
+  group: repl-tune
+  label: 复制槽上限
+  type: int
+  default: 10
+  min: 4
+  max: 100
+  restart: true
+  hint: 不少于从库数 + 3
+- key: hot_standby_feedback
+  group: repl-tune
+  label: 热备反馈
+  type: bool
+  default: true
+  hint: 减少从库查询冲突
+- key: log_min_duration_statement
+  group: logging
+  label: 慢 SQL 阈值
+  type: int
+  unit: ms
+  default: 1000
+  min: -1
+  max: 3600000
+  hint: -1 关闭
+- key: log_connections
+  group: logging
+  label: 记录连接
+  type: bool
+  default: true
+- key: log_disconnections
+  group: logging
+  label: 记录断开
+  type: bool
+  default: true
+- key: log_checkpoints
+  group: logging
+  label: 记录检查点
+  type: bool
+  default: true
+- key: log_lock_waits
+  group: logging
+  label: 记录锁等待
+  type: bool
+  default: false
+  advanced: true
+- key: timezone
+  group: locale
+  label: 数据库时区
+  type: enum
+  options:
+    - Asia/Shanghai
+    - UTC
+    - Asia/Hong_Kong
+    - Asia/Singapore
+    - Europe/Berlin
+  default: Asia/Shanghai
+- key: datestyle
+  group: locale
+  label: 日期显示格式
+  type: enum
+  options:
+    - iso, ymd
+    - iso, mdy
+    - iso, dmy
+  default: iso, ymd
+  hint: 只影响日期的显示与解析顺序，不影响存储
+- key: initdb_locale
+  group: locale
+  label: 初始化 Locale
+  type: enum
+  options:
+    - C.UTF-8
+    - C
+  default: C.UTF-8
+  hint: 仅首次初始化生效
+- key: backup_retention_full
+  group: backup
+  label: 全量备份保留数
+  type: int
+  default: 2
+  min: 1
+  max: 12
+  hint: 保留的是备份份数而不是天数；这里只配置策略，不创建定时任务
+- key: backup_process_max
+  group: backup
+  label: 并行进程数
+  type: int
+  default: 2
+  min: 1
+  max: 8
+- key: compress_type
+  group: backup
+  label: 压缩算法
+  type: enum
+  options:
+    - gz
+    - lz4
+    - zst
+    - bz2
+    - none
+  default: gz
+- key: compress_level
+  group: backup
+  label: 压缩级别
+  type: int
+  default: 6
+  min: 0
+  max: 9
+  when: params.compress_type != 'none'
+- key: retention_diff
+  group: backup
+  label: 差异备份保留数
+  type: int
+  default: 0
+  min: 0
+  max: 30
+  advanced: true
+  hint: 0 按全量策略
+- key: apply_baseline
+  group: os
+  label: 写入内核与限额基线
+  type: bool
+  default: true
+- key: vm_swappiness
+  group: os
+  label: vm.swappiness
+  type: int
+  default: 1
+  min: 0
+  max: 100
+  when: params.apply_baseline
+- key: vm_overcommit_memory
+  group: os
+  label: vm.overcommit_memory
+  type: enum
+  options:
+    - '0'
+    - '1'
+    - '2'
+  default: '2'
+  when: params.apply_baseline
+- key: vm_overcommit_ratio
+  group: os
+  label: vm.overcommit_ratio
+  type: int
+  unit: '%'
+  default: 90
+  min: 50
+  max: 100
+  when: params.apply_baseline
+- key: vm_dirty_ratio
+  group: os
+  label: vm.dirty_ratio
+  type: int
+  unit: '%'
+  default: 10
+  min: 1
+  max: 80
+  when: params.apply_baseline
+- key: vm_dirty_background_ratio
+  group: os
+  label: vm.dirty_background_ratio
+  type: int
+  unit: '%'
+  default: 5
+  min: 1
+  max: 50
+  when: params.apply_baseline
+- key: nofile
+  group: os
+  label: 文件描述符上限
+  type: int
+  default: 65536
+  min: 4096
+  max: 1048576
+  when: params.apply_baseline
+- key: nproc
+  group: os
+  label: postgres 进程数上限
+  type: int
+  default: 65536
+  min: 4096
+  max: 1048576
+  advanced: true
+  when: params.apply_baseline
+- key: thp
+  group: os
+  label: 透明大页 THP
+  type: enum
+  options:
+    - never
+    - madvise
+    - keep
+  default: never
+  hint: keep 表示不修改
+  when: params.apply_baseline
+- key: tcp_keepalive_time
+  group: os
+  label: tcp_keepalive_time
+  type: int
+  unit: s
+  default: 60
+  min: 10
+  max: 7200
+  advanced: true
+  when: params.apply_baseline
+- key: tcp_keepalive_intvl
+  group: os
+  label: tcp_keepalive_intvl
+  type: int
+  unit: s
+  default: 10
+  min: 1
+  max: 300
+  advanced: true
+  when: params.apply_baseline
+- key: tcp_keepalive_probes
+  group: os
+  label: tcp_keepalive_probes
+  type: int
+  default: 6
+  min: 1
+  max: 30
+  advanced: true
+  when: params.apply_baseline
+- key: somaxconn
+  group: os
+  label: net.core.somaxconn
+  type: int
+  default: 4096
+  min: 128
+  max: 65535
+  advanced: true
+  when: params.apply_baseline

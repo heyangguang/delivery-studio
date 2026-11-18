@@ -1,0 +1,22 @@
+id: front-write-switchover
+title: 经入口持续写入并切换
+desc: 至少需要三台数据库节点。先检查执行节点与主库，若相同先切走并等待复制及入口恢复；测试期间只在另外两台成员之间切主并切回测试起始主库，执行节点不作为计划切换候选。经入口持续写入，重连后逐条核对已确认提交的写入都还在。会短暂中断连接；前置切主不自动撤销。
+scope: endpoint:writer
+effect: disruptive
+hosts: first:primary
+when: count(roles.replica) > 0
+skip: 单节点没有可切换的从库
+expect: 报告会给出确认的条数、丢失条数和重试次数。
+inputs:
+    timeout:
+        type: int
+        value: 7200
+preconditions:
+    - mw_step_inputs.timeout > 0
+postconditions:
+    - pg_test_result.rc == 0
+run:
+    role: patroni
+    tasks: test_front_write_switchover
+    vars:
+        pg_test: front-write-switchover

@@ -1,0 +1,95 @@
+- name: 内核参数
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/99-pg-ha.conf
+    mode: '0644'
+    content: |
+      vm.swappiness = {{ mw.params.vm_swappiness }}
+      vm.overcommit_memory = {{ mw.params.vm_overcommit_memory }}
+      vm.overcommit_ratio = {{ mw.params.vm_overcommit_ratio }}
+      vm.dirty_ratio = {{ mw.params.vm_dirty_ratio }}
+      vm.dirty_background_ratio = {{ mw.params.vm_dirty_background_ratio }}
+      net.ipv4.tcp_keepalive_time = {{ mw.params.tcp_keepalive_time }}
+      net.ipv4.tcp_keepalive_intvl = {{ mw.params.tcp_keepalive_intvl }}
+      net.ipv4.tcp_keepalive_probes = {{ mw.params.tcp_keepalive_probes }}
+      net.core.somaxconn = {{ mw.params.somaxconn }}
+  register: pg_sysctl
+
+- name: 使内核参数生效
+  ansible.builtin.command: sysctl --system
+  when: pg_sysctl.changed
+  changed_when: true
+
+- name: 内核参数的实际值应与计划一致
+  # Another file read later (a cloud image's own 99-*.conf, for instance) can silently win over ours.
+  ansible.builtin.shell: |
+    set -e
+    bad=0
+    for kv in "vm.swappiness={{ mw.params.vm_swappiness }}" "vm.overcommit_memory={{ mw.params.vm_overcommit_memory }}" "vm.overcommit_ratio={{ mw.params.vm_overcommit_ratio }}" "vm.dirty_ratio={{ mw.params.vm_dirty_ratio }}" "vm.dirty_background_ratio={{ mw.params.vm_dirty_background_ratio }}" "net.ipv4.tcp_keepalive_time={{ mw.params.tcp_keepalive_time }}" "net.ipv4.tcp_keepalive_intvl={{ mw.params.tcp_keepalive_intvl }}" "net.ipv4.tcp_keepalive_probes={{ mw.params.tcp_keepalive_probes }}" "net.core.somaxconn={{ mw.params.somaxconn }}"; do
+      k=${kv%%=*}; want=${kv#*=}; got=$(sysctl -n "$k")
+      if [ "$got" != "$want" ]; then
+        echo "$k 实际为 $got，计划为 $want；以下文件里也设置了它："
+        grep -rHs "^[[:space:]]*$k[[:space:]]*=" /etc/sysctl.conf /etc/sysctl.d /usr/lib/sysctl.d /run/sysctl.d || true
+        bad=1
+      fi
+    done
+    exit $bad
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: 资源限额
+  ansible.builtin.copy:
+    dest: /etc/security/limits.d/99-pg.conf
+    mode: '0644'
+    content: |
+      postgres soft nofile {{ mw.params.nofile }}
+      postgres hard nofile {{ mw.params.nofile }}
+      postgres soft nproc {{ mw.params.nproc }}
+      postgres hard nproc {{ mw.params.nproc }}
+
+- name: 服务限额目录
+  ansible.builtin.file:
+    path: "/etc/systemd/system/{{ item }}.service.d"
+    state: directory
+    mode: '0755'
+  loop: ["{{ 'patroni' if pg_ha else 'postgresql@' }}"]
+
+- name: 服务限额
+  ansible.builtin.copy:
+    dest: "/etc/systemd/system/{{ 'patroni' if pg_ha else 'postgresql@' }}.service.d/limits.conf"
+    mode: '0644'
+    content: |
+      [Service]
+      LimitNOFILE={{ mw.params.nofile }}
+      LimitNPROC={{ mw.params.nproc }}
+
+- name: 透明大页
+  when: mw.params.thp != 'keep'
+  block:
+    - name: 检查内核是否提供透明大页开关
+      ansible.builtin.stat:
+        path: /sys/kernel/mm/transparent_hugepage/enabled
+      register: pg_thp_sys
+
+    - name: 写入透明大页设置服务
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/middleware-thp.service
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Set transparent hugepages for PostgreSQL
+          Before={{ 'patroni' if pg_ha else 'postgresql@17-main' }}.service
+          [Service]
+          Type=oneshot
+          ExecStart=/bin/sh -c "echo {{ mw.params.thp }} > /sys/kernel/mm/transparent_hugepage/enabled; echo {{ mw.params.thp }} > /sys/kernel/mm/transparent_hugepage/defrag"
+          [Install]
+          WantedBy=multi-user.target
+      when: pg_thp_sys.stat.exists
+
+    - name: 启用并立即应用
+      ansible.builtin.systemd:
+        name: middleware-thp.service
+        enabled: true
+        state: started
+        daemon_reload: true
+      when: pg_thp_sys.stat.exists

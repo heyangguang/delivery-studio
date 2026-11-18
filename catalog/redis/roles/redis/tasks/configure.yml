@@ -1,0 +1,113 @@
+- name: 状态目录
+  ansible.builtin.file:
+    path: "{{ rd_state }}"
+    state: directory
+    mode: '0700'
+
+- name: 是否已经写入过实例与哨兵配置
+  ansible.builtin.stat:
+    path: "{{ rd_state }}/configured"
+  register: rd_configured
+
+- name: 首次配置前停止安装时可能自启的服务（先哨兵后实例）
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: stopped
+  loop: "{{ ['redis-sentinel', 'redis-server'] if rd_ha | bool else ['redis-server'] }}"
+  when: not rd_configured.stat.exists
+
+- name: 备份包自带配置
+  ansible.builtin.copy:
+    src: "/etc/redis/{{ item }}"
+    dest: "/etc/redis/{{ item }}.pkg-orig"
+    remote_src: true
+    force: false
+    owner: root
+    group: root
+    mode: '0644'
+  loop: "{{ ['redis.conf', 'sentinel.conf'] if rd_ha | bool else ['redis.conf'] }}"
+  when: not rd_configured.stat.exists
+
+- name: 写入 redis.conf（只在首次；之后实例会自己改写它）
+  ansible.builtin.template:
+    src: redis.conf.j2
+    dest: /etc/redis/redis.conf
+    owner: root
+    group: redis
+    mode: '0640'
+  when: not rd_configured.stat.exists
+  no_log: true
+
+- name: 写入 sentinel.conf（只在首次；之后哨兵会自己改写它）
+  ansible.builtin.template:
+    src: sentinel.conf.j2
+    dest: /etc/redis/sentinel.conf
+    owner: redis
+    group: redis
+    mode: '0640'
+  when: rd_ha | bool and not rd_configured.stat.exists
+  no_log: true
+
+- name: 记录已写入配置
+  ansible.builtin.copy:
+    dest: "{{ rd_state }}/configured"
+    content: "{{ mw_cluster.id }}/{{ mw.id }}\n"
+    mode: '0600'
+  when: not rd_configured.stat.exists
+
+- name: systemd 覆盖目录
+  ansible.builtin.file:
+    path: "/etc/systemd/system/{{ item }}.service.d"
+    state: directory
+    mode: '0755'
+  loop: "{{ ['redis-server', 'redis-sentinel'] if rd_ha | bool else ['redis-server'] }}"
+
+- name: redis-server 覆盖项
+  # Restart=no only while nothing is persisted: a crashed instance that restarted by itself would come back empty and,
+  # as the primary, wipe the replicas that follow it.
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/redis-server.service.d/redis-local.conf
+    mode: '0644'
+    content: |
+      [Service]
+      {% if rd_persist == 'none' %}
+      Restart=no
+      {% endif %}
+      ReadWritePaths=-{{ rd_dir }}
+      LimitNOFILE={{ mw.params.nofile }}
+
+- name: redis-sentinel 覆盖项
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/redis-sentinel.service.d/redis-local.conf
+    mode: '0644'
+    content: |
+      [Service]
+      ReadWritePaths=-{{ rd_dir }}
+      LimitNOFILE={{ mw.params.nofile }}
+  when: rd_ha | bool
+
+- name: 日志切割配置
+  ansible.builtin.template:
+    src: logrotate.j2
+    dest: /etc/logrotate.d/redis-local
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: 日志切割干跑应无错误
+  ansible.builtin.command: logrotate -d /etc/logrotate.d/redis-local
+  register: rd_logrotate
+  changed_when: false
+  failed_when: rd_logrotate.rc != 0 or 'error' in (rd_logrotate.stderr | lower)
+
+- name: 重新加载 systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: 核对 systemd 覆盖项实际生效
+  ansible.builtin.command: "systemctl show redis-server -p Restart -p LimitNOFILE"
+  register: rd_show
+  changed_when: false
+  failed_when: >-
+    ('LimitNOFILE=' ~ mw.params.nofile) not in rd_show.stdout or
+    (rd_persist == 'none' and 'Restart=no' not in rd_show.stdout)

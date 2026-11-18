@@ -1,0 +1,21 @@
+id: physical-backup
+title: 从库物理备份
+desc: 用 pg_basebackup 从一台从库取一份独立的物理备份，放在控制节点的测试目录，不占用 pgBackRest 仓库。
+effect: change
+hosts: first:primary
+when: params.deployment_mode in ['legacy', 'single'] && (count(roles.replica) > 0)
+skip: 单节点没有从库可用来备份
+expect: 备份期间从库继续服务。
+inputs:
+    timeout:
+        type: int
+        value: 7200
+preconditions:
+    - mw_step_inputs.timeout > 0
+postconditions:
+    - pg_test_result.rc == 0
+run:
+    role: postgresql
+    tasks: test_physical_backup
+    vars:
+        pg_test: physical-backup

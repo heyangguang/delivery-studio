@@ -1,0 +1,59 @@
+- name: 测试目录
+  ansible.builtin.file:
+    path: "/opt/middleware/{{ mw_cluster.id }}/{{ mw.id }}"
+    state: directory
+    mode: '0700'
+
+- name: 分发公共测试运行库
+  ansible.builtin.copy:
+    src: pgcommon.py
+    dest: "/opt/middleware/{{ mw_cluster.id }}/{{ mw.id }}/pgcommon.py"
+    mode: '0600'
+
+- name: 分发测试程序
+  ansible.builtin.copy:
+    src: pgstep_pitr.py
+    dest: "/opt/middleware/{{ mw_cluster.id }}/{{ mw.id }}/pgstep_pitr.py"
+    mode: '0700'
+
+- name: 分发测试配置（含账户密码）
+  ansible.builtin.template:
+    src: pgstep_pitr.json.j2
+    dest: "/opt/middleware/{{ mw_cluster.id }}/{{ mw.id }}/pgstep_pitr.json"
+    mode: '0600'
+  no_log: true
+
+- name: 执行测试并记录结果
+  block:
+
+    - name: 测试日志位置（在实际执行节点查看）
+      ansible.builtin.debug:
+        msg:
+          - "执行节点={{ inventory_hostname }}，测试={{ pg_test }}"
+          - "异步执行期间终端不会实时显示脚本输出；在本节点另开终端执行：tail -n 80 -F /opt/middleware/{{ mw_cluster.id }}/{{ mw.id }}/pgstep_pitr.log"
+
+    - name: 执行 {{ pg_test }}
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -u
+          - "/opt/middleware/{{ mw_cluster.id }}/{{ mw.id }}/pgstep_pitr.py"
+          - "/opt/middleware/{{ mw_cluster.id }}/{{ mw.id }}/pgstep_pitr.json"
+          - "{{ inventory_hostname }}"
+          - "{{ pg_test }}"
+      environment:
+        PYTHONUNBUFFERED: '1'
+      async: "{{ mw_step_inputs.timeout }}"
+      poll: 5
+      register: pg_test_result
+      changed_when: pg_test not in ['ha-check', 'rewind-check', 'inspect', 'backup-info']
+  always:
+    - name: 测试输出（成功或失败均显示）
+      ansible.builtin.debug:
+        msg:
+          - "执行节点={{ inventory_hostname }}，测试={{ pg_test }}，rc={{ pg_test_result.rc | default('未取得退出码') }}"
+          - "{{ pg_test_result.stdout_lines | default([]) }}"
+          - "{{ pg_test_result.stderr_lines | default([]) }}"
+          - "{{ pg_test_result.msg | default('') }}"
+          - "完整脚本日志：/opt/middleware/{{ mw_cluster.id }}/{{ mw.id }}/pgstep_pitr.log（在执行节点查看）"
+      when: pg_test_result is defined

@@ -1,0 +1,9 @@
+- name: 分发证书、私钥与 CA
+  ansible.builtin.copy:
+    src: "{{ mw.inputs.tls }}/{{ item }}"
+    dest: "/etc/pki/pg/{{ item }}"
+    owner: postgres
+    group: postgres
+    mode: '0600'
+  loop: [server.crt, server.key, ca.crt]
+  no_log: true

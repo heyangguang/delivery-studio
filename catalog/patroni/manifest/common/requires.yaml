@@ -1,0 +1,6 @@
+- capability: postgresql-database
+  title: 被管理的 PostgreSQL
+- capability: dcs
+  title: 协调服务（DCS）
+  default_impl: etcd
+  placement: same_hosts

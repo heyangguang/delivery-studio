@@ -1,0 +1,72 @@
+overview: Redis 默认作为缓存使用：数据只在内存里，不落盘，写满内存时按淘汰策略丢弃旧键，节点重启即清空。有从库时，三个哨兵监控主库，主库故障时多数派授权其中一个从库升为主库，客户端必须通过哨兵查询当前主库地址，而不是写死 IP。日常关注：谁是主库、从库复制是否在线、哨兵是否达成仲裁、内存是否逼近上限、淘汰键数量、日志与磁盘。
+checks:
+    - title: 复制状态
+      hosts: 每台机器
+      cmd: REDISCLI_AUTH='<密码>' redis-cli -h 127.0.0.1 -p ${params.redis_port} INFO replication | grep -E 'role|master_link_status|connected_slaves'
+      expect: 恰好一台 role:master 且 connected_slaves 等于从库数；其余是 role:slave 且 master_link_status:up
+    - title: 哨兵仲裁
+      when: count(roles.replica) > 0
+      hosts: 任意一台机器
+      cmd: |
+        redis-cli -p ${params.sentinel_port} SENTINEL get-master-addr-by-name ${params.master_name}
+        redis-cli -p ${params.sentinel_port} SENTINEL ckquorum ${params.master_name}
+      expect: 第一条返回当前主库地址；ckquorum 以 OK 开头
+    - title: 内存与淘汰
+      hosts: 每台机器
+      cmd: REDISCLI_AUTH='<密码>' redis-cli -h 127.0.0.1 -p ${params.redis_port} INFO memory | grep -E 'used_memory_human|maxmemory_human|mem_fragmentation_ratio'
+      expect: used_memory 低于 maxmemory；持续有 evicted_keys 增长说明内存不够用，要评估扩容
+    - title: 服务与磁盘
+      hosts: 每台机器
+      cmd: |
+        systemctl is-active redis-server redis-sentinel
+        df -h ${params.data_dir}
+      expect: 都是 active（单节点没有哨兵，不会有 redis-sentinel）；数据盘使用率低于 80%（不持久化时磁盘只增长日志）
+tasks:
+    - title: 查看当前主库
+      when: count(roles.replica) > 0
+      cmd: redis-cli -p ${params.sentinel_port} SENTINEL get-master-addr-by-name ${params.master_name}
+    - title: 手动触发一次切换
+      when: count(roles.replica) > 0
+      cmd: redis-cli -p ${params.sentinel_port} SENTINEL failover ${params.master_name}
+      note: 会让客户端经历短暂的不可用，须在变更窗口执行；切换完成以哨兵日志出现 +switch-master 为准。选主按 replica-priority、复制偏移量、runid 择优，不是轮询
+    - title: 重启含主库的机器
+      when: count(roles.replica) > 0
+      cmd: |
+        systemctl stop redis-sentinel
+        systemctl stop redis-server
+        redis-cli -p ${params.sentinel_port} SENTINEL get-master-addr-by-name ${params.master_name}
+      note: 不持久化时必须这样做：先停哨兵再停实例，确认哨兵已把主库指向其他节点，再重启机器。直接重启主库机器，主库会以空数据回归并清空从库
+faults:
+    - title: 从库 master_link_status 一直是 down
+      when: count(roles.replica) > 0
+      symptom: INFO replication 里 master_link_status:down，或日志里反复出现连不上主库、认证失败
+      steps:
+        - 先在从库上用 redis-cli 连主库的 ${params.redis_port} 端口，确认网络和安全组是通的
+        - 三处密码必须一致：redis.conf 的 requirepass、masterauth，以及 sentinel.conf 的 sentinel auth-pass；任何一处不同都会导致复制中断或哨兵监控失败
+        - 看日志 ${params.data_dir}/log/redis-server.log 里的具体错误，不要重复重启
+      cmd: tail -50 ${params.data_dir}/log/redis-server.log
+    - title: 哨兵 ckquorum 失败或 num-other-sentinels 不足
+      when: count(roles.replica) > 0
+      symptom: SENTINEL ckquorum 不是 OK，或 SENTINEL master 里 num-other-sentinels 小于节点数减一
+      steps:
+        - 首次启动哨兵之间互相发现约需 30 秒，先等待后重查
+        - 检查三台之间 ${params.sentinel_port} 端口是否互通
+        - 不要手工编辑 sentinel.conf：哨兵会自己改写它（追加 myid、known-replica、known-sentinel），手工改会破坏哨兵集群的发现
+      cmd: tail -50 ${params.data_dir}/log/redis-sentinel.log
+    - title: 切换后应用持续报 READONLY
+      when: count(roles.replica) > 0
+      symptom: 主库切换后应用写入持续失败，提示 READONLY
+      steps:
+        - 说明应用把主库 IP 写死在连接池里了；哨兵只负责告诉客户端新主在哪里
+        - 客户端必须通过哨兵地址列表（所有哨兵都要填）和 master 名称 ${params.master_name} 查询当前主库，捕获断开或 READONLY 后重新查询并重建连接
+        - 应用侧改好之前，只能手动重启应用
+    - title: 内存写满，键被大量淘汰
+      symptom: evicted_keys 持续增长，命中率下降
+      steps:
+        - 这是缓存设计内的行为：写满即按淘汰策略 ${params.maxmemory_policy} 丢弃旧键
+        - 先确认业务能否接受；需要更大容量时通过集群「变更演练」规划 maxmemory 调整流程，并评估机器内存
+logs:
+    - {name: 实例日志, text: "${params.data_dir}/log/redis-server.log"}
+    - {name: 哨兵日志, text: "${params.data_dir}/log/redis-sentinel.log"}
+    - {name: 系统日志, text: journalctl -u redis-server -u redis-sentinel}
+    - {name: 配置文件, text: /etc/redis/redis.conf 与 /etc/redis/sentinel.conf（运行时会被改写）}

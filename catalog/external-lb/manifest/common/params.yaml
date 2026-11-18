@@ -1,0 +1,4 @@
+- {key: mode, group: front, label: 入口方式, type: enum, options: [domain, ip], default: domain}
+- {key: address, group: front, label: 入口域名或 IP, type: string, required: true, hint: 域名模式须为完整域名（含点），IP 模式须为有效 IPv4}
+- {key: resolve_ip, group: front, label: 域名应解析到的 IP, type: ip, when: "params.mode == 'domain'", hint: 填写后，入口测试会核对域名解析是否与它一致；留空则不核对}
+- {key: vendor, group: front, label: 负载均衡产品, type: string, default: 云平台 ELB}

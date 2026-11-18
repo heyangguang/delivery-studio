@@ -1,0 +1,20 @@
+id: single
+name: 基础系列
+spec: 1 台 · 无故障切换
+roles:
+    - role: node
+      count: 1
+params: {}
+contract:
+    when: count(roles.node) == 1
+    series: basic
+    failover: none
+    mechanism: keepalived 单节点
+    read_access: 通过入口访问后端；不提供数据存储或分片
+    sharding: false
+    limitations:
+        - 单节点故障会中断入口服务
+    acceptance:
+        - keepalived/vip-holder
+    operations:
+        - deploy

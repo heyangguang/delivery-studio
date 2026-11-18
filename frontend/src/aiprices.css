@@ -1,0 +1,120 @@
+/* Model prices. Prefix pr- */
+.pr-disp {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 20px;
+}
+.pr-disp label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.pr-h {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  margin-bottom: 6px;
+}
+.pr-h h2 {
+  margin: 0;
+}
+.pr-h h2 em {
+  color: var(--faint);
+  font-size: 13px;
+  font-style: normal;
+  font-weight: 500;
+}
+.pr-sp {
+  flex: 1;
+}
+.pr-group h3 {
+  margin: 16px 0 4px;
+  font-size: 13.5px;
+}
+.pr-table {
+  border-top: 1px solid var(--line);
+}
+.pr-row {
+  display: grid;
+  grid-template-columns: 110px minmax(160px, 1.6fr) 90px 90px 90px 78px auto;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 4px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+.pr-row.b {
+  grid-template-columns: minmax(180px, 1.6fr) 80px 90px 80px minmax(140px, 1.4fr) auto;
+}
+.pr-row.head {
+  padding: 6px 4px;
+  color: var(--faint);
+  font-size: 12px;
+  font-weight: 600;
+}
+.pr-row > .arco-btn {
+  justify-self: end;
+}
+.pr-models {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.pr-models code {
+  padding: 0 6px;
+  border-radius: 5px;
+  font-size: 12px;
+  background: var(--sunken);
+}
+.pr-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  min-width: 0;
+}
+.pr-note small {
+  color: var(--mute);
+  font-size: 12px;
+}
+.pr-note a {
+  color: var(--brand-ink);
+  font-size: 12px;
+}
+.pr-foot {
+  margin-top: 14px;
+}
+@media (max-width: 900px) {
+  .pr-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .pr-row > .arco-btn {
+    justify-self: end;
+  }
+  .pr-row.b {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+    gap: 6px 12px;
+    padding: 10px 4px;
+  }
+  .pr-row.b > .pr-models {
+    grid-column: 1 / -1;
+  }
+  .pr-row.b > .pr-note {
+    grid-column: 1 / 4;
+  }
+  .pr-row.b > .arco-btn {
+    grid-column: 4;
+    justify-self: end;
+  }
+  .pr-row.head {
+    display: none;
+  }
+}
+
+.sx-page-h p a {
+  color: var(--brand-ink);
+  text-underline-offset: 2px;
+}

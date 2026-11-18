@@ -1,0 +1,41 @@
+- name: 写入复制认证文件
+  ansible.builtin.copy:
+    dest: "/etc/postgresql/keys/{{ pg_scope }}.pgpass"
+    content: "{{ mw_hosts[pg_primary].ip }}:{{ pg_port }}:replication:replicator:{{ mw.secrets.replicator }}\n"
+    owner: postgres
+    group: postgres
+    mode: '0600'
+  no_log: true
+- name: 基础备份初始化从库（仅空目录，已有数据不覆盖）
+  become: true
+  become_user: postgres
+  ansible.builtin.command:
+    argv:
+      - "{{ pg_bin }}/pg_basebackup"
+      - -D
+      - "{{ pg_data }}"
+      - -d
+      - "host={{ mw_hosts[pg_primary].ip }} port={{ pg_port }} user=replicator application_name={{ inventory_hostname }} passfile=/etc/postgresql/keys/{{ pg_scope }}.pgpass sslmode={{ 'verify-ca' if mw.params.tls else 'disable' }} sslrootcert=/etc/pki/pg/ca.crt"
+      - -R
+      - -X
+      - stream
+      - --checkpoint=fast
+      - --no-password
+    creates: "{{ pg_data }}/PG_VERSION"
+  no_log: true
+- name: 确认从库恢复标识存在
+  ansible.builtin.stat: {path: "{{ pg_data }}/standby.signal"}
+  register: native_standby
+- name: 拒绝把已提升的主库按旧拓扑启动
+  ansible.builtin.assert:
+    that: native_standby.stat.exists
+    fail_msg: 从库没有 standby.signal，可能已手动提升；请核对拓扑，不能自动重建或降级。
+- name: 启动从库
+  ansible.builtin.systemd: {name: "{{ pg_unit }}", enabled: true, state: started}
+- name: 等待从库就绪
+  ansible.builtin.command: "{{ pg_bin }}/pg_isready -h /var/run/postgresql -p {{ pg_port }}"
+  register: native_ready
+  until: native_ready.rc == 0
+  retries: 60
+  delay: 2
+  changed_when: false

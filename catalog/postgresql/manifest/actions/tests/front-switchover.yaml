@@ -1,0 +1,22 @@
+id: front-switchover
+title: 入口跟随计划切换
+desc: 先检查执行节点与主库，若相同先切走并确认复制及入口恢复；随后只在执行节点以外的两台成员之间计划切主、验证入口跟随并切回测试起始主库。前置切主不自动撤销，整个过程会短暂中断连接。至少需要三台数据库节点。
+scope: endpoint:writer
+effect: disruptive
+hosts: first:primary
+when: params.deployment_mode in ['legacy', 'single'] && (count(roles.replica) > 0)
+skip: 单节点没有可切换的从库
+expect: 入口健康检查有延迟，最长等 3 分钟。
+inputs:
+    timeout:
+        type: int
+        value: 7200
+preconditions:
+    - mw_step_inputs.timeout > 0
+postconditions:
+    - pg_test_result.rc == 0
+run:
+    role: postgresql
+    tasks: test_front_switchover
+    vars:
+        pg_test: front-switchover

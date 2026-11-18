@@ -1,0 +1,3 @@
+- {id: ha, label: 高可用}
+- {id: timeouts, label: 超时与检查}
+- {id: stats, label: 状态页}

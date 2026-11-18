@@ -1,0 +1,23 @@
+id: front-failover
+title: 入口跟随故障接管
+desc: 至少需要三台数据库节点。不修改任何选主标签或同步策略，先从当前每台备库验证入口、数据库客户端及免密 SSH（远端执行时），通过后才停止当前主库 Patroni。允许任意合格备库自动接管，并从仍在运行的备库发起入口 SQL，避免“客户端经入口回到自身主库”的回流路径；日志记录实际客户端和后端。随后启动旧主、等待全部复制恢复并复查入口。会短暂中断连接；完成后保留新主库，需要时另行回切。
+rollback: 成功或失败均尝试启动被停止的旧主 Patroni；若执行被强制终止，先确认旧主的 Patroni 已启动，用 patronictl list 确认一个主库、其余全部 streaming。测试不修改配置及选主标签；若检测到之前遗留的 nofailover 或非正 failover_priority，会在停主前报错，需先按既定选主策略处理。需要恢复原主时另行执行计划切换。
+scope: endpoint:writer
+effect: disruptive
+hosts: first:primary
+when: params.deployment_mode in ['legacy', 'single'] && (count(roles.replica) > 0)
+skip: 单节点没有可接管的从库
+expect: 停主前所有备库的入口预检通过；旧主停止期间从其他存活备库确认入口到达新主且非恢复状态；最后恢复一主两从或计划中的全部从库。此项验证主库路由和可写角色，不执行真实写入，自身回流能力需独立客户端另行验收。
+inputs:
+    timeout:
+        type: int
+        value: 7200
+preconditions:
+    - mw_step_inputs.timeout > 0
+postconditions:
+    - pg_test_result.rc == 0
+run:
+    role: postgresql
+    tasks: test_front_failover
+    vars:
+        pg_test: front-failover

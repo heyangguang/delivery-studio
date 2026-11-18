@@ -1,0 +1,35 @@
+# Only runs when the plan chose to turn swap off. A machine that has none is left alone.
+- name: 当前的 swap
+  ansible.builtin.command: swapon --show --noheadings
+  register: rd_swap
+  changed_when: false
+
+- name: 关闭并禁用 swap
+  when: (rd_swap.stdout | trim) != ''
+  block:
+    - name: 备份 /etc/fstab（只在第一次，不覆盖已有备份）
+      ansible.builtin.copy:
+        src: /etc/fstab
+        dest: /etc/fstab.before-mw-swap
+        remote_src: true
+        force: false
+        mode: '0644'
+
+    - name: 关闭全部 swap
+      ansible.builtin.command: swapoff -a
+      changed_when: true
+
+    - name: 把 /etc/fstab 里的 swap 行注释掉
+      ansible.builtin.replace:
+        path: /etc/fstab
+        regexp: '^([^#\n]*[ \t]swap[ \t][^\n]*)$'
+        replace: '#\1'
+
+- name: 核对 swap 已全部关闭
+  ansible.builtin.shell: |
+    set -e
+    if swapon --show --noheadings | grep -q .; then echo "仍有 swap 在用"; exit 1; fi
+    if grep -Ev '^[[:space:]]*#' /etc/fstab | grep -Eq '[[:space:]]swap[[:space:]]'; then echo "/etc/fstab 里还有未注释的 swap 行"; exit 1; fi
+  args:
+    executable: /bin/bash
+  changed_when: false

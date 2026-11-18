@@ -1,0 +1,38 @@
+# Managed by Middleware Hub for {{ mw_cluster.id }}/{{ mw.id }}.
+global_defs {
+    router_id {{ inventory_hostname }}
+    enable_script_security
+    script_user root
+}
+
+vrrp_script chk_service {
+    script "/bin/sh -c '{{ mw.params.check_command }}'"
+    interval 2
+    fall 2
+    rise 2
+    weight -30
+}
+
+vrrp_instance {{ mw.id | replace('-', '_') }} {
+    state {{ 'MASTER' if inventory_hostname == mw.roles.node | first else 'BACKUP' }}
+    interface {{ mw.params.interface }}
+    virtual_router_id {{ mw.params.vrrp_id }}
+    priority {{ 150 - 10 * (mw.roles.node.index(inventory_hostname)) }}
+    advert_int {{ mw.params.advert_int }}
+    unicast_src_ip {{ mw_hosts[inventory_hostname].ip }}
+    unicast_peer {
+{% for h in mw.roles.node if h != inventory_hostname %}
+        {{ mw_hosts[h].ip }}
+{% endfor %}
+    }
+    authentication {
+        auth_type PASS
+        auth_pass {{ mw.secrets.auth_pass }}
+    }
+    virtual_ipaddress {
+        {{ mw.params.vip }}/{{ mw.params.prefix }} dev {{ mw.params.interface }}
+    }
+    track_script {
+        chk_service
+    }
+}

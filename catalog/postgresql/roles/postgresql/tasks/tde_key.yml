@@ -1,0 +1,50 @@
+- name: 本节点应是当前主库
+  ansible.builtin.command:
+    argv: "{{ pg_psql + ['-d', 'postgres', '-c', 'SELECT pg_is_in_recovery()'] }}"
+  register: pg_recovery
+  changed_when: false
+  failed_when: pg_recovery.stdout | trim != 'f'
+
+- name: 创建 pg_tde 扩展
+  ansible.builtin.command:
+    argv: "{{ pg_psql + ['-d', 'postgres', '-c', 'CREATE EXTENSION IF NOT EXISTS pg_tde'] }}"
+  changed_when: true
+
+- name: 已注册的密钥提供者
+  ansible.builtin.command:
+    argv: "{{ pg_psql + ['-d', 'postgres', '-c', \"SELECT count(*) FROM pg_tde_list_all_global_key_providers()\"] }}"
+  register: pg_providers
+  changed_when: false
+
+- name: 密钥文件是否已存在
+  ansible.builtin.stat:
+    path: /etc/postgresql/keys/pg_tde_keyfile
+  register: pg_keyfile
+
+- name: 未注册的密钥文件不得被覆盖
+  ansible.builtin.assert:
+    that: (pg_providers.stdout | trim | int) > 0 or not pg_keyfile.stat.exists
+    fail_msg: /etc/postgresql/keys/pg_tde_keyfile 已存在但没有注册为密钥提供者，请先核对它的来源
+
+- name: 已注册但密钥文件丢失时停止
+  ansible.builtin.assert:
+    that: (pg_providers.stdout | trim | int) == 0 or pg_keyfile.stat.exists
+    fail_msg: TDE 密钥提供者已存在但密钥文件丢失。不会重新创建密钥：重建会让已加密的数据无法读取
+
+- name: 注册提供者并创建主密钥
+  ansible.builtin.command:
+    argv: "{{ pg_psql + ['-d', 'postgres', '-c', sql] }}"
+  vars:
+    sql: >-
+      SELECT pg_tde_add_global_key_provider_file('file-vault','/etc/postgresql/keys/pg_tde_keyfile');
+      SELECT pg_tde_create_key_using_global_key_provider('principal-key','file-vault');
+      SELECT pg_tde_set_server_key_using_global_key_provider('principal-key','file-vault');
+      SELECT pg_tde_set_default_key_using_global_key_provider('principal-key','file-vault');
+  when: (pg_providers.stdout | trim | int) == 0
+  no_log: true
+  changed_when: true
+
+- name: 核对服务器与默认密钥
+  ansible.builtin.command:
+    argv: "{{ pg_psql + ['-d', 'postgres', '-c', 'SELECT pg_tde_verify_server_key(); SELECT pg_tde_verify_default_key();'] }}"
+  changed_when: false

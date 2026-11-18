@@ -1,0 +1,66 @@
+overview: etcd 保存集群的协调数据，每次写入都要多数成员确认。3 个成员最多容忍 1 个故障，5 个成员容忍 2 个；同时失去多数成员时集群只读不可写，依赖它的服务（例如 Patroni）会停止选主。日常关注三件事：所有成员健康、只有一个领导者、数据库大小离配额还远。
+checks:
+    - title: 成员健康
+      hosts: 任意一台成员
+      cmd: ETCDCTL_API=3 etcdctl --endpoints=127.0.0.1:${params.client_port} endpoint health --cluster
+      expect: 每个成员都显示 is healthy；耗时通常在几十毫秒以内
+    - title: 领导者与数据库大小
+      hosts: 任意一台成员
+      cmd: ETCDCTL_API=3 etcdctl --endpoints=127.0.0.1:${params.client_port} endpoint status --cluster -w table
+      expect: 只有一行 IS LEADER 为 true；DB SIZE 远小于配额 ${params.quota_backend_bytes}（超过七成就要处理）；RAFT TERM 不应频繁增长
+    - title: 告警
+      hosts: 任意一台成员
+      cmd: ETCDCTL_API=3 etcdctl --endpoints=127.0.0.1:${params.client_port} alarm list
+      expect: 没有输出。出现 NOSPACE 说明已经超出配额，集群只读
+    - title: 服务与磁盘
+      hosts: 每台成员
+      cmd: |
+        systemctl is-active etcd
+        df -h ${params.data_dir}
+      expect: active；数据盘使用率低于 80%
+tasks:
+    - title: 查看成员列表
+      cmd: ETCDCTL_API=3 etcdctl --endpoints=127.0.0.1:${params.client_port} member list -w table
+    - title: 手动做一次快照备份
+      cmd: ETCDCTL_API=3 etcdctl --endpoints=127.0.0.1:${params.client_port} snapshot save /data/backup/etcd-$(date +%F-%H%M).db
+      note: 快照要复制到别的机器保存。恢复快照会重建整个集群，必须先评估，不要在单个成员上随意执行
+    - title: 压缩与碎片整理
+      cmd: |
+        rev=$(ETCDCTL_API=3 etcdctl --endpoints=127.0.0.1:${params.client_port} endpoint status -w json | grep -o '"revision":[0-9]*' | cut -d: -f2)
+        ETCDCTL_API=3 etcdctl --endpoints=127.0.0.1:${params.client_port} compact $rev
+        ETCDCTL_API=3 etcdctl --endpoints=127.0.0.1:${params.client_port} defrag
+      note: 已开启每 ${params.auto_compaction_retention} 小时自动压缩，一般不需要手动做。defrag 会让该成员短暂停顿，逐台执行，不要加 --cluster 一次做完
+    - title: 重启一个成员
+      cmd: systemctl restart etcd && sleep 3 && ETCDCTL_API=3 etcdctl --endpoints=127.0.0.1:${params.client_port} endpoint health
+      note: 一次只重启一台，健康后再处理下一台；不要同时重启多数成员
+faults:
+    - title: 一个成员不健康或宕机
+      symptom: endpoint health 显示某个成员 unhealthy 或连不上，其余成员正常
+      steps:
+        - 剩余成员仍是多数时集群照常可写，先不要慌，也不要动其他成员
+        - 在故障机器上看 systemctl status etcd 和 journalctl -u etcd -n 200，确认是进程退出、磁盘满还是网络不通
+        - 磁盘满先清理再启动；网络问题检查 ${params.peer_port} 端口是否互通
+        - 数据目录损坏、无法启动时，不要手工删数据；请在集群「变更演练」生成成员移除与重建成员变更流程，按标准顺序重建成员
+      cmd: journalctl -u etcd -n 200 --no-pager
+    - title: 频繁换领导者
+      symptom: RAFT TERM 持续增长，日志里有 elected leader、lost leader，依赖它的服务偶发报错
+      steps:
+        - 多数情况是磁盘写入慢或网络抖动；看日志里有没有 slow fdatasync、apply request took too long
+        - 用 iostat -x 1 看数据盘的 await，etcd 需要低延迟磁盘，不要和备份等大量写入的任务共用磁盘
+        - 确认成员间延迟稳定；跨机房部署时可在集群「变更演练」生成调大心跳间隔和选举超时的配置变更流程
+    - title: 空间超出配额（NOSPACE）
+      symptom: 写入报 mvcc database space exceeded，alarm list 显示 NOSPACE
+      steps:
+        - 按「压缩与碎片整理」逐台执行，让数据库大小降下来
+        - 降下来后执行 etcdctl alarm disarm 解除告警，集群恢复可写
+        - 找出是谁写入了大量数据；必要时在平台上评估是否调大配额
+      cmd: ETCDCTL_API=3 etcdctl --endpoints=127.0.0.1:${params.client_port} alarm disarm
+    - title: 同时失去多数成员
+      symptom: 所有成员都显示 no leader，写入超时；依赖它的服务不再选主
+      steps:
+        - 先尽量把宕机的成员恢复起来，恢复到多数后集群自动恢复，这是首选
+        - 无法恢复时需要用快照重建集群，属于高风险操作，先停下来评估并保留现场，不要尝试强制新建集群
+logs:
+    - {name: 服务日志, text: journalctl -u etcd}
+    - {name: 数据目录, text: "${params.data_dir}"}
+    - {name: 配置文件, text: /etc/etcd/etcd.conf.yaml}

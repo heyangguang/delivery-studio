@@ -1,0 +1,30 @@
+- name: 临时屏蔽 etcd 服务
+  ansible.builtin.command: systemctl mask --runtime etcd.service
+  changed_when: false
+
+- name: 安装软件包
+  block:
+    - name: 安装 etcd 软件包
+      ansible.builtin.include_role:
+        name: mw_packages
+        tasks_from: install
+  always:
+    - name: 取消临时屏蔽
+      ansible.builtin.command: systemctl unmask --runtime etcd.service
+      changed_when: false
+
+- name: 创建配置目录
+  ansible.builtin.file:
+    path: /etc/etcd
+    state: directory
+    owner: etcd
+    group: etcd
+    mode: '0700'
+
+- name: 创建数据目录
+  ansible.builtin.file:
+    path: "{{ (mw_hosts[inventory_hostname].params.data_root | default('/data')) ~ mw.params.data_dir[5:] }}"
+    state: directory
+    owner: etcd
+    group: etcd
+    mode: '0700'

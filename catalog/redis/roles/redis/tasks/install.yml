@@ -1,0 +1,51 @@
+- name: /data 应已挂载
+  ansible.builtin.command: mountpoint -q {{ mw_hosts[inventory_hostname].params.data_root | default('/data') }}
+  changed_when: false
+  when: (mw_hosts[inventory_hostname].params | default({})).get("storage_mode", "dedicated_disk") == "dedicated_disk"
+
+- name: 普通数据目录应已准备好
+  ansible.builtin.command: test -d {{ mw_hosts[inventory_hostname].params.data_root | default('/data') }}
+  changed_when: false
+  when: (mw_hosts[inventory_hostname].params | default({})).get("storage_mode", "dedicated_disk") == "system_directory"
+
+- name: 临时屏蔽 Redis 服务
+  # The package starts the instance and the sentinel with their default configuration on 0.0.0.0 as soon as it is installed.
+  ansible.builtin.command: systemctl mask --runtime redis-server.service redis-sentinel.service
+  changed_when: false
+
+- name: 安装软件包
+  block:
+    - name: 安装 Redis 软件包
+      ansible.builtin.include_role:
+        name: mw_packages
+        tasks_from: install
+  always:
+    - name: 取消临时屏蔽
+      ansible.builtin.command: systemctl unmask --runtime redis-server.service redis-sentinel.service
+      changed_when: false
+
+- name: 创建数据、日志目录
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: redis
+    group: redis
+    mode: '0750'
+  loop:
+    - "{{ rd_dir }}"
+    - "{{ rd_dir }}/data"
+    - "{{ rd_dir }}/log"
+
+- name: /etc/redis 须让 redis 用户可写（实例与哨兵要改写各自的配置文件）
+  ansible.builtin.file:
+    path: /etc/redis
+    state: directory
+    owner: root
+    group: redis
+    mode: '0770'
+
+- name: 核对安装的版本
+  ansible.builtin.command: redis-server --version
+  register: rd_version
+  changed_when: false
+  failed_when: "'v=7.2.' not in rd_version.stdout"

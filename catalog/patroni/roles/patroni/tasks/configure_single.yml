@@ -1,0 +1,48 @@
+- name: 集群是否已创建
+  ansible.builtin.stat:
+    path: "/etc/postgresql/{{ pg_major }}/main/postgresql.conf"
+  register: pg_cluster
+
+- name: 创建数据库集群
+  ansible.builtin.command:
+    argv:
+      - pg_createcluster
+      - "{{ pg_major }}"
+      - main
+      - --datadir={{ pg_data }}
+      - --locale={{ mw.params.initdb_locale }}
+      - --encoding=UTF8
+      - --
+      - --data-checksums
+      - --auth-host=scram-sha-256
+      - --auth-local=peer
+  when: not pg_cluster.stat.exists
+  changed_when: true
+
+- name: 配置目录
+  ansible.builtin.file:
+    path: "/etc/postgresql/{{ pg_major }}/main/conf.d"
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: '0755'
+
+- name: 写入 postgresql 配置
+  ansible.builtin.template:
+    src: postgresql-single.conf.j2
+    dest: "/etc/postgresql/{{ pg_major }}/main/conf.d/90-middleware.conf"
+    owner: postgres
+    group: postgres
+    mode: '0644'
+
+- name: 写入 pg_hba.conf
+  ansible.builtin.template:
+    src: pg_hba.conf.j2
+    dest: "/etc/postgresql/{{ pg_major }}/main/pg_hba.conf"
+    owner: postgres
+    group: postgres
+    mode: '0640'
+
+- name: 重新加载 systemd
+  ansible.builtin.systemd:
+    daemon_reload: true

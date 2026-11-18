@@ -1,0 +1,38 @@
+# ---- network ----
+- {key: redis_port, group: network, label: Redis 端口, type: port, default: 6379, restart: true}
+- {key: sentinel_port, group: network, label: 哨兵端口, type: port, default: 26379, when: count(roles.replica) > 0}
+- {key: bind, group: network, label: 监听地址, type: string, default: 0.0.0.0, pattern: '^[0-9a-fA-F.: ]{1,80}$', advanced: true, hint: 多个地址用空格隔开；默认监听全部地址，靠安全组限制来源}
+- {key: data_dir, group: network, label: 数据与日志目录, type: string, default: /data/redis, pattern: '^/data/[A-Za-z0-9_./-]+$', hint: 使用 /data 前缀作为数据根目录占位；实际路径随各机器的挂载点变化；其中 data 放数据、log 放日志, restart: true}
+- {key: tcp_backlog, group: network, label: tcp-backlog, type: int, default: 511, min: 128, max: 65535, advanced: true, hint: 不能超过 net.core.somaxconn, restart: true}
+- {key: tcp_keepalive, group: network, label: tcp-keepalive, type: int, unit: s, default: 300, min: 0, max: 7200, advanced: true}
+- {key: client_timeout, group: network, label: 客户端空闲超时, type: int, unit: s, default: 0, min: 0, max: 86400, advanced: true, hint: 0 表示不断开空闲连接}
+- {key: databases, group: network, label: 数据库个数, type: int, default: 16, min: 1, max: 256, advanced: true}
+# ---- memory ----
+- {key: maxmemory, group: memory, label: 内存上限, type: size, default: 6GB, min: 64MB, max: 1TB, hint: 建议取机器内存的 75%–90%；写满即按淘汰策略丢弃旧键}
+- {key: maxmemory_policy, group: memory, label: 淘汰策略, type: enum, options: [allkeys-lru, allkeys-lfu, allkeys-random, volatile-lru, volatile-lfu, volatile-random, volatile-ttl, noeviction], default: allkeys-lru, hint: 当缓存用选 allkeys-lru；noeviction 在写满后拒绝写入}
+- {key: maxmemory_samples, group: memory, label: 淘汰采样数, type: int, default: 5, min: 1, max: 64, advanced: true}
+# ---- persistence ----
+- {key: persistence, group: persistence, label: 持久化方式, type: enum, options: [none, rdb, aof], default: none, restart: true, hint: "none 为默认：不落盘，节点重启即清空数据；rdb 按时间点快照；aof 记录每次写入，每秒刷盘"}
+# ---- replication ----
+- {key: repl_diskless_sync, group: replication, label: 无盘复制, type: bool, default: true, when: count(roles.replica) > 0, hint: 全量同步时主库直接把数据发给从库，不经过磁盘}
+- {key: repl_backlog_size, group: replication, label: 复制积压缓冲, type: size, default: 1MB, min: 1MB, max: 16GB, when: count(roles.replica) > 0, advanced: true}
+- {key: replica_priority, group: replication, label: 从库选主优先级, type: int, default: 100, min: 0, max: 1000, when: count(roles.replica) > 0, advanced: true, hint: 数值越小越优先；0 表示永远不会被选为主库}
+# ---- sentinel ----
+- {key: master_name, group: sentinel, label: 主库名称, type: string, default: mymaster, pattern: '^[A-Za-z][A-Za-z0-9_-]{0,30}$', when: count(roles.replica) > 0, hint: 客户端用它向哨兵查询主库，必须与应用配置逐字一致}
+- {key: sentinel_quorum, group: sentinel, label: 判定主库下线所需的哨兵数, type: int, default: 2, min: 1, max: 9, when: count(roles.replica) > 0, hint: 须过半数；三个哨兵取 2}
+- {key: sentinel_down_after_ms, group: sentinel, label: 判定下线的无响应时间, type: int, unit: ms, default: 30000, min: 1000, max: 600000, when: count(roles.replica) > 0}
+- {key: sentinel_failover_timeout_ms, group: sentinel, label: 故障切换超时, type: int, unit: ms, default: 180000, min: 10000, max: 3600000, when: count(roles.replica) > 0, advanced: true}
+- {key: sentinel_parallel_syncs, group: sentinel, label: 切换后同时同步的从库数, type: int, default: 1, min: 1, max: 16, when: count(roles.replica) > 0, advanced: true}
+# ---- logging ----
+- {key: loglevel, group: logging, label: 日志级别, type: enum, options: [debug, verbose, notice, warning], default: notice}
+- {key: logrotate_days, group: logging, label: 日志保留天数, type: int, default: 14, min: 1, max: 365}
+- {key: logrotate_maxsize, group: logging, label: 日志单文件上限, type: size, default: 100MB, min: 1MB, max: 10GB, hint: 达到上限即使不到一天也会切割}
+# ---- operating system ----
+- {key: apply_baseline, group: os, label: 写入操作系统基线, type: bool, default: true, hint: 关闭后不写 sysctl 与透明大页设置，由使用者自行保证}
+- {key: disable_swap, group: os, label: 关闭 swap, type: bool, default: false, hint: "Redis 官方建议无 swap：内存被换出会让延迟骤增。选中后若机器有 swap，则执行 swapoff 并把 /etc/fstab 里的 swap 行注释掉（原文件先备份）；机器本来没有 swap 则什么都不改。不选时只在验证阶段提示是否有 swap"}
+- {key: vm_overcommit_memory, group: os, label: vm.overcommit_memory, type: enum, options: ["0", "1", "2"], default: "1", when: params.apply_baseline, hint: Redis 官方要求设为 1，否则后台保存或复制时可能因内存分配失败}
+- {key: vm_swappiness, group: os, label: vm.swappiness, type: int, default: 1, min: 0, max: 100, when: params.apply_baseline}
+- {key: somaxconn, group: os, label: net.core.somaxconn, type: int, default: 4096, min: 128, max: 65535, when: params.apply_baseline}
+- {key: tcp_max_syn_backlog, group: os, label: net.ipv4.tcp_max_syn_backlog, type: int, default: 4096, min: 128, max: 65535, advanced: true, when: params.apply_baseline}
+- {key: nofile, group: os, label: 文件描述符上限, type: int, default: 65536, min: 4096, max: 1048576, advanced: true}
+- {key: thp, group: os, label: 透明大页 THP, type: enum, options: [never, madvise, keep], default: never, when: params.apply_baseline, hint: keep 表示不修改；Redis 官方要求关闭}

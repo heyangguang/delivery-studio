@@ -1,0 +1,15 @@
+/dist/
+/runs/
+/cluster.json
+/middleware-deployer
+*.exe
+*.log
+*.pem
+*.key
+*.crt
+.env
+.env.*
+frontend/node_modules/
+frontend/dist/
+__pycache__/
+*.pyc

@@ -1,0 +1,86 @@
+schema: mwpack/v1
+component: patroni
+short: ha
+title: Patroni
+category: 协调服务
+icon: database
+color: blue
+summary: PostgreSQL 高可用管理器。显式选择后管理数据库生命周期，并依赖独立的 DCS。
+tags:
+    - 高可用
+    - TLS
+    - TDE
+    - 备份
+provides:
+    - postgresql-manager
+data_volume: false
+operations: {$file: manifest/common/operations.yaml}
+roles: {$file: manifest/common/roles.yaml}
+flows:
+    - id: wal
+      title: WAL 流复制
+      kind: replication
+      from: primary
+      to: replica
+      when: count(roles.replica) > 0
+      sync: params.replication == 'quorum'
+requires: {$file: manifest/common/requires.yaml}
+groups: {$file: manifest/common/groups.yaml}
+params: {$file: manifest/common/params.yaml}
+rules: {$file: manifest/common/rules.yaml}
+ports: {$file: manifest/common/ports.yaml}
+versions: {$file: manifest/common/versions.yaml}
+lifecycle:
+    install: {$file: manifest/actions/lifecycle/install.yaml}
+    configure: {$file: manifest/actions/lifecycle/configure.yaml}
+    start: {$file: manifest/actions/lifecycle/start.yaml}
+    provision: {$file: manifest/actions/lifecycle/provision.yaml}
+    verify: {$file: manifest/actions/lifecycle/verify.yaml}
+tests:
+    - {$file: manifest/actions/tests/ha-check.yaml}
+    - {$file: manifest/actions/tests/tde.yaml}
+    - {$file: manifest/actions/tests/physical-backup.yaml}
+    - {$file: manifest/actions/tests/physical-restore.yaml}
+    - {$file: manifest/actions/tests/full-backup.yaml}
+    - {$file: manifest/actions/tests/full-restore.yaml}
+    - {$file: manifest/actions/tests/pitr.yaml}
+    - {$file: manifest/actions/tests/switchover.yaml}
+    - {$file: manifest/actions/tests/failover.yaml}
+    - {$file: manifest/actions/tests/switchback.yaml}
+    - {$file: manifest/actions/tests/pitr-switchover.yaml}
+    - {$file: manifest/actions/tests/rewind-check.yaml}
+    - {$file: manifest/actions/tests/front-preflight.yaml}
+    - {$file: manifest/actions/tests/via-front.yaml}
+    - {$file: manifest/actions/tests/tls-negative.yaml}
+    - {$file: manifest/actions/tests/front-switchover.yaml}
+    - {$file: manifest/actions/tests/front-failover.yaml}
+    - {$file: manifest/actions/tests/front-write-switchover.yaml}
+cleanup:
+    - {$file: manifest/actions/cleanup/inspect.yaml}
+    - {$file: manifest/actions/cleanup/clean-tests.yaml}
+    - {$file: manifest/actions/cleanup/clean-artifacts.yaml}
+    - {$file: manifest/actions/cleanup/reset-backups.yaml}
+    - {$file: manifest/actions/cleanup/backup-info.yaml}
+shared_files:
+    - roles/patroni/files/pgcommon.py
+    - roles/patroni/tasks/_patch.yml
+    - roles/patroni/tasks/_wait_ready.yml
+    - roles/patroni/tasks/addons.yml
+    - roles/patroni/tasks/backup_config.yml
+    - roles/patroni/tasks/configure.yml
+    - roles/patroni/tasks/configure_patroni.yml
+    - roles/patroni/tasks/configure_single.yml
+    - roles/patroni/tasks/install.yml
+    - roles/patroni/tasks/os_baseline.yml
+    - roles/patroni/tasks/restart.yml
+    - roles/patroni/tasks/start_replica.yml
+    - roles/patroni/tasks/tde_key_sync.yml
+    - roles/patroni/tasks/tls_files.yml
+    - roles/patroni/tasks/topology.yml
+    - roles/patroni/templates/patroni.yml.j2
+    - roles/patroni/templates/pg_hba.conf.j2
+    - roles/patroni/templates/pgbackrest.conf.j2
+    - roles/patroni/templates/postgresql-single.conf.j2
+    - roles/patroni/tasks/front_preflight.yml
+context: postgresql-database
+addons: {$file: manifest/common/addons.yaml}

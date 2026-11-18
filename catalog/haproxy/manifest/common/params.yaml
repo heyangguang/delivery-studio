@@ -1,0 +1,14 @@
+- {key: ha, group: ha, label: 高可用方式, type: enum, options: [none, keepalived], default: none, hint: none 表示不配置虚拟 IP；keepalived 需要至少 2 台机器}
+- {key: vip, group: ha, label: 虚拟 IP, type: ip, when: "params.ha == 'keepalived'", required: true}
+- {key: vip_interface, group: ha, label: 承载 VIP 的网卡, type: string, when: "params.ha == 'keepalived'", required: true}
+- {key: vip_prefix, group: ha, label: 子网前缀长度, type: int, default: 24, min: 8, max: 32, when: "params.ha == 'keepalived'"}
+- {key: vrrp_id, group: ha, label: VRRP 组号, type: int, default: 51, min: 1, max: 255, when: "params.ha == 'keepalived'"}
+- {key: maxconn, group: timeouts, label: 最大连接数, type: int, default: 4000, min: 100, max: 1000000}
+- {key: timeout_connect, group: timeouts, label: 连接后端超时（秒）, type: int, default: 5, min: 1, max: 120}
+- {key: timeout_client, group: timeouts, label: 客户端空闲超时（分钟）, type: int, default: 30, min: 1, max: 1440}
+- {key: timeout_server, group: timeouts, label: 后端空闲超时（分钟）, type: int, default: 30, min: 1, max: 1440}
+- {key: check_interval, group: timeouts, label: 健康检查间隔（秒）, type: int, default: 3, min: 1, max: 60}
+- {key: check_fall, group: timeouts, label: 判定失败所需次数, type: int, default: 3, min: 1, max: 20}
+- {key: check_rise, group: timeouts, label: 判定恢复所需次数, type: int, default: 2, min: 1, max: 20}
+- {key: stats_port, group: stats, label: 状态页端口, type: port, default: 8404, when: "params.stats_enabled"}
+- {key: stats_enabled, group: stats, label: 启用状态页, type: bool, default: false, hint: 只监听 127.0.0.1}

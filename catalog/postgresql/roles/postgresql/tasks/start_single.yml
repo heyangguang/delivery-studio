@@ -1,0 +1,19 @@
+- name: 启动 PostgreSQL
+  ansible.builtin.systemd:
+    name: postgresql@17-main
+    enabled: true
+    state: started
+
+- name: 等待接受连接
+  ansible.builtin.command: pg_isready -h /var/run/postgresql -p {{ pg_port }}
+  register: pg_ready
+  until: pg_ready.rc == 0
+  retries: 60
+  delay: 2
+  changed_when: false
+
+- name: 设置 postgres 账户密码
+  ansible.builtin.command:
+    argv: "{{ pg_psql + ['-d', 'postgres', '-c', \"ALTER ROLE postgres PASSWORD '\" ~ mw.secrets.postgres ~ \"'\"] }}"
+  no_log: true
+  changed_when: true

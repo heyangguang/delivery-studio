@@ -1,0 +1,51 @@
+- id: bootstrap-primary
+  title: 启动初始主库
+  desc: 首次由 Patroni 完成初始化；若 DCS 里已有 initialize 键，Patroni 不会重新初始化，绝不覆盖已有数据目录。
+  effect: change
+  hosts: first:primary
+  when: params.deployment_mode in ['legacy', 'single'] && (count(roles.replica) > 0)
+  run:
+    role: postgresql
+    tasks: start_primary
+- id: join-replicas
+  title: 从库加入复制
+  desc: 其余节点启动 Patroni，从主库基础备份并开始流复制。
+  effect: change
+  hosts: replica
+  when: params.deployment_mode in ['legacy', 'single'] && (count(roles.replica) > 0)
+  run:
+    role: postgresql
+    tasks: start_replica
+- id: topology
+  title: 核对拓扑
+  desc: 恰好一个主库，所有从库都在流复制。
+  effect: read-only
+  hosts: first:primary
+  when: params.deployment_mode in ['legacy', 'single'] && (count(roles.replica) > 0)
+  expect: 流复制中的从库数等于计划。
+  run:
+    role: postgresql
+    tasks: topology
+- id: start-single
+  title: 启动单节点 PostgreSQL
+  effect: change
+  when: params.deployment_mode in ['legacy', 'single'] && (count(roles.replica) == 0)
+  run:
+    role: postgresql
+    tasks: start_single
+- id: native-primary
+  title: 启动原生主库及复制账户
+  effect: change
+  when: params.deployment_mode == 'replication'
+  run:
+    role: postgresql
+    tasks: native_primary
+  hosts: primary
+- id: native-replicas
+  title: 基础备份初始化从库并启动流复制
+  effect: change
+  when: params.deployment_mode == 'replication'
+  run:
+    role: postgresql
+    tasks: native_replica
+  hosts: replica

@@ -1,0 +1,214 @@
+/* Ansible runtimes. Prefix rtl- */
+.rtl-defs {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--line);
+}
+.rtl-defs > li {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr);
+  gap: 12px;
+  padding: 10px 4px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+.rtl-defs .ok {
+  color: var(--ok);
+}
+.rtl-defs .warn {
+  color: var(--warn);
+}
+.rtl-bad {
+  color: var(--bad);
+  font-size: 12.5px;
+}
+.rtl {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--line);
+}
+.rtl-row {
+  border-bottom: 1px solid var(--line);
+}
+.rtl-row.open {
+  background: var(--surface-2);
+}
+.rtl-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 68px;
+  padding-right: 12px;
+  transition: background 0.15s var(--ease-out);
+}
+/* the whole row answers the pointer, not only its left part */
+.rtl-row:not(.open) .rtl-head:hover {
+  background: var(--hover);
+}
+.rtl-main {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 296px 188px 16px;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  padding: 12px 8px;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+.rtl-ic {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  color: #fff;
+  background: linear-gradient(160deg, #ff5a5f, #c2185b);
+}
+.rtl-row:not(.is-default) .rtl-ic {
+  background: linear-gradient(160deg, #a1a1a6, #6e6e73);
+}
+.rtl-name {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.rtl-name b {
+  font-weight: 600;
+}
+.rtl-name small {
+  font-size: 12px;
+  color: var(--mute);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rtl-def {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+.rtl-def .cm {
+  flex: none;
+  white-space: nowrap;
+}
+.rtl-acts {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  width: 252px;
+}
+.rtl-fixed {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  color: var(--ok);
+  font-size: 12.5px;
+  white-space: nowrap;
+  background: var(--ok-soft);
+  border-radius: 999px;
+}
+.rtl-fixed .mono {
+  color: var(--ink-2);
+}
+.rtl-row.open .so-caret {
+  transform: rotate(180deg);
+}
+.rtl-wheels {
+  margin: 0;
+  padding: 0 16px 12px 56px;
+  list-style: none;
+}
+.rtl-wheels > li {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(110px, 0.8fr) 90px minmax(160px, 1.2fr);
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 12.5px;
+}
+.rtl-wheels > li:last-child {
+  border-bottom: 0;
+}
+.rtl-w {
+  color: var(--ink);
+}
+.rtl-wheels .ok {
+  color: var(--ok);
+}
+@media (max-width: 900px) {
+  .rtl-main {
+    grid-template-columns: 34px minmax(0, 1fr) 16px;
+  }
+  .rtl-def,
+  .rtl-sec {
+    grid-column: 2;
+  }
+  .rtl-head {
+    flex-wrap: wrap;
+  }
+  .rtl-wheels {
+    padding-left: 16px;
+  }
+  .rtl-wheels > li {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+.lib-rt-ic {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  color: #fff;
+  font-size: 16px;
+  background: linear-gradient(160deg, #ff5a5f, #c2185b);
+}
+
+.rtl-twins {
+  padding: 8px 12px 10px 56px;
+  list-style: none;
+}
+.rtl-twins .rtl {
+  margin-top: 8px;
+}
+
+/* Size columns from their content, not reserved empty status slots. */
+.rtl-row { container-type: inline-size; }
+.rtl-main {
+  grid-template-columns: 34px minmax(180px, 1fr) auto 16px;
+  column-gap: 12px;
+  row-gap: 6px;
+}
+.rtl-main > .rtl-ic { grid-column: 1; grid-row: 1; }
+.rtl-main > .rtl-name { grid-column: 2; grid-row: 1; gap: 4px; }
+.rtl-name b { white-space: nowrap; }
+.rtl-main > .rtl-def { grid-column: 2 / 4; grid-row: 2; flex-wrap: wrap; overflow: visible; }
+.rtl-def:empty { display: none; }
+.rtl-main > .rtl-sec { grid-column: 3; grid-row: 1; }
+.rtl-main > .so-caret { grid-column: 4; grid-row: 1; }
+.rtl-acts { width: auto; max-width: 100%; flex-wrap: wrap; padding: 8px 0; }
+.rtl-head { flex-wrap: nowrap; }
+@container (max-width: 850px) {
+  .rtl-head { flex-wrap: wrap; gap: 0; padding-right: 8px; }
+  .rtl-main { flex-basis: 100%; grid-template-columns: 34px minmax(0, 1fr) 16px; }
+  .rtl-main > .rtl-sec { grid-column: 2; grid-row: 2; }
+  .rtl-main > .rtl-def { grid-column: 2; grid-row: 3; }
+  .rtl-main > .so-caret { grid-column: 3; }
+  .rtl-acts { margin-left: auto; padding: 0 0 12px 54px; }
+  .rtl-wheels { padding-left: 16px; }
+  .rtl-wheels > li { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); overflow-wrap: anywhere; }
+}

@@ -1,0 +1,8 @@
+- name: 写入归档设置
+  ansible.builtin.include_tasks: _patch.yml
+  vars:
+    pg_patch_settings:
+      archive_mode: "on"
+      archive_timeout: "{{ mw.params.archive_timeout }}s"
+      archive_command: "{{ pg_archive_command }}"
+      restore_command: "{{ pg_restore_command }}"

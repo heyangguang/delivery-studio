@@ -1,0 +1,62 @@
+kind: pg-extension
+scope:
+    name: database
+    defaults:
+        - postgres
+        - template1
+items:
+    - id: pg_trgm
+      title: pg_trgm（三元组相似度）
+      contrib: true
+    - id: btree_gist
+      title: btree_gist（GiST 上的 B 树类型）
+      contrib: true
+    - id: plpgsql
+      title: plpgsql（过程语言）
+      contrib: true
+      builtin: true
+    - id: amcheck
+      title: amcheck（索引与堆一致性检查）
+      contrib: true
+    - id: pgcrypto
+      title: pgcrypto（加密与哈希函数）
+      contrib: true
+    - id: hstore
+      title: hstore（键值对类型）
+      contrib: true
+    - id: citext
+      title: citext（不区分大小写的文本）
+      contrib: true
+    - id: uuid-ossp
+      title: uuid-ossp（生成 UUID）
+      contrib: true
+    - id: tablefunc
+      title: tablefunc（交叉表等表函数）
+      contrib: true
+    - id: unaccent
+      title: unaccent（去除重音的文本搜索字典）
+      contrib: true
+    - id: fuzzystrmatch
+      title: fuzzystrmatch（字符串相似度）
+      contrib: true
+    - id: btree_gin
+      title: btree_gin（GIN 上的 B 树类型）
+      contrib: true
+    - id: intarray
+      title: intarray（整数数组函数与索引）
+      contrib: true
+    - id: ltree
+      title: ltree（树形路径类型）
+      contrib: true
+    - id: postgres_fdw
+      title: postgres_fdw（访问其他 PostgreSQL）
+      contrib: true
+    - id: pg_buffercache
+      title: pg_buffercache（查看共享缓冲区）
+      contrib: true
+    - id: pgstattuple
+      title: pgstattuple（表与索引膨胀统计）
+      contrib: true
+    - id: pg_visibility
+      title: pg_visibility（可见性映射检查）
+      contrib: true

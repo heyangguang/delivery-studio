@@ -1,0 +1,62 @@
+- name: 等待 Patroni 就绪
+  ansible.builtin.include_tasks: _wait_ready.yml
+  when: pg_ha | bool
+
+- name: 核对 Patroni 的优先克隆来源标签
+  ansible.builtin.uri:
+    url: "http://{{ pg_ip }}:{{ pg_rest_port }}/patroni"
+    method: GET
+    status_code: 200
+  register: pg_health_clonefrom
+  until: >-
+    (pg_health_clonefrom.json.tags.clonefrom | default(false) | bool)
+    == (inventory_hostname == (mw.params.clonefrom_node | default('')))
+  retries: 15
+  delay: 2
+  changed_when: false
+  when: pg_ha | bool
+
+- name: 读取实际设置
+  ansible.builtin.command:
+    argv: "{{ pg_psql + ['-d', 'postgres', '-c', 'SHOW ' ~ item] }}"
+  loop: [ssl, archive_mode, shared_preload_libraries]
+  register: pg_show
+  changed_when: false
+
+- name: TDE 设置
+  ansible.builtin.command:
+    argv: "{{ pg_psql + ['-d', 'postgres', '-c', 'SHOW pg_tde.wal_encrypt'] }}"
+  register: pg_walenc
+  changed_when: false
+  when: mw.params.tde
+
+- name: TDE 密钥校验
+  ansible.builtin.command:
+    argv: "{{ pg_psql + ['-d', 'postgres', '-c', 'SELECT pg_tde_verify_server_key(); SELECT pg_tde_verify_default_key();'] }}"
+  changed_when: false
+  when: mw.params.tde
+
+- name: TCP 认证（经本机地址、按计划使用 TLS）
+  ansible.builtin.command:
+    argv: "{{ pg_psql + ['-h', pg_ip, '-U', 'postgres', '-d', 'postgres', '-c', 'SELECT 1'] }}"
+  environment:
+    PGPASSWORD: "{{ mw.secrets.postgres }}"
+    PGSSLMODE: "{{ 'verify-ca' if mw.params.tls else 'disable' }}"
+    PGSSLROOTCERT: /etc/pki/pg/ca.crt
+    PGCONNECT_TIMEOUT: '10'
+  register: pg_tcp
+  changed_when: false
+  no_log: true
+
+- name: 实际设置应与计划一致
+  ansible.builtin.assert:
+    that:
+      - pg_show.results[0].stdout | trim == ('on' if mw.params.tls else 'off')
+      - pg_show.results[1].stdout | trim == 'on'
+      - (not mw.params.tde) or (pg_walenc.stdout | trim == 'on')
+      - mw.params.tde or ('pg_tde' not in pg_show.results[2].stdout)
+      - pg_tcp.stdout | trim == '1'
+    fail_msg: >-
+      设置与计划不一致：ssl={{ pg_show.results[0].stdout | trim }}，archive_mode={{ pg_show.results[1].stdout | trim }}，
+      preload={{ pg_show.results[2].stdout | trim }}
+    success_msg: "{{ inventory_hostname }}：TLS、归档、TDE 与 TCP 认证均符合计划"

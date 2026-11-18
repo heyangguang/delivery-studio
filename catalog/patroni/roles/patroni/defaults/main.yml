@@ -1,0 +1,119 @@
+# Everything below is derived from the instance (mw) and evaluated where it is used, so it always follows the plan.
+pg_major: "17"
+pg_bin: /usr/lib/postgresql/17/bin
+pg_data: "{{ mw_hosts[inventory_hostname].params.data_root | default('/data') }}/pg/17/data"
+pg_ha: "{{ mw.params.deployment_mode in ['legacy', 'patroni'] and (mw.roles.replica | length) > 0 }}"
+pg_state: "/var/lib/mwctl/{{ mw_cluster.id }}/{{ mw.id }}"
+pg_scope: "{{ mw_cluster.id }}-{{ mw.id }}"
+pg_repo: "{{ mw_hosts[inventory_hostname].params.data_root | default('/data') }}/backup/pgbackrest"
+pg_testroot: "{{ mw_hosts[inventory_hostname].params.data_root | default('/data') }}/backup/middleware-tests/{{ pg_scope }}"
+pg_primary: "{{ mw.roles.primary | first }}"
+pg_ip: "{{ mw_hosts[inventory_hostname].ip }}"
+pg_port: "{{ mw.params.pg_port }}"
+pg_rest_port: "{{ mw.params.restapi_port }}"
+pg_unit: "{{ 'patroni' if pg_ha else 'postgresql@17-main' }}"
+pg_etcd_hosts: "{% for h in mw_manager.uses.dcs.hosts %}{{ mw_hosts[h].ip }}:{{ mw_manager.uses.dcs.params.client_port }}{{ ',' if not loop.last }}{% endfor %}"
+
+# psql against the local socket as the postgres OS user.
+pg_psql: "{{ ['runuser', '-u', 'postgres', '--', pg_bin ~ '/psql', '-X', '-v', 'ON_ERROR_STOP=1', '-At', '-h', '/var/run/postgresql', '-p', pg_port | string] }}"
+pg_backrest: "{{ ['runuser', '-u', 'postgres', '--', 'pgbackrest', '--stanza=' ~ pg_scope] }}"
+
+pg_archive_command: >-
+  {{ (pg_bin ~ '/pg_tde_archive_decrypt %f %p "pgbackrest --stanza=' ~ pg_scope ~ ' archive-push %%p"')
+     if mw.params.tde else ('pgbackrest --stanza=' ~ pg_scope ~ ' archive-push %p') }}
+pg_restore_command: >-
+  {{ (pg_bin ~ '/pg_tde_restore_encrypt %f %p "pgbackrest --stanza=' ~ pg_scope ~ ' archive-get %%f \\\"%%p\\\""')
+     if mw.params.tde else ('pgbackrest --stanza=' ~ pg_scope ~ ' archive-get %f "%p"') }}
+
+pg_tls_parameters: >-
+  {{ {'ssl_cert_file': '/etc/pki/pg/server.crt', 'ssl_key_file': '/etc/pki/pg/server.key', 'ssl_ca_file': '/etc/pki/pg/ca.crt',
+      'ssl_min_protocol_version': mw.params.ssl_min_protocol_version} if mw.params.tls else {} }}
+pg_tde_parameters: "{{ {'shared_preload_libraries': 'pg_tde'} if mw.params.tde else {} }}"
+pg_sync_parameters: "{{ {'synchronous_commit': mw.params.synchronous_commit} if (pg_ha and mw.params.replication == 'quorum') else {} }}"
+
+pg_parameters: >-
+  {{ {
+    'max_connections': mw.params.max_connections | int,
+    'shared_buffers': mw.params.shared_buffers,
+    'effective_cache_size': mw.params.effective_cache_size,
+    'maintenance_work_mem': mw.params.maintenance_work_mem,
+    'work_mem': mw.params.work_mem,
+    'wal_level': 'replica',
+    'wal_log_hints': 'on',
+    'hot_standby': 'on',
+    'hot_standby_feedback': 'on' if mw.params.hot_standby_feedback else 'off',
+    'max_wal_senders': mw.params.max_wal_senders | int,
+    'max_replication_slots': mw.params.max_replication_slots | int,
+    'wal_keep_size': mw.params.wal_keep_size,
+    'min_wal_size': mw.params.min_wal_size,
+    'max_wal_size': mw.params.max_wal_size,
+    'checkpoint_completion_target': mw.params.checkpoint_completion_target | float,
+    'archive_mode': 'off',
+    'password_encryption': 'scram-sha-256',
+    'unix_socket_directories': '/var/run/postgresql',
+    'ssl': 'on' if mw.params.tls else 'off',
+    'log_min_duration_statement': mw.params.log_min_duration_statement | int,
+    'log_checkpoints': 'on' if mw.params.log_checkpoints else 'off',
+    'log_connections': 'on' if mw.params.log_connections else 'off',
+    'log_disconnections': 'on' if mw.params.log_disconnections else 'off',
+    'log_lock_waits': 'on' if mw.params.log_lock_waits else 'off',
+    'log_line_prefix': '%m [%p] %q%u@%d ',
+    'timezone': mw.params.timezone,
+    'log_timezone': mw.params.timezone,
+    'datestyle': mw.params.datestyle,
+    'idle_in_transaction_session_timeout': mw.params.idle_in_transaction_session_timeout | int
+  } | combine(pg_sync_parameters) | combine(pg_tls_parameters) | combine(pg_tde_parameters) }}
+
+# Source addresses PostgreSQL must accept: every machine of the instance (replication, Patroni) and the machines of
+# any load balancer fronting it, because a layer-4 balancer makes the client look like the balancer.
+pg_node_ips: "{% for h in mw.hosts %}{{ mw_hosts[h].ip }}{{ ',' if not loop.last }}{% endfor %}"
+pg_hba_type: "{{ 'hostssl' if mw.params.tls else 'hostnossl' }}"
+pg_hba: >-
+  {{ ['local all all peer', 'local replication postgres peer',
+      pg_hba_type ~ ' all all 127.0.0.1/32 scram-sha-256']
+     + ([pg_hba_type ~ ' replication replicator 127.0.0.1/32 scram-sha-256'] if pg_ha else [])
+     + (pg_node_ips.split(',') | map('regex_replace', '^(.*)$', pg_hba_type ~ ' replication replicator \1/32 scram-sha-256') | list if pg_ha else [])
+     + (pg_node_ips.split(',') | map('regex_replace', '^(.*)$', pg_hba_type ~ ' all all \1/32 scram-sha-256') | list)
+     + (mw.front_sources | map('regex_replace', '^(.*)$', pg_hba_type ~ ' all all \1/32 scram-sha-256') | list)
+     + [pg_hba_type ~ ' all all ' ~ mw.params.client_cidr ~ ' scram-sha-256']
+     + (mw.params.extra_client_cidrs | map('regex_replace', '^(.*)$', pg_hba_type ~ ' all all \1 scram-sha-256') | list)
+     + (['hostnossl all all 0.0.0.0/0 reject', 'hostnossl replication all 0.0.0.0/0 reject'] if mw.params.tls else ['hostssl all all 0.0.0.0/0 reject']) }}
+
+pg_ssl_auth: "{{ {'sslmode': 'verify-ca', 'sslrootcert': '/etc/pki/pg/ca.crt'} if mw.params.tls else {'sslmode': 'disable'} }}"
+pg_auth: >-
+  {{ {'superuser': {'username': 'postgres', 'password': mw.secrets.postgres} | combine(pg_ssl_auth),
+      'replication': {'username': 'replicator', 'password': mw.secrets.replicator} | combine(pg_ssl_auth),
+      'rewind': {'username': 'rewind_user', 'password': mw.secrets.rewind_user} | combine(pg_ssl_auth)} if pg_ha else {} }}
+
+patroni_config: >-
+  {{ {
+    'scope': pg_scope,
+    'namespace': '/pg-ha/',
+    'name': inventory_hostname,
+    'restapi': {'listen': '0.0.0.0:' ~ pg_rest_port, 'connect_address': pg_ip ~ ':' ~ pg_rest_port},
+    'etcd3': {'hosts': pg_etcd_hosts},
+    'bootstrap': {
+      'dcs': {
+        'ttl': mw.params.patroni_ttl | int,
+        'loop_wait': mw.params.patroni_loop_wait | int,
+        'retry_timeout': mw.params.patroni_retry_timeout | int,
+        'maximum_lag_on_failover': mw.params.maximum_lag_on_failover | int,
+        'synchronous_mode': 'quorum' if mw.params.replication == 'quorum' else false,
+        'synchronous_node_count': (mw.params.sync_ack_count | int) if mw.params.replication == 'quorum' else 0,
+        'synchronous_mode_strict': (mw.params.sync_strict | bool) if mw.params.replication == 'quorum' else false,
+        'postgresql': {'use_pg_rewind': true, 'use_slots': true, 'parameters': pg_parameters, 'pg_hba': pg_hba}
+      },
+      'initdb': ([{'encoding': 'UTF8'}, 'data-checksums', {'locale': mw.params.initdb_locale}, {'auth-host': 'scram-sha-256'}, {'auth-local': 'peer'}]
+                 + ([{'set': 'shared_preload_libraries=pg_tde'}] if mw.params.tde else []))
+    },
+    'postgresql': ({
+      'bin_dir': pg_bin,
+      'data_dir': pg_data,
+      'listen': '0.0.0.0:' ~ pg_port,
+      'connect_address': pg_ip ~ ':' ~ pg_port,
+      'pgpass': '/etc/postgresql/keys/pgpass',
+      'authentication': pg_auth,
+      'parameters': {'unix_socket_directories': '/var/run/postgresql'}
+    } | combine({'bin_name': {'pg_basebackup': 'pg_tde_basebackup', 'pg_rewind': 'pg_tde_rewind'}} if mw.params.tde else {})),
+    'tags': {'nofailover': false, 'noloadbalance': false, 'clonefrom': inventory_hostname == (mw.params.clonefrom_node | default('')), 'nosync': false}
+  } }}

@@ -1,0 +1,52 @@
+- name: 找到当前主库
+  ansible.builtin.include_tasks: _find_master.yml
+
+- name: 在主库写入测试键
+  ansible.builtin.command:
+    argv: [redis-cli, -h, "{{ rd_master_ip }}", -p, "{{ rd_port }}", SET, "ha:check", "v1"]
+  environment: "{{ rd_env }}"
+  register: rd_set
+  changed_when: true
+  failed_when: rd_set.stdout | trim != 'OK'
+  no_log: true
+
+- name: 每个从库都能读到
+  ansible.builtin.command:
+    argv: [redis-cli, -h, "{{ item }}", -p, "{{ rd_port }}", GET, "ha:check"]
+  environment: "{{ rd_env }}"
+  register: rd_get
+  changed_when: false
+  until: rd_get.stdout | trim == 'v1'
+  retries: 15
+  delay: 2
+  loop: "{{ rd_ips.split(',') | difference([rd_master_ip]) }}"
+  no_log: true
+
+- name: 从库写入应被拒绝
+  ansible.builtin.command:
+    argv: [redis-cli, -h, "{{ item }}", -p, "{{ rd_port }}", SET, "ha:check", "v2"]
+  environment: "{{ rd_env }}"
+  register: rd_ro
+  changed_when: false
+  failed_when: "'READONLY' not in (rd_ro.stdout ~ rd_ro.stderr)"
+  loop: "{{ rd_ips.split(',') | difference([rd_master_ip]) }}"
+  no_log: true
+
+- name: 每台机器不带密码的连接应被拒绝
+  ansible.builtin.command:
+    argv: [redis-cli, -h, "{{ item }}", -p, "{{ rd_port }}", PING]
+  environment:
+    REDISCLI_AUTH: ''
+  register: rd_na
+  changed_when: false
+  failed_when: "'NOAUTH' not in (rd_na.stdout ~ rd_na.stderr)"
+  loop: "{{ rd_ips.split(',') }}"
+
+- name: 主库的复制总态
+  ansible.builtin.command:
+    argv: [redis-cli, -h, "{{ rd_master_ip }}", -p, "{{ rd_port }}", INFO, replication]
+  environment: "{{ rd_env }}"
+  register: rd_mi
+  changed_when: false
+  failed_when: ('connected_slaves:' ~ rd_replica_count) not in rd_mi.stdout
+  no_log: true

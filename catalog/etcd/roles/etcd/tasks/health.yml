@@ -1,0 +1,27 @@
+- name: 检查全部端点健康
+  ansible.builtin.command:
+    argv:
+      - etcdctl
+      - --endpoints={{ etcd_endpoints }}
+      - endpoint
+      - health
+  register: etcd_health
+  changed_when: false
+  retries: 15
+  delay: 4
+  until: etcd_health.rc == 0
+
+- name: 核对成员数
+  ansible.builtin.command:
+    argv:
+      - etcdctl
+      - --endpoints=127.0.0.1:{{ mw.params.client_port }}
+      - member
+      - list
+  register: etcd_members
+  changed_when: false
+
+- name: 成员数应等于计划
+  ansible.builtin.assert:
+    that: etcd_members.stdout_lines | length == mw.roles.member | length
+    fail_msg: "etcd 成员数 {{ etcd_members.stdout_lines | length }}，计划 {{ mw.roles.member | length }}"

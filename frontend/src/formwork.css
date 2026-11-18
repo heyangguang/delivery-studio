@@ -1,0 +1,668 @@
+/* The assistant's workspace for a new delivery. Prefix fw-. */
+
+/* the step list steps aside; the middle of the page is the conversation or one step of the form */
+.wz.ai-focus {
+  grid-template-columns: minmax(0, 1fr) clamp(340px, 24vw, 440px);
+}
+.wz.ai-focus.no-preview {
+  grid-template-columns: minmax(0, 1fr);
+}
+.wz.ai-focus .wz-side {
+  display: none;
+}
+.wz.ai-focus .wz-pane {
+  display: flex;
+  flex-direction: column;
+}
+.wz.ai-focus .wz-pane-body {
+  flex: 1;
+  min-height: 0;
+}
+.wz.ai-focus.ai-chat .wz-pane-body {
+  display: flex;
+  padding: 0;
+  overflow: hidden;
+}
+
+/* ---- the bar above ---- */
+.fw-bar {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 20px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+.fw-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.fw-back {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  color: var(--ink-2);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  cursor: pointer;
+  transition:
+    color 0.15s var(--ease-out),
+    border-color 0.15s var(--ease-out),
+    background 0.15s var(--ease-out);
+}
+.fw-back:hover {
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+  border-color: var(--brand-line);
+}
+.fw-back:focus-visible,
+.fw-tab:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+.fw-tabs {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 3px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.fw-tabs::-webkit-scrollbar {
+  display: none;
+}
+.fw-sep {
+  flex: none;
+  width: 1px;
+  height: 18px;
+  background: var(--line-strong);
+}
+.fw-tab {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 12px 0 9px;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--ink-2);
+  white-space: nowrap;
+  background: transparent;
+  border: 0;
+  border-radius: 9px;
+  cursor: pointer;
+  transition:
+    color 0.15s var(--ease-out),
+    background 0.15s var(--ease-out),
+    box-shadow 0.2s var(--ease-out);
+}
+.fw-tab:hover {
+  color: var(--ink);
+  background: rgba(0, 0, 0, 0.04);
+}
+.fw-tab.on {
+  color: var(--brand-ink);
+  background: var(--surface);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.08),
+    0 0 0 1px var(--line);
+}
+.fw-tab-n {
+  color: var(--faint);
+  font-size: 11.5px;
+}
+.fw-tab .rail-mark {
+  flex: none;
+}
+.fw-tab.work {
+  color: var(--brand-ink);
+}
+.fw-live {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ai-rb);
+  background-size: 300% 100%;
+  animation:
+    ai-flow 3s linear infinite,
+    fw-pulse 1.2s ease-in-out infinite;
+}
+@keyframes fw-pulse {
+  50% {
+    transform: scale(1.5);
+    opacity: 0.6;
+  }
+}
+.fw-end {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  margin-left: 6px;
+}
+/* secondary actions: a real button with its own shape, not a bare word */
+.fw-ghost {
+  height: 32px;
+  padding: 0 14px;
+  color: var(--ink-2);
+  font: 550 13px var(--sans);
+  white-space: nowrap;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    border-color 0.15s,
+    background 0.15s,
+    transform 0.15s var(--ease-out);
+}
+.fw-ghost:hover {
+  color: var(--brand-ink);
+  border-color: var(--brand-line);
+  background: var(--brand-soft);
+}
+.fw-ghost:active {
+  transform: scale(0.97);
+}
+.fw-ghost:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+.fw-end .arco-btn {
+  height: 32px;
+  border-radius: 9px;
+}
+.fw-bar .fc-card {
+  margin: 0;
+}
+
+/* ---- the conversation ---- */
+.fw {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.fw-list {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  padding: 24px 20px 12px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.fw-col {
+  width: 100%;
+  max-width: 1120px;
+  margin: 0 auto;
+}
+.fw.empty .fw-list {
+  display: flex;
+  align-items: center;
+}
+.fw-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 0 0 40px;
+  text-align: center;
+}
+.fw-hero-orb {
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 18px;
+  border: 1px solid rgba(99, 102, 241, 0.15);
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.96) 0%,
+    rgba(241, 243, 255, 0.92) 100%
+  );
+  box-shadow:
+    0 14px 32px -8px rgba(79, 70, 229, 0.22),
+    0 3px 8px -2px rgba(15, 23, 42, 0.06),
+    inset 0 1px 0 #ffffff;
+}
+.fw-hero h2 {
+  margin: 0;
+  font-size: 22px;
+  letter-spacing: -0.02em;
+}
+.fw-hero p {
+  max-width: 460px;
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 14px;
+  line-height: 1.7;
+}
+.fw-foot {
+  flex: none;
+  padding: 6px 20px 16px;
+  background: linear-gradient(to bottom, transparent, var(--surface) 24%);
+}
+.fw-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 4px 0;
+}
+.fw-down {
+  position: sticky;
+  bottom: 6px;
+  left: 50%;
+  display: block;
+  margin: 0 auto;
+  padding: 5px 14px;
+  font-size: 12.5px;
+  color: var(--brand-ink);
+  background: var(--surface);
+  border: 1px solid var(--brand-line);
+  border-radius: 999px;
+  box-shadow: var(--shadow-md);
+  cursor: pointer;
+}
+.fw .ad-msg {
+  animation: fc-in 0.3s var(--ease-out) backwards;
+}
+
+/* what one fill changed */
+.fw-filled {
+  margin: -4px 0 16px 38px;
+  font-size: 13px;
+}
+.fw-filled-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ok);
+}
+.fw-filled-row .link {
+  margin-left: 4px;
+}
+.fw-changes {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px 16px;
+  margin: 8px 0 0;
+  padding: 12px 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--ink);
+}
+.fw-changes dt {
+  white-space: nowrap;
+}
+.fw-changes dt .link {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-weight: 600;
+}
+.fw-changes dd {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.fw-changes em {
+  color: var(--mute);
+  font-style: normal;
+}
+
+/* ---- the fill as it comes in ---- */
+.fw-run {
+  position: relative;
+  margin: 4px 0 20px 38px;
+  padding: 14px 16px 12px;
+  background: var(--surface);
+  border-radius: 14px;
+  box-shadow: var(--shadow-md);
+  animation: fc-in 0.35s var(--ease-out) backwards;
+}
+.fw-run::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  padding: 1px;
+  border-radius: inherit;
+  background: var(--ai-rb);
+  background-size: 300% 100%;
+  animation: ai-flow 6s linear infinite;
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+.fw-run-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+.fw-run-h .link {
+  margin-left: auto;
+  font-size: 12.5px;
+}
+.fw-run-meter {
+  height: 3px;
+  margin: 10px 0;
+  overflow: hidden;
+  background: var(--line);
+  border-radius: 3px;
+}
+.fw-run-meter span {
+  display: block;
+  height: 100%;
+  background: var(--ai-rb);
+  background-size: 300% 100%;
+  animation: ai-flow 3s linear infinite;
+  transform-origin: left;
+  transition: transform 0.3s var(--ease-out);
+}
+.fw-run-stages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 10px;
+  padding: 0;
+  list-style: none;
+}
+.fw-run-stages li {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 10px 2px 8px;
+  font-size: 12px;
+  color: var(--faint);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  transition:
+    color 0.2s,
+    background 0.2s,
+    border-color 0.2s;
+}
+.fw-run-stages li i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.4;
+}
+.fw-run-stages li.on {
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+  border-color: var(--brand-line);
+}
+.fw-run-stages li.on i {
+  opacity: 1;
+  animation: fw-pulse 1s ease-in-out infinite;
+}
+.fw-run-stages li.done {
+  color: var(--ok);
+}
+.fw-run-items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+.fw-run-items li {
+  display: grid;
+  grid-template-columns: 78px 120px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  padding: 3px 8px;
+  border-radius: 8px;
+  animation: fw-row 0.38s var(--ease-out) backwards;
+}
+.fw-run-items li.new {
+  background: linear-gradient(90deg, var(--brand-soft), transparent 80%);
+}
+.fw-run-items li em {
+  color: var(--faint);
+  font-size: 11.5px;
+  font-style: normal;
+}
+.fw-run-items li b {
+  font-weight: 600;
+}
+.fw-run-items li span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@keyframes fw-row {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+.fw-run-note {
+  margin: 10px 0 0;
+  color: var(--faint);
+  font-size: 12px;
+}
+
+/* the form is locked while the assistant is writing in it */
+.wz-sec[inert] {
+  opacity: 0.7;
+}
+
+@media (max-width: 900px) {
+  .fw-bar {
+    padding: 8px 12px 10px;
+  }
+  .fw-bar-row {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+  /* first row: back, then the buttons; the steps get their own row below and scroll sideways */
+  .fw-back {
+    order: 1;
+  }
+  .fw-end {
+    order: 2;
+    margin-left: auto;
+  }
+  .fw-tabs {
+    order: 3;
+    flex-basis: 100%;
+  }
+  .fw-ghost {
+    display: none;
+  }
+  .fw-list {
+    padding: 16px 12px 8px;
+  }
+  .fw-foot {
+    padding: 4px 12px 12px;
+  }
+  .fw-run-items li {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fw-run::before,
+  .fw-run-meter span,
+  .fw-live,
+  .fw-run-items li,
+  .fw-run-stages li.on i {
+    animation: none;
+  }
+}
+
+/* files given to the assistant */
+.fc-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 14px 0;
+}
+.fc-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  height: 28px;
+  padding: 0 4px 0 10px;
+  font-size: 12.5px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.fc-file > svg {
+  flex: none;
+  color: var(--faint);
+}
+.fc-file b {
+  flex: none;
+  color: var(--brand-ink);
+  font-weight: 600;
+}
+.fc-file span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fc-file button {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  color: var(--faint);
+  font-size: 10px;
+  background: none;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+}
+.fc-file button:hover {
+  color: var(--ink);
+  background: rgba(0, 0, 0, 0.06);
+}
+.fc-attach {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: var(--ink-2);
+  font-size: 15px;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.fc-attach:hover {
+  background: var(--hover);
+  color: var(--brand-ink);
+}
+.fc-attach:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+.fc-drop {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  color: var(--brand-ink);
+  font-size: 14px;
+  font-weight: 600;
+  background: color-mix(in srgb, var(--brand-soft) 92%, transparent);
+  border: 2px dashed var(--brand);
+  border-radius: inherit;
+  pointer-events: none;
+}
+.fc-compose {
+  position: relative;
+}
+
+/* the toolbar under the box starts at the box's own left edge, not under the text */
+.fc-compose .fc-tools,
+.fc-compose .fc-chips {
+  padding-left: 12px;
+}
+
+/* the way back to the conversation: icon and words on one line */
+.wz-pane-foot .fw-chatbtn.arco-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 14px;
+  white-space: nowrap;
+  flex: none;
+}
+.wz-pane-foot .fw-chatbtn svg {
+  flex: none;
+  display: block;
+}
+
+/* Keep actions separate from the complete, wrapping step list. */
+.fw-bar-row {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  gap: 12px;
+}
+.fw-bar-title { color: var(--ink); font-size: 14px; font-weight: 600; }
+.fw-tabs {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  flex-wrap: wrap;
+  overflow: visible;
+  gap: 6px;
+  padding: 6px;
+}
+.fw-end { grid-column: 3; grid-row: 1; margin-left: 0; }
+.fw-bar, .fw-bar .fc-card, .fw-bar .fc-card-row { min-width: 0; max-width: 100%; box-sizing: border-box; }
+@media (max-width: 640px) {
+  .fw-bar { padding: 10px 12px; }
+  .fw-bar-row { grid-template-columns: 32px minmax(0, 1fr); }
+  .fw-end { grid-column: 1 / -1; grid-row: 3; flex-wrap: wrap; justify-content: flex-end; }
+  .fw-tab { padding: 0 8px; gap: 5px; }
+  .fw-sep { display: none; }
+}
+@media (max-width: 900px) {
+  .fw-ghost { display: inline-flex; align-items: center; }
+}

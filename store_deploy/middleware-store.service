@@ -1,0 +1,25 @@
+[Unit]
+Description=Middleware Hub offline application delivery service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=middleware-store
+Group=middleware-store
+WorkingDirectory=/opt/middleware-store
+EnvironmentFile=/etc/middleware-store/service.env
+ExecStart=/opt/middleware-store/bin/middleware-store store serve --config /etc/middleware-store/config.json
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=300
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/middleware-store
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target

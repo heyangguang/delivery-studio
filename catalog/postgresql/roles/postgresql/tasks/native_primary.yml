@@ -1,0 +1,36 @@
+- name: 初始化主库（已有数据不重复初始化）
+  become: true
+  become_user: postgres
+  ansible.builtin.command:
+    argv: ["{{ pg_bin }}/initdb", "-D", "{{ pg_data }}", "--data-checksums", "--encoding=UTF8", "--locale={{ mw.params.initdb_locale }}", "--auth-local=peer", "--auth-host=scram-sha-256"]
+    creates: "{{ pg_data }}/PG_VERSION"
+- name: 启动主库
+  ansible.builtin.systemd: {name: "{{ pg_unit }}", enabled: true, state: started}
+- name: 等待主库就绪
+  ansible.builtin.command: "{{ pg_bin }}/pg_isready -h /var/run/postgresql -p {{ pg_port }}"
+  register: native_ready
+  until: native_ready.rc == 0
+  retries: 60
+  delay: 2
+  changed_when: false
+- name: 核对初始主库可写
+  ansible.builtin.command:
+    argv: >-
+      {{ pg_psql + ['-d', 'postgres', '-c', 'SELECT NOT pg_is_in_recovery()'] }}
+  register: native_primary_role
+  changed_when: false
+  failed_when: native_primary_role.stdout | trim != 't'
+- name: 创建复制账户（已存在则保留）
+  ansible.builtin.command:
+    argv: >-
+      {{ pg_psql + ['-d', 'postgres', '-c', "DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='replicator') THEN CREATE ROLE replicator WITH LOGIN REPLICATION; END IF; END $$;"] }}
+  changed_when: true
+- name: 设置数据库及复制账户密码
+  ansible.builtin.command:
+    argv: >-
+      {{ pg_psql + ['-d', 'postgres', '-c', "ALTER ROLE " ~ item.name ~ " PASSWORD '" ~ item.password ~ "'"] }}
+  loop:
+    - {name: postgres, password: "{{ mw.secrets.postgres }}"}
+    - {name: replicator, password: "{{ mw.secrets.replicator }}"}
+  no_log: true
+  changed_when: true

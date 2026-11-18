@@ -1,0 +1,60 @@
+- name: writer
+  title: 写入入口（主库）
+  protocol: tcp
+  port: =params.pg_port
+  backends:
+    - primary
+    - replica
+  when: params.deployment_mode in ['legacy', 'patroni'] && (count(roles.replica) > 0)
+  health:
+    type: http
+    port: =params.restapi_port
+    path: /primary
+    status: 200
+  lb: allowed
+  note: 备库的 /primary 返回 503 属正常；入口不做读写分离。
+- name: writer
+  title: 写入入口（单节点）
+  protocol: tcp
+  port: =params.pg_port
+  backends:
+    - primary
+  when: params.deployment_mode in ['legacy', 'single'] && (count(roles.replica) == 0)
+  health:
+    type: tcp
+  lb: allowed
+- name: reader
+  title: 只读入口（从库）
+  protocol: tcp
+  port: =params.pg_port
+  backends:
+    - replica
+  when: params.deployment_mode in ['legacy', 'patroni'] && (count(roles.replica) > 0)
+  health:
+    type: http
+    port: =params.restapi_port
+    path: /replica
+    status: 200
+  lb: allowed
+- name: writer
+  title: 普通主从写入入口（固定主库）
+  protocol: tcp
+  port: =params.pg_port
+  backends:
+    - primary
+  when: params.deployment_mode == 'replication'
+  health:
+    type: tcp
+  lb: allowed
+  note: 人工切换后须同步调整入口后端；TCP 探测不验证数据库主从角色。
+- name: reader
+  title: 普通主从只读入口（固定从库）
+  protocol: tcp
+  port: =params.pg_port
+  backends:
+    - replica
+  when: params.deployment_mode == 'replication'
+  health:
+    type: tcp
+  lb: allowed
+  note: 人工切换后须同步调整入口后端；TCP 探测不验证数据库主从角色。

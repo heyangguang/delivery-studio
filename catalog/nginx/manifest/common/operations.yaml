@@ -1,0 +1,24 @@
+overview: Nginx（stream）在四层转发应用连接，不保存数据。配置由平台生成，后端变化请通过集群「变更演练」或修订重新生成配置包。
+checks:
+    - title: 服务与配置
+      hosts: 每台负载均衡机器
+      cmd: systemctl is-active nginx && nginx -t
+      expect: active；syntax is ok、test is successful
+    - title: 虚拟 IP 位置
+      when: "params.ha == 'keepalived'"
+      hosts: 每台负载均衡机器
+      cmd: ip -br addr show ${params.vip_interface} | grep -w ${params.vip} || echo 不在本机
+      expect: 只有一台机器持有 ${params.vip}
+tasks:
+    - title: 平滑重载配置
+      cmd: nginx -t && systemctl reload nginx
+faults:
+    - title: 应用连不上入口
+      symptom: 连接被拒绝或超时
+      steps:
+        - 确认 nginx 在运行、监听端口存在：ss -ltnp | grep nginx
+        - 看错误日志中的 upstream 连接失败记录，判断是后端问题还是网络问题
+      cmd: tail -n 100 /var/log/nginx/error.log
+logs:
+    - {name: 错误日志, text: /var/log/nginx/error.log}
+    - {name: 配置文件, text: /etc/nginx/nginx.conf}

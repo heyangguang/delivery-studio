@@ -1,0 +1,89 @@
+# Restart this node only when a pending change needs it. pg_restart_keys lists the settings that decide.
+- name: 当前设置
+  ansible.builtin.command:
+    argv: "{{ pg_psql + ['-d', 'postgres', '-c', 'SHOW \"' ~ item ~ '\"'] }}"
+  loop: "{{ pg_restart_keys }}"
+  register: pg_current
+  changed_when: false
+  failed_when: false
+
+- name: 集群期望值（Patroni）
+  ansible.builtin.uri:
+    url: "http://{{ pg_ip }}:{{ pg_rest_port }}/config"
+    return_content: true
+  register: pg_desired
+  when: pg_ha | bool
+
+- name: 期望值（单节点）
+  ansible.builtin.command:
+    argv: "{{ pg_psql + ['-d', 'postgres', '-c', \"SELECT name || '=' || setting FROM pg_settings WHERE pending_restart\"] }}"
+  register: pg_pending_single
+  changed_when: false
+  when: not (pg_ha | bool)
+
+- name: 判定是否需要重启
+  ansible.builtin.set_fact:
+    pg_need_restart: false
+
+- name: 比较集群期望值与当前值
+  ansible.builtin.set_fact:
+    pg_need_restart: "{{ (pg_need_restart | bool) or (pg_desired_params[item.item] | string) != (item.stdout | trim) }}"
+  loop: "{{ pg_current.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  vars:
+    pg_desired_params: "{{ pg_desired.json.postgresql.parameters | default({}) }}"
+  when: (pg_ha | bool) and item.item in (pg_desired.json.postgresql.parameters | default({}))
+
+- name: 单节点以待重启标记为准
+  ansible.builtin.set_fact:
+    pg_need_restart: "{{ (pg_pending_single.stdout_lines | default([]) | length) > 0 }}"
+  when: not (pg_ha | bool)
+
+- name: 无需重启
+  ansible.builtin.debug:
+    msg: 重启相关的设置已与期望一致，跳过重启，不会产生中断。
+  when: not (pg_need_restart | bool)
+
+- name: 重启（Patroni）
+  when: (pg_need_restart | bool) and (pg_ha | bool)
+  block:
+    - name: 等待 Patroni 报告待重启
+      ansible.builtin.uri:
+        url: "http://{{ pg_ip }}:{{ pg_rest_port }}/patroni"
+        return_content: true
+      register: pg_pending
+      until: pg_pending.json.pending_restart | default(false)
+      retries: 30
+      delay: 2
+      failed_when: false
+
+    - name: DCS 的改动应已反映为待重启
+      ansible.builtin.assert:
+        that: pg_pending.json.pending_restart | default(false)
+        fail_msg: DCS 配置已改但节点没有报告待重启，请先核对配置再重试，不要直接重启
+
+    - name: 经 Patroni 重启
+      ansible.builtin.uri:
+        url: "http://{{ pg_ip }}:{{ pg_rest_port }}/restart"
+        method: POST
+        body_format: json
+        body: {}
+        status_code: [200, 202]
+
+    - name: 重启后等待就绪
+      ansible.builtin.include_tasks: _wait_ready.yml
+
+- name: 重启（单节点）
+  ansible.builtin.systemd:
+    name: "{{ pg_unit }}"
+    state: restarted
+  when: (pg_need_restart | bool) and not (pg_ha | bool)
+
+- name: 重启后设置应已生效
+  ansible.builtin.command:
+    argv: "{{ pg_psql + ['-d', 'postgres', '-c', 'SHOW \"' ~ item ~ '\"'] }}"
+  loop: "{{ pg_restart_keys }}"
+  register: pg_after
+  changed_when: false
+  when: pg_need_restart | bool

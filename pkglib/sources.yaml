@@ -1,0 +1,43 @@
+# Built-in package sources. An administrator can change any of them (for example to an internal mirror) in the
+# platform; a source with the same id replaces the built-in one, and `enabled: false` switches it off.
+# apt sources need `url`, `suites`, `components`; rpm sources need `baseurl`. `key_file` names a file shipped with
+# the platform (pkglib/keys); signatures are always verified when packages are fetched.
+- id: ubuntu-noble
+  title: Ubuntu 24.04 官方源
+  platforms: [ubuntu-24.04-amd64]
+  kind: apt
+  url: http://archive.ubuntu.com/ubuntu
+  suites: [noble, noble-updates, noble-security]
+  components: [main, universe]
+  key_file: ubuntu-archive-keyring.gpg
+- id: percona-ppg17-noble
+  title: Percona Distribution for PostgreSQL 17（Ubuntu 24.04）
+  platforms: [ubuntu-24.04-amd64]
+  kind: apt
+  url: http://repo.percona.com/ppg-17/apt
+  suites: [noble]
+  components: [main]
+  key_file: percona-keyring.gpg
+  # Key fingerprint 4D1B B29D 63D9 8E42 2B21 13B1 9334 A25F 8507 EFA5 (Percona Release Signing Key).
+- id: redis-noble
+  title: Redis 官方仓库（Ubuntu 24.04）
+  platforms: [ubuntu-24.04-amd64]
+  kind: apt
+  url: https://packages.redis.io/deb
+  suites: [noble]
+  components: [main]
+  key_file: redis-keyring.gpg
+  # Key fingerprint 5431 8FA4 052D 1E61 A6B6 F7BB 5F43 49D6 BF53 AA0C (Redis Package Signing), fetched from
+  # https://packages.redis.io/gpg; the signed InRelease of the suite verifies against it.
+- id: rocky9-baseos
+  title: Rocky Linux 9 BaseOS
+  platforms: [el9-amd64]
+  kind: rpm
+  baseurl: https://download.rockylinux.org/pub/rocky/9/BaseOS/x86_64/os/
+  key_file: RPM-GPG-KEY-Rocky-9
+- id: rocky9-appstream
+  title: Rocky Linux 9 AppStream
+  platforms: [el9-amd64]
+  kind: rpm
+  baseurl: https://download.rockylinux.org/pub/rocky/9/AppStream/x86_64/os/
+  key_file: RPM-GPG-KEY-Rocky-9

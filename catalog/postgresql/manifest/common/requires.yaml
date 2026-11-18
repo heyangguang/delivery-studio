@@ -1,0 +1,5 @@
+- capability: dcs
+  title: 协调服务（DCS）
+  when: params.deployment_mode == 'legacy' && count(roles.replica) > 0
+  default_impl: etcd
+  placement: same_hosts

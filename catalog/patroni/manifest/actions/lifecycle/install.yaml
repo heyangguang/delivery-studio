@@ -1,0 +1,6 @@
+- id: packages
+  title: 安装 Patroni 管理器
+  effect: change
+  run:
+    role: patroni
+    tasks: install_manager

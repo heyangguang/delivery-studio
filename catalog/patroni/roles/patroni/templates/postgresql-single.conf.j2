@@ -1,0 +1,10 @@
+# Managed by Middleware Hub for {{ mw_cluster.id }}/{{ mw.id }}. Do not edit by hand.
+listen_addresses = '*'
+port = {{ pg_port }}
+{% for key, value in (pg_parameters | dictsort) %}
+{% if value is number %}
+{{ key }} = {{ value }}
+{% else %}
+{{ key }} = '{{ value | string | replace("'", "''") }}'
+{% endif %}
+{% endfor %}

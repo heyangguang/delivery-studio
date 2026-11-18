@@ -1,0 +1,14 @@
+- name: 流复制中的从库数
+  ansible.builtin.command:
+    argv: "{{ pg_psql + ['-d', 'postgres', '-c', \"SELECT count(*) FROM pg_stat_replication WHERE state='streaming'\"] }}"
+  register: pg_streaming
+  changed_when: false
+  until: (pg_streaming.stdout | trim | int) == (mw.roles.replica | length)
+  retries: 60
+  delay: 2
+
+- name: 恰好一个主库且从库全部在流复制
+  ansible.builtin.assert:
+    that: (pg_streaming.stdout | trim | int) == (mw.roles.replica | length)
+    fail_msg: "流复制中的从库 {{ pg_streaming.stdout | trim }} 个，计划 {{ mw.roles.replica | length }} 个"
+    success_msg: "一个主库，{{ pg_streaming.stdout | trim }} 个从库在流复制"

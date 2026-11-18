@@ -1,0 +1,122 @@
+schema: mwpack/v1
+component: postgresql
+short: pg
+title: PostgreSQL
+category: 数据库
+icon: database
+color: blue
+summary: PostgreSQL 17：单机、原生主从复制、Patroni 自动高可用三种方案。普通主从不引入 Patroni 或 etcd。
+tags:
+    - 高可用
+    - TLS
+    - TDE
+    - 备份
+provides:
+    - sql-endpoint
+    - postgresql-database
+data_volume: true
+detail:
+    tagline: 先选部署方案，再配置数据库节点
+    scale: 1 主 + 任意从库
+    capabilities:
+        - name: 拓扑
+          text: 单机、普通一主一从/一主多从、Patroni 自动高可用按方案选择
+        - name: 复制
+          text: 异步，或仲裁同步，可设确认数与严格同步
+        - name: 加密
+          text: TLS 使用客户提供的证书；TDE 使用本地密钥文件
+        - name: 备份
+          text: pgBackRest 保留策略与并行度，并开启 WAL 归档，不创建定时任务
+        - name: 扩展
+          text: 可按数据库选择 pg_trgm、btree_gist、plpgsql、amcheck 等
+        - name: 入口
+          text: 暴露写入入口与只读入口，可接 HAProxy、Nginx 或外部 ELB
+    includes:
+        - name: 部署与验收手册
+          text: 命令已按本次配置填好，含功能测试、入口测试和清理
+        - name: 离线软件仓库
+          text: 现场无需外网
+    limits:
+        - 单主架构，不支持多主同时写入
+        - 普通主从首批支持异步流复制与人工切换；不宣称自动故障接管
+        - 普通主从首批不开放 TDE，避免未验证的密钥与基础备份组合
+        - 部署方案不是在线转换操作；现有集群改变管理方式需要单独迁移方案
+    presets:
+        - {$file: manifest/schemes/single.yaml}
+        - {$file: manifest/schemes/replication.yaml}
+        - {$file: manifest/schemes/patroni.yaml}
+operations: {$file: manifest/common/operations.yaml}
+roles: {$file: manifest/common/roles.yaml}
+flows:
+    - id: wal
+      title: WAL 流复制
+      kind: replication
+      from: primary
+      to: replica
+      when: count(roles.replica) > 0
+      sync: params.replication == 'quorum'
+requires: {$file: manifest/common/requires.yaml}
+groups: {$file: manifest/common/groups.yaml}
+params: {$file: manifest/common/params.yaml}
+rules: {$file: manifest/common/rules.yaml}
+ports: {$file: manifest/common/ports.yaml}
+secrets: {$file: manifest/common/secrets.yaml}
+inputs: {$file: manifest/common/inputs.yaml}
+endpoints: {$file: manifest/common/endpoints.yaml}
+addons: {$file: manifest/common/addons.yaml}
+versions: {$file: manifest/common/versions.yaml}
+lifecycle:
+    install: {$file: manifest/actions/lifecycle/install.yaml}
+    configure: {$file: manifest/actions/lifecycle/configure.yaml}
+    start: {$file: manifest/actions/lifecycle/start.yaml}
+    provision: {$file: manifest/actions/lifecycle/provision.yaml}
+    verify: {$file: manifest/actions/lifecycle/verify.yaml}
+tests:
+    - {$file: manifest/actions/tests/ha-check.yaml}
+    - {$file: manifest/actions/tests/tde.yaml}
+    - {$file: manifest/actions/tests/physical-backup.yaml}
+    - {$file: manifest/actions/tests/physical-restore.yaml}
+    - {$file: manifest/actions/tests/full-backup.yaml}
+    - {$file: manifest/actions/tests/full-restore.yaml}
+    - {$file: manifest/actions/tests/pitr.yaml}
+    - {$file: manifest/actions/tests/switchover.yaml}
+    - {$file: manifest/actions/tests/failover.yaml}
+    - {$file: manifest/actions/tests/switchback.yaml}
+    - {$file: manifest/actions/tests/pitr-switchover.yaml}
+    - {$file: manifest/actions/tests/rewind-check.yaml}
+    - {$file: manifest/actions/tests/front-preflight.yaml}
+    - {$file: manifest/actions/tests/via-front.yaml}
+    - {$file: manifest/actions/tests/tls-negative.yaml}
+    - {$file: manifest/actions/tests/front-switchover.yaml}
+    - {$file: manifest/actions/tests/front-failover.yaml}
+    - {$file: manifest/actions/tests/front-write-switchover.yaml}
+    - {$file: manifest/actions/tests/native-replication.yaml}
+cleanup:
+    - {$file: manifest/actions/cleanup/inspect.yaml}
+    - {$file: manifest/actions/cleanup/clean-tests.yaml}
+    - {$file: manifest/actions/cleanup/clean-artifacts.yaml}
+    - {$file: manifest/actions/cleanup/reset-backups.yaml}
+    - {$file: manifest/actions/cleanup/backup-info.yaml}
+shared_files:
+    - roles/postgresql/files/pgcommon.py
+    - roles/postgresql/tasks/_patch.yml
+    - roles/postgresql/tasks/_wait_ready.yml
+    - roles/postgresql/tasks/addons.yml
+    - roles/postgresql/tasks/backup_config.yml
+    - roles/postgresql/tasks/configure.yml
+    - roles/postgresql/tasks/configure_patroni.yml
+    - roles/postgresql/tasks/configure_single.yml
+    - roles/postgresql/tasks/install.yml
+    - roles/postgresql/tasks/os_baseline.yml
+    - roles/postgresql/tasks/restart.yml
+    - roles/postgresql/tasks/start_replica.yml
+    - roles/postgresql/tasks/tde_key_sync.yml
+    - roles/postgresql/tasks/tls_files.yml
+    - roles/postgresql/tasks/topology.yml
+    - roles/postgresql/templates/patroni.yml.j2
+    - roles/postgresql/templates/pg_hba.conf.j2
+    - roles/postgresql/templates/pgbackrest.conf.j2
+    - roles/postgresql/templates/postgresql-single.conf.j2
+    - roles/postgresql/tasks/front_preflight.yml
+    - roles/postgresql/tasks/native_health.yml
+companions: {$file: manifest/common/companions.yaml}

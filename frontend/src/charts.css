@@ -1,0 +1,197 @@
+/* Charts. Prefix ch- and hb- */
+.ch {
+  margin: 0;
+}
+.ch-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.ch-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ch-legend button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--ink-2);
+  font: 12.5px var(--sans);
+  background: none;
+  cursor: pointer;
+}
+.ch-legend button:hover {
+  background: var(--hover);
+}
+.ch-legend button.off {
+  opacity: 0.45;
+  text-decoration: line-through;
+}
+.ch-legend i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+.ch-legend b {
+  color: var(--ink);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.ch-view {
+  flex: none;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--brand-ink);
+  font: 12.5px var(--sans);
+  background: none;
+  cursor: pointer;
+}
+.ch-view:hover {
+  background: var(--brand-soft);
+}
+.ch-plot {
+  position: relative;
+}
+.ch-plot svg {
+  display: block;
+  width: 100%;
+}
+.ch-grid {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+.ch-tick {
+  fill: var(--faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.ch-hover {
+  fill: var(--hover);
+}
+.ch-tip {
+  position: absolute;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 150px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-size: 12px;
+  background: var(--glass-strong);
+  backdrop-filter: blur(14px);
+  box-shadow: var(--shadow-md);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+.ch-tip b {
+  margin-bottom: 2px;
+}
+.ch-tip span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ch-tip i {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+.ch-tip em {
+  margin-left: auto;
+  padding-left: 14px;
+  font-style: normal;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.ch-empty {
+  display: grid;
+  place-items: center;
+  color: var(--faint);
+  font-size: 13px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 10px;
+}
+.ch-empty.small {
+  padding: 18px;
+  border: 0;
+}
+.ch-table {
+  max-height: 260px;
+  overflow: auto;
+}
+.ch-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+.ch-table th,
+.ch-table td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: right;
+}
+.ch-table th:first-child,
+.ch-table td:first-child {
+  text-align: left;
+}
+.hb {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.hb li {
+  display: grid;
+  grid-template-columns: minmax(80px, 150px) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 6px 0;
+  font-size: 13px;
+}
+.hb-l {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hb-t {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--sunken);
+  overflow: hidden;
+}
+.hb-t i {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.5s var(--spring);
+}
+.hb-v {
+  min-width: 56px;
+  text-align: right;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.hb-s {
+  grid-column: 2 / -1;
+  margin-top: -3px;
+  color: var(--faint);
+  font-size: 11.5px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .hb-t i {
+    transition: none;
+  }
+}

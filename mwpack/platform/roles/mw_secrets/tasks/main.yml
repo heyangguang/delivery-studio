@@ -1,0 +1,39 @@
+# Runs once on the controller, before anything runs in parallel, so two machines can never race to create
+# different values for the same secret.
+- name: 创建密码目录
+  ansible.builtin.file:
+    path: "{{ mw_secret_dir }}"
+    state: directory
+    mode: '0700'
+
+- name: 生成并保存密码（已存在则保持不变）
+  ansible.builtin.file:
+    path: "{{ mw_secret_dir }}/{{ item.instance }}"
+    state: directory
+    mode: '0700'
+  loop: "{{ mw_secret_list }}"
+  loop_control:
+    label: "{{ item.instance }}/{{ item.name }}"
+
+- name: 写入密码文件
+  ansible.builtin.set_fact:
+    mw_secret_created: "{{ lookup('ansible.builtin.password', mw_secret_dir ~ '/' ~ item.instance ~ '/' ~ item.name ~ ' length=' ~ item.length ~ ' chars=ascii_letters,digits') | length }}"
+  loop: "{{ mw_secret_list }}"
+  loop_control:
+    label: "{{ item.instance }}/{{ item.name }}"
+  no_log: true
+
+- name: 核对密码文件权限
+  ansible.builtin.find:
+    paths: "{{ mw_secret_dir }}"
+    recurse: true
+    file_type: file
+  register: mw_secret_files
+
+- name: 密码文件不得对其他用户开放
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    mode: '0600'
+  loop: "{{ mw_secret_files.files }}"
+  loop_control:
+    label: "{{ item.path | basename }}"

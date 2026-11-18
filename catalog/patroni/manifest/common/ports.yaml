@@ -1,0 +1,3 @@
+- name: patroni-rest
+  value: =params.restapi_port
+  when: count(roles.replica) > 0

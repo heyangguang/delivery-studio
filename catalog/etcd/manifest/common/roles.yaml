@@ -1,0 +1,1 @@
+- {name: member, title: 成员, min: 1, default: 3, odd: true, advise: 7, advise_why: 每次写入都要多数成员确认，成员越多写入越慢}

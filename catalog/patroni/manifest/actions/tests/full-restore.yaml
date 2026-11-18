@@ -1,0 +1,19 @@
+id: full-restore
+title: 全量备份隔离恢复
+desc: 把上一步的备份恢复到隔离目录并启动，核对测试数据后停止。
+effect: change
+hosts: first:primary
+expect: 恢复目录保留到清理阶段。
+inputs:
+    timeout:
+        type: int
+        value: 7200
+preconditions:
+    - mw_step_inputs.timeout > 0
+postconditions:
+    - pg_test_result.rc == 0
+run:
+    role: patroni
+    tasks: test_full_restore
+    vars:
+        pg_test: full-restore

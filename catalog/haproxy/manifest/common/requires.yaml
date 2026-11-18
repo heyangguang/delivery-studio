@@ -1,0 +1,11 @@
+- capability: vip
+  title: 虚拟 IP
+  when: params.ha == 'keepalived'
+  default_impl: keepalived
+  placement: same_hosts
+  with:
+    vip: =params.vip
+    interface: =params.vip_interface
+    prefix: =params.vip_prefix
+    vrrp_id: =params.vrrp_id
+    check_command: pidof haproxy

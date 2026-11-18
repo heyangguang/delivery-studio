@@ -1,0 +1,59 @@
+.sv-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 28px;
+  margin-bottom: 8px;
+}
+.sv-fields label {
+  display: grid;
+  gap: 6px;
+  width: 220px;
+  max-width: 100%;
+  color: var(--mute);
+  font-size: 13px;
+}
+.sv-h {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.sv-h h2 {
+  margin: 0;
+}
+.sv-row {
+  display: grid;
+  grid-template-columns: minmax(100px, 1fr) minmax(220px, 1.6fr) 80px 72px;
+  gap: 12px;
+  align-items: center;
+  min-height: 48px;
+  border-bottom: 1px solid var(--line);
+}
+.sv-row.head {
+  min-height: 34px;
+  color: var(--faint);
+  font-size: 12px;
+}
+.sv-row .mf-usage-bar {
+  flex: 1;
+}
+.sv-q {
+  display: grid;
+  gap: 8px;
+}
+.sv-q small {
+  color: var(--mute);
+}
+@media (max-width: 720px) {
+  .sv-row {
+    grid-template-columns: 1fr auto;
+  }
+  .sv-row .mf-usage {
+    grid-column: 1 / -1;
+    order: 3;
+  }
+  .sv-row.head {
+    display: none;
+  }
+}

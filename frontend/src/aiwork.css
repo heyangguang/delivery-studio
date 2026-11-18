@@ -1,0 +1,600 @@
+/* The assistant's work timeline (wk-), the model picker (mp-), provider marks. */
+
+/* ---------------------------------------------------------------- work */
+.wk {
+  margin: 0 0 10px;
+}
+.wk-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  max-width: 100%;
+  min-height: 32px;
+  padding: 5px 12px 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink-2);
+  font: 13px var(--sans);
+  background: var(--surface);
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+.wk-head:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-2);
+}
+.wk-head:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+.wk.live .wk-head {
+  color: var(--ink-2);
+}
+.wk-head.plain {
+  padding-left: 2px;
+  border-color: transparent;
+  background: none;
+  cursor: default;
+}
+.wk-head.plain:hover {
+  border-color: transparent;
+  background: none;
+}
+.wk-line.quiet {
+  cursor: default;
+}
+.wk-line.quiet small + small {
+  color: var(--faint);
+}
+.wk-ok {
+  color: var(--ok);
+  font-size: 13px;
+}
+.wk-doing {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wk-doing small {
+  margin-left: 4px;
+  color: var(--mute);
+  font-variant-numeric: tabular-nums;
+}
+.wk-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.wk-chips em {
+  padding: 1px 8px;
+  border-radius: 999px;
+  color: var(--mute);
+  font-size: 11.5px;
+  font-style: normal;
+  line-height: 20px;
+  background: var(--sunken);
+}
+.wk-chips em.sk {
+  color: #a35b00;
+  background: var(--warn-soft);
+}
+.wk-chips em.mcp {
+  color: var(--ok);
+  background: var(--ok-soft);
+}
+.wk-chev {
+  flex: none;
+  color: var(--faint);
+  font-size: 12px;
+  transition: transform 0.25s var(--spring);
+}
+.wk [aria-expanded="true"] > .wk-chev {
+  transform: rotate(180deg);
+}
+.wk-fold {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.32s var(--spring);
+}
+.wk-fold.open {
+  grid-template-rows: 1fr;
+}
+/* the fold reaches left under the logo, so the timeline hangs from the logo's own column and its text lines up with the answer */
+.wk-fold > div {
+  margin-left: -34px;
+  padding-left: 34px;
+  overflow: hidden;
+}
+.wk-list {
+  position: relative;
+  margin: 10px 0 2px -34px;
+  padding: 0;
+  list-style: none;
+}
+.wk-list::before {
+  content: "";
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  left: 11px;
+  width: 1px;
+  background: var(--line-strong);
+}
+.wk-n {
+  position: relative;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 10px;
+  padding: 4px 0;
+  animation: ad-rise 0.24s var(--ease-out) both;
+}
+.wk-dot {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--mute);
+  font-size: 12px;
+  background: var(--surface);
+}
+.k-think .wk-dot {
+  color: #8b5cf6;
+  border-color: rgba(139, 92, 246, 0.35);
+  background: rgba(139, 92, 246, 0.08);
+}
+.k-skill .wk-dot {
+  color: #c27500;
+  border-color: rgba(194, 117, 0, 0.35);
+  background: var(--warn-soft);
+}
+.k-mcp .wk-dot {
+  color: var(--ok);
+  border-color: rgba(31, 138, 76, 0.35);
+  background: var(--ok-soft);
+}
+.k-web .wk-dot {
+  color: #0a84ff;
+  border-color: rgba(10, 132, 255, 0.35);
+  background: rgba(10, 132, 255, 0.08);
+}
+.wk-chips em.web,
+.wk-tag.web {
+  color: #0a6fd6;
+  background: rgba(10, 132, 255, 0.1);
+}
+.wk-n.bad .wk-dot {
+  color: var(--bad);
+  border-color: rgba(215, 0, 21, 0.3);
+  background: var(--bad-soft);
+}
+.k-said .wk-dot::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--faint);
+}
+.k-said .wk-body {
+  padding-top: 2px;
+  color: var(--ink-2);
+  font-size: 13px;
+}
+.k-said .md p {
+  margin: 0 0 4px;
+}
+.wk-body {
+  min-width: 0;
+}
+.wk-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 24px;
+  padding: 1px 8px 1px 2px;
+  border: 0;
+  border-radius: 7px;
+  color: var(--ink);
+  font: 13px var(--sans);
+  text-align: left;
+  background: none;
+  cursor: pointer;
+}
+.wk-line:disabled {
+  cursor: default;
+}
+.wk-line:hover:not(:disabled) {
+  background: var(--hover);
+}
+.wk-line:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+.wk-line > b {
+  flex: none;
+  font-weight: 550;
+}
+.wk-line > code {
+  overflow: hidden;
+  min-width: 0;
+  padding: 1px 6px;
+  border-radius: 5px;
+  color: var(--ink-2);
+  font: 12px var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: var(--sunken);
+}
+.wk-line > svg {
+  flex: none;
+  color: var(--faint);
+  font-size: 11px;
+  transition: transform 0.2s var(--ease-out);
+}
+.wk-meta {
+  display: flex;
+  flex: none;
+  gap: 8px;
+  margin-left: auto;
+  color: var(--faint);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+.wk-meta .bad {
+  color: var(--bad);
+}
+.wk-tag {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 5px;
+  color: var(--ok);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  background: var(--ok-soft);
+}
+.wk-tag.sk {
+  color: #a35b00;
+  background: var(--warn-soft);
+}
+.wk-think {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 4px 0 6px 2px;
+  padding: 0 0 0 12px;
+  border-left: 2px solid rgba(139, 92, 246, 0.25);
+  color: var(--mute);
+  font-size: 13px;
+  line-height: 1.7;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+.wk-think.open {
+  display: block;
+  -webkit-line-clamp: unset;
+}
+.wk-think:not(.open) .md p {
+  margin: 0;
+}
+.wk-think:not(.open) .md p + p {
+  margin-top: 4px;
+}
+.wk-think.open .md p {
+  margin: 0 0 6px;
+}
+.wk-detail {
+  margin: 6px 0 8px 2px;
+  animation: ad-rise 0.2s var(--ease-out) both;
+}
+.wk-term {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--code-bg);
+}
+.wk-term-h {
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--line);
+  color: var(--mute);
+  font-size: 12px;
+  font-weight: 600;
+}
+.wk-cmd,
+.wk-out {
+  margin: 0;
+  padding: 9px 12px 0;
+  font: 12px/1.65 var(--mono);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.wk-cmd {
+  padding-bottom: 9px;
+  color: var(--ink);
+}
+.wk-cmd span {
+  color: var(--faint);
+  user-select: none;
+}
+.wk-out {
+  max-height: 240px;
+  padding: 9px 12px;
+  overflow: auto;
+  border-top: 1px solid var(--line);
+  color: var(--ink-2);
+  font-size: 11.5px;
+  word-break: break-word;
+}
+.wk-term-f {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 7px 12px;
+  border-top: 1px solid var(--line);
+  color: var(--ok);
+  font-size: 12px;
+  font-weight: 600;
+}
+.wk-term-f.bad {
+  color: var(--bad);
+}
+.wk-spin {
+  width: 12px;
+  height: 12px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: wk-spin 0.8s linear infinite;
+}
+.wk-head .wk-spin {
+  color: var(--brand);
+}
+@keyframes wk-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---------------------------------------------------------------- model picker */
+.mp {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 240px;
+  height: 34px;
+  padding: 0 10px 0 8px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: var(--ink-2);
+  font: 12.5px var(--sans);
+  background: none;
+  cursor: pointer;
+}
+.mp:hover {
+  border-color: var(--line);
+  background: var(--hover);
+}
+.mp:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+.mp > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mp > svg {
+  flex: none;
+  color: var(--faint);
+  font-size: 11px;
+  transition: transform 0.2s var(--ease-out);
+}
+.mp > svg.mp-flip {
+  transform: rotate(180deg);
+}
+.mp.on {
+  border-color: var(--line);
+  background: var(--hover);
+}
+.mp.compact {
+  height: 28px;
+  padding: 0 8px 0 6px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+.mp.static {
+  cursor: default;
+}
+.mp-pop .arco-popover-content {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.mp-pop .arco-popover-arrow {
+  display: none;
+}
+.mp-menu {
+  min-width: 296px;
+  max-width: min(352px, calc(100vw - 24px));
+  padding: 5px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+}
+.mp-group + .mp-group {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+.mp-group-title {
+  padding: 5px 10px 3px;
+  color: var(--mute);
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.mp-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.mp-t {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.35;
+}
+.mp-t b {
+  overflow: hidden;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mp-t small {
+  overflow: hidden;
+  color: var(--faint);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mp-t small .mono {
+  font-size: 11px;
+}
+.mp-caps {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+.mp-caps em {
+  padding: 0 5px;
+  border-radius: 4px;
+  color: var(--brand-ink);
+  font-size: 10.5px;
+  font-style: normal;
+  background: var(--brand-soft);
+}
+.mp-caps em.no {
+  color: var(--mute);
+  background: var(--sunken);
+}
+.mp-on {
+  flex: none;
+  color: var(--brand);
+}
+.mp-item {
+  all: unset;
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  margin: 1px 0;
+  padding: 7px 10px;
+  border-radius: 8px;
+  color: var(--ink);
+  font: 13px/1.35 var(--sans);
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+.mp-item:hover {
+  background: var(--hover);
+}
+.mp-item:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+.mp-item.mp-item-on {
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+}
+.mp-item.mp-item-on:hover {
+  background: color-mix(in srgb, var(--brand-soft) 82%, var(--hover));
+}
+
+/* ---------------------------------------------------------------- provider marks */
+.ai-logo {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  color: var(--ink);
+}
+.ai-logo svg {
+  width: 100%;
+  height: 100%;
+}
+.ai-logo.pic {
+  border-radius: 24%;
+  object-fit: cover;
+}
+.ai-logo.plain {
+  border-radius: 28%;
+  color: #fff;
+  font-weight: 700;
+  background: linear-gradient(160deg, #8e8e93, #636366);
+}
+@media (prefers-reduced-motion: reduce) {
+  .wk-n,
+  .wk-detail {
+    animation: none;
+  }
+  .wk-fold,
+  .wk-chev {
+    transition: none;
+  }
+  .wk-spin {
+    animation-duration: 2s;
+  }
+}
+.wk-chips em.kb,
+.wk-tag.kb {
+  color: #0b7d7d;
+  background: rgba(20, 170, 170, 0.12);
+}
+
+.wk-cmd.code {
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre;
+  word-break: normal;
+}
+
+/* while it works nothing may jump: the head keeps one width, the clock does not wobble, and the thinking that is still
+   being written scrolls inside a fixed window, pinned to its newest line */
+.wk.live .wk-head {
+  width: min(100%, 420px);
+}
+.wk-doing {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.wk-head small {
+  font-variant-numeric: tabular-nums;
+}
+.wk-think.live {
+  display: flex;
+  flex-direction: column-reverse;
+  max-height: 150px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.wk-list,
+.wk-fold {
+  overflow-anchor: none;
+}
+/* the logo sits level with the head of the work it did, not with the top edge of it */
+.ad-msg.ai:has(.wk) .ad-avatar {
+  margin-top: 4px;
+}

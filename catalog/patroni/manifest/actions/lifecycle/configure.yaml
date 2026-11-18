@@ -1,0 +1,7 @@
+- id: config
+  title: 写入数据库与高可用配置
+  desc: 有从库时写入 Patroni 配置（含 DCS 引导参数）和 systemd 覆盖项；单节点则创建数据库集群并写入 postgresql.conf 与 pg_hba.conf。
+  effect: change
+  run:
+    role: patroni
+    tasks: configure

@@ -1,0 +1,8 @@
+- name: 启动 redis-server
+  ansible.builtin.systemd:
+    name: redis-server
+    enabled: true
+    state: started
+
+- name: 等待就绪
+  ansible.builtin.include_tasks: _wait_ready.yml

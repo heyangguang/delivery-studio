@@ -1,0 +1,32 @@
+schema: mw-host-parameters/v1
+parameters:
+  - key: storage_mode
+    label: 数据存储方式
+    type: enum
+    default: dedicated_disk
+    help: 独立数据盘沿用现有挂载要求；系统盘目录不格式化磁盘，数据会占用系统盘空间。
+    options:
+      - {value: dedicated_disk, label: 独立数据盘}
+      - {value: system_directory, label: 系统盘目录}
+  - key: data_root
+    label: 挂载点 / 数据根目录
+    type: path
+    default: /data
+    required: true
+    help: 独立数据盘挂载到此目录；系统盘模式直接使用此目录。默认 /data；已有数据不会自动迁移。
+  - key: data_min_free_mb
+    label: 数据目录最少可用空间（MiB）
+    type: int
+    default: 1024
+    min: 1
+    max: 104857600
+    help: 系统盘目录模式部署前检查可用空间，不足时停止。
+rules:
+  - id: system_directory_no_disk
+    when: {field: params.storage_mode, equals: system_directory}
+    require:
+      - {field: disk, equals: ''}
+      - {field: partition, equals: ''}
+      - {field: initialize, equals: false}
+    hide: [disk, partition, initialize]
+    message: 系统盘目录模式不能指定磁盘、分区或初始化磁盘；请清除这些配置。

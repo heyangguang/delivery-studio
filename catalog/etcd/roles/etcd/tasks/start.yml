@@ -1,0 +1,11 @@
+- name: 启动 etcd
+  ansible.builtin.systemd:
+    name: etcd
+    enabled: true
+    state: started
+
+- name: 等待客户端端口
+  ansible.builtin.wait_for:
+    host: "{{ mw_hosts[inventory_hostname].ip }}"
+    port: "{{ mw.params.client_port }}"
+    timeout: 120

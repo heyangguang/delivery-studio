@@ -1,0 +1,21 @@
+# Sets rd_master_ip and rd_master_name: the master the sentinel reports, or the planned primary on a single node.
+- name: 哨兵报告的当前主库
+  ansible.builtin.command:
+    argv: [redis-cli, -h, 127.0.0.1, -p, "{{ rd_sport }}", SENTINEL, get-master-addr-by-name, "{{ rd_master }}"]
+  register: rd_gma
+  changed_when: false
+  until: rd_gma.rc == 0 and (rd_gma.stdout_lines | length) >= 2
+  retries: 30
+  delay: 2
+  when: rd_ha | bool
+
+- name: 记录当前主库
+  ansible.builtin.set_fact:
+    rd_master_ip: "{{ rd_gma.stdout_lines[0] if rd_ha | bool else rd_primary_ip }}"
+- name: 当前主库对应的机器名
+  ansible.builtin.set_fact:
+    rd_master_name: "{% for h in mw.hosts %}{% if mw_hosts[h].ip == rd_master_ip %}{{ h }}{% endif %}{% endfor %}"
+- name: 主库必须是本实例的机器
+  ansible.builtin.assert:
+    that: rd_master_name != ''
+    fail_msg: "哨兵报告的主库 {{ rd_master_ip }} 不是本实例的任何一台机器"

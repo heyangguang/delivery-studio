@@ -1,0 +1,40 @@
+- name: 验证系统盘目录模式没有磁盘写入请求
+  ansible.builtin.assert:
+    that:
+      - not mw_hosts[inventory_hostname].initialize
+      - mw_hosts[inventory_hostname].disk | length == 0
+      - mw_hosts[inventory_hostname].partition | length == 0
+  when: mw_hosts[inventory_hostname].params.storage_mode == 'system_directory'
+
+- name: 复制数据盘脚本
+  ansible.builtin.copy:
+    src: mw-data-disk.sh
+    dest: /usr/local/sbin/mw-data-disk.sh
+    mode: '0700'
+  when: mw_hosts[inventory_hostname].params.storage_mode == 'dedicated_disk'
+
+- name: 处理数据盘
+  ansible.builtin.command:
+    argv:
+      - /usr/local/sbin/mw-data-disk.sh
+      - "{{ 'init' if mw_hosts[inventory_hostname].initialize else 'check' }}"
+      - "{{ mw_hosts[inventory_hostname].disk }}"
+      - "{{ mw_hosts[inventory_hostname].partition }}"
+      - "{{ mw_hosts[inventory_hostname].params.data_root | default('/data') }}"
+  when: mw_hosts[inventory_hostname].params.storage_mode == 'dedicated_disk'
+  register: mw_disk
+  changed_when: "'initialized' in mw_disk.stdout"
+
+- name: 准备系统盘数据目录
+  ansible.builtin.file:
+    path: "{{ mw_hosts[inventory_hostname].params.data_root | default('/data') }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  when: mw_hosts[inventory_hostname].params.storage_mode == 'system_directory'
+
+- name: 提示数据占用系统盘空间
+  ansible.builtin.debug:
+    msg: "{{ mw_hosts[inventory_hostname].params.data_root | default('/data') }} 使用普通目录模式，不执行磁盘格式化；请持续监控系统盘可用空间。"
+  when: mw_hosts[inventory_hostname].params.storage_mode == 'system_directory'

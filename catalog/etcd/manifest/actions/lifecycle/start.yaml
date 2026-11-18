@@ -1,0 +1,11 @@
+- id: start
+  title: 启动 etcd 成员
+  desc: 同时启动全部成员（首次组建需要多数派在线），等待端口监听。
+  effect: change
+  run: {role: etcd, tasks: start}
+- id: cluster-health
+  title: 核对 etcd 集群健康
+  desc: 每个成员都能通过全部端点的健康检查，且成员数等于计划。
+  effect: read-only
+  expect: 全部端点 healthy，成员数与计划一致。
+  run: {role: etcd, tasks: health}

@@ -1,0 +1,9 @@
+id: auth
+title: 密码认证
+desc: 用密码连接成功，不带密码被拒绝。
+effect: read-only
+hosts: first:primary
+when: count(roles.replica) == 0
+skip: 有从库时认证随主从复制测试一起验证
+expect: 带密码 PING 返回 PONG，无密码返回 NOAUTH。
+run: {role: redis, tasks: test_auth}

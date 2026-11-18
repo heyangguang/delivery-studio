@@ -1,0 +1,6 @@
+id: health
+title: 集群健康与领导者
+desc: 检查每个端点健康，并核对只有一个领导者。
+effect: read-only
+expect: 全部端点 healthy，恰好一个 leader。
+run: {role: etcd, tasks: test_health}

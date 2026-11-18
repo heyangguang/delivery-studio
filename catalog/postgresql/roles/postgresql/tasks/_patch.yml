@@ -1,0 +1,21 @@
+# Apply cluster-level PostgreSQL settings: through Patroni's DCS configuration when it manages the cluster,
+# otherwise ALTER SYSTEM. Expects pg_patch_settings (a dict of string values). Runs on the primary.
+- name: 更新集群配置（Patroni DCS）
+  ansible.builtin.uri:
+    url: "http://{{ pg_ip }}:{{ pg_rest_port }}/config"
+    method: PATCH
+    body_format: json
+    body:
+      postgresql:
+        parameters: "{{ pg_patch_settings }}"
+    status_code: 200
+  when: pg_ha | bool
+
+- name: 更新集群配置（ALTER SYSTEM）
+  ansible.builtin.command:
+    argv: "{{ pg_psql + ['-d', 'postgres', '-c', 'ALTER SYSTEM SET \"' ~ item.key ~ '\" = ' ~ (\"'\" ~ (item.value | string | replace(\"'\", \"''\")) ~ \"'\")] }}"
+  loop: "{{ pg_patch_settings | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  when: not (pg_ha | bool)
+  changed_when: true

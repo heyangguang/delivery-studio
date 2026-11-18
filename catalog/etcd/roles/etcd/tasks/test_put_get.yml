@@ -1,0 +1,23 @@
+- name: 写入测试键
+  ansible.builtin.command:
+    argv: [etcdctl, "--endpoints={{ first_ep }}", put, "/mw-acceptance/{{ mw_cluster.id }}", "ok-{{ mw.id }}"]
+  changed_when: true
+  vars:
+    first_ep: "{{ mw_hosts[mw.roles.member | first].ip }}:{{ mw.params.client_port }}"
+
+- name: 从最后一个成员读回
+  ansible.builtin.command:
+    argv: [etcdctl, "--endpoints={{ last_ep }}", get, "/mw-acceptance/{{ mw_cluster.id }}", --print-value-only]
+  register: etcd_got
+  changed_when: false
+  vars:
+    last_ep: "{{ mw_hosts[mw.roles.member | last].ip }}:{{ mw.params.client_port }}"
+
+- name: 值应一致
+  ansible.builtin.assert:
+    that: etcd_got.stdout | trim == 'ok-' ~ mw.id
+
+- name: 删除测试键
+  ansible.builtin.command:
+    argv: [etcdctl, "--endpoints=127.0.0.1:{{ mw.params.client_port }}", del, "/mw-acceptance/{{ mw_cluster.id }}"]
+  changed_when: true

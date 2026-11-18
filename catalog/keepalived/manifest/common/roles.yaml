@@ -1,0 +1,1 @@
+- {name: node, title: 节点, min: 1, default: 2}

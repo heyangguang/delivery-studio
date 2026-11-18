@@ -1,0 +1,6 @@
+- {key: vip, group: vrrp, label: 虚拟 IP, type: ip, required: true}
+- {key: prefix, group: vrrp, label: 子网前缀长度, type: int, default: 24, min: 8, max: 32}
+- {key: interface, group: vrrp, label: 网卡名, type: string, required: true, pattern: '^[a-zA-Z0-9_.:-]{1,15}$', hint: 各节点上承载 VIP 的网卡名须相同}
+- {key: vrrp_id, group: vrrp, label: VRRP 组号, type: int, default: 51, min: 1, max: 255, hint: 同一二层网络内不同 VIP 须不同}
+- {key: advert_int, group: vrrp, label: 通告间隔（秒）, type: int, default: 1, min: 1, max: 10}
+- {key: check_command, group: vrrp, label: 存活检查命令, type: string, default: pidof haproxy, hint: 返回非 0 时本节点降权让出 VIP}

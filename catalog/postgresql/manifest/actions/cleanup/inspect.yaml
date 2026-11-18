@@ -1,0 +1,19 @@
+id: inspect
+title: 盘点测试资源（不删除）
+desc: 列出各节点上的测试目录、正在运行的隔离实例和备份情况。这一步不会改动任何东西。
+effect: read-only
+serial: 1
+inputs:
+    timeout:
+        type: int
+        value: 7200
+preconditions:
+    - mw_step_inputs.timeout > 0
+postconditions:
+    - pg_test_result.rc == 0
+run:
+    role: postgresql
+    tasks: test_inspect
+    vars:
+        pg_test: inspect
+when: params.deployment_mode in ['legacy', 'single']

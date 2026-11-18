@@ -1,0 +1,16 @@
+[Unit]
+Description=PostgreSQL {{ pg_scope }} native replication
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=simple
+User=postgres
+Group=postgres
+ExecStart={{ pg_bin }}/postgres -D {{ pg_data }} -c config_file=/etc/middleware/{{ pg_scope }}/postgresql.conf
+ExecReload=/bin/kill -HUP $MAINPID
+KillSignal=SIGINT
+TimeoutStopSec=300
+Restart=on-failure
+UMask=0077
+[Install]
+WantedBy=multi-user.target

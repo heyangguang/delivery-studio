@@ -1,0 +1,24 @@
+- name: 检查现有数据库归属
+  ansible.builtin.stat: {path: "{{ pg_data }}/PG_VERSION"}
+  register: native_data
+- name: 读取部署归属
+  ansible.builtin.slurp: {src: "{{ pg_state }}/scope"}
+  register: native_scope
+  failed_when: false
+- name: 拒绝接管未知数据目录
+  ansible.builtin.assert:
+    that: not native_data.stat.exists or (native_scope.content | default('') | b64decode | trim) == pg_scope
+    fail_msg: 数据目录已有数据但不属于当前部署，不能当作普通主从初始化。
+- name: 创建配置及状态目录
+  ansible.builtin.file: {path: "{{ item }}", state: directory, owner: postgres, group: postgres, mode: '0700'}
+  loop: ["{{ pg_state }}", "/etc/middleware/{{ pg_scope }}"]
+- name: 记录部署身份
+  ansible.builtin.copy: {dest: "{{ pg_state }}/scope", content: "{{ pg_scope }}\n", mode: '0600'}
+- name: 写入本节点配置
+  ansible.builtin.template: {src: native-postgresql.conf.j2, dest: "/etc/middleware/{{ pg_scope }}/postgresql.conf", owner: postgres, group: postgres, mode: '0600'}
+- name: 写入访问规则
+  ansible.builtin.template: {src: pg_hba.conf.j2, dest: "/etc/middleware/{{ pg_scope }}/pg_hba.conf", owner: postgres, group: postgres, mode: '0600'}
+- name: 写入独立数据库服务
+  ansible.builtin.template: {src: native-postgresql.service.j2, dest: "/etc/systemd/system/{{ pg_unit }}.service", mode: '0644'}
+- name: 重新加载服务定义
+  ansible.builtin.systemd: {daemon_reload: true}

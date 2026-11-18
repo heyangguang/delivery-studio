@@ -1,0 +1,6 @@
+id: put-get
+title: 写入读取删除
+desc: 在 /mw-acceptance/ 下写入一个键，从另一个成员读回，再删除。
+effect: change
+expect: 读回的值与写入一致，测试键已删除。
+run: {role: etcd, tasks: test_put_get}

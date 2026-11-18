@@ -1,0 +1,4 @@
+- {id: network, label: 网络与端口}
+- {id: storage, label: 存储与压缩}
+- {id: tuning, label: 时序调优}
+- {id: logging, label: 日志}

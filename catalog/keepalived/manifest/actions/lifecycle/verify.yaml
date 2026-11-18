@@ -1,0 +1,5 @@
+- id: vip-holder
+  title: 核对 VIP 只在一台机器上
+  effect: read-only
+  expect: 恰好一台机器持有虚拟 IP。
+  run: {role: keepalived, tasks: holder}

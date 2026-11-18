@@ -1,0 +1,98 @@
+overview: PostgreSQL 是单主架构：只有主库能写，从库通过 WAL 流复制跟随主库。有从库时由 Patroni 管理，Patroni 借助 etcd 选主并在主库故障时自动切换，所以不要用 systemctl 或 pg_ctl 直接启停数据库，统一用 patronictl。日常关注：谁是主库、各从库的复制延迟、WAL 归档是否成功、备份是否按计划完成、磁盘空间。
+checks:
+    - title: 集群拓扑与复制延迟
+      when: count(roles.replica) > 0
+      hosts: 任意一台数据库机器
+      cmd: patronictl -c /etc/patroni/patroni.yml list
+      expect: 只有一个 Leader，其余为 Sync Standby 或 Replica，状态都是 streaming / running；Lag in MB 接近 0
+    - title: 服务状态
+      when: count(roles.replica) == 0
+      hosts: 数据库机器
+      cmd: systemctl is-active postgresql@17-main && sudo -u postgres psql -p ${params.pg_port} -Atc "select now() - pg_postmaster_start_time()"
+      expect: active，并输出数据库已运行的时长
+    - title: 复制状态（在主库）
+      when: count(roles.replica) > 0
+      hosts: 主库
+      cmd: sudo -u postgres psql -p ${params.pg_port} -c "select application_name, state, sync_state, pg_size_pretty(pg_wal_lsn_diff(pg_current_wal_lsn(), replay_lsn)) as lag from pg_stat_replication"
+      expect: 每个从库一行，state 为 streaming；仲裁同步时 sync_state 为 quorum；lag 很小
+    - title: WAL 归档
+      hosts: 主库
+      cmd: sudo -u postgres psql -p ${params.pg_port} -c "select archived_count, last_archived_time, failed_count, last_failed_time from pg_stat_archiver"
+      expect: last_archived_time 是最近的时间；failed_count 不增长。归档失败会让 WAL 堆积、磁盘被写满
+    - title: 备份情况
+      hosts: 主库
+      cmd: sudo -u postgres pgbackrest --stanza=${cluster}-${instance} info
+      expect: status ok；能看到最近一次全量或差异备份。平台只配置了备份策略，定时备份要由运维按制度安排
+    - title: 连接数与磁盘
+      hosts: 每台数据库机器
+      cmd: |
+        sudo -u postgres psql -p ${params.pg_port} -Atc "select count(*) || ' / ' || current_setting('max_connections') from pg_stat_activity"
+        df -h /data
+      expect: 连接数明显低于上限；/data 使用率低于 80%
+tasks:
+    - title: 计划内切换主库
+      when: count(roles.replica) > 0
+      cmd: patronictl -c /etc/patroni/patroni.yml switchover
+      note: 交互式选择新的主库，应用连接会短暂中断；安排在低峰执行，切换后用 list 确认
+    - title: 重启一台数据库
+      when: count(roles.replica) > 0
+      cmd: patronictl -c /etc/patroni/patroni.yml restart ${cluster}-${instance} <成员名>
+      note: 先重启从库，主库最后；需要重启主库时先做一次计划内切换
+    - title: 修改需要重启的参数后
+      when: count(roles.replica) > 0
+      cmd: patronictl -c /etc/patroni/patroni.yml list
+      note: 列表里 Pending restart 为 * 的成员需要重启；参数修改应通过集群「变更演练」进行配置变更，不要直接改 postgresql.conf
+    - title: 手动做一次全量备份
+      cmd: sudo -u postgres pgbackrest --stanza=${cluster}-${instance} --type=full backup
+      note: 在主库执行；备份保存在 /data/backup/pgbackrest，按保留数 ${params.backup_retention_full} 份全量自动清理旧备份
+    - title: 连接数据库
+      cmd: sudo -u postgres psql -p ${params.pg_port}
+faults:
+    - title: 主库宕机后的自动切换
+      when: count(roles.replica) > 0
+      symptom: 应用短暂报连接错误，patronictl list 显示 Leader 换到了另一台
+      steps:
+        - 这是预期内的自动接管，先确认新主库可写、应用已恢复
+        - 查原主库为什么宕机：journalctl -u patroni、/data/pg/17/data/log 下的日志、磁盘和内存
+        - 原主库修好后启动 patroni，它会以从库身份重新加入（必要时自动 pg_rewind）；用 list 确认它变成 streaming
+        - 不要手工把原主库直接起成主库，会造成两个主库同时写入
+      cmd: journalctl -u patroni -n 200 --no-pager
+    - title: 从库复制延迟变大
+      when: count(roles.replica) > 0
+      symptom: list 里某个从库 Lag 持续增长，或 pg_stat_replication 里 lag 很大
+      steps:
+        - 看从库所在机器的磁盘 IO 与 CPU（iostat -x 1、top），延迟多数来自从库磁盘慢或有大查询占用
+        - 在从库上查是否有长时间运行的查询阻塞回放：select pid, now()-query_start, query from pg_stat_activity where state <> 'idle' order by 2 desc
+        - 主库在做大批量写入或建索引时延迟升高属于正常，结束后应自动追上
+        - 仲裁同步下，延迟大的从库会拖慢提交；持续不恢复时考虑在平台上调整同步确认数
+    - title: 无法选主，集群只读
+      when: count(roles.replica) > 0
+      symptom: list 显示没有 Leader，或所有成员都是 Replica；写入报 read-only
+      steps:
+        - Patroni 依赖 etcd 选主，先检查 etcd 是否健康（见 etcd 的巡检）
+        - etcd 恢复后 Patroni 会自动选出主库；不要手工 promote
+        - etcd 正常仍无法选主时，看 journalctl -u patroni 中的原因（例如所有成员数据都落后、同步要求无法满足）
+    - title: WAL 归档失败、磁盘快满
+      symptom: pg_stat_archiver 的 failed_count 增长，/data 使用率持续上涨，pg_wal 目录很大
+      steps:
+        - 看 PostgreSQL 日志中 archive command failed 的具体原因
+        - 检查 pgBackRest 仓库 /data/backup/pgbackrest 所在磁盘空间，以及 sudo -u postgres pgbackrest --stanza=${cluster}-${instance} check 的输出
+        - 修好后归档会自动补上，pg_wal 随之变小；不要手工删除 pg_wal 里的文件
+      cmd: sudo -u postgres pgbackrest --stanza=${cluster}-${instance} check
+    - title: 连接数耗尽
+      symptom: 应用报 too many clients already 或 remaining connection slots are reserved
+      steps:
+        - 查看是谁占用了连接：select usename, client_addr, state, count(*) from pg_stat_activity group by 1,2,3 order by 4 desc
+        - 大量 idle 连接说明应用连接池配置过大或泄漏，应由应用侧处理
+        - 确需调大上限时，通过集群「变更演练」配置变更调整 max_connections（当前 ${params.max_connections}），需要重启
+logs:
+    - name: Patroni 日志
+      text: journalctl -u patroni（有从库时）
+    - name: 数据库日志
+      text: /data/pg/17/data/log
+    - name: 备份日志
+      text: /var/log/pgbackrest
+    - name: Patroni 配置
+      text: /etc/patroni/patroni.yml（有从库时）
+    - name: 数据目录
+      text: /data/pg/17/data

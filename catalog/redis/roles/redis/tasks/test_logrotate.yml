@@ -1,0 +1,39 @@
+- name: 手动触发一次日志切割
+  ansible.builtin.command: logrotate -f /etc/logrotate.d/redis-local
+  changed_when: true
+
+- name: 切割后的文件
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ rd_dir }}/log/redis-server.log.1"
+    - "{{ rd_dir }}/log/redis-server.log"
+  register: rd_files
+
+- name: 轮转后触发一次日志写入
+  ansible.builtin.shell: |
+    set -e
+    redis-cli -h 127.0.0.1 -p {{ rd_port }} CONFIG SET loglevel verbose >/dev/null
+    redis-cli -h 127.0.0.1 -p {{ rd_port }} PING >/dev/null
+    redis-cli -h 127.0.0.1 -p {{ rd_port }} CONFIG SET loglevel {{ mw.params.loglevel }} >/dev/null
+  args:
+    executable: /bin/bash
+  environment: "{{ rd_env }}"
+  changed_when: true
+  no_log: true
+
+- name: 新日志文件的状态
+  ansible.builtin.stat:
+    path: "{{ rd_dir }}/log/redis-server.log"
+  register: rd_new
+
+- name: 切割应当生效
+  ansible.builtin.assert:
+    that:
+      - rd_files.results[0].stat.exists
+      - rd_new.stat.exists
+      - rd_new.stat.pw_name == 'redis'
+      - rd_new.stat.gr_name == 'redis'
+      - rd_new.stat.mode == '0660'
+      - rd_new.stat.size > 0
+    success_msg: "{{ inventory_hostname }}：日志已切割，新文件属主 redis:redis 权限 660，且轮转后继续写入"

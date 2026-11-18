@@ -1,0 +1,12 @@
+# Wait until this node's Patroni reports a running PostgreSQL (and, if pg_want_primary, the primary role).
+- name: 等待 Patroni 就绪
+  ansible.builtin.uri:
+    url: "http://{{ pg_ip }}:{{ pg_rest_port }}/patroni"
+    status_code: [200, 503]
+    return_content: true
+  register: pg_patroni
+  until: >-
+    pg_patroni.status == 200 and pg_patroni.json is defined and pg_patroni.json.state == 'running'
+    and (not (pg_want_primary | default(false)) or pg_patroni.json.role in ['master', 'primary'])
+  retries: 90
+  delay: 2

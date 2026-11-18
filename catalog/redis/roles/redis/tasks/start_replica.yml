@@ -1,0 +1,19 @@
+- name: 启动 redis-server
+  ansible.builtin.systemd:
+    name: redis-server
+    enabled: true
+    state: started
+
+- name: 等待就绪
+  ansible.builtin.include_tasks: _wait_ready.yml
+
+- name: 等待复制链路 up（首次是一次全量同步，无盘复制通常数秒）
+  ansible.builtin.command:
+    argv: "{{ rd_cli + ['INFO', 'replication'] }}"
+  environment: "{{ rd_env }}"
+  register: rd_repl
+  changed_when: false
+  until: "'master_link_status:up' in rd_repl.stdout"
+  retries: 60
+  delay: 2
+  no_log: true

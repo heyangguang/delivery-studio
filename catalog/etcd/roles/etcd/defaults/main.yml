@@ -1,0 +1,3 @@
+# Derived from the instance; evaluated where used, so it always follows the plan.
+etcd_initial_cluster: "{% for h in mw.roles.member %}{{ h }}=http://{{ mw_hosts[h].ip }}:{{ mw.params.peer_port }}{{ ',' if not loop.last }}{% endfor %}"
+etcd_endpoints: "{% for h in mw.roles.member %}{{ mw_hosts[h].ip }}:{{ mw.params.client_port }}{{ ',' if not loop.last }}{% endfor %}"

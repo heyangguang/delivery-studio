@@ -1,0 +1,5 @@
+- id: config
+  title: 写入并校验 Nginx 配置
+  desc: 在 stream 块中为每个绑定的端点生成 upstream 与监听，写入前先用 nginx -t 校验。
+  effect: change
+  run: {role: nginx, tasks: configure}

@@ -1,0 +1,4 @@
+- id: health
+  title: 复核 etcd 健康
+  effect: read-only
+  run: {role: etcd, tasks: health}

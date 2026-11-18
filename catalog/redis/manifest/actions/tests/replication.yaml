@@ -1,0 +1,9 @@
+id: replication
+title: 主从复制与认证
+desc: 在主库写一个测试键，每个从库都能读到；从库写入被拒绝（READONLY）；不带密码的连接被拒绝（NOAUTH）。
+effect: change
+hosts: first:primary
+when: count(roles.replica) > 0
+skip: 单节点没有复制可测
+expect: 从库读到与主库相同的值，从库写入返回 READONLY，无密码连接返回 NOAUTH。
+run: {role: redis, tasks: test_replication}

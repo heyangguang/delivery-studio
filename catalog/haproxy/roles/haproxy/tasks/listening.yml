@@ -1,0 +1,7 @@
+- name: 监听端口
+  ansible.builtin.wait_for:
+    port: "{{ item.listen }}"
+    timeout: 10
+  loop: "{{ mw.binds }}"
+  loop_control:
+    label: "{{ item.name }}:{{ item.listen }}"

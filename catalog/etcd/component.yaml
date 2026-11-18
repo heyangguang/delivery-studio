@@ -1,0 +1,48 @@
+schema: mwpack/v1
+component: etcd
+short: etcd
+title: etcd
+category: 协调服务
+icon: kv
+color: teal
+summary: 分布式键值存储，作为 Patroni 等高可用组件的协调服务（DCS）。
+tags: [协调服务, 高可用]
+provides: [dcs]
+data_volume: true
+detail:
+    tagline: 小而稳的分布式协调，3 或 5 个成员即可容忍 1 或 2 台故障
+    scale: 常见 3 或 5 台
+    capabilities:
+        - {name: 一致性, text: Raft 多数派，奇数成员最合算}
+        - {name: 存储, text: 数据放在 /data/etcd，配额和压缩可调}
+        - {name: 角色, text: 作为 dcs 能力被 Patroni 使用，也可单独部署}
+    limits:
+        - 当前版本不启用 etcd 自身的 TLS
+        - 成员数不设上限；超过 7 个会提示，偶数个会提示（多数派不增加容错）
+    presets:
+        - {$file: manifest/schemes/single.yaml}
+        - {$file: manifest/schemes/three.yaml}
+        - {$file: manifest/schemes/five.yaml}
+operations: {$file: manifest/common/operations.yaml}
+roles: {$file: manifest/common/roles.yaml}
+flows:
+    - {id: raft, title: Raft 共识（选主与写入）, kind: mesh, from: member, to: member, sync: "true"}
+groups: {$file: manifest/common/groups.yaml}
+params: {$file: manifest/common/params.yaml}
+rules: {$file: manifest/common/rules.yaml}
+ports: {$file: manifest/common/ports.yaml}
+versions: {$file: manifest/common/versions.yaml}
+lifecycle:
+    install: {$file: manifest/actions/lifecycle/install.yaml}
+    configure: {$file: manifest/actions/lifecycle/configure.yaml}
+    start: {$file: manifest/actions/lifecycle/start.yaml}
+    verify: {$file: manifest/actions/lifecycle/verify.yaml}
+tests:
+    - {$file: manifest/actions/tests/health.yaml}
+    - {$file: manifest/actions/tests/put-get.yaml}
+# Explicit shared implementation dependencies; all other source files are private.
+shared_files:
+    - roles/etcd/tasks/health.yml
+    - roles/etcd/tasks/install.yml
+    - roles/etcd/tasks/start.yml
+    - roles/etcd/templates/etcd.conf.yaml.j2

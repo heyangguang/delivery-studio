@@ -1,0 +1,10 @@
+- {key: ha, group: ha, label: 高可用方式, type: enum, options: [none, keepalived], default: none}
+- {key: vip, group: ha, label: 虚拟 IP, type: ip, when: "params.ha == 'keepalived'", required: true}
+- {key: vip_interface, group: ha, label: 承载 VIP 的网卡, type: string, when: "params.ha == 'keepalived'", required: true}
+- {key: vip_prefix, group: ha, label: 子网前缀长度, type: int, default: 24, min: 8, max: 32, when: "params.ha == 'keepalived'"}
+- {key: vrrp_id, group: ha, label: VRRP 组号, type: int, default: 51, min: 1, max: 255, when: "params.ha == 'keepalived'"}
+- {key: worker_connections, group: tuning, label: 每进程最大连接数, type: int, default: 4096, min: 256, max: 1000000}
+- {key: proxy_connect_timeout, group: tuning, label: 连接后端超时（秒）, type: int, default: 5, min: 1, max: 120}
+- {key: proxy_timeout, group: tuning, label: 会话空闲超时（分钟）, type: int, default: 30, min: 1, max: 1440}
+- {key: max_fails, group: tuning, label: 判定后端失败的次数, type: int, default: 3, min: 1, max: 20}
+- {key: fail_timeout, group: tuning, label: 失败后摘除时长（秒）, type: int, default: 10, min: 1, max: 600}

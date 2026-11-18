@@ -1,0 +1,6 @@
+- id: config
+  title: 写入实例、哨兵与日志切割配置
+  desc: 备份包自带配置后写入 redis.conf（从库带 replicaof），有从库时写入 sentinel.conf；写入 systemd 覆盖项与 logrotate。哨兵和实例会在运行中改写各自的配置，所以已经配置过的节点不会再被覆盖。
+  rollback: "包自带配置已备份为 /etc/redis/redis.conf.pkg-orig 与 /etc/redis/sentinel.conf.pkg-orig：还没启动服务时把它们复制回原名，并删除 /etc/systemd/system/redis-*.service.d/redis-local.conf 和 /etc/logrotate.d/redis-local。服务已启动后不要这样做，请先联系平台维护人员。"
+  effect: change
+  run: {role: redis, tasks: configure}

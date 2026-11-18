@@ -1,0 +1,10 @@
+[Unit]
+Description=Middleware offline package repository {{ item.name }} ({{ mw_cluster.id }})
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 -m http.server {{ item.port }} --bind {{ mw_hosts[mw_cluster.controller].ip }} --directory /opt/middleware-repositories/{{ mw_cluster.project | default(mw_cluster.id) }}/{{ item.root }}
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,24 @@
+id: single
+contract:
+    when: params.deployment_mode == 'single'
+    series: basic
+    failover: none
+    mechanism: PostgreSQL 单机
+    read_access: 单节点读写
+    sharding: false
+    limitations:
+        - 节点故障导致服务中断；不提供自动切换
+    acceptance:
+        - postgresql/full-backup
+    operations:
+        - deploy
+name: 单机方案
+tag: 单节点
+spec: 单机 PostgreSQL · 无自动故障切换
+roles:
+    - role: primary
+      count: 1
+params:
+    deployment_mode: single
+    tls: false
+    tde: false

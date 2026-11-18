@@ -1,0 +1,27 @@
+- name: 写入 patroni.yml
+  ansible.builtin.template:
+    src: patroni.yml.j2
+    dest: /etc/patroni/patroni.yml
+    owner: postgres
+    group: postgres
+    mode: '0600'
+  no_log: true
+
+- name: systemd 覆盖目录
+  ansible.builtin.file:
+    path: /etc/systemd/system/patroni.service.d
+    state: directory
+    mode: '0755'
+
+- name: 指定 Patroni 配置文件
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/patroni.service.d/middleware.conf
+    mode: '0644'
+    content: |
+      [Service]
+      ExecStart=
+      ExecStart=/usr/bin/patroni /etc/patroni/patroni.yml
+
+- name: 重新加载 systemd
+  ansible.builtin.systemd:
+    daemon_reload: true

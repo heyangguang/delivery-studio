@@ -1,0 +1,6 @@
+id: inspect
+title: 盘点测试痕迹（不删除）
+desc: 列出测试键与每台机器的日志文件。这一步不会改动任何东西。
+effect: read-only
+hosts: first:primary
+run: {role: redis, tasks: test_clean, vars: {rd_clean: inspect}}

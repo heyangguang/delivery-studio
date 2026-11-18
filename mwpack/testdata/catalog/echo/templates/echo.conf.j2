@@ -1,0 +1,6 @@
+# generated for {{ mw_cluster.id }}/{{ mw.id }} on {{ inventory_hostname }}
+port={{ mw.params.port }}
+mode={{ mw.params.mode }}
+{% for h in mw.roles.replica %}
+replica={{ mw_hosts[h].ip }}
+{% endfor %}

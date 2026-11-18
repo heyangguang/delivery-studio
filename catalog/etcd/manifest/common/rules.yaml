@@ -1,0 +1,2 @@
+- {id: election-vs-heartbeat, expr: 'params.election_timeout >= 5 * params.heartbeat_interval', message: etcd 要求选举超时不小于心跳间隔的 5 倍}
+- {id: ports-differ, expr: 'params.client_port != params.peer_port', message: 客户端端口与成员间端口不能相同}

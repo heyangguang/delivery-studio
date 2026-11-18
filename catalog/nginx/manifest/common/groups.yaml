@@ -1,0 +1,2 @@
+- {id: ha, label: 高可用}
+- {id: tuning, label: 连接与重试}

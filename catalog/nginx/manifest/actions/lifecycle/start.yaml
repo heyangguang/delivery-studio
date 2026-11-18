@@ -1,0 +1,4 @@
+- id: start
+  title: 启动 Nginx
+  effect: change
+  run: {role: nginx, tasks: start}

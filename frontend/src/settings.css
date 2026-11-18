@@ -1,0 +1,326 @@
+/* Platform settings. Prefix st- */
+.st-page {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  min-height: calc(100vh - 52px);
+  background: var(--surface);
+}
+.st-nav {
+  padding: 18px 10px;
+  border-right: 1px solid var(--line);
+  background: var(--surface-2);
+}
+.st-nav h1 {
+  margin: 0 6px 14px;
+  font-size: 20px;
+  font-weight: 700;
+}
+.st-nav .sx-nav-i {
+  width: 100%;
+}
+.st-chans,
+.st-log {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.st-chans > li {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 4px;
+  border-bottom: 1px solid var(--line);
+}
+.st-chans > li.off {
+  opacity: 0.6;
+}
+.st-kind {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 11px;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(160deg, #8e8e93, #636366);
+}
+.st-kind.k-wecom {
+  background: linear-gradient(160deg, #3bc0ff, #1a73e8);
+}
+.st-kind.k-dingtalk {
+  background: linear-gradient(160deg, #4aa3ff, #0a6cff);
+}
+.st-kind.k-feishu {
+  background: linear-gradient(160deg, #36d6b5, #3370ff);
+}
+.st-kind.k-webhook {
+  font-family: var(--mono);
+  font-size: 13px;
+  background: linear-gradient(160deg, #7b79f0, #4644b8);
+}
+.st-chan-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.st-chan-main b {
+  font-weight: 600;
+}
+.st-chan-main small {
+  font-size: 12px;
+  color: var(--mute);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.st-last {
+  font-size: 12.5px;
+}
+.st-last .ok,
+.st-log .ok {
+  color: var(--ok);
+}
+.st-last .bad,
+.st-log .bad {
+  color: var(--bad);
+}
+.st-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 56px 16px;
+  text-align: center;
+  color: var(--mute);
+}
+.st-empty > svg {
+  font-size: 30px;
+  color: var(--faint);
+}
+.st-empty b {
+  color: var(--ink);
+}
+.st-log > li {
+  display: grid;
+  grid-template-columns: 90px 18px 64px 140px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+.st-ev {
+  font-size: 12px;
+  color: var(--mute);
+}
+.st-log-t {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-2);
+}
+.st-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.st-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.st-field > span {
+  font-size: 13px;
+  font-weight: 500;
+}
+.st-field small {
+  font-size: 12px;
+  color: var(--mute);
+}
+.st-field.row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+.st-body {
+  min-width: 0;
+}
+.st-mobile-bar {
+  min-width: 0;
+  padding: 2px 16px 0;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.st-mobile-bar .st-subtabs {
+  border-bottom: 0;
+}
+.st-group-bar {
+  min-width: 0;
+  padding: 6px 44px 0;
+  background: var(--surface);
+}
+.st-group-bar + .sx-page,
+.st-group-bar + .st-pane > .sx-page {
+  padding-top: 20px;
+}
+.st-pane {
+  min-width: 0;
+}
+.st-pane > .sx-page.enter {
+  animation: none;
+}
+.st-pane-fwd {
+  animation: st-pane-in-fwd 0.2s cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+.st-pane-back {
+  animation: st-pane-in-back 0.2s cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+@keyframes st-pane-in-fwd {
+  from {
+    opacity: 0;
+    transform: translate3d(8px, 0, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes st-pane-in-back {
+  from {
+    opacity: 0;
+    transform: translate3d(-8px, 0, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .st-pane-fwd,
+  .st-pane-back {
+    animation: none;
+  }
+}
+.st-nav .sx-nav-ic {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+}
+.st-nav .sx-nav-ic svg {
+  display: block;
+  flex: none;
+}
+/* a settings page uses the whole width beside the list; prose keeps a readable measure */
+.st-body > .sx-page,
+.st-pane > .sx-page {
+  max-width: none;
+  padding: 28px 44px 80px;
+}
+.st-body > .sx-page .sx-page-h p,
+.st-pane > .sx-page .sx-page-h p {
+  max-width: 760px;
+}
+.st-nav-grp + .st-nav-grp {
+  margin-top: 14px;
+}
+.st-chans > li {
+  grid-template-columns: 40px minmax(0, 1fr) 150px auto auto;
+}
+@media (max-width: 900px) {
+  .st-page {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    align-content: start;
+  }
+  .st-nav {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 10px 12px;
+    overflow-x: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .st-nav h1,
+  .st-nav-g,
+  .st-nav .sx-nav-t small {
+    display: none;
+  }
+  .st-nav-grp {
+    display: flex;
+    gap: 6px;
+  }
+  .st-nav .sx-nav-i {
+    flex: none;
+    width: auto;
+    white-space: nowrap;
+  }
+  .st-chans > li {
+    grid-template-columns: 40px minmax(0, 1fr) auto;
+  }
+  .st-chans > li > .st-last {
+    grid-column: 2;
+  }
+  .st-chans > li > .row-gap {
+    grid-column: 2 / -1;
+  }
+  .st-log > li {
+    grid-template-columns: 80px 18px minmax(0, 1fr);
+  }
+  .st-log > li > :nth-child(3),
+  .st-log > li > :nth-child(4) {
+    display: none;
+  }
+}
+.st-nav-g {
+  margin: 4px 8px 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--faint);
+}
+.st-nav .sx-nav-i + .sx-nav-i {
+  margin-top: 2px;
+}
+.st-gap {
+  margin-top: 16px;
+}
+.ds-set-row .seg {
+  margin-top: 8px;
+  align-self: flex-start;
+}
+
+/* Every settings view uses the same content gutter, including narrow screens. */
+@media (min-width: 901px) {
+  .st-nav {
+    position: sticky;
+    top: 52px;
+    align-self: start;
+    height: calc(100dvh - 52px);
+    overflow-y: auto;
+  }
+}
+@media (max-width: 900px) {
+  .st-group-bar {
+    padding: 4px 24px 0;
+  }
+  .st-body > .sx-page,
+  .st-pane > .sx-page {
+    padding: 24px 24px 64px;
+  }
+  .st-nav-grp + .st-nav-grp,
+  .st-nav .sx-nav-i + .sx-nav-i {
+    margin-top: 0;
+  }
+}
+@media (max-width: 600px) {
+  .st-group-bar {
+    padding: 4px 16px 0;
+  }
+  .st-body > .sx-page,
+  .st-pane > .sx-page {
+    padding: 20px 16px 48px;
+  }
+}

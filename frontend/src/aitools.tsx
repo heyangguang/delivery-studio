@@ -1,0 +1,541 @@
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Popover, Switch } from "@arco-design/web-react";
+import {
+  IconBook,
+  IconBulb,
+  IconCheck,
+  IconCode,
+  IconDown,
+  IconStorage,
+  IconLink,
+  IconPlus,
+  IconUpload,
+  IconFolder,
+} from "@arco-design/web-react/icon";
+import { cached, can, fetchCached, useAIStatus } from "./shared";
+import "./aitools.css";
+
+/* What a person switches on for their messages, the way chat apps put it behind a "+": think harder, search the
+   web, and which skills and outside services the assistant may use. The choice is remembered in this browser. */
+
+type Options = {
+  web: boolean;
+  web_provider?: string;
+  sandbox?: boolean;
+  sandbox_exec_policy?: "ask" | "auto" | "open";
+  sandbox_net_policy?: "deny" | "ask" | "allow";
+  skills: {
+    name: string;
+    title: string;
+    description: string;
+    mine?: boolean;
+  }[];
+  mcp: { id: string; name: string; tools: number; mine?: boolean }[];
+  kb?: number;
+  kb_team?: number;
+};
+type Pref = {
+  think: string;
+  web: boolean;
+  skillsOff: string[];
+  mcpOff: string[];
+  noKB?: boolean;
+  sandboxAsk?: boolean;
+};
+export type AIOpts = {
+  think: string;
+  web: boolean;
+  skills: string[] | null;
+  mcp: string[] | null;
+  no_kb: boolean;
+  sandbox_mode?: "ask";
+};
+
+const KEY = "mh-ai-opts";
+const readPref = (): Pref => {
+  try {
+    const p = {
+      think: "",
+      web: false,
+      skillsOff: [],
+      mcpOff: [],
+      ...JSON.parse(localStorage.getItem(KEY) || "{}"),
+    };
+    if (p.think === true) p.think = "high";
+    if (p.think === false) p.think = "";
+    return p;
+  } catch {
+    return { think: "", web: false, skillsOff: [], mcpOff: [] };
+  }
+};
+
+export function useAIOptions() {
+  const aiStatus = useAIStatus();
+  const [o, setO] = useState<Options | undefined>(() =>
+    cached<Options>("/api/ai/options"),
+  );
+  const [pref, setPref] = useState<Pref>(readPref);
+  useEffect(() => {
+    fetchCached<Options>("/api/ai/options")
+      .then(setO)
+      .catch(() => undefined);
+  }, [aiStatus]);
+  const update = (p: Partial<Pref>) =>
+    setPref((cur) => {
+      const next = { ...cur, ...p };
+      try {
+        localStorage.setItem(KEY, JSON.stringify(next));
+      } catch {
+        /* a convenience only */
+      }
+      return next;
+    });
+  const opts: AIOpts = useMemo(() => {
+    const skills = o?.skills.map((s) => s.name) || [];
+    const mcp = o?.mcp.map((m) => m.id) || [];
+    return {
+      think: pref.think,
+      web: pref.web && !!o?.web,
+      skills: pref.skillsOff.length
+        ? skills.filter((n) => !pref.skillsOff.includes(n))
+        : null,
+      mcp: pref.mcpOff.length
+        ? mcp.filter((n) => !pref.mcpOff.includes(n))
+        : null,
+      no_kb: !!pref.noKB,
+      sandbox_mode: pref.sandboxAsk ? "ask" : undefined,
+    };
+  }, [o, pref]);
+  return { options: o, pref, update, opts };
+}
+
+/** A globe: the web. */
+function Globe() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="1em"
+      height="1em"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinecap="round"
+      aria-hidden
+    >
+      <circle cx="8" cy="8" r="6.2" />
+      <path d="M1.8 8h12.4M8 1.8c1.8 1.7 2.7 3.8 2.7 6.2S9.8 12.5 8 14.2M8 1.8C6.2 3.5 5.3 5.6 5.3 8s.9 4.5 2.7 6.2" />
+    </svg>
+  );
+}
+
+/** The "+" menu and, beside it, what is switched on. */
+const LEVELS: Record<string, string> = {
+  low: "低",
+  medium: "中",
+  high: "高",
+  xhigh: "很高",
+  max: "最高",
+  ultra: "极高",
+};
+const LEVEL_HINT: Record<string, string> = {
+  low: "想得少，回答快",
+  medium: "平衡速度与深度",
+  high: "想得比较深",
+  xhigh: "想得很深，明显更慢",
+  max: "想到最深，慢",
+  ultra: "最深的一档，最慢，费用也最高",
+};
+
+/** How deep the model should think: a few pills, shallowest to deepest. Only the depths the model offers are there; the
+ *  first is the model's own default. The choice is sent as the request's reasoning_effort. */
+function ThinkPills({
+  levels,
+  value,
+  onChange,
+}: {
+  levels?: string[];
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const validLevels = (levels || []).filter((l) => LEVELS[l]);
+  const active = value && validLevels.includes(value) ? value : "";
+  const stops = ["", ...validLevels];
+  return (
+    <div className="thk" role="group" aria-label="思考深度">
+      <div className="thk-row">
+        {stops.map((s) => (
+          <button
+            key={s || "default"}
+            type="button"
+            className={`thk-pill ${s === active ? "on" : ""}`}
+            onClick={() => onChange(s)}
+            aria-pressed={s === active}
+          >
+            {s ? LEVELS[s] : "默认"}
+          </button>
+        ))}
+      </div>
+      <small>{active ? LEVEL_HINT[active] : "不指定，用模型自己的默认"}</small>
+    </div>
+  );
+}
+
+type PopPos = "tl" | "tr" | "bl" | "br";
+
+function computePopPos(
+  el: HTMLElement | null,
+  estHeight: number,
+  estWidth: number,
+): PopPos {
+  if (!el) return "tl";
+  const r = el.getBoundingClientRect();
+  const below = window.innerHeight - r.bottom;
+  const above = r.top;
+  const down = below >= estHeight || below >= above;
+  const rightSpace = window.innerWidth - r.left;
+  const alignRight = rightSpace < estWidth && r.right > rightSpace;
+  return `${down ? "b" : "t"}${alignRight ? "r" : "l"}` as PopPos;
+}
+
+export function ThinkLevel({
+  levels,
+  value,
+  onChange,
+}: {
+  levels?: string[];
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<PopPos>("tl");
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const validLevels = (levels || []).filter((l) => LEVELS[l]);
+  if (validLevels.length === 0) return null;
+  const active = value && validLevels.includes(value) ? value : "";
+  return (
+    <Popover
+      trigger="click"
+      position={pos}
+      popupVisible={open}
+      onVisibleChange={(v) => {
+        if (v) setPos(computePopPos(btnRef.current, 110, 360));
+        setOpen(v);
+      }}
+      className="tm-pop think-pop"
+      triggerProps={{ autoFitPosition: false }}
+      content={
+        <ThinkPills
+          levels={validLevels}
+          value={active}
+          onChange={(v) => (onChange(v), setOpen(false))}
+        />
+      }
+    >
+      <button
+        ref={btnRef}
+        type="button"
+        className={`tm-tog think ${active ? "on" : ""}`}
+        aria-expanded={open}
+        title="思考深度：让模型想多深"
+      >
+        <IconBulb />
+        <span>思考{active ? ` · ${LEVELS[active]}` : ""}</span>
+      </button>
+    </Popover>
+  );
+}
+
+/** compact: a narrow window keeps only the "+"; thinking depth and the web switch move into its menu. */
+export function ToolMenu({
+  t,
+  levels,
+  attach,
+  compact,
+}: {
+  t: ReturnType<typeof useAIOptions>;
+  levels?: string[];
+  attach?: { upload: () => void; pick: () => void };
+  compact?: boolean;
+}) {
+  const { options: o, pref, update, opts } = t;
+  const [open, setOpen] = useState(false);
+  const [skillsOpen, setSkillsOpen] = useState(false);
+  const [pos, setPos] = useState<PopPos>("tl");
+  const [room, setRoom] = useState(420);
+  const btn = useRef<HTMLButtonElement>(null);
+  const skillsOn = (o?.skills || []).filter(
+    (s) => !pref.skillsOff.includes(s.name),
+  ).length;
+  const panel = (
+    <div
+      className="tm"
+      role="dialog"
+      aria-label="工具"
+      style={{ maxHeight: room }}
+    >
+      {attach && (
+        <div className="tm-sec tm-attach">
+          <button
+            type="button"
+            className="tm-row"
+            onClick={() => (setOpen(false), attach.upload())}
+          >
+            <span className="tm-ic upl">
+              <IconUpload />
+            </span>
+            <span className="tm-t">
+              <b>上传文件或图片</b>
+              <small>也可以直接拖进来或粘贴；会存进「我的资料」</small>
+            </span>
+          </button>
+          <button
+            type="button"
+            className="tm-row"
+            onClick={() => (setOpen(false), attach.pick())}
+          >
+            <span className="tm-ic kb">
+              <IconFolder />
+            </span>
+            <span className="tm-t">
+              <b>从我的资料选择</b>
+              <small>用之前传过的文件</small>
+            </span>
+          </button>
+        </div>
+      )}
+      {compact && levels && levels.length > 0 && (
+        <div className="tm-row tm-think">
+          <span className="tm-ic think">
+            <IconBulb />
+          </span>
+          <span className="tm-t">
+            <b>思考深度</b>
+            <ThinkPills
+              levels={levels}
+              value={pref.think}
+              onChange={(v) => update({ think: v })}
+            />
+          </span>
+        </div>
+      )}
+      <label className={`tm-row ${o?.web ? "" : "dis"}`}>
+        <span className="tm-ic web">
+          <Globe />
+        </span>
+        <span className="tm-t">
+          <b>联网搜索</b>
+          <small>
+            {o?.web
+              ? "平台和交付里查不到时，去网上找官方文档、版本说明、报错含义"
+              : can("ai.settings")
+                ? "尚未开启联网搜索（可在 设置 → AI → 联网搜索 开启）"
+                : "管理员尚未开启联网搜索"}
+          </small>
+        </span>
+        <Switch
+          size="small"
+          checked={opts.web}
+          disabled={!o?.web}
+          onChange={(v) => update({ web: v })}
+          aria-label="联网搜索"
+        />
+      </label>
+      {(o?.kb || 0) + (o?.kb_team || 0) > 0 && (
+        <label className="tm-row">
+          <span className="tm-ic kb">
+            <IconStorage />
+          </span>
+          <span className="tm-t">
+            <b>知识库</b>
+            <small>
+              {[
+                o!.kb ? `你的 ${o!.kb} 份资料` : "",
+                o!.kb_team ? `团队的 ${o!.kb_team} 份资料` : "",
+              ]
+                .filter(Boolean)
+                .join("和")}
+              里先找相关内容
+            </small>
+          </span>
+          <Switch
+            size="small"
+            checked={!pref.noKB}
+            onChange={(v) => update({ noKB: !v })}
+            aria-label="使用知识库"
+          />
+        </label>
+      )}
+      {o?.sandbox && (
+        <label className="tm-row">
+          <span className="tm-ic sandbox">
+            <IconCode />
+          </span>
+          <span className="tm-t">
+            <b>沙箱代码每次询问</b>
+            <small>
+              {o.sandbox_exec_policy === "ask"
+                ? "平台已统一开启每次询问授权"
+                : pref.sandboxAsk
+                  ? "每次运行 Python 或技能脚本前先征得我同意"
+                  : o.sandbox_exec_policy === "open"
+                    ? "当前按平台开放策略运行，开启后改为每次问我"
+                    : "当前按 AI 风险分级自动判断，开启后改为每次问我"}
+            </small>
+          </span>
+          <Switch
+            size="small"
+            checked={o.sandbox_exec_policy === "ask" || !!pref.sandboxAsk}
+            disabled={o.sandbox_exec_policy === "ask"}
+            onChange={(v) => update({ sandboxAsk: v })}
+            aria-label="沙箱代码每次询问"
+          />
+        </label>
+      )}
+      {(o?.skills.length || 0) > 0 && (
+        <div className="tm-sec">
+          <button
+            type="button"
+            className="tm-row tm-head"
+            onClick={() => setSkillsOpen(!skillsOpen)}
+            aria-expanded={skillsOpen}
+          >
+            <span className="tm-ic skill">
+              <IconBook />
+            </span>
+            <span className="tm-t">
+              <b>技能</b>
+              <small>
+                用 {skillsOn} / {o!.skills.length} 个运维技能
+              </small>
+            </span>
+            <IconDown className={skillsOpen ? "tm-flip" : ""} />
+          </button>
+          {skillsOpen && (
+            <div className="tm-list">
+              <div className="tm-all">
+                <button type="button" onClick={() => update({ skillsOff: [] })}>
+                  全部启用
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    update({ skillsOff: o!.skills.map((s) => s.name) })
+                  }
+                >
+                  全部不用
+                </button>
+              </div>
+              {o!.skills.map((s) => (
+                <label key={s.name} className="tm-item" title={s.description}>
+                  <Switch
+                    size="small"
+                    checked={!pref.skillsOff.includes(s.name)}
+                    onChange={(v) =>
+                      update({
+                        skillsOff: v
+                          ? pref.skillsOff.filter((x) => x !== s.name)
+                          : [...pref.skillsOff, s.name],
+                      })
+                    }
+                  />
+                  <span>
+                    {s.title} {s.mine && <em className="tm-mine">我的</em>}
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {(o?.mcp.length || 0) > 0 && (
+        <div className="tm-sec">
+          <div className="tm-cap">外部服务（MCP）</div>
+          {o!.mcp.map((m) => (
+            <label key={m.id} className="tm-row">
+              <span className="tm-ic mcp">
+                <IconLink />
+              </span>
+              <span className="tm-t">
+                <b>
+                  {m.name} {m.mine && <em className="tm-mine">我的</em>}
+                </b>
+                <small>{m.tools} 个工具</small>
+              </span>
+              <Switch
+                size="small"
+                checked={!pref.mcpOff.includes(m.id)}
+                onChange={(v) =>
+                  update({
+                    mcpOff: v
+                      ? pref.mcpOff.filter((x) => x !== m.id)
+                      : [...pref.mcpOff, m.id],
+                  })
+                }
+                aria-label={`使用 ${m.name}`}
+              />
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+  return (
+    <>
+      <Popover
+        trigger="click"
+        position={pos}
+        popupVisible={open}
+        triggerProps={{ autoFitPosition: false }}
+        onVisibleChange={(v) => {
+          if (v && btn.current) {
+            const rect = btn.current.getBoundingClientRect();
+            const free = window.innerHeight - rect.bottom;
+            const up = rect.top;
+            const down = free >= 260 || free >= up;
+            setPos(computePopPos(btn.current, 260, 336));
+            setRoom(Math.max(200, Math.min(420, (down ? free : up) - 24)));
+          }
+          setOpen(v);
+        }}
+        content={panel}
+        className="tm-pop"
+      >
+        <button
+          type="button"
+          ref={btn}
+          className={`tm-btn ${open ? "on" : ""} ${compact && (pref.think || opts.web) ? "lit" : ""}`}
+          aria-label="工具与选项"
+          aria-expanded={open}
+        >
+          <IconPlus />
+        </button>
+      </Popover>
+      {!compact && (
+        <>
+          <ThinkLevel
+            levels={levels}
+            value={pref.think}
+            onChange={(v) => update({ think: v })}
+          />
+          <button
+            type="button"
+            className={`tm-tog web ${opts.web ? "on" : ""}`}
+            aria-pressed={opts.web}
+            disabled={!o?.web}
+            title={
+              o?.web
+                ? "平台和交付里查不到时，去网上找官方文档、版本说明、报错含义"
+                : can("ai.settings")
+                  ? "尚未开启联网搜索（可在 设置 → AI → 联网搜索 开启）"
+                  : "管理员尚未开启联网搜索"
+            }
+            onClick={() => update({ web: !pref.web })}
+          >
+            <Globe />
+            <span>联网</span>
+          </button>
+        </>
+      )}
+    </>
+  );
+}

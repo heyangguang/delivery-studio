@@ -1,0 +1,5 @@
+id: listening
+title: 监听端口
+effect: read-only
+expect: 每个绑定的端口都在监听。
+run: {role: nginx, tasks: listening}

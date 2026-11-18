@@ -1,0 +1,5 @@
+- id: config
+  title: 写入并校验 HAProxy 配置
+  desc: 按绑定的端点生成监听与后端，写入前先用 haproxy -c 校验。
+  effect: change
+  run: {role: haproxy, tasks: configure}

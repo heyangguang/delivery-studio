@@ -1,0 +1,21 @@
+id: single
+name: 基础系列
+tag: 开发测试
+spec: 1 台
+roles:
+    - role: member
+      count: 1
+contract:
+    when: count(roles.member) == 1
+    series: basic
+    failover: none
+    mechanism: etcd Raft 共识
+    read_access: 通过任意健康成员访问；写入需要多数派
+    sharding: false
+    limitations:
+        - 多数成员失效时无法写入；成员数量不代表数据分片
+    acceptance:
+        - etcd/health
+        - etcd/put-get
+    operations:
+        - deploy

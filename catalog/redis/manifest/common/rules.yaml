@@ -1,0 +1,5 @@
+- {id: ports-differ, expr: "count(roles.replica) == 0 || params.redis_port != params.sentinel_port", message: Redis 与哨兵端口不能相同}
+- {id: quorum-majority, expr: "count(roles.replica) == 0 || (params.sentinel_quorum * 2 > count(roles.primary) + count(roles.replica) && params.sentinel_quorum <= count(roles.primary) + count(roles.replica))", message: 哨兵数量等于机器数；判定所需的哨兵数必须过半数，且不能超过哨兵总数}
+- {id: backlog-vs-somaxconn, expr: "!params.apply_baseline || params.tcp_backlog <= params.somaxconn", message: tcp-backlog 不能超过 net.core.somaxconn，否则 Redis 启动时报警}
+- {id: two-nodes, expr: "count(roles.replica) != 1", message: "一主一从只有 2 个哨兵：失去任何一台都凑不够多数派，无法自动切换。建议至少 1 主 2 从", warn: true}
+- {id: not-persistent, expr: "params.persistence != 'none'", message: "默认不持久化：任意节点重启即清空该节点全部数据；含主库的机器重启前必须先停服务并确认哨兵已指向其他节点。请确认业务接受缓存语义", warn: true}

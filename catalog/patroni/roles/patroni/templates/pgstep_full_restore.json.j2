@@ -1,0 +1,22 @@
+{% set order = mw.roles.primary + mw.roles.replica %}
+{% set nodes = [] %}
+{% for h in order %}
+{% set _ = nodes.append({'name': h, 'ip': mw_hosts[h].ip}) %}
+{% endfor %}
+{{ {
+  'cluster_id': mw_cluster.id,
+  'instance': mw.id,
+  'scope': pg_scope,
+  'ha': pg_ha,
+  'nodes': nodes,
+  'options': {
+    'tls': mw.params.tls,
+    'tde': mw.params.tde,
+    'replica_count': mw.roles.replica | length,
+    'pg_port': mw.params.pg_port,
+    'restapi_port': mw.params.restapi_port,
+    'patroni_ttl': mw.params.patroni_ttl | default(30) | int
+  },
+  'paths': {'bin': pg_bin, 'data': pg_data, 'repo': pg_repo, 'testroot': pg_testroot},
+  'accounts': {'postgres': mw.secrets.postgres, 'replicator': mw.secrets.replicator | default(''), 'rewind_user': mw.secrets.rewind_user | default('')}
+} | to_nice_json }}

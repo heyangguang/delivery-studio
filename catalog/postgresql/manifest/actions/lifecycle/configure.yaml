@@ -1,0 +1,23 @@
+- id: tls-files
+  title: 分发证书与私钥
+  desc: 把客户证书、私钥和 CA 放到 /etc/pki/pg，属主 postgres，私钥权限 0600。
+  effect: change
+  when: params.tls
+  run:
+    role: postgresql
+    tasks: tls_files
+- id: config
+  title: 写入数据库与高可用配置
+  desc: 有从库时写入 Patroni 配置（含 DCS 引导参数）和 systemd 覆盖项；单节点则创建数据库集群并写入 postgresql.conf 与 pg_hba.conf。
+  effect: change
+  run:
+    role: postgresql
+    tasks: configure
+  when: params.deployment_mode in ['legacy', 'single']
+- id: native-config
+  title: 写入原生主从配置及服务
+  effect: change
+  when: params.deployment_mode == 'replication'
+  run:
+    role: postgresql
+    tasks: native_configure

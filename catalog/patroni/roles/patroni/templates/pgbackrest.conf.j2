@@ -1,0 +1,23 @@
+[global]
+repo1-path={{ pg_repo }}
+repo1-retention-full={{ mw.params.backup_retention_full }}
+process-max={{ mw.params.backup_process_max }}
+compress-type={{ mw.params.compress_type }}
+{% if mw.params.compress_type != 'none' %}
+compress-level={{ mw.params.compress_level }}
+{% endif %}
+{% if mw.params.retention_diff | int > 0 %}
+repo1-retention-diff={{ mw.params.retention_diff }}
+{% endif %}
+log-path=/var/log/pgbackrest
+archive-async=n
+{% if mw.params.tde %}
+archive-header-check=n
+checksum-page=n
+{% endif %}
+
+[{{ pg_scope }}]
+pg1-path={{ pg_data }}
+pg1-port={{ pg_port }}
+pg1-socket-path=/var/run/postgresql
+pg1-user=postgres

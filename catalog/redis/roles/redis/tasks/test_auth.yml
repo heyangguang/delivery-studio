@@ -1,0 +1,23 @@
+- name: 用密码连接
+  ansible.builtin.command:
+    argv: "{{ rd_cli + ['PING'] }}"
+  environment: "{{ rd_env }}"
+  register: rd_pw
+  changed_when: false
+  no_log: true
+
+- name: 不带密码连接
+  ansible.builtin.command:
+    argv: "{{ rd_cli + ['PING'] }}"
+  environment:
+    REDISCLI_AUTH: ''
+  register: rd_nopw
+  changed_when: false
+  failed_when: false
+
+- name: 认证应当生效
+  ansible.builtin.assert:
+    that:
+      - rd_pw.stdout | trim == 'PONG'
+      - "'NOAUTH' in (rd_nopw.stdout ~ rd_nopw.stderr)"
+    success_msg: 带密码 PONG，无密码被拒绝（NOAUTH）

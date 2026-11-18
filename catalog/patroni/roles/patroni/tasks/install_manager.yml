@@ -1,0 +1,19 @@
+- name: 安装期间阻止 Patroni 使用未配置的服务启动
+  ansible.builtin.command: systemctl mask --runtime patroni.service
+  changed_when: false
+
+- block:
+    - name: 安装 Patroni 软件包（数据库软件由 PostgreSQL 组件安装）
+      ansible.builtin.include_role:
+        name: mw_packages
+        tasks_from: install
+      vars:
+        mw_package_list: "{{ mw_manager.packages }}"
+  always:
+    - name: 解除安装期间的临时屏蔽
+      ansible.builtin.command: systemctl unmask --runtime patroni.service
+      changed_when: false
+
+- name: 核对协调存储驱动
+  ansible.builtin.command: /usr/bin/python3 -c "import patroni.dcs.etcd3, OpenSSL.SSL"
+  changed_when: false

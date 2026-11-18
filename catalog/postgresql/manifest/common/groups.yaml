@@ -1,0 +1,33 @@
+- id: network
+  label: 端口与访问
+  tab: base
+- id: replication
+  label: 复制策略
+  tab: ha
+- id: patroni
+  label: Patroni 时序
+  tab: ha
+- id: security
+  label: 加密与账户
+  tab: base
+- id: resource
+  label: 资源与连接
+  tab: database
+- id: wal
+  label: WAL 与检查点
+  tab: database
+- id: repl-tune
+  label: 复制调优
+  tab: database
+- id: logging
+  label: 日志与审计
+  tab: database
+- id: locale
+  label: 初始化与区域
+  tab: database
+- id: backup
+  label: pgBackRest 备份
+  tab: backup
+- id: os
+  label: 操作系统基线
+  tab: os

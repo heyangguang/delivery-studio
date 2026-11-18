@@ -1,0 +1,5 @@
+- name: postgresql
+  value: =params.pg_port
+- name: patroni-rest
+  value: =params.restapi_port
+  when: params.deployment_mode == 'legacy' && count(roles.replica) > 0

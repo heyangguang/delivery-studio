@@ -3,7 +3,6 @@ import { Popover, Switch } from "@arco-design/web-react";
 import {
   IconBook,
   IconBulb,
-  IconCheck,
   IconCode,
   IconDown,
   IconStorage,
@@ -171,128 +170,114 @@ const LEVEL_HINT: Record<string, string> = {
   },
 };
 
-const DEPTH_BARS: Record<string, number> = {
-  "": 0,
-  low: 1,
-  medium: 2,
-  high: 3,
-  xhigh: 4,
-  max: 4,
-  ultra: 4,
-};
-
-function DepthBars({ tier }: { tier: string }) {
-  const lit = DEPTH_BARS[tier] ?? 0;
-  const peak = tier === "max" || tier === "ultra";
-  if (lit === 0) {
-    return (
-      <span className="thk-ic auto" aria-hidden>
-        <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
-          <circle cx="8" cy="8" r="5" stroke="currentColor" strokeWidth="1.4" strokeDasharray="2.4 2" />
-          <circle cx="8" cy="8" r="1.8" fill="currentColor" />
-        </svg>
-      </span>
-    );
-  }
-  return (
-    <span className={`thk-ic ${peak ? "peak" : ""}`} aria-hidden>
-      <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
-        {[
-          { x: 2, h: 4, i: 1 },
-          { x: 5.5, h: 6.5, i: 2 },
-          { x: 9, h: 9, i: 3 },
-          { x: 12.5, h: 11.5, i: 4 },
-        ].map((b) => (
-          <rect
-            key={b.i}
-            x={b.x}
-            y={13.5 - b.h}
-            width="2.1"
-            height={b.h}
-            rx="1"
-            fill="currentColor"
-            opacity={b.i <= lit ? (peak ? 1 : 0.92) : 0.2}
-          />
-        ))}
-      </svg>
-    </span>
-  );
-}
-
-/** How deep the model should think: compact vertical selector for the popover, or wrapping pills inside the "+" panel. */
 function ThinkPills({
   levels,
   value,
   onChange,
-  layout = "wrap",
+  layout = "inline",
 }: {
   levels?: string[];
   value: string;
   onChange: (v: string) => void;
-  layout?: "list" | "wrap";
+  layout?: "popover" | "inline";
 }) {
   useLang();
   const validLevels = (levels || []).filter((l) => LEVELS[l]);
   const active = value && validLevels.includes(value) ? value : "";
   const stops = ["", ...validLevels];
-  if (layout === "list") {
-    return (
-      <div className="thk thk-pop-panel" role="radiogroup" aria-label={bi("思考深度", "Thinking depth")}>
-        <div className="thk-head">
-          <span>{bi("思考深度", "Thinking depth")}</span>
-          <em>{bi("按任务复杂度调节", "Adjust reasoning depth")}</em>
+  const maxIdx = Math.max(1, stops.length - 1);
+  const idx = Math.max(0, stops.indexOf(active));
+  const progress = idx / maxIdx;
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [dragging, setDragging] = useState(false);
+
+  const pickByClientX = (clientX: number) => {
+    const el = trackRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const usable = Math.max(1, r.width - 30);
+    const ratio = Math.max(0, Math.min(1, (clientX - r.left - 15) / usable));
+    const nextIdx = Math.round(ratio * maxIdx);
+    const nextVal = stops[nextIdx] ?? "";
+    if (nextVal !== active) onChange(nextVal);
+  };
+
+  const tierTone = !active
+    ? "auto"
+    : active === "ultra"
+      ? "ultra"
+      : active === "max" || active === "xhigh"
+        ? "high"
+        : "blue";
+  const label = active ? LEVELS[active] : bi("默认", "Default");
+  const hint = active
+    ? LEVEL_HINT[active]
+    : bi("不指定，用模型自己的默认", "Unspecified; use model default");
+
+  return (
+    <div className={`thk thk-slider-wrap ${layout === "popover" ? "in-pop" : "in-menu"}`}>
+      <div className={`thk-slider-head tone-${tierTone}`}>
+        <span className="thk-slider-title">{label}</span>
+        <small className="thk-slider-hint">{hint}</small>
+      </div>
+      <div
+        ref={trackRef}
+        role="slider"
+        tabIndex={0}
+        aria-label={bi("思考深度", "Thinking depth")}
+        aria-valuemin={0}
+        aria-valuemax={maxIdx}
+        aria-valuenow={idx}
+        aria-valuetext={`${label} — ${hint}`}
+        className={`thk-track ${active ? "lit" : ""} tone-${tierTone} ${dragging ? "dragging" : ""}`}
+        style={{ "--p": progress } as React.CSSProperties}
+        onPointerDown={(e) => {
+          e.preventDefault();
+          e.currentTarget.setPointerCapture(e.pointerId);
+          setDragging(true);
+          pickByClientX(e.clientX);
+        }}
+        onPointerMove={(e) => {
+          if (dragging) pickByClientX(e.clientX);
+        }}
+        onPointerUp={() => setDragging(false)}
+        onPointerCancel={() => setDragging(false)}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowRight" || e.key === "ArrowUp") {
+            e.preventDefault();
+            onChange(stops[Math.min(maxIdx, idx + 1)] ?? "");
+          } else if (e.key === "ArrowLeft" || e.key === "ArrowDown") {
+            e.preventDefault();
+            onChange(stops[Math.max(0, idx - 1)] ?? "");
+          } else if (e.key === "Home") {
+            e.preventDefault();
+            onChange("");
+          } else if (e.key === "End") {
+            e.preventDefault();
+            onChange(stops[maxIdx] ?? "");
+          }
+        }}
+      >
+        <div className={`thk-fill ${active ? "on" : ""} tone-${tierTone}`} aria-hidden>
+          <span className="thk-stars" />
         </div>
-        <div className="thk-list">
-          {stops.map((s) => {
-            const on = s === active;
-            const label = s ? LEVELS[s] : bi("默认", "Default");
-            const hint = s
-              ? LEVEL_HINT[s]
-              : bi("不指定，用模型自己的默认", "Unspecified; use model default");
+        <div className="thk-dots" aria-hidden>
+          {stops.map((s, i) => {
+            const p = i / maxIdx;
+            const lit = active && i < idx;
             return (
-              <button
+              <span
                 key={s || "default"}
-                type="button"
-                role="radio"
-                aria-checked={on}
-                className={`thk-opt ${on ? "on" : ""} ${s === "max" || s === "ultra" ? "is-high" : ""}`}
-                onClick={() => onChange(s)}
-              >
-                <DepthBars tier={s} />
-                <span className="thk-opt-main">
-                  <b>{label}</b>
-                  <small>{hint}</small>
-                </span>
-                <span className="thk-opt-check" aria-hidden>
-                  {on && <IconCheck />}
-                </span>
-              </button>
+                data-stop={s || "default"}
+                title={s ? LEVELS[s] : bi("默认", "Default")}
+                className={`thk-dot ${lit ? "in-fill" : ""} ${i === idx ? "active" : ""}`}
+                style={{ left: `calc(15px + (100% - 30px) * ${p})` }}
+              />
             );
           })}
         </div>
+        <span className="thk-thumb" aria-hidden />
       </div>
-    );
-  }
-  return (
-    <div className="thk" role="group" aria-label={bi("思考深度", "Thinking depth")}>
-      <div className="thk-row">
-        {stops.map((s) => (
-          <button
-            key={s || "default"}
-            type="button"
-            className={`thk-pill ${s === active ? "on" : ""}`}
-            onClick={() => onChange(s)}
-            aria-pressed={s === active}
-          >
-            {s ? LEVELS[s] : bi("默认", "Default")}
-          </button>
-        ))}
-      </div>
-      <small>
-        {active
-          ? LEVEL_HINT[active]
-          : bi("不指定，用模型自己的默认", "Unspecified; use model default")}
-      </small>
     </div>
   );
 }
@@ -308,7 +293,7 @@ function computePopPos(
   const r = el.getBoundingClientRect();
   const below = window.innerHeight - r.bottom - 12;
   const above = r.top - 12;
-  const down = below >= estHeight || (below > above && below >= 200);
+  const down = below >= estHeight || (below > above && below >= 120);
   const rightSpace = window.innerWidth - r.left;
   const alignRight = rightSpace < estWidth && r.right > rightSpace;
   return `${down ? "b" : "t"}${alignRight ? "r" : "l"}` as PopPos;
@@ -336,25 +321,17 @@ export function ThinkLevel({
       position={pos}
       popupVisible={open}
       onVisibleChange={(v) => {
-        if (v) {
-          setPos(
-            computePopPos(
-              btnRef.current,
-              Math.min(430, (validLevels.length + 1) * 50 + 48),
-              296,
-            ),
-          );
-        }
+        if (v) setPos(computePopPos(btnRef.current, 128, 296));
         setOpen(v);
       }}
       className="tm-pop think-pop"
       triggerProps={{ autoFitPosition: false }}
       content={
         <ThinkPills
-          layout="list"
+          layout="popover"
           levels={validLevels}
           value={active}
-          onChange={(v) => (onChange(v), setOpen(false))}
+          onChange={onChange}
         />
       }
     >
@@ -447,6 +424,7 @@ export function ToolMenu({
           <span className="tm-t">
             <b>{bi("思考深度", "Thinking depth")}</b>
             <ThinkPills
+              layout="inline"
               levels={levels}
               value={pref.think}
               onChange={(v) => update({ think: v })}

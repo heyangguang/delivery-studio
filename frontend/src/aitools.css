@@ -223,199 +223,210 @@
   background: var(--brand-soft);
 }
 
-/* thinking depth: a few pills */
+/* thinking depth: Codex-style stepped gradient slider */
 .thk {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 10px;
   min-width: 0;
-}
-.thk-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px;
-  padding: 3px;
-  background: var(--surface-2);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-}
-
-.thk-pill {
-  flex: none;
-  height: 24px;
-  padding: 0 10px;
-  font: 550 12.5px var(--sans);
-  color: var(--ink-2);
-  background: transparent;
-  border: 0;
-  border-radius: 8px;
-  cursor: pointer;
-  transition:
-    color 0.15s,
-    background 0.15s,
-    box-shadow 0.15s;
-}
-.thk-pill:hover {
-  color: var(--ink);
-}
-.thk-pill.on {
-  color: var(--brand-ink);
-  background: var(--surface);
-  box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.1),
-    0 0 0 1px var(--line);
-}
-.thk-pill:focus-visible {
-  outline: none;
-  box-shadow: var(--ring);
-}
-.thk small {
-  padding-left: 4px;
-  overflow: hidden;
-  color: var(--faint);
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .think-pop .arco-popover-inner {
-  width: 286px;
+  width: 288px;
   max-width: calc(100vw - 24px);
+  border-radius: 16px;
 }
 .think-pop .arco-popover-content {
-  padding: 6px;
+  padding: 12px 14px 14px;
 }
-.thk-pop-panel {
-  width: 100%;
-  gap: 4px;
-}
-.thk-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
+.thk-slider-wrap.in-menu {
   gap: 8px;
-  padding: 4px 8px 5px;
-  border-bottom: 1px solid var(--line);
+  padding-top: 2px;
 }
-.thk-head span {
-  font-size: 12px;
-  font-weight: 650;
-  color: var(--ink-2);
-}
-.thk-head em {
-  font-style: normal;
-  font-size: 11px;
-  color: var(--faint);
-}
-.thk-list {
+.thk-slider-head {
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  max-height: min(360px, 60vh);
-  overflow-y: auto;
-}
-.thk-opt {
-  display: flex;
   align-items: center;
-  gap: 9px;
-  width: 100%;
-  padding: 5px 8px;
-  border: 1px solid transparent;
-  border-radius: 9px;
-  color: inherit;
-  font: inherit;
+  text-align: center;
+  gap: 2px;
+}
+.thk-slider-wrap.in-menu .thk-slider-head {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: flex-start;
   text-align: left;
-  background: transparent;
-  cursor: pointer;
-  transition:
-    background 0.14s,
-    border-color 0.14s,
-    color 0.14s;
+  gap: 4px 8px;
 }
-.thk-opt:hover {
-  background: var(--hover);
+.thk-slider-title {
+  font-size: 14.5px;
+  font-weight: 660;
+  line-height: 1.25;
+  color: var(--ink-2);
+  transition: color 0.18s ease;
 }
-.thk-opt.on {
-  background: rgba(139, 92, 246, 0.09);
-  border-color: rgba(139, 92, 246, 0.22);
-}
-.thk-opt:focus-visible {
-  outline: none;
-  box-shadow: var(--ring);
-}
-body[arco-theme="dark"] .thk-opt.on {
-  background: rgba(167, 139, 250, 0.14);
-  border-color: rgba(167, 139, 250, 0.28);
-}
-.thk-ic {
-  display: grid;
-  flex: none;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 7px;
-  color: #6d28d9;
-  background: rgba(139, 92, 246, 0.1);
-}
-.thk-ic.auto {
-  color: var(--mute);
-  background: var(--surface-2);
-}
-.thk-ic.peak {
-  color: #7c3aed;
-  background: rgba(124, 58, 237, 0.14);
-}
-body[arco-theme="dark"] .thk-ic {
-  color: #c4b5fd;
-  background: rgba(167, 139, 250, 0.16);
-}
-body[arco-theme="dark"] .thk-ic.auto {
-  color: var(--mute);
-  background: var(--sunken);
-}
-.thk-opt-main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-.thk-opt-main b {
+.thk-slider-wrap.in-menu .thk-slider-title {
   font-size: 13px;
-  font-weight: 600;
-  color: var(--ink);
-  line-height: 1.3;
 }
-.thk-opt.on .thk-opt-main b {
-  color: #6d28d9;
+.tone-blue .thk-slider-title {
+  color: #0969da;
 }
-body[arco-theme="dark"] .thk-opt.on .thk-opt-main b {
-  color: #ddd6fe;
+.tone-high .thk-slider-title {
+  color: #4f46e5;
 }
-.thk-opt-main small {
+.tone-ultra .thk-slider-title {
+  color: #8b5cf6;
+}
+body[arco-theme="dark"] .tone-blue .thk-slider-title {
+  color: #60a5fa;
+}
+body[arco-theme="dark"] .tone-high .thk-slider-title {
+  color: #818cf8;
+}
+body[arco-theme="dark"] .tone-ultra .thk-slider-title {
+  color: #c4b5fd;
+}
+.thk-slider-hint {
+  margin: 0;
   padding-left: 0;
-  overflow: visible;
-  white-space: normal;
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.35;
   color: var(--mute);
+  white-space: normal;
 }
-.thk-opt-check {
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: 16px;
-  color: #6d28d9;
-  font-size: 13px;
+.thk-track {
+  position: relative;
+  width: 100%;
+  height: 30px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink) 8%, var(--surface-2));
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.08);
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+  outline: none;
 }
-body[arco-theme="dark"] .thk-opt-check {
-  color: #c4b5fd;
+body[arco-theme="dark"] .thk-track {
+  background: rgba(255, 255, 255, 0.11);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35);
 }
-.tm-think .thk-row {
-  flex-wrap: wrap;
+.thk-track:focus-visible {
+  box-shadow: var(--ring);
 }
-.tm-think .thk-pill {
-  padding: 0 9px;
-  white-space: nowrap;
+.thk-fill {
+  position: absolute;
+  inset: 2px;
+  border-radius: 999px;
+  overflow: hidden;
+  opacity: 0;
+  background: linear-gradient(
+    90deg,
+    #5cc8ff 0%,
+    #2896ff 32%,
+    #1c72f5 68%,
+    #434ce6 100%
+  );
+  clip-path: inset(0 calc((100% - 26px) * (1 - var(--p, 0))) 0 0 round 999px);
+  transition:
+    clip-path 0.26s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.16s ease,
+    background 0.25s ease;
+  pointer-events: none;
+}
+.thk-fill.tone-ultra {
+  background: linear-gradient(
+    90deg,
+    #1a56db 0%,
+    #4338ca 36%,
+    #7c3aed 72%,
+    #9333ea 100%
+  );
+}
+.thk-fill.on {
+  opacity: 1;
+}
+.thk-track.dragging .thk-fill,
+.thk-track.dragging .thk-thumb {
+  transition: none;
+}
+.thk-stars {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  background-image:
+    radial-gradient(circle at 12% 35%, rgba(255, 255, 255, 0.85) 1px, transparent 1.4px),
+    radial-gradient(circle at 22% 72%, rgba(255, 255, 255, 0.7) 1px, transparent 1.3px),
+    radial-gradient(circle at 36% 42%, rgba(255, 255, 255, 0.8) 1px, transparent 1.4px),
+    radial-gradient(circle at 49% 68%, rgba(255, 255, 255, 0.9) 1.2px, transparent 1.6px),
+    radial-gradient(circle at 58% 30%, rgba(255, 255, 255, 0.75) 1px, transparent 1.4px),
+    radial-gradient(circle at 71% 56%, rgba(255, 255, 255, 0.92) 1.3px, transparent 1.8px),
+    radial-gradient(circle at 82% 28%, rgba(255, 255, 255, 0.85) 1.1px, transparent 1.5px),
+    radial-gradient(circle at 90% 66%, rgba(255, 255, 255, 0.75) 1px, transparent 1.4px);
+  transition: opacity 0.25s ease;
+}
+.thk-fill.tone-ultra .thk-stars {
+  opacity: 0.95;
+  animation: thk-twinkle 2.6s ease-in-out infinite alternate;
+}
+@keyframes thk-twinkle {
+  0% {
+    opacity: 0.72;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .thk-fill,
+  .thk-thumb {
+    transition: none !important;
+  }
+  .thk-fill.tone-ultra .thk-stars {
+    animation: none;
+  }
+}
+.thk-dots {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.thk-dot {
+  position: absolute;
+  top: 50%;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: rgba(15, 23, 42, 0.24);
+  transform: translate(-50%, -50%);
+  transition: background-color 0.18s ease;
+}
+body[arco-theme="dark"] .thk-dot {
+  background: rgba(255, 255, 255, 0.28);
+}
+.thk-dot.in-fill {
+  background: rgba(255, 255, 255, 0.56);
+}
+.thk-dot.active {
+  opacity: 0;
+}
+.thk-thumb {
+  position: absolute;
+  top: 2px;
+  left: calc(2px + (100% - 30px) * var(--p, 0));
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow:
+    0 2px 6px rgba(15, 23, 42, 0.2),
+    0 0 0 1px rgba(15, 23, 42, 0.06);
+  pointer-events: none;
+  transition:
+    left 0.26s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.16s var(--spring);
+}
+.thk-track:hover .thk-thumb,
+.thk-track.dragging .thk-thumb {
+  transform: scale(1.06);
 }
 .tm-think {
   align-items: flex-start;
@@ -425,9 +436,6 @@ body[arco-theme="dark"] .thk-opt-check {
   flex: 1;
   min-width: 0;
   gap: 6px;
-}
-.tm-think .thk small {
-  white-space: normal;
 }
 .tm-think:hover {
   background: none;

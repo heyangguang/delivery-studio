@@ -6069,8 +6069,8 @@ export function ClusterRehearsal({
                                 "Full 4-stage: Scope → Probe → Staging Rehearsal → Production SOP",
                               )
                             : bi(
-                                "简单热改直出步骤留报告，未知状态先快采，重启/升级/切主走完整四步",
-                                "Auto-routes simple live tweaks to Quick Change, uncertain state to Light, high-risk to Full",
+                                "描述模糊先核对补全诉求；明确热改直出步骤，未知状态先快采，重启/切主走四步",
+                                "Clarifies vague goals first; auto-routes clear tweaks to Quick, uncertain state to Light, high-risk to Full",
                               )}
                   </span>
                 </div>
@@ -6620,6 +6620,8 @@ function ScopeAlignmentDeck({
   disabled,
   freshReveal = false,
   baselineVersion,
+  intentUnclear = false,
+  onRefineGoal,
 }: {
   rehearsalId: string;
   questions: ScopeQuestion[];
@@ -6630,6 +6632,8 @@ function ScopeAlignmentDeck({
   disabled: boolean;
   freshReveal?: boolean;
   baselineVersion?: string;
+  intentUnclear?: boolean;
+  onRefineGoal?: () => void;
 }) {
   const lang = useLang();
   const [expandAll, setExpandAll] = useState(false);
@@ -6647,7 +6651,7 @@ function ScopeAlignmentDeck({
   const supplementInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   useEffect(() => {
-    const key = `${rehearsalId}:${questions.length}`;
+    const key = `${rehearsalId}:${questions.map((q) => `${q.id}:${q.question}`).join("|")}`;
     if (!questions.length || syncedKeyRef.current === key) return;
     syncedKeyRef.current = key;
     const firstUnanswered = questions.find(
@@ -6814,40 +6818,65 @@ function ScopeAlignmentDeck({
         className={`rh-sec-head rh-scope-sec-head ${freshReveal ? "is-fresh-head" : ""}`}
       >
         <div>
-          <h3>{bi("确认变更边界与窗口约束", "Confirm Scope & Window Constraints")}</h3>
+          <h3>
+            {intentUnclear
+              ? bi(
+                  "核对 AI 识别到的诉求并补全边界",
+                  "Confirm Recognized Intent & Complete Scope",
+                )
+              : bi("确认变更边界与窗口约束", "Confirm Scope & Window Constraints")}
+          </h3>
           <p>
-            {bi(
-              "点选最贴近现场的前提即可生成纯只读探针；暂未确认的维度将自动按生产保守策略兜底。",
-              "Select options matching your environment to build a read-only probe; unspecified items default to safe production settings.",
-            )}
+            {intentUnclear
+              ? bi(
+                  "原始描述较简略或主要依赖截图识别，请先确认下方诉求并补全目标后再生成纯只读探针；如 AI 识别方向有误，可随时点击「修正诉求」直接改写。",
+                  "Your initial input was brief or screenshot-based. Confirm the recognized intent below before generating a probe, or click Refine Goal if AI misunderstood.",
+                )
+              : bi(
+                  "点选最贴近现场的前提即可生成纯只读探针；暂未确认的维度将自动按生产保守策略兜底。",
+                  "Select options matching your environment to build a read-only probe; unspecified items default to safe production settings.",
+                )}
           </p>
         </div>
-        {questions.length > 0 && (
+        {(questions.length > 0 || (intentUnclear && onRefineGoal)) && (
           <div className="rh-scope-head-tools">
-            <span
-              className={`rh-scope-prog ${allAligned ? "is-ready" : ""}`}
-              aria-live="polite"
-            >
-              <span className="rh-scope-dots" aria-hidden>
-                {questions.map((q) => (
-                  <i
-                    key={q.id}
-                    className={(answers[q.id] || "").trim() ? "on" : ""}
-                  />
-                ))}
+            {intentUnclear && onRefineGoal && (
+              <button
+                type="button"
+                className="rh-scope-mode-btn is-refine"
+                disabled={disabled}
+                onClick={onRefineGoal}
+              >
+                <IconEdit />
+                <span>{bi("识别有误？修正诉求", "Misread? Refine Goal")}</span>
+              </button>
+            )}
+            {questions.length > 0 && (
+              <span
+                className={`rh-scope-prog ${allAligned ? "is-ready" : ""}`}
+                aria-live="polite"
+              >
+                <span className="rh-scope-dots" aria-hidden>
+                  {questions.map((q) => (
+                    <i
+                      key={q.id}
+                      className={(answers[q.id] || "").trim() ? "on" : ""}
+                    />
+                  ))}
+                </span>
+                <span className="num">
+                  {allAligned
+                    ? bi(
+                        `已对齐 ${answeredCount}/${questions.length}`,
+                        `Aligned ${answeredCount}/${questions.length}`,
+                      )
+                    : bi(
+                        `已确认 ${answeredCount}/${questions.length}`,
+                        `Confirmed ${answeredCount}/${questions.length}`,
+                      )}
+                </span>
               </span>
-              <span className="num">
-                {allAligned
-                  ? bi(
-                      `已对齐 ${answeredCount}/${questions.length}`,
-                      `Aligned ${answeredCount}/${questions.length}`,
-                    )
-                  : bi(
-                      `已确认 ${answeredCount}/${questions.length}`,
-                      `Confirmed ${answeredCount}/${questions.length}`,
-                    )}
-              </span>
-            </span>
+            )}
             {questions.length > 1 && (
               <button
                 type="button"
@@ -7816,7 +7845,8 @@ function RehearsalSessionView({
   const [loading, setLoading] = useState(() => !initialSession);
   const [busyFinalize, setBusyFinalize] = useState(false);
 
-  // Live streaming states for Stage 1 -> 2 and Stage 2 -> 3
+  // Live streaming states for Refine, Stage 1 -> 2, and Stage 2 -> 3
+  const [liveRefine, setLiveRefine] = useState<LiveAIState | null>(null);
   const [liveScope, setLiveScope] = useState<LiveAIState | null>(null);
   const [liveProbe, setLiveProbe] = useState<LiveAIState | null>(null);
   const [probeAction, setProbeAction] = useState<"analyze" | "diagnose">(
@@ -7825,6 +7855,15 @@ function RehearsalSessionView({
   const [freshTraceStage, setFreshTraceStage] = useState<string>(
     autoExpandCreateTrace ? "create" : "",
   );
+  // Inline refine-goal state
+  const [refineOpen, setRefineOpen] = useState(false);
+  const [refineTitle, setRefineTitle] = useState("");
+  const [refineGoal, setRefineGoal] = useState("");
+  const [refineMode, setRefineMode] = useState<RehearsalModeChoice>("auto");
+  const [refineKeepImgs, setRefineKeepImgs] = useState<string[]>([]);
+  const [refineAddImgs, setRefineAddImgs] = useState<DraftImage[]>([]);
+  const refineImgInputRef = useRef<HTMLInputElement | null>(null);
+  const refineGoalRef = useRef<HTMLTextAreaElement | null>(null);
   const [stripPropagateOpen, setStripPropagateOpen] = useState(false);
   const [stripRolloutOpen, setStripRolloutOpen] = useState(false);
   const [rolloutBoardOverride, setRolloutBoardOverride] =
@@ -7878,6 +7917,9 @@ function RehearsalSessionView({
 
   useEffect(() => {
     setGoalOpen(false);
+    setRefineOpen(false);
+    setLiveRefine(null);
+    setRefineAddImgs([]);
     setRolloutBoardOverride(null);
     setStripPropagateOpen(false);
     setStripRolloutOpen(false);
@@ -8154,8 +8196,172 @@ function RehearsalSessionView({
   }
 
   const maxIdx = STAGE_ORDER.indexOf(r.stage);
+  const refineBusy = Boolean(liveRefine && !liveRefine.error);
   const scopeBusy = Boolean(liveScope && !liveScope.error);
   const probeBusy = Boolean(liveProbe && !liveProbe.error);
+  const anyBusy = refineBusy || scopeBusy || probeBusy || busyFinalize;
+  const canRefine = r.stage !== "finalized" && !r.applied && !r.voided;
+
+  const openRefine = () => {
+    if (!canRefine || anyBusy) return;
+    setGoalOpen(false);
+    setLiveRefine(null);
+    setRefineTitle(r.title || "");
+    setRefineGoal(r.goal || "");
+    setRefineMode(r.security_context ? "full" : "auto");
+    setRefineKeepImgs(r.goal_images ? [...r.goal_images] : []);
+    setRefineAddImgs([]);
+    setRefineOpen(true);
+    window.requestAnimationFrame(() => {
+      refineGoalRef.current?.focus({ preventScroll: false });
+    });
+  };
+
+  const attachRefineFiles = async (files: FileList | File[]) => {
+    const imgFiles = Array.from(files).filter((f) =>
+      f.type.startsWith("image/"),
+    );
+    if (!imgFiles.length) return;
+    if (noVision) {
+      Message.warning(
+        bi(
+          "当前所选模型不支持识别截图，请先在下方切换支持看图的模型",
+          "Selected model does not support images; switch to a vision model below",
+        ),
+      );
+      return;
+    }
+    const room = MAX_IMAGES - refineKeepImgs.length - refineAddImgs.length;
+    if (room <= 0) {
+      Message.warning(
+        bi(
+          `参考截图总数最多 ${MAX_IMAGES} 张`,
+          `Up to ${MAX_IMAGES} reference screenshots allowed`,
+        ),
+      );
+      return;
+    }
+    const added: DraftImage[] = [];
+    for (const f of imgFiles.slice(0, room)) {
+      try {
+        added.push(await prepareDraftImage(f));
+      } catch (e) {
+        err(e);
+      }
+    }
+    if (added.length > 0) {
+      setRefineAddImgs((prev) => [...prev, ...added]);
+      Message.success(
+        bi(`已添加 ${added.length} 张参考截图`, `Added ${added.length} screenshot(s)`),
+      );
+    }
+  };
+
+  const submitRefine = async () => {
+    const trimmedGoal = refineGoal.trim();
+    if (!trimmedGoal || offline || anyBusy) return;
+    if (Array.from(trimmedGoal).length < 4) {
+      Message.warning(
+        bi(
+          "请把变更诉求写清楚（至少 4 个字）",
+          "Please describe your change goal clearly (at least 4 characters)",
+        ),
+      );
+      return;
+    }
+    const totalImgs = refineKeepImgs.length + refineAddImgs.length;
+    if (totalImgs > 0 && noVision) {
+      Message.warning(
+        bi(
+          "当前包含参考截图，所选模型不支持看图，请切换支持看图的模型或移除截图",
+          "Reference screenshots are attached but the selected model does not support vision",
+        ),
+      );
+      return;
+    }
+    onEngageFocus?.();
+    const ac = new AbortController();
+    abortRef.current = ac;
+    const effectiveMode: RehearsalModeChoice = r.security_context
+      ? "full"
+      : refineMode;
+    const effortVal = pick.current?.effort?.includes(aiOpts.pref.think)
+      ? aiOpts.pref.think
+      : undefined;
+    setLiveRefine(
+      createInitialLiveState(
+        effectiveMode === "quick"
+          ? "create-quick"
+          : effectiveMode === "light"
+            ? "create-light"
+            : "create",
+        bi("AI 正在按修正后的诉求重新研判", "AI is re-analyzing with your refined goal"),
+        bi(
+          "正在核对集群基线与新诉求，重新生成需求确认项、探针或步骤…",
+          "Re-checking cluster baseline against the revised goal…",
+        ),
+        pick.current,
+      ),
+    );
+    try {
+      const nextTitle = refineTitle.trim();
+      const customTitle =
+        nextTitle && nextTitle !== (r.title || "").trim() ? nextTitle : "";
+      const payload = {
+        title: customTitle || undefined,
+        goal: trimmedGoal,
+        mode: effectiveMode,
+        keep_images: refineKeepImgs,
+        add_images:
+          refineAddImgs.length > 0
+            ? refineAddImgs.map((x) => x.dataUrl)
+            : undefined,
+        model: pick.ref || undefined,
+        effort: effortVal,
+      };
+      const next = await streamRehearsalAPI(
+        `/api/clusters/${encodeURIComponent(c.id)}/rehearsals/${encodeURIComponent(r.id)}/refine`,
+        payload,
+        (updater) => setLiveRefine((prev) => (prev ? updater(prev) : prev)),
+        ac.signal,
+      );
+      setLiveRefine(null);
+      setRefineOpen(false);
+      setRefineAddImgs([]);
+      setR(next);
+      const nextAns: Record<string, string> = {};
+      (next.scope_questions || []).forEach((q) => {
+        if (q.answer) nextAns[q.id] = q.answer;
+      });
+      setAnswers(nextAns);
+      setExtraScope(next.extra_scope || "");
+      setProbeOut("");
+      setProbeImages([]);
+      setPhaseFilter("all");
+      setFreshTraceStage("create");
+      switchStage(next.stage, true);
+      void onListChanged();
+      Message.success(
+        next.intent_unclear
+          ? bi(
+              "已重新研判诉求，请核对下方识别结果并补全细节",
+              "Goal re-analyzed; please verify the recognized intent below",
+            )
+          : bi(
+              "已按新诉求重新研判并刷新演练方案",
+              "Rehearsal refreshed with your refined goal",
+            ),
+      );
+    } catch (e) {
+      if (ac.signal.aborted) {
+        setLiveRefine(null);
+      } else {
+        setLiveRefine((prev) => (prev ? markLiveStateError(prev, e) : null));
+      }
+    } finally {
+      abortRef.current = null;
+    }
+  };
 
   const submitScope = async () => {
     if (offline || scopeBusy) return;
@@ -8427,6 +8633,18 @@ function RehearsalSessionView({
   const goalSections = parseRehearsalGoalSections(r.goal);
   const isLongGoal = r.goal.trim().length > 140 || goalSections.length > 1;
   const canToggleGoal = Boolean(r.goal.trim()) && (hasScopeSummary || isLongGoal);
+  const hasDownstreamProgress = Boolean(
+    r.probe_output ||
+      r.manual_state ||
+      (r.probe_images && r.probe_images.length > 0) ||
+      steps.some((s) => s.status !== "pending"),
+  );
+  const refineHasImages = refineKeepImgs.length + refineAddImgs.length > 0;
+  const refineCanSubmit =
+    Boolean(refineGoal.trim()) &&
+    !offline &&
+    !anyBusy &&
+    !(refineHasImages && noVision);
 
   return (
     <div className={`rh-session${isFreshCreate ? " is-fresh-session" : ""}`}>
@@ -8450,7 +8668,7 @@ function RehearsalSessionView({
               <span className="faint small">
                 {bi(`更新于 ${ago(r.updated_at)}`, `Updated ${ago(r.updated_at)}`)}
               </span>
-              {canToggleGoal && (
+              {canToggleGoal && !refineOpen && (
                 <>
                   <span className="rh-shead-dot" aria-hidden>
                     ·
@@ -8477,6 +8695,22 @@ function RehearsalSessionView({
             </div>
           </div>
           <div className="rh-shead-acts">
+            {canRefine && (
+              <Button
+                size="small"
+                type={refineOpen ? "secondary" : "text"}
+                icon={<IconEdit />}
+                disabled={anyBusy || offline}
+                onClick={() =>
+                  refineOpen ? setRefineOpen(false) : openRefine()
+                }
+                aria-expanded={refineOpen}
+              >
+                {refineOpen
+                  ? bi("收起修正", "Close")
+                  : bi("修正诉求", "Refine Goal")}
+              </Button>
+            )}
             <Popconfirm
               position="br"
               title={bi(
@@ -8505,72 +8739,361 @@ function RehearsalSessionView({
           </div>
         </div>
 
-        {hasScopeSummary ? (
-          <div className="rh-shead-summary">
-            <span className="rh-shead-sum-tag">
-              {bi("收敛边界", "Scope Summary")}
-            </span>
-            <span className="rh-shead-sum-txt">
-              {renderThinkingInline(r.scope_summary!)}
-            </span>
-          </div>
-        ) : r.goal.trim() && !goalOpen ? (
-          <div className="rh-shead-summary is-goal">
-            <span className="rh-shead-sum-tag">
-              {bi("变更诉求", "Change Goal")}
-            </span>
-            <span
-              className={`rh-shead-sum-txt ${isLongGoal ? "is-clamped" : ""}`}
-            >
-              {renderThinkingInline(r.goal)}
-            </span>
-          </div>
-        ) : null}
-
-        {goalOpen && goalSections.length > 0 && (
+        {refineOpen && canRefine ? (
           <div
-            className="rh-shead-goal-panel"
+            className="rh-refine-panel"
             role="region"
-            aria-label={bi("完整变更诉求", "Full change goal")}
+            aria-label={bi("修正变更诉求并重新研判", "Refine change goal and re-analyze")}
+            onKeyDown={(e) => {
+              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                e.preventDefault();
+                void submitRefine();
+              }
+            }}
           >
-            <div className="rh-shead-goal-head">
-              <span className="rh-shead-goal-title">
-                {hasScopeSummary
-                  ? bi("原始变更诉求", "Original Change Goal")
-                  : bi("完整变更诉求", "Full Change Goal")}
-              </span>
-              <button
-                type="button"
-                className="rh-shead-goal-close"
-                onClick={() => setGoalOpen(false)}
-              >
-                {bi("收起", "Collapse")}
-              </button>
+            <div className="rh-refine-head">
+              <div className="rh-refine-head-l">
+                <span className="rh-refine-title">
+                  {bi("修正诉求并重新研判", "Refine Goal & Re-analyze")}
+                </span>
+                {hasDownstreamProgress && (
+                  <span className="rh-refine-warn">
+                    {bi(
+                      "将按新诉求重置当前探针回显与步骤",
+                      "Will reset current probe outputs & steps",
+                    )}
+                  </span>
+                )}
+              </div>
+              {hasScopeSummary &&
+                r.scope_summary!.trim() !== refineGoal.trim() && (
+                  <button
+                    type="button"
+                    className="rh-refine-fill-btn"
+                    disabled={anyBusy}
+                    onClick={() => {
+                      setRefineGoal(r.scope_summary!.trim());
+                      window.requestAnimationFrame(() => {
+                        const el = refineGoalRef.current;
+                        if (el) {
+                          el.focus();
+                          el.selectionStart = el.selectionEnd = el.value.length;
+                        }
+                      });
+                    }}
+                  >
+                    <Spark size={12} />
+                    <span>
+                      {bi("填入 AI 识别摘要改写", "Use AI Summary as Draft")}
+                    </span>
+                  </button>
+                )}
             </div>
-            <div className="rh-shead-goal-list">
-              {goalSections.map((sec, idx) => (
-                <div key={idx} className="rh-shead-goal-row">
-                  {sec.label && (
-                    <span className="rh-shead-goal-lbl">{sec.label}</span>
-                  )}
-                  <p className="rh-shead-goal-body">
-                    {renderThinkingInline(sec.body)}
-                  </p>
-                </div>
-              ))}
+
+            <input
+              type="text"
+              className="rh-refine-title-input"
+              value={refineTitle}
+              disabled={anyBusy}
+              onChange={(e) => setRefineTitle(e.target.value)}
+              placeholder={bi(
+                "演练标题（可选；留空或未改动将由 AI 按新诉求自动归纳）",
+                "Title (optional; leave blank or unchanged for AI to re-summarize)",
+              )}
+              maxLength={60}
+            />
+
+            <textarea
+              ref={refineGoalRef}
+              className="rh-refine-textarea"
+              rows={3}
+              value={refineGoal}
+              disabled={anyBusy}
+              onChange={(e) => setRefineGoal(e.target.value)}
+              onPaste={(e) => {
+                const items = e.clipboardData?.files;
+                if (items && items.length > 0) {
+                  const hasImg = Array.from(items).some((f) =>
+                    f.type.startsWith("image/"),
+                  );
+                  if (hasImg) {
+                    e.preventDefault();
+                    void attachRefineFiles(items);
+                  }
+                }
+              }}
+              placeholder={bi(
+                "补充或改写你的真实变更诉求、目标参数/节点范围，或直接 Ctrl+V 粘贴新截图…",
+                "Clarify or rewrite your actual change goal, target parameters/scope, or Ctrl+V paste screenshots…",
+              )}
+            />
+
+            {(refineKeepImgs.length > 0 || refineAddImgs.length > 0) && (
+              <div className="rh-img-strip rh-refine-imgs">
+                {refineKeepImgs.map((name, idx) => (
+                  <div key={name} className="rh-img-thumb">
+                    <img
+                      src={rehearsalImgUrl(c.id, r.id, name)}
+                      alt={bi(`已有截图 ${idx + 1}`, `Saved image ${idx + 1}`)}
+                    />
+                    <button
+                      type="button"
+                      className="rh-img-rm"
+                      disabled={anyBusy}
+                      aria-label={bi("移除截图", "Remove screenshot")}
+                      onClick={() =>
+                        setRefineKeepImgs((prev) =>
+                          prev.filter((x) => x !== name),
+                        )
+                      }
+                    >
+                      <IconClose />
+                    </button>
+                  </div>
+                ))}
+                {refineAddImgs.map((im) => (
+                  <div key={im.id} className="rh-img-thumb">
+                    <img src={im.dataUrl} alt={im.name} />
+                    <button
+                      type="button"
+                      className="rh-img-rm"
+                      disabled={anyBusy}
+                      aria-label={bi("移除截图", "Remove screenshot")}
+                      onClick={() =>
+                        setRefineAddImgs((prev) =>
+                          prev.filter((x) => x.id !== im.id),
+                        )
+                      }
+                    >
+                      <IconClose />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="rh-mode-bar rh-refine-mode-bar">
+              <Segmented
+                size="sm"
+                value={r.security_context ? "full" : refineMode}
+                onChange={(v) => setRefineMode(v as RehearsalModeChoice)}
+                options={[
+                  {
+                    value: "auto",
+                    label: bi("自动判断", "Auto"),
+                    disabled: Boolean(r.security_context),
+                  },
+                  {
+                    value: "quick",
+                    label: bi("极速变更", "Quick"),
+                    disabled: Boolean(r.security_context),
+                  },
+                  {
+                    value: "light",
+                    label: bi("简单推演", "Light"),
+                    disabled: Boolean(r.security_context),
+                  },
+                  {
+                    value: "full",
+                    label: bi("全量推演", "Full"),
+                  },
+                ]}
+              />
+              <span className="rh-mode-hint">
+                {r.security_context
+                  ? bi(
+                      "安全漏洞与证书演练固定走全量推演",
+                      "Security rehearsals always use Full Rehearsal",
+                    )
+                  : refineMode === "quick"
+                    ? bi(
+                        "两步直出执行步骤与回退预案",
+                        "2-step direct steps & rollback",
+                      )
+                    : refineMode === "light"
+                      ? bi(
+                          "直出单屏只读探针 → 快速验证",
+                          "Direct read-only probe → quick verify",
+                        )
+                      : refineMode === "full"
+                        ? bi(
+                            "走完整四步：边界对齐 → 只读探针 → 演练 → SOP",
+                            "Full 4-stage: Scope → Probe → Rehearsal → SOP",
+                          )
+                        : bi(
+                            "诉求未写清先核对补全，写清后按风险自动路由",
+                            "Confirms unclear goals first; auto-routes clear goals by risk",
+                          )}
+              </span>
+            </div>
+
+            <div className="rh-compose-foot rh-refine-foot">
+              <div className="rh-compose-tools">
+                <input
+                  ref={refineImgInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  multiple
+                  hidden
+                  onChange={(e) => {
+                    if (e.target.files?.length) {
+                      void attachRefineFiles(e.target.files);
+                    }
+                    e.target.value = "";
+                  }}
+                />
+                <button
+                  type="button"
+                  className="rh-attach-btn"
+                  disabled={anyBusy || noVision}
+                  onClick={() => refineImgInputRef.current?.click()}
+                >
+                  <IconImage />
+                  <span>{bi("粘贴/添加截图", "Paste / Add Image")}</span>
+                </button>
+              </div>
+              <div className="rh-compose-submit">
+                <ThinkLevel
+                  levels={pick.current?.effort}
+                  value={aiOpts.pref.think}
+                  onChange={(v) => aiOpts.update({ think: v })}
+                />
+                <ModelPicker pick={pick} compact />
+                <Button
+                  size="small"
+                  disabled={refineBusy}
+                  onClick={() => setRefineOpen(false)}
+                >
+                  {bi("取消", "Cancel")}
+                </Button>
+                <Button
+                  type="primary"
+                  size="small"
+                  shape="round"
+                  className={`ai-pill ${refineCanSubmit ? "ai-pill-primary" : ""}`}
+                  icon={<Spark size={13} rainbow={!refineCanSubmit} />}
+                  loading={refineBusy}
+                  disabled={!refineCanSubmit}
+                  onClick={() => void submitRefine()}
+                >
+                  {bi("重新研判并刷新", "Re-analyze & Refresh")}
+                </Button>
+              </div>
             </div>
           </div>
-        )}
+        ) : (
+          <>
+            {hasScopeSummary ? (
+              <div
+                className={`rh-shead-summary${r.intent_unclear ? " is-intent" : ""}`}
+              >
+                <span className="rh-shead-sum-tag">
+                  {r.intent_unclear
+                    ? bi("AI 识别诉求", "AI Recognized")
+                    : bi("收敛边界", "Scope Summary")}
+                </span>
+                <span className="rh-shead-sum-txt">
+                  {renderThinkingInline(r.scope_summary!)}
+                </span>
+                {canRefine && (
+                  <button
+                    type="button"
+                    className="rh-shead-refine-link"
+                    disabled={anyBusy || offline}
+                    onClick={openRefine}
+                  >
+                    <IconEdit />
+                    <span>
+                      {r.intent_unclear
+                        ? bi("识别有偏？修正", "Misread? Edit")
+                        : bi("修正", "Edit")}
+                    </span>
+                  </button>
+                )}
+              </div>
+            ) : r.goal.trim() && !goalOpen ? (
+              <div className="rh-shead-summary is-goal">
+                <span className="rh-shead-sum-tag">
+                  {bi("变更诉求", "Change Goal")}
+                </span>
+                <span
+                  className={`rh-shead-sum-txt ${isLongGoal ? "is-clamped" : ""}`}
+                >
+                  {renderThinkingInline(r.goal)}
+                </span>
+              </div>
+            ) : null}
 
-        {r.goal_images && r.goal_images.length > 0 && (
-          <SavedImageGallery
-            clusterId={c.id}
-            rehearsalId={r.id}
-            names={r.goal_images}
-            label={bi("诉求参考截图", "Reference Screenshots")}
-          />
+            {goalOpen && goalSections.length > 0 && (
+              <div
+                className="rh-shead-goal-panel"
+                role="region"
+                aria-label={bi("完整变更诉求", "Full change goal")}
+              >
+                <div className="rh-shead-goal-head">
+                  <span className="rh-shead-goal-title">
+                    {hasScopeSummary
+                      ? bi("原始变更诉求", "Original Change Goal")
+                      : bi("完整变更诉求", "Full Change Goal")}
+                  </span>
+                  <div className="rh-shead-goal-acts">
+                    {canRefine && (
+                      <button
+                        type="button"
+                        className="rh-shead-goal-edit"
+                        disabled={anyBusy || offline}
+                        onClick={openRefine}
+                      >
+                        <IconEdit />
+                        <span>{bi("修改并重新研判", "Edit & Re-analyze")}</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="rh-shead-goal-close"
+                      onClick={() => setGoalOpen(false)}
+                    >
+                      {bi("收起", "Collapse")}
+                    </button>
+                  </div>
+                </div>
+                <div className="rh-shead-goal-list">
+                  {goalSections.map((sec, idx) => (
+                    <div key={idx} className="rh-shead-goal-row">
+                      {sec.label && (
+                        <span className="rh-shead-goal-lbl">{sec.label}</span>
+                      )}
+                      <p className="rh-shead-goal-body">
+                        {renderThinkingInline(sec.body)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {r.goal_images && r.goal_images.length > 0 && (
+              <SavedImageGallery
+                clusterId={c.id}
+                rehearsalId={r.id}
+                names={r.goal_images}
+                label={bi("诉求参考截图", "Reference Screenshots")}
+              />
+            )}
+          </>
         )}
       </header>
+
+      {liveRefine ? (
+        <RehearsalAIProcess
+          live={liveRefine}
+          title={liveRefine.title}
+          onAbort={() => abortRef.current?.abort()}
+          onRetry={() => void submitRefine()}
+          onDismiss={() => setLiveRefine(null)}
+        />
+      ) : (
+        <>
 
       {r.source?.rollout_id && (
         <RolloutProgressStrip
@@ -8747,9 +9270,11 @@ function RehearsalSessionView({
               setAnswers={setAnswers}
               extraScope={extraScope}
               setExtraScope={setExtraScope}
-              disabled={scopeBusy}
+              disabled={scopeBusy || refineBusy}
               freshReveal={isFreshCreate}
               baselineVersion={c.version}
+              intentUnclear={Boolean(r.intent_unclear)}
+              onRefineGoal={canRefine ? openRefine : undefined}
             />
 
             <div className="rh-sec-foot">
@@ -10163,6 +10688,8 @@ function RehearsalSessionView({
           </section>
         )}
       </div>
+        </>
+      )}
 
       {r.stage === "finalized" && r.applied && !r.voided && (
         <PropagateRehearsalModal

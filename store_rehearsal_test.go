@@ -1697,3 +1697,112 @@ func TestRehearsalExtractQuotedPatroniParamsAndHBARuleAndNoFalseCollision(t *tes
 		}
 	}
 }
+
+func TestRehearsalIntentUnclearGateAndRefineGoal(t *testing.T) {
+	s, _ := testStore(t)
+	alice, csrf := storeLogin(t, s, "alice")
+	cw := storeCreate(t, s, alice, csrf, `{"id":"pg-refine-test","hosts":[{"name":"node-1","ip":"10.0.15.11"},{"name":"node-2","ip":"10.0.15.12"},{"name":"node-3","ip":"10.0.15.13"}],"instances":[{"id":"etcd","component":"etcd","placement":{"member":["node-1","node-2","node-3"]}}]}`, nil)
+	s.wg.Wait()
+	if cw.Code != 202 {
+		t.Fatalf("create job: %d %s", cw.Code, cw.Body.String())
+	}
+	var job storeJob
+	_ = json.Unmarshal(cw.Body.Bytes(), &job)
+	_ = storeRequest(s, "PATCH", "/api/jobs/"+job.ID, strings.NewReader(`{"outcome":"done"}`), alice, csrf)
+
+	// 1x1 valid PNG data URLs with distinct pixel payloads so their sha256 filenames differ.
+	img1 := "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+X2dIAAAAASUVORK5CYII="
+	img2 := "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+
+	// 1) Create with vague goal + screenshot: even if model sets resolved_mode="light" alongside intent_unclear=true,
+	//    backend MUST enforce stage="scoping", mode="full", intent_unclear=true!
+	respUnclear := `{"thinking":"用户只写看这个截图有点问题，需先核对识别到的 pg_hba 报错与处理意图。","intent_unclear":true,"resolved_mode":"light","title":"排查 node-3 replicator 拒绝连接","scope_summary":"从截图识别到 node-3 上 replicator 经 127.0.0.1 被 pg_hba 拒绝，请先确认处理意图。","probe_script":"#!/usr/bin/env bash\nhostname -s","questions":[{"id":"q1","label":"意图核对","question":"截图识别到 node-3 pg_hba 拒绝 replicator，确认本次目标？","options":["补齐 pg_hba 规则并 reload 修复","仅只读排查定位原因，不改配置","识别有偏，改按我的真实需求推进（补充真实诉求）"]}]}`
+	// 2) Submit scope after confirming intent: should receive ScopeSummary + GoalImages and clear intent_unclear!
+	respScopeProbe := `{"thinking":"已结合识别摘要与截图定制单屏只读探针。","probe_script":"#!/usr/bin/env bash\nif [ -z \"${BASH_VERSION:-}\" ]; then exec bash \"$0\" \"$@\"; fi\nset -uo pipefail\nhostname -s\n","probe_notes":["单屏输出"]}`
+	// 3) Refine goal with explicit clear intent -> mode="auto" routes cleanly to light & resets stale probe output!
+	respRefinedLight := `{"thinking":"用户修正诉求为明确调整 max_connections，且需先核实现场配置 -> resolved_mode=light。","intent_unclear":false,"resolved_mode":"light","title":"确认并调优 max_connections","scope_summary":"先核实现场 max_connections 与内存余量，再决定调整方案。","probe_script":"#!/usr/bin/env bash\nif [ -z \"${BASH_VERSION:-}\" ]; then exec bash \"$0\" \"$@\"; fi\nset -uo pipefail\nhostname -s\n","probe_notes":["单屏采集"]}`
+
+	srv, seen := fakeModel(t, respUnclear, respScopeProbe, respRefinedLight)
+	enableAI(t, s, srv.URL, 1)
+
+	// Step 1: Create with vague prompt + img1
+	createBody, _ := json.Marshal(map[string]any{
+		"goal":   "看这个截图有点问题",
+		"mode":   "auto",
+		"images": []string{img1},
+	})
+	w1 := storeRequest(s, "POST", "/api/clusters/pg-refine-test/rehearsals", strings.NewReader(string(createBody)), alice, csrf)
+	if w1.Code != 201 {
+		t.Fatalf("create unclear rehearsal: %d %s", w1.Code, w1.Body.String())
+	}
+	var rh1 changeRehearsal
+	if err := json.Unmarshal(w1.Body.Bytes(), &rh1); err != nil {
+		t.Fatalf("decode rh1: %v", err)
+	}
+	if rh1.Stage != "scoping" || rh1.Mode != "full" || !rh1.IntentUnclear || len(rh1.ScopeQuestions) != 1 {
+		t.Fatalf("expected intent_unclear hard gate to land in scoping/full, got stage=%s mode=%s unclear=%v qs=%d", rh1.Stage, rh1.Mode, rh1.IntentUnclear, len(rh1.ScopeQuestions))
+	}
+	if len(rh1.GoalImages) != 1 {
+		t.Fatalf("expected 1 stored goal image, got %v", rh1.GoalImages)
+	}
+	origImgName := rh1.GoalImages[0]
+
+	// Step 2: Submit scope -> verifies ScopeSummary & GoalImages forwarded to AI and IntentUnclear cleared!
+	scopeBody := `{"answers":[{"id":"q1","question":"截图识别到 node-3 pg_hba 拒绝 replicator，确认本次目标？","answer":"补齐 pg_hba 规则并 reload 修复"}]}`
+	w2 := storeRequest(s, "POST", "/api/clusters/pg-refine-test/rehearsals/"+rh1.ID+"/scope", strings.NewReader(scopeBody), alice, csrf)
+	if w2.Code != 200 {
+		t.Fatalf("submit scope: %d %s", w2.Code, w2.Body.String())
+	}
+	var rh2 changeRehearsal
+	_ = json.Unmarshal(w2.Body.Bytes(), &rh2)
+	if rh2.Stage != "probing" || rh2.IntentUnclear {
+		t.Fatalf("expected probing with IntentUnclear=false after scope confirm, got stage=%s unclear=%v", rh2.Stage, rh2.IntentUnclear)
+	}
+	if len(*seen) < 2 || !strings.Contains((*seen)[1], "从截图识别到 node-3 上 replicator") || !strings.Contains((*seen)[1], "data:image/") {
+		t.Fatalf("expected scope->probe AI request to carry ScopeSummary and GoalImages, got:\n%s", (*seen)[1])
+	}
+
+	// Seed a stale probe_output to ensure refine resets it cleanly.
+	rehearsalMu.Lock()
+	seed, _ := s.loadRehearsal("pg-refine-test", rh1.ID)
+	seed.ProbeOutput = "stale probe output"
+	_ = s.saveRehearsal(seed)
+	rehearsalMu.Unlock()
+
+	// Step 3: Refine goal (drop origImgName, attach img2, rewrite goal clearly)
+	refineBody, _ := json.Marshal(map[string]any{
+		"goal":        "实际上截图我传错了，我想核实现场 max_connections 参数并做在线评估",
+		"mode":        "auto",
+		"keep_images": []string{},
+		"add_images":  []string{img2},
+	})
+	w3 := storeRequest(s, "POST", "/api/clusters/pg-refine-test/rehearsals/"+rh1.ID+"/refine", strings.NewReader(string(refineBody)), alice, csrf)
+	if w3.Code != 200 {
+		t.Fatalf("refine rehearsal: %d %s", w3.Code, w3.Body.String())
+	}
+	var rh3 changeRehearsal
+	_ = json.Unmarshal(w3.Body.Bytes(), &rh3)
+	if rh3.ID != rh1.ID || rh3.Mode != "light" || rh3.Stage != "probing" || rh3.IntentUnclear {
+		t.Fatalf("unexpected refined rehearsal state: id=%s mode=%s stage=%s unclear=%v", rh3.ID, rh3.Mode, rh3.Stage, rh3.IntentUnclear)
+	}
+	if rh3.Title != "确认并调优 max_connections" || rh3.ProbeOutput != "" || len(rh3.ScopeQuestions) != 0 {
+		t.Fatalf("expected title updated and stale downstream state reset, got title=%q probeOut=%q qs=%d", rh3.Title, rh3.ProbeOutput, len(rh3.ScopeQuestions))
+	}
+	if len(rh3.GoalImages) != 1 || rh3.GoalImages[0] == origImgName {
+		t.Fatalf("expected goal_images replaced with new img2 (old=%s), got %v", origImgName, rh3.GoalImages)
+	}
+	if _, err := os.Stat(filepath.Join(s.rehearsalImgDir("pg-refine-test", rh1.ID), origImgName)); !os.IsNotExist(err) {
+		t.Fatalf("expected dropped old goal image %s to be cleaned up from disk", origImgName)
+	}
+
+	// Step 4: Refining a finalized rehearsal MUST return 409 Conflict!
+	rehearsalMu.Lock()
+	fin, _ := s.loadRehearsal("pg-refine-test", rh1.ID)
+	fin.Stage = "finalized"
+	_ = s.saveRehearsal(fin)
+	rehearsalMu.Unlock()
+	w4 := storeRequest(s, "POST", "/api/clusters/pg-refine-test/rehearsals/"+rh1.ID+"/refine", strings.NewReader(string(refineBody)), alice, csrf)
+	if w4.Code != 409 {
+		t.Fatalf("expected 409 when refining finalized rehearsal, got %d %s", w4.Code, w4.Body.String())
+	}
+}

@@ -1779,6 +1779,7 @@ export type ChangeRehearsal = {
   security_context?: RehearsalSecurityContext;
   scope_questions?: ScopeQuestion[];
   scope_summary?: string;
+  intent_unclear?: boolean;
   probe_script?: string;
   probe_notes?: string[];
   probe_safe?: boolean;

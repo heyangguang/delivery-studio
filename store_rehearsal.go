@@ -248,6 +248,7 @@ type changeRehearsal struct {
 	SecurityContext   *rehearsalSecurityContext   `json:"security_context,omitempty"`
 	ScopeQuestions    []rehearsalScopeQuestion    `json:"scope_questions,omitempty"`
 	ScopeSummary      string                      `json:"scope_summary,omitempty"`
+	IntentUnclear     bool                        `json:"intent_unclear,omitempty"`
 	ProbeScript       string                      `json:"probe_script,omitempty"`
 	ProbeNotes        []string                    `json:"probe_notes,omitempty"`
 	ProbeSafe         bool                        `json:"probe_safe"`
@@ -1579,6 +1580,8 @@ func (s *storeServer) handleRehearsals(w http.ResponseWriter, r *http.Request, s
 		}
 		s.auditReq(r, "rehearsal-delete", session.User, f.ID+" "+rid)
 		s.writeJSON(w, 200, map[string]bool{"ok": true})
+	case len(parts) == 2 && parts[1] == "refine" && r.Method == "POST":
+		s.refineRehearsal(w, r, session, f, rid)
 	case len(parts) == 2 && parts[1] == "scope" && r.Method == "POST":
 		s.submitRehearsalScope(w, r, session, f, rid)
 	case len(parts) == 2 && parts[1] == "probe" && r.Method == "POST":
@@ -1599,18 +1602,19 @@ func (s *storeServer) handleRehearsals(w http.ResponseWriter, r *http.Request, s
 }
 
 const rehearsalScopeSystem = `你是资深离线中间件变更架构师。用户打算对一个已经部署运行的生产中间件集群做变更。
-因为生产集群可能已经发生过主从切换、参数手动调整或周边环境变化，你第一步只需做「诉求与边界对齐」：
-- 阅读平台提供的初始交付拓扑、关键参数与用户的变更诉求（若附带架构/工单截图请一并识别）；
+因为生产集群可能已经发生过主从切换、参数手动调整或周边环境变化，你第一步只需做「诉求核对与边界对齐」：
+- 阅读平台提供的初始交付拓扑、关键参数与用户的变更诉求（若附带架构/报错/工单截图请一并识别）；
+- **先判断诉求是否清晰完整（intent_unclear）**：若用户的文字非常简略模糊（如「看这个截图有点问题」「帮我看下报错」「配置改一下」）、缺少明确目标值/处理方式（仅排查 vs 改配置修复）或主要依赖你从截图中反推问题，请设 "intent_unclear": true，并在 scope_summary 中明确写出你识别到的具体现象/节点/报错与拟处理方向，把 **第 1 题留给「意图核对 / 诉求补全」**（让用户确认你是否识别准确，并给出具体处理方向选项及「识别有偏，补充真实诉求（补充真实目标）」），再视需要补 1～2 题；
 - 先在 JSON 第一个字段 thinking 中先评估本次变更的复杂度与风险级别（轻量在线 reload 变更 vs 需重启/切主/升级/扩缩容的中高风险变更），再简明写出分析推演过程；
 - 给出 1 句话的变更边界摘要（scope_summary），并**严格按变更复杂度提出最少且必要的边界确认项（绝不凑数问无关问题）**：
   * **轻量在线变更**（仅补规则/reload/动态参数，无需重启与切主）：只提 **1～2 个**真正影响执行的确认项（严禁硬问「停机窗口」「离线包就绪」「应用重连」「备份恢复」等无关项！）；
   * **中高风险变更**（需滚动重启/切主/升级/扩缩容/证书或备份架构改造）：提 **2～4 个**最关键的边界确认项（聚焦维护窗口与闪断口径、目标离线包/节点就绪度、应用连接重试机制、备份与演练条件）；
 - 每项必须精炼克制，禁止把三四个子问题塞进一个长句：
-  * label：4～6 字维度短标签（如「版本与离线包」「拓扑与复制」「窗口与重连」「备份与演练」）；
+  * label：4～6 字维度短标签（如「意图核对」「版本与离线包」「拓扑与复制」「窗口与重连」「备份与演练」）；
   * question：一句直达核心的简短确认问句（不超过 32 字）；
-  * options：3～4 个结构化单选卡片文案，统一采用「核心结论，简要补充说明」两段式（卡片正文控制在 26 字以内）；若某选项代表具体目标已确定但用户诉求中尚未写明具体值（如版本已定/目标明确、待调参数目标值已定、新增节点已就绪、排期窗口已定），请在该选项末尾附加「（补充目标版本号）」「（补充参数与目标值）」「（补充节点IP）」等简短括号标记以便前端自动展开输入框，而「版本待定/状态不明/按默认/通用策略」类选项严禁附加。
+  * options：3～4 个结构化单选卡片文案，统一采用「核心结论，简要补充说明」两段式（卡片正文控制在 26 字以内）；若某选项代表具体目标已确定但用户诉求中尚未写明具体值（如版本已定/目标明确、待调参数目标值已定、新增节点已就绪、排期窗口已定、识别有偏需补充真实目标），请在该选项末尾附加「（补充目标版本号）」「（补充参数与目标值）」「（补充节点IP）」「（补充真实诉求）」等简短括号标记以便前端自动展开输入框，而「版本待定/状态不明/按默认/通用策略」类选项严禁附加。
 严格只输出一个 JSON 对象，不要附加 Markdown 代码块：
-{"thinking":"1. 集群基线分析...；2. 变更核心风险点...；3. 需对齐的窗口与环境前提...","title":"不超过28字的演练标题","scope_summary":"一句话概括本次变更核心边界","questions":[{"id":"q1","label":"窗口与闪断","question":"可接受的业务闪断窗口与应用重连条件？","options":["秒级闪断滚动切换，应用具备自动重连","低峰计划窗口内执行，允许数秒中断","必须零中断在线操作，暂不允许切主"]},{"id":"q2","label":"版本与就绪","question":"目标小版本及离线包、节点准备到哪一步？","options":["全部就绪，目标明确且包与节点已核验（补充目标版本号）","版本已定，离线包或节点待核验（补充目标版本号）","版本待定，需先确认兼容目标","状态不明，先核实现网与离线资源"]}]}`
+{"thinking":"1. 诉求清晰度与集群基线分析...；2. 变更核心风险点...；3. 需对齐的意图或窗口前提...","intent_unclear":false,"title":"不超过28字的演练标题","scope_summary":"一句话概括本次变更核心边界（若为截图识别则写清识别到的现象与拟处理方向）","questions":[{"id":"q1","label":"窗口与闪断","question":"可接受的业务闪断窗口与应用重连条件？","options":["秒级闪断滚动切换，应用具备自动重连","低峰计划窗口内执行，允许数秒中断","必须零中断在线操作，暂不允许切主"]},{"id":"q2","label":"版本与就绪","question":"目标小版本及离线包、节点准备到哪一步？","options":["全部就绪，目标明确且包与节点已核验（补充目标版本号）","版本已定，离线包或节点待核验（补充目标版本号）","版本待定，需先确认兼容目标","状态不明，先核实现网与离线资源"]}]}`
 
 func cleanSecurityContext(sc *rehearsalSecurityContext) *rehearsalSecurityContext {
 	if sc == nil {
@@ -1711,67 +1715,71 @@ const rehearsalQuickCreateSystem = `你是资深中间件运维与变更专家�
 严格只输出一个 JSON 对象，不要附加 Markdown 代码块：
 {"thinking":"1. 变更定性（仅热重载/轻量改配置且现状明确，走极速变更）...；2. 步骤设计与回退要点...","title":"不超过28字的变更标题","scope_summary":"一句话概括本次极速变更内容与影响边界（如仅 reload 无中断）","steps":[{"id":"s1","phase":"execute","order":1,"title":"步骤标题","target_role":"明确执行机器与IP","command":"1-6行原生命令","expect":"成功判据","risk_note":"注意事项","rollback":"即时回退命令","optional":false},{"id":"s2","phase":"verify","order":2,"title":"核验生效与集群状态","target_role":"明确执行机器与IP","command":"核验命令","expect":"预期结果","risk_note":"","rollback":"","optional":false},{"id":"s3","phase":"rollback","order":3,"title":"回退：恢复原配置","target_role":"明确执行机器与IP","command":"回退命令","expect":"已恢复原值","risk_note":"仅变更异常时按需执行","rollback":"","optional":true}]}`
 
-const rehearsalAutoCreateSystem = `你是资深离线中间件变更架构师。用户对一个已投产运行的生产中间件集群发起了变更推演，你需要先**精准判断三档变更模式（resolved_mode）**，绝不一刀切：
+const rehearsalAutoCreateSystem = `你是资深离线中间件变更架构师。用户对一个已投产运行的生产中间件集群发起了变更推演，你需要先**核验诉求是否清晰完整，再精准判断三档变更模式（resolved_mode）**，绝不瞎猜直接出方案，也绝不一刀切：
 
-三档判断标准：
+第 0 原则（诉求完整度前置门禁 — 优先于档位判断）：
+- 如果用户的文字描述**模糊、笼统、缺少明确变更目标/期望结果/作用范围**（例如只写了「看这个截图有点问题」「帮我看下这个报错」「配置/日志需要改下」「主备好像异常」），或主要依赖你从附带截图中反推问题与改法、尚未得到用户本人确认：
+  -> **严禁跳过确认直接进 quick（直出步骤）或 light（跳过确认直出探针）！**
+  -> **必须设 "intent_unclear": true 且 "resolved_mode": "full"**，先停在「诉求核对与边界对齐」：
+     1. 在 scope_summary 里清晰、具体地写出你从文字/截图中识别出的**核心现象、报错/参数、涉及节点与拟处理方向**，方便用户一眼核对是否识别正确；
+     2. 在 questions 里 **第 1 题必须直接核对并补全需求本身**（label 如「意图核对」「诉求确认」）：复述识别到的问题，提供明确的处理方向选项（如「按识别方向补规则并热重载修复」「仅只读排查定位原因，暂不改配置」「识别有偏，按我的真实需求推进（补充真实诉求）」）；若还缺目标参数值或作用范围（单节点 vs 全集群），再补 1～2 题精准补全（总计 1～3 题，轻量问题严禁硬问无关的「停机窗口」「离线包就绪」）；
+     3. probe_script 与 steps 留空。
+
+仅当用户的变更目标、期望动作与大致范围已经**明确无歧义（intent_unclear=false）**时，按以下三档判断：
 1. **极速变更（resolved_mode="quick"）**：变更特别简单、无需重启服务和主备切换（例如在线动态调参 reload 如改 log_filename / log_rotation_size、补单条明确规则/白名单），**且现场现状已在用户诉求或附带截图中明确**，无需再额外跑采集脚本。
    -> 跳过维护窗口多选题与只读探针！直接输出 **2～3 步正向步骤（execute/verify）+ 1 步独立回退（rollback）** 的 steps（每步 1～6 行原生命令、target_role 写清具体节点与 IP、禁止 read -r -p 或隐藏变量；若验收创建了临时测试数据/文件或动了临时开关，必须在收尾步恢复并清理），questions 与 probe_script 均留空。
-2. **简单推演（resolved_mode="light"）**：只需局部改配置/补规则/在线动态调参（仅 reload 即可生效，无需重启与切主、不涉及升级/扩缩容/证书或架构大改），**但现场当前真实配置/规则/拓扑拿不准，需要先跑一屏只读探针核实后再出步骤**。
+2. **简单推演（resolved_mode="light"）**：只需局部改配置/补规则/在线动态调参（仅 reload 即可生效，无需重启与切主、不涉及升级/扩缩容/证书或架构大改），**且变更意图已明确**，只是现场当前真实配置/规则/拓扑拿不准，需要先跑一屏只读探针核实后再出步骤。
    -> 跳过维护窗口多选题！直接输出 **100% 纯只读、极简一屏（总输出 12～28 行、脚本不超过 40 行）** 的 probe_script 和 probe_notes（带 bash 自保护头与 set -uo pipefail；开头必采 1～2 行基础身份头：节点名 + 本机 IP + 主组件及伴随组件实测版本号 + 当前真实主从/健康状态，对齐下游漂移表列不留「待采集」；再查本次变更相关的 2～3 个核心项；严禁写/重启/改配置/重定向写文件/输出密码，且严禁后端节点直连自身 ELB VIP），questions 与 steps 留空。
 3. **全量推演（resolved_mode="full"）**：涉及滚动重启服务、主备切换/switchover、版本或补丁升级、扩缩容、备份/WAL 归档架构改造、TLS 证书轮换、跨节点或有业务闪断/数据风险的复杂变更。
    -> 先做「边界对齐」：提 2～4 个最关键的边界确认项（questions），probe_script 与 steps 留空。
 
-全量推演的 questions 规则（仅 resolved_mode="full" 时输出）：
-- label：4～6 字维度短标签（如「窗口与闪断」「版本与就绪」「备份与演练」）；
+questions 规则（仅 resolved_mode="full" 或 intent_unclear=true 时输出）：
+- label：4～6 字维度短标签（如「意图核对」「作用范围」「窗口与闪断」「版本与就绪」「备份与演练」）；
 - question：一句直达核心的简短确认问句（不超过 32 字）；
-- options：3～4 个「核心结论，简要补充说明」两段式单选文案（不超过 26 字）；若某选项代表具体目标已定但诉求未写明具体值，末尾可加「（补充目标版本号）」等短括号标记。
+- options：3～4 个「核心结论，简要补充说明」两段式单选文案（不超过 26 字）；若某选项代表具体目标已定但诉求未写明具体值，或需要用户纠正/补充真实诉求，末尾加「（补充目标版本号）」「（补充真实诉求）」等短括号标记。
 
 严格只输出一个 JSON 对象，不要附加 Markdown 代码块：
-- 极速变更格式（resolved_mode="quick"）：
-{"thinking":"1. 复杂度判定：仅在线热重载且现状已明确 -> resolved_mode=quick；2. 精简步骤与回退要点...","resolved_mode":"quick","title":"不超过28字的标题","scope_summary":"一句话概括变更内容与无中断边界","steps":[{"id":"s1","phase":"execute","order":1,"title":"...","target_role":"...","command":"...","expect":"...","risk_note":"","rollback":"","optional":false},{"id":"s2","phase":"verify","order":2,"title":"...","target_role":"...","command":"...","expect":"...","risk_note":"","rollback":"","optional":false},{"id":"s3","phase":"rollback","order":3,"title":"回退：恢复原值","target_role":"...","command":"...","expect":"...","risk_note":"仅异常时执行","rollback":"","optional":true}]}
-- 简单推演格式（resolved_mode="light"）：
-{"thinking":"1. 复杂度判定：仅单条规则/动态参数 reload 但现状拿不准 -> resolved_mode=light；2. 必查现场关键项（2-4项）...","resolved_mode":"light","title":"不超过28字的标题","scope_summary":"一句话概括本次变更核心目标与安全边界","probe_script":"#!/usr/bin/env bash\nif [ -z \"${BASH_VERSION:-}\" ]; then exec bash \"$0\" \"$@\"; fi\nset -uo pipefail\n...","probe_notes":["使用 bash 执行，输出约一屏以内，可直接复制或单张截图回传"]}
-- 全量推演格式（resolved_mode="full"）：
-{"thinking":"1. 复杂度判定：涉及重启/切主/升级/架构改造 -> resolved_mode=full；2. 核心风险点...；3. 需对齐的窗口与前提...","resolved_mode":"full","title":"不超过28字的标题","scope_summary":"一句话概括本次变更核心边界","questions":[{"id":"q1","label":"窗口与闪断","question":"可接受的业务闪断窗口与应用重连条件？","options":["秒级闪断滚动切换，应用具备自动重连","低峰计划窗口内执行，允许数秒中断","必须零中断在线操作，暂不允许切主"]}]}`
+- 极速变更格式（resolved_mode="quick"，仅诉求清晰时）：
+{"thinking":"1. 诉求清晰度与复杂度判定：诉求明确且仅在线热重载、现状已明确 -> resolved_mode=quick；2. 精简步骤与回退要点...","intent_unclear":false,"resolved_mode":"quick","title":"不超过28字的标题","scope_summary":"一句话概括变更内容与无中断边界","steps":[{"id":"s1","phase":"execute","order":1,"title":"...","target_role":"...","command":"...","expect":"...","risk_note":"","rollback":"","optional":false},{"id":"s2","phase":"verify","order":2,"title":"...","target_role":"...","command":"...","expect":"...","risk_note":"","rollback":"","optional":false},{"id":"s3","phase":"rollback","order":3,"title":"回退：恢复原值","target_role":"...","command":"...","expect":"...","risk_note":"仅异常时执行","rollback":"","optional":true}]}
+- 简单推演格式（resolved_mode="light"，仅诉求清晰时）：
+{"thinking":"1. 诉求清晰度与复杂度判定：诉求明确，仅单条规则/动态参数 reload 但现状拿不准 -> resolved_mode=light；2. 必查现场关键项（2-4项）...","intent_unclear":false,"resolved_mode":"light","title":"不超过28字的标题","scope_summary":"一句话概括本次变更核心目标与安全边界","probe_script":"#!/usr/bin/env bash\nif [ -z \"${BASH_VERSION:-}\" ]; then exec bash \"$0\" \"$@\"; fi\nset -uo pipefail\n...","probe_notes":["使用 bash 执行，输出约一屏以内，可直接复制或单张截图回传"]}
+- 诉求待核对 / 全量推演格式（intent_unclear=true 或 resolved_mode="full"）：
+{"thinking":"1. 诉求清晰度判定：...；2. 识别到的核心现象/风险点...；3. 需用户核对补全的关键项...","intent_unclear":true,"resolved_mode":"full","title":"不超过28字的标题","scope_summary":"一句话清晰复述识别到的现象/问题与拟处理方向","questions":[{"id":"q1","label":"意图核对","question":"截图识别到 XXX 报错，确认本次希望如何处理？","options":["定位根因并补全配置热重载修复","先纯只读采集排查，暂不做配置改动","识别有偏，按我的实际诉求推进（补充真实诉求）"]}]}`
 
-func (s *storeServer) createRehearsal(w http.ResponseWriter, r *http.Request, session storeSession, f clusterFacts) {
-	var in struct {
-		Title           string                    `json:"title"`
-		Goal            string                    `json:"goal"`
-		Mode            string                    `json:"mode"` // auto | light | full
-		Images          []string                  `json:"images"`
-		Model           string                    `json:"model"`
-		Effort          thinkLevel                `json:"effort"`
-		SecurityContext *rehearsalSecurityContext `json:"security_context"`
-	}
-	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 28<<20)).Decode(&in) != nil {
-		s.fail(w, 400, "提交的内容格式不对或图片超过大小限制")
-		return
-	}
-	lang := reqLang(r)
-	goal := strings.TrimSpace(in.Goal)
-	title := strings.TrimSpace(in.Title)
-	if len([]rune(goal)) < 4 || len([]rune(goal)) > 4000 {
-		s.fail(w, 400, "请填写清楚变更诉求（4～4000 字）")
-		return
-	}
-	providers, code, err := s.rehearsalCheckAILang(session.User, len(in.Images) > 0, in.Model, lang)
-	if err != nil {
-		s.fail(w, code, err.Error())
-		return
-	}
-	rid := randomStoreToken(6)
-	imgNames, err := s.storeRehearsalImages(f.ID, rid, in.Images)
-	if err != nil {
-		s.fail(w, 400, err.Error())
-		return
-	}
+type rehearsalTriageResult struct {
+	Title          string
+	Mode           string
+	Stage          string
+	ScopeSummary   string
+	IntentUnclear  bool
+	ScopeQuestions []rehearsalScopeQuestion
+	ProbeScript    string
+	ProbeNotes     []string
+	ProbeSafe      bool
+	ProbeWarnings  []string
+	Steps          []rehearsalStep
+	Drift          *rehearsalDrift
+	Trace          rehearsalTrace
+}
 
-	ev := startRehearsalSSE(w, r)
+func (s *storeServer) runRehearsalTriage(
+	r *http.Request,
+	providers []aiProvider,
+	user string,
+	f clusterFacts,
+	rid string,
+	reqMode string,
+	customTitle string,
+	goal string,
+	images []string,
+	secCtx *rehearsalSecurityContext,
+	effort thinkLevel,
+	lang string,
+	ev *sse,
+) (rehearsalTriageResult, int, error) {
 	inspectStart := time.Now()
 	baseline, red := s.clusterBaselinePrompt(f)
-	secCtx := cleanSecurityContext(in.SecurityContext)
-	reqMode := strings.ToLower(strings.TrimSpace(in.Mode))
+	reqMode = strings.ToLower(strings.TrimSpace(reqMode))
 	switch reqMode {
 	case "quick", "light", "full", "auto":
 	default:
@@ -1780,14 +1788,14 @@ func (s *storeServer) createRehearsal(w http.ResponseWriter, r *http.Request, se
 	if secCtx != nil {
 		reqMode = "full"
 	}
-	skillBlock, skillTitles := s.rehearsalSkillBlock(session.User, f, goal, secCtx)
+	skillBlock, skillTitles := s.rehearsalSkillBlock(user, f, goal, secCtx)
 	hostCount := 0
 	if f.Plan != nil {
 		hostCount = len(f.Plan.Hosts)
 	}
 	guardDetail := tr(lang, "自动剥离敏感口令与私钥字段，仅向模型提供架构拓扑与运行参数基线", "Automatically stripped passwords and private keys; sending only architecture topology and runtime parameters")
-	if len(imgNames) > 0 {
-		guardDetail += tr(lang, fmt.Sprintf("（附带 %d 张参考截图）", len(imgNames)), fmt.Sprintf(" (with %d reference image(s))", len(imgNames)))
+	if len(images) > 0 {
+		guardDetail += tr(lang, fmt.Sprintf("（附带 %d 张参考截图）", len(images)), fmt.Sprintf(" (with %d reference image(s))", len(images)))
 	}
 
 	sysPrompt := rehearsalScopeSystem
@@ -1842,12 +1850,12 @@ func (s *storeServer) createRehearsal(w http.ResponseWriter, r *http.Request, se
 		}
 	case "auto":
 		sysPrompt = rehearsalAutoCreateSystem
-		thinkTitle = tr(lang, "评估变更复杂度并选择推演档位", "Evaluate complexity & select rehearsal depth")
-		thinkWait = tr(lang, "正在判断走「简单推演（直出极简探针）」还是「全量推演（先对齐边界）」…", "Deciding between Light Rehearsal (direct probe) vs Full Rehearsal (scope alignment)...")
+		thinkTitle = tr(lang, "评估诉求完整度、复杂度并选择推演档位", "Evaluate goal clarity, complexity & workflow depth")
+		thinkWait = tr(lang, "正在核验诉求是否明确，并判断先做需求确认、直出极简探针还是全量边界对齐…", "Checking goal clarity and selecting intent confirmation, direct probe, or full alignment...")
 		synthID = "build-scope"
 		synthKind = "synthesize"
-		synthTitle = tr(lang, "生成极简探针或边界澄清清单", "Generate direct probe or scope checklist")
-		synthWait = tr(lang, "轻量变更直接生成并校验只读探针；复杂变更提炼边界确认项", "Generating verified probe for light changes or scope questions for complex changes...")
+		synthTitle = tr(lang, "生成需求核对项或只读探针", "Generate intent checklist or direct probe")
+		synthWait = tr(lang, "诉求模糊先输出意图核对问题；诉求明确则按风险直出探针或步骤", "Clarifying vague goals first; generating direct probe or steps for clear requests...")
 	}
 
 	pipeSpec := rehearsalPipelineSpec{
@@ -1881,29 +1889,27 @@ func (s *storeServer) createRehearsal(w http.ResponseWriter, r *http.Request, se
 	}
 
 	prompt := "【集群初始交付基线】\n" + baseline + securityContextPrompt(secCtx, "create") + "\n\n【用户本次变更诉求】\n" + goal
-	text, trace, code, err := s.rehearsalRunAI(r, providers, session.User, f.ID, rid+"/create", "create", red, sysPrompt+skillBlock, prompt, in.Images, pipeSpec, in.Effort, ev)
+	text, trace, code, err := s.rehearsalRunAI(r, providers, user, f.ID, rid+"/create", "create", red, sysPrompt+skillBlock, prompt, images, pipeSpec, effort, ev)
 	if err != nil {
-		if len(imgNames) > 0 {
-			_ = os.RemoveAll(s.rehearsalImgDir(f.ID, rid))
-		}
-		failRehearsalResp(s, w, ev, code, err.Error(), aiDiagFromErr(err), trace.Diag)
-		return
+		return rehearsalTriageResult{Trace: trace}, code, err
 	}
 	parseStart := time.Now()
 	var parsed struct {
-		Thinking     string                   `json:"thinking"`
-		ResolvedMode string                   `json:"resolved_mode"`
-		Title        string                   `json:"title"`
-		ScopeSummary string                   `json:"scope_summary"`
-		Questions    []rehearsalScopeQuestion `json:"questions"`
-		ProbeScript  string                   `json:"probe_script"`
-		ProbeNotes   []string                 `json:"probe_notes"`
-		Steps        []rehearsalStep          `json:"steps"`
-		Drift        *rehearsalDrift          `json:"drift"`
+		Thinking      string                   `json:"thinking"`
+		IntentUnclear bool                     `json:"intent_unclear"`
+		ResolvedMode  string                   `json:"resolved_mode"`
+		Title         string                   `json:"title"`
+		ScopeSummary  string                   `json:"scope_summary"`
+		Questions     []rehearsalScopeQuestion `json:"questions"`
+		ProbeScript   string                   `json:"probe_script"`
+		ProbeNotes    []string                 `json:"probe_notes"`
+		Steps         []rehearsalStep          `json:"steps"`
+		Drift         *rehearsalDrift          `json:"drift"`
 	}
 	if raw := extractJSON(text); raw != "" {
 		_ = json.Unmarshal([]byte(raw), &parsed)
 	}
+	title := strings.TrimSpace(customTitle)
 	if title == "" {
 		title = truncRunes(strings.TrimSpace(parsed.Title), 60)
 	}
@@ -1913,8 +1919,9 @@ func (s *storeServer) createRehearsal(w http.ResponseWriter, r *http.Request, se
 	summary := truncRunes(strings.TrimSpace(parsed.ScopeSummary), 300)
 
 	// Decide final mode & initial stage:
-	// - quick (or auto -> quick with valid steps): skips scoping & probing -> lands directly in rehearsing!
-	// - light (or auto -> light with valid probe_script): skips scoping -> lands in probing!
+	// - auto + intent_unclear=true: MUST pause in scoping (full) so the user can confirm/complete AI's interpretation first!
+	// - quick (or auto -> quick with valid steps & clear intent): skips scoping & probing -> lands directly in rehearsing.
+	// - light (or auto -> light with valid probe_script & clear intent): skips scoping -> lands in probing.
 	// - full: lands in scoping.
 	finalMode := "full"
 	script := ensureProbeBashGuard(parsed.ProbeScript)
@@ -1922,31 +1929,19 @@ func (s *storeServer) createRehearsal(w http.ResponseWriter, r *http.Request, se
 	resolvedLow := strings.ToLower(strings.TrimSpace(parsed.ResolvedMode))
 	if reqMode == "quick" && len(quickSteps) > 0 {
 		finalMode = "quick"
-	} else if reqMode == "auto" && resolvedLow == "quick" && len(quickSteps) > 0 {
+	} else if reqMode == "auto" && !parsed.IntentUnclear && resolvedLow == "quick" && len(quickSteps) > 0 {
 		finalMode = "quick"
 	} else if reqMode == "light" {
 		finalMode = "light"
-	} else if reqMode == "auto" && resolvedLow == "light" && script != "" {
+	} else if reqMode == "auto" && !parsed.IntentUnclear && resolvedLow == "light" && script != "" {
 		finalMode = "light"
 	}
 
-	now := nowStamp()
-	rh := changeRehearsal{
-		ID:              rid,
-		ClusterID:       f.ID,
-		AppID:           f.Current.AppID,
-		AppName:         f.Current.AppName,
-		BaseJobID:       f.Current.ID,
-		Title:           title,
-		Goal:            goal,
-		GoalImages:      imgNames,
-		Owner:           session.User,
-		Mode:            finalMode,
-		SecurityContext: secCtx,
-		ScopeSummary:    summary,
-		ProbeSafe:       true,
-		CreatedAt:       now,
-		UpdatedAt:       now,
+	res := rehearsalTriageResult{
+		Title:        title,
+		Mode:         finalMode,
+		ScopeSummary: summary,
+		ProbeSafe:    true,
 	}
 
 	if finalMode == "quick" && len(quickSteps) > 0 {
@@ -1961,10 +1956,10 @@ func (s *storeServer) createRehearsal(w http.ResponseWriter, r *http.Request, se
 			true,
 			max(1, time.Since(parseStart).Milliseconds()),
 		)
-		rh.Stage = "rehearsing"
-		rh.Steps = quickSteps
-		rh.Drift = parsed.Drift
-		rh.Traces = map[string]rehearsalTrace{"create": trace}
+		res.Stage = "rehearsing"
+		res.Steps = quickSteps
+		res.Drift = parsed.Drift
+		res.Trace = trace
 	} else if finalMode == "light" && script != "" {
 		safe, warns := validateReadOnlyProbeScriptLang(script, lang)
 		if trace.Thinking == "" {
@@ -1982,29 +1977,112 @@ func (s *storeServer) createRehearsal(w http.ResponseWriter, r *http.Request, se
 			safe,
 			max(1, time.Since(parseStart).Milliseconds()),
 		)
-		rh.Stage = "probing"
-		rh.ProbeScript = script
-		rh.ProbeNotes = cleanStringList(parsed.ProbeNotes, 6, 200)
-		rh.ProbeSafe = safe
-		rh.ProbeWarnings = warns
-		rh.Traces = map[string]rehearsalTrace{"create": trace}
+		res.Stage = "probing"
+		res.ProbeScript = script
+		res.ProbeNotes = cleanStringList(parsed.ProbeNotes, 6, 200)
+		res.ProbeSafe = safe
+		res.ProbeWarnings = warns
+		res.Trace = trace
 	} else {
-		rh.Mode = "full"
+		res.Mode = "full"
+		res.IntentUnclear = parsed.IntentUnclear
 		qs := normalizeScopeQuestionsLang(parsed.Questions, lang)
 		if trace.Thinking == "" {
-			trace.Thinking = firstNonEmptyStr(strings.TrimSpace(parsed.Thinking), tr(lang, fmt.Sprintf("已核对集群 %s（%s %s）初始拓扑与参数基线，提炼出 %d 个变更窗口与高可用约束澄清项。", f.ID, f.Current.AppName, f.Current.Version, len(qs)), fmt.Sprintf("Checked baseline topology & parameters for cluster %s (%s %s), extracting %d scope clarification question(s).", f.ID, f.Current.AppName, f.Current.Version, len(qs))))
+			if parsed.IntentUnclear {
+				trace.Thinking = firstNonEmptyStr(strings.TrimSpace(parsed.Thinking), tr(lang, fmt.Sprintf("已结合集群 %s 基线与输入线索识别潜在变更诉求，因原始描述待进一步确认，先提炼 %d 项核对问题供确认。", f.ID, len(qs)), fmt.Sprintf("Inferred likely change intent for cluster %s; generated %d confirmation item(s) before proceeding.", f.ID, len(qs))))
+			} else {
+				trace.Thinking = firstNonEmptyStr(strings.TrimSpace(parsed.Thinking), tr(lang, fmt.Sprintf("已核对集群 %s（%s %s）初始拓扑与参数基线，提炼出 %d 个变更窗口与高可用约束澄清项。", f.ID, f.Current.AppName, f.Current.Version, len(qs)), fmt.Sprintf("Checked baseline topology & parameters for cluster %s (%s %s), extracting %d scope clarification question(s).", f.ID, f.Current.AppName, f.Current.Version, len(qs))))
+			}
+		}
+		synthMsg := tr(lang, fmt.Sprintf("已按「全量推演」提炼 %d 个现场前提问题，确认后自动生成纯只读探针", len(qs)), fmt.Sprintf("Extracted %d prerequisite question(s) for Full Rehearsal; ready to generate probe", len(qs)))
+		if parsed.IntentUnclear {
+			synthMsg = tr(lang, fmt.Sprintf("识别到诉求待确认或补全，已提炼 %d 项需求核对问题（如识别有偏可直接点击「修正诉求」）", len(qs)), fmt.Sprintf("Detected ambiguous goal; prepared %d intent-confirmation item(s) (click Refine Goal if misinterpreted)", len(qs)))
 		}
 		finalizeTraceSynth(
 			&trace,
 			ev,
 			synthID,
-			tr(lang, fmt.Sprintf("已按「全量推演」提炼 %d 个现场前提问题，确认后自动生成纯只读探针", len(qs)), fmt.Sprintf("Extracted %d prerequisite question(s) for Full Rehearsal; ready to generate probe", len(qs))),
+			synthMsg,
 			true,
 			max(1, time.Since(parseStart).Milliseconds()),
 		)
-		rh.Stage = "scoping"
-		rh.ScopeQuestions = qs
-		rh.Traces = map[string]rehearsalTrace{"create": trace}
+		res.Stage = "scoping"
+		res.ScopeQuestions = qs
+		res.Trace = trace
+	}
+	return res, 0, nil
+}
+
+func (s *storeServer) createRehearsal(w http.ResponseWriter, r *http.Request, session storeSession, f clusterFacts) {
+	var in struct {
+		Title           string                    `json:"title"`
+		Goal            string                    `json:"goal"`
+		Mode            string                    `json:"mode"` // auto | quick | light | full
+		Images          []string                  `json:"images"`
+		Model           string                    `json:"model"`
+		Effort          thinkLevel                `json:"effort"`
+		SecurityContext *rehearsalSecurityContext `json:"security_context"`
+	}
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 28<<20)).Decode(&in) != nil {
+		s.fail(w, 400, "提交的内容格式不对或图片超过大小限制")
+		return
+	}
+	lang := reqLang(r)
+	goal := strings.TrimSpace(in.Goal)
+	title := strings.TrimSpace(in.Title)
+	if len([]rune(goal)) < 4 || len([]rune(goal)) > 4000 {
+		s.fail(w, 400, "请填写清楚变更诉求（4～4000 字）")
+		return
+	}
+	providers, code, err := s.rehearsalCheckAILang(session.User, len(in.Images) > 0, in.Model, lang)
+	if err != nil {
+		s.fail(w, code, err.Error())
+		return
+	}
+	rid := randomStoreToken(6)
+	imgNames, err := s.storeRehearsalImages(f.ID, rid, in.Images)
+	if err != nil {
+		s.fail(w, 400, err.Error())
+		return
+	}
+
+	ev := startRehearsalSSE(w, r)
+	secCtx := cleanSecurityContext(in.SecurityContext)
+	res, code, err := s.runRehearsalTriage(r, providers, session.User, f, rid, in.Mode, title, goal, in.Images, secCtx, in.Effort, lang, ev)
+	if err != nil {
+		if len(imgNames) > 0 {
+			_ = os.RemoveAll(s.rehearsalImgDir(f.ID, rid))
+		}
+		failRehearsalResp(s, w, ev, code, err.Error(), aiDiagFromErr(err), res.Trace.Diag)
+		return
+	}
+
+	now := nowStamp()
+	rh := changeRehearsal{
+		ID:              rid,
+		ClusterID:       f.ID,
+		AppID:           f.Current.AppID,
+		AppName:         f.Current.AppName,
+		BaseJobID:       f.Current.ID,
+		Title:           res.Title,
+		Goal:            goal,
+		GoalImages:      imgNames,
+		Owner:           session.User,
+		Mode:            res.Mode,
+		Stage:           res.Stage,
+		SecurityContext: secCtx,
+		ScopeQuestions:  res.ScopeQuestions,
+		ScopeSummary:    res.ScopeSummary,
+		IntentUnclear:   res.IntentUnclear,
+		ProbeScript:     res.ProbeScript,
+		ProbeNotes:      res.ProbeNotes,
+		ProbeSafe:       res.ProbeSafe,
+		ProbeWarnings:   res.ProbeWarnings,
+		Drift:           res.Drift,
+		Steps:           res.Steps,
+		Traces:          map[string]rehearsalTrace{"create": res.Trace},
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
 
 	rehearsalMu.Lock()
@@ -2016,6 +2094,157 @@ func (s *storeServer) createRehearsal(w http.ResponseWriter, r *http.Request, se
 	}
 	s.auditReq(r, "rehearsal-create", session.User, f.ID+" "+rid+" "+rh.Mode)
 	finishRehearsalResp(w, ev, 201, rh)
+}
+
+func (s *storeServer) refineRehearsal(w http.ResponseWriter, r *http.Request, session storeSession, f clusterFacts, rid string) {
+	var in struct {
+		Title      string     `json:"title"`
+		Goal       string     `json:"goal"`
+		Mode       string     `json:"mode"` // auto | quick | light | full
+		KeepImages []string   `json:"keep_images"`
+		AddImages  []string   `json:"add_images"`
+		Model      string     `json:"model"`
+		Effort     thinkLevel `json:"effort"`
+	}
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 28<<20)).Decode(&in) != nil {
+		s.fail(w, 400, "提交的内容格式不对或图片超过大小限制")
+		return
+	}
+	lang := reqLang(r)
+	goal := strings.TrimSpace(in.Goal)
+	title := strings.TrimSpace(in.Title)
+	if len([]rune(goal)) < 4 || len([]rune(goal)) > 4000 {
+		s.fail(w, 400, tr(lang, "请填写清楚变更诉求（4～4000 字）", "Please provide a clear change goal (4–4000 characters)"))
+		return
+	}
+	rehearsalMu.Lock()
+	rh, ok := s.loadRehearsal(f.ID, rid)
+	rehearsalMu.Unlock()
+	if !ok {
+		s.fail(w, 404, tr(lang, "演练会话不存在", "Rehearsal session not found"))
+		return
+	}
+	if rh.Stage == "finalized" || rh.Applied || rh.Voided {
+		s.fail(w, 409, tr(lang, "已定稿、已落地或已作废的演练不可修改原始诉求，请发起新演练", "Finalized, applied, or voided rehearsals cannot be refined; please start a new rehearsal"))
+		return
+	}
+
+	// Only keep image filenames that genuinely belong to this rehearsal's GoalImages.
+	allowedKeep := map[string]bool{}
+	for _, n := range rh.GoalImages {
+		allowedKeep[n] = true
+	}
+	var keptNames []string
+	seenKeep := map[string]bool{}
+	for _, n := range in.KeepImages {
+		n = strings.TrimSpace(n)
+		if allowedKeep[n] && !seenKeep[n] {
+			seenKeep[n] = true
+			keptNames = append(keptNames, n)
+		}
+	}
+	if len(keptNames)+len(in.AddImages) > 6 {
+		s.fail(w, 400, tr(lang, "参考截图总数不能超过 6 张", "Total reference screenshots cannot exceed 6"))
+		return
+	}
+	// Validate newly uploaded data URLs up front before running AI.
+	for _, data := range in.AddImages {
+		if m := reDataImage.FindStringSubmatch(data); m == nil || len(data) > 6<<20 {
+			s.fail(w, 400, tr(lang, "图片格式需为 png、jpg、gif 或 webp，且单张不超过 4 MiB", "Images must be PNG, JPG, GIF, or WebP and under 4 MiB each"))
+			return
+		}
+	}
+
+	allImageData := make([]string, 0, len(keptNames)+len(in.AddImages))
+	for _, name := range keptNames {
+		if d := s.rehearsalImageData(f.ID, rid, name); d != "" {
+			allImageData = append(allImageData, d)
+		}
+	}
+	allImageData = append(allImageData, in.AddImages...)
+
+	providers, code, err := s.rehearsalCheckAILang(session.User, len(allImageData) > 0, in.Model, lang)
+	if err != nil {
+		s.fail(w, code, err.Error())
+		return
+	}
+
+	ev := startRehearsalSSE(w, r)
+	res, code, err := s.runRehearsalTriage(r, providers, session.User, f, rid, in.Mode, title, goal, allImageData, rh.SecurityContext, in.Effort, lang, ev)
+	if err != nil {
+		failRehearsalResp(s, w, ev, code, err.Error(), aiDiagFromErr(err), res.Trace.Diag)
+		return
+	}
+
+	var addedNames []string
+	if len(in.AddImages) > 0 {
+		addedNames, err = s.storeRehearsalImages(f.ID, rid, in.AddImages)
+		if err != nil {
+			failRehearsalResp(s, w, ev, 400, err.Error())
+			return
+		}
+	}
+	finalImgs := append([]string{}, keptNames...)
+	for _, n := range addedNames {
+		if !seenKeep[n] {
+			seenKeep[n] = true
+			finalImgs = append(finalImgs, n)
+		}
+	}
+
+	rehearsalMu.Lock()
+	cur, ok := s.loadRehearsal(f.ID, rid)
+	if !ok {
+		rehearsalMu.Unlock()
+		failRehearsalResp(s, w, ev, 404, tr(lang, "演练会话不存在", "Rehearsal session not found"))
+		return
+	}
+	if cur.Stage == "finalized" || cur.Applied || cur.Voided {
+		rehearsalMu.Unlock()
+		failRehearsalResp(s, w, ev, 409, tr(lang, "已定稿、已落地或已作废的演练不可修改原始诉求", "Finalized, applied, or voided rehearsals cannot be refined"))
+		return
+	}
+	oldImgs := append(append([]string{}, cur.GoalImages...), cur.ProbeImages...)
+	cur.Title = res.Title
+	cur.Goal = goal
+	cur.GoalImages = finalImgs
+	cur.ExtraScope = ""
+	cur.Mode = res.Mode
+	cur.Stage = res.Stage
+	cur.ScopeQuestions = res.ScopeQuestions
+	cur.ScopeSummary = res.ScopeSummary
+	cur.IntentUnclear = res.IntentUnclear
+	cur.ProbeScript = res.ProbeScript
+	cur.ProbeNotes = res.ProbeNotes
+	cur.ProbeSafe = res.ProbeSafe
+	cur.ProbeWarnings = res.ProbeWarnings
+	cur.ProbeOutput = ""
+	cur.ProbeImages = nil
+	cur.ProbeIssue = nil
+	cur.ManualState = ""
+	cur.Drift = res.Drift
+	cur.Steps = res.Steps
+	cur.RestorationAlerts = nil
+	cur.Traces = map[string]rehearsalTrace{"create": res.Trace}
+	cur.UpdatedAt = nowStamp()
+	err = s.saveRehearsal(cur)
+	rehearsalMu.Unlock()
+	if err != nil {
+		failRehearsalResp(s, w, ev, 500, tr(lang, "保存演练会话失败", "Failed to save refined rehearsal"))
+		return
+	}
+	// Clean up removed old goal/probe image files no longer referenced by cur.
+	keepSet := map[string]bool{}
+	for _, n := range finalImgs {
+		keepSet[n] = true
+	}
+	for _, old := range oldImgs {
+		if old != "" && !keepSet[old] && reRehearsalImg.MatchString(old) {
+			_ = os.Remove(filepath.Join(s.rehearsalImgDir(f.ID, rid), filepath.Base(old)))
+		}
+	}
+	s.auditReq(r, "rehearsal-refine", session.User, f.ID+" "+rid+" "+cur.Mode)
+	finishRehearsalResp(w, ev, 200, cur)
 }
 
 func normalizeScopeQuestions(in []rehearsalScopeQuestion) []rehearsalScopeQuestion {
@@ -2198,8 +2427,21 @@ func (s *storeServer) submitRehearsalScope(w http.ResponseWriter, r *http.Reques
 		},
 	}
 
-	prompt := fmt.Sprintf("【集群初始交付基线】\n%s%s\n\n【变更目标】\n%s\n\n【已对齐的边界条件】\n%s", baseline, securityContextPrompt(rh.SecurityContext, "scope"), rh.Goal, qa.String())
-	text, trace, code, err := s.rehearsalRunAI(r, providers, session.User, f.ID, rid+"/scope", "scope", red, rehearsalProbeSystem+skillBlock, prompt, nil, pipeSpec, in.Effort, ev)
+	var scopePrompt strings.Builder
+	fmt.Fprintf(&scopePrompt, "【集群初始交付基线】\n%s%s\n\n【变更目标】\n%s\n", baseline, securityContextPrompt(rh.SecurityContext, "scope"), rh.Goal)
+	if sum := strings.TrimSpace(rh.ScopeSummary); sum != "" && sum != strings.TrimSpace(rh.Goal) {
+		fmt.Fprintf(&scopePrompt, "\n【已识别的变更诉求摘要】\n%s\n", sum)
+	}
+	fmt.Fprintf(&scopePrompt, "\n【已对齐的边界条件】\n%s", qa.String())
+	var goalImgData []string
+	if len(rh.GoalImages) > 0 && len(providers) > 0 && providers[0].Vision != "no" {
+		for _, name := range rh.GoalImages {
+			if d := s.rehearsalImageData(f.ID, rid, name); d != "" {
+				goalImgData = append(goalImgData, d)
+			}
+		}
+	}
+	text, trace, code, err := s.rehearsalRunAI(r, providers, session.User, f.ID, rid+"/scope", "scope", red, rehearsalProbeSystem+skillBlock, scopePrompt.String(), goalImgData, pipeSpec, in.Effort, ev)
 	if err != nil {
 		failRehearsalResp(s, w, ev, code, err.Error(), aiDiagFromErr(err), trace.Diag)
 		return
@@ -2244,6 +2486,7 @@ func (s *storeServer) submitRehearsalScope(w http.ResponseWriter, r *http.Reques
 	}
 	cur.ScopeQuestions = rh.ScopeQuestions
 	cur.ExtraScope = rh.ExtraScope
+	cur.IntentUnclear = false
 	cur.ProbeScript = script
 	cur.ProbeNotes = cleanStringList(parsed.ProbeNotes, 6, 200)
 	cur.ProbeSafe = safe
@@ -2416,6 +2659,9 @@ func (s *storeServer) submitRehearsalProbe(w http.ResponseWriter, r *http.Reques
 	baseline, red := s.clusterBaselinePrompt(f)
 	var prompt strings.Builder
 	fmt.Fprintf(&prompt, "【集群初始交付基线】\n%s\n\n【变更目标】\n%s\n", baseline, rh.Goal)
+	if sum := strings.TrimSpace(rh.ScopeSummary); sum != "" && sum != strings.TrimSpace(rh.Goal) {
+		fmt.Fprintf(&prompt, "\n【已确认的变更诉求摘要】\n%s\n", sum)
+	}
 	if rh.Mode == "light" {
 		prompt.WriteString("\n【当前推演档位：简单推演（light）】\n本次为轻量级推演：如确认现场状态有效且无高风险漂移，请严格将步骤精简控制在 3～5 步（1 步预检现状 → 1～2 步执行与 reload → 1 步验收 → 1 步回退）；若现场回显暴露出需要重启服务、切主或严重漂移的高风险问题，请在 drift.risks 中明确提示风险并建议升级为全量推演。\n")
 	}

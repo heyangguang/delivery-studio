@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.263-dev"
+	version            = "1.0.264-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,22 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.264-dev",
+		Date:    "2026-11-24",
+		Title:   "变更演练新增模糊诉求前置核对门禁与就地「修正诉求 / 重新研判」",
+		TitleEn: "Rehearsal Intent-Clarity Gate & Inline Refine Goal",
+		Highlights: []string{
+			"模糊诉求 / 截图反推前置核对门禁：在「自动判断」模式下，当用户仅填写简略描述或主要依赖截图（如「看这个截图有点问题」）而未明确变更目标与处理方式时，强制先停留在「诉求核对与边界对齐」（intent_unclear=true），先展示 AI 识别到的现象与拟处理方向并生成意图核对题，严禁跳过确认直接生成探针或执行步骤。",
+			"全流程支持「修正诉求 / 重新研判」：未定稿的演练在顶部操作栏、收敛边界条与原始诉求面板均提供就地「修正诉求」入口，支持一键带入 AI 识别摘要改写、增删诉求参考截图、调整推演档位（自动/极速/简单/全量）并流式重新研判刷新方案（新增 POST /api/clusters/{id}/rehearsals/{rid}/refine 接口，异常中断不破坏原会话）。",
+			"诉求摘要与截图全程透传下游：修复边界对齐→生成探针及探针→生成步骤阶段未携带 AI 识别摘要（ScopeSummary）与诉求参考截图的问题，确保截图发起的演练全链路上下文不断档。",
+		},
+		HighlightsEn: []string{
+			"Intent-clarity gate before probing/planning: in Auto mode, vague or screenshot-only inputs now pause at Scope Alignment (intent_unclear=true) so AI explicitly states what it recognized and confirms intent before generating probes or steps.",
+			"Inline Refine Goal & Re-analyze: any non-finalized rehearsal can now be corrected in place (header, scope bar, or original goal panel)—rewrite the goal, load AI's summary as a draft, add/remove screenshots, switch workflow depth, and stream a fresh triage via POST /api/clusters/{id}/rehearsals/{rid}/refine.",
+			"End-to-end context propagation: Stage 2 probe generation and Stage 3 step planning now preserve recognized scope_summary and goal reference screenshots seamlessly.",
+		},
+	},
 	{
 		Version: "1.0.263-dev",
 		Date:    "2026-11-24",

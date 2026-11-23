@@ -2635,15 +2635,20 @@ function RehearsalAIProcess({
     if (defaultOpen) setOpen(true);
   }, [defaultOpen]);
 
-  useEffect(() => {
-    setRawDiagOpen(false);
-  }, [live?.startedAt]);
+  const hasLive = Boolean(live);
+  const liveStartedAt = live?.startedAt ?? 0;
+  const hasLiveError = Boolean(live?.error);
+  const liveErrorAt = live?.errorAt ?? 0;
 
   useEffect(() => {
-    if (!live?.startedAt || lastScrolledStartRef.current === live.startedAt) {
+    setRawDiagOpen(false);
+  }, [liveStartedAt]);
+
+  useEffect(() => {
+    if (!liveStartedAt || lastScrolledStartRef.current === liveStartedAt) {
       return;
     }
-    lastScrolledStartRef.current = live.startedAt;
+    lastScrolledStartRef.current = liveStartedAt;
     const reduced =
       typeof window !== "undefined" &&
       window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
@@ -2651,62 +2656,52 @@ function RehearsalAIProcess({
       const el = procRef.current;
       if (!el || typeof window === "undefined") return;
       const rect = el.getBoundingClientRect();
-      const safeTop = 116;
-      const safeBottom = window.innerHeight - 20;
-      if (rect.top < safeTop) {
-        window.scrollBy({
-          top: rect.top - safeTop,
+      const safeTop = 104;
+      const safeBottom = window.innerHeight - 24;
+      if (rect.top < safeTop || rect.bottom > safeBottom) {
+        el.scrollIntoView({
           behavior: reduced ? "auto" : "smooth",
+          block: rect.top < safeTop ? "start" : "nearest",
         });
-      } else if (rect.bottom > safeBottom) {
-        const delta = Math.min(
-          rect.bottom - safeBottom,
-          Math.max(0, rect.top - safeTop),
-        );
-        if (delta > 4) {
-          window.scrollBy({
-            top: delta,
-            behavior: reduced ? "auto" : "smooth",
-          });
-        }
       }
     };
-    const timer = window.setTimeout(alignIntoSafeViewport, reduced ? 0 : 290);
+    const timer = window.setTimeout(alignIntoSafeViewport, reduced ? 0 : 120);
     return () => window.clearTimeout(timer);
-  }, [live?.startedAt]);
+  }, [liveStartedAt]);
 
   useEffect(() => {
-    if (!live) return;
+    if (!hasLive) return;
     setOpen(true);
-    if (live.error) {
-      setNow(live.errorAt || Date.now());
+    if (hasLiveError) {
+      setNow(liveErrorAt || Date.now());
       return;
     }
     setNow(Date.now());
     const t = setInterval(() => setNow(Date.now()), 120);
     return () => clearInterval(t);
-  }, [live, live?.error, live?.errorAt]);
+  }, [hasLive, liveStartedAt, hasLiveError, liveErrorAt]);
 
   const targetIdx = useMemo(
     () => (live ? computeTargetStepIndex(live.steps) : 0),
-    [live],
+    [live?.steps],
   );
 
   // Stage-by-stage choreography sequencer:
-  // Fast local steps animate one-by-one (280ms each), then hold honestly on
-  // Step 3 ("connect-model") until the upstream LLM returns its first real token.
-  // If an upstream error occurs, jump immediately to the broken step so the user sees why.
+  // Fast local steps animate one-by-one (~260ms each), then hold honestly on
+  // Step 3 ("connect-model") until the upstream LLM handshakes/returns tokens.
+  // Depends ONLY on scalar primitives & targetIdx so high-frequency SSE chunks
+  // (think/progress/phase) NEVER cancel the step-advance timer!
   useEffect(() => {
-    if (!live) return;
-    if (playState.startedAt !== live.startedAt) {
+    if (!hasLive) return;
+    if (playState.startedAt !== liveStartedAt) {
       setPlayState({
-        startedAt: live.startedAt,
-        idx: live.error ? targetIdx : 0,
+        startedAt: liveStartedAt,
+        idx: hasLiveError ? targetIdx : 0,
         enteredAt: Date.now(),
       });
       return;
     }
-    if (live.error && playState.idx !== targetIdx) {
+    if (hasLiveError && playState.idx !== targetIdx) {
       setPlayState((prev) => ({
         ...prev,
         idx: targetIdx,
@@ -2715,13 +2710,23 @@ function RehearsalAIProcess({
       return;
     }
     if (playState.idx >= targetIdx) return;
-    const minHold = targetIdx >= 3 ? 150 : 280;
+    const minHold = targetIdx >= 3 ? 140 : 260;
     const elapsed = Date.now() - playState.enteredAt;
-    const wait = Math.max(16, minHold - elapsed);
+    if (elapsed >= minHold) {
+      setPlayState((prev) => {
+        if (prev.startedAt !== liveStartedAt || prev.idx >= targetIdx) return prev;
+        return {
+          startedAt: prev.startedAt,
+          idx: prev.idx + 1,
+          enteredAt: Date.now(),
+        };
+      });
+      return;
+    }
+    const wait = minHold - elapsed;
     const timer = window.setTimeout(() => {
       setPlayState((prev) => {
-        if (!live || prev.startedAt !== live.startedAt) return prev;
-        if (prev.idx >= targetIdx) return prev;
+        if (prev.startedAt !== liveStartedAt || prev.idx >= targetIdx) return prev;
         return {
           startedAt: prev.startedAt,
           idx: prev.idx + 1,
@@ -2731,8 +2736,9 @@ function RehearsalAIProcess({
     }, wait);
     return () => window.clearTimeout(timer);
   }, [
-    live,
-    live?.error,
+    hasLive,
+    liveStartedAt,
+    hasLiveError,
     playState.startedAt,
     playState.idx,
     playState.enteredAt,
@@ -5801,6 +5807,21 @@ export function ClusterRehearsal({
                 </Smooth>
               </div>
 
+              {creatingBusy ? (
+                <div className="rh-launch-busy-goal">
+                  <span className="rh-launch-busy-k">
+                    {bi("已提交变更诉求", "Submitted Goal")}
+                  </span>
+                  <span className="rh-launch-busy-v">
+                    {title.trim() || goal.trim()}
+                  </span>
+                  {goalImages.length > 0 && (
+                    <span className="rh-launch-busy-img num">
+                      <IconImage /> {goalImages.length}
+                    </span>
+                  )}
+                </div>
+              ) : (
               <div
                 ref={composeRef}
                 className={`rh-compose ${offline ? "off" : ""} ${dragGoal ? "is-drag" : ""} ${creatingBusy ? "is-busy" : ""} ${spacious.expanded ? "is-writing" : ""}`}
@@ -6149,6 +6170,7 @@ export function ClusterRehearsal({
                   </div>
                 </div>
               </div>
+              )}
 
               {liveCreate && (
                 <RehearsalAIProcess
@@ -7871,7 +7893,7 @@ function RehearsalSessionView({
       window.requestAnimationFrame(() => {
         stageNavRef.current?.scrollIntoView({
           behavior: "smooth",
-          block: "nearest",
+          block: "start",
         });
       });
     }
@@ -7968,7 +7990,7 @@ function RehearsalSessionView({
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [visIdx, isQuickMode, isLightMode, loading, r?.stage, r?.steps?.length, Boolean(liveScope), Boolean(liveProbe)]);
+  }, [visIdx, isQuickMode, isLightMode, loading, r?.stage, r?.steps?.length, Boolean(liveScope), Boolean(liveProbe), busyFinalize]);
 
   const attachProbeFiles = async (files: FileList | File[]) => {
     const all = Array.from(files);
@@ -8171,6 +8193,13 @@ function RehearsalSessionView({
     );
     if (action === "analyze") {
       switchStage("rehearsing", true);
+    } else {
+      window.requestAnimationFrame(() => {
+        stageNavRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      });
     }
     try {
       const imgs =
@@ -8236,6 +8265,7 @@ function RehearsalSessionView({
   const finalizeSOP = async () => {
     if (offline) return;
     setBusyFinalize(true);
+    switchStage("finalized", true);
     try {
       const next = await api<ChangeRehearsal>(
         `/api/clusters/${encodeURIComponent(c.id)}/rehearsals/${encodeURIComponent(r.id)}/finalize`,
@@ -8260,6 +8290,9 @@ function RehearsalSessionView({
             ),
       );
     } catch (e) {
+      if (r.stage !== "finalized") {
+        switchStage("rehearsing");
+      }
       err(e);
     } finally {
       setBusyFinalize(false);
@@ -8727,9 +8760,7 @@ function RehearsalSessionView({
                   if (!r.probe_script) switchStage("scoping");
                 }}
               />
-            ) : (
-              <>
-            {liveProbe && probeAction === "diagnose" && (
+            ) : liveProbe && probeAction === "diagnose" ? (
               <RehearsalAIProcess
                 live={liveProbe}
                 title={liveProbe.title}
@@ -8737,8 +8768,8 @@ function RehearsalSessionView({
                 onRetry={() => void submitProbe("diagnose")}
                 onDismiss={() => setLiveProbe(null)}
               />
-            )}
-
+            ) : (
+              <>
             {(r.traces?.scope || (isLightMode && r.traces?.create)) && (
               <RehearsalAIProcess
                 trace={(r.traces?.scope || r.traces?.create)!}
@@ -9854,6 +9885,25 @@ function RehearsalSessionView({
         {/* ---- Stage 4: Finalized Production SOP ---- */}
         {curIdx === 3 && (
           <section className={`rh-sec rh-final-sec${isFreshFinal ? " is-fresh-reveal" : ""}`}>
+            {busyFinalize ? (
+              <div className="rh-finalize-busy" role="status">
+                <span className="rh-stage-pulse" aria-hidden />
+                <div>
+                  <b>
+                    {isChangeReportMode
+                      ? bi("正在整理实测记录并归档《变更报告》…", "Compiling verification records & archiving Change Report…")
+                      : bi("正在映射生产节点拓扑并定稿《生产变更实施方案》…", "Mapping verified steps onto production topology & finalizing SOP…")}
+                  </b>
+                  <p className="muted small">
+                    {bi(
+                      "将自动汇总各步命令、实测核验结论、参数变更与回退预案并写入集群文档。",
+                      "Consolidating executed commands, verification notes, parameter changes, and rollback steps into Cluster Docs.",
+                    )}
+                  </p>
+                </div>
+              </div>
+            ) : (
+            <>
             <div className="rh-doc-card">
               <div className="rh-doc-art" aria-hidden>
                 <svg width="52" height="64" viewBox="0 0 52 64" fill="none">
@@ -10046,6 +10096,8 @@ function RehearsalSessionView({
                 onClusterChanged?.();
               }}
             />
+            </>
+            )}
           </section>
         )}
       </div>

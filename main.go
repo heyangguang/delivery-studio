@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.260-dev"
+	version            = "1.0.261-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,20 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.261-dev",
+		Date:    "2026-11-24",
+		Title:   "修复演练流式推演卡在阶段 1/5 及全阶段丝滑切换体验",
+		TitleEn: "Fix Live Rehearsal Progress Stuck at Stage 1/5 & Smooth Stage Transitions",
+		Highlights: []string{
+			"修复 AI 实时推演进度卡在「阶段 1/5」直到分析结束才一次性跳完的根因：RehearsalAIProcess 的阶段推进定时器与计时器原先依赖完整 live 对象引用，高频 SSE 思考/进度流每次到达都会清除未触发的定时器；现改为仅依赖稳定标量与目标阶段索引，并支持满足驻留时长后立即步进，实时流畅展示 1/5 → 2/5 → 连接模型 → 深度推演 → 生成结构化方案全过程。",
+			"全面理顺演练各阶段切换与视口定位：发起新建推演时自动折叠输入区为单行已提交诉求条，边界对齐→只读探针、探针诊断修复、只读探针→测试演练、测试演练→定稿 SOP 全链路均立即切入目标阶段并自动滚至阶段条顶部（修复此前在 .md-detail 滚容器内调用 window.scrollBy 无效及定稿阶段停留在旧视图的问题）。",
+		},
+		HighlightsEn: []string{
+			"Fixed live AI progress getting starved at Stage 1/5 until completion: RehearsalAIProcess's choreography timer and clock previously depended on the mutable live object reference, causing frequent SSE chunks to cancel pending step-advance timers. Now depends strictly on stable scalar primitives and targetIdx with immediate advancement once minHold elapses.",
+			"Smoothed every rehearsal stage transition & scroll alignment: launcher collapses to a compact submitted-goal strip while creating, Stage 2 diagnosis and Stage 3 -> 4 SOP finalization switch cleanly into dedicated progress panels, and auto-reveal scrolls .rh-stages / .rh-ai-proc inside .md-detail cleanly via scrollIntoView.",
+		},
+	},
 	{
 		Version: "1.0.260-dev",
 		Date:    "2026-11-24",

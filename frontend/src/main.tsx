@@ -472,7 +472,9 @@ function UpdatePill({
 }) {
   const { bi } = useI18n();
   if (!fresh || hidden) return null;
-  const shortBuild = freshBuild ? freshBuild.slice(0, 8) : "";
+  const shortBuild = freshBuild
+    ? freshBuild.split("-")[0].slice(0, 7)
+    : "";
   return (
     <div className="net-pill upd" role="status">
       <span className="sdot" />

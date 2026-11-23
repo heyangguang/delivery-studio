@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.259-dev"
+	version            = "1.0.260-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,24 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.260-dev",
+		Date:    "2026-11-24",
+		Title:   "跨集群变更推广看板、滚动命令分框防误粘与演练工作台打磨",
+		TitleEn: "Cross-Cluster Change Rollout Board, Atomic Rolling Command Boxes & Rehearsal UX Polish",
+		Highlights: []string{
+			"双向跨集群变更推广与看板：仅已确认生产落地的变更可 1→N 批量推广或按需引入；full/light 默认走只读探针并注入样板蓝图，quick 或同架构无冲突支持快车道直达步骤清单并强制执行严格首步预检门禁，配套右侧推广看板实时追踪进度与冲突。",
+			"滚动命令分框与防误粘贴保护：AI 提示词、后端规范化、跨集群映射与 Word SOP 导出全面支持多段独立命令框，自动拆分同框内多台节点的连续重启/切主命令并插入段间暂停核验门禁；同时将「微调 / 问 AI 修改」上移至步骤标题栏，命令框最右侧固定专留「复制」。",
+			"演练与文档界面精简打磨：合并只读探针阶段输入框（直接支持回显、截图或手动打字，移除多余切换条），移除文档页冗余的绿色生产落地卡片，修复文档顶栏「上一份 / 下一份」间距与全站组合按钮/输入框拼接圆角。",
+			"内置技能跨平台加载修复：统一处理内置技能文档 CRLF 换行，修复 Windows 检出编译环境下内置运维技能无法解析的问题。",
+		},
+		HighlightsEn: []string{
+			"Two-way Cross-Cluster Rollout & Board: propagate or import production-applied changes across clusters with automatic architecture/conflict matching, pilot blueprint injection on probe mode, strict blocking Step 1 precheck gate on fast-track mode, and a live Rollout Board drawer.",
+			"Atomic Multi-Node Rolling Command Boxes: prompt rules, deterministic auto-splitting, propagation remapping, and Word SOP export split sequential multi-node restarts/switchovers into isolated copyable boxes with pause-and-verify gates; Edit/Ask-AI moved to step headers so Copy stays pinned far-right.",
+			"Rehearsal & Docs UI Cleanup: unified Stage 2 probe textarea (output, screenshots, or manual notes without a mode toggle), removed redundant production-apply card from SOP docs, fixed doc prev/next switcher spacing and global Button.Group/Input.Group joined seams.",
+			"Cross-Platform Built-In Skills Fix: normalized CRLF frontmatter parsing so embedded AI operational skills load reliably on Windows checkouts.",
+		},
+	},
 	{
 		Version: "1.0.259-dev",
 		Date:    "2026-11-24",

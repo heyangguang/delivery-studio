@@ -656,14 +656,7 @@ export function ClusterDetail({
             }}
           />
         ) : effectiveTab === "docs" ? (
-          <DocsTab
-            c={c}
-            doc={resolvedDoc}
-            onClusterChanged={() => {
-              refreshRehearsals();
-              void reload();
-            }}
-          />
+          <DocsTab c={c} doc={resolvedDoc} />
         ) : (
           <Overview
             c={c}

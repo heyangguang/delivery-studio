@@ -38,11 +38,10 @@ import {
   putCached,
   reducedMotion,
 } from "./shared";
-import type { ChangeRehearsal, ClusterDoc, ClusterView, DocBlock } from "./shared";
+import type { ClusterDoc, ClusterView, DocBlock } from "./shared";
 import { go } from "./router";
 import { Segmented } from "./ui";
 import { Spark, useAIStatus } from "./aichat";
-import { RehearsalProductionApplyCard } from "./rehearsal";
 import { bi, useLang, withLang } from "./i18n";
 import "./docs.css";
 
@@ -231,11 +230,9 @@ export function prefetchClusterDocs(clusterId: string) {
 export function DocsTab({
   c,
   doc,
-  onClusterChanged,
 }: {
   c: ClusterView;
   doc?: string;
-  onClusterChanged?: () => void;
 }) {
   const lang = useLang();
   const listUrl = docsListPath(c.id);
@@ -282,7 +279,6 @@ export function DocsTab({
           view={view}
           setView={setView}
           onChanged={load}
-          onClusterChanged={onClusterChanged}
           onExport={(ids) => setExporting(ids)}
         />
         <ExportDialog
@@ -529,7 +525,6 @@ function DocView({
   view,
   setView,
   onChanged,
-  onClusterChanged,
   onExport,
 }: {
   c: ClusterView;
@@ -538,7 +533,6 @@ function DocView({
   view: ReportView;
   setView: (v: ReportView) => void;
   onChanged: () => void;
-  onClusterChanged?: () => void;
   onExport: (ids: string[]) => void;
 }) {
   const lang = useLang();
@@ -546,11 +540,6 @@ function DocView({
   const [d, setD] = useState<ClusterDoc | null>(
     () => cached<ClusterDoc>(itemUrl) ?? null,
   );
-  const sopRehearsalId = id.startsWith("sop-") ? id.slice(4) : "";
-  const [sopRehearsal, setSopRehearsal] = useState<ChangeRehearsal | null>(
-    null,
-  );
-  const [sopPeers, setSopPeers] = useState<ChangeRehearsal[]>([]);
   const [error, setError] = useState("");
   const [checking, setChecking] = useState(false);
   const [draftingAll, setDraftingAll] = useState(false);
@@ -580,37 +569,6 @@ function DocView({
       alive = false;
     };
   }, [c.id, id, itemUrl, lang]);
-  useEffect(() => {
-    if (!sopRehearsalId) {
-      setSopRehearsal(null);
-      setSopPeers([]);
-      return;
-    }
-    let alive = true;
-    const rhUrl = `/api/clusters/${encodeURIComponent(c.id)}/rehearsals/${encodeURIComponent(sopRehearsalId)}`;
-    const listRhUrl = `/api/clusters/${encodeURIComponent(c.id)}/rehearsals`;
-    const hit = cached<ChangeRehearsal>(rhUrl);
-    if (hit) setSopRehearsal(hit);
-    const listHit = cached<ChangeRehearsal[]>(listRhUrl);
-    if (listHit) setSopPeers(listHit);
-    api<ChangeRehearsal>(rhUrl)
-      .then((r) => {
-        putCached(rhUrl, r);
-        if (alive) setSopRehearsal(r);
-      })
-      .catch(() => {
-        if (alive) setSopRehearsal(null);
-      });
-    api<ChangeRehearsal[]>(listRhUrl)
-      .then((arr) => {
-        putCached(listRhUrl, arr);
-        if (alive) setSopPeers(arr || []);
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, [c.id, sopRehearsalId]);
   const update = (nd: ClusterDoc) => {
     putCached(itemUrl, nd);
     setD(nd);
@@ -923,36 +881,6 @@ function DocView({
               )}
             </div>
           </header>
-          {sopRehearsal && sopRehearsal.stage === "finalized" && (
-            <RehearsalProductionApplyCard
-              clusterId={c.id}
-              rehearsal={sopRehearsal}
-              peers={sopPeers}
-              compact
-              onUpdated={(next) => {
-                setSopRehearsal(next);
-                putCached(
-                  `/api/clusters/${encodeURIComponent(c.id)}/rehearsals/${encodeURIComponent(next.id)}`,
-                  next,
-                );
-                const listRhUrl = `/api/clusters/${encodeURIComponent(c.id)}/rehearsals`;
-                void api<ChangeRehearsal[]>(listRhUrl)
-                  .then((arr) => {
-                    putCached(listRhUrl, arr);
-                    setSopPeers(arr || []);
-                  })
-                  .catch(() => {});
-                void api<ClusterDoc>(itemUrl)
-                  .then((nd) => {
-                    putCached(itemUrl, nd);
-                    setD(nd);
-                  })
-                  .catch(() => {});
-                onChanged();
-                onClusterChanged?.();
-              }}
-            />
-          )}
           {(checking || draftingAll) && (
             <div className="dc-rv-busy" role="status">
               <Spark size={16} rainbow />

@@ -661,7 +661,7 @@ func (s *storeServer) applyRehearsalStepProposal(user string, spec *aiRehearsalS
 			Phase:      firstNonEmptyStr(spec.Phase, rh.Steps[idx].Phase, "execute"),
 			Title:      firstNonEmptyStr(spec.Title, "新增演练步骤"),
 			TargetRole: firstNonEmptyStr(spec.TargetRole, rh.Steps[idx].TargetRole),
-			Command:    strings.TrimSpace(spec.Command),
+			Command:    ensurePasteSafeShellCommand(spec.Command),
 			Expect:     firstNonEmptyStr(spec.Expect, "命令返回码为 0 且状态符合预期"),
 			Rollback:   strings.TrimSpace(spec.Rollback),
 			RiskNote:   strings.TrimSpace(spec.RiskNote),
@@ -670,7 +670,7 @@ func (s *storeServer) applyRehearsalStepProposal(user string, spec *aiRehearsalS
 				At:         now,
 				By:         user,
 				Diagnosis:  diag,
-				NewCommand: strings.TrimSpace(spec.Command),
+				NewCommand: ensurePasteSafeShellCommand(spec.Command),
 			}},
 		}
 		pos := idx
@@ -695,7 +695,15 @@ func (s *storeServer) applyRehearsalStepProposal(user string, spec *aiRehearsalS
 			st.Phase = spec.Phase
 		}
 		if strings.TrimSpace(spec.Command) != "" {
-			st.Command = strings.TrimSpace(spec.Command)
+			st.Command = ensurePasteSafeShellCommand(spec.Command)
+			st.Commands = nil
+			if subs := splitSequentialRollingCommands(st.Command, "zh-CN"); len(subs) > 1 {
+				for si := range subs {
+					subs[si].Command = ensurePasteSafeShellCommand(subs[si].Command)
+				}
+				st.Commands = subs
+				st.Command = joinStepCommandsFallback(subs)
+			}
 		}
 		if spec.Expect != "" {
 			st.Expect = spec.Expect

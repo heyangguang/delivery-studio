@@ -517,3 +517,63 @@ func TestRehearsalTemplatesContentDedupAndCategory(t *testing.T) {
 		t.Fatalf("expected pg-bitbucket security template flagged AlreadyEffective -> bb2200000002, got %+v", bitSec)
 	}
 }
+
+func TestEnsurePasteSafeShellCommand(t *testing.T) {
+	// 1. Exact user Screenshot #3 scenario: sudo psql + sleep 60 + patronictl list must wrap in (...) </dev/null.
+	raw := strings.Join([]string{
+		`sudo -u postgres psql -X -p 5432 -Atc "select 1"`,
+		`sleep 60; journalctl -u patroni --since '60 seconds ago' --no-pager -o cat | grep -c 'no pg_hba.conf'`,
+		`patronictl -c /etc/patroni/patroni.yml list`,
+	}, "\n")
+	got := ensurePasteSafeShellCommand(raw)
+	if !strings.HasPrefix(got, "(\n") || !strings.HasSuffix(got, "\n) </dev/null") {
+		t.Fatalf("expected multi-command block wrapped in (...) </dev/null, got:\n%s", got)
+	}
+	// Idempotent on second call.
+	if got2 := ensurePasteSafeShellCommand(got); got2 != got {
+		t.Fatalf("expected idempotent wrapping, got:\n%s", got2)
+	}
+
+	// 2. Upgrades (...) without </dev/null to (...) </dev/null.
+	upgraded := ensurePasteSafeShellCommand("(\necho a\necho b\n)")
+	if upgraded != "(\necho a\necho b\n) </dev/null" {
+		t.Fatalf("expected </dev/null added, got: %q", upgraded)
+	}
+
+	// 3. Single-line commands and #!/ shebang scripts stay untouched.
+	single := `patronictl -c /etc/patroni/patroni.yml list`
+	if ensurePasteSafeShellCommand(single) != single {
+		t.Fatalf("expected single-line command unchanged")
+	}
+	shebang := "#!/usr/bin/env bash\nset -uo pipefail\necho hi"
+	if ensurePasteSafeShellCommand(shebang) != shebang {
+		t.Fatalf("expected shebang script unchanged")
+	}
+
+	// 4. Single heredoc command stays untouched, while heredoc + follow-up command wraps.
+	singleHeredoc := "cat <<'EOF' > /tmp/test.conf\na=1\nb=2\nEOF"
+	if ensurePasteSafeShellCommand(singleHeredoc) != singleHeredoc {
+		t.Fatalf("expected single heredoc command unchanged, got:\n%s", ensurePasteSafeShellCommand(singleHeredoc))
+	}
+	heredocPlus := singleHeredoc + "\nsystemctl reload nginx"
+	if out := ensurePasteSafeShellCommand(heredocPlus); !strings.HasPrefix(out, "(\n") || !strings.HasSuffix(out, "\n) </dev/null") {
+		t.Fatalf("expected heredoc + follow-up command wrapped, got:\n%s", out)
+	}
+
+	// 5. Already-wrapped sequential rolling restarts still split into 2 paste-safe sub-boxes.
+	wrappedRolling := "(\npatronictl -c /etc/patroni/patroni.yml restart pg node-2 --force\npatronictl -c /etc/patroni/patroni.yml list\npatronictl -c /etc/patroni/patroni.yml restart pg node-3 --force\npatronictl -c /etc/patroni/patroni.yml list\n) </dev/null"
+	steps := normalizeRehearsalStepsLang([]rehearsalStep{{
+		ID:      "s4",
+		Phase:   "execute",
+		Title:   "滚动重启从库",
+		Command: wrappedRolling,
+	}}, "zh-CN")
+	if len(steps) != 1 || len(steps[0].Commands) != 2 {
+		t.Fatalf("expected wrapped rolling restart split into 2 sub-boxes, got %+v", steps)
+	}
+	for i, sub := range steps[0].Commands {
+		if !strings.HasPrefix(sub.Command, "(\n") || !strings.HasSuffix(sub.Command, "\n) </dev/null") {
+			t.Fatalf("expected sub-box %d wrapped in (...) </dev/null, got:\n%s", i, sub.Command)
+		}
+	}
+}

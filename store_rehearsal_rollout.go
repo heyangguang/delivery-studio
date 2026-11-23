@@ -729,7 +729,8 @@ func buildStrictPropagatedPrecheck(
 	case "postgresql":
 		cmdLines = append(cmdLines,
 			`systemctl is-active patroni etcd 2>/dev/null || true`,
-			`patroni --version; sudo -n -u postgres psql -X -w -h /var/run/postgresql -p 5432 -d postgres -Atc "SELECT 'pg='||current_setting('server_version')||' role='||CASE WHEN pg_is_in_recovery() THEN 'replica' ELSE 'primary' END||' pending_restart='||(SELECT count(*) FROM pg_settings WHERE pending_restart)||' long_tx='||(SELECT count(*) FROM pg_stat_activity WHERE state<>'idle' AND now()-xact_start>interval '30 seconds');"`,
+			`patroni --version`,
+			`sudo -n -u postgres psql -X -w -h /var/run/postgresql -p 5432 -d postgres -Atc "SELECT 'pg='||current_setting('server_version')||' role='||CASE WHEN pg_is_in_recovery() THEN 'replica' ELSE 'primary' END||' pending_restart='||(SELECT count(*) FROM pg_settings WHERE pending_restart)||' long_tx='||(SELECT count(*) FROM pg_stat_activity WHERE state<>'idle' AND now()-xact_start>interval '30 seconds');"`,
 			`patronictl -c /etc/patroni/patroni.yml list`,
 		)
 		if len(pgSettings) > 0 {
@@ -801,7 +802,7 @@ func buildStrictPropagatedPrecheck(
 		Order:      1,
 		Title:      tr(lang, "【严格前置预检】核实角色、版本、目标参数现值与健康红线", "[Strict Precheck] Verify Roles, Version, Live Parameters & Health Gate"),
 		TargetRole: tr(lang, fmt.Sprintf("所有数据节点（%s，逐台执行并核验）", targetSummary), fmt.Sprintf("All cluster nodes (%s, run and verify on each)", targetSummary)),
-		Command:    strings.Join(cmdLines, "\n"),
+		Command:    ensurePasteSafeShellCommand(strings.Join(cmdLines, "\n")),
 		Expect:     strings.Join(expectParts, " "),
 		RiskNote: tr(lang,
 			fmt.Sprintf("本演练引用自样板集群 %s（跳过了独立探针），此步为强制阻断门禁：若发现主从已漂移、版本不一致、存在 Pending restart、目标参数已有冲突或磁盘告警，严禁继续执行第 2 步！", originFacts.ID),
@@ -911,6 +912,14 @@ func (s *storeServer) buildPropagatedRehearsal(
 			}
 			if len(remappedSubs) <= 1 {
 				remappedSubs = splitSequentialRollingCommands(remappedCmd, lang)
+			}
+			if len(remappedSubs) > 1 {
+				for si := range remappedSubs {
+					remappedSubs[si].Command = ensurePasteSafeShellCommand(remappedSubs[si].Command)
+				}
+				remappedCmd = joinStepCommandsFallback(remappedSubs)
+			} else {
+				remappedCmd = ensurePasteSafeShellCommand(remappedCmd)
 			}
 			steps = append(steps, rehearsalStep{
 				ID:         fmt.Sprintf("s%d", ord),

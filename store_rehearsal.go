@@ -1707,7 +1707,9 @@ const rehearsalQuickCreateSystem = `你是资深中间件运维与变更专家�
 
 核心编制约束：
 1. **极简精炼**：正向步骤严格控制在 **2～3 步**（例如：1 步执行在线修改与热重载 → 1 步核验参数生效与集群状态；如有必要最多加 1 步可选即时触发动作），外加 **1 步独立应急回退**（phase="rollback"），绝不凑步数；
-2. **每步独立可复制、1～6 行原生命令（严禁多台滚动动作合进同一复制框）**：严禁 read -r -p 交互变量、严禁跨步骤隐藏变量（OLD/R1/R2/CFG 等）；若同一步内存在必须分步人工确认中间结果的两段命令，必须拆成独立步骤或使用 commands 数组分框（含 label、command、gate），绝不拼进同一个 command 字符串；直接使用基线里的真实配置路径与服务名；
+2. **每步独立可复制、堡垒机整块防吞行（严禁多台滚动动作合进同一复制框）**：
+   - 严禁 read -r -p 交互变量、严禁跨步骤隐藏变量（OLD/R1/R2/CFG 等）；若同一步内存在必须分步人工确认中间结果的两段命令，必须拆成独立步骤或使用 commands 数组分框（含 label、command、gate），绝不拼进同一个 command 字符串；
+   - **多行命令整块防吞行铁律**：凡单框包含 **2 条及以上命令**（尤其含 sudo、psql、patronictl、sleep、systemctl 等耗时或读 stdin 的命令），**必须**整块包裹在 ( ... ) </dev/null 子 Shell 中（不要裸写多行，也不要用 bash <<'EOF'），防止 JumpServer/WebSSH 及 Ubuntu sudo use_pty 吞掉后续行或输出交错；同时避免把多条不相关命令用 ; 硬拼成超长单行（拆成子 Shell 内清晰短行），直接使用基线里的真实配置路径与服务名；
 3. **执行机器（target_role）明确写清具体主机名与 IP**：例如「任一数据节点（如当前主库 node-1 / 172.30.4.26）执行一次」「所有数据节点（node-1 / node-2 / node-3，逐台执行）」；
 4. **临时改动必须收尾复位**：若执行或验收中涉及任何临时测试对象（测试表/测试 Key/临时文件）或临时开关/摘流/放宽规则，必须在验收收尾步一并还原并清理干净，绝不遗留脏状态；
 5. 若诉求中某参数值需要热重载后观察生效，expect 写清客观简洁的通过判据。
@@ -1727,7 +1729,7 @@ const rehearsalAutoCreateSystem = `你是资深离线中间件变更架构师。
 
 仅当用户的变更目标、期望动作与大致范围已经**明确无歧义（intent_unclear=false）**时，按以下三档判断：
 1. **极速变更（resolved_mode="quick"）**：变更特别简单、无需重启服务和主备切换（例如在线动态调参 reload 如改 log_filename / log_rotation_size、补单条明确规则/白名单），**且现场现状已在用户诉求或附带截图中明确**，无需再额外跑采集脚本。
-   -> 跳过维护窗口多选题与只读探针！直接输出 **2～3 步正向步骤（execute/verify）+ 1 步独立回退（rollback）** 的 steps（每步 1～6 行原生命令、target_role 写清具体节点与 IP、禁止 read -r -p 或隐藏变量；若验收创建了临时测试数据/文件或动了临时开关，必须在收尾步恢复并清理），questions 与 probe_script 均留空。
+   -> 跳过维护窗口多选题与只读探针！直接输出 **2～3 步正向步骤（execute/verify）+ 1 步独立回退（rollback）** 的 steps（每步 1～6 行原生命令、含 2 条及以上命令时整块包在 ( ... ) </dev/null 防堡垒机 WebSSH 与 sudo use_pty 吞后续行、target_role 写清具体节点与 IP、禁止 read -r -p 或隐藏变量；若验收创建了临时测试数据/文件或动了临时开关，必须在收尾步恢复并清理），questions 与 probe_script 均留空。
 2. **简单推演（resolved_mode="light"）**：只需局部改配置/补规则/在线动态调参（仅 reload 即可生效，无需重启与切主、不涉及升级/扩缩容/证书或架构大改），**且变更意图已明确**，只是现场当前真实配置/规则/拓扑拿不准，需要先跑一屏只读探针核实后再出步骤。
    -> 跳过维护窗口多选题！直接输出 **100% 纯只读、极简一屏（总输出 12～28 行、脚本不超过 40 行）** 的 probe_script 和 probe_notes（带 bash 自保护头与 set -uo pipefail；开头必采 1～2 行基础身份头：节点名 + 本机 IP + 主组件及伴随组件实测版本号 + 当前真实主从/健康状态，对齐下游漂移表列不留「待采集」；再查本次变更相关的 2～3 个核心项；严禁写/重启/改配置/重定向写文件/输出密码，且严禁后端节点直连自身 ELB VIP），questions 与 steps 留空。
 3. **全量推演（resolved_mode="full"）**：涉及滚动重启服务、主备切换/switchover、版本或补丁升级、扩缩容、备份/WAL 归档架构改造、TLS 证书轮换、跨节点或有业务闪断/数据风险的复杂变更。
@@ -2532,7 +2534,7 @@ const rehearsalPlanSystem = `你是资深中间件变更实施专家。现在你
    - **总步数与命令篇幅严格控制**：
      * **轻量在线变更**（如补一条 pg_hba/白名单规则、在线动态调参 reload、补日志目录或轮转规则，无需重启和切主）：总步数严格控制在 **3～4 步**（1 步预检 → 1 步执行与 reload → 1 步验收 → 1 步回退）；
      * **中高风险变更**（需滚动重启、切主、升级、扩缩容、架构或证书改造）：常规变更严格控制在 **5～8 步**（把琐碎的小检查合并，例如日志落盘滚动重启：1 步只读核对现状 → 1 步所有节点建目录 → 1 步修改 DCS 参数 → 1 步滚动重启从库（通过 commands 拆成每台独立的命令框，或拆分为两步） → 1 步切主并重启原主库（切主与重启分框） → 1 步切回原主库恢复初始角色 → 1 步验收日志与入口 → 1 步回退）；
-     * **单步命令短小直白**：每步 command 尽量控制在 **1～6 行**原生命令，不要写大段 Bash 控制流或跨节点 SSH for 循环。
+     * **单步命令短小直白 + 堡垒机 WebSSH 整块防吞行铁律**：每步 command 尽量控制在 **1～6 行**原生命令，不要写大段 Bash 控制流或跨节点 SSH for 循环，也不要把多条不相关耗时命令用 ; 硬拼成超过 160 字符的超长单行；凡单框含 **2 条及以上命令**（尤其含 sudo、psql、patronictl、sleep、systemctl 等耗时或读 stdin 的命令），**必须**整块包裹在 ( ... ) </dev/null 子 Shell 中（严禁裸贴多行，严禁用 bash <<'EOF'），防止 JumpServer/WebSSH 及 Ubuntu sudo use_pty 吞掉缓冲区后续行或造成输出交错；单条命令无需包裹。
    - **单框原子复制铁律（严禁多台滚动操作塞进同一个命令复制框！）**：
      * 工程师会直接点击命令框右上角「复制」把整块命令一次粘贴到终端连续执行！
      * 因此**绝对禁止**把多台节点的滚动/破坏性操作（例如同时重启 node-2 与 node-3、连续多次 systemctl restart/stop/reload、计划内 switchover 紧接重启原主库、先看 diff 确认再 apply 等中间必须人工确认健康后再推进的命令）写进同一个 command 字符串里！
@@ -3027,8 +3029,125 @@ func extractRollingSegmentHint(lines []string) string {
 // (e.g. restarting node-2 and node-3, or switchover followed by restarting the old primary)
 // are packed inside a single copyable block, and splits them into separate copyable
 // sub-commands with an explicit pause-and-verify gate between them.
+var (
+	reInteractiveTTYCmd      = regexp.MustCompile(`(?m)(^|[;&|]\s*)(vi|vim|nano|less|more|top|htop|passwd|tmux|screen)\b|\b(su\s+-|sudo\s+-i|sudo\s+su)\b`)
+	reInteractivePatroniEdit = regexp.MustCompile(`(?i)\bpatronictl\b[^\n]*\bedit-config\b`)
+	rePatroniNonInteractive  = regexp.MustCompile(`(?i)(--force|\s-[ps]\s|--set\b|--replace\b)`)
+	reCloseSubshellLine      = regexp.MustCompile(`^\)\s*(<\s*/dev/null\s*)?(2>&1\s*)?$`)
+	reCloseBraceLine         = regexp.MustCompile(`^\}\s*(<\s*/dev/null\s*)?(2>&1\s*)?$`)
+)
+
+func shellNeedsInteractiveTTY(s string) bool {
+	if reInteractiveTTYCmd.MatchString(s) {
+		return true
+	}
+	for _, line := range strings.Split(s, "\n") {
+		if reInteractivePatroniEdit.MatchString(line) && !rePatroniNonInteractive.MatchString(line) {
+			return true
+		}
+	}
+	return false
+}
+
+// unwrapOuterPasteGroup strips a single top-level (\n...\n) [</dev/null] or {\n...\n} [</dev/null]
+// wrapper if present so structural helpers like splitSequentialRollingCommands inspect inner lines.
+func unwrapOuterPasteGroup(cmd string) string {
+	s := strings.TrimSpace(strings.ReplaceAll(cmd, "\r\n", "\n"))
+	lines := strings.Split(s, "\n")
+	if len(lines) < 3 {
+		return s
+	}
+	first := strings.TrimSpace(lines[0])
+	last := strings.TrimSpace(lines[len(lines)-1])
+	if (first == "(" && reCloseSubshellLine.MatchString(last)) || (first == "{" && reCloseBraceLine.MatchString(last)) {
+		return strings.TrimSpace(strings.Join(lines[1:len(lines)-1], "\n"))
+	}
+	return s
+}
+
+func countLogicalShellCommands(s string) int {
+	lines := strings.Split(s, "\n")
+	logical := 0
+	heredocEnd := ""
+	blockDepth := 0
+	prevCont := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if heredocEnd != "" {
+			if trimmed == heredocEnd {
+				heredocEnd = ""
+			}
+			continue
+		}
+		if trimmed == "" || (!prevCont && strings.HasPrefix(trimmed, "#")) {
+			prevCont = false
+			continue
+		}
+		if !prevCont && blockDepth == 0 {
+			logical++
+		}
+		if m := reHeredocStart.FindStringSubmatch(trimmed); len(m) >= 2 {
+			heredocEnd = m[1]
+		}
+		if reShellBlockOpen.MatchString(trimmed) && !reShellBlockClose.MatchString(trimmed) {
+			blockDepth++
+		} else if reShellBlockClose.MatchString(trimmed) && blockDepth > 0 {
+			blockDepth--
+		}
+		prevCont = strings.HasSuffix(strings.TrimRight(line, " \t"), `\`)
+	}
+	return logical
+}
+
+// ensurePasteSafeShellCommand wraps multi-command shell blocks in a POSIX subshell with stdin
+// redirected from /dev/null:
+//
+//	(
+//	cmd1
+//	cmd2
+//	) </dev/null
+//
+// In bastion / WebSSH terminals (e.g. JumpServer) and Ubuntu hosts with `Defaults use_pty` in sudoers,
+// pasting bare multi-line commands causes slow CLIs or `sudo` to drain the PTY buffer and swallow
+// subsequent lines (`sleep`, `patronictl list`, `df -h`, etc.) or interleave output mid-paste.
+// Wrapping in `(...) </dev/null` forces interactive bash to parse ALL lines before running line 1,
+// isolates `exit`/`cd`, and prevents child commands from reading or flushing terminal stdin.
+func ensurePasteSafeShellCommand(cmd string) string {
+	s := strings.TrimSpace(strings.ReplaceAll(cmd, "\r\n", "\n"))
+	if s == "" || strings.HasPrefix(s, "#!") {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	if len(lines) < 2 {
+		return s
+	}
+	first := strings.TrimSpace(lines[0])
+	last := strings.TrimSpace(lines[len(lines)-1])
+	interactive := shellNeedsInteractiveTTY(s)
+
+	// Idempotent handling if already wrapped in (...) or {...}.
+	if (first == "(" && reCloseSubshellLine.MatchString(last)) || (first == "{" && reCloseBraceLine.MatchString(last)) {
+		if !interactive && !strings.Contains(last, "/dev/null") {
+			if first == "(" {
+				lines[len(lines)-1] = ") </dev/null"
+			} else {
+				lines[len(lines)-1] = "} </dev/null"
+			}
+			return strings.Join(lines, "\n")
+		}
+		return s
+	}
+	if countLogicalShellCommands(s) < 2 {
+		return s
+	}
+	if interactive {
+		return "(\n" + s + "\n)"
+	}
+	return "(\n" + s + "\n) </dev/null"
+}
+
 func splitSequentialRollingCommands(cmd, lang string) []rehearsalStepCommand {
-	rawLines := strings.Split(strings.ReplaceAll(strings.TrimSpace(cmd), "\r\n", "\n"), "\n")
+	rawLines := strings.Split(unwrapOuterPasteGroup(cmd), "\n")
 	if len(rawLines) < 2 {
 		return nil
 	}
@@ -3187,6 +3306,14 @@ func normalizeRehearsalStepsLang(in []rehearsalStep, lang string) []rehearsalSte
 		}
 		if len(cleanCmds) == 0 && cmd != "" {
 			cleanCmds = splitSequentialRollingCommands(cmd, lang)
+		}
+		if len(cleanCmds) > 1 {
+			for ci := range cleanCmds {
+				cleanCmds[ci].Command = ensurePasteSafeShellCommand(cleanCmds[ci].Command)
+			}
+			cmd = joinStepCommandsFallback(cleanCmds)
+		} else if cmd != "" {
+			cmd = ensurePasteSafeShellCommand(cmd)
 		}
 		title := strings.TrimSpace(st.Title)
 		if cmd == "" || title == "" {
@@ -3612,6 +3739,7 @@ const rehearsalVerifyStepSystem = `你是资深中间件变更验收与排障专
        - 若当前步骤命令本身需要修改：action="replace"，给出修正后的完整 command 与 target_role；
        - 若缺少前置步骤：action="insert_before"，给出前置步骤 title、target_role、command、expect；
        - 若只需补测剩余节点或补跑一条轻量补救命令：action="retry"，给出只针对剩余缺口的最小复测命令，并在 target_role 中明确指出该命令要登录哪台/哪几台机器执行。
+       - **防吞行格式**：若 command 包含 2 条及以上命令（尤其含 sudo/psql/patronictl/sleep），请整块包在 ( ... ) </dev/null 中（不要裸写多行，也不要用 bash <<'EOF'），保证堡垒机/WebSSH 一次复制粘贴即可按序跑全。
 
 严格只输出一个 JSON 对象：
 - 通过时：
@@ -4009,7 +4137,7 @@ func (s *storeServer) verifyRehearsalStep(w http.ResponseWriter, r *http.Request
 		}
 	} else {
 		prop := parsed.rehearsalStepProposal
-		prop.Command = strings.TrimSpace(prop.Command)
+		prop.Command = ensurePasteSafeShellCommand(prop.Command)
 		prop.TargetRole = truncRunes(strings.TrimSpace(prop.TargetRole), 160)
 		prop.Diagnosis = truncRunes(strings.TrimSpace(prop.Diagnosis), 600)
 		prop.VerifiedFacts = roundFacts
@@ -4085,6 +4213,7 @@ const rehearsalTroubleSystem = `你是资深中间件变更排障专家。工程
 请先在 JSON 第一个字段 thinking 中简明写出你的报错信号提取、环境/权限/状态根因推理过程，然后给出可直接采纳的修正提案：
 - 若当前步骤本身的命令参数、路径、权限或语法需要调整，action 设为 "replace"，给出修正后的完整命令；
 - 若报错是因为缺少一个前置准备步骤（例如需要先创建目录、暂停守护、释放锁或检查依赖），action 设为 "insert_before"，给出需要插入在此步骤之前的前置步骤标题、目标角色、命令与判据。
+- 若给出的 command 包含 2 条及以上命令（尤其含 sudo/psql/patronictl/sleep），请整块包裹在 ( ... ) </dev/null 中（严禁裸写多行或 bash <<'EOF'），防止堡垒机/WebSSH 粘贴时后续行被吞或输出交错。
 严格只输出一个 JSON 对象：
 {"thinking":"1. 报错信号识别...；2. 根因定位...；3. 修订方案推演...","diagnosis":"简明准确的报错根因诊断","action":"replace|insert_before","title":"前置步骤标题（insert_before时必填）","target_role":"执行角色","command":"修正后或新增前置的完整命令","expect":"成功判据","rollback":"回退命令（可选）","risk_note":"注意事项（可选）"}`
 
@@ -4204,7 +4333,7 @@ func (s *storeServer) troubleshootRehearsalStep(w http.ResponseWriter, r *http.R
 		_ = json.Unmarshal([]byte(raw), &parsed)
 	}
 	prop := parsed.rehearsalStepProposal
-	prop.Command = strings.TrimSpace(prop.Command)
+	prop.Command = ensurePasteSafeShellCommand(prop.Command)
 	prop.Diagnosis = truncRunes(strings.TrimSpace(prop.Diagnosis), 600)
 	if prop.Command == "" || prop.Diagnosis == "" {
 		failRehearsalResp(s, w, ev, 502, "模型未能给出有效的修正命令提案，请补充更完整的报错信息或截图重试", trace.Diag)

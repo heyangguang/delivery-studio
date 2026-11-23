@@ -58,6 +58,8 @@ import {
   can,
   copy,
   csrfToken,
+  toPasteSafeShell,
+  unwrapOuterPasteGroup,
   err,
   fetchCached,
   platformShort,
@@ -1625,10 +1627,12 @@ function tokenizeBashLine(line: string): BashToken[] {
 function CopyCodeBtn({
   text,
   label,
+  title,
   className = "",
 }: {
   text: string;
   label?: string;
+  title?: string;
   className?: string;
 }) {
   useLang();
@@ -1643,6 +1647,7 @@ function CopyCodeBtn({
     <button
       type="button"
       className={`rh-code-btn ${className} ${done ? "copied" : ""}`.trim()}
+      title={title}
       onClick={() => {
         void copy(text);
         setDone(true);
@@ -1658,6 +1663,7 @@ function ShellCodeBlock({
   code,
   title,
   compact = false,
+  pasteSafe = false,
   copyLabel,
   onDownload,
   onEdit,
@@ -1666,6 +1672,7 @@ function ShellCodeBlock({
   code: string;
   title: string;
   compact?: boolean;
+  pasteSafe?: boolean;
   copyLabel?: string;
   onDownload?: () => void;
   onEdit?: () => void;
@@ -1673,6 +1680,13 @@ function ShellCodeBlock({
 }) {
   useLang();
   const [expanded, setExpanded] = useState(false);
+  const safeCopy = useMemo(
+    () =>
+      pasteSafe
+        ? toPasteSafeShell(code)
+        : { text: code, pasteSafe: false, autoWrapped: false },
+    [code, pasteSafe],
+  );
   const lines = useMemo(() => {
     const clean = code.replace(/\r\n/g, "\n").replace(/\n$/, "");
     return clean.split("\n");
@@ -1697,6 +1711,26 @@ function ShellCodeBlock({
               lines.length === 1 ? "1 line" : `${lines.length} lines`,
             )}
           </span>
+          {safeCopy.pasteSafe && (
+            <Tooltip
+              mini
+              content={
+                safeCopy.autoWrapped
+                  ? bi(
+                      "复制时自动封装为 ( ... ) </dev/null，防止堡垒机/WebSSH 下 sudo、psql 或慢命令吞掉后续行，粘贴后按一次回车即可按序完整执行",
+                      "Auto-wrapped in ( ... ) </dev/null on copy so bastion/WebSSH terminals and sudo/psql never swallow subsequent lines — paste and press Enter once",
+                    )
+                  : bi(
+                      "已封装为 ( ... ) </dev/null 子 Shell，防止堡垒机/WebSSH 下 sudo、psql 或慢命令吞掉后续行，粘贴后按一次回车即可按序完整执行",
+                      "Wrapped in ( ... ) </dev/null subshell so bastion/WebSSH terminals and sudo/psql never swallow subsequent lines — paste and press Enter once",
+                    )
+              }
+            >
+              <span className="rh-code-safe-pill">
+                {bi("整块防吞行", "Paste-safe")}
+              </span>
+            </Tooltip>
+          )}
         </div>
         <div className="rh-code-acts">
           {collapsible && (
@@ -1739,7 +1773,18 @@ function ShellCodeBlock({
               <span>{bi("问 AI 修改", "Ask AI")}</span>
             </button>
           )}
-          <CopyCodeBtn text={code} label={copyLabel} />
+          <CopyCodeBtn
+            text={safeCopy.text}
+            label={copyLabel}
+            title={
+              safeCopy.pasteSafe
+                ? bi(
+                    "已启用堡垒机整块防吞行封装 ( ... ) </dev/null，粘贴后按一次回车即可完整执行",
+                    "Copies paste-safe ( ... ) </dev/null block for WebSSH/bastion terminals",
+                  )
+                : undefined
+            }
+          />
         </div>
       </div>
       <div className="rh-code-scroll">
@@ -10795,7 +10840,7 @@ function extractRollingHint(lines: string[]): string {
 }
 
 function splitSequentialRollingCommands(cmd: string): RehearsalStepCommand[] {
-  const rawLines = (cmd || "").trim().replace(/\r\n/g, "\n").split("\n");
+  const rawLines = unwrapOuterPasteGroup(cmd).split("\n");
   if (rawLines.length < 2) return [];
   const segs: { lines: string[]; hasRolling: boolean }[] = [];
   let cur: { lines: string[]; hasRolling: boolean } = {
@@ -11519,6 +11564,7 @@ function StepRow({
                           code={sub.command}
                           title={subTitle}
                           compact
+                          pasteSafe
                         />
                       </div>
                       {ci < subCmds.length - 1 && (
@@ -11544,6 +11590,7 @@ function StepRow({
               code={step.command}
               title={bi("执行命令", "Command")}
               compact
+              pasteSafe
             />
           );
         })()}
@@ -11929,6 +11976,7 @@ function StepRow({
                           : bi("修正后命令", "Revised Command")
                       }
                       compact
+                      pasteSafe
                     />
                   )}
                   <div className="row-gap">

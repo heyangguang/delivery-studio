@@ -1369,6 +1369,112 @@ export async function copy(text: string) {
   Message.success({ content: bi("已复制", "Copied"), duration: 1200 });
 }
 
+const RE_CLOSE_SUBSHELL = /^\)\s*(<\s*\/dev\/null\s*)?(2>&1\s*)?$/;
+const RE_CLOSE_BRACE = /^\}\s*(<\s*\/dev\/null\s*)?(2>&1\s*)?$/;
+const RE_HEREDOC_OP = /<<-?\s*['"]?([A-Za-z_][A-Za-z0-9_-]*)['"]?/;
+const RE_SHELL_BLOCK_OPEN =
+  /(^|[;&|]\s*)(if|for|while|until|case)\b|\b(then|do)\s*$/;
+const RE_SHELL_BLOCK_CLOSE = /(^|[;&|]\s*)(fi|done|esac)\b/;
+const RE_INTERACTIVE_TTY =
+  /(^|[;&|]\s*)(vi|vim|nano|less|more|top|htop|passwd|tmux|screen)\b|\b(su\s+-|sudo\s+-i|sudo\s+su)\b/m;
+const RE_PATRONI_EDIT = /\bpatronictl\b[^\n]*\bedit-config\b/i;
+const RE_PATRONI_NON_INT = /(--force|\s-[ps]\s|--set\b|--replace\b)/i;
+
+function shellNeedsInteractiveTTY(s: string): boolean {
+  if (RE_INTERACTIVE_TTY.test(s)) return true;
+  for (const line of s.split("\n")) {
+    if (RE_PATRONI_EDIT.test(line) && !RE_PATRONI_NON_INT.test(line)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function unwrapOuterPasteGroup(cmd: string): string {
+  const s = (cmd || "").replace(/\r\n?/g, "\n").trim();
+  const lines = s.split("\n");
+  if (lines.length < 3) return s;
+  const first = lines[0].trim();
+  const last = lines[lines.length - 1].trim();
+  if (
+    (first === "(" && RE_CLOSE_SUBSHELL.test(last)) ||
+    (first === "{" && RE_CLOSE_BRACE.test(last))
+  ) {
+    return lines.slice(1, -1).join("\n").trim();
+  }
+  return s;
+}
+
+function countLogicalShellCommands(s: string): number {
+  const lines = s.split("\n");
+  let logical = 0;
+  let heredocEnd = "";
+  let blockDepth = 0;
+  let prevCont = false;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (heredocEnd) {
+      if (trimmed === heredocEnd) heredocEnd = "";
+      continue;
+    }
+    if (!trimmed || (!prevCont && trimmed.startsWith("#"))) {
+      prevCont = false;
+      continue;
+    }
+    if (!prevCont && blockDepth === 0) logical++;
+    const hm = RE_HEREDOC_OP.exec(trimmed);
+    if (hm && hm[1]) heredocEnd = hm[1];
+    if (RE_SHELL_BLOCK_OPEN.test(trimmed) && !RE_SHELL_BLOCK_CLOSE.test(trimmed)) {
+      blockDepth++;
+    } else if (RE_SHELL_BLOCK_CLOSE.test(trimmed) && blockDepth > 0) {
+      blockDepth--;
+    }
+    prevCont = line.trimEnd().endsWith("\\");
+  }
+  return logical;
+}
+
+/**
+ * Wraps multi-command shell blocks in `(\n...\n) </dev/null` so pasting into WebSSH / bastion
+ * terminals (e.g. JumpServer on Ubuntu with `Defaults use_pty`) parses ALL lines before running
+ * line 1 and prevents `sudo`, `psql`, `patronictl`, or `sleep` from draining/swallowing subsequent lines.
+ */
+export function toPasteSafeShell(raw: string): {
+  text: string;
+  pasteSafe: boolean;
+  autoWrapped: boolean;
+} {
+  const s = (raw || "").replace(/\r\n?/g, "\n").trim();
+  if (!s || s.startsWith("#!")) {
+    return { text: s, pasteSafe: false, autoWrapped: false };
+  }
+  const lines = s.split("\n");
+  if (lines.length < 2) {
+    return { text: s, pasteSafe: false, autoWrapped: false };
+  }
+  const first = lines[0].trim();
+  const last = lines[lines.length - 1].trim();
+  const interactive = shellNeedsInteractiveTTY(s);
+
+  if (
+    (first === "(" && RE_CLOSE_SUBSHELL.test(last)) ||
+    (first === "{" && RE_CLOSE_BRACE.test(last))
+  ) {
+    if (!interactive && !last.includes("/dev/null")) {
+      const next = [...lines];
+      next[next.length - 1] = first === "(" ? ") </dev/null" : "} </dev/null";
+      return { text: next.join("\n"), pasteSafe: true, autoWrapped: true };
+    }
+    return { text: s, pasteSafe: true, autoWrapped: false };
+  }
+
+  if (countLogicalShellCommands(s) < 2) {
+    return { text: s, pasteSafe: false, autoWrapped: false };
+  }
+  const wrapped = interactive ? `(\n${s}\n)` : `(\n${s}\n) </dev/null`;
+  return { text: wrapped, pasteSafe: true, autoWrapped: true };
+}
+
 export const platformShort = (id?: string) =>
   !id
     ? ""

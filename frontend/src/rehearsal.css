@@ -6302,6 +6302,26 @@ body[arco-theme="dark"] .rh-mode-pill.is-light {
   color: var(--rh-code-mute);
 }
 
+.rh-code-safe-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: #047857;
+  background: rgba(16, 185, 129, 0.11);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  cursor: help;
+}
+[data-theme="dark"] .rh-code-safe-pill,
+body[arco-theme="dark"] .rh-code-safe-pill {
+  color: #6ee7b7;
+  background: rgba(16, 185, 129, 0.18);
+  border-color: rgba(52, 211, 153, 0.32);
+}
+
 .rh-code-acts {
   display: inline-flex;
   align-items: center;

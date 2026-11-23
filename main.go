@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.268-dev"
+	version            = "1.0.269-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,22 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.269-dev",
+		Date:    "2026-11-24",
+		Title:   "多行执行命令防堡垒机/WebSSH 吞行封装与 AI 生成规范",
+		TitleEn: "Paste-safe subshell wrapping for multi-line bastion/WebSSH commands and AI prompts",
+		Highlights: []string{
+			"新增确定性多行命令防吞行封装 ensurePasteSafeShellCommand：凡单框含 2 条及以上命令自动封装为 ( ... ) </dev/null 子 Shell，迫使交互式 bash 先完整解析整块再按序执行并关闭标准输入，根治 JumpServer/WebSSH 及 Ubuntu sudo use_pty 下慢命令（psql/patronictl/sleep）吞掉后续行与输出交错问题",
+			"全面更新演练生成、快速演练、核验修订、排障修复、对话助手与 change-rehearsal 技能提示词，明确要求 AI 输出多行防吞行子 Shell 格式、禁止裸贴多行及 heredoc 走 stdin（bash <<'EOF'），并拆短严格预检长行",
+			"前端演练命令框、AI 对话 Shell 代码块与归档 SOP 命令复制同步接入 toPasteSafeShell（历史已保存演练开箱即生效），命令框标题栏展示「整块防吞行」胶囊说明",
+		},
+		HighlightsEn: []string{
+			"Added deterministic paste-safe subshell wrapping ( ... ) </dev/null for multi-command blocks across backend step normalization, strict prechecks, proposals, and rollout remapping, eliminating swallowed lines and interleaved output under JumpServer/WebSSH and Ubuntu sudo use_pty",
+			"Updated all rehearsal, verification, troubleshooting, AI chat prompts, and change-rehearsal skill rules to generate concise paste-safe subshell blocks and forbid bare multi-line or bash <<'EOF' heredoc stdin theft",
+			"Wired frontend copy-time paste-safe wrapping and a Paste-safe badge into rehearsal command blocks, AI chat shell blocks, and SOP docs so even existing saved rehearsals copy cleanly on first paste",
+		},
+	},
 	{
 		Version: "1.0.268-dev",
 		Date:    "2026-11-24",

@@ -8,7 +8,7 @@ import {
   IconDownload,
   IconSave,
 } from "@arco-design/web-react/icon";
-import { api, copy, err } from "./shared";
+import { api, copy, err, toPasteSafeShell } from "./shared";
 import { bi, useLang } from "./i18n";
 import { uploadFiles } from "./myfiles";
 import type { FileNode } from "./myfiles";
@@ -428,7 +428,11 @@ export function CodeBlock({
           <button
             type="button"
             onClick={() => {
-              copy(text);
+              const isShell = /^(ba|z|k)?sh$|^shell$|^console$/i.test(
+                (lang || "").trim(),
+              );
+              const payload = isShell ? toPasteSafeShell(text).text : text;
+              copy(payload);
               setDone(true);
               window.setTimeout(() => setDone(false), 1400);
             }}

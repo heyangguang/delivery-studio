@@ -33,6 +33,7 @@ import {
   fetchCached,
   fullTime,
   myTeams,
+  toPasteSafeShell,
   planPhase,
   PLAN_PHASE,
   putCached,
@@ -1530,7 +1531,9 @@ function DocCodeBlock({ text, style }: { text: string; style?: DocBlock["style"]
     style === "ansible" ||
     (!style && (text.includes("TASK  ") || text.includes("PLAY  ") || text.includes("STEP_RESULT ")));
   const isTerminal = style === "terminal";
+  const isShell = !isAnsible && !isTerminal;
   const lines = text.replace(/\r\n/g, "\n").replace(/\n+$/, "").split("\n");
+  const copyPayload = isShell ? toPasteSafeShell(text).text : text;
 
   const copyBtn = text.trim() ? (
     <Tooltip content={copied ? bi("已复制", "Copied") : bi("复制内容", "Copy")} mini>
@@ -1539,7 +1542,7 @@ function DocCodeBlock({ text, style }: { text: string; style?: DocBlock["style"]
         className={`dc-code-copy ${copied ? "copied" : ""}`}
         aria-label={copied ? bi("已复制", "Copied") : bi("复制内容", "Copy")}
         onClick={() => {
-          copy(text);
+          copy(copyPayload);
           setCopied(true);
           setTimeout(() => setCopied(false), 1400);
         }}

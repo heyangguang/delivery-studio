@@ -7331,20 +7331,40 @@ body[arco-theme="dark"] .rh-pnote-tag.is-conn {
   }
 }
 
-/* Sticky Progress & Filter Gate Bar (stacks cleanly below .rh-topbar) */
+/* Sticky Progress & Filter Gate Bar (stacks seamlessly below .rh-topbar with full-bleed mask) */
 .rh-gate {
   position: sticky;
   top: 51px;
-  z-index: 8;
+  z-index: 12;
   scroll-margin-top: 64px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 12px 16px;
-  padding: 12px 0;
+  margin-inline: -8px;
+  padding: 12px 8px;
   background: var(--surface);
   border-bottom: 1px solid var(--line);
+  transition:
+    margin 0.4s cubic-bezier(0.32, 0.72, 0, 1),
+    padding 0.4s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.rh-stage-grid.with-ledger .rh-gate {
+  margin-left: -16px;
+  padding-left: 16px;
+}
+
+.rh-stage-grid.with-aside .rh-gate {
+  margin-right: -14px;
+  padding-right: 14px;
+}
+
+@media (max-width: 900px) {
+  .rh-gate {
+    top: 103px;
+  }
 }
 
 .rh-gate-left {
@@ -7353,9 +7373,17 @@ body[arco-theme="dark"] .rh-pnote-tag.is-conn {
   gap: 11px;
 }
 
+.rh-gate-left > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
 .rh-gate-left b {
-  display: block;
+  display: inline-block;
   font-size: 14px;
+  line-height: 22px;
   color: var(--ink);
 }
 
@@ -8782,20 +8810,26 @@ body[arco-theme="dark"] .rh-pnote-tag.is-conn {
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
+  min-height: 22px;
 }
 .rh-done-toggle-btn {
   all: unset;
+  box-sizing: border-box;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  padding: 1px 8px;
+  justify-content: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 9px;
   border-radius: 999px;
   font-size: 11.5px;
-  font-weight: 560;
+  font-weight: 600;
+  line-height: 1;
   color: var(--brand-ink);
   background: var(--brand-soft);
   border: 1px solid color-mix(in srgb, var(--brand-line) 70%, transparent);
-  transition: background-color 0.14s ease, border-color 0.14s ease;
+  transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease;
 }
 .rh-done-toggle-btn:hover {
   background: color-mix(in srgb, var(--brand-soft) 100%, var(--brand) 8%);

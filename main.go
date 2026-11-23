@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.270-dev"
+	version            = "1.0.271-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,20 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.271-dev",
+		Date:    "2026-11-24",
+		Title:   "修复演练吸顶进度栏边缘割裂与「展开已完成」胶囊居中",
+		TitleEn: "Fix sticky rehearsal gate bar edge alignment and expand-done pill centering",
+		Highlights: []string{
+			"修复「展开已完成 / 收起已完成」胶囊按钮因 all: unset + padding: 1px 缺少固定高度与 line-height 导致的文字上下不居中问题，统一固定 22px 高度并与「必测步骤」标题精准基线居中对齐",
+			"修复吸顶进度筛选栏（.rh-gate）因内缩 8px 未铺满工作列边缘，导致滚动时下方卡片右边框/阴影在高分屏下透出竖向分割线及底边与顶栏不齐的问题：同步负边距满幅遮罩（兼容记录栏/交付基线抽屉展开收起过渡）并提升层级，彻底消除割裂感",
+		},
+		HighlightsEn: []string{
+			"Fixed vertical text centering inside the Expand/Fold done pill button (.rh-done-toggle-btn) with explicit 22px height, line-height: 1, and aligned title row",
+			"Eliminated the right-edge vertical seam and subpixel border bleed on the sticky rehearsal progress bar (.rh-gate) by matching parent column full-bleed margins across collapsed/ledger/aside layouts",
+		},
+	},
 	{
 		Version: "1.0.270-dev",
 		Date:    "2026-11-24",

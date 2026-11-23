@@ -4,6 +4,7 @@ import { IconCheck, IconDown } from "@arco-design/web-react/icon";
 import { cached, fetchCached, useAIStatus } from "./shared";
 import { bi, useLang } from "./i18n";
 import { ProviderLogo } from "./ailogo";
+import { useTrackPopoverPosition, type PopoverHandle } from "./aitools";
 import "./aiwork.css";
 
 /* The model a person talks to. An administrator decides which models people may pick; the choice is remembered in this
@@ -132,6 +133,8 @@ export function ModelPicker({
   const [pos, setPos] = useState<PopPlacement>("tl");
   const [maxH, setMaxH] = useState(380);
   const btnRef = useRef<HTMLButtonElement>(null);
+  const popRef = useRef<PopoverHandle>(null);
+  useTrackPopoverPosition(open, popRef, btnRef);
   const groups = useMemo(() => {
     const m = new Map<string, Pickable[]>();
     pick.models.forEach((x) =>
@@ -150,7 +153,7 @@ export function ModelPicker({
     <button
       ref={btnRef}
       type="button"
-      className={`mp ${compact ? "compact" : ""} ${hasMenu ? "" : "static"} ${open ? "on" : ""}`}
+      className={`mp ${compact ? "compact" : ""} ${hasMenu ? "" : "static"} ${open ? "on tm-open" : ""}`}
       aria-expanded={hasMenu ? open : undefined}
       aria-label={
         hasMenu
@@ -179,11 +182,13 @@ export function ModelPicker({
     );
   return (
     <Popover
+      ref={popRef as React.Ref<never>}
       trigger="click"
       position={pos}
       popupVisible={open}
+      escToClose
       className="mp-pop"
-      triggerProps={{ autoFitPosition: false }}
+      triggerProps={{ autoFitPosition: false, updateOnScroll: true }}
       onVisibleChange={(v) => {
         if (v && btnRef.current) {
           const rect = btnRef.current.getBoundingClientRect();

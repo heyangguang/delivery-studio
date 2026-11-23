@@ -122,6 +122,43 @@ print(json.dumps(out, ensure_ascii=False, indent=2))
 `,
 		},
 	},
+	"redis-sentinel": {
+		{
+			Name:        "calc_redis_memory.py",
+			Description: "根据宿主机内存GB(memory_gb)、持久化方式(persistence: none/rdb/aof/both)、单机实例数(instances)核算 Redis maxmemory、Copy-on-Write 安全余量与 repl-backlog-size 建议",
+			Code: `import json, sys
+
+args = json.load(open(sys.argv[1], encoding="utf-8")) if len(sys.argv) > 1 else {}
+mem_gb = max(1.0, float(args.get("memory_gb", 8)))
+persistence = str(args.get("persistence", "none")).lower()
+instances = max(1, int(args.get("instances", 1)))
+os_reserve_gb = max(1.0, min(4.0, mem_gb * 0.15))
+usable_gb = max(0.5, mem_gb - os_reserve_gb)
+per_inst_gb = usable_gb / instances
+cow_factor = 0.50 if persistence in ("rdb", "aof", "both", "rdb+aof") else 0.78
+maxmem_mb = max(128, int(per_inst_gb * 1024 * cow_factor))
+repl_backlog_mb = max(16, min(512, maxmem_mb // 64))
+
+out = {
+    "input": {"memory_gb": mem_gb, "persistence": persistence, "instances": instances},
+    "recommended": {
+        "maxmemory": f"{maxmem_mb}mb" if maxmem_mb < 2048 else f"{round(maxmem_mb / 1024.0, 1)}gb",
+        "maxmemory_mb": maxmem_mb,
+        "repl_backlog_size": f"{repl_backlog_mb}mb",
+        "vm_overcommit_memory": 1,
+        "thp": "never",
+    },
+    "cow_headroom_reserved": persistence in ("rdb", "aof", "both", "rdb+aof"),
+    "notes": (
+        "开启 RDB/AOF 时 bgsave/bgrewriteaof fork 写时复制可能额外占用接近一倍内存，已按约 50% 可用内存保守核算。"
+        if persistence in ("rdb", "aof", "both", "rdb+aof")
+        else "纯缓存无持久化模式按约 78% 可用内存核算，仍预留系统缓冲、复制积压和客户端输出缓冲区空间。"
+    ),
+}
+print(json.dumps(out, ensure_ascii=False, indent=2))
+`,
+		},
+	},
 	"linux-diagnostics": {
 		{
 			Name:        "parse_disk_mem_snapshot.py",
@@ -681,7 +718,7 @@ type aiOpts struct {
 	Web         bool       `json:"web"`
 	Skills      *[]string  `json:"skills"`
 	MCP         *[]string  `json:"mcp"`
-	SandboxMode string     `json:"sandbox_mode,omitempty"` // "" (follow platform) | "ask" (always confirm with user)
+	SandboxMode string     `json:"sandbox_mode,omitempty"` // "" (follow platform default) | "ask" | "auto" | "open" (end-user choice overrides platform default)
 	// NoKB leaves the person's knowledge base out of this message.
 	NoKB bool `json:"no_kb"`
 	// User is who is asking (set by the server): their own skills, services and knowledge base come along.
@@ -761,20 +798,28 @@ func (s *storeServer) extFor(feature string, opts ...aiOpts) *aiExt {
 			netRule = "禁止任何网络连接"
 		case "ask":
 			netRule = "默认无网络；若任务确需访问外网，可传 network=true 与 net_reason，由用户在对话卡片中实时授权放行（本机服务始终隔离）"
+		case "auto":
+			netRule = "默认无网络；已开启联网智能审批（未挂载文件或工作区且仅对可信公共技术/安全公告域名做只读 HTTPS GET 的 Python 查询将自动放行，并受运行时域名与只读锁保护；涉及文件挂载、非白名单域名、写请求或 Shell 仍由用户实时确认）"
 		case "allow":
 			netRule = "默认无网络；确需外网时可传 network=true（本机服务始终隔离）"
 		}
 		wsPrompt := ""
 		if hasWS {
-			wsPrompt = "若需批量校验脚本语法、核对配置模板或结合用户日志交叉排查，可在 run_python / run_shell 中设 workspace=true，把「" + o.Workspace.Label + "」只读挂载到 /workspace（环境变量 MW_WORKSPACE；始终只读，不可写入）。"
+			wsPrompt = "若需批量校验脚本语法（如 bash -n / YAML 语法检查）或结合用户上传的现场日志交叉分析，可在 run_python / run_shell 中设 workspace=true，把「" + o.Workspace.Label + "」的脱敏只读快照挂载到 /workspace（环境变量 MW_WORKSPACE；始终只读，不连远程主机）。如果只是搜索或查看项目配置、模板或参数，直接用原生 search_files / read_file（毫秒级返回），不要为了 grep 启动沙箱。"
 		}
-		x.prompt += "\n有一个系统级隔离代码沙箱（run_python / run_shell，技能脚本亦共用此沙箱）：" + netRule + "，默认只能处理用户存储空间里的文件（/in），结果写到 /out。" + wsPrompt + "需要精确计算、转换文件格式、生成文档或图表、用 bash -n/Shell/CLI 工具核对脚本或日志时用它；不要用它做平台里本来就能查到的事。只有要交给用户的成品才写到 /out（会自动存进「我的资料 / AI 生成」，并在回答下方显示成可下载的文件卡片，所以回答里不要再写下载链接，只说文件名）。只给你自己看的图片（比如把扫描件的页面渲染成 png）写到 /out/_view/，用 view_images 看，不会被保存。你写的脚本要先在沙箱里跑通再交给用户。\n"
+		x.prompt += "\n有一个系统级隔离代码沙箱（run_python / run_shell，技能脚本亦共用此沙箱）：" + netRule + "，默认只能处理用户存储空间里的文件（/in），结果写到 /out。" + wsPrompt + "需要精确计算、转换文件格式、生成文档或图表、用 bash -n/Shell/CLI 工具核对脚本或日志时用它；不要用它做平台原生工具本来就能查到的事。查询公开 CVE/安全公告、PyPI 版本或网页资料时，应优先使用 check_package_security / web_search / web_fetch（若当前未开启「联网」开关，先提示用户开启「联网」），仅在专用安全查询和搜索工具无法获取或不可用时，再把代码沙箱作为最后兜底。只有要交给用户的成品才写到 /out（会自动存进「我的资料 / AI 生成」，并在回答下方显示成可下载的文件卡片，所以回答里不要再写下载链接，只说文件名）。只给你自己看的图片（比如把扫描件的页面渲染成 png）写到 /out/_view/，用 view_images 看，不会被保存。你写的脚本要先在沙箱里跑通再交给用户。\n"
 	}
 	x.prompt += "\n信息不够、有几种合理的理解、或需要用户做选择时，用 ask_user 向用户提问（本轮随即结束），不要猜着回答。能自己查到的先查。\n"
+	aiSt := s.aiLoad()
+	allowSkills := aiSt.Features["skills"].Enabled && s.userCanAIFeaturePerm(o.User, "skills")
+	allowMCP := aiSt.Features["mcp"].Enabled && s.userCanAIFeaturePerm(o.User, "mcp")
+	allowKB := aiSt.Features["kb"].Enabled && s.userCanAIFeaturePerm(o.User, "kb")
 	var on []aiSkill
-	for _, sk := range s.skillsFor(o.User, false) {
-		if sk.Enabled && allowed(o.Skills, sk.Name) {
-			on = append(on, sk)
+	if allowSkills {
+		for _, sk := range s.skillsFor(o.User, false) {
+			if sk.Enabled && allowed(o.Skills, sk.Name) {
+				on = append(on, sk)
+			}
 		}
 	}
 	if len(on) > 0 {
@@ -802,30 +847,32 @@ func (s *storeServer) extFor(feature string, opts ...aiOpts) *aiExt {
 	if o.Web && s.webSettings().ready() {
 		x.tools = append(x.tools, webTools()...)
 		x.web = true
-		x.prompt += "\n可以用 web_search 搜索互联网、用 web_fetch 打开网页。平台和交付里查不到、或需要最新的官方资料时再用；引用网上的内容时注明来源网址。\n"
+		x.prompt += "\n联网查询工具已开启：核查软件包的已知 CVE/GHSA 漏洞、修复版本、最新稳定版或 Python 兼容性时，首选专用工具 check_package_security（直连 OSV.dev 与 PyPI 官方接口批量查询，无需启动沙箱写脚本）；查官方文档、发行说明、报错含义或外部网页时，优先用 web_search 搜索并用 web_fetch 阅读原文（引用时注明来源网址）。仅在专用安全查询与搜索工具无法满足时，才考虑将代码沙箱作为兜底。\n"
 	}
-	for _, sv := range s.mcpFor(o.User) {
-		if !sv.Enabled || !allowed(o.MCP, sv.ID) {
-			continue
-		}
-		off := map[string]bool{}
-		for _, t := range sv.Disabled {
-			off[t] = true
-		}
-		for _, t := range sv.Tools {
-			if off[t.Name] || (!t.ReadOnly && !sv.AllowWrite) {
+	if allowMCP {
+		for _, sv := range s.mcpFor(o.User) {
+			if !sv.Enabled || !allowed(o.MCP, sv.ID) {
 				continue
 			}
-			name := mcpToolName(sv.ID, t.Name)
-			schema := t.Schema
-			if schema == nil {
-				schema = map[string]any{"type": "object", "properties": map[string]any{}}
+			off := map[string]bool{}
+			for _, t := range sv.Disabled {
+				off[t] = true
 			}
-			x.tools = append(x.tools, aiToolDef{name, "[MCP · " + sv.Name + "] " + t.Description, schema})
-			x.mcp[name] = struct {
-				server mcpServer
-				tool   string
-			}{sv, t.Name}
+			for _, t := range sv.Tools {
+				if off[t.Name] || (!t.ReadOnly && !sv.AllowWrite) {
+					continue
+				}
+				name := mcpToolName(sv.ID, t.Name)
+				schema := t.Schema
+				if schema == nil {
+					schema = map[string]any{"type": "object", "properties": map[string]any{}}
+				}
+				x.tools = append(x.tools, aiToolDef{name, "[MCP · " + sv.Name + "] " + t.Description, schema})
+				x.mcp[name] = struct {
+					server mcpServer
+					tool   string
+				}{sv, t.Name}
+			}
 		}
 	}
 	if len(x.mcp) > 0 {
@@ -845,7 +892,7 @@ func (s *storeServer) extFor(feature string, opts ...aiOpts) *aiExt {
 		x.table = true
 		x.prompt += "\n用户的存储空间里有表格文件（.xlsx / .csv）。要得出数字（一共多少、各类别多少、总和、平均、有没有重复）时，必须用 table_describe 看列、table_query 计算，不要自己数或估算；回答里说明用了哪个文件、哪张表、什么条件。\n"
 	}
-	if o.User != "" && !o.NoKB {
+	if o.User != "" && !o.NoKB && allowKB {
 		own, team := s.kbList(o.User), s.teamDocsFor(o.User)
 		if len(own)+len(team) > 0 {
 			x.kb = true
@@ -937,7 +984,7 @@ func (x *aiExt) wrap(run func(name, args string) string) func(name, args string)
 		if m, ok := x.mcp[name]; ok {
 			return x.callMCP(m.server, m.tool, args)
 		}
-		if x.web && (name == "web_search" || name == "web_fetch") {
+		if x.web && (name == "web_search" || name == "web_fetch" || name == checkPkgSecName) {
 			return x.s.runWeb(name, args)
 		}
 		if x.sandbox && name == viewImagesName && x.made != nil {
@@ -1020,7 +1067,7 @@ func stepKind(name string) string {
 		return "skill"
 	case strings.HasPrefix(name, "mcp__"):
 		return "mcp"
-	case name == "web_search" || name == "web_fetch":
+	case name == "web_search" || name == "web_fetch" || name == checkPkgSecName:
 		return "web"
 	case name == "search_knowledge" || name == "read_knowledge":
 		return "kb"
@@ -1212,26 +1259,39 @@ func (s *storeServer) mcpAPI(w http.ResponseWriter, r *http.Request, session sto
 
 // aiOptions is what a person can switch on for a message: deep thinking, the web, skills and outside services.
 func (s *storeServer) aiOptions(user string) map[string]any {
+	aiSt := s.aiLoad()
+	allowSkills := aiSt.Features["skills"].Enabled && s.userCanAIFeaturePerm(user, "skills")
+	allowMCP := aiSt.Features["mcp"].Enabled && s.userCanAIFeaturePerm(user, "mcp")
+	allowKB := aiSt.Features["kb"].Enabled && s.userCanAIFeaturePerm(user, "kb")
 	skills := []map[string]any{}
-	for _, sk := range s.skillsFor(user, false) {
-		skills = append(skills, map[string]any{"name": sk.Name, "title": sk.Title, "description": sk.Description, "mine": sk.Mine, "scripts": len(sk.Scripts)})
+	if allowSkills {
+		for _, sk := range s.skillsFor(user, false) {
+			skills = append(skills, map[string]any{"name": sk.Name, "title": sk.Title, "description": sk.Description, "mine": sk.Mine, "scripts": len(sk.Scripts)})
+		}
 	}
 	mcp := []map[string]any{}
-	for _, sv := range s.mcpFor(user) {
-		if !sv.Enabled {
-			continue
-		}
-		n := 0
-		off := map[string]bool{}
-		for _, t := range sv.Disabled {
-			off[t] = true
-		}
-		for _, t := range sv.Tools {
-			if !off[t.Name] && (t.ReadOnly || sv.AllowWrite) {
-				n++
+	if allowMCP {
+		for _, sv := range s.mcpFor(user) {
+			if !sv.Enabled {
+				continue
 			}
+			n := 0
+			off := map[string]bool{}
+			for _, t := range sv.Disabled {
+				off[t] = true
+			}
+			for _, t := range sv.Tools {
+				if !off[t.Name] && (t.ReadOnly || sv.AllowWrite) {
+					n++
+				}
+			}
+			mcp = append(mcp, map[string]any{"id": sv.ID, "name": sv.Name, "tools": n, "mine": sv.Mine})
 		}
-		mcp = append(mcp, map[string]any{"id": sv.ID, "name": sv.Name, "tools": n, "mine": sv.Mine})
+	}
+	kbCount, kbTeamCount := 0, 0
+	if allowKB {
+		kbCount = len(s.kbList(user))
+		kbTeamCount = len(s.teamDocsFor(user))
 	}
 	w := s.webSettings()
 	sbSt, _, sbOn := s.sandboxOn()
@@ -1240,8 +1300,8 @@ func (s *storeServer) aiOptions(user string) map[string]any {
 		"web_provider":        w.Provider,
 		"skills":              skills,
 		"mcp":                 mcp,
-		"kb":                  len(s.kbList(user)),
-		"kb_team":             len(s.teamDocsFor(user)),
+		"kb":                  kbCount,
+		"kb_team":             kbTeamCount,
 		"sandbox":             sbOn,
 		"sandbox_exec_policy": sbSt.ExecPolicy,
 		"sandbox_net_policy":  sbSt.NetPolicy,

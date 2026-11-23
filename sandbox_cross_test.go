@@ -277,3 +277,225 @@ Write-Output "ok"`
 		t.Fatalf("expected run_shell with workspace to succeed, got: %s", toolOut)
 	}
 }
+
+func TestSandboxSmartNetworkAutoPolicy(t *testing.T) {
+	// 1. Domain allowlist normalization
+	gotDomains := normalizeNetAllowDomains([]string{
+		"https://PyPI.Corp.Example.com/simple/",
+		"*.com",
+		"localhost",
+		"127.0.0.1",
+		".mirrors.internal.net",
+		"pypi.corp.example.com",
+		"bad domain/x",
+	})
+	if len(gotDomains) != 2 || gotDomains[0] != "pypi.corp.example.com" || gotDomains[1] != "*.mirrors.internal.net" {
+		t.Fatalf("unexpected normalized domains: %#v", gotDomains)
+	}
+
+	autoSt := sandboxSettings{
+		ExecPolicy:      "auto",
+		NetPolicy:       "auto",
+		NetAllowDomains: []string{"pypi.corp.example.com", "*.mirrors.internal.net"},
+	}
+	pypiSnippet := `import urllib.request, json
+pkgs = {'ansible-core': '2.20.10', 'cryptography': '50.0.2'}
+for p, v in pkgs.items():
+    req = urllib.request.Request(f'https://pypi.org/pypi/{p}/{v}/json', headers={'User-Agent': 'audit/1.0'})
+    data = json.load(urllib.request.urlopen(req, timeout=25))
+    print(p, data['info']['version'])
+`
+
+	// 2. Policy decision matrix
+	cases := []struct {
+		name            string
+		gate            *sandboxGate
+		req             sandboxConfirmReq
+		wantExecAsk     bool
+		wantNetAsk      bool
+		wantAllowNet    bool
+		wantReadOnly    bool
+		wantBlockPriv   bool
+		wantReasonMatch string
+	}{
+		{
+			name:          "trusted_pypi_readonly_auto_approved",
+			req:           sandboxConfirmReq{Kind: "python", Code: pypiSnippet, WantNet: true, NetReason: "查询 PyPI 版本"},
+			wantAllowNet:  true,
+			wantReadOnly:  true,
+			wantBlockPriv: true,
+		},
+		{
+			name:            "mounted_user_file_must_ask",
+			req:             sandboxConfirmReq{Kind: "python", Code: pypiSnippet, Files: []string{"servers.xlsx"}, WantNet: true},
+			wantNetAsk:      true,
+			wantReasonMatch: "用户资料或只读工作区",
+		},
+		{
+			name:            "mounted_workspace_must_ask",
+			req:             sandboxConfirmReq{Kind: "python", Code: pypiSnippet, Workspace: "组件 pg 工作区", WantNet: true},
+			wantNetAsk:      true,
+			wantReasonMatch: "用户资料或只读工作区",
+		},
+		{
+			name:            "http_post_data_must_ask",
+			req:             sandboxConfirmReq{Kind: "python", Code: `import urllib.request; urllib.request.urlopen(urllib.request.Request("https://api.osv.dev/v1/query", data=b"{}"))`, WantNet: true},
+			wantNetAsk:      true,
+			wantReasonMatch: "写入",
+		},
+		{
+			name:            "unknown_domain_must_ask",
+			req:             sandboxConfirmReq{Kind: "python", Code: `import urllib.request; urllib.request.urlopen("https://webhook.site/abc")`, WantNet: true},
+			wantNetAsk:      true,
+			wantReasonMatch: "webhook.site",
+		},
+		{
+			name:            "plaintext_http_must_ask",
+			req:             sandboxConfirmReq{Kind: "python", Code: `import urllib.request; urllib.request.urlopen("http://pypi.org/simple/")`, WantNet: true},
+			wantNetAsk:      true,
+			wantReasonMatch: "HTTP",
+		},
+		{
+			name:            "dynamic_host_must_ask",
+			req:             sandboxConfirmReq{Kind: "python", Code: `import urllib.request; h="pypi.org"; urllib.request.urlopen(f"https://{h}/simple/")`, WantNet: true},
+			wantNetAsk:      true,
+			wantReasonMatch: "动态拼接",
+		},
+		{
+			name:            "shell_network_must_ask",
+			req:             sandboxConfirmReq{Kind: "shell", Code: `curl https://pypi.org/pypi/pip/json`, WantNet: true},
+			wantExecAsk:     true,
+			wantNetAsk:      true,
+			wantReasonMatch: "Shell",
+		},
+		{
+			name:          "custom_enterprise_domain_auto_approved",
+			req:           sandboxConfirmReq{Kind: "python", Code: `import urllib.request; urllib.request.urlopen("https://sub.mirrors.internal.net/simple/")`, WantNet: true},
+			wantAllowNet:  true,
+			wantReadOnly:  true,
+			wantBlockPriv: false,
+		},
+		{
+			name:        "user_ask_mode_overrides_auto_net",
+			gate:        &sandboxGate{UserMode: "ask"},
+			req:         sandboxConfirmReq{Kind: "python", Code: pypiSnippet, WantNet: true},
+			wantExecAsk: true,
+			wantNetAsk:  true,
+		},
+		{
+			name:        "user_open_overrides_platform_default_auto",
+			gate:        &sandboxGate{UserMode: "open"},
+			req:         sandboxConfirmReq{Kind: "shell", Code: `echo hi`, WantNet: false},
+			wantExecAsk: false,
+		},
+		{
+			name:            "user_open_still_enforces_net_policy_on_untrusted_host",
+			gate:            &sandboxGate{UserMode: "open"},
+			req:             sandboxConfirmReq{Kind: "python", Code: `import urllib.request; urllib.request.urlopen("https://evil.example.com/a")`, WantNet: true},
+			wantExecAsk:     false,
+			wantNetAsk:      true,
+			wantReasonMatch: "evil.example.com",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			needExec, needNet, guard, reasons := assessSandboxRunWithGuard(autoSt, tc.gate, tc.req)
+			if needExec != tc.wantExecAsk || needNet != tc.wantNetAsk || guard.AllowNet != tc.wantAllowNet || guard.ReadOnly != tc.wantReadOnly || guard.BlockPrivate != tc.wantBlockPriv {
+				t.Fatalf("got (exec=%v net=%v guard=%+v reasons=%v), want (exec=%v net=%v allowNet=%v ro=%v blockPriv=%v)",
+					needExec, needNet, guard, reasons, tc.wantExecAsk, tc.wantNetAsk, tc.wantAllowNet, tc.wantReadOnly, tc.wantBlockPriv)
+			}
+			if tc.wantReasonMatch != "" && !strings.Contains(strings.Join(reasons, " | "), tc.wantReasonMatch) {
+				t.Fatalf("expected reason containing %q, got %v", tc.wantReasonMatch, reasons)
+			}
+		})
+	}
+
+	// End-user's explicit "open" selection also overrides a stricter platform default ("ask").
+	askDefSt := sandboxSettings{ExecPolicy: "ask", NetPolicy: "ask"}
+	if needExec, needNet, _, _ := assessSandboxRunWithGuard(askDefSt, &sandboxGate{UserMode: "open"}, sandboxConfirmReq{Kind: "shell", Code: "echo ok", WantNet: false}); needExec || needNet {
+		t.Fatalf("expected user open mode to override platform default ask, got needExec=%v needNet=%v", needExec, needNet)
+	}
+	if needExec, needNet, _, _ := assessSandboxRunWithGuard(askDefSt, &sandboxGate{UserMode: "open"}, sandboxConfirmReq{Kind: "python", Code: "import urllib.request", WantNet: true}); needExec || !needNet {
+		t.Fatalf("expected user open mode to skip exec ask while still respecting net_policy=ask, got needExec=%v needNet=%v", needExec, needNet)
+	}
+
+	// 3. Settings API roundtrip for net_policy="auto" + net_allow_domains + builtin_net_domains
+	s, _ := testStore(t)
+	admin, acsrf := storeLogin(t, s, "admin")
+	pw := storeRequest(s, "PUT", "/api/settings/sandbox", strings.NewReader(`{"enabled":false,"seconds":60,"memory_mb":1024,"procs":32,"output_mb":50,"exec_policy":"auto","net_policy":"auto","net_allow_domains":["https://pypi.corp.example.com/simple","*.com","localhost","*.mirrors.internal.net"]}`), admin, acsrf)
+	if pw.Code != 200 {
+		t.Fatalf("PUT /api/settings/sandbox failed: %d %s", pw.Code, pw.Body.String())
+	}
+	gw := storeRequest(s, "GET", "/api/settings/sandbox", nil, admin, "")
+	if gw.Code != 200 {
+		t.Fatalf("GET /api/settings/sandbox failed: %d %s", gw.Code, gw.Body.String())
+	}
+	var gotResp struct {
+		Settings          sandboxSettings `json:"settings"`
+		BuiltinNetDomains []string        `json:"builtin_net_domains"`
+	}
+	if err := json.Unmarshal(gw.Body.Bytes(), &gotResp); err != nil {
+		t.Fatalf("decode sandbox GET: %v", err)
+	}
+	if gotResp.Settings.NetPolicy != "auto" || len(gotResp.Settings.NetAllowDomains) != 2 || len(gotResp.BuiltinNetDomains) < 20 {
+		t.Fatalf("unexpected sandbox GET payload: %+v", gotResp)
+	}
+
+	// 4. Live PEP-578 runtime audit hook verification (zero external traffic needed!)
+	info, err := discoverHostPython()
+	if err != nil {
+		t.Skip("no host python3 available for runtime PEP-578 test:", err)
+	}
+	work := t.TempDir()
+	codePath := filepath.Join(work, "net_guard_test.py")
+	pyTest := `import json, socket, urllib.request
+res = {}
+def check(name, fn):
+    try:
+        fn()
+        res[name] = "ALLOWED"
+    except PermissionError as e:
+        res[name] = "BLOCKED:" + str(e)
+    except Exception as e:
+        res[name] = "OTHER:" + type(e).__name__ + ":" + str(e)
+
+check("unlisted_host", lambda: urllib.request.urlopen("https://evil.example.com/"))
+check("post_body", lambda: urllib.request.urlopen(urllib.request.Request("https://pypi.org/pypi/pip/json", data=b"{}")))
+check("http_plain", lambda: urllib.request.urlopen("http://pypi.org/pypi/pip/json"))
+check("direct_ip", lambda: socket.socket().connect(("1.1.1.1", 443)))
+check("private_ip", lambda: socket.socket().connect(("10.0.0.1", 443)))
+print(json.dumps(res))
+`
+	if err := os.WriteFile(codePath, []byte(pyTest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runRes, err := runSandbox(context.Background(), work, sandboxRun{
+		Runtime:         info.Dir,
+		PythonBin:       info.PythonBin,
+		Argv:            []string{info.InnerArg0, "/in/_main.py"},
+		Inputs:          []sandboxInput{{Name: "_main.py", Path: codePath}},
+		Limits:          sandboxLimits{Seconds: 15, MemoryMB: 512, Procs: 32, OutputMB: 8},
+		AllowNet:        true,
+		NetReadOnly:     true,
+		NetAllowHosts:   []string{"pypi.org", "*.pythonhosted.org"},
+		NetBlockPrivate: true,
+		ProbePort:       8443,
+	})
+	if err != nil {
+		t.Fatalf("runSandbox runtime guard test failed: %v", err)
+	}
+	defer runRes.Cleanup()
+	if runRes.ExitCode != 0 {
+		t.Fatalf("expected exit 0, got %d stderr=%s stdout=%s", runRes.ExitCode, runRes.Stderr, runRes.Stdout)
+	}
+	var guardResults map[string]string
+	if err := json.Unmarshal([]byte(strings.TrimSpace(runRes.Stdout)), &guardResults); err != nil {
+		t.Fatalf("parse runtime guard output %q: %v", runRes.Stdout, err)
+	}
+	for _, k := range []string{"unlisted_host", "post_body", "http_plain", "direct_ip", "private_ip"} {
+		if !strings.HasPrefix(guardResults[k], "BLOCKED:") {
+			t.Fatalf("expected %s to be blocked by PEP-578 audit hook, got %q (all=%v)", k, guardResults[k], guardResults)
+		}
+	}
+}

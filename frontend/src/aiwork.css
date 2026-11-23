@@ -7,19 +7,26 @@
 .wk-head {
   display: inline-flex;
   align-items: center;
-  gap: 9px;
+  flex-wrap: wrap;
+  gap: 5px 8px;
   max-width: 100%;
-  min-height: 32px;
-  padding: 5px 12px 5px 10px;
+  min-height: 30px;
+  padding: 4px 10px 4px 9px;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: 10px;
   color: var(--ink-2);
-  font: 13px var(--sans);
+  font: 12.5px/1.35 var(--sans);
   background: var(--surface);
   cursor: pointer;
   transition:
     border-color 0.15s,
     background 0.15s;
+}
+.wk-label {
+  flex: none;
+  white-space: nowrap;
+  font-weight: 520;
+  font-variant-numeric: tabular-nums;
 }
 .wk-head:hover {
   border-color: var(--line-strong);
@@ -49,6 +56,7 @@
   color: var(--faint);
 }
 .wk-ok {
+  flex: none;
   color: var(--ok);
   font-size: 13px;
 }
@@ -64,16 +72,21 @@
 }
 .wk-chips {
   display: inline-flex;
+  align-items: center;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 4px;
 }
 .wk-chips em {
-  padding: 1px 8px;
-  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 6px;
   color: var(--mute);
   font-size: 11.5px;
   font-style: normal;
-  line-height: 20px;
+  line-height: 1;
+  white-space: nowrap;
   background: var(--sunken);
 }
 .wk-chips em.sk {
@@ -221,6 +234,8 @@
   font-weight: 550;
 }
 .wk-line > code {
+  flex: 0 1 auto;
+  max-width: 48%;
   overflow: hidden;
   min-width: 0;
   padding: 1px 6px;
@@ -239,12 +254,25 @@
 }
 .wk-meta {
   display: flex;
-  flex: none;
-  gap: 8px;
+  align-items: center;
+  flex: 0 6 auto;
+  min-width: min(64px, 32%);
+  overflow: hidden;
+  gap: 6px;
   margin-left: auto;
   color: var(--faint);
   font-size: 11.5px;
   font-variant-numeric: tabular-nums;
+}
+.wk-meta > small:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.wk-meta > small:last-child:not(:first-child) {
+  flex: none;
+  white-space: nowrap;
 }
 .wk-meta .bad {
   color: var(--bad);

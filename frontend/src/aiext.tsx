@@ -803,11 +803,11 @@ export function WebView() {
     <article className="sx-page st-main enter">
       <header className="sx-page-h">
         <div>
-          <h1>{bi("联网搜索", "Web search")}</h1>
+          <h1>{bi("联网搜索与安全核查", "Web search & security lookup")}</h1>
           <p>
             {bi(
-              "开启后，对话输入框的「+」里可以打开联网搜索：AI 在平台和交付里查不到时，会去网上搜官方文档、版本说明和报错含义，并能打开网页读正文。默认不允许它访问内网地址。",
-              "When enabled, users can toggle Web Search in the '+' menu to search official docs, release notes, and error meanings online and read web pages. Access to private/internal addresses is blocked by default.",
+              "开启后，对话输入框中打开「联网」即可启用 3 项内置只读联网工具：网页搜索（web_search）、网页正文读取（web_fetch）、以及官方 CVE/PyPI 软件包安全公告核查（check_package_security）。默认禁止访问内网地址。",
+              "When enabled, toggling Web in chat activates 3 read-only online tools: web search (web_search), page reader (web_fetch), and official OSV/PyPI advisory lookup (check_package_security). Private/internal addresses remain blocked by default.",
             )}
           </p>
         </div>

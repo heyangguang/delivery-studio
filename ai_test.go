@@ -605,7 +605,7 @@ func TestAIStepsAreKept(t *testing.T) {
 }
 
 func TestToolSchemasAreStrictServerSafe(t *testing.T) {
-	for _, lists := range [][]aiToolDef{aiTools(), compTools(), assistantTools()} {
+	for _, lists := range [][]aiToolDef{aiTools(), compTools(), assistantTools(), webTools()} {
 		for _, d := range lists {
 			b, _ := json.Marshal(cleanSchema(d.Parameters))
 			if strings.Contains(string(b), `"required":null`) || strings.Contains(string(b), `"required":[]`) || !strings.Contains(string(b), `"properties":{`) {
@@ -653,5 +653,66 @@ func TestModelPricesDefaultsAndOverrides(t *testing.T) {
 	ps := s.loadPriceSettings()
 	if got := ps.convert(7, "USD"); got != 49 {
 		t.Fatal("conversion", got)
+	}
+}
+
+func TestAIChatPersistsFailureAndRetriesCleanly(t *testing.T) {
+	failOnce := true
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if failOnce {
+			http.Error(w, `{"error":{"message":"upstream gateway unavailable"}}`, 502)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"已恢复正常\"}}]}\n\ndata: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	s, _ := testStore(t)
+	admin, acsrf := storeLogin(t, s, "admin")
+	alice, csrf := storeLogin(t, s, "alice")
+	pw := storeRequest(s, "POST", "/api/settings/ai/providers", strings.NewReader(`{"name":"TestGW","preset":"custom","url":"`+srv.URL+`","models":[{"id":"gpt-test","enabled":true}],"enabled":true,"key":"sk-secretsecretsecret1234"}`), admin, acsrf)
+	if pw.Code != 200 {
+		t.Fatal(pw.Code, pw.Body.String())
+	}
+	var pv struct{ ID string }
+	json.Unmarshal(pw.Body.Bytes(), &pv)
+	if sw := storeRequest(s, "PUT", "/api/settings/ai", strings.NewReader(`{"enabled":true,"features":{"assistant":{"enabled":true,"primary":"`+pv.ID+`"}}}`), admin, acsrf); sw.Code != 200 {
+		t.Fatal(sw.Code, sw.Body.String())
+	}
+	chatID := "aabbccddeeff"
+
+	// 1. First call fails with HTTP 502: error + diagnostics must be persisted in chat JSON and returned in SSE.
+	w := storeRequest(s, "POST", "/api/ai/chats/"+chatID+"/chat", strings.NewReader(`{"message":"你好"}`), alice, csrf)
+	if w.Code != 200 {
+		t.Fatalf("expected 200 SSE stream, got %d: %s", w.Code, w.Body.String())
+	}
+	sseBody := w.Body.String()
+	if !strings.Contains(sseBody, `"t":"error"`) || !strings.Contains(sseBody, `"saved":true`) || !strings.Contains(sseBody, `"diag":`) {
+		t.Fatalf("SSE error event missing saved/diag metadata: %s", sseBody)
+	}
+	c, ok := s.loadChat("alice", chatID)
+	if !ok || len(c.Messages) != 2 {
+		t.Fatalf("expected 2 persisted messages (user + failed assistant), got %d: %+v", len(c.Messages), c.Messages)
+	}
+	if c.Messages[0].Role != "user" || c.Messages[0].Text != "你好" {
+		t.Fatalf("unexpected user message: %+v", c.Messages[0])
+	}
+	if !isErrorOnlyMsg(c.Messages[1]) || c.Messages[1].ErrorDiag == nil || c.Messages[1].ErrorDiag.Provider != "TestGW" {
+		t.Fatalf("failed assistant turn not persisted cleanly: %+v", c.Messages[1])
+	}
+
+	// 2. Retry succeeds: stale error turn is replaced and user message is NOT duplicated.
+	failOnce = false
+	w = storeRequest(s, "POST", "/api/ai/chats/"+chatID+"/chat", strings.NewReader(`{"message":"你好","retry":true}`), alice, csrf)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"t":"done"`) {
+		t.Fatalf("retry did not succeed: %d %s", w.Code, w.Body.String())
+	}
+	c2, _ := s.loadChat("alice", chatID)
+	if len(c2.Messages) != 2 {
+		t.Fatalf("expected retry to keep exactly 2 messages (no duplicate user bubble, stale error removed), got %d: %+v", len(c2.Messages), c2.Messages)
+	}
+	if c2.Messages[0].Role != "user" || c2.Messages[1].Role != "assistant" || c2.Messages[1].Error != "" || c2.Messages[1].Text != "已恢复正常" {
+		t.Fatalf("unexpected messages after retry: %+v", c2.Messages)
 	}
 }

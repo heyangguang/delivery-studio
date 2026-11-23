@@ -33,12 +33,63 @@ type aiMsg struct {
 	MS    int64    `json:"ms,omitempty"`
 	// Proposals are the ids of proposals this answer made (see ai_proposals.go).
 	Proposals []string `json:"proposals,omitempty"`
+	// Rehearsals, Knowledges, and Components are inline interactive cards emitted in general/portal AI chats.
+	Rehearsals []aiRehearsalSpec `json:"rehearsals,omitempty"`
+	Knowledges []aiKnowledgeSpec `json:"knowledges,omitempty"`
+	Components []aiComponentSpec `json:"components,omitempty"`
 	// Ask is a question the assistant put to the person instead of guessing (see askTool).
 	Ask *aiAsk `json:"ask,omitempty"`
 	// Form is what the answer wrote into the new-delivery form (see ai_form.go).
 	Form *formFill `json:"form,omitempty"`
-	At   string    `json:"at"`
-	By   string    `json:"by,omitempty"`
+	// Error and ErrorDiag persist failed assistant turns so reopening a conversation never loses failure context.
+	Error     string      `json:"error,omitempty"`
+	ErrorDiag *aiCallDiag `json:"error_diag,omitempty"`
+	At        string      `json:"at"`
+	By        string      `json:"by,omitempty"`
+}
+
+func isErrorOnlyMsg(m aiMsg) bool {
+	return m.Role == "assistant" && m.Error != "" && strings.TrimSpace(m.Text) == ""
+}
+
+func appendOrReuseUserTurn(msgs []aiMsg, retry bool, userMsg aiMsg) []aiMsg {
+	if retry {
+		for len(msgs) > 0 && isErrorOnlyMsg(msgs[len(msgs)-1]) {
+			msgs = msgs[:len(msgs)-1]
+		}
+		if last := len(msgs) - 1; last >= 0 && msgs[last].Role == "user" && strings.TrimSpace(msgs[last].Text) == strings.TrimSpace(userMsg.Text) {
+			return msgs
+		}
+	}
+	return append(msgs, userMsg)
+}
+
+func buildChatErrorDiag(lastErr error, failedAttempts []aiAttemptDiag, tried aiProvider) *aiCallDiag {
+	if d := aiDiagFromErr(lastErr); d != nil {
+		cp := *d
+		if len(failedAttempts) > len(cp.Attempts) {
+			cp.Attempts = failedAttempts
+		}
+		if cp.Provider == "" {
+			cp.Provider = tried.Name
+		}
+		if cp.Model == "" {
+			cp.Model = tried.Model
+		}
+		if cp.API == "" {
+			cp.API = tried.API
+		}
+		return &cp
+	}
+	if tried.Name == "" && tried.Model == "" && len(failedAttempts) == 0 {
+		return nil
+	}
+	return &aiCallDiag{
+		Provider: tried.Name,
+		Model:    tried.Model,
+		API:      tried.API,
+		Attempts: failedAttempts,
+	}
 }
 
 type askOption struct {
@@ -77,6 +128,42 @@ func (m aiMsg) askText() string {
 		}
 	}
 	b.WriteString("）")
+	return b.String()
+}
+
+// rehearsalText summarizes inline interactive cards so follow-up turns know what was already offered.
+func (m aiMsg) rehearsalText() string {
+	var b strings.Builder
+	if len(m.Rehearsals) > 0 {
+		b.WriteString("\n（我已生成以下变更演练发起卡片：")
+		for i, r := range m.Rehearsals {
+			if i > 0 {
+				b.WriteString("；")
+			}
+			fmt.Fprintf(&b, "集群 %s · 「%s」", r.ClusterID, r.Title)
+		}
+		b.WriteString("）")
+	}
+	if len(m.Knowledges) > 0 {
+		b.WriteString("\n（我已生成以下写入知识库总结卡片：")
+		for i, k := range m.Knowledges {
+			if i > 0 {
+				b.WriteString("；")
+			}
+			fmt.Fprintf(&b, "「%s」", k.Title)
+		}
+		b.WriteString("）")
+	}
+	if len(m.Components) > 0 {
+		b.WriteString("\n（我已生成以下组件改进建议卡片：")
+		for i, c := range m.Components {
+			if i > 0 {
+				b.WriteString("；")
+			}
+			fmt.Fprintf(&b, "组件 %s · 「%s」", c.Component, c.Title)
+		}
+		b.WriteString("）")
+	}
 	return b.String()
 }
 
@@ -141,9 +228,10 @@ type aiReport struct {
 	At        string   `json:"at"`
 	By        string   `json:"by"`
 	// KBID and KBTitle point at the copy kept in the writer's own knowledge base (private; publishing to the team is a
-	// separate, reviewed step).
+	// separate, reviewed step). DocID points at the standalone Change Report archived into Cluster Docs when saved on a deployed cluster.
 	KBID    string `json:"kb_id,omitempty"`
 	KBTitle string `json:"kb_title,omitempty"`
+	DocID   string `json:"doc_id,omitempty"`
 }
 
 type aiSession struct {
@@ -179,7 +267,7 @@ func (s *storeServer) aiRunning(job, key string) (bool, string) {
 	return true, v.(aiRun).started.UTC().Format(time.RFC3339Nano)
 }
 
-var reSessionKey = regexp.MustCompile(`^(review(:[a-z0-9]{4,24})?|step:[^\x00\n]{1,120})$`)
+var reSessionKey = regexp.MustCompile(`^(review(:[a-z0-9]{4,24})?|step:[^\x00\n]{1,120}|sec(:[^\x00\n]{1,120})?)$`)
 
 func sessionID(key string) string { h := sha256.Sum256([]byte(key)); return hex.EncodeToString(h[:8]) }
 
@@ -190,9 +278,12 @@ func (s *storeServer) aiLoadSession(job, key string) aiSession {
 	if b, err := os.ReadFile(filepath.Join(s.aiDir(job), "sessions", ss.ID+".json")); err == nil {
 		_ = json.Unmarshal(b, &ss)
 	}
-	if strings.HasPrefix(key, "step:") {
+	switch {
+	case key == "sec" || strings.HasPrefix(key, "sec:"):
+		ss.Kind = "security"
+	case strings.HasPrefix(key, "step:"):
 		ss.Kind = "troubleshoot"
-	} else {
+	default:
 		ss.Kind = "review"
 	}
 	if ss.Messages == nil {
@@ -269,9 +360,12 @@ func (s *storeServer) handleJobAI(w http.ResponseWriter, r *http.Request, sessio
 	}
 }
 
-const aiSystemBase = `你是 Middleware Hub 的交付助手，协助现场工程师把一份离线中间件交付顺利执行下去。
+const aiSystemBase = `你是 Middleware Hub 的交付助手，协助现场工程师把一份离线或自动化中间件交付顺利评审、执行与排障。
 规则：
-- 先用工具查看交付的实际内容（执行手册、项目文件、已记录的执行情况），再下结论；不要凭猜测。
+- 先用工具查看交付的实际内容再下结论，不要凭猜测：
+  · 先用 delivery_info 了解交付模式（离线/自动/仅配置）、系统、方案与实例参数。
+  · 要核对某项配置、日志、轮转、备份、TLS、端口或任务是否存在，优先用 search_files 在交付项目里一次性全文检索（毫秒级定位文件与行号），再对命中的关键文件用 read_file（可带 from_line/max_lines）精读确认；不要用 run_shell 沙箱代替 grep 搜文本。
+  · 沙箱（run_python / run_shell）用于真正需要执行计算、脚本语法校验、大日志解析或生成导出文件的场景；沙箱操作的是隔离只读快照，不连远程主机。
 - 你只能读取，不能修改任何东西。需要改动时，说清楚改什么、为什么、怎么验证，由工程师决定并操作。
 - 密码、密钥、证书不会提供给你，也不要索取；看到［已隐去］是平台有意隐去的内容。
 - 回答用中文，简洁，先给结论再给依据；命令用代码块；有风险的操作要明确提醒并给出回退办法。
@@ -282,13 +376,24 @@ const aiSystemBase = `你是 Middleware Hub 的交付助手，协助现场工程
   · 现场修复须有根因证据、明确改法和验证办法。新需求不要求故障证据：用户目标明确且已核对当前配置，即可提案；不要把新增需求当成故障。
   · 同一现场动作不要重复提案；现场修复与组件长期改进可以各有一张卡片，分别说明作用范围。不要排查一步提一张。拿不准就先问用户或让他执行一条只读命令确认。
   · 提案写进手册后，要在回答里告诉用户去哪里执行：哪个阶段、哪一步的标题。
-- 固定处理流程：新需求用变更提案，现场故障用当前交付修复提案；通用组件缺陷同时提交 suggest_component_change，分别审核，不要求现场等待组件发布。客户专属偏好不应成为所有部署的默认值。reason 首句标明“新需求：”或“现场修复：”。
+- 固定处理流程：新需求用变更提案，现场故障用当前交付修复提案；**只要识别到组件本身存在缺陷、缺少通用前置检查，或组件缺少有普遍价值的配置参数/运维入口（例如 PostgreSQL 组件缺少 logging_collector / log_directory / 日志轮转参数导致配置无法固化到交付规格）**，在用 component_sync_status 确认当前已发布组件和草稿尚未支持/修复后，**必须主动调用 suggest_component_change 输出「组件改进建议」卡片**，与当前交付或演练分别审核，不要求现场等待组件发布。客户专属偏好不应成为所有部署的默认值。reason 首句标明“新需求：”或“现场修复：”。
+- **写入知识库总结卡片（propose_knowledge）**：当用户要求将本次排障、变更操作或经验「生成知识库 / 整理写入知识库 / 沉淀为文档」，或一次有复用价值的现场排障与变更已经解决、值得团队沉淀时，**必须主动调用 propose_knowledge 工具输出一张「写入知识库总结卡片」**（填好清晰标题、一句话摘要和结构化 Markdown 正文；未确认的根因如实写明「待确认」，严禁编造或包含口令密钥），让用户在卡片里预览/微调后一键存入「我的知识库」或发布到「团队知识库」。绝不要回答「我没有写入知识库的工具」。
 - 修改配置时核对持久性：如果临时命令与交付规格不一致、以后重跑会覆盖，优先通过可用参数/规格变更保存目标值；没有相应工具就明确尚未固化，不能只让用户以后重复运行临时命令。采纳提案不等于已执行，组件建议不等于已发布，必须分别报告。
 - 判断根因要抓主要矛盾：一次排查里会出现很多无关的噪音（SSH 指纹确认、命令入口不存在、被误判的进程占用……）。把它们和最终真正阻断的问题区分开，结论和总结只写真正的根因和解决办法，不要把中途的小问题当成原因。先对照事实（磁盘布局、挂载、配置里的参数、报错文字）再下结论。
 - 要在手册里增加一步（补一条命令、一项检查）时，调用 propose_step；要改已有某一步的命令或参数时，调用 propose_change（不要为此建议重新生成交付）。命令必须能直接照抄执行，effect 如实标注，会修改系统的要写回退办法，after_title 用 runbook 里的原标题。平台校验没通过时按提示改好再提交。提案之外，仍然要在回答里讲清原因。
 - 平台不会把格式化、分区、删除数据这类高危操作写进手册，也不会替用户做决定：遇到这类操作，不要反复提案，也不要说“被拒绝所以做不了”。直接在回答里给出完整步骤、风险、前置检查和回退办法，明确交给用户在现场自己评估、自己决定要不要执行。
-- 问题出在自动化本身（某个 Playbook、角色任务、测试脚本的逻辑、跑在了不该跑的机器上）而不是手册命令时，用 propose_file_change 修改这份交付项目里的那个文件：先 list_files / read_file 看清原文，用 edits 局部替换。采纳后平台生成更新包和覆盖命令，用户放到控制节点即可，不需要重新生成交付。这只改这一份交付；同样的问题别的交付也会遇到，所以要同时用 suggest_component_change 建议修组件。
-- 手册里的命令能解决的用 propose_step / propose_change；自动化文件有问题的用 propose_file_change。不要让用户自己去控制节点手改文件。
+- 问题出在自动化本身（某个 Playbook、角色任务、测试脚本或断言的逻辑、跑在了不该跑的机器上）而不是手册命令时，**必须先调用 component_sync_status（传入相关文件路径）核对当前平台已发布组件和草稿的状态**：
+  · 若当前最新已发布组件已经修复了这个问题且本次交付可同步（sync_available=true），直接在回答里明确告知用户「当前组件已修复，无需再去组件工作台修改代码」，说明最新组件具体修复了什么，并引导用户在交付页或执行监控台点击「同步组件更新」（同时提醒重跑前需要核对的现场残留状态，如旧主是否拉起）；不要再给过时的组件修改方案，也不要重复提交 suggest_component_change 或 propose_file_change。
+  · 若仅未发布草稿中已有修复，告知用户先去组件工作台检查并发布草稿，再回来同步本次交付。
+  · 只有核实当前已发布组件和草稿均尚未修复时，才用 propose_file_change 修改这份交付项目里的文件（先 list_files / read_file 看清原文，用 edits 局部替换；采纳后平台生成更新包和覆盖命令，无需重新生成交付），并同时用 suggest_component_change 建议修组件。
+- 手册里的命令能解决的用 propose_step / propose_change；自动化文件有问题且组件尚未修复时用 propose_file_change。不要让用户自己去控制节点手改文件。
+- 严禁向用户反问平台已经记录的状态：当前集群是否已部署完成/已投产、执行进度与已有演练记录均已提供或可通过 delivery_info / cluster_history 查到，直接以平台真实状态为准，不要反问“这个集群已经投产了吗？”。
+- 对已部署完成并处于运行中（已投产）的集群讨论后续操作时，**严守「零未留痕变更」分级铁律**：
+  · **纯只读排查（零修改，不进演练）**：仅查状态、看日志、查主从/连接/复制延迟或核对配置现状（不修改任何配置、文件或服务）→ 直接给 1～3 条只读命令，**不要调用 propose_rehearsal**。
+  · **极速变更（propose_rehearsal + mode="quick"）**：只要涉及**任何配置/参数/规则/文件修改**，哪怕非常简单、仅 reload 无需重启且现状已在对话或截图中明确（例如在线修改 log_filename / log_rotation_size、补单条明确规则），**也必须在正文讲清方案后主动调用 propose_rehearsal 并设 mode="quick"**（跳过问答与探针，2 步直出执行清单并一键归档《变更报告》），绝不只丢几行命令就结束导致无人知晓改过什么！
+  · **简单推演（propose_rehearsal + mode="light"）**：要改配置/补规则/动态调参且无需重启和切主，但现场状态还拿不准需先跑一屏只读探针核实后再执行并归档《变更报告》→ 主动调用 propose_rehearsal 并设 mode="light"；若属组件模板/默认配置缺失，核对 component_sync_status 后一并出 suggest_component_change 卡片。
+  · **全量推演（propose_rehearsal + mode="full"）**：涉及滚动重启服务、主备切换、版本/CVE 升级、扩缩容、备份/WAL 架构改造、证书轮换等高风险变更 → 在正文讲清方案、冲突与风险后，主动调用 propose_rehearsal 并设 mode="full"（走完整四步并定稿生产 SOP），不要只口头引导。
+- **变更演练步骤对话修订（read_rehearsal + propose_rehearsal_step_edit）**：如果工程师正在讨论某个变更演练里的步骤（例如觉得命令太复杂、执行机器不清、需要拆分成两步、调整参数/目标节点或删除冗余步骤），先用 read_rehearsal 核对当前演练完整步骤，再在讲清改法后调用 propose_rehearsal_step_edit 输出交互式「修改演练步骤」卡片让用户一键采纳并同步更新演练页；**切勿**用修改初始交付手册的 propose_step / propose_change 去改演练步骤。
 - 回答先写完，再出卡片；不要在文字还没讲清之前就提案。`
 
 const aiSystemTrouble = aiSystemBase + `
@@ -296,7 +401,7 @@ const aiSystemTrouble = aiSystemBase + `
 
 const aiSystemReview = aiSystemBase + `
 现在的场景：评审这份交付。请检查：组件组合与角色分配是否合理（含奇偶、单点、资源冲突）、参数是否有风险、执行手册的顺序和验证是否完备、有无遗漏的前置条件，并回答工程师的追问。按严重程度列出问题，指出具体位置，没有问题的项不用罗列。
-如果用户问的是整个集群（做过哪些变更、现在是什么样、有什么遗留问题、下一步该做什么），先用 cluster_history 查看集群的全部经历再回答；建议做后续变更时，引导用户前往集群「变更演练」获取变更实施方案。`
+如果用户问的是整个集群（做过哪些变更、现在是什么样、有什么遗留问题、下一步该做什么），先用 cluster_history 查看集群的全部经历再回答；若集群已投产运行且涉及后续操作：纯只读诊断直接给命令；只要涉及任何配置/参数修改，哪怕极简热重载也必须调用 propose_rehearsal（现状明确且极简用 mode="quick" 直出步骤与变更报告，现状拿不准用 mode="light" 先探针再执行，高风险重启/切主/升级用 mode="full" 全量推演）。`
 
 func (s *storeServer) planHostNames(id string) []string {
 	var p struct {
@@ -319,6 +424,12 @@ func stepContext(step map[string]any) string {
 		return ""
 	}
 	b, _ := json.MarshalIndent(step, "", "  ")
+	if k, _ := step["kind"].(string); strings.HasPrefix(k, "security_") {
+		return "工程师当前重点关注的安全研判对象：\n" + string(b)
+	}
+	if k, _ := step["kind"].(string); k == "rehearsal_step" {
+		return "工程师当前正在讨论或需要调整以下【变更演练步骤】（如需修改此步骤命令/执行机器/判据，或在其前后增删演练步骤，请先用 read_rehearsal 核对完整演练上下文，再调用 propose_rehearsal_step_edit 输出一键更新卡片，切勿调用修改初始交付手册的 propose_step / propose_change）：\n" + string(b)
+	}
 	return "工程师正在处理的步骤：\n" + string(b)
 }
 
@@ -343,6 +454,7 @@ func (s *storeServer) aiChatHandler(w http.ResponseWriter, r *http.Request, user
 		Step    map[string]any `json:"step"`
 		Model   string         `json:"model"`
 		Options aiOpts         `json:"options"`
+		Retry   bool           `json:"retry"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 20<<20)).Decode(&in); err != nil {
 		s.fail(w, 400, "提交的内容有问题，或者图片太大了")
@@ -353,15 +465,12 @@ func (s *storeServer) aiChatHandler(w http.ResponseWriter, r *http.Request, user
 		s.fail(w, 400, "请输入内容（最多 3 张图片）")
 		return
 	}
-	feature := "review"
-	if strings.HasPrefix(in.Key, "step:") {
-		feature = "troubleshoot"
-	}
-	st := s.aiLoad()
-	if !st.Enabled || !st.Features[feature].Enabled {
-		s.fail(w, 409, "AI 功能未开启，请管理员在平台设置 → AI 中开启")
+	feature := featureOfKey(in.Key)
+	if code, msg := s.checkAIFeature(user.User, feature); code != 0 {
+		s.fail(w, code, msg)
 		return
 	}
+	st := s.aiLoad()
 	providers := st.aiProvidersForPick(feature, in.Model)
 	if len(providers) == 0 {
 		s.fail(w, 409, "没有可用的模型供应商，请管理员在平台设置 → AI 中配置")
@@ -399,21 +508,23 @@ func (s *storeServer) aiChatHandler(w http.ResponseWriter, r *http.Request, user
 	if ss.Title == "" {
 		ss.Title = "对话"
 		// a conversation of its own is named by what it began with
-		if strings.HasPrefix(in.Key, "review:") && in.Message != "" {
+		if (strings.HasPrefix(in.Key, "review:") || strings.HasPrefix(in.Key, "sec:")) && in.Message != "" {
 			ss.Title = truncRunes(strings.Join(strings.Fields(in.Message), " "), 36)
 		}
 		if t, _ := in.Step["title"].(string); t != "" {
 			ss.Title = truncRunes(t, 80)
+		} else if cve, _ := in.Step["cve"].(string); cve != "" {
+			ss.Title = "安全研判：" + truncRunes(cve, 60)
 		}
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
-	ss.Messages = append(ss.Messages, aiMsg{Role: "user", Text: in.Message, Images: imgNames, At: now, By: user.User})
+	ss.Messages = appendOrReuseUserTurn(ss.Messages, in.Retry, aiMsg{Role: "user", Text: in.Message, Images: imgNames, At: now, By: user.User})
 	// the question is kept at once: whatever happens to the page, it is not lost
 	if err := s.aiSaveSession(j.ID, ss); err != nil {
 		s.fail(w, 500, "对话无法保存")
 		return
 	}
-	s.auditReq(r, "ai-chat", user.User, j.ID+" "+map[string]string{"review": "交付评审", "troubleshoot": "现场排障"}[feature])
+	s.auditReq(r, "ai-chat", user.User, j.ID+" "+map[string]string{"review": "交付评审", "troubleshoot": "现场排障", "security": "安全研判"}[feature])
 
 	fl, _ := w.(http.Flusher)
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -426,10 +537,19 @@ func (s *storeServer) aiChatHandler(w http.ResponseWriter, r *http.Request, user
 		red = newAIRedactor(s.planHostNames(j.ID))
 	}
 	system := aiSystemReview
-	if feature == "troubleshoot" {
+	primarySkill := "delivery-review"
+	switch feature {
+	case "troubleshoot":
 		system = aiSystemTrouble
+		primarySkill = "step-troubleshooting"
+	case "security":
+		system = aiSystemSecurityCluster
+		primarySkill = ""
 	}
-	system += s.skillBlock(user.User, "step-troubleshooting", "proposal-writing") + s.controllerFacts(j.ID)
+	if primarySkill != "" {
+		system += s.skillBlock(user.User, primarySkill, "proposal-writing")
+	}
+	system += s.deliveryLifecycleFacts(j.ID) + s.controllerFacts(j.ID) + s.deliverySkillHint(j.ID)
 	var final aiReply
 	var used, proposed []string
 	var lastErr error
@@ -466,13 +586,13 @@ func (s *storeServer) aiChatHandler(w http.ResponseWriter, r *http.Request, user
 		}
 	}
 	if lastErr != nil {
-		errPayload := map[string]any{"t": "error", "v": lastErr.Error()}
-		if d := aiDiagFromErr(lastErr); d != nil {
-			cp := *d
-			if len(failedAttempts) > len(cp.Attempts) {
-				cp.Attempts = failedAttempts
-			}
-			errPayload["diag"] = &cp
+		errText := localizeGoMessage(reqLang(r), lastErr.Error())
+		errDiag := buildChatErrorDiag(lastErr, failedAttempts, tried)
+		ss.Messages = append(ss.Messages, aiMsg{Role: "assistant", Error: errText, ErrorDiag: errDiag, At: time.Now().UTC().Format(time.RFC3339)})
+		saved := s.aiSaveSession(j.ID, ss) == nil
+		errPayload := map[string]any{"t": "error", "v": errText, "saved": saved}
+		if errDiag != nil {
+			errPayload["diag"] = errDiag
 		}
 		ev.send(errPayload)
 		return
@@ -488,13 +608,14 @@ func (s *storeServer) aiChatHandler(w http.ResponseWriter, r *http.Request, user
 
 // aiRunTurn answers the latest user message, letting the model call tools for up to eight rounds.
 func (s *storeServer) aiRunTurn(ctx context.Context, p aiProvider, ss aiSession, system string, newImages []string, j storeJob, red *aiRedactor, ev sse, proposed *[]string, opts aiOpts) (aiReply, []string, error) {
-	tc := aiToolCtx{s: s, job: j, session: ss.Key, proposed: proposed}
+	tc := aiToolCtx{s: s, job: j, user: opts.User, session: ss.Key, proposed: proposed}
 	if opts.Workspace == nil {
 		opts.Workspace = s.deliveryWorkspaceSpec(j.ID, "交付项目 "+firstNonEmptyStr(j.AppName, j.ID))
 	}
-	ext := s.extFor(featureOfKey(ss.Key), opts)
+	feat := featureOfKey(ss.Key)
+	ext := s.extFor(feat, opts)
 	ctx = ext.bindCtx(ctx, ev)
-	tools := append(aiTools(), ext.tools...)
+	tools := append(aiToolsFor(feat), ext.tools...)
 	system += ext.prompt
 	prep := func(t string) string { return red.out(aiScrub(t)) }
 	var msgs []aiMessage
@@ -503,14 +624,20 @@ func (s *storeServer) aiRunTurn(ctx context.Context, p aiProvider, ss aiSession,
 		// the model cannot call tools: hand it the delivery up front instead
 		tools = nil
 		sys += "\n\n以下是这份交付的内容（你无法调用工具，只能依据它）：\n" + tc.run("delivery_info", "{}") + "\n执行手册：\n" + tc.run("runbook", "{}") + "\n执行记录：\n" + tc.run("execution_record", "{}")
+		if feat == "security" {
+			sys += "\n集群安全审计：\n" + tc.run("cluster_security_info", "{}")
+		}
 	}
 	if c := stepContext(ss.Step); c != "" {
 		sys += "\n\n" + c
 	}
 	msgs = append(msgs, aiMessage{Role: "system", Content: prep(sys)})
 	for i, m := range ss.Messages {
+		if isErrorOnlyMsg(m) {
+			continue
+		}
 		if m.Role == "assistant" {
-			msgs = append(msgs, aiMessage{Role: "assistant", Content: prep(m.Text + m.askText())})
+			msgs = append(msgs, aiMessage{Role: "assistant", Content: prep(m.Text + m.askText() + m.rehearsalText())})
 			continue
 		}
 		text := prep(m.Text)
@@ -533,8 +660,22 @@ func (s *storeServer) aiRunTurn(ctx context.Context, p aiProvider, ss aiSession,
 	return s.aiToolLoop(ctx, p, msgs, tools, red, ev, ext.wrap(tc.run), proposed)
 }
 
-// aiToolLoop lets the model call tools for up to eight rounds and returns its final answer. Proposals the tools make
-// are announced to the browser as they appear.
+func isCardOutputTool(name string) bool {
+	return strings.HasPrefix(name, "propose") || strings.HasPrefix(name, "suggest_") || name == askToolName
+}
+
+func filterCardOutputTools(tools []aiToolDef) []aiToolDef {
+	var out []aiToolDef
+	for _, t := range tools {
+		if isCardOutputTool(t.Name) {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// aiToolLoop lets the model call tools across research rounds and reserves final rounds for action/proposal cards.
+// Proposals the tools make are announced to the browser as they appear.
 func (s *storeServer) aiToolLoop(ctx context.Context, p aiProvider, msgs []aiMessage, tools []aiToolDef, red *aiRedactor, ev sse, run func(name, args string) string, proposed *[]string) (aiReply, []string, error) {
 	var total aiReply
 	var used []string
@@ -560,9 +701,20 @@ func (s *storeServer) aiToolLoop(ctx context.Context, p aiProvider, msgs []aiMes
 		}
 		thinking.Reset()
 	}
+	const maxResearchRounds = 12
+	const maxTotalRounds = 14
 	for round := 0; ; round++ {
-		if round >= 8 {
-			tools = nil // enough looking; make it answer
+		if round == maxResearchRounds && len(tools) > 0 {
+			cardTools := filterCardOutputTools(tools)
+			if len(cardTools) > 0 {
+				tools = cardTools
+				msgs = append(msgs, aiMessage{Role: "user", Content: "信息核查已足够，请停止继续读文件，直接根据已掌握内容作答；如需输出提案或变更演练卡片（如 propose_rehearsal），现在即可调用对应卡片工具后完成回答。"})
+			} else {
+				tools = nil
+				msgs = append(msgs, aiMessage{Role: "user", Content: "请根据已经看到的内容直接回答。"})
+			}
+		} else if round >= maxTotalRounds {
+			tools = nil // hard cap; make it answer
 			msgs = append(msgs, aiMessage{Role: "user", Content: "请根据已经看到的内容直接回答。"})
 		}
 		stream := func(t string) {
@@ -684,7 +836,7 @@ func stepPreview(out string) string {
 }
 
 func stepOK(out string) bool {
-	for _, bad := range []string{"外部工具", "外部服务连接失败", "没有这个技能", "提案没有通过", "文件不存在", "没有找到", "没有这个", "文件集不合规", "检查通过，但试生成失败", "还没有草稿", "请指明", "用户拒绝了本次沙箱运行请求", "等待用户授权沙箱运行超时", "管理员已将沙箱网络策略设为", "代码沙箱没有开启", "运行失败："} {
+	for _, bad := range []string{"外部工具", "外部服务连接失败", "没有这个技能", "提案没有通过", "文件不存在", "没有找到", "没有这个", "文件集不合规", "检查通过，但试生成失败", "还没有草稿", "请指明", "用户拒绝了本次沙箱运行请求", "等待用户授权沙箱运行超时", "管理员已将沙箱网络策略设为", "代码沙箱没有开启", "运行失败：", "安全公告查询失败", "联网搜索没有开启"} {
 		if strings.HasPrefix(out, bad) {
 			return false
 		}
@@ -695,7 +847,7 @@ func stepOK(out string) bool {
 // stepSummary says in a few words what a tool brought back.
 func stepSummary(name, out string) string {
 	first := strings.TrimSpace(strings.SplitN(out, "\n", 2)[0])
-	if strings.HasPrefix(name, "propose") || !stepOK(out) {
+	if strings.HasPrefix(name, "propose") || name == "suggest_component_change" || name == "suggest_security_rehearsal" || name == "search_files" || name == "draft_search" || name == "workspace_search" || name == "component_sync_status" || name == checkPkgSecName || name == "library_runtimes" || !stepOK(out) {
 		return truncRunes(first, 110)
 	}
 	lines := strings.Count(out, "\n") + 1
@@ -750,6 +902,7 @@ func (s *storeServer) aiResolveHandler(w http.ResponseWriter, r *http.Request, u
 		Draft bool `json:"draft"`
 		// Report is the record as the person confirmed it (they may have edited it).
 		Report *struct {
+			Title     string   `json:"title"`
 			Symptom   string   `json:"symptom"`
 			Evidence  string   `json:"evidence"`
 			Cause     string   `json:"cause"`
@@ -769,20 +922,21 @@ func (s *storeServer) aiResolveHandler(w http.ResponseWriter, r *http.Request, u
 	}
 	ss := s.aiLoadSession(j.ID, in.Key)
 	if in.Report != nil {
-		s.saveWriteUp(w, r, user, j, ss, in.Report.Symptom, in.Report.Evidence, in.Report.Cause, in.Report.Fix, in.Report.Changed, in.Report.Followups, in.Report.Model, in.MarkStep, in.ToKB)
+		s.saveWriteUp(w, r, user, j, ss, in.Report.Title, in.Report.Symptom, in.Report.Evidence, in.Report.Cause, in.Report.Fix, in.Report.Changed, in.Report.Followups, in.Report.Model, in.MarkStep, in.ToKB)
 		return
 	}
 	if len(ss.Messages) < 2 {
 		s.fail(w, 409, "还没有对话内容")
 		return
 	}
-	feature := "review"
-	if ss.Kind == "troubleshoot" {
-		feature = "troubleshoot"
+	feature := featureOfKey(ss.Key)
+	if code, msg := s.checkAIFeature(user.User, feature); code != 0 {
+		s.fail(w, code, msg)
+		return
 	}
 	st := s.aiLoad()
 	providers := st.aiProvidersFor(feature)
-	if !st.Enabled || len(providers) == 0 {
+	if len(providers) == 0 {
 		s.fail(w, 409, "AI 功能未开启")
 		return
 	}
@@ -803,11 +957,11 @@ func (s *storeServer) aiResolveHandler(w http.ResponseWriter, r *http.Request, u
 	if r := []rune(convo); len(r) > 24000 {
 		convo = "……（前面的对话已省略）\n" + string(r[len(r)-24000:])
 	}
-	ask := "请把下面这段排障/评审对话整理成一份记录，只输出一个 JSON 对象（不要代码块、不要解释）。先填 findings：把对话里出现过的每一个“问题或猜测”列成 {what: 一句话, verdict: root（最终真正阻断、需要处理的根因，只能有一个）| side（真实存在但不是阻断原因，如已顺手修好的小问题）| ruled_out（已排除或误判）}。后面的字段只写 verdict 为 root 的那一个：symptom（用户一开始遇到的现象，一两句，不要写被排除的猜测）、evidence（关键证据，如报错片段，可为空）、cause（只写这一个根因，一两句，不要罗列其他问题）、fix（只针对这个根因的最终处理办法，含命令；side 的问题最多在 followups 里一笔带过，ruled_out 的一律不写）、changed_delivery（布尔：交付本身是否需要修改）、followups（字符串数组：还需要跟进的事项，可为空）。内容必须来自对话，不要编造。排障对话里常有与最终问题无关的小插曲（SSH 指纹确认、命令入口不存在、被误判的进程占用等）：现象和原因只写真正阻断问题的那一个及其根因，把这些插曲当作噪音略去或只在证据里一笔带过；fix 写最终有效的办法，以及需要用户自己决定的高危操作的步骤与风险。字符串里的换行写成 \\n，双引号要转义。\n\n" + red.out(aiScrub(convo))
+	ask := "请把下面这段排障/变更/评审对话整理成一份结构化变更与处置报告，只输出一个 JSON 对象（不要代码块、不要解释）。先填 findings：把对话里出现过的每一个“问题或猜测”列成 {what: 一句话, verdict: root（最终真正阻断或本次要变更的核心主题，只能有一个）| side（真实存在但不是主线，如顺手修好的小问题）| ruled_out（已排除或误判）}。然后填 title（10~28字的简明中文变更/处置报告标题，例如「调整 Patroni 同步副本数参数」或「修复 pg_hba 本机复制规则」），后面的字段只写 verdict 为 root 的那一个：symptom（变更背景或用户一开始遇到的现象，一两句，不要写被排除的猜测）、evidence（关键证据，如命令输出或报错片段，可为空）、cause（原因或变更依据，一两句，不要罗列无关问题）、fix（针对该主题的最终执行命令与处理经过；side 的问题最多在 followups 里一笔带过，ruled_out 的一律不写）、changed_delivery（布尔：初始交付基线本身是否存在偏差需要修改）、followups（字符串数组：还需要跟进的事项，可为空）。内容必须来自对话，不要编造。对话里常有与主线无关的小插曲（SSH 指纹确认、命令入口不存在、被误判的进程占用等）：把这些插曲当作噪音略去或只在证据里一笔带过；fix 写最终有效的命令与步骤。字符串里的换行写成 \\n，双引号要转义。\n\n" + red.out(aiScrub(convo))
 	var parsed struct {
-		Symptom, Evidence, Cause, Fix string
-		Changed                       bool
-		Followups                     []string
+		Title, Symptom, Evidence, Cause, Fix string
+		Changed                              bool
+		Followups                            []string
 	}
 	var model, lastText string
 	var err error
@@ -816,7 +970,7 @@ func (s *storeServer) aiResolveHandler(w http.ResponseWriter, r *http.Request, u
 	for attempt := 0; attempt < 2 && !good; attempt++ {
 		for _, p := range providers {
 			var rep aiReply
-			rep, err = s.aiChat(r.Context(), p, []aiMessage{{Role: "system", Content: "你负责把交付对话整理成结构化记录。只输出 JSON。"}, {Role: "user", Content: ask}}, nil, nil)
+			rep, err = s.aiChat(r.Context(), p, []aiMessage{{Role: "system", Content: "你负责把运维与交付对话整理成结构化变更报告。只输出 JSON。"}, {Role: "user", Content: ask}}, nil, nil)
 			ru := usageFrom(p, rep)
 			ru.User, ru.IP, ru.Feature, ru.Job, ru.Target, ru.Session, ru.OK = user.User, clientIP(r), feature, j.ID, j.ClusterID, ss.ID, err == nil
 			if err != nil {
@@ -828,7 +982,7 @@ func (s *storeServer) aiResolveHandler(w http.ResponseWriter, r *http.Request, u
 			text := red.back(rep.Text)
 			if err == nil {
 				if v, ok := readWriteUp(text); ok {
-					parsed.Symptom, parsed.Evidence, parsed.Cause, parsed.Fix, parsed.Changed, parsed.Followups = v.Symptom, v.Evidence, v.Cause, v.Fix, v.Changed, v.Followups
+					parsed.Title, parsed.Symptom, parsed.Evidence, parsed.Cause, parsed.Fix, parsed.Changed, parsed.Followups = v.Title, v.Symptom, v.Evidence, v.Cause, v.Fix, v.Changed, v.Followups
 					good, model = true, p.Model
 				} else {
 					lastText = text
@@ -858,16 +1012,17 @@ func (s *storeServer) aiResolveHandler(w http.ResponseWriter, r *http.Request, u
 		s.fail(w, 502, msg)
 		return
 	}
+	draftTitle := truncRunes(firstNonEmptyStr(strings.TrimSpace(parsed.Title), ss.Title, "现场变更报告"), 80)
 	if in.Draft {
-		s.writeJSON(w, 200, aiReport{Session: ss.ID, Kind: ss.Kind, Key: ss.Key, Title: ss.Title, Symptom: parsed.Symptom, Evidence: parsed.Evidence, Cause: parsed.Cause, Fix: parsed.Fix, Changed: parsed.Changed, Followups: parsed.Followups, Model: model, At: time.Now().UTC().Format(time.RFC3339), By: user.User})
+		s.writeJSON(w, 200, aiReport{Session: ss.ID, Kind: ss.Kind, Key: ss.Key, Title: draftTitle, Symptom: parsed.Symptom, Evidence: parsed.Evidence, Cause: parsed.Cause, Fix: parsed.Fix, Changed: parsed.Changed, Followups: parsed.Followups, Model: model, At: time.Now().UTC().Format(time.RFC3339), By: user.User})
 		return
 	}
-	s.saveWriteUp(w, r, user, j, ss, parsed.Symptom, parsed.Evidence, parsed.Cause, parsed.Fix, parsed.Changed, parsed.Followups, model, in.MarkStep, in.ToKB)
+	s.saveWriteUp(w, r, user, j, ss, draftTitle, parsed.Symptom, parsed.Evidence, parsed.Cause, parsed.Fix, parsed.Changed, parsed.Followups, model, in.MarkStep, in.ToKB)
 }
 
-// saveWriteUp puts the record into the execution record, replacing an earlier one of the same conversation, and when
-// asked marks the step the conversation was about as done after a problem was solved.
-func (s *storeServer) saveWriteUp(w http.ResponseWriter, r *http.Request, user storeSession, j storeJob, ss aiSession, symptom, evidence, cause, fix string, changed bool, followups []string, model string, markStep bool, toKB bool) {
+// saveWriteUp puts the record into the execution record, archives a standalone Change Report in Cluster Docs when the
+// cluster is already deployed/running, and when asked marks the step the conversation was about as done.
+func (s *storeServer) saveWriteUp(w http.ResponseWriter, r *http.Request, user storeSession, j storeJob, ss aiSession, customTitle, symptom, evidence, cause, fix string, changed bool, followups []string, model string, markStep bool, toKB bool) {
 	for _, t := range []string{symptom, evidence, cause, fix} {
 		if len([]rune(t)) > 20000 {
 			s.fail(w, 400, "每一项最多 20000 字")
@@ -881,11 +1036,19 @@ func (s *storeServer) saveWriteUp(w http.ResponseWriter, r *http.Request, user s
 	if len(followups) > 30 {
 		followups = followups[:30]
 	}
-	rep := aiReport{Session: ss.ID, Kind: ss.Kind, Key: ss.Key, Title: ss.Title, Symptom: strings.TrimSpace(symptom), Evidence: strings.TrimSpace(evidence), Cause: strings.TrimSpace(cause), Fix: strings.TrimSpace(fix), Changed: changed, Followups: followups, Model: model, At: time.Now().UTC().Format(time.RFC3339), By: user.User}
+	finalTitle := truncRunes(firstNonEmptyStr(strings.TrimSpace(customTitle), ss.Title, "现场变更报告"), 80)
+	rep := aiReport{Session: ss.ID, Kind: ss.Kind, Key: ss.Key, Title: finalTitle, Symptom: strings.TrimSpace(symptom), Evidence: strings.TrimSpace(evidence), Cause: strings.TrimSpace(cause), Fix: strings.TrimSpace(fix), Changed: changed, Followups: followups, Model: model, At: time.Now().UTC().Format(time.RFC3339), By: user.User}
 	if toKB {
-		title := firstNonEmptyStr(ss.Title, "排障记录")
-		if d, err := s.kbSave(user.User, kbDoc{Title: title, Text: reportMarkdown(rep, "交付 "+j.ClusterID+" · "+title)}); err == nil {
+		if d, err := s.kbSave(user.User, kbDoc{Title: finalTitle, Text: reportMarkdown(rep, "交付 "+j.ClusterID+" · "+finalTitle)}); err == nil {
 			rep.KBID, rep.KBTitle = d.ID, d.Title
+		}
+	}
+	// Archive as a standalone exportable Change Report document under Cluster Docs whenever the cluster is deployed/running.
+	if j.ClusterID != "" {
+		if lc, ok := s.deliveryLifecycleInfo(j.ID); ok && lc.ClusterRunning {
+			rep.DocID = s.upsertChangeNoteDoc(j.ClusterID, rep)
+		} else if j.Outcome == outcomeDone || j.Outcome == outcomeDeviated {
+			rep.DocID = s.upsertChangeNoteDoc(j.ClusterID, rep)
 		}
 	}
 	s.mu.Lock()
@@ -949,6 +1112,9 @@ func reportMarkdown(r aiReport, where string) string {
 }
 
 func featureOfKey(key string) string {
+	if key == "sec" || strings.HasPrefix(key, "sec:") {
+		return "security"
+	}
 	if strings.HasPrefix(key, "step:") {
 		return "troubleshoot"
 	}
@@ -979,9 +1145,9 @@ func stepArgsMax(name string) int {
 }
 
 type writeUp struct {
-	Symptom, Evidence, Cause, Fix string
-	Changed                       bool
-	Followups                     []string
+	Title, Symptom, Evidence, Cause, Fix string
+	Changed                              bool
+	Followups                            []string
 }
 
 // readWriteUp reads the record a model wrote, whatever the types it used: a number or a list where text was
@@ -1021,7 +1187,7 @@ func readWriteUp(text string) (writeUp, bool) {
 		}
 		return ""
 	}
-	w := writeUp{Symptom: str("symptom", "现象"), Evidence: str("evidence", "证据"), Cause: str("cause", "原因", "root_cause"), Fix: str("fix", "处理", "solution", "resolution")}
+	w := writeUp{Title: str("title", "标题"), Symptom: str("symptom", "现象"), Evidence: str("evidence", "证据"), Cause: str("cause", "原因", "root_cause"), Fix: str("fix", "处理", "solution", "resolution")}
 	switch v := m["changed_delivery"].(type) {
 	case bool:
 		w.Changed = v

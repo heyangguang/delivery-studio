@@ -355,8 +355,8 @@ body[arco-theme="dark"] .ad-compose::after {
   --ai-ptr: 100%;
 }
 
-:root .ap-compose:not(.off):is(:hover, :focus-within, :has(.arco-dropdown-open), :has(.arco-popover-open))::after,
-:root .ad-compose:not(.off):is(:hover, :focus-within, :has(.arco-dropdown-open), :has(.arco-popover-open))::after {
+:root .ap-compose:not(.off):is(:hover, :focus-within, .is-writing, :has(.arco-dropdown-open), :has(.arco-popover-open), :has(.tm-open))::after,
+:root .ad-compose:not(.off):is(:hover, :focus-within, :has(.arco-dropdown-open), :has(.arco-popover-open), :has(.tm-open))::after {
   opacity: 0.94;
 }
 
@@ -372,28 +372,37 @@ body[arco-theme="dark"] .ad-compose::after {
     var(--ai-card-shadow-hover);
 }
 
-/* Hover / focus spring scale: hero cards lift & scale, docked cards stay subtle */
+/* Hover optical lift + click-to-write spring expand: hero cards anchor on the bottom toolbar so hovering never pushes Thinking/Model away */
 :root .ap-hero .ap-compose,
 :root .fc.start .fc-compose.start-box {
   margin-inline: 0;
   margin-bottom: 0;
+  transform-origin: 50% 82%;
+  transition:
+    transform 0.36s var(--spring),
+    box-shadow 0.24s var(--ease-out);
 }
 
 :root .ap-hero .ap-compose textarea {
-  min-height: 82px;
+  min-height: 70px;
   padding-top: 18px;
   font-size: 15.5px;
+  transition: min-height 0.38s var(--spring);
 }
 
-:root .ap-hero .ap-compose:not(.off):is(:hover, :focus-within, :has(.arco-dropdown-open), :has(.arco-popover-open)),
-:root .fc.start .fc-compose.start-box:not(.off):is(:hover, :focus-within, :has(.arco-dropdown-open), :has(.arco-popover-open)) {
-  transform: translateY(-1px);
+:root .ap-hero .ap-compose.is-writing textarea {
+  min-height: 116px;
+}
+
+:root .ap-hero .ap-compose:not(.off):is(:hover, :focus-within, .is-writing, :has(.arco-dropdown-open), :has(.arco-popover-open), :has(.tm-open)),
+:root .fc.start .fc-compose.start-box:not(.off):is(:hover, :focus-within, .is-writing, :has(.arco-dropdown-open), :has(.arco-popover-open), :has(.tm-open)) {
+  transform: translateY(-1.5px) scale(1.008);
   box-shadow: var(--ai-card-shadow-hover);
 }
 
-:root .ap-foot .ap-compose:not(.off):is(:hover, :focus-within, :has(.arco-dropdown-open), :has(.arco-popover-open)),
-:root .ad-compose:not(.off):is(:hover, :focus-within, :has(.arco-dropdown-open), :has(.arco-popover-open)),
-:root .fc-compose:not(.start-box):not(.off):is(:hover, :focus-within, :has(.arco-dropdown-open), :has(.arco-popover-open)) {
+:root .ap-foot .ap-compose:not(.off):is(:hover, :focus-within, :has(.arco-dropdown-open), :has(.arco-popover-open), :has(.tm-open)),
+:root .ad-compose:not(.off):is(:hover, :focus-within, :has(.arco-dropdown-open), :has(.arco-popover-open), :has(.tm-open)),
+:root .fc-compose:not(.start-box):not(.off):is(:hover, :focus-within, :has(.arco-dropdown-open), :has(.arco-popover-open), :has(.tm-open)) {
   box-shadow: var(--ai-card-shadow-hover);
 }
 
@@ -716,9 +725,15 @@ body[arco-theme="dark"] .ad-compose::after {
     color 0.15s ease;
 }
 
-:root :is(.ad-compose, .fc-compose:not(.start-box)) :is(.tm-btn, .ad-attach, .fc-attach) {
+:root :is(.ad-win:not(.big) .ad-compose, .fc-compose:not(.start-box)) :is(.tm-btn, .ad-attach, .fc-attach) {
   width: 30px;
   height: 30px;
+}
+
+:root .ad-win.big .ad-compose .ad-send {
+  width: 34px;
+  height: 34px;
+  font-size: 15px;
 }
 
 :root :is(.ap-compose, .ad-compose) :is(.tm-btn, .ap-icon, .ad-attach, .fc-attach):hover:not(.off):not(:disabled) {
@@ -739,7 +754,7 @@ body[arco-theme="dark"] .ad-compose::after {
 }
 
 :root :is(.ap-compose, .ad-compose) :is(.tm-tog, .mp, .ap-chipbtn) {
-  height: 32px;
+  height: 34px;
   padding: 0 12px 0 10px;
   border: 1px solid var(--ai-ctl-border);
   border-radius: 999px;
@@ -755,8 +770,8 @@ body[arco-theme="dark"] .ad-compose::after {
     color 0.15s ease;
 }
 
-:root :is(.ad-compose, .fc-compose:not(.start-box)) :is(.tm-tog, .mp) {
-  height: 28px;
+:root :is(.ad-win:not(.big) .ad-compose, .fc-compose:not(.start-box)) :is(.tm-tog, .mp) {
+  height: 30px;
   padding: 0 10px 0 8px;
   font-size: 12px;
 }

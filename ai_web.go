@@ -302,6 +302,7 @@ func (s *storeServer) webFetch(ctx context.Context, w aiWeb, raw string) (string
 
 func webTools() []aiToolDef {
 	return []aiToolDef{
+		checkPackageSecurityTool(),
 		{"web_search", "在互联网上搜索。平台和交付里查不到、或需要最新资料（版本说明、已知问题、官方文档、报错含义）时使用。返回标题、网址和摘要。", map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string", "description": "搜索词，简洁具体；中英文都可以，技术报错原文用英文搜效果更好"}, "count": map[string]any{"type": "integer", "description": "返回几条，默认 6"}}, "required": []string{"query"}}},
 		{"web_fetch", "打开一个网页，读取正文。用于读 web_search 找到的文档或文章。", map[string]any{"type": "object", "properties": map[string]any{"url": map[string]any{"type": "string", "description": "完整网址"}}, "required": []string{"url"}}},
 	}
@@ -312,14 +313,17 @@ func (s *storeServer) runWeb(name, args string) string {
 	if !w.ready() {
 		return "联网搜索没有开启。"
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+	defer cancel()
+	if name == checkPkgSecName {
+		return s.checkPackageSecurity(ctx, args)
+	}
 	var a struct {
 		Query string `json:"query"`
 		Count int    `json:"count"`
 		URL   string `json:"url"`
 	}
 	_ = json.Unmarshal([]byte(args), &a)
-	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
-	defer cancel()
 	if name == "web_fetch" {
 		out, err := s.webFetch(ctx, w, a.URL)
 		if err != nil {

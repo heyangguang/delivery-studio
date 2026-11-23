@@ -74,8 +74,11 @@ type sandboxRun struct {
 	Workspace []sandboxWorkspaceFile // optional read-only workspace exposed as /workspace ($MW_WORKSPACE)
 	Limits    sandboxLimits
 	Env       []string
-	AllowNet  bool // allow outbound external network (loopback & local services stay blocked)
-	ProbePort int  // local platform port to explicitly guard
+	AllowNet        bool     // allow outbound external network (loopback & local services stay blocked)
+	NetReadOnly     bool     // when true (smart-auto network), enforce read-only HTTPS GET/HEAD at runtime
+	NetAllowHosts   []string // when non-empty (smart-auto network), restrict outbound hosts to these patterns at runtime
+	NetBlockPrivate bool     // when true (smart-auto public hosts), also block RFC1918/private/reserved IPs
+	ProbePort       int      // local platform port to explicitly guard
 }
 
 type sandboxOutFile struct {
@@ -106,9 +109,12 @@ type sandboxSpec struct {
 	Argv      []string      `json:"argv"`
 	Env       []string      `json:"env"`
 	Limits    sandboxLimits `json:"limits"`
-	DropTo    int           `json:"drop_to"`
-	AllowNet  bool          `json:"allow_net,omitempty"`
-	ProbePort int           `json:"probe_port,omitempty"`
+	DropTo          int           `json:"drop_to"`
+	AllowNet        bool          `json:"allow_net,omitempty"`
+	NetReadOnly     bool          `json:"net_readonly,omitempty"`
+	NetAllowHosts   []string      `json:"net_allow_hosts,omitempty"`
+	NetBlockPrivate bool          `json:"net_block_private,omitempty"`
+	ProbePort       int           `json:"probe_port,omitempty"`
 }
 
 const sandboxSpecEnv = "MW_SANDBOX_SPEC"
@@ -257,14 +263,41 @@ func stageWorkspaceFiles(wsDir string, files []sandboxWorkspaceFile) error {
 
 // sandboxNetGuardSitePy is injected via sitecustomize.py on Linux when AllowNet=true so outbound internet works
 // while loopback, link-local, metadata, and socket.bind remain strictly blocked.
-const sandboxNetGuardSitePy = `import ipaddress, os, socket, sys
+// When smart-auto network mode grants access, it additionally enforces read-only HTTPS GET/HEAD, host allowlisting,
+// and optional private-IP blocking inside CPython's PEP-578 audit hook.
+const sandboxNetGuardSitePy = `import ipaddress, os, socket, sys, urllib.parse
 
 _probe_port = int(os.environ.pop("MW_SB_PROBE_PORT", "0") or "0")
+_net_ro = os.environ.pop("MW_SB_NET_RO", "") == "1"
+_net_no_priv = os.environ.pop("MW_SB_NET_NO_PRIV", "") == "1"
+_net_hosts = tuple(p.strip().lower().rstrip(".") for p in os.environ.pop("MW_SB_NET_HOSTS", "").split(",") if p.strip())
+_dns_ok = [False]
+_write_verbs = (b"POST ", b"PUT ", b"PATCH ", b"DELETE ", b"TRACE ")
+
+def _to_host(h):
+    if isinstance(h, bytes):
+        h = h.decode("utf-8", "ignore")
+    return str(h or "").strip().lower().rstrip(".")
+
+def _host_allowed(h):
+    if not _net_hosts:
+        return True
+    s = _to_host(h)
+    if not s:
+        return False
+    for pat in _net_hosts:
+        if pat.startswith("*."):
+            base = pat[2:]
+            if s == base or s.endswith("." + base):
+                return True
+        elif s == pat:
+            return True
+    return False
 
 def _is_local_host(h):
     if not h:
         return True
-    s = str(h).strip().lower().rstrip(".")
+    s = _to_host(h)
     if s in ("localhost", "localhost.localdomain", "ip6-localhost", "ip6-loopback", "0.0.0.0", "::", "::1", ""):
         return True
     if s.startswith("127.") or s.startswith("169.254.") or s.endswith(".localhost"):
@@ -275,6 +308,8 @@ def _is_local_host(h):
         ip = ipaddress.ip_address(s)
         if ip.is_loopback or ip.is_unspecified or ip.is_link_local or ip.is_multicast:
             return True
+        if _net_no_priv and (ip.is_private or ip.is_reserved):
+            return True
     except ValueError:
         pass
     return False
@@ -282,15 +317,60 @@ def _is_local_host(h):
 def _net_audit(event, args):
     if event == "socket.bind":
         raise PermissionError("sandbox: binding local ports is not permitted")
+    if event == "urllib.Request":
+        fullurl = args[0] if len(args) > 0 else ""
+        data = args[1] if len(args) > 1 else None
+        method = args[3] if len(args) > 3 else None
+        if _net_ro:
+            if data is not None:
+                raise PermissionError("sandbox: auto-approved network is read-only (request body blocked)")
+            if method and str(method).upper() not in ("GET", "HEAD"):
+                raise PermissionError("sandbox: auto-approved network only permits GET/HEAD")
+        if _net_hosts:
+            u = urllib.parse.urlsplit(str(fullurl))
+            if u.scheme.lower() != "https":
+                raise PermissionError("sandbox: auto-approved network requires HTTPS")
+            if u.port not in (None, 443):
+                raise PermissionError("sandbox: auto-approved network only permits port 443")
+            if not _host_allowed(u.hostname):
+                raise PermissionError("sandbox: host not in auto-approved allowlist: " + str(u.hostname))
+        return
+    if event == "http.client.connect":
+        if _net_hosts:
+            host = args[1] if len(args) > 1 else ""
+            port = args[2] if len(args) > 2 else 0
+            if port not in (443, "443"):
+                raise PermissionError("sandbox: auto-approved network only permits port 443")
+            if not _host_allowed(host):
+                raise PermissionError("sandbox: host not in auto-approved allowlist: " + str(host))
+        return
+    if event == "http.client.send":
+        if _net_ro:
+            data = args[1] if len(args) > 1 else None
+            if isinstance(data, (bytes, bytearray)) and any(data.startswith(v) for v in _write_verbs):
+                raise PermissionError("sandbox: auto-approved network only permits GET/HEAD")
+        return
+    if event == "socket.getaddrinfo":
+        if _net_hosts:
+            host = args[0] if len(args) > 0 else None
+            if not _host_allowed(host):
+                raise PermissionError("sandbox: DNS lookup blocked for non-allowlisted host: " + str(host))
+            _dns_ok[0] = True
+        return
     if event in ("socket.connect", "socket.sendto", "socket.sendmsg"):
         addr = args[1] if len(args) > 1 else None
         if isinstance(addr, tuple) and len(addr) >= 1:
             host = addr[0]
             port = addr[1] if len(addr) >= 2 and isinstance(addr[1], int) else 0
             if _is_local_host(host):
-                raise PermissionError("sandbox: local/loopback network access is blocked")
+                raise PermissionError("sandbox: local/private network access is blocked")
             if _probe_port and port == _probe_port:
                 raise PermissionError("sandbox: platform port access is blocked")
+            if _net_hosts:
+                if port != 443:
+                    raise PermissionError("sandbox: auto-approved network only permits port 443")
+                if not _dns_ok[0]:
+                    raise PermissionError("sandbox: direct IP socket connection blocked under auto-approved network")
         else:
             raise PermissionError("sandbox: non-IP socket address is blocked")
 
@@ -315,6 +395,11 @@ def _boot():
     boot_dir = os.path.abspath(cfg["boot_dir"])
     ws_dir = os.path.abspath(cfg["ws_dir"]) if cfg.get("ws_dir") else ""
     allow_net = bool(cfg.get("allow_net", False))
+    net_ro = bool(cfg.get("net_readonly", False))
+    net_no_priv = bool(cfg.get("net_block_private", False))
+    net_hosts = tuple(str(p).strip().lower().rstrip(".") for p in (cfg.get("net_allow_hosts") or []) if str(p).strip())
+    dns_ok = [False]
+    write_verbs = (b"POST ", b"PUT ", b"PATCH ", b"DELETE ", b"TRACE ")
     probe_port = int(cfg.get("probe_port", 0) or 0)
     entry = cfg["entry"]
     argv = list(cfg.get("argv") or [entry])
@@ -475,7 +560,7 @@ def _boot():
             pass
 
     # Preload standard modules commonly used by data/doc scripts before arming strict audit hooks
-    import csv, datetime, hashlib, itertools, math, pathlib, re, ssl, urllib.request, zipfile, tarfile  # noqa: F401
+    import csv, datetime, hashlib, itertools, math, pathlib, re, ssl, urllib.parse, urllib.request, zipfile, tarfile  # noqa: F401
 
     _orig_open = builtins.open
     _orig_io_open = io.open
@@ -596,10 +681,30 @@ def _boot():
         "winreg.DeleteKey", "winreg.DeleteValue", "winreg.SetValue",
     })
 
+    def _to_host(h):
+        if isinstance(h, bytes):
+            h = h.decode("utf-8", "ignore")
+        return str(h or "").strip().lower().rstrip(".")
+
+    def _host_allowed(h):
+        if not net_hosts:
+            return True
+        s = _to_host(h)
+        if not s:
+            return False
+        for pat in net_hosts:
+            if pat.startswith("*."):
+                base = pat[2:]
+                if s == base or s.endswith("." + base):
+                    return True
+            elif s == pat:
+                return True
+        return False
+
     def _is_local_host(h):
         if not h:
             return True
-        s = str(h).strip().lower().rstrip(".")
+        s = _to_host(h)
         if s in ("localhost", "localhost.localdomain", "ip6-localhost", "ip6-loopback", "0.0.0.0", "::", "::1", "") or s in local_ips:
             return True
         if s.startswith("127.") or s.startswith("169.254.") or s.endswith(".localhost"):
@@ -609,6 +714,8 @@ def _boot():
         try:
             ip = ipaddress.ip_address(s)
             if ip.is_loopback or ip.is_unspecified or ip.is_link_local or ip.is_multicast:
+                return True
+            if net_no_priv and (ip.is_private or ip.is_reserved):
                 return True
         except ValueError:
             pass
@@ -655,6 +762,50 @@ def _boot():
             return
         if event == "socket.bind":
             raise PermissionError("sandbox: socket.bind denied")
+        if event == "urllib.Request":
+            if not allow_net:
+                raise PermissionError("sandbox: network access is disabled")
+            fullurl = args[0] if len(args) > 0 else ""
+            data = args[1] if len(args) > 1 else None
+            method = args[3] if len(args) > 3 else None
+            if net_ro:
+                if data is not None:
+                    raise PermissionError("sandbox: auto-approved network is read-only (request body blocked)")
+                if method and str(method).upper() not in ("GET", "HEAD"):
+                    raise PermissionError("sandbox: auto-approved network only permits GET/HEAD")
+            if net_hosts:
+                u = urllib.parse.urlsplit(str(fullurl))
+                if u.scheme.lower() != "https":
+                    raise PermissionError("sandbox: auto-approved network requires HTTPS")
+                if u.port not in (None, 443):
+                    raise PermissionError("sandbox: auto-approved network only permits port 443")
+                if not _host_allowed(u.hostname):
+                    raise PermissionError("sandbox: host not in auto-approved allowlist: " + str(u.hostname))
+            return
+        if event == "http.client.connect":
+            if not allow_net:
+                raise PermissionError("sandbox: network access is disabled")
+            if net_hosts:
+                host = args[1] if len(args) > 1 else ""
+                port = args[2] if len(args) > 2 else 0
+                if port not in (443, "443"):
+                    raise PermissionError("sandbox: auto-approved network only permits port 443")
+                if not _host_allowed(host):
+                    raise PermissionError("sandbox: host not in auto-approved allowlist: " + str(host))
+            return
+        if event == "http.client.send":
+            if net_ro:
+                data = args[1] if len(args) > 1 else None
+                if isinstance(data, (bytes, bytearray)) and any(data.startswith(v) for v in write_verbs):
+                    raise PermissionError("sandbox: auto-approved network only permits GET/HEAD")
+            return
+        if event == "socket.getaddrinfo":
+            if allow_net and net_hosts:
+                host = args[0] if len(args) > 0 else None
+                if not _host_allowed(host):
+                    raise PermissionError("sandbox: DNS lookup blocked for non-allowlisted host: " + str(host))
+                dns_ok[0] = True
+            return
         if event in ("socket.connect", "socket.sendto", "socket.sendmsg"):
             if not allow_net:
                 raise PermissionError("sandbox: network access is disabled")
@@ -663,9 +814,14 @@ def _boot():
                 host = addr[0]
                 port = addr[1] if len(addr) >= 2 and isinstance(addr[1], int) else 0
                 if _is_local_host(host):
-                    raise PermissionError("sandbox: local/loopback network is blocked")
+                    raise PermissionError("sandbox: local/private network is blocked")
                 if probe_port and port == probe_port:
                     raise PermissionError("sandbox: platform port is blocked")
+                if net_hosts:
+                    if port != 443:
+                        raise PermissionError("sandbox: auto-approved network only permits port 443")
+                    if not dns_ok[0]:
+                        raise PermissionError("sandbox: direct IP socket connection blocked under auto-approved network")
             else:
                 raise PermissionError("sandbox: unsupported socket address")
 

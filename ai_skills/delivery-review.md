@@ -7,6 +7,12 @@ description: 评审一份中间件交付：架构与单点、角色数量、参�
 
 按严重程度给结论（高/中/低），每条写清：问题、依据（文件和位置）、后果、建议、怎么验证。没有问题的项不要罗列。
 
+## 快速核对工作流（先定位再精读）
+1. **先读 `delivery_info`**：掌握交付模式（`offline` 离线手工 / `automatic` 自动执行 / `configuration` 仅配置）、目标操作系统、部署方案（`scheme`）和所有组件实例参数。
+2. **查某项配置或特性是否存在（日志、轮转、备份、TLS、端口、内核参数、健康检查等），首选 `search_files`**：支持 `regex: true` 一次性跨全部 Playbook/任务/模板/变量做毫秒级检索，再对命中的关键文件用 `read_file(from_line=..., max_lines=...)` 精读确认；不要逐个盲翻几十个文件，也不要仅为搜文本启动 `run_shell` 沙箱。
+3. **区分“交付包配置”与“目标机现场状态”**：离线交付中平台不连远程主机，涉及宿主机默认行为（如 `journald` 持久化、系统自带 `logrotate`、磁盘实际余量）时，先说清交付包里有没有配，再给出目标机可执行的只读核对命令。
+4. **善用技能与沙箱**：涉及具体中间件调优或机制核对时按需 `use_skill`（如 `postgresql-patroni`、`redis-sentinel`、`etcd-ops`、`haproxy-keepalived`、`nginx-stream`、`middleware-logging-observability`）；涉及精确内存/容量核算、脚本语法检查（`bash -n`）、解析上传附件或生成导出文档时再用 `run_skill_script` / `run_python` / `run_shell`。
+
 ## 架构
 - 按运行依赖判断数据库、入口、DCS、备份单点；控制节点主要执行离线部署，不能仅因只有一台就判数据库运行单点。
 - 角色数量：etcd 按所选方案检查多数派和容错；单节点基础方案不能承诺容灾，不能把“奇数”泛化为所有组件的要求。主从数量以 contract 为准。

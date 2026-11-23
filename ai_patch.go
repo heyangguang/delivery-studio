@@ -165,7 +165,7 @@ func (c aiToolCtx) proposeFile(a map[string]any) string {
 		return "提案无法保存"
 	}
 	*c.proposed = append(*c.proposed, p.ID)
-	return "提案 #" + p.ID + " 已提交，等待用户审核，尚未生效。采纳后平台会给控制节点生成更新包和覆盖命令，用户把它放到控制节点后，这份交付的自动化就是改过的样子。请在回答里用一两句话说明改了什么、为什么，并提醒：这只改这份交付，同样的问题别的交付还会遇到，所以要同时用 suggest_component_change 建议修组件。"
+	return "提案 #" + p.ID + " 已提交，等待用户审核，尚未生效。采纳后平台会给控制节点生成更新包和覆盖命令，用户把它放到控制节点后，这份交付的自动化就是改过的样子。请在回答里用一两句话说明改了什么、为什么；若已通过 component_sync_status 确认最新组件尚未修复该通用缺陷，再同时用 suggest_component_change 建议修组件（若当前组件已修复则不要重复建议）。"
 }
 
 type aiFilePatch struct {
@@ -206,16 +206,53 @@ func (s *storeServer) acceptFilePatch(j storeJob, p aiProposal, user string) (jo
 	n := len(j.Syncs) + 1
 	prefix := s.projectPrefix(j.ID)
 	latest := s.patchedFiles(j.ID)
+	// Keep update packages cumulative across earlier syncs so the latest update archive alone brings any prior
+	// controller state up to date.
+	pack := map[string][]byte{}
+	for k, v := range latest {
+		pack[k] = v
+	}
+	removeSet := map[string]bool{}
+	for _, prev := range j.Syncs {
+		for _, f := range prev.Files {
+			if _, ok := pack[f]; !ok {
+				if data, exists := s.projectFile(j.ID, f); exists {
+					pack[f] = data
+				}
+			}
+		}
+		for f := range prev.FileHashes {
+			if _, ok := pack[f]; !ok {
+				if data, exists := s.projectFile(j.ID, f); exists {
+					pack[f] = data
+				}
+			}
+		}
+		for _, r := range prev.Remove {
+			if _, ok := pack[r]; !ok {
+				if _, exists := s.projectFile(j.ID, r); !exists {
+					removeSet[r] = true
+				}
+			}
+		}
+	}
 	var names []string
-	for k := range latest {
+	for k := range pack {
 		names = append(names, k)
 	}
 	sort.Strings(names)
+	var removes []string
+	for r := range removeSet {
+		removes = append(removes, r)
+	}
+	sort.Strings(removes)
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
+	fileHashes := map[string]string{}
 	for _, name := range names {
-		b := latest[name]
+		b := pack[name]
+		fileHashes[name] = digest(b)
 		if err := tw.WriteHeader(&tar.Header{Name: prefix + name, Mode: 0o644, Size: int64(len(b)), ModTime: time.Now(), Typeflag: tar.TypeReg}); err != nil {
 			return jobSync{}, err
 		}
@@ -235,17 +272,24 @@ func (s *storeServer) acceptFilePatch(j storeJob, p aiProposal, user string) (jo
 	if sums, err := os.ReadFile(filepath.Join(out, "SHA256SUMS")); err == nil {
 		_ = os.WriteFile(filepath.Join(out, "SHA256SUMS"), append(sums, []byte(sum+"  "+upd+"\n")...), 0o600)
 	}
-	sy := jobSync{N: n, At: at, By: user, Kind: "patch", Reason: p.Reason, Files: names, Steps: []string{}, Update: upd}
+	var patchNames []string
+	for k := range latest {
+		patchNames = append(patchNames, k)
+	}
+	sort.Strings(patchNames)
+	sy := jobSync{N: n, At: at, By: user, Kind: "patch", Reason: p.Reason, Files: patchNames, Steps: []string{}, Update: upd, Remove: removes, FileHashes: fileHashes, UpdateSHA: sum}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	cj := s.jobs[j.ID]
 	cj.Syncs = append(cj.Syncs, sy)
 	if err := s.persistJob(cj); err != nil {
+		s.mu.Unlock()
 		return sy, err
 	}
 	s.jobs[j.ID] = cj
 	doc := s.readProgress(j.ID)
 	doc.Events = append(doc.Events, progressEvent{At: at, By: user, Key: "patch-" + strconv.Itoa(n), Title: "修改了交付的自动化文件 " + p.File.Path, State: "sync"})
 	_ = s.writeProgress(j.ID, doc)
+	s.mu.Unlock()
+	_ = s.applyAmendmentDocs(j.ID)
 	return sy, nil
 }

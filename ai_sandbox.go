@@ -38,8 +38,11 @@ type sandboxSettings struct {
 	// NetPolicy controls outbound external network inside the sandbox (loopback & local platform ports remain strictly blocked):
 	//   - "deny"  : never allow network access
 	//   - "ask"   : require live user authorization whenever a script/run requests network
+	//   - "auto"  : smart approval — auto-allow read-only HTTPS GET Python queries to trusted public domains with no mounted files/workspace (enforced at runtime via PEP-578); ask user on files, unknown hosts, writes, or shell
 	//   - "allow" : allow outbound network when requested by script/run
 	NetPolicy string `json:"net_policy"`
+	// NetAllowDomains lists optional enterprise-added trusted read-only domains (exact or *.suffix) for NetPolicy="auto".
+	NetAllowDomains []string `json:"net_allow_domains,omitempty"`
 	// Runtime overrides where the runtime is (a directory with bin/python3 or python.exe); empty means bundled or host Python 3.
 	Runtime string `json:"runtime,omitempty"`
 	// the last self-check
@@ -47,6 +50,123 @@ type sandboxSettings struct {
 	Passed    bool           `json:"passed"`
 	Checks    []sandboxCheck `json:"checks,omitempty"`
 	Note      string         `json:"note,omitempty"`
+}
+
+// builtinSandboxNetDomains is the curated public read-only allowlist used when NetPolicy == "auto".
+// Auto-approved runs are further restricted at runtime to HTTPS:443 GET/HEAD on these hosts + public IPs only.
+var builtinSandboxNetDomains = []string{
+	"pypi.org",
+	"*.pythonhosted.org",
+	"api.osv.dev",
+	"osv.dev",
+	"nvd.nist.gov",
+	"services.nvd.nist.gov",
+	"cve.mitre.org",
+	"cveawg.mitre.org",
+	"endoflife.date",
+	"github.com",
+	"api.github.com",
+	"raw.githubusercontent.com",
+	"objects.githubusercontent.com",
+	"release-assets.githubusercontent.com",
+	"galaxy.ansible.com",
+	"docs.ansible.com",
+	"registry.npmjs.org",
+	"hub.docker.com",
+	"registry-1.docker.io",
+	"auth.docker.io",
+	"postgresql.org",
+	"*.postgresql.org",
+	"redis.io",
+	"*.redis.io",
+	"etcd.io",
+	"*.etcd.io",
+	"nginx.org",
+	"*.nginx.org",
+	"haproxy.org",
+	"*.haproxy.org",
+	"downloads.apache.org",
+	"archive.apache.org",
+	"ubuntu.com",
+	"security.ubuntu.com",
+	"archive.ubuntu.com",
+	"changelogs.ubuntu.com",
+	"debian.org",
+	"security-tracker.debian.org",
+	"access.redhat.com",
+	"security.access.redhat.com",
+	"rockylinux.org",
+	"errata.rockylinux.org",
+	"almalinux.org",
+	"errata.almalinux.org",
+	"pypi.tuna.tsinghua.edu.cn",
+	"mirrors.aliyun.com",
+	"mirrors.ustc.edu.cn",
+}
+
+var reValidDomainPat = regexp.MustCompile(`^(\*\.)?[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$`)
+
+func normalizeNetAllowDomains(raw []string) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, item := range raw {
+		s := strings.ToLower(strings.TrimSpace(item))
+		if s == "" {
+			continue
+		}
+		if idx := strings.Index(s, "://"); idx >= 0 {
+			s = s[idx+3:]
+		}
+		if idx := strings.IndexAny(s, "/?#"); idx >= 0 {
+			s = s[:idx]
+		}
+		if host, _, err := net.SplitHostPort(s); err == nil {
+			s = host
+		}
+		s = strings.TrimSuffix(s, ".")
+		if strings.HasPrefix(s, ".") {
+			s = "*" + s
+		}
+		if s == "" || s == "localhost" || strings.HasSuffix(s, ".localhost") {
+			continue
+		}
+		checkBase := strings.TrimPrefix(s, "*.")
+		if net.ParseIP(checkBase) != nil {
+			continue
+		}
+		// Reject overly broad wildcards like *.com / *.org (base must have at least one dot, e.g. *.example.com)
+		if strings.HasPrefix(s, "*.") && !strings.Contains(checkBase, ".") {
+			continue
+		}
+		if !reValidDomainPat.MatchString(s) {
+			continue
+		}
+		if seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+		if len(out) >= 64 {
+			break
+		}
+	}
+	return out
+}
+
+func domainMatchesAllowPattern(host, pat string) bool {
+	h := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
+	p := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(pat)), ".")
+	if h == "" || p == "" {
+		return false
+	}
+	if strings.HasPrefix(p, "*.") {
+		base := p[2:]
+		return h == base || strings.HasSuffix(h, "."+base)
+	}
+	return h == p
 }
 
 func normalizeExecPolicy(v string) string {
@@ -60,7 +180,7 @@ func normalizeExecPolicy(v string) string {
 
 func normalizeNetPolicy(v string) string {
 	switch strings.ToLower(strings.TrimSpace(v)) {
-	case "deny", "ask", "allow":
+	case "deny", "ask", "auto", "allow":
 		return strings.ToLower(strings.TrimSpace(v))
 	default:
 		return "ask"
@@ -78,6 +198,7 @@ func (s *storeServer) sandboxSettings() sandboxSettings {
 	st.Seconds, st.MemoryMB, st.Procs, st.OutputMB = lim.Seconds, lim.MemoryMB, lim.Procs, lim.OutputMB
 	st.ExecPolicy = normalizeExecPolicy(st.ExecPolicy)
 	st.NetPolicy = normalizeNetPolicy(st.NetPolicy)
+	st.NetAllowDomains = normalizeNetAllowDomains(st.NetAllowDomains)
 	return st
 }
 
@@ -86,6 +207,7 @@ func (s *storeServer) saveSandboxSettings(st sandboxSettings) error {
 	defer sandboxMu.Unlock()
 	st.ExecPolicy = normalizeExecPolicy(st.ExecPolicy)
 	st.NetPolicy = normalizeNetPolicy(st.NetPolicy)
+	st.NetAllowDomains = normalizeNetAllowDomains(st.NetAllowDomains)
 	return writeJSONFile(filepath.Join(s.settingsDir(), "sandbox.json"), st)
 }
 
@@ -619,10 +741,11 @@ func (s *storeServer) handleSandboxSettings(w http.ResponseWriter, r *http.Reque
 		st := s.sandboxSettings()
 		info, err := s.sandboxRuntimeInfo(st)
 		out := map[string]any{
-			"settings":   st,
-			"runtime_ok": err == nil,
-			"backend":    sandboxBackendLabel(),
-			"os":         runtime.GOOS,
+			"settings":            st,
+			"runtime_ok":          err == nil,
+			"backend":             sandboxBackendLabel(),
+			"os":                  runtime.GOOS,
+			"builtin_net_domains": builtinSandboxNetDomains,
 		}
 		if err != nil {
 			out["runtime_error"] = err.Error()
@@ -638,17 +761,24 @@ func (s *storeServer) handleSandboxSettings(w http.ResponseWriter, r *http.Reque
 		s.writeJSON(w, 200, localizeSandboxPayload(wLang(w), out))
 	case r.URL.Path == "/api/settings/sandbox" && r.Method == "PUT":
 		var in struct {
-			Enabled    bool   `json:"enabled"`
-			Seconds    int    `json:"seconds"`
-			MemoryMB   int    `json:"memory_mb"`
-			Procs      int    `json:"procs"`
-			OutputMB   int    `json:"output_mb"`
-			ExecPolicy string `json:"exec_policy"`
-			NetPolicy  string `json:"net_policy"`
+			Enabled         bool     `json:"enabled"`
+			Seconds         int      `json:"seconds"`
+			MemoryMB        int      `json:"memory_mb"`
+			Procs           int      `json:"procs"`
+			OutputMB        int      `json:"output_mb"`
+			ExecPolicy      string   `json:"exec_policy"`
+			NetPolicy       string   `json:"net_policy"`
+			NetAllowDomains []string `json:"net_allow_domains"`
+			HasNetDomains   bool     `json:"-"`
 		}
-		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&in) != nil || in.Seconds < 5 || in.Seconds > 1800 || in.MemoryMB < 256 || in.MemoryMB > 65536 || in.Procs < 8 || in.Procs > 1024 || in.OutputMB < 1 || in.OutputMB > 10240 {
+		rawBody, readErr := io.ReadAll(http.MaxBytesReader(w, r.Body, 16384))
+		if readErr != nil || json.Unmarshal(rawBody, &in) != nil || in.Seconds < 5 || in.Seconds > 1800 || in.MemoryMB < 256 || in.MemoryMB > 65536 || in.Procs < 8 || in.Procs > 1024 || in.OutputMB < 1 || in.OutputMB > 10240 {
 			s.fail(w, 400, "运行时间要在 5 到 1800 秒，内存 256 到 65536 MB，进程数 8 到 1024，输出 1 到 10240 MB 之间")
 			return
+		}
+		var rawMap map[string]json.RawMessage
+		if json.Unmarshal(rawBody, &rawMap) == nil {
+			_, in.HasNetDomains = rawMap["net_allow_domains"]
 		}
 		st := s.sandboxSettings()
 		if in.Enabled && !st.Passed {
@@ -666,21 +796,25 @@ func (s *storeServer) handleSandboxSettings(w http.ResponseWriter, r *http.Reque
 		if strings.TrimSpace(in.NetPolicy) != "" {
 			st.NetPolicy = normalizeNetPolicy(in.NetPolicy)
 		}
+		if in.HasNetDomains {
+			st.NetAllowDomains = normalizeNetAllowDomains(in.NetAllowDomains)
+		}
 		if err := s.saveSandboxSettings(st); err != nil {
 			s.fail(w, 500, "保存失败，请稍后重试")
 			return
 		}
 		s.auditReq(r, "sandbox-settings", session.User, fmt.Sprintf("%s · 执行:%s · 网络:%s", map[bool]string{true: "开启", false: "关闭"}[st.Enabled], st.ExecPolicy, st.NetPolicy))
-		s.writeJSON(w, 200, localizeSandboxPayload(wLang(w), map[string]any{"settings": st}))
+		s.writeJSON(w, 200, localizeSandboxPayload(wLang(w), map[string]any{"settings": st, "builtin_net_domains": builtinSandboxNetDomains}))
 	case r.URL.Path == "/api/settings/sandbox/check" && r.Method == "POST":
 		st := s.runSandboxCheck(r.Context())
 		s.auditReq(r, "sandbox-check", session.User, map[bool]string{true: "通过", false: "未通过"}[st.Passed])
 		info, err := s.sandboxRuntimeInfo(st)
 		out := map[string]any{
-			"settings":   st,
-			"runtime_ok": err == nil,
-			"backend":    sandboxBackendLabel(),
-			"os":         runtime.GOOS,
+			"settings":            st,
+			"runtime_ok":          err == nil,
+			"backend":             sandboxBackendLabel(),
+			"os":                  runtime.GOOS,
+			"builtin_net_domains": builtinSandboxNetDomains,
 		}
 		if err != nil {
 			out["runtime_error"] = err.Error()
@@ -736,7 +870,7 @@ var sandboxApprovals sync.Map // id -> *pendingSandboxApproval
 
 type sandboxGate struct {
 	User        string
-	UserMode    string // "" | "ask" | "auto"
+	UserMode    string // "" (follow platform default) | "ask" | "auto" | "open" (overrides platform default exec_policy)
 	SessionOpen bool
 	Send        func(map[string]any)
 	mu          sync.Mutex
@@ -760,16 +894,165 @@ func sandboxGateFrom(ctx context.Context) *sandboxGate {
 }
 
 var (
-	rePyNetCode = regexp.MustCompile(`(?i)\b(urllib|http\.client|requests|httpx|aiohttp|socket|ftplib|smtplib|xmlrpc|websocket|urlopen)\b`)
-	rePyDynCode = regexp.MustCompile(`(?i)\b(__import__|compile\s*\(|ctypes|subprocess|os\.system|os\.popen|winreg)\b`)
+	rePyNetCode     = regexp.MustCompile(`(?i)\b(urllib|http\.client|requests|httpx|aiohttp|socket|ftplib|smtplib|xmlrpc|websocket|urlopen)\b`)
+	rePyDynCode     = regexp.MustCompile(`(?i)\b(__import__|compile\s*\(|ctypes|subprocess|os\.system|os\.popen|winreg)\b`)
+	rePyNetUnsafe   = regexp.MustCompile(`(?i)\b(eval|exec)\s*\(`)
+	rePyNetRawProto = regexp.MustCompile(`(?i)\b(socket|ftplib|smtplib|telnetlib|xmlrpc|websocket|websockets|paramiko)\b`)
+	rePyNetWrite    = regexp.MustCompile(`(?i)(\.\s*(?:post|put|patch|delete)\s*\(|\bmethod\s*=\s*['"](?:post|put|patch|delete)['"]|\.(?:request)\s*\(\s*['"](?:post|put|patch|delete)['"]|\b(?:Request|urlopen)\s*\([^)\n]*\bdata\s*=|\b(?:files|upload)\s*=)`)
+	reURLSchemePos  = regexp.MustCompile(`(?i)https?://`)
 )
+
+// sandboxNetGuard carries the approved network permission plus optional runtime restrictions
+// enforced inside CPython's PEP-578 audit hook when smart-auto network approval grants access.
+type sandboxNetGuard struct {
+	AllowNet     bool
+	ReadOnly     bool
+	AllowHosts   []string
+	BlockPrivate bool
+}
+
+// assessSandboxNetAuto decides whether an outbound network request is low-risk enough to auto-approve
+// under NetPolicy="auto". It fails closed (requiring live user confirmation) on any mounted files/workspace,
+// shell/personal scripts, dynamic/raw-socket code, HTTP write methods, non-HTTPS/non-443 endpoints,
+// or unknown/unlisted domains. When approved, it returns a strict runtime sandboxNetGuard enforced by PEP-578.
+func assessSandboxNetAuto(st sandboxSettings, kind, code string, isPersonalSkill, hasFiles, hasWorkspace bool) (bool, sandboxNetGuard, string) {
+	if kind == "shell" {
+		return false, sandboxNetGuard{}, "智能审批：Shell 命令访问外网需人工确认"
+	}
+	if kind == "skill_script" && isPersonalSkill {
+		return false, sandboxNetGuard{}, "智能审批：个人自定义技能脚本访问外网需人工确认"
+	}
+	if hasFiles || hasWorkspace {
+		return false, sandboxNetGuard{}, "智能审批：本次运行挂载了用户资料或只读工作区，为防数据外传需人工确认联网"
+	}
+	if rePyDynCode.MatchString(code) || rePyNetUnsafe.MatchString(code) || rePyNetRawProto.MatchString(code) {
+		return false, sandboxNetGuard{}, "智能审批：代码包含动态执行或底层网络协议调用，需人工确认联网"
+	}
+	if rePyNetWrite.MatchString(code) {
+		return false, sandboxNetGuard{}, "智能审批：代码包含 HTTP 写入或提交操作，仅只读查询可自动放行，需人工确认"
+	}
+
+	// Filter out comment-only lines before extracting literal URLs
+	var activeLines []string
+	for _, line := range strings.Split(code, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+			continue
+		}
+		activeLines = append(activeLines, line)
+	}
+	scanCode := strings.Join(activeLines, "\n")
+
+	customDomains := normalizeNetAllowDomains(st.NetAllowDomains)
+	matches := reURLSchemePos.FindAllStringIndex(scanCode, -1)
+	if len(matches) == 0 {
+		return false, sandboxNetGuard{}, "智能审批：未在代码中识别到明确的可信 HTTPS 目标域名，需人工确认"
+	}
+
+	var matchedHosts []string
+	var unknownHosts []string
+	seenUnknown := map[string]bool{}
+	usedCustom := false
+
+	for _, loc := range matches {
+		scheme := strings.ToLower(scanCode[loc[0]:loc[1]])
+		if scheme != "https://" {
+			return false, sandboxNetGuard{}, "智能审批：检测到非加密 HTTP 连接（仅 HTTPS 只读查询可自动放行），需人工确认"
+		}
+		rest := scanCode[loc[1]:]
+		end := strings.IndexAny(rest, "/?# \t\r\n'\"`)]},;")
+		hostPort := rest
+		if end >= 0 {
+			hostPort = rest[:end]
+		}
+		if hostPort == "" || strings.ContainsAny(hostPort, "{}%$+\\@") {
+			return false, sandboxNetGuard{}, "智能审批：目标域名包含动态拼接或鉴权信息，无法静态确认，需人工确认"
+		}
+		host := strings.ToLower(strings.TrimSuffix(hostPort, "."))
+		if h, port, err := net.SplitHostPort(host); err == nil {
+			if port != "443" {
+				return false, sandboxNetGuard{}, "智能审批：检测到非常规端口（仅 HTTPS 443 可自动放行），需人工确认"
+			}
+			host = strings.TrimSuffix(strings.ToLower(h), ".")
+		} else if strings.Contains(host, ":") {
+			return false, sandboxNetGuard{}, "智能审批：目标地址格式或端口非常规，需人工确认"
+		}
+		if host == "" || net.ParseIP(host) != nil || host == "localhost" || strings.HasSuffix(host, ".localhost") || !strings.Contains(host, ".") {
+			return false, sandboxNetGuard{}, "智能审批：目标地址不是有效的公开域名（" + truncRunes(hostPort, 60) + "），需人工确认"
+		}
+
+		inBuiltin := false
+		for _, pat := range builtinSandboxNetDomains {
+			if domainMatchesAllowPattern(host, pat) {
+				inBuiltin = true
+				break
+			}
+		}
+		inCustom := false
+		if !inBuiltin {
+			for _, pat := range customDomains {
+				if domainMatchesAllowPattern(host, pat) {
+					inCustom = true
+					usedCustom = true
+					break
+				}
+			}
+		}
+		if !inBuiltin && !inCustom {
+			if !seenUnknown[host] {
+				seenUnknown[host] = true
+				unknownHosts = append(unknownHosts, host)
+			}
+		} else {
+			matchedHosts = append(matchedHosts, host)
+		}
+	}
+
+	if len(unknownHosts) > 0 {
+		return false, sandboxNetGuard{}, "智能审批：目标域名不在可信只读白名单中（" + strings.Join(unknownHosts, "、") + "），需人工确认"
+	}
+	if len(matchedHosts) == 0 {
+		return false, sandboxNetGuard{}, "智能审批：未在代码中识别到明确的可信 HTTPS 目标域名，需人工确认"
+	}
+
+	combined := make([]string, 0, len(builtinSandboxNetDomains)+len(customDomains))
+	combined = append(combined, builtinSandboxNetDomains...)
+	combined = append(combined, customDomains...)
+	return true, sandboxNetGuard{
+		AllowNet:     true,
+		ReadOnly:     true,
+		AllowHosts:   combined,
+		BlockPrivate: !usedCustom,
+	}, ""
+}
 
 // assessSandboxRun determines whether execution and/or network requires live user confirmation.
 func assessSandboxRun(st sandboxSettings, gate *sandboxGate, kind, code string, isPersonalSkill, wantNet bool, netReason string) (needExecAsk bool, needNetAsk bool, allowNet bool, reasons []string) {
+	ex, nt, guard, r := assessSandboxRunWithGuard(st, gate, sandboxConfirmReq{
+		Kind:      kind,
+		Code:      code,
+		Mine:      isPersonalSkill,
+		WantNet:   wantNet,
+		NetReason: netReason,
+	})
+	return ex, nt, guard.AllowNet, r
+}
+
+func effectiveSandboxExecPolicy(st sandboxSettings, gate *sandboxGate) string {
 	execPol := normalizeExecPolicy(st.ExecPolicy)
+	if gate != nil && strings.TrimSpace(gate.UserMode) != "" {
+		// End-user's explicit chat permission selection takes precedence over the platform default.
+		execPol = normalizeExecPolicy(gate.UserMode)
+	}
+	return execPol
+}
+
+func assessSandboxRunWithGuard(st sandboxSettings, gate *sandboxGate, req sandboxConfirmReq) (needExecAsk bool, needNetAsk bool, guard sandboxNetGuard, reasons []string) {
+	execPol := effectiveSandboxExecPolicy(st, gate)
 	netPol := normalizeNetPolicy(st.NetPolicy)
-	if gate != nil && gate.UserMode == "ask" {
-		execPol = "ask"
+	if gate != nil && strings.TrimSpace(gate.UserMode) != "" {
+		if normalizeExecPolicy(gate.UserMode) == "ask" && netPol == "auto" {
+			netPol = "ask"
+		}
 	}
 
 	sessionApproved := gate != nil && gate.SessionOpen
@@ -782,17 +1065,17 @@ func assessSandboxRun(st sandboxSettings, gate *sandboxGate, kind, code string, 
 		}
 	case "auto":
 		if !sessionApproved {
-			if kind == "shell" {
+			if req.Kind == "shell" {
 				needExecAsk = true
 				reasons = append(reasons, "执行任意 Shell / CLI 命令需人工确认后放行")
-			} else if kind == "skill_script" && isPersonalSkill {
+			} else if req.Kind == "skill_script" && req.Mine {
 				needExecAsk = true
 				reasons = append(reasons, "个人自定义技能脚本首次运行需确认")
-			} else if kind == "python" {
-				if rePyDynCode.MatchString(code) {
+			} else if req.Kind == "python" {
+				if rePyDynCode.MatchString(req.Code) {
 					needExecAsk = true
 					reasons = append(reasons, "代码包含动态加载或底层系统调用特征，AI 自动识别需人工确认")
-				} else if !wantNet && rePyNetCode.MatchString(code) {
+				} else if !req.WantNet && rePyNetCode.MatchString(req.Code) {
 					needExecAsk = true
 					reasons = append(reasons, "代码引用了网络通信模块，需确认执行范围")
 				}
@@ -802,43 +1085,54 @@ func assessSandboxRun(st sandboxSettings, gate *sandboxGate, kind, code string, 
 		// Execution inside the isolated sandbox is open without prompt
 	}
 
-	if wantNet {
+	if req.WantNet {
 		switch netPol {
 		case "deny":
-			allowNet = false
+			guard = sandboxNetGuard{}
 		case "ask":
 			needNetAsk = true
-			if strings.TrimSpace(netReason) != "" {
-				reasons = append(reasons, "请求外网访问："+strings.TrimSpace(netReason))
+			if strings.TrimSpace(req.NetReason) != "" {
+				reasons = append(reasons, "请求外网访问："+strings.TrimSpace(req.NetReason))
 			} else {
 				reasons = append(reasons, "请求访问外部网络（本机与内网服务仍被隔离阻断）")
 			}
+		case "auto":
+			okAuto, autoGuard, autoReason := assessSandboxNetAuto(st, req.Kind, req.Code, req.Mine, len(req.Files) > 0, strings.TrimSpace(req.Workspace) != "")
+			if okAuto {
+				guard = autoGuard
+			} else {
+				needNetAsk = true
+				reasons = append(reasons, autoReason)
+				if strings.TrimSpace(req.NetReason) != "" {
+					reasons = append(reasons, "请求外网访问："+strings.TrimSpace(req.NetReason))
+				}
+			}
 		case "allow":
-			allowNet = true
+			guard = sandboxNetGuard{AllowNet: true}
 		}
 	}
-	return needExecAsk, needNetAsk, allowNet, reasons
+	return needExecAsk, needNetAsk, guard, reasons
 }
 
-func requestSandboxApproval(ctx context.Context, st sandboxSettings, req sandboxConfirmReq) (runOK bool, allowNet bool, note string) {
+func requestSandboxApproval(ctx context.Context, st sandboxSettings, req sandboxConfirmReq) (runOK bool, guard sandboxNetGuard, note string) {
 	gate := sandboxGateFrom(ctx)
-	needExec, needNet, netDefault, reasons := assessSandboxRun(st, gate, req.Kind, req.Code, req.Mine, req.WantNet, req.NetReason)
+	needExec, needNet, netDefault, reasons := assessSandboxRunWithGuard(st, gate, req)
 
 	if req.WantNet && normalizeNetPolicy(st.NetPolicy) == "deny" && !needExec {
 		// If network was explicitly requested while admin disabled network, tell the model clearly so it doesn't silently fail mysteriously
-		return false, false, "管理员已将沙箱网络策略设为「禁止网络」，不能联网运行。若可离线处理，请去掉 network 参数后重试。"
+		return false, sandboxNetGuard{}, "管理员已将沙箱网络策略设为「禁止网络」，不能联网运行。若可离线处理，请去掉 network 参数后重试。"
 	}
 	if !needExec && !needNet {
 		return true, netDefault, ""
 	}
 	if gate == nil || gate.Send == nil || gate.User == "" {
 		// Non-interactive call (e.g. background test without live stream): fail closed when confirmation is required
-		return false, false, "本次沙箱运行需要用户在对话界面授权确认。"
+		return false, sandboxNetGuard{}, "本次沙箱运行需要用户在对话界面授权确认。"
 	}
 
 	req.ID = "sbc_" + randomStoreToken(8)
 	req.Reasons = reasons
-	req.ExecPolicy = normalizeExecPolicy(st.ExecPolicy)
+	req.ExecPolicy = effectiveSandboxExecPolicy(st, gate)
 	req.NetPolicy = normalizeNetPolicy(st.NetPolicy)
 	req.Code = truncRunes(req.Code, 2400)
 
@@ -867,26 +1161,26 @@ func requestSandboxApproval(ctx context.Context, st sandboxSettings, req sandbox
 	case dec = <-p.Ch:
 	case <-ctx.Done():
 		gate.Send(map[string]any{"t": "sandbox_confirmed", "id": req.ID, "decision": "cancelled"})
-		return false, false, "对话已停止，沙箱运行已取消。"
+		return false, sandboxNetGuard{}, "对话已停止，沙箱运行已取消。"
 	case <-time.After(5 * time.Minute):
 		gate.Send(map[string]any{"t": "sandbox_confirmed", "id": req.ID, "decision": "timeout"})
-		return false, false, "等待用户授权沙箱运行超时（5 分钟），本次未执行。"
+		return false, sandboxNetGuard{}, "等待用户授权沙箱运行超时（5 分钟），本次未执行。"
 	}
 
 	gate.Send(map[string]any{"t": "sandbox_confirmed", "id": req.ID, "decision": dec.Action})
 
 	switch dec.Action {
 	case "allow":
-		return true, req.WantNet && normalizeNetPolicy(st.NetPolicy) != "deny", ""
+		return true, sandboxNetGuard{AllowNet: req.WantNet && normalizeNetPolicy(st.NetPolicy) != "deny"}, ""
 	case "allow_session":
 		gate.mu.Lock()
 		gate.SessionOpen = true
 		gate.mu.Unlock()
-		return true, req.WantNet && normalizeNetPolicy(st.NetPolicy) != "deny", ""
+		return true, sandboxNetGuard{AllowNet: req.WantNet && normalizeNetPolicy(st.NetPolicy) != "deny"}, ""
 	case "allow_offline":
-		return true, false, ""
+		return true, sandboxNetGuard{}, ""
 	default:
-		return false, false, "用户拒绝了本次沙箱运行请求，请不要重复强行调用，可直接向用户说明或给出手动命令。"
+		return false, sandboxNetGuard{}, "用户拒绝了本次沙箱运行请求，请不要重复强行调用，可直接向用户说明或给出手动命令。"
 	}
 }
 
@@ -1126,6 +1420,8 @@ func sandboxNetToolDesc(netPolicy string) (string, bool) {
 		return "沙箱禁止任何网络连接；", false
 	case "ask":
 		return "默认无网络运行（若任务确需访问外部网络，可设 network=true 并写明 net_reason，由用户在对话中授权后放行外网，本机服务始终隔离）；", true
+	case "auto":
+		return "默认无网络运行；已开启联网智能审批（未挂载文件且仅对可信公共技术/安全公告域名做只读 HTTPS GET 的 Python 查询将自动放行，其余情况仍由用户实时确认，本机与内网始终隔离）；", true
 	default:
 		return "默认离线运行（确需外网时可设 network=true，本机服务始终隔离）；", true
 	}
@@ -1137,7 +1433,7 @@ func runPythonTool(packages string, netPolicy string, hasWorkspace bool) aiToolD
 	if hasWorkspace {
 		wsNote = "也可设 workspace=true 把当前交付/组件工程只读挂载到 /workspace（环境变量 MW_WORKSPACE）。"
 	}
-	desc := "在系统隔离沙箱里运行一段 Python，用来处理用户存储空间里的文件：精确计算和统计、整理表格、把 PDF 转成图片或 Word、生成图表、检查脚本等。" + netDesc + wsNote + "只能读用户指定的文件，结果写到当前目录（/out）里的文件会存进用户的「我的资料 / AI 生成」。"
+	desc := "在系统隔离沙箱里运行一段 Python，用来处理用户存储空间里的文件：精确计算和统计、整理表格、把 PDF 转成图片或 Word、生成图表、检查脚本等。" + netDesc + wsNote + "核查公开 CVE/安全公告或 PyPI 版本优先用 check_package_security / web_search / web_fetch，仅在专用查询工具不可用或无法满足时再以此沙箱兜底。只能读用户指定的文件，结果写到当前目录（/out）里的文件会存进用户的「我的资料 / AI 生成」。"
 	if packages != "" {
 		desc += "可用的库：" + packages + "。"
 	}
@@ -1167,9 +1463,9 @@ func runShellTool(hasWorkspace bool, netPolicy string) aiToolDef {
 	wsNote := ""
 	if hasWorkspace {
 		if runtime.GOOS == "windows" {
-			wsNote = "传 workspace=true 可将当前交付/组件项目只读挂载到 $env:MW_WORKSPACE，适合静态检查与日志对照；"
+			wsNote = "传 workspace=true 可将当前交付/组件项目的脱敏只读快照挂载到 $env:MW_WORKSPACE，适合脚本语法检查、复杂日志交叉分析等；若仅搜索或读取项目文件，优先用原生 search_files / read_file（毫秒级返回，无需起沙箱）；"
 		} else {
-			wsNote = "传 workspace=true 可将当前交付/组件项目只读挂载到 /workspace（$MW_WORKSPACE），适合 bash -n / YAML / Ansible 语法检查与日志对照；"
+			wsNote = "传 workspace=true 可将当前交付/组件项目的脱敏只读快照挂载到 /workspace（$MW_WORKSPACE），适合 bash -n / YAML / Ansible 语法检查与复杂日志对照；若仅搜索或读取项目文件，优先用原生 search_files / read_file（毫秒级返回，无需起沙箱）；"
 		}
 	}
 	desc := "在平台隔离沙箱中运行 Shell / 命令行工具与二进制程序（Linux 经内核命名空间与 seccomp 隔离，macOS 经 Seatbelt 沙箱隔离，Windows 经 Job Object 与受限环境变量隔离）。" + osHint + wsNote + netDesc + "严禁跨用户访问，修改项目仍须通过提案工具。"
@@ -1351,7 +1647,7 @@ func (s *storeServer) runPython(ctx context.Context, user, args string, made *pr
 		return wsErr
 	}
 
-	okRun, allowNet, denyMsg := requestSandboxApproval(ctx, st, sandboxConfirmReq{
+	okRun, netGuard, denyMsg := requestSandboxApproval(ctx, st, sandboxConfirmReq{
 		Kind:      "python",
 		Title:     "运行 Python 代码",
 		Purpose:   firstNonEmptyStr(strings.TrimSpace(a.Purpose), "在隔离沙箱中运行 Python 代码"),
@@ -1382,22 +1678,29 @@ func (s *storeServer) runPython(ctx context.Context, user, args string, made *pr
 
 	lim := st.limits()
 	res, err := runSandbox(runCtx, work, sandboxRun{
-		Runtime:   rtInfo.Dir,
-		PythonBin: rtInfo.PythonBin,
-		Argv:      []string{rtInfo.InnerArg0, "/in/_main.py"},
-		Inputs:    inputs,
-		Workspace: wsFiles,
-		Limits:    lim,
-		AllowNet:  allowNet,
-		ProbePort: s.sandboxProbePort(),
+		Runtime:         rtInfo.Dir,
+		PythonBin:       rtInfo.PythonBin,
+		Argv:            []string{rtInfo.InnerArg0, "/in/_main.py"},
+		Inputs:          inputs,
+		Workspace:       wsFiles,
+		Limits:          lim,
+		AllowNet:        netGuard.AllowNet,
+		NetReadOnly:     netGuard.ReadOnly,
+		NetAllowHosts:   netGuard.AllowHosts,
+		NetBlockPrivate: netGuard.BlockPrivate,
+		ProbePort:       s.sandboxProbePort(),
 	})
 	if err != nil {
 		return "运行失败：" + err.Error()
 	}
 	defer res.Cleanup()
 	netTag := ""
-	if allowNet {
-		netTag = "[联网] "
+	if netGuard.AllowNet {
+		if netGuard.ReadOnly {
+			netTag = "[智能联网-只读] "
+		} else {
+			netTag = "[联网] "
+		}
 	}
 	if wsLabel != "" {
 		netTag += "[只读工作区] "
@@ -1443,7 +1746,7 @@ func (s *storeServer) runShell(ctx context.Context, user, args string, made *pro
 			shName = "bash/sh"
 		}
 	}
-	okRun, allowNet, denyMsg := requestSandboxApproval(ctx, st, sandboxConfirmReq{
+	okRun, netGuard, denyMsg := requestSandboxApproval(ctx, st, sandboxConfirmReq{
 		Kind:      "shell",
 		Title:     "运行沙箱命令（" + shName + "）",
 		Purpose:   firstNonEmptyStr(strings.TrimSpace(a.Purpose), "在隔离沙箱中执行 Shell / CLI 命令"),
@@ -1475,7 +1778,7 @@ func (s *storeServer) runShell(ctx context.Context, user, args string, made *pro
 		Inputs:    userInputs,
 		Workspace: wsFiles,
 		Limits:    lim,
-		AllowNet:  allowNet,
+		AllowNet:  netGuard.AllowNet,
 		ProbePort: s.sandboxProbePort(),
 	})
 	if err != nil {
@@ -1483,7 +1786,7 @@ func (s *storeServer) runShell(ctx context.Context, user, args string, made *pro
 	}
 	defer res.Cleanup()
 	tags := ""
-	if allowNet {
+	if netGuard.AllowNet {
 		tags += "[联网] "
 	}
 	if wsLabel != "" {
@@ -1498,6 +1801,8 @@ func runSkillScriptTool(skillNames []string, netPolicy string) aiToolDef {
 	netNote := "默认无网络隔离运行；若脚本需要外网可由用户在对话中授权放行（本机服务始终隔离）。"
 	if netPol == "deny" {
 		netNote = "无外网连接，且与本机服务严格隔离。"
+	} else if netPol == "auto" {
+		netNote = "默认无网络隔离运行；已开启联网智能审批（平台脚本无文件挂载且仅访问白名单只读 HTTPS 时自动放行，其余情况由用户授权，本机服务始终隔离）。"
 	}
 	desc := "在平台统一的隔离沙箱中运行某项技能（平台或当前用户个人技能）随附的 Python 脚本。脚本通过 sys.argv[1]（/in/_args.json）读取 args 参数对象，可读取当前用户存储空间中通过 files 指定的文件，输出写到 /out 目录。严禁跨用户访问；" + netNote
 	skillProp := map[string]any{"type": "string", "description": "技能标识（name）"}
@@ -1587,7 +1892,7 @@ func (s *storeServer) runSkillScript(ctx context.Context, user, args string, mad
 		netReason = "技能脚本声明需要访问外部网络"
 	}
 
-	okRun, allowNet, denyMsg := requestSandboxApproval(ctx, st, sandboxConfirmReq{
+	okRun, netGuard, denyMsg := requestSandboxApproval(ctx, st, sandboxConfirmReq{
 		Kind:      "skill_script",
 		Title:     fmt.Sprintf("运行技能脚本 %s / %s", sk.Title, target.Name),
 		Purpose:   firstNonEmptyStr(strings.TrimSpace(a.Purpose), target.Description, "执行技能随附脚本"),
@@ -1647,13 +1952,16 @@ func (s *storeServer) runSkillScript(ctx context.Context, user, args string, mad
 	defer release()
 
 	res, err := runSandbox(runCtx, work, sandboxRun{
-		Runtime:   rtInfo.Dir,
-		PythonBin: rtInfo.PythonBin,
-		Argv:      []string{rtInfo.InnerArg0, "/in/" + entryName, "/in/_args.json"},
-		Inputs:    inputs,
-		Limits:    lim,
-		AllowNet:  allowNet,
-		ProbePort: s.sandboxProbePort(),
+		Runtime:         rtInfo.Dir,
+		PythonBin:       rtInfo.PythonBin,
+		Argv:            []string{rtInfo.InnerArg0, "/in/" + entryName, "/in/_args.json"},
+		Inputs:          inputs,
+		Limits:          lim,
+		AllowNet:        netGuard.AllowNet,
+		NetReadOnly:     netGuard.ReadOnly,
+		NetAllowHosts:   netGuard.AllowHosts,
+		NetBlockPrivate: netGuard.BlockPrivate,
+		ProbePort:       s.sandboxProbePort(),
 		Env: []string{
 			"MW_SKILL_ARGS=/in/_args.json",
 			"MW_SKILL_NAME=" + sk.Name,
@@ -1670,8 +1978,12 @@ func (s *storeServer) runSkillScript(ctx context.Context, user, args string, mad
 	if sk.Mine {
 		scopeTag = "personal"
 	}
-	if allowNet {
-		scopeTag += "+net"
+	if netGuard.AllowNet {
+		if netGuard.ReadOnly {
+			scopeTag += "+net-ro"
+		} else {
+			scopeTag += "+net"
+		}
 	}
 	auditDetail := fmt.Sprintf("[%s] %s/%s · %s", scopeTag, sk.Name, target.Name, firstNonEmptyStr(a.Purpose, "运行技能脚本"))
 	if len(names) > 0 {

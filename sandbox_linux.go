@@ -117,7 +117,7 @@ func runSandbox(ctx context.Context, work string, r sandboxRun) (sandboxResult, 
 			return fail(err)
 		}
 	}
-	spec, _ := json.Marshal(sandboxSpec{Mode: r.Mode, Root: root, Runtime: r.Runtime, In: in, Out: out, Workspace: wsDir, Argv: argv, Env: r.Env, Limits: lim, DropTo: drop, AllowNet: r.AllowNet, ProbePort: r.ProbePort})
+	spec, _ := json.Marshal(sandboxSpec{Mode: r.Mode, Root: root, Runtime: r.Runtime, In: in, Out: out, Workspace: wsDir, Argv: argv, Env: r.Env, Limits: lim, DropTo: drop, AllowNet: r.AllowNet, NetReadOnly: r.NetReadOnly, NetAllowHosts: r.NetAllowHosts, NetBlockPrivate: r.NetBlockPrivate, ProbePort: r.ProbePort})
 	self, err := os.Executable()
 	if err != nil {
 		return fail(err)
@@ -253,6 +253,15 @@ func sandboxChild() error {
 	}
 	if sp.AllowNet {
 		baseEnv = append(baseEnv, "PYTHONPATH=/in/_netguard", fmt.Sprintf("MW_SB_PROBE_PORT=%d", sp.ProbePort))
+		if sp.NetReadOnly {
+			baseEnv = append(baseEnv, "MW_SB_NET_RO=1")
+		}
+		if sp.NetBlockPrivate {
+			baseEnv = append(baseEnv, "MW_SB_NET_NO_PRIV=1")
+		}
+		if len(sp.NetAllowHosts) > 0 {
+			baseEnv = append(baseEnv, "MW_SB_NET_HOSTS="+strings.Join(sp.NetAllowHosts, ","))
+		}
 	}
 	env := append(baseEnv, sp.Env...)
 	if f, err := os.Open("/dev/null"); err == nil {

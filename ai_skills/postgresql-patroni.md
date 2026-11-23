@@ -18,6 +18,7 @@ pg_hba 报错应查实际加载文件、源地址及 TLS。Patroni bootstrap.dcs
 ## 故障与恢复
 Replica 不启动核对日志、复制权限、槽和基础备份；主库查看 pg_stat_replication。WAL 堆积核对槽、归档和保留策略，不先删槽或 WAL。无 Leader 仅在 Patroni 场景核对 DCS，不手工 promote 绕过管理器。
 切换、重启、reinit、配置编辑均非只读操作；提供影响、前置条件、验证和回退。PITR 要核对可用全量备份及连续 WAL。单机跳过 HA、切换和从库备份属于不适用，不是失败。
+**临时状态复位红线**：凡为变更临时执行了 `patronictl pause`（维护模式）、计划内 `switchover`（非永久迁主）、临时放宽 `synchronous_mode`/`synchronous_node_count`/`pg_hba`/调试日志，或创建了临时测试表/账号/备份槽，必须在正向收尾步骤中显式 `patronictl resume`、切回原主库、恢复原同步与日志策略并清理临时测试对象，验收时确认 `patronictl list` 无 `Maintenance mode` 残留。
 
 ## 参数核算脚本（可用时）
 评估或复核内存与并发参数时，若可用 `run_skill_script`，可调用本技能随附的 `calc_pg_tuning.py`（传入 `memory_gb`、`cpus`、`max_connections`、`workload` 可选 `oltp`/`olap`/`mixed`），结合核算输出与现场 `pg_settings`、连接池形态及余量综合给出建议。

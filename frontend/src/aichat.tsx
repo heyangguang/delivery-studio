@@ -20,14 +20,18 @@ import {
 } from "@arco-design/web-react";
 import {
   IconArrowDown,
+  IconBook,
   IconCheck,
   IconCheckCircle,
   IconClose,
+  IconCloseCircleFill,
   IconCode,
   IconDown,
   IconCopy,
   IconDelete,
   IconDownload,
+  IconEdit,
+  IconExclamationCircleFill,
   IconExpand,
   IconFile,
   IconImage,
@@ -38,14 +42,24 @@ import {
   IconMessage,
   IconPlus,
   IconSearch,
+  IconSettings,
   IconUp,
   IconRecordStop,
   IconRefresh,
+  IconRight,
   IconSend,
   IconShrink,
+  IconThunderbolt,
 } from "@arco-design/web-react/icon";
 import { reportDoc, useSubmitKB } from "./kb";
+import { MessageQueueTray, useMessageQueue } from "./aiqueue";
+import type { QueuedMsg } from "./aiqueue";
 import { go } from "./router";
+import {
+  launchRehearsalIntent,
+  launchSecurityRehearsalIntent,
+} from "./rehearsal_intent";
+import type { RehearsalPresetKind } from "./rehearsal_intent";
 import { bi, getLang, useLang, withLang } from "./i18n";
 import {
   ago,
@@ -64,7 +78,7 @@ export type { AIStatus } from "./shared";
 import { CodeBlock, Markdown } from "./aimd";
 import { Process } from "./aiwork";
 import { ModelPicker, useModelPick } from "./modelpick";
-import { ToolMenu, useAIOptions } from "./aitools";
+import { ThinkLevel, ToolMenu, useAIOptions } from "./aitools";
 import type { Step } from "./aiwork";
 export type { Step } from "./aiwork";
 export { Process, stepLabel, fmtDur } from "./aiwork";
@@ -114,7 +128,29 @@ export type AICallDiag = {
   attempts?: AIAttemptDiag[];
 };
 
-export type ChatStreamError = Error & { diag?: AICallDiag };
+export type ChatErrorKind =
+  | "hub_network"
+  | "stream_interrupted"
+  | "gateway_network"
+  | "auth"
+  | "rate_limit"
+  | "config"
+  | "model_error";
+
+export type ChatStreamError = Error & {
+  diag?: AICallDiag;
+  kind?: ChatErrorKind;
+  rawError?: string;
+  saved?: boolean;
+};
+
+export type ChatErrorState = {
+  text: string;
+  retry?: string;
+  diag?: AICallDiag;
+  kind?: ChatErrorKind;
+  rawError?: string;
+};
 
 const REASON_LABELS: Record<string, string> = {
   get empty_output() {
@@ -323,8 +359,78 @@ export type Msg = {
   steps?: Step[];
   ms?: number;
   proposals?: string[];
+  rehearsals?: RehearsalProposal[];
+  knowledges?: KnowledgeProposal[];
+  components?: ComponentSuggestion[];
+  error?: string;
+  error_diag?: AICallDiag;
   at?: string;
   by?: string;
+};
+export type VexProposal = {
+  cves?: string[];
+  cve?: string;
+  package?: string;
+  ecosystem?: string;
+  cluster_id?: string;
+  global?: boolean;
+  status: string;
+  justification?: string;
+  expires_at?: string;
+  note: string;
+};
+export type BaselineProposal = {
+  cluster_id: string;
+  check_id: string;
+  title?: string;
+  note: string;
+};
+export type RehearsalProposal = {
+  cluster_id: string;
+  kind?: "upgrade" | "scale" | "tune" | "switch" | "security" | "change" | string;
+  mode?: "light" | "full" | string;
+  title: string;
+  goal?: string;
+  packages?: string[];
+  cves?: string[];
+  summary?: string;
+  reason?: string;
+  running?: boolean;
+  app_label?: string;
+};
+export type KnowledgeProposal = {
+  title: string;
+  summary?: string;
+  content: string;
+  scope?: "personal" | "team" | string;
+  source?: string;
+  kb_id?: string;
+  team_doc_id?: string;
+  submission_id?: string;
+};
+export type ComponentSuggestion = {
+  component: string;
+  title: string;
+  detail: string;
+  why?: string;
+};
+export type RehearsalStepEditProposal = {
+  cluster_id: string;
+  rehearsal_id: string;
+  rehearsal_title?: string;
+  step_id: string;
+  step_order?: number;
+  action: "replace" | "insert_before" | "insert_after" | "delete" | string;
+  phase?: string;
+  title?: string;
+  target_role?: string;
+  command?: string;
+  expect?: string;
+  rollback?: string;
+  risk_note?: string;
+  old_title?: string;
+  old_target_role?: string;
+  old_command?: string;
 };
 export type StepProposal = {
   kind?: string;
@@ -346,8 +452,13 @@ export type StepProposal = {
   decided_by?: string;
   /** The change to one file of the delivery's project, when kind is "file". */
   file?: { path: string; diff?: string; new?: boolean };
+  vex?: VexProposal;
+  baseline?: BaselineProposal;
+  rehearsal?: RehearsalProposal;
+  rehearsal_step?: RehearsalStepEditProposal;
+  knowledge?: KnowledgeProposal;
 };
-type CompProposal = {
+export type CompProposal = {
   id: string;
   summary: string;
   files: { path: string; op: string; diff?: string }[];
@@ -380,9 +491,11 @@ export type AIReport = {
   /** The copy in the writer's own knowledge base. */
   kb_id?: string;
   kb_title?: string;
+  /** Standalone exportable Change Report doc ID archived under Cluster Docs (chg-*). */
+  doc_id?: string;
 };
 
-/** What a conversation is about. key is "review", "step:<runbook key>" or "comp". */
+/** What a conversation is about. key is "review", "step:<runbook key>", "sec:<id>", "portal:<id>" or "comp". */
 export type AITarget = {
   key: string;
   title: string;
@@ -391,10 +504,16 @@ export type AITarget = {
   hello?: string;
   suggestions?: string[];
   prefill?: string;
+  /** Pre-populates the composer without auto-sending, letting the user paste logs or edit before sending. */
+  draft?: string;
+  /** Only auto-send prefill when this conversation has no messages yet (reopening an existing security chat shows history instead of re-asking). */
+  prefillIfEmpty?: boolean;
 };
 type Scope =
   | { kind: "job"; jobId: string }
-  | { kind: "comp"; name: string; beforeSend?: () => Promise<unknown> };
+  | { kind: "comp"; name: string; beforeSend?: () => Promise<unknown> }
+  | { kind: "security" }
+  | { kind: "portal" };
 
 const PHASE: Record<string, string> = {
   get prepare() {
@@ -451,11 +570,35 @@ const TOOL: Record<string, string> = {
   get execution_record() {
     return bi("执行记录", "Execution record");
   },
+  get execution_history() {
+    return bi("自动执行批次", "Execution history");
+  },
+  get execution_log() {
+    return bi("执行日志", "Execution log");
+  },
+  get cluster_history() {
+    return bi("集群历史", "Cluster history");
+  },
+  get component_sync_status() {
+    return bi("组件与同步状态", "Component sync status");
+  },
+  get library_runtimes() {
+    return bi("软件库运行环境", "Library runtimes");
+  },
+  get check_package_security() {
+    return bi("安全公告核查", "Security advisory check");
+  },
+  get search_files() {
+    return bi("搜索项目文件", "Search project files");
+  },
   get list_files() {
     return bi("项目文件列表", "Project file list");
   },
   get read_file() {
     return bi("项目文件", "Project file");
+  },
+  get draft_search() {
+    return bi("搜索草稿", "Search draft");
   },
   get propose_step() {
     return bi("步骤提案", "Step proposal");
@@ -484,6 +627,18 @@ const TOOL: Record<string, string> = {
   get propose_files() {
     return bi("改动提案", "File proposal");
   },
+  get propose_rehearsal() {
+    return bi("变更演练卡片", "Change rehearsal card");
+  },
+  get propose_knowledge() {
+    return bi("知识库总结卡片", "KB summary card");
+  },
+  get suggest_component_change() {
+    return bi("组件改进建议", "Component suggestion");
+  },
+  get suggest_security_rehearsal() {
+    return bi("安全修复演练建议", "Security rehearsal suggestion");
+  },
 };
 const DOING: Record<string, string> = {
   get list_deliveries() {
@@ -498,11 +653,35 @@ const DOING: Record<string, string> = {
   get execution_record() {
     return bi("查看执行记录", "Reading execution record");
   },
+  get execution_history() {
+    return bi("查看自动执行批次", "Checking execution runs");
+  },
+  get execution_log() {
+    return bi("读取执行日志", "Reading execution log");
+  },
+  get cluster_history() {
+    return bi("查看集群历史", "Checking cluster history");
+  },
+  get component_sync_status() {
+    return bi("核对当前组件与同步状态", "Checking component & sync status");
+  },
+  get library_runtimes() {
+    return bi("查看软件库运行环境", "Checking library runtimes");
+  },
+  get check_package_security() {
+    return bi("核查官方安全公告与版本", "Checking security advisories");
+  },
+  get search_files() {
+    return bi("搜索项目文件", "Searching project files");
+  },
   get list_files() {
     return bi("浏览项目文件", "Browsing project files");
   },
   get read_file() {
     return bi("读取项目文件", "Reading project file");
+  },
+  get draft_search() {
+    return bi("搜索草稿文件", "Searching draft files");
   },
   get propose_step() {
     return bi("整理步骤提案，平台校验中", "Validating step proposal");
@@ -534,15 +713,62 @@ const DOING: Record<string, string> = {
       "Submitting changes & running dry-run check",
     );
   },
+  get cluster_security_info() {
+    return bi("读取集群安全态势与配置基线", "Reading cluster security posture");
+  },
+  get security_scan_summary() {
+    return bi("查看全局安全扫描概览", "Reading global security overview");
+  },
+  get security_search_findings() {
+    return bi("检索安全中心漏洞清单", "Searching security findings");
+  },
+  get propose_vex_triage() {
+    return bi("生成 VEX 处置提案卡片", "Drafting VEX triage proposal");
+  },
+  get propose_baseline_waive() {
+    return bi("生成配置基线豁免卡片", "Drafting baseline waiver proposal");
+  },
+  get propose_rehearsal() {
+    return bi("整理变更演练方案与目标卡片", "Preparing change rehearsal card");
+  },
+  get read_rehearsal() {
+    return bi("读取当前集群变更演练步骤", "Reading cluster change rehearsal");
+  },
+  get propose_rehearsal_step_edit() {
+    return bi("生成演练步骤修订提案卡片", "Drafting rehearsal step edit card");
+  },
+  get propose_knowledge() {
+    return bi("整理写入知识库总结卡片", "Drafting knowledge base summary card");
+  },
+  get suggest_component_change() {
+    return bi("生成组件改进建议卡片", "Drafting component improvement card");
+  },
+  get suggest_security_rehearsal() {
+    return bi("生成安全修复演练建议", "Drafting security rehearsal suggestion");
+  },
 };
 
 /** A conversation about the whole delivery (as many as people start), not about one step. */
 export const isGeneral = (key: string) =>
   key === "review" || key.startsWith("review:");
+export const isSecurityKey = (key: string) =>
+  key === "sec" || key.startsWith("sec:");
+export const isPortalKey = (key: string) =>
+  key === "portal" || key.startsWith("portal:");
 const newGeneral = () => `review:${Math.random().toString(36).slice(2, 10)}`;
+const newSecurityChat = () => `sec:${Math.random().toString(36).slice(2, 10)}`;
+const newPortalChat = () => `portal:${Math.random().toString(36).slice(2, 10)}`;
 
 const featureOf = (key: string) =>
-  isGeneral(key) ? "review" : key === "comp" ? "component" : "troubleshoot";
+  isSecurityKey(key)
+    ? "security"
+    : isPortalKey(key)
+      ? "assistant"
+      : isGeneral(key)
+        ? "review"
+        : key === "comp"
+          ? "component"
+          : "troubleshoot";
 
 /* ---------------------------------------------------------------- dock */
 
@@ -551,13 +777,129 @@ type Dock = {
   available: (key: string) => boolean;
   /** Steps the window aside (a bar at the bottom) so the page under it can be seen; the conversation goes on. */
   minimize: () => void;
+  scopeKind: Scope["kind"];
 };
 const DockCtx = createContext<Dock | null>(null);
+/** Tracks nested specialized docks (job/comp/security) so an outer portal dock yields automatically without duplicate buttons. */
+const NestedDockCtx = createContext<(() => () => void) | null>(null);
 /** Opens the page's assistant on a conversation. Null outside a page that has one. */
 export const useAIDock = () => useContext(DockCtx);
 
+/**
+ * Compact inline "?" / "Ask AI" trigger that can sit next to any step, field, or error.
+ * Opens the nearest active AIDock (page-specific or global portal dock) with rich context.
+ */
+export function AIHelpButton({
+  topic,
+  title,
+  prompt,
+  draft,
+  page,
+  summary,
+  error,
+  command,
+  label,
+  tooltip,
+  variant = "icon",
+  className = "",
+}: {
+  topic: string;
+  title: string;
+  prompt?: string;
+  draft?: string;
+  page?: string;
+  summary?: string;
+  error?: string;
+  command?: string;
+  label?: string;
+  tooltip?: string;
+  variant?: "icon" | "pill";
+  className?: string;
+}) {
+  useLang();
+  const dock = useAIDock();
+  if (!dock) return null;
+  const checkKey =
+    dock.scopeKind === "portal"
+      ? "portal"
+      : dock.scopeKind === "security"
+        ? "sec"
+        : dock.scopeKind === "comp"
+          ? "comp"
+          : "step:help";
+  if (!dock.available(checkKey)) return null;
+
+  const openHelp = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const safeTopic =
+      topic
+        .toLowerCase()
+        .replace(/[^a-z0-9._-]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 40) || "help";
+    const key =
+      dock.scopeKind === "portal"
+        ? `portal:${safeTopic}`
+        : dock.scopeKind === "security"
+          ? `sec:${safeTopic}`
+          : dock.scopeKind === "comp"
+            ? "comp"
+            : `step:${safeTopic}`;
+    const step: Record<string, unknown> = { title, topic };
+    if (page) step.page = page;
+    if (summary) step.summary = summary;
+    if (error) step.error = error;
+    if (command) step.command = command;
+    dock.open({
+      key,
+      title,
+      context: page || summary,
+      step,
+      prefill: prompt,
+      draft: prompt ? undefined : draft,
+      prefillIfEmpty: !error,
+    });
+  };
+
+  if (variant === "pill") {
+    return (
+      <button
+        type="button"
+        className={`ai-help-btn ai-help-pill ${className}`.trim()}
+        onClick={openHelp}
+        aria-label={tooltip || bi(`问 AI：${title}`, `Ask AI: ${title}`)}
+      >
+        <Spark size={12} />
+        <span>{label || bi("问 AI", "Ask AI")}</span>
+      </button>
+    );
+  }
+  return (
+    <Tooltip
+      content={tooltip || bi(`有疑问？问 AI：${title}`, `Ask AI: ${title}`)}
+      mini
+    >
+      <button
+        type="button"
+        className={`ai-help-btn ai-help-icon ${className}`.trim()}
+        onClick={openHelp}
+        aria-label={tooltip || bi(`问 AI：${title}`, `Ask AI: ${title}`)}
+      >
+        <IconQuestionCircle />
+      </button>
+    </Tooltip>
+  );
+}
+
 /** Tells the parts of a delivery page that read the record to read it again (an accepted proposal, a write-up). */
 export const AI_CHANGED = "mh-ai-changed";
+/** Tells security views (cluster security tab & global security center) to reload after a VEX / baseline proposal is accepted. */
+export const SECURITY_CHANGED = "mh-security-changed";
+/** Tells active rehearsal views to reload after an AI assistant rehearsal-step edit proposal is accepted. */
+export const REHEARSAL_CHANGED = "mh-rehearsal-changed";
+/** Opens the VEX triage form prefilled from an AI VEX proposal card so the user can fine-tune before saving. */
+export const VEX_OPEN_DRAFT = "mh-vex-open-draft";
 
 export function AIDock({
   scope,
@@ -586,7 +928,26 @@ export function AIDock({
     });
     setMounted(true);
   }, []);
-  const id = scope.kind === "job" ? scope.jobId : scope.name;
+  const registerInParent = useContext(NestedDockCtx);
+  const [innerCount, setInnerCount] = useState(0);
+  const registerInner = useCallback(() => {
+    setInnerCount((c) => c + 1);
+    return () => setInnerCount((c) => Math.max(0, c - 1));
+  }, []);
+  useEffect(() => {
+    if (!registerInParent || hidden) return;
+    return registerInParent();
+  }, [registerInParent, hidden]);
+  const yielded = scope.kind === "portal" && innerCount > 0;
+  const effectiveHidden = hidden || yielded;
+  const id =
+    scope.kind === "job"
+      ? scope.jobId
+      : scope.kind === "comp"
+        ? scope.name
+        : scope.kind === "portal"
+          ? "__portal__"
+          : "__security__";
   const [target, setTarget] = useState<AITarget>(start);
   const prevIdRef = useRef(id);
   useEffect(() => {
@@ -597,11 +958,13 @@ export function AIDock({
     }
     setTarget((cur) =>
       cur.key === start.key &&
-      (cur.title !== start.title || cur.context !== start.context)
+      (cur.title !== start.title ||
+        cur.context !== start.context ||
+        cur.hello !== start.hello)
         ? { ...cur, ...start }
         : cur,
     );
-  }, [id, start.key, start.title, start.context]);
+  }, [id, start.key, start.title, start.context, start.hello]);
   // at the foot of a long page the button shrinks to its mark, so it does not sit on the last lines
   const [atEnd, setAtEnd] = useState(false);
   useEffect(() => {
@@ -622,25 +985,30 @@ export function AIDock({
   }, []);
   const available = useCallback(
     (key: string) =>
-      !hidden &&
+      !effectiveHidden &&
       status.enabled &&
       can("ai.use") &&
       !!status.features[featureOf(key)],
-    [hidden, status],
+    [effectiveHidden, status],
   );
   const any =
-    !hidden &&
+    !effectiveHidden &&
     (scope.kind === "comp"
       ? available("comp")
-      : available("review") || available("step:x"));
+      : scope.kind === "security"
+        ? available("sec")
+        : scope.kind === "portal"
+          ? available("portal")
+          : available("review") || available("step:x") || available("sec:x"));
   useEffect(() => {
-    if (hidden || !status.enabled || !any) {
+    if (effectiveHidden || !status.enabled || !any) {
       setMode("closed");
     }
-  }, [hidden, status.enabled, any]);
+  }, [effectiveHidden, status.enabled, any]);
   const dock = useMemo<Dock>(
     () => ({
       available,
+      scopeKind: scope.kind,
       open: (t) => {
         // the page's own starting conversation keeps its context line when opened from a button
         if (t)
@@ -653,7 +1021,7 @@ export function AIDock({
       },
       minimize: () => setMode((m) => (m === "open" ? "min" : m)),
     }),
-    [available, start, setOpen],
+    [available, scope.kind, start, setOpen],
   );
   // opened from the button or the keyboard: a conversation about the whole delivery, not the step someone asked about last
   const modeRef = useRef(mode);
@@ -694,44 +1062,48 @@ export function AIDock({
     onChanged?.();
   }, [scope, onChanged]);
   return (
-    <DockCtx.Provider value={dock}>
-      {children}
-      {any && mode === "closed" && (
-        <button
-          type="button"
-          className={`ad-launch ${busy ? "busy" : ""} ${atEnd && !busy ? "mini" : ""}`}
-          onClick={() => setOpen(true)}
-          aria-label={bi("打开 AI 助手（Ctrl+J）", "Open AI Assistant (Ctrl+J)")}
-        >
-          <Spark rainbow />
-          <span>
-            {busy
-              ? bi("AI 正在回答…", "AI is replying…")
-              : bi("AI 助手", "AI Assistant")}
-          </span>
-          {!busy && <kbd>⌘J</kbd>}
-        </button>
-      )}
-      {any && mounted && (
-        <WindowBoundary onClose={() => setOpen(false)}>
-          <ChatWindow
-            key={id}
-            scope={scope}
-            start={start}
-            target={target}
-            setTarget={setTarget}
-            expanded={expanded}
-            setExpanded={setExpanded}
-            mode={mode}
-            setMode={setMode}
-            onBusy={setBusy}
-            onClose={() => setOpen(false)}
-            onChanged={changed}
-            available={available}
-          />
-        </WindowBoundary>
-      )}
-    </DockCtx.Provider>
+    <NestedDockCtx.Provider
+      value={scope.kind === "portal" ? registerInner : registerInParent}
+    >
+      <DockCtx.Provider value={dock}>
+        {children}
+        {any && mode === "closed" && (
+          <button
+            type="button"
+            className={`ad-launch ${busy ? "busy" : ""} ${atEnd && !busy ? "mini" : ""}`}
+            onClick={() => setOpen(true)}
+            aria-label={bi("打开 AI 助手（Ctrl+J）", "Open AI Assistant (Ctrl+J)")}
+          >
+            <Spark rainbow />
+            <span>
+              {busy
+                ? bi("AI 正在回答…", "AI is replying…")
+                : bi("AI 助手", "AI Assistant")}
+            </span>
+            {!busy && <kbd>⌘J</kbd>}
+          </button>
+        )}
+        {any && mounted && (
+          <WindowBoundary onClose={() => setOpen(false)}>
+            <ChatWindow
+              key={id}
+              scope={scope}
+              start={start}
+              target={target}
+              setTarget={setTarget}
+              expanded={expanded}
+              setExpanded={setExpanded}
+              mode={mode}
+              setMode={setMode}
+              onBusy={setBusy}
+              onClose={() => setOpen(false)}
+              onChanged={changed}
+              available={available}
+            />
+          </WindowBoundary>
+        )}
+      </DockCtx.Provider>
+    </NestedDockCtx.Provider>
   );
 }
 
@@ -1138,6 +1510,9 @@ export type SandboxConfirm = {
 export type Live = {
   files?: MsgFile[];
   ask?: Ask;
+  rehearsals?: RehearsalProposal[];
+  knowledges?: KnowledgeProposal[];
+  components?: ComponentSuggestion[];
   sandboxConfirms?: SandboxConfirm[];
   text: string;
   tools: string[];
@@ -1193,7 +1568,15 @@ function ChatWindow({
   const base =
     scope.kind === "comp"
       ? `/api/components/${scope.name}/ai`
-      : `/api/jobs/${scope.jobId}/ai`;
+      : scope.kind === "security"
+        ? `/api/security/ai`
+        : scope.kind === "portal"
+          ? `/api/ai/portal`
+          : `/api/jobs/${scope.jobId}/ai`;
+  const hasSessions =
+    scope.kind === "job" ||
+    scope.kind === "security" ||
+    scope.kind === "portal";
   const sessionURL =
     scope.kind === "comp"
       ? `${base}/session`
@@ -1208,12 +1591,7 @@ function ChatWindow({
   const [input, setInput] = useState("");
   const [imgs, setImgs] = useState<string[]>([]);
   const [live, setLive] = useState<Live | null>(null);
-  const [error, setError] = useState<{
-    text: string;
-    retry?: string;
-    diag?: AICallDiag;
-  } | null>(null);
-  const [errDiagOpen, setErrDiagOpen] = useState(false);
+  const [error, setError] = useState<ChatErrorState | null>(null);
   const [deciding, setDeciding] = useState("");
   const [resolving, setResolving] = useState(false);
   // the "solved?" line is only a question: it can be put away, and comes back after the conversation goes on
@@ -1250,6 +1628,10 @@ function ChatWindow({
   // which conversation the window shows now: an answer that comes back for another one is not shown here
   const sessionRef = useRef(sessionURL);
   sessionRef.current = sessionURL;
+  const queue = useMessageQueue(sessionURL);
+  const pendingJumpRef = useRef<{ session: string; item: QueuedMsg } | null>(
+    null,
+  );
   // the answer of this conversation is being written on the server (the page looked elsewhere meanwhile)
   const [remote, setRemote] = useState(false);
   const win = useRef<HTMLElement>(null);
@@ -1365,7 +1747,7 @@ function ChatWindow({
     top: number;
   }>({ base: "", ranks: new Map(), top: 0 });
   const loadSessions = useCallback(() => {
-    if (scope.kind !== "job") return;
+    if (!hasSessions) return;
     api<{ sessions: SessionInfo[] }>(`${base}/sessions`)
       .then((r) => {
         const list = r.sessions || [];
@@ -1386,12 +1768,11 @@ function ChatWindow({
         setSessions(list);
       })
       .catch(() => undefined);
-  }, [base, scope.kind]);
+  }, [base, hasSessions]);
 
   useEffect(() => {
     setMsgs(null);
     setError(null);
-    setErrDiagOpen(false);
     setLive(null);
     setInput("");
     setImgs([]);
@@ -1410,16 +1791,6 @@ function ChatWindow({
         if (!live) return;
         setMsgs(s.messages || []);
         setSavedStep(s.step);
-        // a question the server kept but never answered (the answer broke off): offer to ask it again
-        const last = (s.messages || [])[(s.messages || []).length - 1];
-        if (scope.kind === "comp" && !s.running && last?.role === "user")
-          setError({
-            text: bi(
-              "上一次提问没有得到回答（回答中途断了，可能是服务刚更新过）",
-              "The previous message received no reply (stream interrupted, possibly due to a service restart)",
-            ),
-            retry: last.text,
-          });
         if (s.running) {
           setLive({
             ...newLive(),
@@ -1468,14 +1839,26 @@ function ChatWindow({
       window.clearInterval(t);
     };
   }, [remote, sessionURL]); // eslint-disable-line react-hooks/exhaustive-deps
-  // opened with something to ask (a failed step's output): ask it once the conversation is loaded
+  // opened with something to ask (a failed step's output or a CVE to analyze): ask it once the conversation is loaded
   const asked = useRef("");
   useEffect(() => {
     const p = target.prefill;
-    if (!p || msgs === null || asked.current === target.key + p) return;
+    if (!p || msgs === null || remote || asked.current === target.key + p) return;
+    if (target.prefillIfEmpty && msgs.length > 0) {
+      asked.current = target.key + p;
+      return;
+    }
     asked.current = target.key + p;
     send(p);
-  }, [msgs === null, target.prefill]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [msgs === null, target.key, target.prefill]); // eslint-disable-line react-hooks/exhaustive-deps
+  const drafted = useRef("");
+  useEffect(() => {
+    const d = target.draft;
+    if (!d || msgs === null || drafted.current === target.key + d) return;
+    drafted.current = target.key + d;
+    setInput(d);
+    window.setTimeout(() => box.current?.focus({ preventScroll: true }), 40);
+  }, [msgs === null, target.key, target.draft]);
   useEffect(() => {
     if (msgs && !small()) box.current?.focus({ preventScroll: true });
   }, [target.key, msgs === null]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1535,27 +1918,58 @@ function ChatWindow({
     }
   };
 
-  const send = async (override?: string) => {
-    const text = (override ?? input).trim();
-    if ((!text && !imgs.length) || busy || !on) return;
-    const sent = imgs;
+  const enqueueCurrent = () => {
+    const text = input.trim();
+    if ((!text && !imgs.length) || !on || net !== "online") return false;
+    const ok = queue.enqueue({ text, images: imgs });
+    if (ok) {
+      setInput("");
+      setImgs([]);
+      requestAnimationFrame(() => box.current?.focus({ preventScroll: true }));
+    }
+    return ok;
+  };
+
+  const send = async (
+    override?: string,
+    isRetry?: boolean,
+    queued?: QueuedMsg,
+  ) => {
+    const text = (queued ? queued.text : (override ?? input)).trim();
+    const sent = queued ? queued.images || [] : override !== undefined ? [] : imgs;
+    if ((!text && !sent.length) || busy || !on) return;
     const mine = sessionURL;
     const here = () => sessionRef.current === mine;
     setError(null);
-    setErrDiagOpen(false);
-    // asking again a question the server kept but never answered: it is already in the conversation
-    const again =
-      override !== undefined &&
-      msgs?.length &&
-      msgs[msgs.length - 1].role === "user" &&
-      msgs[msgs.length - 1].text === text;
-    if (!again)
-      setMsgs((m) => [
-        ...(m || []),
+    // asking again a question the server kept (or failed to answer): strip trailing error turn and reuse user bubble
+    const trimmed = [...(msgs || [])];
+    while (
+      trimmed.length > 0 &&
+      trimmed[trimmed.length - 1].role === "assistant" &&
+      trimmed[trimmed.length - 1].error &&
+      !trimmed[trimmed.length - 1].text?.trim()
+    ) {
+      trimmed.pop();
+    }
+    const again = Boolean(
+      !queued &&
+        (isRetry || override !== undefined) &&
+        trimmed.length > 0 &&
+        trimmed[trimmed.length - 1].role === "user" &&
+        trimmed[trimmed.length - 1].text === text,
+    );
+    if (again) {
+      setMsgs(trimmed);
+    } else {
+      setMsgs([
+        ...(msgs || []),
         { role: "user", text, images: sent, at: new Date().toISOString() },
       ]);
-    setInput("");
-    setImgs([]);
+    }
+    if (!queued && override === undefined) {
+      setInput("");
+      setImgs([]);
+    }
     setAtBottom(true);
     const cur = newLive();
     setLive({ ...cur });
@@ -1568,6 +1982,9 @@ function ChatWindow({
       steps: cur.steps.map((x) => ({ ...x, running: false })),
       ms: Date.now() - cur.t0,
       proposals: cur.made,
+      rehearsals: cur.rehearsals,
+      knowledges: cur.knowledges,
+      components: cur.components,
       ask: cur.ask,
       files: cur.files,
       at: new Date().toISOString(),
@@ -1582,7 +1999,7 @@ function ChatWindow({
               images: sent,
               model: model.ref,
               options: tools.opts,
-              retry: !!again,
+              retry: again,
             }
           : {
               key: target.key,
@@ -1591,6 +2008,7 @@ function ChatWindow({
               step: target.step,
               model: model.ref,
               options: tools.opts,
+              retry: again,
             },
         ac.signal,
         cur,
@@ -1601,6 +2019,9 @@ function ChatWindow({
             tools: [...cur.tools],
             steps: cur.steps.map((x) => ({ ...x })),
             made: [...cur.made],
+            rehearsals: cur.rehearsals ? [...cur.rehearsals] : undefined,
+            knowledges: cur.knowledges ? [...cur.knowledges] : undefined,
+            components: cur.components ? [...cur.components] : undefined,
             sandboxConfirms: cur.sandboxConfirms
               ? [...cur.sandboxConfirms]
               : undefined,
@@ -1614,25 +2035,43 @@ function ChatWindow({
       // the page moved to another conversation: this one keeps being written on the server, and is read from there
       if (!here()) return;
       const stopped = (e as Error).name === "AbortError";
-      if (cur.text || cur.made.length || cur.steps.length)
+      const streamErr = e as ChatStreamError;
+      const diag =
+        streamErr.diag ??
+        (e as { body?: { diag?: AICallDiag } }).body?.diag;
+      if (cur.text || cur.made.length || cur.steps.length) {
         setMsgs((m) => [
           ...(m || []),
           {
             ...done(),
             text: cur.text + (stopped ? bi("\n\n（已停止）", "\n\n(Stopped)") : ""),
+            ...(stopped
+              ? {}
+              : { error: streamErr.message, error_diag: diag }),
           },
         ]);
-      if (!stopped) {
-        const diag =
-          (e as ChatStreamError).diag ??
-          (e as { body?: { diag?: AICallDiag } }).body?.diag;
-        setErrDiagOpen(false);
+      } else if (!stopped && streamErr.saved) {
+        setMsgs((m) => [
+          ...(m || []),
+          {
+            role: "assistant",
+            text: "",
+            error: streamErr.message,
+            error_diag: diag,
+            at: new Date().toISOString(),
+          },
+        ]);
+        loadSessions();
+      } else if (!stopped) {
         setError({
-          text: (e as Error).message,
-          retry: cur.text ? undefined : text,
+          text: streamErr.message,
+          retry: text,
           diag,
+          kind: streamErr.kind,
+          rawError: streamErr.rawError,
         });
       }
+      if (!stopped && queue.items.length > 0) queue.setPaused(true);
     } finally {
       if (here()) {
         setLive(null);
@@ -1641,9 +2080,10 @@ function ChatWindow({
     }
   };
 
-  const stop = () => {
+  const stop = (pauseQueue = true) => {
+    if (pauseQueue && queue.items.length > 0) queue.setPaused(true);
     abort.current?.abort();
-    if (scope.kind === "job")
+    if (hasSessions)
       api(`${base}/stop`, {
         method: "POST",
         body: JSON.stringify({ key: target.key }),
@@ -1657,10 +2097,55 @@ function ChatWindow({
     }
   };
 
-  const decide = async (id: string, verb: "accept" | "reject") => {
+  const submitComposer = () => {
+    if (busy) {
+      enqueueCurrent();
+      return;
+    }
+    void send();
+  };
+
+  const sendQueuedNow = (item: QueuedMsg) => {
+    const taken = queue.take(item.id);
+    if (!taken) return;
+    queue.setPaused(false);
+    if (busy) {
+      pendingJumpRef.current = { session: sessionURL, item: taken };
+      stop(false);
+    } else {
+      void send(undefined, false, taken);
+    }
+  };
+
+  useEffect(() => {
+    if (busy || !on || net !== "online" || msgs === null) return;
+    if (
+      pendingJumpRef.current &&
+      pendingJumpRef.current.session === sessionURL
+    ) {
+      const next = pendingJumpRef.current.item;
+      pendingJumpRef.current = null;
+      void send(undefined, false, next);
+      return;
+    }
+    if (!queue.paused && queue.items.length > 0) {
+      const next = queue.take();
+      if (next) void send(undefined, false, next);
+    }
+  }, [busy, on, net, msgs, sessionURL, queue.paused, queue.items.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const decide = async (
+    id: string,
+    verb: "accept" | "reject",
+    body?: Record<string, unknown>,
+  ) => {
     setDeciding(id);
     try {
-      await api(`${base}/proposals/${id}/${verb}`, { method: "POST" });
+      const curProp = props[id] as StepProposal | undefined;
+      const saved = await api<StepProposal>(`${base}/proposals/${id}/${verb}`, {
+        method: "POST",
+        body: body ? JSON.stringify(body) : undefined,
+      });
       if (verb === "accept" && scope.kind === "comp")
         window.dispatchEvent(
           new CustomEvent("mh-ai-wrote", {
@@ -1672,21 +2157,75 @@ function ChatWindow({
             },
           }),
         );
-      if (
-        verb === "accept" &&
-        (props[id] as StepProposal | undefined)?.kind !== "component"
-      )
-        Message.success(
-          scope.kind === "comp"
-            ? bi(
-                "已写入草稿，工作台已重新检查",
-                "Applied to draft; workbench re-checked",
-              )
-            : bi(
-                "已写入执行手册和交付文档",
-                "Applied to runbook and delivery docs",
-              ),
-        );
+      if (verb === "accept") {
+        if (curProp?.kind === "vex") {
+          window.dispatchEvent(new CustomEvent(SECURITY_CHANGED));
+          Message.success(
+            bi(
+              "已采纳并写入 VEX 漏洞处置记录",
+              "Accepted and saved to VEX triage",
+            ),
+          );
+        } else if (curProp?.kind === "baseline_waive") {
+          window.dispatchEvent(new CustomEvent(SECURITY_CHANGED));
+          Message.success(
+            bi(
+              "已采纳并写入配置安全基线豁免",
+              "Accepted and saved baseline waiver",
+            ),
+          );
+        } else if (curProp?.kind === "rehearsal") {
+          Message.success(
+            bi(
+              "已确认，正在前往集群变更演练",
+              "Confirmed; opening cluster rehearsal",
+            ),
+          );
+        } else if (curProp?.kind === "rehearsal_step") {
+          const rs = saved?.rehearsal_step || curProp.rehearsal_step;
+          window.dispatchEvent(
+            new CustomEvent(REHEARSAL_CHANGED, {
+              detail: {
+                clusterId: rs?.cluster_id,
+                rehearsalId: rs?.rehearsal_id,
+              },
+            }),
+          );
+          Message.success(
+            bi(
+              "已采纳并更新演练步骤，页面已同步刷新",
+              "Rehearsal step updated and synced",
+            ),
+          );
+        } else if (curProp?.kind === "knowledge") {
+          const kb = saved?.knowledge;
+          Message.success(
+            kb?.team_doc_id
+              ? bi("已直接发布到团队知识库", "Published to team Knowledge Base")
+              : kb?.submission_id
+                ? bi(
+                    "已提交到团队知识库等待审核",
+                    "Submitted to team Knowledge Base for review",
+                  )
+                : bi(
+                    "已存入「我的知识库」",
+                    "Saved to your personal Knowledge Base",
+                  ),
+          );
+        } else if (curProp?.kind !== "component") {
+          Message.success(
+            scope.kind === "comp"
+              ? bi(
+                  "已写入草稿，工作台已重新检查",
+                  "Applied to draft; workbench re-checked",
+                )
+              : bi(
+                  "已写入执行手册和交付文档",
+                  "Applied to runbook and delivery docs",
+                ),
+          );
+        }
+      }
       await loadProps();
       onChanged();
     } catch (e) {
@@ -1717,6 +2256,8 @@ function ChatWindow({
       setResolving(false);
     }
   };
+  const isRunbookStep =
+    target.key.startsWith("step:") && !target.key.startsWith("step:rehearsal:");
   const confirmDraft = async (toKB: boolean) => {
     if (!draft) return;
     setSaving(toKB ? "kb" : "save");
@@ -1726,24 +2267,38 @@ function ChatWindow({
         body: JSON.stringify({
           key: target.key,
           report: draft,
-          mark_step: markStep && target.key.startsWith("step:"),
+          mark_step: markStep && isRunbookStep,
           to_kb: toKB,
         }),
       });
       putAway((msgs || []).length);
       setDraft(null);
       onChanged();
-      Message.success(
-        toKB && rep.kb_id
-          ? bi(
-              "已写入执行记录，并存进你自己的知识库（只有你能看到；要给团队用，在记录里点「发布到团队」）",
-              "Saved to execution record and your personal KB (private; click 'Publish to team' on the record to share)",
-            )
-          : bi(
-              "已写入执行记录，交付报告里会出现这一段",
-              "Saved to execution record; it will appear in the delivery report",
-            ),
-      );
+      if (rep.doc_id) {
+        Message.success(
+          toKB && rep.kb_id
+            ? bi(
+                "已归档为集群《变更报告》（可在「文档」页审阅与导出 Word），并同步存入个人知识库",
+                "Archived as Cluster Change Report (view/export in Docs) and saved to your personal KB",
+              )
+            : bi(
+                "已归档为集群《变更报告》，可在集群「文档」页查看与导出 Word",
+                "Archived as a Cluster Change Report; view and export Word in the cluster Docs tab",
+              ),
+        );
+      } else {
+        Message.success(
+          toKB && rep.kb_id
+            ? bi(
+                "已归档到交付执行记录，并存进你自己的知识库（仅自己可见，可在记录里发布到团队）",
+                "Saved to execution record and your personal KB (private; publish to team anytime)",
+              )
+            : bi(
+                "已归档到交付执行记录，交付报告里将自动收录",
+                "Saved to execution record; it will appear in the delivery report",
+              ),
+        );
+      }
     } catch (e) {
       err(e);
     } finally {
@@ -1814,26 +2369,68 @@ function ChatWindow({
     target.hello ||
     (scope.kind === "comp"
       ? getHelloComp()
-      : isGeneral(target.key)
-        ? getHelloReview()
-        : getHelloStep());
+      : scope.kind === "portal"
+        ? getHelloPortal()
+        : isSecurityKey(target.key)
+          ? getHelloSec(scope.kind === "security")
+          : isGeneral(target.key)
+            ? getHelloReview()
+            : getHelloStep());
   const suggestions =
     target.suggestions ||
     (scope.kind === "comp"
       ? getSuggestComp()
-      : isGeneral(target.key)
-        ? getSuggestReview()
-        : getSuggestStep());
-  const answered = (msgs || []).some((m) => m.role === "assistant");
-  // the "solved?" line shows while it is new; once put away it shrinks to a small button in the box's toolbar, so the
-  // way to write the conversation up is still there when it turns out to be needed
-  const askSolved = feature === "troubleshoot" && answered && !busy;
-  const showSolved = askSolved && (msgs || []).length >= solvedAt + 2;
+      : scope.kind === "portal"
+        ? getSuggestPortal()
+        : isSecurityKey(target.key)
+          ? getSuggestSec(scope.kind === "security")
+          : isGeneral(target.key)
+            ? getSuggestReview()
+            : getSuggestStep());
+  const answered = (msgs || []).some((m) => m.role === "assistant" && !m.error);
+  // the "solved?" line shows on delivery chats (both step troubleshooting and whole-delivery review/ops chats);
+  // once dismissed it stays accessible as a toolbar icon so write-up & save-to-KB is always 1 click away.
+  const askSolved =
+    scope.kind === "job" &&
+    (feature === "troubleshoot" || feature === "review") &&
+    answered &&
+    !busy;
+  const showSolved =
+    askSolved &&
+    (feature === "troubleshoot"
+      ? (msgs || []).length >= solvedAt + 2
+      : (msgs || []).length >= solvedAt + 4);
   const solvedChip = askSolved && !showSolved;
   const offline = net !== "online";
 
-  // a new conversation about the whole delivery; one that has not been written in yet is not started twice
+  // a new conversation about the whole delivery (or a new security chat in security scope); one not yet written in is not started twice
   const startGeneral = () => {
+    if (scope.kind === "portal") {
+      if (isPortalKey(target.key) && (msgs || []).length === 0 && !busy) {
+        box.current?.focus({ preventScroll: true });
+        setListOpen(false);
+        return;
+      }
+      pick({
+        key: newPortalChat(),
+        title: bi("新对话", "New chat"),
+        context: start.context,
+      });
+      return;
+    }
+    if (scope.kind === "security") {
+      if (isSecurityKey(target.key) && (msgs || []).length === 0 && !busy) {
+        box.current?.focus({ preventScroll: true });
+        setListOpen(false);
+        return;
+      }
+      pick({
+        key: newSecurityChat(),
+        title: bi("新安全对话", "New security chat"),
+        context: start.context,
+      });
+      return;
+    }
     if (isGeneral(target.key) && (msgs || []).length === 0 && !busy) {
       box.current?.focus({ preventScroll: true });
       setListOpen(false);
@@ -1845,8 +2442,7 @@ function ChatWindow({
       context: start.context,
     });
   };
-  // the list: what was asked about the whole delivery, then what was asked on a step; a conversation not yet written in
-  // is not in it (it would come and go as the person moves between conversations)
+  // the list: security sessions, whole delivery chats, and troubleshooting chats
   const [find, setFind] = useState("");
   const shownSessions = sessions
     .filter(
@@ -1859,30 +2455,63 @@ function ChatWindow({
         (sessOrder.current.ranks.get(a.key) ?? 0) -
         (sessOrder.current.ranks.get(b.key) ?? 0),
     );
-  const groups = [
-    {
-      id: "all",
-      label: bi("整个交付", "Whole delivery"),
-      items: shownSessions.filter((x) => isGeneral(x.key)),
-    },
-    {
-      id: "step",
-      label: bi("现场排障", "Troubleshooting"),
-      items: shownSessions.filter((x) => !isGeneral(x.key)),
-    },
-  ].filter((g) => g.items.length);
-  const sideList = scope.kind === "job" && (
+  const groups = (
+    scope.kind === "portal"
+      ? [
+          {
+            id: "portal",
+            label: bi("平台助手对话", "Portal assistant chats"),
+            items: shownSessions,
+          },
+        ]
+      : scope.kind === "security"
+      ? [
+          {
+            id: "sec",
+            label: bi("安全研判对话", "Security chats"),
+            items: shownSessions,
+          },
+        ]
+      : [
+          {
+            id: "sec",
+            label: bi("安全研判", "Security analysis"),
+            items: shownSessions.filter((x) => isSecurityKey(x.key)),
+          },
+          {
+            id: "all",
+            label: bi("整个交付", "Whole delivery"),
+            items: shownSessions.filter((x) => isGeneral(x.key)),
+          },
+          {
+            id: "step",
+            label: bi("现场排障", "Troubleshooting"),
+            items: shownSessions.filter(
+              (x) => !isGeneral(x.key) && !isSecurityKey(x.key),
+            ),
+          },
+        ]
+  ).filter((g) => g.items.length);
+  const newChatEnabled =
+    scope.kind === "portal"
+      ? available("portal")
+      : scope.kind === "security"
+        ? available("sec")
+        : available("review");
+  const sideList = hasSessions && (
     <nav className="ad-sessions" aria-label={bi("对话", "Conversations")}>
       <div className="ad-side-top">
         <b>{bi("对话", "Chats")}</b>
         <button
           type="button"
           className="ad-new"
-          disabled={!available("review")}
+          disabled={!newChatEnabled}
           onClick={startGeneral}
         >
           <IconPlus aria-hidden />
-          {bi("新对话", "New chat")}
+          {scope.kind === "security"
+            ? bi("新安全对话", "New chat")
+            : bi("新对话", "New chat")}
         </button>
       </div>
       {sessions.length > 0 && (
@@ -1912,6 +2541,7 @@ function ChatWindow({
             {g.items.map((s) => {
               const cur = s.key === target.key;
               const general = isGeneral(s.key);
+              const isSec = isSecurityKey(s.key);
               return (
                 <button
                   key={s.key}
@@ -1927,15 +2557,17 @@ function ChatWindow({
                         : {
                             key: s.key,
                             title: s.title,
-                            context: general
-                              ? start.context
-                              : bi("现场排障", "Troubleshooting"),
+                            context: isSec
+                              ? bi("安全研判", "Security analysis")
+                              : general
+                                ? start.context
+                                : bi("现场排障", "Troubleshooting"),
                           },
                     )
                   }
                 >
                   <i
-                    className={`ad-dot k-${general ? "review" : "step"} ${s.running ? "run" : ""}`}
+                    className={`ad-dot k-${isSec ? "sec" : general ? "review" : "step"} ${s.running ? "run" : ""}`}
                     aria-hidden
                   />
                   <span>
@@ -2029,7 +2661,7 @@ function ChatWindow({
           <AIEmblem size={28} />
         </span>
         <div className="ad-title">
-          {scope.kind === "job" && !expanded ? (
+          {hasSessions && !expanded ? (
             <button
               type="button"
               className="ad-switch"
@@ -2042,7 +2674,7 @@ function ChatWindow({
             </button>
           ) : (
             <b>
-              {normDeployCopy(scope.kind === "job" ? target.title : start.title)}
+              {normDeployCopy(hasSessions ? target.title : start.title)}
             </b>
           )}
           <small>
@@ -2053,23 +2685,29 @@ function ChatWindow({
               </span>
             ) : (
               normDeployCopy(target.context) ||
-              (isGeneral(target.key)
-                ? bi("关于整个交付", "About this delivery")
-                : scope.kind === "comp"
-                  ? bi("组件工作台", "Component workbench")
-                  : bi("现场排障", "Troubleshooting"))
+              (isSecurityKey(target.key)
+                ? bi("安全研判", "Security analysis")
+                : isGeneral(target.key)
+                  ? bi("关于整个交付", "About this delivery")
+                  : scope.kind === "comp"
+                    ? bi("组件工作台", "Component workbench")
+                    : bi("现场排障", "Troubleshooting"))
             )}
           </small>
         </div>
         <div className="ad-tools">
-          {scope.kind === "job" && mode !== "min" && !expanded && (
+          {hasSessions && mode !== "min" && !expanded && (
             <Tooltip
               position="bottom"
               triggerProps={{ autoFitPosition: false }}
-              content={bi(
-                "新对话（针对整个交付，不关联步骤）",
-                "New chat (about the whole delivery)",
-              )}
+              content={
+                scope.kind === "security"
+                  ? bi("新安全对话", "New security chat")
+                  : bi(
+                      "新对话（针对整个交付，不关联步骤）",
+                      "New chat (about the whole delivery)",
+                    )
+              }
               mini
             >
               <button
@@ -2077,7 +2715,7 @@ function ChatWindow({
                 className="ad-whole"
                 onClick={startGeneral}
                 aria-label={bi("新对话", "New chat")}
-                disabled={!available("review")}
+                disabled={!newChatEnabled}
               >
                 <IconMessage />
               </button>
@@ -2243,18 +2881,48 @@ function ChatWindow({
               </div>
             ) : (
               <>
-                {msgs.map((m, i) => (
-                  <Bubble
-                    key={`${target.key}-${i}`}
-                    m={m}
-                    jobBase={base}
-                    props={props}
-                    deciding={deciding}
-                    decide={decide}
-                    comp={scope.kind === "comp"}
-                    answer={(t) => send(t)}
-                  />
-                ))}
+                {msgs.map((m, i) => {
+                  const isLast = i === msgs.length - 1;
+                  const prevUser =
+                    isLast && m.role === "assistant" && m.error
+                      ? [...msgs.slice(0, i)]
+                          .reverse()
+                          .find((x) => x.role === "user" && x.text?.trim())
+                      : undefined;
+                  return (
+                    <Bubble
+                      key={`${target.key}-${i}`}
+                      m={m}
+                      jobBase={base}
+                      props={props}
+                      deciding={deciding}
+                      decide={decide}
+                      comp={scope.kind === "comp"}
+                      answer={(t) => send(t)}
+                      busy={busy}
+                      onRetry={
+                        isLast && !busy && on && m.error && prevUser?.text
+                          ? () => send(prevUser.text, true)
+                          : undefined
+                      }
+                    />
+                  );
+                })}
+                {!busy &&
+                  !live &&
+                  !error &&
+                  msgs.length > 0 &&
+                  msgs[msgs.length - 1].role === "user" &&
+                  msgs[msgs.length - 1].text?.trim() && (
+                    <UnansweredTurnCard
+                      busy={busy}
+                      onRetry={
+                        on
+                          ? () => send(msgs[msgs.length - 1].text, true)
+                          : undefined
+                      }
+                    />
+                  )}
                 {live && (
                   <LiveBubble
                     live={live}
@@ -2267,42 +2935,18 @@ function ChatWindow({
               </>
             )}
             {error && (
-              <div
-                className={`ad-error ${error.diag ? "has-diag" : ""}`}
-                role="alert"
-              >
-                <div className="ad-error-row">
-                  <span>{error.text}</span>
-                  <div className="ad-error-acts">
-                    {error.diag && (
-                      <button
-                        type="button"
-                        className="ad-err-toggle"
-                        aria-expanded={errDiagOpen}
-                        onClick={() => setErrDiagOpen((v) => !v)}
-                      >
-                        {errDiagOpen
-                          ? bi("收起网关诊断", "Hide diagnostics")
-                          : bi("展开网关诊断", "Show diagnostics")}
-                        <IconDown className={errDiagOpen ? "ad-flip" : ""} />
-                      </button>
-                    )}
-                    {error.retry !== undefined && (
-                      <Button
-                        size="mini"
-                        icon={<IconRefresh />}
-                        onClick={() => send(error.retry)}
-                        disabled={busy}
-                      >
-                        {bi("重试", "Retry")}
-                      </Button>
-                    )}
-                  </div>
-                </div>
-                {error.diag && errDiagOpen && (
-                  <ChatErrorDiag diag={error.diag} errText={error.text} />
-                )}
-              </div>
+              <ChatErrorCard
+                text={error.text}
+                diag={error.diag}
+                kind={error.kind}
+                rawError={error.rawError}
+                busy={busy}
+                onRetry={
+                  error.retry !== undefined
+                    ? () => send(error.retry, true)
+                    : undefined
+                }
+              />
             )}
             {!atBottom && (
               <button
@@ -2320,8 +2964,8 @@ function ChatWindow({
             <div className="ad-solved">
               <span>
                 {bi(
-                  "问题解决了？把经过整理成记录，写进这份交付的执行记录。",
-                  "Issue resolved? Summarize it into this delivery's execution record.",
+                  "变更或排障已敲定？一键归档为集群《变更报告》，可同步存入知识库。",
+                  "Change or troubleshooting done? Archive as a Cluster Change Report and optionally save to KB.",
                 )}
               </span>
               <Button
@@ -2330,7 +2974,7 @@ function ChatWindow({
                 loading={resolving}
                 onClick={resolve}
               >
-                {bi("已解决，写入记录", "Resolved, save record")}
+                {bi("归档变更报告", "Archive Change Report")}
               </Button>
               <button
                 type="button"
@@ -2343,11 +2987,26 @@ function ChatWindow({
             </div>
           )}
 
+          <MessageQueueTray
+            items={queue.items}
+            busy={busy}
+            paused={queue.paused}
+            compact
+            onResume={() => queue.setPaused(false)}
+            onSendNow={sendQueuedNow}
+            onEdit={queue.update}
+            onDelete={queue.remove}
+            onMove={queue.move}
+            onMoveUp={queue.moveUp}
+            onMoveDown={queue.moveDown}
+            onClear={queue.clear}
+          />
+
           <form
             className={`ad-compose ${offline || !on ? "off" : ""}`}
             onSubmit={(e) => {
               e.preventDefault();
-              send();
+              submitComposer();
             }}
             onPaste={(e) => {
               if (e.clipboardData.files.length) {
@@ -2390,7 +3049,7 @@ function ChatWindow({
                   !e.nativeEvent.isComposing
                 ) {
                   e.preventDefault();
-                  send();
+                  submitComposer();
                 }
               }}
               placeholder={
@@ -2405,13 +3064,26 @@ function ChatWindow({
                         "AI is off—contact an administrator",
                       )
                   : offline
-                    ? bi("网络已断开", "Network disconnected")
-                    : scope.kind === "comp"
+                    ? bi(
+                        "暂未连上 Middleware Hub 后端服务",
+                        "Middleware Hub backend unavailable",
+                      )
+                    : busy
+                      ? bi(
+                          "AI 正在回复，输入下一条问题按 Enter 加入待发送队列…",
+                          "AI is replying—type a follow-up and press Enter to queue…",
+                        )
+                      : scope.kind === "comp"
                       ? bi(
                           "说说要怎么改这个组件…",
                           "Describe how to update this component…",
                         )
-                      : images && !noVision
+                      : isSecurityKey(target.key)
+                        ? bi(
+                            "继续追问漏洞细节、补充网络隔离条件，或让 AI 调整 VEX 提案…",
+                            "Follow up on vulnerability details, network isolation, or ask AI to adjust VEX…",
+                          )
+                        : images && !noVision
                         ? bi(
                             "贴上报错、描述现象，或粘贴截图…",
                             "Paste errors, describe symptoms, or paste screenshots…",
@@ -2429,6 +3101,8 @@ function ChatWindow({
                 t={tools}
                 levels={model.current?.effort}
                 compact={!expanded}
+                hideThink
+                thinkInMenu={false}
               />
               {images &&
                 (noVision ? (
@@ -2467,15 +3141,18 @@ function ChatWindow({
               {solvedChip && (
                 <Tooltip
                   content={bi(
-                    "问题解决了？整理成记录写进执行记录",
-                    "Issue resolved? Save a summary to the execution record",
+                    "归档为集群变更报告 / 存入知识库",
+                    "Archive as Change Report / save to KB",
                   )}
                   mini
                 >
                   <button
                     type="button"
                     className="ad-attach ad-solve-chip"
-                    aria-label={bi("整理成记录", "Save as record")}
+                    aria-label={bi(
+                      "归档变更报告 / 存入知识库",
+                      "Archive Change Report / KB",
+                    )}
                     disabled={resolving}
                     onClick={resolve}
                   >
@@ -2483,31 +3160,58 @@ function ChatWindow({
                   </button>
                 </Tooltip>
               )}
-              <ModelPicker pick={model} compact />
-              {busy ? (
-                <button
-                  type="button"
-                  className="ad-send stop"
-                  onClick={stop}
-                  aria-label={bi("停止生成", "Stop")}
-                  title={bi("停止生成", "Stop")}
-                >
-                  <IconRecordStop />
-                </button>
-              ) : (
-                <button
-                  type="submit"
-                  className="ad-send"
-                  disabled={(!input.trim() && !imgs.length) || !on || offline}
-                  aria-label={bi("发送", "Send")}
-                  title={bi(
-                    "发送（Enter 发送 · Shift+Enter 换行）",
-                    "Send (Enter to send · Shift+Enter for new line)",
-                  )}
-                >
-                  <IconSend />
-                </button>
-              )}
+              <div className="ad-bar-right">
+                <ThinkLevel
+                  levels={model.current?.effort}
+                  value={tools.pref.think}
+                  onChange={(v) => tools.update({ think: v })}
+                />
+                <ModelPicker pick={model} compact={!expanded} />
+                {busy ? (
+                  <>
+                    {(input.trim() || imgs.length > 0) && (
+                      <Tooltip
+                        content={bi(
+                          "加入待发送队列（当前回复完成后自动发送 · Enter）",
+                          "Add to queue (sends automatically after current reply · Enter)",
+                        )}
+                        mini
+                      >
+                        <button
+                          type="submit"
+                          className="aq-enqueue-btn"
+                          aria-label={bi("加入队列", "Queue message")}
+                        >
+                          <IconSend />
+                          <span>{bi("入队", "Queue")}</span>
+                        </button>
+                      </Tooltip>
+                    )}
+                    <button
+                      type="button"
+                      className="ad-send stop"
+                      onClick={() => stop(true)}
+                      aria-label={bi("停止生成", "Stop")}
+                      title={bi("停止生成", "Stop")}
+                    >
+                      <IconRecordStop />
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="submit"
+                    className="ad-send"
+                    disabled={(!input.trim() && !imgs.length) || !on || offline}
+                    aria-label={bi("发送", "Send")}
+                    title={bi(
+                      "发送（Enter 发送 · Shift+Enter 换行）",
+                      "Send (Enter to send · Shift+Enter for new line)",
+                    )}
+                  >
+                    <IconSend />
+                  </button>
+                )}
+              </div>
             </div>
           </form>
         </div>
@@ -2527,111 +3231,218 @@ function ChatWindow({
       {submitNode}
       <Modal
         visible={!!draft}
-        title={bi("整理成记录", "Save as record")}
+        wrapClassName="ad-wu-wrap"
         className="ad-wu-modal"
+        title={
+          <div className="ad-wu-head">
+            <span className="ad-wu-head-ico" aria-hidden>
+              <IconFile />
+            </span>
+            <div className="ad-wu-head-txt">
+              <div className="ad-wu-head-row">
+                <b>{bi("归档变更报告", "Archive Change Report")}</b>
+                <span className="ad-wu-head-pill">
+                  {bi("AI 整理草稿 · 可自由编辑", "AI Draft · Editable")}
+                </span>
+              </div>
+              <small>
+                {bi(
+                  "已运行集群将自动生成独立《变更报告》至集群「文档」页，支持在线审阅与 Word 导出",
+                  "Archives a standalone Change Report under Cluster Docs with online review & Word export",
+                )}
+              </small>
+            </div>
+          </div>
+        }
         onCancel={() => !saving && setDraft(null)}
         maskClosable={false}
         footer={
-          <>
-            <Button onClick={() => setDraft(null)} disabled={!!saving}>
-              {bi("先不写入", "Cancel")}
-            </Button>
-            <Button
-              loading={saving === "kb"}
-              disabled={!!saving && saving !== "kb"}
-              onClick={() => confirmDraft(true)}
-            >
-              {bi("写入并存入知识库", "Save & add to KB")}
-            </Button>
-            <Button
-              type="primary"
-              loading={saving === "save"}
-              disabled={!!saving && saving !== "save"}
-              onClick={() => confirmDraft(false)}
-            >
-              {bi("写入记录", "Save record")}
-            </Button>
-          </>
+          <div className="ad-wu-foot">
+            <span className="ad-wu-foot-note">
+              {bi(
+                "归档位置：集群「文档」· 变更报告",
+                "Destination: Cluster Docs · Change Report",
+              )}
+            </span>
+            <div className="ad-wu-foot-acts">
+              <Button onClick={() => setDraft(null)} disabled={!!saving}>
+                {bi("暂不归档", "Cancel")}
+              </Button>
+              <Button
+                icon={<IconBook />}
+                loading={saving === "kb"}
+                disabled={!!saving && saving !== "kb"}
+                onClick={() => confirmDraft(true)}
+              >
+                {bi("归档并存入知识库", "Archive & Save to KB")}
+              </Button>
+              <Button
+                type="primary"
+                icon={<IconCheck />}
+                loading={saving === "save"}
+                disabled={!!saving && saving !== "save"}
+                onClick={() => confirmDraft(false)}
+              >
+                {bi("归档变更报告", "Archive Report")}
+              </Button>
+            </div>
+          </div>
         }
       >
         {draft && (
           <div className="ad-wu">
-            <p className="ad-wu-lead">
-              {bi(
-                "AI 根据对话整理的草稿，可以直接修改。写入后出现在这份交付的执行记录、交付报告和变更报告里。",
-                "Draft generated by AI from this chat—feel free to edit. Once saved, it appears in the execution record, delivery report, and change report.",
-              )}
-            </p>
-            {(
-              [
-                ["symptom", bi("现象", "Symptom"), 2, 5, false],
-                ["cause", bi("原因", "Root cause"), 2, 6, false],
-                ["fix", bi("处理经过", "Resolution"), 3, 8, false],
-              ] as const
-            ).map(([k, label, min, max, mono]) => (
-              <section key={k} className={"ad-wu-f ad-wu-" + k}>
-                <h4>{label}</h4>
+            <div className="ad-wu-card ad-wu-title-card">
+              <div className="ad-wu-card-h">
+                <h4>{bi("报告标题", "Report Title")}</h4>
+                <span className="ad-wu-card-hint">
+                  {bi("将作为文档目录标题显示", "Shown in Cluster Docs list")}
+                </span>
+              </div>
+              <Input
+                value={draft.title || ""}
+                maxLength={80}
+                placeholder={bi(
+                  "例如：调整 Patroni synchronous_node_count 参数",
+                  "e.g. Tune Patroni synchronous_node_count",
+                )}
+                onChange={(v) => setDraft({ ...draft, title: v })}
+                aria-label={bi("报告标题", "Report title")}
+              />
+            </div>
+
+            <div className="ad-wu-grid">
+              <section className="ad-wu-card ad-wu-symptom">
+                <div className="ad-wu-card-h">
+                  <h4>{bi("变更背景与现象", "Background & Symptom")}</h4>
+                </div>
                 <Input.TextArea
-                  className={mono ? "mono" : ""}
-                  autoSize={{ minRows: min, maxRows: max }}
-                  value={draft[k] || ""}
-                  onChange={(v) => setDraft({ ...draft, [k]: v })}
-                  aria-label={label}
+                  autoSize={{ minRows: 3, maxRows: 6 }}
+                  value={draft.symptom || ""}
+                  placeholder={bi(
+                    "记录变更缘由或现场最初观察到的现象…",
+                    "Describe the change trigger or initial symptom…",
+                  )}
+                  onChange={(v) => setDraft({ ...draft, symptom: v })}
+                  aria-label={bi("变更背景与现象", "Background & Symptom")}
                 />
               </section>
-            ))}
-            {draft.fix && (
-              <p className="ad-wu-tip">
-                {bi(
-                  "命令用 ``` 围起来，会按代码显示。",
-                  "Wrap commands in ``` to render as code blocks.",
+              <section className="ad-wu-card ad-wu-cause">
+                <div className="ad-wu-card-h">
+                  <h4>{bi("原因与变更依据", "Cause & Rationale")}</h4>
+                </div>
+                <Input.TextArea
+                  autoSize={{ minRows: 3, maxRows: 6 }}
+                  value={draft.cause || ""}
+                  placeholder={bi(
+                    "说明根因判定或实施本次变更的技术依据…",
+                    "Explain the root cause or technical rationale…",
+                  )}
+                  onChange={(v) => setDraft({ ...draft, cause: v })}
+                  aria-label={bi("原因与变更依据", "Cause & Rationale")}
+                />
+              </section>
+            </div>
+
+            <section className="ad-wu-card ad-wu-fix">
+              <div className="ad-wu-card-h">
+                <h4>{bi("执行命令与处理经过", "Commands & Resolution")}</h4>
+                <span className="ad-wu-card-hint">
+                  {bi(
+                    "支持用 ``` 包裹代码块，导出 Word 时将按命令框排版",
+                    "Wrap commands in ``` for formatted code blocks in Word export",
+                  )}
+                </span>
+              </div>
+              <Input.TextArea
+                autoSize={{ minRows: 4, maxRows: 10 }}
+                value={draft.fix || ""}
+                placeholder={bi(
+                  "贴入实际执行的命令、目标节点与验证结果…",
+                  "Record executed commands, target hosts, and verification outcome…",
                 )}
-              </p>
-            )}
-            <details className="ad-wu-more">
-              <summary>{bi("关键证据", "Key evidence")}</summary>
-              <Input.TextArea
-                className="mono"
-                autoSize={{ minRows: 2, maxRows: 8 }}
-                value={draft.evidence || ""}
-                onChange={(v) => setDraft({ ...draft, evidence: v })}
-                aria-label={bi("关键证据", "Key evidence")}
+                onChange={(v) => setDraft({ ...draft, fix: v })}
+                aria-label={bi("执行命令与处理经过", "Commands & Resolution")}
               />
-            </details>
-            <details className="ad-wu-more">
-              <summary>
-                {bi("还要跟进的事（一行一条）", "Follow-ups (one per line)")}
-              </summary>
-              <Input.TextArea
-                autoSize={{ minRows: 2, maxRows: 6 }}
-                value={(draft.followups || []).join("\n")}
-                onChange={(v) =>
-                  setDraft({
-                    ...draft,
-                    followups: v.split("\n").filter((x) => x.trim()),
-                  })
-                }
-                aria-label={bi("还要跟进的事", "Follow-ups")}
-              />
-            </details>
+            </section>
+
+            <div className="ad-wu-extras">
+              <details
+                className="ad-wu-more"
+                open={Boolean(draft.evidence && draft.evidence.trim())}
+              >
+                <summary>
+                  <span>{bi("关键证据与终端回显", "Key Evidence & Output")}</span>
+                  <span className="ad-wu-more-badge">
+                    {draft.evidence?.trim()
+                      ? bi("已填充", "Filled")
+                      : bi("可选", "Optional")}
+                  </span>
+                </summary>
+                <Input.TextArea
+                  className="mono"
+                  autoSize={{ minRows: 2, maxRows: 8 }}
+                  value={draft.evidence || ""}
+                  placeholder={bi(
+                    "粘贴关键报错日志、配置对比或验收回显片段…",
+                    "Paste key error logs, config diffs, or verification output…",
+                  )}
+                  onChange={(v) => setDraft({ ...draft, evidence: v })}
+                  aria-label={bi("关键证据与终端回显", "Key Evidence & Output")}
+                />
+              </details>
+              <details
+                className="ad-wu-more"
+                open={Boolean(draft.followups && draft.followups.length > 0)}
+              >
+                <summary>
+                  <span>
+                    {bi("后续跟进事项（一行一条）", "Follow-ups (one per line)")}
+                  </span>
+                  <span className="ad-wu-more-badge">
+                    {draft.followups && draft.followups.length > 0
+                      ? bi(
+                          `${draft.followups.length} 项`,
+                          `${draft.followups.length}`,
+                        )
+                      : bi("可选", "Optional")}
+                  </span>
+                </summary>
+                <Input.TextArea
+                  autoSize={{ minRows: 2, maxRows: 6 }}
+                  value={(draft.followups || []).join("\n")}
+                  placeholder={bi(
+                    "例如：下个维护窗口评估是否将同步策略固化到交付模板…",
+                    "e.g. Review syncing this setting back into the delivery template…",
+                  )}
+                  onChange={(v) =>
+                    setDraft({
+                      ...draft,
+                      followups: v.split("\n").filter((x) => x.trim()),
+                    })
+                  }
+                  aria-label={bi("后续跟进事项", "Follow-ups")}
+                />
+              </details>
+            </div>
+
             <div className="ad-wu-opts">
-              <label>
+              <label className="ad-wu-opt">
                 <Checkbox
                   checked={draft.changed}
                   onChange={(v) => setDraft({ ...draft, changed: v })}
                 >
                   {bi(
-                    "这说明交付本身需要修改",
-                    "This indicates the delivery itself needs changes",
+                    "标记初始交付基线存在偏差（后续需同步优化交付模板或文档）",
+                    "Flag baseline deviation (initial delivery template/docs should be updated)",
                   )}
                 </Checkbox>
               </label>
-              {target.key.startsWith("step:") && (
-                <label>
+              {isRunbookStep && (
+                <label className="ad-wu-opt">
                   <Checkbox checked={markStep} onChange={setMarkStep}>
                     {bi(
-                      "已核对执行结果，同时将这一步标记为完成",
-                      "Verified output; also mark this step as completed",
+                      "已核对执行结果，同时将当前交付步骤标记为完成",
+                      "Verified output; also mark this runbook step as completed",
                     )}
                   </Checkbox>
                 </label>
@@ -2644,6 +3455,25 @@ function ChatWindow({
   );
 }
 
+const getHelloPortal = () =>
+  bi(
+    "我是 Middleware Hub 全站助手。可以随时向我咨询执行节点接入、TLS/CA 证书、SSH 免密与目标 Agent 区别、部署规划，或者直接粘贴终端报错让我帮你定位修复命令。",
+    "I'm your Middleware Hub portal assistant. Ask about execution node setup, TLS/CA certs, SSH vs. Target Agent, deployment planning, or paste terminal errors for instant troubleshooting.",
+  );
+const getSuggestPortal = () => [
+  bi(
+    "执行器和目标 Agent 有什么区别？分别装在哪？",
+    "What's the difference between the execution runner and Target Agent?",
+  ),
+  bi(
+    "检查当前平台的连接地址、证书和执行节点状态",
+    "Check current Hub URLs, TLS cert status, and execution nodes",
+  ),
+  bi(
+    "我只有堡垒机、拿不到目标机密码，怎么实现自动部署？",
+    "How do I automate deployments via bastion when I don't have target passwords?",
+  ),
+];
 const getHelloReview = () =>
   bi(
     "我会先读这份交付的执行手册和项目文件，再按严重程度指出问题：组件组合、单点、参数风险、步骤顺序和验证是否完备。也可以直接问你关心的事。",
@@ -2680,9 +3510,62 @@ const getSuggestComp = () => [
   bi("修复检查报出的错误", "Fix the validation errors"),
   bi("评审这个组件的风险", "Review risks in this component"),
 ];
+const getHelloSec = (global: boolean) =>
+  global
+    ? bi(
+        "我会读取安全中心的实时扫描结果（已区分中间件本体与 OS 底层包），结合受影响集群为你研判漏洞风险与修复优先级；需要登记 VEX 处置或发起修复演练时，会在下方直接给出可一键采纳的卡片。",
+        "I inspect live Security Center findings (separating middleware from OS base packages) to assess exploitability and priority, and propose one-click VEX triage or remediation cards right in chat.",
+      )
+    : bi(
+        "我会读取本集群的真实漏洞、配置基线和交付配置文件，为你研判漏洞在本集群的实际可利用性。讨论明确后可直接输出 VEX 处置、基线豁免或修复演练卡片，你确认采纳后才会写入。",
+        "I inspect this cluster's findings, config baselines, and delivery files to assess real exploitability, and propose one-click VEX triage, baseline waiver, or rehearsal cards for your approval.",
+      );
+const getSuggestSec = (global: boolean) =>
+  global
+    ? [
+        bi("总结当前最优先处理的中间件高危漏洞", "Summarize top-priority middleware CVEs"),
+        bi("哪些 OS 底层包漏洞适合先做 VEX 评估？", "Which OS base CVEs should be triaged first?"),
+        bi("帮我核查受影响最广的软件包并给处置建议", "Check widest-impact packages and suggest actions"),
+      ]
+    : [
+        bi("总结本集群最优先处理的漏洞与基线问题", "Summarize top vulnerabilities & baseline issues"),
+        bi("核对本集群未通过的配置基线，给出加固或豁免建议", "Review failed config baselines and suggest actions"),
+        bi("哪些 OS 底层漏洞在本集群内网环境下可标记已缓解？", "Which OS CVEs can be marked mitigated in this cluster?"),
+      ];
 
 function StepContext({ step }: { step: Record<string, unknown> }) {
   useLang();
+  const kind = String(step.kind || "");
+  if (kind.startsWith("security_")) {
+    const cve = String(step.cve || "");
+    const pkg = String(step.package || "");
+    const ver = String(step.installed_version || "");
+    const sev = String(step.severity || "");
+    const role = String(step.pkg_role || "");
+    const title = String(step.title || cve || pkg);
+    const roleLabel =
+      role === "primary"
+        ? bi("中间件本体", "Middleware")
+        : role === "runtime"
+          ? bi("控制机运行环境", "Runtime")
+          : role === "dependency"
+            ? bi("OS 底层包", "OS Base")
+            : "";
+    return (
+      <div className="ad-ctx ad-ctx-sec">
+        <span className="ad-ctx-l">{bi("安全研判", "Security")}</span>
+        <b title={title}>{title}</b>
+        {sev && <span className={`ad-tag sec-tag-${sev.toLowerCase()}`}>{sev}</span>}
+        {roleLabel && <span className="ad-tag">{roleLabel}</span>}
+        {pkg && (
+          <span className="ad-ctx-h">
+            {pkg}
+            {ver ? ` ${ver}` : ""}
+          </span>
+        )}
+      </div>
+    );
+  }
   const title = String(step.title || "");
   const phase = step.phase ? String(step.phase) : "";
   const effect = String(step.effect || "");
@@ -2892,6 +3775,324 @@ function ChatErrorDiag({
   );
 }
 
+const RAW_BROWSER_NET_RE =
+  /^(network error|failed to fetch|load failed|networkerror when attempting to fetch resource|the internet connection appears to be offline|fetch failed|err_network|err_connection|connection reset|econnreset)$/i;
+
+export function classifyChatError(
+  text: string,
+  diag?: AICallDiag,
+  kind?: ChatErrorKind,
+  rawError?: string,
+): {
+  kind: ChatErrorKind;
+  tone: "bad" | "warn";
+  title: string;
+  summary: string;
+  hint: string;
+  showSettings: boolean;
+  raw?: string;
+} {
+  const clean = (text || "").trim();
+  const low = clean.toLowerCase();
+  const rc = (diag?.reason_code || "").toLowerCase();
+  const st = diag?.http_status;
+
+  if (kind === "hub_network" || (!diag && RAW_BROWSER_NET_RE.test(clean))) {
+    return {
+      kind: "hub_network",
+      tone: "warn",
+      title: bi(
+        "无法连接 Middleware Hub 平台后端",
+        "Cannot reach Middleware Hub backend",
+      ),
+      summary: bi(
+        "浏览器与 Middleware Hub 平台服务之间的连接断开，请求未能送达或未收到响应。",
+        "The browser lost connection to the Middleware Hub server before the request completed.",
+      ),
+      hint: bi(
+        "平台服务可能正在重启，或当前本地网络波动；等待服务恢复后点击「重试」即可继续。",
+        "The Hub server may be restarting or your local network dropped; click Retry once it is back.",
+      ),
+      showSettings: false,
+      raw: rawError || (RAW_BROWSER_NET_RE.test(clean) ? clean : undefined),
+    };
+  }
+
+  if (kind === "stream_interrupted") {
+    return {
+      kind: "stream_interrupted",
+      tone: "warn",
+      title: bi(
+        "与 Middleware Hub 的流式连接意外中断",
+        "Streaming connection to Middleware Hub interrupted",
+      ),
+      summary: bi(
+        "回答尚未完成时，浏览器与 Middleware Hub 后端的连接被中途切断。",
+        "The streaming connection to Middleware Hub was cut off before the reply finished.",
+      ),
+      hint: bi(
+        "平台重启、反向代理超时或网络闪断都会导致流式中断；请点击「重试」重新生成。",
+        "A server restart, proxy timeout, or brief network drop can interrupt streaming; click Retry to regenerate.",
+      ),
+      showSettings: false,
+      raw: rawError,
+    };
+  }
+
+  if (
+    kind === "config" ||
+    /未开启|没有可用的模型供应商|尚未配置|not enabled|no available model|provider.*not configured/i.test(
+      clean,
+    )
+  ) {
+    return {
+      kind: "config",
+      tone: "warn",
+      title: bi("AI 功能或模型尚未就绪", "AI feature or model not ready"),
+      summary: clean,
+      hint: bi(
+        "请在「设置 → AI」中确认对应功能开关已开启，并配置了可用的模型供应商。",
+        "Check Settings → AI to ensure the feature is enabled and a model provider is configured.",
+      ),
+      showSettings: true,
+    };
+  }
+
+  if (
+    kind === "auth" ||
+    st === 401 ||
+    st === 403 ||
+    /401|403|api key|invalid_api_key|unauthorized|authentication|鉴权|密钥|无权限/i.test(
+      clean,
+    )
+  ) {
+    return {
+      kind: "auth",
+      tone: "bad",
+      title: bi("AI 模型鉴权或权限失败", "AI model authentication failed"),
+      summary: clean,
+      hint: bi(
+        "请核对供应商的 API Key 是否正确、是否过期，以及该密钥是否有权限调用当前所选模型。",
+        "Verify the provider API key is valid and authorized to call the selected model.",
+      ),
+      showSettings: true,
+    };
+  }
+
+  if (
+    kind === "rate_limit" ||
+    st === 429 ||
+    /429|rate limit|quota|上限|限流|too many requests|余额不足|insufficient_quota/i.test(
+      clean,
+    )
+  ) {
+    return {
+      kind: "rate_limit",
+      tone: "warn",
+      title: bi("AI 请求受限或额度已满", "AI request rate-limited or quota reached"),
+      summary: clean,
+      hint: bi(
+        "可稍等片刻后点击「重试」，或在下方切换其他备用模型继续对话。",
+        "Wait a moment and click Retry, or switch to another available model below.",
+      ),
+      showSettings: true,
+    };
+  }
+
+  if (
+    kind === "gateway_network" ||
+    rc === "network_error" ||
+    rc === "timeout" ||
+    st === 502 ||
+    st === 503 ||
+    st === 504 ||
+    /dial tcp|connection refused|connectex|i\/o timeout|context deadline|timed out|超时|连不上|无法连接|network_error|502|503|504|eof|bad gateway/i.test(
+      low,
+    )
+  ) {
+    const isTimeout =
+      rc === "timeout" || /timeout|timed out|deadline|超时/i.test(low);
+    return {
+      kind: "gateway_network",
+      tone: "bad",
+      title: isTimeout
+        ? bi("AI 模型网关响应超时", "AI model gateway timed out")
+        : bi("AI 模型网关连接失败", "Failed to reach AI model gateway"),
+      summary: clean,
+      hint: bi(
+        "Middleware Hub 后端无法连通配置的模型网关（并非本平台宕机）；请检查网关地址、端口与网络连通性，或切换其他可用模型后重试。",
+        "Middleware Hub could not reach the configured model gateway; check the gateway URL/network in Settings → AI or switch to another model.",
+      ),
+      showSettings: true,
+    };
+  }
+
+  return {
+    kind: kind || "model_error",
+    tone: "bad",
+    title: bi("AI 模型调用失败", "AI model call failed"),
+    summary: clean || bi("本次模型调用返回了异常结果", "The model request returned an error"),
+    hint: bi(
+      "你可以点击「重试」再试一次，或展开诊断明细核对接口协议与上游返回信息。",
+      "Click Retry to try again, or inspect diagnostics to check the API protocol and upstream response.",
+    ),
+    showSettings: Boolean(diag),
+    raw: rawError,
+  };
+}
+
+export function ChatErrorCard({
+  text,
+  diag,
+  kind,
+  rawError,
+  at,
+  onRetry,
+  busy,
+  variant = "standalone",
+}: {
+  text: string;
+  diag?: AICallDiag;
+  kind?: ChatErrorKind;
+  rawError?: string;
+  at?: string;
+  onRetry?: () => void;
+  busy?: boolean;
+  variant?: "standalone" | "bubble" | "hero";
+}) {
+  useLang();
+  const [openDiag, setOpenDiag] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const info = classifyChatError(text, diag, kind, rawError);
+  const modelLabel = [diag?.provider, diag?.model].filter(Boolean).join(" · ");
+  const hasDetail = Boolean(diag || info.raw);
+  return (
+    <div
+      className={`ad-errcard tone-${info.tone} ${variant === "bubble" ? "in-bubble" : variant === "hero" ? "in-hero" : ""}`}
+      role="alert"
+    >
+      <div className="ad-errcard-head">
+        <span className="ad-errcard-ic" aria-hidden>
+          {info.tone === "warn" ? (
+            <IconExclamationCircleFill />
+          ) : (
+            <IconCloseCircleFill />
+          )}
+        </span>
+        <span className="ad-errcard-title">{info.title}</span>
+        {modelLabel && (
+          <span className="ad-errcard-model" title={modelLabel}>
+            {modelLabel}
+          </span>
+        )}
+        {at && (
+          <time className="ad-errcard-time" title={fullTime(at)}>
+            {ago(at)}
+          </time>
+        )}
+      </div>
+      <p className="ad-errcard-summary">{info.summary}</p>
+      <p className="ad-errcard-hint">{info.hint}</p>
+      <div className="ad-errcard-acts">
+        {onRetry && (
+          <button
+            type="button"
+            className="ad-errcard-btn primary"
+            disabled={busy}
+            onClick={onRetry}
+          >
+            <IconRefresh /> {bi("重试", "Retry")}
+          </button>
+        )}
+        {hasDetail && (
+          <button
+            type="button"
+            className="ad-errcard-btn"
+            aria-expanded={openDiag}
+            onClick={() => setOpenDiag((v) => !v)}
+          >
+            {openDiag
+              ? bi("收起诊断详情", "Hide details")
+              : diag
+                ? bi("展开网关诊断", "Show diagnostics")
+                : bi("查看技术详情", "Technical details")}
+            <IconDown className={openDiag ? "ad-flip" : ""} />
+          </button>
+        )}
+        {!diag && (
+          <button
+            type="button"
+            className="ad-errcard-btn"
+            onClick={() => {
+              copy(
+                [info.title, info.summary, info.raw ? `detail: ${info.raw}` : ""]
+                  .filter(Boolean)
+                  .join("\n"),
+              );
+              setCopied(true);
+              window.setTimeout(() => setCopied(false), 1400);
+            }}
+          >
+            {copied ? <IconCheck /> : <IconCopy />}{" "}
+            {copied ? bi("已复制", "Copied") : bi("复制错误", "Copy error")}
+          </button>
+        )}
+        {info.showSettings && can("ai.settings") && (
+          <button
+            type="button"
+            className="ad-errcard-btn"
+            onClick={() => go({ name: "settings", id: "ai" })}
+          >
+            <IconSettings /> {bi("前往设置 → AI", "Settings → AI")}
+          </button>
+        )}
+      </div>
+      {openDiag && diag && <ChatErrorDiag diag={diag} errText={text} />}
+      {openDiag && !diag && info.raw && (
+        <pre className="ad-errcard-raw">{info.raw}</pre>
+      )}
+    </div>
+  );
+}
+
+export function UnansweredTurnCard({
+  onRetry,
+  busy,
+}: {
+  onRetry?: () => void;
+  busy?: boolean;
+}) {
+  useLang();
+  return (
+    <div className="ad-unanswered" role="status">
+      <div className="ad-unanswered-body">
+        <span className="ad-unanswered-ic" aria-hidden>
+          <IconExclamationCircleFill />
+        </span>
+        <div className="ad-unanswered-text">
+          <b>{bi("本轮未收到 AI 回复", "No AI reply received for this turn")}</b>
+          <span>
+            {bi(
+              "上次请求可能因模型网关异常、网络中断或平台服务重启而中止，未留下回复内容。",
+              "The previous request may have stopped due to a gateway error, network drop, or server restart.",
+            )}
+          </span>
+        </div>
+      </div>
+      {onRetry && (
+        <button
+          type="button"
+          className="ad-errcard-btn primary"
+          disabled={busy}
+          onClick={onRetry}
+        >
+          <IconRefresh /> {bi("重新生成回复", "Retry reply")}
+        </button>
+      )}
+    </div>
+  );
+}
+
 /** Sends a message and folds the events of the answer into `cur` as they arrive; `push` says to draw it again. */
 export async function streamChat(
   url: string,
@@ -2902,22 +4103,46 @@ export async function streamChat(
   onProposal?: (id: string) => Promise<unknown>,
   onOther?: (e: { t: string; v?: unknown; target?: unknown }) => void,
 ) {
-  const r = await fetch(withLang(url), {
-    method: "POST",
-    credentials: "same-origin",
-    signal,
-    headers: {
-      "Content-Type": "application/json",
-      "X-CSRF-Token": csrfToken(),
-      "X-Lang": getLang(),
-    },
-    body: JSON.stringify(body),
-  });
+  let r: Response;
+  try {
+    r = await fetch(withLang(url), {
+      method: "POST",
+      credentials: "same-origin",
+      signal,
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRF-Token": csrfToken(),
+        "X-Lang": getLang(),
+      },
+      body: JSON.stringify(body),
+    });
+  } catch (e) {
+    if ((e as Error)?.name === "AbortError") throw e;
+    const raw = (e as Error)?.message || String(e);
+    const errObj = new Error(
+      bi(
+        "无法连接到 Middleware Hub 平台后端，请求未发出或连接中断",
+        "Unable to reach Middleware Hub server; request failed or connection dropped",
+      ),
+    ) as ChatStreamError;
+    errObj.kind = "hub_network";
+    errObj.rawError = raw;
+    throw errObj;
+  }
   if (!r.ok || !r.body) {
     const d = await r.json().catch(() => ({}));
+    const proxyDown =
+      !d?.error && (r.status === 502 || r.status === 503 || r.status === 504);
     const errObj = new Error(
-      d.error || bi(`请求失败（${r.status}）`, `Request failed (${r.status})`),
+      d.error ||
+        (proxyDown
+          ? bi(
+              `Middleware Hub 后端服务暂时不可用（HTTP ${r.status}），可能正在重启`,
+              `Middleware Hub server is temporarily unavailable (HTTP ${r.status})`,
+            )
+          : bi(`请求失败（HTTP ${r.status}）`, `Request failed (HTTP ${r.status})`)),
     ) as ChatStreamError;
+    if (proxyDown) errObj.kind = "hub_network";
     if (d && typeof d === "object" && d.diag) {
       errObj.diag = d.diag as AICallDiag;
     }
@@ -2926,115 +4151,193 @@ export async function streamChat(
   const rd = r.body.getReader();
   const dec = new TextDecoder();
   let buf = "";
-  for (;;) {
-    const { done, value } = await rd.read();
-    if (done) break;
-    buf += dec.decode(value, { stream: true });
-    let i;
-    while ((i = buf.indexOf("\n\n")) >= 0) {
-      const line = buf.slice(0, i).trim();
-      buf = buf.slice(i + 2);
-      if (!line.startsWith("data:")) continue;
-      const e = JSON.parse(line.slice(5));
-      switch (e.t) {
-        case "reset":
-          cur.text = "";
-          cur.steps = [];
-          cur.tools = [];
-          cur.thinking = "";
-          cur.looking = true;
-          cur.model = e.model;
-          break;
-        case "think":
-          cur.thinking += e.v;
-          cur.looking = true;
-          break;
-        case "thinkdone":
-          cur.steps.push({ kind: "think", text: cur.thinking, ms: e.ms });
-          cur.thinking = "";
-          break;
-        case "thought-hidden":
-          cur.steps.push({
-            kind: "think",
-            summary: bi(
-              `用了 ${e.n} 个思考 token，这个模型不公开思考内容`,
-              `Used ${e.n} thinking tokens (reasoning hidden by model)`,
-            ),
-            ms: e.ms,
-          });
-          break;
-        case "text":
-          cur.text += e.v;
-          cur.looking = false;
-          break;
-        case "thought":
-          // what was streamed as the answer was in fact the assistant thinking aloud before it looked
-          cur.steps.push({ kind: "thought", text: e.v });
-          cur.text = "";
-          cur.looking = true;
-          break;
-        case "tool":
-          cur.tools.push(e.v);
-          cur.looking = true;
-          break;
-        case "step":
-          cur.steps.push({
-            kind: e.kind || "tool",
-            id: e.id,
-            name: e.name,
-            args: e.args,
-            running: true,
-          });
-          break;
-        case "stepdone": {
-          const st = cur.steps.find((x) => x.id === e.id);
-          if (st)
-            Object.assign(st, {
-              running: false,
-              summary: e.summary,
+  let sawDone = false;
+  let sseErr: ChatStreamError | null = null;
+  try {
+    for (;;) {
+      const { done, value } = await rd.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf("\n\n")) >= 0) {
+        const line = buf.slice(0, i).trim();
+        buf = buf.slice(i + 2);
+        if (!line.startsWith("data:")) continue;
+        const e = JSON.parse(line.slice(5));
+        switch (e.t) {
+          case "done":
+            sawDone = true;
+            onOther?.(e);
+            break;
+          case "reset":
+            cur.text = "";
+            cur.steps = [];
+            cur.tools = [];
+            cur.rehearsals = undefined;
+            cur.knowledges = undefined;
+            cur.components = undefined;
+            cur.thinking = "";
+            cur.looking = true;
+            cur.model = e.model;
+            break;
+          case "think":
+            cur.thinking += e.v;
+            cur.looking = true;
+            break;
+          case "thinkdone":
+            cur.steps.push({ kind: "think", text: cur.thinking, ms: e.ms });
+            cur.thinking = "";
+            break;
+          case "thought-hidden":
+            cur.steps.push({
+              kind: "think",
+              summary: bi(
+                `用了 ${e.n} 个思考 token，这个模型不公开思考内容`,
+                `Used ${e.n} thinking tokens (reasoning hidden by model)`,
+              ),
               ms: e.ms,
-              ok: e.ok,
-              preview: e.preview,
             });
-          break;
+            break;
+          case "text":
+            cur.text += e.v;
+            cur.looking = false;
+            break;
+          case "thought":
+            // what was streamed as the answer was in fact the assistant thinking aloud before it looked
+            cur.steps.push({ kind: "thought", text: e.v });
+            cur.text = "";
+            cur.looking = true;
+            break;
+          case "tool":
+            cur.tools.push(e.v);
+            cur.looking = true;
+            break;
+          case "step":
+            cur.steps.push({
+              kind: e.kind || "tool",
+              id: e.id,
+              name: e.name,
+              args: e.args,
+              running: true,
+            });
+            break;
+          case "stepdone": {
+            const st = cur.steps.find((x) => x.id === e.id);
+            if (st)
+              Object.assign(st, {
+                running: false,
+                summary: e.summary,
+                ms: e.ms,
+                ok: e.ok,
+                preview: e.preview,
+              });
+            break;
+          }
+          case "notice":
+            cur.notice = e.v;
+            break;
+          case "files":
+            cur.files = [...(cur.files || []), ...e.v];
+            break;
+          case "ask":
+            cur.ask = e.v;
+            break;
+          case "rehearsal":
+            if (e.v) {
+              cur.rehearsals = [
+                ...(cur.rehearsals || []),
+                e.v as RehearsalProposal,
+              ];
+            }
+            break;
+          case "knowledge":
+            if (e.v) {
+              cur.knowledges = [
+                ...(cur.knowledges || []),
+                e.v as KnowledgeProposal,
+              ];
+            }
+            break;
+          case "component_suggest":
+            if (e.v) {
+              cur.components = [
+                ...(cur.components || []),
+                e.v as ComponentSuggestion,
+              ];
+            }
+            break;
+          case "sandbox_confirm":
+            cur.sandboxConfirms = [
+              ...(cur.sandboxConfirms || []).filter((x) => x.id !== e.v?.id),
+              e.v as SandboxConfirm,
+            ];
+            break;
+          case "sandbox_confirmed":
+            cur.sandboxConfirms = (cur.sandboxConfirms || []).filter(
+              (x) => x.id !== e.id,
+            );
+            break;
+          case "proposal":
+            cur.made.push(e.v);
+            await onProposal?.(e.v);
+            break;
+          case "error": {
+            const errObj = new Error(
+              e.v || bi("模型调用失败", "Model call failed"),
+            ) as ChatStreamError;
+            if (e.diag) errObj.diag = e.diag as AICallDiag;
+            if (e.saved) errObj.saved = true;
+            sseErr = errObj;
+            throw errObj;
+          }
+          default:
+            // events only one page understands (the new-delivery form is told what to fill in)
+            onOther?.(e);
         }
-        case "notice":
-          cur.notice = e.v;
-          break;
-        case "files":
-          cur.files = [...(cur.files || []), ...e.v];
-          break;
-        case "ask":
-          cur.ask = e.v;
-          break;
-        case "sandbox_confirm":
-          cur.sandboxConfirms = [
-            ...(cur.sandboxConfirms || []).filter((x) => x.id !== e.v?.id),
-            e.v as SandboxConfirm,
-          ];
-          break;
-        case "sandbox_confirmed":
-          cur.sandboxConfirms = (cur.sandboxConfirms || []).filter(
-            (x) => x.id !== e.id,
-          );
-          break;
-        case "proposal":
-          cur.made.push(e.v);
-          await onProposal?.(e.v);
-          break;
-        case "error": {
-          const errObj = new Error(
-            e.v || bi("模型调用失败", "Model call failed"),
-          ) as ChatStreamError;
-          if (e.diag) errObj.diag = e.diag as AICallDiag;
-          throw errObj;
-        }
-        default:
-          // events only one page understands (the new-delivery form is told what to fill in)
-          onOther?.(e);
+        push();
       }
-      push();
     }
+  } catch (e) {
+    if ((e as Error)?.name === "AbortError") throw e;
+    if (
+      (sseErr && e === sseErr) ||
+      (e as ChatStreamError)?.diag ||
+      (e as ChatStreamError)?.saved ||
+      (e as ChatStreamError)?.kind
+    ) {
+      throw e;
+    }
+    const raw = (e as Error)?.message || String(e);
+    if (e instanceof TypeError || RAW_BROWSER_NET_RE.test(raw.trim()) || /network|stream|aborted|reset|eof/i.test(raw)) {
+      const errObj = new Error(
+        bi(
+          "与 Middleware Hub 平台后端的流式连接意外中断，未收到完整回复",
+          "Streaming connection to Middleware Hub was interrupted before the reply completed",
+        ),
+      ) as ChatStreamError;
+      errObj.kind = "stream_interrupted";
+      errObj.rawError = raw;
+      throw errObj;
+    }
+    throw e;
+  }
+  if (
+    !sawDone &&
+    !cur.text &&
+    !cur.ask &&
+    !cur.made.length &&
+    !(cur.rehearsals && cur.rehearsals.length) &&
+    !(cur.knowledges && cur.knowledges.length) &&
+    !(cur.components && cur.components.length)
+  ) {
+    const errObj = new Error(
+      bi(
+        "与 Middleware Hub 平台后端的连接提前关闭，未收到回复内容",
+        "Connection to Middleware Hub closed unexpectedly with no reply",
+      ),
+    ) as ChatStreamError;
+    errObj.kind = "stream_interrupted";
+    throw errObj;
   }
 }
 
@@ -3065,13 +4368,17 @@ export function Bubble({
   decide,
   comp,
   answer,
+  onRetry,
+  busy,
 }: {
   answer?: (text: string) => void;
+  onRetry?: () => void;
+  busy?: boolean;
   m: Msg;
   jobBase: string;
   props: Record<string, StepProposal | CompProposal>;
   deciding: string;
-  decide: (id: string, v: "accept" | "reject") => void;
+  decide: (id: string, v: "accept" | "reject", body?: Record<string, unknown>) => void;
   comp: boolean;
 }) {
   useLang();
@@ -3143,8 +4450,9 @@ export function Bubble({
         )}
       </div>
     );
+  const isErrorOnly = Boolean(m.error && !m.text?.trim());
   return (
-    <div className="ad-msg ai">
+    <div className={`ad-msg ai ${isErrorOnly ? "is-err" : ""}`}>
       <span className="ad-avatar" aria-hidden>
         <AIEmblem size={24} />
       </span>
@@ -3155,8 +4463,33 @@ export function Bubble({
           <Activity tools={m.tools} />
         ) : null}
         {m.text && <Markdown text={m.text} />}
+        {m.error && (
+          <ChatErrorCard
+            text={m.error}
+            diag={m.error_diag}
+            at={isErrorOnly ? m.at : undefined}
+            onRetry={onRetry}
+            busy={busy}
+            variant="bubble"
+          />
+        )}
         {m.files && m.files.length > 0 && <MadeFiles files={m.files} />}
         {m.ask && <AskCard ask={m.ask} answer={answer} />}
+        {(m.rehearsals || []).map((r, idx) => (
+          <RehearsalLaunchCard
+            key={`${r.cluster_id}-${r.title}-${idx}`}
+            r={r}
+          />
+        ))}
+        {(m.knowledges || []).map((k, idx) => (
+          <KnowledgeCard key={`kb-${k.title}-${idx}`} k={k} />
+        ))}
+        {(m.components || []).map((c, idx) => (
+          <SuggestInlineCard
+            key={`comp-${c.component}-${c.title}-${idx}`}
+            c={c}
+          />
+        ))}
         {(m.proposals || []).map(
           (id) =>
             props[id] && (
@@ -3171,24 +4504,26 @@ export function Bubble({
               />
             ),
         )}
-        <div className="ad-acts">
-          <button
-            type="button"
-            onClick={() => {
-              copy(m.text);
-              setCopied(true);
-              window.setTimeout(() => setCopied(false), 1400);
-            }}
-          >
-            {copied ? <IconCheck /> : <IconCopy />}{" "}
-            {copied ? bi("已复制", "Copied") : bi("复制", "Copy")}
-          </button>
-          {m.at && (
-            <time title={fullTime(m.at)} className="ad-time">
-              {ago(m.at)}
-            </time>
-          )}
-        </div>
+        {!isErrorOnly && (
+          <div className="ad-acts">
+            <button
+              type="button"
+              onClick={() => {
+                copy(m.text);
+                setCopied(true);
+                window.setTimeout(() => setCopied(false), 1400);
+              }}
+            >
+              {copied ? <IconCheck /> : <IconCopy />}{" "}
+              {copied ? bi("已复制", "Copied") : bi("复制", "Copy")}
+            </button>
+            {m.at && (
+              <time title={fullTime(m.at)} className="ad-time">
+                {ago(m.at)}
+              </time>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -3579,7 +4914,7 @@ export function LiveBubble({
   live: Live;
   props: Record<string, StepProposal | CompProposal>;
   deciding: string;
-  decide: (id: string, v: "accept" | "reject") => void;
+  decide: (id: string, v: "accept" | "reject", body?: Record<string, unknown>) => void;
   comp: boolean;
 }) {
   useLang();
@@ -3617,6 +4952,417 @@ export function LiveBubble({
 
 /* ---------------------------------------------------------------- proposals */
 
+function openComponentWorkbenchPrefill(
+  comp: string,
+  title: string,
+  detail: string,
+  why: string,
+): boolean {
+  const child = window.open("about:blank", "_blank");
+  if (!child) {
+    Message.warning(
+      bi(
+        "浏览器拦截了新标签页，请允许弹出窗口后重试；当前页面已保留。",
+        "Pop-up blocked by browser; allow pop-ups and retry (current page is preserved).",
+      ),
+    );
+    return false;
+  }
+  try {
+    child.sessionStorage.setItem(
+      "mh-wb-prefill",
+      JSON.stringify({
+        name: comp,
+        text: bi(
+          [
+            "这次实践识别到一个组件应改进/补充的能力或检查项。",
+            why ? "根因：" + why : "",
+            "建议：" + title,
+            detail ? "详情：" + detail : "",
+            "请先读当前组件的相关文件，用 edits 提议最小修改并通过检查；不要直接发布。",
+          ]
+            .filter(Boolean)
+            .join("\n"),
+          [
+            "Identified a component improvement or missing capability/check.",
+            why ? "Root cause: " + why : "",
+            "Suggestion: " + title,
+            detail ? "Details: " + detail : "",
+            "Read the relevant component files first, propose minimal edits that pass checks, and do not publish directly.",
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        ),
+      }),
+    );
+    child.opener = null;
+    child.location.replace(
+      window.location.origin +
+        window.location.pathname +
+        "#/components/" +
+        encodeURIComponent(comp) +
+        "/edit/overview",
+    );
+    return true;
+  } catch {
+    child.close();
+    Message.error(
+      bi(
+        "无法打开组件工作台，请重试；当前页面未离开。",
+        "Unable to open Component Workbench; please retry.",
+      ),
+    );
+    return false;
+  }
+}
+
+function SuggestInlineCard({ c }: { c: ComponentSuggestion }) {
+  useLang();
+  const [opened, setOpened] = useState(false);
+  const open = () => {
+    if (
+      openComponentWorkbenchPrefill(c.component, c.title, c.detail, c.why || "")
+    ) {
+      setOpened(true);
+    }
+  };
+  return (
+    <article
+      className={`ad-card ad-card-comp${opened ? " s-accepted" : ""}`}
+      role="region"
+      aria-label={bi("组件改进建议", "Component improvement")}
+    >
+      <header>
+        <span className="ad-card-k">
+          {bi("组件改进建议", "Component improvement")}
+        </span>
+        <span className="ad-card-m">{c.component}</span>
+      </header>
+      <p className="ad-card-t">{c.title}</p>
+      {c.detail && <p className="ad-card-d">{c.detail}</p>}
+      {c.why && (
+        <dl className="ad-card-dl">
+          <dt>{bi("缘由", "Reason")}</dt>
+          <dd>{c.why}</dd>
+        </dl>
+      )}
+      <div className="ad-card-acts">
+        {can("component.edit") ? (
+          <Button size="small" type="primary" onClick={open}>
+            {opened
+              ? bi("再次打开组件工作台", "Open Component Workbench again")
+              : bi("新标签页打开，让 AI 起草", "Open in new tab for AI draft")}
+          </Button>
+        ) : (
+          <span className="faint small">
+            {bi(
+              "需要有组件编辑权限的人处理",
+              "Requires component edit permission",
+            )}
+          </span>
+        )}
+      </div>
+    </article>
+  );
+}
+
+function KnowledgeCard({
+  k,
+  status,
+  decidedBy,
+  busy,
+  onAccept,
+  onReject,
+}: {
+  k: KnowledgeProposal;
+  status?: string;
+  decidedBy?: string;
+  busy?: boolean;
+  onAccept?: (body: { scope: "personal" | "team"; title: string; content: string }) => void;
+  onReject?: () => void;
+}) {
+  useLang();
+  const [showBody, setShowBody] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [title, setTitle] = useState(k.title || "");
+  const [content, setContent] = useState(k.content || "");
+  const [saving, setSaving] = useState<"" | "personal" | "team">("");
+  const [savedPersonalId, setSavedPersonalId] = useState(k.kb_id || "");
+  const [savedTeamId, setSavedTeamId] = useState(k.team_doc_id || "");
+  const [savedSubId, setSavedSubId] = useState(k.submission_id || "");
+
+  useEffect(() => {
+    setTitle(k.title || "");
+    setContent(k.content || "");
+    if (k.kb_id) setSavedPersonalId(k.kb_id);
+    if (k.team_doc_id) setSavedTeamId(k.team_doc_id);
+    if (k.submission_id) setSavedSubId(k.submission_id);
+  }, [k.title, k.content, k.kb_id, k.team_doc_id, k.submission_id]);
+
+  const isProposal = status !== undefined;
+  const done = isProposal && status !== "pending";
+  const canManageTeam = can("kb.manage");
+  const canSubmitTeam = can("kb.submit");
+  const preferTeam = k.scope === "team" && (canManageTeam || canSubmitTeam);
+
+  const saveDirect = async (target: "personal" | "team") => {
+    const cleanTitle = title.trim() || k.title;
+    const cleanText = content.trim() || k.content;
+    if (!cleanTitle || !cleanText) {
+      Message.warning(bi("标题和正文不能为空", "Title and content cannot be empty"));
+      return;
+    }
+    if (onAccept) {
+      onAccept({ scope: target, title: cleanTitle, content: cleanText });
+      setEditing(false);
+      return;
+    }
+    setSaving(target);
+    try {
+      if (target === "personal") {
+        const res = await api<{ id: string; title: string }>("/api/me/kb", {
+          method: "POST",
+          body: JSON.stringify({ title: cleanTitle, text: cleanText }),
+        });
+        setSavedPersonalId(res.id || "saved");
+        setEditing(false);
+        Message.success(bi("已存入「我的知识库」", "Saved to your personal Knowledge Base"));
+      } else if (canManageTeam) {
+        const res = await api<{ id: string; title: string }>("/api/kb", {
+          method: "POST",
+          body: JSON.stringify({
+            title: cleanTitle,
+            text: cleanText,
+            source: k.source || "",
+          }),
+        });
+        setSavedTeamId(res.id || "saved");
+        setEditing(false);
+        Message.success(bi("已直接发布到团队知识库", "Published to team Knowledge Base"));
+      } else {
+        const res = await api<{ id: string }>("/api/kb/submissions", {
+          method: "POST",
+          body: JSON.stringify({
+            title: cleanTitle,
+            text: cleanText,
+            source: k.source || "",
+          }),
+        });
+        setSavedSubId(res.id || "submitted");
+        setEditing(false);
+        Message.success(
+          bi(
+            "已提交团队知识库审核，管理员通过后全员可用",
+            "Submitted to team Knowledge Base for admin review",
+          ),
+        );
+      }
+    } catch (e) {
+      err(e);
+    } finally {
+      setSaving("");
+    }
+  };
+
+  const savedInline = Boolean(savedPersonalId || savedTeamId || savedSubId);
+
+  return (
+    <article
+      className={`ad-card ad-card-kb${status ? ` s-${status}` : savedInline ? " s-accepted" : ""}`}
+      role="region"
+      aria-label={bi("写入知识库总结卡片", "Knowledge base summary card")}
+    >
+      <header className="ad-kb-head">
+        <span className="ad-kb-badge">
+          <IconBook />
+          <span>{bi("知识库总结卡片", "KB Summary Card")}</span>
+        </span>
+        <div className="ad-kb-meta">
+          <span className="ad-kb-scope">
+            {k.scope === "team"
+              ? bi("推荐：团队知识库", "Suggested: Team KB")
+              : bi("推荐：我的知识库", "Suggested: My KB")}
+          </span>
+          {k.source && <span className="ad-kb-src">{k.source}</span>}
+        </div>
+      </header>
+
+      {editing ? (
+        <div className="ad-kb-edit">
+          <Input
+            size="small"
+            value={title}
+            onChange={setTitle}
+            placeholder={bi("知识库文档标题", "Document title")}
+            aria-label={bi("知识库文档标题", "Document title")}
+          />
+          <Input.TextArea
+            value={content}
+            onChange={setContent}
+            autoSize={{ minRows: 5, maxRows: 14 }}
+            className="mono"
+            placeholder={bi("Markdown 正文内容", "Markdown content")}
+            aria-label={bi("知识库正文内容", "Document content")}
+          />
+        </div>
+      ) : (
+        <>
+          <p className="ad-card-t">{title}</p>
+          {k.summary && <p className="ad-card-d">{k.summary}</p>}
+          <div className="ad-rh-goal">
+            <button
+              type="button"
+              className="ad-rh-goal-toggle"
+              aria-expanded={showBody}
+              onClick={() => setShowBody((v) => !v)}
+            >
+              <span>
+                {showBody
+                  ? bi("收起知识库正文预览", "Hide document preview")
+                  : bi("展开预览知识库正文", "Preview full KB document")}
+              </span>
+              <IconDown className={showBody ? "ad-flip" : ""} />
+            </button>
+            {showBody && (
+              <div className="ad-kb-body">
+                <Markdown text={content} />
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {done ? (
+        <div className={`ad-card-done s-${status}`}>
+          <span className="ad-card-verdict">
+            {status === "accepted" ? <IconCheck /> : null}
+            <span>
+              {decidedBy}{" "}
+              {status === "accepted"
+                ? k.team_doc_id
+                  ? bi("已发布到团队知识库", "published to team KB")
+                  : k.submission_id
+                    ? bi("已提交团队知识库审核", "submitted to team KB review")
+                    : bi("已存入「我的知识库」", "saved to personal KB")
+                : bi("已忽略", "dismissed")}
+            </span>
+          </span>
+          {status === "accepted" && (
+            <button
+              type="button"
+              className="link"
+              onClick={() =>
+                go(
+                  k.team_doc_id
+                    ? { name: "kb", id: k.team_doc_id }
+                    : k.kb_id
+                      ? { name: "kb", id: `my-${k.kb_id}` }
+                      : { name: "kb" },
+                )
+              }
+            >
+              {bi("前往知识库查看", "Open in Knowledge Base")}
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="ad-card-acts">
+          {(canManageTeam || canSubmitTeam) && (
+            <Button
+              size="small"
+              type={preferTeam ? "primary" : "outline"}
+              loading={busy || saving === "team"}
+              disabled={busy || saving !== "" || Boolean(savedTeamId || savedSubId)}
+              onClick={() => void saveDirect("team")}
+            >
+              {savedTeamId
+                ? bi("已发布到团队知识库", "Published to team KB")
+                : savedSubId
+                  ? bi("已提交审核", "Submitted for review")
+                  : canManageTeam
+                    ? bi("发布到团队知识库", "Publish to Team KB")
+                    : bi("提交到团队知识库（需审核）", "Submit to Team KB")}
+            </Button>
+          )}
+          <Button
+            size="small"
+            type={preferTeam ? "outline" : "primary"}
+            loading={busy || saving === "personal"}
+            disabled={busy || saving !== "" || Boolean(savedPersonalId)}
+            onClick={() => void saveDirect("personal")}
+          >
+            {savedPersonalId
+              ? bi("已存入我的知识库", "Saved to My KB")
+              : bi("存入我的知识库", "Save to My KB")}
+          </Button>
+          <Button
+            size="small"
+            type="text"
+            icon={<IconEdit />}
+            disabled={busy || saving !== ""}
+            onClick={() => setEditing((v) => !v)}
+          >
+            {editing ? bi("完成微调", "Done editing") : bi("微调内容", "Edit")}
+          </Button>
+          {savedInline && (
+            <button
+              type="button"
+              className="link"
+              onClick={() =>
+                go(
+                  savedTeamId && savedTeamId !== "saved"
+                    ? { name: "kb", id: savedTeamId }
+                    : savedPersonalId && savedPersonalId !== "saved"
+                      ? { name: "kb", id: `my-${savedPersonalId}` }
+                      : { name: "kb" },
+                )
+              }
+            >
+              {bi("去知识库查看", "Open KB")}
+            </button>
+          )}
+          {isProposal && onReject && (
+            <Button
+              size="small"
+              disabled={busy || saving !== ""}
+              onClick={() => onReject()}
+            >
+              {bi("暂不保存", "Dismiss")}
+            </Button>
+          )}
+        </div>
+      )}
+    </article>
+  );
+}
+
+function KnowledgeProposalCard({
+  s,
+  busy,
+  decide,
+}: {
+  s: StepProposal;
+  busy: boolean;
+  decide: (
+    id: string,
+    v: "accept" | "reject",
+    body?: Record<string, unknown>,
+  ) => void;
+}) {
+  const k = s.knowledge;
+  if (!k) return null;
+  return (
+    <KnowledgeCard
+      k={k}
+      status={s.status}
+      decidedBy={s.decided_by}
+      busy={busy}
+      onAccept={(body) => decide(s.id, "accept", body)}
+      onReject={() => decide(s.id, "reject")}
+    />
+  );
+}
+
 /** A problem was solved that the component should have caught: take it to the component workbench, where the component's
  *  assistant drafts the change and the person reviews and saves it. */
 function SuggestCard({
@@ -3630,54 +5376,8 @@ function SuggestCard({
 }) {
   useLang();
   const comp = s.after_title || "";
-  const openWorkbench = () => {
-    const child = window.open("about:blank", "_blank");
-    if (!child) {
-      Message.warning(
-        bi(
-          "浏览器拦截了新标签页，请允许弹出窗口后重试；当前交付已保留。",
-          "Pop-up blocked by browser; allow pop-ups and retry (current delivery is preserved).",
-        ),
-      );
-      return false;
-    }
-    try {
-      child.sessionStorage.setItem(
-        "mh-wb-prefill",
-        JSON.stringify({
-          name: comp,
-          text: bi(
-            [
-              "这次交付遇到一个组件应预先检查的问题。",
-              "问题：" + s.reason,
-              "建议：" + s.step.title,
-              "详情：" + (s.step.desc || ""),
-              "请先读当前组件的相关文件，用 edits 提议最小修改并通过检查；不要直接发布。",
-            ].join("\n"),
-            [
-              "This delivery hit an issue the component should pre-check.",
-              "Issue: " + s.reason,
-              "Suggestion: " + s.step.title,
-              "Details: " + (s.step.desc || ""),
-              "Read the relevant component files first, propose minimal edits that pass checks, and do not publish directly.",
-            ].join("\n"),
-          ),
-        }),
-      );
-      child.opener = null;
-      child.location.replace(window.location.origin + window.location.pathname + "#/components/" + encodeURIComponent(comp) + "/edit/overview");
-      return true;
-    } catch {
-      child.close();
-      Message.error(
-        bi(
-          "无法打开组件工作台，请重试；当前交付未离开。",
-          "Unable to open Component Workbench; please retry.",
-        ),
-      );
-      return false;
-    }
-  };
+  const openWorkbench = () =>
+    openComponentWorkbenchPrefill(comp, s.step.title, s.step.desc || "", s.reason);
   const take = () => {
     if (openWorkbench()) decide(s.id, "accept");
   };
@@ -3867,6 +5567,827 @@ function FileCard({
   );
 }
 
+const VEX_STATUS_META: Record<string, { zh: string; en: string; cls: string }> = {
+  open: { zh: "待评估", en: "Open", cls: "s-open" },
+  planned: { zh: "计划修复", en: "Planned", cls: "s-planned" },
+  mitigated: { zh: "已缓解", en: "Mitigated", cls: "s-mitigated" },
+  not_affected: { zh: "不受影响", en: "Not Affected", cls: "s-not_affected" },
+  accepted: { zh: "风险豁免", en: "Accepted Risk", cls: "s-accepted" },
+};
+
+const VEX_JUST_LABEL: Record<string, [string, string]> = {
+  vulnerable_code_not_in_execute_path: [
+    "漏洞代码不在执行路径",
+    "Vulnerable code not in execute path",
+  ],
+  inline_mitigations_already_exist: [
+    "已存在补偿性缓解措施",
+    "Inline mitigations already exist",
+  ],
+  component_not_present: [
+    "受影响组件/模块未启用",
+    "Component / module not present",
+  ],
+};
+
+function VexProposalCard({
+  s,
+  busy,
+  decide,
+  feedback,
+}: {
+  s: StepProposal;
+  busy: boolean;
+  decide: (id: string, v: "accept" | "reject") => void;
+  feedback?: (text: string) => void;
+}) {
+  useLang();
+  const [rejecting, setRejecting] = useState(false);
+  const [why, setWhy] = useState("");
+  const v = s.vex;
+  if (!v) return null;
+  const done = s.status !== "pending";
+  const st = VEX_STATUS_META[v.status] || {
+    zh: v.status,
+    en: v.status,
+    cls: "s-open",
+  };
+  const cves = v.cves && v.cves.length > 0 ? v.cves : v.cve ? [v.cve] : [];
+  const justPair = v.justification ? VEX_JUST_LABEL[v.justification] : undefined;
+  const canManage = can("security.manage");
+  const quickWhy = [
+    bi("状态不太对，换一个 VEX 状态", "Wrong VEX status—pick another"),
+    bi("补充一下现场隔离/业务条件再改说明", "Let me add site context to revise the note"),
+    bi("暂不写 VEX，先告诉我升级修复方案", "Skip VEX for now—give upgrade guidance"),
+  ];
+  return (
+    <article className={`ad-card ad-card-sec s-${s.status}`}>
+      <header>
+        <span className="ad-card-k">{bi("VEX 漏洞处置提案", "VEX Triage Proposal")}</span>
+        <span className="ad-card-m">
+          {v.global
+            ? bi("全局 CVE 生效", "Global CVE scope")
+            : v.package
+              ? `${v.package}${v.ecosystem ? ` · ${v.ecosystem}` : ""}`
+              : bi("按当前包生效", "Package scope")}
+        </span>
+      </header>
+      <div className="ad-sec-head">
+        <div className="ad-sec-cves">
+          {cves.slice(0, 4).map((c) => (
+            <code key={c} className="ad-sec-cve">
+              {c}
+            </code>
+          ))}
+          {cves.length > 4 && (
+            <span className="ad-sec-more">+{cves.length - 4}</span>
+          )}
+        </div>
+        <span className={`ad-vex-pill ${st.cls}`}>{bi(st.zh, st.en)}</span>
+      </div>
+      {(justPair || v.expires_at) && (
+        <div className="ad-sec-meta">
+          {justPair && (
+            <span>
+              {bi("标准依据：", "Justification: ")}
+              <b>{bi(justPair[0], justPair[1])}</b>
+            </span>
+          )}
+          {v.expires_at && (
+            <span>
+              {bi("复审到期：", "Expires: ")}
+              <b className="mono">{v.expires_at}</b>
+            </span>
+          )}
+        </div>
+      )}
+      <div className="ad-sec-note">{v.note}</div>
+      {s.reason && (
+        <dl className="ad-card-dl">
+          <dt>{bi("推荐理由", "Why")}</dt>
+          <dd>{s.reason}</dd>
+        </dl>
+      )}
+      {done ? (
+        <div className={`ad-card-done s-${s.status}`}>
+          <span className="ad-card-verdict">
+            {s.status === "accepted" ? <IconCheck /> : null}
+            <span>
+              {s.decided_by}{" "}
+              {s.status === "accepted"
+                ? bi("已采纳并写入 VEX", "accepted & saved to VEX")
+                : bi("已拒绝", "rejected")}
+            </span>
+          </span>
+        </div>
+      ) : rejecting ? (
+        <div className="ad-card-why">
+          <b>
+            {bi(
+              "需要怎么调整？告诉 AI，它会立即修改提案",
+              "How should this be adjusted? Tell AI so it can revise",
+            )}
+          </b>
+          <div className="ad-card-opts">
+            {quickWhy.map((o) => (
+              <button
+                key={o}
+                type="button"
+                onClick={() => setWhy(o + bi("：", ": "))}
+              >
+                {o}
+              </button>
+            ))}
+          </div>
+          <Input.TextArea
+            value={why}
+            onChange={setWhy}
+            autoSize={{ minRows: 2, maxRows: 4 }}
+            placeholder={bi(
+              "例如：这个集群仅内网访问、请改成「已缓解」并补充说明",
+              "e.g. Internal network only—change to Mitigated and update note",
+            )}
+          />
+          <div className="ad-card-acts">
+            <Button
+              size="small"
+              type="primary"
+              disabled={!why.trim()}
+              onClick={() => {
+                decide(s.id, "reject");
+                setRejecting(false);
+                feedback?.(
+                  bi(
+                    `我没有采纳这张 VEX 处置提案：${why.trim()}`,
+                    `I rejected this VEX proposal: ${why.trim()}`,
+                  ),
+                );
+              }}
+            >
+              {bi("发给 AI 调整", "Send to AI")}
+            </Button>
+            <Button size="small" onClick={() => decide(s.id, "reject")}>
+              {bi("只拒绝", "Reject only")}
+            </Button>
+            <Button size="small" type="text" onClick={() => setRejecting(false)}>
+              {bi("取消", "Cancel")}
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="ad-card-acts">
+          <Tooltip
+            content={
+              canManage
+                ? bi("立即写入安全中心 VEX 处置记录并刷新页面", "Write directly to Security Center VEX records")
+                : bi("需要「安全处置」权限才能写入 VEX", "Requires security.manage permission")
+            }
+            mini
+          >
+            <Button
+              size="small"
+              type="primary"
+              loading={busy}
+              disabled={!canManage}
+              onClick={() => decide(s.id, "accept")}
+            >
+              {bi("采纳并写入 VEX", "Accept & Save VEX")}
+            </Button>
+          </Tooltip>
+          {canManage && cves.length === 1 && (
+            <Button
+              size="small"
+              disabled={busy}
+              onClick={() =>
+                window.dispatchEvent(
+                  new CustomEvent(VEX_OPEN_DRAFT, { detail: v }),
+                )
+              }
+            >
+              {bi("在弹窗中微调", "Edit in Modal")}
+            </Button>
+          )}
+          <Button
+            size="small"
+            disabled={busy}
+            onClick={() =>
+              feedback ? setRejecting(true) : decide(s.id, "reject")
+            }
+          >
+            {bi("不采纳", "Reject")}
+          </Button>
+        </div>
+      )}
+    </article>
+  );
+}
+
+function BaselineWaiveProposalCard({
+  s,
+  busy,
+  decide,
+  feedback,
+}: {
+  s: StepProposal;
+  busy: boolean;
+  decide: (id: string, v: "accept" | "reject") => void;
+  feedback?: (text: string) => void;
+}) {
+  useLang();
+  const [rejecting, setRejecting] = useState(false);
+  const [why, setWhy] = useState("");
+  const b = s.baseline;
+  if (!b) return null;
+  const done = s.status !== "pending";
+  const canManage = can("security.manage");
+  return (
+    <article className={`ad-card ad-card-sec s-${s.status}`}>
+      <header>
+        <span className="ad-card-k">
+          {bi("配置基线豁免提案", "Baseline Waiver Proposal")}
+        </span>
+        <span className="ad-card-m">{b.cluster_id}</span>
+      </header>
+      <p className="ad-card-t">{b.title || b.check_id}</p>
+      <div className="ad-sec-note">{b.note}</div>
+      {s.reason && (
+        <dl className="ad-card-dl">
+          <dt>{bi("建议说明", "Reason")}</dt>
+          <dd>{s.reason}</dd>
+        </dl>
+      )}
+      {done ? (
+        <div className={`ad-card-done s-${s.status}`}>
+          <span className="ad-card-verdict">
+            {s.status === "accepted" ? <IconCheck /> : null}
+            <span>
+              {s.decided_by}{" "}
+              {s.status === "accepted"
+                ? bi("已采纳并豁免基线", "accepted & waived baseline")
+                : bi("已拒绝", "rejected")}
+            </span>
+          </span>
+        </div>
+      ) : rejecting ? (
+        <div className="ad-card-why">
+          <b>{bi("不豁免的原因？告诉 AI 改出加固方案", "Why not waive? Tell AI to suggest hardening instead")}</b>
+          <Input.TextArea
+            value={why}
+            onChange={setWhy}
+            autoSize={{ minRows: 2, maxRows: 4 }}
+          />
+          <div className="ad-card-acts">
+            <Button
+              size="small"
+              type="primary"
+              disabled={!why.trim()}
+              onClick={() => {
+                decide(s.id, "reject");
+                setRejecting(false);
+                feedback?.(
+                  bi(
+                    `我不豁免这条基线：${why.trim()}`,
+                    `I rejected this baseline waiver: ${why.trim()}`,
+                  ),
+                );
+              }}
+            >
+              {bi("发给 AI", "Send to AI")}
+            </Button>
+            <Button size="small" onClick={() => decide(s.id, "reject")}>
+              {bi("只拒绝", "Reject only")}
+            </Button>
+            <Button size="small" type="text" onClick={() => setRejecting(false)}>
+              {bi("取消", "Cancel")}
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="ad-card-acts">
+          <Button
+            size="small"
+            type="primary"
+            loading={busy}
+            disabled={!canManage}
+            onClick={() => decide(s.id, "accept")}
+          >
+            {bi("采纳并豁免基线", "Accept & Waive Baseline")}
+          </Button>
+          <Button
+            size="small"
+            disabled={busy}
+            onClick={() =>
+              feedback ? setRejecting(true) : decide(s.id, "reject")
+            }
+          >
+            {bi("不采纳", "Reject")}
+          </Button>
+        </div>
+      )}
+    </article>
+  );
+}
+
+function rehearsalKindLabel(kind?: string, mode?: string): string {
+  const m = (mode || "").toLowerCase();
+  const prefix =
+    m === "quick"
+      ? bi("极速变更", "Quick Change")
+      : m === "light"
+        ? bi("简单推演", "Light Rehearsal")
+        : m === "full"
+          ? bi("全量推演", "Full Rehearsal")
+          : bi("变更演练", "Rehearsal");
+  switch ((kind || "").toLowerCase()) {
+    case "tune":
+      return `${prefix} · ${bi("参数与配置", "Config & Tuning")}`;
+    case "upgrade":
+      return `${prefix} · ${bi("版本升级", "Version Upgrade")}`;
+    case "scale":
+      return `${prefix} · ${bi("节点扩缩", "Scaling")}`;
+    case "switch":
+      return `${prefix} · ${bi("主备切换", "Failover Drill")}`;
+    case "security":
+      return bi("安全修复演练", "Security Rehearsal");
+    default:
+      return m === "quick"
+        ? bi("极速变更 · 直出步骤与报告", "Quick Change · Direct Steps & Report")
+        : m === "light"
+          ? bi("简单推演建议", "Light Rehearsal")
+          : m === "full"
+            ? bi("全量推演建议", "Full Rehearsal")
+            : bi("变更演练建议", "Change Rehearsal");
+  }
+}
+
+function openRehearsalFromSpec(r: RehearsalProposal) {
+  const goalText = r.goal?.trim() || r.summary?.trim() || r.title;
+  const isSec =
+    r.kind === "security" || (r.cves !== undefined && r.cves.length > 0);
+  if (isSec) {
+    launchSecurityRehearsalIntent(r.cluster_id, {
+      title: r.title,
+      goal: goalText,
+      securityContext: {
+        kind:
+          r.packages && r.packages.length > 0
+            ? "cve_patch"
+            : "config_hardening",
+        cves: r.cves,
+        package: r.packages?.[0],
+      },
+    });
+    return;
+  }
+  const presetKind: RehearsalPresetKind | undefined =
+    r.kind === "upgrade" ||
+    r.kind === "scale" ||
+    r.kind === "tune" ||
+    r.kind === "switch"
+      ? r.kind
+      : undefined;
+  const modeLower = (r.mode || "").toLowerCase();
+  const resolvedMode =
+    modeLower === "quick"
+      ? ("quick" as const)
+      : modeLower === "light"
+        ? ("light" as const)
+        : modeLower === "full"
+          ? ("full" as const)
+          : undefined;
+  const modeTag =
+    resolvedMode === "quick"
+      ? bi("极速变更", "Quick")
+      : resolvedMode === "light"
+        ? bi("简单推演", "Light")
+        : resolvedMode === "full"
+          ? bi("全量推演", "Full")
+          : bi("变更演练", "Rehearsal");
+  const kindBadge =
+    r.kind === "tune"
+      ? bi(`AI 对话 · ${modeTag} · 参数与配置`, `AI Chat · ${modeTag} · Config & Tuning`)
+      : r.kind === "upgrade"
+        ? bi(`AI 对话 · ${modeTag} · 版本升级`, `AI Chat · ${modeTag} · Version Upgrade`)
+        : r.kind === "scale"
+          ? bi(`AI 对话 · ${modeTag} · 节点扩缩`, `AI Chat · ${modeTag} · Scaling`)
+          : r.kind === "switch"
+            ? bi(`AI 对话 · ${modeTag} · 主备切换`, `AI Chat · ${modeTag} · Failover Drill`)
+            : bi(`AI 对话 · ${modeTag}`, `AI Chat · ${modeTag}`);
+  const tags = [
+    r.cluster_id,
+    ...(r.app_label ? [r.app_label] : []),
+    ...(r.packages || []),
+  ].filter(Boolean);
+  launchRehearsalIntent(r.cluster_id, presetKind, {
+    mode: resolvedMode,
+    title: r.title,
+    goal: goalText,
+    sourceContext: {
+      source: "ai_chat",
+      badge: kindBadge,
+      subject: r.title,
+      tags,
+      note:
+        r.reason && r.reason.trim() !== r.title.trim()
+          ? r.reason.trim()
+          : undefined,
+    },
+  });
+}
+
+function RehearsalLaunchCard({
+  r,
+  status,
+  decidedBy,
+  busy,
+  onAccept,
+  onReject,
+}: {
+  r: RehearsalProposal;
+  status?: string;
+  decidedBy?: string;
+  busy?: boolean;
+  onAccept?: () => void;
+  onReject?: () => void;
+}) {
+  useLang();
+  const [showGoal, setShowGoal] = useState(false);
+  const isProposal = status !== undefined;
+  const done = isProposal && status !== "pending";
+  const isQuick = (r.mode || "").toLowerCase() === "quick";
+  const isLight = (r.mode || "").toLowerCase() === "light";
+  const isFull = (r.mode || "").toLowerCase() === "full";
+  const modeCls = isQuick ? " is-quick" : isLight ? " is-light" : "";
+  const hasGoalDetail = Boolean(
+    r.goal && r.goal.trim() && r.goal.trim() !== (r.summary || "").trim(),
+  );
+  const showReason = Boolean(
+    r.reason &&
+      r.reason.trim() &&
+      r.reason.trim() !== (r.summary || "").trim(),
+  );
+
+  return (
+    <article
+      className={`ad-card ad-card-rh${modeCls}${status ? ` s-${status}` : ""}`}
+      role="region"
+      aria-label={bi("变更演练卡片", "Change rehearsal card")}
+    >
+      <header className="ad-rh-head">
+        <span className={`ad-rh-badge${modeCls}`}>
+          <IconThunderbolt />
+          <span>{rehearsalKindLabel(r.kind, r.mode)}</span>
+        </span>
+        <div className="ad-rh-target">
+          <span className="ad-rh-cluster">{r.cluster_id}</span>
+          {r.app_label && <span className="ad-rh-app">{r.app_label}</span>}
+          {r.running && (
+            <span className="ad-rh-live">
+              <i aria-hidden />
+              {bi("运行中", "Running")}
+            </span>
+          )}
+        </div>
+      </header>
+      <p className="ad-card-t">{r.title}</p>
+      {((r.packages && r.packages.length > 0) ||
+        (r.cves && r.cves.length > 0)) && (
+        <div className="ad-sec-cves" style={{ marginBottom: 6 }}>
+          {(r.packages || []).map((pk) => (
+            <span key={pk} className="ad-tag">
+              {pk}
+            </span>
+          ))}
+          {(r.cves || []).slice(0, 4).map((c) => (
+            <code key={c} className="ad-sec-cve">
+              {c}
+            </code>
+          ))}
+        </div>
+      )}
+      {r.summary && <p className="ad-card-d">{r.summary}</p>}
+      {showReason && (
+        <p className="ad-rh-reason">
+          <b>
+            {isQuick
+              ? bi("建议走极速变更（留存变更报告）：", "Why quick change (leaves Change Report): ")
+              : isLight
+                ? bi("建议走简单推演：", "Why light rehearsal: ")
+                : isFull
+                  ? bi("建议走全量推演：", "Why full rehearsal: ")
+                  : bi("建议走演练：", "Why rehearse: ")}
+          </b>
+          {r.reason}
+        </p>
+      )}
+      {hasGoalDetail && (
+        <div className="ad-rh-goal">
+          <button
+            type="button"
+            className="ad-rh-goal-toggle"
+            aria-expanded={showGoal}
+            onClick={() => setShowGoal((v) => !v)}
+          >
+            <span>
+              {showGoal
+                ? bi("收起带入的变更目标", "Hide prefilled change goal")
+                : bi("预览将带入的变更目标", "Preview prefilled change goal")}
+            </span>
+            <IconDown className={showGoal ? "ad-flip" : ""} />
+          </button>
+          {showGoal && <div className="ad-rh-goal-body">{r.goal}</div>}
+        </div>
+      )}
+      {done ? (
+        <div className={`ad-card-done s-${status}`}>
+          <span className="ad-card-verdict">
+            {status === "accepted" ? <IconCheck /> : null}
+            <span>
+              {decidedBy}{" "}
+              {status === "accepted"
+                ? bi("已采纳", "accepted")
+                : bi("已忽略", "dismissed")}
+            </span>
+          </span>
+          {status === "accepted" && (
+            <button
+              type="button"
+              className="link"
+              onClick={() => openRehearsalFromSpec(r)}
+            >
+              {isQuick
+                ? bi("带入目标前往极速变更", "Open Quick Change")
+                : isLight
+                  ? bi("带入目标前往简单推演", "Open Light Rehearsal")
+                  : isFull
+                    ? bi("带入目标前往全量推演", "Open Full Rehearsal")
+                    : bi("带入目标前往变更演练", "Open Rehearsal with Goal")}
+            </button>
+          )}
+        </div>
+      ) : isProposal ? (
+        <div className="ad-card-acts">
+          <Button
+            size="small"
+            type="primary"
+            loading={busy}
+            onClick={() => {
+              onAccept?.();
+              openRehearsalFromSpec(r);
+            }}
+          >
+            {isQuick
+              ? bi("采纳并直出步骤与报告", "Accept & Quick Change")
+              : isLight
+                ? bi("采纳并前往简单推演", "Accept & Launch Light Rehearsal")
+                : isFull
+                  ? bi("采纳并前往全量推演", "Accept & Launch Full Rehearsal")
+                  : bi("采纳并前往演练", "Accept & Launch Rehearsal")}
+            <IconRight style={{ marginLeft: 4 }} />
+          </Button>
+          <Button size="small" disabled={busy} onClick={() => onReject?.()}>
+            {bi("暂不需要", "Dismiss")}
+          </Button>
+        </div>
+      ) : (
+        <div className="ad-card-acts">
+          <Button
+            size="small"
+            type="primary"
+            onClick={() => openRehearsalFromSpec(r)}
+          >
+            {isQuick
+              ? bi("发起极速变更", "Launch Quick Change")
+              : isLight
+                ? bi("发起简单推演", "Launch Light Rehearsal")
+                : isFull
+                  ? bi("发起全量推演", "Launch Full Rehearsal")
+                  : bi("发起变更演练", "Launch Change Rehearsal")}
+            <IconRight style={{ marginLeft: 4 }} />
+          </Button>
+          <Button
+            size="small"
+            onClick={() => go({ name: "deliveries", id: r.cluster_id })}
+          >
+            {bi("查看集群", "Open Cluster")}
+          </Button>
+        </div>
+      )}
+    </article>
+  );
+}
+
+function RehearsalProposalCard({
+  s,
+  busy,
+  decide,
+}: {
+  s: StepProposal;
+  busy: boolean;
+  decide: (id: string, v: "accept" | "reject") => void;
+}) {
+  const r = s.rehearsal;
+  if (!r) return null;
+  return (
+    <RehearsalLaunchCard
+      r={r}
+      status={s.status}
+      decidedBy={s.decided_by}
+      busy={busy}
+      onAccept={() => decide(s.id, "accept")}
+      onReject={() => decide(s.id, "reject")}
+    />
+  );
+}
+
+function RehearsalStepEditCard({
+  s,
+  busy,
+  decide,
+  feedback,
+}: {
+  s: StepProposal;
+  busy: boolean;
+  decide: (id: string, v: "accept" | "reject") => void;
+  feedback?: (text: string) => void;
+}) {
+  useLang();
+  const [rejecting, setRejecting] = useState(false);
+  const [why, setWhy] = useState("");
+  const rs = s.rehearsal_step;
+  if (!rs) return null;
+  const done = s.status !== "pending";
+  const actionLabel =
+    rs.action === "insert_before"
+      ? bi("前置插入演练步骤", "Insert step before")
+      : rs.action === "insert_after"
+        ? bi("后置插入演练步骤", "Insert step after")
+        : rs.action === "delete"
+          ? bi("删除演练步骤", "Delete rehearsal step")
+          : bi("修改演练步骤", "Modify rehearsal step");
+  const phaseLabel: Record<string, string> = {
+    precheck: bi("预检", "Precheck"),
+    execute: bi("执行", "Execute"),
+    verify: bi("验收", "Verify"),
+    rollback: bi("回退", "Rollback"),
+  };
+  const stepTag = rs.step_order
+    ? bi(`步骤 #${rs.step_order}`, `Step #${rs.step_order}`)
+    : rs.step_id;
+  const verdict =
+    s.status === "accepted"
+      ? bi(`${s.decided_by || "用户"} 已采纳`, `${s.decided_by || "User"} accepted`)
+      : s.status === "rejected"
+        ? bi(`${s.decided_by || "用户"} 已拒绝`, `${s.decided_by || "User"} rejected`)
+        : "";
+  const reject = (text: string) => {
+    decide(s.id, "reject");
+    setRejecting(false);
+    if (feedback && text.trim()) {
+      feedback(
+        bi(
+          `我没有采纳这条演练步骤修订：${text.trim()}`,
+          `I rejected this rehearsal step edit: ${text.trim()}`,
+        ),
+      );
+    }
+  };
+  return (
+    <article className={`ad-card s-${s.status}`}>
+      <header>
+        <span className="ad-card-k">{actionLabel}</span>
+        <span className="ad-card-m">
+          {rs.rehearsal_title ? `${rs.rehearsal_title} · ` : ""}
+          {stepTag}
+          {rs.phase && phaseLabel[rs.phase] ? ` · ${phaseLabel[rs.phase]}` : ""}
+        </span>
+      </header>
+      <p className="ad-card-t">
+        {rs.title || rs.old_title || rs.step_id}
+      </p>
+      {rs.target_role && (
+        <p className="ad-card-d">
+          {bi("执行机器：", "Run on: ")}
+          <b>{rs.target_role}</b>
+        </p>
+      )}
+      {rs.action !== "delete" && rs.command && (
+        <CodeBlock
+          text={rs.command}
+          caption={
+            rs.action === "replace"
+              ? bi("修改后的执行命令", "Updated command")
+              : bi("新增步骤命令", "New step command")
+          }
+        />
+      )}
+      {rs.action === "replace" &&
+        rs.old_command &&
+        rs.old_command.trim() !== (rs.command || "").trim() && (
+          <details className="ad-card-warn">
+            <summary>{bi("对比修改前的原命令", "Compare previous command")}</summary>
+            <CodeBlock text={rs.old_command} caption={bi("原命令", "Previous")} />
+          </details>
+        )}
+      <dl className="ad-card-dl">
+        {rs.expect && (
+          <>
+            <dt>{bi("预期判据", "Expected")}</dt>
+            <dd>{rs.expect}</dd>
+          </>
+        )}
+        {rs.risk_note && (
+          <>
+            <dt>{bi("注意事项", "Caution")}</dt>
+            <dd>{rs.risk_note}</dd>
+          </>
+        )}
+        {rs.rollback && (
+          <>
+            <dt>{bi("回退方式", "Rollback")}</dt>
+            <dd>{rs.rollback}</dd>
+          </>
+        )}
+        {s.reason && (
+          <>
+            <dt>{bi("修改原因", "Reason")}</dt>
+            <dd>{s.reason}</dd>
+          </>
+        )}
+      </dl>
+      {!done && rejecting ? (
+        <div className="ad-card-why">
+          <b>
+            {bi(
+              "不采纳的原因？告诉 AI，它会重新调整这条演练步骤",
+              "Why reject? Tell AI how to adjust this step",
+            )}
+          </b>
+          <Input.TextArea
+            value={why}
+            onChange={setWhy}
+            autoSize={{ minRows: 2, maxRows: 4 }}
+            placeholder={bi(
+              "例如：想拆成两步 / 只在 node-2 执行 / 命令里不要加 --force",
+              "e.g. split into two steps / run on node-2 only / drop --force",
+            )}
+          />
+          <div className="ad-card-acts">
+            <Button
+              size="small"
+              type="primary"
+              disabled={!why.trim()}
+              onClick={() => reject(why)}
+            >
+              {bi("发给 AI 调整", "Send to AI")}
+            </Button>
+            <Button size="small" onClick={() => reject("")}>
+              {bi("只拒绝", "Reject")}
+            </Button>
+            <Button size="small" type="text" onClick={() => setRejecting(false)}>
+              {bi("取消", "Cancel")}
+            </Button>
+          </div>
+        </div>
+      ) : !done ? (
+        <div className="ad-card-acts">
+          <Button
+            size="small"
+            type="primary"
+            loading={busy}
+            onClick={() => decide(s.id, "accept")}
+          >
+            {rs.action === "delete"
+              ? bi("确认删除该演练步骤", "Confirm Delete Step")
+              : bi("采纳并更新演练步骤", "Accept & Update Step")}
+          </Button>
+          <Button
+            size="small"
+            disabled={busy}
+            onClick={() =>
+              feedback ? setRejecting(true) : decide(s.id, "reject")
+            }
+          >
+            {bi("不采纳", "Reject")}
+          </Button>
+        </div>
+      ) : (
+        <div className={`ad-card-done s-${s.status}`}>
+          <span className="ad-card-verdict">
+            {s.status === "accepted" ? <IconCheck /> : null}
+            <span>{verdict}</span>
+          </span>
+          {s.status === "accepted" && (
+            <span className="ad-card-result">
+              {bi("已同步更新变更演练步骤", "Synced to change rehearsal")}
+            </span>
+          )}
+        </div>
+      )}
+    </article>
+  );
+}
+
 const getWhyNot = () => [
   bi(
     "命令不对，我来补充说明",
@@ -3895,7 +6416,11 @@ export function Card({
   p: StepProposal | CompProposal;
   comp: boolean;
   busy: boolean;
-  decide: (id: string, v: "accept" | "reject") => void;
+  decide: (
+    id: string,
+    v: "accept" | "reject",
+    body?: Record<string, unknown>,
+  ) => void;
   /** Sends the person's words to the assistant, so a refused card leads to a better one rather than a dead end. */
   feedback?: (text: string) => void;
 }) {
@@ -4118,6 +6643,32 @@ export function Card({
     );
   }
   const s = p as StepProposal;
+  if (s.kind === "vex")
+    return (
+      <VexProposalCard s={s} busy={busy} decide={decide} feedback={feedback} />
+    );
+  if (s.kind === "baseline_waive")
+    return (
+      <BaselineWaiveProposalCard
+        s={s}
+        busy={busy}
+        decide={decide}
+        feedback={feedback}
+      />
+    );
+  if (s.kind === "rehearsal")
+    return <RehearsalProposalCard s={s} busy={busy} decide={decide} />;
+  if (s.kind === "rehearsal_step")
+    return (
+      <RehearsalStepEditCard
+        s={s}
+        busy={busy}
+        decide={decide}
+        feedback={feedback}
+      />
+    );
+  if (s.kind === "knowledge")
+    return <KnowledgeProposalCard s={s} busy={busy} decide={decide} />;
   if (s.kind === "component")
     return <SuggestCard s={s} busy={busy} decide={decide} />;
   if (s.kind === "file")

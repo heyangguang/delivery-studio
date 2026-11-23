@@ -21,15 +21,19 @@ import {
   IconBug,
   IconCheckCircle,
   IconClose,
+  IconCode,
   IconDelete,
   IconEdit,
   IconFolder,
+  IconHistory,
   IconImage,
   IconLaunch,
   IconMenuFold,
+  IconMessage,
   IconMore,
   IconPlus,
   IconRecordStop,
+  IconRight,
   IconSearch,
   IconSend,
   IconSettings,
@@ -53,22 +57,36 @@ import { reportDoc, useSubmitKB } from "./kb";
 import type { Job, Session } from "./shared";
 import { FileIcon, FilePicker, uploadFiles } from "./myfiles";
 import type { FileNode } from "./myfiles";
+import { MessageQueueTray, useMessageQueue } from "./aiqueue";
+import type { QueuedMsg } from "./aiqueue";
 import {
   AIEmblem,
   Bubble,
+  ChatErrorCard,
   LiveBubble,
   Spark,
+  UnansweredTurnCard,
   newLive,
   readFile,
   streamChat,
   useAIStatus,
 } from "./aichat";
 import { isGeneral } from "./aichat";
-import type { AIReport, Live, Msg, StepProposal } from "./aichat";
+import type {
+  AICallDiag,
+  AIReport,
+  ChatErrorState,
+  ChatStreamError,
+  CompProposal,
+  Live,
+  Msg,
+  StepProposal,
+} from "./aichat";
 import { Markdown } from "./aimd";
 import { AIPrefs } from "./aiprefs";
 import { ModelPicker, useModelPick } from "./modelpick";
-import { ToolMenu, useAIOptions } from "./aitools";
+import { ThinkLevel, ToolMenu, useAIOptions, useSpaciousComposer } from "./aitools";
+import type { AIOpts } from "./aitools";
 import "./aichat.css";
 import "./aipage.css";
 
@@ -100,6 +118,36 @@ type Linked = {
   updated: string;
   /** The delivery inside its cluster: 集群部署, 扩容方案 #3. */
   plan?: string;
+};
+type CompSession = {
+  comp: string;
+  comp_title: string;
+  history_id?: string;
+  title: string;
+  label?: string;
+  rev?: number;
+  messages: number;
+  accepted?: number;
+  updated: string;
+  active: boolean;
+  has_draft?: boolean;
+};
+type CompThread = {
+  comp: string;
+  compTitle: string;
+  title: string;
+  historyId?: string;
+  label?: string;
+  rev?: number;
+  at?: string;
+  messages: Msg[];
+  hasDraft: boolean;
+};
+type SideTab = "all" | "chat" | "delivery" | "comp";
+type ChatListResp = {
+  chats: ChatRow[];
+  linked: Linked[];
+  comp_sessions?: CompSession[];
 };
 
 const normPlanLabel = (s?: string) => {
@@ -420,6 +468,7 @@ export function AIPage({
   job,
   sessionKey,
   comp,
+  hist,
   jobs,
 }: {
   me: Session;
@@ -427,32 +476,52 @@ export function AIPage({
   job?: string;
   sessionKey?: string;
   comp?: string;
+  hist?: string;
   jobs: Job[];
 }) {
   useLang();
   const status = useAIStatus();
   const net = useConnectivity();
   const linkedMode = !!(job && sessionKey);
-  const feature = linkedMode
-    ? isGeneral(sessionKey)
-      ? "review"
-      : "troubleshoot"
-    : "assistant";
+  const compArchMode = !!(comp && hist);
+  const compMode = !!(comp && (sessionKey === "workbench" || hist));
+  const compLiveMode = compMode && !compArchMode;
+  const threadMode = linkedMode || compMode;
+  const feature = compMode
+    ? "component"
+    : linkedMode
+      ? isGeneral(sessionKey)
+        ? "review"
+        : "troubleshoot"
+      : "assistant";
   const on = !!status.features[feature];
   const model = useModelPick(feature);
   const tools = useAIOptions();
   const narrowBar = useMedia("(max-width: 700px)");
-  const initChats = cached<{ chats: ChatRow[]; linked: Linked[] }>(
-    "/api/ai/chats",
-  );
+  const initChats = cached<ChatListResp>("/api/ai/chats");
   const [rows, setRows] = useState<ChatRow[] | null>(
     () => initChats?.chats ?? null,
   );
   const [linked, setLinked] = useState<Linked[]>(() => initChats?.linked ?? []);
+  const [compSessions, setCompSessions] = useState<CompSession[]>(
+    () => initChats?.comp_sessions ?? [],
+  );
   const [q, setQ] = useState("");
+  const [sideTab, setSideTab] = useState<SideTab>("all");
+  const [secOpen, setSecOpen] = useState<Record<string, boolean>>({
+    chat: true,
+    comp: true,
+    delivery: true,
+    form: false,
+    arch: false,
+  });
+  const toggleSec = (k: string) =>
+    setSecOpen((prev) => ({ ...prev, [k]: !prev[k] }));
   const [chat, setChat] = useState<Chat | null>(null);
   const [js, setJs] = useState<JobSession | null>(null);
+  const [compThread, setCompThread] = useState<CompThread | null>(null);
   const [props, setProps] = useState<Record<string, StepProposal>>({});
+  const [compProps, setCompProps] = useState<Record<string, CompProposal>>({});
   const [deciding, setDeciding] = useState("");
   const [loading, setLoading] = useState(false);
   const [input, setInput] = useState("");
@@ -461,13 +530,10 @@ export function AIPage({
   const [uploading, setUploading] = useState(0);
   const [picker, setPicker] = useState(false);
   const [drop, setDrop] = useState(false);
-  const [showArch, setShowArch] = useState(false);
   const fileIn = useRef<HTMLInputElement>(null);
   const [ctx, setCtx] = useState<Ctx>({ kind: "", id: "", name: "" });
   const [live, setLive] = useState<Live | null>(null);
-  const [error, setError] = useState<{ text: string; retry?: string } | null>(
-    null,
-  );
+  const [error, setError] = useState<ChatErrorState | null>(null);
   const [atBottom, setAtBottom] = useState(true);
   const [side, setSide] = useState(false);
   const [resolving, setResolving] = useState(false);
@@ -482,8 +548,15 @@ export function AIPage({
   const clusterRanks = useRef<Map<string, number>>(new Map());
   const planRanks = useRef<Map<string, number>>(new Map());
   const linkedRanks = useRef<Map<string, number>>(new Map());
+  const compGroupRanks = useRef<Map<string, number>>(new Map());
+  const compSessRanks = useRef<Map<string, number>>(new Map());
   const list = useRef<HTMLDivElement>(null);
   const box = useRef<HTMLTextAreaElement>(null);
+  const composeRef = useRef<HTMLFormElement>(null);
+  const spacious = useSpaciousComposer(
+    composeRef,
+    Boolean(input.trim() || imgs.length || atts.length),
+  );
   const abort = useRef<AbortController | null>(null);
   const seeded = useRef(false);
   const promotedId = useRef("");
@@ -493,59 +566,87 @@ export function AIPage({
   const id = chatId && !prefsMode ? chatId : draftId;
   const activeThreadId = linkedMode
     ? `linked:${job}:${sessionKey}`
-    : prefsMode
-      ? "prefs"
-      : id;
+    : compMode
+      ? `comp:${comp}:${hist || "workbench"}`
+      : prefsMode
+        ? "prefs"
+        : id;
   const threadRef = useRef(activeThreadId);
   threadRef.current = activeThreadId;
+  const queue = useMessageQueue<FileNode>(activeThreadId);
+  const pendingJumpRef = useRef<{
+    thread: string;
+    item: QueuedMsg<FileNode>;
+  } | null>(null);
   const busy = !!live;
   const jobBase = job ? `/api/jobs/${job}/ai` : "";
+  const compBase = comp ? `/api/components/${encodeURIComponent(comp)}/ai` : "";
+  const imgBase = compMode
+    ? compArchMode
+      ? `${compBase}/history/${encodeURIComponent(hist!)}`
+      : compBase
+    : jobBase;
   const jobRow = jobs.find((j) => j.id === job);
 
-  const applyChatList = useCallback(
-    (r: { chats?: ChatRow[]; linked?: Linked[] }) => {
-      const chats = r.chats || [];
-      const lnk = r.linked || [];
-      if (!orderSeeded.current) {
-        chats.forEach((c, idx) =>
+  const compSessionKey = (s: CompSession) =>
+    `${s.comp}\0${s.history_id || "workbench"}`;
+
+  const applyChatList = useCallback((r: Partial<ChatListResp>) => {
+    const chats = r.chats || [];
+    const lnk = r.linked || [];
+    const comps = r.comp_sessions || [];
+    if (!orderSeeded.current) {
+      chats.forEach((c, idx) =>
+        chatSlots.current.set(c.id, {
+          rank: idx,
+          group: dayKey(c.updated),
+        }),
+      );
+      lnk.forEach((l, idx) => {
+        if (!clusterRanks.current.has(l.cluster))
+          clusterRanks.current.set(l.cluster, clusterRanks.current.size);
+        if (!planRanks.current.has(l.job))
+          planRanks.current.set(l.job, planRanks.current.size);
+        linkedRanks.current.set(`${l.job}\0${l.key}`, idx);
+      });
+      comps.forEach((s, idx) => {
+        if (!compGroupRanks.current.has(s.comp))
+          compGroupRanks.current.set(s.comp, compGroupRanks.current.size);
+        compSessRanks.current.set(compSessionKey(s), idx);
+      });
+      orderSeeded.current = true;
+    } else {
+      for (let i = chats.length - 1; i >= 0; i--) {
+        const c = chats[i];
+        if (!chatSlots.current.has(c.id))
           chatSlots.current.set(c.id, {
-            rank: idx,
+            rank: --topRank.current,
             group: dayKey(c.updated),
-          }),
-        );
-        lnk.forEach((l, idx) => {
-          if (!clusterRanks.current.has(l.cluster))
-            clusterRanks.current.set(l.cluster, clusterRanks.current.size);
-          if (!planRanks.current.has(l.job))
-            planRanks.current.set(l.job, planRanks.current.size);
-          linkedRanks.current.set(`${l.job}\0${l.key}`, idx);
-        });
-        orderSeeded.current = true;
-      } else {
-        for (let i = chats.length - 1; i >= 0; i--) {
-          const c = chats[i];
-          if (!chatSlots.current.has(c.id))
-            chatSlots.current.set(c.id, {
-              rank: --topRank.current,
-              group: dayKey(c.updated),
-            });
-        }
-        for (let i = lnk.length - 1; i >= 0; i--) {
-          const l = lnk[i];
-          const lk = `${l.job}\0${l.key}`;
-          if (!clusterRanks.current.has(l.cluster))
-            clusterRanks.current.set(l.cluster, --topRank.current);
-          if (!planRanks.current.has(l.job))
-            planRanks.current.set(l.job, --topRank.current);
-          if (!linkedRanks.current.has(lk))
-            linkedRanks.current.set(lk, --topRank.current);
-        }
+          });
       }
-      setRows(chats);
-      setLinked(lnk);
-    },
-    [],
-  );
+      for (let i = lnk.length - 1; i >= 0; i--) {
+        const l = lnk[i];
+        const lk = `${l.job}\0${l.key}`;
+        if (!clusterRanks.current.has(l.cluster))
+          clusterRanks.current.set(l.cluster, --topRank.current);
+        if (!planRanks.current.has(l.job))
+          planRanks.current.set(l.job, --topRank.current);
+        if (!linkedRanks.current.has(lk))
+          linkedRanks.current.set(lk, --topRank.current);
+      }
+      for (let i = comps.length - 1; i >= 0; i--) {
+        const s = comps[i];
+        const sk = compSessionKey(s);
+        if (!compGroupRanks.current.has(s.comp))
+          compGroupRanks.current.set(s.comp, --topRank.current);
+        if (!compSessRanks.current.has(sk))
+          compSessRanks.current.set(sk, --topRank.current);
+      }
+    }
+    setRows(chats);
+    setLinked(lnk);
+    setCompSessions(comps);
+  }, []);
 
   if (initChats && !orderSeeded.current) {
     (initChats.chats || []).forEach((c, idx) =>
@@ -558,14 +659,17 @@ export function AIPage({
         planRanks.current.set(l.job, planRanks.current.size);
       linkedRanks.current.set(`${l.job}\0${l.key}`, idx);
     });
+    (initChats.comp_sessions || []).forEach((s, idx) => {
+      if (!compGroupRanks.current.has(s.comp))
+        compGroupRanks.current.set(s.comp, compGroupRanks.current.size);
+      compSessRanks.current.set(compSessionKey(s), idx);
+    });
     orderSeeded.current = true;
   }
 
   const loadList = useCallback(
     (fresh = true) => {
-      (fresh ? api : fetchCached)<{ chats: ChatRow[]; linked: Linked[] }>(
-        "/api/ai/chats",
-      )
+      (fresh ? api : fetchCached)<ChatListResp>("/api/ai/chats")
         .then((r) => {
           putCached("/api/ai/chats", r);
           applyChatList(r);
@@ -587,9 +691,42 @@ export function AIPage({
       .catch(() => undefined);
   }, [jobBase]);
 
-  // open what the address names: a delivery's conversation, a saved one, or a blank one (possibly tied to something)
+  const loadCompProps = useCallback(() => {
+    if (!compBase || compArchMode) return Promise.resolve();
+    return api<{ proposals: CompProposal[]; has_draft?: boolean }>(
+      `${compBase}/session`,
+    )
+      .then((r) => {
+        setCompProps(
+          Object.fromEntries((r.proposals || []).map((p) => [p.id, p])),
+        );
+        if (typeof r.has_draft === "boolean") {
+          setCompThread((prev) =>
+            prev ? { ...prev, hasDraft: !!r.has_draft } : prev,
+          );
+        }
+      })
+      .catch(() => undefined);
+  }, [compBase, compArchMode]);
+
+  const compMetaRow = useMemo(
+    () =>
+      comp
+        ? compSessions.find(
+            (s) =>
+              s.comp === comp &&
+              (hist ? s.history_id === hist : s.active),
+          ) || compSessions.find((s) => s.comp === comp)
+        : undefined,
+    [comp, hist, compSessions],
+  );
+  const compTitleOf = (name: string) =>
+    compSessions.find((s) => s.comp === name)?.comp_title ||
+    (name === "platform-shared" ? bi("平台公共流程", "Platform Shared") : name);
+
+  // open what the address names: a delivery's conversation, a component workbench session, a saved one, or a blank one
   useEffect(() => {
-    if (!linkedMode && chatId && !prefsMode && promotedId.current === chatId) {
+    if (!threadMode && chatId && !prefsMode && promotedId.current === chatId) {
       promotedId.current = "";
       return;
     }
@@ -603,6 +740,7 @@ export function AIPage({
     setImgs([]);
     setAtts([]);
     setProps({});
+    setCompProps({});
     setDeciding("");
     setAtBottom(true);
     setSide(false);
@@ -612,6 +750,7 @@ export function AIPage({
       setLoading(true);
       setChat(null);
       setJs(null);
+      setCompThread(null);
       Promise.all([
         api<JobSession>(
           `${jobBase}/session?key=${encodeURIComponent(sessionKey!)}`,
@@ -645,7 +784,86 @@ export function AIPage({
         alive = false;
       };
     }
+    if (compMode && comp) {
+      setLoading(true);
+      setChat(null);
+      setJs(null);
+      setCompThread(null);
+      const deriveTitle = (msgs: Msg[], fallback?: string) => {
+        if (fallback?.trim()) return fallback.trim();
+        const firstUser = msgs.find((m) => m.role === "user" && m.text?.trim());
+        return firstUser
+          ? plain(firstUser.text).slice(0, 60)
+          : bi("组件工作台对话", "Component workbench chat");
+      };
+      if (compArchMode && hist) {
+        api<{
+          meta?: {
+            id?: string;
+            at?: string;
+            label?: string;
+            rev?: number;
+            title?: string;
+          };
+          messages: Msg[];
+          proposals: CompProposal[];
+        }>(`${compBase}/history/${encodeURIComponent(hist)}`)
+          .then((r) => {
+            if (!alive) return;
+            const ps = (r.proposals || []).map((p) =>
+              p.status === "pending" ? { ...p, status: "withdrawn" } : p,
+            );
+            setCompProps(Object.fromEntries(ps.map((p) => [p.id, p])));
+            setCompThread({
+              comp,
+              compTitle: compTitleOf(comp),
+              title: deriveTitle(r.messages || [], r.meta?.title),
+              historyId: hist,
+              label: r.meta?.label,
+              rev: r.meta?.rev,
+              at: r.meta?.at,
+              messages: r.messages || [],
+              hasDraft: false,
+            });
+          })
+          .catch((e) => {
+            if (alive) setError({ text: (e as Error).message });
+          })
+          .finally(() => {
+            if (alive) setLoading(false);
+          });
+      } else {
+        api<{
+          messages: Msg[];
+          proposals: CompProposal[];
+          has_draft?: boolean;
+        }>(`${compBase}/session`)
+          .then((r) => {
+            if (!alive) return;
+            setCompProps(
+              Object.fromEntries((r.proposals || []).map((p) => [p.id, p])),
+            );
+            setCompThread({
+              comp,
+              compTitle: compTitleOf(comp),
+              title: deriveTitle(r.messages || []),
+              messages: r.messages || [],
+              hasDraft: !!r.has_draft,
+            });
+          })
+          .catch((e) => {
+            if (alive) setError({ text: (e as Error).message });
+          })
+          .finally(() => {
+            if (alive) setLoading(false);
+          });
+      }
+      return () => {
+        alive = false;
+      };
+    }
     setJs(null);
+    setCompThread(null);
     if (chatId && !prefsMode) {
       setLoading(true);
       setChat(null);
@@ -681,9 +899,9 @@ export function AIPage({
     return () => {
       alive = false;
     };
-  }, [chatId, job, sessionKey, comp]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [chatId, job, sessionKey, comp, hist]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (!linkedMode && !chatId && !prefsMode && job) {
+    if (!threadMode && !chatId && !prefsMode && job) {
       const j = jobs.find((x) => x.id === job);
       if (j)
         setCtx((c) =>
@@ -692,7 +910,7 @@ export function AIPage({
             : { kind: "job", id: j.id, name: j.cluster_id },
         );
     }
-  }, [linkedMode, chatId, prefsMode, job, jobs]);
+  }, [threadMode, chatId, prefsMode, job, jobs]);
   useEffect(() => {
     if (!remote || !linkedMode || !jobBase || !sessionKey) return;
     let alive = true;
@@ -732,17 +950,21 @@ export function AIPage({
     if (initialRevealed.current || rows === null) return;
     initialRevealed.current = true;
     const el = sideRows.current;
-    if (!el || el.scrollTop > 0 || (!chatId && !linkedMode)) return;
+    if (!el || el.scrollTop > 0 || (!chatId && !threadMode)) return;
     el.querySelector<HTMLElement>('[aria-current="page"]')?.scrollIntoView({
       block: "nearest",
     });
-  }, [rows, linked, chatId, linkedMode]);
+  }, [rows, linked, compSessions, chatId, threadMode]);
   useEffect(() => {
     if (!loading && !window.matchMedia("(max-width: 900px)").matches)
       box.current?.focus({ preventScroll: true });
-  }, [chatId, job, sessionKey, loading]);
+  }, [chatId, job, sessionKey, comp, hist, loading]);
 
-  const messages = linkedMode ? js?.messages || [] : chat?.messages || [];
+  const messages = linkedMode
+    ? js?.messages || []
+    : compMode
+      ? compThread?.messages || []
+      : chat?.messages || [];
   useLayoutEffect(() => {
     const el = list.current;
     if (el && atBottom) el.scrollTop = el.scrollHeight;
@@ -750,6 +972,10 @@ export function AIPage({
   useLayoutEffect(() => {
     const el = box.current;
     if (!el) return;
+    if (!input) {
+      el.style.height = "";
+      return;
+    }
     el.style.height = "auto";
     el.style.height = Math.min(el.scrollHeight, 220) + "px";
   }, [input]);
@@ -783,9 +1009,10 @@ export function AIPage({
     }
   };
   const addFiles = async (files: FileList | File[]) => {
-    if (!linkedMode) return attach(files);
+    if (!threadMode) return attach(files);
+    if (compArchMode) return;
     const pics = Array.from(files).filter((f) => f.type.startsWith("image/"));
-    if (!pics.length || !linkedMode) return;
+    if (!pics.length) return;
     if (model.current?.vision === "no")
       return Message.warning(
         bi(
@@ -804,7 +1031,8 @@ export function AIPage({
   };
 
   const flip = useRef<{ box: DOMRect; text: DOMRect } | null>(null);
-  const stopRun = () => {
+  const stopRun = (pauseQueue = true) => {
+    if (pauseQueue && queue.items.length > 0) queue.setPaused(true);
     abort.current?.abort();
     if (linkedMode && jobBase)
       api(`${jobBase}/stop`, {
@@ -822,7 +1050,7 @@ export function AIPage({
     }
   };
   const startNewChat = () => {
-    if (!linkedMode && !chatId && !prefsMode) {
+    if (!threadMode && !chatId && !prefsMode) {
       abort.current?.abort();
       abort.current = null;
       setDraftId(newId());
@@ -839,14 +1067,57 @@ export function AIPage({
     }
     go({ name: "ai" });
   };
-  const send = async (override?: string) => {
-    const text = (override ?? input).trim();
-    if ((!text && !imgs.length && !atts.length) || busy || !on || uploading > 0)
+  const canReplyComp = compLiveMode && Boolean(compThread?.hasDraft);
+  const enqueueCurrent = () => {
+    const text = input.trim();
+    if ((!text && !imgs.length && !atts.length) || !on || net !== "online" || uploading > 0)
+      return false;
+    if (compMode && !canReplyComp) return false;
+    const ok = queue.enqueue({ text, images: imgs, files: atts });
+    if (ok) {
+      setInput("");
+      setImgs([]);
+      setAtts([]);
+      requestAnimationFrame(() => box.current?.focus({ preventScroll: true }));
+    }
+    return ok;
+  };
+  const send = async (
+    override?: string,
+    isRetry?: boolean,
+    optsOverride?: Partial<AIOpts>,
+    queued?: QueuedMsg<FileNode>,
+  ) => {
+    const text = (queued ? queued.text : (override ?? input)).trim();
+    const sent = queued ? queued.images || [] : override !== undefined ? [] : imgs;
+    const sentFiles = queued
+      ? queued.files || []
+      : override !== undefined
+        ? []
+        : atts;
+    if ((!text && !sent.length && !sentFiles.length) || busy || !on || (!queued && uploading > 0))
       return;
+    if (compMode && !canReplyComp) return;
     const myThread = threadRef.current;
     const here = () => threadRef.current === myThread;
     setError(null);
-    if (!linkedMode && messages.length === 0 && !live) {
+    const trimmed = [...messages];
+    while (
+      trimmed.length > 0 &&
+      trimmed[trimmed.length - 1].role === "assistant" &&
+      trimmed[trimmed.length - 1].error &&
+      !trimmed[trimmed.length - 1].text?.trim()
+    ) {
+      trimmed.pop();
+    }
+    const again = Boolean(
+      !queued &&
+        (isRetry || override !== undefined) &&
+        trimmed.length > 0 &&
+        trimmed[trimmed.length - 1].role === "user" &&
+        trimmed[trimmed.length - 1].text === text,
+    );
+    if (!threadMode && messages.length === 0 && !live) {
       // remember where the start-page box and its text are, so the first message can travel from there into the thread
       const f = document.querySelector<HTMLElement>(".ap-hero .ap-compose");
       const t = f?.querySelector("textarea");
@@ -856,8 +1127,6 @@ export function AIPage({
           text: t.getBoundingClientRect(),
         };
     }
-    const sent = imgs;
-    const sentFiles = atts;
     const userMsg: Msg = {
       role: "user",
       text,
@@ -871,9 +1140,20 @@ export function AIPage({
       at: new Date().toISOString(),
       by: me.username,
     };
-    if (linkedMode)
+    if (again) {
+      if (linkedMode)
+        setJs((s) => (s ? { ...s, messages: trimmed } : s));
+      else if (compMode)
+        setCompThread((s) => (s ? { ...s, messages: trimmed } : s));
+      else
+        setChat((c) => (c ? { ...c, messages: trimmed } : c));
+    } else if (linkedMode) {
       setJs((s) => (s ? { ...s, messages: [...s.messages, userMsg] } : s));
-    else
+    } else if (compMode) {
+      setCompThread((s) =>
+        s ? { ...s, messages: [...s.messages, userMsg] } : s,
+      );
+    } else {
       setChat((c) => ({
         ...(c || {
           id,
@@ -884,9 +1164,12 @@ export function AIPage({
         }),
         messages: [...(c?.messages || []), userMsg],
       }));
-    setInput("");
-    setImgs([]);
-    setAtts([]);
+    }
+    if (!queued && override === undefined) {
+      setInput("");
+      setImgs([]);
+      setAtts([]);
+    }
     setAtBottom(true);
     const cur = newLive();
     setLive({ ...cur });
@@ -899,6 +1182,9 @@ export function AIPage({
       steps: cur.steps.map((x) => ({ ...x, running: false })),
       ms: Date.now() - cur.t0,
       proposals: cur.made,
+      rehearsals: cur.rehearsals,
+      knowledges: cur.knowledges,
+      components: cur.components,
       ask: cur.ask,
       files: cur.files,
       at: new Date().toISOString(),
@@ -906,9 +1192,20 @@ export function AIPage({
     const push = (m: Msg) =>
       linkedMode
         ? setJs((s) => (s ? { ...s, messages: [...s.messages, m] } : s))
-        : setChat((c) => (c ? { ...c, messages: [...c.messages, m] } : c));
+        : compMode
+          ? setCompThread((s) =>
+              s ? { ...s, messages: [...s.messages, m] } : s,
+            )
+          : setChat((c) => (c ? { ...c, messages: [...c.messages, m] } : c));
     try {
-      const url = linkedMode ? `${jobBase}/chat` : `/api/ai/chats/${id}/chat`;
+      const url = linkedMode
+        ? `${jobBase}/chat`
+        : compMode
+          ? `${compBase}/chat`
+          : `/api/ai/chats/${id}/chat`;
+      const reqOpts = optsOverride
+        ? { ...tools.opts, ...optsOverride }
+        : tools.opts;
       const body = linkedMode
         ? {
             key: sessionKey,
@@ -916,15 +1213,25 @@ export function AIPage({
             images: sent,
             step: js?.step,
             model: model.ref,
-            options: tools.opts,
+            options: reqOpts,
+            retry: again,
           }
-        : {
-            message: text,
-            attachments: sentFiles.map((f) => f.id),
-            ctx: ctx.kind ? { kind: ctx.kind, id: ctx.id } : undefined,
-            model: model.ref,
-            options: tools.opts,
-          };
+        : compMode
+          ? {
+              message: text,
+              images: sent,
+              model: model.ref,
+              options: reqOpts,
+              retry: again,
+            }
+          : {
+              message: text,
+              attachments: sentFiles.map((f) => f.id),
+              ctx: ctx.kind ? { kind: ctx.kind, id: ctx.id } : undefined,
+              model: model.ref,
+              options: reqOpts,
+              retry: again,
+            };
       await streamChat(
         url,
         body,
@@ -937,18 +1244,26 @@ export function AIPage({
             tools: [...cur.tools],
             steps: cur.steps.map((x) => ({ ...x })),
             made: [...cur.made],
+            rehearsals: cur.rehearsals ? [...cur.rehearsals] : undefined,
+            knowledges: cur.knowledges ? [...cur.knowledges] : undefined,
+            components: cur.components ? [...cur.components] : undefined,
             sandboxConfirms: cur.sandboxConfirms
               ? [...cur.sandboxConfirms]
               : undefined,
           }),
-        () => (here() ? loadProps() : Promise.resolve()),
+        () =>
+          here()
+            ? compMode
+              ? loadCompProps()
+              : loadProps()
+            : Promise.resolve(),
       );
       if (!here()) {
         loadList();
         return;
       }
       push(finished());
-      if (!linkedMode && !chatId) {
+      if (!threadMode && !chatId) {
         promotedId.current = id;
         go({ name: "ai", id }, { replace: true, instant: true });
       }
@@ -959,22 +1274,46 @@ export function AIPage({
         return;
       }
       const stopped = (e as Error).name === "AbortError";
+      const streamErr = e as ChatStreamError;
+      const diag =
+        streamErr.diag ??
+        (e as { body?: { diag?: AICallDiag } }).body?.diag;
       if (cur.text || cur.steps.length) {
         push({
           ...finished(),
           text: cur.text + (stopped ? bi("\n\n（已停止）", "\n\n(Stopped)") : ""),
+          ...(stopped
+            ? {}
+            : { error: streamErr.message, error_diag: diag }),
         });
-        if (!linkedMode && !chatId) {
+        if (!threadMode && !chatId) {
           promotedId.current = id;
           go({ name: "ai", id }, { replace: true, instant: true });
         }
         loadList();
-      }
-      if (!stopped)
-        setError({
-          text: (e as Error).message,
-          retry: cur.text ? undefined : text,
+      } else if (!stopped && streamErr.saved) {
+        push({
+          role: "assistant",
+          text: "",
+          error: streamErr.message,
+          error_diag: diag,
+          at: new Date().toISOString(),
         });
+        if (!threadMode && !chatId) {
+          promotedId.current = id;
+          go({ name: "ai", id }, { replace: true, instant: true });
+        }
+        loadList();
+      } else if (!stopped) {
+        setError({
+          text: streamErr.message,
+          retry: text,
+          diag,
+          kind: streamErr.kind,
+          rawError: streamErr.rawError,
+        });
+      }
+      if (!stopped && queue.items.length > 0) queue.setPaused(true);
     } finally {
       if (here()) {
         setLive(null);
@@ -983,11 +1322,61 @@ export function AIPage({
     }
   };
 
+  const submitComposer = () => {
+    if (busy) {
+      enqueueCurrent();
+      return;
+    }
+    void send();
+  };
+
+  const sendQueuedNow = (item: QueuedMsg<FileNode>) => {
+    const taken = queue.take(item.id);
+    if (!taken) return;
+    queue.setPaused(false);
+    if (busy) {
+      pendingJumpRef.current = { thread: activeThreadId, item: taken };
+      stopRun(false);
+    } else {
+      void send(undefined, false, undefined, taken);
+    }
+  };
+
+  // Auto-dispatch the next queued message once the active AI turn finishes cleanly.
+  useEffect(() => {
+    if (busy || !on || net !== "online" || loading || uploading > 0) return;
+    if (compMode && !canReplyComp) return;
+    if (
+      pendingJumpRef.current &&
+      pendingJumpRef.current.thread === activeThreadId
+    ) {
+      const next = pendingJumpRef.current.item;
+      pendingJumpRef.current = null;
+      void send(undefined, false, undefined, next);
+      return;
+    }
+    if (!queue.paused && queue.items.length > 0) {
+      const next = queue.take();
+      if (next) void send(undefined, false, undefined, next);
+    }
+  }, [
+    busy,
+    on,
+    net,
+    loading,
+    uploading,
+    compMode,
+    canReplyComp,
+    activeThreadId,
+    queue.paused,
+    queue.items.length,
+  ]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // a question another page prepared (for example "work out a plan for this CVE"): sent as soon as the page is ready
   useEffect(() => {
     if (
       seeded.current ||
-      linkedMode ||
+      threadMode ||
       chatId ||
       prefsMode ||
       !on ||
@@ -996,11 +1385,19 @@ export function AIPage({
     )
       return;
     let seed = "";
+    let seedWeb = false;
     try {
       const raw = sessionStorage.getItem("mw-ai-seed");
       if (raw) {
-        const v = JSON.parse(raw) as { text?: string; at?: number };
-        if (v.text && Date.now() - (v.at || 0) < 120000) seed = v.text;
+        const v = JSON.parse(raw) as {
+          text?: string;
+          web?: boolean;
+          at?: number;
+        };
+        if (v.text && Date.now() - (v.at || 0) < 120000) {
+          seed = v.text;
+          seedWeb = Boolean(v.web);
+        }
         sessionStorage.removeItem("mw-ai-seed");
       }
     } catch {
@@ -1008,18 +1405,78 @@ export function AIPage({
     }
     if (!seed) return;
     seeded.current = true;
-    window.setTimeout(() => send(seed), 150);
+    const enableWeb = seedWeb && (tools.options ? Boolean(tools.options.web) : true);
+    if (enableWeb && !tools.pref.web && tools.options?.web) {
+      tools.update({ web: true });
+    }
+    window.setTimeout(
+      () => send(seed, false, enableWeb ? { web: true } : undefined),
+      150,
+    );
   }); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const decide = async (pid: string, verb: "accept" | "reject") => {
+  const decide = async (
+    pid: string,
+    verb: "accept" | "reject",
+    body?: Record<string, unknown>,
+  ) => {
+    if (compArchMode) return;
     setDeciding(pid);
     try {
-      await api(`${jobBase}/proposals/${pid}/${verb}`, { method: "POST" });
-      if (verb === "accept")
-        Message.success(
-          bi("已写入执行手册和交付文档", "Applied to runbook and delivery docs"),
+      if (compLiveMode) {
+        await api(`${compBase}/proposals/${pid}/${verb}`, {
+          method: "POST",
+          body: body ? JSON.stringify(body) : undefined,
+        });
+        if (verb === "accept")
+          Message.success(
+            bi(
+              "已写入组件草稿（发布后生效）",
+              "Applied to component draft (effective after publish)",
+            ),
+          );
+        await loadCompProps();
+        loadList();
+      } else {
+        const curProp = props[pid] as StepProposal | undefined;
+        const saved = await api<StepProposal>(
+          `${jobBase}/proposals/${pid}/${verb}`,
+          {
+            method: "POST",
+            body: body ? JSON.stringify(body) : undefined,
+          },
         );
-      await loadProps();
+        if (verb === "accept") {
+          if (curProp?.kind === "knowledge") {
+            const kb = saved?.knowledge;
+            Message.success(
+              kb?.team_doc_id
+                ? bi("已直接发布到团队知识库", "Published to team Knowledge Base")
+                : kb?.submission_id
+                  ? bi(
+                      "已提交团队知识库等待审核",
+                      "Submitted to team Knowledge Base for review",
+                    )
+                  : bi("已存入「我的知识库」", "Saved to your personal Knowledge Base"),
+            );
+          } else if (curProp?.kind === "rehearsal") {
+            Message.success(
+              bi(
+                "已确认，正在前往集群变更演练",
+                "Confirmed; opening cluster rehearsal",
+              ),
+            );
+          } else if (curProp?.kind !== "component") {
+            Message.success(
+              bi(
+                "已写入执行手册和交付文档",
+                "Applied to runbook and delivery docs",
+              ),
+            );
+          }
+        }
+        await loadProps();
+      }
     } catch (e) {
       err(e);
     } finally {
@@ -1156,16 +1613,62 @@ export function AIPage({
         .sort((a, b) => rankOfChat(a) - rankOfChat(b)),
     [rows, needle],
   ); // eslint-disable-line react-hooks/exhaustive-deps
+  const regularChats = useMemo(
+    () => mine.filter((c) => c.ctx?.kind !== "form"),
+    [mine],
+  );
+  const formChats = useMemo(
+    () => mine.filter((c) => c.ctx?.kind === "form"),
+    [mine],
+  );
   const groups = useMemo(() => {
     const m = new Map<DayBucket, ChatRow[]>();
-    mine.forEach((c) => {
+    regularChats.forEach((c) => {
       const g = groupOfChat(c);
       m.set(g, [...(m.get(g) || []), c]);
     });
     return (["today", "yesterday", "week", "older"] as DayBucket[])
       .filter((k) => m.has(k))
       .map((k) => [k, m.get(k)!] as const);
-  }, [mine]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [regularChats]); // eslint-disable-line react-hooks/exhaustive-deps
+  const byComp = useMemo(() => {
+    const m = new Map<string, CompSession[]>();
+    compSessions
+      .filter(
+        (s) =>
+          !needle ||
+          (
+            s.comp +
+            " " +
+            s.comp_title +
+            " " +
+            s.title +
+            " " +
+            (s.label || "")
+          )
+            .toLowerCase()
+            .includes(needle),
+      )
+      .forEach((s) => m.set(s.comp, [...(m.get(s.comp) || []), s]));
+    return [...m.entries()]
+      .sort(
+        ([ca], [cb]) =>
+          (compGroupRanks.current.get(ca) ?? 0) -
+          (compGroupRanks.current.get(cb) ?? 0),
+      )
+      .map(
+        ([k, items]) =>
+          [
+            k,
+            [...items].sort(
+              (a, b) =>
+                (a.active === b.active ? 0 : a.active ? -1 : 1) ||
+                (compSessRanks.current.get(compSessionKey(a)) ?? 0) -
+                  (compSessRanks.current.get(compSessionKey(b)) ?? 0),
+            ),
+          ] as [string, CompSession[]],
+      );
+  }, [compSessions, needle]);
   const byDelivery = useMemo(() => {
     const m = new Map<string, Linked[]>();
     linked
@@ -1206,6 +1709,25 @@ export function AIPage({
           ] as [string, Linked[]],
       );
   }, [linked, needle]);
+
+  const chatTotal = regularChats.length + formChats.length;
+  const deliveryTotal = byDelivery.reduce((n, [, items]) => n + items.length, 0);
+  const compTotal = byComp.reduce((n, [, items]) => n + items.length, 0);
+  const showChatSec = sideTab === "all" || sideTab === "chat";
+  const showCompSec = sideTab === "all" || sideTab === "comp";
+  const showDeliverySec = sideTab === "all" || sideTab === "delivery";
+  const visibleAny =
+    (showChatSec &&
+      (regularChats.length > 0 ||
+        formChats.length > 0 ||
+        archived.length > 0)) ||
+    (showCompSec && byComp.length > 0) ||
+    (showDeliverySec && byDelivery.length > 0);
+  const chatOpen = secOpen.chat || !!needle || sideTab === "chat";
+  const compOpen = secOpen.comp || !!needle || sideTab === "comp";
+  const deliveryOpen = secOpen.delivery || !!needle || sideTab === "delivery";
+  const formOpen = secOpen.form || !!needle || ctx.kind === "form";
+  const archOpen = secOpen.arch || !!needle || Boolean(chat?.archived);
 
   const started = messages.length > 0 || !!live;
   const offline = net !== "online";
@@ -1271,16 +1793,34 @@ export function AIPage({
     }
     return out;
   })();
+  const activeCompTitle =
+    compMetaRow?.comp_title ||
+    compThread?.compTitle ||
+    (comp ? compTitleOf(comp) : "");
   const title = linkedMode
     ? js?.title ||
       (isGeneral(sessionKey)
         ? bi("对话", "Chat")
         : bi("现场排障", "Troubleshooting"))
-    : chat?.title || bi("新对话", "New chat");
-  const answered = messages.some((m) => m.role === "assistant");
+    : compMode
+      ? compThread?.title ||
+        compMetaRow?.title ||
+        bi("组件工作台对话", "Component workbench chat")
+      : chat?.title || bi("新对话", "New chat");
+  const answered = messages.some((m) => m.role === "assistant" && !m.error);
   const ctxChip = linkedMode
     ? { kind: "job", id: job!, name: jobRow?.cluster_id || job!.slice(0, 8) }
-    : ctx;
+    : compMode
+      ? { kind: "comp", id: comp!, name: activeCompTitle || comp! }
+      : ctx;
+  const openCompTarget = (compId: string) =>
+    go(
+      can("component.edit")
+        ? { name: "components", id: compId, edit: "files" }
+        : { name: "components", id: compId },
+    );
+  const canReplyThread =
+    ctx.kind !== "form" && (!compMode || canReplyComp);
 
   // a conversation held while filling in a new delivery goes on next to that form: only there can it write into it
   const formBack = ctx.kind === "form" && (
@@ -1299,12 +1839,37 @@ export function AIPage({
       </Button>
     </div>
   );
-  const composer = formBack || (
+  const compBack = compMode && (compArchMode || (compThread && !compThread.hasDraft)) && (
+    <div className={`ap-compback ${compArchMode ? "arch" : ""}`}>
+      <span>
+        {compArchMode
+          ? bi(
+              `这段组件工作台对话已归档${compThread?.label ? `（${compThread.label}）` : ""}，完整过程与改动提案已保留在此供随时查阅。`,
+              `This component workbench thread is archived${compThread?.label ? ` (${compThread.label})` : ""}; all messages and proposals remain preserved here for reference.`,
+            )
+          : bi(
+              `这段组件工作台对话已保留。当前「${activeCompTitle}」没有编辑中的草稿，前往组件工作台开启草稿后可继续由 AI 协助修改。`,
+              `This component workbench thread is preserved. "${activeCompTitle}" has no active draft right now; open the workbench to start a draft and continue editing with AI.`,
+            )}
+      </span>
+      <Button
+        type="primary"
+        size="small"
+        onClick={() => openCompTarget(comp!)}
+      >
+        {bi("前往组件工作台", "Open Workbench")}
+      </Button>
+    </div>
+  );
+  const isHero = !threadMode && !started;
+  const hasDraft = Boolean(input.trim() || imgs.length || atts.length);
+  const composer = formBack || compBack || (
     <form
-      className={`ap-compose ${!on || offline ? "off" : ""}`}
+      ref={composeRef}
+      className={`ap-compose ${isHero && spacious.expanded ? "is-writing" : ""} ${!on || offline ? "off" : ""}`}
       onSubmit={(e) => {
         e.preventDefault();
-        send();
+        submitComposer();
       }}
       onPaste={(e) => {
         if (e.clipboardData.files.length) {
@@ -1361,11 +1926,12 @@ export function AIPage({
         ref={box}
         value={input}
         rows={1}
+        onPointerDown={isHero ? spacious.onFieldPointerDown : undefined}
         onChange={(e) => setInput(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
             e.preventDefault();
-            send();
+            submitComposer();
           }
         }}
         placeholder={
@@ -1380,18 +1946,31 @@ export function AIPage({
                   "AI is off—contact an administrator",
                 )
             : offline
-              ? bi("网络已断开", "Network disconnected")
-              : linkedMode
+              ? bi(
+                  "暂未连上 Middleware Hub 后端服务",
+                  "Middleware Hub backend unavailable",
+                )
+              : busy
                 ? bi(
-                    "继续这段对话，可以贴报错或截图…",
-                    "Continue this thread, paste logs or screenshots…",
+                    "AI 正在回复，输入下一条问题按 Enter 加入待发送队列…",
+                    "AI is replying—type a follow-up and press Enter to queue…",
                   )
-                : ctx.kind
+                : compLiveMode
+                ? bi(
+                    `继续讨论「${activeCompTitle}」草稿修改，可贴报错或截图…`,
+                    `Continue editing "${activeCompTitle}" draft, paste errors or screenshots…`,
+                  )
+                : linkedMode
                   ? bi(
-                      `问问关于 ${ctx.name} 的事…`,
-                      `Ask anything about ${ctx.name}…`,
+                      "继续这段对话，可以贴报错或截图…",
+                      "Continue this thread, paste logs or screenshots…",
                     )
-                  : bi("有什么想问的？", "What would you like to ask?")
+                  : ctx.kind
+                    ? bi(
+                        `问问关于 ${ctx.name} 的事…`,
+                        `Ask anything about ${ctx.name}…`,
+                      )
+                    : bi("有什么想问的？", "What would you like to ask?")
         }
         disabled={!on || offline}
         aria-label={bi("消息", "Message")}
@@ -1401,8 +1980,9 @@ export function AIPage({
           t={tools}
           levels={model.current?.effort}
           compact={narrowBar}
+          hideThink
           attach={
-            linkedMode
+            threadMode
               ? undefined
               : {
                   upload: () => fileIn.current?.click(),
@@ -1410,7 +1990,7 @@ export function AIPage({
                 }
           }
         />
-        {!linkedMode && !started && (
+        {!threadMode && !started && (
           <Dropdown
             trigger="click"
             position="tl"
@@ -1451,7 +2031,7 @@ export function AIPage({
             </button>
           </Dropdown>
         )}
-        {linkedMode && (
+        {(linkedMode || compLiveMode) && (
           <Tooltip
             content={bi(
               "添加截图（也可以粘贴）",
@@ -1475,17 +2055,44 @@ export function AIPage({
           </Tooltip>
         )}
         <div className="ap-bar-right">
+          {!narrowBar && (
+            <ThinkLevel
+              levels={model.current?.effort}
+              value={tools.pref.think}
+              onChange={(v) => tools.update({ think: v })}
+            />
+          )}
           <ModelPicker pick={model} />
           {busy ? (
-            <button
-              type="button"
-              className="ap-send stop"
-              onClick={stopRun}
-              aria-label={bi("停止生成", "Stop")}
-              title={bi("停止生成", "Stop")}
-            >
-              <IconRecordStop />
-            </button>
+            <>
+              {hasDraft && uploading === 0 && (
+                <Tooltip
+                  content={bi(
+                    "加入待发送队列（当前回复完成后自动发送 · Enter）",
+                    "Add to queue (sends automatically after current reply · Enter)",
+                  )}
+                  mini
+                >
+                  <button
+                    type="submit"
+                    className="aq-enqueue-btn"
+                    aria-label={bi("加入队列", "Queue message")}
+                  >
+                    <IconSend />
+                    <span>{bi("入队", "Queue")}</span>
+                  </button>
+                </Tooltip>
+              )}
+              <button
+                type="button"
+                className="ap-send stop"
+                onClick={() => stopRun(true)}
+                aria-label={bi("停止生成", "Stop")}
+                title={bi("停止生成", "Stop")}
+              >
+                <IconRecordStop />
+              </button>
+            </>
           ) : (
             <button
               type="submit"
@@ -1508,6 +2115,73 @@ export function AIPage({
         </div>
       </div>
     </form>
+  );
+
+  const renderChatItem = (c: ChatRow, showFormTag = false) => (
+    <div key={c.id} className={`ap-row ${c.id === chatId ? "on" : ""}`}>
+      <button
+        type="button"
+        onClick={() =>
+          c.id === chatId
+            ? setSide(false)
+            : keepSideScroll(() => go({ name: "ai", id: c.id }))
+        }
+        aria-current={c.id === chatId ? "page" : undefined}
+      >
+        <b>
+          {showFormTag && (
+            <span className="ap-kind k-form">{bi("填表", "Form")}</span>
+          )}
+          <span className="ap-row-txt">
+            {normPlanLabel(c.title) || bi("新对话", "New chat")}
+          </span>
+        </b>
+        {c.ctx?.name ? (
+          <small>
+            {ctxWord(c.ctx.kind)} · {normPlanLabel(c.ctx.name)}
+          </small>
+        ) : (
+          <small>{ago(c.updated)}</small>
+        )}
+      </button>
+      <Dropdown
+        trigger="click"
+        position="br"
+        triggerProps={{ autoFitPosition: true }}
+        droplist={
+          <Menu
+            onClickMenuItem={(k) =>
+              k === "rename"
+                ? rename(c)
+                : k === "arch"
+                  ? archive(c, true)
+                  : remove(c)
+            }
+          >
+            <Menu.Item key="rename">
+              <IconEdit /> {bi("重命名", "Rename")}
+            </Menu.Item>
+            <Menu.Item key="arch">
+              <IconStorage /> {bi("归档", "Archive")}
+            </Menu.Item>
+            <Menu.Item key="del" className="danger-item">
+              <IconDelete /> {bi("删除", "Delete")}
+            </Menu.Item>
+          </Menu>
+        }
+      >
+        <button
+          type="button"
+          className="ap-more"
+          aria-label={bi(
+            `${c.title} 的更多操作`,
+            `More actions for ${c.title}`,
+          )}
+        >
+          <IconMore />
+        </button>
+      </Dropdown>
+    </div>
   );
 
   const suggest = getSuggest();
@@ -1534,7 +2208,7 @@ export function AIPage({
           <Input
             allowClear
             prefix={<IconSearch />}
-            placeholder={bi("搜索对话", "Search chats")}
+            placeholder={bi("搜索对话、集群或组件…", "Search chats, clusters, components…")}
             value={q}
             onChange={setQ}
             onKeyDown={(e) => {
@@ -1545,102 +2219,305 @@ export function AIPage({
             }}
             aria-label={bi("搜索对话", "Search chats")}
           />
+          <div
+            className="ap-tabs"
+            role="tablist"
+            aria-label={bi("对话分类筛选", "Filter conversations by category")}
+          >
+            {(
+              [
+                { id: "all", label: bi("全部", "All"), count: 0 },
+                { id: "chat", label: bi("日常", "Chat"), count: chatTotal },
+                { id: "delivery", label: bi("交付", "Jobs"), count: deliveryTotal },
+                { id: "comp", label: bi("组件", "Comp"), count: compTotal },
+              ] as const
+            ).map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                role="tab"
+                aria-selected={sideTab === t.id}
+                className={`ap-tab ${sideTab === t.id ? "on" : ""}`}
+                onClick={() => setSideTab(t.id)}
+              >
+                <span>{t.label}</span>
+                {t.count > 0 && <em>{t.count}</em>}
+              </button>
+            ))}
+          </div>
         </div>
         <div className="ap-rows" ref={sideRows}>
           {rows === null && (
             <div className="ap-skel" aria-label={bi("载入中", "Loading")} />
           )}
-          {rows &&
-            mine.length === 0 &&
-            archived.length === 0 &&
-            byDelivery.length === 0 && (
-              <p className="ap-none">
-                {needle
-                  ? bi("没有匹配的对话", "No matching conversations")
-                  : bi(
-                      "还没有对话，从右边开始吧。",
-                      "No conversations yet—start on the right.",
-                    )}
-              </p>
-            )}
-          {groups.map(([g, items]) => (
-            <section key={g}>
-              <h3>{DAY_LABEL[g]}</h3>
-              {items.map((c) => (
-                <div
-                  key={c.id}
-                  className={`ap-row ${c.id === chatId ? "on" : ""}`}
-                >
-                  <button
-                    type="button"
-                    onClick={() =>
-                      c.id === chatId
-                        ? setSide(false)
-                        : keepSideScroll(() => go({ name: "ai", id: c.id }))
-                    }
-                    aria-current={c.id === chatId ? "page" : undefined}
-                  >
-                    <b>{normPlanLabel(c.title) || bi("新对话", "New chat")}</b>
-                    {c.ctx?.name && (
-                      <small>
-                        {ctxWord(c.ctx.kind)} · {normPlanLabel(c.ctx.name)}
-                      </small>
-                    )}
-                  </button>
-                  <Dropdown
-                    trigger="click"
-                    position="br"
-                    triggerProps={{ autoFitPosition: true }}
-                    droplist={
-                      <Menu
-                        onClickMenuItem={(k) =>
-                          k === "rename"
-                            ? rename(c)
-                            : k === "arch"
-                              ? archive(c, true)
-                              : remove(c)
-                        }
-                      >
-                        <Menu.Item key="rename">
-                          <IconEdit /> {bi("重命名", "Rename")}
-                        </Menu.Item>
-                        <Menu.Item key="arch">
-                          <IconStorage /> {bi("归档", "Archive")}
-                        </Menu.Item>
-                        <Menu.Item key="del" className="danger-item">
-                          <IconDelete /> {bi("删除", "Delete")}
-                        </Menu.Item>
-                      </Menu>
-                    }
-                  >
-                    <button
-                      type="button"
-                      className="ap-more"
-                      aria-label={bi(
-                        `${c.title} 的更多操作`,
-                        `More actions for ${c.title}`,
+          {rows && !visibleAny && (
+            <p className="ap-none">
+              {needle
+                ? bi("没有匹配的对话", "No matching conversations")
+                : sideTab === "comp"
+                  ? bi(
+                      "还没有组件工作台对话，在组件编辑器使用 AI 后会自动汇总到这里。",
+                      "No component workbench threads yet—they appear here automatically.",
+                    )
+                  : sideTab === "delivery"
+                    ? bi(
+                        "还没有交付内的排障或评审对话。",
+                        "No delivery review or troubleshooting threads yet.",
+                      )
+                    : bi(
+                        "还没有对话，从右边开始吧。",
+                        "No conversations yet—start on the right.",
                       )}
-                    >
-                      <IconMore />
-                    </button>
-                  </Dropdown>
-                </div>
-              ))}
+            </p>
+          )}
+
+          {/* 1. Regular Assistant Conversations */}
+          {showChatSec && regularChats.length > 0 && (
+            <section className="ap-sec">
+              <button
+                type="button"
+                className="ap-sec-h"
+                aria-expanded={chatOpen}
+                onClick={() => toggleSec("chat")}
+              >
+                <IconRight
+                  className={`ap-sec-chev ${chatOpen ? "open" : ""}`}
+                />
+                <span className="ap-sec-ic">
+                  <IconMessage />
+                </span>
+                <span>{bi("日常对话", "General Chats")}</span>
+                <span className="ap-sec-cnt">{regularChats.length}</span>
+              </button>
+              {chatOpen &&
+                groups.map(([g, items]) => (
+                  <div key={g}>
+                    {groups.length > 1 && (
+                      <div className="ap-subh">{DAY_LABEL[g]}</div>
+                    )}
+                    {items.map((c) => renderChatItem(c))}
+                  </div>
+                ))}
             </section>
-          ))}
-          {archived.length > 0 && (
-            <section>
-              <h3>
-                <button
-                  type="button"
-                  className="ap-fold"
-                  aria-expanded={showArch || !!needle}
-                  onClick={() => setShowArch(!showArch)}
-                >
-                  {bi("已归档", "Archived")} · {archived.length}
-                </button>
-              </h3>
-              {(showArch || !!needle) &&
+          )}
+
+          {/* 2. Component Workbench Conversations (Active & Archived History) */}
+          {showCompSec && byComp.length > 0 && (
+            <section className="ap-sec">
+              <button
+                type="button"
+                className="ap-sec-h"
+                aria-expanded={compOpen}
+                onClick={() => toggleSec("comp")}
+              >
+                <IconRight
+                  className={`ap-sec-chev ${compOpen ? "open" : ""}`}
+                />
+                <span className="ap-sec-ic">
+                  <IconCode />
+                </span>
+                <span>{bi("组件工作台", "Component Workbench")}</span>
+                <span className="ap-sec-cnt">{compTotal}</span>
+              </button>
+              {compOpen &&
+                byComp.map(([compName, items]) => (
+                  <div key={compName} className="ap-dgroup ap-cgroup">
+                    <div className="ap-dhead">
+                      <span className="ap-ddot comp" aria-hidden />
+                      <span className="ap-row-txt">
+                        {items[0].comp_title || compName}
+                      </span>
+                      <span className="ap-dhead-cnt">{items.length}</span>
+                    </div>
+                    {items.map((s) => {
+                      const cur =
+                        compMode &&
+                        comp === s.comp &&
+                        (s.active
+                          ? !compArchMode
+                          : hist === s.history_id);
+                      const tagCls = s.active
+                        ? s.has_draft
+                          ? "k-draft"
+                          : "k-comp"
+                        : s.rev
+                          ? "k-rev"
+                          : "k-hist";
+                      const tagText = s.active
+                        ? s.has_draft
+                          ? bi("草稿", "Draft")
+                          : bi("当前", "Live")
+                        : s.rev
+                          ? `v${s.rev}`
+                          : bi("归档", "Saved");
+                      const subParts = [
+                        s.updated ? ago(s.updated) : "",
+                        bi(`${s.messages} 条`, `${s.messages} msgs`),
+                        s.accepted
+                          ? bi(`采纳 ${s.accepted}`, `${s.accepted} applied`)
+                          : "",
+                        !s.active && s.label ? s.label : "",
+                      ].filter(Boolean);
+                      return (
+                        <div
+                          key={compSessionKey(s)}
+                          className={`ap-row sub ${cur ? "on" : ""}`}
+                        >
+                          <button
+                            type="button"
+                            onClick={() =>
+                              cur
+                                ? setSide(false)
+                                : keepSideScroll(() =>
+                                    go(
+                                      s.active
+                                        ? {
+                                            name: "ai",
+                                            comp: s.comp,
+                                            key: "workbench",
+                                          }
+                                        : {
+                                            name: "ai",
+                                            comp: s.comp,
+                                            hist: s.history_id,
+                                          },
+                                    ),
+                                  )
+                            }
+                            aria-current={cur ? "page" : undefined}
+                          >
+                            <b>
+                              <span className={`ap-kind ${tagCls}`}>
+                                {tagText}
+                              </span>
+                              <span className="ap-row-txt">{s.title}</span>
+                            </b>
+                            <small>{subParts.join(" · ")}</small>
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+            </section>
+          )}
+
+          {/* 3. Delivery Troubleshooting & Review Threads */}
+          {showDeliverySec && byDelivery.length > 0 && (
+            <section className="ap-sec">
+              <button
+                type="button"
+                className="ap-sec-h"
+                aria-expanded={deliveryOpen}
+                onClick={() => toggleSec("delivery")}
+              >
+                <IconRight
+                  className={`ap-sec-chev ${deliveryOpen ? "open" : ""}`}
+                />
+                <span className="ap-sec-ic">
+                  <IconBug />
+                </span>
+                <span>{bi("交付排障与评审", "Delivery Threads")}</span>
+                <span className="ap-sec-cnt">{deliveryTotal}</span>
+              </button>
+              {deliveryOpen &&
+                byDelivery.map(([jid, items]) => (
+                  <div key={jid} className="ap-dgroup">
+                    <div className="ap-dhead">
+                      <span className="ap-ddot" aria-hidden />
+                      <span className="ap-row-txt">{items[0].cluster}</span>
+                      <span className="ap-dhead-cnt">{items.length}</span>
+                    </div>
+                    {items.map((l, i) => {
+                      const planHead =
+                        l.plan && (i === 0 || items[i - 1].job !== l.job);
+                      const cur =
+                        linkedMode && job === l.job && sessionKey === l.key;
+                      return (
+                        <React.Fragment key={l.job + l.key}>
+                          {planHead && (
+                            <div className="ap-dplan">
+                              {normPlanLabel(l.plan)}
+                            </div>
+                          )}
+                          <div className={`ap-row sub ${cur ? "on" : ""}`}>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                cur
+                                  ? setSide(false)
+                                  : keepSideScroll(() =>
+                                      go({
+                                        name: "ai",
+                                        job: l.job,
+                                        key: l.key,
+                                      }),
+                                    )
+                              }
+                              aria-current={cur ? "page" : undefined}
+                            >
+                              <b>
+                                <span className={`ap-kind k-${l.kind}`}>
+                                  {l.kind === "review"
+                                    ? bi("评审", "Review")
+                                    : bi("排障", "Fix")}
+                                </span>
+                                <span className="ap-row-txt">
+                                  {normPlanLabel(l.title)}
+                                </span>
+                              </b>
+                              <small>{ago(l.updated)}</small>
+                            </button>
+                          </div>
+                        </React.Fragment>
+                      );
+                    })}
+                  </div>
+                ))}
+            </section>
+          )}
+
+          {/* 4. New Delivery Form-Wizard Helper Chats (folded cleanly by default) */}
+          {showChatSec && formChats.length > 0 && (
+            <section className="ap-sec">
+              <button
+                type="button"
+                className="ap-sec-h"
+                aria-expanded={formOpen}
+                onClick={() => toggleSec("form")}
+              >
+                <IconRight
+                  className={`ap-sec-chev ${formOpen ? "open" : ""}`}
+                />
+                <span className="ap-sec-ic">
+                  <IconEdit />
+                </span>
+                <span>{bi("新建交付向导", "New Delivery Wizards")}</span>
+                <span className="ap-sec-cnt">{formChats.length}</span>
+              </button>
+              {formOpen && formChats.map((c) => renderChatItem(c, true))}
+            </section>
+          )}
+
+          {/* 5. Archived General Chats (folded by default) */}
+          {showChatSec && archived.length > 0 && (
+            <section className="ap-sec">
+              <button
+                type="button"
+                className="ap-sec-h"
+                aria-expanded={archOpen}
+                onClick={() => toggleSec("arch")}
+              >
+                <IconRight
+                  className={`ap-sec-chev ${archOpen ? "open" : ""}`}
+                />
+                <span className="ap-sec-ic">
+                  <IconHistory />
+                </span>
+                <span>{bi("已归档", "Archived")}</span>
+                <span className="ap-sec-cnt">{archived.length}</span>
+              </button>
+              {archOpen &&
                 archived.map((c) => (
                   <div
                     key={c.id}
@@ -1656,7 +2533,9 @@ export function AIPage({
                       aria-current={c.id === chatId ? "page" : undefined}
                     >
                       <b>
-                        {normPlanLabel(c.title) || bi("新对话", "New chat")}
+                        <span className="ap-row-txt">
+                          {normPlanLabel(c.title) || bi("新对话", "New chat")}
+                        </span>
                       </b>
                       <small>{ago(c.updated)}</small>
                     </button>
@@ -1694,57 +2573,6 @@ export function AIPage({
                 ))}
             </section>
           )}
-          {byDelivery.length > 0 && (
-            <section>
-              <h3>{bi("交付里的对话", "Delivery threads")}</h3>
-              {byDelivery.map(([jid, items]) => (
-                <div key={jid} className="ap-dgroup">
-                  <div className="ap-dhead">
-                    <span className="ap-ddot" aria-hidden />
-                    {items[0].cluster}
-                  </div>
-                  {items.map((l, i) => {
-                    const planHead =
-                      l.plan && (i === 0 || items[i - 1].job !== l.job);
-                    const cur =
-                      linkedMode && job === l.job && sessionKey === l.key;
-                    return (
-                      <React.Fragment key={l.job + l.key}>
-                        {planHead && (
-                          <div className="ap-dplan">
-                            {normPlanLabel(l.plan)}
-                          </div>
-                        )}
-                        <div className={`ap-row sub ${cur ? "on" : ""}`}>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              cur
-                                ? setSide(false)
-                                : keepSideScroll(() =>
-                                    go({ name: "ai", job: l.job, key: l.key }),
-                                  )
-                            }
-                            aria-current={cur ? "page" : undefined}
-                          >
-                            <b>
-                              <span className={`ap-kind k-${l.kind}`}>
-                                {l.kind === "review"
-                                  ? bi("评审", "Review")
-                                  : bi("排障", "Troubleshoot")}
-                              </span>
-                              {normPlanLabel(l.title)}
-                            </b>
-                            <small>{ago(l.updated)}</small>
-                          </button>
-                        </div>
-                      </React.Fragment>
-                    );
-                  })}
-                </div>
-              ))}
-            </section>
-          )}
         </div>
         <div className="ap-side-foot">
           <button
@@ -1761,7 +2589,7 @@ export function AIPage({
         className="ap-main"
         onDragOver={(e) => {
           if (
-            !linkedMode &&
+            !threadMode &&
             !prefsMode &&
             e.dataTransfer.types.includes("Files")
           ) {
@@ -1774,7 +2602,7 @@ export function AIPage({
             setDrop(false);
         }}
         onDrop={(e) => {
-          if (linkedMode || prefsMode || !e.dataTransfer.files.length) return;
+          if (threadMode || prefsMode || !e.dataTransfer.files.length) return;
           e.preventDefault();
           setDrop(false);
           attach(e.dataTransfer.files);
@@ -1799,8 +2627,8 @@ export function AIPage({
                 <IconMenuFold />
               </button>
               <div className="ap-title">
-                <b>{started || linkedMode ? title : bi("新对话", "New chat")}</b>
-                {ctxChip.kind && (started || linkedMode) && (
+                <b>{started || threadMode ? title : bi("新对话", "New chat")}</b>
+                {ctxChip.kind && (started || threadMode) && (
                   <button
                     type="button"
                     className="ap-ctx"
@@ -1809,10 +2637,15 @@ export function AIPage({
                         ? go({ name: "deliveries", id: ctxChip.id })
                         : ctxChip.kind === "form"
                           ? go({ name: "new", app: ctxChip.id, chat: chatId })
-                          : go({ name: "components", id: ctxChip.id })
+                          : compMode
+                            ? openCompTarget(ctxChip.id)
+                            : go({ name: "components", id: ctxChip.id })
                     }
                   >
-                    {ctxWord(ctxChip.kind)} {ctxChip.name} <IconLaunch />
+                    {compMode
+                      ? bi("组件工作台", "Workbench")
+                      : ctxWord(ctxChip.kind)}{" "}
+                    {ctxChip.name} <IconLaunch />
                   </button>
                 )}
                 {linkedMode && (
@@ -1822,8 +2655,24 @@ export function AIPage({
                       : bi("现场排障", "Troubleshooting")}
                   </span>
                 )}
+                {compMode && (
+                  <span
+                    className={`ap-badge ${compArchMode ? "arch" : compThread?.hasDraft ? "live" : ""}`}
+                  >
+                    {compArchMode
+                      ? compThread?.label
+                        ? bi(
+                            `已归档 · ${compThread.label}`,
+                            `Archived · ${compThread.label}`,
+                          )
+                        : bi("历史归档", "Archived")
+                      : compThread?.hasDraft
+                        ? bi("草稿对话中", "Active Draft")
+                        : bi("工作台记录", "Workbench Log")}
+                  </span>
+                )}
               </div>
-              {!linkedMode && chat && chatId && (
+              {!threadMode && chat && chatId && (
                 <Dropdown
                   trigger="click"
                   position="br"
@@ -1875,7 +2724,7 @@ export function AIPage({
               </div>
             )}
 
-            {!started && !loading && !linkedMode ? (
+            {!started && !loading && !threadMode ? (
               <div className="ap-hero">
                 <div className="ap-hero-in">
                   <span className="ap-orb" aria-hidden>
@@ -1898,11 +2747,36 @@ export function AIPage({
                           "I can inspect your deliveries, runbooks, and project files, and apply platform ops skills to answer.",
                         )}
                   </p>
+                  {!formBack && !compBack && (
+                    <MessageQueueTray
+                      items={queue.items}
+                      busy={busy}
+                      paused={queue.paused}
+                      onResume={() => queue.setPaused(false)}
+                      onSendNow={sendQueuedNow}
+                      onEdit={queue.update}
+                      onDelete={queue.remove}
+                      onMove={queue.move}
+                      onMoveUp={queue.moveUp}
+                      onMoveDown={queue.moveDown}
+                      onClear={queue.clear}
+                    />
+                  )}
                   {composer}
                   {error && (
-                    <div className="ad-error" role="alert">
-                      {error.text}
-                    </div>
+                    <ChatErrorCard
+                      variant="hero"
+                      text={error.text}
+                      diag={error.diag}
+                      kind={error.kind}
+                      rawError={error.rawError}
+                      busy={busy}
+                      onRetry={
+                        error.retry !== undefined
+                          ? () => send(error.retry, true)
+                          : undefined
+                      }
+                    />
                   )}
                   <div className="ap-suggest">
                     {suggest.map((s) => (
@@ -1982,7 +2856,7 @@ export function AIPage({
                         <i />
                       </div>
                     )}
-                    {!loading && linkedMode && messages.length === 0 && (
+                    {!loading && threadMode && messages.length === 0 && (
                       <p className="ap-none">
                         {bi(
                           "这段对话还没有内容。",
@@ -1990,47 +2864,81 @@ export function AIPage({
                         )}
                       </p>
                     )}
-                    {messages.map((m, i) => (
-                      <Bubble
-                        key={`${activeThreadId}-${i}`}
-                        m={m}
-                        jobBase={jobBase}
-                        props={props}
-                        deciding={deciding}
-                        decide={decide}
-                        comp={false}
-                        answer={
-                          i === messages.length - 1 &&
-                          !busy &&
-                          on &&
-                          !linkedMode
-                            ? (t) => send(t)
-                            : undefined
-                        }
-                      />
-                    ))}
+                    {messages.map((m, i) => {
+                      const isLast = i === messages.length - 1;
+                      const prevUser =
+                        isLast && m.role === "assistant" && m.error
+                          ? [...messages.slice(0, i)]
+                              .reverse()
+                              .find((x) => x.role === "user" && x.text?.trim())
+                          : undefined;
+                      return (
+                        <Bubble
+                          key={`${activeThreadId}-${i}`}
+                          m={m}
+                          jobBase={imgBase}
+                          props={compMode ? compProps : props}
+                          deciding={deciding}
+                          decide={compArchMode ? () => undefined : decide}
+                          comp={compMode}
+                          busy={busy}
+                          onRetry={
+                            isLast &&
+                            !busy &&
+                            on &&
+                            canReplyThread &&
+                            m.error &&
+                            prevUser?.text
+                              ? () => send(prevUser.text, true)
+                              : undefined
+                          }
+                          answer={
+                            isLast && !busy && on && !threadMode
+                              ? (t) => send(t)
+                              : undefined
+                          }
+                        />
+                      );
+                    })}
+                    {!loading &&
+                      !busy &&
+                      !live &&
+                      !error &&
+                      messages.length > 0 &&
+                      messages[messages.length - 1].role === "user" &&
+                      messages[messages.length - 1].text?.trim() && (
+                        <UnansweredTurnCard
+                          busy={busy}
+                          onRetry={
+                            on && canReplyThread
+                              ? () =>
+                                  send(messages[messages.length - 1].text, true)
+                              : undefined
+                          }
+                        />
+                      )}
                     {live && (
                       <LiveBubble
                         live={live}
-                        props={props}
+                        props={compMode ? compProps : props}
                         deciding={deciding}
                         decide={decide}
-                        comp={false}
+                        comp={compMode}
                       />
                     )}
                     {error && (
-                      <div className="ad-error" role="alert">
-                        <span>{error.text}</span>
-                        {error.retry !== undefined && (
-                          <Button
-                            size="mini"
-                            onClick={() => send(error.retry)}
-                            disabled={busy}
-                          >
-                            {bi("重试", "Retry")}
-                          </Button>
-                        )}
-                      </div>
+                      <ChatErrorCard
+                        text={error.text}
+                        diag={error.diag}
+                        kind={error.kind}
+                        rawError={error.rawError}
+                        busy={busy}
+                        onRetry={
+                          error.retry !== undefined && canReplyThread
+                            ? () => send(error.retry, true)
+                            : undefined
+                        }
+                      />
                     )}
                   </div>
                 </div>
@@ -2051,15 +2959,15 @@ export function AIPage({
                 )}
                 <div className="ap-foot">
                   {linkedMode &&
-                    !isGeneral(sessionKey) &&
+                    (!isGeneral(sessionKey) || messages.length >= 4) &&
                     answered &&
                     !busy && (
                       <div className="ap-solved">
                         <IconCheckCircle />
                         <span>
                           {bi(
-                            "问题解决了？把经过整理成记录，写进这份交付的执行记录。",
-                            "Issue resolved? Summarize the resolution into this delivery's execution record.",
+                            "问题解决了或方案已敲定？一键整理成记录并存入知识库。",
+                            "Resolved or finalized? Summarize into the execution record and save to KB.",
                           )}
                         </span>
                         <Button
@@ -2068,10 +2976,25 @@ export function AIPage({
                           loading={resolving}
                           onClick={resolve}
                         >
-                          {bi("已解决，写入记录", "Resolved, save record")}
+                          {bi("整理记录并存入知识库", "Save record & KB")}
                         </Button>
                       </div>
                     )}
+                  {!formBack && !compBack && (
+                    <MessageQueueTray
+                      items={queue.items}
+                      busy={busy}
+                      paused={queue.paused}
+                      onResume={() => queue.setPaused(false)}
+                      onSendNow={sendQueuedNow}
+                      onEdit={queue.update}
+                      onDelete={queue.remove}
+                      onMove={queue.move}
+                      onMoveUp={queue.moveUp}
+                      onMoveDown={queue.moveDown}
+                      onClear={queue.clear}
+                    />
+                  )}
                   {composer}
                 </div>
               </>

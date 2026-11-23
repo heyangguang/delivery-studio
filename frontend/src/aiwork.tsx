@@ -13,6 +13,7 @@ import {
   IconList,
   IconSearch,
   IconStorage,
+  IconSync,
   IconThunderbolt,
 } from "@arco-design/web-react/icon";
 import { Markdown } from "./aimd";
@@ -97,13 +98,17 @@ export function stepLabel(st: Step): {
     };
   if (st.name === "run_python")
     return {
-      verb: bi("运行 Python", "Run Python"),
+      verb: a.workspace
+        ? bi("沙箱分析交付快照", "Analyze snapshot in sandbox")
+        : bi("运行 Python", "Run Python"),
       what: str(a.purpose),
       icon: <IconCode />,
     };
   if (st.name === "run_shell")
     return {
-      verb: bi("运行沙箱命令", "Run sandbox command"),
+      verb: a.workspace
+        ? bi("沙箱核对交付快照", "Inspect snapshot in sandbox")
+        : bi("运行沙箱命令", "Run sandbox command"),
       what: str(a.purpose) || str(a.command).split(/\r?\n/)[0].slice(0, 60),
       icon: <IconCode />,
     };
@@ -121,6 +126,23 @@ export function stepLabel(st: Step): {
       what: str(a.id),
       icon: <IconStorage />,
     };
+  if (st.name === "check_package_security") {
+    const pkgs = Array.isArray(a.packages)
+      ? (a.packages as { name?: string; version?: string }[])
+          .map((p) => (p.version ? `${p.name} ${p.version}` : p.name || ""))
+          .filter(Boolean)
+      : [];
+    const what =
+      str(a.vuln_id) ||
+      (pkgs.length > 3
+        ? `${pkgs.slice(0, 3).join("、")}${bi(` 等 ${pkgs.length} 个包`, ` +${pkgs.length - 3}`)}`
+        : pkgs.join("、"));
+    return {
+      verb: bi("核查软件包安全公告", "Check package advisories"),
+      what,
+      icon: <IconSearch />,
+    };
+  }
   if (st.name === "web_search")
     return {
       verb: bi("搜索网页", "Search web"),
@@ -152,6 +174,96 @@ export function stepLabel(st: Step): {
       };
     case "execution_record":
       return { verb: bi("查看执行记录", "View execution record"), what: where, icon: <IconList /> };
+    case "execution_history":
+      return { verb: bi("查看自动执行批次", "View execution runs"), what: where, icon: <IconList /> };
+    case "execution_log":
+      return {
+        verb: bi("读取执行日志", "Read execution log"),
+        what: str(a.attempt) || str(a.run) || where,
+        icon: <IconFile />,
+      };
+    case "cluster_history":
+      return { verb: bi("查看集群历史", "View cluster history"), what: where, icon: <IconList /> };
+    case "cluster_security_info":
+      return {
+        verb: bi("读取集群安全态势", "Inspect cluster security posture"),
+        what: str(a.cve) || str(a.package) || str(a.cluster_id) || where,
+        icon: <IconSearch />,
+      };
+    case "security_scan_summary":
+      return {
+        verb: bi("查看全局安全概览", "Read security scan summary"),
+        what: "",
+        icon: <IconList />,
+      };
+    case "security_search_findings":
+      return {
+        verb: bi("检索安全中心漏洞", "Search security findings"),
+        what:
+          [str(a.cve), str(a.package), str(a.cluster_id), str(a.pkg_role)]
+            .filter(Boolean)
+            .join(" · ") || bi("活跃漏洞", "Active findings"),
+        icon: <IconSearch />,
+      };
+    case "propose_vex_triage":
+      return {
+        verb: bi("生成 VEX 处置提案", "Propose VEX triage"),
+        what:
+          str(a.cve) ||
+          (Array.isArray(a.cves) ? (a.cves as string[]).slice(0, 2).join(", ") : "") ||
+          str(a.package),
+        icon: <IconThunderbolt />,
+      };
+    case "propose_baseline_waive":
+      return {
+        verb: bi("生成基线豁免提案", "Propose baseline waiver"),
+        what: str(a.title) || str(a.check_id),
+        icon: <IconThunderbolt />,
+      };
+    case "propose_rehearsal":
+      return {
+        verb: bi("生成变更演练卡片", "Propose change rehearsal"),
+        what: str(a.title) || str(a.cluster_id) || where,
+        icon: <IconThunderbolt />,
+      };
+    case "read_rehearsal":
+      return {
+        verb: bi("读取变更演练步骤", "Read change rehearsal"),
+        what: str(a.rehearsal_id) || where,
+        icon: <IconList />,
+      };
+    case "propose_rehearsal_step_edit":
+      return {
+        verb: bi("生成演练步骤修订卡片", "Propose rehearsal step edit"),
+        what: str(a.title) || str(a.step_id) || where,
+        icon: <IconThunderbolt />,
+      };
+    case "suggest_security_rehearsal":
+      return {
+        verb: bi("生成修复演练建议", "Suggest security rehearsal"),
+        what: str(a.title) || str(a.cluster_id),
+        icon: <IconThunderbolt />,
+      };
+    case "component_sync_status":
+      return {
+        verb: bi("核对当前组件与同步状态", "Check component & sync status"),
+        what: str(a.file) || where,
+        icon: <IconSync />,
+      };
+    case "library_runtimes":
+      return {
+        verb: bi("查看软件库运行环境", "View library runtimes"),
+        what: str(a.runtime_id) || bi("Ansible 运行环境", "Ansible runtimes"),
+        icon: <IconStorage />,
+      };
+    case "search_files":
+      return {
+        verb: bi("搜索项目文件", "Search project files"),
+        what:
+          str(a.query) +
+          (str(a.prefix) ? ` · ${str(a.prefix)}` : ""),
+        icon: <IconSearch />,
+      };
     case "list_files":
       return {
         verb: bi("浏览项目文件", "Browse project files"),
@@ -163,10 +275,18 @@ export function stepLabel(st: Step): {
         verb: bi("读取文件", "Read file"),
         what:
           str(a.path) +
-          (a.offset
-            ? bi(` · 从 ${a.offset} 字节`, ` · from byte ${a.offset}`)
-            : ""),
+          (a.from_line
+            ? bi(` · 第 ${a.from_line} 行起`, ` · from line ${a.from_line}`)
+            : a.offset
+              ? bi(` · 从 ${a.offset} 字节`, ` · from byte ${a.offset}`)
+              : ""),
         icon: <IconFile />,
+      };
+    case "draft_search":
+      return {
+        verb: bi("搜索草稿文件", "Search draft files"),
+        what: str(a.text),
+        icon: <IconSearch />,
       };
     case "list_deliveries":
       return { verb: bi("查看你的交付", "List deliveries"), what: "", icon: <IconSearch /> };
@@ -373,12 +493,19 @@ function Call({ st }: { st: Step }) {
             <span className="wk-tag kb">{bi("记忆", "Memory")}</span>
           )}
           {st.kind === "sandbox" && (
-            <span className="wk-tag sk">{bi("沙箱", "Sandbox")}</span>
+            <span className="wk-tag sk">
+              {args.workspace
+                ? bi("沙箱 · 只读快照", "Sandbox · Snapshot")
+                : bi("沙箱", "Sandbox")}
+            </span>
           )}
           {what && <code title={what}>{what}</code>}
           <span className="wk-meta">
             {st.summary && (
-              <small className={st.ok === false ? "bad" : ""}>
+              <small
+                className={st.ok === false ? "bad" : ""}
+                title={st.summary}
+              >
                 {st.summary}
               </small>
             )}
@@ -391,7 +518,15 @@ function Call({ st }: { st: Step }) {
             <div className="wk-term">
               <div className="wk-term-h">
                 {st.kind === "sandbox"
-                  ? bi("代码沙箱 · Python", "Code sandbox · Python")
+                  ? st.name === "run_shell"
+                    ? args.workspace
+                      ? bi("隔离沙箱 · 交付/组件只读快照（不连目标主机）", "Isolated sandbox · Read-only project snapshot")
+                      : bi("隔离沙箱 · Shell 命令", "Isolated sandbox · Shell")
+                    : st.name === "run_skill_script"
+                      ? bi("隔离沙箱 · 技能脚本", "Isolated sandbox · Skill script")
+                      : args.workspace
+                        ? bi("隔离沙箱 · Python（只读快照）", "Isolated sandbox · Python (read-only snapshot)")
+                        : bi("代码沙箱 · Python", "Code sandbox · Python")
                   : st.kind === "mcp"
                     ? bi("外部服务", "External service")
                     : st.kind === "web"
@@ -406,6 +541,8 @@ function Call({ st }: { st: Step }) {
               </div>
               {st.name === "run_python" ? (
                 <pre className="wk-cmd code">{str(args.code)}</pre>
+              ) : st.name === "run_shell" && str(args.command) ? (
+                <pre className="wk-cmd code">{str(args.command)}</pre>
               ) : (
                 <pre className="wk-cmd">
                   <span aria-hidden>$ </span>
@@ -495,7 +632,9 @@ export function Process({
             {doing}… <small>{fmtDur(now - (t0 || now))}</small>
           </span>
         ) : (
-          <span>{bi(`已处理 ${fmtDur(ms || 0)}`, `Processed for ${fmtDur(ms || 0)}`)}</span>
+          <span className="wk-label">
+            {bi(`已处理 ${fmtDur(ms || 0)}`, `Processed for ${fmtDur(ms || 0)}`)}
+          </span>
         )}
         {!live && (
           <span className="wk-chips">

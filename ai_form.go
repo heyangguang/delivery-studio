@@ -239,7 +239,7 @@ func formTools() []aiToolDef {
 			"summary":          str("切换及沿用需求的简短说明"),
 		}, "target_component", "deployment")},
 		{"fill_form", "把一份完整的部署规格写进表单，用户能看到表单被填上。平台会先校验：不通过时不会写入，并返回要修正的问题。", obj(map[string]any{
-			"deployment": map[string]any{"type": "object", "description": "完整的部署规格：{id, title, platform, delivery_mode(offline或configuration), controller(集群内执行机) 或 execution_host:{name,ip,repository_port}(独立执行机，不可放入业务hosts), hosts:[{name,ip,disk,initialize,params}], instances:[{id,component,version,placement,params,binds,addons}]}。不是只写改动。"},
+			"deployment": map[string]any{"type": "object", "description": "完整的部署规格：{id, title, platform, delivery_mode(offline、automatic或configuration), controller(集群内执行机) 或 execution_host:{name,ip,repository_port}(独立执行机，不可放入业务hosts), hosts:[{name,ip,disk,initialize,params}], instances:[{id,component,version,placement,params,binds,addons}]}。不是只写改动。"},
 			"summary":    str("一句话说明这次填了什么，例如：3 台机器、一主两从，并加上云 ELB 入口"),
 		}, "deployment")},
 	}

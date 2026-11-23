@@ -6,11 +6,10 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { Button, Message, Tooltip } from "@arco-design/web-react";
+import { Button, Message } from "@arco-design/web-react";
 import "./aipage.css";
 import "./airainbow.css";
 import {
-  IconAttachment,
   IconCheckCircleFill,
   IconClose,
   IconExclamationCircleFill,
@@ -24,9 +23,16 @@ import { bi, useLang } from "./i18n";
 import { draftKey, formChatKey } from "./formdraft";
 import type { Deployment, InstanceSpec, Schema } from "./shared";
 import { AIEmblem, Bubble, Spark, newLive, stepLabel, streamChat } from "./aichat";
-import type { MsgFile } from "./aichat";
-import type { Live, Msg } from "./aichat";
+import type {
+  AICallDiag,
+  ChatErrorState,
+  ChatStreamError,
+  Live,
+  Msg,
+  MsgFile,
+} from "./aichat";
 import { ModelPicker, useModelPick } from "./modelpick";
+import { ThinkLevel, ToolMenu, useAIOptions, useSpaciousComposer } from "./aitools";
 import "./formchat.css";
 
 /* Filling the new-delivery form by talking: the person describes the cluster in their own words, the assistant asks
@@ -379,11 +385,11 @@ export function useFormAI(o: {
     }
   }, [saved, o.app.id, o.draftScope, o.enabled]);
   const [msgs, setMsgs] = useState<Msg[]>([]);
+  const msgsRef = useRef(msgs);
+  msgsRef.current = msgs;
   const [loaded, setLoaded] = useState(false);
   const [live, setLive] = useState<Live | null>(null);
-  const [error, setError] = useState<{ text: string; retry?: string } | null>(
-    null,
-  );
+  const [error, setError] = useState<ChatErrorState | null>(null);
   const [run, setRun] = useState<Run | null>(null);
   const ctl = useRef<{
     id: number;
@@ -393,6 +399,9 @@ export function useFormAI(o: {
   const seq = useRef(0);
   const [nudged, setNudged] = useState(0);
   const model = useModelPick("form");
+  const tools = useAIOptions();
+  const toolsRef = useRef(tools.opts);
+  toolsRef.current = tools.opts;
   const abort = useRef<AbortController | null>(null);
   const depRef = useRef(o.dep);
   depRef.current = o.dep;
@@ -562,21 +571,45 @@ export function useFormAI(o: {
   }, []);
 
   const send = useCallback(
-    async (raw: string, attached: MsgFile[] = [], note = "") => {
+    async (
+      raw: string,
+      attached: MsgFile[] = [],
+      note = "",
+      isRetry = false,
+    ) => {
       const text = raw.trim();
       if (!text || live || !on) return;
       ctl.current?.finish();
       setError(null);
       setSaved((s) => (s.used ? s : { ...s, used: true }));
-      setMsgs((m) => [
-        ...m,
-        {
-          role: "user",
-          text,
-          files: attached.length ? attached : undefined,
-          at: new Date().toISOString(),
-        },
-      ]);
+      const trimmed = [...msgsRef.current];
+      while (
+        trimmed.length > 0 &&
+        trimmed[trimmed.length - 1].role === "assistant" &&
+        trimmed[trimmed.length - 1].error &&
+        !trimmed[trimmed.length - 1].text?.trim()
+      ) {
+        trimmed.pop();
+      }
+      const again = Boolean(
+        isRetry &&
+          trimmed.length > 0 &&
+          trimmed[trimmed.length - 1].role === "user" &&
+          trimmed[trimmed.length - 1].text === text,
+      );
+      if (again) {
+        setMsgs(trimmed);
+      } else {
+        setMsgs((m) => [
+          ...m,
+          {
+            role: "user",
+            text,
+            files: attached.length ? attached : undefined,
+            at: new Date().toISOString(),
+          },
+        ]);
+      }
       const cur = newLive();
       setLive({ ...cur });
       const ac = new AbortController();
@@ -608,6 +641,8 @@ export function useFormAI(o: {
               allow_switch: !!oRef.current.onSwitch,
             },
             model: model.ref,
+            options: toolsRef.current,
+            retry: again,
           },
           ac.signal,
           cur,
@@ -649,20 +684,42 @@ export function useFormAI(o: {
         }
       } catch (e) {
         const stopped = (e as Error).name === "AbortError";
-        if (cur.text || cur.steps.length || filled)
+        const streamErr = e as ChatStreamError;
+        const diag =
+          streamErr.diag ??
+          (e as { body?: { diag?: AICallDiag } }).body?.diag;
+        if (cur.text || cur.steps.length || filled) {
           setMsgs((m) => [
             ...m,
             {
               ...done(),
               text:
                 cur.text + (stopped ? bi("\n\n（已停止）", "\n\n(Stopped)") : ""),
+              ...(stopped
+                ? {}
+                : { error: streamErr.message, error_diag: diag }),
             },
           ]);
-        if (!stopped)
+        } else if (!stopped && streamErr.saved) {
+          setMsgs((m) => [
+            ...m,
+            {
+              role: "assistant",
+              text: "",
+              error: streamErr.message,
+              error_diag: diag,
+              at: new Date().toISOString(),
+            },
+          ]);
+        } else if (!stopped) {
           setError({
-            text: (e as Error).message,
-            retry: cur.text || filled ? undefined : text,
+            text: streamErr.message,
+            retry: text,
+            diag,
+            kind: streamErr.kind,
+            rawError: streamErr.rawError,
           });
+        }
       } finally {
         setLive(null);
         abort.current = null;
@@ -727,6 +784,7 @@ export function useFormAI(o: {
     sections,
     pending: changes.length,
     model,
+    tools,
     send,
     stopAnswer: () => abort.current?.abort(),
     confirm,
@@ -867,12 +925,18 @@ export function Composer({
   const [input, setInput] = useState("");
   const [focus, setFocus] = useState(false);
   const box = useRef<HTMLTextAreaElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const isStart = variant === "start";
+  const spacious = useSpaciousComposer(
+    formRef,
+    Boolean(input.trim() || attach?.list.length),
+  );
   const examples = useMemo(
     () => getExamples()[fa.app.id] || [],
     [fa.app.id, lang],
   );
   const work = variant === "work";
-  const open = !!variant && (variant === "start" || work || focus || !!input);
+  const open = !!variant && (isStart || work || focus || !!input);
   const hint = useTypedHint(
     examples,
     fa.started
@@ -937,7 +1001,8 @@ export function Composer({
   };
   return (
     <form
-      className={`ap-compose fc-compose ${variant === "start" ? "start-box" : ""} ${open ? "open" : ""} ${work ? "work" : ""} ${!online ? "off" : ""}`}
+      ref={formRef}
+      className={`ap-compose fc-compose ${isStart ? "start-box" : ""} ${isStart && spacious.expanded ? "is-writing" : ""} ${open ? "open" : ""} ${work ? "work" : ""} ${!online ? "off" : ""}`}
       onSubmit={(e) => {
         e.preventDefault();
         go();
@@ -999,6 +1064,7 @@ export function Composer({
           ref={box}
           value={input}
           rows={1}
+          onPointerDown={isStart ? spacious.onFieldPointerDown : undefined}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
             if (
@@ -1010,78 +1076,98 @@ export function Composer({
               go();
             } else if (e.key === "Escape") box.current?.blur();
           }}
-          placeholder={!online ? bi("网络已断开", "Network disconnected") : hint}
+          placeholder={
+            !online
+              ? bi(
+                  "暂未连上 Middleware Hub 后端服务",
+                  "Middleware Hub backend unavailable",
+                )
+              : hint
+          }
           aria-label={bi("对 AI 说你要的集群", "Describe your cluster to AI")}
           disabled={!online}
         />
         {!open && !fa.busy && <kbd className="fc-kbd">/</kbd>}
-        {fa.busy ? (
-          <button
-            type="button"
-            className="ad-send stop"
-            onClick={fa.stopAnswer}
-            aria-label={bi("停止", "Stop")}
-          >
-            <IconRecordStop />
-          </button>
-        ) : (
-          <button
-            type="submit"
-            className="ad-send"
-            disabled={
-              (!input.trim() && !attach?.waiting) || !online || attach?.busy
-            }
-            aria-label={bi("发送", "Send")}
-            title={bi(
-              "发送（Enter 发送 · Shift+Enter 换行）",
-              "Send (Enter to send · Shift+Enter for new line)",
-            )}
-          >
-            <IconSend />
-          </button>
-        )}
       </div>
+      {attach && (
+        <input
+          ref={pick}
+          type="file"
+          multiple
+          hidden
+          accept={attach.accept}
+          onChange={(e) => {
+            if (e.target.files) attach.add(Array.from(e.target.files));
+            e.target.value = "";
+          }}
+        />
+      )}
       <div className="fc-fold">
         <div>
           <div className="fc-tools">
-            {attach && (
-              <>
-                <Tooltip
-                  content={bi(
-                    "添加任何文件：证书、私钥、p7b、报错截图、配置（也可以拖进来或粘贴）。AI 会自己看、自己整理放进表单；私钥内容不会发给 AI",
-                    "Attach any file: certs, private keys, p7b, error screenshots, configs (or drag/paste). AI will inspect and fill the form; private key contents are never sent to AI",
-                  )}
-                  mini
-                >
-                  <button
-                    type="button"
-                    className="fc-attach"
-                    aria-label={bi("添加文件", "Attach files")}
-                    onClick={() => pick.current?.click()}
-                  >
-                    <IconAttachment />
-                  </button>
-                </Tooltip>
-                <input
-                  ref={pick}
-                  type="file"
-                  multiple
-                  hidden
-                  accept={attach.accept}
-                  onChange={(e) => {
-                    if (e.target.files) attach.add(Array.from(e.target.files));
-                    e.target.value = "";
-                  }}
-                />
-              </>
-            )}
-            <ModelPicker pick={fa.model} compact />
+            <ToolMenu
+              t={fa.tools}
+              levels={fa.model.current?.effort}
+              compact={!isStart}
+              hideThink
+              thinkInMenu={false}
+              attach={
+                attach
+                  ? {
+                      upload: () => pick.current?.click(),
+                      uploadTitle: bi(
+                        "上传证书、配置或截图",
+                        "Upload certs, configs, or screenshots",
+                      ),
+                      uploadDesc: bi(
+                        "支持证书、私钥、p7b、报错截图与配置（可拖拽或粘贴）；私钥内容不会发给 AI",
+                        "Certs, keys, p7b, error screenshots & configs (drag/paste); private keys stay local",
+                      ),
+                    }
+                  : undefined
+              }
+            />
             <span className="fc-hint">
               {bi(
                 "不要写密码，平台会生成",
                 "Don't include passwords—the platform generates them",
               )}
             </span>
+            <div className="fc-tools-right">
+              <ThinkLevel
+                levels={fa.model.current?.effort}
+                value={fa.tools.pref.think}
+                onChange={(v) => fa.tools.update({ think: v })}
+              />
+              <ModelPicker pick={fa.model} compact={!isStart} />
+              {fa.busy ? (
+                <button
+                  type="button"
+                  className={isStart ? "ap-send stop" : "ad-send stop"}
+                  onClick={fa.stopAnswer}
+                  aria-label={bi("停止", "Stop")}
+                >
+                  <IconRecordStop />
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  className={isStart ? "ap-send" : "ad-send"}
+                  disabled={
+                    (!input.trim() && !attach?.waiting) ||
+                    !online ||
+                    attach?.busy
+                  }
+                  aria-label={bi("发送", "Send")}
+                  title={bi(
+                    "发送（Enter 发送 · Shift+Enter 换行）",
+                    "Send (Enter to send · Shift+Enter for new line)",
+                  )}
+                >
+                  <IconSend />
+                </button>
+              )}
+            </div>
           </div>
           {!fa.started && examples.length > 0 && (
             <div className="fc-chips">

@@ -107,7 +107,27 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 2px 14px 12px 52px;
+  min-width: 0;
+  padding: 6px 14px 12px 14px;
+}
+.fc-compose:not(.start-box) .fc-tools {
+  gap: 6px;
+  padding: 4px 12px 10px 12px;
+}
+.fc-tools-right {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-left: auto;
+}
+.fc-compose:not(.start-box) .fc-tools-right {
+  gap: 6px;
+}
+.fc-tools-right .ap-send,
+.fc-tools-right .ad-send {
+  margin-left: 0;
 }
 .fc-hint {
   flex: 1;
@@ -117,13 +137,18 @@
   font-size: 12px;
   white-space: nowrap;
   text-overflow: ellipsis;
-  text-align: right;
+  text-align: left;
+}
+@media (max-width: 680px) {
+  .fc-hint {
+    display: none;
+  }
 }
 .fc-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  padding: 0 12px 12px 52px;
+  padding: 0 14px 12px 14px;
 }
 .fc-chips button {
   max-width: 100%;
@@ -643,20 +668,22 @@ html.fc-vt .fc .fc-compose {
 .fc.start .fc-compose textarea,
 .fc.start .fc-compose textarea:focus,
 .fc.start .fc-compose textarea:focus-visible {
-  min-height: 76px;
-  font-size: 16px;
+  min-height: 68px;
+  font-size: 15.5px;
   line-height: 24px;
+  transition: min-height 0.38s var(--spring);
+}
+.fc.start .fc-compose.is-writing textarea,
+.fc.start .fc-compose.is-writing textarea:focus,
+.fc.start .fc-compose.is-writing textarea:focus-visible {
+  min-height: 112px;
 }
 .fc.start .fc-row {
-  padding: 12px 12px 6px 16px;
+  padding: 14px 18px 6px 16px;
 }
 .fc.start .fc-orb {
   width: 34px;
   height: 34px;
-}
-.fc.start .ad-send {
-  width: 36px;
-  height: 36px;
 }
 /* the other way: a quiet line under the box, the steps it leads through, an arrow that moves under the pointer */
 .fc-start-form {

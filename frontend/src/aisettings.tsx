@@ -204,6 +204,13 @@ type Preset = {
   soon?: boolean;
 };
 type Feature = { enabled: boolean; primary?: string; backup?: string };
+type FeatureDef = {
+  ID: string;
+  Title: string;
+  Help: string;
+  Group?: "workspace" | "scene" | string;
+  HasModel?: boolean;
+};
 type AISettings = {
   enabled: boolean;
   providers: AIProvider[];
@@ -213,7 +220,7 @@ type AISettings = {
   monthly_limit: number;
   user_models: string[];
   presets: Preset[];
-  feature_list: { ID: string; Title: string; Help: string }[];
+  feature_list: FeatureDef[];
 };
 
 const getGroups = (): [string, string][] => [
@@ -317,6 +324,9 @@ function ModelDiagPopover({
     <Popover
       trigger="click"
       position="bl"
+      escToClose
+      className="ai-diag-pop-wrap"
+      style={{ maxWidth: "min(540px, calc(100vw - 24px))" }}
       triggerProps={{ autoFitPosition: true }}
       content={
         <div className="ai-diag-pop">
@@ -1821,8 +1831,10 @@ function AssignModelPicker({
       trigger="click"
       position={align === "end" ? "br" : "bl"}
       popupVisible={open}
+      escToClose
       onVisibleChange={setOpen}
       className="ai-mp-pop-wrap"
+      style={{ maxWidth: "min(380px, calc(100vw - 24px))" }}
       triggerProps={{ autoFitPosition: true, showArrow: false }}
       content={
         <div className="ai-mp-pop" role="listbox" aria-label={label}>
@@ -2313,7 +2325,7 @@ export function AISettingsView() {
                   },
                   {
                     value: "features",
-                    label: bi("场景默认模型", "Feature defaults"),
+                    label: bi("功能开关与模型", "Features & models"),
                     count: d.feature_list.length,
                     icon: AITabIcons.features,
                   },
@@ -2690,101 +2702,243 @@ export function AISettingsView() {
                 </>
               )}
               {showFeatures && (
-                <section className="sx-sec">
-                  <h2>
-                    {bi("每个功能默认用的模型", "Default models per feature")}
-                  </h2>
-                  <div className="ds-set">
-                    {d.feature_list.map((f) => {
-                      const x = d.features[f.ID] || { enabled: true };
-                      const main = find(
-                        x.primary ||
-                          (optionGroups[0]
-                            ? `${optionGroups[0].p.id}|${optionGroups[0].models[0].id}`
-                            : ""),
+                <>
+                  <section className="sx-sec">
+                    <div className="ai-sec-h">
+                      <div>
+                        <h2>
+                          {bi("AI 功能模块独立开关", "Per-module AI feature switches")}
+                          <span className="ai-feat-cnt num">
+                            {
+                              d.feature_list.filter(
+                                (f) => d.features[f.ID]?.enabled !== false,
+                              ).length
+                            }{" "}
+                            / {d.feature_list.length}
+                          </span>
+                        </h2>
+                        <small className="faint">
+                          {bi(
+                            "关闭任意模块后，全平台对应按钮与入口将立即隐藏，后端接口同步拦截。如需按角色差异化控制不同人员可用的 AI 按钮，请在 IAM → 角色 中勾选对应子权限（两者取交集生效）。",
+                            "Disabling any module immediately hides its UI entry points platform-wide and blocks backend APIs. For per-role control, also configure AI sub-permissions in IAM → Roles (intersected with platform switches).",
+                          )}
+                        </small>
+                      </div>
+                      <div className="ai-um-acts">
+                        <Button
+                          size="small"
+                          disabled={
+                            !d.enabled ||
+                            d.feature_list.every(
+                              (f) => d.features[f.ID]?.enabled !== false,
+                            )
+                          }
+                          onClick={() => {
+                            const nextFeats: Record<string, Feature> = {
+                              ...d.features,
+                            };
+                            for (const f of d.feature_list) {
+                              nextFeats[f.ID] = {
+                                ...(nextFeats[f.ID] || { enabled: true }),
+                                enabled: true,
+                              };
+                            }
+                            void put({ ...d, features: nextFeats });
+                          }}
+                        >
+                          {bi("全部开启", "Enable all")}
+                        </Button>
+                        <Button
+                          size="small"
+                          disabled={
+                            !d.enabled ||
+                            d.feature_list.every(
+                              (f) => d.features[f.ID]?.enabled === false,
+                            )
+                          }
+                          onClick={() => {
+                            const nextFeats: Record<string, Feature> = {
+                              ...d.features,
+                            };
+                            for (const f of d.feature_list) {
+                              nextFeats[f.ID] = {
+                                ...(nextFeats[f.ID] || { enabled: true }),
+                                enabled: false,
+                              };
+                            }
+                            void put({ ...d, features: nextFeats });
+                          }}
+                        >
+                          {bi("全部关闭", "Disable all")}
+                        </Button>
+                      </div>
+                    </div>
+                    {!d.enabled && (
+                      <div className="ai-feat-lock-hint" role="status">
+                        {bi(
+                          "请先开启上方「AI 能力套件总开关」，再按需勾选下方功能模块；总开关关闭期间所有子模块已锁定并记忆上次配置。",
+                          "Turn on the AI suite master switch above first to toggle individual modules. Your selections are preserved while the master switch is off.",
+                        )}
+                      </div>
+                    )}
+                    {(
+                      [
+                        [
+                          "workspace",
+                          bi("工作台与扩展模块", "Workspace & Extensions"),
+                        ],
+                        [
+                          "scene",
+                          bi("业务场景 AI 按钮", "Workflow AI Entry Points"),
+                        ],
+                      ] as const
+                    ).map(([grp, grpTitle]) => {
+                      const items = d.feature_list.filter(
+                        (f) => (f.Group || "scene") === grp,
                       );
-                      const blind =
-                        main.m &&
-                        main.m.vision !== "yes" &&
-                        ["troubleshoot", "review"].includes(f.ID);
+                      if (!items.length) return null;
                       return (
-                        <div className="ds-set-row" key={f.ID}>
-                          <div>
-                            <b>{f.Title}</b>
-                            <small>{f.Help}</small>
-                            {blind && (
-                              <small className="ai-warn">
-                                {main.m!.vision === "no"
-                                  ? bi(
-                                      "主模型不能看图：排障时截图不可用，用户只能贴文字",
-                                      "Primary model has no vision: screenshots disabled in troubleshooting, text only",
-                                    )
-                                  : bi(
-                                      "主模型还没确认能不能看图：到「管理模型」里测试一下",
-                                      "Primary model vision support is unverified: test it in Manage models",
-                                    )}
-                              </small>
-                            )}
-                          </div>
-                          <div className="ai-assign">
-                            {picker(
-                              x.primary,
-                              bi(
-                                "主模型（缺省自动匹配）",
-                                "Primary (auto-select)",
-                              ),
-                              bi(
-                                "恢复缺省（取第一个可用模型）",
-                                "Reset to default (first available)",
-                              ),
-                              "start",
-                              (v) =>
-                                put({
-                                  ...d,
-                                  features: {
-                                    ...d.features,
-                                    [f.ID]: { ...x, primary: v },
-                                  },
-                                }),
-                              bi(`${f.Title}主模型`, `${f.Title} primary model`),
-                            )}
-                            {picker(
-                              x.backup,
-                              bi(
-                                "备用模型（主模型失败时）",
-                                "Fallback (on failure)",
-                              ),
-                              bi("不设备用模型", "No fallback model"),
-                              "end",
-                              (v) =>
-                                put({
-                                  ...d,
-                                  features: {
-                                    ...d.features,
-                                    [f.ID]: { ...x, backup: v },
-                                  },
-                                }),
-                              bi(`${f.Title}备用模型`, `${f.Title} fallback model`),
-                            )}
-                            <Switch
-                              checked={x.enabled}
-                              onChange={(v) =>
-                                put({
-                                  ...d,
-                                  features: {
-                                    ...d.features,
-                                    [f.ID]: { ...x, enabled: v },
-                                  },
-                                })
-                              }
-                              aria-label={bi(`启用${f.Title}`, `Enable ${f.Title}`)}
-                            />
+                        <div
+                          key={grp}
+                          className={`ai-feat-group ${!d.enabled ? "is-locked" : ""}`}
+                        >
+                          <div className="ai-feat-group-h">{grpTitle}</div>
+                          <div className="ai-feat-grid">
+                            {items.map((f) => {
+                              const x = d.features[f.ID] || { enabled: true };
+                              const isOn = x.enabled !== false;
+                              return (
+                                <div
+                                  key={f.ID}
+                                  className={`ai-feat-card ${isOn && d.enabled ? "is-on" : ""}`}
+                                >
+                                  <div className="ai-feat-card-top">
+                                    <b>{f.Title}</b>
+                                    <Switch
+                                      size="small"
+                                      checked={isOn}
+                                      disabled={!d.enabled}
+                                      onChange={(v) =>
+                                        put({
+                                          ...d,
+                                          features: {
+                                            ...d.features,
+                                            [f.ID]: { ...x, enabled: v },
+                                          },
+                                        })
+                                      }
+                                      aria-label={bi(
+                                        `启用${f.Title}`,
+                                        `Enable ${f.Title}`,
+                                      )}
+                                    />
+                                  </div>
+                                  <p>{f.Help}</p>
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
                       );
                     })}
-                  </div>
-                </section>
+                  </section>
+
+                  <section className="sx-sec">
+                    <h2>
+                      {bi("每个场景默认用的模型", "Default models per feature")}
+                    </h2>
+                    <div className="ds-set">
+                      {d.feature_list
+                        .filter((f) => f.HasModel !== false)
+                        .map((f) => {
+                          const x = d.features[f.ID] || { enabled: true };
+                          const isOff = !d.enabled || x.enabled === false;
+                          const main = find(
+                            x.primary ||
+                              (optionGroups[0]
+                                ? `${optionGroups[0].p.id}|${optionGroups[0].models[0].id}`
+                                : ""),
+                          );
+                          const blind =
+                            main.m &&
+                            main.m.vision !== "yes" &&
+                            ["troubleshoot", "review"].includes(f.ID);
+                          return (
+                            <div
+                              className={`ds-set-row ${isOff ? "ai-feat-row-off" : ""}`}
+                              key={f.ID}
+                            >
+                              <div>
+                                <b>
+                                  {f.Title}
+                                  {x.enabled === false && (
+                                    <span className="ai-feat-off-tag">
+                                      {bi("已关闭", "Disabled")}
+                                    </span>
+                                  )}
+                                </b>
+                                <small>{f.Help}</small>
+                                {blind && (
+                                  <small className="ai-warn">
+                                    {main.m!.vision === "no"
+                                      ? bi(
+                                          "主模型不能看图：排障时截图不可用，用户只能贴文字",
+                                          "Primary model has no vision: screenshots disabled in troubleshooting, text only",
+                                        )
+                                      : bi(
+                                          "主模型还没确认能不能看图：到「管理模型」里测试一下",
+                                          "Primary model vision support is unverified: test it in Manage models",
+                                        )}
+                                  </small>
+                                )}
+                              </div>
+                              <div className="ai-assign">
+                                {picker(
+                                  x.primary,
+                                  bi(
+                                    "主模型（缺省自动匹配）",
+                                    "Primary (auto-select)",
+                                  ),
+                                  bi(
+                                    "恢复缺省（取第一个可用模型）",
+                                    "Reset to default (first available)",
+                                  ),
+                                  "start",
+                                  (v) =>
+                                    put({
+                                      ...d,
+                                      features: {
+                                        ...d.features,
+                                        [f.ID]: { ...x, primary: v },
+                                      },
+                                    }),
+                                  bi(`${f.Title}主模型`, `${f.Title} primary model`),
+                                )}
+                                {picker(
+                                  x.backup,
+                                  bi(
+                                    "备用模型（主模型失败时）",
+                                    "Fallback (on failure)",
+                                  ),
+                                  bi("不设备用模型", "No fallback model"),
+                                  "end",
+                                  (v) =>
+                                    put({
+                                      ...d,
+                                      features: {
+                                        ...d.features,
+                                        [f.ID]: { ...x, backup: v },
+                                      },
+                                    }),
+                                  bi(`${f.Title}备用模型`, `${f.Title} fallback model`),
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  </section>
+                </>
               )}
               {showBoundary && (
                 <section className="sx-sec">

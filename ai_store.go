@@ -168,29 +168,57 @@ type aiSettings struct {
 // UserMCP says whether people may connect outside services of their own.
 func (st aiSettings) UserMCP() bool { return !st.NoUserMCP }
 
-// aiFeatures are the places the assistant is offered, in the order the settings page lists them.
-var aiFeatures = []struct{ ID, Title, Help string }{
-	{"change_rehearsal", "变更演练", "在已交付集群上通过只读采集探针与测试环境分步演练，生成经实测验证的生产变更实施方案（SOP）"},
-	{"troubleshoot", "现场排障", "执行手册遇到问题时，贴回报错或截图，和 AI 一起分析直到解决"},
-	{"assistant", "AI 助手", "统一的对话页：随时提问，可以关联某个交付或组件，让它读取相关内容再回答"},
-	{"form", "智能填表", "新建交付时和 AI 对话：它查组件、把规格直接填进表单，你最后确认一次"},
-	{"component", "组件工作台", "在组件工作台里对话：起草、修错、补全、评审组件，改动先过平台检查再由你确认写入草稿"},
-	{"review", "交付评审", "在交付详情里点开，让 AI 评审这份交付并回答追问"},
-	{"docs", "文档起草", "在集群的文档里起草说明文字（概述、风险、结论、根因等），检查文字和执行记录是否一致；由你确认后才算数"},
+type aiFeatureDef struct {
+	ID       string `json:"ID"`
+	Title    string `json:"Title"`
+	Help     string `json:"Help"`
+	Group    string `json:"Group"`    // workspace | scene
+	HasModel bool   `json:"HasModel"` // whether per-feature model assignment applies
+}
+
+// aiFeatures are the places AI is offered, grouped into workspace modules and workflow scenes.
+var aiFeatures = []aiFeatureDef{
+	{"assistant", "AI 助手", "顶栏统一的 AI 对话工作台，可关联交付、集群或组件读取上下文后问答", "workspace", true},
+	{"kb", "知识库与检索", "顶栏知识库入口及 AI 对话时的团队/个人知识库检索增强（RAG）", "workspace", false},
+	{"skills", "AI 技能", "顶栏技能页及 AI 对话中按需调用的平台/个人专业操作手册与脚本", "workspace", false},
+	{"mcp", "MCP 服务", "顶栏 MCP 页及 AI 对话中接入的外部只读/受控工具服务", "workspace", false},
+
+	{"component", "组件 AI", "组件工作台对话、AI 提案修改、AI 起草修订说明与组件评审", "scene", true},
+	{"form", "智能填表", "新建交付时和 AI 对话：查组件并自动填写部署规格，由你最后确认", "scene", true},
+	{"review", "交付评审", "在交付详情里让 AI 评审部署方案、风险项并回答追问", "scene", true},
+	{"troubleshoot", "现场排障", "执行手册与执行监控报错时，贴回日志或截图与 AI 一起定位解决", "scene", true},
+	{"change_rehearsal", "变更演练", "在已交付集群上通过只读采集探针与测试环境演练生成生产变更 SOP", "scene", true},
+	{"docs", "文档起草", "在集群文档中起草概述、风险、结论、根因并核对执行记录一致性", "scene", true},
+	{"library", "软件库 AI", "在软件库运行环境页一键发起 AI 依赖差异、CVE 价值与清理评估", "scene", false},
+	{"security", "安全 AI", "在安全中心与集群安全页按需触发 CVE 中文研判、可利用性评估与缓解建议", "scene", true},
 }
 
 var aiFeaturesEn = map[string][2]string{
-	"change_rehearsal": {"Change Rehearsal", "Run read-only discovery probes and step-by-step staging rehearsals on delivered clusters to produce a field-verified production change SOP"},
-	"troubleshoot":     {"Troubleshooting", "Paste errors or screenshots during runbook execution to diagnose and resolve issues together with AI"},
-	"assistant":        {"AI Assistant", "Unified chat workspace: ask questions anytime and attach a delivery or component for context-aware answers"},
-	"form":             {"Smart Form Fill", "Chat with AI while creating a delivery: it inspects components, fills specs into the form, and leaves final confirmation to you"},
-	"component":        {"Component Workbench", "Collaborate in Component Workbench to draft, fix, complete, and review components; edits pass platform checks before saving to draft"},
-	"review":           {"Delivery Review", "Open from Delivery Details to let AI review the delivery plan and answer follow-up questions"},
-	"docs":             {"Doc Drafting", "Draft narrative sections (overview, risks, conclusions, root cause) in cluster documents and check consistency with execution logs; finalized only upon your approval"},
+	"assistant":        {"AI Assistant", "Unified top-bar AI chat workspace with optional delivery or component context"},
+	"kb":               {"Knowledge Base & RAG", "Top-bar Knowledge Base tab and team/personal KB retrieval inside AI chats"},
+	"skills":           {"AI Skills", "Top-bar Skills tab and loadable playbooks/scripts during AI chats"},
+	"mcp":              {"MCP Servers", "Top-bar MCP tab and external MCP tool integrations inside AI chats"},
+	"component":        {"Component AI", "Component Workbench chat, AI draft proposals, AI revision notes, and reviews"},
+	"form":             {"Smart Form Fill", "Chat with AI while creating a delivery to inspect components and fill specs"},
+	"review":           {"Delivery Review", "Open from Delivery Details to let AI review the plan and answer questions"},
+	"troubleshoot":     {"Troubleshooting", "Paste errors or screenshots in runbooks and execution monitor for AI diagnosis"},
+	"change_rehearsal": {"Change Rehearsal", "Run read-only probes and staging rehearsals on delivered clusters to produce a verified SOP"},
+	"docs":             {"Doc Drafting", "Draft narrative sections in cluster documents and verify against execution logs"},
+	"library":          {"Software Library AI", "Analyze Ansible runtime dependencies, upgrades, and cleanup from Software Library"},
+	"security":         {"Security AI", "On-demand CVE impact analysis, exploitability review, and mitigation guidance in Security Center"},
 }
 
-func localizedAIFeatures(lang string) []struct{ ID, Title, Help string } {
-	out := append([]struct{ ID, Title, Help string }(nil), aiFeatures...)
+func aiFeatureTitle(id string) string {
+	for _, f := range aiFeatures {
+		if f.ID == id {
+			return f.Title
+		}
+	}
+	return id
+}
+
+func localizedAIFeatures(lang string) []aiFeatureDef {
+	out := append([]aiFeatureDef(nil), aiFeatures...)
 	if !isEnLang(lang) {
 		return out
 	}
@@ -620,11 +648,33 @@ func (s *storeServer) aiModels() map[string]any {
 	return map[string]any{"models": out, "defaults": defaults, "default_models": defaultModels}
 }
 
+// checkAIFeature enforces the 3-layer gate for an AI capability:
+//  1. Platform AI master switch
+//  2. Platform per-feature module switch
+//  3. User's IAM permissions (ai.use + ai.feat.<feature>)
+func (s *storeServer) checkAIFeature(user, feature string) (int, string) {
+	st := s.aiLoad()
+	if !st.Enabled {
+		return 409, "AI 能力套件总开关未开启，请管理员在平台设置 → AI 中开启"
+	}
+	if f, ok := st.Features[feature]; ok && !f.Enabled {
+		return 409, "「" + aiFeatureTitle(feature) + "」功能已关闭，请管理员在平台设置 → AI 中开启"
+	}
+	if !s.userCanAIFeaturePerm(user, feature) {
+		return 403, "当前角色没有「" + aiFeatureTitle(feature) + "」AI 权限，请联系管理员在 IAM 中授权"
+	}
+	return 0, ""
+}
+
 func (s *storeServer) aiStatus() aiStatus {
+	return s.aiStatusFor("")
+}
+
+func (s *storeServer) aiStatusFor(user string) aiStatus {
 	st := s.aiLoad()
 	configured := false
 	for _, f := range aiFeatures {
-		if len(st.aiProvidersFor(f.ID)) > 0 {
+		if f.HasModel && len(st.aiProvidersFor(f.ID)) > 0 {
 			configured = true
 			break
 		}
@@ -639,12 +689,17 @@ func (s *storeServer) aiStatus() aiStatus {
 		return out
 	}
 	for _, f := range aiFeatures {
-		on := st.Features[f.ID].Enabled && len(st.aiProvidersFor(f.ID)) > 0
+		modelReady := configured
+		if f.HasModel {
+			ps := st.aiProvidersFor(f.ID)
+			modelReady = len(ps) > 0
+			if len(ps) > 0 && ps[0].Vision == "no" {
+				out.NoVision[f.ID] = true
+			}
+		}
+		on := st.Features[f.ID].Enabled && modelReady && s.userCanAIFeaturePerm(user, f.ID)
 		out.Features[f.ID] = on
 		out.Enabled = out.Enabled || on
-		if ps := st.aiProvidersFor(f.ID); len(ps) > 0 && ps[0].Vision == "no" {
-			out.NoVision[f.ID] = true
-		}
 	}
 	return out
 }
@@ -671,7 +726,7 @@ func (s *storeServer) handleAIToggle(w http.ResponseWriter, r *http.Request, ses
 		return
 	}
 	s.auditReq(r, "ai-toggle", session.User, map[bool]string{true: "开启", false: "关闭"}[in.Enabled])
-	s.writeJSON(w, 200, s.aiStatus())
+	s.writeJSON(w, 200, s.aiStatusFor(session.User))
 }
 
 // ---- admin API ----
@@ -745,7 +800,10 @@ func (s *storeServer) handleAISettings(w http.ResponseWriter, r *http.Request, s
 		}
 		allRefs, modelRefs := st.validRefs()
 		for _, f := range aiFeatures {
-			x := in.Features[f.ID]
+			x, present := in.Features[f.ID]
+			if !present {
+				continue
+			}
 			if x.Primary != "" && !allRefs[x.Primary] {
 				x.Primary = ""
 			}

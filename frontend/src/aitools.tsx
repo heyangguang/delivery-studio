@@ -3,27 +3,35 @@ import { Popover, Switch } from "@arco-design/web-react";
 import {
   IconBook,
   IconBulb,
-  IconCode,
+  IconCheck,
   IconDown,
-  IconStorage,
+  IconEye,
+  IconFolder,
   IconLink,
   IconPlus,
+  IconSafe,
+  IconSettings,
+  IconStorage,
+  IconThunderbolt,
   IconUpload,
-  IconFolder,
 } from "@arco-design/web-react/icon";
 import { cached, can, fetchCached, useAIStatus } from "./shared";
+import { go } from "./router";
 import { bi, useLang } from "./i18n";
 import "./aitools.css";
 
 /* What a person switches on for their messages, the way chat apps put it behind a "+": think harder, search the
-   web, and which skills and outside services the assistant may use. The choice is remembered in this browser. */
+   web, sandbox permission tier, and which skills and outside services the assistant may use. */
+
+export type SandboxMode = "ask" | "auto" | "open";
+type NetPolicy = "deny" | "ask" | "auto" | "allow";
 
 type Options = {
   web: boolean;
   web_provider?: string;
   sandbox?: boolean;
-  sandbox_exec_policy?: "ask" | "auto" | "open";
-  sandbox_net_policy?: "deny" | "ask" | "allow";
+  sandbox_exec_policy?: SandboxMode;
+  sandbox_net_policy?: NetPolicy;
   skills: {
     name: string;
     title: string;
@@ -40,7 +48,8 @@ type Pref = {
   skillsOff: string[];
   mcpOff: string[];
   noKB?: boolean;
-  sandboxAsk?: boolean;
+  sandboxMode?: "" | SandboxMode;
+  sandboxAsk?: boolean; // legacy field migrated to sandboxMode="ask"
 };
 export type AIOpts = {
   think: string;
@@ -48,8 +57,15 @@ export type AIOpts = {
   skills: string[] | null;
   mcp: string[] | null;
   no_kb: boolean;
-  sandbox_mode?: "ask";
+  sandbox_mode?: SandboxMode;
 };
+
+function resolveSandboxMode(
+  platformDefault: SandboxMode,
+  picked?: "" | SandboxMode,
+): SandboxMode {
+  return picked || platformDefault;
+}
 
 const KEY = "mh-ai-opts";
 const readPref = (): Pref => {
@@ -63,6 +79,7 @@ const readPref = (): Pref => {
     };
     if (p.think === true) p.think = "high";
     if (p.think === false) p.think = "";
+    if (!p.sandboxMode && p.sandboxAsk) p.sandboxMode = "ask";
     return p;
   } catch {
     return { think: "", web: false, skillsOff: [], mcpOff: [] };
@@ -83,6 +100,7 @@ export function useAIOptions() {
   const update = (p: Partial<Pref>) =>
     setPref((cur) => {
       const next = { ...cur, ...p };
+      if ("sandboxMode" in p) delete next.sandboxAsk;
       try {
         localStorage.setItem(KEY, JSON.stringify(next));
       } catch {
@@ -93,6 +111,8 @@ export function useAIOptions() {
   const opts: AIOpts = useMemo(() => {
     const skills = o?.skills.map((s) => s.name) || [];
     const mcp = o?.mcp.map((m) => m.id) || [];
+    const platformDefault: SandboxMode = o?.sandbox_exec_policy || "auto";
+    const effMode = resolveSandboxMode(platformDefault, pref.sandboxMode);
     return {
       think: pref.think,
       web: pref.web && !!o?.web,
@@ -103,7 +123,7 @@ export function useAIOptions() {
         ? mcp.filter((n) => !pref.mcpOff.includes(n))
         : null,
       no_kb: !!pref.noKB,
-      sandbox_mode: pref.sandboxAsk ? "ask" : undefined,
+      sandbox_mode: effMode !== platformDefault ? effMode : undefined,
     };
   }, [o, pref]);
   return { options: o, pref, update, opts };
@@ -187,35 +207,62 @@ function ThinkPills({
   const stops = ["", ...validLevels];
   const maxIdx = Math.max(1, stops.length - 1);
   const idx = Math.max(0, stops.indexOf(active));
-  const progress = idx / maxIdx;
   const trackRef = useRef<HTMLDivElement>(null);
-  const [dragging, setDragging] = useState(false);
+  const dragStartRef = useRef<{ x: number; moved: boolean } | null>(null);
+  const [pressed, setPressed] = useState(false);
+  const [dragRatio, setDragRatio] = useState<number | null>(null);
 
-  const pickByClientX = (clientX: number) => {
+  const ratioFromClientX = (clientX: number) => {
     const el = trackRef.current;
-    if (!el) return;
+    if (!el) return idx / maxIdx;
     const r = el.getBoundingClientRect();
     const usable = Math.max(1, r.width - 30);
-    const ratio = Math.max(0, Math.min(1, (clientX - r.left - 15) / usable));
-    const nextIdx = Math.round(ratio * maxIdx);
+    return Math.max(0, Math.min(1, (clientX - r.left - 15) / usable));
+  };
+
+  const dragging = dragRatio !== null;
+  const displayProgress = dragRatio !== null ? dragRatio : idx / maxIdx;
+  const displayIdx = Math.round(displayProgress * maxIdx);
+  const displayVal = stops[displayIdx] ?? "";
+  const fillOpacity =
+    displayProgress <= 0.005 ? 0 : Math.min(1, displayProgress / 0.12);
+  const ultraOpacity = Math.max(
+    0,
+    Math.min(1, (displayProgress - 0.72) / 0.24),
+  );
+
+  const tierTone = !displayVal
+    ? "auto"
+    : displayVal === "ultra"
+      ? "ultra"
+      : displayVal === "max"
+        ? "max"
+        : displayVal === "xhigh" || displayVal === "high"
+          ? "high"
+          : displayVal === "medium"
+            ? "medium"
+            : "low";
+  const label = displayVal ? LEVELS[displayVal] : bi("默认", "Default");
+  const hint = displayVal
+    ? LEVEL_HINT[displayVal]
+    : bi("不指定，用模型自己的默认", "Unspecified; use model default");
+
+  const finishPointer = (clientX: number, commit: boolean) => {
+    const start = dragStartRef.current;
+    dragStartRef.current = null;
+    setPressed(false);
+    setDragRatio(null);
+    if (!commit || !start) return;
+    const finalRatio = ratioFromClientX(clientX);
+    const nextIdx = Math.round(finalRatio * maxIdx);
     const nextVal = stops[nextIdx] ?? "";
     if (nextVal !== active) onChange(nextVal);
   };
 
-  const tierTone = !active
-    ? "auto"
-    : active === "ultra"
-      ? "ultra"
-      : active === "max" || active === "xhigh"
-        ? "high"
-        : "blue";
-  const label = active ? LEVELS[active] : bi("默认", "Default");
-  const hint = active
-    ? LEVEL_HINT[active]
-    : bi("不指定，用模型自己的默认", "Unspecified; use model default");
-
   return (
-    <div className={`thk thk-slider-wrap ${layout === "popover" ? "in-pop" : "in-menu"}`}>
+    <div
+      className={`thk thk-slider-wrap ${layout === "popover" ? "in-pop" : "in-menu"}`}
+    >
       <div className={`thk-slider-head tone-${tierTone}`}>
         <span className="thk-slider-title">{label}</span>
         <small className="thk-slider-hint">{hint}</small>
@@ -227,21 +274,42 @@ function ThinkPills({
         aria-label={bi("思考深度", "Thinking depth")}
         aria-valuemin={0}
         aria-valuemax={maxIdx}
-        aria-valuenow={idx}
+        aria-valuenow={displayIdx}
         aria-valuetext={`${label} — ${hint}`}
-        className={`thk-track ${active ? "lit" : ""} tone-${tierTone} ${dragging ? "dragging" : ""}`}
-        style={{ "--p": progress } as React.CSSProperties}
+        className={`thk-track ${displayVal ? "lit" : ""} tone-${tierTone} ${dragging ? "dragging" : ""} ${pressed ? "pressed" : ""}`}
+        style={
+          {
+            "--p": displayProgress,
+            "--fill-op": fillOpacity,
+            "--ultra-op": ultraOpacity,
+          } as React.CSSProperties
+        }
         onPointerDown={(e) => {
+          if (e.button !== 0) return;
           e.preventDefault();
           e.currentTarget.setPointerCapture(e.pointerId);
-          setDragging(true);
-          pickByClientX(e.clientX);
+          dragStartRef.current = { x: e.clientX, moved: false };
+          setPressed(true);
         }}
         onPointerMove={(e) => {
-          if (dragging) pickByClientX(e.clientX);
+          const start = dragStartRef.current;
+          if (!start) return;
+          if (!start.moved && Math.abs(e.clientX - start.x) < 3) return;
+          start.moved = true;
+          setDragRatio(ratioFromClientX(e.clientX));
         }}
-        onPointerUp={() => setDragging(false)}
-        onPointerCancel={() => setDragging(false)}
+        onPointerUp={(e) => {
+          if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+            e.currentTarget.releasePointerCapture(e.pointerId);
+          }
+          finishPointer(e.clientX, true);
+        }}
+        onPointerCancel={(e) => {
+          if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+            e.currentTarget.releasePointerCapture(e.pointerId);
+          }
+          finishPointer(e.clientX, false);
+        }}
         onKeyDown={(e) => {
           if (e.key === "ArrowRight" || e.key === "ArrowUp") {
             e.preventDefault();
@@ -258,19 +326,23 @@ function ThinkPills({
           }
         }}
       >
-        <div className={`thk-fill ${active ? "on" : ""} tone-${tierTone}`} aria-hidden>
+        <div
+          className={`thk-fill ${displayProgress > 0.005 ? "on" : ""} tone-${tierTone}`}
+          aria-hidden
+        >
           <span className="thk-stars" />
         </div>
         <div className="thk-dots" aria-hidden>
           {stops.map((s, i) => {
             const p = i / maxIdx;
-            const lit = active && i < idx;
+            const lit = displayProgress > 0.04 && p < displayProgress - 0.03;
+            const covered = Math.abs(p - displayProgress) < 0.055;
             return (
               <span
                 key={s || "default"}
                 data-stop={s || "default"}
                 title={s ? LEVELS[s] : bi("默认", "Default")}
-                className={`thk-dot ${lit ? "in-fill" : ""} ${i === idx ? "active" : ""}`}
+                className={`thk-dot ${lit ? "in-fill" : ""} ${covered ? "active" : ""}`}
                 style={{ left: `calc(15px + (100% - 30px) * ${p})` }}
               />
             );
@@ -283,6 +355,58 @@ function ThinkPills({
 }
 
 type PopPos = "tl" | "tr" | "bl" | "br";
+
+export type PopoverHandle = {
+  updatePopupPosition?: (delay?: number) => void;
+};
+
+/** Keeps an open Arco Popover pixel-locked to its trigger during hover-expand animations, scroll, resize, or label width changes. */
+export function useTrackPopoverPosition(
+  open: boolean,
+  popRef: React.RefObject<PopoverHandle | null>,
+  btnRef: React.RefObject<HTMLElement | null>,
+) {
+  useEffect(() => {
+    if (!open) return;
+    let raf = 0;
+    let last = "";
+    const sync = () => {
+      const el = btnRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const key = `${Math.round(r.left * 2)},${Math.round(r.top * 2)},${Math.round(r.width * 2)},${Math.round(r.height * 2)}`;
+      if (key !== last) {
+        last = key;
+        popRef.current?.updatePopupPosition?.(0);
+      }
+    };
+    const start = performance.now();
+    const tick = (now: number) => {
+      sync();
+      if (now - start < 480) {
+        raf = window.requestAnimationFrame(tick);
+      }
+    };
+    raf = window.requestAnimationFrame(tick);
+    const ro =
+      typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(() => sync())
+        : null;
+    if (ro && btnRef.current) {
+      ro.observe(btnRef.current);
+      if (btnRef.current.parentElement) ro.observe(btnRef.current.parentElement);
+    }
+    const onMove = () => sync();
+    window.addEventListener("resize", onMove, { passive: true });
+    window.addEventListener("scroll", onMove, { capture: true, passive: true });
+    return () => {
+      if (raf) window.cancelAnimationFrame(raf);
+      ro?.disconnect();
+      window.removeEventListener("resize", onMove);
+      window.removeEventListener("scroll", onMove, true);
+    };
+  }, [open, popRef, btnRef]);
+}
 
 function computePopPos(
   el: HTMLElement | null,
@@ -312,20 +436,30 @@ export function ThinkLevel({
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<PopPos>("tl");
   const btnRef = useRef<HTMLButtonElement>(null);
+  const popRef = useRef<PopoverHandle>(null);
+  useTrackPopoverPosition(open, popRef, btnRef);
   const validLevels = (levels || []).filter((l) => LEVELS[l]);
   if (validLevels.length === 0) return null;
   const active = value && validLevels.includes(value) ? value : "";
+  const prefix = bi("思考", "Think");
+  const defText = bi("默认", "Default");
+  const allLabels = [
+    `${prefix} · ${defText}`,
+    ...validLevels.map((l) => `${prefix} · ${LEVELS[l]}`),
+  ];
   return (
     <Popover
+      ref={popRef as React.Ref<never>}
       trigger="click"
       position={pos}
       popupVisible={open}
+      escToClose
       onVisibleChange={(v) => {
-        if (v) setPos(computePopPos(btnRef.current, 128, 296));
+        if (v) setPos(computePopPos(btnRef.current, 128, 328));
         setOpen(v);
       }}
       className="tm-pop think-pop"
-      triggerProps={{ autoFitPosition: false }}
+      triggerProps={{ autoFitPosition: false, updateOnScroll: true }}
       content={
         <ThinkPills
           layout="popover"
@@ -338,39 +472,317 @@ export function ThinkLevel({
       <button
         ref={btnRef}
         type="button"
-        className={`tm-tog think ${active ? "on" : ""}`}
+        className={`tm-tog think ${active ? "on" : ""} ${open ? "tm-open" : ""}`}
         aria-expanded={open}
         title={bi("思考深度：让模型想多深", "Thinking depth: how hard the model thinks")}
       >
         <IconBulb />
-        <span>
-          {bi("思考", "Think")}
-          {active ? ` · ${LEVELS[active]}` : ""}
+        <span className="tm-think-label">
+          <span className="tm-think-cur">
+            {prefix}
+            <span className={`tm-think-tier ${active ? "" : "is-def"}`}>
+              {" · "}
+              {active ? LEVELS[active] : defText}
+            </span>
+          </span>
+          {allLabels.map((lbl) => (
+            <span key={lbl} className="tm-think-sizer" aria-hidden="true">
+              {lbl}
+            </span>
+          ))}
         </span>
       </button>
     </Popover>
   );
 }
 
-/** compact: a narrow window keeps only the "+"; thinking depth and the web switch move into its menu. */
+const SB_MODES: {
+  id: SandboxMode;
+  icon: React.ReactNode;
+  readonly label: string;
+  readonly short: string;
+  readonly desc: string;
+}[] = [
+  {
+    id: "ask",
+    icon: <IconEye />,
+    get label() {
+      return bi("每次询问", "Request Review");
+    },
+    get short() {
+      return bi("每次询问", "Ask");
+    },
+    get desc() {
+      return bi(
+        "每次执行 Python、Shell 或脚本前都需要人工确认",
+        "Every code run or shell command requires approval",
+      );
+    },
+  },
+  {
+    id: "auto",
+    icon: <IconSafe />,
+    get label() {
+      return bi("智能审批", "Auto");
+    },
+    get short() {
+      return bi("智能审批", "Auto");
+    },
+    get desc() {
+      return bi(
+        "低风险计算自动放行，高风险调用与敏感联网再询问",
+        "Auto-runs safe tasks; prompts before sensitive actions",
+      );
+    },
+  },
+  {
+    id: "open",
+    icon: <IconThunderbolt />,
+    get label() {
+      return bi("沙箱开放", "Turbo");
+    },
+    get short() {
+      return bi("沙箱开放", "Open");
+    },
+    get desc() {
+      return bi(
+        "隔离沙箱边界内直接执行，不逐次弹窗确认",
+        "Run commands inside the isolated sandbox without prompts",
+      );
+    },
+  },
+];
+
+function netPolicyBadge(netPolicy?: NetPolicy): string {
+  switch (netPolicy) {
+    case "deny":
+      return bi("网络：完全断网", "Net: Offline");
+    case "auto":
+      return bi("网络：智能审批", "Net: Smart Auto");
+    case "allow":
+      return bi("网络：允许外网", "Net: External");
+    default:
+      return bi("网络：每次询问", "Net: Ask");
+  }
+}
+
+function SandboxPermList({
+  platformDefault,
+  netPolicy,
+  value,
+  onSelect,
+  onOpenSettings,
+}: {
+  platformDefault: SandboxMode;
+  netPolicy?: NetPolicy;
+  value: SandboxMode;
+  onSelect: (m: SandboxMode) => void;
+  onOpenSettings?: () => void;
+}) {
+  useLang();
+  return (
+    <div className="sbp" role="menu" aria-label={bi("沙箱权限", "Sandbox permissions")}>
+      <div className="sbp-head">
+        <span>{bi("沙箱权限", "Sandbox Permissions")}</span>
+        <em className={`sbp-net ${netPolicy === "auto" ? "auto" : ""}`}>
+          {netPolicyBadge(netPolicy)}
+        </em>
+      </div>
+      <div className="sbp-list">
+        {SB_MODES.map((m) => {
+          const selected = value === m.id;
+          const isDef = platformDefault === m.id;
+          return (
+            <button
+              key={m.id}
+              type="button"
+              role="menuitemradio"
+              aria-checked={selected}
+              className={`sbp-row ${selected ? "on" : ""}`}
+              onClick={() => onSelect(m.id)}
+            >
+              <span className={`sbp-ic m-${m.id}`}>{m.icon}</span>
+              <span className="sbp-t">
+                <span className="sbp-title">
+                  <b>{m.label}</b>
+                  {isDef && (
+                    <em className="sbp-def">{bi("平台默认", "Default")}</em>
+                  )}
+                </span>
+                <small>{m.desc}</small>
+              </span>
+              {selected && <IconCheck className="sbp-chk" />}
+            </button>
+          );
+        })}
+      </div>
+      {can("settings.sandbox") && (
+        <div className="sbp-foot">
+          <button
+            type="button"
+            className="sbp-cfg"
+            onClick={() => {
+              onOpenSettings?.();
+              go({ name: "settings", id: "sandbox" });
+            }}
+          >
+            <IconSettings />
+            <span>{bi("在 设置 → 代码沙箱 调整平台默认与网络策略", "Adjust defaults & network in Settings → Code Sandbox")}</span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SandboxPermPill({
+  platformDefault,
+  netPolicy,
+  value,
+  onSelect,
+}: {
+  platformDefault: SandboxMode;
+  netPolicy?: NetPolicy;
+  value: SandboxMode;
+  onSelect: (m: SandboxMode) => void;
+}) {
+  useLang();
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<PopPos>("tl");
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const popRef = useRef<PopoverHandle>(null);
+  useTrackPopoverPosition(open, popRef, btnRef);
+  const cur = SB_MODES.find((m) => m.id === value) || SB_MODES[1];
+  const overridden = value !== platformDefault;
+
+  return (
+    <Popover
+      ref={popRef as React.Ref<never>}
+      trigger="click"
+      position={pos}
+      popupVisible={open}
+      escToClose
+      className="tm-pop sbp-pop"
+      triggerProps={{ autoFitPosition: false, updateOnScroll: true }}
+      onVisibleChange={(v) => {
+        if (v) setPos(computePopPos(btnRef.current, 240, 316));
+        setOpen(v);
+      }}
+      content={
+        <SandboxPermList
+          platformDefault={platformDefault}
+          netPolicy={netPolicy}
+          value={value}
+          onSelect={(m) => {
+            onSelect(m);
+            setOpen(false);
+          }}
+          onOpenSettings={() => setOpen(false)}
+        />
+      }
+    >
+      <button
+        ref={btnRef}
+        type="button"
+        className={`tm-tog sbp-pill m-${value} ${overridden ? "on" : ""} ${open ? "tm-open" : ""}`}
+        aria-expanded={open}
+        title={bi(
+          "沙箱执行权限（个人选择优先于平台默认）",
+          "Sandbox permission tier (your choice overrides platform default)",
+        )}
+      >
+        {cur.icon}
+        <span>{cur.short}</span>
+        <IconDown className="sbp-caret" />
+      </button>
+    </Popover>
+  );
+}
+
+/**
+ * Coordinates spacious open-page composers so hovering gives tactile lift/glow with zero
+ * toolbar shift, clicking/typing into the text area smoothly expands the canvas, and clicking
+ * toolbar controls (e.g. Thinking/Model/Tools) or their portal popovers never shifts or collapses it.
+ */
+export function useSpaciousComposer(
+  rootRef: React.RefObject<HTMLElement | null>,
+  hasContent: boolean,
+) {
+  const [writing, setWriting] = useState(false);
+
+  useEffect(() => {
+    if (!writing) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      if (rootRef.current?.contains(target)) return;
+      if (
+        target.closest(
+          ".arco-trigger-popup, .arco-popover, .arco-dropdown-menu, .tm-pop, .think-pop, .mp-pop",
+        )
+      ) {
+        return;
+      }
+      setWriting(false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        const active = document.activeElement as HTMLElement | null;
+        if (!active || !rootRef.current?.contains(active)) setWriting(false);
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [writing, rootRef]);
+
+  return {
+    expanded: writing || hasContent,
+    onFieldPointerDown: () => setWriting(true),
+    collapse: () => setWriting(false),
+  };
+}
+
+/** compact: a narrow window keeps only the "+"; hidden controls move into its menu. */
 export function ToolMenu({
   t,
   levels,
   attach,
   compact,
+  hideThink,
+  thinkInMenu,
 }: {
   t: ReturnType<typeof useAIOptions>;
   levels?: string[];
-  attach?: { upload: () => void; pick: () => void };
+  attach?: {
+    upload?: () => void;
+    pick?: () => void;
+    uploadTitle?: string;
+    uploadDesc?: string;
+  };
   compact?: boolean;
+  hideThink?: boolean;
+  thinkInMenu?: boolean;
 }) {
   useLang();
   const { options: o, pref, update, opts } = t;
   const [open, setOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
+  const [sbOpen, setSbOpen] = useState(false);
   const [pos, setPos] = useState<PopPos>("tl");
   const [room, setRoom] = useState(420);
   const btn = useRef<HTMLButtonElement>(null);
+  const popRef = useRef<PopoverHandle>(null);
+  useTrackPopoverPosition(open, popRef, btn);
+  const showThinkInMenu = thinkInMenu ?? Boolean(compact);
+  const sbDefault: SandboxMode = o?.sandbox_exec_policy || "auto";
+  const sbEffective = resolveSandboxMode(sbDefault, pref.sandboxMode);
+  const sbCurMeta = SB_MODES.find((m) => m.id === sbEffective) || SB_MODES[1];
+  const selectSandboxMode = (m: SandboxMode) =>
+    update({ sandboxMode: m === sbDefault ? "" : m });
   const skillsOn = (o?.skills || []).filter(
     (s) => !pref.skillsOff.includes(s.name),
   ).length;
@@ -381,42 +793,50 @@ export function ToolMenu({
       aria-label={bi("工具", "Tools")}
       style={{ maxHeight: room }}
     >
-      {attach && (
+      {attach && (attach.upload || attach.pick) && (
         <div className="tm-sec tm-attach">
-          <button
-            type="button"
-            className="tm-row"
-            onClick={() => (setOpen(false), attach.upload())}
-          >
-            <span className="tm-ic upl">
-              <IconUpload />
-            </span>
-            <span className="tm-t">
-              <b>{bi("上传文件或图片", "Upload file or image")}</b>
-              <small>
-                {bi(
-                  "也可以直接拖进来或粘贴；会存进「我的资料」",
-                  "Or drag and drop / paste directly; saved to My Files",
-                )}
-              </small>
-            </span>
-          </button>
-          <button
-            type="button"
-            className="tm-row"
-            onClick={() => (setOpen(false), attach.pick())}
-          >
-            <span className="tm-ic kb">
-              <IconFolder />
-            </span>
-            <span className="tm-t">
-              <b>{bi("从我的资料选择", "Choose from My Files")}</b>
-              <small>{bi("用之前传过的文件", "Use previously uploaded files")}</small>
-            </span>
-          </button>
+          {attach.upload && (
+            <button
+              type="button"
+              className="tm-row"
+              onClick={() => (setOpen(false), attach.upload?.())}
+            >
+              <span className="tm-ic upl">
+                <IconUpload />
+              </span>
+              <span className="tm-t">
+                <b>
+                  {attach.uploadTitle ||
+                    bi("上传文件或图片", "Upload file or image")}
+                </b>
+                <small>
+                  {attach.uploadDesc ||
+                    bi(
+                      "也可以直接拖进来或粘贴；会存进「我的资料」",
+                      "Or drag and drop / paste directly; saved to My Files",
+                    )}
+                </small>
+              </span>
+            </button>
+          )}
+          {attach.pick && (
+            <button
+              type="button"
+              className="tm-row"
+              onClick={() => (setOpen(false), attach.pick?.())}
+            >
+              <span className="tm-ic kb">
+                <IconFolder />
+              </span>
+              <span className="tm-t">
+                <b>{bi("从我的资料选择", "Choose from My Files")}</b>
+                <small>{bi("用之前传过的文件", "Use previously uploaded files")}</small>
+              </span>
+            </button>
+          )}
         </div>
       )}
-      {compact && levels && levels.length > 0 && (
+      {showThinkInMenu && levels && levels.length > 0 && (
         <div className="tm-row tm-think">
           <span className="tm-ic think">
             <IconBulb />
@@ -437,12 +857,12 @@ export function ToolMenu({
           <Globe />
         </span>
         <span className="tm-t">
-          <b>{bi("联网搜索", "Web search")}</b>
+          <b>{bi("联网搜索与安全核查", "Web search & security lookup")}</b>
           <small>
             {o?.web
               ? bi(
-                  "平台和交付里查不到时，去网上找官方文档、版本说明、报错含义",
-                  "Search official docs, release notes, and error meanings online when not found locally",
+                  "含网页搜索、网页正文读取，以及 OSV/PyPI 官方 CVE 安全公告与最新版本核查",
+                  "Includes web search, page fetch, and official OSV/PyPI CVE & release lookup",
                 )
               : can("ai.settings")
                 ? bi(
@@ -497,43 +917,38 @@ export function ToolMenu({
           />
         </label>
       )}
-      {o?.sandbox && (
-        <label className="tm-row">
-          <span className="tm-ic sandbox">
-            <IconCode />
-          </span>
-          <span className="tm-t">
-            <b>{bi("沙箱代码每次询问", "Ask before sandbox code")}</b>
-            <small>
-              {o.sandbox_exec_policy === "ask"
-                ? bi(
-                    "平台已统一开启每次询问授权",
-                    "Platform enforces confirmation before every execution",
-                  )
-                : pref.sandboxAsk
-                  ? bi(
-                      "每次运行 Python 或技能脚本前先征得我同意",
-                      "Ask my permission before each Python or skill script run",
-                    )
-                  : o.sandbox_exec_policy === "open"
-                    ? bi(
-                        "当前按平台开放策略运行，开启后改为每次问我",
-                        "Currently runs under open policy; turn on to ask every time",
-                      )
-                    : bi(
-                        "当前按 AI 风险分级自动判断，开启后改为每次问我",
-                        "Currently auto-decided by risk level; turn on to ask every time",
-                      )}
-            </small>
-          </span>
-          <Switch
-            size="small"
-            checked={o.sandbox_exec_policy === "ask" || !!pref.sandboxAsk}
-            disabled={o.sandbox_exec_policy === "ask"}
-            onChange={(v) => update({ sandboxAsk: v })}
-            aria-label={bi("沙箱代码每次询问", "Ask before sandbox code")}
-          />
-        </label>
+      {compact && o?.sandbox && (
+        <div className="tm-sec">
+          <button
+            type="button"
+            className="tm-row tm-head"
+            onClick={() => setSbOpen((v) => !v)}
+            aria-expanded={sbOpen}
+          >
+            <span className="tm-ic sandbox">{sbCurMeta.icon}</span>
+            <span className="tm-t">
+              <b>
+                {bi("沙箱权限", "Sandbox Permissions")} · {sbCurMeta.short}
+              </b>
+              <small>{netPolicyBadge(o.sandbox_net_policy)}</small>
+            </span>
+            <IconDown className={sbOpen ? "tm-flip" : ""} />
+          </button>
+          {sbOpen && (
+            <div className="sbp-inline">
+              <SandboxPermList
+                platformDefault={sbDefault}
+                netPolicy={o.sandbox_net_policy}
+                value={sbEffective}
+                onSelect={(m) => {
+                  selectSandboxMode(m);
+                  setSbOpen(false);
+                }}
+                onOpenSettings={() => setOpen(false)}
+              />
+            </div>
+          )}
+        </div>
       )}
       {(o?.skills.length || 0) > 0 && (
         <div className="tm-sec">
@@ -640,10 +1055,12 @@ export function ToolMenu({
   return (
     <>
       <Popover
+        ref={popRef as React.Ref<never>}
         trigger="click"
         position={pos}
         popupVisible={open}
-        triggerProps={{ autoFitPosition: false }}
+        escToClose
+        triggerProps={{ autoFitPosition: false, updateOnScroll: true }}
         onVisibleChange={(v) => {
           if (v && btn.current) {
             const rect = btn.current.getBoundingClientRect();
@@ -661,7 +1078,7 @@ export function ToolMenu({
         <button
           type="button"
           ref={btn}
-          className={`tm-btn ${open ? "on" : ""} ${compact && (pref.think || opts.web) ? "lit" : ""}`}
+          className={`tm-btn ${open ? "on tm-open" : ""} ${(showThinkInMenu && pref.think) || (compact && opts.web) ? "lit" : ""}`}
           aria-label={bi("工具与选项", "Tools & options")}
           aria-expanded={open}
         >
@@ -670,11 +1087,13 @@ export function ToolMenu({
       </Popover>
       {!compact && (
         <>
-          <ThinkLevel
-            levels={levels}
-            value={pref.think}
-            onChange={(v) => update({ think: v })}
-          />
+          {!hideThink && (
+            <ThinkLevel
+              levels={levels}
+              value={pref.think}
+              onChange={(v) => update({ think: v })}
+            />
+          )}
           <button
             type="button"
             className={`tm-tog web ${opts.web ? "on" : ""}`}
@@ -683,8 +1102,8 @@ export function ToolMenu({
             title={
               o?.web
                 ? bi(
-                    "平台和交付里查不到时，去网上找官方文档、版本说明、报错含义",
-                    "Search official docs, release notes, and error meanings online when not found locally",
+                    "含网页搜索、网页正文读取，以及 OSV/PyPI 官方 CVE 安全公告与最新版本核查",
+                    "Includes web search, page reader, and official OSV/PyPI CVE & release lookup",
                   )
                 : can("ai.settings")
                   ? bi(
@@ -701,6 +1120,14 @@ export function ToolMenu({
             <Globe />
             <span>{bi("联网", "Web")}</span>
           </button>
+          {o?.sandbox && (
+            <SandboxPermPill
+              platformDefault={sbDefault}
+              netPolicy={o.sandbox_net_policy}
+              value={sbEffective}
+              onSelect={selectSandboxMode}
+            />
+          )}
         </>
       )}
     </>

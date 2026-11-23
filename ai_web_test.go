@@ -54,10 +54,10 @@ func TestMessageOptionsChooseTools(t *testing.T) {
 		}
 		return m
 	}
-	if n := names(s.extFor("assistant")); n["web_search"] {
+	if n := names(s.extFor("assistant")); n["web_search"] || n[checkPkgSecName] {
 		t.Fatal("the web was offered without being asked for")
 	}
-	if n := names(s.extFor("assistant", aiOpts{Web: true})); !n["web_search"] || !n["web_fetch"] {
+	if n := names(s.extFor("assistant", aiOpts{Web: true})); !n["web_search"] || !n["web_fetch"] || !n[checkPkgSecName] {
 		t.Fatal("the web was asked for but not offered")
 	}
 	none := []string{}
@@ -69,12 +69,12 @@ func TestMessageOptionsChooseTools(t *testing.T) {
 	if !strings.Contains(x.prompt, "etcd-ops") || strings.Contains(x.prompt, "ansible-debug") {
 		t.Fatal("skill choice ignored", x.prompt)
 	}
-	if stepKind("web_search") != "web" {
+	if stepKind("web_search") != "web" || stepKind(checkPkgSecName) != "web" {
 		t.Fatal("web step kind")
 	}
 	st.Web.Enabled = false
 	s.aiSave(st)
-	if n := names(s.extFor("assistant", aiOpts{Web: true})); n["web_search"] {
+	if n := names(s.extFor("assistant", aiOpts{Web: true})); n["web_search"] || n[checkPkgSecName] {
 		t.Fatal("the web was offered while the administrator has it off")
 	}
 }
@@ -218,5 +218,82 @@ func TestTableToolGivesExactFigures(t *testing.T) {
 	}
 	if got = s.runTable("alice", "table_describe", `{"file":"hosts"}`); !strings.Contains(got, "1000 行数据") || !strings.Contains(got, "数字") {
 		t.Fatal(got)
+	}
+}
+
+func TestCheckPackageSecurityAndLibraryRuntimes(t *testing.T) {
+	s, _ := testStore(t)
+	st := s.aiLoad()
+	st.Web = aiWeb{Enabled: true, Provider: "duckduckgo"}
+	s.aiSave(st)
+
+	// Mock OSV.dev + PyPI JSON endpoints locally for deterministic offline testing.
+	osvSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == "POST" && r.URL.Path == "/v1/querybatch":
+			io.WriteString(w, `{"results":[{"vulns":[{"id":"GHSA-test-pip1"}]},{"vulns":[]}]}`)
+		case r.Method == "GET" && (r.URL.Path == "/v1/vulns/GHSA-test-pip1" || r.URL.Path == "/v1/vulns/CVE-2026-1703"):
+			io.WriteString(w, `{"id":"GHSA-test-pip1","aliases":["CVE-2026-1703"],"summary":"pip wheel extraction path issue","database_specific":{"severity":"MODERATE"},"affected":[{"package":{"name":"pip","ecosystem":"PyPI"},"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"26.0"}]}]}],"references":[{"type":"ADVISORY","url":"https://github.com/advisories/GHSA-test-pip1"}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer osvSrv.Close()
+
+	pypiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/pypi/pip/25.3/json":
+			io.WriteString(w, `{"info":{"name":"pip","version":"25.3","requires_python":">=3.9","release_url":"https://pypi.org/project/pip/25.3/"},"vulnerabilities":[{"id":"GHSA-test-pip1","aliases":["CVE-2026-1703"],"summary":"dup from pypi","fixed_in":["26.0"],"link":"https://osv.dev/vulnerability/GHSA-test-pip1"}]}`)
+		case "/pypi/pip/json":
+			io.WriteString(w, `{"info":{"name":"pip","version":"26.2","requires_python":">=3.9","release_url":"https://pypi.org/project/pip/26.2/"}}`)
+		case "/pypi/pycparser/3.11/json":
+			io.WriteString(w, `{"info":{"name":"pycparser","version":"3.11","requires_python":">=3.8","release_url":"https://pypi.org/project/pycparser/3.11/"},"vulnerabilities":[]}`)
+		case "/pypi/pycparser/json":
+			io.WriteString(w, `{"info":{"name":"pycparser","version":"3.12","requires_python":">=3.8","release_url":"https://pypi.org/project/pycparser/3.12/"}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer pypiSrv.Close()
+
+	oldOSV, oldPyPI := osvAPIBase, pypiAPIBase
+	osvAPIBase, pypiAPIBase = osvSrv.URL, pypiSrv.URL
+	defer func() { osvAPIBase, pypiAPIBase = oldOSV, oldPyPI }()
+
+	// 1. Batch package security check merges & deduplicates OSV + PyPI cleanly.
+	out := s.runWeb(checkPkgSecName, `{"packages":[{"name":"pip","version":"25.3"},{"name":"pycparser","version":"3.11"}]}`)
+	if !strings.Contains(out, "发现 1 条已知漏洞") || !strings.Contains(out, "CVE-2026-1703") || !strings.Contains(out, `"latest_version": "26.2"`) || !strings.Contains(out, `"has_newer": true`) {
+		t.Fatalf("unexpected check_package_security batch output: %s", out)
+	}
+	if strings.Count(out, "GHSA-test-pip1") > 2 {
+		t.Fatalf("expected OSV + PyPI duplicate vulnerability to be deduplicated: %s", out)
+	}
+	if sum := stepSummary(checkPkgSecName, out); !strings.Contains(sum, "发现 1 条已知漏洞") {
+		t.Fatalf("unexpected stepSummary: %s", sum)
+	}
+
+	// 2. Direct vuln_id lookup.
+	vout := s.runWeb(checkPkgSecName, `{"vuln_id":"CVE-2026-1703"}`)
+	if !strings.Contains(vout, "GHSA-test-pip1") || !strings.Contains(vout, `"26.0"`) {
+		t.Fatalf("unexpected vuln_id output: %s", vout)
+	}
+
+	// 3. Global assistant exposes library_runtimes and runs cleanly without crashing even when empty.
+	foundLibTool := false
+	for _, td := range assistantTools() {
+		if td.Name == "library_runtimes" {
+			foundLibTool = true
+			break
+		}
+	}
+	if !foundLibTool {
+		t.Fatal("assistantTools missing library_runtimes")
+	}
+	ac := assistCtx{s: s, user: "admin"}
+	rtOut := ac.run("library_runtimes", `{}`)
+	if !strings.Contains(rtOut, "Ansible 运行环境") {
+		t.Fatalf("unexpected library_runtimes output: %s", rtOut)
 	}
 }

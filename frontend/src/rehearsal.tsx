@@ -7869,14 +7869,73 @@ function RehearsalSessionView({
     expand: boolean;
     seq: number;
   }>({ expand: false, seq: 0 });
+  const [arrivalStepId, setArrivalStepId] = useState<string | null>(null);
   const [goalOpen, setGoalOpen] = useState(false);
+  const timelineRef = useRef<HTMLOListElement | null>(null);
+  const gateRef = useRef<HTMLDivElement | null>(null);
+  const forwardStepsRef = useRef<RehearsalStep[]>([]);
+  const arrivalTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     setGoalOpen(false);
     setRolloutBoardOverride(null);
     setStripPropagateOpen(false);
     setStripRolloutOpen(false);
+    setArrivalStepId(null);
+    if (arrivalTimerRef.current !== null) {
+      window.clearTimeout(arrivalTimerRef.current);
+      arrivalTimerRef.current = null;
+    }
   }, [id]);
+
+  useEffect(() => {
+    return () => {
+      if (arrivalTimerRef.current !== null) {
+        window.clearTimeout(arrivalTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleStepSettled = useCallback((completedStepId: string) => {
+    const reduced =
+      typeof window !== "undefined" &&
+      window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        const list = forwardStepsRef.current;
+        const doneIdx = list.findIndex((s) => s.id === completedStepId);
+        const isPending = (s: RehearsalStep) =>
+          s.status !== "passed" && s.status !== "skipped";
+        const nextStep =
+          (doneIdx >= 0 ? list.slice(doneIdx + 1).find(isPending) : undefined) ||
+          list.find(isPending);
+        if (nextStep) {
+          const el = timelineRef.current?.querySelector<HTMLElement>(
+            `li[data-step-id="${nextStep.id.replace(/"/g, '\\"')}"]`,
+          );
+          if (el) {
+            el.scrollIntoView({
+              behavior: reduced ? "auto" : "smooth",
+              block: "start",
+            });
+          }
+          setArrivalStepId(nextStep.id);
+          if (arrivalTimerRef.current !== null) {
+            window.clearTimeout(arrivalTimerRef.current);
+          }
+          arrivalTimerRef.current = window.setTimeout(() => {
+            setArrivalStepId(null);
+            arrivalTimerRef.current = null;
+          }, 1400);
+        } else if (gateRef.current) {
+          gateRef.current.scrollIntoView({
+            behavior: reduced ? "auto" : "smooth",
+            block: "start",
+          });
+        }
+      });
+    });
+  }, []);
 
   const switchStage = (
     next: ChangeRehearsal["stage"],
@@ -8328,6 +8387,7 @@ function RehearsalSessionView({
 
   const steps = r.steps || [];
   const forwardSteps = steps.filter((s) => s.phase !== "rollback");
+  forwardStepsRef.current = forwardSteps;
   const rollbackSteps = steps.filter((s) => s.phase === "rollback");
   const doneForwardCount = forwardSteps.filter(
     (s) => s.status === "passed" || s.status === "skipped",
@@ -9487,7 +9547,7 @@ function RehearsalSessionView({
               );
             })()}
 
-            <div className="rh-gate">
+            <div className="rh-gate" ref={gateRef}>
               <div className="rh-gate-left">
                 <svg
                   viewBox="0 0 36 36"
@@ -9743,7 +9803,7 @@ function RehearsalSessionView({
                 )}
               </div>
             ) : (
-              <ol className="rh-timeline">
+              <ol className="rh-timeline" ref={timelineRef}>
                 {(() => {
                   const isRollbackTab = phaseFilter === "rollback";
                   const activeStepId = isRollbackTab
@@ -9763,6 +9823,7 @@ function RehearsalSessionView({
                       forwardDone={gateReady}
                       doneExpandCmd={doneExpandCmd}
                       isActiveStep={step.id === activeStepId}
+                      isArrival={!isRollbackTab && step.id === arrivalStepId}
                       staggerIndex={isFreshProbe ? Math.min(idx, 7) : undefined}
                       offline={offline}
                       noVision={noVision}
@@ -9770,6 +9831,7 @@ function RehearsalSessionView({
                       aiOpts={aiOpts}
                       onUpdated={setR}
                       onEngageFocus={onEngageFocus}
+                      onStepSettled={isRollbackTab ? undefined : handleStepSettled}
                     />
                   ));
                 })()}
@@ -10277,6 +10339,7 @@ function StepRow({
   forwardDone = false,
   doneExpandCmd,
   isActiveStep = false,
+  isArrival = false,
   staggerIndex,
   offline,
   noVision,
@@ -10284,6 +10347,7 @@ function StepRow({
   aiOpts,
   onUpdated,
   onEngageFocus,
+  onStepSettled,
 }: {
   c: ClusterView;
   rehearsalId: string;
@@ -10294,6 +10358,7 @@ function StepRow({
   forwardDone?: boolean;
   doneExpandCmd?: { expand: boolean; seq: number };
   isActiveStep?: boolean;
+  isArrival?: boolean;
   staggerIndex?: number;
   offline: boolean;
   noVision: boolean;
@@ -10301,6 +10366,7 @@ function StepRow({
   aiOpts: ReturnType<typeof useAIOptions>;
   onUpdated: (r: ChangeRehearsal) => void;
   onEngageFocus?: () => void;
+  onStepSettled?: (stepId: string) => void;
 }) {
   useLang();
   const dock = useAIDock();
@@ -10332,6 +10398,8 @@ function StepRow({
   const verifyAbortRef = useRef<AbortController | null>(null);
   const evidImgInputRef = useRef<HTMLInputElement | null>(null);
   const verifyBoxRef = useRef<HTMLDivElement | null>(null);
+  const onStepSettledRef = useRef(onStepSettled);
+  onStepSettledRef.current = onStepSettled;
 
   // Trigger Ichiban Kuji tear-off peel animation when a step freshly transitions to passed/skipped
   useEffect(() => {
@@ -10354,6 +10422,9 @@ function StepRow({
         setTearing(false);
         setCollapsed(true);
         setJustSettled(true);
+        if (!isRollback) {
+          onStepSettledRef.current?.(step.id);
+        }
       }, 720);
       const t2 = window.setTimeout(() => {
         setJustSettled(false);
@@ -10657,7 +10728,8 @@ function StepRow({
 
   return (
     <li
-      className={`rh-step st-${step.status}${isRollback ? " is-rollback" : ""}${showStub ? " is-stub" : ""}${tearing ? " is-tearing" : ""}${justSettled ? " is-stub-settled" : ""}${staggerIndex !== undefined ? " is-fresh-step" : ""}`}
+      data-step-id={step.id}
+      className={`rh-step st-${step.status}${isRollback ? " is-rollback" : ""}${showStub ? " is-stub" : ""}${tearing ? " is-tearing" : ""}${justSettled ? " is-stub-settled" : ""}${isArrival ? " is-arrival-focus" : ""}${staggerIndex !== undefined ? " is-fresh-step" : ""}`}
       style={
         staggerIndex !== undefined
           ? ({ "--rh-stagger": staggerIndex } as React.CSSProperties)

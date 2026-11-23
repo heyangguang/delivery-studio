@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.261-dev"
+	version            = "1.0.262-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,18 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.262-dev",
+		Date:    "2026-11-24",
+		Title:   "演练步骤撕票收起后自动平滑定位到下一步",
+		TitleEn: "Auto-Focus Next Step After Rehearsal Step Tear-Collapse Animation",
+		Highlights: []string{
+			"演练步骤完成撕票动画自动精准定位下一步：当某步完成并由展开态收起为紧凑存根时，禁用浏览器默认滚动锚定偏移并在收起布局落地后自动将视口平滑定位到紧随其后的下一步（如完成第 4 步后精准停在第 5 步顶部、保留第 4 步已完成存根在上方可见，不再因上方高度骤减被甩到第 6 步），并附带柔和的序号光环高亮提示；全部必测步骤完成后自动定位至顶部定稿门禁栏。",
+		},
+		HighlightsEn: []string{
+			"Post-Tear Auto-Focus to Next Rehearsal Step: disables competing browser scroll anchoring on the step timeline and smoothly aligns the next pending step cleanly below the sticky progress bar with a gentle arrival ring once a completed step finishes tearing into its compact stub (or scrolls to the finalize gate when all required steps pass).",
+		},
+	},
 	{
 		Version: "1.0.261-dev",
 		Date:    "2026-11-24",

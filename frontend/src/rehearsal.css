@@ -6966,6 +6966,7 @@ body[arco-theme="dark"] .rh-pnote-tag.is-conn {
   position: sticky;
   top: 51px;
   z-index: 8;
+  scroll-margin-top: 64px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -7031,6 +7032,7 @@ body[arco-theme="dark"] .rh-pnote-tag.is-conn {
   padding: 0;
   display: flex;
   flex-direction: column;
+  overflow-anchor: none;
 }
 
 .rh-step {
@@ -10255,4 +10257,43 @@ body[arco-theme="dark"] .rh-cmd-gate svg {
 }
 .rh-finalize-busy p {
   margin: 0;
+}
+
+/* Smooth post-tear focus landing on the next step */
+.rh-step {
+  scroll-margin-top: 136px;
+}
+
+@keyframes rh-step-arrival-ring {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--brand) 48%, transparent);
+    border-color: var(--brand);
+    color: var(--brand-ink);
+    background: var(--brand-soft);
+  }
+  55% {
+    box-shadow: 0 0 0 7px color-mix(in srgb, var(--brand) 0%, transparent);
+    border-color: var(--brand);
+    color: var(--brand-ink);
+    background: var(--brand-soft);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+.rh-step.is-arrival-focus > .rh-step-node {
+  animation: rh-step-arrival-ring 1.25s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.rh-step.is-arrival-focus .rh-step-head {
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--brand) 6%, transparent);
+  transition: background-color 0.45s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rh-step.is-arrival-focus > .rh-step-node {
+    animation: none;
+  }
 }

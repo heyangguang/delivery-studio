@@ -1446,6 +1446,13 @@ function rehearsalImgUrl(clusterId: string, rehearsalId: string, name: string) {
   return `/api/clusters/${encodeURIComponent(clusterId)}/rehearsals/${encodeURIComponent(rehearsalId)}/img/${encodeURIComponent(name)}`;
 }
 
+function formatProbeFileStamp(iso?: string): string {
+  const d = iso ? new Date(iso) : new Date();
+  const valid = Number.isNaN(d.getTime()) ? new Date() : d;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${valid.getFullYear()}${pad(valid.getMonth() + 1)}${pad(valid.getDate())}-${pad(valid.getHours())}${pad(valid.getMinutes())}${pad(valid.getSeconds())}`;
+}
+
 /* ---------- Bespoke Shell Syntax Highlighter & Code Block ---------- */
 
 type BashToken = {
@@ -8581,12 +8588,20 @@ function RehearsalSessionView({
     }
   };
 
+  const probeStampSource =
+    (r.probe_issue?.fixed_script ? r.traces?.probe?.at : undefined) ||
+    r.traces?.scope?.at ||
+    r.traces?.create?.at ||
+    r.created_at ||
+    r.updated_at;
+  const probeFileName = `collect-${c.id}-${r.id.slice(0, 6)}-${formatProbeFileStamp(probeStampSource)}.sh`;
+
   const downloadProbe = () => {
     if (!r.probe_script) return;
     const blob = new Blob([r.probe_script], { type: "text/x-shellscript" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `collect-${c.id}-${r.id.slice(0, 6)}.sh`;
+    a.download = probeFileName;
     a.click();
     URL.revokeObjectURL(a.href);
   };
@@ -8618,7 +8633,6 @@ function RehearsalSessionView({
       ? forwardSteps
       : steps.filter((s) => s.phase === phaseFilter);
 
-  const probeFileName = `collect-${c.id}-${r.id.slice(0, 6)}.sh`;
   const hasProbeInput =
     probeImages.length > 0 || Boolean(probeOut.trim());
 

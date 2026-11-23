@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.264-dev"
+	version            = "1.0.265-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,20 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.265-dev",
+		Date:    "2026-11-24",
+		Title:   "只读采集探针脚本文件名新增生成时间戳，避免下载与 /tmp 覆盖混淆",
+		TitleEn: "Add Generation Timestamp to Read-Only Probe Script Filename",
+		Highlights: []string{
+			"只读探针脚本文件名统一附带生成时间戳（格式 collect-<集群ID>-<演练短ID>-YYYYMMDD-HHmmss.sh）：页面展示、现场运行命令（bash /tmp/...）与下载的 .sh 文件名完全一致。",
+			"时间戳绑定探针实际生成/自动修订时间（重算诉求或按报错修订脚本后自动更新时间戳，避免反复下载重名覆盖，同一版脚本复制命令与下载文件名始终对齐）。",
+		},
+		HighlightsEn: []string{
+			"Timestamped probe filenames: read-only probe scripts now use collect-<cluster>-<shortId>-YYYYMMDD-HHmmss.sh consistently across the UI pill, bash /tmp/... run command, and downloaded .sh file.",
+			"Deterministic per probe revision: derived from the probe's generation/auto-fix timestamp so re-downloads stay aligned with the copyable command while revised probes never overwrite older files.",
+		},
+	},
 	{
 		Version: "1.0.264-dev",
 		Date:    "2026-11-24",

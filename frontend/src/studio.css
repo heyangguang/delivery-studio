@@ -171,7 +171,38 @@ body[arco-theme="dark"] .studio-nav-item.on {
 }
 
 .studio-body > .md-split {
+  margin-top: 0;
   height: 100%;
+}
+
+@media (min-width: 901px) {
+  .studio-shell {
+    margin-top: -52px;
+    height: 100vh;
+  }
+
+  .studio-rail {
+    margin-top: 52px;
+    height: calc(100vh - 52px);
+  }
+
+  .studio-body {
+    height: 100vh;
+  }
+
+  .studio-body > .md-split {
+    margin-top: 0;
+    height: 100vh;
+  }
+
+  .studio-body > .md-split > .md-list {
+    margin-top: 52px;
+    height: calc(100vh - 52px);
+  }
+
+  .studio-body > .md-split > .md-detail {
+    padding-top: 52px;
+  }
 }
 
 @media (max-width: 900px) {

@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.266-dev"
+	version            = "1.0.267-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,18 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.267-dev",
+		Date:    "2026-11-24",
+		Title:   "修复能力库工作区底部 52px 高度偏移与贴底铺满",
+		TitleEn: "Fix Studio workspace full-viewport height alignment below topbar",
+		Highlights: []string{
+			"修正「能力库」（Studio）内嵌双栏工作区在桌面端继承 .md-split 负边距导致的底部 52px 留白与左侧列表截断，使左侧栏、列表栏与详情区完全贴底铺满并保留顶栏毛玻璃滚动穿透效果",
+		},
+		HighlightsEn: []string{
+			"Fixed a 52px bottom gap and list clipping inside the Studio workspace caused by nested .md-split negative top margin on desktop, restoring edge-to-edge full-viewport height and frosted topbar scroll-through",
+		},
+	},
 	{
 		Version: "1.0.266-dev",
 		Date:    "2026-11-24",

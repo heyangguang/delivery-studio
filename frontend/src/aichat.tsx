@@ -508,6 +508,8 @@ export type AITarget = {
   draft?: string;
   /** Only auto-send prefill when this conversation has no messages yet (reopening an existing security chat shows history instead of re-asking). */
   prefillIfEmpty?: boolean;
+  /** Internal marker for an auto-created blank general conversation (reusable only while still empty). */
+  fresh?: boolean;
 };
 type Scope =
   | { kind: "job"; jobId: string }
@@ -755,9 +757,40 @@ export const isSecurityKey = (key: string) =>
   key === "sec" || key.startsWith("sec:");
 export const isPortalKey = (key: string) =>
   key === "portal" || key.startsWith("portal:");
-const newGeneral = () => `review:${Math.random().toString(36).slice(2, 10)}`;
-const newSecurityChat = () => `sec:${Math.random().toString(36).slice(2, 10)}`;
-const newPortalChat = () => `portal:${Math.random().toString(36).slice(2, 10)}`;
+const randKey = () =>
+  (Math.random().toString(36).slice(2) + Date.now().toString(36))
+    .replace(/[^a-z0-9]/g, "")
+    .slice(0, 10)
+    .padEnd(8, "0");
+const newGeneral = () => `review:${randKey()}`;
+const newSecurityChat = () => `sec:${randKey()}`;
+const newPortalChat = () => `portal:${randKey()}`;
+
+const sameStringList = (a?: string[], b?: string[]) =>
+  a === b ||
+  (!!a && !!b && a.length === b.length && a.every((v, i) => v === b[i]));
+
+function freshStart(scope: Scope, start: AITarget): AITarget {
+  if (scope.kind === "comp") return start;
+  const key =
+    scope.kind === "portal"
+      ? newPortalChat()
+      : scope.kind === "security"
+        ? newSecurityChat()
+        : newGeneral();
+  return {
+    key,
+    title: start.title || bi("新对话", "New chat"),
+    context: start.context,
+    hello: start.hello,
+    suggestions: start.suggestions,
+    step:
+      scope.kind === "portal" && start.step?.page
+        ? { page: start.step.page }
+        : undefined,
+    fresh: true,
+  };
+}
 
 const featureOf = (key: string) =>
   isSecurityKey(key)
@@ -948,23 +981,72 @@ export function AIDock({
         : scope.kind === "portal"
           ? "__portal__"
           : "__security__";
-  const [target, setTarget] = useState<AITarget>(start);
+  const [target, setTarget] = useState<AITarget>(() =>
+    freshStart(scope, start),
+  );
+  const targetRef = useRef(target);
+  targetRef.current = target;
+  const hasContentRef = useRef(false);
+  const onHasContent = useCallback((has: boolean) => {
+    hasContentRef.current = has;
+  }, []);
+  const startStepPage =
+    typeof start.step?.page === "string" ? start.step.page : "";
+  const startSugKey = (start.suggestions || []).join("\0");
   const prevIdRef = useRef(id);
   useEffect(() => {
     if (prevIdRef.current !== id) {
       prevIdRef.current = id;
-      setTarget(start);
+      hasContentRef.current = false;
+      setTarget(freshStart(scope, start));
       return;
     }
-    setTarget((cur) =>
-      cur.key === start.key &&
-      (cur.title !== start.title ||
+    setTarget((cur) => {
+      if (scope.kind === "comp") {
+        return cur.key === start.key &&
+          (cur.title !== start.title ||
+            cur.context !== start.context ||
+            cur.hello !== start.hello ||
+            !sameStringList(cur.suggestions, start.suggestions))
+          ? { ...cur, ...start }
+          : cur;
+      }
+      if (!cur.fresh || hasContentRef.current) return cur;
+      const nextStep =
+        scope.kind === "portal" && startStepPage
+          ? { page: startStepPage }
+          : undefined;
+      const nextTitle = start.title || bi("新对话", "New chat");
+      const curStepPage =
+        typeof cur.step?.page === "string" ? cur.step.page : "";
+      if (
+        cur.title !== nextTitle ||
         cur.context !== start.context ||
-        cur.hello !== start.hello)
-        ? { ...cur, ...start }
-        : cur,
-    );
-  }, [id, start.key, start.title, start.context, start.hello]);
+        cur.hello !== start.hello ||
+        !sameStringList(cur.suggestions, start.suggestions) ||
+        curStepPage !== (nextStep?.page || "")
+      ) {
+        return {
+          ...cur,
+          title: nextTitle,
+          context: start.context,
+          hello: start.hello,
+          suggestions: start.suggestions,
+          step: nextStep,
+        };
+      }
+      return cur;
+    });
+  }, [
+    id,
+    scope.kind,
+    start.key,
+    start.title,
+    start.context,
+    start.hello,
+    startSugKey,
+    startStepPage,
+  ]); // eslint-disable-line react-hooks/exhaustive-deps
   // at the foot of a long page the button shrinks to its mark, so it does not sit on the last lines
   const [atEnd, setAtEnd] = useState(false);
   useEffect(() => {
@@ -1005,33 +1087,73 @@ export function AIDock({
       setMode("closed");
     }
   }, [effectiveHidden, status.enabled, any]);
-  const dock = useMemo<Dock>(
-    () => ({
-      available,
-      scopeKind: scope.kind,
-      open: (t) => {
-        // the page's own starting conversation keeps its context line when opened from a button
-        if (t)
-          setTarget(
-            t.key === start.key
-              ? { ...start, ...t, context: t.context || start.context }
-              : t,
-          );
-        setOpen(true);
-      },
-      minimize: () => setMode((m) => (m === "open" ? "min" : m)),
-    }),
-    [available, scope.kind, start, setOpen],
-  );
-  // opened from the button or the keyboard: a conversation about the whole delivery, not the step someone asked about last
+  // opened from the button or the keyboard: always start a fresh general conversation (unless actively replying)
   const modeRef = useRef(mode);
   modeRef.current = mode;
   const busyRef = useRef(busy);
   busyRef.current = busy;
   const openGeneral = useCallback(() => {
-    if (!busyRef.current) setTarget(start);
+    if (!busyRef.current) {
+      if (scope.kind === "comp") {
+        setTarget(start);
+      } else {
+        const cur = targetRef.current;
+        if (cur.fresh && !hasContentRef.current && !cur.prefill && !cur.draft) {
+          const nextStep =
+            scope.kind === "portal" && startStepPage
+              ? { page: startStepPage }
+              : undefined;
+          const nextTitle = start.title || bi("新对话", "New chat");
+          const curStepPage =
+            typeof cur.step?.page === "string" ? cur.step.page : "";
+          if (
+            cur.title !== nextTitle ||
+            cur.context !== start.context ||
+            cur.hello !== start.hello ||
+            !sameStringList(cur.suggestions, start.suggestions) ||
+            curStepPage !== (nextStep?.page || "")
+          ) {
+            setTarget({
+              ...cur,
+              title: nextTitle,
+              context: start.context,
+              hello: start.hello,
+              suggestions: start.suggestions,
+              step: nextStep,
+            });
+          }
+        } else {
+          hasContentRef.current = false;
+          setTarget(freshStart(scope, start));
+        }
+      }
+    }
     setOpen(true);
-  }, [start, setOpen]);
+  }, [scope, start, startStepPage, setOpen]);
+  const dock = useMemo<Dock>(
+    () => ({
+      available,
+      scopeKind: scope.kind,
+      open: (t) => {
+        if (!t) {
+          if (modeRef.current === "closed") openGeneral();
+          else setOpen(true);
+          return;
+        }
+        // the page's own starting conversation keeps its context line when opened from a button
+        setTarget(
+          t.key === start.key
+            ? { ...start, ...t, context: t.context || start.context }
+            : isGeneral(t.key) && !t.context && start.context
+              ? { ...t, context: start.context }
+              : t,
+        );
+        setOpen(true);
+      },
+      minimize: () => setMode((m) => (m === "open" ? "min" : m)),
+    }),
+    [available, scope.kind, start, setOpen, openGeneral],
+  );
   // the page can step the window aside (to show what the assistant did) or bring it back
   useEffect(() => {
     const h = (e: Event) => {
@@ -1042,18 +1164,20 @@ export function AIDock({
     window.addEventListener("mh-ai-dock", h);
     return () => window.removeEventListener("mh-ai-dock", h);
   }, [setOpen]);
-  // ⌘J / Ctrl+J opens and closes the window from anywhere on the page
+  // ⌘J / Ctrl+J opens a fresh chat from closed, restores from minimized, or closes when open
   useEffect(() => {
     if (!any) return;
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "j") {
         e.preventDefault();
-        setOpen((o) => !o);
+        if (modeRef.current === "open") setOpen(false);
+        else if (modeRef.current === "min") setOpen(true);
+        else openGeneral();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [any, setOpen]);
+  }, [any, setOpen, openGeneral]);
   const changed = useCallback(() => {
     if (scope.kind === "job")
       window.dispatchEvent(
@@ -1071,7 +1195,7 @@ export function AIDock({
           <button
             type="button"
             className={`ad-launch ${busy ? "busy" : ""} ${atEnd && !busy ? "mini" : ""}`}
-            onClick={() => setOpen(true)}
+            onClick={openGeneral}
             aria-label={bi("打开 AI 助手（Ctrl+J）", "Open AI Assistant (Ctrl+J)")}
           >
             <Spark rainbow />
@@ -1096,6 +1220,7 @@ export function AIDock({
               mode={mode}
               setMode={setMode}
               onBusy={setBusy}
+              onHasContent={onHasContent}
               onClose={() => setOpen(false)}
               onChanged={changed}
               available={available}
@@ -1545,6 +1670,7 @@ function ChatWindow({
   mode,
   setMode,
   onBusy,
+  onHasContent,
   onClose,
   onChanged,
   available,
@@ -1558,6 +1684,7 @@ function ChatWindow({
   mode: "closed" | "open" | "min";
   setMode: (m: "closed" | "open" | "min") => void;
   onBusy: (b: boolean) => void;
+  onHasContent: (has: boolean) => void;
   onClose: () => void;
   onChanged: () => void;
   available: (key: string) => boolean;
@@ -1634,6 +1761,14 @@ function ChatWindow({
   );
   // the answer of this conversation is being written on the server (the page looked elsewhere meanwhile)
   const [remote, setRemote] = useState(false);
+  const hasContent = Boolean(
+    (msgs && msgs.length > 0) ||
+      busy ||
+      remote ||
+      input.trim() ||
+      imgs.length > 0,
+  );
+  useEffect(() => onHasContent(hasContent), [hasContent, onHasContent]);
   const win = useRef<HTMLElement>(null);
   // where the window was dragged to, as distances from the right and bottom edges
   const [pos, setPos] = useState<{ r: number; b: number } | null>(null);
@@ -1652,6 +1787,9 @@ function ChatWindow({
     setPos(null);
     setListOpen(false);
   }, [expanded]);
+  useEffect(() => {
+    if (mode !== "open") setListOpen(false);
+  }, [mode]);
   const wasDrag = useRef(false);
   const small = () => window.innerWidth <= 640;
   const onDown = (e: React.PointerEvent) => {
@@ -1860,8 +1998,9 @@ function ChatWindow({
     window.setTimeout(() => box.current?.focus({ preventScroll: true }), 40);
   }, [msgs === null, target.key, target.draft]);
   useEffect(() => {
-    if (msgs && !small()) box.current?.focus({ preventScroll: true });
-  }, [target.key, msgs === null]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (mode === "open" && msgs && !small())
+      box.current?.focus({ preventScroll: true });
+  }, [mode, target.key, msgs === null]); // eslint-disable-line react-hooks/exhaustive-deps
   useLayoutEffect(() => {
     if (!expanded && !listOpen) return;
     const el = sessListRef.current;
@@ -2403,44 +2542,15 @@ function ChatWindow({
   const solvedChip = askSolved && !showSolved;
   const offline = net !== "online";
 
-  // a new conversation about the whole delivery (or a new security chat in security scope); one not yet written in is not started twice
+  // a new conversation about the whole delivery (or a new security/portal chat); one not yet written in is not started twice
   const startGeneral = () => {
-    if (scope.kind === "portal") {
-      if (isPortalKey(target.key) && (msgs || []).length === 0 && !busy) {
-        box.current?.focus({ preventScroll: true });
-        setListOpen(false);
-        return;
-      }
-      pick({
-        key: newPortalChat(),
-        title: bi("新对话", "New chat"),
-        context: start.context,
-      });
-      return;
-    }
-    if (scope.kind === "security") {
-      if (isSecurityKey(target.key) && (msgs || []).length === 0 && !busy) {
-        box.current?.focus({ preventScroll: true });
-        setListOpen(false);
-        return;
-      }
-      pick({
-        key: newSecurityChat(),
-        title: bi("新安全对话", "New security chat"),
-        context: start.context,
-      });
-      return;
-    }
-    if (isGeneral(target.key) && (msgs || []).length === 0 && !busy) {
+    if (scope.kind === "comp") return;
+    if (target.fresh && (msgs || []).length === 0 && !busy) {
       box.current?.focus({ preventScroll: true });
       setListOpen(false);
       return;
     }
-    pick({
-      key: newGeneral(),
-      title: bi("新对话", "New chat"),
-      context: start.context,
-    });
+    pick(freshStart(scope, start));
   };
   // the list: security sessions, whole delivery chats, and troubleshooting chats
   const [find, setFind] = useState("");
@@ -2602,6 +2712,13 @@ function ChatWindow({
     </nav>
   );
 
+  const savedSessTitle = useMemo(
+    () => sessions.find((s) => s.key === target.key)?.title,
+    [sessions, target.key],
+  );
+  const displayTitle =
+    target.fresh && savedSessTitle ? savedSessTitle : target.title;
+
   return (
     <section
       ref={win}
@@ -2611,7 +2728,7 @@ function ChatWindow({
       }
       aria-hidden={mode === "closed" || undefined}
       role="dialog"
-      aria-label={bi(`AI 助手：${target.title}`, `AI Assistant: ${target.title}`)}
+      aria-label={bi(`AI 助手：${displayTitle}`, `AI Assistant: ${displayTitle}`)}
       onKeyDown={(e) => {
         if (e.key === "Escape" && !e.defaultPrevented) {
           // a menu that is open takes the key first; the window stays
@@ -2669,12 +2786,12 @@ function ChatWindow({
               aria-expanded={listOpen}
               aria-label={bi("切换对话", "Switch conversation")}
             >
-              <b>{normDeployCopy(target.title)}</b>
+              <b>{normDeployCopy(displayTitle)}</b>
               <IconDown className={listOpen ? "ad-flip" : ""} />
             </button>
           ) : (
             <b>
-              {normDeployCopy(hasSessions ? target.title : start.title)}
+              {normDeployCopy(hasSessions ? displayTitle : start.title)}
             </b>
           )}
           <small>

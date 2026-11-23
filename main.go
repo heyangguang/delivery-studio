@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.262-dev"
+	version            = "1.0.263-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,22 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.263-dev",
+		Date:    "2026-11-24",
+		Title:   "悬浮 AI 助手打开即开启全新对话，告别残留历史与旧步骤上下文",
+		TitleEn: "Floating AI Assistant Starts a Fresh Chat on Open",
+		Highlights: []string{
+			"打开 AI 助手默认开启全新对话：点击右下角「AI 助手」按钮或按 ⌘J / Ctrl+J 从关闭状态唤起时，自动开启对应页面/集群的全新空白对话，不再残留上次关闭的「演练步骤 #1」或历史会话。",
+			"保留最小化恢复与后台回复衔接：点击「—」最小化后的恢复、AI 正在回答中（busy）重新点开，以及点击步骤卡片「问 AI 修改」或安全研判按钮的定向入口均保持原上下文无缝衔接。",
+			"历史会话随时一键切换与标题自动同步：所有历史对话与步骤排障记录继续保留在顶部会话切换下拉中随时查阅；新对话发送首条提问后标题自动同步为对话主题，关闭弹窗时自动收起会话菜单。",
+		},
+		HighlightsEn: []string{
+			"Fresh chat on open: clicking the bottom-right AI Assistant launcher or pressing ⌘J / Ctrl+J from closed now starts a clean new conversation scoped to the current page/cluster instead of reopening a stale step thread or old chat.",
+			"Preserves active & targeted flows: restoring a minimized bar, reopening while AI is actively streaming, and clicking contextual triggers (Ask AI on a step, security analysis, etc.) keep their exact target context.",
+			"Seamless history & header polish: all past chats remain one click away in the conversation switcher, new chats automatically adopt their generated topic title once sent, and the session dropdown closes cleanly when the dock hides.",
+		},
+	},
 	{
 		Version: "1.0.262-dev",
 		Date:    "2026-11-24",

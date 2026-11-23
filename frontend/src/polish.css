@@ -480,6 +480,47 @@ textarea.arco-textarea {
   border-radius: 5px;
 }
 
+/* Restore crisp joined seams for Button.Group & Input.Group / addBefore / addAfter / InputNumber */
+.arco-btn-group {
+  display: inline-flex;
+  align-items: center;
+}
+.arco-btn-group > .arco-btn:not(:first-child):not(.arco-btn-circle):not(.arco-btn-round) {
+  border-top-left-radius: 0 !important;
+  border-bottom-left-radius: 0 !important;
+  margin-left: -1px;
+}
+.arco-btn-group > .arco-btn:not(:last-child):not(.arco-btn-circle):not(.arco-btn-round) {
+  border-top-right-radius: 0 !important;
+  border-bottom-right-radius: 0 !important;
+}
+.arco-btn-group > .arco-btn:hover,
+.arco-btn-group > .arco-btn:focus-visible,
+.arco-btn-group > .arco-btn-primary {
+  position: relative;
+  z-index: 1;
+}
+.arco-input-group > .arco-input-inner-wrapper:not(:first-child),
+.arco-input-group > input.arco-input:not(:first-child),
+.arco-input-group > .arco-input-group-addafter,
+.arco-input-group > .arco-input-group-addafter .arco-btn:not(.arco-btn-circle):not(.arco-btn-round),
+.arco-input-group.arco-input-group-compact > *:not(:first-child),
+.arco-input-group.arco-input-group-compact > *:not(:first-child) .arco-select-view,
+.arco-input-group.arco-input-group-compact > *:not(:first-child) .arco-input-inner-wrapper {
+  border-top-left-radius: 0 !important;
+  border-bottom-left-radius: 0 !important;
+}
+.arco-input-group > .arco-input-inner-wrapper:not(:last-child),
+.arco-input-group > input.arco-input:not(:last-child),
+.arco-input-group > .arco-input-group-addbefore,
+.arco-input-group > .arco-input-group-addbefore .arco-btn:not(.arco-btn-circle):not(.arco-btn-round),
+.arco-input-group.arco-input-group-compact > *:not(:last-child),
+.arco-input-group.arco-input-group-compact > *:not(:last-child) .arco-select-view,
+.arco-input-group.arco-input-group-compact > *:not(:last-child) .arco-input-inner-wrapper {
+  border-top-right-radius: 0 !important;
+  border-bottom-right-radius: 0 !important;
+}
+
 /* Fix Arco <Select> value truncation colliding with clear (x) or arrow (v) suffix */
 .arco-select-single .arco-select-view {
   display: flex;

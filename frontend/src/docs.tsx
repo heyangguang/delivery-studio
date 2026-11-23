@@ -754,7 +754,7 @@ function DocView({
       <nav className="cl-crumb" aria-label={bi("位置", "Breadcrumb")}>
         <button
           type="button"
-          className="link quiet"
+          className="cl-return"
           onClick={() => openDoc(c, undefined, true)}
         >
           <IconArrowLeft /> {bi("全部文档", "All Docs")}

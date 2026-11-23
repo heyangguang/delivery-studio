@@ -965,6 +965,14 @@
   color: var(--mute);
   font-size: 12px;
 }
+.cl-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 2px;
+  padding-left: 10px;
+  border-left: 1px solid var(--line);
+}
 .cl-return {
   display: inline-flex;
   flex: none;

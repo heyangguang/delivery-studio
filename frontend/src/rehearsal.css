@@ -6248,6 +6248,12 @@ body[arco-theme="dark"] .rh-mode-pill.is-light {
   border-radius: 19px 19px 0 0;
 }
 
+.rh-probe-head-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
 .rh-probe-upload-btns {
   display: inline-flex;
   align-items: center;

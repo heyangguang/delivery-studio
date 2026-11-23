@@ -7827,19 +7827,11 @@ function RehearsalSessionView({
   );
 
   // Step 2 state
-  const [probeMode, setProbeMode] = useState<"paste" | "manual">(() =>
-    initialSession?.manual_state && !initialSession?.probe_output
-      ? "manual"
-      : "paste",
-  );
   const [probeOut, setProbeOut] = useState(
-    () => initialSession?.probe_output || "",
+    () => initialSession?.probe_output || initialSession?.manual_state || "",
   );
   const [probeImages, setProbeImages] = useState<DraftImage[]>([]);
   const [dragProbe, setDragProbe] = useState(false);
-  const [manualState, setManualState] = useState(
-    () => initialSession?.manual_state || "",
-  );
   const [testEnvNote, setTestEnvNote] = useState(
     () => initialSession?.test_env_note || "",
   );
@@ -7922,10 +7914,8 @@ function RehearsalSessionView({
       });
       setAnswers((prev) => ({ ...initAns, ...prev }));
       if (data.extra_scope) setExtraScope((ex) => ex || data.extra_scope || "");
-      if (data.probe_output) setProbeOut((p) => p || data.probe_output || "");
-      if (data.manual_state) {
-        setManualState((m) => m || data.manual_state || "");
-        if (!data.probe_output) setProbeMode("manual");
+      if (data.probe_output || data.manual_state) {
+        setProbeOut((p) => p || data.probe_output || data.manual_state || "");
       }
       if (data.test_env_note) {
         setTestEnvNote((t) => t || data.test_env_note || "");
@@ -7998,7 +7988,6 @@ function RehearsalSessionView({
       }
       const reader = new FileReader();
       reader.onload = () => {
-        setProbeMode("paste");
         setProbeOut(String(reader.result || ""));
         Message.success(bi(`已载入 ${tf.name}`, `Loaded ${tf.name}`));
       };
@@ -8188,24 +8177,14 @@ function RehearsalSessionView({
           ? probeImages.map((im) => im.dataUrl)
           : undefined;
       const modelRef = pick.ref || undefined;
-      const payload =
-        probeMode === "paste"
-          ? {
-              probe_output: probeOut,
-              test_env_note: testEnvNote,
-              images: imgs,
-              mode: action,
-              model: modelRef,
-              effort: effortVal,
-            }
-          : {
-              manual_state: manualState,
-              test_env_note: testEnvNote,
-              images: imgs,
-              mode: action,
-              model: modelRef,
-              effort: effortVal,
-            };
+      const payload = {
+        probe_output: probeOut,
+        test_env_note: testEnvNote,
+        images: imgs,
+        mode: action,
+        model: modelRef,
+        effort: effortVal,
+      };
       const next = await streamRehearsalAPI(
         `/api/clusters/${encodeURIComponent(c.id)}/rehearsals/${encodeURIComponent(r.id)}/probe`,
         payload,
@@ -8341,8 +8320,7 @@ function RehearsalSessionView({
 
   const probeFileName = `collect-${c.id}-${r.id.slice(0, 6)}.sh`;
   const hasProbeInput =
-    probeImages.length > 0 ||
-    (probeMode === "paste" ? Boolean(probeOut.trim()) : Boolean(manualState.trim()));
+    probeImages.length > 0 || Boolean(probeOut.trim());
 
   const isFreshCreate = freshTraceStage === "create" && curIdx === 0;
   const isFreshScope = freshTraceStage === "scope" && curIdx === 1;
@@ -8889,20 +8867,18 @@ function RehearsalSessionView({
                       className={`rh-echo-status-pill ${hasProbeInput ? "is-ready" : ""}`}
                     >
                       {hasProbeInput
-                        ? probeMode === "paste" && probeOut.trim()
+                        ? probeOut.trim()
                           ? bi(
-                              `已录入 ${probeOut.trim().split("\n").length} 行回显${probeImages.length > 0 ? ` · ${probeImages.length} 张截图` : ""}`,
-                              `${probeOut.trim().split("\n").length} lines entered${probeImages.length > 0 ? ` · ${probeImages.length} image(s)` : ""}`,
+                              `已录入 ${probeOut.trim().split("\n").length} 行内容${probeImages.length > 0 ? ` · ${probeImages.length} 张截图` : ""}`,
+                              `${probeOut.trim().split("\n").length} line(s) entered${probeImages.length > 0 ? ` · ${probeImages.length} image(s)` : ""}`,
                             )
-                          : probeImages.length > 0
-                            ? bi(
-                                `已添加 ${probeImages.length} 张终端截图`,
-                                `${probeImages.length} screenshot(s) added`,
-                              )
-                            : bi("已填写现状说明", "Status notes entered")
+                          : bi(
+                              `已添加 ${probeImages.length} 张终端截图`,
+                              `${probeImages.length} screenshot(s) added`,
+                            )
                         : bi(
-                            "当前核心操作 · 粘贴回显或终端截图",
-                            "Next step · Paste probe output or screenshots",
+                            "粘贴回显、截图或直接文字说明现状",
+                            "Paste output, screenshots, or describe status",
                           )}
                     </span>
                   </div>
@@ -8959,22 +8935,12 @@ function RehearsalSessionView({
                   }}
                 >
                   <div className="rh-probe-head">
-                    <Segmented<"paste" | "manual">
-                      size="sm"
-                      label={bi("录入现场状态方式", "Probe input mode")}
-                      value={probeMode}
-                      onChange={setProbeMode}
-                      options={[
-                        {
-                          value: "paste",
-                          label: bi("粘贴回显或截图", "Paste Output / Images"),
-                        },
-                        {
-                          value: "manual",
-                          label: bi("手动说明现状", "Describe Manually"),
-                        },
-                      ]}
-                    />
+                    <span className="rh-probe-head-title">
+                      {bi(
+                        "现场回显 / 状态说明",
+                        "Live Output / Status Notes",
+                      )}
+                    </span>
                     <div className="rh-probe-upload-btns">
                       <input
                         ref={probeImgInputRef}
@@ -9009,38 +8975,30 @@ function RehearsalSessionView({
                         <IconImage />
                         <span>{bi("上传回显截图", "Upload Image")}</span>
                       </button>
-                      {probeMode === "paste" && (
-                        <Upload
-                          accept=".log,.txt,.out,.json"
-                          showUploadList={false}
+                      <Upload
+                        accept=".log,.txt,.out,.json"
+                        showUploadList={false}
+                        disabled={probeBusy}
+                        beforeUpload={(file) => {
+                          void attachProbeFiles([file]);
+                          return false;
+                        }}
+                      >
+                        <button
+                          type="button"
+                          className="rh-attach-btn is-sm"
                           disabled={probeBusy}
-                          beforeUpload={(file) => {
-                            void attachProbeFiles([file]);
-                            return false;
-                          }}
                         >
-                          <button
-                            type="button"
-                            className="rh-attach-btn is-sm"
-                            disabled={probeBusy}
-                          >
-                            <IconUpload />
-                            <span>{bi("上传 .log / .txt", "Upload .log / .txt")}</span>
-                          </button>
-                        </Upload>
-                      )}
-                      {(probeMode === "paste"
-                        ? Boolean(probeOut.trim())
-                        : Boolean(manualState.trim())) && (
+                          <IconUpload />
+                          <span>{bi("上传 .log / .txt", "Upload .log / .txt")}</span>
+                        </button>
+                      </Upload>
+                      {Boolean(probeOut.trim()) && (
                         <button
                           type="button"
                           className="rh-inline-cancel"
                           disabled={probeBusy}
-                          onClick={() =>
-                            probeMode === "paste"
-                              ? setProbeOut("")
-                              : setManualState("")
-                          }
+                          onClick={() => setProbeOut("")}
                         >
                           {bi("清空文本", "Clear")}
                         </button>
@@ -9048,32 +9006,18 @@ function RehearsalSessionView({
                     </div>
                   </div>
 
-                  {probeMode === "paste" ? (
-                    <Input.TextArea
-                      value={probeOut}
-                      disabled={probeBusy}
-                      onChange={setProbeOut}
-                      autoSize={{ minRows: 9, maxRows: 20 }}
-                      className="mono rh-echo-area"
-                      placeholder={bi(
-                        "将生产节点执行采集脚本后的终端回显粘贴至此（多台节点输出可直接合并粘贴），或直接按 Ctrl+V 粘贴堡垒机/终端截图…",
-                        "Paste terminal output from running the probe script on production nodes (you can combine multiple nodes), or press Ctrl+V to paste screenshots…",
-                      )}
-                      aria-label={bi("探针回显输出", "Probe terminal output")}
-                    />
-                  ) : (
-                    <Input.TextArea
-                      value={manualState}
-                      disabled={probeBusy}
-                      onChange={setManualState}
-                      autoSize={{ minRows: 8, maxRows: 16 }}
-                      placeholder={bi(
-                        "简述生产集群当前真实拓扑、版本号与配置现状（也可配合 Ctrl+V 粘贴监控或终端截图），例如：目前 node-2 为主节点，node-1 / node-3 为从节点；当前版本 7.2.4…",
-                        "Describe current live topology, version, and active config (you can also Ctrl+V screenshots), e.g., node-2 is primary, node-1 / node-3 are replicas; version 7.2.4…",
-                      )}
-                      aria-label={bi("手动说明生产现状", "Manual production state description")}
-                    />
-                  )}
+                  <Input.TextArea
+                    value={probeOut}
+                    disabled={probeBusy}
+                    onChange={setProbeOut}
+                    autoSize={{ minRows: 9, maxRows: 20 }}
+                    className="mono rh-echo-area"
+                    placeholder={bi(
+                      "粘贴采集脚本终端回显、按 Ctrl+V 粘贴堡垒机/终端截图，或直接打字说明生产当前主从角色、版本与配置现状…",
+                      "Paste probe terminal output, Ctrl+V screenshots, or directly describe current primary/replica roles, version, and active config…",
+                    )}
+                    aria-label={bi("现场回显或状态说明", "Probe output or status notes")}
+                  />
 
                   {probeImages.length > 0 && (
                     <div className="rh-compose-imgs">

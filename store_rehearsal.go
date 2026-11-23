@@ -2262,7 +2262,7 @@ const rehearsalPlanSystem = `你是资深中间件变更实施专家。现在你
 
 【第 0 步：硬性采集有效性门禁（必须最先核验，绝不可跳过）】
 先严格判断工程师提交的内容是否真正包含有效的生产现场状态证据：
-- 如果文本或截图显示**采集脚本执行报错提前退出**（例如 sh 执行 bash 脚本报 Illegal option -o pipefail、语法错误、命令不存在、权限拒绝、只写了“报错了”等），或者**未获取到核心节点角色/服务状态/关键参数的任何有效输出**（且并非工程师在「手动说明现状」中明确给出了完整拓扑与现状）：
+- 如果文本或截图显示**采集脚本执行报错提前退出**（例如 sh 执行 bash 脚本报 Illegal option -o pipefail、语法错误、命令不存在、权限拒绝、只写了“报错了”等），或者**未获取到核心节点角色/服务状态/关键参数的任何有效输出**（且并非工程师直接文字说明了明确的节点主从角色、版本与现状）：
   - **必须阻断！严禁编造全是“未知”的漂移表，严禁强行编排测试演练步骤！**
   - 请将 "probe_status" 设为 "failed"（报错中断）或 "incomplete"（仅采集到残缺信息，不足以判断主从/关键状态），并在 "probe_issue" 中明确给出：
     1. summary：一句话说明为什么阻断（未拿到有效现场结果）
@@ -2424,7 +2424,7 @@ func (s *storeServer) submitRehearsalProbe(w http.ResponseWriter, r *http.Reques
 		if diagnoseOnly {
 			fmt.Fprintf(&prompt, "\n【探针执行报错输出（已脱敏）】\n%s\n", probeOut)
 		} else {
-			fmt.Fprintf(&prompt, "\n【生产现场只读探针回显（已脱敏）】\n%s\n", probeOut)
+			fmt.Fprintf(&prompt, "\n【生产现场探针回显或工程师现状说明（已脱敏）】\n%s\n", probeOut)
 		}
 	}
 	if manual != "" {

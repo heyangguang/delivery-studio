@@ -1742,6 +1742,19 @@ export type RehearsalConflictAlert = {
   summary: string;
 };
 
+export type RehearsalSourceRef = {
+  rollout_id: string;
+  is_origin?: boolean;
+  origin_cluster_id: string;
+  origin_rehearsal_id: string;
+  origin_title?: string;
+  import_mode?: "probe" | "steps" | string;
+  imported_at?: string;
+  imported_by?: string;
+  steps_remapped?: boolean;
+  strict_precheck?: boolean;
+};
+
 export type ChangeRehearsal = {
   id: string;
   cluster_id: string;
@@ -1786,6 +1799,7 @@ export type ChangeRehearsal = {
   void_reason?: string;
   superseded_by?: string;
   superseded_title?: string;
+  source?: RehearsalSourceRef;
   created_at: string;
   updated_at: string;
 };

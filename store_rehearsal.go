@@ -268,6 +268,7 @@ type changeRehearsal struct {
 	VoidReason        string                      `json:"void_reason,omitempty"`
 	SupersededBy      string                      `json:"superseded_by,omitempty"`
 	SupersededTitle   string                      `json:"superseded_title,omitempty"`
+	Source            *rehearsalSourceRef         `json:"source,omitempty"`
 	CreatedAt         string                      `json:"created_at"`
 	UpdatedAt         string                      `json:"updated_at"`
 }
@@ -1503,6 +1504,14 @@ func (s *storeServer) handleRehearsals(w http.ResponseWriter, r *http.Request, s
 		s.voidRehearsal(w, r, session, f, parts[0])
 		return
 	}
+	if len(parts) == 2 && parts[1] == "propagate-targets" && r.Method == "GET" && reRehearsalID.MatchString(parts[0]) {
+		s.handlePropagateTargets(w, r, session, f, parts[0])
+		return
+	}
+	if len(parts) == 2 && parts[1] == "propagate" && r.Method == "POST" && reRehearsalID.MatchString(parts[0]) {
+		s.handlePropagateRehearsal(w, r, session, f, parts[0])
+		return
+	}
 	if !s.aiStatus().Enabled {
 		s.fail(w, 409, "平台 AI 功能当前未开启，无法使用变更演练工作台")
 		return
@@ -2405,6 +2414,9 @@ func (s *storeServer) submitRehearsalProbe(w http.ResponseWriter, r *http.Reques
 	if scPrompt := securityContextPrompt(rh.SecurityContext, "probe"); scPrompt != "" {
 		prompt.WriteString(scPrompt)
 	}
+	if bp := s.rehearsalSourceBlueprintPrompt(rh); bp != "" && !diagnoseOnly {
+		prompt.WriteString(bp)
+	}
 	if rh.ProbeScript != "" && (diagnoseOnly || len(probeOut) < 400 || len(imgNames) > 0) {
 		fmt.Fprintf(&prompt, "\n【当前只读探针脚本（前 4000 字符）】\n%s\n", truncRunes(rh.ProbeScript, 4000))
 	}
@@ -3072,6 +3084,23 @@ func (s *storeServer) patchRehearsalStep(w http.ResponseWriter, r *http.Request,
 		st.Note = truncRunes(strings.TrimSpace(*in.Note), 500)
 	}
 	if in.Status != nil {
+		if rh.Source != nil && rh.Source.StrictPrecheck && len(rh.Steps) > 0 && rh.Steps[0].Phase == "precheck" {
+			lang := reqLang(r)
+			if idx == 0 && *in.Status == "skipped" {
+				rehearsalMu.Unlock()
+				s.fail(w, 409, tr(lang,
+					"同架构快车道引入的严格前置预检不可跳过，请先执行并核验通过后再推进后续步骤",
+					"Strict precheck on a fast-track propagated rehearsal cannot be skipped; execute and verify it first"))
+				return
+			}
+			if idx > 0 && st.Phase != "rollback" && *in.Status == "passed" && rh.Steps[0].Status != "passed" {
+				rehearsalMu.Unlock()
+				s.fail(w, 409, tr(lang,
+					"请先执行并核验通过第 1 步「严格前置预检」，预检通过前不允许直接标记后续变更步骤为已通过",
+					"Complete and pass Step 1 (Strict Precheck) before marking subsequent forward steps as passed"))
+				return
+			}
+		}
 		st.Status = *in.Status
 		st.VerifiedByAI = false
 		if *in.Status == "passed" {

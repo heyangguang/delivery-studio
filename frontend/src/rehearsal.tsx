@@ -37,11 +37,19 @@ import {
   IconRefresh,
   IconRight,
   IconSearch,
+  IconShareExternal,
   IconShrink,
   IconUp,
   IconUpload,
 } from "@arco-design/web-react/icon";
 import { VexTriageEditor } from "./vextriage";
+import {
+  ImportTemplateBar,
+  PropagateRehearsalModal,
+  RolloutBoardDrawer,
+  RolloutProgressStrip,
+  type RolloutBoardResponse,
+} from "./rehearsal_rollout";
 import {
   ApiError,
   ago,
@@ -5745,6 +5753,21 @@ export function ClusterRehearsal({
                 <Smooth>
                   {!liveCreate && (
                     <div className="rh-launch-collapsible">
+                      <ImportTemplateBar
+                        cluster={c}
+                        onImported={(rid) => {
+                          creatingRef.current = false;
+                          setCreating(false);
+                          setLiveCreate(null);
+                          void loadList(false);
+                          go({
+                            name: "deliveries",
+                            id: c.id,
+                            tab: "rehearsal",
+                            rehearsal: rid,
+                          });
+                        }}
+                      />
                       <RehearsalPipelineArt />
                       <div
                         className="rh-preset-grid rh-presets"
@@ -7779,6 +7802,10 @@ function RehearsalSessionView({
   const [freshTraceStage, setFreshTraceStage] = useState<string>(
     autoExpandCreateTrace ? "create" : "",
   );
+  const [stripPropagateOpen, setStripPropagateOpen] = useState(false);
+  const [stripRolloutOpen, setStripRolloutOpen] = useState(false);
+  const [rolloutBoardOverride, setRolloutBoardOverride] =
+    useState<RolloutBoardResponse | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   // Stage bar spring indicator
@@ -7831,6 +7858,9 @@ function RehearsalSessionView({
 
   useEffect(() => {
     setGoalOpen(false);
+    setRolloutBoardOverride(null);
+    setStripPropagateOpen(false);
+    setStripRolloutOpen(false);
   }, [id]);
 
   const switchStage = (
@@ -8469,6 +8499,19 @@ function RehearsalSessionView({
           />
         )}
       </header>
+
+      {r.source?.rollout_id && (
+        <RolloutProgressStrip
+          rehearsal={r}
+          currentClusterId={c.id}
+          boardOverride={rolloutBoardOverride}
+          onOpenPropagate={
+            r.stage === "finalized" && r.applied && !r.voided
+              ? () => setStripPropagateOpen(true)
+              : undefined
+          }
+        />
+      )}
 
       {r.security_context && (
         <RehearsalSecurityBanner
@@ -9678,6 +9721,29 @@ function RehearsalSessionView({
                 );
               })()}
 
+            {r.source?.strict_precheck &&
+              steps[0]?.phase === "precheck" &&
+              steps[0]?.status !== "passed" &&
+              phaseFilter !== "rollback" && (
+                <div className="ro-strict-gate" role="alert">
+                  <IconExclamationCircle className="ro-strict-gate-ic" />
+                  <div className="ro-strict-gate-body">
+                    <b>
+                      {bi(
+                        "严格前置预检门禁（强制阻断 · 不可跳过）",
+                        "Strict Precheck Hard Gate (Mandatory · Non-Skippable)",
+                      )}
+                    </b>
+                    <p>
+                      {bi(
+                        `本方案由样板集群 ${r.source.origin_cluster_id} 按同架构快车道引入（跳过了独立探针）。请先在目标集群执行第 1 步并核验通过（确认节点 IP、软件实测版本、主从健康、无全局 Pending restart / 阻塞长事务、目标参数现值无冲突且磁盘充足）；预检通过前，系统会阻断直接跳过第 1 步或提前推进后续步骤。`,
+                        `Fast-track imported from pilot ${r.source.origin_cluster_id} without standalone probe. Run and verify Step 1 first (node identity, exact versions, healthy topology, zero global pending_restart / blocking long tx, clean target parameters, disk headroom). Skipping Step 1 or passing later steps is blocked until Step 1 passes.`,
+                      )}
+                    </p>
+                  </div>
+                </div>
+              )}
+
             {phaseFilter === "rollback" && rollbackSteps.length > 0 && (
               <div className="rh-rollback-banner" role="note">
                 <IconExclamationCircle />
@@ -10027,6 +10093,7 @@ function RehearsalSessionView({
               rehearsal={r}
               peers={peers}
               offline={offline}
+              onRolloutBoardChange={(b) => setRolloutBoardOverride(b)}
               onUpdated={(next) => {
                 setR(next);
                 putCached(rehearsalItemPath(c.id, next.id), next);
@@ -10037,6 +10104,47 @@ function RehearsalSessionView({
           </section>
         )}
       </div>
+
+      {r.stage === "finalized" && r.applied && !r.voided && (
+        <PropagateRehearsalModal
+          clusterId={c.id}
+          rehearsal={r}
+          visible={stripPropagateOpen}
+          onClose={() => setStripPropagateOpen(false)}
+          onPropagated={(res) => {
+            if (res.board) setRolloutBoardOverride(res.board);
+            setStripRolloutOpen(true);
+            void api<ChangeRehearsal>(rehearsalItemPath(c.id, r.id))
+              .then((fresh) => {
+                setR(fresh);
+                putCached(rehearsalItemPath(c.id, fresh.id), fresh);
+                void onListChanged();
+                onClusterChanged?.();
+              })
+              .catch(() => undefined);
+          }}
+        />
+      )}
+
+      {(rolloutBoardOverride?.rollout_id || r.source?.rollout_id) && (
+        <RolloutBoardDrawer
+          rolloutId={
+            rolloutBoardOverride?.rollout_id || r.source?.rollout_id || ""
+          }
+          visible={stripRolloutOpen}
+          currentClusterId={c.id}
+          initialBoard={rolloutBoardOverride}
+          onClose={() => setStripRolloutOpen(false)}
+          onAddMore={
+            r.stage === "finalized" && r.applied && !r.voided
+              ? () => {
+                  setStripRolloutOpen(false);
+                  setStripPropagateOpen(true);
+                }
+              : undefined
+          }
+        />
+      )}
     </div>
   );
 }
@@ -11757,6 +11865,7 @@ export function RehearsalProductionApplyCard({
   offline = false,
   compact = false,
   onUpdated,
+  onRolloutBoardChange,
 }: {
   clusterId: string;
   rehearsal: ChangeRehearsal;
@@ -11764,6 +11873,7 @@ export function RehearsalProductionApplyCard({
   offline?: boolean;
   compact?: boolean;
   onUpdated?: (next: ChangeRehearsal) => void;
+  onRolloutBoardChange?: (board: RolloutBoardResponse) => void;
 }) {
   useLang();
   const dock = useAIDock();
@@ -11774,6 +11884,16 @@ export function RehearsalProductionApplyCard({
 
   const [modalOpen, setModalOpen] = useState(false);
   const [voidOpen, setVoidOpen] = useState(false);
+  const [propagateOpen, setPropagateOpen] = useState(false);
+  const [rolloutBoardOpen, setRolloutBoardOpen] = useState(false);
+  const [rolloutBoardData, setRolloutBoardData] =
+    useState<RolloutBoardResponse | null>(null);
+
+  useEffect(() => {
+    setPropagateOpen(false);
+    setRolloutBoardOpen(false);
+    setRolloutBoardData(null);
+  }, [clusterId, rehearsal.id]);
   const [busy, setBusy] = useState(false);
   const [summary, setSummary] = useState("");
   const [note, setNote] = useState("");
@@ -12318,6 +12438,29 @@ export function RehearsalProductionApplyCard({
               </Button>
             ) : isApplied ? (
               <>
+                {rehearsal.stage === "finalized" && (
+                  <Button
+                    size="small"
+                    type="primary"
+                    icon={<IconShareExternal />}
+                    disabled={offline || busy}
+                    onClick={() => setPropagateOpen(true)}
+                  >
+                    {bi("推广到其他集群", "Propagate")}
+                  </Button>
+                )}
+                {rehearsal.source?.rollout_id && (
+                  <Button
+                    size="small"
+                    disabled={offline || busy}
+                    onClick={() => {
+                      setRolloutBoardData(null);
+                      setRolloutBoardOpen(true);
+                    }}
+                  >
+                    {bi("推广看板", "Rollout Board")}
+                  </Button>
+                )}
                 <Button
                   size="small"
                   icon={<IconEdit />}
@@ -12835,6 +12978,48 @@ export function RehearsalProductionApplyCard({
           )}
         </div>
       </Modal>
+
+      {rehearsal.stage === "finalized" && isApplied && !isVoided && (
+        <PropagateRehearsalModal
+          clusterId={clusterId}
+          rehearsal={rehearsal}
+          visible={propagateOpen}
+          onClose={() => setPropagateOpen(false)}
+          onPropagated={(res) => {
+            if (res.board) {
+              setRolloutBoardData(res.board);
+              onRolloutBoardChange?.(res.board);
+            }
+            setRolloutBoardOpen(true);
+            void api<ChangeRehearsal>(rehearsalItemPath(clusterId, rehearsal.id))
+              .then((fresh) => {
+                putCached(rehearsalItemPath(clusterId, fresh.id), fresh);
+                onUpdated?.(fresh);
+              })
+              .catch(() => undefined);
+          }}
+        />
+      )}
+
+      {(rolloutBoardData?.rollout_id || rehearsal.source?.rollout_id) && (
+        <RolloutBoardDrawer
+          rolloutId={
+            rolloutBoardData?.rollout_id || rehearsal.source?.rollout_id || ""
+          }
+          visible={rolloutBoardOpen}
+          currentClusterId={clusterId}
+          initialBoard={rolloutBoardData}
+          onClose={() => setRolloutBoardOpen(false)}
+          onAddMore={
+            rehearsal.stage === "finalized" && isApplied && !isVoided
+              ? () => {
+                  setRolloutBoardOpen(false);
+                  setPropagateOpen(true);
+                }
+              : undefined
+          }
+        />
+      )}
     </>
   );
 }

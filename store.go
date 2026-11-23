@@ -701,6 +701,8 @@ func (s *storeServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.clusters(w, r, session)
 	case strings.HasPrefix(r.URL.Path, "/api/clusters/"):
 		s.handleCluster(w, r, session)
+	case strings.HasPrefix(r.URL.Path, "/api/rehearsals/"):
+		s.handleGlobalRehearsals(w, r, session)
 	case r.URL.Path == "/api/resolve" && r.Method == "POST":
 		s.resolve(w, r, session)
 	case r.URL.Path == "/api/spec/import" && r.Method == "POST":

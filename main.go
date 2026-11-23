@@ -2,20 +2,58 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"middleware-deployer/mwpack"
 	"middleware-deployer/pkglib"
 )
 
 const (
-	version            = "1.0.258-dev"
-	currentReleaseDate = "2026-11-18"
+	version            = "1.0.259-dev"
+	currentReleaseDate = "2026-11-24"
 )
+
+// buildID can be injected at compile time via `-ldflags "-X main.buildID=..."`.
+// When unset, currentBuildID hashes the running executable once at startup so
+// every freshly compiled binary gets a deterministic fingerprint for hot-reload.
+var (
+	buildID          = ""
+	resolvedBuildID  string
+	buildIDResolveMu sync.Once
+)
+
+func currentBuildID() string {
+	buildIDResolveMu.Do(func() {
+		if s := strings.TrimSpace(buildID); s != "" {
+			resolvedBuildID = s
+			return
+		}
+		h := sha256.New()
+		if exe, err := os.Executable(); err == nil {
+			if f, err := os.Open(exe); err == nil {
+				_, _ = io.Copy(h, f)
+				_ = f.Close()
+				resolvedBuildID = hex.EncodeToString(h.Sum(nil))[:12]
+				return
+			}
+		}
+		if idx, err := storeAssets.ReadFile("store_assets/index.html"); err == nil {
+			h.Write(idx)
+		}
+		h.Write([]byte(version + "|" + currentReleaseDate))
+		resolvedBuildID = hex.EncodeToString(h.Sum(nil))[:12]
+	})
+	return resolvedBuildID
+}
 
 type releaseNote struct {
 	Version      string   `json:"version"`
@@ -27,6 +65,24 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.259-dev",
+		Date:    "2026-11-24",
+		Title:   "安全合规中心、演练生产闭环与原位配置归并、跨平台零中断热更新",
+		TitleEn: "Security Compliance Center, Rehearsal Production Closure & Inline Config Merge, Cross-Platform Hot Reload",
+		Highlights: []string{
+			"安全中心与 CVE 漏洞治理：新增离线安全源同步、组件与集群 CVE 扫描、VEX 处置台账、Word/Excel 合规报告导出及 AI 安全审计助手。",
+			"变更演练生产闭环与配置原位归并：支持已定稿演练确认生产落地、作废与替代防误点保护、冲突校验、回退默认跳过，以及「配置」页原位旧值划线对比与变更历史抽屉、「概览」页紧凑台账；同步统一只读探针首行节点与实测版本采集契约。",
+			"跨平台零中断热重启与自动化发版：升级 store supervise 网关与内置 store reload 命令全面支持 Windows 与 Linux 零断连热切、编译指纹 build_id 精准识别与前端无感热更新提示，并配套一键热更新与发版脚本。",
+			"执行监控、组件工作台与体验打磨：新增全局执行监控、单步热修与交付包导出、放行 Patroni 等伴随组件自定义数据库参数校验，修复弹窗顶栏跳动与演练下拉吸顶漂移。",
+		},
+		HighlightsEn: []string{
+			"Security Center & CVE Governance: Added offline advisory sync, component and cluster CVE scanning, VEX triage ledger, Word/Excel compliance exports, and AI security assistant.",
+			"Rehearsal Production Closure & Inline Config Diff: Added production apply/void/supersede guardrails, conflict detection, rollback auto-skip, inline strikethrough parameter diffs and history drawer in Cluster Config, compact overview ledger, and unified live host/version probe headers.",
+			"Cross-Platform Zero-Downtime Hot Reload & Release Tooling: Upgraded store supervise and added store reload for Windows and Linux with build_id fingerprinting, zero-drop reloads, frontend hot-reload notice, and dev-reload/release scripts.",
+			"Execution Monitor, Component Workbench & UI Polish: Added execution monitoring, step hotfix, delivery bundles, relaxed companion custom database parameter validation, and fixed sticky topbar jump and dropdown scroll anchoring.",
+		},
+	},
 	{
 		Version: "1.0.258-dev",
 		Date:    "2026-11-18",
@@ -252,6 +308,9 @@ func usage() {
 	fmt.Fprint(os.Stderr, `Middleware Hub — 中间件交付平台
 
   middleware-hub store serve --config 配置.json          启动共享服务
+  middleware-hub store supervise --config 配置.json      以零中断热重启网关模式启动服务（Windows / Linux 通用）
+  middleware-hub store reload --config 配置.json [--binary 新程序]
+                                                         零中断热切换到新版程序（活跃任务完成后无缝切换，失败自动回滚）
   middleware-hub execution-node --config 节点配置.json   启动控制节点执行器，领取已授权步骤
   middleware-hub store user-add --data 目录 --username 名 --role admin|operator --password-stdin
   middleware-hub catalog check [--components 目录]       校验组件清单（含内置组件）
@@ -265,7 +324,11 @@ func usage() {
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
-		fmt.Fprintln(os.Stderr, "停止：", err)
+		if len(os.Args) > 1 && (os.Args[1] == "execution-node" || os.Args[1] == "target-agent") {
+			logAgent("ERROR", "%v", err)
+		} else {
+			fmt.Fprintln(os.Stderr, "停止：", err)
+		}
 		os.Exit(1)
 	}
 }
@@ -291,6 +354,20 @@ func run(args []string) error {
 	case "sandbox-child":
 		return sandboxCommand(args[1:])
 	case "version":
+		if len(args) > 1 {
+			switch args[1] {
+			case "--json":
+				enc := json.NewEncoder(os.Stdout)
+				return enc.Encode(map[string]string{
+					"version":     version,
+					"build_id":    currentBuildID(),
+					"released_at": currentReleaseDate,
+				})
+			case "--build-id":
+				fmt.Println(currentBuildID())
+				return nil
+			}
+		}
 		fmt.Println(version)
 		return nil
 	}

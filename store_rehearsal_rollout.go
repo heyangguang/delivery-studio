@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -69,35 +71,58 @@ type propagateTargetItem struct {
 	ExistingVoided       bool     `json:"existing_voided,omitempty"`
 }
 
+type rehearsalTemplateVariant struct {
+	ClusterID            string `json:"cluster_id"`
+	RehearsalID          string `json:"rehearsal_id"`
+	RolloutID            string `json:"rollout_id,omitempty"`
+	Title                string `json:"title"`
+	Version              string `json:"version,omitempty"`
+	SchemeName           string `json:"scheme_name,omitempty"`
+	Hosts                int    `json:"hosts,omitempty"`
+	AppliedAt            string `json:"applied_at,omitempty"`
+	AppliedBy            string `json:"applied_by,omitempty"`
+	MatchTier            string `json:"match_tier,omitempty"`
+	AllowSkipProbe       bool   `json:"allow_skip_probe"`
+	SkipProbeBlockReason string `json:"skip_probe_block_reason,omitempty"`
+	IsOrigin             bool   `json:"is_origin,omitempty"`
+	StepsCount           int    `json:"steps_count"`
+}
+
 type rehearsalTemplateItem struct {
-	OriginClusterID      string                   `json:"origin_cluster_id"`
-	OriginRehearsalID    string                   `json:"origin_rehearsal_id"`
-	RolloutID            string                   `json:"rollout_id,omitempty"`
-	Title                string                   `json:"title"`
-	Goal                 string                   `json:"goal"`
-	Mode                 string                   `json:"mode"`
-	AppID                string                   `json:"app_id"`
-	AppName              string                   `json:"app_name"`
-	Version              string                   `json:"version"`
-	SchemeID             string                   `json:"scheme_id,omitempty"`
-	SchemeName           string                   `json:"scheme_name,omitempty"`
-	Hosts                int                      `json:"hosts"`
-	AppliedAt            string                   `json:"applied_at,omitempty"`
-	AppliedBy            string                   `json:"applied_by,omitempty"`
-	AppliedSummary       string                   `json:"applied_summary,omitempty"`
-	AppliedChanges       []rehearsalAppliedChange `json:"applied_changes,omitempty"`
-	StepsCount           int                      `json:"steps_count"`
-	RolloutTotal         int                      `json:"rollout_total,omitempty"`
-	RolloutApplied       int                      `json:"rollout_applied,omitempty"`
-	MatchTier            string                   `json:"match_tier,omitempty"`
-	MatchReason          string                   `json:"match_reason,omitempty"`
-	AllowSkipProbe       bool                     `json:"allow_skip_probe"`
-	SkipProbeBlockReason string                   `json:"skip_probe_block_reason,omitempty"`
-	AlreadyImported      bool                     `json:"already_imported"`
-	AlreadyEffective     bool                     `json:"already_effective"`
-	ConflictKeys         []string                 `json:"conflict_keys,omitempty"`
-	ConflictSummary      string                   `json:"conflict_summary,omitempty"`
-	ExistingRehearsalID  string                   `json:"existing_rehearsal_id,omitempty"`
+	OriginClusterID      string                     `json:"origin_cluster_id"`
+	OriginRehearsalID    string                     `json:"origin_rehearsal_id"`
+	RolloutID            string                     `json:"rollout_id,omitempty"`
+	Title                string                     `json:"title"`
+	Goal                 string                     `json:"goal"`
+	Mode                 string                     `json:"mode"`
+	Category             string                     `json:"category,omitempty"`
+	CategoryLabel        string                     `json:"category_label,omitempty"`
+	ContentSignature     string                     `json:"content_signature,omitempty"`
+	AppID                string                     `json:"app_id"`
+	AppName              string                     `json:"app_name"`
+	Version              string                     `json:"version"`
+	SchemeID             string                     `json:"scheme_id,omitempty"`
+	SchemeName           string                     `json:"scheme_name,omitempty"`
+	Hosts                int                        `json:"hosts"`
+	AppliedAt            string                     `json:"applied_at,omitempty"`
+	AppliedBy            string                     `json:"applied_by,omitempty"`
+	AppliedSummary       string                     `json:"applied_summary,omitempty"`
+	AppliedChanges       []rehearsalAppliedChange   `json:"applied_changes,omitempty"`
+	StepsCount           int                        `json:"steps_count"`
+	RolloutTotal         int                        `json:"rollout_total,omitempty"`
+	RolloutApplied       int                        `json:"rollout_applied,omitempty"`
+	VerifiedClusters     []string                   `json:"verified_clusters,omitempty"`
+	MergedCount          int                        `json:"merged_count,omitempty"`
+	Variants             []rehearsalTemplateVariant `json:"variants,omitempty"`
+	MatchTier            string                     `json:"match_tier,omitempty"`
+	MatchReason          string                     `json:"match_reason,omitempty"`
+	AllowSkipProbe       bool                       `json:"allow_skip_probe"`
+	SkipProbeBlockReason string                     `json:"skip_probe_block_reason,omitempty"`
+	AlreadyImported      bool                       `json:"already_imported"`
+	AlreadyEffective     bool                       `json:"already_effective"`
+	ConflictKeys         []string                   `json:"conflict_keys,omitempty"`
+	ConflictSummary      string                     `json:"conflict_summary,omitempty"`
+	ExistingRehearsalID  string                     `json:"existing_rehearsal_id,omitempty"`
 }
 
 type rolloutBoardMember struct {
@@ -255,6 +280,142 @@ func rehearsalTouchedKeys(r changeRehearsal) []string {
 	return out
 }
 
+// normalizeChangeValue canonicalizes parameter/config values for content equivalence checks
+// across independent clusters (trimming quotes/whitespace, lowercasing, and scrubbing cluster IDs).
+func normalizeChangeValue(val, clusterID string) string {
+	s := strings.TrimSpace(val)
+	if s == "" {
+		return ""
+	}
+	if len(s) >= 2 && ((s[0] == '\'' && s[len(s)-1] == '\'') || (s[0] == '"' && s[len(s)-1] == '"')) {
+		s = strings.TrimSpace(s[1 : len(s)-1])
+	}
+	s = strings.ToLower(s)
+	if cid := strings.ToLower(strings.TrimSpace(clusterID)); cid != "" {
+		s = strings.ReplaceAll(s, cid, "<cluster>")
+	}
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// rehearsalContentSignature produces a deterministic content fingerprint from normalized
+// effective key=value deltas so identical production changes executed independently across
+// different clusters (even with differently phrased AI titles) consolidate into one template.
+func rehearsalContentSignature(r changeRehearsal, changes []rehearsalAppliedChange) string {
+	if len(changes) == 0 {
+		return ""
+	}
+	kv := map[string]string{}
+	for _, ch := range changes {
+		k := strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(ch.Key)), " "))
+		if k == "" {
+			continue
+		}
+		v := normalizeChangeValue(ch.After, r.ClusterID)
+		if v == "" {
+			continue
+		}
+		kv[k] = v
+	}
+	if len(kv) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(kv))
+	for k := range kv {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	b.WriteString(strings.ToLower(strings.TrimSpace(r.AppID)))
+	b.WriteByte('\n')
+	for _, k := range keys {
+		b.WriteString(k)
+		b.WriteByte('=')
+		b.WriteString(kv[k])
+		b.WriteByte('\n')
+	}
+	sum := sha256.Sum256([]byte(b.String()))
+	return "sig-" + hex.EncodeToString(sum[:8])
+}
+
+func rehearsalCategoryLabel(cat, lang string) string {
+	switch cat {
+	case "logging":
+		return tr(lang, "日志与审计", "Logging & Audit")
+	case "security":
+		return tr(lang, "安全与认证", "Security & Auth")
+	case "backup":
+		return tr(lang, "备份与恢复", "Backup & Recovery")
+	case "upgrade":
+		return tr(lang, "升级与扩容", "Upgrade & Scaling")
+	case "ha":
+		return tr(lang, "高可用与切换", "HA & Failover")
+	case "params":
+		return tr(lang, "参数调优", "Parameter Tuning")
+	default:
+		return tr(lang, "日常运维", "Operations")
+	}
+}
+
+func containsAnySubstr(hay string, needles ...string) bool {
+	for _, n := range needles {
+		if n != "" && strings.Contains(hay, n) {
+			return true
+		}
+	}
+	return false
+}
+
+// classifyRehearsalCategory assigns a consistent semantic category from modified keys first,
+// then title/goal/summary keywords so users can filter templates cleanly across all middleware.
+func classifyRehearsalCategory(r changeRehearsal, changes []rehearsalAppliedChange) string {
+	if r.SecurityContext != nil {
+		return "security"
+	}
+	var keyBuf strings.Builder
+	for _, ch := range changes {
+		keyBuf.WriteString(strings.ToLower(strings.TrimSpace(ch.Key)))
+		keyBuf.WriteByte(' ')
+		keyBuf.WriteString(strings.ToLower(strings.TrimSpace(ch.After)))
+		keyBuf.WriteByte(' ')
+	}
+	keysHay := keyBuf.String()
+	textHay := strings.ToLower(strings.Join([]string{r.Title, r.Goal, r.AppliedSummary}, " "))
+
+	// 1. Check exact modified keys/values first (highest precision).
+	if keysHay != "" {
+		if containsAnySubstr(keysHay, "pg_hba", "hba", "ssl", "tls", "cert", "password", "requirepass", "acl", "scram", "md5", "auth", "cipher") {
+			return "security"
+		}
+		if containsAnySubstr(keysHay, "logging_collector", "log_directory", "log_filename", "log_rotation", "log_min_", "log_statement", "slowlog", "audit", "syslog", "access_log", "error_log") {
+			return "logging"
+		}
+		if containsAnySubstr(keysHay, "pgbackrest", "repo1", "archive_mode", "archive_command", "restore_command", "backup", "appendonly", "save ", "rdb", "aof") {
+			return "backup"
+		}
+	}
+
+	// 2. Fall back to title/goal/summary intent classification.
+	if containsAnySubstr(textHay, "pg_hba", "cve", "漏洞", "tls", "ssl", "证书", "密码", "认证", "鉴权", "白名单", "防火墙", "权限", "安全修复", "security", "auth", "firewall") {
+		return "security"
+	}
+	if containsAnySubstr(textHay, "日志", "轮转", "落盘", "慢查询日志", "审计", "log_directory", "logging", "slowlog", "audit") {
+		return "logging"
+	}
+	if containsAnySubstr(textHay, "备份", "归档", "恢复", "快照", "pgbackrest", "wal", "backup", "restore", "archive", "snapshot", "repo1") {
+		return "backup"
+	}
+	if containsAnySubstr(textHay, "升级", "扩容", "缩容", "迁移", "扩盘", "版本", "upgrade", "scale", "expand", "migrate", "patch") {
+		return "upgrade"
+	}
+	if containsAnySubstr(textHay, "切主", "主从", "故障切换", "哨兵", "高可用", "脑裂", "quorum", "switchover", "failover", "sentinel", "keepalived", "vip", "haproxy", "patroni") {
+		return "ha"
+	}
+	if len(changes) > 0 {
+		return "params"
+	}
+	return "ops"
+}
+
 func (s *storeServer) evaluatePropagateTarget(
 	originFacts clusterFacts,
 	origin changeRehearsal,
@@ -329,7 +490,7 @@ func (s *storeServer) evaluatePropagateTarget(
 	originKeyMap := map[string]string{}
 	for _, ch := range originChanges {
 		if k := strings.TrimSpace(ch.Key); k != "" {
-			originKeyMap[strings.ToLower(k)] = strings.TrimSpace(ch.After)
+			originKeyMap[strings.ToLower(k)] = normalizeChangeValue(ch.After, origin.ClusterID)
 		}
 	}
 	if len(originKeyMap) > 0 {
@@ -342,11 +503,16 @@ func (s *storeServer) evaluatePropagateTarget(
 		}
 		allMatched := len(originKeyMap) > 0
 		conflictSet := map[string]string{}
+		matchedSourceID := ""
+		matchedSourceAt := ""
 		for lk, wantAfter := range originKeyMap {
 			if ef, has := effMap[lk]; has {
-				if !strings.EqualFold(strings.TrimSpace(ef.After), wantAfter) {
+				if normalizeChangeValue(ef.After, targetFacts.ID) != wantAfter {
 					allMatched = false
 					conflictSet[lk] = ef.Key
+				} else if ef.SourceID != "" && (matchedSourceID == "" || ef.AppliedAt > matchedSourceAt) {
+					matchedSourceID = ef.SourceID
+					matchedSourceAt = ef.AppliedAt
 				}
 			} else {
 				allMatched = false
@@ -354,6 +520,11 @@ func (s *storeServer) evaluatePropagateTarget(
 		}
 		if allMatched && !item.AlreadyImported {
 			item.AlreadyEffective = true
+			if item.ExistingRehearsalID == "" && matchedSourceID != "" {
+				item.ExistingRehearsalID = matchedSourceID
+				item.ExistingStage = "finalized"
+				item.ExistingApplied = true
+			}
 		}
 		// Also check pending finalized rehearsals on target cluster for overlapping keys.
 		for _, pending := range targetRehearsals {
@@ -1113,8 +1284,11 @@ func (s *storeServer) handleRehearsalTemplates(w http.ResponseWriter, r *http.Re
 		}
 	}
 
-	var out []rehearsalTemplateItem
-	seenRollout := map[string]bool{}
+	type tplCand struct {
+		item     rehearsalTemplateItem
+		isOrigin bool
+	}
+	var cands []tplCand
 	for _, cid := range allClusters {
 		if cid == targetClusterID {
 			continue
@@ -1132,23 +1306,18 @@ func (s *storeServer) handleRehearsalTemplates(w http.ResponseWriter, r *http.Re
 			if rh.Stage != "finalized" || !rh.Applied || rh.Voided {
 				continue
 			}
-			// If multiple clusters in the same rollout are already applied, show the origin pilot once (avoid duplicate templates).
-			if rh.Source != nil && rh.Source.RolloutID != "" {
-				if !rh.Source.IsOrigin {
-					continue
-				}
-				if seenRollout[rh.Source.RolloutID] {
-					continue
-				}
-				seenRollout[rh.Source.RolloutID] = true
-			}
 			changes := rehearsalAppliedOrExtractedChanges(rh)
+			cat := classifyRehearsalCategory(rh, changes)
+			sig := rehearsalContentSignature(rh, changes)
 			item := rehearsalTemplateItem{
 				OriginClusterID:   cid,
 				OriginRehearsalID: rh.ID,
 				Title:             rh.Title,
 				Goal:              truncRunes(rh.Goal, 240),
 				Mode:              firstNonEmptyStr(rh.Mode, "full"),
+				Category:          cat,
+				CategoryLabel:     rehearsalCategoryLabel(cat, lang),
+				ContentSignature:  sig,
 				AppID:             rh.AppID,
 				AppName:           rh.AppName,
 				Version:           oVer,
@@ -1161,8 +1330,10 @@ func (s *storeServer) handleRehearsalTemplates(w http.ResponseWriter, r *http.Re
 				AppliedChanges:    changes,
 				StepsCount:        len(rh.Steps),
 			}
+			isOrigin := false
 			if rh.Source != nil && rh.Source.RolloutID != "" {
 				item.RolloutID = rh.Source.RolloutID
+				isOrigin = rh.Source.IsOrigin
 				if st, has := rolloutStats[rh.Source.RolloutID]; has {
 					item.RolloutTotal = st[0]
 					item.RolloutApplied = st[1]
@@ -1180,23 +1351,139 @@ func (s *storeServer) handleRehearsalTemplates(w http.ResponseWriter, r *http.Re
 				item.ConflictSummary = eval.ConflictSummary
 				item.ExistingRehearsalID = eval.ExistingRehearsalID
 			}
-			out = append(out, item)
+			cands = append(cands, tplCand{item: item, isOrigin: isOrigin})
 		}
 	}
+
+	// Consolidate equivalent templates via Union-Find across BOTH explicit RolloutID lineage
+	// and deterministic ContentSignature (identical normalized parameter deltas across independent runs).
+	parent := make([]int, len(cands))
+	for i := range parent {
+		parent[i] = i
+	}
+	var find func(int) int
+	find = func(x int) int {
+		for parent[x] != x {
+			parent[x] = parent[parent[x]]
+			x = parent[x]
+		}
+		return x
+	}
+	union := func(a, b int) {
+		ra, rb := find(a), find(b)
+		if ra != rb {
+			parent[rb] = ra
+		}
+	}
+	byRollout := map[string]int{}
+	bySig := map[string]int{}
+	for i, c := range cands {
+		if rid := c.item.RolloutID; rid != "" {
+			if prev, has := byRollout[rid]; has {
+				union(prev, i)
+			} else {
+				byRollout[rid] = i
+			}
+		}
+		if sig := c.item.ContentSignature; sig != "" {
+			if prev, has := bySig[sig]; has {
+				union(prev, i)
+			} else {
+				bySig[sig] = i
+			}
+		}
+	}
+
+	groups := map[int][]tplCand{}
+	var groupOrder []int
+	for i, c := range cands {
+		root := find(i)
+		if _, has := groups[root]; !has {
+			groupOrder = append(groupOrder, root)
+		}
+		groups[root] = append(groups[root], c)
+	}
+
+	var out []rehearsalTemplateItem
+	for _, root := range groupOrder {
+		members := groups[root]
+		sort.Slice(members, func(i, j int) bool {
+			a, b := members[i], members[j]
+			if a.item.AlreadyImported != b.item.AlreadyImported {
+				return a.item.AlreadyImported
+			}
+			aExact := a.item.MatchTier == "exact"
+			bExact := b.item.MatchTier == "exact"
+			if aExact != bExact {
+				return aExact
+			}
+			if a.isOrigin != b.isOrigin {
+				return a.isOrigin
+			}
+			aHasRo := a.item.RolloutID != ""
+			bHasRo := b.item.RolloutID != ""
+			if aHasRo != bHasRo {
+				return aHasRo
+			}
+			if a.item.AppliedAt != b.item.AppliedAt {
+				return a.item.AppliedAt > b.item.AppliedAt
+			}
+			return a.item.OriginClusterID < b.item.OriginClusterID
+		})
+		primary := members[0].item
+		seenClusters := map[string]bool{}
+		var verifiedClusters []string
+		variants := make([]rehearsalTemplateVariant, 0, len(members))
+		for _, m := range members {
+			it := m.item
+			if !seenClusters[it.OriginClusterID] {
+				seenClusters[it.OriginClusterID] = true
+				verifiedClusters = append(verifiedClusters, it.OriginClusterID)
+			}
+			if it.AlreadyEffective && !primary.AlreadyImported && !primary.AlreadyEffective {
+				primary.AlreadyEffective = true
+				if primary.ExistingRehearsalID == "" && it.ExistingRehearsalID != "" {
+					primary.ExistingRehearsalID = it.ExistingRehearsalID
+				}
+			}
+			variants = append(variants, rehearsalTemplateVariant{
+				ClusterID:            it.OriginClusterID,
+				RehearsalID:          it.OriginRehearsalID,
+				RolloutID:            it.RolloutID,
+				Title:                it.Title,
+				Version:              it.Version,
+				SchemeName:           it.SchemeName,
+				Hosts:                it.Hosts,
+				AppliedAt:            it.AppliedAt,
+				AppliedBy:            it.AppliedBy,
+				MatchTier:            it.MatchTier,
+				AllowSkipProbe:       it.AllowSkipProbe,
+				SkipProbeBlockReason: it.SkipProbeBlockReason,
+				IsOrigin:             m.isOrigin,
+				StepsCount:           it.StepsCount,
+			})
+		}
+		primary.VerifiedClusters = verifiedClusters
+		primary.MergedCount = len(variants)
+		primary.Variants = variants
+		out = append(out, primary)
+	}
+
 	sort.Slice(out, func(i, j int) bool {
-		// Unimported exact matches first, then newest applied first.
-		ri := 0
-		if out[i].AlreadyImported {
-			ri = 2
-		} else if out[i].MatchTier == "compatible" {
-			ri = 1
+		// Unimported & not-yet-effective exact matches first, then compatible, then already effective, then already imported; newest first within each tier.
+		rank := func(it rehearsalTemplateItem) int {
+			if it.AlreadyImported {
+				return 3
+			}
+			if it.AlreadyEffective {
+				return 2
+			}
+			if it.MatchTier == "compatible" {
+				return 1
+			}
+			return 0
 		}
-		rj := 0
-		if out[j].AlreadyImported {
-			rj = 2
-		} else if out[j].MatchTier == "compatible" {
-			rj = 1
-		}
+		ri, rj := rank(out[i]), rank(out[j])
 		if ri != rj {
 			return ri < rj
 		}

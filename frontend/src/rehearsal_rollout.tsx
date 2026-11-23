@@ -6,17 +6,21 @@ import {
   Input,
   Message,
   Modal,
+  Select,
   Skeleton,
   Tooltip,
 } from "@arco-design/web-react";
 import {
+  IconBranch,
   IconCheck,
+  IconDown,
   IconExclamationCircle,
   IconImport,
   IconRefresh,
   IconRight,
   IconSearch,
   IconShareExternal,
+  IconUp,
 } from "@arco-design/web-react/icon";
 import { ago, api } from "./shared";
 import type {
@@ -74,6 +78,23 @@ export type PropagateTargetsResponse = {
   targets: PropagateTargetItem[];
 };
 
+export type RehearsalTemplateVariant = {
+  cluster_id: string;
+  rehearsal_id: string;
+  rollout_id?: string;
+  title: string;
+  version?: string;
+  scheme_name?: string;
+  hosts?: number;
+  applied_at?: string;
+  applied_by?: string;
+  match_tier?: "exact" | "compatible";
+  allow_skip_probe: boolean;
+  skip_probe_block_reason?: string;
+  is_origin?: boolean;
+  steps_count: number;
+};
+
 export type RehearsalTemplateItem = {
   origin_cluster_id: string;
   origin_rehearsal_id: string;
@@ -81,6 +102,9 @@ export type RehearsalTemplateItem = {
   title: string;
   goal: string;
   mode: string;
+  category?: string;
+  category_label?: string;
+  content_signature?: string;
   app_id: string;
   app_name: string;
   version: string;
@@ -94,6 +118,9 @@ export type RehearsalTemplateItem = {
   steps_count: number;
   rollout_total?: number;
   rollout_applied?: number;
+  verified_clusters?: string[];
+  merged_count?: number;
+  variants?: RehearsalTemplateVariant[];
   match_tier?: "exact" | "compatible";
   match_reason?: string;
   allow_skip_probe: boolean;
@@ -755,7 +782,7 @@ export function PropagateRehearsalModal({
   onClose: () => void;
   onPropagated: (res: PropagateResult) => void;
 }) {
-  useLang();
+  const lang = useLang();
   const [data, setData] = useState<PropagateTargetsResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -763,12 +790,14 @@ export function PropagateRehearsalModal({
   const [mode, setMode] = useState<"probe" | "steps">("probe");
   const [picked, setPicked] = useState<Record<string, boolean>>({});
   const [query, setQuery] = useState("");
+  const [targetFilter, setTargetFilter] = useState<"all" | "ready" | "exact" | "done">("all");
 
   useEffect(() => {
     if (!visible) return;
     setLoading(true);
     setErr("");
     setQuery("");
+    setTargetFilter("all");
     api<PropagateTargetsResponse>(
       `/api/clusters/${encodeURIComponent(clusterId)}/rehearsals/${encodeURIComponent(rehearsal.id)}/propagate-targets`,
     )
@@ -793,18 +822,33 @@ export function PropagateRehearsalModal({
         setErr((e as Error).message || bi("读取候选集群失败", "Failed to load target clusters"));
       })
       .finally(() => setLoading(false));
-  }, [visible, clusterId, rehearsal.id]);
+  }, [visible, clusterId, rehearsal.id, lang]);
 
   const targets = data?.targets || [];
+  const targetCounts = useMemo(() => {
+    let ready = 0;
+    let exact = 0;
+    let done = 0;
+    for (const t of targets) {
+      if (t.already_imported || t.already_effective) done++;
+      else ready++;
+      if (!t.already_imported && !t.already_effective && t.match_tier === "exact") exact++;
+    }
+    return { all: targets.length, ready, exact, done };
+  }, [targets]);
+
   const filteredTargets = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return targets;
-    return targets.filter((t) =>
-      `${t.cluster_id} ${t.scheme_name || ""} ${t.version} ${t.match_reason}`
+    return targets.filter((t) => {
+      if (targetFilter === "ready" && (t.already_imported || t.already_effective)) return false;
+      if (targetFilter === "exact" && (t.already_imported || t.already_effective || t.match_tier !== "exact")) return false;
+      if (targetFilter === "done" && !t.already_imported && !t.already_effective) return false;
+      if (!q) return true;
+      return `${t.cluster_id} ${t.scheme_name || ""} ${t.version} ${t.match_reason}`
         .toLowerCase()
-        .includes(q),
-    );
-  }, [targets, query]);
+        .includes(q);
+    });
+  }, [targets, query, targetFilter]);
 
   const exactReady = filteredTargets.filter(
     (t) => !t.already_imported && t.match_tier === "exact",
@@ -944,6 +988,23 @@ export function PropagateRehearsalModal({
               {t.existing_applied
                 ? bi("已落地 · 查看", "Applied · View")
                 : bi("已引入 · 查看", "Imported · View")}
+              <IconRight />
+            </button>
+          ) : t.already_effective && t.existing_rehearsal_id ? (
+            <button
+              type="button"
+              className="ro-go-btn is-eff"
+              onClick={() => {
+                onClose();
+                go({
+                  name: "deliveries",
+                  id: t.cluster_id,
+                  tab: "rehearsal",
+                  rehearsal: t.existing_rehearsal_id,
+                });
+              }}
+            >
+              {bi("已独立生效 · 查看", "Already Effective · View")}
               <IconRight />
             </button>
           ) : (
@@ -1095,6 +1156,27 @@ export function PropagateRehearsalModal({
               </div>
             </div>
 
+            <div className="ro-chip-row">
+              {(
+                [
+                  ["all", bi("全部", "All"), targetCounts.all],
+                  ["ready", bi("待推广", "Available"), targetCounts.ready],
+                  ["exact", bi("仅同架构", "Exact Match"), targetCounts.exact],
+                  ["done", bi("已引入/已生效", "Imported / Effective"), targetCounts.done],
+                ] as const
+              ).map(([k, lbl, cnt]) => (
+                <button
+                  key={k}
+                  type="button"
+                  className={`ro-filter-chip${targetFilter === k ? " on" : ""}`}
+                  onClick={() => setTargetFilter(k)}
+                >
+                  <span>{lbl}</span>
+                  <em className="num">{cnt}</em>
+                </button>
+              ))}
+            </div>
+
             <div className="ro-pick-list">
               {exactReady.length > 0 && (
                 <div className="ro-pick-group">
@@ -1135,6 +1217,32 @@ export function PropagateRehearsalModal({
  * 4. ImportTemplateBar — Entry B (Pull into Target Cluster from Applied Pilot)
  * ========================================================================== */
 
+const CATEGORY_ORDER = [
+  "logging",
+  "security",
+  "backup",
+  "params",
+  "ha",
+  "upgrade",
+  "ops",
+] as const;
+
+function modeLabel(m: string): string {
+  switch (m) {
+    case "quick":
+      return bi("极速变更", "Quick");
+    case "light":
+      return bi("简单推演", "Light");
+    default:
+      return bi("全量推演", "Full");
+  }
+}
+
+function truncVal(s: string, max = 36): string {
+  const t = (s || "").trim();
+  return t.length > max ? `${t.slice(0, max - 1)}…` : t;
+}
+
 export function ImportTemplateBar({
   cluster,
   onImported,
@@ -1142,12 +1250,22 @@ export function ImportTemplateBar({
   cluster: ClusterView;
   onImported: (rehearsalId: string) => void;
 }) {
-  useLang();
+  const lang = useLang();
   const [templates, setTemplates] = useState<RehearsalTemplateItem[] | null>(null);
   const [open, setOpen] = useState(false);
   const [selectedKey, setSelectedKey] = useState("");
+  const [pilotOverrides, setPilotOverrides] = useState<Record<string, string>>({});
+  const [expandedVariants, setExpandedVariants] = useState<Record<string, boolean>>({});
+  const [expandedParams, setExpandedParams] = useState<Record<string, boolean>>({});
   const [mode, setMode] = useState<"probe" | "steps">("probe");
   const [query, setQuery] = useState("");
+  const [catFilter, setCatFilter] = useState<string>("all");
+  const [onlyAvailable, setOnlyAvailable] = useState(false);
+  const [onlyExact, setOnlyExact] = useState(false);
+  const [onlyFastTrack, setOnlyFastTrack] = useState(false);
+  const [clusterFilter, setClusterFilter] = useState<string>("");
+  const [modeFilter, setModeFilter] = useState<string>("");
+  const [sortBy, setSortBy] = useState<"recommended" | "recent" | "clusters">("recommended");
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState("");
 
@@ -1161,55 +1279,201 @@ export function ImportTemplateBar({
 
   useEffect(() => {
     loadTemplates();
-  }, [loadTemplates]);
+  }, [loadTemplates, lang]);
 
-  const unimportedCount = useMemo(
-    () => (templates || []).filter((t) => !t.already_imported).length,
-    [templates],
+  const templateKeyOf = (t: RehearsalTemplateItem) =>
+    `${t.origin_cluster_id}/${t.origin_rehearsal_id}`;
+
+  const activeVariantOf = useCallback(
+    (t: RehearsalTemplateItem): RehearsalTemplateVariant | null => {
+      const vs = t.variants || [];
+      if (vs.length === 0) return null;
+      const ov = pilotOverrides[templateKeyOf(t)];
+      if (ov) {
+        const hit = vs.find((v) => `${v.cluster_id}/${v.rehearsal_id}` === ov);
+        if (hit) return hit;
+      }
+      return vs[0];
+    },
+    [pilotOverrides],
   );
+
+  const stats = useMemo(() => {
+    const list = templates || [];
+    let available = 0;
+    let exact = 0;
+    let fastTrack = 0;
+    let totalRuns = 0;
+    const clusters = new Set<string>();
+    const modes = new Set<string>();
+    const cats = new Map<string, { id: string; label: string; count: number }>();
+
+    for (const t of list) {
+      const isAvail = !t.already_imported && !t.already_effective;
+      if (isAvail) available++;
+      if (t.match_tier === "exact") exact++;
+      if (t.allow_skip_probe && isAvail) fastTrack++;
+      totalRuns += Math.max(1, t.merged_count || t.variants?.length || 1);
+      if (t.verified_clusters && t.verified_clusters.length > 0) {
+        for (const c of t.verified_clusters) clusters.add(c);
+      } else {
+        clusters.add(t.origin_cluster_id);
+      }
+      if (t.mode) modes.add(t.mode);
+      const cid = t.category || "ops";
+      const prev = cats.get(cid);
+      if (prev) prev.count++;
+      else
+        cats.set(cid, {
+          id: cid,
+          label: t.category_label || cid,
+          count: 1,
+        });
+    }
+
+    const catList = Array.from(cats.values()).sort((a, b) => {
+      const ia = CATEGORY_ORDER.indexOf(a.id as (typeof CATEGORY_ORDER)[number]);
+      const ib = CATEGORY_ORDER.indexOf(b.id as (typeof CATEGORY_ORDER)[number]);
+      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+    });
+
+    return {
+      total: list.length,
+      available,
+      exact,
+      fastTrack,
+      totalRuns,
+      clusterList: Array.from(clusters).sort(),
+      modeList: Array.from(modes),
+      catList,
+    };
+  }, [templates]);
+
+  const hasActiveFilters =
+    Boolean(query.trim()) ||
+    catFilter !== "all" ||
+    onlyAvailable ||
+    onlyExact ||
+    onlyFastTrack ||
+    Boolean(clusterFilter) ||
+    Boolean(modeFilter);
+
+  const resetFilters = () => {
+    setQuery("");
+    setCatFilter("all");
+    setOnlyAvailable(false);
+    setOnlyExact(false);
+    setOnlyFastTrack(false);
+    setClusterFilter("");
+    setModeFilter("");
+  };
 
   const filtered = useMemo(() => {
     const list = templates || [];
     const q = query.trim().toLowerCase();
-    if (!q) return list;
-    return list.filter((t) =>
-      `${t.title} ${t.origin_cluster_id} ${t.applied_summary || ""}`
-        .toLowerCase()
-        .includes(q),
-    );
-  }, [templates, query]);
+    const matched = list.filter((t) => {
+      if (catFilter !== "all" && (t.category || "ops") !== catFilter) return false;
+      if (onlyAvailable && (t.already_imported || t.already_effective)) return false;
+      if (onlyExact && t.match_tier !== "exact") return false;
+      if (onlyFastTrack && (!t.allow_skip_probe || t.already_imported || t.already_effective)) {
+        return false;
+      }
+      if (clusterFilter) {
+        const hasCluster =
+          t.origin_cluster_id === clusterFilter ||
+          (t.verified_clusters || []).includes(clusterFilter) ||
+          (t.variants || []).some((v) => v.cluster_id === clusterFilter);
+        if (!hasCluster) return false;
+      }
+      if (modeFilter && (t.mode || "full") !== modeFilter) return false;
+      if (!q) return true;
+      const changeText = (t.applied_changes || [])
+        .map((c) => `${c.key}=${c.after} ${c.key}`)
+        .join(" ");
+      const variantText = (t.variants || [])
+        .map((v) => `${v.title} ${v.cluster_id} ${v.applied_by || ""}`)
+        .join(" ");
+      const hay = `${t.title} ${t.origin_cluster_id} ${t.applied_by || ""} ${t.applied_summary || ""} ${t.category_label || ""} ${changeText} ${variantText}`.toLowerCase();
+      return hay.includes(q);
+    });
+
+    if (sortBy === "recommended") return matched;
+    return [...matched].sort((a, b) => {
+      if (sortBy === "recent") {
+        const aMax = (a.variants || []).reduce(
+          (best, v) => ((v.applied_at || "") > best ? v.applied_at || "" : best),
+          a.applied_at || "",
+        );
+        const bMax = (b.variants || []).reduce(
+          (best, v) => ((v.applied_at || "") > best ? v.applied_at || "" : best),
+          b.applied_at || "",
+        );
+        return bMax.localeCompare(aMax);
+      }
+      const ac = a.verified_clusters?.length || 1;
+      const bc = b.verified_clusters?.length || 1;
+      if (ac !== bc) return bc - ac;
+      return (b.applied_at || "").localeCompare(a.applied_at || "");
+    });
+  }, [
+    templates,
+    query,
+    catFilter,
+    onlyAvailable,
+    onlyExact,
+    onlyFastTrack,
+    clusterFilter,
+    modeFilter,
+    sortBy,
+  ]);
 
   const chosen = useMemo(
     () =>
-      (templates || []).find(
-        (t) => `${t.origin_cluster_id}/${t.origin_rehearsal_id}` === selectedKey,
-      ) || null,
+      (templates || []).find((t) => templateKeyOf(t) === selectedKey) || null,
     [templates, selectedKey],
   );
 
+  const chosenPilot = useMemo(() => {
+    if (!chosen) return null;
+    const v = activeVariantOf(chosen);
+    return {
+      clusterId: v?.cluster_id || chosen.origin_cluster_id,
+      rehearsalId: v?.rehearsal_id || chosen.origin_rehearsal_id,
+      title: v?.title || chosen.title,
+      allowSkipProbe:
+        chosen.already_effective || chosen.already_imported
+          ? false
+          : v
+            ? v.allow_skip_probe
+            : chosen.allow_skip_probe,
+      skipProbeBlockReason:
+        v?.skip_probe_block_reason || chosen.skip_probe_block_reason,
+    };
+  }, [chosen, activeVariantOf]);
+
   useEffect(() => {
-    if (!chosen) return;
-    if (chosen.mode === "quick" && chosen.allow_skip_probe) {
+    if (!chosen || !chosenPilot) return;
+    if (chosen.mode === "quick" && chosenPilot.allowSkipProbe) {
       setMode("steps");
     } else {
       setMode("probe");
     }
-  }, [chosen]);
+  }, [chosen, chosenPilot]);
 
   if (!templates || templates.length === 0) return null;
 
   const submitImport = async () => {
-    if (!chosen) return;
+    if (!chosen || !chosenPilot) return;
     setSubmitting(true);
     setErr("");
     try {
       const res = await api<PropagateResult>(
-        `/api/clusters/${encodeURIComponent(chosen.origin_cluster_id)}/rehearsals/${encodeURIComponent(chosen.origin_rehearsal_id)}/propagate`,
+        `/api/clusters/${encodeURIComponent(chosenPilot.clusterId)}/rehearsals/${encodeURIComponent(chosenPilot.rehearsalId)}/propagate`,
         {
           method: "POST",
           body: JSON.stringify({
             target_clusters: [cluster.id],
-            mode: chosen.allow_skip_probe ? mode : "probe",
+            mode: chosenPilot.allowSkipProbe ? mode : "probe",
           }),
         },
       );
@@ -1217,8 +1481,8 @@ export function ImportTemplateBar({
       if (created?.rehearsal_id) {
         Message.success(
           bi(
-            `已引入样板变更《${chosen.title}》到当前集群`,
-            `Imported "${chosen.title}" into ${cluster.id}`,
+            `已引入样板变更《${chosenPilot.title}》到当前集群`,
+            `Imported "${chosenPilot.title}" into ${cluster.id}`,
           ),
         );
         setOpen(false);
@@ -1244,37 +1508,50 @@ export function ImportTemplateBar({
         <div className="ro-import-bar-left">
           <IconImport className="ro-import-ic" />
           <span>
-            {bi(
-              `发现 ${templates.length} 项同组件（${cluster.app_name}）其他集群已生产落地的变更方案`,
-              `${templates.length} production-applied ${cluster.app_name} change(s) available from other clusters`,
-            )}
-            {unimportedCount > 0 && (
-              <small>
-                {bi(
-                  " · 无需重填诉求，一键引入并自动映射本集群基线",
-                  " · Import directly with automatic baseline remapping",
+            {stats.available > 0
+              ? bi(
+                  `发现 ${stats.available} 项可引入的 ${cluster.app_name} 已落地变更模板`,
+                  `${stats.available} reusable ${cluster.app_name} change template(s) ready to import`,
+                )
+              : bi(
+                  `共有 ${stats.total} 项 ${cluster.app_name} 已落地变更模板（本集群均已引入或生效）`,
+                  `${stats.total} ${cluster.app_name} applied template(s) (all already imported or effective here)`,
                 )}
-              </small>
-            )}
+            <small>
+              {stats.totalRuns > stats.total
+                ? bi(
+                    ` · 已按实际内容去重（聚合 ${stats.totalRuns} 次实测 · ${stats.clusterList.length} 套集群）`,
+                    ` · Deduplicated by effective diff (${stats.totalRuns} verified runs across ${stats.clusterList.length} clusters)`,
+                  )
+                : bi(
+                    " · 无需重填诉求，一键引入并自动映射本集群基线",
+                    " · Import directly with automatic baseline remapping",
+                  )}
+            </small>
           </span>
         </div>
         <button
           type="button"
-          className="ro-strip-btn primary"
+          className={`ro-strip-btn${stats.available > 0 ? " primary" : ""}`}
           onClick={() => {
             setErr("");
-            setQuery("");
+            resetFilters();
+            setSortBy("recommended");
+            setExpandedVariants({});
+            setExpandedParams({});
             const firstAvail =
-              templates.find((t) => !t.already_imported) || templates[0];
+              templates.find((t) => !t.already_imported && !t.already_effective) ||
+              templates.find((t) => !t.already_imported) ||
+              templates[0];
             if (firstAvail) {
-              setSelectedKey(
-                `${firstAvail.origin_cluster_id}/${firstAvail.origin_rehearsal_id}`,
-              );
+              setSelectedKey(templateKeyOf(firstAvail));
             }
             setOpen(true);
           }}
         >
-          {bi("从已有变更引入", "Import Applied Change")}
+          {stats.available > 0
+            ? bi("从已有变更引入", "Import Applied Change")
+            : bi("查看变更模板", "Browse Templates")}
           <IconRight />
         </button>
       </div>
@@ -1286,14 +1563,19 @@ export function ImportTemplateBar({
           `引入已落地变更到 ${cluster.id}`,
           `Import Applied Change into ${cluster.id}`,
         )}
-        style={{ width: "min(700px, 94vw)" }}
+        style={{ width: "min(780px, 94vw)" }}
         footer={
           <div className="ro-modal-foot">
             <span className="ro-modal-foot-hint">
-              {bi(
-                "仅展示其他集群已确认「生产已实施完成」的变更方案",
-                "Only production-applied changes from other clusters are eligible",
-              )}
+              {chosen?.already_effective && !chosen.already_imported
+                ? bi(
+                    "本集群似乎已独立生效相同参数；如需核查仍可以「标准探针」引入",
+                    "Identical parameters appear already effective here; use Standard Probe if re-verifying",
+                  )
+                : bi(
+                    "内容一致的跨集群变更已自动合并去重，点卡片内「合并记录」可切换指定样板",
+                    "Equivalent changes across clusters are auto-consolidated; expand a card to switch pilot",
+                  )}
             </span>
             <div className="ro-modal-foot-btns">
               <Button onClick={() => setOpen(false)} disabled={submitting}>
@@ -1305,96 +1587,397 @@ export function ImportTemplateBar({
                 loading={submitting}
                 onClick={() => void submitImport()}
               >
-                {bi("引入到当前集群", "Import to This Cluster")}
+                {chosen?.already_effective && !chosen.already_imported
+                  ? bi("仍以探针引入核查", "Import via Probe Anyway")
+                  : bi("引入到当前集群", "Import to This Cluster")}
               </Button>
             </div>
           </div>
         }
       >
         <div className="ro-modal-body">
-          <Input
-            size="small"
-            prefix={<IconSearch />}
-            value={query}
-            onChange={setQuery}
-            allowClear
-            placeholder={bi("搜索变更标题或样板集群…", "Search change title or pilot cluster…")}
-          />
-
-          <div className="ro-tpl-list">
-            {filtered.map((t) => {
-              const key = `${t.origin_cluster_id}/${t.origin_rehearsal_id}`;
-              const active = key === selectedKey;
-              return (
-                <div
-                  key={key}
-                  className={`ro-tpl-card${active ? " on" : ""}${t.already_imported ? " is-done" : ""}`}
-                  onClick={() => setSelectedKey(key)}
-                >
-                  <div className="ro-tpl-top">
-                    <span className="ro-radio" aria-hidden />
-                    <b>{t.title}</b>
-                    {t.already_imported ? (
-                      <button
-                        type="button"
-                        className="ro-go-btn"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setOpen(false);
-                          if (t.existing_rehearsal_id) {
-                            onImported(t.existing_rehearsal_id);
-                          }
-                        }}
-                      >
-                        {bi("本集群已引入 · 打开", "Already Imported · Open")}
-                        <IconRight />
-                      </button>
-                    ) : (
-                      <span
-                        className={`ro-match-pill ${t.match_tier === "exact" ? "is-same" : "is-diff"}`}
-                      >
-                        {t.match_tier === "exact"
-                          ? bi("同架构", "Exact")
-                          : bi("有差异", "Diff")}
-                      </span>
-                    )}
-                  </div>
-                  <div className="ro-tpl-meta num">
-                    <span>
-                      {bi("样板集群", "Pilot")}:{" "}
-                      <code className="mono">{t.origin_cluster_id}</code>
-                    </span>
-                    <span>
-                      {t.applied_by} · {ago(t.applied_at || "")}
-                    </span>
-                    {t.rollout_total && t.rollout_total > 1 ? (
-                      <span className="ro-tpl-batch">
-                        {bi(
-                          `推广批次 ${t.rollout_applied}/${t.rollout_total} 已落地`,
-                          `Rollout ${t.rollout_applied}/${t.rollout_total} applied`,
-                        )}
-                      </span>
-                    ) : null}
-                    {t.applied_changes && t.applied_changes.length > 0 && (
-                      <span>
-                        {bi(
-                          `${t.applied_changes.length} 项生效参数`,
-                          `${t.applied_changes.length} param(s)`,
-                        )}
-                      </span>
-                    )}
-                  </div>
-                  {t.conflict_summary && (
-                    <div className="ro-pick-warn">
-                      <IconExclamationCircle /> {t.conflict_summary}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+          {/* Row 1: Search + Cluster / Mode / Sort Selects */}
+          <div className="ro-tpl-toolbar">
+            <Input
+              size="small"
+              prefix={<IconSearch />}
+              value={query}
+              onChange={setQuery}
+              allowClear
+              className="ro-tpl-search"
+              placeholder={bi(
+                "搜索标题、参数名/值、样板集群或操作人…",
+                "Search title, parameter key/value, pilot cluster, or operator…",
+              )}
+            />
+            {stats.clusterList.length >= 2 && (
+              <Select
+                size="small"
+                allowClear
+                value={clusterFilter || undefined}
+                onChange={(v) => setClusterFilter(v || "")}
+                placeholder={bi("按样板集群", "Pilot Cluster")}
+                className="ro-tpl-select"
+                triggerProps={{ autoAlignPopupWidth: false }}
+              >
+                {stats.clusterList.map((cid) => (
+                  <Select.Option key={cid} value={cid}>
+                    <span className="mono">{cid}</span>
+                  </Select.Option>
+                ))}
+              </Select>
+            )}
+            {stats.modeList.length >= 2 && (
+              <Select
+                size="small"
+                allowClear
+                value={modeFilter || undefined}
+                onChange={(v) => setModeFilter(v || "")}
+                placeholder={bi("推演档位", "Mode")}
+                className="ro-tpl-select-sm"
+              >
+                <Select.Option value="full">{bi("全量推演", "Full")}</Select.Option>
+                <Select.Option value="light">{bi("简单推演", "Light")}</Select.Option>
+                <Select.Option value="quick">{bi("极速变更", "Quick")}</Select.Option>
+              </Select>
+            )}
+            <Select
+              size="small"
+              value={sortBy}
+              onChange={(v) => setSortBy(v as "recommended" | "recent" | "clusters")}
+              className="ro-tpl-select-sm"
+            >
+              <Select.Option value="recommended">{bi("默认推荐", "Recommended")}</Select.Option>
+              <Select.Option value="recent">{bi("最近落地", "Most Recent")}</Select.Option>
+              <Select.Option value="clusters">{bi("落地集群最多", "Most Verified")}</Select.Option>
+            </Select>
           </div>
 
-          {chosen && !chosen.already_imported && (
+          {/* Row 2: Semantic Categories + Quick Status/Match Chips */}
+          <div className="ro-tpl-filter-bar">
+            <div className="ro-chip-row">
+              <button
+                type="button"
+                className={`ro-filter-chip${catFilter === "all" ? " on" : ""}`}
+                onClick={() => setCatFilter("all")}
+              >
+                <span>{bi("全部分类", "All")}</span>
+                <em className="num">{stats.total}</em>
+              </button>
+              {stats.catList.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  className={`ro-filter-chip cat-${c.id}${catFilter === c.id ? " on" : ""}`}
+                  onClick={() => setCatFilter(catFilter === c.id ? "all" : c.id)}
+                >
+                  <span>{c.label}</span>
+                  <em className="num">{c.count}</em>
+                </button>
+              ))}
+              <span className="ro-chip-sep" aria-hidden />
+              <button
+                type="button"
+                className={`ro-filter-chip is-toggle${onlyAvailable ? " on" : ""}`}
+                onClick={() => setOnlyAvailable((v) => !v)}
+              >
+                <span>{bi("仅可引入", "Available")}</span>
+                <em className="num">{stats.available}</em>
+              </button>
+              <button
+                type="button"
+                className={`ro-filter-chip is-toggle${onlyExact ? " on" : ""}`}
+                onClick={() => setOnlyExact((v) => !v)}
+              >
+                <span>{bi("仅同架构", "Exact Match")}</span>
+                <em className="num">{stats.exact}</em>
+              </button>
+              {stats.fastTrack > 0 && (
+                <button
+                  type="button"
+                  className={`ro-filter-chip is-toggle${onlyFastTrack ? " on" : ""}`}
+                  onClick={() => setOnlyFastTrack((v) => !v)}
+                >
+                  <span>{bi("可极速直达", "Fast Track")}</span>
+                  <em className="num">{stats.fastTrack}</em>
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="ro-tpl-summary-line">
+            <span className="num">
+              {bi(
+                `显示 ${filtered.length} / ${stats.total} 项去重变更模板`,
+                `Showing ${filtered.length} of ${stats.total} deduplicated template(s)`,
+              )}
+              {stats.totalRuns > stats.total &&
+                bi(
+                  ` · 自动聚合 ${stats.totalRuns} 次集群落地记录`,
+                  ` · consolidated from ${stats.totalRuns} verified cluster runs`,
+                )}
+            </span>
+            {hasActiveFilters && (
+              <button type="button" className="link small" onClick={resetFilters}>
+                {bi("重置筛选", "Reset filters")}
+              </button>
+            )}
+          </div>
+
+          {filtered.length === 0 ? (
+            <div className="ro-empty-box">
+              <div>{bi("当前筛选条件下暂无匹配的变更模板", "No templates match the current filters")}</div>
+              {hasActiveFilters && (
+                <Button size="mini" style={{ marginTop: 8 }} onClick={resetFilters}>
+                  {bi("清空筛选条件", "Clear Filters")}
+                </Button>
+              )}
+            </div>
+          ) : (
+            <div className="ro-tpl-list">
+              {filtered.map((t) => {
+                const key = templateKeyOf(t);
+                const active = key === selectedKey;
+                const activeV = activeVariantOf(t);
+                const displayTitle = activeV?.title || t.title;
+                const displayCluster = activeV?.cluster_id || t.origin_cluster_id;
+                const displayBy = activeV?.applied_by || t.applied_by || "";
+                const displayAt = activeV?.applied_at || t.applied_at || "";
+                const displaySteps = activeV?.steps_count ?? t.steps_count;
+                const verifiedCount = t.verified_clusters?.length || 1;
+                const variants = t.variants || [];
+                const hasMerged = variants.length > 1;
+                const variantsOpen = Boolean(expandedVariants[key]);
+                const changes = t.applied_changes || [];
+                const paramsOpen = Boolean(expandedParams[key]);
+                const visibleChanges = paramsOpen ? changes : changes.slice(0, 3);
+                const hiddenParams = changes.length - visibleChanges.length;
+
+                return (
+                  <div
+                    key={key}
+                    className={`ro-tpl-card${active ? " on" : ""}${t.already_imported || t.already_effective ? " is-done" : ""}`}
+                    onClick={() => setSelectedKey(key)}
+                  >
+                    <div className="ro-tpl-top">
+                      <span className="ro-radio" aria-hidden />
+                      {t.category_label && (
+                        <span className={`ro-cat-pill cat-${t.category || "ops"}`}>
+                          {t.category_label}
+                        </span>
+                      )}
+                      <b>{displayTitle}</b>
+                      {t.already_imported ? (
+                        <button
+                          type="button"
+                          className="ro-go-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpen(false);
+                            if (t.existing_rehearsal_id) {
+                              onImported(t.existing_rehearsal_id);
+                            }
+                          }}
+                        >
+                          {bi("本集群已引入 · 打开", "Already Imported · Open")}
+                          <IconRight />
+                        </button>
+                      ) : t.already_effective ? (
+                        t.existing_rehearsal_id ? (
+                          <button
+                            type="button"
+                            className="ro-go-btn is-eff"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOpen(false);
+                              onImported(t.existing_rehearsal_id!);
+                            }}
+                          >
+                            {bi("本集群已生效 · 查看", "Already Effective · View")}
+                            <IconRight />
+                          </button>
+                        ) : (
+                          <span className="ro-match-pill is-eff">
+                            {bi("本集群已生效", "Already Effective")}
+                          </span>
+                        )
+                      ) : (
+                        <span
+                          className={`ro-match-pill ${t.match_tier === "exact" ? "is-same" : "is-diff"}`}
+                        >
+                          {t.match_tier === "exact"
+                            ? bi("同架构", "Exact")
+                            : bi("有差异", "Diff")}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Inline Effective Parameter Diff Preview */}
+                    {changes.length > 0 && (
+                      <div className="ro-tpl-params" onClick={(e) => e.stopPropagation()}>
+                        {visibleChanges.map((ch, idx) => (
+                          <Tooltip
+                            key={`${ch.key}-${idx}`}
+                            content={`${ch.key} = ${ch.after}${ch.before ? ` (${bi("原值", "was")}: ${ch.before})` : ""}`}
+                          >
+                            <span className="ro-param-chip mono">
+                              <em>{ch.key}</em>={truncVal(ch.after, 32)}
+                            </span>
+                          </Tooltip>
+                        ))}
+                        {hiddenParams > 0 && (
+                          <button
+                            type="button"
+                            className="ro-param-more"
+                            onClick={() =>
+                              setExpandedParams((prev) => ({ ...prev, [key]: true }))
+                            }
+                          >
+                            +{hiddenParams} {bi("项参数", "more")}
+                          </button>
+                        )}
+                        {paramsOpen && changes.length > 3 && (
+                          <button
+                            type="button"
+                            className="ro-param-more"
+                            onClick={() =>
+                              setExpandedParams((prev) => ({ ...prev, [key]: false }))
+                            }
+                          >
+                            {bi("收起", "Less")}
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="ro-tpl-meta num">
+                      <span>
+                        {bi("样板", "Pilot")}:{" "}
+                        <code className="mono">{displayCluster}</code>
+                      </span>
+                      <span className="ro-tpl-mode-tag">{modeLabel(t.mode)}</span>
+                      <span>
+                        {displayBy} · {ago(displayAt)}
+                      </span>
+                      {displaySteps > 0 && (
+                        <span>
+                          {bi(`${displaySteps} 步`, `${displaySteps} steps`)}
+                        </span>
+                      )}
+                      {verifiedCount > 1 && (
+                        <span className="ro-tpl-batch">
+                          <IconCheck />{" "}
+                          {bi(
+                            `已在 ${verifiedCount} 套集群落地`,
+                            `Verified on ${verifiedCount} clusters`,
+                          )}
+                        </span>
+                      )}
+                      {hasMerged && (
+                        <button
+                          type="button"
+                          className={`ro-merge-toggle${variantsOpen ? " open" : ""}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setExpandedVariants((prev) => ({
+                              ...prev,
+                              [key]: !prev[key],
+                            }));
+                          }}
+                        >
+                          <IconBranch />
+                          <span>
+                            {bi(
+                              `已合并 ${variants.length} 份同内容变更`,
+                              `Merged ${variants.length} equivalent runs`,
+                            )}
+                          </span>
+                          {variantsOpen ? <IconUp /> : <IconDown />}
+                        </button>
+                      )}
+                    </div>
+
+                    {t.conflict_summary && (
+                      <div className="ro-pick-warn ro-tpl-warn">
+                        <IconExclamationCircle /> {t.conflict_summary}
+                      </div>
+                    )}
+
+                    {/* Expandable Merged Equivalent Variants Drawer */}
+                    {hasMerged && variantsOpen && (
+                      <div
+                        className="ro-tpl-variants"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div className="ro-tpl-variants-h">
+                          {bi(
+                            "以下记录虽然标题或发起方式不同，但实际生效的参数变更完全一致，已自动归并；可按需切换具体样板：",
+                            "These runs modified the exact same normalized parameters despite different titles and were auto-consolidated. You may pick any verified run as pilot:",
+                          )}
+                        </div>
+                        {variants.map((v) => {
+                          const vKey = `${v.cluster_id}/${v.rehearsal_id}`;
+                          const isCurrent =
+                            displayCluster === v.cluster_id &&
+                            (activeV?.rehearsal_id || t.origin_rehearsal_id) ===
+                              v.rehearsal_id;
+                          return (
+                            <div
+                              key={vKey}
+                              className={`ro-var-row${isCurrent ? " is-cur" : ""}`}
+                            >
+                              <div className="ro-var-main">
+                                <div className="ro-var-top">
+                                  <code className="mono">{v.cluster_id}</code>
+                                  {v.is_origin && (
+                                    <span className="ro-var-tag">
+                                      {bi("推广源", "Origin")}
+                                    </span>
+                                  )}
+                                  {v.version && (
+                                    <span className="ro-var-sub mono">
+                                      v{v.version}
+                                    </span>
+                                  )}
+                                  <span className="ro-var-sub num">
+                                    {v.applied_by} · {ago(v.applied_at || "")}
+                                  </span>
+                                </div>
+                                <div className="ro-var-title">{v.title}</div>
+                              </div>
+                              <div className="ro-var-act">
+                                {isCurrent ? (
+                                  <span className="ro-var-picked">
+                                    <IconCheck /> {bi("当前样板", "Active Pilot")}
+                                  </span>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    className="ro-var-pick-btn"
+                                    onClick={() => {
+                                      setPilotOverrides((prev) => ({
+                                        ...prev,
+                                        [key]: vKey,
+                                      }));
+                                      setSelectedKey(key);
+                                    }}
+                                  >
+                                    {bi("选为样板", "Use as Pilot")}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {chosen && chosenPilot && !chosen.already_imported && (
             <div className="ro-mode-grid">
               <button
                 type="button"
@@ -1415,21 +1998,21 @@ export function ImportTemplateBar({
               </button>
               <button
                 type="button"
-                className={`ro-mode-card${mode === "steps" ? " on" : ""}${!chosen.allow_skip_probe ? " is-disabled" : ""}`}
-                disabled={!chosen.allow_skip_probe}
-                onClick={() => chosen.allow_skip_probe && setMode("steps")}
+                className={`ro-mode-card${mode === "steps" ? " on" : ""}${!chosenPilot.allowSkipProbe ? " is-disabled" : ""}`}
+                disabled={!chosenPilot.allowSkipProbe}
+                onClick={() => chosenPilot.allowSkipProbe && setMode("steps")}
               >
                 <div className="ro-mode-card-h">
                   <span className="ro-radio" aria-hidden />
                   <b>{bi("极速直达：严格预检 + 待执行清单", "Fast Track: Strict Precheck + Steps")}</b>
                 </div>
                 <p>
-                  {chosen.allow_skip_probe
+                  {chosenPilot.allowSkipProbe
                     ? bi(
                         "架构与版本一致且无参数冲突，直接映射待执行清单并自动强化第 1 步为强制阻断预检。",
                         "Exact match & conflict-free: maps steps directly with a mandatory strict Step 1 precheck gate.",
                       )
-                    : chosen.skip_probe_block_reason ||
+                    : chosenPilot.skipProbeBlockReason ||
                       bi("当前集群不满足跳过探针条件，请使用标准引入。", "Read-only probe required for this cluster.")}
                 </p>
               </button>

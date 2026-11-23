@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.267-dev"
+	version            = "1.0.268-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,22 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.268-dev",
+		Date:    "2026-11-24",
+		Title:   "已落地变更模板按内容自动去重归并与多维分类筛选",
+		TitleEn: "Content-aware template deduplication and multi-dimensional filtering for rehearsal reuse",
+		Highlights: []string{
+			"新增归一化生效参数内容指纹与并查集归并：跨集群独立实施、标题表述不同但实际生效参数完全一致的变更自动合并为单张权威模板，展示「已在 N 套集群落地」与「已合并 N 份同内容变更」可展开明细并支持按需切换具体样板",
+			"新增语义自动分类（日志与审计 / 安全与认证 / 备份与恢复 / 参数调优 / 高可用与切换 / 升级与扩容 / 日常运维）及多维筛选工具栏：支持按分类、样板集群、推演档位、仅可引入/仅同架构/可极速直达、参数键值搜索及排序快速定位",
+			"卡片内直接展示生效参数 key=value 预览胶囊并识别「本集群已生效 · 查看」，同时在批量推广弹窗补齐快速筛选与独立生效直达链接",
+		},
+		HighlightsEn: []string{
+			"Added normalized effective-diff content fingerprinting and union-find consolidation so equivalent production changes across independent clusters merge into one authoritative template with expandable variant history and pilot switching",
+			"Added automatic semantic categories (Logging, Security, Backup, Params, HA, Upgrade, Ops) and rich multi-dimensional filters by category, pilot cluster, mode, availability/exact-match/fast-track toggles, parameter search, and sorting",
+			"Added inline effective parameter diff preview chips and Already Effective deep-links on template cards and batch propagation target rows",
+		},
+	},
 	{
 		Version: "1.0.267-dev",
 		Date:    "2026-11-24",

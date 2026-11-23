@@ -347,3 +347,173 @@ func TestRehearsalSplitSequentialRollingCommands(t *testing.T) {
 		t.Fatalf("expected normalized multi-command step with fallback command, got %+v", steps)
 	}
 }
+
+func TestRehearsalTemplatesContentDedupAndCategory(t *testing.T) {
+	s, cfg := testStore(t)
+	alice, csrf := storeLogin(t, s, "alice")
+	srv, _ := fakeModel(t)
+	enableAI(t, s, srv.URL, 1)
+
+	createPG := func(id, ipBase string) string {
+		body := `{"id":"` + id + `","hosts":[{"name":"` + id + `-1","ip":"` + ipBase + `.11","disk":"/dev/vdb"},{"name":"` + id + `-2","ip":"` + ipBase + `.12","disk":"/dev/vdb"},{"name":"` + id + `-3","ip":"` + ipBase + `.13","disk":"/dev/vdb"}],"instances":[{"id":"pg","component":"postgresql","version":"17","placement":{"primary":["` + id + `-1"],"replica":["` + id + `-2","` + id + `-3"]},"params":{"client_cidr":"10.0.0.0/8","tls":false}},{"id":"etcd","component":"etcd","placement":{"member":["` + id + `-1","` + id + `-2","` + id + `-3"]}}]}`
+		cw := storeCreate(t, s, alice, csrf, body, nil)
+		s.wg.Wait()
+		if cw.Code != 202 {
+			t.Fatalf("create %s: %d %s", id, cw.Code, cw.Body.String())
+		}
+		var job storeJob
+		if err := json.Unmarshal(cw.Body.Bytes(), &job); err != nil {
+			t.Fatal(err)
+		}
+		s.mu.Lock()
+		j := s.jobs[job.ID]
+		j.State = "succeeded"
+		j.Outcome = outcomeDone
+		j.Marked = time.Now().UTC().Format(time.RFC3339)
+		s.jobs[job.ID] = j
+		s.mu.Unlock()
+		return job.ID
+	}
+
+	jBlackduck := createPG("pg-blackduck", "10.50.1")
+	jBitbucket := createPG("pg-bitbucket", "10.50.2")
+	jSonar := createPG("pg-sonar", "10.50.3")
+	createPG("pg-fresh", "10.50.4")
+
+	t1 := time.Now().UTC().Add(-2 * time.Hour).Format(time.RFC3339)
+	t2 := time.Now().UTC().Add(-1 * time.Hour).Format(time.RFC3339)
+	t3 := time.Now().UTC().Add(-30 * time.Minute).Format(time.RFC3339)
+
+	logChanges := []rehearsalAppliedChange{
+		{Key: "logging_collector", Before: "off", After: "on"},
+		{Key: "log_directory", Before: "log", After: "/data/logs/postgresql"},
+		{Key: "log_rotation_size", Before: "0", After: "1048576"},
+	}
+	hbaChanges := []rehearsalAppliedChange{
+		{Key: "pg_hba", Before: "", After: "+ hostssl replication replicator 127.0.0.1/32 scram-sha-256"},
+	}
+
+	// Independent + rollout logging changes across 3 clusters with different titles and whitespace/case variations.
+	mustSave := func(rh changeRehearsal) {
+		if err := s.saveRehearsal(rh); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustSave(changeRehearsal{
+		ID: "aa1100000001", ClusterID: "pg-blackduck", AppID: "postgresql", AppName: "PostgreSQL", BaseJobID: jBlackduck,
+		Title: "PostgreSQL 日志落盘到 /data/logs/postgresql（按天轮转，单文件上限 1GB）",
+		Owner: "alice", Mode: "full", Stage: "finalized", Applied: true, AppliedAt: t1, AppliedBy: "alice",
+		Source: &rehearsalSourceRef{RolloutID: "ro-aa1100000001", IsOrigin: true, OriginClusterID: "pg-blackduck", OriginRehearsalID: "aa1100000001"},
+		AppliedChanges: logChanges, CreatedAt: t1, UpdatedAt: t1,
+	})
+	mustSave(changeRehearsal{
+		ID: "aa1100000002", ClusterID: "pg-sonar", AppID: "postgresql", AppName: "PostgreSQL", BaseJobID: jSonar,
+		Title: "PostgreSQL 日志落盘到 /data/logs/postgresql（按天轮转，单文件上限 1GB）",
+		Owner: "alice", Mode: "full", Stage: "finalized", Applied: true, AppliedAt: t2, AppliedBy: "alice",
+		Source: &rehearsalSourceRef{RolloutID: "ro-aa1100000001", IsOrigin: false, OriginClusterID: "pg-blackduck", OriginRehearsalID: "aa1100000001"},
+		AppliedChanges: logChanges, CreatedAt: t2, UpdatedAt: t2,
+	})
+	mustSave(changeRehearsal{
+		ID: "aa1100000003", ClusterID: "pg-bitbucket", AppID: "postgresql", AppName: "PostgreSQL", BaseJobID: jBitbucket,
+		Title: "PostgreSQL 日志落盘到 /data/logs/postgresql 并按天/1GB 轮转",
+		Owner: "alice", Mode: "full", Stage: "finalized", Applied: true, AppliedAt: t3, AppliedBy: "alice",
+		AppliedChanges: []rehearsalAppliedChange{
+			{Key: "logging_collector", After: "ON"},
+			{Key: "log_directory", After: "'/data/logs/postgresql'"},
+			{Key: "log_rotation_size", After: "1048576"},
+		},
+		CreatedAt: t3, UpdatedAt: t3,
+	})
+
+	// Two independent pg_hba changes with different titles -> must merge into 1 "security" template.
+	mustSave(changeRehearsal{
+		ID: "bb2200000001", ClusterID: "pg-blackduck", AppID: "postgresql", AppName: "PostgreSQL", BaseJobID: jBlackduck,
+		Title: "Patroni 集群共享 pg_hba 补充 127.0.0.1 replicator 复制规则",
+		Owner: "alice", Mode: "light", Stage: "finalized", Applied: true, AppliedAt: t1, AppliedBy: "alice",
+		AppliedChanges: hbaChanges, CreatedAt: t1, UpdatedAt: t1,
+	})
+	mustSave(changeRehearsal{
+		ID: "bb2200000002", ClusterID: "pg-bitbucket", AppID: "postgresql", AppName: "PostgreSQL", BaseJobID: jBitbucket,
+		Title: "Patroni 本机复制连接被 pg_hba 拒绝核查",
+		Owner: "alice", Mode: "light", Stage: "finalized", Applied: true, AppliedAt: t3, AppliedBy: "alice",
+		AppliedChanges: hbaChanges, CreatedAt: t3, UpdatedAt: t3,
+	})
+
+	// Two non-param operational changes with no shared rollout -> must NOT falsely merge.
+	mustSave(changeRehearsal{
+		ID: "cc3300000001", ClusterID: "pg-blackduck", AppID: "postgresql", AppName: "PostgreSQL", BaseJobID: jBlackduck,
+		Title: "PostgreSQL 17.2 到 17.4 小版本滚动升级",
+		Owner: "alice", Mode: "full", Stage: "finalized", Applied: true, AppliedAt: t1, AppliedBy: "alice",
+		CreatedAt: t1, UpdatedAt: t1,
+	})
+	mustSave(changeRehearsal{
+		ID: "cc3300000002", ClusterID: "pg-bitbucket", AppID: "postgresql", AppName: "PostgreSQL", BaseJobID: jBitbucket,
+		Title: "Patroni 主从演练切主复位",
+		Owner: "alice", Mode: "full", Stage: "finalized", Applied: true, AppliedAt: t2, AppliedBy: "alice",
+		CreatedAt: t2, UpdatedAt: t2,
+	})
+
+	getTemplates := func(target string) []rehearsalTemplateItem {
+		r := httptest.NewRequest("GET", cfg.PublicURL+"/api/rehearsals/templates?app_id=postgresql&target_cluster="+target, nil)
+		r.Header.Set("Origin", cfg.PublicURL)
+		r.Header.Set("X-CSRF-Token", csrf)
+		r.AddCookie(alice)
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		if w.Code != 200 {
+			t.Fatalf("templates(%s): %d %s", target, w.Code, w.Body.String())
+		}
+		var out []rehearsalTemplateItem
+		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+
+	// 1. Fresh target cluster sees 4 deduplicated templates instead of 7 raw runs:
+	//    1 logging (3 clusters merged), 1 security (2 clusters merged), 1 upgrade, 1 ha.
+	freshTpls := getTemplates("pg-fresh")
+	if len(freshTpls) != 4 {
+		t.Fatalf("expected 4 deduplicated templates for pg-fresh, got %d: %+v", len(freshTpls), freshTpls)
+	}
+	byCat := map[string]rehearsalTemplateItem{}
+	for _, it := range freshTpls {
+		byCat[it.Category] = it
+	}
+	logTpl, ok := byCat["logging"]
+	if !ok || logTpl.MergedCount != 3 || len(logTpl.VerifiedClusters) != 3 || len(logTpl.Variants) != 3 || logTpl.ContentSignature == "" {
+		t.Fatalf("expected consolidated logging template across 3 clusters, got %+v", logTpl)
+	}
+	if logTpl.OriginClusterID != "pg-blackduck" || logTpl.RolloutID != "ro-aa1100000001" {
+		t.Fatalf("expected rollout origin pg-blackduck picked as primary pilot, got %+v", logTpl)
+	}
+	secTpl, ok := byCat["security"]
+	if !ok || secTpl.MergedCount != 2 || len(secTpl.VerifiedClusters) != 2 || len(secTpl.Variants) != 2 {
+		t.Fatalf("expected consolidated security template across 2 clusters, got %+v", secTpl)
+	}
+	if _, ok := byCat["upgrade"]; !ok {
+		t.Fatalf("expected upgrade category template kept separate, got %+v", freshTpls)
+	}
+	if _, ok := byCat["ha"]; !ok {
+		t.Fatalf("expected ha category template kept separate, got %+v", freshTpls)
+	}
+
+	// 2. Target cluster pg-bitbucket already applied logging & pg_hba independently ->
+	//    must flag AlreadyEffective=true and point ExistingRehearsalID to its own applied rehearsal!
+	bitTpls := getTemplates("pg-bitbucket")
+	var bitLog, bitSec *rehearsalTemplateItem
+	for i := range bitTpls {
+		switch bitTpls[i].Category {
+		case "logging":
+			bitLog = &bitTpls[i]
+		case "security":
+			bitSec = &bitTpls[i]
+		}
+	}
+	if bitLog == nil || !bitLog.AlreadyEffective || bitLog.ExistingRehearsalID != "aa1100000003" {
+		t.Fatalf("expected pg-bitbucket logging template flagged AlreadyEffective -> aa1100000003, got %+v", bitLog)
+	}
+	if bitSec == nil || !bitSec.AlreadyEffective || bitSec.ExistingRehearsalID != "bb2200000002" {
+		t.Fatalf("expected pg-bitbucket security template flagged AlreadyEffective -> bb2200000002, got %+v", bitSec)
+	}
+}

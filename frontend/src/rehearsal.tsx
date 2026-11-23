@@ -8,6 +8,7 @@ import React, {
 } from "react";
 import {
   Button,
+  Checkbox,
   Dropdown,
   Input,
   Message,
@@ -40,6 +41,7 @@ import {
   IconUp,
   IconUpload,
 } from "@arco-design/web-react/icon";
+import { VexTriageEditor } from "./vextriage";
 import {
   ApiError,
   ago,
@@ -62,6 +64,8 @@ import type {
   ChangeRehearsal,
   ClusterView,
   JobDetail,
+  RehearsalAppliedChange,
+  RehearsalSecurityContext,
   RehearsalStep,
   RehearsalTrace,
   RehearsalTraceStep,
@@ -70,41 +74,45 @@ import type {
 import { SchemeInfo, schemeName } from "./scheme";
 import { go } from "./router";
 import { Segmented, Smooth } from "./ui";
-import { Spark } from "./aichat";
+import { REHEARSAL_CHANGED, Spark, useAIDock } from "./aichat";
 import { ModelPicker, useModelPick } from "./modelpick";
-import { ThinkLevel, useAIOptions } from "./aitools";
+import { ThinkLevel, useAIOptions, useSpaciousComposer } from "./aitools";
 import { bi, biv, getLang, useLang, withLang } from "./i18n";
+import {
+  REHEARSAL_INTENT_EVENT,
+  REHEARSAL_INTENT_KEY,
+  hasRehearsalIntentFor,
+  launchRehearsalIntent,
+  launchSecurityRehearsalIntent,
+} from "./rehearsal_intent";
+import type {
+  RehearsalIntentPayload,
+  RehearsalModeChoice,
+  RehearsalPresetKind,
+  RehearsalSourceContext,
+} from "./rehearsal_intent";
+export {
+  launchRehearsalIntent,
+  launchSecurityRehearsalIntent,
+  type RehearsalModeChoice,
+  type RehearsalPresetKind,
+};
 import "./rehearsal.css";
-
-export type RehearsalPresetKind = "upgrade" | "scale" | "tune" | "switch";
-
-const INTENT_KEY = "mh-rehearsal-intent";
-
-export function launchRehearsalIntent(
-  clusterId: string,
-  kind?: RehearsalPresetKind,
-) {
-  try {
-    if (kind) {
-      sessionStorage.setItem(
-        INTENT_KEY,
-        JSON.stringify({ cluster: clusterId, kind }),
-      );
-    } else {
-      sessionStorage.setItem(
-        INTENT_KEY,
-        JSON.stringify({ cluster: clusterId, create: true }),
-      );
-    }
-  } catch {
-    /* ignore storage limits */
-  }
-  go({ name: "deliveries", id: clusterId, tab: "rehearsal" });
-}
 
 const STAGE_ORDER: ChangeRehearsal["stage"][] = [
   "scoping",
   "probing",
+  "rehearsing",
+  "finalized",
+];
+
+const LIGHT_STAGE_ORDER: ChangeRehearsal["stage"][] = [
+  "probing",
+  "rehearsing",
+  "finalized",
+];
+
+const QUICK_STAGE_ORDER: ChangeRehearsal["stage"][] = [
   "rehearsing",
   "finalized",
 ];
@@ -159,6 +167,76 @@ const STAGE_META: Record<
   },
 };
 
+const LIGHT_STAGE_META: Record<
+  ChangeRehearsal["stage"],
+  { short: string; title: string; sub: string }
+> = {
+  scoping: STAGE_META.scoping,
+  probing: {
+    get short() {
+      return bi("极简探针", "Quick Probe");
+    },
+    get title() {
+      return bi("现场只读快采与状态核实", "Quick Read-Only Live Check");
+    },
+    get sub() {
+      return bi("一屏采集核心状态，零修改生产", "Single-screen read-only check");
+    },
+  },
+  rehearsing: {
+    get short() {
+      return bi("快速验证", "Quick Verify");
+    },
+    get title() {
+      return bi("3～5 步精简执行与验证", "Concise 3–5 Step Verification");
+    },
+    get sub() {
+      return bi("粘贴输出或截图，AI 自动判定通过", "Paste output/image for AI verdict");
+    },
+  },
+  finalized: {
+    get short() {
+      return bi("变更报告", "Change Report");
+    },
+    get title() {
+      return bi("集群变更报告已归档", "Change Report Archived");
+    },
+    get sub() {
+      return bi("留档可追溯，支持导出 Word", "Archived & Word exportable");
+    },
+  },
+};
+
+const QUICK_STAGE_META: Record<
+  ChangeRehearsal["stage"],
+  { short: string; title: string; sub: string }
+> = {
+  scoping: STAGE_META.scoping,
+  probing: LIGHT_STAGE_META.probing,
+  rehearsing: {
+    get short() {
+      return bi("执行与核验", "Execute & Verify");
+    },
+    get title() {
+      return bi("2～3 步极速执行与核验", "2–3 Step Quick Execution");
+    },
+    get sub() {
+      return bi("按步骤执行并贴回输出，AI 自动验收", "Run steps & paste output for AI check");
+    },
+  },
+  finalized: {
+    get short() {
+      return bi("变更报告", "Change Report");
+    },
+    get title() {
+      return bi("集群变更报告已归档", "Change Report Archived");
+    },
+    get sub() {
+      return bi("写入集群文档，支持导出 Word", "Saved to Cluster Docs & Word export");
+    },
+  },
+};
+
 const PHASE_LABEL: Record<RehearsalStep["phase"], string> = {
   get precheck() {
     return bi("预检", "Precheck");
@@ -179,7 +257,14 @@ const isMac =
 
 /* ---------- Streaming SSE State & Client ---------- */
 
-type LivePipelineKind = "create" | "scope" | "probe" | "troubleshoot";
+type LivePipelineKind =
+  | "create"
+  | "create-quick"
+  | "create-light"
+  | "scope"
+  | "probe"
+  | "verify"
+  | "troubleshoot";
 
 type LiveAIState = {
   kind: LivePipelineKind;
@@ -317,6 +402,65 @@ function buildInitialPipelineSteps(kind: LivePipelineKind): RehearsalTraceStep[]
       },
     ];
   }
+  if (kind === "verify") {
+    return [
+      {
+        id: "inspect-step-evid",
+        kind: "inspect",
+        title: bi("读取步骤判据与实测证据", "Load step criteria & execution evidence"),
+        detail: bi(
+          "装载本步执行命令、核心目标判据与前序轮次记录…",
+          "Loading step command, core pass criteria & prior rounds…",
+        ),
+        ok: true,
+        status: "running",
+      },
+      {
+        id: "scrub-step-evid",
+        kind: "guard",
+        title: bi("回显凭据二次脱敏", "Scrub credentials from output"),
+        detail: bi(
+          "自动剥离输出中的口令与私钥，结合前序事实客观核验",
+          "Redacting secrets and loading prior round context",
+        ),
+        ok: true,
+        status: "pending",
+      },
+      {
+        id: "connect-model",
+        kind: "connect",
+        title: bi("连接模型网关与投递上下文", "Connect model gateway & send context"),
+        detail: bi(
+          "等待脱敏完成后建立模型流式连接",
+          "Waiting for redaction before opening AI stream",
+        ),
+        ok: true,
+        status: "pending",
+      },
+      {
+        id: "model-think",
+        kind: "think",
+        title: bi("对照预期判据自动核验结果", "Verify output against expected criteria"),
+        detail: bi(
+          "等待模型通道返回首包后展开核验推演",
+          "Waiting for first token from model stream",
+        ),
+        ok: true,
+        status: "pending",
+      },
+      {
+        id: "verify-verdict",
+        kind: "synthesize",
+        title: bi("输出核验结论与后续动作", "Emit verification verdict & next action"),
+        detail: bi(
+          "通过则自动回写实测记录；未通过则直接给出根因与最小补救方案",
+          "Recording verified summary if passed, or proposing minimal fix if failed",
+        ),
+        ok: true,
+        status: "pending",
+      },
+    ];
+  }
   if (kind === "troubleshoot") {
     return [
       {
@@ -370,6 +514,124 @@ function buildInitialPipelineSteps(kind: LivePipelineKind): RehearsalTraceStep[]
         detail: bi(
           "等待根因明确后生成就地替换或前置步骤命令",
           "Proposing in-place replacement or pre-step command",
+        ),
+        ok: true,
+        status: "pending",
+      },
+    ];
+  }
+  if (kind === "create-quick") {
+    return [
+      {
+        id: "read-baseline",
+        kind: "inspect",
+        title: bi("读取集群交付基线与节点拓扑", "Read cluster baseline & topology"),
+        detail: bi(
+          "装载集群节点地址、组件版本与运行方案基线…",
+          "Loading cluster hosts, component version & scheme baseline…",
+        ),
+        ok: true,
+        status: "running",
+      },
+      {
+        id: "scrub-context",
+        kind: "guard",
+        title: bi("敏感凭据脱敏与极速通道校验", "Scrub secrets & quick-change guard"),
+        detail: bi(
+          "跳过边界问答与前置探针，直通极速变更步骤编排",
+          "Skipping scope Q&A & probe; routing directly to executable steps",
+        ),
+        ok: true,
+        status: "pending",
+      },
+      {
+        id: "connect-model",
+        kind: "connect",
+        title: bi("连接模型网关与投递上下文", "Connect model gateway & send context"),
+        detail: bi(
+          "等待脱敏完成后建立模型流式连接",
+          "Waiting for redaction before opening AI stream",
+        ),
+        ok: true,
+        status: "pending",
+      },
+      {
+        id: "model-think",
+        kind: "think",
+        title: bi("直出极速变更步骤与核验判据", "Draft direct change & verify steps"),
+        detail: bi(
+          "等待模型通道返回首包后展开推演",
+          "Waiting for first token from model stream",
+        ),
+        ok: true,
+        status: "pending",
+      },
+      {
+        id: "build-quick-steps",
+        kind: "synthesize",
+        title: bi("编排可执行步骤与应急回退预案", "Assemble steps & rollback plan"),
+        detail: bi(
+          "生成 2～3 步正向命令、验收判据与独立回退命令，完成后可一键出变更报告",
+          "Structuring 2–3 forward steps, checks & rollback for Change Report archival",
+        ),
+        ok: true,
+        status: "pending",
+      },
+    ];
+  }
+  if (kind === "create-light") {
+    return [
+      {
+        id: "read-baseline",
+        kind: "inspect",
+        title: bi("读取集群初始交付基线", "Read initial delivery baseline"),
+        detail: bi(
+          "装载集群节点拓扑、组件版本与运行方案基线…",
+          "Loading cluster topology, versions & scheme baseline…",
+        ),
+        ok: true,
+        status: "running",
+      },
+      {
+        id: "scrub-context",
+        kind: "guard",
+        title: bi("敏感凭据脱敏与只读边界检查", "Scrub credentials & read-only guard"),
+        detail: bi(
+          "跳过冗长窗口问答，锁定极简只读核查与安全红线",
+          "Skipping scope Q&A; enforcing concise read-only safety boundary",
+        ),
+        ok: true,
+        status: "pending",
+      },
+      {
+        id: "connect-model",
+        kind: "connect",
+        title: bi("连接模型网关与投递上下文", "Connect model gateway & send context"),
+        detail: bi(
+          "等待脱敏完成后建立模型流式连接",
+          "Waiting for redaction before opening AI stream",
+        ),
+        ok: true,
+        status: "pending",
+      },
+      {
+        id: "model-think",
+        kind: "think",
+        title: bi("设计极简只读核查策略", "Design concise read-only probe"),
+        detail: bi(
+          "等待模型通道返回首包后展开推演",
+          "Waiting for first token from model stream",
+        ),
+        ok: true,
+        status: "pending",
+      },
+      {
+        id: "readonly-ast-guard",
+        kind: "guard",
+        title: bi("生成探针与静态安全红线扫描", "Generate probe & run safety AST scan"),
+        detail: bi(
+          "等待极简脚本编写完成后执行只读红线静态校验",
+          "Running static read-only safety scan on generated script",
         ),
         ok: true,
         status: "pending",
@@ -875,8 +1137,11 @@ async function streamRehearsalAPI(
     if (signal?.aborted) throw e;
     throw new ApiError(
       navigator.onLine
-        ? bi("无法连接到服务，请稍后重试", "Unable to connect to the server; please try again later")
-        : bi("网络已断开", "Network disconnected"),
+        ? bi(
+            "无法连接到 Middleware Hub 后端服务（可能正在重启），请稍后重试",
+            "Unable to connect to Middleware Hub backend (may be restarting); please try again later",
+          )
+        : bi("本机网络已断开，请检查网络连接", "Device network disconnected"),
       0,
     );
   }
@@ -890,7 +1155,10 @@ async function streamRehearsalAPI(
     } catch {
       if (!res.ok) {
         throw new ApiError(
-          bi(`服务暂时不可用（${res.status}）`, `Service temporarily unavailable (${res.status})`),
+          bi(
+            `Middleware Hub 后端服务暂时不可用（HTTP ${res.status}）`,
+            `Middleware Hub backend temporarily unavailable (HTTP ${res.status})`,
+          ),
           res.status,
         );
       }
@@ -923,7 +1191,13 @@ async function streamRehearsalAPI(
       return;
     }
     const kind = String(ev.t || "");
-    if (kind === "step" && ev.step) {
+    if (kind === "steps" && Array.isArray(ev.steps)) {
+      const serverSteps = ev.steps as RehearsalTraceStep[];
+      onEvent((prev) => ({
+        ...prev,
+        steps: serverSteps,
+      }));
+    } else if (kind === "step" && ev.step) {
       const st = ev.step as RehearsalTraceStep;
       onEvent((prev) => {
         const idx = prev.steps.findIndex((x) => x.id === st.id);
@@ -978,28 +1252,40 @@ async function streamRehearsalAPI(
     }
   };
 
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    let nl = buf.indexOf("\n");
-    while (nl >= 0) {
-      const line = buf.slice(0, nl);
-      buf = buf.slice(nl + 1);
-      handlePayload(line);
-      nl = buf.indexOf("\n");
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let nl = buf.indexOf("\n");
+      while (nl >= 0) {
+        const line = buf.slice(0, nl);
+        buf = buf.slice(nl + 1);
+        handlePayload(line);
+        nl = buf.indexOf("\n");
+      }
     }
-  }
-  if (buf.trim()) {
-    for (const line of buf.split("\n")) {
-      handlePayload(line);
+    if (buf.trim()) {
+      for (const line of buf.split("\n")) {
+        handlePayload(line);
+      }
     }
+  } catch (e) {
+    if (signal?.aborted || (e as Error)?.name === "AbortError") throw e;
+    if (e instanceof ApiError) throw e;
+    throw new ApiError(
+      bi(
+        "与 Middleware Hub 后端服务的流式连接意外中断（可能正在重启或网络抖动），请重试",
+        "Streaming connection to Middleware Hub backend was interrupted; please retry",
+      ),
+      0,
+    );
   }
   if (!finalResult) {
     throw new ApiError(
       bi(
-        "连接在生成完成前中断，请重试",
-        "Connection closed before generation completed; please retry",
+        "与 Middleware Hub 后端服务的连接在生成完成前关闭，请重试",
+        "Connection to Middleware Hub backend closed before generation completed; please retry",
       ),
       502,
     );
@@ -1359,6 +1645,7 @@ function ShellCodeBlock({
   copyLabel,
   onDownload,
   onEdit,
+  onAskAI,
 }: {
   code: string;
   title: string;
@@ -1366,6 +1653,7 @@ function ShellCodeBlock({
   copyLabel?: string;
   onDownload?: () => void;
   onEdit?: () => void;
+  onAskAI?: () => void;
 }) {
   useLang();
   const [expanded, setExpanded] = useState(false);
@@ -1420,6 +1708,20 @@ function ShellCodeBlock({
             <button type="button" className="rh-code-btn" onClick={onEdit}>
               <IconEdit />
               <span>{bi("微调", "Edit")}</span>
+            </button>
+          )}
+          {onAskAI && (
+            <button
+              type="button"
+              className="rh-code-btn is-ai"
+              onClick={onAskAI}
+              title={bi(
+                "在右下角 AI 助手中讨论或对话修改此演练步骤",
+                "Discuss or modify this step with AI Assistant",
+              )}
+            >
+              <Spark size={12} />
+              <span>{bi("问 AI 修改", "Ask AI")}</span>
             </button>
           )}
         </div>
@@ -2013,7 +2315,11 @@ function splitInlineThinkingSteps(line: string): string[] {
       continue;
     }
     const before = line.slice(0, idx);
-    const afterPunct = /[。；！？.!?;]\s*$/.test(before);
+    // Never split right after a digit+dot (IP addresses like 172.30.4.26 or versions like 17.11.1)
+    if (/\d\.$/.test(before)) {
+      continue;
+    }
+    const afterPunct = /(?:[。；！？;!?]\s*|\.\s+)$/.test(before);
     const afterSequentialSpace =
       /\s+$/.test(before) && prevNum >= 1 && numVal === prevNum + 1;
     if (afterPunct || afterSequentialSpace) {
@@ -2178,7 +2484,18 @@ function RehearsalThinkingContent({
   compact?: boolean;
 }) {
   const blocks = useMemo(() => parseThinkingBlocks(text), [text]);
-  if (!blocks.length) return null;
+  if (!blocks.length) {
+    const trimmed = (text || "").trim();
+    if (!trimmed) return null;
+    return (
+      <div className={`rh-think-flow ${compact ? "is-compact" : ""}`}>
+        <p className="rh-think-para is-single">
+          {renderThinkingInline(trimmed)}
+          {streaming && <span className="rh-ai-caret" aria-hidden />}
+        </p>
+      </div>
+    );
+  }
 
   const nodes: React.ReactNode[] = [];
   let i = 0;
@@ -3079,11 +3396,27 @@ function RehearsalAIProcess({
                   )}
                 </div>
                 <div className="rh-ai-think-box" ref={thinkBoxRef}>
-                  {live.thinking ? (
+                  {live.thinking && live.thinking.trim() ? (
                     <RehearsalThinkingContent
                       text={live.thinking}
                       streaming={activePlayIdx === 3}
                     />
+                  ) : activePlayIdx >= 4 ? (
+                    <p className="rh-ai-think-wait">
+                      {bi(
+                        `模型已完成思考收敛，正在组装与校验结构化方案${
+                          live.chars > 0
+                            ? `（已接收 ${live.chars.toLocaleString("en-US")} 字）`
+                            : ""
+                        }…`,
+                        `Reasoning converged; assembling & validating structured output${
+                          live.chars > 0
+                            ? ` (${live.chars.toLocaleString("en-US")} chars received)`
+                            : ""
+                        }…`,
+                      )}
+                      <span className="rh-ai-caret" aria-hidden />
+                    </p>
                   ) : (
                     <p className="rh-ai-think-wait">
                       {bi(
@@ -4057,17 +4390,74 @@ export function buildPresets(c: ClusterView) {
   ];
 }
 
+function parseRehearsalGoalSections(
+  input?: string,
+): { label?: string; body: string }[] {
+  const raw = (input || "").replace(/\r\n/g, "\n").trim();
+  if (!raw) return [];
+  const headingRe =
+    /(?<=。)\s*(?=(?:变更对象|当前基线|现状|背景|目标方案|变更目标|改造方案|核心约束|约束条件|约束|前置核对|现场需先核实的只读探针|只读探针|演练范围|测试环境演练要求|测试演练|演练要求|验证要点|待用户确认项|待确认项|回退要求|回退方案|预期产出|产出)(?:[（(][^）)\n]{1,24}[）)])?\s*[：:])/g;
+  const chunks: string[] = [];
+  for (const line of raw.split("\n")) {
+    const t = line.trim();
+    if (!t) continue;
+    for (const part of t.split(headingRe)) {
+      const p = part.trim();
+      if (p) chunks.push(p);
+    }
+  }
+  const labelRe =
+    /^([^\n：:，,。；;]{2,18}(?:[（(][^）)\n]{1,24}[）)])?)\s*[：:]\s*(.+)$/;
+  return chunks.map((chunk) => {
+    const m = chunk.match(labelRe);
+    if (m) {
+      return { label: m[1].trim(), body: m[2].trim() };
+    }
+    return { body: chunk };
+  });
+}
+
+function rehearsalDotClass(item?: ChangeRehearsal | null): string {
+  if (!item) return "st-scoping";
+  if (item.voided) return "st-voided";
+  if (item.stage === "finalized") {
+    return item.applied ? "st-applied" : "st-pending-apply";
+  }
+  return `st-${item.stage}`;
+}
+
 function stepSummary(item: ChangeRehearsal) {
+  if (item.voided) {
+    return item.superseded_by
+      ? bi("已被替代", "Superseded")
+      : bi("已作废", "Voided");
+  }
   const steps = item.steps || [];
-  if (item.stage === "finalized") return bi("已定稿 SOP", "Finalized SOP");
+  const isQuick = item.mode === "quick";
+  const isLight = item.mode === "light";
+  if (item.stage === "finalized") {
+    if (item.applied) return bi("✓ 已落地", "✓ Applied");
+    return isQuick || isLight
+      ? bi("变更报告 · 待实施", "Report · Pending")
+      : bi("生产 SOP · 待实施", "SOP · Pending");
+  }
   if (item.stage === "rehearsing" && steps.length > 0) {
     const req = steps.filter((s) => !s.optional && s.phase !== "rollback");
     const done = req.filter(
       (s) => s.status === "passed" || s.status === "skipped",
     ).length;
-    return bi(`演练 ${done}/${req.length}`, `Step ${done}/${req.length}`);
+    return isQuick
+      ? bi(`执行 ${done}/${req.length}`, `Run ${done}/${req.length}`)
+      : isLight
+        ? bi(`验证 ${done}/${req.length}`, `Verify ${done}/${req.length}`)
+        : bi(`演练 ${done}/${req.length}`, `Step ${done}/${req.length}`);
   }
-  return STAGE_META[item.stage]?.short || bi("进行中", "In progress");
+  const metaMap = isQuick
+    ? QUICK_STAGE_META
+    : isLight
+      ? LIGHT_STAGE_META
+      : STAGE_META;
+  return metaMap[item.stage]?.short || bi("进行中", "In progress");
 }
 
 /* ---------- Main Cluster Rehearsal Workbench ---------- */
@@ -4084,6 +4474,7 @@ export function ClusterRehearsal({
   focused = false,
   onFocusChange,
   onListUpdated,
+  onClusterChanged,
 }: {
   c: ClusterView;
   rehearsalId?: string;
@@ -4091,6 +4482,7 @@ export function ClusterRehearsal({
   focused?: boolean;
   onFocusChange?: (v: boolean) => void;
   onListUpdated?: () => void;
+  onClusterChanged?: () => void;
 }) {
   const lang = useLang();
   const listUrl = rehearsalsListPath(c.id);
@@ -4098,17 +4490,25 @@ export function ClusterRehearsal({
     () => initialList ?? cached<ChangeRehearsal[]>(listUrl) ?? null,
   );
   const [loadErr, setLoadErr] = useState("");
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState(() => hasRehearsalIntentFor(c.id));
+  const creatingRef = useRef(creating);
+  creatingRef.current = creating;
   const [pickedPreset, setPickedPreset] = useState<RehearsalPresetKind | null>(
     null,
   );
+  const [launchMode, setLaunchMode] = useState<RehearsalModeChoice>("auto");
   const [goal, setGoal] = useState("");
   const [title, setTitle] = useState("");
+  const [secCtxDraft, setSecCtxDraft] =
+    useState<RehearsalSecurityContext | null>(null);
+  const [srcCtxDraft, setSrcCtxDraft] =
+    useState<RehearsalSourceContext | null>(null);
   const [goalImages, setGoalImages] = useState<DraftImage[]>([]);
   const [dragGoal, setDragGoal] = useState(false);
   const [liveCreate, setLiveCreate] = useState<LiveAIState | null>(null);
   const [ledgerCollapsed, setLedgerCollapsed] = useState(false);
   const [deliveryOpen, setDeliveryOpen] = useState(false);
+  const [sessMenuOpen, setSessMenuOpen] = useState(false);
   const [freshId, setFreshId] = useState<string | null>(null);
   const [ledgerQuery, setLedgerQuery] = useState("");
   const [ledgerFilter, setLedgerFilter] = useState<
@@ -4117,7 +4517,13 @@ export function ClusterRehearsal({
 
   const createAbortRef = useRef<AbortController | null>(null);
   const seededMapRef = useRef<Map<string, ChangeRehearsal>>(new Map());
+  const composeRef = useRef<HTMLDivElement | null>(null);
   const goalRef = useRef<HTMLTextAreaElement | null>(null);
+  const [goalEl, setGoalEl] = useState<HTMLTextAreaElement | null>(null);
+  const bindGoalRef = useCallback((node: HTMLTextAreaElement | null) => {
+    goalRef.current = node;
+    setGoalEl(node);
+  }, []);
   const goalFileInputRef = useRef<HTMLInputElement | null>(null);
   const ledgerShellRef = useRef<HTMLDivElement | null>(null);
   const asideShellRef = useRef<HTMLDivElement | null>(null);
@@ -4135,6 +4541,16 @@ export function ClusterRehearsal({
     : noVision;
   const narrow = useMedia("(max-width: 960px)");
   const creatingBusy = Boolean(liveCreate && !liveCreate.error);
+  const spacious = useSpaciousComposer(
+    composeRef,
+    Boolean(
+      goal.trim() ||
+        title.trim() ||
+        goalImages.length > 0 ||
+        dragGoal ||
+        creatingBusy,
+    ),
+  );
   const ledgerOpen = Boolean(focused && !ledgerCollapsed && !narrow);
 
   const engageFocus = useCallback(() => {
@@ -4175,23 +4591,54 @@ export function ClusterRehearsal({
     [c.id, c.app_name, c.version, c.hosts, lang],
   );
 
-  // Auto-grow launcher textarea height smoothly when populated; clear inline height when empty so CSS spring controls idle/hover expansion
+  // Auto-grow launcher textarea height smoothly whenever the textarea mounts, text changes, or width changes
   const hasLiveCreate = Boolean(liveCreate);
   useLayoutEffect(() => {
-    const el = goalRef.current;
+    const el = goalEl;
     if (!el) return;
-    if (!goal) {
-      el.style.height = "";
-      el.style.overflowY = "hidden";
-      return;
-    }
-    el.style.height = "auto";
-    const minH = hasLiveCreate ? 72 : 104;
-    const maxH = 280;
-    const next = Math.min(Math.max(el.scrollHeight, minH), maxH);
-    el.style.height = `${next}px`;
-    el.style.overflowY = el.scrollHeight > maxH ? "auto" : "hidden";
-  }, [goal, creating, hasLiveCreate]);
+    const syncHeight = () => {
+      if (!goal) {
+        el.style.height = "";
+        el.style.overflowY = "hidden";
+        return;
+      }
+      const minH = hasLiveCreate ? 72 : 104;
+      const maxH = hasLiveCreate
+        ? 220
+        : Math.max(360, Math.min(560, Math.floor(window.innerHeight * 0.56)));
+      el.style.minHeight = "0px";
+      el.style.height = "0px";
+      const contentH = el.scrollHeight;
+      el.style.minHeight = "";
+      const next = Math.min(Math.max(contentH, minH), maxH);
+      el.style.height = `${next}px`;
+      el.style.overflowY = contentH > maxH ? "auto" : "hidden";
+    };
+    syncHeight();
+    let raf = window.requestAnimationFrame(syncHeight);
+    const onResize = () => {
+      window.cancelAnimationFrame(raf);
+      raf = window.requestAnimationFrame(syncHeight);
+    };
+    let lastW = el.clientWidth;
+    const ro =
+      typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(() => {
+            const w = el.clientWidth;
+            if (w > 0 && w !== lastW) {
+              lastW = w;
+              onResize();
+            }
+          })
+        : null;
+    ro?.observe(el);
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      ro?.disconnect();
+      window.removeEventListener("resize", onResize);
+    };
+  }, [goalEl, goal, hasLiveCreate]);
 
   // Reset rail collapse and side drawer when switching clusters
   useEffect(() => {
@@ -4203,33 +4650,73 @@ export function ClusterRehearsal({
     setLedgerFilter("all");
   }, [c.id]);
 
-  // Consume one-shot deep-link intent from Cluster Overview if present (stay in current focus state until execution starts)
-  useEffect(() => {
+  // Consume one-shot deep-link intent from Cluster Overview / AI Chat / Security if present
+  const consumeIntent = useCallback(() => {
     try {
-      const raw = sessionStorage.getItem(INTENT_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as {
-        cluster?: string;
-        kind?: RehearsalPresetKind;
-        create?: boolean;
-      };
-      if (parsed.cluster !== c.id) return;
-      sessionStorage.removeItem(INTENT_KEY);
+      const raw = sessionStorage.getItem(REHEARSAL_INTENT_KEY);
+      if (!raw) return false;
+      const parsed = JSON.parse(raw) as Partial<RehearsalIntentPayload>;
+      if (parsed.cluster !== c.id) return false;
+      sessionStorage.removeItem(REHEARSAL_INTENT_KEY);
+      creatingRef.current = true;
       setCreating(true);
       setLiveCreate(null);
-      if (parsed.kind) {
-        const found = presets.find((p) => p.kind === parsed.kind);
-        if (found) {
-          setPickedPreset(found.kind);
-          setTitle(found.title);
-          setGoal(found.goal);
+      if (parsed.securityContext) {
+        setPickedPreset(null);
+        setSrcCtxDraft(null);
+        setSecCtxDraft(parsed.securityContext);
+        setLaunchMode("full");
+        setTitle(parsed.title || "");
+        setGoal(parsed.goal || "");
+      } else {
+        setSecCtxDraft(null);
+        setLaunchMode(
+          parsed.mode === "quick" ||
+            parsed.mode === "light" ||
+            parsed.mode === "full" ||
+            parsed.mode === "auto"
+            ? parsed.mode
+            : "auto",
+        );
+        const found = parsed.kind
+          ? presets.find((p) => p.kind === parsed.kind)
+          : undefined;
+        const resolvedTitle = parsed.title || found?.title || "";
+        const resolvedGoal = parsed.goal || found?.goal || "";
+        setPickedPreset(found?.kind ?? null);
+        setTitle(resolvedTitle);
+        setGoal(resolvedGoal);
+        if (parsed.sourceContext) {
+          setSrcCtxDraft(parsed.sourceContext);
+        } else if (found || resolvedTitle || resolvedGoal) {
+          const appVer = `${c.app_name}${c.version ? ` ${c.version}` : ""}`.trim();
+          setSrcCtxDraft({
+            source: "overview",
+            badge: found
+              ? bi(`快捷发起 · ${found.label}`, `Quick Launch · ${found.label}`)
+              : bi("外部带入 · 变更演练", "Imported · Change Rehearsal"),
+            subject: resolvedTitle || found?.label || bi("变更演练", "Change Rehearsal"),
+            tags: [c.id, appVer].filter(Boolean),
+          });
+        } else {
+          setSrcCtxDraft(null);
         }
       }
-      requestAnimationFrame(() => goalRef.current?.focus());
+      requestAnimationFrame(() => goalRef.current?.focus({ preventScroll: true }));
+      return true;
     } catch {
-      /* ignore */
+      return false;
     }
   }, [c.id, presets]);
+
+  useEffect(() => {
+    consumeIntent();
+    const onIntent = () => {
+      consumeIntent();
+    };
+    window.addEventListener(REHEARSAL_INTENT_EVENT, onIntent);
+    return () => window.removeEventListener(REHEARSAL_INTENT_EVENT, onIntent);
+  }, [consumeIntent]);
 
   useEffect(() => {
     if (initialList && list === null) {
@@ -4252,7 +4739,13 @@ export function ClusterRehearsal({
         }
         setList(r);
         onListUpdatedRef.current?.();
-        if (allowRedirect && !rehearsalId && r.length > 0 && !creating) {
+        if (
+          allowRedirect &&
+          !rehearsalId &&
+          r.length > 0 &&
+          !creatingRef.current &&
+          !hasRehearsalIntentFor(c.id)
+        ) {
           go(
             {
               name: "deliveries",
@@ -4267,13 +4760,14 @@ export function ClusterRehearsal({
         setLoadErr((e as Error).message || bi("读取失败", "Failed to load"));
       }
     },
-    [c.id, listUrl, rehearsalId, creating],
+    [c.id, listUrl, rehearsalId],
   );
 
   useEffect(() => {
     const hit = initialList ?? cached<ChangeRehearsal[]>(listUrl) ?? null;
     setList(hit);
-    if (hit && hit.length > 0 && !rehearsalId && !creating) {
+    const pendingIntent = creatingRef.current || hasRehearsalIntentFor(c.id);
+    if (hit && hit.length > 0 && !rehearsalId && !pendingIntent) {
       go(
         {
           name: "deliveries",
@@ -4284,7 +4778,7 @@ export function ClusterRehearsal({
         { replace: true, instant: true },
       );
     }
-    void loadList(true);
+    void loadList(!pendingIntent);
   }, [c.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const showLauncher = creating || (list !== null && list.length === 0);
@@ -4398,6 +4892,8 @@ export function ClusterRehearsal({
   }
 
   const applyPreset = (p: (typeof presets)[number]) => {
+    setSecCtxDraft(null);
+    setSrcCtxDraft(null);
     setPickedPreset(p.kind);
     setTitle(p.title);
     setGoal(p.goal);
@@ -4409,17 +4905,47 @@ export function ClusterRehearsal({
     engageFocus();
     const ac = new AbortController();
     createAbortRef.current = ac;
+    const effectiveMode: RehearsalModeChoice = secCtxDraft ? "full" : launchMode;
     setLiveCreate(
       createInitialLiveState(
-        "create",
-        bi(
-          "AI 正在研判变更诉求与集群高可用边界",
-          "AI is analyzing change goal & HA boundaries",
-        ),
-        bi(
-          "正在读取集群基线并建立模型连接…",
-          "Loading cluster baseline & connecting to AI model…",
-        ),
+        effectiveMode === "quick"
+          ? "create-quick"
+          : effectiveMode === "light"
+            ? "create-light"
+            : "create",
+        effectiveMode === "quick"
+          ? bi(
+              "AI 正在按极速变更直出执行步骤",
+              "AI is generating direct steps (Quick Change)",
+            )
+          : effectiveMode === "light"
+            ? bi(
+                "AI 正在按简单推演直出极简只读探针",
+                "AI is generating concise probe (Light Rehearsal)",
+              )
+            : effectiveMode === "auto"
+              ? bi(
+                  "AI 正在评估复杂度并自动选择变更档位",
+                  "AI is evaluating complexity & change workflow depth",
+                )
+              : bi(
+                  "AI 正在研判变更诉求与集群高可用边界",
+                  "AI is analyzing change goal & HA boundaries",
+                ),
+        effectiveMode === "quick"
+          ? bi(
+              "跳过边界问答与前置探针，正在直出 2～3 步执行核验与独立回退预案…",
+              "Skipping scope & probe; drafting 2–3 direct execution steps & rollback plan…",
+            )
+          : effectiveMode === "light"
+            ? bi(
+                "跳过窗口问答，正在筛选 2～4 项核心核查点并校验只读红线…",
+                "Skipping scope Q&A; selecting 2–4 core live checks & validating read-only safety…",
+              )
+            : bi(
+                "正在读取集群基线并建立模型连接…",
+                "Loading cluster baseline & connecting to AI model…",
+              ),
         pick.current,
       ),
     );
@@ -4429,6 +4955,7 @@ export function ClusterRehearsal({
         {
           title: title.trim() || undefined,
           goal: goal.trim(),
+          mode: effectiveMode,
           images:
             goalImages.length > 0
               ? goalImages.map((im) => im.dataUrl)
@@ -4437,6 +4964,7 @@ export function ClusterRehearsal({
           effort: pick.current?.effort?.includes(aiOpts.pref.think)
             ? aiOpts.pref.think
             : undefined,
+          security_context: secCtxDraft || undefined,
         },
         (updater) => setLiveCreate((prev) => (prev ? updater(prev) : prev)),
         ac.signal,
@@ -4446,6 +4974,9 @@ export function ClusterRehearsal({
       setFreshId(created.id);
       setCreating(false);
       setPickedPreset(null);
+      setLaunchMode("auto");
+      setSecCtxDraft(null);
+      setSrcCtxDraft(null);
       setGoal("");
       setTitle("");
       setGoalImages([]);
@@ -4517,6 +5048,7 @@ export function ClusterRehearsal({
     : null;
 
   const selectSession = (item: ChangeRehearsal) => {
+    setSessMenuOpen(false);
     setCreating(false);
     setLiveCreate(null);
     go({
@@ -4541,9 +5073,10 @@ export function ClusterRehearsal({
           type="button"
           className="rh-sess-menu-new"
           onClick={() => {
+            setSessMenuOpen(false);
             setCreating(true);
             setLiveCreate(null);
-            requestAnimationFrame(() => goalRef.current?.focus());
+            requestAnimationFrame(() => goalRef.current?.focus({ preventScroll: true }));
           }}
         >
           <IconPlus /> {bi("新建演练", "New Rehearsal")}
@@ -4586,22 +5119,38 @@ export function ClusterRehearsal({
             </button>
           </div>
         ) : (
-          filteredSessions.map((item) => {
+          [...filteredSessions]
+            .sort((a, b) => Number(Boolean(a.voided)) - Number(Boolean(b.voided)))
+            .map((item) => {
             const on = !showLauncher && item.id === activeId;
+            const hasConflict = Boolean(
+              !item.applied &&
+                !item.voided &&
+                item.conflict_alerts?.some((a) => a.severity === "conflict"),
+            );
             return (
               <button
                 key={item.id}
                 type="button"
                 role="option"
                 aria-selected={on}
-                className={`rh-sess-menu-item ${on ? "on" : ""}`}
+                className={`rh-sess-menu-item ${on ? "on" : ""}${item.voided ? " is-voided" : ""}`}
                 onClick={() => selectSession(item)}
               >
-                <span className={`rh-sdot st-${item.stage}`} aria-hidden />
+                <span className={`rh-sdot ${rehearsalDotClass(item)}`} aria-hidden />
                 <span className="rh-sess-menu-main">
                   <b>{item.title}</b>
                   <small>
-                    <span>{stepSummary(item)}</span>
+                    <span
+                      className={`rh-sess-st${item.applied ? " is-applied" : item.voided ? " is-voided" : item.stage === "finalized" ? " is-pending" : ""}`}
+                    >
+                      {stepSummary(item)}
+                    </span>
+                    {hasConflict && (
+                      <span className="rh-sess-conflict">
+                        {bi("· 冲突提醒", "· Conflict")}
+                      </span>
+                    )}
                     <span>·</span>
                     <span>{ago(item.updated_at)}</span>
                   </small>
@@ -4736,7 +5285,14 @@ export function ClusterRehearsal({
               <Dropdown
                 trigger="click"
                 position="bl"
-                triggerProps={{ autoFitPosition: true }}
+                popupVisible={sessMenuOpen}
+                onVisibleChange={setSessMenuOpen}
+                getPopupContainer={(node) =>
+                  (node.closest(".rh-topbar") as HTMLElement) ||
+                  node.parentElement ||
+                  document.body
+                }
+                triggerProps={{ autoFitPosition: true, updateOnScroll: true }}
                 droplist={sessionDroplist}
               >
                 <button
@@ -4745,7 +5301,7 @@ export function ClusterRehearsal({
                   aria-label={bi("切换演练记录", "Switch rehearsal")}
                 >
                   <span
-                    className={`rh-sdot st-${activeSessionSummary?.stage || "scoping"}`}
+                    className={`rh-sdot ${rehearsalDotClass(activeSessionSummary)}`}
                     aria-hidden
                   />
                   <span className="rh-sess-trigger-txt">
@@ -4762,13 +5318,14 @@ export function ClusterRehearsal({
                 type="button"
                 className={`rh-new-btn ${creating ? "on" : ""}`}
                 onClick={() => {
+                  setSessMenuOpen(false);
                   if (creating) {
                     setCreating(false);
                     setLiveCreate(null);
                   } else {
                     setCreating(true);
                     setLiveCreate(null);
-                    requestAnimationFrame(() => goalRef.current?.focus());
+                    requestAnimationFrame(() => goalRef.current?.focus({ preventScroll: true }));
                   }
                 }}
               >
@@ -4861,7 +5418,7 @@ export function ClusterRehearsal({
                         } else {
                           setCreating(true);
                           setLiveCreate(null);
-                          requestAnimationFrame(() => goalRef.current?.focus());
+                          requestAnimationFrame(() => goalRef.current?.focus({ preventScroll: true }));
                         }
                       }}
                     >
@@ -5034,6 +5591,16 @@ export function ClusterRehearsal({
                             <span className={`rh-ledger-pill st-${item.stage}`}>
                               {stepSummary(item)}
                             </span>
+                            {item.mode === "quick" && (
+                              <span className="rh-mode-pill is-quick is-xs">
+                                {bi("极速", "Quick")}
+                              </span>
+                            )}
+                            {item.mode === "light" && (
+                              <span className="rh-mode-pill is-light is-xs">
+                                {bi("简单", "Light")}
+                              </span>
+                            )}
                             <span className="num">{ago(item.updated_at)}</span>
                           </div>
                         </button>
@@ -5046,27 +5613,51 @@ export function ClusterRehearsal({
                   <div className="rh-ledger-group">
                     <span className="rh-ledger-gtitle num">
                       {bi(
-                        `已定稿 (${visibleFinalized.length})`,
-                        `Finalized (${visibleFinalized.length})`,
+                        `已归档 (${visibleFinalized.length})`,
+                        `Archived (${visibleFinalized.length})`,
                       )}
                     </span>
-                    {visibleFinalized.map((item) => {
+                    {[...visibleFinalized]
+                      .sort((a, b) => Number(Boolean(a.voided)) - Number(Boolean(b.voided)))
+                      .map((item) => {
                       const on = !showLauncher && item.id === activeId;
+                      const hasConflict = Boolean(
+                        !item.applied &&
+                          !item.voided &&
+                          item.conflict_alerts?.some((a) => a.severity === "conflict"),
+                      );
                       return (
                         <button
                           key={item.id}
                           type="button"
-                          className={`rh-ledger-card ${on ? "on" : ""}`}
+                          className={`rh-ledger-card ${on ? "on" : ""}${item.voided ? " is-voided" : ""}`}
                           onClick={() => selectSession(item)}
                         >
                           <div className="rh-ledger-card-top">
-                            <span className="rh-sdot st-finalized" aria-hidden />
+                            <span className={`rh-sdot ${rehearsalDotClass(item)}`} aria-hidden />
                             <b>{item.title}</b>
                           </div>
                           <div className="rh-ledger-card-meta">
-                            <span className="rh-ledger-pill st-finalized">
-                              {bi("生产 SOP 已归档", "SOP Archived")}
+                            <span
+                              className={`rh-ledger-pill st-finalized${item.voided ? " is-voided" : item.applied ? " is-applied" : " is-pending-apply"}`}
+                            >
+                              {stepSummary(item)}
                             </span>
+                            {hasConflict && (
+                              <span className="rh-ledger-conflict">
+                                {bi("冲突", "Conflict")}
+                              </span>
+                            )}
+                            {item.mode === "quick" && (
+                              <span className="rh-mode-pill is-quick is-xs">
+                                {bi("极速", "Quick")}
+                              </span>
+                            )}
+                            {item.mode === "light" && (
+                              <span className="rh-mode-pill is-light is-xs">
+                                {bi("简单", "Light")}
+                              </span>
+                            )}
                             <span className="num">{ago(item.updated_at)}</span>
                           </div>
                         </button>
@@ -5187,7 +5778,8 @@ export function ClusterRehearsal({
               </div>
 
               <div
-                className={`rh-compose ${offline ? "off" : ""} ${dragGoal ? "is-drag" : ""} ${creatingBusy ? "is-busy" : ""} ${goal || title || goalImages.length > 0 || dragGoal || creatingBusy ? "is-open" : ""}`}
+                ref={composeRef}
+                className={`rh-compose ${offline ? "off" : ""} ${dragGoal ? "is-drag" : ""} ${creatingBusy ? "is-busy" : ""} ${spacious.expanded ? "is-writing" : ""}`}
                 onDragOver={(e) => {
                   if (e.dataTransfer?.types?.includes("Files")) {
                     e.preventDefault();
@@ -5212,44 +5804,152 @@ export function ClusterRehearsal({
                   }
                 }}
               >
-                <div className="rh-compose-title">
-                  <input
-                    type="text"
-                    value={title}
-                    disabled={creatingBusy}
-                    onChange={(e) => setTitle(e.target.value)}
-                    maxLength={100}
-                    placeholder={bi(
-                      "演练标题（可选，留空由 AI 按诉求自动归纳命名）",
-                      "Rehearsal title (optional — AI auto-names from goal if blank)",
+                {secCtxDraft ? (
+                  <div className="rh-sec-ctx-chip">
+                    <div className="rh-sec-ctx-head">
+                      <div className="rh-sec-ctx-info">
+                        <span className="rh-sec-ctx-tag">
+                          {secCtxDraft.kind === "cve_patch"
+                            ? bi("安全修复 · 漏洞补丁升级", "Security · CVE Patch")
+                            : secCtxDraft.kind === "cert_rotation"
+                              ? bi("安全修复 · TLS 证书滚动轮换", "Security · Cert Rotation")
+                              : bi("安全修复 · 配置基线加固", "Security · Config Hardening")}
+                        </span>
+                        {secCtxDraft.package ? (
+                          <span className="mono rh-sec-ctx-ver">
+                            {secCtxDraft.package}
+                            {secCtxDraft.current_version ? ` ${secCtxDraft.current_version}` : ""}
+                            {secCtxDraft.target_version ? ` → ${secCtxDraft.target_version}` : ""}
+                          </span>
+                        ) : secCtxDraft.cert_target ? (
+                          <span className="mono rh-sec-ctx-ver">{secCtxDraft.cert_target}</span>
+                        ) : title ? (
+                          <span className="rh-sec-ctx-ver">{title}</span>
+                        ) : null}
+                        {secCtxDraft.repo_fix_ready && (
+                          <span className="rh-sec-ctx-ok">
+                            {bi("软件源已有修复版", "Fix in repo")}
+                          </span>
+                        )}
+                      </div>
+                      {!creatingBusy && (
+                        <button
+                          type="button"
+                          className="rh-sec-ctx-x"
+                          onClick={() => {
+                            setPickedPreset(null);
+                            setSecCtxDraft(null);
+                            setTitle("");
+                            setGoal("");
+                            setGoalImages([]);
+                            goalRef.current?.focus();
+                          }}
+                          aria-label={bi("清除安全演练草稿", "Clear security rehearsal draft")}
+                          title={bi("清除并切换为普通演练", "Clear and switch to standard rehearsal")}
+                        >
+                          <IconClose />
+                        </button>
+                      )}
+                    </div>
+                    {secCtxDraft.cves && secCtxDraft.cves.length > 0 && (
+                      <div className="rh-sec-ctx-cves">
+                        {secCtxDraft.cves.slice(0, 8).map((id) => (
+                          <span key={id} className="mono rh-sec-ctx-cve">
+                            {id}
+                          </span>
+                        ))}
+                        {secCtxDraft.cves.length > 8 && (
+                          <span className="faint small">
+                            +{secCtxDraft.cves.length - 8}
+                          </span>
+                        )}
+                      </div>
                     )}
-                    aria-label={bi("演练标题", "Rehearsal title")}
-                  />
-                  {(title || goal || goalImages.length > 0) && !creatingBusy && (
-                    <button
-                      type="button"
-                      className="rh-clear-btn"
-                      onClick={() => {
-                        setPickedPreset(null);
-                        setTitle("");
-                        setGoal("");
-                        setGoalImages([]);
-                        goalRef.current?.focus();
-                      }}
-                      aria-label={bi("清空输入", "Clear input")}
-                      title={bi("清空", "Clear")}
-                    >
-                      <IconClose />
-                    </button>
-                  )}
-                </div>
+                  </div>
+                ) : srcCtxDraft ? (
+                  <div className="rh-sec-ctx-chip">
+                    <div className="rh-sec-ctx-head">
+                      <div className="rh-sec-ctx-info">
+                        <span className="rh-sec-ctx-tag">
+                          {srcCtxDraft.badge}
+                        </span>
+                        {(srcCtxDraft.subject || title) && (
+                          <span className="rh-sec-ctx-ver">
+                            {srcCtxDraft.subject || title}
+                          </span>
+                        )}
+                      </div>
+                      {!creatingBusy && (
+                        <button
+                          type="button"
+                          className="rh-sec-ctx-x"
+                          onClick={() => {
+                            setPickedPreset(null);
+                            setSrcCtxDraft(null);
+                            setTitle("");
+                            setGoal("");
+                            setGoalImages([]);
+                            goalRef.current?.focus();
+                          }}
+                          aria-label={bi("清除带入的演练草稿", "Clear imported rehearsal draft")}
+                          title={bi("清除并切换为手动新建演练", "Clear and switch to manual rehearsal")}
+                        >
+                          <IconClose />
+                        </button>
+                      )}
+                    </div>
+                    {srcCtxDraft.tags && srcCtxDraft.tags.length > 0 && (
+                      <div className="rh-sec-ctx-cves">
+                        {srcCtxDraft.tags.slice(0, 6).map((t) => (
+                          <span key={t} className="mono rh-sec-ctx-cve">
+                            {t}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="rh-compose-title">
+                    <input
+                      type="text"
+                      value={title}
+                      disabled={creatingBusy}
+                      onPointerDown={spacious.onFieldPointerDown}
+                      onChange={(e) => setTitle(e.target.value)}
+                      maxLength={100}
+                      placeholder={bi(
+                        "演练标题（可选，留空由 AI 按诉求自动归纳命名）",
+                        "Rehearsal title (optional — AI auto-names from goal if blank)",
+                      )}
+                      aria-label={bi("演练标题", "Rehearsal title")}
+                    />
+                    {(title || goal || goalImages.length > 0) && !creatingBusy && (
+                      <button
+                        type="button"
+                        className="rh-clear-btn"
+                        onClick={() => {
+                          setPickedPreset(null);
+                          setTitle("");
+                          setGoal("");
+                          setGoalImages([]);
+                          goalRef.current?.focus();
+                        }}
+                        aria-label={bi("清空输入", "Clear input")}
+                        title={bi("清空", "Clear")}
+                      >
+                        <IconClose />
+                      </button>
+                    )}
+                  </div>
+                )}
 
                 <textarea
-                  ref={goalRef}
+                  ref={bindGoalRef}
                   value={goal}
                   disabled={creatingBusy}
                   rows={1}
                   maxLength={4000}
+                  onPointerDown={spacious.onFieldPointerDown}
                   onChange={(e) => setGoal(e.target.value)}
                   onKeyDown={(e) => {
                     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
@@ -5274,6 +5974,61 @@ export function ClusterRehearsal({
                     />
                   </div>
                 )}
+
+                <div className="rh-mode-bar">
+                  <Segmented<RehearsalModeChoice>
+                    size="sm"
+                    label={bi("变更档位", "Change workflow")}
+                    value={secCtxDraft ? "full" : launchMode}
+                    onChange={(v) => {
+                      if (!creatingBusy && !secCtxDraft) setLaunchMode(v);
+                    }}
+                    options={[
+                      {
+                        value: "auto",
+                        label: bi("自动判断", "Auto"),
+                      },
+                      {
+                        value: "quick",
+                        label: bi("极速变更", "Quick"),
+                      },
+                      {
+                        value: "light",
+                        label: bi("简单推演", "Light"),
+                      },
+                      {
+                        value: "full",
+                        label: bi("全量推演", "Full"),
+                      },
+                    ]}
+                  />
+                  <span className="rh-mode-hint">
+                    {secCtxDraft
+                      ? bi(
+                          "安全漏洞与证书修复默认走全量推演，确保核验与 VEX 闭环",
+                          "Security remediation runs Full Rehearsal for full verification & VEX sync",
+                        )
+                      : launchMode === "quick"
+                        ? bi(
+                            "两步直达：跳过问答与探针 · 直出 2～3 步执行核验 → 一键出《变更报告》",
+                            "2-step direct: Skip scope & probe · 2–3 direct steps → 1-click Change Report",
+                          )
+                        : launchMode === "light"
+                          ? bi(
+                              "三步轻演练：单屏只读快采 → 精简核验 → 归档《变更报告》",
+                              "3-step light: Concise probe → Quick verify → Change Report",
+                            )
+                          : launchMode === "full"
+                            ? bi(
+                                "完整四步：边界对齐 → 只读探针 → 测试演练 → 生产实施方案",
+                                "Full 4-stage: Scope → Probe → Staging Rehearsal → Production SOP",
+                              )
+                            : bi(
+                                "简单热改直出步骤留报告，未知状态先快采，重启/升级/切主走完整四步",
+                                "Auto-routes simple live tweaks to Quick Change, uncertain state to Light, high-risk to Full",
+                              )}
+                  </span>
+                </div>
 
                 <div className="rh-compose-foot">
                   <div className="rh-compose-tools">
@@ -5352,20 +6107,20 @@ export function ClusterRehearsal({
                       }
                       title={
                         isMac
-                          ? bi(
-                              "⌘ + Enter 对齐变更边界 · Enter 换行",
-                              "⌘ + Enter Align scope · Enter newline",
-                            )
-                          : bi(
-                              "Ctrl + Enter 对齐变更边界 · Enter 换行",
-                              "Ctrl + Enter Align scope · Enter newline",
-                            )
+                          ? bi("⌘ + Enter 发起推演 · Enter 换行", "⌘ + Enter Launch · Enter newline")
+                          : bi("Ctrl + Enter 发起推演 · Enter 换行", "Ctrl + Enter Launch · Enter newline")
                       }
                       loading={creatingBusy}
                       disabled={!goal.trim() || offline}
                       onClick={() => void startNew()}
                     >
-                      {bi("对齐变更边界", "Align Scope")}
+                      {secCtxDraft || launchMode === "full"
+                        ? bi("对齐变更边界", "Align Scope")
+                        : launchMode === "quick"
+                          ? bi("直出执行步骤", "Generate Steps")
+                          : launchMode === "light"
+                            ? bi("直出极简探针", "Generate Probe")
+                            : bi("智能研判并发起", "Analyze & Start")}
                     </Button>
                   </div>
                 </div>
@@ -5391,12 +6146,14 @@ export function ClusterRehearsal({
                 list?.find((x) => x.id === activeId) ||
                 cached<ChangeRehearsal>(rehearsalItemPath(c.id, activeId))
               }
+              peers={list || []}
               autoExpandCreateTrace={freshId === activeId}
               offline={offline}
               noVision={effectiveNoVision}
               pick={pick}
               aiOpts={aiOpts}
               onListChanged={() => loadList(false)}
+              onClusterChanged={onClusterChanged}
               onEngageFocus={engageFocus}
             />
           ) : null}
@@ -6739,6 +7496,7 @@ function ProbeExecutionKit({
   warnings,
   notes,
   hasEchoInput,
+  scriptUpdated,
   onDownload,
 }: {
   script: string;
@@ -6747,6 +7505,7 @@ function ProbeExecutionKit({
   warnings: string[];
   notes: string[];
   hasEchoInput: boolean;
+  scriptUpdated?: boolean;
   onDownload: () => void;
 }) {
   const lang = useLang();
@@ -6835,6 +7594,11 @@ function ProbeExecutionKit({
                   )}
                 </span>
               )}
+              {scriptUpdated && (
+                <span className="rh-shield-pill ok">
+                  {bi("已按报错自动修订", "Auto-fixed")}
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -6870,6 +7634,27 @@ function ProbeExecutionKit({
           </div>
         )}
       </div>
+
+      {script && (
+        <div className="rh-probe-runbar">
+          <div className="rh-probe-runbar-cmd">
+            <span className="rh-probe-runbar-lbl">
+              {bi("现场运行方式", "Run command")}
+            </span>
+            <code className="mono">{`bash /tmp/${fileName}`}</code>
+            <span className="rh-probe-runbar-tip">
+              {bi(
+                "请用 bash 执行（勿用 sh，脚本已内置 bash 自切换保护）",
+                "Run with bash (not sh; script includes auto bash guard)",
+              )}
+            </span>
+          </div>
+          <CopyCodeBtn
+            text={`bash /tmp/${fileName}`}
+            label={bi("复制命令", "Copy cmd")}
+          />
+        </div>
+      )}
 
       {warnings.length > 0 && (
         <div className="rh-callout warn rh-kit-warn" role="alert">
@@ -6948,26 +7733,31 @@ function RehearsalSessionView({
   c,
   id,
   initialSession,
+  peers = [],
   autoExpandCreateTrace = false,
   offline,
   noVision,
   pick,
   aiOpts,
   onListChanged,
+  onClusterChanged,
   onEngageFocus,
 }: {
   c: ClusterView;
   id: string;
   initialSession?: ChangeRehearsal;
+  peers?: ChangeRehearsal[];
   autoExpandCreateTrace?: boolean;
   offline: boolean;
   noVision: boolean;
   pick: ReturnType<typeof useModelPick>;
   aiOpts: ReturnType<typeof useAIOptions>;
   onListChanged: () => Promise<void>;
+  onClusterChanged?: () => void;
   onEngageFocus?: () => void;
 }) {
   useLang();
+  const dock = useAIDock();
   const [r, setR] = useState<ChangeRehearsal | null>(
     () => initialSession || null,
   );
@@ -6983,6 +7773,9 @@ function RehearsalSessionView({
   // Live streaming states for Stage 1 -> 2 and Stage 2 -> 3
   const [liveScope, setLiveScope] = useState<LiveAIState | null>(null);
   const [liveProbe, setLiveProbe] = useState<LiveAIState | null>(null);
+  const [probeAction, setProbeAction] = useState<"analyze" | "diagnose">(
+    "analyze",
+  );
   const [freshTraceStage, setFreshTraceStage] = useState<string>(
     autoExpandCreateTrace ? "create" : "",
   );
@@ -7030,6 +7823,15 @@ function RehearsalSessionView({
 
   // Step 3 state
   const [phaseFilter, setPhaseFilter] = useState<string>("all");
+  const [doneExpandCmd, setDoneExpandCmd] = useState<{
+    expand: boolean;
+    seq: number;
+  }>({ expand: false, seq: 0 });
+  const [goalOpen, setGoalOpen] = useState(false);
+
+  useEffect(() => {
+    setGoalOpen(false);
+  }, [id]);
 
   const switchStage = (
     next: ChangeRehearsal["stage"],
@@ -7040,13 +7842,40 @@ function RehearsalSessionView({
     const a = STAGE_ORDER.indexOf(viewStage);
     const b = STAGE_ORDER.indexOf(next);
     setStageDir(b >= a ? "fwd" : "back");
-    setStageAnimated(!isAutoReveal);
+    setStageAnimated(true);
     setViewStage(next);
+    if (isAutoReveal) {
+      window.requestAnimationFrame(() => {
+        stageNavRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "nearest",
+        });
+      });
+    }
   };
 
   useEffect(() => {
     if (r) putCached(rehearsalItemPath(c.id, r.id), r);
   }, [c.id, r]);
+
+  useEffect(() => {
+    const onExternalRehearsalChange = (ev: Event) => {
+      const detail = (
+        ev as CustomEvent<{ clusterId?: string; rehearsalId?: string }>
+      ).detail;
+      if (detail?.clusterId && detail.clusterId !== c.id) return;
+      if (detail?.rehearsalId && detail.rehearsalId !== id) return;
+      void api<ChangeRehearsal>(rehearsalItemPath(c.id, id))
+        .then((next) => {
+          setR(next);
+          void onListChanged();
+        })
+        .catch(() => {});
+    };
+    window.addEventListener(REHEARSAL_CHANGED, onExternalRehearsalChange);
+    return () =>
+      window.removeEventListener(REHEARSAL_CHANGED, onExternalRehearsalChange);
+  }, [c.id, id, onListChanged]);
 
   const load = async (syncStage = false) => {
     setLoadErr("");
@@ -7091,14 +7920,25 @@ function RehearsalSessionView({
     void load(true);
   }, [c.id, id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const isQuickMode = Boolean(
+    r && r.mode === "quick" && r.stage !== "scoping" && r.stage !== "probing",
+  );
+  const isLightMode = Boolean(r && r.mode === "light" && r.stage !== "scoping");
+  const isChangeReportMode = isQuickMode || isLightMode;
+  const visibleStages: ChangeRehearsal["stage"][] = isQuickMode
+    ? QUICK_STAGE_ORDER
+    : isLightMode
+      ? LIGHT_STAGE_ORDER
+      : STAGE_ORDER;
   const curIdx = STAGE_ORDER.indexOf(viewStage);
+  const visIdx = Math.max(0, visibleStages.indexOf(viewStage));
 
   useLayoutEffect(() => {
     const el = stageNavRef.current;
     if (!el || loading || !r) return;
     const measure = () => {
       const btn =
-        el.querySelectorAll<HTMLButtonElement>("button.rh-stage-btn")[curIdx];
+        el.querySelectorAll<HTMLButtonElement>("button.rh-stage-btn")[visIdx];
       setStageThumb(
         btn ? { x: btn.offsetLeft, w: btn.offsetWidth } : null,
       );
@@ -7107,7 +7947,7 @@ function RehearsalSessionView({
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [curIdx, loading, r?.stage, r?.steps?.length]);
+  }, [visIdx, isQuickMode, isLightMode, loading, r?.stage, r?.steps?.length, Boolean(liveScope), Boolean(liveProbe)]);
 
   const attachProbeFiles = async (files: FileList | File[]) => {
     const all = Array.from(files);
@@ -7235,6 +8075,7 @@ function RehearsalSessionView({
         pick.current,
       ),
     );
+    switchStage("probing", true);
     try {
       const payload = {
         answers: (r.scope_questions || []).map((q) => ({
@@ -7266,6 +8107,7 @@ function RehearsalSessionView({
     } catch (e) {
       if (ac.signal.aborted) {
         setLiveScope(null);
+        if (!r.probe_script) switchStage("scoping");
       } else {
         setLiveScope((prev) => (prev ? markLiveStateError(prev, e) : null));
       }
@@ -7274,9 +8116,10 @@ function RehearsalSessionView({
     }
   };
 
-  const submitProbe = async () => {
+  const submitProbe = async (action: "analyze" | "diagnose" = "analyze") => {
     if (offline || probeBusy) return;
     onEngageFocus?.();
+    setProbeAction(action);
     const ac = new AbortController();
     abortRef.current = ac;
     const effortVal = pick.current?.effort?.includes(aiOpts.pref.think)
@@ -7285,17 +8128,30 @@ function RehearsalSessionView({
     setLiveProbe(
       createInitialLiveState(
         "probe",
-        bi(
-          "AI 正在比对现场漂移并编排演练步骤",
-          "AI is analyzing live drift & planning rehearsal steps",
-        ),
-        bi(
-          "正在脱敏现场证据并建立模型连接…",
-          "Redacting live evidence & connecting to AI model…",
-        ),
+        action === "diagnose"
+          ? bi(
+              "AI 正在诊断探针报错并修订只读脚本",
+              "AI is diagnosing probe error & revising read-only script",
+            )
+          : bi(
+              "AI 正在校验探针结果并比对现场漂移",
+              "AI is verifying probe results & analyzing live drift",
+            ),
+        action === "diagnose"
+          ? bi(
+              "正在脱敏报错回显并定位脚本兼容性或权限问题…",
+              "Redacting error output & analyzing script compatibility...",
+            )
+          : bi(
+              "正在脱敏现场证据并先核验采集结果有效性…",
+              "Redacting live evidence & checking probe validity first...",
+            ),
         pick.current,
       ),
     );
+    if (action === "analyze") {
+      switchStage("rehearsing", true);
+    }
     try {
       const imgs =
         probeImages.length > 0
@@ -7308,6 +8164,7 @@ function RehearsalSessionView({
               probe_output: probeOut,
               test_env_note: testEnvNote,
               images: imgs,
+              mode: action,
               model: modelRef,
               effort: effortVal,
             }
@@ -7315,6 +8172,7 @@ function RehearsalSessionView({
               manual_state: manualState,
               test_env_note: testEnvNote,
               images: imgs,
+              mode: action,
               model: modelRef,
               effort: effortVal,
             };
@@ -7328,17 +8186,35 @@ function RehearsalSessionView({
       setR(next);
       setProbeImages([]);
       setFreshTraceStage("probe");
-      switchStage(next.stage, true);
       void onListChanged();
-      Message.success(
-        bi(
-          "已完成漂移分析并生成测试演练步骤",
-          "Drift analysis complete; rehearsal steps generated",
-        ),
-      );
+      if (next.probe_issue) {
+        switchStage("probing", true);
+        Message.warning(
+          next.probe_issue.script_updated
+            ? bi(
+                "探针未拿到有效数据，已阻断漂移分析并自动更新修复版只读脚本，请重新采集",
+                "Probe failed; blocked drift analysis and updated the read-only script—please re-run",
+              )
+            : bi(
+                "未拿到有效现场结果，已阻断进入漂移分析，请按下方诊断修复后重新采集",
+                "No valid live probe result; blocked drift analysis—follow fix guidance and re-run",
+              ),
+        );
+      } else {
+        switchStage(next.stage, true);
+        Message.success(
+          bi(
+            "现场采集核验通过，已完成漂移分析并生成测试演练步骤",
+            "Probe verified; drift analysis and rehearsal steps generated",
+          ),
+        );
+      }
     } catch (e) {
       if (ac.signal.aborted) {
         setLiveProbe(null);
+        if (action === "analyze" && !(r.steps && r.steps.length > 0)) {
+          switchStage("probing");
+        }
       } else {
         setLiveProbe((prev) => (prev ? markLiveStateError(prev, e) : null));
       }
@@ -7363,10 +8239,15 @@ function RehearsalSessionView({
       switchStage("finalized", true);
       void onListChanged();
       Message.success(
-        bi(
-          "《生产变更实施方案》已存入集群文档",
-          "Production Change SOP saved to Cluster Docs",
-        ),
+        isChangeReportMode
+          ? bi(
+              "《变更报告》已归档至集群文档，支持在线审阅与 Word 导出",
+              "Change Report archived to Cluster Docs with Word export",
+            )
+          : bi(
+              "《生产变更实施方案》已存入集群文档",
+              "Production Change SOP saved to Cluster Docs",
+            ),
       );
     } catch (e) {
       err(e);
@@ -7403,9 +8284,12 @@ function RehearsalSessionView({
   };
 
   const steps = r.steps || [];
-  const requiredSteps = steps.filter(
-    (s) => !s.optional && s.phase !== "rollback",
-  );
+  const forwardSteps = steps.filter((s) => s.phase !== "rollback");
+  const rollbackSteps = steps.filter((s) => s.phase === "rollback");
+  const doneForwardCount = forwardSteps.filter(
+    (s) => s.status === "passed" || s.status === "skipped",
+  ).length;
+  const requiredSteps = forwardSteps.filter((s) => !s.optional);
   const doneRequired = requiredSteps.filter(
     (s) => s.status === "passed" || s.status === "skipped",
   ).length;
@@ -7422,7 +8306,7 @@ function RehearsalSessionView({
 
   const shownSteps =
     phaseFilter === "all"
-      ? steps
+      ? forwardSteps
       : steps.filter((s) => s.phase === phaseFilter);
 
   const probeFileName = `collect-${c.id}-${r.id.slice(0, 6)}.sh`;
@@ -7435,70 +8319,186 @@ function RehearsalSessionView({
   const isFreshProbe = freshTraceStage === "probe" && curIdx === 2;
   const isFreshFinal = freshTraceStage === "finalized" && curIdx === 3;
 
+  const hasScopeSummary = Boolean(
+    r.scope_summary && r.scope_summary.trim() !== r.goal.trim(),
+  );
+  const goalSections = parseRehearsalGoalSections(r.goal);
+  const isLongGoal = r.goal.trim().length > 140 || goalSections.length > 1;
+  const canToggleGoal = Boolean(r.goal.trim()) && (hasScopeSummary || isLongGoal);
+
   return (
     <div className={`rh-session${isFreshCreate ? " is-fresh-session" : ""}`}>
       <header className="rh-shead">
-        <div className="rh-shead-main">
-          <div className="rh-shead-title">
+        <div className="rh-shead-top">
+          <div className="rh-shead-heading">
             <h2>{r.title}</h2>
-            <span className="faint small">
-              {bi(`更新于 ${ago(r.updated_at)}`, `Updated ${ago(r.updated_at)}`)}
+            <div className="rh-shead-meta">
+              <span
+                className={`rh-mode-pill ${isQuickMode ? "is-quick" : isLightMode ? "is-light" : "is-full"}`}
+              >
+                {isQuickMode
+                  ? bi("极速变更", "Quick Change")
+                  : isLightMode
+                    ? bi("简单推演", "Light Rehearsal")
+                    : bi("全量推演", "Full Rehearsal")}
+              </span>
+              <span className="rh-shead-dot" aria-hidden>
+                ·
+              </span>
+              <span className="faint small">
+                {bi(`更新于 ${ago(r.updated_at)}`, `Updated ${ago(r.updated_at)}`)}
+              </span>
+              {canToggleGoal && (
+                <>
+                  <span className="rh-shead-dot" aria-hidden>
+                    ·
+                  </span>
+                  <button
+                    type="button"
+                    className={`rh-shead-toggle ${goalOpen ? "on" : ""}`}
+                    aria-expanded={goalOpen}
+                    onClick={() => setGoalOpen((v) => !v)}
+                  >
+                    <span>
+                      {goalOpen
+                        ? hasScopeSummary
+                          ? bi("收起原始诉求", "Hide original goal")
+                          : bi("收起完整诉求", "Collapse goal")
+                        : hasScopeSummary
+                          ? bi("查看原始诉求", "View original goal")
+                          : bi("展开完整诉求", "Expand full goal")}
+                    </span>
+                    <IconDown className={goalOpen ? "open" : ""} />
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+          <div className="rh-shead-acts">
+            <Popconfirm
+              position="br"
+              title={bi(
+                `确认删除演练「${r.title}」？`,
+                `Delete rehearsal "${r.title}"?`,
+              )}
+              content={bi(
+                "已定稿的实施方案仍会保留在集群文档中。",
+                "Finalized SOP documents will remain in Cluster Docs.",
+              )}
+              okText={bi("删除", "Delete")}
+              cancelText={bi("取消", "Cancel")}
+              okButtonProps={{ status: "danger" }}
+              onOk={removeSession}
+            >
+              <Button
+                size="small"
+                type="text"
+                status="danger"
+                icon={<IconDelete />}
+                aria-label={bi("删除演练", "Delete rehearsal")}
+              >
+                {bi("删除", "Delete")}
+              </Button>
+            </Popconfirm>
+          </div>
+        </div>
+
+        {hasScopeSummary ? (
+          <div className="rh-shead-summary">
+            <span className="rh-shead-sum-tag">
+              {bi("收敛边界", "Scope Summary")}
+            </span>
+            <span className="rh-shead-sum-txt">
+              {renderThinkingInline(r.scope_summary!)}
             </span>
           </div>
-          <p className="rh-shead-goal">{renderThinkingInline(r.goal)}</p>
-          {r.scope_summary && r.scope_summary.trim() !== r.goal.trim() && (
-            <div className="rh-shead-summary">
-              <span className="rh-shead-sum-tag">
-                {bi("收敛边界", "Scope Summary")}
-              </span>
-              <span className="rh-shead-sum-txt">
-                {renderThinkingInline(r.scope_summary)}
-              </span>
-            </div>
-          )}
-          {r.goal_images && r.goal_images.length > 0 && (
-            <SavedImageGallery
-              clusterId={c.id}
-              rehearsalId={r.id}
-              names={r.goal_images}
-              label={bi("诉求参考截图", "Reference Screenshots")}
-            />
-          )}
-        </div>
-        <Popconfirm
-          position="br"
-          title={bi(
-            `确认删除演练「${r.title}」？`,
-            `Delete rehearsal "${r.title}"?`,
-          )}
-          content={bi(
-            "已定稿的实施方案仍会保留在集群文档中。",
-            "Finalized SOP documents will remain in Cluster Docs.",
-          )}
-          okText={bi("删除", "Delete")}
-          cancelText={bi("取消", "Cancel")}
-          okButtonProps={{ status: "danger" }}
-          onOk={removeSession}
-        >
-          <Button
-            size="small"
-            type="text"
-            status="danger"
-            icon={<IconDelete />}
-            aria-label={bi("删除演练", "Delete rehearsal")}
+        ) : r.goal.trim() && !goalOpen ? (
+          <div className="rh-shead-summary is-goal">
+            <span className="rh-shead-sum-tag">
+              {bi("变更诉求", "Change Goal")}
+            </span>
+            <span
+              className={`rh-shead-sum-txt ${isLongGoal ? "is-clamped" : ""}`}
+            >
+              {renderThinkingInline(r.goal)}
+            </span>
+          </div>
+        ) : null}
+
+        {goalOpen && goalSections.length > 0 && (
+          <div
+            className="rh-shead-goal-panel"
+            role="region"
+            aria-label={bi("完整变更诉求", "Full change goal")}
           >
-            {bi("删除", "Delete")}
-          </Button>
-        </Popconfirm>
+            <div className="rh-shead-goal-head">
+              <span className="rh-shead-goal-title">
+                {hasScopeSummary
+                  ? bi("原始变更诉求", "Original Change Goal")
+                  : bi("完整变更诉求", "Full Change Goal")}
+              </span>
+              <button
+                type="button"
+                className="rh-shead-goal-close"
+                onClick={() => setGoalOpen(false)}
+              >
+                {bi("收起", "Collapse")}
+              </button>
+            </div>
+            <div className="rh-shead-goal-list">
+              {goalSections.map((sec, idx) => (
+                <div key={idx} className="rh-shead-goal-row">
+                  {sec.label && (
+                    <span className="rh-shead-goal-lbl">{sec.label}</span>
+                  )}
+                  <p className="rh-shead-goal-body">
+                    {renderThinkingInline(sec.body)}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {r.goal_images && r.goal_images.length > 0 && (
+          <SavedImageGallery
+            clusterId={c.id}
+            rehearsalId={r.id}
+            names={r.goal_images}
+            label={bi("诉求参考截图", "Reference Screenshots")}
+          />
+        )}
       </header>
 
+      {r.security_context && (
+        <RehearsalSecurityBanner
+          clusterId={c.id}
+          rehearsal={r}
+          onUpdated={setR}
+        />
+      )}
+
       <nav
-        className="rh-stages"
+        className={`rh-stages${isQuickMode ? " cols-2 is-quick" : isLightMode ? " cols-3 is-light" : ""}`}
         ref={stageNavRef}
         aria-label={bi("变更演练阶段", "Change rehearsal stages")}
         onKeyDown={(e) => {
           if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
-          const unlocked = STAGE_ORDER.filter((_, idx) => idx <= maxIdx);
+          const liveTarget: ChangeRehearsal["stage"] | "" = liveScope
+            ? "probing"
+            : liveProbe
+              ? probeAction === "diagnose"
+                ? "probing"
+                : "rehearsing"
+              : busyFinalize
+                ? "finalized"
+                : "";
+          const maxVis = Math.max(
+            0,
+            visibleStages.indexOf(r.stage),
+            liveTarget ? visibleStages.indexOf(liveTarget) : -1,
+          );
+          const unlocked = visibleStages.filter((_, idx) => idx <= maxVis);
           const pos = unlocked.indexOf(viewStage);
           if (pos < 0) return;
           e.preventDefault();
@@ -7520,32 +8520,79 @@ function RehearsalSessionView({
             aria-hidden
           />
         )}
-        {STAGE_ORDER.map((st, idx) => {
-          const unlocked = idx <= maxIdx;
-          const isDone = idx < maxIdx || r.stage === "finalized";
+        {visibleStages.map((st, idx) => {
+          const liveTarget: ChangeRehearsal["stage"] | "" = liveScope
+            ? "probing"
+            : liveProbe
+              ? probeAction === "diagnose"
+                ? "probing"
+                : "rehearsing"
+              : busyFinalize
+                ? "finalized"
+                : "";
+          const maxVis = Math.max(
+            0,
+            visibleStages.indexOf(r.stage),
+            liveTarget ? visibleStages.indexOf(liveTarget) : -1,
+          );
+          const metaMap = isQuickMode
+            ? QUICK_STAGE_META
+            : isLightMode
+              ? LIGHT_STAGE_META
+              : STAGE_META;
+          const busyTargetStage: ChangeRehearsal["stage"] | "" = scopeBusy
+            ? "probing"
+            : probeBusy
+              ? probeAction === "diagnose"
+                ? "probing"
+                : "rehearsing"
+              : busyFinalize
+                ? "finalized"
+                : "";
+          const isGenerating = busyTargetStage === st;
+          const unlocked = idx <= maxVis;
+          const isDone =
+            idx < maxVis ||
+            r.stage === "finalized" ||
+            (scopeBusy && st === "scoping");
           const active = viewStage === st;
+          const subText = isGenerating
+            ? st === "probing"
+              ? probeBusy
+                ? bi("诊断修订探针中…", "Diagnosing probe…")
+                : bi("定制只读探针中…", "Building probe…")
+              : st === "rehearsing"
+                ? bi("校验结果与编排中…", "Verifying & planning…")
+                : isChangeReportMode
+                  ? bi("生成变更报告中…", "Generating report…")
+                  : bi("生成生产 SOP 中…", "Finalizing SOP…")
+            : st === "rehearsing" && requiredSteps.length > 0
+              ? bi(
+                  `必测 ${doneRequired}/${requiredSteps.length}`,
+                  `Required ${doneRequired}/${requiredSteps.length}`,
+                )
+              : metaMap[st].sub;
           return (
             <button
               key={st}
               type="button"
               disabled={!unlocked}
               aria-current={active ? "step" : undefined}
-              className={`rh-stage-btn ${active ? "on" : ""} ${isDone ? "done" : ""}`}
+              className={`rh-stage-btn ${active ? "on" : ""} ${isDone ? "done" : ""} ${isGenerating ? "is-generating" : ""}`}
               onClick={() => unlocked && switchStage(st)}
             >
               <span className="rh-stage-num num">
-                {isDone && !active ? <IconCheck /> : idx + 1}
+                {isGenerating ? (
+                  <span className="rh-stage-pulse" aria-hidden />
+                ) : isDone && !active ? (
+                  <IconCheck />
+                ) : (
+                  idx + 1
+                )}
               </span>
               <span className="rh-stage-txt">
-                <b>{STAGE_META[st].short}</b>
-                <small>
-                  {st === "rehearsing" && requiredSteps.length > 0
-                    ? bi(
-                        `必测 ${doneRequired}/${requiredSteps.length}`,
-                        `Required ${doneRequired}/${requiredSteps.length}`,
-                      )
-                    : STAGE_META[st].sub}
-                </small>
+                <b>{metaMap[st].short}</b>
+                <small>{subText}</small>
               </span>
             </button>
           );
@@ -7590,24 +8637,8 @@ function RehearsalSessionView({
               baselineVersion={c.version}
             />
 
-            {liveScope && (
-              <RehearsalAIProcess
-                live={liveScope}
-                title={liveScope.title}
-                onAbort={() => abortRef.current?.abort()}
-                onRetry={() => void submitScope()}
-                onDismiss={() => setLiveScope(null)}
-              />
-            )}
-
             <div className="rh-sec-foot">
               <div className="rh-sec-foot-tools">
-                <ThinkLevel
-                  levels={pick.current?.effort}
-                  value={aiOpts.pref.think}
-                  onChange={(v) => aiOpts.update({ think: v })}
-                />
-                <ModelPicker pick={pick} compact />
                 <span className="rh-foot-note">
                   {bi(
                     "仅生成静态只读采集命令，零重启与写操作",
@@ -7616,6 +8647,12 @@ function RehearsalSessionView({
                 </span>
               </div>
               <div className="rh-compose-submit">
+                <ThinkLevel
+                  levels={pick.current?.effort}
+                  value={aiOpts.pref.think}
+                  onChange={(v) => aiOpts.update({ think: v })}
+                />
+                <ModelPicker pick={pick} compact />
                 <Button
                   type="primary"
                   shape="round"
@@ -7649,21 +8686,55 @@ function RehearsalSessionView({
                 e.key === "Enter" &&
                 hasProbeInput &&
                 !offline &&
-                !probeBusy
+                !probeBusy &&
+                !liveScope
               ) {
                 e.preventDefault();
                 void submitProbe();
               }
             }}
           >
-            {r.traces?.scope && (
+            {liveScope ? (
               <RehearsalAIProcess
-                trace={r.traces.scope}
-                title={bi(
-                  "AI 只读探针设计与安全扫描过程",
-                  "AI Probe Design & Safety Scan",
-                )}
-                defaultOpen={false}
+                live={liveScope}
+                title={liveScope.title}
+                onAbort={() => abortRef.current?.abort()}
+                onRetry={() => void submitScope()}
+                onDismiss={() => {
+                  setLiveScope(null);
+                  if (!r.probe_script) switchStage("scoping");
+                }}
+              />
+            ) : (
+              <>
+            {liveProbe && probeAction === "diagnose" && (
+              <RehearsalAIProcess
+                live={liveProbe}
+                title={liveProbe.title}
+                onAbort={() => abortRef.current?.abort()}
+                onRetry={() => void submitProbe("diagnose")}
+                onDismiss={() => setLiveProbe(null)}
+              />
+            )}
+
+            {(r.traces?.scope || (isLightMode && r.traces?.create)) && (
+              <RehearsalAIProcess
+                trace={(r.traces?.scope || r.traces?.create)!}
+                title={
+                  isLightMode && !r.traces?.scope
+                    ? bi(
+                        "AI 简单推演研判与只读探针安全扫描过程",
+                        "AI Light Rehearsal & Probe Safety Scan",
+                      )
+                    : bi(
+                        "AI 只读探针设计与安全扫描过程",
+                        "AI Probe Design & Safety Scan",
+                      )
+                }
+                defaultOpen={
+                  freshTraceStage === "scope" ||
+                  (isLightMode && freshTraceStage === "create")
+                }
               />
             )}
 
@@ -7674,8 +8745,91 @@ function RehearsalSessionView({
               warnings={r.probe_warnings || []}
               notes={r.probe_notes || []}
               hasEchoInput={hasProbeInput}
+              scriptUpdated={Boolean(r.probe_issue?.script_updated)}
               onDownload={downloadProbe}
             />
+
+            {r.probe_issue && (
+              <section
+                className="rh-probe-issue"
+                role="alert"
+                aria-label={bi("探针采集门禁拦截", "Probe validity gate")}
+              >
+                <div className="rh-probe-issue-head">
+                  <div className="rh-probe-issue-title">
+                    <IconExclamationCircle />
+                    <b>
+                      {r.probe_issue.status === "incomplete"
+                        ? bi(
+                            "现场采集结果不完整 · 已暂停进入漂移比对",
+                            "Incomplete Probe Result · Drift Analysis Paused",
+                          )
+                        : bi(
+                            "探针执行报错，未拿到有效现场结果 · 已阻断进入漂移比对",
+                            "Probe Failed Without Valid Live Data · Drift Analysis Blocked",
+                          )}
+                    </b>
+                  </div>
+                  <span className="rh-probe-issue-pill">
+                    {bi("请修复后重新采集", "Fix & Re-collect")}
+                  </span>
+                </div>
+                {r.probe_issue.summary && (
+                  <p className="rh-probe-issue-sum">{r.probe_issue.summary}</p>
+                )}
+                {r.probe_issue.cause && (
+                  <div className="rh-probe-issue-row">
+                    <span>{bi("报错根因", "Root Cause")}</span>
+                    <p>{r.probe_issue.cause}</p>
+                  </div>
+                )}
+                {r.probe_issue.script_updated && (
+                  <div className="rh-probe-issue-updated">
+                    <IconCheck />
+                    <span>
+                      {bi(
+                        "已自动生成通过纯只读扫描的修订版脚本并更新至上方，请重新复制或下载运行。",
+                        "A revised read-only probe script passed safety checks and replaced the script above. Copy or download it to re-run.",
+                      )}
+                    </span>
+                  </div>
+                )}
+                {r.probe_issue.fix_command && (
+                  <div className="rh-probe-fix-cmd">
+                    <div className="rh-probe-fix-cmd-head">
+                      <span>{bi("建议立即执行", "Recommended command")}</span>
+                      <CopyCodeBtn
+                        text={r.probe_issue.fix_command}
+                        label={bi("复制命令", "Copy")}
+                      />
+                    </div>
+                    <pre className="mono">{r.probe_issue.fix_command}</pre>
+                  </div>
+                )}
+                {r.probe_issue.fix_steps &&
+                  r.probe_issue.fix_steps.length > 0 && (
+                    <div className="rh-probe-issue-row">
+                      <span>{bi("处理步骤", "Next Steps")}</span>
+                      <ol className="rh-probe-fix-list">
+                        {r.probe_issue.fix_steps.map((st, idx) => (
+                          <li key={idx}>{st}</li>
+                        ))}
+                      </ol>
+                    </div>
+                  )}
+                {r.probe_issue.missing_items &&
+                  r.probe_issue.missing_items.length > 0 && (
+                    <div className="rh-probe-issue-row">
+                      <span>{bi("待补采项", "Missing Evidence")}</span>
+                      <div className="rh-probe-missing">
+                        {r.probe_issue.missing_items.map((it, idx) => (
+                          <span key={idx}>{it}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+              </section>
+            )}
 
             <div className="rh-echo-workspace">
               <div className="rh-echo-ws-head">
@@ -7954,6 +9108,19 @@ function RehearsalSessionView({
                       />
                       <ModelPicker pick={pick} compact />
                       <Button
+                        shape="round"
+                        type="outline"
+                        loading={probeBusy && probeAction === "diagnose"}
+                        disabled={offline || !hasProbeInput || probeBusy}
+                        onClick={() => void submitProbe("diagnose")}
+                        title={bi(
+                          "探针脚本在现场报错或未出结果时点此诊断修复，不进入漂移比对",
+                          "Diagnose and fix probe script errors without running drift analysis",
+                        )}
+                      >
+                        {bi("探针报错？诊断修复", "Fix Probe Error")}
+                      </Button>
+                      <Button
                         type="primary"
                         shape="round"
                         className={`ai-pill ${hasProbeInput && !offline ? "ai-pill-primary" : ""}`}
@@ -7965,14 +9132,14 @@ function RehearsalSessionView({
                         }
                         title={
                           isMac
-                            ? bi("⌘ + Enter 提交", "⌘ + Enter Submit")
-                            : bi("Ctrl + Enter 提交", "Ctrl + Enter Submit")
+                            ? bi("⌘ + Enter 校验并分析", "⌘ + Enter Verify & Analyze")
+                            : bi("Ctrl + Enter 校验并分析", "Ctrl + Enter Verify & Analyze")
                         }
-                        loading={probeBusy}
-                        disabled={offline || !hasProbeInput}
-                        onClick={() => void submitProbe()}
+                        loading={probeBusy && probeAction === "analyze"}
+                        disabled={offline || !hasProbeInput || probeBusy}
+                        onClick={() => void submitProbe("analyze")}
                       >
-                        {bi("识别漂移并生成演练步骤", "Analyze Drift & Plan Steps")}
+                        {bi("校验结果并分析漂移", "Verify & Analyze Drift")}
                       </Button>
                     </div>
                   </div>
@@ -7989,14 +9156,7 @@ function RehearsalSessionView({
               </div>
             </div>
 
-            {liveProbe && (
-              <RehearsalAIProcess
-                live={liveProbe}
-                title={liveProbe.title}
-                onAbort={() => abortRef.current?.abort()}
-                onRetry={() => void submitProbe()}
-                onDismiss={() => setLiveProbe(null)}
-              />
+              </>
             )}
           </section>
         )}
@@ -8004,43 +9164,92 @@ function RehearsalSessionView({
         {/* ---- Stage 3: Test Rehearsal ---- */}
         {curIdx === 2 && (
           <div className={`rh-rehearse-wrap${isFreshProbe ? " is-fresh-reveal" : ""}`}>
-            {r.traces?.probe && (
+            {liveProbe && probeAction === "analyze" ? (
               <RehearsalAIProcess
-                trace={r.traces.probe}
-                title={bi(
-                  "AI 现场漂移比对与演练编排思考",
-                  "AI Drift Comparison & Plan Synthesis",
-                )}
-                defaultOpen={freshTraceStage === "probe"}
+                live={liveProbe}
+                title={liveProbe.title}
+                onAbort={() => abortRef.current?.abort()}
+                onRetry={() => void submitProbe("analyze")}
+                onDismiss={() => {
+                  setLiveProbe(null);
+                  if (!(r.steps && r.steps.length > 0)) switchStage("probing");
+                }}
+              />
+            ) : (
+              <>
+            {(r.traces?.probe || (isQuickMode && r.traces?.create)) && (
+              <RehearsalAIProcess
+                trace={(r.traces?.probe || r.traces?.create)!}
+                title={
+                  isQuickMode && !r.traces?.probe
+                    ? bi(
+                        "AI 极速变更步骤编排思考",
+                        "AI Quick Change Step Synthesis",
+                      )
+                    : bi(
+                        "AI 现场漂移比对与演练编排思考",
+                        "AI Drift Comparison & Plan Synthesis",
+                      )
+                }
+                defaultOpen={
+                  freshTraceStage === "probe" ||
+                  (isQuickMode && freshTraceStage === "create")
+                }
               />
             )}
 
-            {r.drift && (
+            {r.drift && (() => {
+              const hosts = r.drift.hosts || [];
+              const driftUnverified =
+                hosts.length > 0 &&
+                hosts.every((h) =>
+                  /未知|unknown|未采集|未获取/i.test(
+                    `${h.actual_role || ""} ${h.status || ""}`,
+                  ),
+                );
+              const showWarn = r.drift.drifted || driftUnverified;
+              return (
               <section
-                className={`rh-drift-sec ${r.drift.drifted ? "is-drifted" : ""}`}
+                className={`rh-drift-sec ${showWarn ? "is-drifted" : ""}`}
                 aria-label={bi("基线与现场比对", "Baseline vs Live Comparison")}
               >
                 <div className="rh-drift-top">
                   <div className="rh-drift-title">
                     <span
-                      className={`sdot ${r.drift.drifted ? "s-warn" : "s-done"}`}
+                      className={`sdot ${showWarn ? "s-warn" : "s-done"}`}
                     />
                     <b>
-                      {r.drift.drifted
+                      {driftUnverified
                         ? bi(
-                            "检测到现场状态与初始交付存在漂移",
-                            "Live state drifted from initial baseline",
+                            "现场状态未采集完整，尚不能判定与基线一致",
+                            "Live state unverified — cannot confirm baseline match",
                           )
-                        : bi(
-                            "现场状态与初始交付基线一致",
-                            "Live state matches initial baseline",
-                          )}
+                        : r.drift.drifted
+                          ? bi(
+                              "检测到现场状态与初始交付存在漂移",
+                              "Live state drifted from initial baseline",
+                            )
+                          : bi(
+                              "现场状态与初始交付基线一致",
+                              "Live state matches initial baseline",
+                            )}
                     </b>
                     <span className="rh-drift-tag">
-                      {r.drift.drifted
-                        ? bi("已按现场拓扑对齐", "Aligned to Live State")
-                        : bi("基线一致", "Baseline Matched")}
+                      {driftUnverified
+                        ? bi("待补采核实", "Re-collection Needed")
+                        : r.drift.drifted
+                          ? bi("已按现场拓扑对齐", "Aligned to Live State")
+                          : bi("基线一致", "Baseline Matched")}
                     </span>
+                    {driftUnverified && (
+                      <Button
+                        size="mini"
+                        type="outline"
+                        onClick={() => switchStage("probing")}
+                      >
+                        {bi("返回第 2 步修复探针", "Back to Step 2 to Fix Probe")}
+                      </Button>
+                    )}
                   </div>
                   {r.drift.summary && (
                     <p className="rh-drift-sum">
@@ -8050,69 +9259,191 @@ function RehearsalSessionView({
                 </div>
 
                 {(r.drift.hosts || []).length > 0 && (
-                  <div className="rh-table-wrap">
-                    <table className="rh-drift-tbl">
-                      <thead>
-                        <tr>
-                          <th>{bi("节点", "Node")}</th>
-                          <th>{bi("地址", "Address")}</th>
-                          <th>{bi("角色比对（初始 → 现场）", "Role (Initial → Live)")}</th>
-                          <th>{bi("版本", "Version")}</th>
-                          <th>{bi("运行状态", "Status")}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {r.drift.hosts.map((h) => {
-                          const changed =
-                            h.initial_role &&
-                            h.actual_role &&
-                            h.initial_role !== h.actual_role;
-                          return (
-                            <tr key={h.name + h.ip}>
-                              <td>
-                                <b>{h.name}</b>
-                              </td>
-                              <td className="mono">{h.ip || "—"}</td>
-                              <td>
-                                {changed ? (
-                                  <span className="rh-role-shift">
-                                    <span>{h.initial_role}</span>
-                                    <span aria-hidden>→</span>
-                                    <b>{h.actual_role}</b>
-                                  </span>
-                                ) : (
-                                  <span className="rh-role-same">
-                                    {h.actual_role || h.initial_role || "—"}
-                                  </span>
-                                )}
-                              </td>
-                              <td className="mono">
-                                {h.version || c.version}
-                              </td>
-                              <td>{h.status || bi("正常", "Healthy")}</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
+                  <div className="rh-drift-block">
+                    <div className="rh-drift-block-h">
+                      <span>{bi("节点角色与状态", "Node Roles & Status")}</span>
+                      <span className="rh-drift-cnt num">
+                        {bi(`${r.drift.hosts.length} 台节点`, `${r.drift.hosts.length} nodes`)}
+                      </span>
+                    </div>
+                    <div className="rh-drift-tbl-box">
+                      <table className="rh-drift-tbl">
+                        <colgroup>
+                          <col style={{ width: "86px" }} />
+                          <col style={{ width: "120px" }} />
+                          <col style={{ width: "26%" }} />
+                          <col style={{ width: "22%" }} />
+                          <col />
+                        </colgroup>
+                        <thead>
+                          <tr>
+                            <th>{bi("节点", "Node")}</th>
+                            <th>{bi("地址", "Address")}</th>
+                            <th>{bi("角色比对（初始 → 现场）", "Role (Initial → Live)")}</th>
+                            <th>{bi("版本", "Version")}</th>
+                            <th>{bi("运行状态", "Status")}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {r.drift.hosts.map((h) => {
+                            const initRole = (h.initial_role || "").trim();
+                            const liveRole = (h.actual_role || "").trim();
+                            const changed = Boolean(
+                              initRole && liveRole && initRole !== liveRole,
+                            );
+                            const compactRole =
+                              initRole.length <= 12 && liveRole.length <= 14;
+                            const verText = (h.version || c.version || "—").trim();
+                            const isVerPlaceholder =
+                              !verText ||
+                              /^(—|-|待采集|未采集|未在本机采集|未知|pending|n\/a|unknown)$/i.test(
+                                verText,
+                              );
+                            const isShortVer =
+                              !isVerPlaceholder &&
+                              verText.length <= 24 &&
+                              !/[\u4e00-\u9fa5]/.test(verText);
+                            return (
+                              <tr key={h.name + h.ip}>
+                                <td className="rh-cell-node">
+                                  <b>{h.name}</b>
+                                </td>
+                                <td className="rh-cell-ip mono">{h.ip || "—"}</td>
+                                <td className="rh-cell-role">
+                                  {changed ? (
+                                    compactRole ? (
+                                      <span
+                                        className={`rh-role-shift${r.drift!.drifted ? "" : " is-soft"}`}
+                                      >
+                                        <span>{initRole}</span>
+                                        <span aria-hidden>→</span>
+                                        <b>{liveRole}</b>
+                                      </span>
+                                    ) : (
+                                      <div className="rh-role-stack">
+                                        <div className="rh-role-row">
+                                          <span className="rh-mini-lbl">
+                                            {bi("初始", "Init")}
+                                          </span>
+                                          <span className="rh-role-from">
+                                            {initRole}
+                                          </span>
+                                        </div>
+                                        <div className="rh-role-row">
+                                          <span
+                                            className={`rh-mini-lbl ${r.drift!.drifted ? "is-warn" : "is-live"}`}
+                                          >
+                                            {bi("现场", "Live")}
+                                          </span>
+                                          <b className="rh-role-to">{liveRole}</b>
+                                        </div>
+                                      </div>
+                                    )
+                                  ) : (
+                                    <span className="rh-role-same">
+                                      {liveRole || initRole || "—"}
+                                    </span>
+                                  )}
+                                </td>
+                                <td
+                                  className={`rh-cell-ver${isShortVer ? " mono" : ""}${isVerPlaceholder ? " is-placeholder" : ""}`}
+                                >
+                                  {verText}
+                                </td>
+                                <td className="rh-cell-status">
+                                  {h.status || bi("正常", "Healthy")}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 )}
 
                 {(r.drift.param_diffs || []).length > 0 && (
-                  <div className="rh-pdiffs">
-                    <span className="rh-pdiffs-k">
-                      {bi("参数变化", "Parameter Drift")}
-                    </span>
-                    <div className="rh-pdiffs-list">
-                      {r.drift.param_diffs!.map((p) => (
-                        <span key={p.key} className="rh-pdiff-chip">
-                          <code className="mono">{p.key}</code>
-                          <span>
-                            {p.initial} → <b>{p.actual}</b>
-                          </span>
-                          {p.risk && <em>{p.risk}</em>}
-                        </span>
-                      ))}
+                  <div className="rh-drift-block">
+                    <div className="rh-drift-block-h">
+                      <span>{bi("参数与配置比对", "Parameter & Config Comparison")}</span>
+                      <span className="rh-drift-cnt num">
+                        {bi(
+                          `${r.drift.param_diffs!.length} 项`,
+                          `${r.drift.param_diffs!.length} items`,
+                        )}
+                      </span>
+                    </div>
+                    <div className="rh-drift-tbl-box">
+                      <table className="rh-pdiff-tbl">
+                        <colgroup>
+                          <col style={{ width: "22%" }} />
+                          <col style={{ width: "39%" }} />
+                          <col style={{ width: "39%" }} />
+                        </colgroup>
+                        <thead>
+                          <tr>
+                            <th>{bi("参数项", "Parameter")}</th>
+                            <th>{bi("基线 → 现场实测", "Baseline → Live Value")}</th>
+                            <th>{bi("影响与变更要点", "Impact & Change Note")}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {r.drift.param_diffs!.map((p, idx) => {
+                            const keyTokens = (p.key || "")
+                              .split(/\s*\/\s*/)
+                              .map((s) => s.trim())
+                              .filter(Boolean);
+                            return (
+                              <tr key={`${p.key}-${idx}`}>
+                                <td className="rh-pdiff-col-key">
+                                  <div className="rh-pdiff-keys">
+                                    {keyTokens.length > 1 ? (
+                                      keyTokens.map((tk) => (
+                                        <code key={tk} className="mono">
+                                          {tk}
+                                        </code>
+                                      ))
+                                    ) : (
+                                      <code className="mono">{p.key}</code>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="rh-pdiff-col-val">
+                                  <div className="rh-pdiff-vals">
+                                    {p.initial && (
+                                      <div className="rh-pdiff-val-row">
+                                        <span className="rh-mini-lbl">
+                                          {bi("基线", "Base")}
+                                        </span>
+                                        <span className="rh-pdiff-base">
+                                          {p.initial}
+                                        </span>
+                                      </div>
+                                    )}
+                                    <div className="rh-pdiff-val-row">
+                                      <span className="rh-mini-lbl is-live">
+                                        {bi("现场", "Live")}
+                                      </span>
+                                      <b className="rh-pdiff-live">
+                                        {p.actual || "—"}
+                                      </b>
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="rh-pdiff-col-risk">
+                                  {p.risk ? (
+                                    <span className="rh-pdiff-risk">
+                                      {renderThinkingInline(p.risk)}
+                                    </span>
+                                  ) : (
+                                    <span className="faint">—</span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
                 )}
@@ -8134,7 +9465,8 @@ function RehearsalSessionView({
                   />
                 )}
               </section>
-            )}
+              );
+            })()}
 
             <div className="rh-gate">
               <div className="rh-gate-left">
@@ -8157,21 +9489,50 @@ function RehearsalSessionView({
                   )}
                 </svg>
                 <div>
-                  <b className="num">
-                    {bi(
-                      `必测步骤 ${doneRequired} / ${requiredSteps.length}`,
-                      `Required ${doneRequired} / ${requiredSteps.length}`,
+                  <div className="rh-gate-title-row">
+                    <b className="num">
+                      {bi(
+                        `必测步骤 ${doneRequired} / ${requiredSteps.length}`,
+                        `Required ${doneRequired} / ${requiredSteps.length}`,
+                      )}
+                    </b>
+                    {doneForwardCount > 0 && (
+                      <button
+                        type="button"
+                        className="rh-done-toggle-btn"
+                        onClick={() =>
+                          setDoneExpandCmd((prev) => ({
+                            expand: !prev.expand,
+                            seq: prev.seq + 1,
+                          }))
+                        }
+                      >
+                        {doneExpandCmd.expand
+                          ? bi(
+                              `收起已完成 (${doneForwardCount})`,
+                              `Fold done (${doneForwardCount})`,
+                            )
+                          : bi(
+                              `展开已完成 (${doneForwardCount})`,
+                              `Expand done (${doneForwardCount})`,
+                            )}
+                      </button>
                     )}
-                  </b>
+                  </div>
                   <span className="muted small">
                     {gateReady
-                      ? bi(
-                          "全部必测步骤已验证，可定稿生成生产实施方案",
-                          "All required steps verified; ready to finalize Production SOP",
-                        )
+                      ? isChangeReportMode
+                        ? bi(
+                            "全部必测步骤已验收，可一键生成《变更报告》归档留痕",
+                            "All required steps verified; ready to generate & archive Change Report",
+                          )
+                        : bi(
+                            "全部必测步骤已验证，可定稿生成生产实施方案",
+                            "All required steps verified; ready to finalize Production SOP",
+                          )
                       : bi(
-                          "在测试环境逐条验证耗时；遇到报错可粘贴文本或截图就地排障",
-                          "Verify each step in staging and record timings; paste errors/screenshots to troubleshoot inline",
+                          "贴入每步终端输出或截图，由 AI 对照预期判据自动核验通过或给出修正方案",
+                          "Paste terminal output or screenshots for each step—AI verifies pass criteria or proposes fixes inline",
                         )}
                   </span>
                 </div>
@@ -8182,23 +9543,36 @@ function RehearsalSessionView({
                   value={phaseFilter}
                   onChange={setPhaseFilter}
                   options={[
-                    { value: "all", label: bi("全部", "All"), count: steps.length },
+                    {
+                      value: "all",
+                      label: bi("正向步骤", "Forward"),
+                      count: forwardSteps.length,
+                    },
                     { value: "precheck", label: bi("预检", "Precheck") },
                     { value: "execute", label: bi("执行", "Execute") },
                     { value: "verify", label: bi("验收", "Verify") },
-                    { value: "rollback", label: bi("回退", "Rollback") },
+                    {
+                      value: "rollback",
+                      label: bi("应急回退", "Rollback"),
+                      count: rollbackSteps.length > 0 ? rollbackSteps.length : undefined,
+                    },
                   ]}
                 />
                 <Tooltip
                   content={
                     gateReady
-                      ? bi(
-                          "将已验证命令与实测耗时映射回生产节点并生成实施方案",
-                          "Map verified commands & timings back to production nodes and generate SOP",
-                        )
+                      ? isChangeReportMode
+                        ? bi(
+                            "汇总已核验的执行步骤、实测记录与回退预案，生成集群《变更报告》",
+                            "Compile verified steps, results & rollback plan into a Cluster Change Report",
+                          )
+                        : bi(
+                            "将已验证命令与实测耗时映射回生产节点并生成实施方案",
+                            "Map verified commands & timings back to production nodes and generate SOP",
+                          )
                       : bi(
-                          `完成剩余 ${requiredSteps.length - doneRequired} 个必测步骤后可定稿`,
-                          `Complete remaining ${requiredSteps.length - doneRequired} required step(s) to finalize`,
+                          `完成剩余 ${requiredSteps.length - doneRequired} 个必测步骤后可${isChangeReportMode ? "生成报告" : "定稿"}`,
+                          `Complete remaining ${requiredSteps.length - doneRequired} required step(s) first`,
                         )
                   }
                   mini
@@ -8211,39 +9585,257 @@ function RehearsalSessionView({
                       loading={busyFinalize}
                       onClick={() => void finalizeSOP()}
                     >
-                      {bi("定稿实施方案", "Finalize SOP")}
+                      {isChangeReportMode
+                        ? bi("生成变更报告", "Generate Change Report")
+                        : bi("定稿实施方案", "Finalize SOP")}
                     </Button>
                   </span>
                 </Tooltip>
               </div>
             </div>
 
+            {phaseFilter !== "rollback" &&
+              (r.restoration_alerts || []).length > 0 && (() => {
+                const alerts = r.restoration_alerts!;
+                const first = alerts[0];
+                const aiReady = Boolean(
+                  dock &&
+                    !offline &&
+                    dock.available(`step:rehearsal:${r.id}:${first.step_id}`),
+                );
+                const askAIRestore = () => {
+                  if (!dock) return;
+                  const summaryLines = alerts
+                    .map(
+                      (a, idx) =>
+                        `${idx + 1}. ${a.summary}（建议：${a.suggestion}）`,
+                    )
+                    .join("\n");
+                  dock.open({
+                    key: `step:rehearsal:${r.id}:${first.step_id}`,
+                    title: bi(
+                      `补全临时状态复位步骤 · ${r.title}`,
+                      `Add State Restoration Steps · ${r.title}`,
+                    ),
+                    context: `${r.title} · ${c.id}`,
+                    step: {
+                      kind: "rehearsal_step",
+                      cluster_id: c.id,
+                      rehearsal_id: r.id,
+                      rehearsal_title: r.title,
+                      step_id: first.step_id,
+                      restoration_alerts: alerts,
+                    },
+                    hello: bi(
+                      "系统检测到本次演练包含尚未配齐恢复/清理命令的临时状态变更。直接发送下方草稿，我会读取演练完整步骤并给出「一键插入复位步骤」卡片。",
+                      "Detected temporary state changes without forward restoration steps. Send the draft below and I will generate 1-click step insertion card(s).",
+                    ),
+                    draft: bi(
+                      `请调用 read_rehearsal 读取演练 #${r.id} 的完整步骤，针对以下未配齐的临时状态变更，使用 propose_rehearsal_step_edit（insert_after）在合适位置补充显式的复位/恢复/清理步骤（执行机器与 IP 写清楚，命令 1～6 行可直接复制）：\n${summaryLines}`,
+                      `Please inspect rehearsal #${r.id} via read_rehearsal and use propose_rehearsal_step_edit (insert_after) to add explicit forward restoration/cleanup step(s) for:\n${summaryLines}`,
+                    ),
+                  });
+                };
+                return (
+                  <div className="rh-restore-guard" role="note">
+                    <div className="rh-restore-guard-head">
+                      <div className="rh-restore-guard-title">
+                        <IconExclamationCircle />
+                        <b>
+                          {bi(
+                            `临时状态复位检查 · 发现 ${alerts.length} 项改动未配齐恢复/清理步骤`,
+                            `State Restoration Check · ${alerts.length} temporary change(s) missing cleanup/restore`,
+                          )}
+                        </b>
+                      </div>
+                      {aiReady && (
+                        <button
+                          type="button"
+                          className="rh-restore-ai-btn"
+                          onClick={askAIRestore}
+                        >
+                          <Spark size={12} />
+                          <span>
+                            {bi("让 AI 补全复位步骤", "Ask AI to Add Restore Step")}
+                          </span>
+                        </button>
+                      )}
+                    </div>
+                    <ul className="rh-restore-guard-list">
+                      {alerts.map((a, idx) => (
+                        <li key={`${a.kind}-${a.step_id}-${idx}`}>
+                          <span className="rh-restore-guard-sum">
+                            {a.summary}
+                          </span>
+                          <span className="rh-restore-guard-sug">
+                            {bi("建议：", "Suggestion: ")}
+                            {a.suggestion}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                );
+              })()}
+
+            {phaseFilter === "rollback" && rollbackSteps.length > 0 && (
+              <div className="rh-rollback-banner" role="note">
+                <IconExclamationCircle />
+                <div>
+                  <b>{bi("应急回退预案 · 仅变更异常或受阻时按需执行", "Emergency Rollback Plan · Run ONLY if Change Fails")}</b>
+                  <span>
+                    {bi(
+                      "正常完成正向步骤并通过验收后切勿顺手执行下方命令；回退预案已自动收录至最终生产实施方案「应急回退」章节。",
+                      "Do NOT execute these after a normal successful change; rollback steps are automatically included in the finalized SOP.",
+                    )}
+                  </span>
+                </div>
+              </div>
+            )}
+
             {shownSteps.length === 0 ? (
               <div className="rh-empty-filter muted small">
                 {bi(
-                  "该阶段下暂无步骤，切换到「全部」查看完整演练清单。",
-                  "No steps in this phase; switch to All to view the full checklist.",
+                  "该阶段下暂无步骤，切换到「正向步骤」查看完整执行清单。",
+                  "No steps in this phase; switch to Forward to view the execution checklist.",
                 )}
               </div>
             ) : (
               <ol className="rh-timeline">
-                {shownSteps.map((step, idx) => (
-                  <StepRow
-                    key={step.id}
-                    c={c}
-                    rehearsalId={r.id}
-                    step={step}
-                    index={idx + 1}
-                    staggerIndex={isFreshProbe ? Math.min(idx, 7) : undefined}
-                    offline={offline}
-                    noVision={noVision}
-                    pick={pick}
-                    aiOpts={aiOpts}
-                    onUpdated={setR}
-                    onEngageFocus={onEngageFocus}
-                  />
-                ))}
+                {(() => {
+                  const isRollbackTab = phaseFilter === "rollback";
+                  const activeStepId = isRollbackTab
+                    ? undefined
+                    : shownSteps.find(
+                        (s) => s.status !== "passed" && s.status !== "skipped",
+                      )?.id;
+                  return shownSteps.map((step, idx) => (
+                    <StepRow
+                      key={step.id}
+                      c={c}
+                      rehearsalId={r.id}
+                      rehearsalTitle={r.title}
+                      step={step}
+                      index={idx + 1}
+                      nodeLabel={isRollbackTab ? `R${idx + 1}` : undefined}
+                      forwardDone={gateReady}
+                      doneExpandCmd={doneExpandCmd}
+                      isActiveStep={step.id === activeStepId}
+                      staggerIndex={isFreshProbe ? Math.min(idx, 7) : undefined}
+                      offline={offline}
+                      noVision={noVision}
+                      pick={pick}
+                      aiOpts={aiOpts}
+                      onUpdated={setR}
+                      onEngageFocus={onEngageFocus}
+                    />
+                  ));
+                })()}
               </ol>
+            )}
+
+            {phaseFilter === "all" && rollbackSteps.length > 0 && (() => {
+              const hasExecutedRollback = rollbackSteps.some(
+                (s) => s.status === "passed" || s.status === "failed",
+              );
+              const autoSkipped = gateReady && !hasExecutedRollback;
+              return (
+                <details
+                  className={`rh-rollback-vault${autoSkipped ? " is-auto-skipped" : ""}`}
+                >
+                  <summary>
+                    <span className="rh-rollback-vault-left">
+                      {autoSkipped ? <IconCheck /> : <IconExclamationCircle />}
+                      <b>
+                        {bi(
+                          `应急回退预案（${rollbackSteps.length} 步）`,
+                          `Emergency Rollback Plan (${rollbackSteps.length})`,
+                        )}
+                      </b>
+                      {autoSkipped ? (
+                        <span className="rh-rollback-ok-pill">
+                          {bi("✓ 已默认跳过 · 无需处理", "✓ Auto-Skipped · No Action Needed")}
+                        </span>
+                      ) : (
+                        <span className="rh-rollback-warn-pill">
+                          {bi(
+                            "仅异常时执行 · 勿随正向步骤顺手操作",
+                            "Emergency only · Do NOT run sequentially",
+                          )}
+                        </span>
+                      )}
+                    </span>
+                    <span className="rh-rollback-vault-hint">
+                      {autoSkipped
+                        ? isChangeReportMode
+                          ? bi(
+                              "正向已全部通过 · 回退命令已自动收录进变更报告（无需点开点跳过，如需查看可展开）",
+                              "All forward steps passed · Included in Change Report (no need to open/skip)",
+                            )
+                          : bi(
+                              "正向已全部通过 · 回退命令已自动收录进定稿 SOP（无需点开点跳过，如需查看可展开）",
+                              "All forward steps passed · Included in SOP (no need to open/skip)",
+                            )
+                        : isChangeReportMode
+                          ? bi(
+                              "默认自动跳过 · 无需点开操作 · 已自动纳入变更报告",
+                              "Auto-skipped by default · Included in Change Report",
+                            )
+                          : bi(
+                              "默认自动跳过 · 无需点开操作 · 已自动纳入定稿 SOP",
+                              "Auto-skipped by default · Included in SOP",
+                            )}
+                    </span>
+                  </summary>
+                  <div className="rh-rollback-vault-body">
+                    <div className="rh-rollback-banner" role="note">
+                      <IconExclamationCircle />
+                      <div>
+                        <b>
+                          {bi(
+                            "高危防误操作提示：此处为变更失败或指标异常时的回退命令",
+                            "Safety Warning: Rollback commands for failed changes only",
+                          )}
+                        </b>
+                        <span>
+                          {isChangeReportMode
+                            ? bi(
+                                "正向步骤全部通过后，本区回退预案会自动跳过并完整写入《变更报告》，您无需执行也无需手动点击跳过；仅在确实需要演练回退或触发应急回滚时使用。",
+                                "Automatically skipped and archived into the Change Report once forward steps pass; run only when rehearsing or executing an emergency rollback.",
+                              )
+                            : bi(
+                                "正向步骤全部通过后，本区回退预案会自动跳过并完整写入定稿 SOP，您无需执行也无需手动点击跳过；仅在确实需要演练回退或触发应急回滚时使用。",
+                                "Automatically skipped and archived into the finalized SOP once forward steps pass; run only when rehearsing or executing an emergency rollback.",
+                              )}
+                        </span>
+                      </div>
+                    </div>
+                    <ol className="rh-timeline is-rollback-list">
+                      {rollbackSteps.map((step, idx) => (
+                        <StepRow
+                          key={step.id}
+                          c={c}
+                          rehearsalId={r.id}
+                          rehearsalTitle={r.title}
+                          step={step}
+                          index={idx + 1}
+                          nodeLabel={`R${idx + 1}`}
+                          forwardDone={gateReady}
+                          isActiveStep={false}
+                          offline={offline}
+                          noVision={noVision}
+                          pick={pick}
+                          aiOpts={aiOpts}
+                          onUpdated={setR}
+                          onEngageFocus={onEngageFocus}
+                        />
+                      ))}
+                    </ol>
+                  </div>
+                </details>
+              );
+            })()}
+              </>
             )}
           </div>
         )}
@@ -8308,29 +9900,55 @@ function RehearsalSessionView({
               </div>
               <div className="rh-doc-body">
                 <div className="rh-doc-top">
-                  <span className="rh-doc-badge">{bi("已定稿", "Finalized")}</span>
+                  <span
+                    className={`rh-doc-badge${r.voided ? " is-voided" : r.applied ? " is-applied" : " is-pending-apply"}`}
+                  >
+                    {r.voided
+                      ? r.superseded_by
+                        ? bi("⊘ 已被替代", "⊘ Superseded")
+                        : bi("⊘ 已作废", "⊘ Voided")
+                      : r.applied
+                        ? bi("✓ 生产已落地", "✓ Applied to Prod")
+                        : isChangeReportMode
+                          ? bi("已归档 · 待确认落地", "Archived · Pending Apply")
+                          : bi("已定稿 · 待生产实施", "Finalized · Pending Apply")}
+                  </span>
                   <span className="mono faint small">
                     {r.doc_id || `sop-${r.id}`}
                   </span>
                 </div>
                 <h3>
-                  {bi(
-                    `${r.title} · 生产变更实施方案`,
-                    `${r.title} · Production Change SOP`,
-                  )}
+                  {isChangeReportMode
+                    ? bi(`${r.title} · 变更报告`, `${r.title} · Change Report`)
+                    : bi(
+                        `${r.title} · 生产变更实施方案`,
+                        `${r.title} · Production Change SOP`,
+                      )}
                 </h3>
                 <p className="muted">
-                  {biv(
-                    <>
-                      已将测试环境验证通过的步骤、实测耗时与回退预案映射回集群{" "}
-                      <b className="mono">{c.id}</b> 的生产节点拓扑，并归档至集群文档。
-                    </>,
-                    <>
-                      Mapped verified steps, measured durations, and rollback
-                      procedures onto production topology for cluster{" "}
-                      <b className="mono">{c.id}</b> and archived to Cluster Docs.
-                    </>,
-                  )}
+                  {isChangeReportMode
+                    ? biv(
+                        <>
+                          已汇总集群 <b className="mono">{c.id}</b>{" "}
+                          本次变更的实际执行命令、核验结论与回退预案，归档至集群「文档」供追溯与审计。
+                        </>,
+                        <>
+                          Compiled executed commands, verification outcomes, and
+                          rollback plan for cluster <b className="mono">{c.id}</b>{" "}
+                          into Cluster Docs for auditability.
+                        </>,
+                      )
+                    : biv(
+                        <>
+                          已将测试环境验证通过的步骤、实测耗时与回退预案映射回集群{" "}
+                          <b className="mono">{c.id}</b> 的生产节点拓扑，并归档至集群文档。
+                        </>,
+                        <>
+                          Mapped verified steps, measured durations, and rollback
+                          procedures onto production topology for cluster{" "}
+                          <b className="mono">{c.id}</b> and archived to Cluster Docs.
+                        </>,
+                      )}
                 </p>
                 <dl className="rh-doc-facts">
                   <div>
@@ -8396,11 +10014,26 @@ function RehearsalSessionView({
                     disabled={offline}
                     onClick={() => void finalizeSOP()}
                   >
-                    {bi("重新同步生成", "Re-sync SOP")}
+                    {isChangeReportMode
+                      ? bi("重新同步报告", "Re-sync Report")
+                      : bi("重新同步生成", "Re-sync SOP")}
                   </Button>
                 </div>
               </div>
             </div>
+
+            <RehearsalProductionApplyCard
+              clusterId={c.id}
+              rehearsal={r}
+              peers={peers}
+              offline={offline}
+              onUpdated={(next) => {
+                setR(next);
+                putCached(rehearsalItemPath(c.id, next.id), next);
+                void onListChanged();
+                onClusterChanged?.();
+              }}
+            />
           </section>
         )}
       </div>
@@ -8413,8 +10046,13 @@ function RehearsalSessionView({
 function StepRow({
   c,
   rehearsalId,
+  rehearsalTitle,
   step,
   index,
+  nodeLabel,
+  forwardDone = false,
+  doneExpandCmd,
+  isActiveStep = false,
   staggerIndex,
   offline,
   noVision,
@@ -8425,8 +10063,13 @@ function StepRow({
 }: {
   c: ClusterView;
   rehearsalId: string;
+  rehearsalTitle?: string;
   step: RehearsalStep;
   index: number;
+  nodeLabel?: string;
+  forwardDone?: boolean;
+  doneExpandCmd?: { expand: boolean; seq: number };
+  isActiveStep?: boolean;
   staggerIndex?: number;
   offline: boolean;
   noVision: boolean;
@@ -8436,48 +10079,159 @@ function StepRow({
   onEngageFocus?: () => void;
 }) {
   useLang();
-  const [elapsed, setElapsed] = useState(step.elapsed || "");
+  const dock = useAIDock();
+  const isRollback = step.phase === "rollback";
+  const isDone = step.status === "passed" || step.status === "skipped";
+  const [collapsed, setCollapsed] = useState(() => isDone);
+  const [tearing, setTearing] = useState(false);
+  const [justSettled, setJustSettled] = useState(false);
+  const prevStatusRef = useRef(step.status);
+  const prevStepIdRef = useRef(step.id);
   const [note, setNote] = useState(step.note || "");
+  const [editingNote, setEditingNote] = useState(false);
   const [editingCmd, setEditingCmd] = useState(false);
   const [cmdDraft, setCmdDraft] = useState(step.command);
-  const [troubleOpen, setTroubleOpen] = useState(Boolean(step.proposal));
-  const [errText, setErrText] = useState(step.last_error || "");
-  const [errImages, setErrImages] = useState<DraftImage[]>([]);
-  const [dragErr, setDragErr] = useState(false);
-  const [liveTrouble, setLiveTrouble] = useState<LiveAIState | null>(null);
-  const [freshTrouble, setFreshTrouble] = useState(false);
+  const [verifyOpen, setVerifyOpen] = useState(
+    () =>
+      (!isRollback && isActiveStep) ||
+      step.status === "failed" ||
+      Boolean(step.proposal),
+  );
+  const [evidText, setEvidText] = useState(step.last_error || "");
+  const [evidImages, setEvidImages] = useState<DraftImage[]>([]);
+  const [dragEvid, setDragEvid] = useState(false);
+  const [liveVerify, setLiveVerify] = useState<LiveAIState | null>(null);
+  const [freshVerify, setFreshVerify] = useState(false);
+  const [verifyFlash, setVerifyFlash] = useState(false);
   const [busy, setBusy] = useState("");
 
-  const troubleAbortRef = useRef<AbortController | null>(null);
-  const errImgInputRef = useRef<HTMLInputElement | null>(null);
+  const verifyAbortRef = useRef<AbortController | null>(null);
+  const evidImgInputRef = useRef<HTMLInputElement | null>(null);
+  const verifyBoxRef = useRef<HTMLDivElement | null>(null);
+
+  // Trigger Ichiban Kuji tear-off peel animation when a step freshly transitions to passed/skipped
+  useEffect(() => {
+    if (prevStepIdRef.current !== step.id) {
+      prevStepIdRef.current = step.id;
+      prevStatusRef.current = step.status;
+      setTearing(false);
+      setJustSettled(false);
+      setCollapsed(step.status === "passed" || step.status === "skipped");
+      return;
+    }
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = step.status;
+    const wasDone = prev === "passed" || prev === "skipped";
+    const nowDone = step.status === "passed" || step.status === "skipped";
+    if (!wasDone && nowDone) {
+      setTearing(true);
+      setCollapsed(false);
+      const t1 = window.setTimeout(() => {
+        setTearing(false);
+        setCollapsed(true);
+        setJustSettled(true);
+      }, 720);
+      const t2 = window.setTimeout(() => {
+        setJustSettled(false);
+      }, 1350);
+      return () => {
+        window.clearTimeout(t1);
+        window.clearTimeout(t2);
+      };
+    }
+    if (wasDone && !nowDone) {
+      setTearing(false);
+      setJustSettled(false);
+      setCollapsed(false);
+    }
+  }, [step.id, step.status]);
+
+  // Follow parent's global "Expand / Fold all completed" button
+  useEffect(() => {
+    if (!doneExpandCmd || doneExpandCmd.seq === 0) return;
+    if (isDone && !tearing) {
+      setCollapsed(!doneExpandCmd.expand);
+    }
+  }, [doneExpandCmd, isDone, tearing]);
+
+  const focusVerifyBox = useCallback((clearInput: boolean) => {
+    setVerifyOpen(true);
+    if (clearInput) {
+      setEvidText("");
+      setEvidImages([]);
+    }
+    setVerifyFlash(true);
+    window.setTimeout(() => setVerifyFlash(false), 1600);
+    window.setTimeout(() => {
+      const box = verifyBoxRef.current;
+      if (!box) return;
+      box.scrollIntoView({ behavior: "smooth", block: "center" });
+      const ta = box.querySelector("textarea");
+      if (ta) {
+        ta.focus({ preventScroll: true });
+      }
+    }, 80);
+  }, []);
 
   useEffect(() => {
     setCmdDraft(step.command);
-    setElapsed(step.elapsed || "");
     setNote(step.note || "");
-    if (step.proposal) setTroubleOpen(true);
-  }, [step.command, step.elapsed, step.note, step.proposal]);
+    if (step.status === "failed" || step.proposal) {
+      setVerifyOpen(true);
+    } else if (step.status === "passed" || step.status === "skipped") {
+      setVerifyOpen(false);
+    }
+  }, [step.command, step.note, step.status, step.proposal]);
+
+  useEffect(() => {
+    if (!isRollback && isActiveStep && step.status === "pending") {
+      setVerifyOpen(true);
+    }
+  }, [isActiveStep, isRollback, step.status]);
 
   const baseUrl = `/api/clusters/${encodeURIComponent(c.id)}/rehearsals/${encodeURIComponent(rehearsalId)}/steps/${encodeURIComponent(step.id)}`;
 
-  const attachErrFiles = async (files: FileList | File[]) => {
-    const imgs = Array.from(files).filter((f) => f.type.startsWith("image/"));
+  const attachEvidFiles = async (files: FileList | File[]) => {
+    const all = Array.from(files);
+    const txtFiles = all.filter(
+      (f) =>
+        !f.type.startsWith("image/") &&
+        (/\.(log|txt|out|json|conf|yaml|yml)$/i.test(f.name) ||
+          f.type.startsWith("text/")),
+    );
+    for (const tf of txtFiles.slice(0, 1)) {
+      if (tf.size > 2 * 1024 * 1024) {
+        Message.warning(
+          bi("日志文件请控制在 2 MiB 以内", "Log file must be under 2 MiB"),
+        );
+        continue;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        setVerifyOpen(true);
+        setEvidText(String(reader.result || ""));
+        Message.success(bi(`已载入 ${tf.name}`, `Loaded ${tf.name}`));
+      };
+      reader.readAsText(tf);
+    }
+
+    const imgs = all.filter((f) => f.type.startsWith("image/"));
     if (!imgs.length) return;
     if (noVision) {
       Message.warning(
         bi(
-          "当前所选模型不支持识别截图，请粘贴报错文本或在下方切换支持看图的模型",
-          "Selected model does not support images; paste error text or switch to a vision model below",
+          "当前所选模型不支持识别截图，请粘贴终端输出或在下方切换支持看图的模型",
+          "Selected model does not support images; paste text output or switch to a vision model below",
         ),
       );
       return;
     }
-    const room = MAX_IMAGES - errImages.length;
+    const room = MAX_IMAGES - evidImages.length;
     if (room <= 0) {
       Message.warning(
         bi(
-          `单次最多附加 ${MAX_IMAGES} 张报错截图`,
-          `Up to ${MAX_IMAGES} error screenshots allowed`,
+          `单次最多附加 ${MAX_IMAGES} 张结果截图`,
+          `Up to ${MAX_IMAGES} screenshots allowed`,
         ),
       );
       return;
@@ -8491,27 +10245,26 @@ function StepRow({
       }
     }
     if (added.length > 0) {
-      setErrImages((prev) => [...prev, ...added]);
+      setVerifyOpen(true);
+      setEvidImages((prev) => [...prev, ...added]);
     }
   };
 
   const patchStep = async (
-    patch: Partial<
-      Pick<RehearsalStep, "status" | "elapsed" | "note" | "command">
-    >,
+    patch: Partial<Pick<RehearsalStep, "status" | "note" | "command">>,
   ) => {
     setBusy("patch");
     try {
       const next = await api<ChangeRehearsal>(baseUrl, {
         method: "PATCH",
         body: JSON.stringify({
-          elapsed,
           note,
           ...patch,
         }),
       });
       onUpdated(next);
       setEditingCmd(false);
+      setEditingNote(false);
     } catch (e) {
       err(e);
     } finally {
@@ -8519,60 +10272,76 @@ function StepRow({
     }
   };
 
-  const troubleBusy = Boolean(liveTrouble && !liveTrouble.error);
+  const verifyBusy = Boolean(liveVerify && !liveVerify.error);
+  const hasEvidInput = Boolean(evidText.trim()) || evidImages.length > 0;
 
-  const askTroubleshoot = async () => {
-    if ((!errText.trim() && errImages.length === 0) || offline || troubleBusy)
-      return;
+  const askVerify = async () => {
+    if (!hasEvidInput || offline || verifyBusy) return;
     onEngageFocus?.();
     const ac = new AbortController();
-    troubleAbortRef.current = ac;
+    verifyAbortRef.current = ac;
     const effortVal = pick.current?.effort?.includes(aiOpts.pref.think)
       ? aiOpts.pref.think
       : undefined;
-    setLiveTrouble(
+    setLiveVerify(
       createInitialLiveState(
-        "troubleshoot",
+        "verify",
         bi(
-          "AI 正在诊断测试环境报错并推演修正命令",
-          "AI is diagnosing staging error & proposing a fix",
+          "AI 正在对照预期判据核验此步执行结果",
+          "AI is verifying step output against pass criteria",
         ),
         bi(
-          "正在封装报错上下文并建立模型连接…",
-          "Packaging error context & connecting to AI model…",
+          "正在脱敏执行证据并核验是否通过，未通过将给出根因与修正方案…",
+          "Redacting output & evaluating pass criteria or diagnosing issues...",
         ),
         pick.current,
       ),
     );
     try {
       const next = await streamRehearsalAPI(
-        `${baseUrl}/troubleshoot`,
+        `${baseUrl}/verify`,
         {
-          error_output: errText,
+          output: evidText,
           images:
-            errImages.length > 0
-              ? errImages.map((im) => im.dataUrl)
+            evidImages.length > 0
+              ? evidImages.map((im) => im.dataUrl)
               : undefined,
           model: pick.ref || undefined,
           effort: effortVal,
         },
-        (updater) => setLiveTrouble((prev) => (prev ? updater(prev) : prev)),
+        (updater) => setLiveVerify((prev) => (prev ? updater(prev) : prev)),
         ac.signal,
       );
-      setLiveTrouble(null);
-      setErrImages([]);
-      setFreshTrouble(true);
+      setLiveVerify(null);
+      setEvidImages([]);
+      setFreshVerify(true);
       onUpdated(next);
-    } catch (e) {
-      if (ac.signal.aborted) {
-        setLiveTrouble(null);
+      const updatedStep = (next.steps || []).find((s) => s.id === step.id);
+      if (updatedStep?.status === "passed") {
+        setEvidText("");
+        setVerifyOpen(false);
+        Message.success(
+          bi(
+            `步骤 #${step.order || index} AI 核验通过，已自动回写实测结论`,
+            `Step #${step.order || index} verified PASSED by AI`,
+          ),
+        );
       } else {
-        setLiveTrouble((prev) =>
-          prev ? markLiveStateError(prev, e) : null,
+        Message.warning(
+          bi(
+            `步骤 #${step.order || index} 未通过核验，请查看下方 AI 诊断与修正建议`,
+            `Step #${step.order || index} did not pass—see AI diagnosis below`,
+          ),
         );
       }
+    } catch (e) {
+      if (ac.signal.aborted) {
+        setLiveVerify(null);
+      } else {
+        setLiveVerify((prev) => (prev ? markLiveStateError(prev, e) : null));
+      }
     } finally {
-      troubleAbortRef.current = null;
+      verifyAbortRef.current = null;
     }
   };
 
@@ -8583,9 +10352,9 @@ function StepRow({
         method: "POST",
       });
       onUpdated(next);
-      setTroubleOpen(false);
+      setEvidText("");
       Message.success(
-        bi("已更新步骤命令，请在测试环境复测", "Step command updated; please re-test in staging"),
+        bi("已更新步骤命令，请在测试环境复测并贴回结果", "Step command updated; re-test and paste output"),
       );
     } catch (e) {
       err(e);
@@ -8595,25 +10364,86 @@ function StepRow({
   };
 
   const num = step.order || index;
+  const canAskStepAI = Boolean(
+    dock && !offline && dock.available(`step:rehearsal:${rehearsalId}:${step.id}`),
+  );
+  const openStepInAIDock = useCallback(() => {
+    if (!dock) return;
+    const key = `step:rehearsal:${rehearsalId}:${step.id}`;
+    const stepMeta: Record<string, unknown> = {
+      kind: "rehearsal_step",
+      cluster_id: c.id,
+      rehearsal_id: rehearsalId,
+      rehearsal_title: rehearsalTitle || "",
+      step_id: step.id,
+      order: num,
+      phase: step.phase,
+      title: step.title,
+      target_role: step.target_role,
+      command: step.command,
+      expect: step.expect,
+      rollback: step.rollback || "",
+      risk_note: step.risk_note || "",
+      status: step.status,
+      note: step.note || "",
+    };
+    if (step.last_error) stepMeta.last_error = step.last_error;
+    if (step.proposal?.diagnosis) stepMeta.diagnosis = step.proposal.diagnosis;
+    dock.open({
+      key,
+      title: bi(`演练步骤 #${num} · ${step.title}`, `Rehearsal #${num} · ${step.title}`),
+      context: `${rehearsalTitle || rehearsalId} · ${c.id}`,
+      step: stepMeta,
+      hello: bi(
+        `正在聚焦演练步骤 #${num}「${step.title}」。直接告诉我哪里有问题或想怎么调整（例如拆成两步、修改命令或目标机器、放宽/调整判据、删除冗余步），我会和你确认后给出「一键更新演练步骤」卡片。`,
+        `Focused on rehearsal step #${num} "${step.title}". Tell me what looks off or how you want to change it (split steps, revise command/target host, adjust criteria), and I'll generate a 1-click update card.`,
+      ),
+    });
+  }, [c.id, dock, num, rehearsalId, rehearsalTitle, step]);
   const statusInfo =
     step.status === "passed"
       ? { label: bi("实测通过", "Passed"), cls: "passed" }
       : step.status === "failed"
         ? { label: bi("执行受阻", "Blocked"), cls: "failed" }
         : step.status === "skipped"
-          ? { label: bi("已跳过", "Skipped"), cls: "skipped" }
-          : { label: bi("待演练", "Pending"), cls: "pending" };
+          ? {
+              label: isRollback
+                ? bi("默认已跳过", "Auto-Skipped")
+                : bi("已跳过", "Skipped"),
+              cls: "skipped",
+            }
+          : isRollback
+            ? {
+                label: forwardDone
+                  ? bi("默认已跳过 · 仅异常时执行", "Auto-Skipped · Emergency Only")
+                  : bi("仅异常时执行 · 默认跳过", "Emergency Only · Auto-Skip"),
+                cls: forwardDone ? "skipped" : "rollback-idle",
+              }
+            : { label: bi("待演练", "Pending"), cls: "pending" };
+
+  const showStub = isDone && collapsed && !tearing;
+  const stubNote =
+    step.status === "skipped"
+      ? step.note || bi("已跳过本步（点击可展开查看命令或重置）", "Skipped (click to expand or reset)")
+      : step.note ||
+        (step.verified_by_ai
+          ? bi("AI 已核验通过（点击展开查看核验依据与命令）", "AI verified (click to inspect details)")
+          : bi("已标记通过（点击展开查看命令或补充结论）", "Marked passed (click to inspect or add note)"));
+  const roundCount = step.verify_history?.length || 0;
 
   return (
     <li
-      className={`rh-step st-${step.status}${staggerIndex !== undefined ? " is-fresh-step" : ""}`}
+      className={`rh-step st-${step.status}${isRollback ? " is-rollback" : ""}${showStub ? " is-stub" : ""}${tearing ? " is-tearing" : ""}${justSettled ? " is-stub-settled" : ""}${staggerIndex !== undefined ? " is-fresh-step" : ""}`}
       style={
         staggerIndex !== undefined
           ? ({ "--rh-stagger": staggerIndex } as React.CSSProperties)
           : undefined
       }
     >
-      <span className={`rh-step-node st-${step.status}`} aria-hidden>
+      <span
+        className={`rh-step-node st-${step.status}${isRollback ? " is-rollback" : ""}${tearing ? " is-stamp-pop" : ""}`}
+        aria-hidden
+      >
         {step.status === "passed" ? (
           <IconCheck />
         ) : step.status === "failed" ? (
@@ -8621,26 +10451,138 @@ function StepRow({
         ) : step.status === "skipped" ? (
           "–"
         ) : (
-          <span className="num">{num}</span>
+          <span className="num">{nodeLabel || num}</span>
         )}
       </span>
 
       <div className="rh-step-body">
-        <div className="rh-step-head">
-          <div className="rh-step-title">
-            <span className={`rh-phase ph-${step.phase}`}>
-              {PHASE_LABEL[step.phase]}
-            </span>
-            <b>{step.title}</b>
-            {step.target_role && (
-              <code className="rh-target mono">{step.target_role}</code>
+        {showStub ? (
+          <button
+            type="button"
+            className={`rh-step-stub is-${step.status}`}
+            onClick={() => setCollapsed(false)}
+            aria-expanded={false}
+          >
+            <div className="rh-step-stub-main">
+              <div className="rh-step-stub-top">
+                <span className={`rh-phase ph-${step.phase}`}>
+                  {PHASE_LABEL[step.phase]}
+                </span>
+                <b className="rh-step-stub-title">{step.title}</b>
+                {step.optional && (
+                  <Tag size="small">{bi("可选", "Optional")}</Tag>
+                )}
+              </div>
+              <p className="rh-step-stub-note">{stubNote}</p>
+            </div>
+            <div className="rh-step-stub-right">
+              {roundCount > 1 && (
+                <span className="rh-stub-rounds num">
+                  {bi(`历 ${roundCount} 轮`, `${roundCount} rounds`)}
+                </span>
+              )}
+              <span className={`rh-status-pill ${statusInfo.cls}`}>
+                {step.status === "passed" && step.verified_by_ai && (
+                  <Spark size={11} />
+                )}
+                {statusInfo.label}
+              </span>
+              <span className="rh-stub-expand">
+                <span>{bi("展开详情", "Details")}</span>
+                <IconDown />
+              </span>
+            </div>
+          </button>
+        ) : (
+          <>
+            <div className="rh-step-head">
+              <div className="rh-step-title">
+                <span className={`rh-phase ph-${step.phase}`}>
+                  {PHASE_LABEL[step.phase]}
+                </span>
+                <b>{step.title}</b>
+                {step.optional && (
+                  <Tag size="small">{bi("可选", "Optional")}</Tag>
+                )}
+              </div>
+              <div className="rh-step-head-right">
+                {tearing && (
+                  <span
+                    className={`rh-tear-stamp is-${step.status}`}
+                    aria-hidden
+                  >
+                    {step.status === "passed"
+                      ? bi("✓ 已撕票完成", "✓ COMPLETED")
+                      : bi("已跳过", "SKIPPED")}
+                  </span>
+                )}
+                <span className={`rh-status-pill ${statusInfo.cls}`}>
+                  {statusInfo.label}
+                </span>
+                {isDone && !tearing && (
+                  <button
+                    type="button"
+                    className="rh-stub-collapse-btn"
+                    onClick={() => setCollapsed(true)}
+                  >
+                    <span>{bi("收起存根", "Fold")}</span>
+                    <IconUp />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {tearing && (
+              <div className="rh-tear-seam" aria-hidden>
+                <span className="rh-tear-line" />
+                <span className="rh-tear-spark" />
+              </div>
             )}
-            {step.optional && <Tag size="small">{bi("可选", "Optional")}</Tag>}
-          </div>
-          <span className={`rh-status-pill ${statusInfo.cls}`}>
-            {statusInfo.label}
-          </span>
-        </div>
+
+            <div className={`rh-step-sheet-wrap${tearing ? " is-tearing" : ""}`}>
+              <div className="rh-step-sheet">
+
+        {step.target_role && (() => {
+          const tr = step.target_role.trim();
+          const tone = /集群外|跳板机|客户端|ELB|VIP/i.test(tr)
+            ? "tone-external"
+            : /从库|备库|备节点|standby|replica/i.test(tr) && !/主库|leader|primary/i.test(tr)
+              ? "tone-replica"
+              : /主库|leader|primary/i.test(tr) && !/所有|三台|全节点|逐台/i.test(tr)
+                ? "tone-primary"
+                : "";
+          return (
+            <div className={`rh-step-where ${tone}`.trim()}>
+              <span className="rh-step-where-k">
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  aria-hidden
+                >
+                  <rect
+                    x="2"
+                    y="2.5"
+                    width="12"
+                    height="8.5"
+                    rx="1.6"
+                    stroke="currentColor"
+                    strokeWidth="1.4"
+                  />
+                  <path
+                    d="M5.5 13.5h5M8 11v2.5"
+                    stroke="currentColor"
+                    strokeWidth="1.4"
+                    strokeLinecap="round"
+                  />
+                </svg>
+                {bi("执行机器", "Run On")}
+              </span>
+              <span className="rh-step-where-v">{tr}</span>
+            </div>
+          );
+        })()}
 
         {editingCmd ? (
           <div
@@ -8691,6 +10633,7 @@ function StepRow({
             title={bi("执行命令", "Command")}
             compact
             onEdit={() => setEditingCmd(true)}
+            onAskAI={canAskStepAI ? openStepInAIDock : undefined}
           />
         )}
 
@@ -8717,29 +10660,30 @@ function StepRow({
         </dl>
 
         <Smooth>
-          {(troubleOpen || step.proposal || step.trouble_trace) && (
+          {(verifyOpen || step.proposal || step.trouble_trace || liveVerify) && (
             <div className="rh-drawer-stack">
-              {troubleOpen && (
+              {verifyOpen && (
                 <div
-                  className={`rh-trouble ${offline ? "off" : ""} ${dragErr ? "is-drag" : ""} ${troubleBusy ? "is-busy" : ""}`}
+                  ref={verifyBoxRef}
+                  className={`rh-step-verify ${offline ? "off" : ""} ${dragEvid ? "is-drag" : ""} ${verifyBusy ? "is-busy" : ""} ${verifyFlash ? "is-flash" : ""}`}
                   onKeyDown={(e) => {
                     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
                       e.preventDefault();
-                      void askTroubleshoot();
+                      void askVerify();
                     }
                   }}
                   onDragOver={(e) => {
                     if (e.dataTransfer?.types?.includes("Files")) {
                       e.preventDefault();
-                      setDragErr(true);
+                      setDragEvid(true);
                     }
                   }}
-                  onDragLeave={() => setDragErr(false)}
+                  onDragLeave={() => setDragEvid(false)}
                   onDrop={(e) => {
                     e.preventDefault();
-                    setDragErr(false);
+                    setDragEvid(false);
                     if (e.dataTransfer?.files?.length) {
-                      void attachErrFiles(e.dataTransfer.files);
+                      void attachEvidFiles(e.dataTransfer.files);
                     }
                   }}
                   onPaste={(e) => {
@@ -8748,46 +10692,91 @@ function StepRow({
                       if (!e.clipboardData?.getData("text/plain")) {
                         e.preventDefault();
                       }
-                      void attachErrFiles(imgs);
+                      void attachEvidFiles(imgs);
                     }
                   }}
                 >
-                  <div className="rh-trouble-head">
-                    <b>
-                      <IconExclamationCircle />{" "}
-                      {bi("测试环境报错诊断", "Staging Error Troubleshooting")}
-                    </b>
-                    <button
-                      type="button"
-                      className="link small"
-                      onClick={() => setTroubleOpen(false)}
-                    >
-                      {bi("收起", "Collapse")}
-                    </button>
+                  <div className="rh-step-verify-head">
+                    <div className="rh-step-verify-title">
+                      <Spark size={13} />
+                      <b>{bi("回填执行结果", "Submit Step Output")}</b>
+                      <span className="rh-step-verify-hint">
+                        {(step.proposal?.verified_facts?.length || 0) > 0
+                          ? bi(
+                              `已自动记住前序证实的 ${step.proposal!.verified_facts!.length} 项达标事实，本轮只需贴剩余节点或补测结果`,
+                              `${step.proposal!.verified_facts!.length} prior verified fact(s) remembered automatically; paste only the remaining item(s)`,
+                            )
+                          : bi(
+                              "AI 对照预期判据自动判定通过，未通过则直接给出修正方案",
+                              "AI judges pass/fail against expected criteria and proposes fixes on error",
+                            )}
+                      </span>
+                    </div>
+                    <div className="rh-step-manual-links">
+                      <button
+                        type="button"
+                        disabled={busy === "patch" || verifyBusy}
+                        className="rh-manual-link pass"
+                        onClick={() => void patchStep({ status: "passed" })}
+                      >
+                        {isRollback
+                          ? bi("标记回退已演练", "Mark Rollback Tested")
+                          : bi("直接标记通过", "Mark Passed")}
+                      </button>
+                      {!isRollback && (
+                        <button
+                          type="button"
+                          disabled={busy === "patch" || verifyBusy}
+                          className="rh-manual-link"
+                          onClick={() => void patchStep({ status: "skipped" })}
+                        >
+                          {bi("跳过", "Skip")}
+                        </button>
+                      )}
+                      {!isActiveStep && (
+                        <button
+                          type="button"
+                          className="rh-manual-link"
+                          onClick={() => setVerifyOpen(false)}
+                        >
+                          {bi("收起", "Collapse")}
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <Input.TextArea
-                    value={errText}
-                    disabled={troubleBusy}
-                    onChange={setErrText}
-                    autoSize={{ minRows: 3, maxRows: 8 }}
-                    className="mono"
+                    value={evidText}
+                    disabled={verifyBusy}
+                    onChange={setEvidText}
+                    autoSize={{ minRows: 3, maxRows: 10 }}
+                    className="mono rh-step-verify-area"
                     placeholder={bi(
-                      "粘贴测试机器上的报错输出，或直接按 Ctrl+V 粘贴报错终端截图（敏感信息自动脱敏）…",
-                      "Paste error output from staging host, or press Ctrl+V to paste terminal screenshots (secrets auto-redacted)…",
+                      "粘贴本步在测试机器上的完整终端输出，或直接按 Ctrl+V 粘贴终端结果截图（敏感信息自动脱敏）…",
+                      "Paste terminal output from running this step, or press Ctrl+V to paste screenshots (secrets auto-redacted)…",
                     )}
-                    aria-label={bi("步骤报错输出", "Step error output")}
+                    aria-label={bi("步骤执行输出", "Step execution output")}
                   />
-                  {(errImages.length > 0 ||
+                  {(evidImages.length > 0 ||
+                    (step.evidence_images && step.evidence_images.length > 0) ||
                     (step.error_images && step.error_images.length > 0)) && (
                     <div className="rh-compose-imgs">
                       <DraftImageStrip
-                        images={errImages}
+                        images={evidImages}
                         onRemove={(imgId) =>
-                          setErrImages((prev) =>
+                          setEvidImages((prev) =>
                             prev.filter((x) => x.id !== imgId),
                           )
                         }
                       />
+                      {step.evidence_images &&
+                        step.evidence_images.length > 0 && (
+                          <SavedImageGallery
+                            clusterId={c.id}
+                            rehearsalId={rehearsalId}
+                            names={step.evidence_images}
+                            label={bi("实测截图", "Verification Screenshots")}
+                          />
+                        )}
                       {step.error_images && step.error_images.length > 0 && (
                         <SavedImageGallery
                           clusterId={c.id}
@@ -8801,22 +10790,22 @@ function StepRow({
                   <div className="rh-trouble-foot">
                     <div className="rh-trouble-tools">
                       <input
-                        ref={errImgInputRef}
+                        ref={evidImgInputRef}
                         type="file"
                         accept="image/png,image/jpeg,image/webp,image/gif"
                         multiple
                         hidden
                         onChange={(e) => {
                           if (e.target.files?.length) {
-                            void attachErrFiles(e.target.files);
+                            void attachEvidFiles(e.target.files);
                           }
                           e.target.value = "";
                         }}
                       />
                       <button
                         type="button"
-                        className="rh-attach-btn"
-                        disabled={troubleBusy || noVision}
+                        className="rh-attach-btn is-sm"
+                        disabled={verifyBusy || noVision}
                         title={
                           noVision
                             ? bi(
@@ -8824,78 +10813,93 @@ function StepRow({
                                 "Selected model does not support images; switch to a vision model",
                               )
                             : bi(
-                                "上传或直接 Ctrl+V 粘贴报错截图",
-                                "Upload or Ctrl+V paste error screenshots",
+                                "上传或直接 Ctrl+V 粘贴执行结果截图",
+                                "Upload or Ctrl+V paste output screenshots",
                               )
                         }
-                        onClick={() => errImgInputRef.current?.click()}
+                        onClick={() => evidImgInputRef.current?.click()}
                       >
                         <IconImage />
-                        <span>
-                          {bi("粘贴/上传报错截图", "Paste / Upload Error Image")}
-                        </span>
+                        <span>{bi("上传/粘贴截图", "Upload / Paste Image")}</span>
                       </button>
+                      <Upload
+                        accept=".log,.txt,.out,.json"
+                        showUploadList={false}
+                        disabled={verifyBusy}
+                        beforeUpload={(file) => {
+                          void attachEvidFiles([file]);
+                          return false;
+                        }}
+                      >
+                        <button
+                          type="button"
+                          className="rh-attach-btn is-sm"
+                          disabled={verifyBusy}
+                        >
+                          <IconUpload />
+                          <span>{bi("上传 .log / .txt", "Upload .log / .txt")}</span>
+                        </button>
+                      </Upload>
+                      <span className="rh-foot-note">
+                        {isMac
+                          ? bi("⌘ + Enter AI 核验", "⌘ + Enter Verify")
+                          : bi("Ctrl + Enter AI 核验", "Ctrl + Enter Verify")}
+                      </span>
+                    </div>
+                    <div className="rh-compose-submit">
                       <ThinkLevel
                         levels={pick.current?.effort}
                         value={aiOpts.pref.think}
                         onChange={(v) => aiOpts.update({ think: v })}
                       />
                       <ModelPicker pick={pick} compact />
-                    </div>
-                    <div className="rh-compose-submit">
                       <Button
                         size="small"
                         type="primary"
                         shape="round"
-                        className={`ai-pill ${(errText.trim() || errImages.length > 0) && !offline ? "ai-pill-primary" : ""}`}
+                        className={`ai-pill ${hasEvidInput && !offline ? "ai-pill-primary" : ""}`}
                         icon={
                           <Spark
                             size={13}
-                            rainbow={
-                              (!errText.trim() && errImages.length === 0) ||
-                              offline
-                            }
+                            rainbow={!hasEvidInput || offline}
                           />
                         }
-                        title={
-                          isMac
-                            ? bi("⌘ + Enter 诊断", "⌘ + Enter Diagnose")
-                            : bi("Ctrl + Enter 诊断", "Ctrl + Enter Diagnose")
-                        }
-                        loading={troubleBusy}
-                        disabled={
-                          (!errText.trim() && errImages.length === 0) || offline
-                        }
-                        onClick={() => void askTroubleshoot()}
+                        loading={verifyBusy}
+                        disabled={!hasEvidInput || offline}
+                        onClick={() => void askVerify()}
                       >
-                        {bi("诊断并生成修正命令", "Diagnose & Propose Fix")}
+                        {bi("AI 核验结果", "AI Verify Output")}
                       </Button>
                     </div>
                   </div>
                 </div>
               )}
 
-              {liveTrouble && (
+              {liveVerify && (
                 <RehearsalAIProcess
-                  live={liveTrouble}
-                  title={liveTrouble.title}
-                  onAbort={() => troubleAbortRef.current?.abort()}
-                  onRetry={() => void askTroubleshoot()}
-                  onDismiss={() => setLiveTrouble(null)}
+                  live={liveVerify}
+                  title={liveVerify.title}
+                  onAbort={() => verifyAbortRef.current?.abort()}
+                  onRetry={() => void askVerify()}
+                  onDismiss={() => setLiveVerify(null)}
                 />
               )}
 
-              {!liveTrouble && step.trouble_trace && (
+              {!liveVerify && step.trouble_trace && (
                 <RehearsalAIProcess
                   trace={step.trouble_trace}
-                  title={bi("AI 报错根因推理过程", "AI Root Cause Analysis")}
-                  defaultOpen={freshTrouble}
+                  title={
+                    step.status === "passed"
+                      ? bi("AI 核验通过依据", "AI Verification Reasoning")
+                      : bi("AI 核验与根因诊断过程", "AI Verification & Root Cause")
+                  }
+                  defaultOpen={freshVerify}
                 />
               )}
 
               {step.proposal && (
                 <div
-                  className={`rh-proposal${freshTrouble ? " is-fresh-proposal" : ""}`}
+                  className={`rh-proposal${freshVerify ? " is-fresh-proposal" : ""}`}
                 >
                   <div className="rh-proposal-head">
                     <b>
@@ -8905,7 +10909,9 @@ function StepRow({
                             `建议插入前置步骤：${step.proposal.title || "前置准备"}`,
                             `Insert prerequisite step: ${step.proposal.title || "Prerequisite"}`,
                           )
-                        : bi("建议原位更新此步命令", "Update this step's command in place")}
+                        : step.proposal.action === "retry"
+                          ? bi("核验未通过 · 复测建议", "Verification Failed · Retry Guidance")
+                          : bi("核验未通过 · 建议更新此步命令", "Verification Failed · Update Command")}
                     </b>
                   </div>
                   <div className="rh-proposal-diag">
@@ -8914,27 +10920,247 @@ function StepRow({
                       compact
                     />
                   </div>
-                  <ShellCodeBlock
-                    code={step.proposal.command}
-                    title={bi("修正后命令", "Revised Command")}
-                    compact
-                  />
+                  {((step.proposal.verified_facts &&
+                    step.proposal.verified_facts.length > 0) ||
+                    (step.proposal.missing_items &&
+                      step.proposal.missing_items.length > 0)) && (
+                    <div className="rh-vmem-grid">
+                      {step.proposal.verified_facts &&
+                        step.proposal.verified_facts.length > 0 && (
+                          <div className="rh-vmem-row is-ok">
+                            <span className="rh-vmem-k">
+                              {bi(
+                                "已证实（下轮自动沿用，无需重贴）",
+                                "Already verified (carried forward)",
+                              )}
+                            </span>
+                            <div className="rh-vmem-chips">
+                              {step.proposal.verified_facts.map((vf, i) => (
+                                <span key={i} className="rh-vmem-chip is-ok">
+                                  <IconCheck />
+                                  <span>{vf}</span>
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      {step.proposal.missing_items &&
+                        step.proposal.missing_items.length > 0 && (
+                          <div className="rh-vmem-row is-miss">
+                            <span className="rh-vmem-k">
+                              {bi("仅需补传以下剩余项", "Remaining item(s) only")}
+                            </span>
+                            <div className="rh-vmem-chips">
+                              {step.proposal.missing_items.map((mi, i) => (
+                                <span key={i} className="rh-vmem-chip is-miss">
+                                  {mi}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                    </div>
+                  )}
+                  {(() => {
+                    const propRole =
+                      (step.proposal.target_role || "").trim() ||
+                      (step.target_role || "").trim();
+                    if (!propRole) return null;
+                    const tone = /集群外|跳板机|客户端|ELB|VIP/i.test(propRole)
+                      ? "tone-external"
+                      : /从库|备库|备节点|standby|replica/i.test(propRole) &&
+                          !/主库|leader|primary/i.test(propRole)
+                        ? "tone-replica"
+                        : /主库|leader|primary/i.test(propRole) &&
+                            !/所有|三台|全节点|逐台/i.test(propRole)
+                          ? "tone-primary"
+                          : "";
+                    return (
+                      <div className={`rh-step-where ${tone}`.trim()}>
+                        <span className="rh-step-where-k">
+                          <svg
+                            width="13"
+                            height="13"
+                            viewBox="0 0 16 16"
+                            fill="none"
+                            aria-hidden
+                          >
+                            <rect
+                              x="2"
+                              y="2.5"
+                              width="12"
+                              height="8.5"
+                              rx="1.6"
+                              stroke="currentColor"
+                              strokeWidth="1.4"
+                            />
+                            <path
+                              d="M5.5 13.5h5M8 11v2.5"
+                              stroke="currentColor"
+                              strokeWidth="1.4"
+                              strokeLinecap="round"
+                            />
+                          </svg>
+                          {step.proposal.action === "retry"
+                            ? bi("复测执行机器", "Retry On")
+                            : bi("执行机器", "Run On")}
+                        </span>
+                        <span className="rh-step-where-v">{propRole}</span>
+                      </div>
+                    );
+                  })()}
+                  {step.proposal.command && (
+                    <ShellCodeBlock
+                      code={step.proposal.command}
+                      title={
+                        step.proposal.action === "retry"
+                          ? bi("建议复测命令", "Recommended Command")
+                          : bi("修正后命令", "Revised Command")
+                      }
+                      compact
+                    />
+                  )}
                   <div className="row-gap">
-                    <Button
-                      size="small"
-                      type="primary"
-                      icon={<IconCheck />}
-                      loading={busy === "apply"}
-                      onClick={() => void applyProposal()}
-                    >
-                      {bi("采纳并重新验证", "Accept & Re-test")}
-                    </Button>
+                    {step.proposal.action !== "retry" ? (
+                      <Button
+                        size="small"
+                        type="primary"
+                        icon={<IconCheck />}
+                        loading={busy === "apply"}
+                        onClick={() => void applyProposal()}
+                      >
+                        {bi("采纳并重新验证", "Accept & Re-test")}
+                      </Button>
+                    ) : (
+                      <Button
+                        size="small"
+                        type="outline"
+                        onClick={() => focusVerifyBox(true)}
+                      >
+                        {bi("处理后重新贴回结果", "Clear & Re-submit Output")}
+                      </Button>
+                    )}
+                    {canAskStepAI && (
+                      <Button
+                        size="small"
+                        type="text"
+                        icon={<Spark size={12} />}
+                        onClick={openStepInAIDock}
+                      >
+                        {bi("找 AI 对话修改此步", "Discuss / Edit with AI")}
+                      </Button>
+                    )}
                   </div>
                 </div>
               )}
             </div>
           )}
         </Smooth>
+
+        {(step.verify_history || []).length > 0 && (() => {
+          const hist = step.verify_history!;
+          const failCount = hist.filter((h) => h.verdict !== "passed").length;
+          const summaryLabel =
+            failCount > 0 && step.status === "passed"
+              ? bi(
+                  `核验历史（共 ${hist.length} 轮 · 曾未通过 ${failCount} 轮）`,
+                  `Verification history (${hist.length} rounds · ${failCount} failed)`,
+                )
+              : failCount > 0
+                ? bi(
+                    `核验历史（已核验 ${hist.length} 轮 · 未通过 ${failCount} 轮）`,
+                    `Verification history (${hist.length} rounds · ${failCount} failed)`,
+                  )
+                : bi(
+                    `核验历史（共 ${hist.length} 轮）`,
+                    `Verification history (${hist.length} round${hist.length > 1 ? "s" : ""})`,
+                  );
+          return (
+            <details className="rh-vhist">
+              <summary>
+                <span className="rh-vhist-sum-title">{summaryLabel}</span>
+                {failCount > 0 && (
+                  <span className="rh-vhist-sum-fail num">
+                    {bi(`${failCount} 次未通过`, `${failCount} failed`)}
+                  </span>
+                )}
+              </summary>
+              <ol className="rh-vhist-list">
+                {hist.map((att, idx) => {
+                  const passed = att.verdict === "passed";
+                  return (
+                    <li
+                      key={`${att.round}-${att.at}-${idx}`}
+                      className={`rh-vhist-item ${passed ? "is-pass" : "is-fail"}`}
+                    >
+                      <div className="rh-vhist-head">
+                        <span className="rh-vhist-round num">
+                          {bi(`第 ${att.round || idx + 1} 轮`, `Round ${att.round || idx + 1}`)}
+                        </span>
+                        <span
+                          className={`rh-vhist-verdict ${passed ? "is-pass" : "is-fail"}`}
+                        >
+                          {passed
+                            ? bi("核验通过", "Passed")
+                            : bi("未通过", "Failed")}
+                        </span>
+                        {att.model && (
+                          <span className="rh-vhist-model mono">{att.model}</span>
+                        )}
+                        {att.at && (
+                          <span className="rh-vhist-time num">{ago(att.at)}</span>
+                        )}
+                      </div>
+                      {(att.summary || att.diagnosis) && (
+                        <p className="rh-vhist-msg">
+                          {att.summary || att.diagnosis}
+                        </p>
+                      )}
+                      {att.verified_facts && att.verified_facts.length > 0 && (
+                        <div className="rh-vmem-chips is-compact">
+                          {att.verified_facts.map((vf, vi) => (
+                            <span key={vi} className="rh-vmem-chip is-ok">
+                              <IconCheck />
+                              <span>{vf}</span>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {att.fix_command && (
+                        <div className="rh-vhist-cmd">
+                          <span className="rh-vhist-cmd-k">
+                            {bi("当时建议命令", "Suggested command")}
+                            {att.target_role ? ` · ${att.target_role}` : ""}
+                          </span>
+                          <pre className="mono">{att.fix_command}</pre>
+                        </div>
+                      )}
+                      {att.output && (
+                        <details className="rh-vhist-out">
+                          <summary>{bi("查看当时回传输出", "View submitted output")}</summary>
+                          <pre className="mono">{att.output}</pre>
+                        </details>
+                      )}
+                      {att.images && att.images.length > 0 && (
+                        <div className="rh-vhist-imgs">
+                          <SavedImageGallery
+                            clusterId={c.id}
+                            rehearsalId={rehearsalId}
+                            names={att.images}
+                            label={bi(
+                              `第 ${att.round || idx + 1} 轮截图`,
+                              `Round ${att.round || idx + 1} screenshots`,
+                            )}
+                          />
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
+              </ol>
+            </details>
+          );
+        })()}
 
         {(step.revisions || []).length > 0 && (
           <details className="rh-rev-log">
@@ -8955,67 +11181,1673 @@ function StepRow({
           </details>
         )}
 
-        <div className="rh-step-bar">
-          <div className="rh-step-inputs">
-            <Input
-              size="small"
-              className="rh-in-elapsed"
-              value={elapsed}
-              onChange={setElapsed}
-              onBlur={() => {
-                if (elapsed !== (step.elapsed || "")) {
-                  void patchStep({ elapsed });
-                }
-              }}
-              placeholder={bi("耗时 如 45s", "Duration e.g. 45s")}
-              aria-label={bi("实测耗时", "Measured duration")}
-            />
-            <Input
-              size="small"
-              className="rh-in-note"
-              value={note}
-              onChange={setNote}
-              onBlur={() => {
-                if (note !== (step.note || "")) {
-                  void patchStep({ note });
-                }
-              }}
-              placeholder={bi(
-                "实测备注（将同步写入生产实施方案）",
-                "Notes (synced into Production SOP)",
+        {!verifyOpen &&
+          (step.status === "passed" || step.status === "skipped" ? (
+            <div className={`rh-step-verified-bar is-${step.status}`}>
+              <div className="rh-step-verified-main">
+                <span className="rh-step-verified-badge">
+                  {step.status === "passed" ? (
+                    step.verified_by_ai ? (
+                      <>
+                        <Spark size={12} />{" "}
+                        {(step.verify_history?.length || 0) > 1
+                          ? bi(
+                              `AI 核验通过 · 历 ${step.verify_history!.length} 轮`,
+                              `AI Verified · ${step.verify_history!.length} rounds`,
+                            )
+                          : bi("AI 核验通过", "AI Verified")}
+                      </>
+                    ) : (
+                      <>
+                        <IconCheck /> {bi("已标记通过", "Marked Passed")}
+                      </>
+                    )
+                  ) : (
+                    bi("已跳过", "Skipped")
+                  )}
+                </span>
+                {editingNote ? (
+                  <div className="rh-step-note-edit">
+                    <Input
+                      size="small"
+                      value={note}
+                      onChange={setNote}
+                      autoFocus
+                      onPressEnter={() => void patchStep({ note })}
+                      onBlur={() => {
+                        if (note !== (step.note || "")) {
+                          void patchStep({ note });
+                        } else {
+                          setEditingNote(false);
+                        }
+                      }}
+                      placeholder={bi("补充实测说明（同步写入 SOP）", "Verification note (synced into SOP)")}
+                    />
+                  </div>
+                ) : (
+                  <span
+                    className="rh-step-verified-note"
+                    onClick={() => setEditingNote(true)}
+                    title={bi("点击编辑实测结论", "Click to edit note")}
+                  >
+                    {step.note ||
+                      bi("点击补充实测结论（同步写入生产实施方案）", "Click to add note for Production SOP")}
+                  </span>
+                )}
+              </div>
+              <div className="rh-step-manual-links">
+                <button
+                  type="button"
+                  className="rh-manual-link"
+                  onClick={() => focusVerifyBox(false)}
+                >
+                  {bi("补充输出 / 复测", "Re-verify")}
+                </button>
+                <button
+                  type="button"
+                  disabled={busy === "patch"}
+                  className="rh-manual-link"
+                  onClick={() => void patchStep({ status: "pending" })}
+                >
+                  {bi("重置", "Reset")}
+                </button>
+              </div>
+              {step.evidence_images && step.evidence_images.length > 0 && (
+                <div className="rh-step-verified-imgs">
+                  <SavedImageGallery
+                    clusterId={c.id}
+                    rehearsalId={rehearsalId}
+                    names={step.evidence_images}
+                    label={bi("已留存核验截图", "Saved Verification Screenshots")}
+                  />
+                </div>
               )}
-              aria-label={bi("实测备注", "Verification notes")}
-            />
-          </div>
-          <div className="rh-step-actions">
-            <button
-              type="button"
-              disabled={busy === "patch"}
-              className={`rh-act-btn pass ${step.status === "passed" ? "on" : ""}`}
-              onClick={() => void patchStep({ status: "passed" })}
+            </div>
+          ) : (
+            <div
+              className="rh-step-verify-bar"
+              onClick={() => setVerifyOpen(true)}
+              onPaste={(e) => {
+                const imgs = extractClipboardImageFiles(e);
+                if (imgs.length > 0) {
+                  e.preventDefault();
+                  void attachEvidFiles(imgs);
+                }
+              }}
             >
-              <IconCheck />
-              <span>{bi("通过", "Pass")}</span>
-            </button>
-            <button
-              type="button"
-              className={`rh-act-btn trouble ${troubleOpen ? "on" : ""}`}
-              onClick={() => setTroubleOpen((v) => !v)}
-            >
-              <Spark size={13} />
-              <span>{bi("报错排障", "Troubleshoot")}</span>
-            </button>
-            <button
-              type="button"
-              disabled={busy === "patch"}
-              className={`rh-act-btn skip ${step.status === "skipped" ? "on" : ""}`}
-              onClick={() => void patchStep({ status: "skipped" })}
-            >
-              <span>{bi("跳过", "Skip")}</span>
-            </button>
-          </div>
-        </div>
+              <div className="rh-step-verify-bar-prompt">
+                <IconImage />
+                <span>
+                  {isRollback
+                    ? bi(
+                        "正常变更无需执行也无需点跳过；仅在演练回退或触发应急回滚时，点击此处贴回输出核验…",
+                        "Auto-skipped on normal success; click here only if rehearsing or executing rollback…",
+                      )
+                    : bi(
+                        "点击贴入终端执行输出，或直接 Ctrl+V 粘贴结果截图，由 AI 自动核验是否通过…",
+                        "Click to paste terminal output or Ctrl+V a screenshot for AI verification…",
+                      )}
+                </span>
+              </div>
+              <div
+                className="rh-step-actions"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <button
+                  type="button"
+                  className="rh-act-btn trouble"
+                  onClick={() => setVerifyOpen(true)}
+                >
+                  <Spark size={13} />
+                  <span>{bi("AI 核验", "AI Verify")}</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={busy === "patch"}
+                  className="rh-act-btn pass"
+                  onClick={() => void patchStep({ status: "passed" })}
+                >
+                  <IconCheck />
+                  <span>
+                    {isRollback
+                      ? bi("标记已演练", "Tested")
+                      : bi("直接通过", "Pass")}
+                  </span>
+                </button>
+                {!isRollback && (
+                  <button
+                    type="button"
+                    disabled={busy === "patch"}
+                    className="rh-act-btn skip"
+                    onClick={() => void patchStep({ status: "skipped" })}
+                  >
+                    <span>{bi("跳过", "Skip")}</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </li>
+  );
+}
+
+function RehearsalSecurityBanner({
+  clusterId,
+  rehearsal,
+  onUpdated,
+}: {
+  clusterId: string;
+  rehearsal: ChangeRehearsal;
+  onUpdated: (next: ChangeRehearsal) => void;
+}) {
+  const sc = rehearsal.security_context;
+  const [modalOpen, setModalOpen] = useState(false);
+  const [vexStatus, setVexStatus] = useState<string>(
+    rehearsal.stage === "finalized" ? "mitigated" : "not_affected",
+  );
+  const [vexNote, setVexNote] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  if (!sc) return null;
+
+  const canSyncVex =
+    can("security.manage") && Boolean(sc.cves && sc.cves.length > 0);
+
+  const openModal = (preset?: string) => {
+    const nextStatus =
+      preset || (rehearsal.stage === "finalized" ? "mitigated" : "not_affected");
+    setVexStatus(nextStatus);
+    if (nextStatus === "not_affected") {
+      setVexNote(
+        bi(
+          `经集群 ${clusterId} 只读探针核实，当前生产环境未启用该漏洞对应的脆弱模块或已处于修复版本（演练 ${rehearsal.id}）。`,
+          `Verified via read-only probe on ${clusterId}: vulnerable feature is disabled or fixed version is already deployed (rehearsal ${rehearsal.id}).`,
+        ),
+      );
+    } else if (rehearsal.doc_id) {
+      setVexNote(
+        bi(
+          `已通过集群 ${clusterId} 安全修复演练「${rehearsal.title}」完成测试环境验证，并固化生产 SOP（${rehearsal.doc_id}）。`,
+          `Validated in staging via security rehearsal "${rehearsal.title}" on ${clusterId} with finalized SOP (${rehearsal.doc_id}).`,
+        ),
+      );
+    } else {
+      setVexNote(
+        bi(
+          `已在集群 ${clusterId} 启动安全修复演练「${rehearsal.title}」并排期处理。`,
+          `Scheduled security remediation rehearsal "${rehearsal.title}" on ${clusterId}.`,
+        ),
+      );
+    }
+    setModalOpen(true);
+  };
+
+  const submitSyncVex = async () => {
+    setBusy(true);
+    try {
+      const res = await api<{ rehearsal: ChangeRehearsal; updated: number }>(
+        `/api/clusters/${encodeURIComponent(clusterId)}/rehearsals/${encodeURIComponent(rehearsal.id)}/sync-vex`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            status: vexStatus,
+            note: vexNote.trim(),
+            justification:
+              vexStatus === "not_affected"
+                ? "vulnerable_code_not_in_execute_path"
+                : "rehearsal_verified",
+          }),
+        },
+      );
+      onUpdated(res.rehearsal);
+      Message.success(
+        bi(
+          `已回写 ${res.updated} 条 CVE 的 VEX 状态并关联本演练`,
+          `Synced VEX status for ${res.updated} CVE(s)`,
+        ),
+      );
+      setModalOpen(false);
+    } catch (e) {
+      err(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const kindText =
+    sc.kind === "cve_patch"
+      ? bi("安全修复 · 漏洞补丁升级", "Security · CVE Patch")
+      : sc.kind === "cert_rotation"
+        ? bi("安全修复 · TLS 证书轮换", "Security · Cert Rotation")
+        : bi("安全修复 · 配置基线加固", "Security · Config Hardening");
+
+  const vexLabelMap: Record<string, string> = {
+    planned: bi("已排期", "Planned"),
+    mitigated: bi("已缓解", "Mitigated"),
+    not_affected: bi("不受影响", "Not affected"),
+    accepted: bi("风险豁免", "Accepted"),
+  };
+
+  return (
+    <>
+      <div className="rh-sec-banner">
+        <div className="rh-sec-banner-main">
+          <div className="rh-sec-banner-row">
+            <span className="rh-sec-ctx-tag">{kindText}</span>
+            {sc.package && (
+              <span className="mono rh-sec-ctx-ver">
+                {sc.package}
+                {sc.current_version ? ` ${sc.current_version}` : ""}
+                {sc.target_version ? ` → ${sc.target_version}` : ""}
+              </span>
+            )}
+            {sc.repo_fix_ready && (
+              <span className="rh-sec-ctx-ok">
+                {bi("源已有修复版", "Fix in repo")}
+              </span>
+            )}
+            {sc.cert_target && (
+              <span className="mono rh-sec-ctx-ver">{sc.cert_target}</span>
+            )}
+            {sc.vex_synced && (
+              <span className="rh-sec-ctx-ok">
+                {bi(
+                  `已回写 VEX：${vexLabelMap[sc.vex_status || ""] || sc.vex_status || ""}`,
+                  `VEX Synced: ${vexLabelMap[sc.vex_status || ""] || sc.vex_status || ""}`,
+                )}
+              </span>
+            )}
+          </div>
+          {sc.cves && sc.cves.length > 0 && (
+            <div className="rh-sec-ctx-cves">
+              {sc.cves.slice(0, 10).map((id) => (
+                <span key={id} className="mono rh-sec-ctx-cve">
+                  {id}
+                </span>
+              ))}
+              {sc.cves.length > 10 && (
+                <span className="faint small">+{sc.cves.length - 10}</span>
+              )}
+            </div>
+          )}
+        </div>
+        <div className="rh-sec-banner-actions">
+          <Button
+            size="mini"
+            type="secondary"
+            onClick={() =>
+              go({ name: "deliveries", id: clusterId, tab: "security" })
+            }
+          >
+            {bi("集群安全页", "Cluster Security")}
+          </Button>
+          {canSyncVex && (
+            <Button
+              size="mini"
+              type={rehearsal.stage === "finalized" && !sc.vex_synced ? "primary" : "outline"}
+              onClick={() => openModal()}
+            >
+              {sc.vex_synced
+                ? bi("更新 VEX 状态", "Update VEX")
+                : rehearsal.stage === "finalized"
+                  ? bi("回写 VEX 并关联 SOP", "Sync VEX & Link SOP")
+                  : bi("依据探针回写 VEX", "Sync VEX from Probe")}
+            </Button>
+          )}
+        </div>
+      </div>
+
+      <Modal
+        visible={modalOpen}
+        title={bi("回写安全中心 VEX 处置状态", "Sync VEX Status to Security Center")}
+        onCancel={() => !busy && setModalOpen(false)}
+        onOk={() => void submitSyncVex()}
+        confirmLoading={busy}
+        okText={bi("确认回写", "Sync VEX")}
+        cancelText={bi("取消", "Cancel")}
+        style={{ width: 580, maxWidth: "94vw" }}
+      >
+        <div className="rh-vex-form">
+          <p className="muted small" style={{ marginTop: 0, marginBottom: 4 }}>
+            {bi(
+              `将为本次演练关联的 ${sc.cves?.length || 0} 条 CVE 同步更新 VEX 状态，并自动记录演练编号${rehearsal.doc_id ? `与生产 SOP（${rehearsal.doc_id}）` : ""}作为审计证据。`,
+              `Updates VEX status for ${sc.cves?.length || 0} linked CVE(s) and attaches this rehearsal${rehearsal.doc_id ? ` and SOP (${rehearsal.doc_id})` : ""} as audit evidence.`,
+            )}
+          </p>
+          <VexTriageEditor
+            context={{
+              kind: "vex",
+              cves: sc.cves,
+              package: sc.package,
+              ecosystem: sc.ecosystem,
+              installed_version: sc.current_version,
+              fixed_in: sc.target_version ? [sc.target_version] : [],
+              cluster_id: clusterId,
+            }}
+            status={vexStatus}
+            onStatusChange={setVexStatus}
+            note={vexNote}
+            onNoteChange={setVexNote}
+            includeOpen={false}
+            showContextCard={false}
+            showJustification={false}
+            showExpires={false}
+          />
+        </div>
+      </Modal>
+    </>
+  );
+}
+
+/* ---------- Production Completion & Cluster Sync Card / Modal ---------- */
+
+const HBA_RULE_RE =
+  /\b((?:hostssl|hostnossl|hostgssenc|hostnogssenc|host|local)\s+[a-zA-Z0-9_,.-]+\s+[a-zA-Z0-9_,.-]+(?:\s+[0-9a-fA-F.:/]+(?:\s+[0-9.]+)?)?\s+(?:scram-sha-256|md5|trust|reject|peer|ident|cert|ldap|radius|pam|password))\b/i;
+
+function extractHBARuleClient(r: ChangeRehearsal, stepCmd: string, stepNote?: string, stepTitle?: string): string {
+  for (const src of [stepCmd, stepNote || "", r.goal || "", r.title || ""]) {
+    const m = src.match(HBA_RULE_RE);
+    if (m?.[1]) {
+      const rule = m[1].replace(/\s+/g, " ").trim();
+      const low = `${r.title || ""} ${stepTitle || ""}`.toLowerCase();
+      const prefix =
+        /删除|移除|\b(?:remove|delete|revoke)\b/.test(low) ? "- " : "+ ";
+      return `${prefix}${rule}`.slice(0, 120);
+    }
+  }
+  return (r.title || stepTitle || "更新访问控制规则").trim().slice(0, 100);
+}
+
+function suggestAppliedChangesClient(
+  r: ChangeRehearsal,
+): { summary: string; changes: RehearsalAppliedChange[] } {
+  const execNotes = (r.steps || [])
+    .filter((s) => s.phase === "execute" && s.status === "passed" && s.note?.trim())
+    .map((s) => s.note!.trim().replace(/[。；;\s]+$/, ""))
+    .filter(Boolean);
+  const joinedNotes = execNotes.length > 0 ? `${execNotes.join("；")}。` : "";
+  const rawScope = (r.scope_summary || "").trim();
+  const isProbeCopy = /探针|不改变任何生产配置|只读采集|read-only probe/i.test(rawScope);
+  const summary = (
+    r.applied_summary ||
+    joinedNotes ||
+    (!isProbeCopy ? rawScope : "") ||
+    r.title ||
+    r.goal ||
+    ""
+  )
+    .trim()
+    .slice(0, 260);
+  if (r.applied_changes && r.applied_changes.length > 0) {
+    return { summary, changes: r.applied_changes.map((x) => ({ ...x })) };
+  }
+  const beforeMap = new Map<string, string>();
+  let hbaBefore = "";
+  for (const p of r.drift?.param_diffs || []) {
+    const k = (p.key || "").trim();
+    const v = (p.actual || p.initial || "").trim();
+    if (k && v) {
+      const lk = k.toLowerCase();
+      beforeMap.set(lk, v.slice(0, 80));
+      if (!hbaBefore && lk.includes("pg_hba")) hbaBefore = v.slice(0, 80);
+    }
+  }
+  if (hbaBefore && !beforeMap.has("pg_hba")) {
+    beforeMap.set("pg_hba", hbaBefore);
+  }
+  const out: RehearsalAppliedChange[] = [];
+  const seen = new Set<string>();
+  const add = (key: string, before: string, after: string, note = "") => {
+    const k = key.trim().slice(0, 64);
+    const a = after.trim().slice(0, 120);
+    if (!k || !a || out.length >= 12) return;
+    const lk = k.toLowerCase();
+    if (seen.has(lk)) return;
+    seen.add(lk);
+    out.push({
+      key: k,
+      before: (before.trim() || beforeMap.get(lk) || "").slice(0, 80),
+      after: a,
+      ...(note.trim() ? { note: note.trim().slice(0, 120) } : {}),
+    });
+  };
+  if (r.security_context?.package && r.security_context?.target_version) {
+    add(
+      r.security_context.package,
+      r.security_context.current_version || "",
+      r.security_context.target_version,
+      (r.security_context.cves || []).slice(0, 3).join(", "),
+    );
+  }
+  const patroniRe =
+    /(?:^|\s)-[ps]\s+(?:'([a-zA-Z0-9_.-]+)=([^']+)'|"([a-zA-Z0-9_.-]+)=([^"]+)"|([a-zA-Z0-9_.-]+)=(?:'([^']+)'|"([^"]+)"|([^\s'"\\]+)))/gi;
+  const alterRe =
+    /\bALTER\s+SYSTEM\s+SET\s+([a-zA-Z0-9_.-]+)\s*(?:=|TO)\s*'?([^';\n]+)'?/gi;
+  const redisRe = /\bCONFIG\s+SET\s+([a-zA-Z0-9_.-]+)\s+([^\s'"\n;]+)/gi;
+  for (const st of r.steps || []) {
+    if (st.phase !== "execute" || st.status === "skipped") continue;
+    const cmd = st.command || "";
+    for (const m of cmd.matchAll(patroniRe)) {
+      const k = m[1] || m[3] || m[5] || "";
+      const v = m[2] || m[4] || m[6] || m[7] || m[8] || "";
+      if (k && v) add(k, "", v);
+    }
+    for (const m of cmd.matchAll(alterRe)) add(m[1], "", m[2]);
+    for (const m of cmd.matchAll(redisRe)) add(m[1], "", m[2]);
+    if (/\b(pg_hba|hostssl\s+\S+|hostnossl\s+\S+|host\s+\S+)/i.test(cmd)) {
+      add("pg_hba", "", extractHBARuleClient(r, cmd, st.note, st.title));
+    }
+  }
+  return { summary, changes: out };
+}
+
+function extractRehearsalTopicKeysClient(r: ChangeRehearsal): Map<string, string> {
+  const keys = new Map<string, string>();
+  const add = (k: string) => {
+    const t = k.trim();
+    if (!t) return;
+    const lk = t.toLowerCase();
+    if (!keys.has(lk)) keys.set(lk, t);
+  };
+  const srcChanges =
+    r.applied_changes && r.applied_changes.length > 0
+      ? r.applied_changes
+      : suggestAppliedChangesClient(r).changes;
+  for (const ch of srcChanges) add(ch.key || "");
+  const execCmd = (r.steps || [])
+    .filter((s) => s.phase === "execute" && s.status !== "skipped")
+    .map((s) => s.command || "")
+    .join("\n");
+  const low = execCmd.toLowerCase();
+  if (/\b(pg_hba|hostssl\s+\S+|hostnossl\s+\S+|host\s+\S+)/i.test(execCmd)) {
+    add("pg_hba");
+  }
+  if (low.includes("haproxy.cfg")) add("haproxy.cfg");
+  if (low.includes("nginx.conf") || low.includes("stream.d")) add("nginx配置");
+  if (keys.size === 0 && (low.includes("patroni.yml") || low.includes("edit-config"))) {
+    add("Patroni DCS配置");
+  }
+  return keys;
+}
+
+export type EffectiveClusterChange = {
+  key: string;
+  before?: string;
+  after: string;
+  note?: string;
+  source_id: string;
+  source_title: string;
+  source_doc_id?: string;
+  applied_at: string;
+  applied_by?: string;
+  update_count: number;
+};
+
+/**
+ * Folds all applied (non-voided) rehearsals chronologically so every parameter/config key
+ * shows its latest effective value while preserving earliest `before`, update count, and
+ * a `latestByKey` lookup to mark superseded historical deltas.
+ */
+export function computeEffectiveClusterChanges(
+  rehearsals: ChangeRehearsal[] | null | undefined,
+): {
+  items: EffectiveClusterChange[];
+  latestByKey: Map<string, EffectiveClusterChange>;
+} {
+  const applied = (rehearsals || [])
+    .filter((r) => r && r.stage === "finalized" && r.applied && !r.voided)
+    .slice()
+    .sort((a, b) => {
+      const ta = a.applied_at || a.updated_at || a.created_at || "";
+      const tb = b.applied_at || b.updated_at || b.created_at || "";
+      if (ta !== tb) return ta.localeCompare(tb);
+      return a.id.localeCompare(b.id);
+    });
+  const order: string[] = [];
+  const latestByKey = new Map<string, EffectiveClusterChange>();
+  for (const rh of applied) {
+    const at = rh.applied_at || rh.updated_at || "";
+    const by = rh.applied_by || rh.owner || "";
+    for (const ch of rh.applied_changes || []) {
+      const k = (ch.key || "").trim();
+      if (!k) continue;
+      const lk = k.toLowerCase();
+      const prev = latestByKey.get(lk);
+      if (prev) {
+        prev.after = ch.after;
+        if (ch.note) prev.note = ch.note;
+        prev.source_id = rh.id;
+        prev.source_title = rh.title;
+        prev.source_doc_id = rh.doc_id;
+        prev.applied_at = at;
+        prev.applied_by = by;
+        prev.update_count += 1;
+      } else {
+        order.push(lk);
+        latestByKey.set(lk, {
+          key: k,
+          before: ch.before,
+          after: ch.after,
+          note: ch.note,
+          source_id: rh.id,
+          source_title: rh.title,
+          source_doc_id: rh.doc_id,
+          applied_at: at,
+          applied_by: by,
+          update_count: 1,
+        });
+      }
+    }
+  }
+  const items = order
+    .map((lk) => latestByKey.get(lk)!)
+    .filter(Boolean);
+  return { items, latestByKey };
+}
+
+export function RehearsalProductionApplyCard({
+  clusterId,
+  rehearsal,
+  peers = [],
+  offline = false,
+  compact = false,
+  onUpdated,
+}: {
+  clusterId: string;
+  rehearsal: ChangeRehearsal;
+  peers?: ChangeRehearsal[];
+  offline?: boolean;
+  compact?: boolean;
+  onUpdated?: (next: ChangeRehearsal) => void;
+}) {
+  useLang();
+  const dock = useAIDock();
+  const reconcileDockKey = `step:rehearsal:${rehearsal.id}:conflict`;
+  const aiReady = Boolean(
+    dock && !offline && dock.available(reconcileDockKey),
+  );
+
+  const [modalOpen, setModalOpen] = useState(false);
+  const [voidOpen, setVoidOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [summary, setSummary] = useState("");
+  const [note, setNote] = useState("");
+  const [changes, setChanges] = useState<RehearsalAppliedChange[]>([]);
+  const [supersedeIds, setSupersedeIds] = useState<string[]>([]);
+  const [voidReason, setVoidReason] = useState("");
+  const [voidSupersededBy, setVoidSupersededBy] = useState("");
+
+  const isApplied = Boolean(rehearsal.applied);
+  const isVoided = Boolean(rehearsal.voided);
+  const isReportMode = rehearsal.mode === "quick" || rehearsal.mode === "light";
+
+  const alerts = rehearsal.conflict_alerts || [];
+  const conflictAlerts = alerts.filter((a) => a.severity === "conflict");
+  const staleAlerts = alerts.filter((a) => a.severity === "stale");
+  const earlierPendingAlerts = alerts.filter(
+    (a) => a.severity === "earlier_pending",
+  );
+  const guardAlerts = [...conflictAlerts, ...staleAlerts];
+  const hasConflict = conflictAlerts.length > 0;
+  const hasStale = staleAlerts.length > 0;
+
+  const { overlappingPending, parallelPending } = useMemo(() => {
+    const myKeys = extractRehearsalTopicKeysClient(rehearsal);
+    for (const ch of changes) {
+      const k = (ch.key || "").trim();
+      if (k) myKeys.set(k.toLowerCase(), k);
+    }
+    const overlapping: { plan: ChangeRehearsal; keys: string[] }[] = [];
+    const parallel: ChangeRehearsal[] = [];
+    for (const p of peers) {
+      if (
+        p.id === rehearsal.id ||
+        p.stage !== "finalized" ||
+        p.applied ||
+        p.voided
+      ) {
+        continue;
+      }
+      const pKeys = extractRehearsalTopicKeysClient(p);
+      const shared: string[] = [];
+      for (const [lk, disp] of myKeys.entries()) {
+        if (pKeys.has(lk)) shared.push(disp);
+      }
+      if (shared.length > 0) {
+        overlapping.push({ plan: p, keys: shared });
+      } else {
+        parallel.push(p);
+      }
+    }
+    return { overlappingPending: overlapping, parallelPending: parallel };
+  }, [peers, rehearsal, changes]);
+
+  const replacementCandidates = useMemo(
+    () =>
+      peers.filter(
+        (p) =>
+          p.id !== rehearsal.id &&
+          p.stage === "finalized" &&
+          !p.voided,
+      ),
+    [peers, rehearsal.id],
+  );
+
+  // Merge all applied rehearsals (including current if already applied) to detect superseded params
+  const effectiveAll = useMemo(() => {
+    const mergedPeers = peers.some((p) => p.id === rehearsal.id)
+      ? peers.map((p) => (p.id === rehearsal.id ? rehearsal : p))
+      : [...peers, rehearsal];
+    return computeEffectiveClusterChanges(mergedPeers);
+  }, [peers, rehearsal]);
+
+  // Existing applied keys from OTHER rehearsals for live overwrite preview inside Confirm Modal
+  const otherAppliedEffective = useMemo(
+    () =>
+      computeEffectiveClusterChanges(
+        peers.filter((p) => p.id !== rehearsal.id),
+      ),
+    [peers, rehearsal.id],
+  );
+
+  const liveOverwrites = useMemo(() => {
+    if (isApplied) return [];
+    const hits: {
+      key: string;
+      prevAfter: string;
+      nextAfter: string;
+      sourceTitle: string;
+      sourceId: string;
+    }[] = [];
+    for (const ch of changes) {
+      const k = (ch.key || "").trim();
+      const a = (ch.after || "").trim();
+      if (!k || !a) continue;
+      const prev = otherAppliedEffective.latestByKey.get(k.toLowerCase());
+      if (prev && prev.after !== a) {
+        hits.push({
+          key: k,
+          prevAfter: prev.after,
+          nextAfter: a,
+          sourceTitle: prev.source_title,
+          sourceId: prev.source_id,
+        });
+      }
+    }
+    return hits;
+  }, [changes, isApplied, otherAppliedEffective]);
+
+  const jumpToPeer = (peerId: string) => {
+    if (!peerId) return;
+    go({
+      name: "deliveries",
+      id: clusterId,
+      tab: "rehearsal",
+      rehearsal: peerId,
+    });
+  };
+
+  const openModal = () => {
+    const def = suggestAppliedChangesClient(rehearsal);
+    setSummary(def.summary);
+    setNote(rehearsal.applied_note || "");
+    setChanges(def.changes);
+    setSupersedeIds([]);
+    setModalOpen(true);
+  };
+
+  const openVoidModal = () => {
+    setVoidReason("");
+    setVoidSupersededBy("");
+    setVoidOpen(true);
+  };
+
+  const askAIReconcile = () => {
+    if (!dock) return;
+    const lines = guardAlerts
+      .map(
+        (a, i) =>
+          `${i + 1}. [${a.severity === "conflict" ? "冲突" : "基线更新"}] ${a.summary}${a.overlapping_keys?.length ? `（涉及：${a.overlapping_keys.join("、")}）` : ""}`,
+      )
+      .join("\n");
+    dock.open({
+      key: reconcileDockKey,
+      title: bi(
+        `按最新集群基线复核方案 · ${rehearsal.title}`,
+        `Review Plan Against Latest Baseline · ${rehearsal.title}`,
+      ),
+      context: `${rehearsal.title} · ${clusterId}`,
+      step: {
+        kind: "rehearsal_step",
+        cluster_id: clusterId,
+        rehearsal_id: rehearsal.id,
+        rehearsal_title: rehearsal.title,
+      },
+      hello: bi(
+        "同集群已有其他变更在生产落地。发送下方草稿后，我会读取当前方案与最新生产基线，逐项核对是否会互相覆盖或需要微调命令。",
+        "Another production change landed on this cluster. Send the draft below and I will audit this plan against the latest production baseline for overwrites or needed adjustments.",
+      ),
+      draft: bi(
+        `请调用 read_rehearsal 读取演练 #${rehearsal.id}（「${rehearsal.title}」）的完整步骤，并对照当前集群最新已落地的生产基线，帮我核对以下冲突/变化提醒，判断直接执行是否会覆盖先前变更或需要调整命令：\n${lines}`,
+        `Please call read_rehearsal for #${rehearsal.id} ("${rehearsal.title}") and compare it against the latest applied cluster baseline to verify whether executing it would overwrite prior changes or requires command updates:\n${lines}`,
+      ),
+    });
+  };
+
+  const submitApply = async (applied: boolean) => {
+    if (offline || busy) return;
+    setBusy(true);
+    try {
+      const next = await api<ChangeRehearsal>(
+        `/api/clusters/${encodeURIComponent(clusterId)}/rehearsals/${encodeURIComponent(rehearsal.id)}/apply`,
+        {
+          method: "POST",
+          body: JSON.stringify(
+            applied
+              ? {
+                  applied: true,
+                  summary: summary.trim(),
+                  note: note.trim(),
+                  changes: changes.filter(
+                    (c) => c.key.trim() || c.after.trim(),
+                  ),
+                  ...(supersedeIds.length > 0
+                    ? { supersede_ids: supersedeIds }
+                    : {}),
+                }
+              : { applied: false },
+          ),
+        },
+      );
+      setModalOpen(false);
+      onUpdated?.(next);
+      Message.success(
+        applied
+          ? supersedeIds.length > 0
+            ? bi(
+                `已确认生产落地，同步至集群并自动归档作废 ${supersedeIds.length} 个旧方案`,
+                `Confirmed applied to production and marked ${supersedeIds.length} older plan(s) superseded`,
+              )
+            : bi(
+                "已确认生产实施完成，变更结果已同步至集群概览、配置与交付报告",
+                "Marked applied to production; synced to cluster overview, config, and delivery report",
+              )
+          : bi("已撤销生产落地标记", "Production applied status reverted"),
+      );
+    } catch (e) {
+      err(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitVoid = async (wantVoid: boolean) => {
+    if (offline || busy) return;
+    setBusy(true);
+    try {
+      const next = await api<ChangeRehearsal>(
+        `/api/clusters/${encodeURIComponent(clusterId)}/rehearsals/${encodeURIComponent(rehearsal.id)}/void`,
+        {
+          method: "POST",
+          body: JSON.stringify(
+            wantVoid
+              ? {
+                  voided: true,
+                  reason: voidReason.trim(),
+                  ...(voidSupersededBy
+                    ? { superseded_by: voidSupersededBy }
+                    : {}),
+                }
+              : { voided: false },
+          ),
+        },
+      );
+      setVoidOpen(false);
+      onUpdated?.(next);
+      Message.success(
+        wantVoid
+          ? bi(
+              "已将该方案标记为作废并锁定，防止误操作确认落地",
+              "Plan marked voided and locked against accidental sign-off",
+            )
+          : bi("已恢复为「待生产实施」状态", "Plan restored to pending apply"),
+      );
+    } catch (e) {
+      err(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const stateClass = isVoided
+    ? "is-voided"
+    : isApplied
+      ? "is-applied"
+      : hasConflict
+        ? "is-conflict"
+        : hasStale
+          ? "is-stale"
+          : "is-pending";
+
+  const voidPresets = [
+    bi("已被新版方案替代", "Superseded by newer plan"),
+    bi("变更窗口取消，暂不执行", "Maintenance window cancelled"),
+    bi("现场执行异常，已触发回退", "Rolled back during execution"),
+    bi("仅作演练参考，不上生产", "Staging reference only"),
+  ];
+
+  return (
+    <>
+      <div
+        className={`rh-closure ${stateClass}${compact ? " is-compact" : ""}`}
+        role="region"
+        aria-label={bi("生产变更状态控制台", "Production Change Status Console")}
+      >
+        {/* Top 3-stage lifecycle progress rail */}
+        <div className="rh-closure-rail">
+          <div className="rh-closure-steps" aria-label={bi("变更生命周期", "Change lifecycle")}>
+            <span className="rh-cstep is-done">
+              <i className="rh-cstep-dot" aria-hidden>
+                <IconCheck />
+              </i>
+              {isReportMode
+                ? bi("报告已归档", "Archived")
+                : bi("方案已定稿", "Finalized")}
+            </span>
+            <span className="rh-cstep-line is-done" aria-hidden />
+            <span
+              className={`rh-cstep ${
+                isVoided
+                  ? "is-voided"
+                  : isApplied
+                    ? "is-done"
+                    : hasConflict
+                      ? "is-danger"
+                      : hasStale
+                        ? "is-warn"
+                        : "is-active"
+              }`}
+            >
+              <i className="rh-cstep-dot" aria-hidden>
+                {isApplied ? (
+                  <IconCheck />
+                ) : isVoided ? (
+                  <IconClose />
+                ) : hasConflict || hasStale ? (
+                  <IconExclamationCircle />
+                ) : (
+                  <span className="rh-cstep-pulse" />
+                )}
+              </i>
+              {isVoided
+                ? rehearsal.superseded_by
+                  ? bi("已被替代", "Superseded")
+                  : bi("已作废", "Voided")
+                : isApplied
+                  ? bi("生产已落地", "Applied to Prod")
+                  : hasConflict
+                    ? bi("存在配置冲突", "Conflict Alert")
+                    : hasStale
+                      ? bi("基线已更新", "Baseline Updated")
+                      : bi("待生产实施", "Pending Apply")}
+            </span>
+            <span
+              className={`rh-cstep-line${isApplied ? " is-done" : ""}`}
+              aria-hidden
+            />
+            <span
+              className={`rh-cstep ${
+                isApplied ? "is-done" : isVoided ? "is-voided" : "is-todo"
+              }`}
+            >
+              <i className="rh-cstep-dot" aria-hidden>
+                {isApplied ? <IconCheck /> : isVoided ? <IconClose /> : null}
+              </i>
+              {isApplied
+                ? bi("已同步集群", "Synced to Cluster")
+                : isVoided
+                  ? bi("不计入基线", "Excluded")
+                  : bi("待同步集群", "Pending Sync")}
+            </span>
+          </div>
+
+          <div className="rh-closure-rail-meta">
+            {isApplied && (rehearsal.applied_by || rehearsal.applied_at) && (
+              <span className="rh-closure-stamp is-applied num">
+                {bi(
+                  `${rehearsal.applied_by || rehearsal.owner} · ${ago(rehearsal.applied_at || rehearsal.updated_at)}确认`,
+                  `${rehearsal.applied_by || rehearsal.owner} · confirmed ${ago(rehearsal.applied_at || rehearsal.updated_at)}`,
+                )}
+              </span>
+            )}
+            {isVoided && (rehearsal.voided_by || rehearsal.voided_at) && (
+              <span className="rh-closure-stamp is-voided num">
+                {bi(
+                  `${rehearsal.voided_by || rehearsal.owner} · ${ago(rehearsal.voided_at || rehearsal.updated_at)}作废`,
+                  `${rehearsal.voided_by || rehearsal.owner} · voided ${ago(rehearsal.voided_at || rehearsal.updated_at)}`,
+                )}
+              </span>
+            )}
+            {!isApplied && !isVoided && (
+              <span className={`rh-closure-pill ${hasConflict ? "is-danger" : hasStale ? "is-warn" : "is-pending"}`}>
+                {hasConflict
+                  ? bi("执行前请先核对冲突", "Check Conflict First")
+                  : hasStale
+                    ? bi("建议复核最新基线", "Review Latest Baseline")
+                    : bi("等待生产确认", "Awaiting Confirmation")}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Inline Conflict / Baseline Drift Guard Banner (Pending only) */}
+        {!isApplied && !isVoided && guardAlerts.length > 0 && (
+          <div
+            className={`rh-closure-guard ${hasConflict ? "is-danger" : "is-warn"}`}
+            role="alert"
+          >
+            <div className="rh-closure-guard-head">
+              <div className="rh-closure-guard-title">
+                <IconExclamationCircle />
+                <b>
+                  {hasConflict
+                    ? bi(
+                        "变更冲突提醒 · 集群已有新变更改动了相同配置项",
+                        "Conflict Alert · Overlapping Config Changed in Production",
+                      )
+                    : bi(
+                        "集群基线已更新 · 此方案定稿后已有其他变更在生产落地",
+                        "Cluster Updated · Another Change Landed After Finalization",
+                      )}
+                </b>
+              </div>
+              {aiReady && dock && (
+                <button
+                  type="button"
+                  className="rh-restore-ai-btn"
+                  onClick={askAIReconcile}
+                >
+                  <Spark size={12} rainbow />
+                  {bi("让 AI 按最新基线复核", "AI Baseline Review")}
+                </button>
+              )}
+            </div>
+            <ul className="rh-closure-guard-list">
+              {guardAlerts.map((a, idx) => (
+                <li key={`${a.other_id}-${idx}`}>
+                  <div className="rh-closure-guard-row">
+                    <span>{a.summary}</span>
+                    {a.overlapping_keys && a.overlapping_keys.length > 0 && (
+                      <span className="rh-closure-guard-keys">
+                        {a.overlapping_keys.map((k) => (
+                          <code key={k} className="mono">
+                            {k}
+                          </code>
+                        ))}
+                      </span>
+                    )}
+                    {a.other_id && (
+                      <button
+                        type="button"
+                        className="rh-closure-jump"
+                        onClick={() => jumpToPeer(a.other_id)}
+                      >
+                        {bi("查看该方案", "View Plan")} <IconRight />
+                      </button>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Subtle notice when earlier unapplied peer plans exist (and no harder conflict/stale banner) */}
+        {!isApplied &&
+          !isVoided &&
+          guardAlerts.length === 0 &&
+          earlierPendingAlerts.length > 0 && (
+            <div className="rh-closure-hint">
+              <span>
+                {bi(
+                  `提示：同集群还有 ${earlierPendingAlerts.length} 个更早定稿但未确认落地的方案（如《${earlierPendingAlerts[0].other_title}》）；如本方案已替代旧方案，可在确认落地时顺手勾选作废。`,
+                  `Note: ${earlierPendingAlerts.length} earlier finalized plan(s) remain unapplied (e.g. "${earlierPendingAlerts[0].other_title}"); you can mark obsolete ones superseded when confirming.`,
+                )}
+              </span>
+            </div>
+          )}
+
+        {/* Main Console Action Body */}
+        <div className="rh-closure-body">
+          <div className="rh-closure-lead">
+            <span className={`rh-closure-ico ${stateClass}`} aria-hidden>
+              {isVoided ? (
+                <IconRecordStop />
+              ) : isApplied ? (
+                <IconCheck />
+              ) : hasConflict ? (
+                <IconExclamationCircle />
+              ) : (
+                <IconThunderboltSafe />
+              )}
+            </span>
+            <div className="rh-closure-txt">
+              <div className="rh-closure-title-row">
+                <b>
+                  {isVoided
+                    ? rehearsal.superseded_by
+                      ? bi("此变更方案已被新方案替代", "Superseded by a Newer Plan")
+                      : bi("此变更方案已标记作废", "Change Plan Voided")
+                    : isApplied
+                      ? bi("生产已实施落地并同步至集群", "Applied to Production & Synced")
+                      : bi("生产变更闭环确认", "Production Closure Sign-Off")}
+                </b>
+                {isApplied && (
+                  <div className="rh-closure-sync-pills" aria-label={bi("已同步位置", "Synced targets")}>
+                    <span>{bi("概览", "Overview")}</span>
+                    <span>{bi("配置", "Config")}</span>
+                    <span>{bi("交付报告", "Delivery")}</span>
+                    <span>{bi("AI 基线", "AI")}</span>
+                  </div>
+                )}
+              </div>
+
+              {isVoided ? (
+                <div className="rh-closure-void-info">
+                  <p className="rh-closure-desc">
+                    {rehearsal.void_reason ||
+                      bi(
+                        "已手动标记不再执行，文档与历史演练记录保留供审计。",
+                        "Marked obsolete; documents and history remain preserved for audit.",
+                      )}
+                  </p>
+                  {rehearsal.superseded_by && (
+                    <button
+                      type="button"
+                      className="rh-closure-superseded-link"
+                      onClick={() => jumpToPeer(rehearsal.superseded_by!)}
+                    >
+                      {bi(
+                        `查看替代方案：《${rehearsal.superseded_title || rehearsal.superseded_by}》`,
+                        `Open replacement: "${rehearsal.superseded_title || rehearsal.superseded_by}"`,
+                      )}{" "}
+                      <IconRight />
+                    </button>
+                  )}
+                  <span className="rh-closure-lock-note">
+                    {bi(
+                      "已锁定「确认落地」入口，防止后续误点污染集群配置",
+                      "Sign-off locked to prevent accidental baseline pollution",
+                    )}
+                  </span>
+                </div>
+              ) : isApplied ? (
+                <p className="rh-closure-desc">
+                  {rehearsal.applied_summary ||
+                    bi(
+                      "本次变更已正式记入集群运行台账、配置叠加视图、交付报告与后续 AI 上下文。",
+                      "Synced into cluster overview, config overlays, delivery report, and future AI context.",
+                    )}
+                </p>
+              ) : (
+                <p className="rh-closure-desc">
+                  {bi(
+                    "按方案在生产环境完成实施与验收后点击右侧「确认生产已实施完成」同步到集群；若方案已放弃或被新方案替代，请点击「标记作废」锁定防误触。",
+                    "Confirm completion once executed and verified in production to sync cluster state, or mark voided if obsolete to lock against misclicks.",
+                  )}
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="rh-closure-acts">
+            {isVoided ? (
+              <Button
+                size="small"
+                icon={<IconRefresh />}
+                disabled={offline || busy}
+                loading={busy}
+                onClick={() => void submitVoid(false)}
+              >
+                {bi("恢复为待实施", "Restore to Pending")}
+              </Button>
+            ) : isApplied ? (
+              <>
+                <Button
+                  size="small"
+                  icon={<IconEdit />}
+                  disabled={offline || busy}
+                  onClick={openModal}
+                >
+                  {bi("编辑落地记录", "Edit Record")}
+                </Button>
+                <Popconfirm
+                  position="br"
+                  title={bi("撤销此变更的生产落地标记？", "Revert production applied status?")}
+                  content={bi(
+                    "撤销后将从集群「已落地生产变更」列表中移除，文档与演练记录保留。",
+                    "Removes this item from active production changes on the cluster while preserving docs.",
+                  )}
+                  okText={bi("确认撤销", "Revert")}
+                  cancelText={bi("取消", "Cancel")}
+                  onOk={() => void submitApply(false)}
+                >
+                  <Button
+                    size="small"
+                    type="text"
+                    status="warning"
+                    disabled={offline || busy}
+                  >
+                    {bi("撤销落地", "Revert")}
+                  </Button>
+                </Popconfirm>
+              </>
+            ) : (
+              <>
+                <Tooltip
+                  mini
+                  content={bi(
+                    "若此方案不再执行或已被新方案替代，标记作废可保留文档并锁定防误点",
+                    "Mark obsolete to preserve docs while locking accidental sign-off",
+                  )}
+                >
+                  <Button
+                    size="small"
+                    disabled={offline || busy}
+                    onClick={openVoidModal}
+                  >
+                    {bi("标记作废", "Mark Void")}
+                  </Button>
+                </Tooltip>
+                <Button
+                  type="primary"
+                  status={hasConflict ? "warning" : "success"}
+                  icon={<IconCheck />}
+                  disabled={offline || busy}
+                  loading={busy}
+                  onClick={openModal}
+                >
+                  {hasConflict
+                    ? bi("核对后确认落地", "Review & Confirm")
+                    : bi("确认生产已实施完成", "Confirm Applied to Prod")}
+                </Button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Applied Deltas & Field Note Footer */}
+        {isApplied &&
+          ((rehearsal.applied_changes && rehearsal.applied_changes.length > 0) ||
+            rehearsal.applied_note) && (
+            <div className="rh-closure-foot">
+              {rehearsal.applied_changes &&
+                rehearsal.applied_changes.length > 0 && (
+                  <div className="rh-apply-deltas">
+                    {rehearsal.applied_changes.map((ch, idx) => {
+                      const latest = effectiveAll.latestByKey.get(
+                        (ch.key || "").trim().toLowerCase(),
+                      );
+                      const isOverwritten = Boolean(
+                        latest && latest.source_id !== rehearsal.id,
+                      );
+                      const chip = (
+                        <span
+                          key={`${ch.key}-${idx}`}
+                          className={`rh-apply-delta${isOverwritten ? " is-overwritten" : ""}`}
+                        >
+                          <code className="mono">{ch.key}</code>
+                          {ch.before ? (
+                            <>
+                              <span className="rh-apply-before">{ch.before}</span>
+                              <span className="rh-apply-arrow" aria-hidden>
+                                →
+                              </span>
+                            </>
+                          ) : (
+                            <span className="rh-apply-arrow" aria-hidden>
+                              =
+                            </span>
+                          )}
+                          <b className="mono">{ch.after}</b>
+                          {isOverwritten && (
+                            <em className="rh-apply-overwritten-tag">
+                              {bi("已被更新", "Updated")}
+                            </em>
+                          )}
+                        </span>
+                      );
+                      return isOverwritten && latest ? (
+                        <Tooltip
+                          key={`${ch.key}-${idx}`}
+                          mini
+                          content={bi(
+                            `后续变更《${latest.source_title}》已将该项更新为 ${latest.after}`,
+                            `Later updated to "${latest.after}" by "${latest.source_title}"`,
+                          )}
+                        >
+                          {chip}
+                        </Tooltip>
+                      ) : (
+                        chip
+                      );
+                    })}
+                  </div>
+                )}
+              {rehearsal.applied_note && (
+                <div className="rh-apply-note">
+                  <span>{bi("现场备注：", "Note: ")}</span>
+                  {rehearsal.applied_note}
+                </div>
+              )}
+            </div>
+          )}
+      </div>
+
+      {/* Modal A: Confirm Production Completion */}
+      <Modal
+        visible={modalOpen}
+        wrapClassName="ad-wu-wrap"
+        className="rh-apply-modal"
+        title={
+          isApplied
+            ? bi("更新生产变更落地记录", "Update Production Change Record")
+            : bi("确认生产已实施完成并同步到集群", "Confirm Production Completion & Sync Cluster")
+        }
+        onCancel={() => !busy && setModalOpen(false)}
+        onOk={() => void submitApply(true)}
+        confirmLoading={busy}
+        okText={
+          isApplied
+            ? bi("保存更新", "Save Changes")
+            : bi("确认已落地并同步集群", "Confirm & Sync to Cluster")
+        }
+        cancelText={bi("取消", "Cancel")}
+        okButtonProps={{ status: hasConflict && !isApplied ? "warning" : "success" }}
+        maskClosable={false}
+      >
+        <div className="rh-apply-form">
+          {/* Anti-misclick Full Identity Confirmation Banner */}
+          <div className="rh-apply-ident">
+            <div className="rh-apply-ident-row">
+              <span className="rh-apply-ident-cluster mono">{clusterId}</span>
+              <span className="rh-apply-ident-doc mono">
+                {rehearsal.doc_id || `sop-${rehearsal.id}`}
+              </span>
+            </div>
+            <div className="rh-apply-ident-title">{rehearsal.title}</div>
+          </div>
+
+          {/* Conflict / Overwrite Guard inside Modal */}
+          {!isApplied && (guardAlerts.length > 0 || liveOverwrites.length > 0) && (
+            <div
+              className={`rh-apply-modal-guard ${hasConflict ? "is-danger" : "is-warn"}`}
+            >
+              <div className="rh-apply-modal-guard-h">
+                <IconExclamationCircle />
+                <b>
+                  {hasConflict
+                    ? bi(
+                        "请二次核对：此方案与近期已落地变更存在重叠",
+                        "Double-Check: Overlaps with Recently Applied Change",
+                      )
+                    : bi(
+                        "参数覆盖提示：确认后将以本次新值作为当前最新生效配置",
+                        "Value Update Preview: New values will become active baseline",
+                      )}
+                </b>
+              </div>
+              {guardAlerts.length > 0 && (
+                <ul className="rh-apply-modal-guard-list">
+                  {guardAlerts.map((a, i) => (
+                    <li key={`${a.other_id}-${i}`}>{a.summary}</li>
+                  ))}
+                </ul>
+              )}
+              {liveOverwrites.length > 0 && (
+                <div className="rh-apply-overwrite-list">
+                  {liveOverwrites.map((o) => (
+                    <div key={o.key} className="rh-apply-overwrite-item">
+                      <code className="mono">{o.key}</code>
+                      <span className="rh-apply-before">{o.prevAfter}</span>
+                      <span>→</span>
+                      <b className="mono">{o.nextAfter}</b>
+                      <span className="faint">
+                        {bi(
+                          `（将覆盖此前《${o.sourceTitle}》的生效值）`,
+                          `(updates prior "${o.sourceTitle}")`,
+                        )}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          <p className="rh-apply-form-lead">
+            {bi(
+              "确认后，以下变更结果将正式反映到该集群的「概览」「配置」「交付报告」以及后续 AI 助手与演练的基准上下文中。",
+              "Once confirmed, these effective changes will appear in Cluster Overview, Config, Delivery Report, and future AI/rehearsal baselines.",
+            )}
+          </p>
+
+          <div className="rh-apply-field">
+            <label>{bi("生效变更摘要", "Effective Change Summary")}</label>
+            <Input.TextArea
+              autoSize={{ minRows: 2, maxRows: 4 }}
+              value={summary}
+              placeholder={bi(
+                "简明概括本次在生产环境实际落地生效的改动…",
+                "Briefly describe what changed in production…",
+              )}
+              onChange={setSummary}
+            />
+          </div>
+
+          <div className="rh-apply-field">
+            <div className="rh-apply-field-h">
+              <label>
+                {bi(
+                  "关键配置 / 参数 / 规则变动（将自动与历史生效值归并展示）",
+                  "Key Config / Parameter / Rule Deltas (auto-merged with prior state)",
+                )}
+              </label>
+              <Button
+                size="mini"
+                type="text"
+                icon={<IconPlus />}
+                onClick={() =>
+                  setChanges((prev) => [
+                    ...prev,
+                    { key: "", before: "", after: "" },
+                  ])
+                }
+              >
+                {bi("添加变更项", "Add Item")}
+              </Button>
+            </div>
+            {changes.length === 0 ? (
+              <div className="rh-apply-empty-deltas">
+                {bi(
+                  "未自动解析到具体参数键值；如需在集群配置页高亮展示参数变动，可点右上角「添加变更项」。",
+                  "No specific key/value deltas auto-detected; click Add Item to list specific config changes.",
+                )}
+              </div>
+            ) : (
+              <div className="rh-apply-delta-editor">
+                {changes.map((ch, idx) => (
+                  <div key={idx} className="rh-apply-delta-row">
+                    <Input
+                      size="small"
+                      placeholder={bi("参数/配置项", "Key / Item")}
+                      value={ch.key}
+                      onChange={(v) =>
+                        setChanges((prev) =>
+                          prev.map((x, i) => (i === idx ? { ...x, key: v } : x)),
+                        )
+                      }
+                    />
+                    <Input
+                      size="small"
+                      placeholder={bi("变更前（可选）", "Before (opt)")}
+                      value={ch.before || ""}
+                      onChange={(v) =>
+                        setChanges((prev) =>
+                          prev.map((x, i) =>
+                            i === idx ? { ...x, before: v } : x,
+                          ),
+                        )
+                      }
+                    />
+                    <Input
+                      size="small"
+                      placeholder={bi("变更后生效值", "After (active)")}
+                      value={ch.after}
+                      onChange={(v) =>
+                        setChanges((prev) =>
+                          prev.map((x, i) =>
+                            i === idx ? { ...x, after: v } : x,
+                          ),
+                        )
+                      }
+                    />
+                    <button
+                      type="button"
+                      className="rh-apply-row-del"
+                      aria-label={bi("删除该项", "Remove item")}
+                      onClick={() =>
+                        setChanges((prev) => prev.filter((_, i) => i !== idx))
+                      }
+                    >
+                      <IconClose />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="rh-apply-field">
+            <label>
+              {bi("现场执行备注 / 变更单号（可选）", "Execution Note / Ticket ID (Optional)")}
+            </label>
+            <Input
+              value={note}
+              placeholder={bi(
+                "例如：CHG-20261123 · 低峰窗口执行完成，业务零感知",
+                "e.g. CHG-20261123 · Applied cleanly during maintenance window",
+              )}
+              onChange={setNote}
+            />
+          </div>
+
+          {/* Optional: ONLY offer supersede checkbox for pending peers that modify the SAME config keys */}
+          {!isApplied && overlappingPending.length > 0 && (
+            <div className="rh-apply-supersede">
+              <div className="rh-apply-supersede-h">
+                <b>
+                  {bi(
+                    "检测到改动相同配置项的待实施方案（可选处置）",
+                    "Overlapping Pending Plans Detected (Optional)",
+                  )}
+                </b>
+                <span>
+                  {bi(
+                    "以下旧方案与本次变更修改了相同配置项：如本次方案已取代旧方案，可勾选自动标为「已被替代」；如仍需保留先后执行，请不要勾选",
+                    "These pending plans touch the same config keys: check only if replaced by this change; leave unchecked to keep both",
+                  )}
+                </span>
+              </div>
+              <div className="rh-apply-supersede-list">
+                {overlappingPending.map(({ plan: p, keys }) => {
+                  const checked = supersedeIds.includes(p.id);
+                  return (
+                    <label
+                      key={p.id}
+                      className={`rh-apply-supersede-item${checked ? " is-checked" : ""}`}
+                    >
+                      <Checkbox
+                        checked={checked}
+                        onChange={(v) =>
+                          setSupersedeIds((prev) =>
+                            v
+                              ? Array.from(new Set([...prev, p.id]))
+                              : prev.filter((x) => x !== p.id),
+                          )
+                        }
+                      />
+                      <span className="rh-apply-supersede-main">
+                        <span className="rh-apply-supersede-title">
+                          {p.title}
+                        </span>
+                        <span className="rh-apply-supersede-keys">
+                          {bi("重叠项：", "Overlap: ")}
+                          {keys.join("、")}
+                        </span>
+                      </span>
+                      <span className="rh-apply-supersede-meta num">
+                        {ago(p.updated_at)}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Read-only notice for unrelated parallel pending plans so user knows they coexist & are NOT deleted */}
+          {!isApplied && parallelPending.length > 0 && (
+            <div className="rh-apply-parallel">
+              <div className="rh-apply-parallel-h">
+                <b>
+                  {bi(
+                    "同集群并存待实施变更（独立保留，互不覆盖）",
+                    "Coexisting Pending Changes on Cluster (Preserved)",
+                  )}
+                </b>
+                <span>
+                  {bi(
+                    "以下方案涉及不同配置项，与本方案属于并存/前后演进关系；本次确认不会删除或作废它们，后续完成后可各自独立落地叠加",
+                    "These plans modify different configs and coexist with this change; they remain untouched for independent production sign-off",
+                  )}
+                </span>
+              </div>
+              <div className="rh-apply-parallel-list">
+                {parallelPending.map((p) => (
+                  <div key={p.id} className="rh-apply-parallel-item">
+                    <span className="rh-sdot st-pending-apply" aria-hidden />
+                    <span className="rh-apply-supersede-title">{p.title}</span>
+                    <span className="rh-apply-parallel-tag">
+                      {bi("独立保留", "Kept")}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </Modal>
+
+      {/* Modal B: Mark Plan Void / Obsolete */}
+      <Modal
+        visible={voidOpen}
+        wrapClassName="ad-wu-wrap"
+        className="rh-void-modal"
+        title={bi("标记变更方案为作废 / 不再执行", "Mark Change Plan Void / Obsolete")}
+        onCancel={() => !busy && setVoidOpen(false)}
+        onOk={() => void submitVoid(true)}
+        confirmLoading={busy}
+        okText={bi("确认标记作废", "Confirm Void")}
+        cancelText={bi("取消", "Cancel")}
+        okButtonProps={{ status: "warning" }}
+        maskClosable={false}
+      >
+        <div className="rh-apply-form">
+          <div className="rh-apply-ident is-void">
+            <div className="rh-apply-ident-row">
+              <span className="rh-apply-ident-cluster mono">{clusterId}</span>
+              <span className="rh-apply-ident-doc mono">
+                {rehearsal.doc_id || `sop-${rehearsal.id}`}
+              </span>
+            </div>
+            <div className="rh-apply-ident-title">{rehearsal.title}</div>
+          </div>
+
+          <p className="rh-apply-form-lead">
+            {bi(
+              "作废后该方案会保留全部演练步骤与归档文档供追溯审计，但会锁定「确认生产已实施完成」入口避免后续误点；如有需要随时可一键恢复。",
+              "Voided plans retain all rehearsal steps and archived docs for audit while locking sign-off against misclicks; you can restore anytime.",
+            )}
+          </p>
+
+          <div className="rh-apply-field">
+            <label>{bi("作废原因", "Void Reason")}</label>
+            <div className="rh-void-presets">
+              {voidPresets.map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  className={`rh-void-chip${voidReason === preset ? " on" : ""}`}
+                  onClick={() => setVoidReason(preset)}
+                >
+                  {preset}
+                </button>
+              ))}
+            </div>
+            <Input.TextArea
+              autoSize={{ minRows: 2, maxRows: 3 }}
+              value={voidReason}
+              placeholder={bi(
+                "填写作废原因（可选，留空将记录默认说明）…",
+                "Explain why this plan will not be applied (optional)…",
+              )}
+              onChange={setVoidReason}
+            />
+          </div>
+
+          {replacementCandidates.length > 0 && (
+            <div className="rh-apply-field">
+              <label>
+                {bi(
+                  "关联替代的新方案（可选）",
+                  "Link Replacement Plan (Optional)",
+                )}
+              </label>
+              <div className="rh-void-peers">
+                <button
+                  type="button"
+                  className={`rh-void-peer${voidSupersededBy === "" ? " on" : ""}`}
+                  onClick={() => setVoidSupersededBy("")}
+                >
+                  {bi("不关联特定方案", "None")}
+                </button>
+                {replacementCandidates.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    className={`rh-void-peer${voidSupersededBy === p.id ? " on" : ""}`}
+                    onClick={() => {
+                      setVoidSupersededBy(p.id);
+                      if (!voidReason.trim()) {
+                        setVoidReason(
+                          bi(`已被方案「${p.title}」替代`, `Superseded by "${p.title}"`),
+                        );
+                      }
+                    }}
+                  >
+                    <span className={`rh-sdot ${rehearsalDotClass(p)}`} />
+                    <span className="rh-void-peer-t">{p.title}</span>
+                    {p.applied && (
+                      <em className="rh-void-peer-tag">
+                        {bi("已落地", "Applied")}
+                      </em>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </Modal>
+    </>
+  );
+}
+
+function IconThunderboltSafe() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path
+        d="M9 1.5L3.5 9h4.2L7 14.5 12.5 7H8.3L9 1.5z"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }

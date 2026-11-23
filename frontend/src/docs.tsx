@@ -12,13 +12,14 @@ import {
   IconArrowLeft,
   IconBook,
   IconCheck,
+  IconCheckCircleFill,
   IconCopy,
   IconDelete,
   IconPlus,
   IconDownload,
   IconEdit,
-  IconExclamationCircle,
   IconFile,
+  IconRefresh,
   IconRight,
   IconSearch,
 } from "@arco-design/web-react/icon";
@@ -37,10 +38,11 @@ import {
   putCached,
   reducedMotion,
 } from "./shared";
-import type { ClusterDoc, ClusterView, DocBlock } from "./shared";
+import type { ChangeRehearsal, ClusterDoc, ClusterView, DocBlock } from "./shared";
 import { go } from "./router";
 import { Segmented } from "./ui";
 import { Spark, useAIStatus } from "./aichat";
+import { RehearsalProductionApplyCard } from "./rehearsal";
 import { bi, useLang, withLang } from "./i18n";
 import "./docs.css";
 
@@ -79,8 +81,18 @@ function docState(d: ClusterDoc, aiOn = false): { label: string; tone: string } 
 }
 
 /** What an execution report shows and exports: the steps written as commands, as the playbooks, or both, and the results. */
-export type ReportView = { detail?: boolean; steps: "cmd" | "auto" | "both"; results: boolean };
-const DEFAULT_VIEW: ReportView = { detail: false, steps: "auto", results: true };
+export type ReportView = {
+  detail?: boolean;
+  steps: "cmd" | "auto" | "both";
+  results: boolean;
+  logStyle: "cmd" | "auto" | "both";
+};
+const DEFAULT_VIEW: ReportView = {
+  detail: false,
+  steps: "cmd",
+  results: true,
+  logStyle: "cmd",
+};
 const keeps = (v: DocBlock["variant"], view: ReportView) =>
   v === "cmd"
     ? view.steps !== "auto"
@@ -88,10 +100,14 @@ const keeps = (v: DocBlock["variant"], view: ReportView) =>
       ? view.steps !== "cmd"
       : v === "result"
         ? view.results
-        : true;
+        : v === "result_auto"
+          ? view.results && view.logStyle !== "cmd"
+          : v === "result_cmd"
+            ? view.results && view.logStyle !== "auto"
+            : true;
 const hasVariants = (d: ClusterDoc) => (d.blocks || []).some((b) => b.variant);
 const exportQuery = (view: ReportView) =>
-  `&steps=${view.steps === "both" ? "cmd,auto" : view.steps}&results=${view.results ? 1 : 0}&detail=${view.detail ? 1 : 0}`;
+  `&steps=${view.steps === "both" ? "cmd,auto" : view.steps}&results=${view.results ? 1 : 0}&detail=${view.detail ? 1 : 0}&log_style=${view.logStyle === "both" ? "cmd,auto" : view.logStyle}`;
 
 function ReportOptions({
   view,
@@ -117,42 +133,75 @@ function ReportOptions({
           ]}
         />
       </div>
-      {view.detail && <div className="dc-ropt">
-        <span className="dc-ropt-l">{bi("步骤内容", "Steps")}</span>
-        <Segmented<ReportView["steps"]>
-          value={view.steps}
-          onChange={(steps) => setView({ ...view, steps })}
-          label={bi("步骤写法", "Step format")}
-          options={[
-            { value: "cmd", label: bi("命令版", "Commands") },
-            { value: "auto", label: bi("Playbook 步骤", "Playbooks") },
-            { value: "both", label: bi("两种都要", "Both") },
-          ]}
-        />
-        <span className="faint small">
-          {view.steps === "cmd"
-            ? bi("计划中的命令与执行位置，实际结果以证据为准", "Planned commands and targets; actual outcomes come from evidence")
-            : view.steps === "auto"
-              ? bi("计划中的 Playbook 和任务，实际结果以证据为准", "Planned playbooks and tasks; actual outcomes come from evidence")
-              : bi("每一步先写自动化执行，再写分机器的命令", "Lists automation execution first, followed by per-host commands")}
-        </span>
-      </div>}{view.detail && <div className="dc-ropt">
-        <span className="dc-ropt-l">{bi("执行结果", "Execution results")}</span>
-        <Segmented<"yes" | "no">
-          value={view.results ? "yes" : "no"}
-          onChange={(v) => setView({ ...view, results: v === "yes" })}
-          label={bi("执行结果", "Execution results")}
-          options={[
-            { value: "yes", label: bi("带上现场结果", "Include on-site results") },
-            { value: "no", label: bi("只要执行步骤", "Steps only") },
-          ]}
-        />
-        <span className="faint small">
-          {view.results
-            ? bi("包含执行节点回传的证据，以及现场人员补充的记录", "Includes execution node evidence and notes added on-site")
-            : bi("不含现场记录，可当作操作手册交给下一个现场", "Excludes on-site records; suitable as a reusable runbook")}
-        </span>
-      </div>}
+      {view.detail && (
+        <div className="dc-ropt">
+          <span className="dc-ropt-l">{bi("步骤内容", "Steps")}</span>
+          <Segmented<ReportView["steps"]>
+            value={view.steps}
+            onChange={(steps) =>
+              setView({
+                ...view,
+                steps,
+                logStyle: steps,
+              })
+            }
+            label={bi("步骤写法", "Step format")}
+            options={[
+              { value: "cmd", label: bi("命令版", "Commands") },
+              { value: "auto", label: bi("Playbook 步骤", "Playbooks") },
+              { value: "both", label: bi("两种都要", "Both") },
+            ]}
+          />
+          <span className="faint small">
+            {view.steps === "cmd"
+              ? bi("按机器整理的 Linux 命令与成功判据，适合直接作为客户交付手册", "Per-host Linux commands and pass criteria in ops-manual style")
+              : view.steps === "auto"
+                ? bi("计划中的 Playbook 和任务，实际结果以证据为准", "Planned playbooks and tasks; actual outcomes come from evidence")
+                : bi("每一步先写自动化执行，再写分机器的命令", "Lists automation execution first, followed by per-host commands")}
+          </span>
+        </div>
+      )}
+      {view.detail && (
+        <div className="dc-ropt">
+          <span className="dc-ropt-l">{bi("执行结果", "Execution results")}</span>
+          <Segmented<"yes" | "no">
+            value={view.results ? "yes" : "no"}
+            onChange={(v) => setView({ ...view, results: v === "yes" })}
+            label={bi("执行结果", "Execution results")}
+            options={[
+              { value: "yes", label: bi("带上现场结果", "Include on-site results") },
+              { value: "no", label: bi("只要执行步骤", "Steps only") },
+            ]}
+          />
+          <span className="faint small">
+            {view.results
+              ? bi("包含执行节点回传的证据，以及现场人员补充的记录", "Includes execution node evidence and notes added on-site")
+              : bi("不含现场记录，可当作操作手册交给下一个现场", "Excludes on-site records; suitable as a reusable runbook")}
+          </span>
+        </div>
+      )}
+      {view.detail && view.results && (
+        <div className="dc-ropt">
+          <span className="dc-ropt-l">{bi("执行日志", "Log format")}</span>
+          <Segmented<ReportView["logStyle"]>
+            value={view.logStyle}
+            onChange={(logStyle) => setView({ ...view, logStyle })}
+            label={bi("执行日志样式", "Execution log format")}
+            options={[
+              { value: "cmd", label: bi("命令终端版", "Terminal Log") },
+              { value: "auto", label: bi("Ansible 日志", "Ansible Log") },
+              { value: "both", label: bi("两种都要", "Both") },
+            ]}
+          />
+          <span className="faint small">
+            {view.logStyle === "cmd"
+              ? bi("紧贴每一步展示 Linux 终端命令与真实回显（[root@host ~]#），简洁直观", "Clean Linux terminal prompt & real stdout right beneath each step")
+              : view.logStyle === "auto"
+                ? bi("保留 Ansible 主机执行汇总表（Recap）与 Playbook 原始输出日志", "Ansible host Recap summary tables and raw playbook output logs")
+                : bi("同时保留命令终端回显与完整 Ansible 自动化执行日志", "Includes both Linux terminal transcripts and Ansible execution logs")}
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -179,7 +228,15 @@ export function prefetchClusterDocs(clusterId: string) {
     .catch(() => {});
 }
 
-export function DocsTab({ c, doc }: { c: ClusterView; doc?: string }) {
+export function DocsTab({
+  c,
+  doc,
+  onClusterChanged,
+}: {
+  c: ClusterView;
+  doc?: string;
+  onClusterChanged?: () => void;
+}) {
   const lang = useLang();
   const listUrl = docsListPath(c.id);
   const [list, setList] = useState<ClusterDoc[] | null>(
@@ -225,6 +282,7 @@ export function DocsTab({ c, doc }: { c: ClusterView; doc?: string }) {
           view={view}
           setView={setView}
           onChanged={load}
+          onClusterChanged={onClusterChanged}
           onExport={(ids) => setExporting(ids)}
         />
         <ExportDialog
@@ -410,11 +468,59 @@ export function DocsTab({ c, doc }: { c: ClusterView; doc?: string }) {
 }
 
 type Finding = {
+  id?: string;
+  section_key?: string;
   section: string;
-  level: string;
+  category?: "completeness" | "consistency" | "honesty" | "security" | "clarity" | string;
+  level: "error" | "warn" | "tip" | string;
   problem: string;
+  evidence?: string;
   suggest: string;
+  proposed_text?: string;
+  action_kind?: "apply_text" | "draft_section" | "confirm_draft" | "jump" | string;
 };
+
+type DocCheckMetrics = {
+  total_sections: number;
+  completed: number;
+  empty: number;
+  drafts: number;
+  stale: number;
+  errors: number;
+  warns: number;
+  tips: number;
+};
+
+type DocCheckResult = {
+  score: number;
+  verdict: "ready" | "needs_fill" | "needs_fix" | string;
+  summary: string;
+  checked_at?: string;
+  model?: string;
+  metrics?: DocCheckMetrics;
+  findings: Finding[];
+};
+
+const RV_CAT_LABEL: Record<string, () => string> = {
+  completeness: () => bi("完整性", "Completeness"),
+  consistency: () => bi("事实核对", "Fact Check"),
+  honesty: () => bi("客观坦诚", "Objectivity"),
+  security: () => bi("安全合规", "Security"),
+  clarity: () => bi("交付规范", "Clarity"),
+};
+
+function jumpToDocEl(elId: string) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  el.scrollIntoView({
+    behavior: reducedMotion() ? "auto" : "smooth",
+    block: "start",
+  });
+  el.classList.remove("dc-flash");
+  void el.offsetWidth;
+  el.classList.add("dc-flash");
+  setTimeout(() => el.classList.remove("dc-flash"), 1400);
+}
 
 function DocView({
   c,
@@ -423,6 +529,7 @@ function DocView({
   view,
   setView,
   onChanged,
+  onClusterChanged,
   onExport,
 }: {
   c: ClusterView;
@@ -431,6 +538,7 @@ function DocView({
   view: ReportView;
   setView: (v: ReportView) => void;
   onChanged: () => void;
+  onClusterChanged?: () => void;
   onExport: (ids: string[]) => void;
 }) {
   const lang = useLang();
@@ -438,9 +546,18 @@ function DocView({
   const [d, setD] = useState<ClusterDoc | null>(
     () => cached<ClusterDoc>(itemUrl) ?? null,
   );
+  const sopRehearsalId = id.startsWith("sop-") ? id.slice(4) : "";
+  const [sopRehearsal, setSopRehearsal] = useState<ChangeRehearsal | null>(
+    null,
+  );
+  const [sopPeers, setSopPeers] = useState<ChangeRehearsal[]>([]);
   const [error, setError] = useState("");
   const [checking, setChecking] = useState(false);
-  const [findings, setFindings] = useState<Finding[] | null>(null);
+  const [draftingAll, setDraftingAll] = useState(false);
+  const [review, setReview] = useState<DocCheckResult | null>(null);
+  const [appliedIDs, setAppliedIDs] = useState<Record<string, boolean>>({});
+  const [busyItem, setBusyItem] = useState<string>("");
+  const [applyingAll, setApplyingAll] = useState(false);
   const ai = useAIStatus();
   const aiOn = ai.enabled;
   const canAI = aiOn && !!ai.features?.docs && can("ai.use") && can("report.edit");
@@ -449,7 +566,8 @@ function DocView({
     const hit = cached<ClusterDoc>(itemUrl);
     setD(hit ?? null);
     setError("");
-    setFindings(null);
+    setReview(null);
+    setAppliedIDs({});
     api<ClusterDoc>(itemUrl)
       .then((r) => {
         putCached(itemUrl, r);
@@ -462,6 +580,37 @@ function DocView({
       alive = false;
     };
   }, [c.id, id, itemUrl, lang]);
+  useEffect(() => {
+    if (!sopRehearsalId) {
+      setSopRehearsal(null);
+      setSopPeers([]);
+      return;
+    }
+    let alive = true;
+    const rhUrl = `/api/clusters/${encodeURIComponent(c.id)}/rehearsals/${encodeURIComponent(sopRehearsalId)}`;
+    const listRhUrl = `/api/clusters/${encodeURIComponent(c.id)}/rehearsals`;
+    const hit = cached<ChangeRehearsal>(rhUrl);
+    if (hit) setSopRehearsal(hit);
+    const listHit = cached<ChangeRehearsal[]>(listRhUrl);
+    if (listHit) setSopPeers(listHit);
+    api<ChangeRehearsal>(rhUrl)
+      .then((r) => {
+        putCached(rhUrl, r);
+        if (alive) setSopRehearsal(r);
+      })
+      .catch(() => {
+        if (alive) setSopRehearsal(null);
+      });
+    api<ChangeRehearsal[]>(listRhUrl)
+      .then((arr) => {
+        putCached(listRhUrl, arr);
+        if (alive) setSopPeers(arr || []);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [c.id, sopRehearsalId]);
   const update = (nd: ClusterDoc) => {
     putCached(itemUrl, nd);
     setD(nd);
@@ -470,18 +619,166 @@ function DocView({
   const check = async () => {
     setChecking(true);
     try {
-      const r = await api<{ findings: Finding[] }>(
+      const r = await api<DocCheckResult>(
         `/api/clusters/${c.id}/docs/${id}/check`,
         { method: "POST" },
       );
-      setFindings(r.findings);
-      if (!r.findings.length) Message.success(bi("没有发现问题", "No issues found"));
+      setReview(r);
+      setAppliedIDs({});
+      if (!r.findings?.length) {
+        Message.success(bi("AI 审阅通过，文档达到交付标准", "AI review passed"));
+      }
     } catch (e) {
       err(e);
     } finally {
       setChecking(false);
     }
   };
+  const draftAllEmpty = async () => {
+    setDraftingAll(true);
+    try {
+      const r = await api<{ drafted: number; doc: ClusterDoc }>(
+        `/api/clusters/${c.id}/docs/${id}/draft-all`,
+        { method: "POST", body: JSON.stringify({}) },
+      );
+      if (r.doc) update(r.doc);
+      if (r.drafted > 0) {
+        Message.success(
+          bi(
+            `已一次性起草 ${r.drafted} 个待填章节草稿，请逐节核对确认`,
+            `Drafted ${r.drafted} empty section(s); please review and confirm`,
+          ),
+        );
+      } else {
+        Message.info(bi("所有可起草章节均已填写", "All draftable sections are already filled"));
+      }
+    } catch (e) {
+      err(e);
+    } finally {
+      setDraftingAll(false);
+    }
+  };
+  const applyFindingProposal = async (
+    f: Finding,
+    fid: string,
+    confirmed: boolean,
+  ) => {
+    if (!f.section_key || !f.proposed_text) return;
+    setBusyItem(fid);
+    try {
+      const nd = await api<ClusterDoc>(
+        `/api/clusters/${c.id}/docs/${id}/sections/${f.section_key}`,
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            text: f.proposed_text,
+            confirmed,
+            source: "ai",
+          }),
+        },
+      );
+      update(nd);
+      setAppliedIDs((prev) => ({ ...prev, [fid]: true }));
+      Message.success(
+        confirmed
+          ? bi(`已采纳并确认「${f.section}」`, `Applied & confirmed "${f.section}"`)
+          : bi(`已写入「${f.section}」为待确认草稿`, `Saved "${f.section}" as draft`),
+      );
+    } catch (e) {
+      err(e);
+    } finally {
+      setBusyItem("");
+    }
+  };
+  const draftFindingSection = async (f: Finding, fid: string) => {
+    if (!f.section_key) return;
+    setBusyItem(fid);
+    try {
+      const nd = await api<ClusterDoc>(
+        `/api/clusters/${c.id}/docs/${id}/sections/${f.section_key}/draft`,
+        { method: "POST", body: JSON.stringify({}) },
+      );
+      update(nd);
+      setAppliedIDs((prev) => ({ ...prev, [fid]: true }));
+      Message.success(bi(`已为「${f.section}」生成 AI 草稿`, `Drafted "${f.section}"`));
+      jumpToDocEl(`sec-${f.section_key}`);
+    } catch (e) {
+      err(e);
+    } finally {
+      setBusyItem("");
+    }
+  };
+  const confirmFindingDraft = async (f: Finding, fid: string) => {
+    if (!f.section_key || !d) return;
+    const sec = (d.blocks || []).find(
+      (b) => b.kind === "section" && b.key === f.section_key,
+    );
+    if (!sec?.text) return;
+    setBusyItem(fid);
+    try {
+      const nd = await api<ClusterDoc>(
+        `/api/clusters/${c.id}/docs/${id}/sections/${f.section_key}`,
+        {
+          method: "PUT",
+          body: JSON.stringify({ text: sec.text, confirmed: true, source: "ai" }),
+        },
+      );
+      update(nd);
+      setAppliedIDs((prev) => ({ ...prev, [fid]: true }));
+      Message.success(bi(`已确认「${f.section}」`, `Confirmed "${f.section}"`));
+    } catch (e) {
+      err(e);
+    } finally {
+      setBusyItem("");
+    }
+  };
+  const applyAllProposals = async () => {
+    if (!review) return;
+    const seen = new Set<string>();
+    const queue = review.findings.filter((f, idx) => {
+      const fid = f.id || String(idx);
+      if (appliedIDs[fid] || !f.section_key || !f.proposed_text) return false;
+      if (seen.has(f.section_key)) return false;
+      seen.add(f.section_key);
+      return true;
+    });
+    if (!queue.length) return;
+    setApplyingAll(true);
+    let okN = 0;
+    try {
+      for (const f of queue) {
+        const fid = f.id || `${f.section_key}`;
+        const nd = await api<ClusterDoc>(
+          `/api/clusters/${c.id}/docs/${id}/sections/${f.section_key}`,
+          {
+            method: "PUT",
+            body: JSON.stringify({
+              text: f.proposed_text,
+              confirmed: true,
+              source: "ai",
+            }),
+          },
+        );
+        update(nd);
+        setAppliedIDs((prev) => ({ ...prev, [fid]: true }));
+        okN++;
+      }
+      Message.success(
+        bi(`已一键采纳并写入 ${okN} 个章节建议`, `Applied ${okN} section suggestion(s)`),
+      );
+    } catch (e) {
+      err(e);
+    } finally {
+      setApplyingAll(false);
+    }
+  };
+  const emptyAICount = (d?.blocks || []).filter(
+    (b) => b.kind === "section" && b.ai && !(b.text || "").trim(),
+  ).length;
+  const applicableProposalCount = (review?.findings || []).filter((f, idx) => {
+    const fid = f.id || String(idx);
+    return !appliedIDs[fid] && Boolean(f.section_key) && Boolean(f.proposed_text);
+  }).length;
   const i = (list || []).findIndex((x) => x.id === id);
   const prev = list?.[i - 1];
   const next = list?.[i + 1];
@@ -545,11 +842,31 @@ function DocView({
               </span>
             </div>
             <div className="dc-bar-acts">
+              {canAI && emptyAICount > 0 && (
+                <Tooltip
+                  content={bi(
+                    "结合本集群交付记录与安全态势，一次性起草全部尚未填写的章节",
+                    "Draft all empty sections in one pass grounded in delivery & security facts",
+                  )}
+                  mini
+                >
+                  <Button
+                    shape="round"
+                    type="secondary"
+                    icon={<Spark size={13} />}
+                    loading={draftingAll}
+                    disabled={checking}
+                    onClick={draftAllEmpty}
+                  >
+                    {bi(`AI 补全待填 (${emptyAICount})`, `AI Fill Empty (${emptyAICount})`)}
+                  </Button>
+                </Tooltip>
+              )}
               {canAI && (
                 <Tooltip
                   content={bi(
-                    "让 AI 对照执行记录，检查文字有没有和事实矛盾、回避问题或遗漏",
-                    "Have AI cross-check prose against execution records for contradictions or omissions",
+                    "对照集群拓扑、执行记录与安全态势深度审阅全文，并直接生成可一键采纳的改写建议",
+                    "Audit prose against topology, execution logs, and security posture with 1-click apply proposals",
                   )}
                   mini
                 >
@@ -558,13 +875,14 @@ function DocView({
                     className="ai-pill"
                     icon={<Spark size={14} rainbow />}
                     loading={checking}
+                    disabled={draftingAll}
                     onClick={check}
                   >
-                    {bi("AI 检查", "AI Review")}
+                    {bi("AI 深度审阅", "AI Audit")}
                   </Button>
                 </Tooltip>
               )}
-              {aiOn && (d.kind === "rca" || d.kind === "change") && can("kb.submit") && (
+              {aiOn && !!ai.features?.kb && (d.kind === "rca" || d.kind === "change") && can("kb.submit") && (
                 <ToKB c={c} d={d} />
               )}
               {d.manual && can("report.edit") && (
@@ -605,37 +923,303 @@ function DocView({
               )}
             </div>
           </header>
-          {findings && findings.length > 0 && (
-            <div className="dc-findings" role="region" aria-label={bi("AI 检查结果", "AI review findings")}>
-              <div className="dc-findings-h">
+          {sopRehearsal && sopRehearsal.stage === "finalized" && (
+            <RehearsalProductionApplyCard
+              clusterId={c.id}
+              rehearsal={sopRehearsal}
+              peers={sopPeers}
+              compact
+              onUpdated={(next) => {
+                setSopRehearsal(next);
+                putCached(
+                  `/api/clusters/${encodeURIComponent(c.id)}/rehearsals/${encodeURIComponent(next.id)}`,
+                  next,
+                );
+                const listRhUrl = `/api/clusters/${encodeURIComponent(c.id)}/rehearsals`;
+                void api<ChangeRehearsal[]>(listRhUrl)
+                  .then((arr) => {
+                    putCached(listRhUrl, arr);
+                    setSopPeers(arr || []);
+                  })
+                  .catch(() => {});
+                void api<ClusterDoc>(itemUrl)
+                  .then((nd) => {
+                    putCached(itemUrl, nd);
+                    setD(nd);
+                  })
+                  .catch(() => {});
+                onChanged();
+                onClusterChanged?.();
+              }}
+            />
+          )}
+          {(checking || draftingAll) && (
+            <div className="dc-rv-busy" role="status">
+              <Spark size={16} rainbow />
+              <div className="dc-rv-busy-t">
                 <b>
-                  {bi(
-                    `AI 检查发现 ${findings.length} 处可以改进`,
-                    `AI review found ${findings.length} ${findings.length === 1 ? "suggestion" : "suggestions"}`,
-                  )}
+                  {draftingAll
+                    ? bi(
+                        `正在依据真实交付记录与安全态势批量起草 ${emptyAICount} 个待填章节…`,
+                        `Drafting ${emptyAICount} empty section(s) from delivery & security facts…`,
+                      )
+                    : bi(
+                        "AI 正在对照拓扑规格、执行记录、CVE 漏洞与配置基线进行深度审阅…",
+                        "AI is auditing topology, execution logs, CVEs, and config baselines…",
+                      )}
                 </b>
-                <button
-                  type="button"
-                  className="link quiet"
-                  onClick={() => setFindings(null)}
-                >
-                  {bi("收起", "Dismiss")}
-                </button>
+                <small className="faint">
+                  {draftingAll
+                    ? bi("生成后将自动写入对应章节为待确认草稿，不编造任何现场数据", "Drafts will be saved as unconfirmed drafts grounded in facts")
+                    : bi("审阅完成后将给出就绪评分、核查依据与可一键采纳的正文改写方案", "Will return a readiness score, evidence citations, and 1-click rewrite proposals")}
+                </small>
               </div>
-              {findings.map((f, k) => (
-                <div
-                  key={k}
-                  className={`dc-finding ${f.level === "error" ? "bad" : ""}`}
-                >
-                  <IconExclamationCircle />
-                  <div>
-                    <b>{f.section}</b>
-                    <span>{f.problem}</span>
-                    {f.suggest && <small>{bi("建议：", "Suggestion: ")}{f.suggest}</small>}
+            </div>
+          )}
+
+          {review && !checking && (
+            <section
+              className={`dc-review v-${review.verdict}`}
+              role="region"
+              aria-label={bi("AI 深度审阅报告", "AI Audit Report")}
+            >
+              <div className="dc-rv-head">
+                <div className="dc-rv-score-wrap">
+                  <div
+                    className={`dc-rv-score ${
+                      review.score >= 85 ? "ok" : review.score >= 65 ? "warn" : "bad"
+                    }`}
+                  >
+                    <b className="num">{review.score}</b>
+                    <span>/100</span>
+                  </div>
+                  <div className="dc-rv-meta">
+                    <div className="dc-rv-title-row">
+                      <b>{bi("AI 交付审阅报告", "AI Delivery Audit")}</b>
+                      <span className={`dc-rv-verdict v-${review.verdict}`}>
+                        {review.verdict === "ready"
+                          ? bi("可导出交付", "Ready to Export")
+                          : review.verdict === "needs_fill"
+                            ? bi("存在待填章节", "Sections Incomplete")
+                            : bi("建议修订后交付", "Needs Revision")}
+                      </span>
+                      {review.model && (
+                        <span className="dc-rv-model mono">{review.model}</span>
+                      )}
+                    </div>
+                    <p className="dc-rv-sum">{review.summary}</p>
+                    {review.metrics && (
+                      <div className="dc-rv-stats num">
+                        {review.metrics.errors > 0 && (
+                          <span className="s-bad">
+                            {bi(`严重 ${review.metrics.errors}`, `${review.metrics.errors} error(s)`)}
+                          </span>
+                        )}
+                        {review.metrics.warns > 0 && (
+                          <span className="s-warn">
+                            {bi(`提醒 ${review.metrics.warns}`, `${review.metrics.warns} warning(s)`)}
+                          </span>
+                        )}
+                        {review.metrics.tips > 0 && (
+                          <span className="s-tip">
+                            {bi(`建议 ${review.metrics.tips}`, `${review.metrics.tips} tip(s)`)}
+                          </span>
+                        )}
+                        <span className="s-neutral">
+                          {bi(
+                            `章节已完成 ${review.metrics.completed}/${review.metrics.total_sections}`,
+                            `Sections ${review.metrics.completed}/${review.metrics.total_sections}`,
+                          )}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
-              ))}
-            </div>
+
+                <div className="dc-rv-head-acts">
+                  {applicableProposalCount > 0 && can("report.edit") && (
+                    <Button
+                      size="small"
+                      type="primary"
+                      icon={<IconCheck />}
+                      loading={applyingAll}
+                      onClick={() => void applyAllProposals()}
+                    >
+                      {bi(
+                        `一键采纳全部建议 (${applicableProposalCount})`,
+                        `Apply All (${applicableProposalCount})`,
+                      )}
+                    </Button>
+                  )}
+                  <Button
+                    size="small"
+                    icon={<IconRefresh />}
+                    loading={checking}
+                    onClick={check}
+                  >
+                    {bi("重新审阅", "Re-audit")}
+                  </Button>
+                  <Button
+                    size="small"
+                    type="text"
+                    onClick={() => setReview(null)}
+                  >
+                    {bi("收起", "Dismiss")}
+                  </Button>
+                </div>
+              </div>
+
+              {review.findings.length === 0 ? (
+                <div className="dc-rv-pass">
+                  <IconCheckCircleFill />
+                  <span>
+                    {bi(
+                      "全文事实核对、完整性与安全基线披露均已通过，可直接导出正式 Word 报告。",
+                      "All fact checks, completeness checks, and security disclosures passed. Ready to export.",
+                    )}
+                  </span>
+                </div>
+              ) : (
+                <div className="dc-rv-list">
+                  {review.findings.map((f, idx) => {
+                    const fid = f.id || String(idx);
+                    const done = Boolean(appliedIDs[fid]);
+                    const isBusy = busyItem === fid;
+                    const catLbl =
+                      (f.category && RV_CAT_LABEL[f.category]?.()) ||
+                      bi("规范检查", "Review");
+                    const lvLbl =
+                      f.level === "error"
+                        ? bi("严重", "Error")
+                        : f.level === "tip"
+                          ? bi("建议", "Tip")
+                          : bi("提醒", "Warn");
+                    return (
+                      <div
+                        key={fid}
+                        className={`dc-rv-item lv-${f.level} ${done ? "is-done" : ""}`}
+                      >
+                        <div className="dc-rv-item-top">
+                          <div className="dc-rv-item-tags">
+                            <span className={`dc-rv-lv lv-${f.level}`}>{lvLbl}</span>
+                            <span className="dc-rv-cat">{catLbl}</span>
+                            {f.section_key ? (
+                              <button
+                                type="button"
+                                className="dc-rv-jump"
+                                onClick={() => jumpToDocEl(`sec-${f.section_key}`)}
+                              >
+                                {f.section} ↗
+                              </button>
+                            ) : (
+                              <b className="dc-rv-sec-txt">{f.section}</b>
+                            )}
+                            {done && (
+                              <span className="dc-rv-applied">
+                                <IconCheck /> {bi("已采纳写入", "Applied")}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="dc-rv-problem">{f.problem}</div>
+
+                        {f.evidence && (
+                          <div className="dc-rv-evidence">
+                            <span>{bi("核查依据：", "Evidence: ")}</span>
+                            {f.evidence}
+                          </div>
+                        )}
+
+                        {f.suggest && (
+                          <div className="dc-rv-suggest">
+                            <span>{bi("改进建议：", "Suggestion: ")}</span>
+                            {f.suggest}
+                          </div>
+                        )}
+
+                        {f.proposed_text && f.section_key && !done && (
+                          <div className="dc-rv-proposal">
+                            <div className="dc-rv-prop-h">
+                              <span>
+                                <Spark size={12} />{" "}
+                                {bi(
+                                  `AI 建议改写稿（将写入「${f.section}」）`,
+                                  `AI Proposed Text for "${f.section}"`,
+                                )}
+                              </span>
+                            </div>
+                            <div className="dc-rv-prop-body">{f.proposed_text}</div>
+                            {can("report.edit") && (
+                              <div className="dc-rv-prop-acts">
+                                <Button
+                                  size="mini"
+                                  type="primary"
+                                  icon={<IconCheck />}
+                                  loading={isBusy}
+                                  onClick={() => void applyFindingProposal(f, fid, true)}
+                                >
+                                  {bi("一键采纳并确认", "Apply & Confirm")}
+                                </Button>
+                                <Button
+                                  size="mini"
+                                  type="secondary"
+                                  loading={isBusy}
+                                  onClick={() => void applyFindingProposal(f, fid, false)}
+                                >
+                                  {bi("存为待确认草稿", "Save as Draft")}
+                                </Button>
+                                <Button
+                                  size="mini"
+                                  type="text"
+                                  onClick={() => jumpToDocEl(`sec-${f.section_key}`)}
+                                >
+                                  {bi("定位该节", "Jump to Section")}
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {!f.proposed_text && !done && f.section_key && (
+                          <div className="dc-rv-item-acts">
+                            {f.action_kind === "draft_section" && canAI && (
+                              <Button
+                                size="mini"
+                                type="primary"
+                                icon={<Spark size={11} />}
+                                loading={isBusy}
+                                onClick={() => void draftFindingSection(f, fid)}
+                              >
+                                {bi("AI 立即起草此节", "AI Draft Section")}
+                              </Button>
+                            )}
+                            {f.action_kind === "confirm_draft" && can("report.edit") && (
+                              <Button
+                                size="mini"
+                                type="primary"
+                                icon={<IconCheck />}
+                                loading={isBusy}
+                                onClick={() => void confirmFindingDraft(f, fid)}
+                              >
+                                {bi("确认此节草稿", "Confirm Draft")}
+                              </Button>
+                            )}
+                            <Button
+                              size="mini"
+                              type="secondary"
+                              onClick={() => jumpToDocEl(`sec-${f.section_key}`)}
+                            >
+                              {bi("跳转到该章节 ↗", "Go to Section ↗")}
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
           )}
           {hasVariants(d) && <ReportOptions view={view} setView={setView} />}
           <Paper c={c} d={d} view={view} aiOn={aiOn} canAI={canAI} onSaved={update} />
@@ -662,6 +1246,7 @@ function Paper({
   onSaved: (d: ClusterDoc) => void;
 }) {
   useLang();
+  const [activeId, setActiveId] = useState<string>("");
   const visibleBlocks = (d.blocks || []).filter(
     (b) => (!b.detail || view.detail) && keeps(b.variant, view),
   );
@@ -674,6 +1259,7 @@ function Paper({
           id: `sec-${b.key}`,
           label: b.title,
           tone: isDraft ? "draft" : has ? "done" : "empty",
+          editable: true,
         };
       }
       if (b.kind === "h" && (b.level || 1) === 1 && b.text) {
@@ -681,35 +1267,73 @@ function Paper({
           id: `doc-h-${idx}`,
           label: b.text,
           tone: "",
+          editable: false,
         };
       }
       return null;
     })
-    .filter((x): x is { id: string; label: string; tone: string } => Boolean(x));
+    .filter(
+      (x): x is { id: string; label: string; tone: string; editable: boolean } =>
+        Boolean(x),
+    );
+  const editableTotal = outline.filter((x) => x.editable).length;
+  const emptyTotal = outline.filter((x) => x.tone === "empty").length;
+  const draftTotal = outline.filter((x) => x.tone === "draft").length;
+  const doneTotal = outline.filter((x) => x.tone === "done").length;
 
   return (
     <>
       {outline.length >= 2 && (
         <nav className="dc-outline" aria-label={bi("文档章节导航", "Document sections")}>
-          <span className="dc-outline-label">{bi("章节", "Sections")}</span>
-          {outline.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className="dc-outline-btn"
-              onClick={() => {
-                document.getElementById(item.id)?.scrollIntoView({
-                  behavior: reducedMotion() ? "auto" : "smooth",
-                  block: "start",
-                });
-              }}
-            >
-              {item.tone && (
-                <i className={`dc-outline-dot ${item.tone}`} aria-hidden />
-              )}
-              <span>{item.label}</span>
-            </button>
-          ))}
+          <div className="dc-outline-head">
+            <span className="dc-outline-label">{bi("章节导航", "Chapters")}</span>
+            {editableTotal > 0 && (
+              <div className="dc-outline-meta">
+                {emptyTotal > 0 && (
+                  <span className="dc-ol-stat is-empty">
+                    <i className="dc-outline-dot empty" />
+                    {bi(`${emptyTotal} 节待填写`, `${emptyTotal} to fill`)}
+                  </span>
+                )}
+                {draftTotal > 0 && (
+                  <span className="dc-ol-stat is-draft">
+                    <i className="dc-outline-dot draft" />
+                    {bi(`${draftTotal} 节待确认`, `${draftTotal} pending`)}
+                  </span>
+                )}
+                <span className="dc-ol-stat is-done">
+                  <i className="dc-outline-dot done" />
+                  {bi(`已完成 ${doneTotal}/${editableTotal}`, `Done ${doneTotal}/${editableTotal}`)}
+                </span>
+              </div>
+            )}
+          </div>
+          <div className="dc-outline-list">
+            {outline.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={`dc-outline-btn ${item.tone ? `is-${item.tone}` : "is-auto"} ${activeId === item.id ? "is-active" : ""}`}
+                onClick={() => {
+                  setActiveId(item.id);
+                  jumpToDocEl(item.id);
+                }}
+              >
+                {item.tone === "done" ? (
+                  <IconCheck className="dc-outline-chk" aria-hidden />
+                ) : item.tone ? (
+                  <i className={`dc-outline-dot ${item.tone}`} aria-hidden />
+                ) : null}
+                <span>{item.label}</span>
+                {item.tone === "empty" && (
+                  <em className="dc-outline-tag empty">{bi("待填", "Empty")}</em>
+                )}
+                {item.tone === "draft" && (
+                  <em className="dc-outline-tag draft">{bi("待确认", "Draft")}</em>
+                )}
+              </button>
+            ))}
+          </div>
         </nav>
       )}
       <article className="dc-paper" aria-label={d.title}>
@@ -743,28 +1367,301 @@ function Paper({
   );
 }
 
-function DocCodeBlock({ text }: { text: string }) {
+const CAUTION_RE = /注意|警告|WARN|严禁|务必|不可逆|必须确认|慎用|CAUTION|CRITICAL|DO NOT/i;
+const TERM_PROMPT_RE = /^(\[[^\]]+\][#$]\s+)(.*)$/;
+const SHELL_OPS = new Set(["|", "||", "&&", ";", ">", ">>", "<", "2>&1"]);
+const SHELL_WRAPPERS = new Set(["sudo", "env", "nohup", "time"]);
+
+function splitShellComment(line: string): [string, string] {
+  const dbl = line.indexOf("  #");
+  if (dbl > 0) return [line.slice(0, dbl), line.slice(dbl)];
+  const tab = line.indexOf("\t#");
+  if (tab > 0) return [line.slice(0, tab), line.slice(tab)];
+  const sp = line.indexOf(" # ");
+  if (sp > 0) {
+    const pre = line.slice(0, sp);
+    if ((pre.split("'").length - 1) % 2 === 0 && (pre.split('"').length - 1) % 2 === 0) {
+      return [pre, line.slice(sp)];
+    }
+  }
+  return [line, ""];
+}
+
+function renderShellLine(line: string, lineIdx: number): React.ReactNode {
+  const trim = line.trim();
+  if (!trim) return "\n";
+  if (trim.startsWith("#") || trim.startsWith("//") || trim.startsWith("-- ")) {
+    const cls = CAUTION_RE.test(trim) ? "dc-sh-warn" : "dc-sh-cmt";
+    return (
+      <span key={lineIdx} className={cls}>
+        {line}
+        {"\n"}
+      </span>
+    );
+  }
+  const [cmd, comment] = splitShellComment(line);
+  const parts: React.ReactNode[] = [];
+  let i = 0;
+  let expectCmd = true;
+  let tokIdx = 0;
+  while (i < cmd.length) {
+    if (cmd[i] === " " || cmd[i] === "\t") {
+      const start = i;
+      while (i < cmd.length && (cmd[i] === " " || cmd[i] === "\t")) i++;
+      parts.push(cmd.slice(start, i));
+      continue;
+    }
+    if (cmd[i] === '"' || cmd[i] === "'") {
+      const q = cmd[i];
+      const start = i++;
+      while (i < cmd.length && cmd[i] !== q) {
+        if (cmd[i] === "\\" && q === '"' && i + 1 < cmd.length) i++;
+        i++;
+      }
+      if (i < cmd.length) i++;
+      parts.push(
+        <span key={tokIdx++} className="dc-sh-str">
+          {cmd.slice(start, i)}
+        </span>,
+      );
+      expectCmd = false;
+      continue;
+    }
+    const start = i;
+    while (i < cmd.length && cmd[i] !== " " && cmd[i] !== "\t") i++;
+    const tok = cmd.slice(start, i);
+    if (SHELL_OPS.has(tok)) {
+      parts.push(
+        <span key={tokIdx++} className="dc-sh-op">
+          {tok}
+        </span>,
+      );
+      expectCmd = tok === "|" || tok === "||" || tok === "&&" || tok === ";";
+    } else if (expectCmd) {
+      if (tok.includes("=") && !tok.startsWith("-") && !tok.includes("/")) {
+        parts.push(
+          <span key={tokIdx++} className="dc-sh-str">
+            {tok}
+          </span>,
+        );
+      } else {
+        parts.push(
+          <span key={tokIdx++} className="dc-sh-cmd">
+            {tok}
+          </span>,
+        );
+        expectCmd = SHELL_WRAPPERS.has(tok);
+      }
+    } else if (/^-[A-Za-z0-9-]/.test(tok) && tok !== "--") {
+      parts.push(
+        <span key={tokIdx++} className="dc-sh-flag">
+          {tok}
+        </span>,
+      );
+    } else {
+      parts.push(
+        <span key={tokIdx++} className="dc-sh-arg">
+          {tok}
+        </span>,
+      );
+    }
+  }
+  if (comment) {
+    const cls = CAUTION_RE.test(comment) ? "dc-sh-warn" : "dc-sh-cmt";
+    parts.push(
+      <span key="cmt" className={cls}>
+        {comment}
+      </span>,
+    );
+  }
+  return (
+    <React.Fragment key={lineIdx}>
+      {parts}
+      {"\n"}
+    </React.Fragment>
+  );
+}
+
+function renderTerminalLine(line: string, lineIdx: number): React.ReactNode {
+  const trim = line.trim();
+  if (!trim) return "\n";
+  const pm = TERM_PROMPT_RE.exec(line);
+  if (pm) {
+    return (
+      <React.Fragment key={lineIdx}>
+        <span className="dc-tm-prompt">{pm[1]}</span>
+        <span className="dc-tm-cmd">{pm[2]}</span>
+        {"\n"}
+      </React.Fragment>
+    );
+  }
+  if (trim.startsWith("# ✓") || trim.startsWith("✓ ")) {
+    return (
+      <span key={lineIdx} className="dc-tm-ok">
+        {line}
+        {"\n"}
+      </span>
+    );
+  }
+  if (
+    trim.startsWith("# ✗") ||
+    trim.startsWith("stderr:") ||
+    trim.startsWith("[FAILED") ||
+    trim.startsWith("[UNREACHABLE") ||
+    trim.startsWith("[exit code:")
+  ) {
+    return (
+      <span key={lineIdx} className="dc-tm-err">
+        {line}
+        {"\n"}
+      </span>
+    );
+  }
+  if (trim.startsWith("#")) {
+    const cls = trim.includes("FAILED")
+      ? "dc-tm-err"
+      : trim.includes("[OK")
+        ? "dc-tm-ok"
+        : "dc-tm-meta";
+    return (
+      <span key={lineIdx} className={cls}>
+        {line}
+        {"\n"}
+      </span>
+    );
+  }
+  if (trim.endsWith(": OK") || trim === "active") {
+    return (
+      <span key={lineIdx} className="dc-tm-ok-soft">
+        {line}
+        {"\n"}
+      </span>
+    );
+  }
+  return (
+    <span key={lineIdx} className="dc-tm-out">
+      {line}
+      {"\n"}
+    </span>
+  );
+}
+
+function renderAnsibleLine(line: string, lineIdx: number): React.ReactNode {
+  const trim = line.trim();
+  if (!trim) return "\n";
+  const stripped = trim.replace(/^\d\d:\d\d:\d\d\s+/, "");
+  if (
+    stripped.startsWith("PLAY  ") ||
+    stripped.startsWith("TASK  ") ||
+    stripped === "RECAP" ||
+    trim.startsWith("# ")
+  ) {
+    return (
+      <span key={lineIdx} className="dc-ans-head">
+        {line}
+        {"\n"}
+      </span>
+    );
+  }
+  if (/^(FAILED|UNREACHABLE)\b/.test(stripped) || stripped.includes("RESULT  FAILED")) {
+    return (
+      <span key={lineIdx} className="dc-ans-bad">
+        {line}
+        {"\n"}
+      </span>
+    );
+  }
+  if (/^changed\b/.test(stripped)) {
+    return (
+      <span key={lineIdx} className="dc-ans-chg">
+        {line}
+        {"\n"}
+      </span>
+    );
+  }
+  if (/^ok\b/.test(stripped) || stripped.includes("RESULT  PASSED")) {
+    return (
+      <span key={lineIdx} className="dc-ans-ok">
+        {line}
+        {"\n"}
+      </span>
+    );
+  }
+  return (
+    <React.Fragment key={lineIdx}>
+      {line}
+      {"\n"}
+    </React.Fragment>
+  );
+}
+
+function DocCodeBlock({ text, style }: { text: string; style?: DocBlock["style"] }) {
   useLang();
   const [copied, setCopied] = useState(false);
+  const isAnsible =
+    style === "ansible" ||
+    (!style && (text.includes("TASK  ") || text.includes("PLAY  ") || text.includes("STEP_RESULT ")));
+  const isTerminal = style === "terminal";
+  const lines = text.replace(/\r\n/g, "\n").replace(/\n+$/, "").split("\n");
+
+  const copyBtn = text.trim() ? (
+    <Tooltip content={copied ? bi("已复制", "Copied") : bi("复制内容", "Copy")} mini>
+      <button
+        type="button"
+        className={`dc-code-copy ${copied ? "copied" : ""}`}
+        aria-label={copied ? bi("已复制", "Copied") : bi("复制内容", "Copy")}
+        onClick={() => {
+          copy(text);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1400);
+        }}
+      >
+        {copied ? <IconCheck /> : <IconCopy />}
+      </button>
+    </Tooltip>
+  ) : null;
+
+  if (isTerminal) {
+    return (
+      <div className="dc-term">
+        <div className="dc-term-bar">
+          <span className="dc-term-dots" aria-hidden>
+            <i />
+            <i />
+            <i />
+          </span>
+          <span className="dc-term-title">
+            {bi("Linux 终端执行记录", "Linux Terminal Transcript")}
+          </span>
+          {copyBtn}
+        </div>
+        <pre className="dc-term-body">
+          {lines.map((ln, idx) => renderTerminalLine(ln, idx))}
+        </pre>
+      </div>
+    );
+  }
+
+  if (isAnsible) {
+    return (
+      <div className="dc-code-wrap is-ansible">
+        <div className="dc-ans-bar">
+          <span>{bi("Ansible 自动化日志", "Ansible Automation Log")}</span>
+          {copyBtn}
+        </div>
+        <pre className="dc-code dc-code-ans">
+          {lines.map((ln, idx) => renderAnsibleLine(ln, idx))}
+        </pre>
+      </div>
+    );
+  }
+
   return (
-    <div className="dc-code-wrap">
-      <pre className="dc-code">{text}</pre>
-      {text.trim() && (
-        <Tooltip content={copied ? bi("已复制", "Copied") : bi("复制代码", "Copy code")} mini>
-          <button
-            type="button"
-            className={`dc-code-copy ${copied ? "copied" : ""}`}
-            aria-label={copied ? bi("已复制代码", "Code copied") : bi("复制代码", "Copy code")}
-            onClick={() => {
-              copy(text);
-              setCopied(true);
-              setTimeout(() => setCopied(false), 1400);
-            }}
-          >
-            {copied ? <IconCheck /> : <IconCopy />}
-          </button>
-        </Tooltip>
-      )}
+    <div className="dc-code-wrap is-shell">
+      <pre className="dc-code dc-code-shell">
+        {lines.map((ln, idx) => renderShellLine(ln, idx))}
+      </pre>
+      {copyBtn}
     </div>
   );
 }
@@ -825,16 +1722,29 @@ function Block({
         </H>
       );
     }
-    case "p":
+    case "p": {
+      const txt = (b.text || "").trim();
+      const critMatch = /^(✓\s*判据：|✓\s*Criteria:\s*)(.+)$/s.exec(txt);
+      if (critMatch) {
+        return (
+          <div className="dc-criteria">
+            <span className="dc-criteria-k">{critMatch[1]}</span>
+            <span className="dc-criteria-v">
+              {critMatch[2].split("**").map((x, idx) => (idx % 2 ? <b key={idx}>{x}</b> : x))}
+            </span>
+          </div>
+        );
+      }
       return (
         <div className="dc-p">
           <Rich text={b.text || ""} />
         </div>
       );
+    }
     case "note":
       return <p className="dc-note">{b.text}</p>;
     case "code":
-      return <DocCodeBlock text={b.text || ""} />;
+      return <DocCodeBlock text={b.text || ""} style={b.style} />;
     case "old":
       return (
         <div className="dc-old">

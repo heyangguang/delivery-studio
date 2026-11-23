@@ -20,6 +20,7 @@ import {
 import {
   IconArrowLeft,
   IconCopy,
+  IconDown,
   IconEye,
   IconEyeInvisible,
   IconMore,
@@ -53,9 +54,16 @@ import type {
   PlanEntry,
 } from "./shared";
 import { go } from "./router";
-import { InstanceGraph, StatusBadge, StatusDot, UnderlineTabs } from "./ui";
+import {
+  DeliveryModeTag,
+  InstanceGraph,
+  StatusBadge,
+  StatusDot,
+  UnderlineTabs,
+} from "./ui";
 import {
   DeliveryDetail,
+  VerificationPromoteBanner,
   cachedDetail,
   prefetchDetail,
   putDetailCache,
@@ -63,7 +71,12 @@ import {
 import { DocsTab, prefetchClusterDocs } from "./docs";
 import { AIDock, Spark, useAIStatus } from "./aichat";
 import { ClusterConfig } from "./clusterconfig";
-import { ClusterRehearsal, launchRehearsalIntent } from "./rehearsal";
+import { ClusterSecurityTab } from "./clustersecurity";
+import {
+  ClusterRehearsal,
+  computeEffectiveClusterChanges,
+  launchRehearsalIntent,
+} from "./rehearsal";
 import type { RehearsalPresetKind } from "./rehearsal";
 import { bi, useLang } from "./i18n";
 import "./clusters.css";
@@ -137,10 +150,19 @@ function TabDocsIcon() {
   );
 }
 
+function TabSecurityIcon() {
+  return (
+    <svg {...TAB_SVG_PROPS}>
+      <path d="M8 2.15L13 4.1V7.7C13 10.8 10.9 12.95 8 13.85C5.1 12.95 3 10.8 3 7.7V4.1L8 2.15Z" />
+      <path d="M6.2 8.15L7.45 9.4L10 6.75" />
+    </svg>
+  );
+}
+
 /* ---------- URL compatibility for ?tab=deploy and legacy ?tab=deliveries ---------- */
 
 type ClusterTabCompat = {
-  tab?: "config" | "plans" | "docs" | "rehearsal";
+  tab?: "config" | "plans" | "docs" | "rehearsal" | "security";
   plan?: string;
   doc?: string;
   rehearsal?: string;
@@ -220,6 +242,12 @@ export function parseClusterUrlCompat(clusterId?: string): ClusterTabCompat {
       canonicalize: true,
     };
   }
+  if (qTab === "security") {
+    return {
+      tab: "security",
+      canonicalize: true,
+    };
+  }
   if (qTab === "overview") {
     return { canonicalize: true };
   }
@@ -249,7 +277,7 @@ export function ClusterDetail({
   onRehearsalFocusChange,
 }: {
   c: ClusterView;
-  tab?: "config" | "plans" | "docs" | "rehearsal";
+  tab?: "config" | "plans" | "docs" | "rehearsal" | "security";
   plan?: string;
   doc?: string;
   rehearsal?: string;
@@ -367,7 +395,8 @@ export function ClusterDetail({
   }, [c.id, basePlanId, hasDocs]);
   const effectiveTab =
     (resolvedTab === "rehearsal" && !canRehearse) ||
-    (resolvedTab === "docs" && !hasDocs)
+    (resolvedTab === "docs" && !hasDocs) ||
+    (resolvedTab === "security" && !hasDocs)
       ? undefined
       : resolvedTab;
   const tabKey = effectiveTab || "overview";
@@ -376,6 +405,9 @@ export function ClusterDetail({
     { value: "overview", label: bi("概览", "Overview"), icon: <TabOverviewIcon /> },
     { value: "config", label: bi("配置", "Config"), icon: <TabConfigIcon /> },
     { value: "plans", label: bi("部署", "Deploy"), icon: <TabDeployIcon /> },
+    ...(hasDocs
+      ? [{ value: "security", label: bi("安全", "Security"), icon: <TabSecurityIcon /> }]
+      : []),
     ...(canRehearse
       ? [
           {
@@ -453,6 +485,59 @@ export function ClusterDetail({
             <div className="detail-title">
               <h1>{c.id}</h1>
               <StatusBadge state={st.dot} label={stLabel} />
+              <DeliveryModeTag mode={c.delivery_mode} />
+              {(() => {
+                const appliedList = (rehearsals || []).filter(
+                  (x) => x.stage === "finalized" && x.applied && !x.voided,
+                );
+                const appliedCount = Math.max(
+                  c.applied_changes_count || 0,
+                  appliedList.length,
+                );
+                if (appliedCount <= 0) return null;
+                const latestTitle =
+                  appliedList[0]?.title || c.last_change_title || "";
+                return (
+                  <Tooltip
+                    content={
+                      latestTitle
+                        ? bi(
+                            `最近落地变更：${latestTitle}`,
+                            `Latest applied change: ${latestTitle}`,
+                          )
+                        : bi(
+                            `已确认 ${appliedCount} 次生产变更落地`,
+                            `${appliedCount} production change(s) applied`,
+                          )
+                    }
+                    mini
+                  >
+                    <button
+                      type="button"
+                      className="cl-applied-chip"
+                      onClick={() =>
+                        go(
+                          { name: "deliveries", id: c.id, tab: "rehearsal" },
+                          { replace: true },
+                        )
+                      }
+                    >
+                      <IconCheck />
+                      <span>
+                        {bi(
+                          `已落地 ${appliedCount} 次变更`,
+                          `${appliedCount} ${appliedCount === 1 ? "change" : "changes"} applied`,
+                        )}
+                      </span>
+                    </button>
+                  </Tooltip>
+                );
+              })()}
+              {c.purpose === "verification" && (
+                <span className="cl-verify-tag">
+                  {bi("组件验证通道", "Component Verification")}
+                </span>
+              )}
             </div>
             <div className="detail-meta">
               {owner && <span className="row-owner">{bi(`${owner} 的集群`, `${owner}'s cluster`)}</span>}
@@ -460,6 +545,17 @@ export function ClusterDetail({
                 {c.app_name} {c.version}
               </span>
               {c.platform && <span>{platformShort(c.platform)}</span>}
+              {c.purpose === "verification" && c.verify_target && (
+                <a
+                  className="cl-verify-target-link"
+                  href={`#/components/${encodeURIComponent(c.verify_target.component)}`}
+                >
+                  {bi(
+                    `验证目标：${c.verify_target.component} ${c.verify_target.version} (${platformShort(c.verify_target.platform)})`,
+                    `Target: ${c.verify_target.component} ${c.verify_target.version} (${platformShort(c.verify_target.platform)})`,
+                  )}
+                </a>
+              )}
               {c.hosts > 0 && (
                 <span className="num">
                   {c.hosts === 1 ? bi("1 台机器", "1 host") : bi(`${c.hosts} 台机器`, `${c.hosts} hosts`)}
@@ -516,7 +612,7 @@ export function ClusterDetail({
                   {
                     name: "deliveries",
                     id: c.id,
-                    tab: next as "plans" | "rehearsal" | "docs",
+                    tab: next as "plans" | "rehearsal" | "docs" | "security",
                   },
                   { replace: true },
                 );
@@ -535,6 +631,7 @@ export function ClusterDetail({
             c={c}
             source={resolvedSource}
             section={resolvedSection}
+            rehearsals={rehearsals}
           />
         ) : effectiveTab === "plans" ? (
           <InitialDeploymentView
@@ -543,6 +640,8 @@ export function ClusterDetail({
             narrow={narrow}
             reload={reload}
           />
+        ) : effectiveTab === "security" ? (
+          <ClusterSecurityTab c={c} canRehearse={canRehearse} />
         ) : effectiveTab === "rehearsal" && canRehearse ? (
           <ClusterRehearsal
             c={c}
@@ -551,9 +650,20 @@ export function ClusterDetail({
             focused={isFocusedRehearsal}
             onFocusChange={onRehearsalFocusChange}
             onListUpdated={refreshRehearsals}
+            onClusterChanged={() => {
+              refreshRehearsals();
+              void reload();
+            }}
           />
         ) : effectiveTab === "docs" ? (
-          <DocsTab c={c} doc={resolvedDoc} />
+          <DocsTab
+            c={c}
+            doc={resolvedDoc}
+            onClusterChanged={() => {
+              refreshRehearsals();
+              void reload();
+            }}
+          />
         ) : (
           <Overview
             c={c}
@@ -570,17 +680,24 @@ export function ClusterDetail({
     effectiveTab === "plans" && entry
       ? entry
       : c.plans.find((p) => p.id === (c.current || c.holder)) || c.plans[0];
-  const hideDock =
-    !dockPlan ||
-    dockPlan.state !== "succeeded" ||
-    effectiveTab === "rehearsal";
+  const hideDock = !dockPlan || dockPlan.state !== "succeeded";
+  const activeRehearsal =
+    effectiveTab === "rehearsal" && resolvedRehearsal
+      ? (rehearsals || []).find((x) => x.id === resolvedRehearsal)
+      : undefined;
   return (
     <AIDock
       scope={{ kind: "job", jobId: dockPlan?.id || c.id }}
       start={{
         key: "review",
-        title: bi("集群问答", "Cluster Q&A"),
-        context: `${c.id} · ${c.app_name}`,
+        title:
+          effectiveTab === "rehearsal"
+            ? bi("变更演练助手", "Rehearsal Assistant")
+            : bi("集群问答", "Cluster Q&A"),
+        context:
+          effectiveTab === "rehearsal" && activeRehearsal
+            ? `${c.id} · ${activeRehearsal.title}`
+            : `${c.id} · ${c.app_name}`,
       }}
       hidden={hideDock}
     >
@@ -615,19 +732,35 @@ function InitialDeploymentView({
     );
   }
 
-  const hasVoidedRevisions = c.plans.length > 1;
-  const revisionBar = hasVoidedRevisions ? (
+  const hasOtherRevisions = c.plans.length > 1;
+  const hasCompletedHistory = c.plans.some(
+    (p) =>
+      p.id !== (c.current || c.holder) &&
+      (planPhase(p) === "done" || planPhase(p) === "deviated"),
+  );
+  const revisionBar = hasOtherRevisions ? (
     <div
       className="cl-init-drafts"
       role="navigation"
-      aria-label={bi("当前生效交付与历史草稿", "Active delivery and archived drafts")}
+      aria-label={bi("交付记录切换", "Delivery record switcher")}
     >
-      <span>{bi("当前生效交付与归档草稿：", "Active delivery & archived drafts:")}</span>
+      <span>
+        {hasCompletedHistory
+          ? bi("交付记录切换：", "Delivery records:")
+          : bi("当前生效交付与归档草稿：", "Active delivery & archived drafts:")}
+      </span>
       <div className="cl-init-draft-pills">
         {c.plans.map((p) => {
           const ph = planPhase(p);
           const isCur = p.id === active.id;
           const isBase = p.id === (c.current || c.holder);
+          const pillLabel = isBase
+            ? bi("当前交付", "Active delivery")
+            : ph === "done"
+              ? bi("历史交付（已完成）", "Past delivery (done)")
+              : ph === "deviated"
+                ? bi("历史交付（有偏差）", "Past delivery (deviated)")
+                : bi(`${PLAN_PHASE[ph].label}草稿`, `${PLAN_PHASE[ph].label} draft`);
           return (
             <button
               key={p.id}
@@ -638,7 +771,7 @@ function InitialDeploymentView({
               }
             >
               <StatusDot state={PLAN_PHASE[ph].dot} />
-              <span>{isBase ? bi("当前交付", "Active delivery") : bi(`${PLAN_PHASE[ph].label}草稿`, `${PLAN_PHASE[ph].label} draft`)}</span>
+              <span>{pillLabel}</span>
               <span className="mono faint">#{p.id.slice(0, 6)}</span>
             </button>
           );
@@ -697,7 +830,16 @@ function InlineCopyBtn({
 }
 
 function rehearsalStageShort(r: ChangeRehearsal): string {
-  if (r.stage === "finalized") return bi("方案已定稿", "Finalized");
+  if (r.voided) {
+    return r.superseded_by
+      ? bi("⊘ 已被替代", "⊘ Superseded")
+      : bi("⊘ 已作废", "⊘ Voided");
+  }
+  if (r.stage === "finalized") {
+    return r.applied
+      ? bi("✓ 已落地", "✓ Applied")
+      : bi("待生产实施", "Pending Apply");
+  }
   if (r.stage === "rehearsing") {
     const req = (r.steps || []).filter(
       (s) => !s.optional && s.phase !== "rollback",
@@ -709,6 +851,202 @@ function rehearsalStageShort(r: ChangeRehearsal): string {
   }
   if (r.stage === "probing") return bi("现场采集", "Probing");
   return bi("边界确认", "Scoping");
+}
+
+function AppliedChangesLedger({
+  clusterId,
+  primaryComponent,
+  appliedRehearsals,
+}: {
+  clusterId: string;
+  primaryComponent?: string;
+  appliedRehearsals: ChangeRehearsal[];
+}) {
+  useLang();
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [showAll, setShowAll] = useState(false);
+
+  const sorted = useMemo(
+    () =>
+      [...appliedRehearsals].sort((a, b) =>
+        (b.applied_at || b.updated_at || "").localeCompare(
+          a.applied_at || a.updated_at || "",
+        ),
+      ),
+    [appliedRehearsals],
+  );
+  const effective = useMemo(
+    () => computeEffectiveClusterChanges(appliedRehearsals),
+    [appliedRehearsals],
+  );
+  const visible = showAll ? sorted : sorted.slice(0, 3);
+  const hiddenCount = sorted.length - visible.length;
+
+  return (
+    <div className="cl-u-changes">
+      <div className="cl-u-sec-h">
+        <span className="cl-u-changes-h">
+          <IconCheck />
+          {bi("生产已落地变更", "Applied Production Changes")}
+          <em className="cl-u-changes-cnt num">
+            {effective.items.length > 0
+              ? bi(
+                  `${sorted.length} 次 · ${effective.items.length} 项配置生效`,
+                  `${sorted.length} rollout(s) · ${effective.items.length} active change(s)`,
+                )
+              : bi(`${sorted.length} 次`, `${sorted.length} rollout(s)`)}
+          </em>
+        </span>
+        <button
+          type="button"
+          className="link small"
+          onClick={() =>
+            go({
+              name: "deliveries",
+              id: clusterId,
+              tab: "config",
+              section: primaryComponent ? `component:${primaryComponent}` : undefined,
+            })
+          }
+        >
+          {bi("在配置页查看生效项", "View Merged Config")} <IconRight />
+        </button>
+      </div>
+      <div className="cl-u-chg-ledger">
+        {visible.map((rh) => {
+          const open = Boolean(expanded[rh.id]);
+          const changes = rh.applied_changes || [];
+          return (
+            <div
+              key={rh.id}
+              className={`cl-u-chg-row${open ? " is-open" : ""}`}
+            >
+              <div
+                className="cl-u-chg-head"
+                role="button"
+                tabIndex={0}
+                onClick={() =>
+                  setExpanded((prev) => ({ ...prev, [rh.id]: !open }))
+                }
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setExpanded((prev) => ({ ...prev, [rh.id]: !open }));
+                  }
+                }}
+              >
+                <span className="cl-u-change-dot" aria-hidden />
+                <b className="cl-u-chg-title">{rh.title}</b>
+                {changes.length > 0 && (
+                  <span className="cl-u-chg-pill num">
+                    {bi(`${changes.length} 项参数`, `${changes.length} params`)}
+                  </span>
+                )}
+                <span className="cl-u-change-who num">
+                  {rh.applied_by || rh.owner} · {ago(rh.applied_at || rh.updated_at)}
+                </span>
+                <div
+                  className="cl-u-change-links"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {rh.doc_id && (
+                    <button
+                      type="button"
+                      className="link small"
+                      onClick={() =>
+                        go({
+                          name: "deliveries",
+                          id: clusterId,
+                          tab: "docs",
+                          doc: rh.doc_id,
+                        })
+                      }
+                    >
+                      {bi("变更报告", "Report")}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="link small"
+                    onClick={() =>
+                      go({
+                        name: "deliveries",
+                        id: clusterId,
+                        tab: "rehearsal",
+                        rehearsal: rh.id,
+                      })
+                    }
+                  >
+                    {bi("演练", "Details")}
+                  </button>
+                </div>
+                <IconDown className="cl-u-chg-chev" />
+              </div>
+              {open && (
+                <div className="cl-u-chg-detail">
+                  {rh.applied_summary && (
+                    <p className="cl-u-change-sum">{rh.applied_summary}</p>
+                  )}
+                  {changes.length > 0 && (
+                    <div className="cl-u-chg-kv">
+                      {changes.map((ch, idx) => {
+                        const latest = effective.latestByKey.get(
+                          (ch.key || "").trim().toLowerCase(),
+                        );
+                        const isOverwritten = Boolean(
+                          latest && latest.source_id !== rh.id,
+                        );
+                        return (
+                          <div
+                            key={`${ch.key}-${idx}`}
+                            className={`cl-u-chg-kv-row${isOverwritten ? " is-overwritten" : ""}`}
+                          >
+                            <code className="cl-u-chg-k mono">{ch.key}</code>
+                            <span className="cl-u-chg-v">
+                              {ch.before && (
+                                <>
+                                  <del className="cl-u-delta-old mono">
+                                    {ch.before}
+                                  </del>
+                                  <span className="cl-u-chg-arr" aria-hidden>
+                                    →
+                                  </span>
+                                </>
+                              )}
+                              <code className="cl-u-chg-new">{ch.after}</code>
+                              {isOverwritten && (
+                                <em className="cl-u-delta-sup">
+                                  {bi("已被更新", "Updated")}
+                                </em>
+                              )}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {sorted.length > 3 && (
+        <button
+          type="button"
+          className="cl-u-chg-more"
+          onClick={() => setShowAll((v) => !v)}
+        >
+          {showAll
+            ? bi("收起历史记录", "Show fewer")
+            : bi(
+                `展开其余 ${hiddenCount} 条变更记录（共 ${sorted.length} 条）`,
+                `Show ${hiddenCount} more (${sorted.length} total)`,
+              )}
+        </button>
+      )}
+    </div>
+  );
 }
 
 function Overview({
@@ -733,7 +1071,16 @@ function Overview({
     holder.outcome !== "void" &&
     can("delivery.create");
   const rhList = rehearsals || [];
-  const finalizedCount = rhList.filter((x) => x.stage === "finalized").length;
+  const appliedRehearsals = rhList.filter(
+    (x) => x.stage === "finalized" && x.applied && !x.voided,
+  );
+  const pendingFinalizedCount = rhList.filter(
+    (x) => x.stage === "finalized" && !x.applied && !x.voided,
+  ).length;
+  const voidedCount = rhList.filter((x) => x.voided).length;
+  const sortedRhList = [...rhList].sort(
+    (a, b) => Number(Boolean(a.voided)) - Number(Boolean(b.voided)),
+  );
 
   return (
     <div className="cl-over">
@@ -764,7 +1111,12 @@ function Overview({
         <RehearsalQuickStrip c={c} rehearsals={rehearsals} />
       )}
       {current ? (
-        <Now key={current.id} c={c} p={current} />
+        <Now
+          key={current.id}
+          c={c}
+          p={current}
+          appliedRehearsals={appliedRehearsals}
+        />
       ) : (
         <section className="dsec">
           <p className="muted">{bi("尚无已生成的交付材料。", "No generated delivery artifacts yet.")}</p>
@@ -782,6 +1134,7 @@ function Overview({
                     state={PLAN_PHASE[planPhase(basePlan)].dot}
                     label={PLAN_PHASE[planPhase(basePlan)].label}
                   />
+                  <DeliveryModeTag mode={basePlan.delivery_mode} compact />
                   <span className="cl-ledger-facts">
                     <span>
                       {c.app_name} {basePlan.version}
@@ -798,10 +1151,20 @@ function Overview({
                     <span className="mono faint num">
                       #{basePlan.id.slice(0, 8)} · {ago(basePlan.created)}
                       {c.plans.length > 1
-                        ? bi(
-                            ` · 归档 ${c.plans.length - 1} 份草稿`,
-                            ` · ${c.plans.length - 1} archived ${c.plans.length - 1 === 1 ? "draft" : "drafts"}`,
+                        ? c.plans.some(
+                            (p) =>
+                              p.id !== basePlan.id &&
+                              (planPhase(p) === "done" ||
+                                planPhase(p) === "deviated"),
                           )
+                          ? bi(
+                              ` · 含 ${c.plans.length - 1} 份历史交付`,
+                              ` · ${c.plans.length - 1} past ${c.plans.length - 1 === 1 ? "delivery" : "deliveries"}`,
+                            )
+                          : bi(
+                              ` · 归档 ${c.plans.length - 1} 份草稿`,
+                              ` · ${c.plans.length - 1} archived ${c.plans.length - 1 === 1 ? "draft" : "drafts"}`,
+                            )
                         : ""}
                     </span>
                   </span>
@@ -835,9 +1198,28 @@ function Overview({
                   <div className="cl-ledger-subhead-left">
                     <span className="cl-ledger-tag">{bi("变更演练记录", "Change Rehearsals")}</span>
                     <span className="dsec-count num">{rhList.length}</span>
-                    {finalizedCount > 0 && (
+                    {appliedRehearsals.length > 0 && (
+                      <span className="cl-ledger-subnote is-applied num">
+                        {bi(
+                          `已落地 ${appliedRehearsals.length} 次变更`,
+                          `${appliedRehearsals.length} applied`,
+                        )}
+                      </span>
+                    )}
+                    {pendingFinalizedCount > 0 && (
+                      <span className="cl-ledger-subnote is-pending num">
+                        {bi(
+                          `待实施 ${pendingFinalizedCount} 份方案`,
+                          `${pendingFinalizedCount} pending apply`,
+                        )}
+                      </span>
+                    )}
+                    {voidedCount > 0 && (
                       <span className="cl-ledger-subnote num">
-                        {bi(`已定稿 ${finalizedCount} 份生产方案`, `${finalizedCount} finalized`)}
+                        {bi(
+                          `已作废 ${voidedCount} 份`,
+                          `${voidedCount} voided`,
+                        )}
                       </span>
                     )}
                   </div>
@@ -854,37 +1236,51 @@ function Overview({
                     {rhList.length > 0 ? bi("全部演练", "All Rehearsals") : bi("新建演练", "New Rehearsal")} <IconRight />
                   </button>
                 </div>
-                {rhList.length > 0 ? (
+                {sortedRhList.length > 0 ? (
                   <ul className="cl-ledger-rh-list">
-                    {rhList.slice(0, 5).map((item) => (
-                      <li key={item.id}>
-                        <button
-                          type="button"
-                          className="cl-ledger-rh-row"
-                          onClick={() =>
-                            go({
-                              name: "deliveries",
-                              id: c.id,
-                              tab: "rehearsal",
-                              rehearsal: item.id,
-                            })
-                          }
-                        >
-                          <span className="cl-ledger-rh-title">{item.title}</span>
-                          <span className="cl-ledger-rh-meta">
-                            <span
-                              className={`cl-ledger-stage ${item.stage === "finalized" ? "done" : ""}`}
-                            >
-                              {rehearsalStageShort(item)}
+                    {sortedRhList.slice(0, 5).map((item) => {
+                      const hasConflict = Boolean(
+                        !item.applied &&
+                          !item.voided &&
+                          item.conflict_alerts?.some(
+                            (a) => a.severity === "conflict",
+                          ),
+                      );
+                      return (
+                        <li key={item.id}>
+                          <button
+                            type="button"
+                            className={`cl-ledger-rh-row${item.voided ? " is-voided" : ""}`}
+                            onClick={() =>
+                              go({
+                                name: "deliveries",
+                                id: c.id,
+                                tab: "rehearsal",
+                                rehearsal: item.id,
+                              })
+                            }
+                          >
+                            <span className="cl-ledger-rh-title">{item.title}</span>
+                            <span className="cl-ledger-rh-meta">
+                              {hasConflict && (
+                                <span className="cl-ledger-conflict">
+                                  {bi("冲突提醒", "Conflict")}
+                                </span>
+                              )}
+                              <span
+                                className={`cl-ledger-stage ${item.voided ? "is-voided" : item.applied ? "is-applied" : item.stage === "finalized" ? "is-pending" : ""}`}
+                              >
+                                {rehearsalStageShort(item)}
+                              </span>
+                              <span className="num faint">
+                                {ago(item.updated_at)}
+                              </span>
+                              <IconRight />
                             </span>
-                            <span className="num faint">
-                              {ago(item.updated_at)}
-                            </span>
-                            <IconRight />
-                          </span>
-                        </button>
-                      </li>
-                    ))}
+                          </button>
+                        </li>
+                      );
+                    })}
                   </ul>
                 ) : (
                   <p className="cl-ledger-empty">
@@ -1075,6 +1471,7 @@ function HolderCard({
       <span className="cl-holder-main">
         <span className="cl-holder-heading">
           <strong>{title}</strong>
+          <DeliveryModeTag mode={p.delivery_mode} compact />
           <span className="cl-holder-status">{status}</span>
         </span>
         <span className="cl-holder-meta">
@@ -1108,7 +1505,15 @@ function HolderCard({
 }
 
 /** The cluster as it is now: the topology, endpoints, and profile of the active baseline. */
-function Now({ c, p }: { c: ClusterView; p: PlanEntry }) {
+function Now({
+  c,
+  p,
+  appliedRehearsals = [],
+}: {
+  c: ClusterView;
+  p: PlanEntry;
+  appliedRehearsals?: ChangeRehearsal[];
+}) {
   const lang = useLang();
   const [d, setD] = useState<JobDetail | null>(() => cachedDetail(p.id));
   const [loadError, setLoadError] = useState("");
@@ -1134,13 +1539,28 @@ function Now({ c, p }: { c: ClusterView; p: PlanEntry }) {
   const input = d?.spec?.deployment;
   const finished = p.outcome === "done" || p.outcome === "deviated";
   return (
-    <section className="dsec">
-      <h2 className="dsec-title">
-        {c.delivery_mode === "configuration"
-          ? bi("集群配置拓扑", "Configuration Topology")
+    <>
+      {d?.verification_promote && d.verification_promote.length > 0 && (
+        <VerificationPromoteBanner
+          jobId={p.id}
+          targets={d.verification_promote}
+          onPromoted={() => setRetry((n) => n + 1)}
+        />
+      )}
+      <section className="dsec">
+        <h2 className="dsec-title">
+          {c.delivery_mode === "configuration"
+            ? bi("集群配置拓扑", "Configuration Topology")
           : bi("运行拓扑与连接", "Topology & Connections")}
         <span className="dsec-note">
-          {finished ? bi("已确认运行基线", "Confirmed baseline") : bi("待执行部署交付", "Pending deployment")}
+          {finished
+            ? appliedRehearsals.length > 0
+              ? bi(
+                  `已确认运行基线 · 已叠加 ${appliedRehearsals.length} 次生产变更`,
+                  `Confirmed baseline · ${appliedRehearsals.length} prod change(s) applied`,
+                )
+              : bi("已确认运行基线", "Confirmed baseline")
+            : bi("待执行部署交付", "Pending deployment")}
         </span>
         <button
           type="button"
@@ -1165,23 +1585,16 @@ function Now({ c, p }: { c: ClusterView; p: PlanEntry }) {
       ) : !d ? (
         <Skeleton animation text={{ rows: 4 }} />
       ) : (
-        <div className="cl-now">
-          <div className="cl-now-left">
-            <ExecutionHostSummary host={plan?.execution_host} />
-            {plan && (
-              <InstanceGraph
-                hosts={plan.hosts}
-                instances={plan.instances}
-                controller={plan.controller}
-                layout="row"
-              />
-            )}
-            {plan && <HostTable plan={plan} input={input} />}
-          </div>
-          <ClusterProfile c={c} p={p} plan={plan} input={input} />
-        </div>
+        <ClusterUnifiedOverview
+          c={c}
+          p={p}
+          plan={plan}
+          input={input}
+          appliedRehearsals={appliedRehearsals}
+        />
       )}
-    </section>
+      </section>
+    </>
   );
 }
 
@@ -1209,38 +1622,55 @@ function HostTable({
     ),
   }));
   return (
-    <table className="cl-hosts">
-      <thead>
-        <tr>
-          <th>{bi("机器", "Host")}</th>
-          <th>{bi("地址", "Address")}</th>
-          <th>{bi("数据存储", "Storage")}</th>
-          <th>{bi("运行角色", "Roles")}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((r) => (
-          <tr key={r.name}>
-            <td>
-              <b>{r.name}</b>
-              {r.name === plan.controller && <em>{bi("控制", "Ctrl")}</em>}
-            </td>
-            <td className="mono">
-              <span className="cl-copy-cell">
-                <span>{r.ip}</span>
-                <InlineCopyBtn value={r.ip} label={bi(`${r.name} 地址`, `${r.name} IP`)} />
-              </span>
-            </td>
-            <td>
-              {r.storage.label}
-              <br />
-              <span className="mono faint small">{r.storage.path}</span>
-            </td>
-            <td>{r.roles.join(" · ") || "—"}</td>
+    <div className="cl-hosts-wrap">
+      <table className="cl-hosts">
+        <thead>
+          <tr>
+            <th>{bi("机器", "Host")}</th>
+            <th>{bi("地址", "Address")}</th>
+            <th>{bi("数据存储", "Storage")}</th>
+            <th>{bi("运行角色", "Roles")}</th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.name}>
+              <td className="cl-host-td">
+                <span className="cl-host-cell">
+                  <b>{r.name}</b>
+                  {r.name === plan.controller && <em>{bi("控制", "Ctrl")}</em>}
+                </span>
+              </td>
+              <td className="mono cl-ip-td">
+                <span className="cl-copy-cell">
+                  <span>{r.ip}</span>
+                  <InlineCopyBtn value={r.ip} label={bi(`${r.name} 地址`, `${r.name} IP`)} />
+                </span>
+              </td>
+              <td className="cl-store-td">
+                <span className="cl-store-main">{r.storage.label}</span>
+                {r.storage.path && (
+                  <span className="mono faint small">{r.storage.path}</span>
+                )}
+              </td>
+              <td>
+                {r.roles.length > 0 ? (
+                  <div className="cl-role-tags">
+                    {r.roles.map((role) => (
+                      <span key={role} className="cl-role-tag">
+                        {role}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  "—"
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -1270,36 +1700,55 @@ const showParam = (v: unknown) =>
         ? v.join(bi("、", ", "))
         : String(v);
 
-/** What is worth knowing about the cluster at a glance, in groups: connection & credentials, composition, key parameters, and delivery status. */
-function ClusterProfile({
+/** Unified single-card overview integrating connection strip, topology canvas, components, key parameters, and host table. */
+function ClusterUnifiedOverview({
   c,
   p,
   plan,
   input,
+  appliedRehearsals = [],
 }: {
   c: ClusterView;
   p: PlanEntry;
   plan?: JobDetail["plan"];
   input?: NonNullable<JobDetail["spec"]>["deployment"];
+  appliedRehearsals?: ChangeRehearsal[];
 }) {
   useLang();
   const [shownSecrets, setShownSecrets] = useState<Record<string, boolean>>({});
   const insts = plan?.instances || [];
   const real = displayInstances(insts).filter((i) => !i.external);
   const defaultIp = plan?.hosts?.[0]?.ip || input?.hosts?.[0]?.ip || "";
-  const entries = insts.flatMap((i) =>
-    Object.values(i.fronts || {}).map((f) => ({
-      label: f.external ? bi("外部入口", "External entry") : bi("访问入口", "Entrypoint"),
-      addr: f.address
-        ? `${f.address}:${f.listen}`
-        : defaultIp
-          ? `${defaultIp}:${f.listen}`
-          : `:${f.listen}`,
-    })),
-  );
+  const entries = insts
+    .flatMap((i) =>
+      Object.entries(i.fronts || {}).map(([epName, f]) => {
+        const ep = (i.endpoints || []).find((x) => x.name === epName);
+        const rawTitle = (ep?.title || "").trim();
+        const label = f.external
+          ? rawTitle
+            ? bi(`外部 · ${rawTitle}`, `External · ${rawTitle}`)
+            : bi("外部入口", "External entry")
+          : rawTitle || bi("访问入口", "Entrypoint");
+        const isPrimary = /write|primary|master|主|写/i.test(`${epName} ${rawTitle}`);
+        return {
+          key: `${i.id}.${epName}.${f.listen}`,
+          label,
+          listen: f.listen,
+          isPrimary,
+          addr: f.address
+            ? `${f.address}:${f.listen}`
+            : defaultIp
+              ? `${defaultIp}:${f.listen}`
+              : `:${f.listen}`,
+        };
+      }),
+    )
+    .sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary) || a.listen - b.listen);
+
   const ports = real
-    .flatMap((i) => (i.ports || []).map((x) => `${x.Name} ${x.Port}`))
-    .slice(0, 4);
+    .flatMap((i) => (i.ports || []).map((x) => ({ name: x.Name, port: x.Port })))
+    .filter((x, idx, arr) => arr.findIndex((y) => y.name === x.name && y.port === x.port) === idx)
+    .slice(0, 8);
 
   const secrets = useMemo(() => {
     const out: { key: string; label: string; value: string }[] = [];
@@ -1345,44 +1794,68 @@ function ClusterProfile({
           Array.isArray(main.params[k]) && !(main.params[k] as unknown[]).length
         ),
     )
-    .slice(0, 6);
+    .slice(0, 8);
   const roleLine = (i: (typeof insts)[number]) =>
     Object.entries(i.roles || {})
       .filter(([, hs]) => hs.length)
       .map(([r, hs]) => `${i.role_titles?.[r] || r} ${hs.join(bi("、", ", "))}`)
       .join(" · ");
+  const hostCount = input?.hosts.length ?? c.hosts;
+
   return (
-    <div className="cl-profile">
+    <div className="cl-now-unified">
       {(entries.length > 0 || ports.length > 0 || secrets.length > 0) && (
-        <section>
-          <h3>{bi("连接与凭据", "Endpoints & Credentials")}</h3>
-          <dl className="cl-prof-kv">
-            {entries.map((e) => (
-              <React.Fragment key={e.addr}>
-                <dt>{e.label}</dt>
-                <dd className="mono">
-                  <span className="cl-copy-cell right">
-                    <span>{e.addr}</span>
+        <div className="cl-u-access">
+          {entries.length > 0 && (
+            <div className="cl-u-acc-row">
+              <span className="cl-u-eyebrow">{bi("访问入口", "Endpoints")}</span>
+              <div className="cl-u-entries">
+                {entries.map((e) => (
+                  <div
+                    key={e.key}
+                    className={`cl-u-entry ${e.isPrimary ? "is-primary" : ""}`}
+                  >
+                    <span className="cl-u-entry-lbl">{e.label}</span>
+                    <span className="cl-u-entry-addr mono">{e.addr}</span>
                     <InlineCopyBtn value={e.addr} label={e.label} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {ports.length > 0 && (
+            <div className="cl-u-acc-row">
+              <span className="cl-u-eyebrow">{bi("监听端口", "Ports")}</span>
+              <div className="cl-u-ports">
+                {ports.map((pt) => (
+                  <span key={`${pt.name}-${pt.port}`} className="cl-port-chip">
+                    <span className="cl-port-k">{pt.name}</span>
+                    <b className="mono">{pt.port}</b>
                   </span>
-                </dd>
-              </React.Fragment>
-            ))}
-            {ports.length > 0 && (
-              <>
-                <dt>{bi("监听端口", "Listen ports")}</dt>
-                <dd className="mono">{ports.join(" · ")}</dd>
-              </>
-            )}
-            {secrets.map((s) => {
-              const shown = !!shownSecrets[s.key];
-              return (
-                <React.Fragment key={s.key}>
-                  <dt className="mono">{s.label}</dt>
-                  <dd className="mono">
-                    <span className="cl-copy-cell right">
-                      <span>{shown ? s.value : "••••••••"}</span>
-                      <Tooltip content={shown ? bi("隐藏凭据", "Hide credential") : bi("显示凭据", "Show credential")} mini>
+                ))}
+              </div>
+            </div>
+          )}
+          {secrets.length > 0 && (
+            <div className="cl-u-acc-row">
+              <span className="cl-u-eyebrow">{bi("连接凭据", "Credentials")}</span>
+              <div className="cl-u-secrets">
+                {secrets.map((s) => {
+                  const shown = !!shownSecrets[s.key];
+                  return (
+                    <div key={s.key} className="cl-u-secret">
+                      <span className="cl-u-secret-k mono">{s.label}</span>
+                      <span className="cl-u-secret-v mono">
+                        {shown ? s.value : "••••••••"}
+                      </span>
+                      <Tooltip
+                        content={
+                          shown
+                            ? bi("隐藏凭据", "Hide credential")
+                            : bi("显示凭据", "Show credential")
+                        }
+                        mini
+                      >
                         <button
                           type="button"
                           className="cl-inline-copy"
@@ -1399,89 +1872,123 @@ function ClusterProfile({
                         </button>
                       </Tooltip>
                       <InlineCopyBtn value={s.value} label={s.label} />
-                    </span>
-                  </dd>
-                </React.Fragment>
-              );
-            })}
-          </dl>
-        </section>
-      )}
-      <section>
-        <h3>{bi("组成", "Components")}</h3>
-        <ul className="cl-prof-list">
-          {real.map((i) => (
-            <li key={i.id}>
-              <div>
-                <b>
-                  {i.title} {i.version}
-                </b>
-                {i.embedded ? (
-                  <span className="flag info">{bi("内置管理", "Embedded")}</span>
-                ) : (
-                  i.auto && <span className="flag info">{bi("自动加入", "Auto-added")}</span>
-                )}
-                {i.status !== "published" && (
-                  <span className="flag warn">{bi("待验证", "Unverified")}</span>
-                )}
+                    </div>
+                  );
+                })}
               </div>
-              <small>{roleLine(i) || i.hosts.join(bi("、", ", "))}</small>
-            </li>
-          ))}
-          {(input?.hosts.length ?? c.hosts) > 0 && (
-            <li>
-              <div>
-                <b className="num">
-                  {(input?.hosts.length ?? c.hosts) === 1
-                    ? bi("1 台机器", "1 host")
-                    : bi(`${input?.hosts.length ?? c.hosts} 台机器`, `${input?.hosts.length ?? c.hosts} hosts`)}
-                </b>
-              </div>
-              <small>
-                {plan?.execution_host ? bi("独立执行机", "Standalone executor") : bi("集群内执行机", "In-cluster executor")}{" "}
-                {plan?.controller || input?.controller || "—"}
-              </small>
-            </li>
+            </div>
           )}
-        </ul>
-      </section>
-      {picks.length > 0 && (
-        <section>
-          <h3>{bi("关键配置", "Key Parameters")}</h3>
-          <dl className="cl-prof-kv">
-            {picks.map((k) => (
-              <React.Fragment key={k}>
-                <dt>{PARAM_LABEL[k]}</dt>
-                <dd
-                  className={
-                    typeof main!.params[k] === "boolean"
-                      ? main!.params[k]
-                        ? "on"
-                        : "off"
-                      : "mono"
-                  }
-                >
-                  {showParam(main!.params[k])}
-                </dd>
-              </React.Fragment>
-            ))}
-          </dl>
-        </section>
+        </div>
       )}
-      <section>
-        <h3>{bi("交付信息", "Delivery Info")}</h3>
-        <dl className="cl-prof-kv">
-          <dt>{bi("负责人", "Owner")}</dt>
-          <dd>{c.owner}</dd>
-          <dt>{bi("部署状态", "Status")}</dt>
-          <dd>
-            {PLAN_PHASE[planPhase(p)].label} ·{" "}
-            <span className="mono">#{p.id.slice(0, 8)}</span>
-          </dd>
-          <dt>{bi("创建", "Created")}</dt>
-          <dd>{ago(c.created)}</dd>
-        </dl>
-      </section>
+
+      {plan && (
+        <div className="cl-u-topo">
+          <ExecutionHostSummary host={plan.execution_host} />
+          <InstanceGraph
+            hosts={plan.hosts}
+            instances={plan.instances}
+            controller={plan.controller}
+            layout="row"
+          />
+        </div>
+      )}
+
+      {(real.length > 0 || picks.length > 0) && (
+        <div className="cl-u-meta">
+          {real.length > 0 && (
+            <div className="cl-u-sec">
+              <div className="cl-u-sec-h">
+                <span>{bi("组件组成", "Components")}</span>
+              </div>
+              <div className="cl-u-comps">
+                {real.map((i) => (
+                  <div key={i.id} className="cl-u-comp">
+                    <div className="cl-u-comp-top">
+                      <b>
+                        {i.title} {i.version}
+                      </b>
+                      {i.embedded ? (
+                        <span className="flag info">{bi("内置管理", "Embedded")}</span>
+                      ) : (
+                        i.auto && <span className="flag info">{bi("自动加入", "Auto-added")}</span>
+                      )}
+                      {i.status !== "published" && (
+                        <span className="flag warn">{bi("待验证", "Unverified")}</span>
+                      )}
+                    </div>
+                    <small>{roleLine(i) || i.hosts.join(bi("、", ", "))}</small>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {picks.length > 0 && (
+            <div className="cl-u-sec">
+              <div className="cl-u-sec-h">
+                <span>{bi("关键配置", "Key Parameters")}</span>
+              </div>
+              <div className="cl-u-params">
+                {picks.map((k) => {
+                  const val = main!.params[k];
+                  const cls =
+                    typeof val === "boolean" ? (val ? "on" : "off") : "mono";
+                  return (
+                    <div key={k} className="cl-u-param">
+                      <span className="cl-u-param-k">{PARAM_LABEL[k]}</span>
+                      <span className={`cl-u-param-v ${cls}`}>{showParam(val)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {appliedRehearsals.length > 0 && (
+        <AppliedChangesLedger
+          clusterId={c.id}
+          primaryComponent={main?.id || c.app_id}
+          appliedRehearsals={appliedRehearsals}
+        />
+      )}
+
+      {plan && (
+        <div className="cl-u-hosts">
+          <div className="cl-u-sec-h">
+            <span>{bi("节点与角色", "Hosts & Roles")}</span>
+            {hostCount > 0 && (
+              <span className="cl-u-hosts-meta num">
+                {hostCount === 1
+                  ? bi("1 台机器", "1 host")
+                  : bi(`${hostCount} 台机器`, `${hostCount} hosts`)}
+                {" · "}
+                {plan.execution_host
+                  ? bi("独立执行机", "Standalone executor")
+                  : bi("集群内执行机", "In-cluster executor")}{" "}
+                <b className="mono">{plan.controller || input?.controller || "—"}</b>
+              </span>
+            )}
+          </div>
+          <HostTable plan={plan} input={input} />
+        </div>
+      )}
+
+      <div className="cl-u-foot">
+        <span>
+          {bi("负责人", "Owner")} <b>{c.owner}</b>
+        </span>
+        <span className="cl-u-foot-sep" aria-hidden>·</span>
+        <span>
+          {bi("交付状态", "Status")} <b>{PLAN_PHASE[planPhase(p)].label}</b>{" "}
+          <span className="mono faint">#{p.id.slice(0, 8)}</span>
+        </span>
+        <span className="cl-u-foot-sep" aria-hidden>·</span>
+        <span>
+          {bi("创建", "Created")} {ago(c.created)}
+        </span>
+      </div>
     </div>
   );
 }

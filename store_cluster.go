@@ -174,6 +174,8 @@ func (s *storeServer) markOutcome(id, user, outcome, note string) (storeJob, int
 // planEntry is one job as the cluster page lists it.
 type planEntry struct {
 	DeliveryMode string                `json:"delivery_mode,omitempty"`
+	Purpose      string                `json:"purpose,omitempty"`
+	VerifyTarget *verifyTarget         `json:"verify_target,omitempty"`
 	Scheme       *mwpack.SchemeSummary `json:"scheme,omitempty"`
 	ID           string                `json:"id"`
 	Seq          int                   `json:"seq"`
@@ -198,6 +200,8 @@ type planEntry struct {
 // clusterView is one cluster: its first deployment, revision history, and state.
 type clusterView struct {
 	DeliveryMode string                `json:"delivery_mode,omitempty"`
+	Purpose      string                `json:"purpose,omitempty"`
+	VerifyTarget *verifyTarget         `json:"verify_target,omitempty"`
 	Scheme       *mwpack.SchemeSummary `json:"scheme,omitempty"`
 	ID           string                `json:"id"`
 	AppID        string                `json:"app_id"`
@@ -212,12 +216,43 @@ type clusterView struct {
 	Current  string      `json:"current,omitempty"`
 	Head     string      `json:"head,omitempty"`
 	Holder   string      `json:"holder,omitempty"`
-	Plans    []planEntry `json:"plans"` // newest first
-	Blocked  string      `json:"blocked,omitempty"`
+	Plans               []planEntry `json:"plans"` // newest first
+	Blocked             string      `json:"blocked,omitempty"`
+	AppliedChangesCount int         `json:"applied_changes_count,omitempty"`
+	LastChangeAt        string      `json:"last_change_at,omitempty"`
+	LastChangeTitle     string      `json:"last_change_title,omitempty"`
 }
 
 func entryOf(j storeJob) planEntry {
-	return planEntry{j.DeliveryMode, j.Scheme, j.ID, j.Seq, j.Owner, j.Version, j.State, j.Stage, j.Error, j.Outcome, j.OutcomeNote, j.Marked, j.MarkedBy, j.RunDone, j.RunFailed, j.RunTotal, j.Revises, j.RevisedBy, j.Created, j.Updated}
+	return planEntry{j.DeliveryMode, j.Purpose, j.VerifyTarget, j.Scheme, j.ID, j.Seq, j.Owner, j.Version, j.State, j.Stage, j.Error, j.Outcome, j.OutcomeNote, j.Marked, j.MarkedBy, j.RunDone, j.RunFailed, j.RunTotal, j.Revises, j.RevisedBy, j.Created, j.Updated}
+}
+
+// autoExecutedJobs returns the set of job IDs that have at least one automated execution run.
+func (s *storeServer) autoExecutedJobs() map[string]bool {
+	out := map[string]bool{}
+	executionMu.Lock()
+	db, err := s.readExecutions()
+	executionMu.Unlock()
+	if err != nil {
+		return out
+	}
+	for _, r := range db.Runs {
+		if r.Job != "" {
+			out[r.Job] = true
+		}
+	}
+	return out
+}
+
+func effectiveDeliveryMode(jobID, raw string, autoJobs map[string]bool) string {
+	switch raw {
+	case "automatic", "configuration":
+		return raw
+	}
+	if jobID != "" && autoJobs[jobID] {
+		return "automatic"
+	}
+	return "offline"
 }
 
 // clusters lists the clusters the user can see.
@@ -248,7 +283,7 @@ func (s *storeServer) clusters(w http.ResponseWriter, r *http.Request, session s
 				break
 			}
 		}
-		v := clusterView{Scheme: first.Scheme, ID: id, AppID: first.AppID, AppName: first.AppName, Owner: first.Owner, Version: first.Version, Created: first.Created, Plans: []planEntry{}}
+		v := clusterView{Purpose: first.Purpose, VerifyTarget: first.VerifyTarget, Scheme: first.Scheme, ID: id, AppID: first.AppID, AppName: first.AppName, Owner: first.Owner, Version: first.Version, Created: first.Created, Plans: []planEntry{}}
 		for i := len(jobs) - 1; i >= 0; i-- {
 			j := jobs[i]
 			v.Plans = append(v.Plans, entryOf(j))
@@ -259,6 +294,10 @@ func (s *storeServer) clusters(w http.ResponseWriter, r *http.Request, session s
 		if c, ok := clusterCurrent(jobs); ok {
 			v.Current = c.ID
 			v.Scheme = c.Scheme
+			if c.Purpose != "" {
+				v.Purpose = c.Purpose
+				v.VerifyTarget = c.VerifyTarget
+			}
 			if c.AppID == v.AppID {
 				v.Version = c.Version
 			}
@@ -273,16 +312,33 @@ func (s *storeServer) clusters(w http.ResponseWriter, r *http.Request, session s
 	}
 	s.mu.Unlock()
 	lang := wLang(w)
+	autoJobs := s.autoExecutedJobs()
 	for i := range views {
 		v := &views[i]
-		if dep := s.readSpec(v.Current); dep != nil {
-			v.DeliveryMode = dep.DeliveryMode
+		modeJob := v.Current
+		rawMode := ""
+		if modeJob == "" && len(v.Plans) > 0 {
+			modeJob = v.Plans[0].ID
+			rawMode = v.Plans[0].DeliveryMode
 		}
+		if modeJob != "" {
+			if dep := s.readSpec(modeJob); dep != nil && dep.DeliveryMode != "" {
+				rawMode = dep.DeliveryMode
+			}
+		}
+		v.DeliveryMode = effectiveDeliveryMode(modeJob, rawMode, autoJobs)
 		if v.DeliveryMode == "configuration" {
 			v.Blocked = tr(lang, "本次仅交付配置文件；生成成功不代表已安装或验证现场服务", "Configuration-only delivery: generation succeeded, but on-site installation and runtime checks have not run.")
 		}
 		for n := range v.Plans {
 			entry := &v.Plans[n]
+			entryRaw := entry.DeliveryMode
+			if entryRaw == "" {
+				if dep := s.readSpec(entry.ID); dep != nil {
+					entryRaw = dep.DeliveryMode
+				}
+			}
+			entry.DeliveryMode = effectiveDeliveryMode(entry.ID, entryRaw, autoJobs)
 			entry.Scheme = mwpack.LocalizeSchemeSummary(lang, s.deliveryScheme(entry.ID, v.AppID, entry.Scheme))
 		}
 		if v.Current == "" {
@@ -293,6 +349,15 @@ func (s *storeServer) clusters(w http.ResponseWriter, r *http.Request, session s
 		}
 		v.Scheme = mwpack.LocalizeSchemeSummary(lang, s.deliveryScheme(v.Current, v.AppID, v.Scheme))
 		v.Version = s.deliveryAppVersion(v.Current, v.AppID, v.Version)
+		if applied := s.listAppliedRehearsals(v.ID); len(applied) > 0 {
+			v.AppliedChangesCount = len(applied)
+			latest := applied[len(applied)-1]
+			v.LastChangeAt = firstNonEmptyStr(latest.AppliedAt, latest.UpdatedAt)
+			v.LastChangeTitle = latest.Title
+			if v.LastChangeAt > v.Updated {
+				v.Updated = v.LastChangeAt
+			}
+		}
 	}
 	sort.Slice(views, func(a, b int) bool { return views[a].Updated > views[b].Updated })
 	if views == nil {
@@ -306,10 +371,16 @@ func (s *storeServer) clusterHistoryText(cluster string) string {
 	s.mu.Lock()
 	jobs := s.clusterOf(cluster)
 	s.mu.Unlock()
+	head, hasHead := clusterHead(jobs)
 	cur, _ := clusterCurrent(jobs)
 	holder, busy := clusterHolder(jobs)
 	var b strings.Builder
-	fmt.Fprintf(&b, "集群 %s，共 %d 份交付记录（旧的在前）。\n", cluster, len(jobs))
+	if hasHead {
+		when := firstNonEmptyStr(day(head.Marked), day(head.Created))
+		fmt.Fprintf(&b, "集群 %s 当前状态：【已部署完成 / 运行中（已投产）】，运行基线为 %s（编号 %s，%s 确认）；共 %d 份交付记录（旧的在前）。\n", cluster, jobTitle(head), head.ID, when, len(jobs))
+	} else {
+		fmt.Fprintf(&b, "集群 %s 当前状态：【尚未完成首次部署（未投产）】，共 %d 份交付记录（旧的在前）。\n", cluster, len(jobs))
+	}
 	for _, j := range jobs {
 		state := outcomeNames[j.Outcome]
 		if j.State != "succeeded" {
@@ -329,6 +400,26 @@ func (s *storeServer) clusterHistoryText(cluster string) string {
 	}
 	if busy {
 		fmt.Fprintf(&b, "待确认结果的交付：%s。\n", jobTitle(holder))
+	}
+	if rhs := s.listRehearsals(cluster); len(rhs) > 0 {
+		stageName := map[string]string{"scoping": "边界对齐", "probing": "只读探针", "rehearsing": "测试演练", "finalized": "已定稿待实施"}
+		fmt.Fprintf(&b, "已有变更演练（共 %d 个，最新的在前）：\n", len(rhs))
+		for i, r := range rhs {
+			if i >= 8 {
+				break
+			}
+			st := firstNonEmptyStr(stageName[r.Stage], r.Stage)
+			if r.Voided {
+				st = "已作废（不执行）"
+			} else if r.Stage == "finalized" && r.Applied {
+				st = fmt.Sprintf("已落地生效（%s 于 %s 确认）", firstNonEmptyStr(r.AppliedBy, r.Owner), day(firstNonEmptyStr(r.AppliedAt, r.UpdatedAt)))
+			}
+			fmt.Fprintf(&b, "- 「%s」（%s", r.Title, st)
+			if r.Applied && r.AppliedSummary != "" {
+				fmt.Fprintf(&b, "；生效内容：%s", truncRunes(r.AppliedSummary, 160))
+			}
+			b.WriteString("）\n")
+		}
 	}
 	return b.String()
 }

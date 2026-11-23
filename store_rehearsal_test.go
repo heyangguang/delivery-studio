@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"middleware-deployer/mwpack"
 )
@@ -664,5 +665,1035 @@ func TestRehearsalTruncationUsageAndClaudeFastFallback(t *testing.T) {
 	_ = json.Unmarshal(uW.Body.Bytes(), &uResp)
 	if len(uResp.Rows) < 2 || uResp.Rows[0].OK {
 		t.Fatalf("expected latest truncated rehearsal call recorded as OK=false in usage log, got: %+v", uResp.Rows)
+	}
+}
+
+func TestRehearsalProbeBashGuardAndValidityGate(t *testing.T) {
+	// 1. Verify bash self-reexec guard is injected cleanly and remains 100% read-only.
+	rawScript := "#!/usr/bin/env bash\nset -uo pipefail\npatronictl list\n"
+	guarded := ensureProbeBashGuard(rawScript)
+	if !strings.Contains(guarded, `if [ -z "${BASH_VERSION:-}" ]; then exec bash "$0" "$@"; fi`) {
+		t.Fatalf("expected bash guard injected, got:\n%s", guarded)
+	}
+	if ensureProbeBashGuard(guarded) != guarded {
+		t.Fatalf("expected ensureProbeBashGuard to be idempotent")
+	}
+	if ok, warns := validateReadOnlyProbeScript(guarded); !ok {
+		t.Fatalf("expected guarded probe script to pass read-only validator, got warns=%v", warns)
+	}
+
+	// 2. Verify probe failure gate blocks advancing to rehearsing when AI returns probe_status="failed".
+	s, _ := testStore(t)
+	alice, csrf := storeLogin(t, s, "alice")
+	cw := storeCreate(t, s, alice, csrf, `{"id":"pg-gate-test","hosts":[{"name":"n1","ip":"10.0.1.11"}],"instances":[{"id":"etcd","component":"etcd","placement":{"member":["n1"]}}]}`, nil)
+	s.wg.Wait()
+	if cw.Code != 202 {
+		t.Fatalf("create job: %d %s", cw.Code, cw.Body.String())
+	}
+	scopeReply := `{"title":"PG 日志演练","scope_summary":"测试探针门禁","questions":[{"id":"q1","label":"窗口","question":"维护窗口？","options":["周末"]}]}`
+	probeReply := `{"probe_script":"#!/usr/bin/env bash\nset -uo pipefail\npatronictl list","probe_notes":["使用 bash 运行"]}`
+	blockedReply := `{
+		"thinking": "截图显示 sh 执行报 Illegal option -o pipefail，未获得任何数据库状态。",
+		"probe_status": "failed",
+		"probe_issue": {
+			"summary": "Ubuntu 上使用 sh 执行导致脚本提前退出，未采集到现场数据",
+			"cause": "/bin/sh 指向 dash，不支持 set -o pipefail",
+			"fix_command": "bash /tmp/collect-pg-gate-test.sh",
+			"fix_steps": ["使用 bash 而非 sh 重新运行采集脚本", "将完整输出粘贴回平台"],
+			"missing_items": ["Patroni 成员角色", "当前 logging_collector 状态"],
+			"fixed_script": "#!/usr/bin/env bash\nset -uo pipefail\necho fixed-probe\npatronictl list"
+		}
+	}`
+	srv, _ := fakeModel(t, scopeReply, probeReply, blockedReply)
+	enableAI(t, s, srv.URL, 1)
+
+	w := storeRequest(s, "POST", "/api/clusters/pg-gate-test/rehearsals", strings.NewReader(`{"goal":"开启 logging_collector"}`), alice, csrf)
+	if w.Code != 201 {
+		t.Fatalf("create failed: %d %s", w.Code, w.Body.String())
+	}
+	var rh changeRehearsal
+	_ = json.Unmarshal(w.Body.Bytes(), &rh)
+
+	w = storeRequest(s, "POST", "/api/clusters/pg-gate-test/rehearsals/"+rh.ID+"/scope", strings.NewReader(`{"answers":[{"id":"q1","question":"维护窗口？","answer":"周末"}]}`), alice, csrf)
+	if w.Code != 200 {
+		t.Fatalf("scope failed: %d %s", w.Code, w.Body.String())
+	}
+	rh = changeRehearsal{}
+	_ = json.Unmarshal(w.Body.Bytes(), &rh)
+	if !strings.Contains(rh.ProbeScript, "BASH_VERSION") {
+		t.Fatalf("expected generated probe_script to include BASH_VERSION guard, got: %s", rh.ProbeScript)
+	}
+
+	// Submit error output -> must stay on "probing", set ProbeIssue, NOT advance to "rehearsing" or create Drift/Steps.
+	w = storeRequest(s, "POST", "/api/clusters/pg-gate-test/rehearsals/"+rh.ID+"/probe", strings.NewReader(`{"probe_output":"sh: 2: set: Illegal option -o pipefail"}`), alice, csrf)
+	if w.Code != 200 {
+		t.Fatalf("probe gate failed: %d %s", w.Code, w.Body.String())
+	}
+	rh = changeRehearsal{}
+	_ = json.Unmarshal(w.Body.Bytes(), &rh)
+	if rh.Stage != "probing" {
+		t.Fatalf("expected stage to remain probing when probe failed, got %q", rh.Stage)
+	}
+	if rh.ProbeIssue == nil || rh.ProbeIssue.Status != "failed" || !rh.ProbeIssue.ScriptUpdated {
+		t.Fatalf("expected ProbeIssue with script_updated=true, got %+v", rh.ProbeIssue)
+	}
+	if rh.Drift != nil || len(rh.Steps) != 0 {
+		t.Fatalf("expected no drift/steps created when probe failed, got drift=%+v steps=%d", rh.Drift, len(rh.Steps))
+	}
+	if !strings.Contains(rh.ProbeScript, "echo fixed-probe") || !strings.Contains(rh.ProbeScript, "BASH_VERSION") {
+		t.Fatalf("expected probe script auto-updated with bash guard, got: %s", rh.ProbeScript)
+	}
+}
+
+func TestRehearsalStepAIVerifyPassAndFail(t *testing.T) {
+	s, _ := testStore(t)
+	alice, csrf := storeLogin(t, s, "alice")
+	cw := storeCreate(t, s, alice, csrf, `{"id":"pg-verify-test","hosts":[{"name":"n1","ip":"10.0.2.11"}],"instances":[{"id":"etcd","component":"etcd","placement":{"member":["n1"]}}]}`, nil)
+	s.wg.Wait()
+	if cw.Code != 202 {
+		t.Fatalf("create job: %d %s", cw.Code, cw.Body.String())
+	}
+
+	scopeReply := `{"title":"PG 日志演练","scope_summary":"验证 AI 自动核验步骤","questions":[{"id":"q1","label":"窗口","question":"维护窗口？","options":["周末"]}]}`
+	probeReply := `{"probe_script":"#!/usr/bin/env bash\nset -uo pipefail\necho ok","probe_notes":["使用 bash 运行"]}`
+	planReply := `{
+		"probe_status": "valid",
+		"drift": {"summary":"基线一致","drifted":false,"hosts":[{"name":"n1","ip":"10.0.2.11","initial_role":"member","actual_role":"Leader","version":"3.5.15","status":"healthy"}]},
+		"steps": [
+			{"id":"s1","phase":"precheck","order":1,"title":"确认主备与复制状态","target_role":"n1","command":"patronictl list","expect":"两个从库 streaming，无报错","optional":false},
+			{"id":"s2","phase":"execute","order":2,"title":"调整日志目录权限","target_role":"n1","command":"chown postgres:postgres /data/logs/postgresql","expect":"目录权限 0700 属主 postgres","optional":false}
+		]
+	}`
+	verifyPassReply := `{"thinking":"截图和文本回显显示两从库 streaming 且 lag=0","verdict":"passed","summary":"两个从库均处于 streaming 状态且复制延迟为 0，满足预期判据。","elapsed":""}`
+	verifyFailReply := `{"thinking":"提示目录不存在，需先创建目录","verdict":"failed","diagnosis":"/data/logs/postgresql 目录尚未创建，需先 mkdir -p 再设置属主与权限","action":"retry","command":"mkdir -p /data/logs/postgresql && chown postgres:postgres /data/logs/postgresql && chmod 0700 /data/logs/postgresql","expect":"目录存在且属主 postgres 权限 0700"}`
+
+	srv, bodies := fakeModel(t, scopeReply, probeReply, planReply, verifyPassReply, verifyFailReply)
+	enableAI(t, s, srv.URL, 1)
+
+	w := storeRequest(s, "POST", "/api/clusters/pg-verify-test/rehearsals", strings.NewReader(`{"goal":"开启 logging_collector"}`), alice, csrf)
+	if w.Code != 201 {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	var rh changeRehearsal
+	_ = json.Unmarshal(w.Body.Bytes(), &rh)
+
+	w = storeRequest(s, "POST", "/api/clusters/pg-verify-test/rehearsals/"+rh.ID+"/scope", strings.NewReader(`{"answers":[{"id":"q1","question":"维护窗口？","answer":"周末"}]}`), alice, csrf)
+	if w.Code != 200 {
+		t.Fatalf("scope: %d %s", w.Code, w.Body.String())
+	}
+	w = storeRequest(s, "POST", "/api/clusters/pg-verify-test/rehearsals/"+rh.ID+"/probe", strings.NewReader(`{"probe_output":"node-1 Leader healthy"}`), alice, csrf)
+	if w.Code != 200 {
+		t.Fatalf("probe: %d %s", w.Code, w.Body.String())
+	}
+
+	// 1. Verify s1 with output + secret + 1x1 PNG screenshot -> verdict=passed
+	tinyPNG := "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+	passPayload := `{"output":"state=streaming lag=0\npassword=VerifyStepSecret999","images":["` + tinyPNG + `"]}`
+	w = storeRequest(s, "POST", "/api/clusters/pg-verify-test/rehearsals/"+rh.ID+"/steps/s1/verify", strings.NewReader(passPayload), alice, csrf)
+	if w.Code != 200 {
+		t.Fatalf("verify s1 pass: %d %s", w.Code, w.Body.String())
+	}
+	rh = changeRehearsal{}
+	_ = json.Unmarshal(w.Body.Bytes(), &rh)
+	if rh.Steps[0].Status != "passed" || !rh.Steps[0].VerifiedByAI || !strings.Contains(rh.Steps[0].Note, "streaming") || len(rh.Steps[0].EvidenceImages) != 1 || rh.Steps[0].Proposal != nil {
+		t.Fatalf("unexpected s1 passed state: %+v", rh.Steps[0])
+	}
+	if strings.Contains(strings.Join(*bodies, "\n"), "VerifyStepSecret999") {
+		t.Fatal("secret leaked into verify step LLM request")
+	}
+
+	// 2. Verify s2 with error output -> verdict=failed with retry proposal
+	w = storeRequest(s, "POST", "/api/clusters/pg-verify-test/rehearsals/"+rh.ID+"/steps/s2/verify", strings.NewReader(`{"output":"chown: cannot access '/data/logs/postgresql': No such file or directory"}`), alice, csrf)
+	if w.Code != 200 {
+		t.Fatalf("verify s2 fail: %d %s", w.Code, w.Body.String())
+	}
+	rh = changeRehearsal{}
+	_ = json.Unmarshal(w.Body.Bytes(), &rh)
+	if rh.Steps[1].Status != "failed" || rh.Steps[1].VerifiedByAI || rh.Steps[1].Proposal == nil || rh.Steps[1].Proposal.Action != "retry" || !strings.Contains(rh.Steps[1].Proposal.Diagnosis, "尚未创建") {
+		t.Fatalf("unexpected s2 failed state: %+v", rh.Steps[1])
+	}
+}
+
+func TestRehearsalSkillsAndConciseProbeRules(t *testing.T) {
+	s, _ := testStore(t)
+	alice, csrf := storeLogin(t, s, "alice")
+	admin, acsrf := storeLogin(t, s, "admin")
+
+	// Add a custom organization ELB/network skill + a personal skill for alice
+	orgSkillBody := `{"custom":[{"name":"corp-elb-rule","title":"企业内网 ELB 规范","description":"云 ELB 回环与堡垒机验收入口规范","content":"所有云 ELB 入口只能在跳板机 10.99.0.10 探测，严禁在数据库节点回环访问 VIP。"}]}`
+	if w := storeRequest(s, "PUT", "/api/settings/ai/skills", strings.NewReader(orgSkillBody), admin, acsrf); w.Code != 200 {
+		t.Fatalf("save org custom skill: %d %s", w.Code, w.Body.String())
+	}
+	userSkillBody := `{"skills":[{"name":"alice-vdi-cap","title":"VDI 截屏规范","description":"受限堡垒机终端输出行数约束","content":"堡垒机无法复制，所有只读回显控制在 25 行内。"}]}`
+	if w := storeRequest(s, "PUT", "/api/me/skills", strings.NewReader(userSkillBody), alice, csrf); w.Code != 200 {
+		t.Fatalf("save personal skill: %d %s", w.Code, w.Body.String())
+	}
+
+	cw := storeCreate(t, s, alice, csrf, `{"id":"etcd-skill-test","hosts":[{"name":"n1","ip":"10.0.3.11"}],"instances":[{"id":"etcd","component":"etcd","placement":{"member":["n1"]}}]}`, nil)
+	s.wg.Wait()
+	if cw.Code != 202 {
+		t.Fatalf("create job: %d %s", cw.Code, cw.Body.String())
+	}
+
+	scopeReply := `{"title":"开启日志落盘与 ELB 入口核验","scope_summary":"精简采集","questions":[{"id":"q1","label":"窗口","question":"窗口？","options":["周末"]}]}`
+	probeReply := `{"probe_script":"#!/usr/bin/env bash\nset -uo pipefail\necho '=== ROLE ==='\netcdctl endpoint status -w table 2>/dev/null","probe_notes":["单屏输出"]}`
+	srv, bodies := fakeModel(t, scopeReply, probeReply)
+	enableAI(t, s, srv.URL, 1)
+
+	w := storeRequest(s, "POST", "/api/clusters/etcd-skill-test/rehearsals", strings.NewReader(`{"goal":"开启日志落盘并通过 ELB 入口验证切换"}`), alice, csrf)
+	if w.Code != 201 {
+		t.Fatalf("create rehearsal: %d %s", w.Code, w.Body.String())
+	}
+	var rh changeRehearsal
+	_ = json.Unmarshal(w.Body.Bytes(), &rh)
+
+	w = storeRequest(s, "POST", "/api/clusters/etcd-skill-test/rehearsals/"+rh.ID+"/scope", strings.NewReader(`{"answers":[{"id":"q1","question":"窗口？","answer":"周末"}]}`), alice, csrf)
+	if w.Code != 200 {
+		t.Fatalf("scope rehearsal: %d %s", w.Code, w.Body.String())
+	}
+	rh = changeRehearsal{}
+	_ = json.Unmarshal(w.Body.Bytes(), &rh)
+
+	if len(*bodies) < 2 {
+		t.Fatalf("expected 2 LLM requests, got %d", len(*bodies))
+	}
+	probeReqBody := (*bodies)[1]
+	for _, want := range []string{
+		"15～35 行",
+		"回环",
+		"引导式变更演练与生产 SOP",
+		"负载均衡与 VIP",
+		"日志、轮转与可观测性核对",
+		"企业内网 ELB 规范",
+		"所有云 ELB 入口只能在跳板机 10.99.0.10 探测",
+		"VDI 截屏规范",
+		"所有只读回显控制在 25 行内",
+	} {
+		if !strings.Contains(probeReqBody, want) {
+			t.Errorf("probe LLM request missing expected skill/rule %q", want)
+		}
+	}
+	if tr, ok := rh.Traces["scope"]; !ok || len(tr.Steps) == 0 || !strings.Contains(tr.Steps[0].Detail, "已加载技能") {
+		t.Fatalf("expected scope trace step to surface loaded skills, got %+v", tr.Steps)
+	}
+}
+
+func TestRehearsalLightAndAutoModes(t *testing.T) {
+	s, _ := testStore(t)
+	alice, csrf := storeLogin(t, s, "alice")
+
+	cw := storeCreate(t, s, alice, csrf, `{"id":"pg-tier-test","hosts":[{"name":"n1","ip":"10.0.4.11"}],"instances":[{"id":"etcd","component":"etcd","placement":{"member":["n1"]}}]}`, nil)
+	s.wg.Wait()
+	if cw.Code != 202 {
+		t.Fatalf("create job: %d %s", cw.Code, cw.Body.String())
+	}
+
+	lightReply := `{"thinking":"仅补 pg_hba 单条规则，无需重启切主","title":"Patroni pg_hba 补本地复制规则","scope_summary":"仅 reload 生效，走简单推演","probe_script":"#!/usr/bin/env bash\nset -uo pipefail\necho '=== ROLE ==='\npatronictl list 2>/dev/null","probe_notes":["单屏输出约 15 行"]}`
+	probePlanReply := `{"thinking":"已确认规则缺失","probe_status":"valid","drift":{"summary":"现场角色正常","drifted":false,"hosts":[{"name":"n1","ip":"10.0.4.11","initial_role":"member","actual_role":"Leader","status":"ok"}]},"steps":[{"id":"s1","phase":"precheck","title":"核对当前规则","target_role":"n1","command":"patronictl show-config","expect":"确认缺少 127.0.0.1"},{"id":"s2","phase":"execute","title":"补充规则并重载","target_role":"n1","command":"patronictl edit-config","expect":"reload 成功"},{"id":"s3","phase":"verify","title":"检查日志无报错","target_role":"n1","command":"journalctl -u patroni -n 20","expect":"无 no pg_hba.conf entry"},{"id":"s4","phase":"rollback","title":"回退配置","target_role":"n1","command":"patronictl edit-config","expect":"恢复原配置"}]}`
+	autoLightReply := `{"thinking":"动态参数调整无需重启","resolved_mode":"light","title":"在线调整 statement_timeout","scope_summary":"在线动态参数微调","probe_script":"#!/usr/bin/env bash\nset -uo pipefail\necho '=== PARAM ==='\npsql -Atc 'SHOW statement_timeout;' 2>/dev/null","probe_notes":["单屏 10 行"]}`
+	autoFullReply := `{"thinking":"涉及跨大版本升级与切主","resolved_mode":"full","title":"PostgreSQL 17 升级演练","scope_summary":"高风险滚动升级","questions":[{"id":"q1","label":"维护窗口","question":"可接受的闪断窗口？","options":["低峰窗口滚动切换"]}]}`
+
+	srv, bodies := fakeModel(t, lightReply, probePlanReply, autoLightReply, autoFullReply)
+	enableAI(t, s, srv.URL, 1)
+
+	// 1. Explicit mode="light" skips scoping directly to probing
+	w := storeRequest(s, "POST", "/api/clusters/pg-tier-test/rehearsals", strings.NewReader(`{"mode":"light","goal":"Patroni pg_hba 补充 127.0.0.1 复制规则"}`), alice, csrf)
+	if w.Code != 201 {
+		t.Fatalf("create light rehearsal: %d %s", w.Code, w.Body.String())
+	}
+	var rhLight changeRehearsal
+	_ = json.Unmarshal(w.Body.Bytes(), &rhLight)
+	if rhLight.Mode != "light" || rhLight.Stage != "probing" {
+		t.Fatalf("expected mode=light stage=probing, got mode=%q stage=%q", rhLight.Mode, rhLight.Stage)
+	}
+	if !rhLight.ProbeSafe || !strings.Contains(rhLight.ProbeScript, "patronictl list") {
+		t.Fatalf("expected validated light probe script, got safe=%v script=%q", rhLight.ProbeSafe, rhLight.ProbeScript)
+	}
+
+	// Submitting probe on a light rehearsal injects the light 3-5 step constraint
+	w = storeRequest(s, "POST", "/api/clusters/pg-tier-test/rehearsals/"+rhLight.ID+"/probe", strings.NewReader(`{"probe_output":"=== ROLE ===\nn1 Leader running"}`), alice, csrf)
+	if w.Code != 200 {
+		t.Fatalf("probe light rehearsal: %d %s", w.Code, w.Body.String())
+	}
+	if len(*bodies) < 2 || !strings.Contains((*bodies)[1], "简单推演（light）") {
+		t.Fatalf("expected light mode cue in probe planning request")
+	}
+
+	// 2. mode="auto" -> AI resolves "light" -> directly in probing
+	w = storeRequest(s, "POST", "/api/clusters/pg-tier-test/rehearsals", strings.NewReader(`{"mode":"auto","goal":"在线调整 statement_timeout 为 30s"}`), alice, csrf)
+	if w.Code != 201 {
+		t.Fatalf("create auto-light rehearsal: %d %s", w.Code, w.Body.String())
+	}
+	var rhAutoLight changeRehearsal
+	_ = json.Unmarshal(w.Body.Bytes(), &rhAutoLight)
+	if rhAutoLight.Mode != "light" || rhAutoLight.Stage != "probing" {
+		t.Fatalf("expected auto->light to land in probing, got mode=%q stage=%q", rhAutoLight.Mode, rhAutoLight.Stage)
+	}
+
+	// 3. mode="auto" -> AI resolves "full" -> lands in scoping with questions
+	w = storeRequest(s, "POST", "/api/clusters/pg-tier-test/rehearsals", strings.NewReader(`{"mode":"auto","goal":"升级 PostgreSQL 小版本并滚动切主"}`), alice, csrf)
+	if w.Code != 201 {
+		t.Fatalf("create auto-full rehearsal: %d %s", w.Code, w.Body.String())
+	}
+	var rhAutoFull changeRehearsal
+	_ = json.Unmarshal(w.Body.Bytes(), &rhAutoFull)
+	if rhAutoFull.Mode != "full" || rhAutoFull.Stage != "scoping" || len(rhAutoFull.ScopeQuestions) == 0 {
+		t.Fatalf("expected auto->full to land in scoping with questions, got mode=%q stage=%q qs=%d", rhAutoFull.Mode, rhAutoFull.Stage, len(rhAutoFull.ScopeQuestions))
+	}
+
+	// 4. Static probe safety guard must not false-positive when patronictl list is piped to python3 printing "Pending restart"
+	pipedSafe := "#!/usr/bin/env bash\nset -uo pipefail\npatronictl -c /etc/patroni/patroni.yml list -f json 2>/dev/null | python3 -c 'import sys,json; [print(r.get(\"Pending restart\")) for r in json.load(sys.stdin)]'\n"
+	if ok, warns := validateReadOnlyProbeScript(pipedSafe); !ok {
+		t.Fatalf("expected piped read-only patronictl list to pass safety guard, got warns=%v", warns)
+	}
+	realMutate := "#!/usr/bin/env bash\nset -uo pipefail\npatronictl -c /etc/patroni/patroni.yml restart pg-cluster\n"
+	if ok, _ := validateReadOnlyProbeScript(realMutate); ok {
+		t.Fatalf("expected real patronictl restart command to be flagged as unsafe")
+	}
+}
+
+func TestRehearsalVerifyMultiRoundHistoryAndPragmaticPrompt(t *testing.T) {
+	s, _ := testStore(t)
+	alice, csrf := storeLogin(t, s, "alice")
+	cw := storeCreate(t, s, alice, csrf, `{"id":"pg-vhist","hosts":[{"name":"node-1","ip":"10.0.8.11"},{"name":"node-2","ip":"10.0.8.12"},{"name":"node-3","ip":"10.0.8.13"}],"instances":[{"id":"etcd","component":"etcd","placement":{"member":["node-1","node-2","node-3"]}}]}`, nil)
+	s.wg.Wait()
+	if cw.Code != 202 {
+		t.Fatalf("create job: %d %s", cw.Code, cw.Body.String())
+	}
+	var job storeJob
+	_ = json.Unmarshal(cw.Body.Bytes(), &job)
+	_ = storeRequest(s, "PATCH", "/api/jobs/"+job.ID, strings.NewReader(`{"outcome":"done"}`), alice, csrf)
+
+	// Seed an active rehearsal with prior completed step #4 + current multi-node verify step #5 so we test BOTH cross-step context and split-round screenshot memory!
+	rh := changeRehearsal{
+		ID:        "a1b2c3d4e501",
+		ClusterID: "pg-vhist",
+		Title:     "PostgreSQL 日志配置变更演练",
+		Goal:      "开启 logging_collector 并逐台验证三节点日志写入",
+		Stage:     "rehearsing",
+		Mode:      "full",
+		CreatedAt: nowStamp(),
+		UpdatedAt: nowStamp(),
+		Drift:     &rehearsalDrift{Summary: "现场一主两从健康，原主库为 node-1"},
+		Steps: []rehearsalStep{
+			{
+				ID:           "s4",
+				Phase:        "execute",
+				Order:        4,
+				Title:        "计划内切主并重启原主库 node-1",
+				TargetRole:   "在 node-1 (10.0.8.11) 上执行",
+				Command:      "patronictl switchover && patronictl restart node-1",
+				Expect:       "node-2 为 Leader，三节点无 Pending restart",
+				Status:       "passed",
+				VerifiedByAI: true,
+				Note:         "已完成 node-1→node-2 切主并重启 node-1，三节点均无 Pending restart 且 Lag=0。",
+			},
+			{
+				ID:         "s5",
+				Phase:      "verify",
+				Order:      5,
+				Title:      "逐台验收参数生效与日志持续写入",
+				TargetRole: "所有数据节点（node-1 / node-2 / node-3，逐台执行）",
+				Command:    "sudo -u postgres psql -Atc 'SHOW logging_collector;' && ls -lt /data/logs/postgresql | head -3",
+				Expect:     "node-1 / node-2 / node-3 参数均生效且当日日志文件持续增长",
+				Status:     "pending",
+			},
+		},
+	}
+	if err := s.saveRehearsal(rh); err != nil {
+		t.Fatalf("save seed rehearsal: %v", err)
+	}
+
+	tinyPNG := "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+	round1Fail := `{"thinking":"第 1 轮截图已明确证实 node-1 与 node-3 参数生效且当日日志持续增长，仅缺 node-2 验证结果","verdict":"failed","verified_facts":["node-1: logging_collector=on 等参数生效且当日日志持续增长","node-3: 参数生效且当日日志持续增长"],"missing_items":["node-2 参数生效与日志增长验证"],"diagnosis":"node-1 和 node-3 已验收通过，仅缺 node-2 验收证据","action":"retry","command":"ssh node-2 'ls -lt /data/logs/postgresql | head -3'"}`
+	round2Pass := `{"thinking":"合并第 1 轮已证实的 node-1、node-3 与本轮 node-2 证据，三台节点全部达标","verdict":"passed","verified_facts":["node-2: logging_collector=on 且当日日志字节数持续增长"],"summary":"node-1、node-2、node-3 三台节点均已完成验收，参数生效且日志持续写入正常。","elapsed":""}`
+
+	srv, bodies := fakeModel(t, round1Fail, round2Pass)
+	enableAI(t, s, srv.URL, 1)
+
+	// Round 1 (screenshot-only!): proves node-1 & node-3, asks only for node-2; also verify SSE emits authoritative 5-step "steps" frame.
+	w1 := storeRequest(s, "POST", "/api/clusters/pg-vhist/rehearsals/"+rh.ID+"/steps/s5/verify?stream=1",
+		strings.NewReader(`{"images":["`+tinyPNG+`"]}`), alice, csrf)
+	if w1.Code != 200 {
+		t.Fatalf("round 1 verify: %d %s", w1.Code, w1.Body.String())
+	}
+	sse1 := w1.Body.String()
+	if !strings.Contains(sse1, `"t":"steps"`) || !strings.Contains(sse1, `"id":"inspect-step-evid"`) || !strings.Contains(sse1, `"id":"verify-verdict"`) {
+		t.Fatalf("expected authoritative 5-step SSE snapshot on verify, got: %s", sse1)
+	}
+
+	// Verify Round 1 persisted verified_facts, missing_items, and thinking onto both VerifyHistory and Proposal
+	cur1, ok := s.loadRehearsal("pg-vhist", rh.ID)
+	if !ok || cur1.Steps[1].Status != "failed" || len(cur1.Steps[1].VerifyHistory) != 1 {
+		t.Fatalf("expected 1 failed verify_history item after round 1, got status=%q hist=%+v", cur1.Steps[1].Status, cur1.Steps[1].VerifyHistory)
+	}
+	att1 := cur1.Steps[1].VerifyHistory[0]
+	if att1.Round != 1 || att1.Verdict != "failed" || len(att1.VerifiedFacts) != 2 || len(att1.MissingItems) != 1 || !strings.Contains(att1.Thinking, "node-1 与 node-3") {
+		t.Fatalf("unexpected round 1 history item: %+v", att1)
+	}
+	if cur1.Steps[1].Proposal == nil || len(cur1.Steps[1].Proposal.VerifiedFacts) != 2 || len(cur1.Steps[1].Proposal.MissingItems) != 1 {
+		t.Fatalf("expected cumulative verified_facts & missing_items on active proposal, got %+v", cur1.Steps[1].Proposal)
+	}
+
+	// Round 2: user submits ONLY node-2 -> prompt must include Step #4 passed context + Round 1 cumulative verified_facts (node-1, node-3) + Round 1 thinking!
+	w2 := storeRequest(s, "POST", "/api/clusters/pg-vhist/rehearsals/"+rh.ID+"/steps/s5/verify",
+		strings.NewReader(`{"output":"node-2: logging_collector=on; postgresql-2026-11-23.log 97162 -> 99209 bytes"}`), alice, csrf)
+	if w2.Code != 200 {
+		t.Fatalf("round 2 verify: %d %s", w2.Code, w2.Body.String())
+	}
+	if len(*bodies) < 2 {
+		t.Fatalf("expected 2 AI requests, got %d", len(*bodies))
+	}
+	req2 := (*bodies)[1]
+	for _, must := range []string{
+		"演练全局上下文：前序步骤实测进展",
+		"已完成 node-1→node-2 切主并重启 node-1",
+		"本步前序轮次已累计证实达标的事实",
+		"node-1: logging_collector=on",
+		"node-3: 参数生效且当日日志持续增长",
+		"当时仅剩缺口=[node-2 参数生效与日志增长验证]",
+		"第 1 轮截图已明确证实 node-1 与 node-3",
+		"等价强证据推断",
+		"实事求是采信【集群基线】IP 映射与成功的 ELB/VIP 入口验证",
+	} {
+		if !strings.Contains(req2, must) {
+			t.Fatalf("expected round 2 prompt to contain %q, got:\n%s", must, req2)
+		}
+	}
+	if !strings.Contains(rehearsalPlanSystem, "主从角色复位（切回原主库）") || !strings.Contains(rehearsalPlanSystem, "非当前主库的从库节点") {
+		t.Fatalf("expected rehearsalPlanSystem to include switchback & realistic ELB rules")
+	}
+	for name, prompt := range map[string]string{
+		"light": rehearsalLightCreateSystem,
+		"auto":  rehearsalAutoCreateSystem,
+		"full":  rehearsalProbeSystem,
+	} {
+		if !strings.Contains(prompt, "实测版本号") || !strings.Contains(prompt, "待采集") {
+			t.Fatalf("expected %s probe prompt to mandate live version collection aligned with drift table", name)
+		}
+	}
+	if !strings.Contains(rehearsalPlanSystem, "不要**在 status 字段中重复抱怨") {
+		t.Fatalf("expected rehearsalPlanSystem to suppress redundant missing-version complaints in status")
+	}
+
+	// Final check: step passed AND full 2-round history (failed round 1 + passed round 2) is preserved!
+	cur2, ok := s.loadRehearsal("pg-vhist", rh.ID)
+	if !ok || cur2.Steps[1].Status != "passed" || !cur2.Steps[1].VerifiedByAI || cur2.Steps[1].Proposal != nil {
+		t.Fatalf("expected step passed cleanly, got %+v", cur2.Steps[1])
+	}
+	if len(cur2.Steps[1].VerifyHistory) != 2 || cur2.Steps[1].VerifyHistory[0].Verdict != "failed" || cur2.Steps[1].VerifyHistory[1].Verdict != "passed" {
+		t.Fatalf("expected both failed round 1 and passed round 2 preserved in verify_history, got: %+v", cur2.Steps[1].VerifyHistory)
+	}
+}
+
+func TestRehearsalStepEditProposalInAIDock(t *testing.T) {
+	s, _ := testStore(t)
+	alice, csrf := storeLogin(t, s, "alice")
+	cw := storeCreate(t, s, alice, csrf, `{"id":"pg-edit-step","hosts":[{"name":"node-1","ip":"10.0.9.11"},{"name":"node-2","ip":"10.0.9.12"}],"instances":[{"id":"etcd","component":"etcd","placement":{"member":["node-1","node-2"]}}]}`, nil)
+	s.wg.Wait()
+	if cw.Code != 202 {
+		t.Fatalf("create job: %d %s", cw.Code, cw.Body.String())
+	}
+	var job storeJob
+	_ = json.Unmarshal(cw.Body.Bytes(), &job)
+	_ = storeRequest(s, "PATCH", "/api/jobs/"+job.ID, strings.NewReader(`{"outcome":"done"}`), alice, csrf)
+
+	rh := changeRehearsal{
+		ID:        "a1b2c3d4e502",
+		ClusterID: "pg-edit-step",
+		Title:     "切主与重启演练",
+		Goal:      "计划内切主并重启原主库",
+		Stage:     "rehearsing",
+		Mode:      "full",
+		CreatedAt: nowStamp(),
+		UpdatedAt: nowStamp(),
+		Steps: []rehearsalStep{
+			{
+				ID:         "s1",
+				Phase:      "precheck",
+				Order:      1,
+				Title:      "检查拓扑",
+				TargetRole: "在 node-1 (10.0.9.11) 上执行",
+				Command:    "patronictl list",
+				Expect:     "两节点健康",
+				Status:     "passed",
+			},
+			{
+				ID:         "s2",
+				Phase:      "execute",
+				Order:      2,
+				Title:      "计划内切主并重启",
+				TargetRole: "当前主库 node-1",
+				Command:    "patronictl switchover pg-edit-step --leader node-1 --candidate node-2 --force && patronictl restart pg-edit-step node-1 --force",
+				Expect:     "node-2 为 Leader，node-1 重启完成",
+				Status:     "failed",
+			},
+		},
+	}
+	if err := s.saveRehearsal(rh); err != nil {
+		t.Fatalf("save seed rehearsal: %v", err)
+	}
+
+	// 1. read_rehearsal tool returns steps and metadata
+	s.mu.Lock()
+	job = s.jobs[job.ID]
+	s.mu.Unlock()
+	proposed := []string{}
+	tc := aiToolCtx{s: s, job: job, user: "alice", session: "step:rehearsal:a1b2c3d4e502:s2", proposed: &proposed}
+	readOut := tc.run("read_rehearsal", `{"rehearsal_id":"a1b2c3d4e502"}`)
+	if !strings.Contains(readOut, "计划内切主并重启") || !strings.Contains(readOut, "a1b2c3d4e502") {
+		t.Fatalf("read_rehearsal unexpected output: %s", readOut)
+	}
+
+	// 2. propose_rehearsal_step_edit (replace) creates a persisted rehearsal_step proposal
+	res1 := tc.run("propose_rehearsal_step_edit", `{"rehearsal_id":"a1b2c3d4e502","step_id":"s2","action":"replace","title":"仅执行计划内切主（node-1 -> node-2）","target_role":"在 node-1 (10.0.9.11) 上执行","command":"patronictl -c /etc/patroni/patroni.yml switchover pg-edit-step --leader node-1 --candidate node-2 --force","expect":"node-2 成为新 Leader","reason":"将切主与重启拆为两步以降低风险"}`)
+	if !strings.Contains(res1, "演练步骤修订卡片") || len(proposed) != 1 {
+		t.Fatalf("expected rehearsal_step proposal created, got res=%q proposed=%v", res1, proposed)
+	}
+	propID1 := proposed[0]
+
+	// 3. Accept via API updates rehearsal on disk, adds revision, resets status to pending
+	aw1 := storeRequest(s, "POST", "/api/jobs/"+job.ID+"/ai/proposals/"+propID1+"/accept", nil, alice, csrf)
+	if aw1.Code != 200 {
+		t.Fatalf("accept replace proposal: %d %s", aw1.Code, aw1.Body.String())
+	}
+	after1, ok := s.loadRehearsal("pg-edit-step", "a1b2c3d4e502")
+	if !ok || after1.Steps[1].Title != "仅执行计划内切主（node-1 -> node-2）" || after1.Steps[1].Status != "pending" || len(after1.Steps[1].Revisions) != 1 {
+		t.Fatalf("unexpected step after replace accept: %+v", after1.Steps[1])
+	}
+
+	// 4. propose_rehearsal_step_edit (insert_after) inserts step #3 and renumbers orders cleanly
+	res2 := tc.run("propose_rehearsal_step_edit", `{"rehearsal_id":"a1b2c3d4e502","step_id":"s2","action":"insert_after","title":"重启原主库 node-1","target_role":"在 node-2 (10.0.9.12) 上执行","command":"patronictl -c /etc/patroni/patroni.yml restart pg-edit-step node-1 --pending --force","expect":"node-1 重启完成且无 Pending restart","reason":"独立重启原主库便于逐项核验"}`)
+	if len(proposed) != 2 {
+		t.Fatalf("expected 2nd proposal created, got res=%q proposed=%v", res2, proposed)
+	}
+	aw2 := storeRequest(s, "POST", "/api/jobs/"+job.ID+"/ai/proposals/"+proposed[1]+"/accept", nil, alice, csrf)
+	if aw2.Code != 200 {
+		t.Fatalf("accept insert_after proposal: %d %s", aw2.Code, aw2.Body.String())
+	}
+	after2, _ := s.loadRehearsal("pg-edit-step", "a1b2c3d4e502")
+	if len(after2.Steps) != 3 || after2.Steps[2].Order != 3 || after2.Steps[2].Title != "重启原主库 node-1" {
+		t.Fatalf("unexpected steps after insert_after: %+v", after2.Steps)
+	}
+}
+
+func TestRehearsalQuickModeAndChangeReport(t *testing.T) {
+	s, _ := testStore(t)
+	alice, csrf := storeLogin(t, s, "alice")
+	cw := storeCreate(t, s, alice, csrf, `{"id":"pg-quick-test","hosts":[{"name":"node-1","ip":"10.0.10.11"},{"name":"node-2","ip":"10.0.10.12"},{"name":"node-3","ip":"10.0.10.13"}],"instances":[{"id":"etcd","component":"etcd","placement":{"member":["node-1","node-2","node-3"]}}]}`, nil)
+	s.wg.Wait()
+	if cw.Code != 202 {
+		t.Fatalf("create job: %d %s", cw.Code, cw.Body.String())
+	}
+	var job storeJob
+	_ = json.Unmarshal(cw.Body.Bytes(), &job)
+	_ = storeRequest(s, "PATCH", "/api/jobs/"+job.ID, strings.NewReader(`{"outcome":"done"}`), alice, csrf)
+
+	// Mock model: 1) auto -> resolved_mode="quick" returning direct steps; 2) explicit mode="quick" returning direct steps
+	autoQuickResp := `{"resolved_mode":"quick","thinking":"用户仅调整 Patroni DCS 热参数 synchronous_node_count=1，无需重启或切主且现场参数已知，直接走极速变更生成执行步骤。","title":"调整同步副本数为 1","scope_summary":"将 Patroni DCS synchronous_node_count 调整为 1，允许单备异常时不阻塞主库写入。","steps":[{"id":"s1","phase":"execute","order":1,"title":"修改 DCS 同步副本数参数","target_role":"任一数据节点（如 node-1 / 10.0.10.11）","command":"patronictl -c /etc/patroni/patroni.yml edit-config --force -s synchronous_node_count=1","expect":"Configuration changed 且 show-config 显示 synchronous_node_count: 1","caution":"热生效，无需重启 PostgreSQL","rollback":"patronictl -c /etc/patroni/patroni.yml edit-config --force -s synchronous_node_count=2"},{"id":"s2","phase":"verify","order":2,"title":"核验参数生效与同步流复制健康","target_role":"当前主库（node-1 / 10.0.10.11）","command":"patronictl -c /etc/patroni/patroni.yml list && patronictl -c /etc/patroni/patroni.yml show-config | grep -i synchronous","expect":"三节点健康 Lag=0，synchronous_node_count 为 1"},{"id":"r1","phase":"rollback","order":3,"title":"回退 synchronous_node_count 至原值","target_role":"任一数据节点（node-1 / 10.0.10.11）","command":"patronictl -c /etc/patroni/patroni.yml edit-config --force -s synchronous_node_count=2","expect":"参数恢复原值","optional":true}]}`
+	srv, _ := fakeModel(t, autoQuickResp, autoQuickResp)
+	enableAI(t, s, srv.URL, 1)
+
+	// 1. Test mode="auto" -> resolved_mode="quick" skips scoping & probing directly into stage="rehearsing"
+	w1 := storeRequest(s, "POST", "/api/clusters/pg-quick-test/rehearsals",
+		strings.NewReader(`{"goal":"把 synchronous_node_count 改为 1，避免单备机维护时阻塞写入","mode":"auto"}`), alice, csrf)
+	if w1.Code != 201 {
+		t.Fatalf("auto quick create: %d %s", w1.Code, w1.Body.String())
+	}
+	var rh1 changeRehearsal
+	if err := json.Unmarshal(w1.Body.Bytes(), &rh1); err != nil {
+		t.Fatalf("decode rh1: %v", err)
+	}
+	if rh1.Mode != "quick" || rh1.Stage != "rehearsing" || len(rh1.Steps) != 3 {
+		t.Fatalf("expected auto->quick directly in rehearsing with 3 steps, got mode=%q stage=%q steps=%d", rh1.Mode, rh1.Stage, len(rh1.Steps))
+	}
+
+	// 1b. Test explicit mode="quick" also skips scoping & probing directly into stage="rehearsing"
+	w1b := storeRequest(s, "POST", "/api/clusters/pg-quick-test/rehearsals",
+		strings.NewReader(`{"goal":"把 synchronous_node_count 改为 1","mode":"quick"}`), alice, csrf)
+	if w1b.Code != 201 {
+		t.Fatalf("explicit quick create: %d %s", w1b.Code, w1b.Body.String())
+	}
+	var rh1b changeRehearsal
+	_ = json.Unmarshal(w1b.Body.Bytes(), &rh1b)
+	if rh1b.Mode != "quick" || rh1b.Stage != "rehearsing" || len(rh1b.Steps) != 3 {
+		t.Fatalf("expected explicit quick in rehearsing with 3 steps, got mode=%q stage=%q steps=%d", rh1b.Mode, rh1b.Stage, len(rh1b.Steps))
+	}
+
+	// 2. Mark forward steps passed and finalize -> archived as a Change Report ("变更报告") in Cluster Docs
+	for _, st := range rh1.Steps {
+		if st.Phase == "rollback" {
+			continue
+		}
+		uw := storeRequest(s, "PATCH", "/api/clusters/pg-quick-test/rehearsals/"+rh1.ID+"/steps/"+st.ID,
+			strings.NewReader(`{"status":"passed","note":"现场验证通过"}`), alice, csrf)
+		if uw.Code != 200 {
+			t.Fatalf("mark step %s passed: %d %s", st.ID, uw.Code, uw.Body.String())
+		}
+	}
+	fw := storeRequest(s, "POST", "/api/clusters/pg-quick-test/rehearsals/"+rh1.ID+"/finalize",
+		strings.NewReader(`{}`), alice, csrf)
+	if fw.Code != 200 {
+		t.Fatalf("finalize quick rehearsal: %d %s", fw.Code, fw.Body.String())
+	}
+	var finalized changeRehearsal
+	_ = json.Unmarshal(fw.Body.Bytes(), &finalized)
+	if finalized.Stage != "finalized" || finalized.DocID == "" {
+		t.Fatalf("expected finalized with doc_id, got %+v", finalized)
+	}
+	dw := storeRequest(s, "GET", "/api/clusters/pg-quick-test/docs/"+finalized.DocID, nil, alice, "")
+	if dw.Code != 200 {
+		t.Fatalf("get quick change report doc: %d %s", dw.Code, dw.Body.String())
+	}
+	docBody := dw.Body.String()
+	if !strings.Contains(docBody, "变更报告") || !strings.Contains(docBody, "极速变更") {
+		t.Fatalf("expected Change Report title & quick mode cover row, got: %s", docBody)
+	}
+
+	// 3. Test propose_rehearsal tool normalizes and preserves mode="quick"
+	s.mu.Lock()
+	job = s.jobs[job.ID]
+	s.mu.Unlock()
+	proposed := []string{}
+	tc := aiToolCtx{s: s, job: job, user: "alice", session: "review", proposed: &proposed}
+	out := tc.run("propose_rehearsal", `{"cluster_id":"pg-quick-test","mode":"quick","kind":"tune","title":"调整同步副本数为 1","goal":"修改 synchronous_node_count=1","summary":"热改 DCS 参数并归档变更报告","reason":"涉及配置变更，需留存变更报告"}`)
+	if !strings.Contains(out, "变更演练发起卡片 #") || len(proposed) != 1 {
+		t.Fatalf("expected quick propose_rehearsal card, got out=%q proposed=%v", out, proposed)
+	}
+	props := s.loadProposals(job.ID)
+	if len(props) != 1 || props[0].Rehearsal == nil || props[0].Rehearsal.Mode != "quick" {
+		t.Fatalf("expected persisted rehearsal proposal with mode=quick, got %+v", props)
+	}
+}
+
+func TestAIResolveArchivesStandaloneChangeReport(t *testing.T) {
+	s, _ := testStore(t)
+	alice, csrf := storeLogin(t, s, "alice")
+	cw := storeCreate(t, s, alice, csrf, `{"id":"pg-chg-doc","hosts":[{"name":"node-1","ip":"10.0.11.11"},{"name":"node-2","ip":"10.0.11.12"}],"instances":[{"id":"etcd","component":"etcd","placement":{"member":["node-1","node-2"]}}]}`, nil)
+	s.wg.Wait()
+	if cw.Code != 202 {
+		t.Fatalf("create job: %d %s", cw.Code, cw.Body.String())
+	}
+	var job storeJob
+	_ = json.Unmarshal(cw.Body.Bytes(), &job)
+	_ = storeRequest(s, "PATCH", "/api/jobs/"+job.ID, strings.NewReader(`{"outcome":"done"}`), alice, csrf)
+
+	// Confirm a Change Report directly via /api/jobs/{id}/ai/resolve
+	payload := `{"key":"review","report":{"title":"调整 Patroni synchronous_node_count 参数","symptom":"单备机重启期间主库写入等待超时","cause":"synchronous_node_count=2 要求两台从库同时在线","fix":"在 node-1 执行：\n\n` + "```bash\\npatronictl -c /etc/patroni/patroni.yml edit-config --force -s synchronous_node_count=1\\n```" + `\n\n执行后 show-config 验证已生效。","evidence":"Configuration changed\nsynchronous_node_count: 1","changed":false,"followups":["观察下次维护窗口备机重启期间业务写入延迟"]}}`
+	rw := storeRequest(s, "POST", "/api/jobs/"+job.ID+"/ai/resolve", strings.NewReader(payload), alice, csrf)
+	if rw.Code != 200 {
+		t.Fatalf("ai resolve: %d %s", rw.Code, rw.Body.String())
+	}
+	var rep aiReport
+	if err := json.Unmarshal(rw.Body.Bytes(), &rep); err != nil {
+		t.Fatalf("decode report: %v", err)
+	}
+	if !strings.HasPrefix(rep.DocID, "chg-") {
+		t.Fatalf("expected standalone chg-* doc_id on running cluster, got %+v", rep)
+	}
+
+	// Verify it appears in Cluster Docs list with kind="change" & manual=true
+	lw := storeRequest(s, "GET", "/api/clusters/pg-chg-doc/docs", nil, alice, "")
+	if lw.Code != 200 || !strings.Contains(lw.Body.String(), rep.DocID) || !strings.Contains(lw.Body.String(), "调整 Patroni synchronous_node_count 参数") {
+		t.Fatalf("expected chg-* doc in cluster docs list, got %d %s", lw.Code, lw.Body.String())
+	}
+
+	// Verify full document content renders structured sections and code block
+	dw := storeRequest(s, "GET", "/api/clusters/pg-chg-doc/docs/"+rep.DocID, nil, alice, "")
+	if dw.Code != 200 {
+		t.Fatalf("get chg doc: %d %s", dw.Code, dw.Body.String())
+	}
+	body := dw.Body.String()
+	for _, must := range []string{"变更报告", "synchronous_node_count=1", "Configuration changed", "观察下次维护窗口"} {
+		if !strings.Contains(body, must) {
+			t.Fatalf("expected %q in chg doc body, got: %s", must, body)
+		}
+	}
+
+	// Verify manual deletion cleans up the standalone Change Report
+	delw := storeRequest(s, "DELETE", "/api/clusters/pg-chg-doc/docs/"+rep.DocID, nil, alice, csrf)
+	if delw.Code != 200 {
+		t.Fatalf("delete chg doc: %d %s", delw.Code, delw.Body.String())
+	}
+	dwAfter := storeRequest(s, "GET", "/api/clusters/pg-chg-doc/docs/"+rep.DocID, nil, alice, "")
+	if dwAfter.Code != 404 {
+		t.Fatalf("expected 404 after deleting chg doc, got %d", dwAfter.Code)
+	}
+}
+
+func TestAuditRehearsalRestorations(t *testing.T) {
+	// 1. Detects all 7 unrestored temporary changes across forward steps (ignores rollback phase)
+	dirtySteps := []rehearsalStep{
+		{ID: "s1", Phase: "execute", Title: "开启维护模式并摘流", Command: "patronictl -c /etc/patroni/patroni.yml pause && echo 'set server pg_backend/node-2 state maint' | socat stdio /run/haproxy/admin.sock"},
+		{ID: "s2", Phase: "execute", Title: "临时放宽同步与开调试日志并停备机监控", Command: "patronictl edit-config --force -s synchronous_mode=false -p log_statement=all && systemctl stop keepalived.service"},
+		{ID: "s3", Phase: "execute", Title: "计划内切主", Command: "patronictl -c /etc/patroni/patroni.yml switchover pg-prod --leader node-1 --candidate node-2 --force"},
+		{ID: "s4", Phase: "verify", Title: "写测试表与测试 Key 验收", Command: "psql -c 'CREATE TABLE rehearsal_smoke_test(id int);' && redis-cli SET probe_test_key ok"},
+		// Rollback phase containing resume/switchover MUST NOT silence forward restoration alerts!
+		{ID: "r1", Phase: "rollback", Title: "回退", Command: "patronictl resume && patronictl switchover pg-prod --leader node-2 --candidate node-1 --force"},
+	}
+	alerts := auditRehearsalRestorations("PostgreSQL 日志落盘参数变更并滚动重启", "", dirtySteps, "zh-CN")
+	gotKinds := map[string]int{}
+	for _, a := range alerts {
+		gotKinds[a.Kind]++
+	}
+	for _, want := range []string{"switchover", "maintenance_pause", "lb_drain", "sync_relaxed", "debug_log", "service_stopped", "temp_artifact"} {
+		if gotKinds[want] == 0 {
+			t.Fatalf("expected restoration alert kind %q, got %+v", want, alerts)
+		}
+	}
+	if gotKinds["temp_artifact"] != 2 {
+		t.Fatalf("expected 2 temp_artifact alerts (SQL table + Redis key), got %d (%+v)", gotKinds["temp_artifact"], alerts)
+	}
+
+	// 2. Clean plan with matching forward restoration & cleanup steps emits ZERO alerts!
+	cleanSteps := []rehearsalStep{
+		{ID: "s1", Phase: "execute", Title: "开启维护模式并摘流", Command: "patronictl pause && echo 'set server pg_backend/node-2 state maint' | socat stdio /run/haproxy/admin.sock"},
+		{ID: "s2", Phase: "execute", Title: "临时调整同步与日志并停 keepalived", Command: "patronictl edit-config --force -s synchronous_mode=false -p log_statement=all && systemctl stop keepalived.service"},
+		{ID: "s3", Phase: "execute", Title: "计划内切主重启原主", Command: "patronictl switchover pg-prod --leader node-1 --candidate node-2 --force"},
+		{ID: "s4", Phase: "execute", Title: "切回原主库并恢复维护模式/同步/日志/服务/流量", Command: "patronictl switchover pg-prod --leader node-2 --candidate node-1 --force && patronictl resume && patronictl edit-config --force -s synchronous_mode=true -p log_statement=none && systemctl start keepalived.service && echo 'set server pg_backend/node-2 state ready' | socat stdio /run/haproxy/admin.sock"},
+		{ID: "s5", Phase: "verify", Title: "写入验收并清理临时对象", Command: "psql -c 'CREATE TABLE rehearsal_smoke_test(id int); DROP TABLE IF EXISTS rehearsal_smoke_test;' && redis-cli SET probe_test_key ok && redis-cli DEL probe_test_key"},
+	}
+	if cleanAlerts := auditRehearsalRestorations("PostgreSQL 滚动升级", "", cleanSteps, "zh-CN"); len(cleanAlerts) != 0 {
+		t.Fatalf("expected 0 alerts when all temporary states are restored, got %+v", cleanAlerts)
+	}
+
+	// 3. Respects explicit user intent (permanent switchover or intentional synchronous_mode change -> no false positive!)
+	permSteps := []rehearsalStep{
+		{ID: "s1", Phase: "execute", Title: "修改同步策略", Command: "patronictl edit-config --force -s synchronous_mode=false"},
+		{ID: "s2", Phase: "execute", Title: "永久迁主到 node-2", Command: "patronictl switchover pg-prod --leader node-1 --candidate node-2 --force"},
+	}
+	if permAlerts := auditRehearsalRestorations("永久迁主到新机房 node-2 并关闭同步复制", "", permSteps, "zh-CN"); len(permAlerts) != 0 {
+		t.Fatalf("expected 0 false positives when user explicitly requested permanent switchover & sync change, got %+v", permAlerts)
+	}
+}
+
+func TestRehearsalApplyProductionReflectsInClusterDocsAndAI(t *testing.T) {
+	s, _ := testStore(t)
+	enableAI(t, s, "http://127.0.0.1:1", 1)
+	alice, csrf := storeLogin(t, s, "alice")
+	cw := storeCreate(t, s, alice, csrf, `{"id":"pg-apply-sync","hosts":[{"name":"node-1","ip":"10.0.12.11"},{"name":"node-2","ip":"10.0.12.12"}],"instances":[{"id":"etcd","component":"etcd","placement":{"member":["node-1","node-2"]}}]}`, nil)
+	s.wg.Wait()
+	if cw.Code != 202 {
+		t.Fatalf("create job: %d %s", cw.Code, cw.Body.String())
+	}
+	var job storeJob
+	_ = json.Unmarshal(cw.Body.Bytes(), &job)
+	_ = storeRequest(s, "PATCH", "/api/jobs/"+job.ID, strings.NewReader(`{"outcome":"done"}`), alice, csrf)
+
+	rh := changeRehearsal{
+		ID:           "a1b2c3d4e599",
+		ClusterID:    "pg-apply-sync",
+		AppID:        "etcd",
+		AppName:      "etcd",
+		BaseJobID:    job.ID,
+		Title:        "PostgreSQL 日志落盘参数调整",
+		Goal:         "开启 logging_collector 并将日志目录改为 /data/logs/postgresql",
+		ScopeSummary: "在线调整 DCS 日志参数并滚动生效",
+		Owner:        "alice",
+		Mode:         "full",
+		Stage:        "rehearsing",
+		Drift: &rehearsalDrift{
+			Summary: "初始 logging_collector=off",
+			ParamDiffs: []rehearsalDriftParam{
+				{Key: "logging_collector", Initial: "off", Actual: "off"},
+			},
+		},
+		Steps: []rehearsalStep{
+			{
+				ID:         "s1",
+				Phase:      "execute",
+				Order:      1,
+				Title:      "修改 DCS 日志参数",
+				TargetRole: "node-1",
+				Command:    "patronictl -c /etc/patroni/patroni.yml edit-config --force -p logging_collector=on -p log_directory=/data/logs/postgresql",
+				Expect:     "Configuration changed",
+				Status:     "passed",
+			},
+		},
+		CreatedAt: nowStamp(),
+		UpdatedAt: nowStamp(),
+	}
+	if err := s.saveRehearsal(rh); err != nil {
+		t.Fatalf("save seed rehearsal: %v", err)
+	}
+
+	// 1. Applying before finalize must be rejected (409)
+	early := storeRequest(s, "POST", "/api/clusters/pg-apply-sync/rehearsals/"+rh.ID+"/apply", strings.NewReader(`{"applied":true}`), alice, csrf)
+	if early.Code != 409 {
+		t.Fatalf("expected 409 before finalize, got %d %s", early.Code, early.Body.String())
+	}
+
+	// 2. Finalize first, then mark applied to production (auto-extracting param deltas + operator note)
+	fw := storeRequest(s, "POST", "/api/clusters/pg-apply-sync/rehearsals/"+rh.ID+"/finalize", strings.NewReader(`{}`), alice, csrf)
+	if fw.Code != 200 {
+		t.Fatalf("finalize: %d %s", fw.Code, fw.Body.String())
+	}
+	aw := storeRequest(s, "POST", "/api/clusters/pg-apply-sync/rehearsals/"+rh.ID+"/apply",
+		strings.NewReader(`{"applied":true,"note":"CHG-20261124 低峰窗口已执行完成"}`), alice, csrf)
+	if aw.Code != 200 {
+		t.Fatalf("apply prod: %d %s", aw.Code, aw.Body.String())
+	}
+	var applied changeRehearsal
+	if err := json.Unmarshal(aw.Body.Bytes(), &applied); err != nil {
+		t.Fatalf("decode applied: %v", err)
+	}
+	if !applied.Applied || applied.AppliedBy != "alice" || len(applied.AppliedChanges) < 2 {
+		t.Fatalf("expected applied=true with auto-extracted logging_collector & log_directory changes, got %+v", applied)
+	}
+
+	// 3. Reflects in ClusterView (/api/clusters?id=...)
+	clw := storeRequest(s, "GET", "/api/clusters?id=pg-apply-sync", nil, alice, "")
+	if clw.Code != 200 {
+		t.Fatalf("get clusters: %d %s", clw.Code, clw.Body.String())
+	}
+	var views []clusterView
+	_ = json.Unmarshal(clw.Body.Bytes(), &views)
+	if len(views) != 1 || views[0].AppliedChangesCount != 1 || views[0].LastChangeTitle != "PostgreSQL 日志落盘参数调整" {
+		t.Fatalf("expected clusterView to reflect 1 applied change, got %+v", views)
+	}
+
+	// 4. Reflects in main Delivery Report (/docs/delivery) AND Change SOP (/docs/sop-...)
+	delDoc := storeRequest(s, "GET", "/api/clusters/pg-apply-sync/docs/delivery", nil, alice, "")
+	if delDoc.Code != 200 {
+		t.Fatalf("get delivery doc: %d %s", delDoc.Code, delDoc.Body.String())
+	}
+	for _, must := range []string{"已落地生效", "logging_collector", "/data/logs/postgresql"} {
+		if !strings.Contains(delDoc.Body.String(), must) {
+			t.Fatalf("expected delivery report to contain %q, got: %s", must, delDoc.Body.String())
+		}
+	}
+	sopDoc := storeRequest(s, "GET", "/api/clusters/pg-apply-sync/docs/sop-"+rh.ID, nil, alice, "")
+	if sopDoc.Code != 200 || !strings.Contains(sopDoc.Body.String(), "已实施落地") || !strings.Contains(sopDoc.Body.String(), "CHG-20261124") {
+		t.Fatalf("expected SOP doc to contain production sign-off & note, got %d %s", sopDoc.Code, sopDoc.Body.String())
+	}
+
+	// 5. Reflects in AI baseline context (clusterBaselinePrompt) & deliveryLifecycleFacts
+	f, ok := s.clusterFactsFor("alice", "pg-apply-sync")
+	if !ok {
+		t.Fatalf("facts not found")
+	}
+	basePrompt, _ := s.clusterBaselinePrompt(f)
+	if !strings.Contains(basePrompt, "投产后已确认落地的生产变更") || !strings.Contains(basePrompt, "logging_collector: off -> on") {
+		t.Fatalf("expected clusterBaselinePrompt to include applied change overlay, got:\n%s", basePrompt)
+	}
+	lcFacts := s.deliveryLifecycleFacts(job.ID)
+	if !strings.Contains(lcFacts, "已落地生效") || !strings.Contains(lcFacts, "logging_collector: off -> on") {
+		t.Fatalf("expected deliveryLifecycleFacts to include applied production changes, got:\n%s", lcFacts)
+	}
+
+	// 6. Reverting applied status clears clusterView count cleanly
+	uw := storeRequest(s, "POST", "/api/clusters/pg-apply-sync/rehearsals/"+rh.ID+"/apply", strings.NewReader(`{"applied":false}`), alice, csrf)
+	if uw.Code != 200 {
+		t.Fatalf("unapply prod: %d %s", uw.Code, uw.Body.String())
+	}
+	clw2 := storeRequest(s, "GET", "/api/clusters?id=pg-apply-sync", nil, alice, "")
+	var views2 []clusterView
+	_ = json.Unmarshal(clw2.Body.Bytes(), &views2)
+	if len(views2) != 1 || views2[0].AppliedChangesCount != 0 {
+		t.Fatalf("expected clusterView applied_changes_count=0 after revert, got %+v", views2)
+	}
+}
+
+func TestRehearsalVoidConflictDetectionAndEffectiveMerge(t *testing.T) {
+	s, _ := testStore(t)
+	enableAI(t, s, "http://127.0.0.1:1", 1)
+	alice, csrf := storeLogin(t, s, "alice")
+	cw := storeCreate(t, s, alice, csrf, `{"id":"pg-multi-guard","hosts":[{"name":"node-1","ip":"10.0.13.11"},{"name":"node-2","ip":"10.0.13.12"}],"instances":[{"id":"etcd","component":"etcd","placement":{"member":["node-1","node-2"]}}]}`, nil)
+	s.wg.Wait()
+	if cw.Code != 202 {
+		t.Fatalf("create job: %d %s", cw.Code, cw.Body.String())
+	}
+	var job storeJob
+	_ = json.Unmarshal(cw.Body.Bytes(), &job)
+	_ = storeRequest(s, "PATCH", "/api/jobs/"+job.ID, strings.NewReader(`{"outcome":"done"}`), alice, csrf)
+
+	seed := func(id, title, cmd, created string) changeRehearsal {
+		rh := changeRehearsal{
+			ID:        id,
+			ClusterID: "pg-multi-guard",
+			AppID:     "etcd",
+			AppName:   "etcd",
+			BaseJobID: job.ID,
+			Title:     title,
+			Goal:      title,
+			Owner:     "alice",
+			Mode:      "full",
+			Stage:     "rehearsing",
+			Steps: []rehearsalStep{{
+				ID:         "s1",
+				Phase:      "execute",
+				Order:      1,
+				Title:      title,
+				TargetRole: "node-1",
+				Command:    cmd,
+				Expect:     "ok",
+				Status:     "passed",
+			}},
+			CreatedAt: created,
+			UpdatedAt: created,
+		}
+		if err := s.saveRehearsal(rh); err != nil {
+			t.Fatalf("save %s: %v", id, err)
+		}
+		return rh
+	}
+
+	// Plan A & Plan B both drafted on the same initial baseline and both touch logging_collector
+	seed("aa0000000001", "方案A：日志大小设为 500MB", "patronictl edit-config --force -p logging_collector=on -p log_rotation_size=500MB", "2026-11-23T08:00:00Z")
+	seed("bb0000000002", "方案B：日志大小设为 1GB", "patronictl edit-config --force -p logging_collector=on -p log_rotation_size=1GB", "2026-11-23T08:05:00Z")
+	seed("cc0000000003", "方案C：已放弃的旧 HBA 草案", "patronictl edit-config --force -p max_connections=500", "2026-11-23T07:50:00Z")
+
+	// Finalize all 3 on initial baseline
+	for _, id := range []string{"aa0000000001", "bb0000000002", "cc0000000003"} {
+		fw := storeRequest(s, "POST", "/api/clusters/pg-multi-guard/rehearsals/"+id+"/finalize", strings.NewReader(`{}`), alice, csrf)
+		if fw.Code != 200 {
+			t.Fatalf("finalize %s: %d %s", id, fw.Code, fw.Body.String())
+		}
+	}
+
+	// 1. Apply Plan A AND atomically supersede Plan C via supersede_ids
+	awA := storeRequest(s, "POST", "/api/clusters/pg-multi-guard/rehearsals/aa0000000001/apply",
+		strings.NewReader(`{"applied":true,"changes":[{"key":"logging_collector","before":"off","after":"on"},{"key":"log_rotation_size","before":"10MB","after":"500MB"}],"supersede_ids":["cc0000000003"]}`),
+		alice, csrf)
+	if awA.Code != 200 {
+		t.Fatalf("apply A: %d %s", awA.Code, awA.Body.String())
+	}
+
+	// Verify Plan C is now voided & superseded by Plan A, and locked against /apply (409)
+	gwC := storeRequest(s, "GET", "/api/clusters/pg-multi-guard/rehearsals/cc0000000003", nil, alice, "")
+	var rhC changeRehearsal
+	_ = json.Unmarshal(gwC.Body.Bytes(), &rhC)
+	if !rhC.Voided || rhC.SupersededBy != "aa0000000001" || rhC.SupersededTitle != "方案A：日志大小设为 500MB" {
+		t.Fatalf("expected C voided & superseded by A, got %+v", rhC)
+	}
+	lockedC := storeRequest(s, "POST", "/api/clusters/pg-multi-guard/rehearsals/cc0000000003/apply", strings.NewReader(`{"applied":true}`), alice, csrf)
+	if lockedC.Code != 409 {
+		t.Fatalf("expected 409 when applying voided plan C, got %d %s", lockedC.Code, lockedC.Body.String())
+	}
+
+	// 2. Opening Plan B must surface a "conflict" alert because Plan A landed after B's baseline and overlaps logging_collector + log_rotation_size!
+	gwB := storeRequest(s, "GET", "/api/clusters/pg-multi-guard/rehearsals/bb0000000002", nil, alice, "")
+	var rhB changeRehearsal
+	_ = json.Unmarshal(gwB.Body.Bytes(), &rhB)
+	foundConflict := false
+	for _, al := range rhB.ConflictAlerts {
+		if al.Severity == "conflict" && al.OtherID == "aa0000000001" && len(al.OverlappingKeys) >= 2 {
+			foundConflict = true
+		}
+	}
+	if !foundConflict {
+		t.Fatalf("expected conflict alert on B referencing A with >=2 overlapping keys, got %+v", rhB.ConflictAlerts)
+	}
+
+	// 3. Voiding an already-applied plan (A) must be rejected (409); restoring C back to pending must succeed (200)
+	badVoidA := storeRequest(s, "POST", "/api/clusters/pg-multi-guard/rehearsals/aa0000000001/void", strings.NewReader(`{"voided":true}`), alice, csrf)
+	if badVoidA.Code != 409 {
+		t.Fatalf("expected 409 when voiding already-applied A, got %d", badVoidA.Code)
+	}
+	restC := storeRequest(s, "POST", "/api/clusters/pg-multi-guard/rehearsals/cc0000000003/void", strings.NewReader(`{"voided":false}`), alice, csrf)
+	if restC.Code != 200 {
+		t.Fatalf("restore C: %d %s", restC.Code, restC.Body.String())
+	}
+	// Re-void C manually with explicit reason
+	voidC := storeRequest(s, "POST", "/api/clusters/pg-multi-guard/rehearsals/cc0000000003/void", strings.NewReader(`{"voided":true,"reason":"窗口取消，暂不执行"}`), alice, csrf)
+	if voidC.Code != 200 {
+		t.Fatalf("manual void C: %d %s", voidC.Code, voidC.Body.String())
+	}
+
+	// 4. Now apply Plan B with updated log_rotation_size=1GB (later timestamp) and verify effective merge in AI baseline & Delivery Report
+	time.Sleep(15 * time.Millisecond)
+	awB := storeRequest(s, "POST", "/api/clusters/pg-multi-guard/rehearsals/bb0000000002/apply",
+		strings.NewReader(`{"applied":true,"changes":[{"key":"log_rotation_size","before":"500MB","after":"1GB"}]}`),
+		alice, csrf)
+	if awB.Code != 200 {
+		t.Fatalf("apply B: %d %s", awB.Code, awB.Body.String())
+	}
+
+	// Ensure effectiveAppliedChanges folds log_rotation_size: initial 10MB -> latest 1GB (UpdateCount=2)
+	f, ok := s.clusterFactsFor("alice", "pg-multi-guard")
+	if !ok {
+		t.Fatalf("facts missing")
+	}
+	basePrompt, _ := s.clusterBaselinePrompt(f)
+	if !strings.Contains(basePrompt, "log_rotation_size: 10MB -> 1GB") || !strings.Contains(basePrompt, "累计调整 2 次") {
+		t.Fatalf("expected merged effective change in clusterBaselinePrompt, got:\n%s", basePrompt)
+	}
+	delDoc := storeRequest(s, "GET", "/api/clusters/pg-multi-guard/docs/delivery", nil, alice, "")
+	if delDoc.Code != 200 {
+		t.Fatalf("delivery doc: %d", delDoc.Code)
+	}
+	body := delDoc.Body.String()
+	for _, must := range []string{"已作废", `"log_rotation_size","10MB","1GB"`, "累计调整 2 次"} {
+		if !strings.Contains(body, must) {
+			t.Fatalf("expected delivery report to contain %q, got:\n%s", must, body)
+		}
+	}
+}
+
+func TestRehearsalExtractQuotedPatroniParamsAndHBARuleAndNoFalseCollision(t *testing.T) {
+	logPlan := changeRehearsal{
+		ID:    "a32a2e5bacbe",
+		Title: "PostgreSQL 日志落盘到 /data/logs/postgresql",
+		Stage: "finalized",
+		Drift: &rehearsalDrift{
+			ParamDiffs: []rehearsalDriftParam{
+				{Key: "logging_collector", Actual: "off（default）"},
+				{Key: "log_filename", Actual: "postgresql-%Y-%m-%d_%H%M%S.log（default）"},
+			},
+		},
+		Steps: []rehearsalStep{
+			{ID: "s2", Phase: "execute", Status: "passed", Note: "三节点均已创建目录。", Command: "install -d /data/logs/postgresql"},
+			{ID: "s3", Phase: "execute", Status: "passed", Note: "已写入日志参数。", Command: "patronictl -c /etc/patroni/patroni.yml edit-config pg --force -p logging_collector=on -p 'log_filename=postgresql-%Y-%m-%d.log' -p log_rotation_size=1048576"},
+		},
+	}
+	hbaPlan := changeRehearsal{
+		ID:    "c35b325abae5",
+		Title: "Patroni 集群共享 pg_hba 补充 127.0.0.1 replicator 复制规则",
+		Stage: "finalized",
+		Drift: &rehearsalDrift{
+			ParamDiffs: []rehearsalDriftParam{
+				{Key: "patroni 动态配置 postgresql.pg_hba 中目标规则", Actual: "缺失（三节点 count=0）"},
+			},
+		},
+		Steps: []rehearsalStep{
+			{
+				ID:      "s2",
+				Phase:   "execute",
+				Status:  "passed",
+				Title:   "备份动态配置，生成含全部原规则的补丁并应用",
+				Command: `patronictl -c /etc/patroni/patroni.yml show-config > /tmp/hba.yml; python3 -c 't="hostssl replication replicator 127.0.0.1/32 scram-sha-256"' ; patronictl -c /etc/patroni/patroni.yml edit-config --force --apply /tmp/hba-patch.yml`,
+			},
+		},
+	}
+
+	sum, logChanges := extractDefaultAppliedChanges(logPlan)
+	if strings.Contains(sum, "。；") {
+		t.Fatalf("expected clean summary without double punctuation, got %q", sum)
+	}
+	foundFilename := false
+	for _, ch := range logChanges {
+		if ch.Key == "log_filename" && ch.After == "postgresql-%Y-%m-%d.log" && strings.Contains(ch.Before, "H%M%S") {
+			foundFilename = true
+		}
+	}
+	if !foundFilename {
+		t.Fatalf("expected quoted log_filename to be extracted cleanly, got %+v", logChanges)
+	}
+
+	_, hbaChanges := extractDefaultAppliedChanges(hbaPlan)
+	if len(hbaChanges) != 1 || hbaChanges[0].Key != "pg_hba" || hbaChanges[0].After != "+ hostssl replication replicator 127.0.0.1/32 scram-sha-256" || !strings.Contains(hbaChanges[0].Before, "缺失") {
+		t.Fatalf("expected exact HBA rule (not step title) and drift before value, got %+v", hbaChanges)
+	}
+
+	// Applying logPlan MUST NOT trigger a false "conflict" on hbaPlan (they touch distinct keys; only "stale" cluster update!)
+	logPlan.Applied = true
+	logPlan.AppliedAt = "2026-11-23T15:00:00Z"
+	logPlan.AppliedChanges = logChanges
+	hbaPlan.CreatedAt = "2026-11-23T14:30:00Z"
+	alerts := computeRehearsalConflicts(hbaPlan, []changeRehearsal{logPlan, hbaPlan}, "zh-CN")
+	for _, al := range alerts {
+		if al.Severity == "conflict" {
+			t.Fatalf("expected NO false conflict between logging_collector plan and pg_hba plan, got %+v", al)
+		}
 	}
 }

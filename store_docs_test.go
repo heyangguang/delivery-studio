@@ -674,3 +674,75 @@ func TestDocsStarterTemplateRoundTripAndDrawingML(t *testing.T) {
 		t.Error("placeholder remaining in DrawingML template export")
 	}
 }
+
+func TestClusterDocsEnhancedAuditAndDraftAll(t *testing.T) {
+	s, _ := testStore(t)
+	alice, csrf := storeLogin(t, s, "alice")
+	storeCreate(t, s, alice, csrf, `{"id":"etcd-rev","hosts":[{"name":"n1","ip":"10.0.2.11"}],"instances":[{"id":"etcd","component":"etcd","placement":{"member":["n1"]}}]}`, nil)
+	s.wg.Wait()
+
+	// 1. Run enhanced AI audit on an empty delivery report (mock LLM returns structured summary + proposed_text for summary & risks).
+	mockAuditJSON := `{"summary":"文档尚有 3 节未填写，且单节点部署存在 SPOF 风险，已给出可直接采纳的章节建议。","findings":[{"section_key":"summary","section":"1 概述","category":"completeness","level":"error","problem":"概述章节尚未填写。","evidence":"集群 etcd-rev 部署于 1 台主机 n1 (10.0.2.11)","suggest":"补充集群定位、节点规模与部署方式。","proposed_text":"本次交付部署了单节点 etcd 集群 etcd-rev（主机 n1 / 10.0.2.11），用于【待补充：业务用途】。"},{"section_key":"risks","section":"6 风险与遗留问题","category":"security","level":"warn","problem":"未披露单点部署风险与配置基线告警。","evidence":"单节点拓扑（1 台主机），无高可用备节点","suggest":"明确单点风险与后续扩容演练建议。","proposed_text":"- 当前集群为单节点部署（n1），存在单点故障（SPOF）风险，建议生产核心业务后续规划 3 节点高可用扩容。"}]}`
+	srvAudit, auditBodies := fakeModel(t, mockAuditJSON)
+	defer srvAudit.Close()
+	enableAI(t, s, srvAudit.URL, 0)
+
+	wChk := storeRequest(s, "POST", "/api/clusters/etcd-rev/docs/delivery/check", nil, alice, csrf)
+	if wChk.Code != 200 {
+		t.Fatalf("POST check failed: %d %s", wChk.Code, wChk.Body.String())
+	}
+	var chk docCheckResult
+	if err := json.Unmarshal(wChk.Body.Bytes(), &chk); err != nil {
+		t.Fatal(err)
+	}
+	if chk.Verdict != "needs_fill" || chk.Metrics.Empty != 3 || chk.Score >= 100 {
+		t.Fatalf("unexpected audit metrics/verdict: %+v", chk)
+	}
+	if !strings.Contains(strings.Join(*auditBodies, "\n"), "平台安全态势实时审计") {
+		t.Fatalf("expected live cluster security posture summary in audit prompt")
+	}
+	hasApplySummary := false
+	hasDraftAcceptance := false
+	for _, f := range chk.Findings {
+		if f.SectionKey == "summary" && f.ActionKind == "apply_text" && strings.Contains(f.ProposedText, "etcd-rev") {
+			hasApplySummary = true
+		}
+		// Acceptance was omitted by LLM, so deterministic pre-check MUST still cover it with draft_section!
+		if f.SectionKey == "acceptance" && f.ActionKind == "draft_section" {
+			hasDraftAcceptance = true
+		}
+	}
+	if !hasApplySummary || !hasDraftAcceptance {
+		t.Fatalf("expected merged LLM proposed_text + deterministic fallback findings, got %+v", chk.Findings)
+	}
+
+	// 2. Apply proposed_text directly via PUT sections/{key} with source="ai" & confirmed=true.
+	wApply := storeRequest(s, "PUT", "/api/clusters/etcd-rev/docs/delivery/sections/summary",
+		strings.NewReader(`{"text":"已采纳的概述正文","confirmed":true,"source":"ai"}`), alice, csrf)
+	if wApply.Code != 200 {
+		t.Fatalf("apply section failed: %d %s", wApply.Code, wApply.Body.String())
+	}
+	var docAfterApply clusterDoc
+	_ = json.Unmarshal(wApply.Body.Bytes(), &docAfterApply)
+	if sec := docSectionOf(&docAfterApply, "summary"); sec == nil || sec.Source != "ai" || !sec.Confirmed || docAfterApply.Empty != 2 {
+		t.Fatalf("expected confirmed AI section & empty=2, got sec=%+v empty=%d", sec, docAfterApply.Empty)
+	}
+
+	// 3. Batch-draft all remaining empty sections (risks + acceptance) in ONE call via POST .../draft-all!
+	srvDraftAll, _ := fakeModel(t, `{"sections":{"risks":"- 单节点部署风险。","acceptance":"- 当前交付材料已生成，待现场执行完成后验收。"}}`)
+	defer srvDraftAll.Close()
+	enableAI(t, s, srvDraftAll.URL, 0)
+
+	wDA := storeRequest(s, "POST", "/api/clusters/etcd-rev/docs/delivery/draft-all", strings.NewReader(`{}`), alice, csrf)
+	if wDA.Code != 200 {
+		t.Fatalf("POST draft-all failed: %d %s", wDA.Code, wDA.Body.String())
+	}
+	var daResp struct {
+		Drafted int        `json:"drafted"`
+		Doc     clusterDoc `json:"doc"`
+	}
+	_ = json.Unmarshal(wDA.Body.Bytes(), &daResp)
+	if daResp.Drafted != 2 || daResp.Doc.Empty != 0 || daResp.Doc.Drafts != 2 {
+		t.Fatalf("expected 2 drafted sections, 0 empty, 2 drafts; got %+v", daResp)
+	}
+}

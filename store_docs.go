@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"middleware-deployer/mwpack"
@@ -36,8 +37,12 @@ type docBlock struct {
 	Rows   [][]string `json:"rows,omitempty"`
 	Items  []string   `json:"items,omitempty"`
 	// Variant says which part of an execution report the block belongs to: auto (the playbooks that are run), cmd (the
-	// commands on each machine) or result (what was recorded on site). Empty blocks are always shown.
+	// commands on each machine), result (common on-site results), result_auto (raw Ansible execution logs), or
+	// result_cmd (Linux terminal command execution transcripts). Empty blocks are always shown.
 	Variant string `json:"variant,omitempty"`
+	// Style hints how a code block should be presented in Web and Word: "" / "shell" (command manual), "terminal" (dark
+	// Linux terminal session log), or "ansible" (raw automation log).
+	Style string `json:"style,omitempty"`
 	// An image block lists the pictures recorded for a step (Items) and the delivery they belong to.
 	Job string `json:"job,omitempty"`
 	// A section is a heading (Title) and text people write; Key names it.
@@ -95,10 +100,36 @@ type docSaved struct {
 }
 
 // docIndex lists the documents people started themselves: root-cause analyses of a plan that did not fail, or of an
-// incident that has nothing to do with a plan.
+// incident that has nothing to do with a plan, plus archived on-site change reports from AI chats.
 type docIndex struct {
-	RCA    []rcaEntry    `json:"rca"`
-	Assess []assessEntry `json:"assess,omitempty"`
+	RCA     []rcaEntry        `json:"rca"`
+	Assess  []assessEntry     `json:"assess,omitempty"`
+	Changes []changeNoteEntry `json:"changes,omitempty"`
+}
+
+type changeNoteEntry struct {
+	ID        string   `json:"id"`
+	Session   string   `json:"session,omitempty"`
+	Title     string   `json:"title"`
+	Symptom   string   `json:"symptom"`
+	Evidence  string   `json:"evidence,omitempty"`
+	Cause     string   `json:"cause"`
+	Fix       string   `json:"fix"`
+	Changed   bool     `json:"changed,omitempty"`
+	Followups []string `json:"followups,omitempty"`
+	Model     string   `json:"model,omitempty"`
+	Created   string   `json:"created"`
+	Updated   string   `json:"updated,omitempty"`
+	By        string   `json:"by"`
+}
+
+func (x docIndex) change(id string) (changeNoteEntry, bool) {
+	for _, e := range x.Changes {
+		if e.ID == id {
+			return e, true
+		}
+	}
+	return changeNoteEntry{}, false
 }
 
 // assessEntry is an assessment someone asked for: capacity (is the cluster big enough, what to grow) or selection
@@ -147,7 +178,8 @@ func (x docIndex) rca(id string) (rcaEntry, bool) {
 
 var (
 	docClusterID = regexp.MustCompile(`^[a-z][a-z0-9-]{0,40}$`)
-	docIDRe      = regexp.MustCompile(`^(delivery|kt|sop-[0-9a-f]{12}|rca-[0-9a-f]{32}|rca-x[0-9a-f]{12}|assess-[0-9a-f]{12})$`)
+	docIDRe      = regexp.MustCompile(`^(delivery|kt|sop-[0-9a-f]{12}|chg-[0-9a-f]{12}|rca-[0-9a-f]{32}|rca-x[0-9a-f]{12}|assess-[0-9a-f]{12})$`)
+	docIdxMu     sync.Mutex
 )
 
 func (s *storeServer) docPath(cluster, doc string) string {
@@ -636,12 +668,46 @@ func (s *storeServer) buildDelivery(f clusterFacts) *clusterDoc {
 		b.list(devs)
 	}
 	if sops := s.listFinalizedRehearsals(f.ID); len(sops) > 0 {
-		b.h(2, tr(lang, "5.1 已归档的生产变更实施方案", "5.1 Archived Production Change SOPs"))
+		b.h(2, tr(lang, "5.1 投产后变更台账与生产落地状态", "5.1 Post-Deployment Change Ledger"))
 		var rows [][]string
 		for _, rh := range sops {
-			rows = append(rows, []string{rh.Title, rh.Owner, stamp(rh.UpdatedAt), "sop-" + rh.ID})
+			statusText := tr(lang, "已定稿 · 待实施", "Finalized · Pending")
+			whoWhen := fmt.Sprintf("%s / %s", rh.Owner, stamp(rh.UpdatedAt))
+			sumText := firstNonEmptyStr(rh.AppliedSummary, rh.ScopeSummary, "—")
+			if rh.Applied && !rh.Voided {
+				statusText = tr(lang, "已落地生效", "Applied in Prod")
+				whoWhen = fmt.Sprintf("%s / %s", firstNonEmptyStr(rh.AppliedBy, rh.Owner), stamp(firstNonEmptyStr(rh.AppliedAt, rh.UpdatedAt)))
+			} else if rh.Voided {
+				statusText = tr(lang, "已作废", "Voided")
+				whoWhen = fmt.Sprintf("%s / %s", firstNonEmptyStr(rh.VoidedBy, rh.Owner), stamp(firstNonEmptyStr(rh.VoidedAt, rh.UpdatedAt)))
+				sumText = firstNonEmptyStr(rh.VoidReason, sumText)
+			}
+			rows = append(rows, []string{rh.Title, statusText, truncRunes(sumText, 120), whoWhen, "sop-" + rh.ID})
 		}
-		b.table([]string{tr(lang, "变更方案", "Change Plan"), tr(lang, "负责人", "Owner"), tr(lang, "定稿时间", "Finalized"), tr(lang, "文档编号", "Document ID")}, rows)
+		b.table([]string{
+			tr(lang, "变更方案", "Change Plan"),
+			tr(lang, "生产状态", "Prod Status"),
+			tr(lang, "生效变更摘要", "Effective Summary"),
+			tr(lang, "确认人 / 时间", "Confirmed By / At"),
+			tr(lang, "文档编号", "Document ID"),
+		}, rows)
+		if eff := effectiveAppliedChanges(s.listAppliedRehearsals(f.ID)); len(eff) > 0 {
+			b.h(2, tr(lang, "5.2 相对初始基线的当前最终生效参数与配置变更", "5.2 Effective Config & Parameter Deltas"))
+			var deltaRows [][]string
+			for _, ch := range eff {
+				src := ch.SourceTitle
+				if ch.UpdateCount > 1 {
+					src += tr(lang, fmt.Sprintf("（累计调整 %d 次，以最新为准）", ch.UpdateCount), fmt.Sprintf(" (updated %dx, latest active)", ch.UpdateCount))
+				}
+				deltaRows = append(deltaRows, []string{ch.Key, firstNonEmptyStr(ch.Before, "—"), ch.After, src})
+			}
+			b.table([]string{
+				tr(lang, "变更项", "Item"),
+				tr(lang, "初始/变更前", "Before"),
+				tr(lang, "当前最终生效", "Active Value"),
+				tr(lang, "最新来源变更", "Latest Source"),
+			}, deltaRows)
+		}
 	}
 	b.section(1, "risks", tr(lang, "6 风险与遗留问题", "6 Risks & Open Issues"), tr(lang, "仍然存在的风险、没有解决的问题和建议，例如执行中的偏差、单点、后续容量与监控关注项。", "Remaining risks, unresolved issues, and follow-up recommendations covering deviations, SPOFs, capacity, and monitoring."), true)
 	b.section(1, "acceptance", tr(lang, "7 验收结论", "7 Acceptance Conclusion"), tr(lang, "根据执行记录和测试结果给出结论；有失败或没执行的步骤要如实写明。", "Final acceptance verdict grounded in execution and verification logs; state any failed or unexecuted steps explicitly."), true)
@@ -922,6 +988,147 @@ func (s *storeServer) buildAssess(f clusterFacts, e assessEntry) *clusterDoc {
 	return d
 }
 
+func (s *storeServer) upsertChangeNoteDoc(clusterID string, rep aiReport) string {
+	if !docClusterID.MatchString(clusterID) {
+		return ""
+	}
+	docIdxMu.Lock()
+	defer docIdxMu.Unlock()
+	idx := s.docIndex(clusterID)
+	now := firstNonEmptyStr(rep.At, time.Now().UTC().Format(time.RFC3339))
+	title := truncRunes(firstNonEmptyStr(strings.TrimSpace(rep.Title), "现场变更报告"), 80)
+	for i := range idx.Changes {
+		if rep.Session != "" && idx.Changes[i].Session == rep.Session {
+			idx.Changes[i].Title = title
+			idx.Changes[i].Symptom = rep.Symptom
+			idx.Changes[i].Evidence = rep.Evidence
+			idx.Changes[i].Cause = rep.Cause
+			idx.Changes[i].Fix = rep.Fix
+			idx.Changes[i].Changed = rep.Changed
+			idx.Changes[i].Followups = rep.Followups
+			idx.Changes[i].Model = rep.Model
+			idx.Changes[i].Updated = now
+			idx.Changes[i].By = rep.By
+			_ = writeJSONFile(filepath.Join(s.cfg.DataDir, "docs", clusterID, "index.json"), idx)
+			return idx.Changes[i].ID
+		}
+	}
+	e := changeNoteEntry{
+		ID:        "chg-" + randomStoreToken(6),
+		Session:   rep.Session,
+		Title:     title,
+		Symptom:   rep.Symptom,
+		Evidence:  rep.Evidence,
+		Cause:     rep.Cause,
+		Fix:       rep.Fix,
+		Changed:   rep.Changed,
+		Followups: rep.Followups,
+		Model:     rep.Model,
+		Created:   now,
+		Updated:   now,
+		By:        rep.By,
+	}
+	idx.Changes = append([]changeNoteEntry{e}, idx.Changes...)
+	if err := writeJSONFile(filepath.Join(s.cfg.DataDir, "docs", clusterID, "index.json"), idx); err != nil {
+		return ""
+	}
+	return e.ID
+}
+
+func appendMarkdownBlocks(b *docBuilder, raw string) {
+	lines := strings.Split(strings.ReplaceAll(raw, "\r\n", "\n"), "\n")
+	var paraBuf []string
+	var codeBuf []string
+	inCode := false
+	flushPara := func() {
+		if len(paraBuf) == 0 {
+			return
+		}
+		txt := strings.TrimSpace(strings.Join(paraBuf, "\n"))
+		if txt != "" {
+			b.p(txt)
+		}
+		paraBuf = nil
+	}
+	for _, ln := range lines {
+		trim := strings.TrimSpace(ln)
+		if strings.HasPrefix(trim, "```") {
+			if !inCode {
+				flushPara()
+				inCode = true
+				codeBuf = nil
+			} else {
+				b.code(strings.Join(codeBuf, "\n"))
+				inCode = false
+				codeBuf = nil
+			}
+			continue
+		}
+		if inCode {
+			codeBuf = append(codeBuf, ln)
+			continue
+		}
+		if trim == "" {
+			flushPara()
+		} else {
+			paraBuf = append(paraBuf, ln)
+		}
+	}
+	if inCode && len(codeBuf) > 0 {
+		b.code(strings.Join(codeBuf, "\n"))
+	} else {
+		flushPara()
+	}
+}
+
+func (s *storeServer) buildChangeNoteDoc(f clusterFacts, e changeNoteEntry) *clusterDoc {
+	lang := f.Lang
+	sub := firstNonEmptyStr(e.Title, tr(lang, "现场变更与处置", "On-Site Change"))
+	ts := firstNonEmptyStr(e.Updated, e.Created)
+	coverFacts := [][2]string{
+		{tr(lang, "变更主题", "Change Title"), sub},
+		{tr(lang, "归档时间", "Archived At"), stamp(ts) + tr(lang, "，", ", ") + e.By},
+		{tr(lang, "记录来源", "Source"), tr(lang, "AI 助手对话归档", "AI Assistant Chat")},
+	}
+	if e.Changed {
+		coverFacts = append(coverFacts, [2]string{tr(lang, "基线偏差", "Baseline Drift"), tr(lang, "已标记首次交付规格待同步改进", "Flagged baseline delivery for follow-up update")})
+	}
+	d := &clusterDoc{
+		ID:       e.ID,
+		Kind:     "change",
+		Title:    tr(lang, "变更报告", "Change Report"),
+		Subtitle: sub,
+		Cluster:  f.ID,
+		Cover:    f.cover(coverFacts...),
+		Updated:  ts,
+		Manual:   true,
+	}
+	b := &docBuilder{}
+	if strings.TrimSpace(e.Symptom) != "" {
+		b.h(1, tr(lang, "1 变更背景与现象", "1 Background & Context"))
+		appendMarkdownBlocks(b, e.Symptom)
+	}
+	if strings.TrimSpace(e.Cause) != "" {
+		b.h(1, tr(lang, "2 原因与变更依据", "2 Root Cause & Rationale"))
+		appendMarkdownBlocks(b, e.Cause)
+	}
+	if strings.TrimSpace(e.Fix) != "" {
+		b.h(1, tr(lang, "3 执行命令与处理经过", "3 Execution Commands & Resolution"))
+		appendMarkdownBlocks(b, e.Fix)
+	}
+	if strings.TrimSpace(e.Evidence) != "" {
+		b.h(1, tr(lang, "4 关键现场证据", "4 Key Evidence"))
+		b.code(e.Evidence)
+	}
+	if len(e.Followups) > 0 {
+		b.h(1, tr(lang, "5 后续跟进事项", "5 Follow-Up Actions"))
+		b.list(e.Followups)
+	}
+	b.section(1, "remark", tr(lang, "附：复核与签字说明", "Appendix: Review & Sign-Off Notes"), tr(lang, "可补充本次变更的审批单号、观察结果或复核签字信息。", "Optional ticket ID, post-change observations, or sign-off notes."), false)
+	d.Blocks = b.blocks
+	return d
+}
+
 // rcaJobs are the plans that failed, or had failed steps, and so deserve a root-cause analysis.
 func rcaJobs(f clusterFacts) []storeJob {
 	var out []storeJob
@@ -947,6 +1154,12 @@ func (s *storeServer) buildDoc(f clusterFacts, id string) (*clusterDoc, bool) {
 		if !ok {
 			return nil, false
 		}
+	case strings.HasPrefix(id, "chg-"):
+		e, ok := s.docIndex(f.ID).change(id)
+		if !ok {
+			return nil, false
+		}
+		d = s.buildChangeNoteDoc(f, e)
 	case strings.HasPrefix(id, "assess-"):
 		e, ok := s.docIndex(f.ID).assess(id)
 		if !ok {
@@ -1008,6 +1221,9 @@ func (s *storeServer) buildDoc(f clusterFacts, id string) (*clusterDoc, bool) {
 func docIDs(f clusterFacts, idx docIndex, sopIDs []string) []string {
 	ids := []string{"delivery", "kt"}
 	ids = append(ids, sopIDs...)
+	for _, e := range idx.Changes {
+		ids = append(ids, e.ID)
+	}
 	seen := map[string]bool{}
 	for _, j := range rcaJobs(f) {
 		ids = append(ids, "rca-"+j.ID)
@@ -1363,7 +1579,11 @@ func writeDocBodyLang(w *docxWriter, d *clusterDoc, shift int, load func(job, na
 		case "note":
 			w.note(b.Text)
 		case "code":
-			w.code(b.Text)
+			if b.Style == "terminal" {
+				w.terminal(b.Text)
+			} else {
+				w.codeStyled(b.Text, b.Style)
+			}
 		case "old":
 			w.struck(b.Title, b.Text, b.Items)
 		case "list":
@@ -1579,9 +1799,11 @@ func (s *storeServer) handleCluster(w http.ResponseWriter, r *http.Request, sess
 		s.writeJSON(w, 200, out)
 	case len(parts) >= 2 && parts[1] == "rehearsals":
 		s.handleRehearsals(w, r, session, f, parts[2:])
+	case len(parts) >= 2 && parts[1] == "security":
+		s.handleClusterSecurity(w, r, session, f, parts[2:])
 	case len(parts) == 2 && parts[1] == "docs" && r.Method == "POST":
 		s.startRCA(w, r, session, f)
-	case len(parts) == 3 && parts[1] == "docs" && (strings.HasPrefix(parts[2], "rca-") || strings.HasPrefix(parts[2], "assess-")) && r.Method == "DELETE":
+	case len(parts) == 3 && parts[1] == "docs" && (strings.HasPrefix(parts[2], "rca-") || strings.HasPrefix(parts[2], "assess-") || strings.HasPrefix(parts[2], "chg-")) && r.Method == "DELETE":
 		s.dropRCA(w, r, session, f, parts[2])
 	case len(parts) == 2 && parts[1] == "export" && r.Method == "GET":
 		s.exportDocs(w, r, session, f)
@@ -1598,6 +1820,8 @@ func (s *storeServer) handleCluster(w http.ResponseWriter, r *http.Request, sess
 			s.saveSection(w, r, session, f, d, parts[4])
 		case len(parts) == 6 && parts[3] == "sections" && parts[5] == "draft" && r.Method == "POST":
 			s.draftSection(w, r, session, f, d, parts[4])
+		case len(parts) == 4 && parts[3] == "draft-all" && r.Method == "POST":
+			s.draftAllSections(w, r, session, f, d)
 		case len(parts) == 4 && parts[3] == "check" && r.Method == "POST":
 			s.checkDoc(w, r, session, f, d)
 		default:
@@ -1628,6 +1852,7 @@ func (s *storeServer) saveSection(w http.ResponseWriter, r *http.Request, sessio
 	var in struct {
 		Text      string `json:"text"`
 		Confirmed bool   `json:"confirmed"`
+		Source    string `json:"source"`
 	}
 	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 256<<10)).Decode(&in) != nil || len([]rune(in.Text)) > 20000 {
 		s.fail(w, 400, "每一节最多 20000 字")
@@ -1636,7 +1861,9 @@ func (s *storeServer) saveSection(w http.ResponseWriter, r *http.Request, sessio
 	saved := s.docLoad(f.ID, d.ID)
 	old := saved.Sections[key]
 	src := "user"
-	if strings.TrimSpace(in.Text) == strings.TrimSpace(old.Text) && old.Source != "" {
+	if in.Source == "ai" {
+		src = "ai"
+	} else if strings.TrimSpace(in.Text) == strings.TrimSpace(old.Text) && old.Source != "" {
 		src = old.Source
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
@@ -1709,7 +1936,7 @@ func (s *storeServer) exportDocs(w http.ResponseWriter, r *http.Request, session
 	for _, d := range docs {
 		ids = append(ids, d.ID)
 	}
-	s.auditReq(r, "doc-export", session.User, f.ID+" "+strings.Join(ids, ",")+map[bool]string{true: " 合并", false: ""}[merge]+fmt.Sprintf(" 自动化=%t 命令=%t 结果=%t", opt.Auto, opt.Cmd, opt.Result))
+	s.auditReq(r, "doc-export", session.User, f.ID+" "+strings.Join(ids, ",")+map[bool]string{true: " 合并", false: ""}[merge]+fmt.Sprintf(" 自动化=%t 命令=%t 结果=%t 终端日志=%t 自动化日志=%t", opt.Auto, opt.Cmd, opt.Result, opt.LogCmd, opt.LogAuto))
 	w.Header().Set("Content-Type", ctype)
 	w.Header().Set("Content-Disposition", "attachment; filename=cluster-docs; filename*=UTF-8''"+url.PathEscape(name))
 	_, _ = w.Write(data)
@@ -1778,6 +2005,8 @@ func (s *storeServer) startRCA(w http.ResponseWriter, r *http.Request, session s
 
 // dropRCA removes a root-cause analysis someone started by hand, with what was written in it.
 func (s *storeServer) dropRCA(w http.ResponseWriter, r *http.Request, session storeSession, f clusterFacts, id string) {
+	docIdxMu.Lock()
+	defer docIdxMu.Unlock()
 	idx := s.docIndex(f.ID)
 	keep := idx.RCA[:0]
 	found := false
@@ -1797,8 +2026,17 @@ func (s *storeServer) dropRCA(w http.ResponseWriter, r *http.Request, session st
 		ka = append(ka, e)
 	}
 	idx.Assess = ka
+	kc := idx.Changes[:0]
+	for _, e := range idx.Changes {
+		if e.ID == id {
+			found = true
+			continue
+		}
+		kc = append(kc, e)
+	}
+	idx.Changes = kc
 	if !found {
-		s.fail(w, 409, "只有手动发起的根因分析可以删除；交付执行失败自动产生的会一直保留")
+		s.fail(w, 409, "只有手动归档的变更报告、评估或根因分析可以删除；交付执行失败自动产生的会一直保留")
 		return
 	}
 	idx.RCA = keep

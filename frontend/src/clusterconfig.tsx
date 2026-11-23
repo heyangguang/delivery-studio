@@ -2,6 +2,7 @@ import { sameScheme, SchemeInfo } from "./scheme";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
+  Drawer,
   Input,
   Select,
   Skeleton,
@@ -13,6 +14,7 @@ import {
   IconCheck,
   IconCopy,
   IconDesktop,
+  IconDown,
   IconDownload,
   IconEye,
   IconEyeInvisible,
@@ -23,6 +25,7 @@ import {
   IconSearch,
 } from "@arco-design/web-react/icon";
 import {
+  ago,
   api,
   can,
   copy,
@@ -31,6 +34,7 @@ import {
   useConnectivity,
 } from "./shared";
 import type {
+  ChangeRehearsal,
   ClusterView,
   HostSpec,
   InstanceView,
@@ -42,6 +46,10 @@ import type {
 import { go } from "./router";
 import { AppGlyph, Segmented } from "./ui";
 import { cachedDetail, putDetailCache } from "./deliveries";
+import {
+  computeEffectiveClusterChanges,
+  type EffectiveClusterChange,
+} from "./rehearsal";
 import { bi, useLang, withLang } from "./i18n";
 import "./clusterconfig.css";
 
@@ -74,6 +82,30 @@ const display = (v: unknown): string =>
           ? v.map(raw).join(bi("、", ", ")) || bi("无", "None")
           : raw(v);
 const schemaKey = (i: InstanceView) => `${i.component}@${i.version}`;
+const normParamKey = (k: string) =>
+  k.trim().toLowerCase().replace(/-/g, "_");
+
+const COMPONENT_KEY_HINTS: [RegExp, string[]][] = [
+  [
+    /^(pg_|postgres|patroni|log_|logging_|wal_|max_connections|shared_buffers|work_mem|maintenance_work_mem|effective_cache|synchronous_|checkpoint|autovacuum|archive_|hot_standby|max_wal|min_wal|idle_in_transaction|statement_timeout|ssl_|restapi_)/i,
+    ["postgresql", "patroni"],
+  ],
+  [
+    /^(etcd|quota_backend|heartbeat_interval|election_timeout|auto_compaction|snapshot_count)/i,
+    ["etcd"],
+  ],
+  [
+    /^(redis|maxmemory|appendonly|appendfsync|requirepass|masterauth|sentinel|hz|tcp_keepalive|databases|save)/i,
+    ["redis"],
+  ],
+  [
+    /^(nginx|worker_processes|worker_connections|keepalive_timeout|client_max_body|gzip|upstream|proxy_)/i,
+    ["nginx"],
+  ],
+  [/^(haproxy|maxconn|timeout_connect|timeout_client|timeout_server|balance)/i, ["haproxy"]],
+  [/^(keepalived|vrrp|virtual_ip|unicast_peer|priority|advert_int)/i, ["keepalived"]],
+];
+
 type ParamRow = {
   key: string;
   value: unknown;
@@ -82,6 +114,8 @@ type ParamRow = {
   label: string;
   specified: boolean;
   active: boolean;
+  applied?: EffectiveClusterChange;
+  runtimeAdded?: boolean;
 };
 type SearchHit = {
   id: string;
@@ -146,10 +180,12 @@ export function ClusterConfig({
   c,
   source,
   section,
+  rehearsals,
 }: {
   c: ClusterView;
   source?: string;
   section?: string;
+  rehearsals?: ChangeRehearsal[] | null;
 }) {
   useLang();
   const id = source || c.current || c.head || c.plans[0]?.id;
@@ -179,7 +215,14 @@ export function ClusterConfig({
       </Empty>
     );
   return (
-    <ConfigRecord key={p.id} c={c} p={p} source={source} section={section} />
+    <ConfigRecord
+      key={p.id}
+      c={c}
+      p={p}
+      source={source}
+      section={section}
+      rehearsals={rehearsals}
+    />
   );
 }
 
@@ -188,11 +231,13 @@ function ConfigRecord({
   p,
   source,
   section,
+  rehearsals,
 }: {
   c: ClusterView;
   p: PlanEntry;
   source?: string;
   section?: string;
+  rehearsals?: ChangeRehearsal[] | null;
 }) {
   const lang = useLang();
   const [data, setData] = useState<JobDetail | null>(() => cachedDetail(p.id));
@@ -216,7 +261,9 @@ function ConfigRecord({
   const [focusKey, setFocusKey] = useState("");
   const [rawView, setRawView] = useState("yaml");
   const [roleFilter, setRoleFilter] = useState("all");
-  const [onlySpecified, setOnlySpecified] = useState(false);
+  const [paramFilter, setParamFilter] = useState<"all" | "changed" | "specified">("all");
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [expandedHistoryIds, setExpandedHistoryIds] = useState<Record<string, boolean>>({});
   const [shownSecrets, setShownSecrets] = useState<Record<string, boolean>>({});
   const [rawCopied, setRawCopied] = useState(false);
   const rawCopyTimer = useRef<number | null>(null);
@@ -305,6 +352,73 @@ function ConfigRecord({
     return () => abort.abort();
   }, [keys, schemaRetry, lang]);
 
+  const current = p.id === c.current;
+  const appliedList = useMemo(
+    () =>
+      (rehearsals || [])
+        .filter((x) => x.stage === "finalized" && x.applied && !x.voided)
+        .slice()
+        .sort((a, b) =>
+          (b.applied_at || b.updated_at || "").localeCompare(
+            a.applied_at || a.updated_at || "",
+          ),
+        ),
+    [rehearsals],
+  );
+  const effectiveChanges = useMemo(
+    () =>
+      current || !c.current
+        ? computeEffectiveClusterChanges(appliedList)
+        : { items: [] as EffectiveClusterChange[], latestByKey: new Map<string, EffectiveClusterChange>() },
+    [appliedList, current, c.current],
+  );
+
+  // Assign each merged effective production change to its owning component instance.
+  const effectiveByInstance = useMemo(() => {
+    const map = new Map<string, EffectiveClusterChange[]>();
+    const nonExt = instances.filter((i) => !i.external);
+    if (!nonExt.length || !effectiveChanges.items.length) return map;
+    const primary =
+      nonExt.find((i) => i.component === c.app_id) || nonExt[0];
+    const ordered = primary
+      ? [primary, ...nonExt.filter((i) => i.id !== primary.id)]
+      : nonExt;
+
+    const push = (instId: string, ef: EffectiveClusterChange) => {
+      const list = map.get(instId);
+      if (list) list.push(ef);
+      else map.set(instId, [ef]);
+    };
+
+    for (const ef of effectiveChanges.items) {
+      const nk = normParamKey(ef.key);
+      // 1) Exact / normalized match in Day-0 instance params
+      let owner = ordered.find((i) =>
+        Object.keys(i.params || {}).some((k) => normParamKey(k) === nk),
+      );
+      // 2) Exact / normalized match in component schema param definitions
+      if (!owner) {
+        owner = ordered.find((i) =>
+          (schemas[schemaKey(i)]?.params || []).some(
+            (d) => normParamKey(d.key) === nk,
+          ),
+        );
+      }
+      // 3) Keyword/prefix affinity match
+      if (!owner) {
+        const hint = COMPONENT_KEY_HINTS.find(([re]) => re.test(ef.key));
+        if (hint) {
+          owner = ordered.find((i) => hint[1].includes(i.component));
+        }
+      }
+      // 4) Fallback to primary app instance
+      push((owner || primary).id, ef);
+    }
+    return map;
+  }, [instances, schemas, effectiveChanges.items, c.app_id]);
+
+  const runtimeGroupLabel = bi("运行期生产变更", "Production Runtime Changes");
+
   const parameterRows = useMemo(
     () =>
       new Map(
@@ -313,12 +427,24 @@ function ConfigRecord({
           const explicit =
             dep?.instances.find((sp) => sp.id === i.id)?.params || {};
           const defs = new Map((s?.params || []).map((d) => [d.key, d]));
+          const defsNorm = new Map(
+            (s?.params || []).map((d) => [normParamKey(d.key), d]),
+          );
           const order = new Map(
             (s?.params || []).map((d, index) => [d.key, index]),
           );
-          const rows = Object.entries(i.params)
+          const instChanges = effectiveByInstance.get(i.id) || [];
+          const changeByNorm = new Map(
+            instChanges.map((ef) => [normParamKey(ef.key), ef]),
+          );
+          const matchedNorms = new Set<string>();
+
+          const baseRows: ParamRow[] = Object.entries(i.params)
             .map(([key, value]) => {
               const def = defs.get(key);
+              const nk = normParamKey(key);
+              const applied = changeByNorm.get(nk);
+              if (applied) matchedNorms.add(nk);
               return {
                 key,
                 value,
@@ -329,15 +455,35 @@ function ConfigRecord({
                 label: def?.label || key,
                 specified: Object.hasOwn(explicit, key),
                 active: i.visible?.[key] !== false,
+                applied,
               };
             })
             .sort((a, b) => {
               return (order.get(a.key) ?? 9999) - (order.get(b.key) ?? 9999);
             });
-          return [i.id, rows] as const;
+
+          // Synthesize runtime-added params (e.g. logging_collector, pg_hba) directly inside this component!
+          const extraRows: ParamRow[] = instChanges
+            .filter((ef) => !matchedNorms.has(normParamKey(ef.key)))
+            .map((ef) => {
+              const def = defsNorm.get(normParamKey(ef.key));
+              return {
+                key: ef.key,
+                value: ef.after,
+                def,
+                group: runtimeGroupLabel,
+                label: def?.label || ef.key,
+                specified: false,
+                active: true,
+                applied: ef,
+                runtimeAdded: true,
+              };
+            });
+
+          return [i.id, [...extraRows, ...baseRows]] as [string, ParamRow[]];
         }),
       ),
-    [instances, schemas, dep, lang],
+    [instances, schemas, dep, lang, effectiveByInstance, runtimeGroupLabel],
   );
   const rowsFor = (i: InstanceView): ParamRow[] =>
     parameterRows.get(i.id) || [];
@@ -353,23 +499,27 @@ function ConfigRecord({
       label: bi("机器与角色", "Hosts & Roles"),
       note: hosts.length === 1 ? bi("1 台", "1 host") : bi(`${hosts.length} 台`, `${hosts.length} hosts`),
       icon: <IconDesktop />,
+      changeCount: 0,
     },
     {
       id: "access",
       label: bi("访问入口", "Access Endpoints"),
       note: routes.length === 1 ? bi("1 个端点", "1 endpoint") : bi(`${routes.length} 个端点`, `${routes.length} endpoints`),
       icon: <IconLink />,
+      changeCount: 0,
     },
     ...instances.map((i) => ({
       id: `component:${i.id}`,
       label: i.title,
       note: i.id,
       icon: <AppGlyph id={i.component} size={20} />,
+      changeCount: (effectiveByInstance.get(i.id) || []).length,
     })),
-    { id: "spec", label: bi("原始规格", "Raw Spec"), note: "YAML / JSON", icon: <IconFile /> },
+    { id: "spec", label: bi("原始规格", "Raw Spec"), note: "YAML / JSON", icon: <IconFile />, changeCount: 0 },
   ];
   const selected = section || "hosts";
   const active = nav.find((n) => n.id === selected);
+  const pendingFilterRef = useRef<"all" | "changed" | "specified" | null>(null);
   useEffect(() => {
     const list = navigation.current;
     const button = list?.querySelector<HTMLElement>('[aria-current="page"]');
@@ -382,13 +532,28 @@ function ConfigRecord({
   }, [selected, data]);
   const instance = instances.find((i) => `component:${i.id}` === selected);
   useEffect(() => {
-    setOnlySpecified(false);
+    if (pendingFilterRef.current) {
+      setParamFilter(pendingFilterRef.current);
+      pendingFilterRef.current = null;
+    } else {
+      setParamFilter("all");
+    }
   }, [selected]);
-  const navigate = (next: string, focus = "") => {
+  const navigate = (
+    next: string,
+    focus = "",
+    initialFilter: "all" | "changed" | "specified" = "all",
+  ) => {
     setQuery("");
     setFocusKey(focus);
     if (next === "hosts") setRoleFilter("all");
-    if (next.startsWith("component:")) setOnlySpecified(false);
+    if (next.startsWith("component:")) {
+      if (next === selected) {
+        setParamFilter(initialFilter);
+      } else {
+        pendingFilterRef.current = initialFilter;
+      }
+    }
     go({ name: "deliveries", id: c.id, tab: "config", source, section: next });
   };
   useEffect(() => {
@@ -434,7 +599,11 @@ function ConfigRecord({
         section: `component:${i.id}`,
         title: `${r.label} · ${r.key}`,
         context: `${i.title} · ${i.id} · ${r.group}`,
-        value: isSecretRow(r) ? "••••••••" : display(r.value),
+        value: isSecretRow(r)
+          ? "••••••••"
+          : r.applied
+            ? `${r.applied.before ? `${r.applied.before} → ` : ""}${r.applied.after}`
+            : display(r.value),
         focus: r.key,
       })),
     ),
@@ -458,7 +627,6 @@ function ConfigRecord({
       return searchable.toLocaleLowerCase().includes(t);
     }),
   );
-  const current = p.id === c.current;
   const stateLabel =
     p.outcome === "void"
       ? bi("已作废的交付", "Voided delivery")
@@ -524,16 +692,31 @@ function ConfigRecord({
     : hosts;
 
   const allInstanceRows = instance ? rowsFor(instance) : [];
+  const changedCount = allInstanceRows.filter((r) => Boolean(r.applied)).length;
   const specifiedCount = allInstanceRows.filter((r) => r.specified).length;
   const canFilterSpecified =
     Boolean(plan) && specifiedCount > 0 && specifiedCount < allInstanceRows.length;
+  const canFilterRows = changedCount > 0 || canFilterSpecified;
   const visibleInstanceRows =
-    canFilterSpecified && onlySpecified
-      ? allInstanceRows.filter((r) => r.specified)
-      : allInstanceRows;
+    paramFilter === "changed" && changedCount > 0
+      ? allInstanceRows.filter((r) => Boolean(r.applied))
+      : paramFilter === "specified" && canFilterSpecified
+        ? allInstanceRows.filter((r) => r.specified)
+        : allInstanceRows;
   const paramGroups = instance
     ? [...new Set(visibleInstanceRows.map((r) => r.group))]
     : [];
+  const primaryChangedInstanceId = useMemo(() => {
+    let best = "";
+    let max = 0;
+    for (const [id, list] of effectiveByInstance.entries()) {
+      if (list.length > max) {
+        best = id;
+        max = list.length;
+      }
+    }
+    return best;
+  }, [effectiveByInstance]);
 
   return (
     <div className="cx">
@@ -620,6 +803,54 @@ function ConfigRecord({
             </button>
           </p>
         )}
+        {appliedList.length > 0 && (current || !c.current) && (
+          <div className="cx-chg-strip" role="status">
+            <span className="cx-chg-strip-main">
+              <span className="cx-chg-dot" aria-hidden />
+              <b>
+                {bi(
+                  `已叠加 ${appliedList.length} 次生产变更`,
+                  `${appliedList.length} production change(s) applied`,
+                )}
+              </b>
+              {effectiveChanges.items.length > 0 && (
+                <span className="cx-chg-strip-sub">
+                  {bi(
+                    `· 共 ${effectiveChanges.items.length} 项参数/规则已合并至下方对应组件`,
+                    `· ${effectiveChanges.items.length} parameter/rule updates merged inline below`,
+                  )}
+                </span>
+              )}
+            </span>
+            <span className="cx-chg-strip-acts">
+              {primaryChangedInstanceId && effectiveChanges.items.length > 0 && (
+                <button
+                  type="button"
+                  className="cx-chg-strip-btn primary"
+                  onClick={() =>
+                    navigate(`component:${primaryChangedInstanceId}`, "", "changed")
+                  }
+                >
+                  {bi(
+                    `查看变更项 (${effectiveChanges.items.length})`,
+                    `View Changes (${effectiveChanges.items.length})`,
+                  )}
+                  <IconRight />
+                </button>
+              )}
+              <button
+                type="button"
+                className="cx-chg-strip-btn"
+                onClick={() => setHistoryOpen(true)}
+              >
+                {bi(
+                  `变更历史 (${appliedList.length})`,
+                  `History (${appliedList.length})`,
+                )}
+              </button>
+            </span>
+          </div>
+        )}
       </div>
       {(net !== "online" || error) && (
         <div className="cx-notice" role="status">
@@ -695,6 +926,17 @@ function ConfigRecord({
                         ? bi("外部负载均衡", "External LB")
                         : n.label}
                     </span>
+                    {n.changeCount > 0 && (
+                      <em
+                        className="cx-nav-chg-cnt num"
+                        title={bi(
+                          `${n.changeCount} 项生产变更已生效`,
+                          `${n.changeCount} applied production change(s)`,
+                        )}
+                      >
+                        {n.changeCount}
+                      </em>
+                    )}
                   </button>
                 ))}
               </nav>
@@ -814,7 +1056,7 @@ function ConfigRecord({
                           label={bi("机器 IP 列表", "Host IP list")}
                         />
                       )}
-                      {instance && canFilterSpecified && (
+                      {instance && canFilterRows && (
                         <div
                           className="cx-scope-pills"
                           role="group"
@@ -822,18 +1064,29 @@ function ConfigRecord({
                         >
                           <button
                             type="button"
-                            className={`cx-filter-pill ${!onlySpecified ? "on" : ""}`}
-                            onClick={() => setOnlySpecified(false)}
+                            className={`cx-filter-pill ${paramFilter === "all" ? "on" : ""}`}
+                            onClick={() => setParamFilter("all")}
                           >
                             {bi("全部", "All")} <em>{allInstanceRows.length}</em>
                           </button>
-                          <button
-                            type="button"
-                            className={`cx-filter-pill ${onlySpecified ? "on" : ""}`}
-                            onClick={() => setOnlySpecified(true)}
-                          >
-                            {bi("已指定", "Specified")} <em>{specifiedCount}</em>
-                          </button>
+                          {changedCount > 0 && (
+                            <button
+                              type="button"
+                              className={`cx-filter-pill is-chg ${paramFilter === "changed" ? "on" : ""}`}
+                              onClick={() => setParamFilter("changed")}
+                            >
+                              {bi("已变更", "Changed")} <em>{changedCount}</em>
+                            </button>
+                          )}
+                          {canFilterSpecified && (
+                            <button
+                              type="button"
+                              className={`cx-filter-pill ${paramFilter === "specified" ? "on" : ""}`}
+                              onClick={() => setParamFilter("specified")}
+                            >
+                              {bi("已指定", "Specified")} <em>{specifiedCount}</em>
+                            </button>
+                          )}
                         </div>
                       )}
                       {instance && (
@@ -1099,7 +1352,10 @@ function ConfigRecord({
                       )}
                       <div className="cx-param-groups">
                         {paramGroups.map((group) => (
-                          <div className="cx-param-group" key={group}>
+                          <div
+                            className={`cx-param-group${group === runtimeGroupLabel ? " is-runtime-group" : ""}`}
+                            key={group}
+                          >
                             <h3>
                               {group}
                               <span>
@@ -1118,24 +1374,58 @@ function ConfigRecord({
                                 const revealed = Boolean(
                                   shownSecrets[secretKey],
                                 );
+                                const ef = r.applied;
+                                const oldDiffVal = ef
+                                  ? ef.before ||
+                                    (!r.runtimeAdded ? display(r.value) : "")
+                                  : "";
                                 return (
                                   <div
                                     key={r.key}
-                                    className={`cx-param ${r.active ? "" : "inactive"} ${focusKey === r.key ? "focused" : ""}`}
+                                    className={`cx-param ${r.active ? "" : "inactive"} ${ef ? "is-changed" : ""} ${focusKey === r.key ? "focused" : ""}`}
                                     data-config-key={r.key}
                                     tabIndex={-1}
                                   >
                                     <div className="cx-param-name">
                                       <Tooltip
-                                        content={r.def?.hint || r.key}
+                                        content={
+                                          r.def?.hint ||
+                                          (ef
+                                            ? bi(
+                                                `来自变更《${ef.source_title}》`,
+                                                `From change "${ef.source_title}"`,
+                                              )
+                                            : r.key)
+                                        }
                                         mini
                                       >
                                         <b>{r.label}</b>
                                       </Tooltip>
                                       <code>{r.key}</code>
                                     </div>
-                                    <div className="cx-param-value">
-                                      {typeof r.value === "boolean" ? (
+                                    <div
+                                      className={`cx-param-value${ef ? " is-diff" : ""}`}
+                                    >
+                                      {ef ? (
+                                        <>
+                                          {oldDiffVal && (
+                                            <>
+                                              <del className="cx-val-old mono">
+                                                {oldDiffVal}
+                                              </del>
+                                              <span
+                                                className="cx-val-arrow"
+                                                aria-hidden
+                                              >
+                                                →
+                                              </span>
+                                            </>
+                                          )}
+                                          <code className="cx-val-new">
+                                            {ef.after}
+                                          </code>
+                                        </>
+                                      ) : typeof r.value === "boolean" ? (
                                         <span
                                           className={`cx-bool ${r.value ? "yes" : ""}`}
                                         >
@@ -1183,20 +1473,45 @@ function ConfigRecord({
                                       ) : (
                                         <code>{display(r.value)}</code>
                                       )}
-                                      {r.def?.unit && r.value !== "" && (
+                                      {!ef && r.def?.unit && r.value !== "" && (
                                         <small>{r.def.unit}</small>
                                       )}
                                     </div>
                                     <span className="cx-param-origin">
-                                      {!r.active
-                                        ? bi("未启用", "Inactive")
-                                        : !plan
-                                          ? bi("提交值", "Submitted")
-                                          : r.specified
-                                            ? bi("已指定", "Specified")
-                                            : bi("生成时补全", "Defaulted")}
+                                      {ef ? (
+                                        <Tooltip
+                                          mini
+                                          content={bi(
+                                            `由《${ef.source_title}》于 ${ago(ef.applied_at)} 生效${ef.update_count > 1 ? `（累计调整 ${ef.update_count} 次，当前为最新值）` : ""} · 点击查看变更历史`,
+                                            `Applied via "${ef.source_title}" ${ago(ef.applied_at)}${ef.update_count > 1 ? ` (${ef.update_count} updates merged)` : ""} · Click for history`,
+                                          )}
+                                        >
+                                          <button
+                                            type="button"
+                                            className="cx-origin-chg"
+                                            onClick={() => setHistoryOpen(true)}
+                                          >
+                                            <IconCheck />
+                                            <span>{bi("生产变更", "Changed")}</span>
+                                            {ef.update_count > 1 && (
+                                              <em className="num">×{ef.update_count}</em>
+                                            )}
+                                          </button>
+                                        </Tooltip>
+                                      ) : !r.active ? (
+                                        bi("未启用", "Inactive")
+                                      ) : !plan ? (
+                                        bi("提交值", "Submitted")
+                                      ) : r.specified ? (
+                                        bi("已指定", "Specified")
+                                      ) : (
+                                        bi("生成时补全", "Defaulted")
+                                      )}
                                     </span>
-                                    <CopyValue value={r.value} label={r.label} />
+                                    <CopyValue
+                                      value={ef ? ef.after : r.value}
+                                      label={r.label}
+                                    />
                                   </div>
                                 );
                               })}
@@ -1344,6 +1659,160 @@ function ConfigRecord({
           </div>
         </>
       )}
+      <Drawer
+        visible={historyOpen}
+        onCancel={() => setHistoryOpen(false)}
+        width={560}
+        footer={null}
+        className="cx-chg-drawer"
+        title={
+          <div className="cx-chg-drawer-head">
+            <b>
+              {bi(
+                `生产变更历史（${appliedList.length} 次）`,
+                `Production Change History (${appliedList.length})`,
+              )}
+            </b>
+            <span>
+              {bi(
+                "所有已生效参数已按时间归并至对应组件配置，此处可追溯每次变更详情与报告",
+                "Effective changes are merged inline per component; inspect individual rollout records below",
+              )}
+            </span>
+          </div>
+        }
+      >
+        <div className="cx-chg-drawer-body">
+          {appliedList.map((rh, idx) => {
+            const open = expandedHistoryIds[rh.id] ?? idx === 0;
+            const changes = rh.applied_changes || [];
+            return (
+              <div
+                key={rh.id}
+                className={`cx-hist-row${open ? " is-open" : ""}`}
+              >
+                <div
+                  className="cx-hist-head"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() =>
+                    setExpandedHistoryIds((prev) => ({
+                      ...prev,
+                      [rh.id]: !open,
+                    }))
+                  }
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setExpandedHistoryIds((prev) => ({
+                        ...prev,
+                        [rh.id]: !open,
+                      }));
+                    }
+                  }}
+                >
+                  <span className="cx-chg-dot" aria-hidden />
+                  <div className="cx-hist-title-col">
+                    <b>{rh.title}</b>
+                    <small className="num">
+                      {rh.applied_by || rh.owner} · {ago(rh.applied_at || rh.updated_at)}
+                      {changes.length > 0 &&
+                        ` · ${bi(`${changes.length} 项配置`, `${changes.length} change(s)`)}`}
+                    </small>
+                  </div>
+                  <IconDown className="cx-hist-chev" />
+                </div>
+                {open && (
+                  <div className="cx-hist-detail">
+                    {rh.applied_summary && (
+                      <p className="cx-hist-sum">{rh.applied_summary}</p>
+                    )}
+                    {changes.length > 0 && (
+                      <div className="cx-hist-deltas">
+                        {changes.map((ch, cidx) => {
+                          const latest = effectiveChanges.latestByKey.get(
+                            (ch.key || "").trim().toLowerCase(),
+                          );
+                          const isOverwritten = Boolean(
+                            latest && latest.source_id !== rh.id,
+                          );
+                          return (
+                            <div
+                              key={`${ch.key}-${cidx}`}
+                              className={`cx-hist-delta${isOverwritten ? " is-overwritten" : ""}`}
+                            >
+                              <code className="cx-hist-k mono">{ch.key}</code>
+                              <span className="cx-hist-v">
+                                {ch.before && (
+                                  <>
+                                    <del className="cx-val-old mono">{ch.before}</del>
+                                    <span className="cx-val-arrow" aria-hidden>→</span>
+                                  </>
+                                )}
+                                <code className="cx-val-new">{ch.after}</code>
+                                {isOverwritten && (
+                                  <em className="cx-delta-sup">
+                                    {bi("已被后续更新", "Superseded")}
+                                  </em>
+                                )}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                    <div className="cx-hist-links">
+                      {rh.doc_id && (
+                        <button
+                          type="button"
+                          className="link small"
+                          onClick={() => {
+                            setHistoryOpen(false);
+                            go({
+                              name: "deliveries",
+                              id: c.id,
+                              tab: "docs",
+                              doc: rh.doc_id,
+                            });
+                          }}
+                        >
+                          {bi("查看变更报告", "Change Report")} <IconRight />
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="link small"
+                        onClick={() => {
+                          setHistoryOpen(false);
+                          go({
+                            name: "deliveries",
+                            id: c.id,
+                            tab: "rehearsal",
+                            rehearsal: rh.id,
+                          });
+                        }}
+                      >
+                        {bi("打开演练详情", "Open Rehearsal")} <IconRight />
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          <div className="cx-chg-drawer-foot">
+            <Button
+              size="small"
+              onClick={() => {
+                setHistoryOpen(false);
+                go({ name: "deliveries", id: c.id, tab: "rehearsal" });
+              }}
+            >
+              {bi("前往变更演练工作台", "Go to Rehearsal Workbench")} <IconRight />
+            </Button>
+          </div>
+        </div>
+      </Drawer>
     </div>
   );
 }

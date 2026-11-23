@@ -3,6 +3,7 @@ title: 经入口连接主库
 desc: 先检查执行节点与当前主库；高可用集群中若两者相同，先计划切主并等待全员恢复复制、入口跟随，再验证入口连接、可写主库及解析结果。前置切主会短暂中断连接，结束后保留非执行节点为主库；需要时另行回切。单节点无法避开自身回流，要求入口支持。TLS 按入口验收 sslmode 和所选身份连接。
 scope: endpoint:writer
 effect: disruptive
+timeout: 7200
 hosts: first:primary
 expect: 入口到达可写主库。
 inputs:

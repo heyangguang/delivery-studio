@@ -116,3 +116,70 @@ func TestComponentConversationIsKeptAfterTheDraftEnds(t *testing.T) {
 		t.Fatal("an empty conversation was filed", h)
 	}
 }
+
+func TestAIChatsIncludesComponentWorkbenchSessions(t *testing.T) {
+	s, _ := testStore(t)
+	admin, csrf := storeLogin(t, s, "admin")
+	if w := storeRequest(s, "POST", "/api/components/etcd/draft", strings.NewReader(`{"from":"builtin"}`), admin, csrf); w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	dir := s.compAIDir("etcd")
+	_ = os.MkdirAll(dir, 0o700)
+	_ = os.WriteFile(filepath.Join(dir, "session.json"), []byte(`{"messages":[{"role":"user","text":"第一次草稿讨论","at":"2026-11-19T10:00:00Z"},{"role":"assistant","text":"收到","at":"2026-11-19T10:00:05Z"}]}`), 0o600)
+	if w := storeRequest(s, "DELETE", "/api/components/etcd/draft", nil, admin, csrf); w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if w := storeRequest(s, "POST", "/api/components/etcd/draft", strings.NewReader(`{"from":"builtin"}`), admin, csrf); w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	_ = os.WriteFile(filepath.Join(dir, "session.json"), []byte(`{"messages":[{"role":"user","text":"当前草稿优化","at":"2026-11-19T11:00:00Z"},{"role":"assistant","text":"已检查","at":"2026-11-19T11:00:05Z"}]}`), 0o600)
+
+	w := storeRequest(s, "GET", "/api/ai/chats", nil, admin, "")
+	if w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	var resp struct {
+		CompSessions []compSession `json:"comp_sessions"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.CompSessions) != 2 {
+		t.Fatalf("expected 2 component workbench sessions (1 active + 1 archived), got %d: %+v", len(resp.CompSessions), resp.CompSessions)
+	}
+	var sawActive, sawArchived bool
+	for _, cs := range resp.CompSessions {
+		if cs.Comp != "etcd" {
+			t.Fatalf("unexpected comp: %+v", cs)
+		}
+		if cs.Active && cs.HasDraft && cs.Title == "当前草稿优化" {
+			sawActive = true
+		}
+		if !cs.Active && cs.HistoryID != "" && cs.Title == "第一次草稿讨论" {
+			sawArchived = true
+		}
+	}
+	if !sawActive || !sawArchived {
+		t.Fatalf("missing active or archived session: %+v", resp.CompSessions)
+	}
+
+	// Regular user without component.edit permission must not see component workbench sessions
+	alice, _ := storeLogin(t, s, "alice")
+	w2 := storeRequest(s, "GET", "/api/ai/chats", nil, alice, "")
+	if w2.Code != 200 {
+		t.Fatal(w2.Code, w2.Body.String())
+	}
+	var resp2 struct {
+		CompSessions []compSession `json:"comp_sessions"`
+	}
+	_ = json.Unmarshal(w2.Body.Bytes(), &resp2)
+	if len(resp2.CompSessions) != 0 {
+		t.Fatalf("non-editor should not see comp_sessions, got %+v", resp2.CompSessions)
+	}
+
+	// GET /api/components/etcd/ai/session includes has_draft: true
+	ws := storeRequest(s, "GET", "/api/components/etcd/ai/session", nil, admin, "")
+	if ws.Code != 200 || !strings.Contains(ws.Body.String(), `"has_draft":true`) {
+		t.Fatalf("expected has_draft:true in session response, got %d %s", ws.Code, ws.Body.String())
+	}
+}

@@ -30,6 +30,7 @@
     exit $bad
   args:
     executable: /bin/bash
+  register: rd_sysctl_verified
   changed_when: false
 
 - name: 透明大页

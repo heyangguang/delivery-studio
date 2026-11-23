@@ -185,11 +185,37 @@ def features():
  encrypted=sql('SELECT ssl FROM pg_stat_ssl WHERE pid=pg_backend_pid();',host=p['ip']);need(encrypted==('t' if opt['tls'] else 'f'),'Actual TCP encryption mismatch')
  sql('CHECKPOINT;',host=p['ip']);log('Test marker written, table access method='+am+', TCP TLS='+encrypted)
 
+def _prepare_isolated_conf(target):
+ # Debian/Ubuntu pg_createcluster keeps postgresql.conf/pg_hba.conf under /etc/postgresql/<ver>/main
+ # outside PGDATA, so restored single-node/native directories lack them. Synthesize safe local copies.
+ if not (target/'postgresql.conf').exists():
+  ver=(target/'PG_VERSION').read_text().strip() if (target/'PG_VERSION').exists() else ''
+  conf_dir=Path('/etc/postgresql')/ver/'main' if ver else None
+  skip=re.compile(r'^\s*(data_directory|hba_file|ident_file|external_pid_file|include_dir|include|include_if_exists|ssl_cert_file|ssl_key_file|ssl_ca_file)\s*=')
+  if conf_dir and (conf_dir/'conf.d'/'90-middleware.conf').exists():
+   src=(conf_dir/'conf.d'/'90-middleware.conf').read_text().splitlines()
+  elif conf_dir and (conf_dir/'postgresql.conf').exists():
+   src=(conf_dir/'postgresql.conf').read_text().splitlines()
+  else:
+   src=[]
+  lines=[line for line in src if not skip.match(line)]
+  lines.append("shared_buffers = '128MB'")
+  write(target/'postgresql.conf','\n'.join(lines)+'\n',0o600,'postgres')
+ if not (target/'pg_hba.conf').exists():
+  write(target/'pg_hba.conf','local all all peer\n',0o600,'postgres')
+ if not (target/'pg_ident.conf').exists():
+  write(target/'pg_ident.conf','',0o600,'postgres')
+
 def isolated(name,port,check,extra=''):
  # The isolated instance binds only a private unix socket. There is no TCP listener.
- target=testroot/name
+ target=testroot/name;logf=testroot/(name+'.log')
+ _prepare_isolated_conf(target)
  try:
-  run(['runuser','-u','postgres','--',BIN+'pg_ctl','-D',target,'-l',testroot/(name+'.log'),'-o',"-p "+str(port)+" -k "+str(testroot)+" -c listen_addresses='' -c ssl=off -c archive_mode=off"+extra,'-w','-t','300','start'],show=True)
+  try:
+   run(['runuser','-u','postgres','--',BIN+'pg_ctl','-D',target,'-l',logf,'-o',"-p "+str(port)+" -k "+str(testroot)+" -c listen_addresses='' -c ssl=off -c archive_mode=off"+extra,'-w','-t','300','start'],show=True)
+  except RuntimeError:
+   if logf.exists():log('Isolated postgres log ('+str(logf)+'):\n'+logf.read_text()[-4000:])
+   raise
   check(port)
  finally:
   if (target/'postmaster.pid').exists():run(['runuser','-u','postgres','--',BIN+'pg_ctl','-D',target,'-m','fast','-w','stop'],show=True)
@@ -428,6 +454,6 @@ def execute(fn):
   own_scope()
   with (state/'action.lock').open('w') as lock:
    fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB);log('Starting '+action+' on '+node['name'])
-   if action in FRONT_ACTIONS:prepare_front()
+   if action in FRONT_ACTIONS and os.environ.get('MW_PG_PHASE','all')=='all':prepare_front()
    fn();log('Completed '+action)
  except Exception as e:log('FAILED: '+str(e));sys.exit(1)

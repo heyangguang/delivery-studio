@@ -470,16 +470,13 @@ function PresetRoles({ path, item }: { path: Path; item: any }) {
 /* ------------------------------------------------------------------ versions */
 
 const versionStatuses = () => [
-  { value: "draft", label: bi("草稿（未验证）", "Draft (unverified)") },
-  { value: "verifying", label: bi("待验证", "Verifying") },
-  { value: "published", label: bi("已发布（已在空环境验证）", "Published (verified on clean env)") },
+  { value: "draft", label: bi("未发布", "Unpublished") },
+  { value: "published", label: bi("已发布", "Published") },
 ];
 const versionStatusTag = (s?: string) =>
   s === "published"
     ? bi("已发布", "Published")
-    : s === "verifying"
-      ? bi("待验证", "Verifying")
-      : bi("草稿", "Draft");
+    : bi("未发布", "Unpublished");
 
 export function VersionsTab() {
   useLang();

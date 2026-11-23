@@ -4,13 +4,14 @@ import "sort"
 
 // Schema is what a form needs to render one component version: everything declarative, nothing executable.
 type Schema struct {
-	DeliveryModes []string        `json:"delivery_modes"`
-	Component     string          `json:"component"`
-	Title         string          `json:"title"`
-	Version       string          `json:"version"`
-	Status        string          `json:"status"`
-	Platforms     []string        `json:"platforms"`
-	Context       string          `json:"context,omitempty"`
+	DeliveryModes     []string        `json:"delivery_modes"`
+	Component         string          `json:"component"`
+	Title             string          `json:"title"`
+	Version           string          `json:"version"`
+	Status            string          `json:"status"`
+	Platforms         []string        `json:"platforms"`
+	VerifiedPlatforms []string        `json:"verified_platforms,omitempty"`
+	Context           string          `json:"context,omitempty"`
 	Companions    []CompanionSpec `json:"companions,omitempty"`
 	Kind          string          `json:"kind,omitempty"`
 	Provides      []string        `json:"provides,omitempty"`
@@ -41,7 +42,7 @@ func (c *Component) Describe(version string) (*Schema, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Schema{DeliveryModes: c.EffectiveDeliveryModes(), Component: c.Name, Title: c.Title, Version: version, Status: firstNonEmpty(r.Version.Status, "draft"), Platforms: r.Platforms,
+	s := &Schema{DeliveryModes: c.EffectiveDeliveryModes(), Component: c.Name, Title: c.Title, Version: version, Status: firstNonEmpty(r.Version.Status, "draft"), Platforms: r.Platforms, VerifiedPlatforms: r.EffectiveVerifiedPlatforms(),
 		Context: c.Context, Companions: c.Companions, Kind: c.Kind, Provides: c.Provides, Roles: r.Roles, Groups: r.Groups, Params: r.Params, Requires: r.Requires,
 		Endpoints: r.Endpoints, Inputs: r.Inputs, Addons: r.Addons, LB: r.LB}
 	for _, x := range r.Rules {
@@ -87,10 +88,11 @@ type Info struct {
 }
 
 type VerInfo struct {
-	ID        string     `json:"id"`
-	Status    string     `json:"status"`
-	Platforms []string   `json:"platforms,omitempty"`
-	Artifacts []Artifact `json:"artifacts,omitempty"`
+	ID                string     `json:"id"`
+	Status            string     `json:"status"`
+	Platforms         []string   `json:"platforms,omitempty"`
+	VerifiedPlatforms []string   `json:"verified_platforms,omitempty"`
+	Artifacts         []Artifact `json:"artifacts,omitempty"`
 	// Packages are the unconditional packages per platform; conditional ones are decided when a deployment is resolved.
 	Packages map[string][]PackageRequest `json:"packages,omitempty"`
 	Released string                      `json:"released,omitempty"`
@@ -109,7 +111,7 @@ func (cat *Catalog) Infos() []Info {
 			if err != nil {
 				continue
 			}
-			vi := VerInfo{ID: v.ID, Status: firstNonEmpty(r.Version.Status, "draft"), Platforms: r.Platforms, Released: v.Released, Notes: v.Notes}
+			vi := VerInfo{ID: v.ID, Status: firstNonEmpty(r.Version.Status, "draft"), Platforms: r.Platforms, VerifiedPlatforms: r.EffectiveVerifiedPlatforms(), Released: v.Released, Notes: v.Notes}
 			for _, a := range r.Artifacts {
 				if a.When == "" {
 					vi.Artifacts = append(vi.Artifacts, a)
@@ -147,6 +149,7 @@ type InstanceView struct {
 	Title          string                `json:"title"`
 	Version        string                `json:"version"`
 	Status         string                `json:"status"`
+	Manifest       string                `json:"manifest,omitempty"`
 	Auto           bool                  `json:"auto,omitempty"`
 	AutoReason     string                `json:"auto_reason,omitempty"`
 	External       bool                  `json:"external,omitempty"`
@@ -233,7 +236,7 @@ func (p *Plan) View() PlanView {
 		v.Inputs = []InputReq{}
 	}
 	for _, i := range p.Instances {
-		iv := InstanceView{ID: i.ID, Component: i.Component, Title: i.Title, Version: i.Version, Status: firstNonEmpty(i.R.Version.Status, "draft"),
+		iv := InstanceView{ID: i.ID, Component: i.Component, Title: i.Title, Version: i.Version, Status: i.R.PlatformStatus(p.Platform.ID), Manifest: i.R.C.sum,
 			Auto: i.Auto, AutoReason: i.AutoReason, External: i.External, Roles: i.Roles, Hosts: i.Hosts, Params: i.Params, Visible: i.Visible,
 			Endpoints: i.Endpoints, Fronts: i.Fronts, Uses: i.Uses, Ports: i.Ports}
 		if u := i.Uses[i.R.C.Context]; i.R.C.Context != "" && u != nil {

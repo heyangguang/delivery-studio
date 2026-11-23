@@ -2,7 +2,11 @@
   title: 核对各节点状态
   desc: 角色、TLS、TDE、归档和 TCP 认证；不改动数据。
   effect: read-only
+  timeout: 300
   expect: 每个节点的实际设置与计划一致。
+  postconditions:
+    - pg_tcp.rc == 0
+    - pg_tcp.stdout | trim == '1'
   run:
     role: postgresql
     tasks: health
@@ -10,6 +14,11 @@
 - id: topology
   title: 复核拓扑
   effect: read-only
+  timeout: 300
+  expect: 主库上全部从库处于 streaming 流复制状态。
+  postconditions:
+    - pg_streaming.rc == 0
+    - (pg_streaming.stdout | trim | int) == (mw.roles.replica | length)
   hosts: first:primary
   when: params.deployment_mode in ['legacy', 'single'] && (count(roles.replica) > 0)
   run:
@@ -18,6 +27,12 @@
 - id: native-health
   title: 核对主从角色与 WAL 流复制
   effect: read-only
+  timeout: 300
+  expect: 主库可写且全部从库处于 streaming 状态，从库处于恢复接收状态。
+  postconditions:
+    - native_role.rc == 0
+    - (inventory_hostname != pg_primary) or (native_streaming.stdout | trim | int) == (mw.roles.replica | length)
+    - (inventory_hostname == pg_primary) or (native_receiver.stdout | trim | int) == 1
   when: params.deployment_mode == 'replication'
   run:
     role: postgresql

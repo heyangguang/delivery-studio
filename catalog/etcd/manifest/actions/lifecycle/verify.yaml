@@ -1,4 +1,9 @@
 - id: health
   title: 复核 etcd 健康
   effect: read-only
+  timeout: 300
+  expect: 全部端点 healthy，成员数与计划一致。
+  postconditions:
+    - etcd_members.rc == 0
+    - etcd_members.stdout_lines | length == mw.roles.member | length
   run: {role: etcd, tasks: health}

@@ -625,7 +625,11 @@ func (s *storeServer) handleCompAI(w http.ResponseWriter, r *http.Request, user 
 		if b, err := os.ReadFile(filepath.Join(s.compAIDir(name), "session.json")); err == nil {
 			_ = json.Unmarshal(b, &ss)
 		}
-		s.writeJSON(w, 200, map[string]any{"messages": ss.Messages, "proposals": s.loadCompProposals(name)})
+		s.writeJSON(w, 200, map[string]any{
+			"messages":  ss.Messages,
+			"proposals": s.loadCompProposals(name),
+			"has_draft": s.plat.componentsDir != "" && s.comps().hasDraft(name),
+		})
 	case len(parts) == 1 && parts[0] == "session" && r.Method == "DELETE":
 		s.archiveCompAI(name, "手动清空", 0)
 		s.writeJSON(w, 200, map[string]bool{"ok": true})
@@ -699,11 +703,11 @@ func (s *storeServer) compChat(w http.ResponseWriter, r *http.Request, user stor
 		s.fail(w, 409, "这个组件还没有草稿，先在工作台里开始编辑")
 		return
 	}
-	st := s.aiLoad()
-	if !st.Enabled || !st.Features["component"].Enabled {
-		s.fail(w, 409, "AI 功能未开启，请在平台设置 → AI 中开启")
+	if code, msg := s.checkAIFeature(user.User, "component"); code != 0 {
+		s.fail(w, code, msg)
 		return
 	}
+	st := s.aiLoad()
 	providers := st.aiProvidersForPick("component", in.Model)
 	if len(providers) == 0 {
 		s.fail(w, 409, "没有可用的模型供应商，请在平台设置 → AI 中配置")
@@ -737,11 +741,7 @@ func (s *storeServer) compChat(w http.ResponseWriter, r *http.Request, user stor
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	ask := strings.TrimSpace(in.Message)
-	if last := len(ss.Messages) - 1; in.Retry && last >= 0 && ss.Messages[last].Role == "user" && ss.Messages[last].Text == ask {
-		// the question is already in the conversation
-	} else {
-		ss.Messages = append(ss.Messages, aiMsg{Role: "user", Text: ask, Images: imgNames, At: now, By: user.User})
-	}
+	ss.Messages = appendOrReuseUserTurn(ss.Messages, in.Retry, aiMsg{Role: "user", Text: ask, Images: imgNames, At: now, By: user.User})
 	// the question is kept before anything else happens: if the answer breaks off (a restart, the network), the
 	// conversation still shows what was asked, and it can be asked again
 	if err := writeJSONFile(path, ss); err != nil {
@@ -766,6 +766,9 @@ func (s *storeServer) compChat(w http.ResponseWriter, r *http.Request, user stor
 	build := func(p aiProvider) []aiMessage {
 		msgs := []aiMessage{{Role: "system", Content: compSystem + "\n当前组件：" + name + s.skillBlock(user.User, "component-authoring") + ext.prompt}}
 		for i, m := range hist {
+			if isErrorOnlyMsg(m) {
+				continue
+			}
 			text := aiScrub(m.Text + m.askText())
 			// only the last few pictures are re-sent; earlier ones were already described in the answers
 			if len(m.Images) > 0 && p.Vision != "no" && i >= len(hist)-3 {
@@ -789,6 +792,7 @@ func (s *storeServer) compChat(w http.ResponseWriter, r *http.Request, user stor
 	var used, made []string
 	var lastErr error
 	var tried aiProvider
+	var failedAttempts []aiAttemptDiag
 	for i, p := range providers {
 		tried = p
 		start := time.Now()
@@ -802,6 +806,10 @@ func (s *storeServer) compChat(w http.ResponseWriter, r *http.Request, user stor
 		u.MS, u.OK, u.Failover = time.Since(start).Milliseconds(), err == nil, i > 0
 		if err != nil {
 			u.Error = truncRunes(err.Error(), 200)
+			if d := aiDiagFromErr(err); d != nil {
+				u.applyDiag(d)
+				failedAttempts = append(failedAttempts, d.Attempts...)
+			}
 		}
 		s.aiRecordUsage(u)
 		if err == nil {
@@ -817,7 +825,15 @@ func (s *storeServer) compChat(w http.ResponseWriter, r *http.Request, user stor
 		}
 	}
 	if lastErr != nil {
-		ev.send(map[string]any{"t": "error", "v": localizeGoMessage(reqLang(r), lastErr.Error())})
+		errText := localizeGoMessage(reqLang(r), lastErr.Error())
+		errDiag := buildChatErrorDiag(lastErr, failedAttempts, tried)
+		ss.Messages = append(ss.Messages, aiMsg{Role: "assistant", Error: errText, ErrorDiag: errDiag, At: time.Now().UTC().Format(time.RFC3339)})
+		saved := writeJSONFile(path, ss) == nil
+		errPayload := map[string]any{"t": "error", "v": errText, "saved": saved}
+		if errDiag != nil {
+			errPayload["diag"] = errDiag
+		}
+		ev.send(errPayload)
 		return
 	}
 	ss.Messages = append(ss.Messages, aiMsg{Role: "assistant", Text: final.Text, Tools: used, Steps: final.Steps, MS: final.TotalMS, Proposals: made, Ask: final.Ask, Files: final.Files, At: time.Now().UTC().Format(time.RFC3339)})

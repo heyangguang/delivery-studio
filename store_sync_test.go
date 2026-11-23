@@ -289,3 +289,129 @@ func TestWhenIsThreeValued(t *testing.T) {
 		t.Fatal("or/and with one decided side")
 	}
 }
+
+func TestConfirmSyncApplied(t *testing.T) {
+	if perm, ok := routePermFor("POST", "/api/jobs/abc/sync/confirm"); !ok || perm != "delivery.run" {
+		t.Fatalf("expected delivery.run for sync/confirm, got %q ok=%v", perm, ok)
+	}
+	s, cfg := testStore(t)
+	admin, csrf := storeLogin(t, s, "admin")
+	id := "0123456789abcdef0123456789abcdef"
+	j := storeJob{
+		ID:        id,
+		Owner:     "admin",
+		ClusterID: "sync-confirm-demo",
+		State:     "succeeded",
+		Syncs: []jobSync{
+			{N: 1, At: "2026-11-19T00:00:00Z", By: "admin", Update: "update-1-sync-confirm-demo.tar.gz"},
+			{N: 2, At: "2026-11-19T01:00:00Z", By: "admin", Kind: "patch", Reason: "fix task", Update: "update-2-sync-confirm-demo.tar.gz"},
+		},
+	}
+	if err := s.persistJob(j); err != nil {
+		t.Fatal(err)
+	}
+	s.mu.Lock()
+	s.jobs[id] = j
+	s.mu.Unlock()
+
+	// Component sync allows "full" confirmation
+	w := storeRequest(s, "POST", "/api/jobs/"+id+"/sync/confirm", strings.NewReader(`{"sync":1,"mode":"full"}`), admin, csrf)
+	if w.Code != 200 {
+		t.Fatalf("expected 200 for full sync confirm, got %d: %s", w.Code, w.Body.String())
+	}
+	var sy1 jobSync
+	if err := json.Unmarshal(w.Body.Bytes(), &sy1); err != nil || sy1.AppliedAt == "" || sy1.AppliedBy != "admin" || sy1.AppliedMode != "full" {
+		t.Fatalf("unexpected sync confirm response: %+v (%v)", sy1, err)
+	}
+
+	// AI patch rejects "full" mode because base packages aren't rebuilt
+	w = storeRequest(s, "POST", "/api/jobs/"+id+"/sync/confirm", strings.NewReader(`{"sync":2,"mode":"full"}`), admin, csrf)
+	if w.Code != 409 {
+		t.Fatalf("expected 409 for full mode on AI patch, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// AI patch accepts "patch" confirmation and persists
+	w = storeRequest(s, "POST", "/api/jobs/"+id+"/sync/confirm", strings.NewReader(`{"sync":2,"mode":"patch"}`), admin, csrf)
+	if w.Code != 200 {
+		t.Fatalf("expected 200 for patch confirm, got %d: %s", w.Code, w.Body.String())
+	}
+	var sy2 jobSync
+	if err := json.Unmarshal(w.Body.Bytes(), &sy2); err != nil || sy2.AppliedAt == "" || sy2.AppliedMode != "patch" {
+		t.Fatalf("unexpected patch confirm response: %+v (%v)", sy2, err)
+	}
+
+	// Persists across server restart and writes progress timeline events
+	s2, err := newStoreServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s2.mu.Lock()
+	reloaded := s2.jobs[id]
+	s2.mu.Unlock()
+	if len(reloaded.Syncs) != 2 || reloaded.Syncs[0].AppliedMode != "full" || reloaded.Syncs[1].AppliedMode != "patch" {
+		t.Fatalf("sync confirmation did not persist across restart: %+v", reloaded.Syncs)
+	}
+	doc := s2.readProgress(id)
+	if len(doc.Events) != 2 || doc.Events[0].State != "sync" || doc.Events[1].Key != "sync-confirm-2" {
+		t.Fatalf("unexpected progress events after confirm: %+v", doc.Events)
+	}
+
+	// "verified" mode works for both component sync and AI patch
+	admin2, csrf2 := storeLogin(t, s2, "admin")
+	w = storeRequest(s2, "POST", "/api/jobs/"+id+"/sync/confirm", strings.NewReader(`{"sync":2,"mode":"verified"}`), admin2, csrf2)
+	if w.Code != 200 {
+		t.Fatalf("expected 200 for verified confirm, got %d: %s", w.Code, w.Body.String())
+	}
+	var sy3 jobSync
+	if err := json.Unmarshal(w.Body.Bytes(), &sy3); err != nil || sy3.AppliedMode != "verified" {
+		t.Fatalf("unexpected verified confirm response: %+v (%v)", sy3, err)
+	}
+}
+
+func TestSyncVerifyCommandAndOfflineDocInjection(t *testing.T) {
+	plan := &syncPlanMeta{
+		Controller: "pg-1",
+		ProjectDir: "/root/middleware-automation/projects/ecs-pg-manual",
+		UploadDir:  "/tmp/mw-upload",
+	}
+	sy := jobSync{
+		N:         1,
+		Update:    "update-1-ecs-pg-manual.tar.gz",
+		UpdateSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		FileHashes: map[string]string{
+			"ansible.cfg": "1111111111111111111111111111111111111111111111111111111111111111",
+		},
+		Remove: []string{"roles/old/legacy.yml"},
+	}
+	cmd := buildSyncVerifyCommand(plan, sy)
+	for _, want := range []string{
+		"PROJ='/root/middleware-automation/projects/ecs-pg-manual'",
+		"UPD='/tmp/mw-upload/update-1-ecs-pg-manual.tar.gz'",
+		"sha256sum -c --status <<'MW_SYNC_EOF'",
+		"1111111111111111111111111111111111111111111111111111111111111111  ansible.cfg",
+		"[ ! -e 'roles/old/legacy.yml' ]",
+		"rm -f 'roles/old/legacy.yml'",
+		"tar -xzf \"$UPD\" -C '/root'",
+		"无需重复覆盖",
+		"false",
+	} {
+		if !strings.Contains(cmd, want) {
+			t.Fatalf("verify command missing %q:\n%s", want, cmd)
+		}
+	}
+	if strings.Contains(cmd, "exit 1") {
+		t.Fatalf("verify command must not call exit 1 (would close interactive SSH session):\n%s", cmd)
+	}
+	sy.VerifyCmd = cmd
+
+	md := "# 部署步骤\n\n导语。\n\n## 1. 离线安装 Ansible\n\n步骤正文。\n"
+	out := injectSyncDeploySection(md, plan, sy)
+	idx0 := strings.Index(out, "## 0. 核对并应用第 1 次同步更新（必做）")
+	idx1 := strings.Index(out, "## 1. 离线安装 Ansible")
+	if idx0 < 0 || idx1 < 0 || idx0 >= idx1 {
+		t.Fatalf("expected sync section before step 1, got:\n%s", out)
+	}
+	if !strings.Contains(out, cmd) {
+		t.Fatalf("injected doc missing verify command:\n%s", out)
+	}
+}

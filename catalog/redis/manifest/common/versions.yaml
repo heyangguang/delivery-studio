@@ -1,5 +1,6 @@
 - id: "7.2"
-  status: verifying
+  status: published
+  verified_platforms: [ubuntu-24.04-amd64]
   platforms: [ubuntu-24.04-amd64]
   packages:
     - {name: redis-server, version: "6:7.2.16-1rl1~noble1"}

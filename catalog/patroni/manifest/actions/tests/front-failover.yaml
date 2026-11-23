@@ -4,6 +4,7 @@ desc: 至少需要三台数据库节点。不修改任何选主标签或同步�
 rollback: 成功或失败均尝试启动被停止的旧主 Patroni；若执行被强制终止，先确认旧主的 Patroni 已启动，用 patronictl list 确认一个主库、其余全部 streaming。测试不修改配置及选主标签；若检测到之前遗留的 nofailover 或非正 failover_priority，会在停主前报错，需先按既定选主策略处理。需要恢复原主时另行执行计划切换。
 scope: endpoint:writer
 effect: disruptive
+timeout: 7200
 hosts: first:primary
 when: count(roles.replica) > 0
 skip: 单节点没有可接管的从库

@@ -2,6 +2,7 @@ id: switchover
 title: 计划切换
 desc: 把主库计划切换到一台从库，核对切换前已提交的数据都在新主库上，再切回来。会短暂中断连接。
 effect: disruptive
+timeout: 7200
 hosts: first:primary
 when: count(roles.replica) > 0
 skip: 单节点没有可切换的从库

@@ -261,6 +261,7 @@ timeout = 30
 [ssh_connection]
 ssh_args = -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4
 pipelining = True
+usetty = False
 `
 
 func hostGroup(hosts []string) omap {
@@ -815,7 +816,7 @@ func lockDoc(p *Plan, res map[string]Artifact, opt RenderOptions) []byte {
 		}
 	}
 	for _, i := range p.Instances {
-		x := inst{DeliveryModes: i.R.C.EffectiveDeliveryModes(), Scheme: i.SchemeSummary(), ID: i.ID, Comp: i.Component, Version: i.Version, Status: firstNonEmpty(i.R.Version.Status, "draft"), Manifest: i.R.C.sum, Auto: i.Auto}
+		x := inst{DeliveryModes: i.R.C.EffectiveDeliveryModes(), Scheme: i.SchemeSummary(), ID: i.ID, Comp: i.Component, Version: i.Version, Status: i.R.PlatformStatus(p.Platform.ID), Manifest: i.R.C.sum, Auto: i.Auto}
 		for _, pk := range i.Packages {
 			x.Packages = append(x.Packages, pkg{pk.Name, pk.Version})
 		}
@@ -847,7 +848,12 @@ func planDoc(p *Plan, st *Steps, opt RenderOptions) []byte {
 		Name string `json:"name"`
 		IP   string `json:"ip"`
 	}
+	mode := p.Dep.DeliveryMode
+	if mode == "" {
+		mode = "offline"
+	}
 	doc := struct {
+		DeliveryMode  string         `json:"delivery_mode,omitempty"`
 		ExecutionHost *ExecutionHost `json:"execution_host,omitempty"`
 		Platform      string         `json:"platform"`
 		StepFormat    int            `json:"step_format"`
@@ -865,7 +871,7 @@ func planDoc(p *Plan, st *Steps, opt RenderOptions) []byte {
 		Endpoint      []*PlanStep    `json:"endpoint_tests"`
 		Cleanup       []*PlanStep    `json:"cleanup"`
 		Warnings      []Problem      `json:"warnings,omitempty"`
-	}{RuntimeRoot: p.RuntimeRoot(), Platform: p.Platform.ID, ExecutionHost: p.Dep.ExecutionHost, StepFormat: 2, Cluster: p.Dep.ID, Project: p.ProjectName(), Controller: p.Controller, ProjectDir: opt.ProjectDir, UploadDir: opt.UploadDir, Instances: p.View().Instances, Prepare: PrepareSteps(p, opt), Tests: st.Tests, Endpoint: st.Endpoint, Cleanup: st.Cleanup}
+	}{DeliveryMode: mode, RuntimeRoot: p.RuntimeRoot(), Platform: p.Platform.ID, ExecutionHost: p.Dep.ExecutionHost, StepFormat: 2, Cluster: p.Dep.ID, Project: p.ProjectName(), Controller: p.Controller, ProjectDir: opt.ProjectDir, UploadDir: opt.UploadDir, Instances: p.View().Instances, Prepare: PrepareSteps(p, opt), Tests: st.Tests, Endpoint: st.Endpoint, Cleanup: st.Cleanup}
 	for _, h := range p.Hosts {
 		doc.Hosts = append(doc.Hosts, hostView{h.Name, h.IP})
 	}

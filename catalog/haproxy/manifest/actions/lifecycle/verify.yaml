@@ -1,4 +1,9 @@
 - id: listening
   title: 核对监听端口
   effect: read-only
+  timeout: 300
+  expect: 每个绑定的端口都在监听。
+  postconditions:
+    - haproxy_listeners is succeeded
+    - (haproxy_listeners.results | length) == (mw.binds | length)
   run: {role: haproxy, tasks: listening}

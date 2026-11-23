@@ -20,4 +20,5 @@
 - name: 删除测试键
   ansible.builtin.command:
     argv: [etcdctl, "--endpoints=127.0.0.1:{{ mw.params.client_port }}", del, "/mw-acceptance/{{ mw_cluster.id }}"]
+  register: etcd_del
   changed_when: true

@@ -1,6 +1,10 @@
 - id: packages
   title: 安装 Patroni 管理器
   effect: change
+  timeout: 600
+  expect: Patroni 软件包已安装且协调存储驱动可导入。
+  postconditions:
+    - pg_patroni_driver.rc == 0
   run:
     role: patroni
     tasks: install_manager

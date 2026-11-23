@@ -4,4 +4,9 @@ desc: 手动触发一次 logrotate，确认生成 .1 文件、新日志文件属
 effect: change
 hosts: all
 expect: 每台机器都有 .1 文件，新文件属主 redis:redis、权限 660，轮转后日志继续写入。
+timeout: 300
+postconditions:
+  - rd_files.results[0].stat.exists
+  - rd_new.stat.exists
+  - rd_new.stat.size > 0
 run: {role: redis, tasks: test_logrotate}

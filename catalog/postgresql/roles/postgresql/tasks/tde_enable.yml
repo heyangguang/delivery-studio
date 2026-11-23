@@ -21,6 +21,7 @@
     dest: "{{ pg_state }}/tde-databases-ready"
     content: "{{ pg_scope }}\n"
     mode: '0600'
+  register: pg_tde_marker_written
 
 - name: 写入 TDE 集群设置
   ansible.builtin.include_tasks: _patch.yml

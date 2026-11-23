@@ -1,4 +1,8 @@
 - id: packages
   title: 安装 HAProxy
   effect: change
+  timeout: 600
+  expect: HAProxy 软件包已安装并可执行。
+  postconditions:
+    - haproxy_version.rc == 0
   run: {role: haproxy, tasks: install}

@@ -273,6 +273,10 @@ func (s *storeServer) saveDraft(w http.ResponseWriter, r *http.Request, session 
 		return
 	}
 	for from, to := range req.Rename {
+		if name == sharedPlatformName && (from == "component.yaml" || from == "files/platform-contract.md" || to == "component.yaml" || to == "files/platform-contract.md") {
+			s.fail(w, 400, "平台标识与参数契约由平台代码维护，不能在角色编辑器修改")
+			return
+		}
 		b, ok := set[from]
 		if !ok {
 			s.fail(w, 400, "要改名的文件不存在："+from)
@@ -287,6 +291,17 @@ func (s *storeServer) saveDraft(w http.ResponseWriter, r *http.Request, session 
 	}
 	deleted := map[string]bool{}
 	for p, text := range req.Files {
+		if name == sharedPlatformName && (p == "component.yaml" || p == "files/platform-contract.md") {
+			want := sharedManifest
+			if p == "files/platform-contract.md" {
+				want = sharedContract
+			}
+			if text == nil || *text != want {
+				s.fail(w, 400, "平台标识与参数契约由平台代码维护，不能在角色编辑器修改")
+				return
+			}
+			continue
+		}
 		if text == nil {
 			if p == "component.yaml" {
 				s.fail(w, 400, "component.yaml 不能删除")
@@ -436,6 +451,10 @@ func (s *storeServer) draftAction(w http.ResponseWriter, r *http.Request, sessio
 			"configuration_problems": localizeMWProblems(lang, configurationProblems),
 		})
 	case "note":
+		if code, msg := s.checkAIFeature(session.User, "component"); code != 0 {
+			s.fail(w, code, msg)
+			return
+		}
 		// a revision note written from what actually changed, for the person to keep or edit
 		live, _, _ := cs.liveSet(name)
 		added, removed, changed := diffSets(live, set)
@@ -455,8 +474,8 @@ func (s *storeServer) draftAction(w http.ResponseWriter, r *http.Request, sessio
 		}
 		st := s.aiLoad()
 		providers := st.aiProvidersFor("component")
-		if !st.Enabled || len(providers) == 0 {
-			s.fail(w, 409, "AI 功能未开启")
+		if len(providers) == 0 {
+			s.fail(w, 409, "没有可用的模型供应商")
 			return
 		}
 		pr := providers[0]
@@ -806,31 +825,135 @@ func yamlQuote(s string) string {
 var _ = os.ErrNotExist
 var _ = mwpack.DefaultPlatform
 
-// setVersionStatus changes only the status of one version (draft, verifying, published) of the published component and
-// records it as a revision with the note: who verified it, where. It is the quick way to say "this version has now been
-// deployed on clean machines", without opening the workbench for a one-word change.
+// setVersionStatus manages the simplified 2-state OS-granular release lifecycle of a component version (unpublished <-> published).
+// Component publishing is completely decoupled from delivery records and supports two transparent testing modes:
+//   - "automatic": backed by a self-contained automated execution report captured when all deploy/test steps pass;
+//   - "manual"   : human sign-off after offline/manual testing (no automated report).
 func (s *storeServer) setVersionStatus(w http.ResponseWriter, r *http.Request, session storeSession, name, ver string) {
 	var req struct {
-		Status string `json:"status"`
-		Note   string `json:"note"`
+		Status         string   `json:"status"`
+		Platform       string   `json:"platform"`
+		Platforms      []string `json:"platforms"`
+		TestMode       string   `json:"test_mode"` // automatic | manual
+		RevokePlatform string   `json:"revoke_platform"`
+		Note           string   `json:"note"`
 	}
 	if decodeBody(w, r, 1<<12, &req) != nil || !safeName(name) {
 		s.fail(w, 400, "请求内容有问题")
 		return
 	}
-	if req.Status != "draft" && req.Status != "verifying" && req.Status != "published" {
-		s.fail(w, 400, "状态只能是草稿、待验证或已发布")
-		return
-	}
+	req.Platform = strings.TrimSpace(req.Platform)
+	req.RevokePlatform = strings.TrimSpace(req.RevokePlatform)
+	req.TestMode = strings.ToLower(strings.TrimSpace(req.TestMode))
 	note := strings.TrimSpace(req.Note)
-	if req.Status == "published" && note == "" {
-		s.fail(w, 400, "标为已发布前，请写下在哪套环境验证过（例如：2026-10-27 在三台全新 Ubuntu 24.04 上部署并通过全部测试）")
-		return
-	}
 	if len([]rune(note)) > 200 {
 		s.fail(w, 400, "说明过长（200 字以内）")
 		return
 	}
+	if req.RevokePlatform == "" && req.Status != "draft" && req.Status != "verifying" && req.Status != "published" {
+		s.fail(w, 400, "状态只能是未发布或已发布")
+		return
+	}
+	if req.TestMode != "" && req.TestMode != "automatic" && req.TestMode != "manual" {
+		s.fail(w, 400, "测试方式只能是自动化测试（automatic）或手动测试（manual）")
+		return
+	}
+	if (req.Status == "published" || req.RevokePlatform != "") && !s.need(w, session.User, "component.publish") {
+		return
+	}
+
+	// Validate component + version & resolve OS platforms before locking compMu.
+	compObj, ok := s.plat.cat().Get(name)
+	if !ok {
+		s.fail(w, 404, "找不到这个组件")
+		return
+	}
+	resolved, err := compObj.Resolve(ver)
+	if err != nil {
+		s.fail(w, 404, "这个组件没有这个版本")
+		return
+	}
+
+	var targetPlatforms []string
+	if req.Status == "published" && req.RevokePlatform == "" && len(resolved.Platforms) > 0 {
+		seen := map[string]bool{}
+		for _, p := range req.Platforms {
+			p = strings.TrimSpace(p)
+			if p != "" && !seen[p] {
+				seen[p] = true
+				targetPlatforms = append(targetPlatforms, p)
+			}
+		}
+		if req.Platform != "" && !seen[req.Platform] {
+			seen[req.Platform] = true
+			targetPlatforms = append(targetPlatforms, req.Platform)
+		}
+		if len(targetPlatforms) == 0 && len(resolved.Platforms) == 1 {
+			targetPlatforms = []string{resolved.Platforms[0]}
+		}
+		if len(targetPlatforms) == 0 {
+			s.fail(w, 400, "请至少选择一个要发布的操作系统")
+			return
+		}
+		allowedPl := map[string]bool{}
+		for _, pl := range resolved.Platforms {
+			allowedPl[pl] = true
+		}
+		for _, pl := range targetPlatforms {
+			if !allowedPl[pl] {
+				s.fail(w, 400, "该版本未声明支持操作系统「"+pl+"」")
+				return
+			}
+		}
+	}
+
+	// Load existing automated test reports (if any) when publishing.
+	existingByPl := map[string]compVerification{}
+	if req.Status == "published" && req.RevokePlatform == "" && len(targetPlatforms) > 0 {
+		compVerifyMu.Lock()
+		recs := s.loadCompVerifications(name)
+		compVerifyMu.Unlock()
+		for _, rec := range s.enrichVerifications(name, recs) {
+			if rec.Version == ver {
+				if _, exists := existingByPl[rec.Platform]; !exists {
+					existingByPl[rec.Platform] = rec
+				}
+			}
+		}
+		if req.TestMode == "" {
+			allAuto := true
+			for _, pl := range targetPlatforms {
+				rec, ok := existingByPl[pl]
+				if !ok || !rec.HasReport {
+					allAuto = false
+					break
+				}
+			}
+			if allAuto {
+				req.TestMode = "automatic"
+			} else {
+				req.TestMode = "manual"
+			}
+		}
+		if req.TestMode == "automatic" {
+			for _, pl := range targetPlatforms {
+				rec, ok := existingByPl[pl]
+				if !ok || !rec.HasReport {
+					plTitle := pl
+					if def, ok2 := mwpack.PlatformByID(pl); ok2 {
+						plTitle = def.Title
+					}
+					s.fail(w, 400, fmt.Sprintf("「%s」暂无通过的自动化测试报告，请先点击「测试部署」完成自动化测试，或改选「手动测试」发布", plTitle))
+					return
+				}
+			}
+		}
+		if cves := s.publishSecurityGateIssues(name, ver, targetPlatforms); len(cves) > 0 {
+			s.fail(w, 409, "安全门禁已阻断发布：存在未豁免的严重 (Critical) CVE 漏洞："+strings.Join(cves, "、")+"。请先升级修复软件包，或在「安全中心」完成评估与豁免后再发布")
+			return
+		}
+	}
+
 	compMu.Lock()
 	defer compMu.Unlock()
 	cs := s.comps()
@@ -855,55 +978,102 @@ func (s *storeServer) setVersionStatus(w http.ResponseWriter, r *http.Request, s
 			vs = doc.Content[0].Content[i+1]
 		}
 	}
-	var target *yaml.Node
+	var targetVer *yaml.Node
 	if vs != nil {
 		for _, v := range vs.Content {
-			var id, status *yaml.Node
 			for i := 0; i+1 < len(v.Content); i += 2 {
-				switch v.Content[i].Value {
-				case "id":
-					id = v.Content[i+1]
-				case "status":
-					status = v.Content[i+1]
+				if v.Content[i].Value == "id" && v.Content[i+1].Value == ver {
+					targetVer = v
+					break
 				}
-			}
-			if id != nil && id.Value == ver {
-				target = status
 			}
 		}
 	}
-	if target == nil || target.Kind != yaml.ScalarNode || target.Line == 0 {
-		s.fail(w, 404, "这个组件没有这个版本，或它没有写状态")
+	if targetVer == nil {
+		s.fail(w, 404, "这个组件没有这个版本")
 		return
 	}
-	if target.Value == req.Status {
+	file := origins[targetVer]
+	if file == "" {
+		file = "component.yaml"
+	}
+	updatedYAML, changed, mutErr := mutateVersionYAMLNode(prev[file], ver, req.Status, targetPlatforms, req.RevokePlatform, resolved.Platforms)
+	if mutErr != nil {
+		s.fail(w, 422, mutErr.Error())
+		return
+	}
+
+	recordPublishVouchers := func() []compVerification {
+		if req.Status != "published" || req.RevokePlatform != "" || len(targetPlatforms) == 0 {
+			return nil
+		}
+		curHash := s.currentManifestHash(name)
+		saved := make([]compVerification, 0, len(targetPlatforms))
+		ts := now()
+		for _, pl := range targetPlatforms {
+			plTitle := pl
+			if def, ok := mwpack.PlatformByID(pl); ok {
+				plTitle = def.Title
+			}
+			if req.TestMode == "automatic" {
+				rec := existingByPl[pl]
+				rec.Component = name
+				rec.Version = ver
+				rec.Platform = pl
+				rec.PlatformName = plTitle
+				rec.TestMode = "automatic"
+				rec.DeliveryMode = "automatic"
+				rec.HasReport = true
+				rec.VerifiedBy = session.User
+				if note != "" {
+					rec.Note = note
+				}
+				if rec.ManifestHash == "" {
+					rec.ManifestHash = curHash
+				}
+				_ = s.appendCompVerification(rec)
+				saved = append(saved, rec)
+			} else {
+				rec := compVerification{
+					ID:           randomStoreToken(6),
+					Component:    name,
+					Version:      ver,
+					Platform:     pl,
+					PlatformName: plTitle,
+					TestMode:     "manual",
+					HasReport:    false,
+					ManifestHash: curHash,
+					VerifiedBy:   session.User,
+					VerifiedAt:   ts,
+					Note:         note,
+				}
+				_ = s.appendCompVerification(rec)
+				saved = append(saved, rec)
+			}
+		}
+		return saved
+	}
+
+	if !changed {
+		if req.Status == "published" && req.RevokePlatform == "" && len(targetPlatforms) > 0 {
+			saved := recordPublishVouchers()
+			s.auditReq(r, "component-version-verify", session.User, name+" "+ver+" "+strings.Join(targetPlatforms, ",")+" "+req.TestMode)
+			s.writeJSON(w, 200, map[string]any{"ok": true, "verifications": saved})
+			return
+		}
 		s.writeJSON(w, 200, map[string]any{"ok": true, "unchanged": true})
 		return
 	}
-	file := origins[target]
-	text := string(prev[file])
-	// only the word changes: the file keeps its comments and layout
-	lines := strings.Split(text, "\n")
-	ln := []rune(lines[target.Line-1])
-	col := target.Column - 1
-	end := col + len([]rune(target.Value))
-	if target.Style&(yaml.DoubleQuotedStyle|yaml.SingleQuotedStyle) != 0 {
-		end += 2
-	}
-	if col < 0 || end > len(ln) || !strings.Contains(string(ln[col:end]), target.Value) {
-		s.fail(w, 422, "component.yaml 的写法不支持这样改，请在工作台里改")
-		return
-	}
-	lines[target.Line-1] = string(ln[:col]) + req.Status + string(ln[end:])
+
 	set := fileSet{}
 	for k, v := range prev {
 		set[k] = v
 	}
-	set[file] = []byte(strings.Join(lines, "\n"))
+	set[file] = updatedYAML
 	res := checkComponent(s.plat, name, set)
 	if !res.OK {
 		lang := wLang(w)
-		s.writeJSON(w, 422, map[string]any{"error": localizeGoMessage(lang, fmt.Sprintf("还有 %d 处错误，不能发布", res.Errors)), "check": localizeCompCheck(lang, res)})
+		s.writeJSON(w, 422, map[string]any{"error": localizeGoMessage(lang, fmt.Sprintf("还有 %d 处错误，不能修改状态", res.Errors)), "check": localizeCompCheck(lang, res)})
 		return
 	}
 	done, err := cs.installLive(name, set, s.plat.reload)
@@ -912,9 +1082,38 @@ func (s *storeServer) setVersionStatus(w http.ResponseWriter, r *http.Request, s
 		return
 	}
 	done()
+
+	savedRecs := recordPublishVouchers()
+
 	lang := wLang(w)
-	label := map[string]string{"draft": tr(lang, "草稿", "Draft"), "verifying": tr(lang, "待验证", "Verifying"), "published": tr(lang, "已发布", "Published")}[req.Status]
-	msg := tr(lang, "版本 "+ver+" 状态改为「"+label+"」", "Version "+ver+" status set to "+label)
+	var msg string
+	if req.RevokePlatform != "" {
+		plName := req.RevokePlatform
+		if def, ok := mwpack.PlatformByID(req.RevokePlatform); ok {
+			plName = def.Title
+		}
+		msg = tr(lang, "版本 "+ver+" 下线 "+plName, "Version "+ver+" unpublished on "+plName)
+	} else if req.Status == "published" && len(targetPlatforms) > 0 {
+		var plNames []string
+		for _, pl := range targetPlatforms {
+			if def, ok := mwpack.PlatformByID(pl); ok {
+				plNames = append(plNames, def.Title)
+			} else {
+				plNames = append(plNames, pl)
+			}
+		}
+		modeTxt := tr(lang, "手动测试", "Manual test")
+		if req.TestMode == "automatic" {
+			modeTxt = tr(lang, "自动化测试", "Automated test")
+		}
+		msg = tr(lang,
+			fmt.Sprintf("版本 %s 发布到 %s（%s）", ver, strings.Join(plNames, "、"), modeTxt),
+			fmt.Sprintf("Version %s published on %s (%s)", ver, strings.Join(plNames, ", "), modeTxt),
+		)
+	} else {
+		label := map[string]string{"draft": tr(lang, "未发布", "Unpublished"), "verifying": tr(lang, "未发布", "Unpublished"), "published": tr(lang, "已发布", "Published")}[req.Status]
+		msg = tr(lang, "版本 "+ver+" 状态改为「"+label+"」", "Version "+ver+" status set to "+label)
+	}
 	if note != "" {
 		msg += tr(lang, "：", ": ") + note
 	}
@@ -923,8 +1122,20 @@ func (s *storeServer) setVersionStatus(w http.ResponseWriter, r *http.Request, s
 		s.fail(w, 500, "已修改，但记录修订失败："+err.Error())
 		return
 	}
-	s.auditReq(r, "component-version-status", session.User, name+" "+ver+" "+req.Status)
-	s.writeJSON(w, 200, map[string]any{"ok": true, "rev": rev})
+	auditVal := name + " " + ver + " " + req.Status
+	if len(targetPlatforms) > 0 {
+		auditVal += " " + strings.Join(targetPlatforms, ",") + " " + req.TestMode
+	}
+	if req.RevokePlatform != "" {
+		auditVal = name + " " + ver + " revoke:" + req.RevokePlatform
+	}
+	s.auditReq(r, "component-version-status", session.User, auditVal)
+	resp := map[string]any{"ok": true, "rev": rev}
+	if len(savedRecs) > 0 {
+		resp["verifications"] = savedRecs
+		resp["verification"] = savedRecs[0]
+	}
+	s.writeJSON(w, 200, resp)
 }
 
 // Compare under the save/publish lock: another tab's edits must never be discarded.

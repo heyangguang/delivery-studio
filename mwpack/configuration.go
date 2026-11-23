@@ -68,14 +68,20 @@ func ValidateDeliveryMode(p *Plan) error {
 	if mode == "" {
 		mode = "offline"
 	}
-	if mode != "offline" && mode != "configuration" {
-		return fmt.Errorf("交付方式只能选择 offline 或 configuration；自动执行需在计划生成后单独授权")
+	if mode != "offline" && mode != "automatic" && mode != "configuration" {
+		return fmt.Errorf("交付方式只能选择 offline、automatic 或 configuration")
 	}
 	for _, i := range p.Instances {
 		if i.R == nil || i.R.C == nil {
 			return fmt.Errorf("%s 的组件定义不可用", i.ID)
 		}
 		if i.External {
+			continue
+		}
+		if mode == "automatic" {
+			if !i.R.C.SupportsDelivery("automatic") {
+				return fmt.Errorf("%s 的当前修订不支持自动执行", i.ID)
+			}
 			continue
 		}
 		if !i.R.C.SupportsDelivery(mode) && !(mode == "offline" && i.R.C.SupportsDelivery("automatic")) {

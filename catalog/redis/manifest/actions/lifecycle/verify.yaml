@@ -2,11 +2,21 @@
   title: 核对各节点状态
   desc: 服务运行、能用密码连接、没有密码连接被拒、内存与持久化设置和计划一致；不改动数据。
   effect: read-only
+  timeout: 300
   expect: 每个节点的实际设置与计划一致。
+  postconditions:
+    - rd_active.rc == 0
+    - rd_active.stdout_lines | reject('equalto', 'active') | list | length == 0
+    - not (mw.params.disable_swap | bool) or (rd_swapnow.stdout | trim) == ''
   run: {role: redis, tasks: health}
 - id: topology
   title: 复核拓扑
   effect: read-only
+  timeout: 300
   hosts: first:primary
   when: count(roles.replica) > 0
+  expect: 哨兵指向当前主库、从库数量与计划一致、SENTINEL ckquorum 返回 OK。
+  postconditions:
+    - rd_quorum.rc == 0
+    - rd_quorum.stdout | trim is match('OK')
   run: {role: redis, tasks: topology}

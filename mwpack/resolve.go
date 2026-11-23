@@ -141,6 +141,52 @@ func (c *Component) Resolve(id string) (*Resolved, error) {
 	return r, nil
 }
 
+// EffectiveVerifiedPlatforms returns the OS platforms that are verified and released for this version.
+//   - If status != "published", returns nil (no OS is released for formal delivery).
+//   - If status == "published" and VerifiedPlatforms is explicitly listed, returns those declared platforms.
+//   - If status == "published" and VerifiedPlatforms is omitted on a legacy pack, all declared Platforms count as verified.
+func (r *Resolved) EffectiveVerifiedPlatforms() []string {
+	if firstNonEmpty(r.Version.Status, "draft") != "published" || len(r.Platforms) == 0 {
+		return nil
+	}
+	if len(r.Version.VerifiedPlatforms) > 0 {
+		var out []string
+		for _, p := range r.Version.VerifiedPlatforms {
+			if contains(r.Platforms, p) && !contains(out, p) {
+				out = append(out, p)
+			}
+		}
+		return out
+	}
+	return append([]string(nil), r.Platforms...)
+}
+
+// PlatformStatus returns the effective release state of this version on a specific OS platform:
+//   - "draft"     : version is still in draft
+//   - "verifying" : version is verifying, OR published on other OSes but not yet verified on this OS
+//   - "published" : version is published AND verified on this OS (or external / platform-agnostic)
+func (r *Resolved) PlatformStatus(platform string) string {
+	st := firstNonEmpty(r.Version.Status, "draft")
+	if st != "published" {
+		return st
+	}
+	if len(r.Platforms) == 0 || platform == "" {
+		return "published"
+	}
+	if contains(r.EffectiveVerifiedPlatforms(), platform) {
+		return "published"
+	}
+	return "verifying"
+}
+
+// ManifestSum returns the SHA256 digest of the component's manifest & files.
+func (c *Component) ManifestSum() string {
+	if c == nil {
+		return ""
+	}
+	return c.sum
+}
+
 func (r *Resolved) Role(name string) (RoleSpec, bool) {
 	for _, x := range r.Roles {
 		if x.Name == name {

@@ -83,7 +83,7 @@ func (a *fakeArchive) sources(t *testing.T) *Sources {
 	t.Helper()
 	dir := t.TempDir()
 	yaml := filepath.Join(dir, "sources.yaml")
-	os.WriteFile(yaml, []byte(fmt.Sprintf("- id: ubuntu-noble\n  title: test archive\n  platforms: [ubuntu-24.04-amd64]\n  kind: apt\n  url: %s\n  suites: [noble]\n  components: [main]\n  key_file: test.gpg\n- id: percona-ppg17-noble\n  title: off\n  platforms: [ubuntu-24.04-amd64]\n  kind: apt\n  url: %s\n  suites: [noble]\n  components: [main]\n  key_file: test.gpg\n  disabled: true\n- id: redis-noble\n  title: off\n  platforms: [ubuntu-24.04-amd64]\n  kind: apt\n  url: %s\n  suites: [noble]\n  components: [main]\n  key_file: test.gpg\n  disabled: true\n", a.srv.URL, a.srv.URL, a.srv.URL)), 0o600)
+	os.WriteFile(yaml, []byte(fmt.Sprintf("- id: ubuntu-noble\n  title: test archive\n  platforms: [ubuntu-24.04-amd64]\n  kind: apt\n  url: %s\n  suites: [noble]\n  components: [main]\n  key_file: test.gpg\n- id: percona-ppg17-noble\n  title: off\n  platforms: [ubuntu-24.04-amd64]\n  kind: apt\n  url: %s\n  suites: [noble]\n  components: [main]\n  key_file: test.gpg\n  disabled: true\n- id: redis-noble\n  title: off\n  platforms: [ubuntu-24.04-amd64]\n  kind: apt\n  url: %s\n  suites: [noble]\n  components: [main]\n  key_file: test.gpg\n  disabled: true\n- id: nginx-noble\n  title: off\n  platforms: [ubuntu-24.04-amd64]\n  kind: apt\n  url: %s\n  suites: [noble]\n  components: [nginx]\n  key_file: test.gpg\n  disabled: true\n", a.srv.URL, a.srv.URL, a.srv.URL, a.srv.URL)), 0o600)
 	os.MkdirAll(filepath.Join(dir, "sources.keys"), 0o700)
 	var key bytes.Buffer
 	if err := a.entity.Serialize(&key); err != nil {

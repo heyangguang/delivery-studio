@@ -6,4 +6,8 @@ hosts: first:primary
 when: count(roles.replica) > 0
 skip: 单节点没有故障转移
 expect: 新主在超时内产生并可写；旧主恢复后是从库且读到新主写入的数据。
+timeout: 900
+postconditions:
+  - rd_ni.rc == 0
+  - ('connected_slaves:' ~ rd_replica_count) in rd_ni.stdout
 run: {role: redis, tasks: test_failover}

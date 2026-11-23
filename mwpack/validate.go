@@ -123,6 +123,11 @@ func ValidateComponent(c *Component, cat *Catalog) []Problem {
 			bad(p, "%v", err)
 			continue
 		}
+		for _, vp := range v.VerifiedPlatforms {
+			if !contains(r.Platforms, vp) {
+				bad(p, "verified_platforms 中的系统「%s」不在该版本声明的 platforms 里", vp)
+			}
+		}
 		for _, pr := range validateResolved(r, cat) {
 			pr.Path = "versions[" + v.ID + "]." + pr.Path
 			out = append(out, pr)

@@ -303,6 +303,41 @@ func (p *platform) entries() []catalogEntry { return p.entriesWith(false) }
 
 // entriesWith lists components; includeExternal adds the customer-operated ones the wizard offers as fronts.
 func (p *platform) entriesWith(includeExternal bool) []catalogEntry {
+	rtReadyCache := map[string]bool{}
+	poolCache := map[string]map[string]int64{}
+	pkgHasCache := map[string]bool{}
+	isRuntimeReady := func(pl string) bool {
+		if v, ok := rtReadyCache[pl]; ok {
+			return v
+		}
+		v := p.runtimeReady(pl)
+		rtReadyCache[pl] = v
+		return v
+	}
+	missingFor := func(pl string, reqs []mwpack.PackageRequest) []mwpack.PackageRequest {
+		if len(reqs) == 0 {
+			return nil
+		}
+		pool, ok := poolCache[pl]
+		if !ok {
+			pool = p.lib.PoolSizes(pl)
+			poolCache[pl] = pool
+		}
+		var out []mwpack.PackageRequest
+		for _, r := range reqs {
+			key := pl + "\x00" + r.Key()
+			has, seen := pkgHasCache[key]
+			if !seen {
+				has = p.lib.HasInPool(pl, r, pool)
+				pkgHasCache[key] = has
+			}
+			if !has {
+				out = append(out, r)
+			}
+		}
+		return out
+	}
+
 	var out []catalogEntry
 	for _, info := range p.cat().Infos() {
 		// External components (a customer's own load balancer) only make sense as the front of something else.
@@ -316,8 +351,8 @@ func (p *platform) entriesWith(includeExternal bool) []catalogEntry {
 		for _, v := range info.Versions {
 			ve := versionEntry{VerInfo: v, Coverage: map[string]coverage{}}
 			for _, pl := range v.Platforms {
-				cv := coverage{Deployable: p.runtimeReady(pl)}
-				cv.Missing = p.lib.Missing(pl, v.Packages[pl])
+				cv := coverage{Deployable: isRuntimeReady(pl)}
+				cv.Missing = missingFor(pl, v.Packages[pl])
 				cv.Ready = len(cv.Missing) == 0
 				ve.Coverage[pl] = cv
 				if cv.Ready && cv.Deployable {

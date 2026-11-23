@@ -753,11 +753,15 @@ func TestPackagesFollowThePlatform(t *testing.T) {
 		// nginx cannot front a Patroni endpoint, but with no binds the plan itself is valid
 		_ = err
 	}
-	if got := strings.Join(specs(ub, "lb"), ","); got != "nginx=1.24.0-2ubuntu7.18,libnginx-mod-stream=1.24.0-2ubuntu7.18" {
-		t.Fatalf("ubuntu nginx packages = %s", got)
+	if got := strings.Join(specs(ub, "lb"), ","); got != "nginx=1.26.3-1~noble" {
+		t.Fatalf("ubuntu default nginx packages = %s", got)
 	}
-	if ub.Instance("lb").Version != "1.24" {
-		t.Fatalf("on ubuntu the default nginx is the one that exists there, got %s", ub.Instance("lb").Version)
+	if ub.Instance("lb").Version != "1.26" {
+		t.Fatalf("on ubuntu the default nginx should pick the newest published version (1.26), got %s", ub.Instance("lb").Version)
+	}
+	ub124 := mustSolve(t, cat, strings.Replace(fmt.Sprintf(lbOnly, "ub124", "ubuntu-24.04-amd64", "nginx"), "component: nginx", "component: nginx\n    version: \"1.24\"", 1))
+	if got := strings.Join(specs(ub124, "lb"), ","); got != "nginx=1.24.0-2ubuntu7.18,libnginx-mod-stream=1.24.0-2ubuntu7.18" {
+		t.Fatalf("ubuntu nginx 1.24 packages = %s", got)
 	}
 	el := mustSolve(t, cat, fmt.Sprintf(lbOnly, "el", "el9-amd64", "nginx"))
 	if err := el.Err(); err != nil {
@@ -781,7 +785,7 @@ func TestPackagesFollowThePlatform(t *testing.T) {
 		t.Error("an unverified family must be flagged to the user")
 	}
 	// The request list is exact, deduplicated and stable.
-	reqs := ub.Requests()
+	reqs := ub124.Requests()
 	seen := map[string]bool{}
 	for _, r := range reqs {
 		if seen[r.Key()] {
@@ -790,7 +794,7 @@ func TestPackagesFollowThePlatform(t *testing.T) {
 		seen[r.Key()] = true
 	}
 	if len(reqs) != 3 {
-		t.Fatalf("nginx + stream module + keepalived = 3 packages, got %v", reqs)
+		t.Fatalf("nginx 1.24 + stream module + keepalived = 3 packages, got %v", reqs)
 	}
 }
 

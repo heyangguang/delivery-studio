@@ -343,7 +343,7 @@ func TestSourcesValidationAndOverride(t *testing.T) {
 	}
 	// An administrator can point a built-in source at an internal mirror and switch another one off.
 	path := filepath.Join(t.TempDir(), "sources.yaml")
-	custom := "- {id: ubuntu-noble, platforms: [ubuntu-24.04-amd64], kind: apt, url: https://mirror.corp/ubuntu, suites: [noble], components: [main], key_file: ubuntu-archive-keyring.gpg}\n- {id: percona-ppg17-noble, platforms: [ubuntu-24.04-amd64], kind: apt, url: http://x/, suites: [noble], components: [main], disabled: true}\n- {id: redis-noble, platforms: [ubuntu-24.04-amd64], kind: apt, url: http://x/, suites: [noble], components: [main], disabled: true}\n"
+	custom := "- {id: ubuntu-noble, platforms: [ubuntu-24.04-amd64], kind: apt, url: https://mirror.corp/ubuntu, suites: [noble], components: [main], key_file: ubuntu-archive-keyring.gpg}\n- {id: percona-ppg17-noble, platforms: [ubuntu-24.04-amd64], kind: apt, url: http://x/, suites: [noble], components: [main], disabled: true}\n- {id: redis-noble, platforms: [ubuntu-24.04-amd64], kind: apt, url: http://x/, suites: [noble], components: [main], disabled: true}\n- {id: nginx-noble, platforms: [ubuntu-24.04-amd64], kind: apt, url: http://x/, suites: [noble], components: [nginx], disabled: true}\n"
 	if err := os.WriteFile(path, []byte(custom), 0o600); err != nil {
 		t.Fatal(err)
 	}

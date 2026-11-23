@@ -1,3 +1,16 @@
+- name: 检查 Nginx 运行用户
+  ansible.builtin.getent:
+    database: passwd
+    key: nginx
+  register: nginx_user_entry
+  failed_when: false
+  changed_when: false
+
+- name: 检查 Nginx 动态模块目录
+  ansible.builtin.stat:
+    path: "{{ '/etc/nginx/modules-enabled' if mw_pkg_family == 'apt' else '/usr/share/nginx/modules' }}"
+  register: nginx_modules_dir
+
 - name: 写入配置（先校验再替换）
   ansible.builtin.template:
     src: nginx.conf.j2
@@ -6,3 +19,8 @@
     group: root
     mode: '0644'
     validate: nginx -t -c %s
+
+- name: 核对 Nginx 配置文件
+  ansible.builtin.command: nginx -t -c /etc/nginx/nginx.conf
+  register: nginx_cfg_valid
+  changed_when: false

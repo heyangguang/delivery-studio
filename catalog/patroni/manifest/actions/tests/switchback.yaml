@@ -2,6 +2,7 @@ id: switchback
 title: 回切主库
 desc: 把主库切回控制节点；已经在控制节点时什么也不做。后面的备份恢复类测试都要求控制节点是主库。
 effect: disruptive
+timeout: 7200
 hosts: first:primary
 when: count(roles.replica) > 0
 skip: 单节点没有主从可回切

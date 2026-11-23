@@ -253,7 +253,7 @@ export function LibraryPage({
     prevLang.current = lang;
     reload(langChanged);
     // the list of the system that will be shown is fetched alongside the overview, not after it
-    if (!langChanged) {
+    if (!langChanged && selected !== "ansible") {
       fetchCached(
         closuresPath(selected || ov?.default_platform || "ubuntu-24.04-amd64"),
       ).catch(() => {});
@@ -507,7 +507,11 @@ function PlatformDetail({
   const lastKind = useRef<"index" | "packages">("packages");
   if (importKind) lastKind.current = importKind;
   const [task, setTask] = useState<FetchTask | null>(
-    ov.last_task && ov.last_task.platform === p.id ? ov.last_task : null,
+    ov.last_task &&
+      ov.last_task.platform === p.id &&
+      ov.last_task.state === "running"
+      ? ov.last_task
+      : null,
   );
   const [error, setError] = useState("");
   const [sec, setSec] = useState<"all" | "packages" | "source" | "runtime">(
@@ -906,26 +910,33 @@ function PlatformDetail({
             </div>
           )}
           {missing.length > 0 && (
-            <div className="lp-body lp-missing">
-              <div>
-                <b>
-                  {bi(
-                    `组件需要、库里还没有的 ${missing.length} 个`,
-                    `${missing.length} required ${missing.length === 1 ? "package" : "packages"} missing from library`,
-                  )}
-                </b>
-                <div className="missing">
-                  {missing.map((m) => (
-                    <span className="mono small" key={keyOf(m)}>
-                      {m.name} <span className="faint">{m.version}</span>
-                    </span>
-                  ))}
+            <div className="lp-missing" role="status">
+              <div className="lp-missing-left">
+                <span className="lp-missing-ic" aria-hidden>
+                  <IconExclamationCircle />
+                </span>
+                <div className="lp-missing-body">
+                  <b>
+                    {bi(
+                      `组件需要、库里还没有的 ${missing.length} 个`,
+                      `${missing.length} required ${missing.length === 1 ? "package" : "packages"} missing from library`,
+                    )}
+                  </b>
+                  <div className="missing">
+                    {missing.map((m) => (
+                      <span className="lp-missing-chip mono" key={keyOf(m)}>
+                        <span>{m.name}</span>
+                        <span className="faint">{m.version}</span>
+                      </span>
+                    ))}
+                  </div>
                 </div>
               </div>
               {admin && direct && (
                 <Button
                   type="primary"
                   size="small"
+                  icon={<IconDownload />}
                   disabled={ov.busy}
                   onClick={() => startFetch(missing)}
                 >

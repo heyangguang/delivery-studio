@@ -47,4 +47,5 @@
 - name: 核对服务器与默认密钥
   ansible.builtin.command:
     argv: "{{ pg_psql + ['-d', 'postgres', '-c', 'SELECT pg_tde_verify_server_key(); SELECT pg_tde_verify_default_key();'] }}"
+  register: pg_tde_verified
   changed_when: false

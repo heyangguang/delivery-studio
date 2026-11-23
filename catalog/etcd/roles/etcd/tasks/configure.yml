@@ -50,6 +50,7 @@
     mode: '0644'
     content: |
       [Service]
+      WorkingDirectory={{ (mw_hosts[inventory_hostname].params.data_root | default('/data')) ~ mw.params.data_dir[5:] }}
       ExecStart=
       ExecStart=/usr/bin/etcd --config-file=/etc/etcd/etcd.conf.yaml
       LimitNOFILE={{ mw.params.nofile }}
@@ -66,3 +67,4 @@
     dest: /var/lib/mwctl/{{ mw_cluster.id }}/{{ mw.id }}/initial-cluster
     mode: '0600'
     content: "{{ etcd_initial_cluster }}\n"
+  register: etcd_cluster_marker

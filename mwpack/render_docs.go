@@ -159,7 +159,7 @@ func PrepareSteps(p *Plan, opt RenderOptions) []*PlanStep {
 		kit := base + "/mw-setup"
 		guard := "[[ -e " + kit
 		if h.Name == p.Controller {
-			guard += " || -e " + p.RuntimeRoot()
+			guard += " || -n \"$(ls -A " + p.RuntimeRoot() + " 2>/dev/null)\""
 		}
 		guard += " ]]"
 		prepare := "bash setup-root-ssh-trust.sh prepare " + h.Name
@@ -171,7 +171,17 @@ func PrepareSteps(p *Plan, opt RenderOptions) []*PlanStep {
 		add(PlanStep{ID: "unpack-" + h.Name, Title: "解包并准备 " + h.Name, Desc: desc, Hosts: []string{h.Name},
 			Command: fmt.Sprintf("cd %s\nif %s; then\n  echo '已有部署目录，停止；请核对旧环境，不覆盖。'\nelse\n  mkdir -p %s && sha256sum -c %s.sha256 && tar -xzf %s -C %s && cd %s && %s\nfi", opt.UploadDir, guard, base, name, name, base, kit, prepare)})
 	}
-	if len(p.DeliveryHosts()) > 1 {
+	if p.Dep.DeliveryMode == "automatic" {
+		add(PlanStep{
+			ID:      "bootstrap-runtime",
+			Title:   "安装离线 Ansible 运行环境并核对清单",
+			Desc:    "引导脚本只使用随包的离线材料，不访问外网。完成后请在平台接入执行节点并运行准备检查（目标机器支持 Target Agent 托管连接或已有 SSH）。",
+			Effect:  "change",
+			Hosts:   []string{p.Controller},
+			Command: "cd " + p.RuntimeRoot() + "\nbash bootstrap/bootstrap-ansible.sh\ncd " + opt.ProjectDir + "\n" + inventoryCmd(opt),
+			Expect:  "清单应列出全部机器和各实例的分组；执行节点通过准备检查后即可自动执行后续步骤。",
+		})
+	} else if len(p.DeliveryHosts()) > 1 {
 		add(PlanStep{ID: "ssh-source", Title: "生成控制节点的公钥", Desc: "只输出控制节点 root 用户的公钥，用于后面的免密登录；不交换私钥。", Hosts: []string{p.Controller}, Command: "cd " + p.PackageBase() + "/mw-setup\nbash setup-root-ssh-trust.sh source"})
 		for _, h := range p.Hosts {
 			if h.Name == p.Controller {
@@ -186,7 +196,11 @@ func PrepareSteps(p *Plan, opt RenderOptions) []*PlanStep {
 
 func docPrepare(p *Plan, opt RenderOptions, res map[string]Artifact) string {
 	var b strings.Builder
-	b.WriteString("# 环境准备：上传与免密配置\n\n")
+	if p.Dep.DeliveryMode == "automatic" {
+		b.WriteString("# 环境准备：上传材料与执行节点初始化\n\n")
+	} else {
+		b.WriteString("# 环境准备：上传与免密配置\n\n")
+	}
 	b.WriteString(overview(p))
 	b.WriteString("## 上传文件\n\n生成交付不会操作机器。先把下列文件通过堡垒机上传到各机器的 `" + opt.UploadDir + "`，再按顺序操作。\n\n|机器|上传文件|\n|---|---|\n")
 	for i, h := range p.DeliveryHosts() {
@@ -211,7 +225,11 @@ func docPrepare(p *Plan, opt RenderOptions, res map[string]Artifact) string {
 		}
 		b.WriteString("\n")
 	}
-	b.WriteString("所有机器都完成解包之后再开始免密配置。除标明在其他机器执行的步骤外，都在控制节点 **" + p.Controller + "** 执行。\n\n")
+	if p.Dep.DeliveryMode == "automatic" {
+		b.WriteString("本交付为**自动执行模式**：完成各机器解包与执行机运行环境安装后，直接在平台接入执行节点与目标 Agent（或复用已有 SSH），通过准备检查后即可在页面发起自动部署与测试，无需手工交换 SSH 密钥。\n\n")
+	} else {
+		b.WriteString("所有机器都完成解包之后再开始免密配置。除标明在其他机器执行的步骤外，都在控制节点 **" + p.Controller + "** 执行。\n\n")
+	}
 	for n, s := range PrepareSteps(p, opt) {
 		fmt.Fprintf(&b, "## %d. %s\n\n作用于 %s。%s\n\n", n+1, s.Title, hostList(s.Hosts), s.Desc)
 		b.WriteString(fence(s.Command))
@@ -219,7 +237,7 @@ func docPrepare(p *Plan, opt RenderOptions, res map[string]Artifact) string {
 			b.WriteString("通过标准：" + s.Expect + "\n\n")
 		}
 	}
-	if len(p.DeliveryHosts()) == 1 {
+	if p.Dep.DeliveryMode != "automatic" && len(p.DeliveryHosts()) == 1 {
 		b.WriteString("只有一台机器，不需要配置免密登录。\n\n")
 	}
 	return b.String()
@@ -270,11 +288,18 @@ func stepBlock(b *strings.Builder, n int, s *PlanStep, showCommand bool) {
 func docDeploy(p *Plan, st *Steps, opt RenderOptions) string {
 	var b strings.Builder
 	b.WriteString("# 部署步骤（控制节点 " + p.Controller + "，root）\n\n")
-	b.WriteString("全部在控制节点的 root 终端完成，需先完成免密配置。**每一步的 Ansible 输出末尾必须是 `failed=0`、`unreachable=0` 才继续下一步**；失败或中断时保留日志，不要删锁、不要删数据目录、不要重建集群，先把现象和日志发给平台维护人员。\n\n")
-	n := 1
-	fmt.Fprintf(&b, "## %d. 离线安装 Ansible 并核对清单\n\n引导脚本只使用随包的离线材料，不访问外网。\n\n", n)
-	b.WriteString(fence("cd " + p.RuntimeRoot() + "\nbash bootstrap/bootstrap-ansible.sh\ncd " + opt.ProjectDir + "\n" + inventoryCmd(opt)))
-	b.WriteString("清单应列出全部机器和各实例的分组；缺少机器说明材料与上传包不一致，先停下核对。\n\n")
+	if p.Dep.DeliveryMode == "automatic" {
+		b.WriteString("本交付为**自动执行模式**，在平台通过准备检查后即可按步骤或批量自动执行，以下各步命令保留供审计核对与应急排障参考。**每一步的 Ansible 输出末尾必须是 `failed=0`、`unreachable=0` 才继续下一步**；失败或中断时保留日志，不要删锁、不要删数据目录、不要重建集群。\n\n")
+	} else {
+		b.WriteString("全部在控制节点的 root 终端完成，需先完成免密配置。**每一步的 Ansible 输出末尾必须是 `failed=0`、`unreachable=0` 才继续下一步**；失败或中断时保留日志，不要删锁、不要删数据目录、不要重建集群，先把现象和日志发给平台维护人员。\n\n")
+	}
+	n := 0
+	if p.Dep.DeliveryMode != "automatic" {
+		n = 1
+		fmt.Fprintf(&b, "## %d. 离线安装 Ansible 并核对清单\n\n引导脚本只使用随包的离线材料，不访问外网。\n\n", n)
+		b.WriteString(fence("cd " + p.RuntimeRoot() + "\nbash bootstrap/bootstrap-ansible.sh\ncd " + opt.ProjectDir + "\n" + inventoryCmd(opt)))
+		b.WriteString("清单应列出全部机器和各实例的分组；缺少机器说明材料与上传包不一致，先停下核对。\n\n")
+	}
 	for _, ph := range st.Phases {
 		n++
 		fmt.Fprintf(&b, "## %d. 阶段：%s\n\n", n, ph.Title)

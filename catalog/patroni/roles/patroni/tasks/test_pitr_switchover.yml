@@ -1,25 +1,3 @@
-- name: 核对本项验收需要的节点间 SSH（只读，不配置互信）
-  ansible.builtin.command:
-    argv:
-      - ssh
-      - -oBatchMode=yes
-      - -oStrictHostKeyChecking=yes
-      - -oConnectTimeout=8
-      - -oConnectionAttempts=1
-      - "root@{{ mw_hosts[item].ip }}"
-      - /usr/bin/true
-  loop: "{{ mw.roles.primary + mw.roles.replica }}"
-  when: item != inventory_hostname
-  changed_when: false
-  register: pg_peer_access
-  failed_when: false
-
-- name: 节点间验收连接必须已获授权
-  ansible.builtin.assert:
-    that:
-      - "pg_peer_access.results | default([]) | rejectattr('skipped', 'defined') | selectattr('rc', 'ne', 0) | list | length == 0"
-    fail_msg: "此项跨机验收需要数据库节点间已授权的 SSH。执行机到目标机的 Agent 信任不包含节点间互信；请先完成现场授权，或保留此项人工处理。尚未开始数据库测试。"
-
 - name: 测试目录
   ansible.builtin.file:
     path: "/opt/middleware/{{ mw_cluster.id }}/{{ mw.id }}"
@@ -54,7 +32,7 @@
           - "执行节点={{ inventory_hostname }}，测试={{ pg_test }}"
           - "异步执行期间终端不会实时显示脚本输出；在本节点另开终端执行：tail -n 80 -F /opt/middleware/{{ mw_cluster.id }}/{{ mw.id }}/pgstep_pitr_switchover.log"
 
-    - name: 执行 {{ pg_test }}
+    - name: 切换写入多时间线数据并生成 PITR 目标时间点 ({{ pg_test }})
       ansible.builtin.command:
         argv:
           - /usr/bin/python3
@@ -65,10 +43,177 @@
           - "{{ pg_test }}"
       environment:
         PYTHONUNBUFFERED: '1'
+        MW_PG_PHASE: prepare
       async: "{{ mw_step_inputs.timeout }}"
       poll: 5
       register: pg_test_result
-      changed_when: pg_test not in ['ha-check', 'rewind-check', 'inspect', 'backup-info']
+      changed_when: true
+
+    - name: 解析跨时间线 WAL 收集参数
+      ansible.builtin.set_fact:
+        pg_pitr_sw_meta: "{{ (pg_test_result.stdout_lines | select('match', '^PITR_SW_META:') | first | regex_replace('^PITR_SW_META:', '')) | from_json }}"
+        pg_pitr_sw_done: false
+
+    - name: 经 Ansible 收集多时间线归档 WAL 并完成时间点恢复
+      block:
+        - name: 扫描各节点本地归档仓库的 WAL 与 history 文件
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/python3
+              - -c
+              - |
+                import json, pathlib, re, sys
+                pat = re.compile(r'^([0-9A-F]{24}|[0-9A-F]{8}\.history)(-[0-9a-f]{40})?(\.[a-z0-9]+)?$')
+                root = pathlib.Path(sys.argv[1]) / 'archive' / sys.argv[2]
+                names = sorted({pat.match(p.name).group(1) for p in root.rglob('*') if p.is_file() and pat.match(p.name)}) if root.exists() else []
+                print(json.dumps(names))
+              - "{{ pg_pitr_sw_meta.repo }}"
+              - "{{ pg_pitr_sw_meta.scope }}"
+          delegate_to: "{{ item }}"
+          loop: "{{ [inventory_hostname] + ((mw.roles.primary + mw.roles.replica) | unique | reject('equalto', inventory_hostname) | list) }}"
+          register: pg_pitr_wal_lists
+          changed_when: false
+
+        - name: 汇总唯一 WAL 文件来源（优先本机仓库）
+          ansible.builtin.set_fact:
+            pg_pitr_wal_sources: >-
+              {%- set seen = [] -%}
+              {%- set out = [] -%}
+              {%- for res in pg_pitr_wal_lists.results -%}
+                {%- for wname in (res.stdout | from_json) -%}
+                  {%- if wname not in seen -%}
+                    {%- set _ = seen.append(wname) -%}
+                    {%- set _ = out.append({'host': res.item, 'name': wname}) -%}
+                  {%- endif -%}
+                {%- endfor -%}
+              {%- endfor -%}
+              {{ out }}
+
+        - name: 至少应收集到一个归档 WAL 文件
+          ansible.builtin.assert:
+            that: (pg_pitr_wal_sources | length) > 0
+            fail_msg: 各节点本地归档仓库中没有找到任何 WAL 或 history 文件
+
+        - name: 从本机归档仓库导出 WAL 到暂存目录
+          ansible.builtin.command:
+            argv:
+              - runuser
+              - -u
+              - postgres
+              - --
+              - pgbackrest
+              - "--stanza={{ pg_pitr_sw_meta.scope }}"
+              - archive-get
+              - "{{ item.name }}"
+              - "{{ pg_pitr_sw_meta.stage }}/{{ item.name }}"
+          loop: "{{ pg_pitr_wal_sources }}"
+          when: item.host == inventory_hostname
+          changed_when: true
+
+        - name: 在远端节点导出 WAL 到临时文件
+          ansible.builtin.command:
+            argv:
+              - runuser
+              - -u
+              - postgres
+              - --
+              - pgbackrest
+              - "--stanza={{ pg_pitr_sw_meta.scope }}"
+              - archive-get
+              - "{{ item.name }}"
+              - "/tmp/pg-stage-{{ pg_pitr_sw_meta.scope }}-{{ item.name }}"
+          delegate_to: "{{ item.host }}"
+          loop: "{{ pg_pitr_wal_sources }}"
+          when: item.host != inventory_hostname
+          changed_when: true
+
+        - name: 设置远端临时 WAL 文件可读权限以便 Ansible 拉取
+          ansible.builtin.file:
+            path: "/tmp/pg-stage-{{ pg_pitr_sw_meta.scope }}-{{ item.name }}"
+            mode: '0644'
+          delegate_to: "{{ item.host }}"
+          loop: "{{ pg_pitr_wal_sources }}"
+          when: item.host != inventory_hostname
+
+        - name: 经执行节点拉取远端 WAL 到临时缓存目录
+          ansible.builtin.fetch:
+            src: "/tmp/pg-stage-{{ pg_pitr_sw_meta.scope }}-{{ item.name }}"
+            dest: "/tmp/pg-wal-fetch-{{ pg_pitr_sw_meta.scope }}/{{ item.name }}"
+            flat: true
+          delegate_to: "{{ item.host }}"
+          loop: "{{ pg_pitr_wal_sources }}"
+          when: item.host != inventory_hostname
+
+        - name: 清理远端临时 WAL 导出文件
+          ansible.builtin.file:
+            path: "/tmp/pg-stage-{{ pg_pitr_sw_meta.scope }}-{{ item.name }}"
+            state: absent
+          delegate_to: "{{ item.host }}"
+          loop: "{{ pg_pitr_wal_sources }}"
+          when: item.host != inventory_hostname
+
+        - name: 分发拉取的 WAL 到暂存目录
+          ansible.builtin.copy:
+            src: "/tmp/pg-wal-fetch-{{ pg_pitr_sw_meta.scope }}/{{ item.name }}"
+            dest: "{{ pg_pitr_sw_meta.stage }}/{{ item.name }}"
+            owner: postgres
+            group: postgres
+            mode: '0600'
+          loop: "{{ pg_pitr_wal_sources }}"
+          when: item.host != inventory_hostname
+
+        - name: 统一暂存目录中全部 WAL 文件属主为 postgres
+          ansible.builtin.file:
+            path: "{{ pg_pitr_sw_meta.stage }}/{{ item.name }}"
+            owner: postgres
+            group: postgres
+            mode: '0600'
+          loop: "{{ pg_pitr_wal_sources }}"
+          when: item.host == inventory_hostname
+
+        - name: 执行跨时间线 PITR 恢复并验证数据及时间线 ({{ pg_test }})
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/python3
+              - -u
+              - "/opt/middleware/{{ mw_cluster.id }}/{{ mw.id }}/pgstep_pitr_switchover.py"
+              - "/opt/middleware/{{ mw_cluster.id }}/{{ mw.id }}/pgstep_pitr_switchover.json"
+              - "{{ inventory_hostname }}"
+              - "{{ pg_test }}"
+          environment:
+            PYTHONUNBUFFERED: '1'
+            MW_PG_PHASE: verify
+          async: "{{ mw_step_inputs.timeout }}"
+          poll: 5
+          register: pg_test_result
+          changed_when: pg_test not in ['ha-check', 'rewind-check', 'inspect', 'backup-info']
+
+        - name: 标记跨时间线恢复流程正常完成
+          ansible.builtin.set_fact:
+            pg_pitr_sw_done: true
+      always:
+        - name: 清理执行节点上的临时 WAL 缓存目录
+          ansible.builtin.file:
+            path: "/tmp/pg-wal-fetch-{{ pg_pitr_sw_meta.scope }}"
+            state: absent
+          delegate_to: localhost
+          when: pg_pitr_sw_meta is defined
+
+        - name: 异常中断时将主库切回原控制节点 ({{ pg_test }})
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/python3
+              - -u
+              - "/opt/middleware/{{ mw_cluster.id }}/{{ mw.id }}/pgstep_pitr_switchover.py"
+              - "/opt/middleware/{{ mw_cluster.id }}/{{ mw.id }}/pgstep_pitr_switchover.json"
+              - "{{ inventory_hostname }}"
+              - "{{ pg_test }}"
+          environment:
+            PYTHONUNBUFFERED: '1'
+            MW_PG_PHASE: restore_leader
+          when: pg_pitr_sw_meta is defined and not (pg_pitr_sw_done | default(false))
+          failed_when: false
+          changed_when: true
   always:
     - name: 测试输出（成功或失败均显示）
       ansible.builtin.debug:

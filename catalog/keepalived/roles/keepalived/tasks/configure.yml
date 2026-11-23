@@ -7,4 +7,5 @@
     src: keepalived.conf.j2
     dest: /etc/keepalived/keepalived.conf
     mode: '0600'
+  register: keepalived_cfg
   no_log: true

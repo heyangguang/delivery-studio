@@ -150,3 +150,45 @@ func TestSharedPlatformAIAndImpact(t *testing.T) {
 }
 
 func sharedTestJSON(v any) string { b, _ := json.Marshal(v); return string(b) }
+
+func TestSharedPlatformScriptCheckAndUpgradeRefresh(t *testing.T) {
+	s, _ := testStore(t)
+	w := &wb{t: t, s: s}
+	base := "/api/components/platform-shared"
+	w.ok("POST", base+"/draft", map[string]any{})
+
+	// Simulate an older Middleware Hub version having written an outdated read-only platform-contract.md into the draft.
+	contractDisk := filepath.Join(s.plat.componentsDir, ".work", sharedPlatformName, "files", "files", "platform-contract.md")
+	if err := os.WriteFile(contractDisk, []byte("# outdated contract from previous binary\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	files, _, err := s.comps().readDraft(sharedPlatformName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(files["files/platform-contract.md"]) != sharedContract {
+		t.Fatalf("expected stale platform-contract.md to auto-refresh on readDraft")
+	}
+	check := checkSharedPlatform(s.plat, files)
+	if !check.OK {
+		t.Fatalf("expected clean check after platform-contract refresh, got:\n%s", problemsText(check, nil))
+	}
+
+	// Genuine script syntax errors must still be rejected when host bash/python3 are available.
+	if _, ok := findScriptSyntaxBash(); ok {
+		badSh := files.clone()
+		badSh["files/setup-root-ssh-trust.sh"] = []byte("#!/usr/bin/env bash\nif [ 1 = 1 ]; then\n")
+		res := checkSharedPlatform(s.plat, badSh)
+		if res.OK {
+			t.Fatalf("expected broken bash script to fail checkSharedPlatform")
+		}
+	}
+	if _, ok := findScriptSyntaxPython(); ok {
+		badPy := files.clone()
+		badPy["files/mw_log.py"] = []byte("def broken(:\n    pass\n")
+		res := checkSharedPlatform(s.plat, badPy)
+		if res.OK {
+			t.Fatalf("expected broken python script to fail checkSharedPlatform")
+		}
+	}
+}

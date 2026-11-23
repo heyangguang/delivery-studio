@@ -751,9 +751,11 @@ export function WorkbenchPage({
     [name],
   );
   const aiStatus = useAIStatus();
+  const compAIOn =
+    aiStatus.enabled && !!aiStatus.features?.component && can("ai.use");
   const reviewLoaded = useRef(false);
   useEffect(() => {
-    if (!loaded || !aiStatus.enabled || reviewLoaded.current) return;
+    if (!loaded || !compAIOn || reviewLoaded.current) return;
     reviewLoaded.current = true;
     loadReview(filesRef.current)
       .then((r) => {
@@ -762,7 +764,7 @@ export function WorkbenchPage({
         setAiShown(new Set(r.changes.map((c) => c.tab)));
       })
       .catch(() => undefined);
-  }, [loaded, aiStatus.enabled, loadReview]);
+  }, [loaded, compAIOn, loadReview]);
   useEffect(() => {
     const h = async (e: Event) => {
       const d = (e as CustomEvent<{ name: string }>).detail;
@@ -1240,7 +1242,7 @@ export function WorkbenchPage({
               )}
             </div>
           )}
-          {aiStatus.enabled && aiRun && (
+          {compAIOn && aiRun && (
             <AIStage
               changes={aiDisplayChanges}
               tabTitle={tabTitle}
@@ -1490,7 +1492,7 @@ function StartPanel({
         </Button>
         <h1>{bi("平台公共流程", "Platform Shared Flows")}</h1>
         <p className="muted">
-          {aiStatus.enabled
+          {aiStatus.enabled && !!aiStatus.features?.component && can("ai.use")
             ? bi(
                 "所有交付共享的部署预检、数据盘准备、离线源、软件安装与密钥流程。可以手工编辑文件，也可以让 AI 提出修改。",
                 "Shared preflight, data disk setup, offline repos, package install, and secret flows across all deliveries. Edit files manually or ask AI to propose changes.",

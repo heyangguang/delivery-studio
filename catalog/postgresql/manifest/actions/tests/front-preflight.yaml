@@ -3,8 +3,12 @@ title: 全节点入口解析与端口前置检查
 desc: 在任何入口测试切主或写入之前，从全部 PostgreSQL 节点和控制节点（去重）检查系统 NSS/hosts 解析及入口 TCP 端口。解析正常不修改 hosts；仅解析失败且显式 resolve_ip 有效时备份并幂等补充受管映射。已有冲突映射、解析结果与显式 IP 不符、缺少兜底 IP 或端口不通均阻断；端口不通不会触发 hosts 修改。各入口测试单独运行时也会重新执行本检查。
 scope: endpoint:writer
 effect: change
+timeout: 600
 hosts: first:primary
 expect: 全部目标节点系统解析成功；配置 resolve_ip 时解析地址与其一致；入口 TCP 端口可达。重复执行不增加 hosts 修改，全部通过后才允许后续测试；保持入口域名、TLS 身份和证书校验设置。
+postconditions:
+  - pg_front_probes is succeeded
+  - (pg_front_probes.results | length) > 0
 rollback: 仅在本步骤修改过的节点，以 Ansible blockinfile 删除本实例受管块：ansible <节点名> -i inventory/hosts.yml -b -m ansible.builtin.blockinfile -a 'path=/etc/hosts marker="# {mark} MW PG ${cluster}-${instance} writer entry" state=absent backup=true'。保留其他条目，不整文件恢复备份；回退后重新检查系统解析及入口端口，未通过不得继续入口测试。
 run:
     role: postgresql

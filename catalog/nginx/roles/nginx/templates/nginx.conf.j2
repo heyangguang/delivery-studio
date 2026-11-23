@@ -1,15 +1,19 @@
 # Managed by Middleware Hub for {{ mw_cluster.id }}/{{ mw.id }}. Do not edit by hand.
-{% if mw_pkg_family == 'apt' %}
+{% if nginx_user_entry is defined and nginx_user_entry.ansible_facts is defined and nginx_user_entry.ansible_facts.getent_passwd is defined and 'nginx' in nginx_user_entry.ansible_facts.getent_passwd %}
+user nginx;
+{% elif mw_pkg_family == 'apt' and mw.version == '1.24' %}
 user www-data;
 {% else %}
 user nginx;
 {% endif %}
 worker_processes auto;
 pid /run/nginx.pid;
+{% if (nginx_modules_dir is defined and nginx_modules_dir.stat is defined and nginx_modules_dir.stat.isdir | default(false)) or (nginx_modules_dir is not defined and (mw_pkg_family != 'apt' or mw.version == '1.24')) %}
 {% if mw_pkg_family == 'apt' %}
 include /etc/nginx/modules-enabled/*.conf;
 {% else %}
 include /usr/share/nginx/modules/*.conf;
+{% endif %}
 {% endif %}
 
 events {

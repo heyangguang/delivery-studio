@@ -3,6 +3,7 @@ title: 入口跟随计划切换
 desc: 先检查执行节点与主库，若相同先切走并确认复制及入口恢复；随后只在执行节点以外的两台成员之间计划切主、验证入口跟随并切回测试起始主库。前置切主不自动撤销，整个过程会短暂中断连接。至少需要三台数据库节点。
 scope: endpoint:writer
 effect: disruptive
+timeout: 7200
 hosts: first:primary
 when: count(roles.replica) > 0
 skip: 单节点没有可切换的从库

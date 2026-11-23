@@ -2,6 +2,7 @@ id: failover
 title: 故障接管
 desc: 停止当前主库的 Patroni，验证从库自动升主、已提交数据不丢，再启动旧主并确认它重新加入成为从库。成功后保留新主库。
 effect: disruptive
+timeout: 7200
 hosts: first:primary
 when: params.deployment_mode in ['legacy', 'single'] && (count(roles.replica) > 0)
 skip: 单节点没有可接管的从库

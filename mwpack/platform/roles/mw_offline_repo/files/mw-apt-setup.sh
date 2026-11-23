@@ -10,9 +10,40 @@ CLUSTER=${1:?cluster}; HOST=${2:?controller ip}; shift 2
 for cmd in python3 apt-get apt-cache dpkg; do command -v "$cmd" >/dev/null || { echo "Missing command: $cmd" >&2; exit 1; }; done
 LIST=/etc/apt/sources.list.d/mw-$CLUSTER.list
 WANT=$(for p in "$@"; do printf 'deb [trusted=yes] http://%s:%s/ ./\n' "$HOST" "$p"; done)
+# Deterministic bundle timestamps (e.g. 2020-01-01) can make http.server return 304 for newer repos on the same host:port.
+clear_host_lists() {
+  local port
+  for port in "$@"; do
+    rm -f /var/lib/apt/lists/"${HOST}:${port}"_*
+  done
+}
+# Background apt-daily/unattended-upgrades on fresh Ubuntu hosts may briefly hold /var/lib/apt/lists/lock.
+# DPkg::Lock::Timeout covers dpkg locks, while the retry loop waits cleanly for the apt lists lock too.
+run_apt_update() {
+  local tries=0
+  local out rc
+  while true; do
+    set +e
+    out=$(apt-get -o DPkg::Lock::Timeout=180 -o APT::Update::Error-Mode=any update 2>&1)
+    rc=$?
+    set -e
+    printf '%s\n' "$out"
+    if [[ $rc -eq 0 ]]; then
+      return 0
+    fi
+    if [[ $tries -lt 36 ]] && grep -qE 'Could not get lock|Unable to lock directory' <<<"$out"; then
+      tries=$((tries + 1))
+      echo "apt 锁被系统后台任务占用，等待 5 秒后重试（${tries}/36）..." >&2
+      sleep 5
+      continue
+    fi
+    return "$rc"
+  done
+}
 # Already pointing here (a later plan): the repository behind the address may have new packages, so refresh the lists.
 if [[ -f "$LIST" && "$(cat "$LIST")" == "$WANT" ]]; then
-  apt-get -o APT::Update::Error-Mode=any update
+  clear_host_lists "$@"
+  run_apt_update
   echo 'Repository already in use; package lists refreshed.'; exit 0
 fi
 
@@ -41,6 +72,7 @@ done
 printf '%s\n' "$WANT" > "$LIST"; chmod 644 "$LIST"
 printf 'Acquire::http::Proxy::%s "DIRECT";\n' "$HOST" > /etc/apt/apt.conf.d/99-mw-offline-direct
 chmod 644 /etc/apt/apt.conf.d/99-mw-offline-direct
-apt-get -o APT::Update::Error-Mode=any update
+clear_host_lists "$@"
+run_apt_update
 echo "Old sources saved to: $APT_BACKUP"
 echo 'Repository configured; no packages installed.'

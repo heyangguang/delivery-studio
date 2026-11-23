@@ -5,6 +5,7 @@ title: keepalived
 category: 网络
 icon: vip
 color: indigo
+delivery_modes: [offline, automatic]
 summary: VRRP 虚拟 IP，让负载均衡本身也高可用。
 tags: [高可用, VIP]
 provides: [vip]

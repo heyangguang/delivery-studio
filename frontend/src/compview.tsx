@@ -3,24 +3,52 @@ import { OsLogo } from "./oslogo";
 import { parse } from "yaml";
 import {
   Button,
+  Dropdown,
   Input,
+  Menu,
   Message,
   Modal,
   Radio,
   Skeleton,
+  Tooltip,
 } from "@arco-design/web-react";
 import {
+  IconCheck,
+  IconCheckCircleFill,
   IconCode,
+  IconDelete,
   IconDown,
   IconEdit,
   IconExclamationCircle,
+  IconFile,
+  IconMore,
+  IconPlayArrow,
   IconRefresh,
   IconRight,
 } from "@arco-design/web-react/icon";
-import { api, ago, cached, can, err, putCached, useAIStatus } from "./shared";
-import type { AppInfo } from "./shared";
+import {
+  api,
+  ago,
+  cached,
+  can,
+  err,
+  formatDuration,
+  fullTime,
+  isVersionPlatformReleased,
+  platformShort,
+  putCached,
+  useAIStatus,
+  versionVerifiedPlatforms,
+} from "./shared";
+import type {
+  AppInfo,
+  CompVerification,
+  CompVerificationsPayload,
+  VersionInfo,
+} from "./shared";
 import { go } from "./router";
 import { StatusBadge, UnderlineTabs } from "./ui";
+import type { SecSummaryPayload } from "./security";
 import { styleOf } from "./glyphs";
 import { TopoArt } from "./topoart";
 import { Terminal } from "./runbook";
@@ -216,9 +244,7 @@ const effectInfo = (eff?: string): [string, string] => {
 const versionState = (s: string): [string, string] =>
   s === "published"
     ? ["done", bi("已发布", "Published")]
-    : s === "verifying"
-      ? ["queued", bi("待验证", "Verifying")]
-      : ["idle", bi("草稿", "Draft")];
+    : ["idle", bi("未发布", "Unpublished")];
 const show = (v: unknown) =>
   v === undefined || v === null || v === "" ? "—" : String(v);
 type Rev = {
@@ -282,43 +308,43 @@ const Steps = memo(function Steps({
 const statusChoices = (): { v: string; label: string; hint: string }[] => [
   {
     v: "draft",
-    label: bi("草稿", "Draft"),
-    hint: bi("还没验证过，只给自己试", "Unverified; for personal testing only"),
-  },
-  {
-    v: "verifying",
-    label: bi("待验证", "Verifying"),
-    hint: bi(
-      "能生成交付，但还没有在空环境真正部署过；用它生成交付时会提示“不要用于生产”",
-      "Generates deliveries, not yet verified on a clean environment; warns \"Do not use in production\"",
-    ),
+    label: bi("未发布", "Unpublished"),
+    hint: bi("正式交付不可选，仅维护者调试使用", "Blocked from formal deliveries; maintainer use only"),
   },
   {
     v: "published",
     label: bi("已发布", "Published"),
-    hint: bi(
-      "已经在空环境真正部署并跑通了测试，可以用于生产",
-      "Deployed on a clean environment and passed tests; ready for production",
-    ),
+    hint: bi("已测试确认，可用于正式生产交付", "Tested and available for formal production deliveries"),
   },
 ];
 
-/** A version's status, and for those who may publish, the way to change it: say where it was verified and it is recorded
- *  as a revision of the component (who, when, what), so the status is never just a word someone typed. */
-function VersionStatus({
+const reportPhaseLabel = (p?: string) => {
+  switch (p) {
+    case "deploy":
+      return bi("部署", "Deploy");
+    case "tests":
+      return bi("服务验证", "Service Verify");
+    case "endpoint":
+      return bi("入口检查", "Endpoint Check");
+    default:
+      return bi("步骤", "Step");
+  }
+};
+
+/** Simple 2-state modal for external components (which have no OS deployment). */
+function ExternalVersionStatus({
   name,
   v,
-  tone,
-  label,
+  onDone,
 }: {
   name: string;
-  v: { id: string; status: string };
-  tone: string;
-  label: string;
+  v: VersionInfo;
+  onDone?: () => void;
 }) {
   useLang();
   const [open, setOpen] = useState(false);
-  const [status, setStatus] = useState(v.status);
+  const current = v.status === "published" ? "published" : "draft";
+  const [status, setStatus] = useState(current);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const choices = statusChoices();
@@ -326,8 +352,15 @@ function VersionStatus({
     setBusy(true);
     try {
       await api(
-        `/api/components/${name}/versions/${encodeURIComponent(v.id)}/status`,
-        { method: "POST", body: JSON.stringify({ status, note }) },
+        `/api/components/${encodeURIComponent(name)}/versions/${encodeURIComponent(v.id)}/status`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            status,
+            test_mode: status === "published" ? "manual" : undefined,
+            note: note.trim() || undefined,
+          }),
+        },
       );
       Message.success(
         bi(
@@ -337,6 +370,7 @@ function VersionStatus({
       );
       setOpen(false);
       window.dispatchEvent(new Event("mh-apps-changed"));
+      onDone?.();
     } catch (e) {
       err(e);
     } finally {
@@ -345,32 +379,27 @@ function VersionStatus({
   };
   return (
     <>
-      <StatusBadge state={tone} label={label} />
       {can("component.publish") && (
-        <button
-          type="button"
-          className="cv-vedit"
-          aria-label={bi(`修改版本 ${v.id} 的状态`, `Change status of version ${v.id}`)}
+        <Button
+          size="mini"
+          icon={<IconEdit />}
           onClick={() => {
-            setStatus(v.status);
+            setStatus(current);
             setNote("");
             setOpen(true);
           }}
         >
-          <IconEdit /> {bi("改状态", "Set status")}
-        </button>
+          {bi("改状态", "Set status")}
+        </Button>
       )}
       <Modal
         visible={open}
-        title={bi(`版本 ${v.id} 的状态`, `Version ${v.id} Status`)}
+        title={bi(`版本 ${v.id} 发布状态`, `Version ${v.id} Status`)}
         okText={bi("保存", "Save")}
         confirmLoading={busy}
         onOk={save}
         onCancel={() => !busy && setOpen(false)}
-        okButtonProps={{
-          disabled:
-            status === v.status || (status === "published" && !note.trim()),
-        }}
+        okButtonProps={{ disabled: status === current }}
       >
         <Radio.Group
           direction="vertical"
@@ -386,34 +415,631 @@ function VersionStatus({
           ))}
         </Radio.Group>
         <label className="cv-vnote">
-          <span>
-            {status === "published"
-              ? bi("在哪验证的（必填）", "Verification details (required)")
-              : bi("说明（可选）", "Notes (optional)")}
-          </span>
+          <span>{bi("说明（可选）", "Notes (optional)")}</span>
           <Input.TextArea
             value={note}
             onChange={setNote}
             maxLength={200}
             autoSize={{ minRows: 2, maxRows: 4 }}
+          />
+        </label>
+      </Modal>
+    </>
+  );
+}
+
+/** Self-contained automated test report viewer, completely decoupled from temporary test deliveries. */
+function AutoTestReportModal({
+  rec,
+  compId,
+  compName,
+  canDelete,
+  onClose,
+  onDeleted,
+}: {
+  rec: CompVerification | null;
+  compId: string;
+  compName: string;
+  canDelete: boolean;
+  onClose: () => void;
+  onDeleted: () => void;
+}) {
+  useLang();
+  const [deleting, setDeleting] = useState(false);
+  if (!rec) return null;
+  const steps = rec.steps || [];
+
+  const confirmDelete = () => {
+    Modal.confirm({
+      title: bi("删除这份自动化测试报告？", "Delete this automated test report?"),
+      content: bi(
+        `仅移除 ${rec.version} · ${platformShort(rec.platform)} 的自动化测试报告，不影响当前已发布状态。`,
+        `Removes only the saved automated test report for ${rec.version} · ${platformShort(rec.platform)}; release status is unaffected.`,
+      ),
+      okText: bi("删除报告", "Delete"),
+      okButtonProps: { status: "danger" },
+      onOk: async () => {
+        setDeleting(true);
+        try {
+          await api(
+            `/api/components/${encodeURIComponent(compId)}/verifications/${encodeURIComponent(rec.id)}`,
+            { method: "DELETE" },
+          );
+          Message.success(bi("已删除测试报告", "Test report deleted"));
+          onClose();
+          onDeleted();
+        } catch (e) {
+          err(e);
+        } finally {
+          setDeleting(false);
+        }
+      },
+    });
+  };
+
+  return (
+    <Modal
+      visible={!!rec}
+      onCancel={onClose}
+      className="cv-report-modal"
+      style={{ width: 720, maxWidth: "calc(100vw - 32px)" }}
+      title={
+        <div className="cv-rep-title">
+          <OsLogo id={rec.platform} size={16} />
+          <span>
+            {bi("自动化测试报告", "Automated Test Report")} · {compName}{" "}
+            <span className="mono">{rec.version}</span> ·{" "}
+            {platformShort(rec.platform)}
+          </span>
+        </div>
+      }
+      footer={
+        <div className="cv-pm-foot">
+          <div className="cv-pm-foot-l">
+            {canDelete && (
+              <Button
+                type="text"
+                status="danger"
+                size="small"
+                icon={<IconDelete />}
+                loading={deleting}
+                onClick={confirmDelete}
+              >
+                {bi("删除报告", "Delete Report")}
+              </Button>
+            )}
+          </div>
+          <div className="cv-pm-foot-r">
+            <Button type="primary" onClick={onClose}>
+              {bi("关闭", "Close")}
+            </Button>
+          </div>
+        </div>
+      }
+    >
+      <div className="cv-rep-body">
+        <div className="cv-rep-banner">
+          <div className="cv-rep-banner-l">
+            <span className="cv-rep-pass">
+              <IconCheckCircleFill />
+              {bi("全步通过", "All Steps Passed")}
+            </span>
+            {rec.stale && (
+              <span className="cv-os-pill stale">
+                {bi("剧本有变更 · 建议复测", "Changed · Retest advised")}
+              </span>
+            )}
+          </div>
+          <div className="cv-rep-banner-r faint small">
+            <span>{rec.verified_by}</span>
+            <span>·</span>
+            <span className="num">{fullTime(rec.verified_at)}</span>
+          </div>
+        </div>
+
+        <div className="cv-rep-kpis">
+          <div className="cv-rep-kpi">
+            <span>{bi("通过步骤", "Passed Steps")}</span>
+            <b className="num ok">
+              {rec.passed_steps ?? 0} / {rec.total_steps ?? 0}
+            </b>
+          </div>
+          <div className="cv-rep-kpi">
+            <span>{bi("总耗时", "Duration")}</span>
+            <b className="num">
+              {rec.duration_sec ? formatDuration(rec.duration_sec) : "—"}
+            </b>
+          </div>
+          <div className="cv-rep-kpi">
+            <span>{bi("拓扑方案", "Topology")}</span>
+            <b>
+              {rec.scheme_name || rec.topology || bi("标准方案", "Standard")}
+              {rec.hosts
+                ? bi(` · ${rec.hosts} 台主机`, ` · ${rec.hosts} hosts`)
+                : ""}
+            </b>
+          </div>
+          <div className="cv-rep-kpi">
+            <span>{bi("执行环境", "Runner")}</span>
+            <b className="mono">{rec.executor || bi("平台自动执行", "Automated")}</b>
+          </div>
+        </div>
+
+        {rec.note && (
+          <div className="cv-rep-note">
+            <span>{bi("说明：", "Note: ")}</span>
+            {rec.note}
+          </div>
+        )}
+
+        <div className="cv-rep-steps-wrap">
+          <div className="cv-rep-steps-head">
+            <b>{bi("分步测试明细", "Step-by-Step Results")}</b>
+            <span className="faint small">
+              {bi(
+                "已独立归档于组件库，与临时测试交付解耦",
+                "Archived independently on this component",
+              )}
+            </span>
+          </div>
+          {steps.length > 0 ? (
+            <div className="cv-rep-table-scroll">
+              <table className="cv-rep-table">
+                <thead>
+                  <tr>
+                    <th style={{ width: 42 }}>#</th>
+                    <th style={{ width: 92 }}>{bi("阶段", "Phase")}</th>
+                    <th>{bi("测试步骤", "Step")}</th>
+                    <th style={{ width: 76 }}>{bi("结果", "Result")}</th>
+                    <th style={{ width: 84, textAlign: "right" }}>
+                      {bi("耗时", "Time")}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {steps.map((st, idx) => (
+                    <tr key={st.key || idx}>
+                      <td className="num faint">{idx + 1}</td>
+                      <td>
+                        <span className={`cv-rep-phase ph-${st.phase || "deploy"}`}>
+                          {reportPhaseLabel(st.phase)}
+                        </span>
+                      </td>
+                      <td className="cv-rep-step-title">{st.title || st.key}</td>
+                      <td>
+                        <span className="cv-rep-st-ok">
+                          <IconCheckCircleFill />
+                          {st.state === "resolved"
+                            ? bi("已处理", "Resolved")
+                            : bi("通过", "Pass")}
+                        </span>
+                      </td>
+                      <td className="num faint" style={{ textAlign: "right" }}>
+                        {st.duration_sec
+                          ? formatDuration(st.duration_sec)
+                          : "< 1s"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="cv-rep-empty faint small">
+              {bi(
+                `该历史自动化测试已记录汇总结果（${rec.passed_steps ?? 0}/${rec.total_steps ?? 0} 步全步通过${rec.duration_sec ? ` · 耗时 ${formatDuration(rec.duration_sec)}` : ""}）；重新运行一次自动化测试后即可展示完整分步明细。`,
+                `Summary recorded (${rec.passed_steps ?? 0}/${rec.total_steps ?? 0} steps passed); run an automated test again to capture per-step breakdown.`,
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/** Clean decoupled OS release modal supporting 2 explicit test modes:
+ *  - automatic: backed by a self-contained automated test report (with full step breakdown)
+ *  - manual   : human sign-off after manual/offline testing (no automated report) */
+function PublishVersionModal({
+  open,
+  onClose,
+  compId,
+  compName,
+  verifyAppId,
+  version,
+  initialPlatform,
+  records,
+  onInspectReport,
+  onSuccess,
+}: {
+  open: boolean;
+  onClose: () => void;
+  compId: string;
+  compName: string;
+  verifyAppId: string;
+  version: VersionInfo | null;
+  initialPlatform?: string;
+  records: CompVerification[];
+  onInspectReport: (rec: CompVerification) => void;
+  onSuccess: () => void;
+}) {
+  useLang();
+  const platforms = version?.platforms || [];
+  const verifiedSet = useMemo(
+    () => new Set(version ? versionVerifiedPlatforms(version) : []),
+    [version],
+  );
+  const recByPl = useMemo(() => {
+    const m = new Map<string, CompVerification>();
+    if (!version) return m;
+    for (const r of records) {
+      if (r.version === version.id && !m.has(r.platform)) {
+        m.set(r.platform, r);
+      }
+    }
+    return m;
+  }, [records, version]);
+
+  const [selectedPls, setSelectedPls] = useState<string[]>([]);
+  const [testMode, setTestMode] = useState<"automatic" | "manual">("automatic");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!open || !version) return;
+    let initPls: string[] = [];
+    if (initialPlatform && platforms.includes(initialPlatform)) {
+      initPls = [initialPlatform];
+    } else {
+      const unpub = platforms.filter((p) => !verifiedSet.has(p));
+      initPls = unpub.length > 0 ? unpub : platforms.slice(0, 1);
+    }
+    setSelectedPls(initPls);
+    const allHaveAuto =
+      initPls.length > 0 && initPls.every((p) => recByPl.get(p)?.has_report);
+    setTestMode(allHaveAuto ? "automatic" : "manual");
+    setNote("");
+  }, [open, version?.id, initialPlatform]);
+
+  if (!version) return null;
+
+  const togglePl = (p: string) => {
+    setSelectedPls((prev) =>
+      prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p],
+    );
+  };
+
+  const missingAutoPls = selectedPls.filter((p) => !recByPl.get(p)?.has_report);
+  const canSubmit =
+    selectedPls.length > 0 &&
+    (testMode === "manual" || missingAutoPls.length === 0);
+
+  const launchVerify = (pl: string) => {
+    onClose();
+    go({
+      name: "new",
+      app: verifyAppId,
+      verify: "1",
+      ver: verifyAppId === compId ? version.id : undefined,
+      platform: pl,
+    });
+  };
+
+  const submit = async () => {
+    if (!canSubmit) return;
+    setBusy(true);
+    try {
+      await api(
+        `/api/components/${encodeURIComponent(compId)}/versions/${encodeURIComponent(version.id)}/status`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            status: "published",
+            platforms: selectedPls,
+            test_mode: testMode,
+            note: note.trim() || undefined,
+          }),
+        },
+      );
+      Message.success(
+        bi(
+          `已发布 ${compName} ${version.id}（${selectedPls.map(platformShort).join("、")} · ${testMode === "automatic" ? "自动化测试" : "手动测试"}）`,
+          `Published ${compName} ${version.id} (${selectedPls.map(platformShort).join(", ")} · ${testMode === "automatic" ? "Auto Test" : "Manual Test"})`,
+        ),
+      );
+      onClose();
+      window.dispatchEvent(new Event("mh-apps-changed"));
+      onSuccess();
+    } catch (e) {
+      err(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const singleSelected = selectedPls.length === 1 ? selectedPls[0] : "";
+  const canRevokeSingle = Boolean(
+    singleSelected &&
+      version.status === "published" &&
+      verifiedSet.has(singleSelected),
+  );
+
+  const revokeOS = (pl: string) => {
+    Modal.confirm({
+      title: bi(
+        `下线 ${platformShort(pl)} 的发布状态？`,
+        `Unpublish ${platformShort(pl)}?`,
+      ),
+      content: bi(
+        `下线后，正式交付将无法为 ${compName} ${version.id} 选择 ${platformShort(pl)}；维护者仍可随时发起测试部署，历史交付不受影响。`,
+        `Formal deliveries will no longer allow ${platformShort(pl)} for ${compName} ${version.id}. Existing deliveries are unaffected.`,
+      ),
+      okText: bi("确认下线", "Unpublish"),
+      okButtonProps: { status: "danger" },
+      onOk: async () => {
+        setBusy(true);
+        try {
+          await api(
+            `/api/components/${encodeURIComponent(compId)}/versions/${encodeURIComponent(version.id)}/status`,
+            {
+              method: "POST",
+              body: JSON.stringify({ revoke_platform: pl }),
+            },
+          );
+          Message.success(
+            bi(
+              `已下线 ${platformShort(pl)}`,
+              `Unpublished ${platformShort(pl)}`,
+            ),
+          );
+          onClose();
+          window.dispatchEvent(new Event("mh-apps-changed"));
+          onSuccess();
+        } catch (e) {
+          err(e);
+        } finally {
+          setBusy(false);
+        }
+      },
+    });
+  };
+
+  return (
+    <Modal
+      visible={open}
+      className="cv-promote-modal"
+      style={{ width: 600, maxWidth: "calc(100vw - 32px)" }}
+      title={bi(
+        `发布版本 · ${compName} ${version.id}`,
+        `Publish Version · ${compName} ${version.id}`,
+      )}
+      onCancel={() => !busy && onClose()}
+      footer={
+        <div className="cv-pm-foot">
+          <div className="cv-pm-foot-l">
+            {canRevokeSingle && (
+              <Button
+                type="text"
+                status="danger"
+                size="small"
+                disabled={busy}
+                onClick={() => revokeOS(singleSelected)}
+              >
+                {bi(
+                  `下线 ${platformShort(singleSelected)}`,
+                  `Unpublish ${platformShort(singleSelected)}`,
+                )}
+              </Button>
+            )}
+          </div>
+          <div className="cv-pm-foot-r">
+            <Button disabled={busy} onClick={onClose}>
+              {bi("取消", "Cancel")}
+            </Button>
+            <Button
+              type="primary"
+              loading={busy}
+              disabled={!canSubmit}
+              onClick={submit}
+            >
+              {bi("确认发布", "Publish")}
+            </Button>
+          </div>
+        </div>
+      }
+    >
+      <div className="cv-pm-body">
+        <div className="cv-pm-sec">
+          <div className="cv-pm-label">
+            {bi("1. 选择要发布的操作系统", "1. Target Operating System(s)")}
+            <span className="faint small" style={{ fontWeight: 400, marginLeft: 6 }}>
+              {bi("可多选", "Multi-select")}
+            </span>
+          </div>
+          <div className="cv-pm-os-pills">
+            {platforms.map((p) => {
+              const checked = selectedPls.includes(p);
+              const pub = version.status === "published" && verifiedSet.has(p);
+              const rec = recByPl.get(p);
+              return (
+                <button
+                  key={p}
+                  type="button"
+                  className={`cv-pm-os-pill ${checked ? "on" : ""}`}
+                  onClick={() => togglePl(p)}
+                >
+                  <span className={`cv-pm-chk ${checked ? "on" : ""}`} aria-hidden>
+                    {checked && <IconCheck />}
+                  </span>
+                  <OsLogo id={p} size={14} />
+                  <span>{platformShort(p)}</span>
+                  {rec?.has_report ? (
+                    <span className="cv-os-pill auto">
+                      {bi("有自动报告", "Auto report")}
+                    </span>
+                  ) : pub ? (
+                    <span className="cv-os-pill ok">
+                      {bi("已发布", "Published")}
+                    </span>
+                  ) : (
+                    <span className="cv-os-pill draft">
+                      {bi("未发布", "Unpublished")}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="cv-pm-sec">
+          <div className="cv-pm-label">
+            {bi("2. 选择测试方式", "2. Testing Mode")}
+          </div>
+          <div className="cv-pm-modes" role="radiogroup">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={testMode === "automatic"}
+              className={`cv-pm-mode ${testMode === "automatic" ? "on" : ""}`}
+              onClick={() => setTestMode("automatic")}
+            >
+              <div className="cv-pm-mode-top">
+                <span className="cv-pm-radio" aria-hidden />
+                <b>{bi("自动化测试", "Automated Test")}</b>
+                <span className="cv-mode-chip auto">
+                  {bi("含完整报告", "Full Report")}
+                </span>
+              </div>
+              <p>
+                {bi(
+                  "结合平台自动执行部署与验证步骤，自动归档分步状态与耗时报告，与交付记录解耦。",
+                  "Uses automated test runs and archives a self-contained step-by-step report.",
+                )}
+              </p>
+            </button>
+
+            <button
+              type="button"
+              role="radio"
+              aria-checked={testMode === "manual"}
+              className={`cv-pm-mode ${testMode === "manual" ? "on" : ""}`}
+              onClick={() => setTestMode("manual")}
+            >
+              <div className="cv-pm-mode-top">
+                <span className="cv-pm-radio" aria-hidden />
+                <b>{bi("手动测试", "Manual Test")}</b>
+                <span className="cv-mode-chip manual">
+                  {bi("无完整报告", "No Report")}
+                </span>
+              </div>
+              <p>
+                {bi(
+                  "已在线下或外部环境人工验证，直接人工签核发布，仅记录发布人与备注。",
+                  "Signed off manually after offline/external testing without an automated report.",
+                )}
+              </p>
+            </button>
+          </div>
+
+          {testMode === "automatic" ? (
+            <div className="cv-pm-auto-box">
+              {selectedPls.length === 0 ? (
+                <p className="faint small" style={{ margin: 0 }}>
+                  {bi("请先在上方勾选至少一个操作系统。", "Select at least one OS above.")}
+                </p>
+              ) : (
+                selectedPls.map((p) => {
+                  const rec = recByPl.get(p);
+                  if (rec?.has_report) {
+                    return (
+                      <div key={p} className="cv-pm-auto-row ok">
+                        <div className="cv-pm-auto-l">
+                          <IconCheckCircleFill className="ok-ic" />
+                          <OsLogo id={p} size={14} />
+                          <b>{platformShort(p)}</b>
+                          <span className="num">
+                            {rec.passed_steps}/{rec.total_steps}
+                            {bi(" 步通过", " passed")}
+                            {rec.duration_sec
+                              ? ` · ${formatDuration(rec.duration_sec)}`
+                              : ""}
+                          </span>
+                          <span className="faint small">
+                            · {ago(rec.verified_at)}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          className="cv-report-btn"
+                          onClick={() => onInspectReport(rec)}
+                        >
+                          <IconFile />
+                          {bi("查看报告", "Report")}
+                        </button>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div key={p} className="cv-pm-auto-row miss">
+                      <div className="cv-pm-auto-l">
+                        <IconExclamationCircle className="warn-ic" />
+                        <OsLogo id={p} size={14} />
+                        <b>{platformShort(p)}</b>
+                        <span className="faint small">
+                          {bi(
+                            "暂无自动化测试报告，可发起测试部署或改用手动测试",
+                            "No automated test report yet",
+                          )}
+                        </span>
+                      </div>
+                      {can("component.edit|component.publish") && (
+                        <Button
+                          size="mini"
+                          type="outline"
+                          icon={<IconPlayArrow />}
+                          onClick={() => launchVerify(p)}
+                        >
+                          {bi("去测试部署", "Test Deploy")}
+                        </Button>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          ) : (
+            <div className="cv-pm-manual-hint">
+              {bi(
+                "手动测试为人工签核发布，不关联交付记录、不生成分步报告；后续如运行自动化测试，系统会自动补充完整测试报告。",
+                "Manual test records human sign-off with no delivery coupling or step report. Running an automated test later will automatically attach a full report.",
+              )}
+            </div>
+          )}
+        </div>
+
+        <label className="cv-vnote">
+          <span>{bi("3. 发布说明（可选）", "3. Release note (optional)")}</span>
+          <Input
+            value={note}
+            onChange={setNote}
+            maxLength={160}
             placeholder={
-              status === "published"
+              testMode === "automatic"
                 ? bi(
-                    "例如：2026-10-27 在三台全新 Ubuntu 24.04 上部署并通过全部测试",
-                    "e.g. 2026-10-27 deployed on 3 fresh Ubuntu 24.04 hosts and passed all tests",
+                    "例如：三节点高可用与故障转移自动化测试通过",
+                    "e.g. 3-node HA & failover passed automated testing",
                   )
-                : ""
+                : bi(
+                    "例如：已在测试环境手动验证安装与主从切换",
+                    "e.g. Manually verified install & failover on staging VMs",
+                  )
             }
           />
         </label>
-        <p className="faint small">
-          {bi(
-            "保存后会记为这个组件的一次修订，可以在工作台的历史里看到是谁、什么时候、因为什么改的。",
-            "Saved as a component revision recording who changed it, when, and why in workbench history.",
-          )}
-        </p>
-      </Modal>
-    </>
+      </div>
+    </Modal>
   );
 }
 
@@ -432,9 +1058,22 @@ export function ComponentPanes({
 }) {
   const lang = useLang();
   const revsUrl = `/api/components/${encodeURIComponent(entry.id)}/revisions`;
+  const verifUrl = `/api/components/${encodeURIComponent(entry.id)}/verifications`;
   const [revs, setRevs] = useState<Rev[] | null>(
     () => cached<Rev[]>(revsUrl) ?? null,
   );
+  const [verif, setVerif] = useState<CompVerificationsPayload | null>(
+    () => cached<CompVerificationsPayload>(verifUrl) ?? null,
+  );
+  const [secSummary, setSecSummary] = useState<SecSummaryPayload | null>(
+    () => cached<SecSummaryPayload>("/api/security/summary") ?? null,
+  );
+  const [verifTick, setVerifTick] = useState(0);
+  const [publishTarget, setPublishTarget] = useState<{
+    v: VersionInfo;
+    platform?: string;
+  } | null>(null);
+  const [reportRec, setReportRec] = useState<CompVerification | null>(null);
   const [active, setActive] = useState("versions");
   const box = useRef<HTMLDivElement>(null);
   const lock = useRef(0); // while a click is scrolling the page, the table of contents keeps the clicked entry
@@ -476,7 +1115,35 @@ export function ComponentPanes({
         setRevs(revList);
       })
       .catch(() => setRevs((prev) => prev ?? []));
-  }, [admin, draftOnly, entry.id, entry.source, revsUrl, lang]);
+  }, [admin, draftOnly, entry.id, entry.source, revsUrl, lang, verifTick]);
+
+  useEffect(() => {
+    if (draftOnly) return;
+    const hit = cached<CompVerificationsPayload>(verifUrl);
+    if (hit !== undefined) setVerif(hit);
+    api<CompVerificationsPayload>(verifUrl)
+      .then((r) => {
+        putCached(verifUrl, r);
+        setVerif(r);
+      })
+      .catch(() => setVerif((prev) => prev ?? { current_manifest: "", records: [], candidates: [] }));
+  }, [draftOnly, entry.id, entry.source, verifUrl, lang, verifTick]);
+
+  useEffect(() => {
+    if (draftOnly || !can("security.view")) return;
+    api<SecSummaryPayload>("/api/security/summary")
+      .then((r) => {
+        putCached("/api/security/summary", r);
+        setSecSummary(r);
+      })
+      .catch(() => {});
+  }, [draftOnly, entry.id]);
+
+  useEffect(() => {
+    const bump = () => setVerifTick((n) => n + 1);
+    window.addEventListener("mh-apps-changed", bump);
+    return () => window.removeEventListener("mh-apps-changed", bump);
+  }, []);
 
   const lifecycle: Record<string, Any[]> = c?.lifecycle || {};
   const params: Any[] = c?.params || [];
@@ -734,6 +1401,73 @@ export function ComponentPanes({
   const lit = (id: string) => (flash?.id === id ? "lit" : "");
   const st = styleOf(entry.id, entry.category, entry.icon, entry.color);
   const phases = getPhases();
+  const verifyAppId = entry.context || c?.context || entry.id;
+  const canVerify = can("component.edit|component.publish");
+  const canPublish = can("component.publish");
+  const verifRecords = verif?.records || [];
+
+  const confirmUnpublishAll = (verId: string) => {
+    Modal.confirm({
+      title: bi(`下线版本 ${verId} 的全部系统？`, `Unpublish all OSes for version ${verId}?`),
+      content: bi(
+        "下线后，该版本所有操作系统将暂停正式交付；维护者仍可随时发起测试部署或重新发布，已生成的历史交付不受影响。",
+        "Formal deliveries will be paused for all OSes of this version. Maintainers can still test or republish anytime; existing deliveries are unaffected.",
+      ),
+      okText: bi("确认下线", "Unpublish"),
+      okButtonProps: { status: "danger" },
+      onOk: async () => {
+        try {
+          await api(
+            `/api/components/${encodeURIComponent(entry.id)}/versions/${encodeURIComponent(verId)}/status`,
+            { method: "POST", body: JSON.stringify({ status: "draft" }) },
+          );
+          Message.success(
+            bi(
+              `版本 ${verId} 已全部下线（未发布）`,
+              `Version ${verId} unpublished`,
+            ),
+          );
+          window.dispatchEvent(new Event("mh-apps-changed"));
+          setVerifTick((n) => n + 1);
+        } catch (e) {
+          err(e);
+        }
+      },
+    });
+  };
+
+  const confirmRevokeOS = (verId: string, pl: string) => {
+    Modal.confirm({
+      title: bi(
+        `下线 ${platformShort(pl)} 的发布状态？`,
+        `Unpublish ${platformShort(pl)}?`,
+      ),
+      content: bi(
+        `下线后，正式交付将无法为 ${entry.name} ${verId} 选择 ${platformShort(pl)}；维护者仍可随时测试或重新发布，历史交付不受影响。`,
+        `Formal deliveries will no longer allow ${platformShort(pl)} for ${entry.name} ${verId}. Existing deliveries are unaffected.`,
+      ),
+      okText: bi("确认下线", "Unpublish"),
+      okButtonProps: { status: "danger" },
+      onOk: async () => {
+        try {
+          await api(
+            `/api/components/${encodeURIComponent(entry.id)}/versions/${encodeURIComponent(verId)}/status`,
+            { method: "POST", body: JSON.stringify({ revoke_platform: pl }) },
+          );
+          Message.success(
+            bi(
+              `已下线 ${verId} · ${platformShort(pl)}`,
+              `Unpublished ${verId} · ${platformShort(pl)}`,
+            ),
+          );
+          window.dispatchEvent(new Event("mh-apps-changed"));
+          setVerifTick((n) => n + 1);
+        } catch (e) {
+          err(e);
+        }
+      },
+    });
+  };
 
   return (
     <div className="cv-wrap" ref={box}>
@@ -752,50 +1486,338 @@ export function ComponentPanes({
       <div className="cv2">
         <div className="cv2-main">
           <section id="cv-versions" className={`cv-sec ${lit("cv-versions")}`}>
-          <h2>{bi("版本", "Versions")}</h2>
-          <ul className="cv-versions">
+          <div className="cv-sec-head-row">
+            <h2>
+              {bi("版本与系统发布状态", "Versions & OS Release Status")}
+              <span className="cv-sub">
+                {bi(
+                  "正式交付按「版本 × 操作系统」放行；未发布版本可随时由维护者发起测试部署，支持「自动化测试（自动生成完整报告）」与「手动测试（人工签核）」两种发布方式",
+                  "Formal deliveries require a published Version × OS. Maintainers can test unpublished versions anytime and publish via Automated Test (with full report) or Manual Test.",
+                )}
+              </span>
+            </h2>
+          </div>
+          <div className="cv-ver-cards">
             {entry.versions.map((v) => {
               const [tone, label] = versionState(v.status);
+              const pls = v.platforms || [];
+              const verifiedSet = new Set(versionVerifiedPlatforms(v));
+              const verifiedCount = pls.filter((p) => verifiedSet.has(p)).length;
+              const allPublished =
+                v.status === "published" &&
+                pls.length > 0 &&
+                verifiedCount === pls.length;
               return (
-                <li key={v.id}>
-                  <b className="mono">{v.id}</b>
-                  <VersionStatus
-                    name={entry.id}
-                    v={v}
-                    tone={tone}
-                    label={label}
-                  />
-                  <span className="cv-plats">
-                    {(v.platforms || []).map((p) => {
-                      const k = v.coverage?.[p];
-                      return (
-                        <span
-                          key={p}
-                          className={`cv-plat ${k ? (k.deployable ? "ok" : "warn") : ""}`}
-                        >
-                          <OsLogo id={p} size={13} /> {p.replace("-amd64", "")}
-                          {k
-                            ? k.deployable
-                              ? bi(" · 可生成", " · Ready")
-                              : k.ready
-                                ? bi(" · 缺运行环境", " · Missing runtime")
-                                : bi(` · 缺 ${k.missing?.length ?? ""} 个包`, ` · Missing ${k.missing?.length ?? ""} pkg(s)`)
-                            : ""}
+                <div key={v.id} className="cv-ver-card">
+                  <div className="cv-ver-head">
+                    <div className="cv-ver-head-l">
+                      <b className="mono cv-ver-id">{v.id}</b>
+                      <StatusBadge state={tone} label={label} />
+                      {!external && pls.length > 0 && (
+                        <span className="cv-ver-sum num">
+                          {v.status === "published"
+                            ? allPublished
+                              ? bi(
+                                  `全部 ${pls.length} 个系统已发布`,
+                                  `All ${pls.length} OSes published`,
+                                )
+                              : bi(
+                                  `已发布 ${verifiedCount}/${pls.length} 个系统`,
+                                  `${verifiedCount}/${pls.length} OSes published`,
+                                )
+                            : bi(
+                                "正式交付已拦截 · 维护者可随时测试部署",
+                                "Blocked from formal delivery · Maintainers can test anytime",
+                              )}
                         </span>
-                      );
-                    })}
-                    {!v.platforms?.length && (
-                      <span className="faint small">
-                        {external
-                          ? bi("不安装到机器上", "Not installed on hosts")
-                          : bi("没有声明支持的系统", "No supported OS declared")}
-                      </span>
-                    )}
-                  </span>
-                </li>
+                      )}
+                    </div>
+                    <div className="cv-ver-head-r">
+                      {external || !pls.length ? (
+                        <ExternalVersionStatus
+                          name={entry.id}
+                          v={v}
+                          onDone={() => setVerifTick((n) => n + 1)}
+                        />
+                      ) : (
+                        <>
+                          {canPublish && (
+                            <Button
+                              size="mini"
+                              type={allPublished ? "secondary" : "primary"}
+                              onClick={() => setPublishTarget({ v })}
+                            >
+                              {allPublished
+                                ? bi("管理发布", "Manage Release")
+                                : bi("发布版本", "Publish")}
+                            </Button>
+                          )}
+                          {canPublish && v.status === "published" && (
+                            <Dropdown
+                              trigger="click"
+                              position="br"
+                              droplist={
+                                <Menu
+                                  onClickMenuItem={(k) => {
+                                    if (k === "unpublish")
+                                      confirmUnpublishAll(v.id);
+                                  }}
+                                >
+                                  <Menu.Item key="unpublish">
+                                    {bi("全部下线（退回未发布）", "Unpublish All OSes")}
+                                  </Menu.Item>
+                                </Menu>
+                              }
+                            >
+                              <Button
+                                size="mini"
+                                icon={<IconMore />}
+                                aria-label={bi("更多状态操作", "More actions")}
+                              />
+                            </Dropdown>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {pls.length > 0 ? (
+                    <ul className="cv-os-list">
+                      {pls.map((p) => {
+                        const k = v.coverage?.[p];
+                        const released = isVersionPlatformReleased(v, p);
+                        const latestRec = verifRecords.find(
+                          (r) => r.version === v.id && r.platform === p,
+                        );
+                        const secRisk =
+                          secSummary?.policy?.warn_publish_high !== false
+                            ? secSummary?.component_risks?.[
+                                `${entry.id}@${v.id}@${p}`
+                              ]
+                            : undefined;
+                        return (
+                          <li key={p} className="cv-os-row">
+                            <div className="cv-os-main">
+                            <div className="cv-os-id">
+                              <OsLogo id={p} size={15} />
+                              <b>{platformShort(p)}</b>
+                              <span
+                                className={`cv-os-pill ${released ? "ok" : "draft"}`}
+                              >
+                                {released
+                                  ? bi("已发布", "Published")
+                                  : bi("未发布", "Unpublished")}
+                              </span>
+                              {secRisk && (() => {
+                                const mwOnly = Boolean(
+                                  secSummary?.policy?.gate_middleware_only ||
+                                    secSummary?.policy?.hide_os_cves,
+                                );
+                                const mwC = secRisk.middleware_critical ?? 0;
+                                const mwH = secRisk.middleware_high ?? 0;
+                                const osC = secRisk.os_critical ?? 0;
+                                const osH = secRisk.os_high ?? 0;
+                                const crit = mwOnly ? mwC : secRisk.critical;
+                                const high = mwOnly ? mwH : secRisk.high;
+                                if (crit <= 0 && high <= 0) return null;
+                                const isOSOnly = !mwOnly && mwC === 0 && mwH === 0 && (osC > 0 || osH > 0);
+                                return (
+                                  <Tooltip
+                                    mini
+                                    content={bi(
+                                      `中间件本体：严重 ${mwC} / 高危 ${mwH}；OS 底层包：严重 ${osC} / 高危 ${osH}（点击前往安全中心查看）`,
+                                      `Middleware: ${mwC} Crit / ${mwH} High; OS Base: ${osC} Crit / ${osH} High. Click to inspect.`,
+                                    )}
+                                  >
+                                    <a
+                                      href={`#/security/vulns?q=${encodeURIComponent(entry.id)}`}
+                                      className={`cv-sec-chip ${crit > 0 ? "crit" : "high"}`}
+                                    >
+                                      {crit > 0
+                                        ? isOSOnly
+                                          ? bi(`${crit} OS 严重 CVE`, `${crit} OS Crit`)
+                                          : bi(`${crit} 严重 CVE`, `${crit} Crit CVE`)
+                                        : isOSOnly
+                                          ? bi(`${high} OS 高危 CVE`, `${high} OS High`)
+                                          : bi(`${high} 高危 CVE`, `${high} High CVE`)}
+                                    </a>
+                                  </Tooltip>
+                                );
+                              })()}
+                              {released && latestRec?.stale && (
+                                <Tooltip
+                                  mini
+                                  content={bi(
+                                    "组件剧本或清单在上次测试后发生变更；正式交付仍可使用，建议复测刷新报告",
+                                    "Component files changed after last test; formal deliveries remain allowed, retest recommended",
+                                  )}
+                                >
+                                  <span className="cv-os-pill stale">
+                                    {bi("有变更", "Changed")}
+                                  </span>
+                                </Tooltip>
+                              )}
+                            </div>
+
+                            <div className="cv-os-ev">
+                              {k && (
+                                <a
+                                  href={`#/library/${p}`}
+                                  className={`cv-lib-chip ${k.deployable ? "ok" : "warn"}`}
+                                >
+                                  {k.deployable
+                                    ? bi("软件库就绪", "Library ready")
+                                    : k.ready
+                                      ? bi("缺运行环境", "No runtime")
+                                      : bi(
+                                          `缺 ${k.missing?.length ?? 0} 个包`,
+                                          `Missing ${k.missing?.length ?? 0} pkg(s)`,
+                                        )}
+                                </a>
+                              )}
+                              {latestRec?.has_report ? (
+                                <>
+                                  <span className="cv-mode-chip auto">
+                                    {bi("自动化测试", "Auto Test")}
+                                  </span>
+                                  <span className="cv-ev-inline num">
+                                    <span>
+                                      {latestRec.passed_steps}/{latestRec.total_steps}
+                                      {bi(" 步", " steps")}
+                                    </span>
+                                    {latestRec.duration_sec ? (
+                                      <span>· {formatDuration(latestRec.duration_sec)}</span>
+                                    ) : null}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    className="cv-report-btn"
+                                    onClick={() => setReportRec(latestRec)}
+                                  >
+                                    <IconFile />
+                                    {bi("查看报告", "Report")}
+                                  </button>
+                                </>
+                              ) : latestRec ? (
+                                <>
+                                  <span className="cv-mode-chip manual">
+                                    {bi("手动测试", "Manual Test")}
+                                  </span>
+                                  <Tooltip
+                                    mini
+                                    content={[
+                                      latestRec.verified_by
+                                        ? `${bi("签核人", "By")}: ${latestRec.verified_by}`
+                                        : "",
+                                      fullTime(latestRec.verified_at),
+                                      latestRec.note || "",
+                                    ]
+                                      .filter(Boolean)
+                                      .join(" · ")}
+                                  >
+                                    <span className="cv-ev-inline faint">
+                                      <span>
+                                        {latestRec.verified_by} ·{" "}
+                                        {ago(latestRec.verified_at)}
+                                      </span>
+                                      {latestRec.note ? (
+                                        <span>· {latestRec.note}</span>
+                                      ) : null}
+                                    </span>
+                                  </Tooltip>
+                                </>
+                              ) : released ? (
+                                <span className="faint small">
+                                  {bi("平台内置已发布", "Built-in")}
+                                </span>
+                              ) : (
+                                <span className="faint small">
+                                  {bi("未测试", "Not tested")}
+                                </span>
+                              )}
+                            </div>
+                            </div>
+
+                            <div className="cv-os-acts">
+                              {canVerify && (
+                                <Button
+                                  size="mini"
+                                  icon={<IconPlayArrow />}
+                                  onClick={() =>
+                                    go({
+                                      name: "new",
+                                      app: verifyAppId,
+                                      verify: "1",
+                                      ver:
+                                        verifyAppId === entry.id
+                                          ? v.id
+                                          : undefined,
+                                      platform: p,
+                                    })
+                                  }
+                                >
+                                  {bi("测试部署", "Test Deploy")}
+                                </Button>
+                              )}
+                              {canPublish && !released && (
+                                <Button
+                                  size="mini"
+                                  type={latestRec?.has_report ? "primary" : "secondary"}
+                                  onClick={() =>
+                                    setPublishTarget({ v, platform: p })
+                                  }
+                                >
+                                  {bi("发布", "Publish")}
+                                </Button>
+                              )}
+                              {canPublish && released && (
+                                <Button
+                                  size="mini"
+                                  type="text"
+                                  status="danger"
+                                  onClick={() => confirmRevokeOS(v.id, p)}
+                                >
+                                  {bi("下线", "Unpublish")}
+                                </Button>
+                              )}
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  ) : (
+                    <div className="cv-os-empty faint small">
+                      {external
+                        ? bi("外部组件，不安装到目标机器上", "External component; not installed on hosts")
+                        : bi("没有声明支持的操作系统", "No supported OS declared")}
+                    </div>
+                  )}
+                </div>
               );
             })}
-          </ul>
+          </div>
+
+          <PublishVersionModal
+            open={!!publishTarget}
+            onClose={() => setPublishTarget(null)}
+            compId={entry.id}
+            compName={entry.name}
+            verifyAppId={verifyAppId}
+            version={publishTarget?.v || null}
+            initialPlatform={publishTarget?.platform}
+            records={verifRecords}
+            onInspectReport={(rec) => setReportRec(rec)}
+            onSuccess={() => setVerifTick((n) => n + 1)}
+          />
+
+          <AutoTestReportModal
+            rec={reportRec}
+            compId={entry.id}
+            compName={entry.name}
+            canDelete={canPublish}
+            onClose={() => setReportRec(null)}
+            onDeleted={() => setVerifTick((n) => n + 1)}
+          />
         </section>
 
         {!external && (
@@ -1368,7 +2390,7 @@ function Ops({ o }: { o?: Any }) {
           "这个组件还没有写运维知识。在工作台的清单里补上 operations（巡检、常见操作、典型问题、日志位置），交接文档就会带上",
           "No operations knowledge written yet. Add operations (checks, tasks, faults, log locations) to the manifest in the workbench to include it in handover docs",
         )}
-        {aiStatus.enabled
+        {aiStatus.enabled && !!aiStatus.features?.component && can("ai.use")
           ? bi("；也可以让组件 AI 起草。", "; or ask Component AI to draft it.")
           : "."}
       </p>

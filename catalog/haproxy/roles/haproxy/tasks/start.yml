@@ -3,16 +3,26 @@
     name: haproxy
     enabled: true
     state: started
+  register: haproxy_service
 
 - name: 配置变化时平滑重载
   ansible.builtin.systemd:
     name: haproxy
     state: reloaded
 
+- name: 核对 HAProxy 服务处于运行状态
+  ansible.builtin.command: systemctl is-active haproxy
+  register: haproxy_active
+  changed_when: false
+  retries: 5
+  delay: 1
+  until: haproxy_active.rc == 0 and (haproxy_active.stdout | trim) == 'active'
+
 - name: 等待监听端口
   ansible.builtin.wait_for:
     port: "{{ item.listen }}"
     timeout: 30
+  register: haproxy_listeners
   loop: "{{ mw.binds }}"
   loop_control:
     label: "{{ item.name }}:{{ item.listen }}"

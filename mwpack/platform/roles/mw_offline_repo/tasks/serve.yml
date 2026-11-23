@@ -47,6 +47,15 @@
   loop_control:
     label: "{{ item.name }}"
 
+- name: 写入本次仓库身份标记
+  ansible.builtin.copy:
+    dest: "/opt/middleware-repositories/{{ mw_cluster.project | default(mw_cluster.id) }}/{{ item.root }}/.mw-serve-id"
+    content: "{{ mw_cluster.id }}|{{ mw_cluster.project | default(mw_cluster.id) }}|{{ item.sha256 }}\n"
+    mode: '0644'
+  loop: "{{ mw_repos }}"
+  loop_control:
+    label: "{{ item.name }}"
+
 - name: 提供仓库的 systemd 服务
   register: mw_repo_unit
   ansible.builtin.template:
@@ -66,3 +75,24 @@
   loop: "{{ mw_repos }}"
   loop_control:
     label: "{{ item.name }}"
+
+- name: 核对仓库服务保持运行且端口提供的是本交付仓库
+  ansible.builtin.shell: |
+    set -euo pipefail
+    systemctl is-active --quiet "mw-repo-{{ mw_cluster.id }}-{{ item.name }}"
+    GOT=$(python3 -c 'import urllib.request, sys; o = urllib.request.build_opener(urllib.request.ProxyHandler({})); print(o.open(sys.argv[1], timeout=5).read().decode("utf-8", "replace").strip())' "http://{{ mw_hosts[mw_cluster.controller].ip }}:{{ item.port }}/.mw-serve-id")
+    WANT="{{ mw_cluster.id }}|{{ mw_cluster.project | default(mw_cluster.id) }}|{{ item.sha256 }}"
+    if [ "$GOT" != "$WANT" ]; then
+      echo "端口 {{ item.port }} 返回的仓库身份为 [$GOT]，与本次交付 [$WANT] 不符（端口可能被旧集群仓库服务或其他进程占用）" >&2
+      exit 1
+    fi
+  args:
+    executable: /bin/bash
+  register: mw_repo_verify
+  retries: 5
+  delay: 1
+  until: mw_repo_verify.rc == 0
+  changed_when: false
+  loop: "{{ mw_repos }}"
+  loop_control:
+    label: "{{ item.name }}:{{ item.port }}"

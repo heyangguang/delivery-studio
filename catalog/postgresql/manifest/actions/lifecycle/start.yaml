@@ -2,6 +2,12 @@
   title: 启动初始主库
   desc: 首次由 Patroni 完成初始化；若 DCS 里已有 initialize 键，Patroni 不会重新初始化，绝不覆盖已有数据目录。
   effect: change
+  timeout: 900
+  expect: 初始主库 Patroni 与 PostgreSQL 已启动并处于 primary 运行状态。
+  postconditions:
+    - pg_patroni.status == 200
+    - pg_patroni.json.state == 'running'
+    - pg_patroni.json.role in ['master', 'primary']
   hosts: first:primary
   when: params.deployment_mode in ['legacy', 'single'] && (count(roles.replica) > 0)
   run:
@@ -11,6 +17,11 @@
   title: 从库加入复制
   desc: 其余节点启动 Patroni，从主库基础备份并开始流复制。
   effect: change
+  timeout: 1800
+  expect: 全部从库 Patroni 与 PostgreSQL 已启动并完成基础备份加入复制。
+  postconditions:
+    - pg_patroni.status == 200
+    - pg_patroni.json.state == 'running'
   hosts: replica
   when: params.deployment_mode in ['legacy', 'single'] && (count(roles.replica) > 0)
   run:
@@ -20,15 +31,24 @@
   title: 核对拓扑
   desc: 恰好一个主库，所有从库都在流复制。
   effect: read-only
+  timeout: 600
   hosts: first:primary
   when: params.deployment_mode in ['legacy', 'single'] && (count(roles.replica) > 0)
   expect: 流复制中的从库数等于计划。
+  postconditions:
+    - pg_streaming.rc == 0
+    - (pg_streaming.stdout | trim | int) == (mw.roles.replica | length)
   run:
     role: postgresql
     tasks: topology
 - id: start-single
   title: 启动单节点 PostgreSQL
   effect: change
+  timeout: 600
+  expect: 单节点 PostgreSQL 服务已启动、可接受连接且 postgres 密码已设置。
+  postconditions:
+    - pg_ready.rc == 0
+    - pg_pw_set.rc == 0
   when: params.deployment_mode in ['legacy', 'single'] && (count(roles.replica) == 0)
   run:
     role: postgresql
@@ -36,6 +56,11 @@
 - id: native-primary
   title: 启动原生主库及复制账户
   effect: change
+  timeout: 600
+  expect: 原生主库已初始化、可写且复制账户与密码已配置。
+  postconditions:
+    - native_primary_role.stdout | trim == 't'
+    - native_pw_set.rc == 0
   when: params.deployment_mode == 'replication'
   run:
     role: postgresql
@@ -44,6 +69,11 @@
 - id: native-replicas
   title: 基础备份初始化从库并启动流复制
   effect: change
+  timeout: 1800
+  expect: 原生从库已完成基础备份初始化、存在 standby.signal 且可接受连接。
+  postconditions:
+    - native_standby.stat.exists
+    - native_ready.rc == 0
   when: params.deployment_mode == 'replication'
   run:
     role: postgresql

@@ -3,30 +3,46 @@
   desc: 先启动主库并确认能用密码连接；一定要先于从库和哨兵。
   rollback: "systemctl stop redis-server；主库此时没有业务数据，停止后不影响其他节点。不要在从库已连上之后再重启它而不先停哨兵。"
   effect: change
+  timeout: 300
   hosts: first:primary
   expect: 主库用密码 PING 返回 PONG。
+  postconditions:
+    - rd_ping.rc == 0
+    - rd_ping.stdout | trim == 'PONG'
   run: {role: redis, tasks: start_primary}
 - id: join-replicas
   title: 从库加入复制
   desc: 启动各从库并等待复制链路 up；首次是一次全量同步，无盘复制通常数秒完成。
   rollback: "systemctl stop redis-server 停掉对应从库即可；主库不受影响。"
   effect: change
+  timeout: 600
   hosts: replica
   when: count(roles.replica) > 0
   expect: 每个从库 master_link_status 为 up。
+  postconditions:
+    - rd_repl.rc == 0
+    - "'master_link_status:up' in rd_repl.stdout"
   run: {role: redis, tasks: start_replica}
 - id: start-sentinels
   title: 启动哨兵
   desc: 在全部机器上启动哨兵，必须在全部实例之后；停止时则相反，先停哨兵再停实例，否则会触发误判切换。
   rollback: "systemctl stop redis-sentinel，逐台停止；停止哨兵不影响实例，但之后没有自动故障切换。"
   effect: change
+  timeout: 300
   when: count(roles.replica) > 0
+  expect: 全部机器的 redis-sentinel 服务已启动并监听哨兵端口。
+  postconditions:
+    - rd_sentinel_listen is succeeded
   run: {role: redis, tasks: start_sentinel}
 - id: topology
   title: 核对拓扑与仲裁
   desc: 哨兵返回的主库就是计划的主库，主库连着全部从库，三个哨兵互相发现并满足仲裁。
   effect: read-only
+  timeout: 300
   hosts: first:primary
   when: count(roles.replica) > 0
   expect: 哨兵指向的主库有全部从库，每个哨兵发现了其余哨兵，SENTINEL ckquorum 返回 OK。
+  postconditions:
+    - rd_quorum.rc == 0
+    - rd_quorum.stdout | trim is match('OK')
   run: {role: redis, tasks: topology, vars: {rd_expect_planned: true}}

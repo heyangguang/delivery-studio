@@ -29,6 +29,15 @@
   key_file: redis-keyring.gpg
   # Key fingerprint 5431 8FA4 052D 1E61 A6B6 F7BB 5F43 49D6 BF53 AA0C (Redis Package Signing), fetched from
   # https://packages.redis.io/gpg; the signed InRelease of the suite verifies against it.
+- id: nginx-noble
+  title: Nginx 官方仓库（Ubuntu 24.04）
+  platforms: [ubuntu-24.04-amd64]
+  kind: apt
+  url: https://nginx.org/packages/ubuntu
+  suites: [noble]
+  components: [nginx]
+  key_file: nginx-keyring.gpg
+  # Official NGINX signing keys fetched from https://nginx.org/keys/nginx_signing.key; verifies noble InRelease.
 - id: rocky9-baseos
   title: Rocky Linux 9 BaseOS
   platforms: [el9-amd64]

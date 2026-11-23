@@ -1,4 +1,10 @@
 - id: start
   title: 启动 HAProxy
   effect: change
+  timeout: 300
+  expect: HAProxy 服务处于运行状态并监听所有绑定端口。
+  postconditions:
+    - haproxy_active.rc == 0
+    - (haproxy_active.stdout | trim) == 'active'
+    - haproxy_listeners is succeeded
   run: {role: haproxy, tasks: start}

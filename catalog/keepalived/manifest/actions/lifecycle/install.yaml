@@ -1,4 +1,8 @@
 - id: packages
   title: 安装 keepalived
   effect: change
+  timeout: 600
+  expect: keepalived 软件包已安装并可执行。
+  postconditions:
+    - keepalived_version.rc == 0
   run: {role: keepalived, tasks: install}

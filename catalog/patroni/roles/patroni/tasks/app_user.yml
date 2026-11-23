@@ -5,5 +5,6 @@
     sql: >-
       DO $$BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='{{ mw.params.app_user }}')
       THEN CREATE ROLE {{ mw.params.app_user }} LOGIN CREATEDB CREATEROLE PASSWORD '{{ mw.secrets.app }}'; END IF; END$$;
+  register: pg_app_user_cmd
   no_log: true
   changed_when: true

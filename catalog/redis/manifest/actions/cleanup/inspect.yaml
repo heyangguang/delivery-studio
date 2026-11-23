@@ -2,5 +2,10 @@ id: inspect
 title: 盘点测试痕迹（不删除）
 desc: 列出测试键与每台机器的日志文件。这一步不会改动任何东西。
 effect: read-only
+timeout: 300
 hosts: first:primary
+expect: 已只读盘点测试键与日志文件，未修改任何数据。
+postconditions:
+  - rd_exists.rc == 0
+  - rd_dbsize.rc == 0
 run: {role: redis, tasks: test_clean, vars: {rd_clean: inspect}}

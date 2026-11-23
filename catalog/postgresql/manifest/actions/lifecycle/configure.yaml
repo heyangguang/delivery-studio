@@ -2,6 +2,11 @@
   title: 分发证书与私钥
   desc: 把客户证书、私钥和 CA 放到 /etc/pki/pg，属主 postgres，私钥权限 0600。
   effect: change
+  timeout: 300
+  expect: 服务器证书、私钥与 CA 证书已放到 /etc/pki/pg 并设置正确权限。
+  postconditions:
+    - pg_tls_copied is succeeded
+    - pg_tls_ca.stat.exists
   when: params.tls
   run:
     role: postgresql
@@ -10,6 +15,11 @@
   title: 写入数据库与高可用配置
   desc: 有从库时写入 Patroni 配置（含 DCS 引导参数）和 systemd 覆盖项；单节点则创建数据库集群并写入 postgresql.conf 与 pg_hba.conf。
   effect: change
+  timeout: 300
+  expect: 部署归属标记及 Patroni 或单节点 PostgreSQL 配置已写入。
+  postconditions:
+    - pg_scope_written is succeeded
+    - pg_cfg_stat.stat.exists
   run:
     role: postgresql
     tasks: configure
@@ -17,6 +27,10 @@
 - id: native-config
   title: 写入原生主从配置及服务
   effect: change
+  timeout: 300
+  expect: 原生主从 postgresql.conf、pg_hba.conf 与 systemd 服务定义已写入。
+  postconditions:
+    - native_cfg_stat.stat.exists
   when: params.deployment_mode == 'replication'
   run:
     role: postgresql

@@ -52,7 +52,13 @@ func (s *storeServer) resolve(w http.ResponseWriter, r *http.Request, session st
 	if !ok {
 		return
 	}
+	purpose := strings.TrimSpace(r.URL.Query().Get("purpose"))
+	if purpose == "verification" && !s.can(session.User, "component.edit") && !s.can(session.User, "component.publish") {
+		s.fail(w, 403, "只有组件维护者可以使用组件验证测试通道")
+		return
+	}
 	plan := mwpack.Solve(s.plat.cat(), d)
+	plan.Issues = append(plan.Issues, s.releaseGateIssues(plan, purpose)...)
 	type pkgInfo struct {
 		Platform string                  `json:"platform"`
 		Total    int                     `json:"total"`
@@ -162,14 +168,25 @@ func (s *storeServer) createJob(w http.ResponseWriter, r *http.Request, session 
 	}
 	defer r.MultipartForm.RemoveAll()
 	var input struct {
-		Deployment *mwpack.Deployment `json:"deployment"`
-		Revises    string             `json:"revises"`
+		Deployment   *mwpack.Deployment `json:"deployment"`
+		Revises      string             `json:"revises"`
+		Purpose      string             `json:"purpose"`
+		VerifyTarget *verifyTarget      `json:"verify_target"`
 	}
 	if err := json.Unmarshal([]byte(r.FormValue("request")), &input); err != nil || input.Deployment == nil {
 		s.fail(w, 400, "提交的配置读不出来，请刷新页面后重试")
 		return
 	}
 	if !s.need(w, session.User, "delivery.create") {
+		return
+	}
+	input.Purpose = strings.TrimSpace(input.Purpose)
+	if input.Purpose != "" && input.Purpose != "verification" {
+		s.fail(w, 400, "交付用途参数无效")
+		return
+	}
+	if input.Purpose == "verification" && !s.can(session.User, "component.edit") && !s.can(session.User, "component.publish") {
+		s.fail(w, 403, "只有组件维护者可以发起组件验证交付")
 		return
 	}
 	d := input.Deployment
@@ -189,6 +206,15 @@ func (s *storeServer) createJob(w http.ResponseWriter, r *http.Request, session 
 			s.fail(w, 409, msg)
 			return
 		}
+		// Inherit verification purpose when revising an existing verification delivery.
+		s.mu.Lock()
+		if prev, ok := s.jobs[input.Revises]; ok && prev.Purpose == "verification" && input.Purpose == "" {
+			input.Purpose = prev.Purpose
+			if input.VerifyTarget == nil {
+				input.VerifyTarget = prev.VerifyTarget
+			}
+		}
+		s.mu.Unlock()
 	}
 	if d.Schema == "" {
 		d.Schema = mwpack.DeploymentSchema
@@ -200,6 +226,9 @@ func (s *storeServer) createJob(w http.ResponseWriter, r *http.Request, session 
 	}
 	if d.DeliveryMode == "configuration" {
 		plan.Inputs = nil
+	}
+	if len(plan.Errors()) == 0 {
+		plan.Issues = append(plan.Issues, s.releaseGateIssues(plan, input.Purpose)...)
 	}
 	if len(plan.Errors()) == 0 {
 		plan.Issues = append(plan.Issues, s.plat.readiness(plan)...)
@@ -219,6 +248,22 @@ func (s *storeServer) createJob(w http.ResponseWriter, r *http.Request, session 
 	}
 	// The job is named after the first instance the user chose, not one the platform added.
 	primary := deliveryPrimary(plan, d)
+	var vTarget *verifyTarget
+	if input.Purpose == "verification" {
+		if input.VerifyTarget != nil && input.VerifyTarget.Component != "" {
+			vt := *input.VerifyTarget
+			if vt.Platform == "" {
+				vt.Platform = plan.Platform.ID
+			}
+			vTarget = &vt
+		} else if primary != nil {
+			vTarget = &verifyTarget{
+				Component: primary.Component,
+				Version:   primary.Version,
+				Platform:  plan.Platform.ID,
+			}
+		}
+	}
 
 	// Reserve queue capacity before accepting private material.
 	s.mu.Lock()
@@ -252,7 +297,7 @@ func (s *storeServer) createJob(w http.ResponseWriter, r *http.Request, session 
 	}
 	id := randomStoreToken(16)
 	now := nowStamp()
-	j := storeJob{Scheme: primary.SchemeSummary(), ID: id, Owner: session.User, AppID: primary.Component, AppName: primary.Title, Version: primary.Version, ClusterID: d.ID, Revises: input.Revises, Seq: 0, State: "queued", Stage: "等待生成", Created: now, Updated: now, Logs: []string{}}
+	j := storeJob{Purpose: input.Purpose, VerifyTarget: vTarget, Scheme: primary.SchemeSummary(), ID: id, Owner: session.User, AppID: primary.Component, AppName: primary.Title, Version: primary.Version, ClusterID: d.ID, Revises: input.Revises, Seq: 0, State: "queued", Stage: "等待生成", Created: now, Updated: now, Logs: []string{}}
 	j.DeliveryMode = d.DeliveryMode
 	s.jobs[id] = j
 	s.mu.Unlock()
@@ -421,55 +466,82 @@ func (s *storeServer) jobSpec(id string) any {
 // jobPlan returns the structured handbook (plan.json) of a generated delivery. Deliveries made before a display field
 // existed (role names, data flows) lack it, so those fields are filled in from the submitted specification solved
 // against the current catalog; nothing that was generated changes.
+// Results are cached in memory keyed by plan.json's (ModTime, Size), and modern plans that already contain
+// role_titles bypass the expensive mwpack.Solve() legacy backfill entirely.
 func (s *storeServer) jobPlan(id string) json.RawMessage {
-	b, err := os.ReadFile(filepath.Join(s.jobDir(id), "output", "plan.json"))
+	path := filepath.Join(s.jobDir(id), "output", "plan.json")
+	st, statErr := os.Stat(path)
+	if statErr != nil {
+		return nil
+	}
+	mod := st.ModTime().UnixNano()
+	sz := st.Size()
+
+	s.cacheMu.RLock()
+	if hit, ok := s.planCache[id]; ok && hit.modTime == mod && hit.size == sz {
+		s.cacheMu.RUnlock()
+		return hit.raw
+	}
+	s.cacheMu.RUnlock()
+
+	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil
 	}
+	res := json.RawMessage(b)
 	var doc map[string]json.RawMessage
 	var insts []map[string]json.RawMessage
-	if json.Unmarshal(b, &doc) != nil || json.Unmarshal(doc["instances"], &insts) != nil {
-		return b
-	}
-	spec, err := os.ReadFile(filepath.Join(s.jobDir(id), "deployment.yml"))
-	if err != nil {
-		return b
-	}
-	dep, err := mwpack.ParseSavedDeployment(spec)
-	if err != nil {
-		return b
-	}
-	view := mwpack.Solve(s.plat.cat(), dep).View()
-	byID := map[string]mwpack.InstanceView{}
-	for _, iv := range view.Instances {
-		byID[iv.ID] = iv
-	}
-	changed := false
-	for _, in := range insts {
-		var iid string
-		json.Unmarshal(in["id"], &iid)
-		iv, ok := byID[iid]
-		if !ok {
-			continue
+	if json.Unmarshal(b, &doc) == nil && json.Unmarshal(doc["instances"], &insts) == nil {
+		needsBackfill := false
+		for _, in := range insts {
+			if _, has := in["role_titles"]; !has {
+				needsBackfill = true
+				break
+			}
 		}
-		if _, has := in["flows"]; !has && len(iv.Flows) > 0 {
-			in["flows"], _ = json.Marshal(iv.Flows)
-			changed = true
+		if needsBackfill {
+			if spec, err := os.ReadFile(filepath.Join(s.jobDir(id), "deployment.yml")); err == nil {
+				if dep, err := mwpack.ParseSavedDeployment(spec); err == nil {
+					view := mwpack.Solve(s.plat.cat(), dep).View()
+					byID := map[string]mwpack.InstanceView{}
+					for _, iv := range view.Instances {
+						byID[iv.ID] = iv
+					}
+					changed := false
+					for _, in := range insts {
+						var iid string
+						_ = json.Unmarshal(in["id"], &iid)
+						iv, ok := byID[iid]
+						if !ok {
+							continue
+						}
+						if _, has := in["flows"]; !has && len(iv.Flows) > 0 {
+							in["flows"], _ = json.Marshal(iv.Flows)
+							changed = true
+						}
+						if _, has := in["role_titles"]; !has && len(iv.RoleTitles) > 0 {
+							in["role_titles"], _ = json.Marshal(iv.RoleTitles)
+							changed = true
+						}
+					}
+					if changed {
+						doc["instances"], _ = json.Marshal(insts)
+						if out, err := json.Marshal(doc); err == nil {
+							res = out
+						}
+					}
+				}
+			}
 		}
-		if _, has := in["role_titles"]; !has && len(iv.RoleTitles) > 0 {
-			in["role_titles"], _ = json.Marshal(iv.RoleTitles)
-			changed = true
-		}
 	}
-	if !changed {
-		return b
+
+	s.cacheMu.Lock()
+	if s.planCache == nil {
+		s.planCache = map[string]cachedJobPlan{}
 	}
-	doc["instances"], _ = json.Marshal(insts)
-	out, err := json.Marshal(doc)
-	if err != nil {
-		return b
-	}
-	return out
+	s.planCache[id] = cachedJobPlan{modTime: mod, size: sz, raw: res}
+	s.cacheMu.Unlock()
+	return res
 }
 
 var _ = url.PathEscape

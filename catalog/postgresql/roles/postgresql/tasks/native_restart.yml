@@ -14,6 +14,12 @@
   register: pg_desired
   when: pg_ha | bool
 
+- name: 刷新配置标记（单节点）
+  ansible.builtin.command:
+    argv: "{{ pg_psql + ['-d', 'postgres', '-c', 'SELECT pg_reload_conf()'] }}"
+  changed_when: false
+  when: not (pg_ha | bool)
+
 - name: 期望值（单节点）
   ansible.builtin.command:
     argv: "{{ pg_psql + ['-d', 'postgres', '-c', \"SELECT name || '=' || setting FROM pg_settings WHERE pending_restart\"] }}"
@@ -78,6 +84,16 @@
   ansible.builtin.systemd:
     name: "{{ pg_unit }}"
     state: restarted
+  when: (pg_need_restart | bool) and not (pg_ha | bool)
+
+- name: 重启后等待就绪（单节点）
+  ansible.builtin.command:
+    argv: "{{ pg_psql + ['-d', 'postgres', '-c', 'SELECT 1'] }}"
+  register: pg_single_ready
+  retries: 30
+  delay: 1
+  until: pg_single_ready.rc == 0
+  changed_when: false
   when: (pg_need_restart | bool) and not (pg_ha | bool)
 
 - name: 重启后设置应已生效

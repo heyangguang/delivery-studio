@@ -2,6 +2,7 @@ id: ha-check
 title: 高可用状态
 desc: 只有一个主库、从库全部在流复制、各成员时间线一致、复制连接按设置使用 TLS，并复查归档和 TDE 开关。
 effect: read-only
+timeout: 7200
 hosts: first:primary
 when: params.deployment_mode in ['legacy', 'single'] && (count(roles.replica) > 0)
 skip: 单节点没有高可用状态可查

@@ -2,6 +2,7 @@ id: pitr
 title: 时间点恢复
 desc: 写入一批“之前”的数据，记下时间点，再写入一批“之后”的数据，然后恢复到该时间点：之前的 100 行应存在，之后的 100 行应不存在。
 effect: change
+timeout: 7200
 hosts: first:primary
 expect: 用的是全量备份加归档 WAL，两者缺一不可。
 inputs:

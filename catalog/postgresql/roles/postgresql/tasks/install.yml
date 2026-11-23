@@ -70,3 +70,8 @@
   ansible.builtin.command: /usr/bin/python3 -c "import patroni.dcs.etcd3, OpenSSL.SSL"
   changed_when: false
   when: (pg_ha | bool) and mw.params.deployment_mode == 'legacy'
+
+- name: 核对 PostgreSQL 二进制版本
+  ansible.builtin.command: "{{ pg_bin }}/postgres --version"
+  register: pg_installed_version
+  changed_when: false

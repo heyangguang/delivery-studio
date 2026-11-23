@@ -246,11 +246,51 @@ func (l *Library) Has(platform string, r mwpack.PackageRequest) bool {
 	return true
 }
 
+// PoolSizes snapshots filename -> byte size in a platform's pool directory with a single ReadDir call.
+func (l *Library) PoolSizes(platform string) map[string]int64 {
+	entries, err := os.ReadDir(l.pdir(platform, "pool"))
+	if err != nil {
+		return nil
+	}
+	out := make(map[string]int64, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if fi, err := e.Info(); err == nil {
+			out[e.Name()] = fi.Size()
+		}
+	}
+	return out
+}
+
+// HasInPool reports whether a closure and all its files exist using a pre-scanned pool size map.
+func (l *Library) HasInPool(platform string, r mwpack.PackageRequest, poolSizes map[string]int64) bool {
+	if len(poolSizes) == 0 {
+		return false
+	}
+	c, err := l.Get(platform, r)
+	if err != nil {
+		return false
+	}
+	for _, f := range c.Files {
+		sz, ok := poolSizes[f.File]
+		if !ok || sz != f.Size {
+			return false
+		}
+	}
+	return true
+}
+
 // Missing lists the requests the library cannot satisfy.
 func (l *Library) Missing(platform string, reqs []mwpack.PackageRequest) []mwpack.PackageRequest {
+	if len(reqs) == 0 {
+		return nil
+	}
+	pool := l.PoolSizes(platform)
 	var out []mwpack.PackageRequest
 	for _, r := range reqs {
-		if !l.Has(platform, r) {
+		if !l.HasInPool(platform, r, pool) {
 			out = append(out, r)
 		}
 	}

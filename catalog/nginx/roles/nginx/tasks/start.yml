@@ -3,16 +3,26 @@
     name: nginx
     enabled: true
     state: started
+  register: nginx_service
 
 - name: 平滑重载
   ansible.builtin.systemd:
     name: nginx
     state: reloaded
 
+- name: 核对 Nginx 服务处于运行状态
+  ansible.builtin.command: systemctl is-active nginx
+  register: nginx_active
+  changed_when: false
+  retries: 5
+  delay: 1
+  until: nginx_active.rc == 0 and (nginx_active.stdout | trim) == 'active'
+
 - name: 等待监听端口
   ansible.builtin.wait_for:
     port: "{{ item.listen }}"
     timeout: 30
+  register: nginx_listeners
   loop: "{{ mw.binds }}"
   loop_control:
     label: "{{ item.name }}:{{ item.listen }}"

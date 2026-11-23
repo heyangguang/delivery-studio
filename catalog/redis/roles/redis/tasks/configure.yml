@@ -16,17 +16,26 @@
   loop: "{{ ['redis-sentinel', 'redis-server'] if rd_ha | bool else ['redis-server'] }}"
   when: not rd_configured.stat.exists
 
+- name: 检查包自带配置是否存在
+  ansible.builtin.stat:
+    path: "/etc/redis/{{ item }}"
+  loop: "{{ ['redis.conf', 'sentinel.conf'] if rd_ha | bool else ['redis.conf'] }}"
+  register: rd_pkg_confs
+  when: not rd_configured.stat.exists
+
 - name: 备份包自带配置
   ansible.builtin.copy:
-    src: "/etc/redis/{{ item }}"
-    dest: "/etc/redis/{{ item }}.pkg-orig"
+    src: "/etc/redis/{{ item.item }}"
+    dest: "/etc/redis/{{ item.item }}.pkg-orig"
     remote_src: true
     force: false
     owner: root
     group: root
     mode: '0644'
-  loop: "{{ ['redis.conf', 'sentinel.conf'] if rd_ha | bool else ['redis.conf'] }}"
-  when: not rd_configured.stat.exists
+  loop: "{{ rd_pkg_confs.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: not rd_configured.stat.exists and (item.stat.exists | default(false))
 
 - name: 写入 redis.conf（只在首次；之后实例会自己改写它）
   ansible.builtin.template:

@@ -2,6 +2,8 @@ id: backup-info
 title: 查看备份结果
 desc: 执行上一步后预期备份数为 0，pgBackRest 显示 no valid backups 属正常；仓库里可能已有新的归档 WAL，不要求目录为空。
 effect: read-only
+expect: pgBackRest info 输出已核对，无异常报错。
+timeout: 7200
 serial: 1
 inputs:
     timeout:

@@ -121,17 +121,28 @@ func (c compToolCtx) searchWorkspace(query, view string, offset int) string {
 	return fmt.Sprintf("检索 %s（draft 仅检索已有草稿）；共 %d 处，当前 %d～%d。\n%s\n", view, len(hits), offset, end, strings.Join(hits[offset:end], "\n")) + fmt.Sprintf("继续读取 offset=%d。搜索结果仅用于定位，不代表全部引用都已适配。", end)
 }
 
+type crossEntry struct {
+	Component string        `json:"component"`
+	Kind      string        `json:"kind"` // "static" | "render"
+	Preset    string        `json:"preset,omitempty"`
+	Status    string        `json:"status"` // "ok" | "error" | "warn"
+	Summary   string        `json:"summary"`
+	Files     int           `json:"files,omitempty"`
+	Problems  []compProblem `json:"problems,omitempty"`
+}
+
 type crossResult struct {
-	Incomplete bool     `json:"incomplete"`
-	OK         bool     `json:"ok"`
-	Scope      []string `json:"scope"`
-	Results    []string `json:"results"`
+	Incomplete bool         `json:"incomplete"`
+	OK         bool         `json:"ok"`
+	Scope      []string     `json:"scope"`
+	Results    []string     `json:"results"`
+	Entries    []crossEntry `json:"entries,omitempty"`
 }
 
 // Only explicitly selected drafts enter the snapshot. Unrelated drafts never leak
 // into generation. All other components stay at their published versions.
 func (s *storeServer) crossCheck(names []string) crossResult {
-	r := crossResult{OK: true, Scope: []string{}, Results: []string{}}
+	r := crossResult{OK: true, Scope: []string{}, Results: []string{}, Entries: []crossEntry{}}
 	fail := func(e error) crossResult { r.OK = false; r.Results = append(r.Results, e.Error()); return r }
 	if len(names) == 0 || len(names) > 32 {
 		return fail(fmt.Errorf("请选择1～32份草稿"))
@@ -155,6 +166,9 @@ func (s *storeServer) crossCheck(names []string) crossResult {
 			return fail(fmt.Errorf("%s: %w", n, e))
 		}
 		sets[n] = f.clone()
+		if n == sharedPlatformName {
+			refreshSharedManagedFiles(sets[n])
+		}
 		if selected[n] {
 			r.Scope = append(r.Scope, n)
 		}
@@ -172,11 +186,10 @@ func (s *storeServer) crossCheck(names []string) crossResult {
 			mem[n+"/"+p] = &fstest.MapFile{Data: b, Mode: 0600}
 		}
 	}
-	cat, e := mwpack.LoadCatalog(mem)
-	if e != nil {
-		return fail(e)
+	cat, catErr := mwpack.LoadCatalog(mem)
+	if catErr == nil {
+		cat = cat.WithPlatformFiles(sharedRuntime(sets[sharedPlatformName]))
 	}
-	cat = cat.WithPlatformFiles(sharedRuntime(sets[sharedPlatformName]))
 	// Static checks use an isolated directory, never production drafts or releases.
 	dir, e := os.MkdirTemp("", "mw-cross-check-")
 	if e != nil {
@@ -198,13 +211,48 @@ func (s *storeServer) crossCheck(names []string) crossResult {
 		}
 	}
 	p := &platform{componentsDir: dir}
-	p.catalog.Store(cat)
+	if cat != nil {
+		p.catalog.Store(cat)
+	} else {
+		p.catalog.Store(s.plat.cat().WithPlatformFiles(sharedRuntime(sets[sharedPlatformName])))
+	}
+	staticFailed := false
 	for _, n := range r.Scope {
 		check := checkComponent(p, n, sets[n])
 		if !check.OK {
-			return fail(fmt.Errorf("%s：%s", n, problemsText(check, nil)))
+			staticFailed = true
+			r.OK = false
+			r.Results = append(r.Results, fmt.Sprintf("%s：%s", n, problemsText(check, nil)))
+			r.Entries = append(r.Entries, crossEntry{
+				Component: n,
+				Kind:      "static",
+				Status:    "error",
+				Summary:   fmt.Sprintf("静态校验发现 %d 项错误", check.Errors),
+				Problems:  check.Problems,
+			})
+			continue
 		}
-		r.Results = append(r.Results, n+"：静态检查通过")
+		status := "ok"
+		summary := "静态检查通过"
+		if check.Warnings > 0 {
+			status = "warn"
+			summary = fmt.Sprintf("静态检查通过（%d 项提醒）", check.Warnings)
+		}
+		r.Results = append(r.Results, n+"："+summary)
+		r.Entries = append(r.Entries, crossEntry{
+			Component: n,
+			Kind:      "static",
+			Status:    status,
+			Summary:   summary,
+			Problems:  check.Problems,
+		})
+	}
+	if staticFailed {
+		sort.Strings(r.Scope)
+		return r
+	}
+	if catErr != nil {
+		return fail(catErr)
 	}
 	for _, n := range cat.Names() {
 		component, _ := cat.Get(n)
@@ -217,14 +265,38 @@ func (s *storeServer) crossCheck(names []string) crossResult {
 				_, _, _, baselineErr := renderSample(s.plat.cat(), n, previewReq{Preset: preset.ID})
 				if baselineErr != nil && baselineErr.Error() == err.Error() {
 					r.Incomplete = true
-					r.Results = append(r.Results, n+"/"+preset.ID+"：未完成验证（已发布版本也存在相同试生成问题）："+err.Error())
+					msg := "未完成验证（已发布版本也存在相同试生成问题）：" + err.Error()
+					r.Results = append(r.Results, n+"/"+preset.ID+"："+msg)
+					r.Entries = append(r.Entries, crossEntry{
+						Component: n,
+						Kind:      "render",
+						Preset:    preset.ID,
+						Status:    "warn",
+						Summary:   msg,
+					})
 				} else {
 					r.OK = false
 					r.Results = append(r.Results, n+"/"+preset.ID+"："+err.Error())
+					r.Entries = append(r.Entries, crossEntry{
+						Component: n,
+						Kind:      "render",
+						Preset:    preset.ID,
+						Status:    "error",
+						Summary:   err.Error(),
+					})
 				}
 				continue
 			}
-			r.Results = append(r.Results, fmt.Sprintf("%s/%s：联合试生成通过（%d 个项目文件）", n, preset.ID, len(bundle.Project)))
+			msg := fmt.Sprintf("联合试生成通过（%d 个项目文件）", len(bundle.Project))
+			r.Results = append(r.Results, n+"/"+preset.ID+"："+msg)
+			r.Entries = append(r.Entries, crossEntry{
+				Component: n,
+				Kind:      "render",
+				Preset:    preset.ID,
+				Status:    "ok",
+				Summary:   msg,
+				Files:     len(bundle.Project),
+			})
 		}
 	}
 	r.Results = append(r.Results, "仅检查所选草稿与其余已发布组件的组合；未执行部署、未迁移数据，不代表现场验收通过。")
@@ -241,12 +313,30 @@ func (s *storeServer) crossCheckAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res := s.crossCheck(in.Names)
-	if lang := wLang(w); isEnLang(lang) && len(res.Results) > 0 {
-		out := make([]string, len(res.Results))
-		for i, item := range res.Results {
-			out[i] = localizeGoMessage(lang, item)
+	if lang := wLang(w); isEnLang(lang) {
+		if len(res.Results) > 0 {
+			out := make([]string, len(res.Results))
+			for i, item := range res.Results {
+				out[i] = localizeGoMessage(lang, item)
+			}
+			res.Results = out
 		}
-		res.Results = out
+		if len(res.Entries) > 0 {
+			entries := make([]crossEntry, len(res.Entries))
+			for i, e := range res.Entries {
+				e.Summary = localizeGoMessage(lang, e.Summary)
+				if len(e.Problems) > 0 {
+					ps := make([]compProblem, len(e.Problems))
+					for j, pr := range e.Problems {
+						pr.Message = localizeGoMessage(lang, pr.Message)
+						ps[j] = pr
+					}
+					e.Problems = ps
+				}
+				entries[i] = e
+			}
+			res.Entries = entries
+		}
 	}
 	s.writeJSON(w, 200, res)
 }

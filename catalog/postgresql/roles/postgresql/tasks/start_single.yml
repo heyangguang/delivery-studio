@@ -15,5 +15,6 @@
 - name: 设置 postgres 账户密码
   ansible.builtin.command:
     argv: "{{ pg_psql + ['-d', 'postgres', '-c', \"ALTER ROLE postgres PASSWORD '\" ~ mw.secrets.postgres ~ \"'\"] }}"
+  register: pg_pw_set
   no_log: true
   changed_when: true

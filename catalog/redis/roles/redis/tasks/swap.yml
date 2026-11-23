@@ -32,4 +32,5 @@
     if grep -Ev '^[[:space:]]*#' /etc/fstab | grep -Eq '[[:space:]]swap[[:space:]]'; then echo "/etc/fstab 里还有未注释的 swap 行"; exit 1; fi
   args:
     executable: /bin/bash
+  register: rd_swap_verified
   changed_when: false

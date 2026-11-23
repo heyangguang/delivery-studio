@@ -282,39 +282,37 @@ export function SourcePanel({
         platform={p.id}
         running={running}
       />
-      {task ? (
+      {task && (
         <div className="lp-body">
           <TaskCard task={task} onClose={onDismiss} />
         </div>
-      ) : (
-        has &&
-        repoGroups.length > 0 && (
-          <div className="lp-body src-overview">
-            <div className="src-grid" aria-label={bi("已索引软件源", "Indexed sources")}>
-              {repoGroups.map((g) => (
-                <div className="src-chip" key={g.source}>
-                  <div className="src-chip-top">
-                    <span className="src-dot" aria-hidden="true" />
-                    <b className="src-name">{g.source}</b>
-                    <span className="src-cnt num">
-                      {g.packages.toLocaleString(getLang())}{" "}
-                      {bi("版本", g.packages === 1 ? "ver" : "vers")}
-                    </span>
-                  </div>
-                  {g.suites.size > 0 && (
-                    <div className="src-suites">
-                      {[...g.suites].map((st) => (
-                        <span className="src-suite mono" key={st}>
-                          {st}
-                        </span>
-                      ))}
-                    </div>
-                  )}
+      )}
+      {has && repoGroups.length > 0 && (
+        <div className="lp-body src-overview">
+          <div className="src-grid" aria-label={bi("已索引软件源", "Indexed sources")}>
+            {repoGroups.map((g) => (
+              <div className="src-chip" key={g.source}>
+                <div className="src-chip-top">
+                  <span className="src-dot" aria-hidden="true" />
+                  <b className="src-name">{g.source}</b>
+                  <span className="src-cnt num">
+                    {g.packages.toLocaleString(getLang())}{" "}
+                    {bi("版本", g.packages === 1 ? "ver" : "vers")}
+                  </span>
                 </div>
-              ))}
-            </div>
+                {g.suites.size > 0 && (
+                  <div className="src-suites">
+                    {[...g.suites].map((st) => (
+                      <span className="src-suite mono" key={st}>
+                        {st}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
-        )
+        </div>
       )}
       <button className="lp-foot" onClick={onGuide}>
         <span className="lp-foot-ic" aria-hidden>

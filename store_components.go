@@ -97,6 +97,10 @@ func (s *storeServer) handleComponents(w http.ResponseWriter, r *http.Request, s
 		s.deleteComponent(w, r, session, parts[0])
 	case len(parts) == 2 && parts[1] == "manifest" && r.Method == "GET":
 		s.componentManifest(w, parts[0])
+	case len(parts) == 2 && parts[1] == "verifications" && r.Method == "GET":
+		s.getCompVerifications(w, r, session, parts[0])
+	case len(parts) == 3 && parts[1] == "verifications" && r.Method == "DELETE":
+		s.deleteCompVerification(w, r, session, parts[0], parts[2])
 	case len(parts) == 2 && parts[1] == "pack" && r.Method == "GET":
 		s.componentPack(w, parts[0])
 	default:

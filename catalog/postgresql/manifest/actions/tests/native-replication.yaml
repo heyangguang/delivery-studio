@@ -2,7 +2,12 @@ id: native-replication
 expect: 主库报告所有从库 streaming，从库处于恢复模式且 WAL receiver 为 streaming。
 title: 普通主从流复制验收（只读）
 effect: read-only
+timeout: 300
 when: params.deployment_mode == 'replication'
+postconditions:
+  - native_role.rc == 0
+  - (inventory_hostname != pg_primary) or (native_streaming.stdout | trim | int) == (mw.roles.replica | length)
+  - (inventory_hostname == pg_primary) or (native_receiver.stdout | trim | int) == 1
 run:
     role: postgresql
     tasks: native_health

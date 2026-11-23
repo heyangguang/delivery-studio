@@ -1,5 +1,6 @@
 - id: "3.5"
-  status: verifying
+  status: published
+  verified_platforms: [ubuntu-24.04-amd64]
   platforms: [ubuntu-24.04-amd64]
   packages:
     - {name: etcd-server, version: "1:3.5.33-1.noble"}

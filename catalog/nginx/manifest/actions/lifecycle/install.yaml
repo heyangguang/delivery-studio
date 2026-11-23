@@ -1,4 +1,8 @@
 - id: packages
   title: 安装 Nginx 与 stream 模块
   effect: change
+  timeout: 600
+  expect: Nginx 与 stream 模块已安装并可执行。
+  postconditions:
+    - nginx_version.rc == 0
   run: {role: nginx, tasks: install}

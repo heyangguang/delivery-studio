@@ -35,6 +35,13 @@
     group: postgres
     mode: '0644'
 
+- name: 启用 conf.d 配置目录加载
+  ansible.builtin.lineinfile:
+    path: "/etc/postgresql/{{ pg_major }}/main/postgresql.conf"
+    regexp: "^include_dir\\s*="
+    line: "include_dir = 'conf.d'"
+    insertafter: EOF
+
 - name: 写入 pg_hba.conf
   ansible.builtin.template:
     src: pg_hba.conf.j2

@@ -2,13 +2,22 @@
   title: 核对各节点状态
   desc: 角色、TLS、TDE、归档和 TCP 认证；不改动数据。
   effect: read-only
+  timeout: 300
   expect: 每个节点的实际设置与计划一致。
+  postconditions:
+    - pg_tcp.rc == 0
+    - pg_tcp.stdout | trim == '1'
   run:
     role: patroni
     tasks: health
 - id: topology
   title: 复核拓扑
   effect: read-only
+  timeout: 300
+  expect: 主库上全部从库处于 streaming 流复制状态。
+  postconditions:
+    - pg_streaming.rc == 0
+    - (pg_streaming.stdout | trim | int) == (mw.roles.replica | length)
   hosts: first:primary
   when: count(roles.replica) > 0
   run:

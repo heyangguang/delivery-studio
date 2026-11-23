@@ -9,3 +9,4 @@
     host: "{{ mw_hosts[inventory_hostname].ip }}"
     port: "{{ mw.params.client_port }}"
     timeout: 120
+  register: etcd_client_listen

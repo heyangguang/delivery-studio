@@ -5,6 +5,7 @@ title: Nginx（stream）
 category: 负载均衡
 icon: gateway
 color: green
+delivery_modes: [offline, automatic]
 summary: 用 Nginx stream 做四层 TCP 转发，只支持被动健康检查，可配 keepalived 虚拟 IP。
 tags: [负载均衡]
 provides: [l4-lb]

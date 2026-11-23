@@ -10,19 +10,24 @@ export type FormDraft = {
 };
 export const NEW_DELIVERY_INTENT = "mh-new-delivery";
 
-/** Keep plain new drafts compatible; copied deliveries, revisions and named AI chats have separate lifetimes. */
+/** Keep plain new drafts compatible; copied deliveries, revisions, verification runs and named AI chats have separate lifetimes. */
 export const draftScope = (o: {
   from?: string;
   revise?: string;
   chat?: string;
+  verify?: boolean;
+  initialVer?: string;
+  initialPlatform?: string;
 }) =>
   o.revise
     ? `revise:${o.revise}`
     : o.from
       ? `copy:${o.from}`
-      : o.chat
-        ? `chat:${o.chat}`
-        : "";
+      : o.verify
+        ? `verify:${o.initialVer || ""}:${o.initialPlatform || ""}`
+        : o.chat
+          ? `chat:${o.chat}`
+          : "";
 export const draftKey = (app: string, scope = "") =>
   `mh-draft2-${app}${scope ? `:${encodeURIComponent(scope)}` : ""}`;
 export const formChatKey = (app: string, scope = "") =>

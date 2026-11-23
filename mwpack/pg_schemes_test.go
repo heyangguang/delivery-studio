@@ -202,6 +202,29 @@ func TestManagerCannotOverrideDatabase(t *testing.T) {
 	}
 }
 
+func TestManagerAllowsExtraCustomDatabaseParams(t *testing.T) {
+	cat := fullCatalog(t)
+	c, _ := cat.Get("postgresql")
+	c.Params = append(c.Params, mwpack.Param{
+		Key:     "log_to_file",
+		Group:   "logging",
+		Label:   "日志写入文件",
+		Type:    "bool",
+		Default: false,
+	})
+	d, err := mwpack.ParseDeployment([]byte("id: custom-pg-param\nhosts:\n  - {name: pg1, ip: 10.77.0.11, disk: /dev/vdb}\n  - {name: pg2, ip: 10.77.0.12, disk: /dev/vdb}\ninstances:\n  - id: pg\n    component: postgresql\n    placement: {primary: [pg1], replica: [pg2]}\n    params: {deployment_mode: patroni, tls: false, tde: false, client_cidr: 10.77.0.0/24, log_to_file: true}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := mwpack.Solve(cat, d)
+	if err := p.Err(); err != nil {
+		t.Fatalf("extra custom database params should not fail companion validation: %v", err)
+	}
+	if p.Instance("pg").Params["log_to_file"] != true {
+		t.Fatalf("expected database custom param log_to_file=true, got %v", p.Instance("pg").Params["log_to_file"])
+	}
+}
+
 func TestBuiltinSchemeTitlesDescribeCapabilities(t *testing.T) {
 	cat := fullCatalog(t)
 	for name, want := range map[string][]string{"postgresql": {"单机方案", "原生主从方案", "Patroni 主从方案"}, "redis": {"基础系列", "高可用系列"}} {

@@ -99,14 +99,19 @@ func TestExecutionReportIncludesVerifiableEvidence(t *testing.T) {
 	doc := &clusterDoc{Blocks: b.blocks}
 	detail := parseExportOptions(map[string][]string{"detail": {"1"}, "results": {"1"}}).filtered(doc)
 	raw, _ := json.Marshal(detail)
-	for _, want := range []string{"执行节点验证通过 1 步", "进程退出码：0", "verification-evidence-fixture", "/executions/" + run.ID + "/logs/" + run.Steps[0].ID} {
+	for _, want := range []string{"执行节点验证通过 1 步", "进程退出码：0", "verification-evidence-fixture"} {
 		if !strings.Contains(string(raw), want) {
 			t.Fatal("report missing evidence", want, string(raw))
 		}
 	}
+	for _, unwanted := range []string{"/executions/" + run.ID + "/logs/", "自动执行批次", "固定快照 SHA256", "批次 " + run.ID, "尝试 " + run.Steps[0].ID, "平台收到结果"} {
+		if strings.Contains(string(raw), unwanted) {
+			t.Fatal("customer report leaked internal platform metadata", unwanted, string(raw))
+		}
+	}
 	summary := parseExportOptions(map[string][]string{"detail": {"0"}, "results": {"1"}}).filtered(doc)
 	raw, _ = json.Marshal(summary)
-	if strings.Contains(string(raw), "verification-evidence-fixture") {
-		t.Fatal("summary includes raw logs")
+	if strings.Contains(string(raw), "verification-evidence-fixture") || strings.Contains(string(raw), "自动执行批次") {
+		t.Fatal("summary includes raw logs or internal batch tables")
 	}
 }

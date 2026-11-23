@@ -9,3 +9,4 @@
     host: 127.0.0.1
     port: "{{ rd_sport | int }}"
     timeout: 120
+  register: rd_sentinel_listen

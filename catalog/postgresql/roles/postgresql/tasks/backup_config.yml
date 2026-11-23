@@ -31,4 +31,5 @@
 - name: 启用 stanza
   ansible.builtin.command:
     argv: "{{ pg_backrest + ['start'] }}"
+  register: pg_stanza_started
   changed_when: false

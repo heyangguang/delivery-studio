@@ -197,6 +197,9 @@ func init() {
 		}
 		return fmt.Sprintf("%s status is \"%s\" (not yet verified on a clean environment); do not use in production", m[1], st)
 	}},
+	{regexp.MustCompile(`^(.+?) 在 (.+?) 上尚未实测验证，不要用于生产$`), func(_ string, m []string) string {
+		return fmt.Sprintf("%s has not been verified on %s yet; do not use in production", m[1], m[2])
+	}},
 	{regexp.MustCompile(`^当前实例由 ([^ ]+) 管理；([^ ]+) 不单独执行此项，.+$`), func(_ string, m []string) string {
 		return fmt.Sprintf("Managed by %s; %s does not run this check separately—see the managing component's checks", m[1], m[2])
 	}},

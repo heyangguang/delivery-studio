@@ -7,14 +7,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"testing/fstest"
 	"time"
 
+	"middleware-deployer/catalog"
 	"middleware-deployer/mwpack"
 )
 
@@ -36,6 +39,11 @@ type jobSync struct {
 	Steps  []string `json:"steps"`
 	Update string   `json:"update,omitempty"` // the update package for the controller
 	Remove []string `json:"remove,omitempty"` // project files that are gone
+	// FileHashes maps every project-relative file carried by the cumulative update package to its expected SHA-256.
+	// UpdateSHA is the SHA-256 of the update-*.tar.gz archive itself. VerifyCmd is computed for UI & offline docs.
+	FileHashes map[string]string `json:"file_hashes,omitempty"`
+	UpdateSHA  string            `json:"update_sha,omitempty"`
+	VerifyCmd  string            `json:"verify_cmd,omitempty"`
 	// Kind is "patch" when this entry is a change the assistant made to the delivery's own files (ai_patch.go); Reason
 	// says why.
 	Kind   string `json:"kind,omitempty"`
@@ -43,6 +51,11 @@ type jobSync struct {
 	// Kept are steps the sync marked for running again that a person decided are not affected after all: their old
 	// result stands, with who said so and why.
 	Kept map[string]keptNote `json:"kept,omitempty"`
+	// AppliedAt / AppliedBy / AppliedMode record when an engineer confirmed the updated files are verified on the
+	// controller ("verified" = self-verifying check/apply script succeeded; "patch"/"full" kept for compatibility).
+	AppliedAt   string `json:"applied_at,omitempty"`
+	AppliedBy   string `json:"applied_by,omitempty"`
+	AppliedMode string `json:"applied_mode,omitempty"`
 }
 
 type keptNote struct {
@@ -79,6 +92,8 @@ type syncPreview struct {
 	Phases []syncPhase `json:"phases,omitempty"`
 	// Diffs shows what changed in each text file (secrets never are in the project), so the change can be read.
 	Diffs map[string]string `json:"diffs,omitempty"`
+	// UsingDrafts lists components whose workspace drafts were overlaid (verification deliveries only).
+	UsingDrafts []string `json:"using_drafts,omitempty"`
 }
 
 type syncStep struct {
@@ -134,17 +149,88 @@ func (s *storeServer) projectFiles(id string) (map[string][]byte, error) {
 	return out, nil
 }
 
+// syncCatalogFor returns the published catalog for formal deliveries; for temporary verification deliveries
+// (purpose == "verification"), it overlays any saved component workspace drafts so maintainers can hot-sync draft
+// fixes straight into their active verification test delivery and resume from the failing step without publishing first.
+func (s *storeServer) syncCatalogFor(j storeJob, d *mwpack.Deployment) (*mwpack.Catalog, []string) {
+	base := s.plat.cat()
+	if !isTempVerificationJob(j) || d == nil {
+		return base, nil
+	}
+	cs := s.comps()
+	seen := map[string]bool{}
+	draftNames := []string{}
+	draftSets := map[string]fileSet{}
+	for _, inst := range d.Instances {
+		name := strings.TrimSpace(inst.Component)
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		if cs.hasDraft(name) {
+			if files, _, err := cs.readDraft(name); err == nil && len(files) > 0 {
+				draftNames = append(draftNames, name)
+				draftSets[name] = files
+			}
+		}
+	}
+	var platDraft fileSet
+	if cs.hasDraft(sharedPlatformName) {
+		if files, _, err := cs.readDraft(sharedPlatformName); err == nil && len(files) > 0 {
+			platDraft = files
+			draftNames = append(draftNames, sharedPlatformName)
+		}
+	}
+	if len(draftNames) == 0 {
+		return base, nil
+	}
+	sort.Strings(draftNames)
+	sources := []fs.FS{catalog.FS}
+	if s.plat.componentsDir != "" {
+		custom := os.DirFS(s.plat.componentsDir)
+		if entries, err := os.ReadDir(s.plat.componentsDir); err == nil {
+			for _, e := range entries {
+				if !e.IsDir() || strings.HasPrefix(e.Name(), ".") || draftSets[e.Name()] != nil {
+					continue
+				}
+				one := single{custom, e.Name()}
+				if _, err := mwpack.LoadCatalog(catalog.FS, one); err == nil {
+					sources = append(sources, one)
+				}
+			}
+		}
+	}
+	for name, files := range draftSets {
+		mem := fstest.MapFS{}
+		for p, b := range files {
+			mem[name+"/"+p] = &fstest.MapFile{Data: b, Mode: 0o600}
+		}
+		sources = append(sources, single{mem, name})
+	}
+	cat, err := mwpack.LoadCatalog(sources...)
+	if err != nil {
+		return base, nil
+	}
+	if len(platDraft) > 0 {
+		cat = cat.WithPlatformFiles(platDraft)
+	} else {
+		cat = cat.WithPlatformFiles(base.PlatformSnapshot())
+	}
+	return cat, draftNames
+}
+
 // syncPlan solves the delivery's own specification against the components as they are now and renders it, without
 // packing anything.
-func (s *storeServer) syncPlan(j storeJob) (*mwpack.Plan, mwpack.RenderOptions, *mwpack.Bundle, error) {
+func (s *storeServer) syncPlan(j storeJob) (*mwpack.Plan, mwpack.RenderOptions, *mwpack.Bundle, []string, error) {
 	var opt mwpack.RenderOptions
 	d := s.readSpec(j.ID)
 	if d == nil {
-		return nil, opt, nil, fmt.Errorf("这份交付没有保存部署规格")
+		return nil, opt, nil, nil, fmt.Errorf("这份交付没有保存部署规格")
 	}
-	plan := mwpack.Solve(s.plat.cat(), d)
+	cat, usingDrafts := s.syncCatalogFor(j, d)
+	plan := mwpack.Solve(cat, d)
 	if err := plan.Err(); err != nil {
-		return nil, opt, nil, fmt.Errorf("按现在的组件，这份规格已经不能通过校验：%v", err)
+		return nil, opt, nil, usingDrafts, fmt.Errorf("按现在的组件，这份规格已经不能通过校验：%v", err)
 	}
 	opt = mwpack.RenderOptions{Artifacts: s.plat.artifactsFor(plan), Materials: s.sourceCertificates(j.ID)}
 	if plan.NeedsPackages() {
@@ -156,13 +242,13 @@ func (s *storeServer) syncPlan(j storeJob) (*mwpack.Plan, mwpack.RenderOptions, 
 		_ = json.Unmarshal(b, &lock)
 		st, err := os.Stat(filepath.Join(s.jobDir(j.ID), "output", lock.Repo.File))
 		if lock.Repo.File == "" || err != nil {
-			return nil, opt, nil, fmt.Errorf("这份交付的离线软件仓库不在了，不能同步")
+			return nil, opt, nil, usingDrafts, fmt.Errorf("这份交付的离线软件仓库不在了，不能同步")
 		}
 		opt.PackageRepo = &mwpack.PackageRepo{File: lock.Repo.File, SHA256: lock.Repo.SHA256, Size: st.Size()}
 	}
 	b, err := mwpack.Render(plan, opt)
 	if err != nil {
-		return nil, opt, nil, err
+		return nil, opt, nil, usingDrafts, err
 	}
 	// what was patched on site stays on top of whatever the component now says
 	for k, data := range s.patchedFiles(j.ID) {
@@ -173,7 +259,7 @@ func (s *storeServer) syncPlan(j storeJob) (*mwpack.Plan, mwpack.RenderOptions, 
 		}
 		b.Project[k] = f
 	}
-	return plan, opt, b, nil
+	return plan, opt, b, usingDrafts, nil
 }
 
 // lockPackages is what a lock says each instance installs, for comparing two of them.
@@ -241,11 +327,12 @@ func (s *storeServer) previewSync(j storeJob) (syncPreview, *mwpack.Bundle, map[
 		pv.Blocked = "这份交付已作废"
 		return pv, nil, nil
 	}
-	_, _, b, err := s.syncPlan(j)
+	_, _, b, usingDrafts, err := s.syncPlan(j)
 	if err != nil {
 		pv.Blocked = err.Error()
 		return pv, nil, nil
 	}
+	pv.UsingDrafts = usingDrafts
 	old, err := s.projectFiles(j.ID)
 	if err != nil {
 		pv.Blocked = err.Error()
@@ -519,7 +606,7 @@ func (s *storeServer) filesBeforeSync(id string, n int, changed map[string]bool)
 func (s *storeServer) applySync(j storeJob, user string, b *mwpack.Bundle, old map[string][]byte, pv syncPreview) (jobSync, error) {
 	n := len(j.Syncs) + 1
 	dir := s.jobDir(j.ID)
-	plan, opt, _, err := s.syncPlan(j)
+	plan, opt, _, _, err := s.syncPlan(j)
 	if err != nil {
 		return jobSync{}, err
 	}
@@ -554,12 +641,56 @@ func (s *storeServer) applySync(j storeJob, user string, b *mwpack.Bundle, old m
 	}
 	prefix := "middleware-automation/projects/" + plan.ProjectName() + "/"
 	upd := fmt.Sprintf("update-%d-%s.tar.gz", n, plan.ProjectName())
+	// Pack every file changed across this sync AND all earlier syncs (that still exist in b.Project),
+	// so the latest update archive alone brings any prior controller state up to date.
+	packSet := map[string]bool{}
+	for _, name := range pv.Files {
+		if _, ok := b.Project[name]; ok {
+			packSet[name] = true
+		}
+	}
+	removeSet := map[string]bool{}
+	for _, name := range pv.Removed {
+		if _, ok := b.Project[name]; !ok {
+			removeSet[name] = true
+		}
+	}
+	for _, prev := range j.Syncs {
+		for _, name := range prev.Files {
+			if _, ok := b.Project[name]; ok {
+				packSet[name] = true
+			}
+		}
+		for name := range prev.FileHashes {
+			if _, ok := b.Project[name]; ok {
+				packSet[name] = true
+			}
+		}
+		for _, name := range prev.Remove {
+			if _, ok := b.Project[name]; !ok {
+				removeSet[name] = true
+			}
+		}
+	}
+	packNames := make([]string, 0, len(packSet))
+	for name := range packSet {
+		packNames = append(packNames, name)
+	}
+	sort.Strings(packNames)
+	removeNames := make([]string, 0, len(removeSet))
+	for name := range removeSet {
+		removeNames = append(removeNames, name)
+	}
+	sort.Strings(removeNames)
+
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
 	now := time.Now()
-	for _, name := range pv.Files {
+	fileHashes := map[string]string{}
+	for _, name := range packNames {
 		f := b.Project[name]
+		fileHashes[name] = digest(f.Data)
 		mode := int64(0o600)
 		if f.Mode != 0 {
 			mode = int64(f.Mode)
@@ -592,11 +723,20 @@ func (s *storeServer) applySync(j storeJob, user string, b *mwpack.Bundle, old m
 		return jobSync{}, err
 	}
 	os.RemoveAll(gone)
-	// accepted AI amendments are applied again to the new handbook
+	// reset cached originals so applyAmendmentDocs rebuilds from the newly generated handbook
 	_ = os.RemoveAll(filepath.Join(s.aiDir(j.ID), "orig"))
-	_ = s.applyAmendmentDocs(j.ID)
 
-	sy := jobSync{N: n, At: now.UTC().Format(time.RFC3339), By: user, Files: pv.Files, Steps: pv.Steps, Update: upd, Remove: pv.Removed}
+	sy := jobSync{
+		N:          n,
+		At:         now.UTC().Format(time.RFC3339),
+		By:         user,
+		Files:      pv.Files,
+		Steps:      pv.Steps,
+		Update:     upd,
+		Remove:     removeNames,
+		FileHashes: fileHashes,
+		UpdateSHA:  sum,
+	}
 	// the execution record follows the steps to where they are now
 	before := map[string]reportStep{}
 	for _, st := range flatSteps(s.runbookStepsOf(oldPlan, j.ID)) {
@@ -612,7 +752,6 @@ func (s *storeServer) applySync(j storeJob, user string, b *mwpack.Bundle, old m
 	nowSteps := flatSteps(s.runbookStepsOf(s.jobPlan(j.ID), j.ID))
 	impact := impactOf(nowSteps, before, old, projectMap(b), changedSet)
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	doc := s.readProgress(j.ID)
 	steps := map[string]stepRecord{}
 	if doc.Superseded == nil {
@@ -650,14 +789,315 @@ func (s *storeServer) applySync(j storeJob, user string, b *mwpack.Bundle, old m
 	doc.Steps = steps
 	doc.Events = append(doc.Events, progressEvent{At: sy.At, By: user, Key: "sync-" + strconv.Itoa(n), Title: fmt.Sprintf("按最新组件同步（第 %d 次）：%d 个文件、%d 个步骤有变化", n, len(pv.Files)+len(pv.Removed), len(pv.Steps)), State: "sync"})
 	if err := s.writeProgress(j.ID, doc); err != nil {
+		s.mu.Unlock()
 		return sy, err
 	}
 	cur := s.jobs[j.ID]
 	cur.Syncs = append(cur.Syncs, sy)
 	cur.RunDone, cur.RunFailed = countSteps(doc)
 	if err := s.persistJob(cur); err != nil {
+		s.mu.Unlock()
 		return sy, err
 	}
 	s.jobs[j.ID] = cur
+	s.mu.Unlock()
+	// accepted AI amendments AND the sync verification step are written into the offline handbook
+	aiMu.Lock()
+	_ = s.applyAmendmentDocs(j.ID)
+	aiMu.Unlock()
 	return sy, nil
+}
+
+func syncPackageBase(projectDir string) string {
+	const marker = "/middleware-automation/projects/"
+	if i := strings.Index(projectDir, marker); i > 0 {
+		return projectDir[:i]
+	}
+	return "/root"
+}
+
+func shellSingleQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// readUpdateArchiveInfo inspects an update-*.tar.gz on disk to recover archive SHA-256 and every project-relative
+// file's SHA-256 (used for retroactive enrichment of deliveries synced before FileHashes was persisted).
+func readUpdateArchiveInfo(archivePath string) (map[string]string, string) {
+	raw, err := os.ReadFile(archivePath)
+	if err != nil {
+		return nil, ""
+	}
+	archiveSHA := digest(raw)
+	gz, err := gzip.NewReader(bytes.NewReader(raw))
+	if err != nil {
+		return nil, archiveSHA
+	}
+	defer gz.Close()
+	hashes := map[string]string{}
+	tr := tar.NewReader(gz)
+	for {
+		h, err := tr.Next()
+		if err != nil {
+			break
+		}
+		if h.Typeflag != tar.TypeReg {
+			continue
+		}
+		if i := strings.Index(h.Name, "/projects/"); i >= 0 {
+			rel := h.Name[i+len("/projects/"):]
+			if j := strings.Index(rel, "/"); j >= 0 {
+				rel = rel[j+1:]
+				if rel != "" {
+					if data, err := io.ReadAll(tr); err == nil {
+						hashes[rel] = digest(data)
+					}
+				}
+			}
+		}
+	}
+	return hashes, archiveSHA
+}
+
+type syncPlanMeta struct {
+	Controller   string `json:"controller"`
+	ProjectDir   string `json:"project_dir"`
+	UploadDir    string `json:"upload_dir"`
+	DeliveryMode string `json:"delivery_mode"`
+}
+
+func parseSyncPlanMeta(raw json.RawMessage) *syncPlanMeta {
+	if len(raw) == 0 {
+		return nil
+	}
+	var m syncPlanMeta
+	if json.Unmarshal(raw, &m) != nil || m.ProjectDir == "" {
+		return nil
+	}
+	return &m
+}
+
+// buildSyncVerifyCommand returns a single idempotent, self-verifying command for the controller.
+// It inspects the actual files in projectDir:
+//   - if projectDir does not exist yet: fails without exiting an interactive shell, reminding to unpack base package first
+//   - if all expected file hashes already match (e.g. fresh full bundle unpacked): prints OK and succeeds without needing update-*.tar.gz
+//   - if projectDir has older files and update-*.tar.gz is in uploadDir: verifies archive SHA-256, extracts, removes deleted files, re-verifies hashes
+//   - if projectDir has older files and update-*.tar.gz is missing: fails loudly telling the engineer the exact archive to upload
+func buildSyncVerifyCommand(plan *syncPlanMeta, sy jobSync) string {
+	if plan == nil || sy.Update == "" {
+		return ""
+	}
+	proj := strings.TrimRight(plan.ProjectDir, "/")
+	if proj == "" {
+		return ""
+	}
+	uploadDir := strings.TrimRight(plan.UploadDir, "/")
+	if uploadDir == "" {
+		uploadDir = "/tmp/mw-upload"
+	}
+	pkgBase := syncPackageBase(proj)
+	ctl := plan.Controller
+	if ctl == "" {
+		ctl = "控制节点"
+	}
+	label := fmt.Sprintf("第 %d 次同步", sy.N)
+	if sy.Kind == "patch" {
+		label = fmt.Sprintf("第 %d 次 AI 补丁", sy.N)
+	}
+	updPath := uploadDir + "/" + sy.Update
+
+	hashKeys := make([]string, 0, len(sy.FileHashes))
+	for k := range sy.FileHashes {
+		hashKeys = append(hashKeys, k)
+	}
+	sort.Strings(hashKeys)
+	removes := append([]string(nil), sy.Remove...)
+	sort.Strings(removes)
+
+	var applyParts []string
+	if sy.UpdateSHA != "" {
+		applyParts = append(applyParts, fmt.Sprintf(`echo "%s  $UPD" | sha256sum -c`, sy.UpdateSHA))
+	}
+	applyParts = append(applyParts, fmt.Sprintf(`tar -xzf "$UPD" -C %s`, shellSingleQuote(pkgBase)))
+	if len(removes) > 0 {
+		quoted := make([]string, 0, len(removes))
+		for _, r := range removes {
+			quoted = append(quoted, shellSingleQuote(r))
+		}
+		applyParts = append(applyParts, fmt.Sprintf(`(cd "$PROJ" && rm -f %s)`, strings.Join(quoted, " ")))
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "PROJ=%s\n", shellSingleQuote(proj))
+	fmt.Fprintf(&b, "UPD=%s\n", shellSingleQuote(updPath))
+
+	if len(hashKeys) == 0 && len(removes) == 0 {
+		fmt.Fprintf(&b, "if [ ! -d \"$PROJ\" ]; then\n")
+		fmt.Fprintf(&b, "  echo \"ERROR: 未找到 $PROJ，请先完成「环境准备」中的基础包解包。\" >&2\n")
+		fmt.Fprintf(&b, "  false\n")
+		fmt.Fprintf(&b, "elif [ -f \"$UPD\" ]; then\n")
+		fmt.Fprintf(&b, "  %s && echo \"OK: 已应用更新包（%s）。\"\n", strings.Join(applyParts, " && "), label)
+		fmt.Fprintf(&b, "else\n")
+		fmt.Fprintf(&b, "  echo \"ERROR: 未找到 $UPD，请先上传 %s 到 %s 后重跑。\" >&2\n", sy.Update, uploadDir)
+		fmt.Fprintf(&b, "  false\n")
+		fmt.Fprintf(&b, "fi")
+		return b.String()
+	}
+
+	b.WriteString("check_sync() {\n")
+	var conds []string
+	conds = append(conds, `[ -d "$PROJ" ]`)
+	if len(removes) > 0 {
+		rmChecks := make([]string, 0, len(removes))
+		for _, r := range removes {
+			rmChecks = append(rmChecks, fmt.Sprintf(`[ ! -e %s ]`, shellSingleQuote(r)))
+		}
+		conds = append(conds, fmt.Sprintf(`(cd "$PROJ" && %s)`, strings.Join(rmChecks, " && ")))
+	}
+	if len(hashKeys) > 0 {
+		var sumLines strings.Builder
+		for _, k := range hashKeys {
+			fmt.Fprintf(&sumLines, "%s  %s\n", sy.FileHashes[k], k)
+		}
+		conds = append(conds, fmt.Sprintf("(cd \"$PROJ\" && sha256sum -c --status <<'MW_SYNC_EOF'\n%sMW_SYNC_EOF\n  )", sumLines.String()))
+	}
+	fmt.Fprintf(&b, "  %s\n", strings.Join(conds, " && "))
+	b.WriteString("}\n")
+
+	fmt.Fprintf(&b, "if [ ! -d \"$PROJ\" ]; then\n")
+	fmt.Fprintf(&b, "  echo \"ERROR: 未找到 $PROJ，请先完成「环境准备」中的基础包解包。\" >&2\n")
+	fmt.Fprintf(&b, "  false\n")
+	fmt.Fprintf(&b, "elif check_sync; then\n")
+	fmt.Fprintf(&b, "  echo \"OK: %s 项目文件已是最新（%s），无需重复覆盖。\"\n", ctl, label)
+	fmt.Fprintf(&b, "elif [ -f \"$UPD\" ]; then\n")
+	fmt.Fprintf(&b, "  %s && check_sync && echo \"OK: 已覆盖更新包并校验通过（%s）。\"\n", strings.Join(applyParts, " && "), label)
+	fmt.Fprintf(&b, "else\n")
+	fmt.Fprintf(&b, "  echo \"ERROR: 检测到 %s 仍是旧版本文件！请先上传 %s 到 %s 后重跑此命令。\" >&2\n", ctl, sy.Update, uploadDir)
+	fmt.Fprintf(&b, "  false\n")
+	fmt.Fprintf(&b, "fi")
+	return b.String()
+}
+
+func (s *storeServer) enrichJobSyncs(id string, plan *syncPlanMeta, syncs []jobSync) []jobSync {
+	if len(syncs) == 0 {
+		return syncs
+	}
+	out := make([]jobSync, len(syncs))
+	copy(out, syncs)
+	outDir := filepath.Join(s.jobDir(id), "output")
+	for i := range out {
+		sy := &out[i]
+		if sy.Update != "" && (len(sy.FileHashes) == 0 || sy.UpdateSHA == "") {
+			hashes, sha := readUpdateArchiveInfo(filepath.Join(outDir, sy.Update))
+			if len(sy.FileHashes) == 0 && len(hashes) > 0 {
+				sy.FileHashes = hashes
+			}
+			if sy.UpdateSHA == "" && sha != "" {
+				sy.UpdateSHA = sha
+			}
+		}
+		if plan != nil && sy.Update != "" {
+			sy.VerifyCmd = buildSyncVerifyCommand(plan, *sy)
+		}
+	}
+	return out
+}
+
+// syncDeploySectionMarker lets us detect whether an offline 01-*.md handbook already carries sync #n's check step.
+func syncDeploySectionMarker(sy jobSync) string {
+	if sy.Kind == "patch" {
+		return fmt.Sprintf("## 0. 核对并应用第 %d 次 AI 补丁更新（必做）", sy.N)
+	}
+	return fmt.Sprintf("## 0. 核对并应用第 %d 次同步更新（必做）", sy.N)
+}
+
+func injectSyncDeploySection(md string, plan *syncPlanMeta, sy jobSync) string {
+	if plan == nil || sy.VerifyCmd == "" {
+		return md
+	}
+	ctl := plan.Controller
+	if ctl == "" {
+		ctl = "控制节点"
+	}
+	uploadDir := strings.TrimRight(plan.UploadDir, "/")
+	if uploadDir == "" {
+		uploadDir = "/tmp/mw-upload"
+	}
+	heading := syncDeploySectionMarker(sy)
+	var sec strings.Builder
+	sec.WriteString(heading + "\n\n")
+	if sy.Kind == "patch" {
+		fmt.Fprintf(&sec, "作用于 %s。AI 补丁更新不会重打基础包，请先将 `%s` 上传至 `%s`，再在控制节点执行下方核对与覆盖命令：\n", ctl, sy.Update, uploadDir)
+	} else {
+		fmt.Fprintf(&sec, "作用于 %s。无需凭记忆判断之前上传的是旧包还是最新完整包，执行下方命令会自动按 SHA256 核对项目文件：\n", ctl)
+		sec.WriteString("- 若已解包最新基础包/完整交付包，命令会自动校验通过并放行（无需重复覆盖）；\n")
+		fmt.Fprintf(&sec, "- 若 %s 仍是旧版本，将增量更新包 `%s` 上传至 `%s` 后重跑本命令即可自动校验并覆盖。\n", ctl, sy.Update, uploadDir)
+	}
+	sec.WriteString("\n```bash\n")
+	sec.WriteString(sy.VerifyCmd)
+	sec.WriteString("\n```\n\n")
+	sec.WriteString("通过标准：终端输出 `OK:`（已是最新无需覆盖，或已覆盖更新包并校验通过）。\n\n")
+	if i := strings.Index(md, "\n## "); i >= 0 {
+		return md[:i+1] + sec.String() + md[i+1:]
+	}
+	return strings.TrimRight(md, "\n") + "\n\n" + sec.String()
+}
+
+// confirmSyncApplied records that an engineer has ensured the updated files from sync #syncN
+// are present on the controller (verified via the self-checking command, or legacy patch/full mode).
+func (s *storeServer) confirmSyncApplied(jobID string, syncN int, user, mode string) (jobSync, error) {
+	if mode == "" {
+		mode = "verified"
+	}
+	if mode != "verified" && mode != "patch" && mode != "full" {
+		return jobSync{}, fmt.Errorf("无效的确认方式")
+	}
+	s.jobPersistMu.Lock()
+	defer s.jobPersistMu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cur, ok := s.jobs[jobID]
+	if !ok {
+		return jobSync{}, fmt.Errorf("交付不存在")
+	}
+	idx := -1
+	for i := range cur.Syncs {
+		if cur.Syncs[i].N == syncN {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return jobSync{}, fmt.Errorf("找不到对应的更新记录")
+	}
+	if cur.Syncs[idx].Kind == "patch" && mode == "full" {
+		return jobSync{}, fmt.Errorf("AI 补丁更新不会重打基础包，请在控制节点执行补丁覆盖命令后再确认")
+	}
+	nextSyncs := append([]jobSync(nil), cur.Syncs...)
+	now := time.Now().UTC().Format(time.RFC3339)
+	nextSyncs[idx].AppliedAt = now
+	nextSyncs[idx].AppliedBy = user
+	nextSyncs[idx].AppliedMode = mode
+	cur.Syncs = nextSyncs
+	if err := s.persistJob(cur); err != nil {
+		return jobSync{}, err
+	}
+	s.jobs[jobID] = cur
+	doc := s.readProgress(jobID)
+	label := fmt.Sprintf("已在控制节点核对并应用第 %d 次同步更新（校验通过）", syncN)
+	if nextSyncs[idx].Kind == "patch" {
+		label = fmt.Sprintf("已在控制节点核对并应用第 %d 次 AI 补丁更新（校验通过）", syncN)
+	} else if mode == "full" {
+		label = fmt.Sprintf("确认第 %d 次同步已使用最新完整交付包（无需单独覆盖）", syncN)
+	} else if mode == "patch" {
+		label = fmt.Sprintf("确认第 %d 次同步文件已覆盖到控制节点", syncN)
+	}
+	doc.Events = append(doc.Events, progressEvent{
+		At:    now,
+		By:    user,
+		Key:   fmt.Sprintf("sync-confirm-%d", syncN),
+		Title: label,
+		State: "sync",
+	})
+	_ = s.writeProgress(jobID, doc)
+	return nextSyncs[idx], nil
 }

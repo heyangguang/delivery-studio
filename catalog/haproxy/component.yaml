@@ -5,6 +5,7 @@ title: HAProxy
 category: 负载均衡
 icon: balance
 color: blue
+delivery_modes: [offline, automatic]
 summary: 四层 TCP 负载均衡，支持 HTTP 与自定义健康检查，可配 keepalived 虚拟 IP 做高可用。
 tags: [负载均衡, 高可用]
 provides: [l4-lb]

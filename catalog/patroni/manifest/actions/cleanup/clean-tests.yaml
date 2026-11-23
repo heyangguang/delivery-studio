@@ -2,6 +2,8 @@ id: clean-tests
 title: 删除测试 schema 和表
 desc: 核对标记属于本集群后，删除 middleware_acceptance 及里面所有测试表。生产数据、PGDATA 和 TDE 密钥不会被触碰。
 effect: change
+expect: 测试 schema middleware_acceptance 及其测试表已清理，未影响生产数据。
+timeout: 7200
 serial: 1
 inputs:
     timeout:

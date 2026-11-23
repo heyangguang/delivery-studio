@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
-import { Input, Modal } from "@arco-design/web-react";
+import { Input, Modal, Popover, Tooltip } from "@arco-design/web-react";
+import { IconEdit, IconInfoCircle } from "@arco-design/web-react/icon";
 import { api, cached, err, fetchCached } from "./shared";
 import { go } from "./router";
-import { StylePicker } from "./wbstyle";
+import { AppGlyph } from "./ui";
+import { COLORS, ICONS, iconShape } from "./glyphs";
 import { bi, useLang } from "./i18n";
 import "./workbench.css";
 
@@ -153,6 +155,7 @@ export function NewComponentModal({
     icon: "",
     color: "",
   });
+  const [pickOpen, setPickOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     if (open)
@@ -170,10 +173,15 @@ export function NewComponentModal({
   const color = look.color || suggestion[1];
   const set = (k: keyof typeof f) => (v: string) =>
     setF((x) => ({ ...x, [k]: v }));
+  const nameValid = !f.name || /^[a-z][a-z0-9-]{0,40}$/.test(f.name);
+  const pkgValid = !f.package || /^[a-z0-9][a-z0-9.+-]*$/.test(f.package);
+  const portValid =
+    !f.port || (Number(f.port) > 0 && Number(f.port) < 65536 && /^\d+$/.test(f.port));
   const ok =
     /^[a-z][a-z0-9-]{0,40}$/.test(f.name) &&
-    f.title.trim() &&
+    !!f.title.trim() &&
     /^[a-z0-9][a-z0-9.+-]*$/.test(f.package) &&
+    /^\d+$/.test(f.port) &&
     Number(f.port) > 0 &&
     Number(f.port) < 65536;
   const submit = async () => {
@@ -200,6 +208,62 @@ export function NewComponentModal({
       setBusy(false);
     }
   };
+  const iconPopover = (
+    <div className="wb-new-pop">
+      <div className="wb-new-pop-sec">
+        <span className="wb-new-pop-label">{bi("颜色", "Color")}</span>
+        <div
+          className="wb-swatches wb-swatches-compact"
+          role="radiogroup"
+          aria-label={bi("颜色", "Color")}
+        >
+          {COLORS.map((c) => (
+            <button
+              type="button"
+              key={c.id}
+              role="radio"
+              aria-checked={color === c.id}
+              aria-label={c.label}
+              title={c.label}
+              className={color === c.id ? "on" : ""}
+              style={{ background: `linear-gradient(${c.tile.join(",")})` }}
+              onClick={() => setLook({ icon, color: c.id })}
+            />
+          ))}
+        </div>
+      </div>
+      {[
+        { key: "general", title: bi("通用图标", "General"), list: ICONS.filter((i) => !i.group) },
+        { key: "middleware", title: bi("常见中间件", "Middleware"), list: ICONS.filter((i) => i.group) },
+      ].map(({ key, title, list }) => (
+        <div key={key} className="wb-new-pop-sec">
+          <span className="wb-new-pop-label">{title}</span>
+          <div
+            className="wb-icons wb-icons-compact"
+            role="radiogroup"
+            aria-label={title}
+          >
+            {list.map((i) => (
+              <button
+                type="button"
+                key={i.id}
+                role="radio"
+                aria-checked={icon === i.id}
+                aria-label={i.label}
+                title={i.label}
+                className={icon === i.id ? "on" : ""}
+                onClick={() => setLook({ icon: i.id, color })}
+              >
+                <svg viewBox="0 0 40 40" width="21" height="21" aria-hidden>
+                  {iconShape(i.id)}
+                </svg>
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
   return (
     <Modal
       visible={open}
@@ -209,44 +273,39 @@ export function NewComponentModal({
       confirmLoading={busy}
       okButtonProps={{ disabled: !ok }}
       onOk={submit}
-      style={{ width: 820, maxWidth: "96vw" }}
+      style={{ width: 680, maxWidth: "94vw" }}
       className="wb-newmodal"
     >
-      <div className="wb-newfile">
-        <section>
-          <h3 className="wb-nh">{bi("从哪种结构开始", "Choose a starting structure")}</h3>
-          <div className="wb-kinds" role="radiogroup" aria-label={bi("结构", "Structure")}>
-            {kinds.map((k) => (
+      <div className="wb-new-body">
+        {/* Identity Bar: Clickable Glyph + Display Name + Component ID */}
+        <section className="wb-new-idbar">
+          <Popover
+            trigger="click"
+            position="bl"
+            getPopupContainer={() => document.body}
+            popupVisible={pickOpen}
+            onVisibleChange={setPickOpen}
+            content={iconPopover}
+          >
+            <Tooltip content={bi("点击更换图标与颜色", "Click to customize icon & color")} mini>
               <button
                 type="button"
-                key={k.id}
-                role="radio"
-                aria-checked={kind === k.id}
-                className={kind === k.id ? "on" : ""}
-                onClick={() => setKind(k.id)}
+                className="wb-new-glyph-btn"
+                aria-label={bi("更换图标与颜色", "Customize icon and color")}
               >
-                <KindArt kind={k.id} />
-                <b>{k.title}</b>
-                <span>{k.text}</span>
-                <em>{bi("角色：", "Roles: ")}{k.roles}</em>
+                <AppGlyph id={`pick-${f.name || "new"}`} icon={icon} color={color} size={46} />
+                <span className="wb-new-glyph-edit" aria-hidden>
+                  <IconEdit />
+                </span>
               </button>
-            ))}
-          </div>
-          <p className="wb-fhint">
-            {bi(
-              "只决定起始的角色和配置模板，之后随时可以在「角色与关系」里增删角色、改台数。单机运行不用单独选：「主 + 从」里从节点最少 0 台，预设里自带「单节点」。",
-              "Only sets the initial roles and config templates—you can add, remove, or resize roles anytime under Roles & Relations. No separate single-node option is needed: Primary + Replica allows 0 replicas and includes a Single Node preset.",
-            )}
-          </p>
-        </section>
-        <section>
-          <h3 className="wb-nh">{bi("基本信息", "Basic Info")}</h3>
-          <div className="wb-grid">
-            <div className="wb-field w-m">
-              <span className="wb-flabel">
-                {bi("显示名称", "Display Name")}
-                <i className="req">{bi("必填", "Required")}</i>
-              </span>
+            </Tooltip>
+          </Popover>
+
+          <div className="wb-new-idfields">
+            <div className="wb-new-field">
+              <label className="wb-new-label">
+                {bi("显示名称", "Display Name")} <span className="wb-req-star">*</span>
+              </label>
               <Input
                 value={f.title}
                 onChange={set("title")}
@@ -254,34 +313,91 @@ export function NewComponentModal({
                 aria-label={bi("显示名称", "Display name")}
               />
             </div>
-            <div className="wb-field w-m">
-              <span className="wb-flabel">
-                {bi("组件名", "Component ID")}
-                <i className="req">{bi("必填", "Required")}</i>
-              </span>
+            <div className="wb-new-field">
+              <label className="wb-new-label">
+                {bi("组件标识", "Component ID")} <span className="wb-req-star">*</span>
+                <span className="wb-new-sub">{bi("小写字母/数字/短横线，创建后不可改", "lowercase, immutable")}</span>
+              </label>
               <Input
                 className="wb-mono"
+                status={nameValid ? undefined : "error"}
                 value={f.name}
                 onChange={set("name")}
-                placeholder={bi("如 my-cache（创建后不能改）", "e.g. my-cache (immutable)")}
+                placeholder={bi("如 my-cache", "e.g. my-cache")}
                 aria-label={bi("组件名", "Component ID")}
               />
             </div>
-            <div className="wb-field w-s">
-              <span className="wb-flabel">
-                {bi("软件包名", "Package Name")}
-                <i className="req">{bi("必填", "Required")}</i>
+          </div>
+        </section>
+
+        {/* Starting Structure — Compact 3-Card Radio Row */}
+        <section className="wb-new-sec">
+          <div className="wb-new-sec-head">
+            <h3 className="wb-nh">{bi("起始结构", "Starting Structure")}</h3>
+            <Tooltip
+              content={bi(
+                "仅决定初始角色与模板，后续可随时在「角色与关系」里增删调整；「主 + 从」允许 0 个从节点，已含单机预设。",
+                "Sets only the initial roles and templates; adjust anytime under Roles & Relations. Primary + Replica allows 0 replicas.",
+              )}
+            >
+              <span className="wb-new-info-ico" tabIndex={0}>
+                <IconInfoCircle />
+                <span>{bi("创建后可随时调整角色", "Editable anytime after creation")}</span>
               </span>
+            </Tooltip>
+          </div>
+          <div
+            className="wb-kinds wb-kinds-compact"
+            role="radiogroup"
+            aria-label={bi("结构", "Structure")}
+          >
+            {kinds.map((k) => (
+              <button
+                type="button"
+                key={k.id}
+                role="radio"
+                aria-checked={kind === k.id}
+                className={kind === k.id ? "on" : ""}
+                title={k.text}
+                onClick={() => setKind(k.id)}
+              >
+                <div className="wb-kind-top">
+                  <KindArt kind={k.id} />
+                  <div className="wb-kind-head">
+                    <b>{k.title}</b>
+                    <em>{k.roles}</em>
+                  </div>
+                </div>
+                <span className="wb-kind-desc">{k.text}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {/* Runtime Basics — Single 3-Column Row */}
+        <section className="wb-new-sec">
+          <div className="wb-new-sec-head">
+            <h3 className="wb-nh">{bi("软件包与服务", "Package & Service")}</h3>
+          </div>
+          <div className="wb-new-row3">
+            <div className="wb-new-field">
+              <label className="wb-new-label">
+                {bi("软件包名", "Package Name")} <span className="wb-req-star">*</span>
+              </label>
               <Input
                 className="wb-mono"
+                status={pkgValid ? undefined : "error"}
                 value={f.package}
                 onChange={set("package")}
                 placeholder={bi("如 redis-server", "e.g. redis-server")}
                 aria-label={bi("软件包名", "Package name")}
               />
             </div>
-            <div className="wb-field w-s">
-              <span className="wb-flabel">{bi("服务名", "Service Name")}</span>
+            <div className="wb-new-field">
+              <label className="wb-new-label">
+                {bi("服务名", "Service Name")}
+                <span className="wb-new-sub">{bi("可选", "Optional")}</span>
+              </label>
               <Input
                 className="wb-mono"
                 value={f.service}
@@ -290,13 +406,13 @@ export function NewComponentModal({
                 aria-label={bi("服务名", "Service name")}
               />
             </div>
-            <div className="wb-field w-s">
-              <span className="wb-flabel">
-                {bi("默认端口", "Default Port")}
-                <i className="req">{bi("必填", "Required")}</i>
-              </span>
+            <div className="wb-new-field">
+              <label className="wb-new-label">
+                {bi("默认端口", "Default Port")} <span className="wb-req-star">*</span>
+              </label>
               <Input
                 className="wb-mono"
+                status={portValid ? undefined : "error"}
                 value={f.port}
                 onChange={set("port")}
                 placeholder="6379"
@@ -305,19 +421,11 @@ export function NewComponentModal({
             </div>
           </div>
         </section>
-        <section>
-          <h3 className="wb-nh">{bi("图标与颜色", "Icon & Color")}</h3>
-          <StylePicker
-            id={f.name || "new"}
-            icon={icon}
-            color={color}
-            onChange={(i, c) => setLook({ icon: i, color: c })}
-          />
-        </section>
-        <p className="wb-fhint">
+
+        <p className="wb-new-foot-note">
           {bi(
-            "会生成一个能直接走通流程的最小组件：装包、写配置、起服务、检查端口。软件包版本需要到「版本」页签从软件库里选一个真实存在的，之后按你的中间件改配置模板和步骤。",
-            "Generates a minimal runnable component (install package, write config, start service, check port). Pick an existing package version from the Software Library on the Versions tab, then adapt config templates and steps for your middleware.",
+            "将生成可运行的最小组件草稿（装包、配置、启服务、验端口）；创建后在「版本」页绑定软件库版本即可试生成。",
+            "Generates a minimal runnable draft (install, configure, start, port check); bind a Software Library package on the Versions tab to run trial generation.",
           )}
         </p>
       </div>

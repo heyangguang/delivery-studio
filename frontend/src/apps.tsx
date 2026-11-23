@@ -33,6 +33,9 @@ import {
   phaseOf,
   clock,
   dayLabel,
+  hasReleasedVersion,
+  isVersionPlatformReleased,
+  platformShort,
   size,
   states,
   typing,
@@ -133,9 +136,12 @@ function PlanGlyph({ topology }: { topology: AppPlan["topology"] }) {
   );
 }
 
+const formalReady = (a: AppInfo) => a.available && hasReleasedVersion(a);
+
 function Plans({ app, plans }: { app: AppInfo; plans: AppPlan[] }) {
   useLang();
-  const off = !app.available || !can("delivery.create");
+  const ready = formalReady(app);
+  const off = !ready || !can("delivery.create");
   return (
     <div className="plan-cards">
       {plans.map((p) => (
@@ -153,6 +159,8 @@ function Plans({ app, plans }: { app: AppInfo; plans: AppPlan[] }) {
             {off ? (
               !app.available ? (
                 bi("暂未开放", "Unavailable")
+              ) : !ready ? (
+                bi("待验证发布", "Pending release")
               ) : (
                 ""
               )
@@ -187,6 +195,8 @@ function Plans({ app, plans }: { app: AppInfo; plans: AppPlan[] }) {
           {off ? (
             !app.available ? (
               bi("暂未开放", "Unavailable")
+            ) : !ready ? (
+              bi("待验证发布", "Pending release")
             ) : (
               ""
             )
@@ -320,24 +330,31 @@ function showDeliveriesOf(app: string) {
 
 const badge = (a: AppInfo) => (
   <StatusBadge
-    state={a.available ? "succeeded" : "queued"}
-    label={a.available ? bi("可生成", "Ready") : bi("暂未开放", "Unavailable")}
+    state={formalReady(a) ? "succeeded" : "queued"}
+    label={
+      formalReady(a)
+        ? bi("可生成", "Ready")
+        : a.available
+          ? bi("待验证发布", "Pending release")
+          : bi("暂未开放", "Unavailable")
+    }
   />
 );
 
 function AppTile({ a, usage }: { a: AppInfo; usage: Usage }) {
   useLang();
+  const ready = formalReady(a);
   const used = usage.get(a.id);
   const plans = plansOf(a);
   const caps = (a.detail?.capabilities || []).map((c) => c.name);
   return (
-    <article className={`tile2 ${a.available ? "" : "off"}`}>
+    <article className={`tile2 ${ready ? "" : "off"}`}>
       <div className="tile2-head">
         <AppGlyph
           id={a.id}
           category={a.category}
           size={48}
-          muted={!a.available}
+          muted={!ready}
         />
         <div className="tile2-title">
           <a className="tile2-link" href={`#/apps/${a.id}`}>
@@ -384,7 +401,7 @@ function AppTile({ a, usage }: { a: AppInfo; usage: Usage }) {
             </span>
           ) : null}
         </span>
-        {a.available && can("delivery.create") ? (
+        {ready && can("delivery.create") ? (
           <Button
             className="tile2-new"
             size="small"
@@ -394,7 +411,7 @@ function AppTile({ a, usage }: { a: AppInfo; usage: Usage }) {
           >
             {bi("新建集群", "New cluster")}
           </Button>
-        ) : a.available ? null : (
+        ) : ready ? null : (
           badge(a)
         )}
       </div>
@@ -404,16 +421,17 @@ function AppTile({ a, usage }: { a: AppInfo; usage: Usage }) {
 
 function AppRow({ a, usage }: { a: AppInfo; usage: Usage }) {
   useLang();
+  const ready = formalReady(a);
   const used = usage.get(a.id);
   const plans = plansOf(a);
   const caps = (a.detail?.capabilities || []).map((c) => c.name);
   return (
-    <div className={`cat-row ${a.available ? "" : "off"}`}>
+    <div className={`cat-row ${ready ? "" : "off"}`}>
       <AppGlyph
         id={a.id}
         category={a.category}
         size={44}
-        muted={!a.available}
+        muted={!ready}
       />
       <div className="cat-main">
         <div className="cat-top">
@@ -462,7 +480,7 @@ function AppRow({ a, usage }: { a: AppInfo; usage: Usage }) {
         )}
       </div>
       {badge(a)}
-      {a.available && can("delivery.create") ? (
+      {ready && can("delivery.create") ? (
         <Button
           size="small"
           icon={<IconPlus />}
@@ -481,6 +499,7 @@ function AppRow({ a, usage }: { a: AppInfo; usage: Usage }) {
 /** A catalog entry with everything needed to act on it: its plans start a delivery, its recent deliveries open. */
 function AppWide({ a, mine }: { a: AppInfo; mine: Job[] }) {
   useLang();
+  const ready = formalReady(a);
   const plans = plansOf(a);
   const canCreate = can("delivery.create");
   const [accent] = styleOf(a.id, a.category, a.icon, a.color).color.hero;
@@ -489,7 +508,7 @@ function AppWide({ a, mine }: { a: AppInfo; mine: Job[] }) {
     .slice(0, 3);
   return (
     <article
-      className={`appwide ${a.available ? "" : "off"}`}
+      className={`appwide ${ready ? "" : "off"}`}
       style={{ "--app-accent": accent } as React.CSSProperties}
     >
       <div className="wide-head">
@@ -500,7 +519,7 @@ function AppWide({ a, mine }: { a: AppInfo; mine: Job[] }) {
             icon={a.icon}
             color={a.color}
             size={52}
-            muted={!a.available}
+            muted={!ready}
           />
           <div>
             <div className="wide-name">
@@ -517,9 +536,14 @@ function AppWide({ a, mine }: { a: AppInfo; mine: Job[] }) {
               <span>{a.detail?.scale || a.platform}</span>
             </div>
             <p>
-              {a.available
+              {ready
                 ? tagline(a)
-                : a.reason || bi("暂未开放，敬请期待", "Not yet available")}
+                : a.available
+                  ? bi(
+                      "暂无已验证发布的版本，请由组件维护者在组件页完成实测发布后使用",
+                      "No verified published version yet; maintainers must verify and publish it first",
+                    )
+                  : a.reason || bi("暂未开放，敬请期待", "Not yet available")}
             </p>
             {(a.tags?.length || 0) > 0 && (
               <div className="tile2-tags">
@@ -541,7 +565,7 @@ function AppWide({ a, mine }: { a: AppInfo; mine: Job[] }) {
           </dl>
         )}
         <div className="wide-actions">
-          {a.available && canCreate && (
+          {ready && canCreate && (
             <Button
               type="primary"
               icon={<IconPlus />}
@@ -568,7 +592,7 @@ function AppWide({ a, mine }: { a: AppInfo; mine: Job[] }) {
             <div className="wide-col">
               <h3>
                 <span>{bi("从架构方案起步", "Start from a blueprint")}</span>
-                {!recent.length && a.available && (
+                {!recent.length && ready && (
                   <em>{bi("尚未创建该应用交付", "No deliveries yet")}</em>
                 )}
               </h3>
@@ -576,7 +600,7 @@ function AppWide({ a, mine }: { a: AppInfo; mine: Job[] }) {
                 {plans.slice(0, 4).map((p) => (
                   <li key={p.id}>
                     <button
-                      disabled={!a.available || !canCreate}
+                      disabled={!ready || !canCreate}
                       onClick={() => go({ name: "new", app: a.id, plan: p.id })}
                       aria-label={bi(
                         `用${p.name}方案新建 ${a.name} 集群`,
@@ -593,7 +617,7 @@ function AppWide({ a, mine }: { a: AppInfo; mine: Job[] }) {
                         </b>
                         <small>{p.spec}</small>
                       </span>
-                      {a.available && canCreate && <IconRight />}
+                      {ready && canCreate && <IconRight />}
                     </button>
                   </li>
                 ))}
@@ -1484,41 +1508,50 @@ function Product({ app, jobs }: { app: AppInfo; jobs: Job[] }) {
                       >
                         {v.status === "published"
                           ? bi("已发布", "Published")
-                          : v.status === "verifying"
-                            ? bi("待验证", "Verifying")
-                            : bi("草稿", "Draft")}
-                        {Object.entries(v.coverage || {}).map(([pl, cv]) => (
-                          <a
-                            key={pl}
-                            href={`#/library/${pl}`}
-                            className={`flag ${cv.ready && cv.deployable ? "" : "warn"}`}
-                            title={
-                              cv.ready
-                                ? cv.deployable
-                                  ? bi("软件库已备齐", "Packages ready in library")
-                                  : bi(
-                                      "软件包已备齐，但这个系统还没有 Ansible 运行环境",
-                                      "Packages ready, but no Ansible runtime selected for this OS",
+                          : bi("未发布", "Unpublished")}
+                        {(v.platforms || Object.keys(v.coverage || {})).map((pl) => {
+                          const cv = v.coverage?.[pl];
+                          const released = isVersionPlatformReleased(v, pl);
+                          return (
+                            <a
+                              key={pl}
+                              href={`#/library/${pl}`}
+                              className={`flag ${released && cv?.ready && cv?.deployable ? "" : "warn"}`}
+                              title={
+                                !released
+                                  ? bi(
+                                      `${platformShort(pl)} 尚未发布，正式交付已拦截`,
+                                      `${platformShort(pl)} is not yet published for formal delivery`,
                                     )
-                                : bi(
-                                    `软件库缺 ${cv.missing?.length ?? 0} 个软件包`,
-                                    `Missing ${cv.missing?.length ?? 0} packages in library`,
-                                  )
-                            }
-                            style={{ marginLeft: 6 }}
-                          >
-                            {pl}
-                            {bi("：", ": ")}
-                            {cv.ready
-                              ? cv.deployable
-                                ? bi("可生成", "Ready")
-                                : bi("无运行环境", "No runtime")
-                              : bi(
-                                  `缺 ${cv.missing?.length ?? 0} 个包`,
-                                  `Missing ${cv.missing?.length ?? 0}`,
-                                )}
-                          </a>
-                        ))}
+                                  : cv?.ready
+                                    ? cv.deployable
+                                      ? bi("已发布且软件库就绪", "Published & library ready")
+                                      : bi(
+                                          "软件包已备齐，但这个系统还没有 Ansible 运行环境",
+                                          "Packages ready, but no Ansible runtime selected for this OS",
+                                        )
+                                    : bi(
+                                        `软件库缺 ${cv?.missing?.length ?? 0} 个软件包`,
+                                        `Missing ${cv?.missing?.length ?? 0} packages in library`,
+                                      )
+                              }
+                              style={{ marginLeft: 6 }}
+                            >
+                              {platformShort(pl)}
+                              {bi("：", ": ")}
+                              {!released
+                                ? bi("未发布", "Unpublished")
+                                : cv?.ready
+                                  ? cv.deployable
+                                    ? bi("已发布", "Published")
+                                    : bi("无运行环境", "No runtime")
+                                  : bi(
+                                      `缺 ${cv?.missing?.length ?? 0} 个包`,
+                                      `Missing ${cv?.missing?.length ?? 0}`,
+                                    )}
+                            </a>
+                          );
+                        })}
                       </span>
                     </div>
                   ))}
@@ -1598,7 +1631,7 @@ function Product({ app, jobs }: { app: AppInfo; jobs: Job[] }) {
           </div>
 
           <aside className="product-side">
-            {app.available && can("delivery.create") && (
+            {formalReady(app) && can("delivery.create") && (
               <Button
                 type="primary"
                 long
@@ -1606,6 +1639,14 @@ function Product({ app, jobs }: { app: AppInfo; jobs: Job[] }) {
                 onClick={() => go({ name: "new", app: app.id })}
               >
                 {bi(`新建 ${app.name} 集群`, `New ${app.name} Cluster`)}
+              </Button>
+            )}
+            {app.available && !hasReleasedVersion(app) && can("component.edit|component.publish") && (
+              <Button
+                long
+                onClick={() => go({ name: "components", id: app.id })}
+              >
+                {bi("前往组件页验证发布", "Verify & Publish Component")}
               </Button>
             )}
             <Menu

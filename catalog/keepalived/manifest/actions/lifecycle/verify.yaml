@@ -1,5 +1,8 @@
 - id: vip-holder
   title: 核对 VIP 只在一台机器上
   effect: read-only
+  timeout: 300
   expect: 恰好一台机器持有虚拟 IP。
+  postconditions:
+    - (ansible_play_hosts | map('extract', hostvars) | selectattr('ka_addr.stdout', 'search', mw.params.vip ~ '/') | list | length) == 1
   run: {role: keepalived, tasks: holder}

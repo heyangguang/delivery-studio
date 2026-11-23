@@ -6,7 +6,7 @@ import {
   IconRight,
   IconSearch,
 } from "@arco-design/web-react/icon";
-import { ago } from "./shared";
+import { ago, can, hasReleasedVersion } from "./shared";
 import type { AppInfo, Job } from "./shared";
 import { readFormDraft } from "./formdraft";
 import { go } from "./router";
@@ -109,6 +109,8 @@ export function NewDeliveryPicker({
     [jobs],
   );
 
+  const formalReady = (a: AppInfo) => a.available && hasReleasedVersion(a);
+
   // Detect any unfinished local drafts across available apps
   const drafts = useMemo(() => {
     const list: {
@@ -118,7 +120,7 @@ export function NewDeliveryPicker({
       updated?: string;
     }[] = [];
     for (const a of apps) {
-      if (!a.available) continue;
+      if (!formalReady(a)) continue;
       const d = readFormDraft(a.id);
       if (!d) continue;
       if (d.dep.id && submittedIds.has(d.dep.id)) continue;
@@ -168,7 +170,9 @@ export function NewDeliveryPicker({
         return hay.includes(kw);
       })
       .sort((a, b) => {
-        if (a.available !== b.available) return a.available ? -1 : 1;
+        const ra0 = formalReady(a);
+        const rb0 = formalReady(b);
+        if (ra0 !== rb0) return ra0 ? -1 : 1;
         const ca = clusterCounts.get(a.id) || 0;
         const cb = clusterCounts.get(b.id) || 0;
         if ((ca > 0) !== (cb > 0)) return cb > 0 ? 1 : -1;
@@ -180,8 +184,8 @@ export function NewDeliveryPicker({
       });
   }, [apps, cat, q, clusterCounts, lang]);
 
-  const readyApps = sorted.filter((a) => a.available);
-  const unreadyApps = sorted.filter((a) => !a.available);
+  const readyApps = sorted.filter((a) => formalReady(a));
+  const unreadyApps = sorted.filter((a) => !formalReady(a));
 
   return (
     <div className="np-page enter">
@@ -420,59 +424,80 @@ export function NewDeliveryPicker({
               <div className="np-sec-label unavailable">
                 <span>
                   {bi(
-                    `待补齐离线软件包后可用（${unreadyApps.length}）`,
-                    `Missing offline packages (${unreadyApps.length})`,
+                    `暂不可用于正式交付（${unreadyApps.length}）`,
+                    `Not yet available for formal delivery (${unreadyApps.length})`,
                   )}
                 </span>
               </div>
               <div className="np-grid" role="list">
-                {unreadyApps.map((a) => (
-                  <article key={a.id} role="listitem" className="np-card off">
-                    <div className="np-card-head">
-                      <AppGlyph
-                        id={a.id}
-                        category={a.category}
-                        icon={a.icon}
-                        color={a.color}
-                        size={44}
-                        muted
-                      />
-                      <div className="np-card-title">
-                        <div className="np-card-title-row">
-                          <h2>{a.name}</h2>
-                        </div>
-                        <div className="np-card-sub">
-                          <span>{displayCat(a.category)}</span>
-                          {a.version && (
-                            <>
-                              <span>·</span>
-                              <span>{shortVer(a.version)}</span>
-                            </>
-                          )}
+                {unreadyApps.map((a) => {
+                  const needsVerify = a.available && !hasReleasedVersion(a);
+                  return (
+                    <article key={a.id} role="listitem" className="np-card off">
+                      <div className="np-card-head">
+                        <AppGlyph
+                          id={a.id}
+                          category={a.category}
+                          icon={a.icon}
+                          color={a.color}
+                          size={44}
+                          muted
+                        />
+                        <div className="np-card-title">
+                          <div className="np-card-title-row">
+                            <h2>{a.name}</h2>
+                          </div>
+                          <div className="np-card-sub">
+                            <span>{displayCat(a.category)}</span>
+                            {a.version && (
+                              <>
+                                <span>·</span>
+                                <span>{shortVer(a.version)}</span>
+                              </>
+                            )}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                    <p className="np-desc">
-                      {a.detail?.tagline || a.description}
-                    </p>
-                    <div className="np-unavail-note">
-                      {a.reason ||
-                        bi(
-                          "当前软件库尚未导入该组件所需的离线安装包",
-                          "Required offline packages have not been imported into the library yet",
+                      <p className="np-desc">
+                        {a.detail?.tagline || a.description}
+                      </p>
+                      <div className="np-unavail-note">
+                        {needsVerify
+                          ? bi(
+                              "暂无已验证发布的版本，正式交付已拦截；需由组件维护者在组件页完成实测验收并发布",
+                              "No field-verified published version yet; maintainers must verify and publish it on the Components page first",
+                            )
+                          : a.reason ||
+                            bi(
+                              "当前软件库尚未导入该组件所需的离线安装包",
+                              "Required offline packages have not been imported into the library yet",
+                            )}
+                      </div>
+                      <div className="np-card-foot">
+                        <span className="np-os">{a.platform}</span>
+                        {needsVerify ? (
+                          can("component.edit|component.publish") ? (
+                            <Button
+                              size="mini"
+                              onClick={() =>
+                                go({ name: "components", id: a.id })
+                              }
+                            >
+                              {bi("前往组件验证", "Verify Component")}
+                            </Button>
+                          ) : null
+                        ) : (
+                          <Button
+                            size="mini"
+                            onClick={() => go({ name: "library" })}
+                          >
+                            {bi("前往软件库", "Go to Library")}
+                          </Button>
                         )}
-                    </div>
-                    <div className="np-card-foot">
-                      <span className="np-os">{a.platform}</span>
-                      <Button
-                        size="mini"
-                        onClick={() => go({ name: "library" })}
-                      >
-                        {bi("前往软件库", "Go to Library")}
-                      </Button>
-                    </div>
-                  </article>
-                ))}
+                      </div>
+                    </article>
+                  );
+                })}
               </div>
             </>
           )}

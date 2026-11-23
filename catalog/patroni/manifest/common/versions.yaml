@@ -1,5 +1,7 @@
 - id: '4.1'
-  status: verifying
+  status: published
+  verified_platforms:
+    - ubuntu-24.04-amd64
   platforms:
     - ubuntu-24.04-amd64
   packages:

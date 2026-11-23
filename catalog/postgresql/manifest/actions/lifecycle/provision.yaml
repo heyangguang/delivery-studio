@@ -2,6 +2,10 @@
   title: 创建 TDE 主密钥
   desc: 在主库创建 pg_tde 扩展、注册本地密钥文件并创建服务器主密钥；已存在的密钥一律保留，丢失的密钥不会被重建。
   effect: change
+  timeout: 300
+  expect: 主库已注册 TDE 密钥提供者并创建与验证服务器/默认主密钥。
+  postconditions:
+    - pg_tde_verified.rc == 0
   hosts: first:primary
   when: params.deployment_mode in ['legacy', 'single'] && (params.tde)
   run:
@@ -11,6 +15,11 @@
   title: 把同一把密钥同步到全部节点
   desc: 从主库取回密钥文件，复制到每个从库；这样任何节点接管后都能解密。
   effect: change
+  timeout: 300
+  expect: 所有节点的 TDE 密钥文件 SHA256 校验完全一致。
+  postconditions:
+    - pg_keyfile_sum.stat.exists
+    - (ansible_play_hosts | map('extract', hostvars, ['pg_keyfile_sum', 'stat', 'checksum']) | unique | list | length) == 1
   when: params.deployment_mode in ['legacy', 'single'] && (params.tde && count(roles.replica) > 0)
   run:
     role: postgresql
@@ -19,6 +28,10 @@
   title: 开启 TDE 与 WAL 加密
   desc: 为各数据库设置密钥，并把 default_table_access_method、强制加密和 WAL 加密写入集群配置。
   effect: change
+  timeout: 300
+  expect: 数据库 TDE 密钥、WAL 加密及加密表访问方法设置已写入。
+  postconditions:
+    - pg_tde_marker_written is succeeded
   hosts: first:primary
   when: params.deployment_mode in ['legacy', 'single'] && (params.tde)
   run:
@@ -28,6 +41,11 @@
   title: 滚动重启使 TDE 生效
   desc: 逐台重启；配置已一致的节点会跳过。重启期间连接会短暂中断。
   effect: disruptive
+  timeout: 900
+  expect: 需要重启的节点已滚动重启且 pg_tde.wal_encrypt 设置生效。
+  postconditions:
+    - pg_current is defined
+    - not (pg_need_restart | bool) or pg_after is succeeded
   serial: 1
   when: params.deployment_mode in ['legacy', 'single'] && (params.tde)
   run:
@@ -40,6 +58,10 @@
   title: 安装数据库扩展
   desc: 在所选数据库中创建扩展；已存在的保留，不自动升级。默认装进 postgres 和 template1：以后新建的数据库都会带上；若指定其他数据库，它们必须已经存在。
   effect: change
+  timeout: 300
+  expect: 所选数据库中已安装并核对计划中的扩展。
+  postconditions:
+    - pg_ext_version is succeeded
   hosts: first:primary
   when: params.deployment_mode in ['legacy', 'single'] && (count(addons) > 0)
   run:
@@ -48,6 +70,10 @@
 - id: app-user
   title: 创建业务管理账户
   effect: change
+  timeout: 300
+  expect: 业务管理账户已就绪。
+  postconditions:
+    - pg_app_user_cmd.rc == 0
   hosts: first:primary
   when: params.deployment_mode in ['legacy', 'single'] && (params.app_user != '')
   run:
@@ -57,6 +83,10 @@
   title: 配置 pgBackRest 并创建 stanza
   desc: 每个节点写入 pgBackRest 配置；主库创建 stanza。这里只配置策略，不做备份，也不创建定时任务。
   effect: change
+  timeout: 600
+  expect: pgBackRest 配置已写入且 stanza 已创建并启用。
+  postconditions:
+    - pg_stanza_started.rc == 0
   run:
     role: postgresql
     tasks: backup_config
@@ -64,6 +94,11 @@
 - id: archive-enable
   title: 开启 WAL 归档
   effect: change
+  timeout: 300
+  expect: WAL 归档与恢复命令设置已写入集群或实例配置。
+  postconditions:
+    - not (pg_ha | bool) or pg_patch_dcs.status == 200
+    - (pg_ha | bool) or pg_patch_alter is succeeded
   hosts: first:primary
   run:
     role: postgresql
@@ -73,6 +108,11 @@
   title: 滚动重启使归档生效
   desc: 逐台重启；配置已一致的节点会跳过。
   effect: disruptive
+  timeout: 900
+  expect: 需要重启的节点已滚动重启且 archive_mode 设置生效。
+  postconditions:
+    - pg_current is defined
+    - not (pg_need_restart | bool) or pg_after is succeeded
   serial: 1
   run:
     role: postgresql
@@ -84,8 +124,11 @@
 - id: archive-check
   title: 检查归档
   effect: read-only
+  timeout: 600
   hosts: first:primary
   expect: pgBackRest check 通过。
+  postconditions:
+    - pg_backrest_check.rc == 0
   run:
     role: postgresql
     tasks: archive_check
@@ -94,6 +137,10 @@
   title: 安装数据库扩展
   desc: 在所选数据库中创建扩展；已存在的保留，不自动升级。默认装进 postgres 和 template1：以后新建的数据库都会带上；若指定其他数据库，它们必须已经存在。
   effect: change
+  timeout: 300
+  expect: 所选数据库中已安装并核对计划中的扩展。
+  postconditions:
+    - pg_ext_version is succeeded
   hosts: first:primary
   when: params.deployment_mode == 'replication' && count(addons) > 0
   run:
@@ -102,6 +149,10 @@
 - id: native-app-user
   title: 创建业务管理账户
   effect: change
+  timeout: 300
+  expect: 业务管理账户已就绪。
+  postconditions:
+    - pg_app_user_cmd.rc == 0
   hosts: first:primary
   when: params.deployment_mode == 'replication' && params.app_user != ''
   run:
@@ -111,6 +162,10 @@
   title: 配置 pgBackRest 并创建 stanza
   desc: 每个节点写入 pgBackRest 配置；主库创建 stanza。这里只配置策略，不做备份，也不创建定时任务。
   effect: change
+  timeout: 600
+  expect: pgBackRest 配置已写入且 stanza 已创建并启用。
+  postconditions:
+    - pg_stanza_started.rc == 0
   run:
     role: postgresql
     tasks: native_backup_config
@@ -118,6 +173,11 @@
 - id: native-archive-enable
   title: 开启 WAL 归档
   effect: change
+  timeout: 300
+  expect: WAL 归档与恢复命令设置已写入集群或实例配置。
+  postconditions:
+    - not (pg_ha | bool) or pg_patch_dcs.status == 200
+    - (pg_ha | bool) or pg_patch_alter is succeeded
   hosts: primary
   run:
     role: postgresql
@@ -127,6 +187,11 @@
   title: 滚动重启使归档生效
   desc: 逐台重启；配置已一致的节点会跳过。
   effect: disruptive
+  timeout: 900
+  expect: 需要重启的节点已滚动重启且 archive_mode 设置生效。
+  postconditions:
+    - pg_current is defined
+    - not (pg_need_restart | bool) or pg_after is succeeded
   serial: 1
   run:
     role: postgresql
@@ -139,8 +204,11 @@
 - id: native-archive-check
   title: 检查归档
   effect: read-only
+  timeout: 600
   hosts: primary
   expect: pgBackRest check 通过。
+  postconditions:
+    - pg_backrest_check.rc == 0
   run:
     role: postgresql
     tasks: native_archive_check

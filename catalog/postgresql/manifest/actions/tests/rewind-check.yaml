@@ -2,6 +2,7 @@ id: rewind-check
 title: pg_rewind 前置条件
 desc: pg_rewind 让“带着新主库没收到的数据”的旧主库不用重做整机复制就能回来当从库，由 Patroni 在需要时自动执行。这一步只读：逐项列出 4 个前置条件及实际取值（工具、Patroni 开关、数据校验或 wal_log_hints、rewind 账户），并把 Patroni 日志里真正执行过的 rewind 合并成一条条记录（没有就明说没有）。它不会执行 pg_rewind。
 effect: read-only
+timeout: 7200
 hosts: first:primary
 when: params.deployment_mode in ['legacy', 'single'] && (count(roles.replica) > 0)
 skip: 单节点没有 rewind 场景

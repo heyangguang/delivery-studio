@@ -2,5 +2,9 @@ id: health
 title: 集群健康与领导者
 desc: 检查每个端点健康，并核对只有一个领导者。
 effect: read-only
+timeout: 300
 expect: 全部端点 healthy，恰好一个 leader。
+postconditions:
+  - etcd_status.rc == 0
+  - (etcd_status.stdout | from_json | map(attribute='Status') | map(attribute='leader') | unique | list | length) == 1
 run: {role: etcd, tasks: test_health}

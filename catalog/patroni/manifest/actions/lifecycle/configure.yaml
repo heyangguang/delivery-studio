@@ -2,6 +2,11 @@
   title: 写入数据库与高可用配置
   desc: 有从库时写入 Patroni 配置（含 DCS 引导参数）和 systemd 覆盖项；单节点则创建数据库集群并写入 postgresql.conf 与 pg_hba.conf。
   effect: change
+  timeout: 300
+  expect: 部署归属标记及 Patroni 或单节点 PostgreSQL 配置已写入。
+  postconditions:
+    - pg_scope_written is succeeded
+    - pg_cfg_stat.stat.exists
   run:
     role: patroni
     tasks: configure

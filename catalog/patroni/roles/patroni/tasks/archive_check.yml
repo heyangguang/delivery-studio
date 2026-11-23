@@ -8,4 +8,5 @@
 - name: pgBackRest check
   ansible.builtin.command:
     argv: "{{ pg_backrest + ['check'] }}"
+  register: pg_backrest_check
   changed_when: false

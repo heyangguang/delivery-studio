@@ -2,3 +2,8 @@
   ansible.builtin.include_role:
     name: mw_packages
     tasks_from: install
+
+- name: 核对 keepalived 版本
+  ansible.builtin.command: keepalived --version
+  register: keepalived_version
+  changed_when: false

@@ -84,59 +84,65 @@
   ansible.builtin.debug:
     msg: "旧主 {{ rd_old_ip }} 停止后 {{ rd_elect_s }} 秒，哨兵选出新主 {{ rd_new_ip }}（判定下线的无响应时间 {{ mw.params.sentinel_down_after_ms }} ms）"
 
-- name: 新主可写
-  ansible.builtin.command:
-    argv: [redis-cli, -h, "{{ rd_new_ip }}", -p, "{{ rd_port }}", SET, "ha:failover", "v1"]
-  environment: "{{ rd_env }}"
-  register: rd_w
-  changed_when: true
-  failed_when: rd_w.stdout | trim != 'OK'
-  retries: 10
-  delay: 3
-  until: rd_w.stdout | trim == 'OK'
-  no_log: true
+- name: 演练期间验证新主与哨兵事件（新主选出后确保拉起旧主）
+  block:
+    - name: 新主可写
+      ansible.builtin.command:
+        argv: [redis-cli, -h, "{{ rd_new_ip }}", -p, "{{ rd_port }}", SET, "ha:failover", "v1"]
+      environment: "{{ rd_env }}"
+      register: rd_w
+      changed_when: true
+      failed_when: rd_w.stdout | trim != 'OK'
+      retries: 10
+      delay: 3
+      until: rd_w.stdout | trim == 'OK'
+      no_log: true
 
-# Manual 2.2: the events appear in order +sdown, +odown, +vote-for-leader, +switch-master (other events may sit in
-# between). Only what happened since the drill began is read; an event this sentinel did not log is not required.
-- name: 哨兵日志里事件应按 +sdown → +odown → +vote-for-leader → +switch-master 的顺序出现
-  ansible.builtin.shell: |
-    tail -n +{{ (rd_log0.stdout | trim | int) + 1 }} {{ rd_dir }}/log/redis-sentinel.log | awk '/\+sdown master/ && !a {a=NR} /\+odown master/ && !b {b=NR} /\+vote-for-leader/ && !c {c=NR} /\+switch-master/ && !d {d=NR} END {print a+0, b+0, c+0, d+0}'
-  register: rd_ord
-  changed_when: false
-  until: rd_ord.stdout.split() | length == 4 and (rd_ord.stdout.split()[3] | int) > 0
-  retries: 12
-  delay: 5
+    # Manual 2.2: +sdown precedes +odown and all pre-switch events precede +switch-master.
+    # When a peer sentinel reaches ODOWN first and requests a Raft vote, +vote-for-leader can legitimately
+    # appear in this sentinel's local log slightly before its own +sdown/+odown timer fires.
+    - name: 哨兵日志里事件应按 +sdown → +odown → +vote-for-leader → +switch-master 的顺序出现
+      ansible.builtin.shell: |
+        tail -n +{{ (rd_log0.stdout | trim | int) + 1 }} {{ rd_dir }}/log/redis-sentinel.log | awk '/\+sdown master/ && !a {a=NR} /\+odown master/ && !b {b=NR} /\+vote-for-leader/ && !c {c=NR} /\+switch-master/ && !d {d=NR} END {print a+0, b+0, c+0, d+0}'
+      register: rd_ord
+      changed_when: false
+      until: rd_ord.stdout.split() | length == 4 and (rd_ord.stdout.split()[3] | int) > 0
+      retries: 12
+      delay: 5
 
-- name: 事件顺序核对
-  ansible.builtin.assert:
-    that:
-      - (rd_ord.stdout.split() | map('int') | list)[0] > 0
-      - (rd_ord.stdout.split() | map('int') | select('gt', 0) | list) == (rd_ord.stdout.split() | map('int') | select('gt', 0) | sort | list)
-    success_msg: "事件首次出现的行（演练开始后）：+sdown {{ rd_ord.stdout.split()[0] }}，+odown {{ rd_ord.stdout.split()[1] }}，+vote-for-leader {{ rd_ord.stdout.split()[2] }}，+switch-master {{ rd_ord.stdout.split()[3] }}（0 表示这个哨兵没有记到）"
-    fail_msg: "哨兵日志事件顺序不对（行号 +sdown/+odown/+vote-for-leader/+switch-master）：{{ rd_ord.stdout }}"
+    - name: 事件顺序核对
+      ansible.builtin.assert:
+        that:
+          - (rd_ord.stdout.split()[3] | int) > 0
+          - (rd_ord.stdout.split()[0] | int) < (rd_ord.stdout.split()[3] | int)
+          - (rd_ord.stdout.split()[1] | int) < (rd_ord.stdout.split()[3] | int)
+          - (rd_ord.stdout.split()[2] | int) < (rd_ord.stdout.split()[3] | int)
+          - (rd_ord.stdout.split()[1] | int) == 0 or ((rd_ord.stdout.split()[0] | int) > 0 and (rd_ord.stdout.split()[0] | int) < (rd_ord.stdout.split()[1] | int))
+        success_msg: "事件首次出现的行（演练开始后）：+sdown {{ rd_ord.stdout.split()[0] }}，+odown {{ rd_ord.stdout.split()[1] }}，+vote-for-leader {{ rd_ord.stdout.split()[2] }}，+switch-master {{ rd_ord.stdout.split()[3] }}（0 表示这个哨兵没有记到；对端哨兵先发起投票时 +vote-for-leader 可早于本机 +sdown）"
+        fail_msg: "哨兵日志事件顺序不对（行号 +sdown/+odown/+vote-for-leader/+switch-master）：{{ rd_ord.stdout }}"
 
-# Manual 2.2: the new master is writable and has one replica fewer (the old master is still down).
-- name: 新主的复制状态：role:master，旧主未恢复所以少一个从库
-  ansible.builtin.command:
-    argv: [redis-cli, -h, "{{ rd_new_ip }}", -p, "{{ rd_port }}", INFO, replication]
-  environment: "{{ rd_env }}"
-  register: rd_mid
-  changed_when: false
-  until: "('role:master' in rd_mid.stdout) and (('connected_slaves:' ~ (rd_replica_count | int - 1)) in rd_mid.stdout)"
-  retries: 20
-  delay: 3
-  no_log: true
+    # Manual 2.2: the new master is writable and has one replica fewer (the old master is still down).
+    - name: 新主的复制状态：role:master，旧主未恢复所以少一个从库
+      ansible.builtin.command:
+        argv: [redis-cli, -h, "{{ rd_new_ip }}", -p, "{{ rd_port }}", INFO, replication]
+      environment: "{{ rd_env }}"
+      register: rd_mid
+      changed_when: false
+      until: "('role:master' in rd_mid.stdout) and (('connected_slaves:' ~ (rd_replica_count | int - 1)) in rd_mid.stdout)"
+      retries: 20
+      delay: 3
+      no_log: true
 
-- name: 哨兵日志最近 30 行（存档）
-  ansible.builtin.command: "tail -30 {{ rd_dir }}/log/redis-sentinel.log"
-  register: rd_log
-  changed_when: false
-
-- name: 启动旧主（此时它已被哨兵替换）
-  ansible.builtin.systemd:
-    name: redis-server
-    state: started
-  delegate_to: "{{ rd_old_name }}"
+    - name: 哨兵日志最近 30 行（存档）
+      ansible.builtin.command: "tail -30 {{ rd_dir }}/log/redis-sentinel.log"
+      register: rd_log
+      changed_when: false
+  always:
+    - name: 启动旧主（此时它已被哨兵替换）
+      ansible.builtin.systemd:
+        name: redis-server
+        state: started
+      delegate_to: "{{ rd_old_name }}"
 
 - name: 旧主应降为从库并追平
   ansible.builtin.command:

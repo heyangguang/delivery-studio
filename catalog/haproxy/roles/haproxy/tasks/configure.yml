@@ -6,3 +6,8 @@
     group: haproxy
     mode: '0640'
     validate: haproxy -c -f %s
+
+- name: 核对 HAProxy 配置文件
+  ansible.builtin.command: haproxy -c -f /etc/haproxy/haproxy.cfg
+  register: haproxy_cfg_valid
+  changed_when: false

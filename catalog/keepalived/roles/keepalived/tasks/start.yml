@@ -4,3 +4,12 @@
     enabled: true
     state: restarted
     daemon_reload: true
+  register: keepalived_service
+
+- name: 核对 keepalived 服务处于运行状态
+  ansible.builtin.command: systemctl is-active keepalived
+  register: keepalived_active
+  changed_when: false
+  retries: 5
+  delay: 1
+  until: keepalived_active.rc == 0 and (keepalived_active.stdout | trim) == 'active'

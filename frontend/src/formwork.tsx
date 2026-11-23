@@ -7,7 +7,14 @@ import {
   IconExclamationCircleFill,
   IconRight,
 } from "@arco-design/web-react/icon";
-import { AIEmblem, Bubble, LiveBubble, Spark } from "./aichat";
+import {
+  AIEmblem,
+  Bubble,
+  ChatErrorCard,
+  LiveBubble,
+  Spark,
+  UnansweredTurnCard,
+} from "./aichat";
 import type { Msg } from "./aichat";
 import { Composer, ConfirmCard, ORDER } from "./formchat";
 import type { Attach, Change, FormAI } from "./formchat";
@@ -367,26 +374,33 @@ export function FormWorkspace({
               </p>
             </div>
           )}
-          {fa.msgs.map((m, i) => (
-            <React.Fragment key={i}>
-              <Bubble
-                m={m}
-                jobBase=""
-                props={{}}
-                deciding=""
-                decide={() => undefined}
-                comp={false}
-                answer={
-                  i === fa.msgs.length - 1 && !fa.busy
-                    ? (t) => fa.send(t)
-                    : undefined
-                }
-              />
-              {m.form && !(i === lastForm && fa.run?.active) && (
-                <Filled m={m} titles={titles} onGo={onGo} />
-              )}
-            </React.Fragment>
-          ))}
+          {fa.msgs.map((m, i) => {
+            const prevUser =
+              i > 0 && fa.msgs[i - 1]?.role === "user" ? fa.msgs[i - 1] : null;
+            const isLast = i === fa.msgs.length - 1;
+            return (
+              <React.Fragment key={i}>
+                <Bubble
+                  m={m}
+                  jobBase=""
+                  props={{}}
+                  deciding=""
+                  decide={() => undefined}
+                  comp={false}
+                  busy={fa.busy}
+                  answer={isLast && !fa.busy ? (t) => fa.send(t) : undefined}
+                  onRetry={
+                    isLast && !fa.busy && m.error && prevUser?.text
+                      ? () => fa.send(prevUser.text, [], "", true)
+                      : undefined
+                  }
+                />
+                {m.form && !(i === lastForm && fa.run?.active) && (
+                  <Filled m={m} titles={titles} onGo={onGo} />
+                )}
+              </React.Fragment>
+            );
+          })}
           {fa.live && (
             <LiveBubble
               live={fa.live}
@@ -397,20 +411,35 @@ export function FormWorkspace({
             />
           )}
           <RunCard fa={fa} titles={titles} />
+          {!fa.busy &&
+            !fa.live &&
+            !fa.error &&
+            fa.msgs.length > 0 &&
+            fa.msgs[fa.msgs.length - 1].role === "user" &&
+            fa.msgs[fa.msgs.length - 1].text && (
+              <UnansweredTurnCard
+                busy={fa.busy}
+                onRetry={() =>
+                  fa.send(fa.msgs[fa.msgs.length - 1].text, [], "", true)
+                }
+              />
+            )}
           {fa.error && (
-            <div className="fc-error" role="alert">
-              <IconExclamationCircleFill />
-              <span>{fa.error.text}</span>
-              {fa.error.retry && (
-                <button
-                  type="button"
-                  className="link"
-                  onClick={() => (fa.setError(null), fa.send(fa.error!.retry!))}
-                >
-                  {bi("重试", "Retry")}
-                </button>
-              )}
-            </div>
+            <ChatErrorCard
+              text={fa.error.text}
+              diag={fa.error.diag}
+              kind={fa.error.kind}
+              rawError={fa.error.rawError}
+              busy={fa.busy}
+              onRetry={
+                fa.error.retry
+                  ? () => (
+                      fa.setError(null),
+                      fa.send(fa.error!.retry!, [], "", true)
+                    )
+                  : undefined
+              }
+            />
           )}
         </div>
         {!stick && (

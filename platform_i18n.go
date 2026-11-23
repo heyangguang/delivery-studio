@@ -210,10 +210,21 @@ func localizeExecutionRun(lang string, r executionRun) executionRun {
 }
 
 func localizeExecutionPrep(lang string, p executionPreparation) executionPreparation {
-	if !isEnLang(lang) || p.Invalidated == "" {
+	if !isEnLang(lang) {
 		return p
 	}
-	p.Invalidated = localizeGoMessage(lang, p.Invalidated)
+	if p.Invalidated != "" {
+		p.Invalidated = localizeGoMessage(lang, p.Invalidated)
+	}
+	if len(p.Checks) > 0 {
+		checks := make([]executionCheck, len(p.Checks))
+		for i, c := range p.Checks {
+			c.Title = localizeGoMessage(lang, c.Title)
+			c.Message = localizeGoMessage(lang, c.Message)
+			checks[i] = c
+		}
+		p.Checks = checks
+	}
 	return p
 }
 
@@ -355,16 +366,21 @@ func localizedSkills(lang string, src []aiSkill) []aiSkill {
 		"haproxy-keepalived":   {"Load Balancing & VIP", "HAProxy backend health checks, config validation, graceful reloads, and keepalived VIP failover, split-brain, and VRRP troubleshooting."},
 		"incident-report":      {"Incident Postmortem Report", "Compile field incidents into objective, actionable postmortems covering timeline, impact, root cause, mitigation, and follow-up actions."},
 		"linux-diagnostics":    {"Linux Host Diagnostics", "Diagnose host issues including full disks, port conflicts, failing systemd units, clock drift, SELinux/firewall blocks, memory/inode pressure, and DNS."},
+		"middleware-logging-observability": {"Logging, Rotation & Observability", "Audit middleware log paths, logging_collector, journald persistence/caps, logrotate policies, slow/audit logs, and monitoring hooks across deliveries."},
+		"nginx-stream":         {"Nginx Stream L4 Load Balancing", "Validate Nginx Stream TCP/UDP load balancing configs, upstream health/failover tuning, timeouts, reload safety, and VIP/firewall integration."},
 		"offline-packages":     {"Offline Packages & Repos", "Build and validate offline apt/dnf mirrors, resolve missing dependencies, version conflicts, GPG signatures, and checksum errors."},
 		"postgresql-patroni":   {"PostgreSQL & Patroni HA", "Interpret Patroni cluster state, replication lag, switchover/failover, pg_rewind, replication slots/WAL buildup, and pg_hba authentication."},
 		"proposal-writing":     {"Actionable Proposal Cards", "Format propose_step and propose_change proposals cleanly so automated platform checks accept them on the first pass."},
 		"reading-attachments":  {"Reading Screenshots & Docs", "Analyze screenshots, PDFs, Word docs, spreadsheets, presentations, logs, and configs accurately while scrubbing sensitive fields."},
+		"redis-sentinel":       {"Redis & Sentinel HA", "Verify Redis standalone and Sentinel HA topology, replication, failover event logs, memory/eviction/persistence tuning, and safe read-only checks."},
+		"security-cve-audit":   {"Package Security & Dependency Audit", "Audit Ansible runtime builds, wheel version diffs, OSV/PyPI CVE advisories, upgrade compatibility, and whether historical builds can be safely deleted."},
 		"spreadsheet-analysis": {"Spreadsheet Data Analysis", "Summarize, compare, detect anomalies, and build actionable checklists from uploaded Excel or CSV files."},
 		"step-troubleshooting": {"Runbook Step Troubleshooting", "Root-cause analysis when executing runbooks: isolate signal from noise, decide between answers and proposals, and capture lessons into KB or components."},
 	}
 	scriptDescEn := map[string]string{
 		"calc_pg_tuning.py":          "Calculate PostgreSQL memory and concurrency settings from RAM (memory_gb), CPU cores (cpus), max_connections, and workload type (oltp/olap/mixed).",
 		"calc_etcd_quorum.py":        "Evaluate etcd quorum tolerance, fault redundancy, DB size (db_size_mb), and quota fragmentation warnings.",
+		"calc_redis_memory.py":       "Calculate safe Redis maxmemory, fork CoW headroom, and repl-backlog-size from host RAM (memory_gb), persistence mode, and instance count.",
 		"parse_disk_mem_snapshot.py": "Parse df -h and free memory text (or /in snapshot files) to report mount points exceeding thresholds and Swap/memory warnings.",
 		"profile_csv_quality.py":     "Scan CSV files in /in to compute row counts, null rates per column, distinct cardinality, and numeric min/max/avg.",
 	}

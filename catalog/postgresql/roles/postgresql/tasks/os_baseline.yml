@@ -35,6 +35,7 @@
     exit $bad
   args:
     executable: /bin/bash
+  register: pg_sysctl_verified
   changed_when: false
 
 - name: 资源限额

@@ -3,12 +3,21 @@
   desc: 安装期间临时屏蔽 redis-server 与 redis-sentinel，避免安装包用默认配置启动并监听全部地址；随后创建数据、日志与配置目录。
   rollback: "卸载软件包并删除目录即可：apt-get remove redis-server redis-sentinel redis-tools；数据目录 ${params.data_dir} 在这一步只是空目录，确认里面没有别的东西后再删。"
   effect: change
+  timeout: 600
+  expect: Redis 7.2 软件包已安装且数据与日志目录已创建。
+  postconditions:
+    - rd_version.rc == 0
+    - "'v=7.2.' in rd_version.stdout"
   run: {role: redis, tasks: install}
 - id: os-baseline
   title: 写入内核参数与透明大页设置
   desc: sysctl（overcommit、swappiness、somaxconn、tcp_max_syn_backlog）与透明大页关闭服务，只写入文件并生效，不重启机器；写入后核对实际值。
   rollback: "只写了 /etc/sysctl.d/99-redis.conf 和 /etc/systemd/system/redis-thp.service：删除这两个文件，systemctl disable --now redis-thp，再执行 sysctl --system 即恢复。透明大页恢复默认需要重启或手工写回 /sys/kernel/mm/transparent_hugepage/enabled。"
   effect: change
+  timeout: 300
+  expect: sysctl 内核参数实际值与计划一致，透明大页配置已写入。
+  postconditions:
+    - rd_sysctl_verified.rc == 0
   when: params.apply_baseline
   run: {role: redis, tasks: os_baseline}
 - id: swap
@@ -16,5 +25,9 @@
   desc: 机器有 swap 时执行 swapoff，并把 /etc/fstab 里的 swap 行注释掉，使重启后也没有 swap；先备份 /etc/fstab。机器没有 swap 则不改动任何东西。
   rollback: "恢复备份：cp /etc/fstab.before-mw-swap /etc/fstab，再执行 swapon -a。备份只在第一次关闭时生成，不会被覆盖。"
   effect: change
+  timeout: 300
+  expect: 机器已关闭 swap，/etc/fstab 中无未注释的 swap 行。
+  postconditions:
+    - rd_swap_verified.rc == 0
   when: params.disable_swap
   run: {role: redis, tasks: swap}

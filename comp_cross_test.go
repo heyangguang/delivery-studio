@@ -82,4 +82,16 @@ func TestCrossWorkspaceParameterWorkflow(t *testing.T) {
 	if !strings.Contains(string(b), "联合试生成通过") {
 		t.Fatal(string(b))
 	}
+	// Structured entries should cover all selected components even when multiple fail.
+	w.ok("PUT", "/api/components/redis/draft", map[string]any{"files": map[string]string{"component.yaml": "broken_redis: ["}})
+	res := s.crossCheck([]string{sharedPlatformName, "redis", "etcd"})
+	if res.OK {
+		t.Fatal("expected failure with broken redis and etcd drafts")
+	}
+	if len(res.Entries) != 3 {
+		t.Fatalf("expected 3 structured entries (all checked without short-circuit), got %d: %+v", len(res.Entries), res.Entries)
+	}
+	if res.Entries[0].Status != "ok" || res.Entries[1].Status != "error" || res.Entries[2].Status != "error" {
+		t.Fatalf("unexpected per-entry statuses: %+v", res.Entries)
+	}
 }

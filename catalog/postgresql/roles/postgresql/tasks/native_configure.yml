@@ -22,3 +22,6 @@
   ansible.builtin.template: {src: native-postgresql.service.j2, dest: "/etc/systemd/system/{{ pg_unit }}.service", mode: '0644'}
 - name: 重新加载服务定义
   ansible.builtin.systemd: {daemon_reload: true}
+- name: 核对主从配置文件已写入
+  ansible.builtin.stat: {path: "/etc/middleware/{{ pg_scope }}/postgresql.conf"}
+  register: native_cfg_stat

@@ -28,3 +28,8 @@
     owner: etcd
     group: etcd
     mode: '0700'
+
+- name: 核对 etcd 版本
+  ansible.builtin.command: etcd --version
+  register: etcd_version
+  changed_when: false

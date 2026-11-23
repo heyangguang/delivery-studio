@@ -2,6 +2,8 @@ id: inspect
 title: 盘点测试资源（不删除）
 desc: 列出各节点上的测试目录、正在运行的隔离实例和备份情况。这一步不会改动任何东西。
 effect: read-only
+expect: 各节点测试目录、隔离实例与备份状态已只读盘点。
+timeout: 7200
 serial: 1
 inputs:
     timeout:

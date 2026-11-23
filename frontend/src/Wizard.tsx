@@ -39,7 +39,18 @@ import {
   IconPlus,
   IconSearch,
 } from "@arco-design/web-react/icon";
-import { api, ago, copy, err, size, useMedia } from "./shared";
+import {
+  api,
+  ago,
+  can,
+  copy,
+  err,
+  isVersionPlatformReleased,
+  platformShort,
+  size,
+  useMedia,
+} from "./shared";
+import type { SecSummaryPayload } from "./security";
 import {
   clearFormDraft,
   draftScope,
@@ -124,24 +135,38 @@ function rolesOf(app: AppInfo) {
   return app.roles || [];
 }
 
-/** Versions of a component that exist for an operating system, newest first. */
-const versionsFor = (app: AppInfo, platform: string) =>
+/** Versions of a component declared for an operating system. */
+const declaredVersionsFor = (app: AppInfo, platform: string) =>
   app.versions.filter(
     (v) => !v.platforms?.length || v.platforms.includes(platform),
   );
 
-/** The operating system a new deployment starts on: the platform default when the component supports it. */
+/** Versions selectable for an operating system: formal deliveries only allow published+verified OSes; maintainer test channel allows any declared version (including unpublished/draft). */
+const versionsFor = (app: AppInfo, platform: string, verify = false) =>
+  app.versions.filter(
+    (v) =>
+      (!v.platforms?.length || v.platforms.includes(platform)) &&
+      (verify ? true : isVersionPlatformReleased(v, platform)),
+  );
+
+/** The operating system a new deployment starts on: a released/selectable OS when available. */
 function firstPlatform(
   app: AppInfo,
   preferred: string,
   deployable: string[],
+  verify = false,
 ): string {
   const ok = (id: string) =>
-    app.versions.some((v) => v.platforms?.includes(id)) &&
+    versionsFor(app, id, verify).length > 0 &&
     (!deployable.length || deployable.includes(id));
   if (ok(preferred)) return preferred;
   const any = app.versions.flatMap((v) => v.platforms || []).find(ok);
-  return any || preferred;
+  if (any) return any;
+  const fallback = (id: string) =>
+    app.versions.some((v) => v.platforms?.includes(id)) &&
+    (!deployable.length || deployable.includes(id));
+  if (fallback(preferred)) return preferred;
+  return app.versions.flatMap((v) => v.platforms || []).find(fallback) || preferred;
 }
 
 /** A new deployment of one component, sized by a preset (or by the role defaults). */
@@ -149,6 +174,8 @@ function startDeployment(
   app: AppInfo,
   plan?: AppPlan,
   platform?: string,
+  verify = false,
+  initialVer?: string,
 ): Deployment {
   plan = plan || app.plans?.[0];
   const roles = rolesOf(app);
@@ -176,11 +203,13 @@ function startDeployment(
     for (let k = 0; k < counts[r.name]; k++)
       placement[r.name].push(hosts[next++ % hosts.length].name);
   });
-  const pl = platform || firstPlatform(app, "ubuntu-24.04-amd64", []);
-  const versions = versionsFor(app, pl);
-  const version = versions.find((v) => v.id === app.version)
-    ? app.version
-    : versions[0]?.id || app.version;
+  const pl = platform || firstPlatform(app, "ubuntu-24.04-amd64", [], verify);
+  const versions = versionsFor(app, pl, verify);
+  const version =
+    (initialVer && versions.find((v) => v.id === initialVer)?.id) ||
+    versions.find((v) => v.id === app.version)?.id ||
+    versions[0]?.id ||
+    app.version;
   return {
     schema: "mwdeploy/v1",
     id: "",
@@ -347,11 +376,44 @@ type NewDeliveryProps = {
   /** A first deployment that has not been carried out: change its configuration; the new delivery replaces it. */
   revise?: string;
   preset?: string;
+  verify?: boolean;
+  initialVer?: string;
+  initialPlatform?: string;
   back: () => void;
   created: (j: Job) => void;
   jobs?: Job[];
   jobsLoading?: boolean;
 };
+
+/** Build a clean, collision-free default cluster ID for component verification runs. */
+function suggestVerifyClusterId(
+  appId: string,
+  platform: string,
+  jobs?: Job[],
+): string {
+  const plTag = platform.startsWith("el")
+    ? platform.replace("-amd64", "")
+    : platform.startsWith("ubuntu-")
+      ? "ubuntu"
+      : platform.replace("-amd64", "");
+  const cleanPart = (s: string) =>
+    s
+      .toLowerCase()
+      .replace(/[^a-z0-9-]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+  const base = `verify-${cleanPart(appId)}-${cleanPart(plTag)}`.slice(0, 36).replace(/-+$/, "");
+  const taken = new Set(
+    (jobs || [])
+      .filter((j) => j.state !== "failed" && j.outcome !== "void")
+      .map((j) => j.cluster_id),
+  );
+  if (!taken.has(base)) return base;
+  for (let n = 2; n < 100; n++) {
+    const cand = `${base}-${n}`;
+    if (!taken.has(cand)) return cand;
+  }
+  return base;
+}
 
 /** Decide whether this entry continues a draft before mounting either the form or its assistant. */
 export function NewDelivery(props: NewDeliveryProps) {
@@ -514,6 +576,9 @@ function DeliveryForm({
   from,
   revise,
   preset,
+  verify,
+  initialVer,
+  initialPlatform,
   back,
   created,
   chat,
@@ -527,14 +592,30 @@ function DeliveryForm({
 }) {
   const lang = useLang();
   const submitted = useRef(false);
-  const [dep, setDep] = useState<Deployment>(
-    () =>
-      resume?.dep ||
-      startDeployment(
-        app,
-        app.plans?.find((p) => p.id === preset) || undefined,
-      ),
-  );
+  const [dep, setDep] = useState<Deployment>(() => {
+    if (resume?.dep) return resume.dep;
+    const base = startDeployment(
+      app,
+      app.plans?.find((p) => p.id === preset) || undefined,
+      initialPlatform,
+      !!verify,
+      initialVer,
+    );
+    if (verify && !from && !revise) {
+      base.id = suggestVerifyClusterId(
+        app.id,
+        base.platform || initialPlatform || "ubuntu-24.04-amd64",
+        jobs,
+      );
+      if (
+        !base.delivery_mode &&
+        (!app.delivery_modes?.length || app.delivery_modes.includes("automatic"))
+      ) {
+        base.delivery_mode = "automatic";
+      }
+    }
+    return base;
+  });
   const [plan, setPlan] = useState<string>(resume ? resume.plan : preset || "");
   const [files, setFiles] = useState<Record<string, File | undefined>>({});
   const [res, setRes] = useState<Resolution | null>(null);
@@ -595,12 +676,22 @@ function DeliveryForm({
         pickedInitForApp.current = app.id;
         // A fresh deployment starts on a system that can actually be deployed.
         setDep((d) => {
-          if (resume || from || revise || d.id || d.instances.length !== 1)
+          if (
+            resume ||
+            from ||
+            revise ||
+            (verify && initialPlatform) ||
+            (!verify && d.id) ||
+            d.instances.length !== 1
+          )
             return d;
           const pl = firstPlatform(
             app,
             d.platform || o.default_platform,
-            o.platforms.filter((x) => d.delivery_mode === "configuration" || x.deployable).map((x) => x.id),
+            o.platforms
+              .filter((x) => d.delivery_mode === "configuration" || x.deployable)
+              .map((x) => x.id),
+            !!verify,
           );
           return pl === d.platform
             ? d
@@ -612,9 +703,10 @@ function DeliveryForm({
                     ? {
                         ...i,
                         version:
-                          versionsFor(app, pl).find((v) => v.id === i.version)
-                            ?.id ||
-                          versionsFor(app, pl)[0]?.id ||
+                          versionsFor(app, pl, !!verify).find(
+                            (v) => v.id === i.version,
+                          )?.id ||
+                          versionsFor(app, pl, !!verify)[0]?.id ||
                           i.version,
                       }
                     : i,
@@ -691,11 +783,14 @@ function DeliveryForm({
     const ac = new AbortController();
     const t = setTimeout(() => {
       setResolving(true);
-      api<Resolution>("/api/resolve", {
-        method: "POST",
-        body: JSON.stringify(clean(dep)),
-        signal: ac.signal,
-      })
+      api<Resolution>(
+        verify ? "/api/resolve?purpose=verification" : "/api/resolve",
+        {
+          method: "POST",
+          body: JSON.stringify(clean(dep)),
+          signal: ac.signal,
+        },
+      )
         .then((r) => n === seq.current && setRes(r))
         .catch((e) => {
           if ((e as Error)?.name === "AbortError") return;
@@ -707,7 +802,7 @@ function DeliveryForm({
       clearTimeout(t);
       ac.abort();
     };
-  }, [dep, ready, appsTick, review, lang]);
+  }, [dep, ready, appsTick, review, lang, verify]);
 
   const pv: PlanView | undefined = res?.plan;
   const issues: Issue[] = pv?.issues || [];
@@ -1065,6 +1160,15 @@ function DeliveryForm({
         JSON.stringify({
           deployment: clean(dep),
           revises: revise || undefined,
+          purpose: verify ? "verification" : undefined,
+          verify_target:
+            verify && main
+              ? {
+                  component: main.component,
+                  version: main.version || app.version,
+                  platform: dep.platform || platform,
+                }
+              : undefined,
         }),
       );
       for (const [k, v] of Object.entries(files)) if (v) f.set(k, v);
@@ -1523,11 +1627,11 @@ function DeliveryForm({
           </div>
           {view && (
             <StatusBadge
-              state={view.status === "published" ? "done" : "queued"}
+              state={view.status === "published" ? "done" : "idle"}
               label={
                 view.status === "published"
                   ? bi("已发布", "Published")
-                  : bi("待验证", "Pending")
+                  : bi("未发布", "Unpublished")
               }
             />
           )}
@@ -2010,9 +2114,9 @@ function DeliveryForm({
     : undefined;
 
   // How a new cluster starts: the first screen asks nothing but offers both ways at once (typing to the assistant is
-  // choosing it; "fill it in yourself" is the other). Coming back to a draft, copying a delivery, a plan or a preset skips it.
+  // choosing it; "fill it in yourself" is the other). Coming back to a draft, copying a delivery, a plan, verification or a preset skips it.
   const [mode, setModeRaw] = useState<"choose" | "form" | "ai">(
-    () => resume?.mode || (from || revise || resume ? "form" : "ai"),
+    () => resume?.mode || (from || revise || resume || verify ? "form" : "ai"),
   );
   // with the assistant the middle of the page is the conversation ("chat") or one step of the form, never both at once
   const [aiView, setAiView] = useState<string>(resume?.aiView || "chat");
@@ -2150,7 +2254,7 @@ function DeliveryForm({
   };
   const pickPlatform = (id: string) =>
     setDep((d) => {
-      const vs = versionsFor(app, id);
+      const vs = versionsFor(app, id, !!verify);
       return {
         ...d,
         platform: id,
@@ -2164,11 +2268,16 @@ function DeliveryForm({
   const versionNote = (id: string) => {
     const v = app.versions.find((x) => x.id === id);
     const cv = v?.coverage?.[platform];
-    if (v?.status !== "published")
-      return bi(
-        "尚未在空环境验证，不要用于生产",
-        "Not yet verified on a clean environment; do not use in production",
-      );
+    if (!v || !isVersionPlatformReleased(v, platform))
+      return verify
+        ? bi(
+            `该版本在 ${platformShort(platform)} 上尚未发布；通过测试通道完成自动执行后将自动生成测试报告`,
+            `Unpublished on ${platformShort(platform)}; completing automated test execution automatically captures a test report`,
+          )
+        : bi(
+            `该版本在 ${platformShort(platform)} 上尚未发布，正式交付已拦截`,
+            `Not yet published on ${platformShort(platform)}; blocked from formal delivery`,
+          );
     return dep.delivery_mode !== "configuration" && cv && !cv.ready
       ? bi(
           `软件库缺 ${cv.missing?.length ?? 0} 个软件包`,
@@ -2233,29 +2342,58 @@ function DeliveryForm({
   const bodies: Record<string, React.ReactNode> = {
     basics: (
       <>
+        {verify && (
+          <div className="wz-verify-banner" role="status">
+            <span className="wz-verify-pill">
+              {bi("组件测试部署通道", "Component Test Channel")}
+            </span>
+            <p>
+              {bi(
+                `正在为 ${app.name} ${main?.version || app.version}（${platformShort(platform)}）创建测试部署。采用自动执行全步通过后，平台将自动归档完整测试报告到组件页，之后可随时删除此测试交付。`,
+                `Creating a test delivery for ${app.name} ${main?.version || app.version} (${platformShort(platform)}). Passing all steps in automated mode saves a self-contained test report to the component; you can delete this temporary delivery anytime.`,
+              )}
+            </p>
+          </div>
+        )}
         <Row
-          label={bi("交付内容", "Delivery mode")}
-          hint={bi(
-            "先生成可审核的材料。选择自动执行、步骤和机器，在生成后的交付页面确认。",
-            "Generate reviewable materials first. Choose auto-execution, steps, and targets on the delivery page.",
-          )}
+          label={bi("交付方式", "Delivery Mode")}
+          hint={
+            (dep.delivery_mode || "offline") === "automatic"
+              ? bi(
+                  "自动执行模式：生成离线材料与自动化执行计划，不含手工互信步骤；在交付页接入执行节点后直接自动运行并把日志回传到对应步骤。",
+                  "Automated mode: generates bundles & automated runbook without manual SSH trust steps; connect an Execution Node on the delivery page to run steps and stream logs inline.",
+                )
+              : dep.delivery_mode === "configuration"
+                ? bi(
+                    "仅生成配置文件与说明文档，不生成安装包、不操作机器。",
+                    "Generates configuration files and guide only; no packages or target changes.",
+                  )
+                : bi(
+                    "离线手动模式：生成各机器上传包、手工免密脚本与分步终端手册，由现场人员手动执行并记录结果。",
+                    "Offline manual mode: generates per-host upload packages, SSH trust setup scripts, and step-by-step terminal runbook for manual on-site execution.",
+                  )
+          }
           wide
         >
-          <Select
-            aria-label={bi("交付内容", "Delivery mode")}
-            value={dep.delivery_mode || "offline"}
-            onChange={(v) => set({ delivery_mode: v })}
-            triggerProps={{
-              autoFitPosition: true,
-              autoAlignPopupWidth: false,
-              autoAlignPopupMinWidth: true,
-            }}
-            options={[
+          <div className="wz-mode-grid" role="radiogroup" aria-label={bi("交付方式", "Delivery mode")}>
+            {[
               {
-                value: "offline",
-                label: bi(
-                  "生成部署材料（离线手动执行 / 已授权的自动执行）",
-                  "Deployment bundle (offline manual / authorized auto-execution)",
+                value: "automatic" as const,
+                title: bi("自动化执行", "Automated Execution"),
+                desc: bi(
+                  "通过执行节点 / Target Agent 自动部署与测试，日志直接回传到各步骤",
+                  "Execution Node / Target Agent runs deploy & tests with inline step logs",
+                ),
+                disabled:
+                  !!mainSchema?.delivery_modes &&
+                  !mainSchema.delivery_modes.includes("automatic"),
+              },
+              {
+                value: "offline" as const,
+                title: bi("离线手动部署", "Offline Manual"),
+                desc: bi(
+                  "生成完整离线包、手工免密脚本与终端手册，纯离线现场手工执行",
+                  "Full offline packages, SSH trust scripts & terminal runbook for air-gapped sites",
                 ),
                 disabled:
                   !!mainSchema?.delivery_modes &&
@@ -2263,17 +2401,39 @@ function DeliveryForm({
                     (m) => m === "offline" || m === "automatic",
                   ),
               },
-              {
-                value: "configuration",
-                label: bi(
-                  "仅生成配置文件，不部署",
-                  "Config files only (no deployment)",
-                ),
-                disabled:
-                  !mainSchema?.delivery_modes?.includes("configuration"),
-              },
-            ]}
-          />
+              ...(mainSchema?.delivery_modes?.includes("configuration") ||
+              dep.delivery_mode === "configuration"
+                ? [
+                    {
+                      value: "configuration" as const,
+                      title: bi("仅生成配置", "Config Files Only"),
+                      desc: bi(
+                        "只输出配置文件，不包含安装包与执行步骤",
+                        "Configuration outputs only; no installation or execution steps",
+                      ),
+                      disabled:
+                        !mainSchema?.delivery_modes?.includes("configuration"),
+                    },
+                  ]
+                : []),
+            ].map((opt) => {
+              const active = (dep.delivery_mode || "offline") === opt.value;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  disabled={opt.disabled}
+                  className={`wz-mode-card ${active ? "on" : ""}`}
+                  onClick={() => set({ delivery_mode: opt.value })}
+                >
+                  <b>{opt.title}</b>
+                  <span>{opt.desc}</span>
+                </button>
+              );
+            })}
+          </div>
         </Row>
         <Row
           label={bi("集群标识", "Cluster ID")}
@@ -2317,15 +2477,23 @@ function DeliveryForm({
             </div>
           )}
         </Row>
-        <div className="fgrid">
-          <Row
-            ai="platform"
-            label={bi("操作系统", "OS Platform")}
-            hint={
-              dep.delivery_mode === "configuration"
+        <Row
+          ai="platform"
+          label={bi("操作系统", "OS Platform")}
+          wide
+          hint={
+            dep.delivery_mode === "configuration"
+              ? bi(
+                  "配置文件按这个系统和组件版本生成；不需要安装运行环境",
+                  "Configs are rendered for this OS and version; no execution runtime needed",
+                )
+              : !verify &&
+                  platformChoices.some(
+                    (x) => versionsFor(app, x.id, false).length === 0,
+                  )
                 ? bi(
-                    "配置文件按这个系统和组件版本生成；不需要安装运行环境",
-                    "Configs are rendered for this OS and version; no execution runtime needed",
+                    "正式交付仅开放已发布的操作系统；标有「未发布」的系统仅维护者可通过组件测试通道验证",
+                    "Formal deliveries only allow published OSes; unpublished OSes can only be tested via the maintainer test channel",
                   )
                 : deployableIds.includes(platform)
                   ? bi(
@@ -2336,22 +2504,38 @@ function DeliveryForm({
                       "这个系统还没有 Ansible 运行环境，暂时不能生成交付",
                       "No Ansible runtime available for this OS yet; cannot generate delivery",
                     )
-            }
-          >
-            <Segmented
-              label={bi("操作系统", "OS Platform")}
-              value={platform}
-              onChange={pickPlatform}
-              options={(platformChoices.length
-                ? platformChoices
-                : [{ id: platform, title: platform, deployable: true }]
-              ).map((x) => ({
+          }
+        >
+          <Segmented
+            label={bi("操作系统", "OS Platform")}
+            value={platform}
+            onChange={pickPlatform}
+            options={(platformChoices.length
+              ? platformChoices
+              : [{ id: platform, title: platform, deployable: true }]
+            ).map((x) => {
+              const osReleased = versionsFor(app, x.id, false).length > 0;
+              const osSelectable = versionsFor(app, x.id, !!verify).length > 0;
+              return {
                 value: x.id,
-                label: <OsName id={x.id} title={x.title} />,
-                disabled: dep.delivery_mode !== "configuration" && !x.deployable,
-              }))}
-            />
-          </Row>
+                label: (
+                  <span className="wz-os-opt">
+                    <OsName id={x.id} title={x.title} />
+                    {!osReleased && (
+                      <em className="wz-os-unver">
+                        {bi("未发布", "Unpublished")}
+                      </em>
+                    )}
+                  </span>
+                ),
+                disabled:
+                  !osSelectable ||
+                  (dep.delivery_mode !== "configuration" && !x.deployable),
+              };
+            })}
+          />
+        </Row>
+        <div className="fgrid">
           <Row
             label={bi("版本", "Version")}
             hint={versionNote(main?.version || app.version)}
@@ -2361,10 +2545,26 @@ function DeliveryForm({
               label={bi("版本", "Version")}
               value={main?.version || app.version}
               onChange={pickVersion}
-              options={versionsFor(app, platform).map((v) => ({
-                value: v.id,
-                label: v.id,
-              }))}
+              options={(declaredVersionsFor(app, platform).length
+                ? declaredVersionsFor(app, platform)
+                : versionsFor(app, platform, !!verify)
+              ).map((v) => {
+                const released = isVersionPlatformReleased(v, platform);
+                return {
+                  value: v.id,
+                  label: (
+                    <span className="wz-os-opt">
+                      <span>{v.id}</span>
+                      {!released && (
+                        <em className="wz-os-unver">
+                          {bi("未发布", "Unpublished")}
+                        </em>
+                      )}
+                    </span>
+                  ),
+                  disabled: !verify && !released,
+                };
+              })}
             />
           </Row>
           <Row
@@ -3053,7 +3253,7 @@ function DeliveryForm({
               </span>
               {i.auto && <span className="flag info">{bi("自动", "Auto")}</span>}
               {i.status !== "published" && (
-                <span className="flag warn">{bi("待验证", "Unverified")}</span>
+                <span className="flag warn">{bi("未发布", "Unpublished")}</span>
               )}
               {/* an entry's address in full, on its own line: the diagram has room only for a shortened one */}
               {Object.values(i.fronts || {}).map((f) =>
@@ -3138,10 +3338,15 @@ function DeliveryForm({
                     "配置交付说明 · 部署规格",
                     "Config guide · Deployment spec",
                   )
-                : bi(
-                    `环境准备 · 部署 · 功能测试${lbInstances.length ? " · 入口测试" : ""} · 清理`,
-                    `Preflight · Deploy · Smoke test${lbInstances.length ? " · Entry test" : ""} · Cleanup`,
-                  )}
+                : dep.delivery_mode === "automatic"
+                  ? bi(
+                      `自动执行准备 · 自动部署 · 功能测试${lbInstances.length ? " · 入口测试" : ""} · 清理`,
+                      `Auto Prep · Auto Deploy · Smoke Tests${lbInstances.length ? " · Entry Tests" : ""} · Cleanup`,
+                    )
+                  : bi(
+                      `环境准备（含免密）· 离线部署 · 功能测试${lbInstances.length ? " · 入口测试" : ""} · 清理`,
+                      `Prep (SSH trust) · Offline Deploy · Smoke Tests${lbInstances.length ? " · Entry Tests" : ""} · Cleanup`,
+                    )}
             </span>
           </div>
         </div>
@@ -3531,10 +3736,15 @@ function DeliveryForm({
                     "仅生成配置文件包，不连接目标服务器",
                     "Generates configuration bundle only; no target connection",
                   )
-                : bi(
-                    "生成部署材料与手册，随后进入部署页启动执行",
-                    "Generates deployment bundles & runbook, then opens the job page",
-                  )}
+                : dep.delivery_mode === "automatic"
+                  ? bi(
+                      "生成自动化交付包与执行计划，随后进入交付页连接执行节点并启动自动执行",
+                      "Generates automated delivery bundle & plan, then opens the job page to connect an executor",
+                    )
+                  : bi(
+                      "生成离线安装包与手工执行手册，随后进入交付页下载并按步操作",
+                      "Generates offline bundles & manual runbook, then opens the job page",
+                    )}
             </span>
             <div className="row-gap">
               <Button onClick={() => setReview(false)}>
@@ -3556,6 +3766,13 @@ function DeliveryForm({
       >
         {review && (
           <div className="review">
+            <DeliverySecurityNotice
+              platform={dep.platform || pv?.platforms?.[0] || ""}
+              instances={(pv?.instances || []).map((i) => ({
+                component: i.component,
+                version: i.version,
+              }))}
+            />
             {revise && revBase && (
               <div className="review-block">
                 <h4>
@@ -3971,6 +4188,97 @@ function AddonTarget({
           aria-label={bi(`${label} 目标数据库`, `Target databases for ${label}`)}
         />
       )}
+    </div>
+  );
+}
+
+function DeliverySecurityNotice({
+  platform,
+  instances,
+}: {
+  platform: string;
+  instances: { component: string; version: string }[];
+}) {
+  const [summary, setSummary] = useState<SecSummaryPayload | null>(null);
+  useEffect(() => {
+    if (!can("security.view")) return;
+    let alive = true;
+    api<SecSummaryPayload>("/api/security/summary")
+      .then((res) => {
+        if (alive) setSummary(res);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  if (!summary?.has_scan || !summary.policy?.warn_delivery_critical) return null;
+  const mwOnly = Boolean(summary.policy?.gate_middleware_only);
+  const risks = instances
+    .map((inst) => summary.component_risks[`${inst.component}@${inst.version}@${platform}`])
+    .filter((b): b is NonNullable<typeof b> => {
+      if (!b) return false;
+      const c = mwOnly ? (b.middleware_critical ?? 0) : b.critical;
+      const h = mwOnly ? (b.middleware_high ?? 0) : b.high;
+      return c > 0 || h > 0;
+    });
+  if (risks.length === 0) return null;
+
+  const totalCrit = risks.reduce(
+    (s, r) => s + (mwOnly ? (r.middleware_critical ?? 0) : r.critical),
+    0,
+  );
+  const totalHigh = risks.reduce(
+    (s, r) => s + (mwOnly ? (r.middleware_high ?? 0) : r.high),
+    0,
+  );
+  const mwCrit = risks.reduce((s, r) => s + (r.middleware_critical ?? 0), 0);
+  const mwHigh = risks.reduce((s, r) => s + (r.middleware_high ?? 0), 0);
+  const osCrit = risks.reduce((s, r) => s + (r.os_critical ?? 0), 0);
+  const osHigh = risks.reduce((s, r) => s + (r.os_high ?? 0), 0);
+
+  return (
+    <div
+      className="review-block"
+      style={{
+        borderColor: "rgba(217, 119, 6, 0.4)",
+        background: "rgba(217, 119, 6, 0.06)",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <b style={{ color: "#b45309", fontSize: 13 }}>
+          <IconExclamationCircleFill style={{ marginRight: 6 }} />
+          {mwOnly
+            ? bi(
+                `安全中心提醒：所选组件本体存在 ${totalCrit} 个严重 / ${totalHigh} 个高危未豁免 CVE`,
+                `Security Notice: Selected middleware has ${totalCrit} Critical / ${totalHigh} High unwaived CVEs`,
+              )
+            : bi(
+                `安全中心提醒：存在 ${totalCrit} 个严重 / ${totalHigh} 个高危未豁免 CVE（中间件本体 ${mwCrit} 严/${mwHigh} 高 · OS 底层包 ${osCrit} 严/${osHigh} 高）`,
+                `Security Notice: ${totalCrit} Critical / ${totalHigh} High unwaived CVEs (Middleware ${mwCrit}C/${mwHigh}H · OS Base ${osCrit}C/${osHigh}H)`,
+              )}
+        </b>
+        <a
+          href="#/security/vulns"
+          style={{ fontSize: 12, whiteSpace: "nowrap" }}
+        >
+          {bi("前往安全中心查看 ↗", "Security Center ↗")}
+        </a>
+      </div>
+      <div className="muted small" style={{ marginTop: 4 }}>
+        {risks
+          .map((r) =>
+            mwOnly
+              ? `${r.component} ${r.version}（中间件 严 ${r.middleware_critical ?? 0} / 高 ${r.middleware_high ?? 0}）`
+              : `${r.component} ${r.version}（中间件 严 ${r.middleware_critical ?? 0}/高 ${r.middleware_high ?? 0}，OS 底层 严 ${r.os_critical ?? 0}/高 ${r.os_high ?? 0}）`,
+          )
+          .join("；")}
+        {bi(
+          " — 本提醒不阻断生成交付，建议交付后在集群「安全」页跟进补丁升级或配置缓解演练。",
+          " — Non-blocking notice. Follow up in the cluster Security tab after delivery.",
+        )}
+      </div>
     </div>
   );
 }

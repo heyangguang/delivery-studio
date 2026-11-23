@@ -41,3 +41,7 @@
     dest: "{{ pg_state }}/pg_tde_keyfile.sha256"
     content: "{{ pg_keyfile_sum.stat.checksum }}  /etc/postgresql/keys/pg_tde_keyfile\n"
     mode: '0600'
+
+- name: 密钥同步后等待各节点就绪
+  ansible.builtin.include_tasks: _wait_ready.yml
+  when: pg_ha | bool

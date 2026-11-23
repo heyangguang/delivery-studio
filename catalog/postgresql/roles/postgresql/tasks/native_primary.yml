@@ -32,5 +32,6 @@
   loop:
     - {name: postgres, password: "{{ mw.secrets.postgres }}"}
     - {name: replicator, password: "{{ mw.secrets.replicator }}"}
+  register: native_pw_set
   no_log: true
   changed_when: true

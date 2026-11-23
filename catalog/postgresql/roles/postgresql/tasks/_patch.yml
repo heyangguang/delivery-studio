@@ -9,6 +9,7 @@
       postgresql:
         parameters: "{{ pg_patch_settings }}"
     status_code: 200
+  register: pg_patch_dcs
   when: pg_ha | bool
 
 - name: 更新集群配置（ALTER SYSTEM）
@@ -17,5 +18,12 @@
   loop: "{{ pg_patch_settings | dict2items }}"
   loop_control:
     label: "{{ item.key }}"
+  register: pg_patch_alter
   when: not (pg_ha | bool)
   changed_when: true
+
+- name: 重载配置以应用改动并标记待重启参数
+  ansible.builtin.command:
+    argv: "{{ pg_psql + ['-d', 'postgres', '-c', 'SELECT pg_reload_conf()'] }}"
+  when: not (pg_ha | bool)
+  changed_when: false

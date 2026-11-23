@@ -6,4 +6,8 @@ hosts: first:primary
 when: count(roles.replica) > 0
 skip: 单节点没有切换
 expect: 哨兵指向的主库改变，其余节点都是 slave 且链路 up。
+timeout: 600
+postconditions:
+  - rd_mi.rc == 0
+  - ('connected_slaves:' ~ rd_replica_count) in rd_mi.stdout
 run: {role: redis, tasks: test_switch}

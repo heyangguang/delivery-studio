@@ -464,8 +464,20 @@ func (s *solver) build(sp InstanceSpec, auto bool, reason string) *Instance {
 	}
 	inst := &Instance{ID: sp.ID, Component: c.Name, Version: ver, Title: c.Title, R: r, Auto: auto, AutoReason: reason,
 		External: c.Kind == "external", Roles: map[string][]string{}, Uses: map[string]*Use{}, Spec: sp, Fronts: map[string]FrontFacts{}, controller: s.plan.Controller, cluster: s.plan.Dep.ID}
-	if r.Version.Status != "published" {
-		s.warn(path, "%s %s 的状态是「%s」，尚未在空环境验证，不要用于生产", c.Title, ver, statusName(r.Version.Status))
+	targetOS := s.plan.Platform.ID
+	if targetOS == "" {
+		targetOS = s.plan.Dep.Platform
+	}
+	if st := r.PlatformStatus(targetOS); st != "published" {
+		if r.Version.Status == "published" && targetOS != "" {
+			plTitle := targetOS
+			if def, ok := PlatformByID(targetOS); ok {
+				plTitle = def.Title
+			}
+			s.warn(path, "%s %s 在 %s 上尚未实测验证，不要用于生产", c.Title, ver, plTitle)
+		} else {
+			s.warn(path, "%s %s 的状态是「%s」，尚未在空环境验证，不要用于生产", c.Title, ver, statusName(r.Version.Status))
+		}
 	}
 	// Placement
 	if inst.External {
@@ -527,25 +539,32 @@ func defaultVersion(c *Component) string { return defaultVersionFor(c, "") }
 // defaultVersionFor does the same among the versions that support the platform (any, when platform is empty).
 func defaultVersionFor(c *Component, platform string) string {
 	best := ""
-	pick := func(published bool) {
+	pick := func(mode int) {
 		for _, v := range c.Versions {
-			if published && v.Status != "published" {
+			r, err := c.Resolve(v.ID)
+			if err != nil {
 				continue
 			}
-			if platform != "" {
-				r, err := c.Resolve(v.ID)
-				if err != nil || (len(r.Platforms) > 0 && !contains(r.Platforms, platform)) {
-					continue
-				}
+			if platform != "" && len(r.Platforms) > 0 && !contains(r.Platforms, platform) {
+				continue
+			}
+			if mode == 2 && r.PlatformStatus(platform) != "published" {
+				continue
+			}
+			if mode == 1 && v.Status != "published" {
+				continue
 			}
 			if best == "" || CompareVersions(v.ID, best) > 0 {
 				best = v.ID
 			}
 		}
 	}
-	pick(true)
+	pick(2)
 	if best == "" {
-		pick(false)
+		pick(1)
+	}
+	if best == "" {
+		pick(0)
 	}
 	if best == "" && platform != "" {
 		return defaultVersion(c)

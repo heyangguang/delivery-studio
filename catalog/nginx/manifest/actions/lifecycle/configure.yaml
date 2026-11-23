@@ -2,4 +2,8 @@
   title: 写入并校验 Nginx 配置
   desc: 在 stream 块中为每个绑定的端点生成 upstream 与监听，写入前先用 nginx -t 校验。
   effect: change
+  timeout: 300
+  expect: Nginx 配置已写入且 nginx -t 校验通过。
+  postconditions:
+    - nginx_cfg_valid.rc == 0
   run: {role: nginx, tasks: configure}

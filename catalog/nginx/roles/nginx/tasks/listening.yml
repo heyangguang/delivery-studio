@@ -2,6 +2,7 @@
   ansible.builtin.wait_for:
     port: "{{ item.listen }}"
     timeout: 10
+  register: nginx_listeners
   loop: "{{ mw.binds }}"
   loop_control:
     label: "{{ item.name }}:{{ item.listen }}"

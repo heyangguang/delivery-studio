@@ -152,17 +152,18 @@ type Overlay struct {
 
 // Version is one installable release of the component.
 type Version struct {
-	ID      string `yaml:"id" json:"id"`
-	Extends string `yaml:"extends" json:"extends,omitempty"`
-	Status  string `yaml:"status" json:"status"` // draft | verifying | published
+	ID                string   `yaml:"id" json:"id"`
+	Extends           string   `yaml:"extends" json:"extends,omitempty"`
+	Status            string   `yaml:"status" json:"status"` // draft | verifying | published
+	VerifiedPlatforms []string `yaml:"verified_platforms,omitempty" json:"verified_platforms,omitempty"`
 	// Released and Notes say what this version brings, for people choosing whether to upgrade to it.
-	Released  string   `yaml:"released" json:"released,omitempty"`
+	Released  string     `yaml:"released" json:"released,omitempty"`
 	Notes     []string   `yaml:"notes" json:"notes,omitempty"`
 	Platforms []string   `yaml:"platforms" json:"platforms,omitempty"`
 	Packages  []Package  `yaml:"packages" json:"packages,omitempty"`
-	Artifacts   []Artifact `yaml:"artifacts" json:"artifacts,omitempty"`
-	Overlay     `yaml:",inline"`
-	Remove      Remove `yaml:"remove" json:"remove,omitempty"`
+	Artifacts []Artifact `yaml:"artifacts" json:"artifacts,omitempty"`
+	Overlay   `yaml:",inline"`
+	Remove    Remove `yaml:"remove" json:"remove,omitempty"`
 }
 
 // Remove drops inherited entries by key.

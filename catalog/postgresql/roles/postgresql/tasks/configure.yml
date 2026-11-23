@@ -28,6 +28,7 @@
     dest: "{{ pg_state }}/scope"
     content: "{{ pg_scope }}\n"
     mode: '0600'
+  register: pg_scope_written
 
 - name: 写入 Patroni 配置
   ansible.builtin.include_tasks: configure_patroni.yml
@@ -36,3 +37,8 @@
 - name: 创建并配置单节点数据库
   ansible.builtin.include_tasks: configure_single.yml
   when: not (pg_ha | bool)
+
+- name: 核对主配置文件已写入
+  ansible.builtin.stat:
+    path: "{{ '/etc/patroni/patroni.yml' if (pg_ha | bool) else ('/etc/postgresql/' ~ pg_major ~ '/main/postgresql.conf') }}"
+  register: pg_cfg_stat

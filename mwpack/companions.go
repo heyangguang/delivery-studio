@@ -81,7 +81,7 @@ func (s *solver) validateManagedContexts() {
 		if target == nil {
 			continue
 		}
-		if !reflect.DeepEqual(i.Params, target.Params) || !reflect.DeepEqual(i.Spec.Addons, target.Spec.Addons) {
+		if !managedParamsMatch(i, target) || !reflect.DeepEqual(i.Spec.Addons, target.Spec.Addons) {
 			s.bad("instances["+i.ID+"]", "管理组件的数据库参数及扩展必须跟随被管理对象")
 		}
 		if !reflect.DeepEqual(i.Roles, target.Roles) {
@@ -101,4 +101,17 @@ func (s *solver) validateManagedContexts() {
 			s.bad("instances["+i.ID+"]", "目标数据库未选择这个管理方案，不能独立接管")
 		}
 	}
+}
+
+// managedParamsMatch checks that every parameter declared on the companion manager matches
+// the managed database's effective value, without failing when the database component defines
+// additional custom parameters (e.g. via Component Workbench) that the manager does not declare.
+func managedParamsMatch(manager, target *Instance) bool {
+	for k, v := range manager.Params {
+		tv, ok := target.Params[k]
+		if !ok || !reflect.DeepEqual(v, tv) {
+			return false
+		}
+	}
+	return true
 }

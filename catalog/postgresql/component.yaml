@@ -5,6 +5,7 @@ title: PostgreSQL
 category: 数据库
 icon: database
 color: blue
+delivery_modes: [offline, automatic]
 summary: PostgreSQL 17：单机、原生主从复制、Patroni 自动高可用三种方案。普通主从不引入 Patroni 或 etcd。
 tags:
     - 高可用

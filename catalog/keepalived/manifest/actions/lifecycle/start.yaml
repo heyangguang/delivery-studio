@@ -1,4 +1,9 @@
 - id: start
   title: 启动 keepalived
   effect: change
+  timeout: 300
+  expect: keepalived 服务处于运行状态。
+  postconditions:
+    - keepalived_active.rc == 0
+    - (keepalived_active.stdout | trim) == 'active'
   run: {role: keepalived, tasks: start}

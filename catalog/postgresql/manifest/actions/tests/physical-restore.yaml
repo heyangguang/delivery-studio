@@ -2,6 +2,7 @@ id: physical-restore
 title: 物理备份隔离恢复
 desc: 用上一步的备份在控制节点启动一个只监听本机 socket 的隔离实例，核对测试标记后停止。
 effect: change
+timeout: 7200
 hosts: first:primary
 when: params.deployment_mode in ['legacy', 'single'] && (count(roles.replica) > 0)
 skip: 单节点没有物理备份可恢复

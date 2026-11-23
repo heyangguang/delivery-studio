@@ -1,4 +1,10 @@
 - id: start
   title: 启动 Nginx
   effect: change
+  timeout: 300
+  expect: Nginx 服务处于运行状态并监听所有绑定端口。
+  postconditions:
+    - nginx_active.rc == 0
+    - (nginx_active.stdout | trim) == 'active'
+    - nginx_listeners is succeeded
   run: {role: nginx, tasks: start}

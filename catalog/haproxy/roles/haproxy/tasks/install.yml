@@ -2,3 +2,8 @@
   ansible.builtin.include_role:
     name: mw_packages
     tasks_from: install
+
+- name: 核对 HAProxy 版本
+  ansible.builtin.command: haproxy -v
+  register: haproxy_version
+  changed_when: false

@@ -1,5 +1,9 @@
 id: listening
 title: 监听端口
 effect: read-only
+timeout: 300
 expect: 每个绑定的端口都在监听。
+postconditions:
+  - nginx_listeners is succeeded
+  - (nginx_listeners.results | length) == (mw.binds | length)
 run: {role: nginx, tasks: listening}

@@ -71,6 +71,9 @@ func (c *compStore) liveSet(name string) (fileSet, string, error) {
 		if err != nil {
 			return nil, "", err
 		}
+		if name == sharedPlatformName {
+			refreshSharedManagedFiles(set)
+		}
 		if isBuiltin {
 			return set, "override", nil
 		}
@@ -183,6 +186,9 @@ func (c *compStore) readDraft(name string) (fileSet, draftMeta, error) {
 		return nil, meta, fmt.Errorf("草稿信息损坏：%w", err)
 	}
 	set, err := readFileSetDir(filepath.Join(c.work(name), "files"))
+	if err == nil && name == sharedPlatformName {
+		refreshSharedManagedFiles(set)
+	}
 	return set, meta, err
 }
 

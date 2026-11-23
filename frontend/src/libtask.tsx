@@ -3,7 +3,6 @@ import { Button } from "@arco-design/web-react";
 import {
   IconCheck,
   IconCheckCircleFill,
-  IconClose,
   IconCloseCircleFill,
   IconCode,
   IconCopy,
@@ -768,10 +767,10 @@ export function TaskCard({
               type="text"
               size="mini"
               className="tk-close"
-              icon={<IconClose />}
               onClick={onClose}
-              aria-label={bi("关闭这条记录", "Dismiss this task")}
-            />
+            >
+              {bi("收起", "Hide")}
+            </Button>
           )}
         </div>
       </div>

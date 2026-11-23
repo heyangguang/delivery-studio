@@ -16,4 +16,5 @@
 
 - name: 核对协调存储驱动
   ansible.builtin.command: /usr/bin/python3 -c "import patroni.dcs.etcd3, OpenSSL.SSL"
+  register: pg_patroni_driver
   changed_when: false

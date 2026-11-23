@@ -3,6 +3,7 @@ title: TLS 策略与负向验证
 desc: 先检查执行节点与当前主库；高可用集群中若相同，先计划切主并验证复制及入口跟随，可能短暂中断连接，结束后不自动回切。单节点要求入口支持自身回流。随后按入口验收 sslmode 验证入口及每个节点，域名校验名称与连接 IP 分离，节点使用数据库端口。verify-full 按 dns、ip 或 both 验证身份；verify-ca 不测试名称拒绝；require、prefer、allow 不强加 CA 或身份校验。当前服务端启用 TLS 时拒绝明文。
 scope: endpoint:writer
 effect: disruptive
+timeout: 7200
 hosts: first:primary
 when: params.deployment_mode in ['legacy', 'single'] && (params.tls)
 skip: 未启用 TLS

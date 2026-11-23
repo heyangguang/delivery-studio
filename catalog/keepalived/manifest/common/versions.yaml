@@ -1,5 +1,6 @@
 - id: "2.2"
-  status: draft
+  status: published
+  verified_platforms: [ubuntu-24.04-amd64]
   platforms: [ubuntu-24.04-amd64, el9-amd64]
   packages:
     - {name: keepalived, version: "1:2.2.8-1build2", platforms: [ubuntu-24.04-amd64]}

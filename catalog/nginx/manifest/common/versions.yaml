@@ -1,13 +1,16 @@
 - id: "1.24"
-  status: draft
+  status: published
+  verified_platforms: [ubuntu-24.04-amd64]
   platforms: [ubuntu-24.04-amd64]
   packages:
     - {name: nginx, version: "1.24.0-2ubuntu7.18"}
     - {name: libnginx-mod-stream, version: "1.24.0-2ubuntu7.18"}
 - id: "1.26"
   extends: "1.24"
-  status: draft
-  platforms: [el9-amd64]
+  status: published
+  verified_platforms: [ubuntu-24.04-amd64]
+  platforms: [ubuntu-24.04-amd64, el9-amd64]
   packages:
-    - {name: nginx, version: "1.26.3-9.module+el9.8.0+40317+f33384ab.4"}
-    - {name: nginx-mod-stream, version: "1.26.3-9.module+el9.8.0+40317+f33384ab.4"}
+    - {name: nginx, version: "1.26.3-1~noble", platforms: [ubuntu-24.04-amd64]}
+    - {name: nginx, version: "1.26.3-9.module+el9.8.0+40317+f33384ab.4", platforms: [el9-amd64]}
+    - {name: nginx-mod-stream, version: "1.26.3-9.module+el9.8.0+40317+f33384ab.4", platforms: [el9-amd64]}

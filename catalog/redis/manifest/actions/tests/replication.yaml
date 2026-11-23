@@ -6,4 +6,8 @@ hosts: first:primary
 when: count(roles.replica) > 0
 skip: 单节点没有复制可测
 expect: 从库读到与主库相同的值，从库写入返回 READONLY，无密码连接返回 NOAUTH。
+timeout: 600
+postconditions:
+  - rd_mi.rc == 0
+  - ('connected_slaves:' ~ rd_replica_count) in rd_mi.stdout
 run: {role: redis, tasks: test_replication}

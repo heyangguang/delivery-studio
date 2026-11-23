@@ -2,4 +2,8 @@
   title: 写入 keepalived 配置
   desc: 第一台机器为 MASTER，其余为 BACKUP；使用单播通告。
   effect: change
+  timeout: 300
+  expect: keepalived 单播与 VRRP 配置已写入。
+  postconditions:
+    - keepalived_cfg is succeeded
   run: {role: keepalived, tasks: configure}

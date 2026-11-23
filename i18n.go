@@ -161,6 +161,8 @@ var goExactMessages = func() map[string]string {
 }()
 
 var goPrefixTranslations = []struct{ zh, en string }{
+	{"连接或只读检查失败：", "Connection or read-only check failed: "},
+	{"运行环境尚未安装完成：", "Runtime environment is not fully installed yet: "},
 	{"生成标准模板失败：", "Failed to generate starter template: "},
 	{"生成 Word 失败：", "Failed to generate Word document: "},
 	{"AI 暂时没有回应：", "AI did not respond: "},
@@ -263,6 +265,36 @@ func init() {
 		}},
 		{regexp.MustCompile(`^该节点仍有未结束的执行（集群 (.+?)），请先结束或关闭后再删除$`), func(_ string, m []string) string {
 			return fmt.Sprintf("Node still has an active execution for cluster %s; finish or close it before deleting", m[1])
+		}},
+		{regexp.MustCompile(`^名称解析未就绪：([^ ]+) 解析为 (.+?)，交付要求 ([^；]+)；(.+)$`), func(_ string, m []string) string {
+			return fmt.Sprintf("Name resolution not ready: %s resolved to %s, plan expects %s; complete environment preparation (hostname and /etc/hosts)", m[1], m[2], m[3])
+		}},
+		{regexp.MustCompile(`^([^ ]+) 的 Agent 尚未确认公钥写入；请先连接 Agent，稍后重新检查$`), func(_ string, m []string) string {
+			return fmt.Sprintf("Agent on %s has not confirmed public key write yet; connect the Agent and re-check shortly", m[1])
+		}},
+		{regexp.MustCompile(`^检查通过$`), func(_ string, _ []string) string {
+			return "Checks passed"
+		}},
+		{regexp.MustCompile(`^执行机器与系统$`), func(_ string, _ []string) string {
+			return "Execution Host & OS"
+		}},
+		{regexp.MustCompile(`^交付运行环境与版本$`), func(_ string, _ []string) string {
+			return "Delivery Runtime & Version"
+		}},
+		{regexp.MustCompile(`^软件材料与已有凭据$`), func(_ string, _ []string) string {
+			return "Artifacts & Existing Secrets"
+		}},
+		{regexp.MustCompile(`^连接、身份与运行权限$`), func(_ string, _ []string) string {
+			return "Connectivity, Identity & Privileges"
+		}},
+		{regexp.MustCompile(`^已通过执行准备检查核验$`), func(_ string, _ []string) string {
+			return "Verified by execution pre-flight checks"
+		}},
+		{regexp.MustCompile(`^交付方式只能选择 offline、automatic 或 configuration$`), func(_ string, _ []string) string {
+			return "Delivery mode must be offline, automatic, or configuration"
+		}},
+		{regexp.MustCompile(`^([^ ]+) 的当前修订不支持自动执行$`), func(_ string, m []string) string {
+			return fmt.Sprintf("Current revision of %s does not support automated execution", m[1])
 		}},
 		{regexp.MustCompile(`^这个执行机的软件源端口已用于集群 (.+?)，请在新交付中选择另一端口$`), func(_ string, m []string) string {
 			return fmt.Sprintf("Repository port on this execution host is already used by cluster %s; pick another port", m[1])

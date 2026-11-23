@@ -51,10 +51,19 @@ func escalation(p string) string {
 
 func cleanPerms(in []string) ([]string, bool) {
 	seen := map[string]bool{}
-	out := []string{}
+	hasAIUse := false
 	for _, p := range in {
 		if _, ok := permIndex[p]; !ok {
 			return nil, false
+		}
+		if p == "ai.use" {
+			hasAIUse = true
+		}
+	}
+	out := []string{}
+	for _, p := range in {
+		if isAIFeaturePerm(p) && !hasAIUse {
+			continue
 		}
 		if !seen[p] {
 			seen[p] = true
@@ -120,6 +129,12 @@ func (s *storeServer) handleIAM(w http.ResponseWriter, r *http.Request, session 
 			}
 		}
 		in.Perms, in.Builtin = ps, false
+		for _, p := range ps {
+			if isAIFeaturePerm(p) {
+				in.GranularAI = true
+				break
+			}
+		}
 		if len(parts) == 1 {
 			if len(st.Roles) >= 50 {
 				s.fail(w, 409, "最多 50 个自定义角色")
@@ -314,6 +329,7 @@ func (s *storeServer) iamView(st iamState) map[string]any {
 	}
 	roles := []roleView{}
 	for _, r := range st.allRoles() {
+		r.Perms = expandRolePerms(r)
 		roles = append(roles, roleView{r, holders[r.ID]})
 	}
 	type teamView struct {

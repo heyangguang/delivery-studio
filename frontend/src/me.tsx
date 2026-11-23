@@ -5,24 +5,26 @@ import {
   Empty,
   Input,
   Message,
-  Modal,
   Popconfirm,
   Skeleton,
 } from "@arco-design/web-react";
 import {
   IconBook,
-  IconDelete,
-  IconEdit,
-  IconEye,
-  IconFile,
+  IconCheckCircleFill,
+  IconCloseCircleFill,
+  IconCodeSquare,
+  IconDesktop,
+  IconDown,
+  IconHistory,
   IconLink,
   IconLock,
-  IconPlus,
+  IconMobile,
   IconPoweroff,
+  IconRefresh,
   IconRight,
-  IconSearch,
+  IconSafe,
   IconStorage,
-  IconUpload,
+  IconUp,
   IconUser,
 } from "@arco-design/web-react/icon";
 import {
@@ -41,24 +43,17 @@ import {
   useAIStatus,
   useConnectivity,
 } from "./shared";
-import { StatusDot } from "./ui";
 import type { Outcome, Session } from "./shared";
 import { go } from "./router";
-import {
-  auditText,
-  browser,
-  SESSION_REASON,
-} from "./audit";
+import { auditText, browser, deviceKind, SESSION_REASON } from "./audit";
 import type { AuditSessionRow } from "./audit";
 import { Avatar } from "./accounts";
 import { EffectivePerms, roleTitle } from "./iam";
 import type { Perm } from "./iam";
-import { Markdown } from "./aimd";
 import { bi, getLang, useLang } from "./i18n";
 import "./me.css";
 
-/* My account: who I am, what I did lately, and what my own conversations with the assistant draw on — my skills, my
-   outside services and my knowledge base. Nobody else sees any of it. Managing other accounts is in IAM. */
+/* My account: profile overview, personal AI resources, active sessions, password management, and sign-in history. */
 
 type Me = {
   access?: { perms: Perm[]; scope: string; roles: string[]; teams: string[] };
@@ -91,7 +86,7 @@ type Activity = {
     state: string;
     outcome?: Outcome;
     created: string;
-    delivery_mode?: "offline" | "configuration";
+    delivery_mode?: "offline" | "automatic" | "configuration";
   }[];
 };
 
@@ -162,94 +157,106 @@ export function MePage({
 
   return (
     <div className="me-page">
-      <header className="me-hero">
-        <Avatar name={me.username} role={me.role} size={68} />
-        <div className="me-who">
-          <h1>{me.username}</h1>
-          <span className="me-chips">
-            {(info?.access?.roles || []).map((r) => (
-              <span key={r} className="me-chip role">
-                {roleTitle({ name: r })}
-              </span>
-            ))}
-            {(info?.access?.teams || []).map((t) => (
-              <span key={t} className="me-chip team">
-                {t}
-              </span>
-            ))}
+      <section className="me-banner">
+        <header className="me-hero">
+          <Avatar name={me.username} role={me.role} size={58} />
+          <div className="me-who">
+            <div className="me-name-row">
+              <h1>{me.username}</h1>
+              {(info?.access?.roles || []).map((r) => (
+                <span key={r} className="me-chip role">
+                  {roleTitle({ name: r })}
+                </span>
+              ))}
+              {(info?.access?.teams || []).map((t) => (
+                <span key={t} className="me-chip team">
+                  {t}
+                </span>
+              ))}
+            </div>
             {act && (
-              <span className="me-facts-inline">
-                {act.jobs.length
-                  ? bi(
-                      `${act.jobs.length} 份交付`,
-                      `${act.jobs.length} ${act.jobs.length === 1 ? "delivery" : "deliveries"}`,
-                    )
-                  : bi("还没有交付", "No deliveries yet")}
-                {aiStatus.enabled && act.ai.calls
-                  ? bi(
-                      ` · 本月问了 AI ${act.ai.calls} 次`,
-                      ` · ${act.ai.calls} AI ${act.ai.calls === 1 ? "query" : "queries"} this month`,
-                    )
-                  : ""}
-              </span>
+              <p className="me-facts-inline">
+                <span>
+                  {act.jobs.length
+                    ? bi(
+                        `${act.jobs.length} 份交付`,
+                        `${act.jobs.length} ${act.jobs.length === 1 ? "delivery" : "deliveries"}`,
+                      )
+                    : bi("还没有交付", "No deliveries yet")}
+                </span>
+                {aiStatus.enabled && act.ai.calls > 0 && (
+                  <>
+                    <i aria-hidden>·</i>
+                    <span>
+                      {bi(
+                        `本月问了 AI ${act.ai.calls} 次`,
+                        `${act.ai.calls} AI ${act.ai.calls === 1 ? "query" : "queries"} this month`,
+                      )}
+                    </span>
+                  </>
+                )}
+              </p>
+            )}
+          </div>
+          <span className="me-hero-acts">
+            {cur !== "security" && (
+              <Button icon={<IconLock />} onClick={() => open("security")}>
+                {bi("登录与安全", "Security")}
+              </Button>
+            )}
+            {can("iam.user|iam.role|iam.team|audit.view") && (
+              <Button onClick={() => go({ name: "accounts" })}>
+                IAM <IconRight />
+              </Button>
             )}
           </span>
-        </div>
-        <span className="me-hero-acts">
-          <Button icon={<IconLock />} onClick={() => open("security")}>
-            {bi("修改密码", "Change Password")}
-          </Button>
-          {can("iam.user|iam.role|iam.team|audit.view") && (
-            <Button onClick={() => go({ name: "accounts" })}>
-              IAM <IconRight />
-            </Button>
+        </header>
+        <div
+          className="me-tabs"
+          role="tablist"
+          aria-label={bi("我的账户", "My Account")}
+          ref={tabs}
+          onKeyDown={(e) => {
+            const i = SECTIONS.findIndex((s) => s.id === cur);
+            const d =
+              e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+            if (!d) return;
+            e.preventDefault();
+            const next = SECTIONS[(i + d + SECTIONS.length) % SECTIONS.length];
+            open(next.id);
+            window.setTimeout(
+              () =>
+                tabs.current
+                  ?.querySelector<HTMLElement>(`[data-k="${next.id}"]`)
+                  ?.focus(),
+              0,
+            );
+          }}
+        >
+          {bar && (
+            <span
+              className="me-tabs-bar"
+              style={{ transform: `translateX(${bar.x}px)`, width: bar.w }}
+              aria-hidden
+            />
           )}
-        </span>
-      </header>
-      <div
-        className="me-tabs"
-        role="tablist"
-        aria-label={bi("我的账户", "My Account")}
-        ref={tabs}
-        onKeyDown={(e) => {
-          const i = SECTIONS.findIndex((s) => s.id === cur);
-          const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
-          if (!d) return;
-          e.preventDefault();
-          const next = SECTIONS[(i + d + SECTIONS.length) % SECTIONS.length];
-          open(next.id);
-          window.setTimeout(
-            () =>
-              tabs.current
-                ?.querySelector<HTMLElement>(`[data-k="${next.id}"]`)
-                ?.focus(),
-            0,
-          );
-        }}
-      >
-        {bar && (
-          <span
-            className="me-tabs-bar"
-            style={{ transform: `translateX(${bar.x}px)`, width: bar.w }}
-            aria-hidden
-          />
-        )}
-        {SECTIONS.map((s) => (
-          <button
-            key={s.id}
-            type="button"
-            role="tab"
-            data-k={s.id}
-            aria-selected={cur === s.id}
-            tabIndex={cur === s.id ? 0 : -1}
-            className={cur === s.id ? "on" : ""}
-            onClick={() => open(s.id)}
-          >
-            {s.icon}
-            {s.title}
-          </button>
-        ))}
-      </div>
+          {SECTIONS.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              role="tab"
+              data-k={s.id}
+              aria-selected={cur === s.id}
+              tabIndex={cur === s.id ? 0 : -1}
+              className={cur === s.id ? "on" : ""}
+              onClick={() => open(s.id)}
+            >
+              {s.icon}
+              {s.title}
+            </button>
+          ))}
+        </div>
+      </section>
       <div className="me-body" key={cur}>
         {cur === "" && <Overview info={info} act={act} />}
         {cur === "security" && <SecurityView me={me} act={act} />}
@@ -266,6 +273,16 @@ function Overview({ info, act }: { info: Me | null; act: Activity | null }) {
   const cost = act
     ? `${act.currency === "USD" ? "$" : "¥"}${act.ai.cost >= 1 ? act.ai.cost.toFixed(2) : act.ai.cost.toFixed(4)}`
     : "—";
+  const clusters = useMemo(
+    () =>
+      (act?.jobs || [])
+        .filter(
+          (j, i, all) =>
+            all.findIndex((x) => x.cluster_id === j.cluster_id) === i,
+        )
+        .slice(0, 6),
+    [act?.jobs],
+  );
   const res = [
     {
       to: { name: "kb", id: "~my" } as const,
@@ -305,21 +322,27 @@ function Overview({ info, act }: { info: Me | null; act: Activity | null }) {
   return (
     <div className="me-ov enter">
       <div className="me-main">
-        <section className="me-sec">
-          <h2>{bi("最近的集群", "Recent Clusters")}</h2>
-          {!act ? (
-            <Skeleton animation text={{ rows: 3 }} />
-          ) : act.jobs.length === 0 ? (
-            <p className="me-empty">{bi("还没有交付。", "No deliveries yet.")}</p>
-          ) : (
-            <ul className="me-rows">
-              {act.jobs
-                .filter(
-                  (j, i, all) =>
-                    all.findIndex((x) => x.cluster_id === j.cluster_id) === i,
-                )
-                .slice(0, 6)
-                .map((j) => {
+        <section className="me-card">
+          <div className="me-card-h">
+            <div>
+              <h2>{bi("最近的集群", "Recent Clusters")}</h2>
+            </div>
+            {clusters.length > 0 && (
+              <span className="me-pill num">{clusters.length}</span>
+            )}
+          </div>
+          <div className="me-card-b me-card-b-list">
+            {!act ? (
+              <div className="me-pad">
+                <Skeleton animation text={{ rows: 3 }} />
+              </div>
+            ) : clusters.length === 0 ? (
+              <p className="me-empty">
+                {bi("还没有交付。", "No deliveries yet.")}
+              </p>
+            ) : (
+              <ul className="me-rows me-card-rows">
+                {clusters.map((j) => {
                   const ph = planPhase(j);
                   return (
                     <li key={j.id}>
@@ -355,98 +378,128 @@ function Overview({ info, act }: { info: Me | null; act: Activity | null }) {
                     </li>
                   );
                 })}
-            </ul>
-          )}
+              </ul>
+            )}
+          </div>
         </section>
-        <section className="me-sec">
-          <h2>{bi("最近的操作", "Recent Activity")}</h2>
-          {!act ? (
-            <Skeleton animation text={{ rows: 4 }} />
-          ) : act.events.length === 0 ? (
-            <p className="me-empty">
-              {bi(
-                "最近 30 天没有操作记录。",
-                "No activity in the last 30 days.",
-              )}
-            </p>
-          ) : (
-            <ol className="me-tl">
-              {act.events.slice(0, 12).map((e, i) => (
-                <li
-                  key={i}
-                  className={e.action.includes("failed") ? "bad" : ""}
-                >
-                  <i aria-hidden />
-                  <span>{auditText(e)}</span>
-                  <time className="faint small" title={fullTime(e.time)}>
-                    {ago(e.time)}
-                  </time>
-                </li>
-              ))}
-            </ol>
-          )}
+        <section className="me-card">
+          <div className="me-card-h">
+            <div>
+              <h2>{bi("最近的操作", "Recent Activity")}</h2>
+            </div>
+            {act && act.events.length > 0 && (
+              <span className="me-pill num">
+                {bi("近 30 天", "Last 30d")}
+              </span>
+            )}
+          </div>
+          <div className="me-card-b">
+            {!act ? (
+              <Skeleton animation text={{ rows: 4 }} />
+            ) : act.events.length === 0 ? (
+              <p className="me-empty">
+                {bi(
+                  "最近 30 天没有操作记录。",
+                  "No activity in the last 30 days.",
+                )}
+              </p>
+            ) : (
+              <ol className="me-tl">
+                {act.events.slice(0, 12).map((e, i) => (
+                  <li
+                    key={i}
+                    className={e.action.includes("failed") ? "bad" : ""}
+                  >
+                    <i aria-hidden />
+                    <span>{auditText(e)}</span>
+                    <time className="faint small" title={fullTime(e.time)}>
+                      {ago(e.time)}
+                    </time>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
         </section>
       </div>
       <aside className="me-aside">
         {aiStatus.enabled && (
           <>
-            <section className="me-sec">
-              <h2>{bi("AI 用到的我的资源", "My AI Resources")}</h2>
-              <ul className="me-res">
-                {res.map((o) => (
-                  <li key={o.k}>
-                    <button type="button" onClick={() => go(o.to)}>
-                      <span className={`rp-ic ${o.k}`}>{o.icon}</span>
-                      <span className="me-row-t">
-                        <b>{o.title}</b>
-                        <small>{o.n ? o.unit(o.n) : o.empty}</small>
+            <section className="me-card">
+              <div className="me-card-h">
+                <h2>{bi("本月用 AI", "AI Usage This Month")}</h2>
+              </div>
+              <div className="me-card-b">
+                {!act ? (
+                  <Skeleton animation text={{ rows: 1 }} />
+                ) : (
+                  <div className="me-ai-stats">
+                    <div className="me-ai-stat">
+                      <b className="num">{act.ai.calls}</b>
+                      <span>
+                        {bi(
+                          "对话次数",
+                          act.ai.calls === 1 ? "Query" : "Queries",
+                        )}
                       </span>
-                      <IconRight className="me-chev" />
-                    </button>
-                  </li>
-                ))}
-              </ul>
+                    </div>
+                    <div className="me-ai-stat">
+                      <b className="num">
+                        {(act.ai.in + act.ai.out).toLocaleString(getLang())}
+                      </b>
+                      <span>{bi("Token 用量", "Tokens")}</span>
+                    </div>
+                    <div className="me-ai-stat">
+                      <b className="num">{cost}</b>
+                      <span>{bi("预估费用", "Est. Cost")}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
             </section>
-            <section className="me-sec">
-              <h2>{bi("本月用 AI", "AI Usage This Month")}</h2>
-              {!act ? (
-                <Skeleton animation text={{ rows: 1 }} />
-              ) : (
-                <p className="me-facts">
-                  <span>
-                    <b className="num">{act.ai.calls}</b>{" "}
-                    {bi("次", act.ai.calls === 1 ? "call" : "calls")}
-                  </span>
-                  <span>
-                    <b className="num">
-                      {(act.ai.in + act.ai.out).toLocaleString(getLang())}
-                    </b>{" "}
-                    {bi("Token", "tokens")}
-                  </span>
-                  <span>
-                    {bi("约", "Est.")} <b className="num">{cost}</b>
-                  </span>
-                </p>
-              )}
+            <section className="me-card">
+              <div className="me-card-h">
+                <h2>{bi("AI 用到的我的资源", "My AI Resources")}</h2>
+              </div>
+              <div className="me-card-b">
+                <ul className="me-res">
+                  {res.map((o) => (
+                    <li key={o.k}>
+                      <button type="button" onClick={() => go(o.to)}>
+                        <span className={`rp-ic ${o.k}`}>{o.icon}</span>
+                        <span className="me-row-t">
+                          <b>{o.title}</b>
+                          <small>{o.n ? o.unit(o.n) : o.empty}</small>
+                        </span>
+                        <IconRight className="me-chev" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             </section>
           </>
         )}
-        <section className="me-sec">
-          <h2>{bi("我能做什么", "My Permissions")}</h2>
-          {info?.access ? (
-            <EffectivePerms
-              iam={{
-                perms: info.access.perms,
-                roles: [],
-                teams: [],
-                grants: {},
-              }}
-              perms={new Set(info.access.perms.map((p) => p.id))}
-              scope={info.access.scope}
-            />
-          ) : (
-            <Skeleton animation text={{ rows: 3 }} />
-          )}
+        <section className="me-card">
+          <div className="me-card-h">
+            <h2>{bi("我能做什么", "My Permissions")}</h2>
+          </div>
+          <div className="me-card-b">
+            {info?.access ? (
+              <EffectivePerms
+                iam={{
+                  perms: info.access.perms,
+                  roles: [],
+                  teams: [],
+                  grants: {},
+                }}
+                perms={new Set(info.access.perms.map((p) => p.id))}
+                scope={info.access.scope}
+              />
+            ) : (
+              <Skeleton animation text={{ rows: 3 }} />
+            )}
+          </div>
         </section>
       </aside>
     </div>
@@ -454,6 +507,77 @@ function Overview({ info, act }: { info: Me | null; act: Activity | null }) {
 }
 
 /* ---------------------------------------------------------------- sign-in and password */
+
+function passwordStrength(pw: string): {
+  level: 0 | 1 | 2 | 3 | 4;
+  label: string;
+  tone: string;
+  lenOK: boolean;
+  mixOK: boolean;
+  symOK: boolean;
+} {
+  const lenOK = pw.length >= 12;
+  const hasLower = /[a-z]/.test(pw);
+  const hasUpper = /[A-Z]/.test(pw);
+  const hasNum = /\d/.test(pw);
+  const hasSym = /[^A-Za-z0-9]/.test(pw);
+  const mixOK = (hasLower || hasUpper) && hasNum;
+  const symOK = hasSym || (hasLower && hasUpper);
+  if (!pw) {
+    return { level: 0, label: "", tone: "", lenOK, mixOK, symOK };
+  }
+  let score = 0;
+  if (lenOK) score++;
+  if (pw.length >= 16) score++;
+  if (mixOK) score++;
+  if (hasSym && hasUpper && hasLower) score++;
+  else if (symOK) score = Math.min(4, score + 1);
+  if (!lenOK) {
+    return {
+      level: 1,
+      label: bi("长度不足", "Too short"),
+      tone: "weak",
+      lenOK,
+      mixOK,
+      symOK,
+    };
+  }
+  if (score <= 2) {
+    return {
+      level: 2,
+      label: bi("中等", "Fair"),
+      tone: "mid",
+      lenOK,
+      mixOK,
+      symOK,
+    };
+  }
+  if (score === 3) {
+    return {
+      level: 3,
+      label: bi("较强", "Strong"),
+      tone: "good",
+      lenOK,
+      mixOK,
+      symOK,
+    };
+  }
+  return {
+    level: 4,
+    label: bi("极强", "Very strong"),
+    tone: "great",
+    lenOK,
+    mixOK,
+    symOK,
+  };
+}
+
+function DeviceIcon({ ua }: { ua?: string }) {
+  const kind = deviceKind(ua);
+  if (kind === "mobile") return <IconMobile />;
+  if (kind === "cli") return <IconCodeSquare />;
+  return <IconDesktop />;
+}
 
 function SecurityView({ me, act }: { me: Session; act: Activity | null }) {
   useLang();
@@ -463,14 +587,19 @@ function SecurityView({ me, act }: { me: Session; act: Activity | null }) {
   const [again, setAgain] = useState("");
   const [busy, setBusy] = useState(false);
   const [sessBusy, setSessBusy] = useState(false);
+  const [sessLoading, setSessLoading] = useState(false);
   const [sessErr, setSessErr] = useState("");
+  const [devFilter, setDevFilter] = useState<"all" | "browser" | "cli">("all");
+  const [showAllDevs, setShowAllDevs] = useState(false);
   const [sessData, setSessData] = useState<{
     current_session_id: string;
     active: AuditSessionRow[];
     history: AuditSessionRow[];
   } | null>(null);
+
   const loadSessions = () => {
     setSessErr("");
+    setSessLoading(true);
     api<typeof sessData>("/api/me/sessions")
       .then((d) => {
         setSessData(d);
@@ -481,11 +610,13 @@ function SecurityView({ me, act }: { me: Session; act: Activity | null }) {
           (e as Error).message ||
             bi("加载已登录设备失败", "Failed to load active sessions"),
         ),
-      );
+      )
+      .finally(() => setSessLoading(false));
   };
   useEffect(() => {
     loadSessions();
   }, [me.session_id]);
+
   const revokeOwn = async (id: string) => {
     try {
       await api(`/api/me/sessions/${encodeURIComponent(id)}`, {
@@ -522,8 +653,11 @@ function SecurityView({ me, act }: { me: Session; act: Activity | null }) {
       setSessBusy(false);
     }
   };
+
   const short = next.length > 0 && next.length < 12;
   const differ = again.length > 0 && again !== next;
+  const strength = useMemo(() => passwordStrength(next), [next]);
+
   const submit = async () => {
     setBusy(true);
     try {
@@ -547,15 +681,47 @@ function SecurityView({ me, act }: { me: Session; act: Activity | null }) {
       setBusy(false);
     }
   };
-  const signins = (act?.events || [])
-    .filter((e) =>
-      /^(login|logout|me-password|session-expired|session-revoke)/.test(
-        e.action,
-      ),
-    )
-    .slice(0, 15);
+
+  const signins = useMemo(
+    () =>
+      (act?.events || [])
+        .filter((e) =>
+          /^(login|logout|me-password|session-expired|session-revoke)/.test(
+            e.action,
+          ),
+        )
+        .slice(0, 20),
+    [act?.events],
+  );
+  const failedCount = useMemo(
+    () => signins.filter((e) => e.action === "login-failed").length,
+    [signins],
+  );
+
   const activeDevs = sessData?.active || [];
+  const currentDev = activeDevs.find((s) => s.current) || null;
   const otherCount = activeDevs.filter((s) => !s.current).length;
+  const browserCount = activeDevs.filter(
+    (s) => deviceKind(s.agent) !== "cli",
+  ).length;
+  const cliCount = activeDevs.length - browserCount;
+  const showTypeTabs = browserCount > 0 && cliCount > 0;
+
+  const filteredDevs = useMemo(() => {
+    const list = activeDevs.filter((s) => {
+      if (devFilter === "all") return true;
+      const isCLI = deviceKind(s.agent) === "cli";
+      return devFilter === "cli" ? isCLI : !isCLI;
+    });
+    // Ensure current device stays pinned at top
+    return [...list].sort((a, b) => Number(!!b.current) - Number(!!a.current));
+  }, [activeDevs, devFilter]);
+
+  const FOLD_LIMIT = 5;
+  const visibleDevs = showAllDevs
+    ? filteredDevs
+    : filteredDevs.slice(0, FOLD_LIMIT);
+  const hiddenCount = Math.max(0, filteredDevs.length - visibleDevs.length);
 
   return (
     <div className="me-pane me-secv enter">
@@ -583,262 +749,566 @@ function SecurityView({ me, act }: { me: Session; act: Activity | null }) {
         />
       )}
 
-      <section className="me-sec me-sess-sec">
-        <div className="me-sess-head">
-          <div>
-            <h2>{bi("已登录设备", "Active Devices")}</h2>
-            <p className="faint small">
-              {bi(
-                "管理当前账号在线的浏览器或终端，并可随时远程退出其他设备。",
-                "Manage browsers and terminals currently signed in to your account, or remotely sign out other devices.",
-              )}
-            </p>
+      {/* Top 3-card security summary strip */}
+      <div className="me-sec-kpis">
+        <div className="me-kpi">
+          <div className="me-kpi-ic ok">
+            <IconSafe />
           </div>
-          <div className="me-sess-acts">
-            {sessData && (
-              <span className="me-sess-sum num">
-                {bi(`${activeDevs.length} 台在线`, `${activeDevs.length} online`)}
-              </span>
-            )}
-            {otherCount > 0 && (
-              <Popconfirm
-                title={bi(
-                  `确定退出除本机之外的其他 ${otherCount} 台设备？`,
-                  `Sign out all ${otherCount} other ${otherCount === 1 ? "device" : "devices"}?`,
-                )}
-                onOk={revokeOthers}
-              >
-                <Button
-                  size="small"
-                  loading={sessBusy}
-                  icon={<IconPoweroff />}
-                >
-                  {bi("退出其他设备", "Sign Out Other Devices")}
-                </Button>
-              </Popconfirm>
-            )}
+          <div className="me-kpi-body">
+            <span className="me-kpi-label">{bi("在线会话", "Active Sessions")}</span>
+            <b className="me-kpi-val num">
+              {sessData
+                ? bi(`${activeDevs.length} 台`, `${activeDevs.length}`)
+                : "—"}
+            </b>
+            <small>
+              {!sessData
+                ? bi("正在读取会话状态…", "Checking sessions…")
+                : otherCount === 0
+                  ? bi("仅当前设备在线", "Only this device")
+                  : showTypeTabs
+                    ? bi(
+                        `浏览器 ${browserCount} · 终端/接口 ${cliCount}`,
+                        `${browserCount} browser · ${cliCount} CLI/API`,
+                      )
+                    : bi(
+                        `本机 + ${otherCount} 台其他设备`,
+                        `This device + ${otherCount} other`,
+                      )}
+            </small>
           </div>
         </div>
 
-        {sessErr && (
-          <Alert
-            type="error"
-            showIcon
-            className="me-sess-err"
-            content={sessErr}
-            action={
-              <Button size="mini" onClick={loadSessions}>
-                {bi("重试", "Retry")}
-              </Button>
-            }
-          />
-        )}
-
-        {!sessData && !sessErr ? (
-          <Skeleton animation text={{ rows: 3 }} />
-        ) : activeDevs.length === 0 ? (
-          <div className="me-dev-empty">
-            <Empty description={bi("暂无活跃设备记录", "No active devices")} />
+        <div className="me-kpi">
+          <div className="me-kpi-ic brand">
+            <IconDesktop />
           </div>
-        ) : (
-          <ul
-            className="me-rows me-dev-list"
-            aria-label={bi("已登录设备", "Active devices")}
-          >
-            {activeDevs.map((s) => {
-              const dev =
-                browser(s.agent) || bi("浏览器会话", "Browser Session");
-              return (
-                <li
-                  key={s.id}
-                  className={`me-dev-row ${s.current ? "cur" : ""}`}
-                >
-                  <StatusDot state="done" />
-                  <span className="me-row-t">
-                    <span className="me-dev-title">
-                      <b>{dev}</b>
-                      {s.current && (
-                        <span className="me-cur-tag">
-                          {bi("当前设备", "This Device")}
-                        </span>
-                      )}
-                    </span>
-                    <small className="num">
-                      {s.ip || bi("未知来源", "Unknown IP")} ·{" "}
-                      {bi(
-                        `登录于 ${stamp(s.created_at)} · 已在线 ${formatDuration(s.duration_seconds)}（活跃 ${formatDuration(s.active_seconds)}）`,
-                        `Signed in ${stamp(s.created_at)} · Online ${formatDuration(s.duration_seconds)} (active ${formatDuration(s.active_seconds)})`,
-                      )}
-                    </small>
-                  </span>
-                  <div className="me-dev-act">
-                    {s.current ? (
-                      <span className="me-using">
-                        {bi("正在使用", "In use")}
+          <div className="me-kpi-body">
+            <span className="me-kpi-label">{bi("当前设备", "Current Device")}</span>
+            <b className="me-kpi-val">
+              {currentDev
+                ? browser(currentDev.agent) || bi("浏览器会话", "Browser")
+                : bi("当前浏览器", "This Browser")}
+            </b>
+            <small className="num">
+              {currentDev
+                ? `${currentDev.ip || "—"} · ${bi(`已在线 ${formatDuration(currentDev.duration_seconds)}`, `Online ${formatDuration(currentDev.duration_seconds)}`)}`
+                : bi("已建立安全会话", "Active session")}
+            </small>
+          </div>
+        </div>
+
+        <div className="me-kpi">
+          <div className={`me-kpi-ic ${failedCount > 0 ? "bad" : "ok"}`}>
+            {failedCount > 0 ? <IconCloseCircleFill /> : <IconCheckCircleFill />}
+          </div>
+          <div className="me-kpi-body">
+            <span className="me-kpi-label">
+              {bi("近 30 天安全动态", "30-Day Sign-in Health")}
+            </span>
+            <b className={`me-kpi-val ${failedCount > 0 ? "bad" : ""}`}>
+              {!act
+                ? "—"
+                : failedCount > 0
+                  ? bi(`${failedCount} 次登录失败`, `${failedCount} failed`)
+                  : bi("状态正常", "All clear")}
+            </b>
+            <small>
+              {!act
+                ? bi("正在汇总登录日志…", "Loading sign-in log…")
+                : signins.length > 0
+                  ? bi(
+                      `共 ${signins.length} 条记录 · 最近 ${ago(signins[0].time)}`,
+                      `${signins.length} events · latest ${ago(signins[0].time)}`,
+                    )
+                  : bi("暂无异常登录事件", "No unusual sign-ins")}
+            </small>
+          </div>
+        </div>
+      </div>
+
+      {/* Main 2-column security layout: left sessions + history, right sticky password card */}
+      <div className="me-sec-grid">
+        <div className="me-sec-left">
+          {/* Card 1: Active Devices */}
+          <section className="me-card me-dev-card">
+            <div className="me-card-h">
+              <div className="me-card-title">
+                <span className="me-card-ic brand">
+                  <IconDesktop />
+                </span>
+                <div>
+                  <div className="me-card-title-row">
+                    <h2>{bi("已登录设备", "Active Devices")}</h2>
+                    {sessData && (
+                      <span className="me-pill ok num">
+                        {bi(`${activeDevs.length} 台在线`, `${activeDevs.length} online`)}
                       </span>
-                    ) : (
-                      <Popconfirm
-                        title={bi(
-                          "退出该设备的登录状态？",
-                          "Sign out this device?",
-                        )}
-                        onOk={() => revokeOwn(s.id)}
-                      >
-                        <Button
-                          size="small"
-                          status="danger"
-                          icon={<IconPoweroff />}
-                        >
-                          {bi("退出", "Sign Out")}
-                        </Button>
-                      </Popconfirm>
                     )}
                   </div>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </section>
-      <div className="me-cols">
-        <section className="me-sec">
-          <h2>{bi("修改密码", "Change Password")}</h2>
-          <form
-            className="me-pw"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (!busy && cur && next.length >= 12 && next === again) submit();
-            }}
-          >
-            <input
-              type="text"
-              name="username"
-              value={me.username}
-              autoComplete="username"
-              hidden
-              readOnly
-            />
-            <label>
-              <span>{bi("当前密码", "Current Password")}</span>
-              <Input.Password
-                value={cur}
-                onChange={setCur}
-                autoComplete="current-password"
-                aria-label={bi("当前密码", "Current password")}
-              />
-            </label>
-            <label>
-              <span>{bi("新密码", "New Password")}</span>
-              <Input.Password
-                value={next}
-                onChange={setNext}
-                autoComplete="new-password"
-                status={short ? "warning" : undefined}
-                aria-label={bi("新密码", "New password")}
-              />
-              <small className={short ? "warn" : "faint"}>
-                {bi(
-                  "至少 12 个字符；改完后你在其他地方的登录会退出",
-                  "At least 12 characters; changing it signs out all other sessions",
-                )}
-              </small>
-            </label>
-            <label>
-              <span>{bi("再输一次", "Confirm New Password")}</span>
-              <Input.Password
-                value={again}
-                onChange={setAgain}
-                autoComplete="new-password"
-                status={differ ? "error" : undefined}
-                aria-label={bi("再输一次新密码", "Confirm new password")}
-              />
-              {differ && (
-                <small className="bad">
-                  {bi("两次输入不一样", "Passwords do not match")}
-                </small>
-              )}
-            </label>
-            <Button
-              type="primary"
-              htmlType="submit"
-              loading={busy}
-              disabled={!cur || next.length < 12 || next !== again}
-            >
-              {bi("修改密码", "Update Password")}
-            </Button>
-          </form>
-        </section>
-        <section className="me-sec">
-          <h2>{bi("最近登录记录", "Recent Sign-ins")}</h2>
-          {!act ? (
-            <Skeleton animation text={{ rows: 4 }} />
-          ) : signins.length === 0 &&
-            (sessData?.history || []).length === 0 ? (
-            <p className="faint small">
-              {bi(
-                "最近 30 天没有登录记录。",
-                "No sign-in activity in the last 30 days.",
-              )}
-            </p>
-          ) : (
-            <ul className="me-rows me-logins">
-              {signins.map((e, i) => (
-                <li
-                  key={`ev-${i}`}
-                  className={e.action === "login-failed" ? "bad" : ""}
-                >
-                  <span
-                    className={`me-dot ${e.action === "login-failed" ? "s-failed" : "s-succeeded"}`}
-                    aria-hidden
-                  />
-                  <span className="me-row-t">
-                    <b>{auditText(e)}</b>
-                    <small className="mono">
-                      {e.ip || "—"}
-                      {e.duration_sec && e.duration_sec > 0
-                        ? bi(
-                            ` · 时长 ${formatDuration(e.duration_sec)}`,
-                            ` · duration ${formatDuration(e.duration_sec)}`,
-                          )
-                        : ""}
-                    </small>
-                  </span>
-                  <time className="faint small" title={fullTime(e.time)}>
-                    {ago(e.time)}
-                  </time>
-                </li>
-              ))}
-              {(sessData?.history || []).slice(0, 6).map((h) => {
-                const reason =
-                  (SESSION_REASON[h.end_reason] || [h.end_reason])[0];
-                return (
-                  <li key={`hs-${h.id}`}>
-                    <span className="me-dot" aria-hidden />
-                    <span className="me-row-t">
-                      <b>
-                        {browser(h.agent) || bi("历史设备", "Previous Device")}{" "}
-                        · {reason}
-                      </b>
-                      <small className="mono">
-                        {h.ip || "—"} ·{" "}
-                        {bi(
-                          `在线 ${formatDuration(h.duration_seconds)}（活跃 ${formatDuration(h.active_seconds)}）`,
-                          `Online ${formatDuration(h.duration_seconds)} (active ${formatDuration(h.active_seconds)})`,
-                        )}
-                      </small>
-                    </span>
-                    <time
-                      className="faint small"
-                      title={fullTime(h.ended_at || h.created_at)}
+                  <p className="me-card-sub">
+                    {bi(
+                      "管理当前账号在线的浏览器与终端会话，可随时远程强制退出其他设备。",
+                      "Review browsers and CLI/API sessions signed in to your account, and sign out others remotely.",
+                    )}
+                  </p>
+                </div>
+              </div>
+              <div className="me-card-acts">
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<IconRefresh />}
+                  loading={sessLoading}
+                  onClick={loadSessions}
+                  aria-label={bi("刷新设备列表", "Refresh devices")}
+                />
+                {otherCount > 0 && (
+                  <Popconfirm
+                    title={bi(
+                      `确定退出除本机之外的其他 ${otherCount} 台设备？`,
+                      `Sign out all ${otherCount} other ${otherCount === 1 ? "device" : "devices"}?`,
+                    )}
+                    onOk={revokeOthers}
+                  >
+                    <Button
+                      size="small"
+                      status="danger"
+                      type="outline"
+                      loading={sessBusy}
+                      icon={<IconPoweroff />}
                     >
-                      {ago(h.ended_at || h.created_at)}
-                    </time>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </section>
+                      {bi("退出其他设备", "Sign Out Others")}
+                    </Button>
+                  </Popconfirm>
+                )}
+              </div>
+            </div>
+
+            {showTypeTabs && (
+              <div className="me-dev-bar">
+                <div className="me-dev-filters" role="tablist">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={devFilter === "all"}
+                    className={devFilter === "all" ? "on" : ""}
+                    onClick={() => {
+                      setDevFilter("all");
+                      setShowAllDevs(false);
+                    }}
+                  >
+                    {bi("全部", "All")}
+                    <em className="num">{activeDevs.length}</em>
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={devFilter === "browser"}
+                    className={devFilter === "browser" ? "on" : ""}
+                    onClick={() => {
+                      setDevFilter("browser");
+                      setShowAllDevs(false);
+                    }}
+                  >
+                    {bi("浏览器", "Browsers")}
+                    <em className="num">{browserCount}</em>
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={devFilter === "cli"}
+                    className={devFilter === "cli" ? "on" : ""}
+                    onClick={() => {
+                      setDevFilter("cli");
+                      setShowAllDevs(false);
+                    }}
+                  >
+                    {bi("终端与接口", "CLI / API")}
+                    <em className="num">{cliCount}</em>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="me-card-b me-card-b-devs">
+              {sessErr && (
+                <Alert
+                  type="error"
+                  showIcon
+                  className="me-sess-err"
+                  content={sessErr}
+                  action={
+                    <Button size="mini" onClick={loadSessions}>
+                      {bi("重试", "Retry")}
+                    </Button>
+                  }
+                />
+              )}
+
+              {!sessData && !sessErr ? (
+                <Skeleton animation text={{ rows: 3 }} />
+              ) : filteredDevs.length === 0 ? (
+                <div className="me-dev-empty">
+                  <Empty
+                    description={bi("暂无符合条件的活跃设备", "No matching active devices")}
+                  />
+                </div>
+              ) : (
+                <>
+                  <ul
+                    className="me-dev-list"
+                    aria-label={bi("已登录设备", "Active devices")}
+                  >
+                    {visibleDevs.map((s) => {
+                      const kind = deviceKind(s.agent);
+                      const dev =
+                        browser(s.agent) ||
+                        (kind === "cli"
+                          ? bi("终端 / 接口会话", "CLI / API Session")
+                          : bi("浏览器会话", "Browser Session"));
+                      return (
+                        <li
+                          key={s.id}
+                          className={`me-dev-item ${s.current ? "is-cur" : ""}`}
+                        >
+                          <span
+                            className={`me-dev-ic ${s.current ? "cur" : kind}`}
+                            aria-hidden
+                          >
+                            <DeviceIcon ua={s.agent} />
+                          </span>
+                          <div className="me-dev-info">
+                            <div className="me-dev-title">
+                              <b>{dev}</b>
+                              {s.current && (
+                                <span className="me-cur-tag">
+                                  {bi("当前设备", "This Device")}
+                                </span>
+                              )}
+                              {!s.current && kind === "cli" && (
+                                <span className="me-kind-tag">
+                                  {bi("终端 / 接口", "CLI / API")}
+                                </span>
+                              )}
+                            </div>
+                            <div className="me-dev-meta num">
+                              <span className="me-ip-chip mono">
+                                {s.ip || bi("未知来源", "Unknown IP")}
+                              </span>
+                              <span>
+                                {bi(
+                                  `登录于 ${stamp(s.created_at)}`,
+                                  `Signed in ${stamp(s.created_at)}`,
+                                )}
+                              </span>
+                              <i aria-hidden>·</i>
+                              <span>
+                                {bi(
+                                  `在线 ${formatDuration(s.duration_seconds)}（活跃 ${formatDuration(s.active_seconds)}）`,
+                                  `Online ${formatDuration(s.duration_seconds)} (active ${formatDuration(s.active_seconds)})`,
+                                )}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="me-dev-act">
+                            {s.current ? (
+                              <span className="me-using-pill">
+                                <i aria-hidden />
+                                {bi("正在使用", "In use")}
+                              </span>
+                            ) : (
+                              <Popconfirm
+                                title={bi(
+                                  "退出该设备的登录状态？",
+                                  "Sign out this device?",
+                                )}
+                                onOk={() => revokeOwn(s.id)}
+                              >
+                                <Button
+                                  size="small"
+                                  status="danger"
+                                  type="text"
+                                  icon={<IconPoweroff />}
+                                >
+                                  {bi("退出", "Sign Out")}
+                                </Button>
+                              </Popconfirm>
+                            )}
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  {(hiddenCount > 0 ||
+                    (showAllDevs && filteredDevs.length > FOLD_LIMIT)) && (
+                    <button
+                      type="button"
+                      className="me-dev-more"
+                      onClick={() => setShowAllDevs((v) => !v)}
+                    >
+                      {showAllDevs ? (
+                        <>
+                          <IconUp />
+                          {bi("收起设备列表", "Show fewer devices")}
+                        </>
+                      ) : (
+                        <>
+                          <IconDown />
+                          {bi(
+                            `展开其余 ${hiddenCount} 台在线设备`,
+                            `Show ${hiddenCount} more active ${hiddenCount === 1 ? "device" : "devices"}`,
+                          )}
+                        </>
+                      )}
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          </section>
+
+          {/* Card 2: Recent Sign-ins & Session History */}
+          <section className="me-card me-log-card">
+            <div className="me-card-h">
+              <div className="me-card-title">
+                <span className="me-card-ic neutral">
+                  <IconHistory />
+                </span>
+                <div>
+                  <div className="me-card-title-row">
+                    <h2>{bi("最近登录记录", "Recent Sign-ins")}</h2>
+                    {signins.length > 0 && (
+                      <span className="me-pill num">{signins.length}</span>
+                    )}
+                  </div>
+                  <p className="me-card-sub">
+                    {bi(
+                      "近 30 天账号登录、退出、改密与历史会话摘要。",
+                      "Sign-ins, sign-outs, password changes, and past sessions over the last 30 days.",
+                    )}
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="me-card-b me-card-b-list">
+              {!act ? (
+                <div className="me-pad">
+                  <Skeleton animation text={{ rows: 4 }} />
+                </div>
+              ) : signins.length === 0 &&
+                (sessData?.history || []).length === 0 ? (
+                <p className="me-empty">
+                  {bi(
+                    "最近 30 天没有登录记录。",
+                    "No sign-in activity in the last 30 days.",
+                  )}
+                </p>
+              ) : (
+                <ul className="me-log-list">
+                  {signins.map((e, i) => {
+                    const isFail = e.action === "login-failed";
+                    const isPw = e.action === "me-password";
+                    const isOut =
+                      e.action === "logout" ||
+                      e.action.startsWith("session-");
+                    return (
+                      <li
+                        key={`ev-${i}`}
+                        className={`me-log-row ${isFail ? "bad" : ""}`}
+                      >
+                        <span
+                          className={`me-log-dot ${isFail ? "bad" : isPw ? "brand" : isOut ? "mute" : "ok"}`}
+                          aria-hidden
+                        />
+                        <div className="me-log-main">
+                          <b>{auditText(e)}</b>
+                          <div className="me-log-sub">
+                            <span className="me-ip-chip mono">
+                              {e.ip || "—"}
+                            </span>
+                            {e.duration_sec && e.duration_sec > 0 ? (
+                              <span className="num">
+                                {bi(
+                                  `持续 ${formatDuration(e.duration_sec)}`,
+                                  `Duration ${formatDuration(e.duration_sec)}`,
+                                )}
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+                        <time
+                          className="me-log-time"
+                          title={fullTime(e.time)}
+                        >
+                          {ago(e.time)}
+                        </time>
+                      </li>
+                    );
+                  })}
+                  {(sessData?.history || []).slice(0, 6).map((h) => {
+                    const reason =
+                      (SESSION_REASON[h.end_reason] || [h.end_reason])[0];
+                    return (
+                      <li key={`hs-${h.id}`} className="me-log-row hist">
+                        <span className="me-log-dot mute" aria-hidden />
+                        <div className="me-log-main">
+                          <b>
+                            {browser(h.agent) ||
+                              bi("历史设备", "Previous Device")}
+                            <span className="me-kind-tag">{reason}</span>
+                          </b>
+                          <div className="me-log-sub">
+                            <span className="me-ip-chip mono">
+                              {h.ip || "—"}
+                            </span>
+                            <span className="num">
+                              {bi(
+                                `在线 ${formatDuration(h.duration_seconds)}（活跃 ${formatDuration(h.active_seconds)}）`,
+                                `Online ${formatDuration(h.duration_seconds)} (active ${formatDuration(h.active_seconds)})`,
+                              )}
+                            </span>
+                          </div>
+                        </div>
+                        <time
+                          className="me-log-time"
+                          title={fullTime(h.ended_at || h.created_at)}
+                        >
+                          {ago(h.ended_at || h.created_at)}
+                        </time>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          </section>
+        </div>
+
+        {/* Right Column: Sticky Password Management Card */}
+        <aside className="me-sec-right">
+          <section className="me-card me-pw-card">
+            <div className="me-card-h">
+              <div className="me-card-title">
+                <span className="me-card-ic warn">
+                  <IconLock />
+                </span>
+                <div>
+                  <h2>{bi("修改密码", "Change Password")}</h2>
+                  <p className="me-card-sub">
+                    {bi(
+                      "定期更新高强度密码以保障账号安全。",
+                      "Use a strong unique password to protect your account.",
+                    )}
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="me-card-b">
+              <form
+                className="me-pw"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (!busy && cur && next.length >= 12 && next === again)
+                    submit();
+                }}
+              >
+                <input
+                  type="text"
+                  name="username"
+                  value={me.username}
+                  autoComplete="username"
+                  hidden
+                  readOnly
+                />
+                <label>
+                  <span>{bi("当前密码", "Current Password")}</span>
+                  <Input.Password
+                    value={cur}
+                    onChange={setCur}
+                    placeholder={bi("输入当前登录密码", "Enter current password")}
+                    autoComplete="current-password"
+                    aria-label={bi("当前密码", "Current password")}
+                  />
+                </label>
+                <label>
+                  <span>{bi("新密码", "New Password")}</span>
+                  <Input.Password
+                    value={next}
+                    onChange={setNext}
+                    placeholder={bi("至少 12 位字符", "At least 12 characters")}
+                    autoComplete="new-password"
+                    status={short ? "warning" : undefined}
+                    aria-label={bi("新密码", "New password")}
+                  />
+                  {next.length > 0 && (
+                    <div className="me-pw-meter">
+                      <div className="me-pw-bars" aria-hidden>
+                        {[1, 2, 3, 4].map((n) => (
+                          <span
+                            key={n}
+                            className={
+                              strength.level >= n ? `on ${strength.tone}` : ""
+                            }
+                          />
+                        ))}
+                      </div>
+                      <em className={`me-pw-lvl ${strength.tone}`}>
+                        {strength.label}
+                      </em>
+                    </div>
+                  )}
+                  <div className="me-pw-rules">
+                    <span className={strength.lenOK ? "ok" : ""}>
+                      <IconCheckCircleFill />
+                      {bi("至少 12 位", "12+ chars")}
+                    </span>
+                    <span className={strength.mixOK ? "ok" : ""}>
+                      <IconCheckCircleFill />
+                      {bi("字母与数字", "Letters & digits")}
+                    </span>
+                    <span className={strength.symOK ? "ok" : ""}>
+                      <IconCheckCircleFill />
+                      {bi("大小写或符号", "Case / symbol")}
+                    </span>
+                  </div>
+                </label>
+                <label>
+                  <span>{bi("确认新密码", "Confirm New Password")}</span>
+                  <Input.Password
+                    value={again}
+                    onChange={setAgain}
+                    placeholder={bi("再次输入新密码", "Re-enter new password")}
+                    autoComplete="new-password"
+                    status={differ ? "error" : undefined}
+                    aria-label={bi("再输一次新密码", "Confirm new password")}
+                  />
+                  {differ && (
+                    <small className="bad">
+                      {bi("两次输入的密码不一致", "Passwords do not match")}
+                    </small>
+                  )}
+                </label>
+                <Button
+                  type="primary"
+                  long
+                  htmlType="submit"
+                  loading={busy}
+                  disabled={!cur || next.length < 12 || next !== again}
+                >
+                  {bi("更新密码", "Update Password")}
+                </Button>
+              </form>
+              <p className="me-pw-note">
+                {bi(
+                  "修改成功后当前设备保持登录，其余在线会话将自动退出。",
+                  "Your current device stays signed in; all other sessions will be signed out.",
+                )}
+              </p>
+            </div>
+          </section>
+        </aside>
       </div>
     </div>
   );

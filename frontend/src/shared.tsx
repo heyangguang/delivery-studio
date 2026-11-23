@@ -118,11 +118,35 @@ export type VersionInfo = {
   id: string;
   status: "draft" | "verifying" | "published" | string;
   platforms?: string[];
+  verified_platforms?: string[];
   artifacts?: Artifact[];
   packages?: Record<string, PackageRequest[]>;
   coverage?: Record<string, Coverage>;
   released?: string;
   notes?: string[];
+};
+export const versionVerifiedPlatforms = (
+  v: Pick<VersionInfo, "status" | "platforms" | "verified_platforms">,
+): string[] => {
+  if (v.status !== "published") return [];
+  if (v.verified_platforms && v.verified_platforms.length > 0)
+    return v.verified_platforms;
+  return v.platforms || [];
+};
+export const isVersionPlatformReleased = (
+  v: Pick<VersionInfo, "status" | "platforms" | "verified_platforms">,
+  platform?: string,
+): boolean => {
+  if (v.status !== "published") return false;
+  if (!v.platforms?.length) return true;
+  if (!platform) return versionVerifiedPlatforms(v).length > 0;
+  return versionVerifiedPlatforms(v).includes(platform);
+};
+export const hasReleasedVersion = (
+  app: Pick<AppInfo, "kind" | "versions">,
+): boolean => {
+  if (app.kind === "external") return true;
+  return (app.versions || []).some((v) => isVersionPlatformReleased(v));
 };
 export type AppInfo = {
   id: string;
@@ -137,6 +161,7 @@ export type AppInfo = {
   /** The component's own logo and tint (names from glyphs.tsx); empty means the category default. */
   icon?: string;
   color?: string;
+  context?: string;
   /** Declared data flows between roles, used to draw the component's topology. */
   flows?: {
     id: string;
@@ -237,6 +262,8 @@ export type Schema = {
   version: string;
   status: string;
   platforms: string[];
+  verified_platforms?: string[];
+  context?: string;
   kind?: string;
   provides?: string[];
   roles: RoleSpec[];
@@ -284,7 +311,7 @@ export type InstanceSpec = {
 export type ExecutionHost = { name: string; ip: string; repository_port: number };
 export type Deployment = {
   execution_host?: ExecutionHost;
-  delivery_mode?: "offline" | "configuration";
+  delivery_mode?: "offline" | "automatic" | "configuration";
   schema?: string;
   id: string;
   title?: string;
@@ -535,7 +562,7 @@ export type PackageSource = {
 /** The structured handbook stored with a delivery (plan.json). */
 export type DeliveryPlan = {
   execution_host?: ExecutionHost;
-  delivery_mode?: "offline" | "configuration";
+  delivery_mode?: "offline" | "automatic" | "configuration";
   step_format?: number;
   cluster: string;
   controller: string;
@@ -558,8 +585,111 @@ export type DeliveryPlan = {
   warnings?: Issue[];
 };
 
+export type JobSync = {
+  n: number;
+  at: string;
+  by: string;
+  files: string[];
+  steps: string[];
+  update?: string;
+  remove?: string[];
+  file_hashes?: Record<string, string>;
+  update_sha?: string;
+  verify_cmd?: string;
+  kind?: string;
+  reason?: string;
+  applied_at?: string;
+  applied_by?: string;
+  applied_mode?: "verified" | "patch" | "full" | string;
+};
+
+export type VerifyTarget = {
+  component: string;
+  version: string;
+  platform: string;
+};
+export type CompReportStep = {
+  key: string;
+  title: string;
+  phase?: string;
+  state: string;
+  duration_sec?: number;
+};
+export type CompVerification = {
+  id: string;
+  component: string;
+  version: string;
+  platform: string;
+  platform_name?: string;
+  test_mode?: "automatic" | "manual" | string;
+  has_report?: boolean;
+  job_id?: string;
+  cluster_id?: string;
+  delivery_mode?: "automatic" | "offline" | string;
+  scheme_name?: string;
+  topology?: string;
+  hosts?: number;
+  passed_steps?: number;
+  total_steps?: number;
+  duration_sec?: number;
+  executor?: string;
+  steps?: CompReportStep[];
+  manifest_hash?: string;
+  verified_by: string;
+  verified_at: string;
+  note?: string;
+  stale?: boolean;
+  delivery_exists?: boolean;
+};
+export type VerificationCandidate = {
+  job_id: string;
+  cluster_id: string;
+  version: string;
+  platform: string;
+  platform_name: string;
+  delivery_mode: "automatic" | "offline" | string;
+  purpose?: string;
+  scheme_name?: string;
+  topology?: string;
+  hosts?: number;
+  passed_steps: number;
+  total_steps: number;
+  duration_sec?: number;
+  executor?: string;
+  manifest_hash?: string;
+  stale?: boolean;
+  completed_at: string;
+  owner: string;
+  already_recorded?: boolean;
+  can_cleanup?: boolean;
+  other_pending_targets?: string[];
+};
+export type CompVerificationsPayload = {
+  current_manifest: string;
+  records: CompVerification[];
+  candidates: VerificationCandidate[];
+};
+export type JobPromoteTarget = {
+  component: string;
+  component_title: string;
+  version: string;
+  platform: string;
+  platform_name: string;
+  current_status: string;
+  needs_unlock: boolean;
+  stale?: boolean;
+  already_recorded?: boolean;
+  delivery_mode: "automatic" | "offline" | string;
+  passed_steps: number;
+  total_steps: number;
+  duration_sec?: number;
+  executor?: string;
+};
+
 export type Job = {
-  delivery_mode?: "offline" | "configuration";
+  delivery_mode?: "offline" | "automatic" | "configuration";
+  purpose?: "verification" | string;
+  verify_target?: VerifyTarget;
   scheme?: DeploymentScheme;
   id: string;
   owner: string;
@@ -584,23 +714,13 @@ export type Job = {
   revises?: string;
   revised_by?: string;
   /** Times the delivery took a component fix without being made again. */
-  syncs?: {
-    n: number;
-    at: string;
-    by: string;
-    files: string[];
-    steps: string[];
-    update?: string;
-    remove?: string[];
-    kind?: string;
-    reason?: string;
-  }[];
+  syncs?: JobSync[];
   created: string;
   updated?: string;
   logs: string[];
 };
 export type JobRef = {
-  delivery_mode?: "offline" | "configuration";
+  delivery_mode?: "offline" | "automatic" | "configuration";
   id: string;
   cluster_id: string;
   app_name: string;
@@ -631,6 +751,7 @@ export type JobDetail = {
   spec?: { deployment: Deployment; yaml: string } | null;
   plan?: DeliveryPlan | null;
   lineage?: Lineage | null;
+  verification_promote?: JobPromoteTarget[];
 };
 export type Account = {
   username: string;
@@ -761,8 +882,11 @@ export async function api<T>(
     setReachable(false);
     throw new ApiError(
       navigator.onLine
-        ? bi("无法连接到服务，请稍后重试", "Unable to connect to the server; please try again later")
-        : bi("网络已断开", "Network disconnected"),
+        ? bi(
+            "无法连接到 Middleware Hub 后端服务（可能正在重启），请稍后重试",
+            "Unable to connect to Middleware Hub backend (may be restarting); please try again later",
+          )
+        : bi("本机网络已断开，请检查网络连接", "Device network disconnected"),
       0,
     );
   }
@@ -774,7 +898,10 @@ export async function api<T>(
   } catch {
     if (!r.ok)
       throw new ApiError(
-        bi(`服务暂时不可用（${r.status}）`, `Service temporarily unavailable (${r.status})`),
+        bi(
+          `Middleware Hub 后端服务暂时不可用（HTTP ${r.status}）`,
+          `Middleware Hub backend temporarily unavailable (HTTP ${r.status})`,
+        ),
         r.status,
       );
     return text as unknown as T;
@@ -802,7 +929,13 @@ export async function fetchText(url: string): Promise<string> {
     });
   } catch {
     setReachable(false);
-    throw new ApiError(bi("无法连接到服务", "Unable to reach the service"), 0);
+    throw new ApiError(
+      bi(
+        "无法连接到 Middleware Hub 后端服务",
+        "Unable to reach Middleware Hub backend",
+      ),
+      0,
+    );
   }
   if (!r.ok)
     throw new ApiError(
@@ -839,7 +972,9 @@ export const phaseOf = (j: Pick<Job, "state" | "outcome" | "delivery_mode">): Ph
 
 export type Outcome = "done" | "deviated" | "failed" | "void";
 export type PlanEntry = {
-  delivery_mode?: "offline" | "configuration";
+  delivery_mode?: "offline" | "automatic" | "configuration";
+  purpose?: "verification" | string;
+  verify_target?: VerifyTarget;
   scheme?: DeploymentScheme;
   id: string;
   seq: number;
@@ -861,7 +996,9 @@ export type PlanEntry = {
   updated?: string;
 };
 export type ClusterView = {
-  delivery_mode?: "offline" | "configuration";
+  delivery_mode?: "offline" | "automatic" | "configuration";
+  purpose?: "verification" | string;
+  verify_target?: VerifyTarget;
   scheme?: DeploymentScheme;
   id: string;
   app_id: string;
@@ -877,6 +1014,9 @@ export type ClusterView = {
   holder?: string;
   plans: PlanEntry[];
   blocked?: string;
+  applied_changes_count?: number;
+  last_change_at?: string;
+  last_change_title?: string;
 };
 
 /* ---------- cluster documents (store_docs.go) ---------- */
@@ -893,7 +1033,9 @@ export type DocBlock = {
     | "section"
     | "old";
   /** Which part of an execution report the block belongs to; blocks without it are always shown. */
-  variant?: "auto" | "cmd" | "result";
+  variant?: "auto" | "cmd" | "result" | "result_auto" | "result_cmd";
+  /** Presentation style hint for code blocks: shell (manual), terminal (dark SSH transcript), or ansible (raw log). */
+  style?: "shell" | "terminal" | "ansible";
   detail?: boolean;
   /** The delivery whose pictures an image block lists. */
   job?: string;
@@ -1414,13 +1556,15 @@ export type DriftSummary = {
 
 export type StepProposal = {
   diagnosis: string;
-  action: "replace" | "insert_before";
+  action: "replace" | "insert_before" | "retry";
   title?: string;
   target_role?: string;
   command: string;
   expect?: string;
   rollback?: string;
   risk_note?: string;
+  verified_facts?: string[];
+  missing_items?: string[];
 };
 
 export type StepRevision = {
@@ -1501,6 +1645,24 @@ export type RehearsalTrace = {
   diag?: AICallDiag;
 };
 
+export type RehearsalVerifyAttempt = {
+  round: number;
+  at: string;
+  by?: string;
+  verdict: "passed" | "failed" | string;
+  summary?: string;
+  diagnosis?: string;
+  action?: string;
+  target_role?: string;
+  fix_command?: string;
+  verified_facts?: string[];
+  missing_items?: string[];
+  thinking?: string;
+  output?: string;
+  images?: string[];
+  model?: string;
+};
+
 export type RehearsalStep = {
   id: string;
   phase: "precheck" | "execute" | "verify" | "rollback";
@@ -1515,11 +1677,69 @@ export type RehearsalStep = {
   status: "pending" | "passed" | "failed" | "skipped";
   elapsed?: string;
   note?: string;
+  verified_by_ai?: boolean;
+  evidence_images?: string[];
   last_error?: string;
   error_images?: string[];
   trouble_trace?: RehearsalTrace | null;
   proposal?: StepProposal | null;
   revisions?: StepRevision[];
+  verify_history?: RehearsalVerifyAttempt[];
+};
+
+export type RehearsalSecurityContext = {
+  kind: "cve_patch" | "config_hardening" | "cert_rotation" | string;
+  finding_keys?: string[];
+  cves?: string[];
+  package?: string;
+  ecosystem?: string;
+  current_version?: string;
+  target_version?: string;
+  repo_fix_ready?: boolean;
+  baseline_check_ids?: string[];
+  cert_target?: string;
+  vex_synced?: boolean;
+  vex_status?: string;
+  vex_synced_at?: string;
+};
+
+export type RehearsalProbeIssue = {
+  status: "failed" | "incomplete";
+  summary: string;
+  cause?: string;
+  fix_command?: string;
+  fix_steps?: string[];
+  fixed_script?: string;
+  fixed_safe?: boolean;
+  fixed_warnings?: string[];
+  script_updated?: boolean;
+  missing_items?: string[];
+  at?: string;
+};
+
+export type RehearsalRestorationAlert = {
+  kind: string;
+  step_id: string;
+  step_order: number;
+  step_title: string;
+  summary: string;
+  suggestion: string;
+};
+
+export type RehearsalAppliedChange = {
+  key: string;
+  before?: string;
+  after: string;
+  note?: string;
+};
+
+export type RehearsalConflictAlert = {
+  severity: "conflict" | "stale" | "earlier_pending" | string;
+  other_id: string;
+  other_title: string;
+  other_at?: string;
+  overlapping_keys?: string[];
+  summary: string;
 };
 
 export type ChangeRehearsal = {
@@ -1533,7 +1753,9 @@ export type ChangeRehearsal = {
   goal_images?: string[];
   extra_scope?: string;
   owner: string;
+  mode?: "quick" | "light" | "full";
   stage: "scoping" | "probing" | "rehearsing" | "finalized";
+  security_context?: RehearsalSecurityContext;
   scope_questions?: ScopeQuestion[];
   scope_summary?: string;
   probe_script?: string;
@@ -1542,12 +1764,28 @@ export type ChangeRehearsal = {
   probe_warnings?: string[];
   probe_output?: string;
   probe_images?: string[];
+  probe_issue?: RehearsalProbeIssue | null;
   manual_state?: string;
   drift?: DriftSummary | null;
   test_env_note?: string;
   steps?: RehearsalStep[];
+  restoration_alerts?: RehearsalRestorationAlert[];
+  conflict_alerts?: RehearsalConflictAlert[];
   traces?: Record<string, RehearsalTrace>;
   doc_id?: string;
+  base_applied_ids?: string[];
+  applied?: boolean;
+  applied_at?: string;
+  applied_by?: string;
+  applied_note?: string;
+  applied_summary?: string;
+  applied_changes?: RehearsalAppliedChange[];
+  voided?: boolean;
+  voided_at?: string;
+  voided_by?: string;
+  void_reason?: string;
+  superseded_by?: string;
+  superseded_title?: string;
   created_at: string;
   updated_at: string;
 };

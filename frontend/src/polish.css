@@ -32,13 +32,13 @@ body[arco-theme="dark"] .md-detail.sx-detail {
   }
 }
 .topbar {
-  background: color-mix(in srgb, var(--surface) 84%, transparent);
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
   backdrop-filter: saturate(180%) blur(16px);
   -webkit-backdrop-filter: saturate(180%) blur(16px);
-  border-bottom: 1px solid color-mix(in srgb, var(--line) 85%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 90%, transparent);
 }
 body[arco-theme="dark"] .topbar {
-  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  background: color-mix(in srgb, var(--surface) 95%, transparent);
   border-bottom-color: var(--line);
 }
 

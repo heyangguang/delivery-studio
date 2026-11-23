@@ -187,6 +187,145 @@ export function StatusBadge({
   );
 }
 
+/* ---------- delivery mode badge & search helpers ---------- */
+
+export type NormalizedDeliveryMode = "automatic" | "offline" | "configuration";
+
+export function normalizeDeliveryMode(mode?: string): NormalizedDeliveryMode {
+  if (mode === "automatic") return "automatic";
+  if (mode === "configuration") return "configuration";
+  return "offline";
+}
+
+export function deliveryModeLabel(mode?: string, compact?: boolean): string {
+  const m = normalizeDeliveryMode(mode);
+  if (m === "automatic") {
+    return compact ? bi("自动", "Auto") : bi("自动化部署", "Automated");
+  }
+  if (m === "configuration") {
+    return compact ? bi("仅配置", "Config") : bi("配置交付", "Config Only");
+  }
+  return compact ? bi("离线", "Offline") : bi("离线部署", "Offline Manual");
+}
+
+export function deliveryModeKeywords(mode?: string): string {
+  const m = normalizeDeliveryMode(mode);
+  if (m === "automatic") {
+    return "自动 自动化 自动部署 自动执行 远程执行 auto automatic automated runner";
+  }
+  if (m === "configuration") {
+    return "配置 仅配置 配置交付 config configuration";
+  }
+  return "离线 手动 手工 离线部署 离线手动 离线包 offline manual";
+}
+
+export function DeliveryModeIcon({
+  mode,
+  size = 11,
+}: {
+  mode?: string;
+  size?: number;
+}) {
+  const m = normalizeDeliveryMode(mode);
+  if (m === "automatic") {
+    return (
+      <svg
+        width={size}
+        height={size}
+        viewBox="0 0 16 16"
+        fill="none"
+        aria-hidden
+      >
+        <path
+          d="M9.1 1.5L3.3 8.8h4.2l-.7 5.7 5.9-7.4H8.4l.7-5.6z"
+          fill="currentColor"
+        />
+      </svg>
+    );
+  }
+  if (m === "configuration") {
+    return (
+      <svg
+        width={size}
+        height={size}
+        viewBox="0 0 16 16"
+        fill="none"
+        aria-hidden
+      >
+        <path
+          d="M3 4.5h10M3 8h10M3 11.5h10"
+          stroke="currentColor"
+          strokeWidth="1.45"
+          strokeLinecap="round"
+        />
+        <circle cx="6" cy="4.5" r="1.5" fill="currentColor" />
+        <circle cx="10.5" cy="8" r="1.5" fill="currentColor" />
+        <circle cx="7" cy="11.5" r="1.5" fill="currentColor" />
+      </svg>
+    );
+  }
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="none"
+      aria-hidden
+    >
+      <path
+        d="M2.8 5.2L8 2.4l5.2 2.8v5.6L8 13.6l-5.2-2.8V5.2z"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M2.8 5.2L8 8l5.2-2.8M8 8v5.6"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+export function DeliveryModeTag({
+  mode,
+  compact,
+  className = "",
+}: {
+  mode?: string;
+  compact?: boolean;
+  className?: string;
+}) {
+  useLang();
+  const m = normalizeDeliveryMode(mode);
+  const label = deliveryModeLabel(m, compact);
+  const tip =
+    m === "automatic"
+      ? bi(
+          "自动化部署：通过授权执行节点自动执行并回传状态与日志",
+          "Automated deployment via authorized execution runner",
+        )
+      : m === "configuration"
+        ? bi(
+            "配置交付：仅生成配置文件包，不执行现场部署",
+            "Config-only delivery without on-site deployment",
+          )
+        : bi(
+            "离线部署：下载离线安装包与执行手册，在现场手工执行",
+            "Offline manual deployment using generated bundles & runbook",
+          );
+  return (
+    <span
+      className={`dm-tag dm-${m}${compact ? " is-xs" : ""}${className ? ` ${className}` : ""}`}
+      title={tip}
+    >
+      <DeliveryModeIcon mode={m} size={compact ? 10 : 11.5} />
+      <span>{label}</span>
+    </span>
+  );
+}
+
 /* ---------- segmented control with a sliding thumb ---------- */
 
 export function Segmented<T extends string | number>({
@@ -717,16 +856,94 @@ export const InstanceGraph = React.memo(function InstanceGraph({
     (h) => chips(h.name).length > 0 || h.name === controller,
   );
   const index = new Map(used.map((h, i) => [h.name, i]));
-  type Front = { label: string; targets: string[]; external: boolean };
-  const fronts: Front[] = [];
-  instances.forEach((inst) => {
-    Object.entries(inst.fronts || {}).forEach(([, f]) =>
-      fronts.push({
+  type Front = {
+    key: string;
+    epName: string;
+    badge: string;
+    title: string;
+    label: string;
+    targets: string[];
+    external: boolean;
+    tone: number; // 0 = primary brand, 1 = sky/read, 2 = violet
+  };
+  const frontShortBadge = (
+    epName: string,
+    epTitle: string | undefined,
+    external: boolean,
+    multi: boolean,
+  ) => {
+    const low = epName.toLowerCase();
+    const t = (epTitle || "").trim();
+    if (low === "writer" || low === "write" || low === "rw" || /写入|读写/.test(t)) {
+      if (multi) return external ? bi("外部·写入", "EXT RW") : bi("写入", "RW");
+      return external ? bi("外部", "EXT") : bi("入口", "VIP");
+    }
+    if (low === "reader" || low === "read" || low === "ro" || /只读/.test(t)) {
+      return external ? bi("外部·只读", "EXT RO") : bi("只读", "RO");
+    }
+    if (multi && t) {
+      const clean = t
+        .replace(/[（(].*?[）)]/g, "")
+        .replace(/入口$/g, "")
+        .trim();
+      if (clean) return external ? `${bi("外部·", "EXT ")}${clip(clean, 48)}` : clip(clean, 56);
+    }
+    return external ? bi("外部", "EXT") : bi("入口", "VIP");
+  };
+  const rawFronts: {
+    key: string;
+    epName: string;
+    epTitle?: string;
+    order: number;
+    listen: number;
+    label: string;
+    targets: string[];
+    external: boolean;
+  }[] = [];
+  instances.forEach((inst, instIdx) => {
+    const eps = inst.endpoints || [];
+    Object.entries(inst.fronts || {}).forEach(([epName, f]) => {
+      const epIdx = eps.findIndex((e) => e.name === epName);
+      const ep = epIdx >= 0 ? eps[epIdx] : undefined;
+      const epBackends =
+        ep?.backends && ep.backends.length > 0
+          ? [...new Set(ep.backends.map((b) => b.host))].filter((h) =>
+              index.has(h),
+            )
+          : [];
+      const fallbackTargets = inst.hosts.filter((h) => index.has(h));
+      rawFronts.push({
+        key: `${inst.id}:${epName}:${f.listen}`,
+        epName,
+        epTitle: ep?.title,
+        order: instIdx * 100 + (epIdx >= 0 ? epIdx : 50),
+        listen: f.listen || 0,
         label: `${f.address || "?"}:${f.listen}`,
-        targets: inst.hosts,
+        targets: epBackends.length > 0 ? epBackends : fallbackTargets,
         external: f.external,
-      }),
-    );
+      });
+    });
+  });
+  rawFronts.sort((a, b) => a.order - b.order || a.listen - b.listen);
+  const multiFront = rawFronts.length > 1;
+  const fronts: Front[] = rawFronts.map((rf, idx) => {
+    const isReader =
+      rf.epName.toLowerCase() === "reader" ||
+      rf.epName.toLowerCase() === "ro" ||
+      /只读/.test(rf.epTitle || "");
+    const tone = !multiFront ? 0 : isReader ? 1 : idx % 3;
+    return {
+      key: rf.key,
+      epName: rf.epName,
+      badge: frontShortBadge(rf.epName, rf.epTitle, rf.external, multiFront),
+      title:
+        rf.epTitle ||
+        (rf.external ? bi("外部入口", "External entry") : bi("访问入口", "Entrypoint")),
+      label: rf.label,
+      targets: rf.targets,
+      external: rf.external,
+      tone,
+    };
   });
   const flows = displayFlows(real).map(f=>({...f,from:f.from.filter(h=>index.has(h)),to:f.to.filter(h=>index.has(h))})).filter(f=>f.from.length&&f.to.length);
   const sources = new Set(
@@ -744,43 +961,136 @@ export const InstanceGraph = React.memo(function InstanceGraph({
     setCw(el.clientWidth);
     return () => ro.disconnect();
   }, []);
+  const rowCardW = used.length <= 2 ? 216 : used.length === 3 ? 198 : 176;
+  const rowGap = used.length <= 2 ? 28 : used.length === 3 ? 22 : 20;
   const rowNeed = Math.max(
-    used.length * 172 + (used.length - 1) * 24 + 48,
-    400,
+    used.length * rowCardW + Math.max(0, used.length - 1) * rowGap + 48,
+    360,
   );
-  const stack = layout === "stack" || (cw > 0 && cw < rowNeed * 0.8);
+  const stack = layout === "stack" || (cw > 0 && cw < rowNeed * 0.78);
   const roleLabel = (c: { inst: InstanceView; role: string }) =>
     c.inst.role_titles?.[c.role] || c.role;
   const chipLabel = (c: { inst: InstanceView; role: string }) =>
     `${c.inst.title || c.inst.id} · ${roleLabel(c)}`;
-  const arrow = (kind: string, sync?: boolean) =>
-    `${uid}-${kind}${sync ? "-sync" : ""}`;
+  const arrow = (kind: string, sync?: boolean, tone?: number) =>
+    kind === "live" && tone
+      ? `${uid}-live-${tone}`
+      : `${uid}-${kind}${sync ? "-sync" : ""}`;
 
   // ---- geometry
   const pillH = 34;
   const nFront = fronts.length;
-  const bw = stack ? 262 : 172;
-  const CW = stack ? 148 : bw - 26; // pill width
-  const CH = stack ? 20 : 19;
+  const PAD = stack ? 12 : 10;
+  const maxIpWidth = stack
+    ? Math.max(
+        96,
+        ...used.map((h) => ((h.ip || "—").length || 1) * 6.8),
+      )
+    : 0;
+  const leftColW = stack ? Math.ceil(Math.max(114, maxIpWidth + 10)) : 0;
+  const bw = stack ? 14 + leftColW + 12 + 158 + PAD : rowCardW;
+  const CW = stack ? 158 : bw - 20; // symmetric 10px side inset inside host card
+  const CH = stack ? 20 : 20;
   const PITCH = stack ? 27 : 26;
-  const PAD = stack ? 11 : 10;
-  const top0 = stack ? 38 : 52; // first pill's offset inside a card
+  const top0 = stack ? 38 : 50; // first pill's offset inside a card
   const cardH = (n: number, ctrl: boolean) =>
-    stack ? Math.max(ctrl ? 72 : 60, PAD + n * PITCH + 6) : 60 + n * PITCH;
-  const frontsH = nFront
-    ? 14 + nFront * (pillH + 8) + (stack ? 6 : 34)
-    : stack
-      ? 6
-      : 4;
+    stack ? Math.max(ctrl ? 78 : 64, PAD + n * PITCH + 6) : 58 + n * PITCH;
   const gutL = stack ? (nFront ? 20 + nFront * 18 : 6) : 0;
   const lanes = flows.length;
   const gutR = stack ? (lanes ? 30 + lanes * 24 : 6) : 0;
-  const gap = stack ? 18 : 24;
+  const gap = stack ? 18 : rowGap;
   const n = Math.max(used.length, 1);
+
+  // Measure front pills cleanly; in row layout arrange entrypoints horizontally side-by-side
+  // so curves fan downward cleanly and NEVER pierce another entrypoint box.
+  const frontGapX = 16;
+  const frontGapY = 10;
+  const rawPillW = (f: Front) =>
+    Math.ceil(Math.max(182, 34 + labelWidth(f.badge, 7.2) + 8 + labelWidth(f.label, 7.4)));
+  const baseRowW = Math.max(n * bw + (n - 1) * gap + 48, 320);
+  const maxColsRow = nFront <= 3 ? Math.max(nFront, 1) : 3;
+  const cappedRowPillW = (f: Front) =>
+    Math.min(nFront > 1 ? 248 : Math.max(baseRowW - 24, 280), rawPillW(f));
+  // Split fronts into horizontal rows in row layout (usually 1 single row for 1..3 fronts)
+  const frontRows: { idx: number; f: Front; w: number }[][] = [];
+  if (!stack && nFront > 0) {
+    let cur: { idx: number; f: Front; w: number }[] = [];
+    let curW = 0;
+    const maxLineW = Math.max(baseRowW - 32, 720);
+    fronts.forEach((f, idx) => {
+      const w = cappedRowPillW(f);
+      if (
+        cur.length > 0 &&
+        (cur.length >= maxColsRow || curW + frontGapX + w > maxLineW)
+      ) {
+        frontRows.push(cur);
+        cur = [];
+        curW = 0;
+      }
+      cur.push({ idx, f, w });
+      curW += (cur.length > 1 ? frontGapX : 0) + w;
+    });
+    if (cur.length) frontRows.push(cur);
+  }
+  const widestFrontRow = frontRows.reduce(
+    (mx, row) =>
+      Math.max(
+        mx,
+        row.reduce((s, it) => s + it.w, 0) +
+          Math.max(0, row.length - 1) * frontGapX,
+      ),
+    0,
+  );
   const W = stack
     ? gutL + bw + gutR
-    : Math.max(n * bw + (n - 1) * gap + 48, 400);
+    : Math.max(baseRowW, widestFrontRow + 36);
   const x0 = stack ? gutL : (W - (n * bw + (n - 1) * gap)) / 2;
+
+  const frontBoxes: {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    cx: number;
+    row: number;
+  }[] = new Array(nFront);
+  if (stack) {
+    const centre = x0 + bw / 2;
+    fronts.forEach((f, k) => {
+      const w = Math.min(bw, rawPillW(f));
+      const y = 8 + k * (pillH + 8);
+      frontBoxes[k] = { x: centre - w / 2, y, w, h: pillH, cx: centre, row: k };
+    });
+  } else {
+    frontRows.forEach((row, rIdx) => {
+      const totalW =
+        row.reduce((s, it) => s + it.w, 0) +
+        Math.max(0, row.length - 1) * frontGapX;
+      let cursor = (W - totalW) / 2;
+      const y = 8 + rIdx * (pillH + frontGapY);
+      row.forEach((it) => {
+        frontBoxes[it.idx] = {
+          x: cursor,
+          y,
+          w: it.w,
+          h: pillH,
+          cx: cursor + it.w / 2,
+          row: rIdx,
+        };
+        cursor += it.w + frontGapX;
+      });
+    });
+  }
+  const frontsH = nFront
+    ? stack
+      ? 14 + nFront * (pillH + 8) + 6
+      : 8 +
+        frontRows.length * pillH +
+        Math.max(0, frontRows.length - 1) * frontGapY +
+        (multiFront ? 56 : 44)
+    : stack
+      ? 6
+      : 4;
   const heights = used.map((h) =>
     cardH(chips(h.name).length, h.name === controller),
   );
@@ -824,6 +1134,7 @@ export const InstanceGraph = React.memo(function InstanceGraph({
     halo: string;
     kind: "wal" | "mesh" | "front";
     sync?: boolean;
+    tone?: number;
     title: string;
   };
   const wires: Wire[] = [];
@@ -864,8 +1175,10 @@ export const InstanceGraph = React.memo(function InstanceGraph({
       } else {
         const ya = frontsH + rowBox;
         const ly = ya + 20 + k * 22;
-        const ca = cards[index.get(a) ?? 0].x + bw / 2;
-        const cb = cards[index.get(b) ?? 0].x + bw / 2;
+        // Offset each flow's stem slightly on the card's bottom edge so parallel stems don't blur together
+        const stemDx = lanes > 1 ? (k - (lanes - 1) / 2) * 12 : 0;
+        const ca = cards[index.get(a) ?? 0].x + bw / 2 + stemDx;
+        const cb = cards[index.get(b) ?? 0].x + bw / 2 + stemDx;
         d = roundPath(
           [
             [ca, ya],
@@ -886,49 +1199,94 @@ export const InstanceGraph = React.memo(function InstanceGraph({
       });
     });
   });
-  const pillW = (f: Front) =>
-    Math.min(stack ? bw : W - 24, Math.max(190, 84 + f.label.length * 7.4));
+
+  // Track which fronts target each host so landing ports & arrowheads never collide on a shared backend
+  const hostFrontSlots = new Map<string, number[]>();
   fronts.forEach((f, k) => {
-    const py = 8 + k * (pillH + 8) + pillH / 2;
-    const centre = stack ? x0 + bw / 2 : W / 2;
     used
       .filter((h) => f.targets.includes(h.name))
-      .forEach((h, i) => {
-        let d: string;
-        if (stack) {
-          const lx = x0 - 16 - (nFront - 1 - k) * 18;
+      .forEach((h) => {
+        const arr = hostFrontSlots.get(h.name) || [];
+        arr.push(k);
+        hostFrontSlots.set(h.name, arr);
+      });
+  });
+
+  fronts.forEach((f, k) => {
+    const box = frontBoxes[k];
+    const pyMid = box.y + box.h / 2;
+    const pyBottom = box.y + box.h;
+    const targetHosts = used.filter((h) => f.targets.includes(h.name));
+    targetHosts.forEach((h, i) => {
+      const slots = hostFrontSlots.get(h.name) || [k];
+      const slotIdx = Math.max(0, slots.indexOf(k));
+      const slotCount = slots.length;
+      let d: string;
+      if (stack) {
+        const lx = x0 - 16 - (nFront - 1 - k) * 18;
+        const dy = slotCount > 1 ? (slotIdx - (slotCount - 1) / 2) * 12 : 0;
+        const ty = cardMid(h.name) + dy;
+        d = roundPath(
+          [
+            [box.x, pyMid],
+            [lx, pyMid],
+            [lx, ty],
+            [x0 - 1, ty],
+          ],
+          8,
+        );
+      } else {
+        const card = cards[index.get(h.name) ?? 0];
+        const spreadX = slotCount > 1 ? Math.min(24, (bw - 56) / slotCount) : 0;
+        const tx = card.x + bw / 2 + (slotIdx - (slotCount - 1) / 2) * spreadX;
+        // Spread departure slightly along the bottom of this front box when fanning to multiple hosts
+        const depSpan = Math.min(box.w * 0.42, Math.max(0, (targetHosts.length - 1) * 16));
+        const sx =
+          targetHosts.length > 1
+            ? box.cx - depSpan / 2 + (i / (targetHosts.length - 1)) * depSpan
+            : box.cx;
+        const hasLowerRow = frontRows.length > 1 && box.row < frontRows.length - 1;
+        if (hasLowerRow) {
+          // Route around the outer side channel so wires from upper rows never cross lower entrypoint pills
+          const sideX = box.cx <= W / 2 ? 10 + k * 6 : W - 10 - k * 6;
+          const busY = frontsH - 22 - box.row * 6;
           d = roundPath(
             [
-              [centre - pillW(f) / 2, py],
-              [lx, py],
-              [lx, cardMid(h.name)],
-              [x0 - 1, cardMid(h.name)],
+              [box.cx <= W / 2 ? box.x : box.x + box.w, pyMid],
+              [sideX, pyMid],
+              [sideX, busY],
+              [tx, busY],
+              [tx, frontsH - 1],
             ],
             8,
           );
         } else {
-          const c = cards[index.get(h.name) ?? 0].x + bw / 2;
-          d = `M${W / 2} ${8 + k * (pillH + 8) + pillH} C ${W / 2} ${frontsH - 2}, ${c} ${frontsH - 8}, ${c} ${frontsH}`;
+          const spanY = frontsH - pyBottom;
+          const c1y = pyBottom + spanY * (0.42 + (k % 2) * 0.14);
+          const c2y = frontsH - spanY * (0.36 - (k % 2) * 0.08);
+          d = `M${sx} ${pyBottom} C ${sx} ${c1y}, ${tx} ${c2y}, ${tx} ${frontsH - 1}`;
         }
-        wires.push({
-          key: `front-${k}-${i}`,
-          d,
-          halo: d,
-          kind: "front",
-          title: bi("客户端经入口转发到后端", "Client -> Entrypoint -> Backend"),
-        });
+      }
+      wires.push({
+        key: `front-${k}-${i}`,
+        d,
+        halo: d,
+        kind: "front",
+        tone: f.tone,
+        title: `${f.title} (${f.label}) → ${h.name}`,
       });
+    });
   });
   const wireClass = (w: Wire) =>
     w.kind === "front"
-      ? "link-live"
+      ? `link-live${w.tone ? ` f${w.tone}` : ""}`
       : w.kind === "mesh"
         ? "link-mesh"
         : `link-wal ${w.sync ? "sync" : ""}`;
   const wireArrow = (w: Wire) =>
     w.kind === "mesh"
       ? undefined
-      : `url(#${arrow(w.kind === "front" ? "live" : "wal", w.sync)})`;
+      : `url(#${arrow(w.kind === "front" ? "live" : "wal", w.sync, w.tone)})`;
   const legend = [
     ...flows
       .filter(
@@ -946,23 +1304,34 @@ export const InstanceGraph = React.memo(function InstanceGraph({
             ? bi("异步", "Async")
             : "",
       })),
-    ...(fronts.length
-      ? [
-          {
-            key: "front",
-            cls: "link-live",
-            text: bi("客户端 → 入口 → 后端", "Client → Entry → Backend"),
-            tag: "",
-          },
-        ]
-      : []),
+    ...(multiFront
+      ? fronts.map((f, idx) => ({
+          key: `front-${idx}`,
+          cls: `link-live${f.tone ? ` f${f.tone}` : ""}`,
+          text: `${f.title} (${f.label.split(":").pop()})`,
+          tag: f.external ? bi("外部", "EXT") : "",
+        }))
+      : fronts.length
+        ? [
+            {
+              key: "front",
+              cls: "link-live",
+              text: bi("客户端 → 入口 → 后端", "Client → Entry → Backend"),
+              tag: "",
+            },
+          ]
+        : []),
   ];
   return (
     <div className="topo-scroll" ref={wrap}>
       <svg
         className={`topo ig ${stack ? "stack" : ""}`}
         viewBox={`0 0 ${W} ${H}`}
-        style={stack ? undefined : { minWidth: Math.min(W, 520) }}
+        style={
+          stack
+            ? { maxWidth: W }
+            : { maxWidth: W, minWidth: Math.min(W, 480) }
+        }
         role="img"
         aria-label={bi(
           `${used.length} 台机器，${real.length} 个组件实例，${flows.length + fronts.length} 条连接`,
@@ -970,7 +1339,7 @@ export const InstanceGraph = React.memo(function InstanceGraph({
         )}
       >
         <defs>
-          {["wal", "wal-sync", "live"].map((k) => (
+          {["wal", "wal-sync", "live", "live-1", "live-2"].map((k) => (
             <marker
               key={k}
               id={`${uid}-${k}`}
@@ -985,38 +1354,11 @@ export const InstanceGraph = React.memo(function InstanceGraph({
             </marker>
           ))}
         </defs>
-        {fronts.map((f, k) => {
-          const w = pillW(f);
-          const y = 8 + k * (pillH + 8);
-          const cx = stack ? x0 + bw / 2 : W / 2;
-          return (
-            <g key={k} className="topo-elb">
-              <title>{`${f.external ? bi("外部入口", "External entry") : bi("入口", "Entrypoint")} ${f.label}`}</title>
-              <rect
-                x={cx - w / 2}
-                y={y}
-                width={w}
-                height={pillH}
-                rx={6}
-              />
-              <text x={cx} y={y + 21} textAnchor="middle">
-                <tspan className="t-k">{f.external ? bi("外部", "EXT") : bi("入口", "VIP")}</tspan>
-                {/* the pill has a fixed width: a long domain is shortened in the middle, never spilled over the wires */}
-                <tspan dx="6">
-                  {clipMid(
-                    f.label,
-                    w - 44 - labelWidth(f.external ? bi("外部", "EXT") : bi("入口", "VIP")),
-                    8,
-                  )}
-                </tspan>
-              </text>
-            </g>
-          );
-        })}
         {used.map((h, i) => {
           const c = cards[i];
           const list = chips(h.name);
-          const name = clip(h.name, stack ? 86 : 100);
+          const name = clip(h.name, stack ? leftColW : 100);
+          const ipText = clip(h.ip || "—", stack ? leftColW : bw - 28);
           return (
             <g
               key={h.name}
@@ -1044,7 +1386,7 @@ export const InstanceGraph = React.memo(function InstanceGraph({
               </text>
               {h.name === controller && (
                 <g
-                  transform={`translate(${stack ? 14 : c.w - 44} ${stack ? 31 : 8})`}
+                  transform={`translate(${stack ? 14 : c.w - 44} ${stack ? 32 : 8})`}
                   className="ig-badge"
                 >
                   <rect width={30} height={15} rx={4} />
@@ -1055,10 +1397,11 @@ export const InstanceGraph = React.memo(function InstanceGraph({
               )}
               <text
                 x={14}
-                y={stack ? (h.name === controller ? 62 : 43) : 35}
+                y={stack ? (h.name === controller ? 64 : 44) : 35}
                 className="t-ip"
               >
-                {h.ip || "—"}
+                <title>{h.ip || "—"}</title>
+                {ipText}
               </text>
               {list.map((ch, k) => (
                 <g
@@ -1070,6 +1413,7 @@ export const InstanceGraph = React.memo(function InstanceGraph({
                       : `translate(10 ${top0 + k * PITCH})`
                   }
                 >
+                  <title>{chipLabel(ch)}</title>
                   <rect width={CW} height={CH} rx={5} />
                   <text x={10} y={CH / 2 + 4}>
                     {clip(chipLabel(ch), CW - 18)}
@@ -1103,7 +1447,7 @@ export const InstanceGraph = React.memo(function InstanceGraph({
                   key={`pulse-${w.key}`}
                   r={2.8}
                   opacity={0}
-                  className={`pulse ${w.kind === "front" ? "live" : w.sync ? "sync" : ""}`}
+                  className={`pulse ${w.kind === "front" ? `live${w.tone ? ` live-${w.tone}` : ""}` : w.sync ? "sync" : ""}`}
                 >
                   {/* Delayed particles must stay hidden before motion starts at their path. */}
                   <animate
@@ -1123,6 +1467,36 @@ export const InstanceGraph = React.memo(function InstanceGraph({
                 </circle>
               ))}
         </g>
+        {/* Entrypoint pills render above wire anchors so labels & borders stay crisp */}
+        {fronts.map((f, k) => {
+          const box = frontBoxes[k];
+          return (
+            <g
+              key={f.key}
+              className={`topo-elb${f.tone ? ` f${f.tone}` : ""}`}
+            >
+              <title>{`${f.title} · ${f.label} → ${f.targets.join(", ")}`}</title>
+              <rect
+                x={box.x}
+                y={box.y}
+                width={box.w}
+                height={box.h}
+                rx={7}
+              />
+              <text x={box.cx} y={box.y + 21} textAnchor="middle">
+                <tspan className="t-k">{f.badge}</tspan>
+                {/* the pill has a fixed width: a long domain is shortened in the middle, never spilled over the wires */}
+                <tspan dx="6">
+                  {clipMid(
+                    f.label,
+                    box.w - 30 - labelWidth(f.badge, 7.2),
+                    7.4,
+                  )}
+                </tspan>
+              </text>
+            </g>
+          );
+        })}
         {stack &&
           flows.map((f, k) => {
             const ys = [

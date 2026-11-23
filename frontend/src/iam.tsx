@@ -18,7 +18,7 @@ import {
   IconPlus,
   IconUserGroup,
 } from "@arco-design/web-react/icon";
-import { api, can, err, fullTime } from "./shared";
+import { api, can, err, fullTime, refreshAIStatus } from "./shared";
 import { go } from "./router";
 import { UnderlineTabs } from "./ui";
 import { bi, biv, useLang } from "./i18n";
@@ -31,6 +31,7 @@ const MODULE_EN: Record<string, string> = {
   交付: "Delivery",
   组件: "Components",
   软件库: "Software Library",
+  安全: "Security",
   AI: "AI",
   知识库: "Knowledge Base",
   IAM: "IAM",
@@ -83,13 +84,73 @@ const PERM_EN: Record<string, [string, string]> = {
     "Manage runtimes",
     "Build, import, and set default Ansible runtimes; upload Python packages",
   ],
+  "security.view": [
+    "View Security Center",
+    "Browse platform-wide CVE findings, affected clusters/components, and export reports & SBOM",
+  ],
+  "security.scan": [
+    "Run scans & sync advisory DB",
+    "Trigger offline scans, sync OSV advisories online, and import/export offline advisory bundles",
+  ],
+  "security.manage": [
+    "Manage VEX triage & gates",
+    "Record vulnerability triage/waivers and configure release/delivery security policy gates",
+  ],
   "ai.use": [
-    "Use AI features",
-    "AI assistant, troubleshooting, change rehearsal, delivery review, and smart fill",
+    "Use AI (master gate)",
+    "Required before any individual AI sub-feature below can be enabled for this role",
+  ],
+  "ai.feat.assistant": [
+    "AI Assistant",
+    "Top-bar AI chat workspace and general Q&A",
+  ],
+  "ai.feat.kb": [
+    "Knowledge Base & RAG",
+    "Top-bar Knowledge Base tab and AI knowledge retrieval",
+  ],
+  "ai.feat.skills": [
+    "AI Skills",
+    "Top-bar Skills tab and invoking platform/personal skills in chat",
+  ],
+  "ai.feat.mcp": [
+    "MCP Servers",
+    "Top-bar MCP tab and calling external MCP tools in chat",
+  ],
+  "ai.feat.component": [
+    "Component AI",
+    "Component Workbench chat, AI draft proposals, AI revision notes, and reviews",
+  ],
+  "ai.feat.form": [
+    "Smart Form Fill",
+    "Chat with AI to auto-fill specs when creating deliveries",
+  ],
+  "ai.feat.review": [
+    "Delivery Review",
+    "Ask AI to review delivery plans and risks on delivery details",
+  ],
+  "ai.feat.troubleshoot": [
+    "Troubleshooting",
+    "Diagnose runbook and execution monitor errors/screenshots with AI",
+  ],
+  "ai.feat.change_rehearsal": [
+    "Change Rehearsal",
+    "Run read-only probes and staging rehearsals on delivered clusters to generate SOPs",
+  ],
+  "ai.feat.docs": [
+    "Doc Drafting",
+    "Draft and verify delivery, handover, and RCA documents with AI",
+  ],
+  "ai.feat.library": [
+    "Software Library AI",
+    "Analyze Ansible runtime dependencies and upgrades from Software Library",
+  ],
+  "ai.feat.security": [
+    "Security AI",
+    "On-demand CVE impact analysis, exploitability review, and mitigation guidance in Security Center",
   ],
   "ai.settings": [
     "AI settings",
-    "Global AI switch, model providers, assignments, pricing, web search, skills, and MCP servers",
+    "Global AI switch, per-module AI switches, model providers, web search, skills, and MCP servers",
   ],
   "ai.usage": [
     "View AI usage",
@@ -564,6 +625,7 @@ export function GrantEditor({
           "Saved; new permissions apply on the user's next action",
         ),
       );
+      void refreshAIStatus();
       onSaved();
     } catch (e) {
       err(e);
@@ -686,10 +748,27 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
     (!draft && !!role?.builtin) ||
     (!!draft?.id && !!iam.roles.find((r) => r.id === draft.id)?.builtin);
   const dirty = !!draft;
+  const aiFeatIds = iam.perms
+    .filter((p) => p.id.startsWith("ai.feat."))
+    .map((p) => p.id);
   const toggle = (ids: string[], on: boolean) => {
     if (!cur) return;
     const next = new Set(cur.perms);
     ids.forEach((i) => (on ? next.add(i) : next.delete(i)));
+    // Parent-child rule: enabling ai.use from off selects all AI sub-features by default;
+    // disabling ai.use automatically clears all ai.feat.* sub-permissions.
+    if (ids.length === 1 && ids[0] === "ai.use") {
+      if (on) {
+        if (!aiFeatIds.some((id) => next.has(id))) {
+          aiFeatIds.forEach((id) => next.add(id));
+        }
+      } else {
+        aiFeatIds.forEach((id) => next.delete(id));
+      }
+    }
+    if (!next.has("ai.use")) {
+      aiFeatIds.forEach((id) => next.delete(id));
+    }
     setDraft({
       ...cur,
       perms: iam.perms.map((p) => p.id).filter((p) => next.has(p)),
@@ -704,12 +783,14 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
         desc: draft.desc,
         perms: draft.perms,
         scope: draft.scope,
+        granular_ai: true,
       });
       const next = await api<IAM>(
         draft.id ? `/api/iam/roles/${draft.id}` : "/api/iam/roles",
         { method: draft.id ? "PUT" : "POST", body },
       );
       set(next);
+      void refreshAIStatus();
       const made = next.roles.find((r) => r.name === draft.name);
       setDraft(null);
       if (made) setSel(made.id);
@@ -1042,22 +1123,107 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
                           </small>
                         </label>
                         <div className="iam-perms">
-                          {ps.map((p) => (
-                            <label
-                              key={p.id}
-                              className={`iam-perm ${cur.perms.includes(p.id) ? "on" : ""}`}
-                            >
-                              <Checkbox
-                                checked={cur.perms.includes(p.id)}
-                                disabled={locked}
-                                onChange={(v) => toggle([p.id], v)}
-                              />
-                              <span>
-                                <b>{permTitle(p)}</b>
-                                <small>{permDesc(p)}</small>
-                              </span>
-                            </label>
-                          ))}
+                          {m === "AI" ? (
+                            <>
+                              {ps
+                                .filter((p) => !p.id.startsWith("ai.feat."))
+                                .map((p) => {
+                                  const isUse = p.id === "ai.use";
+                                  const useOn = cur.perms.includes("ai.use");
+                                  const subPerms = isUse
+                                    ? ps.filter((x) =>
+                                        x.id.startsWith("ai.feat."),
+                                      )
+                                    : [];
+                                  return (
+                                    <React.Fragment key={p.id}>
+                                      <label
+                                        className={`iam-perm ${cur.perms.includes(p.id) ? "on" : ""}`}
+                                      >
+                                        <Checkbox
+                                          checked={cur.perms.includes(p.id)}
+                                          disabled={locked}
+                                          onChange={(v) => toggle([p.id], v)}
+                                        />
+                                        <span>
+                                          <b>{permTitle(p)}</b>
+                                          <small>{permDesc(p)}</small>
+                                        </span>
+                                      </label>
+                                      {isUse && subPerms.length > 0 && (
+                                        <div
+                                          className={`iam-ai-sub ${!useOn ? "is-locked" : ""}`}
+                                        >
+                                          <div className="iam-ai-sub-h">
+                                            <span>
+                                              {bi(
+                                                "细粒度 AI 模块权限",
+                                                "Per-module AI permissions",
+                                              )}
+                                              <em className="num">
+                                                {
+                                                  subPerms.filter((x) =>
+                                                    cur.perms.includes(x.id),
+                                                  ).length
+                                                }{" "}
+                                                / {subPerms.length}
+                                              </em>
+                                            </span>
+                                            {!useOn && (
+                                              <small>
+                                                {bi(
+                                                  "请先勾选上方「使用 AI（总入口）」后再按需勾选",
+                                                  "Check “Use AI (master gate)” above first",
+                                                )}
+                                              </small>
+                                            )}
+                                          </div>
+                                          <div className="iam-ai-sub-grid">
+                                            {subPerms.map((sp) => (
+                                              <label
+                                                key={sp.id}
+                                                className={`iam-ai-sub-item ${cur.perms.includes(sp.id) ? "on" : ""}`}
+                                              >
+                                                <Checkbox
+                                                  checked={cur.perms.includes(
+                                                    sp.id,
+                                                  )}
+                                                  disabled={locked || !useOn}
+                                                  onChange={(v) =>
+                                                    toggle([sp.id], v)
+                                                  }
+                                                />
+                                                <span>
+                                                  <b>{permTitle(sp)}</b>
+                                                  <small>{permDesc(sp)}</small>
+                                                </span>
+                                              </label>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      )}
+                                    </React.Fragment>
+                                  );
+                                })}
+                            </>
+                          ) : (
+                            ps.map((p) => (
+                              <label
+                                key={p.id}
+                                className={`iam-perm ${cur.perms.includes(p.id) ? "on" : ""}`}
+                              >
+                                <Checkbox
+                                  checked={cur.perms.includes(p.id)}
+                                  disabled={locked}
+                                  onChange={(v) => toggle([p.id], v)}
+                                />
+                                <span>
+                                  <b>{permTitle(p)}</b>
+                                  <small>{permDesc(p)}</small>
+                                </span>
+                              </label>
+                            ))
+                          )}
                         </div>
                       </div>
                     );

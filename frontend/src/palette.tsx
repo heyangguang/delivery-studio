@@ -14,6 +14,7 @@ import {
   IconSearch,
   IconSettings,
   IconSun,
+  IconThunderbolt,
   IconUser,
   IconUserGroup,
   IconWifi,
@@ -30,7 +31,13 @@ import {
 import type { AppInfo, Job } from "./shared";
 import { go } from "./router";
 import type { Route } from "./router";
-import { AppGlyph, StatusDot, TabIcon } from "./ui";
+import {
+  AppGlyph,
+  StatusDot,
+  TabIcon,
+  deliveryModeKeywords,
+  deliveryModeLabel,
+} from "./ui";
 import { Spark } from "./aichat";
 import { catLabel, useI18n } from "./i18n";
 
@@ -145,6 +152,19 @@ function PaletteBody({
             },
           ]
         : []),
+      ...(can("delivery.view|delivery.execute")
+        ? [
+            {
+              id: "go-exec",
+              group: pageGroup,
+              label: bi("执行监控", "Execution Monitor"),
+              hint: bi("自动化执行流水线与实时终端日志", "Live automated pipelines & streaming logs"),
+              icon: <IconThunderbolt />,
+              run: () => actions.nav("executions"),
+              keywords: "executions monitor live logs stream 自动执行 实时监控 日志 排障 流水线",
+            },
+          ]
+        : []),
       {
         id: "go-a",
         group: pageGroup,
@@ -172,6 +192,19 @@ function PaletteBody({
         run: () => actions.nav("library"),
         keywords: "library packages 软件包 离线包 软件源 mirror 镜像 rpm deb",
       },
+      ...(can("security.view")
+        ? [
+            {
+              id: "go-sec",
+              group: pageGroup,
+              label: bi("安全中心", "Security Center"),
+              hint: bi("CVE 漏洞扫描、SBOM 与风险处置", "CVE scanning, SBOM & VEX triage"),
+              icon: <IconLock />,
+              run: () => actions.nav("security"),
+              keywords: "security cve vuln sbom vex 安全 漏洞 扫描 豁免",
+            },
+          ]
+        : []),
       ...(aiOn && !!aiStatus.features?.assistant && can("ai.use")
         ? [
             {
@@ -185,7 +218,7 @@ function PaletteBody({
             },
           ]
         : []),
-      ...(aiOn && can("ai.use")
+      ...(aiOn && !!aiStatus.features?.kb && can("ai.use")
         ? [
             {
               id: "go-kb",
@@ -196,6 +229,10 @@ function PaletteBody({
               run: () => actions.nav("kb"),
               keywords: "kb knowledge 知识库 经验 文档",
             },
+          ]
+        : []),
+      ...(aiOn && !!aiStatus.features?.skills && can("ai.use")
+        ? [
             {
               id: "go-skills",
               group: pageGroup,
@@ -205,6 +242,10 @@ function PaletteBody({
               run: () => actions.nav("skills"),
               keywords: "skills 技能",
             },
+          ]
+        : []),
+      ...(aiOn && !!aiStatus.features?.mcp && can("ai.use")
+        ? [
             {
               id: "go-mcp",
               group: pageGroup,
@@ -319,14 +360,15 @@ function PaletteBody({
     const clusterItems: Item[] = latestClusters.map((j) => {
       const ph = phaseOf(j);
       const stText = states[ph] || ph;
+      const dmText = deliveryModeLabel(j.delivery_mode);
       return {
         id: `cl-${j.cluster_id}`,
         group: s ? bi("集群", "Clusters") : bi("最近的集群", "Recent Clusters"),
         label: j.cluster_id,
-        hint: `${j.app_name} · ${stText} · ${dayLabel(j.created)}`,
+        hint: `${j.app_name} · ${dmText} · ${stText} · ${dayLabel(j.created)}`,
         icon: <StatusDot state={ph} />,
         run: () => actions.open(j.cluster_id),
-        keywords: `cluster 集群 概览 ${j.app_name} ${j.app_id} ${j.version || ""} ${stText}`,
+        keywords: `cluster 集群 概览 ${j.app_name} ${j.app_id} ${j.version || ""} ${stText} ${deliveryModeKeywords(j.delivery_mode)}`,
         mono: true,
       };
     });
@@ -358,10 +400,7 @@ function PaletteBody({
       .slice()
       .sort((a, b) => b.created.localeCompare(a.created))
       .map((j) => {
-        const modeLabel =
-          j.delivery_mode === "configuration"
-            ? bi("配置交付", "Config Delivery")
-            : bi("部署", "Deploy");
+        const modeLabel = deliveryModeLabel(j.delivery_mode);
         return {
           id: `job-${j.id}`,
           group: bi("部署记录", "Deployments"),
@@ -375,7 +414,7 @@ function PaletteBody({
               tab: "plans",
               plan: j.id,
             }),
-          keywords: `部署 交付 手册 执行 deploy runbook plan ${j.id.slice(0, 8)} ${j.app_name}`,
+          keywords: `部署 交付 手册 执行 deploy runbook plan ${j.id.slice(0, 8)} ${j.app_name} ${deliveryModeKeywords(j.delivery_mode)}`,
           mono: true,
         };
       });
@@ -615,8 +654,8 @@ function PaletteBody({
                     "Offline: searching only cached clusters and catalog entries",
                   )
                 : bi(
-                    "暂时无法连接服务，当前显示最近缓存的数据",
-                    "Service unreachable: showing recently cached data",
+                    "暂时连不上 Middleware Hub 后端服务，当前显示最近缓存的数据",
+                    "Middleware Hub backend unreachable: showing recently cached data",
                   )}
             </span>
           </div>

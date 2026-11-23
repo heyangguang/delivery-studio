@@ -86,6 +86,8 @@ type storeAttempt struct {
 }
 type storeJob struct {
 	DeliveryMode string                `json:"delivery_mode,omitempty"`
+	Purpose      string                `json:"purpose,omitempty"`
+	VerifyTarget *verifyTarget         `json:"verify_target,omitempty"`
 	Scheme       *mwpack.SchemeSummary `json:"scheme,omitempty"`
 	ID           string                `json:"id"`
 	Owner        string                `json:"owner"`
@@ -117,6 +119,25 @@ type storeJob struct {
 	Updated   string   `json:"updated"`
 	Logs      []string `json:"logs"`
 }
+type cachedJobPlan struct {
+	modTime int64
+	size    int64
+	raw     json.RawMessage
+}
+
+type cachedJobSpec struct {
+	modTime int64
+	size    int64
+	dep     *mwpack.Deployment
+}
+
+type cachedExecDB struct {
+	valid   bool
+	modTime int64
+	size    int64
+	db      executionDB
+}
+
 type storeServer struct {
 	repo            *storeRepository
 	cfg             storeConfig
@@ -124,6 +145,10 @@ type storeServer struct {
 	prefMu          sync.Mutex
 	auditMu         sync.Mutex
 	jobPersistMu    sync.Mutex
+	cacheMu         sync.RWMutex
+	planCache       map[string]cachedJobPlan
+	specCache       map[string]cachedJobSpec
+	execCache       cachedExecDB
 	users           map[string]storeUser
 	sessions        map[string]storeSession
 	attempts        map[string]storeAttempt
@@ -136,9 +161,19 @@ type storeServer struct {
 	wg              trackedWork
 }
 
+func (s *storeServer) evictJobCaches(id string) {
+	if id == "" {
+		return
+	}
+	s.cacheMu.Lock()
+	delete(s.planCache, id)
+	delete(s.specCache, id)
+	s.cacheMu.Unlock()
+}
+
 func storeCommand(args []string) error {
 	if len(args) == 0 {
-		return errors.New("store serve --config 配置.json | store user-add --data 数据目录 --username 用户名 --role admin|operator --password-stdin")
+		return errors.New("store serve|supervise|reload --config 配置.json | store user-add --data 数据目录 --username 用户名 --role admin|operator --password-stdin")
 	}
 	f := flag.NewFlagSet("store "+args[0], flag.ContinueOnError)
 	config := f.String("config", "store-config.json", "服务配置")
@@ -146,11 +181,16 @@ func storeCommand(args []string) error {
 	username := f.String("username", "", "登录用户名")
 	role := f.String("role", "operator", "admin或operator")
 	stdin := f.Bool("password-stdin", false, "从标准输入读取初始密码，不显示")
+	binary := f.String("binary", "", "待热切换的新版本二进制路径，仅reload使用")
+	timeout := f.Duration("timeout", 180*time.Second, "等待热切换完成的超时时间，仅reload使用")
 	if err := f.Parse(args[1:]); err != nil {
 		return err
 	}
 	if f.NArg() != 0 {
 		return errors.New("未识别的参数")
+	}
+	if args[0] == "reload" {
+		return reloadGateway(*config, *binary, *timeout)
 	}
 	if args[0] == "user-add" {
 		if !*stdin {
@@ -208,22 +248,20 @@ func storeCommand(args []string) error {
 	var listener net.Listener
 	workerMode := os.Getenv("MW_GATEWAY_WORKER") == "1"
 	if workerMode {
-		f := os.NewFile(3, "gateway-listener")
-		listener, err = net.FileListener(f)
-		f.Close()
+		listener, err = openGatewayWorkerListener()
 	} else {
 		listener, err = net.Listen("tcp", cfg.Listen)
 	}
 	if err != nil {
 		return err
 	}
-	var handler http.Handler = s
-	if workerMode {
-		handler = gatewayWorkerHandler(s)
-	}
-	httpServer := &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32 << 10}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+	var handler http.Handler = s
+	if workerMode {
+		handler = gatewayWorkerHandlerWithControl(s, cancel, os.Getenv("MW_GATEWAY_TOKEN"))
+	}
+	httpServer := &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32 << 10}
 	drained := make(chan struct{})
 	go func() {
 		ticker := time.NewTicker(time.Minute)
@@ -437,6 +475,8 @@ func newStoreServer(c storeConfig) (*storeServer, error) {
 				s.jobs[id] = j
 			}
 		}
+		s.consolidateLegacyChangeDeliveries()
+		s.migrateComponentLifecycle()
 		return s, nil
 	}
 	jobs, _ := filepath.Glob(filepath.Join(c.DataDir, "jobs", "*", "job.json"))
@@ -459,6 +499,8 @@ func newStoreServer(c storeConfig) (*storeServer, error) {
 		}
 		s.jobs[j.ID] = j
 	}
+	s.consolidateLegacyChangeDeliveries()
+	s.migrateComponentLifecycle()
 	return s, nil
 }
 
@@ -543,6 +585,7 @@ func (s *storeServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		s.writeJSON(w, 200, map[string]any{
 			"version":     version,
+			"build_id":    currentBuildID(),
 			"released_at": currentReleaseDate,
 			"notes":       releaseNotesFor(lang),
 		})
@@ -582,6 +625,11 @@ func (s *storeServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Content-Type", kind)
+		if name == "index.html" {
+			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		} else if strings.HasPrefix(name, "assets/") {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		}
 		w.Write(b)
 		return
 	}
@@ -615,12 +663,16 @@ func (s *storeServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.handlePython(w, r, session)
 	case r.URL.Path == "/api/library" || strings.HasPrefix(r.URL.Path, "/api/library/"):
 		s.handleLibrary(w, r, session)
+	case r.URL.Path == "/api/security" || strings.HasPrefix(r.URL.Path, "/api/security/"):
+		s.handleSecurity(w, r, session)
 	case r.URL.Path == "/api/audit/sessions" || strings.HasPrefix(r.URL.Path, "/api/audit/sessions/"):
 		s.handleAuditSessions(w, r, session)
 	case (r.URL.Path == "/api/audit" || r.URL.Path == "/api/audit/export") && r.Method == "GET":
 		s.handleAudit(w, r, session)
 	case r.URL.Path == "/api/ai/chats" || strings.HasPrefix(r.URL.Path, "/api/ai/chats/"):
 		s.handleAIChats(w, r, session)
+	case r.URL.Path == "/api/ai/portal" || strings.HasPrefix(r.URL.Path, "/api/ai/portal/"):
+		s.handlePortalAI(w, r, session)
 	case r.URL.Path == "/api/ai/sandbox/approve" && r.Method == "POST":
 		s.handleSandboxApprove(w, r, session)
 	case r.URL.Path == "/api/ai/options" && r.Method == "GET":
@@ -628,11 +680,13 @@ func (s *storeServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == "/api/ai/models" && r.Method == "GET":
 		s.writeJSON(w, 200, s.aiModels())
 	case r.URL.Path == "/api/ai/status" && r.Method == "GET":
-		s.writeJSON(w, 200, s.aiStatus())
+		s.writeJSON(w, 200, s.aiStatusFor(session.User))
 	case r.URL.Path == "/api/ai/toggle" && r.Method == "POST":
 		s.handleAIToggle(w, r, session)
-	case r.URL.Path == "/api/settings/execution-nodes" || r.URL.Path == "/api/settings/execution-nodes/binary":
+	case r.URL.Path == "/api/settings/execution-nodes" || strings.HasPrefix(r.URL.Path, "/api/settings/execution-nodes/"):
 		s.handleExecutionNodes(w, r, session)
+	case r.URL.Path == "/api/executions/runs" && r.Method == "GET":
+		s.handleExecutionRunsList(w, r, session)
 	case r.URL.Path == "/api/settings/sandbox" || r.URL.Path == "/api/settings/sandbox/check":
 		s.handleSandboxSettings(w, r, session)
 	case r.URL.Path == "/api/settings/storage":

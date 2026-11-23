@@ -3,11 +3,18 @@
 package main
 
 import (
+	"context"
 	"errors"
+	"fmt"
+	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
+	"strings"
+	"sync/atomic"
 	"syscall"
+	"time"
 	"unsafe"
 )
 
@@ -87,4 +94,57 @@ func gatewayNotifySignals() []os.Signal {
 
 func isGatewayReloadSignal(_ os.Signal) bool {
 	return false
+}
+
+func openGatewayWorkerListener() (net.Listener, error) {
+	addrFile := strings.TrimSpace(os.Getenv("MW_GATEWAY_ADDR_FILE"))
+	if addrFile == "" {
+		return nil, errors.New("missing MW_GATEWAY_ADDR_FILE for Windows gateway worker")
+	}
+	return openLoopbackWorkerListener(addrFile)
+}
+
+func prepareGatewayWorkerIPC(cmd *exec.Cmd, dir string) (
+	dial func(ctx context.Context, network, addr string) (net.Conn, error),
+	waitAddr func(ctx context.Context, done <-chan error) error,
+	cleanup func(),
+	closeAfterStart func(),
+	err error,
+) {
+	addrFile := filepath.Join(dir, fmt.Sprintf("worker-%d.addr", time.Now().UnixNano()))
+	cmd.Env = append(cmd.Env, "MW_GATEWAY_ADDR_FILE="+addrFile)
+	var targetAddr atomic.Value
+	dial = func(ctx context.Context, _, _ string) (net.Conn, error) {
+		v, _ := targetAddr.Load().(string)
+		if v == "" {
+			return nil, errors.New("worker loopback address not ready")
+		}
+		return (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, "tcp", v)
+	}
+	waitAddr = func(ctx context.Context, done <-chan error) error {
+		tick := time.NewTicker(40 * time.Millisecond)
+		defer tick.Stop()
+		for {
+			if raw, rerr := os.ReadFile(addrFile); rerr == nil {
+				if addr := strings.TrimSpace(string(raw)); addr != "" {
+					targetAddr.Store(addr)
+					return nil
+				}
+			}
+			select {
+			case e := <-done:
+				return fmt.Errorf("worker exited before binding loopback port: %v", e)
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-tick.C:
+			}
+		}
+	}
+	cleanup = func() { _ = os.Remove(addrFile) }
+	closeAfterStart = func() {}
+	return dial, waitAddr, cleanup, closeAfterStart, nil
+}
+
+func signalGatewayWorkerGraceful(_ *exec.Cmd) {
+	// Windows workers receive graceful shutdown via authenticated POST /__gateway/shutdown.
 }

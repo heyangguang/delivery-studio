@@ -560,7 +560,8 @@ ports:
   - {name: service, value: =params.port}
 versions:
   - id: "1.6"
-    status: draft
+    status: published
+    verified_platforms: [ubuntu-24.04-amd64]
     platforms: [ubuntu-24.04-amd64]
     packages: [{name: memcached, version: "1.6.24-1ubuntu3"}]
 lifecycle:

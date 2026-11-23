@@ -419,22 +419,25 @@ const what = (r: Row) =>
     ? auditLabel(r.action)
     : `${VERB[r.method || ""] || r.method || bi("请求", "Request")}${r.resource?.type ? ` ${resourceLabel(r.resource.type)}` : ""}`;
 
-/** Browser & OS label in concise words: "Chrome 141 · Windows". */
+/** Browser / CLI & OS label in concise words: "Chrome 141 · Windows", "PowerShell 5.1 · Windows". */
 export function browser(ua?: string) {
   if (!ua) return "";
-  const m = /(Edg|Chrome|Firefox|Version)\/(\d+)/.exec(ua);
-  const name = m
-    ? (
-        {
-          Edg: "Edge",
-          Chrome: "Chrome",
-          Firefox: "Firefox",
-          Version: "Safari",
-        } as Record<string, string>
-      )[m[1]] +
-      " " +
-      m[2]
-    : ua.split(" ")[0];
+  let name = "";
+  const ps = /(?:WindowsPowerShell|PowerShell)\/([\d.]+)/i.exec(ua);
+  const cli = /(curl|python-requests|Python-urllib|Go-http-client|PostmanRuntime|HTTPie)\/([\d.]+)/i.exec(
+    ua,
+  );
+  const edg = /Edg\/(\d+)/.exec(ua);
+  const chr = /Chrome\/(\d+)/.exec(ua);
+  const ffx = /Firefox\/(\d+)/.exec(ua);
+  const saf = /Version\/(\d+).*Safari/.exec(ua);
+  if (ps) name = `PowerShell ${ps[1].split(".").slice(0, 2).join(".")}`;
+  else if (cli) name = `${cli[1]} ${cli[2].split(".").slice(0, 2).join(".")}`;
+  else if (edg) name = `Edge ${edg[1]}`;
+  else if (chr) name = `Chrome ${chr[1]}`;
+  else if (ffx) name = `Firefox ${ffx[1]}`;
+  else if (saf) name = `Safari ${saf[1]}`;
+  else name = ua.split(" ")[0];
   const os = /Windows/.test(ua)
     ? "Windows"
     : /Mac OS X/.test(ua)
@@ -447,6 +450,17 @@ export function browser(ua?: string) {
             ? "Linux"
             : "";
   return [name, os].filter(Boolean).join(" · ");
+}
+
+/** Classify a session User-Agent as a desktop browser, mobile browser, or CLI/API client. */
+export function deviceKind(ua?: string): "browser" | "mobile" | "cli" {
+  if (!ua) return "cli";
+  if (/(WindowsPowerShell|PowerShell|curl|python-requests|Python-urllib|Go-http-client|PostmanRuntime|HTTPie|Wget)/i.test(ua)) {
+    return "cli";
+  }
+  if (/Android|iPhone|iPad|Mobile/i.test(ua)) return "mobile";
+  if (/(Edg|Chrome|Firefox|Safari)\/\d+/i.test(ua)) return "browser";
+  return "cli";
 }
 
 const pretty = (t?: string) =>

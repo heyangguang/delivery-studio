@@ -40,8 +40,24 @@ var perms = []perm{
 	{"library.manage", "软件库", "管理软件库", "下载、导入、删除软件包，更新、导入、导出软件源索引"},
 	{"library.runtime", "软件库", "管理运行环境", "构建、导入、设为默认 Ansible 运行环境，上传 Python 包"},
 
-	{"ai.use", "AI", "使用 AI", "AI 助手、现场排障、变更演练、交付评审、智能填表"},
-	{"ai.settings", "AI", "AI 设置", "AI 一键总开关、模型供应商、用途、价格、联网搜索、平台技能和 MCP 服务"},
+	{"security.view", "安全", "查看安全中心", "浏览全平台 CVE 漏洞概览、受影响组件/软件库/集群清单及导出报告与 SBOM"},
+	{"security.scan", "安全", "漏洞扫描与库同步", "触发离线/全量漏洞扫描、在线同步 OSV 漏洞库、导入导出离线漏洞库包"},
+	{"security.manage", "安全", "漏洞处置与安全门禁", "标记 VEX 漏洞处置与风险豁免状态、配置组件发布与交付安全门禁策略"},
+
+	{"ai.use", "AI", "使用 AI（总入口）", "开启后方可使用下方勾选的各项 AI 子功能"},
+	{"ai.feat.assistant", "AI", "AI 助手", "顶栏 AI 助手对话页与通用问答"},
+	{"ai.feat.kb", "AI", "知识库与检索增强", "顶栏知识库入口及 AI 对话知识检索（RAG）"},
+	{"ai.feat.skills", "AI", "AI 技能", "顶栏技能页及对话中调用平台/个人技能"},
+	{"ai.feat.mcp", "AI", "MCP 服务", "顶栏 MCP 页及对话中调用外部 MCP 工具"},
+	{"ai.feat.component", "AI", "组件 AI", "组件工作台对话、AI 修订说明与组件评审"},
+	{"ai.feat.form", "AI", "智能填表", "新建交付时使用 AI 对话自动填写部署规格"},
+	{"ai.feat.review", "AI", "交付评审", "在交付详情页让 AI 评审部署方案与风险"},
+	{"ai.feat.troubleshoot", "AI", "现场排障", "在执行手册与执行监控中贴回报错或截图让 AI 排障"},
+	{"ai.feat.change_rehearsal", "AI", "变更演练", "在已交付集群发起只读探针与测试环境变更演练生成 SOP"},
+	{"ai.feat.docs", "AI", "文档起草", "在集群文档中让 AI 起草并核对交付/交接/RCA 说明文字"},
+	{"ai.feat.library", "AI", "软件库 AI", "在软件库运行环境页发起 AI 依赖差异与升级评估"},
+	{"ai.feat.security", "AI", "安全 AI", "在安全中心和集群安全页按需使用 AI 进行 CVE 研判、影响评估与缓解建议"},
+	{"ai.settings", "AI", "AI 设置", "AI 一键总开关、功能模块总控、模型供应商、联网搜索、平台技能和 MCP 服务"},
 	{"ai.usage", "AI", "查看 AI 用量", "所有人的 AI 调用明细、用量与成本"},
 
 	{"kb.view", "知识库", "使用团队知识库", "浏览团队知识库，AI 回答时也会查它"},
@@ -72,13 +88,76 @@ var permIndex = func() map[string]perm {
 // scopes, narrowest first.
 var scopeRank = map[string]int{"own": 0, "team": 1, "all": 2}
 
+// aiFeaturePerms lists all granular per-module AI usage permissions controlled under ai.use.
+var aiFeaturePerms = []string{
+	"ai.feat.assistant",
+	"ai.feat.kb",
+	"ai.feat.skills",
+	"ai.feat.mcp",
+	"ai.feat.component",
+	"ai.feat.form",
+	"ai.feat.review",
+	"ai.feat.troubleshoot",
+	"ai.feat.change_rehearsal",
+	"ai.feat.docs",
+	"ai.feat.library",
+	"ai.feat.security",
+}
+
+func aiFeaturePermID(feature string) string {
+	id := "ai.feat." + feature
+	if _, ok := permIndex[id]; ok {
+		return id
+	}
+	return ""
+}
+
+func isAIFeaturePerm(p string) bool { return strings.HasPrefix(p, "ai.feat.") }
+
+// expandRolePerms computes the effective permission list of a role:
+//   - If "ai.use" is absent, any stray ai.feat.* entries are ignored (parent gate).
+//   - If "ai.use" is present on a legacy role saved before granular AI perms existed
+//     (!r.GranularAI and zero ai.feat.* stored), all ai.feat.* permissions are auto-granted for backwards compatibility.
+func expandRolePerms(r role) []string {
+	hasAIUse := false
+	hasAnyFeat := false
+	for _, p := range r.Perms {
+		if p == "ai.use" {
+			hasAIUse = true
+		} else if isAIFeaturePerm(p) {
+			hasAnyFeat = true
+		}
+	}
+	out := make([]string, 0, len(r.Perms)+len(aiFeaturePerms))
+	seen := map[string]bool{}
+	for _, p := range r.Perms {
+		if isAIFeaturePerm(p) && !hasAIUse {
+			continue
+		}
+		if !seen[p] {
+			seen[p] = true
+			out = append(out, p)
+		}
+	}
+	if hasAIUse && !r.GranularAI && !hasAnyFeat {
+		for _, fp := range aiFeaturePerms {
+			if !seen[fp] {
+				seen[fp] = true
+				out = append(out, fp)
+			}
+		}
+	}
+	return out
+}
+
 type role struct {
-	ID      string   `json:"id"`
-	Name    string   `json:"name"`
-	Desc    string   `json:"desc,omitempty"`
-	Perms   []string `json:"perms"`
-	Scope   string   `json:"scope"`
-	Builtin bool     `json:"builtin,omitempty"`
+	ID         string   `json:"id"`
+	Name       string   `json:"name"`
+	Desc       string   `json:"desc,omitempty"`
+	Perms      []string `json:"perms"`
+	Scope      string   `json:"scope"`
+	Builtin    bool     `json:"builtin,omitempty"`
+	GranularAI bool     `json:"granular_ai,omitempty"`
 }
 
 func allPerms() []string {
@@ -91,10 +170,10 @@ func allPerms() []string {
 
 // builtinRoles cannot be changed; they can be copied into roles of one's own.
 var builtinRoles = []role{
-	{ID: "sysadmin", Name: "系统管理员", Desc: "管理整个平台：用户、角色、设置、组件和软件库，能看到所有交付", Perms: allPerms(), Scope: "all", Builtin: true},
-	{ID: "engineer", Name: "交付工程师", Desc: "做交付：生成、下载、执行自己的交付，并在开启 AI 时使用变更演练和排障助手", Perms: []string{"delivery.view", "delivery.create", "delivery.download", "delivery.run", "delivery.delete", "report.edit", "report.export", "ai.use", "kb.view", "kb.submit"}, Scope: "own", Builtin: true},
-	{ID: "maintainer", Name: "组件维护者", Desc: "维护组件和软件库：编辑、发布组件，准备软件包和运行环境", Perms: []string{"component.edit", "component.publish", "component.import", "library.manage", "library.runtime", "ai.use", "kb.view", "kb.submit"}, Scope: "own", Builtin: true},
-	{ID: "auditor", Name: "只读审计员", Desc: "只看不改：所有交付、操作审计和 AI 用量", Perms: []string{"delivery.view", "report.export", "audit.view", "ai.usage", "kb.view"}, Scope: "all", Builtin: true},
+	{ID: "sysadmin", Name: "系统管理员", Desc: "管理整个平台：用户、角色、设置、组件和软件库，能看到所有交付", Perms: allPerms(), Scope: "all", Builtin: true, GranularAI: true},
+	{ID: "engineer", Name: "交付工程师", Desc: "做交付：生成、下载、执行自己的交付，并在开启 AI 时使用变更演练和排障助手", Perms: []string{"delivery.view", "delivery.create", "delivery.download", "delivery.run", "delivery.delete", "report.edit", "report.export", "security.view", "ai.use", "ai.feat.assistant", "ai.feat.kb", "ai.feat.skills", "ai.feat.mcp", "ai.feat.form", "ai.feat.review", "ai.feat.troubleshoot", "ai.feat.change_rehearsal", "ai.feat.docs", "ai.feat.library", "ai.feat.security", "kb.view", "kb.submit"}, Scope: "own", Builtin: true, GranularAI: true},
+	{ID: "maintainer", Name: "组件维护者", Desc: "维护组件和软件库：编辑、发布组件，准备软件包和运行环境", Perms: []string{"component.edit", "component.publish", "component.import", "library.manage", "library.runtime", "security.view", "security.scan", "ai.use", "ai.feat.assistant", "ai.feat.kb", "ai.feat.skills", "ai.feat.mcp", "ai.feat.component", "ai.feat.library", "ai.feat.security", "kb.view", "kb.submit"}, Scope: "own", Builtin: true, GranularAI: true},
+	{ID: "auditor", Name: "只读审计员", Desc: "只看不改：所有交付、操作审计和 AI 用量", Perms: []string{"delivery.view", "report.export", "security.view", "audit.view", "ai.usage", "kb.view"}, Scope: "all", Builtin: true, GranularAI: true},
 }
 
 type team struct {
@@ -229,7 +308,7 @@ func (st iamState) accessFrom(u storeUser) access {
 			continue
 		}
 		a.Roles = append(a.Roles, id)
-		for _, p := range r.Perms {
+		for _, p := range expandRolePerms(r) {
 			a.Perms[p] = true
 		}
 		if scopeRank[r.Scope] > scopeRank[a.Scope] {
@@ -241,6 +320,22 @@ func (st iamState) accessFrom(u storeUser) access {
 }
 
 func (s *storeServer) can(user, p string) bool { return s.accessOf(user).can(p) }
+
+// userCanAIFeaturePerm checks the IAM permission layer for a specific AI module:
+// the user must hold both "ai.use" and "ai.feat.<feature>" (if defined).
+func (s *storeServer) userCanAIFeaturePerm(user, feature string) bool {
+	if user == "" {
+		return true
+	}
+	a := s.accessOf(user)
+	if !a.can("ai.use") {
+		return false
+	}
+	if fp := aiFeaturePermID(feature); fp != "" {
+		return a.can(fp)
+	}
+	return true
+}
 
 // need answers 403 when the person lacks the permission.
 func (s *storeServer) need(w http.ResponseWriter, user, p string) bool {
@@ -308,13 +403,14 @@ func rp(methods, path, p string) routePerm {
 // routePerms are checked in order; the first that fits decides. A request that changes something and fits none is
 // refused, so a new API cannot be left open by forgetting it here.
 var routePerms = []routePerm{
-	rp("*", `/api/settings/execution-nodes(/binary)?`, "execution.manage"),
+	rp("*", `/api/settings/execution-nodes(/.*)?`, "execution.manage"),
 	rp("W", `/api/jobs/[^/]+/executions(/.*)?`, "delivery.execute"),
 	rp("*", `/api/(session(/heartbeat)?|logout)`, ""),
 	rp("*", `/api/me(/.*)?`, ""),
 	rp("GET", `/api/(catalog|ai/options|ai/models|ai/status)`, ""),
 	rp("POST", `/api/ai/toggle`, "ai.settings"),
 
+	rp("GET", `/api/executions/runs`, "delivery.view"),
 	rp("GET", `/api/jobs`, "delivery.view"),
 	rp("W", `/api/jobs`, "delivery.create"),
 	rp("W", `/api/certificates/check`, "delivery.create"),
@@ -324,7 +420,10 @@ var routePerms = []routePerm{
 	rp("W", `/api/jobs/[^/]+/progress(/img|/logs)?`, "delivery.run"),
 	rp("W", `/api/jobs/[^/]+/sync`, "delivery.create"),
 	rp("W", `/api/jobs/[^/]+/sync/keep`, "delivery.run"),
-	rp("W", `/api/jobs/[^/]+/ai/proposals/.*`, "delivery.run"),
+	rp("W", `/api/jobs/[^/]+/sync/confirm`, "delivery.run"),
+	rp("GET", `/api/jobs/[^/]+/(scripts|patches)(/.*)?`, "delivery.view"),
+	rp("W", `/api/jobs/[^/]+/(scripts|patches)(/.*)?`, "delivery.run"),
+	rp("W", `/api/jobs/[^/]+/ai/proposals/.*`, "delivery.run|security.manage"),
 	rp("W", `/api/jobs/[^/]+/ai/resolve`, "delivery.run"),
 	rp("*", `/api/jobs/[^/]+/ai(/.*)?`, "ai.use"),
 	rp("GET", `/api/jobs/.*`, "delivery.view"),
@@ -333,7 +432,10 @@ var routePerms = []routePerm{
 	rp("GET", `/api/clusters/[^/]+/docs(/.*)?`, "delivery.view"),
 	rp("W", `/api/clusters/[^/]+/docs(/.*)?`, "report.edit"),
 	rp("GET", `/api/clusters/[^/]+/rehearsals(/.*)?`, "delivery.view"),
+	rp("W", `/api/clusters/[^/]+/rehearsals/[^/]+/sync-vex`, "security.manage"),
 	rp("W", `/api/clusters/[^/]+/rehearsals(/.*)?`, "ai.use"),
+	rp("GET", `/api/clusters/[^/]+/security(/.*)?`, "delivery.view"),
+	rp("W", `/api/clusters/[^/]+/security(/.*)?`, "security.manage"),
 	rp("GET", `/api/settings/report/summary`, "report.export"),
 	rp("*", `/api/settings/report(/.*)?`, "settings.report"),
 	rp("W", `/api/(resolve|spec/import|spec/export)`, "delivery.create"),
@@ -343,6 +445,7 @@ var routePerms = []routePerm{
 	rp("W", `/api/components/[^/]+/draft/publish`, "component.publish"),
 	rp("W", `/api/components/[^/]+/revisions/[^/]+/restore`, "component.publish"),
 	rp("W", `/api/components/[^/]+/versions/[^/]+/status`, "component.publish"),
+	rp("DELETE", `/api/components/[^/]+/verifications/[^/]+`, "component.publish"),
 	rp("DELETE", `/api/components/[^/]+`, "component.publish"),
 	rp("*", `/api/components/[^/]+/(workspace|draft|revisions|ai|fork)(/.*)?`, "component.edit"),
 	rp("W", `/api/components(/.*)?`, "component.edit"),
@@ -354,7 +457,16 @@ var routePerms = []routePerm{
 	rp("GET", `/api/library(/.*)?`, ""),
 	rp("W", `/api/library(/.*)?`, "library.manage"),
 
+	rp("GET", `/api/security/db/export`, "security.scan"),
+	rp("*", `/api/security/ai(/.*)?`, "ai.use"),
+	rp("GET", `/api/security(/.*)?`, "security.view"),
+	rp("POST", `/api/security/ai-(analyze|polish)`, "ai.use"),
+	rp("POST", `/api/security/sources/[^/]+/test`, "security.scan"),
+	rp("W", `/api/security/(scan|db(/.*)?)`, "security.scan"),
+	rp("W", `/api/security/(triage|policy|sources|ignores|report-templates)(/.*)?`, "security.manage"),
+
 	rp("*", `/api/ai/chats(/.*)?`, "ai.use"),
+	rp("*", `/api/ai/portal(/.*)?`, "ai.use"),
 	rp("POST", `/api/ai/sandbox/approve`, "ai.use|component.edit"),
 	rp("GET", `/api/settings/ai/usage(/.*)?`, "ai.usage"),
 	rp("*", `/api/settings/storage`, "settings.storage"),

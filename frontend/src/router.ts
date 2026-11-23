@@ -7,7 +7,7 @@ export type Route =
   | {
       name: "deliveries";
       id?: string;
-      tab?: "config" | "plans" | "docs" | "rehearsal";
+      tab?: "config" | "plans" | "docs" | "rehearsal" | "security";
       plan?: string;
       doc?: string;
       rehearsal?: string;
@@ -22,17 +22,33 @@ export type Route =
       revise?: string;
       plan?: string;
       chat?: string;
+      verify?: string;
+      ver?: string;
+      platform?: string;
     }
   | { name: "apps"; id?: string }
+  | { name: "executions"; id?: string; run?: string; step?: string }
   | { name: "components"; id?: string; edit?: string }
   | { name: "library"; id?: string }
+  | {
+      name: "security";
+      tab?: "overview" | "vulns" | "clusters" | "reports" | "db";
+      q?: string;
+    }
   | { name: "accounts"; id?: string }
   | { name: "me"; id?: string }
   | { name: "kb"; id?: string }
   | { name: "skills"; id?: string }
   | { name: "mcp"; id?: string }
   | { name: "settings"; id?: string }
-  | { name: "ai"; id?: string; job?: string; comp?: string; key?: string };
+  | {
+      name: "ai";
+      id?: string;
+      job?: string;
+      comp?: string;
+      key?: string;
+      hist?: string;
+    };
 
 export function parse(hash: string): Route {
   const [path, query = ""] = hash.replace(/^#\/?/, "").split("?");
@@ -53,7 +69,9 @@ export function parse(hash: string): Route {
           ? { name: "deliveries", id: p[1], tab: "docs", doc: p[3] }
           : p[2] === "rehearsal"
             ? { name: "deliveries", id: p[1], tab: "rehearsal", rehearsal: p[3] }
-            : { name: "deliveries", id: p[1] };
+            : p[2] === "security"
+              ? { name: "deliveries", id: p[1], tab: "security" }
+              : { name: "deliveries", id: p[1] };
   if (p[0] === "new")
     return {
       name: "new",
@@ -62,9 +80,31 @@ export function parse(hash: string): Route {
       revise: q.get("revise") || undefined,
       plan: q.get("plan") || undefined,
       chat: q.get("chat") || undefined,
+      verify: q.get("verify") || undefined,
+      ver: q.get("ver") || undefined,
+      platform: q.get("platform") || undefined,
     };
   if (p[0] === "apps") return { name: "apps", id: p[1] };
+  if (p[0] === "executions")
+    return {
+      name: "executions",
+      id: p[1],
+      run: q.get("run") || undefined,
+      step: q.get("step") || undefined,
+    };
   if (p[0] === "library") return { name: "library", id: p[1] };
+  if (p[0] === "security") {
+    const t = p[1];
+    const tab =
+      t === "vulns" ||
+      t === "clusters" ||
+      t === "reports" ||
+      t === "db" ||
+      t === "overview"
+        ? t
+        : undefined;
+    return { name: "security", tab, q: q.get("q") || undefined };
+  }
   if (p[0] === "components")
     return p[2] === "edit"
       ? { name: "components", id: p[1], edit: p[3] || "overview" }
@@ -83,6 +123,7 @@ export function parse(hash: string): Route {
       job: q.get("job") || undefined,
       comp: q.get("comp") || undefined,
       key: q.get("key") || undefined,
+      hist: q.get("hist") || undefined,
     };
   return { name: "deliveries" };
 }
@@ -99,14 +140,35 @@ export const href = (r: Route): string => {
       return r.id
         ? `#/d/${encodeURIComponent(r.id)}${r.tab ? `/${r.tab}${r.plan || r.doc || r.rehearsal ? `/${encodeURIComponent((r.plan || r.doc || r.rehearsal)!)}` : ""}` : ""}`
         : "#/";
-    case "new":
-      return r.app
-        ? `#/new/${encodeURIComponent(r.app)}${r.revise ? `?revise=${r.revise}` : r.from ? `?from=${r.from}` : r.plan ? `?plan=${r.plan}` : r.chat ? `?chat=${r.chat}` : ""}`
-        : "#/new";
+    case "new": {
+      if (!r.app) return "#/new";
+      const q = new URLSearchParams();
+      if (r.revise) q.set("revise", r.revise);
+      else if (r.from) q.set("from", r.from);
+      else if (r.plan) q.set("plan", r.plan);
+      else if (r.chat) q.set("chat", r.chat);
+      if (r.verify) q.set("verify", r.verify);
+      if (r.ver) q.set("ver", r.ver);
+      if (r.platform) q.set("platform", r.platform);
+      return `#/new/${encodeURIComponent(r.app)}${q.size ? `?${q}` : ""}`;
+    }
     case "apps":
       return r.id ? `#/apps/${encodeURIComponent(r.id)}` : "#/apps";
+    case "executions": {
+      const q = new URLSearchParams();
+      if (r.run) q.set("run", r.run);
+      if (r.step) q.set("step", r.step);
+      return r.id
+        ? `#/executions/${encodeURIComponent(r.id)}${q.size ? `?${q}` : ""}`
+        : "#/executions";
+    }
     case "library":
       return r.id ? `#/library/${encodeURIComponent(r.id)}` : "#/library";
+    case "security": {
+      const sq = new URLSearchParams();
+      if (r.q) sq.set("q", r.q);
+      return `#/security${r.tab && r.tab !== "overview" ? `/${r.tab}` : ""}${sq.size ? `?${sq}` : ""}`;
+    }
     case "components":
       return r.id
         ? `#/components/${encodeURIComponent(r.id)}${r.edit !== undefined ? `/edit/${encodeURIComponent(r.edit)}` : ""}`
@@ -123,8 +185,18 @@ export const href = (r: Route): string => {
       return r.id ? `#/mcp/${encodeURIComponent(r.id)}` : "#/mcp";
     case "settings":
       return r.id ? `#/settings/${encodeURIComponent(r.id)}` : "#/settings";
-    case "ai":
-      return `#/ai${r.id ? `/${r.id}` : ""}${r.job ? `?job=${encodeURIComponent(r.job)}${r.key ? `&key=${encodeURIComponent(r.key)}` : ""}` : r.comp ? `?comp=${encodeURIComponent(r.comp)}` : ""}`;
+    case "ai": {
+      const q = new URLSearchParams();
+      if (r.job) {
+        q.set("job", r.job);
+        if (r.key) q.set("key", r.key);
+      } else if (r.comp) {
+        q.set("comp", r.comp);
+        if (r.key) q.set("key", r.key);
+        if (r.hist) q.set("hist", r.hist);
+      }
+      return `#/ai${r.id ? `/${r.id}` : ""}${q.size ? `?${q}` : ""}`;
+    }
   }
 };
 

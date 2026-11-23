@@ -256,6 +256,71 @@
 .iam-perm:not(.on) b {
   color: var(--ink-2);
 }
+.iam-ai-sub {
+  margin: 2px 12px 10px 32px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--sunken);
+}
+.iam-ai-sub.is-locked {
+  opacity: 0.56;
+}
+.iam-ai-sub-h {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--mute);
+}
+.iam-ai-sub-h em {
+  font-style: normal;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  font-size: 11px;
+}
+.iam-ai-sub-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 8px;
+}
+.iam-ai-sub-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+.iam-ai-sub-item.on {
+  border-color: var(--brand-line);
+  background: color-mix(in srgb, var(--brand-soft) 35%, var(--surface));
+}
+.iam-ai-sub-item > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.iam-ai-sub-item b {
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--ink);
+}
+.iam-ai-sub-item small {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--mute);
+}
 .iam-save {
   position: sticky;
   bottom: 0;

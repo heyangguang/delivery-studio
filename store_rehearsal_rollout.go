@@ -728,13 +728,27 @@ func (s *storeServer) buildPropagatedRehearsal(
 		steps = append(steps, buildStrictPropagatedPrecheck(originFacts, targetFacts, origin, pairs, origPre, lang))
 		for _, st := range restSteps {
 			ord := len(steps) + 1
+			remappedCmd := remapTextWithPairs(st.Command, pairs)
+			var remappedSubs []rehearsalStepCommand
+			for _, sub := range st.Commands {
+				remappedSubs = append(remappedSubs, rehearsalStepCommand{
+					Label:      remapTextWithPairs(sub.Label, pairs),
+					TargetRole: remapTextWithPairs(sub.TargetRole, pairs),
+					Command:    remapTextWithPairs(sub.Command, pairs),
+					Gate:       remapTextWithPairs(sub.Gate, pairs),
+				})
+			}
+			if len(remappedSubs) <= 1 {
+				remappedSubs = splitSequentialRollingCommands(remappedCmd, lang)
+			}
 			steps = append(steps, rehearsalStep{
 				ID:         fmt.Sprintf("s%d", ord),
 				Phase:      st.Phase,
 				Order:      ord,
 				Title:      remapTextWithPairs(st.Title, pairs),
 				TargetRole: remapTextWithPairs(st.TargetRole, pairs),
-				Command:    remapTextWithPairs(st.Command, pairs),
+				Command:    remappedCmd,
+				Commands:   remappedSubs,
 				Expect:     remapTextWithPairs(st.Expect, pairs),
 				RiskNote:   remapTextWithPairs(st.RiskNote, pairs),
 				Rollback:   remapTextWithPairs(st.Rollback, pairs),

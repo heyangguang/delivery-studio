@@ -145,6 +145,13 @@ type rehearsalVerifyAttempt struct {
 	Model         string   `json:"model,omitempty"`
 }
 
+type rehearsalStepCommand struct {
+	Label      string `json:"label,omitempty"`
+	TargetRole string `json:"target_role,omitempty"`
+	Command    string `json:"command"`
+	Gate       string `json:"gate,omitempty"`
+}
+
 type rehearsalStep struct {
 	ID             string                   `json:"id"`
 	Phase          string                   `json:"phase"` // precheck | execute | verify | rollback
@@ -152,6 +159,7 @@ type rehearsalStep struct {
 	Title          string                   `json:"title"`
 	TargetRole     string                   `json:"target_role"`
 	Command        string                   `json:"command"`
+	Commands       []rehearsalStepCommand   `json:"commands,omitempty"`
 	Expect         string                   `json:"expect"`
 	RiskNote       string                   `json:"risk_note,omitempty"`
 	Rollback       string                   `json:"rollback,omitempty"`
@@ -1695,7 +1703,7 @@ const rehearsalQuickCreateSystem = `你是资深中间件运维与变更专家�
 
 核心编制约束：
 1. **极简精炼**：正向步骤严格控制在 **2～3 步**（例如：1 步执行在线修改与热重载 → 1 步核验参数生效与集群状态；如有必要最多加 1 步可选即时触发动作），外加 **1 步独立应急回退**（phase="rollback"），绝不凑步数；
-2. **每步独立可复制、1～6 行原生命令**：严禁 read -r -p 交互变量、严禁跨步骤隐藏变量（OLD/R1/R2/CFG 等）；直接使用基线里的真实配置路径与服务名；
+2. **每步独立可复制、1～6 行原生命令（严禁多台滚动动作合进同一复制框）**：严禁 read -r -p 交互变量、严禁跨步骤隐藏变量（OLD/R1/R2/CFG 等）；若同一步内存在必须分步人工确认中间结果的两段命令，必须拆成独立步骤或使用 commands 数组分框（含 label、command、gate），绝不拼进同一个 command 字符串；直接使用基线里的真实配置路径与服务名；
 3. **执行机器（target_role）明确写清具体主机名与 IP**：例如「任一数据节点（如当前主库 node-1 / 172.30.4.26）执行一次」「所有数据节点（node-1 / node-2 / node-3，逐台执行）」；
 4. **临时改动必须收尾复位**：若执行或验收中涉及任何临时测试对象（测试表/测试 Key/临时文件）或临时开关/摘流/放宽规则，必须在验收收尾步一并还原并清理干净，绝不遗留脏状态；
 5. 若诉求中某参数值需要热重载后观察生效，expect 写清客观简洁的通过判据。
@@ -2280,8 +2288,15 @@ const rehearsalPlanSystem = `你是资深中间件变更实施专家。现在你
 2. 生成分步演练清单（steps）：围绕「步骤清晰、每步复制即跑、一看就懂在哪台机器执行」的原则，按以下 4 个阶段生成**精炼聚焦、按复杂度控制步数、输出简短易单屏核验**的步骤（严禁为了凑形式拆成十几步，严禁把命令写得像几十行脚本程序）：
    - **总步数与命令篇幅严格控制**：
      * **轻量在线变更**（如补一条 pg_hba/白名单规则、在线动态调参 reload、补日志目录或轮转规则，无需重启和切主）：总步数严格控制在 **3～4 步**（1 步预检 → 1 步执行与 reload → 1 步验收 → 1 步回退）；
-     * **中高风险变更**（需滚动重启、切主、升级、扩缩容、架构或证书改造）：常规变更严格控制在 **5～8 步**（把琐碎的小检查合并，例如日志落盘滚动重启：1 步只读核对现状 → 1 步所有节点建目录 → 1 步修改 DCS 参数 → 1 步逐台重启从库 → 1 步切主并重启原主库 → 1 步切回原主库恢复初始角色 → 1 步验收日志与入口 → 1 步回退）；
+     * **中高风险变更**（需滚动重启、切主、升级、扩缩容、架构或证书改造）：常规变更严格控制在 **5～8 步**（把琐碎的小检查合并，例如日志落盘滚动重启：1 步只读核对现状 → 1 步所有节点建目录 → 1 步修改 DCS 参数 → 1 步滚动重启从库（通过 commands 拆成每台独立的命令框，或拆分为两步） → 1 步切主并重启原主库（切主与重启分框） → 1 步切回原主库恢复初始角色 → 1 步验收日志与入口 → 1 步回退）；
      * **单步命令短小直白**：每步 command 尽量控制在 **1～6 行**原生命令，不要写大段 Bash 控制流或跨节点 SSH for 循环。
+   - **单框原子复制铁律（严禁多台滚动操作塞进同一个命令复制框！）**：
+     * 工程师会直接点击命令框右上角「复制」把整块命令一次粘贴到终端连续执行！
+     * 因此**绝对禁止**把多台节点的滚动/破坏性操作（例如同时重启 node-2 与 node-3、连续多次 systemctl restart/stop/reload、计划内 switchover 紧接重启原主库、先看 diff 确认再 apply 等中间必须人工确认健康后再推进的命令）写进同一个 command 字符串里！
+     * 遇到这类必须「做完一段 → 确认恢复健康/无报错 → 再做下一段」的操作，**必须二选一**：
+       1) 在本步骤中填写 **commands 数组**，按节点或阶段拆成多个**独立可复制的子命令框**（每段含 label、command、可选 target_role 以及段间 gate 暂停核验提示，例如先重启 node-2 + patronictl list 为第 1 框，gate 写明确认 node-2 恢复 streaming 且 Lag=0 后再执行第 2 框重启 node-3 + patronictl list）；
+       2) 或直接拆成独立的步骤（如「重启从库 node-2」「重启从库 node-3」）。
+     * 当提供了多段 commands 时，每段仍保持 1～4 行简洁直白；单段简单步骤无需填 commands，只填 command 即可。
    - **变更临时状态复位与现场收尾铁律（做了什么临时改动，就必须原样弄回来！）**：
      * 凡是为了配合变更、降低风险或做验收而临时引入的任何状态改动，**都必须在正向流程的收尾/验收阶段安排显式的「复位/恢复/清理」步骤把它还原**（除非用户在诉求或边界对齐里明确要求保留新状态），绝不能改完不管，也绝不能只藏在应急回退（rollback）里！生成步骤前必须逐项自查以下 6 类临时改动，只要前序步骤涉及其中任意一项，就必须在后续正向步骤配齐对应恢复命令：
        1) **主从角色复位（切回原主库）与 VIP 归位**：只要目标不是刻意永久迁主，而是为滚动重启、升级或补丁做了计划内切主（Patroni switchover、Redis SENTINEL FAILOVER、MySQL 切主或 Keepalived 降权漂移 VIP），在原主重启追平（streaming、Lag=0）后，必须显式安排一步「切回原主库（如 node-2 → node-1）恢复变更前主从角色/VIP」放在最终验收之前（risk_note 可注明：若维护窗口紧张不希望二次短暂闪断，可点击跳过保留新主）；
@@ -2324,7 +2339,8 @@ const rehearsalPlanSystem = `你是资深中间件变更实施专家。现在你
       "order": 1,
       "title": "步骤标题",
       "target_role": "执行目标（如：当前从库 node-01 / 10.0.1.11）",
-      "command": "具体执行的 shell/SQL 命令",
+      "command": "单段步骤时直接填写具体执行的 shell/SQL 命令；多段滚动步骤可留空或写摘要并改用下方 commands 数组",
+      "commands": [{"label":"第 1 段 · 重启从库 node-2","command":"单台执行与立即状态检查命令","gate":"确认 node-2 回到 streaming、Lag=0 后再执行下一段"}],
       "expect": "明确的预期输出与成功判据",
       "risk_note": "风险与注意事项",
       "rollback": "本步异常时的即时回退命令（无则留空）",
@@ -2707,6 +2723,187 @@ func (s *storeServer) submitRehearsalProbe(w http.ResponseWriter, r *http.Reques
 	finishRehearsalResp(w, ev, 200, cur)
 }
 
+var (
+	reRollingActionLine = regexp.MustCompile(`(?i)\b(patronictl\b[^\n]*\b(restart|reinit|reload|switchover|failover|pause|resume)\b|systemctl\b[^\n]*\b(restart|stop|reload)\b|service\s+\S+\s+(restart|stop|reload)\b|pg_ctl\b[^\n]*\b(restart|stop|promote|reload)\b|redis-cli\b[^\n]*\b(failover|shutdown|replicaof|slaveof)\b|etcdctl\b[^\n]*\b(move-leader|member\s+(remove|add|replace))\b|set\s+server\s+\S+\s+state\s+(maint|drain|ready)\b|nginx\s+-s\s+(reload|stop)\b|repmgr\b[^\n]*\b(switchover|promote|follow)\b)`)
+	reSystemctlDaemon   = regexp.MustCompile(`(?i)\bsystemctl\b[^\n]*\bdaemon-reload\b`)
+	rePatroniMemberNode = regexp.MustCompile(`(?i)\bpatronictl\b[^\n]*\b(?:restart|reinit|reload)\s+(?:-[^\s]+\s+\S+\s+)*[^\s-]+\s+([a-zA-Z0-9][a-zA-Z0-9._-]{1,40})\b`)
+	reNodeNameHint      = regexp.MustCompile(`\b((?:node|pg|db|etcd|redis|master|primary|standby|replica|host|srv|vm)[-_]?[0-9]{1,3}|[0-9]{1,3}(?:\.[0-9]{1,3}){3})\b`)
+	reHeredocStart      = regexp.MustCompile(`<<-?\s*['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?`)
+	reShellBlockOpen    = regexp.MustCompile(`(?i)(?:^|[;&|]\s*)(if|for|while|until|case)\b`)
+	reShellBlockClose   = regexp.MustCompile(`(?i)(?:^|[;&|]\s*)(fi|done|esac)\b`)
+)
+
+func isRollingActionCommandLine(trimmed string) bool {
+	if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+		return false
+	}
+	if reSystemctlDaemon.MatchString(trimmed) && !regexp.MustCompile(`(?i)\bsystemctl\b[^\n]*\b(restart|stop)\b`).MatchString(trimmed) {
+		return false
+	}
+	return reRollingActionLine.MatchString(trimmed)
+}
+
+func extractRollingSegmentHint(lines []string) string {
+	for _, raw := range lines {
+		t := strings.TrimSpace(raw)
+		if t == "" || strings.HasPrefix(t, "#") {
+			continue
+		}
+		if m := rePatroniMemberNode.FindStringSubmatch(t); len(m) >= 2 {
+			tok := strings.TrimSpace(m[1])
+			if tok != "" && !strings.HasPrefix(tok, "-") {
+				return tok
+			}
+		}
+		if isRollingActionCommandLine(t) {
+			low := strings.ToLower(t)
+			if strings.Contains(low, "switchover") || strings.Contains(low, "failover") {
+				return "switchover"
+			}
+			if m := reNodeNameHint.FindStringSubmatch(t); len(m) >= 2 {
+				return m[1]
+			}
+		}
+	}
+	for _, raw := range lines {
+		t := strings.TrimSpace(raw)
+		if strings.HasPrefix(t, "#") {
+			c := strings.TrimSpace(strings.TrimLeft(t, "#"))
+			if c != "" {
+				return truncRunes(c, 28)
+			}
+		}
+	}
+	return ""
+}
+
+// splitSequentialRollingCommands detects when multiple rolling/disruptive commands
+// (e.g. restarting node-2 and node-3, or switchover followed by restarting the old primary)
+// are packed inside a single copyable block, and splits them into separate copyable
+// sub-commands with an explicit pause-and-verify gate between them.
+func splitSequentialRollingCommands(cmd, lang string) []rehearsalStepCommand {
+	rawLines := strings.Split(strings.ReplaceAll(strings.TrimSpace(cmd), "\r\n", "\n"), "\n")
+	if len(rawLines) < 2 {
+		return nil
+	}
+	type seg struct {
+		lines      []string
+		hasRolling bool
+	}
+	var segs []seg
+	cur := seg{}
+	heredocEnd := ""
+	blockDepth := 0
+	prevCont := false
+
+	for _, line := range rawLines {
+		trimmed := strings.TrimSpace(line)
+		inMulti := heredocEnd != "" || blockDepth > 0 || prevCont
+		if !inMulti && isRollingActionCommandLine(trimmed) && cur.hasRolling {
+			// Carry trailing leading comments / blank lines attached to this new rolling command.
+			var carry []string
+			for len(cur.lines) > 0 {
+				last := strings.TrimSpace(cur.lines[len(cur.lines)-1])
+				if last == "" || strings.HasPrefix(last, "#") {
+					carry = append([]string{cur.lines[len(cur.lines)-1]}, carry...)
+					cur.lines = cur.lines[:len(cur.lines)-1]
+				} else {
+					break
+				}
+			}
+			for len(carry) > 0 && strings.TrimSpace(carry[0]) == "" {
+				carry = carry[1:]
+			}
+			if len(cur.lines) > 0 {
+				segs = append(segs, cur)
+			}
+			cur = seg{lines: carry, hasRolling: false}
+		}
+
+		cur.lines = append(cur.lines, line)
+		if !inMulti && isRollingActionCommandLine(trimmed) {
+			cur.hasRolling = true
+		}
+
+		// Update multi-line shell syntax trackers so we never break heredocs or loops.
+		if heredocEnd != "" {
+			if trimmed == heredocEnd {
+				heredocEnd = ""
+			}
+		} else if !strings.HasPrefix(trimmed, "#") {
+			if m := reHeredocStart.FindStringSubmatch(trimmed); len(m) >= 2 {
+				heredocEnd = m[1]
+			}
+			if reShellBlockOpen.MatchString(trimmed) && !reShellBlockClose.MatchString(trimmed) {
+				blockDepth++
+			} else if reShellBlockClose.MatchString(trimmed) && blockDepth > 0 {
+				blockDepth--
+			}
+		}
+		prevCont = strings.HasSuffix(strings.TrimRight(line, " \t"), "\\")
+	}
+	if len(cur.lines) > 0 {
+		segs = append(segs, cur)
+	}
+	if len(segs) < 2 {
+		return nil
+	}
+
+	out := make([]rehearsalStepCommand, 0, len(segs))
+	for i, sg := range segs {
+		body := strings.TrimSpace(strings.Join(sg.lines, "\n"))
+		if body == "" {
+			continue
+		}
+		hint := extractRollingSegmentHint(sg.lines)
+		label := tr(lang, fmt.Sprintf("第 %d 段", i+1), fmt.Sprintf("Part %d", i+1))
+		if hint == "switchover" {
+			label = tr(lang, fmt.Sprintf("第 %d 段 · 切主", i+1), fmt.Sprintf("Part %d · Switchover", i+1))
+		} else if hint != "" {
+			label = tr(lang, fmt.Sprintf("第 %d 段 · %s", i+1, hint), fmt.Sprintf("Part %d · %s", i+1, hint))
+		}
+		gate := ""
+		if i < len(segs)-1 {
+			if hint != "" && hint != "switchover" {
+				gate = tr(lang,
+					fmt.Sprintf("暂停核验：确认 %s 恢复健康（如 streaming / Lag=0 / 无告警）后，再复制执行下一段", hint),
+					fmt.Sprintf("Pause & verify: confirm %s is healthy (streaming / Lag=0 / no alerts) before running the next block", hint))
+			} else {
+				gate = tr(lang,
+					"暂停核验：确认本段执行成功且集群恢复健康后，再复制执行下一段",
+					"Pause & verify: confirm this block succeeded and cluster is healthy before running the next block")
+			}
+		}
+		out = append(out, rehearsalStepCommand{
+			Label:   label,
+			Command: body,
+			Gate:    gate,
+		})
+	}
+	if len(out) < 2 {
+		return nil
+	}
+	return out
+}
+
+func joinStepCommandsFallback(cmds []rehearsalStepCommand) string {
+	var parts []string
+	for i, c := range cmds {
+		body := strings.TrimSpace(c.Command)
+		if body == "" {
+			continue
+		}
+		if lbl := strings.TrimSpace(c.Label); lbl != "" {
+			parts = append(parts, fmt.Sprintf("# %s\n%s", lbl, body))
+		} else if i > 0 {
+			parts = append(parts, fmt.Sprintf("# Part %d\n%s", i+1, body))
+		} else {
+			parts = append(parts, body)
+		}
+	}
+	return strings.Join(parts, "\n\n")
+}
+
 func normalizeRehearsalSteps(in []rehearsalStep) []rehearsalStep {
 	return normalizeRehearsalStepsLang(in, "zh-CN")
 }
@@ -2719,7 +2916,32 @@ func normalizeRehearsalStepsLang(in []rehearsalStep, lang string) []rehearsalSte
 		if i >= 40 {
 			break
 		}
+		var cleanCmds []rehearsalStepCommand
+		for _, sub := range st.Commands {
+			sc := strings.TrimSpace(sub.Command)
+			if sc == "" {
+				continue
+			}
+			cleanCmds = append(cleanCmds, rehearsalStepCommand{
+				Label:      truncRunes(strings.TrimSpace(sub.Label), 80),
+				TargetRole: truncRunes(strings.TrimSpace(sub.TargetRole), 80),
+				Command:    sc,
+				Gate:       truncRunes(strings.TrimSpace(sub.Gate), 220),
+			})
+		}
 		cmd := strings.TrimSpace(st.Command)
+		if cmd == "" && len(cleanCmds) > 0 {
+			cmd = joinStepCommandsFallback(cleanCmds)
+		}
+		if len(cleanCmds) == 1 {
+			if cmd == "" {
+				cmd = cleanCmds[0].Command
+			}
+			cleanCmds = nil
+		}
+		if len(cleanCmds) == 0 && cmd != "" {
+			cleanCmds = splitSequentialRollingCommands(cmd, lang)
+		}
 		title := strings.TrimSpace(st.Title)
 		if cmd == "" || title == "" {
 			continue
@@ -2748,6 +2970,7 @@ func normalizeRehearsalStepsLang(in []rehearsalStep, lang string) []rehearsalSte
 			Title:      truncRunes(title, 120),
 			TargetRole: truncRunes(role, 80),
 			Command:    cmd,
+			Commands:   cleanCmds,
 			Expect:     truncRunes(expect, 300),
 			RiskNote:   truncRunes(strings.TrimSpace(st.RiskNote), 300),
 			Rollback:   strings.TrimSpace(st.Rollback),
@@ -3074,6 +3297,7 @@ func (s *storeServer) patchRehearsalStep(w http.ResponseWriter, r *http.Request,
 				NewCommand: nextCmd,
 			})
 			st.Command = nextCmd
+			st.Commands = splitSequentialRollingCommands(nextCmd, reqLang(r))
 			st.Proposal = nil
 		}
 	}
@@ -4766,6 +4990,30 @@ func (s *storeServer) buildRehearsalSOP(f clusterFacts, rid string) (*clusterDoc
 	b.p(summary)
 
 	b.h(1, tr(lang, "4 生产变更分步实施步骤（SOP）", "4 Production Change Procedure (SOP)"))
+	writeStepCmds := func(st rehearsalStep) {
+		subs := st.Commands
+		if len(subs) <= 1 {
+			subs = splitSequentialRollingCommands(st.Command, lang)
+		}
+		if len(subs) > 1 {
+			for j, sub := range subs {
+				lbl := strings.TrimSpace(sub.Label)
+				if lbl == "" {
+					lbl = tr(lang, fmt.Sprintf("第 %d 段", j+1), fmt.Sprintf("Part %d", j+1))
+				}
+				if sub.TargetRole != "" {
+					lbl += tr(lang, "（"+sub.TargetRole+"）", " ("+sub.TargetRole+")")
+				}
+				b.p(lbl + "：")
+				b.code(sub.Command)
+				if j < len(subs)-1 && strings.TrimSpace(sub.Gate) != "" {
+					b.note(sub.Gate)
+				}
+			}
+			return
+		}
+		b.code(st.Command)
+	}
 	writePhase := func(subTitle, phase string) {
 		var list []rehearsalStep
 		for _, st := range rh.Steps {
@@ -4792,7 +5040,7 @@ func (s *storeServer) buildRehearsalSOP(f clusterFacts, rid string) (*clusterDoc
 			if len(meta) > 0 {
 				b.p(strings.Join(meta, " | "))
 			}
-			b.code(st.Command)
+			writeStepCmds(st)
 			b.p(tr(lang, "成功判据：", "Pass Criteria: ") + st.Expect)
 			if st.Rollback != "" {
 				b.note(tr(lang, "本步即时回退：", "Step Rollback: ") + st.Rollback)
@@ -4828,7 +5076,7 @@ func (s *storeServer) buildRehearsalSOP(f clusterFacts, rid string) (*clusterDoc
 			if st.RiskNote != "" {
 				b.p(tr(lang, "触发条件与说明：", "Trigger & notes: ") + st.RiskNote)
 			}
-			b.code(st.Command)
+			writeStepCmds(st)
 			b.p(tr(lang, "回退确认判据：", "Rollback Verification: ") + st.Expect)
 		}
 	} else {

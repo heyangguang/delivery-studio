@@ -10147,3 +10147,49 @@ body[arco-theme="dark"] .rh-void-chip.on {
     transform: none !important;
   }
 }
+
+/* Multi-segment atomic copy boxes & pause-and-verify gate inside a single step */
+.rh-cmd-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.rh-cmd-part {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.rh-cmd-part-where {
+  font-size: 12px;
+  color: var(--mute);
+  padding-left: 2px;
+}
+.rh-cmd-part-where span {
+  color: var(--ink-2);
+  font-weight: 500;
+}
+.rh-cmd-gate {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 11px;
+  border-radius: 7px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #92400e;
+  background: color-mix(in srgb, #f59e0b 8.5%, var(--surface));
+  border: 1px dashed color-mix(in srgb, #f59e0b 45%, var(--line));
+}
+.rh-cmd-gate svg {
+  flex: none;
+  font-size: 14px;
+  color: #d97706;
+}
+[data-theme="dark"] .rh-cmd-gate,
+body[arco-theme="dark"] .rh-cmd-gate {
+  color: #fcd34d;
+}
+[data-theme="dark"] .rh-cmd-gate svg,
+body[arco-theme="dark"] .rh-cmd-gate svg {
+  color: #fbbf24;
+}

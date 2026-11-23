@@ -298,3 +298,52 @@ func TestRehearsalRolloutPropagateGateStrictPrecheckAndBoard(t *testing.T) {
 		t.Fatalf("expected 200 when passing s2 after s1 passed, got %d %s", w.Code, w.Body.String())
 	}
 }
+
+func TestRehearsalSplitSequentialRollingCommands(t *testing.T) {
+	// 1. Exact user scenario: restarting node-2 then node-3 in one command string must auto-split into 2 safe boxes.
+	combined := strings.Join([]string{
+		"patronictl -c /etc/patroni/patroni.yml restart pg-bitbucket-public-prod-pg node-2 --force",
+		"patronictl -c /etc/patroni/patroni.yml list",
+		"patronictl -c /etc/patroni/patroni.yml restart pg-bitbucket-public-prod-pg node-3 --force",
+		"patronictl -c /etc/patroni/patroni.yml list",
+	}, "\n")
+	subs := splitSequentialRollingCommands(combined, "zh-CN")
+	if len(subs) != 2 {
+		t.Fatalf("expected 2 split boxes for node-2 & node-3 restarts, got %d: %+v", len(subs), subs)
+	}
+	if !strings.Contains(subs[0].Label, "node-2") || !strings.Contains(subs[0].Command, "node-2") || strings.Contains(subs[0].Command, "node-3") {
+		t.Fatalf("unexpected box 1: %+v", subs[0])
+	}
+	if !strings.Contains(subs[0].Gate, "node-2") {
+		t.Fatalf("expected pause-and-verify gate mentioning node-2, got %q", subs[0].Gate)
+	}
+	if !strings.Contains(subs[1].Label, "node-3") || !strings.Contains(subs[1].Command, "node-3") || strings.Contains(subs[1].Command, "node-2") {
+		t.Fatalf("unexpected box 2: %+v", subs[1])
+	}
+
+	// 2. Harmless multi-line directory setup or daemon-reload + single restart must NOT be split.
+	if got := splitSequentialRollingCommands("mkdir -p /data/logs/postgresql\nchown postgres:postgres /data/logs/postgresql\nchmod 0750 /data/logs/postgresql", "zh-CN"); len(got) != 0 {
+		t.Fatalf("expected harmless setup not to split, got %+v", got)
+	}
+	if got := splitSequentialRollingCommands("systemctl daemon-reload\nsystemctl restart patroni\nsystemctl is-active patroni", "zh-CN"); len(got) != 0 {
+		t.Fatalf("expected daemon-reload + single restart not to split, got %+v", got)
+	}
+
+	// 3. Explicit AI-supplied commands[] without top-level command synthesizes fallback command cleanly.
+	steps := normalizeRehearsalStepsLang([]rehearsalStep{
+		{
+			ID:         "s4",
+			Phase:      "execute",
+			Title:      "滚动重启两台从库",
+			TargetRole: "任一数据节点",
+			Commands: []rehearsalStepCommand{
+				{Label: "重启 node-2", Command: "patronictl restart pg node-2 --force\npatronictl list", Gate: "确认 node-2 streaming 且 Lag=0"},
+				{Label: "重启 node-3", Command: "patronictl restart pg node-3 --force\npatronictl list"},
+			},
+			Expect: "两台从库均回到 streaming",
+		},
+	}, "zh-CN")
+	if len(steps) != 1 || len(steps[0].Commands) != 2 || !strings.Contains(steps[0].Command, "node-2") || !strings.Contains(steps[0].Command, "node-3") {
+		t.Fatalf("expected normalized multi-command step with fallback command, got %+v", steps)
+	}
+}

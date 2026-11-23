@@ -1663,6 +1663,13 @@ export type RehearsalVerifyAttempt = {
   model?: string;
 };
 
+export type RehearsalStepCommand = {
+  label?: string;
+  target_role?: string;
+  command: string;
+  gate?: string;
+};
+
 export type RehearsalStep = {
   id: string;
   phase: "precheck" | "execute" | "verify" | "rollback";
@@ -1670,6 +1677,7 @@ export type RehearsalStep = {
   title: string;
   target_role: string;
   command: string;
+  commands?: RehearsalStepCommand[];
   expect: string;
   risk_note?: string;
   rollback?: string;

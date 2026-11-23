@@ -75,6 +75,7 @@ import type {
   RehearsalAppliedChange,
   RehearsalSecurityContext,
   RehearsalStep,
+  RehearsalStepCommand,
   RehearsalTrace,
   RehearsalTraceStep,
   ScopeQuestion,
@@ -10095,6 +10096,125 @@ function RehearsalSessionView({
 
 /* ---------- Continuous Timeline Step Row ---------- */
 
+const RE_ROLLING_ACTION =
+  /\b(patronictl\b[^\n]*\b(restart|reinit|reload|switchover|failover|pause|resume)\b|systemctl\b[^\n]*\b(restart|stop|reload)\b|service\s+\S+\s+(restart|stop|reload)\b|pg_ctl\b[^\n]*\b(restart|stop|promote|reload)\b|redis-cli\b[^\n]*\b(failover|shutdown|replicaof|slaveof)\b|etcdctl\b[^\n]*\b(move-leader|member\s+(remove|add|replace))\b|set\s+server\s+\S+\s+state\s+(maint|drain|ready)\b|nginx\s+-s\s+(reload|stop)\b|repmgr\b[^\n]*\b(switchover|promote|follow)\b)/i;
+const RE_SYSTEMCTL_DAEMON = /\bsystemctl\b[^\n]*\bdaemon-reload\b/i;
+const RE_SYSTEMCTL_RESTART_STOP = /\bsystemctl\b[^\n]*\b(restart|stop)\b/i;
+const RE_PATRONI_NODE =
+  /\bpatronictl\b[^\n]*\b(?:restart|reinit|reload)\s+(?:-[^\s]+\s+\S+\s+)*[^\s-]+\s+([a-zA-Z0-9][a-zA-Z0-9._-]{1,40})\b/i;
+const RE_NODE_HINT =
+  /\b((?:node|pg|db|etcd|redis|master|primary|standby|replica|host|srv|vm)[-_]?[0-9]{1,3}|[0-9]{1,3}(?:\.[0-9]{1,3}){3})\b/;
+const RE_HEREDOC_START = /<<-?\s*['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?/;
+const RE_BLOCK_OPEN = /(?:^|[;&|]\s*)(if|for|while|until|case)\b/i;
+const RE_BLOCK_CLOSE = /(?:^|[;&|]\s*)(fi|done|esac)\b/i;
+
+function isRollingActionLine(trimmed: string): boolean {
+  if (!trimmed || trimmed.startsWith("#")) return false;
+  if (RE_SYSTEMCTL_DAEMON.test(trimmed) && !RE_SYSTEMCTL_RESTART_STOP.test(trimmed)) {
+    return false;
+  }
+  return RE_ROLLING_ACTION.test(trimmed);
+}
+
+function extractRollingHint(lines: string[]): string {
+  for (const raw of lines) {
+    const t = raw.trim();
+    if (!t || t.startsWith("#")) continue;
+    const pm = t.match(RE_PATRONI_NODE);
+    if (pm?.[1] && !pm[1].startsWith("-")) return pm[1];
+    if (isRollingActionLine(t)) {
+      const low = t.toLowerCase();
+      if (low.includes("switchover") || low.includes("failover")) return "switchover";
+      const nm = t.match(RE_NODE_HINT);
+      if (nm?.[1]) return nm[1];
+    }
+  }
+  for (const raw of lines) {
+    const t = raw.trim();
+    if (t.startsWith("#")) {
+      const c = t.replace(/^#+\s*/, "").trim();
+      if (c) return c.slice(0, 28);
+    }
+  }
+  return "";
+}
+
+function splitSequentialRollingCommands(cmd: string): RehearsalStepCommand[] {
+  const rawLines = (cmd || "").trim().replace(/\r\n/g, "\n").split("\n");
+  if (rawLines.length < 2) return [];
+  const segs: { lines: string[]; hasRolling: boolean }[] = [];
+  let cur: { lines: string[]; hasRolling: boolean } = {
+    lines: [],
+    hasRolling: false,
+  };
+  let heredocEnd = "";
+  let blockDepth = 0;
+  let prevCont = false;
+
+  for (const line of rawLines) {
+    const trimmed = line.trim();
+    const inMulti = Boolean(heredocEnd) || blockDepth > 0 || prevCont;
+    if (!inMulti && isRollingActionLine(trimmed) && cur.hasRolling) {
+      const carry: string[] = [];
+      while (cur.lines.length > 0) {
+        const last = cur.lines[cur.lines.length - 1].trim();
+        if (!last || last.startsWith("#")) {
+          carry.unshift(cur.lines.pop()!);
+        } else {
+          break;
+        }
+      }
+      while (carry.length > 0 && !carry[0].trim()) carry.shift();
+      if (cur.lines.length > 0) segs.push(cur);
+      cur = { lines: carry, hasRolling: false };
+    }
+    cur.lines.push(line);
+    if (!inMulti && isRollingActionLine(trimmed)) cur.hasRolling = true;
+
+    if (heredocEnd) {
+      if (trimmed === heredocEnd) heredocEnd = "";
+    } else if (!trimmed.startsWith("#")) {
+      const hm = trimmed.match(RE_HEREDOC_START);
+      if (hm?.[1]) heredocEnd = hm[1];
+      if (RE_BLOCK_OPEN.test(trimmed) && !RE_BLOCK_CLOSE.test(trimmed)) {
+        blockDepth++;
+      } else if (RE_BLOCK_CLOSE.test(trimmed) && blockDepth > 0) {
+        blockDepth--;
+      }
+    }
+    prevCont = /[\\]\s*$/.test(line);
+  }
+  if (cur.lines.length > 0) segs.push(cur);
+  if (segs.length < 2) return [];
+
+  const out: RehearsalStepCommand[] = [];
+  for (let i = 0; i < segs.length; i++) {
+    const body = segs[i].lines.join("\n").trim();
+    if (!body) continue;
+    const hint = extractRollingHint(segs[i].lines);
+    const label =
+      hint === "switchover"
+        ? bi(`第 ${i + 1} 段 · 切主`, `Part ${i + 1} · Switchover`)
+        : hint
+          ? bi(`第 ${i + 1} 段 · ${hint}`, `Part ${i + 1} · ${hint}`)
+          : bi(`第 ${i + 1} 段`, `Part ${i + 1}`);
+    const gate =
+      i < segs.length - 1
+        ? hint && hint !== "switchover"
+          ? bi(
+              `暂停核验：确认 ${hint} 恢复健康（如 streaming / Lag=0 / 无告警）后，再复制执行下一段`,
+              `Pause & verify: confirm ${hint} is healthy (streaming / Lag=0 / no alerts) before running the next block`,
+            )
+          : bi(
+              "暂停核验：确认本段执行成功且集群恢复健康后，再复制执行下一段",
+              "Pause & verify: confirm this block succeeded and cluster is healthy before running the next block",
+            )
+        : "";
+    out.push({ label, command: body, gate });
+  }
+  return out.length >= 2 ? out : [];
+}
+
 function StepRow({
   c,
   rehearsalId,
@@ -10679,15 +10799,71 @@ function StepRow({
               </Button>
             </div>
           </div>
-        ) : (
-          <ShellCodeBlock
-            code={step.command}
-            title={bi("执行命令", "Command")}
-            compact
-            onEdit={() => setEditingCmd(true)}
-            onAskAI={canAskStepAI ? openStepInAIDock : undefined}
-          />
-        )}
+        ) : (() => {
+          const subCmds =
+            step.commands && step.commands.length > 1
+              ? step.commands
+              : splitSequentialRollingCommands(step.command);
+          if (subCmds.length > 1) {
+            return (
+              <div className="rh-cmd-stack">
+                {subCmds.map((sub, ci) => {
+                  const subTitle = sub.label
+                    ? bi(
+                        `执行命令 ${ci + 1}/${subCmds.length} · ${sub.label}`,
+                        `Command ${ci + 1}/${subCmds.length} · ${sub.label}`,
+                      )
+                    : bi(
+                        `执行命令 ${ci + 1}/${subCmds.length}`,
+                        `Command ${ci + 1}/${subCmds.length}`,
+                      );
+                  return (
+                    <React.Fragment key={ci}>
+                      <div className="rh-cmd-part">
+                        {sub.target_role && (
+                          <div className="rh-cmd-part-where">
+                            {bi("本段执行机器：", "Run on: ")}
+                            <span>{sub.target_role}</span>
+                          </div>
+                        )}
+                        <ShellCodeBlock
+                          code={sub.command}
+                          title={subTitle}
+                          compact
+                          onEdit={ci === 0 ? () => setEditingCmd(true) : undefined}
+                          onAskAI={
+                            ci === 0 && canAskStepAI ? openStepInAIDock : undefined
+                          }
+                        />
+                      </div>
+                      {ci < subCmds.length - 1 && (
+                        <div className="rh-cmd-gate" role="note">
+                          <IconExclamationCircle />
+                          <span>
+                            {sub.gate ||
+                              bi(
+                                "暂停核验：确认上一段执行成功且节点恢复健康后，再复制执行下一段",
+                                "Pause & verify: confirm the previous command succeeded and node is healthy before running the next block",
+                              )}
+                          </span>
+                        </div>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </div>
+            );
+          }
+          return (
+            <ShellCodeBlock
+              code={step.command}
+              title={bi("执行命令", "Command")}
+              compact
+              onEdit={() => setEditingCmd(true)}
+              onAskAI={canAskStepAI ? openStepInAIDock : undefined}
+            />
+          );
+        })()}
 
         <dl className="rh-step-facts">
           <div>

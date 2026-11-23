@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.269-dev"
+	version            = "1.0.270-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,22 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.270-dev",
+		Date:    "2026-11-24",
+		Title:   "全面精修演练 AI 推演六幕微动画与图标文字间距",
+		TitleEn: "Refined all 6 rehearsal AI stage micro-animations, spacing, and vector craft",
+		Highlights: []string{
+			"将 AI 推演六幕小动画（ACT 01 基线扫描 / ACT 02 安全脱敏 / ACT 03 网关握手 / ACT 04 沙盘推演 / ACT 05 方案签章 / 通道熔断保护）整体升级为 360×96 宽幅矢量画布，统一使用矢量圆形对勾徽标与左对齐留白并采用 dominantBaseline 精准垂直居中，彻底解决「握手已连通」等对勾与文字紧贴重叠问题",
+			"优化 ACT 04 沙盘推演布局与动态联动：顶部「握手已连通」胶囊与下方探针轨迹完全分层零碰撞，新增探针聚光锥与「从库 01 → 从库 02 → 主库守卫」同步节点高亮动效",
+			"全面消除 SVG 内 Unicode 符号混排，升级 ACT 01 渐变激光扫描、ACT 02 分层穿盾脱敏、ACT 03 双向加密握手对接与 ACT 05 居中校验签章波纹，完美适配明暗双主题与中英文",
+		},
+		HighlightsEn: []string{
+			"Upgraded all 6 rehearsal AI stage micro-animations (ACT 01-05 + Circuit Breaker) to a spacious 360x96 vector canvas with crisp vector checkmark badges, generous icon-to-text gaps, and dominantBaseline centering, fixing tight/overlapping checkmark labels",
+			"Eliminated probe-vs-pill overlap in ACT 04 Reasoning and added a spotlight cone with synchronized node highlighting across Rep 01 -> Rep 02 -> Primary",
+			"Replaced inconsistent Unicode ticks with vector icons across all scenes and upgraded scan gradients, layered shield pass-through, dual-link handshake, and centered verification seal ripples for both light and dark themes",
+		},
+	},
 	{
 		Version: "1.0.269-dev",
 		Date:    "2026-11-24",

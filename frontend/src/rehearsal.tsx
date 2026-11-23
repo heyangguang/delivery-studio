@@ -2023,186 +2023,184 @@ function RehearsalStageCartoon({
     <div className={`rh-cartoon-stage is-${scene}`} aria-hidden>
       <div className="rh-cartoon-canvas" key={scene}>
         {scene === "inspect" && (
-          <svg viewBox="0 0 340 84" fill="none" className="rh-cartoon-svg">
+          <svg viewBox="0 0 360 96" fill="none" className="rh-cartoon-svg">
+            <defs>
+              <linearGradient id="ct-scan-grad" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%" stopColor="var(--brand)" stopOpacity="0" />
+                <stop offset="100%" stopColor="var(--brand)" stopOpacity="0.22" />
+              </linearGradient>
+            </defs>
+
             {/* Server Rack Nodes */}
             <g className="ct-rack">
-              <rect
-                x="18"
-                y="12"
-                width="108"
-                height="17"
-                rx="4.5"
-                className="ct-node-box"
-              />
-              <circle cx="29" cy="20.5" r="3" className="ct-led ok" />
-              <rect x="38" y="18" width="44" height="5" rx="2.5" className="ct-bar" />
-              <text x="94" y="23.5" className="ct-mini-txt">PRI</text>
+              <rect x="10" y="11" width="120" height="20" rx="5.5" className="ct-node-box" />
+              <circle cx="22" cy="21" r="3.2" className="ct-led ok" />
+              <rect x="32" y="18.5" width="48" height="5" rx="2.5" className="ct-bar" />
+              <rect x="89" y="14" width="32" height="14" rx="4" className="ct-role-chip" />
+              <text x="105" y="21" textAnchor="middle" dominantBaseline="central" className="ct-mini-txt">
+                PRI
+              </text>
 
-              <rect
-                x="18"
-                y="33.5"
-                width="108"
-                height="17"
-                rx="4.5"
-                className="ct-node-box"
-              />
-              <circle cx="29" cy="42" r="3" className="ct-led brand" />
-              <rect x="38" y="39.5" width="38" height="5" rx="2.5" className="ct-bar" />
-              <text x="94" y="45" className="ct-mini-txt">REP</text>
+              <rect x="10" y="38" width="120" height="20" rx="5.5" className="ct-node-box" />
+              <circle cx="22" cy="48" r="3.2" className="ct-led brand" />
+              <rect x="32" y="45.5" width="42" height="5" rx="2.5" className="ct-bar" />
+              <rect x="89" y="41" width="32" height="14" rx="4" className="ct-role-chip" />
+              <text x="105" y="48" textAnchor="middle" dominantBaseline="central" className="ct-mini-txt">
+                REP
+              </text>
 
-              <rect
-                x="18"
-                y="55"
-                width="108"
-                height="17"
-                rx="4.5"
-                className="ct-node-box"
-              />
-              <circle cx="29" cy="63.5" r="3" className="ct-led brand" />
-              <rect x="38" y="61" width="41" height="5" rx="2.5" className="ct-bar" />
-              <text x="94" y="66.5" className="ct-mini-txt">REP</text>
+              <rect x="10" y="65" width="120" height="20" rx="5.5" className="ct-node-box" />
+              <circle cx="22" cy="75" r="3.2" className="ct-led brand" />
+              <rect x="32" y="72.5" width="45" height="5" rx="2.5" className="ct-bar" />
+              <rect x="89" y="68" width="32" height="14" rx="4" className="ct-role-chip" />
+              <text x="105" y="75" textAnchor="middle" dominantBaseline="central" className="ct-mini-txt">
+                REP
+              </text>
             </g>
 
-            {/* Sweeping Laser Scanner Beam */}
+            {/* Gradient Laser Scanner Beam */}
             <g className="ct-scan-beam">
-              <rect x="16" y="8" width="18" height="68" rx="4" className="ct-scan-glow" />
-              <line x1="33" y1="8" x2="33" y2="76" className="ct-scan-line" />
+              <rect x="10" y="6" width="26" height="84" rx="4" fill="url(#ct-scan-grad)" />
+              <line x1="36" y1="6" x2="36" y2="90" className="ct-scan-line" />
             </g>
 
-            {/* Floating Extracted Blueprint Cards */}
-            <path
-              d="M134 24 C178 24, 194 42, 236 42"
-              className="ct-dash-path"
-            />
-            <path
-              d="M134 60 C178 60, 194 42, 236 42"
-              className="ct-dash-path"
-            />
+            {/* Animated Data Bus & Extracted Chips */}
+            <path d="M134 26 C176 26, 192 48, 234 48" className="ct-dash-path is-moving" />
+            <path d="M134 70 C176 70, 192 48, 234 48" className="ct-dash-path is-moving" />
             <g className="ct-float-card c1">
-              <rect x="156" y="13" width="46" height="18" rx="4" className="ct-pill-card" />
-              <text x="179" y="25" textAnchor="middle" className="ct-pill-txt">YAML</text>
+              <rect x="154" y="14" width="50" height="20" rx="6" className="ct-pill-card" />
+              <text x="179" y="24" textAnchor="middle" dominantBaseline="central" className="ct-pill-txt">
+                YAML
+              </text>
             </g>
             <g className="ct-float-card c2">
-              <rect x="164" y="51" width="46" height="18" rx="4" className="ct-pill-card" />
-              <text x="187" y="63" textAnchor="middle" className="ct-pill-txt">TOPO</text>
+              <rect x="162" y="62" width="50" height="20" rx="6" className="ct-pill-card" />
+              <text x="187" y="72" textAnchor="middle" dominantBaseline="central" className="ct-pill-txt">
+                TOPO
+              </text>
             </g>
 
-            {/* Context Capsule Receiver */}
+            {/* Baseline Snapshot Receiver Pod */}
             <g className="ct-capsule">
-              <rect x="240" y="21" width="82" height="42" rx="10" className="ct-hub-pod" />
-              <circle cx="258" cy="42" r="8" className="ct-pod-ring" />
-              <path d="M255 42l2.2 2.2 4.5-4.6" className="ct-pod-check" />
-              <text x="294" y="39" textAnchor="middle" className="ct-pod-title">
+              <rect x="236" y="20" width="114" height="56" rx="12" className="ct-hub-pod" />
+              <circle cx="258" cy="48" r="10.5" className="ct-check-disc" />
+              <path d="M253.5 48.2l3 3 6-6.2" className="ct-check-white" />
+              <text x="276" y="41" textAnchor="start" dominantBaseline="central" className="ct-pod-title">
                 {bi("基线快照", "Baseline")}
               </text>
-              <text x="294" y="52" textAnchor="middle" className="ct-pod-sub">READY</text>
+              <text x="276" y="56" textAnchor="start" dominantBaseline="central" className="ct-pod-sub ok">
+                READY
+              </text>
             </g>
           </svg>
         )}
 
         {scene === "guard" && (
-          <svg viewBox="0 0 340 84" fill="none" className="rh-cartoon-svg">
+          <svg viewBox="0 0 360 96" fill="none" className="rh-cartoon-svg">
             {/* Conveyor Track */}
-            <line x1="16" y1="42" x2="324" y2="42" className="ct-dash-path" />
+            <line x1="12" y1="48" x2="348" y2="48" className="ct-dash-path is-moving" />
 
-            {/* Incoming Raw Secret Pills (Left -> Gate) */}
+            {/* Incoming Raw Secret Pills (Left -> Shield Gate) */}
             <g className="ct-raw-pill p1">
-              <rect x="22" y="29" width="68" height="26" rx="6" className="ct-pill-warn" />
-              <text x="56" y="45" textAnchor="middle" className="ct-pill-warn-txt">pwd=secret</text>
+              <rect x="14" y="34" width="84" height="28" rx="8" className="ct-pill-warn" />
+              <circle cx="26" cy="48" r="3" className="ct-led warn" />
+              <text x="35" y="48" textAnchor="start" dominantBaseline="central" className="ct-pill-warn-txt">
+                pwd=••••
+              </text>
             </g>
             <g className="ct-raw-pill p2">
-              <rect x="18" y="29" width="64" height="26" rx="6" className="ct-pill-warn" />
-              <text x="50" y="45" textAnchor="middle" className="ct-pill-warn-txt">ssh_key</text>
+              <rect x="14" y="34" width="80" height="28" rx="8" className="ct-pill-warn" />
+              <circle cx="26" cy="48" r="3" className="ct-led warn" />
+              <text x="35" y="48" textAnchor="start" dominantBaseline="central" className="ct-pill-warn-txt">
+                ssh_key
+              </text>
             </g>
 
-            {/* Outgoing Sanitized Safe Pills (Gate -> Right) */}
+            {/* Outgoing Sanitized Safe Pills (Shield Gate -> Right) */}
             <g className="ct-clean-pill p1">
-              <rect x="192" y="29" width="76" height="26" rx="6" className="ct-pill-ok" />
-              <text x="230" y="45" textAnchor="middle" className="ct-pill-ok-txt">
-                {bi("••• 已脱敏 ✓", "Redacted ✓")}
+              <rect x="196" y="34" width="88" height="28" rx="8" className="ct-pill-ok" />
+              <circle cx="211" cy="48" r="6" className="ct-check-disc" />
+              <path d="M208.3 48.1l1.9 1.9 3.7-3.9" className="ct-check-white sm" />
+              <text x="223" y="48" textAnchor="start" dominantBaseline="central" className="ct-pill-ok-txt">
+                {bi("已脱敏", "Redacted")}
               </text>
             </g>
             <g className="ct-clean-pill p2">
-              <rect x="196" y="29" width="72" height="26" rx="6" className="ct-pill-ok" />
-              <text x="232" y="45" textAnchor="middle" className="ct-pill-ok-txt">
-                {bi("RO 只读 ✓", "Read-Only ✓")}
+              <rect x="196" y="34" width="90" height="28" rx="8" className="ct-pill-ok" />
+              <circle cx="211" cy="48" r="6" className="ct-check-disc" />
+              <path d="M208.3 48.1l1.9 1.9 3.7-3.9" className="ct-check-white sm" />
+              <text x="223" y="48" textAnchor="start" dominantBaseline="central" className="ct-pill-ok-txt">
+                {bi("纯只读", "Read-Only")}
               </text>
             </g>
 
-            {/* Central Security Shield Gate */}
+            {/* Central Security Shield Gate (Layered above pills) */}
             <g className="ct-shield-gate">
-              <circle cx="168" cy="42" r="30" className="ct-gate-halo" />
-              <line x1="168" y1="8" x2="168" y2="76" className="ct-gate-laser" />
+              <circle cx="180" cy="48" r="34" className="ct-gate-pulse" />
+              <circle cx="180" cy="48" r="29" className="ct-gate-halo" />
+              <line x1="180" y1="8" x2="180" y2="88" className="ct-gate-laser" />
               <path
-                d="M168 18L148 26.5v14.2c0 11.8 8.4 21.6 20 24.8 11.6-3.2 20-13 20-24.8V26.5L168 18z"
+                d="M180 21L159 29.8v14.8c0 12.2 8.8 22.4 21 25.8 12.2-3.4 21-13.6 21-25.8V29.8L180 21z"
                 className="ct-shield-body"
               />
-              <path d="M161 42.5l4.6 4.6 9.6-10" className="ct-shield-tick" />
+              <path d="M172.5 48.2l5 5 10.2-10.5" className="ct-shield-tick" />
             </g>
           </svg>
         )}
 
         {scene === "connect" && (
-          <svg viewBox="0 0 340 84" fill="none" className="rh-cartoon-svg">
-            {/* Signal Bridge & Ripples */}
-            <line x1="74" y1="44" x2="266" y2="44" className="ct-bridge-line" />
-            <circle cx="170" cy="44" r="16" className="ct-hs-ring r1" />
-            <circle cx="170" cy="44" r="26" className="ct-hs-ring r2" />
+          <svg viewBox="0 0 360 96" fill="none" className="rh-cartoon-svg">
+            {/* Signal Bridge & Concentric Ripples */}
+            <line x1="86" y1="48" x2="274" y2="48" className="ct-bridge-line" />
+            <circle cx="180" cy="48" r="18" className="ct-hs-ring r1" />
+            <circle cx="180" cy="48" r="29" className="ct-hs-ring r2" />
 
-            {/* Encrypted Data Packets Gliding Across */}
-            <circle cx="110" cy="44" r="3.2" className="ct-pkt p1" />
-            <circle cx="110" cy="44" r="3.2" className="ct-pkt p2" />
+            {/* Bidirectional Encrypted Data Packets */}
+            <circle cx="104" cy="48" r="3.4" className="ct-pkt p1" />
+            <circle cx="256" cy="48" r="3.4" className="ct-pkt p2" />
 
-            {/* Left Hub Station Badge */}
+            {/* Left Hub Station Pod */}
             <g className="ct-endpoint left">
-              <rect x="12" y="20" width="52" height="48" rx="10" className="ct-hub-pod" />
-              <text x="38" y="41" textAnchor="middle" className="ct-pod-title">HUB</text>
-              <text x="38" y="54" textAnchor="middle" className="ct-pod-sub">
+              <rect x="10" y="20" width="76" height="56" rx="11" className="ct-hub-pod" />
+              <circle cx="22" cy="31" r="2.8" className="ct-led brand" />
+              <text x="48" y="42" textAnchor="middle" dominantBaseline="central" className="ct-pod-title">
+                HUB
+              </text>
+              <text x="48" y="58" textAnchor="middle" dominantBaseline="central" className="ct-pod-sub">
                 {bi("平台底座", "Platform")}
               </text>
             </g>
 
-            {/* Right AI Gateway Station Badge */}
+            {/* Right AI Gateway Station Pod */}
             <g className="ct-endpoint right">
-              <rect x="276" y="20" width="52" height="48" rx="10" className="ct-gw-pod" />
-              <text x="302" y="41" textAnchor="middle" className="ct-pod-title">AI GW</text>
-              <text x="302" y="54" textAnchor="middle" className="ct-pod-sub">
+              <rect x="274" y="20" width="76" height="56" rx="11" className="ct-gw-pod" />
+              <circle cx="286" cy="31" r="2.8" className="ct-led ok" />
+              <text x="312" y="42" textAnchor="middle" dominantBaseline="central" className="ct-pod-title">
+                AI GW
+              </text>
+              <text x="312" y="58" textAnchor="middle" dominantBaseline="central" className="ct-pod-sub">
                 {bi("模型网关", "Gateway")}
               </text>
             </g>
 
-            {/* Left Articulated Arm & Hand Reaching to Clasp */}
+            {/* Sleek Left Interlocking Handshake Link */}
             <g className="ct-hand-left">
-              <rect x="64" y="35" width="38" height="18" rx="5" className="ct-sleeve-left" />
-              <rect x="98" y="36.5" width="6" height="15" rx="2" className="ct-cuff" />
-              <path
-                d="M104 37.5h22c4.2 0 7.5 2.5 7.5 6s-3.3 6.5-7.5 6.5h-6l6.5 3.8c2.2 1.3 1.4 4.4-1.2 4.4-1.2 0-2.5-.4-3.8-1.2l-11.5-6.5h-6V37.5z"
-                className="ct-palm-left"
-              />
-              <path
-                d="M113 37.5l6.5-6.2c2-1.9 5.2-.4 4.8 2.3l-.7 3.9"
-                className="ct-palm-left"
-              />
+              <rect x="92" y="41" width="28" height="14" rx="7" className="ct-sleeve-left" />
+              <rect x="114" y="38" width="32" height="20" rx="10" className="ct-palm-left" />
+              <circle cx="136" cy="48" r="3.2" className="ct-led brand" />
             </g>
 
-            {/* Right Articulated Arm & Hand Reaching to Clasp */}
+            {/* Sleek Right Interlocking Handshake Link */}
             <g className="ct-hand-right">
-              <rect x="238" y="35" width="38" height="18" rx="5" className="ct-sleeve-right" />
-              <rect x="236" y="36.5" width="6" height="15" rx="2" className="ct-cuff" />
-              <path
-                d="M236 37.5h-22c-4.2 0-7.5 2.5-7.5 6s3.3 6.5 7.5 6.5h6l-6.5 3.8c-2.2 1.3-1.4 4.4 1.2 4.4 1.2 0 2.5-.4 3.8-1.2l11.5-6.5h6V37.5z"
-                className="ct-palm-right"
-              />
-              <path
-                d="M227 37.5l-6.5-6.2c-2-1.9-5.2-.4-4.8 2.3l.7 3.9"
-                className="ct-palm-right"
-              />
+              <rect x="240" y="41" width="28" height="14" rx="7" className="ct-sleeve-right" />
+              <rect x="214" y="38" width="32" height="20" rx="10" className="ct-palm-right" />
+              <circle cx="224" cy="48" r="3.2" className="ct-led ok" />
             </g>
 
             {/* Center Handshake Spark Star */}
             <g className="ct-hs-spark">
               <path
-                d="M170 15l2.2 5.4 5.4 2.2-5.4 2.2-2.2 5.4-2.2-5.4-5.4-2.2 5.4-2.2 2.2-5.4z"
+                d="M180 12l2.1 5.2 5.2 2.1-5.2 2.1-2.1 5.2-2.1-5.2-5.2-2.1 5.2-2.1 2.1-5.2z"
                 className="ct-spark-star"
               />
             </g>
@@ -2210,71 +2208,87 @@ function RehearsalStageCartoon({
         )}
 
         {scene === "think" && (
-          <svg viewBox="0 0 340 84" fill="none" className="rh-cartoon-svg">
-            {/* Locked Handshake Mini Pill */}
+          <svg viewBox="0 0 360 96" fill="none" className="rh-cartoon-svg">
+            <defs>
+              <linearGradient id="ct-cone-grad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="var(--brand)" stopOpacity="0.32" />
+                <stop offset="100%" stopColor="var(--brand)" stopOpacity="0.02" />
+              </linearGradient>
+            </defs>
+
+            {/* Top-Left Connected Status Pill — generous spacing between vector tick & label */}
             <g className="ct-hs-locked">
-              <rect x="12" y="10" width="76" height="20" rx="10" className="ct-pill-ok" />
-              <path d="M23 20l2.5 2.5 5-5" className="ct-pod-check" />
-              <text x="55" y="23.5" textAnchor="middle" className="ct-pill-ok-txt">
+              <rect x="10" y="6" width="102" height="22" rx="11" className="ct-pill-ok" />
+              <circle cx="22" cy="17" r="6.5" className="ct-check-disc" />
+              <path d="M19 17.1l2.1 2.1 4.1-4.2" className="ct-check-white sm" />
+              <text x="34" y="17" textAnchor="start" dominantBaseline="central" className="ct-pill-ok-txt">
                 {bi("握手已连通", "Connected")}
               </text>
             </g>
 
-            {/* HA Cluster Topology Sandbox */}
-            <path d="M92 56 L172 56 L256 56" className="ct-flow-line" />
+            {/* HA Cluster Topology Flow Track */}
+            <path d="M62 69 L293 69" className="ct-flow-line" />
 
+            {/* Replica 01 */}
             <g className="ct-sim-node n1">
-              <rect x="46" y="42" width="68" height="28" rx="7" className="ct-node-box" />
-              <circle cx="58" cy="56" r="3.5" className="ct-led ok" />
-              <text x="86" y="59.5" textAnchor="middle" className="ct-sim-lbl">
+              <rect x="16" y="54" width="92" height="30" rx="8.5" className="ct-node-box" />
+              <circle cx="30" cy="69" r="3.6" className="ct-led ok" />
+              <text x="41" y="69" textAnchor="start" dominantBaseline="central" className="ct-sim-lbl">
                 {bi("从库 01", "Rep 01")}
               </text>
             </g>
 
+            {/* Replica 02 */}
             <g className="ct-sim-node n2">
-              <rect x="136" y="42" width="68" height="28" rx="7" className="ct-node-box" />
-              <circle cx="148" cy="56" r="3.5" className="ct-led ok" />
-              <text x="176" y="59.5" textAnchor="middle" className="ct-sim-lbl">
+              <rect x="128" y="54" width="92" height="30" rx="8.5" className="ct-node-box" />
+              <circle cx="142" cy="69" r="3.6" className="ct-led ok" />
+              <text x="153" y="69" textAnchor="start" dominantBaseline="central" className="ct-sim-lbl">
                 {bi("从库 02", "Rep 02")}
               </text>
             </g>
 
+            {/* Guarded Primary */}
             <g className="ct-sim-node n3">
-              <rect x="226" y="40" width="84" height="32" rx="8" className="ct-hub-pod" />
-              <circle cx="240" cy="56" r="4" className="ct-led brand" />
-              <text x="275" y="59.5" textAnchor="middle" className="ct-pod-title">
+              <rect x="240" y="52" width="106" height="34" rx="9.5" className="ct-hub-pod" />
+              <circle cx="255" cy="69" r="4" className="ct-led brand" />
+              <text x="267" y="69" textAnchor="start" dominantBaseline="central" className="ct-pod-title">
                 {bi("主库守卫", "Primary")}
               </text>
             </g>
 
-            {/* Roaming AI Reasoning Probe */}
+            {/* Roaming AI Reasoning Probe — orbits cleanly below top pill (cy=38) */}
             <g className="ct-think-rover">
-              <circle cx="80" cy="24" r="9" className="ct-rover-halo" />
-              <circle cx="80" cy="24" r="4.5" className="ct-rover-core" />
-              <line x1="80" y1="31" x2="80" y2="41" className="ct-rover-beam" />
+              <path d="M51 54 L62 41 L73 54 Z" fill="url(#ct-cone-grad)" />
+              <circle cx="62" cy="38" r="8.5" className="ct-rover-halo" />
+              <circle cx="62" cy="38" r="4" className="ct-rover-core" />
+              <line x1="62" y1="43" x2="62" y2="53" className="ct-rover-beam" />
             </g>
           </svg>
         )}
 
         {scene === "synthesize" && (
-          <svg viewBox="0 0 340 84" fill="none" className="rh-cartoon-svg">
-            {/* Runbook Blueprint Document */}
-            <rect x="52" y="10" width="174" height="64" rx="8" className="ct-doc-sheet" />
-            <circle cx="68" cy="24" r="3.5" className="ct-led ok" />
-            <line x1="78" y1="24" x2="178" y2="24" className="ct-draw-line l1" />
-            <circle cx="68" cy="38" r="3.5" className="ct-led ok" />
-            <line x1="78" y1="38" x2="198" y2="38" className="ct-draw-line l2" />
-            <circle cx="68" cy="52" r="3.5" className="ct-led brand" />
-            <line x1="78" y1="52" x2="164" y2="52" className="ct-draw-line l3" />
-            <circle cx="68" cy="64" r="3" className="ct-led brand" />
-            <line x1="78" y1="64" x2="144" y2="64" className="ct-draw-line l4" />
+          <svg viewBox="0 0 360 96" fill="none" className="rh-cartoon-svg">
+            {/* Runbook Blueprint Document Sheet */}
+            <rect x="14" y="10" width="196" height="76" rx="10" className="ct-doc-sheet" />
+            <circle cx="30" cy="26" r="3.6" className="ct-led ok" />
+            <line x1="42" y1="26" x2="164" y2="26" className="ct-draw-line l1" />
+            <circle cx="30" cy="42" r="3.6" className="ct-led brand" />
+            <line x1="42" y1="42" x2="190" y2="42" className="ct-draw-line l2" />
+            <circle cx="30" cy="58" r="3.6" className="ct-led ok" />
+            <line x1="42" y1="58" x2="156" y2="58" className="ct-draw-line l3" />
+            <circle cx="30" cy="74" r="3.4" className="ct-led warn" />
+            <line x1="42" y1="74" x2="134" y2="74" className="ct-draw-line l4" />
 
-            {/* Seal Stamp Impact */}
-            <circle cx="256" cy="46" r="22" className="ct-seal-ring" />
+            {/* Centered Safety Verification Seal Impact */}
+            <circle cx="286" cy="48" r="26" className="ct-seal-ring" />
             <g className="ct-stamp-badge">
-              <rect x="224" y="30" width="68" height="32" rx="8" className="ct-pill-ok" />
-              <text x="258" y="45" textAnchor="middle" className="ct-pill-ok-txt">SAFE ✓</text>
-              <text x="258" y="56" textAnchor="middle" className="ct-mini-ok">
+              <rect x="226" y="22" width="120" height="52" rx="12" className="ct-pill-ok" />
+              <circle cx="246" cy="48" r="10" className="ct-check-disc" />
+              <path d="M241.5 48.2l3 3 5.8-6" className="ct-check-white" />
+              <text x="263" y="40" textAnchor="start" dominantBaseline="central" className="ct-pill-ok-txt lg">
+                SAFE
+              </text>
+              <text x="263" y="56" textAnchor="start" dominantBaseline="central" className="ct-mini-ok">
                 {bi("安全校验通过", "Verified")}
               </text>
             </g>
@@ -2282,32 +2296,36 @@ function RehearsalStageCartoon({
         )}
 
         {scene === "error" && (
-          <svg viewBox="0 0 340 84" fill="none" className="rh-cartoon-svg">
-            {/* Retracted Endpoints */}
-            <rect x="18" y="22" width="66" height="42" rx="9" className="ct-hub-pod" />
-            <text x="51" y="41" textAnchor="middle" className="ct-pod-title">
+          <svg viewBox="0 0 360 96" fill="none" className="rh-cartoon-svg">
+            {/* Preserved Draft Pod */}
+            <rect x="12" y="22" width="102" height="52" rx="11" className="ct-hub-pod" />
+            <circle cx="30" cy="48" r="9" className="ct-check-disc" />
+            <path d="M26 48.2l2.7 2.7 5.2-5.4" className="ct-check-white" />
+            <text x="46" y="40" textAnchor="start" dominantBaseline="central" className="ct-pod-title">
               {bi("草稿完好", "Draft OK")}
             </text>
-            <text x="51" y="54" textAnchor="middle" className="ct-mini-ok">
-              {bi("已保护 ✓", "Saved ✓")}
+            <text x="46" y="56" textAnchor="start" dominantBaseline="central" className="ct-mini-ok">
+              {bi("已安全保护", "Preserved")}
             </text>
 
-            <line x1="88" y1="43" x2="136" y2="43" className="ct-broken-line" />
-            <line x1="204" y1="43" x2="252" y2="43" className="ct-broken-line" />
+            <line x1="118" y1="48" x2="148" y2="48" className="ct-broken-line" />
+            <line x1="212" y1="48" x2="242" y2="48" className="ct-broken-line" />
 
             {/* Central Circuit-Breaker Shield */}
-            <circle cx="170" cy="43" r="24" className="ct-err-halo" />
+            <circle cx="180" cy="48" r="27" className="ct-err-halo" />
             <path
-              d="M170 22L152 29.5v12.8c0 10.5 7.5 19.2 18 22.2 10.5-3 18-11.7 18-22.2V29.5L170 22z"
+              d="M180 25L160 33.4v13.8c0 11.4 8.2 20.8 20 24 11.8-3.2 20-12.6 20-24V33.4L180 25z"
               className="ct-err-shield"
             />
-            <path d="M170 34v10M170 49.5h.01" className="ct-err-bang" />
+            <path d="M180 38v11M180 54.5h.01" className="ct-err-bang" />
 
-            <rect x="256" y="22" width="66" height="42" rx="9" className="ct-err-pod" />
-            <text x="289" y="41" textAnchor="middle" className="ct-err-pod-title">
+            {/* Blocked AI Gateway Pod */}
+            <rect x="246" y="22" width="102" height="52" rx="11" className="ct-err-pod" />
+            <circle cx="264" cy="48" r="4.5" className="ct-led bad" />
+            <text x="276" y="40" textAnchor="start" dominantBaseline="central" className="ct-err-pod-title">
               {bi("AI 网关", "AI GW")}
             </text>
-            <text x="289" y="54" textAnchor="middle" className="ct-err-pod-sub">
+            <text x="276" y="56" textAnchor="start" dominantBaseline="central" className="ct-err-pod-sub">
               {bi("响应受阻", "Blocked")}
             </text>
           </svg>

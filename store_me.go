@@ -127,7 +127,7 @@ func (s *storeServer) handleMe(w http.ResponseWriter, r *http.Request, session s
 		s.writeJSON(w, 200, map[string]bool{"ok": true})
 
 	case rest == "skills" && r.Method == "GET":
-		s.writeJSON(w, 200, map[string]any{"skills": nzSkills(s.userSkills(me)), "platform": s.skillsFor("", true)})
+		s.writeJSON(w, 200, map[string]any{"skills": nzSkills(s.userSkills(me)), "platform": localizedSkills(wLang(w), s.skillsFor("", true))})
 	case rest == "skills" && r.Method == "PUT":
 		var in struct {
 			Skills []aiSkill `json:"skills"`

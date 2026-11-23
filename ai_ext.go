@@ -1111,7 +1111,7 @@ func (s *storeServer) handleAIExt(w http.ResponseWriter, r *http.Request, sessio
 			return
 		}
 		s.auditReq(r, "ai-skills", session.User, "")
-		s.writeJSON(w, 200, map[string]any{"skills": s.skills(true)})
+		s.writeJSON(w, 200, map[string]any{"skills": localizedSkills(wLang(w), s.skills(true))})
 	case parts[0] == "mcp":
 		s.mcpAPI(w, r, session, parts, s.loadMCP, s.saveMCP, false)
 	default:

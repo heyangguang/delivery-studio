@@ -179,7 +179,7 @@ function uniqueForkName(base: string, isTaken: (n: string) => boolean): string {
 }
 
 export function SkillsPage({ selected }: { selected?: string }) {
-  useLang();
+  const lang = useLang();
   const narrow = useMedia("(max-width: 900px)");
   const admin = can("ai.settings");
   const initMe = cached<{ skills: Skill[]; platform: Skill[] }>("/api/me/skills");
@@ -219,7 +219,7 @@ export function SkillsPage({ selected }: { selected?: string }) {
 
   useEffect(() => {
     load();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [lang]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     setRaw(false);

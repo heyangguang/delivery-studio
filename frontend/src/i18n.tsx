@@ -43,10 +43,10 @@ export function setLang(next: Lang) {
     /* ignore */
   }
   applyHtmlLang(next);
-  listeners.forEach((fn) => fn());
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent("mh-lang-change", { detail: next }));
   }
+  listeners.forEach((fn) => fn());
 }
 
 export function subscribeLang(fn: () => void): () => void {

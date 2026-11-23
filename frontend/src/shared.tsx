@@ -1290,20 +1290,25 @@ export function dropCached(prefix: string) {
   }
 }
 if (typeof window !== "undefined") {
-  window.addEventListener("mh-lang-change", () => memo.clear());
+  window.addEventListener("mh-lang-change", () => {
+    memo.clear();
+    inflight.clear();
+  });
 }
 
 /** Fetches a GET and keeps the answer for the tab; asking again while it is on its way shares the same request. */
 export function fetchCached<T>(path: string): Promise<T> {
-  const p = inflight.get(path);
+  const reqLang = getLang();
+  const key = `${reqLang}|${path}`;
+  const p = inflight.get(key);
   if (p) return p as Promise<T>;
   const q = api<T>(path)
     .then((r) => {
-      memo.set(path, r);
+      if (getLang() === reqLang) memo.set(path, r);
       return r;
     })
-    .finally(() => inflight.delete(path));
-  inflight.set(path, q);
+    .finally(() => inflight.delete(key));
+  inflight.set(key, q);
   return q;
 }
 

@@ -183,7 +183,7 @@ const NET_OPTIONS: {
 ];
 
 export function SandboxView() {
-  useLang();
+  const lang = useLang();
   const initSandbox = cached<Data>("/api/settings/sandbox");
   const [d, setD] = useState<Data | null>(() => initSandbox ?? null);
   const [f, setF] = useState<Settings | null>(
@@ -205,7 +205,7 @@ export function SandboxView() {
       .catch(err);
   useEffect(() => {
     load();
-  }, []);
+  }, [lang]); // eslint-disable-line react-hooks/exhaustive-deps
   const check = async () => {
     setBusy("check");
     try {

@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.265-dev"
+	version            = "1.0.266-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,22 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.266-dev",
+		Date:    "2026-11-24",
+		Title:   "合并「能力库」统一工作区并修复顶栏拥挤与中英切换残留",
+		TitleEn: "Unified Studio workspace, responsive topbar fit, and live CN/EN switching",
+		Highlights: []string{
+			"将「知识库 / 技能 / MCP」合并为顶栏单一入口「能力库」（Studio），配备左侧 74px 精简活动栏与色标高亮，保留 #/kb、#/skills、#/mcp 深链并自动记忆上次停留子页",
+			"优化顶栏布局与中英文自适应：收拢多余分组分隔线、窄屏下搜索栏自动折叠为紧凑胶囊，并在语言切换后自动复位横向滚动与边界测算，解决英文截断及中→英→中切换后右侧错位",
+			"修复中英文实时切换数据残留：/api/me/skills 与设置接口统一按当前语言本地化内置技能，前端语言切换先清缓存与按语言隔离请求池，技能/沙箱/通知等视图随语言即时刷新",
+		},
+		HighlightsEn: []string{
+			"Merged Knowledge, Skills, and MCP into a single topbar entry 'Studio' with a 74px slim activity rail, color-coded active tiles, and full #/kb, #/skills, #/mcp deep-link compatibility",
+			"Fixed topbar overflow and CN/EN toggle layout glitches by removing extra dividers, compacting the search pill under 1380px, and resetting nav scroll & bounds on language changes",
+			"Fixed stale language data after CN -> EN -> CN toggles across /api/me/skills, settings responses, language-keyed fetch cache, and reactive [lang] reloads in Skills/Sandbox/Notification views",
+		},
+	},
 	{
 		Version: "1.0.265-dev",
 		Date:    "2026-11-24",

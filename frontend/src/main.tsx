@@ -50,9 +50,12 @@ import { NewDeliveryPicker } from "./newpicker";
 import { SettingsPage } from "./settings";
 import { AIPage } from "./aipage";
 import { MePage } from "./me";
-import { KnowledgePage } from "./kb";
-import { SkillsPage } from "./skills";
-import { MCPPage } from "./mcp";
+import {
+  StudioPage,
+  enabledStudioTabs,
+  isStudioRoute,
+  preferredStudioTab,
+} from "./studio";
 import { DeliveriesPage } from "./deliveries";
 import type { LoadState } from "./deliveries";
 import { ExecutionMonitorPage } from "./monitor";
@@ -220,17 +223,17 @@ const latestPerCluster = (jobs: Job[]) =>
       ) === i,
   );
 
-/** The top menu falls into daily work, the assistant and its resources, and administration. */
-const NAV_GROUP: Partial<Record<Route["name"], number>> = {
+/** The top menu falls into daily work, the assistant and its studio, and administration. */
+type NavTabKey = Route["name"] | "studio";
+const NAV_GROUP: Partial<Record<NavTabKey, number>> = {
   deliveries: 0,
   executions: 0,
   apps: 0,
   components: 0,
   library: 0,
+  security: 0,
   ai: 1,
-  kb: 1,
-  skills: 1,
-  mcp: 1,
+  studio: 1,
   accounts: 2,
   settings: 2,
 };
@@ -239,18 +242,24 @@ function NavTabs({
   items,
   active,
 }: {
-  items: { key: Route["name"]; label: string; to: Route; badge?: number }[];
-  active: string;
+  items: { key: NavTabKey; label: string; to: Route; badge?: number }[];
+  active: NavTabKey;
 }) {
+  const lang = useLang();
   const ref = useRef<HTMLElement>(null);
   const [bar, setBar] = useState<{ x: number; w: number } | null>(null);
   const [ready, setReady] = useState(false);
-  const itemKeys = items.map((it) => it.key).join("|");
+  const itemSig = items
+    .map((it) => `${it.key}:${it.label}:${it.badge || 0}`)
+    .join("|");
   useLayoutEffect(() => {
     const nav = ref.current;
     if (!nav) return;
     const links = [...nav.querySelectorAll<HTMLAnchorElement>("a[data-k]")];
     const measure = () => {
+      if (nav.scrollWidth <= nav.clientWidth + 1 && nav.scrollLeft !== 0) {
+        nav.scrollLeft = 0;
+      }
       const el = nav.querySelector<HTMLAnchorElement>(`a[data-k="${active}"]`);
       const next = el ? { x: el.offsetLeft, w: el.offsetWidth } : null;
       setBar((prev) => {
@@ -260,6 +269,7 @@ function NavTabs({
       });
     };
     measure();
+    const raf = requestAnimationFrame(measure);
     const ro =
       typeof ResizeObserver !== "undefined"
         ? new ResizeObserver(measure)
@@ -274,9 +284,10 @@ function NavTabs({
       .catch(() => undefined);
     return () => {
       cancelled = true;
+      cancelAnimationFrame(raf);
       ro?.disconnect();
     };
-  }, [active, itemKeys]);
+  }, [active, itemSig, lang]);
 
   useEffect(() => {
     const raf = requestAnimationFrame(() => setReady(true));
@@ -285,7 +296,11 @@ function NavTabs({
 
   useEffect(() => {
     const nav = ref.current;
-    if (!nav || nav.scrollWidth <= nav.clientWidth) return;
+    if (!nav) return;
+    if (nav.scrollWidth <= nav.clientWidth + 1) {
+      if (nav.scrollLeft !== 0) nav.scrollLeft = 0;
+      return;
+    }
     const el = nav.querySelector<HTMLAnchorElement>(`a[data-k="${active}"]`);
     if (!el) return;
     const pad = 12;
@@ -303,7 +318,7 @@ function NavTabs({
         behavior: ready ? "smooth" : "auto",
       });
     }
-  }, [active, ready]);
+  }, [active, ready, itemSig, lang]);
 
   return (
     <nav className="tabs" ref={ref} aria-label={bi("主导航", "Main navigation")}>
@@ -1239,6 +1254,21 @@ function App() {
         title: bi("权限与账户助手", "IAM & Accounts Helper"),
         context: bi("权限与账户", "IAM & Accounts"),
       },
+      kb: {
+        key: "portal:kb",
+        title: bi("知识库助手", "Knowledge Base Helper"),
+        context: bi("能力库 · 知识库", "Studio · Knowledge Base"),
+      },
+      skills: {
+        key: "portal:skills",
+        title: bi("技能编写助手", "Skills Helper"),
+        context: bi("能力库 · 技能", "Studio · Skills"),
+      },
+      mcp: {
+        key: "portal:mcp",
+        title: bi("MCP 接入助手", "MCP Integration Helper"),
+        context: bi("能力库 · MCP 服务", "Studio · MCP Servers"),
+      },
     };
     const p = pageMap[route.name] || {
       key: "portal:general",
@@ -1300,7 +1330,9 @@ function App() {
       />
     );
 
-  const tabs: { key: Route["name"]; label: string; to: Route; badge?: number }[] = [
+  const studioTabs =
+    aiOn && can("ai.use") ? enabledStudioTabs(aiStatus.features) : [];
+  const tabs: { key: NavTabKey; label: string; to: Route; badge?: number }[] = [
     ...(can("delivery.view|delivery.create")
       ? [
           {
@@ -1335,20 +1367,14 @@ function App() {
     ...(aiOn && !!aiStatus.features?.assistant && can("ai.use")
       ? [{ key: "ai" as const, label: "AI", to: { name: "ai" } as Route }]
       : []),
-    ...(aiOn && !!aiStatus.features?.kb && can("ai.use")
-      ? [{ key: "kb" as const, label: bi("知识库", "Knowledge"), to: { name: "kb" } as Route }]
-      : []),
-    ...(aiOn && !!aiStatus.features?.skills && can("ai.use")
+    ...(studioTabs.length > 0
       ? [
           {
-            key: "skills" as const,
-            label: bi("技能", "Skills"),
-            to: { name: "skills" } as Route,
+            key: "studio" as const,
+            label: bi("能力库", "Studio"),
+            to: { name: preferredStudioTab(aiStatus.features) } as Route,
           },
         ]
-      : []),
-    ...(aiOn && !!aiStatus.features?.mcp && can("ai.use")
-      ? [{ key: "mcp" as const, label: "MCP", to: { name: "mcp" } as Route }]
       : []),
     ...(can("iam.user|iam.role|iam.team|audit.view")
       ? [
@@ -1371,7 +1397,12 @@ function App() {
         ]
       : []),
   ];
-  const activeTab = route.name === "new" ? "deliveries" : route.name;
+  const activeTab: NavTabKey =
+    route.name === "new"
+      ? "deliveries"
+      : isStudioRoute(route.name)
+        ? "studio"
+        : route.name;
 
   const aiRouteBlocked =
     (route.name === "ai" && !(aiOn && !!aiStatus.features?.assistant)) ||
@@ -1449,9 +1480,14 @@ function App() {
   else if (route.name === "accounts")
     page = <AccountsPage me={user} selected={route.id} />;
   else if (route.name === "me") page = <MePage me={user} section={route.id} />;
-  else if (route.name === "kb") page = <KnowledgePage selected={route.id} />;
-  else if (route.name === "skills") page = <SkillsPage selected={route.id} />;
-  else if (route.name === "mcp") page = <MCPPage selected={route.id} />;
+  else if (route.name === "kb" || route.name === "skills" || route.name === "mcp")
+    page = (
+      <StudioPage
+        active={route.name}
+        selected={route.id}
+        features={aiStatus.features}
+      />
+    );
   else if (route.name === "settings")
     page = <SettingsPage me={user} selected={route.id} />;
   else if (route.name === "ai")
@@ -1788,7 +1824,11 @@ function App() {
           </Dropdown>
         </div>
       </header>
-      <main id="main" className="main" key={route.name}>
+      <main
+        id="main"
+        className="main"
+        key={isStudioRoute(route.name) ? "studio" : route.name}
+      >
         <PageBoundary resetKey={href(route)}>{page}</PageBoundary>
       </main>
       <ConnectivityPill

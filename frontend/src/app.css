@@ -106,33 +106,25 @@ html:not([data-vt-ok]) .main {
   top: 10px;
   box-shadow: var(--shadow-md);
 }
+.shell {
+  min-width: 0;
+  max-width: 100%;
+}
 .topbar {
   position: sticky;
   top: 0;
   z-index: 40;
   height: 52px;
+  max-width: 100%;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
-  gap: 20px;
-  padding: 0 18px;
+  gap: 16px;
+  padding: 0 16px;
   background: rgba(255, 255, 255, 0.86);
   backdrop-filter: saturate(180%) blur(16px);
   -webkit-backdrop-filter: saturate(180%) blur(16px);
   border-bottom: 1px solid var(--line);
-}
-:lang(en) .topbar {
-  gap: 14px;
-  padding: 0 14px;
-}
-:lang(en) .tabs a {
-  padding: 0 8.5px;
-  font-size: 13px;
-}
-:lang(en) .search-trigger {
-  min-width: 134px;
-}
-:lang(en) .top-right {
-  gap: 6px;
 }
 .brand {
   display: inline-flex;
@@ -4149,6 +4141,58 @@ body[arco-theme="dark"] .scheme-summary {
   }
   .rn-search input {
     width: 116px;
+  }
+}
+:lang(en) .topbar {
+  gap: 12px;
+  padding: 0 14px;
+}
+:lang(en) .tabs a {
+  padding: 0 9px;
+  font-size: 13px;
+}
+:lang(en) .search-trigger {
+  min-width: 128px;
+}
+:lang(en) .top-right {
+  gap: 6px;
+}
+@media (max-width: 1380px) {
+  .topbar {
+    gap: 12px;
+    padding: 0 12px;
+  }
+  .tabs a {
+    padding: 0 9px;
+    font-size: 13px;
+  }
+  :lang(en) .tabs a {
+    padding: 0 7.5px;
+    font-size: 12.5px;
+  }
+  .search-trigger,
+  :lang(en) .search-trigger {
+    min-width: 0;
+    padding: 0 8px;
+    gap: 6px;
+  }
+  .search-trigger-txt {
+    display: none;
+  }
+  .top-right {
+    gap: 6px;
+  }
+}
+@media (max-width: 1120px) {
+  .ver-pill,
+  .search-trigger-keys {
+    display: none;
+  }
+  .search-trigger,
+  :lang(en) .search-trigger {
+    width: 30px;
+    padding: 0;
+    justify-content: center;
   }
 }
 @media (max-width: 900px) {

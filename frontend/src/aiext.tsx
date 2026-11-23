@@ -29,7 +29,7 @@ type Skill = {
 
 /** Skills: the platform's (for administrators), or a person's own (mine), shown next to the platform's they also get. */
 export function SkillsView({ mine }: { mine?: boolean } = {}) {
-  useLang();
+  const lang = useLang();
   const [skills, setSkills] = useState<Skill[] | null>(null);
   const [open, setOpen] = useState("");
   const [edit, setEdit] = useState<Skill | null>(null);
@@ -51,7 +51,7 @@ export function SkillsView({ mine }: { mine?: boolean } = {}) {
     ).catch(err);
   useEffect(() => {
     load();
-  }, [mine]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [mine, lang]); // eslint-disable-line react-hooks/exhaustive-deps
   const save = async (next: Skill[]) => {
     setBusy(true);
     try {
@@ -738,7 +738,7 @@ type WebProvider = {
 };
 
 export function WebView() {
-  useLang();
+  const lang = useLang();
   const initWeb = cached<{ web: WebCfg; providers: WebProvider[] }>(
     "/api/settings/ai/web",
   );
@@ -763,7 +763,7 @@ export function WebView() {
       .catch(err);
   useEffect(() => {
     load();
-  }, []);
+  }, [lang]); // eslint-disable-line react-hooks/exhaustive-deps
   const save = async (next: WebCfg) => {
     setBusy("save");
     try {

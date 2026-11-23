@@ -265,7 +265,7 @@ function ChannelModal({
 }
 
 export function ChannelsView() {
-  useLang();
+  const lang = useLang();
   const [d, setD] = useState<Channels | null>(
     () => cached<Channels>("/api/settings/channels") ?? null,
   );
@@ -284,7 +284,7 @@ export function ChannelsView() {
       .catch((e) => setError((e as Error).message));
   useEffect(() => {
     load();
-  }, []);
+  }, [lang]); // eslint-disable-line react-hooks/exhaustive-deps
   const test = async (c: NotifyChannel) => {
     setTesting(c.id);
     try {
@@ -718,7 +718,7 @@ export function TemplatesView() {
         if (first) setKind(first.kind);
       })
       .catch(() => undefined);
-  }, []);
+  }, [lang]); // eslint-disable-line react-hooks/exhaustive-deps
   const ev = d?.events.find((e) => e.id === sel);
   const saved = (id: string): Tpl =>
     d?.custom[id] ||

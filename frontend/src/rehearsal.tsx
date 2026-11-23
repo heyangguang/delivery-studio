@@ -1702,7 +1702,6 @@ function ShellCodeBlock({
               <span>{expanded ? bi("收起", "Collapse") : bi("展开全部", "Expand all")}</span>
             </button>
           )}
-          <CopyCodeBtn text={code} label={copyLabel} />
           {onDownload && (
             <button
               type="button"
@@ -1733,6 +1732,7 @@ function ShellCodeBlock({
               <span>{bi("问 AI 修改", "Ask AI")}</span>
             </button>
           )}
+          <CopyCodeBtn text={code} label={copyLabel} />
         </div>
       </div>
       <div className="rh-code-scroll">
@@ -10678,6 +10678,30 @@ function StepRow({
                 )}
               </div>
               <div className="rh-step-head-right">
+                {!editingCmd && !tearing && (
+                  <button
+                    type="button"
+                    className="rh-code-btn"
+                    onClick={() => setEditingCmd(true)}
+                  >
+                    <IconEdit />
+                    <span>{bi("微调", "Edit")}</span>
+                  </button>
+                )}
+                {canAskStepAI && !tearing && (
+                  <button
+                    type="button"
+                    className="rh-code-btn is-ai"
+                    onClick={openStepInAIDock}
+                    title={bi(
+                      "在右下角 AI 助手中讨论或对话修改此演练步骤",
+                      "Discuss or modify this step with AI Assistant",
+                    )}
+                  >
+                    <Spark size={12} />
+                    <span>{bi("问 AI 修改", "Ask AI")}</span>
+                  </button>
+                )}
                 {tearing && (
                   <span
                     className={`rh-tear-stamp is-${step.status}`}
@@ -10830,10 +10854,6 @@ function StepRow({
                           code={sub.command}
                           title={subTitle}
                           compact
-                          onEdit={ci === 0 ? () => setEditingCmd(true) : undefined}
-                          onAskAI={
-                            ci === 0 && canAskStepAI ? openStepInAIDock : undefined
-                          }
                         />
                       </div>
                       {ci < subCmds.length - 1 && (
@@ -10859,8 +10879,6 @@ function StepRow({
               code={step.command}
               title={bi("执行命令", "Command")}
               compact
-              onEdit={() => setEditingCmd(true)}
-              onAskAI={canAskStepAI ? openStepInAIDock : undefined}
             />
           );
         })()}

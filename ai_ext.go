@@ -253,6 +253,7 @@ print(json.dumps({"files": reports}, ensure_ascii=False, indent=2))
 }
 
 func parseSkill(text string) aiSkill {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
 	var sk aiSkill
 	if strings.HasPrefix(text, "---\n") {
 		if end := strings.Index(text[4:], "\n---"); end >= 0 {

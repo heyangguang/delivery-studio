@@ -3350,6 +3350,9 @@ function ChatWindow({
         visible={!!draft}
         wrapClassName="ad-wu-wrap"
         className="ad-wu-modal"
+        style={{ transformOrigin: "center center" }}
+        focusLock={false}
+        autoFocus={false}
         title={
           <div className="ad-wu-head">
             <span className="ad-wu-head-ico" aria-hidden>

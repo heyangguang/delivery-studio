@@ -10312,6 +10312,69 @@ body[arco-theme="dark"] .rh-apply-modal-guard.is-warn .rh-apply-modal-guard-h {
   gap: 6px;
   align-items: center;
 }
+/* Lightweight native inputs inside Production Apply / Void modals: avoids 20+ Arco wrapper mounts & autoSize reflows on first open */
+.rh-apply-input,
+.rh-apply-textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  font-family: inherit;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  outline: none;
+  transition:
+    border-color 0.14s ease,
+    box-shadow 0.14s ease;
+}
+.rh-apply-input {
+  height: 28px;
+  padding: 0 9px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  line-height: 26px;
+}
+.rh-apply-input.is-md {
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 7px;
+  font-size: 13px;
+  line-height: 32px;
+}
+.rh-apply-textarea {
+  display: block;
+  min-height: 86px;
+  max-height: 168px;
+  padding: 7px 10px;
+  border-radius: 7px;
+  font-size: 13px;
+  line-height: 1.55;
+  resize: vertical;
+  scrollbar-width: thin;
+}
+.rh-apply-textarea.is-void {
+  min-height: 68px;
+  max-height: 132px;
+}
+.rh-apply-input::placeholder,
+.rh-apply-textarea::placeholder {
+  color: var(--faint);
+}
+.rh-apply-input:hover:not(:focus),
+.rh-apply-textarea:hover:not(:focus) {
+  border-color: color-mix(in srgb, var(--brand) 38%, var(--line-strong));
+}
+.rh-apply-input:focus,
+.rh-apply-textarea:focus {
+  border-color: var(--brand);
+  box-shadow: var(--ring);
+}
+[data-theme="dark"] .rh-apply-input,
+[data-theme="dark"] .rh-apply-textarea,
+body[arco-theme="dark"] .rh-apply-input,
+body[arco-theme="dark"] .rh-apply-textarea {
+  background: var(--surface-2);
+}
 .rh-apply-row-del {
   all: unset;
   box-sizing: border-box;

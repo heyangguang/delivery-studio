@@ -1025,8 +1025,10 @@ export function PropagateRehearsalModal({
     <Modal
       visible={visible}
       onCancel={onClose}
+      focusLock={false}
+      autoFocus={false}
       title={bi("推广已落地变更到其他同组件集群", "Propagate Applied Change to Other Clusters")}
-      style={{ width: "min(720px, 94vw)" }}
+      style={{ width: "min(720px, 94vw)", transformOrigin: "center center" }}
       footer={
         <div className="ro-modal-foot">
           <span className="ro-modal-foot-hint">
@@ -1559,11 +1561,13 @@ export function ImportTemplateBar({
       <Modal
         visible={open}
         onCancel={() => setOpen(false)}
+        focusLock={false}
+        autoFocus={false}
         title={bi(
           `引入已落地变更到 ${cluster.id}`,
           `Import Applied Change into ${cluster.id}`,
         )}
-        style={{ width: "min(780px, 94vw)" }}
+        style={{ width: "min(780px, 94vw)", transformOrigin: "center center" }}
         footer={
           <div className="ro-modal-foot">
             <span className="ro-modal-foot-hint">

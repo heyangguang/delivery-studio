@@ -12727,6 +12727,607 @@ export function computeEffectiveClusterChanges(
   return { items, latestByKey };
 }
 
+type ApplyModalDraft = {
+  seed: number;
+  summary: string;
+  note: string;
+  changes: RehearsalAppliedChange[];
+};
+
+const ProductionApplyModal = React.memo(function ProductionApplyModal({
+  visible,
+  draft,
+  clusterId,
+  rehearsal,
+  peers,
+  isApplied,
+  hasConflict,
+  guardAlerts,
+  busy,
+  onCancel,
+  onSubmit,
+}: {
+  visible: boolean;
+  draft: ApplyModalDraft;
+  clusterId: string;
+  rehearsal: ChangeRehearsal;
+  peers: ChangeRehearsal[];
+  isApplied: boolean;
+  hasConflict: boolean;
+  guardAlerts: NonNullable<ChangeRehearsal["conflict_alerts"]>;
+  busy: boolean;
+  onCancel: () => void;
+  onSubmit: (payload: {
+    summary: string;
+    note: string;
+    changes: RehearsalAppliedChange[];
+    supersedeIds: string[];
+  }) => void;
+}) {
+  useLang();
+  const [prevSeed, setPrevSeed] = useState(draft.seed);
+  const [summary, setSummary] = useState(draft.summary);
+  const [note, setNote] = useState(draft.note);
+  const [changes, setChanges] = useState<RehearsalAppliedChange[]>(draft.changes);
+  const [supersedeIds, setSupersedeIds] = useState<string[]>([]);
+
+  if (draft.seed !== prevSeed) {
+    setPrevSeed(draft.seed);
+    setSummary(draft.summary);
+    setNote(draft.note);
+    setChanges(draft.changes);
+    setSupersedeIds([]);
+  }
+
+  const peerTopics = useMemo(() => {
+    if (!visible || isApplied) return [];
+    const out: { plan: ChangeRehearsal; keys: Map<string, string> }[] = [];
+    for (const p of peers) {
+      if (
+        p.id === rehearsal.id ||
+        p.stage !== "finalized" ||
+        p.applied ||
+        p.voided
+      ) {
+        continue;
+      }
+      out.push({ plan: p, keys: extractRehearsalTopicKeysClient(p) });
+    }
+    return out;
+  }, [peers, rehearsal.id, visible, isApplied]);
+
+  const baseMyKeys = useMemo(
+    () => (visible && !isApplied ? extractRehearsalTopicKeysClient(rehearsal) : null),
+    [rehearsal, visible, isApplied],
+  );
+
+  const { overlappingPending, parallelPending } = useMemo(() => {
+    if (!visible || isApplied || peerTopics.length === 0) {
+      return {
+        overlappingPending: [] as { plan: ChangeRehearsal; keys: string[] }[],
+        parallelPending: [] as ChangeRehearsal[],
+      };
+    }
+    const myKeys = new Map<string, string>(baseMyKeys || []);
+    for (const ch of changes) {
+      const k = (ch.key || "").trim();
+      if (k) myKeys.set(k.toLowerCase(), k);
+    }
+    const overlapping: { plan: ChangeRehearsal; keys: string[] }[] = [];
+    const parallel: ChangeRehearsal[] = [];
+    for (const { plan: p, keys: pKeys } of peerTopics) {
+      const shared: string[] = [];
+      for (const [lk, disp] of myKeys.entries()) {
+        if (pKeys.has(lk)) shared.push(disp);
+      }
+      if (shared.length > 0) {
+        overlapping.push({ plan: p, keys: shared });
+      } else {
+        parallel.push(p);
+      }
+    }
+    return { overlappingPending: overlapping, parallelPending: parallel };
+  }, [visible, isApplied, peerTopics, baseMyKeys, changes]);
+
+  const otherAppliedEffective = useMemo(() => {
+    if (!visible || isApplied) return null;
+    return computeEffectiveClusterChanges(
+      peers.filter((p) => p.id !== rehearsal.id),
+    );
+  }, [peers, rehearsal.id, visible, isApplied]);
+
+  const liveOverwrites = useMemo(() => {
+    if (!visible || isApplied || !otherAppliedEffective) return [];
+    const hits: {
+      key: string;
+      prevAfter: string;
+      nextAfter: string;
+      sourceTitle: string;
+      sourceId: string;
+    }[] = [];
+    for (const ch of changes) {
+      const k = (ch.key || "").trim();
+      const a = (ch.after || "").trim();
+      if (!k || !a) continue;
+      const prev = otherAppliedEffective.latestByKey.get(k.toLowerCase());
+      if (prev && prev.after !== a) {
+        hits.push({
+          key: k,
+          prevAfter: prev.after,
+          nextAfter: a,
+          sourceTitle: prev.source_title,
+          sourceId: prev.source_id,
+        });
+      }
+    }
+    return hits;
+  }, [visible, changes, isApplied, otherAppliedEffective]);
+
+  return (
+    <Modal
+      visible={visible}
+      wrapClassName="ad-wu-wrap"
+      className="rh-apply-modal"
+      style={{ transformOrigin: "center center" }}
+      focusLock={false}
+      autoFocus={false}
+      title={
+        isApplied
+          ? bi("更新生产变更落地记录", "Update Production Change Record")
+          : bi(
+              "确认生产已实施完成并同步到集群",
+              "Confirm Production Completion & Sync Cluster",
+            )
+      }
+      onCancel={onCancel}
+      onOk={() => onSubmit({ summary, note, changes, supersedeIds })}
+      confirmLoading={busy}
+      okText={
+        isApplied
+          ? bi("保存更新", "Save Changes")
+          : bi("确认已落地并同步集群", "Confirm & Sync to Cluster")
+      }
+      cancelText={bi("取消", "Cancel")}
+      okButtonProps={{
+        status: hasConflict && !isApplied ? "warning" : "success",
+      }}
+      maskClosable={false}
+    >
+      <div className="rh-apply-form">
+        {/* Anti-misclick Full Identity Confirmation Banner */}
+        <div className="rh-apply-ident">
+          <div className="rh-apply-ident-row">
+            <span className="rh-apply-ident-cluster mono">{clusterId}</span>
+            <span className="rh-apply-ident-doc mono">
+              {rehearsal.doc_id || `sop-${rehearsal.id}`}
+            </span>
+          </div>
+          <div className="rh-apply-ident-title">{rehearsal.title}</div>
+        </div>
+
+        {/* Conflict / Overwrite Guard inside Modal */}
+        {!isApplied && (guardAlerts.length > 0 || liveOverwrites.length > 0) && (
+          <div
+            className={`rh-apply-modal-guard ${hasConflict ? "is-danger" : "is-warn"}`}
+          >
+            <div className="rh-apply-modal-guard-h">
+              <IconExclamationCircle />
+              <b>
+                {hasConflict
+                  ? bi(
+                      "请二次核对：此方案与近期已落地变更存在重叠",
+                      "Double-Check: Overlaps with Recently Applied Change",
+                    )
+                  : bi(
+                      "参数覆盖提示：确认后将以本次新值作为当前最新生效配置",
+                      "Value Update Preview: New values will become active baseline",
+                    )}
+              </b>
+            </div>
+            {guardAlerts.length > 0 && (
+              <ul className="rh-apply-modal-guard-list">
+                {guardAlerts.map((a, i) => (
+                  <li key={`${a.other_id}-${i}`}>{a.summary}</li>
+                ))}
+              </ul>
+            )}
+            {liveOverwrites.length > 0 && (
+              <div className="rh-apply-overwrite-list">
+                {liveOverwrites.map((o) => (
+                  <div key={o.key} className="rh-apply-overwrite-item">
+                    <code className="mono">{o.key}</code>
+                    <span className="rh-apply-before">{o.prevAfter}</span>
+                    <span>→</span>
+                    <b className="mono">{o.nextAfter}</b>
+                    <span className="faint">
+                      {bi(
+                        `（将覆盖此前《${o.sourceTitle}》的生效值）`,
+                        `(updates prior "${o.sourceTitle}")`,
+                      )}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        <p className="rh-apply-form-lead">
+          {bi(
+            "确认后，以下变更结果将正式反映到该集群的「概览」「配置」「交付报告」以及后续 AI 助手与演练的基准上下文中。",
+            "Once confirmed, these effective changes will appear in Cluster Overview, Config, Delivery Report, and future AI/rehearsal baselines.",
+          )}
+        </p>
+
+        <div className="rh-apply-field">
+          <label>{bi("生效变更摘要", "Effective Change Summary")}</label>
+          <textarea
+            className="rh-apply-textarea"
+            rows={4}
+            value={summary}
+            placeholder={bi(
+              "简明概括本次在生产环境实际落地生效的改动…",
+              "Briefly describe what changed in production…",
+            )}
+            onChange={(e) => setSummary(e.target.value)}
+          />
+        </div>
+
+        <div className="rh-apply-field">
+          <div className="rh-apply-field-h">
+            <label>
+              {bi(
+                "关键配置 / 参数 / 规则变动（将自动与历史生效值归并展示）",
+                "Key Config / Parameter / Rule Deltas (auto-merged with prior state)",
+              )}
+            </label>
+            <Button
+              size="mini"
+              type="text"
+              icon={<IconPlus />}
+              onClick={() =>
+                setChanges((prev) => [
+                  ...prev,
+                  { key: "", before: "", after: "" },
+                ])
+              }
+            >
+              {bi("添加变更项", "Add Item")}
+            </Button>
+          </div>
+          {changes.length === 0 ? (
+            <div className="rh-apply-empty-deltas">
+              {bi(
+                "未自动解析到具体参数键值；如需在集群配置页高亮展示参数变动，可点右上角「添加变更项」。",
+                "No specific key/value deltas auto-detected; click Add Item to list specific config changes.",
+              )}
+            </div>
+          ) : (
+            <div className="rh-apply-delta-editor">
+              {changes.map((ch, idx) => (
+                <div key={idx} className="rh-apply-delta-row">
+                  <input
+                    type="text"
+                    className="rh-apply-input"
+                    placeholder={bi("参数/配置项", "Key / Item")}
+                    value={ch.key}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setChanges((prev) =>
+                        prev.map((x, i) => (i === idx ? { ...x, key: v } : x)),
+                      );
+                    }}
+                  />
+                  <input
+                    type="text"
+                    className="rh-apply-input"
+                    placeholder={bi("变更前（可选）", "Before (opt)")}
+                    value={ch.before || ""}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setChanges((prev) =>
+                        prev.map((x, i) =>
+                          i === idx ? { ...x, before: v } : x,
+                        ),
+                      );
+                    }}
+                  />
+                  <input
+                    type="text"
+                    className="rh-apply-input"
+                    placeholder={bi("变更后生效值", "After (active)")}
+                    value={ch.after}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setChanges((prev) =>
+                        prev.map((x, i) =>
+                          i === idx ? { ...x, after: v } : x,
+                        ),
+                      );
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="rh-apply-row-del"
+                    aria-label={bi("删除该项", "Remove item")}
+                    onClick={() =>
+                      setChanges((prev) => prev.filter((_, i) => i !== idx))
+                    }
+                  >
+                    <IconClose />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="rh-apply-field">
+          <label>
+            {bi(
+              "现场执行备注 / 变更单号（可选）",
+              "Execution Note / Ticket ID (Optional)",
+            )}
+          </label>
+          <input
+            type="text"
+            className="rh-apply-input is-md"
+            value={note}
+            placeholder={bi(
+              "例如：CHG-20261123 · 低峰窗口执行完成，业务零感知",
+              "e.g. CHG-20261123 · Applied cleanly during maintenance window",
+            )}
+            onChange={(e) => setNote(e.target.value)}
+          />
+        </div>
+
+        {/* Optional: ONLY offer supersede checkbox for pending peers that modify the SAME config keys */}
+        {!isApplied && overlappingPending.length > 0 && (
+          <div className="rh-apply-supersede">
+            <div className="rh-apply-supersede-h">
+              <b>
+                {bi(
+                  "检测到改动相同配置项的待实施方案（可选处置）",
+                  "Overlapping Pending Plans Detected (Optional)",
+                )}
+              </b>
+              <span>
+                {bi(
+                  "以下旧方案与本次变更修改了相同配置项：如本次方案已取代旧方案，可勾选自动标为「已被替代」；如仍需保留先后执行，请不要勾选",
+                  "These pending plans touch the same config keys: check only if replaced by this change; leave unchecked to keep both",
+                )}
+              </span>
+            </div>
+            <div className="rh-apply-supersede-list">
+              {overlappingPending.map(({ plan: p, keys }) => {
+                const checked = supersedeIds.includes(p.id);
+                return (
+                  <label
+                    key={p.id}
+                    className={`rh-apply-supersede-item${checked ? " is-checked" : ""}`}
+                  >
+                    <Checkbox
+                      checked={checked}
+                      onChange={(v) =>
+                        setSupersedeIds((prev) =>
+                          v
+                            ? Array.from(new Set([...prev, p.id]))
+                            : prev.filter((x) => x !== p.id),
+                        )
+                      }
+                    />
+                    <span className="rh-apply-supersede-main">
+                      <span className="rh-apply-supersede-title">
+                        {p.title}
+                      </span>
+                      <span className="rh-apply-supersede-keys">
+                        {bi("重叠项：", "Overlap: ")}
+                        {keys.join("、")}
+                      </span>
+                    </span>
+                    <span className="rh-apply-supersede-meta num">
+                      {ago(p.updated_at)}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Read-only notice for unrelated parallel pending plans so user knows they coexist & are NOT deleted */}
+        {!isApplied && parallelPending.length > 0 && (
+          <div className="rh-apply-parallel">
+            <div className="rh-apply-parallel-h">
+              <b>
+                {bi(
+                  "同集群并存待实施变更（独立保留，互不覆盖）",
+                  "Coexisting Pending Changes on Cluster (Preserved)",
+                )}
+              </b>
+              <span>
+                {bi(
+                  "以下方案涉及不同配置项，与本方案属于并存/前后演进关系；本次确认不会删除或作废它们，后续完成后可各自独立落地叠加",
+                  "These plans modify different configs and coexist with this change; they remain untouched for independent production sign-off",
+                )}
+              </span>
+            </div>
+            <div className="rh-apply-parallel-list">
+              {parallelPending.map((p) => (
+                <div key={p.id} className="rh-apply-parallel-item">
+                  <span className="rh-sdot st-pending-apply" aria-hidden />
+                  <span className="rh-apply-supersede-title">{p.title}</span>
+                  <span className="rh-apply-parallel-tag">
+                    {bi("独立保留", "Kept")}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+});
+
+const ProductionVoidModal = React.memo(function ProductionVoidModal({
+  visible,
+  openSeed,
+  clusterId,
+  rehearsal,
+  peers,
+  busy,
+  onCancel,
+  onSubmit,
+}: {
+  visible: boolean;
+  openSeed: number;
+  clusterId: string;
+  rehearsal: ChangeRehearsal;
+  peers: ChangeRehearsal[];
+  busy: boolean;
+  onCancel: () => void;
+  onSubmit: (payload: { reason: string; supersededBy: string }) => void;
+}) {
+  useLang();
+  const [prevSeed, setPrevSeed] = useState(openSeed);
+  const [voidReason, setVoidReason] = useState("");
+  const [voidSupersededBy, setVoidSupersededBy] = useState("");
+
+  if (openSeed !== prevSeed) {
+    setPrevSeed(openSeed);
+    setVoidReason("");
+    setVoidSupersededBy("");
+  }
+
+  const replacementCandidates = useMemo(
+    () =>
+      visible
+        ? peers.filter(
+            (p) =>
+              p.id !== rehearsal.id &&
+              p.stage === "finalized" &&
+              !p.voided,
+          )
+        : [],
+    [peers, rehearsal.id, visible],
+  );
+
+  const voidPresets = [
+    bi("已被新版方案替代", "Superseded by newer plan"),
+    bi("变更窗口取消，暂不执行", "Maintenance window cancelled"),
+    bi("现场执行异常，已触发回退", "Rolled back during execution"),
+    bi("仅作演练参考，不上生产", "Staging reference only"),
+  ];
+
+  return (
+    <Modal
+      visible={visible}
+      wrapClassName="ad-wu-wrap"
+      className="rh-void-modal"
+      style={{ transformOrigin: "center center" }}
+      focusLock={false}
+      autoFocus={false}
+      title={bi("标记变更方案为作废 / 不再执行", "Mark Change Plan Void / Obsolete")}
+      onCancel={onCancel}
+      onOk={() => onSubmit({ reason: voidReason, supersededBy: voidSupersededBy })}
+      confirmLoading={busy}
+      okText={bi("确认标记作废", "Confirm Void")}
+      cancelText={bi("取消", "Cancel")}
+      okButtonProps={{ status: "warning" }}
+      maskClosable={false}
+    >
+      <div className="rh-apply-form">
+        <div className="rh-apply-ident is-void">
+          <div className="rh-apply-ident-row">
+            <span className="rh-apply-ident-cluster mono">{clusterId}</span>
+            <span className="rh-apply-ident-doc mono">
+              {rehearsal.doc_id || `sop-${rehearsal.id}`}
+            </span>
+          </div>
+          <div className="rh-apply-ident-title">{rehearsal.title}</div>
+        </div>
+
+        <p className="rh-apply-form-lead">
+          {bi(
+            "作废后该方案会保留全部演练步骤与归档文档供追溯审计，但会锁定「确认生产已实施完成」入口避免后续误点；如有需要随时可一键恢复。",
+            "Voided plans retain all rehearsal steps and archived docs for audit while locking sign-off against misclicks; you can restore anytime.",
+          )}
+        </p>
+
+        <div className="rh-apply-field">
+          <label>{bi("作废原因", "Void Reason")}</label>
+          <div className="rh-void-presets">
+            {voidPresets.map((preset) => (
+              <button
+                key={preset}
+                type="button"
+                className={`rh-void-chip${voidReason === preset ? " on" : ""}`}
+                onClick={() => setVoidReason(preset)}
+              >
+                {preset}
+              </button>
+            ))}
+          </div>
+          <textarea
+            className="rh-apply-textarea is-void"
+            rows={3}
+            value={voidReason}
+            placeholder={bi(
+              "填写作废原因（可选，留空将记录默认说明）…",
+              "Explain why this plan will not be applied (optional)…",
+            )}
+            onChange={(e) => setVoidReason(e.target.value)}
+          />
+        </div>
+
+        {replacementCandidates.length > 0 && (
+          <div className="rh-apply-field">
+            <label>
+              {bi(
+                "关联替代的新方案（可选）",
+                "Link Replacement Plan (Optional)",
+              )}
+            </label>
+            <div className="rh-void-peers">
+              <button
+                type="button"
+                className={`rh-void-peer${voidSupersededBy === "" ? " on" : ""}`}
+                onClick={() => setVoidSupersededBy("")}
+              >
+                {bi("不关联特定方案", "None")}
+              </button>
+              {replacementCandidates.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  className={`rh-void-peer${voidSupersededBy === p.id ? " on" : ""}`}
+                  onClick={() => {
+                    setVoidSupersededBy(p.id);
+                    if (!voidReason.trim()) {
+                      setVoidReason(
+                        bi(`已被方案「${p.title}」替代`, `Superseded by "${p.title}"`),
+                      );
+                    }
+                  }}
+                >
+                  <span className={`rh-sdot ${rehearsalDotClass(p)}`} />
+                  <span className="rh-void-peer-t">{p.title}</span>
+                  {p.applied && (
+                    <em className="rh-void-peer-tag">
+                      {bi("已落地", "Applied")}
+                    </em>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+});
+
 export function RehearsalProductionApplyCard({
   clusterId,
   rehearsal,
@@ -12752,24 +13353,24 @@ export function RehearsalProductionApplyCard({
   );
 
   const [modalOpen, setModalOpen] = useState(false);
+  const [applyDraft, setApplyDraft] = useState<ApplyModalDraft | null>(null);
   const [voidOpen, setVoidOpen] = useState(false);
+  const [voidSeed, setVoidSeed] = useState(0);
   const [propagateOpen, setPropagateOpen] = useState(false);
   const [rolloutBoardOpen, setRolloutBoardOpen] = useState(false);
   const [rolloutBoardData, setRolloutBoardData] =
     useState<RolloutBoardResponse | null>(null);
 
   useEffect(() => {
+    setModalOpen(false);
+    setApplyDraft(null);
+    setVoidOpen(false);
+    setVoidSeed(0);
     setPropagateOpen(false);
     setRolloutBoardOpen(false);
     setRolloutBoardData(null);
   }, [clusterId, rehearsal.id]);
   const [busy, setBusy] = useState(false);
-  const [summary, setSummary] = useState("");
-  const [note, setNote] = useState("");
-  const [changes, setChanges] = useState<RehearsalAppliedChange[]>([]);
-  const [supersedeIds, setSupersedeIds] = useState<string[]>([]);
-  const [voidReason, setVoidReason] = useState("");
-  const [voidSupersededBy, setVoidSupersededBy] = useState("");
 
   const isApplied = Boolean(rehearsal.applied);
   const isVoided = Boolean(rehearsal.voided);
@@ -12781,51 +13382,12 @@ export function RehearsalProductionApplyCard({
   const earlierPendingAlerts = alerts.filter(
     (a) => a.severity === "earlier_pending",
   );
-  const guardAlerts = [...conflictAlerts, ...staleAlerts];
+  const guardAlerts = useMemo(
+    () => [...conflictAlerts, ...staleAlerts],
+    [rehearsal.conflict_alerts],
+  );
   const hasConflict = conflictAlerts.length > 0;
   const hasStale = staleAlerts.length > 0;
-
-  const { overlappingPending, parallelPending } = useMemo(() => {
-    const myKeys = extractRehearsalTopicKeysClient(rehearsal);
-    for (const ch of changes) {
-      const k = (ch.key || "").trim();
-      if (k) myKeys.set(k.toLowerCase(), k);
-    }
-    const overlapping: { plan: ChangeRehearsal; keys: string[] }[] = [];
-    const parallel: ChangeRehearsal[] = [];
-    for (const p of peers) {
-      if (
-        p.id === rehearsal.id ||
-        p.stage !== "finalized" ||
-        p.applied ||
-        p.voided
-      ) {
-        continue;
-      }
-      const pKeys = extractRehearsalTopicKeysClient(p);
-      const shared: string[] = [];
-      for (const [lk, disp] of myKeys.entries()) {
-        if (pKeys.has(lk)) shared.push(disp);
-      }
-      if (shared.length > 0) {
-        overlapping.push({ plan: p, keys: shared });
-      } else {
-        parallel.push(p);
-      }
-    }
-    return { overlappingPending: overlapping, parallelPending: parallel };
-  }, [peers, rehearsal, changes]);
-
-  const replacementCandidates = useMemo(
-    () =>
-      peers.filter(
-        (p) =>
-          p.id !== rehearsal.id &&
-          p.stage === "finalized" &&
-          !p.voided,
-      ),
-    [peers, rehearsal.id],
-  );
 
   // Merge all applied rehearsals (including current if already applied) to detect superseded params
   const effectiveAll = useMemo(() => {
@@ -12834,42 +13396,6 @@ export function RehearsalProductionApplyCard({
       : [...peers, rehearsal];
     return computeEffectiveClusterChanges(mergedPeers);
   }, [peers, rehearsal]);
-
-  // Existing applied keys from OTHER rehearsals for live overwrite preview inside Confirm Modal
-  const otherAppliedEffective = useMemo(
-    () =>
-      computeEffectiveClusterChanges(
-        peers.filter((p) => p.id !== rehearsal.id),
-      ),
-    [peers, rehearsal.id],
-  );
-
-  const liveOverwrites = useMemo(() => {
-    if (isApplied) return [];
-    const hits: {
-      key: string;
-      prevAfter: string;
-      nextAfter: string;
-      sourceTitle: string;
-      sourceId: string;
-    }[] = [];
-    for (const ch of changes) {
-      const k = (ch.key || "").trim();
-      const a = (ch.after || "").trim();
-      if (!k || !a) continue;
-      const prev = otherAppliedEffective.latestByKey.get(k.toLowerCase());
-      if (prev && prev.after !== a) {
-        hits.push({
-          key: k,
-          prevAfter: prev.after,
-          nextAfter: a,
-          sourceTitle: prev.source_title,
-          sourceId: prev.source_id,
-        });
-      }
-    }
-    return hits;
-  }, [changes, isApplied, otherAppliedEffective]);
 
   const jumpToPeer = (peerId: string) => {
     if (!peerId) return;
@@ -12883,16 +13409,17 @@ export function RehearsalProductionApplyCard({
 
   const openModal = () => {
     const def = suggestAppliedChangesClient(rehearsal);
-    setSummary(def.summary);
-    setNote(rehearsal.applied_note || "");
-    setChanges(def.changes);
-    setSupersedeIds([]);
+    setApplyDraft((prev) => ({
+      seed: (prev?.seed || 0) + 1,
+      summary: def.summary,
+      note: rehearsal.applied_note || "",
+      changes: def.changes,
+    }));
     setModalOpen(true);
   };
 
   const openVoidModal = () => {
-    setVoidReason("");
-    setVoidSupersededBy("");
+    setVoidSeed((s) => s + 1);
     setVoidOpen(true);
   };
 
@@ -12928,90 +13455,140 @@ export function RehearsalProductionApplyCard({
     });
   };
 
-  const submitApply = async (applied: boolean) => {
-    if (offline || busy) return;
-    setBusy(true);
-    try {
-      const next = await api<ChangeRehearsal>(
-        `/api/clusters/${encodeURIComponent(clusterId)}/rehearsals/${encodeURIComponent(rehearsal.id)}/apply`,
-        {
-          method: "POST",
-          body: JSON.stringify(
-            applied
-              ? {
-                  applied: true,
-                  summary: summary.trim(),
-                  note: note.trim(),
-                  changes: changes.filter(
-                    (c) => c.key.trim() || c.after.trim(),
-                  ),
-                  ...(supersedeIds.length > 0
-                    ? { supersede_ids: supersedeIds }
-                    : {}),
-                }
-              : { applied: false },
-          ),
-        },
-      );
-      setModalOpen(false);
-      onUpdated?.(next);
-      Message.success(
-        applied
-          ? supersedeIds.length > 0
-            ? bi(
-                `已确认生产落地，同步至集群并自动归档作废 ${supersedeIds.length} 个旧方案`,
-                `Confirmed applied to production and marked ${supersedeIds.length} older plan(s) superseded`,
-              )
-            : bi(
-                "已确认生产实施完成，变更结果已同步至集群概览、配置与交付报告",
-                "Marked applied to production; synced to cluster overview, config, and delivery report",
-              )
-          : bi("已撤销生产落地标记", "Production applied status reverted"),
-      );
-    } catch (e) {
-      err(e);
-    } finally {
-      setBusy(false);
-    }
-  };
+  const submitApply = useCallback(
+    async (
+      applied: boolean,
+      payload?: {
+        summary: string;
+        note: string;
+        changes: RehearsalAppliedChange[];
+        supersedeIds: string[];
+      },
+    ) => {
+      if (offline || busy) return;
+      setBusy(true);
+      try {
+        const nextSummary = payload?.summary ?? "";
+        const nextNote = payload?.note ?? "";
+        const nextChanges = payload?.changes ?? [];
+        const nextSupersedeIds = payload?.supersedeIds ?? [];
+        const next = await api<ChangeRehearsal>(
+          `/api/clusters/${encodeURIComponent(clusterId)}/rehearsals/${encodeURIComponent(rehearsal.id)}/apply`,
+          {
+            method: "POST",
+            body: JSON.stringify(
+              applied
+                ? {
+                    applied: true,
+                    summary: nextSummary.trim(),
+                    note: nextNote.trim(),
+                    changes: nextChanges.filter(
+                      (c) => c.key.trim() || c.after.trim(),
+                    ),
+                    ...(nextSupersedeIds.length > 0
+                      ? { supersede_ids: nextSupersedeIds }
+                      : {}),
+                  }
+                : { applied: false },
+            ),
+          },
+        );
+        setModalOpen(false);
+        onUpdated?.(next);
+        Message.success(
+          applied
+            ? nextSupersedeIds.length > 0
+              ? bi(
+                  `已确认生产落地，同步至集群并自动归档作废 ${nextSupersedeIds.length} 个旧方案`,
+                  `Confirmed applied to production and marked ${nextSupersedeIds.length} older plan(s) superseded`,
+                )
+              : bi(
+                  "已确认生产实施完成，变更结果已同步至集群概览、配置与交付报告",
+                  "Marked applied to production; synced to cluster overview, config, and delivery report",
+                )
+            : bi("已撤销生产落地标记", "Production applied status reverted"),
+        );
+      } catch (e) {
+        err(e);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [offline, busy, clusterId, rehearsal.id, onUpdated],
+  );
 
-  const submitVoid = async (wantVoid: boolean) => {
-    if (offline || busy) return;
-    setBusy(true);
-    try {
-      const next = await api<ChangeRehearsal>(
-        `/api/clusters/${encodeURIComponent(clusterId)}/rehearsals/${encodeURIComponent(rehearsal.id)}/void`,
-        {
-          method: "POST",
-          body: JSON.stringify(
-            wantVoid
-              ? {
-                  voided: true,
-                  reason: voidReason.trim(),
-                  ...(voidSupersededBy
-                    ? { superseded_by: voidSupersededBy }
-                    : {}),
-                }
-              : { voided: false },
-          ),
-        },
-      );
-      setVoidOpen(false);
-      onUpdated?.(next);
-      Message.success(
-        wantVoid
-          ? bi(
-              "已将该方案标记为作废并锁定，防止误操作确认落地",
-              "Plan marked voided and locked against accidental sign-off",
-            )
-          : bi("已恢复为「待生产实施」状态", "Plan restored to pending apply"),
-      );
-    } catch (e) {
-      err(e);
-    } finally {
-      setBusy(false);
-    }
-  };
+  const submitVoid = useCallback(
+    async (
+      wantVoid: boolean,
+      payload?: { reason: string; supersededBy: string },
+    ) => {
+      if (offline || busy) return;
+      setBusy(true);
+      try {
+        const nextReason = payload?.reason ?? "";
+        const nextSupersededBy = payload?.supersededBy ?? "";
+        const next = await api<ChangeRehearsal>(
+          `/api/clusters/${encodeURIComponent(clusterId)}/rehearsals/${encodeURIComponent(rehearsal.id)}/void`,
+          {
+            method: "POST",
+            body: JSON.stringify(
+              wantVoid
+                ? {
+                    voided: true,
+                    reason: nextReason.trim(),
+                    ...(nextSupersededBy
+                      ? { superseded_by: nextSupersededBy }
+                      : {}),
+                  }
+                : { voided: false },
+            ),
+          },
+        );
+        setVoidOpen(false);
+        onUpdated?.(next);
+        Message.success(
+          wantVoid
+            ? bi(
+                "已将该方案标记为作废并锁定，防止误操作确认落地",
+                "Plan marked voided and locked against accidental sign-off",
+              )
+            : bi("已恢复为「待生产实施」状态", "Plan restored to pending apply"),
+        );
+      } catch (e) {
+        err(e);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [offline, busy, clusterId, rehearsal.id, onUpdated],
+  );
+
+  const closeApplyModal = useCallback(() => {
+    if (!busy) setModalOpen(false);
+  }, [busy]);
+
+  const handleApplySubmit = useCallback(
+    (payload: {
+      summary: string;
+      note: string;
+      changes: RehearsalAppliedChange[];
+      supersedeIds: string[];
+    }) => {
+      void submitApply(true, payload);
+    },
+    [submitApply],
+  );
+
+  const closeVoidModal = useCallback(() => {
+    if (!busy) setVoidOpen(false);
+  }, [busy]);
+
+  const handleVoidSubmit = useCallback(
+    (payload: { reason: string; supersededBy: string }) => {
+      void submitVoid(true, payload);
+    },
+    [submitVoid],
+  );
 
   const stateClass = isVoided
     ? "is-voided"
@@ -13022,13 +13599,6 @@ export function RehearsalProductionApplyCard({
         : hasStale
           ? "is-stale"
           : "is-pending";
-
-  const voidPresets = [
-    bi("已被新版方案替代", "Superseded by newer plan"),
-    bi("变更窗口取消，暂不执行", "Maintenance window cancelled"),
-    bi("现场执行异常，已触发回退", "Rolled back during execution"),
-    bi("仅作演练参考，不上生产", "Staging reference only"),
-  ];
 
   return (
     <>
@@ -13461,392 +14031,36 @@ export function RehearsalProductionApplyCard({
           )}
       </div>
 
-      {/* Modal A: Confirm Production Completion */}
-      <Modal
-        visible={modalOpen}
-        wrapClassName="ad-wu-wrap"
-        className="rh-apply-modal"
-        title={
-          isApplied
-            ? bi("更新生产变更落地记录", "Update Production Change Record")
-            : bi("确认生产已实施完成并同步到集群", "Confirm Production Completion & Sync Cluster")
-        }
-        onCancel={() => !busy && setModalOpen(false)}
-        onOk={() => void submitApply(true)}
-        confirmLoading={busy}
-        okText={
-          isApplied
-            ? bi("保存更新", "Save Changes")
-            : bi("确认已落地并同步集群", "Confirm & Sync to Cluster")
-        }
-        cancelText={bi("取消", "Cancel")}
-        okButtonProps={{ status: hasConflict && !isApplied ? "warning" : "success" }}
-        maskClosable={false}
-      >
-        <div className="rh-apply-form">
-          {/* Anti-misclick Full Identity Confirmation Banner */}
-          <div className="rh-apply-ident">
-            <div className="rh-apply-ident-row">
-              <span className="rh-apply-ident-cluster mono">{clusterId}</span>
-              <span className="rh-apply-ident-doc mono">
-                {rehearsal.doc_id || `sop-${rehearsal.id}`}
-              </span>
-            </div>
-            <div className="rh-apply-ident-title">{rehearsal.title}</div>
-          </div>
+      {/* Modal A: Confirm Production Completion (lazy-mounted & isolated for instant first open) */}
+      {applyDraft && (
+        <ProductionApplyModal
+          visible={modalOpen}
+          draft={applyDraft}
+          clusterId={clusterId}
+          rehearsal={rehearsal}
+          peers={peers}
+          isApplied={isApplied}
+          hasConflict={hasConflict}
+          guardAlerts={guardAlerts}
+          busy={busy}
+          onCancel={closeApplyModal}
+          onSubmit={handleApplySubmit}
+        />
+      )}
 
-          {/* Conflict / Overwrite Guard inside Modal */}
-          {!isApplied && (guardAlerts.length > 0 || liveOverwrites.length > 0) && (
-            <div
-              className={`rh-apply-modal-guard ${hasConflict ? "is-danger" : "is-warn"}`}
-            >
-              <div className="rh-apply-modal-guard-h">
-                <IconExclamationCircle />
-                <b>
-                  {hasConflict
-                    ? bi(
-                        "请二次核对：此方案与近期已落地变更存在重叠",
-                        "Double-Check: Overlaps with Recently Applied Change",
-                      )
-                    : bi(
-                        "参数覆盖提示：确认后将以本次新值作为当前最新生效配置",
-                        "Value Update Preview: New values will become active baseline",
-                      )}
-                </b>
-              </div>
-              {guardAlerts.length > 0 && (
-                <ul className="rh-apply-modal-guard-list">
-                  {guardAlerts.map((a, i) => (
-                    <li key={`${a.other_id}-${i}`}>{a.summary}</li>
-                  ))}
-                </ul>
-              )}
-              {liveOverwrites.length > 0 && (
-                <div className="rh-apply-overwrite-list">
-                  {liveOverwrites.map((o) => (
-                    <div key={o.key} className="rh-apply-overwrite-item">
-                      <code className="mono">{o.key}</code>
-                      <span className="rh-apply-before">{o.prevAfter}</span>
-                      <span>→</span>
-                      <b className="mono">{o.nextAfter}</b>
-                      <span className="faint">
-                        {bi(
-                          `（将覆盖此前《${o.sourceTitle}》的生效值）`,
-                          `(updates prior "${o.sourceTitle}")`,
-                        )}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          <p className="rh-apply-form-lead">
-            {bi(
-              "确认后，以下变更结果将正式反映到该集群的「概览」「配置」「交付报告」以及后续 AI 助手与演练的基准上下文中。",
-              "Once confirmed, these effective changes will appear in Cluster Overview, Config, Delivery Report, and future AI/rehearsal baselines.",
-            )}
-          </p>
-
-          <div className="rh-apply-field">
-            <label>{bi("生效变更摘要", "Effective Change Summary")}</label>
-            <Input.TextArea
-              autoSize={{ minRows: 2, maxRows: 4 }}
-              value={summary}
-              placeholder={bi(
-                "简明概括本次在生产环境实际落地生效的改动…",
-                "Briefly describe what changed in production…",
-              )}
-              onChange={setSummary}
-            />
-          </div>
-
-          <div className="rh-apply-field">
-            <div className="rh-apply-field-h">
-              <label>
-                {bi(
-                  "关键配置 / 参数 / 规则变动（将自动与历史生效值归并展示）",
-                  "Key Config / Parameter / Rule Deltas (auto-merged with prior state)",
-                )}
-              </label>
-              <Button
-                size="mini"
-                type="text"
-                icon={<IconPlus />}
-                onClick={() =>
-                  setChanges((prev) => [
-                    ...prev,
-                    { key: "", before: "", after: "" },
-                  ])
-                }
-              >
-                {bi("添加变更项", "Add Item")}
-              </Button>
-            </div>
-            {changes.length === 0 ? (
-              <div className="rh-apply-empty-deltas">
-                {bi(
-                  "未自动解析到具体参数键值；如需在集群配置页高亮展示参数变动，可点右上角「添加变更项」。",
-                  "No specific key/value deltas auto-detected; click Add Item to list specific config changes.",
-                )}
-              </div>
-            ) : (
-              <div className="rh-apply-delta-editor">
-                {changes.map((ch, idx) => (
-                  <div key={idx} className="rh-apply-delta-row">
-                    <Input
-                      size="small"
-                      placeholder={bi("参数/配置项", "Key / Item")}
-                      value={ch.key}
-                      onChange={(v) =>
-                        setChanges((prev) =>
-                          prev.map((x, i) => (i === idx ? { ...x, key: v } : x)),
-                        )
-                      }
-                    />
-                    <Input
-                      size="small"
-                      placeholder={bi("变更前（可选）", "Before (opt)")}
-                      value={ch.before || ""}
-                      onChange={(v) =>
-                        setChanges((prev) =>
-                          prev.map((x, i) =>
-                            i === idx ? { ...x, before: v } : x,
-                          ),
-                        )
-                      }
-                    />
-                    <Input
-                      size="small"
-                      placeholder={bi("变更后生效值", "After (active)")}
-                      value={ch.after}
-                      onChange={(v) =>
-                        setChanges((prev) =>
-                          prev.map((x, i) =>
-                            i === idx ? { ...x, after: v } : x,
-                          ),
-                        )
-                      }
-                    />
-                    <button
-                      type="button"
-                      className="rh-apply-row-del"
-                      aria-label={bi("删除该项", "Remove item")}
-                      onClick={() =>
-                        setChanges((prev) => prev.filter((_, i) => i !== idx))
-                      }
-                    >
-                      <IconClose />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="rh-apply-field">
-            <label>
-              {bi("现场执行备注 / 变更单号（可选）", "Execution Note / Ticket ID (Optional)")}
-            </label>
-            <Input
-              value={note}
-              placeholder={bi(
-                "例如：CHG-20261123 · 低峰窗口执行完成，业务零感知",
-                "e.g. CHG-20261123 · Applied cleanly during maintenance window",
-              )}
-              onChange={setNote}
-            />
-          </div>
-
-          {/* Optional: ONLY offer supersede checkbox for pending peers that modify the SAME config keys */}
-          {!isApplied && overlappingPending.length > 0 && (
-            <div className="rh-apply-supersede">
-              <div className="rh-apply-supersede-h">
-                <b>
-                  {bi(
-                    "检测到改动相同配置项的待实施方案（可选处置）",
-                    "Overlapping Pending Plans Detected (Optional)",
-                  )}
-                </b>
-                <span>
-                  {bi(
-                    "以下旧方案与本次变更修改了相同配置项：如本次方案已取代旧方案，可勾选自动标为「已被替代」；如仍需保留先后执行，请不要勾选",
-                    "These pending plans touch the same config keys: check only if replaced by this change; leave unchecked to keep both",
-                  )}
-                </span>
-              </div>
-              <div className="rh-apply-supersede-list">
-                {overlappingPending.map(({ plan: p, keys }) => {
-                  const checked = supersedeIds.includes(p.id);
-                  return (
-                    <label
-                      key={p.id}
-                      className={`rh-apply-supersede-item${checked ? " is-checked" : ""}`}
-                    >
-                      <Checkbox
-                        checked={checked}
-                        onChange={(v) =>
-                          setSupersedeIds((prev) =>
-                            v
-                              ? Array.from(new Set([...prev, p.id]))
-                              : prev.filter((x) => x !== p.id),
-                          )
-                        }
-                      />
-                      <span className="rh-apply-supersede-main">
-                        <span className="rh-apply-supersede-title">
-                          {p.title}
-                        </span>
-                        <span className="rh-apply-supersede-keys">
-                          {bi("重叠项：", "Overlap: ")}
-                          {keys.join("、")}
-                        </span>
-                      </span>
-                      <span className="rh-apply-supersede-meta num">
-                        {ago(p.updated_at)}
-                      </span>
-                    </label>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* Read-only notice for unrelated parallel pending plans so user knows they coexist & are NOT deleted */}
-          {!isApplied && parallelPending.length > 0 && (
-            <div className="rh-apply-parallel">
-              <div className="rh-apply-parallel-h">
-                <b>
-                  {bi(
-                    "同集群并存待实施变更（独立保留，互不覆盖）",
-                    "Coexisting Pending Changes on Cluster (Preserved)",
-                  )}
-                </b>
-                <span>
-                  {bi(
-                    "以下方案涉及不同配置项，与本方案属于并存/前后演进关系；本次确认不会删除或作废它们，后续完成后可各自独立落地叠加",
-                    "These plans modify different configs and coexist with this change; they remain untouched for independent production sign-off",
-                  )}
-                </span>
-              </div>
-              <div className="rh-apply-parallel-list">
-                {parallelPending.map((p) => (
-                  <div key={p.id} className="rh-apply-parallel-item">
-                    <span className="rh-sdot st-pending-apply" aria-hidden />
-                    <span className="rh-apply-supersede-title">{p.title}</span>
-                    <span className="rh-apply-parallel-tag">
-                      {bi("独立保留", "Kept")}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      </Modal>
-
-      {/* Modal B: Mark Plan Void / Obsolete */}
-      <Modal
-        visible={voidOpen}
-        wrapClassName="ad-wu-wrap"
-        className="rh-void-modal"
-        title={bi("标记变更方案为作废 / 不再执行", "Mark Change Plan Void / Obsolete")}
-        onCancel={() => !busy && setVoidOpen(false)}
-        onOk={() => void submitVoid(true)}
-        confirmLoading={busy}
-        okText={bi("确认标记作废", "Confirm Void")}
-        cancelText={bi("取消", "Cancel")}
-        okButtonProps={{ status: "warning" }}
-        maskClosable={false}
-      >
-        <div className="rh-apply-form">
-          <div className="rh-apply-ident is-void">
-            <div className="rh-apply-ident-row">
-              <span className="rh-apply-ident-cluster mono">{clusterId}</span>
-              <span className="rh-apply-ident-doc mono">
-                {rehearsal.doc_id || `sop-${rehearsal.id}`}
-              </span>
-            </div>
-            <div className="rh-apply-ident-title">{rehearsal.title}</div>
-          </div>
-
-          <p className="rh-apply-form-lead">
-            {bi(
-              "作废后该方案会保留全部演练步骤与归档文档供追溯审计，但会锁定「确认生产已实施完成」入口避免后续误点；如有需要随时可一键恢复。",
-              "Voided plans retain all rehearsal steps and archived docs for audit while locking sign-off against misclicks; you can restore anytime.",
-            )}
-          </p>
-
-          <div className="rh-apply-field">
-            <label>{bi("作废原因", "Void Reason")}</label>
-            <div className="rh-void-presets">
-              {voidPresets.map((preset) => (
-                <button
-                  key={preset}
-                  type="button"
-                  className={`rh-void-chip${voidReason === preset ? " on" : ""}`}
-                  onClick={() => setVoidReason(preset)}
-                >
-                  {preset}
-                </button>
-              ))}
-            </div>
-            <Input.TextArea
-              autoSize={{ minRows: 2, maxRows: 3 }}
-              value={voidReason}
-              placeholder={bi(
-                "填写作废原因（可选，留空将记录默认说明）…",
-                "Explain why this plan will not be applied (optional)…",
-              )}
-              onChange={setVoidReason}
-            />
-          </div>
-
-          {replacementCandidates.length > 0 && (
-            <div className="rh-apply-field">
-              <label>
-                {bi(
-                  "关联替代的新方案（可选）",
-                  "Link Replacement Plan (Optional)",
-                )}
-              </label>
-              <div className="rh-void-peers">
-                <button
-                  type="button"
-                  className={`rh-void-peer${voidSupersededBy === "" ? " on" : ""}`}
-                  onClick={() => setVoidSupersededBy("")}
-                >
-                  {bi("不关联特定方案", "None")}
-                </button>
-                {replacementCandidates.map((p) => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    className={`rh-void-peer${voidSupersededBy === p.id ? " on" : ""}`}
-                    onClick={() => {
-                      setVoidSupersededBy(p.id);
-                      if (!voidReason.trim()) {
-                        setVoidReason(
-                          bi(`已被方案「${p.title}」替代`, `Superseded by "${p.title}"`),
-                        );
-                      }
-                    }}
-                  >
-                    <span className={`rh-sdot ${rehearsalDotClass(p)}`} />
-                    <span className="rh-void-peer-t">{p.title}</span>
-                    {p.applied && (
-                      <em className="rh-void-peer-tag">
-                        {bi("已落地", "Applied")}
-                      </em>
-                    )}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      </Modal>
+      {/* Modal B: Mark Plan Void / Obsolete (lazy-mounted & isolated) */}
+      {voidSeed > 0 && (
+        <ProductionVoidModal
+          visible={voidOpen}
+          openSeed={voidSeed}
+          clusterId={clusterId}
+          rehearsal={rehearsal}
+          peers={peers}
+          busy={busy}
+          onCancel={closeVoidModal}
+          onSubmit={handleVoidSubmit}
+        />
+      )}
 
       {rehearsal.stage === "finalized" && isApplied && !isVoided && (
         <PropagateRehearsalModal

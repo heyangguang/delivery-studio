@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.271-dev"
+	version            = "1.0.272-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,22 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.272-dev",
+		Date:    "2026-11-24",
+		Title:   "优化「确认生产已实施完成」等演练弹窗首次打开流畅度",
+		TitleEn: "Eliminate first-open jank on Production Completion and rehearsal modals",
+		Highlights: []string{
+			"移除全屏模态遮罩层耗时的 backdrop-filter 高斯模糊，改用干净半透明压暗并精简为 160ms GPU 合成入场动画，消除 VDI 与低硬件加速环境首次打开掉帧",
+			"将生产落地确认与作废弹窗拆分为独立的懒挂载记忆组件，并以轻量原生输入框与固定高度文本域替代 20 余个 Arco 封装输入及 autoSize 同步重排",
+			"关闭弹窗首帧 FocusLock 扫描、autoFocus 与点击坐标 transform-origin 测量，并将同集群重叠配置计算延迟至弹窗打开后单次执行",
+		},
+		HighlightsEn: []string{
+			"Removed full-viewport backdrop-filter blur from modal/drawer masks and replaced Arco's 400ms scale(0.5) overshoot with a 160ms GPU-composited entrance",
+			"Isolated Production Apply and Void modals into lazy-mounted memoized components with lightweight native inputs and fixed-row textareas, eliminating 20+ Arco wrapper mounts and autoSize forced reflows",
+			"Disabled frame-1 FocusLock DOM walks, autoFocus, and getBoundingClientRect transform-origin reads while caching peer overlap calculations per open",
+		},
+	},
 	{
 		Version: "1.0.271-dev",
 		Date:    "2026-11-24",

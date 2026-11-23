@@ -2460,7 +2460,7 @@
   z-index: 1030 !important;
 }
 .ad-wu-wrap .arco-modal-mask {
-  backdrop-filter: blur(4px);
+  backdrop-filter: none;
 }
 .ad-wu-modal {
   width: 820px;

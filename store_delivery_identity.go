@@ -47,8 +47,8 @@ func (s *storeServer) deliveryScheme(id, component string, fallback *mwpack.Sche
 	if fallback != nil {
 		return fallback
 	}
-	raw, err := os.ReadFile(filepath.Join(s.jobDir(id), "output", "plan.json"))
-	if err != nil {
+	raw := s.jobPlan(id)
+	if len(raw) == 0 {
 		return nil
 	}
 	var plan struct {

@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -88,11 +89,15 @@ type executionRun struct {
 	Updated      string          `json:"updated"`
 	State        string          `json:"state"`
 	Pause        bool            `json:"pause"`
-	Snapshot     string          `json:"snapshot"`
-	Revision     string          `json:"revision"`
-	Resources    []string        `json:"resources"`
-	Steps        []executionStep `json:"steps"`
-	Note         string          `json:"note,omitempty"`
+	Snapshot        string          `json:"snapshot"`
+	Revision        string          `json:"revision"`
+	Resources       []string        `json:"resources"`
+	Steps           []executionStep `json:"steps"`
+	Note            string          `json:"note,omitempty"`
+	PatchedFiles    []string        `json:"patched_files,omitempty"`
+	SyncVersion     int             `json:"sync_version,omitempty"`
+	SafetyConfirmed bool            `json:"safety_confirmed,omitempty"`
+	SafetyWarnings  []string        `json:"safety_warnings,omitempty"`
 }
 type executionDB struct {
 	Agents       map[string]targetAgent          `json:"agents,omitempty"`
@@ -187,10 +192,106 @@ func atomicExecutionJSON(p string, v any) error {
 func (s *storeServer) executionPath(parts ...string) string {
 	return filepath.Join(append([]string{s.cfg.DataDir, "execution"}, parts...)...)
 }
+func cloneExecutionDB(src executionDB) executionDB {
+	dst := executionDB{
+		Nodes:        make(map[string]executionNode, len(src.Nodes)),
+		Runs:         make(map[string]executionRun, len(src.Runs)),
+		Preparations: make(map[string]executionPreparation, len(src.Preparations)),
+	}
+	if len(src.Agents) > 0 {
+		dst.Agents = make(map[string]targetAgent, len(src.Agents))
+		for k, v := range src.Agents {
+			dst.Agents[k] = v
+		}
+	}
+	for k, p := range src.Preparations {
+		if len(p.Checks) > 0 {
+			p.Checks = append([]executionCheck(nil), p.Checks...)
+		}
+		dst.Preparations[k] = p
+	}
+	for k, n := range src.Nodes {
+		if len(n.Clusters) > 0 {
+			n.Clusters = append([]string(nil), n.Clusters...)
+		}
+		if len(n.IPs) > 0 {
+			n.IPs = append([]string(nil), n.IPs...)
+		}
+		if len(n.Repositories) > 0 {
+			m := make(map[string]int, len(n.Repositories))
+			for rk, rv := range n.Repositories {
+				m[rk] = rv
+			}
+			n.Repositories = m
+		}
+		if len(n.PublicKeys) > 0 {
+			m := make(map[string]string, len(n.PublicKeys))
+			for rk, rv := range n.PublicKeys {
+				m[rk] = rv
+			}
+			n.PublicKeys = m
+		}
+		if len(n.Grants) > 0 {
+			m := make(map[string][]string, len(n.Grants))
+			for rk, rv := range n.Grants {
+				m[rk] = append([]string(nil), rv...)
+			}
+			n.Grants = m
+		}
+		dst.Nodes[k] = n
+	}
+	for k, r := range src.Runs {
+		if len(r.Resources) > 0 {
+			r.Resources = append([]string(nil), r.Resources...)
+		}
+		if len(r.Steps) > 0 {
+			steps := make([]executionStep, len(r.Steps))
+			for i, st := range r.Steps {
+				if len(st.Hosts) > 0 {
+					st.Hosts = append([]string(nil), st.Hosts...)
+				}
+				if len(st.Recap) > 0 {
+					st.Recap = append([]logRecap(nil), st.Recap...)
+				}
+				if len(st.ExtraVars) > 0 {
+					ev := make(map[string]any, len(st.ExtraVars))
+					for ek, evv := range st.ExtraVars {
+						ev[ek] = evv
+					}
+					st.ExtraVars = ev
+				}
+				if st.ExitCode != nil {
+					v := *st.ExitCode
+					st.ExitCode = &v
+				}
+				steps[i] = st
+			}
+			r.Steps = steps
+		}
+		dst.Runs[k] = r
+	}
+	return dst
+}
+
 func (s *storeServer) readExecutions() (executionDB, error) {
+	path := s.executionPath("state.json")
+	st, statErr := os.Stat(path)
+	if os.IsNotExist(statErr) {
+		s.execCache = cachedExecDB{}
+		return executionDB{Nodes: map[string]executionNode{}, Runs: map[string]executionRun{}, Preparations: map[string]executionPreparation{}}, nil
+	}
+	if statErr != nil {
+		return executionDB{}, statErr
+	}
+	mod := st.ModTime().UnixNano()
+	sz := st.Size()
+	if s.execCache.valid && s.execCache.modTime == mod && s.execCache.size == sz {
+		return cloneExecutionDB(s.execCache.db), nil
+	}
 	d := executionDB{Nodes: map[string]executionNode{}, Runs: map[string]executionRun{}, Preparations: map[string]executionPreparation{}}
-	b, e := os.ReadFile(s.executionPath("state.json"))
+	b, e := os.ReadFile(path)
 	if os.IsNotExist(e) {
+		s.execCache = cachedExecDB{}
 		return d, nil
 	}
 	if e != nil {
@@ -200,19 +301,29 @@ func (s *storeServer) readExecutions() (executionDB, error) {
 	if d.Nodes == nil || d.Runs == nil {
 		return d, errors.New("执行状态损坏，已停止接收任务")
 	}
+	if e == nil {
+		s.execCache = cachedExecDB{valid: true, modTime: mod, size: sz, db: cloneExecutionDB(d)}
+	}
 	return d, e
 }
 func (s *storeServer) saveExecutions(d executionDB) error {
-	return atomicExecutionJSON(s.executionPath("state.json"), d)
+	path := s.executionPath("state.json")
+	err := atomicExecutionJSON(path, d)
+	if err != nil {
+		s.execCache.valid = false
+		return err
+	}
+	if st, statErr := os.Stat(path); statErr == nil {
+		s.execCache = cachedExecDB{valid: true, modTime: st.ModTime().UnixNano(), size: st.Size(), db: cloneExecutionDB(d)}
+	} else {
+		s.execCache.valid = false
+	}
+	return nil
 }
 func activeExecution(r executionRun) bool {
 	return r.State != "completed" && r.State != "failed" && r.State != "closed"
 }
-func (s *storeServer) executionLocked(job string) bool {
-	d, e := s.readExecutions()
-	if e != nil {
-		return true
-	}
+func executionLockedInDB(d executionDB, job string) bool {
 	for _, r := range d.Runs {
 		if r.Job == job && activeExecution(r) {
 			return true
@@ -220,14 +331,68 @@ func (s *storeServer) executionLocked(job string) bool {
 	}
 	return false
 }
+func (s *storeServer) executionLocked(job string) bool {
+	d, e := s.readExecutions()
+	if e != nil {
+		return true
+	}
+	return executionLockedInDB(d, job)
+}
+
+// purgeJobExecutions removes inactive execution runs, preparations, and chunked log directories belonging to a deleted job.
+func (s *storeServer) purgeJobExecutions(jobID string) {
+	if s.cfg.DataDir == "" || jobID == "" {
+		return
+	}
+	executionMu.Lock()
+	d, err := s.readExecutions()
+	if err != nil {
+		executionMu.Unlock()
+		return
+	}
+	var removedRuns []string
+	changed := false
+	for runID, r := range d.Runs {
+		if r.Job == jobID && !activeExecution(r) {
+			delete(d.Runs, runID)
+			removedRuns = append(removedRuns, runID)
+			changed = true
+		}
+	}
+	for prepID, p := range d.Preparations {
+		if p.Job == jobID {
+			delete(d.Preparations, prepID)
+			changed = true
+		}
+	}
+	if changed {
+		_ = s.saveExecutions(d)
+	}
+	executionMu.Unlock()
+	runsRoot, _ := filepath.Abs(s.executionPath("runs"))
+	for _, runID := range removedRuns {
+		if runID == "" || strings.ContainsAny(runID, `/\`) {
+			continue
+		}
+		target, _ := filepath.Abs(s.executionPath("runs", runID))
+		if filepath.Dir(target) == runsRoot && filepath.Base(target) == runID {
+			_ = os.RemoveAll(target)
+		}
+	}
+}
 func executionOnline(n executionNode) bool {
 	t, e := time.Parse(time.RFC3339Nano, n.LastSeen)
 	return e == nil && !n.Disabled && time.Since(t) < 35*time.Second
 }
 func publicExecutionNode(n executionNode) executionNode { n.TokenHash = ""; return n }
 func (s *storeServer) executionRevision(job string) string {
-	b, _ := json.Marshal(s.loadAmendments(job))
-	return digest(append(s.jobPlan(job), b...))
+	am, _ := json.Marshal(s.loadAmendments(job))
+	raw := append(append([]byte{}, s.jobPlan(job)...), am...)
+	if patches := s.loadPatches(job); len(patches) > 0 {
+		pt, _ := json.Marshal(patches)
+		raw = append(raw, pt...)
+	}
+	return digest(raw)
 }
 func (s *storeServer) executionChoices(job string) []executionChoice {
 	return s.executionChoicesLang(job, "")
@@ -387,19 +552,87 @@ func executionNodeAllows(n executionNode, snap executionSnapshot) bool {
 	return true
 }
 
-func (s *storeServer) handleExecutionNodes(w http.ResponseWriter, r *http.Request, session storeSession) {
-	if r.URL.Path == "/api/settings/execution-nodes/binary" && r.Method == "GET" {
-		f, e := os.Open("/proc/self/exe")
+func isLinuxAMD64ELF(f *os.File) bool {
+	var hdr [20]byte
+	if _, e := io.ReadFull(f, hdr[:]); e != nil {
+		return false
+	}
+	if _, e := f.Seek(0, io.SeekStart); e != nil {
+		return false
+	}
+	// ELF magic, 64-bit class, little-endian data, EM_X86_64 machine (0x003e).
+	return hdr[0] == 0x7f && hdr[1] == 'E' && hdr[2] == 'L' && hdr[3] == 'F' &&
+		hdr[4] == 2 && hdr[5] == 1 && hdr[18] == 0x3e && hdr[19] == 0x00
+}
+
+func (s *storeServer) executionNodeBinaryCandidates() []string {
+	var out []string
+	seen := map[string]bool{}
+	add := func(p string) {
+		if p == "" {
+			return
+		}
+		p = filepath.Clean(p)
+		if !seen[p] {
+			seen[p] = true
+			out = append(out, p)
+		}
+	}
+	if s.cfg.ArtifactsDir != "" {
+		add(filepath.Join(s.cfg.ArtifactsDir, "middleware-store-linux-amd64"))
+	}
+	if s.cfg.DataDir != "" {
+		add(filepath.Join(s.cfg.DataDir, "artifacts", "middleware-store-linux-amd64"))
+	}
+	if exe, e := os.Executable(); e == nil && exe != "" {
+		dir := filepath.Dir(exe)
+		add(filepath.Join(dir, "middleware-store-linux-amd64"))
+		add(filepath.Join(dir, "middleware-store"))
+	}
+	return out
+}
+
+func (s *storeServer) openExecutionNodeBinary() (*os.File, os.FileInfo, error) {
+	if runtime.GOOS == "linux" && runtime.GOARCH == "amd64" {
+		if f, e := os.Open("/proc/self/exe"); e == nil {
+			if info, se := f.Stat(); se == nil && info.Mode().IsRegular() {
+				return f, info, nil
+			}
+			f.Close()
+		}
+	}
+	for _, cand := range s.executionNodeBinaryCandidates() {
+		f, e := os.Open(cand)
 		if e != nil {
-			s.fail(w, 500, "执行器文件不可读")
+			continue
+		}
+		info, se := f.Stat()
+		if se != nil || !info.Mode().IsRegular() || !isLinuxAMD64ELF(f) {
+			f.Close()
+			continue
+		}
+		return f, info, nil
+	}
+	return nil, nil, os.ErrNotExist
+}
+
+func (s *storeServer) handleExecutionNodes(w http.ResponseWriter, r *http.Request, session storeSession) {
+	if s.handleExecutionNodeBootstrap(w, r, session) {
+		return
+	}
+	if r.URL.Path == "/api/settings/execution-nodes/binary" && r.Method == "GET" {
+		f, info, e := s.openExecutionNodeBinary()
+		if e != nil {
+			if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+				s.failBi(w, 404,
+					"当前服务端非 Linux amd64 环境，且未找到 middleware-store-linux-amd64 执行器文件（请将其放入 artifacts 目录或可执行文件同级目录）",
+					"Hub is not running on Linux amd64 and middleware-store-linux-amd64 binary was not found in artifacts or next to the server binary")
+			} else {
+				s.fail(w, 500, "执行器文件不可读")
+			}
 			return
 		}
 		defer f.Close()
-		info, e := f.Stat()
-		if e != nil {
-			s.fail(w, 500, "执行器文件不可读")
-			return
-		}
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Disposition", "attachment; filename=middleware-store-linux-amd64")
 		http.ServeContent(w, r, "middleware-store", info.ModTime(), f)
@@ -580,7 +813,9 @@ func (s *storeServer) handleExecutions(w http.ResponseWriter, r *http.Request, s
 		for _, n := range nodesSnapshot {
 			nodeByID[n.ID] = n
 		}
+		baseSnap, baseSnapErr := s.executionSnapshotFor(j)
 		preps := []executionPreparation{}
+		var dataWarnings []string
 		for _, p := range prepsSnapshot {
 			created, _ := time.Parse(time.RFC3339Nano, p.Created)
 			finished, _ := time.Parse(time.RFC3339Nano, p.Finished)
@@ -591,13 +826,37 @@ func (s *storeServer) handleExecutions(w http.ResponseWriter, r *http.Request, s
 			if p.State == "ready" && string(before) != string(after) {
 				p.State = "expired"
 			}
-			if p.NodeRevision != executionNodeRevision(nodeByID[p.Node]) || p.Invalidated != "" || (p.State == "ready" && time.Since(finished) > 10*time.Minute) || (p.State == "pending" && time.Since(created) > 10*time.Minute) {
+			maxAge := 10 * time.Minute
+			if p.EnvHash != "" {
+				maxAge = 60 * time.Minute
+				if baseSnapErr == nil {
+					ns := baseSnap
+					bindExecutionAccess(&ns, d, p.Node)
+					p.EnvMatch = p.EnvHash == executionEnvDigest(ns)
+					if p.State == "ready" && !p.EnvMatch {
+						p.State = "expired"
+					}
+				}
+			}
+			if p.NodeRevision != executionNodeRevision(nodeByID[p.Node]) || p.Invalidated != "" || (p.State == "ready" && time.Since(finished) > maxAge) || (p.State == "pending" && time.Since(created) > 10*time.Minute) {
 				p.State = "expired"
 			}
 			p.Snapshot = executionSnapshot{}
 			preps = append(preps, p)
 		}
 		sort.Slice(preps, func(a, b int) bool { return preps[a].Created > preps[b].Created })
+		for _, p := range preps {
+			if p.State == "ready" {
+				for _, ck := range p.Checks {
+					for _, wmsg := range ck.Warnings {
+						if !contains(dataWarnings, wmsg) {
+							dataWarnings = append(dataWarnings, wmsg)
+						}
+					}
+				}
+				break
+			}
+		}
 		lang := wLang(w)
 		for i := range runs {
 			runs[i] = localizeExecutionRun(lang, runs[i])
@@ -609,7 +868,33 @@ func (s *storeServer) handleExecutions(w http.ResponseWriter, r *http.Request, s
 			preps[i] = localizeExecutionPrep(lang, preps[i])
 		}
 		steps := localizeExecutionChoices(lang, s.executionChoicesLang(j.ID, lang))
-		s.writeJSON(w, 200, map[string]any{"runs": runs, "nodes": nodes, "steps": steps, "revision": s.executionRevision(j.ID), "targets": context.Hosts, "executor": map[string]any{"ip": context.ControllerIP, "kind": executionKind(context), "host": context.ExecutionHost, "runtime_root": context.RuntimeRoot}, "preparations": preps})
+		envHash := ""
+		if curSnap, serr := s.executionSnapshotFor(j); serr == nil {
+			if len(nodes) > 0 {
+				// Compute base env hash; node-specific access is checked per prep node.
+				envHash = executionEnvDigest(curSnap)
+			}
+		}
+		patches := s.loadPatches(j.ID)
+		if patches == nil {
+			patches = []deliveryPatch{}
+		}
+		if dataWarnings == nil {
+			dataWarnings = []string{}
+		}
+		s.writeJSON(w, 200, map[string]any{
+			"runs":          runs,
+			"nodes":         nodes,
+			"steps":         steps,
+			"revision":      s.executionRevision(j.ID),
+			"env_hash":      envHash,
+			"patches":       patches,
+			"sync_count":    len(j.Syncs),
+			"data_warnings": dataWarnings,
+			"targets":       context.Hosts,
+			"executor":      map[string]any{"ip": context.ControllerIP, "kind": executionKind(context), "host": context.ExecutionHost, "runtime_root": context.RuntimeRoot},
+			"preparations":  preps,
+		})
 		return
 	}
 	if len(parts) == 3 && parts[1] == "logs" && r.Method == "GET" {
@@ -620,10 +905,25 @@ func (s *storeServer) handleExecutions(w http.ResponseWriter, r *http.Request, s
 		}
 		for _, st := range run.Steps {
 			if st.ID == parts[2] {
+				data := s.executionLog(run.ID, st)
+				totalSize := len(data)
 				w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 				w.Header().Set("Content-Disposition", "attachment; filename=execution-"+st.ID+".log")
-				data := s.executionLog(run.ID, st)
-				if r.URL.Query().Get("tail") == "1" && len(data) > 16000 {
+				w.Header().Set("X-Log-Size", strconv.Itoa(totalSize))
+				w.Header().Set("X-Step-State", st.State)
+				w.Header().Set("X-Step-Seq", strconv.Itoa(st.Seq))
+				if offStr := r.URL.Query().Get("offset"); offStr != "" {
+					if off, err := strconv.Atoi(offStr); err == nil && off > 0 {
+						if off >= len(data) {
+							w.WriteHeader(200)
+							return
+						}
+						data = data[off:]
+						for len(data) > 0 && data[0]&0xc0 == 0x80 {
+							data = data[1:]
+						}
+					}
+				} else if r.URL.Query().Get("tail") == "1" && len(data) > 16000 {
 					data = data[len(data)-16000:]
 					for len(data) > 0 && data[0]&0xc0 == 0x80 {
 						data = data[1:]
@@ -641,10 +941,11 @@ func (s *storeServer) handleExecutions(w http.ResponseWriter, r *http.Request, s
 			Preparation string   `json:"preparation"`
 			Node        string   `json:"node"`
 			Keys        []string `json:"keys"`
-			Revision    string   `json:"revision"`
-			Request     string   `json:"request"`
-			Confirm     string   `json:"confirm"`
-			Prepared    bool     `json:"prepared"`
+			Revision      string   `json:"revision"`
+			Request       string   `json:"request"`
+			Confirm       string   `json:"confirm"`
+			Prepared      bool     `json:"prepared"`
+			ConfirmSafety bool     `json:"confirm_safety"`
 		}
 		if decodeBody(w, r, 65536, &req) != nil || len(req.Keys) == 0 || len(req.Keys) > 200 || !executionID.MatchString(req.Request) {
 			s.fail(w, 400, "请选择步骤并提供请求标识")
@@ -738,10 +1039,76 @@ func (s *storeServer) handleExecutions(w http.ResponseWriter, r *http.Request, s
 			selected[key] = true
 		}
 		choices := map[string]executionChoice{}
+		anyDone := false
 		for _, c := range s.executionChoices(j.ID) {
 			choices[c.Key] = c
+			if c.State == "done" || c.State == "resolved" {
+				anyDone = true
+			}
 		}
-		run := executionRun{Preparation: req.Preparation, ExecutorKind: executionKind(snap), ExecutorIP: snap.ControllerIP, ID: randomStoreToken(12), Request: req.Request, Job: j.ID, Cluster: j.ClusterID, Node: n.ID, By: session.User, Created: executionNow(), Updated: executionNow(), State: "queued", Resources: resources, Revision: req.Revision}
+		// Compute safety warnings when re-running completed disruptive/destructive steps or when live target hosts
+		// already carry data directories / active services.
+		var safetyWarnings []string
+		hasMutatingSelected := false
+		for _, key := range req.Keys {
+			c := choices[key]
+			isRisky := c.Effect == "destructive" || c.Effect == "disruptive"
+			if c.Effect != "read-only" {
+				hasMutatingSelected = true
+			}
+			if isRisky && (c.State == "done" || c.State == "resolved") {
+				safetyWarnings = append(safetyWarnings, fmt.Sprintf("步骤「%s」此前已执行通过，且属于变更/高风险操作（%s），重复执行可能覆盖已有数据或中断服务", c.Title, c.Effect))
+			} else if c.Effect == "destructive" && anyDone {
+				safetyWarnings = append(safetyWarnings, fmt.Sprintf("本交付已在目标机器执行过前置步骤（可能已有初始化数据），即将执行破坏性步骤「%s」", c.Title))
+			}
+		}
+		if hasMutatingSelected && req.Preparation != "" {
+			if prep, ok := d.Preparations[req.Preparation]; ok {
+				for _, ck := range prep.Checks {
+					for _, wm := range ck.Warnings {
+						if !contains(safetyWarnings, wm) {
+							safetyWarnings = append(safetyWarnings, wm)
+						}
+					}
+				}
+			}
+		}
+		if len(safetyWarnings) > 0 && !req.ConfirmSafety {
+			s.writeJSON(w, 409, map[string]any{
+				"error":               "检测到目标机已有数据/运行服务或正在重跑已完成的高风险步骤，请核实后勾选二次安全确认再启动",
+				"need_safety_confirm": true,
+				"safety_warnings":     safetyWarnings,
+			})
+			return
+		}
+
+		patchedMap := s.patchedFiles(j.ID)
+		patchedFiles := make([]string, 0, len(patchedMap))
+		for fp := range patchedMap {
+			patchedFiles = append(patchedFiles, fp)
+		}
+		sort.Strings(patchedFiles)
+
+		run := executionRun{
+			Preparation:     req.Preparation,
+			ExecutorKind:    executionKind(snap),
+			ExecutorIP:      snap.ControllerIP,
+			ID:              randomStoreToken(12),
+			Request:         req.Request,
+			Job:             j.ID,
+			Cluster:         j.ClusterID,
+			Node:            n.ID,
+			By:              session.User,
+			Created:         executionNow(),
+			Updated:         executionNow(),
+			State:           "queued",
+			Resources:       resources,
+			Revision:        req.Revision,
+			PatchedFiles:    patchedFiles,
+			SyncVersion:     len(j.Syncs),
+			SafetyConfirmed: req.ConfirmSafety,
+			SafetyWarnings:  safetyWarnings,
+		}
 		run.ExecutorName = n.Name
 		run.AccessMode = "existing-ssh"
 		if len(snap.AgentAccess) > 0 {
@@ -1094,6 +1461,9 @@ func (s *storeServer) handleExecutionAgent(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		s.projectExecutionResult(d.Runs[ev.Run], ev.Attempt)
+		if rDone := d.Runs[ev.Run]; rDone.State == "completed" {
+			s.captureAutoVerificationReports(rDone.Job, d)
+		}
 		state := ""
 		for _, st := range d.Runs[ev.Run].Steps {
 			if st.ID == ev.Attempt {
@@ -1220,8 +1590,40 @@ func (s *storeServer) projectExecutionResult(run executionRun, attempt string) {
 		if prev.Attempt == st.ID && prev.State == state {
 			return
 		}
-		doc.Steps[st.Key] = stepRecord{State: state, By: "执行节点", At: firstNonEmptyStr(st.Returned, st.Finished), Note: st.Message, Source: "automatic", Execution: run.ID, Attempt: st.ID}
-		doc.Events = append(doc.Events, progressEvent{At: st.Finished, By: "执行节点", Key: st.Key, Title: st.Title, State: state})
+		doc.Steps[st.Key] = stepRecord{
+			Source:    "automatic",
+			Execution: run.ID,
+			Attempt:   st.ID,
+			AutoState: st.State,
+			Executor:  run.ExecutorName,
+			Started:   st.Started,
+			Finished:  st.Finished,
+			ExitCode:  st.ExitCode,
+			Recap:     st.Recap,
+			LogSeq:    st.Seq,
+			State:     state,
+			By:        "执行节点",
+			At:        firstNonEmptyStr(st.Returned, st.Finished),
+			Note:      st.Message,
+		}
+		doc.Events = append(doc.Events, progressEvent{
+			At:        firstNonEmptyStr(st.Finished, st.Returned, run.Updated),
+			By:        "执行节点",
+			Key:       st.Key,
+			Title:     st.Title,
+			State:     state,
+			Source:    "automatic",
+			Execution: run.ID,
+			Attempt:   st.ID,
+			Note:      st.Message,
+			Started:   st.Started,
+			Finished:  st.Finished,
+			ExitCode:  st.ExitCode,
+			Recap:     st.Recap,
+			LogSeq:    st.Seq,
+			Executor:  run.ExecutorName,
+			Snapshot:  run.Snapshot,
+		})
 		if len(doc.Events) > maxEvents {
 			doc.Events = doc.Events[len(doc.Events)-maxEvents:]
 		}
@@ -1237,4 +1639,294 @@ func (s *storeServer) projectExecutionResult(run executionRun, attempt string) {
 		}
 		return
 	}
+}
+
+func (s *storeServer) projectPreparationResult(p executionPreparation) {
+	if p.State != "ready" || (p.Revision != "" && p.Revision != s.executionRevision(p.Job)) {
+		return
+	}
+	tabs := s.runbookSteps(p.Job)
+	prepLog := formatPreparationLog(p)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	doc := s.readProgress(p.Job)
+	changed := false
+	for _, tab := range tabs {
+		for _, st := range tab.Steps {
+			if !strings.HasPrefix(st.Key, "prepare/") && st.Key != "deploy/deploy-bootstrap" {
+				continue
+			}
+			if doc.Steps[st.Key].State != "" {
+				continue
+			}
+			doc.Steps[st.Key] = stepRecord{
+				Source:   "automatic",
+				Executor: p.ExecutorName,
+				State:    "done",
+				By:       "执行节点",
+				At:       firstNonEmptyStr(p.Finished, p.Created),
+				Note:     "已通过执行准备检查核验",
+				Log:      prepLog,
+			}
+			changed = true
+		}
+	}
+	if !changed {
+		return
+	}
+	if s.writeProgress(p.Job, doc) != nil {
+		return
+	}
+	j := s.jobs[p.Job]
+	j.RunDone, j.RunFailed = countSteps(doc)
+	j.RunTotal = len(flatSteps(tabs))
+	j.Updated = executionNow()
+	if s.persistJob(j) == nil {
+		s.jobs[p.Job] = j
+	}
+}
+
+type executionMonitorItem struct {
+	JobID            string `json:"job_id"`
+	Cluster          string `json:"cluster"`
+	AppID            string `json:"app_id"`
+	AppName          string `json:"app_name"`
+	Version          string `json:"version"`
+	DeliveryMode     string `json:"delivery_mode"`
+	State            string `json:"state"`
+	Active           bool   `json:"active"`
+	ActiveRunID      string `json:"active_run_id,omitempty"`
+	LatestRunID      string `json:"latest_run_id"`
+	RunningStepKey   string `json:"running_step_key,omitempty"`
+	RunningStepTitle string `json:"running_step_title,omitempty"`
+	RunningStepState string `json:"running_step_state,omitempty"`
+	DoneSteps        int    `json:"done_steps"`
+	FailedSteps      int    `json:"failed_steps"`
+	TotalSteps       int    `json:"total_steps"`
+	BatchCount       int    `json:"batch_count"`
+	FailedBatches    int    `json:"failed_batches"`
+	RecoveredBatches int    `json:"recovered_batches"`
+	ExecutorName     string `json:"executor_name,omitempty"`
+	ExecutorIP       string `json:"executor_ip,omitempty"`
+	RunnerOnline     bool   `json:"runner_online"`
+	By               string `json:"by"`
+	Created          string `json:"created"`
+	Updated          string `json:"updated"`
+}
+
+func execStepSettled(st string) bool {
+	return st == "succeeded" || st == "skipped"
+}
+
+func execStepFailed(st string) bool {
+	return st == "failed" || st == "interrupted" || st == "blocked" || st == "unknown"
+}
+
+func (s *storeServer) handleExecutionRunsList(w http.ResponseWriter, r *http.Request, session storeSession) {
+	executionMu.Lock()
+	d, err := s.readExecutions()
+	if err != nil {
+		executionMu.Unlock()
+		s.fail(w, 500, err.Error())
+		return
+	}
+	runsByJob := make(map[string][]executionRun)
+	for _, run := range d.Runs {
+		runsByJob[run.Job] = append(runsByJob[run.Job], run)
+	}
+	nodeByID := make(map[string]executionNode, len(d.Nodes))
+	for id, n := range d.Nodes {
+		nodeByID[id] = n
+	}
+	executionMu.Unlock()
+
+	vis := s.visibleJobs(session.User)
+	visibleClusters := make(map[string]bool)
+	s.mu.Lock()
+	jobByID := make(map[string]storeJob, len(runsByJob))
+	for id, j := range s.jobs {
+		if !vis(j.Owner) {
+			continue
+		}
+		visibleClusters[j.ClusterID] = true
+		if _, ok := runsByJob[id]; ok {
+			jobByID[id] = j
+		}
+	}
+	s.mu.Unlock()
+
+	canManageNodes := s.can(session.User, "execution.manage")
+	onlineRunners := 0
+	totalRunners := 0
+	for _, n := range nodeByID {
+		allowed := canManageNodes
+		if !allowed {
+			for _, cl := range n.Clusters {
+				if visibleClusters[cl] {
+					allowed = true
+					break
+				}
+			}
+		}
+		if !allowed {
+			continue
+		}
+		totalRunners++
+		if executionOnline(n) {
+			onlineRunners++
+		}
+	}
+
+	lang := wLang(w)
+	items := make([]executionMonitorItem, 0, len(jobByID))
+	activeCount := 0
+	for jobID, j := range jobByID {
+		runs := runsByJob[jobID]
+		if len(runs) == 0 {
+			continue
+		}
+		// Chronological oldest-first to evaluate latest step outcomes accurately.
+		sort.Slice(runs, func(a, b int) bool {
+			if runs[a].Created != runs[b].Created {
+				return runs[a].Created < runs[b].Created
+			}
+			return runs[a].ID < runs[b].ID
+		})
+		latestByKey := make(map[string]string)
+		for _, run := range runs {
+			for _, st := range run.Steps {
+				if st.State != "pending" || latestByKey[st.Key] == "" {
+					latestByKey[st.Key] = st.State
+				}
+			}
+		}
+		var activeRun *executionRun
+		latestRun := runs[len(runs)-1]
+		latestUpdated := latestRun.Updated
+		failedBatches := 0
+		recoveredBatches := 0
+		for i := range runs {
+			run := &runs[i]
+			if run.Updated > latestUpdated {
+				latestUpdated = run.Updated
+			}
+			if activeExecution(*run) {
+				activeRun = run
+			}
+			if run.State == "failed" {
+				failedBatches++
+				hasFailedStep := false
+				allRecovered := true
+				for _, st := range run.Steps {
+					if execStepFailed(st.State) {
+						hasFailedStep = true
+						if !execStepSettled(latestByKey[st.Key]) {
+							allRecovered = false
+						}
+					}
+				}
+				if hasFailedStep && allRecovered {
+					recoveredBatches++
+				}
+			}
+		}
+
+		focusRun := latestRun
+		if activeRun != nil {
+			focusRun = *activeRun
+		}
+		locFocus := localizeExecutionRun(lang, focusRun)
+		node := nodeByID[focusRun.Node]
+		execName := firstNonEmptyStr(focusRun.ExecutorName, node.Name)
+		execIP := firstNonEmptyStr(focusRun.ExecutorIP, node.ControllerIP)
+
+		item := executionMonitorItem{
+			JobID:            jobID,
+			Cluster:          firstNonEmptyStr(j.ClusterID, focusRun.Cluster),
+			AppID:            j.AppID,
+			AppName:          mwpack.TranslateCatalogText(lang, j.AppName),
+			Version:          j.Version,
+			DeliveryMode:     "automated",
+			LatestRunID:      latestRun.ID,
+			BatchCount:       len(runs),
+			FailedBatches:    failedBatches,
+			RecoveredBatches: recoveredBatches,
+			ExecutorName:     execName,
+			ExecutorIP:       execIP,
+			RunnerOnline:     executionOnline(node),
+			By:               focusRun.By,
+			Created:          runs[0].Created,
+			Updated:          firstNonEmptyStr(latestUpdated, focusRun.Created),
+		}
+
+		if activeRun != nil {
+			activeCount++
+			item.Active = true
+			item.ActiveRunID = activeRun.ID
+			item.State = activeRun.State
+			item.TotalSteps = len(locFocus.Steps)
+			var curStep *executionStep
+			for i := range locFocus.Steps {
+				st := &locFocus.Steps[i]
+				if execStepSettled(st.State) {
+					item.DoneSteps++
+				} else if execStepFailed(st.State) {
+					item.FailedSteps++
+				}
+				if curStep == nil && (st.State == "running" || st.State == "leased" || st.State == "unknown") {
+					curStep = st
+				}
+			}
+			if curStep == nil {
+				for i := range locFocus.Steps {
+					if locFocus.Steps[i].State == "pending" {
+						curStep = &locFocus.Steps[i]
+						break
+					}
+				}
+			}
+			if curStep != nil {
+				item.RunningStepKey = curStep.Key
+				item.RunningStepTitle = curStep.Title
+				item.RunningStepState = curStep.State
+			}
+		} else {
+			item.TotalSteps = len(latestByKey)
+			for _, st := range latestByKey {
+				if execStepSettled(st) {
+					item.DoneSteps++
+				} else if execStepFailed(st) {
+					item.FailedSteps++
+				}
+			}
+			switch {
+			case item.FailedSteps > 0:
+				item.State = "failed"
+			case failedBatches > 0 && recoveredBatches == failedBatches:
+				item.State = "recovered"
+			case latestRun.State == "closed":
+				item.State = "closed"
+			default:
+				item.State = "completed"
+			}
+		}
+		items = append(items, item)
+	}
+
+	sort.Slice(items, func(a, b int) bool {
+		if items[a].Active != items[b].Active {
+			return items[a].Active
+		}
+		if items[a].Updated != items[b].Updated {
+			return items[a].Updated > items[b].Updated
+		}
+		return items[a].Cluster < items[b].Cluster
+	})
+
+	s.writeJSON(w, 200, map[string]any{
+		"items":          items,
+		"active_count":   activeCount,
+		"online_runners": onlineRunners,
+		"total_runners":  totalRunners,
+	})
 }

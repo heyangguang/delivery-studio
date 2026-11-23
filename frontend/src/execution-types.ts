@@ -20,6 +20,8 @@ export type ExecutionPreparation = {
   node: string;
   job: string;
   revision: string;
+  env_hash?: string;
+  env_match?: boolean;
   created: string;
   finished?: string;
   invalidated?: string;
@@ -30,6 +32,7 @@ export type ExecutionPreparation = {
     host?: string;
     state: string;
     message: string;
+    warnings?: string[];
   }[];
 };
 

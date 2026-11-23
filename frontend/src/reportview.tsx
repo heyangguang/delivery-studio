@@ -5,8 +5,9 @@ import {
   IconDownload,
   IconUpload,
 } from "@arco-design/web-react/icon";
-import { api, cached, csrfToken, err, putCached } from "./shared";
+import { api, cached, can, csrfToken, err, putCached } from "./shared";
 import { Segmented } from "./ui";
+import { SecReportTemplatesSection } from "./secreport";
 import { bi, biv, getLang, useLang, withLang } from "./i18n";
 import "./storageview.css";
 import "./docs.css";
@@ -78,6 +79,8 @@ export function ReportView() {
   const [v, setV] = useState<RS | null>(() => initReport ?? null);
   const [busy, setBusy] = useState(false);
   const [bannerBust, setBannerBust] = useState(() => Date.now());
+  const [mode, setMode] = useState<"delivery" | "security">("delivery");
+  const canSecView = can("security.view");
 
   const syncState = (r: RS) => {
     putCached("/api/settings/report", r);
@@ -236,10 +239,35 @@ export function ReportView() {
             )}
           </p>
         </div>
-        <Button type="primary" loading={busy} disabled={!dirty} onClick={save}>
-          {bi("保存设置", "Save Settings")}
-        </Button>
+        {mode === "delivery" && (
+          <Button type="primary" loading={busy} disabled={!dirty} onClick={save}>
+            {bi("保存设置", "Save Settings")}
+          </Button>
+        )}
       </header>
+      {canSecView && (
+        <div style={{ marginBottom: 16 }}>
+          <Segmented<"delivery" | "security">
+            value={mode}
+            onChange={setMode}
+            label={bi("报告模板类型", "Report template category")}
+            options={[
+              {
+                value: "delivery",
+                label: bi("交付文档模板（Word 封面与公文规范）", "Delivery Doc Template"),
+              },
+              {
+                value: "security",
+                label: bi("安全报告模板（Word / Excel / HTML）", "Security Report Templates"),
+              },
+            ]}
+          />
+        </div>
+      )}
+      {mode === "security" ? (
+        <SecReportTemplatesSection embeddedInCard={false} />
+      ) : (
+        <>
       {!v && <div className="st-skel" aria-label={bi("载入中", "Loading")} />}
       {v && (
         <>
@@ -580,6 +608,8 @@ export function ReportView() {
               )}
             </p>
           </section>
+        </>
+      )}
         </>
       )}
     </article>

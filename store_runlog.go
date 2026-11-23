@@ -40,8 +40,12 @@ type logTask struct {
 }
 
 type logRecap struct {
-	Host                                      string
-	OK, Changed, Unreachable, Failed, Skipped int
+	Host        string `json:"host"`
+	OK          int    `json:"ok"`
+	Changed     int    `json:"changed"`
+	Unreachable int    `json:"unreachable"`
+	Failed      int    `json:"failed"`
+	Skipped     int    `json:"skipped"`
 }
 
 // runLog is one run of one playbook, read from its log file.

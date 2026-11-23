@@ -77,6 +77,113 @@ body[arco-theme="dark"] .term {
   align-items: center;
   gap: 14px;
 }
+.rb-sync-gate {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 14px;
+  margin: 10px 0 4px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--warn) 36%, transparent);
+  background: var(--warn-soft);
+  color: var(--ink);
+  font-size: 13px;
+}
+.rb-sync-gate.is-info {
+  border-color: var(--brand-line);
+  background: var(--brand-soft);
+}
+.rb-sync-gate.is-info .rb-sync-gate-msg > svg {
+  color: var(--brand);
+}
+.rb-sync-gate-msg {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  line-height: 1.5;
+}
+.rb-sync-gate-msg > svg {
+  flex: none;
+  font-size: 15px;
+  color: var(--warn);
+}
+.rb-sync-gate-msg b {
+  font-weight: 600;
+}
+.rb-tab-n.warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.rstep-sync.is-pending .rstep-check {
+  background: var(--warn-soft);
+  border-color: var(--warn);
+  color: var(--warn);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--warn) 16%, transparent);
+}
+.rstep-sync.is-pending > .rstep-main {
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--warn) 38%, var(--line));
+  background: color-mix(in srgb, var(--warn-soft) 42%, var(--surface));
+  transition: box-shadow 0.25s ease;
+}
+.rstep-sync.is-flash > .rstep-main {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 34%, transparent);
+}
+.rstep-sync-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--warn);
+  background: var(--warn-soft);
+  border: 1px solid color-mix(in srgb, var(--warn) 32%, transparent);
+}
+.rstep-sync-badge.ok {
+  color: var(--ok);
+  background: var(--ok-soft);
+  border-color: color-mix(in srgb, var(--ok) 28%, transparent);
+}
+.rstep-sync-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 12px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--warn) 22%, var(--line));
+}
+.rstep-sync-confirm-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+.rstep-sync-confirm-note > svg {
+  color: var(--warn);
+  flex: none;
+}
+.term.is-locked .term-body {
+  user-select: none;
+  opacity: 0.72;
+}
+.term-copy.locked {
+  color: var(--warn);
+  background: var(--warn-soft);
+  border-color: color-mix(in srgb, var(--warn) 32%, transparent);
+}
+.term-copy.locked:hover {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn-soft) 80%, var(--hover));
+}
 .link.quiet {
   color: var(--mute);
   font-weight: 400;
@@ -89,7 +196,7 @@ body[arco-theme="dark"] .term {
   z-index: 3;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   padding: 8px 0;
   margin: -4px 0 -4px;
   background: linear-gradient(var(--surface) 78%, transparent);
@@ -104,9 +211,9 @@ body[arco-theme="dark"] .term {
 }
 .rb-tabs .seg button {
   height: 28px;
-  padding: 0 12px;
+  padding: 0 9px;
   border-radius: 7px;
-  font-size: 13px;
+  font-size: 12.5px;
 }
 .rb-tabs .seg button.on {
   color: var(--ink);
@@ -149,6 +256,11 @@ body[arco-theme="dark"] .term {
 .rb-tab-n.ok {
   color: var(--ok);
   background: color-mix(in srgb, var(--ok) 15%, transparent);
+}
+.rb-tab-n.skip {
+  color: var(--mute);
+  background: var(--sunken);
+  border: 1px dashed var(--line-strong);
 }
 .rb-tab-n.bad {
   color: var(--bad);
@@ -246,6 +358,13 @@ body[arco-theme="dark"] .term {
 .rstep.done:not(:last-child)::before {
   background: color-mix(in srgb, var(--ok) 40%, transparent);
 }
+.rstep.skipped:not(:last-child)::before {
+  background: repeating-linear-gradient(
+    to bottom,
+    var(--line-strong) 0 4px,
+    transparent 4px 8px
+  );
+}
 .rstep.failed:not(:last-child)::before {
   background: color-mix(in srgb, var(--bad) 36%, transparent);
 }
@@ -291,6 +410,15 @@ body[arco-theme="dark"] .term {
   color: #fff;
   animation: pop 0.42s var(--spring);
 }
+.rstep.skipped .rstep-check {
+  background: var(--sunken);
+  border: 1.5px dashed var(--mute);
+  color: var(--ink-2);
+}
+.rstep.skipped .rstep-check:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
 .rstep-main {
   min-width: 0;
   padding-top: 2px;
@@ -309,7 +437,8 @@ body[arco-theme="dark"] .term {
 .rstep-head b.mono {
   font-size: 13.5px;
 }
-.rstep.done .rstep-head b {
+.rstep.done .rstep-head b,
+.rstep.skipped .rstep-head b {
   color: var(--mute);
 }
 .rstep-sum {
@@ -950,12 +1079,19 @@ body[arco-theme="dark"] .term {
 }
 .rec-top {
   display: flex;
-  gap: 10px;
-  align-items: baseline;
+  gap: 6px 10px;
+  align-items: center;
   flex-wrap: wrap;
 }
-.rec-top .link {
+.rec-top > .link {
   margin-left: auto;
+}
+.rec-top-acts {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 .rec p {
   margin: 4px 0 0;
@@ -970,12 +1106,18 @@ body[arco-theme="dark"] .term {
   position: absolute;
   top: 6px;
   right: 8px;
+  z-index: 1;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 2px 8px;
+  line-height: 1.4;
 }
 .rec-log pre {
   margin: 0;
   max-height: 320px;
   overflow: auto;
-  padding: 10px 12px;
+  padding: 34px 12px 10px;
   font-size: 12px;
   line-height: 1.55;
   background: var(--code-bg);
@@ -1494,6 +1636,18 @@ body[arco-theme="dark"] .term {
 .rb-skipped-list { padding: 0 16px 4px; margin: 0; list-style: none; }
 .rb-skipped-list > li { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(0, 2fr); gap: 12px 20px; padding: 12px 0; border-top: 1px solid var(--line); align-items: start; }
 .rb-skipped-name { display: grid; gap: 3px; min-width: 0; }
+.rb-skipped-name-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.rb-skipped-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 550;
+  color: var(--mute);
+  background: var(--sunken);
+  border: 1px solid var(--line);
+}
 .rb-skipped-name strong { color: var(--ink-2); font-size: 13px; font-weight: 500; }
 .rb-skipped-name code { font-size: 11px; color: var(--mute); overflow-wrap: anywhere; }
 .rb-skipped-list > li > p { margin: 0; font-size: 13px; color: var(--mute); line-height: 1.6; overflow-wrap: anywhere; }
@@ -1505,6 +1659,354 @@ body[arco-theme="dark"] .term {
 
 .rstep-toggle { flex-shrink: 0; white-space: nowrap; min-height: 28px; padding: 0 8px; gap: 6px; }
 .rstep-toggle > svg { width: 14px; height: 14px; flex: none; padding: 0; border: 0; background: transparent; }
+
+/* Inline automated execution status, host recap, and logs inside Runbook step cards */
+.rstep.running .rstep-check {
+  border-color: var(--brand);
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+  box-shadow: 0 0 0 4px var(--brand-soft);
+}
+.rstep-live-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 99px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+  border: 1px solid var(--brand-line);
+}
+.rstep-live-pill i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--brand);
+}
+.rstep-live-pill.unknown,
+.rstep-live-pill.blocked {
+  color: var(--warn);
+  background: var(--warn-soft);
+  border-color: rgba(255, 159, 10, 0.35);
+}
+.rstep-live-pill.unknown i,
+.rstep-live-pill.blocked i {
+  background: var(--warn);
+}
+.rstep-auto-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 99px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.rstep-auto-badge.ok {
+  color: var(--ok);
+  background: var(--ok-soft);
+}
+.rstep-auto-badge.bad {
+  color: var(--bad);
+  background: var(--bad-soft);
+}
+.rstep-auto-badge.skip {
+  color: var(--mute);
+  background: var(--sunken);
+  border: 1px dashed var(--line-strong);
+}
+.rstep-skip-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 99px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--mute);
+  background: var(--sunken);
+  border: 1px dashed var(--line-strong);
+}
+.rstep-cmd-ref {
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface-2);
+  padding: 0;
+  max-width: 980px;
+}
+.rstep-cmd-ref > summary {
+  cursor: pointer;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--mute);
+  user-select: none;
+}
+.rstep-cmd-ref[open] > summary {
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-2);
+}
+.rstep-cmd-ref > .term {
+  border: 0;
+  border-radius: 0 0 9px 9px;
+  box-shadow: none;
+}
+.rec-auto-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--brand-soft);
+  color: var(--brand-ink);
+}
+.rec-exit-code {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+.rec-dl-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--brand-ink);
+  text-decoration: none;
+}
+.rec-dl-link:hover {
+  text-decoration: underline;
+}
+.rec-recap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.rec-recap-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+}
+.rec-recap-chip.bad {
+  border-color: rgba(255, 59, 48, 0.35);
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+.rec-recap-chip b {
+  font-weight: 600;
+  color: var(--ink);
+}
+.rb-auto-wait {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  font-size: 12.5px;
+  color: var(--mute);
+}
+
+/* Multi-attempt badge in step header & inline attempt switcher */
+.rstep-retry-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 99px;
+  font-size: 11px;
+  font-weight: 560;
+  color: var(--mute);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  white-space: nowrap;
+}
+.rstep-retry-badge.recovered {
+  color: var(--warn);
+  background: var(--warn-soft);
+  border-color: color-mix(in srgb, var(--warn) 26%, transparent);
+}
+.rec-attempts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 85%, transparent);
+}
+.rec-attempts-label {
+  font-size: 11.5px;
+  font-weight: 580;
+  color: var(--mute);
+  white-space: nowrap;
+}
+.rec-attempt-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.rec-att-tab {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 7px;
+  font-size: 11.5px;
+  font-weight: 540;
+  color: var(--ink-2);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  transition: border-color 0.14s, background 0.14s, color 0.14s;
+}
+.rec-att-tab:hover {
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+.rec-att-tab.on {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+  color: var(--brand-ink);
+}
+.rec-att-tab.st-failed.on {
+  border-color: color-mix(in srgb, var(--bad) 45%, transparent);
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+.rec-att-tab i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--faint);
+}
+.rec-att-tab.st-done i { background: var(--ok); }
+.rec-att-tab.st-failed i { background: var(--bad); }
+.rec-att-tab.st-skipped i { background: var(--warn); }
+.rec-att-tab.st-running i { background: var(--brand); }
+.rec-att-snap {
+  font-style: normal;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--mute);
+  background: var(--surface-2);
+}
+.rec-hist-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 560;
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+.rec.is-historical {
+  border-style: dashed;
+}
+
+/* Upgraded Execution History timeline */
+.rec-tl-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 14px;
+}
+.rec-tl-filters button {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 540;
+  color: var(--mute);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  transition: background 0.14s, color 0.14s, border-color 0.14s;
+}
+.rec-tl-filters button:hover {
+  color: var(--ink);
+  border-color: var(--line-strong);
+}
+.rec-tl-filters button.on {
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+  border-color: color-mix(in srgb, var(--brand) 30%, transparent);
+}
+.rec-tl-filters button.is-fail.on {
+  color: var(--bad);
+  background: var(--bad-soft);
+  border-color: color-mix(in srgb, var(--bad) 30%, transparent);
+}
+.rec-tl-filters em {
+  font-style: normal;
+  opacity: 0.78;
+}
+.rec-tl-item {
+  flex: 1;
+  min-width: 0;
+}
+.rec-tl-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+.rec-tl-recovered {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 99px;
+  font-size: 11px;
+  font-weight: 550;
+  color: var(--ok);
+  background: var(--ok-soft);
+}
+.rec-sync-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 560;
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+.rec-tl-log-btn {
+  margin-left: auto;
+}
+.rec-tl-note {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.rec-tl-log {
+  margin-top: 8px;
+}
+.rec-tl-log-acts {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-bottom: 6px;
+}
 
 @media (prefers-reduced-motion: reduce) {
   .rb-phase,

@@ -327,21 +327,277 @@
 }
 .sync-done {
   flex-direction: column;
-  gap: 6px;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 14px 16px;
   background: var(--surface-2);
   border: 1px solid var(--line);
+  border-radius: 12px;
+  transition: box-shadow 0.25s ease, border-color 0.25s ease;
+}
+.sync-file-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 11px 14px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.sync-file-strip.is-pending {
+  background: color-mix(in srgb, var(--warn-soft) 36%, var(--surface));
+  border-color: color-mix(in srgb, var(--warn) 32%, var(--line));
+}
+.sync-file-strip.is-confirmed {
+  background: color-mix(in srgb, var(--ok-soft) 34%, var(--surface));
+  border-color: color-mix(in srgb, var(--ok) 26%, var(--line));
+}
+.sync-file-strip-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+.sync-file-strip-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.sync-file-strip-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sync-file-strip-ok {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ok);
+}
+.sync-file-strip-ok > svg {
+  font-size: 14px;
+}
+.sync-file-strip-note {
+  margin: 0;
+  color: var(--mute);
+  font-size: 12.5px;
+}
+.sync-done.is-pending {
+  background: color-mix(in srgb, var(--warn-soft) 45%, var(--surface));
+  border-color: color-mix(in srgb, var(--warn) 36%, var(--line));
+}
+.sync-done.is-patch {
+  background: color-mix(in srgb, var(--warn-soft) 55%, var(--surface));
+  border-color: color-mix(in srgb, var(--warn) 42%, var(--line));
+}
+.sync-done.is-flash {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 32%, transparent);
+}
+.sync-confirm-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 12px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--warn) 22%, var(--line));
+}
+.sync-confirm-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+.sync-confirm-note > svg {
+  color: var(--warn);
+  flex: none;
+}
+.sync-confirm-btns {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.sync-done-collapsed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin-top: 12px;
+  padding: 9px 14px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--ok) 28%, var(--line));
+  background: color-mix(in srgb, var(--ok-soft) 55%, var(--surface));
+  font-size: 12.5px;
+}
+.sync-done-collapsed-info {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  color: var(--ink-2);
+}
+.sync-done-collapsed-info > svg {
+  color: var(--ok);
+  font-size: 15px;
+  flex: none;
+}
+.sync-done-collapsed-info b {
+  color: var(--ink);
+  font-weight: 600;
+}
+.sync-done-toggle {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-2);
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.sync-done-toggle:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.sync-done-toggle svg {
+  font-size: 11px;
+  transition: transform 0.2s var(--ease-out);
+}
+.sync-done-toggle.open svg {
+  transform: rotate(180deg);
+}
+.sync-done-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.sync-done-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+  border: 1px solid var(--brand-line);
+}
+.sync-done.is-patch .sync-done-badge {
+  color: var(--warn);
+  background: var(--warn-soft);
+  border-color: color-mix(in srgb, var(--warn) 32%, transparent);
+}
+.sync-done-pill {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 99px;
+  font-size: 11px;
+  font-weight: 550;
+  color: var(--ok);
+  background: var(--ok-soft);
+}
+.sync-done.is-pending .sync-done-pill,
+.sync-done.is-patch.is-pending .sync-done-pill {
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+.sync-paths {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.sync-path {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 11px;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.sync-path b {
+  font-size: 12.5px;
+  color: var(--ink);
+}
+.sync-path span {
+  color: var(--mute);
+}
+.sync-path.is-highlight {
+  border-color: var(--brand-line);
+  background: color-mix(in srgb, var(--brand-soft) 50%, var(--surface));
+}
+.sync-term {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--surface);
+}
+.sync-term-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px 6px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+  font-size: 12px;
+  color: var(--mute);
+}
+.sync-term-copy {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-2);
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.sync-term-copy:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.sync-term-copy.ok {
+  color: var(--ok);
 }
 .sync-cmd {
   margin: 0;
   padding: 10px 12px;
-  border-radius: 8px;
   background: var(--code-bg);
-  font-size: 12.5px;
+  font-size: 12px;
+  line-height: 1.65;
   white-space: pre-wrap;
   word-break: break-all;
 }
-.sync-done .link {
-  align-self: flex-start;
+@media (max-width: 760px) {
+  .sync-paths {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* what a sync would change, by phase of the handbook */

@@ -104,7 +104,10 @@ func targetAgentCommand(args []string) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 	applied, pub, message := "", "", ""
-	fmt.Println("目标 Agent 已启动：仅管理本次授权的 SSH 公钥，不执行部署命令，不更改 sshd 策略。")
+	logAgent("INFO", "target-agent started id=%s url=%s", cfg.ID, cfg.URL)
+	connected := false
+	lastErr := ""
+	lastErrAt := time.Time{}
 	for ctx.Err() == nil {
 		if !cfg.Enrolled {
 			name, _ := os.Hostname()
@@ -124,21 +127,31 @@ func targetAgentCommand(args []string) error {
 				e = atomicExecutionJSON(*config, next)
 				if e == nil {
 					cfg = next
+					logAgent("INFO", "target-agent enrolled id=%s hostname=%s", cfg.ID, name)
 				}
 			}
 		} else {
 			var instruction targetAgentInstruction
 			e = call("poll", cfg.Token, map[string]any{"machine_id": identity, "version": version, "applied": applied, "public_key": pub, "host_keys": targetHostKeys(), "message": message}, &instruction)
 			if e == nil {
+				if !connected {
+					logAgent("INFO", "connected to platform id=%s, polling for SSH trust instructions", cfg.ID)
+					connected = true
+					lastErr = ""
+				}
 				if instruction.ID != cfg.ID {
-					return errors.New("目标指令身份不符")
+					return errors.New("target instruction ID mismatch")
 				}
 				if instruction.Desired == "revoked" || instruction.PublicKey != "" {
+					prevApplied, prevPub := applied, pub
 					e = applyTargetTrust("/root/.ssh", instruction)
 					if e == nil {
 						applied = instruction.Desired
 						pub = instruction.PublicKey
 						message = ""
+						if applied != prevApplied || pub != prevPub {
+							logAgent("INFO", "SSH trust synchronized id=%s state=%s", cfg.ID, applied)
+						}
 					} else {
 						applied = ""
 						message = truncRunes(e.Error(), 1500)
@@ -147,10 +160,16 @@ func targetAgentCommand(args []string) error {
 			}
 		}
 		if e != nil {
-			fmt.Fprintln(os.Stderr, e)
+			connected = false
+			if e.Error() != lastErr || time.Since(lastErrAt) >= 30*time.Second {
+				logAgent("WARN", "target-agent sync error: %v", e)
+				lastErr = e.Error()
+				lastErrAt = time.Now()
+			}
 		}
 		select {
 		case <-ctx.Done():
+			logAgent("INFO", "target-agent stopped cleanly id=%s", cfg.ID)
 			return nil
 		case <-time.After(5 * time.Second):
 		}

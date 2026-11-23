@@ -51,19 +51,57 @@ with open('/etc/os-release') as f:
     for line in f:
         k,sep,v=line.strip().partition('=')
         if sep: release[k]=v.strip(chr(34)).strip(chr(39))
-print(json.dumps(dict(uid=os.geteuid(),hostname=socket.gethostname(),ips=subprocess.check_output(['hostname','-I'],text=True).split(),os_id=release.get('ID'),version=release.get('VERSION_ID'),arch=platform.machine(),python=list(sys.version_info[:2]))))`
+resolved={}
+for name in sys.argv[1:]:
+    res=subprocess.run(['getent','ahostsv4',name],capture_output=True,text=True)
+    resolved[name]=sorted(set(line.split()[0] for line in res.stdout.splitlines() if line.strip())) if res.returncode==0 else []
+data_dirs=[]
+if os.path.isdir('/data'):
+    try:
+        for ent in sorted(os.listdir('/data')):
+            if ent in ('lost+found', '.Trash', '.snapshots'): continue
+            full=os.path.join('/data',ent)
+            if os.path.isdir(full):
+                try:
+                    if os.listdir(full): data_dirs.append('/data/'+ent)
+                except Exception: data_dirs.append('/data/'+ent)
+            elif os.path.isfile(full) and os.path.getsize(full)>0:
+                data_dirs.append('/data/'+ent)
+            if len(data_dirs)>=8: break
+    except Exception: pass
+active_services=[]
+try:
+    sr=subprocess.run(['systemctl','list-units','--type=service','--state=running','--no-legend','--no-pager'],capture_output=True,text=True,timeout=4)
+    if sr.returncode==0:
+        pats=('postgresql','patroni','redis','etcd','nginx','haproxy','keepalived')
+        for line in sr.stdout.splitlines():
+            parts=line.split()
+            if not parts: continue
+            u=parts[0].lower()
+            if any(p in u for p in pats):
+                active_services.append(parts[0])
+                if len(active_services)>=8: break
+except Exception: pass
+print(json.dumps(dict(uid=os.geteuid(),hostname=socket.gethostname(),ips=subprocess.check_output(['hostname','-I'],text=True).split(),os_id=release.get('ID'),version=release.get('VERSION_ID'),arch=platform.machine(),python=list(sys.version_info[:2]),resolved=resolved,data_dirs=data_dirs,active_services=active_services)))`
 
 type executionProbe struct {
-	UID      int      `json:"uid"`
-	Hostname string   `json:"hostname"`
-	IPs      []string `json:"ips"`
-	OSID     string   `json:"os_id"`
-	Version  string   `json:"version"`
-	Arch     string   `json:"arch"`
-	Python   []int    `json:"python"`
+	UID            int                 `json:"uid"`
+	Hostname       string              `json:"hostname"`
+	IPs            []string            `json:"ips"`
+	OSID           string              `json:"os_id"`
+	Version        string              `json:"version"`
+	Arch           string              `json:"arch"`
+	Python         []int               `json:"python"`
+	Resolved       map[string][]string `json:"resolved"`
+	DataDirs       []string            `json:"data_dirs,omitempty"`
+	ActiveServices []string            `json:"active_services,omitempty"`
 }
 
 func checkExecutionProbe(p executionProbe, h mwpack.Host, platformID string) error {
+	return checkExecutionProbeWithHosts(p, h, platformID, nil)
+}
+
+func checkExecutionProbeWithHosts(p executionProbe, h mwpack.Host, platformID string, allHosts []mwpack.Host) error {
 	if p.UID != 0 {
 		return errors.New("需要执行器和目标 root 身份；当前未获得所需权限")
 	}
@@ -85,19 +123,42 @@ func checkExecutionProbe(p executionProbe, h mwpack.Host, platformID string) err
 			return fmt.Errorf("现场为 %s %s / %s，交付材料适用于 %s", p.OSID, p.Version, p.Arch, platformID)
 		}
 	}
+	for _, peer := range allHosts {
+		ips := p.Resolved[peer.Name]
+		if len(ips) != 1 || ips[0] != peer.IP {
+			return fmt.Errorf("名称解析未就绪：%s 解析为 %v，交付要求 %s；请先完成环境准备（设置主机名与 hosts）", peer.Name, ips, peer.IP)
+		}
+	}
 	return nil
 }
 func (r *executionRunner) probe(h mwpack.Host, local bool, platformID string) error {
-	return r.probeWithAccess(h, local, platformID, nil)
+	return r.probeWithHosts(h, local, platformID, nil, nil)
 }
 func (r *executionRunner) probeWithAccess(h mwpack.Host, local bool, platformID string, sshArgs []string) error {
+	return r.probeWithHosts(h, local, platformID, sshArgs, nil)
+}
+func (r *executionRunner) probeWithHosts(h mwpack.Host, local bool, platformID string, sshArgs []string, allHosts []mwpack.Host) error {
+	_, e := r.probeDetailed(h, local, platformID, sshArgs, allHosts)
+	return e
+}
+func (r *executionRunner) probeDetailed(h mwpack.Host, local bool, platformID string, sshArgs []string, allHosts []mwpack.Host) (executionProbe, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+	names := make([]string, 0, len(allHosts))
+	for _, peer := range allHosts {
+		if peer.Name != "" {
+			names = append(names, peer.Name)
+		}
+	}
 	var cmd *exec.Cmd
 	if local {
-		cmd = exec.CommandContext(ctx, "python3", "-c", executionProbePython)
+		argv := append([]string{"-c", executionProbePython}, names...)
+		cmd = exec.CommandContext(ctx, "python3", argv...)
 	} else {
 		script := "python3 -c '" + strings.ReplaceAll(executionProbePython, "'", `'"'"'`) + "'"
+		for _, name := range names {
+			script += " " + name
+		}
 		args := []string{"-oBatchMode=yes", "-oStrictHostKeyChecking=yes", "-oConnectTimeout=8", "-oConnectionAttempts=1", "-oNumberOfPasswordPrompts=0"}
 		args = append(args, sshArgs...)
 		args = append(args, "root@"+h.IP, script)
@@ -107,15 +168,15 @@ func (r *executionRunner) probeWithAccess(h mwpack.Host, local bool, platformID 
 	b, e := cmd.CombinedOutput()
 	if e != nil {
 		if ctx.Err() != nil {
-			return errors.New("连接检查超时；请检查网络、SSH 服务和授权")
+			return executionProbe{}, errors.New("连接检查超时；请检查网络、SSH 服务和授权")
 		}
-		return fmt.Errorf("连接或只读检查失败：%s", truncRunes(strings.TrimSpace(string(b)), 900))
+		return executionProbe{}, fmt.Errorf("连接或只读检查失败：%s", truncRunes(strings.TrimSpace(string(b)), 900))
 	}
 	var p executionProbe
 	if json.Unmarshal(b, &p) != nil {
-		return errors.New("只读检查没有返回有效的机器信息，请检查远端登录脚本和 Python")
+		return executionProbe{}, errors.New("只读检查没有返回有效的机器信息，请检查远端登录脚本和 Python")
 	}
-	return checkExecutionProbe(p, h, platformID)
+	return p, checkExecutionProbeWithHosts(p, h, platformID, allHosts)
 }
 func fileSHA256(path string) (string, error) {
 	f, e := os.Open(path)
@@ -232,7 +293,7 @@ func (r *executionRunner) checkPreparation(p executionPreparation) error {
 		result.Checks = append(result.Checks, c)
 	}
 	result.ID = p.ID
-	access, trustErr := r.prepareManagedTrust(p)
+	access, trustHostErrs, trustErr := r.prepareManagedTrustDetailed(p)
 	h := mwpack.Host{IP: p.Snapshot.ControllerIP}
 	for _, target := range p.Snapshot.Hosts {
 		if target.IP == h.IP {
@@ -246,7 +307,7 @@ func (r *executionRunner) checkPreparation(p executionPreparation) error {
 	if !localExecutionIP(h.IP) {
 		identity = errors.New("执行器运行的机器与交付指定的执行机器不一致")
 	} else {
-		identity = r.probe(h, true, p.Snapshot.Platform)
+		identity = r.probeWithHosts(h, true, p.Snapshot.Platform, nil, nil)
 	}
 	add("executor", "执行机器与系统", h.Name, identity)
 	root, runtimeErr := r.matchingRoot(p.Snapshot)
@@ -267,16 +328,33 @@ func (r *executionRunner) checkPreparation(p executionPreparation) error {
 	add("materials", "软件材料与已有凭据", h.Name, checkExecutionMaterials(p.Snapshot, root))
 	for _, target := range p.Snapshot.Hosts {
 		var e error
+		var warns []string
 		if p.Snapshot.AgentAccess[target.Name] != "" && trustErr != nil {
 			e = trustErr
+		} else if he := trustHostErrs[target.Name]; p.Snapshot.AgentAccess[target.Name] != "" && he != nil {
+			e = he
 		} else {
 			args := []string{}
 			if a, ok := access[target.Name]; ok {
 				args = []string{"-i", a.PrivateKey, "-oIdentitiesOnly=yes", "-oUserKnownHostsFile=" + a.KnownHosts}
 			}
-			e = r.probeWithAccess(target, target.IP == p.Snapshot.ControllerIP, p.Snapshot.Platform, args)
+			pr, pe := r.probeDetailed(target, target.IP == p.Snapshot.ControllerIP, p.Snapshot.Platform, args, p.Snapshot.Hosts)
+			e = pe
+			if pe == nil {
+				if len(pr.DataDirs) > 0 {
+					warns = append(warns, fmt.Sprintf("目标主机 %s (%s) 检测到已有数据目录：%s", target.Name, target.IP, strings.Join(pr.DataDirs, ", ")))
+				}
+				if len(pr.ActiveServices) > 0 {
+					warns = append(warns, fmt.Sprintf("目标主机 %s (%s) 检测到运行中的中间件服务：%s", target.Name, target.IP, strings.Join(pr.ActiveServices, ", ")))
+				}
+			}
 		}
-		add("host:"+target.Name, "连接、身份与运行权限", target.Name, e)
+		c := executionCheck{ID: "host:" + target.Name, Title: "连接、身份与运行权限", Host: target.Name, State: "passed", Message: "检查通过", Warnings: warns}
+		if e != nil {
+			c.State = "blocked"
+			c.Message = truncRunes(e.Error(), 1800)
+		}
+		result.Checks = append(result.Checks, c)
 	}
 	if e := atomicExecutionJSON(resultPath, result); e != nil {
 		return e

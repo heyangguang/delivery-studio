@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -30,25 +31,64 @@ const (
 	maxDeliveryImg = 300
 )
 
+type stepAttempt struct {
+	Execution string     `json:"execution"`
+	Attempt   string     `json:"attempt"`
+	RunIndex  int        `json:"run_index,omitempty"`
+	State     string     `json:"state"` // done | failed | skipped | running | unknown | blocked | ...
+	AutoState string     `json:"auto_state,omitempty"`
+	Executor  string     `json:"executor,omitempty"`
+	By        string     `json:"by,omitempty"`
+	Started   string     `json:"started,omitempty"`
+	Finished  string     `json:"finished,omitempty"`
+	At        string     `json:"at,omitempty"`
+	ExitCode  *int       `json:"exit_code,omitempty"`
+	Message   string     `json:"message,omitempty"`
+	Recap     []logRecap `json:"recap,omitempty"`
+	LogSeq    int        `json:"log_seq,omitempty"`
+	Snapshot  string     `json:"snapshot,omitempty"`
+	Outdated  bool       `json:"outdated,omitempty"`
+}
+
 type stepRecord struct {
-	Source    string `json:"source,omitempty"`
-	Execution string `json:"execution,omitempty"`
-	Attempt   string `json:"attempt,omitempty"`
-	State     string `json:"state"` // done | failed | skipped | resolved (a problem came up and was solved); empty: no result marked, what was written is kept
-	By        string `json:"by"`
-	At        string `json:"at"`
-	Note      string `json:"note,omitempty"`
-	Log       string `json:"log,omitempty"`
+	Source    string        `json:"source,omitempty"`
+	Execution string        `json:"execution,omitempty"`
+	Attempt   string        `json:"attempt,omitempty"`
+	AutoState string        `json:"auto_state,omitempty"`
+	Executor  string        `json:"executor,omitempty"`
+	Started   string        `json:"started,omitempty"`
+	Finished  string        `json:"finished,omitempty"`
+	ExitCode  *int          `json:"exit_code,omitempty"`
+	Recap     []logRecap    `json:"recap,omitempty"`
+	LogSeq    int           `json:"log_seq,omitempty"`
+	State     string        `json:"state"` // done | failed | skipped | resolved (a problem came up and was solved); empty: no result marked, what was written is kept
+	By        string        `json:"by"`
+	At        string        `json:"at"`
+	Note      string        `json:"note,omitempty"`
+	Log       string        `json:"log,omitempty"`
 	// Images are screenshots pasted or dropped next to the output, as file names under the delivery's progress-img.
 	Images []string `json:"images,omitempty"`
+	// Attempts is populated dynamically from immutable execution runs on GET (never persisted into progress.json).
+	Attempts []stepAttempt `json:"attempts,omitempty"`
 }
 
 type progressEvent struct {
-	At    string `json:"at"`
-	By    string `json:"by"`
-	Key   string `json:"key"`
-	Title string `json:"title,omitempty"`
-	State string `json:"state"` // "" means the record was cleared
+	At        string     `json:"at"`
+	By        string     `json:"by"`
+	Key       string     `json:"key"`
+	Title     string     `json:"title,omitempty"`
+	State     string     `json:"state"` // "" means the record was cleared
+	Source    string     `json:"source,omitempty"`
+	Execution string     `json:"execution,omitempty"`
+	Attempt   string     `json:"attempt,omitempty"`
+	Note      string     `json:"note,omitempty"`
+	Started   string     `json:"started,omitempty"`
+	Finished  string     `json:"finished,omitempty"`
+	ExitCode  *int       `json:"exit_code,omitempty"`
+	Recap     []logRecap `json:"recap,omitempty"`
+	LogSeq    int        `json:"log_seq,omitempty"`
+	Executor  string     `json:"executor,omitempty"`
+	Snapshot  string     `json:"snapshot,omitempty"`
 }
 
 type progressDoc struct {
@@ -79,6 +119,14 @@ func (s *storeServer) readProgress(id string) progressDoc {
 }
 
 func (s *storeServer) writeProgress(id string, doc progressDoc) error {
+	if len(doc.Steps) > 0 {
+		clean := make(map[string]stepRecord, len(doc.Steps))
+		for k, st := range doc.Steps {
+			st.Attempts = nil
+			clean[k] = st
+		}
+		doc.Steps = clean
+	}
 	b, err := json.Marshal(doc)
 	if err != nil {
 		return err
@@ -139,12 +187,41 @@ func localizeProgressDoc(lang string, doc progressDoc) progressDoc {
 	if !isEnLang(lang) {
 		return doc
 	}
+	if len(doc.Steps) > 0 {
+		steps := make(map[string]stepRecord, len(doc.Steps))
+		for k, st := range doc.Steps {
+			if st.By == "执行节点" {
+				st.By = "Execution node"
+			}
+			if st.Note != "" {
+				st.Note = localizeGoMessage(lang, st.Note)
+			}
+			if len(st.Attempts) > 0 {
+				atts := make([]stepAttempt, len(st.Attempts))
+				for i, a := range st.Attempts {
+					if a.By == "执行节点" {
+						a.By = "Execution node"
+					}
+					if a.Message != "" {
+						a.Message = localizeGoMessage(lang, a.Message)
+					}
+					atts[i] = a
+				}
+				st.Attempts = atts
+			}
+			steps[k] = st
+		}
+		doc.Steps = steps
+	}
 	if len(doc.Events) > 0 {
 		evs := make([]progressEvent, len(doc.Events))
 		for i, ev := range doc.Events {
 			ev.Title = localizeProgressTitle(lang, ev.Title)
 			if ev.By == "执行节点" {
 				ev.By = "Execution node"
+			}
+			if ev.Note != "" {
+				ev.Note = localizeGoMessage(lang, ev.Note)
 			}
 			evs[i] = ev
 		}
@@ -165,6 +242,280 @@ func localizeProgressDoc(lang string, doc progressDoc) progressDoc {
 	return doc
 }
 
+func formatPreparationLog(p executionPreparation) string {
+	var b strings.Builder
+	for _, c := range p.Checks {
+		status := "PASSED"
+		if c.State != "passed" {
+			status = strings.ToUpper(c.State)
+		}
+		target := c.Host
+		if target == "" {
+			target = c.ID
+		}
+		fmt.Fprintf(&b, "[%s] %s (%s): %s\n", status, c.Title, target, c.Message)
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func mapAutoStepState(state string) string {
+	switch state {
+	case "succeeded":
+		return "done"
+	case "failed", "interrupted":
+		return "failed"
+	case "skipped":
+		return "skipped"
+	default:
+		return state
+	}
+}
+
+func (s *storeServer) enrichProgressWithExecutions(id string, doc progressDoc) progressDoc {
+	executionMu.Lock()
+	d, err := s.readExecutions()
+	executionMu.Unlock()
+	if err != nil {
+		return doc
+	}
+	return s.enrichProgressWithExecutionDB(id, doc, d, nil)
+}
+
+func (s *storeServer) enrichProgressWithExecutionDB(id string, doc progressDoc, d executionDB, tabs []reportTab) progressDoc {
+	rev := s.executionRevision(id)
+	steps := make(map[string]stepRecord, len(doc.Steps))
+	for k, v := range doc.Steps {
+		steps[k] = v
+	}
+
+	// 1. Reflect verified ready preparation checks onto unrecorded prep/bootstrap steps
+	// (handles both live deliveries and existing deliveries completed before persistence).
+	var latestPrep *executionPreparation
+	for _, p := range d.Preparations {
+		if p.Job != id || p.State != "ready" || (p.Revision != "" && p.Revision != rev) {
+			continue
+		}
+		if latestPrep == nil || p.Finished > latestPrep.Finished {
+			cp := p
+			latestPrep = &cp
+		}
+	}
+	if latestPrep != nil {
+		prepLog := formatPreparationLog(*latestPrep)
+		execName := latestPrep.ExecutorName
+		if tabs == nil {
+			tabs = s.runbookSteps(id)
+		}
+		for _, tab := range tabs {
+			for _, st := range tab.Steps {
+				if !strings.HasPrefix(st.Key, "prepare/") && st.Key != "deploy/deploy-bootstrap" {
+					continue
+				}
+				if steps[st.Key].State != "" {
+					continue
+				}
+				steps[st.Key] = stepRecord{
+					Source:   "automatic",
+					Executor: execName,
+					State:    "done",
+					By:       "执行节点",
+					At:       firstNonEmptyStr(latestPrep.Finished, latestPrep.Created),
+					Note:     "已通过执行准备检查核验",
+					Log:      prepLog,
+				}
+			}
+		}
+	}
+
+	// 2. Collect ALL immutable execution runs for this delivery (across all sync revisions)
+	// so every historical attempt (including earlier failed attempts) stays inspectable with full logs.
+	allRuns := []executionRun{}
+	for _, r := range d.Runs {
+		if r.Job == id {
+			allRuns = append(allRuns, r)
+		}
+	}
+	sort.Slice(allRuns, func(i, j int) bool { return allRuns[i].Created < allRuns[j].Created })
+
+	type attemptMeta struct {
+		key   string
+		title string
+		att   stepAttempt
+	}
+	attemptsByKey := map[string][]stepAttempt{}
+	allAttempts := []attemptMeta{}
+
+	for runIdx, run := range allRuns {
+		isCurrentRev := run.Revision == "" || run.Revision == rev
+		for _, st := range run.Steps {
+			ts := firstNonEmptyStr(st.Returned, st.Finished, st.Started, run.Updated, run.Created)
+			// Skip steps that never started because an earlier step halted the batch.
+			neverStarted := st.State == "pending" && st.Started == "" && st.Finished == "" && st.Seq == 0
+			if !neverStarted {
+				att := stepAttempt{
+					Execution: run.ID,
+					Attempt:   st.ID,
+					RunIndex:  runIdx + 1,
+					State:     mapAutoStepState(st.State),
+					AutoState: st.State,
+					Executor:  run.ExecutorName,
+					By:        firstNonEmptyStr(run.By, "执行节点"),
+					Started:   st.Started,
+					Finished:  st.Finished,
+					At:        ts,
+					ExitCode:  st.ExitCode,
+					Message:   st.Message,
+					Recap:     st.Recap,
+					LogSeq:    st.Seq,
+					Snapshot:  run.Snapshot,
+					Outdated:  !isCurrentRev,
+				}
+				attemptsByKey[st.Key] = append(attemptsByKey[st.Key], att)
+				allAttempts = append(allAttempts, attemptMeta{key: st.Key, title: st.Title, att: att})
+			}
+
+			// Only current-revision runs project onto the active step state.
+			if !isCurrentRev {
+				continue
+			}
+			rec := steps[st.Key]
+			if neverStarted && rec.State != "" {
+				continue
+			}
+			// Respect a newer manual record for State/Note, while still attaching automated evidence metadata if it matches.
+			manualNewer := rec.Source != "automatic" && rec.State != "" && rec.At > ts && st.State != "running" && st.State != "leased" && st.State != "queued" && st.State != "unknown"
+			if manualNewer {
+				continue
+			}
+			rec.Execution = run.ID
+			rec.Attempt = st.ID
+			rec.AutoState = st.State
+			rec.Executor = firstNonEmptyStr(run.ExecutorName, rec.Executor)
+			rec.Started = st.Started
+			rec.Finished = st.Finished
+			rec.ExitCode = st.ExitCode
+			rec.Recap = st.Recap
+			rec.LogSeq = st.Seq
+			if rec.Source == "" || rec.Source == "automatic" || st.State == "running" || st.State == "leased" || st.State == "queued" || st.State == "unknown" {
+				rec.Source = "automatic"
+				rec.By = "执行节点"
+				if ts != "" {
+					rec.At = ts
+				}
+				if st.Message != "" {
+					rec.Note = st.Message
+				}
+				if mapped := map[string]string{"succeeded": "done", "failed": "failed", "skipped": "skipped", "interrupted": "failed"}[st.State]; mapped != "" {
+					rec.State = mapped
+				}
+			}
+			steps[st.Key] = rec
+		}
+	}
+
+	for key, list := range attemptsByKey {
+		rec := steps[key]
+		rec.Attempts = list
+		steps[key] = rec
+	}
+
+	// 3. Enrich existing progress events with execution/attempt/log references and backfill any
+	// historical automated attempts not yet present in doc.Events (e.g. from older runs).
+	evs := make([]progressEvent, len(doc.Events))
+	copy(evs, doc.Events)
+	usedAttempt := make(map[string]bool, len(allAttempts))
+	byAttemptID := make(map[string]attemptMeta, len(allAttempts))
+	for _, am := range allAttempts {
+		byAttemptID[am.att.Attempt] = am
+	}
+	for i := range evs {
+		ev := &evs[i]
+		if ev.Source == "" && (ev.Key == "_sync" || reSyncEventTitle.MatchString(ev.Title) || rePatchEventTitle.MatchString(ev.Title)) {
+			ev.Source = "sync"
+		}
+		if ev.Attempt != "" {
+			usedAttempt[ev.Attempt] = true
+			if am, ok := byAttemptID[ev.Attempt]; ok {
+				ev.Source = "automatic"
+				ev.Execution = firstNonEmptyStr(ev.Execution, am.att.Execution)
+				ev.Note = firstNonEmptyStr(ev.Note, am.att.Message)
+				ev.Started = firstNonEmptyStr(ev.Started, am.att.Started)
+				ev.Finished = firstNonEmptyStr(ev.Finished, am.att.Finished)
+				if ev.ExitCode == nil {
+					ev.ExitCode = am.att.ExitCode
+				}
+				if len(ev.Recap) == 0 {
+					ev.Recap = am.att.Recap
+				}
+				if ev.LogSeq == 0 {
+					ev.LogSeq = am.att.LogSeq
+				}
+				ev.Executor = firstNonEmptyStr(ev.Executor, am.att.Executor)
+				ev.Snapshot = firstNonEmptyStr(ev.Snapshot, am.att.Snapshot)
+			}
+			continue
+		}
+		if ev.By != "执行节点" && ev.By != "Execution node" {
+			continue
+		}
+		for _, am := range allAttempts {
+			if usedAttempt[am.att.Attempt] || am.key != ev.Key || am.att.State != ev.State {
+				continue
+			}
+			if ev.At == am.att.Finished || ev.At == am.att.At || (ev.At != "" && strings.HasPrefix(am.att.At, ev.At[:min(len(ev.At), 19)])) {
+				usedAttempt[am.att.Attempt] = true
+				ev.Source = "automatic"
+				ev.Execution = am.att.Execution
+				ev.Attempt = am.att.Attempt
+				ev.Note = am.att.Message
+				ev.Started = am.att.Started
+				ev.Finished = am.att.Finished
+				ev.ExitCode = am.att.ExitCode
+				ev.Recap = am.att.Recap
+				ev.LogSeq = am.att.LogSeq
+				ev.Executor = am.att.Executor
+				ev.Snapshot = am.att.Snapshot
+				break
+			}
+		}
+	}
+	addedBackfill := false
+	for _, am := range allAttempts {
+		if usedAttempt[am.att.Attempt] {
+			continue
+		}
+		if am.att.State != "done" && am.att.State != "failed" && am.att.State != "skipped" && am.att.State != "blocked" && am.att.State != "unknown" {
+			continue
+		}
+		evs = append(evs, progressEvent{
+			At:        firstNonEmptyStr(am.att.Finished, am.att.At),
+			By:        "执行节点",
+			Key:       am.key,
+			Title:     am.title,
+			State:     am.att.State,
+			Source:    "automatic",
+			Execution: am.att.Execution,
+			Attempt:   am.att.Attempt,
+			Note:      am.att.Message,
+			Started:   am.att.Started,
+			Finished:  am.att.Finished,
+			ExitCode:  am.att.ExitCode,
+			Recap:     am.att.Recap,
+			LogSeq:    am.att.LogSeq,
+			Executor:  am.att.Executor,
+			Snapshot:  am.att.Snapshot,
+		})
+		addedBackfill = true
+	}
+	if addedBackfill {
+		sort.SliceStable(evs, func(i, j int) bool { return evs[i].At < evs[j].At })
+	}
+
+	doc.Steps = steps
+	doc.Events = evs
+	return doc
+}
+
 // handleProgress serves /api/jobs/{id}/progress for a delivery whose files exist.
 func (s *storeServer) handleProgress(w http.ResponseWriter, r *http.Request, session storeSession, id string) {
 	switch r.Method {
@@ -172,6 +523,7 @@ func (s *storeServer) handleProgress(w http.ResponseWriter, r *http.Request, ses
 		s.mu.Lock()
 		doc := s.readProgress(id)
 		s.mu.Unlock()
+		doc = s.enrichProgressWithExecutions(id, doc)
 		doc = localizeProgressDoc(wLang(w), doc)
 		s.writeJSON(w, 200, map[string]any{"steps": doc.Steps, "events": doc.Events, "reports": doc.Reports, "amendments": s.loadAmendments(id), "superseded": doc.Superseded})
 	case "PUT":

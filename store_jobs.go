@@ -29,7 +29,15 @@ func (s *storeServer) listJobs(w http.ResponseWriter, session storeSession) {
 	s.mu.Unlock()
 	sort.Slice(jobs, func(i, j int) bool { return jobs[i].Created > jobs[j].Created })
 	lang := wLang(w)
+	autoJobs := s.autoExecutedJobs()
 	for i := range jobs {
+		rawMode := jobs[i].DeliveryMode
+		if rawMode == "" {
+			if dep := s.readSpec(jobs[i].ID); dep != nil {
+				rawMode = dep.DeliveryMode
+			}
+		}
+		jobs[i].DeliveryMode = effectiveDeliveryMode(jobs[i].ID, rawMode, autoJobs)
 		jobs[i].Scheme = mwpack.LocalizeSchemeSummary(lang, s.deliveryScheme(jobs[i].ID, jobs[i].AppID, jobs[i].Scheme))
 	}
 	s.writeJSON(w, 200, jobs)
@@ -38,6 +46,47 @@ func (s *storeServer) removeFailedReservation(id string) {
 	s.mu.Lock()
 	delete(s.jobs, id)
 	s.mu.Unlock()
+}
+
+// deleteJobData safely removes a delivery's artifacts, inactive execution runs/logs, DB row, and in-memory record.
+// Component verification vouchers in comp-verifications/ remain intact as lightweight decoupled static evidence.
+func (s *storeServer) deleteJobData(id string) (int, string) {
+	s.mu.Lock()
+	j, ok := s.jobs[id]
+	s.mu.Unlock()
+	if !ok {
+		return 404, "交付记录不存在"
+	}
+	if j.State == "running" || j.State == "queued" {
+		return 409, "生成中不能删除"
+	}
+	executionMu.Lock()
+	locked := s.executionLocked(id)
+	executionMu.Unlock()
+	if locked {
+		return 409, "自动执行进行中，请先结束批次再删除"
+	}
+	dir := s.jobDir(id)
+	root, _ := filepath.Abs(filepath.Join(s.cfg.DataDir, "jobs"))
+	target, _ := filepath.Abs(dir)
+	if filepath.Dir(target) != root || filepath.Base(target) != id {
+		return 500, "任务路径无效"
+	}
+	if st, err := os.Lstat(target); err != nil || !st.IsDir() || st.Mode()&os.ModeSymlink != 0 {
+		return 500, "任务目录无效"
+	}
+	if err := os.RemoveAll(target); err != nil {
+		return 500, "交付材料删除失败"
+	}
+	s.purgeJobExecutions(id)
+	s.evictJobCaches(id)
+	if s.repo != nil {
+		if err := s.repo.deleteJob(id); err != nil {
+			return 500, "交付记录删除失败"
+		}
+	}
+	s.removeFailedReservation(id)
+	return 0, ""
 }
 func (s *storeServer) updateJob(id, state, stage, message string) {
 	s.jobPersistMu.Lock()
@@ -80,7 +129,7 @@ func (s *storeServer) handleJob(w http.ResponseWriter, r *http.Request, session 
 		s.fail(w, 404, "任务不存在")
 		return
 	}
-	mutatesExecution := len(parts) == 1 || (len(parts) > 1 && (parts[1] == "executions" || parts[1] == "sync" || parts[1] == "progress" || (parts[1] == "ai" && len(parts) > 2 && (parts[2] == "proposals" || parts[2] == "resolve"))))
+	mutatesExecution := len(parts) == 1 || (len(parts) > 1 && (parts[1] == "executions" || parts[1] == "sync" || parts[1] == "progress" || parts[1] == "scripts" || parts[1] == "patches" || (parts[1] == "ai" && len(parts) > 2 && (parts[2] == "proposals" || parts[2] == "resolve"))))
 	if mutatesExecution && r.Method != "GET" && r.Method != "HEAD" {
 		unlock := s.lockExecutionJob(id)
 		defer unlock()
@@ -103,6 +152,14 @@ func (s *storeServer) handleJob(w http.ResponseWriter, r *http.Request, session 
 		s.handleExecutions(w, r, session, j, parts[2:])
 		return
 	}
+	if len(parts) >= 2 && parts[1] == "scripts" {
+		s.handleDeliveryFiles(w, r, session, j, parts[2:])
+		return
+	}
+	if len(parts) >= 2 && parts[1] == "patches" {
+		s.handleDeliveryPatches(w, r, session, j, parts[2:])
+		return
+	}
 	if len(parts) == 1 && r.Method == "PATCH" {
 		var body struct {
 			Outcome string `json:"outcome"`
@@ -122,32 +179,10 @@ func (s *storeServer) handleJob(w http.ResponseWriter, r *http.Request, session 
 		return
 	}
 	if len(parts) == 1 && r.Method == "DELETE" {
-		if j.State == "running" || j.State == "queued" {
-			s.fail(w, 409, "生成中不能删除")
+		if code, msg := s.deleteJobData(id); code != 0 {
+			s.fail(w, code, msg)
 			return
 		}
-		dir := s.jobDir(id)
-		root, _ := filepath.Abs(filepath.Join(s.cfg.DataDir, "jobs"))
-		target, _ := filepath.Abs(dir)
-		if filepath.Dir(target) != root || filepath.Base(target) != id {
-			s.fail(w, 500, "任务路径无效")
-			return
-		}
-		if st, err := os.Lstat(target); err != nil || !st.IsDir() || st.Mode()&os.ModeSymlink != 0 {
-			s.fail(w, 500, "任务目录无效")
-			return
-		}
-		if err := os.RemoveAll(target); err != nil {
-			s.fail(w, 500, "交付材料删除失败")
-			return
-		}
-		if s.repo != nil {
-			if err := s.repo.deleteJob(id); err != nil {
-				s.fail(w, 500, "交付记录删除失败")
-				return
-			}
-		}
-		s.removeFailedReservation(id)
 		s.auditReq(r, "job-delete", session.User, id)
 		s.writeJSON(w, 200, map[string]bool{"ok": true})
 		return
@@ -182,6 +217,24 @@ func (s *storeServer) handleJob(w http.ResponseWriter, r *http.Request, session 
 		s.writeJSON(w, 200, map[string]bool{"ok": true})
 		return
 	}
+	if len(parts) == 3 && parts[1] == "sync" && parts[2] == "confirm" && r.Method == "POST" {
+		var in struct {
+			Sync int    `json:"sync"`
+			Mode string `json:"mode"`
+		}
+		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<14)).Decode(&in) != nil || in.Sync < 1 {
+			s.fail(w, 400, "提交的内容有问题")
+			return
+		}
+		sy, err := s.confirmSyncApplied(id, in.Sync, session.User, in.Mode)
+		if err != nil {
+			s.fail(w, 409, err.Error())
+			return
+		}
+		s.auditReq(r, "job-sync-confirm", session.User, fmt.Sprintf("%s #%d %s", id, in.Sync, sy.AppliedMode))
+		s.writeJSON(w, 200, sy)
+		return
+	}
 	if len(parts) >= 2 && parts[1] == "progress" {
 		if j.State != "succeeded" {
 			s.fail(w, 409, "交付材料尚未生成成功")
@@ -203,6 +256,34 @@ func (s *storeServer) handleJob(w http.ResponseWriter, r *http.Request, session 
 		return
 	}
 	if len(parts) == 1 {
+		lang := wLang(w)
+		autoJobs := s.autoExecutedJobs()
+		rawMode := j.DeliveryMode
+		if rawMode == "" {
+			if dep := s.readSpec(j.ID); dep != nil {
+				rawMode = dep.DeliveryMode
+			}
+		}
+		j.DeliveryMode = effectiveDeliveryMode(j.ID, rawMode, autoJobs)
+		j.Scheme = mwpack.LocalizeSchemeSummary(lang, s.deliveryScheme(j.ID, j.AppID, j.Scheme))
+		rawPlan := s.jobPlan(id)
+		if j.State == "succeeded" && len(j.Syncs) > 0 {
+			j.Syncs = s.enrichJobSyncs(id, parseSyncPlanMeta(rawPlan), j.Syncs)
+			// Retroactively ensure offline 01-*.md carries the latest sync check step for deliveries synced earlier.
+			if j.DeliveryMode != "automatic" && j.DeliveryMode != "configuration" {
+				last := j.Syncs[len(j.Syncs)-1]
+				if last.VerifyCmd != "" {
+					marker := syncDeploySectionMarker(last)
+					if docs, _ := filepath.Glob(filepath.Join(s.jobDir(id), "output", "01-*.md")); len(docs) > 0 {
+						if b, err := os.ReadFile(docs[0]); err == nil && !strings.Contains(string(b), marker) {
+							aiMu.Lock()
+							_ = s.applyAmendmentDocs(id)
+							aiMu.Unlock()
+						}
+					}
+				}
+			}
+		}
 		files := []map[string]any{}
 		if j.State == "succeeded" {
 			entries, _ := os.ReadDir(filepath.Join(s.jobDir(id), "output"))
@@ -213,9 +294,18 @@ func (s *storeServer) handleJob(w http.ResponseWriter, r *http.Request, session 
 				}
 			}
 		}
-		lang := wLang(w)
-		j.Scheme = mwpack.LocalizeSchemeSummary(lang, s.deliveryScheme(j.ID, j.AppID, j.Scheme))
-		s.writeJSON(w, 200, map[string]any{"job": j, "files": files, "spec": s.jobSpec(id), "plan": mwpack.LocalizePlanJSON(lang, s.jobPlan(id)), "lineage": s.lineageOf(j)})
+		var verifyTargets []jobPromoteTarget
+		if isTempVerificationJob(j) {
+			verifyTargets = s.jobPromotionTargets(j, session.User)
+		}
+		s.writeJSON(w, 200, map[string]any{
+			"job":                  j,
+			"files":                files,
+			"spec":                 s.jobSpec(id),
+			"plan":                 mwpack.LocalizePlanJSON(lang, rawPlan),
+			"lineage":              s.lineageOf(j),
+			"verification_promote": verifyTargets,
+		})
 		return
 	}
 	if j.State != "succeeded" {

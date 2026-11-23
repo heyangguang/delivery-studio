@@ -77,11 +77,21 @@ func (o *executionOutput) Write(p []byte) (int, error) {
 	return n, nil
 }
 
+func logAgent(level, format string, args ...any) {
+	line := fmt.Sprintf("%s %s %s\n", time.Now().Format(time.RFC3339), level, fmt.Sprintf(format, args...))
+	if level == "WARN" || level == "ERROR" {
+		_, _ = os.Stderr.WriteString(line)
+		return
+	}
+	_, _ = os.Stdout.WriteString(line)
+}
+
 func executionNodeCommand(args []string) error {
 	f := flag.NewFlagSet("execution-node", flag.ContinueOnError)
-	config := f.String("config", "execution-node.json", "执行节点配置文件，权限必须为 0600")
-	reconcile := f.String("ack-stopped", "", "异常中断后，核实现场已停止的步骤尝试 ID")
-	note := f.String("note", "", "核实过程及结论（含目标机器的远程任务检查）")
+	config := f.String("config", "execution-node.json", "path to execution node config file (mode 0600)")
+	check := f.Bool("check", false, "verify config, TLS trust, and platform connectivity then exit")
+	reconcile := f.String("ack-stopped", "", "acknowledge a manually verified stopped attempt ID after interruption")
+	note := f.String("note", "", "verification note explaining how on-site tasks were confirmed stopped")
 	if e := f.Parse(args); e != nil {
 		return e
 	}
@@ -90,7 +100,7 @@ func executionNodeCommand(args []string) error {
 		return e
 	}
 	if info.Mode().Perm()&0077 != 0 {
-		return errors.New("配置含认证令牌，请先 chmod 600 配置文件")
+		return errors.New("config file contains credentials and must have mode 0600 (run: chmod 600 " + *config + ")")
 	}
 	b, e := os.ReadFile(*config)
 	if e != nil {
@@ -98,11 +108,19 @@ func executionNodeCommand(args []string) error {
 	}
 	var cfg executionRunnerConfig
 	if e = json.Unmarshal(b, &cfg); e != nil {
-		return e
+		return fmt.Errorf("invalid config JSON: %w", e)
 	}
 	runner, e := newExecutionRunner(cfg)
 	if e != nil {
 		return e
+	}
+	if *check {
+		start := time.Now()
+		if e = runner.call("poll", map[string]any{"version": version, "protocol": 2, "heartbeat": true}, nil); e != nil {
+			return fmt.Errorf("platform connectivity check failed (%s): %w", runner.cfg.URL, e)
+		}
+		logAgent("INFO", "connectivity check passed version=%s url=%s latency=%dms", version, runner.cfg.URL, time.Since(start).Milliseconds())
+		return nil
 	}
 	lock, e := os.OpenFile(filepath.Join(runner.cfg.State, "runner.lock"), os.O_CREATE|os.O_RDWR, 0600)
 	if e != nil {
@@ -110,7 +128,7 @@ func executionNodeCommand(args []string) error {
 	}
 	defer lock.Close()
 	if e = lockFileExclusive(lock, true); e != nil {
-		return errors.New("该状态目录已有执行节点进程，不能同时启动")
+		return errors.New("another execution-node instance is already running for state dir " + runner.cfg.State)
 	}
 	defer unlockFileExclusive(lock)
 	if *reconcile != "" {
@@ -119,11 +137,28 @@ func executionNodeCommand(args []string) error {
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(signals)
-	go func() { <-signals; runner.stop.Store(true) }()
-	fmt.Println("执行节点已启动；只领取平台确认的步骤，退出时等待当前步骤结束。")
+	go func() {
+		sig := <-signals
+		logAgent("INFO", "received signal=%s, draining active task before exit", sig)
+		runner.stop.Store(true)
+	}()
+	logAgent("INFO", "execution-node started version=%s url=%s root=%s", version, runner.cfg.URL, runner.cfg.Root)
+	connected := false
+	everConnected := false
+	lastErr := ""
+	lastErrAt := time.Time{}
+	logPollErr := func(prefix string, err error) {
+		msg := err.Error()
+		if msg != lastErr || time.Since(lastErrAt) >= 30*time.Second {
+			logAgent("WARN", "%s: %s (retrying)", prefix, msg)
+			lastErr = msg
+			lastErrAt = time.Now()
+		}
+		connected = false
+	}
 	for !runner.stop.Load() {
 		if e = runner.recoverOutbox(); e != nil {
-			fmt.Fprintln(os.Stderr, "等待恢复连接或处理本地记录：", e)
+			logPollErr("outbox recovery pending", e)
 			time.Sleep(5 * time.Second)
 			continue
 		}
@@ -131,42 +166,66 @@ func executionNodeCommand(args []string) error {
 			Work        *executionWork        `json:"work"`
 			Preparation *executionPreparation `json:"preparation"`
 		}
+		pollStart := time.Now()
 		e = runner.call("poll", map[string]any{"version": version, "protocol": 2}, &resp)
 		if e != nil {
-			fmt.Fprintln(os.Stderr, "暂未连接平台：", e)
-		} else if resp.Preparation != nil {
-			e = runner.checkPreparation(*resp.Preparation)
-			if e != nil {
-				fmt.Fprintln(os.Stderr, "准备检查结果等待回传：", e)
+			logPollErr("platform poll failed", e)
+		} else {
+			if !connected {
+				latency := time.Since(pollStart).Milliseconds()
+				if everConnected {
+					logAgent("INFO", "reconnected to platform url=%s latency=%dms", runner.cfg.URL, latency)
+				} else {
+					logAgent("INFO", "connected to platform url=%s latency=%dms, polling for authorized tasks", runner.cfg.URL, latency)
+				}
+				connected = true
+				everConnected = true
+				lastErr = ""
 			}
-		} else if resp.Work != nil {
-			e = runner.execute(*resp.Work)
-			if e != nil {
-				fmt.Fprintln(os.Stderr, "本次步骤未继续：", e)
+			if resp.Preparation != nil {
+				logAgent("INFO", "running pre-check id=%s cluster=%s", resp.Preparation.ID, resp.Preparation.Snapshot.Cluster)
+				e = runner.checkPreparation(*resp.Preparation)
+				if e != nil {
+					logAgent("WARN", "pre-check result queued for retry id=%s err=%v", resp.Preparation.ID, e)
+				} else {
+					logAgent("INFO", "pre-check completed id=%s cluster=%s", resp.Preparation.ID, resp.Preparation.Snapshot.Cluster)
+				}
+			} else if resp.Work != nil {
+				logAgent("INFO", "executing run=%s step=%s", resp.Work.Run.ID, resp.Work.Step.Key)
+				e = runner.execute(*resp.Work)
+				if e != nil {
+					logAgent("WARN", "step execution halted run=%s step=%s err=%v", resp.Work.Run.ID, resp.Work.Step.Key, e)
+				} else {
+					logAgent("INFO", "step completed run=%s step=%s", resp.Work.Run.ID, resp.Work.Step.Key)
+				}
 			}
+		}
+		if runner.stop.Load() {
+			break
 		}
 		time.Sleep(3 * time.Second)
 	}
+	logAgent("INFO", "execution-node stopped cleanly")
 	return nil
 }
 func newExecutionRunner(cfg executionRunnerConfig) (*executionRunner, error) {
 	u, e := url.Parse(cfg.URL)
 	if e != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" && u.Path != "/" {
-		return nil, errors.New("平台地址无效")
+		return nil, errors.New("invalid platform url in config")
 	}
 	host := net.ParseIP(u.Hostname())
 	if u.Scheme != "https" && !(u.Scheme == "http" && host != nil && host.IsLoopback()) {
-		return nil, errors.New("执行节点必须通过 HTTPS 连接平台（本机测试除外）")
+		return nil, errors.New("platform url must use https (http is only allowed for loopback testing)")
 	}
 	if len(cfg.Token) < 40 || !filepath.IsAbs(cfg.Root) {
-		return nil, errors.New("请填写令牌和已解包的 middleware-automation 绝对路径")
+		return nil, errors.New("config requires a valid token and an absolute root path")
 	}
 	cfg.Root = filepath.Clean(cfg.Root)
 	if cfg.State == "" {
 		cfg.State = filepath.Join(cfg.Root, ".execution-node")
 	}
 	if !filepath.IsAbs(cfg.State) {
-		return nil, errors.New("state 必须为绝对路径")
+		return nil, errors.New("state must be an absolute path")
 	}
 	if e = os.MkdirAll(cfg.State, 0700); e != nil {
 		return nil, e
@@ -180,14 +239,14 @@ func newExecutionRunner(cfg executionRunnerConfig) (*executionRunner, error) {
 		}
 		b, e := os.ReadFile(cfg.CAFile)
 		if e != nil {
-			return nil, e
+			return nil, fmt.Errorf("failed to read ca_file %s: %w (download platform-ca.pem from the Hub or remove ca_file if using a publicly trusted cert)", cfg.CAFile, e)
 		}
 		if !roots.AppendCertsFromPEM(b) {
-			return nil, errors.New("CA 证书不可读取")
+			return nil, fmt.Errorf("invalid PEM certificate in ca_file %s", cfg.CAFile)
 		}
 		tr.TLSClientConfig.RootCAs = roots
 	}
-	return &executionRunner{cfg: cfg, http: &http.Client{Transport: tr, Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("执行节点 API 不接受重定向") }}}, nil
+	return &executionRunner{cfg: cfg, http: &http.Client{Transport: tr, Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("execution-node API does not allow HTTP redirects") }}}, nil
 }
 func (r *executionRunner) call(endpoint string, in, out any) error {
 	b, e := json.Marshal(in)
@@ -574,7 +633,7 @@ func (r *executionRunner) execute(w executionWork) error {
 	} // No acknowledgement, no process launch.
 	cmd := exec.Command(binary, "-i", "inventory/hosts.yml", w.Step.Playbook, "-e", "@.execution-vars.json")
 	cmd.Dir = project
-	cmd.Env = []string{"PATH=" + filepath.Join(r.cfg.Root, "bin") + ":/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "HOME=/root", "LANG=C.UTF-8", "ANSIBLE_CONFIG=" + filepath.Join(project, "ansible.cfg"), "ANSIBLE_NOCOLOR=1", "ANSIBLE_HOST_KEY_CHECKING=True"}
+	cmd.Env = []string{"PATH=" + filepath.Join(r.cfg.Root, "bin") + ":/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "HOME=/root", "LANG=C.UTF-8", "ANSIBLE_CONFIG=" + filepath.Join(project, "ansible.cfg"), "ANSIBLE_NOCOLOR=1", "ANSIBLE_HOST_KEY_CHECKING=True", "ANSIBLE_SSH_USETTY=False"}
 	setProcessGroup(cmd)
 	// Only callback output (honours no_log) is uploaded, never raw stdout.
 	diagnostic, err := os.OpenFile(filepath.Join(r.dir(id), "runner-output.log"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)

@@ -115,10 +115,32 @@ func (s *storeServer) executionSummary(b *docBuilder, level int, j storeJob, pro
 			rows = append(rows, []string{tab.Label + " · " + st.Title, status, source, stamp(at)})
 		}
 	}
-	b.p(tr(lang,
-		fmt.Sprintf("执行节点验证通过 %d 步；上传日志显示通过 %d 步；人工确认 %d 步；失败 %d 步；未执行/已跳过 %d 步；待完成或待核实 %d 步。", verified, imported, manual, failed, skipped, pending),
-		fmt.Sprintf("Passed via execution node: %d; via uploaded logs: %d; manually confirmed: %d; failed: %d; skipped: %d; pending or unverified: %d.", verified, imported, manual, failed, skipped, pending),
-	))
+	totalSteps := verified + imported + manual + failed + skipped + pending
+	var summaryParts []string
+	if verified > 0 {
+		summaryParts = append(summaryParts, tr(lang, fmt.Sprintf("执行节点验证通过 %d 步", verified), fmt.Sprintf("passed via execution node: %d", verified)))
+	}
+	if imported > 0 {
+		summaryParts = append(summaryParts, tr(lang, fmt.Sprintf("上传日志验证通过 %d 步", imported), fmt.Sprintf("passed via uploaded logs: %d", imported)))
+	}
+	if manual > 0 {
+		summaryParts = append(summaryParts, tr(lang, fmt.Sprintf("人工确认通过 %d 步", manual), fmt.Sprintf("manually confirmed: %d", manual)))
+	}
+	if skipped > 0 {
+		summaryParts = append(summaryParts, tr(lang, fmt.Sprintf("已跳过 %d 步", skipped), fmt.Sprintf("skipped: %d", skipped)))
+	}
+	if failed > 0 {
+		summaryParts = append(summaryParts, tr(lang, fmt.Sprintf("失败 %d 步", failed), fmt.Sprintf("failed: %d", failed)))
+	}
+	if pending > 0 {
+		summaryParts = append(summaryParts, tr(lang, fmt.Sprintf("待完成或待核实 %d 步", pending), fmt.Sprintf("pending or unverified: %d", pending)))
+	}
+	if totalSteps > 0 && len(summaryParts) > 0 {
+		b.p(tr(lang,
+			fmt.Sprintf("共 %d 步：%s。", totalSteps, strings.Join(summaryParts, "；")),
+			fmt.Sprintf("Total %d step(s): %s.", totalSteps, strings.Join(summaryParts, "; ")),
+		))
+	}
 	if failed > 0 || pending > 0 {
 		b.note(tr(lang, "仍有失败、未完成或待核实事项，当前记录不能作为全部验收通过的证明。", "Failures, pending items, or unverified steps remain; this record does not certify full acceptance."))
 	}
@@ -134,41 +156,35 @@ func (s *storeServer) executionSummary(b *docBuilder, level int, j storeJob, pro
 		b.list(follow)
 	}
 	if len(runs) > 0 {
-		b.h(level+1, tr(lang, "自动执行批次", "Automated Execution Batches"))
-		runRows := [][]string{}
+		evStart := len(b.blocks)
+		wroteHead := false
 		for _, r := range runs {
-			node := d.Nodes[r.Node]
-			location := map[string]string{"independent": tr(lang, "独立管理机", "Standalone runner"), "embedded": tr(lang, "集群内执行机", "In-cluster runner")}[r.ExecutorKind]
-			access := map[string]string{"existing-ssh": tr(lang, "已有 SSH", "Existing SSH"), "agent-trust": tr(lang, "Agent 配置信任后通过 SSH 执行", "Agent-trusted SSH")}[r.AccessMode]
-			runRows = append(runRows, []string{r.ID, executionStateLabel(lang, r.State), r.By, firstNonEmptyStr(r.ExecutorName, firstNonEmptyStr(node.Name, r.Node)) + " " + r.ExecutorIP + " " + location + " " + access, stamp(r.Created), r.Snapshot})
-		}
-		b.table([]string{tr(lang, "批次", "Batch"), tr(lang, "结果", "Result"), tr(lang, "发起人", "Initiator"), tr(lang, "执行节点", "Execution Node"), tr(lang, "发起时间", "Started"), tr(lang, "固定快照 SHA256", "Snapshot SHA256")}, runRows)
-		for _, r := range runs {
-			if p, ok := d.Preparations[r.Preparation]; ok {
-				b.h(level+2, tr(lang, "执行准备："+r.ID, "Execution Preparation: "+r.ID))
-				b.p(tr(lang, "检查时间："+stamp(p.Finished)+"；检查编号："+p.ID+"。以下为本批次启动前的检查记录，不计为数据库部署或业务验收通过。", "Checked at "+stamp(p.Finished)+"; check ID "+p.ID+". Pre-launch readiness checks below do not certify deployment or service acceptance."))
-				checks := [][]string{}
-				for _, c := range p.Checks {
-					checks = append(checks, []string{c.Host, c.Title, map[string]string{"passed": tr(lang, "通过", "Passed"), "blocked": tr(lang, "待处理", "Blocked")}[c.State], c.Message})
-				}
-				b.table([]string{tr(lang, "机器", "Host"), tr(lang, "检查项目", "Check"), tr(lang, "检查结果", "Result"), tr(lang, "说明", "Details")}, checks)
-			}
 			for _, st := range r.Steps {
-				start := len(b.blocks)
+				if st.Seq == 0 && st.Finished == "" && st.State == "pending" {
+					continue
+				}
+				if !wroteHead {
+					b.h(level+1, tr(lang, "Ansible 执行日志明细", "Ansible Execution Log Details"))
+					wroteHead = true
+				}
 				b.h(level+2, tr(lang, "执行证据："+st.Title, "Execution Evidence: "+st.Title))
-				b.p(tr(lang,
-					"批次 "+r.ID+"；尝试 "+st.ID+"；机器 "+strings.Join(st.Hosts, "、")+"；结果 "+executionStateLabel(lang, st.State)+"；开始 "+stamp(st.Started)+"；结束 "+stamp(st.Finished),
-					"Batch "+r.ID+"; attempt "+st.ID+"; hosts "+strings.Join(st.Hosts, ", ")+"; result "+executionStateLabel(lang, st.State)+"; started "+stamp(st.Started)+"; finished "+stamp(st.Finished),
-				))
-				b.p(st.Message)
+				var metaParts []string
+				if len(st.Hosts) > 0 {
+					metaParts = append(metaParts, tr(lang, "机器：", "Hosts: ")+strings.Join(st.Hosts, tr(lang, "、", ", ")))
+				}
+				metaParts = append(metaParts, tr(lang, "结果：", "Result: ")+executionStateLabel(lang, st.State))
+				stAt, finAt := stamp(st.Started), stamp(st.Finished)
+				if stAt != "" && finAt != "" && stAt != finAt {
+					metaParts = append(metaParts, tr(lang, "时间：", "Time: ")+stAt+" ~ "+finAt)
+				} else if t := firstNonEmptyStr(finAt, stAt); t != "" {
+					metaParts = append(metaParts, tr(lang, "时间：", "Time: ")+t)
+				}
 				if st.ExitCode != nil {
-					b.p(tr(lang, fmt.Sprintf("进程退出码：%d", *st.ExitCode), fmt.Sprintf("Process exit code: %d", *st.ExitCode)))
+					metaParts = append(metaParts, tr(lang, fmt.Sprintf("进程退出码：%d", *st.ExitCode), fmt.Sprintf("Exit code: %d", *st.ExitCode)))
 				}
-				if st.Runtime != "" {
-					b.p(st.Runtime)
-				}
-				if st.Returned != "" {
-					b.p(tr(lang, "平台收到结果："+stamp(st.Returned), "Result reported at "+stamp(st.Returned)))
+				b.p(strings.Join(metaParts, tr(lang, "　　", "    ")))
+				if msg := strings.TrimSpace(st.Message); msg != "" && msg != "任务与组件声明的完成检查通过" {
+					b.p(msg)
 				}
 				recap := [][]string{}
 				for _, h := range st.Recap {
@@ -178,17 +194,16 @@ func (s *storeServer) executionSummary(b *docBuilder, level int, j storeJob, pro
 				log := []rune(string(s.executionLog(r.ID, st)))
 				if len(log) > 12000 {
 					log = log[len(log)-12000:]
-					b.note(tr(lang, "以下保留最近 12000 字符。完整脱敏日志可在这份交付的执行批次下载。", "Showing last 12,000 characters; full redacted logs are downloadable under this delivery's execution batches."))
+					b.note(tr(lang, "以下保留最近 12000 字符，完整日志可在平台执行记录中查看。", "Showing last 12,000 characters; full logs remain available in the platform execution records."))
 				}
 				if len(log) > 0 {
-					b.code(string(log))
-				}
-				b.p(tr(lang, "完整日志：", "Full log: ") + strings.TrimRight(s.cfg.PublicURL, "/") + "/api/jobs/" + j.ID + "/executions/" + r.ID + "/logs/" + st.ID)
-				for i := start; i < len(b.blocks); i++ {
-					b.blocks[i].Detail = true
-					b.blocks[i].Variant = variantResult
+					b.blocks = append(b.blocks, docBlock{Kind: "code", Style: "ansible", Text: string(log)})
 				}
 			}
+		}
+		for i := evStart; i < len(b.blocks); i++ {
+			b.blocks[i].Detail = true
+			b.blocks[i].Variant = variantResultAuto
 		}
 	}
 }

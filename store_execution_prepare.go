@@ -8,18 +8,24 @@ import (
 	"os"
 	"sort"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 type executionCheck struct {
-	ID      string `json:"id"`
-	Title   string `json:"title"`
-	Host    string `json:"host,omitempty"`
-	State   string `json:"state"`
-	Message string `json:"message"`
+	ID       string   `json:"id"`
+	Title    string   `json:"title"`
+	Host     string   `json:"host,omitempty"`
+	State    string   `json:"state"`
+	Message  string   `json:"message"`
+	Warnings []string `json:"warnings,omitempty"`
 }
 type executionPreparation struct {
 	SnapshotHash string            `json:"snapshot_hash,omitempty"`
+	EnvHash      string            `json:"env_hash,omitempty"`
+	EnvMatch     bool              `json:"env_match,omitempty"`
 	Invalidated  string            `json:"invalidated,omitempty"`
+	ExecutorName string            `json:"executor_name,omitempty"`
 	ID           string            `json:"id"`
 	Job          string            `json:"job"`
 	Node         string            `json:"node"`
@@ -31,6 +37,53 @@ type executionPreparation struct {
 	State        string            `json:"state"`
 	Checks       []executionCheck  `json:"checks"`
 	Snapshot     executionSnapshot `json:"snapshot,omitempty"`
+}
+
+// executionEnvDigest hashes the target environment, host topology, runtime binaries, access keys, and offline repo
+// package declarations — intentionally excluding playbook/role text so step hotfixes and component script syncs reuse
+// an already-verified environment preparation while automatically pushing updated scripts into .hub-<newRunID>.
+func executionEnvDigest(snap executionSnapshot) string {
+	var allVars map[string]any
+	if raw := snap.Files["inventory/group_vars/all.yml"]; len(raw) > 0 {
+		_ = yaml.Unmarshal(raw, &allVars)
+	}
+	materialsKey := map[string]any{}
+	if allVars != nil {
+		for _, k := range []string{"mw_upload_dir", "mw_repos", "mw_instances", "mw_change", "mw_secret_list"} {
+			if v, ok := allVars[k]; ok {
+				materialsKey[k] = v
+			}
+		}
+	}
+	payload := struct {
+		Job           string                `json:"job"`
+		Cluster       string                `json:"cluster"`
+		Project       string                `json:"project"`
+		Platform      string                `json:"platform"`
+		ControllerIP  string                `json:"controller_ip"`
+		ExecutionHost *mwpack.ExecutionHost `json:"execution_host,omitempty"`
+		RuntimeRoot   string                `json:"runtime_root,omitempty"`
+		Hosts         []mwpack.Host         `json:"hosts"`
+		RuntimeFiles  map[string]string     `json:"runtime_files,omitempty"`
+		AgentAccess   map[string]string     `json:"agent_access,omitempty"`
+		AgentIdentity map[string]string     `json:"agent_identity,omitempty"`
+		Materials     map[string]any        `json:"materials,omitempty"`
+	}{
+		Job:           snap.Job,
+		Cluster:       snap.Cluster,
+		Project:       snap.Project,
+		Platform:      snap.Platform,
+		ControllerIP:  snap.ControllerIP,
+		ExecutionHost: snap.ExecutionHost,
+		RuntimeRoot:   snap.RuntimeRoot,
+		Hosts:         snap.Hosts,
+		RuntimeFiles:  snap.RuntimeFiles,
+		AgentAccess:   snap.AgentAccess,
+		AgentIdentity: snap.AgentIdentity,
+		Materials:     materialsKey,
+	}
+	b, _ := json.Marshal(payload)
+	return digest(b)
 }
 type executionNodeOption struct {
 	executionNode
@@ -98,12 +151,25 @@ func validateExecutionPreparation(p executionPreparation, n executionNode, snap 
 	if p.ID == "" || p.Node != n.ID || p.Job != snap.Job || p.State != "ready" || p.Invalidated != "" {
 		return errors.New("请先完成执行准备检查")
 	}
-	if p.Revision != rev || p.NodeRevision != executionNodeRevision(n) {
-		return errors.New("交付或执行节点已变化，请重新检查")
+	if p.NodeRevision != executionNodeRevision(n) {
+		return errors.New("执行节点配置或授权已变化，请重新检查")
 	}
 	t, e := time.Parse(time.RFC3339Nano, p.Finished)
-	if e != nil || time.Since(t) > 10*time.Minute {
-		return errors.New("准备检查已超过 10 分钟，请重新检查")
+	maxAge := 10 * time.Minute
+	if p.EnvHash != "" {
+		maxAge = 60 * time.Minute
+	}
+	if e != nil || time.Since(t) > maxAge {
+		return errors.New("准备检查已过期，请重新检查")
+	}
+	if p.EnvHash != "" {
+		if p.EnvHash != executionEnvDigest(snap) {
+			return errors.New("目标机器、运行环境或离线软件包材料已变化，请重新检查")
+		}
+		return nil
+	}
+	if p.Revision != rev {
+		return errors.New("交付或执行节点已变化，请重新检查")
 	}
 	b, _ := json.Marshal(snap)
 	want := p.SnapshotHash
@@ -239,7 +305,7 @@ func (s *storeServer) handleExecutionPreparation(w http.ResponseWriter, r *http.
 		s.fail(w, 409, "执行快照超过 48 MiB，请拆分交付")
 		return true
 	}
-	p := executionPreparation{ID: randomStoreToken(12), Job: j.ID, Node: n.ID, By: session.User, Created: executionNow(), Revision: req.Revision, NodeRevision: executionNodeRevision(n), State: "pending", Checks: []executionCheck{}, Snapshot: snap}
+	p := executionPreparation{ID: randomStoreToken(12), Job: j.ID, Node: n.ID, ExecutorName: n.Name, By: session.User, Created: executionNow(), Revision: req.Revision, NodeRevision: executionNodeRevision(n), EnvHash: executionEnvDigest(snap), State: "pending", Checks: []executionCheck{}, Snapshot: snap}
 	raw, _ := json.Marshal(snap)
 	p.SnapshotHash = digest(raw)
 	if e = atomicExecutionJSON(s.executionPath("preparations", p.ID+".json"), snap); e != nil {
@@ -350,6 +416,9 @@ func (s *storeServer) handleExecutionPrepared(w http.ResponseWriter, r *http.Req
 	}
 	p.Checks = req.Checks
 	p.Finished = executionNow()
+	if p.ExecutorName == "" {
+		p.ExecutorName = n.Name
+	}
 	p.State = "blocked"
 	if ready {
 		p.State = "ready"
@@ -358,6 +427,9 @@ func (s *storeServer) handleExecutionPrepared(w http.ResponseWriter, r *http.Req
 	if e := s.saveExecutions(*d); e != nil {
 		s.fail(w, 500, "检查结果尚未保存，请重传")
 		return
+	}
+	if p.State == "ready" {
+		s.projectPreparationResult(p)
 	}
 	s.writeJSON(w, 200, map[string]bool{"ack": true})
 }

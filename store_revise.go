@@ -84,7 +84,22 @@ func (s *storeServer) lineageOf(j storeJob) *lineage {
 }
 
 func (s *storeServer) readSpec(id string) *mwpack.Deployment {
-	b, err := os.ReadFile(filepath.Join(s.jobDir(id), "deployment.yml"))
+	path := filepath.Join(s.jobDir(id), "deployment.yml")
+	st, statErr := os.Stat(path)
+	if statErr != nil {
+		return nil
+	}
+	mod := st.ModTime().UnixNano()
+	sz := st.Size()
+
+	s.cacheMu.RLock()
+	if hit, ok := s.specCache[id]; ok && hit.modTime == mod && hit.size == sz {
+		s.cacheMu.RUnlock()
+		return hit.dep
+	}
+	s.cacheMu.RUnlock()
+
+	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil
 	}
@@ -92,6 +107,13 @@ func (s *storeServer) readSpec(id string) *mwpack.Deployment {
 	if err != nil {
 		return nil
 	}
+
+	s.cacheMu.Lock()
+	if s.specCache == nil {
+		s.specCache = map[string]cachedJobSpec{}
+	}
+	s.specCache[id] = cachedJobSpec{modTime: mod, size: sz, dep: d}
+	s.cacheMu.Unlock()
 	return d
 }
 
@@ -340,6 +362,31 @@ func (s *storeServer) packageChanges(from, to string) []Change {
 	return out
 }
 
+// extractProjectFileRel matches "middleware-automation/projects/<project>/files/<rel>" inside a
+// delivery tarball, accepting both the bare cluster ID and versioned change project directories
+// such as "<clusterID>.01", "<clusterID>.02", etc.
+func extractProjectFileRel(tarPath, clusterID string) (string, bool) {
+	name := strings.TrimPrefix(filepath.ToSlash(tarPath), "./")
+	const rootPrefix = "middleware-automation/projects/"
+	after, ok := strings.CutPrefix(name, rootPrefix)
+	if !ok {
+		return "", false
+	}
+	idx := strings.Index(after, "/files/")
+	if idx <= 0 {
+		return "", false
+	}
+	proj := after[:idx]
+	rest := after[idx+len("/files/"):]
+	if rest == "" {
+		return "", false
+	}
+	if clusterID != "" && proj != clusterID && !strings.HasPrefix(proj, clusterID+".") {
+		return "", false
+	}
+	return rest, true
+}
+
 // sourceCertificates are the certificate files a delivery carries, by instance/input/file, read from its controller
 // package. They were checked when that delivery was made.
 func (s *storeServer) sourceCertificates(id string) map[string][]byte {
@@ -347,29 +394,37 @@ func (s *storeServer) sourceCertificates(id string) map[string][]byte {
 	s.mu.Lock()
 	j := s.jobs[id]
 	s.mu.Unlock()
-	if j.ClusterID == "" {
+	clusterID := j.ClusterID
+	if clusterID == "" {
+		if dep := s.readSpec(id); dep != nil {
+			clusterID = dep.ID
+		}
+	}
+	if clusterID == "" {
 		return out
 	}
-	prefix := "middleware-automation/projects/" + j.ClusterID + "/files/"
-	files, _ := filepath.Glob(filepath.Join(s.jobDir(id), "output", "node*.tar.gz"))
-	for _, path := range files {
+	readTar := func(path string) {
 		f, err := os.Open(path)
 		if err != nil {
-			continue
+			return
 		}
+		defer f.Close()
 		zr, err := gzip.NewReader(f)
 		if err != nil {
-			f.Close()
-			continue
+			return
 		}
+		defer zr.Close()
 		tr := tar.NewReader(zr)
 		for {
 			h, err := tr.Next()
 			if err != nil {
 				break
 			}
-			rest, ok := strings.CutPrefix(h.Name, prefix)
-			if !ok || h.Typeflag != tar.TypeReg || h.Size > 2<<20 {
+			if (h.Typeflag != tar.TypeReg && h.Typeflag != tar.TypeRegA) || h.Size > 2<<20 {
+				continue
+			}
+			rest, ok := extractProjectFileRel(h.Name, clusterID)
+			if !ok {
 				continue
 			}
 			if parts := strings.Split(rest, "/"); len(parts) == 3 && (parts[2] == "server.crt" || parts[2] == "server.key" || parts[2] == "ca.crt") {
@@ -378,11 +433,20 @@ func (s *storeServer) sourceCertificates(id string) map[string][]byte {
 				}
 			}
 		}
-		zr.Close()
-		f.Close()
+	}
+	nodeFiles, _ := filepath.Glob(filepath.Join(s.jobDir(id), "output", "node*.tar.gz"))
+	sort.Strings(nodeFiles)
+	for _, path := range nodeFiles {
+		readTar(path)
 		if len(out) > 0 {
 			break
 		}
+	}
+	// Overlay any newer certificate updates carried in update-*.tar.gz bundles.
+	updateFiles, _ := filepath.Glob(filepath.Join(s.jobDir(id), "output", "update-*.tar.gz"))
+	sort.Strings(updateFiles)
+	for _, path := range updateFiles {
+		readTar(path)
 	}
 	return out
 }

@@ -16,6 +16,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"middleware-deployer/mwpack"
 )
 
 func TestExecutionReport(t *testing.T) {
@@ -285,5 +287,124 @@ func TestRunLogsFillTheRecord(t *testing.T) {
 	}
 	if len(s.runLogs(j.ID)) != 0 {
 		t.Fatal("logs outlived the record")
+	}
+}
+
+func TestTerminalTranscriptAndWordExport(t *testing.T) {
+	// 1. Verify buildTerminalTranscript strips Ansible boilerplate/telemetry and pairs real commands with real host output.
+	rawLog := strings.Join([]string{
+		"18:11:52 playbook   tests/vip/vip-holder.yml",
+		"18:11:52 started    2026-11-19 18:11:52 +0800",
+		"18:11:52 PLAY  确认集群标识",
+		"18:11:52 TASK  必须带 -e confirm_cluster=verify-keepalived-ha",
+		"18:11:52   ok          ka-1",
+		"18:11:52     msg: All assertions passed",
+		"18:11:52 PLAY  [vip] VIP 持有者",
+		"18:11:52 TASK  keepalived : 读取本机网卡地址",
+		"18:11:53   ok          ka-1",
+		"18:11:53     stdout:",
+		"18:11:53       2: eth0    inet 172.26.198.120/20 scope global dynamic eth0",
+		"18:11:53       2: eth0    inet 172.26.198.250/20 scope global secondary eth0",
+		"18:11:53     delta: 0:00:00.007667",
+		"18:11:53     ansible_job_id: j12345",
+		"18:11:53   ok          ka-2",
+		"18:11:53     stdout: 2: eth0    inet 172.26.198.118/20 scope global dynamic eth0",
+		"18:11:53     delta: 0:00:00.007505",
+		"18:11:53 TASK  keepalived : 恰好一台机器持有 VIP",
+		"18:11:53   ok          ka-1",
+		"18:11:53     msg: VIP 172.26.198.250 由 ka-1 持有",
+		"18:11:53 TASK  核对步骤完成条件",
+		"18:11:53   ok          ka-1",
+		"18:11:53     msg: All assertions passed",
+		"18:11:53 RECAP",
+		"18:11:53   ka-1                 ok=3 changed=0 unreachable=0 failed=0 skipped=0",
+		"18:11:53   ka-2                 ok=2 changed=0 unreachable=0 failed=0 skipped=0",
+		"18:11:53 RESULT  PASSED",
+	}, "\n")
+	rl := parseRunLog("vip-holder.log", []byte(rawLog))
+	step := reportStep{
+		Key:   "tests/vip/vip-holder",
+		Title: "[vip] VIP 持有者",
+		Hosts: []string{"ka-1", "ka-2"},
+		Parts: []planStepDoc{{
+			Actions: []mwpack.Action{
+				{Name: "读取本机网卡地址", Cmd: "ip -4 -o addr show dev eth0"},
+				{Name: "恰好一台机器持有 VIP", Check: true},
+			},
+		}},
+	}
+	exit0 := 0
+	hostIPs := map[string]string{"ka-1": "172.26.198.120", "ka-2": "172.26.198.118"}
+	term := buildTerminalTranscript(step, rl, hostIPs, terminalMeta{
+		State:    "succeeded",
+		ExitCode: &exit0,
+		Hosts:    []string{"ka-1", "ka-2"},
+	}, "")
+	for _, want := range []string{
+		"ka-1 (172.26.198.120)",
+		"ka-2 (172.26.198.118)",
+		"PASSED (exit 0)",
+		"[root@ka-1 ~]# ip -4 -o addr show dev eth0",
+		"172.26.198.250/20",
+		"[root@ka-2 ~]# ip -4 -o addr show dev eth0",
+		"172.26.198.118/20",
+		"VIP 172.26.198.250 由 ka-1 持有",
+	} {
+		if !strings.Contains(term, want) {
+			t.Fatalf("terminal transcript missing %q:\n%s", want, term)
+		}
+	}
+	for _, unwanted := range []string{"delta:", "ansible_job_id:", "confirm_cluster", "All assertions passed"} {
+		if strings.Contains(term, unwanted) {
+			t.Fatalf("terminal transcript leaked Ansible noise %q:\n%s", unwanted, term)
+		}
+	}
+
+	// 2. Verify formatManualTerminalLog wraps clean 2-line manual command with host prompt.
+	man := formatManualTerminalLog(reportStep{
+		Title:   "核对上传文件",
+		Hosts:   []string{"ka-1"},
+		Command: "cd /tmp/mw-upload\nsha256sum --check SHA256SUMS",
+	}, hostIPs, "packages.tar.gz: OK\n", "")
+	if !strings.Contains(man, "[root@ka-1 ~]# cd /tmp/mw-upload && sha256sum --check SHA256SUMS") || !strings.Contains(man, "packages.tar.gz: OK") {
+		t.Fatalf("unexpected manual terminal log:\n%s", man)
+	}
+
+	// 3. Verify export filtering by log_style=cmd vs log_style=auto vs log_style=cmd,auto and Word dark terminal + shell syntax XML.
+	doc := &clusterDoc{
+		Title: "交付报告",
+		Blocks: []docBlock{
+			{Kind: "h", Level: 1, Text: "1 步骤"},
+			{Kind: "code", Style: "shell", Variant: variantCmd, Detail: true, Text: "# ka-1 (172.26.198.120) root  检查网卡\nip -4 -o addr show dev eth0"},
+			{Kind: "code", Style: "terminal", Variant: variantResultCmd, Detail: true, Text: term},
+			{Kind: "code", Style: "ansible", Variant: variantResultAuto, Detail: true, Text: rawLog},
+		},
+	}
+	cmdOnly := parseExportOptions(map[string][]string{"detail": {"1"}, "steps": {"cmd"}, "results": {"1"}, "log_style": {"cmd"}}).filtered(doc)
+	if len(cmdOnly.Blocks) != 3 {
+		t.Fatalf("log_style=cmd expected 3 blocks (h + shell + terminal), got %d: %+v", len(cmdOnly.Blocks), cmdOnly.Blocks)
+	}
+	autoOnly := parseExportOptions(map[string][]string{"detail": {"1"}, "steps": {"cmd"}, "results": {"1"}, "log_style": {"auto"}}).filtered(doc)
+	if len(autoOnly.Blocks) != 3 || autoOnly.Blocks[2].Variant != variantResultAuto {
+		t.Fatalf("log_style=auto expected ansible log block, got %+v", autoOnly.Blocks)
+	}
+	bothLogs := parseExportOptions(map[string][]string{"detail": {"1"}, "steps": {"cmd"}, "results": {"1"}, "log_style": {"cmd,auto"}}).filtered(doc)
+	if len(bothLogs.Blocks) != 4 {
+		t.Fatalf("log_style=cmd,auto expected all 4 blocks, got %d", len(bothLogs.Blocks))
+	}
+
+	w := newDocxWriter(themeOf("teal"), "rIdTest")
+	writeDocBody(w, cmdOnly, 0, nil)
+	xmlOut := w.b.String()
+	for _, wantXML := range []string{
+		`w:color w:val="1D4ED8"`, // shell command verb highlight
+		`w:color w:val="4D7C0F"`, // shell flag highlight
+		`w:fill="0F172A"`,        // dark Linux terminal background
+		`w:color w:val="4ADE80"`, // green terminal prompt
+		`[root@ka-1 ~]# `,
+	} {
+		if !strings.Contains(xmlOut, wantXML) {
+			t.Fatalf("docx XML missing %q", wantXML)
+		}
 	}
 }

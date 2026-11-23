@@ -510,14 +510,114 @@ func splitInlineShellComment(line string) (cmd, comment string) {
 	return line, ""
 }
 
+var (
+	reTerminalPrompt = regexp.MustCompile(`^(\[[^\]]+\][#$]\s+)(.*)$`)
+)
+
+func isShellFlagToken(tok string) bool {
+	if len(tok) < 2 || tok[0] != '-' {
+		return false
+	}
+	if tok == "-" || tok == "--" {
+		return false
+	}
+	return (tok[1] >= 'a' && tok[1] <= 'z') || (tok[1] >= 'A' && tok[1] <= 'Z') || (tok[1] >= '0' && tok[1] <= '9') || tok[1] == '-'
+}
+
+func isShellOpToken(tok string) bool {
+	switch tok {
+	case "|", "||", "&&", ";", ">", ">>", "<", "2>&1":
+		return true
+	}
+	return false
+}
+
+// writeShellCmdRuns emits syntax-highlighted Word runs for one shell command line matching enterprise ops manuals:
+// command verbs in deep blue (#1D4ED8), CLI flags in olive green (#4D7C0F), operators in muted steel, args in ink.
+func (w *docxWriter) writeShellCmdRuns(cmd string, th docxTheme) {
+	writeSeg := func(seg, color string, bold bool) {
+		if seg == "" {
+			return
+		}
+		w.b.WriteString(`<w:r><w:rPr>`)
+		if bold {
+			w.b.WriteString(`<w:b/>`)
+		}
+		fmt.Fprintf(&w.b, `<w:color w:val="%s"/></w:rPr><w:t xml:space="preserve">%s</w:t></w:r>`, color, esc(seg))
+	}
+	n := len(cmd)
+	i := 0
+	expectCmd := true
+	for i < n {
+		// Preserve runs of whitespace verbatim.
+		if cmd[i] == ' ' || cmd[i] == '\t' {
+			start := i
+			for i < n && (cmd[i] == ' ' || cmd[i] == '\t') {
+				i++
+			}
+			writeSeg(cmd[start:i], th.CmdHex, false)
+			continue
+		}
+		// Quoted string stays intact as one token.
+		if cmd[i] == '"' || cmd[i] == '\'' {
+			q := cmd[i]
+			start := i
+			i++
+			for i < n && cmd[i] != q {
+				if cmd[i] == '\\' && q == '"' && i+1 < n {
+					i++
+				}
+				i++
+			}
+			if i < n {
+				i++
+			}
+			writeSeg(cmd[start:i], "0F766E", false)
+			expectCmd = false
+			continue
+		}
+		start := i
+		for i < n && cmd[i] != ' ' && cmd[i] != '\t' {
+			i++
+		}
+		tok := cmd[start:i]
+		switch {
+		case isShellOpToken(tok):
+			writeSeg(tok, "64748B", true)
+			expectCmd = tok == "|" || tok == "||" || tok == "&&" || tok == ";"
+		case expectCmd:
+			if strings.Contains(tok, "=") && !strings.HasPrefix(tok, "-") && !strings.Contains(tok, "/") {
+				writeSeg(tok, "0F766E", false)
+				// Environment assignment before command verb (e.g. PGPASSWORD=... psql).
+				continue
+			}
+			writeSeg(tok, "1D4ED8", false)
+			expectCmd = tok == "sudo" || tok == "env" || tok == "nohup" || tok == "time"
+		case isShellFlagToken(tok):
+			writeSeg(tok, "4D7C0F", false)
+		default:
+			writeSeg(tok, th.CmdHex, false)
+		}
+	}
+}
+
+func looksLikeAnsibleLogText(text string) bool {
+	return strings.Contains(text, "TASK  ") || strings.Contains(text, "PLAY  ") || strings.Contains(text, "STEP_RESULT ") || strings.Contains(text, "\nRECAP\n")
+}
+
 // code emits a crisp full-width shaded code block matching enterprise manual typography:
-// monospace Consolas/YaHei ink for commands and muted italic blue-grey (#5F7A8A) for comments.
+// monospace Consolas/YaHei ink with shell syntax highlighting and muted italic blue-grey (#5F7A8A) comments.
 func (w *docxWriter) code(text string) {
+	w.codeStyled(text, "")
+}
+
+func (w *docxWriter) codeStyled(text, style string) {
 	lines := strings.Split(strings.TrimRight(strings.ReplaceAll(text, "\r\n", "\n"), "\n"), "\n")
 	if len(lines) == 0 {
 		return
 	}
 	th := w.th()
+	isAnsible := style == "ansible" || looksLikeAnsibleLogText(text)
 	w.b.WriteString(`<w:tbl><w:tblPr>`)
 	fmt.Fprintf(&w.b, `<w:tblW w:w="%d" w:type="dxa"/><w:tblLayout w:type="fixed"/>`, docxBodyWidth)
 	w.b.WriteString(`<w:tblBorders>`)
@@ -545,18 +645,74 @@ func (w *docxWriter) code(text string) {
 				col = "B91C1C"
 			}
 			fmt.Fprintf(&w.b, `<w:r><w:rPr><w:i/><w:color w:val="%s"/></w:rPr><w:t xml:space="preserve">%s</w:t></w:r>`, col, esc(line))
+		case isAnsible:
+			fmt.Fprintf(&w.b, `<w:r><w:rPr><w:color w:val="%s"/></w:rPr><w:t xml:space="preserve">%s</w:t></w:r>`, th.CmdHex, esc(line))
 		default:
 			cmd, comment := splitInlineShellComment(line)
-			if comment == "" {
-				fmt.Fprintf(&w.b, `<w:r><w:rPr><w:color w:val="%s"/></w:rPr><w:t xml:space="preserve">%s</w:t></w:r>`, th.CmdHex, esc(cmd))
-			} else {
+			w.writeShellCmdRuns(cmd, th)
+			if comment != "" {
 				col := th.CommentHex
 				if isCautionComment(comment) {
 					col = "B91C1C"
 				}
-				fmt.Fprintf(&w.b, `<w:r><w:rPr><w:color w:val="%s"/></w:rPr><w:t xml:space="preserve">%s</w:t></w:r>`, th.CmdHex, esc(cmd))
 				fmt.Fprintf(&w.b, `<w:r><w:rPr><w:i/><w:color w:val="%s"/></w:rPr><w:t xml:space="preserve">%s</w:t></w:r>`, col, esc(comment))
 			}
+		}
+		w.b.WriteString(`</w:p>`)
+	}
+	w.b.WriteString(`</w:tc></w:tr></w:tbl><w:p><w:pPr><w:spacing w:before="0" w:after="90"/></w:pPr></w:p>`)
+}
+
+// terminal emits a crisp dark Linux terminal transcript block ([root@host ~]# cmd + stdout/stderr)
+// suitable for customer delivery evidence in Word and WPS Office.
+func (w *docxWriter) terminal(text string) {
+	lines := strings.Split(strings.TrimRight(strings.ReplaceAll(text, "\r\n", "\n"), "\n"), "\n")
+	if len(lines) == 0 {
+		return
+	}
+	w.b.WriteString(`<w:tbl><w:tblPr>`)
+	fmt.Fprintf(&w.b, `<w:tblW w:w="%d" w:type="dxa"/><w:tblLayout w:type="fixed"/>`, docxBodyWidth)
+	w.b.WriteString(`<w:tblBorders>`)
+	for _, edge := range []string{"top", "left", "bottom", "right"} {
+		fmt.Fprintf(&w.b, `<w:%s w:val="single" w:sz="6" w:space="0" w:color="334155"/>`, edge)
+	}
+	w.b.WriteString(`</w:tblBorders>`)
+	w.b.WriteString(`<w:tblCellMar><w:top w:w="120" w:type="dxa"/><w:left w:w="170" w:type="dxa"/><w:bottom w:w="120" w:type="dxa"/><w:right w:w="170" w:type="dxa"/></w:tblCellMar>`)
+	fmt.Fprintf(&w.b, `</w:tblPr><w:tblGrid><w:gridCol w:w="%d"/></w:tblGrid><w:tr><w:tc>`, docxBodyWidth)
+	fmt.Fprintf(&w.b, `<w:tcPr><w:tcW w:w="%d" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="0F172A"/></w:tcPr>`, docxBodyWidth)
+
+	for i, line := range lines {
+		after := "16"
+		if i == len(lines)-1 {
+			after = "0"
+		}
+		fmt.Fprintf(&w.b, `<w:p><w:pPr><w:pStyle w:val="Code"/><w:spacing w:before="0" w:after="%s" w:line="240" w:lineRule="auto"/></w:pPr>`, after)
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case trimmed == "":
+			w.b.WriteString(`<w:r><w:t> </w:t></w:r>`)
+		case reTerminalPrompt.MatchString(line):
+			m := reTerminalPrompt.FindStringSubmatch(line)
+			fmt.Fprintf(&w.b, `<w:r><w:rPr><w:b/><w:color w:val="4ADE80"/></w:rPr><w:t xml:space="preserve">%s</w:t></w:r>`, esc(m[1]))
+			if m[2] != "" {
+				fmt.Fprintf(&w.b, `<w:r><w:rPr><w:b/><w:color w:val="F8FAFC"/></w:rPr><w:t xml:space="preserve">%s</w:t></w:r>`, esc(m[2]))
+			}
+		case strings.HasPrefix(trimmed, "# ✓") || strings.HasPrefix(trimmed, "✓ "):
+			fmt.Fprintf(&w.b, `<w:r><w:rPr><w:color w:val="4ADE80"/></w:rPr><w:t xml:space="preserve">%s</w:t></w:r>`, esc(line))
+		case strings.HasPrefix(trimmed, "# ✗") || strings.HasPrefix(trimmed, "stderr:") || strings.HasPrefix(trimmed, "[FAILED") || strings.HasPrefix(trimmed, "[UNREACHABLE") || strings.HasPrefix(trimmed, "[exit code:"):
+			fmt.Fprintf(&w.b, `<w:r><w:rPr><w:color w:val="F87171"/></w:rPr><w:t xml:space="preserve">%s</w:t></w:r>`, esc(line))
+		case strings.HasPrefix(trimmed, "#"):
+			col := "94A3B8"
+			if strings.Contains(trimmed, "FAILED") {
+				col = "F87171"
+			} else if strings.Contains(trimmed, "[OK") {
+				col = "4ADE80"
+			}
+			fmt.Fprintf(&w.b, `<w:r><w:rPr><w:color w:val="%s"/></w:rPr><w:t xml:space="preserve">%s</w:t></w:r>`, col, esc(line))
+		case strings.HasSuffix(trimmed, ": OK") || trimmed == "active":
+			fmt.Fprintf(&w.b, `<w:r><w:rPr><w:color w:val="86EFAC"/></w:rPr><w:t xml:space="preserve">%s</w:t></w:r>`, esc(line))
+		default:
+			fmt.Fprintf(&w.b, `<w:r><w:rPr><w:color w:val="E2E8F0"/></w:rPr><w:t xml:space="preserve">%s</w:t></w:r>`, esc(line))
 		}
 		w.b.WriteString(`</w:p>`)
 	}

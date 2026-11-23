@@ -22,13 +22,14 @@ import {
 } from "@arco-design/web-react";
 import {
   IconArrowLeft,
-  IconCheck,
+  IconCheckCircleFill,
   IconCloudDownload,
   IconCopy,
   IconDelete,
   IconDownload,
   IconExclamationCircle,
   IconFilter,
+  IconLock,
   IconMore,
   IconPlus,
   IconRefresh,
@@ -45,9 +46,10 @@ import {
   dayLabel,
   duration,
   err,
-  fetchText,
+  formatDuration,
   fullTime,
   phaseOf,
+  platformShort,
   running,
   size,
   typing,
@@ -70,10 +72,14 @@ import type {
   Job,
   JobDetail,
   JobFile,
+  JobPromoteTarget,
 } from "./shared";
+import { OsLogo } from "./oslogo";
 import { go } from "./router";
 import {
   AppGlyph,
+  DeliveryModeIcon,
+  DeliveryModeTag,
   FilterChip,
   PackagesArt,
   Segmented,
@@ -82,6 +88,8 @@ import {
   StatusDot,
   InstanceGraph,
   Kbd,
+  deliveryModeKeywords,
+  normalizeDeliveryMode,
 } from "./ui";
 import { ExecutionPanel } from "./executions";
 import { Runbook } from "./runbook";
@@ -125,12 +133,16 @@ export function prefetchDetail(id: string) {
 /* ---------- filters ---------- */
 
 type Status = "all" | "generated" | "configuration" | "done" | "failed";
+type ModeFilter = "all" | "automatic" | "offline" | "configuration";
+type ScopeFilter = "formal" | "verification";
 type Range = "all" | "today" | "7d" | "30d";
 type Sort = "new" | "old" | "name";
 type Group = "day" | "app" | "none";
 type DF = {
   q: string;
+  scope: ScopeFilter;
   status: Status;
+  mode: ModeFilter;
   apps: string[];
   range: Range;
   sort: Sort;
@@ -138,7 +150,9 @@ type DF = {
 };
 const DF0: DF = {
   q: "",
+  scope: "formal",
   status: "all",
+  mode: "all",
   apps: [],
   range: "all",
   sort: "new",
@@ -160,16 +174,27 @@ const sinceOf = (r: Range) => {
   return 0;
 };
 /** `skip` leaves one facet out, so each facet's counts show what choosing that option would give. */
-function matchJob(j: Job, f: DF, skip?: "status" | "apps") {
+function matchJob(j: Job, f: DF, skip?: "scope" | "status" | "apps" | "mode") {
+  const isVerify = j.purpose === "verification";
+  if (skip !== "scope") {
+    if (f.scope === "verification" && !isVerify) return false;
+    if (f.scope === "formal" && isVerify) return false;
+  }
   const q = f.q.trim().toLowerCase();
   if (
     q &&
-    !`${j.cluster_id} ${j.app_name} ${j.version} ${j.id.slice(0, 8) + " " + schemeName(j.scheme) + " " + (j.scheme?.topology || "")}`
+    !`${j.cluster_id} ${j.app_name} ${j.version} ${j.id.slice(0, 8)} ${schemeName(j.scheme)} ${j.scheme?.topology || ""} ${deliveryModeKeywords(j.delivery_mode)}`
       .toLowerCase()
       .includes(q)
   )
     return false;
   if (skip !== "status" && f.status !== "all" && phaseOf(j) !== f.status)
+    return false;
+  if (
+    skip !== "mode" &&
+    f.mode !== "all" &&
+    normalizeDeliveryMode(j.delivery_mode) !== f.mode
+  )
     return false;
   if (skip !== "apps" && f.apps.length && !f.apps.includes(j.app_id))
     return false;
@@ -244,6 +269,21 @@ function FilterPanel({
         </div>
       </section>
       <section>
+        <h4>{bi("部署方式", "Delivery Mode")}</h4>
+        <Segmented<ModeFilter>
+          size="sm"
+          label={bi("部署方式", "Delivery Mode")}
+          value={f.mode}
+          onChange={(v) => set({ mode: v })}
+          options={[
+            { value: "all", label: bi("全部", "All") },
+            { value: "automatic", label: bi("自动部署", "Automated") },
+            { value: "offline", label: bi("离线部署", "Offline") },
+            { value: "configuration", label: bi("仅配置", "Config") },
+          ]}
+        />
+      </section>
+      <section>
         <h4>{bi("创建时间", "Created")}</h4>
         <Segmented<Range>
           size="sm"
@@ -288,7 +328,7 @@ function FilterPanel({
         <button
           className="link quiet"
           onClick={() =>
-            set({ apps: [], range: "all", sort: "new", group: "day" })
+            set({ apps: [], mode: "all", range: "all", sort: "new", group: "day" })
           }
         >
           {bi("恢复默认", "Reset")}
@@ -312,6 +352,8 @@ function rowOf(c: ClusterView): Row {
   return {
     c,
     delivery_mode: c.delivery_mode,
+    purpose: c.purpose,
+    verify_target: c.verify_target,
     id: c.id,
     owner: c.owner,
     app_id: c.app_id,
@@ -350,7 +392,7 @@ export function DeliveriesPage({
   load: LoadState;
   reload: () => Promise<void>;
   selected?: string;
-  tab?: "config" | "plans" | "docs" | "rehearsal";
+  tab?: "config" | "plans" | "docs" | "rehearsal" | "security";
   plan?: string;
   doc?: string;
   rehearsal?: string;
@@ -362,10 +404,24 @@ export function DeliveriesPage({
   const narrow = useMedia("(max-width: 900px)");
   const conn = useConnectivity();
   const [stored, setF] = useStored<DF>("mh-del-filters", DF0);
-  // Filters saved before the statuses were renamed must not hide everything.
-  const f: DF = ["all", "generated", "configuration", "done", "failed"].includes(stored.status)
-    ? stored
-    : { ...stored, status: "all" };
+  // Filters saved before the statuses or delivery mode filter existed must not hide everything.
+  const f: DF = {
+    ...stored,
+    scope:
+      stored.scope === "verification" || stored.scope === "formal"
+        ? stored.scope
+        : "formal",
+    status: ["all", "generated", "configuration", "done", "failed"].includes(
+      stored.status,
+    )
+      ? stored.status
+      : "all",
+    mode: ["all", "automatic", "offline", "configuration"].includes(
+      stored.mode,
+    )
+      ? stored.mode
+      : "all",
+  };
   const set = (p: Partial<DF>) => setF((c) => ({ ...c, ...p }));
   const [panel, setPanel] = useState(false);
   const search = useRef<HTMLInputElement | null>(null);
@@ -418,22 +474,53 @@ export function DeliveriesPage({
       failed: base.filter((j) => phaseOf(j) === "failed").length,
     };
   }, [rows, f]);
+  const modeCounts = useMemo(() => {
+    const base = rows.filter((j) => matchJob(j, f, "mode"));
+    return {
+      all: base.length,
+      automatic: base.filter((j) => normalizeDeliveryMode(j.delivery_mode) === "automatic").length,
+      offline: base.filter((j) => normalizeDeliveryMode(j.delivery_mode) === "offline").length,
+      configuration: base.filter((j) => normalizeDeliveryMode(j.delivery_mode) === "configuration").length,
+    };
+  }, [rows, f]);
+  const scopeCounts = useMemo(() => {
+    const base = rows.filter((j) => matchJob(j, f, "scope"));
+    const verification = base.filter((j) => j.purpose === "verification").length;
+    return {
+      formal: base.length - verification,
+      verification,
+      totalVerification: rows.filter((j) => j.purpose === "verification").length,
+    };
+  }, [rows, f]);
   const usable = apps.filter((a) => a.available);
   const app = usable[0];
   const extra =
     f.apps.length +
+    (f.mode !== "all" ? 1 : 0) +
     (f.range !== "all" ? 1 : 0) +
     (f.sort !== "new" ? 1 : 0) +
     (f.group !== "day" ? 1 : 0);
   const filtered =
     !!f.q.trim() ||
     f.status !== "all" ||
+    f.mode !== "all" ||
     f.apps.length > 0 ||
     f.range !== "all";
-  const clear = () => setF((c) => ({ ...DF0, sort: c.sort, group: c.group }));
+  const clear = () =>
+    setF((c) => ({ ...DF0, scope: c.scope, sort: c.sort, group: c.group }));
   const multiApp =
     new Set(rows.map((j) => j.app_id)).size > 1 || apps.length > 1;
   const cluster = clusters?.find((c) => c.id === selected);
+
+  // Keep scope aligned when deep-linking directly to a verification or formal cluster.
+  useEffect(() => {
+    if (!cluster) return;
+    const want: ScopeFilter =
+      cluster.purpose === "verification" ? "verification" : "formal";
+    if (f.scope !== want) {
+      set({ scope: want });
+    }
+  }, [cluster?.id, cluster?.purpose]);
 
   // Desktop always shows a detail; pick the first one in view when nothing is selected. Not something the user asked for, so no transition.
   useEffect(() => {
@@ -590,7 +677,10 @@ export function DeliveriesPage({
                 prefix={<IconSearch />}
                 suffix={!f.q ? <Kbd>/</Kbd> : undefined}
                 allowClear
-                placeholder={bi("搜索集群、应用", "Search clusters or apps")}
+                placeholder={bi(
+                  "搜索集群、应用、自动/离线",
+                  "Search cluster, app, auto/offline",
+                )}
                 value={f.q}
                 onChange={(v) => set({ q: v })}
                 onKeyDown={(e) => {
@@ -629,6 +719,26 @@ export function DeliveriesPage({
                 </Button>
               </Popover>
             </div>
+            {(scopeCounts.totalVerification > 0 || f.scope === "verification") && (
+              <Segmented<ScopeFilter>
+                size="sm"
+                label={bi("交付类型", "Delivery scope")}
+                value={f.scope}
+                onChange={(v) => set({ scope: v })}
+                options={[
+                  {
+                    value: "formal",
+                    label: bi("正式集群", "Production"),
+                    count: scopeCounts.formal,
+                  },
+                  {
+                    value: "verification",
+                    label: bi("组件验证", "Verification"),
+                    count: scopeCounts.verification,
+                  },
+                ]}
+              />
+            )}
             <Segmented<Status>
               size="sm"
               label={bi("按状态筛选", "Filter by status")}
@@ -648,6 +758,62 @@ export function DeliveriesPage({
                 { value: "failed", label: bi("失败", "Failed"), count: statusCounts.failed },
               ]}
             />
+            <div
+              className="dm-filter-bar"
+              role="group"
+              aria-label={bi("按部署方式筛选", "Filter by delivery mode")}
+            >
+              <button
+                type="button"
+                className={`dm-filter-pill ${f.mode === "all" ? "on" : ""}`}
+                aria-pressed={f.mode === "all"}
+                onClick={() => set({ mode: "all" })}
+              >
+                {bi("全部方式", "All modes")}
+              </button>
+              <button
+                type="button"
+                className={`dm-filter-pill is-auto ${f.mode === "automatic" ? "on" : ""}`}
+                aria-pressed={f.mode === "automatic"}
+                title={bi("自动部署", "Automated deployment")}
+                onClick={() =>
+                  set({ mode: f.mode === "automatic" ? "all" : "automatic" })
+                }
+              >
+                <DeliveryModeIcon mode="automatic" size={11} />
+                <span>{bi("自动", "Auto")}</span>
+                <em className="num">{modeCounts.automatic}</em>
+              </button>
+              <button
+                type="button"
+                className={`dm-filter-pill ${f.mode === "offline" ? "on" : ""}`}
+                aria-pressed={f.mode === "offline"}
+                title={bi("离线部署", "Offline deployment")}
+                onClick={() =>
+                  set({ mode: f.mode === "offline" ? "all" : "offline" })
+                }
+              >
+                <DeliveryModeIcon mode="offline" size={11} />
+                <span>{bi("离线", "Offline")}</span>
+                <em className="num">{modeCounts.offline}</em>
+              </button>
+              {(modeCounts.configuration > 0 || f.mode === "configuration") && (
+                <button
+                  type="button"
+                  className={`dm-filter-pill is-config ${f.mode === "configuration" ? "on" : ""}`}
+                  aria-pressed={f.mode === "configuration"}
+                  onClick={() =>
+                    set({
+                      mode: f.mode === "configuration" ? "all" : "configuration",
+                    })
+                  }
+                >
+                  <DeliveryModeIcon mode="configuration" size={11} />
+                  <span>{bi("仅配置", "Config")}</span>
+                  <em className="num">{modeCounts.configuration}</em>
+                </button>
+              )}
+            </div>
             {(f.apps.length > 0 || f.range !== "all") && (
               <div className="active-filters tight">
                 {f.apps.map((id) => (
@@ -772,7 +938,7 @@ function JobList({
 }: {
   jobs: Row[];
   selected?: string;
-  activeTab?: "config" | "plans" | "docs" | "rehearsal";
+  activeTab?: "config" | "plans" | "docs" | "rehearsal" | "security";
   load: LoadState;
   reload: () => Promise<void>;
   filtered: boolean;
@@ -880,9 +1046,17 @@ function JobList({
             const c = j.c;
             const st = clusterStatus(c);
             const stLabel = st.label
+              .replace(/^首次部署待执行$/, bi("待执行", "Ready"))
+              .replace(/^部署待执行$/, bi("待执行", "Ready"))
+              .replace(/^首次部署执行中$/, bi("执行中", "Deploying"))
+              .replace(/^部署执行中$/, bi("执行中", "Deploying"))
               .replace(/^首次部署/, bi("部署", "Deploy"))
               .replace(/^Initial Deploy\b/, "Deploy");
             const bad = st.dot === "failed";
+            const appMeta = `${multiApp && mode !== "app" ? `${j.app_name} ` : ""}${j.version.split("·")[0].trim()}`;
+            const fullSubTitle = [st.label, appMeta, schemeName(c.scheme)]
+              .filter(Boolean)
+              .join(" · ");
             return (
               <a
                 key={j.id}
@@ -890,7 +1064,7 @@ function JobList({
                 href={`#/d/${encodeURIComponent(j.id)}${activeTab ? `/${activeTab}` : ""}`}
                 role="option"
                 aria-selected={j.id === selected}
-                className={`row ${j.id === selected ? "on" : ""}`}
+                className={`row row-dlv ${j.id === selected ? "on" : ""}`}
                 onPointerEnter={() => c.current && prefetchDetail(c.current)}
                 onFocus={() => c.current && prefetchDetail(c.current)}
                 onClick={(e) => {
@@ -907,7 +1081,9 @@ function JobList({
                 </span>
                 <div className="row-main">
                   <div className="row-top">
-                    <span className="row-name">{j.cluster_id}</span>
+                    <span className="row-name" title={j.cluster_id}>
+                      {j.cluster_id}
+                    </span>
                     {j.owner && j.owner !== meName() && (
                       <span className="row-owner">{j.owner}</span>
                     )}
@@ -915,17 +1091,24 @@ function JobList({
                       {mode === "day" ? clock(j.created) : ago(j.created)}
                     </span>
                   </div>
-                  <div className={`row-sub ${bad ? "bad" : ""}`}>
-                    <HistoryDots c={c} />
-                    {st.holder && running(st.holder.state)
-                      ? `${stLabel} · ${(st.holder.stage || "").replace(/^\[\d\/5\]\s*/, "")}`
-                      : [
-                          stLabel,
-                          `${multiApp && mode !== "app" ? `${j.app_name} ` : ""}${j.version.split("·")[0].trim()}`,
-                          schemeName(c.scheme),
-                        ]
-                          .filter(Boolean)
-                          .join(" · ")}
+                  <div className="row-sub-line">
+                    <div
+                      className={`row-sub ${bad ? "bad" : ""}`}
+                      title={fullSubTitle}
+                    >
+                      <HistoryDots c={c} />
+                      {st.holder && running(st.holder.state)
+                        ? `${stLabel} · ${(st.holder.stage || "").replace(/^\[\d\/5\]\s*/, "")}`
+                        : [stLabel, appMeta].filter(Boolean).join(" · ")}
+                    </div>
+                    <div className="row-sub-tags">
+                      {j.purpose === "verification" && (
+                        <span className="row-verify-tag">
+                          {bi("验证", "Verify")}
+                        </span>
+                      )}
+                      <DeliveryModeTag mode={j.delivery_mode} compact />
+                    </div>
                   </div>
                 </div>
               </a>
@@ -957,16 +1140,171 @@ function DetailSkeleton() {
   );
 }
 
+/** Lightweight completion banner shown on temporary component test deliveries once all deploy/test steps pass.
+ *  Component publishing is fully decoupled from deliveries: automated test reports are auto-saved on the component,
+ *  and this temporary test delivery can be deleted anytime without affecting component release status or reports. */
+export function VerificationPromoteBanner({
+  jobId,
+  targets,
+  isTempVerification = true,
+  onCleaned,
+}: {
+  jobId: string;
+  targets?: JobPromoteTarget[];
+  isTempVerification?: boolean;
+  onPromoted?: () => void | Promise<void>;
+  onCleaned?: () => void | Promise<void>;
+}) {
+  useLang();
+  const [deleting, setDeleting] = useState(false);
+  if (!targets || targets.length === 0) return null;
+  const isAuto = targets.some((t) => t.delivery_mode === "automatic");
+
+  const confirmDelete = () => {
+    Modal.confirm({
+      title: bi("删除此临时测试交付？", "Delete this temporary test delivery?"),
+      content: isAuto
+        ? bi(
+            "自动化测试报告已独立归档至组件库；删除此临时交付及执行日志不会影响组件已保存的测试报告或发布状态。",
+            "The automated test report is already archived independently on the component. Deleting this temporary delivery will not affect the saved report or release status.",
+          )
+        : bi(
+            "将删除本次临时测试交付及其离线材料包，不影响组件发布状态。",
+            "Deletes this temporary test delivery and its offline bundle without affecting component release status.",
+          ),
+      okText: bi("确认删除", "Delete"),
+      okButtonProps: { status: "danger" },
+      onOk: async () => {
+        setDeleting(true);
+        try {
+          await api(`/api/jobs/${encodeURIComponent(jobId)}`, {
+            method: "DELETE",
+          });
+          Message.success(
+            bi("已删除临时测试交付", "Temporary test delivery deleted"),
+          );
+          if (onCleaned) {
+            await onCleaned();
+          } else {
+            go({ name: "deliveries" });
+          }
+        } catch (e) {
+          err(e);
+        } finally {
+          setDeleting(false);
+        }
+      },
+    });
+  };
+
+  return (
+    <section className="dsec">
+      <div
+        className="verify-promote-bar"
+        role="region"
+        aria-label={bi("组件测试结果", "Component test result")}
+      >
+        <div className="vp-head">
+          <IconCheckCircleFill className="vp-ic" />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <b>
+              {isAuto
+                ? bi(
+                    "自动化测试已全步通过 · 完整测试报告已自动归档至组件",
+                    "Automated test passed · Full report archived on component",
+                  )
+                : bi(
+                    "测试部署步骤已全部标记完成",
+                    "Test deployment steps marked complete",
+                  )}
+            </b>
+            <span>
+              {isAuto
+                ? bi(
+                    "测试报告（含分步状态与耗时）已独立保存到组件库，与本次交付完全解耦；可前往组件页确认发布，并随时删除此临时测试交付。",
+                    "The step-by-step test report is saved independently on the component. Go to the component page to publish, and delete this temporary delivery anytime.",
+                  )
+                : bi(
+                    "离线手工测试不生成自动化测试报告；如需发布版本，请前往组件页选择「手动测试」确认发布，本临时交付可随时删除。",
+                    "Offline manual runs do not produce an automated report. Publish via Manual Test on the component page, and delete this temporary delivery anytime.",
+                  )}
+            </span>
+          </div>
+          {isTempVerification && (
+            <Button
+              size="small"
+              status="danger"
+              type="outline"
+              icon={<IconDelete />}
+              loading={deleting}
+              onClick={confirmDelete}
+            >
+              {bi("删除测试交付", "Delete Test Delivery")}
+            </Button>
+          )}
+        </div>
+        <div className="vp-list">
+          {targets.map((t) => {
+            const key = `${t.component}:${t.version}:${t.platform}`;
+            return (
+              <div key={key} className="vp-item">
+                <div className="vp-item-info">
+                  <b>
+                    {t.component_title} <span className="mono">{t.version}</span>
+                  </b>
+                  <span className="vp-os">
+                    <OsLogo id={t.platform} size={13} />
+                    {platformShort(t.platform)}
+                  </span>
+                  <span className="vp-steps num">
+                    {t.delivery_mode === "automatic"
+                      ? bi("自动化测试", "Automated")
+                      : bi("手动测试", "Manual")}{" "}
+                    · {t.passed_steps}/{t.total_steps}
+                    {bi(" 步通过", " steps")}
+                    {t.duration_sec ? ` · ${formatDuration(t.duration_sec)}` : ""}
+                  </span>
+                  <span
+                    className={`vp-state ${t.needs_unlock ? "unlock" : "refresh"}`}
+                  >
+                    {t.needs_unlock
+                      ? bi("未发布", "Unpublished")
+                      : bi("已发布", "Published")}
+                  </span>
+                </div>
+                <div className="vp-item-acts">
+                  <Button
+                    type="primary"
+                    size="small"
+                    onClick={() =>
+                      go({ name: "components", id: t.component })
+                    }
+                  >
+                    {t.needs_unlock
+                      ? bi("前往组件页发布", "Go to Publish")
+                      : bi("查看组件报告", "View on Component")}
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 /* ---------- detail ---------- */
 
 type Grouped = {
   nodes: { index: number; ip: string; pkg?: JobFile; sha?: JobFile }[];
   extras: JobFile[];
+  updates: JobFile[];
   docs: JobFile[];
   records: JobFile[];
 };
 function groupFiles(files: JobFile[]): Grouped {
-  const g: Grouped = { nodes: [], extras: [], docs: [], records: [] };
+  const g: Grouped = { nodes: [], extras: [], updates: [], docs: [], records: [] };
   const byIndex = new Map<number, Grouped["nodes"][number]>();
   for (const f of files) {
     const m = /^node(\d{2})-.+-(\d+\.\d+\.\d+\.\d+)\.tar\.gz(\.sha256)?$/.exec(
@@ -978,12 +1316,15 @@ function groupFiles(files: JobFile[]): Grouped {
       if (m[3]) n.sha = f;
       else n.pkg = f;
       byIndex.set(i, n);
+    } else if (/^update-\d+-.*\.tar\.gz(\.sha256)?$/.test(f.name)) {
+      g.updates.push(f);
     } else if (/\.tar\.gz$|^SHA256SUMS$/.test(f.name)) g.extras.push(f);
     else if (/^\d\d-.+\.md$/.test(f.name)) g.docs.push(f);
     else g.records.push(f);
   }
   g.nodes = [...byIndex.values()].sort((a, b) => a.index - b.index);
   g.docs.sort((a, b) => a.name.localeCompare(b.name));
+  g.updates.sort((a, b) => a.name.localeCompare(b.name));
   g.extras.sort((a, b) =>
     a.name === "SHA256SUMS"
       ? 1
@@ -1027,6 +1368,8 @@ export function DeliveryDetail({
   );
   const [message, setMessage] = useState("");
   const [undoingOutcome, setUndoingOutcome] = useState(false);
+  const [syncCheckTick, setSyncCheckTick] = useState(0);
+  const [focusSyncTick, setFocusSyncTick] = useState(0);
   const wasRunning = useRef(!!cached && running(cached.job.state));
   // The detail pane is one scroller shared by every delivery; start each at the top.
   useLayoutEffect(() => {
@@ -1269,16 +1612,39 @@ export function DeliveryDetail({
         </Button>
       )}
       {job.state === "succeeded" && <ReviewButton />}
-      {job.state === "succeeded" && can("delivery.download") && (
-        <Button
-          type="primary"
-          icon={<IconCloudDownload />}
-          href={withLang(`/api/jobs/${job.id}/archive`)}
-          download={`delivery-${job.cluster_id || job.id.slice(0, 8)}.zip`}
-        >
-          {bi("下载完整交付包", "Download Bundle")}
-        </Button>
-      )}
+      {job.state === "succeeded" && can("delivery.download") && (() => {
+        const syncs = job.syncs || [];
+        const latestSync = syncs[syncs.length - 1];
+        const btn = (
+          <Button
+            type="primary"
+            icon={<IconCloudDownload />}
+            href={withLang(`/api/jobs/${job.id}/archive`)}
+            download={`delivery-${job.cluster_id || job.id.slice(0, 8)}.zip`}
+          >
+            {bi("下载完整交付包", "Download Bundle")}
+          </Button>
+        );
+        if (!latestSync) return btn;
+        return (
+          <Tooltip
+            mini
+            content={
+              latestSync.kind === "patch"
+                ? bi(
+                    `包含全部基础包与第 ${latestSync.n} 次 AI 补丁（${latestSync.update}）；解压基础包后需按「交付文件」中的补丁命令覆盖生效`,
+                    `Includes base packages & AI patch #${latestSync.n} (${latestSync.update}); apply the patch command under Delivery Files after unpacking`,
+                  )
+                : bi(
+                    `已同步至第 ${latestSync.n} 次组件更新：包含最新全部基础包与手册，首次部署直接下载使用即可，无需再单独执行增量更新包`,
+                    `Synced to update #${latestSync.n}: includes latest base packages & runbooks; fresh deployments do not need the incremental patch`,
+                  )
+            }
+          >
+            {btn}
+          </Tooltip>
+        );
+      })()}
       <Dropdown
         trigger="click"
         position="br"
@@ -1324,9 +1690,38 @@ export function DeliveryDetail({
     </>
   );
 
+  const effectiveMode =
+    job.delivery_mode === "configuration" ||
+    plan?.delivery_mode === "configuration"
+      ? "configuration"
+      : job.delivery_mode === "automatic" ||
+          plan?.delivery_mode === "automatic"
+        ? "automatic"
+        : "offline";
+  const latestSync = (job.syncs || [])[(job.syncs || []).length - 1] || null;
+  const refreshJob = async () => {
+    await fetchDetail();
+    await onChanged();
+  };
+
   const mainGrid = (
       <div className={`detail-grid ${input ? "" : "single"}`}>
         <div className="detail-main">
+          {d?.verification_promote && d.verification_promote.length > 0 && (
+            <VerificationPromoteBanner
+              jobId={job.id}
+              targets={d.verification_promote}
+              isTempVerification={
+                job.purpose === "verification" ||
+                job.cluster_id.startsWith("verify-")
+              }
+              onPromoted={refreshJob}
+              onCleaned={async () => {
+                await onChanged();
+                go({ name: "deliveries" });
+              }}
+            />
+          )}
           {running(job.state) && (
             <section className="dsec">
               <div className="callout c-run">
@@ -1377,61 +1772,97 @@ export function DeliveryDetail({
                         `Upload per host to ${plan?.upload_dir || "/tmp/mw-upload"}`,
                       )}
                 </span>
+                {plan && effectiveMode !== "configuration" && (
+                  <button
+                    type="button"
+                    className="dsec-link link quiet"
+                    onClick={() => setSyncCheckTick((n) => n + 1)}
+                  >
+                    <IconRefresh />
+                    {bi("检查组件更新", "Check Updates")}
+                  </button>
+                )}
               </h2>
-              <div className="uplist">
-                {plan?.delivery_mode === "configuration" && <div className="up-files">{files0.map(f=><FileLink key={f.name} f={f}/>)}</div>}
-                {g.nodes.map((n) => {
-                  const nd =
-                    deliveryHosts[n.index - 1];
-                  const isCtl = !!nd && nd.name === controllerName;
-                  return (
-                    <div className="up" key={n.index}>
-                      <div className="up-who">
-                        <span className={`role-chip ${isCtl ? "p" : ""}`}>
-                          {isCtl ? (executorHost ? bi("执行", "Exec") : bi("控制", "Ctrl")) : bi("机器", "Host")}
-                        </span>
-                        <div>
-                          <b>
-                            {nd?.name ||
-                              `node${String(n.index).padStart(2, "0")}`}
-                          </b>
-                          <span className="mono">{n.ip}</span>
-                        </div>
-                      </div>
+              {(() => {
+                const fileList = (
+                  <div className="uplist">
+                    {plan?.delivery_mode === "configuration" && (
                       <div className="up-files">
-                        {n.pkg && <FileLink f={n.pkg} />}
-                        {n.sha && <FileLink f={n.sha} quiet />}
-                        {isCtl &&
-                          g.extras.map((f) => (
-                            <FileLink
-                              key={f.name}
-                              f={f}
-                              quiet={f.name === "SHA256SUMS"}
-                            />
-                          ))}
+                        {files0.map((f) => (
+                          <FileLink key={f.name} f={f} />
+                        ))}
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    )}
+                    {g.nodes.map((n) => {
+                      const nd = deliveryHosts[n.index - 1];
+                      const isCtl = !!nd && nd.name === controllerName;
+                      return (
+                        <div className="up" key={n.index}>
+                          <div className="up-who">
+                            <span className={`role-chip ${isCtl ? "p" : ""}`}>
+                              {isCtl
+                                ? executorHost
+                                  ? bi("执行", "Exec")
+                                  : bi("控制", "Ctrl")
+                                : bi("机器", "Host")}
+                            </span>
+                            <div>
+                              <b>
+                                {nd?.name ||
+                                  `node${String(n.index).padStart(2, "0")}`}
+                              </b>
+                              <span className="mono">{n.ip}</span>
+                            </div>
+                          </div>
+                          <div className="up-files">
+                            {n.pkg && <FileLink f={n.pkg} />}
+                            {n.sha && <FileLink f={n.sha} quiet />}
+                            {isCtl &&
+                              g.extras.map((f) => (
+                                <FileLink
+                                  key={f.name}
+                                  f={f}
+                                  quiet={f.name === "SHA256SUMS"}
+                                />
+                              ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+                if (!plan || effectiveMode === "configuration") return fileList;
+                return (
+                  <SyncCard
+                    key={job.id}
+                    legacySteps={(plan.step_format || 0) < 2}
+                    job={job}
+                    files={files0}
+                    uploadDir={plan.upload_dir}
+                    controllerName={controllerName}
+                    isAutoDelivery={effectiveMode === "automatic"}
+                    triggerTick={syncCheckTick}
+                    onSynced={refreshJob}
+                    onJumpToSyncStep={() => setFocusSyncTick((n) => n + 1)}
+                  >
+                    {fileList}
+                  </SyncCard>
+                );
+              })()}
             </section>
           )}
 
-          {job.state === "succeeded" && plan && plan.delivery_mode!=="configuration" && (
+          {job.state === "succeeded" && plan && effectiveMode !== "configuration" && (
             <section className="dsec">
-              <h2 className="dsec-title">{bi("现场执行", "On-site Execution")}</h2>
-              <ExecutionPanel key={job.id} jobId={job.id} cluster={job.cluster_id} />
-              <SyncCard
+              <h2 className="dsec-title">
+                {bi("现场执行", "On-site Execution")}
+                <DeliveryModeTag mode={effectiveMode} />
+              </h2>
+              <ExecutionPanel
                 key={job.id}
-                legacySteps={(plan.step_format || 0) < 2}
-                job={job}
-                files={files0}
-                projectDir={plan.project_dir}
-                uploadDir={plan.upload_dir}
-                onSynced={async () => {
-                  await fetchDetail();
-                  await onChanged();
-                }}
+                jobId={job.id}
+                cluster={job.cluster_id}
+                deliveryMode={effectiveMode}
               />
               <Runbook
                 key={`${job.id}-${(job.syncs || []).length}`}
@@ -1439,6 +1870,10 @@ export function DeliveryDetail({
                 docs={g.docs}
                 jobId={job.id}
                 files={files0}
+                deliveryMode={effectiveMode}
+                latestSync={latestSync}
+                onSyncConfirmed={refreshJob}
+                focusSyncTick={focusSyncTick}
               />
             </section>
           )}
@@ -1590,6 +2025,7 @@ export function DeliveryDetail({
                 state={PLAN_PHASE[ph].dot}
                 label={PLAN_PHASE[ph].label}
               />
+              <DeliveryModeTag mode={effectiveMode} />
             </div>
             <div className="cl-deploy-meta">
               {job.owner && job.owner !== meName() && (
@@ -1639,6 +2075,7 @@ export function DeliveryDetail({
             state={PLAN_PHASE[ph].dot}
             label={PLAN_PHASE[ph].label}
           />
+          <DeliveryModeTag mode={effectiveMode} />
         </div>
         <div className="detail-meta">
           {job.owner && job.owner !== meName() && (
@@ -1688,6 +2125,7 @@ export function DeliveryDetail({
 type SyncPreview = {
   available: boolean;
   blocked?: string;
+  using_drafts?: string[];
   files: string[];
   removed?: string[];
   steps: string[];
@@ -1706,16 +2144,24 @@ function SyncCard({
   legacySteps,
   job,
   files,
-  projectDir,
   uploadDir,
+  controllerName,
+  isAutoDelivery,
+  triggerTick = 0,
   onSynced,
+  onJumpToSyncStep,
+  children,
 }: {
   legacySteps: boolean;
   job: Job;
   files: JobFile[];
-  projectDir: string;
   uploadDir: string;
+  controllerName?: string;
+  isAutoDelivery?: boolean;
+  triggerTick?: number;
   onSynced: () => Promise<void>;
+  onJumpToSyncStep?: () => void;
+  children?: React.ReactNode;
 }) {
   useLang();
   const [pv, setPv] = useState<SyncPreview | null>(null);
@@ -1724,9 +2170,14 @@ function SyncCard({
   const [requested, setRequested] = useState(false);
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
-  const [copiedCmd, setCopiedCmd] = useState(false);
   const syncs = job.syncs || [];
   const last = syncs[syncs.length - 1];
+  useEffect(() => {
+    if (triggerTick > 0) {
+      setRequested(true);
+      setRetry((n) => n + 1);
+    }
+  }, [triggerTick]);
   useEffect(() => {
     let live = true;
     setPv(null);
@@ -1740,31 +2191,62 @@ function SyncCard({
       live = false;
     };
   }, [job.id, syncs.length, retry, requested]);
-  const run = () =>
+  const run = () => {
+    const isDraftSync = (pv?.using_drafts?.length || 0) > 0;
     Modal.confirm({
-      title: bi("采用这次组件更新？", "Adopt component update?"),
+      title: isDraftSync
+        ? bi(
+            `热同步组件草稿（${pv!.using_drafts!.join("、")}）？`,
+            `Hot-sync component draft (${pv!.using_drafts!.join(", ")})?`,
+          )
+        : bi("采用这次组件更新？", "Adopt component update?"),
       content: (
         <div className="sync-confirm">
           <p>
-            {bi(
-              "这会更新本交付的自动化文件和手册，软件包不变。受影响步骤的新版本不再沿用原来的完成状态，需要重新核对；原执行记录保留在历史版本中，未受影响步骤保持原状。",
-              "Updates automation files and runbook for this delivery while keeping packages unchanged. Changed steps reset their completion status for re-verification while preserving prior records; unaffected steps stay as-is.",
-            )}
+            {isDraftSync
+              ? bi(
+                  "验证交付可直接采用组件工作区草稿（无需提前发布）。这会更新本交付的自动化文件和手册，软件包与历史记录保留。",
+                  "Verification deliveries can adopt workspace drafts directly without publishing. Updates automation files and runbook while keeping packages and history.",
+                )
+              : bi(
+                  "这会更新本交付的自动化文件和手册，软件包不变。受影响步骤的新版本不再沿用原来的完成状态，需要重新核对；原执行记录保留在历史版本中，未受影响步骤保持原状。",
+                  "Updates automation files and runbook for this delivery while keeping packages unchanged. Changed steps reset their completion status for re-verification while preserving prior records; unaffected steps stay as-is.",
+                )}
           </p>
           <p>
-            {bi(
-              "此操作不会连接机器或自动执行命令。更新包需要你另行应用；请核对实际变化后决定补做哪些操作，不要直接重跑初始化、数据盘等已完成步骤。",
-              "Does not connect to hosts or execute commands. Apply the update archive manually and review actual changes before deciding which steps to re-run—never blindly re-run initialization or disk formatting.",
-            )}
+            {isAutoDelivery
+              ? bi(
+                  "本交付为自动执行模式：不会立即连接目标机执行命令；你后续点击「续跑 / 自动执行」时，平台将自动把最新脚本推送至执行节点，无需重新预检环境或手工拷贝。",
+                  "Automated delivery: nothing runs immediately. On your next resume, the platform automatically pushes the updated scripts to the execution node without re-running host prep.",
+                )
+              : bi(
+                  "此操作不会连接机器或自动执行命令。更新包需要你另行应用；请核对实际变化后决定补做哪些操作，不要直接重跑初始化、数据盘等已完成步骤。",
+                  "Does not connect to hosts or execute commands. Apply the update archive manually and review actual changes before deciding which steps to re-run—never blindly re-run initialization or disk formatting.",
+                )}
           </p>
         </div>
       ),
-      okText: bi("采用更新并生成更新包", "Adopt & Generate Update"),
+      okText: isAutoDelivery
+        ? bi("采用更新（续跑自动下发）", "Adopt Update")
+        : bi("采用更新并生成更新包", "Adopt & Generate Update"),
       onOk: async () => {
         setBusy(true);
         try {
           await api(`/api/jobs/${job.id}/sync`, { method: "POST" });
-          Message.success(bi("已同步，按下面的说明把更新包放到控制节点", "Synced; upload the update package to the controller per instructions below"));
+          window.dispatchEvent(
+            new CustomEvent("mh-delivery-patched", { detail: { jobId: job.id } }),
+          );
+          Message.success(
+            isAutoDelivery
+              ? bi(
+                  "已同步最新脚本，下次点击「续跑 / 自动执行」将自动推送到执行节点",
+                  "Synced! Next resume will auto-push the updated scripts to the execution node",
+                )
+              : bi(
+                  "已同步，请在下方「部署」第 0 步核对并应用更新",
+                  "Synced; verify and apply in Deploy step 0 below",
+                ),
+          );
           await onSynced();
         } catch (e) {
           err(e);
@@ -1773,39 +2255,13 @@ function SyncCard({
         }
       },
     });
+  };
   const upd = last?.update
     ? files.find((f) => f.name === last.update)
     : undefined;
   const sumFile = last?.update
     ? files.find((f) => f.name === `${last.update}.sha256`)
     : undefined;
-  // the checksum goes into the command itself, so downloading the package alone is enough
-  const [sum, setSum] = useState("");
-  useEffect(() => {
-    setSum("");
-    if (!sumFile) return;
-    let live = true;
-    fetchText(sumFile.url)
-      .then((t) => live && setSum(t.trim().split(/\s+/)[0] || ""))
-      .catch(() => undefined);
-    return () => {
-      live = false;
-    };
-  }, [sumFile?.url]);
-  // Update archives are relative to the delivery's package base, which is
-  // isolated per cluster on an independent manager.
-  const packageBase = projectDir.match(/^(.*)\/middleware-automation\/projects\/[^/]+\/?$/)?.[1] || "/root";
-  const cmd = last
-    ? [
-        `cd ${uploadDir}`,
-        sum
-          ? `echo "${sum}  ${last.update}" | sha256sum -c && tar -xzf ${last.update} -C ${packageBase}`
-          : `tar -xzf ${last.update} -C ${packageBase}`,
-        ...(last.remove?.length
-          ? [`cd ${projectDir} && rm -f ${last.remove.join(" ")}`]
-          : []),
-      ].join("\n")
-    : "";
   const aiStatus = useAIStatus();
   const canRehearse =
     aiStatus.enabled &&
@@ -1819,35 +2275,38 @@ function SyncCard({
     canRehearse
       ? job.cluster_id
       : "";
+  const hasCheckBanner = Boolean(requested || pv?.available || syncError);
+  if (!hasCheckBanner && !last) return <>{children}</>;
   return (
-    <div className="sync-card">
-      {!pv?.available && (
+    <>
+      {hasCheckBanner && (
+        <div className="sync-card">
+          {requested && !pv?.available && (
         <div className="sync-pend sync-optional">
           <div className="sync-head">
             <div className="sync-text" role="status" aria-live="polite">
               <b>
                 {syncError
                   ? bi("暂时无法检查更新", "Unable to check updates")
-                  : !requested
-                    ? bi("组件更新 · 按需检查", "Component Updates · Check on demand")
-                    : !pv
-                      ? bi("正在检查可选更新…", "Checking for updates…")
-                      : pv.blocked
-                        ? bi("当前交付暂不能同步", "Sync currently unavailable")
-                        : bi("当前没有可选更新", "No updates available")}
+                  : !pv
+                    ? bi("正在检查可选更新…", "Checking for updates…")
+                    : pv.blocked
+                      ? bi("当前交付暂不能同步", "Sync currently unavailable")
+                      : bi("当前已是最新组件版本", "Already up to date")}
               </b>
               <span>
                 {syncError
                   ? bi("检查未完成，当前交付和执行记录保持不变。", "Check incomplete; delivery and execution records remain unchanged.")
                   : pv?.blocked ||
-                    (requested && !pv
-                      ? bi("正在比较新版内容，不影响你查看或继续当前交付。", "Comparing component version without interrupting your current delivery.")
-                      : bi("继续使用已保存的版本；检查更新不会改动集群或执行记录。", "Continue using the saved version; checking does not modify the cluster or execution records."))}
+                    (!pv
+                      ? bi("正在比较新版内容，不影响查看或继续当前交付。", "Comparing component version without interrupting your current delivery.")
+                      : bi("未检测到新的组件改动，可继续当前执行。", "No new component changes found; continue with this delivery."))}
               </span>
             </div>
             <div className="sync-head-actions">
               {rehearsalClusterId && (
                 <Button
+                  size="small"
                   type="primary"
                   onClick={() =>
                     go({
@@ -1860,9 +2319,26 @@ function SyncCard({
                   {bi("前往变更演练", "Go to Rehearsal")}
                 </Button>
               )}
-              <Button loading={requested && !pv && !syncError} onClick={() => { setRequested(true); setRetry((n) => n + 1); }}>
-                {requested ? bi("重新检查", "Check Again") : bi("检查可选更新", "Check Updates")}
+              <Button
+                size="small"
+                loading={!pv && !syncError}
+                onClick={() => setRetry((n) => n + 1)}
+              >
+                {bi("重新检查", "Check Again")}
               </Button>
+              {(pv || syncError) && (
+                <Button
+                  size="small"
+                  type="text"
+                  onClick={() => {
+                    setRequested(false);
+                    setPv(null);
+                    setSyncError("");
+                  }}
+                >
+                  {bi("收起", "Dismiss")}
+                </Button>
+              )}
             </div>
           </div>
           {syncError && <details><summary>{bi("错误详情", "Error details")}</summary><p>{syncError}</p></details>}
@@ -1872,8 +2348,25 @@ function SyncCard({
         <div className="sync-pend">
           <div className="sync-head">
             <div className="sync-text">
-              <b>{bi("组件有新版本", "Component update available")}</b>
-              <span>{bi("你的交付尚未更新，已完成的执行记录保留。系统没有自动执行任何命令。", "Your delivery is not updated yet; completed records are preserved and no commands were executed.")}</span>
+              <b>
+                {pv.using_drafts && pv.using_drafts.length > 0
+                  ? bi(
+                      `组件工作区草稿有更新（${pv.using_drafts.join("、")}）· 验证交付可直接热同步`,
+                      `Component draft updated (${pv.using_drafts.join(", ")}) · Ready to hot-sync`,
+                    )
+                  : bi("组件有新版本", "Component update available")}
+              </b>
+              <span>
+                {isAutoDelivery
+                  ? bi(
+                      "采用后仅更新本交付脚本，不立即执行命令；下次点击「续跑 / 自动执行」时将自动推送至执行节点（免重新预检）。",
+                      "Adopting updates delivery scripts only; next resume auto-pushes them to the runner.",
+                    )
+                  : bi(
+                      "你的交付尚未更新，已完成的执行记录保留。系统没有自动执行任何命令。",
+                      "Your delivery is not updated yet; completed records are preserved and no commands were executed.",
+                    )}
+              </span>
               <span>
                 {pv.steps.length > 0
                   ? bi(
@@ -1989,63 +2482,107 @@ function SyncCard({
           </>}
         </div>
       )}
-      {last && (
-        <div className="sync-done">
-          <b>
-            {last.kind === "patch"
-              ? bi(`第 ${last.n} 次修改自动化文件`, `Patch #${last.n} to automation files`)
-              : bi(`第 ${last.n} 次同步`, `Sync #${last.n}`)}{" "}
-            · {last.by} {ago(last.at)}
-          </b>
-          <span>
-            {last.kind === "patch" && last.reason ? `${last.reason}　` : ""}
-            {last.kind === "patch"
-              ? bi(
-                  `把更新包上传到控制节点的 ${uploadDir}，执行下面的命令覆盖项目文件（包里是这份交付改过的全部文件），然后继续。`,
-                  `Upload the update package to ${uploadDir} on the controller, run the command below to overwrite project files, then continue.`,
-                )
-              : bi(
-                  `把更新包上传到控制节点的 ${uploadDir}，执行下面的命令覆盖项目文件，然后从出问题的那一步继续。改动过的步骤里保留了旧版本和记录。`,
-                  `Upload the update package to ${uploadDir} on the controller, run the command below to overwrite project files, then resume from the failed step. Prior versions and records are preserved.`,
-                )}
-          </span>
-          {upd && (
-            <div className="rstep-files">
-              <a href={withLang(upd.url)} download={upd.name} className="fchip">
-                <IconDownload />
-                <span className="mono">{upd.name}</span>
-                <span className="faint num">{size(upd.bytes)}</span>
-              </a>
-              {sumFile && (
-                <a href={withLang(sumFile.url)} download={sumFile.name} className="fchip">
-                  <IconDownload />
-                  <span className="mono">{sumFile.name}</span>
-                  <span className="faint num">{size(sumFile.bytes)}</span>
-                </a>
-              )}
-            </div>
-          )}
-          <pre className="sync-cmd mono">{cmd}</pre>
-          <button
-            type="button"
-            className="link"
-            onClick={() => {
-              copy(cmd);
-              setCopiedCmd(true);
-              window.setTimeout(() => setCopiedCmd(false), 1400);
-            }}
-          >
-            {copiedCmd ? (
-              <>
-                <IconCheck /> {bi("已复制", "Copied")}
-              </>
-            ) : (
-              bi("复制命令", "Copy command")
-            )}
-          </button>
         </div>
       )}
-    </div>
+      {children}
+      {last && (() => {
+        const isPatch = last.kind === "patch";
+        const isHotfix = last.kind === "hotfix" || last.kind === "hotfix-revert";
+        const isFilePatch = isPatch || isHotfix;
+        const confirmed = Boolean(last.applied_at);
+        const needsConfirm = !isAutoDelivery && !confirmed;
+        const hostLabel = controllerName || bi("控制节点", "controller");
+        return (
+          <div
+            className={`sync-file-strip ${needsConfirm ? "is-pending" : confirmed ? "is-confirmed" : ""}`}
+          >
+            <div className="sync-file-strip-top">
+              <div className="sync-file-strip-meta">
+                <span className="sync-done-badge">
+                  {isPatch
+                    ? bi("AI 补丁更新", "AI Patch")
+                    : isHotfix
+                      ? bi("脚本热修补丁", "Script Hotfix")
+                      : bi("增量更新包", "Incremental Update")}
+                </span>
+                <b>
+                  {isPatch
+                    ? bi(`第 ${last.n} 次 AI 修改自动化文件`, `AI Patch #${last.n}`)
+                    : isHotfix
+                      ? bi(`第 ${last.n} 次单步热修脚本`, `Hotfix #${last.n}`)
+                      : bi(`第 ${last.n} 次同步`, `Sync #${last.n}`)}
+                </b>
+                <span className="faint small">
+                  {last.by} · {ago(last.at)}
+                </span>
+              </div>
+              <div className="sync-file-strip-actions">
+                {confirmed ? (
+                  <span className="sync-file-strip-ok">
+                    <IconCheckCircleFill />
+                    {bi("已在手册核对通过", "Verified in runbook")}
+                    <span className="faint small">
+                      · {last.applied_by || last.by} ·{" "}
+                      <time title={fullTime(last.applied_at!)}>
+                        {ago(last.applied_at!)}
+                      </time>
+                    </span>
+                  </span>
+                ) : needsConfirm ? (
+                  <Button
+                    size="mini"
+                    type="outline"
+                    status="warning"
+                    icon={<IconLock />}
+                    onClick={() => onJumpToSyncStep?.()}
+                  >
+                    {bi("前往「部署」核对更新", "Verify in Deploy")}
+                  </Button>
+                ) : (
+                  <span className="sync-done-pill">
+                    {isAutoDelivery
+                      ? bi("续跑时将自动推送最新补丁包", "Auto-pushes patch on next resume")
+                      : bi("基础包与完整包已同步最新", "Base & full bundle up to date")}
+                  </span>
+                )}
+              </div>
+            </div>
+            <p className="sync-file-strip-note">
+              {isAutoDelivery
+                ? bi(
+                    `本交付为自动执行模式：最新热修补丁与组件更新已就绪，下次启动或续跑任意步骤时将自动推送至执行节点，无需手工拷贝。`,
+                    `Automated delivery: patched/synced scripts are ready and will auto-push to the execution node on your next run.`,
+                  )
+                : isFilePatch
+                  ? bi(
+                      `「下载完整交付包」已附带此补丁，但基础包未重打：需将下方补丁上传至 ${hostLabel} 的 ${uploadDir}，并在下方「现场执行 → 部署」第 0 步执行校验覆盖。`,
+                      `Included in Download Bundle, but base packages are unchanged: upload to ${uploadDir} on ${hostLabel} and verify/apply in On-site Execution → Deploy step 0.`,
+                    )
+                  : bi(
+                      `上方基础包与「下载完整交付包」均已包含本次更新。无论 ${hostLabel} 之前是旧包还是新包，都在下方「现场执行 → 部署」第 0 步运行一条自动核对命令即可：已是最新自动放行，仍是旧版则补传下方增量包至 ${uploadDir} 自动覆盖。`,
+                      `Base packages and Download Bundle already include this update. Run Deploy step 0 below to auto-verify ${hostLabel}: fresh bundles pass immediately, older bundles apply the incremental archive below from ${uploadDir}.`,
+                    )}
+            </p>
+            {upd && (
+              <div className="rstep-files">
+                <a href={withLang(upd.url)} download={upd.name} className="fchip">
+                  <IconDownload />
+                  <span className="mono">{upd.name}</span>
+                  <span className="faint num">{size(upd.bytes)}</span>
+                </a>
+                {sumFile && (
+                  <a href={withLang(sumFile.url)} download={sumFile.name} className="fchip">
+                    <IconDownload />
+                    <span className="mono">{sumFile.name}</span>
+                    <span className="faint num">{size(sumFile.bytes)}</span>
+                  </a>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+    </>
   );
 }
 

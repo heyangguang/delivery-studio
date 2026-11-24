@@ -2241,8 +2241,8 @@ function RehearsalStageCartoon({
               </text>
             </g>
 
-            {/* HA Cluster Topology Flow Track */}
-            <path d="M62 69 L293 69" className="ct-flow-line" />
+            {/* HA Cluster Topology Flow Track — drawn strictly in the inter-node gaps so lines never bleed across pills */}
+            <path d="M108 69 L128 69 M220 69 L240 69" className="ct-flow-line" />
 
             {/* Replica 01 */}
             <g className="ct-sim-node n1">
@@ -2265,7 +2265,7 @@ function RehearsalStageCartoon({
             {/* Guarded Primary */}
             <g className="ct-sim-node n3">
               <rect x="240" y="52" width="106" height="34" rx="9.5" className="ct-hub-pod" />
-              <circle cx="255" cy="69" r="4" className="ct-led brand" />
+              <circle cx="255" cy="69" r="4" className="ct-led kyndryl" />
               <text x="267" y="69" textAnchor="start" dominantBaseline="central" className="ct-pod-title">
                 {bi("主库守卫", "Primary")}
               </text>
@@ -10029,6 +10029,31 @@ function RehearsalSessionView({
                               !isVerPlaceholder &&
                               verText.length <= 24 &&
                               !/[\u4e00-\u9fa5]/.test(verText);
+                            const roleSample = `${liveRole} ${initRole}`.toLowerCase();
+                            const roleTone = /(leader|primary|master|主库|主节点|读写|writer)/i.test(
+                              roleSample,
+                            )
+                              ? "primary"
+                              : /(standby|replica|slave|secondary|follower|从库|从节点|备库|只读|reader)/i.test(
+                                    roleSample,
+                                  )
+                                ? "replica"
+                                : "neutral";
+                            const statusText = (
+                              h.status || bi("正常", "Healthy")
+                            ).trim();
+                            const cleanedStatus = statusText
+                              .replace(
+                                /(?:接收及回放\s*)?(?:lag|延迟)\s*(?:均为|为|=|:|：)?\s*0(?:\s*(?:bytes?|kb|mb|ms|s))?/gi,
+                                "",
+                              )
+                              .replace(/无\s*(?:pending_restart|延迟|lag|异常)/gi, "");
+                            const statusTone =
+                              /(异常|down|fail|error|stopped|lag|延迟|断开|未知|未采集)/i.test(
+                                cleanedStatus,
+                              )
+                                ? "warn"
+                                : "ok";
                             return (
                               <tr key={h.name + h.ip}>
                                 <td className="rh-cell-node">
@@ -10039,8 +10064,9 @@ function RehearsalSessionView({
                                   {changed ? (
                                     compactRole ? (
                                       <span
-                                        className={`rh-role-shift${r.drift!.drifted ? "" : " is-soft"}`}
+                                        className={`rh-role-shift${r.drift!.drifted ? "" : ` is-soft tone-${roleTone}`}`}
                                       >
+                                        <i className="rh-role-dot" aria-hidden />
                                         <span>{initRole}</span>
                                         <span aria-hidden>→</span>
                                         <b>{liveRole}</b>
@@ -10048,7 +10074,7 @@ function RehearsalSessionView({
                                     ) : (
                                       <div className="rh-role-stack">
                                         <div className="rh-role-row">
-                                          <span className="rh-mini-lbl">
+                                          <span className="rh-mini-lbl is-base">
                                             {bi("初始", "Init")}
                                           </span>
                                           <span className="rh-role-from">
@@ -10066,18 +10092,26 @@ function RehearsalSessionView({
                                       </div>
                                     )
                                   ) : (
-                                    <span className="rh-role-same">
-                                      {liveRole || initRole || "—"}
+                                    <span className={`rh-role-same tone-${roleTone}`}>
+                                      <i className="rh-role-dot" aria-hidden />
+                                      <span>{liveRole || initRole || "—"}</span>
                                     </span>
                                   )}
                                 </td>
                                 <td
                                   className={`rh-cell-ver${isShortVer ? " mono" : ""}${isVerPlaceholder ? " is-placeholder" : ""}`}
                                 >
-                                  {verText}
+                                  {isShortVer ? (
+                                    <span className="rh-ver-pill mono">{verText}</span>
+                                  ) : (
+                                    verText
+                                  )}
                                 </td>
                                 <td className="rh-cell-status">
-                                  {h.status || bi("正常", "Healthy")}
+                                  <span className={`rh-status-chip is-${statusTone}`}>
+                                    <i aria-hidden />
+                                    <span>{statusText}</span>
+                                  </span>
                                 </td>
                               </tr>
                             );
@@ -10119,6 +10153,26 @@ function RehearsalSessionView({
                               .split(/\s*\/\s*/)
                               .map((s) => s.trim())
                               .filter(Boolean);
+                            const initVal = (p.initial || "").trim();
+                            const liveVal = (p.actual || "—").trim();
+                            const isUndeclaredBase =
+                              !initVal ||
+                              /^(—|-|未显式声明|未配置|未声明|默认|default|unset|n\/a)$/i.test(
+                                initVal,
+                              );
+                            const hasConcreteDiff =
+                              !isUndeclaredBase &&
+                              liveVal !== "—" &&
+                              initVal.toLowerCase() !== liveVal.toLowerCase();
+                            const liveValTone = /^(on|true|enabled|开启|启用)$/i.test(
+                              liveVal,
+                            )
+                              ? "is-on"
+                              : /^(off|false|disabled|关闭|未开启)$/i.test(liveVal)
+                                ? "is-off"
+                                : "";
+                            const isMonoLive =
+                              liveVal.length <= 48 && !/[\u4e00-\u9fa5]/.test(liveVal);
                             return (
                               <tr key={`${p.key}-${idx}`}>
                                 <td className="rh-pdiff-col-key">
@@ -10138,7 +10192,7 @@ function RehearsalSessionView({
                                   <div className="rh-pdiff-vals">
                                     {p.initial && (
                                       <div className="rh-pdiff-val-row">
-                                        <span className="rh-mini-lbl">
+                                        <span className="rh-mini-lbl is-base">
                                           {bi("基线", "Base")}
                                         </span>
                                         <span className="rh-pdiff-base">
@@ -10147,11 +10201,15 @@ function RehearsalSessionView({
                                       </div>
                                     )}
                                     <div className="rh-pdiff-val-row">
-                                      <span className="rh-mini-lbl is-live">
+                                      <span
+                                        className={`rh-mini-lbl ${hasConcreteDiff ? "is-warn" : "is-live"}`}
+                                      >
                                         {bi("现场", "Live")}
                                       </span>
-                                      <b className="rh-pdiff-live">
-                                        {p.actual || "—"}
+                                      <b
+                                        className={`rh-pdiff-live${isMonoLive ? " mono" : ""}${liveValTone ? ` ${liveValTone}` : ""}`}
+                                      >
+                                        {liveVal}
                                       </b>
                                     </div>
                                   </div>

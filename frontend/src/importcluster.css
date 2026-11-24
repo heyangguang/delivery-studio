@@ -123,7 +123,7 @@ body[arco-theme="dark"] .imp-step-btn.is-active {
 .imp-step-btn.is-active .imp-step-num {
   background: var(--brand);
   border-color: var(--brand);
-  color: #fff;
+  color: var(--on-brand);
 }
 
 .imp-step-btn.is-done .imp-step-num {

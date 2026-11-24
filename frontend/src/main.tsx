@@ -194,8 +194,13 @@ function useTheme() {
   const dark = pref === "dark" || (pref === "system" && systemDark);
   useLayoutEffect(() => {
     for (const el of [document.documentElement, document.body]) {
-      if (dark) el.setAttribute("arco-theme", "dark");
-      else el.removeAttribute("arco-theme");
+      if (dark) {
+        el.setAttribute("arco-theme", "dark");
+        el.setAttribute("data-theme", "dark");
+      } else {
+        el.removeAttribute("arco-theme");
+        el.removeAttribute("data-theme");
+      }
     }
     document.documentElement.style.colorScheme = dark ? "dark" : "light";
     document

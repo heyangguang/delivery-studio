@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.325-dev"
+	version            = "1.0.326-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,22 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.326-dev",
+		Date:    "2026-11-24",
+		Title:   "全站 Kyndryl Bridge 语义色彩体系升级与演练 UI/暗黑模式深度修复",
+		TitleEn: "Global Kyndryl Bridge Semantic Color System & Comprehensive Rehearsal/Dark-Mode UI Fixes",
+		Highlights: []string{
+			"将全局 --brand 主交互色从单调黑灰升级为 Kyndryl Bridge 建筑青绿（浅色 #0c7480 / 暗黑 #38bcc8），与 Kyndryl 暖红（主 CTA/主库/导航）、建筑钴蓝（从库/基线/纳管）、靛紫（AI 推演/参数项/全量推演）、翠绿（健康/通过）与琥珀（漂移/告警）构成多层次语义色阶，覆盖全站 49 个样式表",
+			"同步写入 data-theme=dark 与 arco-theme=dark，一次性激活全站 80+ 处深色模式精细化适配规则，消除暗黑模式刺眼色块与低对比灰底",
+			"彻底修复演练页 4 处典型 UI 缺陷：ACT 04 沙盘推演「从库 02」虚线穿透文字（节点填充改 100% 不透明且连线限定在节点间隙）、顶部阶段条生成中双边框错位、左侧 AI 推演步骤换行对齐与光标样式，以及节点/参数比对表语义化角色/基线/现场着色与 Lag=0 误判告警修复",
+		},
+		HighlightsEn: []string{
+			"Upgraded global --brand interactive token from flat monochrome black/gray to Kyndryl Bridge Architectural Teal (#0c7480 light / #38bcc8 dark), harmonized with Kyndryl Warm Red, Cobalt Blue, Indigo-Violet, Emerald, and Amber across all 49 stylesheets",
+			"Synced data-theme=dark alongside arco-theme=dark to activate 80+ calibrated dark-mode overrides with zero glare and AAA contrast",
+			"Fixed 4 key Rehearsal UI defects: opaque SVG fills & inter-node connector paths eliminating dashed-line bleed across ACT 04 nodes, single-border generating stage pill alignment, balanced AI pipeline step wrapping & sleek caret, and semantically color-coded Drift Host & Parameter Comparison tables (with zero-lag health recognition)",
+		},
+	},
 	{
 		Version: "1.0.325-dev",
 		Date:    "2026-11-24",

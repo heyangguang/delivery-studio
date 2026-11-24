@@ -32,17 +32,25 @@ body {
   --teal-soft: rgba(14, 107, 116, 0.09);
   --teal-line: rgba(14, 107, 116, 0.28);
 
-  /* Architectural Cobalt: ingress / LB traffic & secondary chart accent. */
+  /* Architectural Cobalt: ingress / LB traffic, replicas, imported clusters & baseline tags. */
   --cobalt: #2563eb;
   --cobalt-ink: #1d4ed8;
   --cobalt-soft: rgba(37, 99, 235, 0.085);
   --cobalt-line: rgba(37, 99, 235, 0.26);
 
-  --brand: #111318;
+  /* Indigo-Violet: AI reasoning, deep-think acts, full-rehearsal badges & config parameter keys. */
+  --violet: #5b5bd6;
+  --violet-ink: #4544b5;
+  --violet-soft: rgba(91, 91, 214, 0.085);
+  --violet-line: rgba(91, 91, 214, 0.26);
+
+  /* Primary Interactive Accent: Kyndryl Bridge Architectural Teal (5.5:1 AA+ with white text),
+     paired with Kyndryl Warm Red (#FF462D / #E53E28) for signature brand CTAs & active nav. */
+  --brand: #0c7480;
   --on-brand: #ffffff;
-  --brand-ink: #0b0d12;
-  --brand-soft: rgba(11, 13, 18, 0.055);
-  --brand-line: rgba(11, 13, 18, 0.17);
+  --brand-ink: #095d67;
+  --brand-soft: rgba(12, 116, 128, 0.09);
+  --brand-line: rgba(12, 116, 128, 0.28);
 
   --ok: #0e7a4b;
   --ok-soft: rgba(14, 122, 75, 0.095);
@@ -90,7 +98,7 @@ body {
   --shadow-lg:
     0 22px 48px -12px rgba(11, 13, 18, 0.15),
     0 6px 16px -4px rgba(11, 13, 18, 0.05);
-  --ring: 0 0 0 3px rgba(229, 62, 40, 0.16);
+  --ring: 0 0 0 3px rgba(12, 116, 128, 0.16);
   --r-sm: 5px;
   --r: 7px;
   --r-md: 9px;
@@ -164,11 +172,17 @@ body[arco-theme="dark"] {
   --cobalt-soft: rgba(108, 168, 247, 0.14);
   --cobalt-line: rgba(108, 168, 247, 0.3);
 
-  --brand: #e8ecf2;
-  --on-brand: #11141a;
-  --brand-ink: #f0f3f8;
-  --brand-soft: rgba(232, 236, 242, 0.09);
-  --brand-line: rgba(232, 236, 242, 0.22);
+  --violet: #8b8cf8;
+  --violet-ink: #b8b9ff;
+  --violet-soft: rgba(139, 140, 248, 0.14);
+  --violet-line: rgba(139, 140, 248, 0.3);
+
+  /* Calibrated Luminous Bridge Teal for restful, high-contrast dark mode (7.3:1 on obsidian, 7.6:1 with --on-brand). */
+  --brand: #38bcc8;
+  --on-brand: #07191c;
+  --brand-ink: #7ce2eb;
+  --brand-soft: rgba(56, 188, 200, 0.14);
+  --brand-line: rgba(56, 188, 200, 0.32);
 
   --ok: #4ade80;
   --ok-soft: rgba(74, 222, 128, 0.13);
@@ -216,7 +230,7 @@ body[arco-theme="dark"] {
   --shadow-lg:
     0 20px 44px rgba(0, 0, 0, 0.56),
     0 0 0 1px rgba(235, 240, 250, 0.08);
-  --ring: 0 0 0 3px rgba(255, 107, 87, 0.24);
+  --ring: 0 0 0 3px rgba(56, 188, 200, 0.24);
 
   --arcoblue-1: 42, 28, 28;
   --arcoblue-2: 64, 34, 32;

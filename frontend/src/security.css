@@ -2085,24 +2085,91 @@ body[arco-theme="dark"] .sec-sev.med {
 }
 
 .sec-cl-acts {
-  display: grid;
-  grid-template-columns: 76px 56px;
+  display: inline-flex;
   align-items: center;
-  justify-content: end;
-  gap: 4px;
+  justify-content: flex-end;
+  vertical-align: middle;
+  gap: 8px;
+  max-width: 100%;
+  white-space: nowrap;
 }
 
-.sec-cl-acts.has-rh {
-  grid-template-columns: 76px 56px 56px;
-}
-
-.sec-cl-acts > button {
-  padding: 0 4px !important;
+.sec-cl-act-rh {
+  display: inline-flex;
+  align-items: center;
   justify-content: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--brand) 24%, transparent);
+  background: var(--brand-soft);
+  color: var(--brand-ink);
+  font: 560 12px/1 var(--sans);
+  cursor: pointer;
+  white-space: nowrap;
+  flex: none;
+  transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease;
 }
 
-.sec-cl-act-main {
-  font-weight: 600;
+.sec-cl-act-rh:hover {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+}
+
+.sec-cl-act-rh:focus-visible,
+.sec-cl-act-link:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+
+.sec-cl-act-links {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+
+.sec-cl-act-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  font: 500 12px/1 var(--sans);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.14s ease, background-color 0.14s ease;
+}
+
+.sec-cl-act-link.is-sub {
+  color: var(--mute);
+}
+
+.sec-cl-act-link.is-main {
+  color: var(--ink-2);
+}
+
+.sec-cl-act-link:last-child {
+  margin-right: -6px;
+}
+
+.sec-cl-act-link:hover {
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+}
+
+.sec-cl-act-sep {
+  display: block;
+  width: 1px;
+  height: 11px;
+  background: var(--line-strong);
+  margin: 0 2px;
+  flex: none;
 }
 
 /* ---- Configurable CVE Sources Manager Card ---- */

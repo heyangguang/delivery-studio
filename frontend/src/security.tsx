@@ -3610,11 +3610,11 @@ export function SecurityPage({
               <div className="sec-table-scroll">
               <table className="sec-table sec-table-clusters">
                 <colgroup>
+                  <col style={{ width: "22%" }} />
+                  <col style={{ width: "14%" }} />
                   <col style={{ width: "20%" }} />
-                  <col style={{ width: "15%" }} />
-                  <col style={{ width: "21%" }} />
-                  <col style={{ width: "19%" }} />
-                  <col style={{ width: "25%" }} />
+                  <col style={{ width: "18%" }} />
+                  <col style={{ width: "26%" }} />
                 </colgroup>
                 <thead>
                   <tr>
@@ -3747,53 +3747,57 @@ export function SecurityPage({
                         </div>
                       </td>
                       <td style={{ textAlign: "right" }}>
-                        <div className={`sec-cl-acts ${canRehearsalAI ? "has-rh" : ""}`}>
-                          <Button
-                            size="mini"
-                            type="outline"
-                            className="sec-cl-act-main"
-                            onClick={() =>
-                              go({
-                                name: "deliveries",
-                                id: cl.cluster_id,
-                                tab: "security",
-                              })
-                            }
-                          >
-                            {bi("集群安全页", "Security")}
-                          </Button>
-                          <Button
-                            size="mini"
-                            type="text"
-                            onClick={() => {
-                              setSevFilter("ALL");
-                              setStateFilter("active");
-                              setCompFilter("all");
-                              setCompVerFilter("all");
-                              setFixFilter("cluster_only");
-                              switchTab("vulns", cl.cluster_id);
-                            }}
-                          >
-                            {bi("筛选漏洞", "CVEs")}
-                          </Button>
-                          {canRehearsalAI &&
-                            (cl.active.total > 0 ? (
-                              <Button
-                                size="mini"
-                                type="text"
-                                onClick={() =>
-                                  go({
-                                    name: "deliveries",
-                                    id: cl.cluster_id,
-                                    tab: "rehearsal",
-                                  })
-                                }
-                              >
-                                {bi("变更演练", "Rehearse")}
-                              </Button>
-                            ) : (
-                              <span />
-                            ))}
+                        <div className="sec-cl-acts">
+                          {canRehearsalAI && cl.active.total > 0 && (
+                            <button
+                              type="button"
+                              className="sec-cl-act-rh"
+                              onClick={() =>
+                                go({
+                                  name: "deliveries",
+                                  id: cl.cluster_id,
+                                  tab: "rehearsal",
+                                })
+                              }
+                            >
+                              <Spark size={11} />
+                              <span>{bi("修复演练", "Rehearse")}</span>
+                            </button>
+                          )}
+                          <span className="sec-cl-act-links">
+                            {cl.active.total > 0 && (
+                              <>
+                                <button
+                                  type="button"
+                                  className="sec-cl-act-link is-sub"
+                                  onClick={() => {
+                                    setSevFilter("ALL");
+                                    setStateFilter("active");
+                                    setCompFilter("all");
+                                    setCompVerFilter("all");
+                                    setFixFilter("cluster_only");
+                                    switchTab("vulns", cl.cluster_id);
+                                  }}
+                                >
+                                  {bi("筛选漏洞", "CVEs")}
+                                </button>
+                                <i className="sec-cl-act-sep" aria-hidden />
+                              </>
+                            )}
+                            <button
+                              type="button"
+                              className="sec-cl-act-link is-main"
+                              onClick={() =>
+                                go({
+                                  name: "deliveries",
+                                  id: cl.cluster_id,
+                                  tab: "security",
+                                })
+                              }
+                            >
+                              {bi("集群安全页", "Security")}
+                            </button>
+                          </span>
                         </div>
                       </td>
                     </tr>

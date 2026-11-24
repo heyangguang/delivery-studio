@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.285-dev"
+	version            = "1.0.286-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,20 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.286-dev",
+		Date:    "2026-11-24",
+		Title:   "安全中心集群风险操作栏对齐与层级重构",
+		TitleEn: "Cluster Risk Action Column Alignment & Hierarchy",
+		Highlights: []string{
+			"重构集群风险表操作列为右对齐统一锚点布局：所有行「集群安全页」严格沿表头「操作」右边线齐平，彻底消除无漏洞行右侧 60px 空洞与满屏紫框堆叠",
+			"有漏洞集群在左侧展示浅色品牌胶囊「修复演练」与带竖线分隔的「筛选漏洞」，无漏洞集群隐藏无结果的「筛选漏洞」死链，仅保留清爽的中性「集群安全页」入口",
+		},
+		HighlightsEn: []string{
+			"Refactored Cluster Risk action column to a flush-right anchored layout so Security aligns razor-straight under the Actions header across every row with zero trailing blank gap or purple-box clutter",
+			"Show soft-tinted Rehearse pill and divider-separated CVEs link only on clusters with active vulnerabilities, hiding the dead-end CVEs link on clean rows",
+		},
+	},
 	{
 		Version: "1.0.285-dev",
 		Date:    "2026-11-24",

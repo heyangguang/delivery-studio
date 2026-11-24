@@ -11,6 +11,7 @@ import {
   Checkbox,
   Dropdown,
   Input,
+  Menu,
   Message,
   Modal,
   Popconfirm,
@@ -20,6 +21,7 @@ import {
   Upload,
 } from "@arco-design/web-react";
 import {
+  IconApps,
   IconBulb,
   IconCheck,
   IconClose,
@@ -32,6 +34,7 @@ import {
   IconExpand,
   IconFile,
   IconImage,
+  IconMore,
   IconPlus,
   IconRecordStop,
   IconRefresh,
@@ -13787,19 +13790,19 @@ export function RehearsalProductionApplyCard({
 
         {/* Main Console Action Body */}
         <div className="rh-closure-body">
-          <div className="rh-closure-lead">
-            <span className={`rh-closure-ico ${stateClass}`} aria-hidden>
-              {isVoided ? (
-                <IconRecordStop />
-              ) : isApplied ? (
-                <IconCheck />
-              ) : hasConflict ? (
-                <IconExclamationCircle />
-              ) : (
-                <IconThunderboltSafe />
-              )}
-            </span>
-            <div className="rh-closure-txt">
+          <div className="rh-closure-head">
+            <div className="rh-closure-head-left">
+              <span className={`rh-closure-ico ${stateClass}`} aria-hidden>
+                {isVoided ? (
+                  <IconRecordStop />
+                ) : isApplied ? (
+                  <IconCheck />
+                ) : hasConflict ? (
+                  <IconExclamationCircle />
+                ) : (
+                  <IconThunderboltSafe />
+                )}
+              </span>
               <div className="rh-closure-title-row">
                 <b>
                   {isVoided
@@ -13819,150 +13822,187 @@ export function RehearsalProductionApplyCard({
                   </div>
                 )}
               </div>
+            </div>
 
+            <div className="rh-closure-acts">
               {isVoided ? (
-                <div className="rh-closure-void-info">
-                  <p className="rh-closure-desc">
-                    {rehearsal.void_reason ||
-                      bi(
-                        "已手动标记不再执行，文档与历史演练记录保留供审计。",
-                        "Marked obsolete; documents and history remain preserved for audit.",
-                      )}
-                  </p>
-                  {rehearsal.superseded_by && (
-                    <button
-                      type="button"
-                      className="rh-closure-superseded-link"
-                      onClick={() => jumpToPeer(rehearsal.superseded_by!)}
-                    >
-                      {bi(
-                        `查看替代方案：《${rehearsal.superseded_title || rehearsal.superseded_by}》`,
-                        `Open replacement: "${rehearsal.superseded_title || rehearsal.superseded_by}"`,
-                      )}{" "}
-                      <IconRight />
-                    </button>
-                  )}
-                  <span className="rh-closure-lock-note">
-                    {bi(
-                      "已锁定「确认落地」入口，防止后续误点污染集群配置",
-                      "Sign-off locked to prevent accidental baseline pollution",
-                    )}
-                  </span>
-                </div>
+                <Button
+                  size="small"
+                  icon={<IconRefresh />}
+                  disabled={offline || busy}
+                  loading={busy}
+                  onClick={() => void submitVoid(false)}
+                >
+                  {bi("恢复为待实施", "Restore to Pending")}
+                </Button>
               ) : isApplied ? (
-                <p className="rh-closure-desc">
-                  {rehearsal.applied_summary ||
-                    bi(
-                      "本次变更已正式记入集群运行台账、配置叠加视图、交付报告与后续 AI 上下文。",
-                      "Synced into cluster overview, config overlays, delivery report, and future AI context.",
-                    )}
-                </p>
-              ) : (
-                <p className="rh-closure-desc">
-                  {bi(
-                    "按方案在生产环境完成实施与验收后点击右侧「确认生产已实施完成」同步到集群；若方案已放弃或被新方案替代，请点击「标记作废」锁定防误触。",
-                    "Confirm completion once executed and verified in production to sync cluster state, or mark voided if obsolete to lock against misclicks.",
+                <>
+                  {rehearsal.stage === "finalized" && (
+                    <Button
+                      size="small"
+                      type="primary"
+                      icon={<IconShareExternal />}
+                      disabled={offline || busy}
+                      onClick={() => setPropagateOpen(true)}
+                    >
+                      {bi("推广到其他集群", "Propagate")}
+                    </Button>
                   )}
-                </p>
+                  {rehearsal.source?.rollout_id && (
+                    <Button
+                      size="small"
+                      icon={<IconApps />}
+                      disabled={offline || busy}
+                      onClick={() => {
+                        setRolloutBoardData(null);
+                        setRolloutBoardOpen(true);
+                      }}
+                    >
+                      {bi("推广看板", "Rollout Board")}
+                    </Button>
+                  )}
+                  {rehearsal.stage !== "finalized" && !rehearsal.source?.rollout_id && (
+                    <Button
+                      size="small"
+                      icon={<IconEdit />}
+                      disabled={offline || busy}
+                      onClick={openModal}
+                    >
+                      {bi("编辑落地记录", "Edit Record")}
+                    </Button>
+                  )}
+                  <Dropdown
+                    trigger="click"
+                    position="br"
+                    droplist={
+                      <Menu
+                        onClickMenuItem={(k) => {
+                          if (k === "edit") {
+                            openModal();
+                          } else if (k === "revert") {
+                            Modal.confirm({
+                              title: bi("撤销此变更的生产落地标记？", "Revert production applied status?"),
+                              content: bi(
+                                "撤销后将从集群「已落地生产变更」列表中移除，文档与演练记录保留。",
+                                "Removes this item from active production changes on the cluster while preserving docs.",
+                              ),
+                              okText: bi("确认撤销", "Revert"),
+                              cancelText: bi("取消", "Cancel"),
+                              okButtonProps: { status: "warning" },
+                              onOk: () => submitApply(false),
+                            });
+                          }
+                        }}
+                      >
+                        {(rehearsal.stage === "finalized" || rehearsal.source?.rollout_id) && (
+                          <Menu.Item key="edit">
+                            <span className="menu-row">
+                              <IconEdit />
+                              <span>{bi("编辑落地记录", "Edit Record")}</span>
+                            </span>
+                          </Menu.Item>
+                        )}
+                        {(rehearsal.stage === "finalized" || rehearsal.source?.rollout_id) && (
+                          <div className="menu-sep" />
+                        )}
+                        <Menu.Item key="revert" className="danger-item">
+                          <span className="menu-row">
+                            <IconRefresh />
+                            <span>{bi("撤销落地", "Revert Sign-Off")}</span>
+                          </span>
+                        </Menu.Item>
+                      </Menu>
+                    }
+                  >
+                    <Button
+                      size="small"
+                      className="rh-closure-more"
+                      icon={<IconMore />}
+                      disabled={offline || busy}
+                      aria-label={bi("更多落地记录操作", "More record actions")}
+                    />
+                  </Dropdown>
+                </>
+              ) : (
+                <>
+                  <Tooltip
+                    mini
+                    content={bi(
+                      "若此方案不再执行或已被新方案替代，标记作废可保留文档并锁定防误点",
+                      "Mark obsolete to preserve docs while locking accidental sign-off",
+                    )}
+                  >
+                    <Button
+                      size="small"
+                      disabled={offline || busy}
+                      onClick={openVoidModal}
+                    >
+                      {bi("标记作废", "Mark Void")}
+                    </Button>
+                  </Tooltip>
+                  <Button
+                    size="small"
+                    type="primary"
+                    status={hasConflict ? "warning" : "success"}
+                    icon={<IconCheck />}
+                    disabled={offline || busy}
+                    loading={busy}
+                    onClick={openModal}
+                  >
+                    {hasConflict
+                      ? bi("核对后确认落地", "Review & Confirm")
+                      : bi("确认生产已实施完成", "Confirm Applied to Prod")}
+                  </Button>
+                </>
               )}
             </div>
           </div>
 
-          <div className="rh-closure-acts">
+          <div className="rh-closure-detail">
             {isVoided ? (
-              <Button
-                size="small"
-                icon={<IconRefresh />}
-                disabled={offline || busy}
-                loading={busy}
-                onClick={() => void submitVoid(false)}
-              >
-                {bi("恢复为待实施", "Restore to Pending")}
-              </Button>
+              <div className="rh-closure-void-info">
+                <p className="rh-closure-desc">
+                  {rehearsal.void_reason ||
+                    bi(
+                      "已手动标记不再执行，文档与历史演练记录保留供审计。",
+                      "Marked obsolete; documents and history remain preserved for audit.",
+                    )}
+                </p>
+                {rehearsal.superseded_by && (
+                  <button
+                    type="button"
+                    className="rh-closure-superseded-link"
+                    onClick={() => jumpToPeer(rehearsal.superseded_by!)}
+                  >
+                    {bi(
+                      `查看替代方案：《${rehearsal.superseded_title || rehearsal.superseded_by}》`,
+                      `Open replacement: "${rehearsal.superseded_title || rehearsal.superseded_by}"`,
+                    )}{" "}
+                    <IconRight />
+                  </button>
+                )}
+                <span className="rh-closure-lock-note">
+                  {bi(
+                    "已锁定「确认落地」入口，防止后续误点污染集群配置",
+                    "Sign-off locked to prevent accidental baseline pollution",
+                  )}
+                </span>
+              </div>
             ) : isApplied ? (
-              <>
-                {rehearsal.stage === "finalized" && (
-                  <Button
-                    size="small"
-                    type="primary"
-                    icon={<IconShareExternal />}
-                    disabled={offline || busy}
-                    onClick={() => setPropagateOpen(true)}
-                  >
-                    {bi("推广到其他集群", "Propagate")}
-                  </Button>
-                )}
-                {rehearsal.source?.rollout_id && (
-                  <Button
-                    size="small"
-                    disabled={offline || busy}
-                    onClick={() => {
-                      setRolloutBoardData(null);
-                      setRolloutBoardOpen(true);
-                    }}
-                  >
-                    {bi("推广看板", "Rollout Board")}
-                  </Button>
-                )}
-                <Button
-                  size="small"
-                  icon={<IconEdit />}
-                  disabled={offline || busy}
-                  onClick={openModal}
-                >
-                  {bi("编辑落地记录", "Edit Record")}
-                </Button>
-                <Popconfirm
-                  position="br"
-                  title={bi("撤销此变更的生产落地标记？", "Revert production applied status?")}
-                  content={bi(
-                    "撤销后将从集群「已落地生产变更」列表中移除，文档与演练记录保留。",
-                    "Removes this item from active production changes on the cluster while preserving docs.",
+              <p className="rh-closure-desc">
+                {rehearsal.applied_summary ||
+                  bi(
+                    "本次变更已正式记入集群运行台账、配置叠加视图、交付报告与后续 AI 上下文。",
+                    "Synced into cluster overview, config overlays, delivery report, and future AI context.",
                   )}
-                  okText={bi("确认撤销", "Revert")}
-                  cancelText={bi("取消", "Cancel")}
-                  onOk={() => void submitApply(false)}
-                >
-                  <Button
-                    size="small"
-                    type="text"
-                    status="warning"
-                    disabled={offline || busy}
-                  >
-                    {bi("撤销落地", "Revert")}
-                  </Button>
-                </Popconfirm>
-              </>
+              </p>
             ) : (
-              <>
-                <Tooltip
-                  mini
-                  content={bi(
-                    "若此方案不再执行或已被新方案替代，标记作废可保留文档并锁定防误点",
-                    "Mark obsolete to preserve docs while locking accidental sign-off",
-                  )}
-                >
-                  <Button
-                    size="small"
-                    disabled={offline || busy}
-                    onClick={openVoidModal}
-                  >
-                    {bi("标记作废", "Mark Void")}
-                  </Button>
-                </Tooltip>
-                <Button
-                  type="primary"
-                  status={hasConflict ? "warning" : "success"}
-                  icon={<IconCheck />}
-                  disabled={offline || busy}
-                  loading={busy}
-                  onClick={openModal}
-                >
-                  {hasConflict
-                    ? bi("核对后确认落地", "Review & Confirm")
-                    : bi("确认生产已实施完成", "Confirm Applied to Prod")}
-                </Button>
-              </>
+              <p className="rh-closure-desc">
+                {bi(
+                  "按方案在生产环境完成实施与验收后点击「确认生产已实施完成」同步到集群；若方案已放弃或被新方案替代，可「标记作废」锁定防误触。",
+                  "Confirm completion once executed and verified in production to sync cluster state, or mark voided if obsolete to lock against misclicks.",
+                )}
+              </p>
             )}
           </div>
         </div>

@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.317-dev"
+	version            = "1.0.318-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,22 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.318-dev",
+		Date:    "2026-11-24",
+		Title:   "变更演练生产落地闭环卡操作区与版式重构",
+		TitleEn: "Rehearsal Production Closure Card Toolbar & Editorial Layout Redesign",
+		Highlights: []string{
+			"重构变更演练「生产已实施落地并同步至集群」闭环卡片布局：由原先四枚按钮扁平横排并挤压左侧摘要改为顶部标题栏右对齐操作组 + 下方全宽摘要两段式版式，左侧多行落地摘要不再被压缩至半栏。",
+			"建立清晰的操作信息层级：高频推广操作保留在主操作栏（Kyndryl 暖红主按钮「推广到其他集群」+ 次按钮「推广看板」），低频记录维护（「编辑落地记录」）与危险操作（「撤销落地」，带二次确认弹窗）收纳进右侧「⋯」下拉菜单。",
+			"统一浅色与暗黑模式视觉质感：暗黑模式下采用柔和半透明成功徽标与高可读摘要排版，确保「⋯」菜单展开无遮挡、无提示气泡冲突。",
+		},
+		HighlightsEn: []string{
+			"Redesigned the Rehearsal Production Closure card from a cramped 4-button horizontal row into a clean two-zone editorial layout: top header bar (status title + synced pills + right-aligned action toolbar) above a full-width summary paragraph.",
+			"Clarified action hierarchy: high-frequency rollout actions stay visible (Kyndryl Warm Red primary Propagate + secondary Rollout Board), while lower-frequency record maintenance (Edit Record) and destructive actions (Revert Sign-Off with confirmation modal) move cleanly into a compact overflow menu.",
+			"Polished Light and Dark Mode contrast with restful translucent status badges, crisp active trigger states, and unobstructed dropdown alignment.",
+		},
+	},
 	{
 		Version: "1.0.317-dev",
 		Date:    "2026-11-24",

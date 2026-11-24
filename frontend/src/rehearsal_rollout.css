@@ -457,6 +457,7 @@ body[arco-theme="dark"] .ro-kpi.is-warn b {
 }
 .ro-tbl {
   width: 100%;
+  min-width: 680px;
   border-collapse: collapse;
   font-size: 12.5px;
   table-layout: fixed;
@@ -811,6 +812,11 @@ body[arco-theme="dark"] .ro-risk-warn {
   border-radius: 4px;
   color: #047857;
   background: color-mix(in srgb, #10b981 13%, transparent);
+}
+[data-theme="dark"] .ro-rec,
+body[arco-theme="dark"] .ro-rec {
+  color: #34d399;
+  background: rgba(16, 185, 129, 0.2);
 }
 
 .ro-pick-bar {
@@ -1380,6 +1386,10 @@ body[arco-theme="dark"] .ro-var-tag {
   border: 1px solid var(--bad-line);
   color: var(--bad);
   font-size: 12.5px;
+}
+.ro-pick-list .ro-empty-box {
+  border: 0;
+  border-radius: 0;
 }
 .ro-empty-box {
   padding: 24px 14px;

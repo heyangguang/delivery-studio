@@ -53,6 +53,7 @@ const ACTION_DATA: Record<string, [string, string, string, string]> = {
   "job-revised": ["修订交付", "交付", "Revise delivery", "Delivery"],
   "job-sync": ["同步组件修复到交付", "交付", "Sync component fix to delivery", "Delivery"],
   "job-sync-keep": ["保留原组件版本", "交付", "Keep pinned component version", "Delivery"],
+  "job-sync-confirm": ["确认组件同步升级", "交付", "Confirm component sync", "Delivery"],
   "job-succeeded": ["交付生成成功", "交付", "Delivery build succeeded", "Delivery"],
   "job-failed": ["交付生成失败", "交付", "Delivery build failed", "Delivery"],
   "job-mark": ["标记交付结果", "交付", "Mark delivery outcome", "Delivery"],
@@ -64,7 +65,34 @@ const ACTION_DATA: Record<string, [string, string, string, string]> = {
   "job-step": ["记录执行结果", "交付", "Record step result", "Delivery"],
   "job-runlogs": ["上传或写入执行日志", "交付", "Upload or write run logs", "Delivery"],
   "job-runlogs-delete": ["清理执行日志", "交付", "Clear run logs", "Delivery"],
+  "cluster-import": ["导入存量集群", "交付", "Import existing cluster", "Delivery"],
+  "cluster-baseline-update": ["更新集群基线配置", "交付", "Update cluster baseline", "Delivery"],
+  "delivery-file-patch": ["热修补交付脚本文件", "交付", "Patch delivery script file", "Delivery"],
+  "delivery-file-patch-revert": [
+    "回退交付脚本热修补",
+    "交付",
+    "Revert delivery script patch",
+    "Delivery",
+  ],
+  "delivery-patch-promote-draft": [
+    "将热修补沉淀至组件草稿",
+    "交付",
+    "Promote hotfix to component draft",
+    "Delivery",
+  ],
+  "legacy-change-consolidate": [
+    "合并归档历史变更记录",
+    "交付",
+    "Consolidate legacy change records",
+    "Delivery",
+  ],
   "execution-node-create": ["登记执行节点", "交付", "Register execution node", "Delivery"],
+  "execution-node-bundle": [
+    "下载执行节点部署包",
+    "交付",
+    "Download execution node bundle",
+    "Delivery",
+  ],
   "execution-node-disable": [
     "停用或启用执行节点",
     "交付",
@@ -93,11 +121,61 @@ const ACTION_DATA: Record<string, [string, string, string, string]> = {
   "doc-rca-delete": ["删除根因分析或评估", "交付", "Delete RCA or assessment", "Delivery"],
   "doc-assess": ["新建评估", "交付", "Create assessment", "Delivery"],
   "rehearsal-create": ["发起变更演练", "AI", "Start change rehearsal", "AI"],
+  "rehearsal-refine": ["AI 优化变更演练方案", "AI", "Refine rehearsal plan", "AI"],
   "rehearsal-scope": ["更新变更影响评估", "AI", "Update change impact scope", "AI"],
   "rehearsal-probe": ["解析变更采集探针", "AI", "Parse change probe", "AI"],
+  "rehearsal-probe-blocked": [
+    "变更探针被安全策略拦截",
+    "交付",
+    "Rehearsal probe blocked",
+    "Delivery",
+  ],
   "rehearsal-step": ["调整变更演练步骤", "交付", "Update rehearsal step", "Delivery"],
+  "rehearsal-verify-passed": [
+    "AI 核验演练步骤通过",
+    "AI",
+    "Rehearsal step verified (passed)",
+    "AI",
+  ],
+  "rehearsal-verify-failed": [
+    "AI 核验演练步骤未通过",
+    "AI",
+    "Rehearsal step verification failed",
+    "AI",
+  ],
   "rehearsal-troubleshoot": ["AI 排障修正演练步骤", "AI", "AI troubleshoot rehearsal step", "AI"],
   "rehearsal-apply": ["应用变更演练修正建议", "AI", "Apply rehearsal fix proposal", "AI"],
+  "rehearsal-apply-prod": [
+    "确认变更方案生产落地",
+    "交付",
+    "Mark rehearsal applied to prod",
+    "Delivery",
+  ],
+  "rehearsal-unapply-prod": [
+    "撤销变更方案落地标记",
+    "交付",
+    "Unmark rehearsal prod applied",
+    "Delivery",
+  ],
+  "rehearsal-void": ["作废变更演练方案", "交付", "Void rehearsal plan", "Delivery"],
+  "rehearsal-restore": [
+    "恢复已作废演练方案",
+    "交付",
+    "Restore voided rehearsal plan",
+    "Delivery",
+  ],
+  "rehearsal-sync-vex": [
+    "回写演练 VEX 漏洞状态",
+    "安全",
+    "Sync rehearsal VEX status",
+    "Security",
+  ],
+  "rehearsal-propagate": [
+    "批量推广变更方案至同类集群",
+    "交付",
+    "Propagate rehearsal to peer clusters",
+    "Delivery",
+  ],
   "rehearsal-finalize": ["定稿生产变更实施方案", "交付", "Finalize production change plan", "Delivery"],
   "rehearsal-delete": ["删除变更演练", "交付", "Delete change rehearsal", "Delivery"],
   "report-settings": ["修改交付文档设置", "设置", "Update report settings", "Settings"],
@@ -121,6 +199,18 @@ const ACTION_DATA: Record<string, [string, string, string, string]> = {
     "调整组件版本状态",
     "组件",
     "Change component version status",
+    "Components",
+  ],
+  "component-version-verify": [
+    "发起组件版本自动化验证",
+    "组件",
+    "Verify component version",
+    "Components",
+  ],
+  "component-verification-delete": [
+    "删除组件验证记录",
+    "组件",
+    "Delete component verification record",
     "Components",
   ],
   "library-fetch": ["下载软件包", "软件库", "Fetch software packages", "Software Library"],
@@ -175,6 +265,7 @@ const ACTION_DATA: Record<string, [string, string, string, string]> = {
     "AI",
   ],
   "ai-chat": ["AI 对话", "AI", "AI chat", "AI"],
+  "portal-ai-chat": ["门户 AI 助手对话", "AI", "Portal AI chat", "AI"],
   "ai-fill": ["AI 智能填表", "AI", "AI smart fill", "AI"],
   "ai-prices": ["修改模型价格", "AI", "Update model pricing", "AI"],
   "ai-skills": ["修改 AI 技能", "AI", "Update AI skills", "AI"],
@@ -183,6 +274,7 @@ const ACTION_DATA: Record<string, [string, string, string, string]> = {
   "ai-mcp-delete": ["移除 MCP 服务", "AI", "Remove MCP server", "AI"],
   "ai-web": ["修改联网搜索", "AI", "Update web search", "AI"],
   "ai-user-mcp": ["个人 MCP 开关", "AI", "Toggle personal MCP", "AI"],
+  "ai-sandbox-approve": ["审批沙箱执行请求", "AI", "Approve sandbox execution", "AI"],
   "ai-sandbox-run": ["AI 在沙箱里运行代码", "AI", "Run AI code in sandbox", "AI"],
   "ai-sandbox-shell": ["在隔离沙箱执行命令", "AI", "Run shell command in sandbox", "AI"],
   "sandbox-settings": ["修改代码沙箱设置", "平台", "Update code sandbox settings", "Platform"],
@@ -228,11 +320,115 @@ const ACTION_DATA: Record<string, [string, string, string, string]> = {
   "kb-reject": ["退回资料", "知识库", "Reject KB submission", "Knowledge Base"],
   "kb-edit": ["编辑团队资料", "知识库", "Edit team KB article", "Knowledge Base"],
   "kb-delete": ["删除团队资料", "知识库", "Delete team KB article", "Knowledge Base"],
+  "security-scan": ["执行全平台漏洞扫描", "安全", "Run vulnerability scan", "Security"],
+  "security-db-sync": ["在线同步安全漏洞库", "安全", "Sync advisory database", "Security"],
+  "security-db-export": ["导出离线漏洞库包", "安全", "Export offline advisory bundle", "Security"],
+  "security-db-import": ["导入离线漏洞库包", "安全", "Import offline advisory bundle", "Security"],
+  "security-triage": ["保存 CVE 漏洞处置结论", "安全", "Save CVE VEX triage", "Security"],
+  "security-triage-batch": [
+    "批量更新 CVE 漏洞处置",
+    "安全",
+    "Batch update CVE VEX triage",
+    "Security",
+  ],
+  "security-triage-ai": ["AI 采纳 CVE 处置提案", "安全", "Apply AI CVE triage", "Security"],
+  "security-supply-verify": [
+    "校验供应链完整性",
+    "安全",
+    "Verify supply-chain integrity",
+    "Security",
+  ],
+  "security-policy": [
+    "修改安全视角与门禁策略",
+    "安全",
+    "Update security policy & gates",
+    "Security",
+  ],
+  "security-ignore-add": [
+    "添加全局忽略软件包规则",
+    "安全",
+    "Add global package ignore rule",
+    "Security",
+  ],
+  "security-ignore-delete": [
+    "移除全局忽略软件包规则",
+    "安全",
+    "Remove global package ignore rule",
+    "Security",
+  ],
+  "security-baseline-waive": [
+    "调整集群基线豁免状态",
+    "安全",
+    "Update cluster baseline waiver",
+    "Security",
+  ],
+  "security-baseline-waive-ai": [
+    "AI 采纳基线豁免提案",
+    "安全",
+    "Apply AI baseline waiver",
+    "Security",
+  ],
+  "security-ai-chat": ["安全中心 AI 对话", "安全", "Security AI chat", "Security"],
+  "security-ai-analyze": ["AI 深度研判 CVE 漏洞", "安全", "AI analyze CVE", "Security"],
+  "security-ai-polish": ["AI 润色安全评估说明", "安全", "AI polish security note", "Security"],
+  "security-ai-proposal-accept": [
+    "采纳安全 AI 提案",
+    "安全",
+    "Accept security AI proposal",
+    "Security",
+  ],
+  "security-ai-proposal-reject": [
+    "拒绝安全 AI 提案",
+    "安全",
+    "Reject security AI proposal",
+    "Security",
+  ],
+  "security-report-template-add": [
+    "新建安全报告模板",
+    "安全",
+    "Create security report template",
+    "Security",
+  ],
+  "security-report-template-update": [
+    "修改安全报告模板",
+    "安全",
+    "Update security report template",
+    "Security",
+  ],
+  "security-report-template-delete": [
+    "删除安全报告模板",
+    "安全",
+    "Delete security report template",
+    "Security",
+  ],
+  "security-report-template-default": [
+    "设置默认安全报告模板",
+    "安全",
+    "Set default security report template",
+    "Security",
+  ],
+  "security-report-template-reset": [
+    "重置内置安全报告模板",
+    "安全",
+    "Reset built-in security report template",
+    "Security",
+  ],
+  "security-source-add": ["新增自定义漏洞源", "安全", "Add CVE advisory source", "Security"],
+  "security-source-update": ["修改漏洞源配置", "安全", "Update CVE advisory source", "Security"],
+  "security-source-delete": ["删除自定义漏洞源", "安全", "Delete CVE advisory source", "Security"],
 };
 
 const actionEntry = (a: string): [string, string] | undefined => {
   const e = ACTION_DATA[a];
-  return e ? [bi(e[0], e[2]), bi(e[1], e[3])] : undefined;
+  if (e) return [bi(e[0], e[2]), bi(e[1], e[3])];
+  if (a.startsWith("rehearsal-verify-")) {
+    const verdict = a.slice("rehearsal-verify-".length);
+    return [
+      bi(`AI 核验演练步骤 (${verdict})`, `Verify rehearsal step (${verdict})`),
+      bi("AI", "AI"),
+    ];
+  }
+  return undefined;
 };
 export const auditLabel = (a: string) => actionEntry(a)?.[0] || a;
 
@@ -247,6 +443,7 @@ const RESOURCE_EN: Record<string, string> = {
   软件库: "Software Library",
   变更演练: "Change Rehearsal",
   集群: "Cluster",
+  安全中心: "Security Center",
   "MCP 服务": "MCP Server",
   "AI 用量": "AI Usage",
   "AI 设置": "AI Settings",
@@ -1218,12 +1415,17 @@ export function AuditView() {
                               `${u.login_count} 次`,
                               `${u.login_count} ${u.login_count === 1 ? "login" : "logins"}`,
                             )}
-                            {u.failed_login_count > 0
-                              ? bi(
-                                  ` · 失败 ${u.failed_login_count}`,
-                                  ` · ${u.failed_login_count} failed`,
-                                )
-                              : ""}
+                            {u.failed_login_count > 0 && (
+                              <>
+                                {" · "}
+                                <span style={{ whiteSpace: "nowrap" }}>
+                                  {bi(
+                                    `失败 ${u.failed_login_count}`,
+                                    `${u.failed_login_count} failed`,
+                                  )}
+                                </span>
+                              </>
+                            )}
                           </span>
                         </div>
                       </button>
@@ -1423,6 +1625,7 @@ export function AuditView() {
 
       <Drawer
         width={540}
+        style={{ maxWidth: "100vw" }}
         visible={!!open}
         onCancel={() => setOpen(null)}
         footer={null}
@@ -1547,6 +1750,7 @@ export function AuditView() {
 
       <Drawer
         width={520}
+        style={{ maxWidth: "100vw" }}
         visible={!!sessDetail}
         onCancel={() => setSessDetail(null)}
         footer={

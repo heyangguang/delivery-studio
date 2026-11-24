@@ -1219,7 +1219,7 @@ export function SecExportModal({
         </div>
 
         <div className="sexp-scope-row">
-          <span style={{ fontSize: 12.5, color: "#334155", fontWeight: 500 }}>
+          <span style={{ fontSize: 12.5, color: "var(--ink-2)", fontWeight: 500 }}>
             {bi("漏洞分层口径覆盖", "Layer Scope Override")}
           </span>
           <Select

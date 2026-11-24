@@ -16,7 +16,7 @@ export function sameScheme(a?: DeploymentScheme, b?: DeploymentScheme): boolean 
 export function SchemeInfo({scheme, detail=false, label}:{scheme?: DeploymentScheme;detail?: boolean;label?: string}) {
  useLang();
  const resolvedLabel = label ?? bi("部署方案", "Deployment scheme");
- if(!scheme)return <section className="scheme-summary is-empty" aria-label={resolvedLabel}><div className="scheme-head"><span className="scheme-dot" aria-hidden /><strong>{bi("部署架构待核对", "Architecture unverified")}</strong></div><div className="scheme-limit">{bi("旧交付未保存方案信息，请在下方节点拓扑或“配置”中查看原始部署记录。", "Legacy delivery has no saved scheme metadata; inspect the topology below or the Config tab for raw records.")}</div></section>;
+ if(!scheme)return <section className="scheme-summary is-empty" aria-label={resolvedLabel}><div className="scheme-head"><span className="scheme-head-title"><span className="scheme-dot" aria-hidden /><strong>{bi("部署架构待核对", "Architecture unverified")}</strong></span></div><div className="scheme-limit">{bi("旧交付未保存方案信息，请在下方节点拓扑或“配置”中查看原始部署记录。", "Legacy delivery has no saved scheme metadata; inspect the topology below or the Config tab for raw records.")}</div></section>;
  const contract=scheme.contract || {when:"",series:"",failover:"",mechanism:"",read_access:"",sharding:false,limitations:[],acceptance:[],operations:[]};
  const failover=({
   none: bi("不提供故障切换", "No failover"),
@@ -39,7 +39,7 @@ export function SchemeInfo({scheme, detail=false, label}:{scheme?: DeploymentSch
      ? bi("此配置对应部署架构", "Config architecture")
      : bi("部署架构", "Architecture");
  return <section className="scheme-summary" aria-label={resolvedLabel}>
-  <div className="scheme-head"><span className="scheme-dot" aria-hidden /><strong>{archTitle}{bi("：", ": ")}{scheme.name}</strong>{scheme.nodes>0 && <span className="scheme-node-pill num">{nodeText}</span>}</div>
+  <div className="scheme-head"><span className="scheme-head-title"><span className="scheme-dot" aria-hidden /><strong>{archTitle}{bi("：", ": ")}{scheme.name}</strong></span>{scheme.nodes>0 && <span className="scheme-node-pill num">{nodeText}</span>}</div>
   {(scheme.topology || facets.length>0) && (
    <div className="scheme-pills">
     {scheme.topology && <span className="scheme-pill is-topo">{scheme.topology}</span>}

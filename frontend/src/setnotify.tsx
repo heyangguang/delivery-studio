@@ -116,7 +116,16 @@ export function KindMark({ kind, size = 36 }: { kind: string; size?: number }) {
     );
   return (
     <svg className="nk" style={box} viewBox="0 0 40 40" aria-hidden>
-      <rect width="40" height="40" rx="11" fill="#1d1c1a" />
+      <rect
+        x="0.75"
+        y="0.75"
+        width="38.5"
+        height="38.5"
+        rx="10.25"
+        fill="#1d1c1a"
+        stroke="rgba(255,255,255,.22)"
+        strokeWidth="1.5"
+      />
       <path
         d="M15 14l-6 6 6 6M25 14l6 6-6 6M22 12l-4 16"
         fill="none"
@@ -700,7 +709,14 @@ export function TemplatesView() {
   const [q, setQ] = useState("");
   const body = useRef<HTMLTextAreaElement>(null);
   const title = useRef<HTMLInputElement>(null);
+  const titlePre = useRef<HTMLPreElement>(null);
   const [focus, setFocus] = useState<"title" | "body">("body");
+  const syncTitleScroll = (el?: HTMLInputElement | null) => {
+    const input = el ?? title.current;
+    if (input && titlePre.current) {
+      titlePre.current.scrollLeft = input.scrollLeft;
+    }
+  };
   const load = () =>
     api<NonNullable<typeof d>>("/api/settings/templates")
       .then((r) => {
@@ -777,6 +793,7 @@ export function TemplatesView() {
       window.setTimeout(() => {
         el?.focus();
         el?.setSelectionRange(at + tag.length, at + tag.length);
+        syncTitleScroll(el);
       }, 0);
     } else {
       const el = body.current;
@@ -880,6 +897,10 @@ export function TemplatesView() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const id = window.requestAnimationFrame(() => syncTitleScroll());
+    return () => window.cancelAnimationFrame(id);
+  }, [draft.title, sel]);
   const t = q.trim().toLowerCase();
   const shown = (d?.events || []).filter(
     (e) =>
@@ -1004,17 +1025,26 @@ export function TemplatesView() {
                 <div className="tp2-field">
                   <label htmlFor="tp-title">{bi("消息标题", "Title")}</label>
                   <div className="tp2-code one">
-                    <pre aria-hidden>
+                    <pre ref={titlePre} aria-hidden>
                       <Marked text={draft.title} known={known} />
                     </pre>
                     <input
                       id="tp-title"
                       ref={title}
                       value={draft.title}
-                      onChange={(e) =>
-                        setDraft({ ...draft, title: e.target.value })
-                      }
-                      onFocus={() => setFocus("title")}
+                      onChange={(e) => {
+                        setDraft({ ...draft, title: e.target.value });
+                        const el = e.currentTarget;
+                        window.requestAnimationFrame(() => syncTitleScroll(el));
+                      }}
+                      onScroll={(e) => syncTitleScroll(e.currentTarget)}
+                      onKeyUp={(e) => syncTitleScroll(e.currentTarget)}
+                      onSelect={(e) => syncTitleScroll(e.currentTarget)}
+                      onClick={(e) => syncTitleScroll(e.currentTarget)}
+                      onFocus={(e) => {
+                        setFocus("title");
+                        syncTitleScroll(e.currentTarget);
+                      }}
                       maxLength={120}
                       spellCheck={false}
                       aria-label={bi("标题", "Title")}

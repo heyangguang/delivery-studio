@@ -57,6 +57,8 @@ export function StackedBars({
   const max = niceMax(Math.max(0, ...totals));
   const any = totals.some((t) => t > 0);
   const [W, setW] = useState(720);
+  const tipRef = useRef<HTMLDivElement>(null);
+  const [tipW, setTipW] = useState(180);
   useLayoutEffect(() => {
     const el = box.current;
     if (!el) return;
@@ -66,8 +68,13 @@ export function StackedBars({
     ro.observe(el);
     return () => ro.disconnect();
   }, [table, any]);
+  useLayoutEffect(() => {
+    if (hover === null || !tipRef.current) return;
+    const w = Math.ceil(tipRef.current.getBoundingClientRect().width);
+    if (w > 0 && w !== tipW) setTipW(w);
+  }, [hover, tipW]);
   const H = height;
-  const pad = { l: 48, r: 8, t: 8, b: 22 };
+  const pad = { l: 56, r: 8, t: 8, b: 22 };
   const iw = W - pad.l - pad.r;
   const ih = H - pad.t - pad.b;
   const slot = iw / Math.max(1, points.length);
@@ -223,27 +230,28 @@ export function StackedBars({
               );
             })}
           </svg>
-          {hover !== null && (
-            <div
-              className="ch-tip"
-              style={{
-                left: Math.min(
-                  W - 80,
-                  Math.max(80, pad.l + slot * hover + slot / 2),
-                ),
-              }}
-              role="status"
-            >
-              <b>{points[hover].label}</b>
-              {series.map((s) => (
-                <span key={s.id}>
-                  <i style={{ background: s.color }} />
-                  {s.label}
-                  <em>{format(points[hover].values[s.id] || 0)}</em>
-                </span>
-              ))}
-            </div>
-          )}
+          {hover !== null && (() => {
+            const cx = pad.l + slot * hover + slot / 2;
+            const halfTip = Math.min(W / 2 - 4, Math.max(84, tipW / 2) + 6);
+            const tipLeft = Math.min(W - halfTip, Math.max(halfTip, cx));
+            return (
+              <div
+                ref={tipRef}
+                className="ch-tip"
+                style={{ left: tipLeft }}
+                role="status"
+              >
+                <b>{points[hover].label}</b>
+                {series.map((s) => (
+                  <span key={s.id}>
+                    <i style={{ background: s.color }} />
+                    {s.label}
+                    <em>{format(points[hover].values[s.id] || 0)}</em>
+                  </span>
+                ))}
+              </div>
+            );
+          })()}
         </div>
       )}
     </figure>

@@ -1478,7 +1478,7 @@ body[arco-theme="dark"] .en-flow-done-tag {
 
 /* Help stays beside the page, with readable commands and copy actions. */
 .en-guide-drawer .arco-drawer-header {
-  padding: 20px 24px;
+  padding: 20px 48px 20px 24px;
 }
 .en-guide-drawer .arco-drawer-content {
   padding: 24px;
@@ -1690,6 +1690,9 @@ body[arco-theme="dark"] .en-flow-done-tag {
   .en-setup-steps > span:not(.en-setup-line) {
     gap: 6px;
     font-size: 11px;
+  }
+  .en-guide-drawer .arco-drawer-header {
+    padding: 18px 48px 18px 18px;
   }
   .en-guide-drawer .arco-drawer-content {
     padding: 18px;
@@ -2545,6 +2548,9 @@ body[arco-theme="dark"] .en-flow-done-tag {
   color: #fff;
   border-color: var(--bad);
 }
+body[arco-theme="dark"] .ex-preset-pill.bad.on {
+  color: #140606;
+}
 .ex-preset-pill.ghost {
   background: transparent;
   border-color: transparent;
@@ -2812,7 +2818,8 @@ body[arco-theme="dark"] .en-flow-done-tag {
   color: #c52b16;
   font-weight: 560;
 }
-[data-theme="dark"] .ex-patch-inline {
+[data-theme="dark"] .ex-patch-inline,
+body[arco-theme="dark"] .ex-patch-inline {
   color: #c4b5fd;
 }
 .ex-step-quick {

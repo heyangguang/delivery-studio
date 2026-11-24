@@ -1367,7 +1367,7 @@ function Overview({
                   <p className="cl-ledger-note">
                     {basePlan.outcome_note
                       ? bi(`现场说明：${basePlan.outcome_note}`, `On-site note: ${basePlan.outcome_note}`)
-                      : bi(`${basePlan.marked_by} 于 ${ago(basePlan.marked!)}确认部署完成`, `${basePlan.marked_by} confirmed completion ${ago(basePlan.marked!)}`)}
+                      : bi(`${basePlan.marked_by} 于 ${ago(basePlan.marked!)} 确认部署完成`, `${basePlan.marked_by} confirmed completion ${ago(basePlan.marked!)}`)}
                   </p>
                 )}
               </div>
@@ -1797,19 +1797,27 @@ function Now({
 function HostTable({
   plan,
   input,
+  cluster,
 }: {
   plan: NonNullable<JobDetail["plan"]>;
   input?: NonNullable<JobDetail["spec"]>["deployment"];
+  cluster?: ClusterView;
 }) {
   useLang();
   const specs = (input?.hosts || []) as {
     name: string;
     disk?: string;
+    partition?: string;
+    initialize?: boolean;
     params?: Record<string, unknown>;
   }[];
+  const storageOpts = {
+    imported: cluster?.delivery_mode === "imported",
+    importedDataDirs: cluster?.imported?.data_dirs,
+  };
   const rows = plan.hosts.map((h) => ({
     ...h,
-    storage: hostStorage(specs.find((x) => x.name === h.name)),
+    storage: hostStorage(specs.find((x) => x.name === h.name), storageOpts),
     roles: displayInstances(plan.instances).flatMap((i) =>
       Object.entries(i.roles || {})
         .filter(([, hs]) => hs.includes(h.name))
@@ -1838,17 +1846,24 @@ function HostTable({
             <tr key={r.name}>
               <td className="cl-host-td">
                 <span className="cl-host-cell">
-                  <b>{r.name}</b>
+                  <b title={r.name}>{r.name}</b>
                   {r.name === plan.controller && <em>{bi("控制", "Ctrl")}</em>}
                 </span>
               </td>
               <td className="mono cl-ip-td">
                 <span className="cl-copy-cell">
-                  <span>{r.ip}</span>
+                  <span title={r.ip}>{r.ip}</span>
                   <InlineCopyBtn value={r.ip} label={bi(`${r.name} 地址`, `${r.name} IP`)} />
                 </span>
               </td>
-              <td className="cl-store-td">
+              <td
+                className="cl-store-td"
+                title={
+                  r.storage.path
+                    ? `${r.storage.label} ${r.storage.path}`
+                    : r.storage.label
+                }
+              >
                 <span className="cl-store-main">{r.storage.label}</span>
                 {r.storage.path && (
                   <span className="mono faint small">{r.storage.path}</span>
@@ -2172,7 +2187,7 @@ function ClusterUnifiedOverview({
               </span>
             )}
           </div>
-          <HostTable plan={plan} input={input} />
+          <HostTable plan={plan} input={input} cluster={c} />
         </div>
       )}
 

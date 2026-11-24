@@ -125,26 +125,26 @@ body[arco-theme="dark"] .rp-ic.k-mine {
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
 }
 .rp-ic.k-built {
-  color: #b45f00;
+  color: var(--warn);
   background: linear-gradient(150deg, rgba(255, 179, 64, 0.22), rgba(255, 159, 10, 0.12));
 }
 .rp-ic.k-org {
-  color: #0b7d7d;
+  color: var(--teal-ink);
   background: linear-gradient(150deg, rgba(20, 170, 170, 0.2), rgba(20, 170, 170, 0.1));
 }
 .rp-ic.k-mcp {
-  color: #1f8a4c;
+  color: var(--ok);
   background: linear-gradient(150deg, rgba(52, 199, 89, 0.22), rgba(52, 199, 89, 0.1));
 }
 .rp-ic.k-doc {
-  color: #0a6fd6;
+  color: var(--cobalt-ink);
   background: linear-gradient(150deg, rgba(10, 132, 255, 0.2), rgba(10, 132, 255, 0.08));
 }
 
 /* the detail pane */
 .rp-detail {
   max-width: 1560px;
-  padding: 30px clamp(20px, 3.2vw, 52px) 80px;
+  padding: 30px clamp(20px, 3.2vw, 52px) 84px;
 }
 .rp-head {
   display: flex;
@@ -340,6 +340,24 @@ body[arco-theme="dark"] .rp-ic.k-mine {
   border-radius: 10px;
 }
 
+@media (max-width: 1360px) {
+  .rp-head {
+    flex-wrap: wrap;
+    gap: 14px 16px;
+  }
+  .rp-head-t {
+    flex: 1 1 280px;
+  }
+  .rp-acts {
+    flex: 1 0 100%;
+  }
+  .rp-head:has(> .rp-ic.lg) .rp-acts {
+    padding-left: 64px;
+  }
+  .rp-acts .rp-switch {
+    margin-left: 0;
+  }
+}
 @media (max-width: 1200px) {
   .rp-body {
     grid-template-columns: minmax(0, 1fr);
@@ -351,6 +369,9 @@ body[arco-theme="dark"] .rp-ic.k-mine {
 @media (max-width: 760px) {
   .rp-head {
     flex-wrap: wrap;
+  }
+  .rp-head:has(> .rp-ic.lg) .rp-acts {
+    padding-left: 0;
   }
   .rp-grid2 {
     grid-template-columns: minmax(0, 1fr);
@@ -441,8 +462,8 @@ body[arco-theme="dark"] .rp-ic.k-mine {
   font-weight: 550;
 }
 .rp-flag.cust {
-  color: #b45f00;
-  background: rgba(255, 159, 10, 0.14);
+  color: var(--warn);
+  background: var(--warn-soft);
 }
 .rp-title-row {
   display: flex;
@@ -469,14 +490,14 @@ body[arco-theme="dark"] .rp-ic.k-mine {
   border: 1px solid var(--brand-line);
 }
 .rp-scope-pill.built {
-  color: #b45f00;
-  background: rgba(255, 159, 10, 0.13);
-  border: 1px solid rgba(255, 159, 10, 0.26);
+  color: var(--warn);
+  background: var(--warn-soft);
+  border: 1px solid var(--warn-line);
 }
 .rp-scope-pill.org {
-  color: #0b7d7d;
-  background: rgba(20, 170, 170, 0.12);
-  border: 1px solid rgba(20, 170, 170, 0.24);
+  color: var(--teal-ink);
+  background: var(--teal-soft);
+  border: 1px solid var(--teal-line);
 }
 .rp-edit-sub {
   margin: 4px 0 0;
@@ -569,15 +590,15 @@ body[arco-theme="dark"] .rp-ic.k-mine {
   border-color: var(--brand-line);
 }
 .rp-sdoc-num.tone-warn {
-  color: #b45f00;
-  background: rgba(255, 159, 10, 0.14);
-  border-color: rgba(255, 159, 10, 0.28);
+  color: var(--warn);
+  background: var(--warn-soft);
+  border-color: var(--warn-line);
   font-family: inherit;
 }
 .rp-sdoc-num.tone-info {
-  color: #0a6fd6;
-  background: rgba(10, 132, 255, 0.12);
-  border-color: rgba(10, 132, 255, 0.25);
+  color: var(--cobalt-ink);
+  background: var(--cobalt-soft);
+  border-color: var(--cobalt-line);
   font-family: inherit;
 }
 .rp-sdoc-num.tone-cause {
@@ -858,11 +879,16 @@ body[arco-theme="dark"] .rp-ic.k-mine {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 .rp-script-fn {
+  max-width: 100%;
+  overflow: hidden;
   color: var(--ink);
   font-size: 13px;
   font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .rp-script-tag {
   padding: 2px 8px;
@@ -1097,14 +1123,32 @@ body[arco-theme="dark"] .rp-ic.k-mine {
   font-size: 12px;
 }
 
-@media (max-width: 760px) {
+@media (max-width: 1360px) {
   .rp-script-bar {
     grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: 6px;
+    align-items: center;
+  }
+  .rp-script-meta {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .rp-script-acts {
+    grid-column: 2;
+    grid-row: 1;
+    flex: none;
   }
   .rp-script-desc {
     grid-column: 1 / -1;
+    grid-row: 2;
     white-space: normal;
+    line-height: 1.5;
   }
+  .rp-script-desc.is-empty {
+    display: none;
+  }
+}
+@media (max-width: 760px) {
   .rp-script-ed-top {
     grid-template-columns: minmax(0, 1fr);
   }

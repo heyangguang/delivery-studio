@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	version            = "1.0.327-dev"
-	currentReleaseDate = "2026-11-24"
+	version            = "1.0.328-dev"
+	currentReleaseDate = "2026-11-25"
 )
 
 // buildID can be injected at compile time via `-ldflags "-X main.buildID=..."`.
@@ -65,6 +65,22 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.328-dev",
+		Date:    "2026-11-25",
+		Title:   "全站 Swarm 深度巡检：集中修复 70+ 项弹窗碰撞、暗黑模式、响应式截断与交互 UI 缺陷",
+		TitleEn: "Full-site Swarm UI audit: resolve 70+ modal, dark-mode, responsive, and layout bugs",
+		Highlights: []string{
+			"全局 Shell 与弹窗系统：修复版本公告弹窗「×」与「刷新升级」按钮重叠、49 处全局 Modal 标题栏统一预留 48px 关闭净空、顶栏滑块 1440→1280 缩放脱锚、CSP 补充 font-src 彻底消除字体报错，以及暗黑模式滚动条与 --surface-raised 缺失",
+			"暗黑模式与安全/IAM：全面语义化安全报告导出弹窗与报告模板编辑器暗黑配色、修复 CVE 详情抽屉右侧裁切与 4 处未包滚动的表格、消除报告模板双边框、补齐 47 项后端审计动作中英文映射并修复会话表溢出",
+			"集群、演练、组件与 AI：修复 Word 导出弹窗复选框错行、配置/组件/软件库 1280px 裁切、纳管数据盘口径一致化、多集群推广计数一致化与编辑落地弹窗、AI 用量 9 列表格溢出、全局行内代码断词、组件指南重复样式及悬浮 AI 入口遮挡",
+		},
+		HighlightsEn: []string{
+			"Global Shell & Modals: fixed release-notes close icon overlap, standardized 48px right clearance across 49 modals, locked navbar active indicator on resize via ResizeObserver, added font-src CSP directive, and unified dark-mode scrollbars & --surface-raised token",
+			"Dark Mode, Security & IAM: replaced hardcoded light surfaces/text in Security Report Export and Template modals, fixed CVE Detail Drawer right-edge clipping and unwrapped tables, removed report double borders, and added 47 missing audit action translations",
+			"Clusters, Rehearsal, Ops & AI: fixed Word export row wrap, 1280px tab/KPI clipping, adopted disk sync, rollout filter-count parity, AI usage table overflow, inline code mid-word breaks, duplicate guide CSS, and compact AI launcher FAB on dense pages",
+		},
+	},
 	{
 		Version: "1.0.327-dev",
 		Date:    "2026-11-24",

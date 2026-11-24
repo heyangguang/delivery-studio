@@ -2200,7 +2200,9 @@ function ExportDialog({
               {(d.kind === "change" ||
                 d.kind === "rca" ||
                 d.kind === "assess") && (
-                <span className="muted">{d.subtitle}</span>
+                <span className="muted" title={d.subtitle}>
+                  {d.subtitle}
+                </span>
               )}
               <span className={`dc-st dc-st-${docState(d, aiOn).tone}`}>
                 {docState(d, aiOn).label}

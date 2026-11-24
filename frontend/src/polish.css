@@ -154,6 +154,9 @@ body[arco-theme="dark"] .row-indicator {
     0 4px 14px rgba(0, 0, 0, 0.44),
     0 0 0 1px var(--line-strong);
 }
+body[arco-theme="dark"] .row.on .row-ico .sdot {
+  box-shadow: 0 0 0 2px var(--surface-2);
+}
 
 /* Tactile optical depth across controls, cards & topology hosts (clean elevation without glossy bevels) */
 .search-trigger {

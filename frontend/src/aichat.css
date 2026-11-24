@@ -8,7 +8,9 @@
   z-index: 900;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
+  min-width: 40px;
   height: 40px;
   padding: 0 8px 0 14px;
   border: 1px solid var(--line);
@@ -1509,7 +1511,8 @@
   font-family: var(--mono);
   font-size: 12.5px;
   background: var(--code-bg);
-  word-break: break-all;
+  word-break: normal;
+  overflow-wrap: break-word;
 }
 .md blockquote {
   margin: 6px 0 10px;
@@ -3182,20 +3185,28 @@ body[arco-theme="dark"] .ad-ask-n.is-spark {
   color: var(--kyndryl-ink);
 }
 .ad-tag.sec-tag-critical {
-  color: #b91c1c;
-  background: rgba(239, 68, 68, 0.12);
+  color: var(--bad);
+  background: var(--bad-soft);
 }
 .ad-tag.sec-tag-high {
   color: #c2410c;
   background: rgba(249, 115, 22, 0.13);
 }
+body[arco-theme="dark"] .ad-tag.sec-tag-high {
+  color: #fb923c;
+  background: rgba(249, 115, 22, 0.18);
+}
 .ad-tag.sec-tag-medium {
-  color: #b45309;
-  background: rgba(245, 158, 11, 0.14);
+  color: var(--warn);
+  background: var(--warn-soft);
 }
 .ad-tag.sec-tag-low {
   color: #0369a1;
   background: rgba(14, 165, 233, 0.13);
+}
+body[arco-theme="dark"] .ad-tag.sec-tag-low {
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.16);
 }
 .ad-card-sec {
   border-color: color-mix(in srgb, var(--brand) 28%, var(--line));
@@ -3240,24 +3251,24 @@ body[arco-theme="dark"] .ad-ask-n.is-spark {
   white-space: nowrap;
 }
 .ad-vex-pill.s-planned {
-  color: #1d4ed8;
-  background: rgba(59, 130, 246, 0.12);
+  color: var(--cobalt-ink);
+  background: var(--cobalt-soft);
 }
 .ad-vex-pill.s-mitigated {
-  color: #047857;
-  background: rgba(16, 185, 129, 0.13);
+  color: var(--ok);
+  background: var(--ok-soft);
 }
 .ad-vex-pill.s-not_affected {
-  color: #0f766e;
-  background: rgba(20, 184, 166, 0.13);
+  color: var(--teal-ink);
+  background: var(--teal-soft);
 }
 .ad-vex-pill.s-accepted {
-  color: #b45309;
-  background: rgba(245, 158, 11, 0.15);
+  color: var(--warn);
+  background: var(--warn-soft);
 }
 .ad-vex-pill.s-open {
-  color: #b91c1c;
-  background: rgba(239, 68, 68, 0.12);
+  color: var(--bad);
+  background: var(--bad-soft);
 }
 .ad-sec-meta {
   display: flex;
@@ -3318,20 +3329,12 @@ body[arco-theme="dark"] .ad-ask-n.is-spark {
   white-space: nowrap;
 }
 .ad-rh-badge.is-quick {
-  color: #047857;
-  background: rgba(16, 185, 129, 0.14);
-}
-[data-theme="dark"] .ad-rh-badge.is-quick {
-  color: #34d399;
-  background: rgba(16, 185, 129, 0.2);
+  color: var(--ok);
+  background: var(--ok-soft);
 }
 .ad-rh-badge.is-light {
-  color: #0f766e;
-  background: color-mix(in srgb, #14b8a6 13%, transparent);
-}
-[data-theme="dark"] .ad-rh-badge.is-light {
-  color: #5eead4;
-  background: color-mix(in srgb, #14b8a6 18%, transparent);
+  color: var(--teal-ink);
+  background: var(--teal-soft);
 }
 .ad-rh-badge svg {
   font-size: 12.5px;
@@ -3360,18 +3363,14 @@ body[arco-theme="dark"] .ad-ask-n.is-spark {
   border-radius: 999px;
   font-size: 11px;
   font-weight: 600;
-  color: #047857;
-  background: rgba(16, 185, 129, 0.13);
+  color: var(--ok);
+  background: var(--ok-soft);
 }
 .ad-rh-live i {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #10b981;
-}
-[data-theme="dark"] .ad-rh-live {
-  color: #34d399;
-  background: rgba(16, 185, 129, 0.18);
+  background: var(--ok);
 }
 .ad-rh-reason {
   margin: 0;

@@ -154,6 +154,9 @@
   font-size: 11.5px;
   color: var(--mute);
 }
+.csec-kpi-seg {
+  white-space: nowrap;
+}
 
 .csec-section {
   min-width: 0;
@@ -206,7 +209,6 @@
 .csec-pkg-list {
   display: flex;
   flex-direction: column;
-  divide-y: 1px solid var(--line);
 }
 .csec-pkg-card {
   padding: 14px 18px;
@@ -302,52 +304,44 @@
   font-weight: 500;
 }
 .csec-pkg-actions {
-  display: grid;
-  grid-template-columns: 76px 124px 92px;
-  align-items: center;
-  justify-content: end;
-  gap: 8px;
-  flex-shrink: 0;
-}
-.csec-pkg-actions.can-ignore {
-  grid-template-columns: 74px 118px 44px 86px;
-  gap: 6px;
-}
-.csec-pkg-actions.is-compact {
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 6px;
+  flex-wrap: nowrap;
+  flex-shrink: 0;
   margin-left: auto;
 }
-.csec-pkg-actions.is-compact > span:empty {
+.csec-pkg-actions > span:empty {
   display: none;
 }
 .csec-act-ign {
-  width: 44px;
   justify-content: center;
-  padding: 0 2px !important;
+  padding: 0 6px !important;
   color: var(--muted) !important;
+  white-space: nowrap;
 }
 .csec-act-ign:hover {
   color: var(--ink) !important;
 }
 .csec-act-ai,
 .csec-act-rh {
-  width: 100%;
   justify-content: center;
-  padding: 0 8px !important;
-}
-.csec-act-exp {
-  width: 92px;
-  justify-content: flex-end;
-  padding: 0 4px !important;
+  padding: 0 10px !important;
   white-space: nowrap;
 }
-.csec-sub-cve-row .csec-pkg-actions {
+.csec-act-exp {
+  justify-content: flex-end;
+  padding: 0 6px !important;
+  white-space: nowrap;
+}
+.csec-sub-cve-row .csec-pkg-actions,
+.csec-rh-row .csec-pkg-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 6px;
+  flex-wrap: nowrap;
 }
 .csec-sub-cves {
   margin-top: 4px;

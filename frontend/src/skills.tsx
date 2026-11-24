@@ -1031,7 +1031,7 @@ function SkillScriptsPanel({
                     {sc.description}
                   </p>
                 ) : (
-                  <span />
+                  <span className="rp-script-desc is-empty" aria-hidden />
                 )}
                 <div className="rp-script-acts">
                   {sc.code && (

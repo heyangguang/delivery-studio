@@ -832,6 +832,34 @@ body[arco-theme="dark"] .ai-quick-toggle.is-interactive:not(:disabled):is(:hover
   box-shadow: none;
 }
 
+:root :is(.ap-compose, .ad-compose) .tm-tog.sbp-pill.on.m-ask {
+  color: var(--warn);
+  border-color: var(--warn-line);
+  background: var(--warn-soft);
+  box-shadow: none;
+}
+
+:root :is(.ap-compose, .ad-compose) .tm-tog.sbp-pill.on.m-auto {
+  color: var(--brand-ink);
+  border-color: var(--brand-line);
+  background: var(--brand-soft);
+  box-shadow: none;
+}
+
+:root :is(.ap-compose, .ad-compose) .tm-tog.sbp-pill.m-open,
+:root :is(.ap-compose, .ad-compose) .tm-tog.sbp-pill.on.m-open {
+  color: var(--ok);
+  border-color: var(--ok-line);
+  background: var(--ok-soft);
+  box-shadow: none;
+}
+
+:root :is(.ap-compose, .ad-compose) .tm-tog.sbp-pill.m-open:hover:not(:disabled) {
+  color: var(--ok);
+  border-color: var(--ok-line);
+  background: color-mix(in srgb, var(--ok-soft) 82%, var(--hover));
+}
+
 body[arco-theme="dark"] :is(.ap-compose, .ad-compose) .tm-tog.think.on {
   color: var(--thk-fg, var(--kyndryl-ink));
   border-color: var(--thk-line, var(--kyndryl-line));
@@ -861,13 +889,22 @@ body[arco-theme="dark"] :is(.ap-compose, .ad-compose) .tm-tog.web.on {
   height: 30px;
 }
 
-:root .ap-compose .ap-send:not(:disabled),
-:root .ad-compose .ad-send:not(:disabled),
-:root .ap-compose .ad-send:not(:disabled) {
-  color: var(--surface);
+:root .ap-compose .ap-send:not(:disabled):not(.stop),
+:root .ad-compose .ad-send:not(:disabled):not(.stop),
+:root .ap-compose .ad-send:not(:disabled):not(.stop) {
+  color: var(--on-brand);
   background: var(--brand);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 2px 8px rgba(11, 13, 18, 0.22);
+}
+
+:root :is(.ap-compose, .ad-compose) :is(.ap-send, .ad-send).stop {
+  color: var(--surface);
+  background: var(--ink);
+  border-color: transparent;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
     0 2px 8px rgba(11, 13, 18, 0.22);
 }
 

@@ -240,11 +240,15 @@ export function extractDocSections(
   const flush = () => {
     if (!curTitle) return;
     const idx = sections.length + 1;
-    const { tone, badge } = classifySectionTone(curTitle);
+    const cleanTitle =
+      curTitle
+        .replace(/^\d{1,2}(?:[.、)\uFF0E\uFF09](?!\d)\s*|\s+)/, "")
+        .trim() || curTitle;
+    const { tone, badge } = classifySectionTone(cleanTitle);
     sections.push({
       id: `${idPrefix}-sec-${idx}`,
       index: idx,
-      title: curTitle,
+      title: cleanTitle,
       level: splitLevel,
       tone,
       badge,

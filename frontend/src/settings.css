@@ -68,6 +68,9 @@
   font-size: 13px;
   background: linear-gradient(160deg, #343a46, #111318);
 }
+body[arco-theme="dark"] .st-kind.k-webhook {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
 .st-chan-main {
   display: flex;
   flex-direction: column;
@@ -229,10 +232,13 @@
   flex: none;
 }
 /* a settings page uses the whole width beside the list; prose keeps a readable measure */
+.sx-page {
+  padding-bottom: 84px;
+}
 .st-body > .sx-page,
 .st-pane > .sx-page {
   max-width: none;
-  padding: 28px 44px 80px;
+  padding: 28px 44px 84px;
 }
 .st-body > .sx-page .sx-page-h p,
 .st-pane > .sx-page .sx-page-h p {
@@ -333,7 +339,7 @@
   }
   .st-body > .sx-page,
   .st-pane > .sx-page {
-    padding: 24px 24px 64px;
+    padding: 24px 24px 84px;
   }
   .st-nav-grp + .st-nav-grp,
   .st-nav .sx-nav-i + .sx-nav-i {
@@ -346,6 +352,6 @@
   }
   .st-body > .sx-page,
   .st-pane > .sx-page {
-    padding: 20px 16px 48px;
+    padding: 20px 16px 84px;
   }
 }

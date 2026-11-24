@@ -418,8 +418,8 @@ export function VexTriageEditor({
           placeholder={
             canSecurityAI
               ? bi(
-                  "可先简单写几句要点（如“内网不对外、没开 HTTP/3、下月升级”），再点右上角「AI 优化润色」自动整理成规范审计文案…",
-                  "Jot down brief facts (e.g. intranet-only, module disabled), then click AI Polish for formal audit wording…",
+                  "可直接点击右上角「AI 辅助起草」生成初稿，或先写几句要点（如“内网不对外、没开 HTTP/3、下月升级”）再点「AI 优化润色」自动整理成规范审计文案…",
+                  "Click AI Draft above for a template, or jot down brief facts (e.g. intranet-only, module disabled) and click AI Polish for formal audit wording…",
                 )
               : bi(
                   "填写处置依据、补偿控制措施或排期说明…",
@@ -576,8 +576,8 @@ export function BaselineWaiveEditor({
           placeholder={
             canSecurityAI
               ? bi(
-                  "简单写明补偿控制（如“前置防火墙限流白名单”），点击右上角「AI 优化润色」自动整理成审计文案…",
-                  "Jot down compensating control, then click AI Polish…",
+                  "可直接点击右上角「AI 辅助起草」生成模板，或简单写明补偿控制（如“前置防火墙限流白名单”）后点「AI 优化润色」自动整理成审计文案…",
+                  "Click AI Draft above for a template, or jot down compensating controls and click AI Polish…",
                 )
               : bi("填写合规说明或补偿控制措施…", "Enter compensating control or justification...")
           }

@@ -27,13 +27,18 @@
 }
 .au-table {
   border-top: 1px solid var(--line);
+  overflow-x: auto;
 }
 .au-head,
 .au-row-b {
   display: grid;
-  grid-template-columns: 146px 76px 84px minmax(105px, 1fr) minmax(130px, 1.2fr) 156px 110px 72px 104px;
+  grid-template-columns: 138px 68px 70px minmax(92px, 1fr) minmax(118px, 1.2fr) 142px 96px 60px 102px;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+}
+.au-head:not(.aud),
+.au-item {
+  min-width: 962px;
 }
 .au-head {
   padding: 8px 6px;
@@ -65,6 +70,8 @@
 }
 .au-time {
   color: var(--mute);
+  font-size: 12.5px;
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
 .au-status-cell {
@@ -157,14 +164,18 @@
 }
 .au-cost {
   text-align: right;
+  white-space: nowrap;
 }
 .au-ip-h,
 .au-ip {
-  padding-left: 8px;
+  padding-left: 4px;
 }
 .au-ip {
+  overflow: hidden;
   color: var(--mute);
   font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .au-more {
   display: grid;
@@ -491,17 +502,25 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0 40px;
 }
-@media (max-width: 1100px) {
-  .au-head {
+@media (max-width: 1320px) {
+  .au-head:not(.aud) {
     display: none;
   }
-  .au-row-b {
+  .au-item {
+    min-width: 0;
+  }
+  .au-row-b:not(.aud) {
     grid-template-columns: 1fr 1fr;
     row-gap: 6px;
+  }
+  .au-row-b:not(.aud) .au-ip {
+    padding-left: 0;
   }
   .au-more {
     padding-left: 14px;
   }
+}
+@media (max-width: 1100px) {
   .au-kpis {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
@@ -545,5 +564,9 @@
 @media (max-width: 1100px) {
   .au-head.aud {
     display: none;
+  }
+  .au-row-b.aud {
+    grid-template-columns: 1fr 1fr;
+    row-gap: 6px;
   }
 }

@@ -540,19 +540,31 @@ function AutoTestReportModal({
         <div className="cv-rep-kpis">
           <div className="cv-rep-kpi">
             <span>{bi("通过步骤", "Passed Steps")}</span>
-            <b className="num ok">
+            <b
+              className="num ok"
+              title={`${rec.passed_steps ?? 0} / ${rec.total_steps ?? 0}`}
+            >
               {rec.passed_steps ?? 0} / {rec.total_steps ?? 0}
             </b>
           </div>
           <div className="cv-rep-kpi">
             <span>{bi("总耗时", "Duration")}</span>
-            <b className="num">
+            <b
+              className="num"
+              title={rec.duration_sec ? formatDuration(rec.duration_sec) : "—"}
+            >
               {rec.duration_sec ? formatDuration(rec.duration_sec) : "—"}
             </b>
           </div>
           <div className="cv-rep-kpi">
             <span>{bi("拓扑方案", "Topology")}</span>
-            <b>
+            <b
+              title={`${rec.scheme_name || rec.topology || bi("标准方案", "Standard")}${
+                rec.hosts
+                  ? bi(` · ${rec.hosts} 台主机`, ` · ${rec.hosts} hosts`)
+                  : ""
+              }`}
+            >
               {rec.scheme_name || rec.topology || bi("标准方案", "Standard")}
               {rec.hosts
                 ? bi(` · ${rec.hosts} 台主机`, ` · ${rec.hosts} hosts`)
@@ -561,7 +573,12 @@ function AutoTestReportModal({
           </div>
           <div className="cv-rep-kpi">
             <span>{bi("执行环境", "Runner")}</span>
-            <b className="mono">{rec.executor || bi("平台自动执行", "Automated")}</b>
+            <b
+              className="mono"
+              title={rec.executor || bi("平台自动执行", "Automated")}
+            >
+              {rec.executor || bi("平台自动执行", "Automated")}
+            </b>
           </div>
         </div>
 

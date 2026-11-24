@@ -53,6 +53,7 @@ import {
   type EffectiveClusterChange,
 } from "./rehearsal";
 import { bi, useLang, withLang } from "./i18n";
+import { hostStorage } from "./topology";
 import { ImportedBaselineModal } from "./importcluster";
 import "./clusterconfig.css";
 
@@ -373,6 +374,17 @@ function ConfigRecord({
     },
     [],
   );
+  useEffect(() => {
+    if (!historyOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        setHistoryOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [historyOpen]);
   useEffect(() => {
     const abort = new AbortController();
     if (!cachedDetail(p.id)) setLoading(true);
@@ -811,29 +823,38 @@ function ConfigRecord({
     r.value.length > 0;
 
   const hits: SearchHit[] = [
-    ...hosts.map((h) => ({
-      id: `host:${h.name}`,
-      section: "hosts",
-      title: h.name,
-      context: `${bi("机器", "Host")} · ${h.disk || bi("未记录磁盘", "Disk unrecorded")}${h.name === controller ? bi(" · 控制节点", " · Controller") : ""}${
-        displayInstances.some((i) => !i.external && (i.hosts || []).includes(h.name))
-          ? ` · ${displayInstances
-              .filter((i) => !i.external && (i.hosts || []).includes(h.name))
-              .map((i) => {
-                const roles = Object.entries(i.roles || {})
-                  .filter(([, hs]) => (hs || []).includes(h.name))
-                  .map(([role]) => `${i.role_titles?.[role] || role} ${role}`)
-                  .join(bi("、", ", "));
-                return roles
-                  ? `${i.title}${bi("（", " (")}${roles}${bi("）", ")")}`
-                  : i.title;
-              })
-              .join(" / ")}`
-          : ""
-      }`,
-      value: h.ip,
-      focus: `host:${h.name}`,
-    })),
+    ...hosts.map((h) => {
+      const storage = hostStorage(h, {
+        imported: isImported,
+        importedDataDirs: c.imported?.data_dirs,
+      });
+      const storageSummary = storage.path
+        ? `${storage.label} ${storage.path}`
+        : storage.label;
+      return {
+        id: `host:${h.name}`,
+        section: "hosts",
+        title: h.name,
+        context: `${bi("机器", "Host")} · ${storageSummary}${h.name === controller ? bi(" · 控制节点", " · Controller") : ""}${
+          displayInstances.some((i) => !i.external && (i.hosts || []).includes(h.name))
+            ? ` · ${displayInstances
+                .filter((i) => !i.external && (i.hosts || []).includes(h.name))
+                .map((i) => {
+                  const roles = Object.entries(i.roles || {})
+                    .filter(([, hs]) => (hs || []).includes(h.name))
+                    .map(([role]) => `${i.role_titles?.[role] || role} ${role}`)
+                    .join(bi("、", ", "));
+                  return roles
+                    ? `${i.title}${bi("（", " (")}${roles}${bi("）", ")")}`
+                    : i.title;
+                })
+                .join(" / ")}`
+            : ""
+        }`,
+        value: h.ip,
+        focus: `host:${h.name}`,
+      };
+    }),
     ...displayInstances.flatMap((i) =>
       rowsFor(i).map((r) => ({
         id: `${i.id}.${r.key}`,
@@ -1465,6 +1486,10 @@ function ConfigRecord({
                             const hostComps = displayInstances.filter(
                               (i) => !i.external && (i.hosts || []).includes(h.name),
                             );
+                            const storage = hostStorage(h, {
+                              imported: isImported,
+                              importedDataDirs: c.imported?.data_dirs,
+                            });
                             return (
                               <div
                                 key={h.name}
@@ -1493,19 +1518,17 @@ function ConfigRecord({
                                 <div className="cx-host-card-body">
                                   <div className="cx-host-kv">
                                     <span className="cx-host-k">
-                                      {bi("数据盘", "Data Disk")}
+                                      {isImported
+                                        ? bi("数据存储", "Data Storage")
+                                        : bi("数据盘", "Data Disk")}
                                     </span>
                                     <div className="cx-host-v">
                                       <code className="cx-disk-val">
-                                        {h.disk || bi("未记录", "Unrecorded")}
-                                        {h.partition ? ` · ${h.partition}` : ""}
+                                        {storage.label}
+                                        {storage.path ? ` · ${storage.path}` : ""}
                                       </code>
                                       <span className="cx-host-sub">
-                                        {h.initialize === true
-                                          ? bi("初始化磁盘", "Init enabled")
-                                          : h.initialize === false
-                                            ? bi("不初始化磁盘", "Init disabled")
-                                            : bi("未记录初始化", "Init unrecorded")}
+                                        {storage.note}
                                       </span>
                                     </div>
                                   </div>
@@ -2015,21 +2038,23 @@ function ConfigRecord({
                                           {ef ? (
                                             <>
                                               {oldDiffVal && (
-                                                <>
-                                                  <del className="cx-val-old mono">
-                                                    {oldDiffVal}
-                                                  </del>
+                                                <del className="cx-val-old mono">
+                                                  {oldDiffVal}
+                                                </del>
+                                              )}
+                                              <span className="cx-hist-next">
+                                                {oldDiffVal && (
                                                   <span
                                                     className="cx-val-arrow"
                                                     aria-hidden
                                                   >
                                                     →
                                                   </span>
-                                                </>
-                                              )}
-                                              <code className="cx-val-new">
-                                                {ef.after}
-                                              </code>
+                                                )}
+                                                <code className="cx-val-new">
+                                                  {ef.after}
+                                                </code>
+                                              </span>
                                             </>
                                           ) : typeof r.value === "boolean" ? (
                                             <span
@@ -2447,16 +2472,18 @@ function ConfigRecord({
                               <code className="cx-hist-k mono">{ch.key}</code>
                               <span className="cx-hist-v">
                                 {ch.before && (
-                                  <>
-                                    <del className="cx-val-old mono">
-                                      {ch.before}
-                                    </del>
+                                  <del className="cx-val-old mono">
+                                    {ch.before}
+                                  </del>
+                                )}
+                                <span className="cx-hist-next">
+                                  {ch.before && (
                                     <span className="cx-val-arrow" aria-hidden>
                                       →
                                     </span>
-                                  </>
-                                )}
-                                <code className="cx-val-new">{ch.after}</code>
+                                  )}
+                                  <code className="cx-val-new">{ch.after}</code>
+                                </span>
                                 {isOverwritten && (
                                   <em className="cx-delta-sup">
                                     {bi("已被后续更新", "Superseded")}

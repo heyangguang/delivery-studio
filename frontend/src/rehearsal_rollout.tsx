@@ -924,12 +924,16 @@ export function PropagateRehearsalModal({
   }, [targets, query, targetFilter]);
 
   const exactReady = filteredTargets.filter(
-    (t) => !t.already_imported && t.match_tier === "exact",
+    (t) =>
+      !t.already_imported && !t.already_effective && t.match_tier === "exact",
   );
   const diffReady = filteredTargets.filter(
-    (t) => !t.already_imported && t.match_tier !== "exact",
+    (t) =>
+      !t.already_imported && !t.already_effective && t.match_tier !== "exact",
   );
-  const importedList = filteredTargets.filter((t) => t.already_imported);
+  const doneList = filteredTargets.filter(
+    (t) => t.already_imported || t.already_effective,
+  );
 
   const pickedIds = Object.entries(picked)
     .filter(([, v]) => v)
@@ -1255,32 +1259,43 @@ export function PropagateRehearsalModal({
             </div>
 
             <div className="ro-pick-list">
-              {exactReady.length > 0 && (
-                <div className="ro-pick-group">
-                  <div className="ro-pick-group-h">
-                    {bi(`同架构推荐（${exactReady.length}）`, `Exact Architecture Match (${exactReady.length})`)}
-                  </div>
-                  {exactReady.map(renderTargetRow)}
+              {filteredTargets.length === 0 ? (
+                <div className="ro-empty-box">
+                  {bi(
+                    "当前筛选条件下暂无匹配的候选集群，请调整筛选或清空搜索关键词。",
+                    "No matching target clusters under the current filter. Adjust filters or clear search.",
+                  )}
                 </div>
-              )}
-              {diffReady.length > 0 && (
-                <div className="ro-pick-group">
-                  <div className="ro-pick-group-h">
-                    {bi(
-                      `版本或架构有差异 · 将通过只读探针适配（${diffReady.length}）`,
-                      `Architecture / Version Diff · Probe Required (${diffReady.length})`,
-                    )}
-                  </div>
-                  {diffReady.map(renderTargetRow)}
-                </div>
-              )}
-              {importedList.length > 0 && (
-                <div className="ro-pick-group">
-                  <div className="ro-pick-group-h">
-                    {bi(`已同步至推广批次（${importedList.length}）`, `Already in Rollout (${importedList.length})`)}
-                  </div>
-                  {importedList.map(renderTargetRow)}
-                </div>
+              ) : (
+                <>
+                  {exactReady.length > 0 && (
+                    <div className="ro-pick-group">
+                      <div className="ro-pick-group-h">
+                        {bi(`同架构推荐（${exactReady.length}）`, `Exact Architecture Match (${exactReady.length})`)}
+                      </div>
+                      {exactReady.map(renderTargetRow)}
+                    </div>
+                  )}
+                  {diffReady.length > 0 && (
+                    <div className="ro-pick-group">
+                      <div className="ro-pick-group-h">
+                        {bi(
+                          `版本或架构有差异 · 将通过只读探针适配（${diffReady.length}）`,
+                          `Architecture / Version Diff · Probe Required (${diffReady.length})`,
+                        )}
+                      </div>
+                      {diffReady.map(renderTargetRow)}
+                    </div>
+                  )}
+                  {doneList.length > 0 && (
+                    <div className="ro-pick-group">
+                      <div className="ro-pick-group-h">
+                        {bi(`已引入 / 已生效（${doneList.length}）`, `Imported / Effective (${doneList.length})`)}
+                      </div>
+                      {doneList.map(renderTargetRow)}
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </>
@@ -1652,8 +1667,8 @@ export function ImportTemplateBar({
                     "Identical parameters appear already effective here; use Standard Probe if re-verifying",
                   )
                 : bi(
-                    "内容一致的跨集群变更已自动合并去重，点卡片内「合并记录」可切换指定样板",
-                    "Equivalent changes across clusters are auto-consolidated; expand a card to switch pilot",
+                    "内容一致的跨集群变更已自动合并去重，点卡片内「已合并 N 份同内容变更」可切换指定样板",
+                    'Equivalent changes across clusters are auto-consolidated; click "Merged N equivalent runs" inside a card to switch pilot',
                   )}
             </span>
             <div className="ro-modal-foot-btns">

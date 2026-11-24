@@ -13,6 +13,7 @@ import {
   IconExclamationCircleFill,
   IconRefresh,
   IconRight,
+  IconUp,
 } from "@arco-design/web-react/icon";
 import {
   ago,
@@ -660,15 +661,18 @@ export function ClusterSecurityTab({
       } else {
         out.active += g.active_count;
         out.waived += g.waived_count;
-        out.all += g.active_count + g.waived_count;
       }
     }
+    if (roleFilter === "all") {
+      out.ignored = Math.max(out.ignored, data.suppressed_count || 0);
+    }
+    out.all = out.active + out.waived + out.ignored;
     return out;
   }, [data, roleFilter, isHiddenGroup]);
 
   const filteredGroups = useMemo(() => {
     if (!data) return [];
-    return data.package_groups.filter((g) => {
+    const list = data.package_groups.filter((g) => {
       if (roleFilter === "primary" && g.pkg_role !== "primary") return false;
       if (roleFilter === "dependency" && g.pkg_role === "primary") return false;
       const hidden = isHiddenGroup(g);
@@ -680,9 +684,15 @@ export function ClusterSecurityTab({
         case "waived":
           return !hidden && g.waived_count > 0;
         default:
-          return !hidden;
+          return true;
       }
     });
+    if (stateFilter === "all") {
+      return [...list].sort(
+        (a, b) => Number(isHiddenGroup(a)) - Number(isHiddenGroup(b)),
+      );
+    }
+    return list;
   }, [data, roleFilter, stateFilter, isHiddenGroup]);
 
   if (loading && !data) {
@@ -815,10 +825,15 @@ export function ClusterSecurityTab({
           {data.deductions.length === 0 ? (
             <span className="csec-deduct-ok">
               <IconCheckCircleFill style={{ marginRight: 4 }} />
-              {bi(
-                "无扣分项：未发现活跃中高危漏洞、配置基线违规或证书到期风险",
-                "All clear: no active critical/high CVEs, baseline failures, or expiring certs",
-              )}
+              {baseFailCount > 0
+                ? bi(
+                    `无扣分项：未发现活跃中高危漏洞或证书到期风险（另有 ${baseFailCount} 项基线加固建议不扣分，详见下方基线审计）`,
+                    `No deductions: no active critical/high CVEs or expiring certs (${baseFailCount} non-deducting baseline advisory item(s) below)`,
+                  )
+                : bi(
+                    "无扣分项：未发现活跃中高危漏洞、配置基线违规或证书到期风险",
+                    "All clear: no active critical/high CVEs, baseline failures, or expiring certs",
+                  )}
             </span>
           ) : (
             data.deductions.map((d, i) => (
@@ -846,9 +861,31 @@ export function ClusterSecurityTab({
             {data.active_counts.total}
           </span>
           <span className="csec-kpi-sub">
-            {bi(
-              `中间件本体 ${data.primary_active} · OS 底层包 ${data.dependency_active}${(data.suppressed_count || 0) > 0 ? ` · 已屏蔽 ${data.suppressed_count} 条` : ""}${data.repo_fix_ready_count > 0 ? ` · ${data.repo_fix_ready_count} 个包源已有修复` : ""}`,
-              `Middleware ${data.primary_active} · OS Base ${data.dependency_active}${(data.suppressed_count || 0) > 0 ? ` · ${data.suppressed_count} ignored` : ""}`,
+            <span className="csec-kpi-seg">
+              {bi(`中间件本体 ${data.primary_active}`, `Middleware ${data.primary_active}`)}
+            </span>
+            {" · "}
+            <span className="csec-kpi-seg">
+              {bi(`OS 底层包 ${data.dependency_active}`, `OS Base ${data.dependency_active}`)}
+            </span>
+            {(data.suppressed_count || 0) > 0 && (
+              <>
+                {" · "}
+                <span className="csec-kpi-seg">
+                  {bi(`已屏蔽 ${data.suppressed_count} 条`, `${data.suppressed_count} ignored`)}
+                </span>
+              </>
+            )}
+            {data.repo_fix_ready_count > 0 && (
+              <>
+                {" · "}
+                <span className="csec-kpi-seg">
+                  {bi(
+                    `${data.repo_fix_ready_count} 个包源已有修复`,
+                    `${data.repo_fix_ready_count} fix(es) in repo`,
+                  )}
+                </span>
+              </>
             )}
           </span>
         </div>
@@ -923,8 +960,8 @@ export function ClusterSecurityTab({
                       {
                         id: "ignored" as const,
                         label: bi(
-                          `已屏蔽 (${roleFilter === "all" ? (data.suppressed_count || statusCounts.ignored) : statusCounts.ignored})`,
-                          `Ignored (${roleFilter === "all" ? (data.suppressed_count || statusCounts.ignored) : statusCounts.ignored})`,
+                          `已屏蔽 (${statusCounts.ignored})`,
+                          `Ignored (${statusCounts.ignored})`,
                         ),
                       },
                     ]
@@ -989,7 +1026,7 @@ export function ClusterSecurityTab({
           </div>
         ) : filteredGroups.length === 0 ? (
           <div className="csec-empty">
-            <IconCheckCircleFill style={{ color: "#16a34a", marginRight: 6 }} />
+            <IconCheckCircleFill style={{ color: "var(--ok)", marginRight: 6 }} />
             {stateFilter === "active" ? (
               <>
                 {bi("当前视角下暂无待处理软件漏洞", "No active unhandled CVEs in this view")}
@@ -1004,10 +1041,19 @@ export function ClusterSecurityTab({
                 {(statusCounts.ignored > 0 || (data.suppressed_count || 0) > 0) && (
                   <>
                     {" · "}
-                    <Button size="mini" type="text" onClick={() => setStateFilter("ignored")}>
+                    <Button
+                      size="mini"
+                      type="text"
+                      onClick={() => {
+                        if (statusCounts.ignored === 0 && (data.suppressed_count || 0) > 0) {
+                          setRoleFilter("all");
+                        }
+                        setStateFilter("ignored");
+                      }}
+                    >
                       {bi(
-                        `查看已屏蔽 (${roleFilter === "all" ? (data.suppressed_count || statusCounts.ignored) : statusCounts.ignored})`,
-                        `View Ignored (${roleFilter === "all" ? (data.suppressed_count || statusCounts.ignored) : statusCounts.ignored})`,
+                        `查看已屏蔽 (${statusCounts.ignored || data.suppressed_count || 0})`,
+                        `View Ignored (${statusCounts.ignored || data.suppressed_count || 0})`,
                       )}
                     </Button>
                   </>
@@ -1104,20 +1150,8 @@ export function ClusterSecurityTab({
                       </div>
                     </div>
 
-                    <div
-                      className={`csec-pkg-actions ${
-                        isResolved ||
-                        (g.globally_ignored &&
-                          (!canManageSec ||
-                            g.ignore_rule_id === "layer:os" ||
-                            g.ignore_rule_id === "layer:runtime"))
-                          ? "is-compact"
-                          : canManageSec
-                            ? "can-ignore"
-                            : ""
-                      }`}
-                    >
-                      {!g.globally_ignored && canSecurityAI && g.active_count > 0 ? (
+                    <div className="csec-pkg-actions">
+                      {!g.globally_ignored && canSecurityAI && g.active_count > 0 && (
                         <Button
                           size="small"
                           type="secondary"
@@ -1126,8 +1160,6 @@ export function ClusterSecurityTab({
                         >
                           <Spark size={12} /> {bi("AI 评估", "AI Assess")}
                         </Button>
-                      ) : (
-                        <span />
                       )}
                       {g.globally_ignored ? (
                         canManageSec &&
@@ -1142,9 +1174,7 @@ export function ClusterSecurityTab({
                           >
                             {bi("恢复显示", "Restore")}
                           </Button>
-                        ) : (
-                          <span />
-                        )
+                        ) : null
                       ) : canRehearse && g.active_count > 0 ? (
                         <Button
                           size="small"
@@ -1157,34 +1187,29 @@ export function ClusterSecurityTab({
                             ? bi("补丁升级演练", "Upgrade Rehearsal")
                             : bi("缓解排查演练", "Mitigation Rehearsal")}
                         </Button>
-                      ) : (
-                        <span />
+                      ) : null}
+                      {canManageSec && !g.globally_ignored && g.active_count > 0 && (
+                        <Button
+                          size="small"
+                          type="text"
+                          className="csec-act-ign"
+                          title={bi(
+                            "全局忽略此软件包：隐藏且不再计入集群打分",
+                            "Globally ignore package: hide & exclude from scoring",
+                          )}
+                          onClick={() => {
+                            setIgnoreTarget(g);
+                            setIgnoreAllEco(true);
+                            setIgnoreNote(
+                              g.pkg_role === "dependency"
+                                ? bi("由操作系统补丁渠道统一维护，中间件视角忽略", "Managed via OS patching channel")
+                                : "",
+                            );
+                          }}
+                        >
+                          {bi("忽略", "Ignore")}
+                        </Button>
                       )}
-                      {canManageSec &&
-                        (!g.globally_ignored && g.active_count > 0 ? (
-                          <Button
-                            size="small"
-                            type="text"
-                            className="csec-act-ign"
-                            title={bi(
-                              "全局忽略此软件包：隐藏且不再计入集群打分",
-                              "Globally ignore package: hide & exclude from scoring",
-                            )}
-                            onClick={() => {
-                              setIgnoreTarget(g);
-                              setIgnoreAllEco(true);
-                              setIgnoreNote(
-                                g.pkg_role === "dependency"
-                                  ? bi("由操作系统补丁渠道统一维护，中间件视角忽略", "Managed via OS patching channel")
-                                  : "",
-                              );
-                            }}
-                          >
-                            {bi("忽略", "Ignore")}
-                          </Button>
-                        ) : (
-                          <span />
-                        ))}
                       <Button
                         size="small"
                         type="text"
@@ -1201,7 +1226,7 @@ export function ClusterSecurityTab({
                             ? bi("收起明细", "Collapse")
                             : bi(`展开 ${g.total_count} 条`, `${g.total_count} CVE(s)`)}
                         </span>
-                        {expanded ? <IconDown style={{ marginLeft: 3 }} /> : <IconRight style={{ marginLeft: 3 }} />}
+                        {expanded ? <IconUp style={{ marginLeft: 3 }} /> : <IconDown style={{ marginLeft: 3 }} />}
                       </Button>
                     </div>
                   </div>

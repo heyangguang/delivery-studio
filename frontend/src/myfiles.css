@@ -227,16 +227,16 @@
   font-size: 18px;
 }
 .mf-ic.mf-folder {
-  color: #c98a0a;
-  background: rgba(240, 170, 20, 0.14);
+  color: var(--warn);
+  background: var(--warn-soft);
 }
 .mf-ic.mf-other {
   color: var(--mute);
   background: var(--sunken, rgba(120, 120, 128, 0.12));
 }
 .mf-ic.mf-img {
-  color: #7a5bd0;
-  background: rgba(122, 91, 208, 0.12);
+  color: var(--violet-ink);
+  background: var(--violet-soft);
 }
 .mf-ic.mf-thumb img {
   width: 100%;

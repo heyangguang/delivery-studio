@@ -133,17 +133,19 @@
 }
 .ai-assign {
   display: grid;
-  grid-template-columns: minmax(0, 236px) minmax(0, 236px) auto;
+  grid-template-columns: repeat(2, minmax(0, 236px));
   align-items: center;
+  justify-content: end;
   gap: 8px;
-  width: 530px;
+  width: auto;
   max-width: 100%;
   flex-shrink: 0;
 }
 .ai-assign > .arco-select,
 .ai-assign > .ai-mp {
   min-width: 0;
-  width: 100%;
+  width: 236px;
+  max-width: 100%;
 }
 .ai-assign > .arco-switch {
   justify-self: start;
@@ -570,6 +572,11 @@
   }
   .ai-assign {
     grid-template-columns: minmax(0, 1fr);
+    justify-content: stretch;
+    width: 100%;
+  }
+  .ai-assign > .arco-select,
+  .ai-assign > .ai-mp {
     width: 100%;
   }
   .ds-set-row:has(> .ai-assign) > div:first-child {
@@ -595,8 +602,9 @@
 }
 .ai-three {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: end;
+  gap: 10px;
 }
 .ai-three label {
   display: flex;
@@ -826,12 +834,16 @@ button.ai-pm:focus-visible {
   max-height: 340px;
   overflow: auto;
 }
+.ai-prov-modal .arco-modal-content {
+  max-height: calc(100vh - 180px);
+  overflow-y: auto;
+}
 .ai-mrow {
   display: grid;
   grid-template-columns: 38px minmax(0, 1.45fr) minmax(
       0,
       1.05fr
-    ) 104px 74px 74px 74px auto;
+    ) 104px 74px 74px 74px 66px;
   align-items: center;
   gap: 8px;
   padding: 8px 4px;
@@ -1243,7 +1255,7 @@ button.ai-pm:focus-visible {
 }
 @media (max-width: 760px) {
   .ai-mrow {
-    grid-template-columns: 38px minmax(0, 1fr) auto;
+    grid-template-columns: 38px minmax(0, 1fr) 66px;
   }
   .ai-mrow > :nth-child(3),
   .ai-mrow > :nth-child(4),
@@ -1378,15 +1390,23 @@ button.ai-pm:focus-visible {
 }
 .ai-um {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 14px 28px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px 24px;
   margin-top: 12px;
 }
+.ai-um-g {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  align-content: start;
+  gap: 8px 10px;
+  min-width: 0;
+}
 .ai-um-h {
+  grid-column: 1 / -1;
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
   font-size: 13px;
 }
 .ai-um-m {

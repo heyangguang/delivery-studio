@@ -427,7 +427,8 @@ export function PreviewDrawer({
   const syntaxFail = data?.syntax.filter((s) => !s.ok).length || 0;
   return (
     <Drawer
-      width={Math.min(980, window.innerWidth)}
+      className="wb-pv-drawer"
+      width="min(980px, 100vw)"
       visible={open}
       onCancel={close}
       footer={null}
@@ -436,68 +437,95 @@ export function PreviewDrawer({
     >
       <div className="wb-pv">
         {(data || error) && (
-          <div className="wb-pv-bar">
-            {data?.delivery_modes?.includes("configuration") && <div className="wb-pv-ctl">
-              <span>{bi("交付内容", "Delivery Mode")}</span>
-              <Select size="small" aria-label={bi("试生成交付内容", "Trial delivery mode")} style={{width:160}} value={req.delivery_mode || data.sample?.delivery_mode || "offline"} onChange={set("delivery_mode")} options={[
-                {value:"offline",label:bi("部署材料", "Deploy Bundle"),disabled:!data.delivery_modes.some(m=>m==="offline"||m==="automatic")},
-                {value:"configuration",label:bi("仅生成配置文件", "Config Files Only")}
-              ]}/>
-            </div>}
-            <div className="wb-pv-ctl">
-              <span>{bi("版本", "Version")}</span>
-              <Select
+          <div className="wb-pv-sticky">
+            <div className="wb-pv-bar">
+              {data?.delivery_modes?.includes("configuration") && <div className="wb-pv-ctl">
+                <span>{bi("交付内容", "Delivery Mode")}</span>
+                <Select size="small" aria-label={bi("试生成交付内容", "Trial delivery mode")} style={{width:160}} value={req.delivery_mode || data.sample?.delivery_mode || "offline"} onChange={set("delivery_mode")} options={[
+                  {value:"offline",label:bi("部署材料", "Deploy Bundle"),disabled:!data.delivery_modes.some(m=>m==="offline"||m==="automatic")},
+                  {value:"configuration",label:bi("仅生成配置文件", "Config Files Only")}
+                ]}/>
+              </div>}
+              <div className="wb-pv-ctl">
+                <span>{bi("版本", "Version")}</span>
+                <Select
+                  size="small"
+                  value={req.version || data?.sample?.version}
+                  options={(data?.versions || []).map((v) => ({
+                    value: v,
+                    label: v,
+                  }))}
+                  onChange={set("version")}
+                  style={{ width: 110 }}
+                  aria-label={bi("版本", "Version")}
+                />
+              </div>
+              <div className="wb-pv-ctl">
+                <span>{bi("方案", "Scheme")}</span>
+                <Select
+                  size="small"
+                  allowClear
+                  placeholder={bi("默认台数", "Default counts")}
+                  value={req.preset || undefined}
+                  options={(data?.presets || []).map((p) => ({
+                    value: p.id,
+                    label: p.name + (p.tag ? ` · ${p.tag}` : ""),
+                  }))}
+                  onChange={set("preset")}
+                  style={{ width: 170 }}
+                  aria-label={bi("方案", "Scheme")}
+                />
+              </div>
+              <div className="wb-pv-ctl">
+                <span>{bi("系统", "OS")}</span>
+                <Select
+                  size="small"
+                  value={req.platform || data?.sample?.platform}
+                  options={(data?.platforms || []).map((p) => ({
+                    value: p,
+                    label: p,
+                  }))}
+                  onChange={set("platform")}
+                  style={{ width: 170 }}
+                  aria-label={bi("系统", "OS")}
+                />
+              </div>
+              <span className="wb-grow" />
+              <Button
                 size="small"
-                value={req.version || data?.sample?.version}
-                options={(data?.versions || []).map((v) => ({
-                  value: v,
-                  label: v,
-                }))}
-                onChange={set("version")}
-                style={{ width: 110 }}
-                aria-label={bi("版本", "Version")}
-              />
+                type="primary"
+                icon={<IconThunderbolt />}
+                loading={busy}
+                onClick={() => run()}
+              >
+                {bi("重新生成", "Regenerate")}
+              </Button>
             </div>
-            <div className="wb-pv-ctl">
-              <span>{bi("方案", "Scheme")}</span>
-              <Select
-                size="small"
-                allowClear
-                placeholder={bi("默认台数", "Default counts")}
-                value={req.preset || undefined}
-                options={(data?.presets || []).map((p) => ({
-                  value: p.id,
-                  label: p.name + (p.tag ? ` · ${p.tag}` : ""),
-                }))}
-                onChange={set("preset")}
-                style={{ width: 170 }}
-                aria-label={bi("方案", "Scheme")}
-              />
-            </div>
-            <div className="wb-pv-ctl">
-              <span>{bi("系统", "OS")}</span>
-              <Select
-                size="small"
-                value={req.platform || data?.sample?.platform}
-                options={(data?.platforms || []).map((p) => ({
-                  value: p,
-                  label: p,
-                }))}
-                onChange={set("platform")}
-                style={{ width: 170 }}
-                aria-label={bi("系统", "OS")}
-              />
-            </div>
-            <span className="wb-grow" />
-            <Button
-              size="small"
-              type="primary"
-              icon={<IconThunderbolt />}
-              loading={busy}
-              onClick={() => run()}
-            >
-              {bi("重新生成", "Regenerate")}
-            </Button>
+            {data?.ok && (
+              <div className="wb-pv-tabs">
+                <Segmented<View>
+                  label={bi("结果", "Result")}
+                  value={view}
+                  onChange={setView}
+                  options={[
+                    { value: "overview", label: bi("概览", "Overview") },
+                    { value: "graph", label: bi("拓扑", "Topology") },
+                    { value: "steps", label: bi("步骤", "Steps") },
+                    { value: "handbook", label: bi("手册", "Runbooks") },
+                    {
+                      value: "files",
+                      label: bi("文件与差异", "Files & Diffs"),
+                      count: data.compared ? data.changes : undefined,
+                    },
+                    {
+                      value: "syntax",
+                      label: bi("Ansible 检查", "Ansible Check"),
+                      count: syntaxFail || undefined,
+                    },
+                  ]}
+                />
+              </div>
+            )}
           </div>
         )}
         <p className="wb-pv-lead">
@@ -550,29 +578,6 @@ export function PreviewDrawer({
               </div>
             ) : (
               <>
-                <div className="wb-pv-tabs">
-                  <Segmented<View>
-                    label={bi("结果", "Result")}
-                    value={view}
-                    onChange={setView}
-                    options={[
-                      { value: "overview", label: bi("概览", "Overview") },
-                      { value: "graph", label: bi("拓扑", "Topology") },
-                      { value: "steps", label: bi("步骤", "Steps") },
-                      { value: "handbook", label: bi("手册", "Runbooks") },
-                      {
-                        value: "files",
-                        label: bi("文件与差异", "Files & Diffs"),
-                        count: data.compared ? data.changes : undefined,
-                      },
-                      {
-                        value: "syntax",
-                        label: bi("Ansible 检查", "Ansible Check"),
-                        count: syntaxFail || undefined,
-                      },
-                    ]}
-                  />
-                </div>
                 {view === "overview" && (
                   <div className="wb-pv-view">
                     <dl className="wb-facts">
@@ -936,55 +941,57 @@ function SampleEditor({
             +
           </Button>
         </div>
-        <div
-          className="wb-grid-matrix"
-          style={{
-            gridTemplateColumns: `minmax(120px, 1.4fr) repeat(${hostNames.length}, minmax(44px, 1fr)) 70px`,
-          }}
-          role="grid"
-        >
-          <span />
-          {hostNames.map((h) => (
-            <span key={h} className="mono faint small">
-              {h}
-            </span>
-          ))}
-          <span className="faint small">{bi("台数要求", "Required")}</span>
-          {data.roles.map((r) => {
-            const n = (value.placement[r.name] || []).length;
-            const bad = n < r.min || (r.max > 0 && n > r.max);
-            return (
-              <div
-                className="wb-matrix-row"
-                key={r.name}
-                role="row"
-                style={{ display: "contents" }}
-              >
-                <span>
-                  <b>{r.title || r.name}</b>{" "}
-                  <span className="mono faint small">{r.name}</span>
-                </span>
-                {hostNames.map((h) => (
-                  <span key={h} role="gridcell">
-                    <input
-                      type="checkbox"
-                      checked={has(r.name, h)}
-                      onChange={() => toggle(r.name, h)}
-                      aria-label={bi(`${r.title || r.name} 放在 ${h}`, `Place ${r.title || r.name} on ${h}`)}
-                    />
+        <div className="wb-grid-matrix-wrap">
+          <div
+            className="wb-grid-matrix"
+            style={{
+              gridTemplateColumns: `minmax(120px, 1.4fr) repeat(${hostNames.length}, minmax(44px, 1fr)) 70px`,
+            }}
+            role="grid"
+          >
+            <span />
+            {hostNames.map((h) => (
+              <span key={h} className="mono faint small">
+                {h}
+              </span>
+            ))}
+            <span className="faint small">{bi("台数要求", "Required")}</span>
+            {data.roles.map((r) => {
+              const n = (value.placement[r.name] || []).length;
+              const bad = n < r.min || (r.max > 0 && n > r.max);
+              return (
+                <div
+                  className="wb-matrix-row"
+                  key={r.name}
+                  role="row"
+                  style={{ display: "contents" }}
+                >
+                  <span>
+                    <b>{r.title || r.name}</b>{" "}
+                    <span className="mono faint small">{r.name}</span>
                   </span>
-                ))}
-                <span className={bad ? "bad small" : "faint small"}>
-                  {n} /{" "}
-                  {r.max
-                    ? r.min === r.max
-                      ? r.min
-                      : `${r.min}–${r.max}`
-                    : `${r.min}+`}
-                </span>
-              </div>
-            );
-          })}
+                  {hostNames.map((h) => (
+                    <span key={h} role="gridcell">
+                      <input
+                        type="checkbox"
+                        checked={has(r.name, h)}
+                        onChange={() => toggle(r.name, h)}
+                        aria-label={bi(`${r.title || r.name} 放在 ${h}`, `Place ${r.title || r.name} on ${h}`)}
+                      />
+                    </span>
+                  ))}
+                  <span className={bad ? "bad small" : "faint small"}>
+                    {n} /{" "}
+                    {r.max
+                      ? r.min === r.max
+                        ? r.min
+                        : `${r.min}–${r.max}`
+                      : `${r.min}+`}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
       <div className="wb-sample-sec">

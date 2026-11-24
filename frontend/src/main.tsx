@@ -349,6 +349,7 @@ function NavTabs({
         ? new ResizeObserver(compute)
         : null;
     ro?.observe(nav);
+    window.addEventListener("resize", compute);
     let cancelled = false;
     document.fonts?.ready
       ?.then(() => {
@@ -359,6 +360,7 @@ function NavTabs({
       cancelled = true;
       cancelAnimationFrame(raf);
       ro?.disconnect();
+      window.removeEventListener("resize", compute);
     };
   }, [active, itemSig, lang, items]);
 
@@ -384,7 +386,24 @@ function NavTabs({
     };
     measureBar();
     const raf = requestAnimationFrame(measureBar);
-    return () => cancelAnimationFrame(raf);
+    const ro =
+      typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(measureBar)
+        : null;
+    ro?.observe(nav);
+    window.addEventListener("resize", measureBar);
+    let cancelled = false;
+    document.fonts?.ready
+      ?.then(() => {
+        if (!cancelled) measureBar();
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+      ro?.disconnect();
+      window.removeEventListener("resize", measureBar);
+    };
   }, [active, activeInOverflow, clampedCount, itemSig, lang]);
 
   useEffect(() => {
@@ -2026,7 +2045,7 @@ function App() {
         fresh={verWatch.fresh}
         freshBuild={verWatch.freshBuild}
         hotfixOnly={verWatch.hotfixOnly}
-        hidden={verWatch.hidden}
+        hidden={verWatch.hidden || changelogOpen}
         hide={verWatch.hide}
         onViewNotes={openChangelog}
       />

@@ -196,7 +196,7 @@ export function NewDeliveryPicker({
           icon={<IconArrowLeft />}
           onClick={back}
         >
-          {bi("返回交付列表", "Back to deliveries")}
+          {bi("返回集群列表", "Back to clusters")}
         </Button>
         <header className="np-hero">
           <div className="np-hero-text">

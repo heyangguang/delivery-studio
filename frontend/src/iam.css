@@ -628,13 +628,22 @@
   font-size: 16px;
   font-weight: 650;
 }
+.iam-user-act .me-tl li > span {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 3px 8px;
+  min-width: 0;
+}
 .iam-ev-obj {
-  margin-left: 8px;
+  display: inline-block;
+  max-width: 100%;
   padding: 0 6px;
   border-radius: 5px;
   color: var(--mute);
   font-size: 11.5px;
   background: var(--sunken);
+  overflow-wrap: anywhere;
 }
 .iam-del-lead {
   margin: 0 0 4px;
@@ -687,6 +696,8 @@
   display: flex;
   flex-direction: column;
   border-top: 1px solid var(--line);
+  overflow-x: auto;
+  max-width: 100%;
 }
 .au2-row {
   display: grid;
@@ -1133,7 +1144,7 @@
 
 .au2-shead,
 .au2-srow {
-  grid-template-columns: minmax(122px, 0.95fr) minmax(138px, 1.02fr) minmax(144px, 1.08fr) minmax(122px, 0.92fr) 118px;
+  grid-template-columns: minmax(122px, 0.95fr) minmax(138px, 1.02fr) minmax(144px, 1.08fr) minmax(144px, 1.15fr) 118px;
   gap: 12px;
 }
 .au2-shead > :last-child {
@@ -1174,7 +1185,7 @@
   gap: 10px;
 }
 
-@media (max-width: 1080px) {
+@media (max-width: 1360px) {
   .au-split {
     grid-template-columns: minmax(0, 1fr);
     border-bottom: 0;
@@ -1232,7 +1243,7 @@
 @media (max-width: 1100px) {
   .au2-shead,
   .au2-srow {
-    grid-template-columns: minmax(120px, 1fr) minmax(88px, 0.78fr) minmax(112px, 0.95fr) 108px;
+    grid-template-columns: minmax(120px, 1fr) minmax(88px, 0.78fr) minmax(132px, 1.08fr) 108px;
   }
   .au2-shead > :nth-child(3),
   .au2-srow > :nth-child(3) {

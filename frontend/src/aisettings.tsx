@@ -1010,6 +1010,7 @@ function ProviderModal({
     <Modal
       visible={open}
       onCancel={close}
+      className="ai-prov-modal"
       title={
         edit
           ? bi("编辑供应商", "Edit provider")

@@ -644,11 +644,26 @@
 .cl-host-td,
 .cl-ip-td {
   white-space: nowrap;
+  overflow: hidden;
 }
 .cl-host-cell {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 7px;
+  min-width: 0;
+  max-width: 100%;
+  white-space: nowrap;
+}
+.cl-host-cell b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cl-ip-td .cl-copy-cell > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 .cl-hosts td b {
@@ -671,6 +686,8 @@
 }
 .cl-store-td {
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .cl-store-main {
   margin-right: 6px;

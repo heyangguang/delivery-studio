@@ -1075,10 +1075,17 @@ export function ImportClusterPage({
 
                 <div className="imp-field">
                   <label>
-                    {bi(
-                      "在目标节点执行 `bash " + probeFilename + "` 后，把终端输出粘贴到这里（多台节点输出可直接拼接）",
-                      `Run \`bash ${probeFilename}\` on target nodes and paste terminal output here (multi-node outputs can be concatenated)`,
-                    )}
+                    <span>
+                      {isEn ? (
+                        <>
+                          Run <code>bash {probeFilename}</code> on target nodes and paste terminal output here (multi-node outputs can be concatenated)
+                        </>
+                      ) : (
+                        <>
+                          在目标节点执行 <code>bash {probeFilename}</code> 后，把终端输出粘贴到这里（多台节点输出可直接拼接）
+                        </>
+                      )}
+                    </span>
                   </label>
                   <Input.TextArea
                     autoSize={{ minRows: 6, maxRows: 14 }}
@@ -1955,7 +1962,7 @@ export function ImportedBaselineModal({
       onCancel={onClose}
       footer={
         tab === "probe" ? (
-          <div style={{ display: "flex", justifyContent: "space-between", width: "100%" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8, width: "100%" }}>
             <Button onClick={() => setTab("edit")}>
               {bi("切回手工编辑", "Switch to Edit")}
             </Button>
@@ -1964,7 +1971,7 @@ export function ImportedBaselineModal({
             </Button>
           </div>
         ) : (
-          <div style={{ display: "flex", justifyContent: "space-between", width: "100%" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8, width: "100%" }}>
             <Button onClick={() => setTab("probe")}>
               <IconRefresh /> {bi("使用只读探针刷新", "Refresh via Probe")}
             </Button>

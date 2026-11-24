@@ -866,45 +866,44 @@ function PlatformDetail({
       </header>
 
       <div className="lib-kpis" aria-label={bi("当前系统软件库概览", "OS library overview")}>
-        {p.direct && (
-          <button
-            type="button"
-            className="lib-kpi"
-            onClick={() => setSec("source")}
-          >
-            <span className="lib-kpi-k">{bi("软件源索引", "Source Index")}</span>
-            <b className="lib-kpi-v num">
-              {p.index.files.length > 0
-                ? bi(
-                    `${p.index.packages.toLocaleString(getLang())} 个版本`,
-                    `${p.index.packages.toLocaleString(getLang())} versions`,
-                  )
-                : bi("尚未拉取", "Not fetched")}
-            </b>
-            <span className="lib-kpi-s">
-              {p.index.files.length > 0
-                ? bi(
-                    `${new Set(p.index.files.map((f) => f.source)).size} 个软件源 · 更新于 ${ago(p.index.updated || "")}`,
-                    `${new Set(p.index.files.map((f) => f.source)).size} sources · updated ${ago(p.index.updated || "")}`,
-                  )
-                : bi("联网刷新或从外网导入", "Fetch online or import bundle")}
-            </span>
-          </button>
-        )}
-        <button
-          type="button"
-          className={`lib-kpi ${missing.length > 0 ? "is-warn" : ""}`}
-          onClick={() => setSec("packages")}
-        >
-          <span className="lib-kpi-k">{bi("已入库软件包", "Stored Packages")}</span>
-          <b className="lib-kpi-v num">
-            {bi(
-              `${rows?.length ?? p.stats.closures} 项`,
-              `${rows?.length ?? p.stats.closures} items`,
-            )}
-          </b>
-          <span className="lib-kpi-s">
-            {missing.length > 0
+        {p.direct && (() => {
+          const idxVal =
+            p.index.files.length > 0
+              ? bi(
+                  `${p.index.packages.toLocaleString(getLang())} 个版本`,
+                  `${p.index.packages.toLocaleString(getLang())} versions`,
+                )
+              : bi("尚未拉取", "Not fetched");
+          const idxSub =
+            p.index.files.length > 0
+              ? bi(
+                  `${new Set(p.index.files.map((f) => f.source)).size} 个软件源 · 更新于 ${ago(p.index.updated || "")}`,
+                  `${new Set(p.index.files.map((f) => f.source)).size} sources · updated ${ago(p.index.updated || "")}`,
+                )
+              : bi("联网刷新或从外网导入", "Fetch online or import bundle");
+          return (
+            <button
+              type="button"
+              className="lib-kpi"
+              onClick={() => setSec("source")}
+            >
+              <span className="lib-kpi-k">{bi("软件源索引", "Source Index")}</span>
+              <b className="lib-kpi-v num" title={idxVal}>
+                {idxVal}
+              </b>
+              <span className="lib-kpi-s" title={idxSub}>
+                {idxSub}
+              </span>
+            </button>
+          );
+        })()}
+        {(() => {
+          const pkgVal = bi(
+            `${rows?.length ?? p.stats.closures} 项`,
+            `${rows?.length ?? p.stats.closures} items`,
+          );
+          const pkgSub =
+            missing.length > 0
               ? bi(
                   `${missing.length} 项待下载 · ${size(p.stats.bytes)}`,
                   `${missing.length} missing · ${size(p.stats.bytes)}`,
@@ -912,46 +911,66 @@ function PlatformDetail({
               : bi(
                   `${p.stats.files} 个文件 · ${size(p.stats.bytes)}`,
                   `${p.stats.files} ${p.stats.files === 1 ? "file" : "files"} · ${size(p.stats.bytes)}`,
-                )}
-          </span>
-        </button>
-        <button
-          type="button"
-          className={`lib-kpi ${p.runtime ? "" : "is-warn"}`}
-          onClick={() =>
-            p.runtime
-              ? setSec("runtime")
-              : go({ name: "library", id: "ansible" })
-          }
-        >
-          <span className="lib-kpi-k">{bi("Ansible 运行环境", "Ansible Runtime")}</span>
-          <b className="lib-kpi-v mono">
-            {p.runtime
-              ? `ansible-core ${p.runtime.ansible || "?"}`
-              : bi("未选定", "Unset")}
-          </b>
-          <span className="lib-kpi-s">
-            {p.runtime
-              ? bi(
-                  `${p.runtime.packages.length} 个离线包 · ${size(p.runtime.size)}`,
-                  `${p.runtime.packages.length} wheels · ${size(p.runtime.size)}`,
-                )
-              : bi("点此前往运行环境库配置", "Click to configure runtime")}
-          </span>
-        </button>
-        <div className={`lib-kpi static ${p.deployable ? "is-ok" : "is-warn"}`}>
-          <span className="lib-kpi-k">{bi("离线交付状态", "Delivery Readiness")}</span>
-          <b className="lib-kpi-v">
-            {p.deployable
-              ? bi("就绪 · 可生成交付", "Ready to build")
-              : bi("待补齐环境", "Needs runtime")}
-          </b>
-          <span className="lib-kpi-s">
-            {p.deployable
-              ? bi("目标机与控制节点均无需联网", "Air-gapped targets & controller")
-              : bi("缺少 Ansible 离线运行环境", "Missing offline Ansible runtime")}
-          </span>
-        </div>
+                );
+          const rtVal = p.runtime
+            ? `ansible-core ${p.runtime.ansible || "?"}`
+            : bi("未选定", "Unset");
+          const rtSub = p.runtime
+            ? bi(
+                `${p.runtime.packages.length} 个离线包 · ${size(p.runtime.size)}`,
+                `${p.runtime.packages.length} wheels · ${size(p.runtime.size)}`,
+              )
+            : bi("点此前往运行环境库配置", "Click to configure runtime");
+          const readyVal = p.deployable
+            ? bi("就绪 · 可生成交付", "Ready to build")
+            : bi("待补齐环境", "Needs runtime");
+          const readySub = p.deployable
+            ? bi("目标机与控制节点均无需联网", "Air-gapped targets & controller")
+            : bi("缺少 Ansible 离线运行环境", "Missing offline Ansible runtime");
+          return (
+            <>
+              <button
+                type="button"
+                className={`lib-kpi ${missing.length > 0 ? "is-warn" : ""}`}
+                onClick={() => setSec("packages")}
+              >
+                <span className="lib-kpi-k">{bi("已入库软件包", "Stored Packages")}</span>
+                <b className="lib-kpi-v num" title={pkgVal}>
+                  {pkgVal}
+                </b>
+                <span className="lib-kpi-s" title={pkgSub}>
+                  {pkgSub}
+                </span>
+              </button>
+              <button
+                type="button"
+                className={`lib-kpi ${p.runtime ? "" : "is-warn"}`}
+                onClick={() =>
+                  p.runtime
+                    ? setSec("runtime")
+                    : go({ name: "library", id: "ansible" })
+                }
+              >
+                <span className="lib-kpi-k">{bi("Ansible 运行环境", "Ansible Runtime")}</span>
+                <b className="lib-kpi-v mono" title={rtVal}>
+                  {rtVal}
+                </b>
+                <span className="lib-kpi-s" title={rtSub}>
+                  {rtSub}
+                </span>
+              </button>
+              <div className={`lib-kpi static ${p.deployable ? "is-ok" : "is-warn"}`}>
+                <span className="lib-kpi-k">{bi("离线交付状态", "Delivery Readiness")}</span>
+                <b className="lib-kpi-v" title={readyVal}>
+                  {readyVal}
+                </b>
+                <span className="lib-kpi-s" title={readySub}>
+                  {readySub}
+                </span>
+              </div>
+            </>
+          );
+        })()}
       </div>
 
       <UnderlineTabs

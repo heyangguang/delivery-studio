@@ -38,9 +38,9 @@
   height: 56px;
   margin-bottom: 10px;
   border-radius: 18px;
-  color: #0b7d7d;
+  color: var(--teal-ink);
   font-size: 26px;
-  background: rgba(20, 170, 170, 0.12);
+  background: var(--teal-soft);
 }
 .kb-intro h2 {
   margin: 0 0 8px;
@@ -186,7 +186,13 @@
   font-size: 13.5px;
 }
 .kb-mine-t a {
+  color: var(--ink);
   font-weight: 600;
+  text-decoration: none;
+}
+.kb-mine-t a:hover {
+  color: var(--brand-ink);
+  text-decoration: underline;
 }
 .kb-mine-t small {
   color: var(--mute);
@@ -210,12 +216,39 @@
   border-color: var(--brand-line);
   background: var(--brand-soft);
 }
+@media (max-width: 1360px) {
+  .kb-rv {
+    grid-template-columns: minmax(200px, 260px) minmax(0, 1fr);
+    gap: 20px;
+  }
+  .kb-rv-acts {
+    grid-template-columns: minmax(180px, 220px) minmax(0, 1fr) auto auto;
+  }
+  .kb-rv-acts > :nth-child(1) {
+    grid-column: 1;
+  }
+  .kb-rv-acts > :nth-child(2) {
+    grid-column: 2 / -1;
+  }
+  .kb-rv-acts > :nth-child(3) {
+    grid-column: 3;
+    grid-row: 2;
+  }
+  .kb-rv-acts > :nth-child(4) {
+    grid-column: 4;
+    grid-row: 2;
+  }
+}
 @media (max-width: 900px) {
   .kb-rv {
     grid-template-columns: minmax(0, 1fr);
   }
   .kb-rv-acts {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .kb-rv-acts > * {
+    grid-column: 1 / -1;
+    grid-row: auto;
   }
 }
 .kb-snip {

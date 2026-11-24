@@ -94,6 +94,8 @@
   height: 2px;
   border-radius: 2px;
   background: var(--brand);
+}
+.me-tabs-bar.ready {
   transition:
     transform 0.32s var(--spring),
     width 0.32s var(--spring);
@@ -192,6 +194,20 @@
   color: var(--ok);
   background: var(--ok-soft);
 }
+body[arco-theme="dark"] .me-obj-ic.k-kb,
+body[arco-theme="dark"] .me-res .rp-ic.k-doc {
+  color: var(--cobalt);
+  background: var(--cobalt-soft);
+}
+body[arco-theme="dark"] .me-obj-ic.k-skills,
+body[arco-theme="dark"] .me-res .rp-ic.k-built {
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+body[arco-theme="dark"] .me-res .rp-ic.k-mcp {
+  color: var(--ok);
+  background: var(--ok-soft);
+}
 .me-obj-t {
   display: flex;
   flex: 1;
@@ -260,13 +276,25 @@
   border-radius: 50%;
   background: var(--faint);
 }
-.me-dot.s-succeeded {
+.me-dot.s-succeeded,
+.me-dot.s-done {
   background: var(--ok);
+}
+.me-dot.s-warn {
+  background: var(--warn);
+}
+.me-dot.s-generated {
+  background: var(--pending);
+}
+.me-dot.s-void {
+  background: var(--faint);
 }
 .me-dot.s-failed {
   background: var(--bad);
 }
-.me-dot.s-running,
+.me-dot.s-running {
+  background: var(--run);
+}
 .me-dot.s-queued {
   background: var(--brand);
 }

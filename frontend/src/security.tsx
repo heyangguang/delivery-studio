@@ -775,13 +775,11 @@ function FindingDrawer({
     setGlobalScope(false);
   }, [finding?.key, finding?.installed_version, draftOverride]);
 
-  if (!finding) return null;
-
   const needNote =
     status === "mitigated" || status === "not_affected" || status === "accepted";
 
   const openInAIDock = () => {
-    if (!dock) return;
+    if (!dock || !finding) return;
     const roleLabel =
       finding.pkg_role === "primary"
         ? bi("中间件本体", "Middleware")
@@ -827,6 +825,7 @@ function FindingDrawer({
   };
 
   const saveTriage = async () => {
+    if (!finding) return;
     if (needNote && !note.trim() && !just.trim()) {
       Message.warning(
         bi("请填写评估依据或说明", "Please enter a justification or note"),
@@ -860,26 +859,39 @@ function FindingDrawer({
     }
   };
 
+  const summaryText = finding?.summary?.trim() || "";
+  const detailsText = finding?.details?.trim() || "";
+  const showDetails = Boolean(detailsText && detailsText !== summaryText);
+  const showSummary = Boolean(
+    summaryText &&
+      !(showDetails && detailsText.startsWith(summaryText.slice(0, 40))),
+  );
+
   return (
     <Drawer
       visible={!!finding}
       onCancel={onClose}
       footer={null}
       width={620}
+      style={{ maxWidth: "100vw" }}
+      unmountOnExit
       className="sec-drawer"
       title={
-        <div className="sec-dr-title">
-          <span className={`sec-sev ${sevClass(finding.severity)}`}>
-            {sevLabel(finding.severity)}
-            {finding.cvss_score ? ` ${finding.cvss_score.toFixed(1)}` : ""}
-          </span>
-          <b className="mono">{finding.cve}</b>
-          {finding.id !== finding.cve && (
-            <span className="faint small mono">{finding.id}</span>
-          )}
-        </div>
+        finding ? (
+          <div className="sec-dr-title">
+            <span className={`sec-sev ${sevClass(finding.severity)}`}>
+              {sevLabel(finding.severity)}
+              {finding.cvss_score ? ` ${finding.cvss_score.toFixed(1)}` : ""}
+            </span>
+            <b className="mono">{finding.cve}</b>
+            {finding.id !== finding.cve && (
+              <span className="faint small mono">{finding.id}</span>
+            )}
+          </div>
+        ) : null
       }
     >
+      {finding && (
       <div className="sec-dr-body">
         <div className="sec-dr-head-meta">
           <span>
@@ -903,22 +915,11 @@ function FindingDrawer({
           )}
         </div>
 
-        {(finding.summary || finding.details) && (
+        {(showSummary || showDetails) && (
           <div className="sec-dr-card">
             <h4>{bi("漏洞说明", "Summary")}</h4>
-            {finding.summary &&
-              !(
-                finding.details &&
-                finding.details
-                  .trim()
-                  .startsWith(finding.summary.trim().slice(0, 40))
-              ) && <p className="sec-dr-sum">{finding.summary}</p>}
-            {finding.details && finding.details !== finding.summary && (
-              <p className="sec-dr-det">{finding.details}</p>
-            )}
-            {!finding.details && finding.summary && (
-              <p className="sec-dr-sum">{finding.summary}</p>
-            )}
+            {showSummary && <p className="sec-dr-sum">{finding.summary}</p>}
+            {showDetails && <p className="sec-dr-det">{finding.details}</p>}
             {finding.cvss_vector && (
               <code className="sec-cvss-vec mono">{finding.cvss_vector}</code>
             )}
@@ -1188,6 +1189,7 @@ function FindingDrawer({
           )}
         </div>
       </div>
+      )}
     </Drawer>
   );
 }
@@ -1860,7 +1862,7 @@ export function SecurityPage({
     [filteredFindings, rep?.package_groups],
   );
 
-  const priorityGroups = useMemo(
+  const scopedActiveGroups = useMemo(
     () =>
       groupFindingsByPackage(
         (rep?.findings || []).filter((f) => {
@@ -1878,8 +1880,13 @@ export function SecurityPage({
           return true;
         }),
         rep?.package_groups,
-      ).slice(0, 8),
+      ),
     [rep?.findings, rep?.package_groups, roleFilter],
+  );
+
+  const priorityGroups = useMemo(
+    () => scopedActiveGroups.slice(0, 8),
+    [scopedActiveGroups],
   );
 
   const hasAnyVulnFilter =
@@ -2452,22 +2459,53 @@ export function SecurityPage({
                 <em> / {rep?.cluster_count ?? 0}</em>
               </b>
               <small>
-                {roleFilter === "all"
-                  ? bi(
-                      `中间件命中 ${rep?.middleware_affected_clusters ?? 0} 个 · OS 底层命中 ${rep?.os_affected_clusters ?? 0} 个`,
-                      `MW ${rep?.middleware_affected_clusters ?? 0} · OS ${rep?.os_affected_clusters ?? 0} clusters`,
-                    )
-                  : bi("点击查看集群分层风险明细", "Click for cluster layer breakdown")}
+                {roleFilter === "all" ? (
+                  <span className="sec-kpi-meta">
+                    <span>
+                      {bi(
+                        `中间件命中 ${rep?.middleware_affected_clusters ?? 0} 个`,
+                        `MW ${rep?.middleware_affected_clusters ?? 0}`,
+                      )}
+                    </span>
+                    <span aria-hidden>·</span>
+                    <span>
+                      {bi(
+                        `OS 底层命中 ${rep?.os_affected_clusters ?? 0} 个`,
+                        `OS ${rep?.os_affected_clusters ?? 0} clusters`,
+                      )}
+                    </span>
+                  </span>
+                ) : (
+                  bi("点击查看集群分层风险明细", "Click for cluster layer breakdown")
+                )}
               </small>
             </button>
             <div className="sec-kpi">
               <span>{bi("已盘点资产包 (SBOM)", "Inventoried Packages")}</span>
               <b className="num">{rep?.sbom_package_count ?? 0}</b>
               <small>
-                {bi(
-                  `闭包 ${rep?.closure_count ?? 0} · 运行环境 ${rep?.runtime_count ?? 0} · 已缓解/豁免 ${rep?.waived_count ?? 0}`,
-                  `Closures ${rep?.closure_count ?? 0} · Runtimes ${rep?.runtime_count ?? 0} · Waived ${rep?.waived_count ?? 0}`,
-                )}
+                <span className="sec-kpi-meta">
+                  <span>
+                    {bi(
+                      `闭包 ${rep?.closure_count ?? 0}`,
+                      `Closures ${rep?.closure_count ?? 0}`,
+                    )}
+                  </span>
+                  <span aria-hidden>·</span>
+                  <span>
+                    {bi(
+                      `运行环境 ${rep?.runtime_count ?? 0}`,
+                      `Runtimes ${rep?.runtime_count ?? 0}`,
+                    )}
+                  </span>
+                  <span aria-hidden>·</span>
+                  <span>
+                    {bi(
+                      `已缓解/豁免 ${rep?.waived_count ?? 0}`,
+                      `Waived ${rep?.waived_count ?? 0}`,
+                    )}
+                  </span>
+                </span>
               </small>
             </div>
           </div>
@@ -2521,6 +2559,21 @@ export function SecurityPage({
                     setRoleFilter(
                       roleFilter === "dependency" ? "all" : "dependency",
                     );
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.target !== e.currentTarget) return;
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    if (policy.hide_os_cves) {
+                      setRoleFilter("all");
+                      setStateFilter("ignored");
+                      switchTab("vulns");
+                    } else {
+                      setRoleFilter(
+                        roleFilter === "dependency" ? "all" : "dependency",
+                      );
+                    }
                   }
                 }}
               >
@@ -2603,6 +2656,19 @@ export function SecurityPage({
                     switchTab("vulns");
                   } else {
                     setRoleFilter(roleFilter === "runtime" ? "all" : "runtime");
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.target !== e.currentTarget) return;
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    if (policy.hide_runtime_cves) {
+                      setRoleFilter("all");
+                      setStateFilter("ignored");
+                      switchTab("vulns");
+                    } else {
+                      setRoleFilter(roleFilter === "runtime" ? "all" : "runtime");
+                    }
                   }
                 }}
               >
@@ -2709,7 +2775,7 @@ export function SecurityPage({
               {(rep?.findings?.length ?? 0) > 0 && (
                 <Button size="small" onClick={() => switchTab("vulns")}>
                   {bi(
-                    `查看全部 (${scopedActiveCounts.total} 条 / ${filteredGroups.length} 个包)`,
+                    `查看全部 (${scopedActiveCounts.total} 条 / ${scopedActiveGroups.length} 个包)`,
                     `View All (${scopedActiveCounts.total})`,
                   )}
                 </Button>
@@ -3496,110 +3562,112 @@ export function SecurityPage({
                 })}
               </div>
             ) : (
-              <table className="sec-table">
-                <thead>
-                  <tr>
-                    {canManage && <th style={{ width: 36 }} />}
-                    <th>{bi("CVE / 等级", "CVE / Severity")}</th>
-                    <th>{bi("软件包与修复对照", "Package & Fix")}</th>
-                    <th>{bi("影响面", "Blast Radius")}</th>
-                    <th>{bi("VEX 状态", "VEX Status")}</th>
-                    <th style={{ textAlign: "right" }}>{bi("操作", "Action")}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredFindings.map((f) => {
-                    const sid = `${f.key}|${f.installed_version}`;
-                    return (
-                      <tr
-                        key={sid}
-                        className={f.waived ? "is-waived" : ""}
-                        onClick={() => setActiveFinding(f)}
-                      >
-                        {canManage && (
-                          <td onClick={(e) => e.stopPropagation()}>
-                            <Checkbox
-                              checked={Boolean(selectedMap[sid])}
-                              onChange={(checked) =>
-                                toggleFindingSelect(f, checked)
-                              }
-                            />
-                          </td>
-                        )}
-                        <td>
-                          <div className="sec-cve-cell">
-                            <span className={`sec-sev ${sevClass(f.severity)}`}>
-                              {sevLabel(f.severity)}
-                              {f.cvss_score ? ` ${f.cvss_score.toFixed(1)}` : ""}
-                            </span>
-                            <b className="mono">{f.cve}</b>
-                          </div>
-                          {f.summary && (
-                            <div className="sec-cve-sub">{f.summary}</div>
+              <div className="sec-table-scroll">
+                <table className="sec-table">
+                  <thead>
+                    <tr>
+                      {canManage && <th style={{ width: 36 }} />}
+                      <th>{bi("CVE / 等级", "CVE / Severity")}</th>
+                      <th>{bi("软件包与修复对照", "Package & Fix")}</th>
+                      <th>{bi("影响面", "Blast Radius")}</th>
+                      <th>{bi("VEX 状态", "VEX Status")}</th>
+                      <th style={{ textAlign: "right" }}>{bi("操作", "Action")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredFindings.map((f) => {
+                      const sid = `${f.key}|${f.installed_version}`;
+                      return (
+                        <tr
+                          key={sid}
+                          className={f.waived ? "is-waived" : ""}
+                          onClick={() => setActiveFinding(f)}
+                        >
+                          {canManage && (
+                            <td onClick={(e) => e.stopPropagation()}>
+                              <Checkbox
+                                checked={Boolean(selectedMap[sid])}
+                                onChange={(checked) =>
+                                  toggleFindingSelect(f, checked)
+                                }
+                              />
+                            </td>
                           )}
-                        </td>
-                        <td>
-                          <div className="sec-pkg-cell">
-                            <b className="mono">{f.package}</b>
-                            <span className={`sec-role-pill role-${f.pkg_role || "dependency"}`}>
-                              {pkgRoleLabel(f.pkg_role)}
+                          <td>
+                            <div className="sec-cve-cell">
+                              <span className={`sec-sev ${sevClass(f.severity)}`}>
+                                {sevLabel(f.severity)}
+                                {f.cvss_score ? ` ${f.cvss_score.toFixed(1)}` : ""}
+                              </span>
+                              <b className="mono">{f.cve}</b>
+                            </div>
+                            {f.summary && (
+                              <div className="sec-cve-sub">{f.summary}</div>
+                            )}
+                          </td>
+                          <td>
+                            <div className="sec-pkg-cell">
+                              <b className="mono">{f.package}</b>
+                              <span className={`sec-role-pill role-${f.pkg_role || "dependency"}`}>
+                                {pkgRoleLabel(f.pkg_role)}
+                              </span>
+                              <span className="sec-eco-tag">{f.ecosystem}</span>
+                            </div>
+                            <div className="sec-ver-line mono">
+                              <span className="bad">{f.installed_version}</span>
+                              {f.fixed_in?.length ? (
+                                <>
+                                  <span>→</span>
+                                  <span className="ok">{f.fixed_in[0]}</span>
+                                </>
+                              ) : null}
+                              {f.repo_fix_version && (
+                                <span className="sec-repo-fix">
+                                  {bi("源已有修复版", "Fix in repo")}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td>
+                            <div className="sec-br-inline">
+                              {f.clusters && f.clusters.length > 0 ? (
+                                <span className="sec-cl-pill bad">
+                                  {bi(
+                                    `${f.clusters.length} 个生产集群`,
+                                    `${f.clusters.length} cluster(s)`,
+                                  )}
+                                </span>
+                              ) : (
+                                <span className="sec-cl-pill">
+                                  {assetTypeLabel(f.asset_type)}
+                                </span>
+                              )}
+                              {(f.components || []).slice(0, 2).map((c) => (
+                                <span
+                                  key={`${c.component}@${c.version}@${c.platform}`}
+                                  className="sec-mini-tag"
+                                >
+                                  {c.title} {c.version}
+                                </span>
+                              ))}
+                            </div>
+                          </td>
+                          <td>
+                            <span className={`sec-tr-badge st-${f.triage_status}`}>
+                              {triageLabel(f.triage_status)}
                             </span>
-                            <span className="sec-eco-tag">{f.ecosystem}</span>
-                          </div>
-                          <div className="sec-ver-line mono">
-                            <span className="bad">{f.installed_version}</span>
-                            {f.fixed_in?.length ? (
-                              <>
-                                <span>→</span>
-                                <span className="ok">{f.fixed_in[0]}</span>
-                              </>
-                            ) : null}
-                            {f.repo_fix_version && (
-                              <span className="sec-repo-fix">
-                                {bi("源已有修复版", "Fix in repo")}
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td>
-                          <div className="sec-br-inline">
-                            {f.clusters && f.clusters.length > 0 ? (
-                              <span className="sec-cl-pill bad">
-                                {bi(
-                                  `${f.clusters.length} 个生产集群`,
-                                  `${f.clusters.length} cluster(s)`,
-                                )}
-                              </span>
-                            ) : (
-                              <span className="sec-cl-pill">
-                                {assetTypeLabel(f.asset_type)}
-                              </span>
-                            )}
-                            {(f.components || []).slice(0, 2).map((c) => (
-                              <span
-                                key={`${c.component}@${c.version}@${c.platform}`}
-                                className="sec-mini-tag"
-                              >
-                                {c.title} {c.version}
-                              </span>
-                            ))}
-                          </div>
-                        </td>
-                        <td>
-                          <span className={`sec-tr-badge st-${f.triage_status}`}>
-                            {triageLabel(f.triage_status)}
-                          </span>
-                        </td>
-                        <td style={{ textAlign: "right" }}>
-                          <Button size="mini" type="text">
-                            {bi("详情与处置", "Inspect")}
-                          </Button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                          </td>
+                          <td style={{ textAlign: "right" }}>
+                            <Button size="mini" type="text">
+                              {bi("详情与处置", "Inspect")}
+                            </Button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             )}
           </section>
         </div>
@@ -3633,10 +3701,10 @@ export function SecurityPage({
               <table className="sec-table sec-table-clusters">
                 <colgroup>
                   <col style={{ width: "21%" }} />
-                  <col style={{ width: "14%" }} />
+                  <col style={{ width: "16%" }} />
                   <col style={{ width: "19%" }} />
-                  <col style={{ width: "18%" }} />
-                  <col style={{ width: "28%" }} />
+                  <col style={{ width: "17%" }} />
+                  <col style={{ width: "27%" }} />
                 </colgroup>
                 <thead>
                   <tr>
@@ -3837,6 +3905,7 @@ export function SecurityPage({
           <SecReportTemplatesSection
             templates={reportTemplates}
             canManage={canManage}
+            embeddedInCard={false}
             hideHeader
             onTemplatesChange={(next) =>
               setData((cur) => {
@@ -4127,56 +4196,58 @@ export function SecurityPage({
                   )}
                 </div>
               ) : (
-                <table className="sec-table">
-                  <thead>
-                    <tr>
-                      <th>{bi("软件包", "Package")}</th>
-                      <th>{bi("生效生态", "Scope")}</th>
-                      <th>{bi("忽略原因", "Reason")}</th>
-                      <th>{bi("操作记录", "By / Time")}</th>
-                      <th style={{ textAlign: "right" }}>{bi("操作", "Action")}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {ignoredRules.map((r) => (
-                      <tr key={r.id}>
-                        <td>
-                          <div className="sec-pkg-cell">
-                            <b className="mono">{r.package}</b>
-                            {r.pkg_role && (
-                              <span className={`sec-role-pill role-${r.pkg_role}`}>
-                                {pkgRoleLabel(r.pkg_role)}
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td>
-                          <span className="sec-eco-tag">
-                            {!r.eco_key || r.eco_key === "*"
-                              ? bi("全部系统生态", "All Ecosystems")
-                              : r.ecosystem || r.eco_key}
-                          </span>
-                        </td>
-                        <td className="faint small">{r.note || "—"}</td>
-                        <td className="faint small num">
-                          {r.by || "admin"} · {r.at ? ago(r.at) : "—"}
-                        </td>
-                        <td style={{ textAlign: "right" }}>
-                          {canManage && (
-                            <Button
-                              size="mini"
-                              type="outline"
-                              loading={policyBusy}
-                              onClick={() => void removeGlobalIgnore(r.id, r.package)}
-                            >
-                              {bi("恢复显示", "Restore")}
-                            </Button>
-                          )}
-                        </td>
+                <div className="sec-table-scroll">
+                  <table className="sec-table">
+                    <thead>
+                      <tr>
+                        <th>{bi("软件包", "Package")}</th>
+                        <th>{bi("生效生态", "Scope")}</th>
+                        <th>{bi("忽略原因", "Reason")}</th>
+                        <th>{bi("操作记录", "By / Time")}</th>
+                        <th style={{ textAlign: "right" }}>{bi("操作", "Action")}</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {ignoredRules.map((r) => (
+                        <tr key={r.id}>
+                          <td>
+                            <div className="sec-pkg-cell">
+                              <b className="mono">{r.package}</b>
+                              {r.pkg_role && (
+                                <span className={`sec-role-pill role-${r.pkg_role}`}>
+                                  {pkgRoleLabel(r.pkg_role)}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td>
+                            <span className="sec-eco-tag">
+                              {!r.eco_key || r.eco_key === "*"
+                                ? bi("全部系统生态", "All Ecosystems")
+                                : r.ecosystem || r.eco_key}
+                            </span>
+                          </td>
+                          <td className="faint small">{r.note || "—"}</td>
+                          <td className="faint small num">
+                            {r.by || "admin"} · {r.at ? ago(r.at) : "—"}
+                          </td>
+                          <td style={{ textAlign: "right" }}>
+                            {canManage && (
+                              <Button
+                                size="mini"
+                                type="outline"
+                                loading={policyBusy}
+                                onClick={() => void removeGlobalIgnore(r.id, r.package)}
+                              >
+                                {bi("恢复显示", "Restore")}
+                              </Button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </div>
           </section>
@@ -4364,66 +4435,68 @@ export function SecurityPage({
                     )}
                   </span>
                 </div>
-                <table className="sec-table">
-                  <thead>
-                    <tr>
-                      <th>{bi("操作系统平台", "OS Platform")}</th>
-                      <th>{bi("GPG 签名源", "GPG Signed Sources")}</th>
-                      <th>{bi("已签名索引 / 包数", "Signed Index")}</th>
-                      <th>{bi("离线闭包文件完整性", "Closure Files")}</th>
-                      <th>{bi("状态", "Status")}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {supplyChain.platforms.map((sp) => (
-                      <tr key={sp.platform}>
-                        <td>
-                          <span className="sec-mini-tag">
-                            <OsLogo id={sp.platform} size={13} />
-                            <span>{platformShort(sp.platform) || sp.title}</span>
-                          </span>
-                        </td>
-                        <td className="num">
-                          {sp.sources_signed}/{sp.sources_total}
-                          {sp.unsigned_source_ids && sp.unsigned_source_ids.length > 0 && (
-                            <div className="faint small">
-                              {bi("未配置 GPG：", "Unsigned: ")}
-                              {sp.unsigned_source_ids.join(", ")}
-                            </div>
-                          )}
-                        </td>
-                        <td className="num">
-                          {sp.signed_releases} {bi("份签名", "signed")} · {sp.index_packages}{" "}
-                          {bi("包", "pkgs")}
-                          {sp.index_updated && (
-                            <div className="faint small">{ago(sp.index_updated)}</div>
-                          )}
-                        </td>
-                        <td className="num">
-                          {sp.closures_total} {bi("闭包", "closures")} · {sp.files_total}{" "}
-                          {bi("文件", "files")}
-                          {(sp.files_missing > 0 || sp.files_hash_mismatch > 0) && (
-                            <div className="bad small">
-                              {bi(
-                                `缺失 ${sp.files_missing} / 校验异常 ${sp.files_hash_mismatch}`,
-                                `Missing ${sp.files_missing} / Mismatch ${sp.files_hash_mismatch}`,
-                              )}
-                            </div>
-                          )}
-                        </td>
-                        <td>
-                          <span
-                            className={`sec-clean-pill ${sp.healthy ? "" : "is-bad"}`}
-                          >
-                            {sp.healthy
-                              ? bi("正常", "Healthy")
-                              : bi("需检查", "Needs Attention")}
-                          </span>
-                        </td>
+                <div className="sec-table-scroll">
+                  <table className="sec-table">
+                    <thead>
+                      <tr>
+                        <th>{bi("操作系统平台", "OS Platform")}</th>
+                        <th>{bi("GPG 签名源", "GPG Signed Sources")}</th>
+                        <th>{bi("已签名索引 / 包数", "Signed Index")}</th>
+                        <th>{bi("离线闭包文件完整性", "Closure Files")}</th>
+                        <th>{bi("状态", "Status")}</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {supplyChain.platforms.map((sp) => (
+                        <tr key={sp.platform}>
+                          <td>
+                            <span className="sec-mini-tag">
+                              <OsLogo id={sp.platform} size={13} />
+                              <span>{platformShort(sp.platform) || sp.title}</span>
+                            </span>
+                          </td>
+                          <td className="num">
+                            {sp.sources_signed}/{sp.sources_total}
+                            {sp.unsigned_source_ids && sp.unsigned_source_ids.length > 0 && (
+                              <div className="faint small">
+                                {bi("未配置 GPG：", "Unsigned: ")}
+                                {sp.unsigned_source_ids.join(", ")}
+                              </div>
+                            )}
+                          </td>
+                          <td className="num">
+                            {sp.signed_releases} {bi("份签名", "signed")} · {sp.index_packages}{" "}
+                            {bi("包", "pkgs")}
+                            {sp.index_updated && (
+                              <div className="faint small">{ago(sp.index_updated)}</div>
+                            )}
+                          </td>
+                          <td className="num">
+                            {sp.closures_total} {bi("闭包", "closures")} · {sp.files_total}{" "}
+                            {bi("文件", "files")}
+                            {(sp.files_missing > 0 || sp.files_hash_mismatch > 0) && (
+                              <div className="bad small">
+                                {bi(
+                                  `缺失 ${sp.files_missing} / 校验异常 ${sp.files_hash_mismatch}`,
+                                  `Missing ${sp.files_missing} / Mismatch ${sp.files_hash_mismatch}`,
+                                )}
+                              </div>
+                            )}
+                          </td>
+                          <td>
+                            <span
+                              className={`sec-clean-pill ${sp.healthy ? "" : "is-bad"}`}
+                            >
+                              {sp.healthy
+                                ? bi("正常", "Healthy")
+                                : bi("需检查", "Needs Attention")}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             ) : (
               <div className="sec-empty">
@@ -4474,48 +4547,50 @@ export function SecurityPage({
                 );
               }
               return (
-                <table className="sec-table">
-                  <thead>
-                    <tr>
-                      <th>{bi("扫描时间", "Scanned At")}</th>
-                      <th>{bi("触发人", "By")}</th>
-                      <th>{bi("活跃风险 (严/高/中/低)", "Active (C/H/M/L)")}</th>
-                      <th>{bi("较上次变化", "Diff")}</th>
-                      <th>{bi("受影响集群", "Clusters")}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.slice(0, 12).map((h, idx) => (
-                      <tr key={`${h.scanned_at}-${idx}`}>
-                        <td className="num">{fullTime(h.scanned_at)}</td>
-                        <td>{h.scanned_by || "system"}</td>
-                        <td className="num">
-                          <div className="sec-counts-row">
-                            <span className="sec-sev crit">C {h.active_counts.critical}</span>
-                            <span className="sec-sev high">H {h.active_counts.high}</span>
-                            <span className="sec-sev med">M {h.active_counts.medium}</span>
-                            <span className="sec-sev low">L {h.active_counts.low}</span>
-                          </div>
-                        </td>
-                        <td className="num">
-                          {h.added_count === 0 && h.resolved_count === 0 ? (
-                            <span className="faint">{bi("基线 / 无变化", "Baseline / No change")}</span>
-                          ) : (
-                            <div style={{ display: "flex", gap: 6 }}>
-                              {h.added_count > 0 && (
-                                <span className="sec-diff-pill add">+{h.added_count}</span>
-                              )}
-                              {h.resolved_count > 0 && (
-                                <span className="sec-diff-pill ok">-{h.resolved_count}</span>
-                              )}
-                            </div>
-                          )}
-                        </td>
-                        <td className="num">{h.affected_clusters}</td>
+                <div className="sec-table-scroll">
+                  <table className="sec-table">
+                    <thead>
+                      <tr>
+                        <th>{bi("扫描时间", "Scanned At")}</th>
+                        <th>{bi("触发人", "By")}</th>
+                        <th>{bi("活跃风险 (严/高/中/低)", "Active (C/H/M/L)")}</th>
+                        <th>{bi("较上次变化", "Diff")}</th>
+                        <th>{bi("受影响集群", "Clusters")}</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {rows.slice(0, 12).map((h, idx) => (
+                        <tr key={`${h.scanned_at}-${idx}`}>
+                          <td className="num">{fullTime(h.scanned_at)}</td>
+                          <td>{h.scanned_by || "system"}</td>
+                          <td className="num">
+                            <div className="sec-counts-row">
+                              <span className="sec-sev crit">C {h.active_counts.critical}</span>
+                              <span className="sec-sev high">H {h.active_counts.high}</span>
+                              <span className="sec-sev med">M {h.active_counts.medium}</span>
+                              <span className="sec-sev low">L {h.active_counts.low}</span>
+                            </div>
+                          </td>
+                          <td className="num">
+                            {h.added_count === 0 && h.resolved_count === 0 ? (
+                              <span className="faint">{bi("基线 / 无变化", "Baseline / No change")}</span>
+                            ) : (
+                              <div style={{ display: "flex", gap: 6 }}>
+                                {h.added_count > 0 && (
+                                  <span className="sec-diff-pill add">+{h.added_count}</span>
+                                )}
+                                {h.resolved_count > 0 && (
+                                  <span className="sec-diff-pill ok">-{h.resolved_count}</span>
+                                )}
+                              </div>
+                            )}
+                          </td>
+                          <td className="num">{h.affected_clusters}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               );
             })()}
           </section>

@@ -844,7 +844,7 @@ export function AppsPage({
         />
       </div>
       <div className="store-rail-body">
-        <nav className="rail-group" aria-label={bi("分类", "Categories")}>
+        <nav className="rail-group rail-cats" aria-label={bi("分类", "Categories")}>
         <h3>{bi("分类", "Categories")}</h3>
         <button
           className={isAllCat(f.cat) ? "on" : ""}
@@ -877,7 +877,7 @@ export function AppsPage({
       </nav>
       {tags.length > 0 && (
         <div
-          className="rail-group"
+          className="rail-group rail-tags"
           role="group"
           aria-label={bi("标签", "Tags")}
         >
@@ -919,7 +919,7 @@ export function AppsPage({
         </div>
       )}
       <div
-        className="rail-group"
+        className="rail-group rail-scope"
         role="group"
         aria-label={bi("范围", "Scope")}
       >
@@ -1496,7 +1496,7 @@ function Product({ app, jobs }: { app: AppInfo; jobs: Job[] }) {
                             <a
                               key={pl}
                               href={`#/library/${pl}`}
-                              className={`flag ${released && cv?.ready && cv?.deployable ? "" : "warn"}`}
+                              className={`flag ${released && cv?.ready && cv?.deployable ? "ok" : "warn"}`}
                               title={
                                 !released
                                   ? bi(
@@ -1515,7 +1515,6 @@ function Product({ app, jobs }: { app: AppInfo; jobs: Job[] }) {
                                         `Missing ${cv?.missing?.length ?? 0} packages in library`,
                                       )
                               }
-                              style={{ marginLeft: 6 }}
                             >
                               {platformShort(pl)}
                               {bi("：", ": ")}

@@ -854,10 +854,45 @@
   flex-direction: column;
   gap: 8px;
 }
+.dc-ex-list .arco-checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding-left: 0;
+  margin-right: 0;
+}
+.dc-ex-list .arco-checkbox-mask-wrapper {
+  flex-shrink: 0;
+  top: 0;
+  margin-top: 4px;
+}
+.dc-ex-list .arco-checkbox-text {
+  flex: 1;
+  min-width: 0;
+  margin-left: 0;
+}
 .dc-ex-row {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+.dc-ex-row b {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.dc-ex-row .muted {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dc-ex-row .dc-st {
+  flex-shrink: 0;
+  margin-left: auto;
 }
 .dc-ex-mode {
   display: flex;

@@ -114,6 +114,19 @@ function PaletteBody({
     document.activeElement as HTMLElement | null,
   );
   useEffect(() => () => restore.current?.focus?.(), []);
+  const closeRef = useRef(close);
+  closeRef.current = close;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        closeRef.current();
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
 
   const net = useConnectivity();
   const aiStatus = useAIStatus();
@@ -144,7 +157,7 @@ function PaletteBody({
             {
               id: "go-d",
               group: pageGroup,
-              label: bi("交付", "Deliveries"),
+              label: bi("集群", "Clusters"),
               hint: bi("集群与部署工作台", "Clusters & deliveries console"),
               icon: <IconList />,
               run: () => actions.nav("deliveries"),

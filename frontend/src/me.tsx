@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Button,
@@ -124,6 +124,7 @@ export function MePage({
   );
   const tabs = useRef<HTMLDivElement>(null);
   const [bar, setBar] = useState<{ x: number; w: number } | null>(null);
+  const [barReady, setBarReady] = useState(false);
   const cur = SECTIONS.some((s) => s.id === section) ? section : "";
   useEffect(() => {
     api<Me>("/api/me")
@@ -148,10 +149,42 @@ export function MePage({
         ),
       );
   }, []);
-  useEffect(() => {
-    const el = tabs.current?.querySelector<HTMLElement>(`[data-k="${cur}"]`);
-    if (el) setBar({ x: el.offsetLeft, w: el.offsetWidth });
+  useLayoutEffect(() => {
+    const host = tabs.current;
+    if (!host) return;
+    const measure = () => {
+      const el = host.querySelector<HTMLElement>(`[data-k="${cur}"]`);
+      const next = el ? { x: el.offsetLeft, w: el.offsetWidth } : null;
+      setBar((prev) => {
+        if (!next) return prev === null ? prev : null;
+        if (prev && prev.x === next.x && prev.w === next.w) return prev;
+        return next;
+      });
+    };
+    measure();
+    const raf = requestAnimationFrame(measure);
+    const ro =
+      typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+    ro?.observe(host);
+    window.addEventListener("resize", measure);
+    let cancelled = false;
+    document.fonts?.ready
+      ?.then(() => {
+        if (!cancelled) measure();
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+      ro?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
   }, [cur, info, lang]);
+  useEffect(() => {
+    if (!bar || barReady) return;
+    const raf = requestAnimationFrame(() => setBarReady(true));
+    return () => cancelAnimationFrame(raf);
+  }, [bar, barReady]);
   const open = (id: string) =>
     go({ name: "me", id: id || undefined }, { replace: true });
 
@@ -235,8 +268,8 @@ export function MePage({
         >
           {bar && (
             <span
-              className="me-tabs-bar"
-              style={{ transform: `translateX(${bar.x}px)`, width: bar.w }}
+              className={`me-tabs-bar${barReady ? " ready" : ""}`}
+              style={{ transform: `translate3d(${bar.x}px, 0, 0)`, width: bar.w }}
               aria-hidden
             />
           )}

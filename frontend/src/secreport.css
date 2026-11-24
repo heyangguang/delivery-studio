@@ -118,6 +118,9 @@
   flex: none;
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.14);
 }
+body[arco-theme="dark"] .srt-swatch {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.24);
+}
 
 .srt-card-title b {
   font-size: 14.5px;
@@ -156,6 +159,11 @@
   background: rgba(14, 116, 144, 0.08);
   color: #0e7490;
   border: 1px solid rgba(14, 116, 144, 0.22);
+}
+body[arco-theme="dark"] .srt-badge-custom {
+  background: rgba(56, 189, 248, 0.14);
+  color: #67e8f9;
+  border-color: rgba(103, 232, 249, 0.26);
 }
 
 .srt-fmt-pill {
@@ -198,12 +206,14 @@
 }
 
 body[arco-theme="dark"] .srt-fmt-docx {
+  background: rgba(59, 130, 246, 0.16);
   color: #93c5fd;
-  border-color: rgba(147, 197, 253, 0.24);
+  border-color: rgba(147, 197, 253, 0.26);
 }
 body[arco-theme="dark"] .srt-fmt-xlsx {
+  background: rgba(16, 185, 129, 0.16);
   color: #6ee7b7;
-  border-color: rgba(110, 231, 183, 0.24);
+  border-color: rgba(110, 231, 183, 0.26);
 }
 
 .srt-desc {
@@ -368,6 +378,26 @@ body[arco-theme="dark"] .srt-fmt-xlsx {
   max-height: 68vh;
   overflow-y: auto;
   padding-right: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--ink) 18%, transparent) transparent;
+}
+.srt-editor::-webkit-scrollbar,
+.sexp-tpl-grid::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.srt-editor::-webkit-scrollbar-track,
+.sexp-tpl-grid::-webkit-scrollbar-track {
+  background: transparent;
+}
+.srt-editor::-webkit-scrollbar-thumb,
+.sexp-tpl-grid::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink) 18%, transparent);
+}
+.srt-editor::-webkit-scrollbar-thumb:hover,
+.sexp-tpl-grid::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--ink) 30%, transparent);
 }
 
 .srt-ed-group {
@@ -379,18 +409,20 @@ body[arco-theme="dark"] .srt-fmt-xlsx {
 .srt-ed-group-h {
   font-size: 13px;
   font-weight: 600;
-  color: var(--ink, #0f172a);
+  color: var(--ink);
   padding-bottom: 6px;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid var(--line);
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .srt-ed-group-h small {
   font-weight: 400;
   font-size: 11.5px;
-  color: var(--muted, #64748b);
+  color: var(--mute);
 }
 
 .srt-form-2col {
@@ -408,7 +440,7 @@ body[arco-theme="dark"] .srt-fmt-xlsx {
 .srt-field label {
   font-size: 12px;
   font-weight: 500;
-  color: #334155;
+  color: var(--ink-2);
 }
 
 .srt-theme-row {
@@ -423,23 +455,25 @@ body[arco-theme="dark"] .srt-fmt-xlsx {
   gap: 7px;
   padding: 7px 10px;
   border-radius: 8px;
-  border: 1px solid #e2e8f0;
-  background: #fff;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
   cursor: pointer;
   font-size: 12px;
-  color: #334155;
+  color: var(--ink-2);
   transition: all 0.14s ease;
 }
 
 .srt-theme-btn:hover {
-  border-color: #94a3b8;
+  border-color: var(--brand-line);
+  background: var(--surface-2);
+  color: var(--ink);
 }
 
 .srt-theme-btn.on {
-  border-color: var(--brand, #ff462d);
-  background: #f5f7ff;
+  border-color: var(--brand);
+  background: var(--brand-soft);
   font-weight: 600;
-  color: #0f172a;
+  color: var(--ink);
 }
 
 .srt-fmt-grid {
@@ -452,8 +486,9 @@ body[arco-theme="dark"] .srt-fmt-xlsx {
   text-align: left;
   padding: 11px 12px;
   border-radius: 10px;
-  border: 1.5px solid #e2e8f0;
-  background: #fff;
+  border: 1.5px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--ink);
   cursor: pointer;
   display: flex;
   flex-direction: column;
@@ -462,14 +497,14 @@ body[arco-theme="dark"] .srt-fmt-xlsx {
 }
 
 .srt-fmt-card:hover {
-  border-color: #94a3b8;
-  background: #f8fafc;
+  border-color: var(--brand-line);
+  background: var(--surface-2);
 }
 
 .srt-fmt-card.on {
-  border-color: var(--brand, #ff462d);
-  background: #f5f7ff;
-  box-shadow: 0 0 0 1px rgba(255, 70, 45, 0.12);
+  border-color: var(--brand);
+  background: var(--brand-soft);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--brand) 18%, transparent);
 }
 
 .srt-fmt-card-h {
@@ -481,12 +516,12 @@ body[arco-theme="dark"] .srt-fmt-xlsx {
 
 .srt-fmt-card-h b {
   font-size: 13px;
-  color: #0f172a;
+  color: var(--ink);
 }
 
 .srt-fmt-card small {
   font-size: 11.5px;
-  color: #64748b;
+  color: var(--mute);
   line-height: 1.4;
 }
 
@@ -502,19 +537,20 @@ body[arco-theme="dark"] .srt-fmt-xlsx {
   gap: 8px;
   padding: 8px 10px;
   border-radius: 8px;
-  border: 1px solid #e2e8f0;
-  background: #fff;
+  border: 1px solid var(--line);
+  background: var(--surface);
   cursor: pointer;
+  transition: border-color 0.14s ease, background-color 0.14s ease;
 }
 
 .srt-sec-opt:hover {
-  border-color: #cbd5e1;
-  background: #f8fafc;
+  border-color: var(--line-strong);
+  background: var(--surface-2);
 }
 
 .srt-sec-opt.on {
   border-color: var(--brand-line);
-  background: #f8faff;
+  background: var(--brand-soft);
 }
 
 .srt-sec-opt-txt {
@@ -525,12 +561,12 @@ body[arco-theme="dark"] .srt-fmt-xlsx {
 
 .srt-sec-opt-txt b {
   font-size: 12.5px;
-  color: #0f172a;
+  color: var(--ink);
 }
 
 .srt-sec-opt-txt small {
   font-size: 11px;
-  color: #64748b;
+  color: var(--mute);
 }
 
 .srt-switches {
@@ -545,7 +581,7 @@ body[arco-theme="dark"] .srt-fmt-xlsx {
   align-items: center;
   gap: 8px;
   font-size: 12.5px;
-  color: #334155;
+  color: var(--ink-2);
   cursor: pointer;
 }
 
@@ -563,10 +599,10 @@ body[arco-theme="dark"] .srt-fmt-xlsx {
   gap: 10px;
   padding: 9px 12px;
   border-radius: 9px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: var(--sunken);
+  border: 1px solid var(--line);
   font-size: 12.5px;
-  color: #334155;
+  color: var(--ink-2);
 }
 
 .sexp-sec-h {
@@ -578,7 +614,7 @@ body[arco-theme="dark"] .srt-fmt-xlsx {
 
 .sexp-sec-h b {
   font-size: 13px;
-  color: #0f172a;
+  color: var(--ink);
 }
 
 .sexp-tpl-grid {
@@ -588,14 +624,17 @@ body[arco-theme="dark"] .srt-fmt-xlsx {
   max-height: 220px;
   overflow-y: auto;
   padding: 1px;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--ink) 18%, transparent) transparent;
 }
 
 .sexp-tpl-item {
   text-align: left;
   padding: 10px 12px;
   border-radius: 10px;
-  border: 1.5px solid #e2e8f0;
-  background: #fff;
+  border: 1.5px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--ink);
   cursor: pointer;
   display: flex;
   flex-direction: column;
@@ -604,14 +643,14 @@ body[arco-theme="dark"] .srt-fmt-xlsx {
 }
 
 .sexp-tpl-item:hover {
-  border-color: #94a3b8;
-  background: #f8fafc;
+  border-color: var(--brand-line);
+  background: var(--surface-2);
 }
 
 .sexp-tpl-item.on {
-  border-color: var(--brand, #ff462d);
-  background: #f5f7ff;
-  box-shadow: 0 0 0 1px rgba(255, 70, 45, 0.12);
+  border-color: var(--brand);
+  background: var(--brand-soft);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--brand) 18%, transparent);
 }
 
 .sexp-tpl-item-h {
@@ -630,7 +669,7 @@ body[arco-theme="dark"] .srt-fmt-xlsx {
 
 .sexp-tpl-item-name b {
   font-size: 13px;
-  color: #0f172a;
+  color: var(--ink);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -638,7 +677,7 @@ body[arco-theme="dark"] .srt-fmt-xlsx {
 
 .sexp-tpl-item-sub {
   font-size: 11.5px;
-  color: #64748b;
+  color: var(--mute);
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
@@ -651,26 +690,29 @@ body[arco-theme="dark"] .srt-fmt-xlsx {
   flex-wrap: wrap;
   margin-top: 8px;
   padding-top: 8px;
-  border-top: 1px dashed #e2e8f0;
+  border-top: 1px dashed var(--line);
 }
 
 .sexp-other-lbl {
   font-size: 12px;
-  color: #64748b;
+  color: var(--mute);
 }
 
 .sexp-mini-fmt {
   padding: 4px 10px;
   border-radius: 999px;
-  border: 1px solid #cbd5e1;
-  background: #fff;
-  color: #334155;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--ink-2);
   font-size: 12px;
   cursor: pointer;
+  transition: border-color 0.14s ease, background-color 0.14s ease, color 0.14s ease;
 }
 
 .sexp-mini-fmt:hover {
-  border-color: #94a3b8;
+  border-color: var(--brand-line);
+  background: var(--surface-2);
+  color: var(--ink);
 }
 
 .sexp-mini-fmt.on {
@@ -688,8 +730,9 @@ body[arco-theme="dark"] .srt-fmt-xlsx {
   flex-wrap: wrap;
   padding: 8px 12px;
   border-radius: 9px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: var(--sunken);
+  border: 1px solid var(--line);
+  color: var(--ink-2);
 }
 
 .sexp-foot {

@@ -2946,22 +2946,22 @@ export function AIPage({
                       />
                     )}
                   </div>
+                  {!atBottom && (
+                    <button
+                      type="button"
+                      className="ap-down"
+                      onClick={() =>
+                        list.current?.scrollTo({
+                          top: list.current.scrollHeight,
+                          behavior: "smooth",
+                        })
+                      }
+                      aria-label={bi("回到最新", "Jump to latest")}
+                    >
+                      <IconArrowDown />
+                    </button>
+                  )}
                 </div>
-                {!atBottom && (
-                  <button
-                    type="button"
-                    className="ap-down"
-                    onClick={() =>
-                      list.current?.scrollTo({
-                        top: list.current.scrollHeight,
-                        behavior: "smooth",
-                      })
-                    }
-                    aria-label={bi("回到最新", "Jump to latest")}
-                  >
-                    <IconArrowDown />
-                  </button>
-                )}
                 <div className="ap-foot">
                   {linkedMode &&
                     (!isGeneral(sessionKey) || messages.length >= 4) &&

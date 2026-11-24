@@ -1033,7 +1033,7 @@ export function WorkbenchPage({
   ) : tab === "source" ? (
     <div className="wb-source">
       {Object.keys(files).some((f) => f.startsWith("manifest/")) && (
-        <div className="note">
+        <div className="note" style={{ margin: "10px 16px" }}>
           {bi(
             "component.yaml 是组件入口。方案、公共定义和动作在独立文件中，点击文件即可编辑。",
             "component.yaml is the entry point. Schemes, shared definitions, and actions live in separate files—click any to edit.",
@@ -1055,15 +1055,17 @@ export function WorkbenchPage({
           </div>
         </div>
       )}
-      <CodeEditor
-        label="component.yaml"
-        value={manifest}
-        lang="manifest"
-        onChange={(v) => editFile("component.yaml", v)}
-        problems={problems.filter((p) => p.file === "component.yaml")}
-        onSave={saveNow}
-        jumpTo={jump?.file === "component.yaml" ? jump : undefined}
-      />
+      <div className="wb-editor-main">
+        <CodeEditor
+          label="component.yaml"
+          value={manifest}
+          lang="manifest"
+          onChange={(v) => editFile("component.yaml", v)}
+          problems={problems.filter((p) => p.file === "component.yaml")}
+          onSave={saveNow}
+          jumpTo={jump?.file === "component.yaml" ? jump : undefined}
+        />
+      </div>
     </div>
   ) : (
     <div className="wb-forms">
@@ -1122,7 +1124,9 @@ export function WorkbenchPage({
         onChanged={() => loadDraft().then(runCheck)}
       >
         <WbPrefill name={name} title={js.title || name} />
-        <div className={`wb enter ${aiRun ? "ai-mode" : ""}`}>
+        <div
+          className={`wb enter ${tab === "files" || tab === "source" ? "wb-fill" : ""} ${aiRun ? "ai-mode" : ""}`}
+        >
           <header className="wb-head">
             <Button
               type="text"
@@ -1339,7 +1343,7 @@ export function WorkbenchPage({
           </div>
 
           <Drawer
-            width={Math.min(560, window.innerWidth)}
+            width="min(560px, 100vw)"
             visible={panel === "problems"}
             onCancel={() => setPanel("")}
             footer={null}
@@ -1997,7 +2001,7 @@ function RevisionsDrawer({
   const revs = [...ws.revisions].reverse();
   return (
     <Drawer
-      width={Math.min(640, window.innerWidth)}
+      width="min(640px, 100vw)"
       visible={open}
       onCancel={close}
       footer={null}
@@ -2026,10 +2030,18 @@ function RevisionsDrawer({
                 </span>
                 <span className="wb-rev-note">{r.note || bi("（无说明）", "(No note)")}</span>
                 <span className="faint small">
-                  {r.added ? `+${r.added} ` : ""}
-                  {r.changed ? `~${r.changed} ` : ""}
-                  {r.removed ? `-${r.removed} ` : ""}
-                  {bi(`${r.files} 个文件`, `${r.files} file(s)`)}
+                  {[
+                    [
+                      r.added ? `+${r.added}` : "",
+                      r.changed ? `~${r.changed}` : "",
+                      r.removed ? `-${r.removed}` : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" "),
+                    bi(`${r.files} 个文件`, `${r.files} file(s)`),
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
                 </span>
               </button>
               {sel === r.rev && (

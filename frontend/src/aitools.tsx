@@ -241,12 +241,13 @@ function ThinkPills({
   const displayProgress = dragRatio !== null ? dragRatio : idx / maxIdx;
   const displayIdx = Math.round(displayProgress * maxIdx);
   const displayVal = stops[displayIdx] ?? "";
+  const maxTier = thinkTierOf(stops[maxIdx] ?? "");
   const fillOpacity =
     displayProgress <= 0.005 ? 0 : Math.min(1, displayProgress / 0.12);
-  const ultraOpacity = Math.max(
-    0,
-    Math.min(1, (displayProgress - 0.72) / 0.24),
-  );
+  const ultraOpacity =
+    displayVal === "ultra"
+      ? Math.max(0, Math.min(1, (displayProgress - 0.72) / 0.24))
+      : 0;
 
   const tierTone = thinkTierOf(displayVal);
   const label = displayVal ? LEVELS[displayVal] : bi("默认", "Default");
@@ -334,7 +335,7 @@ function ThinkPills({
         }}
       >
         <div
-          className={`thk-fill ${displayProgress > 0.005 ? "on" : ""} tone-${tierTone}`}
+          className={`thk-fill ${displayProgress > 0.005 ? "on" : ""} max-${maxTier} tone-${tierTone}`}
           aria-hidden
         >
           <span className="thk-stars" />
@@ -425,7 +426,11 @@ function computePopPos(
   const below = window.innerHeight - r.bottom - 12;
   const above = r.top - 12;
   const down = below >= estHeight || (below > above && below >= 120);
-  const rightSpace = window.innerWidth - r.left;
+  const dock = el.closest(".ad-win")?.getBoundingClientRect();
+  const boundRight = dock
+    ? Math.min(window.innerWidth - 12, dock.right - 8)
+    : window.innerWidth - 12;
+  const rightSpace = boundRight - r.left;
   const alignRight = rightSpace < estWidth && r.right > rightSpace;
   return `${down ? "b" : "t"}${alignRight ? "r" : "l"}` as PopPos;
 }
@@ -485,11 +490,16 @@ export function ThinkLevel({
       popupVisible={open}
       escToClose
       onVisibleChange={(v) => {
-        if (v) setPos(computePopPos(btnRef.current, 128, 328));
+        if (v) {
+          const inDock = !!btnRef.current?.closest(".ad-win");
+          setPos(
+            inDock ? "tr" : computePopPos(btnRef.current, 128, 328),
+          );
+        }
         setOpen(v);
       }}
       className="tm-pop think-pop"
-      triggerProps={{ autoFitPosition: false, updateOnScroll: true }}
+      triggerProps={{ autoFitPosition: true, updateOnScroll: true }}
       content={
         <ThinkPills
           layout="popover"

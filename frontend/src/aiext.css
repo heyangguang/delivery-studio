@@ -51,7 +51,7 @@
   height: 34px;
   border-radius: 10px;
   font-size: 16px;
-  color: #a35b00;
+  color: var(--warn);
   background: var(--warn-soft);
 }
 .ex-ic.c {

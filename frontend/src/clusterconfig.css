@@ -118,7 +118,7 @@
 .cx-browser-head {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px 12px;
   padding-bottom: 14px;
   margin-bottom: 18px;
@@ -126,16 +126,11 @@
 }
 .cx-nav {
   display: flex;
-  flex: 1 1 560px;
+  flex: 1 1 520px;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 2px;
+  gap: 4px 2px;
   min-width: 0;
-  overflow-x: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: none;
-}
-.cx-nav::-webkit-scrollbar {
-  display: none;
 }
 .cx-nav > button {
   display: inline-flex;
@@ -178,6 +173,7 @@
   align-items: center;
   gap: 6px;
   min-width: 190px;
+  margin-left: auto;
 }
 .cx-toolbar .arco-input-inner-wrapper {
   background: var(--surface);
@@ -1553,6 +1549,14 @@ body[arco-theme="dark"] .cx-nav-chg-cnt {
   justify-content: flex-end;
   gap: 3px 6px;
   text-align: right;
+  min-width: 0;
+}
+.cx-hist-next {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
 }
 .cx-hist-links {
   display: flex;

@@ -953,6 +953,39 @@ export const REHEARSAL_CHANGED = "mh-rehearsal-changed";
 /** Opens the VEX triage form prefilled from an AI VEX proposal card so the user can fine-tune before saving. */
 export const VEX_OPEN_DRAFT = "mh-vex-open-draft";
 
+const COMPACT_LAUNCHER_KEYS = new Set([
+  "portal:settings",
+  "portal:execution-nodes",
+  "portal:iam",
+  "portal:kb",
+  "portal:skills",
+  "portal:mcp",
+  "portal:library",
+]);
+
+function isDenseLauncherRoute(scope: Scope, startKey: string): boolean {
+  if (scope.kind === "security") return true;
+  if (COMPACT_LAUNCHER_KEYS.has(startKey)) return true;
+  if (typeof window !== "undefined") {
+    const seg = window.location.hash.replace(/^#\/?/, "").split(/[/?]/)[0];
+    if (
+      seg === "settings" ||
+      seg === "admin" ||
+      seg === "security" ||
+      seg === "accounts" ||
+      seg === "iam" ||
+      seg === "kb" ||
+      seg === "skills" ||
+      seg === "mcp" ||
+      seg === "library" ||
+      seg === "me"
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function AIDock({
   scope,
   start,
@@ -1068,8 +1101,21 @@ export function AIDock({
     startSugKey,
     startStepPage,
   ]); // eslint-disable-line react-hooks/exhaustive-deps
-  // at the foot of a long page the button shrinks to its mark, so it does not sit on the last lines
+  // at the foot of a long page the button shrinks to its mark, so it does not sit on the last lines;
+  // on dense settings/admin/security/iam/capabilities/library routes, default to the compact 40px orb
   const [atEnd, setAtEnd] = useState(false);
+  const [denseRoute, setDenseRoute] = useState(() =>
+    isDenseLauncherRoute(scope, start.key),
+  );
+  useEffect(() => {
+    const sync = () => {
+      setDenseRoute(isDenseLauncherRoute(scope, start.key));
+      setAtEnd(false);
+    };
+    sync();
+    window.addEventListener("hashchange", sync);
+    return () => window.removeEventListener("hashchange", sync);
+  }, [scope, start.key]);
   useEffect(() => {
     const onScroll = (e: Event) => {
       const t = e.target as HTMLElement | Document;
@@ -1086,6 +1132,7 @@ export function AIDock({
     return () =>
       window.removeEventListener("scroll", onScroll, { capture: true });
   }, []);
+  const compactOrb = compactLauncher || denseRoute;
   const available = useCallback(
     (key: string) =>
       !effectiveHidden &&
@@ -1215,7 +1262,7 @@ export function AIDock({
         {any && mode === "closed" && (
           <button
             type="button"
-            className={`ad-launch ${busy ? "busy" : ""} ${(atEnd || compactLauncher) && !busy ? "mini" : ""}`}
+            className={`ad-launch ${busy ? "busy" : ""} ${(atEnd || compactOrb) && !busy ? "mini" : ""}`}
             onClick={openGeneral}
             aria-label={bi("打开 AI 助手（Ctrl+J）", "Open AI Assistant (Ctrl+J)")}
           >

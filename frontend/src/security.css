@@ -217,6 +217,7 @@
 .sec-main {
   min-width: 0;
   background: var(--surface);
+  padding-bottom: 84px;
 }
 
 .sec-mobile-bar {
@@ -428,6 +429,15 @@ button.sec-kpi:hover {
   font-size: 11.5px;
   color: var(--mute);
 }
+.sec-kpi-meta {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 5px;
+}
+.sec-kpi-meta > span {
+  white-space: nowrap;
+}
 
 /* Cards & tables */
 .sec-card {
@@ -596,7 +606,7 @@ button.sec-kpi:hover {
   color: var(--ok);
 }
 .sec-repo-fix {
-  font-family: var(--font-sans);
+  font-family: var(--sans);
   font-size: 11px;
   font-weight: 550;
   padding: 0 6px;
@@ -919,21 +929,52 @@ body[arco-theme="dark"] .sec-sev.med {
 }
 
 /* Detail & VEX Drawer */
+.sec-drawer {
+  max-width: 100vw;
+  box-sizing: border-box;
+}
+.sec-drawer .arco-drawer-inner,
+.sec-drawer .arco-drawer-scroll {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+.sec-drawer .arco-drawer-header {
+  min-width: 0;
+  max-width: 100%;
+}
+.sec-drawer .arco-drawer-content {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
 .sec-dr-title {
-  display: inline-flex;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 6px 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+.sec-dr-title b,
+.sec-dr-title .faint {
+  overflow-wrap: anywhere;
 }
 .sec-dr-body {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  min-width: 0;
+  max-width: 100%;
 }
 .sec-dr-head-meta {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 10px 16px;
+  min-width: 0;
+  max-width: 100%;
   font-size: 12.5px;
   color: var(--mute);
 }
@@ -945,6 +986,8 @@ body[arco-theme="dark"] .sec-sev.med {
   color: var(--brand-ink);
   text-decoration: none;
   font-weight: 550;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .sec-ext-link:hover {
   text-decoration: underline;
@@ -957,6 +1000,8 @@ body[arco-theme="dark"] .sec-sev.med {
   display: flex;
   flex-direction: column;
   gap: 9px;
+  min-width: 0;
+  max-width: 100%;
 }
 .sec-dr-card h4 {
   margin: 0;
@@ -970,6 +1015,8 @@ body[arco-theme="dark"] .sec-sev.med {
   font-weight: 500;
   color: var(--ink);
   line-height: 1.55;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .sec-dr-det {
   margin: 0;
@@ -977,9 +1024,12 @@ body[arco-theme="dark"] .sec-sev.med {
   color: var(--ink-2);
   line-height: 1.55;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .sec-cvss-vec {
   display: inline-block;
+  max-width: 100%;
   padding: 4px 8px;
   border-radius: 6px;
   background: var(--surface);
@@ -987,11 +1037,15 @@ body[arco-theme="dark"] .sec-sev.med {
   font-size: 11.5px;
   color: var(--mute);
   align-self: flex-start;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-all;
 }
 .sec-ver-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+  min-width: 0;
 }
 .sec-ver-grid > div {
   padding: 8px 10px;
@@ -1001,6 +1055,7 @@ body[arco-theme="dark"] .sec-sev.med {
   display: flex;
   flex-direction: column;
   gap: 3px;
+  min-width: 0;
 }
 .sec-ver-grid span {
   font-size: 11.5px;
@@ -1024,6 +1079,8 @@ body[arco-theme="dark"] .sec-sev.med {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-width: 0;
+  max-width: 100%;
 }
 .sec-br-lbl {
   font-size: 11.5px;
@@ -1037,6 +1094,8 @@ body[arco-theme="dark"] .sec-sev.med {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-width: 0;
+  max-width: 100%;
 }
 .sec-br-list li {
   padding: 8px 10px;
@@ -1046,7 +1105,14 @@ body[arco-theme="dark"] .sec-sev.med {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
+  max-width: 100%;
   font-size: 12.5px;
+}
+.sec-br-list li > div {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 .sec-br-list li > div:first-child {
   display: flex;
@@ -1066,6 +1132,8 @@ body[arco-theme="dark"] .sec-sev.med {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  min-width: 0;
+  max-width: 100%;
 }
 .sec-link-chip,
 .sec-plain-chip {
@@ -1082,6 +1150,12 @@ body[arco-theme="dark"] .sec-sev.med {
   color: var(--ink-2);
   text-decoration: none;
 }
+.sec-drawer .sec-link-chip,
+.sec-drawer .sec-plain-chip {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .sec-link-chip:hover {
   border-color: var(--brand-line);
   color: var(--brand-ink);
@@ -1091,6 +1165,8 @@ body[arco-theme="dark"] .sec-sev.med {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  min-width: 0;
+  max-width: 100%;
 }
 .sec-triage-pills {
   display: flex;
@@ -1141,11 +1217,18 @@ body[arco-theme="dark"] .sec-sev.med {
   flex-direction: column;
   align-items: flex-start;
   gap: 6px;
+  min-width: 0;
+  max-width: 100%;
 }
 .sec-triage-ro p {
   margin: 0;
   font-size: 12.5px;
   color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+.sec-tr-hist {
+  min-width: 0;
+  max-width: 100%;
 }
 .sec-tr-hist ul {
   list-style: none;
@@ -1161,11 +1244,13 @@ body[arco-theme="dark"] .sec-sev.med {
   align-items: center;
   gap: 8px;
   font-size: 12px;
+  min-width: 0;
 }
 .sec-tr-hn {
   flex: 1;
-  min-width: 140px;
+  min-width: 0;
   color: var(--ink-2);
+  overflow-wrap: anywhere;
 }
 
 /* Cross-page clickable CVE risk chip on Component version rows */
@@ -1395,6 +1480,8 @@ body[arco-theme="dark"] .sec-sev.med {
   margin-top: 4px;
   border-top: 1px dashed var(--line);
   padding-top: 8px;
+  overflow-x: auto;
+  max-width: 100%;
 }
 
 .sec-sub-table {
@@ -1508,12 +1595,16 @@ body[arco-theme="dark"] .sec-sev.med {
   justify-content: space-between;
   gap: 10px;
   flex-wrap: wrap;
+  min-width: 0;
+  max-width: 100%;
 }
 .sec-br-cl-row > div {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .sec-vex-link-box {
@@ -1522,6 +1613,9 @@ body[arco-theme="dark"] .sec-sev.med {
   justify-content: space-between;
   gap: 10px;
   flex-wrap: wrap;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
   padding: 8px 10px;
   border-radius: 8px;
   background: rgba(22, 163, 74, 0.08);
@@ -1542,8 +1636,17 @@ body[arco-theme="dark"] .sec-sev.med {
   padding: 12px 18px;
   border-bottom: 1px solid var(--line);
 }
+.sec-supply-body .sec-clean-pill:not(.is-bad) {
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--ok-soft);
+  border: 1px solid var(--ok-line);
+}
 .sec-clean-pill.is-bad {
+  padding: 2px 9px;
+  border-radius: 999px;
   background: var(--bad-soft);
+  border: 1px solid var(--bad-line);
   color: var(--bad);
 }
 
@@ -1687,13 +1790,14 @@ body[arco-theme="dark"] .sec-sev.med {
 }
 .sec-layer-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
 }
 .sec-layer-head b {
   font-size: 13.5px;
   color: var(--ink);
+  white-space: nowrap;
 }
 .sec-layer-counts {
   display: flex;
@@ -1765,7 +1869,7 @@ body[arco-theme="dark"] .sec-sev.med {
 
 .sec-vulns-table .sec-pkg-thead.has-chk,
 .sec-vulns-table .sec-pkg-tr.has-chk {
-  grid-template-columns: 20px minmax(156px, 1.02fr) minmax(180px, 1.28fr) minmax(136px, 0.92fr) 244px;
+  grid-template-columns: 20px minmax(156px, 1.02fr) minmax(180px, 1.28fr) minmax(136px, 0.92fr) 254px;
 }
 
 .sec-pkg-tr {
@@ -1887,12 +1991,12 @@ body[arco-theme="dark"] .sec-sev.med {
 }
 
 .sec-pkg-acts.is-vulns.can-ignore {
-  grid-template-columns: 108px 42px 78px;
+  grid-template-columns: 112px 44px 86px;
   gap: 6px;
 }
 
 .sec-act-ignore {
-  width: 42px;
+  width: 100%;
   justify-content: center;
   padding: 0 2px !important;
   color: var(--mute) !important;
@@ -1973,7 +2077,8 @@ body[arco-theme="dark"] .sec-sev.med {
 .sec-layer-head-r {
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: flex-end;
+  gap: 6px 8px;
   flex-wrap: wrap;
 }
 .sec-layer-act {
@@ -1985,6 +2090,7 @@ body[arco-theme="dark"] .sec-sev.med {
   color: var(--brand-ink, var(--brand));
   padding: 1px 6px;
   border-radius: 5px;
+  white-space: nowrap;
 }
 .sec-layer-act:hover {
   background: color-mix(in srgb, var(--brand) 10%, transparent);
@@ -2123,20 +2229,20 @@ body[arco-theme="dark"] .sec-sev.med {
 }
 
 .sec-act-rehearse {
-  width: 112px;
+  width: 100%;
   justify-content: center;
   padding: 0 6px !important;
   font-weight: 560;
 }
 
 .sec-act-link {
-  width: 66px;
+  width: 100%;
   justify-content: flex-end;
   padding: 0 4px !important;
 }
 
 .sec-act-expand {
-  width: 84px;
+  width: 100%;
   justify-content: flex-end;
   padding: 0 2px !important;
   white-space: nowrap;
@@ -2169,6 +2275,14 @@ body[arco-theme="dark"] .sec-sev.med {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.sec-table-clusters .sec-app-line {
+  max-width: 100%;
+  overflow: hidden;
+}
+.sec-table-clusters .sec-app-line > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .sec-table-clusters td:first-child,
@@ -2477,6 +2591,18 @@ body[arco-theme="dark"] .sec-sev.med {
   color: #c2410c;
   background: rgba(249, 115, 22, 0.12);
 }
+body[arco-theme="dark"] .sec-src-kind.k-json_feed {
+  color: #7dd3fc;
+  background: rgba(56, 189, 248, 0.16);
+}
+body[arco-theme="dark"] .sec-src-kind.k-bundle_url {
+  color: #6ee7b7;
+  background: rgba(52, 211, 153, 0.16);
+}
+body[arco-theme="dark"] .sec-src-kind.k-cisa_kev {
+  color: #fdba74;
+  background: rgba(251, 146, 60, 0.18);
+}
 
 .sec-src-url {
   font-size: 12px;
@@ -2594,6 +2720,9 @@ body[arco-theme="dark"] .sec-sev.med {
   .sec-src-row {
     grid-template-columns: 1fr;
     gap: 10px;
+  }
+  .sec-pkg-chk {
+    justify-content: flex-start;
   }
   .sec-pkg-acts,
   .sec-pkg-acts.is-vulns,

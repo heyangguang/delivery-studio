@@ -2003,8 +2003,10 @@ export function DeliveryDetail({
                 <div className="kvlist">
                   {params.map(([k, v]) => (
                     <div key={k}>
-                      <code>{k}</code>
-                      <span className="mono">{v}</span>
+                      <code title={k}>{k}</code>
+                      <span className="mono" title={String(v)}>
+                        {v}
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -2649,13 +2651,62 @@ function ReviewButton() {
   );
 }
 
+function splitFileSuffix(name: string): [string, string] {
+  const m =
+    /^(.*?)(\.tar\.gz\.sha256|\.tar\.gz|\.tgz\.sha256|\.sha256|\.tgz|\.sh|\.zip|\.ya?ml|\.json|\.docx|\.pdf|\.md|\.txt|\.log)$/i.exec(
+      name,
+    );
+  if (m && m[1].length > 0) return [m[1], m[2]];
+  const dot = name.lastIndexOf(".");
+  if (dot > 0 && name.length - dot <= 8) {
+    return [name.slice(0, dot), name.slice(dot)];
+  }
+  return [name, ""];
+}
+
+function FileNameText({ name }: { name: string }) {
+  const [stem, ext] = splitFileSuffix(name);
+  if (!ext) {
+    return (
+      <span className="file-name" title={name}>
+        {name}
+      </span>
+    );
+  }
+  return (
+    <span
+      className="file-name"
+      title={name}
+      style={{
+        display: "inline-flex",
+        alignItems: "baseline",
+        minWidth: 0,
+        maxWidth: "100%",
+        overflow: "hidden",
+      }}
+    >
+      <span
+        style={{
+          minWidth: 0,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {stem}
+      </span>
+      <span style={{ flexShrink: 0, whiteSpace: "nowrap" }}>{ext}</span>
+    </span>
+  );
+}
+
 function FileLink({ f, quiet }: { f: JobFile; quiet?: boolean }) {
   useLang();
   if (!can("delivery.download"))
     return (
-      <span className={`file ${quiet ? "quiet" : ""}`}>
+      <span className={`file ${quiet ? "quiet" : ""}`} title={f.name}>
         <IconFile />
-        <span className="file-name">{f.name}</span>
+        <FileNameText name={f.name} />
         <span className="file-size num">{size(f.bytes)}</span>
       </span>
     );
@@ -2667,7 +2718,7 @@ function FileLink({ f, quiet }: { f: JobFile; quiet?: boolean }) {
       title={bi(`下载 ${f.name}`, `Download ${f.name}`)}
     >
       {quiet ? <IconFile /> : <IconDownload />}
-      <span className="file-name">{f.name}</span>
+      <FileNameText name={f.name} />
       <span className="file-size num">{size(f.bytes)}</span>
     </a>
   );

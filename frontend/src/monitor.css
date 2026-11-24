@@ -1635,9 +1635,9 @@
   animation: mon-blink 1.2s ease-in-out infinite;
 }
 
+:root .route-executions .ad-launch,
 .route-executions .ad-launch {
-  bottom: 14px;
-  right: 24px;
+  display: none;
 }
 
 .mon-rail-backdrop {

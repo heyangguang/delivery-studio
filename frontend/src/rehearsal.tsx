@@ -2528,9 +2528,13 @@ function renderThinkingInline(text: string): React.ReactNode {
       out.push(text.slice(last, start));
     }
     if (rawTok.startsWith("`") && rawTok.endsWith("`")) {
+      const inner = rawTok.slice(1, -1);
       out.push(
-        <code key={k++} className="rh-think-code mono">
-          {rawTok.slice(1, -1)}
+        <code
+          key={k++}
+          className={`rh-think-code mono${inner.length <= 24 ? " is-atom" : ""}`}
+        >
+          {inner}
         </code>,
       );
       last = start + rawTok.length;
@@ -2551,7 +2555,10 @@ function renderThinkingInline(text: string): React.ReactNode {
       }
       if (cleanTok) {
         out.push(
-          <code key={k++} className="rh-think-code mono">
+          <code
+            key={k++}
+            className={`rh-think-code mono${cleanTok.length <= 24 ? " is-atom" : ""}`}
+          >
             {cleanTok}
           </code>,
         );
@@ -3957,10 +3964,12 @@ function DeliveryBaselineAside({
   c,
   onClose,
   onReturnToDelivery,
+  inModal = false,
 }: {
   c: ClusterView;
   onClose: () => void;
   onReturnToDelivery: (tab?: "overview" | "config" | "plans" | "docs") => void;
+  inModal?: boolean;
 }) {
   const lang = useLang();
   const jobPath = c.current
@@ -4056,27 +4065,36 @@ function DeliveryBaselineAside({
 
   return (
     <aside
-      className="rh-delivery-aside"
+      className={`rh-delivery-aside${inModal ? " in-modal" : ""}`}
       aria-label={bi("集群初始交付基线", "Cluster Initial Delivery Baseline")}
     >
-      <div className="rh-aside-head">
-        <div>
-          <b>{bi("当前交付基线", "Delivery Baseline")}</b>
+      {inModal ? (
+        <div className="rh-aside-head is-modal-sub">
           <span className="faint small">
             {c.app_name} {c.version}
             {c.platform ? ` · ${platformShort(c.platform)}` : ""}
           </span>
         </div>
-        <button
-          type="button"
-          className="rh-aside-close"
-          onClick={onClose}
-          aria-label={bi("收起交付基线面板", "Close delivery baseline panel")}
-          title={bi("收起面板 (Esc)", "Close panel (Esc)")}
-        >
-          <IconClose />
-        </button>
-      </div>
+      ) : (
+        <div className="rh-aside-head">
+          <div>
+            <b>{bi("当前交付基线", "Delivery Baseline")}</b>
+            <span className="faint small">
+              {c.app_name} {c.version}
+              {c.platform ? ` · ${platformShort(c.platform)}` : ""}
+            </span>
+          </div>
+          <button
+            type="button"
+            className="rh-aside-close"
+            onClick={onClose}
+            aria-label={bi("收起交付基线面板", "Close delivery baseline panel")}
+            title={bi("收起面板 (Esc)", "Close panel (Esc)")}
+          >
+            <IconClose />
+          </button>
+        </div>
+      )}
 
       <div className="rh-aside-scroll">
         <div className="rh-aside-sec">
@@ -5836,7 +5854,7 @@ export function ClusterRehearsal({
                     aria-label={bi("集群基线", "Cluster baseline")}
                   >
                     {baselineFacts.map((f) => (
-                      <span key={f} className="rh-base-pill">
+                      <span key={f} className="rh-base-pill" title={f}>
                         {f}
                       </span>
                     ))}
@@ -6318,6 +6336,7 @@ export function ClusterRehearsal({
         >
           <DeliveryBaselineAside
             c={c}
+            inModal
             onClose={() => setDeliveryOpen(false)}
             onReturnToDelivery={handleReturnToDelivery}
           />
@@ -8740,6 +8759,8 @@ function RehearsalSessionView({
 
   const hasProbeInput =
     probeImages.length > 0 || Boolean(probeOut.trim());
+  const archivedProbeImgCount = r.probe_images?.length || 0;
+  const hasArchivedProbeEvidence = !hasProbeInput && archivedProbeImgCount > 0;
 
   const isFreshCreate = freshTraceStage === "create" && curIdx === 0;
   const isFreshScope = freshTraceStage === "scope" && curIdx === 1;
@@ -9594,15 +9615,15 @@ function RehearsalSessionView({
               <div className="rh-echo-ws-head">
                 <div className="rh-echo-ws-left">
                   <span
-                    className={`rh-step-num-badge is-active num ${hasProbeInput ? "is-done" : ""}`}
+                    className={`rh-step-num-badge is-active num ${hasProbeInput || hasArchivedProbeEvidence ? "is-done" : ""}`}
                     aria-hidden
                   >
-                    {hasProbeInput ? <IconCheck /> : 2}
+                    {hasProbeInput || hasArchivedProbeEvidence ? <IconCheck /> : 2}
                   </span>
                   <div className="rh-echo-ws-titles">
                     <b>{bi("回填现场采集结果", "Submit Live Probe Output")}</b>
                     <span
-                      className={`rh-echo-status-pill ${hasProbeInput ? "is-ready" : ""}`}
+                      className={`rh-echo-status-pill ${hasProbeInput || hasArchivedProbeEvidence ? "is-ready" : ""}`}
                     >
                       {hasProbeInput
                         ? probeOut.trim()
@@ -9614,10 +9635,15 @@ function RehearsalSessionView({
                               `已添加 ${probeImages.length} 张终端截图`,
                               `${probeImages.length} screenshot(s) added`,
                             )
-                        : bi(
-                            "粘贴回显、截图或直接文字说明现状",
-                            "Paste output, screenshots, or describe status",
-                          )}
+                        : hasArchivedProbeEvidence
+                          ? bi(
+                              `已归档 ${archivedProbeImgCount} 张截图 · 可粘贴新回显重测`,
+                              `${archivedProbeImgCount} archived screenshot(s) · paste new output to re-analyze`,
+                            )
+                          : bi(
+                              "粘贴回显、截图或直接文字说明现状",
+                              "Paste output, screenshots, or describe status",
+                            )}
                     </span>
                   </div>
                 </div>
@@ -9835,7 +9861,7 @@ function RehearsalSessionView({
                       <ModelPicker pick={pick} compact />
                       <Button
                         shape="round"
-                        type="outline"
+                        type="secondary"
                         loading={probeBusy && probeAction === "diagnose"}
                         disabled={offline || !hasProbeInput || probeBusy}
                         onClick={() => void submitProbe("diagnose")}
@@ -13313,6 +13339,8 @@ const ProductionApplyModal = React.memo(function ProductionApplyModal({
       cancelText={bi("取消", "Cancel")}
       okButtonProps={{
         status: hasConflict && !isApplied ? "warning" : "success",
+        className:
+          hasConflict && !isApplied ? undefined : "rh-apply-ok-btn",
       }}
       maskClosable={false}
     >
@@ -13427,12 +13455,19 @@ const ProductionApplyModal = React.memo(function ProductionApplyModal({
             </div>
           ) : (
             <div className="rh-apply-delta-editor">
+              <div className="rh-apply-delta-head" aria-hidden>
+                <span>{bi("参数/配置项", "Key / Item")}</span>
+                <span>{bi("变更前", "Before")}</span>
+                <span>{bi("变更后生效值", "After (Active)")}</span>
+                <span />
+              </div>
               {changes.map((ch, idx) => (
                 <div key={idx} className="rh-apply-delta-row">
                   <input
                     type="text"
                     className="rh-apply-input"
                     placeholder={bi("参数/配置项", "Key / Item")}
+                    title={ch.key || undefined}
                     value={ch.key}
                     onChange={(e) => {
                       const v = e.target.value;
@@ -13445,6 +13480,7 @@ const ProductionApplyModal = React.memo(function ProductionApplyModal({
                     type="text"
                     className="rh-apply-input"
                     placeholder={bi("变更前（可选）", "Before (opt)")}
+                    title={ch.before || undefined}
                     value={ch.before || ""}
                     onChange={(e) => {
                       const v = e.target.value;
@@ -13459,6 +13495,7 @@ const ProductionApplyModal = React.memo(function ProductionApplyModal({
                     type="text"
                     className="rh-apply-input"
                     placeholder={bi("变更后生效值", "After (active)")}
+                    title={ch.after || undefined}
                     value={ch.after}
                     onChange={(e) => {
                       const v = e.target.value;
@@ -13524,21 +13561,34 @@ const ProductionApplyModal = React.memo(function ProductionApplyModal({
             <div className="rh-apply-supersede-list">
               {overlappingPending.map(({ plan: p, keys }) => {
                 const checked = supersedeIds.includes(p.id);
+                const toggleSupersede = (next?: boolean) =>
+                  setSupersedeIds((prev) => {
+                    const want = next !== undefined ? next : !prev.includes(p.id);
+                    return want
+                      ? Array.from(new Set([...prev, p.id]))
+                      : prev.filter((x) => x !== p.id);
+                  });
                 return (
-                  <label
+                  <div
                     key={p.id}
+                    role="button"
+                    tabIndex={0}
+                    aria-pressed={checked}
                     className={`rh-apply-supersede-item${checked ? " is-checked" : ""}`}
-                  >
-                    <Checkbox
-                      checked={checked}
-                      onChange={(v) =>
-                        setSupersedeIds((prev) =>
-                          v
-                            ? Array.from(new Set([...prev, p.id]))
-                            : prev.filter((x) => x !== p.id),
-                        )
+                    onClick={() => toggleSupersede()}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        toggleSupersede();
                       }
-                    />
+                    }}
+                  >
+                    <span onClick={(e) => e.stopPropagation()}>
+                      <Checkbox
+                        checked={checked}
+                        onChange={(v) => toggleSupersede(Boolean(v))}
+                      />
+                    </span>
                     <span className="rh-apply-supersede-main">
                       <span className="rh-apply-supersede-title">
                         {p.title}
@@ -13551,7 +13601,7 @@ const ProductionApplyModal = React.memo(function ProductionApplyModal({
                     <span className="rh-apply-supersede-meta num">
                       {ago(p.updated_at)}
                     </span>
-                  </label>
+                  </div>
                 );
               })}
             </div>
@@ -14290,6 +14340,11 @@ export function RehearsalProductionApplyCard({
                   <Dropdown
                     trigger="click"
                     position="br"
+                    triggerProps={{ autoFitPosition: true, updateOnScroll: true }}
+                    getPopupContainer={(node) =>
+                      (node.closest(".rh-workbench") as HTMLElement) ||
+                      document.body
+                    }
                     droplist={
                       <Menu
                         onClickMenuItem={(k) => {

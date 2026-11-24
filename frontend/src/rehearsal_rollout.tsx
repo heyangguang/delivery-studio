@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Button,
   Checkbox,
-  Drawer,
   Input,
   Message,
   Modal,
@@ -323,12 +322,15 @@ export function RolloutBoardDrawer({
   };
 
   return (
-    <Drawer
+    <Modal
       visible={visible}
       onCancel={onClose}
-      width={780}
+      alignCenter
+      focusLock={false}
+      autoFocus={false}
       footer={null}
-      className="ro-drawer"
+      className="ro-board-modal"
+      style={{ width: "min(940px, 94vw)", transformOrigin: "center center" }}
       title={
         <div className="ro-drawer-head">
           <div className="ro-drawer-title-row">
@@ -444,11 +446,11 @@ export function RolloutBoardDrawer({
           <div className="ro-tbl-wrap">
             <table className="ro-tbl">
               <colgroup>
-                <col style={{ width: "31%" }} />
+                <col style={{ width: "32%" }} />
+                <col style={{ width: "16%" }} />
+                <col style={{ width: "19%" }} />
                 <col style={{ width: "18%" }} />
-                <col style={{ width: "21%" }} />
-                <col style={{ width: "17%" }} />
-                <col style={{ width: "13%" }} />
+                <col style={{ width: "15%" }} />
               </colgroup>
               <thead>
                 <tr>
@@ -609,7 +611,7 @@ export function RolloutBoardDrawer({
           </div>
         </div>
       ) : null}
-    </Drawer>
+    </Modal>
   );
 }
 

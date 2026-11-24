@@ -846,7 +846,15 @@ body[arco-theme="dark"] .arco-drawer-mask {
   box-shadow: var(--shadow-lg);
 }
 .arco-drawer-header {
+  height: auto;
+  min-height: 52px;
+  padding: 14px 48px 14px 20px;
   border-bottom: 1px solid var(--line);
+}
+.arco-drawer-header-title {
+  min-width: 0;
+  flex: 1;
+  line-height: 1.4;
 }
 .arco-drawer-footer {
   border-top: 1px solid var(--line);

@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.277-dev"
+	version            = "1.0.278-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,20 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.278-dev",
+		Date:    "2026-11-24",
+		Title:   "优化跨集群推广看板居中弹窗与表格操作列排版",
+		TitleEn: "Convert multi-cluster rollout board to centered modal with aligned action controls",
+		Highlights: []string{
+			"将「跨集群变更推广看板」从紧贴视口顶部、受 48px 固定页头挤压的右侧抽屉重构为宽屏居中弹窗（最高 940px），与「推广至其他集群」「从已有变更引入」等变更弹窗视觉体系完全统一，同时全局放宽 Arco Drawer 页头高度避免多行标题贴顶",
+			"重构推广看板表格列宽配比（操作列扩至 15%）与单元格留白，将「当前页」与「查看 / 去处理」统一为等高 28px 描边胶囊并严格右对齐，消除锯齿错位与拥挤感",
+		},
+		HighlightsEn: []string{
+			"Refactored the Multi-Cluster Change Rollout board from a top-cramped 780px side drawer into a balanced 940px centered modal matching sibling rehearsal dialogs, and fixed Arco Drawer header height globally so multi-line titles never jam against the top edge",
+			"Rebalanced the 5-column rollout table with generous padding and unified the Action column into crisp 28px right-aligned controls for Current / View / Work states",
+		},
+	},
 	{
 		Version: "1.0.277-dev",
 		Date:    "2026-11-24",

@@ -466,7 +466,10 @@ button.sec-kpi:hover {
   color: var(--ink);
 }
 .sec-table-scroll {
+  width: 100%;
+  max-width: 100%;
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 .sec-table {
   width: 100%;
@@ -2259,6 +2262,79 @@ body[arco-theme="dark"] .sec-sev.med {
 
 .sec-cl-act-link:last-child {
   margin-right: -5px;
+}
+
+/* Narrow / split-screen: transform 5-col cluster risk table into crisp zero-overflow cards */
+@media (max-width: 960px) {
+  .sec-page {
+    padding-bottom: 76px;
+  }
+  .sec-table-clusters {
+    display: block;
+    min-width: 0;
+    width: 100%;
+    table-layout: auto;
+  }
+  .sec-table-clusters colgroup,
+  .sec-table-clusters thead {
+    display: none;
+  }
+  .sec-table-clusters tbody {
+    display: flex;
+    flex-direction: column;
+  }
+  .sec-table-clusters tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px 12px;
+    padding: 13px 16px;
+    border-bottom: 1px solid var(--line);
+  }
+  .sec-table-clusters tr:last-child {
+    border-bottom: 0;
+  }
+  .sec-table-clusters td,
+  .sec-table-clusters td:first-child,
+  .sec-table-clusters td:last-child {
+    display: block;
+    padding: 0;
+    border: 0;
+    overflow: visible;
+    text-align: left !important;
+  }
+  .sec-table-clusters td:nth-child(1) {
+    grid-column: 1;
+    min-width: 0;
+  }
+  .sec-table-clusters td:nth-child(2) {
+    grid-column: 2;
+    text-align: right !important;
+  }
+  .sec-table-clusters td:nth-child(2) .sec-cell-stack {
+    align-items: flex-end;
+  }
+  .sec-table-clusters td:nth-child(3),
+  .sec-table-clusters td:nth-child(4),
+  .sec-table-clusters td:nth-child(5) {
+    grid-column: 1 / -1;
+  }
+  .sec-table-clusters td:nth-child(3) .sec-cl-layers {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+  }
+  .sec-table-clusters td:nth-child(5) {
+    padding-top: 4px;
+  }
+  .sec-table-clusters .sec-cl-acts {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 6px 8px;
+  }
+  .sec-table-clusters .sec-cl-act-link:last-child {
+    margin-right: 0;
+  }
 }
 
 .sec-cl-act-link:hover {

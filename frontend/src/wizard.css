@@ -1477,8 +1477,26 @@ body[arco-theme="dark"] .wz-nav button.on {
     border-bottom: 1px solid var(--line);
   }
   .wz .host-row {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px 10px;
     padding: 12px 14px;
+  }
+  .wz .host-row > .host-del-btn {
+    grid-column: 3;
+    grid-row: 1;
+  }
+  .wz .host-init-cell {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+  }
+  .wz .host-init-lbl {
+    display: inline;
+    font-style: normal;
+    font-size: 12px;
+    color: var(--mute);
+    white-space: nowrap;
   }
   .node-row .role-chip {
     grid-column: 1 / -1;
@@ -1707,6 +1725,13 @@ body[arco-theme="dark"] .wz-nav button.on {
   }
 }
 
+.host-init-cell {
+  display: inline-flex;
+  align-items: center;
+}
+.host-init-lbl {
+  display: none;
+}
 .addon-target {
   margin-top: 10px;
   display: flex;

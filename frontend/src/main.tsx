@@ -26,6 +26,7 @@ import {
   IconCheck,
   IconClose,
   IconDesktop,
+  IconDown,
   IconMoon,
   IconLock,
   IconPoweroff,
@@ -246,39 +247,106 @@ function NavTabs({
 }) {
   const lang = useLang();
   const ref = useRef<HTMLElement>(null);
+  const mirrorRef = useRef<HTMLDivElement>(null);
+  const [visibleCount, setVisibleCount] = useState(items.length);
+  const [moreOpen, setMoreOpen] = useState(false);
   const [bar, setBar] = useState<{ x: number; w: number } | null>(null);
   const [ready, setReady] = useState(false);
   const itemSig = items
     .map((it) => `${it.key}:${it.label}:${it.badge || 0}`)
     .join("|");
+
+  // Priority+ responsive calculation: pack only complete tabs that fit inside the bar; fold overflow cleanly into "More ▾".
   useLayoutEffect(() => {
     const nav = ref.current;
-    if (!nav) return;
-    const links = [...nav.querySelectorAll<HTMLAnchorElement>("a[data-k]")];
-    const measure = () => {
-      if (nav.scrollWidth <= nav.clientWidth + 1 && nav.scrollLeft !== 0) {
-        nav.scrollLeft = 0;
+    const mirror = mirrorRef.current;
+    if (!nav || !mirror) return;
+    const compute = () => {
+      const avail = nav.clientWidth;
+      if (avail <= 0) return;
+      const itemNodes = [...mirror.querySelectorAll<HTMLElement>("[data-mk]")];
+      if (itemNodes.length !== items.length) {
+        setVisibleCount(items.length);
+        return;
       }
-      const el = nav.querySelector<HTMLAnchorElement>(`a[data-k="${active}"]`);
-      const next = el ? { x: el.offsetLeft, w: el.offsetWidth } : null;
-      setBar((prev) => {
-        if (!next) return prev === null ? prev : null;
-        if (prev && prev.x === next.x && prev.w === next.w) return prev;
-        return next;
-      });
+      const sepNode = mirror.querySelector<HTMLElement>(".tabs-sep");
+      const sepW = sepNode ? sepNode.offsetWidth + 12 : 13; // 1px + 6px*2 margin
+      const gap = 2;
+      const widths = itemNodes.map((n) => Math.ceil(n.getBoundingClientRect().width));
+      const moreBaseNode = mirror.querySelector<HTMLElement>("[data-more-base]");
+      const moreBaseW = moreBaseNode
+        ? Math.ceil(moreBaseNode.getBoundingClientRect().width)
+        : 64;
+      const moreActiveNode = mirror.querySelector<HTMLElement>("[data-more-active]");
+      const moreActiveW = moreActiveNode
+        ? Math.ceil(moreActiveNode.getBoundingClientRect().width)
+        : moreBaseW;
+
+      const widthOfPrefix = (k: number) => {
+        let total = 0;
+        for (let i = 0; i < k; i++) {
+          if (i > 0) {
+            total += gap;
+            if (NAV_GROUP[items[i].key] !== NAV_GROUP[items[i - 1].key]) {
+              total += sepW + gap;
+            }
+          }
+          total += widths[i];
+        }
+        return total;
+      };
+
+      const totalAll = widthOfPrefix(items.length);
+      if (totalAll <= avail - 2) {
+        setVisibleCount((prev) => (prev === items.length ? prev : items.length));
+        return;
+      }
+
+      const fitCount = (reserve: number) => {
+        const budget = Math.max(0, avail - reserve - 2);
+        let k = 0;
+        let used = 0;
+        for (let i = 0; i < items.length; i++) {
+          let add = widths[i];
+          if (i > 0) {
+            add += gap;
+            if (NAV_GROUP[items[i].key] !== NAV_GROUP[items[i - 1].key]) {
+              add += sepW + gap;
+            }
+          }
+          if (used + add <= budget) {
+            used += add;
+            k = i + 1;
+          } else {
+            break;
+          }
+        }
+        return k;
+      };
+
+      const activeIdx = items.findIndex((x) => x.key === active);
+      let k = fitCount(moreBaseW + gap);
+      if (activeIdx >= k) {
+        k = fitCount(Math.max(moreBaseW, moreActiveW) + gap);
+      }
+      // Always keep at least 1 tab visible unless container is extremely tiny
+      if (k === 0 && items.length > 0 && widths[0] + moreBaseW + 8 <= avail) {
+        k = 1;
+      }
+      setVisibleCount((prev) => (prev === k ? prev : k));
     };
-    measure();
-    const raf = requestAnimationFrame(measure);
+
+    compute();
+    const raf = requestAnimationFrame(compute);
     const ro =
       typeof ResizeObserver !== "undefined"
-        ? new ResizeObserver(measure)
+        ? new ResizeObserver(compute)
         : null;
     ro?.observe(nav);
-    links.forEach((a) => ro?.observe(a));
     let cancelled = false;
     document.fonts?.ready
       ?.then(() => {
-        if (!cancelled) measure();
+        if (!cancelled) compute();
       })
       .catch(() => undefined);
     return () => {
@@ -286,38 +354,42 @@ function NavTabs({
       cancelAnimationFrame(raf);
       ro?.disconnect();
     };
-  }, [active, itemSig, lang]);
+  }, [active, itemSig, lang, items]);
+
+  const clampedCount = Math.min(visibleCount, items.length);
+  const visibleItems = items.slice(0, clampedCount);
+  const overflowItems = items.slice(clampedCount);
+  const activeInOverflow = overflowItems.find((x) => x.key === active) || null;
+  const overflowLiveCount = overflowItems.reduce((s, x) => s + (x.badge || 0), 0);
+
+  useLayoutEffect(() => {
+    const nav = ref.current;
+    if (!nav) return;
+    const measureBar = () => {
+      const el = activeInOverflow
+        ? nav.querySelector<HTMLElement>('[data-k="__more__"]')
+        : nav.querySelector<HTMLElement>(`a[data-k="${active}"]`);
+      const next = el ? { x: el.offsetLeft, w: el.offsetWidth } : null;
+      setBar((prev) => {
+        if (!next) return prev === null ? prev : null;
+        if (prev && prev.x === next.x && prev.w === next.w) return prev;
+        return next;
+      });
+    };
+    measureBar();
+    const raf = requestAnimationFrame(measureBar);
+    return () => cancelAnimationFrame(raf);
+  }, [active, activeInOverflow, clampedCount, itemSig, lang]);
 
   useEffect(() => {
     const raf = requestAnimationFrame(() => setReady(true));
     return () => cancelAnimationFrame(raf);
   }, []);
 
-  useEffect(() => {
-    const nav = ref.current;
-    if (!nav) return;
-    if (nav.scrollWidth <= nav.clientWidth + 1) {
-      if (nav.scrollLeft !== 0) nav.scrollLeft = 0;
-      return;
-    }
-    const el = nav.querySelector<HTMLAnchorElement>(`a[data-k="${active}"]`);
-    if (!el) return;
-    const pad = 12;
-    if (el.offsetLeft - pad < nav.scrollLeft) {
-      nav.scrollTo({
-        left: Math.max(0, el.offsetLeft - pad),
-        behavior: ready ? "smooth" : "auto",
-      });
-    } else if (
-      el.offsetLeft + el.offsetWidth + pad >
-      nav.scrollLeft + nav.clientWidth
-    ) {
-      nav.scrollTo({
-        left: el.offsetLeft + el.offsetWidth - nav.clientWidth + pad,
-        behavior: ready ? "smooth" : "auto",
-      });
-    }
-  }, [active, ready, itemSig, lang]);
+  const activeItem = items.find((x) => x.key === active);
+  const moreLabel = activeInOverflow
+    ? activeInOverflow.label
+    : bi("更多", "More");
 
   return (
     <nav className="tabs" ref={ref} aria-label={bi("主导航", "Main navigation")}>
@@ -331,9 +403,9 @@ function NavTabs({
           aria-hidden
         />
       )}
-      {items.map((it, i) => (
+      {visibleItems.map((it, i) => (
         <React.Fragment key={it.key}>
-          {i > 0 && NAV_GROUP[it.key] !== NAV_GROUP[items[i - 1].key] && (
+          {i > 0 && NAV_GROUP[it.key] !== NAV_GROUP[visibleItems[i - 1].key] && (
             <span className="tabs-sep" aria-hidden />
           )}
           <a
@@ -359,6 +431,88 @@ function NavTabs({
           </a>
         </React.Fragment>
       ))}
+      {overflowItems.length > 0 && (
+        <Dropdown
+          trigger="click"
+          position="bl"
+          popupVisible={moreOpen}
+          onVisibleChange={setMoreOpen}
+          droplist={
+            <Menu
+              className="tabs-more-menu"
+              selectedKeys={activeInOverflow ? [activeInOverflow.key] : []}
+              onClickMenuItem={(k) => {
+                const hit = overflowItems.find((x) => x.key === k);
+                setMoreOpen(false);
+                if (hit) go(hit.to);
+              }}
+            >
+              {overflowItems.map((it, i) => (
+                <React.Fragment key={it.key}>
+                  {i > 0 &&
+                    NAV_GROUP[it.key] !== NAV_GROUP[overflowItems[i - 1].key] && (
+                      <div className="menu-sep" role="separator" />
+                    )}
+                  <Menu.Item key={it.key}>
+                    <span className="menu-row">
+                      <span className={it.key === "ai" ? "ai-word" : ""}>
+                        {it.label}
+                      </span>
+                      {it.badge && it.badge > 0 ? (
+                        <span className="tabs-live-badge">
+                          <i aria-hidden />
+                          {it.badge}
+                        </span>
+                      ) : null}
+                      {active === it.key && <IconCheck className="menu-check" />}
+                    </span>
+                  </Menu.Item>
+                </React.Fragment>
+              ))}
+            </Menu>
+          }
+        >
+          <button
+            type="button"
+            data-k="__more__"
+            className={`tabs-more${activeInOverflow ? " on" : ""}${moreOpen ? " open" : ""}`}
+            aria-expanded={moreOpen}
+            aria-label={bi("更多导航页面", "More navigation pages")}
+          >
+            <span className={activeInOverflow?.key === "ai" ? "ai-word" : ""}>
+              {moreLabel}
+            </span>
+            {overflowLiveCount > 0 && (
+              <span className="tabs-more-dot" aria-hidden />
+            )}
+            <IconDown className="tabs-more-caret" />
+          </button>
+        </Dropdown>
+      )}
+      <div className="tabs-mirror" ref={mirrorRef} aria-hidden="true">
+        <span className="tabs-sep" />
+        {items.map((it) => (
+          <span key={it.key} data-mk={it.key} className="tabs-m-item">
+            {it.label}
+            {it.badge && it.badge > 0 ? (
+              <span className="tabs-live-badge">
+                <i />
+                {it.badge}
+              </span>
+            ) : null}
+          </span>
+        ))}
+        <span data-more-base="" className="tabs-more">
+          <span>{bi("更多", "More")}</span>
+          <IconDown className="tabs-more-caret" />
+        </span>
+        {activeItem && (
+          <span data-more-active="" className="tabs-more on">
+            <span>{activeItem.label}</span>
+            <IconDown className="tabs-more-caret" />
+          </span>
+        )}
+      </div>
     </nav>
   );
 }

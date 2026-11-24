@@ -1108,23 +1108,13 @@ body[arco-theme="dark"] .fw-run::after {
     padding: 8px 12px 10px;
   }
   .fw-bar-row {
-    flex-wrap: wrap;
-    row-gap: 8px;
+    grid-template-columns: 32px minmax(0, 1fr) auto;
+    gap: 8px 10px;
   }
-  /* first row: back, then the buttons; the steps get their own row below and scroll sideways */
-  .fw-back {
-    order: 1;
-  }
-  .fw-end {
-    order: 2;
-    margin-left: auto;
-  }
-  .fw-tabs {
-    order: 3;
-    flex-basis: 100%;
-  }
-  .fw-ghost {
-    display: none;
+  .fw-bar-title {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .fw-list {
     padding: 16px 12px 8px;
@@ -1285,7 +1275,13 @@ body[arco-theme="dark"] .fw-run::after {
   grid-template-columns: 32px minmax(0, 1fr) auto;
   gap: 12px;
 }
-.fw-bar-title { color: var(--ink); font-size: 14px; font-weight: 600; }
+.fw-bar-title {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  align-self: center;
+}
 .fw-tabs {
   grid-column: 1 / -1;
   grid-row: 2;

@@ -163,6 +163,9 @@
 }
 .st-mobile-bar .st-subtabs {
   border-bottom: 0;
+  padding-right: 24px;
+  -webkit-mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 28px), transparent 100%);
+  mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 28px), transparent 100%);
 }
 .st-group-bar {
   min-width: 0;
@@ -252,10 +255,11 @@
     height: auto;
     display: flex;
     flex-direction: row;
-    align-items: flex-start;
-    gap: 6px;
-    padding: 10px 12px;
-    overflow-x: auto;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 5px 6px;
+    padding: 10px 14px;
+    overflow: visible;
     border-right: 0;
     border-bottom: 1px solid var(--line);
   }
@@ -265,13 +269,19 @@
     display: none;
   }
   .st-nav-grp {
-    display: flex;
-    gap: 6px;
+    display: contents;
   }
   .st-nav .sx-nav-i {
     flex: none;
     width: auto;
+    padding: 5px 9px;
+    border-radius: 8px;
     white-space: nowrap;
+  }
+  .st-nav .sx-nav-ic {
+    width: 24px;
+    height: 24px;
+    font-size: 13px;
   }
   .st-chans > li {
     grid-template-columns: 40px minmax(0, 1fr) auto;

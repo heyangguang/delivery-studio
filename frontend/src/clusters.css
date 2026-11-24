@@ -394,9 +394,12 @@
 .cl-u-entry {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  height: 30px;
-  padding: 0 6px 0 10px;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  min-height: 30px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 4px 6px 4px 10px;
   border-radius: 8px;
   border: 1px solid var(--line);
   background: var(--surface);
@@ -407,6 +410,7 @@
   background: color-mix(in srgb, var(--brand-soft) 45%, var(--surface));
 }
 .cl-u-entry-lbl {
+  flex: none;
   font-size: 11.5px;
   font-weight: 600;
   color: var(--mute);
@@ -416,10 +420,14 @@
   color: var(--brand-ink);
 }
 .cl-u-entry-addr {
+  flex: 0 1 auto;
+  min-width: 0;
   font-size: 12.5px;
   font-weight: 600;
   color: var(--ink);
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.4;
 }
 .cl-port-chip {
   display: inline-flex;

@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.313-dev"
+	version            = "1.0.314-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,24 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.314-dev",
+		Date:    "2026-11-24",
+		Title:   "全站半屏/窄窗响应式全面升级：Priority+ 顶栏智能收纳与多页防溢出重构",
+		TitleEn: "Comprehensive Split-Screen Responsive Upgrade: Priority+ Topbar & Zero-Overflow Views",
+		Highlights: []string{
+			"顶栏主导航升级为 Priority+ 容器自适应排版（NavTabs）：窄窗下只显示完整导航项，溢出项自动收纳进「更多 ▾」下拉菜单，且选中溢出项时直接在按钮上高亮并跟随红线指示，彻底告别字被腰斩与入口消失",
+			"窄屏下自动将语言胶囊精简为地球图标、右下角悬浮 AI 入口自动微缩为 40×40 正圆（悬停可展开），并为列表/详情/安全/IAM 等页面补足底部滚动留白，避免遮挡末行操作",
+			"修复新建交付 AI 页头「创建交付」被错排到返回箭头左侧并竖折的问题，以及手动向导机器卡片窄屏下开关无标签与删除键孤立占行的问题",
+			"重构交付详情页头（更多按钮回位标题行）、访问入口长域名自动换行、集群安全风险表窄屏卡片化（修复演练/筛选漏洞/集群安全页全部可见）及 AI 用量 KPI 三列均衡网格",
+		},
+		HighlightsEn: []string{
+			"Upgraded main topbar navigation to Priority+ overflow (NavTabs): only complete tabs render inline while overflow folds cleanly into a More dropdown showing active selection and sliding indicator—zero sliced labels at any width",
+			"Collapsed language pill to a globe icon below 820px, auto-minimized the floating AI launcher to a 40×40 orb below 900px, and added bottom scroll clearance across list, detail, security, and IAM views",
+			"Fixed the New Delivery AI header grid order where the title wrapped vertically left of the back arrow, and refined manual Step 2 host rows with an inline Init label and top-right delete alignment",
+			"Aligned Delivery detail header actions inline on row 1, enabled clean wrapping for long access endpoint FQDNs, transformed the Security cluster risk table into full-width zero-overflow cards below 960px, and balanced AI Cost KPI grids",
+		},
+	},
 	{
 		Version: "1.0.313-dev",
 		Date:    "2026-11-24",

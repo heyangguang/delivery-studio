@@ -2818,7 +2818,7 @@ function DeliveryForm({
                     }
                     mini
                   >
-                    <span>
+                    <span className="host-init-cell">
                       <Switch
                         size="small"
                         checked={!!h.initialize}
@@ -2828,12 +2828,16 @@ function DeliveryForm({
                           `Initialize data disk for host ${i + 1}`,
                         )}
                       />
+                      <em className="host-init-lbl">
+                        {bi("初始化", "Init disk")}
+                      </em>
                     </span>
                   </Tooltip>
                 )}
                 <Button
                   type="text"
                   status="danger"
+                  className="host-del-btn"
                   icon={<IconDelete />}
                   disabled={dep.hosts.length <= 1}
                   onClick={() => removeHost(i)}

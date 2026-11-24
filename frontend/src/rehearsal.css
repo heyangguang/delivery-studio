@@ -7711,9 +7711,67 @@ body[arco-theme="dark"] .rh-pdiff-risk {
 .rh-cmd-edit {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   padding-top: 4px;
   animation: rh-dock-in 0.18s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+.rh-cmd-edit-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.rh-cmd-edit-card {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--line-strong);
+}
+
+.rh-cmd-edit-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.rh-cmd-edit-idx {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+  border: 1px solid var(--brand-line);
+}
+
+.rh-cmd-edit-lbl {
+  flex: 1 1 200px;
+  min-width: 140px;
+}
+
+.rh-cmd-edit-role {
+  flex: 0 1 170px;
+  min-width: 120px;
+}
+
+.rh-cmd-edit-gate-k {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--warn);
+}
+
+.rh-cmd-edit-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 /* Inline Key-Value Step Facts */

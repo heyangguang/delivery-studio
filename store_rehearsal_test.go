@@ -1806,3 +1806,116 @@ func TestRehearsalIntentUnclearGateAndRefineGoal(t *testing.T) {
 		t.Fatalf("expected 409 when refining finalized rehearsal, got %d %s", w4.Code, w4.Body.String())
 	}
 }
+
+func TestRehearsalPatchStepPreservesSubCommandsAndRecoversFlattened(t *testing.T) {
+	s, _ := testStore(t)
+	alice, csrf := storeLogin(t, s, "alice")
+	cw := storeCreate(t, s, alice, csrf, `{"id":"pg-subcmd-test","hosts":[{"name":"node-1","ip":"10.0.12.11"},{"name":"node-2","ip":"10.0.12.12"},{"name":"node-3","ip":"10.0.12.13"}],"instances":[{"id":"etcd","component":"etcd","placement":{"member":["node-1","node-2","node-3"]}}]}`, nil)
+	s.wg.Wait()
+	if cw.Code != 202 {
+		t.Fatalf("create job: %d %s", cw.Code, cw.Body.String())
+	}
+	var job storeJob
+	_ = json.Unmarshal(cw.Body.Bytes(), &job)
+	_ = storeRequest(s, "PATCH", "/api/jobs/"+job.ID, strings.NewReader(`{"outcome":"done"}`), alice, csrf)
+	enableAI(t, s, "http://127.0.0.1:1", 1)
+
+	// 1. Seed a rehearsal whose step has 3 sub-command boxes (non-rolling verify step).
+	rid := "a1b2c3d4e5f6"
+	rh := changeRehearsal{
+		ID:        rid,
+		ClusterID: "pg-subcmd-test",
+		Title:     "验收三节点参数与日志",
+		Goal:      "验证微调不合并子命令",
+		Stage:     "rehearsing",
+		Owner:     "alice",
+		CreatedAt: nowStamp(),
+		UpdatedAt: nowStamp(),
+		Steps: []rehearsalStep{
+			{
+				ID:         "step-7",
+				Phase:      "verify",
+				Order:      1,
+				Title:      "验收三节点参数、当日日志与写入入口并清理探针",
+				TargetRole: "按各子命令框标注的机器执行；参数与日志验收必须覆盖三节点",
+				Commands: []rehearsalStepCommand{
+					{
+						Label:      "三节点逐台以 root 执行: 参数及持续日志写入",
+						TargetRole: "node-1 / node-2 / node-3",
+						Command:    "(\nsudo -u postgres psql -At -c 'SHOW logging_collector;'\nsleep 2 && sudo -u postgres tail -n 6 /data/logs/postgresql/pg.log\n) </dev/null",
+						Gate:       "确认三节点日志参数生效",
+					},
+					{
+						Label:      "查看当前日志文件路径与最终集群健康",
+						TargetRole: "node-1",
+						Command:    "(\nsudo -u postgres psql -Atc 'SELECT pg_current_logfile();'\npatronictl -c /etc/patroni/patroni.yml list\n) </dev/null",
+						Gate:       "确认集群角色健康",
+					},
+					{
+						Label:      "清理临时采集探针",
+						TargetRole: "node-1 / node-2 / node-3",
+						Command:    "rm -f /tmp/collect-pg-*.sh",
+					},
+				},
+				Status: "pending",
+			},
+		},
+	}
+	rh.Steps[0].Command = joinStepCommandsFallback(rh.Steps[0].Commands)
+	rehearsalMu.Lock()
+	if err := s.saveRehearsal(rh); err != nil {
+		rehearsalMu.Unlock()
+		t.Fatalf("save seed rehearsal: %v", err)
+	}
+	rehearsalMu.Unlock()
+
+	// 2. Structured PATCH with commands array updates one block and preserves all 3 boxes + metadata.
+	structPayload := `{
+		"status": "pending",
+		"commands": [
+			{"label":"三节点逐台以 root 执行: 参数及持续日志写入","target_role":"node-1 / node-2 / node-3","command":"sudo -u postgres psql -At -c 'SHOW logging_collector;'\nsleep 1 && sudo -u postgres tail -n 5 /data/logs/postgresql/pg.log","gate":"确认三节点日志参数生效"},
+			{"label":"查看当前日志文件路径与最终集群健康","target_role":"node-1","command":"sudo -u postgres psql -Atc 'SELECT pg_current_logfile();'\npatronictl -c /etc/patroni/patroni.yml list","gate":"确认集群角色健康"},
+			{"label":"清理临时采集探针","target_role":"node-1 / node-2 / node-3","command":"rm -f /tmp/collect-pg-subcmd-*.sh"}
+		]
+	}`
+	w1 := storeRequest(s, "PATCH", "/api/clusters/pg-subcmd-test/rehearsals/"+rid+"/steps/step-7", strings.NewReader(structPayload), alice, csrf)
+	if w1.Code != 200 {
+		t.Fatalf("structured PATCH failed: %d %s", w1.Code, w1.Body.String())
+	}
+	var got1 changeRehearsal
+	_ = json.Unmarshal(w1.Body.Bytes(), &got1)
+	if len(got1.Steps) != 1 || len(got1.Steps[0].Commands) != 3 {
+		t.Fatalf("expected 3 preserved sub-commands after structured PATCH, got %d", len(got1.Steps[0].Commands))
+	}
+	if got1.Steps[0].Commands[0].TargetRole != "node-1 / node-2 / node-3" || got1.Steps[0].Commands[2].Command != "rm -f /tmp/collect-pg-subcmd-*.sh" {
+		t.Fatalf("unexpected sub-commands after structured PATCH: %+v", got1.Steps[0].Commands)
+	}
+
+	// 3. Plain-text PATCH (like legacy editor / AI proposal) on multi-block `# Label\n(...)` MUST preserve all 3 boxes & metadata!
+	plainJoined := strings.Replace(got1.Steps[0].Command, "tail -n 5", "tail -n 8", 1)
+	pb, _ := json.Marshal(map[string]any{"command": plainJoined, "status": "pending"})
+	w2 := storeRequest(s, "PATCH", "/api/clusters/pg-subcmd-test/rehearsals/"+rid+"/steps/step-7", bytes.NewReader(pb), alice, csrf)
+	if w2.Code != 200 {
+		t.Fatalf("plain PATCH failed: %d %s", w2.Code, w2.Body.String())
+	}
+	var got2 changeRehearsal
+	_ = json.Unmarshal(w2.Body.Bytes(), &got2)
+	if len(got2.Steps[0].Commands) != 3 {
+		t.Fatalf("plain PATCH flattened sub-commands! expected 3, got %d (%+v)", len(got2.Steps[0].Commands), got2.Steps[0].Commands)
+	}
+	if got2.Steps[0].Commands[0].TargetRole != "node-1 / node-2 / node-3" || got2.Steps[0].Commands[0].Gate != "确认三节点日志参数生效" {
+		t.Fatalf("plain PATCH lost target_role/gate metadata: %+v", got2.Steps[0].Commands[0])
+	}
+
+	// 4. Auto-recovery of an already-flattened multi-subshell step (even with prev == nil)
+	recovered := splitFlattenedSubCommands(plainJoined, got2.Steps[0].TargetRole, nil, "zh-CN")
+	if len(recovered) != 3 {
+		t.Fatalf("expected recovery of 3 blocks from flattened command, got %d", len(recovered))
+	}
+
+	// 5. Normal single-box script with inline comments MUST NOT be falsely split
+	normalScript := "# 创建目录\nmkdir -p /data/logs/postgresql\n\n# 修改属主\nchown postgres:postgres /data/logs/postgresql"
+	if bad := splitFlattenedSubCommands(normalScript, "node-1", nil, "zh-CN"); len(bad) != 0 {
+		t.Fatalf("normal single-box script was falsely split into %d blocks: %+v", len(bad), bad)
+	}
+}

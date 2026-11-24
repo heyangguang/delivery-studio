@@ -695,15 +695,7 @@ func (s *storeServer) applyRehearsalStepProposal(user string, spec *aiRehearsalS
 			st.Phase = spec.Phase
 		}
 		if strings.TrimSpace(spec.Command) != "" {
-			st.Command = ensurePasteSafeShellCommand(spec.Command)
-			st.Commands = nil
-			if subs := splitSequentialRollingCommands(st.Command, "zh-CN"); len(subs) > 1 {
-				for si := range subs {
-					subs[si].Command = ensurePasteSafeShellCommand(subs[si].Command)
-				}
-				st.Commands = subs
-				st.Command = joinStepCommandsFallback(subs)
-			}
+			st.Command, st.Commands = reconcileStepCommands(st.Commands, spec.Command, st.TargetRole, "zh-CN")
 		}
 		if spec.Expect != "" {
 			st.Expect = spec.Expect

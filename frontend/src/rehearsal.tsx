@@ -11036,6 +11036,114 @@ function splitSequentialRollingCommands(cmd: string): RehearsalStepCommand[] {
   return out.length >= 2 ? out : [];
 }
 
+const RE_CLOSE_SUBSHELL = /^\)\s*(<\s*\/dev\/null\s*)?(2>&1\s*)?$/;
+const RE_CLOSE_BRACE = /^\}\s*(<\s*\/dev\/null\s*)?(2>&1\s*)?$/;
+const RE_SUBCMD_TARGET_HINT =
+  /(各子命令|子命令框|分步执行|逐段|sub-?command)/i;
+const RE_SUBCMD_HOST_PREFIX =
+  /^(node[-_]?\d+|第\s*\d+\s*段|part\s*\d+|三节点|全节点|所有节点|主库|从库|主节点|从节点|备库|跳板机|集群外|客户端)/i;
+
+/**
+ * Recovers separate sub-command boxes from a flattened `joinStepCommandsFallback` string
+ * (`# <label>\n<cmd>\n\n# <label2>\n<cmd2>`) while respecting heredoc/subshell nesting.
+ */
+function splitFlattenedSubCommands(
+  cmd: string,
+  targetRole?: string,
+): RehearsalStepCommand[] {
+  const raw = (cmd || "").replace(/\r\n/g, "\n").trim();
+  if (!raw) return [];
+  const lines = raw.split("\n");
+  if (lines.length < 4) return [];
+
+  const blocks: string[][] = [];
+  let cur: string[] = [];
+  let heredocEnd = "";
+  let subDepth = 0;
+  let blockDepth = 0;
+  let prevCont = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const inMulti =
+      Boolean(heredocEnd) || subDepth > 0 || blockDepth > 0 || prevCont;
+    if (!inMulti && !trimmed) {
+      if (cur.length > 0) {
+        blocks.push(cur);
+        cur = [];
+      }
+      continue;
+    }
+    cur.push(line);
+    if (heredocEnd) {
+      if (trimmed === heredocEnd) heredocEnd = "";
+      prevCont = false;
+      continue;
+    }
+    if (!trimmed.startsWith("#")) {
+      const hm = trimmed.match(RE_HEREDOC_START);
+      if (hm?.[1]) heredocEnd = hm[1];
+      if (trimmed === "(" || trimmed === "{") {
+        subDepth++;
+      } else if (
+        (RE_CLOSE_SUBSHELL.test(trimmed) || RE_CLOSE_BRACE.test(trimmed)) &&
+        subDepth > 0
+      ) {
+        subDepth--;
+      }
+      if (RE_BLOCK_OPEN.test(trimmed) && !RE_BLOCK_CLOSE.test(trimmed)) {
+        blockDepth++;
+      } else if (RE_BLOCK_CLOSE.test(trimmed) && blockDepth > 0) {
+        blockDepth--;
+      }
+    }
+    prevCont = /[\\]\s*$/.test(line);
+  }
+  if (cur.length > 0) blocks.push(cur);
+  if (blocks.length < 2) return [];
+
+  const parsed: { label: string; body: string }[] = [];
+  let subshellCount = 0;
+  let hostLabelCount = 0;
+
+  for (const rawBlk of blocks) {
+    const blk = rawBlk.slice();
+    while (blk.length > 0 && !blk[0].trim()) blk.shift();
+    if (blk.length < 2) return [];
+    const first = blk[0].trim();
+    if (!first.startsWith("#")) return [];
+    const label = first.replace(/^#+\s*/, "").trim();
+    const body = blk.slice(1).join("\n").trim();
+    if (!label || !body) return [];
+    const hasExec = blk
+      .slice(1)
+      .some((l) => l.trim() !== "" && !l.trim().startsWith("#"));
+    if (!hasExec) return [];
+    const bodyLines = body.split("\n");
+    const isSubshell =
+      bodyLines.length >= 3 &&
+      ((bodyLines[0].trim() === "(" &&
+        RE_CLOSE_SUBSHELL.test(bodyLines[bodyLines.length - 1].trim())) ||
+        (bodyLines[0].trim() === "{" &&
+          RE_CLOSE_BRACE.test(bodyLines[bodyLines.length - 1].trim())));
+    if (isSubshell) subshellCount++;
+    if (RE_SUBCMD_HOST_PREFIX.test(label)) hostLabelCount++;
+    parsed.push({ label, body });
+  }
+  if (parsed.length < 2) return [];
+
+  const strongSignal =
+    subshellCount >= 1 ||
+    RE_SUBCMD_TARGET_HINT.test(targetRole || "") ||
+    hostLabelCount === parsed.length;
+  if (!strongSignal) return [];
+
+  return parsed.map((p) => ({
+    label: p.label,
+    command: p.body,
+  }));
+}
+
 function StepRow({
   c,
   rehearsalId,
@@ -11087,7 +11195,14 @@ function StepRow({
   const [note, setNote] = useState(step.note || "");
   const [editingNote, setEditingNote] = useState(false);
   const [editingCmd, setEditingCmd] = useState(false);
+  const resolvedSubCmds = useMemo<RehearsalStepCommand[]>(() => {
+    if (step.commands && step.commands.length > 1) return step.commands;
+    const flat = splitFlattenedSubCommands(step.command, step.target_role);
+    if (flat.length > 1) return flat;
+    return splitSequentialRollingCommands(step.command);
+  }, [step.commands, step.command, step.target_role]);
   const [cmdDraft, setCmdDraft] = useState(step.command);
+  const [subCmdDrafts, setSubCmdDrafts] = useState<RehearsalStepCommand[]>([]);
   const [verifyOpen, setVerifyOpen] = useState(
     () =>
       (!isRollback && isActiveStep) ||
@@ -11177,13 +11292,18 @@ function StepRow({
 
   useEffect(() => {
     setCmdDraft(step.command);
+    setSubCmdDrafts(
+      resolvedSubCmds.length > 1
+        ? resolvedSubCmds.map((s) => ({ ...s }))
+        : [],
+    );
     setNote(step.note || "");
     if (step.status === "failed" || step.proposal) {
       setVerifyOpen(true);
     } else if (step.status === "passed" || step.status === "skipped") {
       setVerifyOpen(false);
     }
-  }, [step.command, step.note, step.status, step.proposal]);
+  }, [step.command, resolvedSubCmds, step.note, step.status, step.proposal]);
 
   useEffect(() => {
     if (!isRollback && isActiveStep && step.status === "pending") {
@@ -11253,7 +11373,9 @@ function StepRow({
   };
 
   const patchStep = async (
-    patch: Partial<Pick<RehearsalStep, "status" | "note" | "command">>,
+    patch: Partial<
+      Pick<RehearsalStep, "status" | "note" | "command" | "commands">
+    >,
   ) => {
     setBusy("patch");
     try {
@@ -11513,7 +11635,15 @@ function StepRow({
                   <button
                     type="button"
                     className="rh-code-btn"
-                    onClick={() => setEditingCmd(true)}
+                    onClick={() => {
+                      setCmdDraft(step.command);
+                      setSubCmdDrafts(
+                        resolvedSubCmds.length > 1
+                          ? resolvedSubCmds.map((s) => ({ ...s }))
+                          : [],
+                      );
+                      setEditingCmd(true);
+                    }}
                   >
                     <IconEdit />
                     <span>{bi("微调", "Edit")}</span>
@@ -11611,54 +11741,243 @@ function StepRow({
           );
         })()}
 
-        {editingCmd ? (
-          <div
-            className="rh-cmd-edit"
-            onKeyDown={(e) => {
-              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-                e.preventDefault();
-                void patchStep({ command: cmdDraft, status: "pending" });
-              } else if (e.key === "Escape") {
-                e.preventDefault();
-                setCmdDraft(step.command);
-                setEditingCmd(false);
-              }
-            }}
-          >
-            <Input.TextArea
-              value={cmdDraft}
-              onChange={setCmdDraft}
-              autoSize={{ minRows: 3, maxRows: 12 }}
-              className="mono"
-              aria-label={bi("编辑步骤命令", "Edit step command")}
-            />
-            <div className="row-gap">
-              <Button
-                size="small"
-                type="primary"
-                loading={busy === "patch"}
-                onClick={() =>
-                  void patchStep({ command: cmdDraft, status: "pending" })
-                }
-              >
-                {bi("保存命令", "Save Command")}
-              </Button>
-              <Button
-                size="small"
-                onClick={() => {
-                  setCmdDraft(step.command);
-                  setEditingCmd(false);
+        {editingCmd ? (() => {
+          const saveSubDrafts = () => {
+            const cleaned = subCmdDrafts
+              .map((s) => ({
+                label: (s.label || "").trim(),
+                target_role: (s.target_role || "").trim() || undefined,
+                command: (s.command || "").trim(),
+                gate: (s.gate || "").trim() || undefined,
+              }))
+              .filter((s) => s.command.length > 0);
+            if (cleaned.length === 0) {
+              Message.warning(
+                bi("请至少保留一条非空命令", "At least one non-empty command is required"),
+              );
+              return;
+            }
+            void patchStep({ commands: cleaned, status: "pending" });
+          };
+          const cancelEdit = () => {
+            setCmdDraft(step.command);
+            setSubCmdDrafts(
+              resolvedSubCmds.length > 1
+                ? resolvedSubCmds.map((s) => ({ ...s }))
+                : [],
+            );
+            setEditingCmd(false);
+          };
+
+          if (subCmdDrafts.length > 1) {
+            return (
+              <div
+                className="rh-cmd-edit"
+                onKeyDown={(e) => {
+                  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                    e.preventDefault();
+                    saveSubDrafts();
+                  } else if (e.key === "Escape") {
+                    e.preventDefault();
+                    cancelEdit();
+                  }
                 }}
               >
-                {bi("取消", "Cancel")}
-              </Button>
+                <div className="rh-cmd-edit-stack">
+                  {subCmdDrafts.map((sub, si) => (
+                    <div key={si} className="rh-cmd-edit-card">
+                      <div className="rh-cmd-edit-head">
+                        <span className="rh-cmd-edit-idx num">
+                          {bi(
+                            `子命令 ${si + 1}/${subCmdDrafts.length}`,
+                            `Block ${si + 1}/${subCmdDrafts.length}`,
+                          )}
+                        </span>
+                        <Input
+                          size="mini"
+                          className="rh-cmd-edit-lbl"
+                          value={sub.label || ""}
+                          placeholder={bi(
+                            "本段标题（如：查看日志路径与集群健康）",
+                            "Block label (optional)",
+                          )}
+                          onChange={(v) =>
+                            setSubCmdDrafts((prev) =>
+                              prev.map((x, idx) =>
+                                idx === si ? { ...x, label: v } : x,
+                              ),
+                            )
+                          }
+                        />
+                        <Input
+                          size="mini"
+                          className="rh-cmd-edit-role"
+                          value={sub.target_role || ""}
+                          placeholder={bi("执行机器（选填）", "Run on (optional)")}
+                          onChange={(v) =>
+                            setSubCmdDrafts((prev) =>
+                              prev.map((x, idx) =>
+                                idx === si ? { ...x, target_role: v } : x,
+                              ),
+                            )
+                          }
+                        />
+                        <Tooltip content={bi("移除本子命令段", "Remove block")} mini>
+                          <Button
+                            size="mini"
+                            type="text"
+                            status="danger"
+                            icon={<IconDelete />}
+                            onClick={() => {
+                              const next = subCmdDrafts.filter((_, idx) => idx !== si);
+                              if (next.length === 1) {
+                                setCmdDraft(next[0].command);
+                                setSubCmdDrafts([]);
+                              } else {
+                                setSubCmdDrafts(next);
+                              }
+                            }}
+                          />
+                        </Tooltip>
+                      </div>
+                      <Input.TextArea
+                        value={sub.command}
+                        onChange={(v) =>
+                          setSubCmdDrafts((prev) =>
+                            prev.map((x, idx) =>
+                              idx === si ? { ...x, command: v } : x,
+                            ),
+                          )
+                        }
+                        autoSize={{ minRows: 2, maxRows: 10 }}
+                        className="mono"
+                        aria-label={bi(
+                          `编辑子命令 ${si + 1}`,
+                          `Edit sub-command ${si + 1}`,
+                        )}
+                      />
+                      {si < subCmdDrafts.length - 1 && (
+                        <Input
+                          size="mini"
+                          className="rh-cmd-edit-gate"
+                          prefix={
+                            <span className="rh-cmd-edit-gate-k">
+                              {bi("段间核验", "Gate")}
+                            </span>
+                          }
+                          value={sub.gate || ""}
+                          placeholder={bi(
+                            "选填：执行完本段后需要人工确认的条件再继续下一段",
+                            "Optional pause-and-verify note before running next block",
+                          )}
+                          onChange={(v) =>
+                            setSubCmdDrafts((prev) =>
+                              prev.map((x, idx) =>
+                                idx === si ? { ...x, gate: v } : x,
+                              ),
+                            )
+                          }
+                        />
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <div className="rh-cmd-edit-foot">
+                  <Button
+                    size="small"
+                    icon={<IconPlus />}
+                    onClick={() =>
+                      setSubCmdDrafts((prev) => [
+                        ...prev,
+                        {
+                          label: bi(
+                            `第 ${prev.length + 1} 段`,
+                            `Part ${prev.length + 1}`,
+                          ),
+                          command: "",
+                        },
+                      ])
+                    }
+                  >
+                    {bi("新增子命令段", "Add Sub-Command")}
+                  </Button>
+                  <div className="row-gap">
+                    <Button
+                      size="small"
+                      type="primary"
+                      loading={busy === "patch"}
+                      onClick={saveSubDrafts}
+                    >
+                      {bi("保存子命令", "Save Sub-Commands")}
+                    </Button>
+                    <Button size="small" onClick={cancelEdit}>
+                      {bi("取消", "Cancel")}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            );
+          }
+
+          return (
+            <div
+              className="rh-cmd-edit"
+              onKeyDown={(e) => {
+                if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                  e.preventDefault();
+                  void patchStep({ command: cmdDraft, status: "pending" });
+                } else if (e.key === "Escape") {
+                  e.preventDefault();
+                  cancelEdit();
+                }
+              }}
+            >
+              <Input.TextArea
+                value={cmdDraft}
+                onChange={setCmdDraft}
+                autoSize={{ minRows: 3, maxRows: 12 }}
+                className="mono"
+                aria-label={bi("编辑步骤命令", "Edit step command")}
+              />
+              <div className="rh-cmd-edit-foot">
+                <Button
+                  size="small"
+                  icon={<IconPlus />}
+                  onClick={() =>
+                    setSubCmdDrafts([
+                      {
+                        label: bi("第 1 段", "Part 1"),
+                        command: cmdDraft.trim(),
+                      },
+                      {
+                        label: bi("第 2 段", "Part 2"),
+                        command: "",
+                      },
+                    ])
+                  }
+                >
+                  {bi("拆分为多段子命令", "Split into Sub-Commands")}
+                </Button>
+                <div className="row-gap">
+                  <Button
+                    size="small"
+                    type="primary"
+                    loading={busy === "patch"}
+                    onClick={() =>
+                      void patchStep({ command: cmdDraft, status: "pending" })
+                    }
+                  >
+                    {bi("保存命令", "Save Command")}
+                  </Button>
+                  <Button size="small" onClick={cancelEdit}>
+                    {bi("取消", "Cancel")}
+                  </Button>
+                </div>
+              </div>
             </div>
-          </div>
-        ) : (() => {
-          const subCmds =
-            step.commands && step.commands.length > 1
-              ? step.commands
-              : splitSequentialRollingCommands(step.command);
+          );
+        })() : (() => {
+          const subCmds = resolvedSubCmds;
           if (subCmds.length > 1) {
             return (
               <div className="rh-cmd-stack">

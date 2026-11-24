@@ -3319,6 +3319,180 @@ func joinStepCommandsFallback(cmds []rehearsalStepCommand) string {
 	return strings.Join(parts, "\n\n")
 }
 
+var (
+	reSubCmdTargetHint = regexp.MustCompile(`(?i)(各子命令|子命令框|分步执行|逐段|sub-?command)`)
+	reSubCmdHostPrefix = regexp.MustCompile(`(?i)^(node[-_]?\d+|第\s*\d+\s*段|part\s*\d+|三节点|全节点|所有节点|主库|从库|主节点|从节点|备库|跳板机|集群外|客户端)`)
+)
+
+// splitFlattenedSubCommands recovers separate sub-command boxes when a multi-command step
+// was joined via joinStepCommandsFallback (`# <label>\n<cmd>\n\n# <label2>\n<cmd2>`).
+// It tracks heredocs and subshell/brace nesting so multi-line blocks inside one command are
+// never broken apart, and only activates when strong multi-block signals are present.
+func splitFlattenedSubCommands(cmd, targetRole string, prev []rehearsalStepCommand, lang string) []rehearsalStepCommand {
+	raw := strings.TrimSpace(strings.ReplaceAll(cmd, "\r\n", "\n"))
+	if raw == "" {
+		return nil
+	}
+	lines := strings.Split(raw, "\n")
+	if len(lines) < 4 {
+		return nil
+	}
+
+	// Split at blank lines only when at top level (not inside heredoc, subshell, or control block).
+	var blocks [][]string
+	var cur []string
+	heredocEnd := ""
+	subDepth := 0
+	blockDepth := 0
+	prevCont := false
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		inMulti := heredocEnd != "" || subDepth > 0 || blockDepth > 0 || prevCont
+		if !inMulti && trimmed == "" {
+			if len(cur) > 0 {
+				blocks = append(blocks, cur)
+				cur = nil
+			}
+			continue
+		}
+		cur = append(cur, line)
+		if heredocEnd != "" {
+			if trimmed == heredocEnd {
+				heredocEnd = ""
+			}
+			prevCont = false
+			continue
+		}
+		if !strings.HasPrefix(trimmed, "#") {
+			if m := reHeredocStart.FindStringSubmatch(trimmed); len(m) >= 2 {
+				heredocEnd = m[1]
+			}
+			if trimmed == "(" || trimmed == "{" {
+				subDepth++
+			} else if (reCloseSubshellLine.MatchString(trimmed) || reCloseBraceLine.MatchString(trimmed)) && subDepth > 0 {
+				subDepth--
+			}
+			if reShellBlockOpen.MatchString(trimmed) && !reShellBlockClose.MatchString(trimmed) {
+				blockDepth++
+			} else if reShellBlockClose.MatchString(trimmed) && blockDepth > 0 {
+				blockDepth--
+			}
+		}
+		prevCont = strings.HasSuffix(strings.TrimRight(line, " \t"), `\`)
+	}
+	if len(cur) > 0 {
+		blocks = append(blocks, cur)
+	}
+	if len(blocks) < 2 {
+		return nil
+	}
+
+	type parsedBlk struct {
+		label       string
+		body        string
+		hasSubshell bool
+	}
+	var parsed []parsedBlk
+	subshellCount := 0
+	hostLabelCount := 0
+	for _, blk := range blocks {
+		// Trim leading blank lines if any
+		for len(blk) > 0 && strings.TrimSpace(blk[0]) == "" {
+			blk = blk[1:]
+		}
+		if len(blk) < 2 {
+			return nil
+		}
+		first := strings.TrimSpace(blk[0])
+		if !strings.HasPrefix(first, "#") {
+			return nil
+		}
+		label := strings.TrimSpace(strings.TrimLeft(first, "#"))
+		body := strings.TrimSpace(strings.Join(blk[1:], "\n"))
+		if label == "" || body == "" {
+			return nil
+		}
+		// Must contain at least one executable non-comment line
+		hasExec := false
+		for _, bl := range blk[1:] {
+			bt := strings.TrimSpace(bl)
+			if bt != "" && !strings.HasPrefix(bt, "#") {
+				hasExec = true
+				break
+			}
+		}
+		if !hasExec {
+			return nil
+		}
+		bodyLines := strings.Split(body, "\n")
+		isSubshell := len(bodyLines) >= 3 &&
+			((strings.TrimSpace(bodyLines[0]) == "(" && reCloseSubshellLine.MatchString(strings.TrimSpace(bodyLines[len(bodyLines)-1]))) ||
+				(strings.TrimSpace(bodyLines[0]) == "{" && reCloseBraceLine.MatchString(strings.TrimSpace(bodyLines[len(bodyLines)-1]))))
+		if isSubshell {
+			subshellCount++
+		}
+		if reSubCmdHostPrefix.MatchString(label) {
+			hostLabelCount++
+		}
+		parsed = append(parsed, parsedBlk{label: label, body: body, hasSubshell: isSubshell})
+	}
+	if len(parsed) < 2 {
+		return nil
+	}
+
+	// Only split when we have a strong structural signal so single-box scripts with blank-line comments stay untouched.
+	strongSignal := len(prev) > 1 ||
+		subshellCount >= 1 ||
+		reSubCmdTargetHint.MatchString(targetRole) ||
+		hostLabelCount == len(parsed)
+	if !strongSignal {
+		return nil
+	}
+
+	// Index previous sub-commands by label to preserve target_role and gate metadata.
+	prevByLabel := map[string]rehearsalStepCommand{}
+	for _, pc := range prev {
+		k := strings.ToLower(strings.TrimSpace(pc.Label))
+		if k != "" {
+			prevByLabel[k] = pc
+		}
+	}
+	out := make([]rehearsalStepCommand, 0, len(parsed))
+	for i, pb := range parsed {
+		sub := rehearsalStepCommand{
+			Label:   truncRunes(pb.label, 80),
+			Command: ensurePasteSafeShellCommand(pb.body),
+		}
+		if m, ok := prevByLabel[strings.ToLower(pb.label)]; ok {
+			sub.TargetRole = m.TargetRole
+			sub.Gate = m.Gate
+		} else if i < len(prev) {
+			sub.TargetRole = prev[i].TargetRole
+			sub.Gate = prev[i].Gate
+		}
+		out = append(out, sub)
+	}
+	return out
+}
+
+func reconcileStepCommands(prev []rehearsalStepCommand, nextCmd, targetRole, lang string) (string, []rehearsalStepCommand) {
+	trimmed := strings.TrimSpace(nextCmd)
+	if trimmed == "" {
+		return "", nil
+	}
+	if subs := splitFlattenedSubCommands(trimmed, targetRole, prev, lang); len(subs) > 1 {
+		return joinStepCommandsFallback(subs), subs
+	}
+	if subs := splitSequentialRollingCommands(trimmed, lang); len(subs) > 1 {
+		for i := range subs {
+			subs[i].Command = ensurePasteSafeShellCommand(subs[i].Command)
+		}
+		return joinStepCommandsFallback(subs), subs
+	}
+	return ensurePasteSafeShellCommand(trimmed), nil
+}
+
 func normalizeRehearsalSteps(in []rehearsalStep) []rehearsalStep {
 	return normalizeRehearsalStepsLang(in, "zh-CN")
 }
@@ -3667,12 +3841,13 @@ func auditRehearsalRestorations(goal, extraScope string, steps []rehearsalStep, 
 
 func (s *storeServer) patchRehearsalStep(w http.ResponseWriter, r *http.Request, session storeSession, f clusterFacts, rid, sid string) {
 	var in struct {
-		Status  *string `json:"status"`
-		Elapsed *string `json:"elapsed"`
-		Note    *string `json:"note"`
-		Command *string `json:"command"`
+		Status   *string                 `json:"status"`
+		Elapsed  *string                 `json:"elapsed"`
+		Note     *string                 `json:"note"`
+		Command  *string                 `json:"command"`
+		Commands *[]rehearsalStepCommand `json:"commands"`
 	}
-	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&in) != nil {
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 128<<10)).Decode(&in) != nil {
 		s.fail(w, 400, "提交的内容格式不对")
 		return
 	}
@@ -3704,14 +3879,44 @@ func (s *storeServer) patchRehearsalStep(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	st := &rh.Steps[idx]
-	if in.Command != nil {
-		nextCmd := strings.TrimSpace(*in.Command)
-		if nextCmd == "" {
+	if in.Commands != nil {
+		var clean []rehearsalStepCommand
+		for _, sub := range *in.Commands {
+			sc := strings.TrimSpace(sub.Command)
+			if sc == "" {
+				continue
+			}
+			clean = append(clean, rehearsalStepCommand{
+				Label:      truncRunes(strings.TrimSpace(sub.Label), 80),
+				TargetRole: truncRunes(strings.TrimSpace(sub.TargetRole), 80),
+				Command:    ensurePasteSafeShellCommand(sc),
+				Gate:       truncRunes(strings.TrimSpace(sub.Gate), 220),
+			})
+		}
+		if len(clean) == 0 {
 			rehearsalMu.Unlock()
 			s.fail(w, 400, "步骤命令不能为空")
 			return
 		}
-		if nextCmd != st.Command {
+		var nextCmd string
+		var nextSubs []rehearsalStepCommand
+		if len(clean) > 1 {
+			nextSubs = clean
+			nextCmd = joinStepCommandsFallback(clean)
+		} else {
+			nextCmd = clean[0].Command
+			nextSubs = nil
+		}
+		changed := nextCmd != st.Command || len(nextSubs) != len(st.Commands)
+		if !changed {
+			for ci := range nextSubs {
+				if nextSubs[ci] != st.Commands[ci] {
+					changed = true
+					break
+				}
+			}
+		}
+		if changed {
 			st.Revisions = append(st.Revisions, rehearsalStepRevision{
 				At:         nowStamp(),
 				By:         session.User,
@@ -3720,7 +3925,27 @@ func (s *storeServer) patchRehearsalStep(w http.ResponseWriter, r *http.Request,
 				NewCommand: nextCmd,
 			})
 			st.Command = nextCmd
-			st.Commands = splitSequentialRollingCommands(nextCmd, reqLang(r))
+			st.Commands = nextSubs
+			st.Proposal = nil
+		}
+	} else if in.Command != nil {
+		rawCmd := strings.TrimSpace(*in.Command)
+		if rawCmd == "" {
+			rehearsalMu.Unlock()
+			s.fail(w, 400, "步骤命令不能为空")
+			return
+		}
+		nextCmd, nextSubs := reconcileStepCommands(st.Commands, rawCmd, st.TargetRole, reqLang(r))
+		if nextCmd != st.Command || len(nextSubs) != len(st.Commands) {
+			st.Revisions = append(st.Revisions, rehearsalStepRevision{
+				At:         nowStamp(),
+				By:         session.User,
+				Diagnosis:  tr(reqLang(r), "工程师在测试环境手动调整命令", "Command manually adjusted in staging"),
+				OldCommand: st.Command,
+				NewCommand: nextCmd,
+			})
+			st.Command = nextCmd
+			st.Commands = nextSubs
 			st.Proposal = nil
 		}
 	}
@@ -4498,15 +4723,17 @@ func (s *storeServer) applyRehearsalProposal(w http.ResponseWriter, r *http.Requ
 		}
 		rh.Steps = next
 	} else {
+		nextCmd, nextSubs := reconcileStepCommands(st.Commands, prop.Command, st.TargetRole, reqLang(r))
 		rh.Steps[idx].Revisions = append(rh.Steps[idx].Revisions, rehearsalStepRevision{
 			At:           now,
 			By:           session.User,
 			ErrorSnippet: truncRunes(st.LastError, 300),
 			Diagnosis:    prop.Diagnosis,
 			OldCommand:   st.Command,
-			NewCommand:   prop.Command,
+			NewCommand:   nextCmd,
 		})
-		rh.Steps[idx].Command = prop.Command
+		rh.Steps[idx].Command = nextCmd
+		rh.Steps[idx].Commands = nextSubs
 		if strings.TrimSpace(prop.Expect) != "" {
 			rh.Steps[idx].Expect = truncRunes(strings.TrimSpace(prop.Expect), 300)
 		}
@@ -5417,6 +5644,9 @@ func (s *storeServer) buildRehearsalSOP(f clusterFacts, rid string) (*clusterDoc
 	b.h(1, tr(lang, "4 生产变更分步实施步骤（SOP）", "4 Production Change Procedure (SOP)"))
 	writeStepCmds := func(st rehearsalStep) {
 		subs := st.Commands
+		if len(subs) <= 1 {
+			subs = splitFlattenedSubCommands(st.Command, st.TargetRole, nil, lang)
+		}
 		if len(subs) <= 1 {
 			subs = splitSequentialRollingCommands(st.Command, lang)
 		}

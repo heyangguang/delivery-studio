@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.326-dev"
+	version            = "1.0.327-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,22 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.327-dev",
+		Date:    "2026-11-24",
+		Title:   "修复演练步骤微调与 AI 修改将多子命令合并为整块的问题并上线分段微调编辑器",
+		TitleEn: "Preserve rehearsal sub-commands on step edits and AI proposals with structured multi-command editor",
+		Highlights: []string{
+			"前端「微调」升级为结构化多子命令分段编辑器：多子命令步骤支持逐段编辑标题、执行机器、命令内容与段间核验，并可增删分段；单段命令亦支持一键拆分为多段",
+			"后端 PATCH 步骤、应用 AI 修订提案（问 AI 修改 / Step Apply）全面保留并同步结构化 commands 数组，不再在微调或单测修订后被回退逻辑清空合并成整块",
+			"前后端及 Word SOP 导出同步内置已合并多子命令的智能无损恢复机制，历史已被微调合成为整块的演练步骤刷新后即自动还原为独立子命令框",
+		},
+		HighlightsEn: []string{
+			"Upgraded rehearsal step fine-tuning to a structured multi-sub-command editor supporting per-block label, target host, command, gate, and add/remove controls",
+			"Preserved structured step commands across manual PATCH, AI step apply, and AI replace proposals instead of flattening them into a single command blob",
+			"Added automatic recovery for already-flattened multi-sub-command steps in the UI, backend reconciliation, and Word SOP export",
+		},
+	},
 	{
 		Version: "1.0.326-dev",
 		Date:    "2026-11-24",

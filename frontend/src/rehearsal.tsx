@@ -99,6 +99,17 @@ import {
   launchRehearsalIntent,
   launchSecurityRehearsalIntent,
 } from "./rehearsal_intent";
+import {
+  abortRehearsalTask,
+  clearRehearsalTask,
+  getRehearsalTask,
+  hasRunningTaskForSession,
+  isRehearsalTaskLive,
+  rehearsalTaskKey,
+  startRehearsalTask,
+  useActiveRehearsalTasks,
+  useRehearsalTask,
+} from "./rehearsal_live";
 import type {
   RehearsalIntentPayload,
   RehearsalModeChoice,
@@ -2714,11 +2725,14 @@ function RehearsalAIProcess({
     startedAt: number;
     idx: number;
     enteredAt: number;
-  }>(() => ({
-    startedAt: live?.startedAt ?? 0,
-    idx: 0,
-    enteredAt: Date.now(),
-  }));
+  }>(() => {
+    const resuming = Boolean(live && Date.now() - live.startedAt > 1000);
+    return {
+      startedAt: live?.startedAt ?? 0,
+      idx: live && (live.error || resuming) ? computeTargetStepIndex(live.steps) : 0,
+      enteredAt: Date.now(),
+    };
+  });
   const procRef = useRef<HTMLDivElement | null>(null);
   const lastScrolledStartRef = useRef<number>(0);
   const thinkBoxRef = useRef<HTMLDivElement | null>(null);
@@ -2786,9 +2800,10 @@ function RehearsalAIProcess({
   useEffect(() => {
     if (!hasLive) return;
     if (playState.startedAt !== liveStartedAt) {
+      const resuming = Date.now() - liveStartedAt > 1000;
       setPlayState({
         startedAt: liveStartedAt,
-        idx: hasLiveError ? targetIdx : 0,
+        idx: hasLiveError || resuming ? targetIdx : 0,
         enteredAt: Date.now(),
       });
       return;
@@ -4604,26 +4619,69 @@ export function ClusterRehearsal({
 }) {
   const lang = useLang();
   const listUrl = rehearsalsListPath(c.id);
+  const createKey = rehearsalTaskKey.create(c.id);
+  const createTask = useRehearsalTask<LiveAIState, ChangeRehearsal>(createKey);
+  const activeRehearsalTasks = useActiveRehearsalTasks();
+  const liveCreate =
+    createTask && (createTask.status === "running" || createTask.status === "error")
+      ? createTask.live
+      : null;
+
   const [list, setList] = useState<ChangeRehearsal[] | null>(
     () => initialList ?? cached<ChangeRehearsal[]>(listUrl) ?? null,
   );
   const [loadErr, setLoadErr] = useState("");
-  const [creating, setCreating] = useState(() => hasRehearsalIntentFor(c.id));
+  const [creating, setCreating] = useState(
+    () =>
+      hasRehearsalIntentFor(c.id) ||
+      isRehearsalTaskLive(getRehearsalTask(rehearsalTaskKey.create(c.id))),
+  );
   const creatingRef = useRef(creating);
   creatingRef.current = creating;
   const [pickedPreset, setPickedPreset] = useState<RehearsalPresetKind | null>(
     null,
   );
-  const [launchMode, setLaunchMode] = useState<RehearsalModeChoice>("auto");
-  const [goal, setGoal] = useState("");
-  const [title, setTitle] = useState("");
+  const [launchMode, setLaunchMode] = useState<RehearsalModeChoice>(
+    () =>
+      (getRehearsalTask(rehearsalTaskKey.create(c.id))?.draft?.launchMode as
+        | RehearsalModeChoice
+        | undefined) || "auto",
+  );
+  const [goal, setGoal] = useState(
+    () =>
+      String(
+        getRehearsalTask(rehearsalTaskKey.create(c.id))?.draft?.goal || "",
+      ),
+  );
+  const [title, setTitle] = useState(
+    () =>
+      String(
+        getRehearsalTask(rehearsalTaskKey.create(c.id))?.draft?.title || "",
+      ),
+  );
   const [secCtxDraft, setSecCtxDraft] =
-    useState<RehearsalSecurityContext | null>(null);
+    useState<RehearsalSecurityContext | null>(
+      () =>
+        (getRehearsalTask(rehearsalTaskKey.create(c.id))?.draft?.secCtxDraft as
+          | RehearsalSecurityContext
+          | null
+          | undefined) || null,
+    );
   const [srcCtxDraft, setSrcCtxDraft] =
-    useState<RehearsalSourceContext | null>(null);
-  const [goalImages, setGoalImages] = useState<DraftImage[]>([]);
+    useState<RehearsalSourceContext | null>(
+      () =>
+        (getRehearsalTask(rehearsalTaskKey.create(c.id))?.draft?.srcCtxDraft as
+          | RehearsalSourceContext
+          | null
+          | undefined) || null,
+    );
+  const [goalImages, setGoalImages] = useState<DraftImage[]>(
+    () =>
+      (getRehearsalTask(rehearsalTaskKey.create(c.id))?.draft?.goalImages as
+        | DraftImage[]
+        | undefined) || [],
+  );
   const [dragGoal, setDragGoal] = useState(false);
-  const [liveCreate, setLiveCreate] = useState<LiveAIState | null>(null);
   const [ledgerCollapsed, setLedgerCollapsed] = useState(false);
   const [deliveryOpen, setDeliveryOpen] = useState(false);
   const [sessMenuOpen, setSessMenuOpen] = useState(false);
@@ -4633,7 +4691,6 @@ export function ClusterRehearsal({
     "all" | "active" | "finalized"
   >("all");
 
-  const createAbortRef = useRef<AbortController | null>(null);
   const seededMapRef = useRef<Map<string, ChangeRehearsal>>(new Map());
   const composeRef = useRef<HTMLDivElement | null>(null);
   const goalRef = useRef<HTMLTextAreaElement | null>(null);
@@ -4758,12 +4815,23 @@ export function ClusterRehearsal({
     };
   }, [goalEl, goal, hasLiveCreate]);
 
-  // Reset rail collapse and side drawer when switching clusters
+  // Reset rail collapse and side drawer when switching clusters (preserving any active background create task on target cluster)
   useEffect(() => {
     setLedgerCollapsed(false);
     setDeliveryOpen(false);
-    setGoalImages([]);
-    setLiveCreate(null);
+    const existingTask = getRehearsalTask<LiveAIState, ChangeRehearsal>(
+      rehearsalTaskKey.create(c.id),
+    );
+    if (isRehearsalTaskLive(existingTask)) {
+      setCreating(true);
+      const d = existingTask?.draft;
+      setTitle(String(d?.title || ""));
+      setGoal(String(d?.goal || ""));
+      setGoalImages((d?.goalImages as DraftImage[] | undefined) || []);
+      setLaunchMode((d?.launchMode as RehearsalModeChoice | undefined) || "auto");
+    } else {
+      setGoalImages([]);
+    }
     setLedgerQuery("");
     setLedgerFilter("all");
   }, [c.id]);
@@ -4778,7 +4846,10 @@ export function ClusterRehearsal({
       sessionStorage.removeItem(REHEARSAL_INTENT_KEY);
       creatingRef.current = true;
       setCreating(true);
-      setLiveCreate(null);
+      const curCreate = getRehearsalTask(rehearsalTaskKey.create(c.id));
+      if (curCreate && curCreate.status !== "running") {
+        clearRehearsalTask(rehearsalTaskKey.create(c.id));
+      }
       if (parsed.securityContext) {
         setPickedPreset(null);
         setSrcCtxDraft(null);
@@ -4884,20 +4955,55 @@ export function ClusterRehearsal({
   useEffect(() => {
     const hit = initialList ?? cached<ChangeRehearsal[]>(listUrl) ?? null;
     setList(hit);
-    const pendingIntent = creatingRef.current || hasRehearsalIntentFor(c.id);
+    const liveCreateActive = isRehearsalTaskLive(
+      getRehearsalTask(rehearsalTaskKey.create(c.id)),
+    );
+    const pendingIntent =
+      creatingRef.current || hasRehearsalIntentFor(c.id) || liveCreateActive;
     if (hit && hit.length > 0 && !rehearsalId && !pendingIntent) {
+      const runningSessTask = activeRehearsalTasks.find(
+        (t) =>
+          t.status === "running" &&
+          t.clusterId === c.id &&
+          t.rehearsalId &&
+          hit.some((x) => x.id === t.rehearsalId),
+      );
       go(
         {
           name: "deliveries",
           id: c.id,
           tab: "rehearsal",
-          rehearsal: hit[0].id,
+          rehearsal: runningSessTask?.rehearsalId || hit[0].id,
         },
         { replace: true, instant: true },
       );
     }
     void loadList(!pendingIntent);
   }, [c.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Consume completed background/foreground create task seamlessly
+  useEffect(() => {
+    if (createTask?.status !== "done" || !createTask.result) return;
+    const created = createTask.result;
+    clearRehearsalTask(createKey);
+    seededMapRef.current.set(created.id, created);
+    setFreshId(created.id);
+    setCreating(false);
+    setPickedPreset(null);
+    setLaunchMode("auto");
+    setSecCtxDraft(null);
+    setSrcCtxDraft(null);
+    setGoal("");
+    setTitle("");
+    setGoalImages([]);
+    void loadList(false);
+    go({
+      name: "deliveries",
+      id: c.id,
+      tab: "rehearsal",
+      rehearsal: created.id,
+    });
+  }, [createTask, createKey, c.id, loadList]);
 
   const showLauncher = creating || (list !== null && list.length === 0);
   const activeId = !showLauncher
@@ -5021,99 +5127,109 @@ export function ClusterRehearsal({
   const startNew = async () => {
     if (!goal.trim() || creatingBusy || offline) return;
     engageFocus();
-    const ac = new AbortController();
-    createAbortRef.current = ac;
     const effectiveMode: RehearsalModeChoice = secCtxDraft ? "full" : launchMode;
-    setLiveCreate(
-      createInitialLiveState(
-        effectiveMode === "quick"
-          ? "create-quick"
-          : effectiveMode === "light"
-            ? "create-light"
-            : "create",
-        effectiveMode === "quick"
+    const initialLive = createInitialLiveState(
+      effectiveMode === "quick"
+        ? "create-quick"
+        : effectiveMode === "light"
+          ? "create-light"
+          : "create",
+      effectiveMode === "quick"
+        ? bi(
+            "AI 正在按极速变更直出执行步骤",
+            "AI is generating direct steps (Quick Change)",
+          )
+        : effectiveMode === "light"
           ? bi(
-              "AI 正在按极速变更直出执行步骤",
-              "AI is generating direct steps (Quick Change)",
+              "AI 正在按简单推演直出极简只读探针",
+              "AI is generating concise probe (Light Rehearsal)",
             )
-          : effectiveMode === "light"
+          : effectiveMode === "auto"
             ? bi(
-                "AI 正在按简单推演直出极简只读探针",
-                "AI is generating concise probe (Light Rehearsal)",
-              )
-            : effectiveMode === "auto"
-              ? bi(
-                  "AI 正在评估复杂度并自动选择变更档位",
-                  "AI is evaluating complexity & change workflow depth",
-                )
-              : bi(
-                  "AI 正在研判变更诉求与集群高可用边界",
-                  "AI is analyzing change goal & HA boundaries",
-                ),
-        effectiveMode === "quick"
-          ? bi(
-              "跳过边界问答与前置探针，正在直出 2～3 步执行核验与独立回退预案…",
-              "Skipping scope & probe; drafting 2–3 direct execution steps & rollback plan…",
-            )
-          : effectiveMode === "light"
-            ? bi(
-                "跳过窗口问答，正在筛选 2～4 项核心核查点并校验只读红线…",
-                "Skipping scope Q&A; selecting 2–4 core live checks & validating read-only safety…",
+                "AI 正在评估复杂度并自动选择变更档位",
+                "AI is evaluating complexity & change workflow depth",
               )
             : bi(
-                "正在读取集群基线并建立模型连接…",
-                "Loading cluster baseline & connecting to AI model…",
+                "AI 正在研判变更诉求与集群高可用边界",
+                "AI is analyzing change goal & HA boundaries",
               ),
-        pick.current,
-      ),
+      effectiveMode === "quick"
+        ? bi(
+            "跳过边界问答与前置探针，正在直出 2～3 步执行核验与独立回退预案…",
+            "Skipping scope & probe; drafting 2–3 direct execution steps & rollback plan…",
+          )
+        : effectiveMode === "light"
+          ? bi(
+              "跳过窗口问答，正在筛选 2～4 项核心核查点并校验只读红线…",
+              "Skipping scope Q&A; selecting 2–4 core live checks & validating read-only safety…",
+            )
+          : bi(
+              "正在读取集群基线并建立模型连接…",
+              "Loading cluster baseline & connecting to AI model…",
+            ),
+      pick.current,
     );
-    try {
-      const created = await streamRehearsalAPI(
-        `/api/clusters/${encodeURIComponent(c.id)}/rehearsals`,
-        {
-          title: title.trim() || undefined,
-          goal: goal.trim(),
-          mode: effectiveMode,
-          images:
-            goalImages.length > 0
-              ? goalImages.map((im) => im.dataUrl)
-              : undefined,
-          model: pick.ref || undefined,
-          effort: pick.current?.effort?.includes(aiOpts.pref.think)
-            ? aiOpts.pref.think
-            : undefined,
-          security_context: secCtxDraft || undefined,
-        },
-        (updater) => setLiveCreate((prev) => (prev ? updater(prev) : prev)),
-        ac.signal,
-      );
-      setLiveCreate(null);
-      seededMapRef.current.set(created.id, created);
-      setFreshId(created.id);
-      setCreating(false);
-      setPickedPreset(null);
-      setLaunchMode("auto");
-      setSecCtxDraft(null);
-      setSrcCtxDraft(null);
-      setGoal("");
-      setTitle("");
-      setGoalImages([]);
-      await loadList(false);
-      go({
-        name: "deliveries",
-        id: c.id,
-        tab: "rehearsal",
-        rehearsal: created.id,
-      });
-    } catch (e) {
-      if (ac.signal.aborted) {
-        setLiveCreate(null);
-      } else {
-        setLiveCreate((prev) => (prev ? markLiveStateError(prev, e) : null));
-      }
-    } finally {
-      createAbortRef.current = null;
-    }
+    const payload = {
+      title: title.trim() || undefined,
+      goal: goal.trim(),
+      mode: effectiveMode,
+      images:
+        goalImages.length > 0
+          ? goalImages.map((im) => im.dataUrl)
+          : undefined,
+      model: pick.ref || undefined,
+      effort: pick.current?.effort?.includes(aiOpts.pref.think)
+        ? aiOpts.pref.think
+        : undefined,
+      security_context: secCtxDraft || undefined,
+    };
+    const cid = c.id;
+    startRehearsalTask<LiveAIState, ChangeRehearsal>({
+      key: createKey,
+      kind: "create",
+      clusterId: cid,
+      initialLive,
+      draft: {
+        title,
+        goal,
+        goalImages: [...goalImages],
+        launchMode,
+        secCtxDraft,
+        srcCtxDraft,
+      },
+      run: (updateLive, signal) =>
+        streamRehearsalAPI(
+          `/api/clusters/${encodeURIComponent(cid)}/rehearsals`,
+          payload,
+          updateLive,
+          signal,
+        ),
+      markError: markLiveStateError,
+      onSuccessPersist: (created) => {
+        putCached(rehearsalItemPath(cid, created.id), created);
+        window.dispatchEvent(
+          new CustomEvent(REHEARSAL_CHANGED, {
+            detail: { clusterId: cid, rehearsalId: created.id },
+          }),
+        );
+      },
+      onBackgroundDone: (created) => {
+        Message.success(
+          bi(
+            `${cid}：变更演练「${created.title || created.id}」已生成，可返回查看`,
+            `${cid}: rehearsal "${created.title || created.id}" is ready`,
+          ),
+        );
+      },
+      onBackgroundError: () => {
+        Message.error(
+          bi(
+            `${cid}：发起变更演练执行失败，请返回「变更演练」查看诊断`,
+            `${cid}: failed to create rehearsal — return to Rehearsals to inspect`,
+          ),
+        );
+      },
+    });
   };
 
   const handleReturnToDelivery = (
@@ -5165,10 +5281,15 @@ export function ClusterRehearsal({
     ? presets.find((p) => p.kind === pickedPreset)
     : null;
 
+  const clearStaleCreateErr = () => {
+    const cur = getRehearsalTask(createKey);
+    if (cur && cur.status !== "running") clearRehearsalTask(createKey);
+  };
+
   const selectSession = (item: ChangeRehearsal) => {
     setSessMenuOpen(false);
     setCreating(false);
-    setLiveCreate(null);
+    clearStaleCreateErr();
     go({
       name: "deliveries",
       id: c.id,
@@ -5193,7 +5314,7 @@ export function ClusterRehearsal({
           onClick={() => {
             setSessMenuOpen(false);
             setCreating(true);
-            setLiveCreate(null);
+            clearStaleCreateErr();
             requestAnimationFrame(() => goalRef.current?.focus({ preventScroll: true }));
           }}
         >
@@ -5442,10 +5563,10 @@ export function ClusterRehearsal({
                   setSessMenuOpen(false);
                   if (creating) {
                     setCreating(false);
-                    setLiveCreate(null);
+                    clearStaleCreateErr();
                   } else {
                     setCreating(true);
-                    setLiveCreate(null);
+                    clearStaleCreateErr();
                     requestAnimationFrame(() => goalRef.current?.focus({ preventScroll: true }));
                   }
                 }}
@@ -5535,10 +5656,10 @@ export function ClusterRehearsal({
                       onClick={() => {
                         if (creating) {
                           setCreating(false);
-                          setLiveCreate(null);
+                          clearStaleCreateErr();
                         } else {
                           setCreating(true);
-                          setLiveCreate(null);
+                          clearStaleCreateErr();
                           requestAnimationFrame(() => goalRef.current?.focus({ preventScroll: true }));
                         }
                       }}
@@ -5694,24 +5815,36 @@ export function ClusterRehearsal({
                     </span>
                     {visibleInProgress.map((item) => {
                       const on = !showLauncher && item.id === activeId;
+                      const sessionRunning = hasRunningTaskForSession(
+                        activeRehearsalTasks,
+                        c.id,
+                        item.id,
+                      );
                       return (
                         <button
                           key={item.id}
                           type="button"
-                          className={`rh-ledger-card ${on ? "on" : ""}`}
+                          className={`rh-ledger-card ${on ? "on" : ""}${sessionRunning ? " is-ai-live" : ""}`}
                           onClick={() => selectSession(item)}
                         >
                           <div className="rh-ledger-card-top">
                             <span
-                              className={`rh-sdot st-${item.stage}`}
+                              className={`rh-sdot st-${item.stage}${sessionRunning ? " is-live" : ""}`}
                               aria-hidden
                             />
                             <b>{item.title}</b>
                           </div>
                           <div className="rh-ledger-card-meta">
-                            <span className={`rh-ledger-pill st-${item.stage}`}>
-                              {stepSummary(item)}
-                            </span>
+                            {sessionRunning ? (
+                              <span className="rh-ledger-pill is-live">
+                                <i aria-hidden />
+                                {bi("AI 推演中", "AI running")}
+                              </span>
+                            ) : (
+                              <span className={`rh-ledger-pill st-${item.stage}`}>
+                                {stepSummary(item)}
+                              </span>
+                            )}
                             {item.mode === "quick" && (
                               <span className="rh-mode-pill is-quick is-xs">
                                 {bi("极速", "Quick")}
@@ -5871,7 +6004,7 @@ export function ClusterRehearsal({
                         onImported={(rid) => {
                           creatingRef.current = false;
                           setCreating(false);
-                          setLiveCreate(null);
+                          clearStaleCreateErr();
                           void loadList(false);
                           go({
                             name: "deliveries",
@@ -6282,9 +6415,9 @@ export function ClusterRehearsal({
                 <RehearsalAIProcess
                   live={liveCreate}
                   title={liveCreate.title}
-                  onAbort={() => createAbortRef.current?.abort()}
+                  onAbort={() => abortRehearsalTask(createKey)}
                   onRetry={() => void startNew()}
-                  onDismiss={() => setLiveCreate(null)}
+                  onDismiss={() => clearRehearsalTask(createKey)}
                 />
               )}
             </div>
@@ -7945,13 +8078,44 @@ function RehearsalSessionView({
 }) {
   useLang();
   const dock = useAIDock();
+  const refineKey = rehearsalTaskKey.refine(c.id, id);
+  const scopeKey = rehearsalTaskKey.scope(c.id, id);
+  const probeKey = rehearsalTaskKey.probe(c.id, id);
+  const refineTask = useRehearsalTask<LiveAIState, ChangeRehearsal>(refineKey);
+  const scopeTask = useRehearsalTask<LiveAIState, ChangeRehearsal>(scopeKey);
+  const probeTask = useRehearsalTask<LiveAIState, ChangeRehearsal>(probeKey);
+
+  const liveRefine =
+    refineTask && (refineTask.status === "running" || refineTask.status === "error")
+      ? refineTask.live
+      : null;
+  const liveScope =
+    scopeTask && (scopeTask.status === "running" || scopeTask.status === "error")
+      ? scopeTask.live
+      : null;
+  const liveProbe =
+    probeTask && (probeTask.status === "running" || probeTask.status === "error")
+      ? probeTask.live
+      : null;
+  const [localProbeAction, setLocalProbeAction] = useState<"analyze" | "diagnose">(
+    () => getRehearsalTask(probeKey)?.probeAction || "analyze",
+  );
+  const probeAction: "analyze" | "diagnose" =
+    probeTask?.probeAction || localProbeAction;
+
   const [r, setR] = useState<ChangeRehearsal | null>(
     () => initialSession || null,
   );
   const [loadErr, setLoadErr] = useState("");
-  const [viewStage, setViewStage] = useState<ChangeRehearsal["stage"]>(
-    () => initialSession?.stage || "scoping",
-  );
+  const [viewStage, setViewStage] = useState<ChangeRehearsal["stage"]>(() => {
+    const st = getRehearsalTask(scopeKey);
+    if (isRehearsalTaskLive(st)) return "probing";
+    const pt = getRehearsalTask(probeKey);
+    if (isRehearsalTaskLive(pt)) {
+      return pt?.probeAction === "diagnose" ? "probing" : "rehearsing";
+    }
+    return initialSession?.stage || "scoping";
+  });
   const viewStageRef = useRef<ChangeRehearsal["stage"]>(viewStage);
   viewStageRef.current = viewStage;
   const [stageDir, setStageDir] = useState<"fwd" | "back">("fwd");
@@ -7959,13 +8123,6 @@ function RehearsalSessionView({
   const [loading, setLoading] = useState(() => !initialSession);
   const [busyFinalize, setBusyFinalize] = useState(false);
 
-  // Live streaming states for Refine, Stage 1 -> 2, and Stage 2 -> 3
-  const [liveRefine, setLiveRefine] = useState<LiveAIState | null>(null);
-  const [liveScope, setLiveScope] = useState<LiveAIState | null>(null);
-  const [liveProbe, setLiveProbe] = useState<LiveAIState | null>(null);
-  const [probeAction, setProbeAction] = useState<"analyze" | "diagnose">(
-    "analyze",
-  );
   const [freshTraceStage, setFreshTraceStage] = useState<string>(
     autoExpandCreateTrace ? "create" : "",
   );
@@ -7982,7 +8139,6 @@ function RehearsalSessionView({
   const [stripRolloutOpen, setStripRolloutOpen] = useState(false);
   const [rolloutBoardOverride, setRolloutBoardOverride] =
     useState<RolloutBoardResponse | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
 
   // Stage bar spring indicator
   const stageNavRef = useRef<HTMLElement | null>(null);
@@ -7990,29 +8146,48 @@ function RehearsalSessionView({
     null,
   );
 
-  // Step 1 state
+  // Step 1 state (restoring draft if scope task is live)
   const [answers, setAnswers] = useState<Record<string, string>>(() => {
+    const draftAns = getRehearsalTask(scopeKey)?.draft?.answers as
+      | Record<string, string>
+      | undefined;
+    if (draftAns) return { ...draftAns };
     const init: Record<string, string> = {};
     (initialSession?.scope_questions || []).forEach((q) => {
       if (q.answer) init[q.id] = q.answer;
     });
     return init;
   });
-  const [extraScope, setExtraScope] = useState(
-    () => initialSession?.extra_scope || "",
-  );
+  const [extraScope, setExtraScope] = useState(() => {
+    const draftEx = getRehearsalTask(scopeKey)?.draft?.extraScope;
+    if (typeof draftEx === "string") return draftEx;
+    return initialSession?.extra_scope || "";
+  });
 
-  // Step 2 state
-  const [probeOut, setProbeOut] = useState(
-    () => initialSession?.probe_output || initialSession?.manual_state || "",
-  );
-  const [probeImages, setProbeImages] = useState<DraftImage[]>([]);
+  // Step 2 state (restoring draft if probe task is live)
+  const [probeOut, setProbeOut] = useState(() => {
+    const draftOut = getRehearsalTask(probeKey)?.draft?.probeOut;
+    if (typeof draftOut === "string") return draftOut;
+    return initialSession?.probe_output || initialSession?.manual_state || "";
+  });
+  const [probeImages, setProbeImages] = useState<DraftImage[]>(() => {
+    const draftImgs = getRehearsalTask(probeKey)?.draft?.probeImages as
+      | DraftImage[]
+      | undefined;
+    return draftImgs ? [...draftImgs] : [];
+  });
   const [dragProbe, setDragProbe] = useState(false);
-  const [testEnvNote, setTestEnvNote] = useState(
-    () => initialSession?.test_env_note || "",
-  );
+  const [testEnvNote, setTestEnvNote] = useState(() => {
+    const draftEnv = getRehearsalTask(probeKey)?.draft?.testEnvNote;
+    if (typeof draftEnv === "string") return draftEnv;
+    return initialSession?.test_env_note || "";
+  });
   const [testEnvOpen, setTestEnvOpen] = useState(() =>
-    Boolean(initialSession?.test_env_note?.trim()),
+    Boolean(
+      (typeof getRehearsalTask(probeKey)?.draft?.testEnvNote === "string" &&
+        String(getRehearsalTask(probeKey)?.draft?.testEnvNote).trim()) ||
+        initialSession?.test_env_note?.trim(),
+    ),
   );
   const probeImgInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -8032,7 +8207,6 @@ function RehearsalSessionView({
   useEffect(() => {
     setGoalOpen(false);
     setRefineOpen(false);
-    setLiveRefine(null);
     setRefineAddImgs([]);
     setRolloutBoardOverride(null);
     setStripPropagateOpen(false);
@@ -8147,7 +8321,10 @@ function RehearsalSessionView({
       );
       putCached(rehearsalItemPath(c.id, id), data);
       setR(data);
-      if (syncStage) {
+      const hasActiveStageTask =
+        isRehearsalTaskLive(getRehearsalTask(scopeKey)) ||
+        isRehearsalTaskLive(getRehearsalTask(probeKey));
+      if (syncStage && !hasActiveStageTask) {
         viewStageRef.current = data.stage;
         setViewStage(data.stage);
       }
@@ -8170,6 +8347,95 @@ function RehearsalSessionView({
       setLoading(false);
     }
   };
+
+  // Consume completed refine / scope / probe background tasks cleanly on mount or live arrival
+  useEffect(() => {
+    if (refineTask?.status !== "done" || !refineTask.result) return;
+    const next = refineTask.result;
+    clearRehearsalTask(refineKey);
+    setRefineOpen(false);
+    setRefineAddImgs([]);
+    setR(next);
+    const nextAns: Record<string, string> = {};
+    (next.scope_questions || []).forEach((q) => {
+      if (q.answer) nextAns[q.id] = q.answer;
+    });
+    setAnswers(nextAns);
+    setExtraScope(next.extra_scope || "");
+    setProbeOut("");
+    setProbeImages([]);
+    setPhaseFilter("all");
+    setFreshTraceStage("create");
+    switchStage(next.stage, true);
+    void onListChanged();
+    if (!refineTask.notified) {
+      Message.success(
+        next.intent_unclear
+          ? bi(
+              "已重新研判诉求，请核对下方识别结果并补全细节",
+              "Goal re-analyzed; please verify the recognized intent below",
+            )
+          : bi(
+              "已按新诉求重新研判并刷新演练方案",
+              "Rehearsal refreshed with your refined goal",
+            ),
+      );
+    }
+  }, [refineTask, refineKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (scopeTask?.status !== "done" || !scopeTask.result) return;
+    const next = scopeTask.result;
+    clearRehearsalTask(scopeKey);
+    setR(next);
+    setFreshTraceStage("scope");
+    switchStage(next.stage, true);
+    void onListChanged();
+    if (!scopeTask.notified) {
+      Message.success(
+        bi(
+          "已生成只读状态采集脚本并通过静态安全扫描",
+          "Read-only probe generated and passed static safety scan",
+        ),
+      );
+    }
+  }, [scopeTask, scopeKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (probeTask?.status !== "done" || !probeTask.result) return;
+    const next = probeTask.result;
+    clearRehearsalTask(probeKey);
+    setR(next);
+    setProbeImages([]);
+    setFreshTraceStage("probe");
+    void onListChanged();
+    if (next.probe_issue) {
+      switchStage("probing", true);
+      if (!probeTask.notified) {
+        Message.warning(
+          next.probe_issue.script_updated
+            ? bi(
+                "探针未拿到有效数据，已阻断漂移分析并自动更新修复版只读脚本，请重新采集",
+                "Probe failed; blocked drift analysis and updated the read-only script—please re-run",
+              )
+            : bi(
+                "未拿到有效现场结果，已阻断进入漂移分析，请按下方诊断修复后重新采集",
+                "No valid live probe result; blocked drift analysis—follow fix guidance and re-run",
+              ),
+        );
+      }
+    } else {
+      switchStage(next.stage, true);
+      if (!probeTask.notified) {
+        Message.success(
+          bi(
+            "现场采集核验通过，已完成漂移分析并生成测试演练步骤",
+            "Probe verified; drift analysis and rehearsal steps generated",
+          ),
+        );
+      }
+    }
+  }, [probeTask, probeKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (initialSession && initialSession.id === id) {
@@ -8324,7 +8590,8 @@ function RehearsalSessionView({
   const openRefine = () => {
     if (!canRefine || anyBusy) return;
     setGoalOpen(false);
-    setLiveRefine(null);
+    const curRef = getRehearsalTask(refineKey);
+    if (curRef && curRef.status !== "running") clearRehearsalTask(refineKey);
     setRefineTitle(r.title || "");
     setRefineGoal(r.goal || "");
     setRefineMode(r.security_context ? "full" : "auto");
@@ -8399,187 +8666,184 @@ function RehearsalSessionView({
       return;
     }
     onEngageFocus?.();
-    const ac = new AbortController();
-    abortRef.current = ac;
     const effectiveMode: RehearsalModeChoice = r.security_context
       ? "full"
       : refineMode;
     const effortVal = pick.current?.effort?.includes(aiOpts.pref.think)
       ? aiOpts.pref.think
       : undefined;
-    setLiveRefine(
-      createInitialLiveState(
-        effectiveMode === "quick"
-          ? "create-quick"
-          : effectiveMode === "light"
-            ? "create-light"
-            : "create",
-        bi("AI 正在按修正后的诉求重新研判", "AI is re-analyzing with your refined goal"),
-        bi(
-          "正在核对集群基线与新诉求，重新生成需求确认项、探针或步骤…",
-          "Re-checking cluster baseline against the revised goal…",
-        ),
-        pick.current,
+    const initialLive = createInitialLiveState(
+      effectiveMode === "quick"
+        ? "create-quick"
+        : effectiveMode === "light"
+          ? "create-light"
+          : "create",
+      bi("AI 正在按修正后的诉求重新研判", "AI is re-analyzing with your refined goal"),
+      bi(
+        "正在核对集群基线与新诉求，重新生成需求确认项、探针或步骤…",
+        "Re-checking cluster baseline against the revised goal…",
       ),
+      pick.current,
     );
-    try {
-      const nextTitle = refineTitle.trim();
-      const customTitle =
-        nextTitle && nextTitle !== (r.title || "").trim() ? nextTitle : "";
-      const payload = {
-        title: customTitle || undefined,
-        goal: trimmedGoal,
-        mode: effectiveMode,
-        keep_images: refineKeepImgs,
-        add_images:
-          refineAddImgs.length > 0
-            ? refineAddImgs.map((x) => x.dataUrl)
-            : undefined,
-        model: pick.ref || undefined,
-        effort: effortVal,
-      };
-      const next = await streamRehearsalAPI(
-        `/api/clusters/${encodeURIComponent(c.id)}/rehearsals/${encodeURIComponent(r.id)}/refine`,
-        payload,
-        (updater) => setLiveRefine((prev) => (prev ? updater(prev) : prev)),
-        ac.signal,
-      );
-      setLiveRefine(null);
-      setRefineOpen(false);
-      setRefineAddImgs([]);
-      setR(next);
-      const nextAns: Record<string, string> = {};
-      (next.scope_questions || []).forEach((q) => {
-        if (q.answer) nextAns[q.id] = q.answer;
-      });
-      setAnswers(nextAns);
-      setExtraScope(next.extra_scope || "");
-      setProbeOut("");
-      setProbeImages([]);
-      setPhaseFilter("all");
-      setFreshTraceStage("create");
-      switchStage(next.stage, true);
-      void onListChanged();
-      Message.success(
-        next.intent_unclear
-          ? bi(
-              "已重新研判诉求，请核对下方识别结果并补全细节",
-              "Goal re-analyzed; please verify the recognized intent below",
-            )
-          : bi(
-              "已按新诉求重新研判并刷新演练方案",
-              "Rehearsal refreshed with your refined goal",
-            ),
-      );
-    } catch (e) {
-      if (ac.signal.aborted) {
-        setLiveRefine(null);
-      } else {
-        setLiveRefine((prev) => (prev ? markLiveStateError(prev, e) : null));
-      }
-    } finally {
-      abortRef.current = null;
-    }
+    const nextTitle = refineTitle.trim();
+    const customTitle =
+      nextTitle && nextTitle !== (r.title || "").trim() ? nextTitle : "";
+    const payload = {
+      title: customTitle || undefined,
+      goal: trimmedGoal,
+      mode: effectiveMode,
+      keep_images: refineKeepImgs,
+      add_images:
+        refineAddImgs.length > 0
+          ? refineAddImgs.map((x) => x.dataUrl)
+          : undefined,
+      model: pick.ref || undefined,
+      effort: effortVal,
+    };
+    const cid = c.id;
+    const rid = r.id;
+    startRehearsalTask<LiveAIState, ChangeRehearsal>({
+      key: refineKey,
+      kind: "refine",
+      clusterId: cid,
+      rehearsalId: rid,
+      initialLive,
+      run: (updateLive, signal) =>
+        streamRehearsalAPI(
+          `/api/clusters/${encodeURIComponent(cid)}/rehearsals/${encodeURIComponent(rid)}/refine`,
+          payload,
+          updateLive,
+          signal,
+        ),
+      markError: markLiveStateError,
+      onSuccessPersist: (next) => {
+        putCached(rehearsalItemPath(cid, next.id), next);
+        window.dispatchEvent(
+          new CustomEvent(REHEARSAL_CHANGED, {
+            detail: { clusterId: cid, rehearsalId: next.id },
+          }),
+        );
+      },
+      onBackgroundDone: (next) => {
+        Message.success(
+          bi(
+            `${cid}：演练诉求重新研判完成（${next.title || rid}），可返回查看`,
+            `${cid}: refined rehearsal "${next.title || rid}" is ready`,
+          ),
+        );
+      },
+      onBackgroundError: () => {
+        Message.error(
+          bi(
+            `${cid}：重新研判演练失败，请返回「变更演练」查看诊断`,
+            `${cid}: rehearsal refinement failed — return to Rehearsals to inspect`,
+          ),
+        );
+      },
+    });
   };
 
   const submitScope = async () => {
     if (offline || scopeBusy) return;
     onEngageFocus?.();
-    const ac = new AbortController();
-    abortRef.current = ac;
     const effortVal = pick.current?.effort?.includes(aiOpts.pref.think)
       ? aiOpts.pref.think
       : undefined;
-    setLiveScope(
-      createInitialLiveState(
-        "scope",
-        bi("AI 正在定制生产只读采集探针", "AI is building read-only production probe"),
-        bi(
-          "正在锁定只读安全红线并建立模型连接…",
-          "Locking read-only safety guardrails & connecting…",
-        ),
-        pick.current,
+    const initialLive = createInitialLiveState(
+      "scope",
+      bi("AI 正在定制生产只读采集探针", "AI is building read-only production probe"),
+      bi(
+        "正在锁定只读安全红线并建立模型连接…",
+        "Locking read-only safety guardrails & connecting…",
       ),
+      pick.current,
     );
     switchStage("probing", true);
-    try {
-      const payload = {
-        answers: (r.scope_questions || []).map((q) => ({
-          id: q.id,
-          question: q.question,
-          answer: (answers[q.id] || "").trim(),
-        })),
-        extra: extraScope.trim(),
-        model: pick.ref || undefined,
-        effort: effortVal,
-      };
-      const next = await streamRehearsalAPI(
-        `/api/clusters/${encodeURIComponent(c.id)}/rehearsals/${encodeURIComponent(r.id)}/scope`,
-        payload,
-        (updater) => setLiveScope((prev) => (prev ? updater(prev) : prev)),
-        ac.signal,
-      );
-      setLiveScope(null);
-      setR(next);
-      setFreshTraceStage("scope");
-      switchStage(next.stage, true);
-      void onListChanged();
-      Message.success(
-        bi(
-          "已生成只读状态采集脚本并通过静态安全扫描",
-          "Read-only probe generated and passed static safety scan",
+    const payload = {
+      answers: (r.scope_questions || []).map((q) => ({
+        id: q.id,
+        question: q.question,
+        answer: (answers[q.id] || "").trim(),
+      })),
+      extra: extraScope.trim(),
+      model: pick.ref || undefined,
+      effort: effortVal,
+    };
+    const cid = c.id;
+    const rid = r.id;
+    startRehearsalTask<LiveAIState, ChangeRehearsal>({
+      key: scopeKey,
+      kind: "scope",
+      clusterId: cid,
+      rehearsalId: rid,
+      initialLive,
+      draft: {
+        answers: { ...answers },
+        extraScope,
+      },
+      run: (updateLive, signal) =>
+        streamRehearsalAPI(
+          `/api/clusters/${encodeURIComponent(cid)}/rehearsals/${encodeURIComponent(rid)}/scope`,
+          payload,
+          updateLive,
+          signal,
         ),
-      );
-    } catch (e) {
-      if (ac.signal.aborted) {
-        setLiveScope(null);
-        switchStage("scoping");
-        Message.info(
+      markError: markLiveStateError,
+      onSuccessPersist: (next) => {
+        putCached(rehearsalItemPath(cid, next.id), next);
+        window.dispatchEvent(
+          new CustomEvent(REHEARSAL_CHANGED, {
+            detail: { clusterId: cid, rehearsalId: next.id },
+          }),
+        );
+      },
+      onBackgroundDone: () => {
+        Message.success(
           bi(
-            "已停止生成，已返回「边界对齐」",
-            "Stopped — returned to Scope Alignment",
+            `${cid}：只读采集探针已生成并通过安全扫描，可返回「变更演练」查看`,
+            `${cid}: read-only probe is ready in Rehearsals`,
           ),
         );
-      } else {
-        setLiveScope((prev) => (prev ? markLiveStateError(prev, e) : null));
-      }
-    } finally {
-      abortRef.current = null;
-    }
+      },
+      onBackgroundError: () => {
+        Message.error(
+          bi(
+            `${cid}：生成只读探针失败，请返回「变更演练」查看诊断`,
+            `${cid}: probe generation failed — return to Rehearsals to inspect`,
+          ),
+        );
+      },
+    });
   };
 
   const submitProbe = async (action: "analyze" | "diagnose" = "analyze") => {
     if (offline || probeBusy) return;
     onEngageFocus?.();
-    setProbeAction(action);
-    const ac = new AbortController();
-    abortRef.current = ac;
+    setLocalProbeAction(action);
     const effortVal = pick.current?.effort?.includes(aiOpts.pref.think)
       ? aiOpts.pref.think
       : undefined;
-    setLiveProbe(
-      createInitialLiveState(
-        "probe",
-        action === "diagnose"
-          ? bi(
-              "AI 正在诊断探针报错并修订只读脚本",
-              "AI is diagnosing probe error & revising read-only script",
-            )
-          : bi(
-              "AI 正在校验探针结果并比对现场漂移",
-              "AI is verifying probe results & analyzing live drift",
-            ),
-        action === "diagnose"
-          ? bi(
-              "正在脱敏报错回显并定位脚本兼容性或权限问题…",
-              "Redacting error output & analyzing script compatibility...",
-            )
-          : bi(
-              "正在脱敏现场证据并先核验采集结果有效性…",
-              "Redacting live evidence & checking probe validity first...",
-            ),
-        pick.current,
-      ),
+    const initialLive = createInitialLiveState(
+      "probe",
+      action === "diagnose"
+        ? bi(
+            "AI 正在诊断探针报错并修订只读脚本",
+            "AI is diagnosing probe error & revising read-only script",
+          )
+        : bi(
+            "AI 正在校验探针结果并比对现场漂移",
+            "AI is verifying probe results & analyzing live drift",
+          ),
+      action === "diagnose"
+        ? bi(
+            "正在脱敏报错回显并定位脚本兼容性或权限问题…",
+            "Redacting error output & analyzing script compatibility...",
+          )
+        : bi(
+            "正在脱敏现场证据并先核验采集结果有效性…",
+            "Redacting live evidence & checking probe validity first...",
+          ),
+      pick.current,
     );
     if (action === "analyze") {
       switchStage("rehearsing", true);
@@ -8591,74 +8855,75 @@ function RehearsalSessionView({
         });
       });
     }
-    try {
-      const imgs =
-        probeImages.length > 0
-          ? probeImages.map((im) => im.dataUrl)
-          : undefined;
-      const modelRef = pick.ref || undefined;
-      const payload = {
-        probe_output: probeOut,
-        test_env_note: testEnvNote,
-        images: imgs,
-        mode: action,
-        model: modelRef,
-        effort: effortVal,
-      };
-      const next = await streamRehearsalAPI(
-        `/api/clusters/${encodeURIComponent(c.id)}/rehearsals/${encodeURIComponent(r.id)}/probe`,
-        payload,
-        (updater) => setLiveProbe((prev) => (prev ? updater(prev) : prev)),
-        ac.signal,
-      );
-      setLiveProbe(null);
-      setR(next);
-      setProbeImages([]);
-      setFreshTraceStage("probe");
-      void onListChanged();
-      if (next.probe_issue) {
-        switchStage("probing", true);
-        Message.warning(
-          next.probe_issue.script_updated
-            ? bi(
-                "探针未拿到有效数据，已阻断漂移分析并自动更新修复版只读脚本，请重新采集",
-                "Probe failed; blocked drift analysis and updated the read-only script—please re-run",
-              )
-            : bi(
-                "未拿到有效现场结果，已阻断进入漂移分析，请按下方诊断修复后重新采集",
-                "No valid live probe result; blocked drift analysis—follow fix guidance and re-run",
-              ),
+    const imgs =
+      probeImages.length > 0
+        ? probeImages.map((im) => im.dataUrl)
+        : undefined;
+    const modelRef = pick.ref || undefined;
+    const payload = {
+      probe_output: probeOut,
+      test_env_note: testEnvNote,
+      images: imgs,
+      mode: action,
+      model: modelRef,
+      effort: effortVal,
+    };
+    const cid = c.id;
+    const rid = r.id;
+    startRehearsalTask<LiveAIState, ChangeRehearsal>({
+      key: probeKey,
+      kind: "probe",
+      clusterId: cid,
+      rehearsalId: rid,
+      probeAction: action,
+      initialLive,
+      draft: {
+        probeOut,
+        testEnvNote,
+        probeImages: [...probeImages],
+      },
+      run: (updateLive, signal) =>
+        streamRehearsalAPI(
+          `/api/clusters/${encodeURIComponent(cid)}/rehearsals/${encodeURIComponent(rid)}/probe`,
+          payload,
+          updateLive,
+          signal,
+        ),
+      markError: markLiveStateError,
+      onSuccessPersist: (next) => {
+        putCached(rehearsalItemPath(cid, next.id), next);
+        window.dispatchEvent(
+          new CustomEvent(REHEARSAL_CHANGED, {
+            detail: { clusterId: cid, rehearsalId: next.id },
+          }),
         );
-      } else {
-        switchStage(next.stage, true);
-        Message.success(
-          bi(
-            "现场采集核验通过，已完成漂移分析并生成测试演练步骤",
-            "Probe verified; drift analysis and rehearsal steps generated",
-          ),
-        );
-      }
-    } catch (e) {
-      if (ac.signal.aborted) {
-        setLiveProbe(null);
-        if (action === "analyze") {
-          switchStage("probing");
-          const probeLabel = isLightMode
-            ? bi("极简探针", "Quick Probe")
-            : bi("只读探针", "Read-Only Probe");
-          Message.info(
+      },
+      onBackgroundDone: (next) => {
+        if (next.probe_issue) {
+          Message.warning(
             bi(
-              `已停止分析，已返回「${probeLabel}」`,
-              `Stopped — returned to ${probeLabel}`,
+              `${cid}：探针结果未通过核验，请返回「变更演练」查看诊断`,
+              `${cid}: probe did not pass verification — return to Rehearsals for diagnosis`,
+            ),
+          );
+        } else {
+          Message.success(
+            bi(
+              `${cid}：现场漂移比对与演练步骤已生成，可返回「变更演练」查看`,
+              `${cid}: drift analysis and rehearsal steps are ready`,
             ),
           );
         }
-      } else {
-        setLiveProbe((prev) => (prev ? markLiveStateError(prev, e) : null));
-      }
-    } finally {
-      abortRef.current = null;
-    }
+      },
+      onBackgroundError: () => {
+        Message.error(
+          bi(
+            `${cid}：探针分析中断，请返回「变更演练」查看诊断`,
+            `${cid}: probe analysis failed — return to Rehearsals to inspect`,
+          ),
+        );
+      },
+    });
   };
 
   const finalizeSOP = async () => {
@@ -9232,9 +9497,9 @@ function RehearsalSessionView({
         <RehearsalAIProcess
           live={liveRefine}
           title={liveRefine.title}
-          onAbort={() => abortRef.current?.abort()}
+          onAbort={() => abortRehearsalTask(refineKey)}
           onRetry={() => void submitRefine()}
-          onDismiss={() => setLiveRefine(null)}
+          onDismiss={() => clearRehearsalTask(refineKey)}
         />
       ) : (
         <>
@@ -9483,10 +9748,19 @@ function RehearsalSessionView({
               <RehearsalAIProcess
                 live={liveScope}
                 title={liveScope.title}
-                onAbort={() => abortRef.current?.abort()}
+                onAbort={() => {
+                  abortRehearsalTask(scopeKey);
+                  switchStage("scoping");
+                  Message.info(
+                    bi(
+                      "已停止生成，已返回「边界对齐」",
+                      "Stopped — returned to Scope Alignment",
+                    ),
+                  );
+                }}
                 onRetry={() => void submitScope()}
                 onDismiss={() => {
-                  setLiveScope(null);
+                  clearRehearsalTask(scopeKey);
                   switchStage("scoping");
                 }}
               />
@@ -9494,9 +9768,12 @@ function RehearsalSessionView({
               <RehearsalAIProcess
                 live={liveProbe}
                 title={liveProbe.title}
-                onAbort={() => abortRef.current?.abort()}
+                onAbort={() => {
+                  abortRehearsalTask(probeKey);
+                  Message.info(bi("已停止诊断", "Diagnosis stopped"));
+                }}
                 onRetry={() => void submitProbe("diagnose")}
-                onDismiss={() => setLiveProbe(null)}
+                onDismiss={() => clearRehearsalTask(probeKey)}
               />
             ) : (
               <>
@@ -9923,10 +10200,22 @@ function RehearsalSessionView({
               <RehearsalAIProcess
                 live={liveProbe}
                 title={liveProbe.title}
-                onAbort={() => abortRef.current?.abort()}
+                onAbort={() => {
+                  abortRehearsalTask(probeKey);
+                  switchStage("probing");
+                  const probeLabel = isLightMode
+                    ? bi("极简探针", "Quick Probe")
+                    : bi("只读探针", "Read-Only Probe");
+                  Message.info(
+                    bi(
+                      `已停止分析，已返回「${probeLabel}」`,
+                      `Stopped — returned to ${probeLabel}`,
+                    ),
+                  );
+                }}
                 onRetry={() => void submitProbe("analyze")}
                 onDismiss={() => {
-                  setLiveProbe(null);
+                  clearRehearsalTask(probeKey);
                   switchStage("probing");
                 }}
               />
@@ -11214,9 +11503,18 @@ function StepRow({
 }) {
   useLang();
   const dock = useAIDock();
+  const verifyKey = rehearsalTaskKey.verify(c.id, rehearsalId, step.id);
+  const verifyTask = useRehearsalTask<LiveAIState, ChangeRehearsal>(verifyKey);
+  const liveVerify =
+    verifyTask && (verifyTask.status === "running" || verifyTask.status === "error")
+      ? verifyTask.live
+      : null;
+
   const isRollback = step.phase === "rollback";
   const isDone = step.status === "passed" || step.status === "skipped";
-  const [collapsed, setCollapsed] = useState(() => isDone);
+  const [collapsed, setCollapsed] = useState(
+    () => isDone && !isRehearsalTaskLive(getRehearsalTask(verifyKey)),
+  );
   const [tearing, setTearing] = useState(false);
   const [justSettled, setJustSettled] = useState(false);
   const prevStatusRef = useRef(step.status);
@@ -11241,19 +11539,26 @@ function StepRow({
   );
   const [verifyOpen, setVerifyOpen] = useState(
     () =>
+      isRehearsalTaskLive(getRehearsalTask(verifyKey)) ||
       (!isRollback && isActiveStep) ||
       step.status === "failed" ||
       Boolean(step.proposal),
   );
-  const [evidText, setEvidText] = useState(step.last_error || "");
-  const [evidImages, setEvidImages] = useState<DraftImage[]>([]);
+  const [evidText, setEvidText] = useState(() => {
+    const d = getRehearsalTask(verifyKey)?.draft?.evidText;
+    return typeof d === "string" ? d : step.last_error || "";
+  });
+  const [evidImages, setEvidImages] = useState<DraftImage[]>(() => {
+    const d = getRehearsalTask(verifyKey)?.draft?.evidImages as
+      | DraftImage[]
+      | undefined;
+    return d ? [...d] : [];
+  });
   const [dragEvid, setDragEvid] = useState(false);
-  const [liveVerify, setLiveVerify] = useState<LiveAIState | null>(null);
   const [freshVerify, setFreshVerify] = useState(false);
   const [verifyFlash, setVerifyFlash] = useState(false);
   const [busy, setBusy] = useState("");
 
-  const verifyAbortRef = useRef<AbortController | null>(null);
   const evidImgInputRef = useRef<HTMLInputElement | null>(null);
   const verifyBoxRef = useRef<HTMLDivElement | null>(null);
   const onStepSettledRef = useRef(onStepSettled);
@@ -11339,12 +11644,16 @@ function StepRow({
     if (!step.proposal) {
       setEditingProposalCmd(false);
     }
-    if (step.status === "failed" || step.proposal) {
+    if (
+      step.status === "failed" ||
+      step.proposal ||
+      isRehearsalTaskLive(getRehearsalTask(verifyKey))
+    ) {
       setVerifyOpen(true);
     } else if (step.status === "passed" || step.status === "skipped") {
       setVerifyOpen(false);
     }
-  }, [step.command, resolvedSubCmds, step.note, step.status, step.proposal]);
+  }, [step.command, resolvedSubCmds, step.note, step.status, step.proposal, verifyKey]);
 
   useEffect(() => {
     if (!isRollback && isActiveStep && step.status === "pending") {
@@ -11449,74 +11758,116 @@ function StepRow({
   const verifyBusy = Boolean(liveVerify && !liveVerify.error);
   const hasEvidInput = Boolean(evidText.trim()) || evidImages.length > 0;
 
-  const askVerify = async () => {
-    if (!hasEvidInput || offline || verifyBusy) return;
-    onEngageFocus?.();
-    const ac = new AbortController();
-    verifyAbortRef.current = ac;
-    const effortVal = pick.current?.effort?.includes(aiOpts.pref.think)
-      ? aiOpts.pref.think
-      : undefined;
-    setLiveVerify(
-      createInitialLiveState(
-        "verify",
-        bi(
-          "AI 正在对照预期判据核验此步执行结果",
-          "AI is verifying step output against pass criteria",
-        ),
-        bi(
-          "正在脱敏执行证据并核验是否通过，未通过将给出根因与修正方案…",
-          "Redacting output & evaluating pass criteria or diagnosing issues...",
-        ),
-        pick.current,
-      ),
-    );
-    try {
-      const next = await streamRehearsalAPI(
-        `${baseUrl}/verify`,
-        {
-          output: evidText,
-          images:
-            evidImages.length > 0
-              ? evidImages.map((im) => im.dataUrl)
-              : undefined,
-          model: pick.ref || undefined,
-          effort: effortVal,
-        },
-        (updater) => setLiveVerify((prev) => (prev ? updater(prev) : prev)),
-        ac.signal,
-      );
-      setLiveVerify(null);
-      setEvidImages([]);
-      setFreshVerify(true);
-      onUpdated(next);
-      const updatedStep = (next.steps || []).find((s) => s.id === step.id);
-      if (updatedStep?.status === "passed") {
-        setEvidText("");
-        setVerifyOpen(false);
+  // Consume completed background/foreground step verification task cleanly
+  useEffect(() => {
+    if (verifyTask?.status !== "done" || !verifyTask.result) return;
+    const next = verifyTask.result;
+    clearRehearsalTask(verifyKey);
+    setEvidImages([]);
+    setFreshVerify(true);
+    onUpdated(next);
+    const updatedStep = (next.steps || []).find((s) => s.id === step.id);
+    if (updatedStep?.status === "passed") {
+      setEvidText("");
+      setVerifyOpen(false);
+      if (!verifyTask.notified) {
         Message.success(
           bi(
             `步骤 #${step.order || index} AI 核验通过，已自动回写实测结论`,
             `Step #${step.order || index} verified PASSED by AI`,
           ),
         );
-      } else {
-        Message.warning(
+      }
+    } else if (!verifyTask.notified) {
+      Message.warning(
+        bi(
+          `步骤 #${step.order || index} 未通过核验，请查看下方 AI 诊断与修正建议`,
+          `Step #${step.order || index} did not pass—see AI diagnosis below`,
+        ),
+      );
+    }
+  }, [verifyTask, verifyKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const askVerify = async () => {
+    if (!hasEvidInput || offline || verifyBusy) return;
+    onEngageFocus?.();
+    const effortVal = pick.current?.effort?.includes(aiOpts.pref.think)
+      ? aiOpts.pref.think
+      : undefined;
+    const initialLive = createInitialLiveState(
+      "verify",
+      bi(
+        "AI 正在对照预期判据核验此步执行结果",
+        "AI is verifying step output against pass criteria",
+      ),
+      bi(
+        "正在脱敏执行证据并核验是否通过，未通过将给出根因与修正方案…",
+        "Redacting output & evaluating pass criteria or diagnosing issues...",
+      ),
+      pick.current,
+    );
+    const payload = {
+      output: evidText,
+      images:
+        evidImages.length > 0
+          ? evidImages.map((im) => im.dataUrl)
+          : undefined,
+      model: pick.ref || undefined,
+      effort: effortVal,
+    };
+    const cid = c.id;
+    const rid = rehearsalId;
+    const sid = step.id;
+    const stepNo = step.order || index;
+    startRehearsalTask<LiveAIState, ChangeRehearsal>({
+      key: verifyKey,
+      kind: "verify",
+      clusterId: cid,
+      rehearsalId: rid,
+      stepId: sid,
+      initialLive,
+      draft: {
+        evidText,
+        evidImages: [...evidImages],
+      },
+      run: (updateLive, signal) =>
+        streamRehearsalAPI(`${baseUrl}/verify`, payload, updateLive, signal),
+      markError: markLiveStateError,
+      onSuccessPersist: (next) => {
+        putCached(rehearsalItemPath(cid, next.id), next);
+        window.dispatchEvent(
+          new CustomEvent(REHEARSAL_CHANGED, {
+            detail: { clusterId: cid, rehearsalId: next.id },
+          }),
+        );
+      },
+      onBackgroundDone: (next) => {
+        const updatedStep = (next.steps || []).find((s) => s.id === sid);
+        if (updatedStep?.status === "passed") {
+          Message.success(
+            bi(
+              `${cid} 步骤 #${stepNo} AI 核验已通过`,
+              `${cid} Step #${stepNo} verified PASSED by AI`,
+            ),
+          );
+        } else {
+          Message.warning(
+            bi(
+              `${cid} 步骤 #${stepNo} 未通过核验，请返回「变更演练」查看诊断`,
+              `${cid} Step #${stepNo} failed verification — return to Rehearsals for diagnosis`,
+            ),
+          );
+        }
+      },
+      onBackgroundError: () => {
+        Message.error(
           bi(
-            `步骤 #${step.order || index} 未通过核验，请查看下方 AI 诊断与修正建议`,
-            `Step #${step.order || index} did not pass—see AI diagnosis below`,
+            `${cid} 步骤 #${stepNo} AI 核验失败，请返回「变更演练」查看诊断`,
+            `${cid} Step #${stepNo} verification failed — return to Rehearsals`,
           ),
         );
-      }
-    } catch (e) {
-      if (ac.signal.aborted) {
-        setLiveVerify(null);
-      } else {
-        setLiveVerify((prev) => (prev ? markLiveStateError(prev, e) : null));
-      }
-    } finally {
-      verifyAbortRef.current = null;
-    }
+      },
+    });
   };
 
   const applyProposal = async () => {
@@ -12328,9 +12679,9 @@ function StepRow({
                 <RehearsalAIProcess
                   live={liveVerify}
                   title={liveVerify.title}
-                  onAbort={() => verifyAbortRef.current?.abort()}
+                  onAbort={() => abortRehearsalTask(verifyKey)}
                   onRetry={() => void askVerify()}
-                  onDismiss={() => setLiveVerify(null)}
+                  onDismiss={() => clearRehearsalTask(verifyKey)}
                 />
               )}
 

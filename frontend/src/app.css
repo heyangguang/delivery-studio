@@ -769,6 +769,46 @@ body[arco-theme="dark"] .avatar.admin {
   min-width: 48px;
   justify-content: center;
 }
+.row-ai-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 620;
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+  border: 1px solid var(--brand-line);
+  white-space: nowrap;
+}
+.row-ai-live i,
+.rh-tab-live-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--brand);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--brand) 50%, transparent);
+  animation: rh-live-pulse 1.8s ease-out infinite;
+}
+.rh-tab-live-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+@keyframes rh-live-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--brand) 55%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 5px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
 .row.on .row-name {
   color: var(--brand-ink);
 }

@@ -1,6 +1,10 @@
 import {displayInstances,hostStorage} from "./topology";
 import { ExecutionHostSummary } from "./execution-placement";
 import {SchemeInfo, schemeName} from "./scheme";
+import {
+  hasRunningTaskForCluster,
+  useActiveRehearsalTasks,
+} from "./rehearsal_live";
 import React, {
   useCallback,
   useEffect,
@@ -408,6 +412,8 @@ export function ClusterDetail({
       ? undefined
       : resolvedTab;
   const tabKey = effectiveTab || "overview";
+  const activeRhTasks = useActiveRehearsalTasks();
+  const rhLiveRunning = hasRunningTaskForCluster(activeRhTasks, c.id);
   const rhCount = rehearsals ? rehearsals.length : 0;
   const tabItems = [
     { value: "overview", label: bi("概览", "Overview"), icon: <TabOverviewIcon /> },
@@ -422,7 +428,18 @@ export function ClusterDetail({
       ? [
           {
             value: "rehearsal",
-            label: bi("变更演练", "Rehearsals"),
+            label: rhLiveRunning ? (
+              <span className="rh-tab-live-label">
+                {bi("变更演练", "Rehearsals")}
+                <span
+                  className="rh-tab-live-dot"
+                  title={bi("AI 正在后台推演中", "AI running in background")}
+                  aria-hidden
+                />
+              </span>
+            ) : (
+              bi("变更演练", "Rehearsals")
+            ),
             count: rhCount > 0 ? rhCount : undefined,
             icon: <TabRehearsalIcon />,
           },

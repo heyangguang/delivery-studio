@@ -1,5 +1,9 @@
 import {SchemeInfo, schemeName} from "./scheme";
 import { ExecutionHostSummary } from "./execution-placement";
+import {
+  hasRunningTaskForCluster,
+  useActiveRehearsalTasks,
+} from "./rehearsal_live";
 import React, {
   useEffect,
   useLayoutEffect,
@@ -983,6 +987,7 @@ function JobList({
   multiApp: boolean;
 }) {
   useLang();
+  const activeRhTasks = useActiveRehearsalTasks();
   const box = useRef<HTMLDivElement>(null);
   const [ind, setInd] = useState<{ y: number; h: number } | null>(null);
   useLayoutEffect(() => {
@@ -1143,6 +1148,18 @@ function JobList({
                         : [stLabel, appMeta].filter(Boolean).join(" · ")}
                     </div>
                     <div className="row-sub-tags">
+                      {hasRunningTaskForCluster(activeRhTasks, j.cluster_id) && (
+                        <span
+                          className="row-ai-live"
+                          title={bi(
+                            "变更演练 AI 正在后台推演中",
+                            "Change rehearsal AI running in background",
+                          )}
+                        >
+                          <i aria-hidden />
+                          {bi("推演中", "AI")}
+                        </span>
+                      )}
                       {j.purpose === "verification" && (
                         <span className="row-verify-tag">
                           {bi("验证", "Verify")}

@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.330-dev"
+	version            = "1.0.331-dev"
 	currentReleaseDate = "2026-11-25"
 )
 
@@ -65,6 +65,22 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.331-dev",
+		Date:    "2026-11-25",
+		Title:   "变更演练 AI 流式推演全面托管至全局后台状态，切换页面/集群/Tab 不断连并无缝续看",
+		TitleEn: "Persist rehearsal AI streams in global background store across SPA route, cluster, and tab switches",
+		Highlights: []string{
+			"新增全局持久化流式任务存储 rehearsal_live.ts，将演练创建、诉求重研判、边界→探针、探针→漂移编排、步骤 AI 核验 5 类 SSE 流全部解耦出页面组件生命周期：切换到其他页面、集群、Tab 或演练会话时请求持续运行不断连",
+			"切回演练页后自动定位至正在运行的演练会话、阶段或步骤并立即无缝续看实时思考流与连续计时（无动画重放），同时保留已粘贴回显/截图草稿与有效的「停止」控制；若在离开期间推演完成，自动写入缓存并弹出全局完成提示",
+			"在集群侧边栏（推演中胶囊）、集群详情「变更演练」Tab（脉冲圆点）与专注模式演练记录栏（AI 推演中标签）同步展示后台运行状态，随时掌握进度",
+		},
+		HighlightsEn: []string{
+			"Introduced module-level rehearsal_live.ts store decoupling all 5 rehearsal SSE streams (create, refine, scope, probe, step verify) from React component unmounts so navigating to other pages, clusters, or tabs never drops or loses in-flight AI work",
+			"Returning mid-stream seamlessly re-attaches to the active session/stage/step with live elapsed time, accumulated reasoning stream, preserved draft inputs, and working Stop control; completing while away caches results and pops a global completion toast",
+			"Added live pulsing indicators in the cluster sidebar, cluster detail Rehearsals tab, and focus-mode rehearsal ledger whenever background rehearsal AI analysis is running",
+		},
+	},
 	{
 		Version: "1.0.330-dev",
 		Date:    "2026-11-25",

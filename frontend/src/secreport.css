@@ -674,9 +674,9 @@ body[arco-theme="dark"] .srt-fmt-xlsx {
 }
 
 .sexp-mini-fmt.on {
-  background: var(--brand, #ff462d);
-  border-color: var(--brand, #ff462d);
-  color: #fff;
+  background: var(--brand);
+  border-color: var(--brand);
+  color: var(--on-brand);
   font-weight: 500;
 }
 

@@ -1079,8 +1079,8 @@ export function Composer({
           placeholder={
             !online
               ? bi(
-                  "暂未连上 Kyndryl Delivery Hub 后端服务",
-                  "Kyndryl Delivery Hub backend unavailable",
+                  "暂未连上 Kyndryl Delivery Studio 后端服务",
+                  "Kyndryl Delivery Studio backend unavailable",
                 )
               : hint
           }

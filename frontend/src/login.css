@@ -1,27 +1,27 @@
 /* Login page: form column on the left, product introduction panel on the right. */
 
 .ib-root {
-  --ib-field: #f1efea;
-  --ib-field-line: rgba(29, 28, 26, 0.34);
-  --ib-dot: rgba(29, 28, 26, 0.1);
+  --ib-field: #f3f4f7;
+  --ib-field-line: rgba(11, 13, 18, 0.28);
+  --ib-dot: rgba(11, 13, 18, 0.085);
   --ib-panel-wash:
-    radial-gradient(62% 52% at 80% 14%, rgba(255, 70, 45, 0.11), transparent 72%),
-    radial-gradient(48% 42% at 14% 88%, rgba(31, 94, 102, 0.09), transparent 70%),
-    linear-gradient(160deg, #faf9f6 0%, #f3f1ec 56%, #ebe7df 100%);
-  --ib-panel-border: rgba(29, 28, 26, 0.09);
+    radial-gradient(56% 48% at 84% 12%, rgba(255, 70, 45, 0.075), transparent 70%),
+    radial-gradient(48% 42% at 14% 88%, rgba(14, 107, 116, 0.065), transparent 70%),
+    linear-gradient(160deg, #ffffff 0%, #f7f8fa 56%, #eef1f6 100%);
+  --ib-panel-border: rgba(11, 13, 18, 0.085);
   --ib-panel-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.96),
-    inset 0 -24px 48px -24px rgba(29, 28, 26, 0.05),
-    0 28px 64px -14px rgba(29, 28, 26, 0.18),
-    0 8px 20px -6px rgba(29, 28, 26, 0.08);
+    inset 0 -24px 48px -24px rgba(11, 13, 18, 0.04),
+    0 28px 64px -14px rgba(11, 13, 18, 0.16),
+    0 8px 20px -6px rgba(11, 13, 18, 0.07);
   --ib-card: #ffffff;
-  --ib-card-border: rgba(29, 28, 26, 0.09);
+  --ib-card-border: rgba(11, 13, 18, 0.085);
   --ib-card-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.98),
-    0 20px 44px -14px rgba(29, 28, 26, 0.16),
-    0 4px 12px -2px rgba(29, 28, 26, 0.06);
-  --ib-prism-inner: rgba(255, 255, 255, 0.76);
-  --ib-prism-rim: rgba(255, 255, 255, 0.92);
+    0 20px 44px -14px rgba(11, 13, 18, 0.14),
+    0 4px 12px -2px rgba(11, 13, 18, 0.055);
+  --ib-prism-inner: rgba(255, 255, 255, 0.8);
+  --ib-prism-rim: rgba(255, 255, 255, 0.95);
   min-height: 100dvh;
   display: grid;
   grid-template-rows: 48px 1fr;
@@ -30,27 +30,27 @@
 }
 
 body[arco-theme="dark"] .ib-root {
-  --ib-field: #242220;
-  --ib-field-line: rgba(255, 250, 244, 0.28);
-  --ib-dot: rgba(255, 250, 244, 0.08);
+  --ib-field: #191d25;
+  --ib-field-line: rgba(240, 244, 255, 0.24);
+  --ib-dot: rgba(240, 244, 255, 0.075);
   --ib-panel-wash:
-    radial-gradient(62% 52% at 80% 14%, rgba(255, 91, 68, 0.16), transparent 72%),
-    radial-gradient(48% 42% at 14% 88%, rgba(77, 176, 188, 0.1), transparent 70%),
-    linear-gradient(160deg, #1d1b19 0%, #151413 56%, #100f0e 100%);
-  --ib-panel-border: rgba(255, 250, 244, 0.09);
+    radial-gradient(56% 48% at 84% 12%, rgba(255, 85, 62, 0.11), transparent 70%),
+    radial-gradient(48% 42% at 14% 88%, rgba(77, 176, 188, 0.09), transparent 70%),
+    linear-gradient(160deg, #161922 0%, #101319 56%, #0a0c10 100%);
+  --ib-panel-border: rgba(240, 244, 255, 0.085);
   --ib-panel-shadow:
-    inset 0 1px 0 rgba(255, 250, 244, 0.07),
-    inset 0 -28px 52px -24px rgba(0, 0, 0, 0.48),
-    0 28px 68px -12px rgba(0, 0, 0, 0.7),
-    0 8px 22px rgba(0, 0, 0, 0.42);
-  --ib-card: #22201e;
-  --ib-card-border: rgba(255, 250, 244, 0.11);
+    inset 0 1px 0 rgba(240, 244, 255, 0.07),
+    inset 0 -28px 52px -24px rgba(0, 0, 0, 0.5),
+    0 28px 68px -12px rgba(0, 0, 0, 0.72),
+    0 8px 22px rgba(0, 0, 0, 0.44);
+  --ib-card: #161a22;
+  --ib-card-border: rgba(240, 244, 255, 0.1);
   --ib-card-shadow:
-    inset 0 1px 0 rgba(255, 250, 244, 0.08),
-    0 22px 48px -12px rgba(0, 0, 0, 0.6),
-    0 4px 12px rgba(0, 0, 0, 0.36);
-  --ib-prism-inner: rgba(29, 28, 26, 0.76);
-  --ib-prism-rim: rgba(255, 250, 244, 0.16);
+    inset 0 1px 0 rgba(240, 244, 255, 0.08),
+    0 22px 48px -12px rgba(0, 0, 0, 0.62),
+    0 4px 12px rgba(0, 0, 0, 0.38);
+  --ib-prism-inner: rgba(16, 19, 25, 0.78);
+  --ib-prism-rim: rgba(240, 244, 255, 0.15);
 }
 
 /* top bar */
@@ -619,7 +619,7 @@ button.ib-top-item:focus-visible {
   height: 32px;
   border-radius: 8px;
   background: var(--brand);
-  color: #ffffff;
+  color: var(--on-brand);
 }
 
 .ib-ask-hint {

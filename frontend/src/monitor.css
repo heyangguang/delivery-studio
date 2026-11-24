@@ -1433,7 +1433,7 @@
   padding: 7px 16px;
   border-radius: 99px;
   background: var(--brand);
-  color: #fff;
+  color: var(--on-brand);
   font-family: var(--sans);
   font-size: 12.5px;
   font-weight: 560;

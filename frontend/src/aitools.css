@@ -289,34 +289,34 @@
   font-size: 13px;
 }
 .tone-low .thk-slider-title {
-  color: #0284c7;
+  color: #475569;
 }
 .tone-medium .thk-slider-title {
-  color: #2563eb;
+  color: #1e293b;
 }
 .tone-high .thk-slider-title {
-  color: #c52b16;
+  color: #0b0d12;
 }
 .tone-max .thk-slider-title {
-  color: #c52b16;
+  color: var(--kyndryl-ink);
 }
 .tone-ultra .thk-slider-title {
-  color: #8b5cf6;
+  color: var(--kyndryl);
 }
 body[arco-theme="dark"] .tone-low .thk-slider-title {
-  color: #38bdf8;
+  color: #94a3b8;
 }
 body[arco-theme="dark"] .tone-medium .thk-slider-title {
-  color: #60a5fa;
+  color: #cbd5e1;
 }
 body[arco-theme="dark"] .tone-high .thk-slider-title {
-  color: #ff8270;
+  color: #f3f5f8;
 }
 body[arco-theme="dark"] .tone-max .thk-slider-title {
-  color: #a78bfa;
+  color: #ff806e;
 }
 body[arco-theme="dark"] .tone-ultra .thk-slider-title {
-  color: #c4b5fd;
+  color: #ff553e;
 }
 .thk-slider-hint {
   margin: 0;
@@ -358,11 +358,10 @@ body[arco-theme="dark"] .thk-track {
   opacity: var(--fill-op, 0);
   background: linear-gradient(
     90deg,
-    #38bdf8 0%,
-    #2563eb 30%,
-    #c52b16 58%,
-    #c52b16 80%,
-    #9333ea 100%
+    #64748b 0%,
+    #334155 34%,
+    #111318 68%,
+    #ff462d 100%
   );
   clip-path: inset(0 calc((100% - 26px) * (1 - var(--p, 0))) 0 0 round 999px);
   will-change: clip-path, opacity;
@@ -566,9 +565,9 @@ body[arco-theme="dark"] .thk-dot {
   box-shadow: var(--ring);
 }
 .tm-tog.think.on {
-  color: #c52b16;
-  border-color: rgba(139, 92, 246, 0.22);
-  background: rgba(139, 92, 246, 0.11);
+  color: #ffffff;
+  border-color: #0b0d12;
+  background: #0b0d12;
 }
 .tm-think-label {
   display: inline-grid;
@@ -592,19 +591,19 @@ body[arco-theme="dark"] .thk-dot {
   font-weight: 500;
 }
 .tm-tog.web.on {
-  color: #0969da;
-  border-color: rgba(10, 132, 255, 0.22);
-  background: rgba(10, 132, 255, 0.11);
+  color: var(--run);
+  border-color: var(--run-line);
+  background: var(--run-soft);
 }
 body[arco-theme="dark"] .tm-tog.think.on {
-  color: #c4b5fd;
-  border-color: rgba(167, 139, 250, 0.28);
-  background: rgba(167, 139, 250, 0.18);
+  color: #0b0d11;
+  border-color: #f3f5f8;
+  background: #f3f5f8;
 }
 body[arco-theme="dark"] .tm-tog.web.on {
-  color: #7dd3fc;
-  border-color: rgba(56, 189, 248, 0.28);
-  background: rgba(56, 189, 248, 0.17);
+  color: #72cbd6;
+  border-color: rgba(77, 176, 188, 0.34);
+  background: rgba(77, 176, 188, 0.18);
 }
 @media (prefers-reduced-motion: reduce) {
   .tm-tog {

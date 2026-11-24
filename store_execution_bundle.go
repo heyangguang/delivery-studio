@@ -194,7 +194,7 @@ echo "[OK] Installed platform CA certificate -> /etc/middleware-execution/platfo
 	return fmt.Sprintf(`#!/usr/bin/env bash
 set -euo pipefail
 
-# Kyndryl Delivery Hub Execution Node Installer
+# Kyndryl Delivery Studio Execution Node Installer
 # Node: %s
 # Hub:  %s
 
@@ -227,7 +227,7 @@ install -m 0600 "$SCRIPT_DIR/execution-node.json" /etc/middleware-execution/exec
 echo "[3/4] Installing and starting systemd background service..."
 cat <<'EOF' > /etc/systemd/system/middleware-execution.service
 [Unit]
-Description=Kyndryl Delivery Hub Execution Node
+Description=Kyndryl Delivery Studio Execution Node
 After=network-online.target
 Wants=network-online.target
 
@@ -252,7 +252,7 @@ echo "[4/4] Verifying platform connectivity..."
 if /usr/local/bin/middleware-store execution-node --config /etc/middleware-execution/execution-node.json --check; then
   echo ""
   echo "============================================================"
-  echo "[OK] Kyndryl Delivery Hub execution node is installed and online."
+  echo "[OK] Kyndryl Delivery Studio execution node is installed and online."
   echo "     Service: middleware-execution (systemd background)"
   echo "     Status:  systemctl status middleware-execution"
   echo "     Logs:    journalctl -u middleware-execution -f"

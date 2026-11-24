@@ -1090,12 +1090,12 @@ body[arco-theme="dark"] .ro-filter-chip.is-toggle.on em {
   color: #be123c;
 }
 .ro-cat-pill.cat-backup {
-  background: rgba(139, 92, 246, 0.12);
-  color: #c52b16;
+  background: var(--run-soft);
+  color: var(--run);
 }
 .ro-cat-pill.cat-params {
-  background: rgba(255, 70, 45, 0.11);
-  color: #c52b16;
+  background: var(--brand-soft);
+  color: var(--ink);
 }
 .ro-cat-pill.cat-ha {
   background: rgba(20, 184, 166, 0.12);

@@ -34,7 +34,7 @@ type notifyTpl struct {
 var notifyEvents = []notifyEvent{
 	{ID: "test", Group: "系统", Title: "测试消息", Desc: "在渠道里点“发送测试”时发出的消息。",
 		Vars:    []notifyVar{{"channel", "渠道名称"}, {"link", "平台地址"}},
-		Default: notifyTpl{Title: "Kyndryl Delivery Hub 测试消息", Body: "这条消息说明通知渠道「{{channel}}」可以正常送达。\n{{link}}"},
+		Default: notifyTpl{Title: "Kyndryl Delivery Studio 测试消息", Body: "这条消息说明通知渠道「{{channel}}」可以正常送达。\n{{link}}"},
 		Sample:  map[string]string{"channel": "运维值班群", "link": "https://hub.example"}},
 }
 

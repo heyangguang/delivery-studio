@@ -18,46 +18,53 @@
 :root {
   --ai-rb: linear-gradient(
     100deg,
-    #ff462d 0%,
-    #f59e0b 32%,
-    #29707a 66%,
-    #147a4b 100%
+    #0b0d12 0%,
+    #ff462d 36%,
+    #0e6b74 72%,
+    #0b0d12 100%
   );
-  --ai-rb-soft: linear-gradient(135deg, #ff462d, #d95d2b 52%, #1f5e66);
+  --ai-rb-soft: linear-gradient(135deg, #0b0d12, #ff462d 55%, #0e6b74);
 
   --ai-card-bg-top: #ffffff;
-  --ai-card-bg-bot: #faf9f6;
-  --ai-border-base: rgba(29, 28, 26, 0.1);
+  --ai-card-bg-bot: #fafbfc;
+  --ai-border-base: rgba(11, 13, 18, 0.11);
   --ai-card-shadow:
-    0 1px 2px rgba(29, 28, 26, 0.04),
-    0 6px 18px rgba(29, 28, 26, 0.05);
+    0 1px 2px rgba(11, 13, 18, 0.045),
+    0 8px 24px -6px rgba(11, 13, 18, 0.065);
   --ai-card-shadow-hover:
-    0 3px 8px rgba(29, 28, 26, 0.06),
-    0 12px 28px rgba(29, 28, 26, 0.09);
+    0 3px 10px -2px rgba(11, 13, 18, 0.075),
+    0 16px 36px -10px rgba(11, 13, 18, 0.12);
 
   --ai-ctl-bg: #ffffff;
-  --ai-ctl-bg-hover: #f3f1ec;
-  --ai-ctl-border: rgba(29, 28, 26, 0.12);
-  --ai-ctl-border-hover: rgba(29, 28, 26, 0.22);
-  --ai-ctl-shadow: 0 1px 2px rgba(29, 28, 26, 0.045);
+  --ai-ctl-bg-hover: #f3f4f7;
+  --ai-ctl-border: rgba(11, 13, 18, 0.11);
+  --ai-ctl-border-hover: rgba(11, 13, 18, 0.24);
+  --ai-ctl-shadow: 0 1px 2px rgba(11, 13, 18, 0.04);
 }
 
 body[arco-theme="dark"] {
-  --ai-card-bg-top: #1f1e1c;
-  --ai-card-bg-bot: #191817;
-  --ai-border-base: rgba(255, 250, 244, 0.12);
+  --ai-rb: linear-gradient(
+    100deg,
+    #f3f5f8 0%,
+    #ff553e 36%,
+    #4db0bc 72%,
+    #f3f5f8 100%
+  );
+  --ai-card-bg-top: #151922;
+  --ai-card-bg-bot: #11141b;
+  --ai-border-base: rgba(240, 244, 255, 0.12);
   --ai-card-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.3),
-    0 8px 22px rgba(0, 0, 0, 0.26);
+    0 1px 2px rgba(0, 0, 0, 0.34),
+    0 10px 26px rgba(0, 0, 0, 0.32);
   --ai-card-shadow-hover:
-    0 4px 12px rgba(0, 0, 0, 0.36),
-    0 14px 32px rgba(0, 0, 0, 0.32);
+    0 4px 12px rgba(0, 0, 0, 0.42),
+    0 16px 36px rgba(0, 0, 0, 0.38);
 
-  --ai-ctl-bg: rgba(255, 250, 244, 0.065);
-  --ai-ctl-bg-hover: rgba(255, 250, 244, 0.11);
-  --ai-ctl-border: rgba(255, 250, 244, 0.12);
-  --ai-ctl-border-hover: rgba(255, 250, 244, 0.22);
-  --ai-ctl-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  --ai-ctl-bg: rgba(240, 244, 255, 0.055);
+  --ai-ctl-bg-hover: rgba(240, 244, 255, 0.1);
+  --ai-ctl-border: rgba(240, 244, 255, 0.11);
+  --ai-ctl-border-hover: rgba(240, 244, 255, 0.24);
+  --ai-ctl-shadow: 0 1px 2px rgba(0, 0, 0, 0.28);
 }
 
 @keyframes ai-flow {
@@ -88,8 +95,8 @@ body[arco-theme="dark"] {
   height: 28px;
   border-radius: 7.8px;
   box-shadow:
-    0 4px 11px -2px rgba(255, 70, 45, 0.36),
-    0 1px 2px rgba(15, 23, 42, 0.08);
+    0 2px 6px -1px rgba(11, 13, 18, 0.18),
+    0 1px 2px rgba(11, 13, 18, 0.08);
 }
 
 :root .ad-avatar {
@@ -97,8 +104,8 @@ body[arco-theme="dark"] {
   height: 24px;
   border-radius: 6.7px;
   box-shadow:
-    0 3px 8px -2px rgba(255, 70, 45, 0.3),
-    0 1px 2px rgba(15, 23, 42, 0.06);
+    0 2px 5px -1px rgba(11, 13, 18, 0.16),
+    0 1px 2px rgba(11, 13, 18, 0.06);
 }
 
 body[arco-theme="dark"] .ap-brand-mark,
@@ -118,11 +125,11 @@ body[arco-theme="dark"] .ad-avatar {
   isolation: isolate;
   display: grid;
   place-items: center;
-  border: 1px solid color-mix(in srgb, var(--brand) 22%, var(--line));
+  border: 1px solid var(--line-strong);
   background: var(--surface);
   box-shadow:
-    0 12px 28px -8px rgba(255, 70, 45, 0.2),
-    0 3px 8px -2px rgba(15, 23, 42, 0.05);
+    0 12px 28px -10px rgba(11, 13, 18, 0.14),
+    0 3px 8px -2px rgba(11, 13, 18, 0.06);
   animation: none;
 }
 
@@ -130,11 +137,11 @@ body[arco-theme="dark"] .ap-orb,
 body[arco-theme="dark"] .fc-start-orb,
 body[arco-theme="dark"] .fw-hero-orb,
 body[arco-theme="dark"] .ad-empty-mark {
-  border-color: rgba(255, 118, 99, 0.28);
+  border-color: var(--line-strong);
   background: var(--surface-2);
   box-shadow:
-    0 14px 32px -8px rgba(0, 0, 0, 0.52),
-    0 4px 12px rgba(255, 70, 45, 0.18);
+    0 14px 32px -8px rgba(0, 0, 0, 0.56),
+    0 4px 12px rgba(255, 85, 62, 0.12);
 }
 
 :root .ap-orb {
@@ -162,14 +169,14 @@ body[arco-theme="dark"] .ad-empty-mark {
   pointer-events: none;
   background: conic-gradient(
     from var(--ai-angle) at 50% 50%,
-    rgba(255, 70, 45, 0.38) 0deg,
-    rgba(245, 158, 11, 0.32) 120deg,
-    rgba(31, 94, 102, 0.36) 240deg,
-    rgba(255, 70, 45, 0.38) 360deg
+    rgba(255, 70, 45, 0.24) 0deg,
+    rgba(11, 13, 18, 0.14) 120deg,
+    rgba(14, 107, 116, 0.2) 240deg,
+    rgba(255, 70, 45, 0.24) 360deg
   );
-  filter: blur(15px);
-  opacity: 0.42;
-  animation: ai-orbit 12s linear infinite;
+  filter: blur(14px);
+  opacity: 0.32;
+  animation: ai-orbit 14s linear infinite;
 }
 
 :root .ad-avatar.thinking {
@@ -232,7 +239,7 @@ body[arco-theme="dark"] .ad-empty-mark {
   pointer-events: none;
 }
 
-/* Layer 1: inner card gradient + 1px border (crisp hairline + partial-arc orbit + cursor prism spot) */
+/* Layer 1: Swiss Leica titanium-specular 1px hairline border + subtle pointer glint (zero neon rainbow) */
 :root .ap-compose::before,
 :root .ad-compose::before {
   inset: -1px;
@@ -242,41 +249,60 @@ body[arco-theme="dark"] .ad-empty-mark {
     linear-gradient(180deg, var(--ai-card-bg-top), var(--ai-card-bg-bot)) padding-box,
     radial-gradient(
       var(--ai-spot) circle at calc(var(--mx) - var(--ai-off)) var(--my),
-      color-mix(in srgb, #4285f4 calc(var(--ai-ptr) * 0.88), transparent),
+      color-mix(in srgb, var(--ink) calc(var(--ai-ptr) * 0.28), transparent),
       transparent 66%
     ) border-box,
     radial-gradient(
       var(--ai-spot) circle at calc(var(--mx) + var(--ai-off)) var(--my),
-      color-mix(in srgb, #ea4335 calc(var(--ai-ptr) * 0.82), transparent),
-      transparent 66%
-    ) border-box,
-    radial-gradient(
-      var(--ai-spot) circle at var(--mx) calc(var(--my) - var(--ai-off) * 0.55),
-      color-mix(in srgb, #fbbc04 calc(var(--ai-ptr) * 0.78), transparent),
+      color-mix(in srgb, var(--kyndryl) calc(var(--ai-ptr) * 0.42), transparent),
       transparent 66%
     ) border-box,
     radial-gradient(
       var(--ai-spot) circle at var(--mx) calc(var(--my) + var(--ai-off) * 0.55),
-      color-mix(in srgb, #34a853 calc(var(--ai-ptr) * 0.82), transparent),
+      color-mix(in srgb, var(--run) calc(var(--ai-ptr) * 0.26), transparent),
       transparent 66%
     ) border-box,
     conic-gradient(
       from var(--ai-angle) at 50% 50%,
       transparent 0deg,
-      rgba(66, 133, 244, 0.56) 28deg,
-      rgba(52, 168, 83, 0.46) 64deg,
-      rgba(251, 188, 4, 0.5) 100deg,
-      rgba(234, 67, 53, 0.5) 136deg,
-      transparent 172deg,
-      transparent 214deg,
-      rgba(66, 133, 244, 0.36) 252deg,
-      rgba(161, 66, 244, 0.34) 292deg,
+      rgba(11, 13, 18, 0.22) 34deg,
+      rgba(255, 70, 45, 0.32) 76deg,
+      rgba(14, 107, 116, 0.22) 118deg,
+      transparent 162deg,
+      transparent 224deg,
+      rgba(11, 13, 18, 0.16) 276deg,
       transparent 334deg,
       transparent 360deg
     ) border-box,
     linear-gradient(var(--ai-border-base), var(--ai-border-base)) border-box;
-  animation: ai-orbit 11s linear infinite;
+  animation: ai-orbit 14s linear infinite;
   transition: --ai-ptr 0.28s ease;
+}
+
+body[arco-theme="dark"] .ap-compose::before,
+body[arco-theme="dark"] .ad-compose::before {
+  background:
+    linear-gradient(180deg, var(--ai-card-bg-top), var(--ai-card-bg-bot)) padding-box,
+    radial-gradient(
+      var(--ai-spot) circle at calc(var(--mx) - var(--ai-off)) var(--my),
+      color-mix(in srgb, #f3f5f8 calc(var(--ai-ptr) * 0.32), transparent),
+      transparent 66%
+    ) border-box,
+    radial-gradient(
+      var(--ai-spot) circle at calc(var(--mx) + var(--ai-off)) var(--my),
+      color-mix(in srgb, var(--kyndryl) calc(var(--ai-ptr) * 0.46), transparent),
+      transparent 66%
+    ) border-box,
+    conic-gradient(
+      from var(--ai-angle) at 50% 50%,
+      transparent 0deg,
+      rgba(243, 245, 248, 0.22) 36deg,
+      rgba(255, 85, 62, 0.34) 80deg,
+      rgba(77, 176, 188, 0.22) 124deg,
+      transparent 172deg,
+      transparent 360deg
+    ) border-box,
+    linear-gradient(var(--ai-border-base), var(--ai-border-base)) border-box;
 }
 
 :root .ap-compose.off::before,
@@ -287,49 +313,29 @@ body[arco-theme="dark"] .ad-empty-mark {
     linear-gradient(var(--line-strong), var(--line-strong)) border-box;
 }
 
-/* Layer 2: tight 3-7px outer edge whisper (no mask clipping, zero 20px fog) */
+/* Layer 2: whisper-soft obsidian & Leica micro-edge aura (no bright multicolor fog) */
 :root .ap-compose::after,
 :root .ad-compose::after {
   inset: 1px;
   z-index: -2;
   background:
     radial-gradient(
-      var(--ai-spot) circle at calc(var(--mx) - var(--ai-off)) var(--my),
-      color-mix(in srgb, #4285f4 calc(var(--ai-ptr) * 0.54), transparent),
-      transparent 64%
-    ),
-    radial-gradient(
       var(--ai-spot) circle at calc(var(--mx) + var(--ai-off)) var(--my),
-      color-mix(in srgb, #ea4335 calc(var(--ai-ptr) * 0.46), transparent),
-      transparent 64%
-    ),
-    radial-gradient(
-      var(--ai-spot) circle at var(--mx) calc(var(--my) - var(--ai-off) * 0.55),
-      color-mix(in srgb, #fbbc04 calc(var(--ai-ptr) * 0.44), transparent),
-      transparent 64%
-    ),
-    radial-gradient(
-      var(--ai-spot) circle at var(--mx) calc(var(--my) + var(--ai-off) * 0.55),
-      color-mix(in srgb, #34a853 calc(var(--ai-ptr) * 0.48), transparent),
+      color-mix(in srgb, var(--kyndryl) calc(var(--ai-ptr) * 0.16), transparent),
       transparent 64%
     ),
     conic-gradient(
       from var(--ai-angle) at 50% 50%,
       transparent 0deg,
-      rgba(66, 133, 244, 0.24) 28deg,
-      rgba(52, 168, 83, 0.2) 64deg,
-      rgba(251, 188, 4, 0.22) 100deg,
-      rgba(234, 67, 53, 0.22) 136deg,
+      rgba(11, 13, 18, 0.08) 38deg,
+      rgba(255, 70, 45, 0.12) 82deg,
+      rgba(14, 107, 116, 0.09) 124deg,
       transparent 172deg,
-      transparent 214deg,
-      rgba(66, 133, 244, 0.16) 252deg,
-      rgba(161, 66, 244, 0.16) 292deg,
-      transparent 334deg,
       transparent 360deg
     );
-  filter: blur(7px);
-  opacity: 0.62;
-  animation: ai-orbit 11s linear infinite;
+  filter: blur(8px);
+  opacity: 0.45;
+  animation: ai-orbit 14s linear infinite;
   transition:
     opacity 0.3s ease,
     --ai-ptr 0.28s ease;
@@ -489,22 +495,12 @@ body[arco-theme="dark"] .ad-compose::after {
     linear-gradient(180deg, var(--ai-ctl-bg), var(--ai-ctl-bg)) padding-box,
     radial-gradient(
       var(--ai-spot) circle at calc(var(--mx) - var(--ai-off)) var(--my),
-      color-mix(in srgb, #4285f4 calc(var(--ai-ptr) * 0.92), transparent),
+      color-mix(in srgb, var(--ink) calc(var(--ai-ptr) * 0.32), transparent),
       transparent 68%
     ) border-box,
     radial-gradient(
       var(--ai-spot) circle at calc(var(--mx) + var(--ai-off)) var(--my),
-      color-mix(in srgb, #ea4335 calc(var(--ai-ptr) * 0.86), transparent),
-      transparent 68%
-    ) border-box,
-    radial-gradient(
-      var(--ai-spot) circle at var(--mx) calc(var(--my) - var(--ai-off) * 0.55),
-      color-mix(in srgb, #fbbc04 calc(var(--ai-ptr) * 0.82), transparent),
-      transparent 68%
-    ) border-box,
-    radial-gradient(
-      var(--ai-spot) circle at var(--mx) calc(var(--my) + var(--ai-off) * 0.55),
-      color-mix(in srgb, #34a853 calc(var(--ai-ptr) * 0.86), transparent),
+      color-mix(in srgb, var(--kyndryl) calc(var(--ai-ptr) * 0.48), transparent),
       transparent 68%
     ) border-box,
     linear-gradient(var(--ai-ctl-border), var(--ai-ctl-border)) border-box;
@@ -516,25 +512,15 @@ body[arco-theme="dark"] .ad-compose::after {
     linear-gradient(var(--glass-strong), var(--glass-strong)) padding-box,
     radial-gradient(
       var(--ai-spot) circle at calc(var(--mx) - var(--ai-off)) var(--my),
-      color-mix(in srgb, #4285f4 calc(var(--ai-ptr) * 0.92), transparent),
+      color-mix(in srgb, var(--ink) calc(var(--ai-ptr) * 0.32), transparent),
       transparent 68%
     ) border-box,
     radial-gradient(
       var(--ai-spot) circle at calc(var(--mx) + var(--ai-off)) var(--my),
-      color-mix(in srgb, #ea4335 calc(var(--ai-ptr) * 0.86), transparent),
+      color-mix(in srgb, var(--kyndryl) calc(var(--ai-ptr) * 0.48), transparent),
       transparent 68%
     ) border-box,
-    radial-gradient(
-      var(--ai-spot) circle at var(--mx) calc(var(--my) - var(--ai-off) * 0.55),
-      color-mix(in srgb, #fbbc04 calc(var(--ai-ptr) * 0.82), transparent),
-      transparent 68%
-    ) border-box,
-    radial-gradient(
-      var(--ai-spot) circle at var(--mx) calc(var(--my) + var(--ai-off) * 0.55),
-      color-mix(in srgb, #34a853 calc(var(--ai-ptr) * 0.86), transparent),
-      transparent 68%
-    ) border-box,
-    linear-gradient(var(--line), var(--line)) border-box;
+    linear-gradient(var(--line-strong), var(--line-strong)) border-box;
 }
 
 :root .ai-pill::after,
@@ -546,73 +532,45 @@ body[arco-theme="dark"] .ad-compose::after {
   z-index: -2;
   background:
     radial-gradient(
-      var(--ai-spot) circle at calc(var(--mx) - var(--ai-off)) var(--my),
-      color-mix(in srgb, #4285f4 calc(var(--ai-ptr) * 0.62), transparent),
-      transparent 66%
-    ),
-    radial-gradient(
       var(--ai-spot) circle at calc(var(--mx) + var(--ai-off)) var(--my),
-      color-mix(in srgb, #ea4335 calc(var(--ai-ptr) * 0.54), transparent),
+      color-mix(in srgb, var(--kyndryl) calc(var(--ai-ptr) * 0.24), transparent),
       transparent 66%
     ),
     radial-gradient(
-      var(--ai-spot) circle at var(--mx) calc(var(--my) - var(--ai-off) * 0.55),
-      color-mix(in srgb, #fbbc04 calc(var(--ai-ptr) * 0.5), transparent),
-      transparent 66%
-    ),
-    radial-gradient(
-      var(--ai-spot) circle at var(--mx) calc(var(--my) + var(--ai-off) * 0.55),
-      color-mix(in srgb, #34a853 calc(var(--ai-ptr) * 0.56), transparent),
+      var(--ai-spot) circle at calc(var(--mx) - var(--ai-off)) var(--my),
+      color-mix(in srgb, var(--ink) calc(var(--ai-ptr) * 0.14), transparent),
       transparent 66%
     );
-  filter: blur(5px);
+  filter: blur(6px);
   opacity: 0;
   transition:
     opacity 0.24s ease,
     --ai-ptr 0.22s ease;
 }
 
-/* Primary filled pill variant (e.g. ready-to-submit AI actions) */
+/* Primary filled pill variant (matte obsidian on light, platinum on dark) */
 :root .ai-pill.ai-pill-primary:not(:disabled):not(.arco-btn-disabled) {
-  color: #fff;
+  color: var(--surface);
   background: none;
   border-color: transparent;
   box-shadow:
-    0 2px 6px rgba(255, 70, 45, 0.24),
-    0 6px 16px rgba(255, 70, 45, 0.14);
+    0 2px 6px rgba(11, 13, 18, 0.2),
+    0 6px 16px rgba(11, 13, 18, 0.1);
 }
 
 :root .ai-pill.ai-pill-primary:not(:disabled):not(.arco-btn-disabled)::before {
   background:
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--brand) 90%, #fff),
+      color-mix(in srgb, var(--brand) 92%, var(--surface)),
       var(--brand)
     ) padding-box,
     radial-gradient(
-      var(--ai-spot) circle at calc(var(--mx) - var(--ai-off)) var(--my),
-      color-mix(in srgb, #4285f4 calc(var(--ai-ptr) * 0.95), transparent),
-      transparent 68%
-    ) border-box,
-    radial-gradient(
       var(--ai-spot) circle at calc(var(--mx) + var(--ai-off)) var(--my),
-      color-mix(in srgb, #ea4335 calc(var(--ai-ptr) * 0.88), transparent),
+      color-mix(in srgb, var(--kyndryl) calc(var(--ai-ptr) * 0.55), transparent),
       transparent 68%
     ) border-box,
-    radial-gradient(
-      var(--ai-spot) circle at var(--mx) calc(var(--my) - var(--ai-off) * 0.55),
-      color-mix(in srgb, #fbbc04 calc(var(--ai-ptr) * 0.85), transparent),
-      transparent 68%
-    ) border-box,
-    radial-gradient(
-      var(--ai-spot) circle at var(--mx) calc(var(--my) + var(--ai-off) * 0.55),
-      color-mix(in srgb, #34a853 calc(var(--ai-ptr) * 0.88), transparent),
-      transparent 68%
-    ) border-box,
-    linear-gradient(
-      color-mix(in srgb, var(--brand) 86%, #fff),
-      var(--brand)
-    ) border-box;
+    linear-gradient(var(--brand), var(--brand)) border-box;
 }
 
 /* Quiet secondary pill defaults */
@@ -651,10 +609,10 @@ body[arco-theme="dark"] .ad-compose::after {
 }
 
 :root .ai-pill.ai-pill-primary:not(:disabled):not(.arco-btn-disabled):is(:hover, :focus-visible) {
-  color: #fff;
+  color: var(--surface);
   box-shadow:
-    0 3px 10px rgba(255, 70, 45, 0.3),
-    0 8px 20px rgba(255, 70, 45, 0.16);
+    0 3px 10px rgba(11, 13, 18, 0.26),
+    0 8px 20px rgba(11, 13, 18, 0.14);
 }
 
 :root .ai-pill:not(:disabled):not(.arco-btn-disabled):is(:hover, :focus-visible)::after,
@@ -789,23 +747,24 @@ body[arco-theme="dark"] .ad-compose::after {
 }
 
 :root :is(.ap-compose, .ad-compose) .tm-tog.think.on {
-  color: var(--brand-ink);
-  border-color: var(--brand-line);
-  background: var(--brand-soft);
-  box-shadow: none;
+  color: #ffffff;
+  border-color: #0b0d12;
+  background: #0b0d12;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
 }
 
 :root :is(.ap-compose, .ad-compose) .tm-tog.web.on {
-  color: #1f5e66;
-  border-color: rgba(31, 94, 102, 0.28);
-  background: rgba(31, 94, 102, 0.11);
+  color: var(--run);
+  border-color: var(--run-line);
+  background: var(--run-soft);
   box-shadow: none;
 }
 
 body[arco-theme="dark"] :is(.ap-compose, .ad-compose) .tm-tog.think.on {
-  color: var(--brand-ink);
-  border-color: var(--brand-line);
-  background: var(--brand-soft);
+  color: #0b0d11;
+  border-color: #f3f5f8;
+  background: #f3f5f8;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 
 body[arco-theme="dark"] :is(.ap-compose, .ad-compose) .tm-tog.web.on {
@@ -833,9 +792,11 @@ body[arco-theme="dark"] :is(.ap-compose, .ad-compose) .tm-tog.web.on {
 :root .ap-compose .ap-send:not(:disabled),
 :root .ad-compose .ad-send:not(:disabled),
 :root .ap-compose .ad-send:not(:disabled) {
-  color: #ffffff;
+  color: var(--surface);
   background: var(--brand);
-  box-shadow: 0 2px 8px rgba(255, 70, 45, 0.28);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 2px 8px rgba(11, 13, 18, 0.22);
 }
 
 :root .ap-compose .ap-send:disabled:not(.stop),

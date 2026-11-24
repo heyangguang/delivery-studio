@@ -3182,8 +3182,8 @@ function ChatWindow({
                       )
                   : offline
                     ? bi(
-                        "暂未连上 Kyndryl Delivery Hub 后端服务",
-                        "Kyndryl Delivery Hub backend unavailable",
+                        "暂未连上 Kyndryl Delivery Studio 后端服务",
+                        "Kyndryl Delivery Studio backend unavailable",
                       )
                     : busy
                       ? bi(
@@ -3577,8 +3577,8 @@ function ChatWindow({
 
 const getHelloPortal = () =>
   bi(
-    "我是 Kyndryl Delivery Hub 全站助手。可以随时向我咨询执行节点接入、TLS/CA 证书、SSH 免密与目标 Agent 区别、部署规划，或者直接粘贴终端报错让我帮你定位修复命令。",
-    "I'm your Kyndryl Delivery Hub portal assistant. Ask about execution node setup, TLS/CA certs, SSH vs. Target Agent, deployment planning, or paste terminal errors for instant troubleshooting.",
+    "我是 Kyndryl Delivery Studio 全站助手。可以随时向我咨询执行节点接入、TLS/CA 证书、SSH 免密与目标 Agent 区别、部署规划，或者直接粘贴终端报错让我帮你定位修复命令。",
+    "I'm your Kyndryl Delivery Studio portal assistant. Ask about execution node setup, TLS/CA certs, SSH vs. Target Agent, deployment planning, or paste terminal errors for instant troubleshooting.",
   );
 const getSuggestPortal = () => [
   bi(
@@ -3922,12 +3922,12 @@ export function classifyChatError(
       kind: "hub_network",
       tone: "warn",
       title: bi(
-        "无法连接 Kyndryl Delivery Hub 平台后端",
-        "Cannot reach Kyndryl Delivery Hub backend",
+        "无法连接 Kyndryl Delivery Studio 平台后端",
+        "Cannot reach Kyndryl Delivery Studio backend",
       ),
       summary: bi(
-        "浏览器与 Kyndryl Delivery Hub 平台服务之间的连接断开，请求未能送达或未收到响应。",
-        "The browser lost connection to the Kyndryl Delivery Hub server before the request completed.",
+        "浏览器与 Kyndryl Delivery Studio 平台服务之间的连接断开，请求未能送达或未收到响应。",
+        "The browser lost connection to the Kyndryl Delivery Studio server before the request completed.",
       ),
       hint: bi(
         "平台服务可能正在重启，或当前本地网络波动；等待服务恢复后点击「重试」即可继续。",
@@ -3943,12 +3943,12 @@ export function classifyChatError(
       kind: "stream_interrupted",
       tone: "warn",
       title: bi(
-        "与 Kyndryl Delivery Hub 的流式连接意外中断",
-        "Streaming connection to Kyndryl Delivery Hub interrupted",
+        "与 Kyndryl Delivery Studio 的流式连接意外中断",
+        "Streaming connection to Kyndryl Delivery Studio interrupted",
       ),
       summary: bi(
-        "回答尚未完成时，浏览器与 Kyndryl Delivery Hub 后端的连接被中途切断。",
-        "The streaming connection to Kyndryl Delivery Hub was cut off before the reply finished.",
+        "回答尚未完成时，浏览器与 Kyndryl Delivery Studio 后端的连接被中途切断。",
+        "The streaming connection to Kyndryl Delivery Studio was cut off before the reply finished.",
       ),
       hint: bi(
         "平台重启、反向代理超时或网络闪断都会导致流式中断；请点击「重试」重新生成。",
@@ -4040,8 +4040,8 @@ export function classifyChatError(
         : bi("AI 模型网关连接失败", "Failed to reach AI model gateway"),
       summary: clean,
       hint: bi(
-        "Kyndryl Delivery Hub 后端无法连通配置的模型网关（并非本平台宕机）；请检查网关地址、端口与网络连通性，或切换其他可用模型后重试。",
-        "Kyndryl Delivery Hub could not reach the configured model gateway; check the gateway URL/network in Settings → AI or switch to another model.",
+        "Kyndryl Delivery Studio 后端无法连通配置的模型网关（并非本平台宕机）；请检查网关地址、端口与网络连通性，或切换其他可用模型后重试。",
+        "Kyndryl Delivery Studio could not reach the configured model gateway; check the gateway URL/network in Settings → AI or switch to another model.",
       ),
       showSettings: true,
     };
@@ -4241,8 +4241,8 @@ export async function streamChat(
     const raw = (e as Error)?.message || String(e);
     const errObj = new Error(
       bi(
-        "无法连接到 Kyndryl Delivery Hub 平台后端，请求未发出或连接中断",
-        "Unable to reach Kyndryl Delivery Hub server; request failed or connection dropped",
+        "无法连接到 Kyndryl Delivery Studio 平台后端，请求未发出或连接中断",
+        "Unable to reach Kyndryl Delivery Studio server; request failed or connection dropped",
       ),
     ) as ChatStreamError;
     errObj.kind = "hub_network";
@@ -4257,8 +4257,8 @@ export async function streamChat(
       d.error ||
         (proxyDown
           ? bi(
-              `Kyndryl Delivery Hub 后端服务暂时不可用（HTTP ${r.status}），可能正在重启`,
-              `Kyndryl Delivery Hub server is temporarily unavailable (HTTP ${r.status})`,
+              `Kyndryl Delivery Studio 后端服务暂时不可用（HTTP ${r.status}），可能正在重启`,
+              `Kyndryl Delivery Studio server is temporarily unavailable (HTTP ${r.status})`,
             )
           : bi(`请求失败（HTTP ${r.status}）`, `Request failed (HTTP ${r.status})`)),
     ) as ChatStreamError;
@@ -4431,8 +4431,8 @@ export async function streamChat(
     if (e instanceof TypeError || RAW_BROWSER_NET_RE.test(raw.trim()) || /network|stream|aborted|reset|eof/i.test(raw)) {
       const errObj = new Error(
         bi(
-          "与 Kyndryl Delivery Hub 平台后端的流式连接意外中断，未收到完整回复",
-          "Streaming connection to Kyndryl Delivery Hub was interrupted before the reply completed",
+          "与 Kyndryl Delivery Studio 平台后端的流式连接意外中断，未收到完整回复",
+          "Streaming connection to Kyndryl Delivery Studio was interrupted before the reply completed",
         ),
       ) as ChatStreamError;
       errObj.kind = "stream_interrupted";
@@ -4452,8 +4452,8 @@ export async function streamChat(
   ) {
     const errObj = new Error(
       bi(
-        "与 Kyndryl Delivery Hub 平台后端的连接提前关闭，未收到回复内容",
-        "Connection to Kyndryl Delivery Hub closed unexpectedly with no reply",
+        "与 Kyndryl Delivery Studio 平台后端的连接提前关闭，未收到回复内容",
+        "Connection to Kyndryl Delivery Studio closed unexpectedly with no reply",
       ),
     ) as ChatStreamError;
     errObj.kind = "stream_interrupted";

@@ -814,8 +814,8 @@ function ConnectivityPill({ onBack }: { onBack: () => void }) {
       title={
         status === "unreachable"
           ? bi(
-              `无法连接 Kyndryl Delivery Hub 后端服务（${host}），可能正在重启或当前网络中断`,
-              `Cannot reach Kyndryl Delivery Hub backend (${host}); server may be restarting or network interrupted`,
+              `无法连接 Kyndryl Delivery Studio 后端服务（${host}），可能正在重启或当前网络中断`,
+              `Cannot reach Kyndryl Delivery Studio backend (${host}); server may be restarting or network interrupted`,
             )
           : undefined
       }
@@ -824,17 +824,17 @@ function ConnectivityPill({ onBack }: { onBack: () => void }) {
       <span>
         {status === "offline"
           ? bi(
-              "本机网络已断开，恢复后将自动重连 Kyndryl Delivery Hub",
-              "Device network offline; will auto-reconnect to Kyndryl Delivery Hub",
+              "本机网络已断开，恢复后将自动重连 Kyndryl Delivery Studio",
+              "Device network offline; will auto-reconnect to Kyndryl Delivery Studio",
             )
           : status === "unreachable"
             ? bi(
-                "暂时连不上 Kyndryl Delivery Hub 后端服务（可能正在重启），正在自动重连…",
-                "Cannot reach Kyndryl Delivery Hub backend (may be restarting); reconnecting…",
+                "暂时连不上 Kyndryl Delivery Studio 后端服务（可能正在重启），正在自动重连…",
+                "Cannot reach Kyndryl Delivery Studio backend (may be restarting); reconnecting…",
               )
             : bi(
-                "已重新连上 Kyndryl Delivery Hub 服务",
-                "Reconnected to Kyndryl Delivery Hub",
+                "已重新连上 Kyndryl Delivery Studio 服务",
+                "Reconnected to Kyndryl Delivery Studio",
               )}
       </span>
       {status === "unreachable" && (
@@ -1171,7 +1171,7 @@ function App() {
 
   useEffect(() => {
     if (!user) {
-      document.title = bi("登录 · Kyndryl Delivery Hub", "Sign in · Kyndryl Delivery Hub");
+      document.title = bi("登录 · Kyndryl Delivery Studio", "Sign in · Kyndryl Delivery Studio");
       return;
     }
     const titles: Record<Route["name"], string> = {
@@ -1190,7 +1190,7 @@ function App() {
       skills: bi("技能", "Skills"),
       mcp: bi("MCP 服务", "MCP"),
     };
-    document.title = `${titles[route.name]} · Kyndryl Delivery Hub`;
+    document.title = `${titles[route.name]} · Kyndryl Delivery Studio`;
   }, [route.name, lang, user]);
 
   const routeId = "id" in route ? route.id : "";
@@ -1269,7 +1269,7 @@ function App() {
     const p = pageMap[route.name] || {
       key: "portal:general",
       title: bi("平台智能助手", "Portal Assistant"),
-      context: bi("Kyndryl Delivery Hub", "Kyndryl Delivery Hub"),
+      context: bi("Kyndryl Delivery Studio", "Kyndryl Delivery Studio"),
     };
     return {
       key: p.key,
@@ -1306,8 +1306,8 @@ function App() {
         <IconExclamationCircle />
         <h2>
           {bi(
-            "无法连接到 Kyndryl Delivery Hub 后端服务",
-            "Unable to Reach Kyndryl Delivery Hub Backend",
+            "无法连接到 Kyndryl Delivery Studio 后端服务",
+            "Unable to Reach Kyndryl Delivery Studio Backend",
           )}
         </h2>
         <p>{bootError}</p>
@@ -1618,12 +1618,12 @@ function App() {
         {bi("跳到主要内容", "Skip to main content")}
       </a>
       <header className="topbar">
-        <a className="brand" href="#/" aria-label={bi("Kyndryl Delivery Hub 首页", "Kyndryl Delivery Hub Home")}>
-          <BrandMark size={24} />
+        <a className="brand" href="#/" aria-label={bi("Kyndryl Delivery Studio 首页", "Kyndryl Delivery Studio Home")}>
+          <BrandMark size={22} />
           <span className="brand-word">
             <span className="brand-k">kyndryl</span>
             <span className="brand-sep" aria-hidden />
-            <span className="brand-prod">Delivery Hub</span>
+            <span className="brand-prod">Delivery Studio</span>
           </span>
         </a>
         <NavTabs items={tabs} active={activeTab} />

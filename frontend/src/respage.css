@@ -115,9 +115,14 @@
   font-size: 30px;
 }
 .rp-ic.k-mine {
-  color: #fff;
-  background: linear-gradient(150deg, #7a78f0, var(--brand));
-  box-shadow: 0 4px 12px rgba(255, 70, 45, 0.25);
+  color: var(--surface);
+  background: linear-gradient(150deg, #2b313d, #0b0d12);
+  box-shadow: 0 4px 12px rgba(11, 13, 18, 0.22);
+}
+body[arco-theme="dark"] .rp-ic.k-mine {
+  color: #0b0d11;
+  background: linear-gradient(150deg, #ffffff, #d8dee8);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
 }
 .rp-ic.k-built {
   color: #b45f00;
@@ -432,7 +437,7 @@
 }
 .rp-flag.script {
   color: var(--brand-ink);
-  background: var(--brand-soft, rgba(255, 70, 45, 0.1));
+  background: var(--brand-soft);
   font-weight: 550;
 }
 .rp-flag.cust {
@@ -460,8 +465,8 @@
 }
 .rp-scope-pill.mine {
   color: var(--brand-ink);
-  background: rgba(255, 70, 45, 0.12);
-  border: 1px solid rgba(255, 70, 45, 0.24);
+  background: var(--brand-soft);
+  border: 1px solid var(--brand-line);
 }
 .rp-scope-pill.built {
   color: #b45f00;
@@ -577,8 +582,8 @@
 }
 .rp-sdoc-num.tone-cause {
   color: var(--brand-ink);
-  background: rgba(255, 70, 45, 0.12);
-  border-color: rgba(255, 70, 45, 0.25);
+  background: var(--brand-soft);
+  border-color: var(--brand-line);
   font-family: inherit;
 }
 .rp-sdoc-num.tone-ok {
@@ -732,8 +737,8 @@
   background: var(--sunken);
 }
 .rp-sec-box.mine {
-  border-color: rgba(255, 70, 45, 0.25);
-  background: rgba(255, 70, 45, 0.05);
+  border-color: var(--brand-line);
+  background: var(--brand-soft);
 }
 .rp-sec-box.plat {
   border-color: rgba(31, 138, 76, 0.24);
@@ -795,7 +800,7 @@
   height: 34px;
   border-radius: 10px;
   color: var(--brand-ink);
-  background: rgba(255, 70, 45, 0.12);
+  background: var(--brand-soft);
   font-size: 17px;
 }
 .rp-scripts-title h2 {
@@ -810,7 +815,7 @@
   padding: 0 7px;
   border-radius: 999px;
   color: var(--brand-ink);
-  background: rgba(255, 70, 45, 0.12);
+  background: var(--brand-soft);
   font-size: 12px;
   font-style: normal;
 }
@@ -1040,8 +1045,8 @@
 }
 .rp-sec-guard.mine {
   color: var(--ink-2);
-  background: rgba(255, 70, 45, 0.07);
-  border: 1px solid rgba(255, 70, 45, 0.22);
+  background: var(--brand-soft);
+  border: 1px solid var(--brand-line);
 }
 .rp-sec-guard.mine svg {
   color: var(--brand-ink);

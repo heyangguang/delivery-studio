@@ -325,7 +325,7 @@
   color: var(--ink);
 }
 .aq-edit-btn.ok {
-  color: #fff;
+  color: var(--on-brand);
   background: var(--brand);
   border-color: var(--brand);
   font-weight: 550;
@@ -354,7 +354,7 @@
   transition: background-color 0.14s, color 0.14s;
 }
 .aq-enqueue-btn:hover {
-  color: #fff;
+  color: var(--on-brand);
   background: var(--brand);
   border-color: var(--brand);
 }

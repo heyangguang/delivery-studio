@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.295-dev"
+	version            = "1.0.296-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,20 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.296-dev",
+		Date:    "2026-11-24",
+		Title:   "升级 Kyndryl Delivery Studio 品牌与瑞士徕卡高定视觉细节",
+		TitleEn: "Upgrade to Kyndryl Delivery Studio with Swiss Leica luxury palette and layout fixes",
+		Highlights: []string{
+			"全站正式定名为 Kyndryl Delivery Studio，重铸零偏黄白瓷铂金浅色画布与阳极氧化钛黑深色主题，将交互主色收束为哑光曜石黑，仅在 Logo、顶栏与页签指示线、侧栏选中细竖条及未读红点保留徕卡暖红（#FF462D）点睛",
+			"精准对齐顶栏 [K] kyndryl | Delivery Studio 与导航项光学基线（误差 <0.4px），修复 AI 输入框发送按钮溢出，并统一暗黑模式反色图标对比度（--on-brand）与曜石思考胶囊",
+		},
+		HighlightsEn: []string{
+			"Renamed platform to Kyndryl Delivery Studio with Swiss Leica pure porcelain light and anodized titanium dark palettes, separating matte obsidian interactive tokens (--brand/--on-brand) from surgical Kyndryl Warm Red (--kyndryl) accents",
+			"Aligned topbar [K] kyndryl | Delivery Studio optically with navigation tabs (<0.4px), fixed AI composer send-button overflow across widths, removed legacy rainbow/purple composer highlights, and unified dark-mode contrast on inverted badges",
+		},
+	},
 	{
 		Version: "1.0.295-dev",
 		Date:    "2026-11-24",
@@ -823,7 +837,7 @@ var platformReleaseNotes = []releaseNote{
 }
 
 func usage() {
-	fmt.Fprint(os.Stderr, `Kyndryl Delivery Hub — 企业级基础设施与中间件交付中心
+	fmt.Fprint(os.Stderr, `Kyndryl Delivery Studio — 企业级基础设施与中间件交付平台
 
   middleware-hub store serve --config 配置.json          启动共享服务
   middleware-hub store supervise --config 配置.json      以零中断热重启网关模式启动服务（Windows / Linux 通用）

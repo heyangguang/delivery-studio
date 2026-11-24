@@ -35,7 +35,7 @@ type AskItem = {
   hint: string;
 };
 
-/* rolling showcase of real Kyndryl Delivery Hub AI workflows */
+/* rolling showcase of real Kyndryl Delivery Studio AI workflows */
 const ASKS: (AskItem & { tagEn: string; askEn: string; hintEn: string })[] = [
   {
     tag: "沙箱排障",
@@ -162,7 +162,7 @@ function PanelArt() {
         <rect x="64" y="64" width="10" height="10" rx="2.5" transform="rotate(45 69 69)" fill="var(--brand)" fillOpacity="0.28" />
       </svg>
 
-      {/* top-right Kyndryl Delivery Hub orbital prism cluster */}
+      {/* top-right Kyndryl Delivery Studio orbital prism cluster */}
       <svg className="ib-art ib-art-tr" viewBox="0 0 460 360" fill="none">
         <defs>
           <radialGradient id={`tr-glow-${uid}`} cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(382 62) rotate(135) scale(310)">
@@ -306,7 +306,7 @@ function IntroPanel() {
       >
         <div className="ib-ask-eyebrow">
           <AIEmblem size={20} />
-          <span>Kyndryl Delivery Hub AI</span>
+          <span>Kyndryl Delivery Studio AI</span>
           <em>{bi("隔离沙箱 · 只读诊断", "Isolated Sandbox · Read-Only")}</em>
         </div>
 
@@ -504,10 +504,12 @@ export function Login({
     <div className={`ib-root${phase === "entering" ? " is-leaving" : ""}`}>
       <header className="ib-top">
         <span className="ib-brand">
-          <BrandMark size={20} />
-          <span className="brand-k">kyndryl</span>
-          <span className="brand-sep" aria-hidden />
-          <b>Delivery Hub</b>
+          <BrandMark size={22} />
+          <span className="brand-word">
+            <span className="brand-k">kyndryl</span>
+            <span className="brand-sep" aria-hidden />
+            <span className="brand-prod">Delivery Studio</span>
+          </span>
         </span>
         <div className="ib-top-right">
           {conn === "online" ? (
@@ -577,7 +579,7 @@ export function Login({
               <BrandMark size={40} />
             </div>
             <h1 className="ib-title ib-in" style={d(1)}>
-              {bi("登录 Kyndryl", "Sign in to Kyndryl")} <b>Delivery Hub</b>
+              {bi("登录 Kyndryl", "Sign in to Kyndryl")} <b>Delivery Studio</b>
             </h1>
             <p className="ib-sub ib-in" style={d(2)}>
               {bi(
@@ -720,7 +722,7 @@ export function Login({
           </div>
 
           <footer className="ib-foot">
-            © {new Date().getFullYear()} Kyndryl Delivery Hub · {bi("仅限授权人员访问", "Authorized Access Only")}
+            © {new Date().getFullYear()} Kyndryl Delivery Studio · {bi("仅限授权人员访问", "Authorized Access Only")}
           </footer>
         </main>
 

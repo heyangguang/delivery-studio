@@ -261,7 +261,7 @@ instances:
 	}{
 		{"csv", "CVE-2026-9001"},
 		{"cyclonedx", `"bomFormat": "CycloneDX"`},
-		{"markdown", "# Kyndryl Delivery Hub 安全漏洞评估报告"},
+		{"markdown", "# Kyndryl Delivery Studio 安全漏洞评估报告"},
 	} {
 		w := storeRequest(s, "GET", "/api/security/export?format="+tc.fmt, nil, admin, "")
 		if w.Code != 200 || !strings.Contains(w.Body.String(), tc.want) {

@@ -1377,8 +1377,8 @@ body[arco-theme="dark"] .sec-sev.med {
   color: var(--muted);
 }
 .sec-role-pill.role-runtime {
-  background: rgba(255, 70, 45, 0.1);
-  color: #c52b16;
+  background: var(--run-soft);
+  color: var(--run);
 }
 
 .sec-cl-chips {
@@ -2218,7 +2218,7 @@ body[arco-theme="dark"] .sec-sev.med {
 .sec-cl-act-rh:hover {
   background: var(--brand);
   border-color: var(--brand);
-  color: #fff;
+  color: var(--on-brand);
 }
 
 .sec-cl-act-rh:focus-visible,
@@ -2384,8 +2384,8 @@ body[arco-theme="dark"] .sec-sev.med {
   white-space: nowrap;
 }
 .sec-src-kind.k-osv_api {
-  color: #ff462d;
-  background: rgba(255, 70, 45, 0.1);
+  color: var(--ink);
+  background: var(--brand-soft);
 }
 .sec-src-kind.k-json_feed {
   color: #0369a1;

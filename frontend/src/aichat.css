@@ -1318,17 +1318,23 @@
 }
 .ad-bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  row-gap: 6px;
+  column-gap: 6px;
   min-width: 0;
+  max-width: 100%;
   padding: 6px 12px 10px 12px;
 }
 .ad-bar-right {
   display: inline-flex;
-  flex: none;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: center;
   gap: 6px;
   min-width: 0;
+  max-width: 100%;
   margin-left: auto;
 }
 .ad-bar .mp {
@@ -1379,7 +1385,7 @@
   padding: 0;
   border: 0;
   border-radius: 50%;
-  color: #fff;
+  color: var(--on-brand);
   font-size: 15px;
   background: var(--brand);
   cursor: pointer;
@@ -3100,10 +3106,10 @@
 
 /* ---- Security AI session dot, context strip & interactive VEX/baseline/rehearsal proposal cards ---- */
 .ad-dot.k-sec {
-  background: #ff462d;
+  background: var(--kyndryl);
 }
 .ad-ctx-sec .ad-ctx-l {
-  color: #ff462d;
+  color: var(--kyndryl-ink);
 }
 .ad-tag.sec-tag-critical {
   color: #b91c1c;

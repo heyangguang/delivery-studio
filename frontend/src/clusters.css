@@ -1377,7 +1377,7 @@
 }
 .cpq-opt:hover {
   background: var(--brand);
-  color: #fff;
+  color: var(--on-brand);
 }
 .cpq-own {
   display: flex;

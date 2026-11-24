@@ -1003,7 +1003,7 @@
 .dc-q-opt.on,
 .dc-q-opt:hover {
   background: var(--brand);
-  color: #fff;
+  color: var(--on-brand);
 }
 .dc-qs-foot {
   display: flex;

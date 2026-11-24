@@ -3180,13 +3180,14 @@ body[arco-theme="dark"] .ai-quick-toggle:not(.is-on):not(.is-warn) {
     transform 0.22s var(--spring);
 }
 .ai-quick-toggle.is-on {
-  border-color: var(--brand-line);
-  background: var(--brand-soft);
-  color: var(--brand-ink);
+  border-color: var(--line-strong);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow-sm);
 }
 .ai-quick-toggle.is-on:hover:not(:disabled):not(.is-readonly) {
-  background: color-mix(in srgb, var(--brand) 15%, var(--surface));
-  border-color: var(--brand);
+  background: var(--surface-2);
+  border-color: color-mix(in srgb, var(--ink) 26%, var(--line-strong));
 }
 .ai-quick-toggle.is-on .ai-quick-dot {
   background: var(--ok);
@@ -3301,7 +3302,7 @@ body[arco-theme="dark"] .ai-quick-toggle:not(.is-on):not(.is-warn) {
 .sx-nav-i.on .sx-nav-ic {
   background: var(--brand);
   box-shadow: none;
-  color: #fff;
+  color: var(--on-brand);
 }
 .sx-nav-t {
   display: flex;
@@ -3663,7 +3664,7 @@ body[arco-theme="dark"] .ai-quick-toggle:not(.is-on):not(.is-warn) {
 .cv-report-btn:hover {
   background: var(--brand);
   border-color: var(--brand);
-  color: #fff;
+  color: var(--on-brand);
 }
 .cv-pm-hint {
   margin: -2px 0 8px;
@@ -4210,12 +4211,12 @@ body[arco-theme="dark"] .cv-rep-phase.ph-tests {
   background: rgba(45, 212, 191, 0.15);
 }
 .cv-rep-phase.ph-endpoint {
-  color: #ff462d;
-  background: rgba(255, 70, 45, 0.11);
+  color: var(--ink);
+  background: var(--brand-soft);
 }
 body[arco-theme="dark"] .cv-rep-phase.ph-endpoint {
-  color: #c4b5fd;
-  background: rgba(167, 139, 250, 0.15);
+  color: var(--ink);
+  background: var(--brand-soft);
 }
 .cv-rep-st-ok {
   display: inline-flex;

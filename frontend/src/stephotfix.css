@@ -27,14 +27,15 @@
   border-color: var(--brand-line);
 }
 .shf-mode-pill.patched {
-  color: #c52b16;
-  background: rgba(255, 70, 45, 0.1);
-  border-color: rgba(255, 70, 45, 0.25);
+  color: var(--ink);
+  background: var(--brand-soft);
+  border-color: var(--brand-line);
 }
-[data-theme="dark"] .shf-mode-pill.patched {
-  color: #c4b5fd;
-  background: rgba(139, 92, 246, 0.18);
-  border-color: rgba(139, 92, 246, 0.35);
+[data-theme="dark"] .shf-mode-pill.patched,
+body[arco-theme="dark"] .shf-mode-pill.patched {
+  color: var(--ink);
+  background: var(--brand-soft);
+  border-color: var(--brand-line);
 }
 
 .shf-shell {
@@ -134,12 +135,13 @@
   padding: 0 5px;
   line-height: 16px;
   border-radius: 4px;
-  color: #c52b16;
-  background: rgba(255, 70, 45, 0.12);
+  color: var(--ink);
+  background: var(--brand-soft);
 }
-[data-theme="dark"] .shf-patch-dot {
-  color: #c4b5fd;
-  background: rgba(139, 92, 246, 0.22);
+[data-theme="dark"] .shf-patch-dot,
+body[arco-theme="dark"] .shf-patch-dot {
+  color: var(--ink);
+  background: var(--brand-soft);
 }
 
 /* Right Editor Pane */
@@ -195,8 +197,8 @@
 }
 .shf-patch-banner {
   padding: 8px 16px;
-  background: rgba(255, 70, 45, 0.06);
-  border-bottom: 1px solid rgba(255, 70, 45, 0.16);
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
   font-size: 12px;
   color: var(--ink-2);
   display: flex;
@@ -206,10 +208,11 @@
   flex-wrap: wrap;
 }
 .shf-patch-banner strong {
-  color: #c52b16;
+  color: var(--ink);
 }
-[data-theme="dark"] .shf-patch-banner strong {
-  color: #c4b5fd;
+[data-theme="dark"] .shf-patch-banner strong,
+body[arco-theme="dark"] .shf-patch-banner strong {
+  color: var(--ink);
 }
 
 /* Post-Save Action Banner */

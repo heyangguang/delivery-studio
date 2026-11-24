@@ -26,7 +26,7 @@ import (
 // Supports multiple concurrent sources:
 //   - osv_api    : OSV.dev compatible query API (/v1/querybatch + /v1/vulns/{id}) or internal mirror
 //   - json_feed  : HTTP/HTTPS JSON feed ([]secDBAdvisory, []osvFullDoc, single osvFullDoc, or {"advisories":[...]})
-//   - bundle_url : HTTP/HTTPS URL to a SHA256SUMS-verified .tar.gz offline bundle exported by Kyndryl Delivery Hub
+//   - bundle_url : HTTP/HTTPS URL to a SHA256SUMS-verified .tar.gz offline bundle exported by Kyndryl Delivery Studio
 //   - cisa_kev   : CISA Known Exploited Vulnerabilities JSON catalog (enriches matched local CVEs)
 
 type secFeedSource struct {

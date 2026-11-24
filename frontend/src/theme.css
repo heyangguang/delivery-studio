@@ -1,54 +1,65 @@
-/* Kyndryl Delivery Hub Design Tokens (Shidoka-inspired):
-   Warm Stone neutral canvas, Warm Charcoal authority, Kyndryl Warm Red (#FF462D) signature accent,
-   and Shidoka Deep Spruce operational telemetry. Crisp, legible, and distinct from error/critical crimson. */
+/* Kyndryl Delivery Studio Design Tokens (Swiss Leica Edition):
+   Pure Porcelain & Cool Platinum surfaces (0% yellow cast), Matte Obsidian authority,
+   and surgical Kyndryl Warm Red (#FF462D) signature accents reserved for logo, wordmark,
+   active underline bars, active rail indicator ticks, and unread dots. */
 :root,
 body {
-  --bg: #f6f5f2;
+  --bg: #f8f9fb;
   --surface: #ffffff;
-  --surface-2: #f1efea;
-  --surface-3: #e8e5de;
-  --sunken: #edeae3;
-  --rail: #f3f1ec;
-  --hover: rgba(29, 28, 26, 0.045);
-  --press: rgba(29, 28, 26, 0.08);
-  --line: rgba(29, 28, 26, 0.09);
-  --line-strong: rgba(29, 28, 26, 0.16);
-  --ink: #1d1c1a;
-  --ink-2: #3a3835;
-  --mute: #64615b;
-  --faint: #8c8880;
+  --surface-2: #f3f4f7;
+  --surface-3: #e8eaef;
+  --sunken: #eff1f5;
+  --rail: #f7f8fa;
+  --hover: rgba(11, 13, 18, 0.04);
+  --press: rgba(11, 13, 18, 0.075);
+  --line: rgba(11, 13, 18, 0.075);
+  --line-strong: rgba(11, 13, 18, 0.14);
+  --ink: #0b0d12;
+  --ink-2: #343a46;
+  --mute: #646c7c;
+  --faint: #9199a8;
 
-  --brand: #ff462d;
-  --brand-ink: #c52b16;
-  --brand-soft: rgba(255, 70, 45, 0.085);
-  --brand-line: rgba(255, 70, 45, 0.28);
+  --kyndryl: #ff462d;
+  --kyndryl-ink: #d4301a;
+  --kyndryl-soft: rgba(255, 70, 45, 0.08);
+  --kyndryl-line: rgba(255, 70, 45, 0.26);
 
-  --ok: #147a4b;
-  --ok-soft: rgba(20, 122, 75, 0.11);
-  --ok-line: rgba(20, 122, 75, 0.28);
+  --brand: #111318;
+  --on-brand: #ffffff;
+  --brand-ink: #0b0d12;
+  --brand-soft: rgba(11, 13, 18, 0.055);
+  --brand-line: rgba(11, 13, 18, 0.17);
 
-  --warn: #b25900;
-  --warn-soft: rgba(245, 158, 11, 0.14);
-  --warn-line: rgba(178, 89, 0, 0.28);
+  --ok: #0e7a4b;
+  --ok-soft: rgba(14, 122, 75, 0.095);
+  --ok-line: rgba(14, 122, 75, 0.24);
 
-  --bad: #b91c1c;
-  --bad-soft: rgba(185, 28, 28, 0.1);
-  --bad-line: rgba(185, 28, 28, 0.28);
+  --warn: #b45309;
+  --warn-soft: rgba(217, 119, 6, 0.11);
+  --warn-line: rgba(180, 83, 9, 0.25);
 
-  --run: #1f5e66;
-  --run-soft: rgba(31, 94, 102, 0.11);
-  --run-line: rgba(31, 94, 102, 0.3);
+  --bad: #c81e1e;
+  --bad-soft: rgba(200, 30, 30, 0.09);
+  --bad-line: rgba(200, 30, 30, 0.25);
 
-  --idle: #87847d;
-  --idle-soft: rgba(135, 132, 125, 0.13);
-  --idle-line: rgba(135, 132, 125, 0.26);
+  --run: #0e6b74;
+  --run-soft: rgba(14, 107, 116, 0.1);
+  --run-line: rgba(14, 107, 116, 0.26);
 
-  --code-bg: #f1efea;
-  --term-bg: #181716;
-  --term-head: #22201e;
-  --term-ink: #f0ede8;
-  --term-mute: #9c978e;
-  --term-line: rgba(255, 250, 244, 0.09);
+  --pending: #3b475c;
+  --pending-soft: rgba(59, 71, 92, 0.08);
+  --pending-line: rgba(59, 71, 92, 0.2);
+
+  --idle: #7b8394;
+  --idle-soft: rgba(123, 131, 148, 0.11);
+  --idle-line: rgba(123, 131, 148, 0.24);
+
+  --code-bg: #f3f4f7;
+  --term-bg: #0f1116;
+  --term-head: #161921;
+  --term-ink: #edf0f5;
+  --term-mute: #8992a3;
+  --term-line: rgba(240, 244, 255, 0.085);
   --panel: var(--surface);
   --ink-1: var(--ink);
   --ink-3: var(--faint);
@@ -57,15 +68,15 @@ body {
   --rim: 0 0 0 0 transparent;
   --rim-strong: 0 0 0 0 transparent;
   --shadow-sm:
-    0 1px 2px rgba(29, 28, 26, 0.05),
-    0 0 0 1px rgba(29, 28, 26, 0.03);
+    0 1px 2px rgba(11, 13, 18, 0.045),
+    0 0 0 1px rgba(11, 13, 18, 0.025);
   --shadow-md:
-    0 6px 18px -4px rgba(29, 28, 26, 0.09),
-    0 2px 6px rgba(29, 28, 26, 0.04);
+    0 8px 24px -6px rgba(11, 13, 18, 0.085),
+    0 2px 6px -1px rgba(11, 13, 18, 0.04);
   --shadow-lg:
-    0 18px 42px -10px rgba(29, 28, 26, 0.16),
-    0 4px 12px rgba(29, 28, 26, 0.06);
-  --ring: 0 0 0 3px rgba(255, 70, 45, 0.2);
+    0 22px 48px -12px rgba(11, 13, 18, 0.15),
+    0 6px 16px -4px rgba(11, 13, 18, 0.05);
+  --ring: 0 0 0 3px rgba(11, 13, 18, 0.12);
   --r-sm: 5px;
   --r: 7px;
   --r-md: 9px;
@@ -77,16 +88,16 @@ body {
   --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", "Noto Sans CJK SC", sans-serif;
   --mono: "SF Mono", ui-monospace, "JetBrains Mono", "Cascadia Mono", Menlo, Consolas, "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", "Noto Sans CJK SC", monospace;
 
-  --arcoblue-1: 255, 243, 240;
-  --arcoblue-2: 255, 224, 217;
-  --arcoblue-3: 255, 191, 179;
-  --arcoblue-4: 255, 146, 128;
-  --arcoblue-5: 255, 106, 84;
-  --arcoblue-6: 255, 70, 45;
-  --arcoblue-7: 224, 52, 29;
-  --arcoblue-8: 197, 43, 22;
-  --arcoblue-9: 158, 33, 16;
-  --arcoblue-10: 112, 22, 10;
+  --arcoblue-1: 244, 245, 247;
+  --arcoblue-2: 230, 232, 237;
+  --arcoblue-3: 204, 208, 217;
+  --arcoblue-4: 152, 160, 174;
+  --arcoblue-5: 62, 68, 82;
+  --arcoblue-6: 17, 19, 24;
+  --arcoblue-7: 34, 38, 48;
+  --arcoblue-8: 11, 13, 18;
+  --arcoblue-9: 8, 10, 14;
+  --arcoblue-10: 5, 6, 9;
   --primary-1: var(--arcoblue-1);
   --primary-2: var(--arcoblue-2);
   --primary-3: var(--arcoblue-3);
@@ -106,85 +117,95 @@ body {
 
 :root[arco-theme="dark"],
 body[arco-theme="dark"] {
-  --bg: #131312;
-  --surface: #1b1a19;
-  --surface-2: #242220;
-  --surface-3: #2d2b28;
-  --sunken: #0d0d0c;
-  --rail: #161514;
-  --hover: rgba(255, 250, 244, 0.055);
-  --press: rgba(255, 250, 244, 0.095);
-  --line: rgba(255, 250, 244, 0.09);
-  --line-strong: rgba(255, 250, 244, 0.16);
-  --ink: #f5f3ef;
-  --ink-2: #d6d3cc;
-  --mute: #9e9a92;
-  --faint: #747068;
+  --bg: #0b0d11;
+  --surface: #12151b;
+  --surface-2: #191d25;
+  --surface-3: #222733;
+  --sunken: #080a0d;
+  --rail: #0e1116;
+  --hover: rgba(240, 244, 255, 0.055);
+  --press: rgba(240, 244, 255, 0.095);
+  --line: rgba(240, 244, 255, 0.08);
+  --line-strong: rgba(240, 244, 255, 0.15);
+  --ink: #f3f5f8;
+  --ink-2: #cbd2de;
+  --mute: #8892a4;
+  --faint: #5b6475;
 
-  --brand: #ff5b44;
-  --brand-ink: #ff8270;
-  --brand-soft: rgba(255, 91, 68, 0.16);
-  --brand-line: rgba(255, 91, 68, 0.36);
+  --kyndryl: #ff553e;
+  --kyndryl-ink: #ff806e;
+  --kyndryl-soft: rgba(255, 85, 62, 0.15);
+  --kyndryl-line: rgba(255, 85, 62, 0.36);
 
-  --ok: #3ddc84;
-  --ok-soft: rgba(61, 220, 132, 0.15);
-  --ok-line: rgba(61, 220, 132, 0.35);
+  --brand: #f2f4f8;
+  --on-brand: #0b0d11;
+  --brand-ink: #ffffff;
+  --brand-soft: rgba(242, 244, 248, 0.09);
+  --brand-line: rgba(242, 244, 248, 0.22);
 
-  --warn: #ffb340;
-  --warn-soft: rgba(255, 179, 64, 0.15);
-  --warn-line: rgba(255, 179, 64, 0.36);
+  --ok: #34d399;
+  --ok-soft: rgba(52, 211, 153, 0.14);
+  --ok-line: rgba(52, 211, 153, 0.34);
+
+  --warn: #fbbf24;
+  --warn-soft: rgba(251, 191, 36, 0.14);
+  --warn-line: rgba(251, 191, 36, 0.34);
 
   --bad: #f87171;
-  --bad-soft: rgba(248, 113, 113, 0.16);
-  --bad-line: rgba(248, 113, 113, 0.38);
+  --bad-soft: rgba(248, 113, 113, 0.15);
+  --bad-line: rgba(248, 113, 113, 0.36);
 
   --run: #4db0bc;
   --run-soft: rgba(77, 176, 188, 0.16);
   --run-line: rgba(77, 176, 188, 0.36);
 
-  --idle: #949088;
-  --idle-soft: rgba(148, 144, 136, 0.18);
-  --idle-line: rgba(148, 144, 136, 0.32);
+  --pending: #94a3b8;
+  --pending-soft: rgba(148, 163, 184, 0.14);
+  --pending-line: rgba(148, 163, 184, 0.28);
 
-  --code-bg: #11100f;
-  --term-bg: #0e0d0c;
-  --term-head: #171615;
-  --term-ink: #f0ede8;
-  --term-mute: #948f87;
-  --term-line: rgba(255, 250, 244, 0.08);
+  --idle: #8b95a7;
+  --idle-soft: rgba(139, 149, 167, 0.16);
+  --idle-line: rgba(139, 149, 167, 0.3);
+
+  --code-bg: #0c0e13;
+  --term-bg: #090b0f;
+  --term-head: #11141b;
+  --term-ink: #edf0f5;
+  --term-mute: #8892a4;
+  --term-line: rgba(240, 244, 255, 0.08);
   --panel: var(--surface);
   --ink-1: var(--ink);
   --ink-3: var(--faint);
-  --glass: rgba(27, 26, 25, 0.88);
-  --glass-strong: rgba(34, 32, 30, 0.96);
+  --glass: rgba(18, 21, 27, 0.88);
+  --glass-strong: rgba(23, 27, 35, 0.96);
   --rim: 0 0 0 0 transparent;
   --rim-strong: 0 0 0 0 transparent;
   --shadow-sm:
     0 1px 2px rgba(0, 0, 0, 0.44),
-    0 0 0 1px rgba(255, 250, 244, 0.05);
+    0 0 0 1px rgba(240, 244, 255, 0.05);
   --shadow-md:
-    0 8px 24px rgba(0, 0, 0, 0.5),
-    0 0 0 1px rgba(255, 250, 244, 0.06);
+    0 8px 24px rgba(0, 0, 0, 0.52),
+    0 0 0 1px rgba(240, 244, 255, 0.06);
   --shadow-lg:
-    0 20px 48px rgba(0, 0, 0, 0.66),
-    0 0 0 1px rgba(255, 250, 244, 0.08);
-  --ring: 0 0 0 3px rgba(255, 91, 68, 0.32);
+    0 22px 52px rgba(0, 0, 0, 0.68),
+    0 0 0 1px rgba(240, 244, 255, 0.08);
+  --ring: 0 0 0 3px rgba(242, 244, 248, 0.18);
 
-  --arcoblue-1: 54, 24, 20;
-  --arcoblue-2: 78, 32, 26;
-  --arcoblue-3: 112, 42, 32;
-  --arcoblue-4: 158, 54, 40;
-  --arcoblue-5: 224, 74, 54;
-  --arcoblue-6: 255, 91, 68;
-  --arcoblue-7: 255, 118, 99;
-  --arcoblue-8: 255, 152, 138;
-  --arcoblue-9: 255, 192, 184;
-  --arcoblue-10: 255, 228, 224;
+  --arcoblue-1: 24, 28, 36;
+  --arcoblue-2: 34, 40, 52;
+  --arcoblue-3: 52, 60, 76;
+  --arcoblue-4: 96, 108, 128;
+  --arcoblue-5: 186, 194, 208;
+  --arcoblue-6: 242, 244, 248;
+  --arcoblue-7: 255, 255, 255;
+  --arcoblue-8: 224, 229, 238;
+  --arcoblue-9: 196, 204, 216;
+  --arcoblue-10: 164, 174, 190;
   --color-bg-1: var(--surface);
   --color-bg-2: var(--surface);
   --color-bg-3: var(--surface-2);
   --color-bg-4: var(--surface-3);
-  --color-bg-popup: #211f1d;
+  --color-bg-popup: #171b23;
   color-scheme: dark;
 }
 
@@ -428,16 +449,16 @@ kbd {
 .arco-btn:focus-visible {
   box-shadow: var(--ring);
 }
-/* Kyndryl Scheme A Executive Primary CTA: Warm Charcoal authority on light, Warm Ivory on dark,
-   keeping operational danger/warning/success buttons strictly semantic. */
+/* Swiss Leica Matte Obsidian Primary CTA: razor-crisp obsidian on porcelain light,
+   pure anodized platinum on obsidian dark; operational danger/warning/success remain strictly semantic. */
 .arco-btn-primary:not(.arco-btn-disabled):not(.arco-btn-status-danger):not(.arco-btn-status-warning):not(.arco-btn-status-success) {
-  background-color: #1d1c1a;
-  border-color: #1d1c1a;
+  background-color: #0b0d12;
+  border-color: #0b0d12;
   color: #ffffff;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.12),
-    0 1px 3px rgba(29, 28, 26, 0.24),
-    0 1px 1px rgba(29, 28, 26, 0.14);
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 1px 2px rgba(11, 13, 18, 0.24),
+    0 0 0 0.5px rgba(11, 13, 18, 0.2);
   transition:
     transform 0.18s var(--spring),
     box-shadow 0.18s ease,
@@ -445,38 +466,53 @@ kbd {
     border-color 0.16s ease;
 }
 .arco-btn-primary:not(.arco-btn-disabled):not(.arco-btn-status-danger):not(.arco-btn-status-warning):not(.arco-btn-status-success):hover {
-  background-color: #33312e;
-  border-color: #33312e;
+  background-color: #1f2430;
+  border-color: #1f2430;
   color: #ffffff;
   transform: translate3d(0, -0.5px, 0);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.16),
-    0 4px 12px -2px rgba(29, 28, 26, 0.3),
-    0 1px 2px rgba(29, 28, 26, 0.18);
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    0 6px 16px -4px rgba(11, 13, 18, 0.3),
+    0 1px 2px rgba(11, 13, 18, 0.18);
 }
 .arco-btn-primary:not(.arco-btn-disabled):not(.arco-btn-status-danger):not(.arco-btn-status-warning):not(.arco-btn-status-success):active {
-  background-color: #121110;
-  border-color: #121110;
+  background-color: #050608;
+  border-color: #050608;
   transform: scale(0.985);
 }
 body[arco-theme="dark"] .arco-btn-primary:not(.arco-btn-disabled):not(.arco-btn-status-danger):not(.arco-btn-status-warning):not(.arco-btn-status-success) {
-  background-color: #f5f3ef;
-  border-color: #f5f3ef;
-  color: #141312;
+  background-color: #f3f5f8;
+  border-color: #f3f5f8;
+  color: #0b0d11;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.6),
-    0 1px 3px rgba(0, 0, 0, 0.36);
+    inset 0 1px 0 rgba(255, 255, 255, 0.72),
+    0 1px 3px rgba(0, 0, 0, 0.4);
 }
 body[arco-theme="dark"] .arco-btn-primary:not(.arco-btn-disabled):not(.arco-btn-status-danger):not(.arco-btn-status-warning):not(.arco-btn-status-success):hover {
   background-color: #ffffff;
   border-color: #ffffff;
-  color: #141312;
+  color: #0b0d11;
   box-shadow:
-    0 4px 14px -2px rgba(0, 0, 0, 0.45);
+    0 6px 16px -3px rgba(0, 0, 0, 0.48);
 }
 body[arco-theme="dark"] .arco-btn-primary:not(.arco-btn-disabled):not(.arco-btn-status-danger):not(.arco-btn-status-warning):not(.arco-btn-status-success):active {
-  background-color: #e6e2da;
-  border-color: #e6e2da;
+  background-color: #dfe4ec;
+  border-color: #dfe4ec;
+}
+/* Dark-mode monochrome Arco checkmarks & active pagination contrast on light platinum fill */
+body[arco-theme="dark"] .arco-checkbox-checked .arco-checkbox-icon-check,
+body[arco-theme="dark"] .arco-checkbox-indeterminate .arco-checkbox-icon-check {
+  color: #0b0d11;
+}
+body[arco-theme="dark"] .arco-checkbox-indeterminate .arco-checkbox-mask::after {
+  background-color: #0b0d11;
+}
+body[arco-theme="dark"] .arco-radio-checked .arco-radio-mask::after {
+  background-color: #0b0d11;
+}
+body[arco-theme="dark"] .arco-pagination-item-active {
+  background-color: rgba(242, 244, 248, 0.12);
+  color: #ffffff;
 }
 .arco-btn-primary.arco-btn-disabled:not(.arco-btn-status-danger):not(.arco-btn-status-warning):not(.arco-btn-status-success),
 .arco-btn-primary.arco-btn-disabled:not(.arco-btn-status-danger):not(.arco-btn-status-warning):not(.arco-btn-status-success):hover {
@@ -830,7 +866,7 @@ body[arco-theme="dark"] .arco-modal {
 /* Crisp, compositor-friendly scrim (avoid full-viewport backdrop-filter blur which stalls VDI/software GPUs on first open). */
 .arco-modal-mask,
 .arco-drawer-mask {
-  background: rgba(29, 28, 26, 0.44);
+  background: rgba(11, 13, 18, 0.42);
 }
 /* Snappy GPU-composited modal transitions replacing Arco's heavy 400ms scale(0.5) overshoot zoom. */
 .zoomModal-enter,

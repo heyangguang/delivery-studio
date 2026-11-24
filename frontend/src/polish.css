@@ -45,21 +45,32 @@ body[arco-theme="dark"] .topbar {
   border-bottom-color: var(--line);
 }
 
-/* the current top tab: pure borderless soft indigo pill — zero box stroke, zero underline */
+/* the current top tab: crisp platinum pill with razor-sharp Leica red micro-tick */
 .tabs-bar {
-  background: var(--brand-soft);
-  box-shadow: none;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px rgba(11, 13, 18, 0.055);
+}
+.tabs-bar::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 14px;
+  height: 2px;
+  margin-left: -7px;
+  border-radius: 2px 2px 0 0;
+  background: var(--kyndryl);
 }
 body[arco-theme="dark"] .tabs-bar {
-  background: var(--brand-soft);
-  box-shadow: none;
+  background: rgba(242, 244, 248, 0.085);
+  box-shadow: inset 0 0 0 1px rgba(242, 244, 248, 0.08);
 }
 .tabs a.on {
-  color: var(--brand-ink);
+  color: var(--ink);
   font-weight: 600;
 }
 
-/* AI suite status chip in light/dark airy topbar */
+/* AI suite status chip in light/dark airy topbar — pure glass monochrome with emerald live dot */
 .ai-quick-toggle {
   display: inline-flex;
   align-items: center;
@@ -97,8 +108,8 @@ body[arco-theme="dark"] .tabs-bar {
   transition: transform 0.2s var(--spring), opacity 0.18s ease;
 }
 .ai-quick-toggle.is-interactive.is-on:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--brand) 13%, var(--surface));
-  border-color: color-mix(in srgb, var(--brand) 42%, var(--line));
+  background: var(--surface-2);
+  border-color: color-mix(in srgb, var(--ink) 24%, var(--line-strong));
 }
 .ai-quick-toggle.is-interactive:hover .ai-quick-arrow {
   opacity: 0.92;
@@ -111,8 +122,8 @@ body[arco-theme="dark"] .tabs-bar {
 }
 .ai-quick-toggle.is-readonly.is-on {
   border-style: solid;
-  border-color: color-mix(in srgb, var(--brand) 22%, var(--line));
-  background: color-mix(in srgb, var(--brand-soft) 75%, transparent);
+  border-color: var(--line-strong);
+  background: var(--surface);
 }
 .ai-quick-toggle.is-readonly.is-warn {
   border-style: solid;
@@ -120,17 +131,27 @@ body[arco-theme="dark"] .tabs-bar {
   background: color-mix(in srgb, var(--warn-soft) 68%, transparent);
 }
 
-/* the chosen row in a list */
+/* the chosen row in a list: crisp porcelain elevation + surgical 2.5px Leica Warm Red edge bar */
 .row-indicator {
   background: var(--surface);
   box-shadow:
-    0 2px 8px -2px rgba(15, 23, 42, 0.09),
-    0 0 0 1px rgba(15, 23, 42, 0.07);
+    0 2px 8px -2px rgba(11, 13, 18, 0.085),
+    0 0 0 1px rgba(11, 13, 18, 0.08);
+}
+.row-indicator::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 9px;
+  bottom: 9px;
+  width: 2.5px;
+  border-radius: 0 2px 2px 0;
+  background: var(--kyndryl);
 }
 body[arco-theme="dark"] .row-indicator {
   background: var(--surface-2);
   box-shadow:
-    0 4px 14px rgba(0, 0, 0, 0.42),
+    0 4px 14px rgba(0, 0, 0, 0.44),
     0 0 0 1px var(--line-strong);
 }
 
@@ -238,7 +259,7 @@ body[arco-theme="dark"] .ig-card-rim {
   margin: 2px -6px 0;
 }
 
-/* side navigation inside pages: clean calm card without side bars */
+/* side navigation inside pages: elevated porcelain card with surgical 2.5px Leica red edge tick */
 .sx-nav-i {
   position: relative;
   padding: 8px 10px;
@@ -249,9 +270,19 @@ body[arco-theme="dark"] .ig-card-rim {
 }
 .sx-nav-i.on {
   background: var(--surface);
-  color: var(--brand-ink);
+  color: var(--ink);
   font-weight: 600;
   box-shadow: var(--shadow-sm), 0 0 0 1px var(--line);
+}
+.sx-nav-i.on::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 2.5px;
+  border-radius: 0 2px 2px 0;
+  background: var(--kyndryl);
 }
 
 /* pages inside a detail pane share one rhythm */
@@ -852,7 +883,7 @@ body[arco-theme="dark"] .arco-trigger-popup .arco-menu {
   z-index: 2;
   height: 2px;
   border-radius: 2px 2px 0 0;
-  background: var(--brand);
+  background: var(--kyndryl);
   pointer-events: none;
   will-change: transform, width;
 }

@@ -269,7 +269,7 @@ func (c assistCtx) run(name, args string) string {
 	return aiToolCtx{s: c.s, job: j, user: c.user, session: "assistant", proposed: &none}.run(name, string(b))
 }
 
-const assistSystem = `你是 Kyndryl Delivery Hub（离线与自动化中间件交付平台）里的 AI 助手，回答用户关于交付、组件、部署、排障和变更演练的问题。
+const assistSystem = `你是 Kyndryl Delivery Studio（离线与自动化中间件交付平台）里的 AI 助手，回答用户关于交付、组件、部署、排障和变更演练的问题。
 - 先用工具查看实际内容再回答：用户的交付、部署/投产状态、执行手册、项目文件、组件和设计指南都能读到。不要凭记忆编造平台里的数据。
 - **严禁向用户反问平台已知的状态**：对话已关联交付或已通过 list_deliveries / delivery_info / cluster_history 查到集群状态时，**绝对不要问“这个集群已经投产了吗 / 已经部署完成了吗”**——直接以平台真实记录的部署/运行状态为依据。
 - 核对某份交付里的具体配置、日志、参数或模板是否存在时，优先用 delivery_info + search_files（原生全文搜索）+ read_file（支持 from_line）精准定位，不必仅为查文本启动沙箱命令；沙箱留给精确计算、脚本校验、日志解析或生成导出文件。

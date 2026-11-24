@@ -291,13 +291,13 @@ func buildSecExportDataset(
 		RuntimeCounts: rt,
 		WaivedCount:   waivedN,
 		IgnoredCount:  ignoredN,
-		OrgName:       firstNonEmptyStr(tpl.OrgName, "Kyndryl Delivery Hub 安全运营中心"),
+		OrgName:       firstNonEmptyStr(tpl.OrgName, "Kyndryl Delivery Studio 安全运营中心"),
 		Confidential:  firstNonEmptyStr(tpl.Confidential, "内部受控 / Internal"),
 	}
 	ds.Title = expandSecTemplateVars(firstNonEmptyStr(tpl.Title, "{scope}安全态势评估报告"), &ds)
 	ds.Subtitle = expandSecTemplateVars(firstNonEmptyStr(tpl.Subtitle, "SBOM 漏洞评估与合规审计报告"), &ds)
 	ds.HeaderText = expandSecTemplateVars(firstNonEmptyStr(tpl.HeaderText, "{org} · {scope}安全评估报告"), &ds)
-	ds.FooterText = expandSecTemplateVars(firstNonEmptyStr(tpl.FooterText, "Kyndryl Delivery Hub 安全中心 · {date}"), &ds)
+	ds.FooterText = expandSecTemplateVars(firstNonEmptyStr(tpl.FooterText, "Kyndryl Delivery Studio 安全中心 · {date}"), &ds)
 	ds.ConclusionNote = expandSecTemplateVars(tpl.ConclusionNote, &ds)
 	ds.Remediations = buildSecRemediationPlan(&ds)
 	return ds
@@ -706,7 +706,7 @@ func renderSecurityDocx(ds secExportDataset) ([]byte, error) {
 
 	front.cover(docxCover{
 		Org:          ds.OrgName,
-		Project:      "Kyndryl Delivery Hub 安全中心",
+		Project:      "Kyndryl Delivery Studio 安全中心",
 		Slogan:       fmt.Sprintf("报告模板：%s", ds.Template.Name),
 		Title:        ds.Title,
 		Subtitle:     ds.Subtitle,

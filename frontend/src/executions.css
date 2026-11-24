@@ -1011,7 +1011,7 @@
 .en-setup-steps .current i {
   background: var(--brand);
   border-color: var(--brand);
-  color: white;
+  color: var(--on-brand);
 }
 .en-setup-steps .done i {
   background: var(--ok-soft);

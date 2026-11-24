@@ -304,18 +304,18 @@
   border: 1px solid var(--line);
 }
 .cx-origin-badge.is-embedded {
-  color: #c52b16;
-  background: color-mix(in srgb, #ff462d 8%, var(--surface));
-  border-color: color-mix(in srgb, #ff462d 22%, var(--line));
+  color: var(--run);
+  background: var(--run-soft);
+  border-color: var(--run-line);
 }
 .cx-origin-badge.is-split {
   color: var(--brand-ink);
-  background: color-mix(in srgb, var(--brand) 7%, var(--surface));
-  border-color: color-mix(in srgb, var(--brand) 22%, var(--line));
+  background: var(--brand-soft);
+  border-color: var(--brand-line);
 }
 [data-theme="dark"] .cx-origin-badge.is-embedded,
 body[arco-theme="dark"] .cx-origin-badge.is-embedded {
-  color: #c4b5fd;
+  color: var(--run);
 }
 .cx-comp-hero-meta {
   display: flex;

@@ -1,6 +1,6 @@
 @media (prefers-color-scheme: dark) {
   html:not([style*="color-scheme: light"]) {
-    background: #131312;
+    background: #0b0d11;
   }
 }
 .muted {
@@ -150,31 +150,35 @@
   flex: none;
   display: block;
   border-radius: 24%;
-  box-shadow: 0 2px 6px rgba(255, 70, 45, 0.26);
+  box-shadow:
+    0 1px 2px rgba(11, 13, 18, 0.14),
+    0 0 0 0.5px rgba(220, 49, 27, 0.22);
 }
 .brand-word {
   display: inline-flex;
-  align-items: center;
-  gap: 8px;
+  align-items: baseline;
+  gap: 7px;
   line-height: 1;
 }
 .brand-k {
-  font-size: 16px;
+  font-size: 15.5px;
   font-weight: 760;
-  letter-spacing: -0.032em;
-  color: var(--brand);
+  letter-spacing: -0.03em;
+  color: var(--kyndryl);
   line-height: 1;
 }
 .brand-sep {
   width: 1px;
-  height: 14px;
+  height: 13px;
+  align-self: center;
+  transform: translateY(-0.5px);
   background: var(--line-strong);
   flex: none;
 }
 .brand-prod {
-  font-size: 14px;
-  font-weight: 620;
-  letter-spacing: -0.015em;
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: -0.014em;
   color: var(--ink);
   line-height: 1;
 }
@@ -382,10 +386,16 @@
   flex: none;
 }
 .avatar.admin {
-  background: linear-gradient(135deg, #3a3835, #1d1c1a);
+  background: linear-gradient(145deg, #2b313d, #0b0d12);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    0 1px 2px rgba(11, 13, 18, 0.18);
 }
 body[arco-theme="dark"] .avatar.admin {
-  background: linear-gradient(135deg, #ff5b44, #c52b16);
+  background: linear-gradient(145deg, #3a4252, #1b2029);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    0 1px 3px rgba(0, 0, 0, 0.45);
 }
 .user-drop-menu {
   width: 244px;
@@ -976,8 +986,8 @@ body[arco-theme="dark"] .avatar.admin {
   --cs: var(--ok-soft);
 }
 .s-generated {
-  --c: var(--brand);
-  --cs: var(--brand-soft);
+  --c: var(--pending);
+  --cs: var(--pending-soft);
 }
 .s-failed {
   --c: var(--bad);
@@ -1341,8 +1351,8 @@ body[arco-theme="dark"] .seg-thumb {
   stroke: var(--line-strong);
 }
 .topo-node.primary rect {
-  stroke: var(--brand);
-  stroke-width: 1.5;
+  stroke: color-mix(in srgb, var(--brand) 82%, transparent);
+  stroke-width: 1.25;
 }
 .topo .t-role {
   font-family: var(--sans);
@@ -3372,7 +3382,7 @@ body[arco-theme="dark"] .login-policy-box {
   font-style: normal;
   font-size: 10px;
   font-weight: 700;
-  color: #fff;
+  color: var(--on-brand);
   background: var(--brand);
 }
 .fpanel-pop .arco-popover-content {
@@ -3599,15 +3609,15 @@ body[arco-theme="dark"] .login-policy-box {
   gap: 9px;
   margin: 14px 0;
   padding: 13px 16px;
-  border: 1px solid color-mix(in srgb, var(--brand) 22%, var(--line));
+  border: 1px solid var(--line-strong);
   border-radius: 9px;
-  background: var(--surface-2);
+  background: linear-gradient(180deg, var(--surface) 0%, var(--bg) 100%);
   box-shadow: var(--shadow-sm);
   line-height: 1.55;
 }
 body[arco-theme="dark"] .scheme-summary {
-  border-color: color-mix(in srgb, var(--brand) 28%, var(--line));
-  background: var(--surface-2);
+  border-color: var(--line-strong);
+  background: linear-gradient(180deg, var(--surface-2) 0%, var(--surface) 100%);
   box-shadow: var(--shadow-sm);
 }
 .detail-head > .scheme-summary {
@@ -3631,7 +3641,7 @@ body[arco-theme="dark"] .scheme-summary {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--brand);
+  background: var(--kyndryl);
 }
 .scheme-node-pill {
   display: inline-flex;
@@ -3645,8 +3655,9 @@ body[arco-theme="dark"] .scheme-summary {
   line-height: 1;
   text-box-trim: trim-both;
   text-box-edge: cap alphabetic;
-  color: var(--brand-ink);
-  background: var(--brand-soft);
+  color: var(--ink-2);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
 }
 .scheme-pills {
   display: flex;
@@ -3730,16 +3741,17 @@ body[arco-theme="dark"] .scheme-summary {
   box-shadow: var(--ring);
 }
 .ver-pill.is-new {
-  border-color: var(--brand-line);
-  background: var(--brand-soft);
-  color: var(--brand-ink);
+  border-color: var(--line-strong);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow-sm);
 }
 .ver-pill-dot,
 .menu-unread-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--brand);
+  background: var(--kyndryl);
   flex: none;
 }
 .menu-ver {

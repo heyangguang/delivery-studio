@@ -654,8 +654,8 @@ function PaletteBody({
                     "Offline: searching only cached clusters and catalog entries",
                   )
                 : bi(
-                    "暂时连不上 Kyndryl Delivery Hub 后端服务，当前显示最近缓存的数据",
-                    "Kyndryl Delivery Hub backend unreachable: showing recently cached data",
+                    "暂时连不上 Kyndryl Delivery Studio 后端服务，当前显示最近缓存的数据",
+                    "Kyndryl Delivery Studio backend unreachable: showing recently cached data",
                   )}
             </span>
           </div>

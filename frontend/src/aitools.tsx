@@ -423,14 +423,34 @@ function computePopPos(
   return `${down ? "b" : "t"}${alignRight ? "r" : "l"}` as PopPos;
 }
 
+export function useElementWidth(ref: React.RefObject<HTMLElement | null>): number {
+  const [w, setW] = useState(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => {
+      const next = Math.round(el.getBoundingClientRect().width);
+      if (next > 0) setW((prev) => (prev === next ? prev : next));
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [ref]);
+  return w;
+}
+
 export function ThinkLevel({
   levels,
   value,
   onChange,
+  compact,
 }: {
   levels?: string[];
   value: string;
   onChange: (v: string) => void;
+  compact?: boolean;
 }) {
   useLang();
   const [open, setOpen] = useState(false);
@@ -443,10 +463,12 @@ export function ThinkLevel({
   const active = value && validLevels.includes(value) ? value : "";
   const prefix = bi("思考", "Think");
   const defText = bi("默认", "Default");
-  const allLabels = [
-    `${prefix} · ${defText}`,
-    ...validLevels.map((l) => `${prefix} · ${LEVELS[l]}`),
-  ];
+  const allLabels = compact
+    ? []
+    : [
+        `${prefix} · ${defText}`,
+        ...validLevels.map((l) => `${prefix} · ${LEVELS[l]}`),
+      ];
   return (
     <Popover
       ref={popRef as React.Ref<never>}
@@ -472,18 +494,31 @@ export function ThinkLevel({
       <button
         ref={btnRef}
         type="button"
-        className={`tm-tog think ${active ? "on" : ""} ${open ? "tm-open" : ""}`}
+        className={`tm-tog think ${compact ? "compact" : ""} ${active ? "on" : ""} ${open ? "tm-open" : ""}`}
         aria-expanded={open}
-        title={bi("思考深度：让模型想多深", "Thinking depth: how hard the model thinks")}
+        title={
+          active
+            ? bi(
+                `思考深度：${LEVELS[active]}（点击调整）`,
+                `Thinking depth: ${LEVELS[active]} (click to adjust)`,
+              )
+            : bi("思考深度：默认（点击调整）", "Thinking depth: Default (click to adjust)")
+        }
       >
         <IconBulb />
         <span className="tm-think-label">
           <span className="tm-think-cur">
             {prefix}
-            <span className={`tm-think-tier ${active ? "" : "is-def"}`}>
-              {" · "}
-              {active ? LEVELS[active] : defText}
-            </span>
+            {compact ? (
+              active ? (
+                <span className="tm-think-tier">·{LEVELS[active]}</span>
+              ) : null
+            ) : (
+              <span className={`tm-think-tier ${active ? "" : "is-def"}`}>
+                {" · "}
+                {active ? LEVELS[active] : defText}
+              </span>
+            )}
           </span>
           {allLabels.map((lbl) => (
             <span key={lbl} className="tm-think-sizer" aria-hidden="true">

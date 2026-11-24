@@ -9034,6 +9034,7 @@ function RehearsalSessionView({
                   levels={pick.current?.effort}
                   value={aiOpts.pref.think}
                   onChange={(v) => aiOpts.update({ think: v })}
+                  compact
                 />
                 <ModelPicker pick={pick} compact />
                 <Button
@@ -9368,6 +9369,7 @@ function RehearsalSessionView({
                   levels={pick.current?.effort}
                   value={aiOpts.pref.think}
                   onChange={(v) => aiOpts.update({ think: v })}
+                  compact
                 />
                 <ModelPicker pick={pick} compact />
                 <Button
@@ -9786,6 +9788,7 @@ function RehearsalSessionView({
                         levels={pick.current?.effort}
                         value={aiOpts.pref.think}
                         onChange={(v) => aiOpts.update({ think: v })}
+                        compact
                       />
                       <ModelPicker pick={pick} compact />
                       <Button
@@ -11827,6 +11830,7 @@ function StepRow({
                         levels={pick.current?.effort}
                         value={aiOpts.pref.think}
                         onChange={(v) => aiOpts.update({ think: v })}
+                        compact
                       />
                       <ModelPicker pick={pick} compact />
                       <Button

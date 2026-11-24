@@ -85,18 +85,13 @@
   background: var(--ok);
 }
 
-/* Single-row scrollable component filter strip (replaces messy 2-row wrapped pills) */
+/* Clean wrapped component filter chips so every middleware (incl. etcd) stays visible */
 .mon-app-strip {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
-  overflow-x: auto;
-  scrollbar-width: none;
-  padding-bottom: 1px;
+  gap: 5px;
   min-width: 0;
-}
-.mon-app-strip::-webkit-scrollbar {
-  display: none;
 }
 .mon-app-chip {
   all: unset;

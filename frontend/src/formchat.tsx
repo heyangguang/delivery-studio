@@ -32,7 +32,7 @@ import type {
   MsgFile,
 } from "./aichat";
 import { ModelPicker, useModelPick } from "./modelpick";
-import { ThinkLevel, ToolMenu, useAIOptions, useSpaciousComposer } from "./aitools";
+import { ThinkLevel, ToolMenu, useAIOptions, useElementWidth, useSpaciousComposer } from "./aitools";
 import "./formchat.css";
 
 /* Filling the new-delivery form by talking: the person describes the cluster in their own words, the assistant asks
@@ -1008,6 +1008,9 @@ export function Composer({
   const [told, setTold] = useState("");
   const [dragging, setDragging] = useState(false);
   const pick = useRef<HTMLInputElement>(null);
+  const composeW = useElementWidth(formRef);
+  const compactBar = !isStart || (composeW > 0 && composeW < 680);
+  const hideHint = composeW > 0 && composeW < 540;
   const go = (t?: string) => {
     const text = (t ?? input).trim();
     if ((!text && !attach?.waiting) || fa.busy || !online || attach?.busy)
@@ -1136,7 +1139,7 @@ export function Composer({
             <ToolMenu
               t={fa.tools}
               levels={fa.model.current?.effort}
-              compact={!isStart}
+              compact={compactBar}
               hideThink
               thinkInMenu={false}
               attach={
@@ -1155,19 +1158,22 @@ export function Composer({
                   : undefined
               }
             />
-            <span className="fc-hint">
-              {bi(
-                "不要写密码，平台会生成",
-                "Don't include passwords—the platform generates them",
-              )}
-            </span>
+            {!hideHint && (
+              <span className="fc-hint">
+                {bi(
+                  "不要写密码，平台会生成",
+                  "Don't include passwords—the platform generates them",
+                )}
+              </span>
+            )}
             <div className="fc-tools-right">
               <ThinkLevel
                 levels={fa.model.current?.effort}
                 value={fa.tools.pref.think}
                 onChange={(v) => fa.tools.update({ think: v })}
+                compact={compactBar}
               />
-              <ModelPicker pick={fa.model} compact={!isStart} />
+              <ModelPicker pick={fa.model} compact={compactBar} />
               {fa.busy ? (
                 <button
                   type="button"

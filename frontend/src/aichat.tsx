@@ -957,12 +957,14 @@ export function AIDock({
   scope,
   start,
   hidden = false,
+  compactLauncher = false,
   onChanged,
   children,
 }: {
   scope: Scope;
   start: AITarget;
   hidden?: boolean;
+  compactLauncher?: boolean;
   onChanged?: () => void;
   children: React.ReactNode;
 }) {
@@ -1213,7 +1215,7 @@ export function AIDock({
         {any && mode === "closed" && (
           <button
             type="button"
-            className={`ad-launch ${busy ? "busy" : ""} ${atEnd && !busy ? "mini" : ""}`}
+            className={`ad-launch ${busy ? "busy" : ""} ${(atEnd || compactLauncher) && !busy ? "mini" : ""}`}
             onClick={openGeneral}
             aria-label={bi("打开 AI 助手（Ctrl+J）", "Open AI Assistant (Ctrl+J)")}
           >
@@ -3265,6 +3267,7 @@ function ChatWindow({
                   levels={model.current?.effort}
                   value={tools.pref.think}
                   onChange={(v) => tools.update({ think: v })}
+                  compact={!expanded}
                 />
                 <ModelPicker pick={model} compact={!expanded} />
                 {busy ? (

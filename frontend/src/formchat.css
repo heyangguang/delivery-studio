@@ -118,6 +118,7 @@ body[arco-theme="dark"] .fc-orb {
 }
 .fc-tools {
   display: flex;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 8px;
   min-width: 0;
@@ -129,7 +130,9 @@ body[arco-theme="dark"] .fc-orb {
 }
 .fc-tools-right {
   display: inline-flex;
-  flex: none;
+  flex: 0 1 auto;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
   align-items: center;
   gap: 8px;
   min-width: 0;
@@ -137,6 +140,11 @@ body[arco-theme="dark"] .fc-orb {
 }
 .fc-compose:not(.start-box) .fc-tools-right {
   gap: 6px;
+}
+.fc-tools-right .mp {
+  flex: 0 1 auto;
+  min-width: 72px;
+  max-width: 196px;
 }
 .fc-tools-right .ap-send,
 .fc-tools-right .ad-send {

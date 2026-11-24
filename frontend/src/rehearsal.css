@@ -55,7 +55,7 @@ body[arco-theme="dark"] {
   min-width: 0;
   overflow: visible;
   padding-top: 8px;
-  padding-bottom: 40px;
+  padding-bottom: 84px;
   transition: padding-top 0.46s var(--spring);
 }
 
@@ -1923,6 +1923,14 @@ body[arco-theme="dark"] .rh-trouble:not(.off):is(:hover, :focus-within, :has(.ar
   font-size: 12px;
 }
 
+.rh-compose-foot .tm-tog.compact,
+.rh-sec-foot .tm-tog.compact,
+.rh-trouble-foot .tm-tog.compact {
+  gap: 4px;
+  padding: 0 10px 0 8px;
+  font-size: 12px;
+}
+
 .rh-compose-foot .tm-tog:not(.on),
 .rh-sec-foot .tm-tog:not(.on),
 .rh-trouble-foot .tm-tog:not(.on) {
@@ -1942,6 +1950,8 @@ body[arco-theme="dark"] .rh-trouble:not(.off):is(:hover, :focus-within, :has(.ar
 }
 
 .rh-compose-foot .mp {
+  flex: 0 1 auto;
+  min-width: 72px;
   height: 34px;
   max-width: 220px;
   padding: 0 12px 0 9px;
@@ -1960,6 +1970,8 @@ body[arco-theme="dark"] .rh-trouble:not(.off):is(:hover, :focus-within, :has(.ar
 }
 
 .rh-sec-foot .mp {
+  flex: 0 1 auto;
+  min-width: 72px;
   height: 32px;
   max-width: 220px;
   padding: 0 11px 0 8px;
@@ -1978,6 +1990,8 @@ body[arco-theme="dark"] .rh-trouble:not(.off):is(:hover, :focus-within, :has(.ar
 }
 
 .rh-trouble-foot .mp {
+  flex: 0 1 auto;
+  min-width: 72px;
   height: 30px;
   max-width: 205px;
   padding: 0 10px 0 7px;
@@ -2051,7 +2065,8 @@ body[arco-theme="dark"] .rh-trouble:not(.off):is(:hover, :focus-within, :has(.ar
   justify-content: flex-end;
   gap: 8px;
   margin-left: auto;
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
   max-width: 100%;
 }
 
@@ -2085,7 +2100,7 @@ body[arco-theme="dark"] .rh-trouble:not(.off):is(:hover, :focus-within, :has(.ar
   color: var(--faint);
 }
 
-@container (max-width: 920px) {
+@container (max-width: 1020px) {
   .rh-safety-note,
   .rh-foot-note {
     display: none;

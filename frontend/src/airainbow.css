@@ -795,7 +795,13 @@ body[arco-theme="dark"] .ai-quick-toggle.is-interactive:not(:disabled):is(:hover
 
 :root :is(.ad-win:not(.big) .ad-compose, .fc-compose:not(.start-box)) :is(.tm-tog, .mp) {
   height: 30px;
-  padding: 0 10px 0 8px;
+  padding: 0 9px 0 8px;
+  font-size: 12px;
+}
+
+:root :is(.ap-compose, .ad-compose) .tm-tog.think.compact {
+  gap: 4px;
+  padding: 0 9px 0 7px;
   font-size: 12px;
 }
 

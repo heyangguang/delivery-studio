@@ -391,6 +391,9 @@
 /* ---------------------------------------------------------------- model picker */
 .mp {
   display: inline-flex;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
   align-items: center;
   gap: 6px;
   max-width: 240px;
@@ -412,6 +415,7 @@
   box-shadow: var(--ring);
 }
 .mp > span {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

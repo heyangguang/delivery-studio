@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.311-dev"
+	version            = "1.0.312-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,24 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.312-dev",
+		Date:    "2026-11-24",
+		Title:   "全站 AI 输入栏单行排版、窄栏防裁切与浮标零遮挡打磨",
+		TitleEn: "Platform-Wide Single-Row AI Composers, Unclipped Filter Strips & Clear FAB",
+		Highlights: []string{
+			"修复 AI 助手抽屉输入框底部工具栏折成错落两行的问题，新增紧凑型思考深度胶囊（compact）与弹性模型选择器，窄窗下所有控件齐平单行且完整显示模型名称",
+			"全站巡检并统一加固 AI 主页、新建交付向导与变更演练（新建/边界对齐/只读探针/步骤核验）输入栏的容器宽度感知与单行弹性布局，窄屏与 1280px 笔记本均不再折行或溢出",
+			"优化变更演练页右下角 AI 悬浮入口为 40×40 正圆微缩态并增加工作台底部留白，彻底消除对「智能研判并发起」主按钮的遮挡",
+			"修复执行监控左侧栏组件筛选条横向裁切 etcd 等筛选胶囊的问题，同时修正工具菜单红点与思考标签配色细节",
+		},
+		HighlightsEn: []string{
+			"Fixed staggered two-row wrapping in the AI Assistant Drawer composer with a new compact ThinkLevel pill and responsive ModelPicker so all controls align cleanly on one row without truncating model names",
+			"Unified container-aware single-row flexbox layout across AI Page, New Delivery Wizard, and all four Change Rehearsal composer footers for clean rendering down to 1060px–1280px viewports",
+			"Refined the collapsed AI launcher FAB into a symmetric 40×40 orb on Change Rehearsal tabs with extra bottom clearance so primary CTAs are never overlapped",
+			"Replaced clipped horizontal scrolling in Execution Monitor's left component filter strip with clean wrapping so all middleware chips stay visible, and polished tool-menu indicator accents",
+		},
+	},
 	{
 		Version: "1.0.311-dev",
 		Date:    "2026-11-24",

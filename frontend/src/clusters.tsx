@@ -694,6 +694,7 @@ export function ClusterDetail({
             : `${c.id} · ${c.app_name}`,
       }}
       hidden={hideDock}
+      compactLauncher={effectiveTab === "rehearsal"}
     >
       {page}
     </AIDock>

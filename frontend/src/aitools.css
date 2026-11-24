@@ -38,7 +38,7 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--brand);
+  background: var(--kyndryl);
   box-shadow: 0 0 0 2px var(--surface);
 }
 .tm-btn:focus-visible {
@@ -172,8 +172,8 @@
   animation: ad-pop-in 0.25s var(--spring) both;
 }
 .tm-chip.think {
-  color: #ff462d;
-  background: rgba(139, 92, 246, 0.1);
+  color: var(--kyndryl-ink);
+  background: var(--kyndryl-soft);
 }
 .tm-chip.web {
   color: #0a6fd6;
@@ -568,6 +568,14 @@ body[arco-theme="dark"] .thk-dot {
   color: #ffffff;
   border-color: #0b0d12;
   background: #0b0d12;
+}
+.tm-tog.think.compact {
+  gap: 4px;
+  padding: 0 9px 0 7px;
+  font-size: 12px;
+}
+.tm-tog.think.compact svg {
+  font-size: 13px;
 }
 .tm-think-label {
   display: inline-grid;

@@ -754,35 +754,36 @@
 }
 .ap-bar {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
-  row-gap: 8px;
-  column-gap: 6px;
+  gap: 6px;
   min-width: 0;
   max-width: 100%;
   padding: 6px 14px 12px 14px;
 }
 .ap-bar-right {
-  display: inline-flex;
-  flex: 0 1 auto;
-  flex-wrap: wrap;
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: nowrap;
   justify-content: flex-end;
   align-items: center;
   gap: 6px;
   min-width: 0;
-  max-width: 100%;
   margin-left: auto;
 }
 .ap-bar .mp {
-  min-width: 0;
-  max-width: min(192px, 46vw);
+  flex: 0 1 auto;
+  min-width: 80px;
+  max-width: min(210px, 44vw);
 }
 .ap-bar .mp > span {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .ap-bar .ap-chipbtn {
+  flex: 0 1 auto;
   min-width: 0;
   max-width: 168px;
   overflow: hidden;

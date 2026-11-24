@@ -85,7 +85,7 @@ import type {
 import { Markdown } from "./aimd";
 import { AIPrefs } from "./aiprefs";
 import { ModelPicker, useModelPick } from "./modelpick";
-import { ThinkLevel, ToolMenu, useAIOptions, useSpaciousComposer } from "./aitools";
+import { ThinkLevel, ToolMenu, useAIOptions, useElementWidth, useSpaciousComposer } from "./aitools";
 import type { AIOpts } from "./aitools";
 import "./aichat.css";
 import "./aipage.css";
@@ -553,6 +553,10 @@ export function AIPage({
   const list = useRef<HTMLDivElement>(null);
   const box = useRef<HTMLTextAreaElement>(null);
   const composeRef = useRef<HTMLFormElement>(null);
+  const composeW = useElementWidth(composeRef);
+  const compactTools = narrowBar || (composeW > 0 && composeW < 680);
+  const compactThink = narrowBar || (composeW > 0 && composeW < 760);
+  const hideThinkOnBar = (composeW > 0 && composeW < 460) || (composeW === 0 && narrowBar);
   const spacious = useSpaciousComposer(
     composeRef,
     Boolean(input.trim() || imgs.length || atts.length),
@@ -1979,8 +1983,9 @@ export function AIPage({
         <ToolMenu
           t={tools}
           levels={model.current?.effort}
-          compact={narrowBar}
+          compact={compactTools}
           hideThink
+          thinkInMenu={hideThinkOnBar}
           attach={
             threadMode
               ? undefined
@@ -2055,14 +2060,15 @@ export function AIPage({
           </Tooltip>
         )}
         <div className="ap-bar-right">
-          {!narrowBar && (
+          {!hideThinkOnBar && (
             <ThinkLevel
               levels={model.current?.effort}
               value={tools.pref.think}
               onChange={(v) => tools.update({ think: v })}
+              compact={compactThink}
             />
           )}
-          <ModelPicker pick={model} />
+          <ModelPicker pick={model} compact={compactTools} />
           {busy ? (
             <>
               {hasDraft && uploading === 0 && (

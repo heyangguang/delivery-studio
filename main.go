@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.319-dev"
+	version            = "1.0.320-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,22 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.320-dev",
+		Date:    "2026-11-24",
+		Title:   "全局根治下拉菜单与浮层点击发抖（0px 锚点与原地淡入）",
+		TitleEn: "Global Zero-Jitter Dropdowns, Popovers & Select Menus",
+		Highlights: []string{
+			"全局移除 .arco-btn、侧边栏筛选 .filter-btn、AI 工具栏 .tm-tog/.mp 与组件图标选择器 .wb-new-glyph-btn 在按下/悬停态的 transform 缩放与位移（改用背景与阴影按压反馈），彻底根治点击触发 Arco Dropdown/Popover/Popconfirm 时锚点矩形收缩回弹引发的菜单重测与发抖。",
+			"统一将全站 Arco 弹层动效（slideDynamicOrigin、zoomIn*、fadeIn）改为原地纯透明度淡入淡出并锁定 transform: none，彻底消除 Arco 内联 scaleY(0.9)/translateY 与 Windows HiDPI 缩放下 GPU 图层卸载导致的末端微抖与字体清锐度跳变。",
+			"在变更演练「⋯」菜单、交付列表筛选浮层、顶栏主题菜单与 AI 思考档位浮层实机验证按压与展开全程按钮及弹层偏移均为 0.0000px。",
+		},
+		HighlightsEn: []string{
+			"Removed :active/:hover transform scaling and translation across .arco-btn, .filter-btn, .tm-tog/.mp, and .wb-new-glyph-btn (replacing with tactile color/shadow press states) so popup anchors never shrink or shift while Arco Trigger measures getBoundingClientRect().",
+			"Standardized all Arco Trigger popup transitions (slideDynamicOrigin, zoomIn*, fadeIn) to lock transform: none with crisp in-place opacity fades, eliminating Arco's inline scaleY/translateY bounce and Windows HiDPI compositor-layer teardown snaps.",
+			"Verified 0.0000px anchor and popup drift across Rehearsal overflow menu, Sidebar filter popover, Topbar theme dropdown, and AI ThinkLevel popover.",
+		},
+	},
 	{
 		Version: "1.0.319-dev",
 		Date:    "2026-11-24",

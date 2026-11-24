@@ -1946,7 +1946,6 @@ body[arco-theme="dark"] .rh-trouble:not(.off):is(:hover, :focus-within, :has(.ar
   color: var(--ink);
   background: var(--ai-ctl-bg-hover);
   border-color: var(--ai-ctl-border-hover);
-  transform: translateY(-0.5px);
 }
 
 .rh-compose-foot .mp {
@@ -1965,8 +1964,7 @@ body[arco-theme="dark"] .rh-trouble:not(.off):is(:hover, :focus-within, :has(.ar
   transition:
     border-color 0.16s ease,
     background-color 0.16s ease,
-    color 0.16s ease,
-    transform 0.16s var(--ease-out);
+    color 0.16s ease;
 }
 
 .rh-sec-foot .mp {
@@ -1985,8 +1983,7 @@ body[arco-theme="dark"] .rh-trouble:not(.off):is(:hover, :focus-within, :has(.ar
   transition:
     border-color 0.16s ease,
     background-color 0.16s ease,
-    color 0.16s ease,
-    transform 0.16s var(--ease-out);
+    color 0.16s ease;
 }
 
 .rh-trouble-foot .mp {
@@ -2005,8 +2002,7 @@ body[arco-theme="dark"] .rh-trouble:not(.off):is(:hover, :focus-within, :has(.ar
   transition:
     border-color 0.16s ease,
     background-color 0.16s ease,
-    color 0.16s ease,
-    transform 0.16s var(--ease-out);
+    color 0.16s ease;
 }
 
 .rh-compose-foot .mp:not(.static):hover,
@@ -2015,7 +2011,6 @@ body[arco-theme="dark"] .rh-trouble:not(.off):is(:hover, :focus-within, :has(.ar
   border-color: var(--ai-ctl-border-hover);
   background: var(--ai-ctl-bg-hover);
   color: var(--ink);
-  transform: translateY(-0.5px);
 }
 
 /* Match primary submit button height & capsule radius with control pills */

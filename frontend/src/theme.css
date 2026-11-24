@@ -397,11 +397,10 @@ kbd {
   font-weight: 500;
   line-height: 1.2;
   transition:
-    transform 0.18s var(--spring),
-    background-color 0.18s ease,
-    border-color 0.18s ease,
-    color 0.18s ease,
-    box-shadow 0.18s ease;
+    background-color 0.16s ease,
+    border-color 0.16s ease,
+    color 0.16s ease,
+    box-shadow 0.16s ease;
 }
 .arco-btn > .arco-icon + span,
 .arco-btn > span + .arco-icon,
@@ -470,14 +469,12 @@ kbd {
 .arco-btn.arco-btn-round {
   border-radius: 999px;
 }
-.arco-btn:not(.arco-btn-disabled):not(.arco-btn-loading):active {
-  transform: scale(0.985);
-}
 .arco-btn:focus-visible {
   box-shadow: var(--ring);
 }
 /* Kyndryl Signature Warm Red Primary CTA: unmistakable Kyndryl identity on Porcelain Light,
-   and restful coral-vermilion on Obsidian Dark (replaces glaring white brick in dark mode). */
+   and restful coral-vermilion on Obsidian Dark (replaces glaring white brick in dark mode).
+   Zero transform on hover/active so Dropdown/Popover/Popconfirm anchors never shift rect on click. */
 .arco-btn-primary:not(.arco-btn-disabled):not(.arco-btn-status-danger):not(.arco-btn-status-warning):not(.arco-btn-status-success) {
   background-color: #e53e28;
   border-color: #e53e28;
@@ -486,8 +483,7 @@ kbd {
     inset 0 1px 0 rgba(255, 255, 255, 0.2),
     0 1px 2px rgba(180, 38, 18, 0.24);
   transition:
-    transform 0.18s var(--spring),
-    box-shadow 0.18s ease,
+    box-shadow 0.16s ease,
     background-color 0.16s ease,
     border-color 0.16s ease;
 }
@@ -495,7 +491,6 @@ kbd {
   background-color: #cf321d;
   border-color: #cf321d;
   color: #ffffff;
-  transform: translate3d(0, -0.5px, 0);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.24),
     0 6px 16px -4px rgba(229, 62, 40, 0.34),
@@ -504,7 +499,7 @@ kbd {
 .arco-btn-primary:not(.arco-btn-disabled):not(.arco-btn-status-danger):not(.arco-btn-status-warning):not(.arco-btn-status-success):active {
   background-color: #b82917;
   border-color: #b82917;
-  transform: scale(0.985);
+  box-shadow: inset 0 1px 2px rgba(90, 16, 6, 0.28);
 }
 body[arco-theme="dark"] .arco-btn-primary:not(.arco-btn-disabled):not(.arco-btn-status-danger):not(.arco-btn-status-warning):not(.arco-btn-status-success) {
   background-color: #dc4b37;
@@ -561,25 +556,20 @@ body[arco-theme="dark"] .arco-btn-secondary:not(.arco-btn-disabled):not(.arco-bt
   color: var(--ink);
   box-shadow: var(--shadow-sm);
   transition:
-    transform 0.2s var(--spring),
-    border-color 0.18s ease,
-    background-color 0.18s ease,
-    box-shadow 0.2s ease;
-}
-.arco-btn-secondary:not(.arco-btn-disabled):not(.arco-btn-status-danger):hover,
-body[arco-theme="dark"] .arco-btn-secondary:not(.arco-btn-disabled):not(.arco-btn-status-danger):hover {
-  background: var(--surface-raised);
-  border-color: color-mix(in srgb, var(--brand) 28%, var(--line-strong));
-  box-shadow: var(--shadow-sm);
-}
-.arco-btn-secondary:not(.arco-btn-disabled):not(.arco-btn-status-danger):active,
-body[arco-theme="dark"] .arco-btn-secondary:not(.arco-btn-disabled):not(.arco-btn-status-danger):active {
-  transform: scale(0.985);
+    border-color 0.16s ease,
+    background-color 0.16s ease,
+    box-shadow 0.16s ease;
 }
 .arco-btn-secondary:not(.arco-btn-disabled):not(.arco-btn-status-danger):hover,
 body[arco-theme="dark"] .arco-btn-secondary:not(.arco-btn-disabled):not(.arco-btn-status-danger):hover {
   background: var(--hover);
   border-color: color-mix(in srgb, var(--brand) 38%, var(--line-strong));
+  box-shadow: var(--shadow-sm);
+}
+.arco-btn-secondary:not(.arco-btn-disabled):not(.arco-btn-status-danger):active,
+body[arco-theme="dark"] .arco-btn-secondary:not(.arco-btn-disabled):not(.arco-btn-status-danger):active {
+  background: var(--press);
+  box-shadow: none;
 }
 .arco-btn-secondary.arco-btn-disabled:not(.arco-btn-status-danger),
 .arco-btn-secondary.arco-btn-disabled:not(.arco-btn-status-danger):hover,
@@ -962,49 +952,20 @@ body[arco-theme="dark"] .arco-modal {
   pointer-events: none;
   transition: opacity 0.13s ease-in;
 }
-/* Snappy, zero-jitter GPU-composited transitions for Arco Dropdowns, Selects, Popovers, and Tooltips.
-   Replaces Arco's non-uniform scaleY(0.9) (which squashes text & snaps ClearType AA on finish)
-   and cubic-bezier(0.3, 1.3, 0.3, 1) spring overshoot (which visibly bounces/jitters popups on open). */
+/* Zero-jitter in-place fade transitions for ALL Arco popups (Dropdowns, Selects, Popovers,
+   Popconfirms, DatePickers, Cascaders, and Tooltips).
+   Neutralizes Arco's JS inline `scaleY(0.9) translateY(±4px)`, `scale(0.5)`, and spring overshoot
+   so popups lock at exact (x, y) coordinates from Frame 0 with zero subpixel/ClearType layer snap
+   on Windows HiDPI displays. */
+.arco-dropdown-popup-visible,
+.arco-dropdown-open,
+.arco-popover-open,
+.arco-popconfirm-open,
+.arco-trigger-open {
+  transform: none !important;
+}
 .slideDynamicOrigin-enter,
-.slideDynamicOrigin-appear {
-  opacity: 0 !important;
-  transform: translate3d(0, -4px, 0) !important;
-  will-change: opacity, transform;
-}
-.arco-trigger-position-top.slideDynamicOrigin-enter,
-.arco-trigger-position-tl.slideDynamicOrigin-enter,
-.arco-trigger-position-tr.slideDynamicOrigin-enter,
-.arco-trigger-position-top.slideDynamicOrigin-appear,
-.arco-trigger-position-tl.slideDynamicOrigin-appear,
-.arco-trigger-position-tr.slideDynamicOrigin-appear {
-  transform: translate3d(0, 4px, 0) !important;
-}
-.slideDynamicOrigin-enter-active,
-.slideDynamicOrigin-appear-active {
-  opacity: 1 !important;
-  transform: translate3d(0, 0, 0) !important;
-  will-change: opacity, transform;
-  transition:
-    opacity 0.14s cubic-bezier(0.22, 1, 0.36, 1),
-    transform 0.16s cubic-bezier(0.22, 1, 0.36, 1) !important;
-}
-.slideDynamicOrigin-exit {
-  opacity: 1 !important;
-  transform: translate3d(0, 0, 0) !important;
-}
-.slideDynamicOrigin-exit-active {
-  opacity: 0 !important;
-  transform: translate3d(0, -3px, 0) !important;
-  pointer-events: none;
-  transition:
-    opacity 0.11s ease-in,
-    transform 0.11s ease-in !important;
-}
-.arco-trigger-position-top.slideDynamicOrigin-exit-active,
-.arco-trigger-position-tl.slideDynamicOrigin-exit-active,
-.arco-trigger-position-tr.slideDynamicOrigin-exit-active {
-  transform: translate3d(0, 3px, 0) !important;
-}
+.slideDynamicOrigin-appear,
 .zoomInTop-enter,
 .zoomInTop-appear,
 .zoomInBottom-enter,
@@ -1012,21 +973,18 @@ body[arco-theme="dark"] .arco-modal {
 .zoomIn-enter,
 .zoomIn-appear,
 .zoomInFadeOut-enter,
-.zoomInFadeOut-appear {
+.zoomInFadeOut-appear,
+.zoomInBig-enter,
+.zoomInBig-appear,
+.zoomInLeft-enter,
+.zoomInLeft-appear,
+.fadeIn-enter,
+.fadeIn-appear {
   opacity: 0 !important;
-  transform: translate3d(0, -4px, 0) !important;
-  will-change: opacity, transform;
+  transform: none !important;
 }
-.zoomInBottom-enter,
-.zoomInBottom-appear,
-.arco-trigger-position-top.zoomIn-enter,
-.arco-trigger-position-tl.zoomIn-enter,
-.arco-trigger-position-tr.zoomIn-enter,
-.arco-trigger-position-top.zoomInFadeOut-enter,
-.arco-trigger-position-tl.zoomInFadeOut-enter,
-.arco-trigger-position-tr.zoomInFadeOut-enter {
-  transform: translate3d(0, 4px, 0) !important;
-}
+.slideDynamicOrigin-enter-active,
+.slideDynamicOrigin-appear-active,
 .zoomInTop-enter-active,
 .zoomInTop-appear-active,
 .zoomInBottom-enter-active,
@@ -1034,31 +992,56 @@ body[arco-theme="dark"] .arco-modal {
 .zoomIn-enter-active,
 .zoomIn-appear-active,
 .zoomInFadeOut-enter-active,
-.zoomInFadeOut-appear-active {
+.zoomInFadeOut-appear-active,
+.zoomInBig-enter-active,
+.zoomInBig-appear-active,
+.zoomInLeft-enter-active,
+.zoomInLeft-appear-active,
+.fadeIn-enter-active,
+.fadeIn-appear-active {
   opacity: 1 !important;
-  transform: translate3d(0, 0, 0) !important;
-  will-change: opacity, transform;
-  transition:
-    opacity 0.14s cubic-bezier(0.22, 1, 0.36, 1),
-    transform 0.16s cubic-bezier(0.22, 1, 0.36, 1) !important;
+  transform: none !important;
+  transition: opacity 0.1s ease-out !important;
 }
+.slideDynamicOrigin-enter-done,
+.slideDynamicOrigin-appear-done,
+.zoomInTop-enter-done,
+.zoomInTop-appear-done,
+.zoomInBottom-enter-done,
+.zoomInBottom-appear-done,
+.zoomIn-enter-done,
+.zoomIn-appear-done,
+.zoomInFadeOut-enter-done,
+.zoomInFadeOut-appear-done,
+.zoomInBig-enter-done,
+.zoomInBig-appear-done,
+.zoomInLeft-enter-done,
+.zoomInLeft-appear-done,
+.fadeIn-enter-done,
+.fadeIn-appear-done,
+.slideDynamicOrigin-exit,
 .zoomInTop-exit,
 .zoomInBottom-exit,
 .zoomIn-exit,
-.zoomInFadeOut-exit {
+.zoomInFadeOut-exit,
+.zoomInBig-exit,
+.zoomInLeft-exit,
+.fadeIn-exit {
   opacity: 1 !important;
-  transform: translate3d(0, 0, 0) !important;
+  transform: none !important;
 }
+.slideDynamicOrigin-exit-active,
 .zoomInTop-exit-active,
 .zoomInBottom-exit-active,
 .zoomIn-exit-active,
-.zoomInFadeOut-exit-active {
+.zoomInFadeOut-exit-active,
+.zoomInBig-exit-active,
+.zoomInLeft-exit-active,
+.fadeIn-exit-active {
   opacity: 0 !important;
-  transform: translate3d(0, -3px, 0) !important;
+  transform: none !important;
   pointer-events: none;
-  transition:
-    opacity 0.11s ease-in,
-    transform 0.11s ease-in !important;
+  transition: opacity 0.08s ease-in !important;
 }
 
 /* Layering: AI dock window (980) < modal/drawer (1001) < Change Report modal (1030) < Arco popovers/dropdowns/tooltips (1050) < toast messages (1080). */

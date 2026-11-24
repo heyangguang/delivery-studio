@@ -3496,7 +3496,7 @@ body[arco-theme="dark"] .login-policy-box {
   background: var(--surface);
 }
 .filter-btn.arco-btn:active {
-  transform: scale(0.94);
+  background: var(--press);
 }
 .filter-btn.arco-btn.on {
   color: var(--brand-ink);

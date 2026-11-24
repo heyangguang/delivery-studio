@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.283-dev"
+	version            = "1.0.284-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,20 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.284-dev",
+		Date:    "2026-11-24",
+		Title:   "修复平台设置切换离开 AI 页后顶部标签栏残留重复及通知模板页头换行",
+		TitleEn: "Fix orphaned Settings group tab bar from duplicate React key and stabilize Notification Templates header",
+		Highlights: []string{
+			"修复平台设置中同级兄弟节点（.st-group-bar 与 .st-pane）在 AI 设置页同时使用 key='ai' 冲突导致 React 卸载漏删旧标签栏、切往通知模板/报告模板等任意页后顶部永久残留两行标签栏的严重 Bug",
+			"为 .st-group-bar 补齐通栏底边并在通知模板页与左侧栏对齐；同步优化通知模板三栏比例（248px / 1fr / 300–360px）与操作按钮为紧凑单行排列，避免「恢复默认」「保存」折成两行",
+		},
+		HighlightsEn: []string{
+			"Fixed duplicate sibling React key collision ('ai' on both .st-group-bar and .st-pane in SettingsPage) that leaked the AI subtab bar permanently above every subsequent settings view",
+			"Added full-bleed bottom border and aligned gutter on .st-group-bar, rebalanced Notification Templates 3-column widths (248px / 1fr / 300-360px), and kept Reset Default / Save buttons cleanly on a single row",
+		},
+	},
 	{
 		Version: "1.0.283-dev",
 		Date:    "2026-11-24",

@@ -177,8 +177,8 @@
 /* ---------------------------------------------------------------- the template editor */
 .tp2 {
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr) minmax(320px, 400px);
-  min-height: calc(100vh - 52px);
+  grid-template-columns: 248px minmax(0, 1fr) minmax(300px, 360px);
+  min-height: calc(100vh - 98px);
 }
 .tp2-list {
   display: flex;
@@ -287,9 +287,18 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
+  gap: 12px;
   padding-bottom: 16px;
   border-bottom: 1px solid var(--line);
+}
+.tp2-h > div {
+  min-width: 0;
+  flex: 1;
+}
+.tp2-h > .row-gap {
+  flex: none;
+  flex-wrap: nowrap;
+  white-space: nowrap;
 }
 .tp2-h h2 {
   margin: 0 0 4px;

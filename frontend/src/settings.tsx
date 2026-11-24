@@ -437,7 +437,7 @@ export function SettingsPage({
       )}
       <div className="st-body">
         {!narrow && activeGroup && activeGroup.items.length > 1 && (
-          <div className="st-group-bar" key={activeGroup.id}>
+          <div className="st-group-bar" key={`grp-${activeGroup.id}`}>
             <UnderlineTabs
               className="st-subtabs"
               label={bi(
@@ -456,7 +456,7 @@ export function SettingsPage({
         )}
         <div
           className={`st-pane${paneDir ? ` st-pane-${paneDir}` : ""}`}
-          key={view}
+          key={`pane-${view}`}
         >
           {body}
         </div>

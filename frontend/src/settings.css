@@ -168,6 +168,14 @@
   min-width: 0;
   padding: 6px 44px 0;
   background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.st-group-bar .st-subtabs {
+  border-bottom: 0;
+}
+.st-group-bar:has(+ .st-pane > .tp2) {
+  padding-left: 22px;
+  padding-right: 22px;
 }
 .st-group-bar + .sx-page,
 .st-group-bar + .st-pane > .sx-page {

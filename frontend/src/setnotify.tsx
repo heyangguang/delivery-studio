@@ -962,6 +962,7 @@ export function TemplatesView() {
                   </div>
                   <span className="row-gap">
                     <Button
+                      size="small"
                       icon={<IconRefresh />}
                       disabled={!custom || busy}
                       onClick={() => save(true)}
@@ -969,6 +970,7 @@ export function TemplatesView() {
                       {bi("恢复默认", "Reset Default")}
                     </Button>
                     <Button
+                      size="small"
                       type="primary"
                       loading={busy}
                       disabled={!dirty || unknown.length > 0}

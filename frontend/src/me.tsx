@@ -444,9 +444,25 @@ function Overview({ info, act }: { info: Me | null; act: Activity | null }) {
                       </span>
                     </div>
                     <div className="me-ai-stat">
-                      <b className="num">
-                        {(act.ai.in + act.ai.out).toLocaleString(getLang())}
-                      </b>
+                      {(() => {
+                        const tok = act.ai.in + act.ai.out;
+                        const shortTok =
+                          tok >= 1_000_000_000
+                            ? `${(tok / 1_000_000_000).toFixed(2)}B`
+                            : tok >= 1_000_000
+                              ? `${(tok / 1_000_000).toFixed(2)}M`
+                              : tok >= 100_000
+                                ? `${(tok / 1_000).toFixed(1)}K`
+                                : tok.toLocaleString(getLang());
+                        return (
+                          <b
+                            className="num"
+                            title={`${tok.toLocaleString(getLang())} Token`}
+                          >
+                            {shortTok}
+                          </b>
+                        );
+                      })()}
                       <span>{bi("Token 用量", "Tokens")}</span>
                     </div>
                     <div className="me-ai-stat">

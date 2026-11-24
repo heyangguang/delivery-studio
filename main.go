@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.287-dev"
+	version            = "1.0.288-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,24 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.288-dev",
+		Date:    "2026-11-24",
+		Title:   "全站 30 页 UI 全面巡检与排版重构（报告模板/漏洞源/组件/演练/IAM/个人中心）",
+		TitleEn: "Full-Site UI Polish Across 30 Views (Report Templates, CVE Sources, Components, Rehearsal, IAM, Me)",
+		Highlights: []string{
+			"重构安全报告模板卡片（安全中心与设置页同步生效）：底栏改为单行零折行对齐布局（左 Word/Excel/预览 按钮组，右 设为默认|编辑/复制/重置），去重安全中心重复标题，全面替换硬编码浅色色值为主题变量",
+			"重构漏洞源与门禁页：数据源管理头部三按钮右上单行齐平不再掉行；操作列改为右对齐消除内置源空洞；本地漏洞库已覆盖生态折叠为 6 个紧凑标签+展开切换，彻底拉平左右双卡高度",
+			"优化漏洞清单与安全概览长 RPM 版本号对照：超长版本自动双行规范排列并将修复标签独立成行，彻底消除孤立箭头与文字混排",
+			"一并修复全站巡检发现的 7 处细节问题：组件页右侧「清单源码」标签截断、演练页顶栏下拉框过窄与推广条重复集群名、个人中心 Token 数字截断（改为 18.01M + 悬停精确值）、IAM「调整额度」贴字无间距、新建交付搜索框 placeholder 裁切、知识库与技能/MCP 侧栏控件顺序不一致、页面底部留白避免右下角 AI 助手遮挡",
+		},
+		HighlightsEn: []string{
+			"Refactored Security Report Template cards for single-row aligned footers, theme-token colors, and deduplicated section headers",
+			"Fixed CVE Feed Sources header button wrapping, flush-right Actions alignment, and collapsible ecosystem chips to balance the dual cache/offline cards",
+			"Prevented orphaned arrows and inline badge collisions on long RHEL/RPM version diffs in Vulnerabilities and Security Overview",
+			"Fixed 7 additional site-wide visual issues discovered during the 30-screen audit across Components, Rehearsal, Me, IAM, New Delivery Picker, Knowledge Base, and bottom canvas clearance",
+		},
+	},
 	{
 		Version: "1.0.287-dev",
 		Date:    "2026-11-24",

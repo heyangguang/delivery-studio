@@ -3378,6 +3378,11 @@ body[arco-theme="dark"] .ai-quick-toggle:not(.is-on):not(.is-warn) {
 /* ---------- Component detail tabs & diagnostic panel ---------- */
 .cv-utabs {
   margin: 2px 0 18px;
+  gap: 15px;
+}
+.cv-utabs button[role="tab"] {
+  font-size: 13.5px;
+  gap: 5px;
 }
 .cv-toc-label {
   display: inline-flex;

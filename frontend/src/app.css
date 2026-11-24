@@ -713,7 +713,7 @@ html:not([data-vt-ok]) .main {
 }
 .detail {
   max-width: 1680px;
-  padding: 26px 36px 64px;
+  padding: 26px 36px 84px;
   transition: padding-top 0.44s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .detail-grid {

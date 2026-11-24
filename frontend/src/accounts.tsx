@@ -803,6 +803,7 @@ function AccountDetail({
                   <button
                     type="button"
                     className="iam-link"
+                    style={{ marginLeft: 6 }}
                     onClick={() => editQuota(u.username, act.storage!, load)}
                   >
                     {bi("调整额度", "Adjust Quota")}

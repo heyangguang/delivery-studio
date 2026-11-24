@@ -686,6 +686,8 @@ export function RolloutProgressStrip({
         <div className="ro-strip-left">
           {src.is_origin ? (
             <span className="ro-tag is-origin">{bi("样板源", "Pilot")}</span>
+          ) : previewMembers.some((m) => m.cluster_id === src.origin_cluster_id) ? (
+            <span className="ro-tag">{bi("跨集群推广", "Rollout")}</span>
           ) : (
             <button
               type="button"
@@ -712,6 +714,7 @@ export function RolloutProgressStrip({
             <div className="ro-strip-members" aria-label={bi("参与集群", "Participating clusters")}>
               {previewMembers.map((m) => {
                 const isHere = m.cluster_id === currentClusterId;
+                const isOriginChip = !src.is_origin && m.cluster_id === src.origin_cluster_id;
                 const dotCls = m.applied
                   ? "is-ok"
                   : m.conflict_count > 0
@@ -723,6 +726,9 @@ export function RolloutProgressStrip({
                   <>
                     <i className={`ro-strip-dot ${dotCls}`} aria-hidden />
                     <code className="mono">{m.cluster_id}</code>
+                    {isOriginChip && (
+                      <em className="ro-chip-role">{bi("样板", "Pilot")}</em>
+                    )}
                   </>
                 );
                 return isHere ? (

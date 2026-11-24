@@ -9,15 +9,9 @@ import {
   Switch,
 } from "@arco-design/web-react";
 import {
-  IconCopy,
-  IconDelete,
   IconDownload,
-  IconEdit,
   IconEye,
   IconPlus,
-  IconRefresh,
-  IconStar,
-  IconStarFill,
 } from "@arco-design/web-react/icon";
 import { api, can, err } from "./shared";
 import { go } from "./router";
@@ -253,12 +247,14 @@ export function SecReportTemplatesSection({
   canManage: canManageProp,
   clusterId,
   embeddedInCard = true,
+  hideHeader = false,
 }: {
   templates?: SecReportTemplate[];
   onTemplatesChange?: (next: SecReportTemplate[]) => void;
   canManage?: boolean;
   clusterId?: string;
   embeddedInCard?: boolean;
+  hideHeader?: boolean;
 }) {
   useLang();
   const canManage = canManageProp ?? can("security.manage");
@@ -427,22 +423,41 @@ export function SecReportTemplatesSection({
 
   const inner = (
     <div className="srt-wrap">
-      <div className="srt-head">
-        <div>
-          <h2>{bi("安全报告模板配置", "Security Report Templates")}</h2>
-          <p>
-            {bi(
-              "统一管理 Word（.docx）、Excel（.xlsx）与单文件离线 HTML（.html）安全报告模板，按需配置封面配色、页眉页脚、漏洞筛选口径与包含章节；全平台安全中心与单集群安全页导出时均可直接选用。",
-              "Configure reusable Word (.docx), Excel (.xlsx), and standalone HTML (.html) templates with custom branding, scope filters, and sections for both global and cluster security exports.",
-            )}
-          </p>
+      {hideHeader ? (
+        <div className="srt-subbar">
+          <div className="srt-subbar-l">
+            <b>{bi(`共 ${list.length} 套导出模板`, `${list.length} Export Templates`)}</b>
+            <span className="faint small">
+              {bi(
+                "支持 Word (.docx)、Excel (.xlsx) 与单文件离线 HTML；可按需定制封面配色、筛选口径与包含章节。",
+                "Supports Word (.docx), Excel (.xlsx), and standalone HTML with custom branding, filters, and sections.",
+              )}
+            </span>
+          </div>
+          {canManage && (
+            <Button size="small" type="primary" icon={<IconPlus />} onClick={openCreate}>
+              {bi("新建模板", "New Template")}
+            </Button>
+          )}
         </div>
-        {canManage && (
-          <Button type="primary" icon={<IconPlus />} onClick={openCreate}>
-            {bi("新建模板", "New Template")}
-          </Button>
-        )}
-      </div>
+      ) : (
+        <div className="srt-head">
+          <div>
+            <h2>{bi("安全报告模板配置", "Security Report Templates")}</h2>
+            <p>
+              {bi(
+                "统一管理 Word（.docx）、Excel（.xlsx）与单文件离线 HTML（.html）安全报告模板，按需配置封面配色、页眉页脚、漏洞筛选口径与包含章节；全平台安全中心与单集群安全页导出时均可直接选用。",
+                "Configure reusable Word (.docx), Excel (.xlsx), and standalone HTML (.html) templates with custom branding, scope filters, and sections for both global and cluster security exports.",
+              )}
+            </p>
+          </div>
+          {canManage && (
+            <Button size="small" type="primary" icon={<IconPlus />} onClick={openCreate}>
+              {bi("新建模板", "New Template")}
+            </Button>
+          )}
+        </div>
+      )}
 
       {loading ? (
         <div className="faint small">{bi("正在加载报告模板…", "Loading templates…")}</div>
@@ -451,6 +466,12 @@ export function SecReportTemplatesSection({
           {list.map((tpl) => {
             const secLabels = enabledSectionLabels(tpl.sections);
             const fmtCls = `srt-fmt-${(tpl.default_format || "docx").toLowerCase()}`;
+            const metaParts = [
+              scopeLabelOf(tpl.scope),
+              minSevLabelOf(tpl.min_severity),
+              ...(!tpl.include_waived ? [bi("不含已豁免", "Active only")] : []),
+              ...(tpl.include_ignored ? [bi("含全局屏蔽", "Incl. Ignored")] : []),
+            ];
             return (
               <div
                 key={tpl.id}
@@ -487,19 +508,8 @@ export function SecReportTemplatesSection({
                     bi("自定义安全评估报告模板", "Custom security report template")}
                 </p>
 
-                <div className="srt-meta-row">
-                  <span className="srt-chip">{scopeLabelOf(tpl.scope)}</span>
-                  <span className="srt-chip">{minSevLabelOf(tpl.min_severity)}</span>
-                  {!tpl.include_waived && (
-                    <span className="srt-chip">
-                      {bi("不含已豁免", "Active only")}
-                    </span>
-                  )}
-                  {tpl.include_ignored && (
-                    <span className="srt-chip">
-                      {bi("含全局屏蔽", "Incl. Ignored")}
-                    </span>
-                  )}
+                <div className="srt-meta-line">
+                  {metaParts.join(" · ")}
                 </div>
 
                 <div className="srt-secs">
@@ -512,10 +522,9 @@ export function SecReportTemplatesSection({
 
                 <div className="srt-card-foot">
                   <div className="srt-quick-exports">
-                    <Button
-                      size="mini"
-                      type="secondary"
-                      icon={<IconDownload />}
+                    <button
+                      type="button"
+                      className="srt-exp-btn"
                       onClick={() => {
                         window.location.href = buildSecExportUrl({
                           format: "docx",
@@ -523,13 +532,14 @@ export function SecReportTemplatesSection({
                           clusterId,
                         });
                       }}
+                      title={bi("导出 Word (.docx)", "Export Word (.docx)")}
                     >
-                      Word
-                    </Button>
-                    <Button
-                      size="mini"
-                      type="secondary"
-                      icon={<IconDownload />}
+                      <IconDownload />
+                      <span>Word</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="srt-exp-btn"
                       onClick={() => {
                         window.location.href = buildSecExportUrl({
                           format: "xlsx",
@@ -537,13 +547,14 @@ export function SecReportTemplatesSection({
                           clusterId,
                         });
                       }}
+                      title={bi("导出 Excel (.xlsx)", "Export Excel (.xlsx)")}
                     >
-                      Excel
-                    </Button>
-                    <Button
-                      size="mini"
-                      type="secondary"
-                      icon={<IconEye />}
+                      <IconDownload />
+                      <span>Excel</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="srt-exp-btn"
                       onClick={() => {
                         window.open(
                           buildSecExportUrl({
@@ -556,75 +567,60 @@ export function SecReportTemplatesSection({
                           "noopener,noreferrer",
                         );
                       }}
+                      title={bi("在新标签页预览 HTML 简报", "Preview HTML report in new tab")}
                     >
-                      {bi("HTML 预览", "HTML")}
-                    </Button>
+                      <IconEye />
+                      <span>{bi("预览", "Preview")}</span>
+                    </button>
                   </div>
 
                   {canManage && (
                     <div className="srt-manage-acts">
                       {!tpl.is_default && (
-                        <Button
-                          size="mini"
-                          type="text"
-                          loading={busyId === tpl.id}
-                          icon={<IconStar />}
-                          onClick={() => void setDefault(tpl)}
-                        >
-                          {bi("设为默认", "Default")}
-                        </Button>
+                        <>
+                          <button
+                            type="button"
+                            className="srt-act-link is-sub"
+                            disabled={busyId === tpl.id}
+                            onClick={() => void setDefault(tpl)}
+                          >
+                            {bi("设为默认", "Default")}
+                          </button>
+                          <i className="srt-act-sep" aria-hidden />
+                        </>
                       )}
-                      {tpl.is_default && (
-                        <span
-                          className="faint small"
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: 3,
-                            fontSize: 11.5,
-                          }}
-                        >
-                          <IconStarFill style={{ color: "#4f46e5" }} />
-                          {bi("当前默认", "Default")}
-                        </span>
-                      )}
-                      <Button
-                        size="mini"
-                        type="text"
-                        icon={<IconEdit />}
+                      <button
+                        type="button"
+                        className="srt-act-link"
                         onClick={() => openEdit(tpl)}
                       >
                         {bi("编辑", "Edit")}
-                      </Button>
-                      <Button
-                        size="mini"
-                        type="text"
-                        icon={<IconCopy />}
+                      </button>
+                      <button
+                        type="button"
+                        className="srt-act-link"
                         onClick={() => openDuplicate(tpl)}
                       >
                         {bi("复制", "Copy")}
-                      </Button>
+                      </button>
                       {tpl.builtin ? (
-                        <Button
-                          size="mini"
-                          type="text"
-                          loading={busyId === tpl.id}
-                          icon={<IconRefresh />}
+                        <button
+                          type="button"
+                          className="srt-act-link is-sub"
+                          disabled={busyId === tpl.id}
                           onClick={() => void resetBuiltin(tpl)}
                         >
                           {bi("重置", "Reset")}
-                        </Button>
+                        </button>
                       ) : (
-                        <Button
-                          size="mini"
-                          type="text"
-                          status="danger"
-                          loading={busyId === tpl.id}
-                          icon={<IconDelete />}
+                        <button
+                          type="button"
+                          className="srt-act-link is-danger"
+                          disabled={busyId === tpl.id}
                           onClick={() => removeTemplate(tpl)}
                         >
                           {bi("删除", "Delete")}
-                        </Button>
+                        </button>
                       )}
                     </div>
                   )}

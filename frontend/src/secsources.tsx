@@ -457,7 +457,7 @@ export function SecSourcesCard({
             </div>
 
             <div className="sec-src-acts-col">
-              {canScan ? (
+              {canScan && (
                 <Button
                   size="mini"
                   type="text"
@@ -466,10 +466,8 @@ export function SecSourcesCard({
                 >
                   {bi("测试", "Test")}
                 </Button>
-              ) : (
-                <span />
               )}
-              {canScan ? (
+              {canScan && (
                 <Button
                   size="mini"
                   type="text"
@@ -479,10 +477,8 @@ export function SecSourcesCard({
                 >
                   {bi("同步", "Sync")}
                 </Button>
-              ) : (
-                <span />
               )}
-              {canManage ? (
+              {canManage && (
                 <Button
                   size="mini"
                   type="text"
@@ -491,10 +487,8 @@ export function SecSourcesCard({
                 >
                   {bi("编辑", "Edit")}
                 </Button>
-              ) : (
-                <span />
               )}
-              {canManage && !s.builtin ? (
+              {canManage && !s.builtin && (
                 <Button
                   size="mini"
                   type="text"
@@ -503,8 +497,6 @@ export function SecSourcesCard({
                   onClick={() => confirmDelete(s)}
                   aria-label={bi("删除", "Delete")}
                 />
-              ) : (
-                <span />
               )}
             </div>
           </div>

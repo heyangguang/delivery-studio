@@ -391,6 +391,18 @@ export function KnowledgePage({ selected }: { selected?: string }) {
                 </Button>
               ) : null}
             </div>
+            <Input
+              prefix={<IconSearch />}
+              allowClear
+              placeholder={
+                scope === "mine"
+                  ? bi("搜索我的资料内容", "Search my files")
+                  : bi("搜索团队资料内容", "Search team KB")
+              }
+              value={q}
+              onChange={setQ}
+              aria-label={bi("搜索资料", "Search documents")}
+            />
             {teamOK && (
               <Segmented<Scope>
                 size="sm"
@@ -411,18 +423,6 @@ export function KnowledgePage({ selected }: { selected?: string }) {
                 ]}
               />
             )}
-            <Input
-              prefix={<IconSearch />}
-              allowClear
-              placeholder={
-                scope === "mine"
-                  ? bi("搜索我的资料内容", "Search my files")
-                  : bi("搜索团队资料内容", "Search team KB")
-              }
-              value={q}
-              onChange={setQ}
-              aria-label={bi("搜索资料", "Search documents")}
-            />
             {scope === "team" && (home?.can_manage || home?.can_submit) && (
               <nav
                 className="sx-nav"

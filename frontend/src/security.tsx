@@ -1278,6 +1278,7 @@ export function SecurityPage({
   const [syncing, setSyncing] = useState(false);
   const [importing, setImporting] = useState(false);
   const [replaceImport, setReplaceImport] = useState(false);
+  const [ecoExpanded, setEcoExpanded] = useState(false);
   const [policyBusy, setPolicyBusy] = useState(false);
   const [activeFinding, setActiveFinding] = useState<SecFinding | null>(null);
   const [draftOverride, setDraftOverride] = useState<VexProposal | null>(null);
@@ -2778,25 +2779,34 @@ export function SecurityPage({
 
                       {/* Col 2: Version diff + Fix status + CVE gain */}
                       <div className="sec-pkg-c2">
-                        <div className="sec-ver-line mono">
-                          <span className="bad">{g.installed_version}</span>
-                          {targetFix ? (
-                            <>
-                              <span className="sec-ver-arrow">→</span>
-                              <span className="ok">{targetFix}</span>
-                              {g.repo_fix_version && (
-                                <span className="sec-repo-fix">
-                                  {bi("源已有修复版", "Fix in repo")}
+                        {(() => {
+                          const longVer =
+                            (g.installed_version || "").length > 22 ||
+                            (targetFix || "").length > 22;
+                          return (
+                            <div
+                              className={`sec-ver-line mono${longVer ? " is-stack" : ""}`}
+                            >
+                              <span className="bad">{g.installed_version}</span>
+                              {targetFix ? (
+                                <span className="sec-ver-to">
+                                  <span className="sec-ver-arrow">→</span>
+                                  <span className="ok">{targetFix}</span>
+                                </span>
+                              ) : (
+                                <span className="faint small">
+                                  {bi("暂无上游修复版", "No upstream fix")}
                                 </span>
                               )}
-                            </>
-                          ) : (
-                            <span className="faint small">
-                              {bi("暂无上游修复版", "No upstream fix")}
+                            </div>
+                          );
+                        })()}
+                        <div className="sec-pkg-sub-line">
+                          {targetFix && g.repo_fix_version && (
+                            <span className="sec-repo-fix">
+                              {bi("源已有修复版", "Fix in repo")}
                             </span>
                           )}
-                        </div>
-                        <div className="sec-pkg-sub-line">
                           <span className="sec-grp-gain num">
                             {targetFix
                               ? bi(
@@ -3166,36 +3176,48 @@ export function SecurityPage({
 
                         {/* Col 2: Version diff + Fix status + inline Library shortcut + CVE count */}
                         <div className="sec-pkg-c2">
-                          <div className="sec-ver-line mono">
-                            <span className={isResolved ? "muted-ver" : "bad"}>{g.installed_version}</span>
-                            {targetFix ? (
-                              <>
-                                <span className="sec-ver-arrow">→</span>
-                                <span className="ok">{targetFix}</span>
-                                {g.repo_fix_version && (
-                                  <span className="sec-repo-fix">
-                                    {bi("源已有修复版", "Fix in repo")}
+                          {(() => {
+                            const longVer =
+                              (g.installed_version || "").length > 22 ||
+                              (targetFix || "").length > 22;
+                            return (
+                              <div
+                                className={`sec-ver-line mono${longVer ? " is-stack" : ""}`}
+                              >
+                                <span className={isResolved ? "muted-ver" : "bad"}>
+                                  {g.installed_version}
+                                </span>
+                                {targetFix ? (
+                                  <span className="sec-ver-to">
+                                    <span className="sec-ver-arrow">→</span>
+                                    <span className="ok">{targetFix}</span>
+                                  </span>
+                                ) : (
+                                  <span className="faint small">
+                                    {bi("暂无上游修复版（建议排查或缓解）", "No upstream fix yet")}
                                   </span>
                                 )}
-                                {g.repo_fix_version &&
-                                  g.platform &&
-                                  g.platform !== "python" &&
-                                  can("library.manage") && (
-                                    <button
-                                      type="button"
-                                      className="sec-inline-lib-link"
-                                      onClick={() => go({ name: "library", id: g.platform })}
-                                    >
-                                      {bi("软件库备包 ↗", "Library ↗")}
-                                    </button>
-                                  )}
-                              </>
-                            ) : (
-                              <span className="faint small">
-                                {bi("暂无上游修复版（建议排查或缓解）", "No upstream fix yet")}
+                              </div>
+                            );
+                          })()}
+                          {targetFix && g.repo_fix_version && (
+                            <div className="sec-ver-badges">
+                              <span className="sec-repo-fix">
+                                {bi("源已有修复版", "Fix in repo")}
                               </span>
-                            )}
-                          </div>
+                              {g.platform &&
+                                g.platform !== "python" &&
+                                can("library.manage") && (
+                                  <button
+                                    type="button"
+                                    className="sec-inline-lib-link"
+                                    onClick={() => go({ name: "library", id: g.platform })}
+                                  >
+                                    {bi("软件库备包 ↗", "Library ↗")}
+                                  </button>
+                                )}
+                            </div>
+                          )}
                           <div className="sec-pkg-sub-line">
                             {g.globally_ignored ? (
                               <span className="sec-shield-tag" title={g.ignore_reason}>
@@ -3815,6 +3837,7 @@ export function SecurityPage({
           <SecReportTemplatesSection
             templates={reportTemplates}
             canManage={canManage}
+            hideHeader
             onTemplatesChange={(next) =>
               setData((cur) => {
                 if (!cur) return cur;
@@ -3878,13 +3901,49 @@ export function SecurityPage({
                       : bi("尚未同步", "Never")}
                   </b>
                 </div>
-                <div>
-                  <span>{bi("已覆盖生态", "Ecosystems")}</span>
-                  <b>
-                    {meta.ecosystems.length > 0
-                      ? meta.ecosystems.join(" · ")
-                      : "—"}
-                  </b>
+                <div className="sec-db-eco-row">
+                  <div className="sec-db-eco-head">
+                    <span>
+                      {bi(
+                        `已覆盖生态 (${meta.ecosystems.length})`,
+                        `Ecosystems (${meta.ecosystems.length})`,
+                      )}
+                    </span>
+                    {meta.ecosystems.length > 6 && (
+                      <button
+                        type="button"
+                        className="sec-eco-toggle"
+                        onClick={() => setEcoExpanded((v) => !v)}
+                      >
+                        {ecoExpanded
+                          ? bi("收起", "Collapse")
+                          : bi(`展开全部 (${meta.ecosystems.length})`, `Show all (${meta.ecosystems.length})`)}
+                      </button>
+                    )}
+                  </div>
+                  {meta.ecosystems.length > 0 ? (
+                    <div className="sec-eco-chips">
+                      {(ecoExpanded
+                        ? meta.ecosystems
+                        : meta.ecosystems.slice(0, 6)
+                      ).map((eco) => (
+                        <span key={eco} className="sec-eco-chip mono">
+                          {eco}
+                        </span>
+                      ))}
+                      {!ecoExpanded && meta.ecosystems.length > 6 && (
+                        <button
+                          type="button"
+                          className="sec-eco-chip is-more num"
+                          onClick={() => setEcoExpanded(true)}
+                        >
+                          +{meta.ecosystems.length - 6}
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <b>—</b>
+                  )}
                 </div>
               </div>
             </section>

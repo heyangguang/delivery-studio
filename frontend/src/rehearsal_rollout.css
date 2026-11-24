@@ -60,6 +60,17 @@
   white-space: nowrap;
   font-weight: 550;
 }
+.ro-chip-role {
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 4px;
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+  flex: none;
+}
 .ro-strip-chip.is-here {
   border-color: var(--line-strong);
   color: var(--ink);

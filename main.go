@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.296-dev"
+	version            = "1.0.297-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,18 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.297-dev",
+		Date:    "2026-11-24",
+		Title:   "登录页标题与展示卡 Kyndryl 品牌字标升级为官方暖红高亮",
+		TitleEn: "Style Kyndryl wordmark in official Warm Red on login title and showcase eyebrow",
+		Highlights: []string{
+			"将登录页主标题「登录 Kyndryl Delivery Studio」及右侧 AI 展示卡眉标中的 Kyndryl 统一升级为官方暖红（#FF462D / 深色 #FF553E）加粗高亮，并微调标题字号确保单行平衡呈现",
+		},
+		HighlightsEn: []string{
+			"Highlighted Kyndryl in official Kyndryl Warm Red (#FF462D light / #FF553E dark) with balanced bold weight in the login page H1 title and AI showcase eyebrow",
+		},
+	},
 	{
 		Version: "1.0.296-dev",
 		Date:    "2026-11-24",

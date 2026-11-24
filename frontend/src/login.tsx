@@ -306,7 +306,9 @@ function IntroPanel() {
       >
         <div className="ib-ask-eyebrow">
           <AIEmblem size={20} />
-          <span>Kyndryl Delivery Studio AI</span>
+          <span>
+            <b className="ib-eyebrow-k">Kyndryl</b> Delivery Studio AI
+          </span>
           <em>{bi("隔离沙箱 · 只读诊断", "Isolated Sandbox · Read-Only")}</em>
         </div>
 
@@ -579,7 +581,9 @@ export function Login({
               <BrandMark size={40} />
             </div>
             <h1 className="ib-title ib-in" style={d(1)}>
-              {bi("登录 Kyndryl", "Sign in to Kyndryl")} <b>Delivery Studio</b>
+              {bi("登录", "Sign in to")}{" "}
+              <span className="ib-title-k">Kyndryl</span>{" "}
+              <b>Delivery Studio</b>
             </h1>
             <p className="ib-sub ib-in" style={d(2)}>
               {bi(

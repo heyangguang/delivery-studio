@@ -165,14 +165,25 @@ button.ib-top-item:focus-visible {
 
 .ib-title {
   margin: 0;
-  font-size: 32px;
+  font-size: clamp(27px, 2.15vw, 31px);
   line-height: 1.25;
   font-weight: 400;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.022em;
   color: var(--ink);
 }
 
+.ib-title-k {
+  color: var(--kyndryl);
+  font-weight: 700;
+  letter-spacing: -0.028em;
+}
+
 .ib-title b {
+  font-weight: 700;
+}
+
+.ib-eyebrow-k {
+  color: var(--kyndryl);
   font-weight: 700;
 }
 

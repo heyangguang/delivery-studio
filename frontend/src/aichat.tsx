@@ -349,6 +349,25 @@ export type Msg = {
     blocking?: number;
     deployment?: unknown;
     changes?: unknown[];
+    baselines?: {
+      id: string;
+      category: string;
+      severity: string;
+      title: string;
+      title_en?: string;
+      detail: string;
+      detail_en?: string;
+      current?: string;
+      current_en?: string;
+      recommended?: string;
+      recommended_en?: string;
+      section?: string;
+      action_label?: string;
+      action_label_en?: string;
+      action_prompt?: string;
+      default_checked?: boolean;
+    }[];
+    baseline_checked?: boolean;
   };
   role: "user" | "assistant";
   text: string;
@@ -4452,10 +4471,12 @@ export function Bubble({
   decide,
   comp,
   answer,
+  answered,
   onRetry,
   busy,
 }: {
   answer?: (text: string) => void;
+  answered?: string;
   onRetry?: () => void;
   busy?: boolean;
   m: Msg;
@@ -4558,7 +4579,7 @@ export function Bubble({
           />
         )}
         {m.files && m.files.length > 0 && <MadeFiles files={m.files} />}
-        {m.ask && <AskCard ask={m.ask} answer={answer} />}
+        {m.ask && <AskCard ask={m.ask} answer={answer} answered={answered} />}
         {(m.rehearsals || []).map((r, idx) => (
           <RehearsalLaunchCard
             key={`${r.cluster_id}-${r.title}-${idx}`}
@@ -4617,9 +4638,11 @@ export function Bubble({
 export function AskCard({
   ask,
   answer,
+  answered,
 }: {
   ask: Ask;
   answer?: (text: string) => void;
+  answered?: string;
 }) {
   useLang();
   const [pick, setPick] = useState<Record<number, string[]>>({});
@@ -4684,12 +4707,19 @@ export function AskCard({
               role={q.multi ? "group" : "radiogroup"}
             >
               {(q.options || []).map((o) => {
-                const on = (pick[qi] || []).includes(o.label);
+                const ans = (answered || "").trim();
+                const picked =
+                  !live &&
+                  !!ans &&
+                  (ans === o.label.trim() ||
+                    ans.split(/[；;\n]/).some((part) => part.trim() === o.label.trim()) ||
+                    (o.label.trim().length >= 3 && ans.includes(o.label.trim())));
+                const on = live ? (pick[qi] || []).includes(o.label) : picked;
                 return (
                   <button
                     key={o.label}
                     type="button"
-                    className={on ? "on" : ""}
+                    className={on ? (live ? "on" : "on picked") : ""}
                     role={q.multi ? "checkbox" : "radio"}
                     aria-checked={on}
                     onClick={() => toggle(qi, o.label, q.multi)}

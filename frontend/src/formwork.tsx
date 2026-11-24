@@ -4,8 +4,11 @@ import {
   IconArrowLeft,
   IconCheck,
   IconCheckCircleFill,
+  IconDown,
   IconExclamationCircleFill,
   IconRight,
+  IconSafe,
+  IconUp,
 } from "@arco-design/web-react/icon";
 import {
   AIEmblem,
@@ -17,7 +20,7 @@ import {
 } from "./aichat";
 import type { Msg } from "./aichat";
 import { Composer, ConfirmCard, ORDER } from "./formchat";
-import type { Attach, Change, FormAI } from "./formchat";
+import type { Attach, Change, FormAI, FormBaseline } from "./formchat";
 import { bi, useLang } from "./i18n";
 import "./formwork.css";
 
@@ -280,11 +283,13 @@ function Filled({
   useLang();
   const [open, setOpen] = useState(false);
   const changes = (m.form?.changes || []) as Change[];
+  const baselines = (m.form?.baselines || []) as FormBaseline[];
+  const baselineOk = Boolean(m.form?.baseline_checked && baselines.length === 0);
   return (
     <div className={`fw-filled ${open ? "open" : ""}`}>
       <div className="fw-filled-row">
         <IconCheckCircleFill />
-        <span>
+        <span className="fw-filled-txt">
           {m.form?.target_component
             ? bi("已切换部署组件", "Switched component")
             : bi("填进了表单", "Applied to form")}
@@ -292,6 +297,12 @@ function Filled({
             ? bi(`：${m.form.summary}`, `: ${m.form.summary}`)
             : ""}
         </span>
+        {baselineOk && (
+          <span className="fw-base-ok">
+            <IconSafe />
+            {bi("常见生产基线已就绪", "Baselines ready")}
+          </span>
+        )}
         {changes.length > 0 ? (
           <button
             type="button"
@@ -317,6 +328,343 @@ function Filled({
         <Changes changes={changes} titles={titles} onGo={onGo} />
       )}
     </div>
+  );
+}
+
+const baselineCatLabel = (cat: string) => {
+  switch (cat) {
+    case "storage":
+      return bi("存储", "Storage");
+    case "logging":
+      return bi("日志", "Logging");
+    case "security":
+      return bi("安全", "Security");
+    case "backup":
+      return bi("备份", "Backup");
+    case "ha":
+      return bi("高可用", "HA");
+    case "resource":
+      return bi("资源", "Sizing");
+    default:
+      return bi("基线", "Baseline");
+  }
+};
+
+/** Interactive production-baseline reminder card shown beneath the latest AI form fill. */
+function BaselineCard({
+  items,
+  active,
+  busy,
+  titles,
+  onGo,
+  onApply,
+}: {
+  items: FormBaseline[];
+  active: boolean;
+  busy: boolean;
+  titles: Record<string, string>;
+  onGo: (s: string) => void;
+  onApply: (prompt: string) => void;
+}) {
+  useLang();
+  const [dismissed, setDismissed] = useState(false);
+  const [histOpen, setHistOpen] = useState(false);
+  const [showAll, setShowAll] = useState(false);
+  const [checked, setChecked] = useState<Set<string>>(
+    () =>
+      new Set(
+        items
+          .filter((it) => it.default_checked && it.action_prompt)
+          .map((it) => it.id),
+      ),
+  );
+
+  // Sync default selections if the item list changes on the same message slot.
+  const sig = items.map((x) => x.id).join("|");
+  useEffect(() => {
+    setChecked(
+      new Set(
+        items
+          .filter((it) => it.default_checked && it.action_prompt)
+          .map((it) => it.id),
+      ),
+    );
+    setDismissed(false);
+    setShowAll(false);
+  }, [sig]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!items.length) return null;
+
+  const actionCount = items.filter((it) => it.severity === "action").length;
+  const warnCount = items.filter((it) => it.severity === "warn").length;
+  const infoCount = items.length - actionCount - warnCount;
+  const actionable = items.filter((it) => !!it.action_prompt);
+  const selectedItems = actionable.filter((it) => checked.has(it.id));
+
+  const toggle = (id: string) => {
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const applySelected = () => {
+    if (!selectedItems.length || busy) return;
+    if (selectedItems.length === 1 && selectedItems[0].action_prompt) {
+      onApply(selectedItems[0].action_prompt);
+      return;
+    }
+    const lines = selectedItems.map(
+      (it, idx) => `${idx + 1}. ${it.title}：${it.action_prompt}`,
+    );
+    onApply(
+      `请按「生产基线检查」卡片的以下 ${selectedItems.length} 项建议一次性补齐表单配置（其余已有配置保持不变）：\n` +
+        lines.join("\n"),
+    );
+  };
+
+  // Historical turns or dismissed active cards collapse into a quiet single-line bar.
+  if (!active && !histOpen) {
+    return (
+      <div className="fw-base-mini">
+        <IconSafe />
+        <span>
+          {bi(
+            `生产基线巡检 · 该轮检出 ${items.length} 项提醒`,
+            `Baseline check · ${items.length} reminder${items.length === 1 ? "" : "s"} in this turn`,
+          )}
+        </span>
+        <button
+          type="button"
+          className="link quiet"
+          onClick={() => setHistOpen(true)}
+        >
+          {bi("查看", "View")}
+        </button>
+      </div>
+    );
+  }
+  if (active && dismissed) {
+    return (
+      <div className="fw-base-mini">
+        <IconSafe />
+        <span>
+          {bi(
+            `已暂不调整基线建议（${items.length} 项已折叠）`,
+            `Baseline suggestions dismissed (${items.length} hidden)`,
+          )}
+        </span>
+        <button
+          type="button"
+          className="link quiet"
+          onClick={() => setDismissed(false)}
+        >
+          {bi("重新展开", "Reopen")}
+        </button>
+      </div>
+    );
+  }
+
+  const visible =
+    showAll || items.length <= 4 ? items : items.slice(0, 4);
+  const hiddenCount = items.length - visible.length;
+  const topSev =
+    actionCount > 0 ? "action" : warnCount > 0 ? "warn" : "info";
+
+  return (
+    <section
+      className={`fw-base is-${topSev} ${active ? "" : "is-hist"}`}
+      aria-label={bi("生产基线检查", "Production baseline check")}
+    >
+      <header className="fw-base-h">
+        <span className={`fw-base-icon is-${topSev}`} aria-hidden>
+          <IconSafe />
+        </span>
+        <div className="fw-base-title">
+          <b>{bi("生产基线检查", "Production Baseline Check")}</b>
+          <span className="fw-base-pills">
+            {actionCount > 0 && (
+              <span className="fw-base-pill is-action">
+                {bi(`${actionCount} 项需补齐`, `${actionCount} required`)}
+              </span>
+            )}
+            {warnCount > 0 && (
+              <span className="fw-base-pill is-warn">
+                {bi(`${warnCount} 项建议关注`, `${warnCount} recommended`)}
+              </span>
+            )}
+            {infoCount > 0 && actionCount === 0 && warnCount === 0 && (
+              <span className="fw-base-pill is-info">
+                {bi(`${infoCount} 项可选加固`, `${infoCount} optional`)}
+              </span>
+            )}
+          </span>
+        </div>
+        {!active ? (
+          <button
+            type="button"
+            className="fw-base-fold"
+            onClick={() => setHistOpen(false)}
+          >
+            {bi("收起", "Collapse")}
+            <IconUp />
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="fw-base-fold"
+            onClick={() => setDismissed(true)}
+            title={bi("暂不调整，折叠此提醒", "Dismiss and collapse")}
+          >
+            {bi("暂不调整", "Skip for now")}
+          </button>
+        )}
+      </header>
+
+      <ul className="fw-base-list">
+        {visible.map((it) => {
+          const canCheck = active && !!it.action_prompt;
+          const isChecked = canCheck && checked.has(it.id);
+          const title = bi(it.title, it.title_en || it.title);
+          const detail = bi(it.detail, it.detail_en || it.detail);
+          const cur = bi(it.current || "", it.current_en || it.current || "");
+          const rec = bi(
+            it.recommended || "",
+            it.recommended_en || it.recommended || "",
+          );
+          const actLabel = bi(
+            it.action_label || "一键补齐",
+            it.action_label_en || "Apply",
+          );
+          const secTitle = it.section ? titles[it.section] || it.section : "";
+          return (
+            <li
+              key={it.id}
+              className={`fw-base-item is-${it.severity || "info"} ${isChecked ? "is-checked" : ""}`}
+            >
+              <div className="fw-base-lead">
+                {canCheck ? (
+                  <button
+                    type="button"
+                    role="checkbox"
+                    aria-checked={isChecked}
+                    aria-label={title}
+                    className={`fw-base-chk ${isChecked ? "on" : ""}`}
+                    disabled={busy}
+                    onClick={() => toggle(it.id)}
+                  >
+                    {isChecked && <IconCheck />}
+                  </button>
+                ) : (
+                  <span
+                    className={`fw-base-dot is-${it.severity || "info"}`}
+                    aria-hidden
+                  />
+                )}
+              </div>
+
+              <div className="fw-base-body">
+                <div className="fw-base-top">
+                  <span className={`fw-base-cat is-${it.category || "resource"}`}>
+                    {baselineCatLabel(it.category)}
+                  </span>
+                  <span className="fw-base-name">{title}</span>
+                  {(cur || rec) && (
+                    <span className="fw-base-diff">
+                      {cur && <span className="fw-base-cur">{cur}</span>}
+                      {cur && rec && (
+                        <span className="fw-base-arr" aria-hidden>
+                          →
+                        </span>
+                      )}
+                      {rec && <span className="fw-base-rec">{rec}</span>}
+                    </span>
+                  )}
+                </div>
+                <p className="fw-base-desc">{detail}</p>
+              </div>
+
+              <div className="fw-base-acts">
+                {it.section && (
+                  <button
+                    type="button"
+                    className="fw-base-loc"
+                    onClick={() => onGo(it.section!)}
+                    title={bi(`打开「${secTitle}」步骤查看`, `Open "${secTitle}" step`)}
+                  >
+                    {bi("定位", "Locate")}
+                    <IconRight />
+                  </button>
+                )}
+                {active && it.action_prompt && (
+                  <button
+                    type="button"
+                    className="fw-base-one"
+                    disabled={busy}
+                    onClick={() => onApply(it.action_prompt!)}
+                  >
+                    {actLabel}
+                  </button>
+                )}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+
+      {hiddenCount > 0 && (
+        <button
+          type="button"
+          className="fw-base-more"
+          onClick={() => setShowAll(true)}
+        >
+          <IconDown />
+          {bi(
+            `展开其余 ${hiddenCount} 项基线建议`,
+            `Show ${hiddenCount} more baseline reminder${hiddenCount === 1 ? "" : "s"}`,
+          )}
+        </button>
+      )}
+      {showAll && items.length > 4 && (
+        <button
+          type="button"
+          className="fw-base-more"
+          onClick={() => setShowAll(false)}
+        >
+          <IconUp />
+          {bi("收起部分基线项", "Show fewer")}
+        </button>
+      )}
+
+      {active && actionable.length > 0 && (
+        <footer className="fw-base-foot">
+          <span className="fw-base-hint">
+            {bi(
+              "勾选需要 AI 补齐的基线项，或点击单项按钮直接处理；也可以点「定位」手动微调",
+              "Check items for AI to apply together, click a single item, or locate it in the form",
+            )}
+          </span>
+          <div className="fw-base-foot-btns">
+            <button
+              type="button"
+              className="fw-base-apply"
+              disabled={busy || selectedItems.length === 0}
+              onClick={applySelected}
+            >
+              <Spark size={12} rainbow />
+              {selectedItems.length > 0
+                ? bi(
+                    `让 AI 补齐已选 (${selectedItems.length})`,
+                    `Apply selected (${selectedItems.length})`,
+                  )
+                : bi("请先勾选基线项", "Select items to apply")}
+            </button>
+          </div>
+        </footer>
+      )}
+    </section>
   );
 }
 
@@ -382,7 +730,13 @@ export function FormWorkspace({
           {fa.msgs.map((m, i) => {
             const prevUser =
               i > 0 && fa.msgs[i - 1]?.role === "user" ? fa.msgs[i - 1] : null;
+            const nextUser =
+              i + 1 < fa.msgs.length && fa.msgs[i + 1]?.role === "user"
+                ? fa.msgs[i + 1]
+                : null;
             const isLast = i === fa.msgs.length - 1;
+            const isLatestForm = i === lastForm;
+            const baselines = (m.form?.baselines || []) as FormBaseline[];
             return (
               <React.Fragment key={i}>
                 <Bubble
@@ -394,14 +748,27 @@ export function FormWorkspace({
                   comp={false}
                   busy={fa.busy}
                   answer={isLast && !fa.busy ? (t) => fa.send(t) : undefined}
+                  answered={nextUser?.text}
                   onRetry={
                     isLast && !fa.busy && m.error && prevUser?.text
                       ? () => fa.send(prevUser.text, [], "", true)
                       : undefined
                   }
                 />
-                {m.form && !(i === lastForm && fa.run?.active) && (
-                  <Filled m={m} titles={titles} onGo={onGo} />
+                {m.form && !(isLatestForm && fa.run?.active) && (
+                  <>
+                    <Filled m={m} titles={titles} onGo={onGo} />
+                    {baselines.length > 0 && (
+                      <BaselineCard
+                        items={baselines}
+                        active={isLatestForm && !fa.run?.active}
+                        busy={fa.busy}
+                        titles={titles}
+                        onGo={onGo}
+                        onApply={(prompt) => fa.send(prompt)}
+                      />
+                    )}
+                  </>
                 )}
               </React.Fragment>
             );

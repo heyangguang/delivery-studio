@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.308-dev"
+	version            = "1.0.309-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,22 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.309-dev",
+		Date:    "2026-11-24",
+		Title:   "新建交付 AI 生产基线巡检与交互提醒卡片",
+		TitleEn: "AI Delivery Form Production Baseline Inspection & Interactive Reminder Card",
+		Highlights: []string{
+			"新增基于真实组件 Schema 与主机契约的生产基线巡检引擎（ai_form_baseline.go），在 AI 每次填表后自动检查存储磁盘一致性、日志与锁等待/慢查询、安全加密（TLS/TDE/网段/空闲事务超时/业务账户）、备份与持久化（pgBackRest/Redis AOF）、统一访问入口及内核基线，并支持合并 AI 结合对话上下文识别的额外基线建议",
+			"新增瑞士徕卡风格交互式「生产基线检查」卡片（BaselineCard），按需补齐/建议关注/可选加固分级呈现当前值与推荐基线对比，支持定位表单步骤、单项一键应用、多选勾选「让 AI 补齐已选」（带 Gemini 流光边效）及「暂不调整」折叠；历史轮次自动收起，全部达标后显示「常见生产基线已就绪」",
+			"升级填表系统提示词与内置技能（deployment-form.md）引导 AI 主动把关生产基线并输出精炼总结，同时优化历史问答卡片已选项高亮与对话区左轴对齐（34px）",
+		},
+		HighlightsEn: []string{
+			"Added a schema-driven production baseline inspection engine (ai_form_baseline.go) that automatically audits host disk consistency, logging/slow-query/lock-wait baselines, security (TLS/TDE/CIDR/idle-tx timeout/app user), backup & persistence, unified access entries, and OS kernel baselines on every AI form fill, merging contextual AI notes",
+			"Built the Swiss Leica interactive Production Baseline Check card (BaselineCard) with severity badges, current-to-recommended inline diffs, form-step locate links, single-click and multi-select batch AI remediation (with Gemini flowing hover rim), dismiss/collapse states, auto-collapsed history pills, and a Baselines Ready badge",
+			"Upgraded AI form-fill system prompt and deployment-form skill for proactive baseline checks, highlighted selected answers in completed AskCards, and aligned form-fill cards flush to the 34px AI message axis",
+		},
+	},
 	{
 		Version: "1.0.308-dev",
 		Date:    "2026-11-24",

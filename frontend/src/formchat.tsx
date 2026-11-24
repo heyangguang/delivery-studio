@@ -40,12 +40,40 @@ import "./formchat.css";
    touches), and whatever it changed is confirmed once, or undone as a whole. The form is a draft either way: nothing
    is generated until the person does it. */
 
+export type FormBaseline = {
+  id: string;
+  category:
+    | "storage"
+    | "logging"
+    | "security"
+    | "backup"
+    | "ha"
+    | "resource"
+    | string;
+  severity: "action" | "warn" | "info" | string;
+  title: string;
+  title_en?: string;
+  detail: string;
+  detail_en?: string;
+  current?: string;
+  current_en?: string;
+  recommended?: string;
+  recommended_en?: string;
+  section?: string;
+  action_label?: string;
+  action_label_en?: string;
+  action_prompt?: string;
+  default_checked?: boolean;
+};
+
 export type FormFill = {
   target_component?: string;
   summary?: string;
   deployment: Deployment;
   blocking: number;
   changes?: Change[];
+  baselines?: FormBaseline[];
+  baseline_checked?: boolean;
 };
 /** One change, in the form's own words. path names the field on the page (its data-ai attribute); section the step. */
 export type Change = {

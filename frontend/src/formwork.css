@@ -280,17 +280,35 @@
 
 /* what one fill changed */
 .fw-filled {
-  margin: -4px 0 16px 38px;
+  margin: -6px 0 12px 34px;
   font-size: 13px;
 }
 .fw-filled-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   color: var(--ok);
 }
+.fw-filled-txt {
+  color: var(--ok);
+  font-weight: 500;
+}
+.fw-base-ok {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 550;
+  color: var(--ok);
+  background: var(--ok-soft);
+  border: 1px solid var(--ok-line);
+}
 .fw-filled-row .link {
-  margin-left: 4px;
+  margin-left: 2px;
 }
 .fw-changes {
   display: grid;
@@ -324,12 +342,508 @@
   font-style: normal;
 }
 
+/* ---- production baseline check card: Swiss Leica interactive reminder ---- */
+.fw-base-mini {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: -4px 0 18px 34px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-size: 12px;
+}
+.fw-base-mini > svg {
+  flex: none;
+  color: var(--mute);
+  font-size: 13px;
+}
+.fw-base {
+  margin: 0 0 20px 34px;
+  border-radius: 14px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  animation: fc-in 0.32s var(--ease-out) backwards;
+}
+.fw-base.is-action {
+  border-color: color-mix(in srgb, var(--bad) 24%, var(--line-strong));
+}
+.fw-base.is-warn {
+  border-color: color-mix(in srgb, var(--warn) 28%, var(--line-strong));
+}
+.fw-base.is-hist {
+  background: var(--surface-2);
+  border-color: var(--line);
+  box-shadow: none;
+}
+.fw-base-h {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 15px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--surface-2) 60%, var(--surface)),
+    var(--surface)
+  );
+}
+.fw-base.is-hist .fw-base-h {
+  background: var(--surface-2);
+}
+.fw-base-icon {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+.fw-base-icon.is-action {
+  color: var(--bad);
+  background: color-mix(in srgb, var(--bad) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--bad) 22%, transparent);
+}
+.fw-base-icon.is-warn {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn) 24%, transparent);
+}
+.fw-base-icon.is-info {
+  color: var(--ink-2);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+.fw-base-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+.fw-base-title b {
+  font-size: 13.5px;
+  font-weight: 620;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+.fw-base-pills {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.fw-base-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 550;
+  white-space: nowrap;
+}
+.fw-base-pill.is-action {
+  color: var(--bad);
+  background: color-mix(in srgb, var(--bad) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--bad) 22%, transparent);
+}
+.fw-base-pill.is-warn {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 11%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn) 24%, transparent);
+}
+.fw-base-pill.is-info {
+  color: var(--ink-2);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+.fw-base-fold {
+  all: unset;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 7px;
+  color: var(--mute);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    color 0.15s,
+    background-color 0.15s;
+}
+.fw-base-fold:hover {
+  color: var(--ink);
+  background: var(--hover);
+}
+.fw-base-fold:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+.fw-base-list {
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.fw-base-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 11px 9px 13px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  transition:
+    background-color 0.15s,
+    border-color 0.15s;
+}
+.fw-base-item::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 10px;
+  bottom: 10px;
+  width: 2.5px;
+  border-radius: 99px;
+  background: var(--line-strong);
+  pointer-events: none;
+}
+.fw-base-item:hover {
+  background: var(--surface-2);
+}
+.fw-base-item.is-action::before {
+  background: var(--bad);
+}
+.fw-base-item.is-warn::before {
+  background: var(--warn);
+}
+.fw-base-item.is-info::before {
+  background: var(--line-strong);
+}
+.fw-base-item.is-checked {
+  background: color-mix(in srgb, var(--brand-soft) 52%, var(--surface));
+  border-color: color-mix(in srgb, var(--brand) 14%, var(--line));
+}
+.fw-base-item.is-checked.is-info::before {
+  background: var(--brand);
+}
+.fw-base-lead {
+  display: grid;
+  place-items: center;
+  padding-top: 2px;
+}
+.fw-base-chk {
+  all: unset;
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  border: 1.5px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--on-brand);
+  font-size: 10px;
+  cursor: pointer;
+  transition:
+    background-color 0.15s,
+    border-color 0.15s,
+    transform 0.12s var(--ease-out);
+}
+.fw-base-chk:hover:not(:disabled) {
+  border-color: var(--brand);
+}
+.fw-base-chk.on {
+  background: var(--brand);
+  border-color: var(--brand);
+}
+.fw-base-chk:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.fw-base-chk:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+.fw-base-dot {
+  width: 7px;
+  height: 7px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+.fw-base-dot.is-action {
+  background: var(--bad);
+}
+.fw-base-dot.is-warn {
+  background: var(--warn);
+}
+.fw-base-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.fw-base-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  line-height: 1.4;
+}
+.fw-base-cat {
+  display: inline-flex;
+  align-items: center;
+  height: 19px;
+  padding: 0 6px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-2);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  white-space: nowrap;
+}
+.fw-base-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.fw-base-diff {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 8px;
+  border-radius: 6px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.55;
+}
+.fw-base-cur {
+  color: var(--mute);
+}
+.fw-base-arr {
+  color: var(--faint);
+}
+.fw-base-rec {
+  color: var(--ok);
+  font-weight: 600;
+}
+.fw-base-desc {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--ink-2);
+}
+.fw-base-acts {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding-top: 1px;
+}
+.fw-base-loc,
+.fw-base-one {
+  all: unset;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 550;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    background-color 0.15s,
+    border-color 0.15s;
+}
+.fw-base-loc {
+  color: var(--ink-2);
+  background: transparent;
+  border: 1px solid var(--line);
+}
+.fw-base-loc:hover {
+  color: var(--ink);
+  background: var(--surface);
+  border-color: var(--line-strong);
+}
+.fw-base-one {
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+  border: 1px solid var(--brand-line);
+}
+.fw-base-one:hover:not(:disabled) {
+  color: var(--on-brand);
+  background: var(--brand);
+  border-color: var(--brand);
+}
+.fw-base-one:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.fw-base-loc:focus-visible,
+.fw-base-one:focus-visible,
+.fw-base-more:focus-visible,
+.fw-base-apply:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+.fw-base-more {
+  all: unset;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: 100%;
+  height: 32px;
+  border-top: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-2);
+  font-size: 12px;
+  font-weight: 550;
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    background-color 0.15s;
+}
+.fw-base-more:hover {
+  color: var(--ink);
+  background: var(--surface-2);
+}
+.fw-base-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 14px;
+  padding: 10px 15px;
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
+}
+.fw-base-hint {
+  font-size: 11.5px;
+  color: var(--mute);
+  line-height: 1.45;
+}
+.fw-base-foot-btns {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.fw-base-apply {
+  --ai-rim-op: 0%;
+  all: unset;
+  box-sizing: border-box;
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 13px;
+  border-radius: 8px;
+  border: 1.5px solid transparent;
+  background: none;
+  color: var(--on-brand);
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(11, 13, 18, 0.16);
+  transition:
+    --ai-rim-op 0.28s ease,
+    box-shadow 0.25s ease,
+    transform 0.15s var(--ease-out);
+}
+.fw-base-apply::before,
+.fw-base-apply::after {
+  content: "";
+  position: absolute;
+  inset: -1.5px;
+  border-radius: inherit;
+  pointer-events: none;
+}
+.fw-base-apply::before {
+  z-index: -1;
+  border: 1.5px solid transparent;
+  background:
+    linear-gradient(var(--brand), var(--brand)) padding-box,
+    conic-gradient(
+      from var(--ai-angle) at 50% 50%,
+      transparent 0deg,
+      color-mix(in srgb, #ff462d var(--ai-rim-op), transparent) 24deg,
+      color-mix(in srgb, #ffaa1d var(--ai-rim-op), transparent) 54deg,
+      color-mix(in srgb, #4285f4 var(--ai-rim-op), transparent) 88deg,
+      color-mix(in srgb, #22d3ee var(--ai-rim-op), transparent) 118deg,
+      transparent 150deg,
+      transparent 205deg,
+      color-mix(in srgb, #8b5cf6 var(--ai-rim-op), transparent) 238deg,
+      color-mix(in srgb, #38bdf8 var(--ai-rim-op), transparent) 272deg,
+      color-mix(in srgb, #ff5a42 var(--ai-rim-op), transparent) 308deg,
+      transparent 340deg,
+      transparent 360deg
+    ) border-box,
+    linear-gradient(var(--brand), var(--brand)) border-box;
+  animation: ai-orbit 3.6s linear infinite;
+}
+.fw-base-apply::after {
+  z-index: -2;
+  background: var(--ai-flow-ring);
+  filter: blur(7px);
+  opacity: 0;
+  transition: opacity 0.28s ease;
+  animation: ai-orbit 3.6s linear infinite;
+}
+.fw-base-apply:hover:not(:disabled) {
+  --ai-rim-op: 100%;
+  box-shadow: 0 3px 12px -2px rgba(66, 133, 244, 0.26);
+}
+.fw-base-apply:hover:not(:disabled)::after {
+  opacity: 0.34;
+}
+.fw-base-apply:active:not(:disabled) {
+  transform: scale(0.98);
+}
+.fw-base-apply:disabled {
+  opacity: 0.42;
+  cursor: default;
+  box-shadow: none;
+}
+.fw-base-apply:disabled::before,
+.fw-base-apply:disabled::after {
+  animation: none;
+}
+
 /* ---- the fill as it comes in: Swiss Leica × Gemini auto-flowing telemetry card ---- */
 .fw-run {
   --ai-rim-op: 88%;
   position: relative;
   isolation: isolate;
-  margin: 4px 0 20px 38px;
+  margin: 4px 0 20px 34px;
   padding: 15px 16px 13px;
   background: none;
   border: 1px solid transparent;
@@ -611,8 +1125,18 @@ body[arco-theme="dark"] .fw-run::after {
   .fw-foot {
     padding: 4px 12px 12px;
   }
+  .fw-filled,
+  .fw-base,
+  .fw-base-mini,
   .fw-run {
     margin-left: 0;
+  }
+  .fw-base-item {
+    grid-template-columns: 20px minmax(0, 1fr);
+  }
+  .fw-base-acts {
+    grid-column: 2;
+    padding-top: 4px;
   }
   .fw-run-items li {
     grid-template-columns: 1fr;
@@ -620,6 +1144,9 @@ body[arco-theme="dark"] .fw-run::after {
   }
 }
 @media (prefers-reduced-motion: reduce) {
+  .fw-base,
+  .fw-base-apply::before,
+  .fw-base-apply::after,
   .fw-run::before,
   .fw-run::after,
   .fw-run-meter span,

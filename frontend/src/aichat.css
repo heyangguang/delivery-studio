@@ -2454,12 +2454,21 @@ body[arco-theme="dark"] .ad-ask-n.is-spark {
   font-size: 13px;
 }
 .ad-ask.done .ad-ask-opts button {
-  padding: 6px 10px;
-  opacity: 0.7;
+  padding: 7px 11px;
+  opacity: 0.56;
   cursor: default;
+}
+.ad-ask.done .ad-ask-opts button.picked {
+  opacity: 1;
+  border-color: color-mix(in srgb, var(--brand) 38%, var(--line));
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgba(11, 13, 18, 0.04);
 }
 .ad-ask.done .ad-ask-tick {
   display: none;
+}
+.ad-ask.done .ad-ask-opts button.picked .ad-ask-tick {
+  display: grid;
 }
 @keyframes ad-ask-in {
   from {

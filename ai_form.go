@@ -31,6 +31,8 @@ type formFill struct {
 	Summary         string             `json:"summary,omitempty"`
 	Deployment      *mwpack.Deployment `json:"deployment"`
 	Blocking        int                `json:"blocking"`
+	Baselines       []formBaseline     `json:"baselines,omitempty"`
+	BaselineChecked bool               `json:"baseline_checked,omitempty"`
 }
 
 // componentBrief describes a component version for the assistant: everything a specification may say about it.
@@ -238,9 +240,28 @@ func formTools() []aiToolDef {
 			"deployment":       map[string]any{"type": "object", "description": "目标组件的完整部署规格，与fill_form相同"},
 			"summary":          str("切换及沿用需求的简短说明"),
 		}, "target_component", "deployment")},
-		{"fill_form", "把一份完整的部署规格写进表单，用户能看到表单被填上。平台会先校验：不通过时不会写入，并返回要修正的问题。", obj(map[string]any{
+		{"fill_form", "把一份完整的部署规格写进表单，用户能看到表单被填上。平台会先校验并自动巡检常见生产基线（存储、日志、安全、备份、高可用），结果会以交互卡片展示给用户。", obj(map[string]any{
 			"deployment": map[string]any{"type": "object", "description": "完整的部署规格：{id, title, platform, delivery_mode(offline、automatic或configuration), controller(集群内执行机) 或 execution_host:{name,ip,repository_port}(独立执行机，不可放入业务hosts), hosts:[{name,ip,disk,initialize,params}], instances:[{id,component,version,placement,params,binds,addons}]}。不是只写改动。"},
 			"summary":    str("一句话说明这次填了什么，例如：3 台机器、一主两从，并加上云 ELB 入口"),
+			"baseline_notes": map[string]any{
+				"type":        "array",
+				"description": "可选：补充你在对话中结合用户硬件规格或合规需求发现的额外生产基线提醒（平台已自动检查磁盘/日志/TLS/空闲事务/备份/持久化/入口，此处仅补充上下文特有项，如内存规格与 shared_buffers 不匹配、合规审计需求等）",
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"category":      str("storage | logging | security | backup | ha | resource"),
+						"severity":      str("action | warn | info"),
+						"title":         str("简短标题（中文，不超过 24 字）"),
+						"detail":        str("一句话影响说明"),
+						"current":       str("当前值简述"),
+						"recommended":   str("建议基线值"),
+						"section":       str("basics | hosts | placement | params | access"),
+						"action_label":  str("一键补齐按钮文案（可选）"),
+						"action_prompt": str("点击按钮后发给 AI 的精准修改指令（可选）"),
+					},
+					"required": []string{"title", "detail"},
+				},
+			},
 		}, "deployment")},
 	}
 }
@@ -397,7 +418,25 @@ func (c *formCtx) run(name, args string) string {
 			return "平台校验没有通过，这份规格没有填入表单。请修正后再调用 fill_form：\n- " + strings.Join(blocking, "\n- ")
 		}
 		summary := truncRunes(strings.TrimSpace(str("summary")), 120)
-		c.filled = &formFill{Summary: summary, Deployment: d, Blocking: len(rest)}
+		var baselines []formBaseline
+		baselineChecked := false
+		if name == "fill_form" {
+			baselines = evaluateFormBaselines(plan, d)
+			if len(a["baseline_notes"]) > 0 {
+				var extra []formBaseline
+				if json.Unmarshal(a["baseline_notes"], &extra) == nil && len(extra) > 0 {
+					baselines = mergeAIBaselines(baselines, extra)
+				}
+			}
+			baselineChecked = true
+		}
+		c.filled = &formFill{
+			Summary:         summary,
+			Deployment:      d,
+			Blocking:        len(rest),
+			Baselines:       baselines,
+			BaselineChecked: baselineChecked,
+		}
 		if name == "switch_form" {
 			c.filled.TargetComponent = target
 			c.app = target
@@ -417,6 +456,9 @@ func (c *formCtx) run(name, args string) string {
 		if len(warn) > 0 {
 			out += "\n平台的提醒（重要的转告用户）：\n- " + strings.Join(warn, "\n- ")
 		}
+		if baselineChecked {
+			out += formatBaselineSummaryForAI(baselines)
+		}
 		return out
 	}
 	return "没有这个工具：" + name
@@ -429,7 +471,9 @@ const formSystem = `你是 Kyndryl Delivery Studio（离线中间件交付平台
 - 你只改表单这份草稿；生成交付要用户自己在表单里确认。每次填完，页面会请用户确认一次你的全部改动。
 - 用户可以上传任何文件：证书、p7b 证书包、私钥、报错截图、配置。先用 inspect_files 看清里面是什么，再动手：该转换的转换（p7b 拆成 PEM），该拆开的拆开（一个文件里的服务器证书、中间证书、根 CA 分别放进各自的位置），用 place_certificate 放进表单。用户不需要懂格式，也不必按平台的要求准备——你来替他整理。放完看平台核对的结果，缺什么（根 CA、匹配的私钥、覆盖域名的证书）如实告诉他，并说明怎么拿到；不要为了通过而绕过平台的规则。
 - 用户发来压缩包（tar.gz、zip）也直接 inspect_files，平台会替你解开，里面每个文件都能看、能放；不要让用户先在本地解压再传。用户之前发过的文件还在，不用他再传一遍。
-- 要主动，不要等用户把话说全：组件需要证书（TLS、云 ELB 域名入口）而用户还没给，就在第一次回复里问他要，并说明可以直接把证书、私钥、压缩包发过来；只要有不确定、不妥或和现有集群冲突的地方（集群标识被占用、网段不清楚、证书不覆盖域名、版本有已知问题），用提问卡片把选项摆给用户选，也允许他自己写，不要自己悄悄定。
+- 要主动做生产基线判断，不要等用户把话说全：组件需要证书（TLS、云 ELB 域名入口）而用户还没给，就在第一次回复里问他要，并说明可以直接把证书、私钥、压缩包发过来；只要有不确定、不妥或和现有集群冲突的地方（集群标识被占用、网段不清楚、证书不覆盖域名、版本有已知问题），用提问卡片（ask_user）把选项摆给用户选，也允许他自己写，不要自己悄悄定。
+- 每次调用 fill_form 时，平台会自动巡检常见生产基线（数据盘一致性、日志与慢查询/锁等待、安全加密 TLS/空闲事务超时、备份与持久化、统一访问入口、内核与资源基线）并直接渲染为「生产基线检查」交互卡片给用户；如果你从对话中还识别出上下文相关的基线缺口（例如用户提到了宿主机内存大小但内存参数仍沿用默认值、或提出额外合规审计要求），可通过 fill_form 的 baseline_notes 一并补充到卡片中。回复正文保持简短精炼（2–3 句），直接引导用户在下方卡片中勾选一键补齐或跳转表单核对，不要把卡片已列出的细项重复铺成大段文字。
+- 当用户点击基线卡片中的建议（如开启日志基线、统一补齐数据盘、配置访问入口或开启 TLS）时，能直接确定的参数立即用 fill_form 补齐；需要用户选择的（如云 ELB 还是 HAProxy、RDB 还是 AOF、独立数据盘还是系统盘目录）立即用 ask_user 选项卡片确认。
 - 默认值能定的就直接定并告诉用户，不要什么都问：只问会影响结果、你又无法从已有信息判断的事。
 - 私钥内容不会给你看，也不要索取；密码不要写进规格。
 - 回答用中文，简短，用表单上的中文名称说话，不要贴 JSON。

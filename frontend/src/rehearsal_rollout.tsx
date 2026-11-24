@@ -668,14 +668,21 @@ export function RolloutProgressStrip({
     board && board.total > 0
       ? Math.round((board.applied / board.total) * 100)
       : 0;
+  const allApplied = Boolean(board && board.total > 0 && board.applied === board.total);
   const nextCluster =
     board?.next_pending && board.next_pending.cluster_id !== currentClusterId
       ? board.next_pending
       : null;
+  const previewMembers = board?.members ? board.members.slice(0, 2) : [];
+  const extraMembers = board?.members ? Math.max(0, board.members.length - previewMembers.length) : 0;
 
   return (
     <>
-      <div className="ro-strip" role="region" aria-label={bi("跨集群推广进度", "Cross-cluster rollout status")}>
+      <div
+        className={`ro-strip${allApplied ? " is-done" : ""}`}
+        role="region"
+        aria-label={bi("跨集群推广进度", "Cross-cluster rollout status")}
+      >
         <div className="ro-strip-left">
           {src.is_origin ? (
             <span className="ro-tag is-origin">{bi("样板源", "Pilot")}</span>
@@ -701,26 +708,84 @@ export function RolloutProgressStrip({
               {bi("含严格首步预检", "Strict Precheck")}
             </span>
           )}
-          {board && (
-            <span className="ro-strip-stat num">
-              {bi(
-                `推广批次 · ${board.applied}/${board.total} 套已落地`,
-                `Rollout · ${board.applied}/${board.total} applied`,
+          {previewMembers.length > 0 && (
+            <div className="ro-strip-members" aria-label={bi("参与集群", "Participating clusters")}>
+              {previewMembers.map((m) => {
+                const isHere = m.cluster_id === currentClusterId;
+                const dotCls = m.applied
+                  ? "is-ok"
+                  : m.conflict_count > 0
+                    ? "is-warn"
+                    : m.voided
+                      ? "is-void"
+                      : "is-run";
+                const inner = (
+                  <>
+                    <i className={`ro-strip-dot ${dotCls}`} aria-hidden />
+                    <code className="mono">{m.cluster_id}</code>
+                  </>
+                );
+                return isHere ? (
+                  <span
+                    key={`${m.cluster_id}-${m.rehearsal_id}`}
+                    className="ro-strip-chip is-here"
+                    title={bi("当前集群", "Current cluster")}
+                  >
+                    {inner}
+                  </span>
+                ) : (
+                  <button
+                    key={`${m.cluster_id}-${m.rehearsal_id}`}
+                    type="button"
+                    className="ro-strip-chip is-link"
+                    onClick={() =>
+                      go({
+                        name: "deliveries",
+                        id: m.cluster_id,
+                        tab: "rehearsal",
+                        rehearsal: m.rehearsal_id,
+                      })
+                    }
+                    title={bi(`切换到 ${m.cluster_id}`, `Open ${m.cluster_id}`)}
+                  >
+                    {inner}
+                  </button>
+                );
+              })}
+              {extraMembers > 0 && (
+                <button
+                  type="button"
+                  className="ro-strip-chip is-more num"
+                  onClick={() => setDrawerOpen(true)}
+                  title={bi("查看全部推广集群", "View all rollout clusters")}
+                >
+                  +{extraMembers}
+                </button>
               )}
-            </span>
+            </div>
           )}
-          {board && board.total > 0 && (
+        </div>
+
+        {board && board.total > 0 && (
+          <div className="ro-strip-prog">
             <span className="ro-strip-bar" aria-hidden>
               <i style={{ width: `${pct}%` }} />
             </span>
-          )}
-          {board && board.attention > 0 && (
-            <span className="ro-strip-warn num">
-              <IconExclamationCircle />
-              {bi(`${board.attention} 套有冲突`, `${board.attention} conflict`)}
+            <span className="ro-strip-stat num">
+              {bi(
+                `${board.applied}/${board.total} 套已落地 · ${pct}%`,
+                `${board.applied}/${board.total} applied · ${pct}%`,
+              )}
             </span>
-          )}
-        </div>
+            {board.attention > 0 && (
+              <span className="ro-strip-warn num">
+                <IconExclamationCircle />
+                {bi(`${board.attention} 套有冲突`, `${board.attention} conflict`)}
+              </span>
+            )}
+          </div>
+        )}
+
         <div className="ro-strip-right">
           {nextCluster && (
             <button

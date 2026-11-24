@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.278-dev"
+	version            = "1.0.279-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,20 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.279-dev",
+		Date:    "2026-11-24",
+		Title:   "对齐同效样板切换按钮并重构跨集群推广进度条",
+		TitleEn: "Align merged pilot variant controls and redesign full-width rollout progress strip",
+		Highlights: []string{
+			"统一变更引入弹窗中归并样板行的「✓ 当前样板」与「选为样板」为等宽（min-width 84px）、等高（26px）描边胶囊并严格右对齐，消除文字与按钮参差错位",
+			"重构跨集群推广状态条（RolloutProgressStrip）：展示参与集群状态胶囊（支持一键切换集群），并将固定 72px 短进度条改为自适应铺展进度轨与百分比读数，消除长横条中间大片空洞与紫色过重观感",
+		},
+		HighlightsEn: []string{
+			"Unified merged pilot variant rows in the Import Change modal so Active Pilot and Use as Pilot share identical 84px min-width, 26px height, and flush-right alignment",
+			"Redesigned the full-width RolloutProgressStrip with inline clickable participating cluster chips, a flexible stretching progress track with percentage readout, and calmer neutral/emerald styling",
+		},
+	},
 	{
 		Version: "1.0.278-dev",
 		Date:    "2026-11-24",

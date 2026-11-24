@@ -4505,7 +4505,7 @@ body[arco-theme="dark"] .wb-icons button.is-brand.on {
   overflow: visible;
 }
 
-/* ---- what the assistant just changed: marked, and lit up as it is reached ---- */
+/* ---- what the assistant just changed: marked with Swiss Leica edge bar, and lit up as reached ---- */
 .wb [data-wb-ai] {
   position: relative;
 }
@@ -4513,19 +4513,18 @@ body[arco-theme="dark"] .wb-icons button.is-brand.on {
 .wb .wb-raw[data-wb-ai]::before {
   content: "";
   position: absolute;
-  top: 6px;
-  left: -10px;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--ai-rb);
-  background-size: 300% 100%;
-  box-shadow: 0 0 0 3px rgba(155, 114, 242, 0.14);
+  top: 2px;
+  bottom: 2px;
+  left: -12px;
+  width: 2.5px;
+  border-radius: 99px;
+  background: var(--kyndryl);
+  box-shadow: 0 0 8px rgba(255, 70, 45, 0.24);
   pointer-events: none;
 }
 .wb .wb-item[data-wb-ai] {
-  border-color: rgba(155, 114, 242, 0.45);
-  box-shadow: 0 0 0 3px rgba(155, 114, 242, 0.08);
+  border-color: color-mix(in srgb, var(--kyndryl) 40%, var(--line));
+  box-shadow: inset 2.5px 0 0 var(--kyndryl);
 }
 .wb [data-wb][data-wb-flash] {
   position: relative;
@@ -4537,9 +4536,9 @@ body[arco-theme="dark"] .wb-icons button.is-brand.on {
   inset: -4px -6px;
   z-index: 2;
   border-radius: 10px;
-  background: linear-gradient(100deg, transparent 0%, rgba(66, 133, 244, 0.16) 30%, rgba(155, 114, 242, 0.2) 45%, rgba(234, 67, 53, 0.14) 60%, transparent 80%);
+  background: linear-gradient(100deg, transparent 0%, rgba(255, 70, 45, 0.12) 32%, rgba(66, 133, 244, 0.14) 54%, transparent 82%);
   background-size: 250% 100%;
-  box-shadow: 0 0 0 1px rgba(155, 114, 242, 0.25);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--kyndryl) 22%, transparent);
   pointer-events: none;
   animation: wb-sweep 1.2s var(--ease-out) forwards;
 }
@@ -4566,23 +4565,69 @@ body[arco-theme="dark"] .wb-icons button.is-brand.on {
   height: 6px;
   margin-left: 6px;
   border-radius: 50%;
-  background: var(--ai-rb);
+  background: var(--kyndryl);
+  box-shadow: 0 0 0 2px var(--kyndryl-soft);
   vertical-align: middle;
 }
 .wb-aicard {
+  --ai-rim-op: 78%;
   position: sticky;
   top: 0;
   z-index: 5;
+  isolation: isolate;
+  overflow: visible;
   margin: 10px 0;
   padding: 10px 14px;
-  border-radius: 14px;
-  background: var(--surface);
+  border-radius: 12px;
+  background: none;
   border: 1px solid transparent;
-  background-image: linear-gradient(var(--surface), var(--surface)), var(--ai-rb);
-  background-origin: border-box;
-  background-clip: padding-box, border-box;
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--ai-card-shadow);
   animation: wb-wrote-in 0.45s var(--spring) both;
+  transition:
+    box-shadow 0.22s ease,
+    --ai-rim-op 0.24s ease;
+}
+.wb-aicard:hover {
+  --ai-rim-op: 100%;
+}
+.wb-aicard::before,
+.wb-aicard::after {
+  content: "";
+  position: absolute;
+  border-radius: inherit;
+  pointer-events: none;
+}
+.wb-aicard::before {
+  inset: -1px;
+  z-index: -1;
+  border: 1.5px solid transparent;
+  background:
+    linear-gradient(180deg, var(--ai-card-bg-top), var(--ai-card-bg-bot)) padding-box,
+    conic-gradient(
+      from var(--ai-angle) at 50% 50%,
+      transparent 0deg,
+      color-mix(in srgb, #ff462d var(--ai-rim-op), transparent) 22deg,
+      color-mix(in srgb, #ffaa1d var(--ai-rim-op), transparent) 52deg,
+      color-mix(in srgb, #4285f4 var(--ai-rim-op), transparent) 88deg,
+      color-mix(in srgb, #22d3ee var(--ai-rim-op), transparent) 118deg,
+      transparent 150deg,
+      transparent 205deg,
+      color-mix(in srgb, #8b5cf6 var(--ai-rim-op), transparent) 238deg,
+      color-mix(in srgb, #38bdf8 var(--ai-rim-op), transparent) 272deg,
+      color-mix(in srgb, #ff5a42 var(--ai-rim-op), transparent) 308deg,
+      transparent 340deg,
+      transparent 360deg
+    ) border-box,
+    linear-gradient(var(--ai-border-base), var(--ai-border-base)) border-box;
+  animation: ai-orbit 5.2s linear infinite;
+}
+.wb-aicard::after {
+  inset: -1px;
+  z-index: -2;
+  background: var(--ai-flow-ring);
+  filter: blur(7px);
+  opacity: 0.22;
+  animation: ai-orbit 5.2s linear infinite;
 }
 .wb-aicard-row {
   display: flex;
@@ -4790,7 +4835,8 @@ body[arco-theme="dark"] .wb-icons button.is-brand.on {
 }
 .wb-stage:not(.playing) .wb-stage-tab.now .wb-stage-mark {
   border: 0;
-  background: var(--ai-rb);
+  background: var(--kyndryl);
+  box-shadow: 0 0 0 2px var(--kyndryl-soft);
 }
 @keyframes wb-spin {
   to {

@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.307-dev"
+	version            = "1.0.308-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,22 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.308-dev",
+		Date:    "2026-11-24",
+		Title:   "升级 AI 变更确认条与组件工作台提示条为等宽丝滑 Gemini 流光边框",
+		TitleEn: "Silky Symmetric Gemini Edge Light for AI Confirmation Bars & Workbench Marks",
+		Highlights: []string{
+			"彻底修复 AI 变更确认条（.fc-card「AI 改了 N 处」）因 1px mask-composite 导致的 Windows 缩放上边加粗、上下亮度不均与线性平移生硬问题：改用 1.5px 对称 border-box + 不透明内衬 + 双彗星自动环绕流光与柔和外晕，四边像素完全均等丝滑",
+			"顺手精致化确认条内部元素：「看改了什么」升级为轻量圆角胶囊按钮，「校验通过」升级为清透翡翠绿状态胶囊",
+			"同步清理全站最后残留的线性流光边框与旧紫晕圆点：组件工作台 AI 确认条（.wb-aicard）、表单写入外框（.fc-glow）统一接入自动环绕流光，工作台改动标记（[data-wb-ai]）与步骤实况点（.fw-live）全面统一为 2.5px 徕卡红竖标与纯净红点",
+		},
+		HighlightsEn: []string{
+			"Fixed uneven top/bottom border thickness and stiff horizontal animation on AI confirmation bars (.fc-card) by upgrading to symmetric 1.5px dual-comet auto-flowing Gemini prism borders with opaque interiors",
+			"Refined .fc-card interior controls with crisp rounded pills for View Changes and Validation Passed",
+			"Upgraded remaining legacy borders and purple dots in Component Workbench (.wb-aicard, [data-wb-ai]), form glow (.fc-glow), and live stage pulse (.fw-live) to the unified Leica red & Gemini prism system",
+		},
+	},
 	{
 		Version: "1.0.307-dev",
 		Date:    "2026-11-24",

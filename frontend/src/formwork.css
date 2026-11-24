@@ -132,14 +132,13 @@
   color: var(--brand-ink);
 }
 .fw-live {
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
+  flex: none;
   border-radius: 50%;
-  background: var(--ai-rb);
-  background-size: 300% 100%;
-  animation:
-    ai-flow 3s linear infinite,
-    fw-pulse 1.2s ease-in-out infinite;
+  background: var(--kyndryl);
+  box-shadow: 0 0 0 3px var(--kyndryl-soft);
+  animation: fw-pulse 1.2s ease-in-out infinite;
 }
 @keyframes fw-pulse {
   50% {

@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.302-dev"
+	version            = "1.0.303-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,22 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.303-dev",
+		Date:    "2026-11-24",
+		Title:   "重绘 Kyndryl AI 专属曜石 K-Spark 标识并统一无边框徽标体系",
+		TitleEn: "Redesigned Kyndryl AI Obsidian K-Spark Emblem & Frameless Mounts",
+		Highlights: []string{
+			"重绘 AIEmblem 为 Kyndryl AI 专属工业风标识：哑光曜石机身 + 精密几何瓷白 K 字标 + 徕卡暖红四芒星与微光孔径环，与顶栏 BrandMark 形成完整品牌姊妹体系，彻底替代旧版泥棕青渐变与笨重白框",
+			"替换「新建交付」AI 填表输入框左侧歪斜的浅灰方块（.fc-orb），改为端正稳重的无边框 AIEmblem，移除 -12deg 倾斜与旋转动画，忙碌态改为克制的徕卡红呼吸光晕",
+			"精简并纯化全局内联 Spark 双星图标为纯正 Kyndryl 暖红渐变，统一 AI 主页、悬浮抽屉、新建交付向导、组件工作台与登录页所有 AI 触点视觉语言",
+		},
+		HighlightsEn: []string{
+			"Redesigned AIEmblem as a bespoke Kyndryl AI mark featuring a machined obsidian chassis, crisp geometric white K monogram, and Leica-red 4-point optical spark — paired with frameless hero mounts across all AI surfaces",
+			"Replaced the tilted grey .fc-orb sticker in the New Delivery AI form-fill composer with an upright, frameless AIEmblem and subtle Leica-red breathing pulse when active",
+			"Refined the inline Spark glyph to a crisp Kyndryl warm-red twin-spark across the topbar, floating dock, wizard, workbench, and login showcase",
+		},
+	},
 	{
 		Version: "1.0.302-dev",
 		Date:    "2026-11-24",

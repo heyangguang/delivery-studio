@@ -363,7 +363,7 @@ export function FormWorkspace({
           {empty && (
             <div className="fw-hero">
               <span className="fw-hero-orb" aria-hidden>
-                <AIEmblem size={44} />
+                <AIEmblem size={52} />
               </span>
               <h2>{bi("说说你要的集群", "Describe your cluster")}</h2>
               <p>

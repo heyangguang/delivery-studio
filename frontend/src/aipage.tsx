@@ -2191,7 +2191,7 @@ export function AIPage({
         <div className="ap-side-top">
           <div className="ap-brand">
             <span className="ap-brand-mark">
-              <AIEmblem size={24} />
+              <AIEmblem size={28} />
             </span>
             <b>{bi("AI 助手", "AI Assistant")}</b>
             <Tooltip content={bi("新对话", "New chat")} mini>
@@ -2728,7 +2728,7 @@ export function AIPage({
               <div className="ap-hero">
                 <div className="ap-hero-in">
                   <span className="ap-orb" aria-hidden>
-                    <AIEmblem size={52} />
+                    <AIEmblem size={56} />
                   </span>
                   <h1>
                     {bi(

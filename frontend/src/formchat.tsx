@@ -1058,7 +1058,7 @@ export function Composer({
       )}
       <div className="fc-row">
         <span className="fc-orb" aria-hidden>
-          <Spark size={16} rainbow />
+          <AIEmblem size={isStart ? 32 : 28} />
         </span>
         <textarea
           ref={box}
@@ -1208,7 +1208,7 @@ export function FormChat({
     <section className="fc start" aria-label={bi("AI 填表", "AI form fill")}>
       <header className="fc-start-head">
         <span className="fc-start-orb" aria-hidden>
-          <AIEmblem size={44} />
+          <AIEmblem size={52} />
         </span>
         <h2>{start.title}</h2>
         <p>

@@ -1386,7 +1386,7 @@ class WindowBoundary extends React.Component<
   }
 }
 
-/** Sculpted AI constellation glyph for buttons, pills, and inline indicators. */
+/** Precision Kyndryl AI twin-spark glyph for buttons, pills, and inline indicators. */
 export function Spark({
   size = 16,
   rainbow,
@@ -1413,40 +1413,39 @@ export function Spark({
             x1="2"
             y1="18"
             x2="18.5"
-            y2="1.5"
+            y2="2"
             gradientUnits="userSpaceOnUse"
           >
-            <stop offset="0" stopColor="#1F5E66" />
-            <stop offset=".38" stopColor="#FF462D" />
-            <stop offset=".74" stopColor="#F59E0B" />
-            <stop offset="1" stopColor="#E0341D" />
+            <stop offset="0" stopColor="#D92D18" />
+            <stop offset=".52" stopColor="#FF462D" />
+            <stop offset="1" stopColor="#FF715B" />
           </linearGradient>
         </defs>
       )}
       <path
-        d="M9.2 3.8C9.72 7.7 12.1 10.08 16 10.6C12.1 11.12 9.72 13.5 9.2 17.4C8.68 13.5 6.3 11.12 2.4 10.6C6.3 10.08 8.68 7.7 9.2 3.8Z"
+        d="M8.9 3.4C9.42 7.85 11.65 10.08 16.1 10.6C11.65 11.12 9.42 13.35 8.9 17.8C8.38 13.35 6.15 11.12 1.7 10.6C6.15 10.08 8.38 7.85 8.9 3.4Z"
         fill={paint}
       />
       <path
-        d="M15.6 1.8C15.84 3.4 16.8 4.36 18.4 4.6C16.8 4.84 15.84 5.8 15.6 7.4C15.36 5.8 14.4 4.84 12.8 4.6C14.4 4.36 15.36 3.4 15.6 1.8Z"
+        d="M15.8 1.7C16.02 3.35 16.88 4.22 18.5 4.44C16.88 4.66 16.02 5.52 15.8 7.18C15.58 5.52 14.72 4.66 13.1 4.44C14.72 4.22 15.58 3.35 15.8 1.7Z"
         fill={paint}
-        opacity=".92"
+        opacity=".9"
       />
-      <circle cx="4.2" cy="5" r="1.05" fill={paint} opacity=".74" />
     </svg>
   );
 }
 
-/** Multi-layered Aurora Prism squircle emblem with adaptive LOD for hero orbs (40–56px) and compact badges (24–28px). */
-export function AIEmblem({ size = 52 }: { size?: number }) {
+/** Architectural Kyndryl AI emblem: machined matte obsidian squircle, precision geometric K, and Leica-red optical spark. */
+export function AIEmblem({ size = 56 }: { size?: number }) {
   const uid = useId().replace(/[^a-zA-Z0-9]/g, "");
   const detail = size >= 36;
+  const compact = size <= 24;
   return (
     <svg
       className="ai-emblem"
       width={size}
       height={size}
-      viewBox="0 0 52 52"
+      viewBox="0 0 56 56"
       fill="none"
       style={{ display: "block", flex: "none" }}
       aria-hidden
@@ -1455,146 +1454,111 @@ export function AIEmblem({ size = 52 }: { size?: number }) {
         <linearGradient
           id={`ae-bg-${uid}`}
           x1="4"
-          y1="4"
-          x2="48"
-          y2="48"
+          y1="2"
+          x2="52"
+          y2="54"
           gradientUnits="userSpaceOnUse"
         >
-          <stop offset="0" stopColor="#1D1C1A" />
-          <stop offset=".52" stopColor="#2C2522" />
-          <stop offset="1" stopColor="#46221B" />
+          <stop offset="0" stopColor="#1A1E28" />
+          <stop offset=".52" stopColor="#10131B" />
+          <stop offset="1" stopColor="#090B10" />
         </linearGradient>
         <radialGradient
-          id={`ae-cyan-${uid}`}
+          id={`ae-red-${uid}`}
           cx="0"
           cy="0"
           r="1"
           gradientUnits="userSpaceOnUse"
-          gradientTransform="translate(8.5 45.5) rotate(-42) scale(37 34)"
+          gradientTransform="translate(40 16.5) rotate(135) scale(26 24)"
         >
-          <stop offset="0" stopColor="#4DB0BC" stopOpacity=".58" />
-          <stop offset=".62" stopColor="#1F5E66" stopOpacity=".18" />
-          <stop offset="1" stopColor="#1F5E66" stopOpacity="0" />
-        </radialGradient>
-        <radialGradient
-          id={`ae-rose-${uid}`}
-          cx="0"
-          cy="0"
-          r="1"
-          gradientUnits="userSpaceOnUse"
-          gradientTransform="translate(45.5 6.5) rotate(135) scale(38 35)"
-        >
-          <stop offset="0" stopColor="#FF462D" stopOpacity=".85" />
-          <stop offset=".52" stopColor="#FF7A59" stopOpacity=".28" />
+          <stop offset="0" stopColor="#FF462D" stopOpacity=".36" />
+          <stop offset=".48" stopColor="#FF462D" stopOpacity=".11" />
           <stop offset="1" stopColor="#FF462D" stopOpacity="0" />
         </radialGradient>
         <linearGradient
           id={`ae-sheen-${uid}`}
-          x1="26"
+          x1="28"
           y1="0"
-          x2="26"
-          y2="26"
+          x2="28"
+          y2="24"
           gradientUnits="userSpaceOnUse"
         >
-          <stop offset="0" stopColor="#ffffff" stopOpacity=".22" />
-          <stop offset="1" stopColor="#ffffff" stopOpacity="0" />
+          <stop offset="0" stopColor="#FFFFFF" stopOpacity=".13" />
+          <stop offset="1" stopColor="#FFFFFF" stopOpacity="0" />
         </linearGradient>
         <linearGradient
           id={`ae-rim-${uid}`}
-          x1="26"
+          x1="28"
           y1="0"
-          x2="26"
-          y2="52"
+          x2="28"
+          y2="56"
           gradientUnits="userSpaceOnUse"
         >
-          <stop offset="0" stopColor="#ffffff" stopOpacity=".52" />
-          <stop offset=".45" stopColor="#ffffff" stopOpacity=".08" />
-          <stop offset="1" stopColor="#ffffff" stopOpacity=".2" />
+          <stop offset="0" stopColor="#FFFFFF" stopOpacity=".24" />
+          <stop offset=".42" stopColor="#FFFFFF" stopOpacity=".06" />
+          <stop offset="1" stopColor="#FFFFFF" stopOpacity=".12" />
         </linearGradient>
         <linearGradient
-          id={`ae-star-${uid}`}
-          x1="14"
-          y1="13"
-          x2="36"
-          y2="40"
+          id={`ae-spark-${uid}`}
+          x1="31"
+          y1="27"
+          x2="45"
+          y2="12"
           gradientUnits="userSpaceOnUse"
         >
-          <stop offset="0" stopColor="#ffffff" />
-          <stop offset="1" stopColor="#fff3ef" />
+          <stop offset="0" stopColor="#E6331B" />
+          <stop offset=".48" stopColor="#FF462D" />
+          <stop offset="1" stopColor="#FF7A63" />
         </linearGradient>
-        {detail && (
-          <>
-            <linearGradient
-              id={`ae-orb-${uid}`}
-              x1="6"
-              y1="26"
-              x2="46"
-              y2="26"
-              gradientUnits="userSpaceOnUse"
-            >
-              <stop offset="0" stopColor="#72cbd6" stopOpacity=".58" />
-              <stop offset=".48" stopColor="#ffffff" stopOpacity=".12" />
-              <stop offset="1" stopColor="#ff9a85" stopOpacity=".52" />
-            </linearGradient>
-            <linearGradient
-              id={`ae-core-${uid}`}
-              x1="21"
-              y1="23.8"
-              x2="28"
-              y2="30.6"
-              gradientUnits="userSpaceOnUse"
-            >
-              <stop offset="0" stopColor="#ff462d" stopOpacity=".32" />
-              <stop offset="1" stopColor="#29707a" stopOpacity=".28" />
-            </linearGradient>
-          </>
-        )}
       </defs>
 
-      <rect width="52" height="52" rx="14.5" fill={`url(#ae-bg-${uid})`} />
-      <rect width="52" height="52" rx="14.5" fill={`url(#ae-cyan-${uid})`} />
-      <rect width="52" height="52" rx="14.5" fill={`url(#ae-rose-${uid})`} />
-      <rect width="52" height="52" rx="14.5" fill={`url(#ae-sheen-${uid})`} />
+      {/* Machined obsidian chassis */}
+      <rect width="56" height="56" rx="14.5" fill={`url(#ae-bg-${uid})`} />
+      <rect width="56" height="56" rx="14.5" fill={`url(#ae-red-${uid})`} />
+      <rect width="56" height="28" rx="14.5" fill={`url(#ae-sheen-${uid})`} />
 
-      {detail ? (
-        <>
-          <ellipse
-            cx="26"
-            cy="26"
-            rx="19.5"
-            ry="9.2"
-            transform="rotate(-30 26 26)"
-            stroke={`url(#ae-orb-${uid})`}
-            strokeWidth="1.25"
-          />
-          <circle cx="9.1" cy="35.75" r="1.95" fill="#e0f2fe" opacity=".92" />
-        </>
-      ) : (
-        <circle cx="12.6" cy="14.6" r="2.05" fill="#e0f2fe" opacity=".82" />
-      )}
-
-      <path
-        d="M24.6 12.6C25.65 21 30.8 26.15 39.2 27.2C30.8 28.25 25.65 33.4 24.6 41.8C23.55 33.4 18.4 28.25 10 27.2C18.4 26.15 23.55 21 24.6 12.6Z"
-        fill={`url(#ae-star-${uid})`}
-      />
+      {/* Subtle Swiss optical aperture ring on hero sizes */}
       {detail && (
-        <path
-          d="M24.6 23.7L28.1 27.2L24.6 30.7L21.1 27.2Z"
-          fill={`url(#ae-core-${uid})`}
+        <circle
+          cx="28"
+          cy="28"
+          r="21"
+          stroke="#FFFFFF"
+          strokeOpacity=".065"
+          strokeWidth="1"
+          strokeDasharray="28 9 7 9"
         />
       )}
+
+      {/* Precision geometric Kyndryl K monogram */}
       <path
-        d="M37.4 8.8C37.85 12 39.8 13.95 43 14.4C39.8 14.85 37.85 16.8 37.4 20C36.95 16.8 35 14.85 31.8 14.4C35 13.95 36.95 12 37.4 8.8Z"
-        fill="#ffffff"
-        opacity=".95"
+        d="M14.2 17.6V40.8M26.6 18.6L17.4 29.2L28.6 40.6"
+        stroke="#FFFFFF"
+        strokeWidth={compact ? 5.1 : detail ? 4.1 : 4.6}
+        strokeLinecap="round"
+        strokeLinejoin="round"
       />
 
+      {/* Signature Kyndryl Warm Red AI precision spark */}
+      <path
+        d={
+          compact
+            ? "M38.6 11C39.2 16 41.6 18.4 46.6 19C41.6 19.6 39.2 22 38.6 27C38 22 35.6 19.6 30.6 19C35.6 18.4 38 16 38.6 11Z"
+            : "M38.4 11.8C38.96 16.35 41.15 18.54 45.7 19.1C41.15 19.66 38.96 21.85 38.4 26.4C37.84 21.85 35.65 19.66 31.1 19.1C35.65 18.54 37.84 16.35 38.4 11.8Z"
+        }
+        fill={`url(#ae-spark-${uid})`}
+      />
+      {detail && (
+        <circle cx="38.4" cy="19.1" r="1.35" fill="#FFF3F0" opacity=".92" />
+      )}
+
+      {/* Specular machined bevel rim */}
       <rect
-        x="0.6"
-        y="0.6"
-        width="50.8"
-        height="50.8"
-        rx="13.9"
+        x="0.7"
+        y="0.7"
+        width="54.6"
+        height="54.6"
+        rx="13.8"
         stroke={`url(#ae-rim-${uid})`}
         strokeWidth="1.2"
       />
@@ -2980,7 +2944,7 @@ function ChatWindow({
             ) : msgs.length === 0 && !live ? (
               <div className="ad-empty">
                 <span className="ad-empty-mark">
-                  <AIEmblem size={44} />
+                  <AIEmblem size={52} />
                 </span>
                 <p>{hello}</p>
                 <div className="ad-chips">

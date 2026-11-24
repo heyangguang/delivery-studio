@@ -125,7 +125,7 @@ export function PackageList({
             <span>{bi("软件包", "Package")}</span>
             <span>{bi("被谁使用", "Used by")}</span>
             <span className="num">{bi("依赖与大小", "Deps & size")}</span>
-            <span>{bi("入库", "Added")}</span>
+            <span className="num">{bi("入库", "Added")}</span>
             {admin && <span />}
           </li>
           {list.map((r) => {

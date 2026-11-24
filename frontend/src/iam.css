@@ -1128,8 +1128,11 @@
 
 .au2-shead,
 .au2-srow {
-  grid-template-columns: minmax(122px, 0.95fr) minmax(138px, 1.02fr) minmax(144px, 1.08fr) minmax(122px, 0.92fr) auto;
+  grid-template-columns: minmax(122px, 0.95fr) minmax(138px, 1.02fr) minmax(144px, 1.08fr) minmax(122px, 0.92fr) 118px;
   gap: 12px;
+}
+.au2-shead > :last-child {
+  text-align: right;
 }
 .au2-sact {
   display: flex;
@@ -1224,7 +1227,7 @@
 @media (max-width: 1100px) {
   .au2-shead,
   .au2-srow {
-    grid-template-columns: minmax(120px, 1fr) minmax(88px, 0.78fr) minmax(112px, 0.95fr) auto;
+    grid-template-columns: minmax(120px, 1fr) minmax(88px, 0.78fr) minmax(112px, 0.95fr) 108px;
   }
   .au2-shead > :nth-child(3),
   .au2-srow > :nth-child(3) {
@@ -1234,7 +1237,7 @@
 @media (max-width: 760px) {
   .au2-shead,
   .au2-srow {
-    grid-template-columns: minmax(112px, 1.1fr) minmax(72px, 0.85fr) auto;
+    grid-template-columns: minmax(112px, 1.1fr) minmax(72px, 0.85fr) 96px;
   }
   .au2-shead > :nth-child(4),
   .au2-srow > :nth-child(4) {

@@ -210,7 +210,7 @@ export function StorageView() {
                 <span>{bi("账户", "Account")}</span>
                 <span>{bi("已用 / 额度", "Used / Quota")}</span>
                 <span>{bi("额度来源", "Source")}</span>
-                <span />
+                <span>{bi("操作", "Action")}</span>
               </div>
               {rows.map((r) => (
                 <div key={r.user} className="sv-row" role="row">

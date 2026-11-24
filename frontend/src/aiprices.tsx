@@ -352,7 +352,7 @@ export function PricesView() {
                     <span>{bi("缓存命中", "Cached")}</span>
                     <span>{bi("输出", "Output")}</span>
                     <span>{bi("备注与来源", "Notes & source")}</span>
-                    <span />
+                    <span className="pr-act-h">{bi("操作", "Action")}</span>
                   </div>
                   {builtin
                     .filter((e) => e.vendor === v)

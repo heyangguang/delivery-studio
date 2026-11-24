@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.291-dev"
+	version            = "1.0.292-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,20 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.292-dev",
+		Date:    "2026-11-24",
+		Title:   "全站 7 处表格与网格列表表头列对齐根治修复",
+		TitleEn: "Fix Column Header Alignment Across 7 Tables & Grid Lists",
+		Highlights: []string{
+			"根治「设置 → 模型价格」我的价格与官方价格表头整体右偏约 30px 问题：将网格末列由 auto 改为显式定宽（64px / 36px）并补齐右对齐「操作」表头",
+			"同步排查并根治全站其余 6 处同源对齐问题：IAM「操作审计 → 登录与在线」会话表末列 auto 偏移、设置「用量明细」费用表头左对齐与数值右对齐错位、软件库「库里的软件包」入库列过窄折行与对齐、设置「存储空间」操作列对齐、安全中心「按 CVE 明细」操作按钮右齐平、应用列表与向导主机列表网格轨道对齐",
+		},
+		HighlightsEn: []string{
+			"Fixed Model Pricing header-vs-row horizontal offset by replacing auto trailing grid tracks with fixed widths (64px / 36px) and adding a right-aligned Action header",
+			"Fixed 6 additional table/grid alignment issues across IAM Login Sessions, AI Usage Cost column, Software Library Package list, Storage quota table, Security CVE Detail actions, Apps list view, and Wizard host rows",
+		},
+	},
 	{
 		Version: "1.0.291-dev",
 		Date:    "2026-11-24",

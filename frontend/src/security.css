@@ -2130,6 +2130,9 @@ body[arco-theme="dark"] .sec-sev.med {
 }
 
 /* Clusters Risk Table: razor-straight column alignment + fixed 3-slot actions */
+.sec-table td:last-child .arco-btn-text:last-child {
+  padding-right: 0;
+}
 .sec-table-clusters {
   table-layout: fixed;
   width: 100%;

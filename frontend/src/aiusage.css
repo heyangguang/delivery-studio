@@ -31,7 +31,7 @@
 .au-head,
 .au-row-b {
   display: grid;
-  grid-template-columns: 146px 76px 84px minmax(105px, 1fr) minmax(130px, 1.2fr) 156px 110px 62px 90px;
+  grid-template-columns: 146px 76px 84px minmax(105px, 1fr) minmax(130px, 1.2fr) 156px 110px 72px 104px;
   align-items: center;
   gap: 10px;
 }
@@ -157,6 +157,10 @@
 }
 .au-cost {
   text-align: right;
+}
+.au-ip-h,
+.au-ip {
+  padding-left: 8px;
 }
 .au-ip {
   color: var(--mute);

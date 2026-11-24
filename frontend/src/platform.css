@@ -1973,7 +1973,7 @@ body[arco-theme="dark"] .ig-legend path.link-live.f2 {
 .pk-head,
 .pk-row {
   display: grid;
-  grid-template-columns: 24px minmax(0, 1.5fr) minmax(0, 1.1fr) 150px 84px 36px;
+  grid-template-columns: 24px minmax(0, 1.5fr) minmax(0, 1.1fr) 150px 114px 36px;
   align-items: center;
   gap: 12px;
 }
@@ -1985,7 +1985,7 @@ body[arco-theme="dark"] .ig-legend path.link-live.f2 {
 }
 .pk-list.plain .pk-head,
 .pk-list.plain .pk-row {
-  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1.1fr) 150px 84px;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1.1fr) 150px 114px;
 }
 .pk-head .num {
   text-align: right;
@@ -2042,6 +2042,10 @@ body[arco-theme="dark"] .ig-legend path.link-live.f2 {
   gap: 4px;
 }
 .pk-meta {
+  text-align: right;
+  white-space: nowrap;
+}
+.pk-time {
   text-align: right;
   white-space: nowrap;
 }
@@ -3074,7 +3078,7 @@ body[arco-theme="dark"] .ig-legend path.link-live.f2 {
   background: var(--surface);
   min-width: 0;
 }
-.hosts-head { padding: 0 14px; }
+.hosts-head { padding: 0 14px; border: 1px solid transparent; }
 .hosts-head, .host-row {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) 80px 32px;
 }

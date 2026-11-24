@@ -627,8 +627,8 @@ export function UsageView() {
           <span>{bi("模型", "Model")}</span>
           <span>Token</span>
           <span>{bi("耗时", "Latency")}</span>
-          <span>{bi("费用", "Cost")}</span>
-          <span>{bi("来源 IP", "Source IP")}</span>
+          <span className="au-cost">{bi("费用", "Cost")}</span>
+          <span className="au-ip-h">{bi("来源 IP", "Source IP")}</span>
         </div>
         {d?.rows.map((u) => {
           const suspectTrunc = isSuspectZeroTruncated(u);

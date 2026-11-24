@@ -39,7 +39,7 @@
 }
 .pr-row {
   display: grid;
-  grid-template-columns: 110px minmax(160px, 1.6fr) 90px 90px 90px 78px auto;
+  grid-template-columns: 110px minmax(160px, 1.6fr) 90px 90px 90px 78px 36px;
   align-items: center;
   gap: 10px;
   padding: 7px 4px;
@@ -47,13 +47,16 @@
   font-size: 13px;
 }
 .pr-row.b {
-  grid-template-columns: minmax(180px, 1.6fr) 80px 90px 80px minmax(140px, 1.4fr) auto;
+  grid-template-columns: minmax(180px, 1.6fr) 84px 92px 84px minmax(140px, 1.4fr) 64px;
 }
 .pr-row.head {
   padding: 6px 4px;
   color: var(--faint);
   font-size: 12px;
   font-weight: 600;
+}
+.pr-act-h {
+  text-align: right;
 }
 .pr-row > .arco-btn {
   justify-self: end;

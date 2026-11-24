@@ -24,7 +24,7 @@
 }
 .sv-row {
   display: grid;
-  grid-template-columns: minmax(100px, 1fr) minmax(220px, 1.6fr) 80px 72px;
+  grid-template-columns: minmax(100px, 1fr) minmax(220px, 1.6fr) 84px 80px;
   gap: 12px;
   align-items: center;
   min-height: 48px;
@@ -34,6 +34,12 @@
   min-height: 34px;
   color: var(--faint);
   font-size: 12px;
+}
+.sv-row.head > :last-child {
+  text-align: right;
+}
+.sv-row > .arco-btn {
+  justify-self: end;
 }
 .sv-row .mf-usage-bar {
   flex: 1;

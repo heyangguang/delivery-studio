@@ -254,7 +254,12 @@ export function NewComponentModal({
                 className={`${icon === i.id ? "on" : ""} ${i.group === "middleware" ? "is-brand" : ""}`.trim()}
                 onClick={() => setLook({ icon: i.id, color })}
               >
-                <svg viewBox="0 0 40 40" width="24" height="24" aria-hidden>
+                <svg
+                  viewBox="0 0 40 40"
+                  width={i.group === "middleware" ? 30 : 24}
+                  height={i.group === "middleware" ? 30 : 24}
+                  aria-hidden
+                >
                   {iconShape(i.id)}
                 </svg>
               </button>

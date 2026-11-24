@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.314-dev"
+	version            = "1.0.315-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,22 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.315-dev",
+		Date:    "2026-11-24",
+		Title:   "统一重构 32 个中间件官方矢量品牌 Logo",
+		TitleEn: "Unified Official Vector Brand Logos for All 32 Middleware",
+		Highlights: []string{
+			"将全部 32 个中间件组件图标重构为正版官方矢量 Logo（PostgreSQL Slonik、Redis、Nginx、HAProxy、etcd、MySQL、MariaDB、MongoDB、Kafka、RabbitMQ、Elasticsearch、ZooKeeper、MinIO、Prometheus、Grafana、Kubernetes、Docker、ClickHouse、Nacos、Consul、RocketMQ、Envoy、Traefik、Valkey、TiDB、OpenSearch、Memcached、Harbor、Zabbix 等），彻底替换旧版手绘简笔图标",
+			"建立统一的 40×40 视觉网格与光学尺寸归一化体系，去除杂乱外框与微小文字，同时为 Patroni、Keepalived、外部负载均衡 (ELB) 配套同等几何精度的现代扁平徽章，全站风格高度统一",
+			"内置亮/暗色自适应配色与独立作用域 SVG defs ID，确保深色模式瓷砖下 Kafka/MySQL/MariaDB/PostgreSQL/OpenSearch 等深色笔触清晰通透且多实例列表零渲染冲突",
+		},
+		HighlightsEn: []string{
+			"Replaced all 32 hand-drawn middleware icons with authentic official vector brand marks (PostgreSQL Slonik, Redis, Nginx, HAProxy, etcd, MySQL, MariaDB, MongoDB, Kafka, RabbitMQ, Elasticsearch, ZooKeeper, MinIO, Prometheus, Grafana, Kubernetes, Docker, ClickHouse, Nacos, Consul, RocketMQ, Envoy, Traefik, Valkey, TiDB, OpenSearch, Memcached, Harbor, Zabbix, etc.)",
+			"Normalized every icon to a unified 40×40 Swiss squircle optical grid with clean floating symbol marks (no wordmarks or clashing inner boxes) and matched precision emblems for Patroni, Keepalived, and External ELB",
+			"Added automatic Dark Mode ink/contrast adaptation and per-instance useId()-scoped SVG defs to prevent gradient/clipPath ID collisions across repeated rows",
+		},
+	},
 	{
 		Version: "1.0.314-dev",
 		Date:    "2026-11-24",

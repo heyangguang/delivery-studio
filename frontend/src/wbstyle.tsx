@@ -81,7 +81,12 @@ export function StylePicker({
                   className={`${icon === i.id ? "on" : ""} ${i.group === "middleware" ? "is-brand" : ""}`.trim()}
                   onClick={() => onChange(i.id, cur.color)}
                 >
-                  <svg viewBox="0 0 40 40" width="28" height="28" aria-hidden>
+                  <svg
+                    viewBox="0 0 40 40"
+                    width={i.group === "middleware" ? 34 : 28}
+                    height={i.group === "middleware" ? 34 : 28}
+                    aria-hidden
+                  >
                     {iconShape(i.id)}
                   </svg>
                 </button>

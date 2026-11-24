@@ -949,6 +949,24 @@ body[arco-theme="dark"] .avatar.admin {
   flex-direction: column;
   gap: 4px;
 }
+:root {
+  --g-pg: #336791;
+  --g-mysql: #00758f;
+  --g-mariadb-ink: #002b64;
+  --g-es-ink: #343741;
+  --g-os-deep: #003b5c;
+  --g-minio: #c72e49;
+  --g-elb: #2563eb;
+}
+body[arco-theme="dark"] {
+  --g-pg: #4b89bc;
+  --g-mysql: #4bb4e6;
+  --g-mariadb-ink: #cbd5e1;
+  --g-es-ink: #e2e8f0;
+  --g-os-deep: #38bdf8;
+  --g-minio: #e84a66;
+  --g-elb: #3b82f6;
+}
 .app-glyph {
   display: block;
   flex: none;

@@ -19,6 +19,7 @@ import {
   IconEye,
   IconEyeInvisible,
   IconFile,
+  IconInfoCircle,
   IconLink,
   IconRefresh,
   IconRight,
@@ -85,10 +86,35 @@ const schemaKey = (i: InstanceView) => `${i.component}@${i.version}`;
 const normParamKey = (k: string) =>
   k.trim().toLowerCase().replace(/-/g, "_");
 
+// Patroni HA & replication orchestration keys (separated cleanly from PostgreSQL DB params)
+const PATRONI_PARAM_KEY_RE =
+  /^(patroni_|restapi_|deployment_mode$|replication$|sync_ack_count$|sync_strict$|clonefrom_node$|synchronous_commit$|maximum_lag_on_failover$|failover_|loop_wait$|retry_timeout$|ttl$)/i;
+
+function isPatroniParam(key: string, defGroup?: string): boolean {
+  if (defGroup === "patroni" || defGroup === "replication") return true;
+  return PATRONI_PARAM_KEY_RE.test(key.trim());
+}
+
+function hasEmbeddedPatroni(pg: InstanceView, all: InstanceView[]): boolean {
+  if (pg.component !== "postgresql" || pg.external) return false;
+  if (all.some((i) => i.component === "patroni")) return false;
+  const dm = String(pg.params?.deployment_mode || "").toLowerCase();
+  if (dm === "single" || dm === "replication") return false;
+  if (dm === "patroni") return true;
+  const hasReplica = (pg.roles?.replica || []).length > 0;
+  const hasPatroniKeys =
+    (Object.hasOwn(pg.params || {}, "patroni_ttl") &&
+      pg.visible?.patroni_ttl !== false) ||
+    (Object.hasOwn(pg.params || {}, "restapi_port") &&
+      pg.visible?.restapi_port !== false);
+  return hasReplica && hasPatroniKeys;
+}
+
 const COMPONENT_KEY_HINTS: [RegExp, string[]][] = [
+  [PATRONI_PARAM_KEY_RE, ["patroni", "postgresql"]],
   [
-    /^(pg_|postgres|patroni|log_|logging_|wal_|max_connections|shared_buffers|work_mem|maintenance_work_mem|effective_cache|synchronous_|checkpoint|autovacuum|archive_|hot_standby|max_wal|min_wal|idle_in_transaction|statement_timeout|ssl_|restapi_)/i,
-    ["postgresql", "patroni"],
+    /^(pg_|postgres|log_|logging_|wal_|max_connections|shared_buffers|work_mem|maintenance_work_mem|effective_cache|checkpoint|autovacuum|archive_|hot_standby|max_wal|min_wal|idle_in_transaction|statement_timeout|ssl_)/i,
+    ["postgresql"],
   ],
   [
     /^(etcd|quota_backend|heartbeat_interval|election_timeout|auto_compaction|snapshot_count)/i,
@@ -102,9 +128,57 @@ const COMPONENT_KEY_HINTS: [RegExp, string[]][] = [
     /^(nginx|worker_processes|worker_connections|keepalive_timeout|client_max_body|gzip|upstream|proxy_)/i,
     ["nginx"],
   ],
-  [/^(haproxy|maxconn|timeout_connect|timeout_client|timeout_server|balance)/i, ["haproxy"]],
-  [/^(keepalived|vrrp|virtual_ip|unicast_peer|priority|advert_int)/i, ["keepalived"]],
+  [
+    /^(haproxy|maxconn|timeout_connect|timeout_client|timeout_server|balance)/i,
+    ["haproxy"],
+  ],
+  [
+    /^(keepalived|vrrp|virtual_ip|unicast_peer|priority|advert_int)/i,
+    ["keepalived"],
+  ],
 ];
+
+// Built-in bilingual labels for common runtime-added parameters not present in Day-0 schema
+const RUNTIME_PARAM_LABELS: Record<string, [string, string]> = {
+  pg_hba: ["客户端认证规则", "Client Auth Rules (pg_hba)"],
+  logging_collector: ["日志落盘采集器", "Log Collector"],
+  log_directory: ["日志输出目录", "Log Directory"],
+  log_filename: ["日志文件命名格式", "Log Filename Pattern"],
+  log_rotation_age: ["日志按时间轮转周期", "Log Rotation Age"],
+  log_rotation_size: ["单日志文件轮转上限", "Log Rotation Size"],
+  log_truncate_on_rotation: ["轮转时覆盖同名日志", "Truncate on Rotation"],
+  log_line_prefix: ["日志行前缀格式", "Log Line Prefix"],
+  log_statement: ["SQL 语句记录级别", "SQL Statement Logging"],
+  log_min_duration_statement: ["慢 SQL 阈值", "Slow Query Threshold"],
+  log_destination: ["日志输出目标", "Log Destination"],
+  log_timezone: ["日志时区", "Log Timezone"],
+  wal_level: ["WAL 日志级别", "WAL Level"],
+  archive_mode: ["WAL 归档开关", "Archive Mode"],
+  archive_command: ["WAL 归档命令", "Archive Command"],
+  statement_timeout: ["单语句执行超时", "Statement Timeout"],
+  lock_timeout: ["锁等待超时", "Lock Timeout"],
+  synchronous_standby_names: ["同步从库配置", "Synchronous Standby Names"],
+  maxmemory: ["最大内存上限", "Max Memory"],
+  maxmemory_policy: ["内存淘汰策略", "Eviction Policy"],
+  appendonly: ["AOF 持久化开关", "Append-Only File"],
+  appendfsync: ["AOF 刷盘策略", "AOF Fsync Policy"],
+};
+
+function friendlyParamLabel(key: string, def?: ParamDef): string {
+  if (def?.label) return def.label;
+  const hit = RUNTIME_PARAM_LABELS[normParamKey(key)];
+  if (hit) return bi(hit[0], hit[1]);
+  return key;
+}
+
+type DisplayInstance = InstanceView & {
+  /** Legacy PostgreSQL cluster where Patroni was bundled into the PG instance */
+  embeddedFrom?: string;
+  /** Real companion ID (split mode) or virtual ID (legacy mode) when PG & Patroni are partitioned */
+  partitionPeerId?: string;
+  /** Schema lookup override for virtual embedded Patroni view */
+  schemaLookupKey?: string;
+};
 
 type ParamRow = {
   key: string;
@@ -117,6 +191,7 @@ type ParamRow = {
   applied?: EffectiveClusterChange;
   runtimeAdded?: boolean;
 };
+
 type SearchHit = {
   id: string;
   section: string;
@@ -138,7 +213,10 @@ function CopyValue({ value, label }: { value: unknown; label: string }) {
   );
   const text = raw(value);
   return text ? (
-    <Tooltip content={copied ? bi("已复制", "Copied") : bi(`复制${label}`, `Copy ${label}`)} mini>
+    <Tooltip
+      content={copied ? bi("已复制", "Copied") : bi(`复制${label}`, `Copy ${label}`)}
+      mini
+    >
       <button
         type="button"
         className={`cx-copy ${copied ? "copied" : ""}`}
@@ -148,7 +226,11 @@ function CopyValue({ value, label }: { value: unknown; label: string }) {
           if (timer.current) window.clearTimeout(timer.current);
           timer.current = window.setTimeout(() => setCopied(false), 1500);
         }}
-        aria-label={copied ? bi(`已复制${label}`, `Copied ${label}`) : bi(`复制${label}`, `Copy ${label}`)}
+        aria-label={
+          copied
+            ? bi(`已复制${label}`, `Copied ${label}`)
+            : bi(`复制${label}`, `Copy ${label}`)
+        }
       >
         {copied ? <IconCheck /> : <IconCopy />}
       </button>
@@ -193,11 +275,21 @@ export function ClusterConfig({
   if (!p)
     return (
       <Empty
-        title={source ? bi("找不到这份交付", "Delivery not found") : bi("还没有配置记录", "No configuration records")}
+        title={
+          source
+            ? bi("找不到这份交付", "Delivery not found")
+            : bi("还没有配置记录", "No configuration records")
+        }
         text={
           source
-            ? bi("这份交付不属于当前集群，或已被删除。", "This delivery does not belong to this cluster or was deleted.")
-            : bi("提交部署规格后，可以在这里查看配置。", "Configuration will appear here after submitting a deployment spec.")
+            ? bi(
+                "这份交付不属于当前集群，或已被删除。",
+                "This delivery does not belong to this cluster or was deleted.",
+              )
+            : bi(
+                "提交部署规格后，可以在这里查看配置。",
+                "Configuration will appear here after submitting a deployment spec.",
+              )
         }
       >
         {source && (
@@ -262,6 +354,7 @@ function ConfigRecord({
   const [rawView, setRawView] = useState("yaml");
   const [roleFilter, setRoleFilter] = useState("all");
   const [paramFilter, setParamFilter] = useState<"all" | "changed" | "specified">("all");
+  const [groupFilter, setGroupFilter] = useState("all");
   const [historyOpen, setHistoryOpen] = useState(false);
   const [expandedHistoryIds, setExpandedHistoryIds] = useState<Record<string, boolean>>({});
   const [shownSecrets, setShownSecrets] = useState<Record<string, boolean>>({});
@@ -301,7 +394,7 @@ function ConfigRecord({
 
   const dep = data?.spec?.deployment;
   const plan = data?.plan;
-  const instances = useMemo<InstanceView[]>(
+  const rawInstances = useMemo<InstanceView[]>(
     () =>
       plan?.instances ||
       (dep?.instances || []).map((i) => ({
@@ -317,15 +410,79 @@ function ConfigRecord({
       })),
     [plan, dep],
   );
+
+  // Build consistent, deduplicated display instances:
+  // 1) Split PG+Patroni clusters: partition PG DB params vs Patroni HA params cleanly (no 62-vs-62 duplication).
+  // 2) Legacy bundled PG+Patroni clusters: expose a clean Patroni view extracted from the bundled PG instance.
+  // 3) Sort tabs deterministically: Primary app -> Patroni -> etcd -> LB/VIP -> others -> External LB.
+  const displayInstances = useMemo<DisplayInstance[]>(() => {
+    const out: DisplayInstance[] = [];
+    const realPatroni = rawInstances.find((i) => i.component === "patroni");
+
+    for (const inst of rawInstances) {
+      if (inst.component === "postgresql" && realPatroni) {
+        out.push({ ...inst, partitionPeerId: realPatroni.id });
+      } else if (inst.component === "patroni" && rawInstances.some((x) => x.component === "postgresql")) {
+        const pg = rawInstances.find((x) => x.component === "postgresql")!;
+        out.push({ ...inst, partitionPeerId: pg.id });
+      } else if (hasEmbeddedPatroni(inst, rawInstances)) {
+        const virtId = `${inst.id}-patroni`;
+        out.push({ ...inst, partitionPeerId: virtId });
+        const dcsInst = rawInstances.find((x) => x.component === "etcd");
+        out.push({
+          id: virtId,
+          component: "patroni",
+          title: "Patroni",
+          version: "",
+          status: inst.status,
+          auto: true,
+          auto_reason: bi(
+            "旧版一体化交付 · 随 PostgreSQL 同包部署",
+            "Legacy bundled delivery · deployed with PostgreSQL",
+          ),
+          roles: inst.roles,
+          role_titles: inst.role_titles,
+          hosts: inst.hosts,
+          params: inst.params,
+          visible: inst.visible,
+          uses: dcsInst
+            ? {
+                dcs: {
+                  capability: "dcs",
+                  instance: dcsInst.id,
+                  component: dcsInst.component,
+                },
+              }
+            : undefined,
+          embeddedFrom: inst.id,
+          partitionPeerId: inst.id,
+          schemaLookupKey: schemaKey(inst),
+        });
+      } else {
+        out.push({ ...inst });
+      }
+    }
+
+    const rankOf = (i: DisplayInstance): number => {
+      if (i.external) return 50;
+      if (i.component === c.app_id) return 10;
+      if (i.component === "patroni") return 20;
+      if (i.component === "etcd") return 30;
+      if (["haproxy", "nginx", "keepalived"].includes(i.component)) return 35;
+      return 40;
+    };
+    return out.sort((a, b) => rankOf(a) - rankOf(b));
+  }, [rawInstances, c.app_id, lang]);
+
   const hosts: HostSpec[] = dep?.hosts || plan?.hosts || [];
   const controller = plan?.controller || dep?.controller;
-  const keys = instances.map(schemaKey).join("|");
+  const keys = rawInstances.map(schemaKey).join("|");
   useEffect(() => {
-    if (!instances.length) return;
+    if (!rawInstances.length) return;
     const abort = new AbortController();
     setSchemaError(false);
     const unique = [
-      ...new Map(instances.map((i) => [schemaKey(i), i])).values(),
+      ...new Map(rawInstances.map((i) => [schemaKey(i), i])).values(),
     ];
     Promise.allSettled(
       unique.map((i) => {
@@ -352,6 +509,21 @@ function ConfigRecord({
     return () => abort.abort();
   }, [keys, schemaRetry, lang]);
 
+  const schemaFor = (i: DisplayInstance): Schema | undefined =>
+    schemas[i.schemaLookupKey || schemaKey(i)];
+
+  const ownsParamKey = (
+    i: DisplayInstance,
+    key: string,
+    defGroup?: string,
+  ): boolean => {
+    if (!i.partitionPeerId) return true;
+    const patroniKey = isPatroniParam(key, defGroup);
+    if (i.component === "patroni") return patroniKey;
+    if (i.component === "postgresql") return !patroniKey;
+    return true;
+  };
+
   const current = p.id === c.current;
   const appliedList = useMemo(
     () =>
@@ -369,17 +541,21 @@ function ConfigRecord({
     () =>
       current || !c.current
         ? computeEffectiveClusterChanges(appliedList)
-        : { items: [] as EffectiveClusterChange[], latestByKey: new Map<string, EffectiveClusterChange>() },
+        : {
+            items: [] as EffectiveClusterChange[],
+            latestByKey: new Map<string, EffectiveClusterChange>(),
+          },
     [appliedList, current, c.current],
   );
 
-  // Assign each merged effective production change to its owning component instance.
+  // Assign each merged effective production change to its owning display instance.
   const effectiveByInstance = useMemo(() => {
     const map = new Map<string, EffectiveClusterChange[]>();
-    const nonExt = instances.filter((i) => !i.external);
+    const nonExt = displayInstances.filter((i) => !i.external);
     if (!nonExt.length || !effectiveChanges.items.length) return map;
     const primary =
       nonExt.find((i) => i.component === c.app_id) || nonExt[0];
+    const patroniInst = nonExt.find((i) => i.component === "patroni");
     const ordered = primary
       ? [primary, ...nonExt.filter((i) => i.id !== primary.id)]
       : nonExt;
@@ -392,15 +568,25 @@ function ConfigRecord({
 
     for (const ef of effectiveChanges.items) {
       const nk = normParamKey(ef.key);
-      // 1) Exact / normalized match in Day-0 instance params
-      let owner = ordered.find((i) =>
-        Object.keys(i.params || {}).some((k) => normParamKey(k) === nk),
-      );
+      // 0) Explicit Patroni HA key routing when Patroni view exists
+      if (patroniInst && isPatroniParam(ef.key)) {
+        push(patroniInst.id, ef);
+        continue;
+      }
+      // 1) Exact / normalized match in Day-0 owned instance params
+      let owner = ordered.find((i) => {
+        const s = schemaFor(i);
+        const defs = new Map((s?.params || []).map((d) => [normParamKey(d.key), d]));
+        return Object.keys(i.params || {}).some((k) => {
+          const kn = normParamKey(k);
+          return kn === nk && ownsParamKey(i, k, defs.get(kn)?.group);
+        });
+      });
       // 2) Exact / normalized match in component schema param definitions
       if (!owner) {
         owner = ordered.find((i) =>
-          (schemas[schemaKey(i)]?.params || []).some(
-            (d) => normParamKey(d.key) === nk,
+          (schemaFor(i)?.params || []).some(
+            (d) => normParamKey(d.key) === nk && ownsParamKey(i, d.key, d.group),
           ),
         );
       }
@@ -415,17 +601,18 @@ function ConfigRecord({
       push((owner || primary).id, ef);
     }
     return map;
-  }, [instances, schemas, effectiveChanges.items, c.app_id]);
+  }, [displayInstances, schemas, effectiveChanges.items, c.app_id]);
 
   const runtimeGroupLabel = bi("运行期生产变更", "Production Runtime Changes");
 
   const parameterRows = useMemo(
     () =>
       new Map(
-        instances.map((i) => {
-          const s = schemas[schemaKey(i)];
+        displayInstances.map((i) => {
+          const s = schemaFor(i);
+          const sourceSpecId = i.embeddedFrom || i.id;
           const explicit =
-            dep?.instances.find((sp) => sp.id === i.id)?.params || {};
+            dep?.instances.find((sp) => sp.id === sourceSpecId)?.params || {};
           const defs = new Map((s?.params || []).map((d) => [d.key, d]));
           const defsNorm = new Map(
             (s?.params || []).map((d) => [normParamKey(d.key), d]),
@@ -439,30 +626,38 @@ function ConfigRecord({
           );
           const matchedNorms = new Set<string>();
 
-          const baseRows: ParamRow[] = Object.entries(i.params)
+          const baseRows: ParamRow[] = Object.entries(i.params || {})
+            .filter(([key]) => ownsParamKey(i, key, defs.get(key)?.group))
             .map(([key, value]) => {
               const def = defs.get(key);
               const nk = normParamKey(key);
               const applied = changeByNorm.get(nk);
               if (applied) matchedNorms.add(nk);
+              const defaultGroup =
+                i.component === "patroni" && key === "restapi_port"
+                  ? bi("管理接口", "Management API")
+                  : s?.groups?.find((g) => g.id === def?.group)?.label ||
+                    bi("其他参数", "Other parameters");
               return {
                 key,
                 value,
                 def,
-                group:
-                  s?.groups?.find((g) => g.id === def?.group)?.label ||
-                  bi("其他参数", "Other parameters"),
-                label: def?.label || key,
+                group: defaultGroup,
+                label: friendlyParamLabel(key, def),
                 specified: Object.hasOwn(explicit, key),
                 active: i.visible?.[key] !== false,
                 applied,
               };
             })
             .sort((a, b) => {
+              // Keep active params above inactive params within the same group, preserving schema order
+              if (a.group === b.group && a.active !== b.active) {
+                return a.active ? -1 : 1;
+              }
               return (order.get(a.key) ?? 9999) - (order.get(b.key) ?? 9999);
             });
 
-          // Synthesize runtime-added params (e.g. logging_collector, pg_hba) directly inside this component!
+          // Synthesize runtime-added params (e.g. logging_collector, pg_hba) directly inside this component
           const extraRows: ParamRow[] = instChanges
             .filter((ef) => !matchedNorms.has(normParamKey(ef.key)))
             .map((ef) => {
@@ -472,7 +667,7 @@ function ConfigRecord({
                 value: ef.after,
                 def,
                 group: runtimeGroupLabel,
-                label: def?.label || ef.key,
+                label: friendlyParamLabel(ef.key, def),
                 specified: false,
                 active: true,
                 applied: ef,
@@ -483,43 +678,65 @@ function ConfigRecord({
           return [i.id, [...extraRows, ...baseRows]] as [string, ParamRow[]];
         }),
       ),
-    [instances, schemas, dep, lang, effectiveByInstance, runtimeGroupLabel],
+    [displayInstances, schemas, dep, lang, effectiveByInstance, runtimeGroupLabel],
   );
-  const rowsFor = (i: InstanceView): ParamRow[] =>
+
+  const rowsFor = (i: DisplayInstance): ParamRow[] =>
     parameterRows.get(i.id) || [];
-  const routes = instances.flatMap((i) =>
+
+  const routes = rawInstances.flatMap((i) =>
     (i.endpoints || []).map((ep) => ({ i, ep, front: i.fronts?.[ep.name] })),
   );
-  const portRows = instances.flatMap((i) =>
+  const portRows = rawInstances.flatMap((i) =>
     (i.ports || []).map((port) => ({ i, port })),
   );
+
   const nav = [
     {
       id: "hosts",
       label: bi("机器与角色", "Hosts & Roles"),
-      note: hosts.length === 1 ? bi("1 台", "1 host") : bi(`${hosts.length} 台`, `${hosts.length} hosts`),
+      note:
+        hosts.length === 1
+          ? bi("1 台", "1 host")
+          : bi(`${hosts.length} 台`, `${hosts.length} hosts`),
       icon: <IconDesktop />,
       changeCount: 0,
+      embedded: false,
     },
     {
       id: "access",
       label: bi("访问入口", "Access Endpoints"),
-      note: routes.length === 1 ? bi("1 个端点", "1 endpoint") : bi(`${routes.length} 个端点`, `${routes.length} endpoints`),
+      note:
+        routes.length === 1
+          ? bi("1 个端点", "1 endpoint")
+          : bi(`${routes.length} 个端点`, `${routes.length} endpoints`),
       icon: <IconLink />,
       changeCount: 0,
+      embedded: false,
     },
-    ...instances.map((i) => ({
+    ...displayInstances.map((i) => ({
       id: `component:${i.id}`,
-      label: i.title,
-      note: i.id,
-      icon: <AppGlyph id={i.component} size={20} />,
+      label: i.external ? bi("外部负载均衡", "External LB") : i.title,
+      note: i.embeddedFrom
+        ? bi("随 PostgreSQL 内置", "Bundled with PostgreSQL")
+        : i.id,
+      icon: <AppGlyph id={i.component} size={18} />,
       changeCount: (effectiveByInstance.get(i.id) || []).length,
+      embedded: Boolean(i.embeddedFrom),
     })),
-    { id: "spec", label: bi("原始规格", "Raw Spec"), note: "YAML / JSON", icon: <IconFile />, changeCount: 0 },
+    {
+      id: "spec",
+      label: bi("原始规格", "Raw Spec"),
+      note: "YAML / JSON",
+      icon: <IconFile />,
+      changeCount: 0,
+      embedded: false,
+    },
   ];
   const selected = section || "hosts";
   const active = nav.find((n) => n.id === selected);
   const pendingFilterRef = useRef<"all" | "changed" | "specified" | null>(null);
+
   useEffect(() => {
     const list = navigation.current;
     const button = list?.querySelector<HTMLElement>('[aria-current="page"]');
@@ -530,7 +747,9 @@ function ConfigRecord({
     else if (item.right > bounds.right)
       list.scrollLeft += item.right - bounds.right;
   }, [selected, data]);
-  const instance = instances.find((i) => `component:${i.id}` === selected);
+
+  const instance = displayInstances.find((i) => `component:${i.id}` === selected);
+
   useEffect(() => {
     if (pendingFilterRef.current) {
       setParamFilter(pendingFilterRef.current);
@@ -538,7 +757,9 @@ function ConfigRecord({
     } else {
       setParamFilter("all");
     }
+    setGroupFilter("all");
   }, [selected]);
+
   const navigate = (
     next: string,
     focus = "",
@@ -546,6 +767,7 @@ function ConfigRecord({
   ) => {
     setQuery("");
     setFocusKey(focus);
+    setGroupFilter("all");
     if (next === "hosts") setRoleFilter("all");
     if (next.startsWith("component:")) {
       if (next === selected) {
@@ -556,6 +778,7 @@ function ConfigRecord({
     }
     go({ name: "deliveries", id: c.id, tab: "config", source, section: next });
   };
+
   useEffect(() => {
     if (!focusKey || query) return;
     const row = [
@@ -577,15 +800,17 @@ function ConfigRecord({
       section: "hosts",
       title: h.name,
       context: `${bi("机器", "Host")} · ${h.disk || bi("未记录磁盘", "Disk unrecorded")}${h.name === controller ? bi(" · 控制节点", " · Controller") : ""}${
-        instances.some((i) => i.hosts.includes(h.name))
-          ? ` · ${instances
-              .filter((i) => i.hosts.includes(h.name))
+        displayInstances.some((i) => !i.external && i.hosts.includes(h.name))
+          ? ` · ${displayInstances
+              .filter((i) => !i.external && i.hosts.includes(h.name))
               .map((i) => {
                 const roles = Object.entries(i.roles)
                   .filter(([, hs]) => hs.includes(h.name))
                   .map(([role]) => `${i.role_titles?.[role] || role} ${role}`)
                   .join(bi("、", ", "));
-                return roles ? `${i.title}${bi("（", " (")}${roles}${bi("）", ")")}` : i.title;
+                return roles
+                  ? `${i.title}${bi("（", " (")}${roles}${bi("）", ")")}`
+                  : i.title;
               })
               .join(" / ")}`
           : ""
@@ -593,12 +818,12 @@ function ConfigRecord({
       value: h.ip,
       focus: `host:${h.name}`,
     })),
-    ...instances.flatMap((i) =>
+    ...displayInstances.flatMap((i) =>
       rowsFor(i).map((r) => ({
         id: `${i.id}.${r.key}`,
         section: `component:${i.id}`,
-        title: `${r.label} · ${r.key}`,
-        context: `${i.title} · ${i.id} · ${r.group}`,
+        title: r.label !== r.key ? `${r.label} · ${r.key}` : r.key,
+        context: `${i.title} · ${r.group}`,
         value: isSecretRow(r)
           ? "••••••••"
           : r.applied
@@ -614,19 +839,24 @@ function ConfigRecord({
       context: `${ep.protocol.toUpperCase()} · ${front ? `${front.balancer} · ${front.resolve_ip || ""}` : bi("节点直连", "Direct node access")}`,
       value: front
         ? `${front.address}:${front.listen} → ${bi("后端", "backend")} ${ep.port}`
-        : (ep.backends || []).map((b) => `${b.ip}:${b.port}`).join(bi("、", ", ")),
+        : (ep.backends || [])
+            .map((b) => `${b.ip}:${b.port}`)
+            .join(bi("、", ", ")),
       focus: `endpoint:${i.id}.${ep.name}`,
     })),
   ];
+
   const tokens = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
   const results = hits.filter((h) =>
     tokens.every((t) => {
-      const searchable = h.value === "••••••••"
-        ? `${h.title} ${h.context}`
-        : `${h.title} ${h.context} ${h.value}`;
+      const searchable =
+        h.value === "••••••••"
+          ? `${h.title} ${h.context}`
+          : `${h.title} ${h.context} ${h.value}`;
       return searchable.toLocaleLowerCase().includes(t);
     }),
   );
+
   const stateLabel =
     p.outcome === "void"
       ? bi("已作废的交付", "Voided delivery")
@@ -639,6 +869,7 @@ function ConfigRecord({
           : current
             ? bi("交付配置", "Delivery config")
             : bi("交付目标", "Target config");
+
   const yaml = data?.spec?.yaml;
   const generated = plan
     ? JSON.stringify(
@@ -656,12 +887,28 @@ function ConfigRecord({
     (f) => f.name === "部署规格.yml" || f.name === "deployment-spec.yml",
   );
 
-  const nonExternalInstances = instances.filter((i) => !i.external);
+  const nonExternalInstances = displayInstances.filter((i) => !i.external);
+
+  // Deduplicate identical role filters (e.g. PostgreSQL · 主库 & Patroni · 主库 share the exact same host list)
   const roleOptions = useMemo(() => {
-    const opts: { id: string; label: string; match: (h: HostSpec) => boolean; count: number }[] = [
-      { id: "all", label: bi("全部", "All"), match: () => true, count: hosts.length },
+    const opts: {
+      id: string;
+      label: string;
+      match: (h: HostSpec) => boolean;
+      count: number;
+    }[] = [
+      {
+        id: "all",
+        label: bi("全部", "All"),
+        match: () => true,
+        count: hosts.length,
+      },
     ];
-    if (controller && hosts.length > 1 && hosts.some((h) => h.name === controller)) {
+    if (
+      controller &&
+      hosts.length > 1 &&
+      hosts.some((h) => h.name === controller)
+    ) {
       opts.push({
         id: "controller",
         label: bi("控制节点", "Controller"),
@@ -669,14 +916,36 @@ function ConfigRecord({
         count: 1,
       });
     }
-    for (const i of nonExternalInstances) {
+    const seenByRoleHosts = new Map<string, number>();
+    const realNonExt = nonExternalInstances.filter((i) => !i.embeddedFrom);
+    for (const i of realNonExt) {
       for (const [role, hs] of Object.entries(i.roles)) {
-        const count = hs.filter((name) => hosts.some((h) => h.name === name)).length;
+        const matchedHosts = hs
+          .filter((name) => hosts.some((h) => h.name === name))
+          .slice()
+          .sort();
+        const count = matchedHosts.length;
         if (!count || count === hosts.length) continue;
         const roleLabel = i.role_titles?.[role] || role;
+        const sig = `${role}:${matchedHosts.join(",")}`;
+        const existingIdx = seenByRoleHosts.get(sig);
+        if (existingIdx !== undefined) {
+          // Merge co-located roles cleanly (e.g. "PostgreSQL / Patroni · 主库")
+          const prev = opts[existingIdx];
+          if (!prev.label.includes(i.title)) {
+            const parts = prev.label.split(" · ");
+            prev.label =
+              parts.length === 2
+                ? `${parts[0]} / ${i.title} · ${parts[1]}`
+                : `${prev.label} / ${i.title}`;
+          }
+          continue;
+        }
+        seenByRoleHosts.set(sig, opts.length);
         opts.push({
           id: `role:${i.id}:${role}`,
-          label: nonExternalInstances.length > 1 ? `${i.title} · ${roleLabel}` : roleLabel,
+          label:
+            realNonExt.length > 1 ? `${i.title} · ${roleLabel}` : roleLabel,
           match: (h) => hs.includes(h.name),
           count,
         });
@@ -697,15 +966,42 @@ function ConfigRecord({
   const canFilterSpecified =
     Boolean(plan) && specifiedCount > 0 && specifiedCount < allInstanceRows.length;
   const canFilterRows = changedCount > 0 || canFilterSpecified;
-  const visibleInstanceRows =
+
+  const scopeFilteredRows =
     paramFilter === "changed" && changedCount > 0
       ? allInstanceRows.filter((r) => Boolean(r.applied))
       : paramFilter === "specified" && canFilterSpecified
         ? allInstanceRows.filter((r) => r.specified)
         : allInstanceRows;
-  const paramGroups = instance
-    ? [...new Set(visibleInstanceRows.map((r) => r.group))]
-    : [];
+
+  const allParamGroups = useMemo(() => {
+    if (!instance) return [] as { name: string; count: number; isRuntime: boolean }[];
+    const seen = new Map<string, number>();
+    for (const r of scopeFilteredRows) {
+      seen.set(r.group, (seen.get(r.group) || 0) + 1);
+    }
+    return [...seen.entries()].map(([name, count]) => ({
+      name,
+      count,
+      isRuntime: name === runtimeGroupLabel,
+    }));
+  }, [instance, scopeFilteredRows, runtimeGroupLabel]);
+
+  const activeGroupFilter =
+    groupFilter !== "all" && allParamGroups.some((g) => g.name === groupFilter)
+      ? groupFilter
+      : "all";
+
+  const visibleGroups =
+    activeGroupFilter === "all"
+      ? allParamGroups
+      : allParamGroups.filter((g) => g.name === activeGroupFilter);
+
+  const visibleInstanceRows =
+    activeGroupFilter === "all"
+      ? scopeFilteredRows
+      : scopeFilteredRows.filter((r) => r.group === activeGroupFilter);
+
   const primaryChangedInstanceId = useMemo(() => {
     let best = "";
     let max = 0;
@@ -717,6 +1013,16 @@ function ConfigRecord({
     }
     return best;
   }, [effectiveByInstance]);
+
+  // Effective JSON payload for "Copy all parameters" on the active component tab
+  const effectiveCopyPayload = useMemo(() => {
+    if (!instance) return null;
+    const obj: Record<string, unknown> = {};
+    for (const r of allInstanceRows) {
+      obj[r.key] = r.applied ? r.applied.after : r.value;
+    }
+    return obj;
+  }, [instance, allInstanceRows]);
 
   return (
     <div className="cx">
@@ -779,14 +1085,24 @@ function ConfigRecord({
           <div className="cx-notice warn">
             <b>{bi("现场执行有偏差", "On-site deviations recorded")}</b>
             <span>
-              {p.outcome_note || bi("请查看该次交付的确认说明。", "See the confirmation note for this delivery.")}{" "}
-              {bi("以下仍是原交付配置，请结合现场变更核对。", "Below is the original delivered configuration; reconcile with on-site changes.")}
+              {p.outcome_note ||
+                bi(
+                  "请查看该次交付的确认说明。",
+                  "See the confirmation note for this delivery.",
+                )}{" "}
+              {bi(
+                "以下仍是原交付配置，请结合现场变更核对。",
+                "Below is the original delivered configuration; reconcile with on-site changes.",
+              )}
             </span>
           </div>
         )}
         {c.holder && c.holder !== p.id && (
           <p className="cx-pending">
-            {bi("另有交付尚未完成，当前记录未随它改变。", "Another delivery is still pending; current records have not changed yet.")}
+            {bi(
+              "另有交付尚未完成，当前记录未随它改变。",
+              "Another delivery is still pending; current records have not changed yet.",
+            )}
             <button
               className="link"
               onClick={() =>
@@ -799,7 +1115,8 @@ function ConfigRecord({
                 })
               }
             >
-              {bi("查看待执行交付的配置", "View pending delivery config")} <IconRight />
+              {bi("查看待执行交付的配置", "View pending delivery config")}{" "}
+              <IconRight />
             </button>
           </p>
         )}
@@ -828,7 +1145,11 @@ function ConfigRecord({
                   type="button"
                   className="cx-chg-strip-btn primary"
                   onClick={() =>
-                    navigate(`component:${primaryChangedInstanceId}`, "", "changed")
+                    navigate(
+                      `component:${primaryChangedInstanceId}`,
+                      "",
+                      "changed",
+                    )
                   }
                 >
                   {bi(
@@ -852,13 +1173,18 @@ function ConfigRecord({
           </div>
         )}
       </div>
+
       {(net !== "online" || error) && (
         <div className="cx-notice" role="status">
           <span>
             {net !== "online" ? bi("连接已断开。", "Disconnected. ") : ""}
             {data
               ? `${bi("显示已读取的配置。", "Showing loaded configuration.")}${error ? bi(`刷新失败：${error}`, ` Refresh failed: ${error}`) : bi("恢复连接后可刷新。", " Refresh when reconnected.")}`
-              : error || bi("暂时无法读取配置，请恢复连接后重试。", "Unable to load configuration; reconnect and retry.")}
+              : error ||
+                bi(
+                  "暂时无法读取配置，请恢复连接后重试。",
+                  "Unable to load configuration; reconnect and retry.",
+                )}
           </span>
           <Button
             size="small"
@@ -870,22 +1196,35 @@ function ConfigRecord({
           </Button>
         </div>
       )}
+
       {loading && !data ? (
-        <div className="cx-loading" aria-label={bi("正在读取配置", "Loading configuration")}>
+        <div
+          className="cx-loading"
+          aria-label={bi("正在读取配置", "Loading configuration")}
+        >
           <Skeleton animation text={{ rows: 8 }} />
         </div>
       ) : !data ? (
         <Empty
           title={bi("配置未能载入", "Failed to load configuration")}
-          text={bi("交付记录暂时不可用，请重试。", "Delivery record temporarily unavailable; please retry.")}
+          text={bi(
+            "交付记录暂时不可用，请重试。",
+            "Delivery record temporarily unavailable; please retry.",
+          )}
         />
       ) : !dep && !plan ? (
         <Empty
           title={bi("这份交付还没有配置记录", "No configuration record yet")}
           text={
             p.state === "running" || p.state === "queued"
-              ? bi("材料正在生成，完成后刷新即可查看。", "Artifacts are building; refresh once complete.")
-              : bi("未保存部署规格或生成配置，可打开交付检查生成记录。", "No deployment spec or generated config saved; check the delivery record.")
+              ? bi(
+                  "材料正在生成，完成后刷新即可查看。",
+                  "Artifacts are building; refresh once complete.",
+                )
+              : bi(
+                  "未保存部署规格或生成配置，可打开交付检查生成记录。",
+                  "No deployment spec or generated config saved; check the delivery record.",
+                )
           }
         >
           <Button icon={<IconRefresh />} onClick={() => setRetry((v) => v + 1)}>
@@ -904,9 +1243,14 @@ function ConfigRecord({
               </span>
             </div>
           )}
+
           <div className="cx-layout">
             <div className="cx-browser-head">
-              <nav className="cx-nav" aria-label={bi("配置分类", "Config sections")} ref={navigation}>
+              <nav
+                className="cx-nav"
+                aria-label={bi("配置分类", "Config sections")}
+                ref={navigation}
+              >
                 {nav.map((n) => (
                   <button
                     key={n.id}
@@ -919,13 +1263,7 @@ function ConfigRecord({
                     title={`${n.label} · ${n.note}`}
                   >
                     {n.icon}
-                    <span>
-                      {n.id.startsWith("component:") &&
-                      instances.find((i) => `component:${i.id}` === n.id)
-                        ?.external
-                        ? bi("外部负载均衡", "External LB")
-                        : n.label}
-                    </span>
+                    <span>{n.label}</span>
                     {n.changeCount > 0 && (
                       <em
                         className="cx-nav-chg-cnt num"
@@ -947,7 +1285,10 @@ function ConfigRecord({
                   onChange={setQuery}
                   allowClear
                   aria-label={bi("搜索集群配置", "Search cluster configuration")}
-                  placeholder={bi("搜索机器、角色、IP、端口或参数…", "Search hosts, roles, IPs, ports, or params…")}
+                  placeholder={bi(
+                    "搜索机器、角色、IP、端口或参数…",
+                    "Search hosts, roles, IPs, ports, or params…",
+                  )}
                   onKeyDown={(e) => {
                     if (e.key === "Escape") {
                       e.stopPropagation();
@@ -964,6 +1305,7 @@ function ConfigRecord({
                 />
               </div>
             </div>
+
             <div className="cx-detail" ref={detail}>
               {tokens.length ? (
                 <section className="cx-section">
@@ -973,40 +1315,53 @@ function ConfigRecord({
                         {bi("搜索结果", "Search Results")}{" "}
                         <span className="faint num">{results.length}</span>
                       </h2>
-                      <p>{bi("搜索这份记录的机器角色、组件参数与访问入口", "Search host roles, component parameters, and access endpoints in this record")}</p>
+                      <p>
+                        {bi(
+                          "搜索这份记录的机器角色、组件参数与访问入口",
+                          "Search host roles, component parameters, and access endpoints in this record",
+                        )}
+                      </p>
                     </div>
                     <Button type="text" onClick={() => setQuery("")}>
                       {bi("清除搜索", "Clear search")}
                     </Button>
                   </div>
                   {results.length ? (
-                    <div className="cx-results">
-                      {results.map((h) => (
-                        <button
-                          type="button"
-                          key={h.id}
-                          onClick={() => navigate(h.section, h.focus)}
-                        >
-                          <span>
-                            <b>{h.title}</b>
-                            <small>{h.context}</small>
-                          </span>
-                          <code>{h.value}</code>
-                          <IconRight />
-                        </button>
-                      ))}
+                    <div className="cx-spec-card">
+                      <div className="cx-results">
+                        {results.map((h) => (
+                          <button
+                            type="button"
+                            key={h.id}
+                            onClick={() => navigate(h.section, h.focus)}
+                          >
+                            <span>
+                              <b>{h.title}</b>
+                              <small>{h.context}</small>
+                            </span>
+                            <code>{h.value}</code>
+                            <IconRight />
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   ) : (
                     <Empty
                       title={bi("没有匹配的配置", "No matching entries")}
-                      text={bi("试试机器名、角色名称、参数英文名，或只搜索端口数字。", "Try a hostname, role name, parameter key, or port number.")}
+                      text={bi(
+                        "试试机器名、角色名称、参数英文名，或只搜索端口数字。",
+                        "Try a hostname, role name, parameter key, or port number.",
+                      )}
                     />
                   )}
                 </section>
               ) : !active ? (
                 <Empty
                   title={bi("找不到这个配置分区", "Section not found")}
-                  text={bi("可以从上方选择机器、入口或组件参数。", "Select hosts, endpoints, or component parameters above.")}
+                  text={bi(
+                    "可以从上方选择机器、入口或组件参数。",
+                    "Select hosts, endpoints, or component parameters above.",
+                  )}
                 >
                   <Button onClick={() => navigate("hosts")}>
                     {bi("查看机器与角色", "View Hosts & Roles")}
@@ -1014,89 +1369,43 @@ function ConfigRecord({
                 </Empty>
               ) : (
                 <section className="cx-section" key={selected}>
-                  <div className="cx-heading">
-                    <div>
-                      <h2>
-                        {active.label}
-                        {instance && (
-                          <span className="cx-version mono">
-                            {instance.version}
-                          </span>
-                        )}
-                      </h2>
-                      <p>
-                        {instance ? (
-                          <>
-                            <code>{instance.id}</code> ·{" "}
-                            {instance.external
-                              ? bi("外部服务，由客户配置", "External service, customer-managed")
-                              : instance.hosts.length === 1
-                                ? bi("1 台机器", "1 host")
-                                : bi(`${instance.hosts.length} 台机器`, `${instance.hosts.length} hosts`)}
-                            {instance.auto
-                              ? ` · ${instance.auto_reason || bi("按依赖自动加入", "Added automatically by dependency")}`
-                              : ""}
-                          </>
-                        ) : selected === "hosts" ? (
-                          <>
-                            {platformShort(dep?.platform || c.platform || "")} ·{" "}
-                            {bi("控制节点", "Controller")} <code>{controller || bi("未记录", "Unrecorded")}</code>
-                          </>
-                        ) : selected === "access" ? (
-                          bi("区分应用访问地址与后端监听端口，按交付记录查看连接关系", "Distinguish application entrypoints from backend listen ports in this delivery record")
-                        ) : (
-                          bi("保留提交规格和生成时的参数，便于核对、复制与复现", "Preserves submitted spec and generated values for verification and reproduction")
-                        )}
-                      </p>
-                    </div>
-                    <div className="cx-heading-actions">
-                      {selected === "hosts" && filteredHosts.length > 1 && (
-                        <CopyValue
-                          value={filteredHosts.map((h) => h.ip).join("\n")}
-                          label={bi("机器 IP 列表", "Host IP list")}
-                        />
-                      )}
-                      {instance && canFilterRows && (
-                        <div
-                          className="cx-scope-pills"
-                          role="group"
-                          aria-label={bi("参数筛选", "Parameter filter")}
-                        >
-                          <button
-                            type="button"
-                            className={`cx-filter-pill ${paramFilter === "all" ? "on" : ""}`}
-                            onClick={() => setParamFilter("all")}
-                          >
-                            {bi("全部", "All")} <em>{allInstanceRows.length}</em>
-                          </button>
-                          {changedCount > 0 && (
-                            <button
-                              type="button"
-                              className={`cx-filter-pill is-chg ${paramFilter === "changed" ? "on" : ""}`}
-                              onClick={() => setParamFilter("changed")}
-                            >
-                              {bi("已变更", "Changed")} <em>{changedCount}</em>
-                            </button>
+                  {/* Non-component section heading (Hosts / Access / Spec) */}
+                  {!instance && (
+                    <div className="cx-heading">
+                      <div>
+                        <h2>{active.label}</h2>
+                        <p>
+                          {selected === "hosts" ? (
+                            <>
+                              {platformShort(dep?.platform || c.platform || "")}{" "}
+                              · {bi("控制节点", "Controller")}{" "}
+                              <code>{controller || bi("未记录", "Unrecorded")}</code>
+                            </>
+                          ) : selected === "access" ? (
+                            bi(
+                              "区分应用访问地址与后端监听端口，按交付记录查看连接关系",
+                              "Distinguish application entrypoints from backend listen ports in this delivery record",
+                            )
+                          ) : (
+                            bi(
+                              "保留提交规格和生成时的参数，便于核对、复制与复现",
+                              "Preserves submitted spec and generated values for verification and reproduction",
+                            )
                           )}
-                          {canFilterSpecified && (
-                            <button
-                              type="button"
-                              className={`cx-filter-pill ${paramFilter === "specified" ? "on" : ""}`}
-                              onClick={() => setParamFilter("specified")}
-                            >
-                              {bi("已指定", "Specified")} <em>{specifiedCount}</em>
-                            </button>
-                          )}
-                        </div>
-                      )}
-                      {instance && (
-                        <CopyValue
-                          value={instance.params}
-                          label={bi(`${instance.title}全部参数`, `all ${instance.title} parameters`)}
-                        />
-                      )}
+                        </p>
+                      </div>
+                      <div className="cx-heading-actions">
+                        {selected === "hosts" && filteredHosts.length > 1 && (
+                          <CopyValue
+                            value={filteredHosts.map((h) => h.ip).join("\n")}
+                            label={bi("机器 IP 列表", "Host IP list")}
+                          />
+                        )}
+                      </div>
                     </div>
-                  </div>
+                  )}
+
+                  {/* Section: Hosts & Roles */}
                   {selected === "hosts" &&
                     (hosts.length ? (
                       <>
@@ -1119,208 +1428,401 @@ function ConfigRecord({
                           </div>
                         )}
                         <div className="cx-hosts">
-                          {filteredHosts.map((h) => (
-                            <div
-                              key={h.name}
-                              className={`cx-host ${focusKey === `host:${h.name}` ? "focused" : ""}`}
-                              data-config-key={`host:${h.name}`}
-                              tabIndex={-1}
-                            >
-                              <div className="cx-host-id">
-                                <IconDesktop />
-                                <div>
-                                  <b className="mono">{h.name}</b>
-                                  <span className="mono">{h.ip}</span>
-                                </div>
-                                {h.name === controller && (
-                                  <Tag size="small" color="arcoblue">
-                                    {bi("控制节点", "Controller")}
-                                  </Tag>
-                                )}
-                                <CopyValue value={h.ip} label={bi(`${h.name}地址`, `${h.name} IP`)} />
-                              </div>
-                              <dl className="cx-host-info">
-                                <div>
-                                  <dt>{bi("数据盘", "Data disk")}</dt>
-                                  <dd>
-                                    <code>
-                                      {h.disk || bi("未记录", "Unrecorded")}
-                                      {h.partition ? ` · ${h.partition}` : ""}
-                                    </code>
-                                    <span className="cx-sub">
-                                      {h.initialize === true
-                                        ? bi("配置要求初始化磁盘", "Disk initialization enabled")
-                                        : h.initialize === false
-                                          ? bi("配置不初始化磁盘", "Disk initialization disabled")
-                                          : bi("未记录初始化选项", "Initialization unrecorded")}
+                          {filteredHosts.map((h) => {
+                            const hostComps = displayInstances.filter(
+                              (i) => !i.external && i.hosts.includes(h.name),
+                            );
+                            return (
+                              <div
+                                key={h.name}
+                                className={`cx-host-card ${focusKey === `host:${h.name}` ? "focused" : ""}`}
+                                data-config-key={`host:${h.name}`}
+                                tabIndex={-1}
+                              >
+                                <div className="cx-host-card-head">
+                                  <div className="cx-host-card-id">
+                                    <span className="cx-host-ico" aria-hidden>
+                                      <IconDesktop />
                                     </span>
-                                  </dd>
-                                </div>
-                                <div>
-                                  <dt>{bi("部署角色", "Assigned roles")}</dt>
-                                  <dd className="cx-roles">
-                                    {instances
-                                      .filter((i) => i.hosts.includes(h.name))
-                                      .map((i) => (
-                                        <button
-                                          key={i.id}
-                                          type="button"
-                                          onClick={() =>
-                                            navigate(`component:${i.id}`)
-                                          }
-                                        >
-                                          <AppGlyph id={i.component} size={17} />
-                                          <span>{i.title}</span>
-                                          <code>
-                                            {Object.entries(i.roles)
-                                              .filter(([, hs]) =>
-                                                hs.includes(h.name),
-                                              )
-                                              .map(
-                                                ([role]) =>
-                                                  i.role_titles?.[role] || role,
-                                              )
-                                              .join(bi("、", ", "))}
-                                          </code>
-                                          <IconRight />
-                                        </button>
-                                      ))}
-                                    {!instances.some((i) =>
-                                      i.hosts.includes(h.name),
-                                    ) && (
-                                      <span className="muted">
-                                        {bi("未承担组件角色", "No component roles assigned")}
-                                      </span>
+                                    <b className="mono">{h.name}</b>
+                                    <code className="cx-host-ip">{h.ip}</code>
+                                    {h.name === controller && (
+                                      <Tag size="small" color="arcoblue">
+                                        {bi("控制节点", "Controller")}
+                                      </Tag>
                                     )}
-                                  </dd>
+                                  </div>
+                                  <CopyValue
+                                    value={h.ip}
+                                    label={bi(`${h.name}地址`, `${h.name} IP`)}
+                                  />
                                 </div>
-                              </dl>
-                            </div>
-                          ))}
+                                <div className="cx-host-card-body">
+                                  <div className="cx-host-kv">
+                                    <span className="cx-host-k">
+                                      {bi("数据盘", "Data Disk")}
+                                    </span>
+                                    <div className="cx-host-v">
+                                      <code className="cx-disk-val">
+                                        {h.disk || bi("未记录", "Unrecorded")}
+                                        {h.partition ? ` · ${h.partition}` : ""}
+                                      </code>
+                                      <span className="cx-host-sub">
+                                        {h.initialize === true
+                                          ? bi("初始化磁盘", "Init enabled")
+                                          : h.initialize === false
+                                            ? bi("不初始化磁盘", "Init disabled")
+                                            : bi("未记录初始化", "Init unrecorded")}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <div className="cx-host-kv">
+                                    <span className="cx-host-k">
+                                      {bi("部署角色", "Assigned Roles")}
+                                    </span>
+                                    <div className="cx-role-chips">
+                                      {hostComps.map((i) => {
+                                        const roleText = Object.entries(i.roles)
+                                          .filter(([, hs]) => hs.includes(h.name))
+                                          .map(
+                                            ([role]) =>
+                                              i.role_titles?.[role] || role,
+                                          )
+                                          .join(bi("、", ", "));
+                                        return (
+                                          <button
+                                            key={i.id}
+                                            type="button"
+                                            className="cx-role-chip"
+                                            onClick={() =>
+                                              navigate(`component:${i.id}`)
+                                            }
+                                          >
+                                            <AppGlyph id={i.component} size={15} />
+                                            <span className="cx-role-chip-name">
+                                              {i.title}
+                                            </span>
+                                            {roleText && (
+                                              <code className="cx-role-chip-val">
+                                                {roleText}
+                                              </code>
+                                            )}
+                                            <IconRight />
+                                          </button>
+                                        );
+                                      })}
+                                      {!hostComps.length && (
+                                        <span className="muted small">
+                                          {bi("未承担组件角色", "No component roles assigned")}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
                       </>
                     ) : (
                       <Empty
                         title={bi("没有机器记录", "No hosts recorded")}
-                        text={bi("这份规格未包含可展示的机器。", "This spec contains no hosts to display.")}
+                        text={bi(
+                          "这份规格未包含可展示的机器。",
+                          "This spec contains no hosts to display.",
+                        )}
                       />
                     ))}
+
+                  {/* Section: Access Endpoints */}
                   {selected === "access" && (
-                    <>
+                    <div className="cx-spec-stack">
                       {routes.length ? (
                         routes.map(({ i, ep, front }) => (
                           <section
                             key={`${i.id}.${ep.name}`}
-                            className={`cx-endpoint ${focusKey === `endpoint:${i.id}.${ep.name}` ? "focused" : ""}`}
+                            className={`cx-spec-card cx-endpoint-card ${focusKey === `endpoint:${i.id}.${ep.name}` ? "focused" : ""}`}
                             data-config-key={`endpoint:${i.id}.${ep.name}`}
                             tabIndex={-1}
                           >
-                            <h3>
-                              <IconLink />
-                              {ep.title || ep.name}
-                              <code>
-                                {i.id}.{ep.name}
-                              </code>
-                            </h3>
-                            <div className="cx-address">
-                              <span>
-                                {front
-                                  ? front.external
-                                    ? bi("外部入口", "External entry")
-                                    : bi("集群入口", "Cluster entry")
-                                  : bi("节点直连", "Direct node")}
+                            <div className="cx-spec-card-head">
+                              <div className="cx-ep-title">
+                                <IconLink />
+                                <h3>{ep.title || ep.name}</h3>
+                                <code className="cx-ep-key">
+                                  {i.id}.{ep.name}
+                                </code>
+                              </div>
+                              <span className="cx-ep-proto mono">
+                                {ep.protocol.toUpperCase()}
                               </span>
-                              <code>
-                                {front
-                                  ? `${front.address}:${front.listen}`
-                                  : bi("通过下方节点地址访问", "Connect via backend addresses below")}
-                              </code>
-                              {front && (
-                                <CopyValue
-                                  value={`${front.address}:${front.listen}`}
-                                  label={bi(`${ep.title}地址`, `${ep.title} endpoint`)}
-                                />
+                            </div>
+                            <div className="cx-ep-body">
+                              <div className="cx-ep-addr-bar">
+                                <span className="cx-ep-badge">
+                                  {front
+                                    ? front.external
+                                      ? bi("外部入口", "External")
+                                      : bi("集群入口", "Cluster")
+                                    : bi("节点直连", "Direct")}
+                                </span>
+                                <code className="cx-ep-addr">
+                                  {front
+                                    ? `${front.address}:${front.listen}`
+                                    : bi(
+                                        "通过下方节点地址访问",
+                                        "Connect via backend addresses below",
+                                      )}
+                                </code>
+                                {front && (
+                                  <CopyValue
+                                    value={`${front.address}:${front.listen}`}
+                                    label={bi(
+                                      `${ep.title}地址`,
+                                      `${ep.title} endpoint`,
+                                    )}
+                                  />
+                                )}
+                              </div>
+                              {(front || ep.health) && (
+                                <div className="cx-ep-meta-chips">
+                                  {front?.resolve_ip && (
+                                    <span className="cx-ep-meta">
+                                      <em>{bi("DNS 解析", "DNS")}</em>
+                                      <code>{front.resolve_ip}</code>
+                                    </span>
+                                  )}
+                                  {front && (
+                                    <span className="cx-ep-meta">
+                                      <em>{bi("转发映射", "Route")}</em>
+                                      <code>
+                                        :{front.listen} → :{ep.port}
+                                      </code>
+                                    </span>
+                                  )}
+                                  {front?.balancer && (
+                                    <span className="cx-ep-meta">
+                                      <em>{bi("均衡器", "Balancer")}</em>
+                                      <code>{front.balancer}</code>
+                                    </span>
+                                  )}
+                                  {ep.health && (
+                                    <span className="cx-ep-meta">
+                                      <em>{bi("健康检查", "Health")}</em>
+                                      <code>
+                                        {ep.health.type.toUpperCase()}
+                                        {ep.health.port ? ` :${ep.health.port}` : ""}
+                                        {ep.health.path || ""}
+                                        {ep.health.status
+                                          ? ` (${ep.health.status})`
+                                          : ""}
+                                      </code>
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                              {ep.note && (
+                                <p className="cx-ep-note">{ep.note}</p>
+                              )}
+                              {(ep.backends || []).length > 0 && (
+                                <div className="cx-ep-backends">
+                                  <div className="cx-ep-backends-label">
+                                    {bi("后端节点", "Backend Nodes")}
+                                  </div>
+                                  <div className="cx-backends">
+                                    {(ep.backends || []).map((b) => (
+                                      <div key={`${b.host}:${b.port}`}>
+                                        <span className="mono cx-be-host">
+                                          {b.host}
+                                        </span>
+                                        <code className="cx-be-addr">
+                                          {b.ip}:{b.port}
+                                        </code>
+                                        <small>
+                                          {i.role_titles?.[b.role] || b.role}
+                                        </small>
+                                        <CopyValue
+                                          value={`${b.ip}:${b.port}`}
+                                          label={bi(
+                                            `${b.host}后端地址`,
+                                            `${b.host} backend`,
+                                          )}
+                                        />
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
                               )}
                             </div>
-                            {front?.resolve_ip && (
-                              <p className="cx-endpoint-note">
-                                {bi("域名对应地址", "DNS resolves to")} <code>{front.resolve_ip}</code> ·{" "}
-                                {front.balancer} · {ep.protocol.toUpperCase()}
-                              </p>
-                            )}
-                            {front && (
-                              <p className="cx-endpoint-note">
-                                {bi("入口监听", "Frontend listen")} <code>{front.listen}</code>
-                                <IconRight /> {bi("后端端口", "Backend port")} <code>
-                                  {ep.port}
-                                </code> · {ep.protocol.toUpperCase()}
-                              </p>
-                            )}
-                            <div className="cx-backends">
-                              {(ep.backends || []).map((b) => (
-                                <div key={`${b.host}:${b.port}`}>
-                                  <span className="mono">{b.host}</span>
-                                  <code>
-                                    {b.ip}:{b.port}
-                                  </code>
-                                  <small>
-                                    {i.role_titles?.[b.role] || b.role}
-                                  </small>
-                                  <CopyValue
-                                    value={`${b.ip}:${b.port}`}
-                                    label={bi(`${b.host}后端地址`, `${b.host} backend`)}
-                                  />
-                                </div>
-                              ))}
-                            </div>
-                            {ep.health && (
-                              <p className="cx-endpoint-note">
-                                {bi("健康检查", "Health check")}{" "}
-                                <code>
-                                  {ep.health.type.toUpperCase()}
-                                  {ep.health.port ? ` :${ep.health.port}` : ""}
-                                  {ep.health.path || ""}
-                                </code>
-                                {ep.health.status
-                                  ? bi(` · 预期 ${ep.health.status}`, ` · expect ${ep.health.status}`)
-                                  : ""}
-                              </p>
-                            )}
-                            {ep.note && (
-                              <p className="cx-endpoint-note">{ep.note}</p>
-                            )}
                           </section>
                         ))
                       ) : (
                         <Empty
                           title={bi("未声明访问端点", "No endpoints declared")}
-                          text={bi("这份交付未保存访问端点，可在组件参数中查看端口和地址。", "No endpoints saved in this delivery; check component parameters for ports and addresses.")}
+                          text={bi(
+                            "这份交付未保存访问端点，可在组件参数中查看端口和地址。",
+                            "No endpoints saved in this delivery; check component parameters for ports and addresses.",
+                          )}
                         />
                       )}
                       {portRows.length > 0 && (
-                        <div className="cx-param-group">
-                          <h3>{bi("组件监听端口", "Component Listen Ports")}</h3>
-                          {portRows.map(({ i, port }, index) => (
-                            <div
-                              className="cx-port"
-                              key={`${i.id}.${port.Name}.${index}`}
-                            >
-                              <span>
-                                <b>{i.title}</b>
-                                <code>{port.Name}</code>
+                        <div className="cx-spec-card">
+                          <div className="cx-spec-card-head">
+                            <h3>
+                              {bi("组件监听端口", "Component Listen Ports")}
+                              <span className="cx-card-cnt num">
+                                {portRows.length}
                               </span>
-                              <code>
-                                {port.Port}/{port.Proto.toUpperCase()}
-                              </code>
-                              <small>{port.Hosts.join(bi("、", ", "))}</small>
-                            </div>
-                          ))}
+                            </h3>
+                          </div>
+                          <div className="cx-port-list">
+                            {portRows.map(({ i, port }, index) => (
+                              <div
+                                className="cx-port"
+                                key={`${i.id}.${port.Name}.${index}`}
+                              >
+                                <span className="cx-port-comp">
+                                  <AppGlyph id={i.component} size={15} />
+                                  <b>{i.title}</b>
+                                  <code>{port.Name}</code>
+                                </span>
+                                <code className="cx-port-num">
+                                  {port.Port}/{port.Proto.toUpperCase()}
+                                </code>
+                                <small>{port.Hosts.join(bi("、", ", "))}</small>
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       )}
-                    </>
+                    </div>
                   )}
+
+                  {/* Section: Component Parameters (Redesigned Clean Structured Inspector) */}
                   {instance && (
                     <>
+                      {/* Component Summary Hero Bar */}
+                      <div className="cx-comp-hero">
+                        <div className="cx-comp-hero-main">
+                          <div className="cx-comp-hero-top">
+                            <span className="cx-comp-hero-ico" aria-hidden>
+                              <AppGlyph id={instance.component} size={22} />
+                            </span>
+                            <h2>
+                              {instance.external
+                                ? bi("外部负载均衡", "External LB")
+                                : instance.title}
+                            </h2>
+                            {instance.version && (
+                              <span className="cx-ver-pill mono">
+                                {instance.version}
+                              </span>
+                            )}
+                            <code className="cx-id-pill">{instance.id}</code>
+                            {instance.embeddedFrom && (
+                              <Tooltip
+                                mini
+                                content={bi(
+                                  "此集群采用旧版一体化交付（Patroni 随 PostgreSQL 同包部署）；已将 Patroni 高可用与复制策略参数拆至本页独立检视，原始规格文件保持不变。",
+                                  "Legacy bundled delivery (Patroni deployed inside PostgreSQL); HA & replication parameters are shown here for consistent inspection while raw specs remain unchanged.",
+                                )}
+                              >
+                                <span className="cx-origin-badge is-embedded">
+                                  {bi("内置随 PG 部署", "Bundled with PG")}
+                                </span>
+                              </Tooltip>
+                            )}
+                            {!instance.embeddedFrom &&
+                              instance.component === "patroni" &&
+                              instance.partitionPeerId && (
+                                <span className="cx-origin-badge is-split">
+                                  {bi("独立伴生实例", "Companion Instance")}
+                                </span>
+                              )}
+                            {instance.external && (
+                              <span className="cx-origin-badge">
+                                {bi("外部托管", "Customer-managed")}
+                              </span>
+                            )}
+                          </div>
+                          {!instance.external && (
+                            <div className="cx-comp-hero-meta">
+                              <span className="cx-comp-host-cnt">
+                                {instance.hosts.length === 1
+                                  ? bi("1 台机器", "1 host")
+                                  : bi(
+                                      `${instance.hosts.length} 台机器`,
+                                      `${instance.hosts.length} hosts`,
+                                    )}
+                              </span>
+                              {Object.entries(instance.roles)
+                                .filter(([, hs]) => hs.length)
+                                .map(([role, hs]) => (
+                                  <span key={role} className="cx-place-chip">
+                                    <b>{instance.role_titles?.[role] || role}</b>
+                                    <code>{hs.join(bi("、", ", "))}</code>
+                                  </span>
+                                ))}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="cx-comp-hero-acts">
+                          {canFilterRows && (
+                            <div
+                              className="cx-scope-pills"
+                              role="group"
+                              aria-label={bi("参数筛选", "Parameter filter")}
+                            >
+                              <button
+                                type="button"
+                                className={`cx-filter-pill ${paramFilter === "all" ? "on" : ""}`}
+                                onClick={() => {
+                                  setParamFilter("all");
+                                  setGroupFilter("all");
+                                }}
+                              >
+                                {bi("全部", "All")}{" "}
+                                <em>{allInstanceRows.length}</em>
+                              </button>
+                              {changedCount > 0 && (
+                                <button
+                                  type="button"
+                                  className={`cx-filter-pill is-chg ${paramFilter === "changed" ? "on" : ""}`}
+                                  onClick={() => {
+                                    setParamFilter("changed");
+                                    setGroupFilter("all");
+                                  }}
+                                >
+                                  {bi("生产变更", "Changed")}{" "}
+                                  <em>{changedCount}</em>
+                                </button>
+                              )}
+                              {canFilterSpecified && (
+                                <button
+                                  type="button"
+                                  className={`cx-filter-pill ${paramFilter === "specified" ? "on" : ""}`}
+                                  onClick={() => {
+                                    setParamFilter("specified");
+                                    setGroupFilter("all");
+                                  }}
+                                >
+                                  {bi("已指定", "Specified")}{" "}
+                                  <em>{specifiedCount}</em>
+                                </button>
+                              )}
+                            </div>
+                          )}
+                          <CopyValue
+                            value={effectiveCopyPayload || instance.params}
+                            label={bi(
+                              `${instance.title}当前参数`,
+                              `${instance.title} effective parameters`,
+                            )}
+                          />
+                        </div>
+                      </div>
+
                       {schemaError && (
                         <div className="cx-notice">
                           <span>
@@ -1338,237 +1840,364 @@ function ConfigRecord({
                           </Button>
                         </div>
                       )}
-                      {!instance.external && (
-                        <div className="cx-placement">
-                          {Object.entries(instance.roles)
-                            .filter(([, hs]) => hs.length)
-                            .map(([role, hs]) => (
-                              <span key={role}>
-                                <b>{instance.role_titles?.[role] || role}</b>
-                                <code>{hs.join(bi("、", ", "))}</code>
-                              </span>
-                            ))}
+
+                      {/* Quick Group Filter Strip when component has multiple parameter groups */}
+                      {allParamGroups.length > 1 && (
+                        <div
+                          className="cx-group-bar"
+                          role="group"
+                          aria-label={bi("参数分组筛选", "Filter parameter groups")}
+                        >
+                          <button
+                            type="button"
+                            className={`cx-grp-pill ${activeGroupFilter === "all" ? "on" : ""}`}
+                            onClick={() => setGroupFilter("all")}
+                          >
+                            {bi("全部分组", "All Groups")}{" "}
+                            <em className="num">{scopeFilteredRows.length}</em>
+                          </button>
+                          {allParamGroups.map((g) => (
+                            <button
+                              key={g.name}
+                              type="button"
+                              className={`cx-grp-pill${g.isRuntime ? " is-rt" : ""}${activeGroupFilter === g.name ? " on" : ""}`}
+                              onClick={() =>
+                                setGroupFilter((prev) =>
+                                  prev === g.name ? "all" : g.name,
+                                )
+                              }
+                            >
+                              {g.isRuntime && (
+                                <i className="cx-grp-dot" aria-hidden />
+                              )}
+                              <span>{g.name}</span>
+                              <em className="num">{g.count}</em>
+                            </button>
+                          ))}
                         </div>
                       )}
-                      <div className="cx-param-groups">
-                        {paramGroups.map((group) => (
-                          <div
-                            className={`cx-param-group${group === runtimeGroupLabel ? " is-runtime-group" : ""}`}
-                            key={group}
-                          >
-                            <h3>
-                              {group}
-                              <span>
-                                {
-                                  visibleInstanceRows.filter(
-                                    (r) => r.group === group,
-                                  ).length
-                                }
-                              </span>
-                            </h3>
-                            {visibleInstanceRows
-                              .filter((r) => r.group === group)
-                              .map((r) => {
-                                const secretKey = `${instance.id}:${r.key}`;
-                                const secret = isSecretRow(r);
-                                const revealed = Boolean(
-                                  shownSecrets[secretKey],
-                                );
-                                const ef = r.applied;
-                                const oldDiffVal = ef
-                                  ? ef.before ||
-                                    (!r.runtimeAdded ? display(r.value) : "")
-                                  : "";
-                                return (
-                                  <div
-                                    key={r.key}
-                                    className={`cx-param ${r.active ? "" : "inactive"} ${ef ? "is-changed" : ""} ${focusKey === r.key ? "focused" : ""}`}
-                                    data-config-key={r.key}
-                                    tabIndex={-1}
-                                  >
-                                    <div className="cx-param-name">
-                                      <Tooltip
-                                        content={
-                                          r.def?.hint ||
-                                          (ef
-                                            ? bi(
-                                                `来自变更《${ef.source_title}》`,
-                                                `From change "${ef.source_title}"`,
-                                              )
-                                            : r.key)
-                                        }
-                                        mini
-                                      >
-                                        <b>{r.label}</b>
-                                      </Tooltip>
-                                      <code>{r.key}</code>
-                                    </div>
-                                    <div
-                                      className={`cx-param-value${ef ? " is-diff" : ""}`}
-                                    >
-                                      {ef ? (
-                                        <>
-                                          {oldDiffVal && (
-                                            <>
-                                              <del className="cx-val-old mono">
-                                                {oldDiffVal}
-                                              </del>
-                                              <span
-                                                className="cx-val-arrow"
-                                                aria-hidden
-                                              >
-                                                →
-                                              </span>
-                                            </>
-                                          )}
-                                          <code className="cx-val-new">
-                                            {ef.after}
-                                          </code>
-                                        </>
-                                      ) : typeof r.value === "boolean" ? (
-                                        <span
-                                          className={`cx-bool ${r.value ? "yes" : ""}`}
-                                        >
-                                          <i />
-                                          {display(r.value)}
-                                        </span>
-                                      ) : secret ? (
-                                        <>
-                                          <code>
-                                            {revealed
-                                              ? display(r.value)
-                                              : "••••••••"}
-                                          </code>
-                                          <Tooltip
-                                            content={
-                                              revealed
-                                                ? bi(`隐藏${r.label}`, `Hide ${r.label}`)
-                                                : bi(`显示${r.label}`, `Show ${r.label}`)
-                                            }
-                                            mini
-                                          >
-                                            <button
-                                              type="button"
-                                              className="cx-secret-btn"
-                                              aria-label={
-                                                revealed
-                                                  ? bi(`隐藏${r.label}`, `Hide ${r.label}`)
-                                                  : bi(`显示${r.label}`, `Show ${r.label}`)
-                                              }
-                                              onClick={() =>
-                                                setShownSecrets((prev) => ({
-                                                  ...prev,
-                                                  [secretKey]: !prev[secretKey],
-                                                }))
-                                              }
-                                            >
-                                              {revealed ? (
-                                                <IconEyeInvisible />
-                                              ) : (
-                                                <IconEye />
-                                              )}
-                                            </button>
-                                          </Tooltip>
-                                        </>
-                                      ) : (
-                                        <code>{display(r.value)}</code>
-                                      )}
-                                      {!ef && r.def?.unit && r.value !== "" && (
-                                        <small>{r.def.unit}</small>
-                                      )}
-                                    </div>
-                                    <span className="cx-param-origin">
-                                      {ef ? (
-                                        <Tooltip
-                                          mini
-                                          content={bi(
-                                            `由《${ef.source_title}》于 ${ago(ef.applied_at)} 生效${ef.update_count > 1 ? `（累计调整 ${ef.update_count} 次，当前为最新值）` : ""} · 点击查看变更历史`,
-                                            `Applied via "${ef.source_title}" ${ago(ef.applied_at)}${ef.update_count > 1 ? ` (${ef.update_count} updates merged)` : ""} · Click for history`,
-                                          )}
-                                        >
-                                          <button
-                                            type="button"
-                                            className="cx-origin-chg"
-                                            onClick={() => setHistoryOpen(true)}
-                                          >
-                                            <IconCheck />
-                                            <span>{bi("生产变更", "Changed")}</span>
-                                            {ef.update_count > 1 && (
-                                              <em className="num">×{ef.update_count}</em>
-                                            )}
-                                          </button>
-                                        </Tooltip>
-                                      ) : !r.active ? (
-                                        bi("未启用", "Inactive")
-                                      ) : !plan ? (
-                                        bi("提交值", "Submitted")
-                                      ) : r.specified ? (
-                                        bi("已指定", "Specified")
-                                      ) : (
-                                        bi("生成时补全", "Defaulted")
-                                      )}
+
+                      {/* Structured Single-Column Bordered Specification Cards */}
+                      {visibleGroups.length > 0 ? (
+                        <div className="cx-spec-stack">
+                          {visibleGroups.map((grp) => {
+                            const groupRows = visibleInstanceRows.filter(
+                              (r) => r.group === grp.name,
+                            );
+                            const isRt = grp.isRuntime;
+                            return (
+                              <div
+                                className={`cx-spec-card${isRt ? " is-runtime-card" : ""}`}
+                                key={grp.name}
+                              >
+                                <div className="cx-spec-card-head">
+                                  <h3>
+                                    {isRt && (
+                                      <span className="cx-chg-dot" aria-hidden />
+                                    )}
+                                    {grp.name}
+                                    <span className="cx-card-cnt num">
+                                      {groupRows.length}
                                     </span>
-                                    <CopyValue
-                                      value={ef ? ef.after : r.value}
-                                      label={r.label}
-                                    />
-                                  </div>
-                                );
-                              })}
-                          </div>
-                        ))}
-                      </div>
-                      {!paramGroups.length && (
+                                  </h3>
+                                  {isRt && appliedList.length > 0 && (
+                                    <button
+                                      type="button"
+                                      className="cx-card-action"
+                                      onClick={() => setHistoryOpen(true)}
+                                    >
+                                      {bi("查看变更记录", "Change History")}{" "}
+                                      <IconRight />
+                                    </button>
+                                  )}
+                                </div>
+                                <div className="cx-spec-rows">
+                                  {groupRows.map((r) => {
+                                    const secretKey = `${instance.id}:${r.key}`;
+                                    const secret = isSecretRow(r);
+                                    const revealed = Boolean(
+                                      shownSecrets[secretKey],
+                                    );
+                                    const ef = r.applied;
+                                    const oldDiffVal = ef
+                                      ? ef.before ||
+                                        (!r.runtimeAdded
+                                          ? display(r.value)
+                                          : "")
+                                      : "";
+                                    const showDistinctKey =
+                                      r.label.toLowerCase() !==
+                                      r.key.toLowerCase();
+                                    const hasHint = Boolean(r.def?.hint);
+                                    return (
+                                      <div
+                                        key={r.key}
+                                        className={`cx-spec-row${!r.active ? " is-inactive" : ""}${ef ? " is-changed" : ""}${focusKey === r.key ? " focused" : ""}`}
+                                        data-config-key={r.key}
+                                        tabIndex={-1}
+                                      >
+                                        <div className="cx-spec-k">
+                                          <div className="cx-spec-label-line">
+                                            <b>{r.label}</b>
+                                            {hasHint && (
+                                              <Tooltip
+                                                content={r.def!.hint}
+                                                mini
+                                              >
+                                                <span
+                                                  className="cx-hint-ico"
+                                                  tabIndex={0}
+                                                  aria-label={r.def!.hint}
+                                                >
+                                                  <IconInfoCircle />
+                                                </span>
+                                              </Tooltip>
+                                            )}
+                                          </div>
+                                          {showDistinctKey && (
+                                            <code className="cx-spec-key">
+                                              {r.key}
+                                            </code>
+                                          )}
+                                        </div>
+
+                                        <div
+                                          className={`cx-spec-v${ef ? " is-diff" : ""}`}
+                                        >
+                                          {ef ? (
+                                            <>
+                                              {oldDiffVal && (
+                                                <>
+                                                  <del className="cx-val-old mono">
+                                                    {oldDiffVal}
+                                                  </del>
+                                                  <span
+                                                    className="cx-val-arrow"
+                                                    aria-hidden
+                                                  >
+                                                    →
+                                                  </span>
+                                                </>
+                                              )}
+                                              <code className="cx-val-new">
+                                                {ef.after}
+                                              </code>
+                                            </>
+                                          ) : typeof r.value === "boolean" ? (
+                                            <span
+                                              className={`cx-bool-pill ${r.value ? "yes" : ""}`}
+                                            >
+                                              <i />
+                                              {display(r.value)}
+                                            </span>
+                                          ) : secret ? (
+                                            <span className="cx-secret-wrap">
+                                              <code className="cx-val-code">
+                                                {revealed
+                                                  ? display(r.value)
+                                                  : "••••••••"}
+                                              </code>
+                                              <Tooltip
+                                                content={
+                                                  revealed
+                                                    ? bi(
+                                                        `隐藏${r.label}`,
+                                                        `Hide ${r.label}`,
+                                                      )
+                                                    : bi(
+                                                        `显示${r.label}`,
+                                                        `Show ${r.label}`,
+                                                      )
+                                                }
+                                                mini
+                                              >
+                                                <button
+                                                  type="button"
+                                                  className="cx-secret-btn"
+                                                  aria-label={
+                                                    revealed
+                                                      ? bi(
+                                                          `隐藏${r.label}`,
+                                                          `Hide ${r.label}`,
+                                                        )
+                                                      : bi(
+                                                          `显示${r.label}`,
+                                                          `Show ${r.label}`,
+                                                        )
+                                                  }
+                                                  onClick={() =>
+                                                    setShownSecrets((prev) => ({
+                                                      ...prev,
+                                                      [secretKey]:
+                                                        !prev[secretKey],
+                                                    }))
+                                                  }
+                                                >
+                                                  {revealed ? (
+                                                    <IconEyeInvisible />
+                                                  ) : (
+                                                    <IconEye />
+                                                  )}
+                                                </button>
+                                              </Tooltip>
+                                            </span>
+                                          ) : (
+                                            <span className="cx-val-plain">
+                                              <code className="cx-val-code">
+                                                {display(r.value)}
+                                              </code>
+                                              {r.def?.unit && r.value !== "" && (
+                                                <small className="cx-val-unit">
+                                                  {r.def.unit}
+                                                </small>
+                                              )}
+                                            </span>
+                                          )}
+                                        </div>
+
+                                        <div className="cx-spec-meta">
+                                          {ef ? (
+                                            <Tooltip
+                                              mini
+                                              content={bi(
+                                                `由《${ef.source_title}》于 ${ago(ef.applied_at)} 生效${ef.update_count > 1 ? `（累计调整 ${ef.update_count} 次，当前为最新值）` : ""} · 点击查看变更历史`,
+                                                `Applied via "${ef.source_title}" ${ago(ef.applied_at)}${ef.update_count > 1 ? ` (${ef.update_count} updates merged)` : ""} · Click for history`,
+                                              )}
+                                            >
+                                              <button
+                                                type="button"
+                                                className="cx-origin-pill is-chg"
+                                                onClick={() =>
+                                                  setHistoryOpen(true)
+                                                }
+                                              >
+                                                <IconCheck />
+                                                <span>
+                                                  {bi("生产变更", "Changed")}
+                                                </span>
+                                                {ef.update_count > 1 && (
+                                                  <em className="num">
+                                                    ×{ef.update_count}
+                                                  </em>
+                                                )}
+                                              </button>
+                                            </Tooltip>
+                                          ) : !r.active ? (
+                                            <span className="cx-origin-pill is-off">
+                                              {bi("未启用", "Inactive")}
+                                            </span>
+                                          ) : !plan ? (
+                                            <span className="cx-origin-pill is-spec">
+                                              {bi("提交值", "Submitted")}
+                                            </span>
+                                          ) : r.specified ? (
+                                            <span className="cx-origin-pill is-spec">
+                                              {bi("已指定", "Specified")}
+                                            </span>
+                                          ) : (
+                                            <span className="cx-origin-default">
+                                              {bi("默认", "Default")}
+                                            </span>
+                                          )}
+                                          <CopyValue
+                                            value={ef ? ef.after : r.value}
+                                            label={r.label}
+                                          />
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            );
+                          })}
+
+                          {/* Database Extensions (if any) */}
+                          {(
+                            dep?.instances.find(
+                              (sp) => sp.id === (instance.embeddedFrom || instance.id),
+                            )?.addons || []
+                          ).length > 0 &&
+                            instance.component !== "patroni" && (
+                              <div className="cx-spec-card">
+                                <div className="cx-spec-card-head">
+                                  <h3>
+                                    {bi("数据库扩展", "Database Extensions")}
+                                  </h3>
+                                </div>
+                                <div className="cx-spec-rows">
+                                  {dep?.instances
+                                    .find(
+                                      (sp) =>
+                                        sp.id ===
+                                        (instance.embeddedFrom || instance.id),
+                                    )
+                                    ?.addons?.map((a) => (
+                                      <div className="cx-addon" key={a.id}>
+                                        <code>{a.id}</code>
+                                        <span>
+                                          {a.databases?.join(bi("、", ", ")) ||
+                                            bi(
+                                              "按规格指定的数据库",
+                                              "Databases from spec",
+                                            )}
+                                        </span>
+                                        {a.params && (
+                                          <code>{JSON.stringify(a.params)}</code>
+                                        )}
+                                      </div>
+                                    ))}
+                                </div>
+                              </div>
+                            )}
+
+                          {/* Component Dependencies (if any) */}
+                          {instance.uses &&
+                            Object.keys(instance.uses).length > 0 && (
+                              <div className="cx-spec-card">
+                                <div className="cx-spec-card-head">
+                                  <h3>
+                                    {bi("组件依赖", "Component Dependencies")}
+                                  </h3>
+                                </div>
+                                <div className="cx-spec-rows">
+                                  {Object.entries(instance.uses).map(
+                                    ([cap, use]) => (
+                                      <button
+                                        key={cap}
+                                        type="button"
+                                        className="cx-dependency"
+                                        onClick={() =>
+                                          navigate(`component:${use.instance}`)
+                                        }
+                                      >
+                                        <AppGlyph id={use.component} size={16} />
+                                        <span className="cx-dep-cap">{cap}</span>
+                                        <code>{use.instance}</code>
+                                        <span className="muted">
+                                          {use.component}
+                                        </span>
+                                        <IconRight />
+                                      </button>
+                                    ),
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                        </div>
+                      ) : (
                         <Empty
-                          title={bi("没有参数记录", "No parameters recorded")}
-                          text={bi("这份记录未保存组件参数。", "No component parameters saved in this record.")}
+                          title={bi("没有匹配的参数", "No matching parameters")}
+                          text={bi(
+                            "可以切换上方的分组或筛选条件查看全部参数。",
+                            "Switch group or filter pills above to inspect all parameters.",
+                          )}
                         />
                       )}
-                      {(
-                        dep?.instances.find((sp) => sp.id === instance.id)
-                          ?.addons || []
-                      ).length > 0 && (
-                        <div className="cx-param-group">
-                          <h3>{bi("数据库扩展", "Database Extensions")}</h3>
-                          {dep?.instances
-                            .find((sp) => sp.id === instance.id)
-                            ?.addons?.map((a) => (
-                              <div className="cx-addon" key={a.id}>
-                                <code>{a.id}</code>
-                                <span>
-                                  {a.databases?.join(bi("、", ", ")) ||
-                                    bi("按规格指定的数据库", "Databases from spec")}
-                                </span>
-                                {a.params && (
-                                  <code>{JSON.stringify(a.params)}</code>
-                                )}
-                              </div>
-                            ))}
-                        </div>
-                      )}
-                      {instance.uses &&
-                        Object.keys(instance.uses).length > 0 && (
-                          <div className="cx-param-group">
-                            <h3>{bi("组件依赖", "Component Dependencies")}</h3>
-                            {Object.entries(instance.uses).map(([cap, use]) => (
-                              <button
-                                key={cap}
-                                type="button"
-                                className="cx-dependency"
-                                onClick={() =>
-                                  navigate(`component:${use.instance}`)
-                                }
-                              >
-                                <span>{cap}</span>
-                                <code>{use.instance}</code>
-                                <span className="muted">{use.component}</span>
-                                <IconRight />
-                              </button>
-                            ))}
-                          </div>
-                        )}
                     </>
                   )}
+
+                  {/* Section: Raw Spec */}
                   {selected === "spec" && (
                     <>
                       <div className="cx-raw-tools">
@@ -1580,8 +2209,14 @@ function ConfigRecord({
                             setRawCopied(false);
                           }}
                           options={[
-                            { label: bi("提交规格 · YAML", "Submitted · YAML"), value: "yaml" },
-                            { label: bi("生成配置 · JSON", "Generated · JSON"), value: "json" },
+                            {
+                              label: bi("提交规格 · YAML", "Submitted · YAML"),
+                              value: "yaml",
+                            },
+                            {
+                              label: bi("生成配置 · JSON", "Generated · JSON"),
+                              value: "json",
+                            },
                           ]}
                         />
                         {(rawView === "yaml" ? yaml : generated) && (
@@ -1600,7 +2235,9 @@ function ConfigRecord({
                               );
                             }}
                           >
-                            {rawCopied ? bi("已复制", "Copied") : bi("复制", "Copy")}
+                            {rawCopied
+                              ? bi("已复制", "Copied")
+                              : bi("复制", "Copy")}
                           </Button>
                         )}
                         {specFile && can("delivery.download") && (
@@ -1632,7 +2269,10 @@ function ConfigRecord({
                               ? bi("未保存提交规格", "No submitted spec saved")
                               : bi("尚无生成配置", "No generated config yet")
                           }
-                          text={bi("可以切换查看另一种记录，或打开交付检查生成结果。", "Switch formats above or open the delivery to inspect generation logs.")}
+                          text={bi(
+                            "可以切换查看另一种记录，或打开交付检查生成结果。",
+                            "Switch formats above or open the delivery to inspect generation logs.",
+                          )}
                         />
                       )}
                     </>
@@ -1641,9 +2281,21 @@ function ConfigRecord({
               )}
             </div>
           </div>
+
           <div className="cx-footer">
             <span>
               <IconFile /> {titleOf(p)} <code>#{p.id.slice(0, 8)}</code>
+              {instance && (
+                <>
+                  <span className="cx-meta-sep">·</span>
+                  <span>
+                    {bi(
+                      "未标注来源的参数为生成时默认补全",
+                      "Unlabeled values are defaulted at plan generation",
+                    )}
+                  </span>
+                </>
+              )}
             </span>
             {source && source !== c.current && c.current && (
               <button
@@ -1653,12 +2305,14 @@ function ConfigRecord({
                   go({ name: "deliveries", id: c.id, tab: "config", section })
                 }
               >
-                <IconArrowLeft /> {bi("返回当前配置", "Back to current config")}
+                <IconArrowLeft />{" "}
+                {bi("返回当前配置", "Back to current config")}
               </button>
             )}
           </div>
         </>
       )}
+
       <Drawer
         visible={historyOpen}
         onCancel={() => setHistoryOpen(false)}
@@ -1715,7 +2369,8 @@ function ConfigRecord({
                   <div className="cx-hist-title-col">
                     <b>{rh.title}</b>
                     <small className="num">
-                      {rh.applied_by || rh.owner} · {ago(rh.applied_at || rh.updated_at)}
+                      {rh.applied_by || rh.owner} ·{" "}
+                      {ago(rh.applied_at || rh.updated_at)}
                       {changes.length > 0 &&
                         ` · ${bi(`${changes.length} 项配置`, `${changes.length} change(s)`)}`}
                     </small>
@@ -1745,8 +2400,12 @@ function ConfigRecord({
                               <span className="cx-hist-v">
                                 {ch.before && (
                                   <>
-                                    <del className="cx-val-old mono">{ch.before}</del>
-                                    <span className="cx-val-arrow" aria-hidden>→</span>
+                                    <del className="cx-val-old mono">
+                                      {ch.before}
+                                    </del>
+                                    <span className="cx-val-arrow" aria-hidden>
+                                      →
+                                    </span>
                                   </>
                                 )}
                                 <code className="cx-val-new">{ch.after}</code>
@@ -1808,7 +2467,8 @@ function ConfigRecord({
                 go({ name: "deliveries", id: c.id, tab: "rehearsal" });
               }}
             >
-              {bi("前往变更演练工作台", "Go to Rehearsal Workbench")} <IconRight />
+              {bi("前往变更演练工作台", "Go to Rehearsal Workbench")}{" "}
+              <IconRight />
             </Button>
           </div>
         </div>

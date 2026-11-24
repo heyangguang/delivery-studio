@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.272-dev"
+	version            = "1.0.273-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,22 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.273-dev",
+		Date:    "2026-11-24",
+		Title:   "重构集群「配置」页视觉结构并统一新旧 PostgreSQL 集群的 Patroni 配置视图",
+		TitleEn: "Redesign Cluster Configuration UI with structured spec cards and unified Patroni view",
+		Highlights: []string{
+			"为旧版一体化交付的 PostgreSQL+Patroni 集群自动提取独立 Patroni 视图（标注「内置随 PG 部署」），同时在新版拆分交付中按职责分离 PostgreSQL 与 Patroni 参数，彻底消除 62 项全量重复展示并统一导航排序",
+			"将原两列参差瀑布布局升级为单列带框规格卡片表，左对齐参数值并提供充裕宽度展示长规则与行内 Diff，新增顶部分组快捷筛选胶囊与组件概览头部",
+			"消除满屏重复的「生成时补全」视觉噪音（仅高亮生产变更 / 已指定 / 未启用，默认项悬停轻显）并为 pg_hba、logging_* 等运行期变更参数补全中文标签避免名称重复，同步升级机器与角色及访问入口卡片布局",
+		},
+		HighlightsEn: []string{
+			"Unified Patroni configuration tabs across legacy bundled and split PostgreSQL deliveries, cleanly partitioning Patroni HA params from PostgreSQL DB params to eliminate 62-item duplication and normalize tab ordering",
+			"Replaced ragged 2-column parameter lists with full-width bordered specification cards, left-aligned values with generous room for inline diffs, quick group filter pills, and structured component hero cards",
+			"Removed repetitive Defaulted label clutter, added bilingual labels for runtime params (pg_hba, logging_*), and upgraded Hosts & Roles and Access Endpoints into clean bordered cards",
+		},
+	},
 	{
 		Version: "1.0.272-dev",
 		Date:    "2026-11-24",

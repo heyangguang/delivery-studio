@@ -203,14 +203,13 @@ body[arco-theme="dark"] .fc-orb {
 .fc-dot {
   width: 7px;
   height: 7px;
+  flex: none;
   border-radius: 50%;
-  background: var(--ai-rb);
-  background-size: 300% 100%;
+  background: var(--kyndryl);
+  box-shadow: 0 0 0 3px var(--kyndryl-soft);
 }
 .fc-dot.live {
-  animation:
-    ai-flow 2s linear infinite,
-    fc-pulse 1.4s ease-in-out infinite;
+  animation: fc-pulse 1.4s ease-in-out infinite;
 }
 .fc-meta {
   flex: 1;
@@ -446,28 +445,32 @@ body[arco-theme="dark"] .fc-orb {
 }
 
 /* ---- the marks on the form ---- */
-/* a field the assistant changed, until the change is confirmed */
+/* a field the assistant changed: precision 2.5px Leica Warm Red vertical edge bar (always optically aligned) */
 [data-ai][data-ai-on] {
   position: relative;
 }
 [data-ai][data-ai-on]::before {
   content: "";
   position: absolute;
-  top: 10px;
-  left: -10px;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--ai-rb);
-  background-size: 300% 100%;
-  box-shadow: 0 0 0 3px rgba(155, 114, 242, 0.14);
+  top: 2px;
+  bottom: 2px;
+  left: -12px;
+  width: 2.5px;
+  border-radius: 99px;
+  background: var(--kyndryl);
+  box-shadow: 0 0 8px rgba(255, 70, 45, 0.24);
   pointer-events: none;
 }
 .host-row[data-ai-on] {
   border-radius: var(--r-sm);
-  background: linear-gradient(90deg, var(--brand-soft), transparent 70%);
+  background: linear-gradient(90deg, var(--kyndryl-soft), transparent 65%);
 }
-/* the moment it is written: a band of the rainbow passes over the field, then it settles */
+.host-row[data-ai-on]::before {
+  left: 0;
+  top: 4px;
+  bottom: 4px;
+}
+/* the moment it is written: crisp Leica-red + sapphire optical sweep, then settles cleanly */
 [data-ai][data-ai-flash] {
   position: relative;
 }
@@ -480,13 +483,12 @@ body[arco-theme="dark"] .fc-orb {
   background: linear-gradient(
     100deg,
     transparent 0%,
-    rgba(66, 133, 244, 0.16) 30%,
-    rgba(155, 114, 242, 0.2) 45%,
-    rgba(234, 67, 53, 0.14) 60%,
-    transparent 80%
+    rgba(255, 70, 45, 0.12) 32%,
+    rgba(66, 133, 244, 0.14) 54%,
+    transparent 82%
   );
   background-size: 250% 100%;
-  box-shadow: 0 0 0 1px rgba(155, 114, 242, 0.25);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--kyndryl) 22%, transparent);
   pointer-events: none;
   animation: fc-sweep 1.2s var(--ease-out) forwards;
 }
@@ -503,15 +505,15 @@ body[arco-theme="dark"] .fc-orb {
     background-position: -50% 0;
   }
 }
-/* the steps of the form the assistant touched */
+/* the steps of the form the assistant touched: crisp Leica red status dot */
 .fc-navdot {
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
+  flex: none;
   margin-left: auto;
   border-radius: 50%;
-  background: var(--ai-rb);
-  background-size: 300% 100%;
-  animation: ai-flow 6s linear infinite;
+  background: var(--kyndryl);
+  box-shadow: 0 0 0 3px var(--kyndryl-soft);
 }
 
 /* the "AI" marker that travels to each field it writes */

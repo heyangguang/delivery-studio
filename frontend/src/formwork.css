@@ -325,79 +325,156 @@
   font-style: normal;
 }
 
-/* ---- the fill as it comes in ---- */
+/* ---- the fill as it comes in: Swiss Leica × Gemini auto-flowing telemetry card ---- */
 .fw-run {
+  --ai-rim-op: 88%;
   position: relative;
+  isolation: isolate;
   margin: 4px 0 20px 38px;
-  padding: 14px 16px 12px;
-  background: var(--surface);
+  padding: 15px 16px 13px;
+  background: none;
+  border: 1px solid transparent;
   border-radius: 14px;
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--ai-card-shadow);
   animation: fc-in 0.35s var(--ease-out) backwards;
 }
-.fw-run::before {
+.fw-run::before,
+.fw-run::after {
   content: "";
   position: absolute;
-  inset: 0;
-  padding: 1px;
   border-radius: inherit;
-  background: var(--ai-rb);
-  background-size: 300% 100%;
-  animation: ai-flow 6s linear infinite;
-  -webkit-mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
   pointer-events: none;
+}
+.fw-run::before {
+  inset: -1px;
+  z-index: -1;
+  border: 1.5px solid transparent;
+  background:
+    linear-gradient(180deg, var(--ai-card-bg-top), var(--ai-card-bg-bot)) padding-box,
+    conic-gradient(
+      from var(--ai-angle) at 50% 50%,
+      transparent 0deg,
+      color-mix(in srgb, #ff462d var(--ai-rim-op), transparent) 22deg,
+      color-mix(in srgb, #ffaa1d var(--ai-rim-op), transparent) 52deg,
+      color-mix(in srgb, #4285f4 var(--ai-rim-op), transparent) 88deg,
+      color-mix(in srgb, #22d3ee var(--ai-rim-op), transparent) 118deg,
+      transparent 150deg,
+      transparent 205deg,
+      color-mix(in srgb, #8b5cf6 var(--ai-rim-op), transparent) 238deg,
+      color-mix(in srgb, #38bdf8 var(--ai-rim-op), transparent) 272deg,
+      color-mix(in srgb, #ff5a42 var(--ai-rim-op), transparent) 308deg,
+      transparent 340deg,
+      transparent 360deg
+    ) border-box,
+    linear-gradient(var(--ai-border-base), var(--ai-border-base)) border-box;
+  animation: ai-orbit 4.6s linear infinite;
+}
+.fw-run::after {
+  inset: -1px;
+  z-index: -2;
+  background: var(--ai-flow-ring);
+  filter: blur(8px);
+  opacity: 0.24;
+  animation: ai-orbit 4.6s linear infinite;
+}
+body[arco-theme="dark"] .fw-run::after {
+  opacity: 0.38;
 }
 .fw-run-h {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 14px;
+  font-size: 13.5px;
 }
-.fw-run-h .link {
+.fw-run-emblem {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  border-radius: 6px;
+}
+.fw-run-h b {
+  font-weight: 620;
+  color: var(--ink);
+}
+.fw-run-count {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.fw-run-skip {
+  all: unset;
+  box-sizing: border-box;
   margin-left: auto;
-  font-size: 12.5px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-size: 12px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background-color 0.15s,
+    border-color 0.15s,
+    color 0.15s;
+}
+.fw-run-skip:hover {
+  background: var(--hover);
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+.fw-run-skip:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
 }
 .fw-run-meter {
   height: 3px;
-  margin: 10px 0;
+  margin: 11px 0 12px;
   overflow: hidden;
-  background: var(--line);
-  border-radius: 3px;
+  background: var(--surface-2);
+  border-radius: 999px;
 }
 .fw-run-meter span {
   display: block;
   height: 100%;
-  background: var(--ai-rb);
-  background-size: 300% 100%;
-  animation: ai-flow 3s linear infinite;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--kyndryl) 0%, #ff7a59 55%, #4285f4 100%);
   transform-origin: left;
-  transition: transform 0.3s var(--ease-out);
+  transition: transform 0.32s var(--ease-out);
 }
 .fw-run-stages {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin: 0 0 10px;
+  margin: 0 0 11px;
   padding: 0;
   list-style: none;
 }
 .fw-run-stages li {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 2px 10px 2px 8px;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px 0 8px;
   font-size: 12px;
+  font-weight: 500;
   color: var(--faint);
   background: var(--surface-2);
   border: 1px solid var(--line);
   border-radius: 999px;
+  white-space: nowrap;
   transition:
     color 0.2s,
     background 0.2s,
@@ -406,68 +483,99 @@
 .fw-run-stages li i {
   width: 6px;
   height: 6px;
+  flex: none;
   border-radius: 50%;
   background: currentColor;
-  opacity: 0.4;
+  opacity: 0.38;
 }
 .fw-run-stages li.on {
-  color: var(--brand-ink);
-  background: var(--brand-soft);
-  border-color: var(--brand-line);
+  color: var(--ink);
+  font-weight: 600;
+  background: var(--kyndryl-soft);
+  border-color: color-mix(in srgb, var(--kyndryl) 30%, var(--line));
 }
 .fw-run-stages li.on i {
+  background: var(--kyndryl);
   opacity: 1;
-  animation: fw-pulse 1s ease-in-out infinite;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--kyndryl) 22%, transparent);
+  animation: fw-pulse 1.2s ease-in-out infinite;
 }
 .fw-run-stages li.done {
   color: var(--ok);
+  background: var(--ok-soft);
+  border-color: var(--ok-line);
 }
 .fw-run-items {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
   margin: 0;
-  padding: 0;
+  padding: 6px;
   list-style: none;
-  font-size: 13px;
+  font-size: 12.5px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
 }
 .fw-run-items li {
   display: grid;
-  grid-template-columns: 78px 120px minmax(0, 1fr);
-  gap: 10px;
-  align-items: baseline;
-  padding: 3px 8px;
-  border-radius: 8px;
-  animation: fw-row 0.38s var(--ease-out) backwards;
+  grid-template-columns: 108px minmax(112px, 152px) minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 5px 10px;
+  border-radius: 7px;
+  border-left: 2.5px solid transparent;
+  animation: fw-row 0.34s var(--ease-out) backwards;
 }
 .fw-run-items li.new {
-  background: linear-gradient(90deg, var(--brand-soft), transparent 80%);
+  background: var(--surface);
+  border-left-color: var(--kyndryl);
+  box-shadow:
+    0 1px 3px rgba(11, 13, 18, 0.06),
+    0 0 0 1px var(--line);
 }
 .fw-run-items li em {
-  color: var(--faint);
+  color: var(--mute);
   font-size: 11.5px;
   font-style: normal;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fw-run-items li.new em {
+  color: var(--kyndryl);
+  font-weight: 550;
 }
 .fw-run-items li b {
   font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .fw-run-items li span {
   min-width: 0;
   overflow: hidden;
   color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.fw-run-items li.new span {
+  color: var(--ink);
 }
 @keyframes fw-row {
   from {
     opacity: 0;
-    transform: translateY(6px);
+    transform: translateY(5px);
   }
 }
 .fw-run-note {
   margin: 10px 0 0;
   color: var(--faint);
-  font-size: 12px;
+  font-size: 11.5px;
+  line-height: 1.45;
 }
 
 /* the form is locked while the assistant is writing in it */
@@ -504,13 +612,17 @@
   .fw-foot {
     padding: 4px 12px 12px;
   }
+  .fw-run {
+    margin-left: 0;
+  }
   .fw-run-items li {
     grid-template-columns: 1fr;
-    gap: 0;
+    gap: 2px;
   }
 }
 @media (prefers-reduced-motion: reduce) {
   .fw-run::before,
+  .fw-run::after,
   .fw-run-meter span,
   .fw-live,
   .fw-run-items li,

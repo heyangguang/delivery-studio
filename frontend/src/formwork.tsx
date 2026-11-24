@@ -218,12 +218,14 @@ function RunCard({
       )}
     >
       <div className="fw-run-h">
-        <Spark size={16} rainbow />
+        <span className="fw-run-emblem" aria-hidden>
+          <AIEmblem size={22} />
+        </span>
         <b>{bi("AI 正在填写表单", "AI is filling the form")}</b>
-        <span className="num faint">
+        <span className="fw-run-count num">
           {done} / {total}
         </span>
-        <button type="button" className="link quiet" onClick={fa.skipRun}>
+        <button type="button" className="fw-run-skip" onClick={fa.skipRun}>
           {bi("跳过动画，直接完成", "Skip animation & apply")}
         </button>
       </div>
@@ -237,21 +239,24 @@ function RunCard({
             className={x === r.stage ? "on" : finished(x) ? "done" : ""}
           >
             {finished(x) ? <IconCheck /> : <i aria-hidden />}
-            {titles[x] || x}
+            <span>{titles[x] || x}</span>
           </li>
         ))}
       </ol>
       <ul className="fw-run-items">
-        {r.items.slice(-7).map((c, i, arr) => (
-          <li
-            key={`${c.section}${c.path}${c.label}${c.detail}`}
-            className={i === arr.length - 1 ? "new" : ""}
-          >
-            <em>{titles[c.section] || c.section}</em>
-            <b>{c.label}</b>
-            <span>{c.detail}</span>
-          </li>
-        ))}
+        {r.items.slice(-7).map((c, i, arr) => {
+          const isNew = i === arr.length - 1;
+          return (
+            <li
+              key={`${c.section}${c.path}${c.label}${c.detail}`}
+              className={isNew ? "new" : ""}
+            >
+              <em>{titles[c.section] || c.section}</em>
+              <b>{c.label}</b>
+              <span>{c.detail}</span>
+            </li>
+          );
+        })}
       </ul>
       <p className="fw-run-note">
         {bi(

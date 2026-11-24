@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.305-dev"
+	version            = "1.0.306-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,22 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.306-dev",
+		Date:    "2026-11-24",
+		Title:   "重构 AI 自动填表进度卡与表单字段变更指示条",
+		TitleEn: "Redesigned AI Live Form-Fill Progress Card & Field Change Indicators",
+		Highlights: []string{
+			"重构「AI 正在填写表单」实时进度卡（.fw-run）：外框升级为 Gemini 自动流光棱镜边框与不透明白瓷/曜石内衬，头部改为 Kyndryl AIEmblem + 等宽计数胶囊 + 轻质「跳过动画」按钮，阶段胶囊采用徕卡红脉动点高亮当前阶段",
+			"重排实时写入字段列表（.fw-run-items）：放入浅灰内凹遥测底板，步骤列拓宽至 108px 并禁止断字，彻底消除「集群与架构方 / 案」单字折行；当前写入行以纯白浮层 + 2.5px 徕卡红左竖标与等宽值清晰突出",
+			"将表单中 AI 改动字段左侧歪斜的渐变紫晕圆点（[data-ai-on]::before）升级为贯穿字段高度的 2.5px 徕卡暖红垂直指示条，并在任意字号与行高下始终严格对齐，同时统一 .fc-dot / .fc-navdot 与写入扫光动画配色",
+		},
+		HighlightsEn: []string{
+			"Redesigned the AI live form-fill card (.fw-run) with the Gemini auto-flowing prism rim, Kyndryl AIEmblem header, monospace progress counter chip, crisp skip button, and Leica-red active stage pill",
+			"Upgraded the live field telemetry feed (.fw-run-items) with a recessed surface, 108px non-wrapping section column (eliminating orphan character wraps), monospace values, and elevated active-row Leica-red left tick",
+			"Replaced the misaligned gradient dot + purple halo on AI-modified form fields ([data-ai-on]) with a crisp 2.5px Leica warm-red vertical edge bar that aligns cleanly at any row height",
+		},
+	},
 	{
 		Version: "1.0.305-dev",
 		Date:    "2026-11-24",

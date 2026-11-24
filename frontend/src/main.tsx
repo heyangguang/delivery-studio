@@ -24,10 +24,12 @@ import enUS from "@arco-design/web-react/es/locale/en-US";
 import { I18nProvider, bi, getLang, useI18n, useLang } from "./i18n";
 import {
   IconCheck,
+  IconClose,
   IconDesktop,
   IconMoon,
   IconLock,
   IconPoweroff,
+  IconRefresh,
   IconUser,
   IconSearch,
   IconSun,
@@ -488,31 +490,52 @@ function UpdatePill({
     ? freshBuild.split("-")[0].slice(0, 7)
     : "";
   return (
-    <div className="net-pill upd" role="status">
-      <span className="sdot" />
-      {hotfixOnly
-        ? bi(
-            `平台已完成热更新（v${fresh}${shortBuild ? ` · #${shortBuild}` : ""}）。刷新即可加载最新界面，当前内容不受影响`,
-            `Platform hot-reloaded (v${fresh}${shortBuild ? ` · #${shortBuild}` : ""}). Refresh to load the latest UI — your work stays intact`,
-          )
-        : bi(
-            `平台已更新到 v${fresh}。想体验新功能，刷新一下就行；你正在做的内容不受影响`,
-            `Platform updated to v${fresh}. Refresh to switch — your in-progress work stays intact`,
-          )}
-      <button type="button" className="net-pill-link" onClick={onViewNotes}>
-        {bi("更新公告", "Release Notes")}
-      </button>
-      <Button size="mini" type="primary" onClick={() => location.reload()}>
-        {bi("刷新", "Refresh")}
-      </Button>
-      <button
-        type="button"
-        className="net-pill-x"
-        onClick={hide}
-        aria-label={bi("稍后再说", "Later")}
-      >
-        {bi("稍后", "Later")}
-      </button>
+    <div className="upd-toast" role="status" aria-live="polite">
+      <div className="upd-toast-body">
+        <span className="upd-toast-beacon" aria-hidden />
+        <div className="upd-toast-copy">
+          <div className="upd-toast-head">
+            <span className="upd-toast-title">
+              {hotfixOnly
+                ? bi("平台已热更新", "Platform hot-reloaded")
+                : bi("发现新版本", "New version ready")}
+            </span>
+            <code className="upd-toast-ver">
+              v{fresh}
+              {hotfixOnly && shortBuild ? ` · #${shortBuild}` : ""}
+            </code>
+          </div>
+          <div className="upd-toast-sub">
+            {bi(
+              "刷新即可加载最新界面，当前内容不受影响",
+              "Refresh to load the latest UI — your work stays intact",
+            )}
+          </div>
+        </div>
+      </div>
+      <div className="upd-toast-sep" aria-hidden />
+      <div className="upd-toast-actions">
+        <button type="button" className="upd-toast-notes" onClick={onViewNotes}>
+          {bi("更新公告", "Release Notes")}
+        </button>
+        <button
+          type="button"
+          className="upd-toast-refresh"
+          onClick={() => location.reload()}
+        >
+          <IconRefresh />
+          <span>{bi("刷新", "Refresh")}</span>
+        </button>
+        <button
+          type="button"
+          className="upd-toast-close"
+          onClick={hide}
+          title={bi("稍后再说", "Remind me later")}
+          aria-label={bi("稍后再说", "Later")}
+        >
+          <IconClose />
+        </button>
+      </div>
     </div>
   );
 }
@@ -821,7 +844,7 @@ function ConnectivityPill({ onBack }: { onBack: () => void }) {
       }
     >
       <span className="sdot" />
-      <span>
+      <span className="net-pill-msg">
         {status === "offline"
           ? bi(
               "本机网络已断开，恢复后将自动重连 Kyndryl Delivery Studio",

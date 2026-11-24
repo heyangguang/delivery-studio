@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.301-dev"
+	version            = "1.0.302-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,22 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.302-dev",
+		Date:    "2026-11-24",
+		Title:   "重构平台热更新与断网提示浮层响应式 UI",
+		TitleEn: "Redesigned Responsive Hot-Reload & Connectivity Floating Dock",
+		Highlights: []string{
+			"重构 UpdatePill 为瑞士徕卡双区块悬浮浮层（.upd-toast）：左侧徕卡红状态点 + 标题/等宽版本徽章 + 次级说明，右侧垂直细线分隔并锁定「更新公告 / 刷新 / 关闭」操作组，彻底消除孤立圆点与「稍后」单独折行问题",
+			"修复 .net-pill 因 left: 50% 无 fit-content 在宽屏下被 50vw 挤压的 CSS 缺陷，改为左右锚定自适应居中并消除半像素模糊",
+			"支持全断点平滑适配：桌面端紧凑单行贴底悬浮，820px 以下自动抬升避让右下角 AI 浮球，640px 以下切换为顶栏右置关闭 + 底栏操作区的规范双行卡片，并自动感知断网提示避让与明暗双主题磨砂质感",
+		},
+		HighlightsEn: []string{
+			"Redesigned UpdatePill into a two-zone Swiss Leica floating dock (.upd-toast) with Leica red beacon, monospace version chip, subtitle, vertical divider, and atomic action group — eliminating lone dot and orphan button wrapping",
+			"Fixed the 50vw shrink-wrap bug on fixed .net-pill containers using full-width inset auto-centering",
+			"Added responsive breakpoints across desktop, tablet (820px AI FAB clearance), and narrow/mobile (640px clean two-row card), plus automatic stacking above ConnectivityPill and full Light/Dark frosted glass styling",
+		},
+	},
 	{
 		Version: "1.0.301-dev",
 		Date:    "2026-11-24",

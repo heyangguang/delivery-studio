@@ -678,8 +678,8 @@ export function DeliveriesPage({
                 suffix={!f.q ? <Kbd>/</Kbd> : undefined}
                 allowClear
                 placeholder={bi(
-                  "搜索集群、应用、自动/离线",
-                  "Search cluster, app, auto/offline",
+                  "搜索集群、应用或方式",
+                  "Search clusters, apps…",
                 )}
                 value={f.q}
                 onChange={(v) => set({ q: v })}

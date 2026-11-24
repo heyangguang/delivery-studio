@@ -752,8 +752,8 @@ body[arco-theme="dark"] .arco-textarea {
     border-color 0.18s ease,
     box-shadow 0.18s ease !important;
 }
-.arco-input-inner-wrapper input.arco-input,
 .arco-input-inner-wrapper .arco-input,
+.arco-input-inner-wrapper input.arco-input,
 .arco-input-number .arco-input-inner-wrapper .arco-input,
 .arco-picker .arco-picker-input input,
 .arco-select-view .arco-select-view-input,
@@ -768,6 +768,30 @@ body[arco-theme="dark"] .arco-select-view .arco-select-view-input {
   border: 0 !important;
   background: transparent !important;
   box-shadow: none !important;
+}
+/* Prevent Arco Input <input> from overflowing behind prefix/suffix (e.g. <kbd>/</kbd>) in narrow rails */
+.arco-input-inner-wrapper > .arco-input,
+.arco-input-inner-wrapper > .arco-input-clear-wrapper {
+  flex: 1 1 0%;
+  min-width: 0;
+}
+.arco-input-inner-wrapper > .arco-input-clear-wrapper > .arco-input {
+  width: 100%;
+  min-width: 0;
+}
+.arco-input-inner-wrapper-has-prefix > .arco-input,
+.arco-input-inner-wrapper-has-prefix > .arco-input-clear-wrapper .arco-input {
+  padding-left: 8px;
+}
+.arco-input-inner-wrapper .arco-input-group-prefix,
+.arco-input-inner-wrapper .arco-input-group-suffix {
+  flex: none;
+}
+.arco-input-inner-wrapper .arco-input-group-suffix {
+  margin-left: 8px;
+}
+.arco-input-inner-wrapper .arco-input::placeholder {
+  text-overflow: ellipsis;
 }
 .arco-select-multiple .arco-input-tag {
   min-height: 0 !important;

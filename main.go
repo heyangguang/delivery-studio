@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.297-dev"
+	version            = "1.0.298-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,20 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.298-dev",
+		Date:    "2026-11-24",
+		Title:   "修复搜索框右侧快捷键 / 遮挡占位文案的问题",
+		TitleEn: "Fix search input shortcut kbd suffix overlapping placeholder text",
+		Highlights: []string{
+			"在全局 Arco Input 样式中为输入框补齐 flex: 1 1 0%; min-width: 0 与后缀 8px 间距，并启用占位文案省略号截断，彻底避免右侧快捷键 / 与文字重叠遮挡",
+			"精简交付侧栏搜索占位文案为「搜索集群、应用或方式」，在 1440px 与 1100px 窄侧栏下均完整展示且与 / 保持清晰间距",
+		},
+		HighlightsEn: []string{
+			"Added flex: 1 1 0% / min-width: 0, 8px suffix separation, and placeholder ellipsis globally on Arco inputs so trailing <kbd>/</kbd> shortcuts never overlap input or placeholder text",
+			"Tightened Delivery rail search placeholder so it fits cleanly with an 8px gap before / across both standard (304px) and narrow (284px) sidebars",
+		},
+	},
 	{
 		Version: "1.0.297-dev",
 		Date:    "2026-11-24",

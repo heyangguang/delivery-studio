@@ -12,6 +12,7 @@ import {
   IconArrowUp,
   IconCheck,
   IconCheckCircleFill,
+  IconClose,
   IconCloseCircleFill,
   IconCode,
   IconCopy,
@@ -42,7 +43,7 @@ import {
 } from "./execution-types";
 import { bi, getLang, useLang, withLang } from "./i18n";
 import { go } from "./router";
-import { ago, api, can, copy, err, fullTime, useAIStatus } from "./shared";
+import { ago, api, can, copy, err, fullTime, useAIStatus, useMedia } from "./shared";
 import { AppGlyph, Segmented, StatusBadge, StatusDot } from "./ui";
 import { dispatchExecLaunchIntent, StepHotfixDrawer } from "./stephotfix";
 import "./monitor.css";
@@ -962,12 +963,34 @@ export function ExecutionMonitorPage({
   useLang();
   const [listData, setListData] = useState<MonitorListPayload | null>(null);
   const [listLoading, setListLoading] = useState(true);
-  const [railHidden, setRailHidden] = useState(
-    () => typeof window !== "undefined" && window.innerWidth < 1100,
-  );
+  const narrow = useMedia("(max-width: 900px)");
+  const compact = useMedia("(max-width: 1100px)");
+  const [railHidden, setRailHidden] = useState(() => compact);
+  const prevCompactRef = useRef(compact);
+  const prevNarrowRef = useRef(narrow);
   const [railSearch, setRailSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<RailStatusFilter>("all");
   const [appFilter, setAppFilter] = useState<string>("all");
+
+  useEffect(() => {
+    // Auto-collapse rail when resizing into narrow/compact viewports; auto-restore above 1100px.
+    if (narrow && !prevNarrowRef.current) {
+      setRailHidden(true);
+    } else if (compact !== prevCompactRef.current) {
+      setRailHidden(compact);
+    }
+    prevCompactRef.current = compact;
+    prevNarrowRef.current = narrow;
+  }, [compact, narrow]);
+
+  useEffect(() => {
+    if (!narrow || railHidden) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setRailHidden(true);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [narrow, railHidden]);
 
   const loadList = useCallback(async () => {
     try {
@@ -1054,7 +1077,14 @@ export function ExecutionMonitorPage({
 
   return (
     <div className={`md-split mon-split ${railHidden ? "mon-rail-hidden" : ""}`}>
-      {/* Native 304px (--rail-w) Left Cluster Rail */}
+      {narrow && !railHidden && (
+        <div
+          className="mon-rail-backdrop"
+          onClick={() => setRailHidden(true)}
+          aria-hidden
+        />
+      )}
+      {/* Native 304px (--rail-w) Left Cluster Rail (slide-over drawer on <=900px) */}
       <aside
         className="md-list"
         aria-label={bi("自动化执行列表", "Automated executions")}
@@ -1063,29 +1093,41 @@ export function ExecutionMonitorPage({
         <div className="list-head">
           <div className="list-title">
             <h1>{bi("执行监控", "Executions")}</h1>
-            {listData && (
-              <Tooltip
-                content={bi(
-                  `在线执行节点 ${listData.online_runners} / ${listData.total_runners}${canManageNodes ? " · 点击管理执行节点" : ""}`,
-                  `${listData.online_runners} / ${listData.total_runners} runners online`,
-                )}
-                mini
-              >
-                <button
-                  type="button"
-                  className={`mon-runner-pill num ${listData.online_runners > 0 ? "on" : ""} ${canManageNodes ? "clickable" : ""}`}
-                  onClick={() =>
-                    canManageNodes && go({ name: "settings", id: "execution-nodes" })
-                  }
-                >
-                  <i aria-hidden />
-                  {bi(
-                    `在线节点 ${listData.online_runners}/${listData.total_runners}`,
-                    `${listData.online_runners}/${listData.total_runners} online`,
+            <div className="mon-list-title-right">
+              {listData && (
+                <Tooltip
+                  content={bi(
+                    `在线执行节点 ${listData.online_runners} / ${listData.total_runners}${canManageNodes ? " · 点击管理执行节点" : ""}`,
+                    `${listData.online_runners} / ${listData.total_runners} runners online`,
                   )}
-                </button>
-              </Tooltip>
-            )}
+                  mini
+                >
+                  <button
+                    type="button"
+                    className={`mon-runner-pill num ${listData.online_runners > 0 ? "on" : ""} ${canManageNodes ? "clickable" : ""}`}
+                    onClick={() =>
+                      canManageNodes && go({ name: "settings", id: "execution-nodes" })
+                    }
+                  >
+                    <i aria-hidden />
+                    {bi(
+                      `在线节点 ${listData.online_runners}/${listData.total_runners}`,
+                      `${listData.online_runners}/${listData.total_runners} online`,
+                    )}
+                  </button>
+                </Tooltip>
+              )}
+              {narrow && (
+                <Button
+                  size="mini"
+                  type="text"
+                  className="mon-rail-close"
+                  icon={<IconClose />}
+                  onClick={() => setRailHidden(true)}
+                  aria-label={bi("收起集群列表", "Close cluster list")}
+                />
+              )}
+            </div>
           </div>
 
           <Input
@@ -1190,7 +1232,10 @@ export function ExecutionMonitorPage({
                   key={it.job_id}
                   type="button"
                   className={`row mon-row-btn ${isSelected ? "on" : ""}`}
-                  onClick={() => go({ name: "executions", id: it.job_id })}
+                  onClick={() => {
+                    go({ name: "executions", id: it.job_id });
+                    if (narrow) setRailHidden(true);
+                  }}
                 >
                   <span className="row-ico">
                     <AppGlyph id={it.app_id} size={34} />

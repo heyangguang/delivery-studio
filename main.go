@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.292-dev"
+	version            = "1.0.293-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,20 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.293-dev",
+		Date:    "2026-11-24",
+		Title:   "修复执行监控窄屏布局截断并改为滑出式集群抽屉",
+		TitleEn: "Fix Execution Monitor narrow-screen clipping with slide-over cluster drawer",
+		Highlights: []string{
+			"执行监控在 900px 及以下窄屏/半屏视口自动收起左侧集群栏，点击展开按钮以全高滑出抽屉展示，点击遮罩/选定集群/按 Esc 自动关闭，彻底消除顶部截断",
+			"解除窄屏主工作区溢出截断并优化步骤目录折叠、终端日志栏换行与全宽路径展示，同步隐藏窄屏重复悬浮 AI 按钮避免遮挡步骤项",
+		},
+		HighlightsEn: []string{
+			"Execution Monitor auto-collapses the cluster rail on viewports <= 900px into a full-height slide-over drawer with backdrop, close button, and auto-dismiss on selection or Escape",
+			"Fixed narrow-screen workspace clipping, vertical step pipeline collapse, console header wrapping, and removed the redundant floating AI launcher button on narrow viewports",
+		},
+	},
 	{
 		Version: "1.0.292-dev",
 		Date:    "2026-11-24",

@@ -1286,8 +1286,8 @@ function ConfigRecord({
                   allowClear
                   aria-label={bi("搜索集群配置", "Search cluster configuration")}
                   placeholder={bi(
-                    "搜索机器、角色、IP、端口或参数…",
-                    "Search hosts, roles, IPs, ports, or params…",
+                    "搜索机器、IP 或参数…",
+                    "Search hosts, IPs, params…",
                   )}
                   onKeyDown={(e) => {
                     if (e.key === "Escape") {

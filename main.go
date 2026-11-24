@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.273-dev"
+	version            = "1.0.274-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,18 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.274-dev",
+		Date:    "2026-11-24",
+		Title:   "微调集群配置页导航条与搜索栏间距避免 7 标签时裁切",
+		TitleEn: "Tighten cluster config nav and search spacing so all 7 tabs fit unclipped",
+		Highlights: []string{
+			"收紧配置页子导航按钮间距与右侧搜索框宽度，使包含 Patroni 与外部负载均衡的 7 个分类标签在 1440px 视口下完整单行展示不裁切",
+		},
+		HighlightsEn: []string{
+			"Adjusted config nav item spacing and search bar width so all 7 tabs including Patroni and External LB render unclipped at 1440px",
+		},
+	},
 	{
 		Version: "1.0.273-dev",
 		Date:    "2026-11-24",

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path"
 	"strings"
+	"time"
 
 	"middleware-deployer/mwpack"
 )
@@ -461,9 +462,66 @@ func (s *storeServer) resultBlocksLang(b *docBuilder, job string, st reportStep,
 	// a problem met on this step and how it was solved belongs right here
 	for _, rp := range prog.Reports {
 		if rp.Key == "step:"+key {
-			writeUpBlocksLang(b, variantResult, rp, lang)
+			if resolved, doneRec := isReportResolvedByStep(rp, prog); resolved {
+				writeResolvedIncidentNoteLang(b, variantResult, rp, doneRec, lang)
+			} else {
+				writeUpBlocksLang(b, variantResult, rp, lang)
+			}
 		}
 	}
+}
+
+// isReportResolvedByStep returns true when a step-scoped problem writeup has already been
+// superseded by a subsequent "done" execution record on that same step.
+func isReportResolvedByStep(rp aiReport, prog progressDoc) (bool, stepRecord) {
+	if !strings.HasPrefix(rp.Key, "step:") {
+		return false, stepRecord{}
+	}
+	stepKey := strings.TrimPrefix(rp.Key, "step:")
+	rec, ok := prog.Steps[stepKey]
+	if !ok || rec.State != "done" {
+		return false, rec
+	}
+	if rp.At != "" && rec.At != "" {
+		tRep, err1 := time.Parse(time.RFC3339Nano, rp.At)
+		tRec, err2 := time.Parse(time.RFC3339Nano, rec.At)
+		if err1 == nil && err2 == nil {
+			if tRec.Before(tRep) {
+				return false, rec
+			}
+		} else if rec.At < rp.At {
+			return false, rec
+		}
+	}
+	return true, rec
+}
+
+// writeResolvedIncidentNoteLang renders a compact, non-contradictory historical note for an
+// on-site snag that was subsequently resolved and verified passed on the step.
+func writeResolvedIncidentNoteLang(b *docBuilder, variant string, rp aiReport, doneRec stepRecord, lang string) {
+	reason := strings.TrimSpace(firstNonEmptyStr(rp.Cause, rp.Symptom, rp.Title))
+	reason = strings.TrimRight(reason, "。.;；")
+	doneTime := stamp(doneRec.At)
+	var text string
+	if doneTime != "" {
+		if reason != "" {
+			text = tr(lang,
+				fmt.Sprintf("过程排障备忘（已于 %s 解决并复测通过）：执行中曾因「%s」受阻，已按现场补充方案处理并验证通过。", doneTime, truncRunes(reason, 160)),
+				fmt.Sprintf("Resolved on-site note (verified passed at %s): previously blocked by \"%s\"; resolved and passed re-verification.", doneTime, truncRunes(reason, 160)),
+			)
+		} else {
+			text = tr(lang,
+				fmt.Sprintf("过程排障备忘（已于 %s 解决并复测通过）：执行中曾触发排障记录，已完成处理并验证通过。", doneTime),
+				fmt.Sprintf("Resolved on-site note (verified passed at %s): an intermediate issue occurred during execution and was resolved.", doneTime),
+			)
+		}
+	} else {
+		text = tr(lang,
+			fmt.Sprintf("过程排障备忘（已解决并复测通过）：执行中曾因「%s」受阻，已完成现场处理并验证通过。", truncRunes(firstNonEmptyStr(reason, rp.Title), 160)),
+			fmt.Sprintf("Resolved on-site note (verified passed): previously blocked by \"%s\"; resolved and passed.", truncRunes(firstNonEmptyStr(reason, rp.Title), 160)),
+		)
+	}
+	b.variant(variant, docBlock{Kind: "note", Text: text})
 }
 
 // writeUpBlocks writes a problem and its solution: what happened, why, what was done (commands as code), what is left.
@@ -482,7 +540,19 @@ func writeUpBlocksLang(b *docBuilder, variant string, rp aiReport, lang string) 
 	item(tr(lang, "现象", "Symptom"), rp.Symptom)
 	item(tr(lang, "证据", "Evidence"), rp.Evidence)
 	item(tr(lang, "原因", "Cause"), rp.Cause)
-	item(tr(lang, "处理", "Resolution"), rp.Fix)
+	if fix := strings.TrimSpace(rp.Fix); fix != "" {
+		if variant == variantResult && (strings.Contains(fix, "ansible-playbook") || strings.Contains(fix, "/root/middleware-automation/")) {
+			cleanFix := sanitizeIncidentTextForCmd(fix)
+			b.variant(variantResultAuto, docBlock{Kind: "p", Text: "**" + tr(lang, "处理", "Resolution") + "**"})
+			fenced(b, variantResultAuto, fix)
+			if cleanFix != "" {
+				b.variant(variantResultCmd, docBlock{Kind: "p", Text: "**" + tr(lang, "处理", "Resolution") + "**"})
+				fenced(b, variantResultCmd, cleanFix)
+			}
+		} else {
+			item(tr(lang, "处理", "Resolution"), fix)
+		}
+	}
 	if rp.Changed {
 		b.variant(variant, docBlock{Kind: "note", Text: tr(lang, "这个问题说明交付本身需要修改，请回到平台调整规格或手册后重新生成。", "This issue indicates the delivery itself requires changes; adjust the spec or runbook and regenerate.")})
 	}

@@ -542,3 +542,117 @@ func TestDeliveryReportCmdModeHasZeroWrapperScripts(t *testing.T) {
 	}
 	checkCmdDoc("legacy-plan")
 }
+
+func TestCommandReportInlineAnsibleAndResolvedIncident(t *testing.T) {
+	// 1. Inline ansible-playbook amendment translates cleanly into pure Linux shell commands for 命令版
+	inlinePlaybookCmd := `cd /root/middleware-automation/projects/pg-jfrog-artifactory-private-prod
+../../bin/ansible-playbook -i inventory/hosts.yml /dev/stdin <<'YAML'
+---
+- name: 配置数据库入口本地解析
+  hosts: node-1:node-2:node-3
+  gather_facts: false
+  tasks:
+    - name: 写入入口域名并备份原文件
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        regexp: '^[ \t]*[^#\s]+[ \t]+jfrog-xray\.postgresql\.private\.toolchain\.cn\.vwgroup\.com([ \t]|$)'
+        line: '172.30.2.120 jfrog-xray.postgresql.private.toolchain.cn.vwgroup.com'
+        backup: true
+    - name: 显示回退备份路径
+      ansible.builtin.debug:
+        msg: "{{ hosts_update.backup_file | default('内容未变化') }}"
+    - name: 验证系统实际解析
+      ansible.builtin.command:
+        argv:
+          - getent
+          - ahostsv4
+          - jfrog-xray.postgresql.private.toolchain.cn.vwgroup.com
+YAML`
+
+	ctx := reportCmdCtx{Lang: "zh-CN"}
+	got := ctx.expandManualStepToCmd(reportStep{
+		Key:     "prepare/ai-hosts",
+		Title:   "配置三节点数据库入口 hosts 解析",
+		Command: inlinePlaybookCmd,
+		Manual:  true,
+	})
+	for _, forbidden := range []string{"ansible-playbook", "ansible.builtin", "hosts_update"} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("translated command still leaked Ansible token %q:\n%s", forbidden, got)
+		}
+	}
+	for _, want := range []string{
+		"cp -a /etc/hosts /etc/hosts.bak.$(date +%Y%m%d%H%M%S)",
+		"grep -qE",
+		"sed -i -E",
+		"172.30.2.120 jfrog-xray.postgresql.private.toolchain.cn.vwgroup.com",
+		"getent ahostsv4 jfrog-xray.postgresql.private.toolchain.cn.vwgroup.com",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("translated command missing %q:\n%s", want, got)
+		}
+	}
+
+	// 2. Resolved step incident (step done AFTER report) renders compact resolved note without stale followups/warnings
+	s, _ := testStore(t)
+	prog := progressDoc{
+		Steps: map[string]stepRecord{
+			"endpoint/pg/via-front": {State: "done", By: "admin", At: "2026-10-28T19:37:00+08:00"},
+		},
+		Reports: []aiReport{
+			{
+				Key:       "step:endpoint/pg/via-front",
+				Title:     "[pg] 经入口连接主库",
+				At:        "2026-10-28T16:37:00+08:00",
+				By:        "admin",
+				Symptom:   "node-1 无法解析数据库入口域名",
+				Cause:     "客户环境没有内部 DNS，三节点数据库入口域名的本地 hosts 解析配置未落实。",
+				Fix:       "在 /etc/hosts 中补齐映射并运行 ../../bin/ansible-playbook -i inventory/hosts.yml tests-endpoint/01-pg-via-front.yml",
+				Changed:   true,
+				Followups: []string{"采纳提案并执行", "在 node-1 重跑入口连接测试；目前尚无修复后验证结果。"},
+			},
+		},
+	}
+	var b docBuilder
+	s.resultBlocksLang(&b, "job-1", reportStep{Key: "endpoint/pg/via-front", Title: "[pg] 经入口连接主库"}, nil, prog, "zh-CN")
+	var rendered strings.Builder
+	for _, blk := range b.blocks {
+		rendered.WriteString(blk.Text)
+		rendered.WriteString("\n")
+		for _, it := range blk.Items {
+			rendered.WriteString(it)
+			rendered.WriteString("\n")
+		}
+	}
+	out := rendered.String()
+	if !strings.Contains(out, "过程排障备忘") || !strings.Contains(out, "解决并复测通过") {
+		t.Fatalf("expected compact resolved incident note, got:\n%s", out)
+	}
+	for _, stale := range []string{"交付本身需要修改", "还要跟进", "目前尚无修复后验证结果", "ansible-playbook"} {
+		if strings.Contains(out, stale) {
+			t.Fatalf("resolved step should not render stale/ansible text %q:\n%s", stale, out)
+		}
+	}
+
+	// 3. Unresolved step incident (step still failed) keeps full details and sanitizes ansible-playbook in variantResultCmd
+	progFailed := progressDoc{
+		Steps: map[string]stepRecord{
+			"endpoint/pg/via-front": {State: "failed", By: "admin", At: "2026-10-28T16:37:00+08:00"},
+		},
+		Reports: prog.Reports,
+	}
+	var b2 docBuilder
+	s.resultBlocksLang(&b2, "job-1", reportStep{Key: "endpoint/pg/via-front", Title: "[pg] 经入口连接主库"}, nil, progFailed, "zh-CN")
+	cmdOnly := parseExportOptions(map[string][]string{"detail": {"1"}, "steps": {"cmd"}, "results": {"1"}, "log_style": {"cmd"}}).filtered(&clusterDoc{Blocks: b2.blocks})
+	var cmdOut strings.Builder
+	for _, blk := range cmdOnly.Blocks {
+		cmdOut.WriteString(blk.Text)
+		cmdOut.WriteString("\n")
+	}
+	if !strings.Contains(cmdOut.String(), "遇到的问题") || !strings.Contains(cmdOut.String(), "还要跟进") {
+		t.Fatalf("unresolved failed step must keep full incident details:\n%s", cmdOut.String())
+	}
+	if strings.Contains(cmdOut.String(), "ansible-playbook") {
+		t.Fatalf("command-mode incident resolution leaked ansible-playbook:\n%s", cmdOut.String())
+	}
+}

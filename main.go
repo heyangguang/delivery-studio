@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.335-dev"
+	version            = "1.0.336-dev"
 	currentReleaseDate = "2026-11-25"
 )
 
@@ -65,6 +65,20 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.336-dev",
+		Date:    "2026-11-25",
+		Title:   "净化交付报告命令版中的内联 Ansible 步骤并收拢已解决步骤的过期排障记录",
+		TitleEn: "Translate inline Ansible amendments in command reports and compact resolved step incident notes",
+		Highlights: []string{
+			"交付报告「命令版」自动将现场补充的内联 ansible-playbook（如 lineinfile / blockinfile / command / copy / file / systemd / sysctl）与 ad-hoc 命令转换为纯标准 Linux 命令，杜绝命令版出现 Ansible 语法",
+			"当某步骤已复测标记为「完成」且晚于历史排障记录时间时，自动收拢为简洁的「过程排障备忘（已解决并复测通过）」，不再展示过期的「交付本身需要修改」与「还要跟进（目前尚无修复后验证结果）」矛盾提示",
+		},
+		HighlightsEn: []string{
+			"Translate inline ansible-playbook amendments and ad-hoc commands into standalone Linux shell commands in command-mode delivery reports",
+			"Collapse historical mid-troubleshooting incident writeups into a concise resolved note once the step is marked done, removing stale follow-ups and delivery-change warnings",
+		},
+	},
 	{
 		Version: "1.0.335-dev",
 		Date:    "2026-11-25",

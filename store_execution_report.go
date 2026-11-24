@@ -147,6 +147,9 @@ func (s *storeServer) executionSummary(b *docBuilder, level int, j storeJob, pro
 	b.table([]string{tr(lang, "步骤", "Step"), tr(lang, "当前结果", "Status"), tr(lang, "依据", "Source"), tr(lang, "时间", "Timestamp")}, rows)
 	follow := []string{}
 	for _, r := range prog.Reports {
+		if resolved, _ := isReportResolvedByStep(r, prog); resolved {
+			continue
+		}
 		for _, f := range r.Followups {
 			follow = append(follow, r.Title+tr(lang, "：", ": ")+f)
 		}

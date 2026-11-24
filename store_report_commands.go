@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 
+	"gopkg.in/yaml.v3"
+
 	"middleware-deployer/mwpack"
 )
 
@@ -317,6 +319,18 @@ func (c reportCmdCtx) expandManualStepToCmd(st reportStep) string {
 		)
 	}
 
+	// 1b. AI-amended or manual steps that run an inline Ansible playbook (e.g. ansible-playbook ... <<'YAML')
+	// or ad-hoc ansible command must be translated to pure Linux commands for 命令版 (variantCmd).
+	if strings.Contains(cmd, "ansible-playbook") || reAnsibleAdhocCmd.MatchString(cmd) {
+		if translated, ok := expandInlineAnsibleToCmd(cmd, lang); ok {
+			return translated
+		}
+		return tr(lang,
+			"# 该现场补充步骤通过 Ansible Playbook 执行（详见「Playbook 步骤」视图）",
+			"# This on-site amended step runs via Ansible Playbook (see Playbook view)",
+		)
+	}
+
 	if !strings.Contains(cmd, "setup-root-ssh-trust.sh") {
 		return cleanDotDotInText(cmd)
 	}
@@ -386,6 +400,327 @@ func (c reportCmdCtx) expandManualStepToCmd(st reportStep) string {
 	}
 
 	return cleanDotDotInText(cmd)
+}
+
+var (
+	reAnsibleAdhocCmd  = regexp.MustCompile(`(?m)(?:^|\s)(?:\S*/)?ansible\s+[^\n]*?-m\s+(?:shell|command)\s+-a\s+`)
+	reAnsibleHeredoc   = regexp.MustCompile(`(?m)<<-?\s*['"]?([A-Za-z0-9_]+)['"]?\s*\n([\s\S]+?)\n[ \t]*([A-Za-z0-9_]+)\s*(?:\n|$)`)
+	reAnsibleAdhocArg  = regexp.MustCompile(`-m\s+(?:shell|command)\s+-a\s+(?:'([^']+)'|"([^"]+)"|(\S+))`)
+	reShellSafeBareTok = regexp.MustCompile(`^[A-Za-z0-9_./:@%+=,-]+$`)
+)
+
+func shellQuoteArg(s string) string {
+	if s == "" {
+		return "''"
+	}
+	if reShellSafeBareTok.MatchString(s) {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+func posixERE(re string) string {
+	return strings.ReplaceAll(re, `\s`, `[[:space:]]`)
+}
+
+// expandInlineAnsibleToCmd converts an AI-amended inline ansible-playbook heredoc or ad-hoc
+// ansible command into directly executable, standard Linux shell commands (zero Ansible syntax).
+func expandInlineAnsibleToCmd(cmd, lang string) (string, bool) {
+	norm := strings.ReplaceAll(cmd, "\r\n", "\n")
+
+	// Case A: ad-hoc `ansible <hosts> -m shell|command -a '<cmd>'`
+	if reAnsibleAdhocCmd.MatchString(norm) && !strings.Contains(norm, "ansible-playbook") {
+		if m := reAnsibleAdhocArg.FindStringSubmatch(norm); len(m) >= 4 {
+			inner := firstNonEmptyStr(m[1], m[2], m[3])
+			if strings.TrimSpace(inner) != "" {
+				return strings.TrimSpace(inner), true
+			}
+		}
+	}
+
+	// Case B: inline heredoc YAML playbook (`ansible-playbook ... /dev/stdin <<'YAML' ... YAML`)
+	var yamlBody string
+	if m := reAnsibleHeredoc.FindStringSubmatch(norm); len(m) == 4 && m[1] == m[3] {
+		yamlBody = m[2]
+	} else if idx := strings.Index(norm, "\n---\n"); idx >= 0 {
+		tail := norm[idx+1:]
+		// Strip optional trailing heredoc delimiter line (e.g. YAML / EOF)
+		lines := strings.Split(strings.TrimRight(tail, "\n"), "\n")
+		if len(lines) > 1 {
+			last := strings.TrimSpace(lines[len(lines)-1])
+			if last == "YAML" || last == "EOF" || last == "PLAYBOOK" {
+				lines = lines[:len(lines)-1]
+			}
+		}
+		yamlBody = strings.Join(lines, "\n")
+	}
+	if strings.TrimSpace(yamlBody) == "" {
+		return "", false
+	}
+
+	var plays []map[string]any
+	if err := yaml.Unmarshal([]byte(yamlBody), &plays); err != nil || len(plays) == 0 {
+		return "", false
+	}
+
+	asStr := func(v any) string {
+		if v == nil {
+			return ""
+		}
+		return strings.TrimSpace(fmt.Sprint(v))
+	}
+	asBool := func(v any) bool {
+		if b, ok := v.(bool); ok {
+			return b
+		}
+		s := strings.ToLower(asStr(v))
+		return s == "true" || s == "yes" || s == "1"
+	}
+	asMap := func(v any) map[string]any {
+		if m, ok := v.(map[string]any); ok {
+			return m
+		}
+		return nil
+	}
+
+	var out []string
+	for _, play := range plays {
+		tasksRaw, _ := play["tasks"].([]any)
+		for _, trRaw := range tasksRaw {
+			task := asMap(trRaw)
+			if task == nil {
+				continue
+			}
+			taskName := asStr(task["name"])
+			// Identify module key
+			var modName string
+			var modVal any
+			for k, v := range task {
+				switch k {
+				case "name", "register", "when", "changed_when", "failed_when", "become", "become_user",
+					"ignore_errors", "vars", "loop", "with_items", "tags", "notify", "environment", "delegate_to", "run_once":
+					continue
+				}
+				modName = k
+				modVal = v
+				break
+			}
+			shortMod := modName
+			if dot := strings.LastIndexByte(shortMod, '.'); dot >= 0 {
+				shortMod = shortMod[dot+1:]
+			}
+
+			var taskLines []string
+			switch shortMod {
+			case "debug", "set_fact", "stat", "meta", "assert", "fail":
+				// Pure Ansible telemetry/plumbing: omit from customer CLI commands.
+				continue
+
+			case "lineinfile":
+				m := asMap(modVal)
+				if m == nil {
+					continue
+				}
+				filePath := firstNonEmptyStr(asStr(m["path"]), asStr(m["dest"]))
+				lineVal := asStr(m["line"])
+				reVal := posixERE(asStr(m["regexp"]))
+				state := strings.ToLower(asStr(m["state"]))
+				if filePath == "" {
+					continue
+				}
+				if asBool(m["backup"]) {
+					taskLines = append(taskLines, fmt.Sprintf("cp -a %s %s.bak.$(date +%%Y%%m%%d%%H%%M%%S)", shellQuoteArg(filePath), shellQuoteArg(filePath)))
+				}
+				if state == "absent" {
+					if reVal != "" {
+						taskLines = append(taskLines, fmt.Sprintf("sed -i -E %s %s", shellQuoteArg("/"+reVal+"/d"), shellQuoteArg(filePath)))
+					} else if lineVal != "" {
+						taskLines = append(taskLines, fmt.Sprintf("grep -vxF %s %s > %s.tmp && mv %s.tmp %s", shellQuoteArg(lineVal), shellQuoteArg(filePath), shellQuoteArg(filePath), shellQuoteArg(filePath), shellQuoteArg(filePath)))
+					}
+				} else if lineVal != "" {
+					if reVal != "" {
+						sedRepl := strings.NewReplacer(`\`, `\\`, `|`, `\|`, `&`, `\&`).Replace(lineVal)
+						sedExpr := fmt.Sprintf("s|%s|%s|", strings.ReplaceAll(reVal, "|", `\|`), sedRepl)
+						taskLines = append(taskLines,
+							fmt.Sprintf("if grep -qE %s %s; then", shellQuoteArg(reVal), shellQuoteArg(filePath)),
+							fmt.Sprintf("  sed -i -E %s %s", shellQuoteArg(sedExpr), shellQuoteArg(filePath)),
+							"else",
+							fmt.Sprintf("  printf '%%s\\n' %s >> %s", shellQuoteArg(lineVal), shellQuoteArg(filePath)),
+							"fi",
+						)
+					} else {
+						taskLines = append(taskLines, fmt.Sprintf("grep -qF %s %s || printf '%%s\\n' %s >> %s", shellQuoteArg(lineVal), shellQuoteArg(filePath), shellQuoteArg(lineVal), shellQuoteArg(filePath)))
+					}
+				}
+
+			case "blockinfile":
+				m := asMap(modVal)
+				if m == nil {
+					continue
+				}
+				filePath := firstNonEmptyStr(asStr(m["path"]), asStr(m["dest"]))
+				blockVal := strings.TrimRight(asStr(m["block"]), "\n")
+				if filePath == "" || blockVal == "" {
+					continue
+				}
+				if asBool(m["backup"]) {
+					taskLines = append(taskLines, fmt.Sprintf("cp -a %s %s.bak.$(date +%%Y%%m%%d%%H%%M%%S)", shellQuoteArg(filePath), shellQuoteArg(filePath)))
+				}
+				taskLines = append(taskLines, fmt.Sprintf("cat >> %s <<'EOF'\n%s\nEOF", shellQuoteArg(filePath), blockVal))
+
+			case "command", "shell":
+				if m := asMap(modVal); m != nil {
+					if argv, ok := m["argv"].([]any); ok && len(argv) > 0 {
+						parts := make([]string, 0, len(argv))
+						for _, a := range argv {
+							parts = append(parts, shellQuoteArg(fmt.Sprint(a)))
+						}
+						taskLines = append(taskLines, strings.Join(parts, " "))
+					} else if c := firstNonEmptyStr(asStr(m["cmd"]), asStr(m["_raw_params"])); c != "" {
+						taskLines = append(taskLines, c)
+					}
+				} else if s := asStr(modVal); s != "" {
+					taskLines = append(taskLines, s)
+				}
+
+			case "copy":
+				m := asMap(modVal)
+				if m == nil {
+					continue
+				}
+				dest := asStr(m["dest"])
+				if dest == "" {
+					continue
+				}
+				if asBool(m["backup"]) {
+					taskLines = append(taskLines, fmt.Sprintf("[ -f %s ] && cp -a %s %s.bak.$(date +%%Y%%m%%d%%H%%M%%S)", shellQuoteArg(dest), shellQuoteArg(dest), shellQuoteArg(dest)))
+				}
+				if content, hasC := m["content"]; hasC {
+					body := strings.TrimRight(fmt.Sprint(content), "\n")
+					taskLines = append(taskLines, fmt.Sprintf("cat > %s <<'EOF'\n%s\nEOF", shellQuoteArg(dest), body))
+				} else if src := asStr(m["src"]); src != "" {
+					taskLines = append(taskLines, fmt.Sprintf("cp -a %s %s", shellQuoteArg(src), shellQuoteArg(dest)))
+				}
+				if mode := asStr(m["mode"]); mode != "" {
+					taskLines = append(taskLines, fmt.Sprintf("chmod %s %s", shellQuoteArg(mode), shellQuoteArg(dest)))
+				}
+				if owner := asStr(m["owner"]); owner != "" {
+					grp := asStr(m["group"])
+					og := owner
+					if grp != "" {
+						og = owner + ":" + grp
+					}
+					taskLines = append(taskLines, fmt.Sprintf("chown %s %s", shellQuoteArg(og), shellQuoteArg(dest)))
+				}
+
+			case "file":
+				m := asMap(modVal)
+				if m == nil {
+					continue
+				}
+				filePath := firstNonEmptyStr(asStr(m["path"]), asStr(m["dest"]))
+				state := strings.ToLower(asStr(m["state"]))
+				if filePath == "" {
+					continue
+				}
+				switch state {
+				case "directory":
+					taskLines = append(taskLines, "mkdir -p "+shellQuoteArg(filePath))
+				case "absent":
+					taskLines = append(taskLines, "rm -rf "+shellQuoteArg(filePath))
+				case "link":
+					if src := asStr(m["src"]); src != "" {
+						taskLines = append(taskLines, fmt.Sprintf("ln -sfn %s %s", shellQuoteArg(src), shellQuoteArg(filePath)))
+					}
+				case "touch":
+					taskLines = append(taskLines, "touch "+shellQuoteArg(filePath))
+				}
+				if mode := asStr(m["mode"]); mode != "" {
+					taskLines = append(taskLines, fmt.Sprintf("chmod %s %s", shellQuoteArg(mode), shellQuoteArg(filePath)))
+				}
+				if owner := asStr(m["owner"]); owner != "" {
+					grp := asStr(m["group"])
+					og := owner
+					if grp != "" {
+						og = owner + ":" + grp
+					}
+					taskLines = append(taskLines, fmt.Sprintf("chown %s %s", shellQuoteArg(og), shellQuoteArg(filePath)))
+				}
+
+			case "systemd", "systemd_service", "service":
+				m := asMap(modVal)
+				if m == nil {
+					continue
+				}
+				unit := asStr(m["name"])
+				if asBool(m["daemon_reload"]) {
+					taskLines = append(taskLines, "systemctl daemon-reload")
+				}
+				if unit != "" {
+					switch strings.ToLower(asStr(m["state"])) {
+					case "started":
+						taskLines = append(taskLines, "systemctl start "+shellQuoteArg(unit))
+					case "stopped":
+						taskLines = append(taskLines, "systemctl stop "+shellQuoteArg(unit))
+					case "restarted":
+						taskLines = append(taskLines, "systemctl restart "+shellQuoteArg(unit))
+					case "reloaded":
+						taskLines = append(taskLines, "systemctl reload "+shellQuoteArg(unit))
+					}
+					if m["enabled"] != nil {
+						if asBool(m["enabled"]) {
+							taskLines = append(taskLines, "systemctl enable "+shellQuoteArg(unit))
+						} else {
+							taskLines = append(taskLines, "systemctl disable "+shellQuoteArg(unit))
+						}
+					}
+				}
+
+			case "sysctl":
+				if m := asMap(modVal); m != nil {
+					if k, v := asStr(m["name"]), asStr(m["value"]); k != "" && v != "" {
+						taskLines = append(taskLines, fmt.Sprintf("sysctl -w %s=%s", shellQuoteArg(k), shellQuoteArg(v)))
+					}
+				}
+
+			case "wait_for":
+				if m := asMap(modVal); m != nil {
+					host := firstNonEmptyStr(asStr(m["host"]), "127.0.0.1")
+					port := asStr(m["port"])
+					if port != "" {
+						taskLines = append(taskLines, fmt.Sprintf("nc -zv -w 5 %s %s", shellQuoteArg(host), shellQuoteArg(port)))
+					}
+				}
+			}
+
+			if len(taskLines) > 0 {
+				if taskName != "" {
+					out = append(out, "# "+taskName)
+				}
+				out = append(out, taskLines...)
+			}
+		}
+	}
+
+	if len(out) == 0 {
+		return "", false
+	}
+	return strings.Join(out, "\n"), true
+}
+
+// sanitizeIncidentTextForCmd strips raw Ansible playbook invocation lines from incident resolution prose
+// when rendering in pure-command mode (variantResultCmd).
+func sanitizeIncidentTextForCmd(text string) string {
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	var kept []string
+	for _, ln := range lines {
+		trim := strings.TrimSpace(ln)
+		if strings.Contains(trim, "ansible-playbook") || strings.HasPrefix(trim, "cd /root/middleware-automation/") {
+			continue
+		}
+		kept = append(kept, ln)
+	}
+	return strings.TrimSpace(strings.Join(kept, "\n"))
 }
 
 var (

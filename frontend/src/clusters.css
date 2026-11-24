@@ -1842,11 +1842,13 @@
 .cl-ledger-conflict {
   display: inline-flex;
   align-items: center;
-  height: 18px;
-  padding: 0 6px;
-  border-radius: 999px;
-  font-size: 10.5px;
-  font-weight: 650;
+  justify-content: center;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
   color: var(--bad);
   background: var(--bad-soft);
 }
@@ -1890,25 +1892,40 @@ body[arco-theme="dark"] .cl-ledger-subnote.is-applied {
   cursor: pointer;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  flex: none;
   gap: 4px;
-  padding: 1px 8px;
-  border-radius: 999px;
+  height: 22px;
+  padding: 0 8px 0 6.5px;
+  border-radius: 5px;
   font-size: 11.5px;
   font-weight: 600;
-  color: #047857;
-  background: rgba(16, 185, 129, 0.13);
-  border: 1px solid rgba(16, 185, 129, 0.28);
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--ok);
+  background: var(--ok-soft);
+  border: 1px solid color-mix(in srgb, var(--ok) 24%, transparent);
   transition: background-color 0.15s ease, border-color 0.15s ease;
 }
+.cl-applied-chip > svg {
+  flex: none;
+  font-size: 12px;
+}
+.cl-applied-chip > span {
+  display: inline-block;
+  line-height: 1;
+  text-box-trim: trim-both;
+  text-box-edge: cap alphabetic;
+}
 .cl-applied-chip:hover {
-  background: rgba(16, 185, 129, 0.2);
-  border-color: rgba(16, 185, 129, 0.45);
+  background: color-mix(in srgb, var(--ok) 17%, transparent);
+  border-color: color-mix(in srgb, var(--ok) 42%, transparent);
 }
 [data-theme="dark"] .cl-applied-chip,
 body[arco-theme="dark"] .cl-applied-chip {
-  color: #34d399;
-  background: rgba(16, 185, 129, 0.18);
-  border-color: rgba(16, 185, 129, 0.36);
+  color: var(--ok);
+  background: var(--ok-soft);
+  border-color: color-mix(in srgb, var(--ok) 34%, transparent);
 }
 
 .cl-u-changes {
@@ -2002,18 +2019,23 @@ body[arco-theme="dark"] .cl-u-changes-h {
   justify-content: center;
   min-width: 66px;
   height: 22px;
-  font-size: 11px;
-  font-weight: 580;
-  color: #047857;
-  background: color-mix(in srgb, #10b981 10%, transparent);
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1;
+  text-box-trim: trim-both;
+  text-box-edge: cap alphabetic;
+  color: var(--ok);
+  background: var(--ok-soft);
+  border: 1px solid color-mix(in srgb, var(--ok) 22%, transparent);
   padding: 0 8px;
-  border-radius: 999px;
+  border-radius: 5px;
   white-space: nowrap;
 }
 [data-theme="dark"] .cl-u-chg-pill,
 body[arco-theme="dark"] .cl-u-chg-pill {
-  color: #34d399;
-  background: color-mix(in srgb, #10b981 16%, transparent);
+  color: var(--ok);
+  background: var(--ok-soft);
+  border-color: color-mix(in srgb, var(--ok) 32%, transparent);
 }
 .cl-u-change-who {
   font-size: 12px;

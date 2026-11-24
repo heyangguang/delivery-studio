@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.293-dev"
+	version            = "1.0.294-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,20 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.294-dev",
+		Date:    "2026-11-24",
+		Title:   "统一标题栏状态标签为圆角矩形并精准修正中文垂直居中",
+		TitleEn: "Unify header status tags to 5px rounded rectangles with optical vertical centering",
+		Highlights: []string{
+			"统一集群详情标题栏中状态徽章、部署方式标签、已落地变更标签、验证通道标签及架构节点标签为一致的 22px 高度与 5px 圆角矩形，消除长方形与胶囊圆角混搭及高低错位",
+			"为中英文标签文字引入光学垂直居中裁剪（text-box-trim）并收紧标题行高与间距，彻底修正 Windows 字体下标签文字偏上的视觉偏移，同时统一安全中心与报告模板卡片标签圆角",
+		},
+		HighlightsEn: []string{
+			"Unified cluster header badges, applied-change chips, verification tags, architecture node badges, and security/report badges to a consistent 22px height and 5px rounded-rectangle geometry",
+			"Added optical vertical centering (text-box-trim) and tight heading line-height so status dots, icons, and CJK/Latin labels sit centered to 0px tolerance across Windows and macOS",
+		},
+	},
 	{
 		Version: "1.0.293-dev",
 		Date:    "2026-11-24",

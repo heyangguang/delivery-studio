@@ -182,7 +182,7 @@ export function StatusBadge({
   return (
     <span className={`sbadge s-${state}`}>
       <StatusDot state={state} />
-      {label || states[state] || state}
+      <span className="sbadge-lbl">{label || states[state] || state}</span>
     </span>
   );
 }

@@ -114,6 +114,15 @@ func distillList(files map[string]File, role string, list []map[string]any, dept
 					}
 				}
 				cmd, nm = fill(cmd, v), fill(name, v)
+				if short == "apt" || short == "dnf" || short == "yum" || short == "package" {
+					if m, ok := args.(map[string]any); ok {
+						if rawName := m["name"]; rawName != nil {
+							if pkgs := pkgListText(resolveAll(rawName, v)); pkgs != "" {
+								cmd = pkgInstallCmd(short, pkgs)
+							}
+						}
+					}
+				}
 			}
 			if nm == "" && cmd == "" {
 				continue
@@ -121,9 +130,14 @@ func distillList(files map[string]File, role string, list []map[string]any, dept
 			if v != nil {
 				cmd = placeholders(cmd)
 			}
+			cmd = cleanRelPaths(cmd)
 			w := when
 			if v != nil && w != "" {
 				w = fill(w, v)
+			}
+			// Deduplicate consecutive identical name+cmd actions (e.g. repeated mkdir in secret loops).
+			if n := len(out); n > 0 && out[n-1].Name == nm && out[n-1].Cmd == cmd && out[n-1].When == w {
+				continue
 			}
 			out = append(out, Action{Name: nm, Cmd: cmd, When: w, Check: short == "assert"})
 		}
@@ -189,7 +203,7 @@ func commandOf(mod string, args any, t map[string]any) string {
 			if l, ok := av.([]any); ok {
 				var p []string
 				for _, x := range l {
-					p = append(p, fmt.Sprint(x))
+					p = append(p, shellQuoteArg(fmt.Sprint(x)))
 				}
 				return strings.Join(p, " ")
 			}
@@ -232,7 +246,7 @@ func commandOf(mod string, args any, t map[string]any) string {
 		var l []string
 		if c, ok := m["content"]; ok {
 			body := strings.TrimRight(fmt.Sprint(c), "\n")
-			if strings.Count(body, "\n") < 8 {
+			if strings.Count(body, "\n") < 32 {
 				l = append(l, "cat > "+dest+" <<'EOF'\n"+body+"\nEOF")
 			} else {
 				l = append(l, "# 写入 "+dest+"（内容见交付里的任务文件）")
@@ -253,9 +267,24 @@ func commandOf(mod string, args any, t map[string]any) string {
 		}
 		return strings.Join(l, "\n")
 	case "lineinfile":
-		return "# 在 " + str(m, "path") + " 中确保有这一行：" + str(m, "line")
+		ln := str(m, "line")
+		p := str(m, "path")
+		if p == "" {
+			p = str(m, "dest")
+		}
+		if ln != "" && p != "" {
+			return "grep -qF " + shellQuoteArg(ln) + " " + p + " || printf '%s\\n' " + shellQuoteArg(ln) + " >> " + p
+		}
+		return "# 在 " + p + " 中确保有这一行：" + ln
 	case "blockinfile":
-		return "# 在 " + str(m, "path") + " 中写入一段配置"
+		p := str(m, "path")
+		if p == "" {
+			p = str(m, "dest")
+		}
+		if blk := strings.TrimRight(str(m, "block"), "\n"); blk != "" && p != "" && strings.Count(blk, "\n") < 24 {
+			return "cat >> " + p + " <<'EOF'\n" + blk + "\nEOF"
+		}
+		return "# 在 " + p + " 中写入一段配置"
 	case "systemd", "service", "systemd_service":
 		unit := str(m, "name")
 		var l []string
@@ -283,7 +312,10 @@ func commandOf(mod string, args any, t map[string]any) string {
 		}
 		return strings.Join(l, "\n")
 	case "apt", "package", "dnf", "yum":
-		return "# 从离线软件源安装：" + str(m, "name")
+		if pkgs := pkgListText(m["name"]); pkgs != "" {
+			return pkgInstallCmd(mod, pkgs)
+		}
+		return pkgInstallCmd(mod, str(m, "name"))
 	case "stat":
 		return "stat " + str(m, "path")
 	case "slurp":
@@ -294,23 +326,103 @@ func commandOf(mod string, args any, t map[string]any) string {
 		return ""
 	case "wait_for":
 		if p := str(m, "port"); p != "" {
-			return "# 等待 " + firstNonEmpty(str(m, "host"), "本机") + ":" + p + " 可连接"
+			h := firstNonEmpty(str(m, "host"), "127.0.0.1")
+			return fmt.Sprintf("timeout 60 bash -c 'until (echo >/dev/tcp/%s/%s) 2>/dev/null; do sleep 2; done'", h, p)
 		}
-		return "# 等待 " + str(m, "path")
+		if fp := str(m, "path"); fp != "" {
+			return fmt.Sprintf("timeout 60 bash -c 'until [ -e %s ]; do sleep 2; done'", shellQuoteArg(fp))
+		}
+		return ""
 	case "uri":
-		return "curl -s " + str(m, "url")
+		u := str(m, "url")
+		method := strings.ToUpper(str(m, "method"))
+		if method == "" || method == "GET" {
+			return "curl -fsS " + u
+		}
+		cmd := "curl -fsS -X " + method + " " + u
+		if str(m, "body_format") == "json" {
+			cmd += " -H 'Content-Type: application/json'"
+		}
+		if body, ok := m["body"]; ok && body != nil {
+			b := strings.TrimSpace(fmt.Sprint(body))
+			if b != "" && !strings.Contains(b, "secrets") && !strings.Contains(b, "password") {
+				cmd += " -d " + shellQuoteArg(b)
+			}
+		}
+		return cmd
 	case "user":
 		return "useradd " + str(m, "name")
 	case "group":
 		return "groupadd " + str(m, "name")
 	case "sysctl":
 		return "sysctl -w " + str(m, "name") + "=" + str(m, "value")
-	case "get_url", "unarchive":
-		return "# " + mod + " " + firstNonEmpty(str(m, "url"), str(m, "src")) + " → " + str(m, "dest")
+	case "unarchive":
+		return "tar -xzf " + str(m, "src") + " -C " + str(m, "dest")
+	case "get_url":
+		return "curl -fsSL " + str(m, "url") + " -o " + str(m, "dest")
 	case "find":
 		return "find " + str(m, "paths")
 	}
 	return ""
+}
+
+func shellQuoteArg(t string) string {
+	if t == "" || strings.ContainsAny(t, " \t\n\"'$&|;<>*?()\\") {
+		return "'" + strings.ReplaceAll(t, "'", `'\''`) + "'"
+	}
+	return t
+}
+
+func pkgListText(v any) string {
+	switch x := v.(type) {
+	case []any:
+		var out []string
+		for _, it := range x {
+			s := strings.TrimSpace(fmt.Sprint(it))
+			if s != "" && !strings.HasPrefix(s, "{{") {
+				out = append(out, s)
+			}
+		}
+		return strings.Join(out, " ")
+	case []string:
+		return strings.Join(x, " ")
+	case string:
+		s := strings.TrimSpace(x)
+		if s == "" || strings.HasPrefix(s, "{{") {
+			return ""
+		}
+		return s
+	}
+	return ""
+}
+
+func pkgInstallCmd(mod, pkgs string) string {
+	pkgs = strings.TrimSpace(pkgs)
+	if mod == "dnf" || mod == "yum" {
+		return mod + " install -y " + pkgs
+	}
+	return "DEBIAN_FRONTEND=noninteractive apt-get install -y " + pkgs
+}
+
+func cleanRelPaths(s string) string {
+	if !strings.Contains(s, "/../") {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	for i, ln := range lines {
+		if !strings.Contains(ln, "/../") {
+			continue
+		}
+		fields := strings.Fields(ln)
+		for _, tok := range fields {
+			if strings.Contains(tok, "/../") && strings.HasPrefix(tok, "/") {
+				cleaned := path.Clean(tok)
+				ln = strings.ReplaceAll(ln, tok, cleaned)
+			}
+		}
+		lines[i] = ln
+	}
+	return strings.Join(lines, "\n")
 }
 
 func oneLine(v any) string {

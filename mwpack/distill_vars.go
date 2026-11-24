@@ -196,6 +196,27 @@ func varsFor(files map[string]File, projectDir string, s *PlanStep, host string)
 
 // expandLoop lists the items a task loops over, when they can be worked out.
 func expandLoop(t map[string]any, vars map[string]any) ([]any, bool) {
+	if wd, ok := t["with_dict"]; ok {
+		resolved := resolveAll(wd, vars)
+		if m, ok := resolved.(map[string]any); ok && len(m) > 0 {
+			keys := make([]string, 0, len(m))
+			for k := range m {
+				keys = append(keys, k)
+			}
+			for i := 0; i < len(keys); i++ {
+				for j := i + 1; j < len(keys); j++ {
+					if keys[j] < keys[i] {
+						keys[i], keys[j] = keys[j], keys[i]
+					}
+				}
+			}
+			out := make([]any, 0, len(keys))
+			for _, k := range keys {
+				out = append(out, map[string]any{"key": k, "value": m[k]})
+			}
+			return out, true
+		}
+	}
 	raw, ok := t["loop"]
 	if !ok {
 		raw, ok = t["with_items"]
@@ -208,7 +229,29 @@ func expandLoop(t map[string]any, vars map[string]any) ([]any, bool) {
 		out := resolveAll(x, vars).([]any)
 		return out, true
 	case string:
-		if out, ok := jinja("{{ ("+strings.Trim(strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(x), "{{"), "}}")), " ")+") | tojson }}", vars); ok {
+		expr := strings.Trim(strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(x), "{{"), "}}")), " ")
+		if strings.HasSuffix(expr, "| dict2items") || strings.HasSuffix(expr, "|dict2items") {
+			base := strings.TrimSpace(strings.TrimSuffix(strings.TrimSuffix(expr, "dict2items"), "|"))
+			if m, ok := resolveAll("{{ "+base+" }}", vars).(map[string]any); ok && len(m) > 0 {
+				keys := make([]string, 0, len(m))
+				for k := range m {
+					keys = append(keys, k)
+				}
+				for i := 0; i < len(keys); i++ {
+					for j := i + 1; j < len(keys); j++ {
+						if keys[j] < keys[i] {
+							keys[i], keys[j] = keys[j], keys[i]
+						}
+					}
+				}
+				out := make([]any, 0, len(keys))
+				for _, k := range keys {
+					out = append(out, map[string]any{"key": k, "value": m[k]})
+				}
+				return out, true
+			}
+		}
+		if out, ok := jinja("{{ ("+expr+") | tojson }}", vars); ok {
 			var l []any
 			if json.Unmarshal([]byte(out), &l) == nil {
 				return wholeNumbers(l).([]any), true

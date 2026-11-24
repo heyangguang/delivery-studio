@@ -3,7 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"path/filepath"
+	"path"
 	"strings"
 
 	"middleware-deployer/mwpack"
@@ -137,10 +137,11 @@ func (s *storeServer) runbookStepsOfLang(raw []byte, jobID, lang string) []repor
 	label := tr(lang, "部署", "Deploy")
 	dep := reportTab{Label: label}
 	if p.DeliveryMode != "automatic" {
+		rootDir := path.Dir(path.Dir(strings.ReplaceAll(cd, "\\", "/")))
 		dep.Steps = append(dep.Steps, reportStep{
 			Key: "deploy/deploy-bootstrap", Title: tr(lang, "离线安装 Ansible 并核对清单", "Install Ansible Offline & Verify Inventory"), Purpose: tr(lang, "引导脚本只使用随包的离线材料，不访问外网。", "Bootstrap script uses only bundled offline artifacts with zero external network access."), Effect: "change",
 			Expect: tr(lang, "清单应列出全部机器和各实例的分组。", "Inventory must list all hosts and instance groups."), Hosts: []string{p.Controller}, Manual: true,
-			Command: "cd " + filepath.Dir(filepath.Dir(cd)) + "\nbash bootstrap/bootstrap-ansible.sh\n" + withCd("../../bin/ansible-inventory -i inventory/hosts.yml --graph"),
+			Command: "cd " + rootDir + "\nbash bootstrap/bootstrap-ansible.sh\n" + withCd("../../bin/ansible-inventory -i inventory/hosts.yml --graph"),
 		})
 	}
 	for _, ph := range p.Deploy {
@@ -291,6 +292,7 @@ func (s *storeServer) stepReport(b *docBuilder, level int, j storeJob, langOpt .
 	logs := s.runLogs(j.ID)
 	hostIPs := s.jobHostIPs(j.ID)
 	execSteps := s.latestExecutionSteps(j.ID)
+	cmdCtx := s.buildReportCmdCtx(j, hostIPs, lang)
 	b.variant(variantCmd, docBlock{Kind: "note", Text: tr(lang,
 		"命令里的部署参数（目录、端口、地址等）已按本次规格代入，多台机器的步骤以第一台为例，其余机器把主机名和地址换成自己的；写成 <…> 的是执行时才产生的值（上一条命令的输出等，见下面的执行结果），密码不写进报告，见控制节点 secrets/ 目录。以 # 开头的行说明这一步在做什么，不是要输入的命令。",
 		"Deployment parameters (directories, ports, addresses) in these commands are pre-filled from the spec. Multi-host steps show the first host as an example; substitute each peer's hostname/IP as needed. Placeholders like <...> represent runtime values, and secrets remain omitted (refer to controller secrets/). Lines starting with # are descriptive comments, not commands.",
@@ -318,7 +320,13 @@ func (s *storeServer) stepReport(b *docBuilder, level int, j storeJob, langOpt .
 			// automation: the YAML that is run
 			switch {
 			case st.Manual:
-				b.variant("", docBlock{Kind: "code", Style: "shell", Text: headerWithIPLang(st.Hosts, hostIPs, st.Title, lang) + "\n" + st.Command})
+				expandedCmd := cmdCtx.expandManualStepToCmd(st)
+				if expandedCmd != strings.TrimSpace(st.Command) {
+					b.variant(variantAuto, docBlock{Kind: "code", Style: "shell", Text: headerWithIPLang(st.Hosts, hostIPs, st.Title, lang) + "\n" + st.Command})
+					b.variant(variantCmd, docBlock{Kind: "code", Style: "shell", Text: headerWithIPLang(st.Hosts, hostIPs, st.Title, lang) + "\n" + expandedCmd})
+				} else {
+					b.variant("", docBlock{Kind: "code", Style: "shell", Text: headerWithIPLang(st.Hosts, hostIPs, st.Title, lang) + "\n" + expandedCmd})
+				}
 			default:
 				b.variant(variantAuto, docBlock{Kind: "code", Style: "shell", Text: headerWithIPLang([]string{tr(lang, "控制节点", "Controller")}, hostIPs, tr(lang, "执行 ", "Run ")+st.Playbook, lang) + "\n" + st.Command})
 				if len(st.Parts) > 1 {
@@ -332,20 +340,7 @@ func (s *storeServer) stepReport(b *docBuilder, level int, j storeJob, langOpt .
 				// the same tasks as commands, machine by machine
 				any := false
 				for _, p := range st.Parts {
-					var lines []string
-					for _, a := range p.Actions {
-						cond := ""
-						if a.When != "" && len([]rune(a.When)) <= 100 {
-							cond = tr(lang, "（仅当 "+a.When+"）", " (when "+a.When+")")
-						}
-						if strings.TrimSpace(a.Cmd) == "" {
-							if a.Check && strings.TrimSpace(a.Name) != "" {
-								lines = append(lines, tr(lang, "# 核对：", "# Check: ")+mwpack.TranslateCatalogText(lang, strings.ReplaceAll(a.Name, "\n", " "))+cond)
-							}
-							continue
-						}
-						lines = append(lines, "# "+mwpack.TranslateCatalogText(lang, strings.ReplaceAll(a.Name, "\n", " "))+cond+"\n"+a.Cmd)
-					}
+					lines := cmdCtx.renderPartExecutableLines(p)
 					if len(lines) == 0 {
 						continue
 					}
@@ -370,7 +365,11 @@ func (s *storeServer) stepReport(b *docBuilder, level int, j storeJob, langOpt .
 				if rec.Log != "" {
 					items = append(items, tr(lang, "输出：", "Output: ")+truncRunes(rec.Log, 600))
 				}
-				b.variant("", docBlock{Kind: "old", Title: tr(lang,
+				oldVariant := ""
+				if st.Playbook != "" || strings.Contains(old.Command, "ansible-playbook") || isInternalWrapperCmd(old.Command) {
+					oldVariant = variantAuto
+				}
+				b.variant(oldVariant, docBlock{Kind: "old", Title: tr(lang,
 					fmt.Sprintf("旧版本（第 %d 次按最新组件同步前，%s），已被本步骤的新版本取代：%s", old.Sync, stamp(old.At), old.Title),
 					fmt.Sprintf("Superseded revision (before sync #%d on %s), replaced by current step: %s", old.Sync, stamp(old.At), old.Title),
 				), Text: old.Command, Items: items})

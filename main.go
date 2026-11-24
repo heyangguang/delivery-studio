@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.321-dev"
+	version            = "1.0.322-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,22 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.322-dev",
+		Date:    "2026-11-24",
+		Title:   "交付报告纯命令版全面净化为可直接执行的标准命令",
+		TitleEn: "Delivery Report Command Mode: Pure Directly Executable Commands",
+		Highlights: []string{
+			"交付报告默认「命令版」彻底去除内部封装脚本（setup-root-ssh-trust.sh、bootstrap-ansible.sh、mw-data-disk.sh、mw-apt-setup.sh、pgtest.py/pgstep_*.py）与内联 Python 片段，展开为可直接复制执行的标准 Linux / OpenSSH / PostgreSQL / Patroni / pgBackRest / etcd / Redis / HAProxy / Nginx / Keepalived 命令",
+			"修复 Windows 服务端导出报告时路径反斜杠问题（cd \\root\\middleware-automation）、未展开占位符（<pkg_specs>、<执行时得到的值>、inventory/../）与历史 Playbook 取代记录污染",
+			"同时支持新生成交付与历史已交付集群（如 pg-bitbucket-public-prod）的即时净化导出，Playbook 自动化版报告保持完整兼容",
+		},
+		HighlightsEn: []string{
+			"Eliminated bundled wrapper scripts (setup-root-ssh-trust.sh, bootstrap-ansible.sh, mw-data-disk.sh, mw-apt-setup.sh, pgtest.py/pgstep_*.py) and inline Python blobs from Delivery Report Command Mode, expanding them into directly executable Linux/OpenSSH/middleware shell commands",
+			"Fixed Windows backslash paths in exported reports, unresolved placeholders (<pkg_specs>, runtime tokens, inventory/../), and superseded ansible-playbook clutter",
+			"Applies cleanly to both newly created and historical deployed clusters while preserving Playbook Automation Mode reports intact",
+		},
+	},
 	{
 		Version: "1.0.321-dev",
 		Date:    "2026-11-24",

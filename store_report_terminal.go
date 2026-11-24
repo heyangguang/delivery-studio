@@ -482,7 +482,7 @@ func buildTerminalTranscript(st reportStep, rl runLog, hostIPs map[string]string
 		flushMasked()
 
 		act, matched := matchActionForTask(allActions, used, t.Name)
-		hasCmd := matched && isRunnableShellCmd(act.Cmd)
+		hasCmd := matched && isRunnableShellCmd(act.Cmd) && !isInternalWrapperCmd(act.Cmd)
 
 		// Parse outcomes per host so we can group silent identical outcomes cleanly.
 		type hostOut struct {
@@ -627,12 +627,14 @@ func formatManualTerminalLog(st reportStep, hostIPs map[string]string, rawLog st
 		host = strings.TrimSpace(st.Hosts[0])
 	}
 	var cmdLines []string
-	for _, ln := range strings.Split(strings.ReplaceAll(st.Command, "\r\n", "\n"), "\n") {
-		s := strings.TrimSpace(ln)
-		if s == "" || strings.HasPrefix(s, "#") {
-			continue
+	if !isInternalWrapperCmd(st.Command) {
+		for _, ln := range strings.Split(strings.ReplaceAll(st.Command, "\r\n", "\n"), "\n") {
+			s := strings.TrimSpace(ln)
+			if s == "" || strings.HasPrefix(s, "#") {
+				continue
+			}
+			cmdLines = append(cmdLines, s)
 		}
-		cmdLines = append(cmdLines, s)
 	}
 	var head []string
 	if ip := strings.TrimSpace(hostIPs[host]); ip != "" {

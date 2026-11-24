@@ -408,3 +408,137 @@ func TestTerminalTranscriptAndWordExport(t *testing.T) {
 		}
 	}
 }
+
+func TestDeliveryReportCmdModeHasZeroWrapperScripts(t *testing.T) {
+	s, _ := testStore(t)
+	alice, csrf := storeLogin(t, s, "alice")
+	spec := `{
+		"id": "pg-cmd-audit",
+		"delivery_mode": "offline",
+		"hosts": [
+			{"name": "pg-n1", "ip": "10.20.1.11", "disk": "/dev/vdb"},
+			{"name": "pg-n2", "ip": "10.20.1.12", "disk": "/dev/vdb"},
+			{"name": "pg-n3", "ip": "10.20.1.13", "disk": "/dev/vdb"}
+		],
+		"instances": [
+			{"id": "etcd", "component": "etcd", "placement": {"member": ["pg-n1", "pg-n2", "pg-n3"]}},
+			{"id": "pg", "component": "postgresql", "version": "17", "placement": {"primary": ["pg-n1"], "replica": ["pg-n2", "pg-n3"]}, "uses": {"dcs": "etcd"}, "params": {"tde": true, "tls": false, "client_cidr": "10.20.1.0/24"}},
+			{"id": "elb", "component": "external-lb", "params": {"address": "pg-cmd-audit.db.internal", "resolve_ip": "10.20.1.100"}, "binds": [{"endpoint": "pg.writer", "listen": 5432}]}
+		]
+	}`
+	w := storeCreate(t, s, alice, csrf, spec, nil)
+	if w.Code != 200 && w.Code != 201 && w.Code != 202 {
+		t.Fatalf("create delivery failed: %d %s", w.Code, w.Body.String())
+	}
+	s.wg.Wait()
+	var j storeJob
+	if err := json.Unmarshal(w.Body.Bytes(), &j); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify both live-generated plan.json AND simulated legacy historical plan.json
+	// (with old pgtest.py, setup-root-ssh-trust.sh, unquoted 60-line Python, <pkg_specs>, <执行时得到的值>, and superseded ansible-playbook)
+	checkCmdDoc := func(label string) {
+		t.Helper()
+		r := storeRequest(s, "GET", "/api/clusters/pg-cmd-audit/docs/delivery", nil, alice, "")
+		if r.Code != 200 {
+			t.Fatalf("%s: GET delivery doc: %d %s", label, r.Code, r.Body.String())
+		}
+		var d clusterDoc
+		if err := json.Unmarshal(r.Body.Bytes(), &d); err != nil {
+			t.Fatal(err)
+		}
+		cmdDoc := parseExportOptions(map[string][]string{"detail": {"1"}, "steps": {"cmd"}, "results": {"0"}}).filtered(&d)
+		var allCmdText strings.Builder
+		for _, blk := range cmdDoc.Blocks {
+			allCmdText.WriteString(blk.Text)
+			allCmdText.WriteString("\n")
+		}
+		txt := allCmdText.String()
+
+		forbidden := []string{
+			"setup-root-ssh-trust.sh",
+			"bootstrap-ansible.sh",
+			`\root\middleware-automation`,
+			"mw-data-disk.sh",
+			"mw-apt-setup.sh",
+			"mw-dnf-setup.sh",
+			"mw-repo-setup.sh",
+			"pgtest.py",
+			"pgcommon.py",
+			"pgstep_",
+			"<pkg_specs>",
+			"<执行时得到的值>",
+			"inventory/../",
+			"import ipaddress",
+			"ansible-playbook",
+			"# 按模板 ",
+			"# unarchive ",
+			"可连接\n",
+		}
+		for _, bad := range forbidden {
+			if strings.Contains(txt, bad) {
+				var sample []string
+				for _, ln := range strings.Split(txt, "\n") {
+					if strings.Contains(ln, bad) {
+						sample = append(sample, ln)
+						if len(sample) >= 5 {
+							break
+						}
+					}
+				}
+				t.Errorf("%s: variantCmd report leaked forbidden internal script/placeholder %q; samples:\n  %s", label, bad, strings.Join(sample, "\n  "))
+			}
+		}
+
+		required := []string{
+			"hostnamectl set-hostname",
+			"ssh-keygen -t ed25519",
+			"parted -s /dev/vdb",
+			"apt-get install -y",
+			"patronictl -c /etc/patroni/patroni.yml",
+			"pgbackrest --stanza=pg-cmd-audit-pg",
+			"psql",
+			"cat > /etc/patroni/patroni.yml <<'EOF'",
+			"cat > /etc/pgbackrest/pgbackrest.conf <<'EOF'",
+			"cat > /etc/sysctl.d/99-pg-ha.conf <<'EOF'",
+		}
+		for _, want := range required {
+			if !strings.Contains(txt, want) {
+				t.Errorf("%s: variantCmd report missing expected executable command %q", label, want)
+			}
+		}
+
+		// Automation variant must still retain playbooks and helper scripts.
+		autoDoc := parseExportOptions(map[string][]string{"detail": {"1"}, "steps": {"auto"}, "results": {"0"}}).filtered(&d)
+		var allAuto strings.Builder
+		for _, blk := range autoDoc.Blocks {
+			allAuto.WriteString(blk.Text)
+			allAuto.WriteString("\n")
+		}
+		autoTxt := allAuto.String()
+		for _, wantAuto := range []string{"ansible-playbook", "setup-root-ssh-trust.sh", "bootstrap-ansible.sh"} {
+			if !strings.Contains(autoTxt, wantAuto) {
+				t.Errorf("%s: variantAuto report lost automation command %q", label, wantAuto)
+			}
+		}
+		if strings.Contains(autoTxt, `\root\middleware-automation`) {
+			t.Errorf("%s: variantAuto report leaked Windows backslash path", label)
+		}
+	}
+
+	checkCmdDoc("fresh-generated")
+
+	// Inject a legacy historical plan.json snippet & superseded ansible-playbook record to prove backward purification.
+	planPath := filepath.Join(s.jobDir(j.ID), "output", "plan.json")
+	rawPlan, err := os.ReadFile(planPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyPlan := strings.ReplaceAll(string(rawPlan), "pgstep_ha_check.py", "pgtest.py")
+	legacyPlan = strings.ReplaceAll(legacyPlan, "apt-get install -y", "# 从离线软件源安装：<pkg_specs>")
+	if err := os.WriteFile(planPath, []byte(legacyPlan), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	checkCmdDoc("legacy-plan")
+}

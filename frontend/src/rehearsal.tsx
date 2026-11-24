@@ -7733,21 +7733,26 @@ function ProbeExecutionKit({
                   ? bi("纯只读校验通过", "Read-Only Verified")
                   : bi("请人工复核只读性", "Manual Review Needed")}
               </span>
-              {script && (
-                <span className="rh-probe-file-chip mono">
-                  {fileName} ·{" "}
-                  {bi(
-                    `${lineCount} 行`,
-                    lineCount === 1 ? "1 line" : `${lineCount} lines`,
-                  )}
-                </span>
-              )}
               {scriptUpdated && (
                 <span className="rh-shield-pill ok">
                   {bi("已按报错自动修订", "Auto-fixed")}
                 </span>
               )}
             </div>
+            {script && (
+              <div className="rh-probe-kit-meta">
+                <span className="rh-probe-file-chip mono" title={fileName}>
+                  <span className="rh-probe-file-name">{fileName}</span>
+                  <span className="rh-probe-file-lines">
+                    ·{" "}
+                    {bi(
+                      `${lineCount} 行`,
+                      lineCount === 1 ? "1 line" : `${lineCount} lines`,
+                    )}
+                  </span>
+                </span>
+              </div>
+            )}
           </div>
         </div>
 

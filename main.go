@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.323-dev"
+	version            = "1.0.324-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,20 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.324-dev",
+		Date:    "2026-11-24",
+		Title:   "修复演练只读探针标题栏超长脚本文件名与操作按钮重叠问题",
+		TitleEn: "Fix Long Probe Script Filename Overlapping Action Buttons in Rehearsal Header",
+		Highlights: []string{
+			"将演练只读探针脚本文件名与行数拆分为独立自适应次行，支持窄屏自动省略号截断并悬停显示完整文件名，彻底消除与「复制采集脚本」按钮重叠问题",
+			"同步加固探针运行命令栏（rh-probe-runbar）、代码栏（rh-code-meta）及存量导入探针栏（imp-probe-shield）在超长集群标识与多分辨率下的弹性布局与防溢出约束",
+		},
+		HighlightsEn: []string{
+			"Moved rehearsal probe filename and line count onto a dedicated constrained sub-row with graceful ellipsis truncation and hover tooltip, eliminating overlap with the Copy Script action button",
+			"Hardened flex sizing and overflow constraints on rh-probe-runbar, rh-code-meta, and imp-probe-shield across long cluster IDs and narrower viewports",
+		},
+	},
 	{
 		Version: "1.0.323-dev",
 		Date:    "2026-11-24",

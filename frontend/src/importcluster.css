@@ -465,9 +465,12 @@ body[arco-theme="dark"] .imp-step-btn.is-active {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  flex: 1 1 240px;
+  min-width: 0;
   font-size: 12px;
   font-weight: 600;
   color: #4ade80;
+  overflow-wrap: anywhere;
 }
 
 .imp-probe-pre {

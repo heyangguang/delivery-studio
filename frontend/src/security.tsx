@@ -1922,10 +1922,128 @@ export function SecurityPage({
     });
   };
 
+  const navGroups: {
+    id: string;
+    label: string;
+    items: {
+      value: typeof tab;
+      label: string;
+      hint: string;
+      icon: React.ReactNode;
+      count?: number;
+    }[];
+  }[] = [
+    {
+      id: "posture",
+      label: bi("态势与排查", "Posture & Triage"),
+      items: [
+        {
+          value: "overview",
+          label: bi("安全概览", "Overview"),
+          hint: bi("分层风险与优先修复队列", "Risk layers & fix queue"),
+          icon: SecIcons.overview,
+        },
+        {
+          value: "vulns",
+          label: bi("漏洞清单", "Vulnerabilities"),
+          hint: bi("按包聚合、检索与 VEX 处置", "Packages, CVEs & VEX triage"),
+          icon: SecIcons.vulns,
+          count: scopedActiveCounts.total,
+        },
+        {
+          value: "clusters",
+          label: bi("集群风险", "Cluster Risk"),
+          hint: bi("已交付集群受影响范围", "Delivered cluster exposure"),
+          icon: SecIcons.clusters,
+          count: scopedAffectedClusters,
+        },
+      ],
+    },
+    {
+      id: "governance",
+      label: bi("合规与策略", "Governance & Policy"),
+      items: [
+        {
+          value: "reports",
+          label: bi("报告模板", "Report Templates"),
+          hint: bi("合规导出格式与字段定制", "Audit & compliance exports"),
+          icon: SecIcons.reports,
+          count: reportTemplates.length || undefined,
+        },
+        {
+          value: "db",
+          label: bi("漏洞源与门禁", "Sources & Gates"),
+          hint: bi("在线/离线库与发布门禁", "Advisory feeds & gates"),
+          icon: SecIcons.db,
+        },
+      ],
+    },
+  ];
+  const flatNavItems = navGroups.flatMap((g) => g.items);
+  const viewHeaderMap: Record<
+    typeof tab,
+    { title: string; desc: string }
+  > = {
+    overview: {
+      title: bi("安全概览", "Security Overview"),
+      desc: bi(
+        "按中间件本体、OS 底层包与运行环境分层呈现离线 CVE 扫描态势与优先修复队列。",
+        "Deterministic offline CVE posture across middleware, OS base libraries, and runtimes.",
+      ),
+    },
+    vulns: {
+      title: bi("漏洞清单", "Vulnerabilities"),
+      desc: bi(
+        "支持按升级包聚合或按 CVE 明细检索，快速批量 VEX 处置并一键发起修复演练。",
+        "Inspect findings grouped by upgradeable package or individual CVE with batch VEX triage.",
+      ),
+    },
+    clusters: {
+      title: bi("集群风险", "Cluster Risk"),
+      desc: bi(
+        "基于已交付集群 SBOM 追踪受影响生产集群，联动集群安全详情与修复演练。",
+        "Track delivered production cluster exposure from SBOMs and jump straight to remediation.",
+      ),
+    },
+    reports: {
+      title: bi("报告模板", "Report Templates"),
+      desc: bi(
+        "定制安全合规导出模板，全局安全中心与单集群安全页导出时均可直接选用。",
+        "Manage reusable security report templates for global and cluster-level exports.",
+      ),
+    },
+    db: {
+      title: bi("漏洞源与门禁", "Sources & Gates"),
+      desc: bi(
+        "管理在线 OSV / 离线漏洞库同步源，配置全局风险视角屏蔽与交付发布门禁。",
+        "Configure online OSV or offline advisory bundles, global visibility rules, and release gates.",
+      ),
+    },
+  };
+  const currentHead = viewHeaderMap[tab];
+
   if (loading && !data) {
     return (
-      <div className="sec-page">
-        <Skeleton animation text={{ rows: 8 }} />
+      <div className="sec-shell">
+        <aside className="sec-rail" aria-label={bi("安全中心", "Security Center")}>
+          <div className="sec-rail-head">
+            <h1>{bi("安全中心", "Security Center")}</h1>
+            <p>
+              {bi(
+                "基于平台软件库闭包、运行环境与集群 SBOM 的离线 CVE 风险治理。",
+                "Offline CVE scanning across Software Library closures, runtimes, and cluster SBOMs.",
+              )}
+            </p>
+          </div>
+          <div className="sec-rail-nav">
+            <Skeleton animation text={{ rows: 5 }} />
+          </div>
+        </aside>
+        <div className="sec-main">
+          <div className="sec-main-inner">
+            <Skeleton animation text={{ rows: 8 }} />
+          </div>
+        </div>
       </div>
     );
   }
@@ -1940,7 +2058,7 @@ export function SecurityPage({
       }}
       onChanged={() => void load()}
     >
-    <div className="sec-page enter">
+    <div className="sec-shell enter">
       <input
         ref={fileRef}
         type="file"
@@ -1948,97 +2066,159 @@ export function SecurityPage({
         style={{ display: "none" }}
         onChange={handleImportFile}
       />
-      <header className="sec-header">
-        <div className="sec-header-l">
-          <h1>
-            {bi("安全与漏洞中心", "Security & Vulnerability Center")}
-            <span
-              className={`sec-db-pill ${meta.advisory_count > 0 ? "ok" : "empty"}`}
-            >
-              {meta.advisory_count > 0
-                ? bi(
-                    `本地库 ${meta.advisory_count} 条公告 · ${meta.source_mode === "offline-import" ? "离线包" : "在线同步"}${meta.updated_at ? ` · ${ago(meta.updated_at)}` : ""}`,
-                    `Local DB: ${meta.advisory_count} advisories · ${meta.source_mode === "offline-import" ? "Offline" : "Online"}${meta.updated_at ? ` · ${ago(meta.updated_at)}` : ""}`,
-                  )
-                : bi("尚未同步漏洞库", "Advisory DB empty")}
-            </span>
-          </h1>
+
+      <aside className="sec-rail" aria-label={bi("安全中心导航", "Security center navigation")}>
+        <div className="sec-rail-head">
+          <div className="sec-rail-title-row">
+            <h1>{bi("安全中心", "Security Center")}</h1>
+            {canScan && (
+              <button
+                type="button"
+                className="sec-rail-src-btn"
+                onClick={() => switchTab("db")}
+                title={bi("管理漏洞源与门禁策略", "Manage advisory sources & gates")}
+              >
+                {SecIcons.db}
+                <span>{bi("漏洞源", "Sources")}</span>
+              </button>
+            )}
+          </div>
           <p>
             {bi(
-              "基于平台原生软件库闭包、Ansible 运行环境与已交付集群 SBOM 的确定性离线 CVE 扫描，支持在线同步与纯内网离线包导入，不依赖 AI 即可独立运行。",
-              "Deterministic offline CVE scanning across Software Library closures, Ansible runtimes, and delivered clusters. Supports online OSV sync and air-gapped offline bundles.",
+              "基于软件库闭包、运行环境与已交付集群 SBOM 的确定性离线 CVE 扫描，不依赖 AI 即可独立运行。",
+              "Deterministic offline CVE scanning across library closures, runtimes, and delivered cluster SBOMs.",
             )}
           </p>
         </div>
-        <div className="sec-header-r">
-          {canScan && (
-            <>
-              <Button
-                type="primary"
-                icon={<IconRefresh />}
-                loading={scanning}
-                onClick={runScan}
-              >
-                {bi("立即扫描", "Scan Now")}
-              </Button>
-              <Button
-                icon={<IconSync />}
-                loading={syncing}
-                onClick={runOnlineSync}
-              >
-                {bi("在线同步", "Online Sync")}
-              </Button>
-              <Button
-                icon={<IconUpload />}
-                loading={importing}
-                onClick={() => fileRef.current?.click()}
-              >
-                {bi("导入离线库", "Import Offline DB")}
-              </Button>
-            </>
-          )}
-          <Button icon={<IconDownload />} onClick={() => setExportOpen(true)}>
-            {bi("导出报告", "Export Report")}
-          </Button>
-        </div>
-      </header>
 
-      <UnderlineTabs
-        className="sec-tabs"
-        label={bi("安全中心分区", "Security center views")}
-        value={tab}
-        onChange={(v) => switchTab(v as typeof tab)}
-        items={[
-          {
-            value: "overview",
-            label: bi("安全概览", "Overview"),
-            icon: SecIcons.overview,
-          },
-          {
-            value: "vulns",
-            label: bi("漏洞清单", "Vulnerabilities"),
-            count: scopedActiveCounts.total,
-            icon: SecIcons.vulns,
-          },
-          {
-            value: "clusters",
-            label: bi("集群风险", "Cluster Risk"),
-            count: scopedAffectedClusters,
-            icon: SecIcons.clusters,
-          },
-          {
-            value: "reports",
-            label: bi("报告模板", "Report Templates"),
-            count: reportTemplates.length || undefined,
-            icon: SecIcons.reports,
-          },
-          {
-            value: "db",
-            label: bi("漏洞源与门禁", "Sources & Gates"),
-            icon: SecIcons.db,
-          },
-        ]}
-      />
+        <nav className="sec-rail-nav" aria-label={bi("安全中心分区", "Security center views")}>
+          {navGroups.map((grp) => (
+            <div key={grp.id} className="sec-rail-grp">
+              <div className="st-nav-g">{grp.label}</div>
+              {grp.items.map((item) => (
+                <button
+                  key={item.value}
+                  type="button"
+                  className={`sx-nav-i sec-nav-i ${tab === item.value ? "on" : ""}`}
+                  aria-current={tab === item.value ? "page" : undefined}
+                  onClick={() => switchTab(item.value)}
+                >
+                  <span className="sx-nav-ic">{item.icon}</span>
+                  <span className="sx-nav-t">
+                    <b>{item.label}</b>
+                    <small>{item.hint}</small>
+                  </span>
+                  {item.count !== undefined && (
+                    <em
+                      className={`sec-nav-cnt num${item.value === "vulns" && item.count > 0 ? " is-warn" : ""}`}
+                    >
+                      {item.count}
+                    </em>
+                  )}
+                </button>
+              ))}
+            </div>
+          ))}
+        </nav>
+
+        <div className="sec-rail-foot">
+          <div className="sec-rail-db">
+            <div className="sec-rail-db-top">
+              <span className="sec-rail-db-label">
+                <i
+                  className={`sec-rail-db-dot ${meta.advisory_count > 0 ? "ok" : "empty"}`}
+                  aria-hidden
+                />
+                <b>{bi("本地漏洞库", "Local Advisory DB")}</b>
+              </span>
+              {meta.updated_at && (
+                <span className="sec-rail-db-time num">
+                  {ago(meta.updated_at)}
+                </span>
+              )}
+            </div>
+            <div className="sec-rail-db-meta num">
+              {meta.advisory_count > 0
+                ? bi(
+                    `${meta.advisory_count} 条公告 · ${meta.source_mode === "offline-import" ? "离线包导入" : "在线同步"}`,
+                    `${meta.advisory_count} advisories · ${meta.source_mode === "offline-import" ? "Offline bundle" : "Online sync"}`,
+                  )
+                : bi("尚未同步漏洞库", "Advisory DB empty")}
+            </div>
+            {canScan && (
+              <div className="sec-rail-db-acts">
+                <Button
+                  size="mini"
+                  icon={<IconSync />}
+                  loading={syncing}
+                  onClick={() => void runOnlineSync()}
+                >
+                  {bi("在线同步", "Sync")}
+                </Button>
+                <Button
+                  size="mini"
+                  icon={<IconUpload />}
+                  loading={importing}
+                  onClick={() => fileRef.current?.click()}
+                >
+                  {bi("导入离线库", "Import")}
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
+      </aside>
+
+      <div className="sec-main">
+        <div className="sec-mobile-bar">
+          <UnderlineTabs
+            className="sec-tabs"
+            label={bi("安全中心分区", "Security center views")}
+            value={tab}
+            onChange={(v) => switchTab(v as typeof tab)}
+            items={flatNavItems.map((i) => ({
+              value: i.value,
+              label: i.label,
+              count: i.count,
+              icon: i.icon,
+            }))}
+          />
+        </div>
+
+        <div className="sec-main-inner">
+          <header className="sec-main-head">
+            <div className="sec-main-head-l">
+              <div className="sec-main-title-row">
+                <h1>{currentHead.title}</h1>
+                <span
+                  className={`sec-db-pill sec-mobile-pill ${meta.advisory_count > 0 ? "ok" : "empty"}`}
+                >
+                  {meta.advisory_count > 0
+                    ? bi(
+                        `本地库 ${meta.advisory_count} 条公告${meta.updated_at ? ` · ${ago(meta.updated_at)}` : ""}`,
+                        `${meta.advisory_count} advisories${meta.updated_at ? ` · ${ago(meta.updated_at)}` : ""}`,
+                      )
+                    : bi("尚未同步漏洞库", "DB empty")}
+                </span>
+              </div>
+              <p>{currentHead.desc}</p>
+            </div>
+            <div className="sec-main-head-r">
+              {canScan && (
+                <Button
+                  type="primary"
+                  icon={<IconRefresh />}
+                  loading={scanning}
+                  onClick={runScan}
+                >
+                  {bi("立即扫描", "Scan Now")}
+                </Button>
+              )}
+              <Button icon={<IconDownload />} onClick={() => setExportOpen(true)}>
+                {bi("导出报告", "Export Report")}
+              </Button>
+            </div>
+          </header>
 
       {tab !== "db" && tab !== "reports" && rep && (
         <div className="sec-scope-bar">
@@ -4425,6 +4605,8 @@ export function SecurityPage({
         defaultScope={roleFilter !== "all" ? roleFilter : undefined}
         onManageTemplates={() => switchTab("reports")}
       />
+        </div>
+      </div>
     </div>
     </AIDock>
   );

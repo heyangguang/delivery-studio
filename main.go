@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.274-dev"
+	version            = "1.0.275-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,22 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.275-dev",
+		Date:    "2026-11-24",
+		Title:   "将「安全中心」升级为与软件库、交付、设置统一的左右分栏架构",
+		TitleEn: "Unify Security Center into platform left-rail and right-canvas layout",
+		Highlights: []string{
+			"将「安全中心」由原先全屏上下分栏改为平台统一的左侧固定导航栏（--rail-w）+ 右侧全宽白底主画布架构，与交付、软件库、设置视觉无缝对齐",
+			"左侧导航栏分组收纳「态势与排查（安全概览 / 漏洞清单 / 集群风险）」与「合规与策略（报告模板 / 漏洞源与门禁）」并附实时计数，底部常驻本地漏洞库状态卡片与在线同步/导入离线库快捷入口",
+			"右侧主画布按当前分区呈现精简头部与「立即扫描 / 导出报告」核心操作，窄屏（<=900px）自动折叠为顶部横排标签条保持响应式可用",
+		},
+		HighlightsEn: []string{
+			"Migrated Security Center from full-width stacked tabs to the platform's unified sticky left-rail (--rail-w) + right white canvas layout matching Library, Deliveries, and Settings",
+			"Organized navigation into Posture & Triage and Governance & Policy groups with live count pills and a pinned Local Advisory DB status card with Sync/Import controls",
+			"Streamlined right-pane header to contextual title plus Scan Now and Export Report actions, with responsive horizontal tab fallback under 900px",
+		},
+	},
 	{
 		Version: "1.0.274-dev",
 		Date:    "2026-11-24",

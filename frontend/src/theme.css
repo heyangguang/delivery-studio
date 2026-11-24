@@ -220,6 +220,7 @@ html {
 .ap-rows,
 .st-nav,
 .store-rail,
+.sec-rail,
 .md-detail,
 .ap-list,
 .pf {
@@ -230,6 +231,7 @@ html {
 .ap-rows::-webkit-scrollbar,
 .st-nav::-webkit-scrollbar,
 .store-rail::-webkit-scrollbar,
+.sec-rail::-webkit-scrollbar,
 .md-detail::-webkit-scrollbar,
 .ap-list::-webkit-scrollbar,
 .pf::-webkit-scrollbar {
@@ -240,6 +242,7 @@ html {
 .ap-rows::-webkit-scrollbar-track,
 .st-nav::-webkit-scrollbar-track,
 .store-rail::-webkit-scrollbar-track,
+.sec-rail::-webkit-scrollbar-track,
 .md-detail::-webkit-scrollbar-track,
 .ap-list::-webkit-scrollbar-track,
 .pf::-webkit-scrollbar-track {
@@ -249,6 +252,7 @@ html {
 .ap-rows::-webkit-scrollbar-thumb,
 .st-nav::-webkit-scrollbar-thumb,
 .store-rail::-webkit-scrollbar-thumb,
+.sec-rail::-webkit-scrollbar-thumb,
 .md-detail::-webkit-scrollbar-thumb,
 .ap-list::-webkit-scrollbar-thumb,
 .pf::-webkit-scrollbar-thumb {
@@ -259,6 +263,7 @@ html {
 .ap-rows::-webkit-scrollbar-thumb:hover,
 .st-nav::-webkit-scrollbar-thumb:hover,
 .store-rail::-webkit-scrollbar-thumb:hover,
+.sec-rail::-webkit-scrollbar-thumb:hover,
 .md-detail::-webkit-scrollbar-thumb:hover,
 .ap-list::-webkit-scrollbar-thumb:hover,
 .pf::-webkit-scrollbar-thumb:hover {

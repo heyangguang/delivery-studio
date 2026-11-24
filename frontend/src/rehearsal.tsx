@@ -4952,6 +4952,56 @@ export function ClusterRehearsal({
     [c.id, listUrl, rehearsalId],
   );
 
+  const syncSessionInList = useCallback(
+    (updated: ChangeRehearsal) => {
+      if (!updated?.id) return;
+      seededMapRef.current.set(updated.id, updated);
+      putCached(rehearsalItemPath(c.id, updated.id), updated);
+      let notified = false;
+      setList((prev) => {
+        if (!prev) return prev;
+        let changed = false;
+        const next = prev.map((it) => {
+          if (it.id !== updated.id) return it;
+          if (it === updated) return it;
+          const prevSig = `${it.stage}|${it.title}|${it.updated_at}|${it.applied}|${it.voided}|${(it.steps || []).map((s) => `${s.id}:${s.status}:${s.optional ? 1 : 0}:${s.phase}`).join(",")}`;
+          const nextSig = `${updated.stage}|${updated.title}|${updated.updated_at}|${updated.applied}|${updated.voided}|${(updated.steps || []).map((s) => `${s.id}:${s.status}:${s.optional ? 1 : 0}:${s.phase}`).join(",")}`;
+          if (prevSig === nextSig) return it;
+          changed = true;
+          return updated;
+        });
+        if (!changed) return prev;
+        putCached(listUrl, next);
+        if (!notified) {
+          notified = true;
+          queueMicrotask(() => onListUpdatedRef.current?.());
+        }
+        return next;
+      });
+    },
+    [c.id, listUrl],
+  );
+
+  // Keep left sidebar ledger synced when background tasks or AI Dock update any rehearsal on this cluster
+  useEffect(() => {
+    const onChanged = (ev: Event) => {
+      const detail = (
+        ev as CustomEvent<{ clusterId?: string; rehearsalId?: string }>
+      ).detail;
+      if (detail?.clusterId && detail.clusterId !== c.id) return;
+      if (detail?.rehearsalId) {
+        const hit = cached<ChangeRehearsal>(rehearsalItemPath(c.id, detail.rehearsalId));
+        if (hit) {
+          syncSessionInList(hit);
+          return;
+        }
+      }
+      void loadList(false);
+    };
+    window.addEventListener(REHEARSAL_CHANGED, onChanged);
+    return () => window.removeEventListener(REHEARSAL_CHANGED, onChanged);
+  }, [c.id, loadList, syncSessionInList]);
+
   useEffect(() => {
     const hit = initialList ?? cached<ChangeRehearsal[]>(listUrl) ?? null;
     setList(hit);
@@ -6438,6 +6488,7 @@ export function ClusterRehearsal({
               pick={pick}
               aiOpts={aiOpts}
               onListChanged={() => loadList(false)}
+              onSessionSync={syncSessionInList}
               onClusterChanged={onClusterChanged}
               onEngageFocus={engageFocus}
             />
@@ -8060,6 +8111,7 @@ function RehearsalSessionView({
   pick,
   aiOpts,
   onListChanged,
+  onSessionSync,
   onClusterChanged,
   onEngageFocus,
 }: {
@@ -8073,6 +8125,7 @@ function RehearsalSessionView({
   pick: ReturnType<typeof useModelPick>;
   aiOpts: ReturnType<typeof useAIOptions>;
   onListChanged: () => Promise<void>;
+  onSessionSync?: (updated: ChangeRehearsal) => void;
   onClusterChanged?: () => void;
   onEngageFocus?: () => void;
 }) {
@@ -8291,8 +8344,11 @@ function RehearsalSessionView({
   };
 
   useEffect(() => {
-    if (r) putCached(rehearsalItemPath(c.id, r.id), r);
-  }, [c.id, r]);
+    if (r) {
+      putCached(rehearsalItemPath(c.id, r.id), r);
+      onSessionSync?.(r);
+    }
+  }, [c.id, r, onSessionSync]);
 
   useEffect(() => {
     const onExternalRehearsalChange = (ev: Event) => {

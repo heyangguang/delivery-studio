@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.334-dev"
+	version            = "1.0.335-dev"
 	currentReleaseDate = "2026-11-25"
 )
 
@@ -65,6 +65,18 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.335-dev",
+		Date:    "2026-11-25",
+		Title:   "修复演练步骤进度更新后左侧演练记录徽章未实时同步的问题",
+		TitleEn: "Fix stale step progress badge in rehearsal sidebar ledger after step updates",
+		Highlights: []string{
+			"演练步骤核验通过、人工标记、跳过、应用建议或后台流式完成时，实时同步更新左侧「演练记录」进度徽章（如 演练 2/6）与缓存，确保左右两侧状态完全一致",
+		},
+		HighlightsEn: []string{
+			"Sync rehearsal session updates (manual pass/skip, AI step verification, proposal apply, and background completions) directly into the sidebar ledger list and cache so step counts always match",
+		},
+	},
 	{
 		Version: "1.0.334-dev",
 		Date:    "2026-11-25",

@@ -928,13 +928,17 @@ function AppliedChangesLedger({
                   }
                 }}
               >
-                <span className="cl-u-change-dot" aria-hidden />
-                <b className="cl-u-chg-title">{rh.title}</b>
-                {changes.length > 0 && (
-                  <span className="cl-u-chg-pill num">
-                    {bi(`${changes.length} 项参数`, `${changes.length} params`)}
-                  </span>
-                )}
+                <span className="cl-u-chg-main">
+                  <span className="cl-u-change-dot" aria-hidden />
+                  <b className="cl-u-chg-title">{rh.title}</b>
+                </span>
+                <span className="cl-u-chg-pill-slot">
+                  {changes.length > 0 && (
+                    <span className="cl-u-chg-pill num">
+                      {bi(`${changes.length} 项参数`, `${changes.length} params`)}
+                    </span>
+                  )}
+                </span>
                 <span className="cl-u-change-who num">
                   {rh.applied_by || rh.owner} · {ago(rh.applied_at || rh.updated_at)}
                 </span>
@@ -1617,6 +1621,12 @@ function HostTable({
   return (
     <div className="cl-hosts-wrap">
       <table className="cl-hosts">
+        <colgroup>
+          <col style={{ width: "18%" }} />
+          <col style={{ width: "21%" }} />
+          <col style={{ width: "22%" }} />
+          <col style={{ width: "39%" }} />
+        </colgroup>
         <thead>
           <tr>
             <th>{bi("机器", "Host")}</th>

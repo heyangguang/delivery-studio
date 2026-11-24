@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.280-dev"
+	version            = "1.0.281-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,20 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.281-dev",
+		Date:    "2026-11-24",
+		Title:   "对齐集群概览已落地变更台账与节点角色表列宽框架",
+		TitleEn: "Align cluster overview applied changes ledger and hosts table grid",
+		Highlights: []string{
+			"为集群概览「生产已落地变更」与「节点与角色」统一圆角边框容器（border-radius: 9px、14px 对称内边距）并补齐分区通栏分割线，消除上下双边框与区块边界模糊",
+			"将变更台账行改为 5 列固定网格（标题 / 等宽参数胶囊 / 操作人与时间 / 带分隔线的变更报告与演练入口 / 展开箭头），并为节点角色表设定均衡 4 列占比（18% / 21% / 22% / 39%）与浅底表头，上下纵线严丝合缝",
+		},
+		HighlightsEn: []string{
+			"Unified Applied Production Changes ledger and Hosts & Roles table inside matching 9px bordered cards with 14px inner gutters and a clean full-bleed section divider",
+			"Converted applied-change rows to a 5-track CSS grid with fixed-width param pills and separated action links, and gave Hosts & Roles deterministic column proportions (18%/21%/22%/39%) with a subtle tinted header",
+		},
+	},
 	{
 		Version: "1.0.280-dev",
 		Date:    "2026-11-24",

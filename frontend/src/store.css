@@ -2080,8 +2080,14 @@ body[arco-theme="dark"] .pg-arbiter-sen {
 }
 .wide-body .wide-plans {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(256px, 1fr));
   gap: 10px;
+}
+.wide-body.solo .wide-plans {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.wide-body.solo .wide-plans[data-n="4"] {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 .wide-plans li {
   display: flex;
@@ -2091,11 +2097,13 @@ body[arco-theme="dark"] .pg-arbiter-sen {
   all: unset;
   box-sizing: border-box;
   width: 100%;
+  min-height: 68px;
   cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 12px 13px 11px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 13px;
   margin: 0;
   border-radius: 12px;
   background: color-mix(in srgb, var(--surface-2) 68%, var(--surface));
@@ -2109,13 +2117,20 @@ body[arco-theme="dark"] .pg-arbiter-sen {
 .wide-plans button.wide-plan-tile.is-rec {
   border-color: color-mix(in srgb, var(--kyndryl-line) 72%, var(--line));
 }
+.wide-plans button.wide-plan-tile.is-custom {
+  background: transparent;
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--line) 96%, transparent);
+}
 .wide-plans button.wide-plan-tile:hover:not(:disabled) {
   background: var(--surface);
+  border-style: solid;
   border-color: var(--kyndryl-line);
   box-shadow: 0 10px 22px -10px rgba(15, 23, 42, 0.1);
   transform: translateY(-1.5px);
 }
 body[arco-theme="dark"] .wide-plans button.wide-plan-tile:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--surface-2) 90%, var(--surface));
   box-shadow: 0 10px 24px -10px rgba(0, 0, 0, 0.45);
 }
 .wide-plans button.wide-plan-tile:active:not(:disabled) {
@@ -2128,18 +2143,12 @@ body[arco-theme="dark"] .wide-plans button.wide-plan-tile:hover:not(:disabled) {
   cursor: default;
   opacity: 0.65;
 }
-.wide-plan-top {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px;
-}
 .wide-plan-well {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 64px;
-  height: 40px;
+  height: 42px;
   border-radius: 9px;
   background-color: var(--surface);
   background-image: radial-gradient(
@@ -2150,6 +2159,9 @@ body[arco-theme="dark"] .wide-plans button.wide-plan-tile:hover:not(:disabled) {
   border: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
   flex: none;
   transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+.wide-plan-well.is-custom {
+  background-color: color-mix(in srgb, var(--surface-2) 55%, var(--surface));
 }
 .wide-plans button.wide-plan-tile:hover:not(:disabled) .wide-plan-well {
   border-color: color-mix(in srgb, var(--kyndryl-line) 68%, var(--line));
@@ -2162,21 +2174,21 @@ body[arco-theme="dark"] .wide-plans button.wide-plan-tile:hover:not(:disabled) {
 .wide-plan-copy {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
   min-width: 0;
 }
 .wide-plan-name-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 6px;
+  gap: 7px;
   min-width: 0;
+  flex-wrap: wrap;
 }
 .wide-plans b {
   font-size: 13.5px;
   font-weight: 650;
   color: var(--ink);
-  line-height: 1.35;
+  line-height: 1.3;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2190,15 +2202,28 @@ body[arco-theme="dark"] .wide-plans button.wide-plan-tile:hover:not(:disabled) {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+.wide-plan-go {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  flex: none;
+  color: var(--faint);
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease,
+    transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+}
 .wide-plan-arrow {
   flex: none;
   font-size: 12px;
-  color: var(--faint);
-  transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1), color 0.2s ease;
 }
-.wide-plans button.wide-plan-tile:hover:not(:disabled) .wide-plan-arrow {
+.wide-plans button.wide-plan-tile:hover:not(:disabled) .wide-plan-go {
+  background: var(--kyndryl-soft);
   color: var(--kyndryl-ink);
-  transform: translateX(3px);
+  transform: translateX(2px);
 }
 .wide-jobs a {
   text-decoration: none;
@@ -2248,9 +2273,17 @@ body[arco-theme="dark"] .wide-plans button.wide-plan-tile:hover:not(:disabled) {
   gap: 6px;
   align-items: center;
 }
+@media (max-width: 1320px) {
+  .wide-body.solo .wide-plans[data-n="4"] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
 @media (max-width: 1100px) {
   .wide-caps {
     display: none;
+  }
+  .wide-body.solo .wide-plans {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 @media (max-width: 900px) {
@@ -2266,6 +2299,11 @@ body[arco-theme="dark"] .wide-plans button.wide-plan-tile:hover:not(:disabled) {
 @media (max-width: 700px) {
   .wide-head {
     flex-direction: column;
+  }
+  .wide-body .wide-plans,
+  .wide-body.solo .wide-plans,
+  .wide-body.solo .wide-plans[data-n="4"] {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

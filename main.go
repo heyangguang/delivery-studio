@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.336-dev"
+	version            = "1.0.337-dev"
 	currentReleaseDate = "2026-11-25"
 )
 
@@ -65,6 +65,22 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.337-dev",
+		Date:    "2026-11-25",
+		Title:   "应用目录架构方案卡片横向重排与三列对齐",
+		TitleEn: "应用目录架构方案卡片横向重排与三列对齐",
+		Highlights: []string{
+			"将应用目录「从架构方案起步」卡片改为紧凑横向排布（拓扑图示 + 方案名与标签紧邻 + 规格与机制摘要 + 右侧引导箭头），消除大面积空白区域",
+			"为无交付记录的 2 方案应用（HAProxy、Nginx、Keepalived、Redis）补齐虚线「自定义方案」入口并统一桌面端 3 列网格节奏，与 PostgreSQL、etcd 保持视觉对齐",
+			"适配宽屏/窄屏响应式断点及深浅色主题悬停反馈",
+		},
+		HighlightsEn: []string{
+			"将应用目录「从架构方案起步」卡片改为紧凑横向排布（拓扑图示 + 方案名与标签紧邻 + 规格与机制摘要 + 右侧引导箭头），消除大面积空白区域",
+			"为无交付记录的 2 方案应用（HAProxy、Nginx、Keepalived、Redis）补齐虚线「自定义方案」入口并统一桌面端 3 列网格节奏，与 PostgreSQL、etcd 保持视觉对齐",
+			"适配宽屏/窄屏响应式断点及深浅色主题悬停反馈",
+		},
+	},
 	{
 		Version: "1.0.336-dev",
 		Date:    "2026-11-25",

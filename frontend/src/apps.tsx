@@ -456,6 +456,29 @@ function AppRow({ a, usage }: { a: AppInfo; usage: Usage }) {
   );
 }
 
+/** Build a concise non-redundant spec + mechanism line for compact catalog blueprint tiles. */
+function widePlanSummary(p: AppPlan): string {
+  const spec = (p.spec || "").trim();
+  const mech = (p.contract?.mechanism || "").trim();
+  if (!mech) return spec;
+  if (!spec) return mech;
+  const hay = `${p.name} ${spec}`.toLowerCase();
+  const mLow = mech.toLowerCase();
+  if (hay.includes(mLow)) return spec;
+  const mWords = mLow.split(/[\s+/·-]+/).filter((w) => w.length >= 2);
+  if (mWords.length > 0 && mWords.every((w) => hay.includes(w))) {
+    return spec;
+  }
+  if (
+    spec.length >= 16 &&
+    /(单机|单节点|standalone)/i.test(mech) &&
+    /(单机|单节点|standalone)/i.test(spec)
+  ) {
+    return spec;
+  }
+  return `${spec} · ${mech}`;
+}
+
 /** A catalog entry with everything needed to act on it: its plans start a delivery, its recent deliveries open. */
 function AppWide({ a, mine }: { a: AppInfo; mine: Job[] }) {
   useLang();
@@ -466,6 +489,14 @@ function AppWide({ a, mine }: { a: AppInfo; mine: Job[] }) {
   const recent = [...mine]
     .sort((x, y) => y.created.localeCompare(x.created))
     .slice(0, 3);
+  const shownPlans = plans.slice(0, 4);
+  const showCustomTile =
+    !recent.length &&
+    shownPlans.length > 0 &&
+    shownPlans.length <= 2 &&
+    ready &&
+    canCreate;
+  const tileCount = shownPlans.length + (showCustomTile ? 1 : 0);
   return (
     <article
       className={`appwide ${ready ? "" : "off"}`}
@@ -556,9 +587,10 @@ function AppWide({ a, mine }: { a: AppInfo; mine: Job[] }) {
                   <em>{bi("尚未创建该应用交付", "No deliveries yet")}</em>
                 )}
               </h3>
-              <ul className="wide-plans">
-                {plans.slice(0, 4).map((p) => {
+              <ul className="wide-plans" data-n={tileCount}>
+                {shownPlans.map((p) => {
                   const b = planBadgeOf(p);
+                  const summary = widePlanSummary(p);
                   return (
                     <li key={p.id}>
                       <button
@@ -570,29 +602,62 @@ function AppWide({ a, mine }: { a: AppInfo; mine: Job[] }) {
                           `New ${a.name} cluster with ${p.name}`,
                         )}
                       >
-                        <div className="wide-plan-top">
-                          <span className="wide-plan-well">
-                            <PlanGlyph plan={p} />
-                          </span>
-                          {b && (
-                            <span className={`plan-pill tone-${b.tone}`}>
-                              {b.label}
-                            </span>
-                          )}
-                        </div>
+                        <span className="wide-plan-well">
+                          <PlanGlyph plan={p} />
+                        </span>
                         <div className="wide-plan-copy">
                           <div className="wide-plan-name-row">
                             <b>{p.name}</b>
-                            {ready && canCreate && (
-                              <IconRight className="wide-plan-arrow" />
+                            {b && (
+                              <span className={`plan-pill tone-${b.tone}`}>
+                                {b.label}
+                              </span>
                             )}
                           </div>
-                          <small title={p.spec}>{p.spec}</small>
+                          {summary && <small title={summary}>{summary}</small>}
                         </div>
+                        {ready && canCreate && (
+                          <span className="wide-plan-go" aria-hidden="true">
+                            <IconRight className="wide-plan-arrow" />
+                          </span>
+                        )}
                       </button>
                     </li>
                   );
                 })}
+                {showCustomTile && (
+                  <li key="__custom__">
+                    <button
+                      className="wide-plan-tile is-custom"
+                      onClick={() => go({ name: "new", app: a.id })}
+                      aria-label={bi(
+                        `自定义方案新建 ${a.name} 集群`,
+                        `New custom ${a.name} cluster`,
+                      )}
+                    >
+                      <span className="wide-plan-well is-custom">
+                        <PlanGlyphCustom />
+                      </span>
+                      <div className="wide-plan-copy">
+                        <div className="wide-plan-name-row">
+                          <b>{bi("自定义方案", "Custom plan")}</b>
+                          <span className="plan-pill tone-basic">
+                            {bi("自由组合", "Custom")}
+                          </span>
+                        </div>
+                        <small>
+                          {bi(
+                            "按需编排节点、端口与核心参数",
+                            "Customize nodes, ports & parameters",
+                          )}
+                        </small>
+                      </div>
+                      <span className="wide-plan-go" aria-hidden="true">
+                        <IconRight className="wide-plan-arrow" />
+                      </span>
+                    </button>
+                  </li>
+                )}
               </ul>
             </div>
           )}

@@ -2387,17 +2387,49 @@
   place-items: center;
   border-radius: 8px;
   cursor: pointer;
-  background: #6e6e76;
-  border: 2px solid transparent;
-  transition: transform 0.15s var(--ease-out), border-color 0.15s;
+  background: #475569;
+  color: var(--ink);
+  border: 1.5px solid transparent;
+  transition: transform 0.15s var(--ease-out), border-color 0.15s, background-color 0.15s, box-shadow 0.15s;
 }
 .wb-icons button:hover {
   transform: translateY(-1px);
-  background: #5a5a62;
+  background: #334155;
 }
 .wb-icons button.on {
-  background: var(--brand);
-  border-color: var(--ink);
+  background: #111318;
+  border-color: var(--kyndryl);
+  box-shadow: 0 0 0 1px var(--kyndryl);
+}
+body[arco-theme="dark"] .wb-icons button.on {
+  background: #1e293b;
+  border-color: var(--kyndryl);
+  box-shadow: 0 0 0 1px var(--kyndryl);
+}
+.wb-icons button.is-brand {
+  --glyph-bg: var(--surface);
+  color: var(--ink);
+  background: var(--surface);
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow-sm);
+}
+.wb-icons button.is-brand:hover {
+  background: var(--surface-2);
+  border-color: var(--brand-line);
+}
+.wb-icons button.is-brand.on {
+  background: var(--surface);
+  border-color: var(--kyndryl);
+  box-shadow: 0 0 0 1px var(--kyndryl), var(--shadow-sm);
+}
+body[arco-theme="dark"] .wb-icons button.is-brand {
+  --glyph-bg: #1a1f28;
+  background: #1a1f28;
+  border-color: rgba(240, 244, 255, 0.14);
+}
+body[arco-theme="dark"] .wb-icons button.is-brand.on {
+  background: #1a1f28;
+  border-color: var(--kyndryl);
 }
 .wb-icons button:focus-visible {
   box-shadow: var(--ring);

@@ -10,7 +10,7 @@ import { Tag } from "@arco-design/web-react";
 import { IconCheck, IconClose } from "@arco-design/web-react/icon";
 import { running, states, useMedia } from "./shared";
 import type { InstanceView, Job } from "./shared";
-import { iconShape, styleOf } from "./glyphs";
+import { iconShape, isBrandIcon, styleOf } from "./glyphs";
 import { bi, canonicalCat, useLang } from "./i18n";
 
 /* ---------- identity ---------- */
@@ -79,7 +79,7 @@ const TINTS: Record<string, [string, string]> = {
 export const tintOf = (category?: string): [string, string] =>
   TINTS[canonicalCat(category)] || ["#9a9aa2", "#6e6e76"];
 
-/** Component logo: its own icon and colour when it declares them, otherwise the category's default. */
+/** Component logo: authentic full-colour brand SVG on a sculpted porcelain tile, or a tinted icon tile for generic shapes. */
 export function AppGlyph({
   id,
   category,
@@ -96,8 +96,32 @@ export function AppGlyph({
   color?: string;
 }) {
   const st = styleOf(id, category, icon, color);
+  const brand = isBrandIcon(st.icon);
   const [c0, c1] = st.color.tile;
-  const gid = `ag-${id}-${size}-${st.color.id}`;
+  const uid = useId().replace(/[^a-zA-Z0-9]/g, "");
+  const gid = `ag-${uid}`;
+  if (brand) {
+    return (
+      <svg
+        className={`app-glyph is-brand ${muted ? "muted" : ""}`}
+        width={size}
+        height={size}
+        viewBox="0 0 40 40"
+        aria-hidden
+      >
+        <rect
+          className="app-glyph-tile"
+          x="0.6"
+          y="0.6"
+          width="38.8"
+          height="38.8"
+          rx="9.5"
+          strokeWidth="1.2"
+        />
+        {iconShape(st.icon)}
+      </svg>
+    );
+  }
   return (
     <svg
       className={`app-glyph ${muted ? "muted" : ""}`}

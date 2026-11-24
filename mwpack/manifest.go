@@ -8,7 +8,13 @@ import "io/fs"
 // ComponentIcons and ComponentColors are the logos and tints a component may choose; the interface draws them
 // (frontend/src/glyphs.tsx has the same lists, and a test keeps the two equal).
 var (
-	ComponentIcons  = []string{"database", "kv", "cache", "queue", "storage", "search", "balance", "gateway", "vip", "cloud", "server", "cluster", "monitor", "key", "container", "network", "file", "bell", "redis", "mysql", "kafka", "mongodb", "rabbitmq", "elasticsearch", "zookeeper", "minio", "prometheus", "grafana", "kubernetes", "docker"}
+	ComponentIcons = []string{
+		"database", "kv", "cache", "queue", "storage", "search", "balance", "gateway", "vip", "cloud", "server", "cluster", "monitor", "key", "container", "network", "file", "bell",
+		"postgresql", "patroni", "redis", "nginx", "haproxy", "keepalived", "etcd", "elb",
+		"mysql", "mariadb", "mongodb", "kafka", "rabbitmq", "elasticsearch", "zookeeper", "minio",
+		"prometheus", "grafana", "kubernetes", "docker", "clickhouse", "nacos", "consul", "rocketmq",
+		"envoy", "traefik", "valkey", "tidb", "opensearch", "memcached", "harbor", "zabbix",
+	}
 	ComponentColors = []string{"indigo", "blue", "teal", "green", "amber", "coral", "red", "pink", "slate"}
 )
 

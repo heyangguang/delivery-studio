@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.300-dev"
+	version            = "1.0.301-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,22 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.301-dev",
+		Date:    "2026-11-24",
+		Title:   "内置 32 套常见中间件全彩矢量 SVG 品牌图标库",
+		TitleEn: "32 Enterprise Middleware Full-Color Vector SVG Brand Icons",
+		Highlights: []string{
+			"内置 32 套全彩矢量 SVG 中间件品牌图标（PostgreSQL、Patroni、Redis、Nginx、HAProxy、Keepalived、etcd、ELB、MySQL、MariaDB、MongoDB、Kafka、RabbitMQ、Elasticsearch、ZooKeeper、MinIO、Prometheus、Grafana、Kubernetes、Docker、ClickHouse、Nacos、Consul、RocketMQ、Envoy、Traefik、Valkey、TiDB、OpenSearch、Memcached、Harbor、Zabbix），采用白瓷/曜石精细底座卡片，彻底替代通用渐变色块图标",
+			"同步后端 mwpack.ComponentIcons 与全部 8 个内置组件清单，并为已有历史组件与交付记录按组件标识自动升级匹配品牌 SVG，无需修改存量配置",
+			"组件工作台新建与样式编辑器图标面板置顶「常见中间件」全彩 SVG 网格，同时优化深色模式下的对比度与选中态表现",
+		},
+		HighlightsEn: []string{
+			"Introduced 32 full-color vector SVG brand logos for enterprise middleware rendered on sculpted porcelain/obsidian tiles across Deliveries, Monitor, Apps, and Components",
+			"Synchronized mwpack.ComponentIcons and all 8 built-in catalog manifests, with automatic brand SVG upgrades for legacy deployments and manifests",
+			"Prioritized the 32-icon Common Middleware grid at the top of Component Workbench style pickers with tuned Light/Dark contrast",
+		},
+	},
 	{
 		Version: "1.0.300-dev",
 		Date:    "2026-11-24",

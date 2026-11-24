@@ -3,7 +3,7 @@ component: etcd
 short: etcd
 title: etcd
 category: 协调服务
-icon: kv
+icon: etcd
 color: teal
 delivery_modes: [offline, automatic]
 summary: 分布式键值存储，作为 Patroni 等高可用组件的协调服务（DCS）。

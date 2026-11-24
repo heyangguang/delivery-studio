@@ -60,8 +60,8 @@ export function StylePicker({
           ))}
         </div>
         {[
-          { key: "general", title: bi("通用", "General"), list: ICONS.filter((i) => !i.group) },
           { key: "middleware", title: bi("常见中间件", "Common Middleware"), list: ICONS.filter((i) => i.group) },
+          { key: "general", title: bi("通用", "General"), list: ICONS.filter((i) => !i.group) },
         ].map(({ key, title, list }) => (
           <div key={key}>
             <div className="wb-icons-title">{title}</div>
@@ -78,10 +78,10 @@ export function StylePicker({
                   aria-checked={icon === i.id}
                   aria-label={i.label}
                   title={i.label}
-                  className={icon === i.id ? "on" : ""}
+                  className={`${icon === i.id ? "on" : ""} ${i.group === "middleware" ? "is-brand" : ""}`.trim()}
                   onClick={() => onChange(i.id, cur.color)}
                 >
-                  <svg viewBox="0 0 40 40" width="26" height="26" aria-hidden>
+                  <svg viewBox="0 0 40 40" width="28" height="28" aria-hidden>
                     {iconShape(i.id)}
                   </svg>
                 </button>

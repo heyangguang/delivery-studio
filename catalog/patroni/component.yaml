@@ -3,7 +3,7 @@ component: patroni
 short: ha
 title: Patroni
 category: 协调服务
-icon: database
+icon: patroni
 color: blue
 delivery_modes: [offline, automatic]
 summary: PostgreSQL 高可用管理器。显式选择后管理数据库生命周期，并依赖独立的 DCS。

@@ -907,10 +907,27 @@ body[arco-theme="dark"] .avatar.admin {
   display: block;
   flex: none;
   border-radius: 10px;
+  color: var(--ink);
+}
+.app-glyph.is-brand {
+  --glyph-bg: #ffffff;
+  filter: drop-shadow(0 1px 1.5px rgba(11, 13, 18, 0.06));
+}
+.app-glyph.is-brand .app-glyph-tile {
+  fill: var(--glyph-bg);
+  stroke: rgba(11, 13, 18, 0.11);
+}
+body[arco-theme="dark"] .app-glyph.is-brand {
+  --glyph-bg: #1a1f28;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.34));
+}
+body[arco-theme="dark"] .app-glyph.is-brand .app-glyph-tile {
+  fill: var(--glyph-bg);
+  stroke: rgba(240, 244, 255, 0.14);
 }
 .app-glyph.muted {
-  filter: saturate(0.5);
-  opacity: 0.8;
+  filter: saturate(0.35);
+  opacity: 0.72;
 }
 .danger-item {
   color: var(--bad) !important;

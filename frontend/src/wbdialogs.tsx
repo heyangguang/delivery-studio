@@ -233,8 +233,8 @@ export function NewComponentModal({
         </div>
       </div>
       {[
-        { key: "general", title: bi("通用图标", "General"), list: ICONS.filter((i) => !i.group) },
         { key: "middleware", title: bi("常见中间件", "Middleware"), list: ICONS.filter((i) => i.group) },
+        { key: "general", title: bi("通用图标", "General"), list: ICONS.filter((i) => !i.group) },
       ].map(({ key, title, list }) => (
         <div key={key} className="wb-new-pop-sec">
           <span className="wb-new-pop-label">{title}</span>
@@ -251,10 +251,10 @@ export function NewComponentModal({
                 aria-checked={icon === i.id}
                 aria-label={i.label}
                 title={i.label}
-                className={icon === i.id ? "on" : ""}
+                className={`${icon === i.id ? "on" : ""} ${i.group === "middleware" ? "is-brand" : ""}`.trim()}
                 onClick={() => setLook({ icon: i.id, color })}
               >
-                <svg viewBox="0 0 40 40" width="21" height="21" aria-hidden>
+                <svg viewBox="0 0 40 40" width="24" height="24" aria-hidden>
                   {iconShape(i.id)}
                 </svg>
               </button>

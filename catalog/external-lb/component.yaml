@@ -3,7 +3,7 @@ component: external-lb
 short: elb
 title: 外部负载均衡（云 ELB / 硬件）
 category: 负载均衡
-icon: cloud
+icon: elb
 color: amber
 summary: 由客户或云平台运维的负载均衡。本平台不部署它，只生成需要在其上配置的监听、后端与健康检查清单。
 tags: [负载均衡, 外部]

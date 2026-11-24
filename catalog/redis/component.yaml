@@ -3,7 +3,7 @@ component: redis
 short: redis
 title: Redis
 category: 缓存
-icon: cache
+icon: redis
 color: red
 delivery_modes: [offline, automatic]
 summary: Redis 7.2（官方仓库）。没有从库时是单节点；有从库时是一主多从加哨兵（Sentinel）高可用，哨兵与实例同机运行。默认不持久化，按缓存使用。

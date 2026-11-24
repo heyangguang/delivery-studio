@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.312-dev"
+	version            = "1.0.313-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,22 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.313-dev",
+		Date:    "2026-11-24",
+		Title:   "修复新建向导窄屏步骤选中框上下裁切并统一 Bridge Teal 选中态",
+		TitleEn: "Fix Wizard Narrow Step Pill Border Clipping & Bridge Teal Active State",
+		Highlights: []string{
+			"修复新建交付向导窄屏横向步骤栏（.wz-nav）因 overflow-x: auto 叠加零上下留白导致外框 box-shadow 上下边被裁成括号状（( )）的问题",
+			"改用实体边框 border 与封闭胶囊样式（34px 圆角胶囊 + Bridge Teal 轻盈边线与柔和底色），并居中对齐状态徽标，明暗双主题与桌面侧栏视觉统一",
+			"同步将向导 AI 工作区步骤标签（.fw-tab.on）及执行位置选择卡片（集群内机器 / 独立管理机）升级为统一的 Bridge Teal 选中态",
+		},
+		HighlightsEn: []string{
+			"Fixed top/bottom clipping on the active step pill in the narrow horizontal wizard stepper (.wz-nav) where outer 1px box-shadow was sliced into parentheses by overflow-x: auto",
+			"Upgraded narrow and desktop wizard step tabs to closed real-border capsules with Bridge Teal active borders, soft tint, and centered status marks across Light & Dark modes",
+			"Aligned AI workspace step tabs (.fw-tab.on) and execution host selector cards (.ex-location-options) to the unified Bridge Teal selection styling",
+		},
+	},
 	{
 		Version: "1.0.312-dev",
 		Date:    "2026-11-24",

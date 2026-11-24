@@ -1268,6 +1268,14 @@ body[arco-theme="dark"] .ro-tpl-batch {
   background: var(--surface);
   border: 1px solid color-mix(in srgb, var(--line) 85%, transparent);
 }
+.ro-var-row.is-pickable {
+  cursor: pointer;
+  transition: border-color 0.14s ease, background-color 0.14s ease;
+}
+.ro-var-row.is-pickable:hover {
+  border-color: var(--brand-line);
+  background: var(--hover);
+}
 .ro-var-row.is-cur {
   border-color: color-mix(in srgb, var(--brand) 48%, var(--line));
   background: color-mix(in srgb, var(--brand) 4%, var(--surface));

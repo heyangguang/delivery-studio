@@ -1037,12 +1037,13 @@ export function PropagateRehearsalModal({
             )}
           </div>
         </div>
-        <div className="ro-pick-right" onClick={(e) => e.stopPropagation()}>
+        <div className="ro-pick-right">
           {t.already_imported ? (
             <button
               type="button"
               className="ro-go-btn"
-              onClick={() => {
+              onClick={(e) => {
+                e.stopPropagation();
                 onClose();
                 go({
                   name: "deliveries",
@@ -1061,7 +1062,8 @@ export function PropagateRehearsalModal({
             <button
               type="button"
               className="ro-go-btn is-eff"
-              onClick={() => {
+              onClick={(e) => {
+                e.stopPropagation();
                 onClose();
                 go({
                   name: "deliveries",
@@ -1885,7 +1887,7 @@ export function ImportTemplateBar({
 
                     {/* Inline Effective Parameter Diff Preview */}
                     {changes.length > 0 && (
-                      <div className="ro-tpl-params" onClick={(e) => e.stopPropagation()}>
+                      <div className="ro-tpl-params">
                         {visibleChanges.map((ch, idx) => (
                           <Tooltip
                             key={`${ch.key}-${idx}`}
@@ -1900,9 +1902,10 @@ export function ImportTemplateBar({
                           <button
                             type="button"
                             className="ro-param-more"
-                            onClick={() =>
-                              setExpandedParams((prev) => ({ ...prev, [key]: true }))
-                            }
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setExpandedParams((prev) => ({ ...prev, [key]: true }));
+                            }}
                           >
                             +{hiddenParams} {bi("项参数", "more")}
                           </button>
@@ -1911,9 +1914,10 @@ export function ImportTemplateBar({
                           <button
                             type="button"
                             className="ro-param-more"
-                            onClick={() =>
-                              setExpandedParams((prev) => ({ ...prev, [key]: false }))
-                            }
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setExpandedParams((prev) => ({ ...prev, [key]: false }));
+                            }}
                           >
                             {bi("收起", "Less")}
                           </button>
@@ -1995,7 +1999,16 @@ export function ImportTemplateBar({
                           return (
                             <div
                               key={vKey}
-                              className={`ro-var-row${isCurrent ? " is-cur" : ""}`}
+                              className={`ro-var-row${isCurrent ? " is-cur" : " is-pickable"}`}
+                              onClick={() => {
+                                if (!isCurrent) {
+                                  setPilotOverrides((prev) => ({
+                                    ...prev,
+                                    [key]: vKey,
+                                  }));
+                                }
+                                setSelectedKey(key);
+                              }}
                             >
                               <div className="ro-var-main">
                                 <div className="ro-var-top">

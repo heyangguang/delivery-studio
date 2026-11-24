@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.279-dev"
+	version            = "1.0.280-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,20 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.280-dev",
+		Date:    "2026-11-24",
+		Title:   "修复变更模板卡片中部点击盲区与合并样板整行可选",
+		TitleEn: "Fix swallowed click dead-zone inside import template cards and make variant rows clickable",
+		Highlights: []string{
+			"移除引入变更模板卡片参数预览容器（.ro-tpl-params）误加的 stopPropagation，改为仅在「+N 项参数 / 收起」按钮本身阻止冒泡，消除点击卡片中段空白或参数区域无法选中卡片的盲区",
+			"同步修复「推广至其他集群」目标卡片右侧非按钮徽标吞掉勾选点击的问题，并支持点击合并样板记录整行直接切换样板",
+		},
+		HighlightsEn: []string{
+			"Removed overly broad stopPropagation on the parameter preview container (.ro-tpl-params) inside Import Change cards so clicking anywhere on the card selects it, while keeping stopPropagation strictly on the +N more / Less toggle buttons",
+			"Fixed swallowed clicks on non-button badges in the Propagate target picker and made merged pilot variant rows clickable across the full row",
+		},
+	},
 	{
 		Version: "1.0.279-dev",
 		Date:    "2026-11-24",

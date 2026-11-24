@@ -819,10 +819,10 @@ body[arco-theme="dark"] .ai-quick-toggle.is-interactive:not(:disabled):is(:hover
 }
 
 :root :is(.ap-compose, .ad-compose) .tm-tog.think.on {
-  color: var(--kyndryl-ink);
-  border-color: var(--kyndryl-line);
-  background: var(--kyndryl-soft);
-  box-shadow: none;
+  color: var(--thk-fg, var(--kyndryl-ink));
+  border-color: var(--thk-line, var(--kyndryl-line));
+  background: var(--thk-bg, var(--kyndryl-soft));
+  box-shadow: var(--thk-shadow, none);
 }
 
 :root :is(.ap-compose, .ad-compose) .tm-tog.web.on {
@@ -833,10 +833,10 @@ body[arco-theme="dark"] .ai-quick-toggle.is-interactive:not(:disabled):is(:hover
 }
 
 body[arco-theme="dark"] :is(.ap-compose, .ad-compose) .tm-tog.think.on {
-  color: var(--kyndryl-ink);
-  border-color: var(--kyndryl-line);
-  background: var(--kyndryl-soft);
-  box-shadow: none;
+  color: var(--thk-fg, var(--kyndryl-ink));
+  border-color: var(--thk-line, var(--kyndryl-line));
+  background: var(--thk-bg, var(--kyndryl-soft));
+  box-shadow: var(--thk-shadow, none);
 }
 
 body[arco-theme="dark"] :is(.ap-compose, .ad-compose) .tm-tog.web.on {
@@ -928,16 +928,20 @@ body[arco-theme="dark"] :is(.ap-compose, .ad-compose) .tm-tog.web.on {
   box-shadow: var(--ring);
 }
 .tm-tog.think.on {
-  color: var(--brand-ink);
-  background: var(--brand-soft);
+  color: var(--thk-fg, var(--kyndryl-ink));
+  border-color: var(--thk-line, var(--kyndryl-line));
+  background: var(--thk-bg, var(--kyndryl-soft));
+  box-shadow: var(--thk-shadow, none);
 }
 .tm-tog.web.on {
   color: #1f5e66;
   background: rgba(31, 94, 102, 0.11);
 }
 body[arco-theme="dark"] .tm-tog.think.on {
-  color: var(--brand-ink);
-  background: var(--brand-soft);
+  color: var(--thk-fg, var(--kyndryl-ink));
+  border-color: var(--thk-line, var(--kyndryl-line));
+  background: var(--thk-bg, var(--kyndryl-soft));
+  box-shadow: var(--thk-shadow, none);
 }
 body[arco-theme="dark"] .tm-tog.web.on {
   color: #72cbd6;

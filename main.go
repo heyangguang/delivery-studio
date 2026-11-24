@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.320-dev"
+	version            = "1.0.321-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,20 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.321-dev",
+		Date:    "2026-11-24",
+		Title:   "AI 思考深度按钮与滑块按档位递进色谱配色",
+		TitleEn: "Progressive Intelligence-Tier Spectrum Colors for AI ThinkLevel",
+		Highlights: []string{
+			"AI 思考深度胶囊按钮（ThinkLevel）按所选档位动态切换递进色谱：默认中性 → 低（青绿）→ 中（钴蓝）→ 高（深靛紫）→ 很高（绛梅红）→ 最高（暖橙红）→ 极高（Kyndryl 炽红微光渐变），不再一开启就固定为单一红色。",
+			"同步升级弹出浮层内的滑块渐变条（.thk-fill）与档位标题色（.thk-slider-title），拖动滑块时胶囊按钮、标题与轨道色调实时一致，完整适配浅色与暗黑模式。",
+		},
+		HighlightsEn: []string{
+			"Added progressive intelligence-tier spectrum styling to the AI ThinkLevel button pill: Default (neutral) -> Low (Bridge Teal) -> Medium (Cobalt) -> High (Indigo-Violet) -> Very High (Magenta-Plum) -> Max (Ember) -> Ultra (Kyndryl Ignition Red glow), replacing a single flat red state.",
+			"Synchronized the popover slider fill gradient and tier heading colors with the pill spectrum across Light and Dark Mode.",
+		},
+	},
 	{
 		Version: "1.0.320-dev",
 		Date:    "2026-11-24",

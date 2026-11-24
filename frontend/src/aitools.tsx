@@ -192,6 +192,21 @@ const LEVEL_HINT: Record<string, string> = {
   },
 };
 
+function thinkTierOf(val: string): string {
+  if (!val) return "auto";
+  if (
+    val === "low" ||
+    val === "medium" ||
+    val === "high" ||
+    val === "xhigh" ||
+    val === "max" ||
+    val === "ultra"
+  ) {
+    return val;
+  }
+  return "high";
+}
+
 function ThinkPills({
   levels,
   value,
@@ -233,17 +248,7 @@ function ThinkPills({
     Math.min(1, (displayProgress - 0.72) / 0.24),
   );
 
-  const tierTone = !displayVal
-    ? "auto"
-    : displayVal === "ultra"
-      ? "ultra"
-      : displayVal === "max"
-        ? "max"
-        : displayVal === "xhigh" || displayVal === "high"
-          ? "high"
-          : displayVal === "medium"
-            ? "medium"
-            : "low";
+  const tierTone = thinkTierOf(displayVal);
   const label = displayVal ? LEVELS[displayVal] : bi("默认", "Default");
   const hint = displayVal
     ? LEVEL_HINT[displayVal]
@@ -463,6 +468,7 @@ export function ThinkLevel({
   const validLevels = (levels || []).filter((l) => LEVELS[l]);
   if (validLevels.length === 0) return null;
   const active = value && validLevels.includes(value) ? value : "";
+  const tier = thinkTierOf(active);
   const prefix = bi("思考", "Think");
   const defText = bi("默认", "Default");
   const allLabels = compact
@@ -496,7 +502,8 @@ export function ThinkLevel({
       <button
         ref={btnRef}
         type="button"
-        className={`tm-tog think ${compact ? "compact" : ""} ${active ? "on" : ""} ${open ? "tm-open" : ""}`}
+        className={`tm-tog think tier-${tier} ${compact ? "compact" : ""} ${active ? "on" : ""} ${open ? "tm-open" : ""}`}
+        data-think-tier={tier}
         aria-expanded={open}
         title={
           active

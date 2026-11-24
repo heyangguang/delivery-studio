@@ -132,19 +132,21 @@
   color: var(--faint);
 }
 .mon-app-chip.on {
-  color: var(--on-brand);
-  background: var(--brand);
-  border-color: var(--brand);
+  color: var(--teal-ink);
+  background: var(--teal-soft);
+  border-color: var(--teal-line);
   font-weight: 600;
 }
 .mon-app-chip.on em {
-  color: inherit;
-  opacity: 0.72;
+  color: var(--teal-ink);
+  opacity: 0.78;
 }
 
-/* Left Rail Cluster Row — harmonized 1:1 with Deliveries .row.row-dlv + Swiss Leica 2.5px red edge bar */
+/* Left Rail Cluster Row — harmonized 1:1 with Deliveries .row.row-dlv;
+   active card elevation & 2.5px Kyndryl Warm Red edge bar glide smoothly via .row-indicator */
 .mon-row-btn {
   position: relative;
+  z-index: 1;
   width: 100%;
   border: 0;
   background: transparent;
@@ -153,27 +155,11 @@
   box-sizing: border-box;
   overflow: hidden;
 }
+.mon-row-btn:hover:not(.on) {
+  background: var(--hover);
+}
 .mon-row-btn.on {
-  background: var(--surface);
-  box-shadow:
-    0 2px 8px -2px rgba(11, 13, 18, 0.085),
-    0 0 0 1px rgba(11, 13, 18, 0.08);
-}
-body[arco-theme="dark"] .mon-row-btn.on {
-  background: var(--surface-2);
-  box-shadow:
-    0 4px 14px rgba(0, 0, 0, 0.44),
-    0 0 0 1px var(--line-strong);
-}
-.mon-row-btn.on::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 9px;
-  bottom: 9px;
-  width: 2.5px;
-  border-radius: 0 2px 2px 0;
-  background: var(--kyndryl);
+  background: transparent;
 }
 .mon-row-btn.on .row-name {
   color: var(--ink);
@@ -294,20 +280,22 @@ body[arco-theme="dark"] .mon-row-btn.on {
   transition: opacity 0.25s ease;
 }
 .mon-progress-line.is-live,
-.mon-progress-line.is-failed {
+.mon-progress-line.is-failed,
+.mon-progress-line.is-switching {
   opacity: 1;
   background: var(--surface-3);
 }
 .mon-progress-line > i {
   display: block;
   height: 100%;
-  background: var(--run);
+  background: var(--teal);
   transition: width 0.35s var(--ease-out);
 }
-.mon-progress-line.is-live > i {
-  background: linear-gradient(90deg, var(--run) 0%, #38bdf8 50%, var(--run) 100%);
+.mon-progress-line.is-live > i,
+.mon-progress-line.is-switching > i {
+  background: linear-gradient(90deg, var(--teal) 0%, #38bdf8 50%, var(--teal) 100%);
   background-size: 200% 100%;
-  animation: mon-shimmer 2s linear infinite;
+  animation: mon-shimmer 1.4s linear infinite;
 }
 .mon-progress-line.is-failed > i {
   background: var(--bad);
@@ -315,6 +303,27 @@ body[arco-theme="dark"] .mon-row-btn.on {
 @keyframes mon-shimmer {
   0% { background-position: 100% 0; }
   100% { background-position: -100% 0; }
+}
+
+/* Silky zero-flash cluster switch animation: outer shells & obsidian terminal chassis stay
+   solidly mounted while inner content glides gently in (no white/black paint flash). */
+.mon-swap-in {
+  animation: mon-soft-in 0.22s var(--ease-out) backwards;
+}
+@keyframes mon-soft-in {
+  from {
+    opacity: 0.48;
+    transform: translate3d(0, 5px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mon-swap-in {
+    animation: none;
+  }
 }
 
 .mon-header-top {

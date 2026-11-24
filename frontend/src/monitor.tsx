@@ -1,6 +1,7 @@
 import React, {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -43,7 +44,20 @@ import {
 } from "./execution-types";
 import { bi, getLang, useLang, withLang } from "./i18n";
 import { go } from "./router";
-import { ago, api, can, clock, copy, dayLabel, err, fullTime, useAIStatus, useMedia } from "./shared";
+import {
+  ago,
+  api,
+  cached,
+  can,
+  clock,
+  copy,
+  dayLabel,
+  err,
+  fullTime,
+  putCached,
+  useAIStatus,
+  useMedia,
+} from "./shared";
 import { AppGlyph, Segmented, StatusBadge, StatusDot } from "./ui";
 import { dispatchExecLaunchIntent, StepHotfixDrawer } from "./stephotfix";
 import "./monitor.css";
@@ -951,6 +965,31 @@ function StepGlyph({ state }: { state: string }) {
 
 type RailStatusFilter = "all" | "active" | "failed" | "done";
 
+const MONITOR_LIST_URL = "/api/executions/runs";
+const execDetailUrl = (jobId: string) =>
+  `/api/jobs/${encodeURIComponent(jobId)}/executions`;
+const execDetailInflight = new Map<string, Promise<ExecDetailData | null>>();
+
+function prefetchExecDetail(jobId: string): Promise<ExecDetailData | null> {
+  if (!jobId) return Promise.resolve(null);
+  const url = execDetailUrl(jobId);
+  const hit = cached<ExecDetailData>(url);
+  if (hit) return Promise.resolve(hit);
+  const existing = execDetailInflight.get(url);
+  if (existing) return existing;
+  const p = api<ExecDetailData>(url)
+    .then((d) => {
+      putCached(url, d);
+      return d;
+    })
+    .catch(() => null)
+    .finally(() => {
+      execDetailInflight.delete(url);
+    });
+  execDetailInflight.set(url, p);
+  return p;
+}
+
 export function ExecutionMonitorPage({
   selectedJob,
   initialRun,
@@ -961,8 +1000,12 @@ export function ExecutionMonitorPage({
   initialStep?: string;
 }) {
   useLang();
-  const [listData, setListData] = useState<MonitorListPayload | null>(null);
-  const [listLoading, setListLoading] = useState(true);
+  const [listData, setListData] = useState<MonitorListPayload | null>(
+    () => cached<MonitorListPayload>(MONITOR_LIST_URL) ?? null,
+  );
+  const [listLoading, setListLoading] = useState(
+    () => !cached<MonitorListPayload>(MONITOR_LIST_URL),
+  );
   const narrow = useMedia("(max-width: 900px)");
   const compact = useMedia("(max-width: 1100px)");
   const [railHidden, setRailHidden] = useState(() => compact);
@@ -971,6 +1014,8 @@ export function ExecutionMonitorPage({
   const [railSearch, setRailSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<RailStatusFilter>("all");
   const [appFilter, setAppFilter] = useState<string>("all");
+  const listBodyRef = useRef<HTMLDivElement>(null);
+  const [ind, setInd] = useState<{ y: number; h: number } | null>(null);
 
   useEffect(() => {
     // Auto-collapse rail when resizing into narrow/compact viewports; auto-restore above 1100px.
@@ -994,7 +1039,8 @@ export function ExecutionMonitorPage({
 
   const loadList = useCallback(async () => {
     try {
-      const res = await api<MonitorListPayload>("/api/executions/runs");
+      const res = await api<MonitorListPayload>(MONITOR_LIST_URL);
+      putCached(MONITOR_LIST_URL, res);
       setListData(res);
     } catch {
       /* keep last known list */
@@ -1074,6 +1120,79 @@ export function ExecutionMonitorPage({
   }, [items, statusFilter, appFilter, railSearch]);
 
   const canManageNodes = can("execution.manage");
+
+  const summaryById = useMemo(() => {
+    const m = new Map<string, MonitorListItem>();
+    for (const it of items) m.set(it.job_id, it);
+    return m;
+  }, [items]);
+
+  // Warm the first few visible clusters so switching is instant even before hover.
+  useEffect(() => {
+    if (!filteredItems.length) return;
+    const targets = filteredItems
+      .slice(0, 4)
+      .filter((it) => it.job_id !== activeJobId);
+    const id = window.setTimeout(() => {
+      targets.forEach((it) => {
+        void prefetchExecDetail(it.job_id);
+      });
+    }, 180);
+    return () => window.clearTimeout(id);
+  }, [filteredItems, activeJobId]);
+
+  // Sliding selection card (.row-indicator) — identical spring physics to Deliveries.
+  useLayoutEffect(() => {
+    const el = activeJobId
+      ? document.getElementById(`mon-row-${activeJobId}`)
+      : null;
+    const container = listBodyRef.current;
+    const measure = () =>
+      setInd(
+        el && container?.contains(el)
+          ? { y: el.offsetTop, h: el.offsetHeight }
+          : null,
+      );
+    measure();
+    if (!container || !el) return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(container);
+    container
+      .querySelectorAll('[role="group"]')
+      .forEach((group) => observer.observe(group));
+    return () => observer.disconnect();
+  }, [activeJobId, filteredItems, railHidden]);
+
+  // ArrowUp / ArrowDown keyboard switching across visible clusters (matching Deliveries).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+      const t = e.target as HTMLElement | null;
+      if (
+        t &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.isContentEditable ||
+          t.closest(".arco-modal,.arco-drawer"))
+      )
+        return;
+      if (!filteredItems.length) return;
+      e.preventDefault();
+      const idx = filteredItems.findIndex((x) => x.job_id === activeJobId);
+      const step = e.key === "ArrowDown" ? 1 : -1;
+      const next =
+        filteredItems[
+          Math.max(0, Math.min(filteredItems.length - 1, idx < 0 ? 0 : idx + step))
+        ];
+      if (!next || next.job_id === activeJobId) return;
+      go({ name: "executions", id: next.job_id }, { replace: !!selectedJob });
+      document
+        .getElementById(`mon-row-${next.job_id}`)
+        ?.scrollIntoView({ block: "nearest" });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [filteredItems, activeJobId, selectedJob]);
 
   return (
     <div className={`md-split mon-split ${railHidden ? "mon-rail-hidden" : ""}`}>
@@ -1182,7 +1301,14 @@ export function ExecutionMonitorPage({
           )}
         </div>
 
-        <div className="list-body">
+        <div className="list-body" ref={listBodyRef} role="listbox" aria-label={bi("集群", "Clusters")}>
+          {ind && (
+            <span
+              className="row-indicator"
+              style={{ transform: `translateY(${ind.y}px)`, height: ind.h }}
+              aria-hidden
+            />
+          )}
           {listLoading && !listData ? (
             <div className="list-state">
               <IconLoading spin /> {bi("正在读取执行记录…", "Loading executions…")}
@@ -1254,10 +1380,18 @@ export function ExecutionMonitorPage({
                     return (
                       <button
                         key={it.job_id}
+                        id={`mon-row-${it.job_id}`}
                         type="button"
+                        role="option"
+                        aria-selected={isSelected}
                         className={`row row-dlv mon-row-btn ${isSelected ? "on" : ""} ${it.active ? "is-live" : ""}`}
+                        onPointerEnter={() => void prefetchExecDetail(it.job_id)}
+                        onFocus={() => void prefetchExecDetail(it.job_id)}
                         onClick={() => {
-                          go({ name: "executions", id: it.job_id });
+                          go(
+                            { name: "executions", id: it.job_id },
+                            { replace: !!selectedJob },
+                          );
                           if (narrow) setRailHidden(true);
                         }}
                       >
@@ -1338,9 +1472,9 @@ export function ExecutionMonitorPage({
           }}
         >
           <MonitorWorkspace
-            key={activeJobId}
             jobId={activeJobId}
             summary={activeSummary}
+            summaryById={summaryById}
             initialRun={initialRun}
             initialStep={initialStep}
             railHidden={railHidden}
@@ -1378,6 +1512,7 @@ type LogViewMode = "full" | "errors" | "tasks";
 function MonitorWorkspace({
   jobId,
   summary,
+  summaryById,
   initialRun,
   initialStep,
   railHidden,
@@ -1386,6 +1521,7 @@ function MonitorWorkspace({
 }: {
   jobId: string;
   summary?: MonitorListItem;
+  summaryById: Map<string, MonitorListItem>;
   initialRun?: string;
   initialStep?: string;
   railHidden: boolean;
@@ -1393,12 +1529,28 @@ function MonitorWorkspace({
   onListRefresh: () => Promise<void>;
 }) {
   useLang();
-  const [data, setData] = useState<ExecDetailData | null>(null);
+  const [view, setView] = useState<{
+    jobId: string;
+    data: ExecDetailData | null;
+  }>(() => ({
+    jobId,
+    data: cached<ExecDetailData>(execDetailUrl(jobId)) ?? null,
+  }));
+  const data = view.data;
+  const shownJobId = view.data ? view.jobId : jobId;
+  const shownSummary = summaryById.get(shownJobId) || summary;
+  const [switching, setSwitching] = useState(false);
   const [loadErr, setLoadErr] = useState("");
   const [busy, setBusy] = useState(false);
   const [syncBusy, setSyncBusy] = useState(false);
 
-  const [scope, setScope] = useState<string>(initialRun || "");
+  const [scope, setScope] = useState<string>(() => {
+    const init = cached<ExecDetailData>(execDetailUrl(jobId));
+    if (!init) return initialRun || "";
+    if (initialRun && init.runs.some((r) => r.id === initialRun)) return initialRun;
+    const act = init.runs.find(isActiveRun);
+    return act ? act.id : "all";
+  });
   const [consoleMode, setConsoleMode] = useState<"stream" | "log">(
     initialStep ? "log" : "stream",
   );
@@ -1430,29 +1582,125 @@ function MonitorWorkspace({
 
   const termBodyRef = useRef<HTMLDivElement>(null);
   const suppressScrollUntilRef = useRef(0);
-  const scopeInitializedRef = useRef(false);
+  const scopeInitializedRef = useRef(Boolean(view.data && !initialStep));
+  const reqSeqRef = useRef(0);
+  const shownJobRef = useRef(shownJobId);
+  shownJobRef.current = shownJobId;
+
+  const commitClusterSwitch = useCallback(
+    (
+      targetJobId: string,
+      nextData: ExecDetailData,
+      wantRun?: string,
+      wantStep?: string,
+    ) => {
+      const matchedRun = wantRun
+        ? nextData.runs.find((r) => r.id === wantRun)
+        : undefined;
+      const nextActive = nextData.runs.find(isActiveRun);
+      const nextScope = matchedRun
+        ? matchedRun.id
+        : nextActive
+          ? nextActive.id
+          : "all";
+
+      let nextSel: { runId: string; stepId: string; stepKey: string } | null = null;
+      let nextMode: "stream" | "log" = "stream";
+      if (wantStep) {
+        const searchRuns = matchedRun
+          ? [matchedRun, ...nextData.runs.filter((r) => r.id !== matchedRun.id)]
+          : nextData.runs;
+        for (const r of searchRuns) {
+          const st = r.steps.find((s) => s.id === wantStep || s.key === wantStep);
+          if (st) {
+            nextSel = { runId: r.id, stepId: st.id, stepKey: st.key };
+            nextMode = "log";
+            break;
+          }
+        }
+      }
+
+      scopeInitializedRef.current = true;
+      setView({ jobId: targetJobId, data: nextData });
+      setLoadErr("");
+      setScope(nextScope);
+      setSelectedRef(nextSel);
+      setConsoleMode(nextMode);
+      setPipeFilter("all");
+      setFollowLive(true);
+      setCollapsedPhases({});
+      setSearch("");
+      setMatchIdx(0);
+      setLogView("full");
+      setStreamFilter("all");
+      setFocusedLine(null);
+      setDiagCollapsed(false);
+      setHotfixStep(null);
+      setAutoScroll(true);
+    },
+    [],
+  );
 
   const loadDetail = useCallback(async () => {
+    const target = jobId;
+    const seq = reqSeqRef.current;
     try {
-      const d = await api<ExecDetailData>(
-        `/api/jobs/${encodeURIComponent(jobId)}/executions`,
-      );
-      setData(d);
-      setLoadErr("");
+      const d = await api<ExecDetailData>(execDetailUrl(target));
+      putCached(execDetailUrl(target), d);
+      if (seq !== reqSeqRef.current) return;
+      if (shownJobRef.current !== target) {
+        commitClusterSwitch(target, d, initialRun, initialStep);
+      } else {
+        setView({ jobId: target, data: d });
+        setLoadErr("");
+      }
     } catch (e) {
+      if (seq !== reqSeqRef.current) return;
       setLoadErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      if (seq === reqSeqRef.current) setSwitching(false);
     }
-  }, [jobId]);
+  }, [jobId, initialRun, initialStep, commitClusterSwitch]);
 
   useEffect(() => {
-    scopeInitializedRef.current = false;
-    setData(null);
-    setSelectedRef(null);
-    setScope(initialRun || "");
-    setConsoleMode(initialStep ? "log" : "stream");
-    setLogView("full");
-    void loadDetail();
-  }, [jobId, initialRun, initialStep, loadDetail]);
+    const seq = ++reqSeqRef.current;
+    const hit = cached<ExecDetailData>(execDetailUrl(jobId));
+    if (hit) {
+      // Cache hit: transition synchronously on the next frame with zero blank flash,
+      // then quietly revalidate fresh telemetry in the background.
+      if (shownJobRef.current !== jobId || !scopeInitializedRef.current) {
+        commitClusterSwitch(jobId, hit, initialRun, initialStep);
+      }
+      setSwitching(false);
+      void api<ExecDetailData>(execDetailUrl(jobId))
+        .then((fresh) => {
+          putCached(execDetailUrl(jobId), fresh);
+          if (seq !== reqSeqRef.current) return;
+          setView({ jobId, data: fresh });
+          setLoadErr("");
+        })
+        .catch(() => {
+          /* keep cached telemetry visible */
+        });
+      return;
+    }
+
+    // Cold miss: keep the currently displayed cluster smoothly visible (NEVER flash white!)
+    // while showing a 2px shimmer hairline until the new cluster arrives.
+    if (shownJobRef.current && view.data) {
+      setSwitching(true);
+    }
+    void prefetchExecDetail(jobId).then((fetched) => {
+      if (seq !== reqSeqRef.current) return;
+      if (fetched) {
+        commitClusterSwitch(jobId, fetched, initialRun, initialStep);
+        setSwitching(false);
+      } else {
+        // Fallback direct call to surface real error text if needed
+        void loadDetail();
+      }
+    });
+  }, [jobId, initialRun, initialStep]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const runsNewest = data?.runs || [];
   const runsChrono = useMemo(
@@ -1860,7 +2108,7 @@ function MonitorWorkspace({
     loadErr: logErr,
     reload: reloadLog,
   } = useLiveStepLog(
-    jobId,
+    shownJobId,
     activeStepRef?.run.id || "",
     activeStepRef?.step.id || "",
     activeStepRef?.step.seq || 0,
@@ -1909,8 +2157,8 @@ function MonitorWorkspace({
   );
   const failureDiag = useMemo<FailureDiag | null>(() => {
     if (!activeStepRef || !activeStepFailed) return null;
-    return extractFailureDiag(parsedLines, activeStepRef.step, summary?.app_id);
-  }, [activeStepRef, activeStepFailed, parsedLines, summary?.app_id]);
+    return extractFailureDiag(parsedLines, activeStepRef.step, shownSummary?.app_id);
+  }, [activeStepRef, activeStepFailed, parsedLines, shownSummary?.app_id]);
 
   // Pipe filters
   const pipeCounts = useMemo(() => {
@@ -2367,8 +2615,8 @@ function MonitorWorkspace({
   const runnerNode = data?.nodes.find((n) => n.id === headerRun?.node);
   const runnerOnline = runnerNode
     ? isExecutionNodeOnline(runnerNode)
-    : summary?.runner_online;
-  const clusterName = summary?.cluster || headerRun?.cluster || jobId.slice(0, 12);
+    : shownSummary?.runner_online;
+  const clusterName = shownSummary?.cluster || headerRun?.cluster || shownJobId.slice(0, 12);
 
   const unresolvedFailCountAll = useMemo(() => {
     let n = 0;
@@ -2469,7 +2717,7 @@ function MonitorWorkspace({
 
   const activeMatchLine = searchMatches[matchIdx];
   const stepLogUrl = activeStepRef
-    ? `/api/jobs/${encodeURIComponent(jobId)}/executions/${encodeURIComponent(activeStepRef.run.id)}/logs/${encodeURIComponent(activeStepRef.step.id)}`
+    ? `/api/jobs/${encodeURIComponent(shownJobId)}/executions/${encodeURIComponent(activeStepRef.run.id)}/logs/${encodeURIComponent(activeStepRef.step.id)}`
     : "";
   const activeStepRecap = normRecap(activeStepRef?.step.recap);
   const activeStepLaterFixed = Boolean(
@@ -2486,9 +2734,9 @@ function MonitorWorkspace({
       {/* Top Mission Control Header */}
       <header className="mon-header">
         <div
-          className={`mon-progress-line ${activeRun ? "is-live" : unresolvedFailCountAll > 0 ? "is-failed" : ""}`}
+          className={`mon-progress-line ${switching ? "is-switching" : activeRun ? "is-live" : unresolvedFailCountAll > 0 ? "is-failed" : ""}`}
         >
-          <i style={{ width: `${pct}%` }} />
+          <i style={{ width: switching ? "100%" : `${pct}%` }} />
         </div>
         <div className="mon-header-top">
           <div className="mon-header-left">
@@ -2515,7 +2763,7 @@ function MonitorWorkspace({
               />
             </Tooltip>
 
-            <div className="mon-title-block">
+            <div key={`head-${shownJobId}`} className="mon-title-block mon-swap-in">
               <div className="mon-title-row">
                 <h1 className="mon-cluster-title">{clusterName}</h1>
                 <StatusBadge
@@ -2524,10 +2772,10 @@ function MonitorWorkspace({
                 />
               </div>
               <div className="mon-meta-row">
-                {summary?.app_name && (
+                {shownSummary?.app_name && (
                   <span>
-                    {summary.app_name}
-                    {summary.version ? ` ${summary.version}` : ""}
+                    {shownSummary.app_name}
+                    {shownSummary.version ? ` ${shownSummary.version}` : ""}
                   </span>
                 )}
                 {headerRun && (
@@ -2594,7 +2842,7 @@ function MonitorWorkspace({
                     ? extractFailureDiag(
                         [],
                         primaryFailedAttempt.step,
-                        summary?.app_id,
+                        shownSummary?.app_id,
                       )
                     : undefined
               }
@@ -3041,7 +3289,8 @@ function MonitorWorkspace({
             )}
 
             <div className="mon-pipe-scroll">
-              {groupedPhases.map((grp) => {
+              <div key={`pipe-${shownJobId}`} className="mon-swap-in">
+                {groupedPhases.map((grp) => {
                 const isCollapsed = !!collapsedPhases[grp.phase];
                 const fracCls = grp.live
                   ? "run"
@@ -3152,6 +3401,7 @@ function MonitorWorkspace({
                   </div>
                 );
               })}
+              </div>
             </div>
           </aside>
 
@@ -3733,6 +3983,7 @@ function MonitorWorkspace({
                 className={`mon-term-body ${wrapLines ? "wrap" : ""}`}
                 onScroll={handleTermScroll}
               >
+                <div key={`term-${shownJobId}`} className="mon-swap-in">
                 {consoleMode === "stream" ? (
                   visibleStreamEvents.length === 0 ? (
                     <div className="mon-term-empty">
@@ -4062,6 +4313,7 @@ function MonitorWorkspace({
                     });
                   })()
                 )}
+                </div>
               </div>
 
               {!autoScroll && (
@@ -4090,7 +4342,7 @@ function MonitorWorkspace({
         jobId={jobId}
         stepKey={hotfixStep?.key}
         stepTitle={hotfixStep?.title}
-        deliveryMode={summary?.delivery_mode || "automatic"}
+        deliveryMode={shownSummary?.delivery_mode || "automatic"}
         onClose={() => setHotfixStep(null)}
         onPatched={() => {
           void loadDetail();

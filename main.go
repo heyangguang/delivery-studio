@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.310-dev"
+	version            = "1.0.311-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,24 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.311-dev",
+		Date:    "2026-11-24",
+		Title:   "执行监控丝滑零闪烁切换与弹簧滑块",
+		TitleEn: "Execution Monitor Zero-Flash Cluster Switching & Spring Rail Indicator",
+		Highlights: []string{
+			"彻底消除「执行监控」切换集群时的白屏加载闪烁：移除 MonitorWorkspace 的强制卸载重建（key={activeJobId}）与 setData(null) 空白态，接入与「交付」一致的内存缓存与悬停/聚焦/首屏预取机制，点击切换 0ms 瞬时响应",
+			"左侧集群列表接入与「交付」完全一致的弹簧滑块（.row-indicator，含 2.5px Kyndryl 暖红边条）与上下方向键快捷切换，选中卡片在列表行间丝滑滑移",
+			"重构右侧监控区过渡动画：顶栏、步骤栏与深色终端外框常驻不动避免黑白闪屏，仅内部内容轻柔上浮淡入（mon-soft-in）；未命中缓存的冷切换仅在顶边显示 2px 架构青微光进度条并保持当前画面完整",
+			"同步将左侧组件快捷筛选选中态（mon-app-chip.on）与顶边进度条升级为 Kyndryl 架构青，明暗双主题均通过实测验证",
+		},
+		HighlightsEn: []string{
+			"Eliminated full-pane white spinner flashes when switching clusters in Execution Monitor by keeping MonitorWorkspace persistently mounted, caching execution telemetry with hover/focus/initial prefetch, and swapping state atomically",
+			"Added the same spring-gliding left-rail selection indicator (.row-indicator with 2.5px Kyndryl Warm Red edge bar) and ArrowUp/ArrowDown keyboard navigation as Deliveries",
+			"Kept the header, pipeline, and obsidian terminal chassis mounted while smoothly transitioning inner content (mon-soft-in) and displaying a subtle 2px Bridge Teal top shimmer on cold switches",
+			"Aligned the active component filter chip and top progress bar with the Kyndryl Bridge Teal palette across Light and Dark modes",
+		},
+	},
 	{
 		Version: "1.0.310-dev",
 		Date:    "2026-11-24",

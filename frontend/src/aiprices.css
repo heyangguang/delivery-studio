@@ -118,6 +118,7 @@
 }
 
 .sx-page-h p a {
-  color: var(--brand-ink);
-  text-underline-offset: 2px;
+  color: var(--teal-ink);
+  font-weight: 500;
+  text-underline-offset: 3px;
 }

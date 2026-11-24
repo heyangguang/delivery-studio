@@ -1405,23 +1405,29 @@ export const InstanceGraph = React.memo(function InstanceGraph({
                 <title>{h.ip || "—"}</title>
                 {ipText}
               </text>
-              {list.map((ch, k) => (
-                <g
-                  key={k}
-                  className={`ig-chip ${tintClass(order[ch.inst.component] ?? ch.ii)} ${ch.inst.auto ? "auto" : ""}`}
-                  transform={
-                    stack
-                      ? `translate(${c.w - PAD - CW} ${PAD + k * PITCH})`
-                      : `translate(10 ${top0 + k * PITCH})`
-                  }
-                >
-                  <title>{chipLabel(ch)}</title>
-                  <rect width={CW} height={CH} rx={5} />
-                  <text x={10} y={CH / 2 + 4}>
-                    {clip(chipLabel(ch), CW - 18)}
-                  </text>
-                </g>
-              ))}
+              {list.map((ch, k) => {
+                const isPrim =
+                  ch.role === "primary" ||
+                  ch.role === "master" ||
+                  ch.role === "leader";
+                return (
+                  <g
+                    key={k}
+                    className={`ig-chip ${tintClass(order[ch.inst.component] ?? ch.ii)} ${isPrim ? "is-primary" : ""} ${ch.inst.auto ? "auto" : ""}`}
+                    transform={
+                      stack
+                        ? `translate(${c.w - PAD - CW} ${PAD + k * PITCH})`
+                        : `translate(10 ${top0 + k * PITCH})`
+                    }
+                  >
+                    <title>{chipLabel(ch)}</title>
+                    <rect width={CW} height={CH} rx={5} />
+                    <text x={10} y={CH / 2 + 4}>
+                      {clip(chipLabel(ch), CW - 18)}
+                    </text>
+                  </g>
+                );
+              })}
             </g>
           );
         })}
@@ -1551,7 +1557,21 @@ export const InstanceGraph = React.memo(function InstanceGraph({
                 <path d="M1 4 H29" className={l.cls} />
               </svg>
               <span>{l.text}</span>
-              {l.tag && <em>{l.tag}</em>}
+              {l.tag && (
+                <em
+                  className={
+                    l.cls.includes("sync")
+                      ? "is-sync"
+                      : l.cls.includes("link-live")
+                        ? "is-live"
+                        : l.cls.includes("link-mesh")
+                          ? "is-mesh"
+                          : "is-wal"
+                  }
+                >
+                  {l.tag}
+                </em>
+              )}
             </li>
           ))}
         </ul>

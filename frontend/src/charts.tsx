@@ -256,7 +256,7 @@ export type Bar = { key: string; label: string; value: number; sub?: string };
 export function HBars({
   rows,
   format,
-  color = "var(--brand)",
+  color = "var(--teal)",
   empty,
 }: {
   rows: Bar[];

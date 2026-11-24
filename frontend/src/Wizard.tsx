@@ -3282,7 +3282,7 @@ function DeliveryForm({
             packageHosts.map((h, i) => (
               <div key={i} className="pfile">
                 <span
-                  className={`role-chip ${h.name === pv?.controller ? "p" : ""}`}
+                  className={`role-chip ${h.name === pv?.controller ? "p" : "node"}`}
                 >
                   {h.name === pv?.controller
                     ? dep.execution_host
@@ -3296,7 +3296,7 @@ function DeliveryForm({
           )}
           {res?.packages && res.packages.total > 0 && (
             <div className="pfile">
-              <span className="role-chip">{bi("软件", "Pkg")}</span>
+              <span className="role-chip pkg">{bi("软件", "Pkg")}</span>
               <span className="mono">
                 packages-{res.packages.platform}.tar.gz
               </span>

@@ -738,15 +738,19 @@ const Tile = ({
   label,
   value,
   sub,
+  tone,
+  subTone,
 }: {
   label: string;
   value: string;
   sub?: string;
+  tone?: "kyndryl" | "teal" | "ok";
+  subTone?: "warn" | "bad" | "ok";
 }) => (
-  <div className="au-kpi">
+  <div className={`au-kpi ${tone ? `is-${tone}` : ""}`}>
     <small>{label}</small>
     <b>{value}</b>
-    {sub && <span>{sub}</span>}
+    {sub && <span className={subTone ? `is-${subTone}` : ""}>{sub}</span>}
   </div>
 );
 
@@ -874,6 +878,7 @@ export function CostView() {
             <Tile
               label={bi("估算费用", "Estimated cost")}
               value={hasCost ? money(tot.cost, cur) : "—"}
+              tone={hasCost ? "kyndryl" : undefined}
               sub={
                 hasCost
                   ? bi(
@@ -886,6 +891,15 @@ export function CostView() {
             <Tile
               label={bi("调用次数", "Calls")}
               value={num(tot.calls)}
+              subTone={
+                tot.errors
+                  ? tot.errors / Math.max(1, tot.calls) >= 0.1
+                    ? "bad"
+                    : "warn"
+                  : tot.calls > 0
+                    ? "ok"
+                    : undefined
+              }
               sub={
                 tot.errors
                   ? bi(
@@ -898,6 +912,7 @@ export function CostView() {
             <Tile
               label={bi("Token 总量", "Total tokens")}
               value={num(tot.in + tot.out)}
+              tone="teal"
               sub={bi(
                 `输入 ${num(tot.in)} · 输出 ${num(tot.out)}`,
                 `In ${num(tot.in)} · Out ${num(tot.out)}`,
@@ -907,6 +922,9 @@ export function CostView() {
               label={bi("缓存命中", "Cache hit")}
               value={
                 tot.in ? `${((tot.cached / tot.in) * 100).toFixed(1)}%` : "—"
+              }
+              tone={
+                tot.in && tot.cached / tot.in >= 0.5 ? "ok" : undefined
               }
               sub={bi(
                 `读取 ${num(tot.cached)} Token`,
@@ -978,21 +996,25 @@ export function CostView() {
                       {
                         id: "cost",
                         label: bi("估算费用", "Estimated cost"),
-                        color: "var(--brand)",
+                        color: "var(--teal)",
                       },
                     ]
                   : [
                       {
                         id: "fresh",
                         label: bi("输入（未缓存）", "Input (uncached)"),
-                        color: "#1f5e66",
+                        color: "var(--teal)",
                       },
                       {
                         id: "cached",
                         label: bi("输入（缓存命中）", "Input (cached)"),
-                        color: "#1baf7a",
+                        color: "var(--ok)",
                       },
-                      { id: "out", label: bi("输出", "Output"), color: "#eb6834" },
+                      {
+                        id: "out",
+                        label: bi("输出", "Output"),
+                        color: "var(--kyndryl)",
+                      },
                     ]
               }
             />
@@ -1001,17 +1023,26 @@ export function CostView() {
           <div className="au-cols">
             <section className="sx-sec">
               <h2>{bi("按模型", "By model")}</h2>
-              <HBars rows={bars(s.by_model)} format={fmt} />
+              <HBars
+                rows={bars(s.by_model)}
+                format={fmt}
+                color="var(--teal)"
+              />
             </section>
             <section className="sx-sec">
               <h2>{bi("按用户", "By user")}</h2>
-              <HBars rows={bars(s.by_user)} format={fmt} />
+              <HBars
+                rows={bars(s.by_user)}
+                format={fmt}
+                color="var(--cobalt)"
+              />
             </section>
             <section className="sx-sec">
               <h2>{bi("按功能", "By feature")}</h2>
               <HBars
                 rows={bars(s.by_feature, (a) => FEATURE[a.key] || a.key)}
                 format={fmt}
+                color="var(--kyndryl)"
               />
             </section>
             <section className="sx-sec">
@@ -1019,6 +1050,7 @@ export function CostView() {
               <HBars
                 rows={bars(s.by_target, (a) => a.label || a.key)}
                 format={fmt}
+                color="var(--ok)"
               />
             </section>
           </div>

@@ -21,8 +21,21 @@ body {
 
   --kyndryl: #ff462d;
   --kyndryl-ink: #d4301a;
-  --kyndryl-soft: rgba(255, 70, 45, 0.08);
-  --kyndryl-line: rgba(255, 70, 45, 0.26);
+  --kyndryl-soft: rgba(255, 70, 45, 0.085);
+  --kyndryl-line: rgba(255, 70, 45, 0.28);
+
+  /* Kyndryl Bridge Architectural Teal: secondary signature accent for selected option cards,
+     replication streams, data visualization, and interactive links. */
+  --teal: #0e6b74;
+  --teal-ink: #0b565e;
+  --teal-soft: rgba(14, 107, 116, 0.09);
+  --teal-line: rgba(14, 107, 116, 0.28);
+
+  /* Architectural Cobalt: ingress / LB traffic & secondary chart accent. */
+  --cobalt: #2563eb;
+  --cobalt-ink: #1d4ed8;
+  --cobalt-soft: rgba(37, 99, 235, 0.085);
+  --cobalt-line: rgba(37, 99, 235, 0.26);
 
   --brand: #111318;
   --on-brand: #ffffff;
@@ -136,6 +149,16 @@ body[arco-theme="dark"] {
   --kyndryl-ink: #ff806e;
   --kyndryl-soft: rgba(255, 85, 62, 0.15);
   --kyndryl-line: rgba(255, 85, 62, 0.36);
+
+  --teal: #3ab7c4;
+  --teal-ink: #72d5df;
+  --teal-soft: rgba(58, 183, 196, 0.15);
+  --teal-line: rgba(58, 183, 196, 0.36);
+
+  --cobalt: #60a5fa;
+  --cobalt-ink: #93c5fd;
+  --cobalt-soft: rgba(96, 165, 250, 0.15);
+  --cobalt-line: rgba(96, 165, 250, 0.36);
 
   --brand: #f2f4f8;
   --on-brand: #0b0d11;

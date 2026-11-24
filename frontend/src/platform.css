@@ -33,13 +33,13 @@ body[arco-theme="dark"] .ig-host > .ig-card-shadow {
 .ig-chip.auto rect {
   stroke-dasharray: 3 2;
 }
-.ig-chip.c0 { --chip: var(--brand-soft); --chip-line: var(--brand-line); --chip-ink: var(--brand-ink); }
+.ig-chip.c0 { --chip: var(--teal-soft); --chip-line: var(--teal-line); --chip-ink: var(--teal-ink); }
+.ig-chip.c0.is-primary { --chip: var(--kyndryl-soft); --chip-line: var(--kyndryl-line); --chip-ink: var(--kyndryl-ink); }
 .ig-chip.c1 { --chip: var(--ok-soft); --chip-line: rgba(52, 199, 89, 0.4); --chip-ink: var(--ok); }
 .ig-chip.c2 { --chip: var(--warn-soft); --chip-line: rgba(255, 159, 10, 0.4); --chip-ink: var(--warn); }
-.ig-chip.c3 { --chip: rgba(0, 122, 255, 0.1); --chip-line: rgba(0, 122, 255, 0.35); --chip-ink: #0a5fd1; }
+.ig-chip.c3 { --chip: var(--cobalt-soft); --chip-line: var(--cobalt-line); --chip-ink: var(--cobalt-ink); }
 .ig-chip.c4 { --chip: rgba(175, 82, 222, 0.1); --chip-line: rgba(175, 82, 222, 0.35); --chip-ink: #8944ab; }
 .ig-chip.c5 { --chip: var(--idle-soft); --chip-line: var(--line-strong); --chip-ink: var(--mute); }
-body[arco-theme="dark"] .ig-chip.c3 { --chip-ink: #6cb2ff; }
 body[arco-theme="dark"] .ig-chip.c4 { --chip-ink: #d09bf0; }
 
 /* ---------- machines ---------- */
@@ -280,14 +280,14 @@ div.auto small {
   box-shadow: var(--ring);
 }
 .ig-host.targeted > .ig-card-body {
-  stroke: var(--brand-line);
+  stroke: color-mix(in srgb, var(--teal) 36%, var(--line-strong));
 }
 .ig-host.source > .ig-card-body {
-  stroke: var(--brand);
+  stroke: color-mix(in srgb, var(--teal) 72%, var(--line-strong));
   stroke-width: 1.5;
 }
 .ig-host.source .t-name {
-  fill: var(--brand-ink);
+  fill: var(--ink);
 }
 .ig.stack {
   width: 100%;
@@ -459,12 +459,13 @@ div.auto small {
 }
 
 
-/* wires between machines: the dashes move the way the data travels (animation lives in app.css) */
+/* wires between machines: semantic Kyndryl colors (Teal = async replication/WAL, Emerald = sync quorum,
+   Cobalt = LB/ingress traffic, Amber = etcd/mesh coordination) */
 .topo .ig-arrow {
-  fill: var(--faint);
+  fill: var(--teal);
 }
 .topo .ig-arrow.live {
-  fill: var(--brand);
+  fill: var(--cobalt);
 }
 .topo .ig-arrow.live-1 {
   fill: #0284c7;
@@ -512,11 +513,12 @@ body[arco-theme="dark"] .topo-elb.f2 .t-k {
   fill: #5eead4;
 }
 .topo .link-wal {
-  stroke: var(--faint);
+  stroke: var(--teal);
+  stroke-width: 1.65;
 }
 .topo .link-wal.sync {
   stroke: var(--ok);
-  stroke-width: 1.8;
+  stroke-width: 1.85;
 }
 .topo .link-mesh {
   fill: none;
@@ -533,16 +535,16 @@ body[arco-theme="dark"] .topo-elb.f2 .t-k {
   margin-inline: auto;
 }
 .topo .pulse {
-  fill: var(--faint);
-  filter: drop-shadow(0 0 3px var(--faint));
+  fill: var(--teal);
+  filter: drop-shadow(0 0 3.5px color-mix(in srgb, var(--teal) 65%, transparent));
 }
 .topo .pulse.sync {
   fill: var(--ok);
-  filter: drop-shadow(0 0 3px var(--ok));
+  filter: drop-shadow(0 0 3.5px color-mix(in srgb, var(--ok) 65%, transparent));
 }
 .topo .pulse.live {
-  fill: var(--brand);
-  filter: drop-shadow(0 0 3px var(--brand));
+  fill: var(--cobalt);
+  filter: drop-shadow(0 0 3.5px color-mix(in srgb, var(--cobalt) 65%, transparent));
 }
 .topo .pulse.live-1 {
   fill: #0284c7;
@@ -563,7 +565,7 @@ body[arco-theme="dark"] .topo .pulse.live-2 {
 .topo .lane-label {
   font: 600 9px var(--sans);
   letter-spacing: 0.04em;
-  fill: var(--faint);
+  fill: var(--teal-ink);
 }
 .topo .lane-label.sync {
   fill: var(--ok);
@@ -580,8 +582,8 @@ body[arco-theme="dark"] .topo .pulse.live-2 {
 }
 .topo .port {
   fill: var(--surface);
-  stroke: var(--faint);
-  stroke-width: 1.6;
+  stroke: var(--teal);
+  stroke-width: 1.7;
 }
 .topo .port.sync {
   stroke: var(--ok);
@@ -590,11 +592,13 @@ body[arco-theme="dark"] .topo .pulse.live-2 {
   stroke: var(--warn);
 }
 .ig-badge rect {
-  fill: var(--brand-soft);
+  fill: var(--kyndryl-soft);
+  stroke: var(--kyndryl-line);
+  stroke-width: 0.75;
 }
 .ig-badge text {
   font: 600 10px var(--sans);
-  fill: var(--brand-ink);
+  fill: var(--kyndryl-ink);
 }
 .topo .mesh-dot {
   fill: var(--surface);
@@ -610,7 +614,7 @@ body[arco-theme="dark"] .topo .pulse.live-2 {
   flex-direction: column;
   gap: 6px;
   font-size: 12px;
-  color: var(--mute);
+  color: var(--ink-2);
 }
 .ig-legend li {
   display: flex;
@@ -626,7 +630,7 @@ body[arco-theme="dark"] .topo .pulse.live-2 {
   stroke-linecap: round;
 }
 .ig-legend path.link-live {
-  stroke: var(--brand);
+  stroke: var(--cobalt);
   stroke-width: 2;
   stroke-dasharray: 5 7;
   animation: flow 1.2s linear infinite;
@@ -644,28 +648,45 @@ body[arco-theme="dark"] .ig-legend path.link-live.f2 {
   stroke: #2dd4bf;
 }
 .ig-legend path.link-wal {
-  stroke: var(--faint);
-  stroke-width: 1.4;
+  stroke: var(--teal);
+  stroke-width: 1.7;
   stroke-dasharray: 4 8;
   animation: flow 1.8s linear infinite;
 }
 .ig-legend path.link-wal.sync {
   stroke: var(--ok);
-  stroke-width: 1.8;
+  stroke-width: 1.9;
 }
 .ig-legend path.link-mesh {
   stroke: var(--warn, #ff9f0a);
-  stroke-width: 1.4;
+  stroke-width: 1.6;
   stroke-dasharray: 2 6;
   animation: flow 3s linear infinite;
 }
 .ig-legend em {
   font-style: normal;
   font-size: 10.5px;
-  padding: 0 6px;
-  border-radius: 8px;
+  font-weight: 550;
+  padding: 1px 7px;
+  border-radius: 999px;
   background: var(--idle-soft);
   color: var(--mute);
+}
+.ig-legend em.is-wal {
+  background: var(--teal-soft);
+  color: var(--teal-ink);
+}
+.ig-legend em.is-sync {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+.ig-legend em.is-live {
+  background: var(--cobalt-soft);
+  color: var(--cobalt-ink);
+}
+.ig-legend em.is-mesh {
+  background: var(--warn-soft);
+  color: var(--warn);
 }
 
 /* ---------- package library ---------- */
@@ -3439,9 +3460,9 @@ body[arco-theme="dark"] .ai-quick-toggle:not(.is-on):not(.is-warn) {
   flex: none;
 }
 .sx-nav-i.on .sx-nav-ic {
-  background: var(--brand);
-  box-shadow: none;
-  color: var(--on-brand);
+  background: var(--kyndryl-soft);
+  box-shadow: inset 0 0 0 1px var(--kyndryl-line);
+  color: var(--kyndryl-ink);
 }
 .sx-nav-t {
   display: flex;

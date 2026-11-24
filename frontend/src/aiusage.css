@@ -396,11 +396,32 @@
   border-bottom: 1px solid var(--line);
 }
 .au-kpi {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 2px;
   padding: 14px 16px;
   min-width: 0;
+}
+.au-kpi.is-kyndryl::before,
+.au-kpi.is-teal::before,
+.au-kpi.is-ok::before {
+  content: "";
+  position: absolute;
+  left: 16px;
+  top: 0;
+  width: 24px;
+  height: 2px;
+  border-radius: 0 0 2px 2px;
+}
+.au-kpi.is-kyndryl::before {
+  background: var(--kyndryl);
+}
+.au-kpi.is-teal::before {
+  background: var(--teal);
+}
+.au-kpi.is-ok::before {
+  background: var(--ok);
 }
 .au-kpi + .au-kpi {
   border-left: 1px solid var(--line);
@@ -414,9 +435,23 @@
   font-weight: 650;
   font-variant-numeric: tabular-nums;
 }
+.au-kpi.is-ok b {
+  color: var(--ok);
+}
 .au-kpi span {
   color: var(--faint);
   font-size: 12px;
+}
+.au-kpi span.is-warn {
+  color: var(--warn);
+  font-weight: 500;
+}
+.au-kpi span.is-bad {
+  color: var(--bad);
+  font-weight: 500;
+}
+.au-kpi span.is-ok {
+  color: var(--ok);
 }
 .au-sec-h {
   display: flex;

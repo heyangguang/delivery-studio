@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.309-dev"
+	version            = "1.0.310-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,24 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.310-dev",
+		Date:    "2026-11-24",
+		Title:   "Kyndryl 品牌双主调与克制语义配色升级",
+		TitleEn: "Kyndryl Bridge Duotone & Semantic Accent Palette Polish",
+		Highlights: []string{
+			"在保留瑞士徕卡白瓷/曜石克制底色的基础上，引入源自 kyndryl bridge 品牌基因的「架构青（--teal）」与「钴蓝（--cobalt）」语义令牌，与 Kyndryl 暖红（--kyndryl）形成高辨识度品牌双主调，彻底告别单调黑灰",
+			"全面升级拓扑图（InstanceGraph）连线、角色与图例配色：异步 WAL/流复制线与流动光点采用架构青、同步复制采用翡翠绿、入口/负载均衡转发采用钴蓝、Raft/etcd 共识采用琥珀橙；主库与控制节点采用暖红点缀、从库采用架构青，一眼分清拓扑层次",
+			"重构「用量与成本」可视化与设置导航配色：移除纯黑柱状图与侧栏纯黑图标块，改用架构青按天费用柱、四组和谐分色排行条（青/钴/暖红/翠）、带微色标与失败率/缓存命中高亮的 KPI 栏、以及暖红轻质激活图标与二级页签",
+			"将新建交付选中卡片（交付方式/架构方案）、右侧预览产物标签（控制/业务/软件）、下拉选中态与文字链接升级为架构青/暖红克制点缀，明暗双主题均通过实测验证",
+		},
+		HighlightsEn: []string{
+			"Introduced Kyndryl Bridge Architectural Teal (--teal) and Cobalt (--cobalt) semantic tokens alongside Kyndryl Warm Red (--kyndryl) on the Porcelain/Obsidian chassis to replace overly monochrome black-and-grey accents",
+			"Restored clear semantic color coding across Topology diagrams and legends: Bridge Teal for async WAL/replication flows, Emerald for quorum sync, Cobalt for LB/ingress traffic, Amber for Raft/etcd mesh, Warm Red for Primary & Control badges, and Bridge Teal for Replicas",
+			"Upgraded AI Usage & Cost charts, KPI strip, and Settings navigation: replaced stark black bars and solid black active nav squares with Bridge Teal cost bars, a 4-tone ranking palette, highlighted failure-rate & cache-hit KPIs, and refined Warm Red active nav/tab icons",
+			"Polished selected Wizard delivery-mode & scheme cards, preview artifact role chips (Control/Node/Package), dropdown selections, and inline links across both Light and Dark themes",
+		},
+	},
 	{
 		Version: "1.0.309-dev",
 		Date:    "2026-11-24",

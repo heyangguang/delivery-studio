@@ -34,7 +34,7 @@
 .link {
   all: unset;
   cursor: pointer;
-  color: var(--brand-ink);
+  color: var(--teal-ink);
   font-size: 13px;
   font-weight: 500;
   border-radius: 4px;
@@ -1348,14 +1348,14 @@ body[arco-theme="dark"] .seg-thumb {
 }
 .topo-elb rect {
   fill: var(--surface);
-  stroke: var(--brand-line);
+  stroke: var(--cobalt-line);
 }
 .topo-elb text {
   font-size: 12px;
   fill: var(--ink);
 }
 .topo-elb .t-k {
-  fill: var(--brand-ink);
+  fill: var(--cobalt-ink);
   font-weight: 700;
   font-family: var(--sans);
 }
@@ -1368,8 +1368,8 @@ body[arco-theme="dark"] .seg-thumb {
   stroke: var(--line-strong);
 }
 .topo-node.primary rect {
-  stroke: color-mix(in srgb, var(--brand) 82%, transparent);
-  stroke-width: 1.25;
+  stroke: color-mix(in srgb, var(--teal) 72%, var(--line-strong));
+  stroke-width: 1.4;
 }
 .topo .t-role {
   font-family: var(--sans);
@@ -1377,7 +1377,7 @@ body[arco-theme="dark"] .seg-thumb {
   fill: var(--mute);
 }
 .topo-node.primary .t-role {
-  fill: var(--brand-ink);
+  fill: var(--kyndryl-ink);
   font-weight: 600;
 }
 .topo .t-name {
@@ -1402,7 +1402,7 @@ body[arco-theme="dark"] .seg-thumb {
   stroke-linecap: round;
 }
 .link-live {
-  stroke: var(--brand);
+  stroke: var(--cobalt);
   stroke-width: 2;
   stroke-dasharray: 5 7;
 }
@@ -1412,8 +1412,8 @@ body[arco-theme="dark"] .seg-thumb {
   stroke-dasharray: 2 4;
 }
 .link-wal {
-  stroke: var(--faint);
-  stroke-width: 1.4;
+  stroke: var(--teal);
+  stroke-width: 1.65;
   stroke-dasharray: 4 8;
 }
 .link-wal.sync {
@@ -1538,9 +1538,9 @@ body[arco-theme="dark"] .seg-thumb {
   animation: pop 0.4s var(--spring);
 }
 .st-now .stage-mark {
-  border-color: var(--brand);
-  color: var(--brand-ink);
-  box-shadow: 0 0 0 4px var(--brand-soft);
+  border-color: var(--teal);
+  color: var(--teal-ink);
+  box-shadow: 0 0 0 4px var(--teal-soft);
   animation: breathe 1.8s ease-in-out infinite;
 }
 .st-fail .stage-mark {
@@ -1555,7 +1555,7 @@ body[arco-theme="dark"] .seg-thumb {
 }
 @keyframes breathe {
   50% {
-    box-shadow: 0 0 0 7px var(--brand-soft);
+    box-shadow: 0 0 0 7px var(--teal-soft);
   }
 }
 .stage > div {
@@ -1632,9 +1632,19 @@ body[arco-theme="dark"] .seg-thumb {
   border: 1px solid var(--line);
 }
 .role-chip.p {
-  color: var(--brand-ink);
-  background: var(--brand-soft);
-  border-color: var(--brand-line);
+  color: var(--kyndryl-ink);
+  background: var(--kyndryl-soft);
+  border-color: var(--kyndryl-line);
+}
+.role-chip.node {
+  color: var(--teal-ink);
+  background: var(--teal-soft);
+  border-color: var(--teal-line);
+}
+.role-chip.pkg {
+  color: var(--cobalt-ink);
+  background: var(--cobalt-soft);
+  border-color: var(--cobalt-line);
 }
 .up-files {
   display: flex;

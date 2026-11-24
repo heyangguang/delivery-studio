@@ -51,13 +51,14 @@
   padding: 2px 8px;
   border: 0;
   border-radius: 6px;
-  color: var(--brand-ink);
+  color: var(--teal-ink);
   font: 12.5px var(--sans);
+  font-weight: 500;
   background: none;
   cursor: pointer;
 }
 .ch-view:hover {
-  background: var(--brand-soft);
+  background: var(--teal-soft);
 }
 .ch-plot {
   position: relative;

@@ -347,8 +347,9 @@ body[arco-theme="dark"] .ig-card-rim {
   background: var(--hover);
 }
 .ai-um-m.on {
-  border-color: var(--brand-line);
-  background: var(--surface-2);
+  border-color: var(--teal);
+  background: color-mix(in srgb, var(--teal-soft) 65%, var(--surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--teal) 35%, transparent);
 }
 
 /* ---------------------------------------------------------------- continuous sections instead of boxes in boxes */
@@ -661,8 +662,8 @@ body[arco-theme="dark"] .arco-trigger-popup .arco-menu {
 .arco-select-popup .arco-select-option-selected,
 .arco-dropdown-menu .arco-dropdown-menu-item.arco-dropdown-menu-selected,
 .arco-trigger-popup .arco-menu .arco-menu-item.arco-menu-selected {
-  background-color: var(--brand-soft) !important;
-  color: var(--brand-ink) !important;
+  background-color: var(--teal-soft) !important;
+  color: var(--teal-ink) !important;
   font-weight: 600;
 }
 .arco-select-popup .arco-select-option-disabled,
@@ -813,7 +814,7 @@ body[arco-theme="dark"] .arco-trigger-popup .arco-menu {
   opacity: 0.96;
 }
 .utabs button.on .utabs-ic {
-  color: var(--brand);
+  color: var(--kyndryl);
   opacity: 1;
 }
 .utabs-ic svg,
@@ -862,8 +863,8 @@ body[arco-theme="dark"] .arco-trigger-popup .arco-menu {
 }
 .utabs button.on em,
 .utabs button.on .utabs-count {
-  color: var(--brand-ink);
-  background: var(--brand-soft);
+  color: var(--kyndryl-ink);
+  background: var(--kyndryl-soft);
 }
 .utabs-err {
   width: 6px;

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { TopoArt } from "./topoart";
+import { PlanGlyph, PlanGlyphCustom, planBadgeOf } from "./planglyph";
 import { styleOf } from "./glyphs";
 import {
   Menu,
@@ -80,61 +81,7 @@ const heroStyle = (a: AppInfo) => {
 /** Plans to show for an app: the ready-made starting points its component declares. */
 const plansOf = (a: AppInfo): AppPlan[] => a.plans || [];
 
-/* ---------- art ---------- */
-
-/** Tiny topology glyph for a plan card. */
-function PlanGlyph({ topology }: { topology: AppPlan["topology"] }) {
-  const c = (role: string) => topology.find((t) => t.role === role)?.count ?? 0;
-  const n = Math.max(c("primary"), 1) + c("replica");
-  const s = c("sentinel");
-  const w = 18,
-    gap = 6;
-  const W = Math.max(n * w + (n - 1) * gap, 44);
-  const x0 = (W - (n * w + (n - 1) * gap)) / 2;
-  return (
-    <svg className="plan-glyph" viewBox={`-2 0 ${W + 4} 44`} aria-hidden>
-      {Array.from({ length: s }, (_, i) => {
-        const cx = (W / (s + 1)) * (i + 1);
-        return (
-          <g key={i}>
-            <path d={`M${cx} 10 L${x0 + w / 2} 26`} className="pg-idle" />
-            <rect
-              x={cx - 4}
-              y={4}
-              width={8}
-              height={8}
-              rx={2}
-              transform={`rotate(45 ${cx} 8)`}
-              className="pg-sen"
-            />
-          </g>
-        );
-      })}
-      {s === 0 && <circle cx={W / 2} cy={6} r={4} className="pg-elb" />}
-      {Array.from({ length: n }, (_, i) => {
-        const x = x0 + i * (w + gap);
-        return (
-          <g key={i}>
-            {s === 0 && (
-              <path
-                d={`M${W / 2} 10 L${x + w / 2} 26`}
-                className={i === 0 ? "pg-live" : "pg-idle"}
-              />
-            )}
-            <rect
-              x={x}
-              y={26}
-              width={w}
-              height={14}
-              rx={4}
-              className={i === 0 ? "pg-p" : "pg-r"}
-            />
-          </g>
-        );
-      })}
-    </svg>
-  );
-}
+/* ---------- plans ---------- */
 
 const formalReady = (a: AppInfo) => a.available && hasReleasedVersion(a);
 
@@ -144,53 +91,66 @@ function Plans({ app, plans }: { app: AppInfo; plans: AppPlan[] }) {
   const off = !ready || !can("delivery.create");
   return (
     <div className="plan-cards">
-      {plans.map((p) => (
-        <button
-          key={p.id}
-          className="plan-card"
-          disabled={off}
-          onClick={() => go({ name: "new", app: app.id, plan: p.id })}
-        >
-          <PlanGlyph topology={p.topology} />
-          {p.tag && <span className="plan-card-tag">{p.tag}</span>}
-          <strong>{p.name}</strong>
-          <span className="plan-card-spec">{p.spec}</span>
-          <span className="plan-card-go">
-            {off ? (
-              !app.available ? (
-                bi("暂未开放", "Unavailable")
-              ) : !ready ? (
-                bi("待验证发布", "Pending release")
+      {plans.map((p) => {
+        const b = planBadgeOf(p);
+        return (
+          <button
+            key={p.id}
+            className={`plan-card ${b?.recommended ? "is-rec" : ""}`}
+            disabled={off}
+            onClick={() => go({ name: "new", app: app.id, plan: p.id })}
+          >
+            <div className="plan-card-stage">
+              <PlanGlyph plan={p} className="plan-glyph-lg" />
+              {b && (
+                <span className={`plan-pill tone-${b.tone}`}>{b.label}</span>
+              )}
+            </div>
+            <div className="plan-card-body">
+              <strong>{p.name}</strong>
+              <span className="plan-card-spec">{p.spec}</span>
+              {p.contract?.mechanism && (
+                <span className="plan-card-mech">{p.contract.mechanism}</span>
+              )}
+            </div>
+            <span className="plan-card-go">
+              {off ? (
+                !app.available ? (
+                  bi("暂未开放", "Unavailable")
+                ) : !ready ? (
+                  bi("待验证发布", "Pending release")
+                ) : (
+                  ""
+                )
               ) : (
-                ""
-              )
-            ) : (
-              <>
-                {bi("用此方案新建", "Use this plan")} <IconRight />
-              </>
-            )}
-          </span>
-        </button>
-      ))}
+                <>
+                  {bi("用此方案新建", "Use this plan")} <IconRight />
+                </>
+              )}
+            </span>
+          </button>
+        );
+      })}
       <button
         className="plan-card custom"
         disabled={off}
         onClick={() => go({ name: "new", app: app.id })}
       >
-        <span className="plan-glyph-custom" aria-hidden>
-          <i />
-          <i />
-          <i />
-          <i />
-        </span>
-        <span className="plan-card-tag">{bi("自由组合", "Custom")}</span>
-        <strong>{bi("自定义", "Custom")}</strong>
-        <span className="plan-card-spec">
-          {bi(
-            "节点、复制、加密与参数逐项决定",
-            "Configure nodes, replication, TLS & parameters manually",
-          )}
-        </span>
+        <div className="plan-card-stage is-custom">
+          <PlanGlyphCustom className="plan-glyph-lg" />
+          <span className="plan-pill tone-basic">
+            {bi("自由组合", "Custom")}
+          </span>
+        </div>
+        <div className="plan-card-body">
+          <strong>{bi("自定义", "Custom")}</strong>
+          <span className="plan-card-spec">
+            {bi(
+              "节点、复制、加密与参数逐项决定",
+              "Configure nodes, replication, TLS & parameters manually",
+            )}
+          </span>
+        </div>
         <span className="plan-card-go">
           {off ? (
             !app.available ? (
@@ -597,30 +557,42 @@ function AppWide({ a, mine }: { a: AppInfo; mine: Job[] }) {
                 )}
               </h3>
               <ul className="wide-plans">
-                {plans.slice(0, 4).map((p) => (
-                  <li key={p.id}>
-                    <button
-                      disabled={!ready || !canCreate}
-                      onClick={() => go({ name: "new", app: a.id, plan: p.id })}
-                      aria-label={bi(
-                        `用${p.name}方案新建 ${a.name} 集群`,
-                        `New ${a.name} cluster with ${p.name}`,
-                      )}
-                    >
-                      <span className="wide-plan-well">
-                        <PlanGlyph topology={p.topology} />
-                      </span>
-                      <span className="wide-plan-copy">
-                        <b>
-                          {p.name}
-                          {p.tag && <i className="wide-plan-tag">{p.tag}</i>}
-                        </b>
-                        <small>{p.spec}</small>
-                      </span>
-                      {ready && canCreate && <IconRight />}
-                    </button>
-                  </li>
-                ))}
+                {plans.slice(0, 4).map((p) => {
+                  const b = planBadgeOf(p);
+                  return (
+                    <li key={p.id}>
+                      <button
+                        className={`wide-plan-tile ${b?.recommended ? "is-rec" : ""}`}
+                        disabled={!ready || !canCreate}
+                        onClick={() => go({ name: "new", app: a.id, plan: p.id })}
+                        aria-label={bi(
+                          `用${p.name}方案新建 ${a.name} 集群`,
+                          `New ${a.name} cluster with ${p.name}`,
+                        )}
+                      >
+                        <div className="wide-plan-top">
+                          <span className="wide-plan-well">
+                            <PlanGlyph plan={p} />
+                          </span>
+                          {b && (
+                            <span className={`plan-pill tone-${b.tone}`}>
+                              {b.label}
+                            </span>
+                          )}
+                        </div>
+                        <div className="wide-plan-copy">
+                          <div className="wide-plan-name-row">
+                            <b>{p.name}</b>
+                            {ready && canCreate && (
+                              <IconRight className="wide-plan-arrow" />
+                            )}
+                          </div>
+                          <small title={p.spec}>{p.spec}</small>
+                        </div>
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           )}
@@ -1362,7 +1334,15 @@ function Product({ app, jobs }: { app: AppInfo; jobs: Job[] }) {
               )}
             </div>
           </div>
-          <TopoArt app={app} plan={plans[1] || plans[0]} />
+          <TopoArt
+            app={app}
+            plan={
+              plans.find((p) => /推荐|recommended/i.test(p.tag || "")) ||
+              plans.find((p) => p.contract?.failover === "automatic") ||
+              plans[1] ||
+              plans[0]
+            }
+          />
         </header>
 
         <dl className="info-strip">

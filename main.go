@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.318-dev"
+	version            = "1.0.319-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,22 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.319-dev",
+		Date:    "2026-11-24",
+		Title:   "架构方案语义拓扑图示与蓝图卡片全面重构",
+		TitleEn: "Semantic PlanGlyph Topology Diagrams & Blueprint Card Redesign",
+		Highlights: []string{
+			"全新设计语义化架构方案拓扑微缩图（PlanGlyph）：修复 etcd、HAProxy、Nginx、keepalived 等非 primary/replica 角色多节点方案全部误退化为单节点图标的问题，按架构模式精确区分单机、VIP 双机热备、3 成员 Raft 三角共识、5 成员 Raft 五边形共识、原生主从流复制、Sentinel 哨兵仲裁与 Patroni+etcd 高可用拓扑。",
+			"重构应用目录「从架构方案起步」、应用详情页「方案」卡片与新建交付向导 Step 1 方案选卡：统一引入点阵蓝图视窗、按语义分色的徽标体系（推荐暖红 / 高可用与自动切换青绿 / 人工切换琥珀 / 单节点中性灰），桌面端 3 方案卡片单行等高对齐，消除旧版第二行孤卡与说明文字截断。",
+			"同步优化应用详情页顶部 Hero 架构预览，优先展示推荐/自动切换高可用方案（如 PostgreSQL Patroni 主从方案），并全面适配浅色与暗黑模式对比度。",
+		},
+		HighlightsEn: []string{
+			"Redesigned PlanGlyph semantic topology diagrams: fixed multi-node plans using non-primary/replica roles (etcd, HAProxy, Nginx, keepalived) falling back to a single-node glyph, introducing distinct precision illustrations for standalone, VIP active-standby, 3-node Raft triangle, 5-node Raft pentagon, native primary-replica streaming, Redis Sentinel, and Patroni DCS HA.",
+			"Upgraded blueprint plan cards consistently across the App Catalog, App Detail Plans tab, and Delivery Wizard Step 1 with blueprint dot-grid stages, semantic color-coded pills, and balanced 3-column single-row alignment on desktop without orphan cards or truncated specs.",
+			"Updated App Detail hero TopoArt to prioritize recommended/automatic-failover plans (such as PostgreSQL Patroni HA) with crisp Light & Dark Mode rendering.",
+		},
+	},
 	{
 		Version: "1.0.318-dev",
 		Date:    "2026-11-24",

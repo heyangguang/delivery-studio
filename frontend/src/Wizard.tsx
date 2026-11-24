@@ -1,5 +1,6 @@
 import { HostParameterFields, hiddenHostFields, hostValue } from "./hostcontract";
 import type { HostContract } from "./hostcontract";
+import { PlanGlyph, PlanGlyphCustom } from "./planglyph";
 import { SchemeInfo } from "./scheme";
 import { ExecutionPlacement, ExecutionHostSummary } from "./execution-placement";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -2613,27 +2614,32 @@ function DeliveryForm({
                     className={`plan ${isSelected ? "on" : ""}`}
                     onClick={() => applyPlan(p)}
                   >
-                    <span className="plan-meta">
-                      {nodeCount > 0 && (
-                        <span className="plan-tag num">
-                          {bi(
-                            `${nodeCount} 台节点`,
-                            `${nodeCount} ${nodeCount === 1 ? "node" : "nodes"}`,
-                          )}
-                        </span>
-                      )}
-                      {p.contract && (
-                        <span
-                          className={`plan-ha ${p.contract.failover === "automatic" ? "ok" : ""}`}
-                        >
-                          {p.contract.failover === "automatic"
-                            ? bi("自动切换", "Auto failover")
-                            : p.contract.failover === "manual"
-                              ? bi("人工切换", "Manual failover")
-                              : bi("无故障切换", "No failover")}
-                        </span>
-                      )}
-                    </span>
+                    <div className="plan-top">
+                      <span className="plan-well">
+                        <PlanGlyph plan={p} />
+                      </span>
+                      <span className="plan-meta">
+                        {p.contract && (
+                          <span
+                            className={`plan-ha ${p.contract.failover === "automatic" ? "ok" : ""}`}
+                          >
+                            {p.contract.failover === "automatic"
+                              ? bi("自动切换", "Auto failover")
+                              : p.contract.failover === "manual"
+                                ? bi("人工切换", "Manual failover")
+                                : bi("无故障切换", "No failover")}
+                          </span>
+                        )}
+                        {nodeCount > 0 && (
+                          <span className="plan-tag num">
+                            {bi(
+                              `${nodeCount} 台节点`,
+                              `${nodeCount} ${nodeCount === 1 ? "node" : "nodes"}`,
+                            )}
+                          </span>
+                        )}
+                      </span>
+                    </div>
                     <strong>{p.name}</strong>
                     <span>{p.spec}</span>
                     {p.contract && (
@@ -2650,11 +2656,16 @@ function DeliveryForm({
                   className={`plan ${plan === "" ? "on" : ""}`}
                   onClick={() => setPlan("")}
                 >
-                  <span className="plan-meta">
-                    <span className="plan-tag">
-                      {bi("自由组合", "Flexible")}
+                  <div className="plan-top">
+                    <span className="plan-well">
+                      <PlanGlyphCustom />
                     </span>
-                  </span>
+                    <span className="plan-meta">
+                      <span className="plan-tag">
+                        {bi("自由组合", "Flexible")}
+                      </span>
+                    </span>
+                  </div>
                   <strong>{bi("自定义", "Custom")}</strong>
                   <span>
                     {bi(

@@ -1532,14 +1532,11 @@ button.rh-ledger-card:focus-visible {
   text-overflow: ellipsis;
 }
 
-/* ---- Layered Google AI Mode Prism Composer Cards ---- */
+/* ---- Layered Gemini Auto-Flowing Prism Composer Cards ---- */
 .rh-compose,
 .rh-probe-box,
 .rh-trouble {
-  --ai-spot: 165px;
-  --ai-off: 46px;
-  --mx: 50%;
-  --my: 50%;
+  --ai-rim-op: 48%;
   position: relative;
   isolation: isolate;
   display: flex;
@@ -1554,7 +1551,13 @@ button.rh-ledger-card:focus-visible {
   transition:
     transform 0.42s var(--spring),
     box-shadow 0.28s var(--ease-out),
-    opacity 0.2s ease;
+    opacity 0.2s ease,
+    --ai-rim-op 0.26s ease;
+}
+.rh-compose.off,
+.rh-probe-box.off,
+.rh-trouble.off {
+  --ai-rim-op: 0%;
 }
 
 .rh-compose::before,
@@ -1569,49 +1572,32 @@ button.rh-ledger-card:focus-visible {
   pointer-events: none;
 }
 
-/* Inner layered canvas + hairline + partial-arc prism + cursor-following 4-color edge border */
+/* Layer 1 (z-index: -1): opaque interior padding-box + crisp 1.5px flowing Gemini border-box */
 .rh-compose::before,
 .rh-probe-box::before,
 .rh-trouble::before {
   inset: -1px;
   z-index: -1;
-  border: 1px solid transparent;
+  border: 1.5px solid transparent;
   background:
     linear-gradient(180deg, var(--ai-card-bg-top), var(--ai-card-bg-bot)) padding-box,
-    radial-gradient(
-      var(--ai-spot) circle at calc(var(--mx) - var(--ai-off)) var(--my),
-      color-mix(in srgb, #4285f4 calc(var(--ai-ptr) * 0.88), transparent),
-      transparent 65%
-    ) border-box,
-    radial-gradient(
-      var(--ai-spot) circle at calc(var(--mx) + var(--ai-off)) var(--my),
-      color-mix(in srgb, #ea4335 calc(var(--ai-ptr) * 0.82), transparent),
-      transparent 65%
-    ) border-box,
-    radial-gradient(
-      var(--ai-spot) circle at var(--mx) calc(var(--my) - var(--ai-off) * 0.55),
-      color-mix(in srgb, #fbbc04 calc(var(--ai-ptr) * 0.78), transparent),
-      transparent 65%
-    ) border-box,
-    radial-gradient(
-      var(--ai-spot) circle at var(--mx) calc(var(--my) + var(--ai-off) * 0.55),
-      color-mix(in srgb, #34a853 calc(var(--ai-ptr) * 0.82), transparent),
-      transparent 65%
-    ) border-box,
     conic-gradient(
       from var(--ai-angle) at 50% 50%,
-      rgba(66, 133, 244, 0.72) 0deg,
-      rgba(161, 66, 244, 0.62) 48deg,
-      transparent 122deg,
-      transparent 210deg,
-      rgba(52, 168, 83, 0.65) 268deg,
-      rgba(251, 188, 4, 0.72) 308deg,
-      rgba(234, 67, 53, 0.72) 334deg,
-      rgba(66, 133, 244, 0.72) 360deg
+      transparent 0deg,
+      color-mix(in srgb, #ff462d var(--ai-rim-op), transparent) 22deg,
+      color-mix(in srgb, #ffaa1d var(--ai-rim-op), transparent) 52deg,
+      color-mix(in srgb, #4285f4 var(--ai-rim-op), transparent) 88deg,
+      color-mix(in srgb, #22d3ee var(--ai-rim-op), transparent) 118deg,
+      transparent 150deg,
+      transparent 205deg,
+      color-mix(in srgb, #8b5cf6 var(--ai-rim-op), transparent) 238deg,
+      color-mix(in srgb, #38bdf8 var(--ai-rim-op), transparent) 272deg,
+      color-mix(in srgb, #ff5a42 var(--ai-rim-op), transparent) 308deg,
+      transparent 340deg,
+      transparent 360deg
     ) border-box,
     linear-gradient(var(--ai-border-base), var(--ai-border-base)) border-box;
-  animation: ai-orbit 11s linear infinite;
-  transition: --ai-ptr 0.28s ease;
+  animation: ai-orbit 7.5s linear infinite;
 }
 
 .rh-compose.off::before,
@@ -1623,72 +1609,49 @@ button.rh-ledger-card:focus-visible {
   animation: none;
 }
 
-/* Outer tight whisper edge halo (no bloated perimeter haze) */
+/* Layer 2 (z-index: -2): tight outer glow strictly behind ::before */
 .rh-compose::after,
 .rh-probe-box::after,
 .rh-trouble::after {
-  inset: -1px -2px -2px;
+  inset: -1px;
   z-index: -2;
-  background:
-    radial-gradient(
-      var(--ai-spot) circle at calc(var(--mx) - var(--ai-off)) var(--my),
-      color-mix(in srgb, #4285f4 calc(var(--ai-ptr) * 0.54), transparent),
-      transparent 65%
-    ),
-    radial-gradient(
-      var(--ai-spot) circle at calc(var(--mx) + var(--ai-off)) var(--my),
-      color-mix(in srgb, #ea4335 calc(var(--ai-ptr) * 0.46), transparent),
-      transparent 65%
-    ),
-    radial-gradient(
-      var(--ai-spot) circle at var(--mx) calc(var(--my) - var(--ai-off) * 0.55),
-      color-mix(in srgb, #fbbc04 calc(var(--ai-ptr) * 0.44), transparent),
-      transparent 65%
-    ),
-    radial-gradient(
-      var(--ai-spot) circle at var(--mx) calc(var(--my) + var(--ai-off) * 0.55),
-      color-mix(in srgb, #34a853 calc(var(--ai-ptr) * 0.48), transparent),
-      transparent 65%
-    ),
-    conic-gradient(
-      from var(--ai-angle) at 50% 50%,
-      rgba(66, 133, 244, 0.36) 0deg,
-      rgba(161, 66, 244, 0.3) 48deg,
-      transparent 122deg,
-      transparent 210deg,
-      rgba(52, 168, 83, 0.32) 268deg,
-      rgba(251, 188, 4, 0.34) 308deg,
-      rgba(234, 67, 53, 0.34) 334deg,
-      rgba(66, 133, 244, 0.36) 360deg
-    );
-  filter: blur(7px);
-  opacity: 0.22;
-  animation: ai-orbit 11s linear infinite;
-  transition:
-    opacity 0.28s ease,
-    --ai-ptr 0.28s ease;
+  background: var(--ai-flow-ring);
+  filter: blur(8px);
+  opacity: 0.14;
+  animation: ai-orbit 7.5s linear infinite;
+  transition: opacity 0.28s ease;
 }
 
 body[arco-theme="dark"] .rh-compose::after,
 body[arco-theme="dark"] .rh-probe-box::after,
 body[arco-theme="dark"] .rh-trouble::after {
-  opacity: 0.28;
+  opacity: 0.24;
 }
 
 .rh-compose.off::after,
 .rh-probe-box.off::after,
 .rh-trouble.off::after {
   opacity: 0;
-  animation: none !important;
+  animation-play-state: paused;
 }
 
-.rh-compose:not(.off):is(:hover, [data-ai-ptr="1"])::before,
-.rh-probe-box:not(.off):is(:hover, [data-ai-ptr="1"])::before,
-.rh-trouble:not(.off):is(:hover, [data-ai-ptr="1"])::before,
-.rh-compose:not(.off):is(:hover, [data-ai-ptr="1"])::after,
-.rh-probe-box:not(.off):is(:hover, [data-ai-ptr="1"])::after,
-.rh-trouble:not(.off):is(:hover, [data-ai-ptr="1"])::after {
-  --ai-ptr: 100%;
+.rh-compose:not(.off):is(:hover, :focus-within, .is-writing, :has(.arco-dropdown-open), :has(.arco-popover-open), :has(.tm-open)),
+.rh-probe-box:not(.off):is(:hover, :focus-within, .is-writing, :has(.arco-dropdown-open), :has(.arco-popover-open), :has(.tm-open)),
+.rh-trouble:not(.off):is(:hover, :focus-within, .is-writing, :has(.arco-dropdown-open), :has(.arco-popover-open), :has(.tm-open)) {
+  --ai-rim-op: 100%;
+}
+
+.rh-compose:not(.off):is(:hover, :focus-within, .is-writing, :has(.arco-dropdown-open), :has(.arco-popover-open), :has(.tm-open))::before,
+.rh-probe-box:not(.off):is(:hover, :focus-within, .is-writing, :has(.arco-dropdown-open), :has(.arco-popover-open), :has(.tm-open))::before,
+.rh-trouble:not(.off):is(:hover, :focus-within, .is-writing, :has(.arco-dropdown-open), :has(.arco-popover-open), :has(.tm-open))::before {
+  animation: ai-orbit 4.2s linear infinite;
+}
+
+.rh-compose:not(.off):is(:hover, :focus-within, .is-writing, :has(.arco-dropdown-open), :has(.arco-popover-open), :has(.tm-open))::after,
+.rh-probe-box:not(.off):is(:hover, :focus-within, .is-writing, :has(.arco-dropdown-open), :has(.arco-popover-open), :has(.tm-open))::after,
+.rh-trouble:not(.off):is(:hover, :focus-within, .is-writing, :has(.arco-dropdown-open), :has(.arco-popover-open), :has(.tm-open))::after {
+  opacity: 0.34;
+  animation: ai-orbit 4.2s linear infinite;
 }
 
 .rh-compose:not(.off):is(:hover, :focus-within, .is-writing, :has(.arco-dropdown-open), :has(.arco-popover-open), :has(.tm-open)) {

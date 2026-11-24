@@ -4724,10 +4724,8 @@ body[arco-theme="dark"] .wb-icons button.is-brand.on {
   font-weight: 600;
   color: var(--ink);
   cursor: pointer;
-  border: 1px solid transparent;
-  background-image: linear-gradient(var(--surface), var(--surface)), var(--ai-rb);
-  background-origin: border-box;
-  background-clip: padding-box, border-box;
+  border: 1px solid var(--ai-ctl-border);
+  background: var(--surface);
 }
 .wb-stage-sep {
   width: 1px;

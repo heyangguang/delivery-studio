@@ -70,15 +70,15 @@ body[arco-theme="dark"] .tabs-bar {
   font-weight: 600;
 }
 
-/* AI suite status chip in light/dark airy topbar — pure glass monochrome with emerald live dot */
+/* AI suite status pill in topbar — clean porcelain pill with Gemini auto-flowing rim on hover */
 .ai-quick-toggle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
   height: 30px;
-  padding: 0 10px 0 9px;
-  border-radius: 7px;
+  padding: 0 11px 0 10px;
+  border-radius: 999px;
   line-height: 1.2;
 }
 .ai-quick-ic {
@@ -107,9 +107,9 @@ body[arco-theme="dark"] .tabs-bar {
   display: block;
   transition: transform 0.2s var(--spring), opacity 0.18s ease;
 }
-.ai-quick-toggle.is-interactive.is-on:hover:not(:disabled) {
-  background: var(--surface-2);
-  border-color: color-mix(in srgb, var(--ink) 24%, var(--line-strong));
+.ai-quick-toggle.is-interactive:hover:not(:disabled) {
+  background: none;
+  border-color: transparent;
 }
 .ai-quick-toggle.is-interactive:hover .ai-quick-arrow {
   opacity: 0.92;

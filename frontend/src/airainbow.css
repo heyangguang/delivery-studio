@@ -1,7 +1,7 @@
-/* Google AI Mode / Gemini-inspired 3-layer multicolor edge light:
-   1) crisp partial-arc orbiting perimeter (wide breathing gaps, no full 360deg hue-rotate fog)
-   2) 60fps pointer-following 4-color prism cluster (--mx, --my, --ai-ptr)
-   3) layered surface depth with micro-elevated tactile interior controls */
+/* Gemini-inspired automatic flowing edge light (zero pointer-chasing):
+   1) crisp 1.5px dual-comet luminous prism beam gliding smoothly along the border (mask-composite: exclude)
+   2) phase-locked tight outer aura that wakes up cleanly on hover / focus-within
+   3) calm Swiss Leica porcelain/obsidian rest state so hovering any AI control feels instantly luminous */
 
 @property --ai-angle {
   syntax: "<angle>";
@@ -9,21 +9,39 @@
   initial-value: 0deg;
 }
 
-@property --ai-ptr {
+@property --ai-rim-op {
   syntax: "<percentage>";
-  inherits: false;
+  inherits: true;
   initial-value: 0%;
 }
 
 :root {
   --ai-rb: linear-gradient(
     100deg,
-    #0b0d12 0%,
-    #ff462d 36%,
-    #0e6b74 72%,
-    #0b0d12 100%
+    #ff462d 0%,
+    #ff9e2c 28%,
+    #4285f4 62%,
+    #06b6d4 86%,
+    #ff462d 100%
   );
-  --ai-rb-soft: linear-gradient(135deg, #0b0d12, #ff462d 55%, #0e6b74);
+  --ai-rb-soft: linear-gradient(135deg, #ff462d, #4285f4 58%, #06b6d4);
+
+  /* Dual opposing luminous prism comets with clean breathing gaps for outer halo */
+  --ai-flow-ring: conic-gradient(
+    from var(--ai-angle) at 50% 50%,
+    transparent 0deg,
+    #ff462d 22deg,
+    #ffaa1d 52deg,
+    #4285f4 88deg,
+    #22d3ee 118deg,
+    transparent 150deg,
+    transparent 205deg,
+    #8b5cf6 238deg,
+    #38bdf8 272deg,
+    #ff5a42 308deg,
+    transparent 340deg,
+    transparent 360deg
+  );
 
   --ai-card-bg-top: #ffffff;
   --ai-card-bg-bot: #fafbfc;
@@ -32,12 +50,14 @@
     0 1px 2px rgba(11, 13, 18, 0.045),
     0 8px 24px -6px rgba(11, 13, 18, 0.065);
   --ai-card-shadow-hover:
-    0 3px 10px -2px rgba(11, 13, 18, 0.075),
-    0 16px 36px -10px rgba(11, 13, 18, 0.12);
+    0 3px 12px -2px rgba(11, 13, 18, 0.08),
+    0 16px 36px -10px rgba(66, 133, 244, 0.12);
 
+  /* Opaque fills for pill interiors so ::after (z-index: -2) NEVER bleeds inside */
+  --ai-pill-fill: #ffffff;
   --ai-ctl-bg: #ffffff;
   --ai-ctl-bg-hover: #f3f4f7;
-  --ai-ctl-border: rgba(11, 13, 18, 0.11);
+  --ai-ctl-border: rgba(11, 13, 18, 0.12);
   --ai-ctl-border-hover: rgba(11, 13, 18, 0.24);
   --ai-ctl-shadow: 0 1px 2px rgba(11, 13, 18, 0.04);
 }
@@ -45,10 +65,26 @@
 body[arco-theme="dark"] {
   --ai-rb: linear-gradient(
     100deg,
-    #f3f5f8 0%,
-    #ff553e 36%,
-    #4db0bc 72%,
-    #f3f5f8 100%
+    #ff5a42 0%,
+    #fbbf24 28%,
+    #60a5fa 62%,
+    #22d3ee 86%,
+    #ff5a42 100%
+  );
+  --ai-flow-ring: conic-gradient(
+    from var(--ai-angle) at 50% 50%,
+    transparent 0deg,
+    #ff5a42 22deg,
+    #fbbf24 52deg,
+    #60a5fa 88deg,
+    #22d3ee 118deg,
+    transparent 150deg,
+    transparent 205deg,
+    #a78bfa 238deg,
+    #38bdf8 272deg,
+    #ff6b52 308deg,
+    transparent 340deg,
+    transparent 360deg
   );
   --ai-card-bg-top: #151922;
   --ai-card-bg-bot: #11141b;
@@ -58,11 +94,12 @@ body[arco-theme="dark"] {
     0 10px 26px rgba(0, 0, 0, 0.32);
   --ai-card-shadow-hover:
     0 4px 12px rgba(0, 0, 0, 0.42),
-    0 16px 36px rgba(0, 0, 0, 0.38);
+    0 16px 36px -8px rgba(66, 133, 244, 0.2);
 
+  --ai-pill-fill: #181c26;
   --ai-ctl-bg: rgba(240, 244, 255, 0.055);
   --ai-ctl-bg-hover: rgba(240, 244, 255, 0.1);
-  --ai-ctl-border: rgba(240, 244, 255, 0.11);
+  --ai-ctl-border: rgba(240, 244, 255, 0.12);
   --ai-ctl-border-hover: rgba(240, 244, 255, 0.24);
   --ai-ctl-shadow: 0 1px 2px rgba(0, 0, 0, 0.28);
 }
@@ -201,12 +238,10 @@ body[arco-theme="dark"] .ad-empty-mark {
 /* ---------------------------------------------------------------- composer cards (AI page, chat dock, wizard) */
 :root .ap-compose,
 :root .ad-compose {
-  --mx: 50%;
-  --my: 50%;
-  --ai-spot: 155px;
-  --ai-off: 44px;
+  --ai-rim-op: 45%;
   position: relative;
   isolation: isolate;
+  overflow: visible;
   border: 1px solid transparent;
   border-radius: 16px;
   background: none;
@@ -214,7 +249,8 @@ body[arco-theme="dark"] .ad-empty-mark {
   transform-origin: center center;
   transition:
     transform 0.28s var(--spring),
-    box-shadow 0.24s var(--ease-out);
+    box-shadow 0.24s var(--ease-out),
+    --ai-rim-op 0.26s ease;
 }
 
 :root .ad-compose {
@@ -229,6 +265,12 @@ body[arco-theme="dark"] .ad-empty-mark {
   border-radius: 16px;
 }
 
+:root .ap-compose.off,
+:root .ad-compose.off,
+:root .fc-compose:not(.open):not(:hover) {
+  --ai-rim-op: 0%;
+}
+
 :root .ap-compose::before,
 :root .ad-compose::before,
 :root .ap-compose::after,
@@ -239,130 +281,89 @@ body[arco-theme="dark"] .ad-empty-mark {
   pointer-events: none;
 }
 
-/* Layer 1: Swiss Leica titanium-specular 1px hairline border + subtle pointer glint (zero neon rainbow) */
+/* Layer 1 (z-index: -1): opaque interior padding-box (100% seals off ::after) + crisp 1.5px flowing Gemini border-box */
 :root .ap-compose::before,
 :root .ad-compose::before {
   inset: -1px;
   z-index: -1;
-  border: 1px solid transparent;
+  border: 1.5px solid transparent;
   background:
     linear-gradient(180deg, var(--ai-card-bg-top), var(--ai-card-bg-bot)) padding-box,
-    radial-gradient(
-      var(--ai-spot) circle at calc(var(--mx) - var(--ai-off)) var(--my),
-      color-mix(in srgb, var(--ink) calc(var(--ai-ptr) * 0.28), transparent),
-      transparent 66%
-    ) border-box,
-    radial-gradient(
-      var(--ai-spot) circle at calc(var(--mx) + var(--ai-off)) var(--my),
-      color-mix(in srgb, var(--kyndryl) calc(var(--ai-ptr) * 0.42), transparent),
-      transparent 66%
-    ) border-box,
-    radial-gradient(
-      var(--ai-spot) circle at var(--mx) calc(var(--my) + var(--ai-off) * 0.55),
-      color-mix(in srgb, var(--run) calc(var(--ai-ptr) * 0.26), transparent),
-      transparent 66%
-    ) border-box,
     conic-gradient(
       from var(--ai-angle) at 50% 50%,
       transparent 0deg,
-      rgba(11, 13, 18, 0.22) 34deg,
-      rgba(255, 70, 45, 0.32) 76deg,
-      rgba(14, 107, 116, 0.22) 118deg,
-      transparent 162deg,
-      transparent 224deg,
-      rgba(11, 13, 18, 0.16) 276deg,
-      transparent 334deg,
+      color-mix(in srgb, #ff462d var(--ai-rim-op), transparent) 22deg,
+      color-mix(in srgb, #ffaa1d var(--ai-rim-op), transparent) 52deg,
+      color-mix(in srgb, #4285f4 var(--ai-rim-op), transparent) 88deg,
+      color-mix(in srgb, #22d3ee var(--ai-rim-op), transparent) 118deg,
+      transparent 150deg,
+      transparent 205deg,
+      color-mix(in srgb, #8b5cf6 var(--ai-rim-op), transparent) 238deg,
+      color-mix(in srgb, #38bdf8 var(--ai-rim-op), transparent) 272deg,
+      color-mix(in srgb, #ff5a42 var(--ai-rim-op), transparent) 308deg,
+      transparent 340deg,
       transparent 360deg
     ) border-box,
     linear-gradient(var(--ai-border-base), var(--ai-border-base)) border-box;
-  animation: ai-orbit 14s linear infinite;
-  transition: --ai-ptr 0.28s ease;
-}
-
-body[arco-theme="dark"] .ap-compose::before,
-body[arco-theme="dark"] .ad-compose::before {
-  background:
-    linear-gradient(180deg, var(--ai-card-bg-top), var(--ai-card-bg-bot)) padding-box,
-    radial-gradient(
-      var(--ai-spot) circle at calc(var(--mx) - var(--ai-off)) var(--my),
-      color-mix(in srgb, #f3f5f8 calc(var(--ai-ptr) * 0.32), transparent),
-      transparent 66%
-    ) border-box,
-    radial-gradient(
-      var(--ai-spot) circle at calc(var(--mx) + var(--ai-off)) var(--my),
-      color-mix(in srgb, var(--kyndryl) calc(var(--ai-ptr) * 0.46), transparent),
-      transparent 66%
-    ) border-box,
-    conic-gradient(
-      from var(--ai-angle) at 50% 50%,
-      transparent 0deg,
-      rgba(243, 245, 248, 0.22) 36deg,
-      rgba(255, 85, 62, 0.34) 80deg,
-      rgba(77, 176, 188, 0.22) 124deg,
-      transparent 172deg,
-      transparent 360deg
-    ) border-box,
-    linear-gradient(var(--ai-border-base), var(--ai-border-base)) border-box;
+  animation: ai-orbit 7.5s linear infinite;
 }
 
 :root .ap-compose.off::before,
 :root .ad-compose.off::before {
-  animation: none;
   background:
     linear-gradient(var(--surface-2), var(--surface-2)) padding-box,
     linear-gradient(var(--line-strong), var(--line-strong)) border-box;
+  animation: none;
 }
 
-/* Layer 2: whisper-soft obsidian & Leica micro-edge aura (no bright multicolor fog) */
+:root .fc-compose:not(.open):not(:hover)::before {
+  animation-play-state: paused;
+}
+
+/* Layer 2 (z-index: -2): strictly behind ::before's opaque fill — casts ONLY the tight outer edge halo */
 :root .ap-compose::after,
 :root .ad-compose::after {
-  inset: 1px;
+  inset: -1px;
   z-index: -2;
-  background:
-    radial-gradient(
-      var(--ai-spot) circle at calc(var(--mx) + var(--ai-off)) var(--my),
-      color-mix(in srgb, var(--kyndryl) calc(var(--ai-ptr) * 0.16), transparent),
-      transparent 64%
-    ),
-    conic-gradient(
-      from var(--ai-angle) at 50% 50%,
-      transparent 0deg,
-      rgba(11, 13, 18, 0.08) 38deg,
-      rgba(255, 70, 45, 0.12) 82deg,
-      rgba(14, 107, 116, 0.09) 124deg,
-      transparent 172deg,
-      transparent 360deg
-    );
+  background: var(--ai-flow-ring);
   filter: blur(8px);
-  opacity: 0.45;
-  animation: ai-orbit 14s linear infinite;
-  transition:
-    opacity 0.3s ease,
-    --ai-ptr 0.28s ease;
+  opacity: 0.14;
+  animation: ai-orbit 7.5s linear infinite;
+  transition: opacity 0.28s ease;
 }
 
 body[arco-theme="dark"] .ap-compose::after,
 body[arco-theme="dark"] .ad-compose::after {
-  opacity: 0.72;
+  opacity: 0.24;
 }
 
 :root .ap-compose.off::after,
 :root .ad-compose.off::after,
 :root .fc-compose:not(.open):not(:hover)::after {
   opacity: 0;
-  animation: none !important;
+  animation-play-state: paused;
 }
 
-:root .ap-compose:not(.off):is(:hover, [data-ai-ptr="1"])::before,
-:root .ad-compose:not(.off):is(:hover, [data-ai-ptr="1"])::before,
-:root .ap-compose:not(.off):is(:hover, [data-ai-ptr="1"])::after,
-:root .ad-compose:not(.off):is(:hover, [data-ai-ptr="1"])::after {
-  --ai-ptr: 100%;
+/* Hover / active writing: wake up into vivid, unmistakable auto-flowing Gemini edge light */
+:root .ap-compose:not(.off):is(:hover, :focus-within, .is-writing, :has(.arco-dropdown-open), :has(.arco-popover-open), :has(.tm-open)),
+:root .ad-compose:not(.off):is(:hover, :focus-within, :has(.arco-dropdown-open), :has(.arco-popover-open), :has(.tm-open)) {
+  --ai-rim-op: 100%;
+}
+
+:root .ap-compose:not(.off):is(:hover, :focus-within, .is-writing, :has(.arco-dropdown-open), :has(.arco-popover-open), :has(.tm-open))::before,
+:root .ad-compose:not(.off):is(:hover, :focus-within, :has(.arco-dropdown-open), :has(.arco-popover-open), :has(.tm-open))::before {
+  animation: ai-orbit 4.2s linear infinite;
 }
 
 :root .ap-compose:not(.off):is(:hover, :focus-within, .is-writing, :has(.arco-dropdown-open), :has(.arco-popover-open), :has(.tm-open))::after,
 :root .ad-compose:not(.off):is(:hover, :focus-within, :has(.arco-dropdown-open), :has(.arco-popover-open), :has(.tm-open))::after {
-  opacity: 0.94;
+  opacity: 0.34;
+  animation: ai-orbit 4.2s linear infinite;
+}
+
+body[arco-theme="dark"] .ap-compose:not(.off):is(:hover, :focus-within, .is-writing, :has(.arco-dropdown-open), :has(.arco-popover-open), :has(.tm-open))::after,
+body[arco-theme="dark"] .ad-compose:not(.off):is(:hover, :focus-within, :has(.arco-dropdown-open), :has(.arco-popover-open), :has(.tm-open))::after {
+  opacity: 0.52;
 }
 
 :root .ap-compose:focus-within,
@@ -373,7 +374,7 @@ body[arco-theme="dark"] .ad-compose::after {
 :root .ap-compose.drop,
 :root .ad-compose.drop {
   box-shadow:
-    0 0 0 2px var(--brand),
+    0 0 0 2px var(--kyndryl),
     var(--ai-card-shadow-hover);
 }
 
@@ -385,7 +386,8 @@ body[arco-theme="dark"] .ad-compose::after {
   transform-origin: 50% 82%;
   transition:
     transform 0.36s var(--spring),
-    box-shadow 0.24s var(--ease-out);
+    box-shadow 0.24s var(--ease-out),
+    --ai-rim-op 0.26s ease;
 }
 
 :root .ap-hero .ap-compose textarea {
@@ -415,11 +417,14 @@ body[arco-theme="dark"] .ad-compose::after {
   margin-top: 20px;
 }
 
-/* ---------------------------------------------------------------- Google AI Mode cursor-following pills */
+/* ---------------------------------------------------------------- Gemini-style auto-flowing hover edge light on ALL AI buttons */
 :root .ai-pill,
 :root .fc-callai,
 :root .wz-pane-foot .fw-chatbtn.arco-btn,
-:root .rstep-ai {
+:root .rstep-ai,
+:root .wb-stage-chat,
+:root .vex-ai-btn,
+:root .ai-quick-toggle.is-interactive {
   position: relative;
 }
 
@@ -427,23 +432,33 @@ body[arco-theme="dark"] .ad-compose::after {
 :root .ad-launch,
 :root .fc-callai,
 :root .wz-pane-foot .fw-chatbtn.arco-btn,
-:root .rstep-ai {
-  --mx: 50%;
-  --my: 50%;
-  --ai-spot: 64px;
-  --ai-off: 16px;
+:root .rstep-ai,
+:root .wb-stage-chat,
+:root .vex-ai-btn,
+:root .ai-quick-toggle.is-interactive {
+  --ai-rim-op: 0%;
   isolation: isolate;
+  overflow: visible;
   border: 1px solid transparent;
-  border-radius: 999px;
   background: none;
   box-shadow: var(--ai-ctl-shadow);
   transition:
     transform 0.24s var(--spring),
     color 0.16s ease,
-    box-shadow 0.2s ease,
+    box-shadow 0.22s ease,
     padding 0.3s var(--spring),
     gap 0.3s var(--spring),
-    opacity 0.25s;
+    opacity 0.25s,
+    --ai-rim-op 0.22s ease;
+}
+
+:root .ai-pill,
+:root .ad-launch,
+:root .fc-callai,
+:root .wz-pane-foot .fw-chatbtn.arco-btn,
+:root .rstep-ai,
+:root .wb-stage-chat {
+  border-radius: 999px;
 }
 
 :root .ai-pill.arco-btn {
@@ -467,16 +482,41 @@ body[arco-theme="dark"] .ad-compose::after {
   cursor: pointer;
 }
 
+/* Primary filled pill variant (matte obsidian on light, platinum on dark) */
+:root .ai-pill.ai-pill-primary:not(:disabled):not(.arco-btn-disabled) {
+  color: var(--on-brand);
+  box-shadow:
+    0 2px 6px rgba(11, 13, 18, 0.2),
+    0 6px 16px rgba(11, 13, 18, 0.1);
+}
+
+/* Quiet secondary pill defaults */
+:root .ai-pill.arco-btn:not(.ai-pill-primary):not(:disabled):not(.arco-btn-disabled),
+:root .wz-pane-foot .fw-chatbtn.arco-btn:not(:disabled),
+:root .fc-callai,
+:root .rstep-ai,
+:root .wb-stage-chat {
+  color: var(--ink);
+}
+
+/* Shared Layer 1 (::before at z-index: -1): opaque interior + 1.5px flowing rim
+   and Layer 2 (::after at z-index: -2): tight outer glow strictly occluded behind ::before */
 :root .ai-pill::before,
 :root .ad-launch::before,
 :root .fc-callai::before,
 :root .wz-pane-foot .fw-chatbtn.arco-btn::before,
 :root .rstep-ai::before,
+:root .wb-stage-chat::before,
+:root .vex-ai-btn::before,
+:root .ai-quick-toggle.is-interactive::before,
 :root .ai-pill::after,
 :root .ad-launch::after,
 :root .fc-callai::after,
 :root .wz-pane-foot .fw-chatbtn.arco-btn::after,
-:root .rstep-ai::after {
+:root .rstep-ai::after,
+:root .wb-stage-chat::after,
+:root .vex-ai-btn::after,
+:root .ai-quick-toggle.is-interactive::after {
   content: "";
   position: absolute;
   border-radius: inherit;
@@ -487,38 +527,73 @@ body[arco-theme="dark"] .ad-compose::after {
 :root .ad-launch::before,
 :root .fc-callai::before,
 :root .wz-pane-foot .fw-chatbtn.arco-btn::before,
-:root .rstep-ai::before {
+:root .rstep-ai::before,
+:root .wb-stage-chat::before,
+:root .vex-ai-btn::before,
+:root .ai-quick-toggle.is-interactive::before {
   inset: -1px;
   z-index: -1;
-  border: 1px solid transparent;
+  border: 1.5px solid transparent;
   background:
-    linear-gradient(180deg, var(--ai-ctl-bg), var(--ai-ctl-bg)) padding-box,
-    radial-gradient(
-      var(--ai-spot) circle at calc(var(--mx) - var(--ai-off)) var(--my),
-      color-mix(in srgb, var(--ink) calc(var(--ai-ptr) * 0.32), transparent),
-      transparent 68%
-    ) border-box,
-    radial-gradient(
-      var(--ai-spot) circle at calc(var(--mx) + var(--ai-off)) var(--my),
-      color-mix(in srgb, var(--kyndryl) calc(var(--ai-ptr) * 0.48), transparent),
-      transparent 68%
+    linear-gradient(var(--ai-pill-fill), var(--ai-pill-fill)) padding-box,
+    conic-gradient(
+      from var(--ai-angle) at 50% 50%,
+      transparent 0deg,
+      color-mix(in srgb, #ff462d var(--ai-rim-op), transparent) 22deg,
+      color-mix(in srgb, #ffaa1d var(--ai-rim-op), transparent) 52deg,
+      color-mix(in srgb, #4285f4 var(--ai-rim-op), transparent) 88deg,
+      color-mix(in srgb, #22d3ee var(--ai-rim-op), transparent) 118deg,
+      transparent 150deg,
+      transparent 205deg,
+      color-mix(in srgb, #8b5cf6 var(--ai-rim-op), transparent) 238deg,
+      color-mix(in srgb, #38bdf8 var(--ai-rim-op), transparent) 272deg,
+      color-mix(in srgb, #ff5a42 var(--ai-rim-op), transparent) 308deg,
+      transparent 340deg,
+      transparent 360deg
     ) border-box,
     linear-gradient(var(--ai-ctl-border), var(--ai-ctl-border)) border-box;
-  transition: --ai-ptr 0.22s ease;
+  animation: ai-orbit 2.4s linear infinite;
+  animation-play-state: paused;
 }
 
-:root .ad-launch::before {
+:root .ai-pill.ai-pill-primary:not(:disabled):not(.arco-btn-disabled)::before {
   background:
-    linear-gradient(var(--glass-strong), var(--glass-strong)) padding-box,
-    radial-gradient(
-      var(--ai-spot) circle at calc(var(--mx) - var(--ai-off)) var(--my),
-      color-mix(in srgb, var(--ink) calc(var(--ai-ptr) * 0.32), transparent),
-      transparent 68%
+    linear-gradient(var(--brand), var(--brand)) padding-box,
+    conic-gradient(
+      from var(--ai-angle) at 50% 50%,
+      transparent 0deg,
+      color-mix(in srgb, #ff462d var(--ai-rim-op), transparent) 22deg,
+      color-mix(in srgb, #ffaa1d var(--ai-rim-op), transparent) 52deg,
+      color-mix(in srgb, #4285f4 var(--ai-rim-op), transparent) 88deg,
+      color-mix(in srgb, #22d3ee var(--ai-rim-op), transparent) 118deg,
+      transparent 150deg,
+      transparent 205deg,
+      color-mix(in srgb, #8b5cf6 var(--ai-rim-op), transparent) 238deg,
+      color-mix(in srgb, #38bdf8 var(--ai-rim-op), transparent) 272deg,
+      color-mix(in srgb, #ff5a42 var(--ai-rim-op), transparent) 308deg,
+      transparent 340deg,
+      transparent 360deg
     ) border-box,
-    radial-gradient(
-      var(--ai-spot) circle at calc(var(--mx) + var(--ai-off)) var(--my),
-      color-mix(in srgb, var(--kyndryl) calc(var(--ai-ptr) * 0.48), transparent),
-      transparent 68%
+    linear-gradient(var(--brand), var(--brand)) border-box;
+}
+
+:root .ai-quick-toggle.is-interactive:not(.is-on):not(.is-warn)::before {
+  background:
+    linear-gradient(var(--sunken), var(--sunken)) padding-box,
+    conic-gradient(
+      from var(--ai-angle) at 50% 50%,
+      transparent 0deg,
+      color-mix(in srgb, #ff462d var(--ai-rim-op), transparent) 22deg,
+      color-mix(in srgb, #ffaa1d var(--ai-rim-op), transparent) 52deg,
+      color-mix(in srgb, #4285f4 var(--ai-rim-op), transparent) 88deg,
+      color-mix(in srgb, #22d3ee var(--ai-rim-op), transparent) 118deg,
+      transparent 150deg,
+      transparent 205deg,
+      color-mix(in srgb, #8b5cf6 var(--ai-rim-op), transparent) 238deg,
+      color-mix(in srgb, #38bdf8 var(--ai-rim-op), transparent) 272deg,
+      color-mix(in srgb, #ff5a42 var(--ai-rim-op), transparent) 308deg,
+      transparent 340deg,
+      transparent 360deg
     ) border-box,
     linear-gradient(var(--line-strong), var(--line-strong)) border-box;
 }
@@ -527,107 +602,94 @@ body[arco-theme="dark"] .ad-compose::after {
 :root .ad-launch::after,
 :root .fc-callai::after,
 :root .wz-pane-foot .fw-chatbtn.arco-btn::after,
-:root .rstep-ai::after {
-  inset: 0;
+:root .rstep-ai::after,
+:root .wb-stage-chat::after,
+:root .vex-ai-btn::after,
+:root .ai-quick-toggle.is-interactive::after {
+  inset: -1px;
   z-index: -2;
-  background:
-    radial-gradient(
-      var(--ai-spot) circle at calc(var(--mx) + var(--ai-off)) var(--my),
-      color-mix(in srgb, var(--kyndryl) calc(var(--ai-ptr) * 0.24), transparent),
-      transparent 66%
-    ),
-    radial-gradient(
-      var(--ai-spot) circle at calc(var(--mx) - var(--ai-off)) var(--my),
-      color-mix(in srgb, var(--ink) calc(var(--ai-ptr) * 0.14), transparent),
-      transparent 66%
-    );
-  filter: blur(6px);
+  background: var(--ai-flow-ring);
+  filter: blur(7px);
   opacity: 0;
-  transition:
-    opacity 0.24s ease,
-    --ai-ptr 0.22s ease;
+  animation: ai-orbit 2.4s linear infinite;
+  animation-play-state: paused;
+  transition: opacity 0.24s ease;
 }
 
-/* Primary filled pill variant (matte obsidian on light, platinum on dark) */
-:root .ai-pill.ai-pill-primary:not(:disabled):not(.arco-btn-disabled) {
-  color: var(--surface);
-  background: none;
-  border-color: transparent;
-  box-shadow:
-    0 2px 6px rgba(11, 13, 18, 0.2),
-    0 6px 16px rgba(11, 13, 18, 0.1);
+/* Hover / focus-visible (and busy AI launcher): ignite crisp auto-flowing prism light! */
+:root .ai-pill:not(:disabled):not(.arco-btn-disabled):is(:hover, :focus-visible),
+:root .ad-launch:is(:hover, :focus-visible, .busy),
+:root .fc-callai:is(:hover, :focus-visible),
+:root .wz-pane-foot .fw-chatbtn.arco-btn:not(:disabled):is(:hover, :focus-visible),
+:root .rstep-ai:is(:hover, :focus-visible),
+:root .wb-stage-chat:is(:hover, :focus-visible),
+:root .vex-ai-btn:not(:disabled):is(:hover, :focus-visible),
+:root .ai-quick-toggle.is-interactive:not(:disabled):is(:hover, :focus-visible) {
+  --ai-rim-op: 100%;
 }
 
-:root .ai-pill.ai-pill-primary:not(:disabled):not(.arco-btn-disabled)::before {
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--brand) 92%, var(--surface)),
-      var(--brand)
-    ) padding-box,
-    radial-gradient(
-      var(--ai-spot) circle at calc(var(--mx) + var(--ai-off)) var(--my),
-      color-mix(in srgb, var(--kyndryl) calc(var(--ai-ptr) * 0.55), transparent),
-      transparent 68%
-    ) border-box,
-    linear-gradient(var(--brand), var(--brand)) border-box;
+:root .ai-pill:not(:disabled):not(.arco-btn-disabled):is(:hover, :focus-visible)::before,
+:root .ad-launch:is(:hover, :focus-visible, .busy)::before,
+:root .fc-callai:is(:hover, :focus-visible)::before,
+:root .wz-pane-foot .fw-chatbtn.arco-btn:not(:disabled):is(:hover, :focus-visible)::before,
+:root .rstep-ai:is(:hover, :focus-visible)::before,
+:root .wb-stage-chat:is(:hover, :focus-visible)::before,
+:root .vex-ai-btn:not(:disabled):is(:hover, :focus-visible)::before,
+:root .ai-quick-toggle.is-interactive:not(:disabled):is(:hover, :focus-visible)::before {
+  animation-play-state: running;
 }
 
-/* Quiet secondary pill defaults */
-:root .ai-pill.arco-btn:not(.ai-pill-primary):not(:disabled):not(.arco-btn-disabled),
-:root .wz-pane-foot .fw-chatbtn.arco-btn:not(:disabled),
-:root .fc-callai,
-:root .rstep-ai {
-  color: var(--ink);
-  background: none;
-  border-color: transparent;
+:root .ai-pill:not(:disabled):not(.arco-btn-disabled):is(:hover, :focus-visible)::after,
+:root .ad-launch:is(:hover, :focus-visible, .busy)::after,
+:root .fc-callai:is(:hover, :focus-visible)::after,
+:root .wz-pane-foot .fw-chatbtn.arco-btn:not(:disabled):is(:hover, :focus-visible)::after,
+:root .rstep-ai:is(:hover, :focus-visible)::after,
+:root .wb-stage-chat:is(:hover, :focus-visible)::after,
+:root .vex-ai-btn:not(:disabled):is(:hover, :focus-visible)::after,
+:root .ai-quick-toggle.is-interactive:not(:disabled):is(:hover, :focus-visible)::after {
+  opacity: 0.42;
+  animation-play-state: running;
 }
 
-:root .ai-pill:not(:disabled):not(.arco-btn-disabled):is(:hover, [data-ai-ptr="1"]):before,
-:root .ad-launch:is(:hover, [data-ai-ptr="1"])::before,
-:root .fc-callai:is(:hover, [data-ai-ptr="1"])::before,
-:root .wz-pane-foot .fw-chatbtn.arco-btn:not(:disabled):is(:hover, [data-ai-ptr="1"])::before,
-:root .rstep-ai:is(:hover, [data-ai-ptr="1"])::before,
-:root .ai-pill:not(:disabled):not(.arco-btn-disabled):is(:hover, :focus-visible, [data-ai-ptr="1"])::after,
-:root .ad-launch:is(:hover, :focus-visible, [data-ai-ptr="1"])::after,
-:root .fc-callai:is(:hover, :focus-visible, [data-ai-ptr="1"])::after,
-:root .wz-pane-foot .fw-chatbtn.arco-btn:not(:disabled):is(:hover, :focus-visible, [data-ai-ptr="1"])::after,
-:root .rstep-ai:is(:hover, :focus-visible, [data-ai-ptr="1"])::after {
-  --ai-ptr: 100%;
+body[arco-theme="dark"] .ai-pill:not(:disabled):not(.arco-btn-disabled):is(:hover, :focus-visible)::after,
+body[arco-theme="dark"] .ad-launch:is(:hover, :focus-visible, .busy)::after,
+body[arco-theme="dark"] .fc-callai:is(:hover, :focus-visible)::after,
+body[arco-theme="dark"] .wz-pane-foot .fw-chatbtn.arco-btn:not(:disabled):is(:hover, :focus-visible)::after,
+body[arco-theme="dark"] .rstep-ai:is(:hover, :focus-visible)::after,
+body[arco-theme="dark"] .wb-stage-chat:is(:hover, :focus-visible)::after,
+body[arco-theme="dark"] .vex-ai-btn:not(:disabled):is(:hover, :focus-visible)::after,
+body[arco-theme="dark"] .ai-quick-toggle.is-interactive:not(:disabled):is(:hover, :focus-visible)::after {
+  opacity: 0.64;
 }
 
 :root .ai-pill:not(:disabled):not(.arco-btn-disabled):is(:hover, :focus-visible),
 :root .ad-launch:is(:hover, :focus-visible),
 :root .fc-callai:is(:hover, :focus-visible),
 :root .wz-pane-foot .fw-chatbtn.arco-btn:not(:disabled):is(:hover, :focus-visible),
-:root .rstep-ai:is(:hover, :focus-visible) {
-  transform: translateY(-0.5px) scale(1.015);
+:root .rstep-ai:is(:hover, :focus-visible),
+:root .wb-stage-chat:is(:hover, :focus-visible),
+:root .ai-quick-toggle.is-interactive:not(:disabled):is(:hover, :focus-visible) {
+  transform: translateY(-1px);
   box-shadow:
-    0 2px 6px rgba(15, 23, 42, 0.07),
-    0 6px 16px rgba(15, 23, 42, 0.06);
+    0 3px 10px -2px rgba(11, 13, 18, 0.09),
+    0 6px 18px -4px rgba(66, 133, 244, 0.12);
   text-decoration: none;
 }
 
 :root .ai-pill.ai-pill-primary:not(:disabled):not(.arco-btn-disabled):is(:hover, :focus-visible) {
-  color: var(--surface);
+  color: var(--on-brand);
   box-shadow:
-    0 3px 10px rgba(11, 13, 18, 0.26),
-    0 8px 20px rgba(11, 13, 18, 0.14);
-}
-
-:root .ai-pill:not(:disabled):not(.arco-btn-disabled):is(:hover, :focus-visible)::after,
-:root .ad-launch:is(:hover, :focus-visible)::after,
-:root .fc-callai:is(:hover, :focus-visible)::after,
-:root .wz-pane-foot .fw-chatbtn.arco-btn:not(:disabled):is(:hover, :focus-visible)::after,
-:root .rstep-ai:is(:hover, :focus-visible)::after {
-  opacity: 0.92;
+    0 4px 12px rgba(11, 13, 18, 0.28),
+    0 8px 22px -4px rgba(66, 133, 244, 0.22);
 }
 
 :root .ai-pill:not(:disabled):not(.arco-btn-disabled):active,
 :root .ad-launch:active,
 :root .fc-callai:active,
 :root .wz-pane-foot .fw-chatbtn.arco-btn:not(:disabled):active,
-:root .rstep-ai:active {
+:root .rstep-ai:active,
+:root .wb-stage-chat:active,
+:root .ai-quick-toggle.is-interactive:not(:disabled):active {
   transform: scale(0.97);
 }
 
@@ -635,14 +697,17 @@ body[arco-theme="dark"] .ad-compose::after {
 :root .ad-launch:focus-visible,
 :root .fc-callai:focus-visible,
 :root .wz-pane-foot .fw-chatbtn.arco-btn:focus-visible,
-:root .rstep-ai:focus-visible {
+:root .rstep-ai:focus-visible,
+:root .wb-stage-chat:focus-visible,
+:root .ai-quick-toggle.is-interactive:focus-visible {
   outline: none;
 }
 
-/* Clean quiet frosted disabled state on AI pill buttons (replaces Arco pastel purple fill) */
+/* Clean quiet frosted disabled state on AI pill buttons */
 :root .ai-pill.arco-btn:is(:disabled, .arco-btn-disabled),
 :root .ai-pill.arco-btn:is(:disabled, .arco-btn-disabled):hover,
 :root .wz-pane-foot .fw-chatbtn.arco-btn:is(:disabled, .arco-btn-disabled) {
+  --ai-rim-op: 0%;
   color: var(--faint);
   border-color: transparent;
   background: none;
@@ -654,15 +719,16 @@ body[arco-theme="dark"] .ad-compose::after {
 
 :root .ai-pill.arco-btn:is(:disabled, .arco-btn-disabled)::before,
 :root .wz-pane-foot .fw-chatbtn.arco-btn:is(:disabled, .arco-btn-disabled)::before {
-  --ai-ptr: 0%;
   background:
     linear-gradient(var(--surface-2), var(--surface-2)) padding-box,
     linear-gradient(var(--line), var(--line)) border-box;
+  animation-play-state: paused !important;
 }
 
 :root .ai-pill.arco-btn:is(:disabled, .arco-btn-disabled)::after,
 :root .wz-pane-foot .fw-chatbtn.arco-btn:is(:disabled, .arco-btn-disabled)::after {
   opacity: 0 !important;
+  animation-play-state: paused !important;
 }
 
 /* ---------------------------------------------------------------- tactile interior controls inside composers */

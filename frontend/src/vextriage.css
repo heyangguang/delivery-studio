@@ -172,12 +172,13 @@ body[arco-theme="dark"] .vex-st-btn.on.st-open { color: #fca5a5; }
   display: inline-flex !important;
   align-items: center;
   gap: 5px;
-  border-color: color-mix(in srgb, var(--brand, #ff462d) 45%, var(--line)) !important;
-  color: var(--brand-ink, #c52b16) !important;
-  background: color-mix(in srgb, var(--brand, #ff462d) 7%, var(--surface)) !important;
+  border-color: transparent !important;
+  color: var(--ink) !important;
+  background: none !important;
 }
 .vex-ai-btn:hover {
-  background: color-mix(in srgb, var(--brand, #ff462d) 14%, var(--surface)) !important;
+  border-color: transparent !important;
+  background: none !important;
 }
 
 .vex-quick-row {

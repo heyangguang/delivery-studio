@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.303-dev"
+	version            = "1.0.304-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,22 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.304-dev",
+		Date:    "2026-11-24",
+		Title:   "升级全局 AI 按钮与输入框为 Gemini 风格悬停自动流光边框",
+		TitleEn: "Gemini-Style Auto-Flowing Hover Edge Light for All AI Controls",
+		Highlights: []string{
+			"移除旧版鼠标坐标追踪（pointermove）流光，全面升级为纯 CSS @property --ai-angle 驱动的双彗星自动环绕棱镜流光（暖红 → 琥珀金 → 宝石蓝 → 冰青，并保留干净呼吸间隙），视觉质感对标 Google Gemini",
+			"覆盖全局所有 AI 触点按钮（顶栏 AI 状态胶囊、右下角 AI 助手悬浮球、.ai-pill、AI 帮我填、执行监控问 AI、组件工作台与安全中心 AI 按钮）：静息态保持瑞士白瓷/曜石极简克制，鼠标悬停或聚焦即自动点亮 1.5px 边缘流光与相锁外晕",
+			"统一 AI 对话框与演练输入卡片（.ap-compose / .ad-compose / .rh-compose）采用双层严密遮罩结构（::before 不透明内衬 + 流动边框，::after 紧贴外晕），彻底杜绝任何内底色渗漏，明暗双主题均晶莹利落",
+		},
+		HighlightsEn: []string{
+			"Replaced pointer-chasing edge spots with pure CSS @property --ai-angle dual-comet auto-flowing Gemini prism edge light (Kyndryl warm red → solar gold → sapphire blue → cyan with clean breathing gaps)",
+			"Enabled hover/focus-triggered 1.5px automatic flowing rim + phase-locked tight outer halo across all AI buttons (topbar AI pill, floating AI launcher, .ai-pill, Fill with AI, Ask AI, Workbench & VEX AI buttons) while keeping rest states clean and restrained",
+			"Unified all AI composer cards (.ap-compose, .ad-compose, .rh-compose) with opaque padding-box occlusion so interiors remain 100% pure white/obsidian with zero glow bleed in Light and Dark modes",
+		},
+	},
 	{
 		Version: "1.0.303-dev",
 		Date:    "2026-11-24",

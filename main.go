@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.284-dev"
+	version            = "1.0.285-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,20 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.285-dev",
+		Date:    "2026-11-24",
+		Title:   "软件库左下角状态卡与侧栏源按钮统一",
+		TitleEn: "Library Rail Status Card & Unified Rail Source Button",
+		Highlights: []string{
+			"软件库侧栏底部新增固定「本地软件库」状态卡（与安全中心本地漏洞库对齐）：汇总展示总软件包数、总占用空间、就绪系统数、最近索引时间，并提供「更新索引」与「导入离线包」快捷入口",
+			"将安全中心侧栏顶部「漏洞源」按钮由旧版自定义 26px 按钮统一替换为 Arco 原生 small 按钮 + 设置图标，并对齐标题字号与顶距，与软件库「软件源」保持像素级一致",
+		},
+		HighlightsEn: []string{
+			"Added a pinned Local Library status card at the bottom of the Software Library rail matching Security Center's Local Advisory DB card, showing total packages, disk footprint, ready OS count, latest index time, plus quick Sync Index and Import buttons",
+			"Unified Security Center's rail Sources button to the exact same native Arco small Button with settings icon and aligned 20px rail heading as Software Library",
+		},
+	},
 	{
 		Version: "1.0.284-dev",
 		Date:    "2026-11-24",

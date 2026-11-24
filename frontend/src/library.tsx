@@ -235,6 +235,8 @@ export function LibraryPage({
   );
   const [message, setMessage] = useState("");
   const [sourcesOpen, setSourcesOpen] = useState(false);
+  const [railImportOpen, setRailImportOpen] = useState(false);
+  const [railSyncing, setRailSyncing] = useState(false);
 
   const reload = (fresh?: unknown) =>
     (fresh === true ? api : fetchCached)<LibraryOverview>("/api/library")
@@ -308,6 +310,42 @@ export function LibraryPage({
   const current = ov?.platforms.find((p) => p.id === shownId);
   const runtimes = selected === "ansible";
   const slowList = useDelayed(load === "loading" && !ov);
+  const activePlat =
+    current ||
+    ov?.platforms.find((p) => p.id === ov?.default_platform) ||
+    ov?.platforms[0];
+  const totalClosures = ov
+    ? ov.platforms.reduce((s, p) => s + (p.stats?.closures || 0), 0)
+    : 0;
+  const totalBytes = ov
+    ? ov.platforms.reduce((s, p) => s + (p.stats?.bytes || 0), 0)
+    : 0;
+  const readyPlats = ov ? ov.platforms.filter((p) => p.deployable).length : 0;
+  const latestIndex = ov
+    ? ov.platforms
+        .map((p) => p.index?.updated || "")
+        .filter(Boolean)
+        .sort()
+        .pop() || ""
+    : "";
+  const syncActiveIndex = async () => {
+    if (!activePlat || railSyncing || ov?.busy) return;
+    setRailSyncing(true);
+    try {
+      await api<FetchTask>("/api/library/index/update", {
+        method: "POST",
+        body: JSON.stringify({ platform: activePlat.id }),
+      });
+      if (runtimes) {
+        go({ name: "library", id: activePlat.id }, { replace: true });
+      }
+      await reload(true);
+    } catch (e) {
+      err(e);
+    } finally {
+      setRailSyncing(false);
+    }
+  };
   return (
     <div className="md-split">
       {(!narrow || !selected) && (
@@ -438,6 +476,68 @@ export function LibraryPage({
               })}
             </div>
           )}
+          {ov && (
+            <div className="lib-rail-foot">
+              <div className="lib-rail-card">
+                <div className="lib-rail-top">
+                  <span className="lib-rail-label">
+                    <i
+                      className={`lib-rail-dot ${
+                        ov.busy
+                          ? "busy"
+                          : readyPlats > 0 && totalClosures > 0
+                            ? "ok"
+                            : "empty"
+                      }`}
+                      aria-hidden
+                    />
+                    <b>{bi("本地软件库", "Local Library")}</b>
+                  </span>
+                  <span className="lib-rail-time num">
+                    {ov.busy
+                      ? bi("同步中…", "Syncing…")
+                      : latestIndex
+                        ? ago(latestIndex)
+                        : size(totalBytes)}
+                  </span>
+                </div>
+                <div className="lib-rail-meta num">
+                  {bi(
+                    `${totalClosures} 个软件包 · ${size(totalBytes)} · ${readyPlats}/${ov.platforms.length} 系统就绪`,
+                    `${totalClosures} pkgs · ${size(totalBytes)} · ${readyPlats}/${ov.platforms.length} OS ready`,
+                  )}
+                </div>
+                {admin && activePlat && (
+                  <div className="lib-rail-acts">
+                    <Button
+                      size="mini"
+                      icon={<IconRefresh />}
+                      loading={railSyncing || ov.busy}
+                      onClick={() => void syncActiveIndex()}
+                      title={bi(
+                        `更新 ${osTitle(activePlat.title)} 的软件源索引`,
+                        `Update package index for ${osTitle(activePlat.title)}`,
+                      )}
+                    >
+                      {bi("更新索引", "Sync Index")}
+                    </Button>
+                    <Button
+                      size="mini"
+                      icon={<IconUpload />}
+                      disabled={ov.busy}
+                      onClick={() => setRailImportOpen(true)}
+                      title={bi(
+                        `向 ${osTitle(activePlat.title)} 导入离线软件包`,
+                        `Import offline packages into ${osTitle(activePlat.title)}`,
+                      )}
+                    >
+                      {bi("导入离线包", "Import")}
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </aside>
       )}
       {(!narrow || selected) && (
@@ -471,6 +571,18 @@ export function LibraryPage({
         narrow={narrow}
         changed={reload}
       />
+      {activePlat && (
+        <ImportDrawer
+          open={railImportOpen}
+          kind="packages"
+          platform={activePlat}
+          onClose={() => setRailImportOpen(false)}
+          done={() => {
+            setRailImportOpen(false);
+            reload(true);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -534,6 +646,17 @@ function PlatformDetail({
   useEffect(() => {
     reloadRows(false);
   }, [p.id, ov.busy, p.stats.closures]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (
+      ov.last_task &&
+      ov.last_task.platform === p.id &&
+      ov.last_task.state === "running" &&
+      task?.id !== ov.last_task.id
+    ) {
+      setTask(ov.last_task);
+    }
+  }, [ov.last_task, p.id, task?.id]);
 
   // Follow a running fetch until it ends.
   useEffect(() => {

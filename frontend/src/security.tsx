@@ -21,6 +21,7 @@ import {
   IconRefresh,
   IconRight,
   IconSearch,
+  IconSettings,
   IconSync,
   IconUpload,
 } from "@arco-design/web-react/icon";
@@ -2072,15 +2073,14 @@ export function SecurityPage({
           <div className="sec-rail-title-row">
             <h1>{bi("安全中心", "Security Center")}</h1>
             {canScan && (
-              <button
-                type="button"
-                className="sec-rail-src-btn"
+              <Button
+                size="small"
+                icon={<IconSettings />}
                 onClick={() => switchTab("db")}
                 title={bi("管理漏洞源与门禁策略", "Manage advisory sources & gates")}
               >
-                {SecIcons.db}
-                <span>{bi("漏洞源", "Sources")}</span>
-              </button>
+                {bi("漏洞源", "Sources")}
+              </Button>
             )}
           </div>
           <p>

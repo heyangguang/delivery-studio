@@ -3447,10 +3447,10 @@ body[arco-theme="dark"] .login-policy-box {
 }
 
 .topo .link-live {
-  animation: flow 1.2s linear infinite;
+  animation: flow 1.6s linear infinite;
 }
 .topo .link-wal {
-  animation: flow 1.8s linear infinite;
+  animation: flow 2s linear infinite;
 }
 .topo .link-idle {
   animation: flow 3.2s linear infinite;

@@ -819,10 +819,10 @@ body[arco-theme="dark"] .ai-quick-toggle.is-interactive:not(:disabled):is(:hover
 }
 
 :root :is(.ap-compose, .ad-compose) .tm-tog.think.on {
-  color: #ffffff;
-  border-color: #0b0d12;
-  background: #0b0d12;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  color: var(--kyndryl-ink);
+  border-color: var(--kyndryl-line);
+  background: var(--kyndryl-soft);
+  box-shadow: none;
 }
 
 :root :is(.ap-compose, .ad-compose) .tm-tog.web.on {
@@ -833,10 +833,10 @@ body[arco-theme="dark"] .ai-quick-toggle.is-interactive:not(:disabled):is(:hover
 }
 
 body[arco-theme="dark"] :is(.ap-compose, .ad-compose) .tm-tog.think.on {
-  color: #0b0d11;
-  border-color: #f3f5f8;
-  background: #f3f5f8;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  color: var(--kyndryl-ink);
+  border-color: var(--kyndryl-line);
+  background: var(--kyndryl-soft);
+  box-shadow: none;
 }
 
 body[arco-theme="dark"] :is(.ap-compose, .ad-compose) .tm-tog.web.on {

@@ -1410,9 +1410,6 @@ export function AIPage({
     if (!seed) return;
     seeded.current = true;
     const enableWeb = seedWeb && (tools.options ? Boolean(tools.options.web) : true);
-    if (enableWeb && !tools.pref.web && tools.options?.web) {
-      tools.update({ web: true });
-    }
     window.setTimeout(
       () => send(seed, false, enableWeb ? { web: true } : undefined),
       150,
@@ -2143,11 +2140,13 @@ export function AIPage({
           </span>
         </b>
         {c.ctx?.name ? (
-          <small>
-            {ctxWord(c.ctx.kind)} · {normPlanLabel(c.ctx.name)}
+          <small className="ap-row-meta">
+            <span className="ap-ctx-pill">
+              {ctxWord(c.ctx.kind)} · {normPlanLabel(c.ctx.name)}
+            </span>
           </small>
         ) : (
-          <small>{ago(c.updated)}</small>
+          <small className="ap-row-meta">{ago(c.updated)}</small>
         )}
       </button>
       <Dropdown
@@ -2196,8 +2195,8 @@ export function AIPage({
       <aside className="ap-side" aria-label={bi("对话", "Conversations")}>
         <div className="ap-side-top">
           <div className="ap-brand">
-            <span className="ap-brand-mark">
-              <AIEmblem size={28} />
+            <span className="ap-brand-spark" aria-hidden>
+              <Spark size={15} />
             </span>
             <b>{bi("AI 助手", "AI Assistant")}</b>
             <Tooltip content={bi("新对话", "New chat")} mini>

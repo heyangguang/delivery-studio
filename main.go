@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.316-dev"
+	version            = "1.0.317-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,24 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.317-dev",
+		Date:    "2026-11-24",
+		Title:   "修复拓扑流动卡顿、AI 联网默认关闭/去重标头，强化 Kyndryl 暖红主色与暗黑模式视觉舒适度",
+		TitleEn: "Smooth Topology Flows, AI Web Opt-In & Sidebar Polish, Kyndryl Warm Red Identity & Dark Mode Overhaul",
+		Highlights: []string{
+			"彻底消除拓扑连线流动突然加速与卡帧：修正 etcd Raft 虚线周期（3 6 改为整除 24 的 2 6）及工作台连线周期，移除动画粒子高开销 drop-shadow 改为纯矢量柔光晕，并按连线物理长度等速计算粒子时长",
+			"AI 助手默认关闭「联网」且不再因单次预设提示持久写死开启；移除 AI 页侧栏与顶栏上下叠放的重复 K Logo 改为简洁星标，优化侧栏会话列表滚动条、分组分割线与交付标签",
+			"回归清晰的 Kyndryl 暖红品牌识别：重绘应用目录「单机/原生主从/Patroni」迷你拓扑为暖红主节点 + Bridge Teal 备节点，主操作按钮、勾选/单选与深度思考标签采用协调的 Kyndryl 暖红视觉体系",
+			"全面重构暗黑模式色彩与集群安全态势页：抬升纯黑背景为柔和炭黑层级、消除刺眼纯白主按钮与发闷深红/荧光蓝绿硬编码色值，并修复集群安全页右侧工具栏裁切",
+		},
+		HighlightsEn: []string{
+			"Eliminated topology flow stutter & speed bursts by aligning mesh/wire dasharray periods to divide the 24-unit cycle evenly, replacing CPU-heavy drop-shadow filters with pure-vector particle halos, and normalizing particle travel speed to wire length",
+			"Made AI Web Search strictly opt-in (OFF by default per session without sticky localStorage mutation), removed the duplicate stacked K logo in the AI sidebar header, and polished sidebar scrollbars, date-group dividers, and context badges",
+			"Restored unmistakable Kyndryl Warm Red brand identity across primary CTAs, checkboxes/radios, active think pills, and color-coded PlanGlyph scheme thumbnails (Warm Red primary + Bridge Teal replicas)",
+			"Overhauled Dark Mode with restful elevated charcoal layers, calibrated soft-luminous semantic inks across Cluster Security, Security Center & VEX triage (removing hardcoded light-mode hex values), and fixed right-edge clipping in Cluster Security",
+		},
+	},
 	{
 		Version: "1.0.316-dev",
 		Date:    "2026-11-24",

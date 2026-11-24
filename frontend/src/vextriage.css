@@ -76,45 +76,41 @@
   flex: none;
   background: var(--faint);
 }
-.vex-st-btn.st-open .vex-st-dot { background: #dc2626; }
-.vex-st-btn.st-planned .vex-st-dot { background: var(--brand, #ff462d); }
-.vex-st-btn.st-mitigated .vex-st-dot { background: #16a34a; }
-.vex-st-btn.st-not_affected .vex-st-dot { background: #0d9488; }
-.vex-st-btn.st-accepted .vex-st-dot { background: #d97706; }
+.vex-st-btn.st-open .vex-st-dot { background: var(--bad); }
+.vex-st-btn.st-planned .vex-st-dot { background: var(--kyndryl); }
+.vex-st-btn.st-mitigated .vex-st-dot { background: var(--ok); }
+.vex-st-btn.st-not_affected .vex-st-dot { background: var(--teal); }
+.vex-st-btn.st-accepted .vex-st-dot { background: var(--warn); }
 
 .vex-st-btn.on {
   font-weight: 620;
   box-shadow: 0 0 0 1px currentColor inset;
 }
 .vex-st-btn.on.st-open {
-  color: #dc2626;
-  border-color: rgba(220, 38, 38, 0.45);
-  background: rgba(220, 38, 38, 0.08);
+  color: var(--bad);
+  border-color: var(--bad-line);
+  background: var(--bad-soft);
 }
 .vex-st-btn.on.st-planned {
-  color: var(--brand-ink, #c52b16);
-  border-color: var(--brand-line, rgba(255, 70, 45, 0.45));
-  background: var(--brand-soft, rgba(255, 70, 45, 0.09));
+  color: var(--kyndryl-ink);
+  border-color: var(--kyndryl-line);
+  background: var(--kyndryl-soft);
 }
 .vex-st-btn.on.st-mitigated {
-  color: #15803d;
-  border-color: rgba(22, 163, 74, 0.45);
-  background: rgba(22, 163, 74, 0.09);
+  color: var(--ok);
+  border-color: var(--ok-line);
+  background: var(--ok-soft);
 }
 .vex-st-btn.on.st-not_affected {
-  color: #0f766e;
-  border-color: rgba(13, 148, 136, 0.45);
-  background: rgba(13, 148, 136, 0.09);
+  color: var(--teal-ink);
+  border-color: var(--teal-line);
+  background: var(--teal-soft);
 }
 .vex-st-btn.on.st-accepted {
-  color: #b45309;
-  border-color: rgba(217, 119, 6, 0.45);
-  background: rgba(217, 119, 6, 0.1);
+  color: var(--warn);
+  border-color: var(--warn-line);
+  background: var(--warn-soft);
 }
-body[arco-theme="dark"] .vex-st-btn.on.st-mitigated { color: #86efac; }
-body[arco-theme="dark"] .vex-st-btn.on.st-not_affected { color: #5eead4; }
-body[arco-theme="dark"] .vex-st-btn.on.st-accepted { color: #fcd34d; }
-body[arco-theme="dark"] .vex-st-btn.on.st-open { color: #fca5a5; }
 
 .vex-st-desc {
   font-size: 12px;
@@ -126,7 +122,7 @@ body[arco-theme="dark"] .vex-st-btn.on.st-open { color: #fca5a5; }
   border-left: 2.5px solid var(--line-strong);
 }
 .vex-st-desc.waives {
-  border-left-color: #16a34a;
+  border-left-color: var(--ok);
 }
 
 .vex-field {
@@ -152,8 +148,8 @@ body[arco-theme="dark"] .vex-st-btn.on.st-open { color: #fca5a5; }
 .vex-req-tag {
   font-size: 11px;
   font-weight: 560;
-  color: #b45309;
-  background: rgba(217, 119, 6, 0.12);
+  color: var(--warn);
+  background: var(--warn-soft);
   padding: 0 5px;
   border-radius: 4px;
 }

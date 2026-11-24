@@ -524,9 +524,10 @@ body[arco-theme="dark"] .topo-elb.f2 .t-k {
   fill: none;
   stroke: var(--warn, #ff9f0a);
   stroke-width: 1.8;
-  stroke-dasharray: 3 6;
+  /* Period 8 (2+6) divides the 24-unit @keyframes flow cycle evenly (24/8 = 3) with zero loop jump. */
+  stroke-dasharray: 2 6;
   stroke-linecap: round;
-  animation: flow 3s linear infinite;
+  animation: flow 2.8s linear infinite;
 }
 .ig {
   max-height: none;
@@ -534,33 +535,37 @@ body[arco-theme="dark"] .topo-elb.f2 .t-k {
 .topo.ig:not(.stack) {
   margin-inline: auto;
 }
-.topo .pulse {
+/* Pure-vector particle + soft halo (avoids per-frame CPU drop-shadow rasterization on VDI). */
+.topo .pulse,
+.topo .pulse-halo {
   fill: var(--teal);
-  filter: drop-shadow(0 0 3.5px color-mix(in srgb, var(--teal) 65%, transparent));
 }
-.topo .pulse.sync {
+.topo .pulse-halo {
+  opacity: 0.24;
+}
+.topo .pulse.sync,
+.topo .pulse-halo.sync {
   fill: var(--ok);
-  filter: drop-shadow(0 0 3.5px color-mix(in srgb, var(--ok) 65%, transparent));
 }
-.topo .pulse.live {
+.topo .pulse.live,
+.topo .pulse-halo.live {
   fill: var(--cobalt);
-  filter: drop-shadow(0 0 3.5px color-mix(in srgb, var(--cobalt) 65%, transparent));
 }
-.topo .pulse.live-1 {
+.topo .pulse.live-1,
+.topo .pulse-halo.live-1 {
   fill: #0284c7;
-  filter: drop-shadow(0 0 3px #0284c7);
 }
-.topo .pulse.live-2 {
+.topo .pulse.live-2,
+.topo .pulse-halo.live-2 {
   fill: #0d9488;
-  filter: drop-shadow(0 0 3px #0d9488);
 }
-body[arco-theme="dark"] .topo .pulse.live-1 {
+body[arco-theme="dark"] .topo .pulse.live-1,
+body[arco-theme="dark"] .topo .pulse-halo.live-1 {
   fill: #38bdf8;
-  filter: drop-shadow(0 0 3px #38bdf8);
 }
-body[arco-theme="dark"] .topo .pulse.live-2 {
+body[arco-theme="dark"] .topo .pulse.live-2,
+body[arco-theme="dark"] .topo .pulse-halo.live-2 {
   fill: #2dd4bf;
-  filter: drop-shadow(0 0 3px #2dd4bf);
 }
 .topo .lane-label {
   font: 600 9px var(--sans);

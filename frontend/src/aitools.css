@@ -565,9 +565,9 @@ body[arco-theme="dark"] .thk-dot {
   box-shadow: var(--ring);
 }
 .tm-tog.think.on {
-  color: #ffffff;
-  border-color: #0b0d12;
-  background: #0b0d12;
+  color: var(--kyndryl-ink);
+  border-color: var(--kyndryl-line);
+  background: var(--kyndryl-soft);
 }
 .tm-tog.think.compact {
   gap: 4px;
@@ -604,9 +604,9 @@ body[arco-theme="dark"] .thk-dot {
   background: var(--run-soft);
 }
 body[arco-theme="dark"] .tm-tog.think.on {
-  color: #0b0d11;
-  border-color: #f3f5f8;
-  background: #f3f5f8;
+  color: var(--kyndryl-ink);
+  border-color: var(--kyndryl-line);
+  background: var(--kyndryl-soft);
 }
 body[arco-theme="dark"] .tm-tog.web.on {
   color: #72cbd6;

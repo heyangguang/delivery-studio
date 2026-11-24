@@ -716,29 +716,33 @@
   margin-bottom: 8px;
 }
 .pg-live {
-  stroke: var(--brand);
-  stroke-width: 1.6;
+  stroke: var(--kyndryl);
+  stroke-width: 1.7;
+  stroke-linecap: round;
 }
 .pg-idle {
-  stroke: var(--line-strong);
-  stroke-width: 1.2;
-  stroke-dasharray: 2 3;
+  stroke: var(--teal);
+  stroke-opacity: 0.68;
+  stroke-width: 1.3;
+  stroke-dasharray: 2.5 2.5;
+  stroke-linecap: round;
 }
 .pg-p {
-  fill: var(--brand);
+  fill: var(--kyndryl);
 }
 .pg-r {
-  fill: var(--surface);
-  stroke: var(--line-strong);
+  fill: var(--teal-soft);
+  stroke: var(--teal);
+  stroke-width: 1.35;
 }
 .pg-elb {
   fill: var(--surface);
-  stroke: var(--brand);
-  stroke-width: 1.6;
+  stroke: var(--cobalt);
+  stroke-width: 1.7;
 }
 .pg-sen {
-  fill: var(--surface);
-  stroke: var(--brand);
+  fill: var(--warn-soft);
+  stroke: var(--warn);
   stroke-width: 1.4;
 }
 .plan-glyph-custom {
@@ -753,12 +757,13 @@
   width: 14px;
   height: 14px;
   border-radius: 4px;
-  border: 1.4px dashed var(--line-strong);
+  border: 1.4px dashed var(--teal-line);
+  background: var(--teal-soft);
 }
 .plan-card-tag {
   font-size: 11px;
   font-weight: 650;
-  color: var(--brand-ink);
+  color: var(--kyndryl-ink);
 }
 .plan-card strong {
   font-size: 15px;
@@ -1915,7 +1920,7 @@
 }
 .wide-plans button:hover:not(:disabled) {
   background: var(--surface);
-  border-color: color-mix(in srgb, var(--app-accent, var(--brand)) 34%, var(--line));
+  border-color: var(--kyndryl-line);
   box-shadow: 0 8px 20px -8px rgba(15, 23, 42, 0.075);
   transform: translateY(-1px);
 }
@@ -1929,14 +1934,14 @@
 .wide-plan-well {
   display: grid;
   place-items: center;
-  width: 38px;
+  width: 40px;
   height: 36px;
   border-radius: 9px;
   background: var(--surface);
   border: 1px solid var(--line);
 }
 .wide-plans .plan-glyph {
-  height: 22px;
+  height: 24px;
   margin: 0;
   justify-self: center;
 }
@@ -1957,8 +1962,8 @@
 .wide-plan-tag {
   padding: 0 6px;
   border-radius: 999px;
-  background: var(--brand-soft);
-  color: var(--brand-ink);
+  background: var(--teal-soft);
+  color: var(--teal-ink);
   font-size: 10.5px;
   font-style: normal;
   font-weight: 600;
@@ -1976,7 +1981,7 @@
   transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1), color 0.2s;
 }
 .wide-plans button:hover:not(:disabled) > svg {
-  color: var(--brand-ink);
+  color: var(--kyndryl-ink);
   transform: translateX(3px);
 }
 .wide-jobs a {

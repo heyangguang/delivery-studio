@@ -3772,8 +3772,8 @@ body[arco-theme="dark"] .wb-icons button.is-brand.on {
   fill: none;
   stroke: rgba(255, 255, 255, 0.7);
   stroke-width: 1.6;
-  stroke-dasharray: 5 5;
-  animation: flow 1.5s linear infinite;
+  stroke-dasharray: 4 4;
+  animation: flow 1.6s linear infinite;
 }
 @media (max-width: 1100px) {
   .cv2 {

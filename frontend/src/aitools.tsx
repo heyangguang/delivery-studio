@@ -70,12 +70,14 @@ function resolveSandboxMode(
 const KEY = "mh-ai-opts";
 const readPref = (): Pref => {
   try {
+    const raw = JSON.parse(localStorage.getItem(KEY) || "{}");
     const p = {
       think: "",
-      web: false,
       skillsOff: [],
       mcpOff: [],
-      ...JSON.parse(localStorage.getItem(KEY) || "{}"),
+      ...raw,
+      // Web search is strictly opt-in per session so internal queries are never sent online by default.
+      web: false,
     };
     if (p.think === true) p.think = "high";
     if (p.think === false) p.think = "";
@@ -102,7 +104,7 @@ export function useAIOptions() {
       const next = { ...cur, ...p };
       if ("sandboxMode" in p) delete next.sandboxAsk;
       try {
-        localStorage.setItem(KEY, JSON.stringify(next));
+        localStorage.setItem(KEY, JSON.stringify({ ...next, web: false }));
       } catch {
         /* a convenience only */
       }

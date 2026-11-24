@@ -17,6 +17,7 @@ body {
   --ink: #0b0d12;
   --ink-2: #343a46;
   --mute: #646c7c;
+  --muted: var(--mute);
   --faint: #9199a8;
 
   --kyndryl: #ff462d;
@@ -89,7 +90,7 @@ body {
   --shadow-lg:
     0 22px 48px -12px rgba(11, 13, 18, 0.15),
     0 6px 16px -4px rgba(11, 13, 18, 0.05);
-  --ring: 0 0 0 3px rgba(11, 13, 18, 0.12);
+  --ring: 0 0 0 3px rgba(229, 62, 40, 0.16);
   --r-sm: 5px;
   --r: 7px;
   --r-md: 9px;
@@ -101,16 +102,16 @@ body {
   --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", "Noto Sans CJK SC", sans-serif;
   --mono: "SF Mono", ui-monospace, "JetBrains Mono", "Cascadia Mono", Menlo, Consolas, "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", "Noto Sans CJK SC", monospace;
 
-  --arcoblue-1: 244, 245, 247;
-  --arcoblue-2: 230, 232, 237;
-  --arcoblue-3: 204, 208, 217;
-  --arcoblue-4: 152, 160, 174;
-  --arcoblue-5: 62, 68, 82;
-  --arcoblue-6: 17, 19, 24;
-  --arcoblue-7: 34, 38, 48;
-  --arcoblue-8: 11, 13, 18;
-  --arcoblue-9: 8, 10, 14;
-  --arcoblue-10: 5, 6, 9;
+  --arcoblue-1: 255, 243, 241;
+  --arcoblue-2: 255, 226, 221;
+  --arcoblue-3: 255, 196, 187;
+  --arcoblue-4: 252, 148, 134;
+  --arcoblue-5: 242, 98, 78;
+  --arcoblue-6: 229, 62, 40;
+  --arcoblue-7: 204, 49, 28;
+  --arcoblue-8: 176, 38, 20;
+  --arcoblue-9: 145, 28, 14;
+  --arcoblue-10: 112, 20, 10;
   --primary-1: var(--arcoblue-1);
   --primary-2: var(--arcoblue-2);
   --primary-3: var(--arcoblue-3);
@@ -130,105 +131,108 @@ body {
 
 :root[arco-theme="dark"],
 body[arco-theme="dark"] {
-  --bg: #0b0d11;
-  --surface: #12151b;
-  --surface-2: #191d25;
-  --surface-3: #222733;
-  --sunken: #080a0d;
-  --rail: #0e1116;
-  --hover: rgba(240, 244, 255, 0.055);
-  --press: rgba(240, 244, 255, 0.095);
-  --line: rgba(240, 244, 255, 0.08);
-  --line-strong: rgba(240, 244, 255, 0.15);
-  --ink: #f3f5f8;
-  --ink-2: #cbd2de;
-  --mute: #8892a4;
-  --faint: #5b6475;
+  /* Restful elevated obsidian-charcoal layers (avoids stark #000 glare & halation in dark mode). */
+  --bg: #11141a;
+  --surface: #171b22;
+  --surface-2: #1e232c;
+  --surface-3: #272d38;
+  --sunken: #0e1116;
+  --rail: #14181f;
+  --hover: rgba(235, 240, 250, 0.06);
+  --press: rgba(235, 240, 250, 0.1);
+  --line: rgba(235, 240, 250, 0.085);
+  --line-strong: rgba(235, 240, 250, 0.155);
+  --ink: #e8ecf2;
+  --ink-2: #bcc5d4;
+  --mute: #8a94a6;
+  --muted: var(--mute);
+  --faint: #646f82;
 
-  --kyndryl: #ff553e;
-  --kyndryl-ink: #ff806e;
-  --kyndryl-soft: rgba(255, 85, 62, 0.15);
-  --kyndryl-line: rgba(255, 85, 62, 0.36);
+  /* Calibrated desaturated luminous accents for comfortable dark-mode contrast without eye strain. */
+  --kyndryl: #ff6b57;
+  --kyndryl-ink: #ff9485;
+  --kyndryl-soft: rgba(255, 107, 87, 0.14);
+  --kyndryl-line: rgba(255, 107, 87, 0.3);
 
-  --teal: #3ab7c4;
-  --teal-ink: #72d5df;
-  --teal-soft: rgba(58, 183, 196, 0.15);
-  --teal-line: rgba(58, 183, 196, 0.36);
+  --teal: #45c4cf;
+  --teal-ink: #7edce4;
+  --teal-soft: rgba(69, 196, 207, 0.14);
+  --teal-line: rgba(69, 196, 207, 0.3);
 
-  --cobalt: #60a5fa;
-  --cobalt-ink: #93c5fd;
-  --cobalt-soft: rgba(96, 165, 250, 0.15);
-  --cobalt-line: rgba(96, 165, 250, 0.36);
+  --cobalt: #6ca8f7;
+  --cobalt-ink: #9bc5fc;
+  --cobalt-soft: rgba(108, 168, 247, 0.14);
+  --cobalt-line: rgba(108, 168, 247, 0.3);
 
-  --brand: #f2f4f8;
-  --on-brand: #0b0d11;
-  --brand-ink: #ffffff;
-  --brand-soft: rgba(242, 244, 248, 0.09);
-  --brand-line: rgba(242, 244, 248, 0.22);
+  --brand: #e8ecf2;
+  --on-brand: #11141a;
+  --brand-ink: #f0f3f8;
+  --brand-soft: rgba(232, 236, 242, 0.09);
+  --brand-line: rgba(232, 236, 242, 0.22);
 
-  --ok: #34d399;
-  --ok-soft: rgba(52, 211, 153, 0.14);
-  --ok-line: rgba(52, 211, 153, 0.34);
+  --ok: #4ade80;
+  --ok-soft: rgba(74, 222, 128, 0.13);
+  --ok-line: rgba(74, 222, 128, 0.28);
 
   --warn: #fbbf24;
-  --warn-soft: rgba(251, 191, 36, 0.14);
-  --warn-line: rgba(251, 191, 36, 0.34);
+  --warn-soft: rgba(251, 191, 36, 0.13);
+  --warn-line: rgba(251, 191, 36, 0.28);
 
   --bad: #f87171;
-  --bad-soft: rgba(248, 113, 113, 0.15);
-  --bad-line: rgba(248, 113, 113, 0.36);
+  --bad-soft: rgba(248, 113, 113, 0.14);
+  --bad-line: rgba(248, 113, 113, 0.3);
 
-  --run: #4db0bc;
-  --run-soft: rgba(77, 176, 188, 0.16);
-  --run-line: rgba(77, 176, 188, 0.36);
+  --run: #45c4cf;
+  --run-soft: rgba(69, 196, 207, 0.14);
+  --run-line: rgba(69, 196, 207, 0.3);
 
   --pending: #94a3b8;
   --pending-soft: rgba(148, 163, 184, 0.14);
   --pending-line: rgba(148, 163, 184, 0.28);
 
-  --idle: #8b95a7;
-  --idle-soft: rgba(139, 149, 167, 0.16);
-  --idle-line: rgba(139, 149, 167, 0.3);
+  --idle: #8a94a6;
+  --idle-soft: rgba(138, 148, 166, 0.15);
+  --idle-line: rgba(138, 148, 166, 0.28);
 
-  --code-bg: #0c0e13;
-  --term-bg: #090b0f;
-  --term-head: #11141b;
-  --term-ink: #edf0f5;
-  --term-mute: #8892a4;
-  --term-line: rgba(240, 244, 255, 0.08);
+  --code-bg: #12161d;
+  --term-bg: #0e1116;
+  --term-head: #151922;
+  --term-ink: #e8ecf2;
+  --term-mute: #8a94a6;
+  --term-line: rgba(235, 240, 250, 0.085);
   --panel: var(--surface);
   --ink-1: var(--ink);
   --ink-3: var(--faint);
-  --glass: rgba(18, 21, 27, 0.88);
-  --glass-strong: rgba(23, 27, 35, 0.96);
+  --glass: rgba(23, 27, 34, 0.88);
+  --glass-strong: rgba(28, 33, 42, 0.96);
   --rim: 0 0 0 0 transparent;
   --rim-strong: 0 0 0 0 transparent;
   --shadow-sm:
-    0 1px 2px rgba(0, 0, 0, 0.44),
-    0 0 0 1px rgba(240, 244, 255, 0.05);
+    0 1px 2px rgba(0, 0, 0, 0.34),
+    0 0 0 1px rgba(235, 240, 250, 0.05);
   --shadow-md:
-    0 8px 24px rgba(0, 0, 0, 0.52),
-    0 0 0 1px rgba(240, 244, 255, 0.06);
+    0 8px 24px rgba(0, 0, 0, 0.42),
+    0 0 0 1px rgba(235, 240, 250, 0.06);
   --shadow-lg:
-    0 22px 52px rgba(0, 0, 0, 0.68),
-    0 0 0 1px rgba(240, 244, 255, 0.08);
-  --ring: 0 0 0 3px rgba(242, 244, 248, 0.18);
+    0 20px 44px rgba(0, 0, 0, 0.56),
+    0 0 0 1px rgba(235, 240, 250, 0.08);
+  --ring: 0 0 0 3px rgba(255, 107, 87, 0.24);
 
-  --arcoblue-1: 24, 28, 36;
-  --arcoblue-2: 34, 40, 52;
-  --arcoblue-3: 52, 60, 76;
-  --arcoblue-4: 96, 108, 128;
-  --arcoblue-5: 186, 194, 208;
-  --arcoblue-6: 242, 244, 248;
-  --arcoblue-7: 255, 255, 255;
-  --arcoblue-8: 224, 229, 238;
-  --arcoblue-9: 196, 204, 216;
-  --arcoblue-10: 164, 174, 190;
+  --arcoblue-1: 42, 28, 28;
+  --arcoblue-2: 64, 34, 32;
+  --arcoblue-3: 112, 48, 42;
+  --arcoblue-4: 176, 66, 54;
+  --arcoblue-5: 222, 82, 62;
+  --arcoblue-6: 222, 76, 56;
+  --arcoblue-7: 238, 96, 76;
+  --arcoblue-8: 255, 126, 108;
+  --arcoblue-9: 255, 160, 146;
+  --arcoblue-10: 255, 200, 192;
   --color-bg-1: var(--surface);
   --color-bg-2: var(--surface);
   --color-bg-3: var(--surface-2);
   --color-bg-4: var(--surface-3);
-  --color-bg-popup: #171b23;
+  --color-bg-popup: #1c212a;
   color-scheme: dark;
 }
 
@@ -472,16 +476,15 @@ kbd {
 .arco-btn:focus-visible {
   box-shadow: var(--ring);
 }
-/* Swiss Leica Matte Obsidian Primary CTA: razor-crisp obsidian on porcelain light,
-   pure anodized platinum on obsidian dark; operational danger/warning/success remain strictly semantic. */
+/* Kyndryl Signature Warm Red Primary CTA: unmistakable Kyndryl identity on Porcelain Light,
+   and restful coral-vermilion on Obsidian Dark (replaces glaring white brick in dark mode). */
 .arco-btn-primary:not(.arco-btn-disabled):not(.arco-btn-status-danger):not(.arco-btn-status-warning):not(.arco-btn-status-success) {
-  background-color: #0b0d12;
-  border-color: #0b0d12;
+  background-color: #e53e28;
+  border-color: #e53e28;
   color: #ffffff;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.16),
-    0 1px 2px rgba(11, 13, 18, 0.24),
-    0 0 0 0.5px rgba(11, 13, 18, 0.2);
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    0 1px 2px rgba(180, 38, 18, 0.24);
   transition:
     transform 0.18s var(--spring),
     box-shadow 0.18s ease,
@@ -489,53 +492,54 @@ kbd {
     border-color 0.16s ease;
 }
 .arco-btn-primary:not(.arco-btn-disabled):not(.arco-btn-status-danger):not(.arco-btn-status-warning):not(.arco-btn-status-success):hover {
-  background-color: #1f2430;
-  border-color: #1f2430;
+  background-color: #cf321d;
+  border-color: #cf321d;
   color: #ffffff;
   transform: translate3d(0, -0.5px, 0);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.2),
-    0 6px 16px -4px rgba(11, 13, 18, 0.3),
-    0 1px 2px rgba(11, 13, 18, 0.18);
+    inset 0 1px 0 rgba(255, 255, 255, 0.24),
+    0 6px 16px -4px rgba(229, 62, 40, 0.34),
+    0 1px 2px rgba(180, 38, 18, 0.2);
 }
 .arco-btn-primary:not(.arco-btn-disabled):not(.arco-btn-status-danger):not(.arco-btn-status-warning):not(.arco-btn-status-success):active {
-  background-color: #050608;
-  border-color: #050608;
+  background-color: #b82917;
+  border-color: #b82917;
   transform: scale(0.985);
 }
 body[arco-theme="dark"] .arco-btn-primary:not(.arco-btn-disabled):not(.arco-btn-status-danger):not(.arco-btn-status-warning):not(.arco-btn-status-success) {
-  background-color: #f3f5f8;
-  border-color: #f3f5f8;
-  color: #0b0d11;
+  background-color: #dc4b37;
+  border-color: #dc4b37;
+  color: #ffffff;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.72),
-    0 1px 3px rgba(0, 0, 0, 0.4);
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 1px 3px rgba(0, 0, 0, 0.36);
 }
 body[arco-theme="dark"] .arco-btn-primary:not(.arco-btn-disabled):not(.arco-btn-status-danger):not(.arco-btn-status-warning):not(.arco-btn-status-success):hover {
-  background-color: #ffffff;
-  border-color: #ffffff;
-  color: #0b0d11;
+  background-color: #eb5b47;
+  border-color: #eb5b47;
+  color: #ffffff;
   box-shadow:
-    0 6px 16px -3px rgba(0, 0, 0, 0.48);
+    0 6px 16px -3px rgba(220, 75, 55, 0.38);
 }
 body[arco-theme="dark"] .arco-btn-primary:not(.arco-btn-disabled):not(.arco-btn-status-danger):not(.arco-btn-status-warning):not(.arco-btn-status-success):active {
-  background-color: #dfe4ec;
-  border-color: #dfe4ec;
+  background-color: #c93e2b;
+  border-color: #c93e2b;
 }
-/* Dark-mode monochrome Arco checkmarks & active pagination contrast on light platinum fill */
+/* Crisp white checkmarks & active pagination contrast on Kyndryl Warm Red accents in dark mode */
 body[arco-theme="dark"] .arco-checkbox-checked .arco-checkbox-icon-check,
 body[arco-theme="dark"] .arco-checkbox-indeterminate .arco-checkbox-icon-check {
-  color: #0b0d11;
+  color: #ffffff;
 }
 body[arco-theme="dark"] .arco-checkbox-indeterminate .arco-checkbox-mask::after {
-  background-color: #0b0d11;
+  background-color: #ffffff;
 }
 body[arco-theme="dark"] .arco-radio-checked .arco-radio-mask::after {
-  background-color: #0b0d11;
+  background-color: #ffffff;
 }
 body[arco-theme="dark"] .arco-pagination-item-active {
-  background-color: rgba(242, 244, 248, 0.12);
-  color: #ffffff;
+  background-color: var(--kyndryl-soft);
+  color: var(--kyndryl-ink);
+  border-color: var(--kyndryl-line);
 }
 .arco-btn-primary.arco-btn-disabled:not(.arco-btn-status-danger):not(.arco-btn-status-warning):not(.arco-btn-status-success),
 .arco-btn-primary.arco-btn-disabled:not(.arco-btn-status-danger):not(.arco-btn-status-warning):not(.arco-btn-status-success):hover {

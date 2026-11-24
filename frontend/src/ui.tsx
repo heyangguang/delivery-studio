@@ -1450,30 +1450,44 @@ export const InstanceGraph = React.memo(function InstanceGraph({
           {!calm &&
             wires
               .filter((w) => w.kind !== "mesh")
-              .map((w, i) => (
-                <circle
-                  key={`pulse-${w.key}`}
-                  r={2.8}
-                  opacity={0}
-                  className={`pulse ${w.kind === "front" ? `live${w.tone ? ` live-${w.tone}` : ""}` : w.sync ? "sync" : ""}`}
-                >
-                  {/* Delayed particles must stay hidden before motion starts at their path. */}
-                  <animate
-                    attributeName="opacity"
-                    values="0;1;1;0"
-                    keyTimes="0;0.05;0.95;1"
-                    dur={`${1.9 + (i % 3) * 0.25}s`}
-                    begin={`${(i % 4) * 0.35}s`}
-                    repeatCount="indefinite"
-                  />
-                  <animateMotion
-                    dur={`${1.9 + (i % 3) * 0.25}s`}
-                    begin={`${(i % 4) * 0.35}s`}
-                    repeatCount="indefinite"
-                    path={w.d}
-                  />
-                </circle>
-              ))}
+              .map((w, i) => {
+                /* Keep particle travel speed uniform across short and long wires (~88px/s) without CPU blur filters. */
+                const pts = (w.d.match(/-?\d+(?:\.\d+)?/g) || []).map(Number);
+                let len = 0;
+                for (let p = 2; p + 1 < pts.length; p += 2) {
+                  len += Math.hypot(pts[p] - pts[p - 2], pts[p + 1] - pts[p - 1]);
+                }
+                const dur = `${Math.min(4.6, Math.max(2.0, len / 88)).toFixed(2)}s`;
+                const delay = `${((i % 4) * 0.45).toFixed(2)}s`;
+                const tone =
+                  w.kind === "front"
+                    ? `live${w.tone ? ` live-${w.tone}` : ""}`
+                    : w.sync
+                      ? "sync"
+                      : "";
+                return (
+                  <g key={`pulse-${w.key}`} opacity={0}>
+                    <circle r={5.2} className={`pulse-halo ${tone}`} />
+                    <circle r={2.5} className={`pulse ${tone}`} />
+                    {/* Delayed particles stay hidden until motion starts at their path. */}
+                    <animate
+                      attributeName="opacity"
+                      values="0;1;1;0"
+                      keyTimes="0;0.06;0.94;1"
+                      dur={dur}
+                      begin={delay}
+                      repeatCount="indefinite"
+                    />
+                    <animateMotion
+                      dur={dur}
+                      begin={delay}
+                      calcMode="paced"
+                      repeatCount="indefinite"
+                      path={w.d}
+                    />
+                  </g>
+                );
+              })}
         </g>
         {/* Entrypoint pills render above wire anchors so labels & borders stay crisp */}
         {fronts.map((f, k) => {

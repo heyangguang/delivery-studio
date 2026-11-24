@@ -827,7 +827,7 @@ function AIDiagnoseButton({
       shape="round"
       size={size}
       className="ai-pill"
-      icon={<Spark size={14} rainbow />}
+      icon={<Spark size={size === "small" ? 13 : 14} rainbow />}
       onClick={() => {
         if (step && diag) {
           const rawTail = logText
@@ -2520,7 +2520,7 @@ function MonitorWorkspace({
                   ? bi("AI 一键诊断", "AI Diagnose")
                   : bi("AI 助手", "AI Assistant")
               }
-              size="default"
+              size="small"
             />
 
             {can("delivery.create") &&

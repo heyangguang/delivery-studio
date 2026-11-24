@@ -270,6 +270,17 @@
   gap: 8px;
   flex-wrap: wrap;
 }
+/* Unify every header action control (AI pill, secondary, outline, primary, live tag)
+   onto one exact 30px / 7px / 12.5px geometry and baseline. */
+.mon-header .mon-header-right .arco-btn.arco-btn-size-small:not(.arco-btn-circle):not(.arco-btn-round),
+.mon-header .mon-header-right .arco-btn.ai-pill {
+  height: 30px;
+  padding: 0 12px;
+  font-size: 12.5px;
+  line-height: 1;
+  border-radius: var(--r);
+  gap: 6px;
+}
 .mon-live-sync-tag {
   display: inline-flex;
   align-items: center;

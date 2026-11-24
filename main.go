@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.276-dev"
+	version            = "1.0.277-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,20 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.277-dev",
+		Date:    "2026-11-24",
+		Title:   "统一执行监控页头按钮高度与描边按钮视觉体量",
+		TitleEn: "Unify execution monitor header button sizing and outline button elevation",
+		Highlights: []string{
+			"修复执行监控页头右侧「AI 助手」按钮混用默认大尺寸（34px）导致与相邻「刷新」「交付手册」（28px）高低错落的问题，统一所有页头操作按钮与实时流状态徽标为一致的 30px 高度、7px 圆角与 12.5px 字号",
+			"统一 Arco outline 描边按钮的表面底色、浅品牌描边与轻微阴影体量，消除「刷新」与「交付手册」并排时的对比度与视觉大小落差",
+		},
+		HighlightsEn: []string{
+			"Fixed mismatched default (34px) sizing on the Execution Monitor header AI Assistant button versus adjacent small (28px) controls; unified all header action controls and live-streaming badge to an exact 30px height, 7px radius, and 12.5px label scale",
+			"Harmonized Arco outline buttons with secondary and AI pill elevation, surface fill, and soft brand border so adjacent buttons align cleanly in visual weight",
+		},
+	},
 	{
 		Version: "1.0.276-dev",
 		Date:    "2026-11-24",

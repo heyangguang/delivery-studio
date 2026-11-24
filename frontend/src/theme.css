@@ -499,6 +499,21 @@ body[arco-theme="dark"] .arco-btn-secondary.arco-btn-status-danger:not(.arco-btn
   border: 1px solid var(--line);
   color: color-mix(in srgb, var(--bad) 45%, var(--faint));
 }
+/* Harmonize outline buttons with secondary & AI pills: same surface grounding and subtle elevation,
+   so sibling buttons never look mismatched in height or visual weight. */
+.arco-btn-outline:not(.arco-btn-disabled):not(.arco-btn-status-danger):not(.arco-btn-status-warning):not(.arco-btn-status-success):not(.ai-pill):not(.fw-chatbtn),
+body[arco-theme="dark"] .arco-btn-outline:not(.arco-btn-disabled):not(.arco-btn-status-danger):not(.arco-btn-status-warning):not(.arco-btn-status-success):not(.ai-pill):not(.fw-chatbtn) {
+  background: var(--surface);
+  border-color: color-mix(in srgb, var(--brand) 42%, transparent);
+  color: var(--brand-ink);
+  box-shadow: var(--shadow-sm);
+}
+.arco-btn-outline:not(.arco-btn-disabled):not(.arco-btn-status-danger):not(.arco-btn-status-warning):not(.arco-btn-status-success):not(.ai-pill):not(.fw-chatbtn):hover,
+body[arco-theme="dark"] .arco-btn-outline:not(.arco-btn-disabled):not(.arco-btn-status-danger):not(.arco-btn-status-warning):not(.arco-btn-status-success):not(.ai-pill):not(.fw-chatbtn):hover {
+  background: var(--brand-soft);
+  border-color: color-mix(in srgb, var(--brand) 64%, transparent);
+  color: var(--brand-ink);
+}
 
 .arco-input-inner-wrapper,
 .arco-select-view,

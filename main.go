@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.290-dev"
+	version            = "1.0.291-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,20 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.291-dev",
+		Date:    "2026-11-24",
+		Title:   "移除页面转场动画及其外观菜单开关",
+		TitleEn: "Remove Page View Transitions & Appearance Menu Toggle",
+		Highlights: []string{
+			"移除右上角外观下拉菜单中的「页面转场动画」开关项，菜单仅保留浅色 / 深色 / 跟随系统三项",
+			"移除路由层 document.startViewTransition 页面切换动画与对应 CSS 规则，全站页面切换即点即开、彻底消除残影",
+		},
+		HighlightsEn: []string{
+			"Removed the Page Transitions toggle from the topbar Appearance menu, keeping Light / Dark / System only",
+			"Removed router-level View Transition snapshots and CSS keyframes so page navigation switches immediately without ghosting",
+		},
+	},
 	{
 		Version: "1.0.290-dev",
 		Date:    "2026-11-24",

@@ -1,5 +1,4 @@
 import { useSyncExternalStore } from "react";
-import { flushSync } from "react-dom";
 import { NEW_DELIVERY_INTENT } from "./formdraft";
 
 export type Route =
@@ -275,29 +274,6 @@ function kindOf(a: Route, b: Route): Kind {
   return db > da ? "forward" : db < da ? "back" : "swap";
 }
 
-const doc = document as Document & {
-  startViewTransition?: (cb: () => void) => {
-    finished: Promise<unknown>;
-    skipTransition: () => void;
-  };
-};
-const reduced = () =>
-  window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-/** Page transitions can be switched off per browser, for slow machines or personal taste. */
-export const supportsTransitions = () => !!doc.startViewTransition;
-export const transitionsOn = () => localStorage.getItem("mh-vt") !== "off";
-export const transitions = () =>
-  supportsTransitions() && !reduced() && transitionsOn();
-const mark = () =>
-  transitions()
-    ? (document.documentElement.dataset.vtOk = "")
-    : delete document.documentElement.dataset.vtOk;
-mark();
-export function setTransitions(on: boolean) {
-  localStorage.setItem("mh-vt", on ? "on" : "off");
-  mark();
-}
-
 const scrolls = new Map<string, number>();
 /** Pages open at the top; going back returns to where the page was left. */
 const settle = (kind: Kind | "none", to: Route) => {
@@ -306,7 +282,6 @@ const settle = (kind: Kind | "none", to: Route) => {
 };
 
 let skipNext = false;
-let active: { skipTransition: () => void } | null = null;
 
 window.addEventListener("hashchange", () => {
   const next = parse(location.hash);
@@ -315,31 +290,8 @@ window.addEventListener("hashchange", () => {
   skipNext = false;
   const kind = kindOf(current, next);
   scrolls.set(href(current), window.scrollY);
-  // Picking another item in a list swaps only the detail pane, which already fades in on its own; a snapshot
-  // transition there costs more than it adds and would stall every keystroke while arrowing through the list.
-  if (instant || kind === "pane" || !transitions()) {
-    apply(next);
-    if (!instant) settle(kind, next);
-    return;
-  }
-  active?.skipTransition();
-  const root = document.documentElement;
-  root.dataset.vt = kind;
-  // The DOM is replaced synchronously inside the callback; the browser then animates snapshots on the compositor,
-  // so a slow React commit can no longer drop frames out of the animation.
-  const t = doc.startViewTransition!(() => {
-    flushSync(() => apply(next));
-    settle(kind, next);
-  });
-  active = t;
-  void t.finished
-    .catch(() => {})
-    .finally(() => {
-      if (active === t) {
-        active = null;
-        delete root.dataset.vt;
-      }
-    });
+  apply(next);
+  if (!instant) settle(kind, next);
 });
 
 const subscribe = (l: () => void) => {

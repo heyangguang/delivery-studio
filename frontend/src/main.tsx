@@ -103,9 +103,6 @@ import { Palette } from "./palette";
 import {
   go,
   href,
-  setTransitions,
-  supportsTransitions,
-  transitionsOn,
   useRoute,
 } from "./router";
 import type { Route } from "./router";
@@ -982,7 +979,6 @@ function App() {
   const [jobsLoad, setJobsLoad] = useState<LoadState>("loading");
   const [palette, setPalette] = useState(false);
   const [changelogOpen, setChangelogOpen] = useState(false);
-  const [vtOn, setVtOn] = useState(transitionsOn);
   const verWatch = useVersionWatch();
   const route = useRoute();
   const theme = useTheme();
@@ -1715,10 +1711,7 @@ function App() {
             position="br"
             droplist={
               <Menu
-                onClickMenuItem={(k) => {
-                  if (k === "vt") (setTransitions(!vtOn), setVtOn(!vtOn));
-                  else theme.choose(k as ThemePref);
-                }}
+                onClickMenuItem={(k) => theme.choose(k as ThemePref)}
                 selectedKeys={[theme.pref]}
               >
                 {(
@@ -1736,17 +1729,6 @@ function App() {
                     </span>
                   </Menu.Item>
                 ))}
-                {supportsTransitions() && (
-                  <>
-                    <div className="menu-sep" role="separator" />
-                    <Menu.Item key="vt">
-                      <span className="menu-row">
-                        <span>{bi("页面转场动画", "Page Transitions")}</span>
-                        {vtOn && <IconCheck className="menu-check" />}
-                      </span>
-                    </Menu.Item>
-                  </>
-                )}
               </Menu>
             }
           >

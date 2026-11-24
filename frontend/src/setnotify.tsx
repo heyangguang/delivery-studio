@@ -641,7 +641,7 @@ function Delivered({
             text: link ? `${text}\n${link}` : text,
             link,
             at: new Date().toISOString(),
-            source: "middleware-hub",
+            source: "kyndryl-delivery-studio",
           },
           null,
           2,
@@ -889,99 +889,120 @@ export function TemplatesView() {
         .includes(t),
   );
   const groups = [...new Set(shown.map((e) => e.group))];
+  const totalEvents = d?.events.length ?? 0;
   const link = (vars as Record<string, string>).link || "";
   return (
-    <article className="tp2 enter">
+    <article className="sx-page tp2-page enter">
       {!d ? (
         <div className="st-skel" aria-label={bi("载入中", "Loading")} />
       ) : (
         <>
-          <aside className="tp2-list" aria-label={bi("消息类型", "Event types")}>
-            <header>
+          <header className="sx-page-h tp2-page-h">
+            <div>
               <h1>{bi("通知模板", "Notification Templates")}</h1>
               <p>
                 {bi(
-                  "每类消息的标题和正文都可以改，对所有渠道生效。",
-                  "Customize the title and body for each event type across all channels.",
+                  "自定义各类通知消息的标题与正文，保存后统一对所有推送渠道生效。",
+                  "Customize title and body templates for each event across all delivery channels.",
                 )}
               </p>
-            </header>
-            <Input
-              prefix={<IconSearch />}
-              allowClear
-              placeholder={bi("搜索消息类型", "Search event types")}
-              value={q}
-              onChange={setQ}
-              aria-label={bi("搜索消息类型", "Search event types")}
-            />
-            <div className="tp2-items" role="listbox">
-              {groups.map((g) => (
-                <div key={g}>
-                  <div className="tp-g">{evGroup(g)}</div>
-                  {shown
-                    .filter((e) => e.group === g)
-                    .map((e) => (
+            </div>
+            {ev && (
+              <div className="tp2-head-acts">
+                <Button
+                  size="small"
+                  icon={<IconRefresh />}
+                  disabled={!custom || busy}
+                  onClick={() => save(true)}
+                >
+                  {bi("恢复默认", "Reset Default")}
+                </Button>
+                <Button
+                  size="small"
+                  type="primary"
+                  loading={busy}
+                  disabled={!dirty || unknown.length > 0}
+                  onClick={() => save()}
+                >
+                  {bi("保存模板", "Save Template")}
+                </Button>
+              </div>
+            )}
+          </header>
+
+          <section className="tp2-picker-bar" aria-label={bi("消息类型", "Event types")}>
+            <div className="tp2-picker-tabs" role="listbox">
+              {groups.map((g) =>
+                shown
+                  .filter((e) => e.group === g)
+                  .map((e) => {
+                    const active = e.id === sel;
+                    return (
                       <button
                         key={e.id}
                         type="button"
                         role="option"
-                        aria-selected={e.id === sel}
-                        className={e.id === sel ? "on" : ""}
+                        aria-selected={active}
+                        className={`tp2-pick-btn ${active ? "on" : ""}`}
                         onClick={() => setSel(e.id)}
+                        title={evDesc(e)}
                       >
-                        <span>
-                          <b>{evTitle(e)}</b>
-                          <small>{evDesc(e)}</small>
-                        </span>
+                        <span className="tp2-pick-grp">{evGroup(g)}</span>
+                        <b>{evTitle(e)}</b>
                         {isDirty(e.id) ? (
                           <i
                             className="tp2-dot"
-                            title={bi("有没保存的修改", "Unsaved changes")}
+                            title={bi("有未保存修改", "Unsaved changes")}
                           />
                         ) : d.custom[e.id] ? (
-                          <em>{bi("已自定义", "Custom")}</em>
+                          <em className="tp2-pick-tag">{bi("已自定义", "Custom")}</em>
                         ) : null}
                       </button>
-                    ))}
-                </div>
-              ))}
+                    );
+                  }),
+              )}
               {shown.length === 0 && (
-                <p className="faint small tp2-none">
+                <span className="faint small tp2-none">
                   {bi("没有匹配的消息类型", "No matching event types")}
-                </p>
+                </span>
               )}
             </div>
-          </aside>
+            {totalEvents > 4 && (
+              <div className="tp2-picker-search">
+                <Input
+                  size="small"
+                  prefix={<IconSearch />}
+                  allowClear
+                  placeholder={bi("筛选消息类型", "Filter events")}
+                  value={q}
+                  onChange={setQ}
+                  aria-label={bi("搜索消息类型", "Search event types")}
+                />
+              </div>
+            )}
+          </section>
+
           {ev && (
-            <>
-              <section className="tp2-edit" key={sel}>
-                <header className="tp2-h">
+            <div className="tp2-grid" key={sel}>
+              <section className="tp2-card tp2-edit">
+                <header className="tp2-card-h">
                   <div>
                     <h2>{evTitle(ev)}</h2>
                     <p>{evDesc(ev)}</p>
                   </div>
-                  <span className="row-gap">
-                    <Button
-                      size="small"
-                      icon={<IconRefresh />}
-                      disabled={!custom || busy}
-                      onClick={() => save(true)}
-                    >
-                      {bi("恢复默认", "Reset Default")}
-                    </Button>
-                    <Button
-                      size="small"
-                      type="primary"
-                      loading={busy}
-                      disabled={!dirty || unknown.length > 0}
-                      onClick={() => save()}
-                    >
-                      {bi("保存", "Save")}
-                    </Button>
+                  <span
+                    className={`tp2-state-pill ${dirty ? "is-dirty" : custom ? "is-custom" : ""}`}
+                  >
+                    {dirty
+                      ? bi("有未保存修改", "Unsaved")
+                      : custom
+                        ? bi("已自定义", "Custom")
+                        : bi("系统默认", "Default")}
                   </span>
                 </header>
+
                 <div className="tp2-field">
-                  <label htmlFor="tp-title">{bi("标题", "Title")}</label>
+                  <label htmlFor="tp-title">{bi("消息标题", "Title")}</label>
                   <div className="tp2-code one">
                     <pre aria-hidden>
                       <Marked text={draft.title} known={known} />
@@ -1000,119 +1021,128 @@ export function TemplatesView() {
                     />
                   </div>
                 </div>
+
                 <div className="tp2-field">
                   <label htmlFor="tp-body">
-                    {bi("正文", "Body")}
+                    {bi("消息正文", "Body")}
                     <small>
                       {bi(
-                        "每行一条消息内容；空行会被去掉",
+                        "每行一条内容，空行自动忽略",
                         "One item per line; blank lines are trimmed",
                       )}
                     </small>
                   </label>
-                  <div
-                    className="tp2-tools"
-                    role="toolbar"
-                    aria-label={bi("格式", "Formatting")}
-                  >
-                    <button
-                      type="button"
-                      onClick={() =>
-                        wrap("**", "**", bi("加粗的文字", "bold text"))
-                      }
-                      title={bi("加粗", "Bold")}
+                  <div className="tp2-editor-box">
+                    <div
+                      className="tp2-toolbar"
+                      role="toolbar"
+                      aria-label={bi("格式", "Formatting")}
                     >
-                      <b>B</b>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => wrap("`", "`", bi("代码", "code"))}
-                      title={bi("代码", "Code")}
-                    >
-                      <code>&lt;/&gt;</code>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        wrap("[", "](https://)", bi("链接文字", "link text"))
-                      }
-                      title={bi("链接", "Link")}
-                    >
-                      {bi("链接", "Link")}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => lead("> ")}
-                      title={bi("引用", "Quote")}
-                    >
-                      {bi("引用", "Quote")}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => lead("- ")}
-                      title={bi("列表", "List")}
-                    >
-                      {bi("列表", "List")}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => lead("## ")}
-                      title={bi("标题", "Heading")}
-                    >
-                      {bi("标题", "Heading")}
-                    </button>
-                    <small>
-                      {bi(
-                        "企业微信和钉钉按 Markdown 显示这些格式；飞书和 Webhook 里会原样显示符号。",
-                        "WeCom and DingTalk render Markdown; Feishu and Webhook deliver raw text.",
-                      )}
-                    </small>
-                  </div>
-                  <div className="tp2-code">
-                    <pre aria-hidden>
-                      <Marked text={draft.body} known={known} />
-                    </pre>
-                    <textarea
-                      id="tp-body"
-                      ref={body}
-                      value={draft.body}
-                      onChange={(e) =>
-                        setDraft({ ...draft, body: e.target.value })
-                      }
-                      onFocus={() => setFocus("body")}
-                      maxLength={2000}
-                      spellCheck={false}
-                      aria-label={bi("正文", "Body")}
-                    />
-                  </div>
-                  <div className="tp2-meta">
-                    <span>
-                      {draft.body.split("\n").filter((l) => l.trim()).length}{" "}
-                      {bi("行", "lines")} · {draft.body.length} / 2000{" "}
-                      {bi("字", "chars")}
-                    </span>
-                    {unknown.length > 0 && (
-                      <span className="bad">
+                      <div className="tp2-tool-btns">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            wrap("**", "**", bi("加粗的文字", "bold text"))
+                          }
+                          title={bi("加粗", "Bold")}
+                        >
+                          <b>B</b>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => wrap("`", "`", bi("代码", "code"))}
+                          title={bi("代码", "Code")}
+                        >
+                          <code>&lt;/&gt;</code>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            wrap("[", "](https://)", bi("链接文字", "link text"))
+                          }
+                          title={bi("链接", "Link")}
+                        >
+                          {bi("链接", "Link")}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => lead("> ")}
+                          title={bi("引用", "Quote")}
+                        >
+                          {bi("引用", "Quote")}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => lead("- ")}
+                          title={bi("列表", "List")}
+                        >
+                          {bi("列表", "List")}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => lead("## ")}
+                          title={bi("标题", "Heading")}
+                        >
+                          {bi("标题", "Heading")}
+                        </button>
+                      </div>
+                      <span className="tp2-tool-note">
                         {bi(
-                          `没有这些变量：${unknown.map((u) => `{{${u}}}`).join("、")}，需要改掉才能保存`,
-                          `Unknown variables: ${unknown.map((u) => `{{${u}}}`).join(", ")}. Remove them before saving.`,
+                          "企微 / 钉钉渲染 Markdown，飞书 / Webhook 发原文",
+                          "WeCom / DingTalk render Markdown; Feishu / Webhook send plain text",
                         )}
                       </span>
-                    )}
+                    </div>
+                    <div className="tp2-code in-box">
+                      <pre aria-hidden>
+                        <Marked text={draft.body} known={known} />
+                      </pre>
+                      <textarea
+                        id="tp-body"
+                        ref={body}
+                        value={draft.body}
+                        onChange={(e) =>
+                          setDraft({ ...draft, body: e.target.value })
+                        }
+                        onFocus={() => setFocus("body")}
+                        maxLength={2000}
+                        spellCheck={false}
+                        aria-label={bi("正文", "Body")}
+                      />
+                    </div>
+                    <div className="tp2-editor-foot">
+                      <span className="num">
+                        {draft.body.split("\n").filter((l) => l.trim()).length}{" "}
+                        {bi("行", "lines")} · {draft.body.length} / 2000{" "}
+                        {bi("字", "chars")}
+                      </span>
+                      {unknown.length > 0 ? (
+                        <span className="bad">
+                          {bi(
+                            `未知变量：${unknown.map((u) => `{{${u}}}`).join("、")}，请移除后保存`,
+                            `Unknown variables: ${unknown.map((u) => `{{${u}}}`).join(", ")}. Remove before saving.`,
+                          )}
+                        </span>
+                      ) : (
+                        <span className="faint">
+                          {bi("Ctrl+S 快速保存", "Ctrl+S to save")}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
+
                 <div className="tp2-vars">
-                  <span>
-                    {bi(
-                      "变量：点一下，插入到光标处",
-                      "Variables: click to insert at cursor",
-                    )}
-                  </span>
-                  <div>
+                  <div className="tp2-vars-h">
+                    <span>{bi("可用变量", "Available Variables")}</span>
+                    <small>{bi("点击插入到当前光标处", "Click to insert at cursor")}</small>
+                  </div>
+                  <div className="tp2-var-chips">
                     {ev.vars.map((v) => (
                       <button
                         key={v.key}
                         type="button"
+                        className="tp2-var-chip"
                         onClick={() => insert(v.key)}
                         title={bi(
                           `${varDesc(v)}\n示例：${vars[v.key as keyof typeof vars] ?? ""}`,
@@ -1126,21 +1156,29 @@ export function TemplatesView() {
                   </div>
                 </div>
               </section>
-              <aside className="tp2-prev" aria-label={bi("预览", "Preview")}>
+
+              <aside
+                className="tp2-card tp2-prev"
+                aria-label={bi("预览", "Preview")}
+              >
                 <div className="tp2-prev-h">
-                  <b>{bi("预览", "Preview")}</b>
-                  <small>{bi("用示例数据", "With sample data")}</small>
+                  <b>{bi("实时预览", "Live Preview")}</b>
+                  <span className="tp2-sample-tag">
+                    {bi("示例数据", "Sample Data")}
+                  </span>
                 </div>
-                <Segmented
-                  size="sm"
-                  label={bi("渠道类型", "Channel type")}
-                  value={kind}
-                  onChange={setKind}
-                  options={Object.entries(BOT).map(([k, v]) => ({
-                    value: k,
-                    label: v.name,
-                  }))}
-                />
+                <div className="tp2-seg-wrap">
+                  <Segmented
+                    size="sm"
+                    label={bi("渠道类型", "Channel type")}
+                    value={kind}
+                    onChange={setKind}
+                    options={Object.entries(BOT).map(([k, v]) => ({
+                      value: k,
+                      label: v.name,
+                    }))}
+                  />
+                </div>
                 <div className="tp2-stage">
                   <Delivered
                     kind={kind}
@@ -1150,43 +1188,48 @@ export function TemplatesView() {
                   />
                 </div>
                 <p className="tp2-how">{BOT[kind].hint}</p>
-                <div className="tp2-send">
-                  <Select
-                    placeholder={bi(
-                      "选一个渠道，发一条示例",
-                      "Pick a channel to send a sample",
-                    )}
-                    value={target || undefined}
-                    onChange={setTarget}
-                    options={channels.map((c) => ({
-                      value: c.id,
-                      label: c.name,
-                    }))}
-                    triggerProps={{
-                      autoAlignPopupWidth: false,
-                      autoFitPosition: true,
-                      position: "tl",
-                    }}
-                    aria-label={bi("示例发到哪个渠道", "Target channel for sample")}
-                  />
-                  <Button
-                    icon={<IconSend />}
-                    onClick={sendTest}
-                    disabled={!target}
-                  >
-                    {bi("发送示例", "Send Sample")}
-                  </Button>
+                <div className="tp2-send-box">
+                  <div className="tp2-send-label">
+                    {bi("发送真实示例验证", "Send Sample Test")}
+                  </div>
+                  <div className="tp2-send">
+                    <Select
+                      placeholder={bi(
+                        "选择通知渠道",
+                        "Pick a channel",
+                      )}
+                      value={target || undefined}
+                      onChange={setTarget}
+                      options={channels.map((c) => ({
+                        value: c.id,
+                        label: c.name,
+                      }))}
+                      triggerProps={{
+                        autoAlignPopupWidth: false,
+                        autoFitPosition: true,
+                        position: "tl",
+                      }}
+                      aria-label={bi("示例发到哪个渠道", "Target channel for sample")}
+                    />
+                    <Button
+                      icon={<IconSend />}
+                      onClick={sendTest}
+                      disabled={!target}
+                    >
+                      {bi("发送示例", "Send")}
+                    </Button>
+                  </div>
+                  {dirty && (
+                    <small className="faint">
+                      {bi(
+                        "发出去的是已保存的模板，请先保存当前修改。",
+                        "Samples use the last saved template; save your changes first.",
+                      )}
+                    </small>
+                  )}
                 </div>
-                {dirty && (
-                  <small className="faint">
-                    {bi(
-                      "发出去的是已保存的模板，先保存再发。",
-                      "Samples use the last saved template; save your changes first.",
-                    )}
-                  </small>
-                )}
               </aside>
-            </>
+            </div>
           )}
         </>
       )}

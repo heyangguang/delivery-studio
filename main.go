@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.299-dev"
+	version            = "1.0.300-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,20 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.300-dev",
+		Date:    "2026-11-24",
+		Title:   "重构平台设置「通知模板」为双栏高定编辑器与悬浮实时预览工作台",
+		TitleEn: "Redesign Notification Templates into a unified two-column Swiss Leica studio layout",
+		Highlights: []string{
+			"移除通知模板页挤压的四栏布局、248px 空旷二级侧栏与通高灰墙，重构为与全站设置页左轴对齐的 .sx-page 瑞士徕卡双栏工作台，顶部清晰呈现标题与保存/恢复默认操作",
+			"引入带 2.5px 徕卡红竖线的横向消息类型选择条，将 Markdown 格式工具栏与字数状态条一体嵌入正文编辑器框体，变量插入升级为紧凑行内胶囊，并将实时预览与「发送真实示例验证」收束在首屏可见的悬浮白瓷卡片内",
+		},
+		HighlightsEn: []string{
+			"Replaced the cramped 4-column Notification Templates layout (empty 248px mini-sidebar + full-height grey right wall) with a unified .sx-page two-column Swiss Leica studio aligned cleanly with Settings tabs",
+			"Added a horizontal event selector strip with a 2.5px Leica red active edge tick, unified Markdown toolbar + textarea + footer inside one bordered editor frame, compacted variable insert chips, and kept the Live Preview + Send Sample card cleanly visible above the fold",
+		},
+	},
 	{
 		Version: "1.0.299-dev",
 		Date:    "2026-11-24",

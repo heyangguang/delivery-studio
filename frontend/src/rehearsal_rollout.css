@@ -1173,9 +1173,8 @@ body[arco-theme="dark"] .ro-match-pill.is-eff {
   padding-left: 22px;
 }
 .ro-param-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 1px;
+  display: inline-block;
+  vertical-align: middle;
   padding: 2px 7px;
   border-radius: 5px;
   font-size: 11px;

@@ -107,9 +107,7 @@
   background: var(--warn-soft);
 }
 .au-user {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  display: block;
   min-width: 0;
   font-weight: 600;
   overflow: hidden;

@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.329-dev"
+	version            = "1.0.330-dev"
 	currentReleaseDate = "2026-11-25"
 )
 
@@ -65,6 +65,20 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.330-dev",
+		Date:    "2026-11-25",
+		Title:   "修复专注演练顶部集群胶囊硬裁切及全站同类 flex 省略号失效问题",
+		TitleEn: "Fix focus-mode cluster crumb hard-clipping and systemic flex text-overflow bugs",
+		Highlights: []string{
+			"修复演练专注模式顶部 .rh-cluster-crumb 因 300px 窄上限与 inline-flex 容器 text-overflow: ellipsis 不生效导致的组件名硬裁切（如 PostgreS），放宽宽度并改为仅在超长时对集群 ID 做省略号、完整保留组件版本与悬停提示",
+			"全站扫描同步修复另外 3 处同类 flex 容器设置 text-overflow: ellipsis 导致的文本硬裁切：AI 会话上下文标签 (.ap-ctx-pill)、AI 用量表用户名 (.au-user) 与推广参数芯片 (.ro-param-chip)",
+		},
+		HighlightsEn: []string{
+			"Fixed focus-mode .rh-cluster-crumb hard-clipping PostgreSQL mid-word due to 300px cap and ineffective text-overflow on inline-flex, widening the crumb and applying proper child ellipsis on the cluster ID",
+			"Resolved 3 additional systemic flex text-overflow hard-clipping pills across the codebase (.ap-ctx-pill, .au-user, .ro-param-chip)",
+		},
+	},
 	{
 		Version: "1.0.329-dev",
 		Date:    "2026-11-25",

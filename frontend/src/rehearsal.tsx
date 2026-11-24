@@ -5378,7 +5378,10 @@ export function ClusterRehearsal({
           )}
 
           {focused && (
-            <span className="rh-cluster-crumb">
+            <span
+              className="rh-cluster-crumb"
+              title={`${c.id} · ${c.app_name} ${c.version}`.trim()}
+            >
               <b className="mono">{c.id}</b>
               <span className="faint">·</span>
               <span>

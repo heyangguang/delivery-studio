@@ -289,12 +289,13 @@
   white-space: nowrap;
 }
 .ap-ctx-pill {
-  display: inline-flex;
-  align-items: center;
+  display: inline-block;
+  vertical-align: middle;
   max-width: 100%;
   padding: 1px 6px;
   border-radius: 4px;
   font-size: 10.5px;
+  line-height: 1.45;
   font-weight: 560;
   color: var(--teal-ink);
   background: var(--teal-soft);

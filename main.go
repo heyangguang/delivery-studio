@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.332-dev"
+	version            = "1.0.333-dev"
 	currentReleaseDate = "2026-11-25"
 )
 
@@ -65,6 +65,20 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.333-dev",
+		Date:    "2026-11-25",
+		Title:   "全面加固集群配置与详情页空数组防护并增强错误页堆栈诊断",
+		TitleEn: "Harden null-array guards across cluster config/detail views and add stack diagnostics to PageBoundary",
+		Highlights: []string{
+			"系统加固集群配置页（clusterconfig.tsx）、集群详情页（clusters.tsx）、集群列表筛选与持久化（deliveries.tsx / useStored）、存量基线编辑（importcluster.tsx）与拓扑解析（topology.ts / ui.tsx）中所有易受 null 数组触发的 length / find / includes 访问，防止 Go 空切片或脏缓存导致页面崩溃",
+			"增强全局 PageBoundary 错误页：通过 componentDidCatch 捕获并记录组件堆栈，支持一键复制完整错误诊断信息及折叠查看技术堆栈详情，便于即时定位任何前端异常",
+		},
+		HighlightsEn: []string{
+			"Hardened nullable array accesses (.length, .find, .includes) across clusterconfig, clusters, deliveries, useStored, importcluster, topology, and InstanceGraph to prevent null-slice or stale sessionStorage crashes",
+			"Enhanced PageBoundary with componentDidCatch stack capture, one-click diagnostic copy, and collapsible technical stack trace details",
+		},
+	},
 	{
 		Version: "1.0.332-dev",
 		Date:    "2026-11-25",

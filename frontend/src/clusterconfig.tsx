@@ -275,8 +275,9 @@ export function ClusterConfig({
   rehearsals?: ChangeRehearsal[] | null;
 }) {
   useLang();
-  const id = source || c.current || c.head || c.plans[0]?.id;
-  const p = c.plans.find((entry) => entry.id === id);
+  const plans = Array.isArray(c.plans) ? c.plans : [];
+  const id = source || c.current || c.head || plans[0]?.id;
+  const p = plans.find((entry) => entry.id === id);
   if (!p)
     return (
       <Empty
@@ -412,15 +413,15 @@ function ConfigRecord({
   const plan = data?.plan;
   const rawInstances = useMemo<InstanceView[]>(
     () =>
-      plan?.instances ||
-      (dep?.instances || []).map((i) => ({
+      (Array.isArray(plan?.instances) ? plan.instances : null) ||
+      (Array.isArray(dep?.instances) ? dep.instances : []).map((i) => ({
         id: i.id,
         component: i.component,
         title: i.component,
         version: i.version || "",
         status: "",
         roles: i.placement || {},
-        hosts: [...new Set(Object.values(i.placement || {}).flat())],
+        hosts: [...new Set(Object.values(i.placement || {}).flat().filter(Boolean))],
         params: i.params || {},
         visible: {},
       })),
@@ -490,7 +491,10 @@ function ConfigRecord({
     return out.sort((a, b) => rankOf(a) - rankOf(b));
   }, [rawInstances, c.app_id, lang]);
 
-  const hosts: HostSpec[] = dep?.hosts || plan?.hosts || [];
+  const hosts: HostSpec[] =
+    (Array.isArray(dep?.hosts) ? dep.hosts : null) ||
+    (Array.isArray(plan?.hosts) ? plan.hosts : null) ||
+    [];
   const controller = plan?.controller || dep?.controller;
   const isImported = c.delivery_mode === "imported";
   const skipCatalogSchema = isImported && c.imported?.managed_catalog === false;
@@ -633,7 +637,9 @@ function ConfigRecord({
           const s = schemaFor(i);
           const sourceSpecId = i.embeddedFrom || i.id;
           const explicit =
-            dep?.instances.find((sp) => sp.id === sourceSpecId)?.params || {};
+            (Array.isArray(dep?.instances) ? dep.instances : []).find(
+              (sp) => sp.id === sourceSpecId,
+            )?.params || {};
           const defs = new Map((s?.params || []).map((d) => [d.key, d]));
           const defsNorm = new Map(
             (s?.params || []).map((d) => [normParamKey(d.key), d]),
@@ -873,7 +879,7 @@ function ConfigRecord({
       id: `endpoint:${i.id}.${ep.name}`,
       section: "access",
       title: `${i.title} · ${ep.title || ep.name}`,
-      context: `${ep.protocol.toUpperCase()} · ${front ? `${front.balancer} · ${front.resolve_ip || ""}` : bi("节点直连", "Direct node access")}`,
+      context: `${(ep.protocol || "").toUpperCase()} · ${front ? `${front.balancer} · ${front.resolve_ip || ""}` : bi("节点直连", "Direct node access")}`,
       value: front
         ? `${front.address}:${front.listen} → ${bi("后端", "backend")} ${ep.port}`
         : (ep.backends || [])
@@ -983,7 +989,7 @@ function ConfigRecord({
           id: `role:${i.id}:${role}`,
           label:
             realNonExt.length > 1 ? `${i.title} · ${roleLabel}` : roleLabel,
-          match: (h) => hs.includes(h.name),
+          match: (h) => (Array.isArray(hs) ? hs : []).includes(h.name),
           count,
         });
       }
@@ -1083,7 +1089,7 @@ function ConfigRecord({
               </Button>
             </>
           )}
-          {c.plans.length > 1 && (
+          {(Array.isArray(c.plans) ? c.plans : []).length > 1 && (
             <Select
               size="small"
               value={p.id}
@@ -1104,7 +1110,7 @@ function ConfigRecord({
                   section,
                 })
               }
-              options={c.plans.map((entry) => ({
+              options={(Array.isArray(c.plans) ? c.plans : []).map((entry) => ({
                 value: entry.id,
                 label: `${titleOf(entry)}${entry.id === c.current ? bi(" · 当前", " · Current") : ""}${entry.outcome === "void" ? bi(" · 已作废", " · Void") : ""}`,
               }))}
@@ -1615,7 +1621,7 @@ function ConfigRecord({
                                 </code>
                               </div>
                               <span className="cx-ep-proto mono">
-                                {ep.protocol.toUpperCase()}
+                                {(ep.protocol || "").toUpperCase()}
                               </span>
                             </div>
                             <div className="cx-ep-body">
@@ -1671,7 +1677,7 @@ function ConfigRecord({
                                     <span className="cx-ep-meta">
                                       <em>{bi("健康检查", "Health")}</em>
                                       <code>
-                                        {ep.health.type.toUpperCase()}
+                                        {(ep.health.type || "").toUpperCase()}
                                         {ep.health.port ? ` :${ep.health.port}` : ""}
                                         {ep.health.path || ""}
                                         {ep.health.status
@@ -2187,7 +2193,7 @@ function ConfigRecord({
 
                           {/* Database Extensions (if any) */}
                           {(
-                            dep?.instances.find(
+                            (Array.isArray(dep?.instances) ? dep.instances : []).find(
                               (sp) => sp.id === (instance.embeddedFrom || instance.id),
                             )?.addons || []
                           ).length > 0 &&
@@ -2199,7 +2205,7 @@ function ConfigRecord({
                                   </h3>
                                 </div>
                                 <div className="cx-spec-rows">
-                                  {dep?.instances
+                                  {(Array.isArray(dep?.instances) ? dep.instances : [])
                                     .find(
                                       (sp) =>
                                         sp.id ===

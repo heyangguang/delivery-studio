@@ -486,7 +486,7 @@ export function ImportClusterPage({
     setLogDirsText((prev) =>
       !prev || prev === prevHints.log ? nextLog : prev,
     );
-    if (item.roles.length > 0) {
+    if (Array.isArray(item.roles) && item.roles.length > 0) {
       setHosts((prev) =>
         prev.length === 1 && !prev[0].ip
           ? [{ name: `${item.id}-1`, ip: "", role: item.roles[0].id, disk: "" }]
@@ -1921,7 +1921,7 @@ export function ImportedBaselineModal({
         setParamRows(
           Object.entries(res.params || {}).map(([k, v]) => ({
             key: k,
-            value: typeof v === "string" ? v : JSON.stringify(v),
+            value: typeof v === "string" ? v : (JSON.stringify(v) ?? ""),
           })),
         );
         setPackages(res.packages || []);

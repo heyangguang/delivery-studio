@@ -115,6 +115,7 @@ import {
   cached,
   can,
   clearAuth,
+  copy,
   err,
   fetchCached,
   hasReleasedVersion,
@@ -138,15 +139,20 @@ type ThemePref = "light" | "dark" | "system";
 /** One broken page should not blank the whole app. */
 class PageBoundary extends React.Component<
   { children: React.ReactNode; resetKey: string },
-  { error: Error | null }
+  { error: Error | null; componentStack: string }
 > {
-  state = { error: null as Error | null };
+  state = { error: null as Error | null, componentStack: "" };
   static getDerivedStateFromError(error: Error) {
     return { error };
   }
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    const cs = (info?.componentStack || "").trim();
+    if (cs) this.setState({ componentStack: cs });
+    console.error("[PageBoundary]", error, cs);
+  }
   componentDidUpdate(prev: { resetKey: string }) {
     if (prev.resetKey !== this.props.resetKey && this.state.error)
-      this.setState({ error: null });
+      this.setState({ error: null, componentStack: "" });
   }
   render() {
     if (!this.state.error) return this.props.children;
@@ -167,6 +173,16 @@ class PageBoundary extends React.Component<
           </div>
         </div>
       );
+    const diagText = [
+      `URL: ${location.href}`,
+      `Error: ${this.state.error.message}`,
+      this.state.error.stack ? `\nStack:\n${this.state.error.stack}` : "",
+      this.state.componentStack
+        ? `\nComponent Stack:\n${this.state.componentStack}`
+        : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
     return (
       <div className="detail-none enter" role="alert">
         <IconExclamationCircle style={{ fontSize: 28, color: "var(--bad)" }} />
@@ -176,10 +192,53 @@ class PageBoundary extends React.Component<
           <Button onClick={() => go({ name: "deliveries" })}>
             {bi("回到集群", "Back to Clusters")}
           </Button>
+          <Button
+            onClick={() => {
+              copy(diagText);
+              Message.success(bi("已复制错误诊断信息", "Copied diagnostic info"));
+            }}
+          >
+            {bi("复制诊断信息", "Copy Diagnostics")}
+          </Button>
           <Button type="primary" onClick={() => location.reload()}>
             {bi("重新加载", "Reload")}
           </Button>
         </div>
+        {(this.state.error.stack || this.state.componentStack) && (
+          <details
+            style={{
+              marginTop: 14,
+              maxWidth: 680,
+              width: "100%",
+              textAlign: "left",
+              fontSize: 12,
+              color: "var(--mute)",
+            }}
+          >
+            <summary style={{ cursor: "pointer", userSelect: "none" }}>
+              {bi("查看错误堆栈详情", "Show technical stack trace")}
+            </summary>
+            <pre
+              style={{
+                marginTop: 8,
+                padding: "10px 12px",
+                borderRadius: 8,
+                border: "1px solid var(--line)",
+                background: "var(--surface-2)",
+                color: "var(--ink-2)",
+                fontFamily: "var(--mono)",
+                fontSize: 11,
+                lineHeight: 1.5,
+                maxHeight: 220,
+                overflow: "auto",
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+              }}
+            >
+              {diagText}
+            </pre>
+          </details>
+        )}
       </div>
     );
   }

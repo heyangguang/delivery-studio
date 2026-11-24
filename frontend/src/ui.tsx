@@ -982,7 +982,7 @@ export const InstanceGraph = React.memo(function InstanceGraph({
       tone,
     };
   });
-  const flows = displayFlows(real).map(f=>({...f,from:f.from.filter(h=>index.has(h)),to:f.to.filter(h=>index.has(h))})).filter(f=>f.from.length&&f.to.length);
+  const flows = displayFlows(real).map(f=>({...f,from:(f.from||[]).filter(h=>index.has(h)),to:(f.to||[]).filter(h=>index.has(h))})).filter(f=>f.from.length&&f.to.length);
   const sources = new Set(
     flows.filter((f) => f.kind === "replication").flatMap((f) => f.from),
   );

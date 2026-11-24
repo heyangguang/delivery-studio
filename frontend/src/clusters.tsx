@@ -380,14 +380,15 @@ export function ClusterDetail({
     if (hit !== undefined) setRehearsals(hit);
     api<ChangeRehearsal[]>(rehearsalsUrl)
       .then((r) => {
-        putCached(rehearsalsUrl, r);
-        for (const item of r) {
+        const list = Array.isArray(r) ? r : [];
+        putCached(rehearsalsUrl, list);
+        for (const item of list) {
           putCached(
             `/api/clusters/${encodeURIComponent(c.id)}/rehearsals/${encodeURIComponent(item.id)}`,
             item,
           );
         }
-        setRehearsals(r);
+        setRehearsals(list);
       })
       .catch(() => setRehearsals((prev) => prev ?? []));
   }, [c.id, canRehearse, rehearsalsUrl, lang]);
@@ -1832,12 +1833,12 @@ function HostTable({
     imported: cluster?.delivery_mode === "imported",
     importedDataDirs: cluster?.imported?.data_dirs,
   };
-  const rows = plan.hosts.map((h) => ({
+  const rows = (Array.isArray(plan.hosts) ? plan.hosts : []).map((h) => ({
     ...h,
     storage: hostStorage(specs.find((x) => x.name === h.name), storageOpts),
-    roles: displayInstances(plan.instances).flatMap((i) =>
+    roles: displayInstances(Array.isArray(plan.instances) ? plan.instances : []).flatMap((i) =>
       Object.entries(i.roles || {})
-        .filter(([, hs]) => hs.includes(h.name))
+        .filter(([, hs]) => Array.isArray(hs) && hs.includes(h.name))
         .map(([r]) => `${i.title} ${i.role_titles?.[r] || r}`),
     ),
   }));
@@ -2030,10 +2031,10 @@ function ClusterUnifiedOverview({
     .slice(0, 8);
   const roleLine = (i: (typeof insts)[number]) =>
     Object.entries(i.roles || {})
-      .filter(([, hs]) => hs.length)
-      .map(([r, hs]) => `${i.role_titles?.[r] || r} ${hs.join(bi("、", ", "))}`)
+      .filter(([, hs]) => Array.isArray(hs) && hs.length > 0)
+      .map(([r, hs]) => `${i.role_titles?.[r] || r} ${(hs || []).join(bi("、", ", "))}`)
       .join(" · ");
-  const hostCount = input?.hosts.length ?? c.hosts;
+  const hostCount = Array.isArray(input?.hosts) ? input.hosts.length : c.hosts;
 
   return (
     <div className="cl-now-unified">

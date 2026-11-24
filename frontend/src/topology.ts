@@ -6,12 +6,14 @@ export const componentOrder: Record<string, number> = { postgresql: 0, etcd: 1, 
 
 // Snapshot presentation only: never add these inferred entries to deployment specs.
 export function displayInstances(instances: InstanceView[]): DisplayInstance[] {
-  const expanded = instances.flatMap((inst): DisplayInstance[] => {
-    const managed = instances.some((m) => m.managed_context === inst.id);
+  const safe = Array.isArray(instances) ? instances : [];
+  const expanded = safe.flatMap((inst): DisplayInstance[] => {
+    const managed = safe.some((m) => m.managed_context === inst.id);
+    const params = inst.params || {};
     const embedded = inst.component === 'postgresql' && !managed &&
-      !['single', 'replication'].includes(String(inst.params.deployment_mode || '')) &&
-      !!inst.uses?.dcs && inst.ports?.some((p) => p.Name === 'patroni-rest') &&
-      typeof inst.params.patroni_ttl === 'number';
+      !['single', 'replication'].includes(String(params.deployment_mode || '')) &&
+      !!inst.uses?.dcs && (inst.ports || []).some((p) => p.Name === 'patroni-rest') &&
+      typeof params.patroni_ttl === 'number';
     if (!embedded) return [inst];
     return [inst, {
       id: inst.id + '/embedded-patroni', component: 'patroni', title: 'Patroni',
@@ -25,14 +27,15 @@ export function displayInstances(instances: InstanceView[]): DisplayInstance[] {
 }
 
 const flowIdentity = (f: FlowView) => JSON.stringify([
-  f.kind, f.from_role, f.to_role, [...f.from].sort(), [...f.to].sort(), !!f.sync,
+  f.kind, f.from_role, f.to_role, [...(f.from || [])].sort(), [...(f.to || [])].sort(), !!f.sync,
 ]);
 
 // A manager can describe the same database flow. Collapse only an exact match
 // through its explicit binding; independent databases must retain their own flows.
 export function displayFlows(instances: InstanceView[]) {
-  return instances.flatMap((inst) => {
-    const database = instances.find((i) => i.id === inst.managed_context);
+  const safe = Array.isArray(instances) ? instances : [];
+  return safe.flatMap((inst) => {
+    const database = safe.find((i) => i.id === inst.managed_context);
     return (inst.flows || []).filter((flow) =>
       !database?.flows?.some((f) => flowIdentity(f) === flowIdentity(flow))
     ).map((flow) => ({ ...flow, inst }));
@@ -69,8 +72,8 @@ export function hostStorage(
     typeof host?.params?.data_root === 'string'
       ? host.params.data_root.trim()
       : '';
-  const importedRoot = (opts?.importedDataDirs || [])
-    .map((d) => d.trim())
+  const importedRoot = (Array.isArray(opts?.importedDataDirs) ? opts.importedDataDirs : [])
+    .map((d) => String(d || '').trim())
     .filter(Boolean)
     .join(', ');
   const storageMode =

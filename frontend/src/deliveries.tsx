@@ -411,7 +411,10 @@ export function DeliveriesPage({
   const [stored, setF] = useStored<DF>("mh-del-filters", DF0);
   // Filters saved before the statuses or delivery mode filter existed must not hide everything.
   const f: DF = {
+    ...DF0,
     ...stored,
+    q: typeof stored.q === "string" ? stored.q : "",
+    apps: Array.isArray(stored.apps) ? stored.apps : [],
     scope:
       stored.scope === "verification" || stored.scope === "formal"
         ? stored.scope
@@ -439,7 +442,7 @@ export function DeliveriesPage({
   const loadClusters = async () => {
     try {
       const r = await api<ClusterView[]>("/api/clusters");
-      setClusters(r);
+      setClusters(Array.isArray(r) ? r : []);
       setCload("ready");
     } catch {
       setCload((x) => (clusters ? x : "error"));
@@ -1968,7 +1971,7 @@ export function DeliveryDetail({
               <dl className="side-facts">
                 <div>
                   <dt>{bi("机器", "Hosts")}</dt>
-                  <dd>{input.hosts.length === 1 ? bi("1 台", "1 host") : bi(`${input.hosts.length} 台`, `${input.hosts.length} hosts`)}</dd>
+                  <dd>{(input.hosts || []).length === 1 ? bi("1 台", "1 host") : bi(`${(input.hosts || []).length} 台`, `${(input.hosts || []).length} hosts`)}</dd>
                 </div>
                 <div>
                   <dt>{executorHost ? bi("独立执行机", "Standalone executor") : bi("集群内执行机", "In-cluster executor")}</dt>
@@ -2032,21 +2035,21 @@ export function DeliveryDetail({
             {job.state === "succeeded" && g.records.length > 0 && (
               <section className="side-sec">
                 <h2 className="dsec-title">{bi("生成记录", "Build Logs")}</h2>
-                {job.logs.length > 0 && (
+                {(job.logs || []).length > 0 && (
                   <details className="gen-log">
                     <summary>
                       {bi("生成过程", "Build trace")}{" "}
                       <span className="faint small">
-                        {job.logs.length === 1
+                        {(job.logs || []).length === 1
                           ? bi("1 行", "1 line")
-                          : bi(`${job.logs.length} 行`, `${job.logs.length} lines`)}
+                          : bi(`${(job.logs || []).length} 行`, `${(job.logs || []).length} lines`)}
                         {job.updated
                           ? bi(` · 用时 ${duration(job.created, job.updated)}`, ` · Took ${duration(job.created, job.updated)}`)
                           : ""}
                       </span>
                     </summary>
                     <ol>
-                      {job.logs.map((l, i) => (
+                      {(job.logs || []).map((l, i) => (
                         <li key={i}>{l.replace(/^\[\d\/\d\]\s*/, "")}</li>
                       ))}
                     </ol>

@@ -1257,7 +1257,19 @@ export function useStored<T>(
   const [v, setV] = useState<T>(() => {
     try {
       const raw = sessionStorage.getItem(key);
-      return raw ? ({ ...initial, ...JSON.parse(raw) } as T) : initial;
+      if (!raw) return initial;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return initial;
+      }
+      const merged: Record<string, unknown> = { ...(initial as Record<string, unknown>) };
+      for (const [k, val] of Object.entries(parsed as Record<string, unknown>)) {
+        const def = merged[k];
+        if (Array.isArray(def) && !Array.isArray(val)) continue;
+        if (typeof def === "string" && typeof val !== "string") continue;
+        if (val !== null && val !== undefined) merged[k] = val;
+      }
+      return merged as T;
     } catch {
       return initial;
     }

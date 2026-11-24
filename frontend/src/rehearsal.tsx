@@ -1266,9 +1266,16 @@ async function streamRehearsalAPI(
     }
   };
 
+  const onAbortRead = () => {
+    void reader.cancel().catch(() => {});
+  };
+  signal?.addEventListener("abort", onAbortRead, { once: true });
   try {
     while (true) {
       const { value, done } = await reader.read();
+      if (signal?.aborted) {
+        throw new DOMException("Aborted", "AbortError");
+      }
       if (done) break;
       buf += decoder.decode(value, { stream: true });
       let nl = buf.indexOf("\n");
@@ -1278,6 +1285,9 @@ async function streamRehearsalAPI(
         handlePayload(line);
         nl = buf.indexOf("\n");
       }
+    }
+    if (signal?.aborted) {
+      throw new DOMException("Aborted", "AbortError");
     }
     if (buf.trim()) {
       for (const line of buf.split("\n")) {
@@ -1294,6 +1304,8 @@ async function streamRehearsalAPI(
       ),
       0,
     );
+  } finally {
+    signal?.removeEventListener("abort", onAbortRead);
   }
   if (!finalResult) {
     throw new ApiError(
@@ -7918,6 +7930,8 @@ function RehearsalSessionView({
   const [viewStage, setViewStage] = useState<ChangeRehearsal["stage"]>(
     () => initialSession?.stage || "scoping",
   );
+  const viewStageRef = useRef<ChangeRehearsal["stage"]>(viewStage);
+  viewStageRef.current = viewStage;
   const [stageDir, setStageDir] = useState<"fwd" | "back">("fwd");
   const [stageAnimated, setStageAnimated] = useState(false);
   const [loading, setLoading] = useState(() => !initialSession);
@@ -8062,9 +8076,11 @@ function RehearsalSessionView({
     isAutoReveal = false,
   ) => {
     if (!isAutoReveal) setFreshTraceStage("");
-    if (next === viewStage) return;
-    const a = STAGE_ORDER.indexOf(viewStage);
+    const current = viewStageRef.current;
+    if (next === current) return;
+    const a = STAGE_ORDER.indexOf(current);
     const b = STAGE_ORDER.indexOf(next);
+    viewStageRef.current = next;
     setStageDir(b >= a ? "fwd" : "back");
     setStageAnimated(true);
     setViewStage(next);
@@ -8109,7 +8125,10 @@ function RehearsalSessionView({
       );
       putCached(rehearsalItemPath(c.id, id), data);
       setR(data);
-      if (syncStage) setViewStage(data.stage);
+      if (syncStage) {
+        viewStageRef.current = data.stage;
+        setViewStage(data.stage);
+      }
       const initAns: Record<string, string> = {};
       (data.scope_questions || []).forEach((q) => {
         if (q.answer) initAns[q.id] = q.answer;
@@ -8492,7 +8511,13 @@ function RehearsalSessionView({
     } catch (e) {
       if (ac.signal.aborted) {
         setLiveScope(null);
-        if (!r.probe_script) switchStage("scoping");
+        switchStage("scoping");
+        Message.info(
+          bi(
+            "已停止生成，已返回「边界对齐」",
+            "Stopped — returned to Scope Alignment",
+          ),
+        );
       } else {
         setLiveScope((prev) => (prev ? markLiveStateError(prev, e) : null));
       }
@@ -8594,8 +8619,17 @@ function RehearsalSessionView({
     } catch (e) {
       if (ac.signal.aborted) {
         setLiveProbe(null);
-        if (action === "analyze" && !(r.steps && r.steps.length > 0)) {
+        if (action === "analyze") {
           switchStage("probing");
+          const probeLabel = isLightMode
+            ? bi("极简探针", "Quick Probe")
+            : bi("只读探针", "Read-Only Probe");
+          Message.info(
+            bi(
+              `已停止分析，已返回「${probeLabel}」`,
+              `Stopped — returned to ${probeLabel}`,
+            ),
+          );
         }
       } else {
         setLiveProbe((prev) => (prev ? markLiveStateError(prev, e) : null));
@@ -9429,7 +9463,7 @@ function RehearsalSessionView({
                 onRetry={() => void submitScope()}
                 onDismiss={() => {
                   setLiveScope(null);
-                  if (!r.probe_script) switchStage("scoping");
+                  switchStage("scoping");
                 }}
               />
             ) : liveProbe && probeAction === "diagnose" ? (
@@ -9864,7 +9898,7 @@ function RehearsalSessionView({
                 onRetry={() => void submitProbe("analyze")}
                 onDismiss={() => {
                   setLiveProbe(null);
-                  if (!(r.steps && r.steps.length > 0)) switchStage("probing");
+                  switchStage("probing");
                 }}
               />
             ) : (

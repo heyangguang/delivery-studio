@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.324-dev"
+	version            = "1.0.325-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,22 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.325-dev",
+		Date:    "2026-11-24",
+		Title:   "修复演练阶段流式分析点击「停止」未返回上一步的闭包与回退缺陷",
+		TitleEn: "Fix Rehearsal Stage Rollback When Stopping In-Flight AI Streaming",
+		Highlights: []string{
+			"修复 switchStage 异步闭包读取过期 viewStage 导致点击「停止」、探针门禁阻断或生成报错时无法回退上一步的缺陷",
+			"统一「边界对齐 → 只读探针」与「只读探针 → 测试演练」在点击「停止」或关闭错误卡片时始终回退至发起页，且完整保留已填写/上传的探针回显与截图（含模板克隆或二次重跑场景）",
+			"加固 streamRehearsalAPI 在 AbortSignal 触发时立即取消 SSE Reader 并抛出中止，杜绝取消卡顿或误报连接关闭错误",
+		},
+		HighlightsEn: []string{
+			"Fixed stale viewStage closure in switchStage that caused stage rollbacks on Stop, probe validity blocks, and finalize errors to silently no-op",
+			"Ensured clicking Stop or dismissing errors during Scope -> Probe and Probe -> Rehearsal always returns to the originating stage while preserving all entered probe text and screenshots (including template-cloned or re-run rehearsals)",
+			"Hardened streamRehearsalAPI to cancel the SSE reader immediately on AbortSignal without false connection-closed errors",
+		},
+	},
 	{
 		Version: "1.0.324-dev",
 		Date:    "2026-11-24",

@@ -2,7 +2,7 @@
    Devicon, SVG Logos, Simple Icons, and official upstream repos), optically normalized to a unified
    40x40 Swiss squircle tile grid with automatic Dark Mode legibility & collision-free scoped SVG defs. */
 
-import { useId } from "react";
+import React, { useId, useMemo } from "react";
 
 export interface BrandLogoSpec {
   vb: string;
@@ -49,13 +49,17 @@ export const BRAND_LOGOS: Record<string, BrandLogoSpec> = {
 };
 
 /** Renders an optically normalized official brand SVG inside a 40x40 parent SVG, scoping any <defs> IDs per instance. */
-export function BrandLogoSvg({ id }: { id: string }) {
+export const BrandLogoSvg = React.memo(function BrandLogoSvg({ id }: { id: string }) {
   const spec = BRAND_LOGOS[id];
   const rawId = useId();
-  if (!spec) return null;
-  const html = spec.body.includes("__UID__")
-    ? spec.body.replaceAll("__UID__", "bl" + rawId.replace(/[^a-zA-Z0-9]/g, "") + "_")
-    : spec.body;
+  const inner = useMemo(() => {
+    if (!spec) return null;
+    const html = spec.body.includes("__UID__")
+      ? spec.body.replaceAll("__UID__", "bl" + rawId.replace(/[^a-zA-Z0-9]/g, "") + "_")
+      : spec.body;
+    return { __html: html };
+  }, [spec, rawId]);
+  if (!spec || !inner) return null;
   return (
     <svg
       x={spec.x}
@@ -64,7 +68,7 @@ export function BrandLogoSvg({ id }: { id: string }) {
       height={spec.h}
       viewBox={spec.vb}
       preserveAspectRatio="xMidYMid meet"
-      dangerouslySetInnerHTML={{ __html: html }}
+      dangerouslySetInnerHTML={inner}
     />
   );
-}
+});

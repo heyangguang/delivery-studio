@@ -80,7 +80,7 @@ export const tintOf = (category?: string): [string, string] =>
   TINTS[canonicalCat(category)] || ["#9a9aa2", "#6e6e76"];
 
 /** Component logo: authentic full-colour brand SVG on a sculpted porcelain tile, or a tinted icon tile for generic shapes. */
-export function AppGlyph({
+export const AppGlyph = React.memo(function AppGlyph({
   id,
   category,
   size = 40,
@@ -140,7 +140,7 @@ export function AppGlyph({
       {iconShape(st.icon)}
     </svg>
   );
-}
+});
 
 /** A removable filter, whose close button says what it removes. */
 export function FilterChip({

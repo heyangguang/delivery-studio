@@ -1037,12 +1037,13 @@ body[arco-theme="dark"] {
 .app-glyph {
   display: block;
   flex: none;
-  border-radius: 10px;
+  border-radius: 24%;
   color: var(--ink);
+  contain: layout style paint;
 }
 .app-glyph.is-brand {
   --glyph-bg: #ffffff;
-  filter: drop-shadow(0 1px 1.5px rgba(11, 13, 18, 0.06));
+  box-shadow: 0 1px 2px rgba(11, 13, 18, 0.06);
 }
 .app-glyph.is-brand .app-glyph-tile {
   fill: var(--glyph-bg);
@@ -1050,7 +1051,7 @@ body[arco-theme="dark"] {
 }
 body[arco-theme="dark"] .app-glyph.is-brand {
   --glyph-bg: #1a1f28;
-  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.34));
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.34);
 }
 body[arco-theme="dark"] .app-glyph.is-brand .app-glyph-tile {
   fill: var(--glyph-bg);

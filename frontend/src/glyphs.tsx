@@ -550,15 +550,19 @@ export const COLORS: {
   },
 ];
 
+const ICON_MAP = new Map(ICONS.map((i) => [i.id, i]));
+const COLOR_MAP = new Map(COLORS.map((c) => [c.id, c]));
+const FALLBACK_ICON_SHAPE = ICON_MAP.get("container")!.shape;
+
 export const iconLabel = (id: string, fallback?: string): string =>
   bi(
-    fallback || ICONS.find((i) => i.id === id)?.label || id,
+    fallback || ICON_MAP.get(id)?.label || id,
     ICON_EN[id] || fallback || id,
   );
 
 export const colorLabel = (id: string, fallback?: string): string =>
   bi(
-    fallback || COLORS.find((c) => c.id === id)?.label || id,
+    fallback || COLOR_MAP.get(id)?.label || id,
     COLOR_EN[id] || fallback || id,
   );
 
@@ -647,9 +651,9 @@ export function styleOf(
 ): { icon: string; color: (typeof COLORS)[number] } {
   const reg = registry.get(id);
   const [di, dc] = BY_CATEGORY[canonicalCat(category)] || ["container", "slate"];
-  const explicit = [icon, reg?.icon].find(
-    (x) => x && ICONS.some((i) => i.id === x),
-  );
+  const explicit =
+    (icon && ICON_MAP.has(icon) ? icon : undefined) ||
+    (reg?.icon && ICON_MAP.has(reg.icon) ? reg.icon : undefined);
   const inferred = inferBrandIcon(id);
   // Upgrade legacy generic category icons automatically when component id clearly matches a known middleware brand.
   const iconId =
@@ -657,13 +661,14 @@ export function styleOf(
       ? explicit
       : inferred || explicit || di;
   const colorId =
-    [color, reg?.color].find((x) => x && COLORS.some((c) => c.id === x)) || dc;
-  return { icon: iconId, color: COLORS.find((c) => c.id === colorId)! };
+    (color && COLOR_MAP.has(color) ? color : undefined) ||
+    (reg?.color && COLOR_MAP.has(reg.color) ? reg.color : undefined) ||
+    dc;
+  return { icon: iconId, color: COLOR_MAP.get(colorId)! };
 }
 
 export const iconShape = (id: string) =>
-  (ICONS.find((i) => i.id === id) || ICONS.find((i) => i.id === "container")!)
-    .shape;
+  ICON_MAP.get(id)?.shape || FALLBACK_ICON_SHAPE;
 
 for (const it of ICONS) {
   const zh = it.label;

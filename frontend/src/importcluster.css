@@ -61,11 +61,11 @@
   flex-direction: row;
   flex: 0 0 auto;
   flex-wrap: nowrap;
-  gap: 4px;
+  gap: 2px;
   padding: 4px;
   background: var(--surface-2);
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 999px;
   white-space: nowrap;
 }
 
@@ -75,15 +75,16 @@
   display: inline-flex;
   align-items: center;
   flex: 0 0 auto;
-  gap: 7px;
-  padding: 6px 11px;
-  border-radius: 7px;
+  gap: 6px;
+  padding: 5px 11px 5px 7px;
+  border-radius: 999px;
+  border: 1px solid transparent;
   font-size: 12.5px;
   font-weight: 550;
   color: var(--mute);
   cursor: pointer;
   white-space: nowrap;
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 }
 
 .imp-step-btn:hover:not(:disabled) {
@@ -92,13 +93,15 @@
 }
 
 .imp-step-btn:disabled {
-  opacity: 0.45;
+  opacity: 0.48;
   cursor: not-allowed;
 }
 
 .imp-step-btn.is-active {
   background: var(--surface);
+  border-color: var(--brand-line);
   color: var(--ink);
+  font-weight: 600;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
 }
 
@@ -118,6 +121,7 @@ body[arco-theme="dark"] .imp-step-btn.is-active {
   background: var(--surface);
   border: 1px solid var(--line-strong);
   color: var(--mute);
+  flex: none;
 }
 
 .imp-step-btn.is-active .imp-step-num {
@@ -133,8 +137,12 @@ body[arco-theme="dark"] .imp-step-btn.is-active {
 }
 
 .imp-step-sep {
+  display: inline-flex;
+  align-items: center;
   color: var(--faint);
-  font-size: 12px;
+  font-size: 11px;
+  padding: 0 2px;
+  flex: none;
 }
 
 /* Cards & Sections */
@@ -249,7 +257,8 @@ body[arco-theme="dark"] .imp-step-btn.is-active {
   background: var(--surface);
   cursor: pointer;
   text-align: left;
-  transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+  contain: layout style paint;
+  transition: border-color 0.08s ease, background-color 0.08s ease;
 }
 
 .imp-mw-card:hover {
@@ -259,8 +268,8 @@ body[arco-theme="dark"] .imp-step-btn.is-active {
 
 .imp-mw-card.is-selected {
   border-color: var(--brand);
-  background: color-mix(in srgb, var(--brand) 6%, var(--surface));
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--brand) 25%, transparent);
+  background: var(--brand-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--brand) 32%, transparent);
 }
 
 .imp-mw-meta {

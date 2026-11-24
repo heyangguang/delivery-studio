@@ -2162,7 +2162,7 @@ body[arco-theme="dark"] .ig-legend path.link-live.f2 {
   font-size: 14px;
   font-weight: 650;
 }
-.imp-steps {
+ol.imp-steps {
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -2170,14 +2170,14 @@ body[arco-theme="dark"] .ig-legend path.link-live.f2 {
   padding: 0;
   list-style: none;
 }
-.imp-steps li {
+ol.imp-steps li {
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr);
   align-items: start;
   gap: 12px;
   line-height: 1.65;
 }
-.imp-steps code {
+ol.imp-steps code {
   padding: 1px 6px;
   border-radius: 4px;
   font-size: 12px;

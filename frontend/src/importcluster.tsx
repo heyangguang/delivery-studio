@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   Drawer,
@@ -249,6 +249,97 @@ function buildPreviewInstances(
   ];
 }
 
+const EMPTY_PLATFORMS: { id: string; title: string }[] = [];
+
+const MiddlewareCard = React.memo(function MiddlewareCard({
+  item,
+  selected,
+  isEn,
+  showCatalogBadge,
+  onSelect,
+}: {
+  item: ImportPresetItem;
+  selected: boolean;
+  isEn: boolean;
+  showCatalogBadge: boolean;
+  onSelect: (item: ImportPresetItem) => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={`imp-mw-card ${selected ? "is-selected" : ""}`}
+      aria-pressed={selected}
+      onClick={() => onSelect(item)}
+    >
+      <AppGlyph id={item.id} icon={item.icon} color={item.color} size={34} />
+      <div className="imp-mw-meta">
+        <div className="imp-mw-name-row">
+          <span className="imp-mw-name">
+            {isEn ? item.name_en || item.name : item.name}
+          </span>
+          {showCatalogBadge && (
+            <span className="imp-mw-badge">{bi("目录", "Catalog")}</span>
+          )}
+        </div>
+        <span className="imp-mw-desc">
+          {isEn ? item.summary_en || item.summary : item.summary}
+        </span>
+      </div>
+    </button>
+  );
+});
+
+const Step1PlatformSelects = React.memo(function Step1PlatformSelects({
+  platforms,
+  platform,
+  onPlatformChange,
+  deployMethod,
+  onDeployMethodChange,
+  lang,
+}: {
+  platforms: { id: string; title: string }[];
+  platform: string;
+  onPlatformChange: (v: string) => void;
+  deployMethod: string;
+  onDeployMethodChange: (v: string) => void;
+  lang: string;
+}) {
+  const deployOptions = useMemo(() => DEPLOY_METHODS(), [lang]);
+  return (
+    <>
+      <div className="imp-field">
+        <label>{bi("操作系统平台", "OS Platform")}</label>
+        <Select
+          allowClear
+          showSearch
+          placeholder={bi("选择或暂不明确", "Select OS platform")}
+          value={platform || undefined}
+          onChange={(v) => onPlatformChange(v || "")}
+        >
+          {platforms.map((pl) => (
+            <Select.Option key={pl.id} value={pl.id}>
+              {pl.title}
+            </Select.Option>
+          ))}
+          <Select.Option value="linux-custom">
+            {bi("其他 Linux / 暂不明确", "Other Linux / Unknown")}
+          </Select.Option>
+        </Select>
+      </div>
+      <div className="imp-field">
+        <label>{bi("部署形态", "Deployment Mode")}</label>
+        <Select value={deployMethod} onChange={onDeployMethodChange}>
+          {deployOptions.map((dm) => (
+            <Select.Option key={dm.value} value={dm.value}>
+              {dm.label}
+            </Select.Option>
+          ))}
+        </Select>
+      </div>
+    </>
+  );
+});
+
 export function ImportClusterPage({
   component: initialComp,
   onImported,
@@ -361,22 +452,48 @@ export function ImportClusterPage({
     [selectedPreset, lang],
   );
 
-  // Sync default hints when user switches middleware in Step 1
-  const selectMiddleware = (item: ImportPresetItem) => {
+  const appliedHintsRef = useRef({
+    service: "",
+    config: "",
+    data: "",
+    log: "",
+  });
+
+  // Sync default hints when user switches middleware in Step 1 (referentially stable so memoized cards skip re-render)
+  const selectMiddleware = useCallback((item: ImportPresetItem) => {
     setIsCustom(false);
-    setSelectedId(item.id);
-    if (!serviceUnitsText && item.service_hints?.length)
-      setServiceUnitsText(item.service_hints[0]);
-    if (!configPathsText && item.config_hints?.length)
-      setConfigPathsText(item.config_hints[0]);
-    if (!dataDirsText && item.data_hints?.length)
-      setDataDirsText(item.data_hints[0]);
-    if (!logDirsText && item.log_hints?.length)
-      setLogDirsText(item.log_hints[0]);
-    if (hosts.length === 1 && !hosts[0].ip && item.roles.length > 0) {
-      setHosts([{ name: `${item.id}-1`, ip: "", role: item.roles[0].id, disk: "" }]);
+    setSelectedId((prev) => (prev === item.id ? prev : item.id));
+    const prevHints = appliedHintsRef.current;
+    const nextSvc = item.service_hints?.[0] || "";
+    const nextCfg = item.config_hints?.[0] || "";
+    const nextData = item.data_hints?.[0] || "";
+    const nextLog = item.log_hints?.[0] || "";
+    appliedHintsRef.current = {
+      service: nextSvc,
+      config: nextCfg,
+      data: nextData,
+      log: nextLog,
+    };
+    setServiceUnitsText((prev) =>
+      !prev || prev === prevHints.service ? nextSvc : prev,
+    );
+    setConfigPathsText((prev) =>
+      !prev || prev === prevHints.config ? nextCfg : prev,
+    );
+    setDataDirsText((prev) =>
+      !prev || prev === prevHints.data ? nextData : prev,
+    );
+    setLogDirsText((prev) =>
+      !prev || prev === prevHints.log ? nextLog : prev,
+    );
+    if (item.roles.length > 0) {
+      setHosts((prev) =>
+        prev.length === 1 && !prev[0].ip
+          ? [{ name: `${item.id}-1`, ip: "", role: item.roles[0].id, disk: "" }]
+          : prev,
+      );
     }
-  };
+  }, []);
 
   // Load read-only probe script whenever entering Step 2 Probe tab or changing component/deployMethod
   useEffect(() => {
@@ -557,7 +674,10 @@ export function ImportClusterPage({
     CLUSTER_ID_RE.test(clusterId.trim()) &&
     (!isCustom || customName.trim().length > 0);
 
-  const validHosts = hosts.filter((h) => h.name.trim() || h.ip.trim());
+  const validHosts = useMemo(
+    () => hosts.filter((h) => h.name.trim() || h.ip.trim()),
+    [hosts],
+  );
 
   const submitImport = async () => {
     const cid = clusterId.trim();
@@ -656,17 +776,24 @@ export function ImportClusterPage({
     [presetsData, catFilter, qLow],
   );
 
+  const platformList = useMemo(
+    () => presetsData?.platforms || EMPTY_PLATFORMS,
+    [presetsData],
+  );
+
   const previewInstances = useMemo(
     () =>
-      buildPreviewInstances(
-        effectiveCompID,
-        effectiveDisplayName,
-        exactVersion || version,
-        validHosts,
-        effectiveRoles,
-        endpoints,
-      ),
-    [effectiveCompID, effectiveDisplayName, exactVersion, version, validHosts, effectiveRoles, endpoints],
+      step === 3
+        ? buildPreviewInstances(
+            effectiveCompID,
+            effectiveDisplayName,
+            exactVersion || version,
+            validHosts,
+            effectiveRoles,
+            endpoints,
+          )
+        : [],
+    [step, effectiveCompID, effectiveDisplayName, exactVersion, version, validHosts, effectiveRoles, endpoints],
   );
 
   const CATEGORIES = [
@@ -698,20 +825,24 @@ export function ImportClusterPage({
               <h1>{bi("导入存量集群", "Import Existing Cluster")}</h1>
               <p>
                 {bi(
-                  "纳管已有运行中中间件集群，免首次部署包，直接解锁拓扑档案、变更演练与 Word 报告、跨集群推广及安全治理。",
-                  "Onboard brownfield middleware clusters without deployment bundles to unlock topology archives, change rehearsals, Word reports, rollouts, and security governance.",
+                  "纳管运行中中间件集群，免首次部署包，直接解锁拓扑档案、变更演练、Word 报告、跨集群推广与安全治理。",
+                  "Onboard brownfield middleware clusters without deployment bundles to unlock topology, rehearsals, Word reports, rollouts, and security.",
                 )}
               </p>
             </div>
           </div>
           <nav className="imp-stepper" aria-label={bi("导入步骤", "Import steps")}>
             {[
-              { n: 1 as const, label: bi("识别中间件", "Select Middleware") },
-              { n: 2 as const, label: bi("采集 / 录入节点", "Onboard Nodes") },
-              { n: 3 as const, label: bi("核对基线与拓扑", "Review & Topology") },
+              { n: 1 as const, label: bi("识别中间件", "Middleware") },
+              { n: 2 as const, label: bi("采集录入节点", "Onboard Nodes") },
+              { n: 3 as const, label: bi("核对基线拓扑", "Review & Topology") },
             ].map((s, idx) => (
               <React.Fragment key={s.n}>
-                {idx > 0 && <span className="imp-step-sep">/</span>}
+                {idx > 0 && (
+                  <span className="imp-step-sep" aria-hidden>
+                    <IconRight />
+                  </span>
+                )}
                 <button
                   type="button"
                   className={`imp-step-btn ${step === s.n ? "is-active" : ""} ${step > s.n ? "is-done" : ""}`}
@@ -824,25 +955,14 @@ export function ImportClusterPage({
                       </div>
                       <div className="imp-mw-grid">
                         {filteredCatalog.map((item) => (
-                          <button
+                          <MiddlewareCard
                             key={item.id}
-                            type="button"
-                            className={`imp-mw-card ${!isCustom && selectedId === item.id ? "is-selected" : ""}`}
-                            onClick={() => selectMiddleware(item)}
-                          >
-                            <AppGlyph id={item.id} icon={item.icon} color={item.color} size={34} />
-                            <div className="imp-mw-meta">
-                              <div className="imp-mw-name-row">
-                                <span className="imp-mw-name">
-                                  {isEn ? item.name_en || item.name : item.name}
-                                </span>
-                                <span className="imp-mw-badge">{bi("目录", "Catalog")}</span>
-                              </div>
-                              <span className="imp-mw-desc">
-                                {isEn ? item.summary_en || item.summary : item.summary}
-                              </span>
-                            </div>
-                          </button>
+                            item={item}
+                            selected={!isCustom && selectedId === item.id}
+                            isEn={isEn}
+                            showCatalogBadge
+                            onSelect={selectMiddleware}
+                          />
                         ))}
                       </div>
                     </>
@@ -856,24 +976,14 @@ export function ImportClusterPage({
                       </div>
                       <div className="imp-mw-grid">
                         {filteredPresets.map((item) => (
-                          <button
+                          <MiddlewareCard
                             key={item.id}
-                            type="button"
-                            className={`imp-mw-card ${!isCustom && selectedId === item.id ? "is-selected" : ""}`}
-                            onClick={() => selectMiddleware(item)}
-                          >
-                            <AppGlyph id={item.id} icon={item.icon} color={item.color} size={34} />
-                            <div className="imp-mw-meta">
-                              <div className="imp-mw-name-row">
-                                <span className="imp-mw-name">
-                                  {isEn ? item.name_en || item.name : item.name}
-                                </span>
-                              </div>
-                              <span className="imp-mw-desc">
-                                {isEn ? item.summary_en || item.summary : item.summary}
-                              </span>
-                            </div>
-                          </button>
+                            item={item}
+                            selected={!isCustom && selectedId === item.id}
+                            isEn={isEn}
+                            showCatalogBadge={false}
+                            onSelect={selectMiddleware}
+                          />
                         ))}
                       </div>
                     </>
@@ -921,35 +1031,14 @@ export function ImportClusterPage({
                     onChange={setVersion}
                   />
                 </div>
-                <div className="imp-field">
-                  <label>{bi("操作系统平台", "OS Platform")}</label>
-                  <Select
-                    allowClear
-                    showSearch
-                    placeholder={bi("选择或暂不明确", "Select OS platform")}
-                    value={platform || undefined}
-                    onChange={(v) => setPlatform(v || "")}
-                  >
-                    {(presetsData?.platforms || []).map((pl) => (
-                      <Select.Option key={pl.id} value={pl.id}>
-                        {pl.title}
-                      </Select.Option>
-                    ))}
-                    <Select.Option value="linux-custom">
-                      {bi("其他 Linux / 暂不明确", "Other Linux / Unknown")}
-                    </Select.Option>
-                  </Select>
-                </div>
-                <div className="imp-field">
-                  <label>{bi("部署形态", "Deployment Mode")}</label>
-                  <Select value={deployMethod} onChange={setDeployMethod}>
-                    {DEPLOY_METHODS().map((dm) => (
-                      <Select.Option key={dm.value} value={dm.value}>
-                        {dm.label}
-                      </Select.Option>
-                    ))}
-                  </Select>
-                </div>
+                <Step1PlatformSelects
+                  platforms={platformList}
+                  platform={platform}
+                  onPlatformChange={setPlatform}
+                  deployMethod={deployMethod}
+                  onDeployMethodChange={setDeployMethod}
+                  lang={lang}
+                />
               </div>
               <div className="imp-footer-bar">
                 <span className="muted small">

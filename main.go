@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.331-dev"
+	version            = "1.0.332-dev"
 	currentReleaseDate = "2026-11-25"
 )
 
@@ -65,6 +65,22 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.332-dev",
+		Date:    "2026-11-25",
+		Title:   "优化存量集群导入步骤栏排版并根治中间件卡片切换卡顿",
+		TitleEn: "Polish brownfield import stepper layout and eliminate middleware card switch lag",
+		Highlights: []string{
+			"重构存量集群导入顶部三步进度条：采用单行胶囊步骤条与箭头分隔（替换易与步骤文案混淆的斜杠），并收紧副标题消除 1280px 下的两字孤行换行，同时收窄 platform.css 旧 .imp-steps 作用域彻底杜绝类名冲突",
+			"根治中间件卡片切换卡顿：移除全部 38 个品牌 SVG 图标上的 CPU 离屏高斯模糊（filter: drop-shadow 改为等视觉 box-shadow），并升级 AppGlyph / BrandLogoSvg 为 React.memo + O(1) Map 查表",
+			"拆分 MiddlewareCard 与 Step1PlatformSelects 记忆化子组件、稳定化 selectMiddleware 回调并隔离卡片绘制边界（contain: layout style paint），切换中间件时仅重绘前后 2 张卡片，跳过其余 36 张卡片与下拉选择器重渲染",
+		},
+		HighlightsEn: []string{
+			"Refined the brownfield import 3-step pill stepper with chevron separators and single-line subtitle fit at 1280px+, and scoped legacy .imp-steps in platform.css to ol.imp-steps",
+			"Eliminated middleware card switch lag by replacing SVG filter: drop-shadow with GPU-friendly box-shadow, adding O(1) glyph/color map lookups, and memoizing AppGlyph & BrandLogoSvg",
+			"Extracted memoized MiddlewareCard and Step1PlatformSelects with stable callbacks and CSS paint containment so switching cards only updates the 2 affected cards",
+		},
+	},
 	{
 		Version: "1.0.331-dev",
 		Date:    "2026-11-25",

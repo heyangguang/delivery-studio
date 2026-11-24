@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.328-dev"
+	version            = "1.0.329-dev"
 	currentReleaseDate = "2026-11-25"
 )
 
@@ -65,6 +65,22 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.329-dev",
+		Date:    "2026-11-25",
+		Title:   "支持直接在演练步骤诊断建议中微调「建议复测命令」与「修正后命令」并持久化",
+		TitleEn: "Allow inline fine-tuning and persistence of rehearsal recommended retry and revised commands",
+		Highlights: []string{
+			"变更演练 AI 未通过核验后的「建议复测命令」与「修正后命令」代码块标题栏新增「微调」按钮，支持就地编辑命令内容与建议执行机器，支持 Ctrl/⌘+Enter 保存与 Esc 取消",
+			"后端 PATCH 步骤接口新增 proposal_command / proposal_target_role 字段，保存时自动执行防吞行规范化并持久化至演练会话，不影响原步骤命令与子命令分段，采纳修订与后续复测均直接沿用微调结果",
+			"新增 Go 单元测试 TestRehearsalPatchStepEditsProposalCommand 覆盖空命令拦截、建议命令与目标机器持久化及原步骤保护",
+		},
+		HighlightsEn: []string{
+			"Added an inline Edit button to the Recommended Command and Revised Command blocks in rehearsal step diagnosis cards with optional target host editing and Ctrl/Cmd+Enter & Esc shortcuts",
+			"Extended backend PATCH rehearsal step API with proposal_command and proposal_target_role fields, applying paste-safe normalization and persisting changes for copy, apply, and subsequent verification rounds",
+			"Added Go unit test TestRehearsalPatchStepEditsProposalCommand verifying validation, persistence, and preservation of original step commands",
+		},
+	},
 	{
 		Version: "1.0.328-dev",
 		Date:    "2026-11-25",

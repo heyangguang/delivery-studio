@@ -1919,3 +1919,77 @@ func TestRehearsalPatchStepPreservesSubCommandsAndRecoversFlattened(t *testing.T
 		t.Fatalf("normal single-box script was falsely split into %d blocks: %+v", len(bad), bad)
 	}
 }
+
+func TestRehearsalPatchStepEditsProposalCommand(t *testing.T) {
+	s, _ := testStore(t)
+	alice, csrf := storeLogin(t, s, "alice")
+	cw := storeCreate(t, s, alice, csrf, `{"id":"pg-prop-edit","hosts":[{"name":"node-1","ip":"10.0.13.11"}],"instances":[{"id":"etcd","component":"etcd","placement":{"member":["node-1"]}}]}`, nil)
+	s.wg.Wait()
+	if cw.Code != 202 {
+		t.Fatalf("create job: %d %s", cw.Code, cw.Body.String())
+	}
+	var job storeJob
+	_ = json.Unmarshal(cw.Body.Bytes(), &job)
+	_ = storeRequest(s, "PATCH", "/api/jobs/"+job.ID, strings.NewReader(`{"outcome":"done"}`), alice, csrf)
+	enableAI(t, s, "http://127.0.0.1:1", 1)
+
+	rid := "b1c2d3e4f5a6"
+	rh := changeRehearsal{
+		ID:        rid,
+		ClusterID: "pg-prop-edit",
+		Title:     "验证建议复测命令微调",
+		Goal:      "允许直接微调 AI 建议复测命令",
+		Stage:     "rehearsing",
+		Owner:     "alice",
+		CreatedAt: nowStamp(),
+		UpdatedAt: nowStamp(),
+		Steps: []rehearsalStep{
+			{
+				ID:         "step-1",
+				Phase:      "verify",
+				Order:      1,
+				Title:      "验证写入入口",
+				TargetRole: "node-1",
+				Command:    "psql -c 'SELECT 1;'",
+				Status:     "failed",
+				Proposal: &rehearsalStepProposal{
+					Diagnosis:  "端口应调整为 5434",
+					Action:     "retry",
+					TargetRole: "仅在从库 node-2 上执行",
+					Command:    `sudo -u postgres psql -X -w "host=demo port=5432 dbname=postgres"`,
+				},
+			},
+		},
+	}
+	rehearsalMu.Lock()
+	if err := s.saveRehearsal(rh); err != nil {
+		rehearsalMu.Unlock()
+		t.Fatalf("save seed rehearsal: %v", err)
+	}
+	rehearsalMu.Unlock()
+
+	// 1. Reject blank proposal_command
+	wBad := storeRequest(s, "PATCH", "/api/clusters/pg-prop-edit/rehearsals/"+rid+"/steps/step-1",
+		strings.NewReader(`{"proposal_command":"   "}`), alice, csrf)
+	if wBad.Code != 400 {
+		t.Fatalf("expected 400 for empty proposal_command, got %d %s", wBad.Code, wBad.Body.String())
+	}
+
+	// 2. Fine-tune proposal_command and proposal_target_role while preserving step.Command & proposal
+	wOk := storeRequest(s, "PATCH", "/api/clusters/pg-prop-edit/rehearsals/"+rid+"/steps/step-1",
+		strings.NewReader(`{"proposal_command":"sudo -u postgres psql -X -w \"host=demo port=5434 dbname=postgres\"","proposal_target_role":"在跳板机上执行"}`), alice, csrf)
+	if wOk.Code != 200 {
+		t.Fatalf("PATCH proposal_command failed: %d %s", wOk.Code, wOk.Body.String())
+	}
+	var got changeRehearsal
+	_ = json.Unmarshal(wOk.Body.Bytes(), &got)
+	if got.Steps[0].Proposal == nil {
+		t.Fatalf("expected proposal to remain present after proposal_command PATCH")
+	}
+	if !strings.Contains(got.Steps[0].Proposal.Command, "port=5434") || got.Steps[0].Proposal.TargetRole != "在跳板机上执行" {
+		t.Fatalf("unexpected updated proposal: %+v", got.Steps[0].Proposal)
+	}
+	if got.Steps[0].Command != "psql -c 'SELECT 1;'" {
+		t.Fatalf("expected original step.Command unchanged, got %q", got.Steps[0].Command)
+	}
+}

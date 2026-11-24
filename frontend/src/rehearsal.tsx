@@ -11229,6 +11229,13 @@ function StepRow({
   }, [step.commands, step.command, step.target_role]);
   const [cmdDraft, setCmdDraft] = useState(step.command);
   const [subCmdDrafts, setSubCmdDrafts] = useState<RehearsalStepCommand[]>([]);
+  const [editingProposalCmd, setEditingProposalCmd] = useState(false);
+  const [proposalCmdDraft, setProposalCmdDraft] = useState(
+    step.proposal?.command || "",
+  );
+  const [proposalRoleDraft, setProposalRoleDraft] = useState(
+    step.proposal?.target_role || "",
+  );
   const [verifyOpen, setVerifyOpen] = useState(
     () =>
       (!isRollback && isActiveStep) ||
@@ -11324,6 +11331,11 @@ function StepRow({
         : [],
     );
     setNote(step.note || "");
+    setProposalCmdDraft(step.proposal?.command || "");
+    setProposalRoleDraft(step.proposal?.target_role || "");
+    if (!step.proposal) {
+      setEditingProposalCmd(false);
+    }
     if (step.status === "failed" || step.proposal) {
       setVerifyOpen(true);
     } else if (step.status === "passed" || step.status === "skipped") {
@@ -11401,7 +11413,10 @@ function StepRow({
   const patchStep = async (
     patch: Partial<
       Pick<RehearsalStep, "status" | "note" | "command" | "commands">
-    >,
+    > & {
+      proposal_command?: string;
+      proposal_target_role?: string;
+    },
   ) => {
     setBusy("patch");
     try {
@@ -11415,6 +11430,12 @@ function StepRow({
       onUpdated(next);
       setEditingCmd(false);
       setEditingNote(false);
+      setEditingProposalCmd(false);
+      if (patch.proposal_command !== undefined) {
+        Message.success(
+          bi("已保存微调后的建议命令", "Saved edited recommended command"),
+        );
+      }
     } catch (e) {
       err(e);
     } finally {
@@ -12434,18 +12455,137 @@ function StepRow({
                       </div>
                     );
                   })()}
-                  {step.proposal.command && (
-                    <ShellCodeBlock
-                      code={step.proposal.command}
-                      title={
-                        step.proposal.action === "retry"
-                          ? bi("建议复测命令", "Recommended Command")
-                          : bi("修正后命令", "Revised Command")
-                      }
-                      compact
-                      pasteSafe
-                    />
-                  )}
+                  {step.proposal.command &&
+                    (editingProposalCmd ? (
+                      <div
+                        className="rh-cmd-edit-card rh-prop-cmd-edit"
+                        onKeyDown={(e) => {
+                          if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                            e.preventDefault();
+                            if (!proposalCmdDraft.trim()) {
+                              Message.warning(
+                                bi("建议命令不能为空", "Command cannot be empty"),
+                              );
+                              return;
+                            }
+                            void patchStep({
+                              proposal_command: proposalCmdDraft,
+                              proposal_target_role: proposalRoleDraft,
+                            });
+                          } else if (e.key === "Escape") {
+                            e.preventDefault();
+                            setProposalCmdDraft(step.proposal?.command || "");
+                            setProposalRoleDraft(
+                              step.proposal?.target_role || "",
+                            );
+                            setEditingProposalCmd(false);
+                          }
+                        }}
+                      >
+                        <div className="rh-cmd-edit-head">
+                          <span className="rh-cmd-edit-idx">
+                            {step.proposal.action === "retry"
+                              ? bi("微调建议复测命令", "Edit Recommended Command")
+                              : bi("微调修正后命令", "Edit Revised Command")}
+                          </span>
+                          <Input
+                            size="small"
+                            className="rh-cmd-edit-lbl"
+                            value={proposalRoleDraft}
+                            onChange={setProposalRoleDraft}
+                            placeholder={
+                              step.proposal.action === "retry"
+                                ? bi(
+                                    "复测执行机器（选填，如：在 node-2 上执行）",
+                                    "Retry target host (optional)",
+                                  )
+                                : bi(
+                                    "执行机器（选填）",
+                                    "Target host (optional)",
+                                  )
+                            }
+                            aria-label={bi(
+                              "微调建议执行机器",
+                              "Edit recommended target host",
+                            )}
+                          />
+                        </div>
+                        <Input.TextArea
+                          value={proposalCmdDraft}
+                          onChange={setProposalCmdDraft}
+                          autoSize={{ minRows: 2, maxRows: 10 }}
+                          className="mono"
+                          aria-label={bi(
+                            "微调建议复测命令",
+                            "Edit recommended command",
+                          )}
+                        />
+                        <div className="rh-cmd-edit-foot">
+                          <span className="rh-cmd-edit-hint">
+                            {bi(
+                              "可直接微调端口、主机或参数后保存复制（Ctrl/⌘+Enter 保存）",
+                              "Adjust host, port, or flags and save to copy (Ctrl/⌘+Enter)",
+                            )}
+                          </span>
+                          <div className="row-gap">
+                            <Button
+                              size="small"
+                              type="primary"
+                              loading={busy === "patch"}
+                              onClick={() => {
+                                if (!proposalCmdDraft.trim()) {
+                                  Message.warning(
+                                    bi(
+                                      "建议命令不能为空",
+                                      "Command cannot be empty",
+                                    ),
+                                  );
+                                  return;
+                                }
+                                void patchStep({
+                                  proposal_command: proposalCmdDraft,
+                                  proposal_target_role: proposalRoleDraft,
+                                });
+                              }}
+                            >
+                              {bi("保存微调", "Save")}
+                            </Button>
+                            <Button
+                              size="small"
+                              onClick={() => {
+                                setProposalCmdDraft(
+                                  step.proposal?.command || "",
+                                );
+                                setProposalRoleDraft(
+                                  step.proposal?.target_role || "",
+                                );
+                                setEditingProposalCmd(false);
+                              }}
+                            >
+                              {bi("取消", "Cancel")}
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <ShellCodeBlock
+                        code={step.proposal.command}
+                        title={
+                          step.proposal.action === "retry"
+                            ? bi("建议复测命令", "Recommended Command")
+                            : bi("修正后命令", "Revised Command")
+                        }
+                        compact
+                        pasteSafe
+                        onEdit={() => {
+                          setProposalCmdDraft(step.proposal?.command || "");
+                          setProposalRoleDraft(
+                            step.proposal?.target_role || "",
+                          );
+                          setEditingProposalCmd(true);
+                        }}
+                      />
+                    ))}
                   <div className="row-gap">
                     {step.proposal.action !== "retry" ? (
                       <Button

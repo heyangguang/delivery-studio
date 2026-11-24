@@ -3841,11 +3841,13 @@ func auditRehearsalRestorations(goal, extraScope string, steps []rehearsalStep, 
 
 func (s *storeServer) patchRehearsalStep(w http.ResponseWriter, r *http.Request, session storeSession, f clusterFacts, rid, sid string) {
 	var in struct {
-		Status   *string                 `json:"status"`
-		Elapsed  *string                 `json:"elapsed"`
-		Note     *string                 `json:"note"`
-		Command  *string                 `json:"command"`
-		Commands *[]rehearsalStepCommand `json:"commands"`
+		Status             *string                 `json:"status"`
+		Elapsed            *string                 `json:"elapsed"`
+		Note               *string                 `json:"note"`
+		Command            *string                 `json:"command"`
+		Commands           *[]rehearsalStepCommand `json:"commands"`
+		ProposalCommand    *string                 `json:"proposal_command"`
+		ProposalTargetRole *string                 `json:"proposal_target_role"`
 	}
 	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 128<<10)).Decode(&in) != nil {
 		s.fail(w, 400, "提交的内容格式不对")
@@ -3947,6 +3949,25 @@ func (s *storeServer) patchRehearsalStep(w http.ResponseWriter, r *http.Request,
 			st.Command = nextCmd
 			st.Commands = nextSubs
 			st.Proposal = nil
+		}
+	}
+	if in.ProposalCommand != nil || in.ProposalTargetRole != nil {
+		if st.Proposal == nil {
+			rehearsalMu.Unlock()
+			s.fail(w, 400, "当前步骤没有可微调的建议命令")
+			return
+		}
+		if in.ProposalCommand != nil {
+			rawPropCmd := strings.TrimSpace(*in.ProposalCommand)
+			if rawPropCmd == "" {
+				rehearsalMu.Unlock()
+				s.fail(w, 400, "建议命令不能为空")
+				return
+			}
+			st.Proposal.Command = ensurePasteSafeShellCommand(rawPropCmd)
+		}
+		if in.ProposalTargetRole != nil {
+			st.Proposal.TargetRole = truncRunes(strings.TrimSpace(*in.ProposalTargetRole), 120)
 		}
 	}
 	if in.Elapsed != nil {

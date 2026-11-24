@@ -7859,6 +7859,15 @@ body[arco-theme="dark"] .rh-gate {
   gap: 8px;
 }
 
+.rh-cmd-edit-hint {
+  font-size: 11.5px;
+  color: var(--mute);
+}
+
+.rh-prop-cmd-edit {
+  margin-top: 2px;
+}
+
 /* Inline Key-Value Step Facts */
 .rh-step-facts {
   margin: 0;

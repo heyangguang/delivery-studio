@@ -65,6 +65,16 @@ func SolveImported(cat *Catalog, d *Deployment) *Plan {
 		}}
 	}
 
+	companionByComp := map[string]ImportedCompanion{}
+	if d.Imported != nil {
+		for _, cm := range d.Imported.Companions {
+			cid := NormalizeCompanionID(cm.Component)
+			if cid != "" {
+				companionByComp[cid] = cm
+			}
+		}
+	}
+
 	for idx, sp := range specs {
 		instID := strings.TrimSpace(sp.ID)
 		if instID == "" {
@@ -95,11 +105,18 @@ func SolveImported(cat *Catalog, d *Deployment) *Plan {
 		}
 
 		preset, hasPreset := LookupImportPreset(compID)
+		compDef, hasCompDef := LookupCompanionDef(compID)
+		compMeta, hasCompMeta := companionByComp[NormalizeCompanionID(compID)]
 
 		title := compID
 		icon := "server"
 		color := "slate"
 		category := "middleware"
+		if hasCompDef {
+			title = compDef.Name
+			icon = compDef.Icon
+			color = compDef.Color
+		}
 		if hasPreset {
 			title = preset.Name
 			icon = preset.Icon
@@ -119,6 +136,9 @@ func SolveImported(cat *Catalog, d *Deployment) *Plan {
 			if catComp.Category != "" {
 				category = catComp.Category
 			}
+		}
+		if idx > 0 && hasCompMeta && strings.TrimSpace(compMeta.DisplayName) != "" {
+			title = strings.TrimSpace(compMeta.DisplayName)
 		}
 		if idx == 0 && d.Imported != nil {
 			if strings.TrimSpace(d.Imported.DisplayName) != "" {
@@ -160,6 +180,9 @@ func SolveImported(cat *Catalog, d *Deployment) *Plan {
 				addRoleTitle(r.ID, r.Title)
 			}
 		}
+		if hasCompDef && compDef.DefaultRole != "" {
+			addRoleTitle(compDef.DefaultRole, compDef.RoleTitle)
+		}
 		// Ensure every role used in Placement is registered with a readable title.
 		specRoles := make([]string, 0, len(sp.Placement))
 		for rk := range sp.Placement {
@@ -193,8 +216,14 @@ func SolveImported(cat *Catalog, d *Deployment) *Plan {
 				}
 			}
 			if len(hosts) > 0 {
-				rolesMap["node"] = append([]string(nil), hosts...)
-				addRoleTitle("node", "节点")
+				fallbackRole := "node"
+				fallbackTitle := "节点"
+				if hasCompDef && compDef.DefaultRole != "" {
+					fallbackRole = compDef.DefaultRole
+					fallbackTitle = compDef.RoleTitle
+				}
+				rolesMap[fallbackRole] = append([]string(nil), hosts...)
+				addRoleTitle(fallbackRole, fallbackTitle)
 			}
 		}
 
@@ -207,26 +236,53 @@ func SolveImported(cat *Catalog, d *Deployment) *Plan {
 			roleSpecs = append(roleSpecs, RoleSpec{Name: rk, Title: roleTitleMap[rk]})
 		}
 		flowSpecs := []FlowSpec{}
+		isSyncRepl := false
+		if sp.Params != nil {
+			if rv, ok := sp.Params["replication"]; ok {
+				s := strings.ToLower(strings.TrimSpace(fmt.Sprint(rv)))
+				if s == "quorum" || s == "sync" || s == "synchronous" || s == "strict" {
+					isSyncRepl = true
+				}
+			}
+			if sv, ok := sp.Params["synchronous_mode"]; ok {
+				s := strings.ToLower(strings.TrimSpace(fmt.Sprint(sv)))
+				if s == "true" || s == "on" || s == "strict" || s == "1" {
+					isSyncRepl = true
+				}
+			}
+		}
 		if catRes != nil && len(catRes.Flows) > 0 {
 			for _, fl := range catRes.Flows {
 				if len(rolesMap[fl.From]) > 0 && len(rolesMap[fl.To]) > 0 {
-					// Clear condition so flowViews always renders declared topology relationships on imported clusters.
 					copyFl := fl
 					copyFl.When = ""
+					if copyFl.Kind == "replication" && isSyncRepl {
+						copyFl.Sync = "true"
+					} else if copyFl.Sync != "" && copyFl.Sync != "true" {
+						copyFl.Sync = ""
+					}
 					flowSpecs = append(flowSpecs, copyFl)
 				}
 			}
 		}
-		if len(flowSpecs) == 0 && hasPreset {
-			for fi, fl := range preset.Flows {
+		if len(flowSpecs) == 0 {
+			srcFlows := preset.Flows
+			if len(srcFlows) == 0 && hasCompDef {
+				srcFlows = compDef.Flows
+			}
+			for fi, fl := range srcFlows {
 				if len(rolesMap[fl.From]) == 0 || len(rolesMap[fl.To]) == 0 {
 					continue
 				}
 				kind := "replication"
-				if fl.From == fl.To || fl.Kind == "quorum" || fl.Kind == "peer" {
-					if fl.From == fl.To {
-						kind = "mesh"
+				syncExpr := ""
+				if fl.From == fl.To {
+					kind = "mesh"
+					if fl.Kind == "quorum" {
+						syncExpr = "true"
 					}
+				} else if isSyncRepl {
+					syncExpr = "true"
 				}
 				flowSpecs = append(flowSpecs, FlowSpec{
 					ID:    fmt.Sprintf("flow-%d", fi),
@@ -234,6 +290,7 @@ func SolveImported(cat *Catalog, d *Deployment) *Plan {
 					From:  fl.From,
 					To:    fl.To,
 					Kind:  kind,
+					Sync:  syncExpr,
 				})
 			}
 		}
@@ -241,6 +298,9 @@ func SolveImported(cat *Catalog, d *Deployment) *Plan {
 		ver := strings.TrimSpace(sp.Version)
 		if idx == 0 && d.Imported != nil && strings.TrimSpace(d.Imported.ExactVersion) != "" && ver == "" {
 			ver = strings.TrimSpace(d.Imported.ExactVersion)
+		}
+		if idx > 0 && ver == "" && hasCompMeta {
+			ver = strings.TrimSpace(compMeta.Version)
 		}
 
 		synComp := &Component{
@@ -254,6 +314,8 @@ func SolveImported(cat *Catalog, d *Deployment) *Plan {
 		}
 		if catComp != nil {
 			synComp.Operations = catComp.Operations
+			synComp.Context = catComp.Context
+			synComp.Provides = catComp.Provides
 			synComp.sum = catComp.sum
 		}
 		synRes := &Resolved{
@@ -273,10 +335,19 @@ func SolveImported(cat *Catalog, d *Deployment) *Plan {
 			visible[k] = true
 		}
 
-		// Build endpoints, fronts, and ports from ImportedMeta.Endpoints (for primary instance) + preset default port
+		// Build endpoints, fronts, and ports
 		endpoints := []EndpointFacts{}
 		fronts := map[string]FrontFacts{}
 		ports := []PortUse{}
+		seenPort := map[int]bool{}
+		addPort := func(label string, pn int) {
+			if pn <= 0 || seenPort[pn] || len(hosts) == 0 {
+				return
+			}
+			seenPort[pn] = true
+			ports = append(ports, PortUse{Instance: instID, Name: label, Port: pn, Proto: "tcp", Hosts: hosts})
+		}
+
 		if idx == 0 && d.Imported != nil && len(d.Imported.Endpoints) > 0 {
 			for ei, ep := range d.Imported.Endpoints {
 				addr, portNum := splitImportedAddressPort(ep.Address, preset.DefaultPort)
@@ -288,13 +359,14 @@ func SolveImported(cat *Catalog, d *Deployment) *Plan {
 						epName = fmt.Sprintf("endpoint-%d", ei+1)
 					}
 				}
+				epTitle := importedEndpointTitle(epName, ep.Role)
 				backends := make([]Backend, 0, len(hosts))
 				for _, h := range hosts {
 					backends = append(backends, Backend{Host: h, IP: hostIP[h], Port: portNum})
 				}
 				endpoints = append(endpoints, EndpointFacts{
 					Name:     epName,
-					Title:    epName,
+					Title:    epTitle,
 					Protocol: "tcp",
 					Port:     portNum,
 					Backends: backends,
@@ -308,12 +380,22 @@ func SolveImported(cat *Catalog, d *Deployment) *Plan {
 						External: true,
 					}
 				}
-				if portNum > 0 {
-					ports = append(ports, PortUse{Instance: instID, Name: epName, Port: portNum, Proto: "tcp", Hosts: hosts})
-				}
+				addPort(importedPortLabel(epName, ep.Role, title), portNum)
 			}
-		} else if preset.DefaultPort > 0 && len(hosts) > 0 {
-			ports = append(ports, PortUse{Instance: instID, Name: "service", Port: preset.DefaultPort, Proto: "tcp", Hosts: hosts})
+		} else if idx > 0 {
+			if hasCompMeta && len(compMeta.Ports) > 0 {
+				for _, pn := range compMeta.Ports {
+					addPort(companionPortLabel(compDef, pn, title), pn)
+				}
+			} else if hasCompDef && len(compDef.DefaultPorts) > 0 {
+				for _, dp := range compDef.DefaultPorts {
+					addPort(dp.Name, dp.Port)
+				}
+			} else if preset.DefaultPort > 0 {
+				addPort(title, preset.DefaultPort)
+			}
+		} else if preset.DefaultPort > 0 {
+			addPort(title, preset.DefaultPort)
 		}
 
 		inst := &Instance{
@@ -322,6 +404,7 @@ func SolveImported(cat *Catalog, d *Deployment) *Plan {
 			Version:    ver,
 			Title:      title,
 			R:          synRes,
+			Auto:       idx > 0 && hasCompMeta && compMeta.Inferred,
 			Roles:      rolesMap,
 			Hosts:      hosts,
 			Params:     params,
@@ -337,6 +420,23 @@ func SolveImported(cat *Catalog, d *Deployment) *Plan {
 		p.Instances = append(p.Instances, inst)
 	}
 
+	// Second pass: wire cross-instance Uses (e.g. Patroni -> etcd DCS & PostgreSQL database context).
+	byID := map[string]*Instance{}
+	for _, inst := range p.Instances {
+		byID[inst.ID] = inst
+	}
+	for _, inst := range p.Instances {
+		for capName, targetID := range inst.Spec.Uses {
+			if tgt, ok := byID[targetID]; ok {
+				inst.Uses[capName] = &Use{
+					Capability: capName,
+					Instance:   tgt.ID,
+					Component:  tgt.Component,
+				}
+			}
+		}
+	}
+
 	return p
 }
 
@@ -346,16 +446,71 @@ func ImportedSchemeSummary(d *Deployment) *SchemeSummary {
 		return nil
 	}
 	hostCount := len(d.Hosts)
+	var stackTitles []string
+	seenStack := map[string]bool{}
+	addStackTitle := func(t string) {
+		t = strings.TrimSpace(t)
+		if t != "" && !seenStack[strings.ToLower(t)] {
+			seenStack[strings.ToLower(t)] = true
+			stackTitles = append(stackTitles, t)
+		}
+	}
+	if len(d.Instances) > 0 {
+		primaryTitle := d.Instances[0].Component
+		if d.Imported != nil && strings.TrimSpace(d.Imported.DisplayName) != "" {
+			primaryTitle = strings.TrimSpace(d.Imported.DisplayName)
+		} else if pr, ok := LookupImportPreset(d.Instances[0].Component); ok {
+			primaryTitle = pr.Name
+		}
+		addStackTitle(primaryTitle)
+		for _, sp := range d.Instances[1:] {
+			t := sp.Component
+			if cd, ok := LookupCompanionDef(sp.Component); ok {
+				t = cd.Name
+			} else if pr, ok := LookupImportPreset(sp.Component); ok {
+				t = pr.Name
+			}
+			addStackTitle(t)
+		}
+	}
+	if d.Imported != nil {
+		for _, cm := range d.Imported.Companions {
+			if cm.Kind == "monitoring" {
+				continue
+			}
+			t := strings.TrimSpace(cm.DisplayName)
+			if t == "" {
+				if cd, ok := LookupCompanionDef(cm.Component); ok {
+					t = cd.Name
+				} else {
+					t = cm.Component
+				}
+			}
+			addStackTitle(t)
+		}
+	}
+
 	name := "存量纳管集群"
 	if d.Imported != nil && strings.TrimSpace(d.Imported.ArchSummary) != "" {
 		name = strings.TrimSpace(d.Imported.ArchSummary)
+	} else if len(stackTitles) > 1 {
+		name = fmt.Sprintf("%s 架构集群（%d 节点）", strings.Join(stackTitles, " + "), hostCount)
 	} else if hostCount == 1 {
 		name = "存量单节点实例"
 	} else if hostCount > 1 {
 		name = fmt.Sprintf("存量多节点架构（%d 节点）", hostCount)
 	}
+
 	var roleParts []string
 	if len(d.Instances) > 0 {
+		primaryComp := d.Instances[0].Component
+		preset, hasPreset := LookupImportPreset(primaryComp)
+		roleTitles := map[string]string{}
+		if hasPreset {
+			for _, r := range preset.Roles {
+				roleTitles[r.ID] = r.Title
+			}
+		}
 		keys := make([]string, 0, len(d.Instances[0].Placement))
 		for k := range d.Instances[0].Placement {
 			keys = append(keys, k)
@@ -363,8 +518,34 @@ func ImportedSchemeSummary(d *Deployment) *SchemeSummary {
 		sort.Strings(keys)
 		for _, k := range keys {
 			if n := len(d.Instances[0].Placement[k]); n > 0 {
-				roleParts = append(roleParts, fmt.Sprintf("%s × %d", defaultImportedRoleTitle(k), n))
+				rt := roleTitles[k]
+				if rt == "" {
+					rt = defaultImportedRoleTitle(k)
+				}
+				roleParts = append(roleParts, fmt.Sprintf("%s × %d", rt, n))
 			}
+		}
+		for _, sp := range d.Instances[1:] {
+			cnt := 0
+			seenH := map[string]bool{}
+			for _, hs := range sp.Placement {
+				for _, hn := range hs {
+					if hn != "" && !seenH[hn] {
+						seenH[hn] = true
+						cnt++
+					}
+				}
+			}
+			if cnt == 0 {
+				cnt = hostCount
+			}
+			label := sp.Component
+			if cd, ok := LookupCompanionDef(sp.Component); ok {
+				label = cd.Name
+			} else if pr, ok := LookupImportPreset(sp.Component); ok {
+				label = pr.Name
+			}
+			roleParts = append(roleParts, fmt.Sprintf("%s × %d", label, cnt))
 		}
 	}
 	topo := strings.Join(roleParts, " · ")
@@ -384,13 +565,17 @@ func ImportedSchemeSummary(d *Deployment) *SchemeSummary {
 			mech = "Kubernetes 集群纳管"
 		}
 	}
+	evidence := []string{}
+	if len(stackTitles) > 1 {
+		evidence = append(evidence, fmt.Sprintf("已识别 %d 个架构组件：%s", len(stackTitles), strings.Join(stackTitles, " / ")))
+	}
 	return &SchemeSummary{
 		ID:       "imported",
 		Name:     name,
 		Topology: topo,
 		Nodes:    hostCount,
 		Source:   "imported",
-		Evidence: []string{},
+		Evidence: evidence,
 		Contract: &SeriesContract{
 			Mechanism:   mech,
 			Limitations: []string{},
@@ -398,6 +583,72 @@ func ImportedSchemeSummary(d *Deployment) *SchemeSummary {
 			Operations:  []string{},
 		},
 	}
+}
+
+func importedEndpointTitle(epName, role string) string {
+	lowName := strings.ToLower(strings.TrimSpace(epName))
+	lowRole := strings.ToLower(strings.TrimSpace(role))
+	genericNames := map[string]bool{
+		"": true, "readwrite": true, "rw": true, "write": true, "writer": true, "primary": true, "master": true,
+		"readonly": true, "ro": true, "read": true, "reader": true, "replica": true, "standby": true,
+		"admin": true, "console": true, "mgmt": true, "management": true, "endpoint": true, "vip": true,
+	}
+	if !genericNames[lowName] && epName != "" {
+		return epName
+	}
+	switch lowRole {
+	case "readonly", "ro", "read", "reader", "replica", "standby":
+		return "只读入口"
+	case "admin", "console", "mgmt", "management":
+		return "管理入口"
+	default:
+		if lowName == "readonly" || lowName == "ro" || lowName == "reader" || lowName == "read" {
+			return "只读入口"
+		}
+		if lowName == "admin" || lowName == "console" || lowName == "mgmt" {
+			return "管理入口"
+		}
+		return "读写入口"
+	}
+}
+
+func importedPortLabel(epName, role, compTitle string) string {
+	lowRole := strings.ToLower(strings.TrimSpace(role))
+	lowName := strings.ToLower(strings.TrimSpace(epName))
+	switch lowRole {
+	case "readonly", "ro", "read", "reader":
+		return "只读"
+	case "admin", "console", "mgmt":
+		return "管理"
+	case "readwrite", "rw", "write", "writer":
+		if strings.TrimSpace(compTitle) != "" {
+			return compTitle
+		}
+		return "读写"
+	default:
+		if lowName == "readwrite" || lowName == "writer" || lowName == "" {
+			if strings.TrimSpace(compTitle) != "" {
+				return compTitle
+			}
+			return "读写"
+		}
+		if lowName == "readonly" || lowName == "reader" {
+			return "只读"
+		}
+		return epName
+	}
+}
+
+func companionPortLabel(def CompanionDef, port int, fallback string) string {
+	for _, dp := range def.DefaultPorts {
+		if dp.Port == port {
+			return dp.Name
+		}
+	}
+	if strings.TrimSpace(fallback) != "" {
+		return fallback
+	}
+	return "service"
 }
 
 func defaultImportedRoleTitle(role string) string {

@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -55,30 +57,32 @@ type importHostInput struct {
 }
 
 type importClusterReq struct {
-	ID           string                    `json:"id"`
-	Title        string                    `json:"title,omitempty"`
-	Component    string                    `json:"component"`
-	DisplayName  string                    `json:"display_name,omitempty"`
-	Category     string                    `json:"category,omitempty"`
-	Icon         string                    `json:"icon,omitempty"`
-	Color        string                    `json:"color,omitempty"`
-	Version      string                    `json:"version"`
-	ExactVersion string                    `json:"exact_version,omitempty"`
-	Platform     string                    `json:"platform,omitempty"`
-	OSDetail     string                    `json:"os_detail,omitempty"`
-	SourceKind   string                    `json:"source_kind,omitempty"` // manual | probe | ai_doc
-	DeployMethod string                    `json:"deploy_method,omitempty"`
-	ArchSummary  string                    `json:"arch_summary,omitempty"`
-	Hosts        []importHostInput         `json:"hosts"`
-	Endpoints    []mwpack.ImportedEndpoint `json:"endpoints,omitempty"`
-	ServiceUnits []string                  `json:"service_units,omitempty"`
-	ConfigPaths  []string                  `json:"config_paths,omitempty"`
-	DataDirs     []string                  `json:"data_dirs,omitempty"`
-	LogDirs      []string                  `json:"log_dirs,omitempty"`
-	Params       map[string]any            `json:"params,omitempty"`
-	Packages     []mwpack.ImportedPkg      `json:"packages,omitempty"`
-	Notes        string                    `json:"notes,omitempty"`
-	LastProbedAt string                    `json:"last_probed_at,omitempty"`
+	ID                  string                     `json:"id"`
+	Title               string                     `json:"title,omitempty"`
+	Component           string                     `json:"component"`
+	DisplayName         string                     `json:"display_name,omitempty"`
+	Category            string                     `json:"category,omitempty"`
+	Icon                string                     `json:"icon,omitempty"`
+	Color               string                     `json:"color,omitempty"`
+	Version             string                     `json:"version"`
+	ExactVersion        string                     `json:"exact_version,omitempty"`
+	Platform            string                     `json:"platform,omitempty"`
+	OSDetail            string                     `json:"os_detail,omitempty"`
+	SourceKind          string                     `json:"source_kind,omitempty"` // manual | probe | ai_doc
+	DeployMethod        string                     `json:"deploy_method,omitempty"`
+	ArchSummary         string                     `json:"arch_summary,omitempty"`
+	Hosts               []importHostInput          `json:"hosts"`
+	Endpoints           []mwpack.ImportedEndpoint  `json:"endpoints,omitempty"`
+	Companions          []mwpack.ImportedCompanion `json:"companions,omitempty"`
+	SuggestedCompanions []mwpack.ImportedCompanion `json:"suggested_companions,omitempty"`
+	ServiceUnits        []string                   `json:"service_units,omitempty"`
+	ConfigPaths         []string                   `json:"config_paths,omitempty"`
+	DataDirs            []string                   `json:"data_dirs,omitempty"`
+	LogDirs             []string                   `json:"log_dirs,omitempty"`
+	Params              map[string]any             `json:"params,omitempty"`
+	Packages            []mwpack.ImportedPkg       `json:"packages,omitempty"`
+	Notes               string                     `json:"notes,omitempty"`
+	LastProbedAt        string                     `json:"last_probed_at,omitempty"`
 }
 
 type importProbeScriptReq struct {
@@ -99,24 +103,25 @@ type importParseReq struct {
 }
 
 type importParseDraft struct {
-	SuggestedID  string                    `json:"suggested_id,omitempty"`
-	Component    string                    `json:"component,omitempty"`
-	DisplayName  string                    `json:"display_name,omitempty"`
-	Version      string                    `json:"version,omitempty"`
-	ExactVersion string                    `json:"exact_version,omitempty"`
-	Platform     string                    `json:"platform,omitempty"`
-	OSDetail     string                    `json:"os_detail,omitempty"`
-	DeployMethod string                    `json:"deploy_method,omitempty"`
-	ArchSummary  string                    `json:"arch_summary,omitempty"`
-	Hosts        []importHostInput         `json:"hosts"`
-	Endpoints    []mwpack.ImportedEndpoint `json:"endpoints"`
-	ServiceUnits []string                  `json:"service_units"`
-	ConfigPaths  []string                  `json:"config_paths"`
-	DataDirs     []string                  `json:"data_dirs"`
-	LogDirs      []string                  `json:"log_dirs"`
-	Params       map[string]any            `json:"params"`
-	Packages     []mwpack.ImportedPkg      `json:"packages"`
-	Notes        string                    `json:"notes,omitempty"`
+	SuggestedID  string                     `json:"suggested_id,omitempty"`
+	Component    string                     `json:"component,omitempty"`
+	DisplayName  string                     `json:"display_name,omitempty"`
+	Version      string                     `json:"version,omitempty"`
+	ExactVersion string                     `json:"exact_version,omitempty"`
+	Platform     string                     `json:"platform,omitempty"`
+	OSDetail     string                     `json:"os_detail,omitempty"`
+	DeployMethod string                     `json:"deploy_method,omitempty"`
+	ArchSummary  string                     `json:"arch_summary,omitempty"`
+	Hosts        []importHostInput          `json:"hosts"`
+	Endpoints    []mwpack.ImportedEndpoint  `json:"endpoints"`
+	Companions   []mwpack.ImportedCompanion `json:"companions"`
+	ServiceUnits []string                   `json:"service_units"`
+	ConfigPaths  []string                   `json:"config_paths"`
+	DataDirs     []string                   `json:"data_dirs"`
+	LogDirs      []string                   `json:"log_dirs"`
+	Params       map[string]any             `json:"params"`
+	Packages     []mwpack.ImportedPkg       `json:"packages"`
+	Notes        string                     `json:"notes,omitempty"`
 }
 
 // handleClusterImport dispatches /api/clusters/import... routes.
@@ -237,6 +242,7 @@ func (s *storeServer) importPresetsHandler(w http.ResponseWriter, r *http.Reques
 	s.writeJSON(w, 200, map[string]any{
 		"catalog":    catalogItems,
 		"presets":    presetItems,
+		"companions": mwpack.CompanionCatalog,
 		"platforms":  plats,
 		"icons":      mwpack.ComponentIcons,
 		"ai_enabled": s.aiStatusFor(session.User).Enabled,
@@ -251,11 +257,13 @@ func buildImportProbeScript(req importProbeScriptReq, lang string) (string, stri
 	if pkgMatch == "" {
 		pkgMatch = regexp.QuoteMeta(compID)
 	}
+	fullPkgMatch := pkgMatch + "|patroni|etcd|haproxy|keepalived|pgbackrest|pgbouncer|sentinel|zookeeper|proxysql|clickhouse-keeper"
 	var sb strings.Builder
 	sb.WriteString("#!/usr/bin/env bash\n")
 	sb.WriteString("# ============================================================================\n")
 	sb.WriteString(fmt.Sprintf("# Kyndryl Delivery Studio - Read-Only Cluster Inventory Probe (%s)\n", displayName))
 	sb.WriteString("# 100% READ-ONLY: zero writes, zero restarts, zero config mutations, secrets redacted.\n")
+	sb.WriteString("# Collects primary middleware + co-located HA/DCS/LB/Backup companions + OS + packages.\n")
 	sb.WriteString("# Run on each target node (or primary node) and paste output back to the Import page.\n")
 	sb.WriteString("# ============================================================================\n")
 	sb.WriteString("set -u\nexport LC_ALL=C\n\n")
@@ -301,6 +309,10 @@ func buildImportProbeScript(req importProbeScriptReq, lang string) (string, stri
 		sb.WriteString(fmt.Sprintf("ps -ef 2>/dev/null | grep -iE '%s' | grep -v grep | head -n 20 || true\n", pkgMatch))
 	}
 
+	sb.WriteString("\necho '=== MW_IMPORT_COMPANIONS ==='\n")
+	sb.WriteString("systemctl list-units --type=service --all --no-pager 2>/dev/null | grep -iE 'patroni|etcd|consul|zookeeper|haproxy|keepalived|nginx|openresty|pgbouncer|sentinel|proxysql|maxscale|obproxy|clickhouse-keeper|node_exporter' || true\n")
+	sb.WriteString("ps -ef 2>/dev/null | grep -iE 'patroni|etcd|consul|QuorumPeerMain|haproxy|keepalived|pgbouncer|redis-sentinel|proxysql|clickhouse-keeper' | grep -v grep | head -n 20 || true\n")
+
 	// Custom service units or config paths hints provided by user
 	for _, u := range req.ServiceUnits {
 		u = strings.TrimSpace(u)
@@ -319,9 +331,9 @@ func buildImportProbeScript(req importProbeScriptReq, lang string) (string, stri
 
 	sb.WriteString("\necho '=== MW_IMPORT_PACKAGES ==='\n")
 	sb.WriteString("if command -v dpkg-query >/dev/null 2>&1; then\n")
-	sb.WriteString(fmt.Sprintf("  dpkg-query -W -f='${Package}\\t${Version}\\n' 2>/dev/null | grep -iE '%s' | sort -u | head -n 60 || true\n", pkgMatch))
+	sb.WriteString(fmt.Sprintf("  dpkg-query -W -f='${Package}\\t${Version}\\n' 2>/dev/null | grep -iE '%s' | sort -u | head -n 80 || true\n", fullPkgMatch))
 	sb.WriteString("elif command -v rpm >/dev/null 2>&1; then\n")
-	sb.WriteString(fmt.Sprintf("  rpm -qa --qf '%%{NAME}\\t%%{VERSION}-%%{RELEASE}\\n' 2>/dev/null | grep -iE '%s' | sort -u | head -n 60 || true\n", pkgMatch))
+	sb.WriteString(fmt.Sprintf("  rpm -qa --qf '%%{NAME}\\t%%{VERSION}-%%{RELEASE}\\n' 2>/dev/null | grep -iE '%s' | sort -u | head -n 80 || true\n", fullPkgMatch))
 	sb.WriteString("fi\n")
 	sb.WriteString("echo '=== MW_IMPORT_END ==='\n")
 
@@ -450,28 +462,39 @@ func (s *storeServer) aiExtractImportDraft(ctx context.Context, p aiProvider, us
 1. 只输出一个合法 JSON 对象，不要包含 Markdown 代码块围栏或额外解释文字。
 2. 所有信息必须严格来自输入文本或截图，严禁凭空编造 IP、主机名或版本号；未在输入中出现的可留空。
 3. 严禁在 params 或 notes 中输出任何密码、私钥或密钥明文（如有请脱敏为 <redacted>）。
-4. platform 如能识别，优先映射到以下标准 ID 之一：ubuntu-24.04-amd64, ubuntu-22.04-amd64, el9-amd64, el8-amd64, debian-12-amd64, kylin-v10-amd64, openeuler-22.03-amd64；无法映射可留空并在 os_detail 填写原始发行版名称。
-5. deploy_method 取值为 systemd / docker / binary / k8s / other 之一。
-6. JSON 结构：
+4. 【核心要求：识别多组件 / 伴生高可用架构】如果现场存在伴生/支撑组件（如 Patroni、etcd、HAProxy、Keepalived、Nginx、PgBouncer、pgBackRest、Redis Sentinel、ZooKeeper、Consul、ClickHouse Keeper、ProxySQL、MaxScale、OBProxy、node_exporter 等），必须全部结构化填入 companions 数组，不得只写入 notes！
+   - 例如 PostgreSQL + Patroni + etcd + pgBackRest：主 component="postgresql"，companions 必须分别列出 patroni(kind="ha_manager", ports:[8008], placement:{primary:[...],replica:[...]})、etcd(kind="dcs", role="member", hosts:[...], ports:[2379,2380])、pgbackrest(kind="backup", version:"...")。
+   - companion 的 kind 仅取：ha_manager | dcs | proxy | vip | pooler | backup | monitoring | companion。
+5. hosts[].disk 从存储输出（df -hT / lsblk）中提取数据盘设备（如 /dev/vdb），不要填系统根盘 /dev/vda。
+6. params 仅保留有运维价值的中间件配置参数（如 port、max_connections、shared_buffers、replication、synchronous_mode、cluster_name 等），不要把宿主机硬件信息（arch、cpu_cores、kernel、mem）塞进 params。
+7. platform 如能识别，优先映射到以下标准 ID 之一：ubuntu-24.04-amd64, ubuntu-22.04-amd64, el9-amd64, el8-amd64, debian-12-amd64, kylin-v10-amd64, openeuler-22.03-amd64；无法映射可留空并在 os_detail 填写原始发行版名称。
+8. deploy_method 取值为 systemd / docker / binary / k8s / other 之一。
+9. endpoints[].role 仅取 readwrite | readonly | admin 之一；endpoints[].name 使用简短标识如 writer / reader / admin。
+10. notes 用简洁的分条要点（每行以 "• " 开头，3~6 条）列出高价值现场线索或待人工核对项（如发行版类型、单节点采集范围、待确认 VIP、未采集到的目录等），避免长段堆砌。
+11. JSON 结构：
 {
-  "suggested_id": "小写字母数字连字符集群标识，如 mysql-erp-prod",
-  "component": "中间件标识，如 postgresql / mysql / redis / kafka",
-  "display_name": "展示名称，如 MySQL / PostgreSQL",
-  "version": "主版本或版本，如 8.0 / 17",
-  "exact_version": "精确版本，如 8.0.36 / 17.2",
+  "suggested_id": "小写字母数字连字符集群标识，如 pg-gitlab-private-prod",
+  "component": "主中间件标识，如 postgresql / mysql / redis / kafka",
+  "display_name": "展示名称，如 PostgreSQL / MySQL",
+  "version": "主版本，如 17 / 8.0",
+  "exact_version": "精确版本，如 17.11.1 / 8.0.36",
   "platform": "平台 ID",
-  "os_detail": "原始操作系统描述，如 Ubuntu 24.04.1 LTS",
+  "os_detail": "原始操作系统描述，如 Ubuntu 24.04.5 LTS",
   "deploy_method": "systemd|docker|binary|k8s|other",
-  "arch_summary": "一句话架构总结，如 一主两从高可用 / 3节点 Raft 集群",
-  "hosts": [{"name":"node-1","ip":"10.0.1.11","role":"primary"}],
-  "endpoints": [{"name":"writer","address":"10.0.1.100:3306","role":"readwrite"}], // role 仅取 readwrite | readonly | admin 之一
-  "service_units": ["mysqld.service"],
-  "config_paths": ["/etc/my.cnf"],
-  "data_dirs": ["/data/mysql"],
-  "log_dirs": ["/var/log/mysql"],
-  "params": {"port": 3306},
-  "packages": [{"name":"mysql-server","version":"8.0.36","role":"primary"}],
-  "notes": "其他有价值的运维线索摘要"
+  "arch_summary": "一句话架构总结，如 3节点 Patroni + etcd 高可用集群（一主两从 Quorum 同步）",
+  "hosts": [{"name":"db-node-01","ip":"10.0.1.11","role":"primary","disk":"/dev/vdb"}],
+  "endpoints": [{"name":"writer","address":"10.0.1.100:5432","role":"readwrite"}],
+  "companions": [
+    {"component":"patroni","display_name":"Patroni","version":"4.0.4","kind":"ha_manager","placement":{"primary":["db-node-01"],"replica":["db-node-02","db-node-03"]},"ports":[8008],"service_units":["patroni.service"],"config_paths":["/etc/patroni/patroni.yml"],"evidence":"patronictl list · patroni.service"},
+    {"component":"etcd","display_name":"etcd","version":"3.5.14","kind":"dcs","role":"member","hosts":["db-node-01","db-node-02","db-node-03"],"ports":[2379,2380],"service_units":["etcd.service"],"config_paths":["/etc/etcd/etcd.conf.yaml"],"data_dirs":["/data/etcd"],"evidence":"etcd.service · initial-cluster"}
+  ],
+  "service_units": ["patroni.service", "etcd.service"],
+  "config_paths": ["/etc/patroni/patroni.yml", "/etc/etcd/etcd.conf.yaml"],
+  "data_dirs": ["/data/pg", "/data/etcd"],
+  "log_dirs": ["/var/log/postgresql"],
+  "params": {"port": 5432, "replication": "quorum"},
+  "packages": [{"name":"percona-postgresql-17","version":"17.11","role":"primary"}],
+  "notes": "• 发行版为 Percona Distribution for PostgreSQL 17.11.1\n• 探针仅在主节点执行，备节点信息来自 patronictl 成员表"
 }`
 	var prompt strings.Builder
 	if req.Component != "" || req.DisplayName != "" {
@@ -558,7 +581,26 @@ var (
 	reVersionSemver = regexp.MustCompile(`\b(\d+\.\d+(?:\.\d+)?(?:-[a-zA-Z0-9._]+)?)\b`)
 	reHostLine      = regexp.MustCompile(`(?i)^\s*([a-z][a-z0-9._-]{1,62})[\s,;|\t]+(\d{1,3}(?:\.\d{1,3}){3})(?:[\s,;|\t]+([a-z0-9_-]+))?`)
 	reIPFirstLine   = regexp.MustCompile(`(?i)^\s*(\d{1,3}(?:\.\d{1,3}){3})[\s,;|\t]+([a-z][a-z0-9._-]{1,62})(?:[\s,;|\t]+([a-z0-9_-]+))?`)
+	reListenPort    = regexp.MustCompile(`(?:0\.0\.0\.0|\*|\[::\]|\d{1,3}(?:\.\d{1,3}){3}):(\d{2,5})\b`)
+	reDiskPart      = regexp.MustCompile(`^(/dev/(?:[hsv]d|xvd)[a-z]+)\d+$`)
+	reNvmePart      = regexp.MustCompile(`^(/dev/nvme\d+n\d+)p\d+$`)
 )
+
+func stripDiskPartition(dev string) string {
+	dev = strings.TrimSpace(dev)
+	if m := reNvmePart.FindStringSubmatch(dev); len(m) >= 2 {
+		return m[1]
+	}
+	if m := reDiskPart.FindStringSubmatch(dev); len(m) >= 2 {
+		return m[1]
+	}
+	return dev
+}
+
+func isRootSystemDisk(dev string) bool {
+	base := stripDiskPartition(dev)
+	return base == "/dev/vda" || base == "/dev/sda" || base == "/dev/xvda" || base == "/dev/nvme0n1"
+}
 
 func parseImportedDeterministic(text, component, displayName string, preset mwpack.ImportPreset) importParseDraft {
 	draft := importParseDraft{
@@ -566,6 +608,7 @@ func parseImportedDeterministic(text, component, displayName string, preset mwpa
 		DisplayName:  firstNonEmptyStr(strings.TrimSpace(displayName), preset.Name),
 		Hosts:        []importHostInput{},
 		Endpoints:    []mwpack.ImportedEndpoint{},
+		Companions:   []mwpack.ImportedCompanion{},
 		ServiceUnits: []string{},
 		ConfigPaths:  []string{},
 		DataDirs:     []string{},
@@ -577,11 +620,51 @@ func parseImportedDeterministic(text, component, displayName string, preset mwpa
 		return draft
 	}
 
-	seenHost := map[string]bool{}
+	seenHost := map[string]int{} // lower(name) -> index in draft.Hosts
+	seenIP := map[string]int{}   // ip -> index in draft.Hosts
 	seenUnit := map[string]bool{}
 	seenCfg := map[string]bool{}
+	seenData := map[string]bool{}
+	seenLog := map[string]bool{}
 	seenPkg := map[string]bool{}
-	addHost := func(name, ip, role string) {
+	listeningPorts := map[int]string{} // port -> process line
+	compVersions := map[string]string{}
+	compEvidence := map[string][]string{}
+	addCompEv := func(compID, ev string) {
+		compID = mwpack.NormalizeCompanionID(compID)
+		if compID == "" || ev == "" {
+			return
+		}
+		for _, cur := range compEvidence[compID] {
+			if cur == ev {
+				return
+			}
+		}
+		compEvidence[compID] = append(compEvidence[compID], ev)
+	}
+	addDataDir := func(p string) {
+		p = strings.TrimSpace(p)
+		if p != "" && strings.HasPrefix(p, "/") && !seenData[p] {
+			seenData[p] = true
+			draft.DataDirs = append(draft.DataDirs, p)
+		}
+	}
+	addLogDir := func(p string) {
+		p = strings.TrimSpace(p)
+		if p != "" && strings.HasPrefix(p, "/") && !seenLog[p] {
+			seenLog[p] = true
+			draft.LogDirs = append(draft.LogDirs, p)
+		}
+	}
+	addCfgPath := func(p string) {
+		p = strings.TrimSpace(p)
+		if p != "" && strings.HasPrefix(p, "/") && !seenCfg[p] {
+			seenCfg[p] = true
+			draft.ConfigPaths = append(draft.ConfigPaths, p)
+		}
+	}
+
+	addOrUpdateHost := func(name, ip, role string, preferName bool) {
 		name = strings.TrimSpace(name)
 		ip = strings.TrimSpace(ip)
 		if ip != "" && (strings.HasPrefix(ip, "127.") || ip == "0.0.0.0" || net.ParseIP(ip) == nil) {
@@ -594,10 +677,29 @@ func parseImportedDeterministic(text, component, displayName string, preset mwpa
 			name = "node-" + fmt.Sprint(len(draft.Hosts)+1)
 		}
 		key := strings.ToLower(name)
-		if seenHost[key] {
+		if idx, ok := seenHost[key]; ok {
+			if draft.Hosts[idx].IP == "" && ip != "" {
+				draft.Hosts[idx].IP = ip
+				seenIP[ip] = idx
+			}
+			if role != "" {
+				draft.Hosts[idx].Role = role
+			}
 			return
 		}
-		seenHost[key] = true
+		if ip != "" {
+			if idx, ok := seenIP[ip]; ok {
+				if preferName && len(name) > 0 && (len(draft.Hosts[idx].Name) > 28 || strings.HasPrefix(draft.Hosts[idx].Name, "ecs-")) {
+					delete(seenHost, strings.ToLower(draft.Hosts[idx].Name))
+					draft.Hosts[idx].Name = name
+					seenHost[key] = idx
+				}
+				if role != "" {
+					draft.Hosts[idx].Role = role
+				}
+				return
+			}
+		}
 		if role == "" && len(preset.Roles) > 0 {
 			if len(draft.Hosts) == 0 {
 				role = preset.Roles[0].ID
@@ -607,11 +709,24 @@ func parseImportedDeterministic(text, component, displayName string, preset mwpa
 				role = preset.Roles[0].ID
 			}
 		}
+		idx := len(draft.Hosts)
 		draft.Hosts = append(draft.Hosts, importHostInput{Name: name, IP: ip, Role: role})
+		seenHost[key] = idx
+		if ip != "" {
+			seenIP[ip] = idx
+		}
 	}
 
 	section := ""
 	curHost := ""
+	curConfigFile := ""
+	detectedDataDisk := ""
+	patroniCols := map[string]int{} // col name -> idx
+	hasPatroniTable := false
+	patroniPlacement := map[string][]string{}
+	etcdHosts := []string{}
+	seenEtcdHost := map[string]bool{}
+
 	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
 	for _, raw := range lines {
 		ln := strings.TrimSpace(raw)
@@ -620,6 +735,7 @@ func parseImportedDeterministic(text, component, displayName string, preset mwpa
 		}
 		if strings.HasPrefix(ln, "=== MW_IMPORT_") && strings.HasSuffix(ln, "===") {
 			section = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(ln, "=== MW_IMPORT_"), "==="))
+			curConfigFile = ""
 			continue
 		}
 		if strings.HasPrefix(ln, "PROBE_COMPONENT=") && draft.Component == "" {
@@ -640,7 +756,7 @@ func parseImportedDeterministic(text, component, displayName string, preset mwpa
 				}
 			}
 			if curHost != "" || chosen != "" {
-				addHost(curHost, chosen, "")
+				addOrUpdateHost(curHost, chosen, "", false)
 				curHost = ""
 			}
 			continue
@@ -655,12 +771,148 @@ func parseImportedDeterministic(text, component, displayName string, preset mwpa
 		}
 		if strings.HasPrefix(ln, "# file: ") {
 			cf := strings.TrimSpace(strings.TrimPrefix(ln, "# file: "))
-			if cf != "" && !seenCfg[cf] {
-				seenCfg[cf] = true
-				draft.ConfigPaths = append(draft.ConfigPaths, cf)
+			curConfigFile = cf
+			addCfgPath(cf)
+			continue
+		}
+
+		// Storage parsing (df -hT)
+		if section == "STORAGE" && strings.HasPrefix(ln, "/dev/") {
+			flds := strings.Fields(ln)
+			if len(flds) >= 7 {
+				dev := flds[0]
+				mnt := flds[len(flds)-1]
+				if !isRootSystemDisk(dev) && mnt != "/" && !strings.HasPrefix(mnt, "/boot") && !strings.HasPrefix(mnt, "/snap") {
+					if detectedDataDisk == "" {
+						detectedDataDisk = stripDiskPartition(dev)
+					}
+					if strings.HasPrefix(mnt, "/data") || strings.Contains(mnt, "pg") || strings.Contains(mnt, "mysql") || strings.Contains(mnt, "redis") || strings.Contains(mnt, "etcd") {
+						addDataDir(mnt)
+					}
+				}
 			}
 			continue
 		}
+
+		// Listening ports parsing (ss -tlnp / netstat -tlnp)
+		if section == "PORTS" {
+			if m := reListenPort.FindStringSubmatch(ln); len(m) == 2 {
+				if pn, err := strconv.Atoi(m[1]); err == nil && pn > 0 {
+					listeningPorts[pn] = ln
+				}
+			}
+			continue
+		}
+
+		// Direct PG query outputs & key config lines
+		if strings.HasPrefix(ln, "PG_DATA_DIR=") {
+			addDataDir(strings.TrimPrefix(ln, "PG_DATA_DIR="))
+			continue
+		}
+		if strings.HasPrefix(ln, "PG_CONFIG_FILE=") {
+			addCfgPath(strings.TrimPrefix(ln, "PG_CONFIG_FILE="))
+			continue
+		}
+		if strings.HasPrefix(ln, "PG_LOG_DIR=") {
+			addLogDir(strings.TrimPrefix(ln, "PG_LOG_DIR="))
+			continue
+		}
+		if strings.HasPrefix(ln, "PG_MAX_CONN=") {
+			if v := strings.TrimSpace(strings.TrimPrefix(ln, "PG_MAX_CONN=")); v != "" {
+				draft.Params["max_connections"] = v
+			}
+			continue
+		}
+		if strings.HasPrefix(ln, "PG_SHARED_BUFFERS=") {
+			if v := strings.TrimSpace(strings.TrimPrefix(ln, "PG_SHARED_BUFFERS=")); v != "" {
+				draft.Params["shared_buffers"] = v
+			}
+			continue
+		}
+		// Config YAML/INI key extraction (e.g., patroni.yml data_dir / log_directory, etcd.conf.yaml data-dir / initial-cluster)
+		if curConfigFile != "" && strings.Contains(ln, ":") {
+			lowLn := strings.ToLower(ln)
+			if strings.HasPrefix(lowLn, "data_dir:") || strings.HasPrefix(lowLn, "data-dir:") {
+				v := strings.Trim(strings.TrimSpace(ln[strings.IndexByte(ln, ':')+1:]), `"'`)
+				addDataDir(v)
+			} else if strings.HasPrefix(lowLn, "log_directory:") {
+				v := strings.Trim(strings.TrimSpace(ln[strings.IndexByte(ln, ':')+1:]), `"'`)
+				addLogDir(v)
+			} else if strings.HasPrefix(lowLn, "initial-cluster:") {
+				addCompEv("etcd", "initial-cluster")
+				v := strings.Trim(strings.TrimSpace(ln[strings.IndexByte(ln, ':')+1:]), `"'`)
+				for _, seg := range strings.Split(v, ",") {
+					if eq := strings.IndexByte(seg, '='); eq > 0 {
+						hn := strings.TrimSpace(seg[:eq])
+						if hn != "" && !seenEtcdHost[hn] {
+							seenEtcdHost[hn] = true
+							etcdHosts = append(etcdHosts, hn)
+						}
+					}
+				}
+			}
+		}
+
+		// Parse patronictl list tables
+		if strings.HasPrefix(ln, "|") && strings.HasSuffix(ln, "|") {
+			rawCells := strings.Split(strings.Trim(ln, "|"), "|")
+			cells := make([]string, len(rawCells))
+			for i, c := range rawCells {
+				cells[i] = strings.TrimSpace(c)
+			}
+			// Header row detection
+			isHeader := false
+			for _, c := range cells {
+				if strings.EqualFold(c, "Member") {
+					isHeader = true
+					break
+				}
+			}
+			if isHeader {
+				patroniCols = map[string]int{}
+				for i, c := range cells {
+					patroniCols[strings.ToLower(c)] = i
+				}
+				continue
+			}
+			if len(patroniCols) > 0 {
+				mIdx, hasM := patroniCols["member"]
+				hIdx, hasH := patroniCols["host"]
+				rIdx, hasR := patroniCols["role"]
+				if hasM && hasH && mIdx < len(cells) && hIdx < len(cells) {
+					member := cells[mIdx]
+					hostVal := cells[hIdx]
+					if colon := strings.IndexByte(hostVal, ':'); colon > 0 {
+						hostVal = hostVal[:colon]
+					}
+					roleRaw := ""
+					if hasR && rIdx < len(cells) {
+						roleRaw = strings.ToLower(cells[rIdx])
+					}
+					mappedRole := "replica"
+					if strings.Contains(roleRaw, "leader") || strings.Contains(roleRaw, "primary") || strings.Contains(roleRaw, "master") {
+						mappedRole = "primary"
+					}
+					if strings.Contains(roleRaw, "quorum") || strings.Contains(roleRaw, "sync") {
+						draft.Params["replication"] = "quorum"
+					}
+					if cIdx, hasC := patroniCols["cluster"]; hasC && cIdx < len(cells) {
+						cl := strings.ToLower(strings.TrimSpace(cells[cIdx]))
+						if cl != "" && draft.SuggestedID == "" && docClusterID.MatchString(cl) {
+							draft.SuggestedID = cl
+						}
+					}
+					if member != "" && net.ParseIP(hostVal) != nil {
+						hasPatroniTable = true
+						addCompEv("patroni", "patronictl list")
+						addOrUpdateHost(member, hostVal, mappedRole, true)
+						patroniPlacement[mappedRole] = append(patroniPlacement[mappedRole], member)
+					}
+				}
+			}
+			continue
+		}
+
 		if section == "PACKAGES" {
 			fields := strings.Split(ln, "\t")
 			if len(fields) < 2 {
@@ -680,6 +932,31 @@ func parseImportedDeterministic(text, component, displayName string, preset mwpa
 			}
 			continue
 		}
+
+		// Extract companion version banners
+		low := strings.ToLower(ln)
+		if strings.HasPrefix(low, "etcd version:") {
+			if m := reVersionSemver.FindStringSubmatch(ln); len(m) == 2 {
+				compVersions["etcd"] = m[1]
+				addCompEv("etcd", "etcd --version")
+			}
+		} else if strings.HasPrefix(low, "patronictl version") {
+			if m := reVersionSemver.FindStringSubmatch(ln); len(m) == 2 {
+				compVersions["patroni"] = m[1]
+				addCompEv("patroni", "patronictl version")
+			}
+		} else if strings.HasPrefix(low, "pgbackrest ") {
+			if m := reVersionSemver.FindStringSubmatch(ln); len(m) == 2 {
+				compVersions["pgbackrest"] = m[1]
+				addCompEv("pgbackrest", "pgbackrest version")
+			}
+		} else if strings.HasPrefix(low, "pgbouncer ") {
+			if m := reVersionSemver.FindStringSubmatch(ln); len(m) == 2 {
+				compVersions["pgbouncer"] = m[1]
+				addCompEv("pgbouncer", "pgbouncer --version")
+			}
+		}
+
 		// Extract systemd service unit names
 		if strings.Contains(ln, ".service") {
 			for _, tok := range strings.Fields(ln) {
@@ -693,25 +970,40 @@ func parseImportedDeterministic(text, component, displayName string, preset mwpa
 			}
 		}
 		// Detect docker deployment
-		if strings.Contains(strings.ToLower(ln), "docker") && strings.Contains(ln, "Up ") && draft.DeployMethod == "" {
+		if strings.Contains(low, "docker") && strings.Contains(ln, "Up ") && draft.DeployMethod == "" {
 			draft.DeployMethod = "docker"
 		}
-		// Extract version from typical middleware --version banners
+		// Extract version from typical middleware --version banners (skip companion-only banners if primary != companion)
 		if draft.ExactVersion == "" {
-			low := strings.ToLower(ln)
-			if strings.Contains(low, "version") || strings.Contains(low, "ver ") || strings.Contains(low, "(postgresql)") || strings.Contains(low, "redis server v=") || strings.Contains(low, "nginx/") || strings.Contains(low, "haproxy") || strings.Contains(low, "mysqld") || strings.Contains(low, "mongod") || strings.Contains(low, "clickhouse") {
-				if m := reVersionSemver.FindStringSubmatch(ln); len(m) == 2 {
-					draft.ExactVersion = m[1]
-					draft.Version = majorMinorVersion(m[1], draft.Component)
+			isCompanionBanner := strings.HasPrefix(low, "etcd version:") || strings.HasPrefix(low, "patronictl version") || strings.HasPrefix(low, "pgbackrest ")
+			if !isCompanionBanner || strings.EqualFold(draft.Component, "etcd") || strings.EqualFold(draft.Component, "patroni") {
+				if strings.Contains(low, "version") || strings.Contains(low, "ver ") || strings.Contains(low, "(postgresql)") || strings.Contains(low, "redis server v=") || strings.Contains(low, "nginx/") || strings.Contains(low, "haproxy") || strings.Contains(low, "mysqld") || strings.Contains(low, "mongod") || strings.Contains(low, "clickhouse") {
+					if m := reVersionSemver.FindStringSubmatch(ln); len(m) == 2 {
+						draft.ExactVersion = m[1]
+						draft.Version = majorMinorVersion(m[1], draft.Component)
+					}
 				}
 			}
 		}
 		// Extract hosts from /etc/hosts or pasted CMDB lines (hostname ip [role] or ip hostname [role])
 		if section == "HOSTS_FILE" || section == "" {
 			if m := reIPFirstLine.FindStringSubmatch(ln); len(m) >= 3 {
-				addHost(m[2], m[1], strings.ToLower(m[3]))
+				if !strings.Contains(m[2], ".") {
+					addOrUpdateHost(m[2], m[1], strings.ToLower(m[3]), false)
+				}
 			} else if m := reHostLine.FindStringSubmatch(ln); len(m) >= 3 {
-				addHost(m[1], m[2], strings.ToLower(m[3]))
+				if !strings.Contains(m[1], ".") {
+					addOrUpdateHost(m[1], m[2], strings.ToLower(m[3]), false)
+				}
+			}
+		}
+	}
+
+	// Fill detected data disk onto hosts lacking one
+	if detectedDataDisk != "" {
+		for i := range draft.Hosts {
+			if draft.Hosts[i].Disk == "" {
+				draft.Hosts[i].Disk = detectedDataDisk
 			}
 		}
 	}
@@ -725,6 +1017,23 @@ func parseImportedDeterministic(text, component, displayName string, preset mwpa
 	if draft.Version == "" && draft.ExactVersion != "" {
 		draft.Version = majorMinorVersion(draft.ExactVersion, draft.Component)
 	}
+
+	// Infer structured companions (Patroni, etcd, HAProxy, Keepalived, PgBouncer, pgBackRest, Sentinel, ZooKeeper, etc.)
+	inferred := inferCompanionsFromSignals(companionSignals{
+		PrimaryComp:      draft.Component,
+		Hosts:            draft.Hosts,
+		ServiceUnits:     draft.ServiceUnits,
+		ConfigPaths:      draft.ConfigPaths,
+		DataDirs:         draft.DataDirs,
+		Packages:         draft.Packages,
+		ListeningPorts:   listeningPorts,
+		VersionsByComp:   compVersions,
+		EvidenceByComp:   compEvidence,
+		PatroniPlacement: patroniPlacement,
+		EtcdHosts:        etcdHosts,
+	})
+	draft.Companions = inferred
+
 	if len(draft.ConfigPaths) == 0 && len(preset.ConfigHints) > 0 {
 		draft.ConfigPaths = append([]string(nil), preset.ConfigHints[0])
 	}
@@ -735,13 +1044,502 @@ func parseImportedDeterministic(text, component, displayName string, preset mwpa
 		draft.LogDirs = append([]string(nil), preset.LogHints[0])
 	}
 	if len(draft.Hosts) > 0 && draft.ArchSummary == "" {
-		if len(draft.Hosts) == 1 {
-			draft.ArchSummary = "存量单节点实例"
-		} else {
-			draft.ArchSummary = fmt.Sprintf("存量 %d 节点集群", len(draft.Hosts))
-		}
+		draft.ArchSummary = synthesizeImportArchSummary(draft.Component, draft.DisplayName, draft.Hosts, draft.Companions, hasPatroniTable)
 	}
 	return draft
+}
+
+type companionSignals struct {
+	PrimaryComp      string
+	Hosts            []importHostInput
+	ServiceUnits     []string
+	ConfigPaths      []string
+	DataDirs         []string
+	Packages         []mwpack.ImportedPkg
+	ArchSummary      string
+	Notes            string
+	ListeningPorts   map[int]string
+	VersionsByComp   map[string]string
+	EvidenceByComp   map[string][]string
+	PatroniPlacement map[string][]string
+	EtcdHosts        []string
+}
+
+func inferCompanionsFromSignals(sig companionSignals) []mwpack.ImportedCompanion {
+	primary := mwpack.NormalizeImportComponentID(sig.PrimaryComp)
+	allHosts := make([]string, 0, len(sig.Hosts))
+	primaryPlacement := map[string][]string{}
+	for _, h := range sig.Hosts {
+		hn := strings.TrimSpace(h.Name)
+		if hn == "" {
+			continue
+		}
+		allHosts = append(allHosts, hn)
+		rk := strings.TrimSpace(h.Role)
+		if rk == "" {
+			rk = "node"
+		}
+		primaryPlacement[rk] = append(primaryPlacement[rk], hn)
+	}
+
+	type acc struct {
+		ev    []string
+		ver   string
+		units []string
+		cfgs  []string
+		datas []string
+		ports []int
+	}
+	hits := map[string]*acc{}
+	touch := func(cid string) *acc {
+		cid = mwpack.NormalizeCompanionID(cid)
+		if cid == "" || cid == primary {
+			return nil
+		}
+		a := hits[cid]
+		if a == nil {
+			a = &acc{}
+			hits[cid] = a
+		}
+		return a
+	}
+	addStrUniq := func(sl *[]string, v string) {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			return
+		}
+		for _, cur := range *sl {
+			if cur == v {
+				return
+			}
+		}
+		*sl = append(*sl, v)
+	}
+	addIntUniq := func(sl *[]int, v int) {
+		if v <= 0 {
+			return
+		}
+		for _, cur := range *sl {
+			if cur == v {
+				return
+			}
+		}
+		*sl = append(*sl, v)
+	}
+
+	// Explicit evidence & versions from parser
+	for cid, evs := range sig.EvidenceByComp {
+		if a := touch(cid); a != nil {
+			for _, e := range evs {
+				addStrUniq(&a.ev, e)
+			}
+		}
+	}
+	for cid, ver := range sig.VersionsByComp {
+		if ver == "" {
+			continue
+		}
+		if a := touch(cid); a != nil && a.ver == "" {
+			a.ver = ver
+		}
+	}
+
+	// Service units
+	unitMatchers := []struct {
+		cid string
+		sub string
+	}{
+		{"patroni", "patroni"},
+		{"etcd", "etcd"},
+		{"haproxy", "haproxy"},
+		{"keepalived", "keepalived"},
+		{"nginx", "nginx"},
+		{"nginx", "openresty"},
+		{"pgbouncer", "pgbouncer"},
+		{"redis-sentinel", "sentinel"},
+		{"zookeeper", "zookeeper"},
+		{"consul", "consul"},
+		{"clickhouse-keeper", "clickhouse-keeper"},
+		{"proxysql", "proxysql"},
+		{"maxscale", "maxscale"},
+		{"obproxy", "obproxy"},
+		{"node-exporter", "node_exporter"},
+		{"node-exporter", "node-exporter"},
+	}
+	for _, u := range sig.ServiceUnits {
+		low := strings.ToLower(strings.TrimSpace(u))
+		for _, m := range unitMatchers {
+			if strings.Contains(low, m.sub) {
+				if a := touch(m.cid); a != nil {
+					addStrUniq(&a.units, u)
+					addStrUniq(&a.ev, u)
+				}
+			}
+		}
+	}
+
+	// Config paths
+	for _, cf := range sig.ConfigPaths {
+		low := strings.ToLower(strings.TrimSpace(cf))
+		for _, m := range unitMatchers {
+			if strings.Contains(low, m.sub) {
+				if a := touch(m.cid); a != nil {
+					addStrUniq(&a.cfgs, cf)
+					addStrUniq(&a.ev, filepath.Base(cf))
+				}
+			}
+		}
+		if strings.Contains(low, "pgbackrest") {
+			if a := touch("pgbackrest"); a != nil {
+				addStrUniq(&a.cfgs, cf)
+				addStrUniq(&a.ev, filepath.Base(cf))
+			}
+		}
+	}
+
+	// Data dirs
+	for _, dd := range sig.DataDirs {
+		low := strings.ToLower(strings.TrimSpace(dd))
+		if strings.Contains(low, "etcd") {
+			if a := touch("etcd"); a != nil {
+				addStrUniq(&a.datas, dd)
+				addStrUniq(&a.ev, dd)
+			}
+		}
+		if strings.Contains(low, "zookeeper") {
+			if a := touch("zookeeper"); a != nil {
+				addStrUniq(&a.datas, dd)
+				addStrUniq(&a.ev, dd)
+			}
+		}
+		if strings.Contains(low, "pgbackrest") {
+			if a := touch("pgbackrest"); a != nil {
+				addStrUniq(&a.datas, dd)
+				addStrUniq(&a.ev, dd)
+			}
+		}
+	}
+
+	// Packages
+	pkgMatchers := []struct {
+		cid string
+		sub string
+	}{
+		{"patroni", "patroni"},
+		{"etcd", "etcd"},
+		{"haproxy", "haproxy"},
+		{"keepalived", "keepalived"},
+		{"pgbouncer", "pgbouncer"},
+		{"pgbackrest", "pgbackrest"},
+		{"redis-sentinel", "redis-sentinel"},
+		{"zookeeper", "zookeeper"},
+		{"consul", "consul"},
+		{"clickhouse-keeper", "clickhouse-keeper"},
+		{"proxysql", "proxysql"},
+		{"maxscale", "maxscale"},
+		{"obproxy", "obproxy"},
+	}
+	for _, pk := range sig.Packages {
+		low := strings.ToLower(strings.TrimSpace(pk.Name))
+		for _, m := range pkgMatchers {
+			if strings.Contains(low, m.sub) {
+				if a := touch(m.cid); a != nil {
+					if a.ver == "" && pk.Version != "" {
+						if mv := reVersionSemver.FindStringSubmatch(pk.Version); len(mv) == 2 {
+							a.ver = mv[1]
+						} else {
+							a.ver = pk.Version
+						}
+					}
+					addStrUniq(&a.ev, "pkg:"+pk.Name)
+				}
+			}
+		}
+	}
+
+	// Listening ports
+	portMap := map[int]string{
+		8008:  "patroni",
+		2379:  "etcd",
+		2380:  "etcd",
+		6432:  "pgbouncer",
+		26379: "redis-sentinel",
+		2181:  "zookeeper",
+		9181:  "clickhouse-keeper",
+		6033:  "proxysql",
+		9100:  "node-exporter",
+	}
+	for pn, rawLine := range sig.ListeningPorts {
+		if cid, ok := portMap[pn]; ok {
+			low := strings.ToLower(rawLine)
+			// Only infer from ambiguous ports like 8008 or 9100 if process name or already-hit companion corroborates
+			if pn == 8008 && !strings.Contains(low, "patroni") && hits["patroni"] == nil && primary != "postgresql" {
+				continue
+			}
+			if pn == 9100 && !strings.Contains(low, "node_exporter") && !strings.Contains(low, "exporter") {
+				continue
+			}
+			if a := touch(cid); a != nil {
+				addIntUniq(&a.ports, pn)
+				addStrUniq(&a.ev, fmt.Sprintf(":%d", pn))
+			}
+		}
+	}
+
+	// Text signals from ArchSummary (positive architecture declaration) and non-negated Notes lines
+	// Prevents false positives when AI notes say "未采集到 VIP / HAProxy 等统一入口".
+	archLow := strings.ToLower(sig.ArchSummary)
+	reNegated := regexp.MustCompile(`(?i)(未采集|未发现|未安装|未见|未配置|没有|不含|无\s*[a-z]|not\s+found|not\s+installed|without\s+|no\s+)`)
+	positiveNoteLines := []string{}
+	for _, rawLn := range strings.Split(strings.ReplaceAll(sig.Notes, "\r\n", "\n"), "\n") {
+		for _, sent := range strings.Split(rawLn, "。") {
+			s := strings.TrimSpace(sent)
+			if s == "" || reNegated.MatchString(s) {
+				continue
+			}
+			positiveNoteLines = append(positiveNoteLines, strings.ToLower(s))
+		}
+	}
+	notesPositive := strings.Join(positiveNoteLines, "\n")
+
+	if strings.TrimSpace(archLow) != "" || strings.TrimSpace(notesPositive) != "" {
+		textMatchers := []struct {
+			cid          string
+			token        string
+			allowInNotes bool
+		}{
+			{"patroni", "patroni", true},
+			{"etcd", "etcd", true},
+			{"pgbackrest", "pgbackrest", true},
+			{"pgbouncer", "pgbouncer", false},
+			{"haproxy", "haproxy", false},
+			{"keepalived", "keepalived", false},
+			{"redis-sentinel", "sentinel", false},
+			{"zookeeper", "zookeeper", true},
+			{"clickhouse-keeper", "clickhouse-keeper", true},
+			{"proxysql", "proxysql", false},
+			{"node-exporter", "node_exporter", true},
+		}
+		for _, m := range textMatchers {
+			matched := strings.Contains(archLow, m.token) || (m.allowInNotes && strings.Contains(notesPositive, m.token))
+			if matched {
+				// Avoid false positive on generic "sentinel" unless primary is redis/valkey
+				if m.cid == "redis-sentinel" && primary != "redis" && primary != "valkey" {
+					continue
+				}
+				if a := touch(m.cid); a != nil {
+					addStrUniq(&a.ev, "架构摘要")
+				}
+			}
+		}
+	}
+
+	if len(hits) == 0 {
+		return []mwpack.ImportedCompanion{}
+	}
+
+	// Deterministic canonical ordering matching CompanionCatalog
+	orderIdx := map[string]int{}
+	for i, cd := range mwpack.CompanionCatalog {
+		orderIdx[cd.ID] = i
+	}
+	ids := make([]string, 0, len(hits))
+	for cid := range hits {
+		ids = append(ids, cid)
+	}
+	sort.Slice(ids, func(i, j int) bool {
+		oi, oki := orderIdx[ids[i]]
+		oj, okj := orderIdx[ids[j]]
+		if oki && okj {
+			return oi < oj
+		}
+		if oki != okj {
+			return oki
+		}
+		return ids[i] < ids[j]
+	})
+
+	out := make([]mwpack.ImportedCompanion, 0, len(ids))
+	for _, cid := range ids {
+		a := hits[cid]
+		def, hasDef := mwpack.LookupCompanionDef(cid)
+		cm := mwpack.ImportedCompanion{
+			Component:    cid,
+			DisplayName:  cid,
+			Version:      a.ver,
+			Kind:         "companion",
+			Role:         "node",
+			ServiceUnits: a.units,
+			ConfigPaths:  a.cfgs,
+			DataDirs:     a.datas,
+			Ports:        a.ports,
+			Evidence:     strings.Join(a.ev, " · "),
+			Inferred:     true,
+		}
+		if hasDef {
+			cm.DisplayName = def.Name
+			cm.Kind = def.Kind
+			cm.Role = def.DefaultRole
+			if len(cm.Ports) == 0 {
+				for _, dp := range def.DefaultPorts {
+					cm.Ports = append(cm.Ports, dp.Port)
+				}
+			}
+		}
+		if cid == "patroni" {
+			if len(sig.PatroniPlacement) > 0 {
+				cm.Placement = sig.PatroniPlacement
+			} else if len(primaryPlacement) > 0 {
+				cm.Placement = primaryPlacement
+			}
+			cm.Hosts = append([]string(nil), allHosts...)
+		} else if cid == "etcd" && len(sig.EtcdHosts) > 0 {
+			cm.Hosts = append([]string(nil), sig.EtcdHosts...)
+		} else if len(allHosts) > 0 {
+			cm.Hosts = append([]string(nil), allHosts...)
+		}
+		out = append(out, cm)
+	}
+	return out
+}
+
+func synthesizeImportArchSummary(compID, displayName string, hosts []importHostInput, companions []mwpack.ImportedCompanion, hasPatroni bool) string {
+	n := len(hosts)
+	if n == 0 {
+		return ""
+	}
+	var compNames []string
+	for _, cm := range companions {
+		if cm.Kind == "monitoring" || cm.Kind == "backup" {
+			continue
+		}
+		compNames = append(compNames, firstNonEmptyStr(cm.DisplayName, cm.Component))
+	}
+	if len(compNames) > 0 {
+		primCnt, repCnt := 0, 0
+		for _, h := range hosts {
+			r := strings.ToLower(h.Role)
+			if r == "primary" || r == "master" {
+				primCnt++
+			} else if r == "replica" || r == "standby" || r == "secondary" {
+				repCnt++
+			}
+		}
+		roleNote := ""
+		if primCnt > 0 && repCnt > 0 {
+			roleNote = fmt.Sprintf("（%d 主 %d 从）", primCnt, repCnt)
+		}
+		return fmt.Sprintf("%d 节点 %s 高可用集群%s", n, strings.Join(compNames, " + "), roleNote)
+	}
+	if n == 1 {
+		return "存量单节点实例"
+	}
+	return fmt.Sprintf("存量 %d 节点集群", n)
+}
+
+func mergeCompanionLists(primaryComp string, lists ...[]mwpack.ImportedCompanion) []mwpack.ImportedCompanion {
+	primary := mwpack.NormalizeImportComponentID(primaryComp)
+	byID := map[string]mwpack.ImportedCompanion{}
+	var order []string
+	appendUniqStr := func(base, extra []string) []string {
+		seen := map[string]bool{}
+		out := make([]string, 0, len(base)+len(extra))
+		for _, s := range base {
+			s = strings.TrimSpace(s)
+			if s != "" && !seen[s] {
+				seen[s] = true
+				out = append(out, s)
+			}
+		}
+		for _, s := range extra {
+			s = strings.TrimSpace(s)
+			if s != "" && !seen[s] {
+				seen[s] = true
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	appendUniqInt := func(base, extra []int) []int {
+		seen := map[int]bool{}
+		out := make([]int, 0, len(base)+len(extra))
+		for _, p := range base {
+			if p > 0 && !seen[p] {
+				seen[p] = true
+				out = append(out, p)
+			}
+		}
+		for _, p := range extra {
+			if p > 0 && !seen[p] {
+				seen[p] = true
+				out = append(out, p)
+			}
+		}
+		return out
+	}
+
+	for _, list := range lists {
+		for _, raw := range list {
+			cid := mwpack.NormalizeCompanionID(firstNonEmptyStr(raw.Component, raw.DisplayName))
+			if cid == "" || cid == primary {
+				continue
+			}
+			def, hasDef := mwpack.LookupCompanionDef(cid)
+			cm := raw
+			cm.Component = cid
+			if cm.DisplayName == "" {
+				if hasDef {
+					cm.DisplayName = def.Name
+				} else {
+					cm.DisplayName = cid
+				}
+			}
+			if cm.Kind == "" {
+				if hasDef {
+					cm.Kind = def.Kind
+				} else {
+					cm.Kind = "companion"
+				}
+			}
+			if cm.Role == "" && hasDef {
+				cm.Role = def.DefaultRole
+			}
+			if len(cm.Ports) == 0 && hasDef {
+				for _, dp := range def.DefaultPorts {
+					cm.Ports = append(cm.Ports, dp.Port)
+				}
+			}
+			if cur, exists := byID[cid]; exists {
+				if cur.Version == "" {
+					cur.Version = cm.Version
+				}
+				if len(cur.Hosts) == 0 {
+					cur.Hosts = cm.Hosts
+				}
+				if len(cur.Placement) == 0 {
+					cur.Placement = cm.Placement
+				}
+				cur.Ports = appendUniqInt(cur.Ports, cm.Ports)
+				cur.ServiceUnits = appendUniqStr(cur.ServiceUnits, cm.ServiceUnits)
+				cur.ConfigPaths = appendUniqStr(cur.ConfigPaths, cm.ConfigPaths)
+				cur.DataDirs = appendUniqStr(cur.DataDirs, cm.DataDirs)
+				if cur.Evidence == "" {
+					cur.Evidence = cm.Evidence
+				}
+				cur.Inferred = cur.Inferred && cm.Inferred
+				byID[cid] = cur
+			} else {
+				byID[cid] = cm
+				order = append(order, cid)
+			}
+		}
+	}
+
+	out := make([]mwpack.ImportedCompanion, 0, len(order))
+	for _, cid := range order {
+		out = append(out, byID[cid])
+	}
+	return out
 }
 
 func mergeImportDrafts(aiD, det importParseDraft) importParseDraft {
@@ -772,6 +1570,29 @@ func mergeImportDrafts(aiD, det importParseDraft) importParseDraft {
 	}
 	if len(out.Hosts) == 0 {
 		out.Hosts = det.Hosts
+	} else if len(det.Hosts) > 0 {
+		// Backfill missing host disks from deterministic df -hT detection
+		detDiskByIP := map[string]string{}
+		fallbackDisk := ""
+		for _, dh := range det.Hosts {
+			if dh.Disk != "" {
+				if dh.IP != "" {
+					detDiskByIP[dh.IP] = dh.Disk
+				}
+				if fallbackDisk == "" {
+					fallbackDisk = dh.Disk
+				}
+			}
+		}
+		for i := range out.Hosts {
+			if out.Hosts[i].Disk == "" {
+				if d := detDiskByIP[out.Hosts[i].IP]; d != "" {
+					out.Hosts[i].Disk = d
+				} else if fallbackDisk != "" {
+					out.Hosts[i].Disk = fallbackDisk
+				}
+			}
+		}
 	}
 	if len(out.ServiceUnits) == 0 {
 		out.ServiceUnits = det.ServiceUnits
@@ -821,10 +1642,27 @@ func mergeImportDrafts(aiD, det importParseDraft) importParseDraft {
 	}
 	if out.Params == nil {
 		out.Params = map[string]any{}
+	} else {
+		// Remove noisy OS hardware attributes if AI placed them into middleware params
+		for _, noise := range []string{"arch", "cpu_cores", "kernel", "mem", "hostname", "fqdn"} {
+			delete(out.Params, noise)
+		}
 	}
 	if out.Packages == nil {
 		out.Packages = []mwpack.ImportedPkg{}
 	}
+	// Merge companions from AI + deterministic parser + final safety-net inference on merged metadata
+	safetyCompanions := inferCompanionsFromSignals(companionSignals{
+		PrimaryComp:  out.Component,
+		Hosts:        out.Hosts,
+		ServiceUnits: out.ServiceUnits,
+		ConfigPaths:  out.ConfigPaths,
+		DataDirs:     out.DataDirs,
+		Packages:     out.Packages,
+		ArchSummary:  out.ArchSummary,
+		Notes:        out.Notes,
+	})
+	out.Companions = mergeCompanionLists(out.Component, out.Companions, det.Companions, safetyCompanions)
 	return out
 }
 
@@ -996,6 +1834,15 @@ func buildImportedDeployment(cat *mwpack.Catalog, req importClusterReq, user, no
 		pkgs = append(pkgs, mwpack.ImportedPkg{Name: pn, Version: pv, Role: role})
 	}
 
+	// Normalize companions & materialize topology companions as first-class InstanceSpecs.
+	normCompanions := mergeCompanionLists(compID, req.Companions)
+	allHostNames := make([]string, 0, len(hosts))
+	validHostSet := map[string]bool{}
+	for _, h := range hosts {
+		allHostNames = append(allHostNames, h.Name)
+		validHostSet[h.Name] = true
+	}
+
 	meta := &mwpack.ImportedMeta{
 		SourceKind:        sourceKind,
 		ManagedCatalog:    inCatalog,
@@ -1012,6 +1859,7 @@ func buildImportedDeployment(cat *mwpack.Catalog, req importClusterReq, user, no
 		DataDirs:          cleanSlice(req.DataDirs),
 		LogDirs:           cleanSlice(req.LogDirs),
 		Endpoints:         endpoints,
+		Companions:        normCompanions,
 		Packages:          pkgs,
 		Notes:             strings.TrimSpace(req.Notes),
 		LastProbedAt:      strings.TrimSpace(req.LastProbedAt),
@@ -1029,6 +1877,142 @@ func buildImportedDeployment(cat *mwpack.Catalog, req importClusterReq, user, no
 		}
 	}
 
+	instances := []mwpack.InstanceSpec{{
+		ID:        instID,
+		Component: compID,
+		Version:   ver,
+		Placement: placement,
+		Params:    req.Params,
+	}}
+	usedInstIDs := map[string]bool{instID: true}
+	compInstID := map[string]string{compID: instID}
+
+	for _, cm := range normCompanions {
+		def, hasDef := mwpack.LookupCompanionDef(cm.Component)
+		isTopo := true
+		if cm.Kind == "backup" || cm.Kind == "monitoring" {
+			isTopo = false
+		} else if hasDef && !def.Topology {
+			isTopo = false
+		}
+		if !isTopo {
+			continue
+		}
+
+		cInstID := cm.Component
+		if cat != nil {
+			if c, ok := cat.Get(cm.Component); ok && c.Short != "" {
+				cInstID = c.Short
+			}
+		}
+		if usedInstIDs[cInstID] {
+			cInstID = cm.Component
+		}
+		if usedInstIDs[cInstID] {
+			cInstID = cm.Component + "-comp"
+		}
+		usedInstIDs[cInstID] = true
+		compInstID[cm.Component] = cInstID
+
+		cPlace := map[string][]string{}
+		if len(cm.Placement) > 0 {
+			for rk, hs := range cm.Placement {
+				var keep []string
+				for _, hn := range hs {
+					if validHostSet[hn] {
+						keep = append(keep, hn)
+					}
+				}
+				if len(keep) > 0 {
+					cPlace[rk] = keep
+				}
+			}
+		}
+		if len(cPlace) == 0 {
+			if hasDef && def.InheritRoles && len(placement) > 0 {
+				for rk, hs := range placement {
+					cPlace[rk] = append([]string(nil), hs...)
+				}
+			} else {
+				var targetHosts []string
+				for _, hn := range cm.Hosts {
+					if validHostSet[hn] {
+						targetHosts = append(targetHosts, hn)
+					}
+				}
+				if len(targetHosts) == 0 {
+					targetHosts = append([]string(nil), allHostNames...)
+				}
+				rk := strings.TrimSpace(cm.Role)
+				if rk == "" && hasDef {
+					rk = def.DefaultRole
+				}
+				if rk == "" {
+					rk = "node"
+				}
+				cPlace[rk] = targetHosts
+			}
+		}
+
+		cParams := map[string]any{}
+		if len(cm.ServiceUnits) > 0 {
+			cParams["service_units"] = strings.Join(cm.ServiceUnits, ", ")
+		}
+		if len(cm.ConfigPaths) > 0 {
+			cParams["config_paths"] = strings.Join(cm.ConfigPaths, ", ")
+		}
+		if len(cm.DataDirs) > 0 {
+			cParams["data_dirs"] = strings.Join(cm.DataDirs, ", ")
+		}
+		instances = append(instances, mwpack.InstanceSpec{
+			ID:        cInstID,
+			Component: cm.Component,
+			Version:   strings.TrimSpace(cm.Version),
+			Placement: cPlace,
+			Params:    cParams,
+		})
+	}
+
+	// Wire cross-instance Uses (e.g. Patroni -> etcd DCS + PostgreSQL database; LB -> backend)
+	dcsID := firstNonEmptyStr(compInstID["etcd"], compInstID["consul"], compInstID["zookeeper"])
+	lbID := firstNonEmptyStr(compInstID["haproxy"], compInstID["nginx"], compInstID["pgbouncer"], compInstID["proxysql"])
+	for i := range instances {
+		sp := &instances[i]
+		switch sp.Component {
+		case "patroni":
+			if sp.Uses == nil {
+				sp.Uses = map[string]string{}
+			}
+			if compID == "postgresql" {
+				sp.Uses["postgresql-database"] = instID
+			}
+			if dcsID != "" {
+				sp.Uses["dcs"] = dcsID
+			}
+		case "postgresql":
+			if dcsID != "" && compInstID["patroni"] == "" {
+				if sp.Uses == nil {
+					sp.Uses = map[string]string{}
+				}
+				sp.Uses["dcs"] = dcsID
+			}
+		case "haproxy", "nginx", "pgbouncer", "proxysql", "maxscale", "obproxy":
+			if i > 0 {
+				if sp.Uses == nil {
+					sp.Uses = map[string]string{}
+				}
+				sp.Uses["backend"] = instID
+			}
+		case "keepalived":
+			if i > 0 {
+				if sp.Uses == nil {
+					sp.Uses = map[string]string{}
+				}
+				sp.Uses["service"] = firstNonEmptyStr(lbID, instID)
+			}
+		}
+	}
+
 	dep := &mwpack.Deployment{
 		Schema:       mwpack.DeploymentSchema,
 		DeliveryMode: "imported",
@@ -1037,14 +2021,8 @@ func buildImportedDeployment(cat *mwpack.Catalog, req importClusterReq, user, no
 		Controller:   hosts[0].Name,
 		Platform:     strings.TrimSpace(req.Platform),
 		Hosts:        hosts,
-		Instances: []mwpack.InstanceSpec{{
-			ID:        instID,
-			Component: compID,
-			Version:   ver,
-			Placement: placement,
-			Params:    req.Params,
-		}},
-		Imported: meta,
+		Instances:    instances,
+		Imported:     meta,
 	}
 	return dep, compID, displayName, ver, nil
 }
@@ -1212,31 +2190,74 @@ func (s *storeServer) handleClusterBaseline(w http.ResponseWriter, r *http.Reque
 			ep.Role = normalizeImportEndpointRole(ep.Role)
 			normEps = append(normEps, ep)
 		}
-		s.writeJSON(w, 200, importClusterReq{
-			ID:           dep.ID,
-			Title:        dep.Title,
-			Component:    compID,
-			DisplayName:  firstNonEmptyStr(meta.DisplayName, f.Current.AppName),
-			Category:     meta.Category,
-			Icon:         meta.Icon,
-			Color:        meta.Color,
-			Version:      ver,
-			ExactVersion: meta.ExactVersion,
-			Platform:     dep.Platform,
-			OSDetail:     meta.OSDetail,
-			SourceKind:   meta.SourceKind,
-			DeployMethod: meta.DeployMethod,
-			ArchSummary:  meta.ArchSummary,
+		companions := append([]mwpack.ImportedCompanion(nil), meta.Companions...)
+		if len(companions) == 0 && len(dep.Instances) > 1 {
+			for _, sp := range dep.Instances[1:] {
+				def, hasDef := mwpack.LookupCompanionDef(sp.Component)
+				cm := mwpack.ImportedCompanion{
+					Component:   sp.Component,
+					DisplayName: sp.Component,
+					Version:     sp.Version,
+					Placement:   sp.Placement,
+				}
+				if hasDef {
+					cm.DisplayName = def.Name
+					cm.Kind = def.Kind
+					cm.Role = def.DefaultRole
+					for _, dp := range def.DefaultPorts {
+						cm.Ports = append(cm.Ports, dp.Port)
+					}
+				}
+				companions = append(companions, cm)
+			}
+		}
+		existingComp := map[string]bool{}
+		for _, cm := range companions {
+			existingComp[mwpack.NormalizeCompanionID(cm.Component)] = true
+		}
+		inferredAll := inferCompanionsFromSignals(companionSignals{
+			PrimaryComp:  compID,
 			Hosts:        hosts,
-			Endpoints:    normEps,
 			ServiceUnits: meta.ServiceUnits,
 			ConfigPaths:  meta.ConfigPaths,
 			DataDirs:     meta.DataDirs,
-			LogDirs:      meta.LogDirs,
-			Params:       params,
 			Packages:     meta.Packages,
+			ArchSummary:  meta.ArchSummary,
 			Notes:        meta.Notes,
-			LastProbedAt: meta.LastProbedAt,
+		})
+		var suggestedCompanions []mwpack.ImportedCompanion
+		for _, cand := range inferredAll {
+			if !existingComp[mwpack.NormalizeCompanionID(cand.Component)] {
+				suggestedCompanions = append(suggestedCompanions, cand)
+			}
+		}
+		s.writeJSON(w, 200, importClusterReq{
+			ID:                  dep.ID,
+			Title:               dep.Title,
+			Component:           compID,
+			DisplayName:         firstNonEmptyStr(meta.DisplayName, f.Current.AppName),
+			Category:            meta.Category,
+			Icon:                meta.Icon,
+			Color:               meta.Color,
+			Version:             ver,
+			ExactVersion:        meta.ExactVersion,
+			Platform:            dep.Platform,
+			OSDetail:            meta.OSDetail,
+			SourceKind:          meta.SourceKind,
+			DeployMethod:        meta.DeployMethod,
+			ArchSummary:         meta.ArchSummary,
+			Hosts:               hosts,
+			Endpoints:           normEps,
+			Companions:          companions,
+			SuggestedCompanions: suggestedCompanions,
+			ServiceUnits:        meta.ServiceUnits,
+			ConfigPaths:         meta.ConfigPaths,
+			DataDirs:            meta.DataDirs,
+			LogDirs:             meta.LogDirs,
+			Params:              params,
+			Packages:            meta.Packages,
+			Notes:               meta.Notes,
+			LastProbedAt:        meta.LastProbedAt,
 		})
 
 	case "PUT":

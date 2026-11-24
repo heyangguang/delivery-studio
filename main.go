@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.333-dev"
+	version            = "1.0.334-dev"
 	currentReleaseDate = "2026-11-25"
 )
 
@@ -65,6 +65,22 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.334-dev",
+		Date:    "2026-11-25",
+		Title:   "存量纳管多组件伴生架构识别与导入工作台 UI 全面重构",
+		TitleEn: "Multi-component brownfield stack recognition and Import Workbench UI redesign",
+		Highlights: []string{
+			"新增伴生架构组件结构化识别与多实例拓扑建模（自动识别 Patroni、etcd、HAProxy、Keepalived、PgBouncer、pgBackRest、Redis Sentinel、ZooKeeper 等），完整呈现角色、端口与流复制/Raft 拓扑",
+			"增强 PostgreSQL/Patroni/etcd 等只读采集探针并新增存量集群一键补全未建模伴生组件能力，同时中文化读写/只读/管理访问入口与监听端口标签",
+			"按照 Kyndryl Swiss Leica 设计体系全面重构导入三步工作台（免滚动右侧身份栏、浅/暗双模式代码框、AI 分阶段解析看板、组件栈编辑器）、存量基线档案卡与编辑基线抽屉，修复表单溢出与路径拼接缺陷",
+		},
+		HighlightsEn: []string{
+			"Structured multi-component companion recognition and topology modeling (Patroni, etcd, HAProxy, Keepalived, PgBouncer, pgBackRest, Redis Sentinel, ZooKeeper) with real ports and replication/Raft flows",
+			"Upgraded read-only probe scripts and added 1-click companion stack recovery for existing brownfield clusters plus localized endpoint/port labels",
+			"Full Swiss Leica UI redesign across Import Steps 1-3, Baseline Archive card, and Edit Baseline drawer (sticky identity rail, light/dark probe viewer, staged AI panel, InputTag chips, zero overflow)",
+		},
+	},
 	{
 		Version: "1.0.333-dev",
 		Date:    "2026-11-25",

@@ -22,29 +22,49 @@ type ImportedEndpoint struct {
 	Role    string `yaml:"role,omitempty" json:"role,omitempty"` // readwrite | readonly | admin
 }
 
+// ImportedCompanion records a co-located or supporting component detected alongside
+// the primary middleware (e.g. Patroni, etcd, HAProxy, Keepalived, PgBouncer,
+// pgBackRest, Redis Sentinel, ZooKeeper, ClickHouse Keeper, ProxySQL, OBProxy).
+type ImportedCompanion struct {
+	Component    string              `yaml:"component" json:"component"`
+	DisplayName  string              `yaml:"display_name,omitempty" json:"display_name,omitempty"`
+	Version      string              `yaml:"version,omitempty" json:"version,omitempty"`
+	Kind         string              `yaml:"kind,omitempty" json:"kind,omitempty"` // ha_manager | dcs | proxy | vip | pooler | backup | monitoring | companion
+	Role         string              `yaml:"role,omitempty" json:"role,omitempty"` // default role when Placement is empty
+	Hosts        []string            `yaml:"hosts,omitempty" json:"hosts,omitempty"`
+	Placement    map[string][]string `yaml:"placement,omitempty" json:"placement,omitempty"`
+	Ports        []int               `yaml:"ports,omitempty" json:"ports,omitempty"`
+	ServiceUnits []string            `yaml:"service_units,omitempty" json:"service_units,omitempty"`
+	ConfigPaths  []string            `yaml:"config_paths,omitempty" json:"config_paths,omitempty"`
+	DataDirs     []string            `yaml:"data_dirs,omitempty" json:"data_dirs,omitempty"`
+	Evidence     string              `yaml:"evidence,omitempty" json:"evidence,omitempty"`
+	Inferred     bool                `yaml:"inferred,omitempty" json:"inferred,omitempty"`
+}
+
 // ImportedMeta holds onboarding provenance and runtime baseline details for brownfield clusters
 // onboarded without initial platform deployment (DeliveryMode == "imported").
 type ImportedMeta struct {
-	SourceKind        string             `yaml:"source_kind,omitempty" json:"source_kind,omitempty"` // manual | probe | ai_doc
-	ManagedCatalog    bool               `yaml:"managed_catalog,omitempty" json:"managed_catalog,omitempty"`
-	DisplayName       string             `yaml:"display_name,omitempty" json:"display_name,omitempty"`
-	Category          string             `yaml:"category,omitempty" json:"category,omitempty"`
-	Icon              string             `yaml:"icon,omitempty" json:"icon,omitempty"`
-	Color             string             `yaml:"color,omitempty" json:"color,omitempty"`
-	DeployMethod      string             `yaml:"deploy_method,omitempty" json:"deploy_method,omitempty"` // systemd | docker | binary | k8s | other
-	ArchSummary       string             `yaml:"arch_summary,omitempty" json:"arch_summary,omitempty"`
-	ExactVersion      string             `yaml:"exact_version,omitempty" json:"exact_version,omitempty"`
-	OSDetail          string             `yaml:"os_detail,omitempty" json:"os_detail,omitempty"`
-	ServiceUnits      []string           `yaml:"service_units,omitempty" json:"service_units,omitempty"`
-	ConfigPaths       []string           `yaml:"config_paths,omitempty" json:"config_paths,omitempty"`
-	DataDirs          []string           `yaml:"data_dirs,omitempty" json:"data_dirs,omitempty"`
-	LogDirs           []string           `yaml:"log_dirs,omitempty" json:"log_dirs,omitempty"`
-	Endpoints         []ImportedEndpoint `yaml:"endpoints,omitempty" json:"endpoints,omitempty"`
-	Packages          []ImportedPkg      `yaml:"packages,omitempty" json:"packages,omitempty"`
-	Notes             string             `yaml:"notes,omitempty" json:"notes,omitempty"`
-	LastProbedAt      string             `yaml:"last_probed_at,omitempty" json:"last_probed_at,omitempty"`
-	BaselineUpdatedAt string             `yaml:"baseline_updated_at,omitempty" json:"baseline_updated_at,omitempty"`
-	BaselineUpdatedBy string             `yaml:"baseline_updated_by,omitempty" json:"baseline_updated_by,omitempty"`
+	SourceKind        string              `yaml:"source_kind,omitempty" json:"source_kind,omitempty"` // manual | probe | ai_doc
+	ManagedCatalog    bool                `yaml:"managed_catalog,omitempty" json:"managed_catalog,omitempty"`
+	DisplayName       string              `yaml:"display_name,omitempty" json:"display_name,omitempty"`
+	Category          string              `yaml:"category,omitempty" json:"category,omitempty"`
+	Icon              string              `yaml:"icon,omitempty" json:"icon,omitempty"`
+	Color             string              `yaml:"color,omitempty" json:"color,omitempty"`
+	DeployMethod      string              `yaml:"deploy_method,omitempty" json:"deploy_method,omitempty"` // systemd | docker | binary | k8s | other
+	ArchSummary       string              `yaml:"arch_summary,omitempty" json:"arch_summary,omitempty"`
+	ExactVersion      string              `yaml:"exact_version,omitempty" json:"exact_version,omitempty"`
+	OSDetail          string              `yaml:"os_detail,omitempty" json:"os_detail,omitempty"`
+	ServiceUnits      []string            `yaml:"service_units,omitempty" json:"service_units,omitempty"`
+	ConfigPaths       []string            `yaml:"config_paths,omitempty" json:"config_paths,omitempty"`
+	DataDirs          []string            `yaml:"data_dirs,omitempty" json:"data_dirs,omitempty"`
+	LogDirs           []string            `yaml:"log_dirs,omitempty" json:"log_dirs,omitempty"`
+	Endpoints         []ImportedEndpoint  `yaml:"endpoints,omitempty" json:"endpoints,omitempty"`
+	Companions        []ImportedCompanion `yaml:"companions,omitempty" json:"companions,omitempty"`
+	Packages          []ImportedPkg       `yaml:"packages,omitempty" json:"packages,omitempty"`
+	Notes             string              `yaml:"notes,omitempty" json:"notes,omitempty"`
+	LastProbedAt      string              `yaml:"last_probed_at,omitempty" json:"last_probed_at,omitempty"`
+	BaselineUpdatedAt string              `yaml:"baseline_updated_at,omitempty" json:"baseline_updated_at,omitempty"`
+	BaselineUpdatedBy string              `yaml:"baseline_updated_by,omitempty" json:"baseline_updated_by,omitempty"`
 }
 
 // Deployment is what an implementer fills in (through the form or as YAML) for one customer cluster.

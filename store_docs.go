@@ -766,6 +766,52 @@ func (s *storeServer) buildImportedBaselineDoc(f clusterFacts, first storeJob) *
 			b.p(tr(lang, "暂未登记对外访问入口。", "No access endpoints recorded."))
 		}
 	}
+	if meta != nil && len(meta.Companions) > 0 {
+		b.h(2, tr(lang, "2.2 伴生与支撑组件栈", "2.2 Companion & Supporting Stack"))
+		kindLabel := map[string]string{
+			"ha_manager": tr(lang, "高可用管理", "HA Manager"),
+			"dcs":        tr(lang, "分布式协调 (DCS)", "Consensus / DCS"),
+			"proxy":      tr(lang, "代理与负载均衡", "Proxy / LB"),
+			"vip":        tr(lang, "虚拟 IP (VRRP)", "VIP / VRRP"),
+			"pooler":     tr(lang, "连接池", "Connection Pooler"),
+			"backup":     tr(lang, "备份工具", "Backup"),
+			"monitoring": tr(lang, "监控采集", "Monitoring"),
+			"companion":  tr(lang, "伴生组件", "Companion"),
+		}
+		var compRows [][]string
+		for _, cm := range meta.Companions {
+			var portStrs []string
+			for _, pn := range cm.Ports {
+				if pn > 0 {
+					portStrs = append(portStrs, fmt.Sprint(pn))
+				}
+			}
+			hostSummary := strings.Join(cm.Hosts, ", ")
+			if hostSummary == "" && len(cm.Placement) > 0 {
+				var parts []string
+				for rk, hs := range cm.Placement {
+					parts = append(parts, fmt.Sprintf("%s: %s", rk, strings.Join(hs, ",")))
+				}
+				hostSummary = strings.Join(parts, "; ")
+			}
+			compRows = append(compRows, []string{
+				firstNonEmptyStr(cm.DisplayName, cm.Component),
+				firstNonEmptyStr(kindLabel[cm.Kind], cm.Kind, tr(lang, "伴生组件", "Companion")),
+				firstNonEmptyStr(cm.Version, "—"),
+				firstNonEmptyStr(strings.Join(portStrs, ", "), "—"),
+				firstNonEmptyStr(hostSummary, "—"),
+				firstNonEmptyStr(cm.Evidence, strings.Join(cm.ServiceUnits, ", "), "—"),
+			})
+		}
+		b.table([]string{
+			tr(lang, "组件", "Component"),
+			tr(lang, "定位", "Role"),
+			tr(lang, "版本", "Version"),
+			tr(lang, "端口", "Ports"),
+			tr(lang, "部署节点", "Hosts"),
+			tr(lang, "识别依据", "Evidence"),
+		}, compRows)
+	}
 	b.h(1, tr(lang, "3 运行环境与路径基线", "3 Runtime Environment & Path Baseline"))
 	if meta != nil {
 		var rows [][]string

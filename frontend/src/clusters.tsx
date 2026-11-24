@@ -63,6 +63,7 @@ import type {
 } from "./shared";
 import { go } from "./router";
 import {
+  AppGlyph,
   DeliveryModeTag,
   InstanceGraph,
   StatusBadge,
@@ -80,7 +81,12 @@ import { DocsTab, prefetchClusterDocs } from "./docs";
 import { AIDock, Spark, useAIStatus } from "./aichat";
 import { ClusterConfig } from "./clusterconfig";
 import { ClusterSecurityTab } from "./clustersecurity";
-import { ImportedBaselineModal } from "./importcluster";
+import {
+  ImportedBaselineModal,
+  companionKindMeta,
+  detectMissingCompanionsFromMeta,
+  localizeEndpointTitle,
+} from "./importcluster";
 import {
   ClusterRehearsal,
   computeEffectiveClusterChanges,
@@ -733,6 +739,19 @@ export function ClusterDetail({
             canRehearse={canRehearse}
             rehearsals={rehearsals}
             onOpenBaseline={isImported ? (m) => setBaselineModal(m) : undefined}
+            onSavedBaseline={
+              isImported
+                ? async () => {
+                    if (c.current) {
+                      putDetailCache(
+                        c.current,
+                        await api<JobDetail>(`/api/jobs/${encodeURIComponent(c.current)}`),
+                      );
+                    }
+                    await reload();
+                  }
+                : undefined
+            }
           />
         )}
       </div>
@@ -1134,19 +1153,39 @@ function AppliedChangesLedger({
   );
 }
 
+function splitBaselineNotes(raw?: string): string[] {
+  const s = (raw || "").trim();
+  if (!s) return [];
+  const byLines = s
+    .split(/\r?\n+/)
+    .map((x) => x.replace(/^[•\-*·]\s*/, "").trim())
+    .filter(Boolean);
+  if (byLines.length > 1) return byLines;
+  // Split legacy single-paragraph prose into crisp scannable sentences
+  const bySentences = s
+    .split(/(?<=。)\s*/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+  return bySentences.length > 1 ? bySentences : [s];
+}
+
 function Overview({
   c,
   canRehearse,
   rehearsals,
   onOpenBaseline,
+  onSavedBaseline,
 }: {
   c: ClusterView;
   appIcon?: string;
   canRehearse: boolean;
   rehearsals: ChangeRehearsal[] | null;
   onOpenBaseline?: (mode: "edit" | "probe") => void;
+  onSavedBaseline?: () => Promise<void>;
 }) {
   useLang();
+  const [notesExpanded, setNotesExpanded] = useState(false);
+  const [recoveringStack, setRecoveringStack] = useState(false);
   const isImported = c.delivery_mode === "imported";
   const imp = c.imported;
   const holder = c.plans.find((p) => p.id === c.holder);
@@ -1188,6 +1227,47 @@ function Overview({
         ? bi("文档 / 配置识别", "Doc / Config Extract")
         : bi("手工建档", "Manual Onboarding");
 
+  const missingCompanions = useMemo(
+    () => (isImported ? detectMissingCompanionsFromMeta(c.app_id, imp) : []),
+    [isImported, c.app_id, imp],
+  );
+  const noteItems = useMemo(() => splitBaselineNotes(imp?.notes), [imp?.notes]);
+  const visibleNotes = notesExpanded ? noteItems : noteItems.slice(0, 2);
+
+  const handleAutoAdoptCompanions = async () => {
+    setRecoveringStack(true);
+    try {
+      const base = await api<Record<string, unknown>>(
+        `/api/clusters/${encodeURIComponent(c.id)}/baseline`,
+      );
+      const existing = Array.isArray(base.companions) ? base.companions : [];
+      const suggested = Array.isArray(base.suggested_companions)
+        ? base.suggested_companions
+        : [];
+      if (suggested.length === 0) {
+        onOpenBaseline?.("edit");
+        return;
+      }
+      const merged = [...existing, ...suggested];
+      await api(`/api/clusters/${encodeURIComponent(c.id)}/baseline`, {
+        method: "PUT",
+        body: JSON.stringify({ ...base, companions: merged }),
+      });
+      Message.success(
+        bi(
+          `已将 ${suggested.length} 个伴生组件纳入架构拓扑`,
+          `Adopted ${suggested.length} companion component(s) into topology`,
+        ),
+      );
+      window.dispatchEvent(new Event("mh-clusters-changed"));
+      if (onSavedBaseline) await onSavedBaseline();
+    } catch (e) {
+      Message.error((e as Error).message || bi("补全伴生组件失败", "Failed to adopt companions"));
+    } finally {
+      setRecoveringStack(false);
+    }
+  };
+
   return (
     <div className="cl-over">
       {isImported && (
@@ -1217,17 +1297,52 @@ function Overview({
                   </Button>
                 </>
               )}
-              {canRehearse && (
-                <Button
-                  size="small"
-                  type="primary"
-                  onClick={() => go({ name: "deliveries", id: c.id, tab: "rehearsal" })}
-                >
-                  {bi("发起变更演练", "Start Change Rehearsal")}
-                </Button>
-              )}
             </div>
           </div>
+
+          {/* Component Architecture Stack Strip */}
+          <div className="cl-imp-stack">
+            <span className="cl-imp-stack-lbl">{bi("架构组件栈", "Stack")}</span>
+            <span className="cl-imp-comp-pill is-primary">
+              <AppGlyph id={c.app_id} icon={c.icon} size={16} />
+              <b>{imp?.display_name || c.app_name}</b>
+              {(imp?.exact_version || c.version) && (
+                <span className="cl-imp-comp-ver">{imp?.exact_version || c.version}</span>
+              )}
+              <span className="cl-imp-comp-kind">{bi("主组件", "Primary")}</span>
+            </span>
+            {(imp?.companions || []).map((cm) => {
+              const km = companionKindMeta(cm.kind);
+              return (
+                <span key={cm.component} className="cl-imp-comp-pill">
+                  <AppGlyph id={cm.component} icon={cm.component} size={16} />
+                  <b>{cm.display_name || cm.component}</b>
+                  {cm.version && <span className="cl-imp-comp-ver">{cm.version}</span>}
+                  <span className="cl-imp-comp-kind">{km.label}</span>
+                </span>
+              );
+            })}
+          </div>
+
+          {/* Non-destructive 1-click recovery callout for legacy clusters with unmodeled companions */}
+          {missingCompanions.length > 0 && can("delivery.create") && (
+            <div className="cl-imp-recover-bar">
+              <span>
+                {bi("检测到基线线索中包含伴生组件 ", "Baseline signals mention companion components ")}
+                <b>{missingCompanions.join(" · ")}</b>
+                {bi("，尚未纳入运行拓扑与端口视图。", " not yet modeled in topology.")}
+              </span>
+              <Button
+                size="mini"
+                type="primary"
+                loading={recoveringStack}
+                onClick={handleAutoAdoptCompanions}
+              >
+                {bi("一键补全拓扑组件", "Adopt into Topology")}
+              </Button>
+            </div>
+          )}
+
           <div className="cl-imp-facts">
             <div className="cl-imp-fact">
               <span className="cl-imp-fact-k">{bi("精确版本", "Exact Version")}</span>
@@ -1239,40 +1354,30 @@ function Overview({
             </div>
             <div className="cl-imp-fact">
               <span className="cl-imp-fact-k">{bi("服务单元", "Service Units")}</span>
-              <span className="cl-imp-fact-v mono">
-                {imp?.service_units?.length ? imp.service_units.join(", ") : "—"}
+              <span className="cl-imp-fact-v">
+                {imp?.service_units?.length
+                  ? imp.service_units.map((u) => (
+                      <span key={u} className="cl-imp-path-chip">{u}</span>
+                    ))
+                  : "—"}
               </span>
             </div>
             <div className="cl-imp-fact">
               <span className="cl-imp-fact-k">{bi("配置路径", "Config Paths")}</span>
-              <span className="cl-imp-fact-v mono">
+              <span className="cl-imp-fact-v">
                 {imp?.config_paths?.length
-                  ? imp.config_paths.join(", ").split("/").map((seg, idx) => (
-                      <React.Fragment key={idx}>
-                        {idx > 0 && (
-                          <>
-                            /<wbr />
-                          </>
-                        )}
-                        {seg}
-                      </React.Fragment>
+                  ? imp.config_paths.map((p) => (
+                      <span key={p} className="cl-imp-path-chip">{p}</span>
                     ))
                   : "—"}
               </span>
             </div>
             <div className="cl-imp-fact">
               <span className="cl-imp-fact-k">{bi("数据目录", "Data Dirs")}</span>
-              <span className="cl-imp-fact-v mono">
+              <span className="cl-imp-fact-v">
                 {imp?.data_dirs?.length
-                  ? imp.data_dirs.join(", ").split("/").map((seg, idx) => (
-                      <React.Fragment key={idx}>
-                        {idx > 0 && (
-                          <>
-                            /<wbr />
-                          </>
-                        )}
-                        {seg}
-                      </React.Fragment>
+                  ? imp.data_dirs.map((d) => (
+                      <span key={d} className="cl-imp-path-chip">{d}</span>
                     ))
                   : "—"}
               </span>
@@ -1286,7 +1391,32 @@ function Overview({
               </span>
             </div>
           </div>
-          {imp?.notes && <div className="cl-imp-notes">{imp.notes}</div>}
+
+          {noteItems.length > 0 && (
+            <div className="cl-imp-notes-box">
+              <div className="cl-imp-notes-head">
+                <span className="cl-imp-notes-lbl">
+                  {bi(`现场线索与备注（${noteItems.length} 条）`, `Field Notes (${noteItems.length})`)}
+                </span>
+                {noteItems.length > 2 && (
+                  <button
+                    type="button"
+                    className="cl-imp-notes-toggle"
+                    onClick={() => setNotesExpanded((v) => !v)}
+                  >
+                    {notesExpanded
+                      ? bi("收起", "Collapse")
+                      : bi(`展开全部 ${noteItems.length} 条`, `Show all ${noteItems.length}`)}
+                  </button>
+                )}
+              </div>
+              <ul className="cl-imp-notes-list">
+                {visibleNotes.map((line, i) => (
+                  <li key={i}>{line}</li>
+                ))}
+              </ul>
+            </div>
+          )}
         </section>
       )}
       {!isImported && holder && <HolderCard c={c} p={holder} />}
@@ -1958,12 +2088,16 @@ function ClusterUnifiedOverview({
       Object.entries(i.fronts || {}).map(([epName, f]) => {
         const ep = (i.endpoints || []).find((x) => x.name === epName);
         const rawTitle = (ep?.title || "").trim();
+        const niceTitle =
+          /^(readwrite|readonly|admin|writer|reader)$/i.test(rawTitle) || !rawTitle
+            ? localizeEndpointTitle(rawTitle || epName, epName)
+            : rawTitle;
         const label = f.external
-          ? rawTitle
-            ? bi(`外部 · ${rawTitle}`, `External · ${rawTitle}`)
+          ? niceTitle
+            ? bi(`外部 · ${niceTitle}`, `External · ${niceTitle}`)
             : bi("外部入口", "External entry")
-          : rawTitle || bi("访问入口", "Entrypoint");
-        const isPrimary = /write|primary|master|主|写/i.test(`${epName} ${rawTitle}`);
+          : niceTitle || bi("访问入口", "Entrypoint");
+        const isPrimary = /write|primary|master|主|写/i.test(`${epName} ${niceTitle}`);
         return {
           key: `${i.id}.${epName}.${f.listen}`,
           label,
@@ -1979,10 +2113,23 @@ function ClusterUnifiedOverview({
     )
     .sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary) || a.listen - b.listen);
 
+  const localizePortName = (name: string) => {
+    const low = (name || "").trim().toLowerCase();
+    if (low === "readwrite" || low === "writer" || low === "rw") return bi("读写", "RW");
+    if (low === "readonly" || low === "reader" || low === "ro") return bi("只读", "RO");
+    if (low === "admin" || low === "mgmt") return bi("管理", "Admin");
+    if (low === "patroni-rest") return "Patroni API";
+    return name;
+  };
   const ports = real
-    .flatMap((i) => (i.ports || []).map((x) => ({ name: x.Name, port: x.Port })))
+    .flatMap((i) =>
+      (i.ports || []).map((x) => ({
+        name: localizePortName(x.Name),
+        port: x.Port,
+      })),
+    )
     .filter((x, idx, arr) => arr.findIndex((y) => y.name === x.name && y.port === x.port) === idx)
-    .slice(0, 8);
+    .slice(0, 10);
 
   const secrets = useMemo(() => {
     const out: { key: string; label: string; value: string }[] = [];

@@ -61,13 +61,37 @@ var ImportPresets = []ImportPreset{
 		ConfigHints:  []string{"/etc/patroni/patroni.yml", "/etc/postgresql/*/main/postgresql.conf", "/var/lib/pgsql/*/data/postgresql.conf"},
 		DataHints:    []string{"/data/pg", "/var/lib/postgresql", "/var/lib/pgsql"},
 		LogHints:     []string{"/var/log/postgresql", "/data/logs/postgresql"},
-		PkgMatch:     "postgres|patroni|pgbackrest|pgbouncer|percona-postgresql|etcd",
-		ProbeSnippet: `echo "--- [POSTGRESQL / PATRONI] ---"
+		PkgMatch:     "postgres|patroni|pgbackrest|pgbouncer|percona-postgresql|etcd|haproxy|keepalived",
+		ProbeSnippet: `echo "--- [POSTGRESQL / PATRONI / ETCD] ---"
 command -v psql >/dev/null 2>&1 && psql --version || true
 for b in /usr/lib/postgresql/*/bin/postgres /usr/pgsql-*/bin/postgres; do [ -x "$b" ] && "$b" --version; done 2>/dev/null || true
-command -v patronictl >/dev/null 2>&1 && { [ -f /etc/patroni/patroni.yml ] && patronictl -c /etc/patroni/patroni.yml list 2>/dev/null || true; }
+ps -ef 2>/dev/null | grep -E 'postgres.*-D|patroni' | grep -v grep | head -n 10 || true
+PATRONI_CFG=""
+for cand in /etc/patroni/patroni.yml /etc/patroni/patroni.yaml /etc/patroni.yml /data/patroni/patroni.yml; do
+  [ -r "$cand" ] && { PATRONI_CFG="$cand"; break; }
+done
+if [ -z "$PATRONI_CFG" ]; then
+  PATRONI_CFG="$(systemctl show patroni -p ExecStart --no-pager 2>/dev/null | grep -oE '/[^[:space:];"]+patroni[^[:space:];"]*\.ya?ml' | head -n 1 || true)"
+fi
+if [ -n "$PATRONI_CFG" ] && [ -r "$PATRONI_CFG" ]; then
+  echo "# file: $PATRONI_CFG"
+  grep -iE '^\s*(scope|name|data_dir|config_dir|bin_dir|listen|connect_address|hosts|log_directory|logging_collector|max_connections|shared_buffers|synchronous_mode|synchronous_node_count|use_pg_rewind|loop_wait|ttl|retry_timeout):' "$PATRONI_CFG" | grep -viE 'pass|secret|token|key|auth' | head -n 45 || true
+fi
+if command -v patronictl >/dev/null 2>&1; then
+  patronictl version 2>/dev/null || true
+  [ -n "$PATRONI_CFG" ] && [ -r "$PATRONI_CFG" ] && patronictl -c "$PATRONI_CFG" list 2>/dev/null || true
+fi
+if command -v psql >/dev/null 2>&1; then
+  sudo -n -u postgres psql -X -w -Atc "SELECT 'PG_DATA_DIR='||setting FROM pg_settings WHERE name='data_directory' UNION ALL SELECT 'PG_CONFIG_FILE='||setting FROM pg_settings WHERE name='config_file' UNION ALL SELECT 'PG_LOG_DIR='||setting FROM pg_settings WHERE name='log_directory' UNION ALL SELECT 'PG_MAX_CONN='||setting FROM pg_settings WHERE name='max_connections' UNION ALL SELECT 'PG_SHARED_BUFFERS='||setting FROM pg_settings WHERE name='shared_buffers';" 2>/dev/null || true
+fi
+command -v etcd >/dev/null 2>&1 && etcd --version 2>/dev/null | head -n 3 || true
+for ef in /etc/etcd/etcd.conf.yaml /etc/etcd/etcd.conf.yml /etc/etcd/etcd.conf; do
+  [ -r "$ef" ] && { echo "# file: $ef"; grep -vE '^\s*(#|$|.*pass|.*secret|.*token|.*key)' "$ef" | head -n 30; }
+done
+command -v etcdctl >/dev/null 2>&1 && ETCDCTL_API=3 etcdctl member list 2>/dev/null || true
 command -v pgbackrest >/dev/null 2>&1 && pgbackrest version 2>/dev/null || true
-systemctl list-units --type=service --all --no-pager 2>/dev/null | grep -iE 'patroni|postgres|etcd|pgbouncer' || true`,
+command -v pgbouncer >/dev/null 2>&1 && pgbouncer --version 2>/dev/null | head -n 2 || true
+systemctl list-units --type=service --all --no-pager 2>/dev/null | grep -iE 'patroni|postgres|etcd|pgbouncer|haproxy|keepalived' || true`,
 	},
 	{
 		ID: "mysql", Name: "MySQL", NameEn: "MySQL",
@@ -329,8 +353,29 @@ systemctl list-units --type=service --all --no-pager 2>/dev/null | grep -iE 'mem
 		PkgMatch:     "etcd",
 		ProbeSnippet: `echo "--- [ETCD] ---"
 command -v etcd >/dev/null 2>&1 && etcd --version | head -n 4 || true
-command -v etcdctl >/dev/null 2>&1 && etcdctl version | head -n 4 || true
+command -v etcdctl >/dev/null 2>&1 && { etcdctl version | head -n 4 || true; ETCDCTL_API=3 etcdctl member list 2>/dev/null || true; }
+for ef in /etc/etcd/etcd.conf.yaml /etc/etcd/etcd.conf.yml /etc/etcd/etcd.conf; do
+  [ -r "$ef" ] && { echo "# file: $ef"; grep -vE '^\s*(#|$|.*pass|.*secret|.*token|.*key)' "$ef" | head -n 35; }
+done
 systemctl list-units --type=service --all --no-pager 2>/dev/null | grep -iE 'etcd' || true`,
+	},
+	{
+		ID: "patroni", Name: "Patroni", NameEn: "Patroni",
+		Category: "cache", CategoryTitle: "缓存与协调", CategoryTitleEn: "Cache & Coordination",
+		Icon: "patroni", Color: "blue", DefaultPort: 8008,
+		Summary: "PostgreSQL 高可用自动故障切换与生命周期管理器", SummaryEn: "PostgreSQL high-availability failover and lifecycle manager",
+		Roles: []ImportRolePreset{
+			{ID: "primary", Title: "主控", TitleEn: "Leader"},
+			{ID: "replica", Title: "备控", TitleEn: "Standby"},
+		},
+		ServiceHints: []string{"patroni"},
+		ConfigHints:  []string{"/etc/patroni/patroni.yml"},
+		DataHints:    []string{},
+		LogHints:     []string{"/var/log/patroni"},
+		PkgMatch:     "patroni|etcd|postgres",
+		ProbeSnippet: `echo "--- [PATRONI] ---"
+command -v patronictl >/dev/null 2>&1 && { patronictl version 2>/dev/null || true; [ -r /etc/patroni/patroni.yml ] && patronictl -c /etc/patroni/patroni.yml list 2>/dev/null || true; }
+systemctl list-units --type=service --all --no-pager 2>/dev/null | grep -iE 'patroni|etcd|postgres' || true`,
 	},
 	{
 		ID: "consul", Name: "Consul", NameEn: "Consul",
@@ -756,7 +801,7 @@ func NormalizeImportComponentID(raw string) string {
 func LookupImportPreset(id string) (ImportPreset, bool) {
 	key := strings.ToLower(strings.TrimSpace(id))
 	aliases := map[string]string{
-		"pg": "postgresql", "postgres": "postgresql", "patroni": "postgresql",
+		"pg": "postgresql", "postgres": "postgresql",
 		"es": "elasticsearch", "elastic": "elasticsearch",
 		"zk": "zookeeper", "mongo": "mongodb", "rmq": "rabbitmq",
 		"ch": "clickhouse", "dm8": "dm", "dameng": "dm", "kes": "kingbase",
@@ -771,4 +816,164 @@ func LookupImportPreset(id string) (ImportPreset, bool) {
 		}
 	}
 	return ImportPreset{}, false
+}
+
+// CompanionPortDef defines a named listening port for a companion component.
+type CompanionPortDef struct {
+	Name string `json:"name"`
+	Port int    `json:"port"`
+}
+
+// CompanionDef describes canonical metadata for co-located/supporting architectural components
+// (Patroni, etcd, HAProxy, Keepalived, PgBouncer, pgBackRest, Redis Sentinel, ZooKeeper, etc.).
+type CompanionDef struct {
+	ID            string             `json:"id"`
+	Name          string             `json:"name"`
+	Kind          string             `json:"kind"` // ha_manager | dcs | proxy | vip | pooler | backup | monitoring | companion
+	Icon          string             `json:"icon"`
+	Color         string             `json:"color"`
+	DefaultRole   string             `json:"default_role"`
+	RoleTitle     string             `json:"role_title"`
+	Topology      bool               `json:"topology"` // materialize as a first-class InstanceSpec in Deployment.Instances
+	InheritRoles  bool               `json:"inherit_roles,omitempty"`
+	DefaultPorts  []CompanionPortDef `json:"default_ports,omitempty"`
+	Flows         []ImportFlowPreset `json:"flows,omitempty"`
+	ServiceHints  []string           `json:"service_hints,omitempty"`
+	ConfigHints   []string           `json:"config_hints,omitempty"`
+	DataHints     []string           `json:"data_hints,omitempty"`
+}
+
+// CompanionCatalog lists canonical companion components recognized across enterprise stacks.
+var CompanionCatalog = []CompanionDef{
+	{
+		ID: "patroni", Name: "Patroni", Kind: "ha_manager", Icon: "patroni", Color: "blue",
+		DefaultRole: "primary", RoleTitle: "主控", Topology: true, InheritRoles: true,
+		DefaultPorts: []CompanionPortDef{{Name: "patroni-rest", Port: 8008}},
+		ServiceHints: []string{"patroni.service"}, ConfigHints: []string{"/etc/patroni/patroni.yml"},
+	},
+	{
+		ID: "etcd", Name: "etcd", Kind: "dcs", Icon: "etcd", Color: "teal",
+		DefaultRole: "member", RoleTitle: "成员", Topology: true,
+		DefaultPorts: []CompanionPortDef{{Name: "etcd 客户端", Port: 2379}, {Name: "etcd 节点通信", Port: 2380}},
+		Flows:        []ImportFlowPreset{{From: "member", To: "member", Label: "Raft 共识（选主与写入）", Kind: "quorum"}},
+		ServiceHints: []string{"etcd.service"}, ConfigHints: []string{"/etc/etcd/etcd.conf.yaml"}, DataHints: []string{"/data/etcd"},
+	},
+	{
+		ID: "haproxy", Name: "HAProxy", Kind: "proxy", Icon: "haproxy", Color: "blue",
+		DefaultRole: "node", RoleTitle: "负载均衡", Topology: true,
+		DefaultPorts: []CompanionPortDef{{Name: "HAProxy 入口", Port: 5000}},
+		ServiceHints: []string{"haproxy.service"}, ConfigHints: []string{"/etc/haproxy/haproxy.cfg"},
+	},
+	{
+		ID: "keepalived", Name: "Keepalived", Kind: "vip", Icon: "keepalived", Color: "teal",
+		DefaultRole: "node", RoleTitle: "VRRP 节点", Topology: true,
+		Flows:        []ImportFlowPreset{{From: "node", To: "node", Label: "VRRP 心跳", Kind: "peer"}},
+		ServiceHints: []string{"keepalived.service"}, ConfigHints: []string{"/etc/keepalived/keepalived.conf"},
+	},
+	{
+		ID: "nginx", Name: "Nginx", Kind: "proxy", Icon: "nginx", Color: "green",
+		DefaultRole: "node", RoleTitle: "代理节点", Topology: true,
+		DefaultPorts: []CompanionPortDef{{Name: "Nginx 代理", Port: 80}},
+		ServiceHints: []string{"nginx.service"}, ConfigHints: []string{"/etc/nginx/nginx.conf"},
+	},
+	{
+		ID: "pgbouncer", Name: "PgBouncer", Kind: "pooler", Icon: "postgresql", Color: "indigo",
+		DefaultRole: "node", RoleTitle: "连接池", Topology: true,
+		DefaultPorts: []CompanionPortDef{{Name: "PgBouncer", Port: 6432}},
+		ServiceHints: []string{"pgbouncer.service"}, ConfigHints: []string{"/etc/pgbouncer/pgbouncer.ini"},
+	},
+	{
+		ID: "pgbackrest", Name: "pgBackRest", Kind: "backup", Icon: "storage", Color: "emerald",
+		DefaultRole: "backup", RoleTitle: "物理备份", Topology: false,
+		ConfigHints: []string{"/etc/pgbackrest/pgbackrest.conf"},
+	},
+	{
+		ID: "redis-sentinel", Name: "Redis Sentinel", Kind: "ha_manager", Icon: "redis", Color: "red",
+		DefaultRole: "sentinel", RoleTitle: "哨兵", Topology: true,
+		DefaultPorts: []CompanionPortDef{{Name: "Sentinel", Port: 26379}},
+		Flows:        []ImportFlowPreset{{From: "sentinel", To: "sentinel", Label: "哨兵仲裁", Kind: "quorum"}},
+		ServiceHints: []string{"redis-sentinel.service"}, ConfigHints: []string{"/etc/redis/sentinel.conf"},
+	},
+	{
+		ID: "zookeeper", Name: "ZooKeeper", Kind: "dcs", Icon: "zookeeper", Color: "amber",
+		DefaultRole: "node", RoleTitle: "集群节点", Topology: true,
+		DefaultPorts: []CompanionPortDef{{Name: "ZooKeeper", Port: 2181}},
+		Flows:        []ImportFlowPreset{{From: "node", To: "node", Label: "ZAB 共识", Kind: "quorum"}},
+		ServiceHints: []string{"zookeeper.service"}, ConfigHints: []string{"/etc/zookeeper/conf/zoo.cfg"},
+	},
+	{
+		ID: "consul", Name: "Consul", Kind: "dcs", Icon: "consul", Color: "pink",
+		DefaultRole: "server", RoleTitle: "Server", Topology: true,
+		DefaultPorts: []CompanionPortDef{{Name: "Consul HTTP", Port: 8500}},
+		Flows:        []ImportFlowPreset{{From: "server", To: "server", Label: "Raft 同步", Kind: "quorum"}},
+		ServiceHints: []string{"consul.service"}, ConfigHints: []string{"/etc/consul.d/consul.hcl"},
+	},
+	{
+		ID: "clickhouse-keeper", Name: "ClickHouse Keeper", Kind: "dcs", Icon: "clickhouse", Color: "amber",
+		DefaultRole: "keeper", RoleTitle: "Keeper", Topology: true,
+		DefaultPorts: []CompanionPortDef{{Name: "Keeper", Port: 9181}},
+		Flows:        []ImportFlowPreset{{From: "keeper", To: "keeper", Label: "Raft 协调", Kind: "quorum"}},
+		ServiceHints: []string{"clickhouse-keeper.service"}, ConfigHints: []string{"/etc/clickhouse-keeper/keeper_config.xml"},
+	},
+	{
+		ID: "proxysql", Name: "ProxySQL", Kind: "proxy", Icon: "mysql", Color: "blue",
+		DefaultRole: "router", RoleTitle: "代理路由", Topology: true,
+		DefaultPorts: []CompanionPortDef{{Name: "ProxySQL", Port: 6033}, {Name: "ProxySQL 管理", Port: 6032}},
+		ServiceHints: []string{"proxysql.service"}, ConfigHints: []string{"/etc/proxysql.cnf"},
+	},
+	{
+		ID: "maxscale", Name: "MariaDB MaxScale", Kind: "proxy", Icon: "mariadb", Color: "indigo",
+		DefaultRole: "router", RoleTitle: "代理路由", Topology: true,
+		DefaultPorts: []CompanionPortDef{{Name: "MaxScale", Port: 4006}},
+		ServiceHints: []string{"maxscale.service"}, ConfigHints: []string{"/etc/maxscale.cnf"},
+	},
+	{
+		ID: "obproxy", Name: "OBProxy (ODP)", Kind: "proxy", Icon: "oceanbase", Color: "teal",
+		DefaultRole: "router", RoleTitle: "代理路由", Topology: true,
+		DefaultPorts: []CompanionPortDef{{Name: "OBProxy", Port: 2883}},
+		ServiceHints: []string{"obproxy.service"},
+	},
+	{
+		ID: "node-exporter", Name: "node_exporter", Kind: "monitoring", Icon: "prometheus", Color: "coral",
+		DefaultRole: "exporter", RoleTitle: "指标采集", Topology: false,
+		DefaultPorts: []CompanionPortDef{{Name: "Metrics", Port: 9100}},
+		ServiceHints: []string{"node_exporter.service"},
+	},
+}
+
+// NormalizeCompanionID canonicalizes companion aliases (e.g. "zk" -> "zookeeper", "node_exporter" -> "node-exporter").
+func NormalizeCompanionID(raw string) string {
+	k := strings.ToLower(strings.TrimSpace(raw))
+	k = strings.ReplaceAll(k, "_", "-")
+	k = strings.ReplaceAll(k, " ", "-")
+	aliases := map[string]string{
+		"zk":                "zookeeper",
+		"sentinel":          "redis-sentinel",
+		"redis-sentinel":    "redis-sentinel",
+		"ch-keeper":         "clickhouse-keeper",
+		"clickhouse-keeper": "clickhouse-keeper",
+		"pg-backrest":       "pgbackrest",
+		"pgbackrest":        "pgbackrest",
+		"pg-bouncer":        "pgbouncer",
+		"pgbouncer":         "pgbouncer",
+		"node-exporter":     "node-exporter",
+		"openresty":         "nginx",
+		"nginx-stream":      "nginx",
+		"odp":               "obproxy",
+	}
+	if mapped, ok := aliases[k]; ok {
+		return mapped
+	}
+	return NormalizeImportComponentID(k)
+}
+
+// LookupCompanionDef returns canonical companion metadata by ID or alias.
+func LookupCompanionDef(id string) (CompanionDef, bool) {
+	norm := NormalizeCompanionID(id)
+	for _, c := range CompanionCatalog {
+		if c.ID == norm {
+			return c, true
+		}
+	}
+	return CompanionDef{}, false
 }

@@ -280,3 +280,186 @@ mysql-client-8.0	8.0.36-0ubuntu0.24.04.1
 		t.Fatalf("expected replica -> readonly, got %q", got)
 	}
 }
+
+func TestClusterImportMultiComponentPatroniEtcdStack(t *testing.T) {
+	s, _ := testStore(t)
+	alice, csrf := storeLogin(t, s, "alice")
+
+	// Realistic Percona PostgreSQL 17 + Patroni + etcd + pgBackRest probe output matching production scenario
+	probeOut := `=== MW_IMPORT_BEGIN ===
+PROBE_COMPONENT=postgresql
+=== MW_IMPORT_HOST ===
+HOSTNAME=ecs-unified-toolchain-private-prod-edc-gitlab-pg-ha-001
+IPS=172.30.2.67 127.0.0.1
+=== MW_IMPORT_OS ===
+PRETTY_NAME="Ubuntu 24.04.5 LTS"
+=== MW_IMPORT_STORAGE ===
+Filesystem     Type  Size  Used Avail Use% Mounted on
+/dev/vda2      ext4   96G   18G   74G  20% /
+/dev/vdb1      ext4  196G   25G  162G  13% /data
+=== MW_IMPORT_PORTS ===
+LISTEN 0 128 0.0.0.0:5432 0.0.0.0:* users:(("postgres",pid=2101,fd=6))
+LISTEN 0 128 0.0.0.0:8008 0.0.0.0:* users:(("patroni",pid=1980,fd=9))
+LISTEN 0 128 172.30.2.67:2379 0.0.0.0:* users:(("etcd",pid=1620,fd=7))
+LISTEN 0 128 172.30.2.67:2380 0.0.0.0:* users:(("etcd",pid=1620,fd=5))
+LISTEN 0 128 0.0.0.0:9100 0.0.0.0:* users:(("node_exporter",pid=1400,fd=3))
+=== MW_IMPORT_MIDDLEWARE ===
+--- [POSTGRESQL / PATRONI / ETCD] ---
+psql (PostgreSQL) 17.11.1
+# file: /etc/patroni/patroni.yml
+scope: pg-gitlab-private-prod
+data_dir: /data/pg
+log_directory: /data/logs/postgresql
+patronictl version 4.0.4
++ Cluster: pg-gitlab-private-prod (7698776689296485808) +----+-----------+----+-----------+
+| Member     | Host        | Role           | State     | TL | Lag in MB |
++------------+-------------+----------------+-----------+----+-----------+
+| db-node-01 | 172.30.2.67 | Leader         | running   |  9 |           |
+| db-node-02 | 172.30.2.82 | Quorum Standby | streaming |  9 |         0 |
+| db-node-03 | 172.30.2.91 | Quorum Standby | streaming |  9 |         0 |
++------------+-------------+----------------+-----------+----+-----------+
+etcd Version: 3.5.14
+# file: /etc/etcd/etcd.conf.yaml
+data-dir: /data/etcd
+initial-cluster: db-node-01=http://172.30.2.67:2380,db-node-02=http://172.30.2.82:2380,db-node-03=http://172.30.2.91:2380
+pgBackRest 2.59.1
+patroni.service loaded active running Patroni PostgreSQL HA
+etcd.service loaded active running etcd key-value store
+=== MW_IMPORT_PACKAGES ===
+percona-postgresql-17	17.11-1.noble
+patroni	4.0.4-1.noble
+etcd-server	3.5.14-1
+pgbackrest	2.59.1-1.noble
+=== MW_IMPORT_END ===`
+
+	parseBody, _ := json.Marshal(importParseReq{
+		Component:  "postgresql",
+		SourceKind: "probe",
+		Text:       probeOut,
+	})
+	pw := storeRequest(s, "POST", "/api/clusters/import/parse", bytes.NewReader(parseBody), alice, csrf)
+	if pw.Code != 200 {
+		t.Fatalf("parse failed: %d %s", pw.Code, pw.Body.String())
+	}
+	var parsed struct {
+		Draft importParseDraft `json:"draft"`
+	}
+	if err := json.Unmarshal(pw.Body.Bytes(), &parsed); err != nil {
+		t.Fatal(err)
+	}
+	if len(parsed.Draft.Hosts) != 3 {
+		t.Fatalf("expected 3 hosts from patronictl table, got %+v", parsed.Draft.Hosts)
+	}
+	if parsed.Draft.Hosts[0].Name != "db-node-01" || parsed.Draft.Hosts[0].Role != "primary" || parsed.Draft.Hosts[0].Disk != "/dev/vdb" {
+		t.Fatalf("unexpected primary host: %+v", parsed.Draft.Hosts[0])
+	}
+	if parsed.Draft.Hosts[1].Role != "replica" || parsed.Draft.Hosts[2].Role != "replica" {
+		t.Fatalf("expected replica roles for standby nodes, got %+v", parsed.Draft.Hosts)
+	}
+	compSet := map[string]mwpack.ImportedCompanion{}
+	for _, cm := range parsed.Draft.Companions {
+		compSet[cm.Component] = cm
+	}
+	for _, want := range []string{"patroni", "etcd", "pgbackrest"} {
+		if _, ok := compSet[want]; !ok {
+			t.Fatalf("expected companion %q to be detected, got %+v", want, parsed.Draft.Companions)
+		}
+	}
+	if compSet["patroni"].Version != "4.0.4" || compSet["etcd"].Version != "3.5.14" || compSet["pgbackrest"].Version != "2.59.1" {
+		t.Fatalf("unexpected companion versions: patroni=%+v etcd=%+v pgbackrest=%+v", compSet["patroni"], compSet["etcd"], compSet["pgbackrest"])
+	}
+
+	// Import cluster with the parsed multi-component companions
+	importReq := importClusterReq{
+		ID:           "pg-patroni-stack-test",
+		Component:    "postgresql",
+		DisplayName:  "PostgreSQL",
+		Version:      parsed.Draft.Version,
+		ExactVersion: parsed.Draft.ExactVersion,
+		Platform:     parsed.Draft.Platform,
+		OSDetail:     parsed.Draft.OSDetail,
+		SourceKind:   "probe",
+		DeployMethod: "systemd",
+		ArchSummary:  parsed.Draft.ArchSummary,
+		Hosts:        parsed.Draft.Hosts,
+		Endpoints:    []mwpack.ImportedEndpoint{{Name: "readwrite", Address: "gitlab.pg.internal:5432", Role: "readwrite"}},
+		Companions:   parsed.Draft.Companions,
+		ServiceUnits: parsed.Draft.ServiceUnits,
+		ConfigPaths:  parsed.Draft.ConfigPaths,
+		DataDirs:     parsed.Draft.DataDirs,
+		LogDirs:      parsed.Draft.LogDirs,
+		Params:       parsed.Draft.Params,
+		Packages:     parsed.Draft.Packages,
+	}
+	ib, _ := json.Marshal(importReq)
+	iw := storeRequest(s, "POST", "/api/clusters/import", bytes.NewReader(ib), alice, csrf)
+	if iw.Code != 201 {
+		t.Fatalf("import failed: %d %s", iw.Code, iw.Body.String())
+	}
+	var created struct {
+		JobID string `json:"job_id"`
+	}
+	json.Unmarshal(iw.Body.Bytes(), &created)
+
+	// Verify solved plan contains PostgreSQL + Patroni (with ManagedContext & Uses->etcd) + etcd (with Raft flow & 2379/2380 ports)
+	jw := storeRequest(s, "GET", "/api/jobs/"+created.JobID, nil, alice, "")
+	if jw.Code != 200 {
+		t.Fatalf("GET job failed: %d %s", jw.Code, jw.Body.String())
+	}
+	bodyStr := jw.Body.String()
+	for _, want := range []string{`"component":"postgresql"`, `"component":"patroni"`, `"component":"etcd"`, `"managed_context":"pg"`, `"title":"读写入口"`, `2379`, `2380`, `8008`} {
+		if !strings.Contains(bodyStr, want) {
+			t.Fatalf("solved plan missing %s; body=%s", want, bodyStr)
+		}
+	}
+	// Verify raw "readwrite" did not leak as endpoint title
+	if strings.Contains(bodyStr, `"title":"readwrite"`) {
+		t.Fatalf("endpoint title leaked raw 'readwrite': %s", bodyStr)
+	}
+
+	// Verify legacy single-instance cluster with patroni/etcd service_units gets suggested_companions from GET /baseline
+	legacyReq := importClusterReq{
+		ID:           "pg-legacy-hints",
+		Component:    "postgresql",
+		Version:      "17",
+		Hosts:        []importHostInput{{Name: "n1", IP: "10.90.1.1", Role: "primary"}, {Name: "n2", IP: "10.90.1.2", Role: "replica"}},
+		ServiceUnits: []string{"patroni.service", "etcd.service"},
+		ConfigPaths:  []string{"/etc/etcd/etcd.conf.yaml"},
+		DataDirs:     []string{"/data/etcd", "/data"},
+		Packages:     []mwpack.ImportedPkg{{Name: "pgbackrest", Version: "2.59.1"}},
+	}
+	lb, _ := json.Marshal(legacyReq)
+	lw := storeRequest(s, "POST", "/api/clusters/import", bytes.NewReader(lb), alice, csrf)
+	if lw.Code != 201 {
+		t.Fatalf("import legacy cluster failed: %d %s", lw.Code, lw.Body.String())
+	}
+	bg := storeRequest(s, "GET", "/api/clusters/pg-legacy-hints/baseline", nil, alice, "")
+	if bg.Code != 200 {
+		t.Fatalf("GET legacy baseline failed: %d %s", bg.Code, bg.Body.String())
+	}
+	var baseResp importClusterReq
+	if err := json.Unmarshal(bg.Body.Bytes(), &baseResp); err != nil {
+		t.Fatal(err)
+	}
+	sugSet := map[string]bool{}
+	for _, sc := range baseResp.SuggestedCompanions {
+		sugSet[sc.Component] = true
+	}
+	if !sugSet["patroni"] || !sugSet["etcd"] || !sugSet["pgbackrest"] {
+		t.Fatalf("expected suggested_companions patroni+etcd+pgbackrest for legacy cluster, got %+v", baseResp.SuggestedCompanions)
+	}
+
+	// Regression: negated notes ("未采集到 VIP / HAProxy") must NOT trigger false-positive HAProxy companion
+	negated := inferCompanionsFromSignals(companionSignals{
+		PrimaryComp:  "postgresql",
+		Hosts:        parsed.Draft.Hosts,
+		ServiceUnits: []string{"patroni.service", "etcd.service"},
+		ArchSummary:  "3节点 Patroni + etcd 高可用集群",
+		Notes:        "• 未采集到 VIP / HAProxy / Keepalived 等统一入口，待人工核对",
+	})
+	for _, cm := range negated {
+		if cm.Component == "haproxy" || cm.Component == "keepalived" {
+			t.Fatalf("negated note triggered false-positive companion: %+v", cm)
+		}
+	}
+}

@@ -1005,6 +1005,21 @@ export type ImportedEndpoint = {
   address: string;
   role?: string;
 };
+export type ImportedCompanion = {
+  component: string;
+  display_name?: string;
+  version?: string;
+  kind?: "ha_manager" | "dcs" | "proxy" | "vip" | "pooler" | "backup" | "monitoring" | "companion" | string;
+  role?: string;
+  hosts?: string[];
+  placement?: Record<string, string[]>;
+  ports?: number[];
+  service_units?: string[];
+  config_paths?: string[];
+  data_dirs?: string[];
+  evidence?: string;
+  inferred?: boolean;
+};
 export type ImportedMeta = {
   source_kind?: "manual" | "probe" | "ai_doc" | string;
   managed_catalog?: boolean;
@@ -1021,6 +1036,7 @@ export type ImportedMeta = {
   data_dirs?: string[];
   log_dirs?: string[];
   endpoints?: ImportedEndpoint[];
+  companions?: ImportedCompanion[];
   packages?: ImportedPkg[];
   notes?: string;
   last_probed_at?: string;

@@ -705,7 +705,7 @@ html:not([data-vt-ok]) .main {
   font-size: 24px;
 }
 .md-detail {
-  overflow-y: auto;
+  overflow-y: scroll;
   overflow-x: hidden;
   scrollbar-gutter: stable;
   min-width: 0;

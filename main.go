@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.281-dev"
+	version            = "1.0.282-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,20 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.282-dev",
+		Date:    "2026-11-24",
+		Title:   "消除集群配置页切换多/少参数分组或标签时的页面跳动",
+		TitleEn: "Eliminate horizontal and vertical layout jump when switching config tabs or parameter group filters",
+		Highlights: []string{
+			"为集群配置详情区（.cx-detail）与参数卡片堆叠区（.cx-spec-stack）设置视口级稳定最小高度并关闭浏览器 scroll-anchoring 干扰，从多参数页/全部分组切到少参数分组（如 1 项参数）时滚动位置零回弹、按钮纹丝不动",
+			"将交付右侧滚动容器（.md-detail）改为 overflow-y: scroll 预留透明滚动条槽位，规避 Windows Chromium 下自定义 ::-webkit-scrollbar 导致 scrollbar-gutter 失效引发的横向 6px 抖动",
+		},
+		HighlightsEn: []string{
+			"Added viewport-scaled min-height and overflow-anchor: none on Config detail and spec card stack so switching from long parameter lists to 1-item groups never clamps scrollTop or jumps controls under the pointer",
+			"Set overflow-y: scroll on .md-detail (with transparent track) to work around Windows Chromium ignoring scrollbar-gutter with custom ::-webkit-scrollbar, eliminating 6px horizontal layout shifts",
+		},
+	},
 	{
 		Version: "1.0.281-dev",
 		Date:    "2026-11-24",

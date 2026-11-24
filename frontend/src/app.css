@@ -229,9 +229,13 @@
   color: var(--ink);
   background: var(--hover);
 }
-.tabs a:active,
-.tabs-more:active {
+.tabs a:active {
   transform: scale(0.985);
+}
+/* Keep dropdown anchor rects rock-steady on click so Arco Trigger never re-measures a rebounding scale(). */
+.tabs-more:active {
+  background: var(--hover);
+  color: var(--ink);
 }
 .tabs a.on,
 .tabs-more.on {
@@ -379,16 +383,16 @@
   font-size: 16px;
   line-height: 0;
   transition:
-    background-color 0.18s ease,
-    color 0.18s ease,
-    transform 0.18s var(--spring),
-    box-shadow 0.18s ease;
+    background-color 0.16s ease,
+    color 0.16s ease,
+    box-shadow 0.16s ease;
 }
 .icon-btn > svg {
   display: block;
   flex: none;
 }
-.icon-btn:hover {
+.icon-btn:hover,
+.icon-btn.arco-dropdown-popup-visible {
   background: var(--hover);
   color: var(--ink);
 }
@@ -398,7 +402,8 @@
   border-radius: 50% !important;
   padding: 0;
 }
-.me:hover {
+.me:hover,
+.me.arco-dropdown-popup-visible {
   background: transparent;
   box-shadow: 0 0 0 3px var(--hover);
 }
@@ -408,9 +413,12 @@
     0 0 0 2px var(--surface),
     0 0 0 3.5px var(--brand);
 }
-.icon-btn:active,
+.icon-btn:active {
+  background: var(--hover);
+  color: var(--ink);
+}
 .me:active {
-  transform: scale(0.94);
+  box-shadow: 0 0 0 3px var(--hover);
 }
 .icon-btn:focus-visible,
 .me:focus-visible {
@@ -536,7 +544,7 @@ body[arco-theme="dark"] .avatar.admin {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-width: 152px;
+  min-width: 138px;
   height: 100%;
   line-height: 1.2;
 }
@@ -547,7 +555,7 @@ body[arco-theme="dark"] .avatar.admin {
 }
 .menu-check {
   margin-left: auto;
-  color: var(--brand);
+  color: currentColor;
 }
 .main {
   min-height: calc(100vh - 52px);
@@ -2325,15 +2333,17 @@ body[arco-theme="dark"] .login-topbar {
   display: grid;
   place-items: center;
   cursor: pointer;
-  transition: color 0.16s ease, border-color 0.16s ease, background-color 0.16s ease, transform 0.18s var(--spring);
+  transition: color 0.16s ease, border-color 0.16s ease, background-color 0.16s ease;
 }
-.login-theme-btn:hover {
+.login-theme-btn:hover,
+.login-theme-btn.arco-dropdown-popup-visible {
   color: var(--ink);
   border-color: var(--line-strong);
   background: var(--surface);
 }
 .login-theme-btn:active {
-  transform: scale(0.93);
+  color: var(--ink);
+  background: var(--hover);
 }
 .login-theme-btn:focus-visible {
   outline: none;
@@ -4046,14 +4056,18 @@ body[arco-theme="dark"] .scheme-summary {
   gap: 5px;
 }
 .ver-pill:hover,
-.lang-pill:hover {
+.lang-pill:hover,
+.lang-pill.arco-dropdown-popup-visible {
   color: var(--ink);
   border-color: var(--line-strong);
   background: var(--hover);
 }
-.ver-pill:active,
-.lang-pill:active {
+.ver-pill:active {
   transform: scale(0.985);
+}
+.lang-pill:active {
+  color: var(--ink);
+  background: var(--hover);
 }
 .lang-pill:focus-visible,
 .ver-pill:focus-visible {

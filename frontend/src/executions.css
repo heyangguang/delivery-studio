@@ -659,10 +659,11 @@
   font-weight: 650;
 }
 .en-onboarding h3 {
-  margin: 3px 0 5px;
+  margin: 5px 0 4px;
   color: var(--ink);
   font-size: 14px;
   font-weight: 600;
+  line-height: 1.4;
 }
 .en-onboarding p {
   margin: 0;
@@ -1279,7 +1280,7 @@
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding: 11px 14px;
+  padding: 12px 14px;
   border-radius: 9px;
   background: var(--surface);
   border: 1px solid color-mix(in srgb, var(--line) 85%, transparent);
@@ -1293,13 +1294,14 @@
   place-items: center;
   width: 22px;
   height: 22px;
-  margin-top: 1px;
+  margin-top: 0;
   border-radius: 50%;
-  background: var(--brand-soft);
-  color: var(--brand-ink);
+  background: var(--teal-soft);
+  color: var(--teal-ink);
   font-style: normal;
   font-size: 12px;
   font-weight: 650;
+  line-height: 1;
 }
 .en-flow-item.is-done > i {
   background: rgba(16, 185, 129, 0.14);
@@ -1315,19 +1317,20 @@ body[arco-theme="dark"] .en-flow-item.is-done > i {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
 }
 .en-flow-title-row {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
+  min-height: 22px;
 }
 .en-flow-item b {
   font-size: 13px;
   font-weight: 600;
   color: var(--ink);
-  line-height: 1.4;
+  line-height: 22px;
 }
 .en-flow-done-tag {
   font-style: normal;
@@ -1463,7 +1466,7 @@ body[arco-theme="dark"] .en-flow-done-tag {
   flex-wrap: wrap;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1120px) {
   .en-flow-strip {
     grid-template-columns: 1fr;
     gap: 6px;
@@ -1498,9 +1501,9 @@ body[arco-theme="dark"] .en-flow-done-tag {
   flex: none;
   width: 26px;
   height: 26px;
-  background: var(--brand-soft);
+  background: var(--teal-soft);
   border-radius: 50%;
-  color: var(--brand-ink);
+  color: var(--teal-ink);
   font-size: 12px;
   font-weight: 600;
 }
@@ -1510,9 +1513,10 @@ body[arco-theme="dark"] .en-flow-done-tag {
 }
 .en-guide-steps h3,
 .en-maintenance h3 {
-  margin: 2px 0 10px;
+  margin: 3px 0 8px;
   font-size: 14px;
   font-weight: 600;
+  line-height: 1.4;
 }
 .en-guide-steps p,
 .en-maintenance p {

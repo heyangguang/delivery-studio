@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.315-dev"
+	version            = "1.0.316-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,22 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.316-dev",
+		Date:    "2026-11-24",
+		Title:   "消除全站下拉菜单展开抖动并精校执行节点三步卡片水平对齐",
+		TitleEn: "Eliminate Dropdown Open Jitter & Align Execution-Node Step Strip",
+		Highlights: []string{
+			"根治外观/语言/用户/选择框等全站下拉与浮层点开时的发抖问题：移除触发按钮按压缩放导致的坐标漂移，并用纯平滑位移淡入替换 Arco 默认的 scaleY 挤压与 1.3 回弹过冲动效",
+			"同步统一顶部菜单选中态对勾与图标为 Bridge Teal 配色，并保留菜单展开时的触发按钮高亮反馈",
+			"精校「设置 → 执行节点」三步流程条的水平基准线：将 1/2/3 序号徽章与标题中心 0px 对齐、精简第三步文案避免尾部单字换行导致卡片不等高，并使连接箭头精准居中且在窄屏下提前平滑堆叠",
+		},
+		HighlightsEn: []string{
+			"Eliminated dropdown/popover open jitter platform-wide by removing trigger button active scale() rect drift and replacing Arco's scaleY(0.9) squash and 1.3 overshoot bounce with clean damped translate+fade transitions",
+			"Aligned active menu checkmarks to Bridge Teal and added crisp open-state highlights for topbar dropdown triggers",
+			"Aligned the Execution Nodes 3-step strip horizontally to 0.00px delta across step badges, titles, equal-height single-line cards, and centered connector arrows, with cleaner responsive stacking",
+		},
+	},
 	{
 		Version: "1.0.315-dev",
 		Date:    "2026-11-24",

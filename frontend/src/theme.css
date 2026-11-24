@@ -958,6 +958,105 @@ body[arco-theme="dark"] .arco-modal {
   pointer-events: none;
   transition: opacity 0.13s ease-in;
 }
+/* Snappy, zero-jitter GPU-composited transitions for Arco Dropdowns, Selects, Popovers, and Tooltips.
+   Replaces Arco's non-uniform scaleY(0.9) (which squashes text & snaps ClearType AA on finish)
+   and cubic-bezier(0.3, 1.3, 0.3, 1) spring overshoot (which visibly bounces/jitters popups on open). */
+.slideDynamicOrigin-enter,
+.slideDynamicOrigin-appear {
+  opacity: 0 !important;
+  transform: translate3d(0, -4px, 0) !important;
+  will-change: opacity, transform;
+}
+.arco-trigger-position-top.slideDynamicOrigin-enter,
+.arco-trigger-position-tl.slideDynamicOrigin-enter,
+.arco-trigger-position-tr.slideDynamicOrigin-enter,
+.arco-trigger-position-top.slideDynamicOrigin-appear,
+.arco-trigger-position-tl.slideDynamicOrigin-appear,
+.arco-trigger-position-tr.slideDynamicOrigin-appear {
+  transform: translate3d(0, 4px, 0) !important;
+}
+.slideDynamicOrigin-enter-active,
+.slideDynamicOrigin-appear-active {
+  opacity: 1 !important;
+  transform: translate3d(0, 0, 0) !important;
+  will-change: opacity, transform;
+  transition:
+    opacity 0.14s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.16s cubic-bezier(0.22, 1, 0.36, 1) !important;
+}
+.slideDynamicOrigin-exit {
+  opacity: 1 !important;
+  transform: translate3d(0, 0, 0) !important;
+}
+.slideDynamicOrigin-exit-active {
+  opacity: 0 !important;
+  transform: translate3d(0, -3px, 0) !important;
+  pointer-events: none;
+  transition:
+    opacity 0.11s ease-in,
+    transform 0.11s ease-in !important;
+}
+.arco-trigger-position-top.slideDynamicOrigin-exit-active,
+.arco-trigger-position-tl.slideDynamicOrigin-exit-active,
+.arco-trigger-position-tr.slideDynamicOrigin-exit-active {
+  transform: translate3d(0, 3px, 0) !important;
+}
+.zoomInTop-enter,
+.zoomInTop-appear,
+.zoomInBottom-enter,
+.zoomInBottom-appear,
+.zoomIn-enter,
+.zoomIn-appear,
+.zoomInFadeOut-enter,
+.zoomInFadeOut-appear {
+  opacity: 0 !important;
+  transform: translate3d(0, -4px, 0) !important;
+  will-change: opacity, transform;
+}
+.zoomInBottom-enter,
+.zoomInBottom-appear,
+.arco-trigger-position-top.zoomIn-enter,
+.arco-trigger-position-tl.zoomIn-enter,
+.arco-trigger-position-tr.zoomIn-enter,
+.arco-trigger-position-top.zoomInFadeOut-enter,
+.arco-trigger-position-tl.zoomInFadeOut-enter,
+.arco-trigger-position-tr.zoomInFadeOut-enter {
+  transform: translate3d(0, 4px, 0) !important;
+}
+.zoomInTop-enter-active,
+.zoomInTop-appear-active,
+.zoomInBottom-enter-active,
+.zoomInBottom-appear-active,
+.zoomIn-enter-active,
+.zoomIn-appear-active,
+.zoomInFadeOut-enter-active,
+.zoomInFadeOut-appear-active {
+  opacity: 1 !important;
+  transform: translate3d(0, 0, 0) !important;
+  will-change: opacity, transform;
+  transition:
+    opacity 0.14s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.16s cubic-bezier(0.22, 1, 0.36, 1) !important;
+}
+.zoomInTop-exit,
+.zoomInBottom-exit,
+.zoomIn-exit,
+.zoomInFadeOut-exit {
+  opacity: 1 !important;
+  transform: translate3d(0, 0, 0) !important;
+}
+.zoomInTop-exit-active,
+.zoomInBottom-exit-active,
+.zoomIn-exit-active,
+.zoomInFadeOut-exit-active {
+  opacity: 0 !important;
+  transform: translate3d(0, -3px, 0) !important;
+  pointer-events: none;
+  transition:
+    opacity 0.11s ease-in,
+    transform 0.11s ease-in !important;
+}
+
 /* Layering: AI dock window (980) < modal/drawer (1001) < Change Report modal (1030) < Arco popovers/dropdowns/tooltips (1050) < toast messages (1080). */
 .arco-trigger {
   z-index: 1050 !important;
@@ -1039,8 +1138,8 @@ body[arco-theme="dark"] .arco-trigger-popup .arco-popconfirm-content {
 .arco-select-popup .arco-select-option-selected,
 .arco-dropdown-menu .arco-dropdown-menu-item.arco-dropdown-menu-selected,
 .arco-trigger-popup .arco-menu .arco-menu-item.arco-menu-selected {
-  color: var(--brand-ink) !important;
-  background-color: var(--brand-soft) !important;
+  color: var(--teal-ink) !important;
+  background-color: var(--teal-soft) !important;
   font-weight: 600;
 }
 

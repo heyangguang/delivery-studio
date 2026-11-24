@@ -1431,6 +1431,7 @@
 .wg-flow-mid {
   display: flex;
   flex-direction: column;
+  justify-content: center;
   gap: 3px;
   padding: 12px 14px;
   border: 1px solid var(--line);

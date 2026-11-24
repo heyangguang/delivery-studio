@@ -795,8 +795,8 @@ export function ExecutionNodes() {
                 </div>
                 <span>
                   {bi(
-                    "后台常驻领任务；业务机不要装执行器",
-                    "Runs as systemd daemon; leave workload hosts clean",
+                    "后台常驻领任务，业务机无需安装",
+                    "Runs as a daemon; keep workload hosts clean",
                   )}
                 </span>
               </div>
@@ -815,7 +815,7 @@ export function ExecutionNodes() {
                 <span>
                   {bi(
                     "在交付的「现场执行」中选定本节点",
-                    "Pick this node in the delivery's On-site Execution tab",
+                    "Pick this node in On-site Execution",
                   )}
                 </span>
               </div>
@@ -833,8 +833,8 @@ export function ExecutionNodes() {
                 </div>
                 <span>
                   {bi(
-                    "已有免密直接预检；无密码（堡垒机）装目标 Agent",
-                    "Existing SSH or Target Agent (for bastion hosts)",
+                    "已有免密直接预检，无密码装目标 Agent",
+                    "Use existing SSH or Target Agent (bastion)",
                   )}
                 </span>
               </div>

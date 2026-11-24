@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.275-dev"
+	version            = "1.0.276-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,18 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.276-dev",
+		Date:    "2026-11-24",
+		Title:   "修正安全中心桌面端顶部重复漏洞库状态胶囊",
+		TitleEn: "Hide redundant desktop DB status pill in Security Center header",
+		Highlights: []string{
+			"桌面端左侧导航栏底部已常驻本地漏洞库状态卡，隐藏右侧标题旁仅用于窄屏的重复状态胶囊，使头部更清爽",
+		},
+		HighlightsEn: []string{
+			"Fixed CSS specificity so the mobile-only DB status pill stays hidden on desktop where the left rail DB card is visible",
+		},
+	},
 	{
 		Version: "1.0.275-dev",
 		Date:    "2026-11-24",

@@ -3376,13 +3376,17 @@ body[arco-theme="dark"] .ai-quick-toggle:not(.is-on):not(.is-warn) {
 }
 
 /* ---------- Component detail tabs & diagnostic panel ---------- */
-.cv-utabs {
+.utabs.cv-utabs {
   margin: 2px 0 18px;
-  gap: 15px;
+  gap: 13px;
 }
-.cv-utabs button[role="tab"] {
-  font-size: 13.5px;
-  gap: 5px;
+.utabs.cv-utabs button[role="tab"] {
+  font-size: 13px;
+  gap: 4px;
+}
+.utabs.cv-utabs .utabs-count {
+  padding: 0 5px;
+  font-size: 11px;
 }
 .cv-toc-label {
   display: inline-flex;

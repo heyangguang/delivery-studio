@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.288-dev"
+	version            = "1.0.289-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,20 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.289-dev",
+		Date:    "2026-11-24",
+		Title:   "补齐组件标签栏优先级与新建交付搜索栏细节优化",
+		TitleEn: "Finalize Components Tab Specificity, New Picker Search, and Rollout Chip Width",
+		Highlights: []string{
+			"提高 .utabs.cv-utabs 选择器优先级覆盖 polish.css 间距，确保组件详情页第 9 项「清单源码」及行数角标完整展示无截断",
+			"精简新建交付搜索框占位文案并放宽推广条样板集群芯片最大宽度（245px），消除尾部省略号截断",
+		},
+		HighlightsEn: []string{
+			"Raised .utabs.cv-utabs selector specificity so the 9th Manifest Source tab and line count badge fit completely unclipped",
+			"Shortened New Delivery search placeholder and widened rollout strip cluster chip max-width to 245px to avoid premature ellipsis",
+		},
+	},
 	{
 		Version: "1.0.288-dev",
 		Date:    "2026-11-24",

@@ -216,8 +216,8 @@ export function NewDeliveryPicker({
               value={q}
               onChange={setQ}
               placeholder={bi(
-                "搜索 PostgreSQL、Redis、etcd、高可用…",
-                "Search PostgreSQL, Redis, etcd, HA…",
+                "搜索组件名称、分类或架构…",
+                "Search components, category, or HA…",
               )}
               aria-label={bi("搜索组件", "Search components")}
             />

@@ -52,7 +52,7 @@
   color: var(--ink-2);
   background: var(--surface);
   border: 1px solid var(--line);
-  max-width: 210px;
+  max-width: 245px;
 }
 .ro-strip-chip code {
   overflow: hidden;

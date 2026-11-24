@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.322-dev"
+	version            = "1.0.323-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,22 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.323-dev",
+		Date:    "2026-11-24",
+		Title:   "存量中间件集群导入（纳管）工作台与全生命周期 Day-2 闭环",
+		TitleEn: "Brownfield Middleware Cluster Import (Adoption) Workbench & Day-2 Lifecycle",
+		Highlights: []string{
+			"新增存量中间件集群导入工作台（#/import），支持平台目录组件、36 种常见企业中间件免包预设及任意自定义组件纳管",
+			"提供只读探针脚本采集（全量静态安全校验）、文档/配置/截图 AI 多模态提取（含离线确定性兜底）与极速手填三合一建档，并在建档前实时预览集群拓扑图",
+			"导航栏「交付」升级为「集群」并新增「导入」入口与「纳管」筛选胶囊；纳管集群自动隐藏首次部署页签，提供在线编辑基线、重新只读采集、Word 纳管基线档案导出、变更演练与报告、跨集群推广及 CVE 软件清单扫描全闭环",
+		},
+		HighlightsEn: []string{
+			"Added Brownfield Cluster Import Workbench (#/import) supporting platform catalog components, 36 zero-playbook enterprise middleware presets, and arbitrary custom middlewares",
+			"Introduced 3-in-1 onboarding with statically validated read-only Bash probes, multimodal AI parsing of CMDB/configs/screenshots (with offline deterministic fallback), and quick manual entry with live topology preview",
+			"Upgraded top navigation from Deliveries to Clusters with Import action and Imported filter pill; imported clusters hide Day-0 Deploy tab and integrate online baseline editing, re-probing, Word baseline archive export, Change Rehearsal & Word reports, multi-cluster rollout, and SBOM CVE scanning",
+		},
+	},
 	{
 		Version: "1.0.322-dev",
 		Date:    "2026-11-24",

@@ -8,12 +8,52 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// ImportedPkg records a software package detected on or declared for an imported brownfield cluster.
+type ImportedPkg struct {
+	Name    string `yaml:"name" json:"name"`
+	Version string `yaml:"version" json:"version"`
+	Role    string `yaml:"role,omitempty" json:"role,omitempty"` // primary | dependency
+}
+
+// ImportedEndpoint records an access endpoint (VIP, LB, DNS, or host:port) for an imported cluster.
+type ImportedEndpoint struct {
+	Name    string `yaml:"name,omitempty" json:"name,omitempty"`
+	Address string `yaml:"address" json:"address"`               // e.g. vip:5432 or host:3306
+	Role    string `yaml:"role,omitempty" json:"role,omitempty"` // readwrite | readonly | admin
+}
+
+// ImportedMeta holds onboarding provenance and runtime baseline details for brownfield clusters
+// onboarded without initial platform deployment (DeliveryMode == "imported").
+type ImportedMeta struct {
+	SourceKind        string             `yaml:"source_kind,omitempty" json:"source_kind,omitempty"` // manual | probe | ai_doc
+	ManagedCatalog    bool               `yaml:"managed_catalog,omitempty" json:"managed_catalog,omitempty"`
+	DisplayName       string             `yaml:"display_name,omitempty" json:"display_name,omitempty"`
+	Category          string             `yaml:"category,omitempty" json:"category,omitempty"`
+	Icon              string             `yaml:"icon,omitempty" json:"icon,omitempty"`
+	Color             string             `yaml:"color,omitempty" json:"color,omitempty"`
+	DeployMethod      string             `yaml:"deploy_method,omitempty" json:"deploy_method,omitempty"` // systemd | docker | binary | k8s | other
+	ArchSummary       string             `yaml:"arch_summary,omitempty" json:"arch_summary,omitempty"`
+	ExactVersion      string             `yaml:"exact_version,omitempty" json:"exact_version,omitempty"`
+	OSDetail          string             `yaml:"os_detail,omitempty" json:"os_detail,omitempty"`
+	ServiceUnits      []string           `yaml:"service_units,omitempty" json:"service_units,omitempty"`
+	ConfigPaths       []string           `yaml:"config_paths,omitempty" json:"config_paths,omitempty"`
+	DataDirs          []string           `yaml:"data_dirs,omitempty" json:"data_dirs,omitempty"`
+	LogDirs           []string           `yaml:"log_dirs,omitempty" json:"log_dirs,omitempty"`
+	Endpoints         []ImportedEndpoint `yaml:"endpoints,omitempty" json:"endpoints,omitempty"`
+	Packages          []ImportedPkg      `yaml:"packages,omitempty" json:"packages,omitempty"`
+	Notes             string             `yaml:"notes,omitempty" json:"notes,omitempty"`
+	LastProbedAt      string             `yaml:"last_probed_at,omitempty" json:"last_probed_at,omitempty"`
+	BaselineUpdatedAt string             `yaml:"baseline_updated_at,omitempty" json:"baseline_updated_at,omitempty"`
+	BaselineUpdatedBy string             `yaml:"baseline_updated_by,omitempty" json:"baseline_updated_by,omitempty"`
+}
+
 // Deployment is what an implementer fills in (through the form or as YAML) for one customer cluster.
 type Deployment struct {
 	// ExecutionHost is an independent control machine, never a component/data target.
 	// When absent the historical Controller-in-Hosts behaviour is preserved.
 	ExecutionHost *ExecutionHost `yaml:"execution_host,omitempty" json:"execution_host,omitempty"`
 	DeliveryMode  string         `yaml:"delivery_mode,omitempty" json:"delivery_mode,omitempty"`
+	Imported      *ImportedMeta  `yaml:"imported,omitempty" json:"imported,omitempty"`
 	Schema        string         `yaml:"schema" json:"schema"`
 	ID            string         `yaml:"id" json:"id"`
 	Title         string         `yaml:"title" json:"title,omitempty"`

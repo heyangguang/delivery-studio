@@ -553,6 +553,56 @@ func (s *storeServer) clusterBaselinePrompt(f clusterFacts) (string, *aiRedactor
 	var b strings.Builder
 	var hostNames []string
 	fmt.Fprintf(&b, "集群标识：%s\n应用组件：%s %s\n初始交付任务：%s（状态：%s）\n", f.ID, f.Current.AppName, f.Current.Version, f.Current.ID, jobOutcomeName(f.Current))
+	if f.Current.DeliveryMode == "imported" {
+		b.WriteString("集群来源：【存量纳管运行中集群】（非平台自动化首次部署，切勿假设存在 /root/middleware-automation、平台 secrets/ 或平台固定目录结构；请以以下登记路径与只读探针核实为准！）\n")
+		if dep := s.readSpec(f.Current.ID); dep != nil && dep.Imported != nil {
+			im := dep.Imported
+			if im.DeployMethod != "" {
+				fmt.Fprintf(&b, "部署形态：%s\n", im.DeployMethod)
+			}
+			if im.ExactVersion != "" {
+				fmt.Fprintf(&b, "登记精确版本：%s\n", im.ExactVersion)
+			}
+			if im.OSDetail != "" {
+				fmt.Fprintf(&b, "操作系统详情：%s\n", im.OSDetail)
+			}
+			if im.ArchSummary != "" {
+				fmt.Fprintf(&b, "架构摘要：%s\n", im.ArchSummary)
+			}
+			if len(im.ServiceUnits) > 0 {
+				fmt.Fprintf(&b, "系统服务单元：%s\n", strings.Join(im.ServiceUnits, ", "))
+			}
+			if len(im.ConfigPaths) > 0 {
+				fmt.Fprintf(&b, "配置文件路径：%s\n", strings.Join(im.ConfigPaths, ", "))
+			}
+			if len(im.DataDirs) > 0 {
+				fmt.Fprintf(&b, "数据目录：%s\n", strings.Join(im.DataDirs, ", "))
+			}
+			if len(im.LogDirs) > 0 {
+				fmt.Fprintf(&b, "日志目录：%s\n", strings.Join(im.LogDirs, ", "))
+			}
+			if len(im.Endpoints) > 0 {
+				var eps []string
+				for _, ep := range im.Endpoints {
+					eps = append(eps, firstNonEmptyStr(ep.Name, ep.Role, "endpoint")+"="+ep.Address)
+				}
+				fmt.Fprintf(&b, "访问入口：%s\n", strings.Join(eps, ", "))
+			}
+			if len(im.Packages) > 0 {
+				var pks []string
+				for i, pk := range im.Packages {
+					if i >= 20 {
+						break
+					}
+					pks = append(pks, pk.Name+"="+pk.Version)
+				}
+				fmt.Fprintf(&b, "已采集软件包：%s\n", strings.Join(pks, ", "))
+			}
+			if im.Notes != "" {
+				fmt.Fprintf(&b, "纳管运维备注：%s\n", aiScrub(im.Notes))
+			}
+		}
+	}
 	if f.Current.OutcomeNote != "" {
 		fmt.Fprintf(&b, "首次部署现场登记说明：%s\n", aiScrub(f.Current.OutcomeNote))
 	}

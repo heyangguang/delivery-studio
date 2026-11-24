@@ -685,6 +685,75 @@ func (s *storeServer) extractSBOM() secSBOMInventory {
 		if dep != nil && dep.DeliveryMode != "" {
 			rawMode = dep.DeliveryMode
 		}
+		effMode := effectiveDeliveryMode(cur.ID, rawMode, autoJobs)
+		if effMode == "imported" && dep != nil && dep.Imported != nil {
+			ecos := platformToOSVEcosystems(pl)
+			ecoDisp := pl
+			if len(ecos) > 0 {
+				ecoDisp = ecos[0]
+			}
+			ecoKey := normalizeEcoKey(ecoDisp)
+			platTitle := pl
+			if def, ok := mwpack.PlatformByID(pl); ok && def.Title != "" {
+				platTitle = def.Title
+			} else if dep.Imported.OSDetail != "" {
+				platTitle = dep.Imported.OSDetail
+			}
+			cvKey := ""
+			if len(cvKeys) > 0 {
+				cvKey = cvKeys[0]
+			}
+			hasPrimaryPkg := false
+			for _, pk := range dep.Imported.Packages {
+				if pk.Name == "" || pk.Version == "" {
+					continue
+				}
+				role := pk.Role
+				if role == "" {
+					role = classifySecPkgRole("os_package", pk.Name, []string{cur.AppID}, primaryPkgNames)
+				}
+				if role == "primary" {
+					hasPrimaryPkg = true
+				}
+				comps := []string{}
+				if cvKey != "" {
+					comps = []string{cvKey}
+				}
+				addItem(secSBOMItem{
+					AssetType:     "os_package",
+					PkgRole:       role,
+					Platform:      pl,
+					PlatformTitle: platTitle,
+					Ecosystem:     ecoDisp,
+					OSVEcosystems: ecos,
+					EcoKey:        ecoKey,
+					Package:       pk.Name,
+					Version:       pk.Version,
+					Components:    comps,
+				})
+			}
+			if !hasPrimaryPkg {
+				declVer := firstNonEmptyStr(dep.Imported.ExactVersion, cur.Version)
+				if declVer != "" && declVer != "unknown" && cur.AppID != "" {
+					comps := []string{}
+					if cvKey != "" {
+						comps = []string{cvKey}
+					}
+					addItem(secSBOMItem{
+						AssetType:     "component_declared",
+						PkgRole:       "primary",
+						Platform:      pl,
+						PlatformTitle: platTitle,
+						Ecosystem:     ecoDisp,
+						OSVEcosystems: ecos,
+						EcoKey:        ecoKey,
+						Package:       cur.AppID,
+						Version:       declVer,
+						Components:    comps,
+					})
+				}
+			}
+		}
 		inv.Clusters = append(inv.Clusters, secClusterSpec{
 			ClusterID:    cid,
 			AppID:        cur.AppID,
@@ -692,7 +761,7 @@ func (s *storeServer) extractSBOM() secSBOMInventory {
 			Version:      cur.Version,
 			Platform:     pl,
 			Owner:        cur.Owner,
-			DeliveryMode: effectiveDeliveryMode(cur.ID, rawMode, autoJobs),
+			DeliveryMode: effMode,
 			Hosts:        hosts,
 			CompVerKeys:  cvKeys,
 		})

@@ -133,7 +133,7 @@ export function prefetchDetail(id: string) {
 /* ---------- filters ---------- */
 
 type Status = "all" | "generated" | "configuration" | "done" | "failed";
-type ModeFilter = "all" | "automatic" | "offline" | "configuration";
+type ModeFilter = "all" | "automatic" | "offline" | "imported" | "configuration";
 type ScopeFilter = "formal" | "verification";
 type Range = "all" | "today" | "7d" | "30d";
 type Sort = "new" | "old" | "name";
@@ -277,8 +277,9 @@ function FilterPanel({
           onChange={(v) => set({ mode: v })}
           options={[
             { value: "all", label: bi("全部", "All") },
-            { value: "automatic", label: bi("自动部署", "Automated") },
-            { value: "offline", label: bi("离线部署", "Offline") },
+            { value: "automatic", label: bi("自动", "Auto") },
+            { value: "offline", label: bi("离线", "Offline") },
+            { value: "imported", label: bi("纳管", "Imported") },
             { value: "configuration", label: bi("仅配置", "Config") },
           ]}
         />
@@ -416,7 +417,7 @@ export function DeliveriesPage({
     )
       ? stored.status
       : "all",
-    mode: ["all", "automatic", "offline", "configuration"].includes(
+    mode: ["all", "automatic", "offline", "imported", "configuration"].includes(
       stored.mode,
     )
       ? stored.mode
@@ -480,6 +481,7 @@ export function DeliveriesPage({
       all: base.length,
       automatic: base.filter((j) => normalizeDeliveryMode(j.delivery_mode) === "automatic").length,
       offline: base.filter((j) => normalizeDeliveryMode(j.delivery_mode) === "offline").length,
+      imported: base.filter((j) => normalizeDeliveryMode(j.delivery_mode) === "imported").length,
       configuration: base.filter((j) => normalizeDeliveryMode(j.delivery_mode) === "configuration").length,
     };
   }, [rows, f]);
@@ -612,23 +614,32 @@ export function DeliveriesPage({
     return (
       <div className="page-empty enter">
         <PackagesArt />
-        <h1>{bi("还没有交付", "No deliveries yet")}</h1>
+        <h1>{bi("还没有集群", "No clusters yet")}</h1>
         <p>
           {bi(
-            "选择应用和拓扑、填写节点与入口，平台会为每台机器生成上传包和对应的执行手册，支持离线手工部署或授权执行节点自动部署。",
-            "Choose an app and topology, specify hosts and endpoints, and generate per-host upload packages and runbooks for manual offline or automated node execution.",
+            "选择应用新建标准集群交付，或直接导入已有运行中的存量中间件集群，统一开展变更演练、报告生成与安全治理。",
+            "Create a new standardized cluster delivery or import an existing brownfield middleware cluster for change rehearsals, reporting, and security governance.",
           )}
         </p>
         <div className="row-gap">
           {can("delivery.create") && (
-            <Button
-              type="primary"
-              size="large"
-              icon={<IconPlus />}
-              onClick={() => go({ name: "new" })}
-            >
-              {bi("新建集群交付", "New Cluster Delivery")}
-            </Button>
+            <>
+              <Button
+                type="primary"
+                size="large"
+                icon={<IconPlus />}
+                onClick={() => go({ name: "new" })}
+              >
+                {bi("新建集群交付", "New Cluster Delivery")}
+              </Button>
+              <Button
+                size="large"
+                icon={<DeliveryModeIcon mode="imported" size={14} />}
+                onClick={() => go({ name: "import" })}
+              >
+                {bi("导入存量集群", "Import Cluster")}
+              </Button>
+            </>
           )}
           <Button size="large" onClick={() => go({ name: "apps" })}>
             {bi("浏览应用", "Browse Apps")}
@@ -656,16 +667,26 @@ export function DeliveriesPage({
         >
           <div className="list-head">
             <div className="list-title">
-              <h1>{bi("交付", "Deliveries")}</h1>
+              <h1>{bi("集群", "Clusters")}</h1>
               {can("delivery.create") && (
-                <Button
-                  type="primary"
-                  size="small"
-                  icon={<IconPlus />}
-                  onClick={() => go({ name: "new" })}
-                >
-                  {bi("新建", "New")}
-                </Button>
+                <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <Button
+                    size="small"
+                    icon={<DeliveryModeIcon mode="imported" size={12} />}
+                    title={bi("导入已有存量集群", "Import existing brownfield cluster")}
+                    onClick={() => go({ name: "import" })}
+                  >
+                    {bi("导入", "Import")}
+                  </Button>
+                  <Button
+                    type="primary"
+                    size="small"
+                    icon={<IconPlus />}
+                    onClick={() => go({ name: "new" })}
+                  >
+                    {bi("新建", "New")}
+                  </Button>
+                </div>
               )}
             </div>
             <div className="search-row">
@@ -767,9 +788,10 @@ export function DeliveriesPage({
                 type="button"
                 className={`dm-filter-pill ${f.mode === "all" ? "on" : ""}`}
                 aria-pressed={f.mode === "all"}
+                title={bi("全部方式", "All modes")}
                 onClick={() => set({ mode: "all" })}
               >
-                {bi("全部方式", "All modes")}
+                {bi("全部", "All")}
               </button>
               <button
                 type="button"
@@ -796,6 +818,19 @@ export function DeliveriesPage({
                 <DeliveryModeIcon mode="offline" size={11} />
                 <span>{bi("离线", "Offline")}</span>
                 <em className="num">{modeCounts.offline}</em>
+              </button>
+              <button
+                type="button"
+                className={`dm-filter-pill is-imported ${f.mode === "imported" ? "on" : ""}`}
+                aria-pressed={f.mode === "imported"}
+                title={bi("存量纳管集群", "Imported brownfield clusters")}
+                onClick={() =>
+                  set({ mode: f.mode === "imported" ? "all" : "imported" })
+                }
+              >
+                <DeliveryModeIcon mode="imported" size={11} />
+                <span>{bi("纳管", "Imported")}</span>
+                <em className="num">{modeCounts.imported}</em>
               </button>
               {(modeCounts.configuration > 0 || f.mode === "configuration") && (
                 <button
@@ -1076,7 +1111,13 @@ function JobList({
                 }}
               >
                 <span className="row-ico">
-                  <AppGlyph id={j.app_id} category={a?.category} size={30} />
+                  <AppGlyph
+                    id={j.app_id}
+                    category={a?.category || c.imported?.category}
+                    icon={c.icon || c.imported?.icon}
+                    color={c.imported?.color}
+                    size={30}
+                  />
                   <StatusDot state={st.dot} />
                 </span>
                 <div className="row-main">

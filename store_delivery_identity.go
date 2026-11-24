@@ -45,6 +45,21 @@ func (s *storeServer) deliveryAppVersion(id, component, fallback string) string 
 // the current catalog, and never assume the first instance is the application.
 func (s *storeServer) deliveryScheme(id, component string, fallback *mwpack.SchemeSummary) *mwpack.SchemeSummary {
 	if fallback != nil {
+		if fallback.Contract != nil && (fallback.Contract.Limitations == nil || fallback.Contract.Acceptance == nil || fallback.Contract.Operations == nil) {
+			cp := *fallback
+			cc := *fallback.Contract
+			if cc.Limitations == nil {
+				cc.Limitations = []string{}
+			}
+			if cc.Acceptance == nil {
+				cc.Acceptance = []string{}
+			}
+			if cc.Operations == nil {
+				cc.Operations = []string{}
+			}
+			cp.Contract = &cc
+			return &cp
+		}
 		return fallback
 	}
 	raw := s.jobPlan(id)

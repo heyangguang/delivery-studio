@@ -7,15 +7,17 @@ export function sameScheme(a?: DeploymentScheme, b?: DeploymentScheme): boolean 
  if(!a || !b)return !a && !b;
  if(a===b)return true;
  const ca=a.contract, cb=b.contract;
+ if(!ca || !cb)return !ca && !cb && a.name===b.name && a.topology===b.topology && a.nodes===b.nodes;
+ const la=ca.limitations || [], lb=cb.limitations || [];
  return a.name===b.name && a.topology===b.topology && a.nodes===b.nodes &&
   ca.mechanism===cb.mechanism && ca.failover===cb.failover && ca.read_access===cb.read_access &&
-  ca.limitations.length===cb.limitations.length && ca.limitations.every((v,i)=>v===cb.limitations[i]);
+  la.length===lb.length && la.every((v,i)=>v===lb[i]);
 }
 export function SchemeInfo({scheme, detail=false, label}:{scheme?: DeploymentScheme;detail?: boolean;label?: string}) {
  useLang();
  const resolvedLabel = label ?? bi("部署方案", "Deployment scheme");
  if(!scheme)return <section className="scheme-summary is-empty" aria-label={resolvedLabel}><div className="scheme-head"><span className="scheme-dot" aria-hidden /><strong>{bi("部署架构待核对", "Architecture unverified")}</strong></div><div className="scheme-limit">{bi("旧交付未保存方案信息，请在下方节点拓扑或“配置”中查看原始部署记录。", "Legacy delivery has no saved scheme metadata; inspect the topology below or the Config tab for raw records.")}</div></section>;
- const contract=scheme.contract;
+ const contract=scheme.contract || {when:"",series:"",failover:"",mechanism:"",read_access:"",sharding:false,limitations:[],acceptance:[],operations:[]};
  const failover=({
   none: bi("不提供故障切换", "No failover"),
   manual: bi("人工切换", "Manual failover"),
@@ -26,7 +28,8 @@ export function SchemeInfo({scheme, detail=false, label}:{scheme?: DeploymentSch
  if(!detail)return <span title={summary}>{resolvedLabel}{bi("：", ": ")}<strong>{scheme.name}</strong>{scheme.nodes>0 ? ` · ${nodeText}` : ""}</span>;
  const facets=[contract.mechanism,failover,contract.read_access].filter(Boolean);
  const hasEvidence=scheme.source==="delivery-evidence" && Boolean(scheme.evidence?.length);
- const hasLimits=contract.limitations?.length>0;
+ const limits=contract.limitations || [];
+ const hasLimits=limits.length>0;
  const archTitle =
   resolvedLabel.includes("目标") || /\btarget\b/i.test(resolvedLabel)
    ? bi("目标部署架构", "Target architecture")
@@ -46,7 +49,7 @@ export function SchemeInfo({scheme, detail=false, label}:{scheme?: DeploymentSch
   {(hasEvidence || hasLimits) && (
    <div className="scheme-foot">
     {hasEvidence && <div className="scheme-limit">{bi("根据历史交付识别 · ", "Inferred from delivery evidence · ")}{scheme.evidence?.join(bi("；", "; "))}</div>}
-    {hasLimits && <div className="scheme-limit">{bi("适用限制：", "Limitations: ")}{contract.limitations.join(bi("；", "; "))}</div>}
+    {hasLimits && <div className="scheme-limit">{bi("适用限制：", "Limitations: ")}{limits.join(bi("；", "; "))}</div>}
    </div>
   )}
  </section>;

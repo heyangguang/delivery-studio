@@ -14,13 +14,17 @@ import {
   Button,
   Dropdown,
   Menu,
+  Message,
+  Modal,
   Skeleton,
   Tooltip,
 } from "@arco-design/web-react";
 import {
   IconArrowLeft,
   IconCopy,
+  IconDelete,
   IconDown,
+  IconEdit,
   IconEye,
   IconEyeInvisible,
   IconMore,
@@ -72,6 +76,7 @@ import { DocsTab, prefetchClusterDocs } from "./docs";
 import { AIDock, Spark, useAIStatus } from "./aichat";
 import { ClusterConfig } from "./clusterconfig";
 import { ClusterSecurityTab } from "./clustersecurity";
+import { ImportedBaselineModal } from "./importcluster";
 import {
   ClusterRehearsal,
   computeEffectiveClusterChanges,
@@ -393,7 +398,10 @@ export function ClusterDetail({
     if (basePlanId) prefetchDetail(basePlanId);
     if (hasDocs) prefetchClusterDocs(c.id);
   }, [c.id, basePlanId, hasDocs]);
+  const isImported = c.delivery_mode === "imported";
+  const [baselineModal, setBaselineModal] = useState<null | "edit" | "probe">(null);
   const effectiveTab =
+    (resolvedTab === "plans" && isImported) ||
     (resolvedTab === "rehearsal" && !canRehearse) ||
     (resolvedTab === "docs" && !hasDocs) ||
     (resolvedTab === "security" && !hasDocs)
@@ -404,7 +412,9 @@ export function ClusterDetail({
   const tabItems = [
     { value: "overview", label: bi("概览", "Overview"), icon: <TabOverviewIcon /> },
     { value: "config", label: bi("配置", "Config"), icon: <TabConfigIcon /> },
-    { value: "plans", label: bi("部署", "Deploy"), icon: <TabDeployIcon /> },
+    ...(!isImported
+      ? [{ value: "plans", label: bi("部署", "Deploy"), icon: <TabDeployIcon /> }]
+      : []),
     ...(hasDocs
       ? [{ value: "security", label: bi("安全", "Security"), icon: <TabSecurityIcon /> }]
       : []),
@@ -576,10 +586,50 @@ export function ClusterDetail({
                 trigger="click"
                 position="br"
                 droplist={
-                  <Menu onClickMenuItem={(k) => k === "copy" && copy(c.id)}>
+                  <Menu
+                    onClickMenuItem={(k) => {
+                      if (k === "copy") copy(c.id);
+                      else if (k === "edit-baseline") setBaselineModal("edit");
+                      else if (k === "reprobe") setBaselineModal("probe");
+                      else if (k === "delete-imported" && c.current) {
+                        Modal.confirm({
+                          title: bi("移除存量纳管集群", "Remove Imported Cluster"),
+                          content: bi(
+                            `确定要从平台移除纳管集群「${c.id}」的基线档案吗？此操作仅删除平台档案，绝不会影响线上运行的中间件节点。`,
+                            `Remove the onboarded baseline record for "${c.id}"? This only removes platform records and never touches your running cluster.`,
+                          ),
+                          okText: bi("确认移除", "Remove"),
+                          okButtonProps: { status: "danger" },
+                          cancelText: bi("取消", "Cancel"),
+                          onOk: async () => {
+                            await api(`/api/jobs/${encodeURIComponent(c.current!)}`, {
+                              method: "DELETE",
+                            });
+                            Message.success(bi(`已移除纳管集群 ${c.id}`, `Removed ${c.id}`));
+                            window.dispatchEvent(new Event("mh-clusters-changed"));
+                            await reload();
+                            go({ name: "deliveries" });
+                          },
+                        });
+                      }
+                    }}
+                  >
                     <Menu.Item key="copy">
                       <IconCopy /> {bi("复制集群标识", "Copy Cluster ID")}
                     </Menu.Item>
+                    {isImported && can("delivery.create") && (
+                      <>
+                        <Menu.Item key="edit-baseline">
+                          <IconEdit /> {bi("编辑纳管基线", "Edit Baseline")}
+                        </Menu.Item>
+                        <Menu.Item key="reprobe">
+                          <IconRefresh /> {bi("重新只读采集", "Re-Run Probe")}
+                        </Menu.Item>
+                        <Menu.Item key="delete-imported" style={{ color: "var(--bad)" }}>
+                          <IconDelete /> {bi("移除纳管集群", "Remove Imported Cluster")}
+                        </Menu.Item>
+                      </>
+                    )}
                   </Menu>
                 }
               >
@@ -664,9 +714,27 @@ export function ClusterDetail({
             appIcon={app?.category}
             canRehearse={canRehearse}
             rehearsals={rehearsals}
+            onOpenBaseline={isImported ? (m) => setBaselineModal(m) : undefined}
           />
         )}
       </div>
+      {isImported && (
+        <ImportedBaselineModal
+          visible={baselineModal !== null}
+          mode={baselineModal || "edit"}
+          cluster={c}
+          onClose={() => setBaselineModal(null)}
+          onSaved={async () => {
+            if (c.current) {
+              putDetailCache(
+                c.current,
+                await api<JobDetail>(`/api/jobs/${encodeURIComponent(c.current)}`),
+              );
+            }
+            await reload();
+          }}
+        />
+      )}
     </article>
   );
   // the assistant on a cluster talks about the delivery that describes it now, or the viewed deployment
@@ -1052,17 +1120,22 @@ function Overview({
   c,
   canRehearse,
   rehearsals,
+  onOpenBaseline,
 }: {
   c: ClusterView;
   appIcon?: string;
   canRehearse: boolean;
   rehearsals: ChangeRehearsal[] | null;
+  onOpenBaseline?: (mode: "edit" | "probe") => void;
 }) {
   useLang();
+  const isImported = c.delivery_mode === "imported";
+  const imp = c.imported;
   const holder = c.plans.find((p) => p.id === c.holder);
   const current = c.plans.find((p) => p.id === c.current);
   const basePlan = current || holder || c.plans[0];
   const canReviseHolder =
+    !isImported &&
     !!holder &&
     holder.state === "succeeded" &&
     holder.outcome !== "done" &&
@@ -1080,10 +1153,125 @@ function Overview({
   const sortedRhList = [...rhList].sort(
     (a, b) => Number(Boolean(a.voided)) - Number(Boolean(b.voided)),
   );
+  const deployMethodLabel =
+    imp?.deploy_method === "docker"
+      ? bi("Docker / 容器化", "Docker / Container")
+      : imp?.deploy_method === "binary"
+        ? bi("二进制手工部署", "Binary / Manual")
+        : imp?.deploy_method === "k8s"
+          ? "Kubernetes"
+          : imp?.deploy_method === "other"
+            ? bi("其他形态", "Other")
+            : bi("systemd 系统服务", "systemd Service");
+  const sourceKindLabel =
+    imp?.source_kind === "probe"
+      ? bi("只读探针采集", "Read-Only Probe")
+      : imp?.source_kind === "ai_doc"
+        ? bi("文档 / 配置识别", "Doc / Config Extract")
+        : bi("手工建档", "Manual Onboarding");
 
   return (
     <div className="cl-over">
-      {holder && <HolderCard c={c} p={holder} />}
+      {isImported && (
+        <section className="cl-imp-card" aria-label={bi("存量纳管基线", "Imported Baseline")}>
+          <div className="cl-imp-card-head">
+            <div className="cl-imp-title-wrap">
+              <div>
+                <h3>{bi("存量纳管基线档案", "Imported Brownfield Baseline")}</h3>
+                <div className="cl-imp-sub">
+                  {sourceKindLabel} · {deployMethodLabel}
+                  {imp?.last_probed_at
+                    ? bi(` · 最近采集 ${ago(imp.last_probed_at)}`, ` · Probed ${ago(imp.last_probed_at)}`)
+                    : imp?.baseline_updated_at
+                      ? bi(` · 基线更新于 ${ago(imp.baseline_updated_at)}`, ` · Updated ${ago(imp.baseline_updated_at)}`)
+                      : ""}
+                </div>
+              </div>
+            </div>
+            <div className="cl-imp-actions">
+              {can("delivery.create") && onOpenBaseline && (
+                <>
+                  <Button size="small" icon={<IconEdit />} onClick={() => onOpenBaseline("edit")}>
+                    {bi("编辑基线", "Edit Baseline")}
+                  </Button>
+                  <Button size="small" icon={<IconRefresh />} onClick={() => onOpenBaseline("probe")}>
+                    {bi("重新只读采集", "Re-Run Probe")}
+                  </Button>
+                </>
+              )}
+              {canRehearse && (
+                <Button
+                  size="small"
+                  type="primary"
+                  onClick={() => go({ name: "deliveries", id: c.id, tab: "rehearsal" })}
+                >
+                  {bi("发起变更演练", "Start Change Rehearsal")}
+                </Button>
+              )}
+            </div>
+          </div>
+          <div className="cl-imp-facts">
+            <div className="cl-imp-fact">
+              <span className="cl-imp-fact-k">{bi("精确版本", "Exact Version")}</span>
+              <span className="cl-imp-fact-v mono">{imp?.exact_version || c.version || "—"}</span>
+            </div>
+            <div className="cl-imp-fact">
+              <span className="cl-imp-fact-k">{bi("操作系统", "Operating System")}</span>
+              <span className="cl-imp-fact-v">{imp?.os_detail || (c.platform ? platformShort(c.platform) : "—")}</span>
+            </div>
+            <div className="cl-imp-fact">
+              <span className="cl-imp-fact-k">{bi("服务单元", "Service Units")}</span>
+              <span className="cl-imp-fact-v mono">
+                {imp?.service_units?.length ? imp.service_units.join(", ") : "—"}
+              </span>
+            </div>
+            <div className="cl-imp-fact">
+              <span className="cl-imp-fact-k">{bi("配置路径", "Config Paths")}</span>
+              <span className="cl-imp-fact-v mono">
+                {imp?.config_paths?.length
+                  ? imp.config_paths.join(", ").split("/").map((seg, idx) => (
+                      <React.Fragment key={idx}>
+                        {idx > 0 && (
+                          <>
+                            /<wbr />
+                          </>
+                        )}
+                        {seg}
+                      </React.Fragment>
+                    ))
+                  : "—"}
+              </span>
+            </div>
+            <div className="cl-imp-fact">
+              <span className="cl-imp-fact-k">{bi("数据目录", "Data Dirs")}</span>
+              <span className="cl-imp-fact-v mono">
+                {imp?.data_dirs?.length
+                  ? imp.data_dirs.join(", ").split("/").map((seg, idx) => (
+                      <React.Fragment key={idx}>
+                        {idx > 0 && (
+                          <>
+                            /<wbr />
+                          </>
+                        )}
+                        {seg}
+                      </React.Fragment>
+                    ))
+                  : "—"}
+              </span>
+            </div>
+            <div className="cl-imp-fact">
+              <span className="cl-imp-fact-k">{bi("采集软件包", "Collected Packages")}</span>
+              <span className="cl-imp-fact-v num">
+                {imp?.packages?.length
+                  ? bi(`${imp.packages.length} 项（已纳入 CVE 扫描）`, `${imp.packages.length} pkg(s) (CVE indexed)`)
+                  : bi("未采集（可运行只读探针补齐）", "None (run probe to collect)")}
+              </span>
+            </div>
+          </div>
+          {imp?.notes && <div className="cl-imp-notes">{imp.notes}</div>}
+        </section>
+      )}
+      {!isImported && holder && <HolderCard c={c} p={holder} />}
       {canReviseHolder && (
         <div className="cl-revise">
           <span>
@@ -1128,10 +1316,16 @@ function Overview({
             <div className="cl-ledger-row">
               <div className="cl-ledger-main">
                 <div className="cl-ledger-title-line">
-                  <span className="cl-ledger-tag">{bi("初始部署基线", "Initial Baseline")}</span>
+                  <span className="cl-ledger-tag">
+                    {isImported ? bi("存量纳管基线", "Imported Baseline") : bi("初始部署基线", "Initial Baseline")}
+                  </span>
                   <StatusBadge
                     state={PLAN_PHASE[planPhase(basePlan)].dot}
-                    label={PLAN_PHASE[planPhase(basePlan)].label}
+                    label={
+                      isImported
+                        ? bi("纳管运行中", "Managed")
+                        : PLAN_PHASE[planPhase(basePlan)].label
+                    }
                   />
                   <DeliveryModeTag mode={basePlan.delivery_mode} compact />
                   <span className="cl-ledger-facts">
@@ -1182,12 +1376,14 @@ function Overview({
                 className="dsec-link link cl-ledger-act"
                 onClick={() =>
                   go(
-                    { name: "deliveries", id: c.id, tab: "plans" },
+                    isImported
+                      ? { name: "deliveries", id: c.id, tab: "docs", doc: "delivery" }
+                      : { name: "deliveries", id: c.id, tab: "plans" },
                     { replace: true },
                   )
                 }
               >
-                {bi("查看部署手册", "View Runbook")} <IconRight />
+                {isImported ? bi("查看基线档案", "View Baseline Doc") : bi("查看部署手册", "View Runbook")} <IconRight />
               </button>
             </div>
 

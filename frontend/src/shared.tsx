@@ -311,7 +311,7 @@ export type InstanceSpec = {
 export type ExecutionHost = { name: string; ip: string; repository_port: number };
 export type Deployment = {
   execution_host?: ExecutionHost;
-  delivery_mode?: "offline" | "automatic" | "configuration";
+  delivery_mode?: "offline" | "automatic" | "configuration" | "imported";
   schema?: string;
   id: string;
   title?: string;
@@ -562,7 +562,7 @@ export type PackageSource = {
 /** The structured handbook stored with a delivery (plan.json). */
 export type DeliveryPlan = {
   execution_host?: ExecutionHost;
-  delivery_mode?: "offline" | "automatic" | "configuration";
+  delivery_mode?: "offline" | "automatic" | "configuration" | "imported";
   step_format?: number;
   cluster: string;
   controller: string;
@@ -687,7 +687,7 @@ export type JobPromoteTarget = {
 };
 
 export type Job = {
-  delivery_mode?: "offline" | "automatic" | "configuration";
+  delivery_mode?: "offline" | "automatic" | "configuration" | "imported";
   purpose?: "verification" | string;
   verify_target?: VerifyTarget;
   scheme?: DeploymentScheme;
@@ -720,7 +720,7 @@ export type Job = {
   logs: string[];
 };
 export type JobRef = {
-  delivery_mode?: "offline" | "automatic" | "configuration";
+  delivery_mode?: "offline" | "automatic" | "configuration" | "imported";
   id: string;
   cluster_id: string;
   app_name: string;
@@ -972,7 +972,7 @@ export const phaseOf = (j: Pick<Job, "state" | "outcome" | "delivery_mode">): Ph
 
 export type Outcome = "done" | "deviated" | "failed" | "void";
 export type PlanEntry = {
-  delivery_mode?: "offline" | "automatic" | "configuration";
+  delivery_mode?: "offline" | "automatic" | "configuration" | "imported";
   purpose?: "verification" | string;
   verify_target?: VerifyTarget;
   scheme?: DeploymentScheme;
@@ -995,8 +995,42 @@ export type PlanEntry = {
   created: string;
   updated?: string;
 };
+export type ImportedPkg = {
+  name: string;
+  version: string;
+  role?: string;
+};
+export type ImportedEndpoint = {
+  name?: string;
+  address: string;
+  role?: string;
+};
+export type ImportedMeta = {
+  source_kind?: "manual" | "probe" | "ai_doc" | string;
+  managed_catalog?: boolean;
+  display_name?: string;
+  category?: string;
+  icon?: string;
+  color?: string;
+  deploy_method?: "systemd" | "docker" | "binary" | "k8s" | "other" | string;
+  arch_summary?: string;
+  exact_version?: string;
+  os_detail?: string;
+  service_units?: string[];
+  config_paths?: string[];
+  data_dirs?: string[];
+  log_dirs?: string[];
+  endpoints?: ImportedEndpoint[];
+  packages?: ImportedPkg[];
+  notes?: string;
+  last_probed_at?: string;
+  baseline_updated_at?: string;
+  baseline_updated_by?: string;
+};
 export type ClusterView = {
-  delivery_mode?: "offline" | "automatic" | "configuration";
+  delivery_mode?: "offline" | "automatic" | "configuration" | "imported";
+  imported?: ImportedMeta;
+  icon?: string;
   purpose?: "verification" | string;
   verify_target?: VerifyTarget;
   scheme?: DeploymentScheme;
@@ -1114,9 +1148,11 @@ export const PLAN_PHASE: Record<PlanPhase, { label: string; dot: string }> = {
 };
 /** "首次部署" or "配置交付" for a first deployment. */
 export const planTitle = (p: { delivery_mode?: string }) =>
-  p.delivery_mode === "configuration"
-    ? bi("配置交付", "Config Delivery")
-    : bi("首次部署", "Initial Deploy");
+  p.delivery_mode === "imported"
+    ? bi("存量纳管基线", "Imported Baseline")
+    : p.delivery_mode === "configuration"
+      ? bi("配置交付", "Config Delivery")
+      : bi("首次部署", "Initial Deploy");
 /** The cluster's state in a few words, for its row and header. */
 export function clusterStatus(c: ClusterView): {
   label: string;

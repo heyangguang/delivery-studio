@@ -144,6 +144,9 @@ func (s *storeServer) markOutcome(id, user, outcome, note string) (storeJob, int
 	s.mu.Lock()
 	j := s.jobs[id]
 	switch {
+	case j.DeliveryMode == "imported":
+		s.mu.Unlock()
+		return j, 409, "存量纳管集群无需登记首次部署结果，请直接编辑纳管基线或发起变更演练"
 	case j.DeliveryMode == "configuration" && outcome != "" && outcome != outcomeVoid:
 		s.mu.Unlock()
 		return j, 409, "仅配置交付不能登记为现场部署结果；配置生成不代表已安装或验证服务"
@@ -200,6 +203,8 @@ type planEntry struct {
 // clusterView is one cluster: its first deployment, revision history, and state.
 type clusterView struct {
 	DeliveryMode string                `json:"delivery_mode,omitempty"`
+	Imported     *mwpack.ImportedMeta  `json:"imported,omitempty"`
+	Icon         string                `json:"icon,omitempty"`
 	Purpose      string                `json:"purpose,omitempty"`
 	VerifyTarget *verifyTarget         `json:"verify_target,omitempty"`
 	Scheme       *mwpack.SchemeSummary `json:"scheme,omitempty"`
@@ -246,7 +251,7 @@ func (s *storeServer) autoExecutedJobs() map[string]bool {
 
 func effectiveDeliveryMode(jobID, raw string, autoJobs map[string]bool) string {
 	switch raw {
-	case "automatic", "configuration":
+	case "automatic", "configuration", "imported":
 		return raw
 	}
 	if jobID != "" && autoJobs[jobID] {
@@ -346,6 +351,17 @@ func (s *storeServer) clusters(w http.ResponseWriter, r *http.Request, session s
 		}
 		if d := s.readSpec(v.Current); d != nil {
 			v.Hosts, v.Platform = len(d.Hosts), d.Platform
+			if d.Imported != nil {
+				v.Imported = d.Imported
+				if d.Imported.Icon != "" {
+					v.Icon = d.Imported.Icon
+				}
+			}
+		}
+		if v.Icon == "" {
+			if pr, ok := mwpack.LookupImportPreset(v.AppID); ok {
+				v.Icon = pr.Icon
+			}
 		}
 		v.Scheme = mwpack.LocalizeSchemeSummary(lang, s.deliveryScheme(v.Current, v.AppID, v.Scheme))
 		v.Version = s.deliveryAppVersion(v.Current, v.AppID, v.Version)
@@ -375,7 +391,28 @@ func (s *storeServer) clusterHistoryText(cluster string) string {
 	cur, _ := clusterCurrent(jobs)
 	holder, busy := clusterHolder(jobs)
 	var b strings.Builder
-	if hasHead {
+	if cur.DeliveryMode == "imported" {
+		when := firstNonEmptyStr(day(cur.Created), day(cur.Updated))
+		fmt.Fprintf(&b, "集群 %s 当前状态：【存量纳管运行中集群】（非平台首次部署，于 %s 纳管建档，组件：%s %s）。\n", cluster, when, cur.AppName, cur.Version)
+		if dep := s.readSpec(cur.ID); dep != nil && dep.Imported != nil {
+			im := dep.Imported
+			if im.DeployMethod != "" || im.ArchSummary != "" {
+				fmt.Fprintf(&b, "- 部署形态：%s；架构摘要：%s\n", firstNonEmptyStr(im.DeployMethod, "未知"), firstNonEmptyStr(im.ArchSummary, "—"))
+			}
+			if len(im.ServiceUnits) > 0 {
+				fmt.Fprintf(&b, "- 系统服务：%s\n", strings.Join(im.ServiceUnits, ", "))
+			}
+			if len(im.ConfigPaths) > 0 {
+				fmt.Fprintf(&b, "- 配置路径：%s\n", strings.Join(im.ConfigPaths, ", "))
+			}
+			if len(im.DataDirs) > 0 {
+				fmt.Fprintf(&b, "- 数据目录：%s\n", strings.Join(im.DataDirs, ", "))
+			}
+			if im.Notes != "" {
+				fmt.Fprintf(&b, "- 纳管备注：%s\n", truncRunes(im.Notes, 240))
+			}
+		}
+	} else if hasHead {
 		when := firstNonEmptyStr(day(head.Marked), day(head.Created))
 		fmt.Fprintf(&b, "集群 %s 当前状态：【已部署完成 / 运行中（已投产）】，运行基线为 %s（编号 %s，%s 确认）；共 %d 份交付记录（旧的在前）。\n", cluster, jobTitle(head), head.ID, when, len(jobs))
 	} else {

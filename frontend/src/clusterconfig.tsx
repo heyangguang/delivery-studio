@@ -16,6 +16,7 @@ import {
   IconDesktop,
   IconDown,
   IconDownload,
+  IconEdit,
   IconEye,
   IconEyeInvisible,
   IconFile,
@@ -52,6 +53,7 @@ import {
   type EffectiveClusterChange,
 } from "./rehearsal";
 import { bi, useLang, withLang } from "./i18n";
+import { ImportedBaselineModal } from "./importcluster";
 import "./clusterconfig.css";
 
 const schemaCache = new Map<string, Schema>();
@@ -62,11 +64,13 @@ if (typeof window !== "undefined") {
 const completed = (p: PlanEntry) =>
   p.outcome === "done" || p.outcome === "deviated";
 const titleOf = (p: PlanEntry) =>
-  p.delivery_mode === "configuration"
-    ? bi("配置交付", "Config Delivery")
-    : completed(p)
-      ? bi("初始部署基线", "Initial Baseline")
-      : bi("部署交付", "Deployment Delivery");
+  p.delivery_mode === "imported"
+    ? bi("存量纳管基线", "Imported Baseline")
+    : p.delivery_mode === "configuration"
+      ? bi("配置交付", "Config Delivery")
+      : completed(p)
+        ? bi("初始部署基线", "Initial Baseline")
+        : bi("部署交付", "Deployment Delivery");
 const SECRET_KEY_RE =
   /(password|passwd|pwd|secret|token|requirepass|access_key|secret_key|auth_key|private_key|admin_pass|repl_pass|superuser_pass)/i;
 
@@ -476,9 +480,14 @@ function ConfigRecord({
 
   const hosts: HostSpec[] = dep?.hosts || plan?.hosts || [];
   const controller = plan?.controller || dep?.controller;
+  const isImported = c.delivery_mode === "imported";
+  const skipCatalogSchema = isImported && c.imported?.managed_catalog === false;
   const keys = rawInstances.map(schemaKey).join("|");
   useEffect(() => {
-    if (!rawInstances.length) return;
+    if (!rawInstances.length || skipCatalogSchema) {
+      setSchemaError(false);
+      return;
+    }
     const abort = new AbortController();
     setSchemaError(false);
     const unique = [
@@ -504,10 +513,10 @@ function ConfigRecord({
           results.flatMap((r) => (r.status === "fulfilled" ? [r.value] : [])),
         ),
       );
-      setSchemaError(results.some((r) => r.status === "rejected"));
+      setSchemaError(!isImported && results.some((r) => r.status === "rejected"));
     });
     return () => abort.abort();
-  }, [keys, schemaRetry, lang]);
+  }, [keys, schemaRetry, lang, skipCatalogSchema, isImported]);
 
   const schemaFor = (i: DisplayInstance): Schema | undefined =>
     schemas[i.schemaLookupKey || schemaKey(i)];
@@ -720,7 +729,14 @@ function ConfigRecord({
       note: i.embeddedFrom
         ? bi("随 PostgreSQL 内置", "Bundled with PostgreSQL")
         : i.id,
-      icon: <AppGlyph id={i.component} size={18} />,
+      icon: (
+        <AppGlyph
+          id={i.component}
+          icon={i.component === c.app_id ? c.icon : undefined}
+          color={i.component === c.app_id ? c.imported?.color : undefined}
+          size={18}
+        />
+      ),
       changeCount: (effectiveByInstance.get(i.id) || []).length,
       embedded: Boolean(i.embeddedFrom),
     })),
@@ -800,12 +816,12 @@ function ConfigRecord({
       section: "hosts",
       title: h.name,
       context: `${bi("机器", "Host")} · ${h.disk || bi("未记录磁盘", "Disk unrecorded")}${h.name === controller ? bi(" · 控制节点", " · Controller") : ""}${
-        displayInstances.some((i) => !i.external && i.hosts.includes(h.name))
+        displayInstances.some((i) => !i.external && (i.hosts || []).includes(h.name))
           ? ` · ${displayInstances
-              .filter((i) => !i.external && i.hosts.includes(h.name))
+              .filter((i) => !i.external && (i.hosts || []).includes(h.name))
               .map((i) => {
-                const roles = Object.entries(i.roles)
-                  .filter(([, hs]) => hs.includes(h.name))
+                const roles = Object.entries(i.roles || {})
+                  .filter(([, hs]) => (hs || []).includes(h.name))
                   .map(([role]) => `${i.role_titles?.[role] || role} ${role}`)
                   .join(bi("、", ", "));
                 return roles
@@ -883,7 +899,7 @@ function ConfigRecord({
         2,
       )
     : undefined;
-  const specFile = data?.files.find(
+  const specFile = (data?.files || []).find(
     (f) => f.name === "部署规格.yml" || f.name === "deployment-spec.yml",
   );
 
@@ -919,8 +935,8 @@ function ConfigRecord({
     const seenByRoleHosts = new Map<string, number>();
     const realNonExt = nonExternalInstances.filter((i) => !i.embeddedFrom);
     for (const i of realNonExt) {
-      for (const [role, hs] of Object.entries(i.roles)) {
-        const matchedHosts = hs
+      for (const [role, hs] of Object.entries(i.roles || {})) {
+        const matchedHosts = (hs || [])
           .filter((name) => hosts.some((h) => h.name === name))
           .slice()
           .sort();
@@ -1024,16 +1040,28 @@ function ConfigRecord({
     return obj;
   }, [instance, allInstanceRows]);
 
+  const [baselineEdit, setBaselineEdit] = useState<null | "edit" | "probe">(null);
+
   return (
     <div className="cx">
       <div className="cx-source">
         <div className="cx-source-title">
-          <h2>{bi("部署配置", "Configuration")}</h2>
+          <h2>{isImported ? bi("纳管基线配置", "Imported Baseline") : bi("部署配置", "Configuration")}</h2>
           <span className={`cx-record ${completed(p) ? "done" : ""}`}>
-            {stateLabel}
+            {isImported ? bi("存量纳管运行中", "Managed & Running") : stateLabel}
           </span>
         </div>
         <div className="cx-source-actions">
+          {isImported && can("delivery.create") && (
+            <>
+              <Button size="small" icon={<IconEdit />} onClick={() => setBaselineEdit("edit")}>
+                {bi("编辑基线", "Edit Baseline")}
+              </Button>
+              <Button size="small" icon={<IconRefresh />} onClick={() => setBaselineEdit("probe")}>
+                {bi("重新只读采集", "Re-Run Probe")}
+              </Button>
+            </>
+          )}
           {c.plans.length > 1 && (
             <Select
               size="small"
@@ -1065,10 +1093,15 @@ function ConfigRecord({
             type="text"
             size="small"
             onClick={() =>
-              go({ name: "deliveries", id: c.id, tab: "plans", plan: p.id })
+              isImported
+                ? go({ name: "deliveries", id: c.id, tab: "docs" })
+                : go({ name: "deliveries", id: c.id, tab: "plans", plan: p.id })
             }
           >
-            {bi("查看部署手册", "View Runbook")} <IconRight />
+            {isImported
+              ? bi("查看基线档案", "View Baseline Doc")
+              : bi("查看部署手册", "View Runbook")}{" "}
+            <IconRight />
           </Button>
         </div>
         <p>
@@ -1430,7 +1463,7 @@ function ConfigRecord({
                         <div className="cx-hosts">
                           {filteredHosts.map((h) => {
                             const hostComps = displayInstances.filter(
-                              (i) => !i.external && i.hosts.includes(h.name),
+                              (i) => !i.external && (i.hosts || []).includes(h.name),
                             );
                             return (
                               <div
@@ -1482,8 +1515,8 @@ function ConfigRecord({
                                     </span>
                                     <div className="cx-role-chips">
                                       {hostComps.map((i) => {
-                                        const roleText = Object.entries(i.roles)
-                                          .filter(([, hs]) => hs.includes(h.name))
+                                        const roleText = Object.entries(i.roles || {})
+                                          .filter(([, hs]) => (hs || []).includes(h.name))
                                           .map(
                                             ([role]) =>
                                               i.role_titles?.[role] || role,
@@ -1498,7 +1531,12 @@ function ConfigRecord({
                                               navigate(`component:${i.id}`)
                                             }
                                           >
-                                            <AppGlyph id={i.component} size={15} />
+                                            <AppGlyph
+                                              id={i.component}
+                                              icon={i.component === c.app_id ? c.icon : undefined}
+                                              color={i.component === c.app_id ? c.imported?.color : undefined}
+                                              size={15}
+                                            />
                                             <span className="cx-role-chip-name">
                                               {i.title}
                                             </span>
@@ -1682,14 +1720,19 @@ function ConfigRecord({
                                 key={`${i.id}.${port.Name}.${index}`}
                               >
                                 <span className="cx-port-comp">
-                                  <AppGlyph id={i.component} size={15} />
+                                  <AppGlyph
+                                    id={i.component}
+                                    icon={i.component === c.app_id ? c.icon : undefined}
+                                    color={i.component === c.app_id ? c.imported?.color : undefined}
+                                    size={15}
+                                  />
                                   <b>{i.title}</b>
                                   <code>{port.Name}</code>
                                 </span>
                                 <code className="cx-port-num">
-                                  {port.Port}/{port.Proto.toUpperCase()}
+                                  {port.Port}/{(port.Proto || "tcp").toUpperCase()}
                                 </code>
-                                <small>{port.Hosts.join(bi("、", ", "))}</small>
+                                <small>{(port.Hosts || []).join(bi("、", ", "))}</small>
                               </div>
                             ))}
                           </div>
@@ -1706,7 +1749,12 @@ function ConfigRecord({
                         <div className="cx-comp-hero-main">
                           <div className="cx-comp-hero-top">
                             <span className="cx-comp-hero-ico" aria-hidden>
-                              <AppGlyph id={instance.component} size={22} />
+                              <AppGlyph
+                                id={instance.component}
+                                icon={instance.component === c.app_id ? c.icon : undefined}
+                                color={instance.component === c.app_id ? c.imported?.color : undefined}
+                                size={22}
+                              />
                             </span>
                             <h2>
                               {instance.external
@@ -1748,19 +1796,19 @@ function ConfigRecord({
                           {!instance.external && (
                             <div className="cx-comp-hero-meta">
                               <span className="cx-comp-host-cnt">
-                                {instance.hosts.length === 1
+                                {(instance.hosts || []).length === 1
                                   ? bi("1 台机器", "1 host")
                                   : bi(
-                                      `${instance.hosts.length} 台机器`,
-                                      `${instance.hosts.length} hosts`,
+                                      `${(instance.hosts || []).length} 台机器`,
+                                      `${(instance.hosts || []).length} hosts`,
                                     )}
                               </span>
-                              {Object.entries(instance.roles)
-                                .filter(([, hs]) => hs.length)
+                              {Object.entries(instance.roles || {})
+                                .filter(([, hs]) => (hs || []).length)
                                 .map(([role, hs]) => (
                                   <span key={role} className="cx-place-chip">
                                     <b>{instance.role_titles?.[role] || role}</b>
-                                    <code>{hs.join(bi("、", ", "))}</code>
+                                    <code>{(hs || []).join(bi("、", ", "))}</code>
                                   </span>
                                 ))}
                             </div>
@@ -2473,6 +2521,23 @@ function ConfigRecord({
           </div>
         </div>
       </Drawer>
+      {isImported && (
+        <ImportedBaselineModal
+          visible={baselineEdit !== null}
+          mode={baselineEdit || "edit"}
+          cluster={c}
+          onClose={() => setBaselineEdit(null)}
+          onSaved={async () => {
+            if (p.id) {
+              putDetailCache(
+                p.id,
+                await api<JobDetail>(`/api/jobs/${encodeURIComponent(p.id)}`),
+              );
+            }
+            setRetry((x) => x + 1);
+          }}
+        />
+      )}
     </div>
   );
 }

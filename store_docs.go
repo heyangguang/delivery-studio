@@ -243,6 +243,9 @@ func (s *storeServer) solvedJob(id string) *mwpack.Plan {
 	if d == nil {
 		return nil
 	}
+	if d.DeliveryMode == "imported" {
+		return mwpack.SolveImported(s.plat.cat(), d)
+	}
 	return mwpack.Solve(s.plat.cat(), d)
 }
 
@@ -267,6 +270,9 @@ func (f clusterFacts) first() storeJob {
 func jobTitle(j storeJob) string { return jobTitleLang(j, "") }
 
 func jobTitleLang(j storeJob, lang string) string {
+	if j.DeliveryMode == "imported" {
+		return tr(lang, "存量纳管基线", "Imported Baseline")
+	}
 	if j.DeliveryMode == "configuration" {
 		return tr(lang, "配置交付", "Configuration Delivery")
 	}
@@ -276,6 +282,9 @@ func jobTitleLang(j storeJob, lang string) string {
 func jobOutcomeName(j storeJob) string { return jobOutcomeNameLang(j, "") }
 
 func jobOutcomeNameLang(j storeJob, lang string) string {
+	if j.DeliveryMode == "imported" && j.Outcome != outcomeVoid {
+		return tr(lang, "存量纳管运行中", "Onboarded & Running")
+	}
 	if j.DeliveryMode == "configuration" && j.Outcome != outcomeVoid {
 		return tr(lang, "仅生成配置，未执行现场部署", "Configuration generated only; on-site deployment not executed")
 	}
@@ -531,6 +540,13 @@ func (s *storeServer) packagesTable(b *docBuilder, id string, langOpt ...string)
 		rows = append(rows, []string{n, strings.Join(pk[n], tr(lang, "、", ", "))})
 	}
 	if len(rows) == 0 {
+		if dep := s.readSpec(id); dep != nil && dep.Imported != nil && len(dep.Imported.Packages) > 0 {
+			for _, p := range dep.Imported.Packages {
+				rows = append(rows, []string{p.Name, p.Version})
+			}
+		}
+	}
+	if len(rows) == 0 {
 		b.p(tr(lang, "没有软件包清单。", "No package inventory recorded."))
 		return
 	}
@@ -628,6 +644,9 @@ func (f clusterFacts) cover(extra ...[2]string) [][2]string {
 func (s *storeServer) buildDelivery(f clusterFacts) *clusterDoc {
 	lang := f.Lang
 	first := f.first()
+	if first.DeliveryMode == "imported" {
+		return s.buildImportedBaselineDoc(f, first)
+	}
 	d := &clusterDoc{ID: "delivery", Kind: "delivery", Title: tr(lang, "交付报告", "Delivery Report"), Subtitle: f.ID, Cluster: f.ID,
 		Cover: f.cover([2]string{tr(lang, "首次部署", "Initial Deploy"), day(first.Created)}, [2]string{tr(lang, "负责人", "Owner"), first.Owner})}
 	b := &docBuilder{}
@@ -711,6 +730,131 @@ func (s *storeServer) buildDelivery(f clusterFacts) *clusterDoc {
 	}
 	b.section(1, "risks", tr(lang, "6 风险与遗留问题", "6 Risks & Open Issues"), tr(lang, "仍然存在的风险、没有解决的问题和建议，例如执行中的偏差、单点、后续容量与监控关注项。", "Remaining risks, unresolved issues, and follow-up recommendations covering deviations, SPOFs, capacity, and monitoring."), true)
 	b.section(1, "acceptance", tr(lang, "7 验收结论", "7 Acceptance Conclusion"), tr(lang, "根据执行记录和测试结果给出结论；有失败或没执行的步骤要如实写明。", "Final acceptance verdict grounded in execution and verification logs; state any failed or unexecuted steps explicitly."), true)
+	d.Blocks = b.blocks
+	return d
+}
+
+func (s *storeServer) buildImportedBaselineDoc(f clusterFacts, first storeJob) *clusterDoc {
+	lang := f.Lang
+	dep := s.readSpec(f.Current.ID)
+	var meta *mwpack.ImportedMeta
+	if dep != nil {
+		meta = dep.Imported
+	}
+	d := &clusterDoc{
+		ID:       "delivery",
+		Kind:     "delivery",
+		Title:    tr(lang, "存量集群纳管基线档案", "Imported Cluster Baseline Archive"),
+		Subtitle: f.ID,
+		Cluster:  f.ID,
+		Cover: f.cover(
+			[2]string{tr(lang, "纳管来源", "Onboarding Source"), tr(lang, "存量纳管（非平台首次部署）", "Brownfield Imported")},
+			[2]string{tr(lang, "建档时间", "Onboarded"), day(first.Created)},
+			[2]string{tr(lang, "负责人", "Owner"), first.Owner},
+		),
+	}
+	b := &docBuilder{}
+	b.section(1, "summary", tr(lang, "1 集群概述", "1 Cluster Overview"), tr(lang, "描述该存量集群承载的业务系统、核心高可用架构、责任团队与日常运维边界。", "Business workload served by this brownfield cluster, HA architecture, owning team, and day-2 operational boundaries."), true)
+	b.h(1, tr(lang, "2 架构与拓扑", "2 Architecture & Topology"))
+	b.p(tr(lang, "以下基线由存量纳管档案记录，并可随现场只读探针或人工校对持续更新。", "Baseline recorded during brownfield onboarding; kept current via read-only probes or manual baseline updates."))
+	topology(b, f.Plan, lang)
+	b.h(2, tr(lang, "2.1 访问入口", "2.1 Access Endpoints"))
+	if f.Plan != nil {
+		n := len(b.blocks)
+		entries(b, f.Plan, lang)
+		if len(b.blocks) == n {
+			b.p(tr(lang, "暂未登记对外访问入口。", "No access endpoints recorded."))
+		}
+	}
+	b.h(1, tr(lang, "3 运行环境与路径基线", "3 Runtime Environment & Path Baseline"))
+	if meta != nil {
+		var rows [][]string
+		addRow := func(k, v string) {
+			if strings.TrimSpace(v) != "" {
+				rows = append(rows, []string{k, v})
+			}
+		}
+		deployMap := map[string]string{
+			"systemd": tr(lang, "systemd 系统服务", "systemd service"),
+			"docker":  tr(lang, "Docker / 容器化", "Docker / Container"),
+			"binary":  tr(lang, "二进制手工部署", "Binary / Manual"),
+			"k8s":     "Kubernetes",
+			"other":   tr(lang, "其他部署形态", "Other"),
+		}
+		srcMap := map[string]string{
+			"probe":  tr(lang, "只读探针脚本采集", "Read-only probe script"),
+			"ai_doc": tr(lang, "文档 / 配置 / 截图识别", "Document / config / screenshot"),
+			"manual": tr(lang, "手工录入建档", "Manual entry"),
+		}
+		addRow(tr(lang, "纳管录入方式", "Onboarding Method"), firstNonEmptyStr(srcMap[meta.SourceKind], meta.SourceKind))
+		addRow(tr(lang, "部署形态", "Deploy Method"), firstNonEmptyStr(deployMap[meta.DeployMethod], meta.DeployMethod))
+		addRow(tr(lang, "精确版本", "Exact Version"), firstNonEmptyStr(meta.ExactVersion, f.Current.Version))
+		addRow(tr(lang, "操作系统", "Operating System"), firstNonEmptyStr(meta.OSDetail, dep.Platform))
+		addRow(tr(lang, "架构摘要", "Architecture Summary"), meta.ArchSummary)
+		addRow(tr(lang, "系统服务单元", "Service Units"), strings.Join(meta.ServiceUnits, ", "))
+		addRow(tr(lang, "配置文件路径", "Config Paths"), strings.Join(meta.ConfigPaths, ", "))
+		addRow(tr(lang, "数据目录", "Data Directories"), strings.Join(meta.DataDirs, ", "))
+		addRow(tr(lang, "日志目录", "Log Directories"), strings.Join(meta.LogDirs, ", "))
+		if meta.LastProbedAt != "" {
+			addRow(tr(lang, "最近探针采集", "Last Probed"), stamp(meta.LastProbedAt))
+		}
+		if meta.BaselineUpdatedAt != "" {
+			addRow(tr(lang, "最近基线更新", "Baseline Updated"), fmt.Sprintf("%s (%s)", stamp(meta.BaselineUpdatedAt), meta.BaselineUpdatedBy))
+		}
+		if len(rows) > 0 {
+			b.table([]string{tr(lang, "基线项", "Baseline Field"), tr(lang, "登记值", "Recorded Value")}, rows)
+		}
+		if meta.Notes != "" {
+			b.note(tr(lang, "运维备注：", "Operations Notes: ") + meta.Notes)
+		}
+	}
+	b.h(2, tr(lang, "3.1 关键运行参数", "3.1 Key Parameters"))
+	paramsTable(b, f.Plan, lang)
+	b.h(2, tr(lang, "3.2 采集到的软件包清单", "3.2 Collected Packages"))
+	s.packagesTable(b, f.Current.ID, lang)
+	if sops := s.listFinalizedRehearsals(f.ID); len(sops) > 0 {
+		b.h(1, tr(lang, "4 纳管后变更演练与生产落地台账", "4 Post-Onboarding Change Ledger"))
+		var rows [][]string
+		for _, rh := range sops {
+			statusText := tr(lang, "已定稿 · 待实施", "Finalized · Pending")
+			whoWhen := fmt.Sprintf("%s / %s", rh.Owner, stamp(rh.UpdatedAt))
+			sumText := firstNonEmptyStr(rh.AppliedSummary, rh.ScopeSummary, "—")
+			if rh.Applied && !rh.Voided {
+				statusText = tr(lang, "已落地生效", "Applied in Prod")
+				whoWhen = fmt.Sprintf("%s / %s", firstNonEmptyStr(rh.AppliedBy, rh.Owner), stamp(firstNonEmptyStr(rh.AppliedAt, rh.UpdatedAt)))
+			} else if rh.Voided {
+				statusText = tr(lang, "已作废", "Voided")
+				whoWhen = fmt.Sprintf("%s / %s", firstNonEmptyStr(rh.VoidedBy, rh.Owner), stamp(firstNonEmptyStr(rh.VoidedAt, rh.UpdatedAt)))
+				sumText = firstNonEmptyStr(rh.VoidReason, sumText)
+			}
+			rows = append(rows, []string{rh.Title, statusText, truncRunes(sumText, 120), whoWhen, "sop-" + rh.ID})
+		}
+		b.table([]string{
+			tr(lang, "变更方案", "Change Plan"),
+			tr(lang, "生产状态", "Prod Status"),
+			tr(lang, "生效变更摘要", "Effective Summary"),
+			tr(lang, "确认人 / 时间", "Confirmed By / At"),
+			tr(lang, "文档编号", "Document ID"),
+		}, rows)
+		if eff := effectiveAppliedChanges(s.listAppliedRehearsals(f.ID)); len(eff) > 0 {
+			b.h(2, tr(lang, "4.1 相对纳管基线的当前生效变更", "4.1 Active Deltas vs. Onboarded Baseline"))
+			var deltaRows [][]string
+			for _, ch := range eff {
+				src := ch.SourceTitle
+				if ch.UpdateCount > 1 {
+					src += tr(lang, fmt.Sprintf("（累计调整 %d 次，以最新为准）", ch.UpdateCount), fmt.Sprintf(" (updated %dx, latest active)", ch.UpdateCount))
+				}
+				deltaRows = append(deltaRows, []string{ch.Key, firstNonEmptyStr(ch.Before, "—"), ch.After, src})
+			}
+			b.table([]string{
+				tr(lang, "变更项", "Item"),
+				tr(lang, "变更前", "Before"),
+				tr(lang, "当前最终生效", "Active Value"),
+				tr(lang, "来源变更", "Source Change"),
+			}, deltaRows)
+		}
+	}
+	b.section(1, "risks", tr(lang, "5 风险项与后续治理建议", "5 Risks & Governance Notes"), tr(lang, "记录该存量集群已知的单点风险、版本升级窗口、备份核验与监控告警待补齐项。", "Known SPOFs, upgrade windows, backup verification gaps, and monitoring action items."), true)
 	d.Blocks = b.blocks
 	return d
 }
@@ -1220,6 +1364,9 @@ func (s *storeServer) buildDoc(f clusterFacts, id string) (*clusterDoc, bool) {
 // docIDs lists the documents a cluster has, in the order they are shown.
 func docIDs(f clusterFacts, idx docIndex, sopIDs []string) []string {
 	ids := []string{"delivery", "kt"}
+	if f.Current.DeliveryMode == "imported" {
+		ids = []string{"delivery"}
+	}
 	ids = append(ids, sopIDs...)
 	for _, e := range idx.Changes {
 		ids = append(ids, e.ID)
@@ -1801,6 +1948,8 @@ func (s *storeServer) handleCluster(w http.ResponseWriter, r *http.Request, sess
 		s.handleRehearsals(w, r, session, f, parts[2:])
 	case len(parts) >= 2 && parts[1] == "security":
 		s.handleClusterSecurity(w, r, session, f, parts[2:])
+	case len(parts) == 2 && parts[1] == "baseline":
+		s.handleClusterBaseline(w, r, session, f)
 	case len(parts) == 2 && parts[1] == "docs" && r.Method == "POST":
 		s.startRCA(w, r, session, f)
 	case len(parts) == 3 && parts[1] == "docs" && (strings.HasPrefix(parts[2], "rca-") || strings.HasPrefix(parts[2], "assess-") || strings.HasPrefix(parts[2], "chg-")) && r.Method == "DELETE":

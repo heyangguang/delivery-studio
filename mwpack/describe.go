@@ -236,14 +236,24 @@ func (p *Plan) View() PlanView {
 		v.Inputs = []InputReq{}
 	}
 	for _, i := range p.Instances {
-		iv := InstanceView{ID: i.ID, Component: i.Component, Title: i.Title, Version: i.Version, Status: i.R.PlatformStatus(p.Platform.ID), Manifest: i.R.C.sum,
+		var status, manifestSum, compCtx string
+		if i.R != nil {
+			status = i.R.PlatformStatus(p.Platform.ID)
+			if i.R.C != nil {
+				manifestSum = i.R.C.sum
+				compCtx = i.R.C.Context
+			}
+		}
+		iv := InstanceView{ID: i.ID, Component: i.Component, Title: i.Title, Version: i.Version, Status: status, Manifest: manifestSum,
 			Auto: i.Auto, AutoReason: i.AutoReason, External: i.External, Roles: i.Roles, Hosts: i.Hosts, Params: i.Params, Visible: i.Visible,
 			Endpoints: i.Endpoints, Fronts: i.Fronts, Uses: i.Uses, Ports: i.Ports}
-		if u := i.Uses[i.R.C.Context]; i.R.C.Context != "" && u != nil {
+		if u := i.Uses[compCtx]; compCtx != "" && u != nil {
 			iv.ManagedContext = u.Instance
 		}
-		iv.Contract, _ = i.SelectedSeries()
-		iv.Scheme = i.SchemeSummary()
+		if p.Dep == nil || p.Dep.DeliveryMode != "imported" {
+			iv.Contract, _ = i.SelectedSeries()
+			iv.Scheme = i.SchemeSummary()
+		}
 		iv.Flows = flowViews(i)
 		iv.RoleTitles = map[string]string{}
 		if i.R != nil {
@@ -260,7 +270,7 @@ func (p *Plan) View() PlanView {
 		v.Instances = []InstanceView{}
 	}
 	v.Artifacts = []ArtifactView{}
-	if v.OK {
+	if v.OK && (p.Dep == nil || p.Dep.DeliveryMode != "imported") {
 		for _, a := range p.Artifacts() {
 			v.Artifacts = append(v.Artifacts, ArtifactView{a.Name, a.File, a.Kind})
 		}

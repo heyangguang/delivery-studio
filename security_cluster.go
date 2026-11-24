@@ -596,6 +596,79 @@ func (s *storeServer) evaluateConfigBaseline(
 ) []secBaselineCheck {
 	checks := []secBaselineCheck{}
 
+	// Tailored governance checks for brownfield imported clusters (avoiding false positives on undeclared install-time fields).
+	if dep != nil && dep.DeliveryMode == "imported" {
+		meta := dep.Imported
+		hasPkg := meta != nil && len(meta.Packages) > 0
+		hasExact := meta != nil && strings.TrimSpace(meta.ExactVersion) != "" && meta.ExactVersion != "unknown"
+		if hasPkg || hasExact {
+			detail := fmt.Sprintf("已采集 %d 个软件包", len(meta.Packages))
+			if !hasPkg {
+				detail = fmt.Sprintf("已登记精确版本 %s（建议后续补充只读探针采集完整 OS 软件包清单）", meta.ExactVersion)
+			}
+			checks = append(checks, secBaselineCheck{
+				ID:       "imported-sbom-coverage",
+				Category: "software",
+				Title:    "存量纳管版本与软件包资产覆盖",
+				Severity: "LOW",
+				Status:   "pass",
+				Detail:   detail,
+			})
+		} else {
+			checks = append(checks, secBaselineCheck{
+				ID:             "imported-sbom-coverage",
+				Category:       "architecture",
+				Title:          "存量纳管版本与软件包资产覆盖",
+				Severity:       "MEDIUM",
+				Status:         "warn",
+				Detail:         "尚未采集精确版本号与软件包清单，当前无法做完整 CVE 匹配",
+				Recommendation: "在集群「概览」或「配置」点击「重新只读采集」，运行只读探针并粘贴回显即可自动补齐软件包清单。",
+			})
+		}
+		if len(dep.Hosts) >= 2 {
+			checks = append(checks, secBaselineCheck{
+				ID:       "imported-ha-nodes",
+				Category: "architecture",
+				Title:    "高可用多节点冗余",
+				Severity: "LOW",
+				Status:   "pass",
+				Detail:   fmt.Sprintf("已登记 %d 台集群主机节点", len(dep.Hosts)),
+			})
+		} else {
+			checks = append(checks, secBaselineCheck{
+				ID:             "imported-ha-nodes",
+				Category:       "architecture",
+				Title:          "高可用多节点冗余",
+				Severity:       "MEDIUM",
+				Status:         "warn",
+				Detail:         "当前仅登记 1 台节点，存在单点故障风险",
+				Recommendation: "如生产环境为单机实例，建议评估高可用改造并通过「变更演练」规划演练方案。",
+			})
+		}
+		hasPaths := meta != nil && (len(meta.ConfigPaths) > 0 || len(meta.DataDirs) > 0 || len(meta.ServiceUnits) > 0)
+		if hasPaths {
+			checks = append(checks, secBaselineCheck{
+				ID:       "imported-runtime-paths",
+				Category: "architecture",
+				Title:    "运行路径与服务单元基线完整性",
+				Severity: "LOW",
+				Status:   "pass",
+				Detail:   "已登记服务单元或配置/数据目录，变更演练可直接生成精确现场命令",
+			})
+		} else {
+			checks = append(checks, secBaselineCheck{
+				ID:             "imported-runtime-paths",
+				Category:       "architecture",
+				Title:          "运行路径与服务单元基线完整性",
+				Severity:       "LOW",
+				Status:         "warn",
+				Detail:         "尚未登记配置路径、数据目录或 systemd 服务单元",
+				Recommendation: "在「配置」页补充实际路径信息，可显著提升变更演练脚本与 SOP 精准度。",
+			})
+		}
+		return checks
+	}
+
 	// Inspect instances from solved plan (effective defaults merged), plan.json fallback, or deployment.yml + schema defaults.
 	var tlsSupported, tlsDisabled []string
 	var tdeSupported, tdeDisabled []string

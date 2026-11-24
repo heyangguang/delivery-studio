@@ -191,11 +191,16 @@ export function StatusBadge({
 
 /* ---------- delivery mode badge & search helpers ---------- */
 
-export type NormalizedDeliveryMode = "automatic" | "offline" | "configuration";
+export type NormalizedDeliveryMode =
+  | "automatic"
+  | "offline"
+  | "configuration"
+  | "imported";
 
 export function normalizeDeliveryMode(mode?: string): NormalizedDeliveryMode {
   if (mode === "automatic") return "automatic";
   if (mode === "configuration") return "configuration";
+  if (mode === "imported") return "imported";
   return "offline";
 }
 
@@ -206,6 +211,9 @@ export function deliveryModeLabel(mode?: string, compact?: boolean): string {
   }
   if (m === "configuration") {
     return compact ? bi("仅配置", "Config") : bi("配置交付", "Config Only");
+  }
+  if (m === "imported") {
+    return compact ? bi("纳管", "Imported") : bi("存量纳管", "Imported Cluster");
   }
   return compact ? bi("离线", "Offline") : bi("离线部署", "Offline Manual");
 }
@@ -218,6 +226,9 @@ export function deliveryModeKeywords(mode?: string): string {
   if (m === "configuration") {
     return "配置 仅配置 配置交付 config configuration";
   }
+  if (m === "imported") {
+    return "纳管 导入 存量 已有 imported adopted brownfield";
+  }
   return "离线 手动 手工 离线部署 离线手动 离线包 offline manual";
 }
 
@@ -229,6 +240,25 @@ export function DeliveryModeIcon({
   size?: number;
 }) {
   const m = normalizeDeliveryMode(mode);
+  if (m === "imported") {
+    return (
+      <svg
+        width={size}
+        height={size}
+        viewBox="0 0 16 16"
+        fill="none"
+        aria-hidden
+      >
+        <path
+          d="M8 2.2v6.6m0 0l-2.6-2.5M8 8.8l2.6-2.5M2.6 10.2v1.6a1.4 1.4 0 0 0 1.4 1.4h8a1.4 1.4 0 0 0 1.4-1.4v-1.6"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  }
   if (m === "automatic") {
     return (
       <svg
@@ -313,10 +343,15 @@ export function DeliveryModeTag({
             "配置交付：仅生成配置文件包，不执行现场部署",
             "Config-only delivery without on-site deployment",
           )
-        : bi(
-            "离线部署：下载离线安装包与执行手册，在现场手工执行",
-            "Offline manual deployment using generated bundles & runbook",
-          );
+        : m === "imported"
+          ? bi(
+              "存量纳管：直接导入已有运行中集群，用于基线档案、变更演练与安全治理",
+              "Imported brownfield cluster onboarded for baseline tracking, change rehearsals, and security audits",
+            )
+          : bi(
+              "离线部署：下载离线安装包与执行手册，在现场手工执行",
+              "Offline manual deployment using generated bundles & runbook",
+            );
   return (
     <span
       className={`dm-tag dm-${m}${compact ? " is-xs" : ""}${className ? ` ${className}` : ""}`}

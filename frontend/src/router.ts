@@ -25,6 +25,7 @@ export type Route =
       ver?: string;
       platform?: string;
     }
+  | { name: "import"; component?: string }
   | { name: "apps"; id?: string }
   | { name: "executions"; id?: string; run?: string; step?: string }
   | { name: "components"; id?: string; edit?: string }
@@ -83,6 +84,8 @@ export function parse(hash: string): Route {
       ver: q.get("ver") || undefined,
       platform: q.get("platform") || undefined,
     };
+  if (p[0] === "import")
+    return { name: "import", component: p[1] || undefined };
   if (p[0] === "apps") return { name: "apps", id: p[1] };
   if (p[0] === "executions")
     return {
@@ -151,6 +154,10 @@ export const href = (r: Route): string => {
       if (r.platform) q.set("platform", r.platform);
       return `#/new/${encodeURIComponent(r.app)}${q.size ? `?${q}` : ""}`;
     }
+    case "import":
+      return r.component
+        ? `#/import/${encodeURIComponent(r.component)}`
+        : "#/import";
     case "apps":
       return r.id ? `#/apps/${encodeURIComponent(r.id)}` : "#/apps";
     case "executions": {
@@ -215,7 +222,9 @@ const depth = (r: Route) =>
     ? r.app
       ? 3
       : 2
-    : r.name === "components" && r.edit !== undefined
+    : r.name === "import"
+      ? 2
+      : r.name === "components" && r.edit !== undefined
       ? 2
       : "id" in r && r.id
         ? 1

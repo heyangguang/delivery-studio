@@ -50,6 +50,7 @@ import "./polish.css";
 installAIRainbowPointer();
 import { NewDelivery } from "./Wizard";
 import { NewDeliveryPicker } from "./newpicker";
+import { ImportClusterPage } from "./importcluster";
 import { SettingsPage } from "./settings";
 import { AIPage } from "./aipage";
 import { MePage } from "./me";
@@ -173,7 +174,7 @@ class PageBoundary extends React.Component<
         <p>{this.state.error.message}</p>
         <div className="row-gap">
           <Button onClick={() => go({ name: "deliveries" })}>
-            {bi("回到交付", "Back to Deliveries")}
+            {bi("回到集群", "Back to Clusters")}
           </Button>
           <Button type="primary" onClick={() => location.reload()}>
             {bi("重新加载", "Reload")}
@@ -1352,11 +1353,12 @@ function App() {
       return;
     }
     const titles: Record<Route["name"], string> = {
-      deliveries: bi("交付", "Deliveries"),
+      deliveries: bi("集群", "Clusters"),
       executions: bi("执行监控", "Execution Monitor"),
       settings: bi("平台设置", "Settings"),
       ai: bi("AI 助手", "AI Assistant"),
       new: bi("新建集群", "New Cluster"),
+      import: bi("导入存量集群", "Import Cluster"),
       apps: bi("应用", "Apps"),
       components: bi("组件", "Components"),
       library: bi("软件库", "Library"),
@@ -1510,7 +1512,7 @@ function App() {
       ? [
           {
             key: "deliveries" as const,
-            label: bi("交付", "Deliveries"),
+            label: bi("集群", "Clusters"),
             to: { name: "deliveries" } as Route,
           },
         ]
@@ -1571,7 +1573,7 @@ function App() {
       : []),
   ];
   const activeTab: NavTabKey =
-    route.name === "new"
+    route.name === "new" || route.name === "import"
       ? "deliveries"
       : isStudioRoute(route.name)
         ? "studio"
@@ -1663,6 +1665,21 @@ function App() {
     );
   else if (route.name === "settings")
     page = <SettingsPage me={user} selected={route.id} />;
+  else if (route.name === "import")
+    page = !can("delivery.create") ? (
+      <div className="detail-none enter">
+        <h2>{bi("你没有导入集群的权限", "No permission to import clusters")}</h2>
+        <p>{bi("需要「创建交付」权限才能纳管存量集群。", "Requires cluster creation permission to onboard brownfield clusters.")}</p>
+        <Button onClick={() => go({ name: "deliveries" })}>{bi("返回集群", "Back to Clusters")}</Button>
+      </div>
+    ) : (
+      <ImportClusterPage
+        component={route.component}
+        onImported={async () => {
+          await loadJobs();
+        }}
+      />
+    );
   else if (route.name === "ai")
     page = (
       <AIPage

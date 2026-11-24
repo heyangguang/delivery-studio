@@ -50,12 +50,13 @@
   box-sizing: border-box;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  height: 24px;
-  padding: 0 9px;
-  border-radius: 99px;
-  font-size: 12px;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 5px;
+  font-size: 11.5px;
   font-weight: 560;
+  line-height: 1;
   color: var(--mute);
   background: var(--surface);
   border: 1px solid var(--line);
@@ -84,67 +85,155 @@
   background: var(--ok);
 }
 
-/* Left Rail Cluster Row Extensions (uses native .row, .row-ico, .row-main, .row-top, .row-name, .row-time, .row-sub) */
+/* Single-row scrollable component filter strip (replaces messy 2-row wrapped pills) */
+.mon-app-strip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-bottom: 1px;
+  min-width: 0;
+}
+.mon-app-strip::-webkit-scrollbar {
+  display: none;
+}
+.mon-app-chip {
+  all: unset;
+  box-sizing: border-box;
+  flex: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 7px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 540;
+  line-height: 1;
+  color: var(--mute);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  white-space: nowrap;
+  transition: background-color 0.14s, border-color 0.14s, color 0.14s;
+}
+.mon-app-chip:hover {
+  color: var(--ink);
+  border-color: var(--line-strong);
+  background: var(--hover);
+}
+.mon-app-chip:focus-visible {
+  box-shadow: var(--ring);
+}
+.mon-app-chip em {
+  font-style: normal;
+  font-size: 10.5px;
+  color: var(--faint);
+}
+.mon-app-chip.on {
+  color: var(--on-brand);
+  background: var(--brand);
+  border-color: var(--brand);
+  font-weight: 600;
+}
+.mon-app-chip.on em {
+  color: inherit;
+  opacity: 0.72;
+}
+
+/* Left Rail Cluster Row — harmonized 1:1 with Deliveries .row.row-dlv + Swiss Leica 2.5px red edge bar */
 .mon-row-btn {
+  position: relative;
   width: 100%;
   border: 0;
   background: transparent;
   font: inherit;
   text-align: left;
   box-sizing: border-box;
+  overflow: hidden;
 }
 .mon-row-btn.on {
   background: var(--surface);
-  box-shadow: var(--shadow-sm), 0 0 0 1px color-mix(in srgb, var(--brand) 22%, var(--line));
+  box-shadow:
+    0 2px 8px -2px rgba(11, 13, 18, 0.085),
+    0 0 0 1px rgba(11, 13, 18, 0.08);
+}
+body[arco-theme="dark"] .mon-row-btn.on {
+  background: var(--surface-2);
+  box-shadow:
+    0 4px 14px rgba(0, 0, 0, 0.44),
+    0 0 0 1px var(--line-strong);
+}
+.mon-row-btn.on::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 9px;
+  bottom: 9px;
+  width: 2.5px;
+  border-radius: 0 2px 2px 0;
+  background: var(--kyndryl);
+}
+.mon-row-btn.on .row-name {
+  color: var(--ink);
 }
 .mon-row-live {
+  flex: 1;
+  min-width: 0;
   font-size: 12px;
   color: var(--run);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  margin-top: 2px;
 }
-.mon-row-prog {
-  display: flex;
+.mon-row-tags {
+  flex: none;
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  margin-top: 6px;
+  gap: 4px;
 }
-.mon-row-bar {
-  flex: 1;
-  height: 4px;
-  border-radius: 99px;
-  background: var(--surface-3);
-  overflow: hidden;
-}
-.mon-row-bar > i {
-  display: block;
-  height: 100%;
-  border-radius: 99px;
-  background: var(--ok);
-  transition: width 0.3s var(--ease-out);
-}
-.mon-row-bar.is-live > i {
-  background: var(--run);
-}
-.mon-row-bar.is-failed > i {
-  background: var(--bad);
-}
-.mon-row-frac {
-  font-size: 11.5px;
-  color: var(--faint);
-  font-variant-numeric: tabular-nums;
+.mon-row-frac-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 19px;
+  padding: 0 6px;
+  border-radius: 5px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 560;
+  line-height: 1;
+  color: var(--mute);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
   white-space: nowrap;
 }
+.mon-row-btn.on .mon-row-frac-pill:not(.is-live):not(.is-failed) {
+  background: var(--bg);
+}
+.mon-row-frac-pill.is-live {
+  color: var(--run);
+  background: var(--run-soft);
+  border-color: var(--run-line);
+}
+.mon-row-frac-pill.is-failed {
+  color: var(--bad);
+  background: var(--bad-soft);
+  border-color: var(--bad-line);
+  font-weight: 620;
+}
 .mon-row-flag {
-  display: inline-block;
-  margin-left: 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 19px;
   padding: 0 5px;
-  border-radius: 4px;
-  font-size: 11px;
-  font-weight: 560;
-  vertical-align: baseline;
+  border-radius: 5px;
+  font-size: 10.5px;
+  font-weight: 580;
+  line-height: 1;
+  white-space: nowrap;
 }
 .mon-row-flag.bad {
   color: var(--bad);
@@ -153,6 +242,25 @@
 .mon-row-flag.warn {
   color: var(--warn);
   background: var(--warn-soft);
+}
+/* Ultra-slim live telemetry hairline tucked inside active running rows only */
+.mon-row-live-track {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--run-soft);
+  overflow: hidden;
+  pointer-events: none;
+}
+.mon-row-live-track > i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--run);
+  transition: width 0.3s var(--ease-out);
 }
 
 /* ---------- Right Telemetry Main Canvas ---------- */
@@ -178,18 +286,26 @@
   top: 0;
   left: 0;
   right: 0;
-  height: 3px;
-  background: var(--surface-3);
+  height: 2px;
+  background: transparent;
   overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+.mon-progress-line.is-live,
+.mon-progress-line.is-failed {
+  opacity: 1;
+  background: var(--surface-3);
 }
 .mon-progress-line > i {
   display: block;
   height: 100%;
-  background: var(--ok);
+  background: var(--run);
   transition: width 0.35s var(--ease-out);
 }
 .mon-progress-line.is-live > i {
-  background: linear-gradient(90deg, var(--brand) 0%, var(--run) 50%, var(--brand) 100%);
+  background: linear-gradient(90deg, var(--run) 0%, #38bdf8 50%, var(--run) 100%);
   background-size: 200% 100%;
   animation: mon-shimmer 2s linear infinite;
 }
@@ -592,8 +708,8 @@
   font-variant-numeric: tabular-nums;
 }
 .mon-phase-frac {
-  padding: 1px 7px;
-  border-radius: 99px;
+  padding: 1px 6px;
+  border-radius: 5px;
   background: var(--surface);
   border: 1px solid var(--line);
 }
@@ -622,6 +738,7 @@
 .mon-step-row {
   all: unset;
   box-sizing: border-box;
+  position: relative;
   cursor: pointer;
   width: 100%;
   display: flex;
@@ -631,14 +748,25 @@
   border-radius: var(--r);
   border: 1px solid transparent;
   text-align: left;
-  transition: background 0.13s, border-color 0.13s;
+  transition: background 0.13s, border-color 0.13s, box-shadow 0.13s;
 }
 .mon-step-row:hover {
   background: var(--surface-2);
 }
 .mon-step-row.on {
-  background: var(--brand-soft);
-  border-color: var(--brand-line);
+  background: var(--surface);
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow-sm);
+}
+.mon-step-row.on::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 2.5px;
+  border-radius: 0 2px 2px 0;
+  background: var(--kyndryl);
 }
 .mon-step-row.is-running:not(.on) {
   background: color-mix(in srgb, var(--run-soft) 55%, transparent);
@@ -1320,16 +1448,16 @@
 .mon-ev.clickable { cursor: pointer; }
 .mon-ev.clickable:hover { background: rgba(255, 255, 255, 0.055); }
 .mon-ev.is-selected {
-  background: rgba(255, 91, 68, 0.14);
-  border-left-color: #ff6a54;
+  background: rgba(240, 244, 255, 0.075);
+  border-left-color: var(--kyndryl);
 }
 .mon-ev-batch {
   margin: 10px 0 4px;
   padding: 6px 16px 6px 0;
-  background: rgba(255, 250, 244, 0.045);
+  background: rgba(240, 244, 255, 0.04);
   border-top: 1px solid var(--term-line);
   border-bottom: 1px solid var(--term-line);
-  color: #d6d3cc;
+  color: #e2e8f0;
   font-weight: 600;
 }
 .mon-ev-batch:first-child { margin-top: 0; }
@@ -1337,10 +1465,10 @@
   margin-top: 8px;
   padding-top: 4px;
   padding-bottom: 4px;
-  color: #ff9c8a;
+  color: #e2e8f0;
   font-weight: 640;
-  border-left-color: #ff5b44;
-  background: rgba(255, 91, 68, 0.09);
+  border-left-color: rgba(240, 244, 255, 0.36);
+  background: rgba(240, 244, 255, 0.045);
 }
 .mon-ev-phase-done {
   margin-bottom: 6px;

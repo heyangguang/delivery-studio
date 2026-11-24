@@ -43,7 +43,7 @@ import {
 } from "./execution-types";
 import { bi, getLang, useLang, withLang } from "./i18n";
 import { go } from "./router";
-import { ago, api, can, copy, err, fullTime, useAIStatus, useMedia } from "./shared";
+import { ago, api, can, clock, copy, dayLabel, err, fullTime, useAIStatus, useMedia } from "./shared";
 import { AppGlyph, Segmented, StatusBadge, StatusDot } from "./ui";
 import { dispatchExecLaunchIntent, StepHotfixDrawer } from "./stephotfix";
 import "./monitor.css";
@@ -1135,7 +1135,7 @@ export function ExecutionMonitorPage({
             allowClear
             value={railSearch}
             onChange={setRailSearch}
-            placeholder={bi("搜索集群、组件或执行节点", "Search cluster, component, runner")}
+            placeholder={bi("搜索集群、组件或节点", "Search clusters, apps, runners")}
             aria-label={bi("搜索集群", "Search clusters")}
           />
 
@@ -1156,22 +1156,22 @@ export function ExecutionMonitorPage({
 
           {appCounts.length > 1 && (
             <div
-              className="dm-filter-bar"
+              className="mon-app-strip"
               role="group"
               aria-label={bi("按组件快捷筛选", "Quick filter by component")}
             >
               <button
                 type="button"
-                className={`dm-filter-pill ${appFilter === "all" ? "on" : ""}`}
+                className={`mon-app-chip ${appFilter === "all" ? "on" : ""}`}
                 onClick={() => setAppFilter("all")}
               >
-                {bi("全部组件", "All")}
+                {bi("全部", "All")}
               </button>
               {appCounts.map((a) => (
                 <button
                   key={a.id}
                   type="button"
-                  className={`dm-filter-pill ${appFilter === a.id ? "on" : ""}`}
+                  className={`mon-app-chip ${appFilter === a.id ? "on" : ""}`}
                   onClick={() => setAppFilter(appFilter === a.id ? "all" : a.id)}
                 >
                   <span>{a.name}</span>
@@ -1211,76 +1211,116 @@ export function ExecutionMonitorPage({
               )}
             </div>
           ) : (
-            filteredItems.map((it) => {
-              const pct =
-                it.total_steps > 0
-                  ? Math.round((it.done_steps / it.total_steps) * 100)
-                  : 0;
-              const isSelected = it.job_id === activeJobId;
-              const dotState = it.active
-                ? "running"
-                : it.state === "failed"
-                  ? "failed"
-                  : "done";
-              const barCls = it.active
-                ? "is-live"
-                : it.state === "failed"
-                  ? "is-failed"
-                  : "";
-              return (
-                <button
-                  key={it.job_id}
-                  type="button"
-                  className={`row mon-row-btn ${isSelected ? "on" : ""}`}
-                  onClick={() => {
-                    go({ name: "executions", id: it.job_id });
-                    if (narrow) setRailHidden(true);
-                  }}
-                >
-                  <span className="row-ico">
-                    <AppGlyph id={it.app_id} size={34} />
-                    <StatusDot state={dotState} />
-                  </span>
-                  <div className="row-main">
-                    <div className="row-top">
-                      <span className="row-name" title={it.cluster}>
-                        {it.cluster}
-                      </span>
-                      <span className="row-time num">{ago(it.updated)}</span>
-                    </div>
-                    {it.active && it.running_step_title ? (
-                      <div className="mon-row-live" title={it.running_step_title}>
-                        ▸ {it.running_step_title}
-                      </div>
-                    ) : (
-                      <div className="row-sub">
-                        {it.app_name}
-                        {it.version ? ` ${it.version}` : ""} ·{" "}
-                        {bi(`${it.batch_count} 批`, `${it.batch_count} runs`)}
-                        {it.state === "failed" && (
-                          <span className="mon-row-flag bad">
-                            {bi(`${it.failed_steps} 步失败`, `${it.failed_steps} failed`)}
+            (() => {
+              const groups: { key: string; items: MonitorListItem[] }[] = [];
+              for (const it of filteredItems) {
+                const key = dayLabel(it.updated);
+                let g = groups[groups.length - 1];
+                if (!g || g.key !== key) {
+                  g = { key, items: [] };
+                  groups.push(g);
+                }
+                g.items.push(it);
+              }
+              return groups.map((g) => (
+                <div key={g.key} role="group" aria-label={g.key}>
+                  <div className="list-day">{g.key}</div>
+                  {g.items.map((it) => {
+                    const pct =
+                      it.total_steps > 0
+                        ? Math.round((it.done_steps / it.total_steps) * 100)
+                        : 0;
+                    const isSelected = it.job_id === activeJobId;
+                    const dotState = it.active
+                      ? "running"
+                      : it.state === "failed"
+                        ? "failed"
+                        : "done";
+                    const fracCls = it.active
+                      ? "is-live"
+                      : it.state === "failed"
+                        ? "is-failed"
+                        : "";
+                    const fracTip =
+                      it.state === "failed"
+                        ? bi(
+                            `已完成 ${it.done_steps}/${it.total_steps} 步 · ${it.failed_steps} 步失败`,
+                            `${it.done_steps}/${it.total_steps} steps · ${it.failed_steps} failed`,
+                          )
+                        : bi(
+                            `已完成 ${it.done_steps}/${it.total_steps} 步`,
+                            `${it.done_steps}/${it.total_steps} steps`,
+                          );
+                    return (
+                      <button
+                        key={it.job_id}
+                        type="button"
+                        className={`row row-dlv mon-row-btn ${isSelected ? "on" : ""} ${it.active ? "is-live" : ""}`}
+                        onClick={() => {
+                          go({ name: "executions", id: it.job_id });
+                          if (narrow) setRailHidden(true);
+                        }}
+                      >
+                        <span className="row-ico">
+                          <AppGlyph id={it.app_id} size={30} />
+                          <StatusDot state={dotState} />
+                        </span>
+                        <div className="row-main">
+                          <div className="row-top">
+                            <span className="row-name" title={it.cluster}>
+                              {it.cluster}
+                            </span>
+                            <span
+                              className="row-time num"
+                              title={fullTime(it.updated)}
+                            >
+                              {clock(it.updated)}
+                            </span>
+                          </div>
+                          <div className="row-sub-line">
+                            {it.active && it.running_step_title ? (
+                              <div
+                                className="mon-row-live"
+                                title={it.running_step_title}
+                              >
+                                ▸ {it.running_step_title}
+                              </div>
+                            ) : (
+                              <div className="row-sub">
+                                {it.app_name}
+                                {it.version ? ` ${it.version}` : ""} ·{" "}
+                                {bi(`${it.batch_count} 批`, `${it.batch_count} runs`)}
+                              </div>
+                            )}
+                            <span className="mon-row-tags">
+                              {it.state === "recovered" && (
+                                <span
+                                  className="mon-row-flag warn"
+                                  title={bi("包含重试恢复的步骤", "Contains retried steps")}
+                                >
+                                  {bi("重跑", "Retry")}
+                                </span>
+                              )}
+                              <span
+                                className={`mon-row-frac-pill num ${fracCls}`}
+                                title={fracTip}
+                              >
+                                {it.done_steps}/{it.total_steps}
+                              </span>
+                            </span>
+                          </div>
+                        </div>
+                        {it.active && (
+                          <span className="mon-row-live-track" aria-hidden>
+                            <i style={{ width: `${pct}%` }} />
                           </span>
                         )}
-                        {it.state === "recovered" && (
-                          <span className="mon-row-flag warn">
-                            {bi("含重跑", "retried")}
-                          </span>
-                        )}
-                      </div>
-                    )}
-                    <div className="mon-row-prog">
-                      <span className={`mon-row-bar ${barCls}`}>
-                        <i style={{ width: `${pct}%` }} />
-                      </span>
-                      <span className="mon-row-frac">
-                        {it.done_steps}/{it.total_steps}
-                      </span>
-                    </div>
-                  </div>
-                </button>
-              );
-            })
+                      </button>
+                    );
+                  })}
+                </div>
+              ));
+            })()
           )}
         </div>
       </aside>

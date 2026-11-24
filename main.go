@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.298-dev"
+	version            = "1.0.299-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,20 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.299-dev",
+		Date:    "2026-11-24",
+		Title:   "重构执行监控侧栏列表与遥测细节为瑞士徕卡高定统一风格",
+		TitleEn: "Redesign Execution Monitor rail and telemetry highlights to match Swiss Leica system",
+		Highlights: []string{
+			"重构执行监控左侧集群列表为与交付页 1:1 统一的日期分组、紧凑双行卡片与 2.5px 徕卡红选中竖线；移除每行下方冗长粗进度条，改以右对齐等宽步骤数徽章（仅运行中展示 2px 底部细轨），完整呈现集群名不再截断",
+			"组件快捷筛选升级为单行可滚动 5px 圆角矩形条；移除已完成任务顶部的刺眼绿色横条，并将暗黑终端选中事件与阶段标题升级为通透钛灰底 + 徕卡红细竖线",
+		},
+		HighlightsEn: []string{
+			"Redesigned Execution Monitor left rail to match Deliveries 1:1 with date grouping, compact two-line cards, 2.5px Leica Warm Red active edge ticks, and right-aligned tabular step badges so cluster names display without truncation",
+			"Upgraded component filters into a crisp single-row 5px rounded-rect strip, removed static green top progress bars on completed runs, and refined dark terminal selected-event highlights to frosted titanium with a Leica red accent bar",
+		},
+	},
 	{
 		Version: "1.0.298-dev",
 		Date:    "2026-11-24",

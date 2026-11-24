@@ -883,8 +883,8 @@ export async function api<T>(
     throw new ApiError(
       navigator.onLine
         ? bi(
-            "无法连接到 Middleware Hub 后端服务（可能正在重启），请稍后重试",
-            "Unable to connect to Middleware Hub backend (may be restarting); please try again later",
+            "无法连接到 Kyndryl Delivery Hub 后端服务（可能正在重启），请稍后重试",
+            "Unable to connect to Kyndryl Delivery Hub backend (may be restarting); please try again later",
           )
         : bi("本机网络已断开，请检查网络连接", "Device network disconnected"),
       0,
@@ -899,8 +899,8 @@ export async function api<T>(
     if (!r.ok)
       throw new ApiError(
         bi(
-          `Middleware Hub 后端服务暂时不可用（HTTP ${r.status}）`,
-          `Middleware Hub backend temporarily unavailable (HTTP ${r.status})`,
+          `Kyndryl Delivery Hub 后端服务暂时不可用（HTTP ${r.status}）`,
+          `Kyndryl Delivery Hub backend temporarily unavailable (HTTP ${r.status})`,
         ),
         r.status,
       );
@@ -931,8 +931,8 @@ export async function fetchText(url: string): Promise<string> {
     setReachable(false);
     throw new ApiError(
       bi(
-        "无法连接到 Middleware Hub 后端服务",
-        "Unable to reach Middleware Hub backend",
+        "无法连接到 Kyndryl Delivery Hub 后端服务",
+        "Unable to reach Kyndryl Delivery Hub backend",
       ),
       0,
     );

@@ -1149,8 +1149,8 @@ async function streamRehearsalAPI(
     throw new ApiError(
       navigator.onLine
         ? bi(
-            "无法连接到 Middleware Hub 后端服务（可能正在重启），请稍后重试",
-            "Unable to connect to Middleware Hub backend (may be restarting); please try again later",
+            "无法连接到 Kyndryl Delivery Hub 后端服务（可能正在重启），请稍后重试",
+            "Unable to connect to Kyndryl Delivery Hub backend (may be restarting); please try again later",
           )
         : bi("本机网络已断开，请检查网络连接", "Device network disconnected"),
       0,
@@ -1167,8 +1167,8 @@ async function streamRehearsalAPI(
       if (!res.ok) {
         throw new ApiError(
           bi(
-            `Middleware Hub 后端服务暂时不可用（HTTP ${res.status}）`,
-            `Middleware Hub backend temporarily unavailable (HTTP ${res.status})`,
+            `Kyndryl Delivery Hub 后端服务暂时不可用（HTTP ${res.status}）`,
+            `Kyndryl Delivery Hub backend temporarily unavailable (HTTP ${res.status})`,
           ),
           res.status,
         );
@@ -1286,8 +1286,8 @@ async function streamRehearsalAPI(
     if (e instanceof ApiError) throw e;
     throw new ApiError(
       bi(
-        "与 Middleware Hub 后端服务的流式连接意外中断（可能正在重启或网络抖动），请重试",
-        "Streaming connection to Middleware Hub backend was interrupted; please retry",
+        "与 Kyndryl Delivery Hub 后端服务的流式连接意外中断（可能正在重启或网络抖动），请重试",
+        "Streaming connection to Kyndryl Delivery Hub backend was interrupted; please retry",
       ),
       0,
     );
@@ -1295,8 +1295,8 @@ async function streamRehearsalAPI(
   if (!finalResult) {
     throw new ApiError(
       bi(
-        "与 Middleware Hub 后端服务的连接在生成完成前关闭，请重试",
-        "Connection to Middleware Hub backend closed before generation completed; please retry",
+        "与 Kyndryl Delivery Hub 后端服务的连接在生成完成前关闭，请重试",
+        "Connection to Kyndryl Delivery Hub backend closed before generation completed; please retry",
       ),
       502,
     );

@@ -16,7 +16,7 @@ import (
 
 var rePortalSessionKey = regexp.MustCompile(`^portal(:[a-zA-Z0-9._:-]{1,80})?$`)
 
-const aiSystemPortal = `你是 Middleware Hub 全站智能运维助手，随时在任意页面协助工程师完成平台配置、执行节点接入、交付规划与故障排障。
+const aiSystemPortal = `你是 Kyndryl Delivery Hub 全站智能运维助手，随时在任意页面协助工程师完成平台配置、执行节点接入、交付规划与故障排障。
 
 核心工作原则：
 1. **先读真实状态，再给精确方案**：

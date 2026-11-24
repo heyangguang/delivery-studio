@@ -263,7 +263,7 @@ func localizedNotifyEvents(lang string, src []notifyEvent) []notifyEvent {
 				{Key: "link", Desc: "Platform URL"},
 			}
 			ev.Default = notifyTpl{
-				Title: "Middleware Hub Test Message",
+				Title: "Kyndryl Delivery Hub Test Message",
 				Body:  "This message confirms that notification channel \"{{channel}}\" can deliver alerts.\n{{link}}",
 			}
 			ev.Sample = map[string]string{"channel": "On-call Ops", "link": "https://hub.example"}

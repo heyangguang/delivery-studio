@@ -1255,18 +1255,18 @@
   margin-top: 6px;
   padding-top: 3px;
   padding-bottom: 3px;
-  background: rgba(255, 255, 255, 0.045);
-  border-left-color: #818cf8;
-  color: #f8fafc;
+  background: rgba(255, 250, 244, 0.045);
+  border-left-color: #ff6a54;
+  color: #f8f6f2;
   font-weight: 640;
 }
 .mon-line.k-task {
   margin-top: 4px;
   padding-top: 2px;
   padding-bottom: 2px;
-  background: rgba(99, 102, 241, 0.09);
-  border-left-color: #6366f1;
-  color: #c7d2fe;
+  background: rgba(77, 176, 188, 0.1);
+  border-left-color: #4db0bc;
+  color: #bae6ec;
   font-weight: 560;
 }
 .mon-line.k-ok { color: #6ee7b7; }
@@ -1320,16 +1320,16 @@
 .mon-ev.clickable { cursor: pointer; }
 .mon-ev.clickable:hover { background: rgba(255, 255, 255, 0.055); }
 .mon-ev.is-selected {
-  background: rgba(99, 102, 241, 0.14);
-  border-left-color: #818cf8;
+  background: rgba(255, 91, 68, 0.14);
+  border-left-color: #ff6a54;
 }
 .mon-ev-batch {
   margin: 10px 0 4px;
   padding: 6px 16px 6px 0;
-  background: rgba(255, 255, 255, 0.045);
+  background: rgba(255, 250, 244, 0.045);
   border-top: 1px solid var(--term-line);
   border-bottom: 1px solid var(--term-line);
-  color: #cbd5e1;
+  color: #d6d3cc;
   font-weight: 600;
 }
 .mon-ev-batch:first-child { margin-top: 0; }
@@ -1337,10 +1337,10 @@
   margin-top: 8px;
   padding-top: 4px;
   padding-bottom: 4px;
-  color: #a5b4fc;
+  color: #ff9c8a;
   font-weight: 640;
-  border-left-color: #6366f1;
-  background: rgba(99, 102, 241, 0.08);
+  border-left-color: #ff5b44;
+  background: rgba(255, 91, 68, 0.09);
 }
 .mon-ev-phase-done {
   margin-bottom: 6px;

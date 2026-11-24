@@ -117,7 +117,7 @@
 .rp-ic.k-mine {
   color: #fff;
   background: linear-gradient(150deg, #7a78f0, var(--brand));
-  box-shadow: 0 4px 12px rgba(88, 86, 214, 0.25);
+  box-shadow: 0 4px 12px rgba(255, 70, 45, 0.25);
 }
 .rp-ic.k-built {
   color: #b45f00;
@@ -432,7 +432,7 @@
 }
 .rp-flag.script {
   color: var(--brand-ink);
-  background: var(--brand-soft, rgba(88, 86, 214, 0.1));
+  background: var(--brand-soft, rgba(255, 70, 45, 0.1));
   font-weight: 550;
 }
 .rp-flag.cust {
@@ -460,8 +460,8 @@
 }
 .rp-scope-pill.mine {
   color: var(--brand-ink);
-  background: rgba(88, 86, 214, 0.12);
-  border: 1px solid rgba(88, 86, 214, 0.24);
+  background: rgba(255, 70, 45, 0.12);
+  border: 1px solid rgba(255, 70, 45, 0.24);
 }
 .rp-scope-pill.built {
   color: #b45f00;
@@ -577,8 +577,8 @@
 }
 .rp-sdoc-num.tone-cause {
   color: var(--brand-ink);
-  background: rgba(88, 86, 214, 0.12);
-  border-color: rgba(88, 86, 214, 0.25);
+  background: rgba(255, 70, 45, 0.12);
+  border-color: rgba(255, 70, 45, 0.25);
   font-family: inherit;
 }
 .rp-sdoc-num.tone-ok {
@@ -732,8 +732,8 @@
   background: var(--sunken);
 }
 .rp-sec-box.mine {
-  border-color: rgba(88, 86, 214, 0.25);
-  background: rgba(88, 86, 214, 0.05);
+  border-color: rgba(255, 70, 45, 0.25);
+  background: rgba(255, 70, 45, 0.05);
 }
 .rp-sec-box.plat {
   border-color: rgba(31, 138, 76, 0.24);
@@ -795,7 +795,7 @@
   height: 34px;
   border-radius: 10px;
   color: var(--brand-ink);
-  background: rgba(88, 86, 214, 0.12);
+  background: rgba(255, 70, 45, 0.12);
   font-size: 17px;
 }
 .rp-scripts-title h2 {
@@ -810,7 +810,7 @@
   padding: 0 7px;
   border-radius: 999px;
   color: var(--brand-ink);
-  background: rgba(88, 86, 214, 0.12);
+  background: rgba(255, 70, 45, 0.12);
   font-size: 12px;
   font-style: normal;
 }
@@ -1040,8 +1040,8 @@
 }
 .rp-sec-guard.mine {
   color: var(--ink-2);
-  background: rgba(88, 86, 214, 0.07);
-  border: 1px solid rgba(88, 86, 214, 0.22);
+  background: rgba(255, 70, 45, 0.07);
+  border: 1px solid rgba(255, 70, 45, 0.22);
 }
 .rp-sec-guard.mine svg {
   color: var(--brand-ink);

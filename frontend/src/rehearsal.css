@@ -14,16 +14,16 @@ body {
   --rh-code-btn-bg: rgba(15, 23, 42, 0.055);
   --rh-code-btn-hover: rgba(15, 23, 42, 0.1);
   --rh-code-cmt: #64748b;
-  --rh-code-sec: #4338ca;
+  --rh-code-sec: #c52b16;
   --rh-code-cmd: #0c4a6e;
   --rh-code-flag: #9a4d00;
   --rh-code-str: #166534;
-  --rh-code-var: #6d28d9;
+  --rh-code-var: #c52b16;
   --rh-code-op: #475569;
   --rh-scroll-thumb: rgba(100, 116, 139, 0.28);
   --rh-scroll-hover: rgba(100, 116, 139, 0.46);
   --rh-think-bg: #f7f8fc;
-  --rh-think-border: rgba(88, 86, 214, 0.18);
+  --rh-think-border: rgba(255, 70, 45, 0.18);
 }
 
 body[arco-theme="dark"] {
@@ -6545,7 +6545,7 @@ body[arco-theme="dark"] .rh-code-safe-pill {
 }
 
 .rh-code-row:hover {
-  background: rgba(88, 86, 214, 0.045);
+  background: rgba(255, 70, 45, 0.045);
 }
 
 .rh-code-ln {

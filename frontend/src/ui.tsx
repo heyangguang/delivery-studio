@@ -15,13 +15,11 @@ import { bi, canonicalCat, useLang } from "./i18n";
 
 /* ---------- identity ---------- */
 
-export function BrandMark({ size = 26 }: { size?: number }) {
+export function BrandMark({ size = 24 }: { size?: number }) {
   useLang();
   const uid = useId().replace(/[^a-zA-Z0-9]/g, "");
   const bgId = `bm-bg-${uid}`;
-  const glowId = `bm-gl-${uid}`;
-  const wingId = `bm-wg-${uid}`;
-  const coreId = `bm-cr-${uid}`;
+  const sheenId = `bm-sh-${uid}`;
   return (
     <svg
       className="brand-mark"
@@ -33,55 +31,35 @@ export function BrandMark({ size = 26 }: { size?: number }) {
     >
       <defs>
         <linearGradient id={bgId} x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="#6366F1" />
-          <stop offset="0.52" stopColor="#4F46E5" />
-          <stop offset="1" stopColor="#312E81" />
+          <stop offset="0" stopColor="#FF5A42" />
+          <stop offset="0.55" stopColor="#FF462D" />
+          <stop offset="1" stopColor="#DC311B" />
         </linearGradient>
-        <radialGradient id={glowId} cx="0.22" cy="0.14" r="0.78">
-          <stop offset="0" stopColor="#A5B4FC" stopOpacity=".46" />
-          <stop offset="1" stopColor="#4F46E5" stopOpacity="0" />
-        </radialGradient>
-        <linearGradient id={wingId} x1="0.5" y1="0" x2="0.5" y2="1">
-          <stop offset="0" stopColor="#EEF2FF" />
-          <stop offset="1" stopColor="#A5B4FC" />
-        </linearGradient>
-        <linearGradient id={coreId} x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="#FFFFFF" />
-          <stop offset="1" stopColor="#38BDF8" />
+        <linearGradient id={sheenId} x1="0.5" y1="0" x2="0.5" y2="1">
+          <stop offset="0" stopColor="#FFFFFF" stopOpacity=".22" />
+          <stop offset="1" stopColor="#FFFFFF" stopOpacity="0" />
         </linearGradient>
       </defs>
-      <rect width="32" height="32" rx="8.5" fill={`url(#${bgId})`} />
-      <rect width="32" height="32" rx="8.5" fill={`url(#${glowId})`} />
-      {/* Interlocking right M-wing with cool silver-indigo bevel depth */}
+      <rect width="32" height="32" rx="7.5" fill={`url(#${bgId})`} />
+      <rect width="32" height="16" rx="7.5" fill={`url(#${sheenId})`} />
+      {/* Precision geometric K emblem */}
       <path
-        d="M25 22.9V12.3Q25 11.1 23.8 11.1H22Q21.2 11.1 20.7 11.8L16 18.2V23.4L21.6 15.9V22.9Q21.6 24.1 22.8 24.1H23.8Q25 24.1 25 22.9Z"
-        fill={`url(#${wingId})`}
+        d="M10.5 8.5v15M21.2 9L13.2 16l8.3 7.2"
+        stroke="#FFFFFF"
+        strokeWidth="3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
       />
-      {/* Dominant left M-wing in crisp pure white */}
-      <path
-        d="M7 22.9V12.3Q7 11.1 8.2 11.1H10Q10.8 11.1 11.3 11.8L16 18.2V23.4L10.4 15.9V22.9Q10.4 24.1 9.2 24.1H8.2Q7 24.1 7 22.9Z"
-        fill="#FFFFFF"
-      />
-      {/* Central cyan-ice orchestration Hub core diamond */}
-      <rect
-        x="13.45"
-        y="8.05"
-        width="5.1"
-        height="5.1"
-        rx="1.25"
-        transform="rotate(45 16 10.6)"
-        fill={`url(#${coreId})`}
-      />
-      {/* Subtle top-edge specular rim for tactile depth */}
       <rect
         x="0.5"
         y="0.5"
         width="31"
         height="31"
-        rx="8"
+        rx="7"
         fill="none"
         stroke="#FFFFFF"
-        strokeOpacity=".22"
+        strokeOpacity=".18"
         strokeWidth="1"
       />
     </svg>

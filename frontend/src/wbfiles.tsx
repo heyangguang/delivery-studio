@@ -370,7 +370,7 @@ const STARTER: Record<Kind, (role: string, name: string) => string> = {
       `# ${n}: Ansible tasks executed on target hosts.\n# See Variable Reference above for variables such as {{ mw.params.xxx }} and {{ mw_hosts[inventory_hostname].ip }}.\n- name: Example task\n  ansible.builtin.debug:\n    msg: "${n} on {{ inventory_hostname }}"\n`,
     ),
   template: () =>
-    "# Managed by Middleware Hub for {{ mw_cluster.id }}/{{ mw.id }}. Do not edit by hand.\n",
+    "# Managed by Kyndryl Delivery Hub for {{ mw_cluster.id }}/{{ mw.id }}. Do not edit by hand.\n",
   file: () => "",
   defaults: () => bi("# 角色默认变量\n", "# Role default variables\n"),
 };

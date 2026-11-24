@@ -1879,8 +1879,8 @@ body[arco-theme="dark"] .ig-legend path.link-live.f2 {
   flex: none;
 }
 .tk-ltag.read {
-  color: #a5b4fc;
-  background: rgba(129, 140, 248, 0.16);
+  color: #ff9c8a;
+  background: rgba(255, 118, 99, 0.16);
 }
 .tk-ltag.dl {
   color: #38bdf8;
@@ -4210,8 +4210,8 @@ body[arco-theme="dark"] .cv-rep-phase.ph-tests {
   background: rgba(45, 212, 191, 0.15);
 }
 .cv-rep-phase.ph-endpoint {
-  color: #7c3aed;
-  background: rgba(124, 58, 237, 0.11);
+  color: #ff462d;
+  background: rgba(255, 70, 45, 0.11);
 }
 body[arco-theme="dark"] .cv-rep-phase.ph-endpoint {
   color: #c4b5fd;

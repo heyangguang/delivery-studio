@@ -1947,8 +1947,8 @@ export function AIPage({
                 )
             : offline
               ? bi(
-                  "暂未连上 Middleware Hub 后端服务",
-                  "Middleware Hub backend unavailable",
+                  "暂未连上 Kyndryl Delivery Hub 后端服务",
+                  "Kyndryl Delivery Hub backend unavailable",
                 )
               : busy
                 ? bi(

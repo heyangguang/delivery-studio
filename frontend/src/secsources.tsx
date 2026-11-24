@@ -72,8 +72,8 @@ const KIND_OPTIONS = () => [
     label: bi("离线漏洞库包 URL (.tar.gz)", "Offline Bundle URL (.tar.gz)"),
     short: bi("离线包 URL", "Bundle URL"),
     hint: bi(
-      "从内网文件服务器/制品库拉取由另一台 Middleware Hub 导出的 .tar.gz 漏洞库包（自动校验 SHA256SUMS）。",
-      "Pulls a SHA256-verified .tar.gz bundle exported from another Middleware Hub instance.",
+      "从内网文件服务器/制品库拉取由另一台 Kyndryl Delivery Hub 导出的 .tar.gz 漏洞库包（自动校验 SHA256SUMS）。",
+      "Pulls a SHA256-verified .tar.gz bundle exported from another Kyndryl Delivery Hub instance.",
     ),
     placeholder: "https://artifacts.internal/security/mh-cve-db-latest.tar.gz",
   },

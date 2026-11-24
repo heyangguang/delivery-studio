@@ -231,7 +231,7 @@ tests:
     port: "{{ mw.params.port }}"
     timeout: 30
 `)
-	conf := "# Managed by Middleware Hub for {{ mw_cluster.id }}/{{ mw.id }}. Do not edit by hand.\n" +
+	conf := "# Managed by Kyndryl Delivery Hub for {{ mw_cluster.id }}/{{ mw.id }}. Do not edit by hand.\n" +
 		"bind {{ mw_hosts[inventory_hostname].ip }}\nport {{ mw.params.port }}\ndir {{ mw.params.data_dir }}\n"
 	switch o.Kind {
 	case "primary-replica":

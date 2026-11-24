@@ -1015,7 +1015,7 @@ func (w *docxWriter) versionControl(vc docxVersionControl) {
 		[]string{tr(lang, "文档标题", "Document Title"), firstNonEmptyStr(vc.Title, "—")},
 		[]string{tr(lang, "文档版本号", "Document Version"), firstNonEmptyStr(vc.Version, "V1.0")},
 		[]string{tr(lang, "版本日期", "Release Date"), firstNonEmptyStr(vc.Date, time.Now().Format("2006-01-02"))},
-		[]string{tr(lang, "作    者", "Author"), firstNonEmptyStr(vc.Author, "Middleware Hub")},
+		[]string{tr(lang, "作    者", "Author"), firstNonEmptyStr(vc.Author, "Kyndryl Delivery Hub")},
 		[]string{tr(lang, "审 核 人", "Reviewer"), firstNonEmptyStr(vc.Reviewer, "—")},
 	)
 	if strings.TrimSpace(vc.Confidential) != "" {
@@ -1037,7 +1037,7 @@ func (w *docxWriter) versionControl(vc docxVersionControl) {
 	}
 	if len(histRows) == 0 {
 		histRows = [][]string{
-			{firstNonEmptyStr(vc.Version, "V1.0"), firstNonEmptyStr(vc.Date, time.Now().Format("2006-01-02")), firstNonEmptyStr(vc.Author, "Middleware Hub"), tr(lang, "文档生成与基线归档", "Document generated and baselined")},
+			{firstNonEmptyStr(vc.Version, "V1.0"), firstNonEmptyStr(vc.Date, time.Now().Format("2006-01-02")), firstNonEmptyStr(vc.Author, "Kyndryl Delivery Hub"), tr(lang, "文档生成与基线归档", "Document generated and baselined")},
 			{"", "", "", ""},
 		}
 	}
@@ -1188,7 +1188,7 @@ func docxFileDual(front, body *docxWriter, meta docxBuildMeta) ([]byte, error) {
 		{"_rels/.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/></Relationships>`},
 		{"word/styles.xml", stylesXML(meta.Theme)},
 		{"word/settings.xml", docxSettingsXML},
-		{"docProps/core.xml", fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>%s</dc:title><dc:creator>%s</dc:creator></cp:coreProperties>`, esc(meta.Title), esc(firstNonEmptyStr(meta.Author, "Middleware Hub")))},
+		{"docProps/core.xml", fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>%s</dc:title><dc:creator>%s</dc:creator></cp:coreProperties>`, esc(meta.Title), esc(firstNonEmptyStr(meta.Author, "Kyndryl Delivery Hub")))},
 	}
 
 	if meta.HasFrontSect && front != nil {

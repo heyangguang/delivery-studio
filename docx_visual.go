@@ -150,7 +150,7 @@ func starterTemplateDocxLang(rs reportSettings, lang string) ([]byte, error) {
 		Header:       toTemplatePlaceholders(firstNonEmptyStr(rs.Header, "{{cluster}} · {{title}}")),
 		Footer:       toTemplatePlaceholders(firstNonEmptyStr(rs.Footer, "{{org}}")),
 		FrontOrg:     firstNonEmptyStr(rs.Org, "{{org}}"),
-		Author:       firstNonEmptyStr(rs.Author, "Middleware Hub"),
+		Author:       firstNonEmptyStr(rs.Author, "Kyndryl Delivery Hub"),
 		Theme:        theme,
 		HasFrontSect: true,
 		Lang:         lang,

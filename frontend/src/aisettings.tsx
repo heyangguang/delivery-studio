@@ -269,8 +269,8 @@ const ctxText = (n?: number) =>
     : "";
 
 const SWATCHES = [
-  "#5856d6",
-  "#0a84ff",
+  "#ff462d",
+  "#1f5e66",
   "#30b0c7",
   "#34c759",
   "#ff9f0a",

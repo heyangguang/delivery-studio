@@ -2517,7 +2517,7 @@ function MonitorWorkspace({
                     </span>
                   )}
                 {(data?.patches?.length || 0) > 0 && (
-                  <span style={{ color: "#6d28d9", fontWeight: 560 }}>
+                  <span style={{ color: "var(--brand-ink)", fontWeight: 560 }}>
                     {bi(
                       `· 本交付已热修 ${new Set(data!.patches!.map((p) => p.path)).size} 个脚本（续跑自动推送）`,
                       `· ${new Set(data!.patches!.map((p) => p.path)).size} hotfixed (auto-pushed)`,

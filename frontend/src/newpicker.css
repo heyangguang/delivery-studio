@@ -59,11 +59,11 @@
 .np-drafts {
   margin-bottom: 24px;
   padding: 14px 16px;
-  border: 1px solid var(--brand-line, rgba(88, 86, 214, 0.28));
+  border: 1px solid var(--brand-line, rgba(255, 70, 45, 0.28));
   border-radius: 14px;
   background: linear-gradient(
     90deg,
-    rgba(88, 86, 214, 0.06),
+    rgba(255, 70, 45, 0.06),
     var(--surface) 60%
   );
 }
@@ -312,7 +312,7 @@
 .np-plan-pill:hover {
   color: var(--brand-ink);
   border-color: var(--brand-line, var(--brand));
-  background: rgba(88, 86, 214, 0.08);
+  background: rgba(255, 70, 45, 0.08);
 }
 
 .np-plan-nodes {

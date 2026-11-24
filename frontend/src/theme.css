@@ -1,70 +1,71 @@
-/* Tokens. Brand is an indigo accent; status colours (--ok / --warn / --bad / --run) are shared across badges,
-   progress tracks, tables, and topology graphs. Surfaces stay neutral and crisp in both light and dark modes. */
+/* Kyndryl Delivery Hub Design Tokens (Shidoka-inspired):
+   Warm Stone neutral canvas, Warm Charcoal authority, Kyndryl Warm Red (#FF462D) signature accent,
+   and Shidoka Deep Spruce operational telemetry. Crisp, legible, and distinct from error/critical crimson. */
 :root,
 body {
-  --bg: #f9fafc;
+  --bg: #f6f5f2;
   --surface: #ffffff;
-  --surface-2: #f5f6fa;
-  --surface-3: #eceef4;
-  --sunken: #eef0f6;
-  --rail: #f4f5f9;
-  --hover: rgba(15, 23, 42, 0.042);
-  --press: rgba(15, 23, 42, 0.072);
-  --line: rgba(15, 23, 42, 0.085);
-  --line-strong: rgba(15, 23, 42, 0.14);
-  --ink: #111318;
-  --ink-2: #343844;
-  --mute: #646875;
-  --faint: #8a8f9e;
+  --surface-2: #f1efea;
+  --surface-3: #e8e5de;
+  --sunken: #edeae3;
+  --rail: #f3f1ec;
+  --hover: rgba(29, 28, 26, 0.045);
+  --press: rgba(29, 28, 26, 0.08);
+  --line: rgba(29, 28, 26, 0.09);
+  --line-strong: rgba(29, 28, 26, 0.16);
+  --ink: #1d1c1a;
+  --ink-2: #3a3835;
+  --mute: #64615b;
+  --faint: #8c8880;
 
-  --brand: #4338ca;
-  --brand-ink: #3730a3;
-  --brand-soft: rgba(67, 56, 202, 0.072);
-  --brand-line: rgba(67, 56, 202, 0.24);
+  --brand: #ff462d;
+  --brand-ink: #c52b16;
+  --brand-soft: rgba(255, 70, 45, 0.085);
+  --brand-line: rgba(255, 70, 45, 0.28);
 
-  --ok: #18864b;
-  --ok-soft: rgba(24, 134, 75, 0.11);
-  --ok-line: rgba(24, 134, 75, 0.28);
+  --ok: #147a4b;
+  --ok-soft: rgba(20, 122, 75, 0.11);
+  --ok-line: rgba(20, 122, 75, 0.28);
 
   --warn: #b25900;
-  --warn-soft: rgba(245, 158, 11, 0.13);
+  --warn-soft: rgba(245, 158, 11, 0.14);
   --warn-line: rgba(178, 89, 0, 0.28);
 
-  --bad: #d92d20;
-  --bad-soft: rgba(217, 45, 32, 0.1);
-  --bad-line: rgba(217, 45, 32, 0.28);
+  --bad: #b91c1c;
+  --bad-soft: rgba(185, 28, 28, 0.1);
+  --bad-line: rgba(185, 28, 28, 0.28);
 
-  --run: #2563eb;
-  --run-soft: rgba(37, 99, 235, 0.11);
-  --run-line: rgba(37, 99, 235, 0.3);
+  --run: #1f5e66;
+  --run-soft: rgba(31, 94, 102, 0.11);
+  --run-line: rgba(31, 94, 102, 0.3);
 
-  --idle: #8b909c;
-  --idle-soft: rgba(139, 144, 156, 0.13);
-  --idle-line: rgba(139, 144, 156, 0.26);
+  --idle: #87847d;
+  --idle-soft: rgba(135, 132, 125, 0.13);
+  --idle-line: rgba(135, 132, 125, 0.26);
 
-  --code-bg: #f4f5f8;
-  --term-bg: #16181f;
-  --term-head: #1f222c;
-  --term-ink: #e8ecf4;
-  --term-mute: #949cb0;
-  --term-line: rgba(255, 255, 255, 0.08);
+  --code-bg: #f1efea;
+  --term-bg: #181716;
+  --term-head: #22201e;
+  --term-ink: #f0ede8;
+  --term-mute: #9c978e;
+  --term-line: rgba(255, 250, 244, 0.09);
   --panel: var(--surface);
   --ink-1: var(--ink);
   --ink-3: var(--faint);
-  --glass: rgba(255, 255, 255, 0.85);
-  --glass-strong: rgba(255, 255, 255, 0.95);
+  --glass: rgba(255, 255, 255, 0.88);
+  --glass-strong: rgba(255, 255, 255, 0.96);
   --rim: 0 0 0 0 transparent;
   --rim-strong: 0 0 0 0 transparent;
   --shadow-sm:
-    0 1px 2px rgba(15, 23, 42, 0.04),
-    0 0 0 1px rgba(15, 23, 42, 0.03);
+    0 1px 2px rgba(29, 28, 26, 0.05),
+    0 0 0 1px rgba(29, 28, 26, 0.03);
   --shadow-md:
-    0 6px 18px -4px rgba(15, 23, 42, 0.08),
-    0 2px 6px rgba(15, 23, 42, 0.04);
+    0 6px 18px -4px rgba(29, 28, 26, 0.09),
+    0 2px 6px rgba(29, 28, 26, 0.04);
   --shadow-lg:
-    0 18px 42px -10px rgba(15, 23, 42, 0.14),
-    0 4px 12px rgba(15, 23, 42, 0.05);
-  --ring: 0 0 0 3px rgba(67, 56, 202, 0.2);
+    0 18px 42px -10px rgba(29, 28, 26, 0.16),
+    0 4px 12px rgba(29, 28, 26, 0.06);
+  --ring: 0 0 0 3px rgba(255, 70, 45, 0.2);
   --r-sm: 5px;
   --r: 7px;
   --r-md: 9px;
@@ -76,16 +77,16 @@ body {
   --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", "Noto Sans CJK SC", sans-serif;
   --mono: "SF Mono", ui-monospace, "JetBrains Mono", "Cascadia Mono", Menlo, Consolas, "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", "Noto Sans CJK SC", monospace;
 
-  --arcoblue-1: 238, 240, 253;
-  --arcoblue-2: 221, 224, 250;
-  --arcoblue-3: 194, 198, 245;
-  --arcoblue-4: 155, 160, 236;
-  --arcoblue-5: 99, 102, 241;
-  --arcoblue-6: 67, 56, 202;
-  --arcoblue-7: 55, 48, 163;
-  --arcoblue-8: 49, 46, 129;
-  --arcoblue-9: 36, 33, 96;
-  --arcoblue-10: 24, 22, 66;
+  --arcoblue-1: 255, 243, 240;
+  --arcoblue-2: 255, 224, 217;
+  --arcoblue-3: 255, 191, 179;
+  --arcoblue-4: 255, 146, 128;
+  --arcoblue-5: 255, 106, 84;
+  --arcoblue-6: 255, 70, 45;
+  --arcoblue-7: 224, 52, 29;
+  --arcoblue-8: 197, 43, 22;
+  --arcoblue-9: 158, 33, 16;
+  --arcoblue-10: 112, 22, 10;
   --primary-1: var(--arcoblue-1);
   --primary-2: var(--arcoblue-2);
   --primary-3: var(--arcoblue-3);
@@ -105,25 +106,25 @@ body {
 
 :root[arco-theme="dark"],
 body[arco-theme="dark"] {
-  --bg: #0f1116;
-  --surface: #161820;
-  --surface-2: #1c1e27;
-  --surface-3: #232632;
-  --sunken: #0b0c10;
-  --rail: #12141b;
-  --hover: rgba(255, 255, 255, 0.05);
-  --press: rgba(255, 255, 255, 0.09);
-  --line: rgba(255, 255, 255, 0.09);
-  --line-strong: rgba(255, 255, 255, 0.16);
-  --ink: #f3f4f6;
-  --ink-2: #d1d5de;
-  --mute: #9ca2b0;
-  --faint: #717786;
+  --bg: #131312;
+  --surface: #1b1a19;
+  --surface-2: #242220;
+  --surface-3: #2d2b28;
+  --sunken: #0d0d0c;
+  --rail: #161514;
+  --hover: rgba(255, 250, 244, 0.055);
+  --press: rgba(255, 250, 244, 0.095);
+  --line: rgba(255, 250, 244, 0.09);
+  --line-strong: rgba(255, 250, 244, 0.16);
+  --ink: #f5f3ef;
+  --ink-2: #d6d3cc;
+  --mute: #9e9a92;
+  --faint: #747068;
 
-  --brand: #6366f1;
-  --brand-ink: #a5b4fc;
-  --brand-soft: rgba(99, 102, 241, 0.14);
-  --brand-line: rgba(129, 140, 248, 0.34);
+  --brand: #ff5b44;
+  --brand-ink: #ff8270;
+  --brand-soft: rgba(255, 91, 68, 0.16);
+  --brand-line: rgba(255, 91, 68, 0.36);
 
   --ok: #3ddc84;
   --ok-soft: rgba(61, 220, 132, 0.15);
@@ -133,57 +134,57 @@ body[arco-theme="dark"] {
   --warn-soft: rgba(255, 179, 64, 0.15);
   --warn-line: rgba(255, 179, 64, 0.36);
 
-  --bad: #ff6961;
-  --bad-soft: rgba(255, 105, 97, 0.15);
-  --bad-line: rgba(255, 105, 97, 0.36);
+  --bad: #f87171;
+  --bad-soft: rgba(248, 113, 113, 0.16);
+  --bad-line: rgba(248, 113, 113, 0.38);
 
-  --run: #60a5fa;
-  --run-soft: rgba(96, 165, 250, 0.16);
-  --run-line: rgba(96, 165, 250, 0.38);
+  --run: #4db0bc;
+  --run-soft: rgba(77, 176, 188, 0.16);
+  --run-line: rgba(77, 176, 188, 0.36);
 
-  --idle: #8e939e;
-  --idle-soft: rgba(142, 147, 158, 0.18);
-  --idle-line: rgba(142, 147, 158, 0.32);
+  --idle: #949088;
+  --idle-soft: rgba(148, 144, 136, 0.18);
+  --idle-line: rgba(148, 144, 136, 0.32);
 
-  --code-bg: #101115;
-  --term-bg: #0d0e12;
-  --term-head: #14161d;
-  --term-ink: #ebedf5;
-  --term-mute: #8d94a8;
-  --term-line: rgba(255, 255, 255, 0.08);
+  --code-bg: #11100f;
+  --term-bg: #0e0d0c;
+  --term-head: #171615;
+  --term-ink: #f0ede8;
+  --term-mute: #948f87;
+  --term-line: rgba(255, 250, 244, 0.08);
   --panel: var(--surface);
   --ink-1: var(--ink);
   --ink-3: var(--faint);
-  --glass: rgba(22, 24, 32, 0.85);
-  --glass-strong: rgba(28, 30, 40, 0.95);
+  --glass: rgba(27, 26, 25, 0.88);
+  --glass-strong: rgba(34, 32, 30, 0.96);
   --rim: 0 0 0 0 transparent;
   --rim-strong: 0 0 0 0 transparent;
   --shadow-sm:
-    0 1px 2px rgba(0, 0, 0, 0.42),
-    0 0 0 1px rgba(255, 255, 255, 0.05);
+    0 1px 2px rgba(0, 0, 0, 0.44),
+    0 0 0 1px rgba(255, 250, 244, 0.05);
   --shadow-md:
-    0 8px 24px rgba(0, 0, 0, 0.48),
-    0 0 0 1px rgba(255, 255, 255, 0.06);
+    0 8px 24px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(255, 250, 244, 0.06);
   --shadow-lg:
-    0 20px 48px rgba(0, 0, 0, 0.64),
-    0 0 0 1px rgba(255, 255, 255, 0.08);
-  --ring: 0 0 0 3px rgba(99, 102, 241, 0.34);
+    0 20px 48px rgba(0, 0, 0, 0.66),
+    0 0 0 1px rgba(255, 250, 244, 0.08);
+  --ring: 0 0 0 3px rgba(255, 91, 68, 0.32);
 
-  --arcoblue-1: 30, 29, 68;
-  --arcoblue-2: 40, 39, 92;
-  --arcoblue-3: 55, 53, 128;
-  --arcoblue-4: 75, 73, 172;
-  --arcoblue-5: 118, 120, 244;
-  --arcoblue-6: 99, 102, 241;
-  --arcoblue-7: 129, 132, 248;
-  --arcoblue-8: 165, 180, 252;
-  --arcoblue-9: 199, 210, 254;
-  --arcoblue-10: 224, 231, 255;
+  --arcoblue-1: 54, 24, 20;
+  --arcoblue-2: 78, 32, 26;
+  --arcoblue-3: 112, 42, 32;
+  --arcoblue-4: 158, 54, 40;
+  --arcoblue-5: 224, 74, 54;
+  --arcoblue-6: 255, 91, 68;
+  --arcoblue-7: 255, 118, 99;
+  --arcoblue-8: 255, 152, 138;
+  --arcoblue-9: 255, 192, 184;
+  --arcoblue-10: 255, 228, 224;
   --color-bg-1: var(--surface);
   --color-bg-2: var(--surface);
   --color-bg-3: var(--surface-2);
   --color-bg-4: var(--surface-3);
-  --color-bg-popup: #1b1d26;
+  --color-bg-popup: #211f1d;
   color-scheme: dark;
 }
 
@@ -427,25 +428,68 @@ kbd {
 .arco-btn:focus-visible {
   box-shadow: var(--ring);
 }
-.arco-btn-primary:not(.arco-btn-disabled) {
+/* Kyndryl Scheme A Executive Primary CTA: Warm Charcoal authority on light, Warm Ivory on dark,
+   keeping operational danger/warning/success buttons strictly semantic. */
+.arco-btn-primary:not(.arco-btn-disabled):not(.arco-btn-status-danger):not(.arco-btn-status-warning):not(.arco-btn-status-success) {
+  background-color: #1d1c1a;
+  border-color: #1d1c1a;
+  color: #ffffff;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.12),
-    0 1px 3px rgba(var(--arcoblue-7), 0.24),
-    0 1px 1px rgba(var(--arcoblue-8), 0.16);
+    0 1px 3px rgba(29, 28, 26, 0.24),
+    0 1px 1px rgba(29, 28, 26, 0.14);
   transition:
     transform 0.18s var(--spring),
     box-shadow 0.18s ease,
-    background-color 0.16s ease;
+    background-color 0.16s ease,
+    border-color 0.16s ease;
 }
-.arco-btn-primary:not(.arco-btn-disabled):hover {
+.arco-btn-primary:not(.arco-btn-disabled):not(.arco-btn-status-danger):not(.arco-btn-status-warning):not(.arco-btn-status-success):hover {
+  background-color: #33312e;
+  border-color: #33312e;
+  color: #ffffff;
   transform: translate3d(0, -0.5px, 0);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.16),
-    0 4px 12px -2px rgba(var(--arcoblue-6), 0.34),
-    0 1px 2px rgba(var(--arcoblue-8), 0.22);
+    0 4px 12px -2px rgba(29, 28, 26, 0.3),
+    0 1px 2px rgba(29, 28, 26, 0.18);
 }
-.arco-btn-primary:not(.arco-btn-disabled):active {
+.arco-btn-primary:not(.arco-btn-disabled):not(.arco-btn-status-danger):not(.arco-btn-status-warning):not(.arco-btn-status-success):active {
+  background-color: #121110;
+  border-color: #121110;
   transform: scale(0.985);
+}
+body[arco-theme="dark"] .arco-btn-primary:not(.arco-btn-disabled):not(.arco-btn-status-danger):not(.arco-btn-status-warning):not(.arco-btn-status-success) {
+  background-color: #f5f3ef;
+  border-color: #f5f3ef;
+  color: #141312;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.6),
+    0 1px 3px rgba(0, 0, 0, 0.36);
+}
+body[arco-theme="dark"] .arco-btn-primary:not(.arco-btn-disabled):not(.arco-btn-status-danger):not(.arco-btn-status-warning):not(.arco-btn-status-success):hover {
+  background-color: #ffffff;
+  border-color: #ffffff;
+  color: #141312;
+  box-shadow:
+    0 4px 14px -2px rgba(0, 0, 0, 0.45);
+}
+body[arco-theme="dark"] .arco-btn-primary:not(.arco-btn-disabled):not(.arco-btn-status-danger):not(.arco-btn-status-warning):not(.arco-btn-status-success):active {
+  background-color: #e6e2da;
+  border-color: #e6e2da;
+}
+.arco-btn-primary.arco-btn-disabled:not(.arco-btn-status-danger):not(.arco-btn-status-warning):not(.arco-btn-status-success),
+.arco-btn-primary.arco-btn-disabled:not(.arco-btn-status-danger):not(.arco-btn-status-warning):not(.arco-btn-status-success):hover {
+  background-color: var(--surface-3);
+  border-color: var(--line);
+  color: var(--faint);
+}
+.arco-btn-primary.arco-btn-status-danger:not(.arco-btn-disabled),
+.arco-btn-primary.arco-btn-status-warning:not(.arco-btn-disabled),
+.arco-btn-primary.arco-btn-status-success:not(.arco-btn-disabled) {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 1px 3px rgba(29, 28, 26, 0.2);
 }
 .arco-btn-secondary:not(.arco-btn-disabled):not(.arco-btn-status-danger),
 body[arco-theme="dark"] .arco-btn-secondary:not(.arco-btn-disabled):not(.arco-btn-status-danger) {
@@ -786,7 +830,7 @@ body[arco-theme="dark"] .arco-modal {
 /* Crisp, compositor-friendly scrim (avoid full-viewport backdrop-filter blur which stalls VDI/software GPUs on first open). */
 .arco-modal-mask,
 .arco-drawer-mask {
-  background: rgba(15, 23, 42, 0.42);
+  background: rgba(29, 28, 26, 0.44);
 }
 /* Snappy GPU-composited modal transitions replacing Arco's heavy 400ms scale(0.5) overshoot zoom. */
 .zoomModal-enter,

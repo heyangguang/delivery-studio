@@ -157,9 +157,9 @@
   background: var(--surface);
 }
 .k-think .wk-dot {
-  color: #8b5cf6;
-  border-color: rgba(139, 92, 246, 0.35);
-  background: rgba(139, 92, 246, 0.08);
+  color: var(--brand);
+  border-color: var(--brand-line);
+  background: var(--brand-soft);
 }
 .k-skill .wk-dot {
   color: #c27500;
@@ -296,7 +296,7 @@
   overflow: hidden;
   margin: 4px 0 6px 2px;
   padding: 0 0 0 12px;
-  border-left: 2px solid rgba(139, 92, 246, 0.25);
+  border-left: 2px solid var(--brand-line);
   color: var(--mute);
   font-size: 13px;
   line-height: 1.7;

@@ -436,7 +436,7 @@ body[arco-theme="dark"] .srt-fmt-xlsx {
 }
 
 .srt-theme-btn.on {
-  border-color: var(--brand, #4f46e5);
+  border-color: var(--brand, #ff462d);
   background: #f5f7ff;
   font-weight: 600;
   color: #0f172a;
@@ -467,9 +467,9 @@ body[arco-theme="dark"] .srt-fmt-xlsx {
 }
 
 .srt-fmt-card.on {
-  border-color: var(--brand, #4f46e5);
+  border-color: var(--brand, #ff462d);
   background: #f5f7ff;
-  box-shadow: 0 0 0 1px rgba(79, 70, 229, 0.12);
+  box-shadow: 0 0 0 1px rgba(255, 70, 45, 0.12);
 }
 
 .srt-fmt-card-h {
@@ -513,7 +513,7 @@ body[arco-theme="dark"] .srt-fmt-xlsx {
 }
 
 .srt-sec-opt.on {
-  border-color: #c7d2fe;
+  border-color: var(--brand-line);
   background: #f8faff;
 }
 
@@ -609,9 +609,9 @@ body[arco-theme="dark"] .srt-fmt-xlsx {
 }
 
 .sexp-tpl-item.on {
-  border-color: var(--brand, #4f46e5);
+  border-color: var(--brand, #ff462d);
   background: #f5f7ff;
-  box-shadow: 0 0 0 1px rgba(79, 70, 229, 0.12);
+  box-shadow: 0 0 0 1px rgba(255, 70, 45, 0.12);
 }
 
 .sexp-tpl-item-h {
@@ -674,8 +674,8 @@ body[arco-theme="dark"] .srt-fmt-xlsx {
 }
 
 .sexp-mini-fmt.on {
-  background: var(--brand, #4f46e5);
-  border-color: var(--brand, #4f46e5);
+  background: var(--brand, #ff462d);
+  border-color: var(--brand, #ff462d);
   color: #fff;
   font-weight: 500;
 }

@@ -35,7 +35,7 @@ type AskItem = {
   hint: string;
 };
 
-/* rolling showcase of real Middleware Hub AI workflows */
+/* rolling showcase of real Kyndryl Delivery Hub AI workflows */
 const ASKS: (AskItem & { tagEn: string; askEn: string; hintEn: string })[] = [
   {
     tag: "沙箱排障",
@@ -162,30 +162,30 @@ function PanelArt() {
         <rect x="64" y="64" width="10" height="10" rx="2.5" transform="rotate(45 69 69)" fill="var(--brand)" fillOpacity="0.28" />
       </svg>
 
-      {/* top-right Middleware Hub orbital prism cluster */}
+      {/* top-right Kyndryl Delivery Hub orbital prism cluster */}
       <svg className="ib-art ib-art-tr" viewBox="0 0 460 360" fill="none">
         <defs>
           <radialGradient id={`tr-glow-${uid}`} cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(382 62) rotate(135) scale(310)">
             <stop offset="0" stopColor="var(--brand)" stopOpacity="0.22" />
-            <stop offset="0.55" stopColor="#38bdf8" stopOpacity="0.07" />
+            <stop offset="0.55" stopColor="#29707a" stopOpacity="0.08" />
             <stop offset="1" stopColor="var(--brand)" stopOpacity="0" />
           </radialGradient>
           <linearGradient id={`tr-plate-${uid}`} x1="255" y1="24" x2="415" y2="184" gradientUnits="userSpaceOnUse">
-            <stop offset="0" stopColor="#6366f1" stopOpacity="0.28" />
-            <stop offset="1" stopColor="#282670" stopOpacity="0.08" />
+            <stop offset="0" stopColor="#ff462d" stopOpacity="0.24" />
+            <stop offset="1" stopColor="#1d1c1a" stopOpacity="0.08" />
           </linearGradient>
           <linearGradient id={`tr-core-${uid}`} x1="312" y1="90" x2="346" y2="124" gradientUnits="userSpaceOnUse">
             <stop offset="0" stopColor="#ffffff" />
-            <stop offset="0.52" stopColor="#38bdf8" />
-            <stop offset="1" stopColor="#5856d6" />
+            <stop offset="0.52" stopColor="#ff7a59" />
+            <stop offset="1" stopColor="#ff462d" />
           </linearGradient>
         </defs>
 
         <circle cx="382" cy="62" r="280" fill={`url(#tr-glow-${uid})`} />
         <circle cx="382" cy="62" r="268" stroke="currentColor" strokeOpacity="0.065" />
-        <circle cx="382" cy="62" r="204" stroke="var(--brand)" strokeOpacity="0.14" strokeDasharray="5 7" />
+        <circle cx="382" cy="62" r="204" stroke="var(--brand)" strokeOpacity="0.16" strokeDasharray="5 7" />
         <circle cx="382" cy="62" r="138" stroke="currentColor" strokeOpacity="0.1" />
-        <circle cx="382" cy="62" r="78" stroke="var(--brand)" strokeOpacity="0.18" />
+        <circle cx="382" cy="62" r="78" stroke="var(--brand)" strokeOpacity="0.2" />
 
         {/* layered chamfered prism cards */}
         <g className="ib-art-float">
@@ -222,10 +222,10 @@ function PanelArt() {
         </g>
 
         {/* cluster nodes resting cleanly on orbital paths */}
-        <circle cx="212" cy="176" r="5" fill="var(--brand)" fillOpacity="0.48" />
-        <circle cx="212" cy="176" r="10" stroke="var(--brand)" strokeOpacity="0.2" />
-        <rect x="319" y="253" width="10" height="10" rx="2.5" transform="rotate(45 324 258)" fill="#38bdf8" fillOpacity="0.65" />
-        <circle cx="418" cy="195" r="4" fill="#3ddc84" fillOpacity="0.75" />
+        <circle cx="212" cy="176" r="5" fill="var(--brand)" fillOpacity="0.52" />
+        <circle cx="212" cy="176" r="10" stroke="var(--brand)" strokeOpacity="0.22" />
+        <rect x="319" y="253" width="10" height="10" rx="2.5" transform="rotate(45 324 258)" fill="#29707a" fillOpacity="0.7" />
+        <circle cx="418" cy="195" r="4" fill="#147a4b" fillOpacity="0.8" />
       </svg>
 
       {/* bottom-right architectural stepped strata & node trace */}
@@ -236,12 +236,12 @@ function PanelArt() {
             <stop offset="1" stopColor="var(--brand)" stopOpacity="0.16" />
           </linearGradient>
           <linearGradient id={`br-2-${uid}`} x1="220" y1="320" x2="540" y2="150" gradientUnits="userSpaceOnUse">
-            <stop offset="0" stopColor="#312e81" stopOpacity="0.06" />
-            <stop offset="1" stopColor="#4f46e5" stopOpacity="0.22" />
+            <stop offset="0" stopColor="#1f5e66" stopOpacity="0.06" />
+            <stop offset="1" stopColor="#29707a" stopOpacity="0.2" />
           </linearGradient>
           <linearGradient id={`br-3-${uid}`} x1="340" y1="320" x2="540" y2="210" gradientUnits="userSpaceOnUse">
-            <stop offset="0" stopColor="#1e1b4b" stopOpacity="0.12" />
-            <stop offset="1" stopColor="#4338ca" stopOpacity="0.32" />
+            <stop offset="0" stopColor="#1d1c1a" stopOpacity="0.12" />
+            <stop offset="1" stopColor="#ff462d" stopOpacity="0.24" />
           </linearGradient>
         </defs>
 
@@ -265,10 +265,10 @@ function PanelArt() {
 
         {/* minimal cluster status nodes anchored on strata crest */}
         <path d="M326 218Q416 184 504 170" stroke="var(--brand)" strokeOpacity="0.32" strokeDasharray="3 5" />
-        <rect x="321" y="213" width="10" height="10" rx="2.5" fill="var(--brand)" fillOpacity="0.42" />
-        <rect x="408" y="182" width="12" height="12" rx="3" transform="rotate(45 414 188)" fill="#38bdf8" fillOpacity="0.72" />
-        <circle cx="496" cy="172" r="4.5" fill="#3ddc84" />
-        <circle cx="496" cy="172" r="9.5" stroke="#3ddc84" strokeOpacity="0.28" />
+        <rect x="321" y="213" width="10" height="10" rx="2.5" fill="var(--brand)" fillOpacity="0.48" />
+        <rect x="408" y="182" width="12" height="12" rx="3" transform="rotate(45 414 188)" fill="#29707a" fillOpacity="0.72" />
+        <circle cx="496" cy="172" r="4.5" fill="#147a4b" />
+        <circle cx="496" cy="172" r="9.5" stroke="#147a4b" strokeOpacity="0.28" />
       </svg>
     </div>
   );
@@ -306,7 +306,7 @@ function IntroPanel() {
       >
         <div className="ib-ask-eyebrow">
           <AIEmblem size={20} />
-          <span>Middleware Hub AI</span>
+          <span>Kyndryl Delivery Hub AI</span>
           <em>{bi("隔离沙箱 · 只读诊断", "Isolated Sandbox · Read-Only")}</em>
         </div>
 
@@ -504,7 +504,10 @@ export function Login({
     <div className={`ib-root${phase === "entering" ? " is-leaving" : ""}`}>
       <header className="ib-top">
         <span className="ib-brand">
-          Middleware <b>Hub</b>
+          <BrandMark size={20} />
+          <span className="brand-k">kyndryl</span>
+          <span className="brand-sep" aria-hidden />
+          <b>Delivery Hub</b>
         </span>
         <div className="ib-top-right">
           {conn === "online" ? (
@@ -574,7 +577,7 @@ export function Login({
               <BrandMark size={40} />
             </div>
             <h1 className="ib-title ib-in" style={d(1)}>
-              {bi("登录 Middleware", "Sign in to Middleware")} <b>Hub</b>
+              {bi("登录 Kyndryl", "Sign in to Kyndryl")} <b>Delivery Hub</b>
             </h1>
             <p className="ib-sub ib-in" style={d(2)}>
               {bi(
@@ -717,7 +720,7 @@ export function Login({
           </div>
 
           <footer className="ib-foot">
-            © {new Date().getFullYear()} Middleware Hub · {bi("仅限授权人员访问", "Authorized Access Only")}
+            © {new Date().getFullYear()} Kyndryl Delivery Hub · {bi("仅限授权人员访问", "Authorized Access Only")}
           </footer>
         </main>
 

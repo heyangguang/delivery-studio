@@ -27,9 +27,9 @@
   border-color: var(--brand-line);
 }
 .shf-mode-pill.patched {
-  color: #6d28d9;
-  background: rgba(124, 58, 237, 0.1);
-  border-color: rgba(124, 58, 237, 0.25);
+  color: #c52b16;
+  background: rgba(255, 70, 45, 0.1);
+  border-color: rgba(255, 70, 45, 0.25);
 }
 [data-theme="dark"] .shf-mode-pill.patched {
   color: #c4b5fd;
@@ -134,8 +134,8 @@
   padding: 0 5px;
   line-height: 16px;
   border-radius: 4px;
-  color: #6d28d9;
-  background: rgba(124, 58, 237, 0.12);
+  color: #c52b16;
+  background: rgba(255, 70, 45, 0.12);
 }
 [data-theme="dark"] .shf-patch-dot {
   color: #c4b5fd;
@@ -195,8 +195,8 @@
 }
 .shf-patch-banner {
   padding: 8px 16px;
-  background: rgba(124, 58, 237, 0.06);
-  border-bottom: 1px solid rgba(124, 58, 237, 0.16);
+  background: rgba(255, 70, 45, 0.06);
+  border-bottom: 1px solid rgba(255, 70, 45, 0.16);
   font-size: 12px;
   color: var(--ink-2);
   display: flex;
@@ -206,7 +206,7 @@
   flex-wrap: wrap;
 }
 .shf-patch-banner strong {
-  color: #6d28d9;
+  color: #c52b16;
 }
 [data-theme="dark"] .shf-patch-banner strong {
   color: #c4b5fd;

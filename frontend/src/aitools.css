@@ -172,7 +172,7 @@
   animation: ad-pop-in 0.25s var(--spring) both;
 }
 .tm-chip.think {
-  color: #7c3aed;
+  color: #ff462d;
   background: rgba(139, 92, 246, 0.1);
 }
 .tm-chip.web {
@@ -295,10 +295,10 @@
   color: #2563eb;
 }
 .tone-high .thk-slider-title {
-  color: #4338ca;
+  color: #c52b16;
 }
 .tone-max .thk-slider-title {
-  color: #6d28d9;
+  color: #c52b16;
 }
 .tone-ultra .thk-slider-title {
   color: #8b5cf6;
@@ -310,7 +310,7 @@ body[arco-theme="dark"] .tone-medium .thk-slider-title {
   color: #60a5fa;
 }
 body[arco-theme="dark"] .tone-high .thk-slider-title {
-  color: #818cf8;
+  color: #ff8270;
 }
 body[arco-theme="dark"] .tone-max .thk-slider-title {
   color: #a78bfa;
@@ -360,8 +360,8 @@ body[arco-theme="dark"] .thk-track {
     90deg,
     #38bdf8 0%,
     #2563eb 30%,
-    #4338ca 58%,
-    #6d28d9 80%,
+    #c52b16 58%,
+    #c52b16 80%,
     #9333ea 100%
   );
   clip-path: inset(0 calc((100% - 26px) * (1 - var(--p, 0))) 0 0 round 999px);
@@ -566,7 +566,7 @@ body[arco-theme="dark"] .thk-dot {
   box-shadow: var(--ring);
 }
 .tm-tog.think.on {
-  color: #6d28d9;
+  color: #c52b16;
   border-color: rgba(139, 92, 246, 0.22);
   background: rgba(139, 92, 246, 0.11);
 }

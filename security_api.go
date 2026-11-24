@@ -852,7 +852,7 @@ func (s *storeServer) handleSecurityExport(w http.ResponseWriter, r *http.Reques
 			"version":     1,
 			"metadata": map[string]any{
 				"timestamp": now(),
-				"tools":     []map[string]string{{"vendor": "Middleware Hub", "name": "Security Center"}},
+				"tools":     []map[string]string{{"vendor": "Kyndryl Delivery Hub", "name": "Security Center"}},
 			},
 			"components":      components,
 			"vulnerabilities": vulns,
@@ -892,7 +892,7 @@ func (s *storeServer) handleSecurityExport(w http.ResponseWriter, r *http.Reques
 				sb.WriteString("\n")
 			}
 		} else {
-			fmt.Fprintf(&sb, "# Middleware Hub 安全漏洞评估报告\n\n")
+			fmt.Fprintf(&sb, "# Kyndryl Delivery Hub 安全漏洞评估报告\n\n")
 			fmt.Fprintf(&sb, "- **扫描时间**：%s\n", rep.ScannedAt)
 			fmt.Fprintf(&sb, "- **漏洞库公告数**：%d 条（更新时间：%s）\n", rep.DBAdvisoryCount, firstNonEmptyStr(rep.DBUpdatedAt, "—"))
 			fmt.Fprintf(&sb, "- **盘点资产包 (SBOM)**：%d 个（软件库闭包 %d / 运行环境 %d / 生产集群 %d）\n",

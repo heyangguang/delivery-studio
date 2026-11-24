@@ -116,7 +116,7 @@ export function KindMark({ kind, size = 36 }: { kind: string; size?: number }) {
     );
   return (
     <svg className="nk" style={box} viewBox="0 0 40 40" aria-hidden>
-      <rect width="40" height="40" rx="11" fill="#5856d6" />
+      <rect width="40" height="40" rx="11" fill="#1d1c1a" />
       <path
         d="M15 14l-6 6 6 6M25 14l6 6-6 6M22 12l-4 16"
         fill="none"

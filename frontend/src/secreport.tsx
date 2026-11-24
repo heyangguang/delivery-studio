@@ -206,12 +206,12 @@ function emptyCustomTemplate(): SecReportTemplate {
     is_default: false,
     default_format: "docx",
     theme: "teal",
-    org_name: "Middleware Hub 安全运营中心",
+    org_name: "Kyndryl Delivery Hub 安全运营中心",
     title: "{scope}安全态势评估报告",
     subtitle: "SBOM 漏洞评估与合规审计报告",
     confidential: "内部受控 / Internal",
     header_text: "{org} · {scope}安全评估报告",
-    footer_text: "由 Middleware Hub 生成 · {date}",
+    footer_text: "由 Kyndryl Delivery Hub 生成 · {date}",
     conclusion_note:
       "本报告基于平台本地漏洞库与资产快照生成，用于安全审计与修复排期。",
     scope: "active",
@@ -666,7 +666,7 @@ export function SecReportTemplatesSection({
                   <label>{bi("组织 / 部门抬头", "Organization Header")}</label>
                   <Input
                     value={editing.org_name || ""}
-                    placeholder="Middleware Hub 安全运营中心"
+                    placeholder="Kyndryl Delivery Hub 安全运营中心"
                     onChange={(v) => setEditing({ ...editing, org_name: v })}
                   />
                 </div>

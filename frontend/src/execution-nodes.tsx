@@ -106,7 +106,7 @@ function Command({ title, children }: { title: string; children: string }) {
 }
 
 const serviceUnit = `[Unit]
-Description=Middleware Hub Execution Node
+Description=Kyndryl Delivery Hub Execution Node
 After=network-online.target
 Wants=network-online.target
 

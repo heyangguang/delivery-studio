@@ -1624,12 +1624,12 @@ func buildVersionHistory(f clusterFacts, rs reportSettings, user, docVersion, to
 		rows = append(rows, [4]string{
 			v,
 			day(j.Created),
-			firstNonEmptyStr(j.Owner, rs.Author, user, "Middleware Hub"),
+			firstNonEmptyStr(j.Owner, rs.Author, user, "Kyndryl Delivery Hub"),
 			tr(f.Lang, fmt.Sprintf("%s（%s）", jobTitleLang(j, f.Lang), jobOutcomeNameLang(j, f.Lang)), fmt.Sprintf("%s (%s)", jobTitleLang(j, f.Lang), jobOutcomeNameLang(j, f.Lang))),
 		})
 	}
 	if len(rows) == 0 {
-		rows = append(rows, [4]string{docVersion, today, firstNonEmptyStr(rs.Author, user, "Middleware Hub"), tr(f.Lang, "文档生成与基线归档", "Document generated and baselined")})
+		rows = append(rows, [4]string{docVersion, today, firstNonEmptyStr(rs.Author, user, "Kyndryl Delivery Hub"), tr(f.Lang, "文档生成与基线归档", "Document generated and baselined")})
 	}
 	rows = append(rows, [4]string{"", "", "", ""})
 	return rows
@@ -1680,7 +1680,7 @@ func (s *storeServer) docxOf(f clusterFacts, docs []*clusterDoc, user string, fr
 	today := time.Now().Format("2006-01-02")
 	docVersion := firstNonEmptyStr(rs.DocVersion, "V1.0")
 	project := firstNonEmptyStr(rs.fill(rs.Project, f.ID, title, appLabel), appLabel, f.ID)
-	author := firstNonEmptyStr(rs.Author, user, "Middleware Hub")
+	author := firstNonEmptyStr(rs.Author, user, "Kyndryl Delivery Hub")
 	reviewer := firstNonEmptyStr(rs.Reviewer, "—")
 	note := rs.fill(rs.Note, f.ID, title, appLabel)
 	headerTxt := rs.fill(rs.Header, f.ID, title, appLabel)

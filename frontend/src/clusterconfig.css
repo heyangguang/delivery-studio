@@ -304,9 +304,9 @@
   border: 1px solid var(--line);
 }
 .cx-origin-badge.is-embedded {
-  color: #6d28d9;
-  background: color-mix(in srgb, #7c3aed 8%, var(--surface));
-  border-color: color-mix(in srgb, #7c3aed 22%, var(--line));
+  color: #c52b16;
+  background: color-mix(in srgb, #ff462d 8%, var(--surface));
+  border-color: color-mix(in srgb, #ff462d 22%, var(--line));
 }
 .cx-origin-badge.is-split {
   color: var(--brand-ink);

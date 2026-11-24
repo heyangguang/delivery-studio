@@ -1091,11 +1091,11 @@ body[arco-theme="dark"] .ro-filter-chip.is-toggle.on em {
 }
 .ro-cat-pill.cat-backup {
   background: rgba(139, 92, 246, 0.12);
-  color: #6d28d9;
+  color: #c52b16;
 }
 .ro-cat-pill.cat-params {
-  background: rgba(79, 70, 229, 0.11);
-  color: #4338ca;
+  background: rgba(255, 70, 45, 0.11);
+  color: #c52b16;
 }
 .ro-cat-pill.cat-ha {
   background: rgba(20, 184, 166, 0.12);
@@ -1127,8 +1127,8 @@ body[arco-theme="dark"] .ro-cat-pill.cat-backup {
 }
 [data-theme="dark"] .ro-cat-pill.cat-params,
 body[arco-theme="dark"] .ro-cat-pill.cat-params {
-  background: rgba(129, 140, 248, 0.18);
-  color: #a5b4fc;
+  background: rgba(255, 118, 99, 0.18);
+  color: #ff9c8a;
 }
 [data-theme="dark"] .ro-cat-pill.cat-ha,
 body[arco-theme="dark"] .ro-cat-pill.cat-ha {

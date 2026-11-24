@@ -73,7 +73,7 @@ func newXlsxWorkbook(title, author string, theme docxTheme) *xlsxWorkbook {
 	}
 	return &xlsxWorkbook{
 		Title:  title,
-		Author: firstNonEmptyStr(author, "Middleware Hub"),
+		Author: firstNonEmptyStr(author, "Kyndryl Delivery Hub"),
 		Theme:  theme,
 		strIdx: make(map[string]int),
 	}

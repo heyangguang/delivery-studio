@@ -1416,10 +1416,10 @@ export function Spark({
             y2="1.5"
             gradientUnits="userSpaceOnUse"
           >
-            <stop offset="0" stopColor="#0ea5e9" />
-            <stop offset=".38" stopColor="#6366f1" />
-            <stop offset=".72" stopColor="#a855f7" />
-            <stop offset="1" stopColor="#ec4899" />
+            <stop offset="0" stopColor="#1F5E66" />
+            <stop offset=".38" stopColor="#FF462D" />
+            <stop offset=".74" stopColor="#F59E0B" />
+            <stop offset="1" stopColor="#E0341D" />
           </linearGradient>
         </defs>
       )}
@@ -1460,9 +1460,9 @@ export function AIEmblem({ size = 52 }: { size?: number }) {
           y2="48"
           gradientUnits="userSpaceOnUse"
         >
-          <stop offset="0" stopColor="#4338ca" />
-          <stop offset=".48" stopColor="#5b54ef" />
-          <stop offset="1" stopColor="#7c3aed" />
+          <stop offset="0" stopColor="#1D1C1A" />
+          <stop offset=".52" stopColor="#2C2522" />
+          <stop offset="1" stopColor="#46221B" />
         </linearGradient>
         <radialGradient
           id={`ae-cyan-${uid}`}
@@ -1472,9 +1472,9 @@ export function AIEmblem({ size = 52 }: { size?: number }) {
           gradientUnits="userSpaceOnUse"
           gradientTransform="translate(8.5 45.5) rotate(-42) scale(37 34)"
         >
-          <stop offset="0" stopColor="#38bdf8" stopOpacity=".66" />
-          <stop offset=".62" stopColor="#38bdf8" stopOpacity=".16" />
-          <stop offset="1" stopColor="#38bdf8" stopOpacity="0" />
+          <stop offset="0" stopColor="#4DB0BC" stopOpacity=".58" />
+          <stop offset=".62" stopColor="#1F5E66" stopOpacity=".18" />
+          <stop offset="1" stopColor="#1F5E66" stopOpacity="0" />
         </radialGradient>
         <radialGradient
           id={`ae-rose-${uid}`}
@@ -1482,11 +1482,11 @@ export function AIEmblem({ size = 52 }: { size?: number }) {
           cy="0"
           r="1"
           gradientUnits="userSpaceOnUse"
-          gradientTransform="translate(45.5 6.5) rotate(135) scale(36 33)"
+          gradientTransform="translate(45.5 6.5) rotate(135) scale(38 35)"
         >
-          <stop offset="0" stopColor="#f472b6" stopOpacity=".68" />
-          <stop offset=".52" stopColor="#c084fc" stopOpacity=".26" />
-          <stop offset="1" stopColor="#c084fc" stopOpacity="0" />
+          <stop offset="0" stopColor="#FF462D" stopOpacity=".85" />
+          <stop offset=".52" stopColor="#FF7A59" stopOpacity=".28" />
+          <stop offset="1" stopColor="#FF462D" stopOpacity="0" />
         </radialGradient>
         <linearGradient
           id={`ae-sheen-${uid}`}
@@ -1520,7 +1520,7 @@ export function AIEmblem({ size = 52 }: { size?: number }) {
           gradientUnits="userSpaceOnUse"
         >
           <stop offset="0" stopColor="#ffffff" />
-          <stop offset="1" stopColor="#eef2ff" />
+          <stop offset="1" stopColor="#fff3ef" />
         </linearGradient>
         {detail && (
           <>
@@ -1532,9 +1532,9 @@ export function AIEmblem({ size = 52 }: { size?: number }) {
               y2="26"
               gradientUnits="userSpaceOnUse"
             >
-              <stop offset="0" stopColor="#bae6fd" stopOpacity=".58" />
-              <stop offset=".48" stopColor="#ffffff" stopOpacity=".1" />
-              <stop offset="1" stopColor="#fbcfe8" stopOpacity=".46" />
+              <stop offset="0" stopColor="#72cbd6" stopOpacity=".58" />
+              <stop offset=".48" stopColor="#ffffff" stopOpacity=".12" />
+              <stop offset="1" stopColor="#ff9a85" stopOpacity=".52" />
             </linearGradient>
             <linearGradient
               id={`ae-core-${uid}`}
@@ -1544,8 +1544,8 @@ export function AIEmblem({ size = 52 }: { size?: number }) {
               y2="30.6"
               gradientUnits="userSpaceOnUse"
             >
-              <stop offset="0" stopColor="#4f46e5" stopOpacity=".3" />
-              <stop offset="1" stopColor="#ec4899" stopOpacity=".28" />
+              <stop offset="0" stopColor="#ff462d" stopOpacity=".32" />
+              <stop offset="1" stopColor="#29707a" stopOpacity=".28" />
             </linearGradient>
           </>
         )}
@@ -3182,8 +3182,8 @@ function ChatWindow({
                       )
                   : offline
                     ? bi(
-                        "暂未连上 Middleware Hub 后端服务",
-                        "Middleware Hub backend unavailable",
+                        "暂未连上 Kyndryl Delivery Hub 后端服务",
+                        "Kyndryl Delivery Hub backend unavailable",
                       )
                     : busy
                       ? bi(
@@ -3577,8 +3577,8 @@ function ChatWindow({
 
 const getHelloPortal = () =>
   bi(
-    "我是 Middleware Hub 全站助手。可以随时向我咨询执行节点接入、TLS/CA 证书、SSH 免密与目标 Agent 区别、部署规划，或者直接粘贴终端报错让我帮你定位修复命令。",
-    "I'm your Middleware Hub portal assistant. Ask about execution node setup, TLS/CA certs, SSH vs. Target Agent, deployment planning, or paste terminal errors for instant troubleshooting.",
+    "我是 Kyndryl Delivery Hub 全站助手。可以随时向我咨询执行节点接入、TLS/CA 证书、SSH 免密与目标 Agent 区别、部署规划，或者直接粘贴终端报错让我帮你定位修复命令。",
+    "I'm your Kyndryl Delivery Hub portal assistant. Ask about execution node setup, TLS/CA certs, SSH vs. Target Agent, deployment planning, or paste terminal errors for instant troubleshooting.",
   );
 const getSuggestPortal = () => [
   bi(
@@ -3922,12 +3922,12 @@ export function classifyChatError(
       kind: "hub_network",
       tone: "warn",
       title: bi(
-        "无法连接 Middleware Hub 平台后端",
-        "Cannot reach Middleware Hub backend",
+        "无法连接 Kyndryl Delivery Hub 平台后端",
+        "Cannot reach Kyndryl Delivery Hub backend",
       ),
       summary: bi(
-        "浏览器与 Middleware Hub 平台服务之间的连接断开，请求未能送达或未收到响应。",
-        "The browser lost connection to the Middleware Hub server before the request completed.",
+        "浏览器与 Kyndryl Delivery Hub 平台服务之间的连接断开，请求未能送达或未收到响应。",
+        "The browser lost connection to the Kyndryl Delivery Hub server before the request completed.",
       ),
       hint: bi(
         "平台服务可能正在重启，或当前本地网络波动；等待服务恢复后点击「重试」即可继续。",
@@ -3943,12 +3943,12 @@ export function classifyChatError(
       kind: "stream_interrupted",
       tone: "warn",
       title: bi(
-        "与 Middleware Hub 的流式连接意外中断",
-        "Streaming connection to Middleware Hub interrupted",
+        "与 Kyndryl Delivery Hub 的流式连接意外中断",
+        "Streaming connection to Kyndryl Delivery Hub interrupted",
       ),
       summary: bi(
-        "回答尚未完成时，浏览器与 Middleware Hub 后端的连接被中途切断。",
-        "The streaming connection to Middleware Hub was cut off before the reply finished.",
+        "回答尚未完成时，浏览器与 Kyndryl Delivery Hub 后端的连接被中途切断。",
+        "The streaming connection to Kyndryl Delivery Hub was cut off before the reply finished.",
       ),
       hint: bi(
         "平台重启、反向代理超时或网络闪断都会导致流式中断；请点击「重试」重新生成。",
@@ -4040,8 +4040,8 @@ export function classifyChatError(
         : bi("AI 模型网关连接失败", "Failed to reach AI model gateway"),
       summary: clean,
       hint: bi(
-        "Middleware Hub 后端无法连通配置的模型网关（并非本平台宕机）；请检查网关地址、端口与网络连通性，或切换其他可用模型后重试。",
-        "Middleware Hub could not reach the configured model gateway; check the gateway URL/network in Settings → AI or switch to another model.",
+        "Kyndryl Delivery Hub 后端无法连通配置的模型网关（并非本平台宕机）；请检查网关地址、端口与网络连通性，或切换其他可用模型后重试。",
+        "Kyndryl Delivery Hub could not reach the configured model gateway; check the gateway URL/network in Settings → AI or switch to another model.",
       ),
       showSettings: true,
     };
@@ -4241,8 +4241,8 @@ export async function streamChat(
     const raw = (e as Error)?.message || String(e);
     const errObj = new Error(
       bi(
-        "无法连接到 Middleware Hub 平台后端，请求未发出或连接中断",
-        "Unable to reach Middleware Hub server; request failed or connection dropped",
+        "无法连接到 Kyndryl Delivery Hub 平台后端，请求未发出或连接中断",
+        "Unable to reach Kyndryl Delivery Hub server; request failed or connection dropped",
       ),
     ) as ChatStreamError;
     errObj.kind = "hub_network";
@@ -4257,8 +4257,8 @@ export async function streamChat(
       d.error ||
         (proxyDown
           ? bi(
-              `Middleware Hub 后端服务暂时不可用（HTTP ${r.status}），可能正在重启`,
-              `Middleware Hub server is temporarily unavailable (HTTP ${r.status})`,
+              `Kyndryl Delivery Hub 后端服务暂时不可用（HTTP ${r.status}），可能正在重启`,
+              `Kyndryl Delivery Hub server is temporarily unavailable (HTTP ${r.status})`,
             )
           : bi(`请求失败（HTTP ${r.status}）`, `Request failed (HTTP ${r.status})`)),
     ) as ChatStreamError;
@@ -4431,8 +4431,8 @@ export async function streamChat(
     if (e instanceof TypeError || RAW_BROWSER_NET_RE.test(raw.trim()) || /network|stream|aborted|reset|eof/i.test(raw)) {
       const errObj = new Error(
         bi(
-          "与 Middleware Hub 平台后端的流式连接意外中断，未收到完整回复",
-          "Streaming connection to Middleware Hub was interrupted before the reply completed",
+          "与 Kyndryl Delivery Hub 平台后端的流式连接意外中断，未收到完整回复",
+          "Streaming connection to Kyndryl Delivery Hub was interrupted before the reply completed",
         ),
       ) as ChatStreamError;
       errObj.kind = "stream_interrupted";
@@ -4452,8 +4452,8 @@ export async function streamChat(
   ) {
     const errObj = new Error(
       bi(
-        "与 Middleware Hub 平台后端的连接提前关闭，未收到回复内容",
-        "Connection to Middleware Hub closed unexpectedly with no reply",
+        "与 Kyndryl Delivery Hub 平台后端的连接提前关闭，未收到回复内容",
+        "Connection to Kyndryl Delivery Hub closed unexpectedly with no reply",
       ),
     ) as ChatStreamError;
     errObj.kind = "stream_interrupted";

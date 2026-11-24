@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.294-dev"
+	version            = "1.0.295-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,20 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.295-dev",
+		Date:    "2026-11-24",
+		Title:   "全新升级 Kyndryl Delivery Hub 品牌、官方 Warm Red 视觉体系与几何 K 标志",
+		TitleEn: "Rebrand to Kyndryl Delivery Hub with Warm Red / Charcoal / Warm Stone visual system",
+		Highlights: []string{
+			"平台全站正式升级为 Kyndryl Delivery Hub（Kyndryl 交付中心），全面更新顶栏官方字标锁组（kyndryl | Delivery Hub）、几何 K 暖红徽标、浏览器 Favicon、登录页、AI 助手人设与安全/交付文档导出模板",
+			"全面重构明暗双模式视觉体系为 Kyndryl Shidoka 风格：Warm Stone 暖石画布、Warm Charcoal 权威主按钮、Kyndryl Warm Red (#FF462D) 品牌高亮与 Deep Spruce 深云杉青自动化遥测色，彻底清理全站残留靛紫色",
+		},
+		HighlightsEn: []string{
+			"Rebranded platform to Kyndryl Delivery Hub across topbar lockup (kyndryl | Delivery Hub), geometric Warm Red K mark, favicon, login experience, AI assistant personas, and exported compliance/delivery reports",
+			"Rebuilt light and dark design tokens in Kyndryl Shidoka style (Warm Stone surfaces, Warm Charcoal primary CTAs, Kyndryl Warm Red #FF462D brand accents, Deep Spruce telemetry) and eliminated legacy indigo/purple overrides",
+		},
+	},
 	{
 		Version: "1.0.294-dev",
 		Date:    "2026-11-24",
@@ -809,7 +823,7 @@ var platformReleaseNotes = []releaseNote{
 }
 
 func usage() {
-	fmt.Fprint(os.Stderr, `Middleware Hub — 中间件交付平台
+	fmt.Fprint(os.Stderr, `Kyndryl Delivery Hub — 企业级基础设施与中间件交付中心
 
   middleware-hub store serve --config 配置.json          启动共享服务
   middleware-hub store supervise --config 配置.json      以零中断热重启网关模式启动服务（Windows / Linux 通用）

@@ -985,7 +985,7 @@ export function CostView() {
                       {
                         id: "fresh",
                         label: bi("输入（未缓存）", "Input (uncached)"),
-                        color: "#6250d6",
+                        color: "#1f5e66",
                       },
                       {
                         id: "cached",

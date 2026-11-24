@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.289-dev"
+	version            = "1.0.290-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,20 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.290-dev",
+		Date:    "2026-11-24",
+		Title:   "能力库移除多余双侧栏并统一为标准 304px 左右分栏",
+		TitleEn: "Unified Capabilities Workspace into Single 304px Left Rail",
+		Highlights: []string{
+			"移除能力库（知识库/技能/MCP）最左侧多余的 74px 竖向图标窄栏，彻底消除双侧栏割裂感，左侧边栏严格对齐全站 304px 基准线并为主画布释放 +74px 宽度",
+			"将「知识库 / 技能 / MCP」整合为侧栏顶部紧凑的横向图标下划线标签页，三模块切换时标题、标签、搜索框与范围切换条坐标完全固定无跳动",
+		},
+		HighlightsEn: []string{
+			"Removed the extra 74px vertical icon rail from Capabilities (KB/Skills/MCP) so the workspace aligns pixel-for-pixel with the platform's unified 304px left-rail layout and gives +74px more canvas width",
+			"Integrated KB, Skills, and MCP as a crisp inline icon-underline tab bar inside the rail header with zero vertical shift when switching tabs",
+		},
+	},
 	{
 		Version: "1.0.289-dev",
 		Date:    "2026-11-24",

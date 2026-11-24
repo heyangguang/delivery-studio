@@ -72,7 +72,13 @@ const host = (u: string) => {
   }
 };
 
-export function MCPPage({ selected }: { selected?: string }) {
+export function MCPPage({
+  selected,
+  studioNav,
+}: {
+  selected?: string;
+  studioNav?: React.ReactNode;
+}) {
   useLang();
   const narrow = useMedia("(max-width: 900px)");
   const admin = can("ai.settings");
@@ -243,7 +249,7 @@ export function MCPPage({ selected }: { selected?: string }) {
         <aside className="md-list" aria-label={bi("MCP 服务", "MCP servers")}>
           <div className="list-head">
             <div className="list-title">
-              <h1>{bi("MCP 服务", "MCP servers")}</h1>
+              <h1>{studioNav ? bi("能力库", "Capabilities") : bi("MCP 服务", "MCP servers")}</h1>
               {canAdd && (
                 <Button
                   type="primary"
@@ -255,6 +261,7 @@ export function MCPPage({ selected }: { selected?: string }) {
                 </Button>
               )}
             </div>
+            {studioNav}
             <Input
               prefix={<IconSearch />}
               allowClear

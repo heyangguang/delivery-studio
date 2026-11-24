@@ -266,7 +266,13 @@ const docBase = (scope: Scope) => (scope === "mine" ? "/api/me/kb" : "/api/kb");
 const docKey = (scope: Scope, id: string) =>
   scope === "mine" ? `my-${id}` : id;
 
-export function KnowledgePage({ selected }: { selected?: string }) {
+export function KnowledgePage({
+  selected,
+  studioNav,
+}: {
+  selected?: string;
+  studioNav?: React.ReactNode;
+}) {
   useLang();
   const narrow = useMedia("(max-width: 900px)");
   const initFiles = cached<{ nodes: FileNode[]; usage: Usage }>(
@@ -370,7 +376,7 @@ export function KnowledgePage({ selected }: { selected?: string }) {
         <aside className="md-list kb-side" aria-label={bi("知识库", "Knowledge base")}>
           <div className="list-head">
             <div className="list-title">
-              <h1>{bi("知识库", "Knowledge base")}</h1>
+              <h1>{studioNav ? bi("能力库", "Capabilities") : bi("知识库", "Knowledge base")}</h1>
               {scope === "mine" ? null : home?.can_manage ? (
                 <Button
                   type="primary"
@@ -391,6 +397,7 @@ export function KnowledgePage({ selected }: { selected?: string }) {
                 </Button>
               ) : null}
             </div>
+            {studioNav}
             <Input
               prefix={<IconSearch />}
               allowClear

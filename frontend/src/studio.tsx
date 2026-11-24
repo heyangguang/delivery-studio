@@ -113,49 +113,43 @@ export function StudioPage({
       : []),
   ];
 
-  const showRail = modules.length > 1;
+  const showTabs = modules.length > 1;
+  const studioNav = showTabs ? (
+    <nav
+      className="studio-tabs"
+      aria-label={bi("能力库分类", "Capabilities modules")}
+    >
+      {modules.map((m) => {
+        const on = active === m.key;
+        return (
+          <Tooltip
+            key={m.key}
+            position="bottom"
+            content={m.tip}
+            mini
+            triggerProps={{ mouseEnterDelay: 400 }}
+          >
+            <a
+              href={href({ name: m.key })}
+              className={`studio-tab tone-${m.tone}${on ? " on" : ""}`}
+              aria-current={on ? "page" : undefined}
+            >
+              <span className="studio-tab-ic" aria-hidden>
+                {m.icon}
+              </span>
+              <span className="studio-tab-lbl">{m.label}</span>
+            </a>
+          </Tooltip>
+        );
+      })}
+    </nav>
+  ) : null;
 
-  return (
-    <div className={`studio-shell${showRail ? "" : " is-single"}`}>
-      {showRail && (
-        <nav
-          className="studio-rail"
-          aria-label={bi("能力库导航", "Studio navigation")}
-        >
-          {modules.map((m) => {
-            const on = active === m.key;
-            return (
-              <Tooltip
-                key={m.key}
-                position="right"
-                content={m.tip}
-                mini
-                triggerProps={{ mouseEnterDelay: 350 }}
-              >
-                <a
-                  href={href({ name: m.key })}
-                  className={`studio-nav-item tone-${m.tone}${on ? " on" : ""}`}
-                  aria-current={on ? "page" : undefined}
-                >
-                  <span className="studio-nav-ic" aria-hidden>
-                    {m.icon}
-                  </span>
-                  <span className="studio-nav-lbl">{m.label}</span>
-                </a>
-              </Tooltip>
-            );
-          })}
-        </nav>
-      )}
-      <div className="studio-body">
-        {active === "kb" ? (
-          <KnowledgePage selected={selected} />
-        ) : active === "skills" ? (
-          <SkillsPage selected={selected} />
-        ) : (
-          <MCPPage selected={selected} />
-        )}
-      </div>
-    </div>
+  return active === "kb" ? (
+    <KnowledgePage selected={selected} studioNav={studioNav} />
+  ) : active === "skills" ? (
+    <SkillsPage selected={selected} studioNav={studioNav} />
+  ) : (
+    <MCPPage selected={selected} studioNav={studioNav} />
   );
 }

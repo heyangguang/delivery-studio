@@ -178,7 +178,13 @@ function uniqueForkName(base: string, isTaken: (n: string) => boolean): string {
   return `my-skill-${Date.now().toString(36).slice(-5)}`;
 }
 
-export function SkillsPage({ selected }: { selected?: string }) {
+export function SkillsPage({
+  selected,
+  studioNav,
+}: {
+  selected?: string;
+  studioNav?: React.ReactNode;
+}) {
   const lang = useLang();
   const narrow = useMedia("(max-width: 900px)");
   const admin = can("ai.settings");
@@ -481,7 +487,7 @@ export function SkillsPage({ selected }: { selected?: string }) {
         <aside className="md-list" aria-label={bi("技能", "Skills")}>
           <div className="list-head">
             <div className="list-title">
-              <h1>{bi("技能", "Skills")}</h1>
+              <h1>{studioNav ? bi("能力库", "Capabilities") : bi("技能", "Skills")}</h1>
               <Button
                 type="primary"
                 size="small"
@@ -491,6 +497,7 @@ export function SkillsPage({ selected }: { selected?: string }) {
                 {bi("新建", "New")}
               </Button>
             </div>
+            {studioNav}
             <Input
               prefix={<IconSearch />}
               allowClear

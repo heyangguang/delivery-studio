@@ -2042,7 +2042,7 @@ body[arco-theme="dark"] .sec-sev.med {
 .sec-table-clusters {
   table-layout: fixed;
   width: 100%;
-  min-width: 800px;
+  min-width: 860px;
 }
 
 .sec-table-clusters td {
@@ -2071,6 +2071,7 @@ body[arco-theme="dark"] .sec-sev.med {
 
 .sec-table-clusters td:last-child,
 .sec-table-clusters th:last-child {
+  padding-left: 6px;
   padding-right: 16px;
 }
 
@@ -2089,7 +2090,7 @@ body[arco-theme="dark"] .sec-sev.med {
   align-items: center;
   justify-content: flex-end;
   vertical-align: middle;
-  gap: 8px;
+  gap: 6px;
   max-width: 100%;
   white-space: nowrap;
 }
@@ -2100,7 +2101,7 @@ body[arco-theme="dark"] .sec-sev.med {
   justify-content: center;
   gap: 4px;
   height: 26px;
-  padding: 0 9px;
+  padding: 0 8px;
   border-radius: 6px;
   border: 1px solid color-mix(in srgb, var(--brand) 24%, transparent);
   background: var(--brand-soft);
@@ -2136,7 +2137,7 @@ body[arco-theme="dark"] .sec-sev.med {
   align-items: center;
   justify-content: center;
   height: 26px;
-  padding: 0 6px;
+  padding: 0 5px;
   border: 0;
   border-radius: 6px;
   background: transparent;
@@ -2155,7 +2156,7 @@ body[arco-theme="dark"] .sec-sev.med {
 }
 
 .sec-cl-act-link:last-child {
-  margin-right: -6px;
+  margin-right: -5px;
 }
 
 .sec-cl-act-link:hover {

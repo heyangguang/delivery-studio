@@ -3610,11 +3610,11 @@ export function SecurityPage({
               <div className="sec-table-scroll">
               <table className="sec-table sec-table-clusters">
                 <colgroup>
-                  <col style={{ width: "22%" }} />
+                  <col style={{ width: "21%" }} />
                   <col style={{ width: "14%" }} />
-                  <col style={{ width: "20%" }} />
+                  <col style={{ width: "19%" }} />
                   <col style={{ width: "18%" }} />
-                  <col style={{ width: "26%" }} />
+                  <col style={{ width: "28%" }} />
                 </colgroup>
                 <thead>
                   <tr>

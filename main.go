@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.286-dev"
+	version            = "1.0.287-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,18 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.287-dev",
+		Date:    "2026-11-24",
+		Title:   "集群风险操作列 1280px 窄屏列宽防裁切优化",
+		TitleEn: "Cluster Risk Action Column Width Safeguard at 1280px",
+		Highlights: []string{
+			"将集群风险表操作列比例调整至 28%（总表 min-width 860px）并微调操作项内边距，确保 1280px 笔记本宽度下「修复演练」胶囊左边框完整呈现无任何裁切",
+		},
+		HighlightsEn: []string{
+			"Adjusted Cluster Risk action column share to 28% (table min-width 860px) and tightened inner gaps so the Rehearse pill renders completely unclipped at 1280px",
+		},
+	},
 	{
 		Version: "1.0.286-dev",
 		Date:    "2026-11-24",

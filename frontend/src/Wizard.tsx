@@ -2843,6 +2843,9 @@ function DeliveryForm({
                   host={h}
                   index={i}
                   contract={hostContract}
+                  hasError={Boolean(
+                    rowErr && /存储|数据盘|目录|空间|storage|disk|dir|free/i.test(rowErr),
+                  )}
                   onChange={(v) => setHost(i, v)}
                 />
                 {rowErr && (

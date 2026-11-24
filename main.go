@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.306-dev"
+	version            = "1.0.307-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,22 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.307-dev",
+		Date:    "2026-11-24",
+		Title:   "重构部署向导机器存储卡片与全流程表单间距层级",
+		TitleEn: "Redesigned Delivery Wizard Host Storage Cards & Unified Form Spacing",
+		Highlights: []string{
+			"彻底修复部署向导「主机与执行通道」机器卡片因 wizard.css 与 platform.css 冲突导致的 0px 粘连双边框与 4px 贴边挤压问题：改为 12px 独立圆角白瓷卡片与 14px 16px 充裕内边距，表头与输入框 0px 精准列对齐",
+			"将每台机器默认展开的冗长存储参数升级为单行可折叠摘要条（展示存储方式、路径与自定义标记，仅存储报错或点击「调整参数」时展开），展开后采用三列均衡内凹面板（minmax(185px, 1fr)）消除单行落单",
+			"全面排查并统一部署向导全部步骤的相似列表区块：角色与拓扑放置（.place-row）、平台自动加入（.auto）、关键参数（.param）与入口附加项（.addon）均升级为统一间距的独立白瓷卡片，并优化校验报错态为克制的左侧红竖线提示",
+		},
+		HighlightsEn: []string{
+			"Fixed the CSS collision on Wizard host rows that caused zero-gap glued borders and cramped 4px padding — upgraded to cleanly separated 12px-gap rounded porcelain host cards with exact column header alignment",
+			"Converted verbose per-host storage parameters into a sleek collapsible one-line summary strip (expanding into a balanced 3-column recessed drawer on click or storage validation error)",
+			"Unified spacing, padding, and calm error-bar accents across all sibling Wizard sections (Roles & Placement, Auto-Added Components, Key Parameters, and Access Addons)",
+		},
+	},
 	{
 		Version: "1.0.306-dev",
 		Date:    "2026-11-24",

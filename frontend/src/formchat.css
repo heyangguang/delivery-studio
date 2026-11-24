@@ -462,13 +462,14 @@ body[arco-theme="dark"] .fc-orb {
   pointer-events: none;
 }
 .host-row[data-ai-on] {
-  border-radius: var(--r-sm);
-  background: linear-gradient(90deg, var(--kyndryl-soft), transparent 65%);
+  border-radius: 12px;
+  border-color: color-mix(in srgb, var(--kyndryl) 35%, var(--line-strong));
+  background: linear-gradient(90deg, var(--kyndryl-soft), var(--surface) 42%);
 }
 .host-row[data-ai-on]::before {
-  left: 0;
-  top: 4px;
-  bottom: 4px;
+  left: -1px;
+  top: 10px;
+  bottom: 10px;
 }
 /* the moment it is written: crisp Leica-red + sapphire optical sweep, then settles cleanly */
 [data-ai][data-ai-flash] {

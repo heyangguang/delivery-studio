@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.282-dev"
+	version            = "1.0.283-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,18 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.283-dev",
+		Date:    "2026-11-24",
+		Title:   "修复集群配置页切换组件子标签时强制回顶跳动",
+		TitleEn: "Preserve scroll position when switching inner Config sub-section tabs",
+		Highlights: []string{
+			"从集群详情滚动重置依赖中移除配置子分区（resolvedSection），在配置页切换 PostgreSQL / Patroni / etcd / 外部负载均衡等子标签时不再强制 scrollTo(0)，彻底消除多参数页切少参数页时的整体跳动",
+		},
+		HighlightsEn: []string{
+			"Removed resolvedSection from Cluster detail's scroll-to-top effect so switching inner Config tabs (PostgreSQL, Patroni, etcd, External LB, etc.) preserves exact scroll position with zero vertical jump",
+		},
+	},
 	{
 		Version: "1.0.282-dev",
 		Date:    "2026-11-24",

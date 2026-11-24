@@ -431,7 +431,9 @@ export function ClusterDetail({
   useEffect(() => {
     prevTabIdx.current = curTabIdx;
   }, [curTabIdx]);
-  // keep the detail pane at the top when moving between tabs and plans
+  // Keep the detail pane at the top when switching cluster tabs, plans, docs, or rehearsals,
+  // but preserve scroll position when switching inner Config sub-sections (`resolvedSection`)
+  // so clicking between long/short component tabs never yanks the tab bar away from the pointer.
   useLayoutEffect(() => {
     document.querySelector(".md-detail")?.scrollTo({ top: 0 });
   }, [
@@ -440,7 +442,6 @@ export function ClusterDetail({
     resolvedDoc,
     resolvedRehearsal,
     resolvedSource,
-    resolvedSection,
     c.id,
   ]);
 

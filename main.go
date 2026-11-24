@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.304-dev"
+	version            = "1.0.305-dev"
 	currentReleaseDate = "2026-11-24"
 )
 
@@ -65,6 +65,20 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.305-dev",
+		Date:    "2026-11-24",
+		Title:   "优化 AI 提问选择卡片图标徽章与交互细节",
+		TitleEn: "Refined AI Question Card Badge & Controls",
+		Highlights: []string{
+			"将 AI 提问卡片（AskCard）左侧粗糙的泥色渐变问号方块替换为精雕徕卡暖红微光星标徽章（单题）与等宽步骤序号微标（多题），彻底告别生硬问号底块",
+			"同步统一提问卡片自定义回答发送按钮（.ad-ask-go）与 AI 填表浮标（.fc-cursor-dot / .fc-cursor-tag）为白瓷曜石与徕卡暖红体系，并修复深色模式下已选勾选图标对比度",
+		},
+		HighlightsEn: []string{
+			"Replaced the legacy gradient question-mark square on AI AskCard headers with a refined Leica warm-red Spark badge (single question) and monospace step badge (multi-question)",
+			"Aligned the AskCard custom-reply send button and AI form-fill cursor tags with the Swiss Leica obsidian/red palette and fixed Dark Mode checkmark contrast",
+		},
+	},
 	{
 		Version: "1.0.304-dev",
 		Date:    "2026-11-24",

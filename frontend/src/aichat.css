@@ -2202,10 +2202,11 @@
   flex-direction: column;
   gap: 14px;
   margin: 10px 0 4px;
-  padding: 14px;
-  border: 1px solid var(--line);
-  border-radius: var(--r-lg);
+  padding: 15px 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
   background: var(--surface);
+  box-shadow: var(--shadow-sm);
   animation: ad-ask-in 0.35s var(--ease-out) backwards;
 }
 .ad-ask fieldset {
@@ -2217,35 +2218,59 @@
 .ad-ask legend {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 9px;
   float: left;
   width: 100%;
-  margin: 0 0 10px;
+  margin: 0 0 11px;
   padding: 0;
   color: var(--ink);
   font-size: 14px;
   font-weight: 600;
-  line-height: 1.5;
+  line-height: 1.45;
 }
 .ad-ask legend + * {
   clear: both;
 }
+.ad-ask-q {
+  min-width: 0;
+}
 .ad-ask legend small {
+  margin-left: auto;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
   color: var(--mute);
-  font-size: 12px;
-  font-weight: 400;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
 }
 .ad-ask-n {
-  display: grid;
+  display: inline-grid;
   place-items: center;
   flex: none;
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   border-radius: 7px;
-  color: #fff;
-  font-size: 11.5px;
-  font-weight: 700;
-  background: var(--ai-rb-soft);
+}
+.ad-ask-n.is-spark {
+  background: var(--kyndryl-soft);
+  border: 1px solid color-mix(in srgb, var(--kyndryl) 24%, transparent);
+}
+.ad-ask-n.is-num {
+  background: var(--surface-2);
+  border: 1px solid var(--line-strong);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 650;
+}
+body[arco-theme="dark"] .ad-ask-n.is-spark {
+  background: rgba(255, 85, 62, 0.14);
+  border-color: rgba(255, 85, 62, 0.28);
+}
+.ad-ask.done .ad-ask-n {
+  opacity: 0.6;
 }
 .ad-ask-opts {
   display: grid;
@@ -2297,7 +2322,7 @@
   margin-top: 1px;
   border: 1.5px solid var(--line-strong);
   border-radius: 50%;
-  color: #fff;
+  color: var(--on-brand);
   font-size: 11px;
   transition:
     background 0.15s,
@@ -2395,13 +2420,23 @@
   display: grid;
   place-items: center;
   flex: none;
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   border: 0;
   border-radius: 50%;
-  color: #fff;
-  background: var(--ai-rb-soft);
+  color: var(--on-brand);
+  background: var(--brand);
+  box-shadow: 0 1px 4px rgba(11, 13, 18, 0.18);
   cursor: pointer;
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s var(--spring);
+}
+.ad-ask-go:hover {
+  opacity: 0.9;
+}
+.ad-ask-go:active {
+  transform: scale(0.95);
 }
 .ad-ask-acts {
   display: flex;

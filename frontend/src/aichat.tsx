@@ -4665,10 +4665,17 @@ export function AskCard({
       {ask.questions.map((q, qi) => (
         <fieldset key={qi} disabled={!live}>
           <legend>
-            <span className="ad-ask-n" aria-hidden>
-              {ask.questions.length > 1 ? qi + 1 : "?"}
+            <span
+              className={`ad-ask-n ${ask.questions.length > 1 ? "is-num" : "is-spark"}`}
+              aria-hidden
+            >
+              {ask.questions.length > 1 ? (
+                qi + 1
+              ) : (
+                <Spark size={12} rainbow />
+              )}
             </span>
-            {q.question}
+            <span className="ad-ask-q">{q.question}</span>
             {q.multi && <small>{bi("可多选", "Multi-select")}</small>}
           </legend>
           {(q.options || []).length > 0 && (

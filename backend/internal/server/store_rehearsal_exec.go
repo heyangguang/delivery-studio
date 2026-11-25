@@ -701,6 +701,121 @@ func (s *storeServer) handleClusterAutomation(w http.ResponseWriter, r *http.Req
 	}
 }
 
+func revokeTargetAgent(d *executionDB, a *targetAgent) {
+	a.Desired = "revoked"
+	a.EnrollmentHash = ""
+	if a.Mode == "direct" {
+		if a.TokenHash == "" {
+			a.Applied = "revoked"
+			a.Message = "直连 Agent 接入已取消（尚未注册）"
+		} else {
+			a.Message = "已撤销该目标机直连 Agent 授权"
+		}
+		return
+	}
+	a.Applied = ""
+	a.Message = "等待目标 Agent 移除托管公钥；现存会话需现场核实"
+	if a.TokenHash == "" {
+		a.Applied = "revoked"
+		a.Message = "接入配置已取消，目标尚未注册，未写入托管公钥"
+	}
+	if d != nil && a.Node != "" && a.Job != "" {
+		invalidateExecutionPreparations(d, a.Node, a.Job)
+	}
+}
+
+func (s *storeServer) handleGlobalExecutionAgents(w http.ResponseWriter, r *http.Request, session storeSession) {
+	executionMu.Lock()
+	defer executionMu.Unlock()
+	d, err := s.readExecutions()
+	if err != nil {
+		s.fail(w, 500, err.Error())
+		return
+	}
+	lang := reqLang(r)
+	switch r.Method {
+	case "GET":
+		out := make([]automationAgentView, 0, len(d.Agents))
+		for _, a := range d.Agents {
+			pub := localizeTargetAgent(lang, publicTargetAgent(a))
+			out = append(out, automationAgentView{
+				targetAgent: pub,
+				Online:      targetAgentOnline(a),
+			})
+		}
+		sort.Slice(out, func(i, j int) bool {
+			iAct := out[i].Desired == "active"
+			jAct := out[j].Desired == "active"
+			if iAct != jAct {
+				return iAct
+			}
+			if out[i].Online != out[j].Online {
+				return out[i].Online
+			}
+			if out[i].Cluster != out[j].Cluster {
+				return out[i].Cluster < out[j].Cluster
+			}
+			return out[i].Created > out[j].Created
+		})
+		s.writeJSON(w, 200, out)
+	case "PATCH":
+		var req struct {
+			ID            string `json:"id"`
+			Action        string `json:"action"` // update | revoke
+			AllowMutating *bool  `json:"allow_mutating"`
+		}
+		if decodeBody(w, r, 4096, &req) != nil || strings.TrimSpace(req.ID) == "" {
+			s.fail(w, 400, "请求参数无效")
+			return
+		}
+		a, ok := d.Agents[req.ID]
+		if !ok {
+			s.fail(w, 404, "目标 Agent 不存在")
+			return
+		}
+		action := strings.TrimSpace(req.Action)
+		switch {
+		case action == "revoke":
+			if a.Mode != "direct" {
+				for _, run := range d.Runs {
+					if run.Node == a.Node && run.Cluster == a.Cluster && activeExecution(run) {
+						s.fail(w, 409, "该集群仍有执行批次，请先暂停并处理现场任务")
+						return
+					}
+				}
+			}
+			revokeTargetAgent(&d, &a)
+		case (action == "" || action == "update") && req.AllowMutating != nil:
+			a.AllowMutating = *req.AllowMutating
+		default:
+			s.fail(w, 400, "未指定有效的 Agent 更新操作")
+			return
+		}
+		d.Agents[a.ID] = a
+		if err := s.saveExecutions(d); err != nil {
+			s.fail(w, 500, "保存 Agent 状态失败")
+			return
+		}
+		if action == "revoke" {
+			s.auditReq(r, "execution-agent-revoke", session.User, fmt.Sprintf("%s %s (%s)", a.Cluster, a.Host, a.IP))
+			pub := localizeTargetAgent(lang, publicTargetAgent(a))
+			s.writeJSON(w, 200, automationAgentView{
+				targetAgent: pub,
+				Online:      false,
+			})
+			return
+		}
+		s.auditReq(r, "execution-agent-update", session.User, fmt.Sprintf("%s %s allow_mutating=%v", a.Cluster, a.Host, a.AllowMutating))
+		pub := localizeTargetAgent(lang, publicTargetAgent(a))
+		s.writeJSON(w, 200, automationAgentView{
+			targetAgent: pub,
+			Online:      targetAgentOnline(a),
+		})
+	default:
+		s.fail(w, 405, "不支持的请求方式")
+	}
+}
+
 func (s *storeServer) handleClusterDirectAgents(w http.ResponseWriter, r *http.Request, session storeSession, f clusterFacts) {
 	executionMu.Lock()
 	defer executionMu.Unlock()
@@ -816,21 +931,14 @@ func (s *storeServer) handleClusterDirectAgents(w http.ResponseWriter, r *http.R
 			return
 		}
 		if req.Action == "revoke" {
-			a.Desired = "revoked"
-			a.EnrollmentHash = ""
-			if a.TokenHash == "" {
-				a.Applied = "revoked"
-				a.Message = "直连 Agent 接入已取消（尚未注册）"
-			} else {
-				a.Message = "已撤销该目标机直连 Agent 授权"
-			}
+			revokeTargetAgent(&d, &a)
 			d.Agents[a.ID] = a
 			if err := s.saveExecutions(d); err != nil {
 				s.fail(w, 500, "保存失败")
 				return
 			}
 			s.auditReq(r, "target-agent-revoke", session.User, a.ID+" "+f.ID)
-			s.writeJSON(w, 200, automationAgentView{targetAgent: publicTargetAgent(a), Online: false})
+			s.writeJSON(w, 200, automationAgentView{targetAgent: localizeTargetAgent(wLang(w), publicTargetAgent(a)), Online: false})
 			return
 		}
 		if req.AllowMutating != nil {

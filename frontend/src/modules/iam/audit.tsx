@@ -120,6 +120,8 @@ const ACTION_DATA: Record<string, [string, string, string, string]> = {
   "cluster-agent-enroll": ["签发集群直连目标机 Agent", "交付", "Enroll cluster direct target agent", "Delivery"],
   "cluster-agent-update": ["修改直连目标机 Agent 权限", "交付", "Update direct target agent policy", "Delivery"],
   "cluster-agent-bundle": ["下载直连目标机 Agent 安装包", "交付", "Download direct target agent bundle", "Delivery"],
+  "execution-agent-update": ["修改目标机 Agent 写权限", "交付", "Update target agent write policy", "Delivery"],
+  "execution-agent-revoke": ["撤销目标机 Agent 授权", "交付", "Revoke target agent authorization", "Delivery"],
   "rehearsal-exec-probe": ["自动执行演练只读探针", "交付", "Auto-run rehearsal read-only probe", "Delivery"],
   "rehearsal-exec-step": ["自动执行变更演练步骤", "交付", "Auto-run rehearsal step", "Delivery"],
   "rehearsal-exec-rollback": ["自动执行演练回滚命令", "交付", "Auto-run rehearsal rollback", "Delivery"],

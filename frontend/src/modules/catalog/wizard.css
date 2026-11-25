@@ -461,6 +461,27 @@ input.mono-in {
   margin-left: auto;
   font-size: 12px;
 }
+.pgroup-more {
+  grid-column: 1 / -1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px dashed var(--line-strong);
+  background: var(--surface-2);
+  color: var(--mute);
+  font: 500 12px var(--sans);
+  cursor: pointer;
+  transition: color 0.14s ease, border-color 0.14s ease, background-color 0.14s ease;
+}
+.pgroup-more:hover {
+  color: var(--brand-ink);
+  border-color: var(--brand-line);
+  background: var(--brand-soft);
+}
 .params {
   display: flex;
   flex-direction: column;

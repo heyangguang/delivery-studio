@@ -433,6 +433,7 @@ var routePerms = []routePerm{
 	rp("GET", `/api/clusters/import/presets`, "delivery.view"),
 	rp("W", `/api/clusters/import(/.*)?`, "delivery.create"),
 	rp("GET", `/api/clusters/[^/]+/baseline`, "delivery.view"),
+	rp("W", `/api/clusters/[^/]+/baseline/gaps`, "delivery.create"),
 	rp("W", `/api/clusters/[^/]+/baseline`, "delivery.create"),
 	rp("GET", `/api/clusters/[^/]+/export`, "report.export"),
 	rp("GET", `/api/clusters/[^/]+/docs(/.*)?`, "delivery.view"),

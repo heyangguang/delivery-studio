@@ -2265,6 +2265,8 @@ func (s *storeServer) handleCluster(w http.ResponseWriter, r *http.Request, sess
 		s.handleClusterSecurity(w, r, session, f, parts[2:])
 	case len(parts) == 2 && parts[1] == "baseline":
 		s.handleClusterBaseline(w, r, session, f)
+	case len(parts) == 3 && parts[1] == "baseline" && parts[2] == "gaps":
+		s.handleClusterBaselineGaps(w, r, session, f)
 	case len(parts) == 2 && parts[1] == "docs" && r.Method == "POST":
 		s.startRCA(w, r, session, f)
 	case len(parts) == 3 && parts[1] == "docs" && (strings.HasPrefix(parts[2], "rca-") || strings.HasPrefix(parts[2], "assess-") || strings.HasPrefix(parts[2], "chg-")) && r.Method == "DELETE":

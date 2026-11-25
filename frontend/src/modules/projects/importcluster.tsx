@@ -129,6 +129,8 @@ type BaselineGap = {
   probe_action: string;
   selected: boolean;
   source?: "rule" | "ai";
+  manual_target?: "endpoints" | "paths" | "params" | string;
+  dismiss_hint?: string;
 };
 
 type BaselineHealth = {
@@ -137,6 +139,7 @@ type BaselineHealth = {
   total: number;
   summary: string;
   gaps: BaselineGap[];
+  dismissed_gaps?: BaselineGap[];
 };
 
 type ImportPayload = {
@@ -164,6 +167,7 @@ type ImportPayload = {
   params?: Record<string, unknown>;
   packages?: ImportedPkg[];
   notes?: string;
+  dismissed_gaps?: string[];
   last_probed_at?: string;
   health?: BaselineHealth;
 };
@@ -4930,6 +4934,8 @@ export function ImportedBaselineModal({
 
   // Re-probe & Gap Diagnosis state
   const [health, setHealth] = useState<BaselineHealth | null>(null);
+  const [dismissedGaps, setDismissedGaps] = useState<string[]>([]);
+  const [gapBusyID, setGapBusyID] = useState<string | null>(null);
   const [selectedGapIDs, setSelectedGapIDs] = useState<string[]>([]);
   const [diagnosingGaps, setDiagnosingGaps] = useState(false);
   const [diagLive, setDiagLive] = useState<LiveAIState<ImportLiveKind> | null>(null);
@@ -4947,6 +4953,7 @@ export function ImportedBaselineModal({
   const [probeCoveredGaps, setProbeCoveredGaps] = useState<string[]>([]);
   const [probeRunHint, setProbeRunHint] = useState("");
   const [probeModelName, setProbeModelName] = useState("");
+  const [templateGenerating, setTemplateGenerating] = useState(false);
   const [probeGenerating, setProbeGenerating] = useState(false);
   const [probeLive, setProbeLive] = useState<LiveAIState<ImportLiveKind> | null>(null);
   const [probeTrace, setProbeTrace] = useState<RehearsalTrace | null>(null);
@@ -4972,10 +4979,9 @@ export function ImportedBaselineModal({
       parseAbortRef.current?.abort();
     };
   }, [visible]);
-  // Progressive 3-step collapsible flow: Step 1 expanded by default; Step 2 & Step 3 collapsed until needed.
-  const [step1Open, setStep1Open] = useState(true);
-  const [step2Open, setStep2Open] = useState(false);
-  const [step3Open, setStep3Open] = useState(false);
+  // Focused 3-step horizontal flow: 1 (Scope) -> 2 (Generated Probe) -> 3 (Paste & Merge).
+  // No probe script is generated until the user explicitly requests one in Step 1.
+  const [probeStep, setProbeStep] = useState<1 | 2 | 3>(1);
   const [autoSummary, setAutoSummary] = useState<ClusterAutomationSummary | null>(null);
   const [autoProbeBusy, setAutoProbeBusy] = useState(false);
   const [autoProbeTask, setAutoProbeTask] = useState<RehearsalExecTask | null>(null);
@@ -5043,21 +5049,22 @@ export function ImportedBaselineModal({
         );
         setPackages(res.packages || []);
         setNotes(res.notes || "");
+        setDismissedGaps(res.dismissed_gaps || []);
         setHealth(res.health || null);
         const defaultGaps = (res.health?.gaps || []).filter((g) => g.selected).map((g) => g.id);
-        const fallbackGaps =
-          defaultGaps.length > 0
-            ? defaultGaps
-            : (res.health?.gaps || []).slice(0, 3).map((g) => g.id);
-        setSelectedGapIDs(fallbackGaps);
-        setProbeMode(res.health && res.health.gaps.length > 0 ? "gap" : "full");
+        setSelectedGapIDs(defaultGaps);
+        setProbeMode("gap");
+        setProbeScript("");
+        setProbeCoveredGaps([]);
+        setProbeRunHint("");
+        setProbeModelName("");
+        setProbeTrace(null);
+        setProbeLive(null);
+        setProbeStep(1);
         setMergeDiff([]);
         setAiGapDone(false);
         setAiGapModel("");
         setAiGapAdded(0);
-        setStep1Open(true);
-        setStep2Open(false);
-        setStep3Open(false);
       })
       .catch((e: Error) => Message.error(e.message))
       .finally(() => alive && setLoading(false));
@@ -5109,6 +5116,7 @@ export function ImportedBaselineModal({
         think: aiOpts.pref.think || undefined,
       };
       if (!opts?.useAI) {
+        setTemplateGenerating(true);
         try {
           const res = await api<DrawerProbeResp>("/api/clusters/import/probe-script", {
             method: "POST",
@@ -5121,8 +5129,16 @@ export function ImportedBaselineModal({
           setProbeCoveredGaps(res.covered_gaps || []);
           setProbeRunHint(res.run_hint || "");
           setProbeModelName(res.model || "");
-        } catch {
-          /* ignore silent template refresh */
+          setProbeTrace(null);
+          setProbeLive(null);
+          setProbeStep(2);
+          Message.success(
+            bi("已生成 100% 只读标准探针，可在目标节点执行", "Generated 100% read-only template probe"),
+          );
+        } catch (e) {
+          Message.error((e as Error).message || bi("生成只读探针失败", "Failed to generate probe script"));
+        } finally {
+          setTemplateGenerating(false);
         }
         return;
       }
@@ -5131,8 +5147,7 @@ export function ImportedBaselineModal({
       const ac = new AbortController();
       probeAbortRef.current = ac;
       setProbeGenerating(true);
-      setStep1Open(false);
-      setStep2Open(true);
+      setProbeStep(2);
       const modelHint = modelPick.current?.model || modelPick.ref?.split("|")[1];
       setProbeLive(
         buildImportInitialLive(
@@ -5286,17 +5301,74 @@ export function ImportedBaselineModal({
     );
   };
 
-  const selectedGapKey = selectedGapIDs.join(",");
+  const handleGapDismissAction = useCallback(
+    async (gap: BaselineGap, action: "dismiss" | "restore") => {
+      if (gapBusyID) return;
+      // Transient AI-discovered gaps only live in the current session
+      if (gap.source === "ai" && action === "dismiss") {
+        setHealth((prev) =>
+          prev
+            ? {
+                ...prev,
+                gaps: prev.gaps.filter((g) => g.id !== gap.id),
+              }
+            : prev,
+        );
+        setSelectedGapIDs((prev) => prev.filter((id) => id !== gap.id));
+        Message.success(bi(`已关闭推荐项「${gap.category}」`, `Dismissed "${gap.category}"`));
+        return;
+      }
+      setGapBusyID(gap.id);
+      try {
+        const res = await api<{
+          dismissed_gaps?: string[];
+          health?: BaselineHealth;
+        }>(`/api/clusters/${encodeURIComponent(cluster.id)}/baseline/gaps`, {
+          method: "POST",
+          body: JSON.stringify({ action, gap_id: gap.id }),
+        });
+        const nextDismissed = res.dismissed_gaps || [];
+        setDismissedGaps(nextDismissed);
+        setData((prev) => (prev ? { ...prev, dismissed_gaps: nextDismissed } : prev));
+        if (res.health) {
+          setHealth((prev) => {
+            const existingAIGaps = (prev?.gaps || []).filter((g) => g.source === "ai");
+            return {
+              ...res.health!,
+              gaps: [...(res.health!.gaps || []), ...existingAIGaps],
+            };
+          });
+        }
+        if (action === "dismiss") {
+          setSelectedGapIDs((prev) => prev.filter((id) => id !== gap.id));
+          Message.success(
+            bi(
+              `已忽略「${gap.category}」，后续不再推荐（可随时在下方恢复）`,
+              `Dismissed "${gap.category}" (can be restored anytime below)`,
+            ),
+          );
+        } else {
+          Message.success(bi(`已恢复「${gap.category}」核验项`, `Restored "${gap.category}" check`));
+        }
+      } catch (e) {
+        Message.error((e as Error).message || bi("更新缺口状态失败", "Failed to update gap state"));
+      } finally {
+        setGapBusyID(null);
+      }
+    },
+    [cluster.id, gapBusyID],
+  );
 
-  useEffect(() => {
-    if (!visible || tab !== "probe" || loading) return;
-    void fetchDrawerProbe({ mode: probeMode, gapIDs: selectedGapIDs });
-  }, [visible, tab, loading, probeMode, cluster.id]);
-
-  useEffect(() => {
-    if (!visible || tab !== "probe" || loading || probeGenerating || probeSource === "ai") return;
-    void fetchDrawerProbe({ mode: probeMode, gapIDs: selectedGapIDs });
-  }, [selectedGapKey]);
+  const jumpToBaselineSection = useCallback((target: string) => {
+    setTab("edit");
+    window.setTimeout(() => {
+      const el = document.getElementById(`imp-sec-${target}`);
+      if (!el) return;
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.add("is-jump-flash");
+      window.setTimeout(() => el.classList.remove("is-jump-flash"), 1600);
+    }, 80);
+  }, []);
 
   useEffect(() => {
     if (!visible || tab !== "probe") return;
@@ -5315,7 +5387,7 @@ export function ImportedBaselineModal({
     autoProbeAbortRef.current?.abort();
     const ctrl = new AbortController();
     autoProbeAbortRef.current = ctrl;
-    setStep2Open(true);
+    setProbeStep(2);
     setAutoProbeBusy(true);
     try {
       const task = await api<RehearsalExecTask>(
@@ -5329,7 +5401,7 @@ export function ImportedBaselineModal({
       const fin = await pollRehearsalExecTask(cluster.id, task.id, setAutoProbeTask, ctrl.signal);
       if (fin.combined_output?.trim()) {
         setProbeOutput(fin.combined_output);
-        setStep3Open(true);
+        setProbeStep(3);
         Message.success(
           bi(
             "只读探针已自动采集完成并填入下方回显框，点击「AI 解析并增量合并基线」即可合入",
@@ -5385,8 +5457,7 @@ export function ImportedBaselineModal({
     setParsing(true);
     const modelHint = modelPick.current?.model || modelPick.ref?.split("|")[1];
     if (useAI) {
-      setStep1Open(false);
-      setStep2Open(false);
+      setProbeStep(3);
       setDrawerParseCollapsed(true);
       setParseLive(
         buildImportInitialLive(
@@ -5632,6 +5703,7 @@ export function ImportedBaselineModal({
           params: paramsObj,
           packages,
           notes: notes.trim() || undefined,
+          dismissed_gaps: dismissedGaps,
           last_probed_at: probeOutput.trim() ? new Date().toISOString() : data?.last_probed_at,
         }),
       });
@@ -5729,390 +5801,473 @@ export function ImportedBaselineModal({
       ) : tab === "probe" ? (
         (() => {
           const allGaps = health?.gaps || [];
+          const dismissedList = health?.dismissed_gaps || [];
           const selectedGapObjs = allGaps.filter((g) => selectedGapIDs.includes(g.id));
-          const aiGapCount = allGaps.filter((g) => g.source === "ai").length;
-          const ruleGapCount = allGaps.length - aiGapCount;
-          const probeLineCount = probeScript ? probeScript.split("\n").length : 0;
+          const hasProbe = Boolean(probeScript.trim()) || probeGenerating;
+          const canGenerate =
+            probeMode === "full" ||
+            selectedGapObjs.length > 0 ||
+            probeFocus.trim().length > 0;
           const isMac =
             typeof navigator !== "undefined" &&
             /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent);
-          const triggerGenerateProbe = () =>
+          const triggerGenerateProbe = (useAI: boolean) => {
+            if (!canGenerate) {
+              Message.info(
+                bi(
+                  "请先勾选需要补采的缺口，或输入自定义核查需求，或切换「全量标准探针」",
+                  "Select gap item(s), enter custom focus, or switch to Full Standard Probe first",
+                ),
+              );
+              return;
+            }
             void fetchDrawerProbe({
-              useAI: true,
+              useAI,
               focus: probeFocus,
               mode: probeMode,
               gapIDs: selectedGapIDs,
               gapsList: allGaps,
             });
+          };
+
+          const manualLabelFor = (target?: string) => {
+            if (target === "endpoints") return bi("去基线填写入口", "Fill Endpoint");
+            if (target === "paths") return bi("去基线填写路径", "Edit Paths");
+            if (target === "params") return bi("去基线填写参数", "Edit Params");
+            return bi("去基线手工填写", "Fill Manually");
+          };
 
           return (
             <div className="imp-probe-studio">
-              {/* Step 1: Define Probe Requirements (Rule Baseline + AI Deep Discovery + Flowing AI Intent Composer) */}
-              <section className={`imp-step-card ${step1Open ? "is-open" : ""}`}>
-                <div
-                  className="imp-step-head"
-                  role="button"
-                  tabIndex={0}
-                  aria-expanded={step1Open}
-                  onClick={() => setStep1Open((v) => !v)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      setStep1Open((v) => !v);
+              {/* Clean 3-Step Horizontal Stepper: One Focused Workspace at a Time */}
+              <div className="imp-pflow-bar" role="tablist" aria-label={bi("只读补采流程", "Read-Only Probe Flow")}>
+                <div className="imp-pflow-steps">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={probeStep === 1}
+                    className={`imp-pflow-step ${probeStep === 1 ? "is-active" : hasProbe ? "is-done" : ""}`}
+                    onClick={() => setProbeStep(1)}
+                  >
+                    <span className="imp-pflow-num">{probeStep > 1 && hasProbe ? <IconCheck /> : "1"}</span>
+                    <span>{bi("选择补采项", "Select Scope")}</span>
+                  </button>
+                  <span className="imp-pflow-sep" aria-hidden>›</span>
+                  <Tooltip
+                    content={
+                      !hasProbe
+                        ? bi("请先在第 1 步确认补采项并点击生成探针", "Confirm scope and generate a probe in Step 1 first")
+                        : ""
                     }
-                  }}
-                >
-                  <div className="imp-step-head-l">
-                    <span className={`imp-step-num ${!step1Open && (selectedGapObjs.length > 0 || probeFocus.trim()) ? "is-done" : "is-active"}`}>
-                      {!step1Open && (selectedGapObjs.length > 0 || probeFocus.trim()) ? <IconCheck /> : "1"}
+                    disabled={hasProbe}
+                    mini
+                  >
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={probeStep === 2}
+                      disabled={!hasProbe}
+                      className={`imp-pflow-step ${probeStep === 2 ? "is-active" : hasProbe && probeStep > 2 ? "is-done" : ""}`}
+                      onClick={() => hasProbe && setProbeStep(2)}
+                    >
+                      <span className="imp-pflow-num">{probeStep > 2 && hasProbe ? <IconCheck /> : "2"}</span>
+                      <span>{bi("获取并执行探针", "Run Probe")}</span>
+                    </button>
+                  </Tooltip>
+                  <span className="imp-pflow-sep" aria-hidden>›</span>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={probeStep === 3}
+                    className={`imp-pflow-step ${probeStep === 3 ? "is-active" : ""}`}
+                    onClick={() => setProbeStep(3)}
+                  >
+                    <span className="imp-pflow-num">3</span>
+                    <span>{bi("回填合并基线", "Merge Output")}</span>
+                  </button>
+                </div>
+
+                <div className="imp-pflow-meta">
+                  <span className="imp-iron-badge">
+                    <IconCheckCircle /> {bi("100% 只读", "100% RO")}
+                  </span>
+                  {health && (
+                    <span
+                      className={`imp-gap-score xs num ${
+                        health.score >= 85 ? "is-ok" : health.score >= 55 ? "is-warn" : "is-low"
+                      }`}
+                    >
+                      {health.score}%
                     </span>
-                    {health && (
-                      <span
-                        className={`imp-gap-score xs num ${
-                          health.score >= 85 ? "is-ok" : health.score >= 55 ? "is-warn" : "is-low"
-                        }`}
-                      >
-                        {health.score}%
-                      </span>
-                    )}
-                    <div className="imp-step-titles">
-                      <div className="imp-step-title-row">
-                        <h4>{bi("明确补采需求", "Define Probe Scope")}</h4>
-                        <span className="imp-iron-badge">
-                          <IconCheckCircle /> {bi("100% 只读铁律", "100% Read-Only")}
-                        </span>
-                        {aiGapCount > 0 && (
+                  )}
+                </div>
+              </div>
+
+              {/* ===================== STEP 1: Scope & Gap Management ===================== */}
+              {probeStep === 1 && (
+                <div className="imp-pflow-panel enter">
+                  <div className="imp-pflow-status">
+                    <div className="imp-pflow-status-l">
+                      <div className="imp-pflow-status-title">
+                        <b>
+                          {allGaps.length > 0
+                            ? bi(
+                                `基线已齐备 ${health?.passed ?? 0}/${health?.total ?? 0} 项 · 还有 ${allGaps.length} 项待确认`,
+                                `Baseline ${health?.passed ?? 0}/${health?.total ?? 0} complete · ${allGaps.length} item(s) to review`,
+                              )
+                            : bi(
+                                `基线核验已全部齐备（${health?.passed ?? 0}/${health?.total ?? 0}）`,
+                                `All applicable baseline checks complete (${health?.passed ?? 0}/${health?.total ?? 0})`,
+                              )}
+                        </b>
+                        {aiGapDone && aiGapAdded > 0 && (
                           <span className="imp-gap-ai-tag">
                             <Spark size={10} rainbow />
-                            {bi(`含 ${aiGapCount} 项 AI 发现`, `${aiGapCount} AI-found`)}
+                            {bi(`含 ${aiGapAdded} 项 AI 发现`, `+${aiGapAdded} AI-found`)}
                           </span>
                         )}
                       </div>
-                      {!step1Open && (
-                        <div className="imp-step-summary">
-                          {probeMode === "full"
-                            ? bi("全量标准基线探针", "Full standard baseline probe")
-                            : selectedGapObjs.length > 0
-                              ? bi(
-                                  `已选 ${selectedGapObjs.length} 项缺口：${selectedGapObjs.map((g) => g.category).slice(0, 4).join("、")}${selectedGapObjs.length > 4 ? " 等" : ""}`,
-                                  `${selectedGapObjs.length} gap(s): ${selectedGapObjs.map((g) => g.category).slice(0, 4).join(", ")}`,
-                                )
-                              : bi("自定义只读核查需求", "Custom read-only verification scope")}
-                          {probeFocus.trim() ? ` · 「${probeFocus.trim().slice(0, 32)}${probeFocus.trim().length > 32 ? "…" : ""}」` : ""}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  <div className="imp-step-head-r">
-                    <span className="imp-step-toggle">
-                      {step1Open ? bi("收起", "Collapse") : bi("修改需求", "Edit Scope")}
-                      {step1Open ? <IconUp /> : <IconDown />}
-                    </span>
-                  </div>
-                </div>
-
-                {step1Open && (
-                  <div className="imp-step-body">
-                    <div className="imp-gap-toolbar">
-                      <div className="imp-gap-toolbar-l">
-                        <p className="imp-gap-sub">
-                          {health?.summary ||
-                            bi(
-                              "先通过规则初检定位标准基线缺失项，可进一步让 AI 结合架构栈与变更历史深度发现专属盲区。",
-                              "Start with baseline rule checks, or let AI deeply inspect stack & change history for hidden blind spots.",
-                            )}
-                        </p>
-                        <div className="imp-gap-src-meta">
-                          <span>{bi(`规则初检 ${ruleGapCount} 项`, `${ruleGapCount} rule check(s)`)}</span>
-                          {aiGapDone && (
-                            <span className="is-ai">
-                              <Spark size={11} rainbow />
-                              {bi(
-                                `AI 深度发现 +${aiGapAdded} 项${aiGapModel ? ` · ${aiGapModel}` : ""}`,
-                                `AI discovered +${aiGapAdded}${aiGapModel ? ` · ${aiGapModel}` : ""}`,
-                              )}
-                            </span>
+                      <p className="imp-gap-sub">
+                        {health?.summary ||
+                          bi(
+                            "勾选需要探测的缺口后按需生成只读脚本；对于不在主机侧配置的项目（如前端 F5 / 云 LB / VIP）可直接手工填写或关闭。",
+                            "Select items to probe and generate a script on demand, or dismiss items configured outside the hosts (e.g. F5 / Cloud LB / VIP).",
                           )}
-                        </div>
-                      </div>
-                      <div className="imp-gap-toolbar-r">
-                        <Button
-                          size="small"
-                          shape="round"
-                          type={aiGapDone ? "outline" : "secondary"}
-                          className="imp-ai-discover-btn"
-                          loading={diagnosingGaps}
-                          disabled={probeGenerating}
-                          icon={<Spark size={12} rainbow />}
-                          onClick={() => void runAIDiagnoseGaps()}
+                      </p>
+                    </div>
+                    <div className="imp-gap-toolbar-r">
+                      <Button
+                        size="small"
+                        shape="round"
+                        type={aiGapDone ? "outline" : "secondary"}
+                        className="imp-ai-discover-btn"
+                        loading={diagnosingGaps}
+                        disabled={probeGenerating || templateGenerating}
+                        icon={<Spark size={12} rainbow />}
+                        onClick={() => void runAIDiagnoseGaps()}
+                      >
+                        {aiGapDone
+                          ? bi("重新排查遗漏", "Re-scan Gaps")
+                          : bi("AI 深度排查遗漏", "AI Deep Gap Scan")}
+                      </Button>
+                      <div className="imp-gap-mode-sw">
+                        <button
+                          type="button"
+                          className={probeMode === "gap" ? "on" : ""}
+                          onClick={() => setProbeMode("gap")}
                         >
-                          {aiGapDone
-                            ? bi("AI 重新深度发现", "Re-run AI Discovery")
-                            : bi("AI 深度发现遗漏项", "AI Deep Gap Discovery")}
-                        </Button>
-                        <div className="imp-gap-mode-sw">
-                          <button
-                            type="button"
-                            className={probeMode === "gap" ? "on" : ""}
-                            onClick={() => setProbeMode("gap")}
-                            disabled={allGaps.length === 0}
-                          >
-                            {bi("专项缺口补采", "Gap Probe")}
-                          </button>
-                          <button
-                            type="button"
-                            className={probeMode === "full" ? "on" : ""}
-                            onClick={() => setProbeMode("full")}
-                          >
-                            {bi("全量标准探针", "Full Standard")}
-                          </button>
-                        </div>
+                          {bi("按缺口补采", "By Gap")}
+                        </button>
+                        <button
+                          type="button"
+                          className={probeMode === "full" ? "on" : ""}
+                          onClick={() => setProbeMode("full")}
+                        >
+                          {bi("全量标准探针", "Full Standard")}
+                        </button>
                       </div>
                     </div>
+                  </div>
 
-                    {(diagLive || diagTrace) && (
-                      <AIProcessCard
-                        live={diagLive}
-                        trace={diagLive ? null : diagTrace}
-                        title={bi("AI 深度基线盲区诊断推演", "AI Deep Baseline Gap Diagnosis")}
-                        onAbort={() => {
-                          diagAbortRef.current?.abort();
-                          setDiagLive(null);
-                          setDiagnosingGaps(false);
-                        }}
-                        onRetry={() => void runAIDiagnoseGaps()}
-                        onDismiss={() => setDiagLive(null)}
-                      />
-                    )}
+                  {(diagLive || diagTrace) && (
+                    <AIProcessCard
+                      live={diagLive}
+                      trace={diagLive ? null : diagTrace}
+                      title={bi("AI 深度基线盲区诊断推演", "AI Deep Baseline Gap Diagnosis")}
+                      onAbort={() => {
+                        diagAbortRef.current?.abort();
+                        setDiagLive(null);
+                        setDiagnosingGaps(false);
+                      }}
+                      onRetry={() => void runAIDiagnoseGaps()}
+                      onDismiss={() => setDiagLive(null)}
+                    />
+                  )}
 
-                    {probeMode === "gap" && allGaps.length > 0 && (
-                      <div className="imp-gap-grid">
+                  {probeMode === "gap" ? (
+                    allGaps.length > 0 ? (
+                      <div className="imp-gap-list">
                         {allGaps.map((g) => {
                           const picked = selectedGapIDs.includes(g.id);
                           const isAI = g.source === "ai";
+                          const busyThis = gapBusyID === g.id;
                           return (
-                            <button
+                            <div
                               key={g.id}
-                              type="button"
-                              className={`imp-gap-item ${picked ? "is-on" : ""} ${isAI ? "is-ai" : ""}`}
-                              onClick={() => toggleGapID(g.id)}
+                              className={`imp-gap-card ${picked ? "is-on" : ""} ${isAI ? "is-ai" : ""}`}
                             >
-                              <div className="imp-gap-item-top">
+                              <button
+                                type="button"
+                                className="imp-gap-card-main"
+                                aria-pressed={picked}
+                                onClick={() => toggleGapID(g.id)}
+                              >
                                 <span className={`imp-gap-chk ${picked ? "is-on" : ""}`}>
                                   {picked && <IconCheck />}
                                 </span>
-                                <span className={`imp-gap-sev is-${g.severity}`}>
-                                  {g.severity === "high"
-                                    ? bi("建议优先", "High")
-                                    : g.severity === "medium"
-                                      ? bi("建议完善", "Medium")
-                                      : bi("可选", "Optional")}
-                                </span>
-                                <span className="imp-gap-cat">{g.category}</span>
-                                {isAI && (
-                                  <span className="imp-gap-ai-tag">
-                                    <Spark size={10} rainbow />
-                                    {bi("AI 发现", "AI Found")}
-                                  </span>
+                                <div className="imp-gap-card-body">
+                                  <div className="imp-gap-item-top">
+                                    <span className={`imp-gap-sev is-${g.severity}`}>
+                                      {g.severity === "high"
+                                        ? bi("建议优先", "High")
+                                        : g.severity === "medium"
+                                          ? bi("建议完善", "Medium")
+                                          : bi("可选", "Optional")}
+                                    </span>
+                                    <span className="imp-gap-cat">{g.category}</span>
+                                    {isAI && (
+                                      <span className="imp-gap-ai-tag">
+                                        <Spark size={10} rainbow />
+                                        {bi("AI 发现", "AI Found")}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="imp-gap-item-title">{g.title}</div>
+                                  <div className="imp-gap-item-act">{g.probe_action}</div>
+                                  {g.dismiss_hint && (
+                                    <div className="imp-gap-item-hint">{g.dismiss_hint}</div>
+                                  )}
+                                </div>
+                              </button>
+                              <div className="imp-gap-card-acts">
+                                {g.manual_target && (
+                                  <button
+                                    type="button"
+                                    className="imp-gap-act-btn is-link"
+                                    onClick={() => jumpToBaselineSection(g.manual_target!)}
+                                  >
+                                    <IconEdit />
+                                    <span>{manualLabelFor(g.manual_target)}</span>
+                                  </button>
                                 )}
+                                <Tooltip
+                                  content={
+                                    g.dismiss_hint ||
+                                    bi(
+                                      "如该项目不在主机侧配置或当前无需探测，点击后将关闭推荐，随时可在下方恢复",
+                                      "Dismiss this recommendation if not applicable on hosts; can be restored anytime",
+                                    )
+                                  }
+                                  mini
+                                >
+                                  <button
+                                    type="button"
+                                    className="imp-gap-act-btn is-dismiss"
+                                    disabled={busyThis || Boolean(gapBusyID)}
+                                    onClick={() => void handleGapDismissAction(g, "dismiss")}
+                                  >
+                                    <IconClose />
+                                    <span>{busyThis ? bi("处理中…", "Saving…") : bi("无需探测", "Dismiss")}</span>
+                                  </button>
+                                </Tooltip>
                               </div>
-                              <div className="imp-gap-item-title">{g.title}</div>
-                              <div className="imp-gap-item-act">{g.probe_action}</div>
-                            </button>
+                            </div>
                           );
                         })}
                       </div>
-                    )}
-
-                    {/* Flagship Flowing-Rim AI Intent Composer */}
-                    <div className={`imp-intent-box ${probeGenerating || diagnosingGaps ? "is-busy" : ""}`}>
-                      <div className="imp-intent-head">
-                        <div className="imp-intent-chips">
-                          <span className="imp-intent-lbl">
-                            <Spark size={12} rainbow />
-                            {probeMode === "full"
-                              ? bi("全量标准基线模式", "Full Standard Baseline Mode")
-                              : bi("本次补采范围", "Selected Scope")}
+                    ) : (
+                      <div className="imp-gap-allclear">
+                        <span className="imp-gap-allclear-ic" aria-hidden>
+                          <IconCheckCircle />
+                        </span>
+                        <div className="imp-gap-allclear-txt">
+                          <b>{bi("当前基线已完备，无需例行补采", "Baseline is complete — no routine probe needed")}</b>
+                          <span>
+                            {bi(
+                              "如需临时核查特定配置或运行水位，可在下方输入自定义核查需求，或切换到「全量标准探针」。",
+                              "Need an ad-hoc check? Describe what to inspect below or switch to Full Standard Probe.",
+                            )}
                           </span>
-                          {probeMode === "gap" && selectedGapObjs.length > 0 ? (
-                            <>
-                              {selectedGapObjs.map((g) => (
-                                <span
-                                  key={g.id}
-                                  className={`imp-intent-chip ${g.source === "ai" ? "is-ai" : ""}`}
-                                >
-                                  {g.source === "ai" && <Spark size={10} rainbow />}
-                                  <span>{g.category}</span>
-                                  <button
-                                    type="button"
-                                    aria-label={bi("移除", "Remove")}
-                                    onClick={() => toggleGapID(g.id)}
-                                  >
-                                    <IconClose />
-                                  </button>
-                                </span>
-                              ))}
-                              <button
-                                type="button"
-                                className="imp-inline-clear"
-                                onClick={() => setSelectedGapIDs([])}
+                        </div>
+                      </div>
+                    )
+                  ) : (
+                    <div className="imp-gap-full-note">
+                      <IconCheckCircle />
+                      <span>
+                        {bi(
+                          "全量标准探针将一次只读采集主机 OS、精确版本、伴生组件栈、运行目录、核心参数与 CVE 软件包清单（零修改、自动脱敏）。",
+                          "Full standard probe collects OS, exact versions, companion stack, paths, core params & CVE packages in one 100% read-only pass.",
+                        )}
+                      </span>
+                    </div>
+                  )}
+
+                  {dismissedList.length > 0 && (
+                    <div className="imp-gap-dismissed-bar">
+                      <span className="imp-gap-dismissed-lbl">
+                        {bi(
+                          `已忽略 ${dismissedList.length} 项（不在主机侧 / 无需探测）：`,
+                          `Dismissed ${dismissedList.length} item(s):`,
+                        )}
+                      </span>
+                      <div className="imp-gap-dismissed-chips">
+                        {dismissedList.map((dg) => (
+                          <span key={dg.id} className="imp-gap-dismissed-chip">
+                            <span>{dg.category}</span>
+                            <button
+                              type="button"
+                              disabled={Boolean(gapBusyID)}
+                              onClick={() => void handleGapDismissAction(dg, "restore")}
+                            >
+                              {gapBusyID === dg.id ? "…" : bi("恢复", "Restore")}
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Intent Composer & Explicit On-Demand Probe Generation */}
+                  <div className={`imp-intent-box ${probeGenerating || templateGenerating || diagnosingGaps ? "is-busy" : ""}`}>
+                    <div className="imp-intent-head">
+                      <div className="imp-intent-chips">
+                        <span className="imp-intent-lbl">
+                          <Spark size={12} rainbow />
+                          {probeMode === "full"
+                            ? bi("本次采集范围：全量标准基线", "Scope: Full Standard Baseline")
+                            : bi("本次采集范围", "Probe Scope")}
+                        </span>
+                        {probeMode === "gap" && selectedGapObjs.length > 0 ? (
+                          <>
+                            {selectedGapObjs.map((g) => (
+                              <span
+                                key={g.id}
+                                className={`imp-intent-chip ${g.source === "ai" ? "is-ai" : ""}`}
                               >
-                                {bi("清空", "Clear")}
-                              </button>
-                            </>
-                          ) : probeMode === "gap" ? (
-                            <span className="imp-intent-empty-hint">
-                              {bi("未勾选上方卡片，可直接用自然语言指定你想核查的项目", "No cards selected — describe what to inspect below")}
-                            </span>
-                          ) : null}
-                        </div>
+                                {g.source === "ai" && <Spark size={10} rainbow />}
+                                <span>{g.category}</span>
+                                <button
+                                  type="button"
+                                  aria-label={bi("移除", "Remove")}
+                                  onClick={() => toggleGapID(g.id)}
+                                >
+                                  <IconClose />
+                                </button>
+                              </span>
+                            ))}
+                            <button
+                              type="button"
+                              className="imp-inline-clear"
+                              onClick={() => setSelectedGapIDs([])}
+                            >
+                              {bi("清空", "Clear")}
+                            </button>
+                          </>
+                        ) : probeMode === "gap" ? (
+                          <span className="imp-intent-empty-hint">
+                            {allGaps.length > 0
+                              ? bi("请勾选上方缺口，或在下方输入自定义只读核查需求", "Select gap cards above or enter a custom check below")
+                              : bi("输入自定义只读核查需求，或切换上方「全量标准探针」", "Describe a custom read-only check below, or switch to Full Standard")}
+                          </span>
+                        ) : null}
                       </div>
+                    </div>
 
-                      <Input.TextArea
-                        className="imp-intent-area"
-                        value={probeFocus}
-                        onChange={setProbeFocus}
-                        disabled={probeGenerating}
-                        autoSize={{ minRows: 2, maxRows: 5 }}
-                        onKeyDown={(e) => {
-                          if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-                            e.preventDefault();
-                            if (!probeGenerating) triggerGenerateProbe();
+                    <Input.TextArea
+                      className="imp-intent-area"
+                      value={probeFocus}
+                      onChange={setProbeFocus}
+                      disabled={probeGenerating || templateGenerating}
+                      autoSize={{ minRows: 2, maxRows: 4 }}
+                      onKeyDown={(e) => {
+                        if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                          e.preventDefault();
+                          if (!probeGenerating && !templateGenerating && canGenerate) {
+                            triggerGenerateProbe(true);
                           }
-                        }}
-                        placeholder={bi(
-                          "补充本次想重点核查的现场诉求（可选）… 例如：核查 VIP 172.30.2.120 承载位置、Patroni 切换保护参数与备库复制槽状态",
-                          "Optional natural-language focus… e.g. verify VIP 172.30.2.120 binding, Patroni failover TTL, and replica slot status",
-                        )}
-                      />
-
-                      <div className="imp-intent-foot">
-                        <div className="imp-intent-foot-l">
-                          <ThinkLevel
-                            compact
-                            levels={modelPick.current?.effort}
-                            value={aiOpts.pref.think}
-                            onChange={(v) => aiOpts.update({ think: v })}
-                          />
-                          <ModelPicker compact pick={modelPick} />
-                          <span className="imp-foot-note">
-                            {isMac ? "⌘" : "Ctrl"} + Enter
-                          </span>
-                        </div>
-                        <div className="imp-intent-foot-r">
-                          <Button
-                            size="small"
-                            shape="round"
-                            className="ai-pill"
-                            loading={probeGenerating}
-                            disabled={diagnosingGaps}
-                            icon={<Spark size={13} rainbow />}
-                            onClick={triggerGenerateProbe}
-                          >
-                            {probeMode === "gap" && selectedGapObjs.length > 0
-                              ? bi(
-                                  `AI 生成专项 100% 只读探针（${selectedGapObjs.length} 项）`,
-                                  `AI Generate Targeted Probe (${selectedGapObjs.length})`,
-                                )
-                              : bi("AI 生成 100% 只读探针", "AI Generate Read-Only Probe")}
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </section>
-
-              {/* Step 2: 100% Read-Only Probe Script (Collapsed by default; auto-expands on AI generation) */}
-              <section className={`imp-step-card ${step2Open ? "is-open" : ""}`}>
-                <div
-                  className="imp-step-head"
-                  role="button"
-                  tabIndex={0}
-                  aria-expanded={step2Open}
-                  onClick={() => setStep2Open((v) => !v)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      setStep2Open((v) => !v);
-                    }
-                  }}
-                >
-                  <div className="imp-step-head-l">
-                    <span className={`imp-step-num ${probeSource === "ai" ? "is-done" : step2Open ? "is-active" : ""}`}>
-                      {probeSource === "ai" && !probeGenerating ? <IconCheck /> : "2"}
-                    </span>
-                    <div className="imp-step-titles">
-                      <div className="imp-step-title-row">
-                        <h4>{bi("获取并执行 100% 只读探针", "Get & Run 100% Read-Only Probe")}</h4>
-                        {probeGenerating ? (
-                          <span className="imp-gap-ai-tag">
-                            <Spark size={10} rainbow />
-                            {bi("AI 正在生成并做安全校验…", "AI generating & verifying…")}
-                          </span>
-                        ) : (
-                          <span className={`imp-probe-mode-tag ${probeSource === "ai" ? "is-ai" : ""}`}>
-                            {probeSource === "ai" && <Spark size={10} />}
-                            {probeSource === "ai"
-                              ? bi("AI 专项已就绪", "AI Probe Ready")
-                              : bi("模板探针就绪", "Template Ready")}
-                            {probeLineCount > 0 ? ` · ${probeLineCount} ${bi("行", "lines")}` : ""}
-                          </span>
-                        )}
-                      </div>
-                      {!step2Open && (
-                        <div className="imp-step-summary">
-                          {probeCoveredGaps.length > 0
-                            ? bi(
-                                `覆盖 ${probeCoveredGaps.join("、")} · 通过静态只读安全门禁，可直接复制或展开查看`,
-                                `Covers ${probeCoveredGaps.join(", ")} · Static read-only verified`,
-                              )
-                            : bi(
-                                "已通过 100% 静态只读校验（零写入、零重启），先定需求后再展开或直接复制执行",
-                                "100% static read-only verified (zero writes/restarts); expand when ready",
-                              )}
-                        </div>
+                        }
+                      }}
+                      placeholder={bi(
+                        "补充本次想重点核查的现场诉求（可选）… 例如：核查 Patroni 切换超时、备库复制槽状态与日志轮转配置",
+                        "Optional focus… e.g. inspect Patroni failover TTL, replication slots, and log rotation",
                       )}
+                    />
+
+                    <div className="imp-intent-foot">
+                      <div className="imp-intent-foot-l">
+                        <ThinkLevel
+                          compact
+                          levels={modelPick.current?.effort}
+                          value={aiOpts.pref.think}
+                          onChange={(v) => aiOpts.update({ think: v })}
+                        />
+                        <ModelPicker compact pick={modelPick} />
+                        <span className="imp-foot-note">
+                          {isMac ? "⌘" : "Ctrl"} + Enter
+                        </span>
+                      </div>
+                      <div className="imp-intent-foot-r">
+                        <Button
+                          size="small"
+                          shape="round"
+                          type="secondary"
+                          loading={templateGenerating}
+                          disabled={!canGenerate || probeGenerating || diagnosingGaps}
+                          onClick={() => triggerGenerateProbe(false)}
+                        >
+                          {bi("生成标准模板探针", "Standard Template")}
+                        </Button>
+                        <Button
+                          size="small"
+                          shape="round"
+                          className="ai-pill"
+                          loading={probeGenerating}
+                          disabled={!canGenerate || templateGenerating || diagnosingGaps}
+                          icon={<Spark size={13} rainbow />}
+                          onClick={() => triggerGenerateProbe(true)}
+                        >
+                          {probeMode === "gap" && selectedGapObjs.length > 0
+                            ? bi(
+                                `AI 生成专项探针（${selectedGapObjs.length} 项）`,
+                                `AI Generate Probe (${selectedGapObjs.length})`,
+                              )
+                            : bi("AI 生成只读探针", "AI Generate Probe")}
+                        </Button>
+                      </div>
                     </div>
                   </div>
-                  <div className="imp-step-head-r">
-                    {!step2Open && probeScript && !probeGenerating && (
-                      <Button
-                        size="mini"
-                        type="secondary"
-                        icon={<IconCopy />}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          copy(probeScript);
-                          Message.success(bi("已复制 100% 只读采集脚本", "100% read-only probe script copied"));
-                        }}
-                      >
-                        {bi("复制脚本", "Copy")}
-                      </Button>
-                    )}
-                    <span className="imp-step-toggle">
-                      {step2Open ? bi("收起", "Collapse") : bi("展开脚本", "Expand")}
-                      {step2Open ? <IconUp /> : <IconDown />}
+
+                  {/* Direct skip shortcut for engineers who already have terminal output / screenshots */}
+                  <div className="imp-pflow-skip">
+                    <span className="small muted">
+                      {bi(
+                        "已经在节点终端手动采集过输出，或有配置截图？",
+                        "Already collected terminal output or screenshots?",
+                      )}
                     </span>
+                    <button
+                      type="button"
+                      className="imp-pflow-skip-btn"
+                      onClick={() => setProbeStep(3)}
+                    >
+                      <span>{bi("跳过生成，直接粘贴回显合并", "Skip to Step 3: Paste Output")}</span>
+                      <IconArrowRight />
+                    </button>
                   </div>
                 </div>
+              )}
 
-                {step2Open && (
-                  <div className="imp-step-body">
-                    {(probeLive || probeTrace) && (
-                      <AIProcessCard
-                        live={probeLive}
-                        trace={probeLive ? null : probeTrace}
-                        title={bi("AI 定制只读探针推演记录", "AI Read-Only Probe Generation Trace")}
-                        onAbort={() => {
-                          probeAbortRef.current?.abort();
-                          setProbeLive(null);
-                          setProbeGenerating(false);
-                        }}
-                        onRetry={() => void fetchDrawerProbe({ useAI: true })}
-                        onDismiss={() => setProbeLive(null)}
-                      />
-                    )}
+              {/* ===================== STEP 2: Generated Probe Execution ===================== */}
+              {probeStep === 2 && (
+                <div className="imp-pflow-panel enter">
+                  {(probeLive || probeTrace) && (
+                    <AIProcessCard
+                      live={probeLive}
+                      trace={probeLive ? null : probeTrace}
+                      title={bi("AI 定制只读探针推演记录", "AI Read-Only Probe Generation Trace")}
+                      onAbort={() => {
+                        probeAbortRef.current?.abort();
+                        setProbeLive(null);
+                        setProbeGenerating(false);
+                        if (!probeScript.trim()) setProbeStep(1);
+                      }}
+                      onRetry={() => triggerGenerateProbe(true)}
+                      onDismiss={() => setProbeLive(null)}
+                    />
+                  )}
+
+                  {probeScript && (
                     <ProbeCodeBlock
                       script={probeScript}
                       filename={probeFilename}
@@ -6127,192 +6282,142 @@ export function ImportedBaselineModal({
                       aiBusy={probeGenerating}
                       gapCount={selectedGapIDs.length}
                     />
-                    {autoProbeTask && (
-                      <LiveExecLogCard
-                        task={autoProbeTask}
-                        clusterId={cluster.id}
-                        compact
-                        onCancelled={setAutoProbeTask}
-                      />
-                    )}
-                    <div className="imp-step-next">
-                      <span className="imp-step-next-hint">
-                        {bi(
-                          "在目标主/备节点终端执行后复制完整回显；若已配置自动化通道也可直接一键采集",
-                          "Run on target terminals and copy output, or use 1-click automated collection if configured",
-                        )}
-                      </span>
-                      <div className="imp-step-next-acts">
-                        {can("delivery.execute") && (
-                          autoSummary?.ready ? (
-                            <Button
-                              size="small"
-                              type="secondary"
-                              loading={autoProbeBusy}
-                              disabled={probeGenerating || !probeScript}
-                              icon={<IconThunderbolt style={{ color: "var(--ok)" }} />}
-                              onClick={() => void runAutoBaselineProbe()}
-                            >
-                              {bi("自动执行只读探针", "Auto-Run Probe")}
-                            </Button>
-                          ) : (
-                            <Button
-                              size="small"
-                              type="outline"
-                              icon={<IconThunderbolt style={{ color: "var(--warn)" }} />}
-                              onClick={() => {
-                                onClose();
-                                navigateToClusterAutomation(cluster.id);
-                              }}
-                            >
-                              {bi("前往配置自动采集", "Configure Automation")}
-                            </Button>
-                          )
-                        )}
+                  )}
+
+                  {autoProbeTask && (
+                    <LiveExecLogCard
+                      task={autoProbeTask}
+                      clusterId={cluster.id}
+                      compact
+                      onCancelled={setAutoProbeTask}
+                    />
+                  )}
+
+                  <div className="imp-pflow-foot">
+                    <Button
+                      size="small"
+                      type="text"
+                      disabled={probeGenerating}
+                      onClick={() => setProbeStep(1)}
+                    >
+                      <IconArrowLeft /> {bi("返回调整补采项", "Back to Scope")}
+                    </Button>
+                    <div className="imp-step-next-acts">
+                      {can("delivery.execute") && (
+                        autoSummary?.ready ? (
+                          <Button
+                            size="small"
+                            type="secondary"
+                            loading={autoProbeBusy}
+                            disabled={probeGenerating || !probeScript}
+                            icon={<IconThunderbolt style={{ color: "var(--ok)" }} />}
+                            onClick={() => void runAutoBaselineProbe()}
+                          >
+                            {bi("自动执行只读探针", "Auto-Run Probe")}
+                          </Button>
+                        ) : (
+                          <Button
+                            size="small"
+                            type="outline"
+                            icon={<IconThunderbolt style={{ color: "var(--warn)" }} />}
+                            onClick={() => {
+                              onClose();
+                              navigateToClusterAutomation(cluster.id);
+                            }}
+                          >
+                            {bi("配置自动采集", "Setup Automation")}
+                          </Button>
+                        )
+                      )}
+                      <Button
+                        size="small"
+                        type="primary"
+                        disabled={probeGenerating || !probeScript}
+                        onClick={() => setProbeStep(3)}
+                      >
+                        {bi("已执行完毕，去粘贴回显", "Next: Paste Output")} <IconArrowRight />
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ===================== STEP 3: Paste Output & Incremental Merge ===================== */}
+              {probeStep === 3 && (
+                <div className="imp-pflow-panel enter">
+                  {parseLive && (
+                    <ImportParseFocusBar
+                      collapsed={drawerParseCollapsed}
+                      onToggle={() => setDrawerParseCollapsed((v) => !v)}
+                      textLength={probeOutput.trim().length}
+                      imageCount={probeImages.length}
+                      isRunning={parsing}
+                    />
+                  )}
+                  {!(parseLive && drawerParseCollapsed) && (
+                    <ImportEvidenceComposer
+                      title={bi("回显文本 / 截图（自动增量合并，不覆盖已有基线）", "Probe Output / Screenshots (Additive Merge)")}
+                      placeholder={bi(
+                        "=== MW_IMPORT_BEGIN ===\n直接粘贴采集终端回显、拖拽 .log/.txt 文件，或按 Ctrl+V 粘贴终端截图；AI 将自动提取缺失字段并增量合并…",
+                        "=== MW_IMPORT_BEGIN ===\nPaste terminal output, drag & drop .log/.txt files, or Ctrl+V screenshots; AI will extract and merge incrementally…",
+                      )}
+                      value={probeOutput}
+                      onChange={setProbeOutput}
+                      images={probeImages}
+                      onImagesChange={setProbeImages}
+                      busy={parsing}
+                      aiEnabled
+                      modelPick={modelPick}
+                      aiOpts={aiOpts}
+                      minRows={7}
+                      maxRows={16}
+                      imageBtnLabel={bi("上传回显截图", "Upload Image")}
+                      footHint={bi("支持拖拽 .log/.txt/截图", "Drag & drop .log/.txt/images")}
+                      leftSlot={
                         <Button
                           size="small"
                           type="text"
-                          onClick={() => {
-                            setStep1Open(true);
-                            setStep2Open(false);
-                          }}
+                          onClick={() => setProbeStep(hasProbe ? 2 : 1)}
+                          disabled={parsing}
                         >
-                          {bi("调整补采需求", "Edit Scope")}
+                          <IconArrowLeft />{" "}
+                          {hasProbe ? bi("返回探针脚本", "Back to Script") : bi("返回选择补采项", "Back to Scope")}
                         </Button>
-                        <Button
-                          size="small"
-                          type="primary"
-                          disabled={probeGenerating}
-                          onClick={() => {
-                            setStep2Open(false);
-                            setStep3Open(true);
-                          }}
-                        >
-                          {bi("已执行完毕，去粘贴回显", "Done — Paste Output")} <IconArrowRight />
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </section>
-
-              {/* Step 3: Paste Output / Screenshots & Incremental Merge (Collapsed by default) */}
-              <section className={`imp-step-card ${step3Open ? "is-open" : ""}`}>
-                <div
-                  className="imp-step-head"
-                  role="button"
-                  tabIndex={0}
-                  aria-expanded={step3Open}
-                  onClick={() => setStep3Open((v) => !v)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      setStep3Open((v) => !v);
-                    }
-                  }}
-                >
-                  <div className="imp-step-head-l">
-                    <span className={`imp-step-num ${step3Open ? "is-active" : ""}`}>3</span>
-                    <div className="imp-step-titles">
-                      <div className="imp-step-title-row">
-                        <h4>{bi("粘贴回显与截图 · AI 增量合并基线", "Paste Output / Screenshots · AI Incremental Merge")}</h4>
-                        {(probeOutput.trim() || probeImages.length > 0) && (
-                          <span className="imp-gap-ai-tag">
-                            {bi(
-                              `已待解析${probeOutput.trim() ? ` ${probeOutput.trim().length} 字` : ""}${probeImages.length > 0 ? ` · ${probeImages.length} 张图` : ""}`,
-                              `Draft ready${probeOutput.trim() ? ` (${probeOutput.trim().length} chars)` : ""}${probeImages.length > 0 ? ` · ${probeImages.length} img` : ""}`,
-                            )}
-                          </span>
-                        )}
-                      </div>
-                      {!step3Open && (
-                        <div className="imp-step-summary">
-                          {bi(
-                            "支持直接粘贴回显、拖拽 .log/.txt 或 Ctrl+V 截图；自动脱敏并增量合并，不覆盖已有基线",
-                            "Paste terminal output, drop .log/.txt, or Ctrl+V screenshots; auto-redacted additive merge",
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  <div className="imp-step-head-r">
-                    <span className="imp-step-toggle">
-                      {step3Open ? bi("收起", "Collapse") : bi("展开粘贴", "Expand")}
-                      {step3Open ? <IconUp /> : <IconDown />}
-                    </span>
-                  </div>
-                </div>
-
-                {step3Open && (
-                  <div className="imp-step-body">
-                    {parseLive && (
-                      <ImportParseFocusBar
-                        collapsed={drawerParseCollapsed}
-                        onToggle={() => setDrawerParseCollapsed((v) => !v)}
-                        textLength={probeOutput.trim().length}
-                        imageCount={probeImages.length}
-                        isRunning={parsing}
-                      />
-                    )}
-                    {!(parseLive && drawerParseCollapsed) && (
-                      <ImportEvidenceComposer
-                        title={bi("回显文本 / 截图（自动增量合并，不覆盖已有基线）", "Probe Output / Screenshots (Additive Merge)")}
-                        placeholder={bi(
-                          "=== MW_IMPORT_BEGIN ===\n直接粘贴采集终端回显、拖拽 .log/.txt 文件，或按 Ctrl+V 粘贴终端截图；AI 将自动提取缺失字段并增量合并…",
-                          "=== MW_IMPORT_BEGIN ===\nPaste terminal output, drag & drop .log/.txt files, or Ctrl+V screenshots; AI will extract and merge incrementally…",
-                        )}
-                        value={probeOutput}
-                        onChange={setProbeOutput}
-                        images={probeImages}
-                        onImagesChange={setProbeImages}
-                        busy={parsing}
-                        aiEnabled
-                        modelPick={modelPick}
-                        aiOpts={aiOpts}
-                        minRows={6}
-                        maxRows={15}
-                        imageBtnLabel={bi("上传回显截图", "Upload Image")}
-                        footHint={bi("支持拖拽 .log/.txt/截图", "Drag & drop .log/.txt/images")}
-                        leftSlot={
-                          <Button size="small" type="text" onClick={() => setTab("edit")} disabled={parsing}>
-                            <IconArrowLeft /> {bi("返回基线编辑", "Back to Edit")}
+                      }
+                      submitLabel={bi("AI 解析并增量合并基线", "AI Parse & Merge")}
+                      onSubmit={() => void parseAndMergeProbe({ useAI: true })}
+                    />
+                  )}
+                  {parseLive && (
+                    <AIProcessCard
+                      live={parseLive}
+                      title={bi("AI 现场回显与多组件架构解析", "AI Evidence & Multi-Component Stack Parsing")}
+                      onAbort={() => {
+                        parseAbortRef.current?.abort();
+                        setParseLive(null);
+                        setDrawerParseCollapsed(false);
+                        setParsing(false);
+                      }}
+                      onRetry={() => void parseAndMergeProbe({ useAI: true })}
+                      onDismiss={() => {
+                        setParseLive(null);
+                        setDrawerParseCollapsed(false);
+                      }}
+                      extraErrorActions={
+                        probeOutput.trim() ? (
+                          <Button
+                            size="small"
+                            type="secondary"
+                            onClick={() => void parseAndMergeProbe({ useAI: false })}
+                          >
+                            {bi("改用内置规则引擎提取", "Use Built-in Rule Parser")}
                           </Button>
-                        }
-                        submitLabel={bi("AI 解析并增量合并基线", "AI Parse & Merge")}
-                        onSubmit={() => void parseAndMergeProbe({ useAI: true })}
-                      />
-                    )}
-                    {parseLive && (
-                      <AIProcessCard
-                        live={parseLive}
-                        title={bi("AI 现场回显与多组件架构解析", "AI Evidence & Multi-Component Stack Parsing")}
-                        onAbort={() => {
-                          parseAbortRef.current?.abort();
-                          setParseLive(null);
-                          setDrawerParseCollapsed(false);
-                          setParsing(false);
-                        }}
-                        onRetry={() => void parseAndMergeProbe({ useAI: true })}
-                        onDismiss={() => {
-                          setParseLive(null);
-                          setDrawerParseCollapsed(false);
-                        }}
-                        extraErrorActions={
-                          probeOutput.trim() ? (
-                            <Button
-                              size="small"
-                              type="secondary"
-                              onClick={() => void parseAndMergeProbe({ useAI: false })}
-                            >
-                              {bi("改用内置规则引擎提取", "Use Built-in Rule Parser")}
-                            </Button>
-                          ) : null
-                        }
-                      />
-                    )}
-                  </div>
-                )}
-              </section>
+                        ) : null
+                      }
+                    />
+                  )}
+                </div>
+              )}
             </div>
           );
         })()
@@ -6506,7 +6611,7 @@ export function ImportedBaselineModal({
           </div>
 
           {/* Section 4: Endpoints */}
-          <div className="imp-drawer-sec">
+          <div id="imp-sec-endpoints" className="imp-drawer-sec">
             <div className="imp-drawer-sec-h">
               <h4>{bi("访问入口（VIP / LB / 域名）", "Access Endpoints")}</h4>
               <Button
@@ -6526,7 +6631,7 @@ export function ImportedBaselineModal({
           </div>
 
           {/* Section 5: Structured Runtime Paths & Service Units Editor */}
-          <div className="imp-drawer-sec">
+          <div id="imp-sec-paths" className="imp-drawer-sec">
             <div className="imp-drawer-sec-h">
               <h4>{bi("服务单元与运行路径", "Service Units & Paths")}</h4>
             </div>
@@ -6547,7 +6652,7 @@ export function ImportedBaselineModal({
           </div>
 
           {/* Section 6: Key Parameters & Notes */}
-          <div className="imp-drawer-sec">
+          <div id="imp-sec-params" className="imp-drawer-sec">
             <div className="imp-drawer-sec-h">
               <h4>{bi("关键运行参数", "Key Parameters")}</h4>
               <Button

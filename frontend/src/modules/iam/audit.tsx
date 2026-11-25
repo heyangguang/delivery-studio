@@ -67,6 +67,7 @@ const ACTION_DATA: Record<string, [string, string, string, string]> = {
   "job-runlogs-delete": ["清理执行日志", "交付", "Clear run logs", "Delivery"],
   "cluster-import": ["导入存量集群", "交付", "Import existing cluster", "Delivery"],
   "cluster-baseline-update": ["更新集群基线配置", "交付", "Update cluster baseline", "Delivery"],
+  "cluster-baseline-gaps-update": ["更新基线补采忽略项", "交付", "Update dismissed baseline gaps", "Delivery"],
   "cluster-baseline-ai-gaps": ["AI 深度诊断基线缺口", "AI", "AI diagnose baseline gaps", "AI"],
   "delivery-file-patch": ["热修补交付脚本文件", "交付", "Patch delivery script file", "Delivery"],
   "delivery-file-patch-revert": [

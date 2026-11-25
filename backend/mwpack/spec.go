@@ -64,6 +64,7 @@ type ImportedMeta struct {
 	Companions        []ImportedCompanion `yaml:"companions,omitempty" json:"companions,omitempty"`
 	Packages          []ImportedPkg       `yaml:"packages,omitempty" json:"packages,omitempty"`
 	Notes             string              `yaml:"notes,omitempty" json:"notes,omitempty"`
+	DismissedGaps     []string            `yaml:"dismissed_gaps,omitempty" json:"dismissed_gaps,omitempty"`
 	LastProbedAt      string              `yaml:"last_probed_at,omitempty" json:"last_probed_at,omitempty"`
 	BaselineUpdatedAt string              `yaml:"baseline_updated_at,omitempty" json:"baseline_updated_at,omitempty"`
 	BaselineUpdatedBy string              `yaml:"baseline_updated_by,omitempty" json:"baseline_updated_by,omitempty"`

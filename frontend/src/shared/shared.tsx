@@ -1042,6 +1042,7 @@ export type ImportedMeta = {
   companions?: ImportedCompanion[];
   packages?: ImportedPkg[];
   notes?: string;
+  dismissed_gaps?: string[];
   last_probed_at?: string;
   baseline_updated_at?: string;
   baseline_updated_by?: string;

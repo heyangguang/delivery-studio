@@ -5839,7 +5839,13 @@ export function ClusterRehearsal({
           {(can("delivery.execute") || can("execution.manage")) && (
             <button
               type="button"
-              className={`rh-nav-pill ${autoSummary?.config.enabled ? "on" : ""}`}
+              className={`rh-nav-pill rh-auto-pill ${
+                autoSummary?.config.enabled
+                  ? autoSummary.ready
+                    ? "is-ready"
+                    : "is-warn"
+                  : ""
+              }`}
               onClick={() => setAutoDrawerOpen(true)}
               title={bi(
                 "开启或配置变更演练自动化执行（控制机 Ansible/SSH 或目标机直连 Agent）",

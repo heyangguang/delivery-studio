@@ -4373,7 +4373,7 @@ export function ImportedBaselineModal({
                               type="secondary"
                               loading={autoProbeBusy}
                               disabled={probeGenerating || !probeScript}
-                              icon={<IconThunderbolt />}
+                              icon={<IconThunderbolt style={{ color: "var(--ok)" }} />}
                               onClick={() => void runAutoBaselineProbe()}
                             >
                               {bi("自动执行只读探针", "Auto-Run Probe")}
@@ -4382,7 +4382,7 @@ export function ImportedBaselineModal({
                             <Button
                               size="small"
                               type="outline"
-                              icon={<IconThunderbolt />}
+                              icon={<IconThunderbolt style={{ color: "var(--warn)" }} />}
                               onClick={() => setAutoDrawerOpen(true)}
                             >
                               {bi("配置自动采集", "Setup Automation")}

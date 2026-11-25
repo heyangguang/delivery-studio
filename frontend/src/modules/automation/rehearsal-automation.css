@@ -7,7 +7,51 @@
 }
 
 .rha-drawer-title > svg {
-  color: var(--brand);
+  color: var(--warn);
+}
+
+/* Topbar Automation Pill (in Rehearsal Workbench) */
+.rh-nav-pill.rh-auto-pill > svg {
+  color: var(--warn);
+  font-size: 14px;
+  flex-shrink: 0;
+  transition: transform 0.16s ease, color 0.16s ease;
+}
+
+.rh-nav-pill.rh-auto-pill:hover > svg {
+  transform: scale(1.08);
+}
+
+.rh-nav-pill.rh-auto-pill.is-ready {
+  border-color: var(--ok-line);
+  background: color-mix(in srgb, var(--ok-soft) 55%, var(--surface));
+  color: var(--ink);
+}
+
+.rh-nav-pill.rh-auto-pill.is-ready > svg {
+  color: var(--ok);
+}
+
+.rh-nav-pill.rh-auto-pill.is-ready em {
+  color: var(--ok);
+  font-style: normal;
+  font-weight: 650;
+}
+
+.rh-nav-pill.rh-auto-pill.is-warn {
+  border-color: color-mix(in srgb, var(--warn) 38%, var(--line));
+  background: color-mix(in srgb, var(--warn-soft) 55%, var(--surface));
+  color: var(--ink);
+}
+
+.rh-nav-pill.rh-auto-pill.is-warn > svg {
+  color: var(--warn);
+}
+
+.rh-nav-pill.rh-auto-pill.is-warn em {
+  color: var(--warn);
+  font-style: normal;
+  font-weight: 650;
 }
 
 .rha-cluster-pill {
@@ -676,7 +720,7 @@
 }
 
 .rha-ribbon-title svg {
-  color: var(--brand);
+  color: var(--warn);
 }
 
 .rha-ribbon-r {
@@ -804,8 +848,13 @@
   color: var(--ink-2);
 }
 
+.rha-step-exec-l > svg {
+  color: var(--warn);
+  flex-shrink: 0;
+}
+
 .rha-probe-auto-l svg {
-  color: var(--brand);
+  color: var(--warn);
   flex-shrink: 0;
 }
 

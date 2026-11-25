@@ -1112,7 +1112,7 @@ function ConfigRecord({
           {(can("delivery.execute") || can("execution.manage")) && (
             <Button
               size="small"
-              icon={<IconThunderbolt />}
+              icon={<IconThunderbolt style={{ color: "var(--warn)" }} />}
               onMouseEnter={() => void import("../automation/rehearsal-automation")}
               onClick={() => setAutoDrawerOpen(true)}
             >

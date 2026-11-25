@@ -4897,7 +4897,7 @@ func (s *storeServer) finalizeRehearsal(w http.ResponseWriter, r *http.Request, 
 }
 
 var (
-	reAppliedPatroniKV = regexp.MustCompile(`(?i)(?:^|\s)-[ps]\s+(?:'([a-zA-Z0-9_.-]+)=([^']+)'|"([a-zA-Z0-9_.-]+)=([^"]+)"|([a-zA-Z0-9_.-]+)=(?:'([^']+)'|"([^"]+)"|([^\s'"\\]+)))`)
+	reAppliedPatroniKV = regexp.MustCompile(`(?i)(?:^|\s)(?:-[ps]|--(?:set|parameter))(?:\s+|=)(?:'([a-zA-Z0-9_.-]+)=([^']+)'|"([a-zA-Z0-9_.-]+)=([^"]+)"|([a-zA-Z0-9_.-]+)=(?:'([^']+)'|"([^"]+)"|([^\s'"\\]+)))`)
 	reAppliedAlterSys  = regexp.MustCompile(`(?i)\bALTER\s+SYSTEM\s+SET\s+([a-zA-Z0-9_.-]+)\s*(?:=|TO)\s*'?([^';\n]+)'?`)
 	reAppliedRedisCfg  = regexp.MustCompile(`(?i)\bCONFIG\s+SET\s+([a-zA-Z0-9_.-]+)\s+([^\s'"\n;]+)`)
 	reAppliedHBA       = regexp.MustCompile(`(?i)\b(pg_hba|hostssl\s+\S+|hostnossl\s+\S+|host\s+\S+)`)
@@ -4908,16 +4908,23 @@ func matchPatroniKV(m []string) (string, string) {
 	if len(m) < 9 {
 		return "", ""
 	}
-	if m[1] != "" {
-		return m[1], m[2]
+	var k, v string
+	switch {
+	case m[1] != "":
+		k, v = m[1], m[2]
+	case m[3] != "":
+		k, v = m[3], m[4]
+	case m[5] != "":
+		k, v = m[5], firstNonEmptyStr(m[6], m[7], m[8])
+	default:
+		return "", ""
 	}
-	if m[3] != "" {
-		return m[3], m[4]
+	// Normalize Patroni --set/-s dotted parameter paths (e.g. postgresql.parameters.log_min_duration_statement)
+	// so they match -p keys, drift before-maps, and cross-plan conflict detection consistently.
+	if low := strings.ToLower(k); strings.HasPrefix(low, "postgresql.parameters.") {
+		k = k[len("postgresql.parameters."):]
 	}
-	if m[5] != "" {
-		return m[5], firstNonEmptyStr(m[6], m[7], m[8])
-	}
-	return "", ""
+	return k, v
 }
 
 func extractHBARuleDisplay(rh changeRehearsal, st rehearsalStep) string {

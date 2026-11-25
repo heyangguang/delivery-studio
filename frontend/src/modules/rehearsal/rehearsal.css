@@ -6168,6 +6168,86 @@ body[arco-theme="dark"] .rh-step-where.tone-external .rh-step-where-k {
   background: var(--brand-soft);
   border: 1px solid var(--brand-line);
 }
+.rh-proposal.is-confirm {
+  background: color-mix(in srgb, var(--warn) 6%, var(--surface));
+  border-color: color-mix(in srgb, var(--warn) 34%, var(--line));
+}
+.rh-proposal.is-confirm .rh-proposal-head b {
+  color: var(--warn);
+}
+.rh-corr-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+.rh-corr-head {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--mute);
+}
+.rh-corr-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.rh-corr-item {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.rh-corr-lbl {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-2);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  white-space: nowrap;
+}
+.rh-corr-diff {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 5px;
+  font-size: 12px;
+  min-width: 0;
+}
+.rh-corr-diff del {
+  color: var(--bad);
+  background: var(--bad-soft);
+  padding: 0 5px;
+  border-radius: 4px;
+  text-decoration: line-through;
+  overflow-wrap: anywhere;
+}
+.rh-corr-arrow {
+  color: var(--faint);
+}
+.rh-corr-diff ins {
+  color: var(--ok);
+  background: var(--ok-soft);
+  padding: 0 5px;
+  border-radius: 4px;
+  text-decoration: none;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.rh-corr-why {
+  font-size: 11.5px;
+  color: var(--mute);
+}
 
 .rh-proposal-head b {
   display: inline-flex;

@@ -4152,9 +4152,10 @@ func (s *storeServer) enrichImportedBaselineFromEvidence(
 		DataDirs:     meta.DataDirs,
 		LogDirs:      meta.LogDirs,
 		Params:       params,
-		Packages:     meta.Packages,
-		Notes:        meta.Notes,
-		LastProbedAt: meta.LastProbedAt,
+		Packages:      meta.Packages,
+		Notes:         meta.Notes,
+		DismissedGaps: append([]string(nil), meta.DismissedGaps...),
+		LastProbedAt:  meta.LastProbedAt,
 	}
 	newDep, _, _, newVer, err := buildImportedDeployment(s.plat.cat(), req, meta.BaselineUpdatedBy, now)
 	if err != nil {
@@ -4175,6 +4176,330 @@ func (s *storeServer) enrichImportedBaselineFromEvidence(
 	j.Scheme = mwpack.ImportedSchemeSummary(newDep)
 	j.Updated = now
 	j.Logs = append(j.Logs, fmt.Sprintf("[%s] 由变更演练「%s」自动反哺基线档案（%s）", now, firstNonEmptyStr(sourceTitle, "演练"), strings.Join(summary, "、")))
+	s.mu.Unlock()
+	if err := s.persistJob(j); err == nil {
+		s.mu.Lock()
+		s.jobs[j.ID] = j
+		s.mu.Unlock()
+	}
+	return summary
+}
+
+// applyBaselineCorrectionsToCluster applies engineer-confirmed live corrections (e.g., port 5432 -> 5433,
+// endpoint address, config path, service unit, or param) back into the cluster's baseline so future
+// rehearsals, probes, and overviews use the authoritative live values.
+func (s *storeServer) applyBaselineCorrectionsToCluster(
+	f clusterFacts,
+	user string,
+	corrections []rehearsalBaselineCorrection,
+	sourceTitle, lang string,
+) []string {
+	if f.Current.ID == "" || len(corrections) == 0 {
+		return nil
+	}
+	now := nowStamp()
+	by := firstNonEmptyStr(user, "system")
+
+	// Platform-deployed clusters: never rewrite immutable signed delivery archives; persist confirmed live
+	// corrections cleanly into OutcomeNote & audit logs so all subsequent rehearsals/AI read them directly.
+	if f.Current.DeliveryMode != "imported" {
+		var notes []string
+		var summary []string
+		for _, c := range corrections {
+			nv := strings.TrimSpace(c.NewValue)
+			if nv == "" {
+				continue
+			}
+			lbl := firstNonEmptyStr(strings.TrimSpace(c.Label), strings.TrimSpace(c.Key), c.Kind)
+			ov := strings.TrimSpace(c.OldValue)
+			entry := fmt.Sprintf("%s：%s", lbl, nv)
+			if ov != "" && ov != nv {
+				entry = fmt.Sprintf("%s：%s → %s", lbl, ov, nv)
+			}
+			notes = append(notes, entry)
+			summary = append(summary, entry)
+		}
+		if len(notes) == 0 {
+			return nil
+		}
+		line := fmt.Sprintf("[%s] 演练「%s」实测校准：%s", now[:min(10, len(now))], firstNonEmptyStr(sourceTitle, "变更演练"), strings.Join(notes, "；"))
+		s.mu.Lock()
+		j, exists := s.jobs[f.Current.ID]
+		if !exists {
+			s.mu.Unlock()
+			return nil
+		}
+		if !strings.Contains(j.OutcomeNote, strings.Join(notes, "；")) {
+			if strings.TrimSpace(j.OutcomeNote) != "" {
+				j.OutcomeNote = strings.TrimSpace(j.OutcomeNote) + "\n" + line
+			} else {
+				j.OutcomeNote = line
+			}
+		}
+		j.Updated = now
+		j.Logs = append(j.Logs, fmt.Sprintf("[%s] 由 %s 确认并反哺现场基线校准（%s）", now, by, strings.Join(summary, "、")))
+		s.mu.Unlock()
+		if err := s.persistJob(j); err == nil {
+			s.mu.Lock()
+			s.jobs[j.ID] = j
+			s.mu.Unlock()
+		}
+		return summary
+	}
+
+	dep := s.readSpec(f.Current.ID)
+	if dep == nil || dep.DeliveryMode != "imported" {
+		return nil
+	}
+	if dep.Imported == nil {
+		dep.Imported = &mwpack.ImportedMeta{}
+	}
+	meta := dep.Imported
+
+	compID := f.Current.AppID
+	displayName := firstNonEmptyStr(meta.DisplayName, f.Current.AppName, compID)
+	if len(dep.Instances) > 0 && dep.Instances[0].Component != "" {
+		compID = dep.Instances[0].Component
+	}
+
+	replaceOrAddSlice := func(dst *[]string, oldVal, newVal string) bool {
+		if newVal == "" {
+			return false
+		}
+		for i, cur := range *dst {
+			if oldVal != "" && strings.EqualFold(strings.TrimSpace(cur), oldVal) {
+				if strings.TrimSpace(cur) == newVal {
+					return false
+				}
+				(*dst)[i] = newVal
+				return true
+			}
+		}
+		for _, cur := range *dst {
+			if strings.EqualFold(strings.TrimSpace(cur), newVal) {
+				return false
+			}
+		}
+		*dst = append(*dst, newVal)
+		return true
+	}
+
+	extractPort := func(v string) string {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			return ""
+		}
+		if idx := strings.LastIndex(v, ":"); idx >= 0 && idx+1 < len(v) {
+			p := strings.TrimSpace(v[idx+1:])
+			if _, err := strconv.Atoi(p); err == nil {
+				return p
+			}
+		}
+		if _, err := strconv.Atoi(v); err == nil {
+			return v
+		}
+		return ""
+	}
+
+	var summary []string
+	changed := false
+	for _, c := range corrections {
+		nv := strings.TrimSpace(c.NewValue)
+		ov := strings.TrimSpace(c.OldValue)
+		if nv == "" {
+			continue
+		}
+		lbl := firstNonEmptyStr(strings.TrimSpace(c.Label), strings.TrimSpace(c.Key), c.Kind)
+		applied := false
+
+		switch strings.ToLower(strings.TrimSpace(c.Kind)) {
+		case "endpoint", "port":
+			oldPort := extractPort(ov)
+			newPort := extractPort(nv)
+			oldHost := ""
+			if idx := strings.LastIndex(ov, ":"); idx > 0 {
+				oldHost = strings.ToLower(strings.TrimSpace(ov[:idx]))
+			}
+			newHost := ""
+			if idx := strings.LastIndex(nv, ":"); idx > 0 {
+				newHost = strings.ToLower(strings.TrimSpace(nv[:idx]))
+			}
+			for i := range meta.Endpoints {
+				addr := strings.TrimSpace(meta.Endpoints[i].Address)
+				if addr == "" {
+					continue
+				}
+				addrLower := strings.ToLower(addr)
+				if ov != "" && strings.EqualFold(addr, ov) {
+					meta.Endpoints[i].Address = nv
+					applied = true
+					continue
+				}
+				if newHost != "" && strings.HasPrefix(addrLower, newHost+":") && addr != nv {
+					meta.Endpoints[i].Address = nv
+					applied = true
+					continue
+				}
+				if oldHost != "" && strings.HasPrefix(addrLower, oldHost+":") {
+					if newHost != "" {
+						meta.Endpoints[i].Address = nv
+					} else if newPort != "" {
+						meta.Endpoints[i].Address = addr[:strings.LastIndex(addr, ":")+1] + newPort
+					}
+					applied = true
+					continue
+				}
+				if oldPort != "" && newPort != "" && strings.HasSuffix(addr, ":"+oldPort) {
+					meta.Endpoints[i].Address = strings.TrimSuffix(addr, ":"+oldPort) + ":" + newPort
+					applied = true
+				}
+			}
+			if !applied && strings.Contains(nv, ":") && newPort != "" {
+				dup := false
+				for _, ep := range meta.Endpoints {
+					if strings.EqualFold(strings.TrimSpace(ep.Address), nv) {
+						dup = true
+						break
+					}
+				}
+				if !dup {
+					meta.Endpoints = append(meta.Endpoints, mwpack.ImportedEndpoint{
+						Name:    firstNonEmptyStr(strings.TrimSpace(c.Key), strings.TrimSpace(c.Label), tr(lang, "访问入口", "Endpoint")),
+						Address: nv,
+					})
+					applied = true
+				}
+			}
+			// Also calibrate matching port param if present in baseline params
+			if len(dep.Instances) > 0 && dep.Instances[0].Params != nil && newPort != "" {
+				for pk, pv := range dep.Instances[0].Params {
+					pStr := strings.TrimSpace(fmt.Sprint(pv))
+					if (strings.EqualFold(pk, c.Key) || strings.Contains(strings.ToLower(pk), "port")) && (oldPort != "" && pStr == oldPort) {
+						dep.Instances[0].Params[pk] = newPort
+						applied = true
+					}
+				}
+			}
+		case "config_path":
+			applied = replaceOrAddSlice(&meta.ConfigPaths, ov, nv)
+		case "service_unit":
+			applied = replaceOrAddSlice(&meta.ServiceUnits, ov, nv)
+		case "data_dir":
+			applied = replaceOrAddSlice(&meta.DataDirs, ov, nv)
+		case "log_dir":
+			applied = replaceOrAddSlice(&meta.LogDirs, ov, nv)
+		case "param":
+			if len(dep.Instances) > 0 && strings.TrimSpace(c.Key) != "" {
+				if dep.Instances[0].Params == nil {
+					dep.Instances[0].Params = map[string]any{}
+				}
+				if fmt.Sprint(dep.Instances[0].Params[c.Key]) != nv {
+					dep.Instances[0].Params[c.Key] = nv
+					applied = true
+				}
+			}
+		}
+
+		if !applied {
+			noteLine := fmt.Sprintf("现场实测校准（%s）：%s", lbl, nv)
+			if ov != "" && ov != nv {
+				noteLine = fmt.Sprintf("现场实测校准（%s）：%s → %s", lbl, ov, nv)
+			}
+			if !strings.Contains(meta.Notes, noteLine) {
+				if strings.TrimSpace(meta.Notes) != "" {
+					meta.Notes = strings.TrimSpace(meta.Notes) + "\n" + noteLine
+				} else {
+					meta.Notes = noteLine
+				}
+				applied = true
+			}
+		}
+		if applied {
+			changed = true
+			if ov != "" && ov != nv {
+				summary = append(summary, fmt.Sprintf("%s %s→%s", lbl, ov, nv))
+			} else {
+				summary = append(summary, fmt.Sprintf("%s %s", lbl, nv))
+			}
+		}
+	}
+
+	if !changed {
+		return nil
+	}
+
+	meta.BaselineUpdatedAt = now
+	meta.BaselineUpdatedBy = by
+
+	hostsIn := make([]importHostInput, 0, len(dep.Hosts))
+	roleByHost := map[string]string{}
+	if len(dep.Instances) > 0 {
+		for rk, hs := range dep.Instances[0].Placement {
+			for _, hn := range hs {
+				if _, ok := roleByHost[hn]; !ok {
+					roleByHost[hn] = rk
+				}
+			}
+		}
+	}
+	for _, h := range dep.Hosts {
+		hostsIn = append(hostsIn, importHostInput{Name: h.Name, IP: h.IP, Role: roleByHost[h.Name], Disk: h.Disk})
+	}
+	var params map[string]any
+	ver := f.Current.Version
+	if len(dep.Instances) > 0 {
+		params = dep.Instances[0].Params
+		if dep.Instances[0].Version != "" {
+			ver = dep.Instances[0].Version
+		}
+	}
+	req := importClusterReq{
+		ID:            dep.ID,
+		Title:         dep.Title,
+		Component:     compID,
+		DisplayName:   displayName,
+		Category:      meta.Category,
+		Icon:          meta.Icon,
+		Color:         meta.Color,
+		Version:       ver,
+		ExactVersion:  meta.ExactVersion,
+		Platform:      dep.Platform,
+		OSDetail:      meta.OSDetail,
+		SourceKind:    meta.SourceKind,
+		DeployMethod:  meta.DeployMethod,
+		ArchSummary:   meta.ArchSummary,
+		Hosts:         hostsIn,
+		Endpoints:     meta.Endpoints,
+		Companions:    meta.Companions,
+		ServiceUnits:  meta.ServiceUnits,
+		ConfigPaths:   meta.ConfigPaths,
+		DataDirs:      meta.DataDirs,
+		LogDirs:       meta.LogDirs,
+		Params:        params,
+		Packages:      meta.Packages,
+		Notes:         meta.Notes,
+		DismissedGaps: append([]string(nil), meta.DismissedGaps...),
+		LastProbedAt:  meta.LastProbedAt,
+	}
+	newDep, _, _, newVer, err := buildImportedDeployment(s.plat.cat(), req, by, now)
+	if err != nil {
+		return nil
+	}
+	plan := mwpack.SolveImported(s.plat.cat(), newDep)
+
+	s.jobPersistMu.Lock()
+	defer s.jobPersistMu.Unlock()
+	if err := writeImportedPlanFiles(s.jobDir(f.Current.ID), newDep, plan); err != nil {
+		return nil
+	}
+	s.invalidateJobCaches(f.Current.ID)
+
+	s.mu.Lock()
+	j := s.jobs[f.Current.ID]
+	j.Version = newVer
+	j.Scheme = mwpack.ImportedSchemeSummary(newDep)
+	j.Updated = now
+	j.Logs = append(j.Logs, fmt.Sprintf("[%s] 由 %s 在演练「%s」确认并反哺校准基线（%s）", now, by, firstNonEmptyStr(sourceTitle, "演练"), strings.Join(summary, "、")))
 	s.mu.Unlock()
 	if err := s.persistJob(j); err == nil {
 		s.mu.Lock()

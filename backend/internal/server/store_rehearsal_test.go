@@ -2102,3 +2102,127 @@ func TestRehearsalExtraScopePersistedAndHonoredInProbeReplan(t *testing.T) {
 		}
 	}
 }
+
+func TestRehearsalConfirmOverrideAndFeedImportedBaseline(t *testing.T) {
+	s, _ := testStore(t)
+	admin, csrf := storeLogin(t, s, "admin")
+
+	// Import a PostgreSQL cluster whose baseline initially recorded stale VIP port 5432.
+	impBody := `{
+		"id": "pg-port-corr",
+		"component": "postgresql",
+		"version": "17.11",
+		"hosts": [
+			{"name": "db-node-01", "ip": "172.30.2.58", "role": "primary"},
+			{"name": "db-node-03", "ip": "172.30.2.60", "role": "replica"}
+		],
+		"endpoints": [
+			{"name": "读写 VIP", "address": "jfrog-artifactory.postgresql.private.toolchain.cn.vwgroup.com:5432"}
+		]
+	}`
+	iw := storeRequest(s, "POST", "/api/clusters/import", strings.NewReader(impBody), admin, csrf)
+	if iw.Code != 200 && iw.Code != 201 {
+		t.Fatalf("import cluster failed: %d %s", iw.Code, iw.Body.String())
+	}
+
+	rid := "d4e5f6a1b209"
+	rh := changeRehearsal{
+		ID:        rid,
+		ClusterID: "pg-port-corr",
+		Title:     "验证入口路由验收",
+		Goal:      "验证读写 VIP 路由至原主库",
+		Stage:     "rehearsing",
+		Mode:      "full",
+		Owner:     "admin",
+		Steps: []rehearsalStep{
+			{
+				ID:         "s1",
+				Phase:      "verify",
+				Order:      1,
+				Title:      "验收业务读写入口",
+				TargetRole: "仅在从库 db-node-03 (172.30.2.60) 执行",
+				Command:    `psql -X -W "host=jfrog-artifactory.postgresql.private.toolchain.cn.vwgroup.com port=5432 dbname=postgres user=postgres"`,
+				Expect:     "VIP:5432 返回 172.30.2.58|f|off",
+				Status:     "pending",
+			},
+		},
+		CreatedAt: nowStamp(),
+		UpdatedAt: nowStamp(),
+	}
+	rehearsalMu.Lock()
+	if err := s.saveRehearsal(rh); err != nil {
+		rehearsalMu.Unlock()
+		t.Fatalf("save seed rehearsal: %v", err)
+	}
+	rehearsalMu.Unlock()
+
+	verifyResp := `{
+		"thinking": "工程师改用 port=5433 已成功连到原主库 172.30.2.58 且可读写，原基线 5432 大概率登记有误，应征询工程师确认而非强迫重测 5432。",
+		"verdict": "failed",
+		"action": "confirm_override",
+		"diagnosis": "检测到现场改用 5433 已验证连通原主库且可读写，但原步骤与集群基线登记的是 5432。请确认是否以现场实测 5433 为准直接通过并反哺基线？",
+		"confirm_summary": "db-node-03 经读写 VIP:5433 成功路由至原主库 172.30.2.58 且 transaction_read_only=off，验收通过。",
+		"verified_facts": ["db-node-03 经 jfrog-artifactory...:5433 返回 172.30.2.58|f|off"],
+		"missing_items": [],
+		"target_role": "仅在从库 db-node-03 (172.30.2.60) 执行",
+		"command": "psql -X -W \"host=jfrog-artifactory.postgresql.private.toolchain.cn.vwgroup.com port=5433 dbname=postgres user=postgres\"",
+		"expect": "VIP:5433 返回 172.30.2.58|f|off",
+		"baseline_corrections": [
+			{
+				"kind": "endpoint",
+				"label": "访问入口端口",
+				"old_value": "jfrog-artifactory.postgresql.private.toolchain.cn.vwgroup.com:5432",
+				"new_value": "jfrog-artifactory.postgresql.private.toolchain.cn.vwgroup.com:5433",
+				"reason": "现场实测真实读写入口端口为 5433"
+			}
+		]
+	}`
+	srv, _ := fakeModel(t, verifyResp)
+	enableAI(t, s, srv.URL, 1)
+
+	vw := storeRequest(s, "POST", "/api/clusters/pg-port-corr/rehearsals/"+rid+"/steps/s1/verify",
+		strings.NewReader(`{"output":"psql host=... port=5433 -> 172.30.2.58|f|off"}`), admin, csrf)
+	if vw.Code != 200 {
+		t.Fatalf("verify failed: %d %s", vw.Code, vw.Body.String())
+	}
+	var afterVerify changeRehearsal
+	_ = json.Unmarshal(vw.Body.Bytes(), &afterVerify)
+	if afterVerify.Steps[0].Proposal == nil || afterVerify.Steps[0].Proposal.Action != "confirm_override" {
+		t.Fatalf("expected confirm_override proposal, got: %+v", afterVerify.Steps[0].Proposal)
+	}
+	if len(afterVerify.Steps[0].Proposal.BaselineCorrections) != 1 {
+		t.Fatalf("expected 1 baseline correction, got: %+v", afterVerify.Steps[0].Proposal.BaselineCorrections)
+	}
+
+	// Engineer confirms live 5433 & feeds back into cluster baseline!
+	aw := storeRequest(s, "POST", "/api/clusters/pg-port-corr/rehearsals/"+rid+"/steps/s1/apply",
+		strings.NewReader(`{"accept_passed":true,"feed_baseline":true}`), admin, csrf)
+	if aw.Code != 200 {
+		t.Fatalf("apply confirm_override failed: %d %s", aw.Code, aw.Body.String())
+	}
+	var afterApply changeRehearsal
+	_ = json.Unmarshal(aw.Body.Bytes(), &afterApply)
+	st := afterApply.Steps[0]
+	if st.Status != "passed" || !st.VerifiedByAI || st.Proposal != nil {
+		t.Fatalf("expected step passed & proposal cleared, got status=%q verified=%v proposal=%+v", st.Status, st.VerifiedByAI, st.Proposal)
+	}
+	if !strings.Contains(st.Command, "port=5433") || !strings.Contains(st.Expect, "5433") {
+		t.Fatalf("expected step command & expect updated to 5433, got cmd=%q expect=%q", st.Command, st.Expect)
+	}
+	if len(afterApply.BaselineEnriched) == 0 {
+		t.Fatalf("expected baseline_enriched summary after feed_baseline=true")
+	}
+
+	// Verify cluster baseline endpoint was actually updated in-place from :5432 to :5433!
+	facts, ok := s.clusterFactsFor("admin", "pg-port-corr")
+	if !ok {
+		t.Fatalf("cluster facts missing")
+	}
+	dep := s.readSpec(facts.Current.ID)
+	if dep == nil || dep.Imported == nil || len(dep.Imported.Endpoints) != 1 {
+		t.Fatalf("unexpected imported baseline: %+v", dep)
+	}
+	if dep.Imported.Endpoints[0].Address != "jfrog-artifactory.postgresql.private.toolchain.cn.vwgroup.com:5433" {
+		t.Fatalf("expected cluster baseline endpoint updated to :5433, got %q", dep.Imported.Endpoints[0].Address)
+	}
+}

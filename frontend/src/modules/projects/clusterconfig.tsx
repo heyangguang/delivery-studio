@@ -47,7 +47,7 @@ import type {
 } from "../../shared/shared";
 import { go } from "../../app/router";
 import { AppGlyph, Segmented } from "../../design/ui";
-import { cachedDetail, putDetailCache } from "./deliveries";
+import { cachedDetail, putDetailCache, subscribeDetailCache } from "./deliveries";
 import {
   buildClusterStackPills,
   computeEffectiveClusterChanges,
@@ -394,11 +394,25 @@ function ConfigRecord({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [historyOpen]);
+  useEffect(
+    () =>
+      subscribeDetailCache((changedId, next) => {
+        if (changedId === p.id) {
+          setData(next);
+          setLoading(false);
+          setError("");
+        }
+      }),
+    [p.id],
+  );
   useEffect(() => {
     const abort = new AbortController();
     if (!cachedDetail(p.id)) setLoading(true);
     setError("");
-    api<JobDetail>(`/api/jobs/${p.id}`, { signal: abort.signal })
+    api<JobDetail>(`/api/jobs/${encodeURIComponent(p.id)}`, {
+      signal: abort.signal,
+      cache: "no-store",
+    })
       .then((d) => {
         if (!abort.signal.aborted) {
           putDetailCache(p.id, d);
@@ -2641,7 +2655,9 @@ function ConfigRecord({
               if (p.id) {
                 putDetailCache(
                   p.id,
-                  await api<JobDetail>(`/api/jobs/${encodeURIComponent(p.id)}`),
+                  await api<JobDetail>(`/api/jobs/${encodeURIComponent(p.id)}`, {
+                    cache: "no-store",
+                  }),
                 );
               }
               setRetry((x) => x + 1);

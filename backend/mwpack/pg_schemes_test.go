@@ -239,3 +239,54 @@ func TestBuiltinSchemeTitlesDescribeCapabilities(t *testing.T) {
 		}
 	}
 }
+
+func TestLBBindsIgnoreHiddenVIPWhenHADisabled(t *testing.T) {
+	cat := fullCatalog(t)
+	for _, tc := range []struct {
+		name     string
+		ha       string
+		wantAddr string
+	}{
+		{name: "ha_none_ignores_hidden_vip", ha: "none", wantAddr: "10.77.0.21"},
+		{name: "ha_keepalived_uses_vip", ha: "keepalived", wantAddr: "10.77.0.99"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := &mwpack.Deployment{
+				Schema: mwpack.DeploymentSchema,
+				ID:     "lb-vip-guard",
+				Hosts: []mwpack.Host{
+					{Name: "pg1", IP: "10.77.0.11", Disk: "/dev/vdb"},
+					{Name: "pg2", IP: "10.77.0.12", Disk: "/dev/vdb"},
+					{Name: "lb1", IP: "10.77.0.21"},
+					{Name: "lb2", IP: "10.77.0.22"},
+				},
+				Instances: []mwpack.InstanceSpec{
+					{
+						ID:        "pg",
+						Component: "postgresql",
+						Placement: map[string][]string{"primary": {"pg1"}, "replica": {"pg2"}},
+						Params:    map[string]any{"deployment_mode": "patroni", "tls": false, "tde": false, "client_cidr": "10.77.0.0/24"},
+					},
+					{
+						ID:        "lb",
+						Component: "haproxy",
+						Placement: map[string][]string{"balancer": {"lb1", "lb2"}},
+						Params:    map[string]any{"ha": tc.ha, "vip": "10.77.0.99", "vip_interface": "eth0"},
+						Binds:     []mwpack.BindSpec{{Endpoint: "pg.writer", Listen: 5435}},
+					},
+				},
+			}
+			p := mwpack.Solve(cat, d)
+			if err := p.Err(); err != nil {
+				t.Fatalf("Solve failed: %v", err)
+			}
+			front, ok := p.Instance("pg").Fronts["writer"]
+			if !ok {
+				t.Fatalf("missing pg.Fronts[writer]: %+v", p.Instance("pg").Fronts)
+			}
+			if front.Address != tc.wantAddr {
+				t.Fatalf("Fronts[writer].Address = %q, want %q", front.Address, tc.wantAddr)
+			}
+		})
+	}
+}

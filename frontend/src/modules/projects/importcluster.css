@@ -232,10 +232,12 @@ body[arco-theme="dark"] {
   min-width: 0;
 }
 
-.imp-card-head h2 {
+.imp-card-head h2,
+.imp-card-head-title h2 {
   margin: 0;
   font-size: 14.5px;
   font-weight: 650;
+  line-height: 1.35;
   color: var(--ink);
   letter-spacing: -0.015em;
   display: flex;
@@ -4223,6 +4225,7 @@ body[arco-theme="dark"] .imp-compose-box::after {
 
 .imp-review-adv {
   padding: 0 !important;
+  gap: 0 !important;
   overflow: hidden;
 }
 
@@ -4230,8 +4233,8 @@ body[arco-theme="dark"] .imp-compose-box::after {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 14px 18px;
+  gap: 10px 14px;
+  padding: 10px 16px;
   cursor: pointer;
   user-select: none;
   flex-wrap: wrap;
@@ -4239,26 +4242,69 @@ body[arco-theme="dark"] .imp-compose-box::after {
 }
 
 .imp-review-adv-head:hover {
-  background: var(--surface-hover, var(--surface-2));
+  background: var(--hover);
+}
+
+.imp-review-adv-head .imp-review-sec-title {
+  align-items: center;
+  gap: 9px;
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+.imp-review-adv-head .imp-sec-index {
+  margin-top: 0;
+}
+
+.imp-review-adv-head .imp-card-head-title {
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  min-width: 0;
+}
+
+.imp-review-adv-head h2 {
+  font-size: 14px;
+  font-weight: 630;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .imp-review-adv-pills {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 5px;
+  gap: 5px;
+  margin-top: 0;
+}
+
+.imp-review-adv-pills .imp-review-kpi {
+  background: var(--surface-2);
+  color: var(--mute);
+  font-weight: 540;
 }
 
 .imp-review-adv-toggle {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: var(--surface);
   font-size: 12px;
   font-weight: 560;
   color: var(--ink-2);
   white-space: nowrap;
   flex-shrink: 0;
+  transition: color 0.14s ease, border-color 0.14s ease, background-color 0.14s ease;
+}
+
+.imp-review-adv-head:hover .imp-review-adv-toggle {
+  color: var(--ink);
+  border-color: var(--line-strong);
 }
 
 .imp-review-adv-body {

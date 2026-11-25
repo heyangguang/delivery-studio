@@ -89,12 +89,13 @@ func assembleRuntime(def mwpack.PlatformDef, r *pkglib.PyRuntime, store *pkglib.
 	if err != nil {
 		return nil, err
 	}
+	toLF := func(s string) []byte { return []byte(strings.ReplaceAll(s, "\r\n", "\n")) }
 	out := map[string]deliveryFile{
-		"middleware-automation/bootstrap/bootstrap-ansible.sh": {[]byte(strings.ReplaceAll(string(boot), "__ANSIBLE__", r.Ansible)), 0700},
-		"middleware-automation/bootstrap/run-ansible.py":       {runner, 0600},
-		"middleware-automation/bootstrap/requirements.lock":    {[]byte(r.Lock()), 0600},
-		"middleware-automation/bin/ansible-playbook":           {[]byte(fmt.Sprintf(ansibleWrapper, "playbook")), 0700},
-		"middleware-automation/bin/ansible-inventory":          {[]byte(fmt.Sprintf(ansibleWrapper, "inventory")), 0700},
+		"middleware-automation/bootstrap/bootstrap-ansible.sh": {toLF(strings.ReplaceAll(string(boot), "__ANSIBLE__", r.Ansible)), 0700},
+		"middleware-automation/bootstrap/run-ansible.py":       {toLF(string(runner)), 0600},
+		"middleware-automation/bootstrap/requirements.lock":    {toLF(r.Lock()), 0600},
+		"middleware-automation/bin/ansible-playbook":           {toLF(fmt.Sprintf(ansibleWrapper, "playbook")), 0700},
+		"middleware-automation/bin/ansible-inventory":          {toLF(fmt.Sprintf(ansibleWrapper, "inventory")), 0700},
 	}
 	for _, w := range r.Wheels {
 		data, err := store.WheelData(w)

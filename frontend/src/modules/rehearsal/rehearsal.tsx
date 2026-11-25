@@ -51,8 +51,8 @@ import {
   IconUpload,
 } from "@arco-design/web-react/icon";
 import {
-  ClusterAutomationDrawer,
   LiveExecLogCard,
+  navigateToClusterAutomation,
   pollRehearsalExecTask,
 } from "../automation/rehearsal-automation";
 import {
@@ -4799,7 +4799,6 @@ export function ClusterRehearsal({
   );
   const [loadErr, setLoadErr] = useState("");
   const [autoSummary, setAutoSummary] = useState<ClusterAutomationSummary | null>(null);
-  const [autoDrawerOpen, setAutoDrawerOpen] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -5847,10 +5846,15 @@ export function ClusterRehearsal({
                     : "is-warn"
                   : ""
               }`}
-              onClick={() => setAutoDrawerOpen(true)}
+              onClick={() =>
+                navigateToClusterAutomation(c.id, {
+                  tab: "rehearsal",
+                  rehearsal: activeId || undefined,
+                })
+              }
               title={bi(
-                "开启或配置变更演练自动化执行（控制机 Ansible/SSH 或目标机直连 Agent）",
-                "Configure automated rehearsal execution (Controller Ansible/SSH or Direct Target Agent)",
+                "前往「集群 → 配置 → 自动化执行」查看或配置自动化通道",
+                "Open Cluster → Config → Automation to configure execution channel",
               )}
             >
               <IconThunderbolt />
@@ -6732,7 +6736,12 @@ export function ClusterRehearsal({
               pick={pick}
               aiOpts={aiOpts}
               autoSummary={autoSummary}
-              onOpenAutoDrawer={() => setAutoDrawerOpen(true)}
+              onOpenAutoDrawer={() =>
+                navigateToClusterAutomation(c.id, {
+                  tab: "rehearsal",
+                  rehearsal: activeId || undefined,
+                })
+              }
               onListChanged={() => loadList(false)}
               onSessionSync={syncSessionInList}
               onClusterChanged={onClusterChanged}
@@ -6776,12 +6785,6 @@ export function ClusterRehearsal({
           />
         </Modal>
       )}
-      <ClusterAutomationDrawer
-        visible={autoDrawerOpen}
-        clusterId={c.id}
-        onClose={() => setAutoDrawerOpen(false)}
-        onChanged={setAutoSummary}
-      />
     </div>
   );
 }
@@ -10668,7 +10671,9 @@ function RehearsalSessionView({
                     icon={<IconSettings />}
                     onClick={onOpenAutoDrawer}
                   >
-                    {autoSummary?.ready ? bi("切换接入方式", "Settings") : bi("开启自动化采集", "Enable Automation")}
+                    {autoSummary?.ready
+                      ? bi("管理通道", "Manage Channel")
+                      : bi("前往开启自动化", "Configure Automation")}
                   </Button>
                 </div>
               </div>
@@ -13705,7 +13710,7 @@ const StepRow = React.memo(function StepRow({
                   icon={<IconSettings />}
                   onClick={onOpenAutoDrawer}
                 >
-                  {bi("通道离线 · 点此接入", "Channel Offline · Setup")}
+                  {bi("通道离线 · 前往配置", "Channel Offline · Setup")}
                 </Button>
               )}
             </div>

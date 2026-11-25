@@ -545,25 +545,45 @@ func (st aiSettings) aiProvidersFor(feature string) []aiProvider {
 // aiProvidersForPick is aiProvidersFor with the person's own choice of model first, when it is one they may use.
 func (st aiSettings) aiProvidersForPick(feature, pick string) []aiProvider {
 	base := st.aiProvidersFor(feature)
+	pick = strings.TrimSpace(pick)
 	if pick == "" {
 		return base
 	}
-	allowed := false
+	f := st.Features[feature]
+	allowed := pick == f.Primary || pick == f.Backup
 	for _, r := range st.UserModels {
 		allowed = allowed || r == pick
 	}
 	if !allowed {
 		return base
 	}
+	return st.promotePickedProvider(base, pick)
+}
+
+func (st aiSettings) promotePickedProvider(base []aiProvider, pick string) []aiProvider {
 	pid, mid, _ := strings.Cut(pick, "|")
 	for _, p := range st.Providers {
 		if p.ID != pid || !p.Enabled || (p.KeyEnc == "" && !p.Private) || (st.PrivateOnly && !p.Private) {
 			continue
 		}
-		if m, ok := p.model(mid); ok && m.Enabled {
-			out := []aiProvider{p.withModel(m)}
+		var chosen aiModel
+		found := false
+		if mid != "" {
+			if m, ok := p.model(mid); ok && m.Enabled {
+				chosen, found = m, true
+			}
+		} else {
+			for _, m := range p.Models {
+				if m.Enabled {
+					chosen, found = m, true
+					break
+				}
+			}
+		}
+		if found {
+			out := []aiProvider{p.withModel(chosen)}
 			for _, b := range base {
-				if b.ID != pid || b.Model != mid {
+				if b.ID != p.ID || b.Model != chosen.ID {
 					out = append(out, b)
 				}
 			}
@@ -571,6 +591,18 @@ func (st aiSettings) aiProvidersForPick(feature, pick string) []aiProvider {
 		}
 	}
 	return base
+}
+
+// aiProvidersForUser resolves the ordered provider list for a specific user & feature,
+// honoring user-picked models in UserModels, feature Primary/Backup, and any enabled
+// model selected by an AI administrator (ai.settings).
+func (s *storeServer) aiProvidersForUser(st aiSettings, user, feature, pick string) []aiProvider {
+	pick = strings.TrimSpace(pick)
+	providers := st.aiProvidersForPick(feature, pick)
+	if pick != "" && s.can(user, "ai.settings") {
+		providers = st.promotePickedProvider(providers, pick)
+	}
+	return providers
 }
 
 // pickable is what one person sees in the model menu of a conversation.
@@ -615,7 +647,7 @@ func (s *storeServer) aiModels() map[string]any {
 	for _, ref := range st.UserModels {
 		pid, mid, _ := strings.Cut(ref, "|")
 		for _, p := range st.Providers {
-			if p.ID != pid || !p.Enabled {
+			if p.ID != pid || !p.Enabled || (p.KeyEnc == "" && !p.Private) || (st.PrivateOnly && !p.Private) {
 				continue
 			}
 			if m, ok := p.model(mid); ok && m.Enabled {

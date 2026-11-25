@@ -536,7 +536,7 @@ func (s *storeServer) assistantChat(w http.ResponseWriter, r *http.Request, user
 		return
 	}
 	st := s.aiLoad()
-	providers := st.aiProvidersForPick(feature, in.Model)
+	providers := s.aiProvidersForUser(st, user.User, feature, in.Model)
 	if len(providers) == 0 {
 		s.fail(w, 409, "没有可用的模型供应商，请管理员在平台设置 → AI 中配置")
 		return

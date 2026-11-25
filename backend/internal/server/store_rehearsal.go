@@ -992,39 +992,7 @@ func (s *storeServer) rehearsalCheckAI(user string, needVision bool, pick string
 	}
 	st := s.aiLoad()
 	pick = strings.TrimSpace(pick)
-	providers := st.aiProvidersForPick("change_rehearsal", pick)
-	if pick != "" && s.can(user, "ai.settings") {
-		pid, mid, _ := strings.Cut(pick, "|")
-		for _, p := range st.Providers {
-			if p.ID != pid || !p.Enabled || (p.KeyEnc == "" && !p.Private) || (st.PrivateOnly && !p.Private) {
-				continue
-			}
-			var chosen aiModel
-			found := false
-			if mid != "" {
-				if m, ok := p.model(mid); ok && m.Enabled {
-					chosen, found = m, true
-				}
-			} else {
-				for _, m := range p.Models {
-					if m.Enabled {
-						chosen, found = m, true
-						break
-					}
-				}
-			}
-			if found {
-				picked := []aiProvider{p.withModel(chosen)}
-				for _, b := range providers {
-					if b.ID != p.ID || b.Model != chosen.ID {
-						picked = append(picked, b)
-					}
-				}
-				providers = picked
-				break
-			}
-		}
-	}
+	providers := s.aiProvidersForUser(st, user, "change_rehearsal", pick)
 	if len(providers) == 0 {
 		return nil, 409, fmt.Errorf("没有可用的模型供应商，请管理员在平台设置 → AI 中配置模型")
 	}

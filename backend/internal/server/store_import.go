@@ -968,9 +968,9 @@ func (s *storeServer) importProbeScriptHandler(w http.ResponseWriter, r *http.Re
 			aiNote = tr(lang, "未开启 AI 助手，已自动使用 100% 静态只读标准探针", "AI is disabled; using 100% static read-only probe")
 		} else {
 			st := s.aiLoad()
-			providers := st.aiProvidersForPick("chat", req.Model)
+			providers := s.aiProvidersForUser(st, session.User, "assistant", req.Model)
 			if len(providers) == 0 {
-				providers = st.aiProvidersForPick("rehearsal", req.Model)
+				providers = s.aiProvidersForUser(st, session.User, "change_rehearsal", req.Model)
 			}
 			if len(providers) > 0 && (st.MonthlyLimit <= 0 || s.aiCallsThisMonth(session.User) < st.MonthlyLimit) {
 				aiScript, aiTrace, status, aiErr := s.aiBuildImportProbeScript(r, providers, session.User, req, existing, selectedGaps, effMode, baseScript, lang, ev)
@@ -1259,9 +1259,9 @@ func (s *storeServer) importDiagnoseGapsHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 	st := s.aiLoad()
-	providers := st.aiProvidersForPick("chat", req.Model)
+	providers := s.aiProvidersForUser(st, session.User, "assistant", req.Model)
 	if len(providers) == 0 {
-		providers = st.aiProvidersForPick("rehearsal", req.Model)
+		providers = s.aiProvidersForUser(st, session.User, "change_rehearsal", req.Model)
 	}
 	if len(providers) == 0 || (st.MonthlyLimit > 0 && s.aiCallsThisMonth(session.User) >= st.MonthlyLimit) {
 		finishImportStreamResp(w, ev, map[string]any{
@@ -1514,12 +1514,20 @@ func (s *storeServer) importParseHandler(w http.ResponseWriter, r *http.Request,
 
 	if wantAI && s.aiStatusFor(session.User).Enabled {
 		st := s.aiLoad()
-		providers := st.aiProvidersForPick("chat", req.Model)
+		providers := s.aiProvidersForUser(st, session.User, "assistant", req.Model)
 		if len(providers) == 0 {
-			providers = st.aiProvidersForPick("rehearsal", req.Model)
+			providers = s.aiProvidersForUser(st, session.User, "change_rehearsal", req.Model)
 		}
 		if len(providers) > 0 && (st.MonthlyLimit <= 0 || s.aiCallsThisMonth(session.User) < st.MonthlyLimit) {
 			if len(req.Images) > 0 && providers[0].Vision == "no" {
+				if strings.TrimSpace(req.Model) != "" {
+					msg := tr(lang,
+						fmt.Sprintf("所选模型（%s）不支持识别截图，请切换支持视觉的模型或改贴文本回显", providers[0].Model),
+						fmt.Sprintf("Selected model (%s) does not support images; pick a vision-capable model or paste text", providers[0].Model),
+					)
+					failRehearsalResp(s, w, ev, 409, msg, nil)
+					return
+				}
 				var visionFirst, others []aiProvider
 				for _, cand := range providers {
 					if cand.Vision != "no" {

@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -811,5 +813,80 @@ func TestImportParseSSEStreamingAndThinking(t *testing.T) {
 		if !strings.Contains(raw, want) {
 			t.Fatalf("SSE stream missing %q:\n%s", want, raw)
 		}
+	}
+}
+
+func TestImportParseAndProbeRespectSelectedModel(t *testing.T) {
+	s, _ := testStore(t)
+	alice, csrf := storeLogin(t, s, "alice")
+	admin, adminCSRF := storeLogin(t, s, "admin")
+
+	var requestedModels []string
+	aiReply := `{"thinking":"ok","suggested_id":"pg-model-check","component":"postgresql","display_name":"PostgreSQL","version":"17","hosts":[{"name":"db-01","ip":"10.10.0.11","role":"primary"}]}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Model string `json:"model"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		requestedModels = append(requestedModels, req.Model)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":` + string(mustJSON(aiReply)) + `}}]}`))
+	}))
+	defer srv.Close()
+
+	st := s.aiLoad()
+	enc, _ := s.aiEncrypt("test-key")
+	st.Enabled = true
+	st.Providers = []aiProvider{{
+		ID:      "magpie",
+		Name:    "Magpie",
+		Preset:  "custom",
+		URL:     srv.URL,
+		Enabled: true,
+		KeyEnc:  enc,
+		Models: []aiModel{
+			{ID: "zerotoken/claude-sonnet-5-5", Enabled: true, Tools: "yes", Vision: "yes"},
+			{ID: "codex/gpt-6.1-sol", Name: "GPT-6.1 Sol", Enabled: true, Tools: "yes", Vision: "yes"},
+			{ID: "text-only/mini", Enabled: true, Tools: "yes", Vision: "no"},
+			{ID: "admin-only/o3", Enabled: true, Tools: "yes", Vision: "yes"},
+		},
+	}}
+	st.UserModels = []string{"magpie|codex/gpt-6.1-sol", "magpie|zerotoken/claude-sonnet-5-5", "magpie|text-only/mini"}
+	st.Features = map[string]aiFeature{
+		"assistant":        {Enabled: true, Primary: "magpie|zerotoken/claude-sonnet-5-5"},
+		"change_rehearsal": {Enabled: true, Primary: "magpie|zerotoken/claude-sonnet-5-5"},
+	}
+	if err := s.aiSave(st); err != nil {
+		t.Fatalf("aiSave failed: %v", err)
+	}
+
+	// 1. Regular user explicitly selects GPT-6.1 Sol -> backend MUST execute codex/gpt-6.1-sol, NOT claude-sonnet-5-5!
+	body := `{"component":"postgresql","display_name":"PostgreSQL","source_kind":"probe","text":"HOSTNAME=db-01\nIP=10.10.0.11","use_ai":true,"model":"magpie|codex/gpt-6.1-sol"}`
+	w := storeRequest(s, "POST", "/api/clusters/import/parse?stream=1", strings.NewReader(body), alice, csrf)
+	if w.Code != 200 {
+		t.Fatalf("parse failed: %d %s", w.Code, w.Body.String())
+	}
+	if len(requestedModels) != 1 || requestedModels[0] != "codex/gpt-6.1-sol" {
+		t.Fatalf("expected requested model codex/gpt-6.1-sol, got %+v", requestedModels)
+	}
+	if !strings.Contains(w.Body.String(), `"model":"codex/gpt-6.1-sol"`) {
+		t.Fatalf("expected SSE meta model codex/gpt-6.1-sol, got %s", w.Body.String())
+	}
+
+	// 2. Admin selects an enabled model outside UserModels -> aiProvidersForUser honors it!
+	adminBody := `{"component":"postgresql","display_name":"PostgreSQL","source_kind":"probe","text":"HOSTNAME=db-01\nIP=10.10.0.11","use_ai":true,"model":"magpie|admin-only/o3"}`
+	w2 := storeRequest(s, "POST", "/api/clusters/import/parse?stream=1", strings.NewReader(adminBody), admin, adminCSRF)
+	if w2.Code != 200 {
+		t.Fatalf("admin parse failed: %d %s", w2.Code, w2.Body.String())
+	}
+	if len(requestedModels) != 2 || requestedModels[1] != "admin-only/o3" {
+		t.Fatalf("expected admin requested model admin-only/o3, got %+v", requestedModels)
+	}
+
+	// 3. Explicit selection of a non-vision model with screenshots must refuse (409 / error) rather than silently switching models!
+	imgBody := `{"component":"postgresql","display_name":"PostgreSQL","source_kind":"screenshot","images":["data:image/png;base64,iVBORw0KGgo="],"use_ai":true,"model":"magpie|text-only/mini"}`
+	w3 := storeRequest(s, "POST", "/api/clusters/import/parse", strings.NewReader(imgBody), alice, csrf)
+	if w3.Code != 409 || len(requestedModels) != 2 {
+		t.Fatalf("expected 409 refusal without silent fallback, got code=%d models=%+v body=%s", w3.Code, requestedModels, w3.Body.String())
 	}
 }

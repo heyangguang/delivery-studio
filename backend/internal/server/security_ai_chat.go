@@ -946,7 +946,7 @@ func (s *storeServer) handleSecurityAIChat(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	st := s.aiLoad()
-	providers := st.aiProvidersForPick("security", in.Model)
+	providers := s.aiProvidersForUser(st, user.User, "security", in.Model)
 	if len(providers) == 0 {
 		s.fail(w, 409, "「安全 AI」未配置可用模型，请管理员在平台设置 → AI 中配置模型")
 		return

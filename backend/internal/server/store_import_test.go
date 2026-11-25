@@ -778,3 +778,38 @@ func TestImportNegatedCompanionAndDistroSchemaVersion(t *testing.T) {
 		}
 	}
 }
+
+func TestImportParseSSEStreamingAndThinking(t *testing.T) {
+	s, _ := testStore(t)
+	alice, csrf := storeLogin(t, s, "alice")
+
+	aiReply := `{"thinking":"1. 主机与发行版核对：识别到 db-node-01 (10.10.0.11) Ubuntu 24.04\n2. 伴生架构识别：检测到 Patroni 4.0 + etcd 3.5 高可用栈","suggested_id":"pg-sse-prod","component":"postgresql","display_name":"PostgreSQL","version":"17","exact_version":"17.11","platform":"ubuntu-24.04-amd64","deploy_method":"systemd","arch_summary":"Patroni + etcd 高可用集群","hosts":[{"name":"db-node-01","ip":"10.10.0.11","role":"primary","disk":"/dev/vdb"}],"endpoints":[{"name":"writer","address":"10.10.0.11:5432","role":"readwrite"}],"companions":[{"component":"patroni","display_name":"Patroni","version":"4.0","kind":"ha_manager","ports":[8008]}],"service_units":["patroni.service"],"config_paths":["/etc/patroni/patroni.yml"],"data_dirs":["/data/pg"],"log_dirs":["/var/log/postgresql"],"params":{"port":5432},"packages":[],"notes":"• 主节点已核验"}`
+	srv, _ := fakeModel(t, aiReply)
+	enableAI(t, s, srv.URL, 1)
+
+	body := `{"component":"postgresql","display_name":"PostgreSQL","source_kind":"probe","text":"=== MW_IMPORT_BEGIN ===\nHOSTNAME=db-node-01\nIP=10.10.0.11\n=== MW_IMPORT_END ===","use_ai":true}`
+	w := storeRequest(s, "POST", "/api/clusters/import/parse?stream=1", strings.NewReader(body), alice, csrf)
+	if w.Code != 200 || !strings.Contains(w.Header().Get("Content-Type"), "text/event-stream") {
+		t.Fatalf("expected 200 text/event-stream, got %d ct=%q body=%s", w.Code, w.Header().Get("Content-Type"), w.Body.String())
+	}
+	raw := w.Body.String()
+	for _, want := range []string{
+		`"t":"steps"`,
+		`"id":"det-scan"`,
+		`"id":"redact-secrets"`,
+		`"id":"connect-model"`,
+		`"id":"model-think"`,
+		`"id":"synth-baseline"`,
+		`"t":"meta"`,
+		`"t":"think"`,
+		`"t":"phase"`,
+		`"t":"done"`,
+		`"ai_used":true`,
+		`"suggested_id":"pg-sse-prod"`,
+		`"patroni"`,
+	} {
+		if !strings.Contains(raw, want) {
+			t.Fatalf("SSE stream missing %q:\n%s", want, raw)
+		}
+	}
+}

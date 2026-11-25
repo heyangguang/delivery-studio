@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"delivery-studio/mwpack"
 )
@@ -960,6 +960,8 @@ func (s *storeServer) importProbeScriptHandler(w http.ResponseWriter, r *http.Re
 	source := "template"
 	aiNote := ""
 	usedModel := ""
+	var trace *rehearsalTrace
+	ev := startRehearsalSSE(w, r)
 
 	if req.UseAI {
 		if !s.aiStatusFor(session.User).Enabled {
@@ -971,17 +973,27 @@ func (s *storeServer) importProbeScriptHandler(w http.ResponseWriter, r *http.Re
 				providers = st.aiProvidersForPick("rehearsal", req.Model)
 			}
 			if len(providers) > 0 && (st.MonthlyLimit <= 0 || s.aiCallsThisMonth(session.User) < st.MonthlyLimit) {
-				aiScript, aiErr := s.aiBuildImportProbeScript(r.Context(), providers[0], session.User, req, existing, selectedGaps, effMode, baseScript, lang)
+				aiScript, aiTrace, status, aiErr := s.aiBuildImportProbeScript(r, providers, session.User, req, existing, selectedGaps, effMode, baseScript, lang, ev)
 				if aiErr == nil && strings.TrimSpace(aiScript) != "" {
+					guardStart := time.Now()
 					aiSafe, aiWarns := validateReadOnlyProbeScriptLang(aiScript, lang)
+					guardMS := max(1, time.Since(guardStart).Milliseconds())
 					if aiSafe && len(aiWarns) == 0 {
 						script = aiScript
 						source = "ai"
-						usedModel = providers[0].Model
+						usedModel = aiTrace.Model
+						finalizeTraceSynth(&aiTrace, ev, "readonly-ast-guard", tr(lang, fmt.Sprintf("静态安全门禁通过（%d 行 · 100%% 纯只读零写操作）", strings.Count(aiScript, "\n")), fmt.Sprintf("Static read-only gate passed (%d lines · zero mutations)", strings.Count(aiScript, "\n"))), true, guardMS)
+						trace = &aiTrace
 					} else {
 						aiNote = tr(lang, "AI 生成脚本未通过 100% 静态只读安全门禁，已自动回退已校验的安全只读探针", "AI-generated script failed static read-only gate; fell back to verified read-only probe")
+						finalizeTraceSynth(&aiTrace, ev, "readonly-ast-guard", aiNote, false, guardMS)
+						trace = &aiTrace
 					}
 				} else if aiErr != nil {
+					if ev != nil {
+						failRehearsalResp(s, w, ev, status, aiErr.Error(), aiTrace.Diag)
+						return
+					}
 					aiNote = tr(lang, "AI 定制探针暂不可用，已回退已校验的安全只读探针："+aiErr.Error(), "AI probe customization unavailable; fell back to verified read-only probe: "+aiErr.Error())
 				}
 			} else {
@@ -991,7 +1003,7 @@ func (s *storeServer) importProbeScriptHandler(w http.ResponseWriter, r *http.Re
 	}
 
 	safe, warns := validateReadOnlyProbeScriptLang(script, lang)
-	s.writeJSON(w, 200, map[string]any{
+	payload := map[string]any{
 		"script":       script,
 		"filename":     filename,
 		"safe":         safe,
@@ -1002,10 +1014,92 @@ func (s *storeServer) importProbeScriptHandler(w http.ResponseWriter, r *http.Re
 		"run_hint":     runHint,
 		"model":        usedModel,
 		"ai_note":      aiNote,
-	})
+	}
+	if trace != nil {
+		payload["trace"] = trace
+	}
+	finishImportStreamResp(w, ev, payload)
 }
 
-func (s *storeServer) aiBuildImportProbeScript(ctx context.Context, p aiProvider, user string, req importProbeScriptReq, existing *importClusterReq, selectedGaps []baselineGap, mode, baseScript, lang string) (string, error) {
+func finishImportStreamResp(w http.ResponseWriter, ev *sse, payload map[string]any) {
+	if ev != nil {
+		ev.send(map[string]any{"t": "done", "result": payload})
+		return
+	}
+	sWriteJSON(w, 200, payload)
+}
+
+func parseImportDraftStreamMetaLang(raw, lang string) (thinking string, phase string) {
+	thinking, _ = extractLiveJSONThinking(raw)
+	switch {
+	case strings.Contains(raw, `"notes"`):
+		phase = tr(lang, "正在收敛现场线索与待人工核对清单…", "Summarizing live evidence & review checklist...")
+	case strings.Contains(raw, `"packages"`):
+		phase = tr(lang, "正在整理已识别软件包与版本信息…", "Cataloging detected packages & versions...")
+	case strings.Contains(raw, `"params"`):
+		phase = tr(lang, "正在提取关键中间件运行参数与路径…", "Extracting key middleware runtime params & paths...")
+	case strings.Contains(raw, `"companions"`):
+		phase = tr(lang, "正在识别 Patroni / etcd / 代理等伴生架构组件栈…", "Detecting companion HA stack (Patroni / etcd / proxy / exporters)...")
+	case strings.Contains(raw, `"endpoints"`):
+		phase = tr(lang, "正在整理集群读写与管理访问入口…", "Mapping cluster read-write & admin endpoints...")
+	case strings.Contains(raw, `"hosts"`):
+		phase = tr(lang, "正在提取主机节点、角色与数据盘拓扑…", "Extracting hosts, roles & data disk layout...")
+	}
+	return thinking, phase
+}
+
+func parseImportProbeStreamMetaLang(raw, lang string) (thinking string, phase string) {
+	thinking, _ = extractLiveJSONThinking(raw)
+	switch {
+	case strings.Contains(raw, "=== MW_IMPORT_END ==="):
+		phase = tr(lang, "探针脚本正文编写完成，即将执行静态只读安全扫描…", "Probe script drafted; preparing static read-only security scan...")
+	case strings.Contains(raw, "=== MW_IMPORT_COMPANIONS ===") || strings.Contains(raw, "=== MW_IMPORT_PORTS ==="):
+		phase = tr(lang, "正在编写伴生组件栈与监听端口只读探测段…", "Writing companion stack & listening port probes...")
+	case strings.Contains(raw, "=== MW_IMPORT_MIDDLEWARE ==="):
+		phase = tr(lang, "正在编写主中间件配置与版本只读探测段…", "Writing primary middleware version & config probes...")
+	case strings.Contains(raw, "=== MW_IMPORT_BEGIN ===") || strings.Contains(raw, "#!/usr/bin/env bash"):
+		phase = tr(lang, "正在编写 100% 纯只读现场采集 Bash 脚本…", "Writing 100% read-only Bash discovery probe script...")
+	}
+	return thinking, phase
+}
+
+func parseImportGapStreamMetaLang(raw, lang string) (thinking string, phase string) {
+	thinking, _ = extractLiveJSONThinking(raw)
+	switch {
+	case strings.Contains(raw, `"gaps"`):
+		phase = tr(lang, "正在收敛固定规则之外的高价值补采项与只读探测动作…", "Compiling high-value blind spots & read-only probe actions...")
+	case strings.Contains(raw, `"summary"`):
+		phase = tr(lang, "正在总结当前集群基线完整度与风险评估…", "Summarizing baseline completeness & operational risks...")
+	}
+	return thinking, phase
+}
+
+func extractProbeScriptOutput(raw string) (string, error) {
+	out := strings.TrimSpace(raw)
+	if strings.HasPrefix(out, "```") {
+		if nl := strings.IndexByte(out, '\n'); nl > 0 {
+			out = out[nl+1:]
+		}
+		out = strings.TrimSuffix(strings.TrimSpace(out), "```")
+		out = strings.TrimSpace(out)
+	}
+	if !strings.HasPrefix(out, "#!") || !strings.Contains(out, "=== MW_IMPORT_BEGIN ===") {
+		return "", fmt.Errorf("AI 返回脚本缺少标准探针结构")
+	}
+	return out + "\n", nil
+}
+
+func (s *storeServer) aiBuildImportProbeScript(
+	r *http.Request,
+	providers []aiProvider,
+	user string,
+	req importProbeScriptReq,
+	existing *importClusterReq,
+	selectedGaps []baselineGap,
+	mode, baseScript, lang string,
+	ev *sse,
+) (string, rehearsalTrace, int, error) {
+	prepStart := time.Now()
 	compID := mwpack.NormalizeImportComponentID(firstNonEmptyStr(req.Component, req.DisplayName))
 	displayName := firstNonEmptyStr(strings.TrimSpace(req.DisplayName), compID)
 	sys := `你是一位企业级中间件与 Linux 基础设施运维专家，负责编写一份极简、克制、100% 静态只读的 Bash 采集探针脚本。
@@ -1057,44 +1151,80 @@ func (s *storeServer) aiBuildImportProbeScript(ctx context.Context, p aiProvider
 	prompt.WriteString("\n参考安全基线骨架（请在此基础上按上述缺口精准优化，保持极简与 100% 只读）：\n")
 	prompt.WriteString(baseScript)
 
-	callCtx, cancel := context.WithTimeout(ctx, 50*time.Second)
-	defer cancel()
-	if strings.TrimSpace(req.Think) != "" {
-		callCtx = withEffort(callCtx, strings.TrimSpace(req.Think))
+	prepMS := max(1, time.Since(prepStart).Milliseconds())
+	scopeDetail := tr(lang,
+		fmt.Sprintf("已装载 %s (%s) 基线上下文%s", displayName, firstNonEmptyStr(req.DeployMethod, "systemd"), func() string {
+			if len(selectedGaps) > 0 {
+				return fmt.Sprintf(" · 聚焦 %d 项待补采缺口", len(selectedGaps))
+			}
+			return ""
+		}()),
+		fmt.Sprintf("Loaded %s (%s) context%s", displayName, firstNonEmptyStr(req.DeployMethod, "systemd"), func() string {
+			if len(selectedGaps) > 0 {
+				return fmt.Sprintf(" · targeting %d baseline gap(s)", len(selectedGaps))
+			}
+			return ""
+		}()),
+	)
+	spec := rehearsalPipelineSpec{
+		Feature: "import_probe_gen",
+		PreSteps: []rehearsalTraceStep{
+			{
+				ID:     "inspect-baseline",
+				Kind:   "inspect",
+				Title:  tr(lang, "读取集群基线与采集目标", "Inspect Baseline & Probe Targets"),
+				Detail: scopeDetail,
+				MS:     prepMS,
+				OK:     true,
+				Status: "done",
+			},
+			{
+				ID:     "inject-ro-policy",
+				Kind:   "guard",
+				Title:  tr(lang, "注入 100% 纯只读安全红线规则", "Inject 100% Read-Only Safety Guardrails"),
+				Detail: tr(lang, "已锁定零写操作、零服务重启、零文件重定向与凭据脱敏约束", "Locked zero-write, zero-restart, zero-redirect & credential redaction rules"),
+				MS:     1,
+				OK:     true,
+				Status: "done",
+			},
+		},
+		ThinkTitle:     tr(lang, "设计精炼只读现场采集策略", "Design Lean Read-Only Probe Strategy"),
+		ThinkWait:      tr(lang, "正在结合组件形态与补采重点编排 100% 只读探测策略…", "Designing targeted 100% read-only probe strategy..."),
+		ThinkDone:      tr(lang, "已完成精炼只读采集策略规划", "Completed lean read-only probe strategy"),
+		SynthID:        "readonly-ast-guard",
+		SynthKind:      "guard",
+		SynthTitle:     tr(lang, "生成探针脚本与静态安全门禁校验", "Generate Probe & Static Read-Only Gate"),
+		SynthWait:      tr(lang, "等待脚本编写完成后执行静态只读安全扫描", "Waiting for script output before static read-only verification"),
+		PhaseExtractor: parseImportProbeStreamMetaLang,
+		Validate: func(txt string) error {
+			_, err := extractProbeScriptOutput(txt)
+			return err
+		},
 	}
-	started := time.Now()
-	rep, err := s.aiChat(callCtx, p, []aiMessage{
-		{Role: "system", Content: sys},
-		{Role: "user", Content: prompt.String()},
-	}, nil, nil)
+
+	txt, trace, status, err := s.rehearsalRunAI(
+		r,
+		providers,
+		user,
+		firstNonEmptyStr(req.ClusterID, compID),
+		"import-probe",
+		"probe",
+		nil,
+		sys,
+		prompt.String(),
+		nil,
+		spec,
+		thinkLevel(strings.TrimSpace(req.Think)),
+		ev,
+	)
 	if err != nil {
-		return "", err
+		return "", trace, status, err
 	}
-	s.aiRecordUsage(aiUsage{
-		At:        nowStamp(),
-		User:      user,
-		Feature:   "import_probe_gen",
-		Provider:  firstNonEmptyStr(p.Name, p.ID),
-		Model:     p.Model,
-		In:        rep.In,
-		Out:       rep.Out,
-		Cached:    rep.Cached,
-		Reasoning: rep.Reasoning,
-		MS:        time.Since(started).Milliseconds(),
-		OK:        true,
-	})
-	out := strings.TrimSpace(rep.Text)
-	if strings.HasPrefix(out, "```") {
-		if nl := strings.IndexByte(out, '\n'); nl > 0 {
-			out = out[nl+1:]
-		}
-		out = strings.TrimSuffix(strings.TrimSpace(out), "```")
-		out = strings.TrimSpace(out)
+	out, err := extractProbeScriptOutput(txt)
+	if err != nil {
+		return "", trace, 502, err
 	}
-	if !strings.HasPrefix(out, "#!") || !strings.Contains(out, "=== MW_IMPORT_BEGIN ===") {
-		return "", fmt.Errorf("AI 返回脚本缺少标准探针结构")
-	}
-	return out + "\n", nil
+	return out, trace, 200, nil
 }
 
 // importDiagnoseGapsHandler combines deterministic standard-baseline checks with deep AI discovery
@@ -1118,9 +1248,10 @@ func (s *storeServer) importDiagnoseGapsHandler(w http.ResponseWriter, r *http.R
 		s.fail(w, 404, "未找到该存量纳管集群基线")
 		return
 	}
+	ev := startRehearsalSSE(w, r)
 	baseHealth := *existing.Health
 	if !s.aiStatusFor(session.User).Enabled {
-		s.writeJSON(w, 200, map[string]any{
+		finishImportStreamResp(w, ev, map[string]any{
 			"health":  baseHealth,
 			"ai_used": false,
 			"ai_note": tr(lang, "AI 助手未开启，当前展示标准规则基线检查结果", "AI is disabled; showing deterministic baseline checks"),
@@ -1133,7 +1264,7 @@ func (s *storeServer) importDiagnoseGapsHandler(w http.ResponseWriter, r *http.R
 		providers = st.aiProvidersForPick("rehearsal", req.Model)
 	}
 	if len(providers) == 0 || (st.MonthlyLimit > 0 && s.aiCallsThisMonth(session.User) >= st.MonthlyLimit) {
-		s.writeJSON(w, 200, map[string]any{
+		finishImportStreamResp(w, ev, map[string]any{
 			"health":  baseHealth,
 			"ai_used": false,
 			"ai_note": tr(lang, "暂无可用 AI 模型或已达月额度，当前保留规则基线检查结果", "No AI model available or quota reached; keeping rule-based checks"),
@@ -1141,6 +1272,7 @@ func (s *storeServer) importDiagnoseGapsHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	prepStart := time.Now()
 	sys := `你是一位拥有 15 年生产交付与应急排障经验的企业级中间件架构师。
 你的任务是审阅该存量纳管集群当前的真实基线档案、已落地变更记录与安全态势，找出「固定规则尚未覆盖、但对后续生产变更演练、高可用切换、故障排障与交付验收至关重要的遗漏信息」。
 
@@ -1148,8 +1280,8 @@ func (s *storeServer) importDiagnoseGapsHandler(w http.ResponseWriter, r *http.R
 1. 【只补充固定规则没覆盖的深度缺口】下方会列出固定规则已经检出的缺口，禁止重复输出相同内容；请聚焦该集群架构独有的高价值盲区（例如：Patroni DCS TTL/loop_wait/复制槽与 WAL 保留策略、备库 clonefrom 标签或同步模式细节、连接池/连接数水位、日志轮转与保留清理策略、数据盘/WAL 挂载独立性与 inode 水位、etcd 压缩与存储配额、内核 HugePages/swappiness/ulimit 等）。
 2. 【100% 只读核验铁律】每条建议的 probe_action 必须是 100% 静态只读、零副作用、可安全在生产执行的只读检查动作（严禁建议修改参数、重启服务、写入文件或测试破坏性切换）。
 3. 数量克制精准：最多输出 2~4 条真正有含金量的缺口，不要凑数。
-4. 只输出严格 JSON，不要 Markdown 围栏或多余文字：
-{"summary":"1句面向工程师的整体基线评估结论（中文，简练直接）","gaps":[{"category":"4字以内分类如 复制机制/容量水位/日志治理/高可用参数","severity":"high|medium|low","title":"简明缺口标题（22字以内）","detail":"1句说明为什么后续变更演练或排障需要这项信息","probe_action":"1句具体的只读探测核验动作（100% 只读）"}]}`
+4. 只输出严格 JSON，不要 Markdown 围栏或多余文字；请将 "thinking" 放在第一个字段用于流式展示研判思路：
+{"thinking":"2~3条简洁研判要点（以 1. / 2. / 3. 开头，简述当前基线已覆盖事实、该架构特有运维盲区及补采价值）","summary":"1句面向工程师的整体基线评估结论（中文，简练直接）","gaps":[{"category":"4字以内分类如 复制机制/容量水位/日志治理/高可用参数","severity":"high|medium|low","title":"简明缺口标题（22字以内）","detail":"1句说明为什么后续变更演练或排障需要这项信息","probe_action":"1句具体的只读探测核验动作（100% 只读）"}]}`
 
 	var prompt strings.Builder
 	fmt.Fprintf(&prompt, "集群：%s（%s %s，精确版本：%s，OS：%s，部署形态：%s）\n",
@@ -1206,18 +1338,77 @@ func (s *storeServer) importDiagnoseGapsHandler(w http.ResponseWriter, r *http.R
 		fmt.Fprintf(&prompt, "\n工程师特别关注方向：%s\n", truncRunes(strings.TrimSpace(req.Focus), 500))
 	}
 
-	p := providers[0]
-	callCtx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
-	defer cancel()
-	if strings.TrimSpace(req.Think) != "" {
-		callCtx = withEffort(callCtx, strings.TrimSpace(req.Think))
+	prepMS := max(1, time.Since(prepStart).Milliseconds())
+	var parsed struct {
+		Summary string        `json:"summary"`
+		Gaps    []baselineGap `json:"gaps"`
 	}
-	started := time.Now()
-	rep, err := s.aiChat(callCtx, p, []aiMessage{
-		{Role: "system", Content: sys},
-		{Role: "user", Content: prompt.String()},
-	}, nil, nil)
+	spec := rehearsalPipelineSpec{
+		Feature: "import_gap_diagnose",
+		PreSteps: []rehearsalTraceStep{
+			{
+				ID:     "scan-baseline",
+				Kind:   "inspect",
+				Title:  tr(lang, "通读集群基线、架构栈与变更台账", "Read Baseline, Stack & History"),
+				Detail: tr(lang, fmt.Sprintf("已加载 %d 台节点 · %d 个伴生组件 · %d 项规则初检缺口", len(existing.Hosts), len(existing.Companions), len(baseHealth.Gaps)), fmt.Sprintf("Loaded %d host(s) · %d companion(s) · %d rule gap(s)", len(existing.Hosts), len(existing.Companions), len(baseHealth.Gaps))),
+				MS:     prepMS,
+				OK:     true,
+				Status: "done",
+			},
+			{
+				ID:     "redact-context",
+				Kind:   "guard",
+				Title:  tr(lang, "敏感凭据自动脱敏与只读核验锁定", "Scrub Credentials & Lock Read-Only"),
+				Detail: tr(lang, "已清除配置与台账中的凭据片段，仅允许输出 100% 只读核验项", "Scrubbed secrets from baseline context; enforcing 100% read-only checks"),
+				MS:     1,
+				OK:     true,
+				Status: "done",
+			},
+		},
+		ThinkTitle:     tr(lang, "研判固定规则之外的架构盲区", "Identify Architecture-Specific Blind Spots"),
+		ThinkWait:      tr(lang, "正在对照生产高可用、备份与演练标准定位专属遗漏项…", "Comparing baseline against HA, backup & rehearsal standards..."),
+		ThinkDone:      tr(lang, "已完成基线盲区深度研判", "Completed baseline blind-spot analysis"),
+		SynthID:        "synth-gaps",
+		SynthKind:      "synthesize",
+		SynthTitle:     tr(lang, "收敛只读补采清单与优先级", "Compile Read-Only Gap Checklist"),
+		SynthWait:      tr(lang, "等待盲区研判完成后生成只读补采建议", "Waiting for analysis before compiling read-only gaps"),
+		PhaseExtractor: parseImportGapStreamMetaLang,
+		Validate: func(txt string) error {
+			raw := extractJSON(txt)
+			if raw == "" {
+				return fmt.Errorf("AI 未返回有效 JSON")
+			}
+			var tmp struct {
+				Summary string        `json:"summary"`
+				Gaps    []baselineGap `json:"gaps"`
+			}
+			if err := json.Unmarshal([]byte(raw), &tmp); err != nil {
+				return fmt.Errorf("AI 返回格式解析失败: %v", err)
+			}
+			return nil
+		},
+	}
+
+	txt, trace, status, err := s.rehearsalRunAI(
+		r,
+		providers,
+		session.User,
+		cid,
+		"import-gap-diagnose",
+		"diagnose",
+		nil,
+		sys,
+		prompt.String(),
+		nil,
+		spec,
+		thinkLevel(strings.TrimSpace(req.Think)),
+		ev,
+	)
 	if err != nil {
+		if ev != nil {
+			failRehearsalResp(s, w, ev, status, err.Error(), trace.Diag)
+			return
+		}
 		s.writeJSON(w, 200, map[string]any{
 			"health":  baseHealth,
 			"ai_used": false,
@@ -1225,26 +1416,13 @@ func (s *storeServer) importDiagnoseGapsHandler(w http.ResponseWriter, r *http.R
 		})
 		return
 	}
-	s.aiRecordUsage(aiUsage{
-		At:        nowStamp(),
-		User:      session.User,
-		Feature:   "import_gap_diagnose",
-		Provider:  firstNonEmptyStr(p.Name, p.ID),
-		Model:     p.Model,
-		In:        rep.In,
-		Out:       rep.Out,
-		Cached:    rep.Cached,
-		Reasoning: rep.Reasoning,
-		MS:        time.Since(started).Milliseconds(),
-		OK:        true,
-	})
 
-	var parsed struct {
-		Summary string        `json:"summary"`
-		Gaps    []baselineGap `json:"gaps"`
-	}
-	raw := extractJSON(rep.Text)
+	raw := extractJSON(txt)
 	if raw == "" || json.Unmarshal([]byte(raw), &parsed) != nil {
+		if ev != nil {
+			failRehearsalResp(s, w, ev, 502, tr(lang, "AI 返回格式异常，未能解析深度诊断结果", "AI output could not be parsed"), trace.Diag)
+			return
+		}
 		s.writeJSON(w, 200, map[string]any{
 			"health":  baseHealth,
 			"ai_used": false,
@@ -1287,12 +1465,14 @@ func (s *storeServer) importDiagnoseGapsHandler(w http.ResponseWriter, r *http.R
 	if strings.TrimSpace(parsed.Summary) != "" {
 		baseHealth.Summary = truncRunes(strings.TrimSpace(parsed.Summary), 220)
 	}
-	s.auditReq(r, "cluster-baseline-ai-gaps", session.User, fmt.Sprintf("%s added=%d model=%s", cid, added, p.Model))
-	s.writeJSON(w, 200, map[string]any{
+	finalizeTraceSynth(&trace, ev, "synth-gaps", tr(lang, fmt.Sprintf("已完成基线深度诊断，新增 %d 项架构专属只读补采项", added), fmt.Sprintf("Completed deep diagnosis; discovered %d new read-only gap(s)", added)), true, 0)
+	s.auditReq(r, "cluster-baseline-ai-gaps", session.User, fmt.Sprintf("%s added=%d model=%s", cid, added, trace.Model))
+	finishImportStreamResp(w, ev, map[string]any{
 		"health":   baseHealth,
 		"ai_used":  true,
 		"ai_added": added,
-		"model":    p.Model,
+		"model":    trace.Model,
+		"trace":    trace,
 	})
 }
 
@@ -1319,8 +1499,11 @@ func (s *storeServer) importParseHandler(w http.ResponseWriter, r *http.Request,
 	}
 
 	lang := wLang(w)
+	ev := startRehearsalSSE(w, r)
+	detStart := time.Now()
 	preset, _ := mwpack.LookupImportPreset(req.Component)
 	det := parseImportedDeterministic(text, req.Component, req.DisplayName, preset)
+	detMS := max(1, time.Since(detStart).Milliseconds())
 
 	wantAI := true
 	if req.UseAI != nil {
@@ -1331,6 +1514,7 @@ func (s *storeServer) importParseHandler(w http.ResponseWriter, r *http.Request,
 	parserMode := "deterministic"
 	var warns []string
 	draft := det
+	var trace *rehearsalTrace
 
 	if wantAI && s.aiStatusFor(session.User).Enabled {
 		st := s.aiLoad()
@@ -1339,21 +1523,35 @@ func (s *storeServer) importParseHandler(w http.ResponseWriter, r *http.Request,
 			providers = st.aiProvidersForPick("rehearsal", req.Model)
 		}
 		if len(providers) > 0 && (st.MonthlyLimit <= 0 || s.aiCallsThisMonth(session.User) < st.MonthlyLimit) {
-			p := providers[0]
-			if len(req.Images) > 0 && p.Vision == "no" {
+			if len(req.Images) > 0 && providers[0].Vision == "no" {
+				var visionFirst, others []aiProvider
 				for _, cand := range providers {
 					if cand.Vision != "no" {
-						p = cand
-						break
+						visionFirst = append(visionFirst, cand)
+					} else {
+						others = append(others, cand)
 					}
 				}
+				if len(visionFirst) > 0 {
+					providers = append(visionFirst, others...)
+				}
 			}
-			aiDraft, aiErr := s.aiExtractImportDraft(r.Context(), p, session.User, req, det, preset, lang)
+			aiDraft, aiTrace, status, aiErr := s.aiExtractImportDraft(r, providers, session.User, req, det, detMS, preset, lang, ev)
 			if aiErr == nil && aiDraft != nil {
 				draft = mergeImportDrafts(*aiDraft, det)
 				aiUsed = true
 				parserMode = "ai"
+				synthSummary := tr(lang,
+					fmt.Sprintf("已提取 %d 台主机 · %d 个伴生组件 · %d 个访问入口", len(draft.Hosts), len(draft.Companions), len(draft.Endpoints)),
+					fmt.Sprintf("Extracted %d host(s) · %d companion(s) · %d endpoint(s)", len(draft.Hosts), len(draft.Companions), len(draft.Endpoints)),
+				)
+				finalizeTraceSynth(&aiTrace, ev, "synth-baseline", synthSummary, true, 0)
+				trace = &aiTrace
 			} else if aiErr != nil {
+				if ev != nil {
+					failRehearsalResp(s, w, ev, status, aiErr.Error(), aiTrace.Diag)
+					return
+				}
 				warns = append(warns, tr(lang, "AI 解析暂时不可用，已自动回退为内置规则解析："+aiErr.Error(), "AI extraction unavailable; fell back to deterministic parser: "+aiErr.Error()))
 			}
 		}
@@ -1376,23 +1574,38 @@ func (s *storeServer) importParseHandler(w http.ResponseWriter, r *http.Request,
 		missing = append(missing, tr(lang, "操作系统平台", "Operating system platform"))
 	}
 
-	s.writeJSON(w, 200, map[string]any{
+	payload := map[string]any{
 		"draft":          draft,
 		"parser":         parserMode,
 		"ai_used":        aiUsed,
 		"warnings":       nz(warns),
 		"missing_fields": nz(missing),
-	})
+	}
+	if trace != nil {
+		payload["trace"] = trace
+	}
+	finishImportStreamResp(w, ev, payload)
 }
 
-func (s *storeServer) aiExtractImportDraft(ctx context.Context, p aiProvider, user string, req importParseReq, det importParseDraft, preset mwpack.ImportPreset, lang string) (*importParseDraft, error) {
+func (s *storeServer) aiExtractImportDraft(
+	r *http.Request,
+	providers []aiProvider,
+	user string,
+	req importParseReq,
+	det importParseDraft,
+	detMS int64,
+	preset mwpack.ImportPreset,
+	lang string,
+	ev *sse,
+) (*importParseDraft, rehearsalTrace, int, error) {
+	scrubStart := time.Now()
 	var roleHint []string
-	for _, r := range preset.Roles {
-		roleHint = append(roleHint, r.ID+"("+r.Title+")")
+	for _, rl := range preset.Roles {
+		roleHint = append(roleHint, rl.ID+"("+rl.Title+")")
 	}
 	sys := `你是一位企业级中间件架构师，负责把运维工程师粘贴的只读采集脚本输出、CMDB 表格、配置文件或截图整理为严格的 JSON 纳管基线草稿。
 严格要求：
-1. 只输出一个合法 JSON 对象，不要包含 Markdown 代码块围栏或额外解释文字。
+1. 只输出一个合法 JSON 对象，不要包含 Markdown 代码块围栏或额外解释文字；请将 "thinking" 作为第一个字段用于实时展示你的分析路径。
 2. 所有信息必须严格来自输入文本或截图，严禁凭空编造 IP、主机名或版本号；未在输入中出现的可留空。
 3. 严禁在 params 或 notes 中输出任何密码、私钥或密钥明文（如有请脱敏为 <redacted>）。
 4. 【核心要求：识别多组件 / 伴生高可用架构】如果现场存在伴生/支撑组件（如 Patroni、etcd、HAProxy、Keepalived、Nginx、PgBouncer、pgBackRest、Redis Sentinel、ZooKeeper、Consul、ClickHouse Keeper、ProxySQL、MaxScale、OBProxy、node_exporter、postgres_exporter 等各类 exporter），必须全部结构化填入 companions 数组，不得只写入 notes！
@@ -1406,6 +1619,7 @@ func (s *storeServer) aiExtractImportDraft(ctx context.Context, p aiProvider, us
 10. notes 用简洁的分条要点（每行以 "• " 开头，3~6 条）列出高价值现场线索或待人工核对项（如发行版类型、单节点采集范围、待确认 VIP、未采集到的目录等），避免长段堆砌。
 11. JSON 结构：
 {
+  "thinking": "1. 主机与发行版核对：... 2. 伴生高可用架构识别：... 3. 目录、端口与运行参数收敛：...",
   "suggested_id": "小写字母数字连字符集群标识，如 pg-gitlab-private-prod",
   "component": "主中间件标识，如 postgresql / mysql / redis / kafka",
   "display_name": "展示名称，如 PostgreSQL / MySQL",
@@ -1439,58 +1653,111 @@ func (s *storeServer) aiExtractImportDraft(ctx context.Context, p aiProvider, us
 	if req.SourceKind != "" {
 		fmt.Fprintf(&prompt, "输入来源类型：%s\n", req.SourceKind)
 	}
+	scrubbedText := truncRunes(aiScrub(req.Text), 14000)
 	if strings.TrimSpace(req.Text) != "" {
 		prompt.WriteString("\n--- 原始粘贴文本 ---\n")
-		prompt.WriteString(truncRunes(aiScrub(req.Text), 14000))
+		prompt.WriteString(scrubbedText)
 		prompt.WriteString("\n")
 	} else {
 		prompt.WriteString("\n请结合附图提取集群主机、角色、版本、入口地址与关键参数。\n")
 	}
+	scrubMS := max(1, time.Since(scrubStart).Milliseconds())
 
-	var userContent any = prompt.String()
-	if len(req.Images) > 0 && p.Vision != "no" {
-		parts := []map[string]any{{"type": "text", "text": prompt.String()}}
-		for _, img := range req.Images {
-			parts = append(parts, map[string]any{"type": "image_url", "image_url": map[string]string{"url": img}})
-		}
-		userContent = parts
+	detSummary := tr(lang,
+		fmt.Sprintf("规则预扫描 %d 字%s · 初检 %d 台主机 / %d 个伴生线索",
+			utf8.RuneCountInString(req.Text),
+			func() string {
+				if len(req.Images) > 0 {
+					return fmt.Sprintf(" + %d 张截图", len(req.Images))
+				}
+				return ""
+			}(),
+			len(det.Hosts),
+			len(det.Companions),
+		),
+		fmt.Sprintf("Pre-scanned %d chars%s · %d host(s) / %d companion clue(s)",
+			utf8.RuneCountInString(req.Text),
+			func() string {
+				if len(req.Images) > 0 {
+					return fmt.Sprintf(" + %d image(s)", len(req.Images))
+				}
+				return ""
+			}(),
+			len(det.Hosts),
+			len(det.Companions),
+		),
+	)
+
+	spec := rehearsalPipelineSpec{
+		Feature: "import_parse",
+		PreSteps: []rehearsalTraceStep{
+			{
+				ID:     "det-scan",
+				Kind:   "inspect",
+				Title:  tr(lang, "扫描现场回显与架构线索", "Scan Live Evidence & Clues"),
+				Detail: detSummary,
+				MS:     detMS,
+				OK:     true,
+				Status: "done",
+			},
+			{
+				ID:     "redact-secrets",
+				Kind:   "guard",
+				Title:  tr(lang, "敏感凭据自动脱敏与规范化", "Scrub Credentials & Normalize Input"),
+				Detail: tr(lang, "已剥离口令、私钥与敏感连接串，仅投递架构元数据", "Credentials, keys & tokens scrubbed locally; topology metadata only"),
+				MS:     scrubMS,
+				OK:     true,
+				Status: "done",
+			},
+		},
+		ThinkTitle:     tr(lang, "识别主机角色与多组件架构栈", "Analyze Hosts & Companion Stack"),
+		ThinkWait:      tr(lang, "正在逐段核对主机、版本、磁盘与伴生高可用组件…", "Evaluating hosts, versions, disks & companion HA stack..."),
+		ThinkDone:      tr(lang, "已完成现场回显与多组件架构推演", "Completed live evidence & companion stack analysis"),
+		SynthID:        "synth-baseline",
+		SynthKind:      "synthesize",
+		SynthTitle:     tr(lang, "合成结构化纳管基线草稿", "Synthesize Structured Baseline Draft"),
+		SynthWait:      tr(lang, "等待架构推演完成后组装基线拓扑草稿", "Waiting for analysis before assembling baseline draft"),
+		PhaseExtractor: parseImportDraftStreamMetaLang,
+		Validate: func(txt string) error {
+			raw := extractJSONObject(txt)
+			if raw == "" {
+				return fmt.Errorf("AI 未返回有效 JSON")
+			}
+			var tmp importParseDraft
+			if err := json.Unmarshal([]byte(raw), &tmp); err != nil {
+				return fmt.Errorf("AI 返回 JSON 解析失败: %v", err)
+			}
+			return nil
+		},
 	}
 
-	callCtx, cancel := context.WithTimeout(ctx, 50*time.Second)
-	defer cancel()
-	if strings.TrimSpace(req.Think) != "" {
-		callCtx = withEffort(callCtx, strings.TrimSpace(req.Think))
-	}
-	started := time.Now()
-	rep, err := s.aiChat(callCtx, p, []aiMessage{
-		{Role: "system", Content: sys},
-		{Role: "user", Content: userContent},
-	}, nil, nil)
+	txt, trace, status, err := s.rehearsalRunAI(
+		r,
+		providers,
+		user,
+		firstNonEmptyStr(req.ClusterID, req.Component, "import"),
+		"import-parse",
+		"parse",
+		nil,
+		sys,
+		prompt.String(),
+		req.Images,
+		spec,
+		thinkLevel(strings.TrimSpace(req.Think)),
+		ev,
+	)
 	if err != nil {
-		return nil, err
+		return nil, trace, status, err
 	}
-	s.aiRecordUsage(aiUsage{
-		At:        nowStamp(),
-		User:      user,
-		Feature:   "import_parse",
-		Provider:  firstNonEmptyStr(p.Name, p.ID),
-		Model:     p.Model,
-		In:        rep.In,
-		Out:       rep.Out,
-		Cached:    rep.Cached,
-		Reasoning: rep.Reasoning,
-		MS:        time.Since(started).Milliseconds(),
-		OK:        true,
-	})
-	raw := extractJSONObject(rep.Text)
+	raw := extractJSONObject(txt)
 	if raw == "" {
-		return nil, fmt.Errorf("AI 未返回有效 JSON")
+		return nil, trace, 502, fmt.Errorf("AI 未返回有效 JSON")
 	}
 	var out importParseDraft
 	if err := json.Unmarshal([]byte(raw), &out); err != nil {
-		return nil, fmt.Errorf("AI 返回 JSON 解析失败: %v", err)
+		return nil, trace, 502, fmt.Errorf("AI 返回 JSON 解析失败: %v", err)
 	}
-	return &out, nil
+	return &out, trace, 200, nil
 }
 
 func extractJSONObject(s string) string {

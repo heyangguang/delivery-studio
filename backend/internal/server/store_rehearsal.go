@@ -48,14 +48,17 @@ type rehearsalTraceStep struct {
 }
 
 type rehearsalPipelineSpec struct {
-	PreSteps   []rehearsalTraceStep
-	ThinkTitle string
-	ThinkWait  string
-	SynthID    string
-	SynthKind  string
-	SynthTitle string
-	SynthWait  string
-	Validate   func(string) error
+	PreSteps       []rehearsalTraceStep
+	Feature        string
+	ThinkTitle     string
+	ThinkWait      string
+	ThinkDone      string
+	SynthID        string
+	SynthKind      string
+	SynthTitle     string
+	SynthWait      string
+	PhaseExtractor func(raw, lang string) (thinking, phase string)
+	Validate       func(string) error
 }
 
 type rehearsalTrace struct {
@@ -1302,7 +1305,12 @@ func (s *storeServer) rehearsalRunAI(
 			if red != nil {
 				curRaw = red.back(curRaw)
 			}
-			jt, ph := parseRehearsalStreamMetaLang(curRaw, lang)
+			var jt, ph string
+			if spec.PhaseExtractor != nil {
+				jt, ph = spec.PhaseExtractor(curRaw, lang)
+			} else {
+				jt, ph = parseRehearsalStreamMetaLang(curRaw, lang)
+			}
 			if strings.TrimSpace(nativeThinking.String()) == "" && len(jt) > sentJSONThinkLen {
 				chunk := jt[sentJSONThinkLen:]
 				sentJSONThinkLen = len(jt)
@@ -1316,7 +1324,7 @@ func (s *storeServer) rehearsalRunAI(
 					thinkStep.Status = "done"
 					thinkStep.OK = true
 					thinkStep.MS = max(1, time.Since(firstTokenAt).Milliseconds())
-					thinkStep.Detail = tr(lang, "已完成集群拓扑与高可用风险推演", "Completed cluster topology & HA risk analysis")
+					thinkStep.Detail = firstNonEmptyStr(spec.ThinkDone, tr(lang, "已完成集群拓扑与高可用风险推演", "Completed cluster topology & HA risk analysis"))
 					ev.send(map[string]any{"t": "step", "step": thinkStep})
 				}
 				if synthStartedAt.IsZero() {
@@ -1370,14 +1378,14 @@ func (s *storeServer) rehearsalRunAI(
 					thinkStep.Status = "done"
 					thinkStep.OK = true
 					thinkStep.MS = max(1, time.Since(firstTokenAt).Milliseconds())
-					thinkStep.Detail = tr(lang, "已完成集群拓扑与高可用风险推演", "Completed cluster topology & HA risk analysis")
+					thinkStep.Detail = firstNonEmptyStr(spec.ThinkDone, tr(lang, "已完成集群拓扑与高可用风险推演", "Completed cluster topology & HA risk analysis"))
 				}
 				err = &aiCallError{Msg: vErr.Error(), Diag: &dCopy, Err: vErr}
 			}
 		}
 
 		u := usageFrom(p, reply)
-		u.User, u.IP, u.Feature, u.Target, u.Session = user, clientIP(r), "change_rehearsal", target, session
+		u.User, u.IP, u.Feature, u.Target, u.Session = user, clientIP(r), firstNonEmptyStr(spec.Feature, "change_rehearsal"), target, session
 		u.MS, u.OK, u.Failover = time.Since(start).Milliseconds(), err == nil, i > 0
 		if err != nil {
 			u.Error = truncRunes(err.Error(), 200)
@@ -1418,7 +1426,7 @@ func (s *storeServer) rehearsalRunAI(
 				thinkStep.Status = "done"
 				thinkStep.OK = true
 				thinkStep.MS = max(1, time.Since(firstTokenAt).Milliseconds())
-				thinkStep.Detail = tr(lang, "已完成集群拓扑与高可用风险推演", "Completed cluster topology & HA risk analysis")
+				thinkStep.Detail = firstNonEmptyStr(spec.ThinkDone, tr(lang, "已完成集群拓扑与高可用风险推演", "Completed cluster topology & HA risk analysis"))
 				if ev != nil {
 					ev.send(map[string]any{"t": "step", "step": thinkStep})
 				}

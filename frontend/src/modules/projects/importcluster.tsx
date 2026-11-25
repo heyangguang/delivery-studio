@@ -52,7 +52,15 @@ import type {
   ImportedMeta,
   ImportedPkg,
   InstanceView,
+  RehearsalTrace,
+  RehearsalTraceStep,
 } from "../../shared/shared";
+import {
+  AIProcessCard,
+  markLiveStateError,
+  streamPipelineSSE,
+  type LiveAIState,
+} from "../../shared/ai-process";
 import { go } from "../../app/router";
 import { AppGlyph, InstanceGraph } from "../../design/ui";
 import { bi, useLang } from "../../app/i18n";
@@ -183,6 +191,7 @@ type ParseResp = {
   ai_used: boolean;
   warnings: string[];
   missing_fields: string[];
+  trace?: RehearsalTrace;
 };
 
 const CLUSTER_ID_RE = /^[a-z][a-z0-9-]{0,40}$/;
@@ -815,93 +824,154 @@ function FieldCluesEditor({
   );
 }
 
-function ProbeGeneratingBanner({ active, gapCount }: { active: boolean; gapCount?: number }) {
-  useLang();
-  const stages = useMemo(
-    () => [
-      bi(
-        gapCount && gapCount > 0
-          ? `正在对照标准交付基线分析已选 ${gapCount} 项缺口…`
-          : "正在分析组件形态与现场采集诉求…",
-        gapCount && gapCount > 0
-          ? `Analyzing ${gapCount} selected baseline gap(s)…`
-          : "Analyzing component layout & collection scope…",
-      ),
-      bi("正在编排极简 100% 静态只读探测命令（口令自动脱敏）…", "Composing lean 100% read-only probe commands (secrets redacted)…"),
-      bi("正在执行 100% 静态只读安全门禁与零写操作校验…", "Running 100% static read-only security gate verification…"),
-    ],
-    [gapCount],
-  );
-  const [idx, setIdx] = useState(0);
-  const [secs, setSecs] = useState(0);
+type ImportLiveKind = "import-parse" | "import-probe" | "import-diagnose";
 
-  useEffect(() => {
-    if (!active) {
-      setIdx(0);
-      setSecs(0);
-      return;
-    }
-    const t0 = Date.now();
-    const tick = window.setInterval(() => setSecs((Date.now() - t0) / 1000), 200);
-    const rot = window.setInterval(() => setIdx((p) => (p + 1) % stages.length), 2000);
-    return () => {
-      window.clearInterval(tick);
-      window.clearInterval(rot);
-    };
-  }, [active, stages.length]);
+function buildImportInitialLive(
+  kind: ImportLiveKind,
+  title: string,
+  target?: { provider?: string; model?: string },
+): LiveAIState<ImportLiveKind> {
+  const steps: RehearsalTraceStep[] =
+    kind === "import-probe"
+      ? [
+          {
+            id: "inspect-baseline",
+            kind: "inspect",
+            title: bi("读取集群基线与采集目标", "Inspect Baseline & Probe Targets"),
+            detail: bi("正在装载组件形态与待补采缺口上下文…", "Loading component layout & selected gap context…"),
+            ok: true,
+            status: "running",
+          },
+          {
+            id: "inject-ro-policy",
+            kind: "guard",
+            title: bi("注入 100% 纯只读安全红线规则", "Inject 100% Read-Only Safety Guardrails"),
+            detail: bi("锁定零写操作、零服务重启与凭据脱敏约束", "Locking zero-write, zero-restart & secret redaction rules"),
+            ok: true,
+            status: "pending",
+          },
+          {
+            id: "connect-model",
+            kind: "connect",
+            title: bi("连接模型网关与投递上下文", "Connect Model Gateway & Dispatch Context"),
+            detail: bi("等待安全校验完成后建立模型流式连接", "Waiting for safety checks before opening AI stream"),
+            ok: true,
+            status: "pending",
+          },
+          {
+            id: "model-think",
+            kind: "think",
+            title: bi("设计精炼只读现场采集策略", "Design Lean Read-Only Probe Strategy"),
+            detail: bi("等待模型通道返回首包后展开推演", "Waiting for first token from model stream"),
+            ok: true,
+            status: "pending",
+          },
+          {
+            id: "readonly-ast-guard",
+            kind: "guard",
+            title: bi("生成探针脚本与静态安全门禁校验", "Generate Probe & Static Read-Only Gate"),
+            detail: bi("等待脚本编写完成后执行静态只读安全扫描", "Waiting for script output before static read-only scan"),
+            ok: true,
+            status: "pending",
+          },
+        ]
+      : kind === "import-diagnose"
+        ? [
+            {
+              id: "scan-baseline",
+              kind: "inspect",
+              title: bi("通读集群基线、架构栈与变更台账", "Read Baseline, Stack & History"),
+              detail: bi("正在加载当前拓扑、参数、历史变更与安全态势…", "Loading topology, params, change history & security context…"),
+              ok: true,
+              status: "running",
+            },
+            {
+              id: "redact-context",
+              kind: "guard",
+              title: bi("敏感凭据自动脱敏与只读核验锁定", "Scrub Credentials & Lock Read-Only"),
+              detail: bi("自动剥离敏感凭据，仅放行 100% 只读核验项", "Scrubbing secrets locally; allowing 100% read-only checks only"),
+              ok: true,
+              status: "pending",
+            },
+            {
+              id: "connect-model",
+              kind: "connect",
+              title: bi("连接模型网关与投递上下文", "Connect Model Gateway & Dispatch Context"),
+              detail: bi("等待脱敏完成后建立模型流式连接", "Waiting for redaction before opening AI stream"),
+              ok: true,
+              status: "pending",
+            },
+            {
+              id: "model-think",
+              kind: "think",
+              title: bi("研判固定规则之外的架构盲区", "Identify Architecture-Specific Blind Spots"),
+              detail: bi("等待模型通道返回首包后展开推演", "Waiting for first token from model stream"),
+              ok: true,
+              status: "pending",
+            },
+            {
+              id: "synth-gaps",
+              kind: "synthesize",
+              title: bi("收敛只读补采清单与优先级", "Compile Read-Only Gap Checklist"),
+              detail: bi("等待盲区研判完成后生成只读补采建议", "Waiting for analysis before compiling gap checklist"),
+              ok: true,
+              status: "pending",
+            },
+          ]
+        : [
+            {
+              id: "det-scan",
+              kind: "inspect",
+              title: bi("扫描现场回显与架构线索", "Scan Live Evidence & Clues"),
+              detail: bi("正在运行规则预扫描并整理输入回显与截图…", "Running pre-scan over pasted output & screenshots…"),
+              ok: true,
+              status: "running",
+            },
+            {
+              id: "redact-secrets",
+              kind: "guard",
+              title: bi("敏感凭据自动脱敏与规范化", "Scrub Credentials & Normalize Input"),
+              detail: bi("自动剥离口令、私钥与敏感连接串，仅投递架构元数据", "Scrubbing passwords, keys & DSNs; topology metadata only"),
+              ok: true,
+              status: "pending",
+            },
+            {
+              id: "connect-model",
+              kind: "connect",
+              title: bi("连接模型网关与投递上下文", "Connect Model Gateway & Dispatch Context"),
+              detail: bi("等待脱敏完成后建立模型流式连接", "Waiting for redaction before opening AI stream"),
+              ok: true,
+              status: "pending",
+            },
+            {
+              id: "model-think",
+              kind: "think",
+              title: bi("识别主机角色与多组件架构栈", "Analyze Hosts & Companion Stack"),
+              detail: bi("等待模型通道返回首包后展开推演", "Waiting for first token from model stream"),
+              ok: true,
+              status: "pending",
+            },
+            {
+              id: "synth-baseline",
+              kind: "synthesize",
+              title: bi("合成结构化纳管基线草稿", "Synthesize Structured Baseline Draft"),
+              detail: bi("等待架构推演完成后组装基线拓扑草稿", "Waiting for analysis before assembling baseline draft"),
+              ok: true,
+              status: "pending",
+            },
+          ];
 
-  if (!active) return null;
-
-  return (
-    <div className="imp-probe-gen" role="status" aria-live="polite">
-      <Spark size={14} rainbow />
-      <span className="imp-probe-gen-txt">{stages[idx]}</span>
-      <span className="imp-probe-gen-meta num">
-        {idx + 1}/{stages.length} · {secs.toFixed(1)}s
-      </span>
-    </div>
-  );
-}
-
-function GapDiagnosingBanner({ active }: { active: boolean }) {
-  const [idx, setIdx] = useState(0);
-  const [secs, setSecs] = useState(0);
-  const stages = useMemo(
-    () => [
-      bi("正在通读集群基线、架构栈与历史演练线索…", "Reading cluster baseline, stack & rehearsal history…"),
-      bi("对照生产高可用、备份与安全巡检最佳实践…", "Comparing against production HA, backup & security standards…"),
-      bi("定位固定规则之外的架构专属盲区…", "Spotting architecture-specific blind spots beyond fixed rules…"),
-      bi("整理 100% 只读核查项与优先级…", "Compiling 100% read-only verification items & priority…"),
-    ],
-    [],
-  );
-
-  useEffect(() => {
-    if (!active) {
-      setIdx(0);
-      setSecs(0);
-      return;
-    }
-    const t0 = Date.now();
-    const tick = window.setInterval(() => setSecs((Date.now() - t0) / 1000), 200);
-    const rot = window.setInterval(() => setIdx((p) => (p + 1) % stages.length), 1900);
-    return () => {
-      window.clearInterval(tick);
-      window.clearInterval(rot);
-    };
-  }, [active, stages.length]);
-
-  if (!active) return null;
-
-  return (
-    <div className="imp-gap-diag-prog" role="status" aria-live="polite">
-      <Spark size={14} rainbow />
-      <span className="imp-probe-gen-txt">{stages[idx]}</span>
-      <span className="imp-probe-gen-meta num">
-        {idx + 1}/{stages.length} · {secs.toFixed(1)}s
-      </span>
-    </div>
-  );
+  return {
+    kind,
+    title,
+    startedAt: Date.now(),
+    steps,
+    thinking: "",
+    phase: steps[0]?.detail || "",
+    chars: 0,
+    provider: target?.provider,
+    model: target?.model,
+  };
 }
 
 function ProbeCodeBlock({
@@ -1087,8 +1157,6 @@ function ProbeCodeBlock({
           )}
         </div>
       )}
-
-      <ProbeGeneratingBanner active={aiBusy} gapCount={gapCount} />
 
       <pre className={`imp-probe-pre ${expanded ? "is-expanded" : ""}`}>
         {previewText || bi("正在生成只读采集脚本…", "Generating read-only probe script...")}
@@ -1421,57 +1489,6 @@ function ImportEvidenceComposer({
   );
 }
 
-function ParsingStagePanel({ active, aiEnabled }: { active: boolean; aiEnabled: boolean }) {
-  const [elapsed, setElapsed] = useState(0);
-  useEffect(() => {
-    if (!active) {
-      setElapsed(0);
-      return;
-    }
-    const started = Date.now();
-    const timer = window.setInterval(() => {
-      setElapsed((Date.now() - started) / 1000);
-    }, 200);
-    return () => window.clearInterval(timer);
-  }, [active]);
-
-  if (!active) return null;
-
-  const stages = [
-    bi("凭据脱敏与规范化", "Redacting secrets"),
-    bi("识别主机、版本与磁盘", "Parsing hosts & OS"),
-    bi("识别伴生架构组件栈", "Detecting companions"),
-    bi("合成多组件运行拓扑", "Synthesizing topology"),
-  ];
-  const currentIdx = elapsed < 0.8 ? 0 : elapsed < 2.4 ? 1 : elapsed < 5.5 ? 2 : 3;
-
-  return (
-    <div className="imp-ai-stage" role="status" aria-live="polite">
-      <div className="imp-ai-stage-head">
-        <span className="imp-ai-stage-title">
-          <span className="imp-ai-pulse" />
-          {aiEnabled
-            ? bi("AI 正在解析现场回显并识别多组件架构…", "AI is analyzing input & detecting companion stack...")
-            : bi("内置规则引擎正在提取基线与伴生组件…", "Rule engine is extracting baseline & companions...")}
-        </span>
-        <span className="mono small muted num">{elapsed.toFixed(1)}s</span>
-      </div>
-      <div className="imp-ai-steps">
-        {stages.map((label, idx) => {
-          const done = idx < currentIdx;
-          const on = idx === currentIdx;
-          return (
-            <div key={idx} className={`imp-ai-step ${done ? "is-done" : on ? "is-active" : ""}`}>
-              <span className="imp-ai-step-dot" />
-              <span>{label}</span>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 function CompanionStackEditor({
   primaryCompID,
   primaryDisplayName,
@@ -1771,10 +1788,24 @@ export function ImportClusterPage({
   const [probeSafe, setProbeSafe] = useState(true);
   const [probeSource, setProbeSource] = useState<"template" | "ai">("template");
   const [probeGenerating, setProbeGenerating] = useState(false);
+  const [probeLive, setProbeLive] = useState<LiveAIState<ImportLiveKind> | null>(null);
+  const [probeTrace, setProbeTrace] = useState<RehearsalTrace | null>(null);
+  const [lastProbeFocus, setLastProbeFocus] = useState("");
+  const probeAbortRef = useRef<AbortController | null>(null);
   const [pasteText, setPasteText] = useState("");
   const [images, setImages] = useState<string[]>([]);
   const [parsing, setParsing] = useState(false);
+  const [parseLive, setParseLive] = useState<LiveAIState<ImportLiveKind> | null>(null);
+  const [parseTrace, setParseTrace] = useState<RehearsalTrace | null>(null);
+  const parseAbortRef = useRef<AbortController | null>(null);
   const [parseInfo, setParseInfo] = useState<{ parser: string; warnings: string[]; missing: string[]; companionCount: number } | null>(null);
+
+  useEffect(() => {
+    return () => {
+      probeAbortRef.current?.abort();
+      parseAbortRef.current?.abort();
+    };
+  }, []);
 
   // Step 2 manual & Step 3 editable baseline
   const [hosts, setHosts] = useState<HostRow[]>([{ name: "node-1", ip: "", role: "primary", disk: "" }]);
@@ -1863,46 +1894,87 @@ export function ImportClusterPage({
 
   const fetchImportProbe = useCallback(
     async (opts?: { useAI?: boolean; focus?: string }) => {
-      if (opts?.useAI) setProbeGenerating(true);
+      type ProbeResp = {
+        script: string;
+        filename: string;
+        safe: boolean;
+        source?: "template" | "ai";
+        ai_note?: string;
+        trace?: RehearsalTrace;
+      };
+      const payload = {
+        component: effectiveCompID,
+        display_name: effectiveDisplayName,
+        deploy_method: deployMethod,
+        use_ai: Boolean(opts?.useAI),
+        focus: opts?.focus?.trim() || undefined,
+        model: wizardModelPick.ref || undefined,
+        think: wizardAIOpts.pref.think || undefined,
+      };
+      if (!opts?.useAI) {
+        try {
+          const res = await api<ProbeResp>("/api/clusters/import/probe-script", {
+            method: "POST",
+            body: JSON.stringify(payload),
+          });
+          setProbeScript(res.script);
+          setProbeFilename(res.filename);
+          setProbeSafe(res.safe);
+          setProbeSource(res.source === "ai" ? "ai" : "template");
+          setProbeLive(null);
+          setProbeTrace(null);
+        } catch {
+          /* ignore silent template refresh failure */
+        }
+        return;
+      }
+
+      probeAbortRef.current?.abort();
+      const ac = new AbortController();
+      probeAbortRef.current = ac;
+      setLastProbeFocus(opts.focus || "");
+      setProbeGenerating(true);
+      const modelHint = wizardModelPick.ref?.split("|")[1];
+      setProbeLive(
+        buildImportInitialLive(
+          "import-probe",
+          bi("AI 正在定制 100% 只读采集探针", "AI Tailoring 100% Read-Only Probe"),
+          modelHint ? { model: modelHint } : undefined,
+        ),
+      );
       try {
-        const res = await api<{
-          script: string;
-          filename: string;
-          safe: boolean;
-          source?: "template" | "ai";
-          ai_note?: string;
-        }>("/api/clusters/import/probe-script", {
-          method: "POST",
-          body: JSON.stringify({
-            component: effectiveCompID,
-            display_name: effectiveDisplayName,
-            deploy_method: deployMethod,
-            use_ai: Boolean(opts?.useAI),
-            focus: opts?.focus?.trim() || undefined,
-            model: wizardModelPick.ref || undefined,
-            think: wizardAIOpts.pref.think || undefined,
-          }),
-        });
+        const res = await streamPipelineSSE<ProbeResp, ImportLiveKind>(
+          "/api/clusters/import/probe-script",
+          payload,
+          (updater) => setProbeLive((prev) => (prev ? updater(prev) : prev)),
+          ac.signal,
+        );
+        if (ac.signal.aborted) return;
         setProbeScript(res.script);
         setProbeFilename(res.filename);
         setProbeSafe(res.safe);
         setProbeSource(res.source === "ai" ? "ai" : "template");
-        if (opts?.useAI) {
-          if (res.source === "ai") {
-            Message.success(bi("AI 已按现场特点定制精炼只读探针（已通过安全扫描）", "AI tailored a concise read-only probe (verified safe)"));
-          } else if (res.ai_note) {
-            Message.warning(res.ai_note);
-          }
+        setProbeTrace(res.trace || null);
+        setProbeLive(null);
+        if (res.source === "ai") {
+          Message.success(bi("AI 已按现场特点定制精炼只读探针（已通过安全扫描）", "AI tailored a concise read-only probe (verified safe)"));
+        } else if (res.ai_note) {
+          Message.warning(res.ai_note);
         }
       } catch (e) {
-        if (opts?.useAI) {
-          Message.error((e as Error).message || bi("AI 定制探针失败", "AI probe generation failed"));
+        if (ac.signal.aborted || (e as Error)?.name === "AbortError") {
+          setProbeLive(null);
+          return;
         }
+        setProbeLive((prev) => (prev ? markLiveStateError(prev, e) : prev));
       } finally {
-        if (opts?.useAI) setProbeGenerating(false);
+        if (probeAbortRef.current === ac) {
+          probeAbortRef.current = null;
+        }
+        setProbeGenerating(false);
       }
     },
-    [effectiveCompID, effectiveDisplayName, deployMethod],
+    [effectiveCompID, effectiveDisplayName, deployMethod, wizardModelPick.ref, wizardAIOpts.pref.think],
   );
 
   // Fetch read-only probe script when entering Step 2 in probe mode
@@ -1970,27 +2042,53 @@ export function ImportClusterPage({
 
   const validHosts = useMemo(() => hosts.filter((h) => h.name.trim() || h.ip.trim()), [hosts]);
 
-  const runParseAndProceed = async () => {
+  const runParseAndProceed = async (opts?: { useAI?: boolean }) => {
     if (parsing) return;
     if (!pasteText.trim() && images.length === 0) {
       Message.warning(bi("请先粘贴采集脚本输出或文档文本，或上传截图", "Paste probe output / text or upload screenshots first"));
       return;
     }
+    const useAI = opts?.useAI ?? Boolean(presetsData?.ai_enabled);
+    parseAbortRef.current?.abort();
+    const ac = new AbortController();
+    parseAbortRef.current = ac;
     setParsing(true);
+    const modelHint = wizardModelPick.ref?.split("|")[1];
+    if (useAI) {
+      setParseLive(
+        buildImportInitialLive(
+          "import-parse",
+          bi("AI 正在解析现场回显与多组件架构", "AI Parsing Evidence & Multi-Component Stack"),
+          modelHint ? { model: modelHint } : undefined,
+        ),
+      );
+    } else {
+      setParseLive(null);
+    }
     try {
-      const res = await api<ParseResp>("/api/clusters/import/parse", {
-        method: "POST",
-        body: JSON.stringify({
-          component: effectiveCompID,
-          display_name: effectiveDisplayName,
-          source_kind: inputMode === "probe" ? "probe" : "ai_doc",
-          text: pasteText,
-          images,
-          use_ai: true,
-          model: wizardModelPick.ref || undefined,
-          think: wizardAIOpts.pref.think || undefined,
-        }),
-      });
+      const payload = {
+        component: effectiveCompID,
+        display_name: effectiveDisplayName,
+        source_kind: inputMode === "probe" ? "probe" : "ai_doc",
+        text: pasteText,
+        images,
+        use_ai: useAI,
+        model: wizardModelPick.ref || undefined,
+        think: wizardAIOpts.pref.think || undefined,
+      };
+      const res = useAI
+        ? await streamPipelineSSE<ParseResp, ImportLiveKind>(
+            "/api/clusters/import/parse",
+            payload,
+            (updater) => setParseLive((prev) => (prev ? updater(prev) : prev)),
+            ac.signal,
+          )
+        : await api<ParseResp>("/api/clusters/import/parse", {
+            method: "POST",
+            body: JSON.stringify(payload),
+            signal: ac.signal,
+          });
+      if (ac.signal.aborted) return;
       const d = res.draft;
       if (d.suggested_id && !clusterId.trim() && CLUSTER_ID_RE.test(d.suggested_id)) {
         setClusterId(d.suggested_id);
@@ -2023,6 +2121,8 @@ export function ImportClusterPage({
       if (d.packages?.length) setPackages(d.packages);
       if (d.notes) setNotes(d.notes);
 
+      setParseLive(null);
+      setParseTrace(res.trace || null);
       setParseInfo({
         parser: res.parser,
         warnings: res.warnings || [],
@@ -2039,8 +2139,19 @@ export function ImportClusterPage({
       );
       setStep(3);
     } catch (e) {
-      Message.error((e as Error).message || bi("解析失败", "Parse failed"));
+      if (ac.signal.aborted || (e as Error)?.name === "AbortError") {
+        setParseLive(null);
+        return;
+      }
+      if (useAI) {
+        setParseLive((prev) => (prev ? markLiveStateError(prev, e) : prev));
+      } else {
+        Message.error((e as Error).message || bi("解析失败", "Parse failed"));
+      }
     } finally {
+      if (parseAbortRef.current === ac) {
+        parseAbortRef.current = null;
+      }
       setParsing(false);
     }
   };
@@ -2581,6 +2692,21 @@ export function ImportClusterPage({
 
             {inputMode === "probe" && (
               <>
+                {(probeLive || probeTrace) && (
+                  <AIProcessCard
+                    live={probeLive}
+                    trace={probeLive ? null : probeTrace}
+                    title={bi("AI 定制只读探针推演记录", "AI Read-Only Probe Generation Trace")}
+                    onAbort={() => {
+                      probeAbortRef.current?.abort();
+                      setProbeLive(null);
+                      setProbeGenerating(false);
+                    }}
+                    onRetry={() => void fetchImportProbe({ useAI: true, focus: lastProbeFocus })}
+                    onDismiss={() => setProbeLive(null)}
+                  />
+                )}
+
                 <ProbeCodeBlock
                   script={probeScript}
                   filename={probeFilename}
@@ -2658,8 +2784,29 @@ export function ImportClusterPage({
               />
             )}
 
-            {(inputMode === "probe" || inputMode === "ai_doc") && (
-              <ParsingStagePanel active={parsing} aiEnabled={Boolean(presetsData?.ai_enabled)} />
+            {(inputMode === "probe" || inputMode === "ai_doc") && parseLive && (
+              <AIProcessCard
+                live={parseLive}
+                title={bi("AI 现场回显与多组件架构解析", "AI Evidence & Multi-Component Stack Parsing")}
+                onAbort={() => {
+                  parseAbortRef.current?.abort();
+                  setParseLive(null);
+                  setParsing(false);
+                }}
+                onRetry={() => void runParseAndProceed({ useAI: true })}
+                onDismiss={() => setParseLive(null)}
+                extraErrorActions={
+                  pasteText.trim() ? (
+                    <Button
+                      size="small"
+                      type="secondary"
+                      onClick={() => void runParseAndProceed({ useAI: false })}
+                    >
+                      {bi("改用内置规则引擎提取", "Use Built-in Rule Parser")}
+                    </Button>
+                  ) : null
+                }
+              />
             )}
 
             {inputMode === "manual" && (
@@ -2828,6 +2975,13 @@ export function ImportClusterPage({
                     {bi("返回补充采集", "Re-parse")}
                   </Button>
                 </div>
+              )}
+
+              {parseTrace && (
+                <AIProcessCard
+                  trace={parseTrace}
+                  title={bi("AI 架构识别与推演过程", "AI Architecture Parsing Trace")}
+                />
               )}
 
               {/* NEW: First-Class Multi-Component Architecture Stack Editor */}
@@ -3361,6 +3515,9 @@ export function ImportedBaselineModal({
   const [health, setHealth] = useState<BaselineHealth | null>(null);
   const [selectedGapIDs, setSelectedGapIDs] = useState<string[]>([]);
   const [diagnosingGaps, setDiagnosingGaps] = useState(false);
+  const [diagLive, setDiagLive] = useState<LiveAIState<ImportLiveKind> | null>(null);
+  const [diagTrace, setDiagTrace] = useState<RehearsalTrace | null>(null);
+  const diagAbortRef = useRef<AbortController | null>(null);
   const [aiGapDone, setAiGapDone] = useState(false);
   const [aiGapModel, setAiGapModel] = useState("");
   const [aiGapAdded, setAiGapAdded] = useState(0);
@@ -3374,10 +3531,29 @@ export function ImportedBaselineModal({
   const [probeRunHint, setProbeRunHint] = useState("");
   const [probeModelName, setProbeModelName] = useState("");
   const [probeGenerating, setProbeGenerating] = useState(false);
+  const [probeLive, setProbeLive] = useState<LiveAIState<ImportLiveKind> | null>(null);
+  const [probeTrace, setProbeTrace] = useState<RehearsalTrace | null>(null);
+  const probeAbortRef = useRef<AbortController | null>(null);
   const [probeOutput, setProbeOutput] = useState("");
   const [probeImages, setProbeImages] = useState<string[]>([]);
   const [parsing, setParsing] = useState(false);
+  const [parseLive, setParseLive] = useState<LiveAIState<ImportLiveKind> | null>(null);
+  const [parseTrace, setParseTrace] = useState<RehearsalTrace | null>(null);
+  const parseAbortRef = useRef<AbortController | null>(null);
   const [mergeDiff, setMergeDiff] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!visible) {
+      diagAbortRef.current?.abort();
+      probeAbortRef.current?.abort();
+      parseAbortRef.current?.abort();
+    }
+    return () => {
+      diagAbortRef.current?.abort();
+      probeAbortRef.current?.abort();
+      parseAbortRef.current?.abort();
+    };
+  }, [visible]);
   // Progressive 3-step collapsible flow: Step 1 expanded by default; Step 2 & Step 3 collapsed until needed.
   const [step1Open, setStep1Open] = useState(true);
   const [step2Open, setStep2Open] = useState(false);
@@ -3487,40 +3663,74 @@ export function ImportedBaselineModal({
         targetMode === "gap"
           ? sourceGaps.filter((g) => g.source === "ai" && targetGaps.includes(g.id))
           : [];
-      if (opts?.useAI) {
-        setProbeGenerating(true);
-        setStep1Open(false);
-        setStep2Open(true);
+      type DrawerProbeResp = {
+        script: string;
+        filename: string;
+        safe?: boolean;
+        source?: "template" | "ai";
+        mode?: "gap" | "full";
+        covered_gaps?: string[];
+        run_hint?: string;
+        model?: string;
+        ai_note?: string;
+        trace?: RehearsalTrace;
+      };
+      const payload = {
+        cluster_id: cluster.id,
+        component: cluster.app_id,
+        display_name: cluster.app_name,
+        deploy_method: deployMethod,
+        service_units: serviceUnits,
+        config_paths: configPaths,
+        mode: targetMode,
+        missing_gaps: targetMode === "gap" ? targetGaps : [],
+        custom_gaps: customGaps,
+        use_ai: Boolean(opts?.useAI),
+        focus: (opts?.focus ?? probeFocus).trim() || undefined,
+        model: modelPick.ref || undefined,
+        think: aiOpts.pref.think || undefined,
+      };
+      if (!opts?.useAI) {
+        try {
+          const res = await api<DrawerProbeResp>("/api/clusters/import/probe-script", {
+            method: "POST",
+            body: JSON.stringify(payload),
+          });
+          setProbeScript(res.script);
+          setProbeFilename(res.filename);
+          setProbeSafe(res.safe !== false);
+          setProbeSource(res.source === "ai" ? "ai" : "template");
+          setProbeCoveredGaps(res.covered_gaps || []);
+          setProbeRunHint(res.run_hint || "");
+          setProbeModelName(res.model || "");
+        } catch {
+          /* ignore silent template refresh */
+        }
+        return;
       }
+
+      probeAbortRef.current?.abort();
+      const ac = new AbortController();
+      probeAbortRef.current = ac;
+      setProbeGenerating(true);
+      setStep1Open(false);
+      setStep2Open(true);
+      const modelHint = modelPick.ref?.split("|")[1];
+      setProbeLive(
+        buildImportInitialLive(
+          "import-probe",
+          bi("AI 正在生成专项 100% 只读探针", "AI Generating Targeted 100% Read-Only Probe"),
+          modelHint ? { model: modelHint } : undefined,
+        ),
+      );
       try {
-        const res = await api<{
-          script: string;
-          filename: string;
-          safe?: boolean;
-          source?: "template" | "ai";
-          mode?: "gap" | "full";
-          covered_gaps?: string[];
-          run_hint?: string;
-          model?: string;
-          ai_note?: string;
-        }>("/api/clusters/import/probe-script", {
-          method: "POST",
-          body: JSON.stringify({
-            cluster_id: cluster.id,
-            component: cluster.app_id,
-            display_name: cluster.app_name,
-            deploy_method: deployMethod,
-            service_units: serviceUnits,
-            config_paths: configPaths,
-            mode: targetMode,
-            missing_gaps: targetMode === "gap" ? targetGaps : [],
-            custom_gaps: customGaps,
-            use_ai: Boolean(opts?.useAI),
-            focus: (opts?.focus ?? probeFocus).trim() || undefined,
-            model: modelPick.ref || undefined,
-            think: aiOpts.pref.think || undefined,
-          }),
-        });
+        const res = await streamPipelineSSE<DrawerProbeResp, ImportLiveKind>(
+          "/api/clusters/import/probe-script",
+          payload,
+          (updater) => setProbeLive((prev) => (prev ? updater(prev) : prev)),
+          ac.signal,
+        );
+        if (ac.signal.aborted) return;
         setProbeScript(res.script);
         setProbeFilename(res.filename);
         setProbeSafe(res.safe !== false);
@@ -3528,24 +3738,29 @@ export function ImportedBaselineModal({
         setProbeCoveredGaps(res.covered_gaps || []);
         setProbeRunHint(res.run_hint || "");
         setProbeModelName(res.model || "");
-        if (opts?.useAI) {
-          if (res.source === "ai") {
-            Message.success(
-              bi(
-                "AI 已按所选需求生成专项 100% 只读探针（已通过静态安全门禁）",
-                "AI generated targeted 100% read-only probe (verified safe)",
-              ),
-            );
-          } else if (res.ai_note) {
-            Message.warning(res.ai_note);
-          }
+        setProbeTrace(res.trace || null);
+        setProbeLive(null);
+        if (res.source === "ai") {
+          Message.success(
+            bi(
+              "AI 已按所选需求生成专项 100% 只读探针（已通过静态安全门禁）",
+              "AI generated targeted 100% read-only probe (verified safe)",
+            ),
+          );
+        } else if (res.ai_note) {
+          Message.warning(res.ai_note);
         }
       } catch (e) {
-        if (opts?.useAI) {
-          Message.error((e as Error).message || bi("AI 生成只读探针失败", "AI probe generation failed"));
+        if (ac.signal.aborted || (e as Error)?.name === "AbortError") {
+          setProbeLive(null);
+          return;
         }
+        setProbeLive((prev) => (prev ? markLiveStateError(prev, e) : prev));
       } finally {
-        if (opts?.useAI) setProbeGenerating(false);
+        if (probeAbortRef.current === ac) {
+          probeAbortRef.current = null;
+        }
+        setProbeGenerating(false);
       }
     },
     [
@@ -3566,23 +3781,39 @@ export function ImportedBaselineModal({
 
   const runAIDiagnoseGaps = useCallback(async () => {
     if (diagnosingGaps) return;
+    type DiagResp = {
+      health: BaselineHealth;
+      ai_used?: boolean;
+      ai_added?: number;
+      model?: string;
+      ai_note?: string;
+      trace?: RehearsalTrace;
+    };
+    diagAbortRef.current?.abort();
+    const ac = new AbortController();
+    diagAbortRef.current = ac;
     setDiagnosingGaps(true);
+    const modelHint = modelPick.ref?.split("|")[1];
+    setDiagLive(
+      buildImportInitialLive(
+        "import-diagnose",
+        bi("AI 正在深度排查架构基线盲区", "AI Deep Baseline Gap Diagnosis"),
+        modelHint ? { model: modelHint } : undefined,
+      ),
+    );
     try {
-      const res = await api<{
-        health: BaselineHealth;
-        ai_used?: boolean;
-        ai_added?: number;
-        model?: string;
-        ai_note?: string;
-      }>("/api/clusters/import/diagnose-gaps", {
-        method: "POST",
-        body: JSON.stringify({
+      const res = await streamPipelineSSE<DiagResp, ImportLiveKind>(
+        "/api/clusters/import/diagnose-gaps",
+        {
           cluster_id: cluster.id,
           focus: probeFocus.trim() || undefined,
           model: modelPick.ref || undefined,
           think: aiOpts.pref.think || undefined,
-        }),
-      });
+        },
+        (updater) => setDiagLive((prev) => (prev ? updater(prev) : prev)),
+        ac.signal,
+      );
+      if (ac.signal.aborted) return;
       if (res.health) {
         setHealth(res.health);
         const newAISelected = (res.health.gaps || [])
@@ -3596,6 +3827,8 @@ export function ImportedBaselineModal({
       setAiGapDone(Boolean(res.ai_used));
       setAiGapModel(res.model || "");
       setAiGapAdded(res.ai_added || 0);
+      setDiagTrace(res.trace || null);
+      setDiagLive(null);
       if (res.ai_used) {
         if ((res.ai_added || 0) > 0) {
           Message.success(
@@ -3616,8 +3849,15 @@ export function ImportedBaselineModal({
         Message.warning(res.ai_note);
       }
     } catch (e) {
-      Message.error((e as Error).message || bi("AI 深度发现遗漏项失败", "AI gap diagnosis failed"));
+      if (ac.signal.aborted || (e as Error)?.name === "AbortError") {
+        setDiagLive(null);
+        return;
+      }
+      setDiagLive((prev) => (prev ? markLiveStateError(prev, e) : prev));
     } finally {
+      if (diagAbortRef.current === ac) {
+        diagAbortRef.current = null;
+      }
       setDiagnosingGaps(false);
     }
   }, [diagnosingGaps, cluster.id, probeFocus, modelPick.ref, aiOpts.pref.think]);
@@ -3714,28 +3954,54 @@ export function ImportedBaselineModal({
     return () => window.removeEventListener("keydown", onKey);
   }, [visible, saving, parsing, onClose]);
 
-  const parseAndMergeProbe = async () => {
+  const parseAndMergeProbe = async (opts?: { useAI?: boolean }) => {
     if (parsing) return;
     if (!probeOutput.trim() && probeImages.length === 0) {
       Message.warning(bi("请先粘贴采集脚本终端输出或上传截图", "Paste probe terminal output or upload screenshots first"));
       return;
     }
+    const useAI = opts?.useAI ?? true;
+    parseAbortRef.current?.abort();
+    const ac = new AbortController();
+    parseAbortRef.current = ac;
     setParsing(true);
+    const modelHint = modelPick.ref?.split("|")[1];
+    if (useAI) {
+      setParseLive(
+        buildImportInitialLive(
+          "import-parse",
+          bi("AI 正在解析回显并增量合并基线", "AI Parsing Evidence & Merging Baseline"),
+          modelHint ? { model: modelHint } : undefined,
+        ),
+      );
+    } else {
+      setParseLive(null);
+    }
     try {
-      const res = await api<ParseResp>("/api/clusters/import/parse", {
-        method: "POST",
-        body: JSON.stringify({
-          cluster_id: cluster.id,
-          component: cluster.app_id,
-          display_name: cluster.app_name,
-          source_kind: "probe",
-          text: probeOutput,
-          images: probeImages,
-          use_ai: true,
-          model: modelPick.ref || undefined,
-          think: aiOpts.pref.think || undefined,
-        }),
-      });
+      const payload = {
+        cluster_id: cluster.id,
+        component: cluster.app_id,
+        display_name: cluster.app_name,
+        source_kind: "probe",
+        text: probeOutput,
+        images: probeImages,
+        use_ai: useAI,
+        model: modelPick.ref || undefined,
+        think: aiOpts.pref.think || undefined,
+      };
+      const res = useAI
+        ? await streamPipelineSSE<ParseResp, ImportLiveKind>(
+            "/api/clusters/import/parse",
+            payload,
+            (updater) => setParseLive((prev) => (prev ? updater(prev) : prev)),
+            ac.signal,
+          )
+        : await api<ParseResp>("/api/clusters/import/parse", {
+            method: "POST",
+            body: JSON.stringify(payload),
+            signal: ac.signal,
+          });
+      if (ac.signal.aborted) return;
       const d = res.draft;
       const changes: string[] = [];
       const unionStrings = (cur: string[], incoming?: string[], label?: string) => {
@@ -3886,6 +4152,8 @@ export function ImportedBaselineModal({
       }
 
       setMergeDiff(changes);
+      setParseLive(null);
+      setParseTrace(res.trace || null);
       Message.success(
         changes.length > 0
           ? bi(`已增量合并：${changes.join(" · ")}，请核对后保存基线`, `Merged: ${changes.join(" · ")}; review and save`)
@@ -3893,8 +4161,19 @@ export function ImportedBaselineModal({
       );
       setTab("edit");
     } catch (e) {
-      Message.error((e as Error).message);
+      if (ac.signal.aborted || (e as Error)?.name === "AbortError") {
+        setParseLive(null);
+        return;
+      }
+      if (useAI) {
+        setParseLive((prev) => (prev ? markLiveStateError(prev, e) : prev));
+      } else {
+        Message.error((e as Error).message);
+      }
     } finally {
+      if (parseAbortRef.current === ac) {
+        parseAbortRef.current = null;
+      }
       setParsing(false);
     }
   };
@@ -4135,7 +4414,20 @@ export function ImportedBaselineModal({
                       </div>
                     </div>
 
-                    <GapDiagnosingBanner active={diagnosingGaps} />
+                    {(diagLive || diagTrace) && (
+                      <AIProcessCard
+                        live={diagLive}
+                        trace={diagLive ? null : diagTrace}
+                        title={bi("AI 深度基线盲区诊断推演", "AI Deep Baseline Gap Diagnosis")}
+                        onAbort={() => {
+                          diagAbortRef.current?.abort();
+                          setDiagLive(null);
+                          setDiagnosingGaps(false);
+                        }}
+                        onRetry={() => void runAIDiagnoseGaps()}
+                        onDismiss={() => setDiagLive(null)}
+                      />
+                    )}
 
                     {probeMode === "gap" && allGaps.length > 0 && (
                       <div className="imp-gap-grid">
@@ -4351,6 +4643,20 @@ export function ImportedBaselineModal({
 
                 {step2Open && (
                   <div className="imp-step-body">
+                    {(probeLive || probeTrace) && (
+                      <AIProcessCard
+                        live={probeLive}
+                        trace={probeLive ? null : probeTrace}
+                        title={bi("AI 定制只读探针推演记录", "AI Read-Only Probe Generation Trace")}
+                        onAbort={() => {
+                          probeAbortRef.current?.abort();
+                          setProbeLive(null);
+                          setProbeGenerating(false);
+                        }}
+                        onRetry={() => void fetchDrawerProbe({ useAI: true })}
+                        onDismiss={() => setProbeLive(null)}
+                      />
+                    )}
                     <ProbeCodeBlock
                       script={probeScript}
                       filename={probeFilename}
@@ -4507,9 +4813,32 @@ export function ImportedBaselineModal({
                         </Button>
                       }
                       submitLabel={bi("AI 解析并增量合并基线", "AI Parse & Merge")}
-                      onSubmit={() => void parseAndMergeProbe()}
+                      onSubmit={() => void parseAndMergeProbe({ useAI: true })}
                     />
-                    <ParsingStagePanel active={parsing} aiEnabled />
+                    {parseLive && (
+                      <AIProcessCard
+                        live={parseLive}
+                        title={bi("AI 现场回显与多组件架构解析", "AI Evidence & Multi-Component Stack Parsing")}
+                        onAbort={() => {
+                          parseAbortRef.current?.abort();
+                          setParseLive(null);
+                          setParsing(false);
+                        }}
+                        onRetry={() => void parseAndMergeProbe({ useAI: true })}
+                        onDismiss={() => setParseLive(null)}
+                        extraErrorActions={
+                          probeOutput.trim() ? (
+                            <Button
+                              size="small"
+                              type="secondary"
+                              onClick={() => void parseAndMergeProbe({ useAI: false })}
+                            >
+                              {bi("改用内置规则引擎提取", "Use Built-in Rule Parser")}
+                            </Button>
+                          ) : null
+                        }
+                      />
+                    )}
                   </div>
                 )}
               </section>
@@ -4531,6 +4860,12 @@ export function ImportedBaselineModal({
                 {bi("立即保存", "Save Now")}
               </Button>
             </div>
+          )}
+          {parseTrace && (
+            <AIProcessCard
+              trace={parseTrace}
+              title={bi("AI 增量补采解析推演记录", "AI Incremental Merge Trace")}
+            />
           )}
 
           {health && health.gaps.length > 0 && mergeDiff.length === 0 && (

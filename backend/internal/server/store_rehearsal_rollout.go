@@ -5,11 +5,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -736,65 +738,766 @@ func (s *storeServer) evaluatePropagateTarget(
 	return item
 }
 
-// buildClusterRemapPairs builds deterministic text replacement pairs (longest-first)
-// to scrub origin cluster IDs, IPs, hostnames, and VIPs before applying to a target cluster.
-func buildClusterRemapPairs(originFacts, targetFacts clusterFacts) [][2]string {
-	var pairs [][2]string
+type clusterEndpointInfo struct {
+	Component string
+	Name      string
+	Role      string // "readwrite" | "readonly" | "admin" | ""
+	Host      string
+	Port      int
+	ResolveIP string
+}
+
+type endpointRemapRule struct {
+	OldHost       string
+	OldPort       int
+	OldResolveIP  string
+	NewHost       string
+	NewPort       int
+	NewResolveIP  string
+	MissingTarget bool
+}
+
+type remapToken struct {
+	From     string
+	To       string
+	Boundary string // "" | "ip" | "word"
+}
+
+type clusterRemapper struct {
+	tokens                []remapToken
+	endpointRules         []endpointRemapRule
+	targetIPToName        map[string]string
+	targetIPs             []string
+	targetSlug            string
+	originLocalPGPort     int
+	targetLocalPGPort     int
+	missingTargetEndpoint bool
+	missingEndpointHosts  []string
+	lang                  string
+}
+
+var (
+	reAwkSubnetIPGroup  = regexp.MustCompile(`(\d{1,3}\\\.\d{1,3}\\\.\d{1,3}\\\.\(\d{1,3}(?:\|\d{1,3})+\))`)
+	reAwkFullIPGroup    = regexp.MustCompile(`(\(\d{1,3}\\\.\d{1,3}\\\.\d{1,3}\\\.\d{1,3}(?:\|\d{1,3}\\\.\d{1,3}\\\.\d{1,3}\\\.\d{1,3})+\))`)
+	reLogVerifySlug     = regexp.MustCompile(`(^|[^a-z0-9_])([a-z][a-z0-9]{1,31})(_log_verify)`)
+	reOrphanNodeIPPair  = regexp.MustCompile(`\b(00[1-9])\s*/\s*(\d{1,3}(?:\.\d{1,3}){3})\b`)
+	rePortFlagSpace     = regexp.MustCompile(`(-p[ \t]+)(\d{2,5})\b`)
+	rePortEquals        = regexp.MustCompile(`\b(port=)(\d{2,5})\b`)
+	reLongPortOpt       = regexp.MustCompile(`(--port(?:=|[ \t]+))(\d{2,5})\b`)
+	rePortProseCN       = regexp.MustCompile(`(端口[：:\s]*)(\d{2,5})\b`)
+	reStrictExpectStrip = regexp.MustCompile(`(?s)^1\)\s*(?:节点名/IP 与本集群基线|Hostname/IP matches target cluster baseline).*?(?:补充核对：|Additional check:\s*)`)
+)
+
+func splitEndpointHostPort(raw string) (string, int) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return "", 0
+	}
+	if strings.Contains(s, "://") {
+		if idx := strings.Index(s, "://"); idx >= 0 {
+			s = s[idx+3:]
+		}
+		if slash := strings.IndexByte(s, '/'); slash >= 0 {
+			s = s[:slash]
+		}
+	}
+	if h, pStr, err := net.SplitHostPort(s); err == nil {
+		p, _ := strconv.Atoi(strings.TrimSpace(pStr))
+		return strings.TrimSpace(h), p
+	}
+	return s, 0
+}
+
+func normalizeEndpointRole(name, role string) string {
+	r := strings.ToLower(strings.TrimSpace(role))
+	switch r {
+	case "readwrite", "rw", "writer", "primary", "master":
+		return "readwrite"
+	case "readonly", "ro", "reader", "replica", "standby":
+		return "readonly"
+	case "admin", "manage", "management":
+		return "admin"
+	}
+	n := strings.ToLower(strings.TrimSpace(name))
+	switch {
+	case strings.Contains(n, "read") && !strings.Contains(n, "write"):
+		return "readonly"
+	case strings.Contains(n, "ro") && n != "patroni":
+		return "readonly"
+	case n == "writer" || n == "eip" || n == "vip" || n == "elb" || n == "lb" || n == "primary" || strings.Contains(n, "write") || strings.Contains(n, "rw"):
+		return "readwrite"
+	}
+	return "readwrite"
+}
+
+func extractClusterEndpoints(f clusterFacts, dep *mwpack.Deployment) []clusterEndpointInfo {
+	var out []clusterEndpointInfo
 	seen := map[string]bool{}
-	add := func(from, to string) {
+	add := func(ep clusterEndpointInfo) {
+		ep.Host = strings.TrimSpace(ep.Host)
+		if ep.Host == "" {
+			return
+		}
+		key := strings.ToLower(ep.Host) + ":" + strconv.Itoa(ep.Port)
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		out = append(out, ep)
+	}
+	if f.Plan != nil {
+		for _, inst := range f.Plan.Instances {
+			if len(inst.Fronts) == 0 {
+				continue
+			}
+			names := make([]string, 0, len(inst.Fronts))
+			for k := range inst.Fronts {
+				names = append(names, k)
+			}
+			sort.Strings(names)
+			for _, epName := range names {
+				fr := inst.Fronts[epName]
+				h, p := splitEndpointHostPort(fr.Address)
+				if fr.Listen > 0 {
+					p = fr.Listen
+				}
+				add(clusterEndpointInfo{
+					Component: strings.ToLower(strings.TrimSpace(inst.Component)),
+					Name:      strings.ToLower(strings.TrimSpace(epName)),
+					Role:      normalizeEndpointRole(epName, ""),
+					Host:      h,
+					Port:      p,
+					ResolveIP: strings.TrimSpace(fr.ResolveIP),
+				})
+			}
+		}
+	}
+	if dep != nil && dep.Imported != nil {
+		app := strings.ToLower(strings.TrimSpace(f.Current.AppID))
+		for _, ie := range dep.Imported.Endpoints {
+			h, p := splitEndpointHostPort(ie.Address)
+			add(clusterEndpointInfo{
+				Component: app,
+				Name:      strings.ToLower(strings.TrimSpace(ie.Name)),
+				Role:      normalizeEndpointRole(ie.Name, ie.Role),
+				Host:      h,
+				Port:      p,
+			})
+		}
+	}
+	return out
+}
+
+func hostRoleRank(hostName string, f clusterFacts, dep *mwpack.Deployment) int {
+	app := strings.ToLower(strings.TrimSpace(f.Current.AppID))
+	best := 2
+	checkRoles := func(roles map[string][]string) {
+		for rName, hs := range roles {
+			rn := strings.ToLower(strings.TrimSpace(rName))
+			rank := 2
+			switch rn {
+			case "primary", "leader", "master", "writer":
+				rank = 0
+			case "replica", "standby", "slave", "quorum", "quorum standby", "sync_standby":
+				rank = 1
+			}
+			for _, h := range hs {
+				if strings.EqualFold(strings.TrimSpace(h), hostName) && rank < best {
+					best = rank
+				}
+			}
+		}
+	}
+	if f.Plan != nil {
+		for _, inst := range f.Plan.Instances {
+			if inst.External {
+				continue
+			}
+			if app != "" && !strings.EqualFold(inst.Component, app) && inst.Component != "patroni" {
+				continue
+			}
+			checkRoles(inst.Roles)
+		}
+	}
+	if dep != nil {
+		for _, inst := range dep.Instances {
+			if app != "" && !strings.EqualFold(inst.Component, app) && inst.Component != "patroni" {
+				continue
+			}
+			checkRoles(inst.Placement)
+		}
+		if dep.Imported != nil {
+			for _, cm := range dep.Imported.Companions {
+				if strings.EqualFold(cm.Component, "patroni") {
+					checkRoles(cm.Placement)
+				}
+			}
+		}
+	}
+	return best
+}
+
+func alignedClusterHosts(f clusterFacts, dep *mwpack.Deployment) []mwpack.Host {
+	var raw []mwpack.Host
+	if f.Plan != nil && len(f.Plan.Hosts) > 0 {
+		raw = append(raw, f.Plan.Hosts...)
+	} else if dep != nil {
+		for _, h := range dep.Hosts {
+			raw = append(raw, mwpack.Host{Name: h.Name, IP: h.IP})
+		}
+	}
+	type rankedHost struct {
+		h    mwpack.Host
+		rank int
+		idx  int
+	}
+	items := make([]rankedHost, len(raw))
+	for i, h := range raw {
+		items[i] = rankedHost{h: h, rank: hostRoleRank(h.Name, f, dep), idx: i}
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].rank != items[j].rank {
+			return items[i].rank < items[j].rank
+		}
+		return items[i].idx < items[j].idx
+	})
+	out := make([]mwpack.Host, len(items))
+	for i, it := range items {
+		out[i] = it.h
+	}
+	return out
+}
+
+func clusterPatroniConfigPath(f clusterFacts, dep *mwpack.Deployment) string {
+	if dep != nil && dep.Imported != nil {
+		for _, cm := range dep.Imported.Companions {
+			if strings.EqualFold(cm.Component, "patroni") {
+				for _, p := range cm.ConfigPaths {
+					if strings.HasSuffix(p, ".yml") || strings.HasSuffix(p, ".yaml") {
+						return strings.TrimSpace(p)
+					}
+				}
+			}
+		}
+		for _, p := range dep.Imported.ConfigPaths {
+			lp := strings.ToLower(p)
+			if strings.Contains(lp, "patroni") && (strings.HasSuffix(lp, ".yml") || strings.HasSuffix(lp, ".yaml")) {
+				return strings.TrimSpace(p)
+			}
+		}
+	}
+	if dep != nil {
+		for _, inst := range dep.Instances {
+			if strings.EqualFold(inst.Component, "patroni") {
+				if v, ok := inst.Params["config_paths"].(string); ok {
+					for _, part := range strings.Split(v, ",") {
+						p := strings.TrimSpace(part)
+						if strings.HasSuffix(p, ".yml") || strings.HasSuffix(p, ".yaml") {
+							return p
+						}
+					}
+				}
+			}
+		}
+	}
+	return "/etc/patroni/patroni.yml"
+}
+
+func clusterLocalPGPort(f clusterFacts, dep *mwpack.Deployment) int {
+	parsePort := func(v any) int {
+		switch x := v.(type) {
+		case int:
+			if x > 0 && x <= 65535 {
+				return x
+			}
+		case float64:
+			if int(x) > 0 && int(x) <= 65535 {
+				return int(x)
+			}
+		case string:
+			if n, err := strconv.Atoi(strings.TrimSpace(x)); err == nil && n > 0 && n <= 65535 {
+				return n
+			}
+		}
+		return 0
+	}
+	if dep != nil {
+		for _, inst := range dep.Instances {
+			if strings.EqualFold(inst.Component, "postgresql") {
+				if p := parsePort(inst.Params["pg_port"]); p > 0 {
+					return p
+				}
+				if p := parsePort(inst.Params["port"]); p > 0 {
+					return p
+				}
+			}
+		}
+	}
+	if f.Plan != nil {
+		for _, inst := range f.Plan.Instances {
+			if strings.EqualFold(inst.Component, "postgresql") {
+				for _, pt := range inst.Ports {
+					ln := strings.ToLower(pt.Name)
+					if (ln == "postgresql" || ln == "postgres" || ln == "pg") && pt.Port > 0 {
+						return pt.Port
+					}
+				}
+			}
+		}
+	}
+	return 5432
+}
+
+func clusterPGDataDir(dep *mwpack.Deployment) string {
+	if dep == nil {
+		return ""
+	}
+	for _, inst := range dep.Instances {
+		if strings.EqualFold(inst.Component, "postgresql") {
+			if v, ok := inst.Params["data_dir"].(string); ok && strings.HasPrefix(strings.TrimSpace(v), "/") {
+				return strings.TrimSpace(v)
+			}
+		}
+	}
+	if dep.Imported != nil {
+		for _, d := range dep.Imported.DataDirs {
+			ld := strings.ToLower(strings.TrimSpace(d))
+			if strings.HasPrefix(ld, "/") && (strings.Contains(ld, "pg") || strings.Contains(ld, "postgres")) && !strings.Contains(ld, "backup") && !strings.Contains(ld, "pgbackrest") {
+				return strings.TrimSpace(d)
+			}
+		}
+	}
+	return ""
+}
+
+func extractClusterSlug(clusterID string) string {
+	generic := map[string]bool{
+		"pg": true, "postgres": true, "postgresql": true, "redis": true, "etcd": true,
+		"nginx": true, "haproxy": true, "keepalived": true, "mysql": true, "mongo": true,
+		"prod": true, "production": true, "dev": true, "test": true, "qa": true, "uat": true, "stg": true, "staging": true,
+		"private": true, "public": true, "internal": true, "external": true,
+		"ha": true, "cluster": true, "db": true, "node": true, "svc": true, "app": true,
+	}
+	parts := strings.FieldsFunc(strings.ToLower(strings.TrimSpace(clusterID)), func(r rune) bool {
+		return !(r >= 'a' && r <= 'z') && !(r >= '0' && r <= '9')
+	})
+	for _, p := range parts {
+		if len(p) >= 2 && !generic[p] {
+			return p
+		}
+	}
+	return ""
+}
+
+func escapeIPv4ForRegex(ip string) string {
+	return strings.ReplaceAll(strings.TrimSpace(ip), ".", `\.`)
+}
+
+func buildTargetIPv4Regex(ips []string) string {
+	var clean []string
+	for _, ip := range ips {
+		ip = strings.TrimSpace(ip)
+		if net.ParseIP(ip) != nil && strings.Contains(ip, ".") {
+			clean = append(clean, ip)
+		}
+	}
+	if len(clean) == 0 {
+		return ""
+	}
+	// Check if all target IPs share the same /24 prefix (A.B.C).
+	prefix := ""
+	var lastOctets []string
+	sameSlash24 := true
+	for _, ip := range clean {
+		parts := strings.Split(ip, ".")
+		if len(parts) != 4 {
+			sameSlash24 = false
+			break
+		}
+		p := parts[0] + "." + parts[1] + "." + parts[2]
+		if prefix == "" {
+			prefix = p
+		} else if prefix != p {
+			sameSlash24 = false
+			break
+		}
+		lastOctets = append(lastOctets, parts[3])
+	}
+	if sameSlash24 && len(lastOctets) > 1 {
+		return escapeIPv4ForRegex(prefix) + `\.(` + strings.Join(lastOctets, "|") + `)`
+	}
+	escaped := make([]string, len(clean))
+	for i, ip := range clean {
+		escaped[i] = escapeIPv4ForRegex(ip)
+	}
+	return `(` + strings.Join(escaped, "|") + `)`
+}
+
+func (s *storeServer) newClusterRemapper(originFacts, targetFacts clusterFacts, lang string) *clusterRemapper {
+	oDep := s.readSpec(originFacts.Current.ID)
+	tDep := s.readSpec(targetFacts.Current.ID)
+	r := &clusterRemapper{
+		targetIPToName:    map[string]string{},
+		targetSlug:        extractClusterSlug(targetFacts.ID),
+		originLocalPGPort: clusterLocalPGPort(originFacts, oDep),
+		targetLocalPGPort: clusterLocalPGPort(targetFacts, tDep),
+		lang:              lang,
+	}
+	seen := map[string]bool{}
+	add := func(from, to, boundary string) {
 		from = strings.TrimSpace(from)
 		to = strings.TrimSpace(to)
 		if from == "" || to == "" || from == to || seen[from] {
 			return
 		}
 		seen[from] = true
-		pairs = append(pairs, [2]string{from, to})
+		r.tokens = append(r.tokens, remapToken{From: from, To: to, Boundary: boundary})
 	}
-	add(originFacts.ID, targetFacts.ID)
 
-	if originFacts.Plan != nil && targetFacts.Plan != nil {
-		// Role-aligned host mapping when possible, falling back to positional mapping.
-		oHosts := originFacts.Plan.Hosts
-		tHosts := targetFacts.Plan.Hosts
-		for i, oh := range oHosts {
-			if i < len(tHosts) {
-				add(oh.IP, tHosts[i].IP)
-				add(oh.Name, tHosts[i].Name)
-			} else if oh.IP != "" {
-				add(oh.IP, "<目标节点IP>")
+	add(originFacts.ID, targetFacts.ID, "word")
+
+	// 1. Role-aligned host & IP mapping (primary->primary, replica->replica).
+	oHosts := alignedClusterHosts(originFacts, oDep)
+	tHosts := alignedClusterHosts(targetFacts, tDep)
+	for _, th := range tHosts {
+		if th.IP != "" {
+			r.targetIPs = append(r.targetIPs, th.IP)
+			if th.Name != "" {
+				r.targetIPToName[th.IP] = th.Name
 			}
 		}
-		// Remap frontend/ELB VIP addresses if different.
-		oFronts := map[string]string{}
-		for _, inst := range originFacts.Plan.Instances {
-			for epName, fr := range inst.Fronts {
-				if fr.Address != "" {
-					oFronts[inst.Component+":"+epName] = fr.Address
+	}
+	for i, oh := range oHosts {
+		if i < len(tHosts) {
+			if oh.IP != "" && tHosts[i].IP != "" {
+				add(oh.IP, tHosts[i].IP, "ip")
+				add(escapeIPv4ForRegex(oh.IP), escapeIPv4ForRegex(tHosts[i].IP), "")
+			}
+			if oh.Name != "" && tHosts[i].Name != "" {
+				add(oh.Name, tHosts[i].Name, "word")
+			}
+		} else if oh.IP != "" {
+			add(oh.IP, "<目标节点IP>", "ip")
+			add(escapeIPv4ForRegex(oh.IP), "<目标节点IP>", "")
+		}
+	}
+
+	// 2. Endpoint / VIP / ELB host + port + resolveIP matching (exact name -> role -> primary fallback).
+	oEps := extractClusterEndpoints(originFacts, oDep)
+	tEps := extractClusterEndpoints(targetFacts, tDep)
+	usedTarget := map[int]bool{}
+	matchEndpoint := func(oe clusterEndpointInfo) (clusterEndpointInfo, bool) {
+		// Pass 1: exact (component, name)
+		for i, te := range tEps {
+			if !usedTarget[i] && te.Component == oe.Component && te.Name != "" && te.Name == oe.Name {
+				usedTarget[i] = true
+				return te, true
+			}
+		}
+		// Pass 2: matching role (e.g. "writer" <-> "eip", both readwrite)
+		for i, te := range tEps {
+			if !usedTarget[i] && te.Role != "" && te.Role == oe.Role {
+				usedTarget[i] = true
+				return te, true
+			}
+		}
+		// Pass 3: first unused target endpoint
+		for i, te := range tEps {
+			if !usedTarget[i] {
+				usedTarget[i] = true
+				return te, true
+			}
+		}
+		// Pass 4: reuse primary target endpoint if origin had multiple aliases for same role
+		if len(tEps) > 0 {
+			return tEps[0], true
+		}
+		return clusterEndpointInfo{}, false
+	}
+
+	placeholderHost := tr(lang, "<待补齐目标集群访问入口>", "<TARGET_CLUSTER_ENDPOINT>")
+	for _, oe := range oEps {
+		if te, ok := matchEndpoint(oe); ok {
+			if oe.Port > 0 && te.Port > 0 {
+				add(fmt.Sprintf("%s:%d", oe.Host, oe.Port), fmt.Sprintf("%s:%d", te.Host, te.Port), "")
+			}
+			add(oe.Host, te.Host, "")
+			if oe.ResolveIP != "" && te.ResolveIP != "" && oe.ResolveIP != te.ResolveIP {
+				add(oe.ResolveIP, te.ResolveIP, "ip")
+			}
+			r.endpointRules = append(r.endpointRules, endpointRemapRule{
+				OldHost:      oe.Host,
+				OldPort:      oe.Port,
+				OldResolveIP: oe.ResolveIP,
+				NewHost:      te.Host,
+				NewPort:      te.Port,
+				NewResolveIP: te.ResolveIP,
+			})
+		} else {
+			// Target has NO registered endpoint: scrub origin's production VIP so it never leaks!
+			r.missingTargetEndpoint = true
+			r.missingEndpointHosts = append(r.missingEndpointHosts, oe.Host)
+			placeholderPort := tr(lang, "<入口端口>", "<ENDPOINT_PORT>")
+			if oe.Port > 0 {
+				add(fmt.Sprintf("%s:%d", oe.Host, oe.Port), placeholderHost+":"+placeholderPort, "")
+			}
+			add(oe.Host, placeholderHost, "")
+			r.endpointRules = append(r.endpointRules, endpointRemapRule{
+				OldHost:       oe.Host,
+				OldPort:       oe.Port,
+				OldResolveIP:  oe.ResolveIP,
+				NewHost:       placeholderHost,
+				MissingTarget: true,
+			})
+		}
+	}
+
+	// 3. Config path & data dir remapping when origin and target differ.
+	oCfg := clusterPatroniConfigPath(originFacts, oDep)
+	tCfg := clusterPatroniConfigPath(targetFacts, tDep)
+	if oCfg != "" && tCfg != "" && oCfg != tCfg {
+		add(oCfg, tCfg, "")
+	}
+	oData := clusterPGDataDir(oDep)
+	tData := clusterPGDataDir(tDep)
+	if oData != "" && tData != "" && oData != tData {
+		add(oData, tData, "")
+	}
+
+	sort.SliceStable(r.tokens, func(i, j int) bool {
+		return len(r.tokens[i].From) > len(r.tokens[j].From)
+	})
+	return r
+}
+
+func isIPBoundaryChar(b byte) bool {
+	return (b >= '0' && b <= '9') || b == '.'
+}
+
+func isWordBoundaryChar(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '_' || b == '-'
+}
+
+// applySinglePassTokens performs longest-first simultaneous non-overlapping replacement
+// with boundary checks so swapped hostnames/IPs never suffer transitive corruption and
+// shorter prefixes (e.g. 172.30.2.10) never corrupt longer ones (e.g. 172.30.2.106).
+func applySinglePassTokens(text string, tokens []remapToken) string {
+	if text == "" || len(tokens) == 0 {
+		return text
+	}
+	var b strings.Builder
+	b.Grow(len(text))
+	n := len(text)
+	i := 0
+	for i < n {
+		matched := false
+		for _, tk := range tokens {
+			m := len(tk.From)
+			if m == 0 || i+m > n || text[i:i+m] != tk.From {
+				continue
+			}
+			switch tk.Boundary {
+			case "ip":
+				if (i > 0 && isIPBoundaryChar(text[i-1])) || (i+m < n && isIPBoundaryChar(text[i+m])) {
+					continue
+				}
+			case "word":
+				if (i > 0 && isWordBoundaryChar(text[i-1])) || (i+m < n && isWordBoundaryChar(text[i+m])) {
+					continue
 				}
 			}
+			b.WriteString(tk.To)
+			i += m
+			matched = true
+			break
 		}
-		for _, inst := range targetFacts.Plan.Instances {
-			for epName, fr := range inst.Fronts {
-				if fr.Address != "" {
-					if oldAddr, ok := oFronts[inst.Component+":"+epName]; ok {
-						add(oldAddr, fr.Address)
+		if !matched {
+			b.WriteByte(text[i])
+			i++
+		}
+	}
+	return b.String()
+}
+
+func rewriteEndpointPortsInLine(line string, rule endpointRemapRule, lang string) string {
+	if rule.OldPort <= 0 {
+		return line
+	}
+	oldPortStr := strconv.Itoa(rule.OldPort)
+	targetPortStr := ""
+	if rule.MissingTarget {
+		targetPortStr = tr(lang, "<入口端口>", "<ENDPOINT_PORT>")
+	} else if rule.NewPort > 0 && rule.NewPort != rule.OldPort {
+		targetPortStr = strconv.Itoa(rule.NewPort)
+	} else {
+		return line
+	}
+
+	out := line
+	// Direct host:port match (handles host already remapped to NewHost).
+	if rule.NewHost != "" {
+		out = strings.ReplaceAll(out, rule.NewHost+":"+oldPortStr, rule.NewHost+":"+targetPortStr)
+	}
+	// Line-scoped contextual match when line references the remapped endpoint host, resolveIP, or ingress keywords.
+	low := strings.ToLower(out)
+	lineHasEndpoint := (rule.NewHost != "" && strings.Contains(low, strings.ToLower(rule.NewHost))) ||
+		(rule.NewResolveIP != "" && strings.Contains(low, strings.ToLower(rule.NewResolveIP))) ||
+		strings.Contains(low, "入口") || strings.Contains(low, "vip") || strings.Contains(low, "elb") || strings.Contains(low, "endpoint")
+	if !lineHasEndpoint {
+		return out
+	}
+
+	out = rePortEquals.ReplaceAllStringFunc(out, func(m string) string {
+		if strings.HasSuffix(m, "="+oldPortStr) {
+			return "port=" + targetPortStr
+		}
+		return m
+	})
+	out = rePortFlagSpace.ReplaceAllStringFunc(out, func(m string) string {
+		sub := rePortFlagSpace.FindStringSubmatch(m)
+		if len(sub) == 3 && sub[2] == oldPortStr {
+			return sub[1] + targetPortStr
+		}
+		return m
+	})
+	out = reLongPortOpt.ReplaceAllStringFunc(out, func(m string) string {
+		sub := reLongPortOpt.FindStringSubmatch(m)
+		if len(sub) == 3 && sub[2] == oldPortStr {
+			return sub[1] + targetPortStr
+		}
+		return m
+	})
+	out = rePortProseCN.ReplaceAllStringFunc(out, func(m string) string {
+		sub := rePortProseCN.FindStringSubmatch(m)
+		if len(sub) == 3 && sub[2] == oldPortStr {
+			return sub[1] + targetPortStr
+		}
+		return m
+	})
+	return out
+}
+
+func (r *clusterRemapper) RemapText(text string) string {
+	if text == "" {
+		return ""
+	}
+	out := applySinglePassTokens(text, r.tokens)
+
+	// Contextual port rewriting (line-by-line so external VIP ports and local PG ports never cross-contaminate).
+	if len(r.endpointRules) > 0 || (r.originLocalPGPort > 0 && r.targetLocalPGPort > 0 && r.originLocalPGPort != r.targetLocalPGPort) {
+		lines := strings.Split(out, "\n")
+		for idx, ln := range lines {
+			for _, rule := range r.endpointRules {
+				ln = rewriteEndpointPortsInLine(ln, rule, r.lang)
+			}
+			// Local PG port rewrite only on local psql/socket lines that do NOT target an external endpoint.
+			if r.originLocalPGPort > 0 && r.targetLocalPGPort > 0 && r.originLocalPGPort != r.targetLocalPGPort {
+				low := strings.ToLower(ln)
+				hasExt := false
+				for _, rule := range r.endpointRules {
+					if rule.NewHost != "" && strings.Contains(low, strings.ToLower(rule.NewHost)) {
+						hasExt = true
+						break
 					}
 				}
+				if !hasExt && (strings.Contains(low, "psql") || strings.Contains(low, "/var/run/postgresql")) {
+					oldLP := strconv.Itoa(r.originLocalPGPort)
+					newLP := strconv.Itoa(r.targetLocalPGPort)
+					ln = rePortFlagSpace.ReplaceAllStringFunc(ln, func(m string) string {
+						sub := rePortFlagSpace.FindStringSubmatch(m)
+						if len(sub) == 3 && sub[2] == oldLP {
+							return sub[1] + newLP
+						}
+						return m
+					})
+				}
 			}
+			lines[idx] = ln
 		}
+		out = strings.Join(lines, "\n")
 	}
-	sort.Slice(pairs, func(i, j int) bool {
-		return len(pairs[i][0]) > len(pairs[j][0])
-	})
-	return pairs
+
+	// Normalize stale ancestor cluster service slugs in verification tags (e.g. jfrog_log_verify_first -> onedevops_log_verify_first).
+	if r.targetSlug != "" {
+		out = reLogVerifySlug.ReplaceAllStringFunc(out, func(m string) string {
+			sub := reLogVerifySlug.FindStringSubmatch(m)
+			if len(sub) == 4 && sub[2] != r.targetSlug {
+				return sub[1] + r.targetSlug + sub[3]
+			}
+			return m
+		})
+	}
+
+	// Normalize orphan 3-digit ancestor node suffixes paired with a known target IP (e.g. "003 / 172.30.2.99" -> "db-node-03 / 172.30.2.99").
+	if len(r.targetIPToName) > 0 {
+		out = reOrphanNodeIPPair.ReplaceAllStringFunc(out, func(m string) string {
+			sub := reOrphanNodeIPPair.FindStringSubmatch(m)
+			if len(sub) == 3 {
+				if realName, ok := r.targetIPToName[sub[2]]; ok && realName != "" && !strings.HasSuffix(realName, sub[1]) {
+					return realName + " / " + sub[2]
+				}
+			}
+			return m
+		})
+	}
+
+	return out
+}
+
+func (r *clusterRemapper) RemapProbeScript(script string) string {
+	out := r.RemapText(script)
+	targetIPRegex := buildTargetIPv4Regex(r.targetIPs)
+	if targetIPRegex != "" {
+		out = reAwkSubnetIPGroup.ReplaceAllString(out, targetIPRegex)
+		out = reAwkFullIPGroup.ReplaceAllString(out, targetIPRegex)
+	}
+	return out
+}
+
+func (r *clusterRemapper) containsMissingEndpointPlaceholder(s string) bool {
+	if !r.missingTargetEndpoint {
+		return false
+	}
+	return strings.Contains(s, "<待补齐目标集群访问入口>") || strings.Contains(s, "<TARGET_CLUSTER_ENDPOINT>")
+}
+
+// buildClusterRemapPairs preserves compatibility for helpers/tests needing explicit text pairs.
+func buildClusterRemapPairs(originFacts, targetFacts clusterFacts) [][2]string {
+	r := (&storeServer{}).newClusterRemapper(originFacts, targetFacts, "zh-CN")
+	out := make([][2]string, 0, len(r.tokens))
+	for _, tk := range r.tokens {
+		out = append(out, [2]string{tk.From, tk.To})
+	}
+	return out
 }
 
 func remapTextWithPairs(text string, pairs [][2]string) string {
-	out := text
+	tokens := make([]remapToken, 0, len(pairs))
 	for _, p := range pairs {
-		out = strings.ReplaceAll(out, p[0], p[1])
+		tokens = append(tokens, remapToken{From: p[0], To: p[1]})
 	}
-	return out
+	sort.SliceStable(tokens, func(i, j int) bool {
+		return len(tokens[i].From) > len(tokens[j].From)
+	})
+	return applySinglePassTokens(text, tokens)
+}
+
+func isAutoPropagatedProbeNote(note string) bool {
+	t := strings.TrimSpace(note)
+	return strings.HasPrefix(t, "本变更引用自已落地样板集群") ||
+		strings.HasPrefix(t, "Imported from production-applied pilot")
+}
+
+func unwrapStrictPrecheckExpect(expect string) string {
+	cur := strings.TrimSpace(expect)
+	for cur != "" {
+		next := strings.TrimSpace(reStrictExpectStrip.ReplaceAllString(cur, ""))
+		if next == cur {
+			break
+		}
+		cur = next
+	}
+	return cur
 }
 
 func targetHostSummaryLine(f clusterFacts) string {
@@ -812,8 +1515,17 @@ func targetHostSummaryLine(f clusterFacts) string {
 	return strings.Join(parts, " / ")
 }
 
-func buildFallbackProbeScript(targetFacts clusterFacts, origin changeRehearsal) string {
+func (s *storeServer) buildFallbackProbeScript(targetFacts clusterFacts, origin changeRehearsal) string {
+	dep := s.readSpec(targetFacts.Current.ID)
 	app := strings.ToLower(strings.TrimSpace(targetFacts.Current.AppID))
+	sc := s.deliveryScheme(targetFacts.Current.ID, targetFacts.Current.AppID, targetFacts.Current.Scheme)
+	hostCount := 0
+	if targetFacts.Plan != nil {
+		hostCount = len(targetFacts.Plan.Hosts)
+	} else if dep != nil {
+		hostCount = len(dep.Hosts)
+	}
+	coreArch := canonicalCoreArch(targetFacts, dep, sc, hostCount)
 	keys := rehearsalTouchedKeys(origin)
 	var b strings.Builder
 	b.WriteString("#!/usr/bin/env bash\n")
@@ -822,24 +1534,34 @@ func buildFallbackProbeScript(targetFacts clusterFacts, origin changeRehearsal) 
 	b.WriteString("printf '=== node=%s ip=%s ===\\n' \"$(hostname -s)\" \"$(hostname -I 2>/dev/null | awk '{print $1}')\"\n")
 	switch app {
 	case "postgresql":
+		pgPort := clusterLocalPGPort(targetFacts, dep)
+		patroniCfg := clusterPatroniConfigPath(targetFacts, dep)
 		b.WriteString("printf '[version & topology]\\n'\n")
-		b.WriteString("sudo -n -u postgres psql -X -w -h /var/run/postgresql -p 5432 -d postgres -Atc \"SELECT 'pg_version='||current_setting('server_version')||' role='||CASE WHEN pg_is_in_recovery() THEN 'replica' ELSE 'primary' END;\" 2>/dev/null || printf 'ERROR: psql unavailable\\n'\n")
-		b.WriteString("patroni --version 2>/dev/null || true\n")
-		b.WriteString("timeout 15s patronictl -c /etc/patroni/patroni.yml list 2>/dev/null || printf 'WARN: patronictl list unavailable\\n'\n")
+		fmt.Fprintf(&b, "sudo -n -u postgres psql -X -w -h /var/run/postgresql -p %d -d postgres -Atc \"SELECT 'pg_version='||current_setting('server_version')||' role='||CASE WHEN pg_is_in_recovery() THEN 'replica' ELSE 'primary' END;\" 2>/dev/null || printf 'ERROR: psql unavailable\\n'\n", pgPort)
+		if coreArch == "pg-patroni" {
+			b.WriteString("patroni --version 2>/dev/null || true\n")
+			fmt.Fprintf(&b, "timeout 15s sudo -n -u postgres patronictl -c %s list 2>/dev/null || printf 'WARN: patronictl list unavailable\\n'\n", patroniCfg)
+		}
 		if len(keys) > 0 {
 			var pgKeys []string
+			var pgPyKeys []string
 			for _, k := range keys {
 				lk := strings.ToLower(k)
 				if lk == "pg_hba" {
 					b.WriteString("printf '[pg_hba_file_rules errors]\\n'\n")
-					b.WriteString("sudo -n -u postgres psql -X -w -h /var/run/postgresql -p 5432 -d postgres -Atc \"SELECT count(*) FILTER (WHERE error IS NOT NULL) AS parse_errors, count(*) AS total_rules FROM pg_hba_file_rules;\" 2>/dev/null || true\n")
+					fmt.Fprintf(&b, "sudo -n -u postgres psql -X -w -h /var/run/postgresql -p %d -d postgres -Atc \"SELECT count(*) FILTER (WHERE error IS NOT NULL) AS parse_errors, count(*) AS total_rules FROM pg_hba_file_rules;\" 2>/dev/null || true\n", pgPort)
 				} else if regexp.MustCompile(`^[a-z0-9_]+$`).MatchString(lk) {
 					pgKeys = append(pgKeys, "'"+lk+"'")
+					pgPyKeys = append(pgPyKeys, `"`+lk+`"`)
 				}
 			}
 			if len(pgKeys) > 0 {
 				fmt.Fprintf(&b, "printf '[target parameters]\\n'\n")
-				fmt.Fprintf(&b, "sudo -n -u postgres psql -X -w -h /var/run/postgresql -p 5432 -d postgres -Atc \"SELECT name||'='||setting||' source='||source||' pending_restart='||pending_restart FROM pg_settings WHERE name IN (%s) ORDER BY name;\" 2>/dev/null || true\n", strings.Join(pgKeys, ","))
+				fmt.Fprintf(&b, "sudo -n -u postgres psql -X -w -h /var/run/postgresql -p %d -d postgres -Atc \"SELECT name||'='||setting||' source='||source||' pending_restart='||pending_restart FROM pg_settings WHERE name IN (%s) ORDER BY name;\" 2>/dev/null || true\n", pgPort, strings.Join(pgKeys, ","))
+				if coreArch == "pg-patroni" {
+					fmt.Fprintf(&b, "printf '[DCS postgresql.parameters]\\n'\n")
+					fmt.Fprintf(&b, "sudo -n -u postgres patronictl -c %s show-config 2>/dev/null | python3 -c 'import sys,yaml; d=yaml.safe_load(sys.stdin) or {}; p=(d.get(\"postgresql\") or {}).get(\"parameters\") or {}; [print(k+\"=\"+str(p.get(k,\"<unset>\"))) for k in (%s,)]' 2>/dev/null || true\n", patroniCfg, strings.Join(pgPyKeys, ","))
+				}
 			}
 		}
 	case "redis":
@@ -863,20 +1585,30 @@ func buildFallbackProbeScript(targetFacts clusterFacts, origin changeRehearsal) 
 
 // buildStrictPropagatedPrecheck synthesizes a strict, blocking Step 1 precheck whenever
 // a target cluster skips the standalone probe step ("steps" fast-track mode).
-func buildStrictPropagatedPrecheck(
+func (s *storeServer) buildStrictPropagatedPrecheck(
 	originFacts, targetFacts clusterFacts,
 	origin changeRehearsal,
-	pairs [][2]string,
+	remapper *clusterRemapper,
 	origPrecheck *rehearsalStep,
 	lang string,
 ) rehearsalStep {
+	dep := s.readSpec(targetFacts.Current.ID)
 	app := strings.ToLower(strings.TrimSpace(targetFacts.Current.AppID))
+	sc := s.deliveryScheme(targetFacts.Current.ID, targetFacts.Current.AppID, targetFacts.Current.Scheme)
+	hostCount := 0
+	if targetFacts.Plan != nil {
+		hostCount = len(targetFacts.Plan.Hosts)
+	} else if dep != nil {
+		hostCount = len(dep.Hosts)
+	}
+	coreArch := canonicalCoreArch(targetFacts, dep, sc, hostCount)
 	changes := rehearsalAppliedOrExtractedChanges(origin)
 	var cmdLines []string
 	cmdLines = append(cmdLines, `printf 'node=%s ip=%s\n' "$(hostname -s)" "$(hostname -I 2>/dev/null | awk '{print $1}')"`)
 
 	var extraDirs []string
 	var pgSettings []string
+	var pgPySettings []string
 	hasHBA := false
 	for _, ch := range changes {
 		k := strings.TrimSpace(ch.Key)
@@ -886,6 +1618,7 @@ func buildStrictPropagatedPrecheck(
 			hasHBA = true
 		} else if app == "postgresql" && regexp.MustCompile(`^[a-z0-9_]+$`).MatchString(lk) {
 			pgSettings = append(pgSettings, "'"+lk+"'")
+			pgPySettings = append(pgPySettings, `"`+lk+`"`)
 		}
 		if strings.HasPrefix(v, "/") && !strings.ContainsAny(v, " \t\n;'\"") {
 			extraDirs = append(extraDirs, v)
@@ -894,21 +1627,38 @@ func buildStrictPropagatedPrecheck(
 
 	switch app {
 	case "postgresql":
+		pgPort := clusterLocalPGPort(targetFacts, dep)
+		patroniCfg := clusterPatroniConfigPath(targetFacts, dep)
+		if coreArch == "pg-patroni" {
+			cmdLines = append(cmdLines,
+				`systemctl is-active patroni etcd 2>/dev/null || true`,
+				`patroni --version`,
+			)
+		} else {
+			cmdLines = append(cmdLines, `systemctl is-active postgresql 2>/dev/null || true`)
+		}
 		cmdLines = append(cmdLines,
-			`systemctl is-active patroni etcd 2>/dev/null || true`,
-			`patroni --version`,
-			`sudo -n -u postgres psql -X -w -h /var/run/postgresql -p 5432 -d postgres -Atc "SELECT 'pg='||current_setting('server_version')||' role='||CASE WHEN pg_is_in_recovery() THEN 'replica' ELSE 'primary' END||' pending_restart='||(SELECT count(*) FROM pg_settings WHERE pending_restart)||' long_tx='||(SELECT count(*) FROM pg_stat_activity WHERE state<>'idle' AND now()-xact_start>interval '30 seconds');"`,
-			`patronictl -c /etc/patroni/patroni.yml list`,
+			fmt.Sprintf(`sudo -n -u postgres psql -X -w -h /var/run/postgresql -p %d -d postgres -Atc "SELECT 'pg='||current_setting('server_version')||' role='||CASE WHEN pg_is_in_recovery() THEN 'replica' ELSE 'primary' END||' pending_restart='||(SELECT count(*) FROM pg_settings WHERE pending_restart)||' long_tx='||(SELECT count(*) FROM pg_stat_activity WHERE state<>'idle' AND now()-xact_start>interval '30 seconds');"`, pgPort),
 		)
+		if coreArch == "pg-patroni" {
+			cmdLines = append(cmdLines, fmt.Sprintf(`sudo -n -u postgres patronictl -c %s list`, patroniCfg))
+		}
 		if len(pgSettings) > 0 {
 			cmdLines = append(cmdLines,
-				fmt.Sprintf(`sudo -n -u postgres psql -X -w -h /var/run/postgresql -p 5432 -d postgres -Atc "SELECT name||'='||setting||' source='||source||' pending_restart='||pending_restart FROM pg_settings WHERE name IN (%s) ORDER BY name;"`, strings.Join(pgSettings, ",")),
+				fmt.Sprintf(`sudo -n -u postgres psql -X -w -h /var/run/postgresql -p %d -d postgres -Atc "SELECT name||'='||setting||' source='||source||' pending_restart='||pending_restart FROM pg_settings WHERE name IN (%s) ORDER BY name;"`, pgPort, strings.Join(pgSettings, ",")),
 			)
+			if coreArch == "pg-patroni" {
+				cmdLines = append(cmdLines,
+					fmt.Sprintf(`sudo -n -u postgres patronictl -c %s show-config | python3 -c 'import sys,yaml; d=yaml.safe_load(sys.stdin) or {}; p=(d.get("postgresql") or {}).get("parameters") or {}; [print("dcs:"+k+"="+str(p.get(k,"<unset>"))) for k in (%s,)]'`, patroniCfg, strings.Join(pgPySettings, ",")),
+				)
+			}
 		}
 		if hasHBA {
+			if coreArch == "pg-patroni" {
+				cmdLines = append(cmdLines, fmt.Sprintf(`sudo -n -u postgres patronictl -c %s show-config | grep -nE '^[[:space:]]+- (host|local)'`, patroniCfg))
+			}
 			cmdLines = append(cmdLines,
-				`patronictl -c /etc/patroni/patroni.yml show-config | grep -nE '^[[:space:]]+- (host|local)'`,
-				`sudo -n -u postgres psql -X -w -h /var/run/postgresql -p 5432 -d postgres -Atc "SELECT count(*) FILTER (WHERE error IS NOT NULL) AS parse_errors, count(*) AS total_rules FROM pg_hba_file_rules;"`,
+				fmt.Sprintf(`sudo -n -u postgres psql -X -w -h /var/run/postgresql -p %d -d postgres -Atc "SELECT count(*) FILTER (WHERE error IS NOT NULL) AS parse_errors, count(*) AS total_rules FROM pg_hba_file_rules;"`, pgPort),
 			)
 		}
 	case "redis":
@@ -921,7 +1671,7 @@ func buildStrictPropagatedPrecheck(
 		cmdLines = append(cmdLines, `haproxy -v | head -n 1; systemctl is-active haproxy`)
 	default:
 		if origPrecheck != nil && strings.TrimSpace(origPrecheck.Command) != "" {
-			cmdLines = append(cmdLines, remapTextWithPairs(strings.TrimSpace(origPrecheck.Command), pairs))
+			cmdLines = append(cmdLines, remapper.RemapText(strings.TrimSpace(origPrecheck.Command)))
 		}
 	}
 	if len(extraDirs) > 0 {
@@ -940,7 +1690,7 @@ func buildStrictPropagatedPrecheck(
 	expectParts = append(expectParts, tr(lang,
 		fmt.Sprintf("1) 节点名/IP 与本集群基线（%s）一致，软件实测小版本与样板一致；", targetSummary),
 		fmt.Sprintf("1) Hostname/IP matches target cluster baseline (%s) and live software version aligns with pilot;", targetSummary)))
-	if app == "postgresql" {
+	if app == "postgresql" && coreArch == "pg-patroni" {
 		expectParts = append(expectParts, tr(lang,
 			"2) 集群拓扑全健康（Leader running、所有从库 streaming、Lag=0、无 Pending restart 标记）；",
 			"2) Topology healthy (Leader running, replicas streaming, Lag=0, zero Pending restart flags);"))
@@ -952,15 +1702,17 @@ func buildStrictPropagatedPrecheck(
 	if len(changes) > 0 {
 		keys := rehearsalTouchedKeys(origin)
 		expectParts = append(expectParts, tr(lang,
-			fmt.Sprintf("3) 目标配置项（%s）当前现值无意外冲突且未存在未决变更，磁盘余量充足。", strings.Join(keys, "、")),
-			fmt.Sprintf("3) Target parameter values (%s) have no unexpected conflicts and disk space is sufficient.", strings.Join(keys, ", "))))
+			fmt.Sprintf("3) 目标配置项（%s）当前运行值与共享 DCS 基线已核清且无意外冲突，磁盘余量充足。", strings.Join(keys, "、")),
+			fmt.Sprintf("3) Target parameter values (%s) and shared DCS baseline verified with no unexpected conflicts and sufficient disk headroom.", strings.Join(keys, ", "))))
 	} else {
 		expectParts = append(expectParts, tr(lang,
 			"3) 目标路径/权限与磁盘空间满足变更前提。",
 			"3) Target paths, permissions, and disk headroom satisfy prerequisites."))
 	}
-	if origPrecheck != nil && strings.TrimSpace(origPrecheck.Expect) != "" {
-		expectParts = append(expectParts, tr(lang, "补充核对：", "Additional check: ")+remapTextWithPairs(strings.TrimSpace(origPrecheck.Expect), pairs))
+	if origPrecheck != nil {
+		if unwrapped := unwrapStrictPrecheckExpect(remapper.RemapText(origPrecheck.Expect)); unwrapped != "" {
+			expectParts = append(expectParts, tr(lang, "补充核对：", "Additional check: ")+unwrapped)
+		}
 	}
 
 	return rehearsalStep{
@@ -994,7 +1746,7 @@ func (s *storeServer) buildPropagatedRehearsal(
 		downgradedReason = eval.SkipProbeBlockReason
 	}
 
-	pairs := buildClusterRemapPairs(originFacts, targetFacts)
+	remapper := s.newClusterRemapper(originFacts, targetFacts, lang)
 	now := time.Now().UTC().Format(time.RFC3339)
 	rid := randomStoreToken(6)
 
@@ -1018,12 +1770,12 @@ func (s *storeServer) buildPropagatedRehearsal(
 		secCopy = &cp
 	}
 
-	// Remap probe script (or synthesize fallback if pilot was quick mode without probe script).
+	// Remap probe script (including awk/bash subnet IPv4 regex groups), or synthesize fallback.
 	probeScript := ""
 	if strings.TrimSpace(origin.ProbeScript) != "" {
-		probeScript = remapTextWithPairs(origin.ProbeScript, pairs)
+		probeScript = remapper.RemapProbeScript(origin.ProbeScript)
 	} else {
-		probeScript = buildFallbackProbeScript(targetFacts, origin)
+		probeScript = s.buildFallbackProbeScript(targetFacts, origin)
 	}
 	probeScript = ensureProbeBashGuard(probeScript)
 	probeSafe, probeWarns := validateReadOnlyProbeScriptLang(probeScript, lang)
@@ -1033,7 +1785,10 @@ func (s *storeServer) buildPropagatedRehearsal(
 		fmt.Sprintf("本变更引用自已落地样板集群 %s（%s），已自动继承边界约束并映射至当前集群 %s 的基线地址；请在本集群节点执行探针核实现场后继续。", originFacts.ID, origin.Title, targetFacts.ID),
 		fmt.Sprintf("Imported from production-applied pilot %s (%s) with boundaries inherited and baseline addresses remapped for %s; run the read-only probe on this cluster before proceeding.", originFacts.ID, origin.Title, targetFacts.ID)))
 	for _, n := range origin.ProbeNotes {
-		if t := strings.TrimSpace(remapTextWithPairs(n, pairs)); t != "" {
+		if isAutoPropagatedProbeNote(n) {
+			continue
+		}
+		if t := strings.TrimSpace(remapper.RemapText(n)); t != "" {
 			probeNotes = append(probeNotes, t)
 		}
 	}
@@ -1064,17 +1819,20 @@ func (s *storeServer) buildPropagatedRehearsal(
 			restSteps = append(restSteps, st)
 		}
 
-		steps = append(steps, buildStrictPropagatedPrecheck(originFacts, targetFacts, origin, pairs, origPre, lang))
+		steps = append(steps, s.buildStrictPropagatedPrecheck(originFacts, targetFacts, origin, remapper, origPre, lang))
+		missingEPNotice := tr(lang,
+			"【注意】当前目标集群基线尚未登记访问入口（VIP/ELB），已自动脱敏屏蔽样板集群入口以防误连；执行此步前请先在基线中补齐入口或手动替换为本集群实际入口与端口。",
+			"[Note] Target cluster baseline has no registered access endpoint (VIP/ELB); pilot endpoint was scrubbed to prevent cross-cluster connection. Fill in target endpoint & port before running.")
 		for _, st := range restSteps {
 			ord := len(steps) + 1
-			remappedCmd := remapTextWithPairs(st.Command, pairs)
+			remappedCmd := remapper.RemapText(st.Command)
 			var remappedSubs []rehearsalStepCommand
 			for _, sub := range st.Commands {
 				remappedSubs = append(remappedSubs, rehearsalStepCommand{
-					Label:      remapTextWithPairs(sub.Label, pairs),
-					TargetRole: remapTextWithPairs(sub.TargetRole, pairs),
-					Command:    remapTextWithPairs(sub.Command, pairs),
-					Gate:       remapTextWithPairs(sub.Gate, pairs),
+					Label:      remapper.RemapText(sub.Label),
+					TargetRole: remapper.RemapText(sub.TargetRole),
+					Command:    remapper.RemapText(sub.Command),
+					Gate:       remapper.RemapText(sub.Gate),
 				})
 			}
 			if len(remappedSubs) <= 1 {
@@ -1088,17 +1846,25 @@ func (s *storeServer) buildPropagatedRehearsal(
 			} else {
 				remappedCmd = ensurePasteSafeShellCommand(remappedCmd)
 			}
+			riskNote := remapper.RemapText(st.RiskNote)
+			if remapper.containsMissingEndpointPlaceholder(remappedCmd) && !strings.Contains(riskNote, missingEPNotice) {
+				if riskNote != "" {
+					riskNote = missingEPNotice + " " + riskNote
+				} else {
+					riskNote = missingEPNotice
+				}
+			}
 			steps = append(steps, rehearsalStep{
 				ID:         fmt.Sprintf("s%d", ord),
 				Phase:      st.Phase,
 				Order:      ord,
-				Title:      remapTextWithPairs(st.Title, pairs),
-				TargetRole: remapTextWithPairs(st.TargetRole, pairs),
+				Title:      remapper.RemapText(st.Title),
+				TargetRole: remapper.RemapText(st.TargetRole),
 				Command:    remappedCmd,
 				Commands:   remappedSubs,
-				Expect:     remapTextWithPairs(st.Expect, pairs),
-				RiskNote:   remapTextWithPairs(st.RiskNote, pairs),
-				Rollback:   remapTextWithPairs(st.Rollback, pairs),
+				Expect:     remapper.RemapText(st.Expect),
+				RiskNote:   riskNote,
+				Rollback:   remapper.RemapText(st.Rollback),
 				Optional:   st.Optional,
 				Status:     "pending",
 			})
@@ -1118,14 +1884,14 @@ func (s *storeServer) buildPropagatedRehearsal(
 		AppName:         targetFacts.Current.AppName,
 		BaseJobID:       targetFacts.Current.ID,
 		Title:           origin.Title,
-		Goal:            remapTextWithPairs(origin.Goal, pairs),
-		ExtraScope:      remapTextWithPairs(origin.ExtraScope, pairs),
+		Goal:            remapper.RemapText(origin.Goal),
+		ExtraScope:      remapper.RemapText(origin.ExtraScope),
 		Owner:           operator,
 		Mode:            rhMode,
 		Stage:           stage,
 		SecurityContext: secCopy,
 		ScopeQuestions:  scopeQs,
-		ScopeSummary:    remapTextWithPairs(origin.ScopeSummary, pairs),
+		ScopeSummary:    remapper.RemapText(origin.ScopeSummary),
 		ProbeScript:     probeScript,
 		ProbeNotes:      probeNotes,
 		ProbeSafe:       probeSafe,

@@ -724,3 +724,175 @@ func TestRolloutCoreArchEquivalenceImportedVsDeployedAndVersionParsing(t *testin
 		t.Fatalf("expected explicit core architecture block reason, got %q", singleItems[0].SkipProbeBlockReason)
 	}
 }
+
+func TestRolloutHardenedRemapperPortsRolesProbeScriptAndDedup(t *testing.T) {
+	s, _ := testStore(t)
+	srv, _ := fakeModel(t)
+	enableAI(t, s, srv.URL, 1)
+	admin, csrf := storeLogin(t, s, "admin")
+
+	// Import origin (pg-sonarqube-private-prod, port 5435, primary=db-node-01) and 3 targets:
+	// 1) pg-onedevops-private-prod: port 5436, different endpoint name ("vip" vs "eip"), primary=db-node-02 (ROLE INVERTED!)
+	// 2) pg-noep-private-prod: NO endpoint registered (must scrub origin VIP & port to prevent cross-cluster connect!)
+	imports := []string{
+		`{"id":"pg-sonarqube-private-prod","component":"postgresql","version":"17.11.1","hosts":[{"name":"db-node-01","ip":"172.30.2.101","role":"primary"},{"name":"db-node-02","ip":"172.30.2.102","role":"replica"},{"name":"db-node-03","ip":"172.30.2.107","role":"replica"}],"endpoints":[{"name":"eip","address":"sonarqube.postgresql.private.toolchain.cn.vwgroup.com:5435","role":"readwrite"}],"config_paths":["/etc/patroni/patroni.yml"],"companions":[{"component":"patroni","kind":"ha_manager","version":"4.1.5"},{"component":"etcd","kind":"dcs","version":"3.5.33"}]}`,
+		`{"id":"pg-onedevops-private-prod","component":"postgresql","version":"17.11.1","hosts":[{"name":"db-node-01","ip":"172.30.2.106","role":"replica"},{"name":"db-node-02","ip":"172.30.2.108","role":"primary"},{"name":"db-node-03","ip":"172.30.2.99","role":"replica"}],"endpoints":[{"name":"vip","address":"onedevops.postgresql.private.toolchain.cn.vwgroup.com:5436","role":"readwrite"}],"config_paths":["/etc/patroni/custom-patroni.yml"],"companions":[{"component":"patroni","kind":"ha_manager","version":"4.1.5","config_paths":["/etc/patroni/custom-patroni.yml"]},{"component":"etcd","kind":"dcs","version":"3.5.33"}]}`,
+		`{"id":"pg-noep-private-prod","component":"postgresql","version":"17.11.1","hosts":[{"name":"n1","ip":"10.60.1.11","role":"primary"},{"name":"n2","ip":"10.60.1.12","role":"replica"},{"name":"n3","ip":"10.60.1.13","role":"replica"}],"companions":[{"component":"patroni","kind":"ha_manager","version":"4.1.5"},{"component":"etcd","kind":"dcs","version":"3.5.33"}]}`,
+	}
+	for _, ib := range imports {
+		iw := storeRequest(s, "POST", "/api/clusters/import", strings.NewReader(ib), admin, csrf)
+		if iw.Code != 200 && iw.Code != 201 {
+			t.Fatalf("import failed: %d %s", iw.Code, iw.Body.String())
+		}
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	originRh := changeRehearsal{
+		ID:        "aabb11223344",
+		ClusterID: "pg-sonarqube-private-prod",
+		AppID:     "postgresql",
+		AppName:   "PostgreSQL",
+		Title:     "PostgreSQL 日志落盘到 /data/logs/postgresql",
+		Goal:      "在 pg-sonarqube-private-prod 开启日志落盘",
+		Owner:     "admin",
+		Mode:      "full",
+		Stage:     "finalized",
+		Applied:   true,
+		AppliedAt: now,
+		ProbeScript: "#!/usr/bin/env bash\nip=$(ip -o -4 addr show scope global | awk '$4 ~ /^172\\.30\\.2\\.(58|38|60)\\// {print $4}')\npatronictl -c /etc/patroni/patroni.yml list\n",
+		ProbeNotes: []string{
+			"本变更引用自已落地样板集群 pg-jfrog-artifactory-private-prod（旧记录），已自动继承边界约束并映射至当前集群 pg-sonarqube-private-prod 的基线地址；请在本集群节点执行探针核实现场后继续。",
+			"本变更引用自已落地样板集群 pg-gitlab-private-prod（更旧记录），已自动继承边界约束并映射至当前集群 pg-sonarqube-private-prod 的基线地址；请在本集群节点执行探针核实现场后继续。",
+			"请在 db-node-01、db-node-02、db-node-03 分别执行。",
+		},
+		AppliedChanges: []rehearsalAppliedChange{
+			{Key: "logging_collector", After: "on"},
+			{Key: "log_directory", After: "/data/logs/postgresql"},
+		},
+		Steps: []rehearsalStep{
+			{
+				ID:     "s1",
+				Phase:  "precheck",
+				Order:  1,
+				Title:  "【严格前置预检】旧步",
+				Expect: "1) 节点名/IP 与本集群基线（db-node-01 (172.30.2.101)）一致； 2) 集群拓扑全健康； 3) 目标配置项已核清。 补充核对：目录空间满足现场容量要求。",
+				Status: "passed",
+			},
+			{
+				ID:         "s2",
+				Phase:      "execute",
+				Order:      2,
+				Title:      "切主 db-node-01 → db-node-02",
+				TargetRole: "001 / 172.30.2.101 执行",
+				Command:    "sudo -n -u postgres patronictl -c /etc/patroni/patroni.yml switchover --leader db-node-01 --candidate db-node-02 --force",
+				Expect:     "db-node-02 升主，db-node-01 降级为从库",
+				Status:     "passed",
+			},
+			{
+				ID:         "s3",
+				Phase:      "verify",
+				Order:      3,
+				Title:      "验证日志与写入入口",
+				TargetRole: "非当前主库的 003 / 172.30.2.107 执行",
+				Command:    "sudo -n -u postgres psql -p 5432 -c 'RAISE LOG $msg$jfrog_log_verify_first$msg$;'\npsql -X -W \"host=sonarqube.postgresql.private.toolchain.cn.vwgroup.com port=5435 dbname=postgres user=postgres\" -Atc \"SELECT inet_server_addr()\"",
+				Expect:     "返回主库 172.30.2.101；经入口 sonarqube.postgresql.private.toolchain.cn.vwgroup.com:5435 连接成功",
+				Status:     "passed",
+			},
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := s.saveRehearsal(originRh); err != nil {
+		t.Fatal(err)
+	}
+
+	// Propagate in fast-track "steps" mode to BOTH targets.
+	pw := storeRequest(s, "POST", "/api/clusters/pg-sonarqube-private-prod/rehearsals/aabb11223344/propagate",
+		strings.NewReader(`{"target_clusters":["pg-onedevops-private-prod","pg-noep-private-prod"],"mode":"steps"}`), admin, csrf)
+	if pw.Code != 200 {
+		t.Fatalf("propagate failed: %d %s", pw.Code, pw.Body.String())
+	}
+
+	// ---- Assert pg-onedevops-private-prod ----
+	oneList := s.listRehearsals("pg-onedevops-private-prod")
+	if len(oneList) != 1 {
+		t.Fatalf("expected 1 rehearsal on onedevops, got %d", len(oneList))
+	}
+	one := oneList[0]
+
+	// 1. Probe script awk IPv4 group must be rewritten to target IPs (108|106|99), NOT stale jfrog (58|38|60)!
+	if strings.Contains(one.ProbeScript, "58|38|60") || !strings.Contains(one.ProbeScript, `172\.30\.2\.(`) || !strings.Contains(one.ProbeScript, "108") || !strings.Contains(one.ProbeScript, "106") || !strings.Contains(one.ProbeScript, "99") {
+		t.Fatalf("expected probe_script awk IP regex rewritten to onedevops IPs, got:\n%s", one.ProbeScript)
+	}
+
+	// 2. Probe notes must NOT snowball old provenance banners (only 1 auto banner + 1 genuine note).
+	autoCount := 0
+	for _, n := range one.ProbeNotes {
+		if strings.HasPrefix(n, "本变更引用自已落地样板集群") {
+			autoCount++
+		}
+	}
+	if autoCount != 1 {
+		t.Fatalf("expected exactly 1 auto provenance probe_note (no snowball), got %d: %v", autoCount, one.ProbeNotes)
+	}
+
+	// 3. Step 1 strict precheck must include patronictl show-config with custom config path, valid bash-safe Python quoting, AND unwrapped Expect (only 1 "补充核对：").
+	s1 := one.Steps[0]
+	if !strings.Contains(s1.Command, "sudo -n -u postgres patronictl -c /etc/patroni/custom-patroni.yml show-config") || !strings.Contains(s1.Command, `("logging_collector","log_directory",)`) {
+		t.Fatalf("expected Step 1 strict precheck to include sudo patronictl show-config with valid double-quoted python keys, got:\n%s", s1.Command)
+	}
+	if strings.Count(s1.Expect, "补充核对：") != 1 || !strings.Contains(s1.Expect, "目录空间满足现场容量要求") {
+		t.Fatalf("expected Step 1 Expect unwrapped cleanly without snowball duplication, got: %q", s1.Expect)
+	}
+
+	// 4. Step 2 must align hosts BY ROLE without transitive swap corruption:
+	//    origin primary=db-node-01 -> target primary=db-node-02; origin replica=db-node-02 -> target replica=db-node-01!
+	s2 := one.Steps[1]
+	if !strings.Contains(s2.Command, "--leader db-node-02 --candidate db-node-01") {
+		t.Fatalf("expected role-aligned non-transitive swap (--leader db-node-02 --candidate db-node-01), got:\n%s", s2.Command)
+	}
+	if !strings.Contains(s2.Command, "/etc/patroni/custom-patroni.yml") {
+		t.Fatalf("expected custom patroni config path remapped in Step 2, got:\n%s", s2.Command)
+	}
+	if !strings.Contains(s2.TargetRole, "db-node-02 / 172.30.2.108") || strings.Contains(s2.TargetRole, "001 /") {
+		t.Fatalf("expected orphan '001 / IP' normalized to 'db-node-02 / 172.30.2.108', got: %q", s2.TargetRole)
+	}
+
+	// 5. Step 3 must remap BOTH endpoint host ("eip" -> "vip" by role!) AND port (5435 -> 5436) while keeping local psql -p 5432 intact,
+	//    normalize jfrog_log_verify_first -> onedevops_log_verify_first, and normalize 003 / 172.30.2.99 -> db-node-03 / 172.30.2.99!
+	s3 := one.Steps[2]
+	if !strings.Contains(s3.Command, "host=onedevops.postgresql.private.toolchain.cn.vwgroup.com port=5436") {
+		t.Fatalf("expected endpoint host AND port 5435->5436 remapped, got:\n%s", s3.Command)
+	}
+	if strings.Contains(s3.Command, "5435") || strings.Contains(s3.Command, "sonarqube") {
+		t.Fatalf("origin endpoint host/port leaked into Step 3:\n%s", s3.Command)
+	}
+	if !strings.Contains(s3.Command, "psql -p 5432") {
+		t.Fatalf("local psql port 5432 must remain untouched, got:\n%s", s3.Command)
+	}
+	if !strings.Contains(s3.Command, "onedevops_log_verify_first") || strings.Contains(s3.Command, "jfrog_log_verify") {
+		t.Fatalf("expected stale ancestor slug jfrog_log_verify normalized to onedevops_log_verify, got:\n%s", s3.Command)
+	}
+	if !strings.Contains(s3.TargetRole, "db-node-03 / 172.30.2.99") || strings.Contains(s3.TargetRole, "003 /") {
+		t.Fatalf("expected orphan '003 / 172.30.2.99' normalized to 'db-node-03 / 172.30.2.99', got: %q", s3.TargetRole)
+	}
+	if !strings.Contains(s3.Expect, "172.30.2.108") || !strings.Contains(s3.Expect, "onedevops.postgresql.private.toolchain.cn.vwgroup.com:5436") {
+		t.Fatalf("expected Step 3 Expect to have target primary IP 172.30.2.108 and host:5436, got: %q", s3.Expect)
+	}
+
+	// ---- Assert pg-noep-private-prod (missing endpoint safety scrub) ----
+	noepList := s.listRehearsals("pg-noep-private-prod")
+	if len(noepList) != 1 {
+		t.Fatalf("expected 1 rehearsal on noep, got %d", len(noepList))
+	}
+	noepS3 := noepList[0].Steps[2]
+	if strings.Contains(noepS3.Command, "sonarqube") || strings.Contains(noepS3.Command, "5435") {
+		t.Fatalf("expected origin VIP & port scrubbed when target has no endpoint, got:\n%s", noepS3.Command)
+	}
+	if !strings.Contains(noepS3.Command, "<待补齐目标集群访问入口>") || !strings.Contains(noepS3.Command, "port=<入口端口>") {
+		t.Fatalf("expected explicit placeholder host/port in noep Step 3, got:\n%s", noepS3.Command)
+	}
+	if !strings.Contains(noepS3.RiskNote, "尚未登记访问入口") {
+		t.Fatalf("expected missing-endpoint warning added to RiskNote, got: %q", noepS3.RiskNote)
+	}
+}

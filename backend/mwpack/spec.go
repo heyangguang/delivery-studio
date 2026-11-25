@@ -28,6 +28,8 @@ type ImportedEndpoint struct {
 type ImportedCompanion struct {
 	Component    string              `yaml:"component" json:"component"`
 	DisplayName  string              `yaml:"display_name,omitempty" json:"display_name,omitempty"`
+	Icon         string              `yaml:"icon,omitempty" json:"icon,omitempty"`
+	Color        string              `yaml:"color,omitempty" json:"color,omitempty"`
 	Version      string              `yaml:"version,omitempty" json:"version,omitempty"`
 	Kind         string              `yaml:"kind,omitempty" json:"kind,omitempty"` // ha_manager | dcs | proxy | vip | pooler | backup | monitoring | companion
 	Role         string              `yaml:"role,omitempty" json:"role,omitempty"` // default role when Placement is empty

@@ -2414,16 +2414,35 @@ body[arco-theme="dark"] .imp-compose-box::after {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 11px;
+  gap: 12px;
   padding: 10px 12px;
   border-radius: var(--r-md);
   border: 1px solid var(--line);
   background: var(--surface-2);
+  min-width: 0;
 }
 
 .imp-stack-item.is-primary {
   background: color-mix(in srgb, var(--brand-soft) 50%, var(--surface));
   border-color: color-mix(in srgb, var(--brand) 26%, var(--line));
+}
+
+.imp-stack-icon-btn {
+  all: unset;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  padding: 2px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: transform 0.16s var(--spring), box-shadow 0.16s ease;
+}
+
+.imp-stack-icon-btn:hover {
+  transform: scale(1.05);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand) 36%, transparent);
 }
 
 .imp-stack-main {
@@ -2438,12 +2457,24 @@ body[arco-theme="dark"] .imp-compose-box::after {
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 .imp-stack-top strong {
   font-size: 13.5px;
   font-weight: 650;
   color: var(--ink);
+  white-space: nowrap;
+}
+
+.imp-stack-ports {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.imp-stack-core-lbl {
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .imp-kind-pill {
@@ -2454,6 +2485,8 @@ body[arco-theme="dark"] .imp-compose-box::after {
   border: 1px solid var(--line-strong);
   background: var(--surface);
   color: var(--ink-2);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .imp-kind-pill.t-brand {
@@ -2483,10 +2516,29 @@ body[arco-theme="dark"] .imp-compose-box::after {
 .imp-stack-meta {
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
   font-size: 11.5px;
   color: var(--mute);
+  overflow: hidden;
+}
+
+.imp-stack-hosts {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.imp-meta-sep {
+  flex-shrink: 0;
+  opacity: 0.55;
+}
+
+.imp-stack-ev {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .imp-stack-controls {
@@ -2494,13 +2546,209 @@ body[arco-theme="dark"] .imp-compose-box::after {
   align-items: center;
   gap: 6px;
   flex-wrap: nowrap;
-  flex: none;
+  flex-shrink: 0;
 }
 
 .imp-stack-controls .arco-input-inner-wrapper,
 .imp-stack-controls .arco-input {
-  width: 96px;
+  width: 102px;
   flex: none;
+}
+
+.imp-quick-chip.is-open {
+  border-style: solid;
+  border-color: var(--brand);
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+}
+
+/* Custom Companion Inset Card (Standard Control Heights + Icon Picker) */
+.imp-custom-comp-box {
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--brand-line);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.imp-custom-comp-grid {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1.35fr) minmax(0, 1.1fr) minmax(92px, 0.65fr);
+  gap: 8px;
+  align-items: center;
+}
+
+@container (max-width: 560px) {
+  .imp-custom-comp-grid {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+}
+
+.imp-custom-icon-trigger {
+  all: unset;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border-radius: 10px;
+  border: 1px dashed var(--line-strong);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: border-color 0.14s ease, transform 0.14s var(--spring);
+}
+
+.imp-custom-icon-trigger:hover {
+  border-style: solid;
+  border-color: var(--brand);
+  transform: scale(1.04);
+}
+
+.imp-custom-comp-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 75%, transparent);
+}
+
+.imp-custom-icon-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+
+.imp-custom-icon-lbl {
+  font-size: 11.5px;
+  color: var(--mute);
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-right: 2px;
+}
+
+.imp-custom-comp-acts {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.imp-custom-comp-acts .arco-btn {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.imp-icon-more-btn {
+  all: unset;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 550;
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+  border: 1px solid var(--brand-line);
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.imp-icon-more-btn:hover {
+  background: color-mix(in srgb, var(--brand) 16%, var(--surface));
+}
+
+.imp-icon-pop {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 296px;
+  max-width: calc(100vw - 40px);
+}
+
+.imp-icon-pop-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.imp-icon-pop-lbl {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--mute);
+}
+
+.imp-icon-pop-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.imp-icon-pop-btn {
+  all: unset;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px;
+  border-radius: 8px;
+  border: 1.5px solid transparent;
+  cursor: pointer;
+  transition: border-color 0.14s ease, background-color 0.14s ease, transform 0.14s ease;
+}
+
+.imp-icon-pop-btn:hover {
+  background: var(--hover);
+  transform: scale(1.06);
+}
+
+.imp-icon-pop-btn.on {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+}
+
+.imp-color-swatches {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.imp-color-swatch {
+  all: unset;
+  box-sizing: border-box;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: transform 0.14s ease, box-shadow 0.14s ease;
+}
+
+.imp-color-swatch:hover {
+  transform: scale(1.1);
+}
+
+.imp-color-swatch.on {
+  border-color: var(--surface);
+  box-shadow: 0 0 0 2px var(--brand);
+}
+
+.imp-ep-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .imp-quick-add {
@@ -2605,9 +2853,13 @@ body[arco-theme="dark"] .imp-compose-box::after {
 
 .imp-ep-row {
   display: grid;
-  grid-template-columns: minmax(0, 0.72fr) minmax(0, 1.55fr) minmax(0, 0.85fr) 30px;
+  grid-template-columns: minmax(150px, 1.05fr) minmax(170px, 1.35fr) minmax(108px, 0.72fr) 32px;
   gap: 8px;
   align-items: center;
+}
+
+.imp-ep-row > * {
+  min-width: 0;
 }
 
 .imp-kv-row {

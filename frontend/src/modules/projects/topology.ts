@@ -171,10 +171,25 @@ export function companionKindMeta(kind?: string): { label: string; tone: string 
 export function localizeEndpointTitle(epName?: string, role?: string): string {
   const lowName = (epName || '').trim().toLowerCase();
   const lowRole = (role || '').trim().toLowerCase();
+  const presets: Record<string, string> = {
+    eip: bi('EIP 弹性公网', 'EIP Public'),
+    vip: bi('VIP 虚拟 IP', 'Virtual IP (VIP)'),
+    f5: bi('F5 负载均衡', 'F5 Load Balancer'),
+    elb: bi('ELB 负载均衡', 'Cloud ELB'),
+    slb: bi('SLB 负载均衡', 'Cloud SLB'),
+    lvs: bi('LVS 四层均衡', 'LVS L4 LB'),
+    haproxy: bi('HAProxy 代理', 'HAProxy Proxy'),
+    nginx: bi('Nginx 代理', 'Nginx Proxy'),
+    pooler: bi('连接池入口', 'Connection Pooler'),
+    pgbouncer: bi('PgBouncer 连接池', 'PgBouncer Pooler'),
+    dns: bi('DNS 域名入口', 'DNS Endpoint'),
+    metrics: bi('监控指标入口', 'Metrics Endpoint'),
+  };
+  if (presets[lowName]) return presets[lowName];
   const generic = new Set([
     '', 'readwrite', 'rw', 'write', 'writer', 'primary', 'master',
     'readonly', 'ro', 'read', 'reader', 'replica', 'standby',
-    'admin', 'console', 'mgmt', 'management', 'endpoint', 'vip',
+    'admin', 'console', 'mgmt', 'management', 'endpoint',
   ]);
   if (epName && !generic.has(lowName)) return epName.trim();
   if (['readonly', 'ro', 'read', 'reader', 'replica', 'standby'].includes(lowRole) || ['readonly', 'ro', 'read', 'reader'].includes(lowName)) {
@@ -368,7 +383,7 @@ export function buildClusterStackPills(
     const pill: ClusterStackPill = {
       key: ck,
       component: cm.component,
-      icon: companionIcon(cm.component),
+      icon: cm.icon || companionIcon(cm.component),
       title: cm.display_name || cm.component,
       version: (cm.version || '').trim() || undefined,
       kindLabel: companionKindMeta(effKind).label,

@@ -1611,7 +1611,7 @@ func (s *storeServer) aiExtractImportDraft(
 6. params 仅保留有运维价值的中间件配置参数（如 port、max_connections、shared_buffers、replication、synchronous_mode、cluster_name 等），不要把宿主机硬件信息（arch、cpu_cores、kernel、mem）塞进 params。
 7. platform 如能识别，优先映射到以下标准 ID 之一：ubuntu-24.04-amd64, ubuntu-22.04-amd64, el9-amd64, el8-amd64, debian-12-amd64, kylin-v10-amd64, openeuler-22.03-amd64；无法映射可留空并在 os_detail 填写原始发行版名称。
 8. deploy_method 取值为 systemd / docker / binary / k8s / other 之一。
-9. endpoints[].role 仅取 readwrite | readonly | admin 之一；endpoints[].name 使用简短标识如 writer / reader / admin。
+9. endpoints[].role 仅取 readwrite | readonly | admin 之一；endpoints[].name 优先使用清晰入口类型标识，如 vip / eip / f5 / elb / slb / lvs / haproxy / nginx / pooler / dns / writer / reader / admin / metrics（或保留现场实际入口名称）。
 10. notes 用简洁的分条要点（每行以 "• " 开头，3~6 条）列出高价值现场线索或待人工核对项（如发行版类型、单节点采集范围、待确认 VIP、未采集到的目录等），避免长段堆砌。
 11. JSON 结构：
 {

@@ -5,6 +5,7 @@ import {
   Input,
   InputTag,
   Message,
+  Popover,
   Select,
   Skeleton,
   Tag,
@@ -63,6 +64,7 @@ import {
 } from "../../shared/ai-process";
 import { go } from "../../app/router";
 import { AppGlyph, InstanceGraph } from "../../design/ui";
+import { COLORS, isBrandIcon } from "../../design/glyphs";
 import { bi, useLang } from "../../app/i18n";
 import "./importcluster.css";
 
@@ -211,7 +213,7 @@ export const FALLBACK_COMPANIONS: CompanionCatalogItem[] = [
   { id: "keepalived", name: "Keepalived", kind: "vip", icon: "keepalived", color: "teal", default_role: "node", role_title: "VRRP 节点", topology: true },
   { id: "nginx", name: "Nginx", kind: "proxy", icon: "nginx", color: "green", default_role: "node", role_title: "代理节点", topology: true, default_ports: [{ name: "Nginx", port: 80 }] },
   { id: "pgbouncer", name: "PgBouncer", kind: "pooler", icon: "postgresql", color: "indigo", default_role: "node", role_title: "连接池", topology: true, default_ports: [{ name: "PgBouncer", port: 6432 }] },
-  { id: "pgbackrest", name: "pgBackRest", kind: "backup", icon: "storage", color: "emerald", default_role: "backup", role_title: "物理备份", topology: false },
+  { id: "pgbackrest", name: "pgBackRest", kind: "backup", icon: "storage", color: "green", default_role: "backup", role_title: "物理备份", topology: false },
   { id: "redis-sentinel", name: "Redis Sentinel", kind: "ha_manager", icon: "redis", color: "red", default_role: "sentinel", role_title: "哨兵", topology: true, default_ports: [{ name: "Sentinel", port: 26379 }] },
   { id: "zookeeper", name: "ZooKeeper", kind: "dcs", icon: "zookeeper", color: "amber", default_role: "node", role_title: "集群节点", topology: true, default_ports: [{ name: "ZooKeeper", port: 2181 }] },
   { id: "consul", name: "Consul", kind: "dcs", icon: "consul", color: "pink", default_role: "server", role_title: "Server", topology: true, default_ports: [{ name: "Consul", port: 8500 }] },
@@ -1483,6 +1485,319 @@ function ImportEvidenceComposer({
   );
 }
 
+const COMPANION_GENERAL_ICONS = [
+  "balance",
+  "vip",
+  "gateway",
+  "cloud",
+  "storage",
+  "database",
+  "cache",
+  "queue",
+  "monitor",
+  "cluster",
+  "server",
+  "network",
+  "key",
+  "file",
+];
+
+const COMPANION_BRAND_ICONS = [
+  "haproxy",
+  "keepalived",
+  "nginx",
+  "elb",
+  "envoy",
+  "traefik",
+  "patroni",
+  "etcd",
+  "zookeeper",
+  "consul",
+  "prometheus",
+  "grafana",
+  "zabbix",
+  "docker",
+  "kubernetes",
+  "minio",
+];
+
+const COMPANION_QUICK_ICONS = [
+  "balance",
+  "vip",
+  "elb",
+  "haproxy",
+  "nginx",
+  "keepalived",
+  "storage",
+  "monitor",
+  "cloud",
+  "server",
+];
+
+function defaultGlyphForCompanionKind(kind: string): { icon: string; color: string } {
+  switch (kind) {
+    case "proxy":
+      return { icon: "balance", color: "blue" };
+    case "vip":
+      return { icon: "vip", color: "teal" };
+    case "ha_manager":
+      return { icon: "cluster", color: "indigo" };
+    case "dcs":
+      return { icon: "kv", color: "blue" };
+    case "pooler":
+      return { icon: "network", color: "indigo" };
+    case "backup":
+      return { icon: "storage", color: "green" };
+    case "monitoring":
+      return { icon: "monitor", color: "coral" };
+    case "os_component":
+      return { icon: "server", color: "slate" };
+    default:
+      return { icon: "cloud", color: "blue" };
+  }
+}
+
+function CompanionIconPicker({
+  icon,
+  color,
+  onSelect,
+  children,
+}: {
+  icon: string;
+  color: string;
+  onSelect: (next: { icon: string; color: string }) => void;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const brandSelected = isBrandIcon(icon);
+  return (
+    <Popover
+      trigger="click"
+      position="bl"
+      popupVisible={open}
+      onVisibleChange={setOpen}
+      content={
+        <div className="imp-icon-pop">
+          <div className="imp-icon-pop-sec">
+            <span className="imp-icon-pop-lbl">{bi("通用架构图标", "General Icons")}</span>
+            <div className="imp-icon-pop-grid">
+              {COMPANION_GENERAL_ICONS.map((ic) => (
+                <button
+                  key={ic}
+                  type="button"
+                  className={`imp-icon-pop-btn ${icon === ic ? "on" : ""}`}
+                  title={ic}
+                  onClick={() => onSelect({ icon: ic, color })}
+                >
+                  <AppGlyph id={`pick-${ic}`} icon={ic} color={color} size={24} />
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="imp-icon-pop-sec">
+            <span className="imp-icon-pop-lbl">{bi("常见品牌 / 组件图标", "Brand & Component Logos")}</span>
+            <div className="imp-icon-pop-grid">
+              {COMPANION_BRAND_ICONS.map((ic) => (
+                <button
+                  key={ic}
+                  type="button"
+                  className={`imp-icon-pop-btn ${icon === ic ? "on" : ""}`}
+                  title={ic}
+                  onClick={() => {
+                    onSelect({ icon: ic, color });
+                    setOpen(false);
+                  }}
+                >
+                  <AppGlyph id={`pick-${ic}`} icon={ic} color={color} size={24} />
+                </button>
+              ))}
+            </div>
+          </div>
+          {!brandSelected && (
+            <div className="imp-icon-pop-sec">
+              <span className="imp-icon-pop-lbl">{bi("图标配色", "Tile Color")}</span>
+              <div className="imp-color-swatches">
+                {COLORS.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    className={`imp-color-swatch ${color === c.id ? "on" : ""}`}
+                    style={{ background: `linear-gradient(180deg, ${c.tile[0]}, ${c.tile[1]})` }}
+                    title={c.label}
+                    onClick={() => onSelect({ icon, color: c.id })}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      }
+    >
+      {children}
+    </Popover>
+  );
+}
+
+type EndpointPreset = {
+  value: string;
+  label: string;
+  group: "lb" | "direct";
+  defaultRole: "readwrite" | "readonly" | "admin";
+  short?: string;
+};
+
+function getEndpointPresets(): EndpointPreset[] {
+  return [
+    { value: "vip", label: bi("VIP 虚拟 IP（Keepalived）", "Virtual IP (VIP)"), group: "lb", defaultRole: "readwrite", short: "VIP" },
+    { value: "eip", label: bi("EIP 弹性公网 IP", "Elastic IP (EIP)"), group: "lb", defaultRole: "readwrite", short: "EIP" },
+    { value: "f5", label: bi("F5 负载均衡", "F5 Load Balancer"), group: "lb", defaultRole: "readwrite", short: "F5" },
+    { value: "elb", label: bi("ELB 云负载均衡", "Cloud ELB"), group: "lb", defaultRole: "readwrite", short: "ELB" },
+    { value: "slb", label: bi("SLB 云负载均衡", "Cloud SLB"), group: "lb", defaultRole: "readwrite", short: "SLB" },
+    { value: "lvs", label: bi("LVS 四层均衡", "LVS L4 LB"), group: "lb", defaultRole: "readwrite", short: "LVS" },
+    { value: "haproxy", label: bi("HAProxy 代理入口", "HAProxy Proxy"), group: "lb", defaultRole: "readwrite", short: "HAProxy" },
+    { value: "nginx", label: bi("Nginx 代理入口", "Nginx Proxy"), group: "lb", defaultRole: "readwrite", short: "Nginx" },
+    { value: "pooler", label: bi("连接池入口（PgBouncer）", "Connection Pooler"), group: "lb", defaultRole: "readwrite", short: bi("连接池", "Pooler") },
+    { value: "dns", label: bi("DNS 域名入口", "DNS Endpoint"), group: "lb", defaultRole: "readwrite", short: "DNS" },
+    { value: "writer", label: bi("主库读写入口", "Primary Read/Write"), group: "direct", defaultRole: "readwrite", short: bi("主库读写", "Primary") },
+    { value: "reader", label: bi("从库只读入口", "Replica Read-Only"), group: "direct", defaultRole: "readonly", short: bi("从库只读", "Replica") },
+    { value: "admin", label: bi("管理 / 控制台入口", "Admin / Console"), group: "direct", defaultRole: "admin", short: bi("管理入口", "Admin") },
+    { value: "metrics", label: bi("监控指标入口", "Metrics Endpoint"), group: "direct", defaultRole: "admin", short: bi("监控指标", "Metrics") },
+  ];
+}
+
+function EndpointListEditor({
+  endpoints,
+  defaultPort,
+  onChange,
+}: {
+  endpoints: ImportedEndpoint[];
+  defaultPort?: number;
+  onChange: (next: ImportedEndpoint[]) => void;
+}) {
+  useLang();
+  const presets = getEndpointPresets();
+  const presetByVal = new Map(presets.map((p) => [p.value, p]));
+  const lbPresets = presets.filter((p) => p.group === "lb");
+  const directPresets = presets.filter((p) => p.group === "direct");
+  const quickAdds = ["vip", "eip", "f5", "elb", "writer", "reader"];
+
+  const addPreset = (val: string) => {
+    const p = presetByVal.get(val);
+    onChange([
+      ...endpoints,
+      { name: val, address: "", role: p?.defaultRole || "readwrite" },
+    ]);
+  };
+
+  return (
+    <div className="imp-ep-editor">
+      {endpoints.length > 0 && (
+        <div className="imp-table-rows">
+          <div className="imp-ep-row imp-col-heads">
+            <span>{bi("入口类型 / 名称（可选或自填）", "Entry Type / Name")}</span>
+            <span>{bi("访问地址 : 端口", "Address : Port")}</span>
+            <span>{bi("入口用途", "Role")}</span>
+            <span />
+          </div>
+          {endpoints.map((ep, idx) => {
+            const rawName = (ep.name || "").trim();
+            const hasInPresets = presetByVal.has(rawName);
+            return (
+              <div key={idx} className="imp-ep-row">
+                <Select
+                  allowCreate
+                  showSearch
+                  allowClear
+                  value={rawName || undefined}
+                  placeholder={bi("选择 VIP / EIP / F5 或自填…", "Pick VIP / EIP / F5 or type…")}
+                  onChange={(v) => {
+                    const nextVal = String(v || "").trim();
+                    const matched = presetByVal.get(nextVal.toLowerCase());
+                    onChange(
+                      endpoints.map((r, i) =>
+                        i === idx
+                          ? {
+                              ...r,
+                              name: nextVal,
+                              role: matched ? matched.defaultRole : r.role,
+                            }
+                          : r,
+                      ),
+                    );
+                  }}
+                >
+                  {rawName && !hasInPresets && (
+                    <Select.Option value={rawName}>{rawName}</Select.Option>
+                  )}
+                  <Select.OptGroup label={bi("外部 / 负载均衡入口", "External & Load Balancers")}>
+                    {lbPresets.map((p) => (
+                      <Select.Option key={p.value} value={p.value}>
+                        {p.label}
+                      </Select.Option>
+                    ))}
+                  </Select.OptGroup>
+                  <Select.OptGroup label={bi("节点直连 / 管理用途", "Direct & Management")}>
+                    {directPresets.map((p) => (
+                      <Select.Option key={p.value} value={p.value}>
+                        {p.label}
+                      </Select.Option>
+                    ))}
+                  </Select.OptGroup>
+                </Select>
+                <Input
+                  className="mono"
+                  placeholder={`10.0.1.100:${defaultPort || 5432}`}
+                  value={ep.address}
+                  onChange={(v) =>
+                    onChange(endpoints.map((r, i) => (i === idx ? { ...r, address: v } : r)))
+                  }
+                />
+                <Select
+                  value={normalizeEndpointRole(ep.role)}
+                  onChange={(v) =>
+                    onChange(endpoints.map((r, i) => (i === idx ? { ...r, role: v } : r)))
+                  }
+                >
+                  <Select.Option value="readwrite">{bi("读写入口", "Read/Write")}</Select.Option>
+                  <Select.Option value="readonly">{bi("只读入口", "Read-Only")}</Select.Option>
+                  <Select.Option value="admin">{bi("管理入口", "Admin")}</Select.Option>
+                </Select>
+                <Button
+                  size="small"
+                  type="text"
+                  status="danger"
+                  icon={<IconDelete />}
+                  onClick={() => onChange(endpoints.filter((_, i) => i !== idx))}
+                />
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="imp-quick-add">
+        <span className="imp-quick-add-lbl">{bi("快捷添加入口：", "Quick add:")}</span>
+        <div className="imp-quick-add-pills">
+          {quickAdds.map((id) => {
+            const p = presetByVal.get(id)!;
+            return (
+              <button
+                key={id}
+                type="button"
+                className="imp-quick-chip"
+                onClick={() => addPreset(id)}
+              >
+                <IconPlus style={{ fontSize: 10 }} />
+                {p.short || p.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CompanionStackEditor({
   primaryCompID,
   primaryDisplayName,
@@ -1510,7 +1825,9 @@ function CompanionStackEditor({
 }) {
   const [customOpen, setCustomOpen] = useState(false);
   const [customName, setCustomName] = useState("");
-  const [customKind, setCustomKind] = useState("companion");
+  const [customKind, setCustomKind] = useState("proxy");
+  const [customIcon, setCustomIcon] = useState("balance");
+  const [customColor, setCustomColor] = useState("blue");
   const [customPort, setCustomPort] = useState("");
 
   const catalogByID = useMemo(() => new Map(catalog.map((c) => [c.id, c])), [catalog]);
@@ -1536,6 +1853,13 @@ function CompanionStackEditor({
     [hosts],
   );
 
+  const handleCustomKindChange = (nextKind: string) => {
+    setCustomKind(nextKind);
+    const defGlyph = defaultGlyphForCompanionKind(nextKind);
+    setCustomIcon(defGlyph.icon);
+    setCustomColor(defGlyph.color);
+  };
+
   const addCatalogCompanion = (id: string) => {
     const def = catalogByID.get(id);
     if (!def || activeIDs.has(id)) return;
@@ -1543,6 +1867,8 @@ function CompanionStackEditor({
     const nextItem: ImportedCompanion = {
       component: def.id,
       display_name: def.name,
+      icon: def.icon,
+      color: def.color,
       kind: def.kind,
       role: def.default_role,
       hosts: validHostNames,
@@ -1557,22 +1883,30 @@ function CompanionStackEditor({
 
   const addCustomCompanion = () => {
     const name = customName.trim();
-    if (!name) return;
-    const id = name.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "") || "companion";
+    if (!name) {
+      Message.warning(bi("请填写伴生组件名称", "Please enter a component name"));
+      return;
+    }
+    const id = name.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "") || `comp-${Date.now()}`;
     if (activeIDs.has(id)) {
       Message.warning(bi("该伴生组件已存在", "Companion already added"));
       return;
     }
-    const pn = parseInt(customPort.trim(), 10);
+    const ports = customPort
+      .split(/[,，\s]+/)
+      .map((s) => parseInt(s.trim(), 10))
+      .filter((n) => Number.isFinite(n) && n > 0 && n <= 65535);
     onChange([
       ...companions,
       {
         component: id,
         display_name: name,
+        icon: customIcon,
+        color: customColor,
         kind: customKind,
         role: "node",
         hosts: validHostNames,
-        ports: Number.isFinite(pn) && pn > 0 ? [pn] : [],
+        ports,
         evidence: bi("手工添加", "Added manually"),
       },
     ]);
@@ -1606,10 +1940,10 @@ function CompanionStackEditor({
               {primaryVersion && <span className="mono small muted">{primaryVersion}</span>}
             </div>
             <div className="imp-stack-meta">
-              <span>{bi(`${validHostNames.length} 台节点`, `${validHostNames.length} host(s)`)}</span>
+              <span className="imp-stack-hosts">{bi(`${validHostNames.length} 台节点`, `${validHostNames.length} host(s)`)}</span>
             </div>
           </div>
-          <span className="small muted">{bi("核心组件", "Core")}</span>
+          <span className="small muted imp-stack-core-lbl">{bi("核心组件", "Core")}</span>
         </div>
 
         {/* Companion component rows */}
@@ -1617,31 +1951,48 @@ function CompanionStackEditor({
           const def = catalogByID.get(cm.component);
           const effKind = effectiveCompanionKind(cm.component, cm.kind);
           const km = companionKindMeta(effKind);
+          const fallbackGlyph = defaultGlyphForCompanionKind(effKind);
+          const curIcon = cm.icon || def?.icon || companionIcon(cm.component) || fallbackGlyph.icon;
+          const curColor = cm.color || (def?.color === "emerald" ? "green" : def?.color) || fallbackGlyph.color;
           const hostCount = cm.placement
             ? new Set(Object.values(cm.placement).flat()).size
             : cm.hosts?.length || validHostNames.length;
           return (
             <div key={`${cm.component}-${idx}`} className="imp-stack-item">
-              <AppGlyph
-                id={cm.component}
-                icon={def?.icon || companionIcon(cm.component)}
-                color={def?.color || "slate"}
-                size={28}
-              />
+              <CompanionIconPicker
+                icon={curIcon}
+                color={curColor}
+                onSelect={({ icon: nextIc, color: nextCol }) =>
+                  onChange(
+                    companions.map((item, i) =>
+                      i === idx ? { ...item, icon: nextIc, color: nextCol } : item,
+                    ),
+                  )
+                }
+              >
+                <button
+                  type="button"
+                  className="imp-stack-icon-btn"
+                  title={bi("点击更换图标与配色", "Click to customize icon & color")}
+                >
+                  <AppGlyph id={cm.component} icon={curIcon} color={curColor} size={30} />
+                </button>
+              </CompanionIconPicker>
               <div className="imp-stack-main">
                 <div className="imp-stack-top">
                   <strong>{cm.display_name || def?.name || cm.component}</strong>
                   <span className={`imp-kind-pill ${km.tone}`}>{km.label}</span>
                   {cm.ports && cm.ports.length > 0 && (
-                    <span className="mono small muted">:{cm.ports.join(", :")}</span>
+                    <span className="mono small muted imp-stack-ports">:{cm.ports.join(", :")}</span>
                   )}
                 </div>
                 <div className="imp-stack-meta">
-                  <span>{bi(`${hostCount} 台节点`, `${hostCount} host(s)`)}</span>
+                  <span className="imp-stack-hosts">{bi(`${hostCount} 台节点`, `${hostCount} host(s)`)}</span>
                   {validHostNames.length > 1 && hostCount < validHostNames.length && effKind !== "backup" && effKind !== "monitoring" && effKind !== "os_component" && (
                     <button
                       type="button"
                       className="cl-imp-notes-toggle"
+                      style={{ flexShrink: 0 }}
                       onClick={() =>
                         onChange(
                           companions.map((item, i) =>
@@ -1655,7 +2006,14 @@ function CompanionStackEditor({
                       {bi(`展开至全部 ${validHostNames.length} 节点`, `Expand to all ${validHostNames.length} hosts`)}
                     </button>
                   )}
-                  {cm.evidence && <span>· {cm.evidence}</span>}
+                  {cm.evidence && (
+                    <>
+                      <span className="imp-meta-sep" aria-hidden>·</span>
+                      <span className="imp-stack-ev" title={cm.evidence}>
+                        {cm.evidence}
+                      </span>
+                    </>
+                  )}
                 </div>
               </div>
               <div className="imp-stack-controls">
@@ -1700,7 +2058,7 @@ function CompanionStackEditor({
           })}
           <button
             type="button"
-            className="imp-quick-chip"
+            className={`imp-quick-chip ${customOpen ? "is-open" : ""}`}
             onClick={() => setCustomOpen((v) => !v)}
           >
             <IconPlus style={{ fontSize: 10 }} />
@@ -1710,33 +2068,86 @@ function CompanionStackEditor({
       </div>
 
       {customOpen && (
-        <div className="imp-ep-row" style={{ paddingTop: 4 }}>
-          <Input
-            size="small"
-            placeholder={bi("组件名，如 Keepalived", "Name, e.g. Keepalived")}
-            value={customName}
-            onChange={setCustomName}
-          />
-          <Select size="small" value={customKind} onChange={setCustomKind}>
-            <Select.Option value="ha_manager">{bi("高可用管理", "HA Manager")}</Select.Option>
-            <Select.Option value="dcs">{bi("分布式协调 DCS", "DCS / Quorum")}</Select.Option>
-            <Select.Option value="proxy">{bi("代理 / 均衡", "Proxy / LB")}</Select.Option>
-            <Select.Option value="vip">{bi("虚拟 IP", "VIP")}</Select.Option>
-            <Select.Option value="pooler">{bi("连接池", "Pooler")}</Select.Option>
-            <Select.Option value="backup">{bi("备份工具", "Backup")}</Select.Option>
-            <Select.Option value="monitoring">{bi("监控采集", "Monitoring")}</Select.Option>
-            <Select.Option value="os_component">{bi("OS 组件", "OS Component")}</Select.Option>
-            <Select.Option value="companion">{bi("其他伴生组件", "Companion")}</Select.Option>
-          </Select>
-          <Input
-            size="small"
-            placeholder={bi("端口", "Port")}
-            value={customPort}
-            onChange={setCustomPort}
-          />
-          <Button size="small" type="primary" onClick={addCustomCompanion}>
-            {bi("加", "Add")}
-          </Button>
+        <div className="imp-custom-comp-box">
+          <div className="imp-custom-comp-grid">
+            <CompanionIconPicker
+              icon={customIcon}
+              color={customColor}
+              onSelect={({ icon: ic, color: col }) => {
+                setCustomIcon(ic);
+                setCustomColor(col);
+              }}
+            >
+              <button
+                type="button"
+                className="imp-custom-icon-trigger"
+                title={bi("点击选择图标与配色", "Choose icon & color")}
+              >
+                <AppGlyph id="custom-preview" icon={customIcon} color={customColor} size={32} />
+              </button>
+            </CompanionIconPicker>
+            <Input
+              placeholder={bi("组件名，如 F5 / Keepalived / Zabbix", "Name, e.g. F5 / Keepalived / Zabbix")}
+              value={customName}
+              onChange={setCustomName}
+              onPressEnter={addCustomCompanion}
+            />
+            <Select value={customKind} onChange={handleCustomKindChange}>
+              <Select.Option value="proxy">{bi("代理 / 均衡", "Proxy / LB")}</Select.Option>
+              <Select.Option value="vip">{bi("虚拟 IP / VIP", "VIP / VRRP")}</Select.Option>
+              <Select.Option value="ha_manager">{bi("高可用管理", "HA Manager")}</Select.Option>
+              <Select.Option value="dcs">{bi("分布式协调 DCS", "DCS / Quorum")}</Select.Option>
+              <Select.Option value="pooler">{bi("连接池", "Pooler")}</Select.Option>
+              <Select.Option value="backup">{bi("备份工具", "Backup")}</Select.Option>
+              <Select.Option value="monitoring">{bi("监控采集", "Monitoring")}</Select.Option>
+              <Select.Option value="os_component">{bi("OS 组件", "OS Component")}</Select.Option>
+              <Select.Option value="companion">{bi("其他伴生组件", "Companion")}</Select.Option>
+            </Select>
+            <Input
+              className="mono"
+              placeholder={bi("端口(选填)", "Port")}
+              value={customPort}
+              onChange={setCustomPort}
+              onPressEnter={addCustomCompanion}
+            />
+          </div>
+
+          <div className="imp-custom-comp-foot">
+            <div className="imp-custom-icon-strip">
+              <span className="imp-custom-icon-lbl">{bi("图标：", "Icon:")}</span>
+              {COMPANION_QUICK_ICONS.map((ic) => (
+                <button
+                  key={ic}
+                  type="button"
+                  className={`imp-icon-pop-btn ${customIcon === ic ? "on" : ""}`}
+                  title={ic}
+                  onClick={() => setCustomIcon(ic)}
+                >
+                  <AppGlyph id={`q-${ic}`} icon={ic} color={customColor} size={22} />
+                </button>
+              ))}
+              <CompanionIconPicker
+                icon={customIcon}
+                color={customColor}
+                onSelect={({ icon: ic, color: col }) => {
+                  setCustomIcon(ic);
+                  setCustomColor(col);
+                }}
+              >
+                <button type="button" className="imp-icon-more-btn">
+                  {bi("更多 / 配色", "More")}
+                </button>
+              </CompanionIconPicker>
+            </div>
+            <div className="imp-custom-comp-acts">
+              <Button size="small" onClick={() => setCustomOpen(false)}>
+                {bi("取消", "Cancel")}
+              </Button>
+              <Button size="small" type="primary" icon={<IconPlus />} onClick={addCustomCompanion}>
+                {bi("添加组件", "Add Component")}
+              </Button>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -3191,52 +3602,11 @@ export function ImportClusterPage({
                   </Button>
                 </div>
 
-                {endpoints.length > 0 && (
-                  <div className="imp-table-rows">
-                    <div className="imp-ep-row imp-col-heads">
-                      <span>{bi("入口标识", "Label")}</span>
-                      <span>{bi("访问地址 : 端口", "Address : Port")}</span>
-                      <span>{bi("入口用途", "Role")}</span>
-                      <span />
-                    </div>
-                    {endpoints.map((ep, idx) => (
-                      <div key={idx} className="imp-ep-row">
-                        <Input
-                          placeholder="writer"
-                          value={ep.name || ""}
-                          onChange={(v) =>
-                            setEndpoints((prev) => prev.map((r, i) => (i === idx ? { ...r, name: v } : r)))
-                          }
-                        />
-                        <Input
-                          className="mono"
-                          placeholder={`vip.internal:${selectedPreset?.default_port || 5432}`}
-                          value={ep.address}
-                          onChange={(v) =>
-                            setEndpoints((prev) => prev.map((r, i) => (i === idx ? { ...r, address: v } : r)))
-                          }
-                        />
-                        <Select
-                          value={normalizeEndpointRole(ep.role)}
-                          onChange={(v) =>
-                            setEndpoints((prev) => prev.map((r, i) => (i === idx ? { ...r, role: v } : r)))
-                          }
-                        >
-                          <Select.Option value="readwrite">{bi("读写入口", "Read/Write")}</Select.Option>
-                          <Select.Option value="readonly">{bi("只读入口", "Read-Only")}</Select.Option>
-                          <Select.Option value="admin">{bi("管理入口", "Admin")}</Select.Option>
-                        </Select>
-                        <Button
-                          size="small"
-                          type="text"
-                          status="danger"
-                          icon={<IconDelete />}
-                          onClick={() => setEndpoints((prev) => prev.filter((_, i) => i !== idx))}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                )}
+                <EndpointListEditor
+                  endpoints={endpoints}
+                  defaultPort={selectedPreset?.default_port}
+                  onChange={setEndpoints}
+                />
 
                 <div className="imp-form-grid-2">
                   <div className="imp-field">
@@ -3400,7 +3770,7 @@ export function ImportClusterPage({
                       </span>
                       {companions.map((cm) => (
                         <span key={cm.component} className="cl-imp-comp-pill">
-                          <AppGlyph id={cm.component} icon={companionIcon(cm.component)} size={15} />
+                          <AppGlyph id={cm.component} icon={cm.icon || companionIcon(cm.component)} color={cm.color} size={15} />
                           <b>{cm.display_name || cm.component}</b>
                           {cm.version && <span className="cl-imp-comp-ver">{cm.version}</span>}
                           <span className="cl-imp-comp-kind">{companionKindMeta(effectiveCompanionKind(cm.component, cm.kind)).label}</span>
@@ -5042,52 +5412,10 @@ export function ImportedBaselineModal({
                 {bi("添加入口", "Add Endpoint")}
               </Button>
             </div>
-            {endpoints.length > 0 && (
-              <div className="imp-table-rows">
-                <div className="imp-ep-row imp-col-heads">
-                  <span>{bi("入口标识", "Label")}</span>
-                  <span>{bi("访问地址 : 端口", "Address : Port")}</span>
-                  <span>{bi("用途", "Role")}</span>
-                  <span />
-                </div>
-                {endpoints.map((ep, idx) => (
-                  <div key={idx} className="imp-ep-row">
-                    <Input
-                      value={ep.name || ""}
-                      placeholder="writer"
-                      onChange={(v) =>
-                        setEndpoints((prev) => prev.map((r, i) => (i === idx ? { ...r, name: v } : r)))
-                      }
-                    />
-                    <Input
-                      className="mono"
-                      value={ep.address}
-                      placeholder="10.0.0.100:5432"
-                      onChange={(v) =>
-                        setEndpoints((prev) => prev.map((r, i) => (i === idx ? { ...r, address: v } : r)))
-                      }
-                    />
-                    <Select
-                      value={normalizeEndpointRole(ep.role)}
-                      onChange={(v) =>
-                        setEndpoints((prev) => prev.map((r, i) => (i === idx ? { ...r, role: v } : r)))
-                      }
-                    >
-                      <Select.Option value="readwrite">{bi("读写入口", "Read/Write")}</Select.Option>
-                      <Select.Option value="readonly">{bi("只读入口", "Read-Only")}</Select.Option>
-                      <Select.Option value="admin">{bi("管理入口", "Admin")}</Select.Option>
-                    </Select>
-                    <Button
-                      size="small"
-                      type="text"
-                      status="danger"
-                      icon={<IconDelete />}
-                      onClick={() => setEndpoints((prev) => prev.filter((_, i) => i !== idx))}
-                    />
-                  </div>
-                ))}
-              </div>
-            )}
+            <EndpointListEditor
+              endpoints={endpoints}
+              onChange={setEndpoints}
+            />
           </div>
 
           {/* Section 5: Paths & Service Units (Tag Chips - ZERO concatenation bug!) */}

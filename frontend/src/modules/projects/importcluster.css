@@ -761,6 +761,107 @@ body[arco-theme="dark"] {
   box-shadow: var(--shadow-sm);
 }
 
+.imp-probe-box.is-folded .imp-probe-bar {
+  border-bottom: 0;
+}
+
+.imp-parse-focus-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 42px;
+  padding: 7px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--bg-subtle, var(--surface));
+  flex-wrap: wrap;
+}
+
+.imp-parse-focus-l {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.imp-parse-focus-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--ok);
+  flex-shrink: 0;
+}
+
+.imp-parse-focus-dot.is-live {
+  background: var(--accent, var(--primary));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, var(--primary)) 18%, transparent);
+  animation: imp-ai-pulse 1.5s ease-in-out infinite;
+}
+
+.imp-parse-focus-title {
+  font-size: 12.5px;
+  font-weight: 560;
+  color: var(--ink);
+}
+
+.imp-parse-focus-meta {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 5px;
+  font-size: 11.5px;
+  color: var(--ink-2);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.imp-parse-focus-shield {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 560;
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 11%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ok) 24%, transparent);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.imp-parse-focus-btn {
+  all: unset;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 550;
+  color: var(--ink-2);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: color 0.14s ease, border-color 0.14s ease, background-color 0.14s ease;
+}
+
+.imp-parse-focus-btn:hover {
+  color: var(--ink);
+  border-color: var(--line-strong);
+  background: var(--surface-hover, var(--surface));
+}
+
 .imp-probe-bar {
   display: flex;
   align-items: center;
@@ -3598,7 +3699,8 @@ body[arco-theme="dark"] .imp-compose-box::after {
 
 @media (prefers-reduced-motion: reduce) {
   .imp-step-pane,
-  .imp-ai-pulse {
+  .imp-ai-pulse,
+  .imp-parse-focus-dot.is-live {
     animation: none;
   }
   .imp-back-pill,

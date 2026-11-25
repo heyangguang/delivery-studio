@@ -1399,7 +1399,6 @@ function ProbeCodeBlock({
   const [focusText, setFocusText] = useState("");
   const [copied, setCopied] = useState(false);
   const [scriptStamp, setScriptStamp] = useState(() => formatProbeStamp());
-  const previewLimit = compact ? 9 : 12;
   const lines = useMemo(() => (script ? script.split("\n") : []), [script]);
 
   useEffect(() => {
@@ -1413,6 +1412,14 @@ function ProbeCodeBlock({
     setSelectedPresetIds([]);
   }, [componentId]);
 
+  useEffect(() => {
+    // Auto-fold panels when AI probe generation starts so the AIProcessCard takes focus.
+    if (aiBusy) {
+      setExpanded(false);
+      setAiBarOpen(false);
+    }
+  }, [aiBusy]);
+
   const tailorPresets = useMemo(
     () => getProbeTailorSuggestions(componentId, deployMethod),
     [componentId, deployMethod],
@@ -1421,14 +1428,6 @@ function ProbeCodeBlock({
   const displayFilename = useMemo(
     () => buildTimestampedProbeFilename(filename, source, mode, scriptStamp),
     [filename, source, mode, scriptStamp],
-  );
-
-  const previewText = useMemo(
-    () =>
-      expanded || lines.length <= previewLimit
-        ? script
-        : lines.slice(0, previewLimit).join("\n") + `\n# ... (${lines.length - previewLimit} more lines)`,
-    [expanded, lines, previewLimit, script],
   );
 
   const downloadScript = () => {
@@ -1600,7 +1599,7 @@ function ProbeCodeBlock({
         </div>
       )}
 
-      <div className="imp-probe-box">
+      <div className={`imp-probe-box ${!expanded && !hasSubMeta ? "is-folded" : ""}`}>
         <div className="imp-probe-bar">
           <div className="imp-probe-bar-l">
             <code className="imp-probe-fname" title={displayFilename}>
@@ -1630,7 +1629,9 @@ function ProbeCodeBlock({
                   : bi("标准探针", "Standard")}
             </span>
             <span className="imp-probe-lines num">
-              {lines.length} {bi("行", "lines")}
+              {lines.length > 0
+                ? `${lines.length} ${bi("行", "lines")}`
+                : bi("加载中…", "Loading…")}
             </span>
           </div>
 
@@ -1650,23 +1651,25 @@ function ProbeCodeBlock({
                 </span>
               </button>
             )}
-            {lines.length > previewLimit && (
+            {lines.length > 0 && (
               <button
                 type="button"
                 className="imp-probe-act"
+                aria-expanded={expanded}
                 onClick={() => setExpanded((v) => !v)}
               >
                 {expanded ? <IconUp /> : <IconDown />}
-                <span>{expanded ? bi("收起", "Fold") : bi("展开", "Expand")}</span>
+                <span>{expanded ? bi("收起脚本", "Hide Script") : bi("查看脚本", "View Script")}</span>
               </button>
             )}
-            <button type="button" className="imp-probe-act" onClick={downloadScript}>
+            <button type="button" className="imp-probe-act" disabled={!script} onClick={downloadScript}>
               <IconDownload />
               <span>{bi("下载", "Download")}</span>
             </button>
             <button
               type="button"
               className={`imp-probe-act is-primary ${copied ? "is-copied" : ""}`}
+              disabled={!script}
               onClick={handleCopy}
             >
               {copied ? <IconCheck /> : <IconCopy />}
@@ -1690,10 +1693,74 @@ function ProbeCodeBlock({
           </div>
         )}
 
-        <pre className={`imp-probe-pre ${expanded ? "is-expanded" : ""}`}>
-          {previewText || bi("正在生成只读采集脚本…", "Generating read-only probe script...")}
-        </pre>
+        {expanded && (
+          <pre className="imp-probe-pre is-expanded">
+            {script || bi("正在生成只读采集脚本…", "Generating read-only probe script...")}
+          </pre>
+        )}
       </div>
+    </div>
+  );
+}
+
+function ImportParseFocusBar({
+  collapsed,
+  onToggle,
+  includesProbe = false,
+  textLength,
+  imageCount,
+  isRunning,
+}: {
+  collapsed: boolean;
+  onToggle: () => void;
+  includesProbe?: boolean;
+  textLength: number;
+  imageCount: number;
+  isRunning: boolean;
+}) {
+  const parts: string[] = [];
+  if (textLength > 0) {
+    parts.push(bi(`${textLength.toLocaleString()} 字回显`, `${textLength.toLocaleString()} chars`));
+  }
+  if (imageCount > 0) {
+    parts.push(bi(`${imageCount} 张截图`, `${imageCount} image(s)`));
+  }
+  return (
+    <div className={`imp-parse-focus-bar ${collapsed ? "is-collapsed" : "is-open"}`}>
+      <div className="imp-parse-focus-l">
+        <span className={`imp-parse-focus-dot ${isRunning ? "is-live" : ""}`} aria-hidden />
+        <span className="imp-parse-focus-title">
+          {collapsed
+            ? includesProbe
+              ? bi("探针脚本与现场回显输入已收起", "Probe script & input folded")
+              : bi("现场回显录入区已收起", "Input composer folded")
+            : includesProbe
+              ? bi("已展开探针脚本与现场回显输入", "Probe script & input expanded")
+              : bi("已展开现场回显录入区", "Input composer expanded")}
+        </span>
+        {parts.length > 0 && (
+          <span className="imp-parse-focus-meta num">{parts.join(" · ")}</span>
+        )}
+        <span className="imp-parse-focus-shield">
+          <IconCheckCircle />
+          <span>{bi("口令已脱敏", "Redacted")}</span>
+        </span>
+      </div>
+      <button
+        type="button"
+        className="imp-parse-focus-btn"
+        aria-expanded={!collapsed}
+        onClick={onToggle}
+      >
+        {collapsed ? <IconDown /> : <IconUp />}
+        <span>
+          {collapsed
+            ? includesProbe
+              ? bi("展开脚本与输入", "Expand Script & Input")
+              : bi("展开查看输入", "Expand Input")
+            : bi("收起聚焦解析", "Fold to Focus")}
+        </span>
+      </button>
     </div>
   );
 }
@@ -2733,6 +2800,7 @@ export function ImportClusterPage({
   const [parsing, setParsing] = useState(false);
   const [parseLive, setParseLive] = useState<LiveAIState<ImportLiveKind> | null>(null);
   const [parseTrace, setParseTrace] = useState<RehearsalTrace | null>(null);
+  const [parseInputsCollapsed, setParseInputsCollapsed] = useState(false);
   const parseAbortRef = useRef<AbortController | null>(null);
   const [parseInfo, setParseInfo] = useState<{ parser: string; warnings: string[]; missing: string[]; companionCount: number } | null>(null);
 
@@ -2993,6 +3061,7 @@ export function ImportClusterPage({
     setParsing(true);
     const modelHint = wizardModelPick.current?.model || wizardModelPick.ref?.split("|")[1];
     if (useAI) {
+      setParseInputsCollapsed(true);
       setParseLive(
         buildImportInitialLive(
           "import-parse",
@@ -3003,6 +3072,7 @@ export function ImportClusterPage({
         ),
       );
     } else {
+      setParseInputsCollapsed(false);
       setParseLive(null);
     }
     try {
@@ -3062,6 +3132,7 @@ export function ImportClusterPage({
       if (d.notes) setNotes(d.notes);
 
       setParseLive(null);
+      setParseInputsCollapsed(false);
       setParseTrace(res.trace || null);
       setParseInfo({
         parser: res.parser,
@@ -3081,6 +3152,7 @@ export function ImportClusterPage({
     } catch (e) {
       if (ac.signal.aborted || (e as Error)?.name === "AbortError") {
         setParseLive(null);
+        setParseInputsCollapsed(false);
         return;
       }
       if (useAI) {
@@ -3536,7 +3608,12 @@ export function ImportClusterPage({
         )}
 
         {/* ---------------- STEP 2: 3-in-1 Capture / Parse / Manual ---------------- */}
-        {step === 2 && (
+        {step === 2 && (() => {
+          const focusParseView =
+            (inputMode === "probe" || inputMode === "ai_doc") &&
+            Boolean(parseLive) &&
+            parseInputsCollapsed;
+          return (
           <section className="imp-card imp-step-pane">
             <div className="imp-ctx-strip">
               <div className="imp-ctx-left">
@@ -3550,87 +3627,105 @@ export function ImportClusterPage({
                 <span className="imp-ctx-chip">{effectiveDisplayName}</span>
                 {version && <span className="imp-ctx-chip mono">{version}</span>}
               </div>
-              <Button size="mini" type="text" onClick={() => setStep(1)}>
+              <Button size="mini" type="text" disabled={parsing} onClick={() => setStep(1)}>
                 <IconEdit /> {bi("修改中间件或标识", "Change Middleware / ID")}
               </Button>
             </div>
 
-            <div className="imp-card-head">
-              <div className="imp-card-head-title">
-                <h2>{bi("选择录入方式（三选一，随时切换）", "Choose Onboarding Input Mode")}</h2>
-                <p>
-                  {bi(
-                    "无需打通 SSH 网络；支持离线只读探针自动识别全栈（主中间件 + Patroni / etcd / LB / 备份）、粘贴文档截图，或手工登记。",
-                    "No SSH network needed: run read-only probe for full-stack discovery, paste docs/screenshots, or enter hosts manually.",
-                  )}
-                </p>
-              </div>
-            </div>
-
-            <div className="imp-mode-tabs">
-              <button
-                type="button"
-                className={`imp-mode-tab ${inputMode === "probe" ? "on" : ""}`}
-                onClick={() => setInputMode("probe")}
-              >
-                <div className="imp-mode-tab-head">
-                  <span className="imp-mode-tab-title">
-                    <span className="imp-mode-ic"><IconCode /></span>
-                    {bi("一键只读采集脚本", "Read-Only Probe Script")}
-                  </span>
-                  <span className="imp-rec-tag">{bi("推荐 · 全栈识别", "Full-Stack")}</span>
+            {!focusParseView && (
+              <>
+                <div className="imp-card-head">
+                  <div className="imp-card-head-title">
+                    <h2>{bi("选择录入方式（三选一，随时切换）", "Choose Onboarding Input Mode")}</h2>
+                    <p>
+                      {bi(
+                        "无需打通 SSH 网络；支持离线只读探针自动识别全栈（主中间件 + Patroni / etcd / LB / 备份）、粘贴文档截图，或手工登记。",
+                        "No SSH network needed: run read-only probe for full-stack discovery, paste docs/screenshots, or enter hosts manually.",
+                      )}
+                    </p>
+                  </div>
                 </div>
-                <span className="imp-mode-desc">
-                  {bi(
-                    "自动采集主节点/从节点、Patroni/etcd/LB 伴生组件、数据盘、路径与 CVE 软件包清单。",
-                    "Auto-collects hosts, Patroni/etcd/LB companions, data disks, paths, and CVE packages.",
-                  )}
-                </span>
-              </button>
 
-              <button
-                type="button"
-                className={`imp-mode-tab ${inputMode === "ai_doc" ? "on" : ""}`}
-                onClick={() => setInputMode("ai_doc")}
-              >
-                <div className="imp-mode-tab-head">
-                  <span className="imp-mode-tab-title">
-                    <span className="imp-mode-ic"><IconFile /></span>
-                    {bi("粘贴文档 / 配置 / 截图", "Paste Docs / Config / Image")}
-                  </span>
-                  {presetsData?.ai_enabled && (
-                    <span className="imp-rec-tag">{bi("AI 多模态", "AI Vision")}</span>
-                  )}
+                <div className="imp-mode-tabs">
+                  <button
+                    type="button"
+                    className={`imp-mode-tab ${inputMode === "probe" ? "on" : ""}`}
+                    disabled={parsing}
+                    onClick={() => setInputMode("probe")}
+                  >
+                    <div className="imp-mode-tab-head">
+                      <span className="imp-mode-tab-title">
+                        <span className="imp-mode-ic"><IconCode /></span>
+                        {bi("一键只读采集脚本", "Read-Only Probe Script")}
+                      </span>
+                      <span className="imp-rec-tag">{bi("推荐 · 全栈识别", "Full-Stack")}</span>
+                    </div>
+                    <span className="imp-mode-desc">
+                      {bi(
+                        "自动采集主节点/从节点、Patroni/etcd/LB 伴生组件、数据盘、路径与 CVE 软件包清单。",
+                        "Auto-collects hosts, Patroni/etcd/LB companions, data disks, paths, and CVE packages.",
+                      )}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={`imp-mode-tab ${inputMode === "ai_doc" ? "on" : ""}`}
+                    disabled={parsing}
+                    onClick={() => setInputMode("ai_doc")}
+                  >
+                    <div className="imp-mode-tab-head">
+                      <span className="imp-mode-tab-title">
+                        <span className="imp-mode-ic"><IconFile /></span>
+                        {bi("粘贴文档 / 配置 / 截图", "Paste Docs / Config / Image")}
+                      </span>
+                      {presetsData?.ai_enabled && (
+                        <span className="imp-rec-tag">{bi("AI 多模态", "AI Vision")}</span>
+                      )}
+                    </div>
+                    <span className="imp-mode-desc">
+                      {bi(
+                        "直接粘贴 CMDB 资产表、交接文档、patroni.yml / etcd.conf 或架构拓扑截图（支持 Ctrl+V）。",
+                        "Paste CMDB tables, handover docs, patroni.yml / etcd.conf, or architecture screenshots.",
+                      )}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={`imp-mode-tab ${inputMode === "manual" ? "on" : ""}`}
+                    disabled={parsing}
+                    onClick={() => setInputMode("manual")}
+                  >
+                    <div className="imp-mode-tab-head">
+                      <span className="imp-mode-tab-title">
+                        <span className="imp-mode-ic"><IconEdit /></span>
+                        {bi("极简手工建档", "Quick Manual Entry")}
+                      </span>
+                    </div>
+                    <span className="imp-mode-desc">
+                      {bi(
+                        "只需填写主机名、IP 与角色（支持批量粘贴），下一步可一键勾选 Patroni / etcd 等伴生组件。",
+                        "Enter hostnames, IPs, and roles (batch paste supported); add companions in the next step.",
+                      )}
+                    </span>
+                  </button>
                 </div>
-                <span className="imp-mode-desc">
-                  {bi(
-                    "直接粘贴 CMDB 资产表、交接文档、patroni.yml / etcd.conf 或架构拓扑截图（支持 Ctrl+V）。",
-                    "Paste CMDB tables, handover docs, patroni.yml / etcd.conf, or architecture screenshots.",
-                  )}
-                </span>
-              </button>
+              </>
+            )}
 
-              <button
-                type="button"
-                className={`imp-mode-tab ${inputMode === "manual" ? "on" : ""}`}
-                onClick={() => setInputMode("manual")}
-              >
-                <div className="imp-mode-tab-head">
-                  <span className="imp-mode-tab-title">
-                    <span className="imp-mode-ic"><IconEdit /></span>
-                    {bi("极简手工建档", "Quick Manual Entry")}
-                  </span>
-                </div>
-                <span className="imp-mode-desc">
-                  {bi(
-                    "只需填写主机名、IP 与角色（支持批量粘贴），下一步可一键勾选 Patroni / etcd 等伴生组件。",
-                    "Enter hostnames, IPs, and roles (batch paste supported); add companions in the next step.",
-                  )}
-                </span>
-              </button>
-            </div>
+            {(inputMode === "probe" || inputMode === "ai_doc") && parseLive && (
+              <ImportParseFocusBar
+                collapsed={parseInputsCollapsed}
+                onToggle={() => setParseInputsCollapsed((v) => !v)}
+                includesProbe={inputMode === "probe"}
+                textLength={pasteText.trim().length}
+                imageCount={images.length}
+                isRunning={parsing}
+              />
+            )}
 
-            {inputMode === "probe" && (
+            {inputMode === "probe" && !focusParseView && (
               <>
                 {(probeLive || probeTrace) && (
                   <AIProcessCard
@@ -3698,7 +3793,7 @@ export function ImportClusterPage({
               </>
             )}
 
-            {inputMode === "ai_doc" && (
+            {inputMode === "ai_doc" && !focusParseView && (
               <ImportEvidenceComposer
                 title={bi("CMDB 表格 / 交接文档 / 配置文件 / 架构截图", "CMDB Tables / Handover Docs / Configs / Diagrams")}
                 placeholder={docPlaceholderFor(effectiveCompID, effectiveDisplayName, selectedPreset?.default_port)}
@@ -3734,10 +3829,14 @@ export function ImportClusterPage({
                 onAbort={() => {
                   parseAbortRef.current?.abort();
                   setParseLive(null);
+                  setParseInputsCollapsed(false);
                   setParsing(false);
                 }}
                 onRetry={() => void runParseAndProceed({ useAI: true })}
-                onDismiss={() => setParseLive(null)}
+                onDismiss={() => {
+                  setParseLive(null);
+                  setParseInputsCollapsed(false);
+                }}
                 extraErrorActions={
                   pasteText.trim() ? (
                     <Button
@@ -3883,7 +3982,8 @@ export function ImportClusterPage({
               </>
             )}
           </section>
-        )}
+          );
+        })()}
 
         {/* ---------------- STEP 3: Multi-Component Baseline Review & Live Topology ---------------- */}
         {step === 3 && (
@@ -4440,6 +4540,7 @@ export function ImportedBaselineModal({
   const [probeImages, setProbeImages] = useState<string[]>([]);
   const [parsing, setParsing] = useState(false);
   const [parseLive, setParseLive] = useState<LiveAIState<ImportLiveKind> | null>(null);
+  const [drawerParseCollapsed, setDrawerParseCollapsed] = useState(false);
   const [parseTrace, setParseTrace] = useState<RehearsalTrace | null>(null);
   const parseAbortRef = useRef<AbortController | null>(null);
   const [mergeDiff, setMergeDiff] = useState<string[]>([]);
@@ -4869,6 +4970,9 @@ export function ImportedBaselineModal({
     setParsing(true);
     const modelHint = modelPick.current?.model || modelPick.ref?.split("|")[1];
     if (useAI) {
+      setStep1Open(false);
+      setStep2Open(false);
+      setDrawerParseCollapsed(true);
       setParseLive(
         buildImportInitialLive(
           "import-parse",
@@ -4877,6 +4981,7 @@ export function ImportedBaselineModal({
         ),
       );
     } else {
+      setDrawerParseCollapsed(false);
       setParseLive(null);
     }
     try {
@@ -5055,6 +5160,7 @@ export function ImportedBaselineModal({
 
       setMergeDiff(changes);
       setParseLive(null);
+      setDrawerParseCollapsed(false);
       setParseTrace(res.trace || null);
       Message.success(
         changes.length > 0
@@ -5065,6 +5171,7 @@ export function ImportedBaselineModal({
     } catch (e) {
       if (ac.signal.aborted || (e as Error)?.name === "AbortError") {
         setParseLive(null);
+        setDrawerParseCollapsed(false);
         return;
       }
       if (useAI) {
@@ -5691,32 +5798,43 @@ export function ImportedBaselineModal({
 
                 {step3Open && (
                   <div className="imp-step-body">
-                    <ImportEvidenceComposer
-                      title={bi("回显文本 / 截图（自动增量合并，不覆盖已有基线）", "Probe Output / Screenshots (Additive Merge)")}
-                      placeholder={bi(
-                        "=== MW_IMPORT_BEGIN ===\n直接粘贴采集终端回显、拖拽 .log/.txt 文件，或按 Ctrl+V 粘贴终端截图；AI 将自动提取缺失字段并增量合并…",
-                        "=== MW_IMPORT_BEGIN ===\nPaste terminal output, drag & drop .log/.txt files, or Ctrl+V screenshots; AI will extract and merge incrementally…",
-                      )}
-                      value={probeOutput}
-                      onChange={setProbeOutput}
-                      images={probeImages}
-                      onImagesChange={setProbeImages}
-                      busy={parsing}
-                      aiEnabled
-                      modelPick={modelPick}
-                      aiOpts={aiOpts}
-                      minRows={6}
-                      maxRows={15}
-                      imageBtnLabel={bi("上传回显截图", "Upload Image")}
-                      footHint={bi("支持拖拽 .log/.txt/截图", "Drag & drop .log/.txt/images")}
-                      leftSlot={
-                        <Button size="small" type="text" onClick={() => setTab("edit")} disabled={parsing}>
-                          <IconArrowLeft /> {bi("返回基线编辑", "Back to Edit")}
-                        </Button>
-                      }
-                      submitLabel={bi("AI 解析并增量合并基线", "AI Parse & Merge")}
-                      onSubmit={() => void parseAndMergeProbe({ useAI: true })}
-                    />
+                    {parseLive && (
+                      <ImportParseFocusBar
+                        collapsed={drawerParseCollapsed}
+                        onToggle={() => setDrawerParseCollapsed((v) => !v)}
+                        textLength={probeOutput.trim().length}
+                        imageCount={probeImages.length}
+                        isRunning={parsing}
+                      />
+                    )}
+                    {!(parseLive && drawerParseCollapsed) && (
+                      <ImportEvidenceComposer
+                        title={bi("回显文本 / 截图（自动增量合并，不覆盖已有基线）", "Probe Output / Screenshots (Additive Merge)")}
+                        placeholder={bi(
+                          "=== MW_IMPORT_BEGIN ===\n直接粘贴采集终端回显、拖拽 .log/.txt 文件，或按 Ctrl+V 粘贴终端截图；AI 将自动提取缺失字段并增量合并…",
+                          "=== MW_IMPORT_BEGIN ===\nPaste terminal output, drag & drop .log/.txt files, or Ctrl+V screenshots; AI will extract and merge incrementally…",
+                        )}
+                        value={probeOutput}
+                        onChange={setProbeOutput}
+                        images={probeImages}
+                        onImagesChange={setProbeImages}
+                        busy={parsing}
+                        aiEnabled
+                        modelPick={modelPick}
+                        aiOpts={aiOpts}
+                        minRows={6}
+                        maxRows={15}
+                        imageBtnLabel={bi("上传回显截图", "Upload Image")}
+                        footHint={bi("支持拖拽 .log/.txt/截图", "Drag & drop .log/.txt/images")}
+                        leftSlot={
+                          <Button size="small" type="text" onClick={() => setTab("edit")} disabled={parsing}>
+                            <IconArrowLeft /> {bi("返回基线编辑", "Back to Edit")}
+                          </Button>
+                        }
+                        submitLabel={bi("AI 解析并增量合并基线", "AI Parse & Merge")}
+                        onSubmit={() => void parseAndMergeProbe({ useAI: true })}
+                      />
+                    )}
                     {parseLive && (
                       <AIProcessCard
                         live={parseLive}
@@ -5724,10 +5842,14 @@ export function ImportedBaselineModal({
                         onAbort={() => {
                           parseAbortRef.current?.abort();
                           setParseLive(null);
+                          setDrawerParseCollapsed(false);
                           setParsing(false);
                         }}
                         onRetry={() => void parseAndMergeProbe({ useAI: true })}
-                        onDismiss={() => setParseLive(null)}
+                        onDismiss={() => {
+                          setParseLive(null);
+                          setDrawerParseCollapsed(false);
+                        }}
                         extraErrorActions={
                           probeOutput.trim() ? (
                             <Button

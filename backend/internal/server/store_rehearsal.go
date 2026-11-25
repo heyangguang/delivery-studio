@@ -5554,9 +5554,10 @@ func (s *storeServer) buildRehearsalSOP(f clusterFacts, rid string) (*clusterDoc
 	if !ok || rh.Stage != "finalized" {
 		return nil, false
 	}
+	ownerName := resolveReportSigner(rh.Owner, f.Meta, "owner", lang)
 	coverRows := [][2]string{
 		{tr(lang, "变更主题", "Change Topic"), rh.Title},
-		{tr(lang, "演练负责人", "Rehearsal Owner"), rh.Owner},
+		{tr(lang, "变更负责人", "Change Lead"), ownerName},
 		{tr(lang, "定稿时间", "Finalized"), stamp(rh.UpdatedAt)},
 	}
 	if rh.SecurityContext != nil {
@@ -5573,21 +5574,23 @@ func (s *storeServer) buildRehearsalSOP(f clusterFacts, rid string) (*clusterDoc
 	}
 	modeLabel := tr(lang, "全量推演（生产 SOP）", "Full Rehearsal (Production SOP)")
 	if rh.Mode == "quick" {
-		modeLabel = tr(lang, "极速变更（直出步骤与报告）", "Quick Change (Direct Steps & Report)")
+		modeLabel = tr(lang, "极速变更（标准变更报告）", "Quick Change (Direct SOP & Report)")
 	} else if rh.Mode == "light" {
-		modeLabel = tr(lang, "简单推演（探针核实与报告）", "Light Rehearsal (Probe & Report)")
+		modeLabel = tr(lang, "轻量化核验变更", "Light Rehearsal (Probe & Report)")
 	}
 	coverRows = append(coverRows, [2]string{tr(lang, "变更模式", "Change Mode"), modeLabel})
 	if rh.Applied {
+		confirmer := resolveReportSigner(firstNonEmptyStr(rh.AppliedBy, rh.Owner), f.Meta, "confirmer", lang)
 		appliedLabel := tr(lang,
-			fmt.Sprintf("已实施落地（%s 于 %s 确认）", firstNonEmptyStr(rh.AppliedBy, rh.Owner), stamp(firstNonEmptyStr(rh.AppliedAt, rh.UpdatedAt))),
-			fmt.Sprintf("Applied to Production (confirmed by %s on %s)", firstNonEmptyStr(rh.AppliedBy, rh.Owner), stamp(firstNonEmptyStr(rh.AppliedAt, rh.UpdatedAt))),
+			fmt.Sprintf("已实施落地（%s 于 %s 确认）", confirmer, stamp(firstNonEmptyStr(rh.AppliedAt, rh.UpdatedAt))),
+			fmt.Sprintf("Applied to Production (confirmed by %s on %s)", confirmer, stamp(firstNonEmptyStr(rh.AppliedAt, rh.UpdatedAt))),
 		)
 		coverRows = append(coverRows, [2]string{tr(lang, "生产落地状态", "Production Status"), appliedLabel})
 	} else if rh.Voided {
+		voider := resolveReportSigner(firstNonEmptyStr(rh.VoidedBy, rh.Owner), f.Meta, "confirmer", lang)
 		voidLabel := tr(lang,
-			fmt.Sprintf("已作废（%s 于 %s 标记：%s）", firstNonEmptyStr(rh.VoidedBy, rh.Owner), stamp(firstNonEmptyStr(rh.VoidedAt, rh.UpdatedAt)), firstNonEmptyStr(rh.VoidReason, "不再执行")),
-			fmt.Sprintf("Voided by %s on %s (%s)", firstNonEmptyStr(rh.VoidedBy, rh.Owner), stamp(firstNonEmptyStr(rh.VoidedAt, rh.UpdatedAt)), firstNonEmptyStr(rh.VoidReason, "Obsolete")),
+			fmt.Sprintf("已作废（%s 于 %s 标记：%s）", voider, stamp(firstNonEmptyStr(rh.VoidedAt, rh.UpdatedAt)), firstNonEmptyStr(rh.VoidReason, "不再执行")),
+			fmt.Sprintf("Voided by %s on %s (%s)", voider, stamp(firstNonEmptyStr(rh.VoidedAt, rh.UpdatedAt)), firstNonEmptyStr(rh.VoidReason, "Obsolete")),
 		)
 		coverRows = append(coverRows, [2]string{tr(lang, "生产落地状态", "Production Status"), voidLabel})
 	} else {
@@ -5603,12 +5606,13 @@ func (s *storeServer) buildRehearsalSOP(f clusterFacts, rid string) (*clusterDoc
 		Cover:    f.cover(coverRows...),
 	}
 	b := &docBuilder{}
-	b.section(1, "overview", tr(lang, "1 变更目标与维护窗口", "1 Change Objective & Maintenance Window"), tr(lang, "本次变更的业务背景、目标、计划维护窗口起止时间及审批单号。", "Business context, objectives, planned maintenance window start/end, and approval ticket ID."), true)
+	b.section(1, "overview", tr(lang, "1 变更目标与维护窗口", "1 Change Objective & Maintenance Window"), tr(lang, "明确本次生产变更的业务目标、预期收益、影响范围、计划维护窗口及变更审批依据。", "Business objective, expected outcome, impact scope, planned maintenance window, and approval basis."), true)
 	if rh.Applied {
 		b.h(2, tr(lang, "1.1 生产实施落地确认与生效变更", "1.1 Production Completion & Effective Changes"))
+		confirmer := resolveReportSigner(firstNonEmptyStr(rh.AppliedBy, rh.Owner), f.Meta, "confirmer", lang)
 		confirmLine := tr(lang,
-			fmt.Sprintf("本次变更已由 %s 于 %s 确认在生产环境执行完成并同步至集群运行台账。", firstNonEmptyStr(rh.AppliedBy, rh.Owner), stamp(firstNonEmptyStr(rh.AppliedAt, rh.UpdatedAt))),
-			fmt.Sprintf("Confirmed applied to production by %s on %s and synced to the cluster operational ledger.", firstNonEmptyStr(rh.AppliedBy, rh.Owner), stamp(firstNonEmptyStr(rh.AppliedAt, rh.UpdatedAt))),
+			fmt.Sprintf("本次变更已由 %s 于 %s 确认完成生产环境实施并同步更新至集群运行基线。", confirmer, stamp(firstNonEmptyStr(rh.AppliedAt, rh.UpdatedAt))),
+			fmt.Sprintf("Confirmed applied to production by %s on %s and synced to the cluster operational baseline.", confirmer, stamp(firstNonEmptyStr(rh.AppliedAt, rh.UpdatedAt))),
 		)
 		if rh.AppliedSummary != "" {
 			confirmLine += "\n" + tr(lang, "生效摘要：", "Applied Summary: ") + rh.AppliedSummary
@@ -5687,7 +5691,7 @@ func (s *storeServer) buildRehearsalSOP(f clusterFacts, rid string) (*clusterDoc
 		summary += tr(lang, fmt.Sprintf("，跳过 %d 个可选/不适用步骤", skipped), fmt.Sprintf(", skipped %d optional/N/A step(s)", skipped))
 	}
 	if revTotal > 0 {
-		summary += tr(lang, fmt.Sprintf("，演练过程中累计排障与打磨修正命令 %d 次", revTotal), fmt.Sprintf(", with %d command revision(s) refined during rehearsal", revTotal))
+		summary += tr(lang, fmt.Sprintf("，演练期间完成 %d 处实施步骤优化与复测确认", revTotal), fmt.Sprintf(", with %d step revision(s) validated during rehearsal", revTotal))
 	}
 	summary += tr(lang, "。", ".")
 	if rh.TestEnvNote != "" {
@@ -5802,7 +5806,7 @@ func (s *storeServer) buildRehearsalSOP(f clusterFacts, rid string) (*clusterDoc
 		}
 	}
 
-	b.section(1, "signoff", tr(lang, "6 回退红线与审批签字", "6 Rollback Triggers & Sign-Off"), tr(lang, "回退触发红线、窗口负责人、执行人与复核人签字确认。", "Rollback trigger thresholds and sign-off from change lead, executor, and reviewer."), true)
+	b.section(1, "signoff", tr(lang, "6 回退红线与审批签字", "6 Rollback Triggers & Sign-Off"), tr(lang, "明确生产回退触发红线条件，以及变更负责人、执行人与复核人的签字确认意见。", "Explicit production rollback thresholds and formal sign-off from change lead, executor, and reviewer."), true)
 	d.Blocks = b.blocks
 	return d, true
 }

@@ -22,6 +22,7 @@ import {
   IconRefresh,
   IconRight,
   IconSearch,
+  IconUser,
 } from "@arco-design/web-react/icon";
 import {
   ago,
@@ -39,17 +40,481 @@ import {
   putCached,
   reducedMotion,
 } from "../../shared/shared";
-import type { ClusterDoc, ClusterView, DocBlock } from "../../shared/shared";
+import type { ClusterDoc, ClusterView, DocBlock, DocMeta } from "../../shared/shared";
 import { go } from "../../app/router";
 import { Segmented } from "../../design/ui";
 import { Spark, useAIStatus } from "../ai/aichat";
 import { bi, useLang, withLang } from "../../app/i18n";
 import "./docs.css";
 
-/* The documents of a cluster (store_docs.go): the delivery report, the operations handover, a change report per plan
-   and a root-cause analysis per failed plan. Facts come from the platform; the sections people write — or let the
-   assistant draft and then confirm — are edited in place on the page. Everything exports to Word, one file each or
-   merged into one. */
+type AIDraftMode = "section" | "draft-all" | "audit";
+
+function aiProgressStages(mode: AIDraftMode, sectionKey?: string, count?: number): string[] {
+  if (mode === "draft-all") {
+    return [
+      bi(
+        `正在汇总集群拓扑、版本与安全扫描基线（共 ${count || 0} 个章节）…`,
+        `Gathering cluster topology, versions, and security baselines (${count || 0} sections)…`,
+      ),
+      bi(
+        "正在梳理各章节结论框架，交叉核对数据口径…",
+        "Structuring executive conclusions and cross-checking facts…",
+      ),
+      bi(
+        "正在以正式企业交付报告语言逐节起草正文…",
+        "Drafting client-ready deliverable prose across sections…",
+      ),
+      bi(
+        "正在去除过程性表述、校验客观性并润色排版…",
+        "Polishing formal tone, objectivity, and formatting…",
+      ),
+    ];
+  }
+  if (mode === "audit") {
+    return [
+      bi(
+        "正在比对正文叙述与真实节点拓扑、版本及运行状态…",
+        "Cross-checking prose against live topology, versions, and status…",
+      ),
+      bi(
+        "正在核验 CVE 漏洞、TLS 证书与配置安全基线披露…",
+        "Auditing CVE findings, TLS certificates, and config baselines…",
+      ),
+      bi(
+        "正在排查过程性套话、内部编号与残留占位符…",
+        "Checking for process narration, internal IDs, and placeholders…",
+      ),
+      bi(
+        "正在生成交付就绪评分与可直接采纳的定稿修订建议…",
+        "Compiling readiness score and 1-click formal rewrite proposals…",
+      ),
+    ];
+  }
+  switch (sectionKey) {
+    case "risks":
+      return [
+        bi(
+          "正在核对集群拓扑结构、软件栈版本与高可用基线…",
+          "Inspecting cluster topology, software versions, and HA baseline…",
+        ),
+        bi(
+          "正在交叉评估备份恢复机制、历史变更与安全合规态势…",
+          "Evaluating backup readiness, change history, and security posture…",
+        ),
+        bi(
+          "正在提炼核心风险分级与可落地的工程治理建议…",
+          "Prioritizing architecture risks and actionable remediation…",
+        ),
+        bi(
+          "正在按正式企业交付报告口径润色定稿…",
+          "Polishing into formal client-ready deliverable prose…",
+        ),
+      ];
+    case "summary":
+    case "overview":
+      return [
+        bi(
+          "正在汇总节点角色分工、组件版本与访问入口基线…",
+          "Summarizing host roles, component versions, and access endpoints…",
+        ),
+        bi(
+          "正在梳理交付架构形态与当前生产运行状态…",
+          "Reviewing deployment architecture and live operational state…",
+        ),
+        bi(
+          "正在提炼面向技术负责人与运维团队的交付综述…",
+          "Drafting executive overview for technical & ops stakeholders…",
+        ),
+        bi(
+          "正在校验事实一致性与正式公文行文规范…",
+          "Verifying factual consistency and formal wording…",
+        ),
+      ];
+    case "acceptance":
+    case "signoff":
+      return [
+        bi(
+          "正在核验实施执行记录、功能测试与验收判据达成情况…",
+          "Verifying step execution logs, test results, and pass criteria…",
+        ),
+        bi(
+          "正在对照实施偏差、安全基线与回退红线要求…",
+          "Cross-checking deviations, security baselines, and rollback gates…",
+        ),
+        bi(
+          "正在整理客观、可签字的最终验收与上线结论…",
+          "Composing objective sign-off conclusion…",
+        ),
+        bi(
+          "正在按正式交付标准完成文字润色…",
+          "Polishing formal acceptance prose…",
+        ),
+      ];
+    case "arch":
+    case "specific":
+      return [
+        bi(
+          "正在分析节点职责分工、数据复制与故障切换机制…",
+          "Analyzing node roles, replication flow, and HA failover…",
+        ),
+        bi(
+          "正在整合端口规范、目录基线与历史变更注意事项…",
+          "Consolidating ports, paths, and change caveats…",
+        ),
+        bi(
+          "正在撰写面向一线运维团队的交接与实操要点…",
+          "Drafting day-2 operational guidance for ops teams…",
+        ),
+        bi(
+          "正在按运维交接手册规范润色排版…",
+          "Polishing into formal handover manual style…",
+        ),
+      ];
+    case "symptom":
+    case "impact":
+    case "timeline":
+    case "cause":
+    case "handling":
+    case "improve":
+      return [
+        bi(
+          "正在回溯异常时间线、失败步骤与关键现场日志证据…",
+          "Reviewing incident timeline, failed steps, and log evidence…",
+        ),
+        bi(
+          "正在区分直接诱因与底层架构/配置根因…",
+          "Separating immediate triggers from underlying root cause…",
+        ),
+        bi(
+          "正在梳理止损恢复状态与长效预防改进措施…",
+          "Summarizing recovery verification and corrective actions…",
+        ),
+        bi(
+          "正在按正式根因分析报告口径润色定稿…",
+          "Polishing formal RCA prose…",
+        ),
+      ];
+    case "inputs":
+    case "analysis":
+    case "conclusion":
+      return [
+        bi(
+          "正在读取当前集群规格参数、节点规模与架构约束…",
+          "Reading current cluster sizing, scale, and constraints…",
+        ),
+        bi(
+          "正在结合业务输入与前提假设进行量化测算推演…",
+          "Running sizing & architecture trade-off analysis…",
+        ),
+        bi(
+          "正在提炼明确可落地的评估结论与后续演练路径…",
+          "Synthesizing actionable verdict and execution roadmap…",
+        ),
+        bi(
+          "正在按咨询评审报告标准润色成文…",
+          "Polishing formal assessment report prose…",
+        ),
+      ];
+    default:
+      return [
+        bi(
+          "正在读取集群拓扑、软件栈版本与交付台账事实…",
+          "Reading cluster topology, versions, and delivery facts…",
+        ),
+        bi(
+          "正在梳理核心结论与可落地建议结构…",
+          "Structuring key conclusions and actionable recommendations…",
+        ),
+        bi(
+          "正在按正式企业交付报告口径润色正文…",
+          "Polishing formal client-deliverable prose…",
+        ),
+        bi(
+          "正在复核数据准确性与行文规范…",
+          "Verifying accuracy and deliverable tone…",
+        ),
+      ];
+  }
+}
+
+/** Dynamic rotating status strip shown while AI drafts a section, fills all sections, or runs deep audit. */
+function AIDraftingProgress({
+  mode,
+  sectionKey,
+  count,
+  showSkeleton = false,
+}: {
+  mode: AIDraftMode;
+  sectionKey?: string;
+  count?: number;
+  showSkeleton?: boolean;
+}) {
+  useLang();
+  const stages = aiProgressStages(mode, sectionKey, count);
+  const [idx, setIdx] = useState(0);
+  const [elapsedMs, setElapsedMs] = useState(0);
+
+  useEffect(() => {
+    setIdx(0);
+    setElapsedMs(0);
+    const t0 = Date.now();
+    const tick = window.setInterval(() => {
+      setElapsedMs(Date.now() - t0);
+    }, 250);
+    const rotate = window.setInterval(() => {
+      setIdx((prev) => (prev + 1) % stages.length);
+    }, 2400);
+    return () => {
+      window.clearInterval(tick);
+      window.clearInterval(rotate);
+    };
+  }, [mode, sectionKey, count, stages.length]);
+
+  const secs = (elapsedMs / 1000).toFixed(1);
+  const subHint =
+    mode === "audit"
+      ? bi(
+          "审阅完成后将给出就绪评分、事实依据与可一键采纳的正式修订稿",
+          "Returns readiness score, evidence citations, and 1-click formal rewrite proposals",
+        )
+      : bi(
+          "严格基于真实拓扑与审计事实撰写正式报告结论，完成后可逐节核对确认",
+          "Grounded strictly in verified topology & audit facts; review and confirm once ready",
+        );
+
+  return (
+    <div
+      className={`dc-ai-prog ${showSkeleton ? "in-sec" : "in-bar"}`}
+      role="status"
+      aria-live="polite"
+    >
+      <div className="dc-ai-prog-top">
+        <span className="dc-ai-prog-ic" aria-hidden>
+          <Spark size={showSkeleton ? 14 : 16} rainbow />
+        </span>
+        <div className="dc-ai-prog-body">
+          <div className="dc-ai-prog-head">
+            <span key={idx} className="dc-ai-prog-stage">
+              {stages[idx]}
+            </span>
+            <span className="dc-ai-prog-meta num">
+              <span className="dc-ai-prog-step">
+                {idx + 1}/{stages.length}
+              </span>
+              <span className="dc-ai-prog-time">{secs}s</span>
+            </span>
+          </div>
+          <div className="dc-ai-prog-foot">
+            <div className="dc-ai-prog-dots" aria-hidden>
+              {stages.map((_, i) => (
+                <i
+                  key={i}
+                  className={i === idx ? "is-cur" : i < idx ? "is-done" : ""}
+                />
+              ))}
+            </div>
+            <small className="faint">{subHint}</small>
+          </div>
+        </div>
+      </div>
+      {showSkeleton && (
+        <Skeleton
+          animation={!reducedMotion()}
+          text={{ rows: 3, width: ["94%", "88%", "64%"] }}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Modal to edit extracted report signers (Author / Reviewer / Confirmer / Owner) and cover metadata. */
+function DocMetaModal({
+  visible,
+  c,
+  d,
+  onClose,
+  onSaved,
+}: {
+  visible: boolean;
+  c: ClusterView;
+  d: ClusterDoc;
+  onClose: () => void;
+  onSaved: (nd: ClusterDoc, appliedToCluster: boolean) => void;
+}) {
+  useLang();
+  const [form, setForm] = useState<DocMeta>({});
+  const [applyToCluster, setApplyToCluster] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (visible) {
+      setForm({
+        author: d.meta?.author || "",
+        reviewer: d.meta?.reviewer || "",
+        confirmer: d.meta?.confirmer || "",
+        owner: d.meta?.owner || "",
+        client: d.meta?.client || "",
+        project: d.meta?.project || "",
+        doc_version: d.meta?.doc_version || "V1.0",
+        confidential: d.meta?.confidential || "",
+      });
+      setApplyToCluster(true);
+    }
+  }, [visible, d.id, d.meta]);
+
+  const setField = (k: keyof DocMeta, v: string) =>
+    setForm((prev) => ({ ...prev, [k]: v }));
+
+  const submit = async () => {
+    if (saving) return;
+    setSaving(true);
+    try {
+      const nd = await api<ClusterDoc>(
+        `/api/clusters/${encodeURIComponent(c.id)}/docs/${encodeURIComponent(d.id)}/meta`,
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            ...form,
+            apply_to_cluster: applyToCluster,
+          }),
+        },
+      );
+      onSaved(nd, applyToCluster);
+      Message.success(
+        applyToCluster
+          ? bi("报告署名与元信息已更新，并已同步为本集群默认署名", "Report signers saved and applied to all cluster reports")
+          : bi("本报告署名与元信息已更新", "Document signers updated"),
+      );
+      onClose();
+    } catch (e) {
+      err(e);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      visible={visible}
+      title={bi("编辑报告署名与交付属性", "Edit Report Signers & Metadata")}
+      onCancel={onClose}
+      className="dc-meta-modal"
+      style={{ width: "min(620px, 94vw)" }}
+      footer={
+        <>
+          <Button onClick={onClose}>{bi("取消", "Cancel")}</Button>
+          <Button
+            type="primary"
+            icon={<IconCheck />}
+            loading={saving}
+            onClick={() => void submit()}
+          >
+            {bi("保存并更新报告", "Save & Apply")}
+          </Button>
+        </>
+      }
+    >
+      <p className="faint small dc-meta-intro">
+        {bi(
+          "用于替换系统默认账号名（如 admin），立即生效于网页预览封面、变更台账「确认人 / 时间」及导出 Word 文档属性与版本控制页。",
+          "Replaces raw system logins (such as admin) across the Web cover, change ledger 'Confirmed By / At', and exported Word document control pages.",
+        )}
+      </p>
+      <div className="dc-meta-grid">
+        <label className="dc-meta-field">
+          <span>{bi("确认人 / 验收人", "Confirmer / Approver")}</span>
+          <Input
+            size="small"
+            value={form.confirmer || ""}
+            onChange={(v) => setField("confirmer", v)}
+            placeholder={bi("例如：王强（用于变更台账确认人及验收签字）", "e.g., Alex Chen (used in Change Ledger & Sign-Off)")}
+            maxLength={120}
+          />
+        </label>
+        <label className="dc-meta-field">
+          <span>{bi("交付负责人 / 变更负责人", "Delivery / Change Lead")}</span>
+          <Input
+            size="small"
+            value={form.owner || ""}
+            onChange={(v) => setField("owner", v)}
+            placeholder={bi("例如：何洋（用于封面负责人与执行记录）", "e.g., Jordan Lee (used in Cover Owner)")}
+            maxLength={120}
+          />
+        </label>
+        <label className="dc-meta-field">
+          <span>{bi("编制人 / 作者", "Author")}</span>
+          <Input
+            size="small"
+            value={form.author || ""}
+            onChange={(v) => setField("author", v)}
+            placeholder={bi("例如：张伟（用于 Word 版本控制作者与安全报告）", "e.g., Taylor Wu (used in Word Author)")}
+            maxLength={120}
+          />
+        </label>
+        <label className="dc-meta-field">
+          <span>{bi("审核人", "Reviewer")}</span>
+          <Input
+            size="small"
+            value={form.reviewer || ""}
+            onChange={(v) => setField("reviewer", v)}
+            placeholder={bi("例如：李明（用于封面及 Word 审核人）", "e.g., Morgan Lin (used in Reviewer)")}
+            maxLength={120}
+          />
+        </label>
+        <label className="dc-meta-field">
+          <span>{bi("客户 / 使用单位", "Client / Organization")}</span>
+          <Input
+            size="small"
+            value={form.client || ""}
+            onChange={(v) => setField("client", v)}
+            placeholder={bi("例如：某汽车集团 IT 基础设施部", "e.g., Enterprise IT Infrastructure")}
+            maxLength={120}
+          />
+        </label>
+        <label className="dc-meta-field">
+          <span>{bi("项目名称", "Project Name")}</span>
+          <Input
+            size="small"
+            value={form.project || ""}
+            onChange={(v) => setField("project", v)}
+            placeholder={bi("例如：核心中间件高可用交付项目", "e.g., Core Middleware HA Delivery")}
+            maxLength={120}
+          />
+        </label>
+        <label className="dc-meta-field">
+          <span>{bi("文档版本号", "Document Version")}</span>
+          <Input
+            size="small"
+            value={form.doc_version || ""}
+            onChange={(v) => setField("doc_version", v)}
+            placeholder="V1.0"
+            maxLength={60}
+          />
+        </label>
+        <label className="dc-meta-field">
+          <span>{bi("密级标识", "Classification")}</span>
+          <Input
+            size="small"
+            value={form.confidential || ""}
+            onChange={(v) => setField("confidential", v)}
+            placeholder={bi("例如：内部 / 商密", "e.g., Internal / Confidential")}
+            maxLength={60}
+          />
+        </label>
+      </div>
+      <div className="dc-meta-sync">
+        <Checkbox checked={applyToCluster} onChange={setApplyToCluster}>
+          {bi(
+            "同步设为本集群全部报告的默认署名（交付报告、运维交接、变更方案、根因分析、安全报告）",
+            "Apply as default signers for all reports in this cluster (Delivery, Handover, Change SOP, RCA, Security)",
+          )}
+        </Checkbox>
+      </div>
+    </Modal>
+  );
+}
+
+/** The documents of a cluster (store_docs.go): the delivery report, the operations handover, a change report per plan */
 
 const KIND: Record<ClusterDoc["kind"], { icon: string; groupKey: string; group: string }> = {
   delivery: { get icon() { return bi("报", "R"); }, groupKey: "cluster", get group() { return bi("集群文档", "Cluster Docs"); } },
@@ -583,6 +1048,21 @@ function DocView({
     setD(nd);
     onChanged();
   };
+  const onMetaSaved = (nd: ClusterDoc, appliedToCluster: boolean) => {
+    putCached(itemUrl, nd);
+    setD(nd);
+    if (appliedToCluster && list?.length) {
+      // Refresh cached sibling docs in background so navigating to KT/SOP reflects updated signers immediately.
+      for (const item of list) {
+        if (item.id === nd.id) continue;
+        const sibUrl = docItemPath(c.id, item.id);
+        void api<ClusterDoc>(sibUrl)
+          .then((fresh) => putCached(sibUrl, fresh))
+          .catch(() => {});
+      }
+    }
+    onChanged();
+  };
   const check = async () => {
     if (checking) return;
     setChecking(true);
@@ -893,27 +1373,10 @@ function DocView({
             </div>
           </header>
           {(checking || draftingAll) && (
-            <div className="dc-rv-busy" role="status">
-              <Spark size={16} rainbow />
-              <div className="dc-rv-busy-t">
-                <b>
-                  {draftingAll
-                    ? bi(
-                        `正在依据真实交付记录与安全态势批量起草 ${emptyAICount} 个待填章节…`,
-                        `Drafting ${emptyAICount} empty section(s) from delivery & security facts…`,
-                      )
-                    : bi(
-                        "AI 正在对照拓扑规格、执行记录、CVE 漏洞与配置基线进行深度审阅…",
-                        "AI is auditing topology, execution logs, CVEs, and config baselines…",
-                      )}
-                </b>
-                <small className="faint">
-                  {draftingAll
-                    ? bi("生成后将自动写入对应章节为待确认草稿，不编造任何现场数据", "Drafts will be saved as unconfirmed drafts grounded in facts")
-                    : bi("审阅完成后将给出就绪评分、核查依据与可一键采纳的正文改写方案", "Will return a readiness score, evidence citations, and 1-click rewrite proposals")}
-                </small>
-              </div>
-            </div>
+            <AIDraftingProgress
+              mode={draftingAll ? "draft-all" : "audit"}
+              count={emptyAICount}
+            />
           )}
 
           {review && !checking && (
@@ -1161,7 +1624,15 @@ function DocView({
             </section>
           )}
           {hasVariants(d) && <ReportOptions view={view} setView={setView} />}
-          <Paper c={c} d={d} view={view} aiOn={aiOn} canAI={canAI} onSaved={update} />
+          <Paper
+            c={c}
+            d={d}
+            view={view}
+            aiOn={aiOn}
+            canAI={canAI}
+            onSaved={update}
+            onMetaSaved={onMetaSaved}
+          />
         </>
       )}
     </div>
@@ -1176,6 +1647,7 @@ function Paper({
   aiOn,
   canAI,
   onSaved,
+  onMetaSaved,
 }: {
   c: ClusterView;
   d: ClusterDoc;
@@ -1183,9 +1655,11 @@ function Paper({
   aiOn: boolean;
   canAI: boolean;
   onSaved: (d: ClusterDoc) => void;
+  onMetaSaved: (d: ClusterDoc, appliedToCluster: boolean) => void;
 }) {
   useLang();
   const [activeId, setActiveId] = useState<string>("");
+  const [metaOpen, setMetaOpen] = useState(false);
   const visibleBlocks = (d.blocks || []).filter(
     (b) => (!b.detail || view.detail) && keeps(b.variant, view),
   );
@@ -1277,7 +1751,20 @@ function Paper({
       )}
       <article className="dc-paper" aria-label={d.title}>
         <div className="dc-cover">
-          <div className="dc-cover-t">{d.title}</div>
+          <div className="dc-cover-top">
+            <div className="dc-cover-t">{d.title}</div>
+            {can("report.edit") && (
+              <Button
+                size="mini"
+                type="outline"
+                icon={<IconUser />}
+                className="dc-signers-btn"
+                onClick={() => setMetaOpen(true)}
+              >
+                {bi("编辑署名与属性", "Edit Signers")}
+              </Button>
+            )}
+          </div>
           <dl>
             {(d.cover || []).map(([k, v]) => (
               <div key={k}>
@@ -1286,7 +1773,37 @@ function Paper({
               </div>
             ))}
           </dl>
+          <div className="dc-signers">
+            <span className="dc-signers-label">
+              <IconUser /> {bi("报告署名", "Signers")}
+            </span>
+            <div className="dc-signers-pills">
+              <span className={`dc-signer-pill ${d.meta?.confirmer ? "is-set" : ""}`}>
+                <em>{bi("确认人", "Confirmer")}</em>
+                <b>{d.meta?.confirmer || bi("交付负责人（默认）", "Delivery Lead (default)")}</b>
+              </span>
+              <span className={`dc-signer-pill ${d.meta?.owner ? "is-set" : ""}`}>
+                <em>{bi("负责人", "Owner")}</em>
+                <b>{d.meta?.owner || bi("交付负责人（默认）", "Delivery Lead (default)")}</b>
+              </span>
+              <span className={`dc-signer-pill ${d.meta?.author ? "is-set" : ""}`}>
+                <em>{bi("编制人", "Author")}</em>
+                <b>{d.meta?.author || bi("交付团队（默认）", "Delivery Team (default)")}</b>
+              </span>
+              <span className={`dc-signer-pill ${d.meta?.reviewer ? "is-set" : ""}`}>
+                <em>{bi("审核人", "Reviewer")}</em>
+                <b>{d.meta?.reviewer || "—"}</b>
+              </span>
+            </div>
+          </div>
         </div>
+        <DocMetaModal
+          visible={metaOpen}
+          c={c}
+          d={d}
+          onClose={() => setMetaOpen(false)}
+          onSaved={onMetaSaved}
+        />
         {visibleBlocks.map((b, i) => (
           <Block
             key={b.key || i}
@@ -2019,15 +2536,11 @@ function Section({
         </div>
       )}
       {busy === "draft" ? (
-        <div className="dc-drafting" aria-live="polite">
-          <span>
-            <Spark /> {bi("AI 正在阅读平台整理的事实并起草…", "AI is reading cluster facts and drafting…")}
-          </span>
-          <Skeleton
-            animation
-            text={{ rows: 3, width: ["92%", "86%", "60%"] }}
-          />
-        </div>
+        <AIDraftingProgress
+          mode="section"
+          sectionKey={b.key}
+          showSkeleton
+        />
       ) : edit ? (
         <div className="dc-edit">
           <Input.TextArea
@@ -2180,11 +2693,24 @@ function ExportDialog({
               {tplSummary.use_template && tplSummary.template
                 ? bi(`自定义模板（${tplSummary.template}）`, `Custom template (${tplSummary.template})`)
                 : bi(
-                    `${tplSummary.theme_name || "深青标准"} · 企业公文规范 ${tplSummary.doc_version || "V1.0"}`,
-                    `${tplSummary.theme_name || "Teal Standard"} · Doc Standard ${tplSummary.doc_version || "V1.0"}`,
+                    `${tplSummary.theme_name || "深青标准"} · 企业公文规范 ${chosen[0]?.meta?.doc_version || tplSummary.doc_version || "V1.0"}`,
+                    `${tplSummary.theme_name || "Teal Standard"} · Doc Standard ${chosen[0]?.meta?.doc_version || tplSummary.doc_version || "V1.0"}`,
                   )}
             </b>
-            {tplSummary.org ? ` · ${tplSummary.org}` : ""}
+            {chosen[0]?.meta?.client || tplSummary.org
+              ? ` · ${chosen[0]?.meta?.client || tplSummary.org}`
+              : ""}
+            {(chosen[0]?.meta?.author || chosen[0]?.meta?.confirmer) && (
+              <>
+                {" · "}
+                {[
+                  chosen[0]?.meta?.author && bi(`编制：${chosen[0].meta.author}`, `Author: ${chosen[0].meta.author}`),
+                  chosen[0]?.meta?.confirmer && bi(`确认：${chosen[0].meta.confirmer}`, `Confirmer: ${chosen[0].meta.confirmer}`),
+                ]
+                  .filter(Boolean)
+                  .join(" / ")}
+              </>
+            )}
           </span>
           {can("settings.report") && (
             <button

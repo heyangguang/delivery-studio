@@ -275,7 +275,7 @@ func buildSecExportDataset(
 		Theme:         themeOf(tpl.Theme),
 		GeneratedAt:   nowStr,
 		GeneratedDate: dateStr,
-		GeneratedBy:   firstNonEmptyStr(user, "system"),
+		GeneratedBy:   resolveReportSigner(user, docMeta{}, "author", ""),
 		ScopeName:     scopeName,
 		ScopeFilter:   effScope,
 		IsCluster:     clusterAudit != nil,
@@ -521,7 +521,7 @@ func renderSecurityDocx(ds secExportDataset) ([]byte, error) {
 						fmt.Sprintf("%d", len(cs.Hosts)),
 						fmt.Sprintf("%d / %d / %d", cs.MiddlewareActive.Critical, cs.MiddlewareActive.High, cs.MiddlewareActive.Total),
 						fmt.Sprintf("%d / %d / %d", cs.OSActive.Critical, cs.OSActive.High, cs.OSActive.Total),
-						firstNonEmptyStr(cs.Owner, "—"),
+						resolveReportSigner(cs.Owner, docMeta{}, "owner", ""),
 					})
 				}
 				body.table(

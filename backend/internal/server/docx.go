@@ -992,11 +992,11 @@ func (w *docxWriter) cover(c docxCover) {
 
 // docxVersionControl configures the corporate "版本控制信息" page (文档属性 + 文档变更过程) at the end of front matter.
 type docxVersionControl struct {
-	Project, Title, Version, Date, Author, Reviewer string
-	Cluster, Confidential                           string
-	Facts                                           [][2]string
-	History                                         [][4]string
-	Lang                                            string
+	Project, Title, Version, Date, Author, Reviewer, Confirmer string
+	Cluster, Confidential                                      string
+	Facts                                                      [][2]string
+	History                                                    [][4]string
+	Lang                                                       string
 }
 
 func (w *docxWriter) versionControl(vc docxVersionControl) {
@@ -1018,6 +1018,9 @@ func (w *docxWriter) versionControl(vc docxVersionControl) {
 		[]string{tr(lang, "作    者", "Author"), firstNonEmptyStr(vc.Author, "Kyndryl Delivery Studio")},
 		[]string{tr(lang, "审 核 人", "Reviewer"), firstNonEmptyStr(vc.Reviewer, "—")},
 	)
+	if strings.TrimSpace(vc.Confirmer) != "" {
+		attrRows = append(attrRows, []string{tr(lang, "确 认 人", "Confirmer"), vc.Confirmer})
+	}
 	if strings.TrimSpace(vc.Confidential) != "" {
 		attrRows = append(attrRows, []string{tr(lang, "密级标识", "Classification"), vc.Confidential})
 	}

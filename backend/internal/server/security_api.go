@@ -670,9 +670,19 @@ func (s *storeServer) handleSecurityExport(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
+	// Resolve human-readable report author (honoring cluster doc meta > report settings > non-generic username).
+	secAuthor := session.User
+	if clusterAudit != nil {
+		m := s.effectiveDocMeta(clusterAudit.ClusterID, "delivery", "")
+		secAuthor = resolveReportSigner(session.User, m, "author", "")
+	} else {
+		rs := s.reportSettings()
+		secAuthor = resolveReportSigner(session.User, docMeta{Author: rs.Author}, "author", "")
+	}
+
 	// Rich template-driven exports: Word (.docx), Excel (.xlsx), standalone HTML (.html).
 	if format == "docx" || format == "xlsx" || format == "html" {
-		ds := buildSecExportDataset(rep, clusterAudit, tpl, session.User, scopeFilter, incIgnoredOverride, incWaivedOverride)
+		ds := buildSecExportDataset(rep, clusterAudit, tpl, secAuthor, scopeFilter, incIgnoredOverride, incWaivedOverride)
 		switch format {
 		case "docx":
 			data, err := renderSecurityDocx(ds)
@@ -724,7 +734,7 @@ func (s *storeServer) handleSecurityExport(w http.ResponseWriter, r *http.Reques
 		rep.Clusters = nil
 	}
 	if tplID != "" {
-		ds := buildSecExportDataset(rep, clusterAudit, tpl, session.User, scopeFilter, incIgnoredOverride, incWaivedOverride)
+		ds := buildSecExportDataset(rep, clusterAudit, tpl, secAuthor, scopeFilter, incIgnoredOverride, incWaivedOverride)
 		rep.Findings = ds.Findings
 		rep.ActiveCounts = ds.ActiveCounts
 		rep.TotalCounts = ds.TotalCounts

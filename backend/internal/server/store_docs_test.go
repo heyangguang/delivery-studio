@@ -746,3 +746,96 @@ func TestClusterDocsEnhancedAuditAndDraftAll(t *testing.T) {
 		t.Fatalf("expected 2 drafted sections, 0 empty, 2 drafts; got %+v", daResp)
 	}
 }
+
+func TestClusterDocSignersAndCleanReportProse(t *testing.T) {
+	s, _ := testStore(t)
+	admin, acsrf := storeLogin(t, s, "admin")
+	w := storeCreate(t, s, admin, acsrf, `{"id":"pg-signers","hosts":[{"name":"n1","ip":"10.0.9.11"}],"instances":[{"id":"etcd","component":"etcd","placement":{"member":["n1"]}}]}`, nil)
+	s.wg.Wait()
+	var j storeJob
+	_ = json.Unmarshal(w.Body.Bytes(), &j)
+	if w.Code != 202 || j.ID == "" {
+		t.Fatalf("create failed: %d %s", w.Code, w.Body.String())
+	}
+
+	// Mark outcome as admin and create a finalized rehearsal applied by admin so we verify generic "admin" never leaks.
+	storeRequest(s, "PATCH", "/api/jobs/"+j.ID, strings.NewReader(`{"outcome":"done","note":"验收通过"}`), admin, acsrf)
+	rh := changeRehearsal{
+		ID:             "a1b2c3d4e5f6",
+		ClusterID:      "pg-signers",
+		BaseJobID:      j.ID,
+		Title:          "调整日志落盘目录",
+		Owner:          "admin",
+		Stage:          "finalized",
+		Applied:        true,
+		AppliedBy:      "admin",
+		AppliedAt:      "2026-11-24T14:48:00Z",
+		AppliedSummary: "日志目录迁移至 /data/logs",
+		UpdatedAt:      "2026-11-24T14:48:00Z",
+	}
+	if err := s.saveRehearsal(rh); err != nil {
+		t.Fatalf("save rehearsal: %v", err)
+	}
+
+	// 1. Verify RBAC requires report.edit for PUT .../meta.
+	if perm, ok := routePermFor("PUT", "/api/clusters/pg-signers/docs/delivery/meta"); !ok || perm != "report.edit" {
+		t.Fatalf("expected report.edit perm for PUT docs/.../meta, got ok=%v perm=%q", ok, perm)
+	}
+
+	// 2. Before setting custom signers, raw "admin" must NOT appear in Cover, Change Ledger, or stepReport prose.
+	wGet := storeRequest(s, "GET", "/api/clusters/pg-signers/docs/delivery", nil, admin, "")
+	if wGet.Code != 200 {
+		t.Fatalf("GET delivery failed: %d %s", wGet.Code, wGet.Body.String())
+	}
+	bodyBefore := wGet.Body.String()
+	if strings.Contains(bodyBefore, `"admin"`) || strings.Contains(bodyBefore, "admin /") || strings.Contains(bodyBefore, "由 admin ") {
+		t.Fatalf("raw generic username 'admin' leaked into delivery report: %s", bodyBefore)
+	}
+	if strings.Contains(bodyBefore, "以 # 开头的行说明这一步在做什么") {
+		t.Fatalf("verbose developer comment tutorial still present in stepReport")
+	}
+
+	// 3. Edit signers via PUT .../meta with apply_to_cluster=true and verify propagation across delivery, kt, sop, and Word export.
+	metaPayload := `{"author":"张伟","reviewer":"李明","confirmer":"王强","owner":"何洋","client":"大众汽车","project":"核心数据库平台","doc_version":"V2.1","apply_to_cluster":true}`
+	wMeta := storeRequest(s, "PUT", "/api/clusters/pg-signers/docs/delivery/meta", strings.NewReader(metaPayload), admin, acsrf)
+	if wMeta.Code != 200 {
+		t.Fatalf("PUT meta failed: %d %s", wMeta.Code, wMeta.Body.String())
+	}
+	bodyAfter := wMeta.Body.String()
+	for _, want := range []string{"张伟", "李明", "王强", "何洋", "大众汽车", "王强 / "} {
+		if !strings.Contains(bodyAfter, want) {
+			t.Errorf("updated delivery report missing expected signer %q", want)
+		}
+	}
+
+	// Verify cluster-wide propagation into SOP change report.
+	wSOP := storeRequest(s, "GET", "/api/clusters/pg-signers/docs/sop-a1b2c3d4e5f6", nil, admin, "")
+	if wSOP.Code != 200 || !strings.Contains(wSOP.Body.String(), "王强") || !strings.Contains(wSOP.Body.String(), "何洋") {
+		t.Fatalf("SOP doc did not inherit cluster signers: %d %s", wSOP.Code, wSOP.Body.String())
+	}
+	if strings.Contains(wSOP.Body.String(), `"admin"`) {
+		t.Fatalf("SOP doc leaked raw admin: %s", wSOP.Body.String())
+	}
+
+	// Verify exported Word .docx contains editable signers and zero raw "admin".
+	wExp := storeRequest(s, "GET", "/api/clusters/pg-signers/export?docs=delivery", nil, admin, "")
+	if wExp.Code != 200 {
+		t.Fatalf("export docx failed: %d %s", wExp.Code, wExp.Body.String())
+	}
+	files := readDocxZip(t, wExp.Body.Bytes())
+	docXML := files["word/document.xml"]
+	assertValidXML(t, "signer-docx", docXML)
+	for _, want := range []string{"张伟", "李明", "王强", "何洋", "大众汽车", "V2.1"} {
+		if !strings.Contains(docXML, want) {
+			t.Errorf("exported docx missing %q", want)
+		}
+	}
+	if strings.Contains(docXML, "admin /") || strings.Contains(docXML, ">admin<") {
+		t.Errorf("exported docx leaked raw admin")
+	}
+
+	// Verify AI prompt rules suppress process narration and placeholder spam.
+	if !strings.Contains(docSystem, "写结论与结果") || !strings.Contains(docDraftAllSystem, "写结论与结果") {
+		t.Errorf("AI drafting system prompts missing formal result-oriented rules")
+	}
+}

@@ -58,6 +58,17 @@ type docBlock struct {
 	Stale string `json:"stale,omitempty"`
 }
 
+type docMeta struct {
+	Author       string `json:"author,omitempty"`
+	Reviewer     string `json:"reviewer,omitempty"`
+	Confirmer    string `json:"confirmer,omitempty"`
+	Owner        string `json:"owner,omitempty"`
+	Client       string `json:"client,omitempty"`
+	Project      string `json:"project,omitempty"`
+	DocVersion   string `json:"doc_version,omitempty"`
+	Confidential string `json:"confidential,omitempty"`
+}
+
 type clusterDoc struct {
 	ID       string      `json:"id"`
 	Kind     string      `json:"kind"` // delivery | change | kt | rca | assess
@@ -66,6 +77,7 @@ type clusterDoc struct {
 	Cluster  string      `json:"cluster"`
 	Job      string      `json:"job,omitempty"`
 	Cover    [][2]string `json:"cover"`
+	Meta     docMeta     `json:"meta,omitempty"`
 	Blocks   []docBlock  `json:"blocks"`
 	// Counts over the sections: how many there are, how many are empty, how many are assistant drafts nobody has
 	// confirmed yet.
@@ -97,6 +109,8 @@ type docSaved struct {
 	Sections map[string]docSection `json:"sections"`
 	// Answers are what people on site told the assistant when it asked (root-cause analyses).
 	Answers []planQA `json:"answers,omitempty"`
+	// Meta holds optional editable document signers and cover attributes (author, reviewer, confirmer, owner, etc.).
+	Meta docMeta `json:"meta,omitempty"`
 }
 
 // docIndex lists the documents people started themselves: root-cause analyses of a plan that did not fail, or of an
@@ -201,12 +215,153 @@ func (s *storeServer) docSave(cluster, doc string, d docSaved) error {
 	return writeJSONFile(s.docPath(cluster, doc), d)
 }
 
+func (s *storeServer) clusterDocMetaPath(cluster string) string {
+	return filepath.Join(s.cfg.DataDir, "docs", cluster, "meta.json")
+}
+
+func (s *storeServer) clusterDocMetaLoad(cluster string) docMeta {
+	var m docMeta
+	if b, err := os.ReadFile(s.clusterDocMetaPath(cluster)); err == nil {
+		_ = json.Unmarshal(b, &m)
+	}
+	return m
+}
+
+func (s *storeServer) clusterDocMetaSave(cluster string, m docMeta) error {
+	return writeJSONFile(s.clusterDocMetaPath(cluster), m)
+}
+
+func isGenericSystemUser(u string) bool {
+	switch strings.ToLower(strings.TrimSpace(u)) {
+	case "", "admin", "administrator", "root", "system", "sysadmin", "operator", "sa":
+		return true
+	default:
+		return false
+	}
+}
+
+// effectiveDocMeta merges per-document signers/attributes > cluster-wide defaults > global report settings.
+func (s *storeServer) effectiveDocMeta(cluster, docID, lang string) docMeta {
+	rs := s.reportSettingsFor(lang)
+	cm := s.clusterDocMetaLoad(cluster)
+	dm := s.docLoad(cluster, docID).Meta
+	return docMeta{
+		Author:       firstNonEmptyStr(strings.TrimSpace(dm.Author), strings.TrimSpace(cm.Author), strings.TrimSpace(rs.Author)),
+		Reviewer:     firstNonEmptyStr(strings.TrimSpace(dm.Reviewer), strings.TrimSpace(cm.Reviewer), strings.TrimSpace(rs.Reviewer)),
+		Confirmer:    firstNonEmptyStr(strings.TrimSpace(dm.Confirmer), strings.TrimSpace(cm.Confirmer)),
+		Owner:        firstNonEmptyStr(strings.TrimSpace(dm.Owner), strings.TrimSpace(cm.Owner)),
+		Client:       firstNonEmptyStr(strings.TrimSpace(dm.Client), strings.TrimSpace(cm.Client), strings.TrimSpace(rs.Org)),
+		Project:      firstNonEmptyStr(strings.TrimSpace(dm.Project), strings.TrimSpace(cm.Project), strings.TrimSpace(rs.Project)),
+		DocVersion:   firstNonEmptyStr(strings.TrimSpace(dm.DocVersion), strings.TrimSpace(cm.DocVersion), strings.TrimSpace(rs.DocVersion), "V1.0"),
+		Confidential: firstNonEmptyStr(strings.TrimSpace(dm.Confidential), strings.TrimSpace(cm.Confidential), strings.TrimSpace(rs.Confidential)),
+	}
+}
+
+// resolveReportSigner translates a raw login username (such as built-in "admin") into a formal human-readable signer
+// for client-facing deliverables, honoring explicit editable overrides in docMeta.
+func resolveReportSigner(rawUser string, meta docMeta, role, lang string) string {
+	raw := strings.TrimSpace(rawUser)
+	switch role {
+	case "confirmer":
+		if strings.TrimSpace(meta.Confirmer) != "" {
+			return strings.TrimSpace(meta.Confirmer)
+		}
+		if !isGenericSystemUser(raw) {
+			return raw
+		}
+		return firstNonEmptyStr(strings.TrimSpace(meta.Owner), strings.TrimSpace(meta.Author), tr(lang, "交付负责人", "Delivery Lead"))
+	case "owner":
+		if strings.TrimSpace(meta.Owner) != "" {
+			return strings.TrimSpace(meta.Owner)
+		}
+		if !isGenericSystemUser(raw) {
+			return raw
+		}
+		return firstNonEmptyStr(strings.TrimSpace(meta.Author), strings.TrimSpace(meta.Confirmer), tr(lang, "交付负责人", "Delivery Lead"))
+	case "author":
+		if strings.TrimSpace(meta.Author) != "" {
+			return strings.TrimSpace(meta.Author)
+		}
+		if !isGenericSystemUser(raw) {
+			return raw
+		}
+		return firstNonEmptyStr(strings.TrimSpace(meta.Owner), tr(lang, "交付团队", "Delivery Team"))
+	case "reviewer":
+		if strings.TrimSpace(meta.Reviewer) != "" {
+			return strings.TrimSpace(meta.Reviewer)
+		}
+		if !isGenericSystemUser(raw) {
+			return raw
+		}
+		return "—"
+	default: // "actor" (execution operator, amendment author, revision updater)
+		if !isGenericSystemUser(raw) {
+			return raw
+		}
+		return firstNonEmptyStr(strings.TrimSpace(meta.Owner), strings.TrimSpace(meta.Author), strings.TrimSpace(meta.Confirmer), tr(lang, "交付工程师", "Delivery Engineer"))
+	}
+}
+
+func formatSectionBy(raw string, meta docMeta, lang string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if idx := strings.Index(raw, "（AI："); idx >= 0 {
+		prefix := strings.TrimSpace(raw[:idx])
+		return resolveReportSigner(prefix, meta, "author", lang) + raw[idx:]
+	}
+	return resolveReportSigner(raw, meta, "author", lang)
+}
+
+func formatCompanionEvidence(cm mwpack.ImportedCompanion, lang string) string {
+	if len(cm.ServiceUnits) > 0 {
+		return tr(lang, "运行服务：", "Service: ") + strings.Join(cm.ServiceUnits, ", ")
+	}
+	ev := strings.TrimSpace(cm.Evidence)
+	if ev == "" {
+		return tr(lang, "现场运行状态核验", "Runtime verification")
+	}
+	parts := strings.Split(ev, "·")
+	var clean []string
+	seen := map[string]bool{}
+	for _, p := range parts {
+		t := strings.TrimSpace(p)
+		if t == "" {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(strings.ToLower(t), "pkg:"):
+			pkg := strings.TrimSpace(t[4:])
+			if pkg != "" {
+				t = tr(lang, "软件包 "+pkg, "Package "+pkg)
+			}
+		case strings.HasPrefix(strings.ToLower(t), "unit:"):
+			u := strings.TrimSpace(t[5:])
+			if u != "" {
+				t = tr(lang, "服务单元 "+u, "Unit "+u)
+			}
+		case t == "架构摘要":
+			t = tr(lang, "架构基线核验", "Architecture baseline")
+		}
+		if !seen[t] {
+			seen[t] = true
+			clean = append(clean, t)
+		}
+	}
+	if len(clean) == 0 {
+		return tr(lang, "现场运行状态核验", "Runtime verification")
+	}
+	return strings.Join(clean, " · ")
+}
+
 // ---- facts ----
 
 // clusterFacts is what every document of a cluster is built from.
 type clusterFacts struct {
 	ID      string
 	Lang    string
+	Meta    docMeta
 	Jobs    []storeJob // oldest first; generation failures left out
 	Current storeJob
 	Plan    *mwpack.Plan // the current job's specification, solved
@@ -414,7 +569,7 @@ func topology(b *docBuilder, p *mwpack.Plan, langOpt ...string) {
 		lang = langOpt[0]
 	}
 	if p == nil {
-		b.note(tr(lang, "这份交付的部署规格读不出来，拓扑无法列出。", "Deployment specification is unreadable; topology cannot be listed."))
+		b.note(tr(lang, "暂未获取到部署规格定义，拓扑明细未展开。", "Deployment specification is unavailable; topology details omitted."))
 		return
 	}
 	carry := map[string][]string{}
@@ -437,9 +592,9 @@ func topology(b *docBuilder, p *mwpack.Plan, langOpt ...string) {
 		}
 		rows = append(rows, []string{name, h.IP, strings.Join(carry[h.Name], sep)})
 	}
-	b.table([]string{tr(lang, "机器", "Host"), "IP", tr(lang, "承担", "Roles")}, rows)
+	b.table([]string{tr(lang, "主机节点", "Host"), "IP", tr(lang, "承载角色", "Roles")}, rows)
 	if e := p.Dep.ExecutionHost; e != nil {
-		b.p(tr(lang, "独立执行机："+e.Name+"（"+e.IP+"），不计入业务机器；运行目录 "+p.RuntimeRoot()+"。", "Standalone execution host: "+e.Name+" ("+e.IP+"), excluded from workload hosts; runtime root "+p.RuntimeRoot()+"."))
+		b.p(tr(lang, "独立执行机："+e.Name+"（"+e.IP+"），不计入业务节点；运行目录 "+p.RuntimeRoot()+"。", "Standalone execution host: "+e.Name+" ("+e.IP+"), excluded from workload hosts; runtime root "+p.RuntimeRoot()+"."))
 	}
 	rows = nil
 	for _, inst := range p.Instances {
@@ -455,11 +610,11 @@ func topology(b *docBuilder, p *mwpack.Plan, langOpt ...string) {
 		}
 		note := ""
 		if inst.Auto {
-			note = tr(lang, "平台自动加入：", "Auto-added by platform: ") + mwpack.TranslateCatalogText(lang, inst.AutoReason)
+			note = tr(lang, "自动配套组件：", "Auto-provisioned companion: ") + mwpack.TranslateCatalogText(lang, inst.AutoReason)
 		}
 		rows = append(rows, []string{inst.ID, mwpack.TranslateCatalogText(lang, inst.Title) + " " + inst.Version, place, note})
 	}
-	b.table([]string{tr(lang, "实例", "Instance"), tr(lang, "组件与版本", "Component & Version"), tr(lang, "放置", "Placement"), tr(lang, "说明", "Notes")}, rows)
+	b.table([]string{tr(lang, "实例", "Instance"), tr(lang, "组件与版本", "Component & Version"), tr(lang, "部署分布", "Placement"), tr(lang, "说明", "Notes")}, rows)
 }
 
 // entries lists the addresses applications use, and how a balancer picks the backend that takes the connection.
@@ -487,14 +642,14 @@ func entries(b *docBuilder, p *mwpack.Plan, langOpt ...string) {
 				via = tr(lang, "经 "+f.Balancer+"，"+health, "Via "+f.Balancer+", "+health)
 			} else if len(e.Backends) > 1 {
 				several = true
-				via = tr(lang, "没有负载均衡；"+health, "No load balancer; "+health)
+				via = tr(lang, "直连多节点；"+health, "Direct multi-host; "+health)
 			}
 			rows = append(rows, []string{inst.ID + "." + e.Name, firstNonEmptyStr(mwpack.TranslateCatalogText(lang, e.Title), e.Name), addr, via})
 		}
 	}
-	b.table([]string{tr(lang, "入口", "Endpoint"), tr(lang, "用途", "Purpose"), tr(lang, "地址", "Address"), tr(lang, "如何选到可用节点", "Routing & Health Check")}, rows)
+	b.table([]string{tr(lang, "访问入口", "Endpoint"), tr(lang, "用途", "Purpose"), tr(lang, "连接地址", "Address"), tr(lang, "路由与健康检查机制", "Routing & Health Check")}, rows)
 	if several {
-		b.note(tr(lang, "没有负载均衡的入口列出的是所有可能承担这个角色的节点，同一时间只有通过检查的那台（例如当前主库）能用。应用要么经负载均衡访问，要么使用支持多主机的连接串（PostgreSQL 例如 host=节点1,节点2,节点3 target_session_attrs=read-write），主库切换后才能自动找到新的主库。", "Endpoints without a load balancer list all candidate hosts for the role; only the host passing health checks (such as the active primary) serves writes at any given time. Clients should either connect via a load balancer or use a multi-host connection string (e.g., PostgreSQL host=h1,h2,h3 target_session_attrs=read-write) so traffic follows failover automatically."))
+		b.note(tr(lang, "说明：未配置独立负载均衡器的多节点入口列出了全部候选节点，实际写流量由健康检查判定可用节点（如当前主库）承载；建议应用侧经负载均衡接入，或配置支持多主机自动选主的连接串（例如 PostgreSQL target_session_attrs=read-write）。", "Note: Multi-host endpoints without a load balancer list all candidate nodes; only healthy targets (e.g., active primary) serve writes. Connect via a load balancer or a multi-host failover connection string (e.g., PostgreSQL target_session_attrs=read-write)."))
 	}
 }
 
@@ -554,47 +709,49 @@ func (s *storeServer) packagesTable(b *docBuilder, id string, langOpt ...string)
 }
 
 // record writes a job's execution record, what was changed during it and the problems solved with the assistant.
-func (s *storeServer) record(b *docBuilder, level int, j storeJob, langOpt ...string) {
-	lang := ""
-	if len(langOpt) > 0 {
-		lang = langOpt[0]
+func (s *storeServer) record(b *docBuilder, level int, j storeJob, lang string, metaOpt ...docMeta) {
+	var meta docMeta
+	if len(metaOpt) > 0 {
+		meta = metaOpt[0]
 	}
 	if scheme := mwpack.LocalizeSchemeSummary(lang, s.deliveryScheme(j.ID, j.AppID, j.Scheme)); scheme != nil {
-		b.note(tr(lang, "本次交付部署方案：", "Delivery architecture scheme: ") + scheme.Name + tr(lang, "；", "; ") + scheme.Topology + tr(lang, "；", "; ") + scheme.Contract.Mechanism)
+		b.note(tr(lang, "交付部署方案：", "Delivery architecture scheme: ") + scheme.Name + tr(lang, "；", "; ") + scheme.Topology + tr(lang, "；", "; ") + scheme.Contract.Mechanism)
 	}
 	steps, prog := s.execRecord(j.ID)
 	s.executionSummary(b, level, j, prog, lang)
-	facts := []string{tr(lang, "交付负责人登记的结论：", "Recorded delivery outcome: ") + jobOutcomeNameLang(j, lang)}
+	facts := []string{tr(lang, "交付验收结论：", "Recorded delivery outcome: ") + jobOutcomeNameLang(j, lang)}
 	if j.MarkedBy != "" {
-		facts = append(facts, tr(lang, fmt.Sprintf("确认：%s，%s", j.MarkedBy, stamp(j.Marked)), fmt.Sprintf("Confirmed by %s at %s", j.MarkedBy, stamp(j.Marked))))
+		confirmer := resolveReportSigner(j.MarkedBy, meta, "confirmer", lang)
+		facts = append(facts, tr(lang, fmt.Sprintf("确认人：%s（%s）", confirmer, stamp(j.Marked)), fmt.Sprintf("Confirmed by %s at %s", confirmer, stamp(j.Marked))))
 	}
 	if j.RunTotal > 0 {
-		facts = append(facts, tr(lang, fmt.Sprintf("现场记录：%d / %d 步，%d 步失败", j.RunDone, j.RunTotal, j.RunFailed), fmt.Sprintf("On-site progress: %d / %d step(s) done, %d failed", j.RunDone, j.RunTotal, j.RunFailed)))
+		facts = append(facts, tr(lang, fmt.Sprintf("实施进度：%d / %d 步完成，%d 步失败", j.RunDone, j.RunTotal, j.RunFailed), fmt.Sprintf("Execution progress: %d / %d step(s) done, %d failed", j.RunDone, j.RunTotal, j.RunFailed)))
 	}
 	b.p(strings.Join(facts, tr(lang, "；", "; ")))
 	if j.OutcomeNote != "" {
-		b.note(tr(lang, "现场说明：", "On-site notes: ") + j.OutcomeNote)
+		b.note(tr(lang, "实施说明：", "Execution notes: ") + j.OutcomeNote)
 	}
-	if !s.stepReport(b, level, j, lang) {
+	if !s.stepReport(b, level, j, lang, meta) {
 		var rows [][]string
 		for _, st := range steps {
-			rows = append(rows, []string{st.Title, stepStateLabel(lang, st.State), st.By, stamp(st.At), st.Note})
+			rows = append(rows, []string{st.Title, stepStateLabel(lang, st.State), resolveReportSigner(st.By, meta, "actor", lang), stamp(st.At), st.Note})
 		}
 		if len(rows) == 0 {
-			b.p(tr(lang, "现场没有在平台上逐步记录。", "No step-by-step on-site execution records logged on platform."))
+			b.p(tr(lang, "本次交付未启用分步在线回传记录。", "No step-by-step on-site execution records logged."))
 		} else {
 			b.table([]string{tr(lang, "步骤", "Step"), tr(lang, "结果", "Result"), tr(lang, "执行人", "Operator"), tr(lang, "时间", "Timestamp"), tr(lang, "说明", "Notes")}, rows)
 		}
 	}
 	if ams := s.loadAmendments(j.ID); len(ams) > 0 {
-		b.h(level, tr(lang, "执行中对手册的修改", "Runbook Amendments During Execution"))
+		b.h(level, tr(lang, "实施过程手册修订记录", "Runbook Amendments During Execution"))
 		var items []string
 		for _, a := range ams {
 			what := tr(lang, "新增步骤「"+a.Step.Title+"」", fmt.Sprintf("Added step %q", a.Step.Title))
 			if a.Kind == "replace" {
-				what = tr(lang, "修改步骤「"+firstNonEmptyStr(a.AfterTitle, a.Step.Title)+"」的命令", fmt.Sprintf("Updated command for step %q", firstNonEmptyStr(a.AfterTitle, a.Step.Title)))
+				what = tr(lang, "修订步骤「"+firstNonEmptyStr(a.AfterTitle, a.Step.Title)+"」的执行命令", fmt.Sprintf("Updated command for step %q", firstNonEmptyStr(a.AfterTitle, a.Step.Title)))
 			}
-			items = append(items, tr(lang, fmt.Sprintf("%s（%s，%s）：%s", what, a.By, stamp(a.At), a.Reason), fmt.Sprintf("%s (%s, %s): %s", what, a.By, stamp(a.At), a.Reason)))
+			actor := resolveReportSigner(a.By, meta, "actor", lang)
+			items = append(items, tr(lang, fmt.Sprintf("%s（%s，%s）：%s", what, actor, stamp(a.At), a.Reason), fmt.Sprintf("%s (%s, %s): %s", what, actor, stamp(a.At), a.Reason)))
 		}
 		b.list(items)
 	}
@@ -612,9 +769,9 @@ func (s *storeServer) record(b *docBuilder, level int, j storeJob, langOpt ...st
 		}
 	}
 	if len(loose) > 0 {
-		b.h(level, tr(lang, "现场解决的问题", "Issues Resolved On-Site"))
+		b.h(level, tr(lang, "实施过程问题处置记录", "Issues Resolved During Implementation"))
 		for _, r := range loose {
-			writeUpBlocksLang(b, "", r, lang)
+			writeUpBlocksLang(b, "", r, lang, meta)
 		}
 	}
 }
@@ -647,19 +804,20 @@ func (s *storeServer) buildDelivery(f clusterFacts) *clusterDoc {
 	if first.DeliveryMode == "imported" {
 		return s.buildImportedBaselineDoc(f, first)
 	}
+	ownerName := resolveReportSigner(first.Owner, f.Meta, "owner", lang)
 	d := &clusterDoc{ID: "delivery", Kind: "delivery", Title: tr(lang, "交付报告", "Delivery Report"), Subtitle: f.ID, Cluster: f.ID,
-		Cover: f.cover([2]string{tr(lang, "首次部署", "Initial Deploy"), day(first.Created)}, [2]string{tr(lang, "负责人", "Owner"), first.Owner})}
+		Cover: f.cover([2]string{tr(lang, "首次部署", "Initial Deploy"), day(first.Created)}, [2]string{tr(lang, "交付负责人", "Delivery Lead"), ownerName})}
 	b := &docBuilder{}
-	b.section(1, "summary", tr(lang, "1 概述", "1 Overview"), tr(lang, "这个集群是什么、为谁服务、怎么部署的、现在是什么状态。", "What this cluster is, what workload it serves, how it was deployed, and its current status."), true)
+	b.section(1, "summary", tr(lang, "1 概述", "1 Overview"), tr(lang, "阐述本集群的业务定位、服务对象、高可用部署架构及当前投产运行状态。", "Business role, served workloads, HA deployment architecture, and current operational status."), true)
 	b.h(1, tr(lang, "2 架构与拓扑", "2 Architecture & Topology"))
-	b.p(tr(lang, fmt.Sprintf("以下按平台保存的「%s」配置展示。现场完成情况以执行结果和交付负责人确认记录为准。", jobTitleLang(f.Current, lang)), fmt.Sprintf("Displayed below from the platform-saved %q specification. Actual on-site state follows execution records and owner sign-off.", jobTitleLang(f.Current, lang))))
+	b.p(tr(lang, fmt.Sprintf("本节呈现本次「%s」的标准架构拓扑与接入规范，实际运行状态详见后续实施验证与变更台账。", jobTitleLang(f.Current, lang)), fmt.Sprintf("Standard architecture topology and access specification for %q; verified operational status is recorded in the execution and change sections below.", jobTitleLang(f.Current, lang))))
 	topology(b, f.Plan, lang)
 	b.h(2, tr(lang, "2.1 访问入口", "2.1 Access Endpoints"))
 	if f.Plan != nil {
 		n := len(b.blocks)
 		entries(b, f.Plan, lang)
 		if len(b.blocks) == n {
-			b.p(tr(lang, "没有声明对外入口。", "No external endpoints declared."))
+			b.p(tr(lang, "本集群未配置对外独立访问入口。", "No external endpoints declared."))
 		}
 	}
 	b.h(1, tr(lang, "3 规格与版本", "3 Specification & Versions"))
@@ -672,8 +830,8 @@ func (s *storeServer) buildDelivery(f clusterFacts) *clusterDoc {
 	} else {
 		b.h(1, tr(lang, "4 首次部署记录", "4 Initial Deployment Record"))
 	}
-	b.p(tr(lang, fmt.Sprintf("%s 由 %s 生成交付材料。", stamp(first.Created), first.Owner), fmt.Sprintf("Generated on %s by %s.", stamp(first.Created), first.Owner)))
-	s.record(b, 2, first, lang)
+	b.p(tr(lang, fmt.Sprintf("交付基线生成时间：%s；编制/交付人：%s。", stamp(first.Created), ownerName), fmt.Sprintf("Baseline generated on %s by %s.", stamp(first.Created), ownerName)))
+	s.record(b, 2, first, lang, f.Meta)
 	b.h(1, tr(lang, "5 当前状态", "5 Current State"))
 	var devs []string
 	for _, j := range f.Jobs {
@@ -681,9 +839,9 @@ func (s *storeServer) buildDelivery(f clusterFacts) *clusterDoc {
 			devs = append(devs, jobTitleLang(j, lang)+tr(lang, "：", ": ")+j.OutcomeNote)
 		}
 	}
-	b.p(tr(lang, fmt.Sprintf("集群当前以「%s」为准：%s。", jobTitleLang(f.Current, lang), jobOutcomeNameLang(f.Current, lang)), fmt.Sprintf("Active baseline is %q: %s.", jobTitleLang(f.Current, lang), jobOutcomeNameLang(f.Current, lang))))
+	b.p(tr(lang, fmt.Sprintf("当前生效基线为「%s」，运行状态：%s。", jobTitleLang(f.Current, lang), jobOutcomeNameLang(f.Current, lang)), fmt.Sprintf("Active baseline is %q; status: %s.", jobTitleLang(f.Current, lang), jobOutcomeNameLang(f.Current, lang))))
 	if len(devs) > 0 {
-		b.p(tr(lang, "实际执行与原交付的出入（已计入当前状态）：", "On-site deviations from original delivery (accounted in current state):"))
+		b.p(tr(lang, "实施偏差汇总（已纳入当前运行基线）：", "On-site deviations from original delivery (accounted in current state):"))
 		b.list(devs)
 	}
 	if sops := s.listFinalizedRehearsals(f.ID); len(sops) > 0 {
@@ -691,14 +849,14 @@ func (s *storeServer) buildDelivery(f clusterFacts) *clusterDoc {
 		var rows [][]string
 		for _, rh := range sops {
 			statusText := tr(lang, "已定稿 · 待实施", "Finalized · Pending")
-			whoWhen := fmt.Sprintf("%s / %s", rh.Owner, stamp(rh.UpdatedAt))
+			whoWhen := fmt.Sprintf("%s / %s", resolveReportSigner(rh.Owner, f.Meta, "confirmer", lang), stamp(rh.UpdatedAt))
 			sumText := firstNonEmptyStr(rh.AppliedSummary, rh.ScopeSummary, "—")
 			if rh.Applied && !rh.Voided {
 				statusText = tr(lang, "已落地生效", "Applied in Prod")
-				whoWhen = fmt.Sprintf("%s / %s", firstNonEmptyStr(rh.AppliedBy, rh.Owner), stamp(firstNonEmptyStr(rh.AppliedAt, rh.UpdatedAt)))
+				whoWhen = fmt.Sprintf("%s / %s", resolveReportSigner(firstNonEmptyStr(rh.AppliedBy, rh.Owner), f.Meta, "confirmer", lang), stamp(firstNonEmptyStr(rh.AppliedAt, rh.UpdatedAt)))
 			} else if rh.Voided {
 				statusText = tr(lang, "已作废", "Voided")
-				whoWhen = fmt.Sprintf("%s / %s", firstNonEmptyStr(rh.VoidedBy, rh.Owner), stamp(firstNonEmptyStr(rh.VoidedAt, rh.UpdatedAt)))
+				whoWhen = fmt.Sprintf("%s / %s", resolveReportSigner(firstNonEmptyStr(rh.VoidedBy, rh.Owner), f.Meta, "confirmer", lang), stamp(firstNonEmptyStr(rh.VoidedAt, rh.UpdatedAt)))
 				sumText = firstNonEmptyStr(rh.VoidReason, sumText)
 			}
 			rows = append(rows, []string{rh.Title, statusText, truncRunes(sumText, 120), whoWhen, "sop-" + rh.ID})
@@ -708,7 +866,7 @@ func (s *storeServer) buildDelivery(f clusterFacts) *clusterDoc {
 			tr(lang, "生产状态", "Prod Status"),
 			tr(lang, "生效变更摘要", "Effective Summary"),
 			tr(lang, "确认人 / 时间", "Confirmed By / At"),
-			tr(lang, "文档编号", "Document ID"),
+			tr(lang, "变更编号", "Change Ref"),
 		}, rows)
 		if eff := effectiveAppliedChanges(s.listAppliedRehearsals(f.ID)); len(eff) > 0 {
 			b.h(2, tr(lang, "5.2 相对初始基线的当前最终生效参数与配置变更", "5.2 Effective Config & Parameter Deltas"))
@@ -728,8 +886,8 @@ func (s *storeServer) buildDelivery(f clusterFacts) *clusterDoc {
 			}, deltaRows)
 		}
 	}
-	b.section(1, "risks", tr(lang, "6 风险与遗留问题", "6 Risks & Open Issues"), tr(lang, "仍然存在的风险、没有解决的问题和建议，例如执行中的偏差、单点、后续容量与监控关注项。", "Remaining risks, unresolved issues, and follow-up recommendations covering deviations, SPOFs, capacity, and monitoring."), true)
-	b.section(1, "acceptance", tr(lang, "7 验收结论", "7 Acceptance Conclusion"), tr(lang, "根据执行记录和测试结果给出结论；有失败或没执行的步骤要如实写明。", "Final acceptance verdict grounded in execution and verification logs; state any failed or unexecuted steps explicitly."), true)
+	b.section(1, "risks", tr(lang, "6 风险与遗留问题", "6 Risks & Open Issues"), tr(lang, "客观呈现当前存在的架构隐患、实施偏差、安全合规及备份监控短板，并给出可落地的分级治理建议。", "Objective assessment of architecture risks, deviations, security compliance, and backup/monitoring gaps with actionable recommendations."), true)
+	b.section(1, "acceptance", tr(lang, "7 验收结论", "7 Acceptance Conclusion"), tr(lang, "基于实际部署验证、功能测试及安全基线结果，形成客观、可签字的最终交付验收结论。", "Final sign-off acceptance conclusion grounded in deployment verification, testing, and security baseline checks."), true)
 	d.Blocks = b.blocks
 	return d
 }
@@ -741,6 +899,7 @@ func (s *storeServer) buildImportedBaselineDoc(f clusterFacts, first storeJob) *
 	if dep != nil {
 		meta = dep.Imported
 	}
+	ownerName := resolveReportSigner(first.Owner, f.Meta, "owner", lang)
 	d := &clusterDoc{
 		ID:       "delivery",
 		Kind:     "delivery",
@@ -748,15 +907,15 @@ func (s *storeServer) buildImportedBaselineDoc(f clusterFacts, first storeJob) *
 		Subtitle: f.ID,
 		Cluster:  f.ID,
 		Cover: f.cover(
-			[2]string{tr(lang, "纳管来源", "Onboarding Source"), tr(lang, "存量纳管（非平台首次部署）", "Brownfield Imported")},
+			[2]string{tr(lang, "纳管来源", "Onboarding Source"), tr(lang, "存量生产集群纳管", "Brownfield Production Cluster")},
 			[2]string{tr(lang, "建档时间", "Onboarded"), day(first.Created)},
-			[2]string{tr(lang, "负责人", "Owner"), first.Owner},
+			[2]string{tr(lang, "负责人", "Owner"), ownerName},
 		),
 	}
 	b := &docBuilder{}
-	b.section(1, "summary", tr(lang, "1 集群概述", "1 Cluster Overview"), tr(lang, "描述该存量集群承载的业务系统、核心高可用架构、责任团队与日常运维边界。", "Business workload served by this brownfield cluster, HA architecture, owning team, and day-2 operational boundaries."), true)
+	b.section(1, "summary", tr(lang, "1 集群概述", "1 Cluster Overview"), tr(lang, "概述本集群承载的核心业务、高可用架构形态、关键组件版本及运维管理边界。", "Overview of core workloads, HA architecture, component versions, and day-2 operational boundaries."), true)
 	b.h(1, tr(lang, "2 架构与拓扑", "2 Architecture & Topology"))
-	b.p(tr(lang, "以下基线由存量纳管档案记录，并可随现场只读探针或人工校对持续更新。", "Baseline recorded during brownfield onboarding; kept current via read-only probes or manual baseline updates."))
+	b.p(tr(lang, "本节汇总该生产集群的节点拓扑、访问入口与伴生组件栈配置基线。", "Node topology, access endpoints, and companion component stack baseline for this production cluster."))
 	topology(b, f.Plan, lang)
 	b.h(2, tr(lang, "2.1 访问入口", "2.1 Access Endpoints"))
 	if f.Plan != nil {
@@ -769,11 +928,11 @@ func (s *storeServer) buildImportedBaselineDoc(f clusterFacts, first storeJob) *
 	if meta != nil && len(meta.Companions) > 0 {
 		b.h(2, tr(lang, "2.2 伴生与支撑组件栈", "2.2 Companion & Supporting Stack"))
 		kindLabel := map[string]string{
-			"ha_manager": tr(lang, "高可用管理", "HA Manager"),
-			"dcs":        tr(lang, "分布式协调 (DCS)", "Consensus / DCS"),
-			"proxy":      tr(lang, "代理与负载均衡", "Proxy / LB"),
-			"vip":        tr(lang, "虚拟 IP (VRRP)", "VIP / VRRP"),
-			"pooler":     tr(lang, "连接池", "Connection Pooler"),
+			"ha_manager":   tr(lang, "高可用管理", "HA Manager"),
+			"dcs":          tr(lang, "分布式协调 (DCS)", "Consensus / DCS"),
+			"proxy":        tr(lang, "代理与负载均衡", "Proxy / LB"),
+			"vip":          tr(lang, "虚拟 IP (VRRP)", "VIP / VRRP"),
+			"pooler":       tr(lang, "连接池", "Connection Pooler"),
 			"backup":       tr(lang, "备份工具", "Backup"),
 			"monitoring":   tr(lang, "监控采集", "Monitoring"),
 			"os_component": tr(lang, "OS 组件", "OS Component"),
@@ -805,7 +964,7 @@ func (s *storeServer) buildImportedBaselineDoc(f clusterFacts, first storeJob) *
 				firstNonEmptyStr(cm.Version, "—"),
 				firstNonEmptyStr(strings.Join(portStrs, ", "), "—"),
 				firstNonEmptyStr(hostSummary, "—"),
-				firstNonEmptyStr(cm.Evidence, strings.Join(cm.ServiceUnits, ", "), "—"),
+				formatCompanionEvidence(cm, lang),
 			})
 		}
 		b.table([]string{
@@ -814,7 +973,7 @@ func (s *storeServer) buildImportedBaselineDoc(f clusterFacts, first storeJob) *
 			tr(lang, "版本", "Version"),
 			tr(lang, "端口", "Ports"),
 			tr(lang, "部署节点", "Hosts"),
-			tr(lang, "识别依据", "Evidence"),
+			tr(lang, "运行服务 / 核验来源", "Service / Verification"),
 		}, compRows)
 	}
 	b.h(1, tr(lang, "3 运行环境与路径基线", "3 Runtime Environment & Path Baseline"))
@@ -833,11 +992,11 @@ func (s *storeServer) buildImportedBaselineDoc(f clusterFacts, first storeJob) *
 			"other":   tr(lang, "其他部署形态", "Other"),
 		}
 		srcMap := map[string]string{
-			"probe":  tr(lang, "只读探针脚本采集", "Read-only probe script"),
-			"ai_doc": tr(lang, "文档 / 配置 / 截图识别", "Document / config / screenshot"),
-			"manual": tr(lang, "手工录入建档", "Manual entry"),
+			"probe":  tr(lang, "只读探针核验采集", "Read-only probe verification"),
+			"ai_doc": tr(lang, "文档 / 配置资料解析", "Document / config parsing"),
+			"manual": tr(lang, "人工校对建档", "Manual verification"),
 		}
-		addRow(tr(lang, "纳管录入方式", "Onboarding Method"), firstNonEmptyStr(srcMap[meta.SourceKind], meta.SourceKind))
+		addRow(tr(lang, "基线采集方式", "Baseline Source"), firstNonEmptyStr(srcMap[meta.SourceKind], meta.SourceKind))
 		addRow(tr(lang, "部署形态", "Deploy Method"), firstNonEmptyStr(deployMap[meta.DeployMethod], meta.DeployMethod))
 		addRow(tr(lang, "精确版本", "Exact Version"), firstNonEmptyStr(meta.ExactVersion, f.Current.Version))
 		addRow(tr(lang, "操作系统", "Operating System"), firstNonEmptyStr(meta.OSDetail, dep.Platform))
@@ -847,35 +1006,36 @@ func (s *storeServer) buildImportedBaselineDoc(f clusterFacts, first storeJob) *
 		addRow(tr(lang, "数据目录", "Data Directories"), strings.Join(meta.DataDirs, ", "))
 		addRow(tr(lang, "日志目录", "Log Directories"), strings.Join(meta.LogDirs, ", "))
 		if meta.LastProbedAt != "" {
-			addRow(tr(lang, "最近探针采集", "Last Probed"), stamp(meta.LastProbedAt))
+			addRow(tr(lang, "最近状态核验", "Last Verified"), stamp(meta.LastProbedAt))
 		}
 		if meta.BaselineUpdatedAt != "" {
-			addRow(tr(lang, "最近基线更新", "Baseline Updated"), fmt.Sprintf("%s (%s)", stamp(meta.BaselineUpdatedAt), meta.BaselineUpdatedBy))
+			updater := resolveReportSigner(meta.BaselineUpdatedBy, f.Meta, "actor", lang)
+			addRow(tr(lang, "最近基线修订", "Baseline Updated"), fmt.Sprintf("%s（%s）", stamp(meta.BaselineUpdatedAt), updater))
 		}
 		if len(rows) > 0 {
-			b.table([]string{tr(lang, "基线项", "Baseline Field"), tr(lang, "登记值", "Recorded Value")}, rows)
+			b.table([]string{tr(lang, "基线项", "Baseline Field"), tr(lang, "配置基线", "Recorded Value")}, rows)
 		}
 		if meta.Notes != "" {
-			b.note(tr(lang, "运维备注：", "Operations Notes: ") + meta.Notes)
+			b.note(tr(lang, "架构补充说明：", "Architecture Notes: ") + meta.Notes)
 		}
 	}
 	b.h(2, tr(lang, "3.1 关键运行参数", "3.1 Key Parameters"))
 	paramsTable(b, f.Plan, lang)
-	b.h(2, tr(lang, "3.2 采集到的软件包清单", "3.2 Collected Packages"))
+	b.h(2, tr(lang, "3.2 软件包清单", "3.2 Installed Packages"))
 	s.packagesTable(b, f.Current.ID, lang)
 	if sops := s.listFinalizedRehearsals(f.ID); len(sops) > 0 {
-		b.h(1, tr(lang, "4 纳管后变更演练与生产落地台账", "4 Post-Onboarding Change Ledger"))
+		b.h(1, tr(lang, "4 纳管后变更台账与生产落地记录", "4 Post-Onboarding Change Ledger"))
 		var rows [][]string
 		for _, rh := range sops {
 			statusText := tr(lang, "已定稿 · 待实施", "Finalized · Pending")
-			whoWhen := fmt.Sprintf("%s / %s", rh.Owner, stamp(rh.UpdatedAt))
+			whoWhen := fmt.Sprintf("%s / %s", resolveReportSigner(rh.Owner, f.Meta, "confirmer", lang), stamp(rh.UpdatedAt))
 			sumText := firstNonEmptyStr(rh.AppliedSummary, rh.ScopeSummary, "—")
 			if rh.Applied && !rh.Voided {
 				statusText = tr(lang, "已落地生效", "Applied in Prod")
-				whoWhen = fmt.Sprintf("%s / %s", firstNonEmptyStr(rh.AppliedBy, rh.Owner), stamp(firstNonEmptyStr(rh.AppliedAt, rh.UpdatedAt)))
+				whoWhen = fmt.Sprintf("%s / %s", resolveReportSigner(firstNonEmptyStr(rh.AppliedBy, rh.Owner), f.Meta, "confirmer", lang), stamp(firstNonEmptyStr(rh.AppliedAt, rh.UpdatedAt)))
 			} else if rh.Voided {
 				statusText = tr(lang, "已作废", "Voided")
-				whoWhen = fmt.Sprintf("%s / %s", firstNonEmptyStr(rh.VoidedBy, rh.Owner), stamp(firstNonEmptyStr(rh.VoidedAt, rh.UpdatedAt)))
+				whoWhen = fmt.Sprintf("%s / %s", resolveReportSigner(firstNonEmptyStr(rh.VoidedBy, rh.Owner), f.Meta, "confirmer", lang), stamp(firstNonEmptyStr(rh.VoidedAt, rh.UpdatedAt)))
 				sumText = firstNonEmptyStr(rh.VoidReason, sumText)
 			}
 			rows = append(rows, []string{rh.Title, statusText, truncRunes(sumText, 120), whoWhen, "sop-" + rh.ID})
@@ -885,7 +1045,7 @@ func (s *storeServer) buildImportedBaselineDoc(f clusterFacts, first storeJob) *
 			tr(lang, "生产状态", "Prod Status"),
 			tr(lang, "生效变更摘要", "Effective Summary"),
 			tr(lang, "确认人 / 时间", "Confirmed By / At"),
-			tr(lang, "文档编号", "Document ID"),
+			tr(lang, "变更编号", "Change Ref"),
 		}, rows)
 		if eff := effectiveAppliedChanges(s.listAppliedRehearsals(f.ID)); len(eff) > 0 {
 			b.h(2, tr(lang, "4.1 相对纳管基线的当前生效变更", "4.1 Active Deltas vs. Onboarded Baseline"))
@@ -905,7 +1065,7 @@ func (s *storeServer) buildImportedBaselineDoc(f clusterFacts, first storeJob) *
 			}, deltaRows)
 		}
 	}
-	b.section(1, "risks", tr(lang, "5 风险项与后续治理建议", "5 Risks & Governance Notes"), tr(lang, "记录该存量集群已知的单点风险、版本升级窗口、备份核验与监控告警待补齐项。", "Known SPOFs, upgrade windows, backup verification gaps, and monitoring action items."), true)
+	b.section(1, "risks", tr(lang, "5 风险评估与后续治理建议", "5 Risk Assessment & Governance Recommendations"), tr(lang, "基于当前集群架构拓扑、版本基线、备份机制与安全审计结果，提炼核心风险分级与可落地的后续治理建议。", "Executive risk assessment and actionable governance recommendations covering HA topology, versioning, backup recovery, monitoring, and security."), true)
 	d.Blocks = b.blocks
 	return d
 }
@@ -913,11 +1073,11 @@ func (s *storeServer) buildImportedBaselineDoc(f clusterFacts, first storeJob) *
 func (s *storeServer) buildKT(f clusterFacts) *clusterDoc {
 	lang := f.Lang
 	d := &clusterDoc{ID: "kt", Kind: "kt", Title: tr(lang, "运维交接文档", "Operations Handover"), Subtitle: f.ID, Cluster: f.ID,
-		Cover: f.cover([2]string{tr(lang, "依据", "Baseline"), tr(lang, jobTitleLang(f.Current, lang)+"的配置与执行记录", jobTitleLang(f.Current, lang)+" configuration & execution record")})}
+		Cover: f.cover([2]string{tr(lang, "基线来源", "Baseline"), tr(lang, jobTitleLang(f.Current, lang)+"的配置与验收基线", jobTitleLang(f.Current, lang)+" configuration & baseline")})}
 	b := &docBuilder{}
 	b.h(1, tr(lang, "1 架构", "1 Architecture"))
 	topology(b, f.Plan, lang)
-	b.section(2, "arch", tr(lang, "1.1 架构说明", "1.1 Architecture Notes"), tr(lang, "面向运维人员：各节点做什么，数据怎么复制，高可用怎么工作，坏了一台会发生什么。", "For operations teams: node roles, data replication, HA failover mechanics, and single-node failure impact."), true)
+	b.section(2, "arch", tr(lang, "1.1 架构说明", "1.1 Architecture Notes"), tr(lang, "阐述集群节点分工、主从数据复制机制、高可用故障切换流程及单节点故障影响评估。", "Node responsibilities, data replication flow, HA failover mechanics, and single-node failure impact."), true)
 	b.h(1, tr(lang, "2 访问与位置", "2 Access & Locations"))
 	if f.Plan != nil {
 		entries(b, f.Plan, lang)
@@ -929,11 +1089,11 @@ func (s *storeServer) buildKT(f clusterFacts) *clusterDoc {
 			}
 		}
 		b.h(2, tr(lang, "2.1 端口", "2.1 Ports"))
-		b.table([]string{tr(lang, "实例", "Instance"), tr(lang, "用途", "Purpose"), tr(lang, "端口", "Port"), tr(lang, "机器", "Hosts")}, rows)
-		b.h(2, tr(lang, "2.2 平台生成的文件", "2.2 Platform-Generated Files"))
+		b.table([]string{tr(lang, "实例", "Instance"), tr(lang, "用途", "Purpose"), tr(lang, "端口", "Port"), tr(lang, "主机节点", "Hosts")}, rows)
+		b.h(2, tr(lang, "2.2 交付资产与凭据位置", "2.2 Deployment Assets & Credentials"))
 		b.list([]string{
-			tr(lang, "Ansible 项目在执行机 "+f.Plan.Controller+" 的 "+f.Plan.RuntimeRoot()+"/projects/"+f.Plan.ProjectName()+" 下。", "Ansible project resides on controller "+f.Plan.Controller+" under "+f.Plan.RuntimeRoot()+"/projects/"+f.Plan.ProjectName()+"."),
-			tr(lang, "密码保存在该项目的 secrets/ 目录（只有 root 可读），不在本文档里；交接时当面确认谁有权查看。", "Credentials are stored in the project's secrets/ directory (root-only permissions) and omitted from this document; verify authorized access during handover."),
+			tr(lang, "自动化部署工程位于控制节点 "+f.Plan.Controller+" 的 "+f.Plan.RuntimeRoot()+"/projects/"+f.Plan.ProjectName()+" 目录。", "Automation project resides on controller "+f.Plan.Controller+" under "+f.Plan.RuntimeRoot()+"/projects/"+f.Plan.ProjectName()+"."),
+			tr(lang, "敏感凭据存放于项目 secrets/ 受控目录（仅限 root 权限访问），本文档已做脱敏处理，交接时请同步完成访问权限移交。", "Credentials are stored in the project's secrets/ directory (root-only permissions) and redacted from this document; verify authorized access during handover."),
 		})
 	}
 	ops := 0
@@ -954,11 +1114,11 @@ func (s *storeServer) buildKT(f clusterFacts) *clusterDoc {
 				for _, c := range o.Checks {
 					b.h(3, c.Title)
 					if c.Hosts != "" {
-						b.p(tr(lang, "在"+c.Hosts+"上执行：", "Run on "+c.Hosts+":"))
+						b.p(tr(lang, "执行节点："+c.Hosts, "Run on "+c.Hosts+":"))
 					}
 					b.code(c.Cmd)
 					if c.Expect != "" {
-						b.p(tr(lang, "正常："+c.Expect, "Expected: "+c.Expect))
+						b.p(tr(lang, "正常判据："+c.Expect, "Expected: "+c.Expect))
 					}
 				}
 			}
@@ -993,16 +1153,13 @@ func (s *storeServer) buildKT(f clusterFacts) *clusterDoc {
 			}
 		}
 	}
-	if ops == 0 {
-		b.note(tr(lang, "组件没有提供运维知识。可以在组件工作台为组件补上 operations，或让 AI 在下一节起草。", "Component does not declare operations runbook metadata. Add operations in Component Workbench or have AI draft the notes below."))
-	}
 	n := 3 + ops
-	b.section(1, "specific", fmt.Sprintf("%d %s", n, tr(lang, "这个集群的注意事项", "Cluster-Specific Notes")), tr(lang, "结合实际拓扑、版本、经历过的变更和执行偏差，补充上面的通用内容没有覆盖、只适用于这个集群的注意点。", "Add cluster-specific caveats not covered above, accounting for topology, versions, changes, and deviations."), true)
-	b.h(1, fmt.Sprintf("%d %s", n+1, tr(lang, "变更须知", "Change Guidelines")))
+	b.section(1, "specific", fmt.Sprintf("%d %s", n, tr(lang, "集群专项运维注意事项", "Cluster-Specific Operational Notes")), tr(lang, "结合本集群拓扑、组件版本、历史变更与环境特性，明确日常运维红线与专项操作注意事项。", "Cluster-specific operational guardrails and caveats covering topology, versions, changes, and deviations."), true)
+	b.h(1, fmt.Sprintf("%d %s", n+1, tr(lang, "变更管理规范", "Change Governance Guidelines")))
 	b.list([]string{
-		tr(lang, "生产集群后续的升级、扩容、缩容与关键参数变更，应先核实现场真实主从角色与配置现状，严禁直接盲跑首次部署剧本覆盖运行中的集群。", "For production upgrades, scaling, or parameter changes, always verify live primary/replica roles and config drift first; never blindly re-run initial deployment playbooks over live clusters."),
-		tr(lang, "启用平台 AI 后，可在该集群的「变更演练」工作台生成 100% 只读采集探针，并在测试环境逐步验证命令与回退预案，定稿输出《生产变更实施方案》。", "With platform AI enabled, generate a 100% read-only discovery probe in the Change Rehearsal workspace, validate steps and rollback in staging, and finalize a Production Change SOP."),
-		tr(lang, "首次部署执行中若实际做法与手册不同，确认结果时选择「有偏差」并写明差异。", "If actual initial deployment diverged from the runbook, record 'Completed with Deviations' when confirming outcome and document the differences."),
+		tr(lang, "生产环境执行版本升级、节点扩缩容及核心参数调整前，须先核实现场实时主从角色与配置现状，严禁直接覆盖执行初始部署脚本。", "Before production upgrades, scaling, or parameter changes, always verify live primary/replica roles and config drift first; never blindly re-run initial deployment scripts over live clusters."),
+		tr(lang, "所有生产变更应先在测试或预发环境完成演练验证、确认回退预案并定稿《生产变更实施方案》后再行实施。", "Validate all production changes and rollback procedures in a non-production environment and finalize a Production Change SOP prior to execution."),
+		tr(lang, "变更实施后若实际配置与初始基线存在差异，应及时同步更新集群配置台账与交接档案，确保文档与线上运行状态一致。", "After execution, reconcile any configuration deviations back into the cluster baseline ledger and operational handover records."),
 	})
 	var devs []string
 	for _, j := range f.Jobs {
@@ -1011,10 +1168,10 @@ func (s *storeServer) buildKT(f clusterFacts) *clusterDoc {
 		}
 	}
 	if len(devs) > 0 {
-		b.p(tr(lang, "已知的执行偏差：", "Known execution deviations:"))
+		b.p(tr(lang, "已知实施偏差：", "Known execution deviations:"))
 		b.list(devs)
 	}
-	b.section(1, "contacts", fmt.Sprintf("%d %s", n+2, tr(lang, "联系人与升级路径", "Contacts & Escalation Path")), tr(lang, "运维联系人、值班电话、遇到问题时逐级找谁。", "On-call contacts, phone numbers, and escalation chain when issues arise."), false)
+	b.section(1, "contacts", fmt.Sprintf("%d %s", n+2, tr(lang, "运维联系人与升级路径", "Contacts & Escalation Path")), tr(lang, "列明集群运维责任人、值班联络方式及故障逐级升级路径。", "On-call contacts, phone numbers, and escalation chain when issues arise."), false)
 	d.Blocks = b.blocks
 	return d
 }
@@ -1022,30 +1179,30 @@ func (s *storeServer) buildKT(f clusterFacts) *clusterDoc {
 func (s *storeServer) buildRCA(f clusterFacts, j storeJob) *clusterDoc {
 	lang := f.Lang
 	d := &clusterDoc{ID: "rca-" + j.ID, Kind: "rca", Title: tr(lang, "根因分析报告", "Root Cause Analysis"), Subtitle: jobTitleLang(j, lang), Cluster: f.ID, Job: j.ID,
-		Cover: f.cover([2]string{tr(lang, "交付", "Delivery"), jobTitleLang(j, lang)}, [2]string{tr(lang, "结果", "Outcome"), jobOutcomeNameLang(j, lang)})}
+		Cover: f.cover([2]string{tr(lang, "关联交付", "Delivery"), jobTitleLang(j, lang)}, [2]string{tr(lang, "执行结果", "Outcome"), jobOutcomeNameLang(j, lang)})}
 	b := &docBuilder{}
 	steps, prog := s.execRecord(j.ID)
 	n := 0
 	num := func(t string) string { n++; return fmt.Sprintf("%d %s", n, t) }
-	b.section(1, "symptom", num(tr(lang, "现象", "Symptoms")), tr(lang, "出了什么问题，在哪一步、什么时间被发现。", "What went wrong, at which step, and when it was observed."), true)
-	b.section(1, "impact", num(tr(lang, "影响范围", "Impact Scope")), tr(lang, "影响了哪些机器、服务和业务，持续多久。", "Affected hosts, services, workloads, and total duration."), true)
-	b.h(1, num(tr(lang, "时间线", "Timeline")))
+	b.section(1, "symptom", num(tr(lang, "故障现象", "Symptoms")), tr(lang, "简明陈述异常现象、发现时间、触发环节及核心报错信息。", "Concise statement of observed symptoms, detection timestamp, step, and key error."), true)
+	b.section(1, "impact", num(tr(lang, "影响范围", "Impact Scope")), tr(lang, "明确受影响的主机节点、服务组件、业务范围及持续时长。", "Affected hosts, services, workloads, and total duration."), true)
+	b.h(1, num(tr(lang, "事件时间线", "Timeline")))
 	var rows [][]string
 	for _, e := range prog.Events {
 		st := stepStateLabel(lang, e.State)
 		if e.State == "" {
 			st = tr(lang, "清除记录", "Cleared")
 		}
-		rows = append(rows, []string{stamp(e.At), e.By, e.Title, st})
+		rows = append(rows, []string{stamp(e.At), resolveReportSigner(e.By, f.Meta, "actor", lang), e.Title, st})
 	}
 	if j.Marked != "" {
-		rows = append(rows, []string{stamp(j.Marked), j.MarkedBy, tr(lang, "确认结果", "Confirmed Outcome"), jobOutcomeNameLang(j, lang)})
+		rows = append(rows, []string{stamp(j.Marked), resolveReportSigner(j.MarkedBy, f.Meta, "confirmer", lang), tr(lang, "确认结果", "Confirmed Outcome"), jobOutcomeNameLang(j, lang)})
 	}
 	if len(rows) == 0 {
-		b.p(tr(lang, "现场没有在平台上记录。", "No on-site timeline recorded on platform."))
+		b.p(tr(lang, "暂无平台在线采集的操作时间线记录。", "No platform execution timeline recorded."))
 	}
-	b.table([]string{tr(lang, "时间", "Time"), tr(lang, "人", "Actor"), tr(lang, "步骤", "Step"), tr(lang, "记录", "State")}, rows)
-	b.h(1, num(tr(lang, "失败的步骤", "Failed Steps")))
+	b.table([]string{tr(lang, "时间", "Time"), tr(lang, "操作人", "Actor"), tr(lang, "步骤", "Step"), tr(lang, "状态", "State")}, rows)
+	b.h(1, num(tr(lang, "异常步骤与日志", "Failed Steps")))
 	failed := 0
 	for _, st := range steps {
 		if st.State != "failed" {
@@ -1053,7 +1210,7 @@ func (s *storeServer) buildRCA(f clusterFacts, j storeJob) *clusterDoc {
 		}
 		failed++
 		b.h(2, st.Title)
-		b.p(tr(lang, fmt.Sprintf("%s 由 %s 记为失败。%s", stamp(st.At), st.By, st.Note), fmt.Sprintf("Marked failed on %s by %s. %s", stamp(st.At), st.By, st.Note)))
+		b.p(tr(lang, fmt.Sprintf("记录时间：%s；操作人：%s。%s", stamp(st.At), resolveReportSigner(st.By, f.Meta, "actor", lang), st.Note), fmt.Sprintf("Marked failed on %s by %s. %s", stamp(st.At), resolveReportSigner(st.By, f.Meta, "actor", lang), st.Note)))
 		log := st.Log
 		if len(log) > 4000 {
 			log = "...\n" + log[len(log)-4000:]
@@ -1061,20 +1218,20 @@ func (s *storeServer) buildRCA(f clusterFacts, j storeJob) *clusterDoc {
 		b.code(log)
 	}
 	if failed == 0 {
-		b.p(tr(lang, "执行记录里没有标为失败的步骤。", "No step was marked as failed in the execution log."))
+		b.p(tr(lang, "执行记录中未标记失败步骤。", "No step was marked as failed in the execution log."))
 	}
 	if j.OutcomeNote != "" {
-		b.note(tr(lang, "现场说明：", "On-site notes: ") + j.OutcomeNote)
+		b.note(tr(lang, "实施说明：", "Execution notes: ") + j.OutcomeNote)
 	}
 	if len(prog.Reports) > 0 || len(s.loadAmendments(j.ID)) > 0 {
-		b.h(1, num(tr(lang, "现场的排查", "On-Site Investigation")))
+		b.h(1, num(tr(lang, "现场排查记录", "On-Site Investigation")))
 		for _, r := range prog.Reports {
 			b.p("**" + firstNonEmptyStr(r.Title, r.Symptom) + "**")
 			b.list(nonEmpty(
 				tr(lang, "现象：", "Symptom: ")+r.Symptom,
 				tr(lang, "证据：", "Evidence: ")+r.Evidence,
 				tr(lang, "原因：", "Cause: ")+r.Cause,
-				tr(lang, "处理：", "Resolution: ")+r.Fix,
+				tr(lang, "处置：", "Resolution: ")+r.Fix,
 			))
 		}
 		var items []string
@@ -1082,13 +1239,13 @@ func (s *storeServer) buildRCA(f clusterFacts, j storeJob) *clusterDoc {
 			items = append(items, fmt.Sprintf("%q: %s", a.Step.Title, a.Reason))
 		}
 		if len(items) > 0 {
-			b.p(tr(lang, "执行中采纳的手册修改：", "Runbook amendments adopted during execution:"))
+			b.p(tr(lang, "实施过程采纳的手册修订：", "Runbook amendments adopted during execution:"))
 			b.list(items)
 		}
 	}
-	b.section(1, "cause", num(tr(lang, "根因分析", "Root Cause Analysis")), tr(lang, "直接原因和根本原因，说明依据；判断不了的写明还需要什么信息。", "Immediate and underlying causes with supporting evidence; note missing data if inconclusive."), true)
-	b.section(1, "handling", num(tr(lang, "处理过程", "Remediation & Recovery")), tr(lang, "做了什么、恢复到了什么状态。", "Actions taken and the verified recovery state."), true)
-	b.section(1, "improve", num(tr(lang, "改进建议", "Corrective Actions")), tr(lang, "避免再次发生要改什么：组件、手册、流程、监控。", "Preventive improvements across components, runbooks, workflows, and monitoring."), true)
+	b.section(1, "cause", num(tr(lang, "根因分析", "Root Cause Analysis")), tr(lang, "基于现场证据区分直接诱因与底层根因，给出明确的技术定论。", "Immediate and underlying causes supported by technical evidence."), true)
+	b.section(1, "handling", num(tr(lang, "处置与恢复结果", "Remediation & Recovery")), tr(lang, "总结已执行的止损与修复操作，以及业务与集群最终验证恢复状态。", "Actions taken and the verified recovery state."), true)
+	b.section(1, "improve", num(tr(lang, "长效改进措施", "Corrective Actions")), tr(lang, "从架构加固、标准化手册、变更流程与监控告警等维度提出可落地预防措施。", "Preventive improvements across architecture, runbooks, change workflow, and monitoring."), true)
 	d.Blocks = b.blocks
 	return d
 }
@@ -1098,25 +1255,25 @@ func (s *storeServer) buildRCA(f clusterFacts, j storeJob) *clusterDoc {
 func (s *storeServer) buildIncident(f clusterFacts, e rcaEntry) *clusterDoc {
 	lang := f.Lang
 	d := &clusterDoc{ID: e.ID, Kind: "rca", Title: tr(lang, "根因分析报告", "Root Cause Analysis"), Subtitle: firstNonEmptyStr(e.Title, tr(lang, "集群故障", "Cluster Incident")), Cluster: f.ID,
-		Cover: f.cover([2]string{tr(lang, "事件", "Incident"), firstNonEmptyStr(e.Title, tr(lang, "集群故障", "Cluster Incident"))}, [2]string{tr(lang, "发起", "Opened"), stamp(e.Created) + tr(lang, "，", ", ") + e.By})}
+		Cover: f.cover([2]string{tr(lang, "事件主题", "Incident"), firstNonEmptyStr(e.Title, tr(lang, "集群故障", "Cluster Incident"))}, [2]string{tr(lang, "发起人 / 时间", "Opened By / At"), resolveReportSigner(e.By, f.Meta, "owner", lang) + " / " + stamp(e.Created)})}
 	b := &docBuilder{}
 	n := 0
 	num := func(t string) string { n++; return fmt.Sprintf("%d %s", n, t) }
-	b.section(1, "symptom", num(tr(lang, "现象", "Symptoms")), tr(lang, "出了什么问题，什么时间、怎么发现的，报错或告警是什么。", "What failed, when and how it was detected, and the exact error or alert."), true)
-	b.section(1, "impact", num(tr(lang, "影响范围", "Impact Scope")), tr(lang, "影响了哪些机器、服务和业务，持续多久。", "Affected hosts, services, workloads, and total duration."), true)
-	b.section(1, "timeline", num(tr(lang, "时间线", "Timeline")), tr(lang, "按时间写清楚发生了什么、谁做了什么。", "Chronological log of events and operator actions."), true)
-	b.h(1, num(tr(lang, "出事时的集群", "Cluster Baseline at Incident")))
-	b.p(tr(lang, fmt.Sprintf("平台记录的集群以「%s」为准（%s）。", jobTitleLang(f.Current, lang), jobOutcomeNameLang(f.Current, lang)), fmt.Sprintf("Recorded cluster baseline is %q (%s).", jobTitleLang(f.Current, lang), jobOutcomeNameLang(f.Current, lang))))
+	b.section(1, "symptom", num(tr(lang, "故障现象", "Symptoms")), tr(lang, "简明陈述异常现象、发现时间、触发告警及关键报错信息。", "Observed failure, detection time, alert, and key error."), true)
+	b.section(1, "impact", num(tr(lang, "影响范围", "Impact Scope")), tr(lang, "明确受影响的节点、服务组件、关联业务及持续时长。", "Affected hosts, services, workloads, and total duration."), true)
+	b.section(1, "timeline", num(tr(lang, "事件时间线", "Timeline")), tr(lang, "按时间顺序梳理关键事件节点与处置动作。", "Chronological summary of key events and operator actions."), true)
+	b.h(1, num(tr(lang, "事发时集群基线", "Cluster Baseline at Incident")))
+	b.p(tr(lang, fmt.Sprintf("当前生效基线为「%s」（状态：%s）。", jobTitleLang(f.Current, lang), jobOutcomeNameLang(f.Current, lang)), fmt.Sprintf("Active cluster baseline is %q (%s).", jobTitleLang(f.Current, lang), jobOutcomeNameLang(f.Current, lang))))
 	topology(b, f.Plan, lang)
 	var rows [][]string
 	for _, j := range f.Jobs {
 		rows = append(rows, []string{jobTitleLang(j, lang), stamp(j.Created), jobOutcomeNameLang(j, lang), j.OutcomeNote})
 	}
-	b.h(2, tr(lang, "经历过的交付", "Delivery History"))
-	b.table([]string{tr(lang, "交付", "Delivery"), tr(lang, "生成", "Created"), tr(lang, "结果", "Outcome"), tr(lang, "说明", "Notes")}, rows)
-	b.section(1, "cause", num(tr(lang, "根因分析", "Root Cause Analysis")), tr(lang, "直接原因和根本原因，说明依据；判断不了的写明还需要什么信息。", "Immediate and underlying causes with evidence; note missing data if inconclusive."), true)
-	b.section(1, "handling", num(tr(lang, "处理过程", "Remediation & Recovery")), tr(lang, "做了什么、恢复到了什么状态。", "Actions taken and the verified recovery state."), true)
-	b.section(1, "improve", num(tr(lang, "改进建议", "Corrective Actions")), tr(lang, "避免再次发生要改什么：组件、手册、流程、监控；需要后续变更集群的，写明建议通过变更演练或调整哪些参数。", "Preventive actions across components, runbooks, process, and monitoring; note recommended Change Rehearsal or config adjustments."), true)
+	b.h(2, tr(lang, "历史交付与变更记录", "Delivery History"))
+	b.table([]string{tr(lang, "交付阶段", "Delivery"), tr(lang, "时间", "Created"), tr(lang, "状态", "Outcome"), tr(lang, "说明", "Notes")}, rows)
+	b.section(1, "cause", num(tr(lang, "根因分析", "Root Cause Analysis")), tr(lang, "基于现场日志与拓扑证据，区分直接触发原因与底层根因并给出结论。", "Immediate and underlying causes with supporting evidence."), true)
+	b.section(1, "handling", num(tr(lang, "处置与恢复结果", "Remediation & Recovery")), tr(lang, "总结已执行的应急处置步骤及最终业务验证恢复状态。", "Actions taken and verified recovery state."), true)
+	b.section(1, "improve", num(tr(lang, "长效改进措施", "Corrective Actions")), tr(lang, "从架构高可用、参数调优、变更流程与监控告警维度提出可落地的整改计划。", "Preventive actions across HA architecture, configuration tuning, change workflow, and monitoring."), true)
 	d.Blocks = b.blocks
 	return d
 }
@@ -1136,11 +1293,11 @@ func (s *storeServer) buildAssess(f clusterFacts, e assessEntry) *clusterDoc {
 	lang := f.Lang
 	title := assessTitle(lang, e.Type)
 	d := &clusterDoc{ID: e.ID, Kind: "assess", Title: title, Subtitle: truncRunes(e.Question, 40), Cluster: f.ID,
-		Cover: f.cover([2]string{tr(lang, "类型", "Type"), title}, [2]string{tr(lang, "提出", "Requested"), stamp(e.Created) + tr(lang, "，", ", ") + e.By})}
+		Cover: f.cover([2]string{tr(lang, "评估类型", "Type"), title}, [2]string{tr(lang, "发起人 / 时间", "Requested By / At"), resolveReportSigner(e.By, f.Meta, "owner", lang) + " / " + stamp(e.Created)})}
 	b := &docBuilder{}
-	b.section(1, "goal", tr(lang, "1 要回答的问题", "1 Objective"), tr(lang, "要评估什么，为什么现在要评估。", "What is being evaluated and why it is needed now."), false)
-	b.h(1, tr(lang, "2 集群现状", "2 Current Cluster State"))
-	b.p(tr(lang, fmt.Sprintf("平台记录的集群以「%s」为准（%s）。", jobTitleLang(f.Current, lang), jobOutcomeNameLang(f.Current, lang)), fmt.Sprintf("Recorded cluster baseline is %q (%s).", jobTitleLang(f.Current, lang), jobOutcomeNameLang(f.Current, lang))))
+	b.section(1, "goal", tr(lang, "1 评估目标与背景", "1 Objective"), tr(lang, "阐明本次评估的核心业务诉求与决策目标。", "Core assessment objective and business context."), false)
+	b.h(1, tr(lang, "2 集群现状基线", "2 Current Cluster Baseline"))
+	b.p(tr(lang, fmt.Sprintf("当前生效基线为「%s」（状态：%s）。", jobTitleLang(f.Current, lang), jobOutcomeNameLang(f.Current, lang)), fmt.Sprintf("Active cluster baseline is %q (%s).", jobTitleLang(f.Current, lang), jobOutcomeNameLang(f.Current, lang))))
 	topology(b, f.Plan, lang)
 	b.h(2, tr(lang, "2.1 定制参数", "2.1 Customized Parameters"))
 	paramsTable(b, f.Plan, lang)
@@ -1155,14 +1312,14 @@ func (s *storeServer) buildAssess(f clusterFacts, e assessEntry) *clusterDoc {
 					adv := ""
 					if r.Advise > 0 {
 						why := mwpack.TranslateCatalogText(lang, r.AdviseWhy)
-						adv = tr(lang, fmt.Sprintf("超过 %d 台时注意：%s", r.Advise, r.AdviseWhy), fmt.Sprintf("Note above %d nodes: %s", r.Advise, why))
+						adv = tr(lang, fmt.Sprintf("超过 %d 节点建议关注：%s", r.Advise, r.AdviseWhy), fmt.Sprintf("Note above %d nodes: %s", r.Advise, why))
 					}
 					rows = append(rows, []string{inst.ID, roleTitleLang(inst, r.Name, lang), fmt.Sprint(len(hs)), adv})
 				}
 			}
 		}
 		b.h(2, tr(lang, "2.2 角色与规模", "2.2 Roles & Scale"))
-		b.table([]string{tr(lang, "实例", "Instance"), tr(lang, "角色", "Role"), tr(lang, "台数", "Count"), tr(lang, "组件的建议", "Component Advisory")}, rows)
+		b.table([]string{tr(lang, "实例", "Instance"), tr(lang, "角色", "Role"), tr(lang, "节点数", "Count"), tr(lang, "架构建议", "Component Advisory")}, rows)
 	}
 	if e.Type == "selection" {
 		var rows [][]string
@@ -1173,12 +1330,12 @@ func (s *storeServer) buildAssess(f clusterFacts, e assessEntry) *clusterDoc {
 			}
 			rows = append(rows, []string{mwpack.TranslateCatalogText(lang, c.Title), mwpack.TranslateCatalogText(lang, c.Category), truncRunes(mwpack.TranslateCatalogText(lang, c.Summary), 120)})
 		}
-		b.h(2, tr(lang, "2.3 平台上可用的组件", "2.3 Available Platform Components"))
+		b.h(2, tr(lang, "2.3 候选技术栈组件", "2.3 Candidate Components"))
 		b.table([]string{tr(lang, "组件", "Component"), tr(lang, "类别", "Category"), tr(lang, "说明", "Summary")}, rows)
 	}
-	b.section(1, "inputs", tr(lang, "3 输入与假设", "3 Inputs & Assumptions"), tr(lang, "业务量、数据量、增长速度、机器配置等评估依据；平台不知道的由现场提供，没有的写成假设。", "Workload volume, data size, growth rate, and hardware specs; document unknown parameters explicitly as assumptions."), true)
-	b.section(1, "analysis", tr(lang, "4 分析", "4 Analysis"), tr(lang, "依据上面的现状和输入，说明计算过程和判断理由。", "Detailed sizing calculations and engineering rationale based on current state and inputs."), true)
-	b.section(1, "conclusion", tr(lang, "5 结论与建议", "5 Conclusions & Recommendations"), tr(lang, "结论；需要后续变更集群的，写明建议通过变更演练实施的调整方向（如扩容、改配置、升级），以及主要参数。", "Summary verdict; specify recommended scaling, tuning, or upgrades to validate via Change Rehearsal."), true)
+	b.section(1, "inputs", tr(lang, "3 评估输入与前提假设", "3 Inputs & Assumptions"), tr(lang, "列出业务吞吐、数据规模、增长预期及硬件规格等评估依据与合理假设。", "Workload volume, data size, growth rate, hardware specs, and explicit engineering assumptions."), true)
+	b.section(1, "analysis", tr(lang, "4 技术分析与测算", "4 Technical Analysis"), tr(lang, "基于当前架构基线与评估输入，展开量化测算与方案对比论证。", "Quantitative sizing calculations and architectural trade-off analysis."), true)
+	b.section(1, "conclusion", tr(lang, "5 评估结论与实施建议", "5 Conclusions & Recommendations"), tr(lang, "给出明确可落地的最终结论、目标架构规格及后续变更演练实施路径。", "Clear verdict, target sizing/parameters, and recommended execution roadmap."), true)
 	d.Blocks = b.blocks
 	return d
 }
@@ -1282,8 +1439,8 @@ func (s *storeServer) buildChangeNoteDoc(f clusterFacts, e changeNoteEntry) *clu
 	ts := firstNonEmptyStr(e.Updated, e.Created)
 	coverFacts := [][2]string{
 		{tr(lang, "变更主题", "Change Title"), sub},
-		{tr(lang, "归档时间", "Archived At"), stamp(ts) + tr(lang, "，", ", ") + e.By},
-		{tr(lang, "记录来源", "Source"), tr(lang, "AI 助手对话归档", "AI Assistant Chat")},
+		{tr(lang, "归档确认", "Archived By / At"), resolveReportSigner(e.By, f.Meta, "confirmer", lang) + " / " + stamp(ts)},
+		{tr(lang, "记录来源", "Source"), tr(lang, "现场变更归档", "On-Site Change Archive")},
 	}
 	if e.Changed {
 		coverFacts = append(coverFacts, [2]string{tr(lang, "基线偏差", "Baseline Drift"), tr(lang, "已标记首次交付规格待同步改进", "Flagged baseline delivery for follow-up update")})
@@ -1335,8 +1492,9 @@ func rcaJobs(f clusterFacts) []storeJob {
 	return out
 }
 
-// buildDoc builds one document by id, with its saved sections filled in.
+// buildDoc builds one document by id, with its saved sections and editable signer metadata filled in.
 func (s *storeServer) buildDoc(f clusterFacts, id string) (*clusterDoc, bool) {
+	f.Meta = s.effectiveDocMeta(f.ID, id, f.Lang)
 	var d *clusterDoc
 	switch {
 	case id == "delivery":
@@ -1377,6 +1535,34 @@ func (s *storeServer) buildDoc(f clusterFacts, id string) (*clusterDoc, bool) {
 	default:
 		return nil, false
 	}
+	d.Meta = f.Meta
+	// Surface explicit editable signers & project/client attributes cleanly on the document cover.
+	hasCoverKey := func(k string) bool {
+		for _, kv := range d.Cover {
+			if kv[0] == k {
+				return true
+			}
+		}
+		return false
+	}
+	addCover := func(k, v string) {
+		v = strings.TrimSpace(v)
+		if v != "" && !hasCoverKey(k) {
+			d.Cover = append(d.Cover, [2]string{k, v})
+		}
+	}
+	if f.Meta.Client != "" {
+		addCover(tr(f.Lang, "客户/单位", "Client / Org"), f.Meta.Client)
+	}
+	if f.Meta.Author != "" {
+		addCover(tr(f.Lang, "编制人", "Author"), f.Meta.Author)
+	}
+	if f.Meta.Reviewer != "" {
+		addCover(tr(f.Lang, "审核人", "Reviewer"), f.Meta.Reviewer)
+	}
+	if f.Meta.Confirmer != "" {
+		addCover(tr(f.Lang, "确认人", "Confirmer"), f.Meta.Confirmer)
+	}
 	if d.Kind == "rca" {
 		_, d.Manual = s.docIndex(f.ID).rca(id)
 	}
@@ -1389,7 +1575,7 @@ func (s *storeServer) buildDoc(f clusterFacts, id string) (*clusterDoc, bool) {
 		for _, a := range saved.Answers {
 			items = append(items, tr(f.Lang, "问："+a.Question+" 答："+a.Answer, "Q: "+a.Question+" A: "+a.Answer))
 		}
-		d.Blocks = append(d.Blocks, docBlock{Kind: "h", Level: 1, Text: tr(f.Lang, "附：现场补充的信息", "Appendix: Additional On-Site Notes")}, docBlock{Kind: "list", Items: items})
+		d.Blocks = append(d.Blocks, docBlock{Kind: "h", Level: 1, Text: tr(f.Lang, "附：现场补充信息", "Appendix: Additional On-Site Notes")}, docBlock{Kind: "list", Items: items})
 	}
 	for i := range d.Blocks {
 		b := &d.Blocks[i]
@@ -1398,7 +1584,7 @@ func (s *storeServer) buildDoc(f clusterFacts, id string) (*clusterDoc, bool) {
 		}
 		d.Sections++
 		if sec, ok := saved.Sections[b.Key]; ok && strings.TrimSpace(sec.Text) != "" {
-			b.Text, b.Source, b.Confirmed, b.By, b.At = sec.Text, sec.Source, sec.Confirmed, sec.By, sec.At
+			b.Text, b.Source, b.Confirmed, b.By, b.At = sec.Text, sec.Source, sec.Confirmed, formatSectionBy(sec.By, f.Meta, f.Lang), sec.At
 			if sec.Source == "ai" && !sec.Confirmed {
 				d.Drafts++
 			}
@@ -1807,7 +1993,7 @@ func writeDocBodyLang(w *docxWriter, d *clusterDoc, shift int, load func(job, na
 	}
 }
 
-func buildVersionHistory(f clusterFacts, rs reportSettings, user, docVersion, today string) [][4]string {
+func buildVersionHistory(f clusterFacts, rs reportSettings, meta docMeta, user, docVersion, today string) [][4]string {
 	var rows [][4]string
 	start := 0
 	if len(f.Jobs) > 6 {
@@ -1819,15 +2005,16 @@ func buildVersionHistory(f clusterFacts, rs reportSettings, user, docVersion, to
 		if len(f.Jobs) == 1 {
 			v = docVersion
 		}
+		updater := resolveReportSigner(j.Owner, meta, "actor", f.Lang)
 		rows = append(rows, [4]string{
 			v,
 			day(j.Created),
-			firstNonEmptyStr(j.Owner, rs.Author, user, "Kyndryl Delivery Studio"),
+			updater,
 			tr(f.Lang, fmt.Sprintf("%s（%s）", jobTitleLang(j, f.Lang), jobOutcomeNameLang(j, f.Lang)), fmt.Sprintf("%s (%s)", jobTitleLang(j, f.Lang), jobOutcomeNameLang(j, f.Lang))),
 		})
 	}
 	if len(rows) == 0 {
-		rows = append(rows, [4]string{docVersion, today, firstNonEmptyStr(rs.Author, user, "Kyndryl Delivery Studio"), tr(f.Lang, "文档生成与基线归档", "Document generated and baselined")})
+		rows = append(rows, [4]string{docVersion, today, resolveReportSigner(firstNonEmptyStr(rs.Author, user), meta, "author", f.Lang), tr(f.Lang, "文档生成与基线归档", "Document generated and baselined")})
 	}
 	rows = append(rows, [4]string{"", "", "", ""})
 	return rows
@@ -1842,6 +2029,10 @@ func (s *storeServer) docxOf(f clusterFacts, docs []*clusterDoc, user string, fr
 	rs := s.reportSettingsFor(lang)
 	theme := themeOf(rs.Theme)
 	appLabel := strings.TrimSpace(f.Current.AppName + " " + f.Current.Version)
+	meta := docs[0].Meta
+	if meta == (docMeta{}) {
+		meta = s.effectiveDocMeta(f.ID, docs[0].ID, lang)
+	}
 
 	title := docs[0].Title
 	sub := docs[0].Subtitle
@@ -1876,26 +2067,31 @@ func (s *storeServer) docxOf(f clusterFacts, docs []*clusterDoc, user string, fr
 	}
 
 	today := time.Now().Format("2006-01-02")
-	docVersion := firstNonEmptyStr(rs.DocVersion, "V1.0")
-	project := firstNonEmptyStr(rs.fill(rs.Project, f.ID, title, appLabel), appLabel, f.ID)
-	author := firstNonEmptyStr(rs.Author, user, "Kyndryl Delivery Studio")
-	reviewer := firstNonEmptyStr(rs.Reviewer, "—")
-	note := rs.fill(rs.Note, f.ID, title, appLabel)
-	headerTxt := rs.fill(rs.Header, f.ID, title, appLabel)
-	footerTxt := rs.fill(rs.Footer, f.ID, title, appLabel)
+	docVersion := firstNonEmptyStr(meta.DocVersion, rs.DocVersion, "V1.0")
+	org := firstNonEmptyStr(meta.Client, rs.Org)
+	project := firstNonEmptyStr(meta.Project, rs.fill(rs.Project, f.ID, title, appLabel), appLabel, f.ID)
+	author := resolveReportSigner(user, meta, "author", lang)
+	reviewer := resolveReportSigner("", meta, "reviewer", lang)
+	confirmer := strings.TrimSpace(meta.Confirmer)
+	confidential := firstNonEmptyStr(meta.Confidential, rs.Confidential)
+	rsEff := rs
+	rsEff.Org, rsEff.Project, rsEff.DocVersion, rsEff.Author, rsEff.Reviewer, rsEff.Confidential = org, project, docVersion, author, reviewer, confidential
+	note := rsEff.fill(rsEff.Note, f.ID, title, appLabel)
+	headerTxt := rsEff.fill(rsEff.Header, f.ID, title, appLabel)
+	footerTxt := rsEff.fill(rsEff.Footer, f.ID, title, appLabel)
 
 	// Only an organization-uploaded banner is placed on the cover; no built-in decorative artwork.
 	customBanner := s.reportBannerBytes()
 
 	coverCfg := docxCover{
-		Org:          rs.Org,
+		Org:          org,
 		Project:      project,
 		Slogan:       rs.Slogan,
 		Title:        title,
 		Subtitle:     sub,
 		DocVersion:   docVersion,
 		Date:         today,
-		Confidential: rs.Confidential,
+		Confidential: confidential,
 		Note:         note,
 		Cluster:      f.ID,
 		Facts:        coverFacts,
@@ -1910,10 +2106,11 @@ func (s *storeServer) docxOf(f clusterFacts, docs []*clusterDoc, user string, fr
 		Date:         today,
 		Author:       author,
 		Reviewer:     reviewer,
+		Confirmer:    confirmer,
 		Cluster:      f.ID,
-		Confidential: rs.Confidential,
+		Confidential: confidential,
 		Facts:        coverFacts,
-		History:      buildVersionHistory(f, rs, user, docVersion, today),
+		History:      buildVersionHistory(f, rsEff, meta, user, docVersion, today),
 		Lang:         lang,
 	}
 
@@ -1934,13 +2131,14 @@ func (s *storeServer) docxOf(f clusterFacts, docs []*clusterDoc, user string, fr
 			"title":        title,
 			"subtitle":     sub,
 			"cluster":      f.ID,
-			"org":          rs.Org,
+			"org":          org,
 			"date":         today,
-			"confidential": rs.Confidential,
+			"confidential": confidential,
 			"version":      docVersion,
 			"project":      project,
 			"author":       author,
 			"reviewer":     reviewer,
+			"confirmer":    firstNonEmptyStr(confirmer, resolveReportSigner("", meta, "confirmer", lang)),
 			"slogan":       rs.Slogan,
 			"app":          appLabel,
 		}
@@ -1954,7 +2152,7 @@ func (s *storeServer) docxOf(f clusterFacts, docs []*clusterDoc, user string, fr
 			Title:        title,
 			Header:       headerTxt,
 			Footer:       footerTxt,
-			FrontOrg:     firstNonEmptyStr(rs.Org, project, f.ID),
+			FrontOrg:     firstNonEmptyStr(org, project, f.ID),
 			Author:       author,
 			Theme:        theme,
 			HasFrontSect: true,
@@ -2016,6 +2214,8 @@ func (s *storeServer) handleCluster(w http.ResponseWriter, r *http.Request, sess
 		switch {
 		case len(parts) == 3 && r.Method == "GET":
 			s.writeJSON(w, 200, d)
+		case len(parts) == 4 && parts[3] == "meta" && r.Method == "PUT":
+			s.saveDocMeta(w, r, session, f, d)
 		case len(parts) == 5 && parts[3] == "sections" && r.Method == "PUT":
 			s.saveSection(w, r, session, f, d, parts[4])
 		case len(parts) == 6 && parts[3] == "sections" && parts[5] == "draft" && r.Method == "POST":
@@ -2030,6 +2230,56 @@ func (s *storeServer) handleCluster(w http.ResponseWriter, r *http.Request, sess
 	default:
 		s.fail(w, 404, "接口不存在")
 	}
+}
+
+func (s *storeServer) saveDocMeta(w http.ResponseWriter, r *http.Request, session storeSession, f clusterFacts, d *clusterDoc) {
+	var in struct {
+		Author         string `json:"author"`
+		Reviewer       string `json:"reviewer"`
+		Confirmer      string `json:"confirmer"`
+		Owner          string `json:"owner"`
+		Client         string `json:"client"`
+		Project        string `json:"project"`
+		DocVersion     string `json:"doc_version"`
+		Confidential   string `json:"confidential"`
+		ApplyToCluster bool   `json:"apply_to_cluster"`
+	}
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&in) != nil {
+		s.fail(w, 400, "提交的报告属性格式不正确")
+		return
+	}
+	clean := func(v string) string { return strings.TrimSpace(v) }
+	meta := docMeta{
+		Author:       clean(in.Author),
+		Reviewer:     clean(in.Reviewer),
+		Confirmer:    clean(in.Confirmer),
+		Owner:        clean(in.Owner),
+		Client:       clean(in.Client),
+		Project:      clean(in.Project),
+		DocVersion:   clean(in.DocVersion),
+		Confidential: clean(in.Confidential),
+	}
+	for _, v := range []string{meta.Author, meta.Reviewer, meta.Confirmer, meta.Owner, meta.Client, meta.Project, meta.DocVersion, meta.Confidential} {
+		if len([]rune(v)) > 120 {
+			s.fail(w, 400, "报告署名与属性各项不超过 120 字")
+			return
+		}
+	}
+	saved := s.docLoad(f.ID, d.ID)
+	saved.Meta = meta
+	if err := s.docSave(f.ID, d.ID, saved); err != nil {
+		s.fail(w, 500, "保存失败，请稍后重试")
+		return
+	}
+	if in.ApplyToCluster {
+		if err := s.clusterDocMetaSave(f.ID, meta); err != nil {
+			s.fail(w, 500, "保存集群默认署名失败，请稍后重试")
+			return
+		}
+	}
+	s.auditReq(r, "doc-meta", session.User, fmt.Sprintf("%s %s author=%s confirmer=%s cluster=%t", f.ID, d.ID, meta.Author, meta.Confirmer, in.ApplyToCluster))
+	nd, _ := s.buildDoc(f, d.ID)
+	s.writeJSON(w, 200, nd)
 }
 
 func docSectionOf(d *clusterDoc, key string) *docBlock {

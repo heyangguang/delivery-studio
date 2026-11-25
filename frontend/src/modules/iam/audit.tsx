@@ -114,6 +114,7 @@ const ACTION_DATA: Record<string, [string, string, string, string]> = {
   "target-agent-enroll": ["接入目标机 Agent", "交付", "Enroll target agent", "Delivery"],
   "target-agent-revoke": ["撤销目标机 Agent", "交付", "Revoke target agent", "Delivery"],
   "doc-section": ["编辑文档", "交付", "Edit document section", "Delivery"],
+  "doc-meta": ["更新报告署名与元信息", "交付", "Update report signers & metadata", "Delivery"],
   "doc-draft": ["AI 起草文档", "交付", "AI draft document", "Delivery"],
   "doc-check": ["AI 检查文档", "交付", "AI review document", "Delivery"],
   "doc-export": ["导出文档", "交付", "Export document", "Delivery"],

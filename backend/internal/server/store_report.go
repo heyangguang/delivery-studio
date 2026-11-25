@@ -274,10 +274,10 @@ func (b *docBuilder) variant(v string, blk docBlock) {
 }
 
 // stepReport writes every step of the delivery's runbook with its result. Steps nobody recorded show as not done.
-func (s *storeServer) stepReport(b *docBuilder, level int, j storeJob, langOpt ...string) bool {
-	lang := ""
-	if len(langOpt) > 0 {
-		lang = langOpt[0]
+func (s *storeServer) stepReport(b *docBuilder, level int, j storeJob, lang string, metaOpt ...docMeta) bool {
+	var meta docMeta
+	if len(metaOpt) > 0 {
+		meta = metaOpt[0]
 	}
 	start := len(b.blocks)
 	defer func() {
@@ -295,8 +295,8 @@ func (s *storeServer) stepReport(b *docBuilder, level int, j storeJob, langOpt .
 	execSteps := s.latestExecutionSteps(j.ID)
 	cmdCtx := s.buildReportCmdCtx(j, hostIPs, lang)
 	b.variant(variantCmd, docBlock{Kind: "note", Text: tr(lang,
-		"命令里的部署参数（目录、端口、地址等）已按本次规格代入，多台机器的步骤以第一台为例，其余机器把主机名和地址换成自己的；写成 <…> 的是执行时才产生的值（上一条命令的输出等，见下面的执行结果），密码不写进报告，见控制节点 secrets/ 目录。以 # 开头的行说明这一步在做什么，不是要输入的命令。",
-		"Deployment parameters (directories, ports, addresses) in these commands are pre-filled from the spec. Multi-host steps show the first host as an example; substitute each peer's hostname/IP as needed. Placeholders like <...> represent runtime values, and secrets remain omitted (refer to controller secrets/). Lines starting with # are descriptive comments, not commands.",
+		"说明：以下实施命令已代入本次交付规格参数，多节点步骤以首节点为例，运行时动态值以 <…> 标识；敏感凭据已做脱敏处理，留存于控制节点 secrets/ 受控目录。",
+		"Note: Commands below reflect this delivery specification (multi-host steps reference the first host; runtime outputs use <...>). Credentials are redacted and stored in the controller's restricted secrets/ directory.",
 	)})
 	hl := func(n int) int {
 		if n > 4 {
@@ -350,18 +350,18 @@ func (s *storeServer) stepReport(b *docBuilder, level int, j storeJob, langOpt .
 					b.variant(variantCmd, docBlock{Kind: "code", Style: "shell", Text: headerWithIPLang(p.Hosts, hostIPs, who+exampleNoteLang(p.Hosts, lang), lang) + "\n" + strings.Join(lines, "\n")})
 				}
 				if !any {
-					b.variant(variantCmd, docBlock{Kind: "p", Text: tr(lang, "这一步由 Playbook 完成，没有可单列的手工命令：", "This step runs via Playbook with no standalone manual command: ") + st.Command})
+					b.variant(variantCmd, docBlock{Kind: "p", Text: tr(lang, "本步骤通过自动化 Playbook 统一执行：", "This step is executed via automated Playbook: ") + st.Command})
 				}
 			}
 			if st.Expect != "" {
-				b.variant("", docBlock{Kind: "p", Text: tr(lang, "✓ 判据：", "✓ Criteria: ") + st.Expect})
+				b.variant("", docBlock{Kind: "p", Text: tr(lang, "✓ 验收判据：", "✓ Criteria: ") + st.Expect})
 			}
 			// what was run before a sync replaced this step: kept, struck through, so the report tells all of it
 			for _, old := range prog.Superseded[st.Key] {
 				var items []string
 				rec := old.Record
 				if rec.State != "" || rec.Note != "" {
-					items = append(items, strings.TrimSpace(fmt.Sprintf("%s%s  %s  %s  %s", tr(lang, "执行结果：", "Result: "), firstNonEmptyStr(stepStateLabel(lang, rec.State), tr(lang, "没有标记结果", "Not marked")), rec.By, stamp(rec.At), rec.Note)))
+					items = append(items, strings.TrimSpace(fmt.Sprintf("%s%s  %s  %s  %s", tr(lang, "执行结果：", "Result: "), firstNonEmptyStr(stepStateLabel(lang, rec.State), tr(lang, "未标记", "Not marked")), resolveReportSigner(rec.By, meta, "actor", lang), stamp(rec.At), rec.Note)))
 				}
 				if rec.Log != "" {
 					items = append(items, tr(lang, "输出：", "Output: ")+truncRunes(rec.Log, 600))
@@ -371,11 +371,11 @@ func (s *storeServer) stepReport(b *docBuilder, level int, j storeJob, langOpt .
 					oldVariant = variantAuto
 				}
 				b.variant(oldVariant, docBlock{Kind: "old", Title: tr(lang,
-					fmt.Sprintf("旧版本（第 %d 次按最新组件同步前，%s），已被本步骤的新版本取代：%s", old.Sync, stamp(old.At), old.Title),
-					fmt.Sprintf("Superseded revision (before sync #%d on %s), replaced by current step: %s", old.Sync, stamp(old.At), old.Title),
+					fmt.Sprintf("已替代历史步骤（第 %d 次组件基线同步前，%s）：%s", old.Sync, stamp(old.At), old.Title),
+					fmt.Sprintf("Superseded revision (before sync #%d on %s): %s", old.Sync, stamp(old.At), old.Title),
 				), Text: old.Command, Items: items})
 			}
-			s.resultBlocksLang(b, j.ID, st, hostIPs, prog, lang)
+			s.resultBlocksLang(b, j.ID, st, hostIPs, prog, lang, meta)
 			stRuns := stepRuns(logs, st.Playbook)
 			runBlocksLang(b, stRuns, lang)
 			if execInfo, hasExec := execSteps[st.Key]; hasExec {
@@ -424,24 +424,32 @@ func (s *storeServer) stepReport(b *docBuilder, level int, j storeJob, langOpt .
 		}
 	}
 	if len(extra) > 0 {
-		b.h(hl(level+1), tr(lang, "其他记录", "Other Records"))
+		b.h(hl(level+1), tr(lang, "其他执行记录", "Additional Records"))
 		for i, st := range extra {
 			b.h(hl(level+2), fmt.Sprintf("%d  %s", i+1, st.Title))
-			s.resultBlocksLang(b, j.ID, reportStep{Key: st.Key, Title: st.Title}, hostIPs, prog, lang)
+			s.resultBlocksLang(b, j.ID, reportStep{Key: st.Key, Title: st.Title}, hostIPs, prog, lang, meta)
 		}
 	}
 	return true
 }
 
-func (s *storeServer) resultBlocksLang(b *docBuilder, job string, st reportStep, hostIPs map[string]string, prog progressDoc, lang string) {
+func (s *storeServer) resultBlocksLang(b *docBuilder, job string, st reportStep, hostIPs map[string]string, prog progressDoc, lang string, metaOpt ...docMeta) {
+	var meta docMeta
+	if len(metaOpt) > 0 {
+		meta = metaOpt[0]
+	}
 	key := st.Key
 	rec, ok := prog.Steps[key]
 	if !ok {
-		b.variant(variantResult, docBlock{Kind: "note", Text: tr(lang, "执行结果：尚未记录", "Execution result: not yet recorded")})
+		b.variant(variantResult, docBlock{Kind: "note", Text: tr(lang, "执行状态：待执行 / 暂无回传记录", "Execution status: pending / no record")})
 		return
 	}
-	label := firstNonEmptyStr(stepStateLabel(lang, rec.State), tr(lang, "没有标记结果", "Not marked"))
-	b.variant(variantResult, docBlock{Kind: "p", Text: fmt.Sprintf("**%s**  %s  %s  %s", tr(lang, "执行结果", "Execution Result"), label, rec.By, stamp(rec.At))})
+	label := firstNonEmptyStr(stepStateLabel(lang, rec.State), tr(lang, "未标记", "Not marked"))
+	actor := rec.By
+	if actor != runLogBy {
+		actor = resolveReportSigner(actor, meta, "actor", lang)
+	}
+	b.variant(variantResult, docBlock{Kind: "p", Text: fmt.Sprintf("**%s**  %s  %s  %s", tr(lang, "执行结果", "Execution Result"), label, actor, stamp(rec.At))})
 	if note := strings.TrimSpace(rec.Note); note != "" && !(rec.Source == "automatic" && note == "任务与组件声明的完成检查通过") {
 		b.variant(variantResult, docBlock{Kind: "p", Text: note})
 	}
@@ -449,7 +457,7 @@ func (s *storeServer) resultBlocksLang(b *docBuilder, job string, st reportStep,
 	if strings.TrimSpace(rec.Log) != "" && rec.By != runLogBy {
 		log := strings.TrimRight(rec.Log, "\n")
 		if r := []rune(log); len(r) > 12000 {
-			log = tr(lang, "……（只保留末尾 12000 字，完整输出在平台的执行记录里）\n", "... (truncated to last 12,000 chars; full output in platform execution logs)\n") + string(r[len(r)-12000:])
+			log = tr(lang, "……（日志已截取末尾 12000 字符，完整执行日志留存于平台归档）\n", "... (truncated to last 12,000 chars; full output archived)\n") + string(r[len(r)-12000:])
 		}
 		if st.Manual {
 			log = formatManualTerminalLog(st, hostIPs, log, lang)
@@ -465,7 +473,7 @@ func (s *storeServer) resultBlocksLang(b *docBuilder, job string, st reportStep,
 			if resolved, doneRec := isReportResolvedByStep(rp, prog); resolved {
 				writeResolvedIncidentNoteLang(b, variantResult, rp, doneRec, lang)
 			} else {
-				writeUpBlocksLang(b, variantResult, rp, lang)
+				writeUpBlocksLang(b, variantResult, rp, lang, meta)
 			}
 		}
 	}
@@ -527,8 +535,12 @@ func writeResolvedIncidentNoteLang(b *docBuilder, variant string, rp aiReport, d
 // writeUpBlocks writes a problem and its solution: what happened, why, what was done (commands as code), what is left.
 func writeUpBlocks(b *docBuilder, variant string, rp aiReport) { writeUpBlocksLang(b, variant, rp, "") }
 
-func writeUpBlocksLang(b *docBuilder, variant string, rp aiReport, lang string) {
-	b.variant(variant, docBlock{Kind: "p", Text: "**" + tr(lang, "遇到的问题", "Issue Encountered") + "**  " + firstNonEmptyStr(rp.Title, rp.Symptom) + "  " + stamp(rp.At) + "  " + rp.By})
+func writeUpBlocksLang(b *docBuilder, variant string, rp aiReport, lang string, metaOpt ...docMeta) {
+	var meta docMeta
+	if len(metaOpt) > 0 {
+		meta = metaOpt[0]
+	}
+	b.variant(variant, docBlock{Kind: "p", Text: "**" + tr(lang, "过程问题记录", "Issue Encountered") + "**  " + firstNonEmptyStr(rp.Title, rp.Symptom) + "  " + stamp(rp.At) + "  " + resolveReportSigner(rp.By, meta, "actor", lang)})
 	item := func(label, text string) {
 		text = strings.TrimSpace(text)
 		if text == "" {
@@ -543,21 +555,21 @@ func writeUpBlocksLang(b *docBuilder, variant string, rp aiReport, lang string) 
 	if fix := strings.TrimSpace(rp.Fix); fix != "" {
 		if variant == variantResult && (strings.Contains(fix, "ansible-playbook") || strings.Contains(fix, "/root/middleware-automation/")) {
 			cleanFix := sanitizeIncidentTextForCmd(fix)
-			b.variant(variantResultAuto, docBlock{Kind: "p", Text: "**" + tr(lang, "处理", "Resolution") + "**"})
+			b.variant(variantResultAuto, docBlock{Kind: "p", Text: "**" + tr(lang, "处置措施", "Resolution") + "**"})
 			fenced(b, variantResultAuto, fix)
 			if cleanFix != "" {
-				b.variant(variantResultCmd, docBlock{Kind: "p", Text: "**" + tr(lang, "处理", "Resolution") + "**"})
+				b.variant(variantResultCmd, docBlock{Kind: "p", Text: "**" + tr(lang, "处置措施", "Resolution") + "**"})
 				fenced(b, variantResultCmd, cleanFix)
 			}
 		} else {
-			item(tr(lang, "处理", "Resolution"), fix)
+			item(tr(lang, "处置措施", "Resolution"), fix)
 		}
 	}
 	if rp.Changed {
-		b.variant(variant, docBlock{Kind: "note", Text: tr(lang, "这个问题说明交付本身需要修改，请回到平台调整规格或手册后重新生成。", "This issue indicates the delivery itself requires changes; adjust the spec or runbook and regenerate.")})
+		b.variant(variant, docBlock{Kind: "note", Text: tr(lang, "基线影响说明：该问题涉及部署规格或标准手册调整，建议同步更新标准交付基线。", "Baseline impact: this issue requires adjusting the deployment specification or standard runbook.")})
 	}
 	if len(rp.Followups) > 0 {
-		b.variant(variant, docBlock{Kind: "p", Text: "**" + tr(lang, "还要跟进", "Follow-Up Items") + "**"})
+		b.variant(variant, docBlock{Kind: "p", Text: "**" + tr(lang, "后续跟进项", "Follow-Up Items") + "**"})
 		b.variant(variant, docBlock{Kind: "list", Items: rp.Followups})
 	}
 }
@@ -701,7 +713,7 @@ func runBlocksLang(b *docBuilder, runs []runLog, lang string) {
 		for _, r := range runs[:len(runs)-1] {
 			items = append(items, fmt.Sprintf("%s  %s  %s", r.File, r.Started, resText(r.Result)))
 		}
-		b.variant(variantResultAuto, docBlock{Kind: "p", Text: tr(lang, "这一步此前还运行过：", "Previous runs for this step:")})
+		b.variant(variantResultAuto, docBlock{Kind: "p", Text: tr(lang, "历史执行批次记录：", "Previous runs for this step:")})
 		b.variant(variantResultAuto, docBlock{Kind: "list", Items: items})
 	}
 	if len(last.Recap) > 0 {
@@ -709,7 +721,7 @@ func runBlocksLang(b *docBuilder, runs []runLog, lang string) {
 		for _, c := range last.Recap {
 			rows = append(rows, []string{c.Host, fmt.Sprint(c.OK), fmt.Sprint(c.Changed), fmt.Sprint(c.Unreachable), fmt.Sprint(c.Failed), fmt.Sprint(c.Skipped)})
 		}
-		b.variant(variantResultAuto, docBlock{Kind: "table", Head: []string{tr(lang, "机器", "Host"), "ok", "changed", "unreachable", "failed", "skipped"}, Rows: rows})
+		b.variant(variantResultAuto, docBlock{Kind: "table", Head: []string{tr(lang, "主机节点", "Host"), "ok", "changed", "unreachable", "failed", "skipped"}, Rows: rows})
 	}
 	var lines []string
 	cut := false
@@ -735,7 +747,7 @@ func runBlocksLang(b *docBuilder, runs []runLog, lang string) {
 			lines = append(lines, "  "+o.Kind+" "+o.Host)
 			for i, l := range o.Lines {
 				if i >= 14 {
-					lines = append(lines, tr(lang, fmt.Sprintf("    ……（还有 %d 行，完整内容在日志文件里）", len(o.Lines)-i), fmt.Sprintf("    ... (%d more line(s); see full log file)", len(o.Lines)-i)))
+					lines = append(lines, tr(lang, fmt.Sprintf("    ……（其余 %d 行已省略，完整输出详见归档日志）", len(o.Lines)-i), fmt.Sprintf("    ... (%d more line(s); see archived log)", len(o.Lines)-i)))
 					break
 				}
 				lines = append(lines, "    "+l)
@@ -743,7 +755,7 @@ func runBlocksLang(b *docBuilder, runs []runLog, lang string) {
 		}
 	}
 	if cut {
-		lines = append(lines, tr(lang, "……（后面的任务没有列出，完整内容在日志文件里）", "... (remaining tasks omitted; see full log file)"))
+		lines = append(lines, tr(lang, "……（后续任务输出已省略，完整内容详见归档日志）", "... (remaining tasks omitted; see archived log)"))
 	}
 	if len(lines) > 0 {
 		b.variant(variantResultAuto, docBlock{Kind: "code", Style: "ansible", Text: strings.Join(lines, "\n")})

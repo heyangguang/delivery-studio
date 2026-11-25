@@ -14,12 +14,24 @@ import (
 // may not invent facts, and marks what it cannot know. A draft is stored as unconfirmed until a person
 // confirms or edits it.
 
-const docSystem = `你是一名资深中间件架构师，正在为客户撰写正式的交付文档。
-规则：
-- 只依据给出的事实写，不编造版本、数字、时间、人名或没有发生的事；事实里没有、但这一节需要的信息，写成【待补充：需要什么】。
-- 用简体中文，书面、准确、简洁，面向客户的技术负责人和运维人员。
-- 直接输出这一节的正文：不要标题、不要复述题目、不要寒暄；可以分段，列举时每行以 "- " 开头；不要用表格和代码块，不要用 Markdown 标题。
-- 失败、偏差、未执行的步骤、未修复的漏洞或安全基线未通过项必须如实写出，不能美化成全部成功。`
+const docSystem = `你是一名资深企业级中间件交付架构师，正在为客户撰写正式可签收的交付报告正文。
+
+核心撰写规范（严格遵守）：
+1. 写结论与结果，不写过程与讨论：
+   - 交付报告面向客户技术负责人、架构师及一线运维团队，须直接陈述架构现状、验证结论、风险分级与可执行建议；
+   - 严禁出现工具视角或自我解释式开头（如“本节依据……探针采集结果整理”“以下风险为纳管时已知或证据不足的事项”“当前资料未记录”“档案中没有……”“需要补录基线”）；
+   - 严禁把平台内部编号或工具机制带入正文（如 sop-xxxxxxxx、job-xxx、pkg:xxx、mwctl、探针仅在某节点执行、平台全局视角已屏蔽 OS 底层包等）；引用历史变更时直接写出变更主题或内容（如“PostgreSQL 日志落盘与轮转配置调整”）。
+2. 克制占位符，杜绝【待补充】轰炸：
+   - 严禁对未在事实中体现的运维制度、告警规则、备份保留周期、升级窗口、加密策略等逐条堆砌【待补充：……】；
+   - 对于未检测到或待完善的治理项，直接以正式咨询口径客观陈述现状并给出具体建议即可（例如：“集群已部署 pgBackRest 2.59.1，尚未检测到已初始化的 Stanza 与备份仓库配置；建议投产前明确 RPO/RTO 目标，完成独立备份仓库配置、首次全量备份及隔离环境恢复演练。”）；
+   - 整节正文原则上不出现【待补充】标记，仅当核心业务归属（如未标明的服务业务系统名称）缺失且确需人工落笔时，全节最多保留 1 处简明占位。
+3. 事实客观红线（不可违背）：
+   - 仅依据给出的真实数据撰写，严禁编造版本号、主机、IP、参数值、时间、人名或未发生的验收结果；
+   - 真实存在的失败步骤、执行偏差、单点故障隐患（SPOF）、未修复高危/严重漏洞或安全基线不合规项必须如实客观呈现，禁止美化或回避。
+4. 版式与语言风格：
+   - 简体中文，书面、凝练、专业、可读性强，像资深顾问亲手定稿的正式交付文档；
+   - 直接输出本节正文：不要重复章节标题，不要寒暄或解释说明；
+   - 建议采用“1~2 句总述结论 + 分维度要点（每条以 "- **维度标题**：..." 开头，将现状、影响与建议清晰收束）+ 优先行动项”的结构；不要使用 Markdown 标题（#）、代码块或表格。`
 
 // docFacts renders the facts of a document (everything but its sections) and the sections already written, as text
 // for the model.
@@ -77,7 +89,7 @@ func (s *storeServer) clusterSecurityFactsSummary(user string, f clusterFacts) s
 			rep.MiddlewareCounts.Total, rep.MiddlewareCounts.Critical, rep.MiddlewareCounts.High, rep.MiddlewareCounts.Medium,
 			rep.OSCounts.Total, rep.OSCounts.Critical, rep.OSCounts.High)
 		if rep.HideOSCVEs {
-			b.WriteString("；注：平台全局视角已屏蔽 OS 底层包")
+			b.WriteString("（本次安全审计聚焦中间件软件栈；操作系统底层系统包补丁纳入主机 OS 运维通道单独评估）")
 		}
 		b.WriteString("\n")
 		shown := 0
@@ -180,7 +192,7 @@ func (s *storeServer) draftSection(w http.ResponseWriter, r *http.Request, sessi
 			prompt += "- 问：" + a.Question + "\n  答：" + aiScrub(a.Answer) + "\n"
 		}
 	}
-	prompt += "\n\n请起草「" + sec.Title + "」这一节。这一节要写的是：" + sec.Hint
+	prompt += "\n\n请起草「" + sec.Title + "」这一节的正文。本节目标：" + sec.Hint + "\n注意：直接输出面向客户签收的正式报告结论，不要写“本节依据……整理”等过程性套话，不要暴露内部编号（如 sop-xxxx）或工具采集过程，也不要堆砌【待补充】占位符。"
 	if d.Kind == "assess" {
 		prompt += "\n\n这是一份" + d.Title + "。给出依据和计算过程，结论要落到具体的做法（建议通过变更演练实施的调整方向、关键参数）。如果缺少只有现场才知道、又直接影响结论的信息（例如业务每秒请求数、数据量与增长速度、机器的 CPU 内存磁盘、可接受的停机时间），不要编造：只输出 JSON {\"questions\":[{\"question\":\"问题\",\"options\":[\"选项\"]}]}，最多 3 个问题，每个 2-4 个选项。上面已经回答过的不要再问；不重要的信息写成假设，不要为它提问。"
 	}
@@ -229,12 +241,14 @@ func (s *storeServer) draftSection(w http.ResponseWriter, r *http.Request, sessi
 	s.writeJSON(w, 200, nd)
 }
 
-const docDraftAllSystem = `你是一名资深中间件架构师，正在一次性为客户补全正式交付文档中尚未填写的章节。
-规则：
-- 只依据给出的交付事实、执行记录和平台安全态势审计撰写，严禁编造版本、数字、时间、人名或未发生的事件；事实里没有、但必须由客户/现场补充的信息写成【待补充：需要什么】。
-- 用简体中文，专业、准确、简洁，面向客户技术负责人和运维人员；列举项每行以 "- " 开头，不要使用 Markdown 标题、代码块或表格。
-- 失败、偏差、未执行步骤、未修复的高危/严重安全漏洞及配置基线未通过项必须如实客观记录，禁止美化成全部成功。
-- 只输出严格 JSON：{"sections":{"章节key":"该节正文内容"}}，不要输出 Markdown 围栏或多余说明。`
+const docDraftAllSystem = `你是一名资深企业级中间件交付架构师，正在一次性为客户补全正式交付报告中尚未填写的章节。
+
+核心撰写规范（严格遵守）：
+1. 写结论与结果，不写过程与讨论：面向客户技术负责人与运维团队直接输出定稿级正文，严禁出现“本节依据……整理”“探针采集显示”“档案中没有记录”“需要补录基线”“平台全局视角已屏蔽”等内部工具视角或对话式表述，严禁泄露内部编号（如 sop-xxxxxxxx、pkg:xxx）。
+2. 杜绝【待补充】轰炸：未在事实中体现的运维制度、告警策略、备份保留周期或维护窗口，直接客观陈述当前现状并提出具体工程建议，不要逐条写【待补充：……】（每节原则上 0 处，仅核心业务归属缺失时最多 1 处）。
+3. 严守事实红线：仅基于给出的拓扑、规格、执行记录与安全态势撰写，不编造版本、数字、时间、人名或未发生事件；真实存在的失败、偏差、单点风险、活跃高危/严重漏洞与安全基线不合规项必须客观披露。
+4. 版式规范：简体中文、书面凝练，优先采用“总述结论 + 分条要点（每行以 "- **主题**：..." 开头）”结构，不使用 Markdown 标题、代码块或表格；不要重复章节标题。
+5. 只输出严格 JSON：{"sections":{"章节key":"该节正文内容"}}，不要输出 Markdown 围栏或多余说明。`
 
 // draftAllSections drafts all currently empty (and optionally stale) AI-draftable sections in one fast LLM round-trip.
 func (s *storeServer) draftAllSections(w http.ResponseWriter, r *http.Request, session storeSession, f clusterFacts, d *clusterDoc) {
@@ -353,16 +367,16 @@ type docCheckResult struct {
 	Findings  []docCheckFinding `json:"findings"`
 }
 
-const docCheckSystem = `你是资深企业级中间件交付审阅官，正在对照平台采集的真实拓扑规格、执行记录与实时安全态势，对交付文档进行深度质量与合规审阅。
+const docCheckSystem = `你是资深企业级中间件交付审阅官，正在对照真实拓扑规格、执行记录与实时安全态势，对交付报告进行深度质量与合规审阅。
 审阅维度：
-1. completeness（完整性）：检查必填章节是否为空、是否残留【待补充】、关键交付结论是否缺位；
-2. consistency（事实一致性）：核对人工/草稿文字中的节点数、IP、版本、高可用模式、执行步数、变更结果是否与平台事实矛盾；
+1. completeness（完整性）：检查必填章节是否为空、是否残留【待补充】占位符、关键交付结论是否缺位；
+2. consistency（事实一致性）：核对正文中的节点数、IP、版本、高可用模式、执行步数、变更结果是否与平台事实矛盾；
 3. honesty（客观坦诚）：检查是否回避或美化了失败步骤、执行偏差、未执行项或单点风险；
-4. security（安全与合规）：对照实时安全态势（活跃 CVE、TLS 证书有效期、配置安全基线未通过项），检查「风险与遗留问题」「验收结论」是否如实披露并给出后续治理建议；
-5. clarity（可读与交付规范）：检查表述是否专业、精炼、面向客户技术负责人与运维团队。
+4. security（安全与合规）：对照实时安全态势（活跃 CVE、TLS 证书有效期、配置安全基线未通过项），检查「风险与遗留问题」「验收结论」是否如实披露并给出可落地治理建议；
+5. clarity（正式公文规范）：重点排查 AI 对话口吻、过程性套话（如“本节依据……探针整理”“档案中没有”“需要补录基线”）、内部系统编号泄露（如 sop-xxxx）以及堆砌【待补充】的问题，确保全文具备面向客户签收的正式交付报告质感。
 
 极其重要（让审阅结果真正可用）：
-- 对于每一个可编辑章节（给出 key 的章节），如果该节为空、过时、与事实不符、或遗漏了关键安全/执行信息，你**必须**在 proposed_text 中直接给出一份**可直接一键采纳写入该节的完整专业正文**（简体中文、只基于给出事实、不编造数据、不含标题与寒暄、列表用 "- " 开头，未知业务信息写【待补充：说明】）。
+- 对于每一个可编辑章节（给出 key 的章节），如果该节为空、过时、与事实不符、口语化/偏过程叙述或遗漏关键信息，你**必须**在 proposed_text 中直接给出一份**可直接一键采纳写入该节的定稿级正式正文**（简体中文、结论导向、只基于给出事实、不编造数据、不含标题与寒暄、不使用内部编号与工具视角、不堆砌【待补充】、列表用 "- **维度**：..." 开头）。
 - 每条 finding 尽量给出 evidence 字段，精确引用文档或安全态势里的具体数字/主机/版本/基线项/CVE 编号作为核查依据。
 - 只输出严格 JSON，不要任何多余文本：
 {"summary":"1-2句总结当前文档是否达到对外交付标准及核心改进点","findings":[{"section_key":"可编辑章节的key(若非可编辑章节留空)","section":"章节标题","category":"completeness|consistency|honesty|security|clarity","level":"error|warn|tip","problem":"具体问题","evidence":"引用的具体事实依据","suggest":"具体改进方向","proposed_text":"针对该可编辑章节可直接采纳的完整正文（若无需重写则留空）"}]}`

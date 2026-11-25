@@ -1106,6 +1106,16 @@ export type DocBlock = {
   /** The plans carried out after the section was written; it may no longer be true. */
   stale?: string;
 };
+export type DocMeta = {
+  author?: string;
+  reviewer?: string;
+  confirmer?: string;
+  owner?: string;
+  client?: string;
+  project?: string;
+  doc_version?: string;
+  confidential?: string;
+};
 export type ClusterDoc = {
   id: string;
   kind: "delivery" | "change" | "kt" | "rca" | "assess";
@@ -1114,6 +1124,7 @@ export type ClusterDoc = {
   cluster: string;
   job?: string;
   cover?: [string, string][];
+  meta?: DocMeta;
   blocks?: DocBlock[];
   sections: number;
   empty: number;

@@ -88,9 +88,46 @@ export type AutomationAgentView = {
   version?: string;
   desired: string;
   applied?: string;
+  matched_clusters?: string[];
   message?: string;
   online: boolean;
 };
+
+export type AgentEnrollPrefill = {
+  role?: "controller" | "target";
+  host?: string;
+  ip?: string;
+  ts?: number;
+};
+
+const AGENT_ENROLL_PREFILL_KEY = "ds:agent-enroll-prefill";
+const AGENT_ENROLL_PREFILL_TTL_MS = 5 * 60 * 1000;
+
+export function saveAgentEnrollPrefill(prefill: Omit<AgentEnrollPrefill, "ts">) {
+  try {
+    sessionStorage.setItem(
+      AGENT_ENROLL_PREFILL_KEY,
+      JSON.stringify({ ...prefill, ts: Date.now() } satisfies AgentEnrollPrefill),
+    );
+  } catch {
+    // Ignore private-mode storage failures
+  }
+}
+
+export function consumeAgentEnrollPrefill(): AgentEnrollPrefill | null {
+  try {
+    const raw = sessionStorage.getItem(AGENT_ENROLL_PREFILL_KEY);
+    if (!raw) return null;
+    sessionStorage.removeItem(AGENT_ENROLL_PREFILL_KEY);
+    const parsed = JSON.parse(raw) as AgentEnrollPrefill;
+    if (!parsed || (parsed.ts && Date.now() - parsed.ts > AGENT_ENROLL_PREFILL_TTL_MS)) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
 
 export type RehearsalExecTarget = {
   host: string;

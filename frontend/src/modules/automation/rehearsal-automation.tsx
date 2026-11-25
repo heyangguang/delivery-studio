@@ -43,6 +43,7 @@ import {
   RehearsalExecTask,
   RehearsalExecTarget,
   isRehearsalTaskTerminal,
+  saveAgentEnrollPrefill,
 } from "./execution-types";
 import "./rehearsal-automation.css";
 
@@ -629,7 +630,9 @@ export function ClusterAutomationPanel({
   const activeAgentsByIP = useMemo(() => {
     const map = new Map<string, AutomationAgentView>();
     for (const a of summary?.agents || []) {
-      if (a.desired === "active" && (a.mode === "direct" || !map.has(a.ip))) {
+      if (a.mode !== "direct" || a.desired !== "active") continue;
+      const cur = map.get(a.ip);
+      if (!cur || (a.online && !cur.online)) {
         map.set(a.ip, a);
       }
     }
@@ -669,16 +672,16 @@ export function ClusterAutomationPanel({
       }
       if (!selectedNode.allow_probe) {
         return bi(
-          `执行节点「${selectedNode.name}」未开启「只读探针采集」，请先前往设置 → 执行节点开启`,
-          `Node "${selectedNode.name}" is not authorized for read-only probes`,
+          `执行节点「${selectedNode.name}」未开启「只读探针采集」，请先前往「执行中心 → Agent」开启`,
+          `Node "${selectedNode.name}" is not authorized for read-only probes; enable it in Execution Center → Agent`,
         );
       }
       return "";
     }
     if (onlineAgentHostCount === 0) {
       return bi(
-        "暂无在线的目标机直连 Agent，请先为目标主机生成并启动 Agent",
-        "No online Direct Target Agent yet; enroll and start an agent first",
+        "暂无在线的目标机直连 Agent，请先在「执行中心 → Agent」接入对应主机并启动服务",
+        "No online Direct Target Agent yet; enroll the hosts in Execution Center → Agent",
       );
     }
     if (onlineAgentHostCount < effectiveHosts.length) {
@@ -706,7 +709,7 @@ export function ClusterAutomationPanel({
           tone: "warn" as const,
           text:
             summary.nodes.length === 0
-              ? bi("暂无已接入的执行节点，可先前往「设置 → 执行节点」接入，或切换方式 B", "No execution nodes yet; enroll in Settings or use Mode B")
+              ? bi("暂无已接入的控制机，可先前往「执行中心 → Agent」接入，或切换方式 B", "No control agents yet; enroll in Execution Center → Agent or use Mode B")
               : bi("请先选择一台执行节点（控制机）后继续", "Select an execution node to continue"),
         };
       }
@@ -1002,7 +1005,7 @@ export function ClusterAutomationPanel({
                 className="rha-link-btn"
                 onClick={() => go({ name: "executions", view: "nodes" })}
               >
-                <IconSettings /> {bi("前往执行中心 → 执行节点", "Open Execution Center → Nodes")}
+                <IconSettings /> {bi("前往执行中心 → Agent", "Open Execution Center → Agent")}
               </button>
             </div>
           </div>
@@ -1011,18 +1014,36 @@ export function ClusterAutomationPanel({
             <div className="rha-agents-head">
               <span>
                 {bi(
-                  `目标主机清单（${onlineAgentHostCount}/${effectiveHosts.length} 台 Agent 在线）`,
-                  `Target Hosts (${onlineAgentHostCount}/${effectiveHosts.length} Agents Online)`,
+                  `目标主机自动匹配状态（${onlineAgentHostCount}/${effectiveHosts.length} 台 Agent 在线）`,
+                  `Matched Target Hosts (${onlineAgentHostCount}/${effectiveHosts.length} Agents Online)`,
                 )}
               </span>
-              <Button
-                size="mini"
-                type="text"
-                icon={<IconRefresh />}
-                onClick={() => void load(true)}
-              >
-                {bi("刷新心跳", "Refresh")}
-              </Button>
+              <div style={{ display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                <Button
+                  size="mini"
+                  type="text"
+                  icon={<IconRefresh />}
+                  onClick={() => void load(true)}
+                >
+                  {bi("刷新心跳", "Refresh")}
+                </Button>
+                <button
+                  type="button"
+                  className="rha-link-btn"
+                  onClick={() => go({ name: "executions", view: "nodes", fleet: "agents" })}
+                >
+                  <IconSettings /> {bi("管理全平台 Agent", "Manage Agents")}
+                </button>
+              </div>
+            </div>
+
+            <div className="rha-field-hint" style={{ marginTop: 0 }}>
+              <span>
+                {bi(
+                  "按主机 IP 自动匹配「执行中心 → Agent」中已接入的目标机；1 台主机仅需接入 1 次即可跨集群复用。",
+                  "Auto-matches Direct Target Agents enrolled in Execution Center → Agent by host IP; enroll each machine once.",
+                )}
+              </span>
             </div>
 
             <div className="rha-agent-list">
@@ -1045,15 +1066,15 @@ export function ClusterAutomationPanel({
                           </div>
                           <div className="rha-agent-meta">
                             {!ag
-                              ? bi("未接入直连 Agent", "Not enrolled")
+                              ? bi("执行中心尚未接入该主机 IP 的直连 Agent", "Not enrolled in Execution Center yet")
                               : ag.online
                                 ? bi(
-                                    `在线 · ${ag.mode === "direct" ? "直连执行模式" : "托管信任"} · 最近心跳 ${fullTime(ag.last_seen || "")}`,
-                                    `Online · ${ag.mode === "direct" ? "Direct Exec" : "SSH Trust"} · Last seen ${fullTime(ag.last_seen || "")}`,
+                                    `已匹配并在线 · 免密直连 · 最近心跳 ${fullTime(ag.last_seen || "")}`,
+                                    `Matched & Online · Direct HTTPS · Last seen ${fullTime(ag.last_seen || "")}`,
                                   )
                                 : bi(
-                                    "已生成配置，等待在目标机启动 Agent 服务…",
-                                    "Enrolled; waiting for target-agent daemon…",
+                                    "已在执行中心签发，等待在目标机启动 Agent 服务…",
+                                    "Enrolled in Execution Center; waiting for target-agent daemon…",
                                   )}
                           </div>
                         </div>
@@ -1093,15 +1114,32 @@ export function ClusterAutomationPanel({
                           </>
                         ) : (
                           canManage && (
-                            <Button
-                              size="mini"
-                              type="primary"
-                              loading={enrollingHost === h.ip}
-                              icon={<IconPlus />}
-                              onClick={() => void enrollDirectAgent(h.name, h.ip)}
-                            >
-                              {bi("生成直连 Agent", "Enroll Agent")}
-                            </Button>
+                            <div style={{ display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                              <Button
+                                size="mini"
+                                type="primary"
+                                icon={<IconArrowRight />}
+                                onClick={() => {
+                                  saveAgentEnrollPrefill({
+                                    role: "target",
+                                    host: h.name,
+                                    ip: h.ip,
+                                  });
+                                  go({ name: "executions", view: "nodes", fleet: "agents" });
+                                }}
+                              >
+                                {bi("去执行中心接入", "Enroll in Center")}
+                              </Button>
+                              <Button
+                                size="mini"
+                                type="outline"
+                                loading={enrollingHost === h.ip}
+                                icon={<IconPlus />}
+                                onClick={() => void enrollDirectAgent(h.name, h.ip)}
+                              >
+                                {bi("就地签发", "Quick Issue")}
+                              </Button>
+                            </div>
                           )
                         )}
                       </div>

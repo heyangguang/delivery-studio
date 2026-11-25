@@ -663,24 +663,76 @@ function clueCategoryMeta(text: string): { label: string; tone: string } {
   return { label: bi("现场线索", "Clue"), tone: "neutral" };
 }
 
-/** Structured, scannable field-clue list replacing cramped paragraph textareas (with raw text toggle). */
+const CLUE_QUICK_TEMPLATES = () => [
+  {
+    label: bi("+ 维护窗口", "+ Maint Window"),
+    text: bi("维护窗口：每周日 02:00-04:00，期间允许逐台滚动重启", "Maintenance window: Sun 02:00-04:00, rolling restarts permitted"),
+  },
+  {
+    label: bi("+ 切主/重启红线", "+ Failover Guard"),
+    text: bi("变更红线：工作时段禁止主库重启或计划内切主，须提前审批", "Guardrail: no primary restart or switchover during business hours without approval"),
+  },
+  {
+    label: bi("+ 入口 / VIP 约束", "+ VIP / LB Note"),
+    text: bi("访问入口：业务经外部 VIP/ELB 接入，后端节点禁止直连回环探测", "Endpoint: external VIP/ELB in front; avoid backend hairpinning probes"),
+  },
+  {
+    label: bi("+ 备份前提", "+ Backup Prereq"),
+    text: bi("备份约束：变更前须确认当日有效全量备份与 WAL 归档正常", "Backup prereq: verify fresh full backup and healthy WAL archiving before changes"),
+  },
+];
+
+/** Structured, scannable field-clue list with top quick-add bar, templates, and category filter. */
 function FieldCluesEditor({
   value,
   onChange,
   title,
   placeholder,
+  fullHeight = false,
+  showTemplates = false,
 }: {
   value: string;
   onChange: (next: string) => void;
   title?: string;
   placeholder?: string;
+  fullHeight?: boolean;
+  showTemplates?: boolean;
 }) {
   useLang();
   const [rawMode, setRawMode] = useState(false);
   const [draft, setDraft] = useState("");
+  const [activeCat, setActiveCat] = useState<string>("all");
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [editingText, setEditingText] = useState("");
+  const addInputRef = useRef<HTMLInputElement | null>(null);
   const clues = useMemo(() => splitNotesToClues(value), [value]);
+
+  const indexedClues = useMemo(
+    () => clues.map((text, idx) => ({ text, idx, cat: clueCategoryMeta(text) })),
+    [clues],
+  );
+  const catCounts = useMemo(() => {
+    const m = new Map<string, { label: string; tone: string; count: number }>();
+    for (const item of indexedClues) {
+      const prev = m.get(item.cat.label);
+      if (prev) prev.count += 1;
+      else m.set(item.cat.label, { label: item.cat.label, tone: item.cat.tone, count: 1 });
+    }
+    return Array.from(m.values());
+  }, [indexedClues]);
+  const visibleClues = useMemo(
+    () =>
+      activeCat === "all"
+        ? indexedClues
+        : indexedClues.filter((it) => it.cat.label === activeCat),
+    [activeCat, indexedClues],
+  );
+
+  useEffect(() => {
+    if (activeCat !== "all" && !catCounts.some((c) => c.label === activeCat)) {
+      setActiveCat("all");
+    }
+  }, [activeCat, catCounts]);
 
   const commitClues = (next: string[]) => {
     onChange(joinCluesToNotes(next));
@@ -689,8 +741,9 @@ function FieldCluesEditor({
   const addClue = () => {
     const t = draft.trim();
     if (!t) return;
-    commitClues([...clues, t]);
+    commitClues([t, ...clues]);
     setDraft("");
+    setActiveCat("all");
   };
 
   const saveEdit = (idx: number) => {
@@ -705,7 +758,7 @@ function FieldCluesEditor({
   };
 
   return (
-    <div className="imp-clues-wrap">
+    <div className={`imp-clues-wrap ${fullHeight ? "is-full" : ""}`}>
       <div className="imp-clues-head">
         <div className="imp-clues-head-l">
           <span className="imp-lbl-left">
@@ -724,7 +777,7 @@ function FieldCluesEditor({
 
       {rawMode ? (
         <Input.TextArea
-          autoSize={{ minRows: 4, maxRows: 10 }}
+          autoSize={{ minRows: fullHeight ? 10 : 4, maxRows: fullHeight ? 24 : 10 }}
           value={value}
           onChange={onChange}
           placeholder={
@@ -737,17 +790,80 @@ function FieldCluesEditor({
         />
       ) : (
         <div className="imp-clues-card">
-          {clues.length === 0 ? (
+          {/* Quick-Add Bar placed AT THE TOP so users never scroll past existing notes to add one */}
+          <div className="imp-clues-add is-top">
+            <Input
+              ref={(inst) => {
+                addInputRef.current = (inst as unknown as { dom?: HTMLInputElement } | null)?.dom || null;
+              }}
+              size="small"
+              value={draft}
+              onChange={setDraft}
+              onPressEnter={addClue}
+              placeholder={
+                placeholder ||
+                bi(
+                  "输入一条现场线索或运维约束（如：每周日 02:00-04:00 为生产维护窗口），回车立即置顶添加…",
+                  "Type a field clue or constraint (e.g., maintenance window Sun 02:00-04:00) and press Enter…",
+                )
+              }
+            />
+            <Button size="small" type="primary" icon={<IconPlus />} disabled={!draft.trim()} onClick={addClue}>
+              {bi("添加", "Add")}
+            </Button>
+          </div>
+
+          {showTemplates && (
+            <div className="imp-clues-tpls">
+              <span className="imp-clues-tpl-lbl">{bi("常用约束：", "Quick templates:")}</span>
+              {CLUE_QUICK_TEMPLATES().map((tpl, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  className="imp-clues-tpl-chip"
+                  onClick={() => {
+                    setDraft(tpl.text);
+                    window.setTimeout(() => addInputRef.current?.focus(), 0);
+                  }}
+                >
+                  {tpl.label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {fullHeight && catCounts.length > 1 && clues.length >= 4 && (
+            <div className="imp-clues-filters">
+              <button
+                type="button"
+                className={`imp-clues-flt ${activeCat === "all" ? "is-on" : ""}`}
+                onClick={() => setActiveCat("all")}
+              >
+                {bi("全部", "All")} <span className="num">{clues.length}</span>
+              </button>
+              {catCounts.map((c) => (
+                <button
+                  key={c.label}
+                  type="button"
+                  className={`imp-clues-flt ${activeCat === c.label ? "is-on" : ""}`}
+                  onClick={() => setActiveCat(c.label)}
+                >
+                  {c.label} <span className="num">{c.count}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {visibleClues.length === 0 ? (
             <div className="imp-clues-empty">
               {bi(
-                "暂无线索记录。运行只读探针、变更演练或手动在下方添加维护窗口与环境约束，将自动沉淀于此。",
-                "No clues recorded yet. Run a read-only probe, change rehearsal, or add notes below.",
+                "暂无线索记录。可在上方直接录入维护窗口、切主红线或环境备注，也会在运行只读探针与变更演练后自动沉淀于此。",
+                "No clues recorded yet. Add maintenance windows or operational guardrails above, or run a read-only probe.",
               )}
             </div>
           ) : (
-            <div className="imp-clues-list">
-              {clues.map((item, idx) => {
-                const cat = clueCategoryMeta(item);
+            <div className={`imp-clues-list ${fullHeight ? "is-full" : ""}`}>
+              {visibleClues.map(({ text: item, idx, cat }) => {
                 const isEditing = editingIdx === idx;
                 return (
                   <div key={idx} className="imp-clue-row">
@@ -803,24 +919,6 @@ function FieldCluesEditor({
               })}
             </div>
           )}
-          <div className="imp-clues-add">
-            <Input
-              size="small"
-              value={draft}
-              onChange={setDraft}
-              onPressEnter={addClue}
-              placeholder={
-                placeholder ||
-                bi(
-                  "补充一条现场线索或约束（如：每周日 02:00-04:00 为生产维护窗口），回车添加…",
-                  "Add a field clue or constraint (e.g., maintenance window Sun 02:00-04:00) and press Enter…",
-                )
-              }
-            />
-            <Button size="small" icon={<IconPlus />} disabled={!draft.trim()} onClick={addClue}>
-              {bi("添加", "Add")}
-            </Button>
-          </div>
         </div>
       )}
     </div>
@@ -4801,14 +4899,14 @@ export function ImportedBaselineModal({
   onSaved,
 }: {
   visible: boolean;
-  mode?: "edit" | "probe";
+  mode?: "edit" | "notes" | "probe";
   cluster: ClusterView;
   onClose: () => void;
   onSaved: () => Promise<void>;
 }) {
   const lang = useLang();
   const isEn = lang === "en-US";
-  const [tab, setTab] = useState<"edit" | "probe">(mode);
+  const [tab, setTab] = useState<"edit" | "notes" | "probe">(mode);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [data, setData] = useState<ImportPayload | null>(null);
@@ -5571,6 +5669,16 @@ export function ImportedBaselineModal({
             </button>
             <button
               type="button"
+              className={`imp-drawer-tab ${tab === "notes" ? "on" : ""}`}
+              onClick={() => setTab("notes")}
+            >
+              {bi("线索与约束", "Clues & Guardrails")}
+              {splitNotesToClues(notes).length > 0 && (
+                <em className="imp-tab-dot is-muted">{splitNotesToClues(notes).length}</em>
+              )}
+            </button>
+            <button
+              type="button"
               className={`imp-drawer-tab ${tab === "probe" ? "on" : ""}`}
               onClick={() => setTab("probe")}
             >
@@ -5588,7 +5696,10 @@ export function ImportedBaselineModal({
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, width: "100%" }}>
             <Button onClick={onClose}>{bi("取消", "Cancel")}</Button>
             <Button type="primary" loading={saving} onClick={saveBaseline}>
-              <IconCheck /> {bi("保存基线并刷新拓扑", "Save & Rebuild Topology")}
+              <IconCheck />{" "}
+              {tab === "notes"
+                ? bi("保存线索与约束", "Save Clues & Guardrails")
+                : bi("保存基线并刷新拓扑", "Save & Rebuild Topology")}
             </Button>
           </div>
         )
@@ -5596,6 +5707,25 @@ export function ImportedBaselineModal({
     >
       {loading ? (
         <Skeleton text={{ rows: 9 }} animation />
+      ) : tab === "notes" ? (
+        <div className="imp-notes-tab">
+          <div className="imp-notes-tab-banner">
+            <Spark size={13} />
+            <span>
+              {bi(
+                "沉淀在此的维护窗口、切主红线与环境特殊说明会自动注入 AI 变更演练与排障上下文，无需每次重复提醒。",
+                "Maintenance windows, failover guardrails, and field notes saved here are automatically injected into AI Change Rehearsal & troubleshooting.",
+              )}
+            </span>
+          </div>
+          <FieldCluesEditor
+            title={bi("现场线索与运维约束", "Field Clues & Operational Guardrails")}
+            value={notes}
+            onChange={setNotes}
+            fullHeight
+            showTemplates
+          />
+        </div>
       ) : tab === "probe" ? (
         (() => {
           const allGaps = health?.gaps || [];
@@ -6459,13 +6589,6 @@ export function ImportedBaselineModal({
                 ))}
               </div>
             )}
-            <div style={{ marginTop: 6 }}>
-              <FieldCluesEditor
-                title={bi("现场线索与运维约束", "Field Clues & Operational Notes")}
-                value={notes}
-                onChange={setNotes}
-              />
-            </div>
           </div>
           {lang ? null : null}
         </div>

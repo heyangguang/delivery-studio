@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - develop
+      - main
+      - "release/**"
+  push:
+    branches:
+      - develop
+      - main
+      - "release/**"
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  repo-standard:
+    name: Repo Standard & Contracts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check locked root directory layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          allowed='^(\.git|\.github|\.gitignore|AGENTS\.md|LICENSE|README\.md|backend|deploy|docs|frontend|scripts|tests)$'
+          bad=0
+          while IFS= read -r entry; do
+            name="${entry#./}"
+            if [[ ! "$name" =~ $allowed ]]; then
+              echo "::error::Unexpected root entry violating docs/DIRECTORY_STANDARD.md: $name"
+              bad=1
+            fi
+          done < <(find . -maxdepth 1 -mindepth 1 | sort)
+          exit "$bad"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run Python contract unit tests
+        run: python3 -m unittest discover -s tests/python -p "test_*.py" -v
+
+  frontend:
+    name: Frontend Build & Typecheck
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck & Production Build
+        run: npm run build
+
+  backend:
+    name: Backend CI
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Go Vet
+        run: go vet ./...
+
+      - name: Run Core Package Tests
+        run: go test -count=1 -timeout 3m ./mwpack/... ./pkglib/... ./catalog/...
+
+      - name: Run Server Verification Tests
+        run: go test -short -count=1 -timeout 5m -run "TestGateway|TestAPIVersion|TestDev|TestRehearsal|TestClusterImport|TestImported|TestGlyphs|TestDocs|TestIAM|TestSecurity|TestTargetEnrollment|TestExecutionNodeBootstrap|TestExecutionDurable|TestExecutionReport|TestExecutionAuthorization|TestExecutionOutbox|TestAIMasterSwitch" ./internal/server
+
+      - name: Verify Linux amd64 Build
+        env:
+          GOOS: linux
+          GOARCH: amd64
+        run: go build -o /tmp/delivery-studio-linux-amd64 ./cmd/studio

@@ -706,7 +706,7 @@ func (s *storeServer) compChat(w http.ResponseWriter, r *http.Request, user stor
 		return
 	}
 	st := s.aiLoad()
-	providers := st.aiProvidersForPick("component", in.Model)
+	providers := s.aiProvidersForUser(st, user.User, "component", in.Model)
 	if len(providers) == 0 {
 		s.fail(w, 409, "没有可用的模型供应商，请在平台设置 → AI 中配置")
 		return

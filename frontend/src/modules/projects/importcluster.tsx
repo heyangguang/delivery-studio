@@ -2825,7 +2825,7 @@ export function ImportClusterPage({
     ];
   }, [isCustom, selectedPreset]);
 
-  const wizardModelPick = useModelPick("chat");
+  const wizardModelPick = useModelPick("assistant");
   const wizardAIOpts = useAIOptions();
 
   const fetchImportProbe = useCallback(
@@ -2870,12 +2870,14 @@ export function ImportClusterPage({
       probeAbortRef.current = ac;
       setLastProbeFocus(opts.focus || "");
       setProbeGenerating(true);
-      const modelHint = wizardModelPick.ref?.split("|")[1];
+      const modelHint = wizardModelPick.current?.model || wizardModelPick.ref?.split("|")[1];
       setProbeLive(
         buildImportInitialLive(
           "import-probe",
           bi("AI 正在定制 100% 只读采集探针", "AI Tailoring 100% Read-Only Probe"),
-          modelHint ? { model: modelHint } : undefined,
+          modelHint
+            ? { model: modelHint, provider: wizardModelPick.current?.provider }
+            : undefined,
         ),
       );
       try {
@@ -2989,13 +2991,15 @@ export function ImportClusterPage({
     const ac = new AbortController();
     parseAbortRef.current = ac;
     setParsing(true);
-    const modelHint = wizardModelPick.ref?.split("|")[1];
+    const modelHint = wizardModelPick.current?.model || wizardModelPick.ref?.split("|")[1];
     if (useAI) {
       setParseLive(
         buildImportInitialLive(
           "import-parse",
           bi("AI 正在解析现场回显与多组件架构", "AI Parsing Evidence & Multi-Component Stack"),
-          modelHint ? { model: modelHint } : undefined,
+          modelHint
+            ? { model: modelHint, provider: wizardModelPick.current?.provider }
+            : undefined,
         ),
       );
     } else {
@@ -4460,7 +4464,7 @@ export function ImportedBaselineModal({
   const [autoProbeBusy, setAutoProbeBusy] = useState(false);
   const [autoProbeTask, setAutoProbeTask] = useState<RehearsalExecTask | null>(null);
   const autoProbeAbortRef = useRef<AbortController | null>(null);
-  const modelPick = useModelPick("chat");
+  const modelPick = useModelPick("assistant");
   const aiOpts = useAIOptions();
 
   const roleOptions = useMemo<RolePreset[]>(() => {
@@ -4613,12 +4617,12 @@ export function ImportedBaselineModal({
       setProbeGenerating(true);
       setStep1Open(false);
       setStep2Open(true);
-      const modelHint = modelPick.ref?.split("|")[1];
+      const modelHint = modelPick.current?.model || modelPick.ref?.split("|")[1];
       setProbeLive(
         buildImportInitialLive(
           "import-probe",
           bi("AI 正在生成专项 100% 只读探针", "AI Generating Targeted 100% Read-Only Probe"),
-          modelHint ? { model: modelHint } : undefined,
+          modelHint ? { model: modelHint, provider: modelPick.current?.provider } : undefined,
         ),
       );
       try {
@@ -4691,12 +4695,12 @@ export function ImportedBaselineModal({
     const ac = new AbortController();
     diagAbortRef.current = ac;
     setDiagnosingGaps(true);
-    const modelHint = modelPick.ref?.split("|")[1];
+    const modelHint = modelPick.current?.model || modelPick.ref?.split("|")[1];
     setDiagLive(
       buildImportInitialLive(
         "import-diagnose",
         bi("AI 正在深度排查架构基线盲区", "AI Deep Baseline Gap Diagnosis"),
-        modelHint ? { model: modelHint } : undefined,
+        modelHint ? { model: modelHint, provider: modelPick.current?.provider } : undefined,
       ),
     );
     try {
@@ -4863,13 +4867,13 @@ export function ImportedBaselineModal({
     const ac = new AbortController();
     parseAbortRef.current = ac;
     setParsing(true);
-    const modelHint = modelPick.ref?.split("|")[1];
+    const modelHint = modelPick.current?.model || modelPick.ref?.split("|")[1];
     if (useAI) {
       setParseLive(
         buildImportInitialLive(
           "import-parse",
           bi("AI 正在解析回显并增量合并基线", "AI Parsing Evidence & Merging Baseline"),
-          modelHint ? { model: modelHint } : undefined,
+          modelHint ? { model: modelHint, provider: modelPick.current?.provider } : undefined,
         ),
       );
     } else {

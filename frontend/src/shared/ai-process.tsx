@@ -659,9 +659,31 @@ export function fmtStepDuration(ms?: number) {
   return `${Math.floor(sec / 60)}m ${Math.round(sec % 60)}s`;
 }
 
-function pendingHintForStep(st: RehearsalTraceStep): string {
+type StageDomain = "rehearsal" | "import-parse" | "import-probe" | "import-diagnose";
+
+function stageDomainOf(kind?: string): StageDomain {
+  if (kind === "import-parse") return "import-parse";
+  if (kind === "import-probe") return "import-probe";
+  if (kind === "import-diagnose") return "import-diagnose";
+  return "rehearsal";
+}
+
+function pendingHintForStep(st: RehearsalTraceStep, kind?: string): string {
+  const dom = stageDomainOf(kind);
   switch (st.kind) {
     case "guard":
+      if (dom === "import-parse") {
+        return bi(
+          "等待线索预扫描完成后自动剥离口令与私钥",
+          "Waiting for pre-scan before scrubbing passwords & keys",
+        );
+      }
+      if (dom === "import-probe") {
+        return bi(
+          "等待场景加载完成后注入 100% 静态只读安全护栏",
+          "Waiting to lock 100% read-only safety guardrails",
+        );
+      }
       return bi(
         "等待基线上下文读取完成后执行脱敏与安全红线校验",
         "Waiting for baseline read to scrub secrets & run safety checks",
@@ -672,11 +694,47 @@ function pendingHintForStep(st: RehearsalTraceStep): string {
         "Waiting for safety checks to open AI model stream",
       );
     case "think":
+      if (dom === "import-parse") {
+        return bi(
+          "等待模型首包返回后开始识别主机、伴生组件与访问入口",
+          "Waiting for first token to extract hosts, companions & endpoints",
+        );
+      }
+      if (dom === "import-probe") {
+        return bi(
+          "等待模型首包返回后按场景编写精炼只读探针脚本",
+          "Waiting for first token to craft tailored read-only probe",
+        );
+      }
+      if (dom === "import-diagnose") {
+        return bi(
+          "等待模型首包返回后扫描架构盲区与缺失基线项",
+          "Waiting for first token to audit baseline blind spots",
+        );
+      }
       return bi(
         "等待模型网关返回首包 Token 后展开实时推演",
         "Waiting for first token from model gateway",
       );
     case "synthesize":
+      if (dom === "import-parse") {
+        return bi(
+          "等待多组件架构识别完成后合成可编辑纳管基线草稿",
+          "Waiting for extraction to assemble editable baseline draft",
+        );
+      }
+      if (dom === "import-probe") {
+        return bi(
+          "等待脚本编写完成后执行 100% 静态只读安全门禁扫描",
+          "Waiting for script generation to run static read-only gate",
+        );
+      }
+      if (dom === "import-diagnose") {
+        return bi(
+          "等待盲区审计完成后收敛高价值只读补采清单",
+          "Waiting for audit to compile read-only gap checklist",
+        );
+      }
       return bi(
         "等待架构风险推演完成后编排结构化结果",
         "Waiting for analysis to structure final output",
@@ -770,6 +828,7 @@ const LiveElapsedSpan = React.memo(function LiveElapsedSpan({
 });
 
 const RehearsalStageCartoon = React.memo(function RehearsalStageCartoon({
+  kind,
   scene,
   stepTitle,
   stepDetail,
@@ -778,6 +837,7 @@ const RehearsalStageCartoon = React.memo(function RehearsalStageCartoon({
   waitStartedAt,
   errorBadge,
 }: {
+  kind?: string;
   scene: CartoonScene;
   stepTitle: string;
   stepDetail?: string;
@@ -787,53 +847,121 @@ const RehearsalStageCartoon = React.memo(function RehearsalStageCartoon({
   errorBadge?: string;
 }) {
   useLang();
+  const domain = stageDomainOf(kind);
+
   const actMeta: Record<
     CartoonScene,
     { tag: string; headline: string; sub: React.ReactNode }
   > = {
-    inspect: {
-      tag: bi("ACT 01 · 基线扫描", "ACT 01 · BASELINE SCAN"),
-      headline:
-        stepTitle ||
-        bi(
-          "扫描集群初始交付拓扑与参数基线",
-          "Scanning initial delivery topology & baseline params",
-        ),
-      sub:
-        stepDetail ||
-        bi(
-          "逐节点提取主从角色、端口与关键配置，构建演练数字沙盘",
-          "Extracting node roles, ports & key configs to build rehearsal sandbox",
-        ),
-    },
-    guard: {
-      tag: bi("ACT 02 · 安全脱敏", "ACT 02 · REDACTION"),
-      headline:
-        stepTitle ||
-        bi(
-          "敏感凭据自动剥离与只读红线锁定",
-          "Stripping credentials & locking read-only guardrails",
-        ),
-      sub:
-        stepDetail ||
-        bi(
-          "口令、私钥与连接串在本地安检门全部擦除，仅放行架构元数据",
-          "Passwords, keys & DSNs scrubbed locally; only topology metadata passes",
-        ),
-    },
+    inspect:
+      domain === "import-parse"
+        ? {
+            tag: bi("ACT 01 · 线索采样", "ACT 01 · EVIDENCE SCAN"),
+            headline:
+              stepTitle ||
+              bi(
+                "扫描终端回显与现场截图线索",
+                "Scanning terminal outputs & screenshot clues",
+              ),
+            sub:
+              stepDetail ||
+              bi(
+                "规则引擎同步扫描文本回显与截图，提取主机、端口与伴生组件初步线索",
+                "Pre-scanning terminal logs & screenshots for hosts, ports & companion clues",
+              ),
+          }
+        : domain === "import-probe"
+          ? {
+              tag: bi("ACT 01 · 场景解析", "ACT 01 · SCENARIO CONTEXT"),
+              headline:
+                stepTitle ||
+                bi(
+                  "装载中间件类型与定制场景需求",
+                  "Loading middleware type & tailored scenario hints",
+                ),
+              sub:
+                stepDetail ||
+                bi(
+                  "结合所选中间件、部署形态与勾选的场景卡片规划采集重点",
+                  "Planning probe coverage from middleware type, runtime & selected scenario cards",
+                ),
+            }
+          : domain === "import-diagnose"
+            ? {
+                tag: bi("ACT 01 · 档案通读", "ACT 01 · BASELINE AUDIT"),
+                headline:
+                  stepTitle ||
+                  bi(
+                    "通读存量基线档案与历史变更台账",
+                    "Reading existing baseline archive & change history",
+                  ),
+                sub:
+                  stepDetail ||
+                  bi(
+                    "读取主机角色、伴生栈、配置路径与近期变更，准备排查高价值盲区",
+                    "Loading hosts, companions, config paths & history to locate blind spots",
+                  ),
+              }
+            : {
+                tag: bi("ACT 01 · 基线扫描", "ACT 01 · BASELINE SCAN"),
+                headline:
+                  stepTitle ||
+                  bi(
+                    "扫描集群初始交付拓扑与参数基线",
+                    "Scanning initial delivery topology & baseline params",
+                  ),
+                sub:
+                  stepDetail ||
+                  bi(
+                    "逐节点提取主从角色、端口与关键配置，构建演练数字沙盘",
+                    "Extracting node roles, ports & key configs to build rehearsal sandbox",
+                  ),
+              },
+    guard:
+      domain === "import-probe"
+        ? {
+            tag: bi("ACT 02 · 只读护栏", "ACT 02 · READ-ONLY POLICY"),
+            headline:
+              stepTitle ||
+              bi(
+                "注入 100% 静态只读安全红线规则",
+                "Injecting 100% static read-only safety guardrails",
+              ),
+            sub:
+              stepDetail ||
+              bi(
+                "锁定零写入、零服务重启、零文件重定向与凭据脱敏约束，确保生产绝对安全",
+                "Locking zero-write, zero-restart, zero-redirect & secret redaction constraints",
+              ),
+          }
+        : {
+            tag: bi("ACT 02 · 安全脱敏", "ACT 02 · REDACTION"),
+            headline:
+              stepTitle ||
+              bi(
+                "敏感凭据自动剥离与安全边界锁定",
+                "Stripping credentials & locking safety guardrails",
+              ),
+            sub:
+              stepDetail ||
+              bi(
+                "口令、私钥与连接串在本地安检门全部擦除，仅放行架构元数据",
+                "Passwords, keys & DSNs scrubbed locally; only topology metadata passes",
+              ),
+          },
     connect: {
       tag: bi("ACT 03 · 网关握手", "ACT 03 · GATEWAY HANDSHAKE"),
       headline:
         stepTitle ||
         bi(
-          "平台底座正在与 AI 模型网关双向握手",
-          "Handshaking with AI model gateway",
+          "平台底座正在与所选 AI 模型建立流式握手",
+          "Handshaking with selected AI model gateway",
         ),
       sub: stepDetail || (
         <>
           {bi(
-            `正在向 ${provider || "模型网关"}${model ? ` (${model})` : ""} 投递脱敏基线并等待首包响应`,
-            `Sending redacted baseline to ${provider || "model gateway"}${model ? ` (${model})` : ""} and awaiting first token`,
+            `正在向 ${provider || "模型网关"}${model ? ` (${model})` : ""} 投递脱敏上下文并等待首包响应`,
+            `Sending redacted context to ${provider || "model gateway"}${model ? ` (${model})` : ""} and awaiting first token`,
           )}
           {waitStartedAt ? (
             <LiveElapsedSpan
@@ -846,45 +974,143 @@ const RehearsalStageCartoon = React.memo(function RehearsalStageCartoon({
         </>
       ),
     },
-    think: {
-      tag: bi("ACT 04 · 沙盘推演", "ACT 04 · REASONING"),
-      headline:
-        stepTitle ||
-        bi(
-          "握手已建立 · 正在推演高可用变更路径",
-          "Connected · Reasoning HA-safe change path",
-        ),
-      sub:
-        stepDetail ||
-        bi(
-          "遵循「从库先行、主库守卫、随时可回退」原则逐节点模拟变更影响",
-          "Simulating impact node-by-node: replicas first, primary guarded, always reversible",
-        ),
-    },
-    synthesize: {
-      tag: bi("ACT 05 · 方案签章", "ACT 05 · FINALIZING"),
-      headline:
-        stepTitle ||
-        bi(
-          "编排结构化演练清单并加盖安全校验章",
-          "Structuring runbook & stamping safety verification",
-        ),
-      sub:
-        stepDetail ||
-        bi(
-          "收敛模型推演结论，完成静态安全红线复核与可执行步骤封装",
-          "Consolidating findings, verifying safety rules & packaging executable steps",
-        ),
-    },
+    think:
+      domain === "import-parse"
+        ? {
+            tag: bi("ACT 04 · 拓扑拼装", "ACT 04 · TOPOLOGY EXTRACTION"),
+            headline:
+              stepTitle ||
+              bi(
+                "识别主机角色、多组件伴生栈与访问入口",
+                "Extracting hosts, companion stack & access endpoints",
+              ),
+            sub:
+              stepDetail ||
+              bi(
+                "交叉解析回显与多张截图，结构化拼装主中间件、伴生高可用栈与 VIP 入口",
+                "Cross-referencing logs & screenshots to assemble hosts, companions & VIP endpoints",
+              ),
+          }
+        : domain === "import-probe"
+          ? {
+              tag: bi("ACT 04 · 探针编排", "ACT 04 · SCRIPT CRAFTING"),
+              headline:
+                stepTitle ||
+                bi(
+                  "编排精炼 100% 只读 Bash 采集探针",
+                  "Crafting concise 100% read-only Bash probe",
+                ),
+              sub:
+                stepDetail ||
+                bi(
+                  "按所选现场场景逐段编写轻量、零副作用的只读采集命令与脱敏过滤",
+                  "Writing targeted, zero-side-effect read-only commands & secret filters",
+                ),
+            }
+          : domain === "import-diagnose"
+            ? {
+                tag: bi("ACT 04 · 盲区审计", "ACT 04 · BLIND-SPOT AUDIT"),
+                headline:
+                  stepTitle ||
+                  bi(
+                    "对照生产高可用与演练标准扫描基线盲区",
+                    "Auditing baseline blind spots against HA & rehearsal standards",
+                  ),
+                sub:
+                  stepDetail ||
+                  bi(
+                    "深入排查复制机制、备份归档、容量水位与高可用参数中的遗漏项",
+                    "Inspecting replication, backup, capacity & HA boundaries for missing signals",
+                  ),
+              }
+            : {
+                tag: bi("ACT 04 · 沙盘推演", "ACT 04 · REASONING"),
+                headline:
+                  stepTitle ||
+                  bi(
+                    "握手已建立 · 正在推演高可用变更路径",
+                    "Connected · Reasoning HA-safe change path",
+                  ),
+                sub:
+                  stepDetail ||
+                  bi(
+                    "遵循「从库先行、主库守卫、随时可回退」原则逐节点模拟变更影响",
+                    "Simulating impact node-by-node: replicas first, primary guarded, always reversible",
+                  ),
+              },
+    synthesize:
+      domain === "import-parse"
+        ? {
+            tag: bi("ACT 05 · 基线落盘", "ACT 05 · BASELINE DRAFT"),
+            headline:
+              stepTitle ||
+              bi(
+                "合成结构化存量纳管基线草稿",
+                "Synthesizing structured import baseline draft",
+              ),
+            sub:
+              stepDetail ||
+              bi(
+                "合并规则预检与 AI 识别结果，输出可逐项核对微调的架构拓扑草稿",
+                "Merging deterministic & AI findings into an editable topology baseline draft",
+              ),
+          }
+        : domain === "import-probe"
+          ? {
+              tag: bi("ACT 05 · 静态安检", "ACT 05 · STATIC RO GATE"),
+              headline:
+                stepTitle ||
+                bi(
+                  "100% 静态只读安全门禁复核",
+                  "Running 100% static read-only safety gate",
+                ),
+              sub:
+                stepDetail ||
+                bi(
+                  "逐行静态扫描生成脚本，拦截任何写操作或服务变更指令后放行使用",
+                  "Scanning every line to guarantee zero write or service-mutation commands",
+                ),
+            }
+          : domain === "import-diagnose"
+            ? {
+                tag: bi("ACT 05 · 缺口清单", "ACT 05 · GAP CHECKLIST"),
+                headline:
+                  stepTitle ||
+                  bi(
+                    "收敛高价值只读补采建议与优先级",
+                    "Compiling prioritized read-only backfill checklist",
+                  ),
+                sub:
+                  stepDetail ||
+                  bi(
+                    "按高/中/低优先级整理缺失项与 100% 只读核验动作，一键勾选生成补采探针",
+                    "Organizing gaps by priority with 100% read-only verification actions",
+                  ),
+              }
+            : {
+                tag: bi("ACT 05 · 方案签章", "ACT 05 · FINALIZING"),
+                headline:
+                  stepTitle ||
+                  bi(
+                    "编排结构化演练清单并加盖安全校验章",
+                    "Structuring runbook & stamping safety verification",
+                  ),
+                sub:
+                  stepDetail ||
+                  bi(
+                    "收敛模型推演结论，完成静态安全红线复核与可执行步骤封装",
+                    "Consolidating findings, verifying safety rules & packaging executable steps",
+                  ),
+              },
     error: {
       tag: errorBadge || bi("通道熔断保护", "CIRCUIT BREAKER"),
       headline: bi(
-        "模型网关握手中断 · 本地安全熔断已介入",
-        "Gateway handshake interrupted · Safety breaker active",
+        "模型网关调用中断 · 本地安全熔断已介入",
+        "Gateway call interrupted · Safety breaker active",
       ),
       sub: bi(
-        "生产与测试数据零改动，您填写的变更诉求与截图已完整保留，可随时重试",
-        "Zero changes made; your inputs and screenshots are preserved for retry",
+        "您填写的内容与上传的截图已完整保留，切换模型或确认网络后可随时重试",
+        "Your inputs and screenshots are preserved; switch model or retry anytime",
       ),
     },
   };
@@ -893,8 +1119,119 @@ const RehearsalStageCartoon = React.memo(function RehearsalStageCartoon({
 
   return (
     <div className={`rh-cartoon-stage is-${scene}`} aria-hidden>
-      <div className="rh-cartoon-canvas" key={scene}>
-        {scene === "inspect" && (
+      <div className="rh-cartoon-canvas" key={`${domain}-${scene}`}>
+        {scene === "inspect" && domain === "import-parse" && (
+          <svg viewBox="0 0 360 96" fill="none" className="rh-cartoon-svg">
+            <defs>
+              <linearGradient id="ct-scan-grad-imp" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%" stopColor="var(--brand)" stopOpacity="0" />
+                <stop offset="100%" stopColor="var(--brand)" stopOpacity="0.22" />
+              </linearGradient>
+            </defs>
+            {/* Terminal Output Window + Screenshot Stack */}
+            <g className="ct-rack">
+              <rect x="10" y="10" width="122" height="44" rx="7" className="ct-node-box" />
+              <circle cx="20" cy="20" r="2.6" className="ct-led ok" />
+              <circle cx="29" cy="20" r="2.6" className="ct-led brand" />
+              <text x="40" y="20" textAnchor="start" dominantBaseline="central" className="ct-mini-txt">
+                $_ PROBE LOG
+              </text>
+              <rect x="18" y="30" width="84" height="4.5" rx="2.2" className="ct-bar" />
+              <rect x="18" y="40" width="64" height="4.5" rx="2.2" className="ct-bar" />
+
+              <rect x="10" y="60" width="58" height="26" rx="6" className="ct-node-box" />
+              <circle cx="22" cy="73" r="3.2" className="ct-led brand" />
+              <text x="31" y="73" textAnchor="start" dominantBaseline="central" className="ct-mini-txt">
+                IMG 1
+              </text>
+              <rect x="74" y="60" width="58" height="26" rx="6" className="ct-node-box" />
+              <circle cx="86" cy="73" r="3.2" className="ct-led ok" />
+              <text x="95" y="73" textAnchor="start" dominantBaseline="central" className="ct-mini-txt">
+                IMG N
+              </text>
+            </g>
+            <g className="ct-scan-beam">
+              <rect x="10" y="6" width="26" height="84" rx="4" fill="url(#ct-scan-grad-imp)" />
+              <line x1="36" y1="6" x2="36" y2="90" className="ct-scan-line" />
+            </g>
+            <path d="M134 28 C176 28, 192 48, 234 48" className="ct-dash-path is-moving" />
+            <path d="M134 72 C176 72, 192 48, 234 48" className="ct-dash-path is-moving" />
+            <g className="ct-float-card c1">
+              <rect x="154" y="14" width="52" height="20" rx="6" className="ct-pill-card" />
+              <text x="180" y="24" textAnchor="middle" dominantBaseline="central" className="ct-pill-txt">
+                HOST
+              </text>
+            </g>
+            <g className="ct-float-card c2">
+              <rect x="160" y="62" width="52" height="20" rx="6" className="ct-pill-card" />
+              <text x="186" y="72" textAnchor="middle" dominantBaseline="central" className="ct-pill-txt">
+                STACK
+              </text>
+            </g>
+            <g className="ct-capsule">
+              <rect x="236" y="20" width="114" height="56" rx="12" className="ct-hub-pod" />
+              <circle cx="258" cy="48" r="10.5" className="ct-check-disc" />
+              <path d="M253.5 48.2l3 3 6-6.2" className="ct-check-white" />
+              <text x="276" y="41" textAnchor="start" dominantBaseline="central" className="ct-pod-title">
+                {bi("现场线索", "Evidence")}
+              </text>
+              <text x="276" y="56" textAnchor="start" dominantBaseline="central" className="ct-pod-sub ok">
+                READY
+              </text>
+            </g>
+          </svg>
+        )}
+
+        {scene === "inspect" && domain === "import-probe" && (
+          <svg viewBox="0 0 360 96" fill="none" className="rh-cartoon-svg">
+            <g className="ct-rack">
+              <rect x="10" y="11" width="120" height="20" rx="5.5" className="ct-node-box" />
+              <circle cx="22" cy="21" r="3.2" className="ct-led brand" />
+              <text x="33" y="21" textAnchor="start" dominantBaseline="central" className="ct-mini-txt">
+                {bi("高可用栈 · HA", "HA Stack")}
+              </text>
+
+              <rect x="10" y="38" width="120" height="20" rx="5.5" className="ct-node-box" />
+              <circle cx="22" cy="48" r="3.2" className="ct-led ok" />
+              <text x="33" y="48" textAnchor="start" dominantBaseline="central" className="ct-mini-txt">
+                {bi("备份与归档", "Backup & WAL")}
+              </text>
+
+              <rect x="10" y="65" width="120" height="20" rx="5.5" className="ct-node-box" />
+              <circle cx="22" cy="75" r="3.2" className="ct-led brand" />
+              <text x="33" y="75" textAnchor="start" dominantBaseline="central" className="ct-mini-txt">
+                {bi("TLS / VIP 代理", "TLS & Proxy")}
+              </text>
+            </g>
+            <path d="M134 24 C176 24, 192 48, 234 48" className="ct-dash-path is-moving" />
+            <path d="M134 72 C176 72, 192 48, 234 48" className="ct-dash-path is-moving" />
+            <g className="ct-float-card c1">
+              <rect x="154" y="14" width="54" height="20" rx="6" className="ct-pill-card" />
+              <text x="181" y="24" textAnchor="middle" dominantBaseline="central" className="ct-pill-txt">
+                RO-ONLY
+              </text>
+            </g>
+            <g className="ct-float-card c2">
+              <rect x="160" y="62" width="52" height="20" rx="6" className="ct-pill-card" />
+              <text x="186" y="72" textAnchor="middle" dominantBaseline="central" className="ct-pill-txt">
+                BASH
+              </text>
+            </g>
+            <g className="ct-capsule">
+              <rect x="236" y="20" width="114" height="56" rx="12" className="ct-hub-pod" />
+              <circle cx="258" cy="48" r="10.5" className="ct-check-disc" />
+              <path d="M253.5 48.2l3 3 6-6.2" className="ct-check-white" />
+              <text x="276" y="41" textAnchor="start" dominantBaseline="central" className="ct-pod-title">
+                {bi("探针蓝图", "Blueprint")}
+              </text>
+              <text x="276" y="56" textAnchor="start" dominantBaseline="central" className="ct-pod-sub ok">
+                READY
+              </text>
+            </g>
+          </svg>
+        )}
+
+        {scene === "inspect" && domain !== "import-parse" && domain !== "import-probe" && (
           <svg viewBox="0 0 360 96" fill="none" className="rh-cartoon-svg">
             <defs>
               <linearGradient id="ct-scan-grad" x1="0" y1="0" x2="1" y2="0">
@@ -958,7 +1295,7 @@ const RehearsalStageCartoon = React.memo(function RehearsalStageCartoon({
               <circle cx="258" cy="48" r="10.5" className="ct-check-disc" />
               <path d="M253.5 48.2l3 3 6-6.2" className="ct-check-white" />
               <text x="276" y="41" textAnchor="start" dominantBaseline="central" className="ct-pod-title">
-                {bi("基线快照", "Baseline")}
+                {domain === "import-diagnose" ? bi("基线档案", "Archive") : bi("基线快照", "Baseline")}
               </text>
               <text x="276" y="56" textAnchor="start" dominantBaseline="central" className="ct-pod-sub ok">
                 READY
@@ -977,14 +1314,14 @@ const RehearsalStageCartoon = React.memo(function RehearsalStageCartoon({
               <rect x="14" y="34" width="84" height="28" rx="8" className="ct-pill-warn" />
               <circle cx="26" cy="48" r="3" className="ct-led warn" />
               <text x="35" y="48" textAnchor="start" dominantBaseline="central" className="ct-pill-warn-txt">
-                pwd=••••
+                {domain === "import-probe" ? "write/rm" : "pwd=••••"}
               </text>
             </g>
             <g className="ct-raw-pill p2">
               <rect x="14" y="34" width="80" height="28" rx="8" className="ct-pill-warn" />
               <circle cx="26" cy="48" r="3" className="ct-led warn" />
               <text x="35" y="48" textAnchor="start" dominantBaseline="central" className="ct-pill-warn-txt">
-                ssh_key
+                {domain === "import-probe" ? "restart" : "ssh_key"}
               </text>
             </g>
 
@@ -994,7 +1331,7 @@ const RehearsalStageCartoon = React.memo(function RehearsalStageCartoon({
               <circle cx="211" cy="48" r="6" className="ct-check-disc" />
               <path d="M208.3 48.1l1.9 1.9 3.7-3.9" className="ct-check-white sm" />
               <text x="223" y="48" textAnchor="start" dominantBaseline="central" className="ct-pill-ok-txt">
-                {bi("已脱敏", "Redacted")}
+                {domain === "import-probe" ? bi("零写入", "Zero-Write") : bi("已脱敏", "Redacted")}
               </text>
             </g>
             <g className="ct-clean-pill p2">
@@ -1002,7 +1339,7 @@ const RehearsalStageCartoon = React.memo(function RehearsalStageCartoon({
               <circle cx="211" cy="48" r="6" className="ct-check-disc" />
               <path d="M208.3 48.1l1.9 1.9 3.7-3.9" className="ct-check-white sm" />
               <text x="223" y="48" textAnchor="start" dominantBaseline="central" className="ct-pill-ok-txt">
-                {bi("纯只读", "Read-Only")}
+                {domain === "import-parse" ? bi("纯元数据", "Meta-Only") : bi("纯只读", "Read-Only")}
               </text>
             </g>
 
@@ -1079,7 +1416,148 @@ const RehearsalStageCartoon = React.memo(function RehearsalStageCartoon({
           </svg>
         )}
 
-        {scene === "think" && (
+        {scene === "think" && domain === "import-parse" && (
+          <svg viewBox="0 0 360 96" fill="none" className="rh-cartoon-svg">
+            <defs>
+              <linearGradient id="ct-cone-grad-imp" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="var(--brand)" stopOpacity="0.32" />
+                <stop offset="100%" stopColor="var(--brand)" stopOpacity="0.02" />
+              </linearGradient>
+            </defs>
+            <g className="ct-hs-locked">
+              <rect x="10" y="6" width="102" height="22" rx="11" className="ct-pill-ok" />
+              <circle cx="22" cy="17" r="6.5" className="ct-check-disc" />
+              <path d="M19 17.1l2.1 2.1 4.1-4.2" className="ct-check-white sm" />
+              <text x="34" y="17" textAnchor="start" dominantBaseline="central" className="ct-pill-ok-txt">
+                {bi("握手已连通", "Connected")}
+              </text>
+            </g>
+            <path d="M108 69 L128 69 M220 69 L240 69" className="ct-flow-line" />
+            <g className="ct-sim-node n1">
+              <rect x="16" y="54" width="92" height="30" rx="8.5" className="ct-node-box" />
+              <circle cx="30" cy="69" r="3.6" className="ct-led ok" />
+              <text x="41" y="69" textAnchor="start" dominantBaseline="central" className="ct-sim-lbl">
+                {bi("主机节点", "Hosts")}
+              </text>
+            </g>
+            <g className="ct-sim-node n2">
+              <rect x="128" y="54" width="92" height="30" rx="8.5" className="ct-node-box" />
+              <circle cx="142" cy="69" r="3.6" className="ct-led brand" />
+              <text x="153" y="69" textAnchor="start" dominantBaseline="central" className="ct-sim-lbl">
+                {bi("伴生栈", "Stack")}
+              </text>
+            </g>
+            <g className="ct-sim-node n3">
+              <rect x="240" y="52" width="106" height="34" rx="9.5" className="ct-hub-pod" />
+              <circle cx="255" cy="69" r="4" className="ct-led ok" />
+              <text x="267" y="69" textAnchor="start" dominantBaseline="central" className="ct-pod-title">
+                {bi("入口 VIP", "Endpoints")}
+              </text>
+            </g>
+            <g className="ct-think-rover">
+              <path d="M51 54 L62 41 L73 54 Z" fill="url(#ct-cone-grad-imp)" />
+              <circle cx="62" cy="38" r="8.5" className="ct-rover-halo" />
+              <circle cx="62" cy="38" r="4" className="ct-rover-core" />
+              <line x1="62" y1="43" x2="62" y2="53" className="ct-rover-beam" />
+            </g>
+          </svg>
+        )}
+
+        {scene === "think" && domain === "import-probe" && (
+          <svg viewBox="0 0 360 96" fill="none" className="rh-cartoon-svg">
+            <defs>
+              <linearGradient id="ct-cone-grad-prb" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="var(--brand)" stopOpacity="0.32" />
+                <stop offset="100%" stopColor="var(--brand)" stopOpacity="0.02" />
+              </linearGradient>
+            </defs>
+            <g className="ct-hs-locked">
+              <rect x="10" y="6" width="102" height="22" rx="11" className="ct-pill-ok" />
+              <circle cx="22" cy="17" r="6.5" className="ct-check-disc" />
+              <path d="M19 17.1l2.1 2.1 4.1-4.2" className="ct-check-white sm" />
+              <text x="34" y="17" textAnchor="start" dominantBaseline="central" className="ct-pill-ok-txt">
+                {bi("握手已连通", "Connected")}
+              </text>
+            </g>
+            <path d="M150 69 L174 69 M262 69 L280 69" className="ct-flow-line" />
+            <g className="ct-sim-node n1">
+              <rect x="16" y="44" width="134" height="44" rx="8.5" className="ct-doc-sheet" />
+              <text x="26" y="57" textAnchor="start" dominantBaseline="central" className="ct-mini-txt">
+                #!/usr/bin/env bash
+              </text>
+              <line x1="26" y1="69" x2="118" y2="69" className="ct-draw-line l1" />
+              <line x1="26" y1="79" x2="96" y2="79" className="ct-draw-line l2" />
+            </g>
+            <g className="ct-sim-node n2">
+              <rect x="174" y="54" width="88" height="30" rx="8.5" className="ct-pill-ok" />
+              <circle cx="187" cy="69" r="3.6" className="ct-led ok" />
+              <text x="197" y="69" textAnchor="start" dominantBaseline="central" className="ct-pill-ok-txt">
+                {bi("纯只读", "100% RO")}
+              </text>
+            </g>
+            <g className="ct-sim-node n3">
+              <rect x="280" y="54" width="68" height="30" rx="8.5" className="ct-node-box" />
+              <circle cx="292" cy="69" r="3.4" className="ct-led brand" />
+              <text x="301" y="69" textAnchor="start" dominantBaseline="central" className="ct-sim-lbl">
+                {bi("脱敏", "Safe")}
+              </text>
+            </g>
+            <g className="ct-think-rover">
+              <path d="M51 44 L62 32 L73 44 Z" fill="url(#ct-cone-grad-prb)" />
+              <circle cx="62" cy="30" r="8" className="ct-rover-halo" />
+              <circle cx="62" cy="30" r="3.8" className="ct-rover-core" />
+            </g>
+          </svg>
+        )}
+
+        {scene === "think" && domain === "import-diagnose" && (
+          <svg viewBox="0 0 360 96" fill="none" className="rh-cartoon-svg">
+            <defs>
+              <linearGradient id="ct-cone-grad-diag" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="var(--brand)" stopOpacity="0.32" />
+                <stop offset="100%" stopColor="var(--brand)" stopOpacity="0.02" />
+              </linearGradient>
+            </defs>
+            <g className="ct-hs-locked">
+              <rect x="10" y="6" width="102" height="22" rx="11" className="ct-pill-ok" />
+              <circle cx="22" cy="17" r="6.5" className="ct-check-disc" />
+              <path d="M19 17.1l2.1 2.1 4.1-4.2" className="ct-check-white sm" />
+              <text x="34" y="17" textAnchor="start" dominantBaseline="central" className="ct-pill-ok-txt">
+                {bi("握手已连通", "Connected")}
+              </text>
+            </g>
+            <path d="M108 69 L128 69 M220 69 L240 69" className="ct-flow-line" />
+            <g className="ct-sim-node n1">
+              <rect x="16" y="54" width="92" height="30" rx="8.5" className="ct-node-box" />
+              <circle cx="30" cy="69" r="3.6" className="ct-led ok" />
+              <text x="41" y="69" textAnchor="start" dominantBaseline="central" className="ct-sim-lbl">
+                {bi("复制机制", "Sync")}
+              </text>
+            </g>
+            <g className="ct-sim-node n2">
+              <rect x="128" y="54" width="92" height="30" rx="8.5" className="ct-node-box" />
+              <circle cx="142" cy="69" r="3.6" className="ct-led warn" />
+              <text x="153" y="69" textAnchor="start" dominantBaseline="central" className="ct-sim-lbl">
+                {bi("容量水位", "Storage")}
+              </text>
+            </g>
+            <g className="ct-sim-node n3">
+              <rect x="240" y="52" width="106" height="34" rx="9.5" className="ct-hub-pod" />
+              <circle cx="255" cy="69" r="4" className="ct-led brand" />
+              <text x="267" y="69" textAnchor="start" dominantBaseline="central" className="ct-pod-title">
+                {bi("高可用边界", "HA Rules")}
+              </text>
+            </g>
+            <g className="ct-think-rover">
+              <path d="M51 54 L62 41 L73 54 Z" fill="url(#ct-cone-grad-diag)" />
+              <circle cx="62" cy="38" r="8.5" className="ct-rover-halo" />
+              <circle cx="62" cy="38" r="4" className="ct-rover-core" />
+              <line x1="62" y1="43" x2="62" y2="53" className="ct-rover-beam" />
+            </g>
+          </svg>
+        )}
+
+        {scene === "think" && domain === "rehearsal" && (
           <svg viewBox="0 0 360 96" fill="none" className="rh-cartoon-svg">
             <defs>
               <linearGradient id="ct-cone-grad" x1="0" y1="0" x2="0" y2="1">
@@ -1140,7 +1618,7 @@ const RehearsalStageCartoon = React.memo(function RehearsalStageCartoon({
 
         {scene === "synthesize" && (
           <svg viewBox="0 0 360 96" fill="none" className="rh-cartoon-svg">
-            {/* Runbook Blueprint Document Sheet */}
+            {/* Structured Output Document Sheet */}
             <rect x="14" y="10" width="196" height="76" rx="10" className="ct-doc-sheet" />
             <circle cx="30" cy="26" r="3.6" className="ct-led ok" />
             <line x1="42" y1="26" x2="164" y2="26" className="ct-draw-line l1" />
@@ -1151,17 +1629,29 @@ const RehearsalStageCartoon = React.memo(function RehearsalStageCartoon({
             <circle cx="30" cy="74" r="3.4" className="ct-led warn" />
             <line x1="42" y1="74" x2="134" y2="74" className="ct-draw-line l4" />
 
-            {/* Centered Safety Verification Seal Impact */}
+            {/* Centered Verification Seal Impact */}
             <circle cx="286" cy="48" r="26" className="ct-seal-ring" />
             <g className="ct-stamp-badge">
               <rect x="226" y="22" width="120" height="52" rx="12" className="ct-pill-ok" />
               <circle cx="246" cy="48" r="10" className="ct-check-disc" />
               <path d="M241.5 48.2l3 3 5.8-6" className="ct-check-white" />
               <text x="263" y="40" textAnchor="start" dominantBaseline="central" className="ct-pill-ok-txt lg">
-                SAFE
+                {domain === "import-parse"
+                  ? "DRAFT"
+                  : domain === "import-probe"
+                    ? "100% RO"
+                    : domain === "import-diagnose"
+                      ? "AUDIT"
+                      : "SAFE"}
               </text>
               <text x="263" y="56" textAnchor="start" dominantBaseline="central" className="ct-mini-ok">
-                {bi("安全校验通过", "Verified")}
+                {domain === "import-parse"
+                  ? bi("拓扑草稿就绪", "Draft Ready")
+                  : domain === "import-probe"
+                    ? bi("静态只读通过", "RO Verified")
+                    : domain === "import-diagnose"
+                      ? bi("补采清单就绪", "Checklist Ready")
+                      : bi("安全校验通过", "Verified")}
               </text>
             </g>
           </svg>
@@ -1975,7 +2465,7 @@ export function RehearsalAIProcess({
                             "因前序模型连接受阻，本环节未执行",
                             "Skipped due to upstream connection failure",
                           )
-                        : pendingHintForStep(st)
+                        : pendingHintForStep(st, live.kind)
                       : st.detail || "";
 
                   return (
@@ -2058,6 +2548,7 @@ export function RehearsalAIProcess({
 
           <div className="rh-ai-right">
             <RehearsalStageCartoon
+              kind={live.kind}
               scene={cartoonScene}
               stepTitle={currentStep?.title || live.title}
               stepDetail={currentStep?.detail}
@@ -2468,10 +2959,25 @@ export function RehearsalAIProcess({
                     </p>
                   ) : (
                     <p className="rh-ai-think-wait">
-                      {bi(
-                        "已接收模型流式通道，正在解码架构风险与变更边界推演…",
-                        "Stream connected; decoding architecture risks & boundary analysis…",
-                      )}
+                      {stageDomainOf(live.kind) === "import-parse"
+                        ? bi(
+                            "已接收模型流式通道，正在从终端回显与截图中识别主机角色、伴生组件栈与访问入口…",
+                            "Stream connected; extracting hosts, companion stack & access endpoints…",
+                          )
+                        : stageDomainOf(live.kind) === "import-probe"
+                          ? bi(
+                              "已接收模型流式通道，正在按所选现场场景编排精炼 100% 只读采集命令…",
+                              "Stream connected; crafting tailored 100% read-only probe commands…",
+                            )
+                          : stageDomainOf(live.kind) === "import-diagnose"
+                            ? bi(
+                                "已接收模型流式通道，正在对照高可用与演练标准扫描架构基线盲区…",
+                                "Stream connected; scanning baseline blind spots against HA & rehearsal standards…",
+                              )
+                            : bi(
+                                "已接收模型流式通道，正在解码架构风险与变更边界推演…",
+                                "Stream connected; decoding architecture risks & boundary analysis…",
+                              )}
                       <span className="rh-ai-caret" aria-hidden />
                     </p>
                   )}

@@ -7220,8 +7220,11 @@ function RehearsalSessionView({
     r.scope_summary && r.scope_summary.trim() !== r.goal.trim(),
   );
   const goalSections = parseRehearsalGoalSections(r.goal);
-  const isLongGoal = r.goal.trim().length > 140 || goalSections.length > 1;
-  const canToggleGoal = Boolean(r.goal.trim()) && (hasScopeSummary || isLongGoal);
+  const canToggleGoal = Boolean(
+    hasScopeSummary ||
+      r.goal.trim() ||
+      (r.goal_images && r.goal_images.length > 0),
+  );
   const hasDownstreamProgress = Boolean(
     r.probe_output ||
       r.manual_state ||
@@ -7270,15 +7273,31 @@ function RehearsalSessionView({
                   >
                     <span>
                       {goalOpen
-                        ? hasScopeSummary
-                          ? bi("收起原始诉求", "Hide original goal")
-                          : bi("收起完整诉求", "Collapse goal")
+                        ? bi("收起诉求与边界", "Hide goal & scope")
                         : hasScopeSummary
-                          ? bi("查看原始诉求", "View original goal")
-                          : bi("展开完整诉求", "Expand full goal")}
+                          ? bi("诉求与边界", "Goal & scope")
+                          : bi("变更诉求", "Change goal")}
                     </span>
                     <IconDown className={goalOpen ? "open" : ""} />
                   </button>
+                </>
+              )}
+              {r.source?.rollout_id && !refineOpen && (
+                <>
+                  <span className="rh-shead-dot" aria-hidden>
+                    ·
+                  </span>
+                  <RolloutProgressStrip
+                    compact
+                    rehearsal={r}
+                    currentClusterId={c.id}
+                    boardOverride={rolloutBoardOverride}
+                    onOpenPropagate={
+                      r.stage === "finalized" && r.applied && !r.voided
+                        ? () => setStripPropagateOpen(true)
+                        : undefined
+                    }
+                  />
                 </>
               )}
             </div>
@@ -7613,14 +7632,10 @@ function RehearsalSessionView({
           </div>
         ) : (
           <>
-            {hasScopeSummary ? (
-              <div
-                className={`rh-shead-summary${r.intent_unclear ? " is-intent" : ""}`}
-              >
+            {hasScopeSummary && r.intent_unclear && (
+              <div className="rh-shead-summary is-intent">
                 <span className="rh-shead-sum-tag">
-                  {r.intent_unclear
-                    ? bi("AI 识别诉求", "AI Recognized")
-                    : bi("收敛边界", "Scope Summary")}
+                  {bi("AI 识别诉求", "AI Recognized")}
                 </span>
                 <span className="rh-shead-sum-txt">
                   {renderThinkingInline(r.scope_summary!)}
@@ -7633,37 +7648,22 @@ function RehearsalSessionView({
                     onClick={openRefine}
                   >
                     <IconEdit />
-                    <span>
-                      {r.intent_unclear
-                        ? bi("识别有偏？修正", "Misread? Edit")
-                        : bi("修正", "Edit")}
-                    </span>
+                    <span>{bi("识别有偏？修正", "Misread? Edit")}</span>
                   </button>
                 )}
               </div>
-            ) : r.goal.trim() && !goalOpen ? (
-              <div className="rh-shead-summary is-goal">
-                <span className="rh-shead-sum-tag">
-                  {bi("变更诉求", "Change Goal")}
-                </span>
-                <span
-                  className={`rh-shead-sum-txt ${isLongGoal ? "is-clamped" : ""}`}
-                >
-                  {renderThinkingInline(r.goal)}
-                </span>
-              </div>
-            ) : null}
+            )}
 
-            {goalOpen && goalSections.length > 0 && (
+            {goalOpen && (hasScopeSummary || goalSections.length > 0 || (r.goal_images && r.goal_images.length > 0)) && (
               <div
                 className="rh-shead-goal-panel"
                 role="region"
-                aria-label={bi("完整变更诉求", "Full change goal")}
+                aria-label={bi("变更诉求与收敛边界", "Change goal and scope summary")}
               >
                 <div className="rh-shead-goal-head">
                   <span className="rh-shead-goal-title">
                     {hasScopeSummary
-                      ? bi("原始变更诉求", "Original Change Goal")
+                      ? bi("变更诉求与收敛边界", "Goal & Scope Summary")
                       : bi("完整变更诉求", "Full Change Goal")}
                   </span>
                   <div className="rh-shead-goal-acts">
@@ -7687,28 +7687,41 @@ function RehearsalSessionView({
                     </button>
                   </div>
                 </div>
-                <div className="rh-shead-goal-list">
-                  {goalSections.map((sec, idx) => (
-                    <div key={idx} className="rh-shead-goal-row">
-                      {sec.label && (
-                        <span className="rh-shead-goal-lbl">{sec.label}</span>
-                      )}
-                      <p className="rh-shead-goal-body">
-                        {renderThinkingInline(sec.body)}
-                      </p>
-                    </div>
-                  ))}
-                </div>
+                {hasScopeSummary && (
+                  <div className="rh-shead-goal-scope">
+                    <span className="rh-shead-sum-tag">
+                      {bi("收敛边界", "Scope Summary")}
+                    </span>
+                    <span className="rh-shead-sum-txt">
+                      {renderThinkingInline(r.scope_summary!)}
+                    </span>
+                  </div>
+                )}
+                {goalSections.length > 0 && (
+                  <div className="rh-shead-goal-list">
+                    {goalSections.map((sec, idx) => (
+                      <div key={idx} className="rh-shead-goal-row">
+                        {sec.label && (
+                          <span className="rh-shead-goal-lbl">{sec.label}</span>
+                        )}
+                        <p className="rh-shead-goal-body">
+                          {renderThinkingInline(sec.body)}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {r.goal_images && r.goal_images.length > 0 && (
+                  <div className="rh-shead-goal-imgs">
+                    <SavedImageGallery
+                      clusterId={c.id}
+                      rehearsalId={r.id}
+                      names={r.goal_images}
+                      label={bi("诉求参考截图", "Reference Screenshots")}
+                    />
+                  </div>
+                )}
               </div>
-            )}
-
-            {r.goal_images && r.goal_images.length > 0 && (
-              <SavedImageGallery
-                clusterId={c.id}
-                rehearsalId={r.id}
-                names={r.goal_images}
-                label={bi("诉求参考截图", "Reference Screenshots")}
-              />
             )}
           </>
         )}
@@ -7724,19 +7737,6 @@ function RehearsalSessionView({
         />
       ) : (
         <>
-
-      {r.source?.rollout_id && (
-        <RolloutProgressStrip
-          rehearsal={r}
-          currentClusterId={c.id}
-          boardOverride={rolloutBoardOverride}
-          onOpenPropagate={
-            r.stage === "finalized" && r.applied && !r.voided
-              ? () => setStripPropagateOpen(true)
-              : undefined
-          }
-        />
-      )}
 
       {r.security_context && (
         <RehearsalSecurityBanner
@@ -8078,44 +8078,35 @@ function RehearsalSessionView({
               />
             )}
 
-            {can("delivery.execute") && (
+            {can("delivery.execute") && autoSummary?.ready && (
               <div className="rha-probe-auto-bar">
                 <div className="rha-probe-auto-l">
                   <IconThunderbolt />
                   <span>
-                    {autoSummary?.ready
-                      ? bi(
-                          `自动化采集通道已就绪（${autoSummary.config.transport === "agent" ? `目标机 Agent ${autoSummary.online_agents}/${autoSummary.hosts.length} 在线` : `控制机直连`}），可一键自动运行 100% 只读探针并直接送交 AI 解析漂移`,
-                          `Automation ready (${autoSummary.config.transport === "agent" ? `Direct Agent ${autoSummary.online_agents}/${autoSummary.hosts.length}` : "Controller"}) — run 100% read-only probe & analyze drift in 1 click`,
-                        )
-                      : bi(
-                          "想免去手工复制脚本和贴回显？可接入控制机（Ansible/SSH）或目标机直连 Agent（免密码）",
-                          "Want 1-click automated read-only collection? Connect a Controller (Ansible/SSH) or passwordless Direct Target Agent",
-                        )}
+                    {bi(
+                      `自动化采集通道已就绪（${autoSummary.config.transport === "agent" ? `目标机 Agent ${autoSummary.online_agents}/${autoSummary.hosts.length} 在线` : `控制机直连`}），可一键自动运行 100% 只读探针并直接送交 AI 解析漂移`,
+                      `Automation ready (${autoSummary.config.transport === "agent" ? `Direct Agent ${autoSummary.online_agents}/${autoSummary.hosts.length}` : "Controller"}) — run 100% read-only probe & analyze drift in 1 click`,
+                    )}
                   </span>
                 </div>
                 <div className="rha-ribbon-r">
-                  {autoSummary?.ready ? (
-                    <Button
-                      size="small"
-                      type="primary"
-                      loading={autoProbeRunning}
-                      disabled={probeBusy || offline || !r.probe_script}
-                      icon={<IconPlayArrow />}
-                      onClick={() => void runAutoRehearsalProbe()}
-                    >
-                      {bi("自动采集并 AI 解析", "Auto-Collect & Analyze")}
-                    </Button>
-                  ) : null}
                   <Button
                     size="small"
-                    type={autoSummary?.ready ? "text" : "outline"}
+                    type="primary"
+                    loading={autoProbeRunning}
+                    disabled={probeBusy || offline || !r.probe_script}
+                    icon={<IconPlayArrow />}
+                    onClick={() => void runAutoRehearsalProbe()}
+                  >
+                    {bi("自动采集并 AI 解析", "Auto-Collect & Analyze")}
+                  </Button>
+                  <Button
+                    size="small"
+                    type="text"
                     icon={<IconSettings />}
                     onClick={onOpenAutoDrawer}
                   >
-                    {autoSummary?.ready
-                      ? bi("管理通道", "Manage Channel")
-                      : bi("前往开启自动化", "Configure Automation")}
+                    {bi("管理通道", "Manage Channel")}
                   </Button>
                 </div>
               </div>

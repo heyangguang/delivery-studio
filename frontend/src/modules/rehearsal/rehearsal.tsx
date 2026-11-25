@@ -4501,6 +4501,7 @@ const ScopeAlignmentDeck = React.memo(function ScopeAlignmentDeck({
   setAnswers,
   extraScope,
   setExtraScope,
+  savedExtraScope = "",
   disabled,
   freshReveal = false,
   baselineVersion,
@@ -4513,6 +4514,7 @@ const ScopeAlignmentDeck = React.memo(function ScopeAlignmentDeck({
   setAnswers: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   extraScope: string;
   setExtraScope: (v: string) => void;
+  savedExtraScope?: string;
   disabled: boolean;
   freshReveal?: boolean;
   baselineVersion?: string;
@@ -5279,15 +5281,35 @@ const ScopeAlignmentDeck = React.memo(function ScopeAlignmentDeck({
                   {bi("补充现场背景", "Extra Context")}{" "}
                   <span className="faint">{bi("（可选）", "(optional)")}</span>
                 </label>
-                {!extraScope.trim() && (
-                  <button
-                    type="button"
-                    className="rh-inline-cancel"
-                    onClick={() => setExtraOpen(false)}
-                  >
-                    {bi("收起", "Collapse")}
-                  </button>
-                )}
+                <div className="rh-extra-head-acts">
+                  {extraScope.trim() !== savedExtraScope.trim() ? (
+                    <span className="rh-extra-status is-pending">
+                      {bi("已修改 · 点击下方按钮生效", "Unsaved · click button below to apply")}
+                    </span>
+                  ) : extraScope.trim() ? (
+                    <span className="rh-extra-status is-applied">
+                      {bi("已生效于当前方案", "Active in plan")}
+                    </span>
+                  ) : null}
+                  {extraScope.trim() ? (
+                    <button
+                      type="button"
+                      disabled={disabled}
+                      className="rh-inline-cancel"
+                      onClick={() => setExtraScope("")}
+                    >
+                      {bi("清空", "Clear")}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="rh-inline-cancel"
+                      onClick={() => setExtraOpen(false)}
+                    >
+                      {bi("收起", "Collapse")}
+                    </button>
+                  )}
+                </div>
               </div>
               <Input.TextArea
                 id={`extra-${rehearsalId}`}
@@ -5296,8 +5318,8 @@ const ScopeAlignmentDeck = React.memo(function ScopeAlignmentDeck({
                 onChange={setExtraScope}
                 autoSize={{ minRows: 2, maxRows: 5 }}
                 placeholder={bi(
-                  "例如：生产近期发生过一次主备切换；测试环境为 2 台同系统虚拟机…",
-                  "e.g., Production had a failover recently; staging uses 2 matching VMs…",
+                  "例如：直接对主操作就行、可以接受短暂闪断无需切主；或生产近期发生过主备切换…",
+                  "e.g., Operate directly on primary (brief blip OK, no switchover); or recent failover…",
                 )}
                 aria-label={bi("补充约束说明", "Extra constraints")}
               />
@@ -6162,14 +6184,20 @@ function RehearsalSessionView({
     const next = scopeTask.result;
     clearRehearsalTask(scopeKey);
     setR(next);
+    const nextAns: Record<string, string> = {};
+    (next.scope_questions || []).forEach((q) => {
+      if (q.answer) nextAns[q.id] = q.answer;
+    });
+    setAnswers(nextAns);
+    setExtraScope(next.extra_scope || "");
     setFreshTraceStage("scope");
-    switchStage(next.stage, true);
+    switchStage("probing", true);
     void onListChanged();
     if (!scopeTask.notified) {
       Message.success(
         bi(
-          "已生成只读状态采集脚本并通过静态安全扫描",
-          "Read-only probe generated and passed static safety scan",
+          "已按最新边界生成只读采集脚本并通过静态安全扫描",
+          "Read-only probe generated with updated scope and passed static safety scan",
         ),
       );
     }
@@ -6180,6 +6208,12 @@ function RehearsalSessionView({
     const next = probeTask.result;
     clearRehearsalTask(probeKey);
     setR(next);
+    const nextAns: Record<string, string> = {};
+    (next.scope_questions || []).forEach((q) => {
+      if (q.answer) nextAns[q.id] = q.answer;
+    });
+    setAnswers(nextAns);
+    setExtraScope(next.extra_scope || "");
     setProbeImages([]);
     setFreshTraceStage("probe");
     void onListChanged();
@@ -6695,13 +6729,23 @@ function RehearsalSessionView({
         ? probeImages.map((im) => im.dataUrl)
         : undefined;
     const modelRef = pick.ref || undefined;
+    const effectiveProbeOut =
+      overrideOutput !== undefined
+        ? overrideOutput
+        : probeOut || r.probe_output || r.manual_state || "";
     const payload = {
-      probe_output: overrideOutput !== undefined ? overrideOutput : probeOut,
+      probe_output: effectiveProbeOut,
       test_env_note: testEnvNote,
       images: imgs,
       mode: action,
       model: modelRef,
       effort: effortVal,
+      answers: (r.scope_questions || []).map((q) => ({
+        id: q.id,
+        question: q.question,
+        answer: (answers[q.id] || "").trim(),
+      })),
+      extra: extraScope.trim(),
     };
     const cid = c.id;
     const rid = r.id;
@@ -6713,9 +6757,11 @@ function RehearsalSessionView({
       probeAction: action,
       initialLive,
       draft: {
-        probeOut,
+        probeOut: effectiveProbeOut,
         testEnvNote,
         probeImages: [...probeImages],
+        answers: { ...answers },
+        extraScope,
       },
       run: (updateLive, signal) =>
         streamRehearsalAPI(
@@ -7826,13 +7872,30 @@ function RehearsalSessionView({
         className={`rh-stage-body${stageAnimated ? ` rh-anim-${stageDir}` : ""}`}
       >
         {/* ---- Stage 1: Scoping ---- */}
-        {curIdx === 0 && (
+        {curIdx === 0 && (() => {
+          const hasSavedProbeEvidence = Boolean(
+            probeOut.trim() ||
+              r.probe_output?.trim() ||
+              r.manual_state?.trim() ||
+              probeImages.length > 0 ||
+              (r.probe_images && r.probe_images.length > 0),
+          );
+          const scopeDirty =
+            extraScope.trim() !== (r.extra_scope || "").trim() ||
+            (r.scope_questions || []).some(
+              (q) => (answers[q.id] || "").trim() !== (q.answer || "").trim(),
+            );
+          return (
           <section
             className={`rh-sec${isFreshCreate ? " is-fresh-reveal" : ""}`}
             onKeyDown={(e) => {
               if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
                 e.preventDefault();
-                void submitScope();
+                if (hasSavedProbeEvidence) {
+                  void submitProbe("analyze");
+                } else {
+                  void submitScope();
+                }
               }
             }}
           >
@@ -7854,7 +7917,8 @@ function RehearsalSessionView({
               setAnswers={setAnswers}
               extraScope={extraScope}
               setExtraScope={setExtraScope}
-              disabled={scopeBusy || refineBusy}
+              savedExtraScope={r.extra_scope || ""}
+              disabled={scopeBusy || probeBusy || refineBusy}
               freshReveal={isFreshCreate}
               baselineVersion={c.version}
               intentUnclear={Boolean(r.intent_unclear)}
@@ -7864,10 +7928,20 @@ function RehearsalSessionView({
             <div className="rh-sec-foot">
               <div className="rh-sec-foot-tools">
                 <span className="rh-foot-note">
-                  {bi(
-                    "仅生成静态只读采集命令，零重启与写操作",
-                    "Generates static read-only commands only; zero restarts or writes",
-                  )}
+                  {hasSavedProbeEvidence
+                    ? scopeDirty
+                      ? bi(
+                          "边界或补充背景已更新：可直接复用已有探针证据重新生成演练步骤，无需再次登录节点采集",
+                          "Scope updated: regenerate rehearsal steps directly using saved probe evidence",
+                        )
+                      : bi(
+                          "已保留第 2 步现场采集证据，修改边界或补充背景后可直接重新编排演练步骤",
+                          "Saved probe evidence ready — edit scope/context and regenerate steps directly",
+                        )
+                    : bi(
+                        "仅生成静态只读采集命令，零重启与写操作",
+                        "Generates static read-only commands only; zero restarts or writes",
+                      )}
                 </span>
               </div>
               <div className="rh-compose-submit">
@@ -7878,28 +7952,59 @@ function RehearsalSessionView({
                   compact
                 />
                 <ModelPicker pick={pick} compact />
-                <Button
-                  type="primary"
-                  shape="round"
-                  className={`ai-pill ${!offline ? "ai-pill-primary" : ""}`}
-                  icon={<Spark size={14} rainbow={offline} />}
-                  title={
-                    isMac
-                      ? bi("⌘ + Enter 提交", "⌘ + Enter Submit")
-                      : bi("Ctrl + Enter 提交", "Ctrl + Enter Submit")
-                  }
-                  loading={scopeBusy}
-                  disabled={offline}
-                  onClick={() => void submitScope()}
-                >
-                  {r.probe_script
-                    ? bi("重新生成只读探针", "Regenerate Probe")
-                    : bi("生成只读采集脚本", "Generate Probe")}
-                </Button>
+                {hasSavedProbeEvidence ? (
+                  <>
+                    <Button
+                      shape="round"
+                      type="secondary"
+                      loading={scopeBusy}
+                      disabled={offline || probeBusy}
+                      onClick={() => void submitScope()}
+                    >
+                      {bi("重新生成只读探针", "Regenerate Probe")}
+                    </Button>
+                    <Button
+                      type="primary"
+                      shape="round"
+                      className={`ai-pill ${!offline ? "ai-pill-primary" : ""}`}
+                      icon={<Spark size={14} rainbow={offline} />}
+                      title={
+                        isMac
+                          ? bi("⌘ + Enter 应用边界并重排步骤", "⌘ + Enter Apply & Replan")
+                          : bi("Ctrl + Enter 应用边界并重排步骤", "Ctrl + Enter Apply & Replan")
+                      }
+                      loading={probeBusy && probeAction === "analyze"}
+                      disabled={offline || scopeBusy || probeBusy}
+                      onClick={() => void submitProbe("analyze")}
+                    >
+                      {bi("按最新边界重新生成演练步骤", "Apply Scope & Replan Steps")}
+                    </Button>
+                  </>
+                ) : (
+                  <Button
+                    type="primary"
+                    shape="round"
+                    className={`ai-pill ${!offline ? "ai-pill-primary" : ""}`}
+                    icon={<Spark size={14} rainbow={offline} />}
+                    title={
+                      isMac
+                        ? bi("⌘ + Enter 提交", "⌘ + Enter Submit")
+                        : bi("Ctrl + Enter 提交", "Ctrl + Enter Submit")
+                    }
+                    loading={scopeBusy}
+                    disabled={offline || probeBusy}
+                    onClick={() => void submitScope()}
+                  >
+                    {r.probe_script
+                      ? bi("重新生成只读探针", "Regenerate Probe")
+                      : bi("生成只读采集脚本", "Generate Probe")}
+                  </Button>
+                )}
               </div>
             </div>
           </section>
-        )}
+          );
+        })()}
 
         {/* ---- Stage 2: Read-Only Probing ---- */}
         {curIdx === 1 && (
@@ -8474,6 +8579,24 @@ function RehearsalSessionView({
                   (isQuickMode && freshTraceStage === "create")
                 }
               />
+            )}
+
+            {r.extra_scope?.trim() && (
+              <div className="rh-extra-active-bar">
+                <span className="rh-extra-active-tag">
+                  {bi("已生效补充约束", "Active Constraint")}
+                </span>
+                <span className="rh-extra-active-txt">{r.extra_scope}</span>
+                {visibleStages.includes("scoping") && !r.applied && !r.voided && (
+                  <button
+                    type="button"
+                    className="rh-inline-cancel"
+                    onClick={() => switchStage("scoping")}
+                  >
+                    {bi("修改边界", "Edit Scope")}
+                  </button>
+                )}
+              </div>
             )}
 
             {r.drift && (() => {

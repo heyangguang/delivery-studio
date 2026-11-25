@@ -92,8 +92,11 @@ jobs:
       - name: Go Vet
         run: go vet ./...
 
-      - name: Run Core Go Tests
-        run: go test -count=1 ./mwpack/... ./pkglib/... ./internal/server/...
+      - name: Run Core Package Tests
+        run: go test -count=1 -timeout 3m ./mwpack/... ./pkglib/... ./catalog/...
+
+      - name: Run Server Verification Tests
+        run: go test -short -count=1 -timeout 5m -run "TestGateway|TestAPIVersion|TestDev|TestRehearsal|TestClusterImport|TestImported|TestGlyphs|TestDocs|TestIAM|TestSecurity|TestTargetEnrollment|TestExecutionNodeBootstrap|TestExecutionDurable|TestExecutionReport|TestExecutionAuthorization|TestExecutionOutbox|TestAIMasterSwitch" ./internal/server
 
       - name: Verify Linux amd64 Build
         env:

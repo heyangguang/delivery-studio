@@ -453,7 +453,7 @@ export function ClusterDetail({
     if (basePlanId) prefetchDetail(basePlanId);
   }, [c.id, basePlanId]);
   const isImported = c.delivery_mode === "imported";
-  const [baselineModal, setBaselineModal] = useState<null | "edit" | "probe">(null);
+  const [baselineModal, setBaselineModal] = useState<null | "edit" | "notes" | "probe">(null);
   const [autoSummary, setAutoSummary] = useState<ClusterAutomationSummary | null>(null);
   const deletingImportedRef = useRef(false);
   useEffect(() => {
@@ -1294,7 +1294,7 @@ function Overview({
   appIcon?: string;
   canRehearse: boolean;
   rehearsals: ChangeRehearsal[] | null;
-  onOpenBaseline?: (mode: "edit" | "probe") => void;
+  onOpenBaseline?: (mode: "edit" | "notes" | "probe") => void;
   onSavedBaseline?: () => Promise<void>;
 }) {
   useLang();
@@ -1521,29 +1521,56 @@ function Overview({
             </div>
           </div>
 
-          {noteItems.length > 0 && (
+          {(noteItems.length > 0 || (can("delivery.create") && onOpenBaseline)) && (
             <div className="cl-imp-notes-box">
               <div className="cl-imp-notes-head">
                 <span className="cl-imp-notes-lbl">
-                  {bi(`现场线索与备注（${noteItems.length} 条）`, `Field Notes (${noteItems.length})`)}
+                  {noteItems.length > 0
+                    ? bi(`现场线索与运维约束（${noteItems.length} 条）`, `Field Clues & Guardrails (${noteItems.length})`)
+                    : bi("现场线索与运维约束", "Field Clues & Guardrails")}
                 </span>
-                {noteItems.length > 2 && (
-                  <button
-                    type="button"
-                    className="cl-imp-notes-toggle"
-                    onClick={() => setNotesExpanded((v) => !v)}
-                  >
-                    {notesExpanded
-                      ? bi("收起", "Collapse")
-                      : bi(`展开全部 ${noteItems.length} 条`, `Show all ${noteItems.length}`)}
-                  </button>
-                )}
+                <div className="cl-imp-notes-acts">
+                  {noteItems.length > 2 && (
+                    <button
+                      type="button"
+                      className="cl-imp-notes-toggle"
+                      onClick={() => setNotesExpanded((v) => !v)}
+                    >
+                      {notesExpanded
+                        ? bi("收起", "Collapse")
+                        : bi(`展开全部 ${noteItems.length} 条`, `Show all ${noteItems.length}`)}
+                    </button>
+                  )}
+                  {can("delivery.create") && onOpenBaseline && (
+                    <button
+                      type="button"
+                      className="cl-imp-notes-edit-btn"
+                      onClick={() => onOpenBaseline("notes")}
+                    >
+                      <IconEdit />
+                      <span>
+                        {noteItems.length > 0
+                          ? bi("补充 / 管理", "Add / Manage")
+                          : bi("添加维护窗口或约束", "Add Guardrail")}
+                      </span>
+                    </button>
+                  )}
+                </div>
               </div>
-              <ul className="cl-imp-notes-list">
-                {visibleNotes.map((line, i) => (
-                  <li key={i}>{line}</li>
-                ))}
-              </ul>
+              {noteItems.length > 0 ? (
+                <ul className="cl-imp-notes-list">
+                  {visibleNotes.map((line, i) => (
+                    <li key={i}>{line}</li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="cl-imp-notes-empty">
+                  {bi(
+                    "尚未登记维护窗口、切主红线等运维约束；添加后将自动带入 AI 变更演练与排障上下文。",
+                    "No maintenance windows or guardrails recorded yet; added notes auto-feed into AI Rehearsal.",
+                  )}
+                </div>
+              )}
             </div>
           )}
         </section>

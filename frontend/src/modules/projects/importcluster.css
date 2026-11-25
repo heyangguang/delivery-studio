@@ -1928,6 +1928,121 @@ body[arco-theme="dark"] .imp-intent-box::after {
   overflow-y: auto;
 }
 
+.imp-clues-list.is-full {
+  max-height: none;
+  overflow-y: visible;
+}
+
+.imp-clues-tpls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 7px 10px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+}
+
+.imp-clues-tpl-lbl {
+  font-size: 11.5px;
+  color: var(--mute);
+  white-space: nowrap;
+}
+
+.imp-clues-tpl-chip {
+  all: unset;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 550;
+  color: var(--ink-2);
+  background: var(--surface);
+  border: 1px dashed var(--line-strong);
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: color 0.14s ease, border-color 0.14s ease, background-color 0.14s ease;
+}
+
+.imp-clues-tpl-chip:hover {
+  color: var(--brand-ink);
+  border-style: solid;
+  border-color: var(--brand-line);
+  background: var(--brand-soft);
+}
+
+.imp-clues-filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.imp-clues-flt {
+  all: unset;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 550;
+  color: var(--mute);
+  background: var(--surface-2);
+  border: 1px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.imp-clues-flt:hover {
+  color: var(--ink);
+}
+
+.imp-clues-flt.is-on {
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+  border-color: var(--brand-line);
+}
+
+.imp-notes-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.imp-notes-tab-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--brand-line);
+  background: color-mix(in srgb, var(--brand-soft) 55%, var(--surface));
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+
+.imp-notes-tab-banner svg {
+  color: var(--brand-ink);
+  flex-shrink: 0;
+}
+
+.imp-tab-dot.is-muted {
+  background: var(--sunken);
+  color: var(--ink-2);
+}
+
 .imp-clue-row {
   display: flex;
   align-items: flex-start;
@@ -2040,6 +2155,12 @@ body[arco-theme="dark"] .imp-intent-box::after {
   padding: 8px 10px;
   background: var(--surface-2);
   border-top: 1px solid var(--line);
+}
+
+.imp-clues-add.is-top {
+  border-top: 0;
+  border-bottom: 1px solid var(--line);
+  padding: 9px 10px;
 }
 
 .imp-clues-add > .arco-input-inner-wrapper,
@@ -4105,6 +4226,46 @@ body[arco-theme="dark"] .imp-compose-box::after {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cl-imp-notes-acts {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.cl-imp-notes-edit-btn {
+  all: unset;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 560;
+  color: var(--ink-2);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: color 0.14s ease, border-color 0.14s ease, background-color 0.14s ease;
+}
+
+.cl-imp-notes-edit-btn:hover {
+  color: var(--brand-ink);
+  border-color: var(--brand-line);
+  background: var(--brand-soft);
+}
+
+.cl-imp-notes-empty {
+  font-size: 12px;
+  color: var(--mute);
+  line-height: 1.5;
 }
 
 .cl-imp-notes-lbl {

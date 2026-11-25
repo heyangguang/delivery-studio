@@ -5853,8 +5853,8 @@ export function ClusterRehearsal({
                 })
               }
               title={bi(
-                "前往「集群 → 配置 → 自动化执行」查看或配置自动化通道",
-                "Open Cluster → Config → Automation to configure execution channel",
+                "前往当前集群的「自动化」标签页查看或配置执行通道",
+                "Open the Cluster → Automation tab to configure execution channel",
               )}
             >
               <IconThunderbolt />

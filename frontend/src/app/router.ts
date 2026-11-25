@@ -6,7 +6,7 @@ export type Route =
   | {
       name: "deliveries";
       id?: string;
-      tab?: "config" | "plans" | "docs" | "rehearsal" | "security";
+      tab?: "config" | "plans" | "docs" | "rehearsal" | "security" | "automation";
       plan?: string;
       doc?: string;
       rehearsal?: string;
@@ -71,7 +71,9 @@ export function parse(hash: string): Route {
             ? { name: "deliveries", id: p[1], tab: "rehearsal", rehearsal: p[3] }
             : p[2] === "security"
               ? { name: "deliveries", id: p[1], tab: "security" }
-              : { name: "deliveries", id: p[1] };
+              : p[2] === "automation"
+                ? { name: "deliveries", id: p[1], tab: "automation" }
+                : { name: "deliveries", id: p[1] };
   if (p[0] === "new")
     return {
       name: "new",

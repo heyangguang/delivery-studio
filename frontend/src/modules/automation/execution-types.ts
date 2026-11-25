@@ -185,6 +185,9 @@ export type ClusterAutomationSummary = {
   online_agents: number;
   ready: boolean;
   ready_reason?: string;
+  verified?: boolean;
+  last_check_state?: string;
+  last_check_at?: string;
   bootstrap: AutomationBootstrapInfo;
   recent_tasks: RehearsalExecTask[];
 };

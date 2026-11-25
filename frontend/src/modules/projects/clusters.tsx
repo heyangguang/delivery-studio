@@ -92,6 +92,7 @@ import {
   type RehearsalPresetKind,
 } from "../rehearsal/rehearsal_intent";
 import { bi, useLang } from "../../app/i18n";
+import type { ClusterAutomationSummary } from "../automation/execution-types";
 import "./clusters.css";
 import "./importcluster.css";
 
@@ -103,6 +104,11 @@ const LazyClusterConfig = lazySubView(() =>
 );
 const LazyClusterSecurityTab = lazySubView(() =>
   import("../security/clustersecurity").then((m) => ({ default: m.ClusterSecurityTab })),
+);
+const LazyClusterAutomationPanel = lazySubView(() =>
+  import("../automation/rehearsal-automation").then((m) => ({
+    default: m.ClusterAutomationPanel,
+  })),
 );
 const LazyImportedBaselineModal = lazySubView(() =>
   import("./importcluster").then((m) => ({ default: m.ImportedBaselineModal })),
@@ -189,10 +195,25 @@ function TabSecurityIcon() {
   );
 }
 
+function TabAutomationIcon({ lit }: { lit?: boolean }) {
+  return (
+    <svg
+      {...TAB_SVG_PROPS}
+      style={{
+        display: "block",
+        flex: "none",
+        color: lit ? "var(--ok)" : undefined,
+      }}
+    >
+      <path d="M9.15 2.05L3.65 8.85H8.05L6.85 13.95L12.35 7.15H7.95L9.15 2.05Z" />
+    </svg>
+  );
+}
+
 /* ---------- URL compatibility for ?tab=deploy and legacy ?tab=deliveries ---------- */
 
 type ClusterTabCompat = {
-  tab?: "config" | "plans" | "docs" | "rehearsal" | "security";
+  tab?: "config" | "plans" | "docs" | "rehearsal" | "security" | "automation";
   plan?: string;
   doc?: string;
   rehearsal?: string;
@@ -278,6 +299,12 @@ export function parseClusterUrlCompat(clusterId?: string): ClusterTabCompat {
       canonicalize: true,
     };
   }
+  if (qTab === "automation") {
+    return {
+      tab: "automation",
+      canonicalize: true,
+    };
+  }
   if (qTab === "overview") {
     return { canonicalize: true };
   }
@@ -307,7 +334,7 @@ export function ClusterDetail({
   onRehearsalFocusChange,
 }: {
   c: ClusterView;
-  tab?: "config" | "plans" | "docs" | "rehearsal" | "security";
+  tab?: "config" | "plans" | "docs" | "rehearsal" | "security" | "automation";
   plan?: string;
   doc?: string;
   rehearsal?: string;
@@ -425,10 +452,22 @@ export function ClusterDetail({
   }, [c.id, basePlanId]);
   const isImported = c.delivery_mode === "imported";
   const [baselineModal, setBaselineModal] = useState<null | "edit" | "probe">(null);
+  const [autoSummary, setAutoSummary] = useState<ClusterAutomationSummary | null>(null);
   const deletingImportedRef = useRef(false);
   useEffect(() => {
     setBaselineModal(null);
   }, [c.id, resolvedTab]);
+  useEffect(() => {
+    let alive = true;
+    setAutoSummary(null);
+    api<ClusterAutomationSummary>(`/api/clusters/${encodeURIComponent(c.id)}/automation`)
+      .then((res) => alive && setAutoSummary(res))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [c.id]);
+  const autoLit = Boolean(autoSummary?.verified);
   const effectiveTab =
     (resolvedTab === "plans" && isImported) ||
     (resolvedTab === "rehearsal" && !canRehearse) ||
@@ -473,6 +512,21 @@ export function ClusterDetail({
     ...(hasDocs
       ? [{ value: "docs", label: bi("文档", "Docs"), icon: <TabDocsIcon /> }]
       : []),
+    {
+      value: "automation",
+      label: autoLit ? (
+        <span
+          className="cl-auto-tab-label"
+          title={bi("自动化通道已测试连通", "Automation verified & ready")}
+        >
+          {bi("自动化", "Automation")}
+          <span className="cl-auto-tab-dot" aria-hidden />
+        </span>
+      ) : (
+        bi("自动化", "Automation")
+      ),
+      icon: <TabAutomationIcon lit={autoLit} />,
+    },
   ];
   const prevTabIdx = useRef(0);
   const curTabIdx = Math.max(
@@ -708,6 +762,8 @@ export function ClusterDetail({
                 void import("../rehearsal/rehearsal");
               } else if (next === "docs" && hasDocs) {
                 void import("./docs").then((m) => m.prefetchClusterDocs(c.id));
+              } else if (next === "automation") {
+                void import("../automation/rehearsal-automation");
               }
             }}
             onChange={(next) => {
@@ -724,7 +780,7 @@ export function ClusterDetail({
                   {
                     name: "deliveries",
                     id: c.id,
-                    tab: next as "plans" | "rehearsal" | "docs" | "security",
+                    tab: next as "plans" | "rehearsal" | "docs" | "security" | "automation",
                   },
                   { replace: true },
                 );
@@ -777,6 +833,15 @@ export function ClusterDetail({
           <React.Suspense fallback={<div className="dsec"><Skeleton animation text={{ rows: 6 }} /></div>}>
             <LazyDocsTab c={c} doc={resolvedDoc} />
           </React.Suspense>
+        ) : effectiveTab === "automation" ? (
+          <div className="dsec rha-tab-pane">
+            <React.Suspense fallback={<Skeleton animation text={{ rows: 6 }} />}>
+              <LazyClusterAutomationPanel
+                clusterId={c.id}
+                onChanged={setAutoSummary}
+              />
+            </React.Suspense>
+          </div>
         ) : (
           <Overview
             c={c}

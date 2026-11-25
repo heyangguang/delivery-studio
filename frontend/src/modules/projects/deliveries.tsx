@@ -404,7 +404,7 @@ export function DeliveriesPage({
   load: LoadState;
   reload: () => Promise<void>;
   selected?: string;
-  tab?: "config" | "plans" | "docs" | "rehearsal" | "security";
+  tab?: "config" | "plans" | "docs" | "rehearsal" | "security" | "automation";
   plan?: string;
   doc?: string;
   rehearsal?: string;
@@ -987,7 +987,7 @@ function JobList({
 }: {
   jobs: Row[];
   selected?: string;
-  activeTab?: "config" | "plans" | "docs" | "rehearsal" | "security";
+  activeTab?: "config" | "plans" | "docs" | "rehearsal" | "security" | "automation";
   load: LoadState;
   reload: () => Promise<void>;
   filtered: boolean;

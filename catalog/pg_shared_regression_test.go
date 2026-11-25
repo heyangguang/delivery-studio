@@ -26,7 +26,7 @@ func TestRealPostgreSQLOverrideWithClonefromTagsLoadsCleanly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	orig := string(mem["postgresql/component.yaml"].Data)
+	orig := strings.ReplaceAll(string(mem["postgresql/component.yaml"].Data), "\r\n", "\n")
 	if !strings.Contains(orig, "shared_files:\n") {
 		t.Fatal("expected shared_files in postgresql/component.yaml")
 	}

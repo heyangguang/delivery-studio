@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.340-dev"
+	version            = "1.0.0"
 	currentReleaseDate = "2026-11-25"
 )
 
@@ -65,6 +65,22 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.0",
+		Date:    "2026-11-25",
+		Title:   "Kyndryl Delivery Studio 1.0 正式版",
+		TitleEn: "Kyndryl Delivery Studio 1.0 GA",
+		Highlights: []string{
+			"全栈离线交付包组装、组件工作台实测发布门禁与授权执行节点零中断交付",
+			"存量集群多组件伴生架构识别与引导式变更演练、跨集群推广闭环",
+			"供应链 CVE/VEX 安全治理、交付/安全 Word 报告导出与 Apple 级全站视觉动效升级",
+		},
+		HighlightsEn: []string{
+			"Full offline delivery packaging, verified component workbench, and authorized execution node delivery",
+			"Brownfield multi-component topology recognition, guided change rehearsal, and multi-cluster rollout",
+			"Supply-chain CVE/VEX governance, Word/Excel compliance reports, and Apple-grade UI/motion polish",
+		},
+	},
 	{
 		Version: "1.0.340-dev",
 		Date:    "2026-11-25",

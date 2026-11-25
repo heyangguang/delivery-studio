@@ -789,6 +789,19 @@ func TestImportedBaselineGapDiagnosisAndReadOnlyGapProbe(t *testing.T) {
 	if len(rResp.DismissedGaps) != 0 || !restored {
 		t.Fatalf("expected backup restored into active gaps, got dismissed=%+v gaps=%+v", rResp.DismissedGaps, rResp.Health.Gaps)
 	}
+
+	// Dismissing every remaining gap must serialize health.gaps as [] (not JSON null) so the UI never crashes on .length.
+	allDismissed := analyzeImportedBaselineHealth("postgresql", "PostgreSQL", importClusterReq{
+		DismissedGaps: []string{"paths", "params", "backup", "endpoint", "security", "packages"},
+	}, "zh")
+	if allDismissed.Gaps == nil || len(allDismissed.Gaps) != 0 {
+		t.Fatalf("expected non-nil empty slice for zero active gaps, got %#v", allDismissed.Gaps)
+	}
+	if rawJSON, err := json.Marshal(allDismissed); err != nil {
+		t.Fatal(err)
+	} else if !strings.Contains(string(rawJSON), `"gaps":[]`) {
+		t.Fatalf("expected JSON \"gaps\":[] when all gaps are dismissed, got: %s", string(rawJSON))
+	}
 }
 
 func TestImportNegatedCompanionAndDistroSchemaVersion(t *testing.T) {

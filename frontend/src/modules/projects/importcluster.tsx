@@ -5310,7 +5310,7 @@ export function ImportedBaselineModal({
           prev
             ? {
                 ...prev,
-                gaps: prev.gaps.filter((g) => g.id !== gap.id),
+                gaps: (prev.gaps || []).filter((g) => g.id !== gap.id),
               }
             : prev,
         );
@@ -5755,8 +5755,8 @@ export function ImportedBaselineModal({
               onClick={() => setTab("probe")}
             >
               {bi("AI 只读补采", "AI Read-Only Probe")}
-              {health && health.gaps.length > 0 && (
-                <em className="imp-tab-dot">{health.gaps.length}</em>
+              {(health?.gaps?.length ?? 0) > 0 && (
+                <em className="imp-tab-dot">{health!.gaps!.length}</em>
               )}
             </button>
           </div>
@@ -6444,25 +6444,25 @@ export function ImportedBaselineModal({
             />
           )}
 
-          {health && health.gaps.length > 0 && mergeDiff.length === 0 && (
+          {(health?.gaps?.length ?? 0) > 0 && mergeDiff.length === 0 && (
             <div className="imp-health-strip">
               <div className="imp-health-strip-l">
-                <span className={`imp-gap-score sm num ${health.score >= 85 ? "is-ok" : health.score >= 55 ? "is-warn" : "is-low"}`}>
-                  {health.score}%
+                <span className={`imp-gap-score sm num ${health!.score >= 85 ? "is-ok" : health!.score >= 55 ? "is-warn" : "is-low"}`}>
+                  {health!.score}%
                 </span>
                 <div className="imp-health-strip-t">
                   <b>
                     {bi(
-                      `标准基线已齐备 ${health.passed}/${health.total} 项 · 发现 ${health.gaps.length} 项待补采`,
-                      `Standard baseline ${health.passed}/${health.total} complete · ${health.gaps.length} gap(s)`,
+                      `标准基线已齐备 ${health!.passed}/${health!.total} 项 · 发现 ${(health!.gaps || []).length} 项待补采`,
+                      `Standard baseline ${health!.passed}/${health!.total} complete · ${(health!.gaps || []).length} gap(s)`,
                     )}
                   </b>
                   <span className="small muted">
-                    {health.gaps
+                    {(health!.gaps || [])
                       .slice(0, 2)
                       .map((g) => g.title)
                       .join("；")}
-                    {health.gaps.length > 2 ? bi(" 等", "…") : ""}
+                    {(health!.gaps || []).length > 2 ? bi(" 等", "…") : ""}
                   </span>
                 </div>
               </div>

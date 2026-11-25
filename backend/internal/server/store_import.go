@@ -431,7 +431,7 @@ func analyzeImportedBaselineHealth(compID, displayName string, req importCluster
 		}
 	}
 
-	var gaps []baselineGap
+	gaps := []baselineGap{}
 	var dismissed []baselineGap
 	total := 0
 	passed := 0

@@ -446,6 +446,12 @@ func TestGlobalExecutionAgentsAPI(t *testing.T) {
 		t.Fatalf("expected allow_mutating=false, got true")
 	}
 
+	// Reject unknown action even when allow_mutating is provided
+	badActRR := storeRequest(srv, "PATCH", "/api/executions/agents", strings.NewReader(`{"id":"`+enr.Agent.ID+`","action":"unknown","allow_mutating":true}`), cookie, csrf)
+	if badActRR.Code != 400 {
+		t.Fatalf("expected 400 for invalid action, got %d %s", badActRR.Code, badActRR.Body.String())
+	}
+
 	// Revoke globally
 	revRR := storeRequest(srv, "PATCH", "/api/executions/agents", strings.NewReader(`{"id":"`+enr.Agent.ID+`","action":"revoke"}`), cookie, csrf)
 	if revRR.Code != 200 {
@@ -453,7 +459,16 @@ func TestGlobalExecutionAgentsAPI(t *testing.T) {
 	}
 	var revoked automationAgentView
 	_ = json.Unmarshal(revRR.Body.Bytes(), &revoked)
-	if revoked.Desired != "revoked" {
-		t.Fatalf("expected desired=revoked, got %q", revoked.Desired)
+	if revoked.Desired != "revoked" || revoked.Applied != "revoked" || revoked.Online || revoked.Message == "" {
+		t.Fatalf("unexpected revoked agent view: %+v", revoked)
+	}
+	executionMu.Lock()
+	execData, err := srv.readExecutions()
+	executionMu.Unlock()
+	if err != nil {
+		t.Fatalf("readExecutions failed: %v", err)
+	}
+	if stored := execData.Agents[enr.Agent.ID]; stored.EnrollmentHash != "" {
+		t.Fatalf("expected enrollment_hash cleared after global revoke, got %q", stored.EnrollmentHash)
 	}
 }

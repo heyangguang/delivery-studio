@@ -367,6 +367,7 @@ export function ExecutionNodes({
   const busyLockRef = useRef(false);
   const bundleLockRef = useRef(false);
   const updatingLockRef = useRef("");
+  const updatingAgentLockRef = useRef("");
   const deletingLockRef = useRef(false);
 
   const load = async (manual = false) => {
@@ -411,7 +412,8 @@ export function ExecutionNodes({
     ag: AutomationAgentView,
     payload: { action: "update" | "revoke"; allow_mutating?: boolean },
   ) => {
-    if (updatingAgent) return;
+    if (updatingAgentLockRef.current) return;
+    updatingAgentLockRef.current = ag.id;
     setUpdatingAgent(ag.id);
     try {
       await api("/api/executions/agents", {
@@ -427,6 +429,7 @@ export function ExecutionNodes({
     } catch (e) {
       Message.error((e as Error).message);
     } finally {
+      updatingAgentLockRef.current = "";
       setUpdatingAgent("");
     }
   };
@@ -811,10 +814,13 @@ export function ExecutionNodes({
     return allAgents.filter((a) => a.cluster === activeAgent.cluster);
   }, [allAgents, activeAgent]);
 
-  const upgradeCmd = `# 1. 将新版执行器上传至控制机（点击上方按钮下载 Linux amd64 二进制）
+  const upgradeCmd = `${bi(
+    "# 1. 将新版执行器上传至控制机（点击上方按钮下载 Linux amd64 二进制）",
+    "# 1. Upload the new runner binary to the control host (download Linux amd64 above)",
+  )}
 sudo install -m 0755 middleware-store-linux-amd64 /usr/local/bin/middleware-store
-sudo systemctl restart middleware-execution-node
-sudo systemctl status middleware-execution-node --no-pager`;
+sudo systemctl restart middleware-execution
+sudo systemctl status middleware-execution --no-pager`;
 
   const showRail = !narrow || !mobileDetail;
   const showDetail = !narrow || mobileDetail;
@@ -971,9 +977,11 @@ sudo systemctl status middleware-execution-node --no-pager`;
                 <div className="ec-rail-empty">
                   <IconDesktop />
                   <span>
-                    {all.length === 0
-                      ? bi("暂无控制机节点", "No control nodes yet")
-                      : bi("没有匹配的控制机", "No matching nodes")}
+                    {!canManage
+                      ? bi("仅具备只读查看权限", "Read-only access")
+                      : all.length === 0
+                        ? bi("暂无控制机节点", "No control nodes yet")
+                        : bi("没有匹配的控制机", "No matching nodes")}
                   </span>
                 </div>
               )
@@ -1395,19 +1403,33 @@ sudo systemctl status middleware-execution-node --no-pager`;
                 <div className="detail-none enter">
                   <IconDesktop style={{ fontSize: 28, color: "var(--faint)" }} />
                   <h2>
-                    {all.length === 0
-                      ? bi("连接第一台控制机执行节点", "Connect Your First Control Node")
-                      : bi("没有符合筛选条件的控制机", "No Matching Control Nodes")}
+                    {!canManage
+                      ? bi("控制机节点仅管理员可配置", "Control Nodes Require Management Permission")
+                      : all.length === 0
+                        ? bi("连接第一台控制机执行节点", "Connect Your First Control Node")
+                        : bi("没有符合筛选条件的控制机", "No Matching Control Nodes")}
                   </h2>
                   <p>
-                    {all.length === 0
+                    {!canManage
                       ? bi(
-                          "在主控机安装 1 个轻量后台执行器，即可统一调度集群交付、只读探针采集与变更演练。",
-                          "Install one background runner on a control host to orchestrate deliveries, probes, and rehearsals.",
+                          "当前账户仅具备只读查看权限，无法查看或配置控制机执行节点。请联系管理员配置控制机，或切换至「Agent」查看目标机直连 Agent。",
+                          "Your account has read-only access and cannot view or manage control nodes. Contact an administrator, or switch to the Agents tab to inspect target agents.",
                         )
-                      : bi("调整左侧搜索或状态筛选条件以查看其他节点。", "Adjust the rail search or filter to view nodes.")}
+                      : all.length === 0
+                        ? bi(
+                            "在主控机安装 1 个轻量后台执行器，即可统一调度集群交付、只读探针采集与变更演练。",
+                            "Install one background runner on a control host to orchestrate deliveries, probes, and rehearsals.",
+                          )
+                        : bi("调整左侧搜索或状态筛选条件以查看其他节点。", "Adjust the rail search or filter to view nodes.")}
                   </p>
-                  {all.length === 0 && canManage ? (
+                  {!canManage ? (
+                    <Button
+                      type="outline"
+                      onClick={() => go({ name: "executions", view: "nodes", fleet: "agents" })}
+                    >
+                      {bi("查看目标机 Agent", "View Target Agents")} <IconArrowRight />
+                    </Button>
+                  ) : all.length === 0 ? (
                     <div className="ec-row-acts">
                       <Button type="primary" icon={<IconPlus />} onClick={begin}>
                         {bi("接入执行节点", "Add Control Node")}
@@ -1417,16 +1439,14 @@ sudo systemctl status middleware-execution-node --no-pager`;
                       </Button>
                     </div>
                   ) : (
-                    all.length > 0 && (
-                      <Button
-                        onClick={() => {
-                          setQuery("");
-                          setFilter("all");
-                        }}
-                      >
-                        {bi("清除筛选", "Clear Filters")}
-                      </Button>
-                    )
+                    <Button
+                      onClick={() => {
+                        setQuery("");
+                        setFilter("all");
+                      }}
+                    >
+                      {bi("清除筛选", "Clear Filters")}
+                    </Button>
                   )}
                 </div>
               )}

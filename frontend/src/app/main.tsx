@@ -88,6 +88,7 @@ import "../modules/rehearsal/rehearsal_rollout.css";
 import "../modules/rehearsal/rehearsal.css";
 import "../modules/projects/clusters.css";
 import "../modules/automation/monitor.css";
+import "../modules/automation/execution-center.css";
 import "../modules/iam/iam.css";
 import "../modules/catalog/workbench.css";
 import "../modules/library/libruntime.css";
@@ -1868,7 +1869,7 @@ function App() {
         ]
       : []),
     ...(can(
-      "settings.notify|ai.settings|ai.usage|settings.report|settings.storage|settings.sandbox|execution.manage",
+      "settings.notify|ai.settings|ai.usage|settings.report|settings.storage|settings.sandbox",
     )
       ? [
           {

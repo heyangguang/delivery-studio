@@ -87,6 +87,7 @@ import {
   cachedDetail,
   prefetchDetail,
   putDetailCache,
+  subscribeDetailCache,
 } from "./deliveries";
 import { AIDock, Spark, useAIStatus } from "../ai/aichat";
 import {
@@ -854,10 +855,13 @@ export function ClusterDetail({
             onSavedBaseline={
               isImported
                 ? async () => {
-                    if (c.current) {
+                    const targetJobId = c.current || c.holder || c.plans?.[0]?.id;
+                    if (targetJobId) {
                       putDetailCache(
-                        c.current,
-                        await api<JobDetail>(`/api/jobs/${encodeURIComponent(c.current)}`),
+                        targetJobId,
+                        await api<JobDetail>(`/api/jobs/${encodeURIComponent(targetJobId)}`, {
+                          cache: "no-store",
+                        }),
                       );
                     }
                     await reload();
@@ -875,10 +879,13 @@ export function ClusterDetail({
             cluster={c}
             onClose={() => setBaselineModal(null)}
             onSaved={async () => {
-              if (c.current) {
+              const targetJobId = c.current || c.holder || c.plans?.[0]?.id;
+              if (targetJobId) {
                 putDetailCache(
-                  c.current,
-                  await api<JobDetail>(`/api/jobs/${encodeURIComponent(c.current)}`),
+                  targetJobId,
+                  await api<JobDetail>(`/api/jobs/${encodeURIComponent(targetJobId)}`, {
+                    cache: "no-store",
+                  }),
                 );
               }
               await reload();
@@ -1979,12 +1986,27 @@ function Now({
   const [d, setD] = useState<JobDetail | null>(() => cachedDetail(p.id));
   const [loadError, setLoadError] = useState("");
   const [retry, setRetry] = useState(0);
+  useEffect(
+    () =>
+      subscribeDetailCache((changedId, next) => {
+        if (changedId === p.id) {
+          setD(next);
+          setLoadError("");
+        }
+      }),
+    [p.id],
+  );
+  useEffect(() => {
+    const onChanged = () => setRetry((n) => n + 1);
+    window.addEventListener("mh-clusters-changed", onChanged);
+    return () => window.removeEventListener("mh-clusters-changed", onChanged);
+  }, []);
   useEffect(() => {
     let live = true;
     const hit = cachedDetail(p.id);
     if (hit) setD(hit);
     setLoadError("");
-    api<JobDetail>(`/api/jobs/${p.id}`)
+    api<JobDetail>(`/api/jobs/${encodeURIComponent(p.id)}`, { cache: "no-store" })
       .then((r) => {
         putDetailCache(p.id, r);
         if (live) setD(r);

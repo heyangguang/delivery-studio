@@ -185,6 +185,7 @@ export function VexTriageEditor({
   };
 
   const handleAIPolish = async () => {
+    if (polishing) return;
     setPolishing(true);
     setAiHint("");
     const before = note;
@@ -247,7 +248,7 @@ export function VexTriageEditor({
         <div className="vex-ctx-card">
           <div className="vex-ctx-top">
             {context.severity && (
-              <span className={`sec-sev-pill sev-${context.severity}`}>
+              <span className={`sec-sev-pill num sev-${context.severity}`}>
                 {sevLabelMap[context.severity.toUpperCase()] || context.severity}
                 {context.cvss_score ? ` ${context.cvss_score.toFixed(1)}` : ""}
               </span>
@@ -342,7 +343,7 @@ export function VexTriageEditor({
               <button
                 key={p.d}
                 type="button"
-                className="vex-quick-chip"
+                className="vex-quick-chip num"
                 onClick={() => onExpiresChange(addDaysISO(p.d))}
               >
                 {p.lbl}
@@ -483,6 +484,7 @@ export function BaselineWaiveEditor({
   ];
 
   const handlePolish = async () => {
+    if (polishing) return;
     setPolishing(true);
     const before = note;
     try {

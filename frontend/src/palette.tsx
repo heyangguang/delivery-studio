@@ -576,6 +576,29 @@ function PaletteBody({
             e.preventDefault();
             e.stopPropagation();
             close();
+            return;
+          }
+          if (e.key === "Tab") {
+            const focusables = Array.from(
+              e.currentTarget.querySelectorAll<HTMLElement>(
+                'input:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+              ),
+            );
+            if (focusables.length <= 1) {
+              e.preventDefault();
+              focusables[0]?.focus();
+              return;
+            }
+            const first = focusables[0];
+            const last = focusables[focusables.length - 1];
+            const active = document.activeElement as HTMLElement | null;
+            if (e.shiftKey && (active === first || !e.currentTarget.contains(active))) {
+              e.preventDefault();
+              last.focus();
+            } else if (!e.shiftKey && (active === last || !e.currentTarget.contains(active))) {
+              e.preventDefault();
+              first.focus();
+            }
           }
         }}
       >
@@ -631,8 +654,6 @@ function PaletteBody({
                 e.preventDefault();
                 e.stopPropagation();
                 close();
-              } else if (e.key === "Tab") {
-                e.preventDefault();
               }
             }}
           />

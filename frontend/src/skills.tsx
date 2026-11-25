@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   Input,
@@ -31,6 +31,7 @@ import { DocToc, StructuredDoc, extractDocSections } from "./docrender";
 import { Segmented } from "./ui";
 import { bi, useLang } from "./i18n";
 import "./respage.css";
+import "./kb.css";
 
 /* Skills: structured operational manuals + optional air-gapped sandbox scripts (Python 3).
    Strict dual-scope isolation:
@@ -73,6 +74,9 @@ type Draft = {
 
 const NAME = /^[a-z][a-z0-9-]{1,40}$/;
 const SCRIPT_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,36}\.py$/;
+
+const hasFileTransfer = (dt?: DataTransfer | null) =>
+  !!dt && Array.from(dt.types || []).includes("Files");
 
 type ScriptTemplate = {
   label: string;
@@ -178,6 +182,8 @@ function uniqueForkName(base: string, isTaken: (n: string) => boolean): string {
   return `my-skill-${Date.now().toString(36).slice(-5)}`;
 }
 
+const skillKey = (s: Skill) => (s.mine ? `my-${s.name}` : s.name);
+
 export function SkillsPage({
   selected,
   studioNav,
@@ -188,6 +194,10 @@ export function SkillsPage({
   const lang = useLang();
   const narrow = useMedia("(max-width: 900px)");
   const admin = can("ai.settings");
+  const mountedRef = useRef(true);
+  const saveRef = useRef(false);
+  const actionRef = useRef(false);
+  const toggleRef = useRef(false);
   const initMe = cached<{ skills: Skill[]; platform: Skill[] }>("/api/me/skills");
   const initAll = admin
     ? cached<{ skills: Skill[] }>("/api/settings/ai/skills")
@@ -206,49 +216,76 @@ export function SkillsPage({
   const [raw, setRaw] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [busy, setBusy] = useState(false);
+  const [toggling, setToggling] = useState("");
 
-  const load = () =>
-    Promise.all([
-      api<{ skills: Skill[]; platform: Skill[] }>("/api/me/skills"),
-      admin
-        ? api<{ skills: Skill[] }>("/api/settings/ai/skills")
-        : Promise.resolve(null),
-    ])
-      .then(([me, all]) => {
-        putCached("/api/me/skills", me);
-        if (all) putCached("/api/settings/ai/skills", all);
-        setMine(me.skills.map((x) => ({ ...x, mine: true, enabled: true })));
-        setPlatform(all ? all.skills : me.platform);
-        setError("");
-      })
-      .catch((e) => setError((e as Error).message));
+  const load = useCallback(
+    () =>
+      Promise.all([
+        api<{ skills: Skill[]; platform: Skill[] }>("/api/me/skills"),
+        admin
+          ? api<{ skills: Skill[] }>("/api/settings/ai/skills")
+          : Promise.resolve(null),
+      ])
+        .then(([me, all]) => {
+          putCached("/api/me/skills", me);
+          if (all) putCached("/api/settings/ai/skills", all);
+          if (!mountedRef.current) return;
+          setMine(me.skills.map((x) => ({ ...x, mine: true, enabled: true })));
+          setPlatform(all ? all.skills : me.platform);
+          setError("");
+        })
+        .catch((e) => {
+          if (mountedRef.current) setError((e as Error).message);
+        }),
+    [admin],
+  );
 
   useEffect(() => {
+    mountedRef.current = true;
     load();
-  }, [lang]); // eslint-disable-line react-hooks/exhaustive-deps
+    return () => {
+      mountedRef.current = false;
+    };
+  }, [lang, load]);
 
   useEffect(() => {
     setRaw(false);
   }, [selected]);
 
-  const key = (s: Skill) => (s.mine ? `my-${s.name}` : s.name);
   const all = useMemo(() => [...(mine || []), ...platform], [mine, platform]);
   const t = q.trim().toLowerCase();
-  const shown = all.filter(
-    (s) =>
-      (kind === "all" || (kind === "mine") === !!s.mine) &&
-      (!t ||
-        `${s.title} ${s.name} ${s.description} ${(s.scripts || []).map((x) => x.name).join(" ")}`
-          .toLowerCase()
-          .includes(t)),
+  const shown = useMemo(
+    () =>
+      all.filter(
+        (s) =>
+          (kind === "all" || (kind === "mine") === !!s.mine) &&
+          (!t ||
+            `${s.title} ${s.name} ${s.description} ${(s.scripts || []).map((x) => x.name).join(" ")}`
+              .toLowerCase()
+              .includes(t)),
+      ),
+    [all, kind, t],
   );
-  const cur = all.find((s) => key(s) === selected);
+  const groupedRows = useMemo(
+    () => ({
+      mine: shown.filter((s) => !!s.mine),
+      platform: shown.filter((s) => !s.mine),
+    }),
+    [shown],
+  );
+  const cur = useMemo(
+    () => all.find((s) => skillKey(s) === selected),
+    [all, selected],
+  );
 
   const curSections = useMemo(
     () =>
       cur && !raw
-        ? extractDocSections(cur.content || "", cur.title, `sk-${key(cur)}`)
-            .sections
+        ? extractDocSections(
+            cur.content || "",
+            cur.title,
+            `sk-${skillKey(cur)}`,
+          ).sections
         : [],
     [cur, raw],
   );
@@ -279,7 +316,7 @@ export function SkillsPage({
       }),
     });
     putCached("/api/settings/ai/skills", r);
-    setPlatform(r.skills);
+    if (mountedRef.current) setPlatform(r.skills);
   };
 
   const saveMine = async (next: Skill[]) => {
@@ -295,11 +332,13 @@ export function SkillsPage({
         })),
       }),
     });
-    setMine(r.skills.map((x) => ({ ...x, mine: true, enabled: true })));
+    if (mountedRef.current)
+      setMine(r.skills.map((x) => ({ ...x, mine: true, enabled: true })));
   };
 
   const save = async () => {
-    if (!draft) return;
+    if (!draft || saveRef.current) return;
+    saveRef.current = true;
     setBusy(true);
     try {
       const s: Skill = {
@@ -340,7 +379,7 @@ export function SkillsPage({
           },
         ]);
       }
-      setDraft(null);
+      if (mountedRef.current) setDraft(null);
       Message.success(bi("已保存", "Saved"));
       go(
         {
@@ -352,7 +391,8 @@ export function SkillsPage({
     } catch (e) {
       err(e);
     } finally {
-      setBusy(false);
+      saveRef.current = false;
+      if (mountedRef.current) setBusy(false);
     }
   };
 
@@ -370,6 +410,8 @@ export function SkillsPage({
       cancelText: bi("取消", "Cancel"),
       okButtonProps: { status: "warning" },
       onOk: async () => {
+        if (actionRef.current) return;
+        actionRef.current = true;
         try {
           await savePlatform(
             platform.map((x) =>
@@ -381,6 +423,9 @@ export function SkillsPage({
           );
         } catch (e) {
           err(e);
+          throw e;
+        } finally {
+          actionRef.current = false;
         }
       },
     });
@@ -398,6 +443,8 @@ export function SkillsPage({
       cancelText: bi("取消", "Cancel"),
       okButtonProps: { status: "danger" },
       onOk: async () => {
+        if (actionRef.current) return;
+        actionRef.current = true;
         try {
           if (s.mine)
             await saveMine((mine || []).filter((x) => x.name !== s.name));
@@ -405,17 +452,26 @@ export function SkillsPage({
           go({ name: "skills" }, { replace: true });
         } catch (e) {
           err(e);
+          throw e;
+        } finally {
+          actionRef.current = false;
         }
       },
     });
 
   const toggle = async (s: Skill, on: boolean) => {
+    if (toggleRef.current) return;
+    toggleRef.current = true;
+    setToggling(s.name);
     try {
       await savePlatform(
         platform.map((x) => (x.name === s.name ? { ...x, enabled: on } : x)),
       );
     } catch (e) {
       err(e);
+    } finally {
+      toggleRef.current = false;
+      if (mountedRef.current) setToggling("");
     }
   };
 
@@ -444,6 +500,7 @@ export function SkillsPage({
         name: sc.name,
         description: sc.description || "",
         code: sc.code || "",
+        ...(sc.network ? { network: true } : {}),
       })),
     });
   };
@@ -462,6 +519,7 @@ export function SkillsPage({
         name: sc.name,
         description: sc.description || "",
         code: sc.code || "",
+        ...(sc.network ? { network: true } : {}),
       })),
     });
     go({ name: "skills", id: "~new" }, { replace: !!selected });
@@ -471,18 +529,21 @@ export function SkillsPage({
     !!draft &&
     (selected === "~new" ||
       (cur &&
-        key(cur) === selected &&
+        skillKey(cur) === selected &&
         draft.orig === cur.name &&
         (draft.scope === "mine") === !!cur.mine));
 
-  const counts = {
-    all: all.length,
-    mine: mine?.length || 0,
-    platform: platform.length,
-  };
+  const counts = useMemo(
+    () => ({
+      all: all.length,
+      mine: mine?.length || 0,
+      platform: platform.length,
+    }),
+    [all.length, mine?.length, platform.length],
+  );
 
   return (
-    <div className="md-split">
+    <div className="md-split sk-split-page">
       {(!narrow || !selected) && (
         <aside className="md-list" aria-label={bi("技能", "Skills")}>
           <div className="list-head">
@@ -560,7 +621,7 @@ export function SkillsPage({
               aria-label={bi("技能", "Skills")}
             >
               {(["mine", "platform"] as const).map((g) => {
-                const rows = shown.filter((s) => (g === "mine") === !!s.mine);
+                const rows = groupedRows[g];
                 if (!rows.length) return null;
                 return (
                   <React.Fragment key={g}>
@@ -577,18 +638,19 @@ export function SkillsPage({
                     </div>
                     {rows.map((s) => {
                       const scCount = s.scripts?.length || 0;
+                      const k = skillKey(s);
                       return (
                         <a
-                          key={key(s)}
-                          href={`#/skills/${key(s)}`}
+                          key={k}
+                          href={`#/skills/${k}`}
                           role="option"
-                          aria-selected={selected === key(s)}
-                          className={`rp-row ${selected === key(s) ? "on" : ""} ${s.enabled === false ? "off" : ""}`}
+                          aria-selected={selected === k}
+                          className={`rp-row ${selected === k ? "on" : ""} ${s.enabled === false ? "off" : ""}`}
                           onClick={(e) => {
                             e.preventDefault();
                             setDraft(null);
                             go(
-                              { name: "skills", id: key(s) },
+                              { name: "skills", id: k },
                               { replace: !!selected },
                             );
                           }}
@@ -599,13 +661,13 @@ export function SkillsPage({
                             <IconBook />
                           </span>
                           <span className="rp-t">
-                            <b>{s.title}</b>
-                            <small>{s.description}</small>
+                            <b title={s.title}>{s.title}</b>
+                            <small title={s.description}>{s.description}</small>
                           </span>
                           <span className="rp-flags">
                             {scCount > 0 && (
                               <em
-                                className="rp-flag script"
+                                className="rp-flag script num"
                                 title={bi("含沙箱脚本", "Includes sandbox scripts")}
                               >
                                 {bi(`脚本 ×${scCount}`, `Scripts ×${scCount}`)}
@@ -669,7 +731,7 @@ export function SkillsPage({
                 )}
               />
             ) : cur ? (
-              <article className="rp-doc enter" key={key(cur)}>
+              <article className="rp-doc sk-doc enter" key={skillKey(cur)}>
                 <header className="rp-head">
                   <span
                     className={`rp-ic lg ${cur.mine ? "k-mine" : cur.builtin ? "k-built" : "k-org"}`}
@@ -738,6 +800,7 @@ export function SkillsPage({
                       <label className="rp-switch">
                         <Switch
                           size="small"
+                          loading={toggling === cur.name}
                           checked={cur.enabled !== false}
                           onChange={(v) => toggle(cur, v)}
                           aria-label={bi("对所有人启用", "Enable for everyone")}
@@ -759,7 +822,7 @@ export function SkillsPage({
                       <StructuredDoc
                         text={cur.content || ""}
                         docTitle={cur.title}
-                        idPrefix={`sk-${key(cur)}`}
+                        idPrefix={`sk-${skillKey(cur)}`}
                       />
                     )}
                     <SkillScriptsPanel
@@ -855,7 +918,7 @@ export function SkillsPage({
                             : bi("本单位编写 · 全员可用", "Organization · Shared")}
                       </dd>
                       <dt>{bi("随附沙箱脚本", "Sandbox scripts")}</dt>
-                      <dd>
+                      <dd className="num">
                         {cur.scripts && cur.scripts.length > 0
                           ? bi(
                               `${cur.scripts.length} 个 Python 脚本（调用平台统一沙箱隔离执行）`,
@@ -926,6 +989,7 @@ function downloadScript(filename: string, code: string) {
   const blob = new Blob([code], { type: "text/x-python;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
+  a.style.display = "none";
   a.href = url;
   a.download = filename || "script.py";
   document.body.appendChild(a);
@@ -977,10 +1041,10 @@ function SkillScriptsPanel({
           <span className="rp-scripts-ic">
             <IconCode />
           </span>
-          <div>
+          <div className="sk-scripts-title-body">
             <h2>
               {bi("随附可执行沙箱脚本", "Attached sandbox scripts")}{" "}
-              <em>{scripts.length}</em>
+              <em className="num">{scripts.length}</em>
             </h2>
             <p>
               {bi(
@@ -993,7 +1057,12 @@ function SkillScriptsPanel({
           </div>
         </div>
         {canEdit && (
-          <Button size="small" icon={<IconEdit />} onClick={onEdit}>
+          <Button
+            size="small"
+            style={{ flexShrink: 0 }}
+            icon={<IconEdit />}
+            onClick={onEdit}
+          >
             {bi("管理脚本", "Manage scripts")}
           </Button>
         )}
@@ -1011,7 +1080,9 @@ function SkillScriptsPanel({
                 onClick={() => toggleScript(sc.name)}
               >
                 <div className="rp-script-meta">
-                  <code className="rp-script-fn mono">{sc.name}</code>
+                  <code className="rp-script-fn mono" title={sc.name}>
+                    {sc.name}
+                  </code>
                   <span
                     className={`rp-script-tag ${sc.network ? "net" : ""}`}
                   >
@@ -1135,6 +1206,36 @@ function SkillEditor({
 }) {
   const lang = useLang();
   const [preview, setPreview] = useState(false);
+  const [scriptDrag, setScriptDrag] = useState(false);
+  const dragDepthRef = useRef(0);
+
+  useEffect(() => {
+    if (!scriptDrag) return;
+    const clearDrag = () => {
+      dragDepthRef.current = 0;
+      setScriptDrag(false);
+    };
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") clearDrag();
+    };
+    window.addEventListener("dragend", clearDrag);
+    window.addEventListener("drop", clearDrag);
+    window.addEventListener("blur", clearDrag);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("dragend", clearDrag);
+      window.removeEventListener("drop", clearDrag);
+      window.removeEventListener("blur", clearDrag);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [scriptDrag]);
+
+  useEffect(
+    () => () => {
+      dragDepthRef.current = 0;
+    },
+    [],
+  );
 
   const nameErr = !draft.name
     ? ""
@@ -1184,7 +1285,7 @@ function SkillEditor({
     draft.content.trim() &&
     !hasScriptErr;
 
-  const templates = getScriptTemplates();
+  const templates = useMemo(() => getScriptTemplates(), [lang]);
   const addScript = (tpl?: ScriptTemplate) => {
     if (draft.scripts.length >= 8) {
       Message.warning(
@@ -1215,6 +1316,54 @@ function SkillEditor({
     });
   };
 
+  const dropScriptFiles = async (files: File[]) => {
+    const pyFiles = files.filter((f) => f.name.toLowerCase().endsWith(".py"));
+    if (!pyFiles.length) {
+      Message.warning(
+        bi("请拖入 .py Python 脚本文件", "Please drop .py Python script files"),
+      );
+      return;
+    }
+    const room = 8 - draft.scripts.length;
+    if (room <= 0) {
+      Message.warning(
+        bi("单个技能最多挂载 8 个脚本", "A skill can attach at most 8 scripts"),
+      );
+      return;
+    }
+    const used = new Set(draft.scripts.map((s) => s.name.trim()));
+    const additions: SkillScript[] = [];
+    for (const f of pyFiles.slice(0, room)) {
+      if (f.size > 64 << 10) {
+        Message.warning(
+          bi(
+            `${f.name} 超过 64 KiB，已跳过`,
+            `${f.name} exceeds 64 KiB and was skipped`,
+          ),
+        );
+        continue;
+      }
+      const code = await f.text();
+      const rawStem = f.name
+        .replace(/\.py$/i, "")
+        .replace(/[^a-zA-Z0-9_-]/g, "_")
+        .replace(/^_+/, "")
+        .slice(0, 32);
+      const stem = rawStem || `script_${draft.scripts.length + additions.length + 1}`;
+      let candidate = `${stem}.py`;
+      let idx = 2;
+      while (used.has(candidate)) {
+        candidate = `${stem.slice(0, 30)}_${idx}.py`;
+        idx++;
+      }
+      used.add(candidate);
+      additions.push({ name: candidate, description: "", code });
+    }
+    if (additions.length) {
+      setDraft({ ...draft, scripts: [...draft.scripts, ...additions] });
+    }
+  };
+
   const updateScript = (idx: number, patch: Partial<SkillScript>) => {
     const next = draft.scripts.map((sc, i) =>
       i === idx ? { ...sc, ...patch } : sc,
@@ -1230,7 +1379,7 @@ function SkillEditor({
   };
 
   return (
-    <div className="rp-edit enter">
+    <div className="rp-edit sk-edit-wrap enter">
       <header className="rp-edit-h">
         <div>
           <h1>
@@ -1261,7 +1410,9 @@ function SkillEditor({
           </p>
         </div>
         <span className="rp-acts">
-          <Button onClick={cancel}>{bi("取消", "Cancel")}</Button>
+          <Button disabled={busy} onClick={cancel}>
+            {bi("取消", "Cancel")}
+          </Button>
           <Button type="primary" loading={busy} disabled={!ok} onClick={save}>
             {bi("保存", "Save")}
           </Button>
@@ -1392,10 +1543,43 @@ function SkillEditor({
         </small>
       </div>
 
-      <div className="rp-scripts-editor">
+      <div
+        className={`rp-scripts-editor sk-scripts-drop ${scriptDrag ? "is-drag" : ""}`}
+        onDragEnter={(e) => {
+          if (!hasFileTransfer(e.dataTransfer)) return;
+          e.preventDefault();
+          dragDepthRef.current += 1;
+          setScriptDrag(true);
+        }}
+        onDragOver={(e) => {
+          if (!hasFileTransfer(e.dataTransfer)) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "copy";
+          if (!scriptDrag) setScriptDrag(true);
+        }}
+        onDragLeave={(e) => {
+          if (!hasFileTransfer(e.dataTransfer)) return;
+          dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+          if (
+            dragDepthRef.current === 0 ||
+            (e.relatedTarget &&
+              !e.currentTarget.contains(e.relatedTarget as Node))
+          ) {
+            dragDepthRef.current = 0;
+            setScriptDrag(false);
+          }
+        }}
+        onDrop={(e) => {
+          if (!hasFileTransfer(e.dataTransfer)) return;
+          e.preventDefault();
+          dragDepthRef.current = 0;
+          setScriptDrag(false);
+          void dropScriptFiles(Array.from(e.dataTransfer.files || []));
+        }}
+      >
         <div className="rp-scripts-ed-h">
           <div>
-            <h3>
+            <h3 className="num">
               <IconCode />{" "}
               {bi(
                 `随附可执行沙箱脚本（可选 · ${draft.scripts.length}/8）`,
@@ -1404,8 +1588,8 @@ function SkillEditor({
             </h3>
             <p>
               {bi(
-                "当技能不仅需要文字规程，还需要精确参数核算、快照解析或表格质检时，可挂载 Python 3 脚本供 AI 调用 ",
-                "Attach Python 3 scripts when the skill needs deterministic sizing, log parsing, or table checks via ",
+                "当技能不仅需要文字规程，还需要精确参数核算、快照解析或表格质检时，可挂载或拖入 Python 3 脚本供 AI 调用 ",
+                "Attach or drop Python 3 scripts when the skill needs deterministic sizing, log parsing, or table checks via ",
               )}
               <code className="mono">run_skill_script</code>
               {bi(" 执行。", ".")}
@@ -1476,6 +1660,7 @@ function SkillEditor({
                       placeholder="calc_params.py"
                       maxLength={40}
                       status={scriptErrors[idx] ? "error" : undefined}
+                      aria-label={bi("脚本文件名", "Script filename")}
                     />
                   </div>
                   <div className="rp-field rp-script-ed-desc">
@@ -1493,6 +1678,7 @@ function SkillEditor({
                         "e.g. Read args.memory_gb and max_connections, print recommended memory JSON",
                       )}
                       maxLength={200}
+                      aria-label={bi("用途与入参说明", "Purpose & args description")}
                     />
                   </div>
                   <Button
@@ -1508,6 +1694,7 @@ function SkillEditor({
                     size="small"
                     checked={!!sc.network}
                     onChange={(v) => updateScript(idx, { network: v })}
+                    aria-label={bi("需要访问外部网络", "Requires outbound network access")}
                   />
                   <span>
                     {bi(
@@ -1525,6 +1712,7 @@ function SkillEditor({
                   onChange={(v) => updateScript(idx, { code: v })}
                   autoSize={{ minRows: 7, maxRows: 22 }}
                   placeholder='import json, sys\nargs = json.load(open(sys.argv[1], encoding="utf-8"))\nprint(json.dumps(args))'
+                  aria-label={bi("脚本源码", "Script source code")}
                 />
                 <small className="rp-script-hint">
                   {bi("约定：", "Convention: ")}
@@ -1542,6 +1730,14 @@ function SkillEditor({
                 </small>
               </div>
             ))}
+          </div>
+        )}
+        {scriptDrag && (
+          <div className="kb-ed-drop-mask">
+            {bi(
+              "松开即可挂载 .py 脚本（≤ 64 KiB，最多 8 个）",
+              "Drop .py script files to attach (≤ 64 KiB, up to 8)",
+            )}
           </div>
         )}
       </div>

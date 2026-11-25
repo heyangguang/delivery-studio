@@ -300,7 +300,7 @@ export function SchemesTab() {
       )}
     </p>
     <div className="plans" role="tablist" aria-label={bi("组件部署方案", "Component deployment schemes")}>
-      {schemes.map((scheme, i) => <button key={scheme.id || i} role="tab" aria-selected={i === index} className={i === index ? "plan on" : "plan"} onClick={() => select(i)}>
+      {schemes.map((scheme, i) => <button type="button" key={scheme.id || i} role="tab" aria-selected={i === index} className={i === index ? "plan on" : "plan"} onClick={() => select(i)}>
         <strong>{scheme.name || bi("未命名方案", "Untitled Scheme")}</strong><span>{scheme.spec || scheme.id}</span>
       </button>)}
     </div>
@@ -729,8 +729,10 @@ function PackagePicker({
   useEffect(() => {
     if (open) setPlat(platform);
   }, [open, platform]);
+  const chooseSeq = useRef(0);
   useEffect(() => {
     const term = q.trim();
+    chooseSeq.current++;
     setChosen(null);
     setVersions(null);
     if (term.length < 2) {
@@ -752,13 +754,14 @@ function PackagePicker({
     return () => clearTimeout(t);
   }, [q, plat]);
   const choose = (h: SearchHit) => {
+    const cSeq = ++chooseSeq.current;
     setChosen(h);
     setVersions(null);
     api<{ details: VersionDetail[] }>(
       `/api/library/versions?platform=${encodeURIComponent(plat)}&package=${encodeURIComponent(h.name)}`,
     )
-      .then((r) => setVersions(r.details))
-      .catch((e) => setError((e as Error).message));
+      .then((r) => cSeq === chooseSeq.current && setVersions(r.details))
+      .catch((e) => cSeq === chooseSeq.current && setError((e as Error).message));
   };
   return (
     <Modal

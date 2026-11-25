@@ -304,6 +304,23 @@ export function WorkbenchPage({
   const inflight = useRef<Promise<void>>(Promise.resolve());
   const leaveEditor = useRef<() => Promise<void>>(async () => {});
   const editorEpoch = useRef(0);
+  const aiTimersRef = useRef<number[]>([]);
+  const unmountedRef = useRef(false);
+  const backLockRef = useRef(false);
+  const [leaving, setLeaving] = useState(false);
+  const startLockRef = useRef(false);
+  const [starting, setStarting] = useState(false);
+  const discardLockRef = useRef(false);
+  const publishOpenLockRef = useRef(false);
+
+  useEffect(() => {
+    unmountedRef.current = false;
+    return () => {
+      unmountedRef.current = true;
+      aiTimersRef.current.forEach((id) => window.clearTimeout(id));
+      aiTimersRef.current = [];
+    };
+  }, []);
 
   const reloadWs = useCallback(async () => {
     try {
@@ -670,19 +687,30 @@ export function WorkbenchPage({
   );
   const flashTab = useCallback(
     async (t: string, list: AIChange[], step: number) => {
+      if (unmountedRef.current) return;
       const reduce = window.matchMedia(
         "(prefers-reduced-motion: reduce)",
       ).matches;
       const wait = (ms: number) =>
-        new Promise((r) => window.setTimeout(r, reduce ? 0 : ms));
+        new Promise<void>((r) => {
+          const id = window.setTimeout(() => {
+            aiTimersRef.current = aiTimersRef.current.filter((x) => x !== id);
+            r();
+          }, reduce ? 0 : ms);
+          aiTimersRef.current.push(id);
+        });
       setAiNow(t);
       await goTab(t);
+      if (unmountedRef.current) return;
       await wait(260);
+      if (unmountedRef.current) return;
       for (const c of list.filter((x) => x.tab === t).slice(0, 10)) {
+        if (unmountedRef.current) return;
         let el: HTMLElement | null = null;
         if (c.file !== "component.yaml") {
           setActive(c.file);
           await wait(220);
+          if (unmountedRef.current) return;
           el = document.querySelector<HTMLElement>(".wb-editor");
         } else {
           let best = -1;
@@ -704,23 +732,32 @@ export function WorkbenchPage({
           behavior: reduce ? "auto" : "smooth",
         });
         node.setAttribute("data-wb-flash", "");
-        window.setTimeout(() => node.removeAttribute("data-wb-flash"), 1400);
+        const rmId = window.setTimeout(() => {
+          aiTimersRef.current = aiTimersRef.current.filter((x) => x !== rmId);
+          node.removeAttribute("data-wb-flash");
+        }, 1400);
+        aiTimersRef.current.push(rmId);
         await wait(step);
       }
-      setAiShown((x) => new Set(x).add(t));
+      if (!unmountedRef.current) setAiShown((x) => new Set(x).add(t));
     },
     [goTab],
   );
   const play = useCallback(
     async (changes: AIChange[]) => {
+      if (unmountedRef.current) return;
       setAiPlaying(true);
       setAiShown(new Set());
       try {
-        for (const t of [...new Set(changes.map((c) => c.tab))])
+        for (const t of [...new Set(changes.map((c) => c.tab))]) {
+          if (unmountedRef.current) break;
           await flashTab(t, changes, Math.max(260, 620 - changes.length * 20));
+        }
       } finally {
-        setAiNow("");
-        setAiPlaying(false);
+        if (!unmountedRef.current) {
+          setAiNow("");
+          setAiPlaying(false);
+        }
       }
     },
     [flashTab],
@@ -845,6 +882,9 @@ export function WorkbenchPage({
     };
   }, [name]);
   const backFromEditor = async () => {
+    if (backLockRef.current) return;
+    backLockRef.current = true;
+    setLeaving(true);
     try {
       await leaveEditor.current();
       go({
@@ -853,6 +893,9 @@ export function WorkbenchPage({
       });
     } catch (e) {
       err(e);
+    } finally {
+      backLockRef.current = false;
+      if (!unmountedRef.current) setLeaving(false);
     }
   };
   const tabTitle = (t: string) => tabLabel(t);
@@ -871,6 +914,9 @@ export function WorkbenchPage({
 
   /* ---- draft actions ---- */
   const start = async (from: "live" | "builtin") => {
+    if (startLockRef.current) return;
+    startLockRef.current = true;
+    setStarting(true);
     try {
       await api(`/api/components/${name}/draft`, {
         method: "POST",
@@ -881,6 +927,9 @@ export function WorkbenchPage({
       runCheck();
     } catch (e) {
       err(e);
+    } finally {
+      startLockRef.current = false;
+      if (!unmountedRef.current) setStarting(false);
     }
   };
   // arriving with something for the assistant to do (a suggestion from a delivery): go straight into editing — the
@@ -909,6 +958,8 @@ export function WorkbenchPage({
       okText: bi("放弃草稿", "Discard Draft"),
       okButtonProps: { status: "danger" },
       onOk: async () => {
+        if (discardLockRef.current) return;
+        discardLockRef.current = true;
         try {
           pending.current = {};
           window.clearTimeout(timer.current);
@@ -919,6 +970,8 @@ export function WorkbenchPage({
           else go({ name: "components" }, { replace: true });
         } catch (e) {
           err(e);
+        } finally {
+          discardLockRef.current = false;
         }
       },
     });
@@ -965,6 +1018,7 @@ export function WorkbenchPage({
         <StartPanel
           ws={ws}
           start={start}
+          starting={starting}
           openRevisions={() => setPanel("revisions")}
         />
         <RevisionsDrawer
@@ -1132,6 +1186,7 @@ export function WorkbenchPage({
               type="text"
               className="wb-back"
               icon={<IconArrowLeft />}
+              loading={leaving}
               onClick={backFromEditor}
             >
               {name}
@@ -1193,11 +1248,16 @@ export function WorkbenchPage({
               <AssistButton flush={saveNow} />
               <Button
                 type="primary"
-                onClick={() =>
+                onClick={() => {
+                  if (publishOpenLockRef.current) return;
+                  publishOpenLockRef.current = true;
                   saveNow()
                     .then(() => setPublishing(true))
                     .catch(err)
-                }
+                    .finally(() => {
+                      publishOpenLockRef.current = false;
+                    });
+                }}
               >
                 {bi("发布…", "Publish...")}
               </Button>
@@ -1276,6 +1336,7 @@ export function WorkbenchPage({
                   "Manages shared preflight, data disk, offline repo, and secret flows across all deliveries. Edits save as draft; once published they apply to new/synced deliveries without altering running clusters. See ",
                 )}
                 <button
+                  type="button"
                   className="wb-link"
                   onClick={() => openFile("files/platform-contract.md")}
                 >
@@ -1475,10 +1536,12 @@ function Gate({
 function StartPanel({
   ws,
   start,
+  starting,
   openRevisions,
 }: {
   ws: Workspace;
   start: (from: "live" | "builtin") => Promise<void>;
+  starting: boolean;
   openRevisions: () => void;
 }) {
   useLang();
@@ -1507,7 +1570,12 @@ function StartPanel({
               )}
         </p>
         <div className="wb-choices">
-          <button className="wb-choice" onClick={() => start("live")}>
+          <button
+            type="button"
+            className="wb-choice"
+            disabled={starting}
+            onClick={() => start("live")}
+          >
             <b>{bi("开始编辑公共流程", "Edit Shared Flows")}</b>
             <span>
               {bi(
@@ -1547,6 +1615,7 @@ function StartPanel({
             <button
               type="button"
               className="wb-choice"
+              disabled={starting}
               onClick={() => start("builtin")}
             >
               <b>{bi("修改这个组件", "Modify This Component")}</b>
@@ -1560,6 +1629,7 @@ function StartPanel({
             <button
               type="button"
               className="wb-choice"
+              disabled={starting}
               onClick={() => setFork(true)}
             >
               <b>{bi("复制为自定义组件", "Copy as Custom Component")}</b>
@@ -1587,6 +1657,7 @@ function StartPanel({
             <button
               type="button"
               className="wb-choice"
+              disabled={starting}
               onClick={() => start("live")}
             >
               <b>{bi("开始编辑", "Start Editing")}</b>
@@ -1645,14 +1716,17 @@ function PublishModal({
   const modesChanged=JSON.stringify([...modes].sort())!==JSON.stringify([...originalModes].sort());
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
+  const submitLockRef = useRef(false);
   // the note is written from what changed; the person keeps it, edits it or writes their own
   const [writing, setWriting] = useState(false);
+  const writeNoteLockRef = useRef(false);
   const generation = useRef(0);
   const noteEdit = useRef(0);
   const [loadError, setLoadError] = useState("");
   const [reviewedAt, setReviewedAt] = useState("");
   const writeNote = async (quiet = false) => {
-    if (writing || busy) return;
+    if (writing || busy || writeNoteLockRef.current || submitLockRef.current) return;
+    writeNoteLockRef.current = true;
     const current = generation.current;
     const edit = noteEdit.current;
     setWriting(true);
@@ -1666,6 +1740,7 @@ function PublishModal({
     } catch (e) {
       if (current === generation.current) err(e);
     } finally {
+      writeNoteLockRef.current = false;
       if (current === generation.current) setWriting(false);
     }
   };
@@ -1721,7 +1796,8 @@ function PublishModal({
     (name!=="platform-shared" && (!modes.length || (modes.includes("automatic") && automaticProblems.length>0) || (modes.includes("configuration") && configurationProblems.length>0))) ||
     !note.trim();
   const submit = async () => {
-    if (blocked) return;
+    if (blocked || submitLockRef.current) return;
+    submitLockRef.current = true;
     setBusy(true);
     try {
       const r = await api<{ rev: number }>(
@@ -1743,6 +1819,7 @@ function PublishModal({
       if (body?.check) Message.error((e as Error).message);
       else err(e);
     } finally {
+      submitLockRef.current = false;
       setBusy(false);
     }
   };
@@ -1958,6 +2035,8 @@ function RevisionsDrawer({
 }) {
   useLang();
   const [sel, setSel] = useState<number | null>(null);
+  const [restoring, setRestoring] = useState(false);
+  const restoreLockRef = useRef(false);
   const [detail, setDetail] = useState<{
     meta: Rev;
     diffs: { path: string; status: string; diff?: string }[];
@@ -1979,6 +2058,9 @@ function RevisionsDrawer({
   }, [sel, name]);
   const restore = (rev: number) => {
     const doIt = async () => {
+      if (restoreLockRef.current) return;
+      restoreLockRef.current = true;
+      setRestoring(true);
       try {
         await api(`/api/components/${name}/revisions/${rev}/restore`, {
           method: "POST",
@@ -1987,6 +2069,9 @@ function RevisionsDrawer({
         onRestored();
       } catch (e) {
         err(e);
+      } finally {
+        restoreLockRef.current = false;
+        setRestoring(false);
       }
     };
     if (hasDraft)
@@ -2054,6 +2139,7 @@ function RevisionsDrawer({
                         <Button
                           size="small"
                           icon={<IconUpload />}
+                          loading={restoring}
                           onClick={() => restore(r.rev)}
                         >
                           {bi("以此为基础编辑（放进草稿）", "Edit from this revision (load into draft)")}
@@ -2097,13 +2183,27 @@ function RevisionsDrawer({
 function AssistButton({ flush }: { flush: () => Promise<void> }) {
   useLang();
   const dock = useAIDock();
+  const lockRef = useRef(false);
+  const [busy, setBusy] = useState(false);
   if (!dock?.available("comp")) return null;
   return (
     <Button
       shape="round"
       className="ai-pill"
+      loading={busy}
       icon={<Spark size={14} rainbow />}
-      onClick={() => flush().then(() => dock.open())}
+      onClick={() => {
+        if (lockRef.current) return;
+        lockRef.current = true;
+        setBusy(true);
+        flush()
+          .then(() => dock.open())
+          .catch(err)
+          .finally(() => {
+            lockRef.current = false;
+            setBusy(false);
+          });
+      }}
     >
       {bi("AI 助手", "AI Assistant")}
     </Button>

@@ -242,6 +242,7 @@ export function PlanGlyph({
       className={`plan-glyph ${className}`.trim()}
       viewBox="0 0 64 40"
       fill="none"
+      style={{ display: "block", flexShrink: 0 }}
       aria-hidden="true"
     >
       {arch.kind === "standalone" && (
@@ -417,6 +418,7 @@ export function PlanGlyphCustom({ className = "" }: { className?: string }) {
       className={`plan-glyph ${className}`.trim()}
       viewBox="0 0 64 40"
       fill="none"
+      style={{ display: "block", flexShrink: 0 }}
       aria-hidden="true"
     >
       <path d="M28 11.5 H36 M28 28.5 H36 M20 17.5 V22.5 M44 17.5 V22.5" className="pg-wire-faint" />

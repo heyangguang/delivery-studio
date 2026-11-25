@@ -1212,13 +1212,22 @@ export const size = (n: number) =>
 
 const pad = (n: number) => String(n).padStart(2, "0");
 export const clock = (s: string) => {
+  if (!s) return "—";
   const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return s;
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
-export const fullTime = (s: string) =>
-  new Date(s).toLocaleString(getLang(), { hour12: false });
-export function dayLabel(s: string) {
+export const fullTime = (s: string) => {
+  if (!s) return "—";
   const d = new Date(s);
+  return Number.isNaN(d.getTime())
+    ? s
+    : d.toLocaleString(getLang(), { hour12: false });
+};
+export function dayLabel(s: string) {
+  if (!s) return "—";
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return s;
   const today = new Date();
   const start = (x: Date) =>
     new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
@@ -1237,10 +1246,10 @@ export function dayLabel(s: string) {
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
 }
 export function ago(s: string) {
-  const sec = Math.max(
-    0,
-    Math.round((Date.now() - new Date(s).getTime()) / 1000),
-  );
+  if (!s) return "—";
+  const ts = new Date(s).getTime();
+  if (Number.isNaN(ts)) return s;
+  const sec = Math.max(0, Math.round((Date.now() - ts) / 1000));
   if (sec < 45) return bi("刚刚", "just now");
   if (sec < 3600) {
     const m = Math.round(sec / 60);
@@ -1253,10 +1262,10 @@ export function ago(s: string) {
   return `${dayLabel(s)} ${clock(s)}`;
 }
 export function duration(a: string, b: string) {
-  const sec = Math.max(
-    0,
-    Math.round((new Date(b).getTime() - new Date(a).getTime()) / 1000),
-  );
+  const ta = new Date(a).getTime();
+  const tb = new Date(b).getTime();
+  if (Number.isNaN(ta) || Number.isNaN(tb)) return "—";
+  const sec = Math.max(0, Math.round((tb - ta) / 1000));
   return biv(
     sec < 60 ? `${sec} 秒` : `${Math.floor(sec / 60)} 分 ${sec % 60} 秒`,
     sec < 60 ? `${sec}s` : `${Math.floor(sec / 60)}m ${sec % 60}s`,
@@ -1391,12 +1400,16 @@ export function useDelayed(on: boolean, ms = 220) {
 }
 
 export const reducedMotion = () =>
-  window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  typeof window !== "undefined" &&
+  !!window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
 
 export function useMedia(q: string) {
-  const [m, setM] = useState(() => window.matchMedia(q).matches);
+  const [m, setM] = useState(
+    () => typeof window !== "undefined" && !!window.matchMedia?.(q)?.matches,
+  );
   useEffect(() => {
-    const mq = window.matchMedia(q);
+    const mq = window.matchMedia?.(q);
+    if (!mq) return;
     const f = () => setM(mq.matches);
     mq.addEventListener("change", f);
     return () => mq.removeEventListener("change", f);

@@ -25,7 +25,7 @@ export function SchemeInfo({scheme, detail=false, label}:{scheme?: DeploymentSch
  } as Record<string,string>)[contract.failover] || contract.failover;
  const summary=[scheme.topology,contract.mechanism,failover].filter(Boolean).join(bi("；", "; "));
  const nodeText = scheme.nodes === 1 ? bi("1 个应用节点", "1 app node") : bi(`${scheme.nodes} 个应用节点`, `${scheme.nodes} app nodes`);
- if(!detail)return <span title={summary}>{resolvedLabel}{bi("：", ": ")}<strong>{scheme.name}</strong>{scheme.nodes>0 ? ` · ${nodeText}` : ""}</span>;
+ if(!detail)return <span title={summary}>{resolvedLabel}{bi("：", ": ")}<strong>{scheme.name}</strong>{scheme.nodes>0 ? <>{" · "}<span className="num">{nodeText}</span></> : ""}</span>;
  const facets=[contract.mechanism,failover,contract.read_access].filter(Boolean);
  const hasEvidence=scheme.source==="delivery-evidence" && Boolean(scheme.evidence?.length);
  const limits=contract.limitations || [];

@@ -1,4 +1,7 @@
 /* Model prices. Prefix pr- */
+.pr-page {
+  padding-bottom: 92px;
+}
 .pr-disp {
   display: flex;
   flex-wrap: wrap;
@@ -10,6 +13,10 @@
   align-items: center;
   gap: 8px;
   font-size: 13px;
+}
+.pr-disp .arco-input-number input,
+.pr-row .arco-input-number input {
+  font-variant-numeric: tabular-nums;
 }
 .pr-h {
   display: flex;
@@ -26,6 +33,7 @@
   font-size: 13px;
   font-style: normal;
   font-weight: 500;
+  font-variant-numeric: tabular-nums;
 }
 .pr-sp {
   flex: 1;
@@ -45,6 +53,10 @@
   padding: 7px 4px;
   border-bottom: 1px solid var(--line);
   font-size: 13px;
+  transition: background-color 0.15s var(--spring);
+}
+.pr-row:not(.head):hover {
+  background: var(--hover);
 }
 .pr-row.b {
   grid-template-columns: minmax(180px, 1.6fr) 84px 92px 84px minmax(140px, 1.4fr) 64px;
@@ -65,8 +77,13 @@
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+  min-width: 0;
 }
 .pr-models code {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   padding: 0 6px;
   border-radius: 5px;
   font-size: 12px;
@@ -121,4 +138,9 @@
   color: var(--teal-ink);
   font-weight: 500;
   text-underline-offset: 3px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pr-row {
+    transition: none;
+  }
 }

@@ -1,5 +1,187 @@
-import type { FlowView, InstanceView } from './shared';
+import React from 'react';
+import type { ChangeRehearsal, FlowView, ImportedMeta, InstanceView } from './shared';
 import { bi } from './i18n';
+
+const STALE_CHUNK_RE =
+  /dynamically imported module|Importing a module script failed|Unable to preload CSS|Failed to fetch|error loading dynamically imported module/i;
+
+/** Lazy-loads a sub-view chunk with one-shot reload recovery on stale asset hashes. */
+export function lazySubView<T extends React.ComponentType<any>>(
+  loader: () => Promise<{ default: T }>,
+): React.LazyExoticComponent<T> {
+  return React.lazy(async () => {
+    try {
+      return await loader();
+    } catch (e) {
+      if (
+        STALE_CHUNK_RE.test(String((e as Error)?.message || e)) &&
+        typeof window !== 'undefined'
+      ) {
+        const key = 'mh-reloaded-for';
+        if (sessionStorage.getItem(key) !== location.href) {
+          sessionStorage.setItem(key, location.href);
+          location.reload();
+          return await new Promise<never>(() => {});
+        }
+      }
+      throw e;
+    }
+  });
+}
+
+export type EffectiveClusterChange = {
+  key: string;
+  before?: string;
+  after: string;
+  note?: string;
+  source_id: string;
+  source_title: string;
+  source_doc_id?: string;
+  applied_at: string;
+  applied_by: string;
+  update_count: number;
+};
+
+/**
+ * Merges confirmed production rehearsal changes chronologically (oldest -> newest)
+ * so each configuration key resolves to its currently effective value, while keeping
+ * a `latestByKey` lookup to mark superseded historical deltas.
+ */
+export function computeEffectiveClusterChanges(
+  rehearsals: ChangeRehearsal[] | null | undefined,
+): {
+  items: EffectiveClusterChange[];
+  latestByKey: Map<string, EffectiveClusterChange>;
+} {
+  const applied = (rehearsals || [])
+    .filter((r) => r && r.stage === 'finalized' && r.applied && !r.voided)
+    .slice()
+    .sort((a, b) => {
+      const ta = a.applied_at || a.updated_at || a.created_at || '';
+      const tb = b.applied_at || b.updated_at || b.created_at || '';
+      if (ta !== tb) return ta.localeCompare(tb);
+      return a.id.localeCompare(b.id);
+    });
+  const order: string[] = [];
+  const latestByKey = new Map<string, EffectiveClusterChange>();
+  for (const rh of applied) {
+    const at = rh.applied_at || rh.updated_at || '';
+    const by = rh.applied_by || rh.owner || '';
+    for (const ch of rh.applied_changes || []) {
+      const k = (ch.key || '').trim();
+      if (!k) continue;
+      const lk = k.toLowerCase();
+      const prev = latestByKey.get(lk);
+      if (prev) {
+        prev.after = ch.after;
+        if (ch.note) prev.note = ch.note;
+        prev.source_id = rh.id;
+        prev.source_title = rh.title;
+        prev.source_doc_id = rh.doc_id;
+        prev.applied_at = at;
+        prev.applied_by = by;
+        prev.update_count += 1;
+      } else {
+        order.push(lk);
+        latestByKey.set(lk, {
+          key: k,
+          before: ch.before,
+          after: ch.after,
+          note: ch.note,
+          source_id: rh.id,
+          source_title: rh.title,
+          source_doc_id: rh.doc_id,
+          applied_at: at,
+          applied_by: by,
+          update_count: 1,
+        });
+      }
+    }
+  }
+  const items = order
+    .map((lk) => latestByKey.get(lk)!)
+    .filter(Boolean);
+  return { items, latestByKey };
+}
+
+export function companionKindMeta(kind?: string): { label: string; tone: string } {
+  switch ((kind || '').toLowerCase()) {
+    case 'ha_manager':
+      return { label: bi('高可用管理', 'HA Manager'), tone: 't-brand' };
+    case 'dcs':
+      return { label: bi('分布式协调', 'DCS / Quorum'), tone: 't-cobalt' };
+    case 'proxy':
+      return { label: bi('代理 / 均衡', 'Proxy / LB'), tone: 't-violet' };
+    case 'vip':
+      return { label: bi('虚拟 IP', 'VIP / VRRP'), tone: 't-brand' };
+    case 'pooler':
+      return { label: bi('连接池', 'Pooler'), tone: 't-cobalt' };
+    case 'backup':
+      return { label: bi('备份工具', 'Backup'), tone: 't-ok' };
+    case 'monitoring':
+      return { label: bi('监控采集', 'Monitoring'), tone: '' };
+    default:
+      return { label: bi('伴生组件', 'Companion'), tone: '' };
+  }
+}
+
+export function localizeEndpointTitle(epName?: string, role?: string): string {
+  const lowName = (epName || '').trim().toLowerCase();
+  const lowRole = (role || '').trim().toLowerCase();
+  const generic = new Set([
+    '', 'readwrite', 'rw', 'write', 'writer', 'primary', 'master',
+    'readonly', 'ro', 'read', 'reader', 'replica', 'standby',
+    'admin', 'console', 'mgmt', 'management', 'endpoint', 'vip',
+  ]);
+  if (epName && !generic.has(lowName)) return epName.trim();
+  if (['readonly', 'ro', 'read', 'reader', 'replica', 'standby'].includes(lowRole) || ['readonly', 'ro', 'read', 'reader'].includes(lowName)) {
+    return bi('只读入口', 'Read-Only');
+  }
+  if (['admin', 'console', 'mgmt', 'management'].includes(lowRole) || ['admin', 'console', 'mgmt'].includes(lowName)) {
+    return bi('管理入口', 'Admin');
+  }
+  return bi('读写入口', 'Read/Write');
+}
+
+/** Light client-side detector for legacy single-instance clusters whose metadata mentions unmodeled companions. */
+export function detectMissingCompanionsFromMeta(
+  primaryComp: string,
+  meta?: ImportedMeta,
+): string[] {
+  if (!meta) return [];
+  const primary = (primaryComp || '').toLowerCase();
+  const existing = new Set((meta.companions || []).map((c) => (c.component || '').toLowerCase()));
+  const positiveBag = [
+    ...(meta.service_units || []),
+    ...(meta.config_paths || []),
+    ...(meta.data_dirs || []),
+    ...(meta.packages || []).map((p) => p.name),
+    meta.arch_summary || '',
+  ]
+    .join(' ')
+    .toLowerCase();
+  if (!positiveBag.trim()) return [];
+  const rules: [string, string, string][] = [
+    ['patroni', 'patroni', 'Patroni'],
+    ['etcd', 'etcd', 'etcd'],
+    ['pgbackrest', 'pgbackrest', 'pgBackRest'],
+    ['pgbouncer', 'pgbouncer', 'PgBouncer'],
+    ['haproxy', 'haproxy', 'HAProxy'],
+    ['keepalived', 'keepalived', 'Keepalived'],
+    ['zookeeper', 'zookeeper', 'ZooKeeper'],
+    ['clickhouse-keeper', 'clickhouse-keeper', 'ClickHouse Keeper'],
+    ['proxysql', 'proxysql', 'ProxySQL'],
+  ];
+  const out: string[] = [];
+  for (const [id, token, label] of rules) {
+    if (id === primary || existing.has(id)) continue;
+    if (positiveBag.includes(token)) out.push(label);
+  }
+  if ((primary === 'redis' || primary === 'valkey') && !existing.has('redis-sentinel') && positiveBag.includes('sentinel')) {
+    out.push('Redis Sentinel');
+  }
+  return out;
+}
 
 export type DisplayInstance = InstanceView & { embedded?: boolean };
 export const componentOrder: Record<string, number> = { postgresql: 0, etcd: 1, patroni: 2 };

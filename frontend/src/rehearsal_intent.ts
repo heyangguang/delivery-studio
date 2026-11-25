@@ -27,17 +27,21 @@ export type RehearsalIntentPayload = {
 };
 
 export function hasRehearsalIntentFor(clusterId: string): boolean {
+  if (!clusterId) return false;
   try {
     const raw = sessionStorage.getItem(REHEARSAL_INTENT_KEY);
     if (!raw) return false;
-    const parsed = JSON.parse(raw) as Partial<RehearsalIntentPayload>;
-    return parsed?.cluster === clusterId;
+    const parsed = JSON.parse(raw) as Partial<RehearsalIntentPayload> | null;
+    return Boolean(
+      parsed && typeof parsed === "object" && parsed.cluster === clusterId,
+    );
   } catch {
     return false;
   }
 }
 
 function dispatchRehearsalIntent(payload: RehearsalIntentPayload) {
+  if (!payload.cluster) return;
   try {
     sessionStorage.setItem(REHEARSAL_INTENT_KEY, JSON.stringify(payload));
   } catch {

@@ -1,5 +1,5 @@
 import React, { useLayoutEffect, useMemo, useRef, useState } from "react";
-import { bi, useLang } from "./i18n";
+import { bi, getLang, useLang } from "./i18n";
 
 /* The two charts the platform needs: a stacked bar series over time, and horizontal bars for a ranking. Marks are thin
    with a 2px gap between stacked parts, the grid is quiet, one axis only, and every chart has a table view. */
@@ -25,7 +25,7 @@ export const compact = (n: number) =>
       ? `${+(n / 1e6).toFixed(1)}M`
       : n >= 1e4
         ? `${+(n / 1e3).toFixed(0)}K`
-        : n.toLocaleString("en-US");
+        : n.toLocaleString(getLang());
 
 export function StackedBars({
   points,
@@ -62,11 +62,17 @@ export function StackedBars({
   useLayoutEffect(() => {
     const el = box.current;
     if (!el) return;
-    const measure = () => setW(Math.max(280, Math.round(el.clientWidth)));
+    const measure = () => {
+      const next = Math.max(280, Math.round(el.clientWidth));
+      setW((prev) => (prev === next ? prev : next));
+    };
     measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
+    const ro =
+      typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(measure)
+        : null;
+    ro?.observe(el);
+    return () => ro?.disconnect();
   }, [table, any]);
   useLayoutEffect(() => {
     if (hover === null || !tipRef.current) return;
@@ -182,8 +188,8 @@ export function StackedBars({
                     width={slot}
                     height={ih}
                     fill="transparent"
-                    onMouseEnter={() => setHover(i)}
-                    onMouseMove={() => setHover(i)}
+                    onMouseEnter={() => setHover((h) => (h === i ? h : i))}
+                    onMouseMove={() => setHover((h) => (h === i ? h : i))}
                   />
                   {hover === i && (
                     <rect
@@ -238,7 +244,9 @@ export function StackedBars({
               <div
                 ref={tipRef}
                 className="ch-tip"
-                style={{ left: tipLeft }}
+                style={{
+                  transform: `translate3d(${tipLeft}px, 0, 0) translateX(-50%)`,
+                }}
                 role="status"
               >
                 <b>{points[hover].label}</b>

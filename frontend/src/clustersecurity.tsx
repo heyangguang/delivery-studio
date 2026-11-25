@@ -33,12 +33,16 @@ import {
   useAIDock,
   type VexProposal,
 } from "./aichat";
-import { launchSecurityRehearsalIntent } from "./rehearsal";
+import { launchSecurityRehearsalIntent } from "./rehearsal_intent";
+import { lazySubView } from "./topology";
 import { BaselineWaiveEditor, VexTriageEditor } from "./vextriage";
-import { SecExportModal } from "./secreport";
 import { bi, useLang } from "./i18n";
 import "./security.css";
 import "./clustersecurity.css";
+
+const LazySecExportModal = lazySubView(() =>
+  import("./secreport").then((m) => ({ default: m.SecExportModal })),
+);
 
 /* ---------- types ---------- */
 
@@ -299,13 +303,14 @@ export function ClusterSecurityTab({
       const v = (e as CustomEvent<VexProposal>).detail;
       if (!v || !data) return;
       const targetCVE = (v.cve || v.cves?.[0] || "").toUpperCase();
+      const list = data.findings || [];
       const hit =
-        data.findings.find(
+        list.find(
           (f) =>
             (f.cve.toUpperCase() === targetCVE || f.id.toUpperCase() === targetCVE) &&
             (!v.package || f.package.toLowerCase() === v.package.toLowerCase()),
         ) ||
-        data.findings.find(
+        list.find(
           (f) => f.cve.toUpperCase() === targetCVE || f.id.toUpperCase() === targetCVE,
         );
       if (!hit) return;
@@ -321,6 +326,7 @@ export function ClusterSecurityTab({
   }, [data]);
 
   const triggerScan = async () => {
+    if (scanning) return;
     setScanning(true);
     try {
       await api("/api/security/scan", { method: "POST" });
@@ -407,6 +413,7 @@ export function ClusterSecurityTab({
   };
 
   const submitBaselineWaive = async (ck: SecBaselineCheck, waived: boolean, note: string) => {
+    if (waiveBusy) return;
     setWaiveBusy(true);
     try {
       const next = await api<ClusterSecurityReport>(
@@ -428,7 +435,7 @@ export function ClusterSecurityTab({
   };
 
   const submitQuickVex = async () => {
-    if (!vexFinding) return;
+    if (!vexFinding || vexBusy) return;
     const needNote =
       vexStatus === "mitigated" ||
       vexStatus === "not_affected" ||
@@ -574,7 +581,7 @@ export function ClusterSecurityTab({
   const findingsByGroup = useMemo(() => {
     const m: Record<string, SecFinding[]> = {};
     if (!data) return m;
-    for (const f of data.findings) {
+    for (const f of data.findings || []) {
       const gk = `${f.eco_key}|${f.package.toLowerCase()}|${f.installed_version}|${f.platform || ""}`;
       if (!m[gk]) m[gk] = [];
       m[gk].push(f);
@@ -583,7 +590,7 @@ export function ClusterSecurityTab({
   }, [data]);
 
   const submitGlobalIgnore = async () => {
-    if (!ignoreTarget) return;
+    if (!ignoreTarget || ignoreBusy) return;
     setIgnoreBusy(true);
     try {
       await api("/api/security/ignores", {
@@ -616,7 +623,7 @@ export function ClusterSecurityTab({
 
   const restoreIgnoredGroup = async (g: SecPackageGroup) => {
     const rid = g.ignore_rule_id;
-    if (!rid) return;
+    if (!rid || ignoreBusy) return;
     setIgnoreBusy(true);
     try {
       if (rid === "layer:os" || rid === "layer:runtime") {
@@ -653,7 +660,7 @@ export function ClusterSecurityTab({
   const statusCounts = useMemo(() => {
     const out = { active: 0, waived: 0, ignored: 0, all: 0 };
     if (!data) return out;
-    for (const g of data.package_groups) {
+    for (const g of data.package_groups || []) {
       if (roleFilter === "primary" && g.pkg_role !== "primary") continue;
       if (roleFilter === "dependency" && g.pkg_role === "primary") continue;
       if (isHiddenGroup(g)) {
@@ -672,7 +679,7 @@ export function ClusterSecurityTab({
 
   const filteredGroups = useMemo(() => {
     if (!data) return [];
-    const list = data.package_groups.filter((g) => {
+    const list = (data.package_groups || []).filter((g) => {
       if (roleFilter === "primary" && g.pkg_role !== "primary") return false;
       if (roleFilter === "dependency" && g.pkg_role === "primary") return false;
       const hidden = isHiddenGroup(g);
@@ -720,7 +727,12 @@ export function ClusterSecurityTab({
 
   if (!data) return null;
 
-  const baseFailCount = data.baseline_checks.filter(
+  const baseChecks = data.baseline_checks || [];
+  const certsList = data.certs || [];
+  const rehearsalsList = data.rehearsals || [];
+  const deductionsList = data.deductions || [];
+  const hostsList = data.hosts || [];
+  const baseFailCount = baseChecks.filter(
     (x) => x.status === "fail" || x.status === "warn",
   ).length;
 
@@ -773,8 +785,8 @@ export function ClusterSecurityTab({
               </div>
               <span className="faint small">
                 {bi(
-                  `${data.app_name} ${data.version} · ${data.hosts.length} 台节点 · 综合 CVE 漏洞、配置基线与证书健康度评估`,
-                  `${data.app_name} ${data.version} · ${data.hosts.length} host(s) · Composite CVE, baseline & cert score`,
+                  `${data.app_name} ${data.version} · ${hostsList.length} 台节点 · 综合 CVE 漏洞、配置基线与证书健康度评估`,
+                  `${data.app_name} ${data.version} · ${hostsList.length} host(s) · Composite CVE, baseline & cert score`,
                 )}
               </span>
             </div>
@@ -805,6 +817,7 @@ export function ClusterSecurityTab({
               <Button
                 size="small"
                 icon={<IconDownload />}
+                onMouseEnter={() => void import("./secreport")}
                 onClick={() => setExportOpen(true)}
               >
                 {bi("导出安全报告", "Export Report")}
@@ -822,7 +835,7 @@ export function ClusterSecurityTab({
           </div>
         </div>
         <div className="csec-deducts">
-          {data.deductions.length === 0 ? (
+          {deductionsList.length === 0 ? (
             <span className="csec-deduct-ok">
               <IconCheckCircleFill style={{ marginRight: 4 }} />
               {baseFailCount > 0
@@ -836,7 +849,7 @@ export function ClusterSecurityTab({
                   )}
             </span>
           ) : (
-            data.deductions.map((d, i) => (
+            deductionsList.map((d, i) => (
               <span key={i} className="csec-deduct-pill">
                 -{d.points} · {d.reason}
               </span>
@@ -910,17 +923,17 @@ export function ClusterSecurityTab({
           <span className="csec-kpi-lbl">{bi("TLS 证书巡检", "TLS Certificates")}</span>
           <span
             className={`csec-kpi-val ${
-              data.cert_expiring > 0 ? "danger" : data.certs.length > 0 ? "ok" : ""
+              data.cert_expiring > 0 ? "danger" : certsList.length > 0 ? "ok" : ""
             }`}
           >
-            {data.certs.length > 0
+            {certsList.length > 0
               ? data.cert_expiring > 0
                 ? bi(`${data.cert_expiring} 份预警`, `${data.cert_expiring} Expiring`)
-                : bi(`${data.certs.length} 份正常`, `${data.certs.length} Healthy`)
+                : bi(`${certsList.length} 份正常`, `${certsList.length} Healthy`)
               : bi("未配置", "None")}
           </span>
           <span className="csec-kpi-sub">
-            {data.certs.length > 0
+            {certsList.length > 0
               ? bi("基于交付包内嵌 X.509 实时解析", "Parsed from embedded X.509 bundle")
               : bi("当前集群未启用 TLS 证书包", "No TLS bundle embedded")}
           </span>
@@ -928,11 +941,11 @@ export function ClusterSecurityTab({
 
         <div className="csec-kpi">
           <span className="csec-kpi-lbl">{bi("安全修复演练", "Security Rehearsals")}</span>
-          <span className="csec-kpi-val">{data.rehearsals.length}</span>
+          <span className="csec-kpi-val">{rehearsalsList.length}</span>
           <span className="csec-kpi-sub">
             {bi(
-              `${data.rehearsals.filter((x) => x.stage === "finalized").length} 份已固化生产 SOP`,
-              `${data.rehearsals.filter((x) => x.stage === "finalized").length} finalized SOP(s)`,
+              `${rehearsalsList.filter((x) => x.stage === "finalized").length} 份已固化生产 SOP`,
+              `${rehearsalsList.filter((x) => x.stage === "finalized").length} finalized SOP(s)`,
             )}
           </span>
         </div>
@@ -1302,7 +1315,7 @@ export function ClusterSecurityTab({
           </span>
         </div>
         <div className="csec-base-list">
-          {data.baseline_checks.map((ck) => (
+          {baseChecks.map((ck) => (
             <div key={ck.id} className="csec-base-row">
               <div className="csec-base-main">
                 <div className="csec-base-title">
@@ -1400,9 +1413,9 @@ export function ClusterSecurityTab({
             )}
           </span>
         </div>
-        {data.certs.length === 0 ? (
+        {certsList.length === 0 ? (
           <div className="csec-empty">
-            {data.baseline_checks.some(
+            {baseChecks.some(
               (ck) => ck.id === "tls_enabled" && ck.status === "pass",
             )
               ? bi(
@@ -1416,7 +1429,7 @@ export function ClusterSecurityTab({
           </div>
         ) : (
           <div className="csec-cert-grid">
-            {data.certs.map((cert, i) => (
+            {certsList.map((cert, i) => (
               <div key={`${cert.instance}-${cert.role}-${i}`} className="csec-cert-card">
                 <div className="csec-cert-head">
                   <div className="csec-pkg-row">
@@ -1481,7 +1494,7 @@ export function ClusterSecurityTab({
             {bi("4. 安全修复演练与生产 SOP 追踪", "4. Security Rehearsals & Verified SOPs")}
           </h4>
         </div>
-        {data.rehearsals.length === 0 ? (
+        {rehearsalsList.length === 0 ? (
           <div className="csec-empty">
             {bi(
               "暂未在本集群发起过安全修复演练。可从上方漏洞包、配置基线或证书卡片一键发起 AI 安全修复演练，自动生成只读探针与生产 SOP。",
@@ -1490,7 +1503,7 @@ export function ClusterSecurityTab({
           </div>
         ) : (
           <div className="csec-rh-list">
-            {data.rehearsals.map((rh) => (
+            {rehearsalsList.map((rh) => (
               <div key={rh.id} className="csec-rh-row">
                 <div className="csec-pkg-meta">
                   <div className="csec-pkg-row">
@@ -1549,6 +1562,8 @@ export function ClusterSecurityTab({
           `Globally Ignore Package: ${ignoreTarget?.package || ""}`,
         )}
         onCancel={() => !ignoreBusy && setIgnoreTarget(null)}
+        maskClosable={!ignoreBusy}
+        cancelButtonProps={{ disabled: ignoreBusy }}
         onOk={() => void submitGlobalIgnore()}
         confirmLoading={ignoreBusy}
         okText={bi("确认全局忽略", "Confirm Ignore")}
@@ -1635,6 +1650,8 @@ export function ClusterSecurityTab({
         visible={Boolean(waiveTarget)}
         title={bi(`豁免配置基线：${waiveTarget?.title || ""}`, `Waive Baseline: ${waiveTarget?.title || ""}`)}
         onCancel={() => !waiveBusy && setWaiveTarget(null)}
+        maskClosable={!waiveBusy}
+        cancelButtonProps={{ disabled: waiveBusy }}
         onOk={() => {
           if (waiveTarget) void submitBaselineWaive(waiveTarget, true, waiveNote);
         }}
@@ -1659,6 +1676,8 @@ export function ClusterSecurityTab({
         visible={Boolean(vexFinding)}
         title={bi(`VEX 漏洞处置：${vexFinding?.cve || ""}`, `VEX Triage: ${vexFinding?.cve || ""}`)}
         onCancel={() => !vexBusy && setVexFinding(null)}
+        maskClosable={!vexBusy}
+        cancelButtonProps={{ disabled: vexBusy }}
         onOk={() => void submitQuickVex()}
         confirmLoading={vexBusy}
         okText={bi("保存处置", "Save Triage")}
@@ -1694,14 +1713,18 @@ export function ClusterSecurityTab({
         )}
       </Modal>
 
-      <SecExportModal
-        visible={exportOpen}
-        onClose={() => setExportOpen(false)}
-        clusterId={c.id}
-        clusterTitle={`${c.id} (${data.app_name} ${data.version})`}
-        defaultScope={roleFilter !== "all" ? roleFilter : undefined}
-        onManageTemplates={() => go({ name: "security", tab: "reports" })}
-      />
+      {exportOpen && (
+        <React.Suspense fallback={null}>
+          <LazySecExportModal
+            visible
+            onClose={() => setExportOpen(false)}
+            clusterId={c.id}
+            clusterTitle={`${c.id} (${data.app_name} ${data.version})`}
+            defaultScope={roleFilter !== "all" ? roleFilter : undefined}
+            onManageTemplates={() => go({ name: "security", tab: "reports" })}
+          />
+        </React.Suspense>
+      )}
     </div>
   );
 }

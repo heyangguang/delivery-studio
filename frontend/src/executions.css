@@ -26,6 +26,14 @@
   background: var(--surface);
   color: var(--ink);
   cursor: pointer;
+  transition: border-color 0.18s var(--spring), background-color 0.18s var(--spring), box-shadow 0.18s var(--spring), transform 0.15s var(--spring);
+}
+.ex-location-options button:hover:not([aria-pressed="true"]):not(:disabled) {
+  border-color: color-mix(in srgb, var(--teal) 36%, var(--line-strong));
+  background: var(--surface-2);
+}
+.ex-location-options button:active:not(:disabled) {
+  transform: scale(0.985);
 }
 .ex-location-options button[aria-pressed="true"] {
   border-color: var(--teal);
@@ -474,12 +482,11 @@
   overflow-wrap: anywhere;
 }
 .exec-modal .arco-modal-header {
-  padding: 22px 24px 18px;
+  padding: 22px 48px 18px 24px;
   height: auto;
 }
 .exec-modal .arco-modal-title {
   justify-content: flex-start;
-  padding-right: 24px;
   font-size: 18px;
   font-weight: 650;
   text-align: left;
@@ -564,6 +571,7 @@
 /* Settings: onboarding and registered nodes */
 .exec-settings {
   min-width: 0;
+  padding-bottom: 76px;
 }
 .en-page-header .exec-actions {
   flex-wrap: nowrap;
@@ -690,12 +698,16 @@
   text-align: left;
   cursor: pointer;
   transition:
-    border-color 0.16s,
-    background 0.16s;
+    border-color 0.18s var(--spring),
+    background 0.18s var(--spring),
+    transform 0.15s var(--spring);
 }
 .en-resources > button:hover {
   border-color: var(--brand-line);
   background: var(--surface-2);
+}
+.en-resources > button:active {
+  transform: scale(0.985);
 }
 .en-resources > button:focus-visible {
   outline: 2px solid var(--brand);
@@ -1010,8 +1022,9 @@
   font-style: normal;
   font-size: 12px;
 }
+.en-setup-steps > span.current,
 .en-setup-steps .current {
-  color: var(--brand-ink) !important;
+  color: var(--brand-ink);
   font-weight: 600;
 }
 .en-setup-steps .current i {
@@ -1075,12 +1088,16 @@
   text-align: left;
   cursor: pointer;
   transition:
-    border-color 0.15s ease,
-    background-color 0.15s ease,
-    box-shadow 0.15s ease;
+    border-color 0.18s var(--spring),
+    background-color 0.18s var(--spring),
+    box-shadow 0.18s var(--spring),
+    transform 0.15s var(--spring);
 }
 .en-kind-option:hover:not(.on) {
   border-color: color-mix(in srgb, var(--ink) 28%, var(--line-strong));
+}
+.en-kind-option:active:not(:disabled) {
+  transform: scale(0.985);
 }
 .en-kind-option:focus-visible {
   outline: none;
@@ -1099,7 +1116,7 @@
   border: 1.5px solid var(--line-strong);
   border-radius: 50%;
   background: var(--surface);
-  transition: border 0.15s ease;
+  transition: border 0.18s var(--spring);
 }
 .en-kind-option.on > i {
   border: 5px solid var(--brand);
@@ -1254,8 +1271,9 @@
   gap: 8px;
   margin-bottom: 8px;
 }
+.en-connect .en-sec-head h3,
 .en-sec-head h3 {
-  margin: 0 !important;
+  margin: 0;
 }
 .en-label-with-help {
   display: inline-flex;
@@ -1367,7 +1385,7 @@ body[arco-theme="dark"] .en-flow-done-tag {
   border: 1px solid var(--line);
   color: var(--mute);
   font-size: 11px;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  box-shadow: var(--shadow-sm);
 }
 
 /* Hub URL selector & CA cert controls in setup modal */
@@ -1676,7 +1694,7 @@ body[arco-theme="dark"] .en-flow-done-tag {
     gap: 18px;
   }
   .exec-modal .arco-modal-header {
-    padding: 18px;
+    padding: 18px 48px 18px 18px;
   }
   .exec-modal .arco-modal-content {
     padding: 18px;
@@ -1731,15 +1749,6 @@ body[arco-theme="dark"] .en-flow-done-tag {
   }
 }
 
-.exec-modal .arco-modal-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-.exec-modal .arco-modal-footer > .arco-btn {
-  margin-left: 0;
-}
 @media (max-width: 600px) {
   .ex-agent-list > div {
     align-items: flex-start;
@@ -1753,10 +1762,10 @@ body[arco-theme="dark"] .en-flow-done-tag {
   gap: 8px 12px;
   padding: 12px 16px;
   margin: 0 0 16px;
-  border: 1px solid var(--color-border-2);
+  border: 1px solid var(--line);
   border-radius: 10px;
-  background: var(--color-fill-1);
-  color: var(--color-text-2);
+  background: var(--surface-2);
+  color: var(--ink-2);
   font-size: 13px;
 }
 .ex-host-summary code { overflow-wrap: anywhere; }
@@ -1779,11 +1788,14 @@ body[arco-theme="dark"] .en-flow-done-tag {
   border: 1px solid var(--line-strong);
   background: var(--surface);
   cursor: pointer;
-  transition: border-color 0.16s, background-color 0.16s, box-shadow 0.16s;
+  transition: border-color 0.18s var(--spring), background-color 0.18s var(--spring), box-shadow 0.18s var(--spring), transform 0.15s var(--spring);
 }
 .wz-mode-card:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--teal) 42%, var(--line-strong));
   background: var(--surface-2);
+}
+.wz-mode-card:active:not(:disabled) {
+  transform: scale(0.985);
 }
 .wz-mode-card.on {
   border-color: var(--teal);
@@ -1875,11 +1887,14 @@ body[arco-theme="dark"] .en-flow-done-tag {
   font-size: 12.5px;
   font-weight: 500;
   color: var(--ink-2);
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition: background-color 0.18s var(--spring), color 0.18s var(--spring), transform 0.15s var(--spring);
 }
 .exec-batch-toggle:hover {
   background: var(--hover);
   color: var(--ink);
+}
+.exec-batch-toggle:active {
+  transform: scale(0.975);
 }
 .exec-batch-toggle:focus-visible {
   box-shadow: var(--ring);
@@ -1913,7 +1928,7 @@ body[arco-theme="dark"] .en-flow-done-tag {
 .exec-node-pill.on {
   color: var(--ok);
   background: var(--ok-soft);
-  border-color: rgba(52, 199, 89, 0.35);
+  border-color: var(--ok-line);
 }
 .exec-node-pill.on i {
   background: var(--ok);
@@ -1976,11 +1991,14 @@ body[arco-theme="dark"] .en-flow-done-tag {
   color: var(--ink-2);
   background: var(--surface);
   border: 1px solid var(--line);
-  transition: border-color 0.15s, color 0.15s;
+  transition: border-color 0.16s var(--spring), color 0.16s var(--spring), transform 0.15s var(--spring);
 }
 .exec-step-jump:hover {
   border-color: var(--brand);
   color: var(--brand-ink);
+}
+.exec-step-jump:active {
+  transform: scale(0.975);
 }
 .exec-step-jump i {
   width: 6px;
@@ -2205,7 +2223,7 @@ body[arco-theme="dark"] .en-flow-done-tag {
 
 /* ---------- Redesigned Single-Screen Smart Automated Execution Launcher ---------- */
 .ex-launch-modal .arco-modal-header {
-  padding: 16px 22px 14px;
+  padding: 16px 48px 14px 22px;
 }
 .ex-launch-modal .arco-modal-content {
   padding: 16px 22px;
@@ -2399,11 +2417,14 @@ body[arco-theme="dark"] .en-flow-done-tag {
   color: var(--ink-2);
   background: var(--surface);
   border: 1px solid var(--line);
-  transition: border-color 0.14s, color 0.14s, background 0.14s;
+  transition: border-color 0.16s var(--spring), color 0.16s var(--spring), background 0.16s var(--spring), transform 0.15s var(--spring);
 }
 .ex-mini-toggle:hover {
   border-color: var(--line-strong);
   color: var(--ink);
+}
+.ex-mini-toggle:active {
+  transform: scale(0.975);
 }
 .ex-mini-toggle.on {
   color: var(--brand-ink);
@@ -2526,11 +2547,14 @@ body[arco-theme="dark"] .en-flow-done-tag {
   color: var(--ink-2);
   background: var(--surface);
   border: 1px solid var(--line);
-  transition: all 0.14s;
+  transition: border-color 0.16s var(--spring), color 0.16s var(--spring), background 0.16s var(--spring), transform 0.15s var(--spring);
 }
 .ex-preset-pill:hover {
   border-color: var(--line-strong);
   color: var(--ink);
+}
+.ex-preset-pill:active {
+  transform: scale(0.975);
 }
 .ex-preset-pill.on {
   color: var(--brand-ink);
@@ -2810,24 +2834,21 @@ body[arco-theme="dark"] .ex-preset-pill.bad.on {
   flex-direction: column;
   gap: 2px;
 }
+.ex-ck-main .ex-ck-warns .ex-ck-warn-line,
 .ex-ck-warn-line {
-  color: var(--warn) !important;
+  color: var(--warn);
   font-weight: 540;
 }
 .ex-patch-inline {
-  color: #c52b16;
+  color: var(--brand-ink);
   font-weight: 560;
-}
-[data-theme="dark"] .ex-patch-inline,
-body[arco-theme="dark"] .ex-patch-inline {
-  color: #c4b5fd;
 }
 .ex-step-quick {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   opacity: 0;
-  transition: opacity 0.12s;
+  transition: opacity 0.16s var(--spring);
 }
 .ex-step-row:hover .ex-step-quick,
 .ex-step-row.on .ex-step-quick,
@@ -2846,10 +2867,13 @@ body[arco-theme="dark"] .ex-patch-inline {
   background: var(--surface);
   border: 1px solid var(--brand-line);
   white-space: nowrap;
-  transition: background 0.12s;
+  transition: background 0.16s var(--spring), transform 0.15s var(--spring);
 }
 .ex-step-qbtn:hover {
   background: var(--brand-soft);
+}
+.ex-step-qbtn:active {
+  transform: scale(0.975);
 }
 .ex-safety-box {
   padding: 12px 14px;

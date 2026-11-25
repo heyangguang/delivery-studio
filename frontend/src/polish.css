@@ -341,9 +341,13 @@ body[arco-theme="dark"] .ig-card-rim {
   border: 1px solid var(--line-strong);
   border-radius: 7px;
   transition:
-    border-color 0.15s,
-    background 0.15s,
-    box-shadow 0.15s;
+    border-color 0.15s var(--apple-ease),
+    background 0.15s var(--apple-ease),
+    box-shadow 0.15s var(--apple-ease),
+    transform 0.18s var(--spring);
+}
+.ai-um-m:active:not(:disabled) {
+  transform: scale(0.985);
 }
 .ai-um-m:hover:not(.on) {
   border-color: color-mix(in srgb, var(--brand) 38%, var(--line-strong));
@@ -893,8 +897,8 @@ body[arco-theme="dark"] .arco-trigger-popup .arco-menu {
 }
 .utabs-bar.ready {
   transition:
-    transform 0.3s cubic-bezier(0.22, 1, 0.36, 1),
-    width 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+    transform 0.28s var(--apple-sheet, cubic-bezier(0.32, 0.72, 0, 1)),
+    width 0.28s var(--apple-sheet, cubic-bezier(0.32, 0.72, 0, 1));
 }
 @media (max-width: 640px) {
   .utabs {

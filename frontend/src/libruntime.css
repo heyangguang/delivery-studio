@@ -35,12 +35,12 @@
   border-radius: 13px;
   background: var(--surface);
   transition:
-    border-color 0.16s var(--ease-out),
-    box-shadow 0.16s var(--ease-out);
+    border-color 0.18s var(--spring),
+    box-shadow 0.18s var(--spring);
 }
 .rtl-def-card:hover {
   border-color: var(--line-strong);
-  box-shadow: var(--shadow-xs, 0 1px 3px rgba(15, 23, 42, 0.04));
+  box-shadow: var(--shadow-sm);
 }
 .rtl-def-top {
   display: flex;
@@ -105,11 +105,13 @@
 .rtl-def-ver {
   font-weight: 600;
   color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
 }
 .rtl-def-size {
   margin-left: auto;
   color: var(--faint);
   font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
 }
 .rtl-def-empty {
   padding-top: 8px;
@@ -149,12 +151,12 @@
   background: var(--surface);
   overflow: hidden;
   transition:
-    border-color 0.16s var(--ease-out),
-    box-shadow 0.16s var(--ease-out);
+    border-color 0.18s var(--spring),
+    box-shadow 0.18s var(--spring);
 }
 .rtl-group.is-default {
   border-color: color-mix(in srgb, var(--brand) 22%, var(--line));
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+  box-shadow: var(--shadow-sm);
 }
 .rtl-group:hover {
   border-color: var(--line-strong);
@@ -164,14 +166,14 @@
 }
 
 .rtl-item {
-  transition: background 0.14s var(--ease-out);
+  transition: background 0.16s var(--spring);
 }
 .rtl-head {
   display: flex;
   align-items: center;
   gap: 8px;
   padding-right: 12px;
-  transition: background 0.15s var(--ease-out);
+  transition: background 0.16s var(--spring);
 }
 .rtl-item:not(.open) > .rtl-head:hover {
   background: var(--hover);
@@ -193,6 +195,10 @@
   text-align: left;
   color: inherit;
   cursor: pointer;
+  transition: transform 0.16s var(--spring);
+}
+.rtl-main:active {
+  transform: scale(0.994);
 }
 .rtl-main:focus-visible {
   outline: 2px solid var(--brand);
@@ -253,8 +259,8 @@ body[arco-theme="dark"] .rtl-item.is-default .rtl-ic {
   border: 1.5px solid var(--faint);
   background: var(--surface);
   transition:
-    border-color 0.15s,
-    background 0.15s;
+    border-color 0.16s var(--spring),
+    background 0.16s var(--spring);
 }
 .rtl-item.is-sibling.open .rtl-sub-marker > i,
 .rtl-item.is-sibling > .rtl-head:hover .rtl-sub-marker > i {
@@ -362,7 +368,7 @@ body[arco-theme="dark"] .rtl-item.is-default .rtl-ic {
   width: 6px;
   height: 6px;
   border-radius: 999px;
-  background: #0ea5e9;
+  background: var(--cobalt);
   opacity: 0.85;
 }
 
@@ -381,9 +387,9 @@ body[arco-theme="dark"] .rtl-item.is-default .rtl-ic {
   border: 1px solid var(--line);
   white-space: nowrap;
   transition:
-    color 0.15s,
-    background 0.15s,
-    border-color 0.15s;
+    color 0.16s var(--spring),
+    background 0.16s var(--spring),
+    border-color 0.16s var(--spring);
 }
 .rtl-expand-pill em {
   font-style: normal;
@@ -393,6 +399,7 @@ body[arco-theme="dark"] .rtl-item.is-default .rtl-ic {
   line-height: 1.5;
   color: var(--mute);
   background: var(--surface-2);
+  font-variant-numeric: tabular-nums;
 }
 .rtl-main:hover .rtl-expand-pill {
   color: var(--ink);
@@ -410,7 +417,7 @@ body[arco-theme="dark"] .rtl-item.is-default .rtl-ic {
 }
 .rtl-expand-pill .so-caret {
   font-size: 12px;
-  transition: transform 0.2s var(--ease-out);
+  transition: transform 0.22s var(--spring);
 }
 .rtl-item.open > .rtl-head .so-caret {
   transform: rotate(180deg);
@@ -465,8 +472,12 @@ body[arco-theme="dark"] .rtl-item.is-default .rtl-ic {
   color: var(--mute);
   cursor: pointer;
   transition:
-    background 0.15s,
-    color 0.15s;
+    background 0.16s var(--spring),
+    color 0.16s var(--spring),
+    transform 0.14s var(--spring);
+}
+.rtl-siblings-bar:active {
+  transform: scale(0.996);
 }
 .rtl-siblings-bar:hover {
   background: color-mix(in srgb, var(--surface-2) 85%, var(--surface));
@@ -502,6 +513,7 @@ body[arco-theme="dark"] .rtl-item.is-default .rtl-ic {
   align-items: center;
   height: 22px;
   font-style: normal;
+  font-variant-numeric: tabular-nums;
   padding: 0 8px;
   border-radius: 999px;
   font-size: 12px;
@@ -538,7 +550,7 @@ body[arco-theme="dark"] .rtl-item.is-default .rtl-ic {
 }
 .rtl-siblings-toggle .so-caret {
   font-size: 12px;
-  transition: transform 0.2s var(--ease-out);
+  transition: transform 0.22s var(--spring);
 }
 .rtl-siblings-toggle .so-caret.flip {
   transform: rotate(180deg);
@@ -634,6 +646,7 @@ body[arco-theme="dark"] .rtl-diff-explain {
   align-items: center;
   height: 22px;
   font-style: normal;
+  font-variant-numeric: tabular-nums;
   padding: 0 8px;
   border-radius: 999px;
   font-size: 12px;
@@ -656,6 +669,7 @@ body[arco-theme="dark"] .rtl-diff-explain {
   border-radius: 999px;
   font-size: 12.5px;
   font-weight: 560;
+  font-variant-numeric: tabular-nums;
   color: var(--run);
   background: var(--run-soft);
   border: 1px solid color-mix(in srgb, var(--run) 24%, transparent);
@@ -676,7 +690,7 @@ body[arco-theme="dark"] .rtl-diff-explain {
   padding: 10px 14px;
   border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
   font-size: 13.5px;
-  transition: background 0.12s;
+  transition: background 0.14s var(--spring);
 }
 .rtl-wheels > li:nth-child(odd) {
   border-right: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
@@ -712,6 +726,7 @@ body[arco-theme="dark"] .rtl-diff-explain {
   border-radius: 6px;
   font-size: 12.5px;
   line-height: 1;
+  font-variant-numeric: tabular-nums;
   color: var(--ink-2);
   background: var(--surface-2);
 }
@@ -723,6 +738,7 @@ body[arco-theme="dark"] .rtl-diff-explain {
   border-radius: 6px;
   font-size: 12.5px;
   line-height: 1;
+  font-variant-numeric: tabular-nums;
   color: var(--run);
   background: var(--run-soft);
   border: 1px solid color-mix(in srgb, var(--run) 22%, transparent);
@@ -749,16 +765,12 @@ body[arco-theme="dark"] .rtl-diff-explain {
 .rtl-via-tag em {
   font-style: normal;
   opacity: 0.8;
+  font-variant-numeric: tabular-nums;
 }
 .rtl-via-tag.via-pypi {
-  color: #0369a1;
-  background: rgba(14, 165, 233, 0.08);
-  border-color: rgba(14, 165, 233, 0.2);
-}
-body[arco-theme="dark"] .rtl-via-tag.via-pypi {
-  color: #7dd3fc;
-  background: rgba(56, 189, 248, 0.14);
-  border-color: rgba(56, 189, 248, 0.24);
+  color: var(--cobalt-ink);
+  background: var(--cobalt-soft);
+  border-color: var(--cobalt-line);
 }
 .rtl-via-tag.via-imported {
   color: var(--brand-ink);
@@ -811,4 +823,59 @@ body[arco-theme="dark"] .rtl-via-tag.via-pypi {
   .rtl-item.is-sibling > .rtl-wheels-wrap {
     padding-left: 14px;
   }
+}
+
+/* Software Library detail pane: reserve bottom clearance for AI FAB & wrap 4-col KPI / 3-col source grids cleanly at 1280px */
+.route-library .md-detail {
+  padding-bottom: 76px;
+}
+@media (max-width: 1360px) {
+  .detail.lib .lib-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .detail.lib .src-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* TaskCard windowed raw log bar */
+.tk-log-window-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 6px 14px;
+  margin-bottom: 4px;
+  border-bottom: 1px dashed var(--line);
+  background: color-mix(in srgb, var(--surface-2) 65%, transparent);
+  color: var(--mute);
+  font-family: var(--sans);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.tk-log-window-acts {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.tk-log-window-acts button {
+  all: unset;
+  cursor: pointer;
+  color: var(--brand-ink);
+  font-weight: 560;
+  border-radius: 4px;
+  padding: 1px 6px;
+  transition:
+    background-color 0.15s var(--spring),
+    transform 0.14s var(--spring);
+}
+.tk-log-window-acts button:hover {
+  background: var(--brand-soft);
+}
+.tk-log-window-acts button:active {
+  transform: scale(0.975);
+}
+.tk-log-window-acts button:focus-visible {
+  box-shadow: var(--ring);
 }

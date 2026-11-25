@@ -347,8 +347,11 @@ function ExternalVersionStatus({
   const [status, setStatus] = useState(current);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
+  const busyLockRef = useRef(false);
   const choices = statusChoices();
   const save = async () => {
+    if (busyLockRef.current) return;
+    busyLockRef.current = true;
     setBusy(true);
     try {
       await api(
@@ -374,6 +377,7 @@ function ExternalVersionStatus({
     } catch (e) {
       err(e);
     } finally {
+      busyLockRef.current = false;
       setBusy(false);
     }
   };
@@ -446,6 +450,7 @@ function AutoTestReportModal({
 }) {
   useLang();
   const [deleting, setDeleting] = useState(false);
+  const deletingLockRef = useRef(false);
   if (!rec) return null;
   const steps = rec.steps || [];
 
@@ -459,6 +464,8 @@ function AutoTestReportModal({
       okText: bi("删除报告", "Delete"),
       okButtonProps: { status: "danger" },
       onOk: async () => {
+        if (deletingLockRef.current) return;
+        deletingLockRef.current = true;
         setDeleting(true);
         try {
           await api(
@@ -471,6 +478,7 @@ function AutoTestReportModal({
         } catch (e) {
           err(e);
         } finally {
+          deletingLockRef.current = false;
           setDeleting(false);
         }
       },
@@ -702,6 +710,7 @@ function PublishVersionModal({
   const [testMode, setTestMode] = useState<"automatic" | "manual">("automatic");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
+  const busyLockRef = useRef(false);
 
   useEffect(() => {
     if (!open || !version) return;
@@ -744,7 +753,8 @@ function PublishVersionModal({
   };
 
   const submit = async () => {
-    if (!canSubmit) return;
+    if (!canSubmit || busyLockRef.current) return;
+    busyLockRef.current = true;
     setBusy(true);
     try {
       await api(
@@ -771,6 +781,7 @@ function PublishVersionModal({
     } catch (e) {
       err(e);
     } finally {
+      busyLockRef.current = false;
       setBusy(false);
     }
   };
@@ -795,6 +806,8 @@ function PublishVersionModal({
       okText: bi("确认下线", "Unpublish"),
       okButtonProps: { status: "danger" },
       onOk: async () => {
+        if (busyLockRef.current) return;
+        busyLockRef.current = true;
         setBusy(true);
         try {
           await api(
@@ -816,6 +829,7 @@ function PublishVersionModal({
         } catch (e) {
           err(e);
         } finally {
+          busyLockRef.current = false;
           setBusy(false);
         }
       },
@@ -1098,6 +1112,16 @@ export function ComponentPanes({
   const [flash, setFlash] = useState<{ id: string; n: number } | null>(null); // the part the reader just asked for, briefly lit
   const [phase, setPhase] = useState("");
   const tocRef = useRef<HTMLElement>(null);
+  const flashTimerRef = useRef<number>(0);
+  const scrollRafRef = useRef<number>(0);
+  const revokeLockRef = useRef(false);
+
+  useEffect(() => {
+    return () => {
+      if (flashTimerRef.current) window.clearTimeout(flashTimerRef.current);
+      if (scrollRafRef.current) window.cancelAnimationFrame(scrollRafRef.current);
+    };
+  }, []);
   const manifest = useMemo(() => {
     if (yaml === null) return {value:null as Any | null,error:""};
     try {
@@ -1357,7 +1381,8 @@ export function ComponentPanes({
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const lightUp = (id: string) => {
     setFlash({ id, n: Date.now() });
-    window.setTimeout(
+    if (flashTimerRef.current) window.clearTimeout(flashTimerRef.current);
+    flashTimerRef.current = window.setTimeout(
       () => setFlash((f) => (f && f.id === id ? null : f)),
       2000,
     );
@@ -1391,15 +1416,20 @@ export function ComponentPanes({
           ? top
           : (viewH - r.height) / 2 + (sc ? sc.getBoundingClientRect().top : 0)),
     );
+    if (scrollRafRef.current) {
+      window.cancelAnimationFrame(scrollRafRef.current);
+      scrollRafRef.current = 0;
+    }
     if (reduced) return set(target);
     const from = cur();
     const t0 = performance.now();
     const step = (now: number) => {
       const k = Math.min(1, (now - t0) / 360);
       set(from + (target - from) * (1 - Math.pow(1 - k, 3)));
-      if (k < 1) requestAnimationFrame(step);
+      if (k < 1) scrollRafRef.current = window.requestAnimationFrame(step);
+      else scrollRafRef.current = 0;
     };
-    requestAnimationFrame(step);
+    scrollRafRef.current = window.requestAnimationFrame(step);
   };
   const jump = (id: string) => {
     lock.current = Date.now() + 700;
@@ -1433,6 +1463,8 @@ export function ComponentPanes({
       okText: bi("确认下线", "Unpublish"),
       okButtonProps: { status: "danger" },
       onOk: async () => {
+        if (revokeLockRef.current) return;
+        revokeLockRef.current = true;
         try {
           await api(
             `/api/components/${encodeURIComponent(entry.id)}/versions/${encodeURIComponent(verId)}/status`,
@@ -1448,6 +1480,8 @@ export function ComponentPanes({
           setVerifTick((n) => n + 1);
         } catch (e) {
           err(e);
+        } finally {
+          revokeLockRef.current = false;
         }
       },
     });
@@ -1466,6 +1500,8 @@ export function ComponentPanes({
       okText: bi("确认下线", "Unpublish"),
       okButtonProps: { status: "danger" },
       onOk: async () => {
+        if (revokeLockRef.current) return;
+        revokeLockRef.current = true;
         try {
           await api(
             `/api/components/${encodeURIComponent(entry.id)}/versions/${encodeURIComponent(verId)}/status`,
@@ -1481,6 +1517,8 @@ export function ComponentPanes({
           setVerifTick((n) => n + 1);
         } catch (e) {
           err(e);
+        } finally {
+          revokeLockRef.current = false;
         }
       },
     });

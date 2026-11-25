@@ -1,4 +1,4 @@
-import React, { useSyncExternalStore } from "react";
+import React, { useMemo, useSyncExternalStore } from "react";
 
 export type Lang = "zh-CN" | "en-US";
 
@@ -68,13 +68,16 @@ export const biv = <T,>(zh: T, en: T): T => (currentLang === "en-US" ? en : zh);
 
 export function useI18n() {
   const lang = useLang();
-  return {
-    lang,
-    isEn: lang === "en-US",
-    setLang,
-    bi: (zh: string, en: string) => (lang === "en-US" ? en : zh),
-    biv: <T,>(zh: T, en: T): T => (lang === "en-US" ? en : zh),
-  };
+  return useMemo(
+    () => ({
+      lang,
+      isEn: lang === "en-US",
+      setLang,
+      bi: (zh: string, en: string) => (lang === "en-US" ? en : zh),
+      biv: <T,>(zh: T, en: T): T => (lang === "en-US" ? en : zh),
+    }),
+    [lang],
+  );
 }
 
 export function I18nProvider({ children }: { children: React.ReactNode }) {

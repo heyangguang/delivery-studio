@@ -12,6 +12,7 @@ body {
   --imp-code-sec: #0c7480;
 }
 
+[data-theme="dark"],
 body[arco-theme="dark"] {
   --imp-code-bg: #151820;
   --imp-code-head: #1c202a;
@@ -72,7 +73,7 @@ body[arco-theme="dark"] {
   background: var(--surface);
   border: 1px solid var(--line-strong);
   flex: none;
-  transition: background-color 0.14s ease, border-color 0.14s ease, transform 0.16s var(--spring);
+  transition: background-color 0.16s var(--spring), border-color 0.16s var(--spring), transform 0.16s var(--spring);
 }
 
 .imp-back-pill:hover {
@@ -141,7 +142,11 @@ body[arco-theme="dark"] {
   color: var(--mute);
   cursor: pointer;
   white-space: nowrap;
-  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  transition: background-color 0.16s var(--spring), color 0.16s var(--spring), border-color 0.16s var(--spring), transform 0.16s var(--spring);
+}
+
+.imp-step-btn:active:not(:disabled) {
+  transform: scale(0.975);
 }
 
 .imp-step-btn:hover:not(:disabled) {
@@ -303,7 +308,11 @@ body[arco-theme="dark"] {
   font-size: 12px;
   font-weight: 550;
   cursor: pointer;
-  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+  transition: background-color 0.16s var(--spring), border-color 0.16s var(--spring), color 0.16s var(--spring), transform 0.16s var(--spring);
+}
+
+.imp-cat-pill:active {
+  transform: scale(0.975);
 }
 
 .imp-cat-pill:hover {
@@ -357,7 +366,11 @@ body[arco-theme="dark"] {
   text-align: left;
   contain: layout style paint;
   min-width: 0;
-  transition: border-color 0.12s ease, background-color 0.12s ease, box-shadow 0.14s ease;
+  transition: border-color 0.16s var(--spring), background-color 0.16s var(--spring), box-shadow 0.18s var(--spring), transform 0.16s var(--spring);
+}
+
+.imp-mw-card:active {
+  transform: scale(0.985);
 }
 
 .imp-mw-card:hover {
@@ -532,6 +545,11 @@ body[arco-theme="dark"] {
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  transition: border-color 0.16s var(--spring), box-shadow 0.16s var(--spring), transform 0.16s var(--spring);
+}
+
+.imp-icon-opt:active {
+  transform: scale(0.92);
 }
 
 .imp-icon-opt.on {
@@ -663,7 +681,11 @@ body[arco-theme="dark"] {
   display: flex;
   flex-direction: column;
   gap: 5px;
-  transition: border-color 0.14s ease, background-color 0.14s ease, box-shadow 0.16s ease;
+  transition: border-color 0.18s var(--spring), background-color 0.18s var(--spring), box-shadow 0.18s var(--spring), transform 0.18s var(--spring);
+}
+
+.imp-mode-tab:active {
+  transform: scale(0.985);
 }
 
 .imp-mode-tab:hover {
@@ -852,7 +874,7 @@ body[arco-theme="dark"] {
   gap: 7px;
   font-size: 12px;
   color: var(--mute);
-  transition: border-color 0.2s ease, color 0.2s ease;
+  transition: border-color 0.2s var(--spring), color 0.2s var(--spring);
 }
 
 .imp-ai-step.is-done {
@@ -1062,7 +1084,11 @@ body[arco-theme="dark"] {
   color: var(--ink-2);
   font-size: 11.5px;
   font-weight: 550;
-  transition: border-color 0.14s ease, color 0.14s ease, background-color 0.14s ease;
+  transition: border-color 0.16s var(--spring), color 0.16s var(--spring), background-color 0.16s var(--spring), transform 0.16s var(--spring);
+}
+
+.imp-quick-chip:active {
+  transform: scale(0.97);
 }
 
 .imp-quick-chip:hover {
@@ -1144,7 +1170,7 @@ body[arco-theme="dark"] {
 /* Step 3: Review Split Layout */
 .imp-review-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.38fr) minmax(350px, 0.92fr);
+  grid-template-columns: minmax(0, 1.38fr) minmax(min(350px, 100%), 0.92fr);
   gap: 18px;
   align-items: start;
 }
@@ -1234,7 +1260,11 @@ body[arco-theme="dark"] {
   font-size: 12px;
   font-weight: 550;
   color: var(--mute);
-  transition: background-color 0.14s ease, color 0.14s ease;
+  transition: background-color 0.16s var(--spring), color 0.16s var(--spring), transform 0.16s var(--spring);
+}
+
+.imp-drawer-tab:active {
+  transform: scale(0.975);
 }
 
 .imp-drawer-tab.on {
@@ -1511,6 +1541,17 @@ body[arco-theme="dark"] {
   }
 }
 
+.imp-step-pane {
+  animation: imp-step-in 0.24s var(--spring) backwards;
+}
+
+@keyframes imp-step-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 6px, 0);
+  }
+}
+
 @media (max-width: 980px) {
   .imp-page {
     padding: 14px 16px 40px;
@@ -1539,5 +1580,37 @@ body[arco-theme="dark"] {
   }
   .imp-host-row {
     grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 700px) {
+  .cl-imp-facts,
+  .imp-ai-steps {
+    grid-template-columns: 1fr;
+  }
+  .imp-ep-row {
+    grid-template-columns: 1fr 1fr;
+  }
+  .imp-footer-bar {
+    flex-wrap: wrap;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .imp-step-pane,
+  .imp-ai-pulse {
+    animation: none;
+  }
+  .imp-back-pill,
+  .imp-step-btn,
+  .imp-cat-pill,
+  .imp-mw-card,
+  .imp-icon-opt,
+  .imp-mode-tab,
+  .imp-ai-step,
+  .imp-quick-chip,
+  .imp-drawer-tab {
+    transition: none;
+    transform: none;
   }
 }

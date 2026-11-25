@@ -1,0 +1,1 @@
+import{ir as e,sr as t}from"./router-Dv68thFq.js";var n=t(e());function r(e,t){t===void 0&&(t=[]);var r=(0,n.useRef)(!1);(0,n.useEffect)(function(){r.current?e():r.current=!0},t)}export{r as t};

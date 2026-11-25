@@ -1,4 +1,11 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Button,
   Checkbox,
@@ -15,7 +22,6 @@ import {
 import {
   IconCheckCircleFill,
   IconCloudDownload,
-  IconDown,
   IconDownload,
   IconExclamationCircleFill,
   IconRefresh,
@@ -414,8 +420,8 @@ const SecIcons = {
   ),
 };
 
-const sevLabel = (s: string) => {
-  switch (s.toUpperCase()) {
+const sevLabel = (s?: string) => {
+  switch ((s || "").toUpperCase()) {
     case "CRITICAL":
       return bi("严重", "Critical");
     case "HIGH":
@@ -429,8 +435,8 @@ const sevLabel = (s: string) => {
   }
 };
 
-const sevClass = (s: string) => {
-  switch (s.toUpperCase()) {
+const sevClass = (s?: string) => {
+  switch ((s || "").toUpperCase()) {
     case "CRITICAL":
       return "crit";
     case "HIGH":
@@ -487,8 +493,8 @@ const pkgRoleLabel = (r?: string) => {
   }
 };
 
-const sevRank = (s: string) => {
-  switch (s.toUpperCase()) {
+const sevRank = (s?: string) => {
+  switch ((s || "").toUpperCase()) {
     case "CRITICAL":
       return 4;
     case "HIGH":
@@ -514,7 +520,7 @@ function groupFindingsByPackage(
   }
   const map = new Map<string, SecPackageGroup>();
   for (const f of findings) {
-    const gk = `${f.eco_key}|${f.package.toLowerCase()}|${f.installed_version}|${f.platform || ""}`;
+    const gk = `${f.eco_key}|${(f.package || "").toLowerCase()}|${f.installed_version || ""}|${f.platform || ""}`;
     let g = map.get(gk);
     if (!g) {
       g = {
@@ -575,7 +581,7 @@ function groupFindingsByPackage(
     } else {
       g.active_count++;
       g.active_counts.total++;
-      const su = f.severity.toUpperCase();
+      const su = (f.severity || "").toUpperCase();
       if (su === "CRITICAL") g.active_counts.critical++;
       else if (su === "HIGH") g.active_counts.high++;
       else if (su === "MEDIUM") g.active_counts.medium++;
@@ -825,7 +831,7 @@ function FindingDrawer({
   };
 
   const saveTriage = async () => {
-    if (!finding) return;
+    if (!finding || saving) return;
     if (needNote && !note.trim() && !just.trim()) {
       Message.warning(
         bi("请填写评估依据或说明", "Please enter a justification or note"),
@@ -1022,7 +1028,7 @@ function FindingDrawer({
                       )}
                     </div>
                     <div className="faint small">
-                      {cl.owner} · {cl.hosts.join(", ") || bi("无主机记录", "No hosts")}
+                      {cl.owner} · {(cl.hosts || []).join(", ") || bi("无主机记录", "No hosts")}
                     </div>
                   </li>
                 ))}
@@ -1194,6 +1200,507 @@ function FindingDrawer({
   );
 }
 
+/* ---------- Memoized Row Components for 60/120fps Filtering & Triage ---------- */
+
+const VulnGroupCard = React.memo(function VulnGroupCard({
+  g,
+  expanded,
+  wasOpened,
+  allSelected,
+  someSelected,
+  selectedFindingIds,
+  canManage,
+  canRehearsalAI,
+  canManageLib,
+  policyBusy,
+  onToggleGroup,
+  onToggleFinding,
+  onToggleExpand,
+  onInspect,
+  onRestoreRule,
+  onOpenIgnore,
+}: {
+  g: SecPackageGroup;
+  expanded: boolean;
+  wasOpened: boolean;
+  allSelected: boolean;
+  someSelected: boolean;
+  selectedFindingIds: string;
+  canManage: boolean;
+  canRehearsalAI: boolean;
+  canManageLib: boolean;
+  policyBusy: boolean;
+  onToggleGroup: (g: SecPackageGroup, checked: boolean) => void;
+  onToggleFinding: (f: SecFinding, checked: boolean) => void;
+  onToggleExpand: (groupKey: string) => void;
+  onInspect: (f: SecFinding) => void;
+  onRestoreRule: (ruleId: string | undefined, pkgLabel?: string) => void;
+  onOpenIgnore: (g: SecPackageGroup) => void;
+}) {
+  useLang();
+  const targetFix = g.repo_fix_version || g.recommended_fix || "";
+  const eligibleClusters = (g.clusters || []).filter(
+    (cl) => cl.delivery_mode !== "configuration",
+  );
+  const isPrimaryEmph =
+    g.pkg_role === "primary" && g.active_count > 0 && Boolean(targetFix);
+  const isResolved = !g.globally_ignored && g.active_count === 0;
+  const longVer =
+    (g.installed_version || "").length > 22 || (targetFix || "").length > 22;
+  const selectedSubSet = useMemo(
+    () => (selectedFindingIds ? new Set(selectedFindingIds.split("\n")) : null),
+    [selectedFindingIds],
+  );
+
+  return (
+    <div
+      className={`sec-grp-card ${isResolved ? "is-waived is-resolved" : g.active_count === 0 ? "is-waived" : ""}`}
+    >
+      <div className={`sec-pkg-tr ${canManage ? "has-chk" : ""}`}>
+        {canManage && (
+          <div className="sec-pkg-chk">
+            <Checkbox
+              checked={allSelected}
+              indeterminate={someSelected}
+              onChange={(checked) => onToggleGroup(g, checked)}
+            />
+          </div>
+        )}
+
+        <div className="sec-pkg-c1">
+          <div className="sec-pkg-title-line">
+            <span
+              className={`sec-sev sec-sev-fixed ${isResolved ? "is-resolved" : sevClass(g.max_severity)}`}
+            >
+              {sevLabel(g.max_severity)}
+              {g.max_cvss ? ` ${g.max_cvss.toFixed(1)}` : ""}
+            </span>
+            <b className="mono sec-grp-pkg" title={g.package}>
+              {g.package}
+            </b>
+          </div>
+          <div className="sec-pkg-sub-line">
+            <span className={`sec-role-pill role-${g.pkg_role}`}>
+              {pkgRoleLabel(g.pkg_role)}
+            </span>
+            {g.platform && g.platform !== "python" ? (
+              <span className="sec-mini-tag">
+                <OsLogo id={g.platform} size={12} />
+                <span>{platformShort(g.platform)}</span>
+              </span>
+            ) : (
+              <span className="sec-eco-tag">{g.ecosystem}</span>
+            )}
+          </div>
+        </div>
+
+        <div className="sec-pkg-c2">
+          <div className={`sec-ver-line mono${longVer ? " is-stack" : ""}`}>
+            <span className={isResolved ? "muted-ver" : "bad"}>
+              {g.installed_version}
+            </span>
+            {targetFix ? (
+              <span className="sec-ver-to">
+                <span className="sec-ver-arrow">→</span>
+                <span className="ok">{targetFix}</span>
+              </span>
+            ) : (
+              <span className="faint small">
+                {bi("暂无上游修复版（建议排查或缓解）", "No upstream fix yet")}
+              </span>
+            )}
+          </div>
+          {targetFix && g.repo_fix_version && (
+            <div className="sec-ver-badges">
+              <span className="sec-repo-fix">
+                {bi("源已有修复版", "Fix in repo")}
+              </span>
+              {g.platform && g.platform !== "python" && canManageLib && (
+                <button
+                  type="button"
+                  className="sec-inline-lib-link"
+                  onClick={() => go({ name: "library", id: g.platform })}
+                >
+                  {bi("软件库备包 ↗", "Library ↗")}
+                </button>
+              )}
+            </div>
+          )}
+          <div className="sec-pkg-sub-line">
+            {g.globally_ignored ? (
+              <span className="sec-shield-tag" title={g.ignore_reason}>
+                {g.ignore_reason ||
+                  bi("已全局屏蔽（不计入打分）", "Globally ignored (unscored)")}
+              </span>
+            ) : isResolved ? (
+              <span className="sec-resolved-tag num">
+                <IconCheckCircleFill style={{ fontSize: 12 }} />
+                {bi(
+                  `全部 ${g.total_count} 条已处置 / 豁免`,
+                  `All ${g.total_count} triaged`,
+                )}
+              </span>
+            ) : (
+              <span className="sec-grp-gain num">
+                {targetFix
+                  ? bi(
+                      `一次升级可修 ${g.active_count} 个活跃漏洞`,
+                      `1 upgrade resolves ${g.active_count} active CVE(s)`,
+                    )
+                  : bi(
+                      `命中 ${g.active_count} 个活跃漏洞`,
+                      `${g.active_count} active CVE(s)`,
+                    )}
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="sec-pkg-c3">
+          {(g.clusters || []).length > 0 ? (
+            <div className="sec-pkg-sub-line">
+              <span className={`sec-cl-pill ${isResolved ? "" : "bad"} num`}>
+                {bi(
+                  `${g.clusters!.length} 个集群`,
+                  `${g.clusters!.length} cluster(s)`,
+                )}
+              </span>
+              {g.clusters!.slice(0, 2).map((cl) => (
+                <a
+                  key={cl.cluster_id}
+                  href={`#/d/${encodeURIComponent(cl.cluster_id)}/security`}
+                  className="sec-link-chip mono"
+                >
+                  {cl.cluster_id}
+                </a>
+              ))}
+              {g.clusters!.length > 2 && (
+                <span className="faint small num">+{g.clusters!.length - 2}</span>
+              )}
+            </div>
+          ) : (
+            <div className="sec-pkg-sub-line">
+              <span className="faint small">
+                {bi("仅软件库 / 运行环境", "Library / Runtime")}
+              </span>
+            </div>
+          )}
+          {(g.components || []).length > 0 && (
+            <div className="sec-pkg-sub-line">
+              {(g.components || []).slice(0, 2).map((c) => (
+                <span
+                  key={`${c.component}@${c.version}@${c.platform}`}
+                  className="sec-mini-tag"
+                >
+                  {c.title} {c.version}
+                </span>
+              ))}
+              {(g.components || []).length > 2 && (
+                <span className="faint small num">
+                  +{g.components!.length - 2}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className={`sec-pkg-acts is-vulns ${canManage ? "can-ignore" : ""}`}>
+          {g.globally_ignored ? (
+            canManage &&
+            g.ignore_rule_id !== "layer:os" &&
+            g.ignore_rule_id !== "layer:runtime" ? (
+              <Button
+                size="mini"
+                type="outline"
+                className="sec-act-rehearse"
+                loading={policyBusy}
+                onClick={() => onRestoreRule(g.ignore_rule_id, g.package)}
+              >
+                {bi("恢复显示", "Restore")}
+              </Button>
+            ) : (
+              <span />
+            )
+          ) : canRehearsalAI &&
+            g.active_count > 0 &&
+            eligibleClusters.length === 1 ? (
+            <Button
+              size="mini"
+              type={isPrimaryEmph ? "primary" : "secondary"}
+              className="sec-act-rehearse"
+              onClick={() => launchRehearsalForGroup(g, eligibleClusters[0])}
+            >
+              <Spark size={11} />{" "}
+              {targetFix
+                ? bi("发起修复演练", "Rehearse Fix")
+                : bi("发起缓解演练", "Mitigate")}
+            </Button>
+          ) : canRehearsalAI &&
+            g.active_count > 0 &&
+            eligibleClusters.length > 1 ? (
+            <Dropdown
+              trigger="click"
+              position="br"
+              droplist={
+                <Menu
+                  onClickMenuItem={(cid) => {
+                    const hit = eligibleClusters.find(
+                      (x) => x.cluster_id === cid,
+                    );
+                    if (hit) launchRehearsalForGroup(g, hit);
+                  }}
+                >
+                  {eligibleClusters.slice(0, 15).map((cl) => (
+                    <Menu.Item key={cl.cluster_id}>
+                      <span className="mono">{cl.cluster_id}</span>{" "}
+                      <span className="faint small">
+                        ({cl.app_name} {cl.version})
+                      </span>
+                    </Menu.Item>
+                  ))}
+                </Menu>
+              }
+            >
+              <Button
+                size="mini"
+                type={isPrimaryEmph ? "primary" : "secondary"}
+                className="sec-act-rehearse"
+              >
+                <Spark size={11} /> {bi("选集群演练", "Pick Cluster")}
+              </Button>
+            </Dropdown>
+          ) : (
+            <span />
+          )}
+          {canManage &&
+            (!g.globally_ignored && g.active_count > 0 ? (
+              <Button
+                size="mini"
+                type="text"
+                className="sec-act-ignore"
+                title={bi(
+                  "全局忽略此软件包：隐藏所有 CVE 且不计入集群打分与门禁",
+                  "Globally ignore package: hide CVEs & exclude from scoring/gates",
+                )}
+                onClick={() => onOpenIgnore(g)}
+              >
+                {bi("忽略", "Ignore")}
+              </Button>
+            ) : (
+              <span />
+            ))}
+          <Button
+            size="mini"
+            type="text"
+            className="sec-act-expand num"
+            aria-expanded={expanded}
+            onClick={() => onToggleExpand(g.group_key)}
+          >
+            <span>
+              {expanded
+                ? bi("收起明细", "Collapse")
+                : bi(`展开 ${g.total_count} 条`, `${g.total_count} CVE(s)`)}
+            </span>
+            <IconRight className={`sec-exp-chev ${expanded ? "is-open" : ""}`} />
+          </Button>
+        </div>
+      </div>
+
+      <div
+        className={`sec-grp-collapse ${expanded ? "is-open" : ""}`}
+        aria-hidden={!expanded}
+      >
+        <div className="sec-grp-collapse-inner">
+          {(expanded || wasOpened) && (
+            <div className="sec-grp-sub">
+              <table className="sec-table sec-sub-table">
+                <tbody>
+                  {g.findings.map((f) => {
+                    const sid = `${f.key}|${f.installed_version}`;
+                    const subChecked = Boolean(selectedSubSet?.has(sid));
+                    return (
+                      <tr
+                        key={sid}
+                        tabIndex={expanded ? 0 : -1}
+                        className={`is-clickable${f.waived ? " is-waived" : ""}`}
+                        onClick={() => onInspect(f)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            onInspect(f);
+                          }
+                        }}
+                      >
+                        {canManage && (
+                          <td
+                            style={{ width: 34 }}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <Checkbox
+                              checked={subChecked}
+                              onChange={(checked) => onToggleFinding(f, checked)}
+                            />
+                          </td>
+                        )}
+                        <td style={{ whiteSpace: "nowrap" }}>
+                          <div className="sec-cve-cell">
+                            <span className={`sec-sev ${sevClass(f.severity)}`}>
+                              {sevLabel(f.severity)}
+                              {f.cvss_score ? ` ${f.cvss_score.toFixed(1)}` : ""}
+                            </span>
+                            <b className="mono">{f.cve}</b>
+                          </div>
+                          {f.id !== f.cve && (
+                            <div className="faint small mono">{f.id}</div>
+                          )}
+                        </td>
+                        <td className="sec-sub-sum-cell">
+                          <div className="sec-cve-sub" title={f.summary || ""}>
+                            {f.summary || "—"}
+                          </div>
+                        </td>
+                        <td className="mono small sec-sub-fix-cell">
+                          {f.fixed_in?.length ? (
+                            <span className="ok">→ {f.fixed_in[0]}</span>
+                          ) : (
+                            <span className="faint">
+                              {bi("待修复", "No fix")}
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ whiteSpace: "nowrap" }}>
+                          <span className={`sec-tr-badge st-${f.triage_status}`}>
+                            {triageLabel(f.triage_status)}
+                          </span>
+                        </td>
+                        <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                          <Button size="mini" type="text">
+                            {bi("详情与处置", "Inspect")}
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+});
+
+const VulnFindingRow = React.memo(function VulnFindingRow({
+  f,
+  checked,
+  canManage,
+  onToggleFinding,
+  onInspect,
+}: {
+  f: SecFinding;
+  checked: boolean;
+  canManage: boolean;
+  onToggleFinding: (f: SecFinding, checked: boolean) => void;
+  onInspect: (f: SecFinding) => void;
+}) {
+  useLang();
+  return (
+    <tr
+      tabIndex={0}
+      className={`is-clickable${f.waived ? " is-waived" : ""}`}
+      onClick={() => onInspect(f)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onInspect(f);
+        }
+      }}
+    >
+      {canManage && (
+        <td onClick={(e) => e.stopPropagation()}>
+          <Checkbox
+            checked={checked}
+            onChange={(next) => onToggleFinding(f, next)}
+          />
+        </td>
+      )}
+      <td>
+        <div className="sec-cve-cell">
+          <span className={`sec-sev ${sevClass(f.severity)}`}>
+            {sevLabel(f.severity)}
+            {f.cvss_score ? ` ${f.cvss_score.toFixed(1)}` : ""}
+          </span>
+          <b className="mono">{f.cve}</b>
+        </div>
+        {f.summary && (
+          <div className="sec-cve-sub" title={f.summary}>
+            {f.summary}
+          </div>
+        )}
+      </td>
+      <td>
+        <div className="sec-pkg-cell">
+          <b className="mono">{f.package}</b>
+          <span className={`sec-role-pill role-${f.pkg_role || "dependency"}`}>
+            {pkgRoleLabel(f.pkg_role)}
+          </span>
+          <span className="sec-eco-tag">{f.ecosystem}</span>
+        </div>
+        <div className="sec-ver-line mono">
+          <span className="bad">{f.installed_version}</span>
+          {f.fixed_in?.length ? (
+            <>
+              <span>→</span>
+              <span className="ok">{f.fixed_in[0]}</span>
+            </>
+          ) : null}
+          {f.repo_fix_version && (
+            <span className="sec-repo-fix">
+              {bi("源已有修复版", "Fix in repo")}
+            </span>
+          )}
+        </div>
+      </td>
+      <td>
+        <div className="sec-br-inline">
+          {f.clusters && f.clusters.length > 0 ? (
+            <span className="sec-cl-pill bad num">
+              {bi(
+                `${f.clusters.length} 个生产集群`,
+                `${f.clusters.length} cluster(s)`,
+              )}
+            </span>
+          ) : (
+            <span className="sec-cl-pill">{assetTypeLabel(f.asset_type)}</span>
+          )}
+          {(f.components || []).slice(0, 2).map((c) => (
+            <span
+              key={`${c.component}@${c.version}@${c.platform}`}
+              className="sec-mini-tag"
+            >
+              {c.title} {c.version}
+            </span>
+          ))}
+        </div>
+      </td>
+      <td>
+        <span className={`sec-tr-badge st-${f.triage_status}`}>
+          {triageLabel(f.triage_status)}
+        </span>
+      </td>
+      <td style={{ textAlign: "right" }}>
+        <Button size="mini" type="text">
+          {bi("详情与处置", "Inspect")}
+        </Button>
+      </td>
+    </tr>
+  );
+});
+
+const SEC_GROUP_PAGE_STEP = 60;
+const SEC_LIST_PAGE_STEP = 100;
+
 /* ---------- Main Security Center Page ---------- */
 
 export function SecurityPage({
@@ -1261,6 +1768,12 @@ export function SecurityPage({
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(
     {},
   );
+  const [openedSubGroups, setOpenedSubGroups] = useState<
+    Record<string, boolean>
+  >({});
+  const [groupLimit, setGroupLimit] = useState(SEC_GROUP_PAGE_STEP);
+  const [listLimit, setListLimit] = useState(SEC_LIST_PAGE_STEP);
+  const deferredQ = useDeferredValue(q);
   const [selectedMap, setSelectedMap] = useState<Record<string, SecFinding>>(
     {},
   );
@@ -1285,9 +1798,19 @@ export function SecurityPage({
   const [activeFinding, setActiveFinding] = useState<SecFinding | null>(null);
   const [draftOverride, setDraftOverride] = useState<VexProposal | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const mountedRef = useRef(true);
+  const loadSeqRef = useRef(0);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const canRehearsalAI =
     aiStatus.enabled && !!aiStatus.features?.change_rehearsal && can("ai.use");
+  const canManageLib = can("library.manage");
 
   useEffect(() => {
     if (initTab) setTab(initTab);
@@ -1296,28 +1819,33 @@ export function SecurityPage({
     if (initQuery !== undefined) setQ(initQuery);
   }, [initQuery]);
 
-  const load = async () => {
+  const load = useCallback(async () => {
+    const seq = ++loadSeqRef.current;
     try {
       const r = await api<SecOverviewPayload>("/api/security/overview");
       putCached("/api/security/overview", r);
-      setData(r);
+      if (mountedRef.current && seq === loadSeqRef.current) {
+        setData(r);
+      }
     } catch (e) {
-      err(e);
+      if (mountedRef.current) err(e);
     } finally {
-      setLoading(false);
+      if (mountedRef.current && seq === loadSeqRef.current) {
+        setLoading(false);
+      }
     }
-  };
+  }, []);
 
   useEffect(() => {
     void load();
-  }, []);
+  }, [load]);
 
   // Auto-reload when a VEX proposal card is accepted inside the bottom-right Security AI Assistant.
   useEffect(() => {
     const onSecChanged = () => void load();
     window.addEventListener(SECURITY_CHANGED, onSecChanged);
     return () => window.removeEventListener(SECURITY_CHANGED, onSecChanged);
-  }, []);
+  }, [load]);
 
   // Allow "Edit in Modal" on an AI VEX proposal card to open FindingDrawer prefilled.
   useEffect(() => {
@@ -1344,11 +1872,13 @@ export function SecurityPage({
   }, [data]);
 
   const loadSupplyChain = async (verify = false) => {
+    if (supplyBusy) return;
     setSupplyBusy(true);
     try {
       const res = await api<SecSupplyChainReport>(
         `/api/security/supply-chain${verify ? "?verify=1" : ""}`,
       );
+      if (!mountedRef.current) return;
       setSupplyChain(res);
       if (verify) {
         Message.success(
@@ -1361,16 +1891,16 @@ export function SecurityPage({
         );
       }
     } catch (e) {
-      err(e);
+      if (mountedRef.current) err(e);
     } finally {
-      setSupplyBusy(false);
+      if (mountedRef.current) setSupplyBusy(false);
     }
   };
 
   const loadHistory = async () => {
     try {
       const list = await api<SecScanHistoryEntry[]>("/api/security/history");
-      setHistory(list || []);
+      if (mountedRef.current) setHistory(list || []);
     } catch {
       /* optional */
     }
@@ -1385,7 +1915,7 @@ export function SecurityPage({
 
   const submitBatchTriage = async () => {
     const picked = Object.values(selectedMap);
-    if (picked.length === 0) return;
+    if (picked.length === 0 || batchBusy) return;
     const needNote =
       batchStatus === "mitigated" ||
       batchStatus === "not_affected" ||
@@ -1450,6 +1980,7 @@ export function SecurityPage({
   };
 
   const runScan = async () => {
+    if (scanning) return;
     setScanning(true);
     try {
       const res = await api<SecOverviewPayload>("/api/security/scan", {
@@ -1474,6 +2005,7 @@ export function SecurityPage({
   };
 
   const runOnlineSync = async (sourceId?: unknown) => {
+    if (syncing) return;
     const sid = typeof sourceId === "string" ? sourceId : undefined;
     setSyncing(true);
     try {
@@ -1505,7 +2037,7 @@ export function SecurityPage({
   const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = "";
-    if (!file) return;
+    if (!file || importing) return;
     setImporting(true);
     try {
       const fd = new FormData();
@@ -1534,7 +2066,7 @@ export function SecurityPage({
   };
 
   const savePolicy = async (next: SecPolicy, toastMsg?: string) => {
-    if (!data || !canManage) return;
+    if (!data || !canManage || policyBusy) return;
     const prev = data.policy;
     setPolicyBusy(true);
     setData({ ...data, policy: next });
@@ -1556,7 +2088,7 @@ export function SecurityPage({
   };
 
   const submitGlobalIgnore = async () => {
-    if (!ignoreTarget || !canManage) return;
+    if (!ignoreTarget || !canManage || ignoreBusy) return;
     setIgnoreBusy(true);
     try {
       const res = await api<{
@@ -1601,7 +2133,7 @@ export function SecurityPage({
   };
 
   const removeGlobalIgnore = async (ruleId: string, label?: string) => {
-    if (!canManage || !ruleId) return;
+    if (!canManage || !ruleId || policyBusy) return;
     setPolicyBusy(true);
     try {
       const res = await api<{
@@ -1790,9 +2322,31 @@ export function SecurityPage({
     ];
   }, [rep?.findings, stateFilter]);
 
+  const findingSearchIndex = useMemo(() => {
+    const m = new WeakMap<SecFinding, string>();
+    for (const f of rep?.findings || []) {
+      m.set(
+        f,
+        [
+          f.cve,
+          f.id,
+          f.package,
+          f.installed_version,
+          f.ecosystem,
+          f.summary,
+          ...(f.components || []).map((c) => `${c.component} ${c.title} ${c.version}`),
+          ...(f.clusters || []).map((c) => `${c.cluster_id} ${c.app_name}`),
+        ]
+          .join(" ")
+          .toLowerCase(),
+      );
+    }
+    return m;
+  }, [rep?.findings]);
+
   const filteredFindings = useMemo(() => {
     const list = rep?.findings || [];
-    const needle = q.trim().toLowerCase();
+    const needle = deferredQ.trim().toLowerCase();
     return list.filter((f) => {
       if (stateFilter === "ignored") {
         if (!f.globally_ignored) return false;
@@ -1829,25 +2383,29 @@ export function SecurityPage({
       if (fixFilter === "cluster_only" && !(f.clusters && f.clusters.length > 0))
         return false;
       if (needle) {
-        const hay = [
-          f.cve,
-          f.id,
-          f.package,
-          f.installed_version,
-          f.ecosystem,
-          f.summary,
-          ...(f.components || []).map((c) => `${c.component} ${c.title} ${c.version}`),
-          ...(f.clusters || []).map((c) => `${c.cluster_id} ${c.app_name}`),
-        ]
-          .join(" ")
-          .toLowerCase();
+        const hay = findingSearchIndex.get(f) || "";
         if (!hay.includes(needle)) return false;
       }
       return true;
     });
   }, [
     rep?.findings,
-    q,
+    findingSearchIndex,
+    deferredQ,
+    sevFilter,
+    stateFilter,
+    compFilter,
+    compVerFilter,
+    osFilter,
+    roleFilter,
+    fixFilter,
+  ]);
+
+  useEffect(() => {
+    setGroupLimit(SEC_GROUP_PAGE_STEP);
+    setListLimit(SEC_LIST_PAGE_STEP);
+  }, [
+    deferredQ,
     sevFilter,
     stateFilter,
     compFilter,
@@ -1909,8 +2467,34 @@ export function SecurityPage({
     setFixFilter("all");
   };
 
-  const selectedCount = Object.keys(selectedMap).length;
-  const toggleFindingSelect = (f: SecFinding, checked: boolean) => {
+  const selectedKeys = useMemo(() => Object.keys(selectedMap), [selectedMap]);
+  const selectedCount = selectedKeys.length;
+  const headerCheckState = useMemo(() => {
+    if (filteredFindings.length === 0 || selectedCount === 0) {
+      return { all: false, indeterminate: false };
+    }
+    let matched = 0;
+    for (const f of filteredFindings) {
+      if (selectedMap[`${f.key}|${f.installed_version}`]) matched++;
+    }
+    return {
+      all: matched === filteredFindings.length,
+      indeterminate: matched > 0 && matched < filteredFindings.length,
+    };
+  }, [filteredFindings, selectedMap, selectedCount]);
+
+  const batchContext = useMemo(() => {
+    const vals = Object.values(selectedMap);
+    return {
+      kind: "vex" as const,
+      cves: vals.map((f) => f.cve),
+      package: vals[0]?.package,
+      ecosystem: vals[0]?.ecosystem,
+      pkg_role: vals[0]?.pkg_role,
+    };
+  }, [selectedMap]);
+
+  const toggleFindingSelect = useCallback((f: SecFinding, checked: boolean) => {
     const id = `${f.key}|${f.installed_version}`;
     setSelectedMap((prev) => {
       const next = { ...prev };
@@ -1918,8 +2502,9 @@ export function SecurityPage({
       else delete next[id];
       return next;
     });
-  };
-  const toggleGroupSelect = (g: SecPackageGroup, checked: boolean) => {
+  }, []);
+
+  const toggleGroupSelect = useCallback((g: SecPackageGroup, checked: boolean) => {
     setSelectedMap((prev) => {
       const next = { ...prev };
       for (const f of g.findings) {
@@ -1929,7 +2514,56 @@ export function SecurityPage({
       }
       return next;
     });
-  };
+  }, []);
+
+  const handleToggleExpand = useCallback((groupKey: string) => {
+    setOpenedSubGroups((prev) =>
+      prev[groupKey] ? prev : { ...prev, [groupKey]: true },
+    );
+    setExpandedGroups((prev) => ({
+      ...prev,
+      [groupKey]: !prev[groupKey],
+    }));
+  }, []);
+
+  const handleInspectFinding = useCallback((f: SecFinding) => {
+    setActiveFinding(f);
+  }, []);
+
+  const handleOpenIgnore = useCallback((g: SecPackageGroup) => {
+    setIgnoreTarget({
+      pkg: g.package,
+      ecoKey: g.eco_key,
+      ecosystem: g.ecosystem,
+      pkgRole: g.pkg_role,
+      activeCount: g.active_count,
+      clusterCount: g.clusters?.length || 0,
+    });
+    setIgnoreAllEco(true);
+    setIgnoreNote(
+      g.pkg_role === "dependency"
+        ? bi("由操作系统补丁渠道统一维护，中间件视角忽略", "Managed via OS patching channel")
+        : "",
+    );
+  }, []);
+
+  const restoreIgnoredRuleRef = useRef(restoreIgnoredRule);
+  restoreIgnoredRuleRef.current = restoreIgnoredRule;
+  const handleRestoreRule = useCallback(
+    (ruleId: string | undefined, pkgLabel?: string) => {
+      restoreIgnoredRuleRef.current(ruleId, pkgLabel);
+    },
+    [],
+  );
+
+  const visibleGroups = useMemo(
+    () => filteredGroups.slice(0, groupLimit),
+    [filteredGroups, groupLimit],
+  );
+  const visibleFindings = useMemo(
+    () => filteredFindings.slice(0, listLimit),
+    [filteredFindings, listLimit],
+  );
 
   const navGroups: {
     id: string;
@@ -2356,7 +2990,7 @@ export function SecurityPage({
                       size="small"
                       icon={<IconSync />}
                       loading={syncing}
-                      onClick={runOnlineSync}
+                      onClick={() => void runOnlineSync()}
                     >
                       {bi("立即在线同步", "Sync Now")}
                     </Button>
@@ -2973,6 +3607,7 @@ export function SecurityPage({
                           onClick={() => {
                             setQ(g.package);
                             setViewMode("grouped");
+                            setOpenedSubGroups((p) => ({ ...p, [g.group_key]: true }));
                             setExpandedGroups((p) => ({ ...p, [g.group_key]: true }));
                             switchTab("vulns", g.package);
                           }}
@@ -3111,7 +3746,7 @@ export function SecurityPage({
 
           {canManage && selectedCount > 0 && (
             <div className="sec-batch-bar">
-              <span>
+              <span className="num">
                 {bi(
                   `已选择 ${selectedCount} 条漏洞记录`,
                   `${selectedCount} vulnerability record(s) selected`,
@@ -3151,18 +3786,8 @@ export function SecurityPage({
                 <div className={`sec-pkg-thead ${canManage ? "has-chk" : ""}`}>
                   {canManage && (
                     <Checkbox
-                      checked={
-                        filteredFindings.length > 0 &&
-                        filteredFindings.every((f) =>
-                          Boolean(selectedMap[`${f.key}|${f.installed_version}`]),
-                        )
-                      }
-                      indeterminate={
-                        selectedCount > 0 &&
-                        filteredFindings.some(
-                          (f) => !selectedMap[`${f.key}|${f.installed_version}`],
-                        )
-                      }
+                      checked={headerCheckState.all}
+                      indeterminate={headerCheckState.indeterminate}
                       onChange={(checked) => {
                         if (!checked) {
                           setSelectedMap({});
@@ -3181,385 +3806,75 @@ export function SecurityPage({
                   <span>{bi("受影响集群与组件", "Affected Clusters & Components")}</span>
                   <span style={{ textAlign: "right" }}>{bi("操作", "Actions")}</span>
                 </div>
-                {filteredGroups.map((g) => {
+                {visibleGroups.map((g) => {
                   const expanded = Boolean(expandedGroups[g.group_key]);
-                  const targetFix = g.repo_fix_version || g.recommended_fix || "";
+                  const wasOpened = Boolean(openedSubGroups[g.group_key]);
+                  let selCnt = 0;
+                  const selSubIds: string[] = [];
+                  if (selectedCount > 0) {
+                    for (const f of g.findings) {
+                      const sid = `${f.key}|${f.installed_version}`;
+                      if (selectedMap[sid]) {
+                        selCnt++;
+                        if (expanded || wasOpened) selSubIds.push(sid);
+                      }
+                    }
+                  }
                   const allSelected =
-                    g.findings.length > 0 &&
-                    g.findings.every(
-                      (f) => Boolean(selectedMap[`${f.key}|${f.installed_version}`]),
-                    );
-                  const someSelected =
-                    !allSelected &&
-                    g.findings.some(
-                      (f) => Boolean(selectedMap[`${f.key}|${f.installed_version}`]),
-                    );
-                  const eligibleClusters = (g.clusters || []).filter(
-                    (cl) => cl.delivery_mode !== "configuration",
-                  );
-                  const isPrimaryEmph =
-                    g.pkg_role === "primary" && g.active_count > 0 && Boolean(targetFix);
-                  const isResolved = !g.globally_ignored && g.active_count === 0;
+                    g.findings.length > 0 && selCnt === g.findings.length;
+                  const someSelected = selCnt > 0 && !allSelected;
                   return (
-                    <div
+                    <VulnGroupCard
                       key={g.group_key}
-                      className={`sec-grp-card ${isResolved ? "is-waived is-resolved" : g.active_count === 0 ? "is-waived" : ""}`}
-                    >
-                      <div className={`sec-pkg-tr ${canManage ? "has-chk" : ""}`}>
-                        {canManage && (
-                          <div className="sec-pkg-chk">
-                            <Checkbox
-                              checked={allSelected}
-                              indeterminate={someSelected}
-                              onChange={(checked) => toggleGroupSelect(g, checked)}
-                            />
-                          </div>
-                        )}
-
-                        {/* Col 1: Severity + Package + Layer + OS */}
-                        <div className="sec-pkg-c1">
-                          <div className="sec-pkg-title-line">
-                            <span className={`sec-sev sec-sev-fixed ${isResolved ? "is-resolved" : sevClass(g.max_severity)}`}>
-                              {sevLabel(g.max_severity)}
-                              {g.max_cvss ? ` ${g.max_cvss.toFixed(1)}` : ""}
-                            </span>
-                            <b className="mono sec-grp-pkg" title={g.package}>{g.package}</b>
-                          </div>
-                          <div className="sec-pkg-sub-line">
-                            <span className={`sec-role-pill role-${g.pkg_role}`}>
-                              {pkgRoleLabel(g.pkg_role)}
-                            </span>
-                            {g.platform && g.platform !== "python" ? (
-                              <span className="sec-mini-tag">
-                                <OsLogo id={g.platform} size={12} />
-                                <span>{platformShort(g.platform)}</span>
-                              </span>
-                            ) : (
-                              <span className="sec-eco-tag">{g.ecosystem}</span>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Col 2: Version diff + Fix status + inline Library shortcut + CVE count */}
-                        <div className="sec-pkg-c2">
-                          {(() => {
-                            const longVer =
-                              (g.installed_version || "").length > 22 ||
-                              (targetFix || "").length > 22;
-                            return (
-                              <div
-                                className={`sec-ver-line mono${longVer ? " is-stack" : ""}`}
-                              >
-                                <span className={isResolved ? "muted-ver" : "bad"}>
-                                  {g.installed_version}
-                                </span>
-                                {targetFix ? (
-                                  <span className="sec-ver-to">
-                                    <span className="sec-ver-arrow">→</span>
-                                    <span className="ok">{targetFix}</span>
-                                  </span>
-                                ) : (
-                                  <span className="faint small">
-                                    {bi("暂无上游修复版（建议排查或缓解）", "No upstream fix yet")}
-                                  </span>
-                                )}
-                              </div>
-                            );
-                          })()}
-                          {targetFix && g.repo_fix_version && (
-                            <div className="sec-ver-badges">
-                              <span className="sec-repo-fix">
-                                {bi("源已有修复版", "Fix in repo")}
-                              </span>
-                              {g.platform &&
-                                g.platform !== "python" &&
-                                can("library.manage") && (
-                                  <button
-                                    type="button"
-                                    className="sec-inline-lib-link"
-                                    onClick={() => go({ name: "library", id: g.platform })}
-                                  >
-                                    {bi("软件库备包 ↗", "Library ↗")}
-                                  </button>
-                                )}
-                            </div>
-                          )}
-                          <div className="sec-pkg-sub-line">
-                            {g.globally_ignored ? (
-                              <span className="sec-shield-tag" title={g.ignore_reason}>
-                                {g.ignore_reason || bi("已全局屏蔽（不计入打分）", "Globally ignored (unscored)")}
-                              </span>
-                            ) : isResolved ? (
-                              <span className="sec-resolved-tag">
-                                <IconCheckCircleFill style={{ fontSize: 12 }} />
-                                {bi(
-                                  `全部 ${g.total_count} 条已处置 / 豁免`,
-                                  `All ${g.total_count} triaged`,
-                                )}
-                              </span>
-                            ) : (
-                              <span className="sec-grp-gain num">
-                                {targetFix
-                                  ? bi(
-                                      `一次升级可修 ${g.active_count} 个活跃漏洞`,
-                                      `1 upgrade resolves ${g.active_count} active CVE(s)`,
-                                    )
-                                  : bi(
-                                      `命中 ${g.active_count} 个活跃漏洞`,
-                                      `${g.active_count} active CVE(s)`,
-                                    )}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Col 3: Impacted clusters + components */}
-                        <div className="sec-pkg-c3">
-                          {(g.clusters || []).length > 0 ? (
-                            <div className="sec-pkg-sub-line">
-                              <span className={`sec-cl-pill ${isResolved ? "" : "bad"} num`}>
-                                {bi(`${g.clusters!.length} 个集群`, `${g.clusters!.length} cluster(s)`)}
-                              </span>
-                              {g.clusters!.slice(0, 2).map((cl) => (
-                                <a
-                                  key={cl.cluster_id}
-                                  href={`#/d/${encodeURIComponent(cl.cluster_id)}/security`}
-                                  className="sec-link-chip mono"
-                                >
-                                  {cl.cluster_id}
-                                </a>
-                              ))}
-                              {g.clusters!.length > 2 && (
-                                <span className="faint small">+{g.clusters!.length - 2}</span>
-                              )}
-                            </div>
-                          ) : (
-                            <div className="sec-pkg-sub-line">
-                              <span className="faint small">{bi("仅软件库 / 运行环境", "Library / Runtime")}</span>
-                            </div>
-                          )}
-                          {(g.components || []).length > 0 && (
-                            <div className="sec-pkg-sub-line">
-                              {(g.components || []).slice(0, 2).map((c) => (
-                                <span
-                                  key={`${c.component}@${c.version}@${c.platform}`}
-                                  className="sec-mini-tag"
-                                >
-                                  {c.title} {c.version}
-                                </span>
-                              ))}
-                              {(g.components || []).length > 2 && (
-                                <span className="faint small">+{g.components!.length - 2}</span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Col 4: Fixed right-aligned action slots */}
-                        <div className={`sec-pkg-acts is-vulns ${canManage ? "can-ignore" : ""}`}>
-                          {g.globally_ignored ? (
-                            canManage &&
-                            g.ignore_rule_id !== "layer:os" &&
-                            g.ignore_rule_id !== "layer:runtime" ? (
-                              <Button
-                                size="mini"
-                                type="outline"
-                                className="sec-act-rehearse"
-                                loading={policyBusy}
-                                onClick={() => restoreIgnoredRule(g.ignore_rule_id, g.package)}
-                              >
-                                {bi("恢复显示", "Restore")}
-                              </Button>
-                            ) : (
-                              <span />
-                            )
-                          ) : canRehearsalAI &&
-                            g.active_count > 0 &&
-                            eligibleClusters.length === 1 ? (
-                            <Button
-                              size="mini"
-                              type={isPrimaryEmph ? "primary" : "secondary"}
-                              className="sec-act-rehearse"
-                              onClick={() =>
-                                launchRehearsalForGroup(g, eligibleClusters[0])
-                              }
-                            >
-                              <Spark size={11} />{" "}
-                              {targetFix
-                                ? bi("发起修复演练", "Rehearse Fix")
-                                : bi("发起缓解演练", "Mitigate")}
-                            </Button>
-                          ) : canRehearsalAI &&
-                            g.active_count > 0 &&
-                            eligibleClusters.length > 1 ? (
-                            <Dropdown
-                              trigger="click"
-                              position="br"
-                              droplist={
-                                <Menu
-                                  onClickMenuItem={(cid) => {
-                                    const hit = eligibleClusters.find(
-                                      (x) => x.cluster_id === cid,
-                                    );
-                                    if (hit) launchRehearsalForGroup(g, hit);
-                                  }}
-                                >
-                                  {eligibleClusters.slice(0, 15).map((cl) => (
-                                    <Menu.Item key={cl.cluster_id}>
-                                      <span className="mono">{cl.cluster_id}</span>{" "}
-                                      <span className="faint small">
-                                        ({cl.app_name} {cl.version})
-                                      </span>
-                                    </Menu.Item>
-                                  ))}
-                                </Menu>
-                              }
-                            >
-                              <Button
-                                size="mini"
-                                type={isPrimaryEmph ? "primary" : "secondary"}
-                                className="sec-act-rehearse"
-                              >
-                                <Spark size={11} /> {bi("选集群演练", "Pick Cluster")}
-                              </Button>
-                            </Dropdown>
-                          ) : (
-                            <span />
-                          )}
-                          {canManage &&
-                            (!g.globally_ignored && g.active_count > 0 ? (
-                              <Button
-                                size="mini"
-                                type="text"
-                                className="sec-act-ignore"
-                                title={bi(
-                                  "全局忽略此软件包：隐藏所有 CVE 且不计入集群打分与门禁",
-                                  "Globally ignore package: hide CVEs & exclude from scoring/gates",
-                                )}
-                                onClick={() => {
-                                  setIgnoreTarget({
-                                    pkg: g.package,
-                                    ecoKey: g.eco_key,
-                                    ecosystem: g.ecosystem,
-                                    pkgRole: g.pkg_role,
-                                    activeCount: g.active_count,
-                                    clusterCount: g.clusters?.length || 0,
-                                  });
-                                  setIgnoreAllEco(true);
-                                  setIgnoreNote(
-                                    g.pkg_role === "dependency"
-                                      ? bi("由操作系统补丁渠道统一维护，中间件视角忽略", "Managed via OS patching channel")
-                                      : "",
-                                  );
-                                }}
-                              >
-                                {bi("忽略", "Ignore")}
-                              </Button>
-                            ) : (
-                              <span />
-                            ))}
-                          <Button
-                            size="mini"
-                            type="text"
-                            className="sec-act-expand num"
-                            onClick={() =>
-                              setExpandedGroups((p) => ({
-                                ...p,
-                                [g.group_key]: !p[g.group_key],
-                              }))
-                            }
-                          >
-                            <span>
-                              {expanded
-                                ? bi("收起明细", "Collapse")
-                                : bi(`展开 ${g.total_count} 条`, `${g.total_count} CVE(s)`)}
-                            </span>
-                            {expanded ? (
-                              <IconDown style={{ marginLeft: 3 }} />
-                            ) : (
-                              <IconRight style={{ marginLeft: 3 }} />
-                            )}
-                          </Button>
-                        </div>
-                      </div>
-
-                      {expanded && (
-                        <div className="sec-grp-sub">
-                          <table className="sec-table sec-sub-table">
-                            <tbody>
-                              {g.findings.map((f) => {
-                                const sid = `${f.key}|${f.installed_version}`;
-                                return (
-                                  <tr
-                                    key={sid}
-                                    className={f.waived ? "is-waived" : ""}
-                                    onClick={() => setActiveFinding(f)}
-                                  >
-                                    {canManage && (
-                                      <td
-                                        style={{ width: 34 }}
-                                        onClick={(e) => e.stopPropagation()}
-                                      >
-                                        <Checkbox
-                                          checked={Boolean(selectedMap[sid])}
-                                          onChange={(checked) =>
-                                            toggleFindingSelect(f, checked)
-                                          }
-                                        />
-                                      </td>
-                                    )}
-                                    <td style={{ whiteSpace: "nowrap" }}>
-                                      <div className="sec-cve-cell">
-                                        <span className={`sec-sev ${sevClass(f.severity)}`}>
-                                          {sevLabel(f.severity)}
-                                          {f.cvss_score
-                                            ? ` ${f.cvss_score.toFixed(1)}`
-                                            : ""}
-                                        </span>
-                                        <b className="mono">{f.cve}</b>
-                                      </div>
-                                      {f.id !== f.cve && (
-                                        <div className="faint small mono">{f.id}</div>
-                                      )}
-                                    </td>
-                                    <td className="sec-sub-sum-cell">
-                                      <div className="sec-cve-sub" title={f.summary || ""}>
-                                        {f.summary || "—"}
-                                      </div>
-                                    </td>
-                                    <td className="mono small sec-sub-fix-cell">
-                                      {f.fixed_in?.length ? (
-                                        <span className="ok">
-                                          → {f.fixed_in[0]}
-                                        </span>
-                                      ) : (
-                                        <span className="faint">
-                                          {bi("待修复", "No fix")}
-                                        </span>
-                                      )}
-                                    </td>
-                                    <td style={{ whiteSpace: "nowrap" }}>
-                                      <span
-                                        className={`sec-tr-badge st-${f.triage_status}`}
-                                      >
-                                        {triageLabel(f.triage_status)}
-                                      </span>
-                                    </td>
-                                    <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                                      <Button size="mini" type="text">
-                                        {bi("详情与处置", "Inspect")}
-                                      </Button>
-                                    </td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-                    </div>
+                      g={g}
+                      expanded={expanded}
+                      wasOpened={wasOpened}
+                      allSelected={allSelected}
+                      someSelected={someSelected}
+                      selectedFindingIds={selSubIds.join("\n")}
+                      canManage={canManage}
+                      canRehearsalAI={canRehearsalAI}
+                      canManageLib={canManageLib}
+                      policyBusy={policyBusy}
+                      onToggleGroup={toggleGroupSelect}
+                      onToggleFinding={toggleFindingSelect}
+                      onToggleExpand={handleToggleExpand}
+                      onInspect={handleInspectFinding}
+                      onRestoreRule={handleRestoreRule}
+                      onOpenIgnore={handleOpenIgnore}
+                    />
                   );
                 })}
+                {filteredGroups.length > visibleGroups.length && (
+                  <div className="sec-more-bar">
+                    <span>
+                      {bi(
+                        `已展示前 ${visibleGroups.length} / ${filteredGroups.length} 个软件包`,
+                        `Showing ${visibleGroups.length} of ${filteredGroups.length} packages`,
+                      )}
+                    </span>
+                    <div className="sec-more-acts">
+                      <Button
+                        size="mini"
+                        onClick={() =>
+                          setGroupLimit((n) => n + SEC_GROUP_PAGE_STEP)
+                        }
+                      >
+                        {bi(
+                          `加载更多 (+${Math.min(SEC_GROUP_PAGE_STEP, filteredGroups.length - visibleGroups.length)})`,
+                          `Load More (+${Math.min(SEC_GROUP_PAGE_STEP, filteredGroups.length - visibleGroups.length)})`,
+                        )}
+                      </Button>
+                      <Button
+                        size="mini"
+                        type="text"
+                        onClick={() => setGroupLimit(filteredGroups.length)}
+                      >
+                        {bi("显示全部", "Show All")}
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="sec-table-scroll">
@@ -3575,98 +3890,51 @@ export function SecurityPage({
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredFindings.map((f) => {
+                    {visibleFindings.map((f) => {
                       const sid = `${f.key}|${f.installed_version}`;
                       return (
-                        <tr
+                        <VulnFindingRow
                           key={sid}
-                          className={f.waived ? "is-waived" : ""}
-                          onClick={() => setActiveFinding(f)}
-                        >
-                          {canManage && (
-                            <td onClick={(e) => e.stopPropagation()}>
-                              <Checkbox
-                                checked={Boolean(selectedMap[sid])}
-                                onChange={(checked) =>
-                                  toggleFindingSelect(f, checked)
-                                }
-                              />
-                            </td>
-                          )}
-                          <td>
-                            <div className="sec-cve-cell">
-                              <span className={`sec-sev ${sevClass(f.severity)}`}>
-                                {sevLabel(f.severity)}
-                                {f.cvss_score ? ` ${f.cvss_score.toFixed(1)}` : ""}
-                              </span>
-                              <b className="mono">{f.cve}</b>
-                            </div>
-                            {f.summary && (
-                              <div className="sec-cve-sub">{f.summary}</div>
-                            )}
-                          </td>
-                          <td>
-                            <div className="sec-pkg-cell">
-                              <b className="mono">{f.package}</b>
-                              <span className={`sec-role-pill role-${f.pkg_role || "dependency"}`}>
-                                {pkgRoleLabel(f.pkg_role)}
-                              </span>
-                              <span className="sec-eco-tag">{f.ecosystem}</span>
-                            </div>
-                            <div className="sec-ver-line mono">
-                              <span className="bad">{f.installed_version}</span>
-                              {f.fixed_in?.length ? (
-                                <>
-                                  <span>→</span>
-                                  <span className="ok">{f.fixed_in[0]}</span>
-                                </>
-                              ) : null}
-                              {f.repo_fix_version && (
-                                <span className="sec-repo-fix">
-                                  {bi("源已有修复版", "Fix in repo")}
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                          <td>
-                            <div className="sec-br-inline">
-                              {f.clusters && f.clusters.length > 0 ? (
-                                <span className="sec-cl-pill bad">
-                                  {bi(
-                                    `${f.clusters.length} 个生产集群`,
-                                    `${f.clusters.length} cluster(s)`,
-                                  )}
-                                </span>
-                              ) : (
-                                <span className="sec-cl-pill">
-                                  {assetTypeLabel(f.asset_type)}
-                                </span>
-                              )}
-                              {(f.components || []).slice(0, 2).map((c) => (
-                                <span
-                                  key={`${c.component}@${c.version}@${c.platform}`}
-                                  className="sec-mini-tag"
-                                >
-                                  {c.title} {c.version}
-                                </span>
-                              ))}
-                            </div>
-                          </td>
-                          <td>
-                            <span className={`sec-tr-badge st-${f.triage_status}`}>
-                              {triageLabel(f.triage_status)}
-                            </span>
-                          </td>
-                          <td style={{ textAlign: "right" }}>
-                            <Button size="mini" type="text">
-                              {bi("详情与处置", "Inspect")}
-                            </Button>
-                          </td>
-                        </tr>
+                          f={f}
+                          checked={Boolean(selectedMap[sid])}
+                          canManage={canManage}
+                          onToggleFinding={toggleFindingSelect}
+                          onInspect={handleInspectFinding}
+                        />
                       );
                     })}
                   </tbody>
                 </table>
+                {filteredFindings.length > visibleFindings.length && (
+                  <div className="sec-more-bar">
+                    <span>
+                      {bi(
+                        `已展示前 ${visibleFindings.length} / ${filteredFindings.length} 条 CVE 记录`,
+                        `Showing ${visibleFindings.length} of ${filteredFindings.length} CVE findings`,
+                      )}
+                    </span>
+                    <div className="sec-more-acts">
+                      <Button
+                        size="mini"
+                        onClick={() =>
+                          setListLimit((n) => n + SEC_LIST_PAGE_STEP)
+                        }
+                      >
+                        {bi(
+                          `加载更多 (+${Math.min(SEC_LIST_PAGE_STEP, filteredFindings.length - visibleFindings.length)})`,
+                          `Load More (+${Math.min(SEC_LIST_PAGE_STEP, filteredFindings.length - visibleFindings.length)})`,
+                        )}
+                      </Button>
+                      <Button
+                        size="mini"
+                        type="text"
+                        onClick={() => setListLimit(filteredFindings.length)}
+                      >
+                        {bi("显示全部", "Show All")}
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </section>
@@ -3687,7 +3955,7 @@ export function SecurityPage({
                 </small>
               </div>
             </div>
-            {!rep || rep.clusters.length === 0 ? (
+            {!rep || (rep.clusters || []).length === 0 ? (
               <div className="sec-empty">
                 <p>
                   {bi(
@@ -3716,7 +3984,7 @@ export function SecurityPage({
                   </tr>
                 </thead>
                 <tbody>
-                  {rep.clusters.map((cl) => {
+                  {(rep.clusters || []).map((cl) => {
                     const mw = cl.middleware_active || emptyCounts;
                     const os = cl.os_active || emptyCounts;
                     const displayTop =
@@ -3739,8 +4007,8 @@ export function SecurityPage({
                       <td className="sec-nowrap-col">
                         <div className="sec-cell-stack">
                           <b className="mono" title={cl.cluster_id}>{cl.cluster_id}</b>
-                          <span className="faint small">
-                            {cl.owner} · {cl.hosts.length} {bi("台主机", "host(s)")}
+                          <span className="faint small num">
+                            {cl.owner} · {(cl.hosts || []).length} {bi("台主机", "host(s)")}
                           </span>
                         </div>
                       </td>
@@ -3972,16 +4240,16 @@ export function SecurityPage({
                 </div>
                 <div className="sec-db-eco-row">
                   <div className="sec-db-eco-head">
-                    <span>
+                    <span className="num">
                       {bi(
-                        `已覆盖生态 (${meta.ecosystems.length})`,
-                        `Ecosystems (${meta.ecosystems.length})`,
+                        `已覆盖生态 (${(meta.ecosystems || []).length})`,
+                        `Ecosystems (${(meta.ecosystems || []).length})`,
                       )}
                     </span>
-                    {meta.ecosystems.length > 6 && (
+                    {(meta.ecosystems || []).length > 6 && (
                       <button
                         type="button"
-                        className="sec-eco-toggle"
+                        className="sec-eco-toggle num"
                         onClick={() => setEcoExpanded((v) => !v)}
                       >
                         {ecoExpanded
@@ -3990,23 +4258,23 @@ export function SecurityPage({
                       </button>
                     )}
                   </div>
-                  {meta.ecosystems.length > 0 ? (
+                  {(meta.ecosystems || []).length > 0 ? (
                     <div className="sec-eco-chips">
                       {(ecoExpanded
-                        ? meta.ecosystems
-                        : meta.ecosystems.slice(0, 6)
+                        ? meta.ecosystems || []
+                        : (meta.ecosystems || []).slice(0, 6)
                       ).map((eco) => (
                         <span key={eco} className="sec-eco-chip mono">
                           {eco}
                         </span>
                       ))}
-                      {!ecoExpanded && meta.ecosystems.length > 6 && (
+                      {!ecoExpanded && (meta.ecosystems || []).length > 6 && (
                         <button
                           type="button"
                           className="sec-eco-chip is-more num"
                           onClick={() => setEcoExpanded(true)}
                         >
-                          +{meta.ecosystems.length - 6}
+                          +{(meta.ecosystems || []).length - 6}
                         </button>
                       )}
                     </div>
@@ -4428,7 +4696,7 @@ export function SecurityPage({
                           `${supplyChain.total_issues} Integrity Issue(s)`,
                         )}
                   </span>
-                  <span className="faint small">
+                  <span className="faint small num">
                     {bi(
                       `Ansible 运行环境 ${supplyChain.runtime_count} 个 · Wheel ${supplyChain.wheel_count} 个（SHA256 覆盖 ${supplyChain.wheel_sha256_count}/${supplyChain.wheel_count}）· 已设为默认平台 ${supplyChain.default_platforms} 个`,
                       `Ansible Runtimes: ${supplyChain.runtime_count} · Wheels: ${supplyChain.wheel_count} (SHA256 ${supplyChain.wheel_sha256_count}/${supplyChain.wheel_count})`,
@@ -4447,7 +4715,7 @@ export function SecurityPage({
                       </tr>
                     </thead>
                     <tbody>
-                      {supplyChain.platforms.map((sp) => (
+                      {(supplyChain.platforms || []).map((sp) => (
                         <tr key={sp.platform}>
                           <td>
                             <span className="sec-mini-tag">
@@ -4691,13 +4959,7 @@ export function SecurityPage({
         style={{ width: 580, maxWidth: "94vw" }}
       >
         <VexTriageEditor
-          context={{
-            kind: "vex",
-            cves: Object.values(selectedMap).map((f) => f.cve),
-            package: Object.values(selectedMap)[0]?.package,
-            ecosystem: Object.values(selectedMap)[0]?.ecosystem,
-            pkg_role: Object.values(selectedMap)[0]?.pkg_role,
-          }}
+          context={batchContext}
           status={batchStatus}
           onStatusChange={setBatchStatus}
           expires={batchExpires}

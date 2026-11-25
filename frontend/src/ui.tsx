@@ -384,6 +384,7 @@ export function Segmented<T extends string | number>({
   size?: "sm" | "md" | "lg";
   label?: string;
 }) {
+  const lang = useLang();
   const ref = useRef<HTMLDivElement>(null);
   const [thumb, setThumb] = useState<{ x: number; w: number } | null>(null);
   const [ready, setReady] = useState(false);
@@ -391,7 +392,7 @@ export function Segmented<T extends string | number>({
   const optSig = options
     .map(
       (o) =>
-        `${String(o.value)}:${o.count ?? ""}:${o.disabled ? 1 : 0}:${o.sig ?? ""}`,
+        `${String(o.value)}:${typeof o.label === "string" || typeof o.label === "number" ? String(o.label) : ""}:${o.count ?? ""}:${o.disabled ? 1 : 0}:${o.sig ?? ""}`,
     )
     .join("|");
   useLayoutEffect(() => {
@@ -409,14 +410,25 @@ export function Segmented<T extends string | number>({
       });
     };
     measure();
+    const raf = requestAnimationFrame(measure);
     const ro =
       typeof ResizeObserver !== "undefined"
         ? new ResizeObserver(measure)
         : null;
     ro?.observe(el);
     btns.forEach((b) => ro?.observe(b));
-    return () => ro?.disconnect();
-  }, [idx, optSig]);
+    let cancelled = false;
+    document.fonts?.ready
+      ?.then(() => {
+        if (!cancelled) measure();
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+      ro?.disconnect();
+    };
+  }, [idx, optSig, lang]);
   useEffect(() => {
     const raf = requestAnimationFrame(() => setReady(true));
     return () => cancelAnimationFrame(raf);
@@ -646,6 +658,7 @@ export function UnderlineTabs<T extends string>({
   label: string;
   className?: string;
 }) {
+  const lang = useLang();
   const ref = useRef<HTMLDivElement>(null);
   const [bar, setBar] = useState<{ x: number; w: number } | null>(null);
   const [ready, setReady] = useState(false);
@@ -653,7 +666,7 @@ export function UnderlineTabs<T extends string>({
   const itemSig = items
     .map(
       (it) =>
-        `${it.value}:${it.count ?? ""}:${it.icon ? 1 : 0}:${it.error ? 1 : 0}:${it.disabled ? 1 : 0}`,
+        `${it.value}:${typeof it.label === "string" || typeof it.label === "number" ? String(it.label) : ""}:${it.count ?? ""}:${it.icon ? 1 : 0}:${it.error ? 1 : 0}:${it.disabled ? 1 : 0}`,
     )
     .join("|");
 
@@ -676,6 +689,7 @@ export function UnderlineTabs<T extends string>({
       });
     };
     measure();
+    const raf = requestAnimationFrame(measure);
     const ro =
       typeof ResizeObserver !== "undefined"
         ? new ResizeObserver(measure)
@@ -690,9 +704,10 @@ export function UnderlineTabs<T extends string>({
       .catch(() => undefined);
     return () => {
       cancelled = true;
+      cancelAnimationFrame(raf);
       ro?.disconnect();
     };
-  }, [idx, itemSig]);
+  }, [idx, itemSig, lang]);
 
   useEffect(() => {
     const raf = requestAnimationFrame(() => setReady(true));
@@ -993,9 +1008,13 @@ export const InstanceGraph = React.memo(function InstanceGraph({
   useEffect(() => {
     const el = wrap.current;
     if (!el || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => setCw(el.clientWidth));
+    const update = () => {
+      const next = el.clientWidth;
+      setCw((prev) => (prev === next ? prev : next));
+    };
+    const ro = new ResizeObserver(update);
     ro.observe(el);
-    setCw(el.clientWidth);
+    update();
     return () => ro.disconnect();
   }, []);
   const rowCardW = used.length <= 2 ? 216 : used.length === 3 ? 198 : 176;
@@ -1686,6 +1705,8 @@ export function StageTrack({ job }: { job: Job }) {
 /* ---------- empty-state art ---------- */
 
 export function PackagesArt() {
+  const uid = useId().replace(/[^a-zA-Z0-9]/g, "");
+  const gradId = `pa-g-${uid}`;
   return (
     <svg
       className="art"
@@ -1695,7 +1716,7 @@ export function PackagesArt() {
       aria-hidden
     >
       <defs>
-        <linearGradient id="pa-g" x1="0" y1="0" x2="0" y2="1">
+        <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0" stopColor="var(--brand)" stopOpacity=".9" />
           <stop offset="1" stopColor="var(--brand)" stopOpacity=".55" />
         </linearGradient>
@@ -1722,7 +1743,7 @@ export function PackagesArt() {
         <rect x="30" y="70" width="18" height="4" rx="2" fill="var(--line)" />
       </g>
       <g className="art-box b2">
-        <rect x="68" y="30" width="44" height="68" rx="8" fill="url(#pa-g)" />
+        <rect x="68" y="30" width="44" height="68" rx="8" fill={`url(#${gradId})`} />
         <rect
           x="76"
           y="42"
@@ -1801,16 +1822,24 @@ export function Smooth({
     const o = outer.current;
     const i = inner.current;
     if (!o || !i) return;
-    o.style.height = `${i.offsetHeight}px`;
+    let lastH = i.offsetHeight;
+    o.style.height = `${lastH}px`;
     // only animate after the first size is known, or every block would grow in from nothing on page load
     const raf = requestAnimationFrame(() => o.classList.add("smooth-on"));
-    const ro = new ResizeObserver(() => {
-      o.style.height = `${i.offsetHeight}px`;
-    });
-    ro.observe(i);
+    const ro =
+      typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(() => {
+            const nextH = i.offsetHeight;
+            if (nextH !== lastH) {
+              lastH = nextH;
+              o.style.height = `${nextH}px`;
+            }
+          })
+        : null;
+    ro?.observe(i);
     return () => {
       cancelAnimationFrame(raf);
-      ro.disconnect();
+      ro?.disconnect();
     };
   }, []);
   return (

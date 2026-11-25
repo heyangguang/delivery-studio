@@ -35,7 +35,7 @@ export function hostValue(
 ): unknown {
   if (field.startsWith("params.")) {
     const key = field.slice(7);
-    return h.params?.[key] ?? c.parameters.find((p) => p.key === key)?.default;
+    return h.params?.[key] ?? (c.parameters || []).find((p) => p.key === key)?.default;
   }
   return field === "initialize"
     ? !!h.initialize
@@ -43,7 +43,7 @@ export function hostValue(
 }
 export function hiddenHostFields(h: HostSpec, c: HostContract): Set<string> {
   return new Set(
-    c.rules
+    (c.rules || [])
       .filter((r) => hostValue(h, c, r.when.field) === r.when.equals)
       .flatMap((r) => r.hide || []),
   );
@@ -55,7 +55,7 @@ export function changeHostParam(
   value: unknown,
 ): HostSpec {
   const next = { ...h, params: { ...h.params, [key]: value } };
-  for (const r of c.rules) {
+  for (const r of c.rules || []) {
     if (hostValue(next, c, r.when.field) !== r.when.equals) continue;
     for (const v of r.require || []) {
       if (!(r.hide || []).includes(v.field)) continue;
@@ -90,7 +90,7 @@ export function HostParameterFields({
   }, [hasError]);
 
   const hidden = hiddenHostFields(host, contract);
-  const visible = contract.parameters.filter(
+  const visible = (contract.parameters || []).filter(
     (p) => !hidden.has("params." + p.key),
   );
   if (visible.length === 0) return null;

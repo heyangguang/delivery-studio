@@ -267,6 +267,17 @@ function ThinkPills({
     if (nextVal !== active) onChange(nextVal);
   };
 
+  useEffect(() => {
+    if (!pressed) return;
+    const cancel = () => {
+      dragStartRef.current = null;
+      setPressed(false);
+      setDragRatio(null);
+    };
+    window.addEventListener("blur", cancel);
+    return () => window.removeEventListener("blur", cancel);
+  }, [pressed]);
+
   return (
     <div
       className={`thk thk-slider-wrap ${layout === "popover" ? "in-pop" : "in-menu"}`}
@@ -317,6 +328,9 @@ function ThinkPills({
             e.currentTarget.releasePointerCapture(e.pointerId);
           }
           finishPointer(e.clientX, false);
+        }}
+        onLostPointerCapture={() => {
+          if (dragStartRef.current) finishPointer(0, false);
         }}
         onKeyDown={(e) => {
           if (e.key === "ArrowRight" || e.key === "ArrowUp") {
@@ -440,15 +454,25 @@ export function useElementWidth(ref: React.RefObject<HTMLElement | null>): numbe
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
+    let raf = 0;
     const measure = () => {
       const next = Math.round(el.getBoundingClientRect().width);
       if (next > 0) setW((prev) => (prev === next ? prev : next));
     };
     measure();
     if (typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(measure);
+    const ro = new ResizeObserver(() => {
+      if (raf) return;
+      raf = window.requestAnimationFrame(() => {
+        raf = 0;
+        measure();
+      });
+    });
     ro.observe(el);
-    return () => ro.disconnect();
+    return () => {
+      if (raf) window.cancelAnimationFrame(raf);
+      ro.disconnect();
+    };
   }, [ref]);
   return w;
 }

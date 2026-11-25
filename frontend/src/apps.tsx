@@ -95,6 +95,7 @@ function Plans({ app, plans }: { app: AppInfo; plans: AppPlan[] }) {
         const b = planBadgeOf(p);
         return (
           <button
+            type="button"
             key={p.id}
             className={`plan-card ${b?.recommended ? "is-rec" : ""}`}
             disabled={off}
@@ -132,6 +133,7 @@ function Plans({ app, plans }: { app: AppInfo; plans: AppPlan[] }) {
         );
       })}
       <button
+        type="button"
         className="plan-card custom"
         disabled={off}
         onClick={() => go({ name: "new", app: app.id })}
@@ -594,6 +596,7 @@ function AppWide({ a, mine }: { a: AppInfo; mine: Job[] }) {
                   return (
                     <li key={p.id}>
                       <button
+                        type="button"
                         className={`wide-plan-tile ${b?.recommended ? "is-rec" : ""}`}
                         disabled={!ready || !canCreate}
                         onClick={() => go({ name: "new", app: a.id, plan: p.id })}
@@ -628,6 +631,7 @@ function AppWide({ a, mine }: { a: AppInfo; mine: Job[] }) {
                 {showCustomTile && (
                   <li key="__custom__">
                     <button
+                      type="button"
                       className="wide-plan-tile is-custom"
                       onClick={() => go({ name: "new", app: a.id })}
                       aria-label={bi(
@@ -844,7 +848,7 @@ export function AppsPage({
 
   const plain = isDefault(f);
   const grouped = plain;
-  const byCat = (() => {
+  const byCat = useMemo(() => {
     const m = new Map<string, AppInfo[]>();
     list.forEach((a) =>
       m.set(catKey(a.category), [...(m.get(catKey(a.category)) || []), a]),
@@ -858,11 +862,20 @@ export function AppsPage({
         y[1].length - x[1].length ||
         displayCat(x[0]).localeCompare(displayCat(y[0]), getLang()),
     );
-  })();
+  }, [list, f.sort, lang]);
   const totalApps = cats.length ? apps.length : 0;
   const clear = () => set({ ...DEFAULTS, view: f.view, sort: f.sort });
 
-  const jobsOf = (id: string) => jobs.filter((j) => j.app_id === id);
+  const jobsByApp = useMemo(() => {
+    const m = new Map<string, Job[]>();
+    for (const j of jobs) {
+      const arr = m.get(j.app_id);
+      if (arr) arr.push(j);
+      else m.set(j.app_id, [j]);
+    }
+    return m;
+  }, [jobs]);
+  const jobsOf = (id: string) => jobsByApp.get(id) || [];
   const grid = (items: AppInfo[]) =>
     f.view === "wide" ? (
       <div className="wides">
@@ -912,6 +925,7 @@ export function AppsPage({
         <nav className="rail-group rail-cats" aria-label={bi("分类", "Categories")}>
         <h3>{bi("分类", "Categories")}</h3>
         <button
+          type="button"
           className={isAllCat(f.cat) ? "on" : ""}
           onClick={() => set({ cat: "全部" })}
         >
@@ -922,6 +936,7 @@ export function AppsPage({
         </button>
         {cats.map(([c, n]) => (
           <button
+            type="button"
             key={c}
             className={!isAllCat(f.cat) && catKey(f.cat) === c ? "on" : ""}
             onClick={() => set({ cat: c })}
@@ -1084,7 +1099,7 @@ export function AppsPage({
                 onClose={() => set({ mine: false })}
               />
             )}
-            <button className="link" onClick={clear}>
+            <button type="button" className="link" onClick={clear}>
               {bi("清除全部", "Clear all")}
             </button>
           </div>
@@ -1646,6 +1661,7 @@ function Product({ app, jobs }: { app: AppInfo; jobs: Job[] }) {
                   <span className="dsec-count num">{jobs.length}</span>
                   {jobs.length > 0 && (
                     <button
+                      type="button"
                       className="link small side-more"
                       onClick={() => showDeliveriesOf(app.id)}
                     >

@@ -156,6 +156,7 @@ export function PackageList({
                     />
                   )}
                   <button
+                    type="button"
                     className="pk-main"
                     onClick={() => toggle(k)}
                     aria-expanded={isOpen}

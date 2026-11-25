@@ -1,4 +1,4 @@
-import React, { useContext, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { AI_CHANGED, AIReports, Spark, readFile, useAIDock } from "./aichat";
 import type { AIReport } from "./aichat";
 import {
@@ -112,6 +112,25 @@ const UNLOCKED_GUARD: CopyGuard = {
 };
 const CopyGuardContext = React.createContext<CopyGuard>(UNLOCKED_GUARD);
 
+function useTimeoutPool() {
+  const timers = useRef<Set<number>>(new Set());
+  useEffect(
+    () => () => {
+      timers.current.forEach((id) => window.clearTimeout(id));
+      timers.current.clear();
+    },
+    [],
+  );
+  return useCallback((fn: () => void, ms: number) => {
+    const id = window.setTimeout(() => {
+      timers.current.delete(id);
+      fn();
+    }, ms);
+    timers.current.add(id);
+    return id;
+  }, []);
+}
+
 export function Terminal({
   code,
   host,
@@ -127,6 +146,7 @@ export function Terminal({
 }) {
   useLang();
   const guard = useContext(CopyGuardContext);
+  const schedule = useTimeoutPool();
   const [copied, setCopied] = useState(false);
   const [copiedLine, setCopiedLine] = useState<number | null>(null);
   const [expanded, setExpanded] = useState(false);
@@ -161,7 +181,7 @@ export function Terminal({
             }
             await copy(code);
             setCopied(true);
-            setTimeout(() => setCopied(false), 1600);
+            schedule(() => setCopied(false), 1600);
           }}
           aria-label={
             guard.locked
@@ -224,7 +244,7 @@ export function Terminal({
                     onClick={() => {
                       copy(l.trim());
                       setCopiedLine(i);
-                      setTimeout(
+                      schedule(
                         () => setCopiedLine((cur) => (cur === i ? null : cur)),
                         1300,
                       );
@@ -270,6 +290,7 @@ export function Terminal({
 function CodeChip({ value }: { value: string }) {
   useLang();
   const guard = useContext(CopyGuardContext);
+  const schedule = useTimeoutPool();
   const [copied, setCopied] = useState(false);
   return (
     <Tooltip
@@ -293,7 +314,7 @@ function CodeChip({ value }: { value: string }) {
           }
           copy(value);
           setCopied(true);
-          setTimeout(() => setCopied(false), 1300);
+          schedule(() => setCopied(false), 1300);
         }}
       >
         {value}
@@ -1050,6 +1071,8 @@ export function Runbook({
       content: bi("这一步会从手册和交付文档里移除，已记录的结果保留在执行记录中。", "Removes this step from the runbook and docs while keeping logged results in history."),
       okText: bi("撤销", "Withdraw"),
       onOk: async () => {
+        if (withdrawingRef.current) return;
+        withdrawingRef.current = true;
         try {
           await api(`/api/jobs/${jobId}/ai/proposals/amendment/${id}`, {
             method: "DELETE",
@@ -1057,9 +1080,16 @@ export function Runbook({
           apply(await api(`/api/jobs/${jobId}/progress`));
         } catch (e) {
           err(e);
+        } finally {
+          withdrawingRef.current = false;
         }
       },
     });
+
+  const savingKeysRef = useRef<Set<string>>(new Set());
+  const withdrawingRef = useRef(false);
+  const clearingRef = useRef(false);
+  const scheduleRunbook = useTimeoutPool();
 
   const save = async (
     t: string,
@@ -1070,6 +1100,8 @@ export function Runbook({
     images: string[] = [],
   ) => {
     const key = keyOf(t, stepKey);
+    if (savingKeysRef.current.has(key)) return;
+    savingKeysRef.current.add(key);
     try {
       apply(
         await api(`/api/jobs/${jobId}/progress`, {
@@ -1089,6 +1121,8 @@ export function Runbook({
       setSync("ok");
     } catch (e) {
       err(e);
+    } finally {
+      savingKeysRef.current.delete(key);
     }
   };
   const [logs, setLogs] = useState<RunLog[]>([]);
@@ -1100,7 +1134,7 @@ export function Runbook({
       .catch(() => undefined);
   }, [jobId]);
   const uploadLogs = async (files: FileList | null) => {
-    if (!files?.length) return;
+    if (!files?.length || uploading) return;
     const fd = new FormData();
     Array.from(files).forEach((f) => fd.append("files", f));
     setUploading(true);
@@ -1152,6 +1186,8 @@ export function Runbook({
     }
   };
   const clearAll = async (everything = false) => {
+    if (clearingRef.current) return;
+    clearingRef.current = true;
     try {
       apply(
         await api(`/api/jobs/${jobId}/progress${everything ? "?all=1" : ""}`, {
@@ -1161,6 +1197,8 @@ export function Runbook({
       if (everything) setLogs([]);
     } catch (e) {
       err(e);
+    } finally {
+      clearingRef.current = false;
     }
   };
 
@@ -1251,7 +1289,7 @@ export function Runbook({
                   block: "center",
                 });
                 el?.classList.add("rstep-flash");
-                window.setTimeout(
+                scheduleRunbook(
                   () => el?.classList.remove("rstep-flash"),
                   1800,
                 );
@@ -1293,7 +1331,7 @@ export function Runbook({
         el.classList.remove("is-flash");
         void el.offsetWidth;
         el.classList.add("is-flash");
-        window.setTimeout(() => el.classList.remove("is-flash"), 1600);
+        scheduleRunbook(() => el.classList.remove("is-flash"), 1600);
       }),
     );
   };
@@ -1441,6 +1479,7 @@ export function Runbook({
             )}
             {(finished > 0 || failed > 0) && (
               <button
+                type="button"
                 className="link quiet"
                 onClick={() => {
                   const m = Modal.confirm({
@@ -2037,6 +2076,7 @@ export function Runbook({
                         )}
                         {isSettled && (
                           <button
+                            type="button"
                             className="rstep-toggle"
                             onClick={() =>
                               setOpen((o) => ({
@@ -2263,6 +2303,7 @@ export function Runbook({
             </ol>
             {idx < tabs.length - 1 && (
               <button
+                type="button"
                 className="rb-nextphase"
                 onClick={() => switchTo(tabs[idx + 1].id)}
               >
@@ -2978,6 +3019,7 @@ function StepRecord({ r }: { r: Rec }) {
     };
   }, [showExec, hasExecLog, execLogUrl, viewLogSeq, viewAutoState]);
 
+  const schedule = useTimeoutPool();
   const logLines = r.log ? r.log.replace(/\s+$/, "").split("\n").length : 0;
   const clsState =
     viewState ||
@@ -3176,7 +3218,7 @@ function StepRecord({ r }: { r: Rec }) {
                 onClick={() => {
                   copy(execText || "");
                   setExecCopied(true);
-                  setTimeout(() => setExecCopied(false), 1400);
+                  schedule(() => setExecCopied(false), 1400);
                 }}
               >
                 {execCopied ? <IconCheck /> : <IconCopy />}{" "}
@@ -3197,7 +3239,7 @@ function StepRecord({ r }: { r: Rec }) {
             onClick={() => {
               copy(r.log!);
               setLogCopied(true);
-              setTimeout(() => setLogCopied(false), 1400);
+              schedule(() => setLogCopied(false), 1400);
             }}
           >
             {logCopied ? <IconCheck /> : <IconCopy />}{" "}
@@ -3273,6 +3315,7 @@ function StepForm({
           loading={busy}
           disabled={tooBig}
           onClick={async () => {
+            if (busy) return;
             setBusy(true);
             try {
               await onSave(state, note, log);
@@ -3302,6 +3345,7 @@ function EventLogPanel({
   const [loading, setLoading] = useState(true);
   const [loadErr, setLoadErr] = useState("");
   const [copied, setCopied] = useState(false);
+  const schedule = useTimeoutPool();
   const url = `/api/jobs/${jobId}/executions/${execution}/logs/${attempt}`;
 
   useEffect(() => {
@@ -3350,7 +3394,7 @@ function EventLogPanel({
               onClick={() => {
                 copy(text || "");
                 setCopied(true);
-                setTimeout(() => setCopied(false), 1400);
+                schedule(() => setCopied(false), 1400);
               }}
             >
               {copied ? <IconCheck /> : <IconCopy />}{" "}

@@ -25,12 +25,22 @@ export const rangeOf = (preset: string, custom?: [string, string]): Range => {
         from: new Date(sod.getTime() - 29 * DAY).toISOString(),
         to: to.toISOString(),
       };
-    case "custom":
+    case "custom": {
+      const d0 = custom?.[0] ? new Date(custom[0]) : null;
+      const d1 = custom?.[1] ? new Date(custom[1]) : null;
+      if (d0 && d1 && !Number.isNaN(d0.getTime()) && !Number.isNaN(d1.getTime())) {
+        return {
+          preset,
+          from: d0.toISOString(),
+          to: d1.toISOString(),
+        };
+      }
       return {
-        preset,
-        from: new Date(custom![0]).toISOString(),
-        to: new Date(custom![1]).toISOString(),
+        preset: "custom",
+        from: new Date(sod.getTime() - 6 * DAY).toISOString(),
+        to: to.toISOString(),
       };
+    }
     default:
       return {
         preset: "7d",
@@ -70,7 +80,7 @@ export function RangeBar({
         <DatePicker.RangePicker
           showTime={{ format: "HH:mm" }}
           format="YYYY-MM-DD HH:mm"
-          style={{ width: 330 }}
+          style={{ width: 330, maxWidth: "100%" }}
           allowClear={false}
           value={[value.from, value.to]}
           onChange={(_, d) => {

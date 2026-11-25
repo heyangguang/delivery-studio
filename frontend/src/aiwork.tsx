@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   IconBook,
   IconBulb,
@@ -395,51 +395,55 @@ export function fmtDur(ms: number): string {
 const fmtMs = (ms?: number) =>
   !ms || ms < 50 ? "" : ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
 
-function Think({ st, live }: { st: Step; live?: boolean }) {
-  useLang();
-  const [open, setOpen] = useState(false);
-  const long = (st.text || "").length > 260;
-  if (!st.text && !live)
-    // the model thought but does not show it: say that it did, and for how long
+const Think = React.memo(
+  function Think({ st, live }: { st: Step; live?: boolean }) {
+    useLang();
+    const [open, setOpen] = useState(false);
+    const long = (st.text || "").length > 260;
+    if (!st.text && !live)
+      // the model thought but does not show it: say that it did, and for how long
+      return (
+        <li className="wk-n k-think">
+          <span className="wk-dot" aria-hidden>
+            <IconBulb />
+          </span>
+          <div className="wk-body">
+            <span className="wk-line quiet">
+              <b>{bi("思考", "Thought")}</b>
+              {st.ms ? <small>{fmtDur(st.ms)}</small> : null}
+            </span>
+          </div>
+        </li>
+      );
     return (
-      <li className="wk-n k-think">
+      <li className={`wk-n k-think ${live ? "live" : ""}`}>
         <span className="wk-dot" aria-hidden>
           <IconBulb />
         </span>
         <div className="wk-body">
-          <span className="wk-line quiet">
-            <b>{bi("思考", "Thought")}</b>
-            {st.ms ? <small>{fmtDur(st.ms)}</small> : null}
-          </span>
+          <button
+            type="button"
+            className="wk-line"
+            onClick={() => setOpen(!open)}
+            aria-expanded={open}
+            disabled={!long && !live}
+          >
+            <b>{live ? bi("正在思考", "Thinking") : bi("思考", "Thought")}</b>
+            {!live && st.ms ? <small>{fmtDur(st.ms)}</small> : null}
+            {long && <IconDown className="wk-chev" />}
+          </button>
+          <div
+            className={`wk-think ${open || live ? "open" : ""} ${live ? "live" : ""}`}
+          >
+            <Markdown text={st.text || ""} className={live ? "streaming" : ""} />
+          </div>
         </div>
       </li>
     );
-  return (
-    <li className={`wk-n k-think ${live ? "live" : ""}`}>
-      <span className="wk-dot" aria-hidden>
-        <IconBulb />
-      </span>
-      <div className="wk-body">
-        <button
-          type="button"
-          className="wk-line"
-          onClick={() => setOpen(!open)}
-          aria-expanded={open}
-          disabled={!long && !live}
-        >
-          <b>{live ? bi("正在思考", "Thinking") : bi("思考", "Thought")}</b>
-          {!live && st.ms ? <small>{fmtDur(st.ms)}</small> : null}
-          {long && <IconDown className="wk-chev" />}
-        </button>
-        <div
-          className={`wk-think ${open || live ? "open" : ""} ${live ? "live" : ""}`}
-        >
-          <Markdown text={st.text || ""} className={live ? "streaming" : ""} />
-        </div>
-      </div>
-    </li>
-  );
-}
+  },
+  (a, b) =>
+    a.live === b.live && a.st.text === b.st.text && a.st.ms === b.st.ms,
+);
 
 /** The call as a command line: the tool, then each argument. */
 const cmdLine = (st: Step, args: Record<string, unknown>) =>
@@ -451,120 +455,147 @@ const cmdLine = (st: Step, args: Record<string, unknown>) =>
     ),
   ].join(" ");
 
-function Call({ st }: { st: Step }) {
-  useLang();
-  const [open, setOpen] = useState(false);
-  const { verb, what, icon } = stepLabel(st);
-  const args = jsonArgs(st.args);
-  const hasDetail = Object.keys(args).length > 0 || !!st.preview;
-  return (
-    <li
-      className={`wk-n k-${st.kind} ${st.running ? "run" : st.ok === false ? "bad" : ""}`}
-    >
-      <span className="wk-dot" aria-hidden>
-        {st.running ? (
-          <i className="wk-spin" />
-        ) : st.ok === false ? (
-          <IconClose />
-        ) : (
-          icon
-        )}
-      </span>
-      <div className="wk-body">
-        <button
-          type="button"
-          className="wk-line"
-          onClick={() => hasDetail && setOpen(!open)}
-          aria-expanded={hasDetail ? open : undefined}
-          disabled={!hasDetail}
-        >
-          <b>{verb}</b>
-          {st.kind === "mcp" && <span className="wk-tag">MCP</span>}
-          {st.kind === "skill" && (
-            <span className="wk-tag sk">{bi("技能", "Skill")}</span>
+const Call = React.memo(
+  function Call({ st }: { st: Step }) {
+    useLang();
+    const [open, setOpen] = useState(false);
+    const { verb, what, icon } = useMemo(
+      () => stepLabel(st),
+      [st.kind, st.name, st.args], // eslint-disable-line react-hooks/exhaustive-deps
+    );
+    const args = useMemo(() => jsonArgs(st.args), [st.args]);
+    const hasDetail = Object.keys(args).length > 0 || !!st.preview;
+    return (
+      <li
+        className={`wk-n k-${st.kind} ${st.running ? "run" : st.ok === false ? "bad" : ""}`}
+      >
+        <span className="wk-dot" aria-hidden>
+          {st.running ? (
+            <i className="wk-spin" />
+          ) : st.ok === false ? (
+            <IconClose />
+          ) : (
+            icon
           )}
-          {st.kind === "web" && (
-            <span className="wk-tag web">{bi("联网", "Web")}</span>
-          )}
-          {st.kind === "kb" && (
-            <span className="wk-tag kb">{bi("知识库", "KB")}</span>
-          )}
-          {st.kind === "memory" && (
-            <span className="wk-tag kb">{bi("记忆", "Memory")}</span>
-          )}
-          {st.kind === "sandbox" && (
-            <span className="wk-tag sk">
-              {args.workspace
-                ? bi("沙箱 · 只读快照", "Sandbox · Snapshot")
-                : bi("沙箱", "Sandbox")}
-            </span>
-          )}
-          {what && <code title={what}>{what}</code>}
-          <span className="wk-meta">
-            {st.summary && (
-              <small
-                className={st.ok === false ? "bad" : ""}
-                title={st.summary}
-              >
-                {st.summary}
-              </small>
+        </span>
+        <div className="wk-body">
+          <button
+            type="button"
+            className="wk-line"
+            onClick={() => hasDetail && setOpen(!open)}
+            aria-expanded={hasDetail ? open : undefined}
+            disabled={!hasDetail}
+          >
+            <b>{verb}</b>
+            {st.kind === "mcp" && <span className="wk-tag">MCP</span>}
+            {st.kind === "skill" && (
+              <span className="wk-tag sk">{bi("技能", "Skill")}</span>
             )}
-            {fmtMs(st.ms) && <small>{fmtMs(st.ms)}</small>}
-          </span>
-          {hasDetail && <IconDown className="wk-chev" />}
-        </button>
-        {open && (
-          <div className="wk-detail">
-            <div className="wk-term">
-              <div className="wk-term-h">
-                {st.kind === "sandbox"
-                  ? st.name === "run_shell"
-                    ? args.workspace
-                      ? bi("隔离沙箱 · 交付/组件只读快照（不连目标主机）", "Isolated sandbox · Read-only project snapshot")
-                      : bi("隔离沙箱 · Shell 命令", "Isolated sandbox · Shell")
-                    : st.name === "run_skill_script"
-                      ? bi("隔离沙箱 · 技能脚本", "Isolated sandbox · Skill script")
-                      : args.workspace
-                        ? bi("隔离沙箱 · Python（只读快照）", "Isolated sandbox · Python (read-only snapshot)")
-                        : bi("代码沙箱 · Python", "Code sandbox · Python")
-                  : st.kind === "mcp"
-                    ? bi("外部服务", "External service")
-                    : st.kind === "web"
-                      ? bi("联网", "Web")
-                      : st.kind === "skill"
-                        ? bi("技能", "Skill")
-                        : st.kind === "kb"
-                          ? bi("知识库", "Knowledge base")
-                          : st.kind === "memory"
-                            ? bi("记忆", "Memory")
-                            : bi("查阅", "Inspect")}
-              </div>
-              {st.name === "run_python" ? (
-                <pre className="wk-cmd code">{str(args.code)}</pre>
-              ) : st.name === "run_shell" && str(args.command) ? (
-                <pre className="wk-cmd code">{str(args.command)}</pre>
-              ) : (
-                <pre className="wk-cmd">
-                  <span aria-hidden>$ </span>
-                  {cmdLine(st, args)}
-                </pre>
+            {st.kind === "web" && (
+              <span className="wk-tag web">{bi("联网", "Web")}</span>
+            )}
+            {st.kind === "kb" && (
+              <span className="wk-tag kb">{bi("知识库", "KB")}</span>
+            )}
+            {st.kind === "memory" && (
+              <span className="wk-tag kb">{bi("记忆", "Memory")}</span>
+            )}
+            {st.kind === "sandbox" && (
+              <span className="wk-tag sk">
+                {args.workspace
+                  ? bi("沙箱 · 只读快照", "Sandbox · Snapshot")
+                  : bi("沙箱", "Sandbox")}
+              </span>
+            )}
+            {what && <code title={what}>{what}</code>}
+            <span className="wk-meta">
+              {st.summary && (
+                <small
+                  className={st.ok === false ? "bad" : ""}
+                  title={st.summary}
+                >
+                  {st.summary}
+                </small>
               )}
-              {st.preview && <pre className="wk-out">{st.preview}</pre>}
-              {!st.running && (
-                <div className={`wk-term-f ${st.ok === false ? "bad" : ""}`}>
-                  {st.ok === false ? <IconClose /> : <IconCheck />}{" "}
-                  {st.ok === false
-                    ? bi("失败", "Failed")
-                    : bi("成功", "Succeeded")}
-                  {fmtMs(st.ms) ? ` · ${fmtMs(st.ms)}` : ""}
+              {fmtMs(st.ms) && <small>{fmtMs(st.ms)}</small>}
+            </span>
+            {hasDetail && <IconDown className="wk-chev" />}
+          </button>
+          {open && (
+            <div className="wk-detail">
+              <div className="wk-term">
+                <div className="wk-term-h">
+                  {st.kind === "sandbox"
+                    ? st.name === "run_shell"
+                      ? args.workspace
+                        ? bi("隔离沙箱 · 交付/组件只读快照（不连目标主机）", "Isolated sandbox · Read-only project snapshot")
+                        : bi("隔离沙箱 · Shell 命令", "Isolated sandbox · Shell")
+                      : st.name === "run_skill_script"
+                        ? bi("隔离沙箱 · 技能脚本", "Isolated sandbox · Skill script")
+                        : args.workspace
+                          ? bi("隔离沙箱 · Python（只读快照）", "Isolated sandbox · Python (read-only snapshot)")
+                          : bi("代码沙箱 · Python", "Code sandbox · Python")
+                    : st.kind === "mcp"
+                      ? bi("外部服务", "External service")
+                      : st.kind === "web"
+                        ? bi("联网", "Web")
+                        : st.kind === "skill"
+                          ? bi("技能", "Skill")
+                          : st.kind === "kb"
+                            ? bi("知识库", "Knowledge base")
+                            : st.kind === "memory"
+                              ? bi("记忆", "Memory")
+                              : bi("查阅", "Inspect")}
                 </div>
-              )}
+                {st.name === "run_python" ? (
+                  <pre className="wk-cmd code">{str(args.code)}</pre>
+                ) : st.name === "run_shell" && str(args.command) ? (
+                  <pre className="wk-cmd code">{str(args.command)}</pre>
+                ) : (
+                  <pre className="wk-cmd">
+                    <span aria-hidden>$ </span>
+                    {cmdLine(st, args)}
+                  </pre>
+                )}
+                {st.preview && <pre className="wk-out">{st.preview}</pre>}
+                {!st.running && (
+                  <div className={`wk-term-f ${st.ok === false ? "bad" : ""}`}>
+                    {st.ok === false ? <IconClose /> : <IconCheck />}{" "}
+                    {st.ok === false
+                      ? bi("失败", "Failed")
+                      : bi("成功", "Succeeded")}
+                    {fmtMs(st.ms) ? ` · ${fmtMs(st.ms)}` : ""}
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        )}
-      </div>
-    </li>
-  );
+          )}
+        </div>
+      </li>
+    );
+  },
+  (a, b) =>
+    a.st.kind === b.st.kind &&
+    a.st.id === b.st.id &&
+    a.st.name === b.st.name &&
+    a.st.args === b.st.args &&
+    a.st.summary === b.st.summary &&
+    a.st.preview === b.st.preview &&
+    a.st.ms === b.st.ms &&
+    a.st.ok === b.st.ok &&
+    a.st.running === b.st.running,
+);
+
+/** Leaf elapsed clock so 1s ticks update only this <small> node without re-rendering Process or Markdown steps. */
+function LiveElapsed({ t0 }: { t0?: number }) {
+  useLang();
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    setNow(Date.now());
+    const t = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(t);
+  }, [t0]);
+  return <small>{fmtDur(Math.max(0, now - (t0 || now)))}</small>;
 }
 
 /** The assistant's work: a summary line, and under it each step. While it works the list stays open and the line says what it is doing. */
@@ -583,27 +614,30 @@ export function Process({
 }) {
   useLang();
   const [open, setOpen] = useState<boolean | null>(null);
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    if (!live) return;
-    const t = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(t);
-  }, [live]);
   const shown = open ?? !!live;
   if (!live && steps.length === 0) return null;
-  const calls = steps.filter((s) => s.kind === "tool").length;
-  const skills = steps.filter((s) => s.kind === "skill");
-  const mcp = steps.filter((s) => s.kind === "mcp").length;
-  const web = steps.filter((s) => s.kind === "web").length;
-  const kb = steps.filter((s) => s.kind === "kb").length;
-  const thinkMs = steps
-    .filter((s) => s.kind === "think")
-    .reduce((n, s) => n + (s.ms || 0), 0);
-  const running = [...steps].reverse().find((s) => s.running);
+  let calls = 0;
+  let skillsCount = 0;
+  let mcp = 0;
+  let web = 0;
+  let kb = 0;
+  let thinkMs = 0;
+  let running: Step | undefined;
+  for (let i = 0; i < steps.length; i++) {
+    const s = steps[i];
+    if (s.kind === "tool") calls++;
+    else if (s.kind === "skill") skillsCount++;
+    else if (s.kind === "mcp") mcp++;
+    else if (s.kind === "web") web++;
+    else if (s.kind === "kb") kb++;
+    else if (s.kind === "think") thinkMs += s.ms || 0;
+    if (s.running) running = s;
+  }
+  const runningLbl = running && !thinking ? stepLabel(running) : null;
   const doing = thinking
     ? bi("思考中", "Thinking")
-    : running
-      ? `${stepLabel(running).verb}${stepLabel(running).what ? " " + stepLabel(running).what : ""}`
+    : runningLbl
+      ? `${runningLbl.verb}${runningLbl.what ? " " + runningLbl.what : ""}`
       : bi("思考中", "Thinking");
   // with nothing to show yet (no thinking text, no tool), the line is only a status and cannot be opened
   const canOpen = steps.length > 0 || !!thinking;
@@ -629,7 +663,7 @@ export function Process({
         )}
         {live ? (
           <span className="wk-doing">
-            {doing}… <small>{fmtDur(now - (t0 || now))}</small>
+            {doing}… <LiveElapsed t0={t0} />
           </span>
         ) : (
           <span className="wk-label">
@@ -644,9 +678,9 @@ export function Process({
             {calls > 0 && (
               <em>{bi(`查阅 ${calls} 次`, `${calls} checks`)}</em>
             )}
-            {skills.length > 0 && (
+            {skillsCount > 0 && (
               <em className="sk">
-                {bi(`技能 ${skills.length}`, `Skills ${skills.length}`)}
+                {bi(`技能 ${skillsCount}`, `Skills ${skillsCount}`)}
               </em>
             )}
             {web > 0 && (

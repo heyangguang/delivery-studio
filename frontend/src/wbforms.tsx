@@ -312,6 +312,116 @@ export function ListEditor(p: ListProps) {
   const items: any[] = get(ops.js, p.path) || [];
   const [open, setOpen] = useState<Record<number, boolean>>({});
   const scrolled = React.useRef(false);
+  const listRef = React.useRef<HTMLDivElement>(null);
+  const dragCleanupRef = React.useRef<(() => void) | null>(null);
+  const suppressClickRef = React.useRef(false);
+  const canDrag = !readOnly && items.length > 1 && p.visibleIndex === undefined;
+
+  React.useEffect(() => () => dragCleanupRef.current?.(), []);
+
+  const startDrag = (e: React.PointerEvent<HTMLButtonElement>, fromIdx: number) => {
+    if (e.button !== 0 || !canDrag) return;
+    const listEl = listRef.current;
+    if (!listEl) return;
+    const nodes = Array.from(listEl.querySelectorAll<HTMLElement>(":scope > .wb-item"));
+    const dragNode = nodes[fromIdx];
+    if (!dragNode) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragCleanupRef.current?.();
+
+    const rects = nodes.map((n) => n.getBoundingClientRect());
+    const startY = e.clientY;
+    let latestY = startY;
+    let rafId = 0;
+    let moved = false;
+    let targetIdx = fromIdx;
+
+    dragNode.classList.add("is-dragging");
+    document.body.classList.add("is-dragging-item");
+
+    const renderFrame = () => {
+      rafId = 0;
+      const dy = latestY - startY;
+      if (!moved && Math.abs(dy) > 3) moved = true;
+      if (!moved) return;
+      dragNode.style.transform = `translate3d(0, ${Math.round(dy)}px, 0)`;
+      nodes.forEach((n) => n.classList.remove("drop-before", "drop-after"));
+      let next = fromIdx;
+      if (dy < 0) {
+        for (let k = 0; k < fromIdx; k++) {
+          if (latestY < rects[k].top + rects[k].height * 0.5) {
+            next = k;
+            break;
+          }
+        }
+      } else if (dy > 0) {
+        for (let k = nodes.length - 1; k > fromIdx; k--) {
+          if (latestY > rects[k].top + rects[k].height * 0.5) {
+            next = k;
+            break;
+          }
+        }
+      }
+      targetIdx = next;
+      if (next < fromIdx) nodes[next]?.classList.add("drop-before");
+      else if (next > fromIdx) nodes[next]?.classList.add("drop-after");
+    };
+
+    const onMove = (ev: PointerEvent) => {
+      latestY = ev.clientY;
+      if (!rafId) rafId = window.requestAnimationFrame(renderFrame);
+    };
+
+    const clearVisuals = () => {
+      if (rafId) {
+        window.cancelAnimationFrame(rafId);
+        rafId = 0;
+      }
+      dragNode.style.transform = "";
+      nodes.forEach((n) => n.classList.remove("is-dragging", "drop-before", "drop-after"));
+      document.body.classList.remove("is-dragging-item");
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onCancel);
+      window.removeEventListener("blur", onCancel);
+      if (dragCleanupRef.current === clearVisuals) dragCleanupRef.current = null;
+    };
+
+    const onUp = () => {
+      clearVisuals();
+      if (moved) {
+        suppressClickRef.current = true;
+        window.requestAnimationFrame(() => {
+          suppressClickRef.current = false;
+        });
+        if (targetIdx !== fromIdx) {
+          setOpen((prev) => {
+            const nextOpen: Record<number, boolean> = {};
+            const order = items.map((_, idx) => idx);
+            const [picked] = order.splice(fromIdx, 1);
+            order.splice(targetIdx, 0, picked);
+            order.forEach((oldIdx, newIdx) => {
+              if (prev[oldIdx] !== undefined) nextOpen[newIdx] = prev[oldIdx];
+            });
+            return nextOpen;
+          });
+          ops.move(p.path, fromIdx, targetIdx);
+        }
+      }
+    };
+
+    const onCancel = () => {
+      clearVisuals();
+    };
+
+    dragCleanupRef.current = clearVisuals;
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onCancel);
+    window.addEventListener("blur", onCancel);
+  };
+
   const unique = (item: Record<string, unknown>) => {
     if (!p.idKey) return item;
     const base = String(item[p.idKey] || p.noun);
@@ -327,7 +437,7 @@ export function ListEditor(p: ListProps) {
     p.onAdded?.(items.length);
   };
   return (
-    <div className="wb-list">
+    <div className="wb-list" ref={listRef}>
       {items.length === 0 && (
         <div className="wb-empty">
           {p.empty || bi(`还没有${p.noun}`, `No ${p.noun.toLowerCase()} yet`)}
@@ -361,11 +471,36 @@ export function ListEditor(p: ListProps) {
             }
           >
             <div className="wb-item-head">
+              {canDrag && (
+                <button
+                  type="button"
+                  className="wb-drag-handle"
+                  aria-label={bi("拖拽调整顺序", "Drag to reorder")}
+                  title={bi("按住上下拖拽调整顺序", "Drag up or down to reorder")}
+                  onPointerDown={(e) => startDrag(e, i)}
+                  onClick={(e) => e.preventDefault()}
+                >
+                  <svg width={12} height={12} viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
+                    <circle cx="4" cy="2.5" r="1.1" />
+                    <circle cx="8" cy="2.5" r="1.1" />
+                    <circle cx="4" cy="6" r="1.1" />
+                    <circle cx="8" cy="6" r="1.1" />
+                    <circle cx="4" cy="9.5" r="1.1" />
+                    <circle cx="8" cy="9.5" r="1.1" />
+                  </svg>
+                </button>
+              )}
               <button
                 type="button"
                 className="wb-item-toggle"
                 aria-expanded={on}
-                onClick={() => setOpen((o) => ({ ...o, [i]: !on }))}
+                onClick={(e) => {
+                  if (suppressClickRef.current) {
+                    e.preventDefault();
+                    return;
+                  }
+                  setOpen((o) => ({ ...o, [i]: !on }));
+                }}
               >
                 <span className="wb-caret">
                   {on ? <IconDown /> : <IconRight />}

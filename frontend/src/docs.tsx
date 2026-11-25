@@ -576,6 +576,7 @@ function DocView({
     onChanged();
   };
   const check = async () => {
+    if (checking) return;
     setChecking(true);
     try {
       const r = await api<DocCheckResult>(
@@ -594,6 +595,7 @@ function DocView({
     }
   };
   const draftAllEmpty = async () => {
+    if (draftingAll) return;
     setDraftingAll(true);
     try {
       const r = await api<{ drafted: number; doc: ClusterDoc }>(
@@ -622,7 +624,7 @@ function DocView({
     fid: string,
     confirmed: boolean,
   ) => {
-    if (!f.section_key || !f.proposed_text) return;
+    if (!f.section_key || !f.proposed_text || busyItem) return;
     setBusyItem(fid);
     try {
       const nd = await api<ClusterDoc>(
@@ -650,7 +652,7 @@ function DocView({
     }
   };
   const draftFindingSection = async (f: Finding, fid: string) => {
-    if (!f.section_key) return;
+    if (!f.section_key || busyItem) return;
     setBusyItem(fid);
     try {
       const nd = await api<ClusterDoc>(
@@ -668,7 +670,7 @@ function DocView({
     }
   };
   const confirmFindingDraft = async (f: Finding, fid: string) => {
-    if (!f.section_key || !d) return;
+    if (!f.section_key || !d || busyItem) return;
     const sec = (d.blocks || []).find(
       (b) => b.kind === "section" && b.key === f.section_key,
     );
@@ -692,9 +694,9 @@ function DocView({
     }
   };
   const applyAllProposals = async () => {
-    if (!review) return;
+    if (!review || applyingAll) return;
     const seen = new Set<string>();
-    const queue = review.findings.filter((f, idx) => {
+    const queue = (review.findings || []).filter((f, idx) => {
       const fid = f.id || String(idx);
       if (appliedIDs[fid] || !f.section_key || !f.proposed_text) return false;
       if (seen.has(f.section_key)) return false;
@@ -1527,6 +1529,13 @@ function renderAnsibleLine(line: string, lineIdx: number): React.ReactNode {
 function DocCodeBlock({ text, style }: { text: string; style?: DocBlock["style"] }) {
   useLang();
   const [copied, setCopied] = useState(false);
+  const copyTimer = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (copyTimer.current) window.clearTimeout(copyTimer.current);
+    },
+    [],
+  );
   const isAnsible =
     style === "ansible" ||
     (!style && (text.includes("TASK  ") || text.includes("PLAY  ") || text.includes("STEP_RESULT ")));
@@ -1544,7 +1553,8 @@ function DocCodeBlock({ text, style }: { text: string; style?: DocBlock["style"]
         onClick={() => {
           copy(copyPayload);
           setCopied(true);
-          setTimeout(() => setCopied(false), 1400);
+          if (copyTimer.current) window.clearTimeout(copyTimer.current);
+          copyTimer.current = window.setTimeout(() => setCopied(false), 1400);
         }}
       >
         {copied ? <IconCheck /> : <IconCopy />}
@@ -1778,6 +1788,7 @@ function Section({
   const url = `/api/clusters/${c.id}/docs/${d.id}/sections/${b.key}`;
 
   const save = async (t: string, confirmed: boolean) => {
+    if (busy) return;
     setBusy("save");
     try {
       const nd = await api<ClusterDoc>(url, {
@@ -1793,6 +1804,7 @@ function Section({
     }
   };
   const runDraft = async (replies?: { question: string; answer: string }[]) => {
+    if (busy) return;
     setBusy("draft");
     setAsking(false);
     try {
@@ -2348,6 +2360,7 @@ function ToKB({ c, d }: { c: ClusterView; d: ClusterDoc }) {
     setOpen(true);
   };
   const send = async () => {
+    if (busy) return;
     setBusy(true);
     try {
       await api("/api/kb/submissions", {
@@ -2388,7 +2401,9 @@ function ToKB({ c, d }: { c: ClusterView; d: ClusterDoc }) {
       <Modal
         visible={open}
         title={bi("存入团队知识库", "Save to Team Knowledge Base")}
-        onCancel={() => setOpen(false)}
+        onCancel={() => !busy && setOpen(false)}
+        maskClosable={!busy}
+        cancelButtonProps={{ disabled: busy }}
         onOk={send}
         okText={bi("提交审核", "Submit for Review")}
         okButtonProps={{
@@ -2449,10 +2464,11 @@ function StartRCA({ c }: { c: ClusterView }) {
   const [what, setWhat] = useState<string>("incident");
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
-  const plans = c.plans.filter(
+  const plans = (c.plans || []).filter(
     (p) => p.state === "succeeded" && p.outcome !== "void",
   );
   const start = async () => {
+    if (busy) return;
     setBusy(true);
     try {
       const r = await api<{ id: string }>(`/api/clusters/${c.id}/docs`, {
@@ -2478,7 +2494,9 @@ function StartRCA({ c }: { c: ClusterView }) {
       <Modal
         visible={open}
         title={bi("发起根因分析", "New Root-Cause Analysis")}
-        onCancel={() => setOpen(false)}
+        onCancel={() => !busy && setOpen(false)}
+        maskClosable={!busy}
+        cancelButtonProps={{ disabled: busy }}
         onOk={start}
         okText={bi("开始写", "Create")}
         okButtonProps={{
@@ -2555,6 +2573,7 @@ function StartAssess({ c, aiOn }: { c: ClusterView; aiOn: boolean }) {
     ),
   };
   const start = async () => {
+    if (busy) return;
     setBusy(true);
     try {
       const r = await api<{ id: string }>(`/api/clusters/${c.id}/docs`, {
@@ -2577,7 +2596,9 @@ function StartAssess({ c, aiOn }: { c: ClusterView; aiOn: boolean }) {
       <Modal
         visible={open}
         title={bi("新建评估", "New Assessment")}
-        onCancel={() => setOpen(false)}
+        onCancel={() => !busy && setOpen(false)}
+        maskClosable={!busy}
+        cancelButtonProps={{ disabled: busy }}
         onOk={start}
         okText={bi("开始评估", "Create")}
         okButtonProps={{ loading: busy, disabled: !q.trim() }}

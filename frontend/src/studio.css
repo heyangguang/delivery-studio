@@ -27,8 +27,13 @@
   white-space: nowrap;
   border-radius: 7px 7px 0 0;
   transition:
-    color 0.16s ease,
-    background-color 0.16s ease;
+    color 0.18s var(--spring),
+    background-color 0.18s var(--spring),
+    transform 0.16s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.studio-tab:active {
+  transform: scale(0.975);
 }
 
 .studio-tab::after {
@@ -43,8 +48,8 @@
   opacity: 0;
   transform: scaleX(0.45);
   transition:
-    opacity 0.18s ease,
-    transform 0.22s var(--spring);
+    opacity 0.18s var(--spring),
+    transform 0.24s cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 .studio-tab.tone-kb {
@@ -75,13 +80,15 @@ body[arco-theme="dark"] .studio-tab.tone-mcp {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
   font-size: 14px;
   line-height: 0;
   color: var(--faint);
-  transition: color 0.16s ease;
+  transition: color 0.18s var(--spring);
 }
 
 .studio-tab-lbl {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -116,4 +123,12 @@ body[arco-theme="dark"] .studio-tab.tone-mcp {
 .studio-tab.on::after {
   opacity: 1;
   transform: scaleX(1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .studio-tab,
+  .studio-tab::after,
+  .studio-tab-ic {
+    transition: none;
+  }
 }

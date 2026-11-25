@@ -91,7 +91,7 @@ body[arco-theme="dark"] .ib-root {
   height: 32px;
   padding: 0 10px;
   border: 0;
-  border-radius: 4px;
+  border-radius: 7px;
   background: none;
   font: inherit;
   font-size: 13px;
@@ -99,27 +99,42 @@ body[arco-theme="dark"] .ib-root {
   white-space: nowrap;
 }
 
+.ib-top-item > svg {
+  flex: none;
+  display: block;
+}
+
 button.ib-top-item {
   cursor: pointer;
-  transition: background-color 0.15s ease;
+  transition:
+    background-color 0.15s var(--apple-ease, ease),
+    color 0.15s var(--apple-ease, ease),
+    transform 0.18s var(--spring);
 }
 
 button.ib-top-item:hover {
   background: var(--ib-field);
+  color: var(--ink);
+}
+
+button.ib-top-item:active:not(:disabled):not(.arco-dropdown-open) {
+  transform: scale(0.975);
 }
 
 button.ib-top-item:focus-visible {
-  outline: 2px solid var(--brand);
-  outline-offset: -2px;
+  outline: none;
+  box-shadow: var(--ring);
 }
 
 .ib-ver {
   font-family: var(--mono);
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
   color: var(--mute);
 }
 
 .ib-dot {
+  flex: none;
   width: 6px;
   height: 6px;
   border-radius: 50%;
@@ -212,15 +227,29 @@ button.ib-top-item:focus-visible {
 
 .ib-banner > span {
   flex: 1;
+  min-width: 0;
 }
 
 .ib-banner button {
-  padding: 2px 4px;
+  flex: none;
+  padding: 2px 6px;
   border: 0;
+  border-radius: 5px;
   background: none;
   font: inherit;
   color: var(--brand-ink);
   cursor: pointer;
+  transition:
+    background-color 0.15s var(--apple-ease, ease),
+    transform 0.18s var(--spring);
+}
+
+.ib-banner button:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.ib-banner button:active:not(:disabled) {
+  transform: scale(0.975);
 }
 
 .ib-form {
@@ -289,6 +318,12 @@ button.ib-top-item:focus-visible {
   gap: 6px;
   font-size: 12px;
   line-height: 1.5;
+  min-width: 0;
+}
+
+.ib-msg > svg {
+  flex: none;
+  display: block;
 }
 
 .ib-msg.is-error {
@@ -776,11 +811,22 @@ button.ib-top-item:focus-visible {
   font: inherit;
   text-align: left;
   cursor: pointer;
-  transition: background-color 0.15s ease;
+  transition:
+    background-color 0.15s var(--apple-ease, ease),
+    transform 0.18s var(--spring);
 }
 
 .ib-more-btn:hover {
   background: color-mix(in srgb, var(--surface) 58%, transparent);
+}
+
+.ib-more-btn:active {
+  transform: scale(0.985);
+}
+
+.ib-more-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
 }
 
 .ib-more-tag {
@@ -804,6 +850,7 @@ button.ib-top-item:focus-visible {
   position: absolute;
   z-index: 1;
   left: 44px;
+  right: 44px;
   bottom: 38px;
   display: flex;
   flex-direction: column;

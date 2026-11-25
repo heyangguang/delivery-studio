@@ -986,6 +986,291 @@ function isDenseLauncherRoute(scope: Scope, startKey: string): boolean {
   return false;
 }
 
+const FAB_POS_KEY = "mh-ai-fab-pos";
+type FabPos = { side: "left" | "right"; bottom: number };
+
+function readFabPos(): FabPos {
+  try {
+    const raw = JSON.parse(
+      sessionStorage.getItem(FAB_POS_KEY) || "null",
+    ) as Partial<FabPos> | null;
+    if (
+      raw &&
+      (raw.side === "left" || raw.side === "right") &&
+      typeof raw.bottom === "number" &&
+      Number.isFinite(raw.bottom)
+    ) {
+      return { side: raw.side, bottom: Math.max(14, Math.round(raw.bottom)) };
+    }
+  } catch {
+    /* ignore storage error */
+  }
+  return { side: "right", bottom: 20 };
+}
+
+function clampFabBottom(bottom: number, fabHeight = 40): number {
+  if (typeof window === "undefined") return bottom;
+  const margin =
+    window.innerWidth <= 900 ? 14 : window.innerWidth <= 640 ? 16 : 20;
+  const maxBottom = Math.max(margin, window.innerHeight - fabHeight - 64);
+  return Math.round(Math.min(maxBottom, Math.max(margin, bottom)));
+}
+
+function FloatingFAB({
+  busy,
+  mini,
+  onOpen,
+}: {
+  busy: boolean;
+  mini: boolean;
+  onOpen: () => void;
+}) {
+  useLang();
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const [pos, setPos] = useState<FabPos>(() => {
+    const p = readFabPos();
+    return { side: p.side, bottom: clampFabBottom(p.bottom) };
+  });
+  const dragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    rect: DOMRect;
+    dx: number;
+    dy: number;
+    moved: boolean;
+  } | null>(null);
+  const rafRef = useRef<number>(0);
+  const snapTimerRef = useRef<number>(0);
+  const suppressTimerRef = useRef<number>(0);
+  const suppressClickRef = useRef(false);
+
+  const persistPos = useCallback((next: FabPos) => {
+    setPos(next);
+    try {
+      sessionStorage.setItem(FAB_POS_KEY, JSON.stringify(next));
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const cleanupDrag = useCallback(() => {
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = 0;
+    }
+    dragRef.current = null;
+    document.documentElement.classList.remove("ad-dragging");
+    const btn = btnRef.current;
+    if (btn) {
+      btn.classList.remove("is-dragging");
+      btn.style.transform = "";
+    }
+  }, []);
+
+  useEffect(() => {
+    let resizeRaf = 0;
+    const onResize = () => {
+      if (resizeRaf) return;
+      resizeRaf = requestAnimationFrame(() => {
+        resizeRaf = 0;
+        const h = btnRef.current?.offsetHeight || 40;
+        setPos((cur) => {
+          const clamped = clampFabBottom(cur.bottom, h);
+          return clamped === cur.bottom ? cur : { ...cur, bottom: clamped };
+        });
+      });
+    };
+    const onBlur = () => cleanupDrag();
+    window.addEventListener("resize", onResize, { passive: true });
+    window.addEventListener("blur", onBlur);
+    return () => {
+      if (resizeRaf) cancelAnimationFrame(resizeRaf);
+      if (snapTimerRef.current) window.clearTimeout(snapTimerRef.current);
+      if (suppressTimerRef.current) window.clearTimeout(suppressTimerRef.current);
+      window.removeEventListener("resize", onResize);
+      window.removeEventListener("blur", onBlur);
+      cleanupDrag();
+    };
+  }, [cleanupDrag]);
+
+  const edgeMargin =
+    typeof window !== "undefined" && window.innerWidth <= 900
+      ? 14
+      : typeof window !== "undefined" && window.innerWidth <= 640
+        ? 16
+        : 20;
+
+  const onPointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (e.button !== 0 || !btnRef.current) return;
+    if (snapTimerRef.current) {
+      window.clearTimeout(snapTimerRef.current);
+      snapTimerRef.current = 0;
+    }
+    btnRef.current.classList.remove("is-snapping");
+    dragRef.current = {
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      rect: btnRef.current.getBoundingClientRect(),
+      dx: 0,
+      dy: 0,
+      moved: false,
+    };
+  };
+
+  const onPointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
+    const d = dragRef.current;
+    const btn = btnRef.current;
+    if (!d || !btn || e.pointerId !== d.pointerId) return;
+    const rawDx = e.clientX - d.startX;
+    const rawDy = e.clientY - d.startY;
+    if (!d.moved && Math.hypot(rawDx, rawDy) < 5) return;
+    if (!d.moved) {
+      d.moved = true;
+      suppressClickRef.current = true;
+      try {
+        btn.setPointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      btn.classList.add("is-dragging");
+      document.documentElement.classList.add("ad-dragging");
+    }
+    const minDx = 12 - d.rect.left;
+    const maxDx = window.innerWidth - 12 - d.rect.right;
+    const minDy = 64 - d.rect.top;
+    const maxDy = window.innerHeight - 12 - d.rect.bottom;
+    d.dx = Math.min(maxDx, Math.max(minDx, rawDx));
+    d.dy = Math.min(maxDy, Math.max(minDy, rawDy));
+    if (!rafRef.current) {
+      rafRef.current = requestAnimationFrame(() => {
+        rafRef.current = 0;
+        const cur = dragRef.current;
+        if (cur && btnRef.current) {
+          btnRef.current.style.transform = `translate3d(${Math.round(cur.dx)}px, ${Math.round(cur.dy)}px, 0)`;
+        }
+      });
+    }
+  };
+
+  const finishPointer = (
+    e: React.PointerEvent<HTMLButtonElement>,
+    cancelled: boolean,
+  ) => {
+    const d = dragRef.current;
+    const btn = btnRef.current;
+    if (!d) return;
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = 0;
+    }
+    dragRef.current = null;
+    document.documentElement.classList.remove("ad-dragging");
+    if (btn && d.moved) {
+      try {
+        if (btn.hasPointerCapture(e.pointerId)) {
+          btn.releasePointerCapture(e.pointerId);
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    if (!btn || !d.moved || cancelled) {
+      if (btn) {
+        btn.classList.remove("is-dragging");
+        btn.style.transform = "";
+      }
+      if (cancelled) suppressClickRef.current = false;
+      return;
+    }
+    const finalLeft = d.rect.left + d.dx;
+    const finalTop = d.rect.top + d.dy;
+    const centerX = finalLeft + d.rect.width / 2;
+    const nextSide: "left" | "right" =
+      centerX < window.innerWidth / 2 ? "left" : "right";
+    const margin =
+      window.innerWidth <= 900 ? 14 : window.innerWidth <= 640 ? 16 : 20;
+    const nextBottom = clampFabBottom(
+      window.innerHeight - (finalTop + d.rect.height),
+      d.rect.height,
+    );
+    const targetLeft =
+      nextSide === "left"
+        ? margin
+        : window.innerWidth - margin - d.rect.width;
+    const targetTop = window.innerHeight - nextBottom - d.rect.height;
+    const invertX = Math.round(finalLeft - targetLeft);
+    const invertY = Math.round(finalTop - targetTop);
+
+    // FLIP magnetic snap with Apple spring settle (cubic-bezier(0.32, 0.72, 0, 1))
+    btn.classList.remove("is-dragging");
+    btn.style.left = nextSide === "left" ? `${margin}px` : "auto";
+    btn.style.right = nextSide === "right" ? `${margin}px` : "auto";
+    btn.style.bottom = `${nextBottom}px`;
+    btn.style.transition = "none";
+    btn.style.transform = `translate3d(${invertX}px, ${invertY}px, 0)`;
+    void btn.offsetWidth;
+    btn.classList.add("is-snapping");
+    btn.style.transition = "";
+    btn.style.transform = "translate3d(0, 0, 0)";
+    persistPos({ side: nextSide, bottom: nextBottom });
+    if (snapTimerRef.current) window.clearTimeout(snapTimerRef.current);
+    snapTimerRef.current = window.setTimeout(() => {
+      snapTimerRef.current = 0;
+      if (btnRef.current) {
+        btnRef.current.classList.remove("is-snapping");
+        btnRef.current.style.transform = "";
+      }
+    }, 440);
+    if (suppressTimerRef.current) window.clearTimeout(suppressTimerRef.current);
+    suppressTimerRef.current = window.setTimeout(() => {
+      suppressTimerRef.current = 0;
+      suppressClickRef.current = false;
+    }, 240);
+  };
+
+  return (
+    <button
+      ref={btnRef}
+      type="button"
+      className={`ad-launch ${pos.side === "left" ? "side-left" : ""} ${busy ? "busy" : ""} ${mini && !busy ? "mini" : ""}`}
+      style={{
+        left: pos.side === "left" ? edgeMargin : "auto",
+        right: pos.side === "right" ? edgeMargin : "auto",
+        bottom: pos.bottom,
+      }}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={(e) => finishPointer(e, false)}
+      onPointerCancel={(e) => finishPointer(e, true)}
+      onClick={(e) => {
+        if (suppressClickRef.current) {
+          e.preventDefault();
+          e.stopPropagation();
+          suppressClickRef.current = false;
+          return;
+        }
+        onOpen();
+      }}
+      onDoubleClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        persistPos({ side: "right", bottom: 20 });
+      }}
+      aria-label={bi("打开 AI 助手（Ctrl+J）", "Open AI Assistant (Ctrl+J)")}
+    >
+      <Spark rainbow />
+      <span>
+        {busy
+          ? bi("AI 正在回答…", "AI is replying…")
+          : bi("AI 助手", "AI Assistant")}
+      </span>
+      {!busy && <kbd>⌘J</kbd>}
+    </button>
+  );
+}
+
 export function AIDock({
   scope,
   start,
@@ -1117,20 +1402,30 @@ export function AIDock({
     return () => window.removeEventListener("hashchange", sync);
   }, [scope, start.key]);
   useEffect(() => {
+    let scrollRaf = 0;
+    let lastTarget: HTMLElement | Document | null = null;
     const onScroll = (e: Event) => {
-      const t = e.target as HTMLElement | Document;
-      const el = (
-        t instanceof Document ? document.scrollingElement : t
-      ) as HTMLElement | null;
-      if (!el || el.scrollHeight <= el.clientHeight + 80) return;
-      setAtEnd(el.scrollTop + el.clientHeight >= el.scrollHeight - 80);
+      lastTarget = e.target as HTMLElement | Document;
+      if (scrollRaf) return;
+      scrollRaf = requestAnimationFrame(() => {
+        scrollRaf = 0;
+        const t = lastTarget;
+        const el = (
+          t instanceof Document ? document.scrollingElement : t
+        ) as HTMLElement | null;
+        if (!el || el.scrollHeight <= el.clientHeight + 80) return;
+        const nearEnd = el.scrollTop + el.clientHeight >= el.scrollHeight - 80;
+        setAtEnd((prev) => (prev === nearEnd ? prev : nearEnd));
+      });
     };
     window.addEventListener("scroll", onScroll, {
       capture: true,
       passive: true,
     });
-    return () =>
+    return () => {
+      if (scrollRaf) cancelAnimationFrame(scrollRaf);
       window.removeEventListener("scroll", onScroll, { capture: true });
+    };
   }, []);
   const compactOrb = compactLauncher || denseRoute;
   const available = useCallback(
@@ -1260,20 +1555,11 @@ export function AIDock({
       <DockCtx.Provider value={dock}>
         {children}
         {any && mode === "closed" && (
-          <button
-            type="button"
-            className={`ad-launch ${busy ? "busy" : ""} ${(atEnd || compactOrb) && !busy ? "mini" : ""}`}
-            onClick={openGeneral}
-            aria-label={bi("打开 AI 助手（Ctrl+J）", "Open AI Assistant (Ctrl+J)")}
-          >
-            <Spark rainbow />
-            <span>
-              {busy
-                ? bi("AI 正在回答…", "AI is replying…")
-                : bi("AI 助手", "AI Assistant")}
-            </span>
-            {!busy && <kbd>⌘J</kbd>}
-          </button>
+          <FloatingFAB
+            busy={busy}
+            mini={atEnd || compactOrb}
+            onOpen={openGeneral}
+          />
         )}
         {any && mounted && (
           <WindowBoundary onClose={() => setOpen(false)}>
@@ -1802,9 +2088,11 @@ function ChatWindow({
   );
   useEffect(() => onHasContent(hasContent), [hasContent, onHasContent]);
   const win = useRef<HTMLElement>(null);
-  // where the window was dragged to, as distances from the right and bottom edges
+  // where the window was dragged to, as distances from the right and bottom edges, plus optional custom resize dimensions
   const [pos, setPos] = useState<{ r: number; b: number } | null>(null);
+  const [size, setSize] = useState<{ w: number; h: number } | null>(null);
   const dragging = useRef<{
+    pointerId: number;
     x: number;
     y: number;
     r: number;
@@ -1813,26 +2101,164 @@ function ChatWindow({
     h: number;
     moved: boolean;
   } | null>(null);
+  const resizingRef = useRef<{
+    pointerId: number;
+    dir: "n" | "w" | "e" | "nw";
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    r: number;
+    b: number;
+    nextW: number;
+    nextH: number;
+    nextR: number;
+    raf: number;
+  } | null>(null);
   const [moving, setMoving] = useState(false);
-  // A size change resets the position and closes the compact conversation menu.
+  const [resizing, setResizing] = useState(false);
+  const wasDragTimerRef = useRef<number>(0);
+  // A size preset change resets custom drag/resize and closes the compact conversation menu.
   useEffect(() => {
     setPos(null);
+    setSize(null);
     setListOpen(false);
   }, [expanded]);
   useEffect(() => {
     if (mode !== "open") setListOpen(false);
+    if (mode === "closed" && win.current?.contains(document.activeElement)) {
+      (document.activeElement as HTMLElement)?.blur?.();
+    }
   }, [mode]);
+  // Close cleanly on Escape without eating open Arco Modal / Drawer / Popup / ImagePreview Escapes.
+  useEffect(() => {
+    if (mode !== "open") return;
+    const hasVisibleOverlay = () => {
+      const overlays = document.querySelectorAll<HTMLElement>(
+        ".arco-modal-wrapper, .arco-drawer-wrapper, .arco-trigger-popup, .arco-image-preview",
+      );
+      for (const el of overlays) {
+        const st = window.getComputedStyle(el);
+        if (
+          st.display !== "none" &&
+          st.visibility !== "hidden" &&
+          Number(st.opacity || "1") > 0
+        ) {
+          return true;
+        }
+      }
+      return false;
+    };
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      if (hasVisibleOverlay()) return;
+      const active = document.activeElement as HTMLElement | null;
+      if (
+        active &&
+        !win.current?.contains(active) &&
+        (/INPUT|TEXTAREA|SELECT/.test(active.tagName) ||
+          active.isContentEditable)
+      ) {
+        return;
+      }
+      e.stopPropagation();
+      if (listOpen) setListOpen(false);
+      else onClose();
+    };
+    window.addEventListener("keydown", onEsc);
+    return () => window.removeEventListener("keydown", onEsc);
+  }, [mode, listOpen, onClose]);
+  useEffect(() => {
+    if (!drag) return;
+    const clearDrop = () => setDrag(false);
+    window.addEventListener("dragend", clearDrop);
+    window.addEventListener("drop", clearDrop);
+    window.addEventListener("blur", clearDrop);
+    return () => {
+      window.removeEventListener("dragend", clearDrop);
+      window.removeEventListener("drop", clearDrop);
+      window.removeEventListener("blur", clearDrop);
+    };
+  }, [drag]);
   const wasDrag = useRef(false);
   const small = () => window.innerWidth <= 640;
+  const moveTo = useRef<{ r: number; b: number; raf: number }>({
+    r: 0,
+    b: 0,
+    raf: 0,
+  });
+  const cancelPointerOps = useCallback(() => {
+    if (moveTo.current.raf) {
+      cancelAnimationFrame(moveTo.current.raf);
+      moveTo.current.raf = 0;
+    }
+    if (resizingRef.current?.raf) {
+      cancelAnimationFrame(resizingRef.current.raf);
+      resizingRef.current.raf = 0;
+    }
+    dragging.current = null;
+    resizingRef.current = null;
+    document.documentElement.classList.remove("ad-dragging");
+    if (win.current) {
+      win.current.style.transform = "";
+    }
+    setMoving(false);
+    setResizing(false);
+  }, []);
+  useEffect(() => {
+    let resizeRaf = 0;
+    const clampViewport = () => {
+      if (resizeRaf) return;
+      resizeRaf = requestAnimationFrame(() => {
+        resizeRaf = 0;
+        if (small()) return;
+        setSize((curSize) => {
+          if (!curSize) return curSize;
+          const maxW = Math.max(360, window.innerWidth - 32);
+          const maxH = Math.max(360, window.innerHeight - 76);
+          const w = Math.min(maxW, Math.max(360, curSize.w));
+          const h = Math.min(maxH, Math.max(360, curSize.h));
+          return w === curSize.w && h === curSize.h ? curSize : { w, h };
+        });
+        setPos((curPos) => {
+          if (!curPos) return curPos;
+          const rect = win.current?.getBoundingClientRect();
+          const w = rect?.width || 436;
+          const h = rect?.height || 560;
+          const r = Math.round(
+            Math.min(window.innerWidth - 120, Math.max(120 - w, curPos.r)),
+          );
+          const b = Math.round(
+            Math.min(
+              Math.max(12, window.innerHeight - h - 8),
+              Math.max(54 - h, curPos.b),
+            ),
+          );
+          return r === curPos.r && b === curPos.b ? curPos : { r, b };
+        });
+      });
+    };
+    window.addEventListener("resize", clampViewport, { passive: true });
+    window.addEventListener("blur", cancelPointerOps);
+    return () => {
+      if (resizeRaf) cancelAnimationFrame(resizeRaf);
+      if (wasDragTimerRef.current) window.clearTimeout(wasDragTimerRef.current);
+      window.removeEventListener("resize", clampViewport);
+      window.removeEventListener("blur", cancelPointerOps);
+      cancelPointerOps();
+    };
+  }, [cancelPointerOps]);
   const onDown = (e: React.PointerEvent) => {
     if (
       e.button !== 0 ||
       small() ||
+      !win.current ||
       (e.target as HTMLElement).closest(".ad-tools")
     )
       return;
-    const rect = win.current!.getBoundingClientRect();
+    const rect = win.current.getBoundingClientRect();
     dragging.current = {
+      pointerId: e.pointerId,
       x: e.clientX,
       y: e.clientY,
       r: window.innerWidth - rect.right,
@@ -1842,59 +2268,171 @@ function ChatWindow({
       moved: false,
     };
   };
-  const moveTo = useRef<{ r: number; b: number; raf: number }>({
-    r: 0,
-    b: 0,
-    raf: 0,
-  });
   const onMove = (e: React.PointerEvent) => {
     const d = dragging.current;
-    if (!d) return;
+    if (!d || e.pointerId !== d.pointerId) return;
     const dx = e.clientX - d.x;
     const dy = e.clientY - d.y;
-    if (!d.moved && Math.abs(dx) + Math.abs(dy) < 4) return;
+    if (!d.moved && Math.hypot(dx, dy) < 4) return;
     if (!d.moved) {
       setMoving(true);
+      document.documentElement.classList.add("ad-dragging");
       // only a real drag takes the pointer: a plain click still reaches the buttons in the header
-      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      try {
+        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
     }
     d.moved = true;
     wasDrag.current = true;
     // keep the header reachable: at least 120px of it inside the screen, and never above the top bar
     const r = Math.min(window.innerWidth - 120, Math.max(120 - d.w, d.r - dx));
     const b = Math.min(
-      window.innerHeight - d.h - 8,
+      Math.max(12, window.innerHeight - d.h - 8),
       Math.max(54 - d.h, d.b - dy),
     );
-    // the window follows the pointer directly; the page is not drawn again for every movement
+    // the window follows the pointer directly via GPU translate3d; React does not re-render at 120Hz
     moveTo.current.r = r;
     moveTo.current.b = b;
     if (!moveTo.current.raf)
       moveTo.current.raf = requestAnimationFrame(() => {
         moveTo.current.raf = 0;
-        if (win.current)
-          win.current.style.translate = `${Math.round(d.r - moveTo.current.r)}px ${Math.round(d.b - moveTo.current.b)}px`;
+        if (win.current) {
+          win.current.style.transform = `translate3d(${Math.round(d.r - moveTo.current.r)}px, ${Math.round(d.b - moveTo.current.b)}px, 0)`;
+        }
       });
   };
-  const onUp = () => {
+  const onUp = (e?: React.PointerEvent, cancelled = false) => {
     const d = dragging.current;
     dragging.current = null;
     if (moveTo.current.raf) {
       cancelAnimationFrame(moveTo.current.raf);
       moveTo.current.raf = 0;
     }
-    if (d?.moved) {
-      // it stays where it was dropped: the translation becomes the window's own position
-      if (win.current) {
-        win.current.style.right = moveTo.current.r + "px";
-        win.current.style.bottom = moveTo.current.b + "px";
-        win.current.style.translate = "";
+    document.documentElement.classList.remove("ad-dragging");
+    if (d?.moved && e) {
+      try {
+        const el = e.currentTarget as HTMLElement;
+        if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
       }
-      setPos({ r: moveTo.current.r, b: moveTo.current.b });
+    }
+    if (d?.moved && !cancelled) {
+      const nextR = Math.round(moveTo.current.r);
+      const nextB = Math.round(moveTo.current.b);
+      if (win.current) {
+        win.current.style.right = nextR + "px";
+        win.current.style.bottom = nextB + "px";
+        win.current.style.transform = "";
+      }
+      setPos({ r: nextR, b: nextB });
+    } else if (win.current) {
+      win.current.style.transform = "";
     }
     setMoving(false);
-    window.setTimeout(() => (wasDrag.current = false), 0);
-    if (d && !d.moved && mode === "min") setMode("open");
+    if (wasDragTimerRef.current) window.clearTimeout(wasDragTimerRef.current);
+    wasDragTimerRef.current = window.setTimeout(() => {
+      wasDragTimerRef.current = 0;
+      wasDrag.current = false;
+    }, 60);
+    if (d && !d.moved && !cancelled && mode === "min") setMode("open");
+  };
+  const onResizeDown = (
+    e: React.PointerEvent<HTMLDivElement>,
+    dir: "n" | "w" | "e" | "nw",
+  ) => {
+    if (e.button !== 0 || small() || mode !== "open" || !win.current) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const rect = win.current.getBoundingClientRect();
+    const curR = Math.max(0, window.innerWidth - rect.right);
+    const curB = Math.max(0, window.innerHeight - rect.bottom);
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+    document.documentElement.classList.add("ad-dragging");
+    setResizing(true);
+    resizingRef.current = {
+      pointerId: e.pointerId,
+      dir,
+      x: e.clientX,
+      y: e.clientY,
+      w: rect.width,
+      h: rect.height,
+      r: curR,
+      b: curB,
+      nextW: rect.width,
+      nextH: rect.height,
+      nextR: curR,
+      raf: 0,
+    };
+  };
+  const onResizeMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const rz = resizingRef.current;
+    if (!rz || e.pointerId !== rz.pointerId || !win.current) return;
+    const dx = e.clientX - rz.x;
+    const dy = e.clientY - rz.y;
+    if (rz.dir === "w" || rz.dir === "nw") {
+      const maxW = Math.max(360, window.innerWidth - Math.max(12, rz.r) - 12);
+      rz.nextW = Math.min(maxW, Math.max(360, rz.w - dx));
+    } else if (rz.dir === "e") {
+      const leftEdge = window.innerWidth - rz.r - rz.w;
+      const maxW = Math.max(360, window.innerWidth - Math.max(12, leftEdge) - 12);
+      rz.nextW = Math.min(maxW, Math.max(360, rz.w + dx));
+      rz.nextR = Math.max(12, window.innerWidth - leftEdge - rz.nextW);
+    }
+    if (rz.dir === "n" || rz.dir === "nw") {
+      const maxH = Math.max(360, window.innerHeight - Math.max(12, rz.b) - 60);
+      rz.nextH = Math.min(maxH, Math.max(360, rz.h - dy));
+    }
+    if (!rz.raf) {
+      rz.raf = requestAnimationFrame(() => {
+        const cur = resizingRef.current;
+        if (!cur || !win.current) return;
+        cur.raf = 0;
+        win.current.style.width = `${Math.round(cur.nextW)}px`;
+        win.current.style.height = `${Math.round(cur.nextH)}px`;
+        if (cur.dir === "e") {
+          win.current.style.right = `${Math.round(cur.nextR)}px`;
+        }
+      });
+    }
+  };
+  const onResizeUp = (
+    e: React.PointerEvent<HTMLDivElement>,
+    cancelled = false,
+  ) => {
+    const rz = resizingRef.current;
+    if (!rz) return;
+    if (rz.raf) {
+      cancelAnimationFrame(rz.raf);
+      rz.raf = 0;
+    }
+    resizingRef.current = null;
+    document.documentElement.classList.remove("ad-dragging");
+    try {
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+    } catch {
+      /* ignore */
+    }
+    if (!cancelled) {
+      const w = Math.round(rz.nextW);
+      const h = Math.round(rz.nextH);
+      setSize({ w, h });
+      if (rz.dir === "e") {
+        setPos({ r: Math.round(rz.nextR), b: Math.round(rz.b) });
+      }
+    } else if (win.current) {
+      win.current.style.width = size ? `${size.w}px` : "";
+      win.current.style.height = size ? `${size.h}px` : "";
+    }
+    setResizing(false);
   };
 
   const loadProps = useCallback(
@@ -2027,7 +2565,11 @@ function ChatWindow({
     if (!d || msgs === null || drafted.current === target.key + d) return;
     drafted.current = target.key + d;
     setInput(d);
-    window.setTimeout(() => box.current?.focus({ preventScroll: true }), 40);
+    const tid = window.setTimeout(
+      () => box.current?.focus({ preventScroll: true }),
+      40,
+    );
+    return () => window.clearTimeout(tid);
   }, [msgs === null, target.key, target.draft]);
   useEffect(() => {
     if (mode === "open" && msgs && !small())
@@ -2042,16 +2584,55 @@ function ChatWindow({
     });
   }, [expanded, listOpen]);
 
-  // Follow the answer while it streams, unless the reader scrolled up to read something earlier.
-  useLayoutEffect(() => {
-    const el = list.current;
-    if (el && atBottom) el.scrollTop = el.scrollHeight;
+  // Follow the answer while it streams via coalesced rAF, unless the reader scrolled up to read something earlier.
+  const stickRef = useRef(true);
+  const progScrollRef = useRef(false);
+  const scrollRafRef = useRef<number>(0);
+  useEffect(() => {
+    stickRef.current = true;
+    setAtBottom(true);
+  }, [sessionURL]);
+  useEffect(() => {
+    if (!stickRef.current) return;
+    if (scrollRafRef.current) return;
+    scrollRafRef.current = requestAnimationFrame(() => {
+      scrollRafRef.current = 0;
+      const el = list.current;
+      if (!el || !stickRef.current) return;
+      progScrollRef.current = true;
+      el.scrollTop = el.scrollHeight;
+      requestAnimationFrame(() => {
+        progScrollRef.current = false;
+      });
+    });
   }, [msgs, live, atBottom]);
+  useEffect(
+    () => () => {
+      if (scrollRafRef.current) {
+        cancelAnimationFrame(scrollRafRef.current);
+        scrollRafRef.current = 0;
+      }
+    },
+    [],
+  );
+  const onListWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    if (e.deltaY < -2 && stickRef.current) {
+      stickRef.current = false;
+      setAtBottom(false);
+    };
+  };
   const onScroll = () => {
     const el = list.current;
-    if (el) setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 40);
+    if (!el || progScrollRef.current) return;
+    const near = el.scrollHeight - el.scrollTop - el.clientHeight < 44;
+    if (stickRef.current !== near) {
+      stickRef.current = near;
+      setAtBottom(near);
+    }
   };
   const toBottom = () => {
+    stickRef.current = true;
+    setAtBottom(true);
     const el = list.current;
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   };
@@ -2101,6 +2682,18 @@ function ChatWindow({
     return ok;
   };
 
+  const sendingRef = useRef(false);
+  const liveRafRef = useRef<number>(0);
+  useEffect(
+    () => () => {
+      if (liveRafRef.current) {
+        cancelAnimationFrame(liveRafRef.current);
+        liveRafRef.current = 0;
+      }
+    },
+    [],
+  );
+
   const send = async (
     override?: string,
     isRetry?: boolean,
@@ -2108,7 +2701,8 @@ function ChatWindow({
   ) => {
     const text = (queued ? queued.text : (override ?? input)).trim();
     const sent = queued ? queued.images || [] : override !== undefined ? [] : imgs;
-    if ((!text && !sent.length) || busy || !on) return;
+    if ((!text && !sent.length) || busy || sendingRef.current || !on) return;
+    sendingRef.current = true;
     const mine = sessionURL;
     const here = () => sessionRef.current === mine;
     setError(null);
@@ -2141,11 +2735,38 @@ function ChatWindow({
       setInput("");
       setImgs([]);
     }
+    stickRef.current = true;
     setAtBottom(true);
     const cur = newLive();
     setLive({ ...cur });
     const ac = new AbortController();
     abort.current = ac;
+    const snapshotLive = () => ({
+      ...cur,
+      tools: [...cur.tools],
+      steps: cur.steps.map((x) => ({ ...x })),
+      made: [...cur.made],
+      rehearsals: cur.rehearsals ? [...cur.rehearsals] : undefined,
+      knowledges: cur.knowledges ? [...cur.knowledges] : undefined,
+      components: cur.components ? [...cur.components] : undefined,
+      sandboxConfirms: cur.sandboxConfirms
+        ? [...cur.sandboxConfirms]
+        : undefined,
+    });
+    const scheduleLive = () => {
+      if (!here() || liveRafRef.current) return;
+      liveRafRef.current = requestAnimationFrame(() => {
+        liveRafRef.current = 0;
+        if (here()) setLive(snapshotLive());
+      });
+    };
+    const flushLive = () => {
+      if (liveRafRef.current) {
+        cancelAnimationFrame(liveRafRef.current);
+        liveRafRef.current = 0;
+      }
+      if (here()) setLive(snapshotLive());
+    };
     const done = () => ({
       role: "assistant" as const,
       text: cur.text,
@@ -2183,23 +2804,11 @@ function ChatWindow({
             },
         ac.signal,
         cur,
-        () =>
-          here() &&
-          setLive({
-            ...cur,
-            tools: [...cur.tools],
-            steps: cur.steps.map((x) => ({ ...x })),
-            made: [...cur.made],
-            rehearsals: cur.rehearsals ? [...cur.rehearsals] : undefined,
-            knowledges: cur.knowledges ? [...cur.knowledges] : undefined,
-            components: cur.components ? [...cur.components] : undefined,
-            sandboxConfirms: cur.sandboxConfirms
-              ? [...cur.sandboxConfirms]
-              : undefined,
-          }),
+        scheduleLive,
         () => (here() ? loadProps() : Promise.resolve()),
       );
       if (!here()) return;
+      flushLive();
       setMsgs((m) => [...(m || []), done()]);
       loadSessions();
     } catch (e) {
@@ -2244,12 +2853,22 @@ function ChatWindow({
       }
       if (!stopped && queue.items.length > 0) queue.setPaused(true);
     } finally {
+      if (liveRafRef.current) {
+        cancelAnimationFrame(liveRafRef.current);
+        liveRafRef.current = 0;
+      }
+      sendingRef.current = false;
       if (here()) {
         setLive(null);
         abort.current = null;
       }
     }
   };
+  const sendFnRef = useRef(send);
+  sendFnRef.current = send;
+  const sendAnswer = useCallback((t: string) => {
+    void sendFnRef.current(t);
+  }, []);
 
   const stop = (pauseQueue = true) => {
     if (pauseQueue && queue.items.length > 0) queue.setPaused(true);
@@ -2305,113 +2924,127 @@ function ChatWindow({
     }
   }, [busy, on, net, msgs, sessionURL, queue.paused, queue.items.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const decide = async (
-    id: string,
-    verb: "accept" | "reject",
-    body?: Record<string, unknown>,
-  ) => {
-    setDeciding(id);
-    try {
-      const curProp = props[id] as StepProposal | undefined;
-      const saved = await api<StepProposal>(`${base}/proposals/${id}/${verb}`, {
-        method: "POST",
-        body: body ? JSON.stringify(body) : undefined,
-      });
-      if (verb === "accept" && scope.kind === "comp")
-        window.dispatchEvent(
-          new CustomEvent("mh-ai-wrote", {
-            detail: {
-              name: scope.name,
-              files: ((props[id] as CompProposal | undefined)?.files || []).map(
-                (f) => ({ path: f.path, op: f.op, diff: f.diff }),
-              ),
-            },
-          }),
-        );
-      if (verb === "accept") {
-        if (curProp?.kind === "vex") {
-          window.dispatchEvent(new CustomEvent(SECURITY_CHANGED));
-          Message.success(
-            bi(
-              "已采纳并写入 VEX 漏洞处置记录",
-              "Accepted and saved to VEX triage",
-            ),
-          );
-        } else if (curProp?.kind === "baseline_waive") {
-          window.dispatchEvent(new CustomEvent(SECURITY_CHANGED));
-          Message.success(
-            bi(
-              "已采纳并写入配置安全基线豁免",
-              "Accepted and saved baseline waiver",
-            ),
-          );
-        } else if (curProp?.kind === "rehearsal") {
-          Message.success(
-            bi(
-              "已确认，正在前往集群变更演练",
-              "Confirmed; opening cluster rehearsal",
-            ),
-          );
-        } else if (curProp?.kind === "rehearsal_step") {
-          const rs = saved?.rehearsal_step || curProp.rehearsal_step;
+  const decidingRef = useRef(false);
+  const propsRef = useRef(props);
+  propsRef.current = props;
+  const decide = useCallback(
+    async (
+      id: string,
+      verb: "accept" | "reject",
+      body?: Record<string, unknown>,
+    ) => {
+      if (decidingRef.current) return;
+      decidingRef.current = true;
+      setDeciding(id);
+      try {
+        const curProps = propsRef.current;
+        const curProp = curProps[id] as StepProposal | undefined;
+        const saved = await api<StepProposal>(`${base}/proposals/${id}/${verb}`, {
+          method: "POST",
+          body: body ? JSON.stringify(body) : undefined,
+        });
+        if (verb === "accept" && scope.kind === "comp")
           window.dispatchEvent(
-            new CustomEvent(REHEARSAL_CHANGED, {
+            new CustomEvent("mh-ai-wrote", {
               detail: {
-                clusterId: rs?.cluster_id,
-                rehearsalId: rs?.rehearsal_id,
+                name: scope.name,
+                files: (
+                  (curProps[id] as CompProposal | undefined)?.files || []
+                ).map((f) => ({ path: f.path, op: f.op, diff: f.diff })),
               },
             }),
           );
-          Message.success(
-            bi(
-              "已采纳并更新演练步骤，页面已同步刷新",
-              "Rehearsal step updated and synced",
-            ),
-          );
-        } else if (curProp?.kind === "knowledge") {
-          const kb = saved?.knowledge;
-          Message.success(
-            kb?.team_doc_id
-              ? bi("已直接发布到团队知识库", "Published to team Knowledge Base")
-              : kb?.submission_id
+        if (verb === "accept") {
+          if (curProp?.kind === "vex") {
+            window.dispatchEvent(new CustomEvent(SECURITY_CHANGED));
+            Message.success(
+              bi(
+                "已采纳并写入 VEX 漏洞处置记录",
+                "Accepted and saved to VEX triage",
+              ),
+            );
+          } else if (curProp?.kind === "baseline_waive") {
+            window.dispatchEvent(new CustomEvent(SECURITY_CHANGED));
+            Message.success(
+              bi(
+                "已采纳并写入配置安全基线豁免",
+                "Accepted and saved baseline waiver",
+              ),
+            );
+          } else if (curProp?.kind === "rehearsal") {
+            Message.success(
+              bi(
+                "已确认，正在前往集群变更演练",
+                "Confirmed; opening cluster rehearsal",
+              ),
+            );
+          } else if (curProp?.kind === "rehearsal_step") {
+            const rs = saved?.rehearsal_step || curProp.rehearsal_step;
+            window.dispatchEvent(
+              new CustomEvent(REHEARSAL_CHANGED, {
+                detail: {
+                  clusterId: rs?.cluster_id,
+                  rehearsalId: rs?.rehearsal_id,
+                },
+              }),
+            );
+            Message.success(
+              bi(
+                "已采纳并更新演练步骤，页面已同步刷新",
+                "Rehearsal step updated and synced",
+              ),
+            );
+          } else if (curProp?.kind === "knowledge") {
+            const kb = saved?.knowledge;
+            Message.success(
+              kb?.team_doc_id
+                ? bi("已直接发布到团队知识库", "Published to team Knowledge Base")
+                : kb?.submission_id
+                  ? bi(
+                      "已提交到团队知识库等待审核",
+                      "Submitted to team Knowledge Base for review",
+                    )
+                  : bi(
+                      "已存入「我的知识库」",
+                      "Saved to your personal Knowledge Base",
+                    ),
+            );
+          } else if (curProp?.kind !== "component") {
+            Message.success(
+              scope.kind === "comp"
                 ? bi(
-                    "已提交到团队知识库等待审核",
-                    "Submitted to team Knowledge Base for review",
+                    "已写入草稿，工作台已重新检查",
+                    "Applied to draft; workbench re-checked",
                   )
                 : bi(
-                    "已存入「我的知识库」",
-                    "Saved to your personal Knowledge Base",
+                    "已写入执行手册和交付文档",
+                    "Applied to runbook and delivery docs",
                   ),
-          );
-        } else if (curProp?.kind !== "component") {
-          Message.success(
-            scope.kind === "comp"
-              ? bi(
-                  "已写入草稿，工作台已重新检查",
-                  "Applied to draft; workbench re-checked",
-                )
-              : bi(
-                  "已写入执行手册和交付文档",
-                  "Applied to runbook and delivery docs",
-                ),
-          );
+            );
+          }
         }
+        await loadProps();
+        onChanged();
+      } catch (e) {
+        err(e);
+      } finally {
+        decidingRef.current = false;
+        setDeciding("");
       }
-      await loadProps();
-      onChanged();
-    } catch (e) {
-      err(e);
-    } finally {
-      setDeciding("");
-    }
-  };
+    },
+    [base, scope, loadProps, onChanged],
+  );
 
   // "solved": the assistant writes the conversation up as a draft, the person reads and corrects it, and only then is it
   // written into the execution record. Closing the draft writes nothing and the question stays.
   const [draft, setDraft] = useState<AIReport | null>(null);
   const [markStep, setMarkStep] = useState(false);
   const [saving, setSaving] = useState<"" | "save" | "kb">("");
+  const resolvingRef = useRef(false);
+  const savingDraftRef = useRef(false);
   const resolve = async () => {
+    if (resolvingRef.current) return;
+    resolvingRef.current = true;
     setResolving(true);
     try {
       setDraft(
@@ -2424,13 +3057,15 @@ function ChatWindow({
     } catch (e) {
       err(e);
     } finally {
+      resolvingRef.current = false;
       setResolving(false);
     }
   };
   const isRunbookStep =
     target.key.startsWith("step:") && !target.key.startsWith("step:rehearsal:");
   const confirmDraft = async (toKB: boolean) => {
-    if (!draft) return;
+    if (!draft || savingDraftRef.current) return;
+    savingDraftRef.current = true;
     setSaving(toKB ? "kb" : "save");
     try {
       const rep = await api<AIReport>(`${base}/resolve`, {
@@ -2473,6 +3108,7 @@ function ChatWindow({
     } catch (e) {
       err(e);
     } finally {
+      savingDraftRef.current = false;
       setSaving("");
     }
   };
@@ -2751,27 +3387,27 @@ function ChatWindow({
   const displayTitle =
     target.fresh && savedSessTitle ? savedSessTitle : target.title;
 
+  const winStyle = useMemo<React.CSSProperties | undefined>(() => {
+    if (mode === "min") return undefined;
+    if (!pos && !size) return undefined;
+    return {
+      ...(pos ? { right: pos.r, bottom: pos.b } : {}),
+      ...(size ? { width: size.w, height: size.h } : {}),
+    };
+  }, [mode, pos, size]);
+  const nearLeftEdge =
+    typeof window !== "undefined" &&
+    pos !== null &&
+    pos.r > window.innerWidth * 0.35;
+
   return (
     <section
       ref={win}
-      className={`ad-win ${expanded && mode !== "min" ? "big" : ""} ${drag ? "drag" : ""} ${mode === "min" ? "min" : ""} ${mode === "closed" ? "hidden" : ""} ${moving ? "moving" : ""}`}
-      style={
-        pos && mode !== "min" ? { right: pos.r, bottom: pos.b } : undefined
-      }
+      className={`ad-win ${expanded && mode !== "min" ? "big" : ""} ${nearLeftEdge ? "side-left" : ""} ${drag ? "drag" : ""} ${mode === "min" ? "min" : ""} ${mode === "closed" ? "hidden" : ""} ${moving ? "moving" : ""} ${resizing ? "resizing" : ""}`}
+      style={winStyle}
       aria-hidden={mode === "closed" || undefined}
       role="dialog"
       aria-label={bi(`AI 助手：${displayTitle}`, `AI Assistant: ${displayTitle}`)}
-      onKeyDown={(e) => {
-        if (e.key === "Escape" && !e.defaultPrevented) {
-          // a menu that is open takes the key first; the window stays
-          const menu = [
-            ...document.querySelectorAll<HTMLElement>(".arco-trigger-popup"),
-          ].some((el) => el.offsetParent !== null);
-          if (menu) return;
-          if (listOpen) setListOpen(false);
-          else onClose();
-        }
-      }}
       onDragOver={(e) => {
         if (images && e.dataTransfer.types.includes("Files")) {
           e.preventDefault();
@@ -2779,7 +3415,7 @@ function ChatWindow({
         }
       }}
       onDragLeave={(e) => {
-        if (e.currentTarget === e.target) setDrag(false);
+        if (!e.currentTarget.contains(e.relatedTarget as Node)) setDrag(false);
       }}
       onDrop={(e) => {
         if (!images) return;
@@ -2788,21 +3424,66 @@ function ChatWindow({
         addFiles(e.dataTransfer.files);
       }}
     >
+      {mode === "open" && (
+        <>
+          <div
+            className="ad-rz ad-rz-n"
+            onPointerDown={(e) => onResizeDown(e, "n")}
+            onPointerMove={onResizeMove}
+            onPointerUp={(e) => onResizeUp(e, false)}
+            onPointerCancel={(e) => onResizeUp(e, true)}
+            onDoubleClick={() => setSize(null)}
+            aria-hidden
+          />
+          <div
+            className="ad-rz ad-rz-w"
+            onPointerDown={(e) => onResizeDown(e, "w")}
+            onPointerMove={onResizeMove}
+            onPointerUp={(e) => onResizeUp(e, false)}
+            onPointerCancel={(e) => onResizeUp(e, true)}
+            onDoubleClick={() => setSize(null)}
+            aria-hidden
+          />
+          <div
+            className="ad-rz ad-rz-nw"
+            onPointerDown={(e) => onResizeDown(e, "nw")}
+            onPointerMove={onResizeMove}
+            onPointerUp={(e) => onResizeUp(e, false)}
+            onPointerCancel={(e) => onResizeUp(e, true)}
+            onDoubleClick={() => setSize(null)}
+            aria-hidden
+          />
+          {pos && pos.r > 28 && (
+            <div
+              className="ad-rz ad-rz-e"
+              onPointerDown={(e) => onResizeDown(e, "e")}
+              onPointerMove={onResizeMove}
+              onPointerUp={(e) => onResizeUp(e, false)}
+              onPointerCancel={(e) => onResizeUp(e, true)}
+              onDoubleClick={() => setSize(null)}
+              aria-hidden
+            />
+          )}
+        </>
+      )}
       <header
         className="ad-head"
         onPointerDown={onDown}
         onPointerMove={onMove}
-        onPointerUp={onUp}
-        onPointerCancel={onUp}
-        onDoubleClick={(e) =>
-          !(e.target as HTMLElement).closest(".ad-tools") && setPos(null)
-        }
+        onPointerUp={(e) => onUp(e, false)}
+        onPointerCancel={(e) => onUp(e, true)}
+        onDoubleClick={(e) => {
+          if (!(e.target as HTMLElement).closest(".ad-tools")) {
+            setPos(null);
+            setSize(null);
+          }
+        }}
         title={
           expanded
             ? undefined
             : bi(
-                "拖动可移动窗口，双击回到右下角",
-                "Drag to move; double-click to reset position",
+                "拖动可移动窗口，拖拽边缘可调整大小，双击恢复默认",
+                "Drag to move, drag edges to resize, double-click to reset",
               )
         }
       >
@@ -2996,6 +3677,7 @@ function ChatWindow({
           <div
             className="ad-list"
             ref={list}
+            onWheel={onListWheel}
             onScroll={onScroll}
             aria-live="polite"
             aria-busy={busy}
@@ -3047,7 +3729,7 @@ function ChatWindow({
                       deciding={deciding}
                       decide={decide}
                       comp={scope.kind === "comp"}
-                      answer={(t) => send(t)}
+                      answer={sendAnswer}
                       busy={busy}
                       onRetry={
                         isLast && !busy && on && m.error && prevUser?.text
@@ -4116,6 +4798,13 @@ export function ChatErrorCard({
   useLang();
   const [openDiag, setOpenDiag] = useState(false);
   const [copied, setCopied] = useState(false);
+  const copyTimerRef = useRef<number>(0);
+  useEffect(
+    () => () => {
+      if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
+    },
+    [],
+  );
   const info = classifyChatError(text, diag, kind, rawError);
   const modelLabel = [diag?.provider, diag?.model].filter(Boolean).join(" · ");
   const hasDetail = Boolean(diag || info.raw);
@@ -4183,7 +4872,11 @@ export function ChatErrorCard({
                   .join("\n"),
               );
               setCopied(true);
-              window.setTimeout(() => setCopied(false), 1400);
+              if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
+              copyTimerRef.current = window.setTimeout(() => {
+                copyTimerRef.current = 0;
+                setCopied(false);
+              }, 1400);
             }}
           >
             {copied ? <IconCheck /> : <IconCopy />}{" "}
@@ -4513,7 +5206,47 @@ function Activity({ tools }: { tools: string[] }) {
   );
 }
 
-export function Bubble({
+type BubbleProps = {
+  answer?: (text: string) => void;
+  answered?: string;
+  onRetry?: () => void;
+  busy?: boolean;
+  m: Msg;
+  jobBase: string;
+  props: Record<string, StepProposal | CompProposal>;
+  deciding: string;
+  decide: (
+    id: string,
+    v: "accept" | "reject",
+    body?: Record<string, unknown>,
+  ) => void;
+  comp: boolean;
+};
+
+function areBubblesEqual(prev: BubbleProps, next: BubbleProps): boolean {
+  if (
+    prev.m !== next.m ||
+    prev.jobBase !== next.jobBase ||
+    prev.comp !== next.comp ||
+    prev.answered !== next.answered ||
+    Boolean(prev.answer) !== Boolean(next.answer) ||
+    Boolean(prev.onRetry) !== Boolean(next.onRetry)
+  ) {
+    return false;
+  }
+  if (next.m.error && prev.busy !== next.busy) return false;
+  const ids = next.m.proposals;
+  if (ids && ids.length > 0) {
+    for (let i = 0; i < ids.length; i++) {
+      const id = ids[i];
+      if (prev.props[id] !== next.props[id]) return false;
+      if ((prev.deciding === id) !== (next.deciding === id)) return false;
+    }
+  }
+  return true;
+}
+
+export const Bubble = React.memo(function Bubble({
   m,
   jobBase,
   props,
@@ -4524,20 +5257,16 @@ export function Bubble({
   answered,
   onRetry,
   busy,
-}: {
-  answer?: (text: string) => void;
-  answered?: string;
-  onRetry?: () => void;
-  busy?: boolean;
-  m: Msg;
-  jobBase: string;
-  props: Record<string, StepProposal | CompProposal>;
-  deciding: string;
-  decide: (id: string, v: "accept" | "reject", body?: Record<string, unknown>) => void;
-  comp: boolean;
-}) {
+}: BubbleProps) {
   useLang();
   const [copied, setCopied] = useState(false);
+  const copyTimerRef = useRef<number>(0);
+  useEffect(
+    () => () => {
+      if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
+    },
+    [],
+  );
   if (m.role === "user")
     return (
       <div className="ad-msg user">
@@ -4666,7 +5395,12 @@ export function Bubble({
               onClick={() => {
                 copy(m.text);
                 setCopied(true);
-                window.setTimeout(() => setCopied(false), 1400);
+                if (copyTimerRef.current)
+                  window.clearTimeout(copyTimerRef.current);
+                copyTimerRef.current = window.setTimeout(() => {
+                  copyTimerRef.current = 0;
+                  setCopied(false);
+                }, 1400);
               }}
             >
               {copied ? <IconCheck /> : <IconCopy />}{" "}
@@ -4682,7 +5416,7 @@ export function Bubble({
       </div>
     </div>
   );
-}
+}, areBubblesEqual);
 
 /** Questions the assistant asks instead of guessing: pick an option or type an answer; the answer goes back as the next message. */
 export function AskCard({
@@ -4908,6 +5642,7 @@ export function MadeFiles({ files }: { files: MsgFile[] }) {
 export function SandboxConfirmCard({ req }: { req: SandboxConfirm }) {
   useLang();
   const [busy, setBusy] = useState("");
+  const busyRef = useRef(false);
   const [done, setDone] = useState("");
   const [showCode, setShowCode] = useState(
     req.kind === "python" || req.kind === "shell",
@@ -4917,6 +5652,8 @@ export function SandboxConfirmCard({ req }: { req: SandboxConfirm }) {
   const submit = async (
     decision: "allow" | "allow_offline" | "allow_session" | "deny",
   ) => {
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(decision);
     try {
       await api("/api/ai/sandbox/approve", {
@@ -4927,6 +5664,7 @@ export function SandboxConfirmCard({ req }: { req: SandboxConfirm }) {
     } catch (e) {
       err(e);
     } finally {
+      busyRef.current = false;
       setBusy("");
     }
   };
@@ -5258,6 +5996,7 @@ function KnowledgeCard({
   const [title, setTitle] = useState(k.title || "");
   const [content, setContent] = useState(k.content || "");
   const [saving, setSaving] = useState<"" | "personal" | "team">("");
+  const savingRef = useRef(false);
   const [savedPersonalId, setSavedPersonalId] = useState(k.kb_id || "");
   const [savedTeamId, setSavedTeamId] = useState(k.team_doc_id || "");
   const [savedSubId, setSavedSubId] = useState(k.submission_id || "");
@@ -5277,6 +6016,7 @@ function KnowledgeCard({
   const preferTeam = k.scope === "team" && (canManageTeam || canSubmitTeam);
 
   const saveDirect = async (target: "personal" | "team") => {
+    if (savingRef.current) return;
     const cleanTitle = title.trim() || k.title;
     const cleanText = content.trim() || k.content;
     if (!cleanTitle || !cleanText) {
@@ -5288,6 +6028,7 @@ function KnowledgeCard({
       setEditing(false);
       return;
     }
+    savingRef.current = true;
     setSaving(target);
     try {
       if (target === "personal") {
@@ -5331,6 +6072,7 @@ function KnowledgeCard({
     } catch (e) {
       err(e);
     } finally {
+      savingRef.current = false;
       setSaving("");
     }
   };

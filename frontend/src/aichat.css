@@ -1,6 +1,12 @@
 /* The assistant's chat window, its answers and proposal cards. Prefixes ad- (window), md (answers). */
 
 /* ---------------------------------------------------------------- launcher */
+html.ad-dragging,
+html.ad-dragging * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
 .ad-launch {
   position: fixed;
   right: 20px;
@@ -22,17 +28,32 @@
   -webkit-backdrop-filter: saturate(180%) blur(18px);
   box-shadow: var(--shadow-md);
   cursor: pointer;
+  touch-action: none;
+  user-select: none;
   animation: ad-pop-in 0.42s var(--spring) both;
   transition:
-    transform 0.2s var(--ease-out),
-    box-shadow 0.2s var(--ease-out);
+    transform 0.2s cubic-bezier(0.32, 0.72, 0, 1),
+    box-shadow 0.2s var(--spring);
 }
-.ad-launch:hover {
+.ad-launch:hover:not(.is-dragging):not(.is-snapping) {
   transform: translateY(-1px);
   box-shadow: var(--shadow-lg);
 }
-.ad-launch:active {
-  transform: scale(0.97);
+.ad-launch:active:not(.is-dragging):not(.is-snapping) {
+  transform: scale(0.975);
+}
+.ad-launch.is-dragging {
+  cursor: grabbing;
+  box-shadow: var(--shadow-lg);
+  transition: none !important;
+  animation: none !important;
+  will-change: transform;
+}
+.ad-launch.is-snapping {
+  transition:
+    transform 0.42s cubic-bezier(0.32, 0.72, 0, 1),
+    box-shadow 0.24s var(--spring) !important;
+  animation: none !important;
 }
 .ad-launch:focus-visible {
   outline: none;
@@ -120,8 +141,9 @@
   display: flex;
   flex-direction: column;
   width: 436px;
-  max-width: calc(100vw - 32px);
+  max-width: calc(100vw - 24px);
   height: min(680px, calc(100vh - 88px));
+  max-height: calc(100vh - 68px);
   overflow: hidden;
   border: 1px solid var(--line-strong);
   border-radius: 14px;
@@ -129,10 +151,19 @@
   background: var(--surface);
   box-shadow: var(--shadow-lg);
   transform-origin: 100% 100%;
-  animation: ad-win-in 0.34s var(--spring) both;
+  opacity: 1;
+  visibility: visible;
+  transform: translate3d(0, 0, 0) scale(1);
+  animation: ad-win-in 0.32s cubic-bezier(0.32, 0.72, 0, 1) both;
   transition:
-    width 0.3s var(--spring),
-    height 0.3s var(--spring);
+    opacity 0.24s cubic-bezier(0.32, 0.72, 0, 1),
+    transform 0.3s cubic-bezier(0.32, 0.72, 0, 1),
+    visibility 0s linear 0s,
+    width 0.3s cubic-bezier(0.32, 0.72, 0, 1),
+    height 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.ad-win.side-left {
+  transform-origin: 0% 100%;
 }
 .ad-win.big {
   width: min(1040px, calc(100vw - 40px));
@@ -141,21 +172,89 @@
 @keyframes ad-win-in {
   from {
     opacity: 0;
-    transform: translateY(16px) scale(0.96);
+    transform: translate3d(0, 14px, 0) scale(0.965);
   }
 }
 @keyframes ad-pop-in {
   from {
     opacity: 0;
-    transform: translateY(8px) scale(0.9);
+    transform: translate3d(0, 8px, 0) scale(0.92);
   }
 }
 .ad-win.hidden {
-  display: none;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translate3d(0, 14px, 0) scale(0.965);
+  transition:
+    opacity 0.18s cubic-bezier(0.32, 0.72, 0, 1),
+    transform 0.22s cubic-bezier(0.32, 0.72, 0, 1),
+    visibility 0s linear 0.22s,
+    width 0.3s cubic-bezier(0.32, 0.72, 0, 1),
+    height 0.3s cubic-bezier(0.32, 0.72, 0, 1);
 }
-.ad-win.moving {
-  transition: none;
+.ad-win.moving,
+.ad-win.resizing {
+  transition: none !important;
   user-select: none;
+}
+.ad-win.resizing {
+  will-change: width, height;
+}
+.ad-rz {
+  position: absolute;
+  z-index: 6;
+  touch-action: none;
+  user-select: none;
+}
+.ad-rz-n {
+  top: 0;
+  left: 14px;
+  right: 14px;
+  height: 6px;
+  cursor: ns-resize;
+}
+.ad-rz-w {
+  top: 14px;
+  bottom: 0;
+  left: 0;
+  width: 6px;
+  cursor: ew-resize;
+}
+.ad-rz-e {
+  top: 14px;
+  bottom: 0;
+  right: 0;
+  width: 6px;
+  cursor: ew-resize;
+}
+.ad-rz-nw {
+  top: 0;
+  left: 0;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+  z-index: 7;
+}
+.ad-rz-n:hover,
+.ad-rz-w:hover,
+.ad-rz-e:hover {
+  background: color-mix(in srgb, var(--brand) 22%, transparent);
+}
+.ad-rz-nw::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 6px;
+  height: 6px;
+  border-top: 1.5px solid transparent;
+  border-left: 1.5px solid transparent;
+  border-top-left-radius: 3px;
+  transition: border-color 0.16s var(--spring);
+}
+.ad-rz-nw:hover::after {
+  border-color: var(--brand);
 }
 .ad-win .ad-head {
   cursor: grab;
@@ -290,10 +389,17 @@
   font-size: 15px;
   background: none;
   cursor: pointer;
+  transition:
+    color 0.16s var(--spring),
+    background-color 0.16s var(--spring),
+    transform 0.16s cubic-bezier(0.32, 0.72, 0, 1);
 }
 .ad-tools button:hover:not(:disabled) {
   color: var(--ink);
   background: var(--hover);
+}
+.ad-tools button:active:not(:disabled) {
+  transform: scale(0.94);
 }
 .ad-tools button:disabled {
   opacity: 0.4;
@@ -459,16 +565,25 @@
   text-align: left;
   background: none;
   cursor: pointer;
-  transition: background 0.12s;
+  transition:
+    background 0.16s var(--spring),
+    transform 0.16s cubic-bezier(0.32, 0.72, 0, 1);
 }
 .ad-sess-group button:hover:not(:disabled) {
   background: var(--hover);
+}
+.ad-sess-group button:active:not(:disabled) {
+  transform: scale(0.985);
 }
 .ad-sess-group button.on {
   background: var(--surface);
   box-shadow:
     0 1px 2px rgba(0, 0, 0, 0.06),
     0 0 0 1px var(--line);
+}
+body[arco-theme="dark"] .ad-sess-group button.on {
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-sm);
 }
 .ad-sess-group button.on b {
   color: var(--brand-ink);
@@ -516,8 +631,11 @@
   position: absolute;
   inset: 0;
   z-index: 5;
-  background: rgba(0, 0, 0, 0.08);
-  animation: ad-fade 0.18s var(--ease-out) both;
+  background: rgba(11, 13, 18, 0.2);
+  animation: ad-fade 0.18s var(--spring) both;
+}
+body[arco-theme="dark"] .ad-pop {
+  background: rgba(0, 0, 0, 0.46);
 }
 .ad-pop .ad-sessions {
   width: 100%;
@@ -651,6 +769,7 @@
 .ad-time {
   color: var(--faint);
   font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 .ad-msg.ai {
   display: grid;
@@ -704,10 +823,17 @@
   font: 12px var(--sans);
   background: none;
   cursor: pointer;
+  transition:
+    color 0.15s var(--spring),
+    background-color 0.15s var(--spring),
+    transform 0.15s cubic-bezier(0.32, 0.72, 0, 1);
 }
 .ad-acts button:hover {
   color: var(--ink);
   background: var(--hover);
+}
+.ad-acts button:active {
+  transform: scale(0.96);
 }
 .ad-notice {
   margin-bottom: 6px;
@@ -795,6 +921,11 @@
     0 14px 30px -8px rgba(11, 13, 18, 0.3),
     0 4px 12px -3px rgba(255, 70, 45, 0.16);
 }
+body[arco-theme="dark"] .ad-empty-mark {
+  box-shadow:
+    0 16px 34px -8px rgba(0, 0, 0, 0.65),
+    0 4px 14px -3px rgba(255, 107, 87, 0.22);
+}
 .ad-empty p {
   max-width: 340px;
   margin: 0;
@@ -829,7 +960,7 @@
   background: var(--brand-soft);
 }
 .ad-chips button:active:not(:disabled) {
-  transform: scale(0.98);
+  transform: scale(0.975);
 }
 .ad-chips button:disabled {
   opacity: 0.5;
@@ -995,6 +1126,7 @@
   margin-left: auto;
   font-size: 11.5px;
   color: var(--faint);
+  font-variant-numeric: tabular-nums;
 }
 .ad-errcard-summary {
   margin: 0;
@@ -1030,12 +1162,19 @@
   font: 500 12px/1 var(--sans);
   cursor: pointer;
   white-space: nowrap;
-  transition: border-color 0.15s, background-color 0.15s, color 0.15s;
+  transition:
+    border-color 0.16s var(--spring),
+    background-color 0.16s var(--spring),
+    color 0.16s var(--spring),
+    transform 0.16s cubic-bezier(0.32, 0.72, 0, 1);
 }
 .ad-errcard-btn:hover:not(:disabled) {
   border-color: var(--brand-line);
   color: var(--brand-ink);
   background: var(--surface-2);
+}
+.ad-errcard-btn:active:not(:disabled) {
+  transform: scale(0.975);
 }
 .ad-errcard-btn:disabled {
   opacity: 0.5;
@@ -1277,6 +1416,17 @@
   box-shadow: var(--shadow-md);
   cursor: pointer;
   animation: ad-pop-in 0.24s var(--spring) both;
+  transition:
+    background-color 0.16s var(--spring),
+    border-color 0.16s var(--spring),
+    transform 0.16s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.ad-down:hover {
+  background: var(--surface-2);
+  border-color: var(--line-strong);
+}
+.ad-down:active {
+  transform: scale(0.94);
 }
 
 /* solved, compose */
@@ -1440,10 +1590,21 @@
   padding: 0;
   border: 2px solid var(--surface);
   border-radius: 50%;
-  color: #fff;
+  color: #ffffff;
   font-size: 9px;
-  background: var(--ink-2);
+  background: rgba(11, 13, 18, 0.78);
   cursor: pointer;
+  transition: transform 0.15s cubic-bezier(0.32, 0.72, 0, 1), background-color 0.15s var(--spring);
+}
+.ad-thumbs button:hover {
+  background: rgba(11, 13, 18, 0.92);
+}
+.ad-thumbs button:active {
+  transform: scale(0.92);
+}
+body[arco-theme="dark"] .ad-thumbs button {
+  background: rgba(14, 17, 22, 0.88);
+  border-color: var(--surface);
 }
 .ad-drop {
   position: absolute;
@@ -1566,11 +1727,20 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
   padding: 3px 4px 3px 12px;
   border-bottom: 1px solid var(--line);
   color: var(--mute);
   font-size: 11.5px;
   background: var(--surface-2);
+}
+.md-code figcaption .md-code-cap {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .md-code figcaption button {
   display: inline-flex;
@@ -1581,12 +1751,24 @@
   border-radius: 6px;
   color: var(--mute);
   font: 11.5px var(--sans);
+  white-space: nowrap;
   background: none;
   cursor: pointer;
+  transition:
+    color 0.15s var(--spring),
+    background-color 0.15s var(--spring),
+    transform 0.15s cubic-bezier(0.32, 0.72, 0, 1);
 }
-.md-code figcaption button:hover {
+.md-code figcaption button:hover:not(:disabled) {
   color: var(--ink);
   background: var(--hover);
+}
+.md-code figcaption button:active:not(:disabled) {
+  transform: scale(0.96);
+}
+.md-code figcaption button:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 .md-code pre {
   margin: 0;
@@ -1843,6 +2025,9 @@
 
 /* ---------------------------------------------------------------- small screens, motion */
 @media (max-width: 640px) {
+  .ad-rz {
+    display: none;
+  }
   .ad-win.min {
     inset: auto 0 0 0;
     width: 100%;
@@ -1937,6 +2122,7 @@
 .ps-head small {
   color: var(--faint);
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 .ps-now {
   overflow: hidden;
@@ -2029,6 +2215,7 @@
 .ps-r small {
   font-size: 11.5px;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 .ps-tool.bad .ps-r small:first-child {
   color: var(--bad);
@@ -2051,11 +2238,11 @@
 /* the launcher at the foot of a page: just its mark, and the full button again under the pointer */
 .ad-launch {
   transition:
-    transform 0.2s var(--spring),
-    box-shadow 0.2s,
+    transform 0.2s cubic-bezier(0.32, 0.72, 0, 1),
+    box-shadow 0.2s var(--spring),
     padding 0.3s var(--spring),
     gap 0.3s var(--spring),
-    opacity 0.25s;
+    opacity 0.25s var(--spring);
 }
 .ad-launch > span,
 .ad-launch > kbd {
@@ -2064,15 +2251,15 @@
   white-space: nowrap;
   transition:
     max-width 0.3s var(--spring),
-    opacity 0.2s;
+    opacity 0.2s var(--spring);
 }
-.ad-launch.mini:not(:hover):not(:focus-visible) {
+.ad-launch.mini:not(:hover):not(:focus-visible):not(.is-dragging) {
   gap: 0;
   padding: 0 11px;
   opacity: 0.88;
 }
-.ad-launch.mini:not(:hover):not(:focus-visible) > span,
-.ad-launch.mini:not(:hover):not(:focus-visible) > kbd {
+.ad-launch.mini:not(:hover):not(:focus-visible):not(.is-dragging) > span,
+.ad-launch.mini:not(:hover):not(:focus-visible):not(.is-dragging) > kbd {
   max-width: 0;
   min-width: 0;
   padding: 0;
@@ -2086,13 +2273,13 @@
     right: 14px;
     bottom: 14px;
   }
-  .ad-launch:not(.busy):not(:hover):not(:focus-visible) {
+  .ad-launch:not(.busy):not(:hover):not(:focus-visible):not(.is-dragging) {
     gap: 0;
     padding: 0 11px;
     opacity: 0.88;
   }
-  .ad-launch:not(.busy):not(:hover):not(:focus-visible) > span,
-  .ad-launch:not(.busy):not(:hover):not(:focus-visible) > kbd {
+  .ad-launch:not(.busy):not(:hover):not(:focus-visible):not(.is-dragging) > span,
+  .ad-launch:not(.busy):not(:hover):not(:focus-visible):not(.is-dragging) > kbd {
     max-width: 0;
     min-width: 0;
     padding: 0;
@@ -2147,6 +2334,7 @@
 
 .md-code-acts {
   display: inline-flex;
+  flex-shrink: 0;
   gap: 4px;
 }
 .md-math {
@@ -2192,10 +2380,17 @@
   color: var(--ink);
   text-decoration: none;
   background: var(--surface);
+  transition:
+    border-color 0.18s var(--spring),
+    background-color 0.18s var(--spring),
+    transform 0.16s cubic-bezier(0.32, 0.72, 0, 1);
 }
 .ad-made-i:hover {
   border-color: var(--brand);
   background: var(--hover);
+}
+.ad-made-i:active {
+  transform: scale(0.985);
 }
 .ad-made-i > svg:first-child {
   flex: none;
@@ -2223,6 +2418,7 @@
 .ad-made-i small {
   color: var(--faint);
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---- questions the assistant asks instead of guessing (AskCard): choices as rows, one tap answers ---- */
@@ -2293,6 +2489,7 @@
   font-family: var(--mono);
   font-size: 11px;
   font-weight: 650;
+  font-variant-numeric: tabular-nums;
 }
 body[arco-theme="dark"] .ad-ask-n.is-spark {
   background: rgba(255, 85, 62, 0.14);
@@ -2331,7 +2528,7 @@ body[arco-theme="dark"] .ad-ask-n.is-spark {
   transform: translateY(-1px);
 }
 .ad-ask-opts button:active:not(:disabled) {
-  transform: scale(0.99);
+  transform: scale(0.975);
 }
 .ad-ask-opts button:focus-visible {
   outline: none;
@@ -2725,7 +2922,7 @@ body[arco-theme="dark"] .ad-ask-n.is-spark {
   margin-right: 6px;
   font-size: 11px;
   color: var(--mute);
-  transition: transform 0.16s ease;
+  transition: transform 0.18s var(--spring);
 }
 .ad-wu-more[open] summary::before {
   transform: rotate(90deg);
@@ -2815,7 +3012,7 @@ body[arco-theme="dark"] .ad-ask-n.is-spark {
   align-self: stretch;
 }
 .ad-win.moving {
-  will-change: translate;
+  will-change: transform;
   box-shadow: var(--shadow-md);
 }
 
@@ -2852,6 +3049,15 @@ body[arco-theme="dark"] .ad-ask-n.is-spark {
   font-size: 12.5px;
   color: var(--brand-ink);
   background: var(--brand-soft, rgba(88, 80, 236, 0.08));
+  transition:
+    background-color 0.16s var(--spring),
+    transform 0.16s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.ad-card-opts button:hover {
+  background: color-mix(in srgb, var(--brand) 16%, transparent);
+}
+.ad-card-opts button:active {
+  transform: scale(0.975);
 }
 .ad-card-opts button:focus-visible {
   box-shadow: var(--ring);
@@ -3003,11 +3209,18 @@ body[arco-theme="dark"] .ad-ask-n.is-spark {
   border: 1px solid var(--line);
   border-radius: 12px;
   cursor: pointer;
+  transition:
+    background-color 0.16s var(--spring),
+    border-color 0.16s var(--spring),
+    transform 0.16s cubic-bezier(0.32, 0.72, 0, 1);
 }
 .ad-hist-list button:hover,
 .ad-hist-list button:focus-visible {
   background: var(--brand-soft);
   border-color: var(--brand-line);
+}
+.ad-hist-list button:active {
+  transform: scale(0.985);
 }
 .ad-hist-msgs {
   margin-top: 12px;
@@ -3156,7 +3369,7 @@ body[arco-theme="dark"] .ad-ask-n.is-spark {
 .ad-sbc-toggle svg:last-child {
   margin-left: auto;
   color: var(--faint);
-  transition: transform 0.2s ease;
+  transition: transform 0.2s var(--spring);
 }
 .ad-sbc-code pre {
   margin: 0;
@@ -3302,10 +3515,10 @@ body[arco-theme="dark"] .ad-tag.sec-tag-low {
   );
 }
 .ad-card-rh.is-quick {
-  border-color: color-mix(in srgb, #10b981 36%, var(--line));
+  border-color: color-mix(in srgb, var(--ok) 36%, var(--line));
   background: linear-gradient(
     180deg,
-    color-mix(in srgb, #10b981 5%, var(--surface)) 0%,
+    color-mix(in srgb, var(--ok) 5%, var(--surface)) 0%,
     var(--surface) 46%
   );
 }
@@ -3406,7 +3619,7 @@ body[arco-theme="dark"] .ad-tag.sec-tag-low {
 }
 .ad-rh-goal-toggle svg {
   font-size: 12px;
-  transition: transform 0.16s ease;
+  transition: transform 0.18s var(--spring);
 }
 .ad-rh-goal-body {
   padding: 9px 11px;

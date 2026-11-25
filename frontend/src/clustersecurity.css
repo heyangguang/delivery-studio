@@ -138,7 +138,7 @@
 }
 .csec-kpi-lbl {
   font-size: 12px;
-  color: var(--muted);
+  color: var(--mute);
 }
 .csec-kpi-val {
   font-size: 22px;
@@ -231,7 +231,7 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  min-width: 280px;
+  min-width: min(280px, 100%);
   flex: 1 1 320px;
 }
 .csec-pkg-row {
@@ -259,7 +259,7 @@
 .csec-role-tag.dependency {
   background: var(--bg);
   border: 1px solid var(--line);
-  color: var(--muted);
+  color: var(--mute);
 }
 .csec-pkg-upgrade {
   display: flex;
@@ -318,7 +318,7 @@
 .csec-act-ign {
   justify-content: center;
   padding: 0 6px !important;
-  color: var(--muted) !important;
+  color: var(--mute) !important;
   white-space: nowrap;
 }
 .csec-act-ign:hover {
@@ -350,6 +350,13 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  animation: csec-sub-in 0.2s var(--spring) backwards;
+}
+@keyframes csec-sub-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
 }
 .csec-sub-cve-row {
   display: flex;
@@ -371,7 +378,7 @@
 }
 .csec-sub-cve-summary {
   font-size: 12px;
-  color: var(--muted);
+  color: var(--mute);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -413,7 +420,7 @@
 }
 .csec-base-detail {
   font-size: 12.5px;
-  color: var(--muted);
+  color: var(--mute);
   line-height: 1.5;
 }
 .csec-base-rec {
@@ -442,7 +449,7 @@
 /* Certs */
 .csec-cert-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
   gap: 12px;
   padding: 16px 18px;
 }
@@ -467,7 +474,7 @@
   gap: 4px 8px;
   font-size: 12px;
 }
-.csec-cert-kv dt { color: var(--muted); }
+.csec-cert-kv dt { color: var(--mute); }
 .csec-cert-kv dd { margin: 0; color: var(--ink); word-break: break-all; }
 
 .csec-rh-list {
@@ -488,8 +495,25 @@
 .csec-empty {
   padding: 24px 18px;
   text-align: center;
-  color: var(--muted);
+  color: var(--mute);
   font-size: 13px;
+}
+
+@media (max-width: 720px) {
+  .csec-pkg-actions,
+  .csec-sub-cve-row .csec-pkg-actions,
+  .csec-rh-row .csec-pkg-actions,
+  .csec-base-actions {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    margin-left: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .csec-sub-cves {
+    animation: none;
+  }
 }
 
 .csec-ai-box {

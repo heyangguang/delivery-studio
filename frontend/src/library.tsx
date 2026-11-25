@@ -237,6 +237,7 @@ export function LibraryPage({
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [railImportOpen, setRailImportOpen] = useState(false);
   const [railSyncing, setRailSyncing] = useState(false);
+  const railSyncLockRef = useRef(false);
 
   const reload = (fresh?: unknown) =>
     (fresh === true ? api : fetchCached)<LibraryOverview>("/api/library")
@@ -264,8 +265,18 @@ export function LibraryPage({
   // A fetch or import in progress changes the library under us; keep the numbers fresh while it runs.
   useEffect(() => {
     if (!ov?.busy) return;
-    const t = setInterval(reload, 3000);
-    return () => clearInterval(t);
+    const tick = () => {
+      if (document.visibilityState === "visible") void reload(true);
+    };
+    const t = setInterval(tick, 3000);
+    const onVis = () => {
+      if (document.visibilityState === "visible") void reload(true);
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", onVis);
+    };
   }, [ov?.busy]);
 
   useEffect(() => {
@@ -329,7 +340,8 @@ export function LibraryPage({
         .pop() || ""
     : "";
   const syncActiveIndex = async () => {
-    if (!activePlat || railSyncing || ov?.busy) return;
+    if (!activePlat || railSyncing || railSyncLockRef.current || ov?.busy) return;
+    railSyncLockRef.current = true;
     setRailSyncing(true);
     try {
       await api<FetchTask>("/api/library/index/update", {
@@ -343,6 +355,7 @@ export function LibraryPage({
     } catch (e) {
       err(e);
     } finally {
+      railSyncLockRef.current = false;
       setRailSyncing(false);
     }
   };
@@ -661,7 +674,10 @@ function PlatformDetail({
   // Follow a running fetch until it ends.
   useEffect(() => {
     if (!task || task.state !== "running") return;
-    const t = setInterval(() => {
+    let inFlight = false;
+    const poll = () => {
+      if (document.visibilityState !== "visible" || inFlight) return;
+      inFlight = true;
       api<FetchTask>(`/api/library/tasks/${task.id}`)
         .then((x) => {
           setTask(x);
@@ -681,12 +697,23 @@ function PlatformDetail({
                 );
           }
         })
-        .catch(() => {});
-    }, 1500);
-    return () => clearInterval(t);
+        .catch(() => {})
+        .finally(() => {
+          inFlight = false;
+        });
+    };
+    const t = setInterval(poll, 1500);
+    document.addEventListener("visibilitychange", poll);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", poll);
+    };
   }, [task?.id, task?.state]);
 
   const keyOf = (r: PackageRequest) => `${r.name}=${r.version}`;
+  const removeLockRef = useRef(false);
+  const fetchLockRef = useRef(false);
+  const indexLockRef = useRef(false);
 
   const remove = (r: ClosureRow) =>
     Modal.confirm({
@@ -706,6 +733,8 @@ function PlatformDetail({
       okText: bi("删除", "Delete"),
       okButtonProps: { status: "danger" },
       onOk: async () => {
+        if (removeLockRef.current) return;
+        removeLockRef.current = true;
         try {
           await api("/api/library/delete", {
             method: "POST",
@@ -720,11 +749,15 @@ function PlatformDetail({
           reloadRows();
         } catch (e) {
           err(e);
+        } finally {
+          removeLockRef.current = false;
         }
       },
     });
 
   const startFetch = async (pkgs: PackageRequest[]) => {
+    if (fetchLockRef.current) return;
+    fetchLockRef.current = true;
     try {
       const t = await api<FetchTask>("/api/library/fetch", {
         method: "POST",
@@ -735,11 +768,15 @@ function PlatformDetail({
       changed();
     } catch (e) {
       err(e);
+    } finally {
+      fetchLockRef.current = false;
     }
   };
 
   const direct = p.direct && p.index.files.length > 0; // search and download from the cached source indexes, no container
   const updateIndex = async () => {
+    if (indexLockRef.current) return;
+    indexLockRef.current = true;
     try {
       const t = await api<FetchTask>("/api/library/index/update", {
         method: "POST",
@@ -749,6 +786,8 @@ function PlatformDetail({
       changed();
     } catch (e) {
       err(e);
+    } finally {
+      indexLockRef.current = false;
     }
   };
   const exportHref = withLang(
@@ -1232,6 +1271,7 @@ function SourcesDrawer({
   const [text, setText] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const saveLockRef = useRef(false);
   useEffect(() => {
     if (!open) return;
     setError("");
@@ -1245,6 +1285,8 @@ function SourcesDrawer({
       .catch((e) => setError((e as Error).message));
   }, [open]);
   const save = async () => {
+    if (saveLockRef.current) return;
+    saveLockRef.current = true;
     setBusy(true);
     setError("");
     try {
@@ -1262,12 +1304,13 @@ function SourcesDrawer({
     } catch (e) {
       setError((e as Error).message);
     } finally {
+      saveLockRef.current = false;
       setBusy(false);
     }
   };
   return (
     <Drawer
-      width={narrow ? "100%" : 720}
+      width={narrow ? "100%" : "min(720px, 100vw)"}
       visible={open}
       onCancel={onClose}
       title={bi("软件源", "Package Sources")}

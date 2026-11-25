@@ -78,17 +78,17 @@
   background: var(--surface);
   cursor: pointer;
   transition:
-    border-color 0.16s,
-    background 0.16s,
-    box-shadow 0.16s,
+    border-color 0.18s var(--spring),
+    background-color 0.18s var(--spring),
+    box-shadow 0.18s var(--spring),
     transform 0.16s var(--spring);
 }
 .sb-opt-card:hover {
   border-color: var(--line-strong);
   background: var(--surface-2);
 }
-.sb-opt-card:active {
-  transform: scale(0.992);
+.sb-opt-card:active:not(:disabled) {
+  transform: scale(0.985);
 }
 .sb-opt-card:focus-visible {
   outline: none;
@@ -168,8 +168,8 @@
   font-size: 11px;
   background: var(--surface);
   transition:
-    border-color 0.15s,
-    background 0.15s;
+    border-color 0.18s var(--spring),
+    background-color 0.18s var(--spring);
 }
 .sb-opt-radio.on {
   border-color: var(--brand);
@@ -225,12 +225,20 @@
   background: var(--surface);
   cursor: pointer;
   transition:
-    border-color 0.15s,
-    color 0.15s;
+    border-color 0.18s var(--spring),
+    color 0.18s var(--spring),
+    transform 0.16s var(--spring);
 }
 .sb-domain-toggle:hover {
   border-color: var(--brand-line);
   color: var(--brand-ink);
+}
+.sb-domain-toggle:active:not(:disabled) {
+  transform: scale(0.975);
+}
+.sb-domain-toggle:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
 }
 .sb-domain-toggle svg {
   font-size: 12px;
@@ -272,9 +280,10 @@
   margin: 10px 0 0;
   padding: 10px 14px;
   border-radius: 12px;
+  border: 1px solid var(--bad-line);
   color: var(--bad);
   font-size: 13px;
-  background: var(--bad-soft, rgba(220, 60, 60, 0.08));
+  background: var(--bad-soft);
 }
 .sb-checks {
   margin: 14px 0 0;
@@ -314,5 +323,14 @@
   .sb-opt-grid.cols-3,
   .sb-opt-grid.cols-2 {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sb-opt-card,
+  .sb-opt-radio,
+  .sb-domain-toggle {
+    transition: none !important;
+    transform: none !important;
   }
 }

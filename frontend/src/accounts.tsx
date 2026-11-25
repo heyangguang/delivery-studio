@@ -1,6 +1,12 @@
 import { bytesText } from "./myfiles";
 import { editQuota } from "./storageview";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Button,
   Input,
@@ -171,6 +177,61 @@ export function Avatar({
   );
 }
 
+const AccountListItem = React.memo(function AccountListItem({
+  u,
+  isSelected,
+  isMe,
+  roleSummary,
+  onSelect,
+}: {
+  u: Account;
+  isSelected: boolean;
+  isMe: boolean;
+  roleSummary: string;
+  onSelect: (username: string) => void;
+}) {
+  useLang();
+  return (
+    <a
+      href={`#/iam/${encodeURIComponent(u.username)}`}
+      role="option"
+      aria-selected={isSelected}
+      className={`row acc-row ${isSelected ? "on" : ""}`}
+      onClick={(e) => {
+        e.preventDefault();
+        onSelect(u.username);
+      }}
+    >
+      <Avatar name={u.username} role={u.role} />
+      <div className="row-main">
+        <div className="row-top">
+          <span className="row-name sans">
+            {u.username}
+            {isMe && <span className="you">{bi("你", "You")}</span>}
+          </span>
+          {!!u.active && (
+            <span className="sbadge s-running small-badge num">
+              {bi(`${u.active} 生成中`, `${u.active} building`)}
+            </span>
+          )}
+          {u.disabled && (
+            <span className="acc-off sm">{bi("已停用", "Disabled")}</span>
+          )}
+        </div>
+        <div className="row-sub num">
+          {roleSummary || roleName(u.role)} ·{" "}
+          {u.deliveries
+            ? bi(
+                `${u.deliveries} 份交付${u.last_delivery ? ` · ${ago(u.last_delivery)}` : ""}`,
+                `${u.deliveries} ${u.deliveries === 1 ? "delivery" : "deliveries"}${u.last_delivery ? ` · ${ago(u.last_delivery)}` : ""}`,
+              )
+            : bi("还没有交付", "No deliveries")}
+        </div>
+      </div>
+    </a>
+  );
+});
+
 type Filter = string;
 
 export function AccountsPage({
@@ -191,49 +252,79 @@ export function AccountsPage({
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const search = useRef<HTMLInputElement | null>(null);
-
-  const reload = () =>
-    api<Account[]>("/api/users")
-      .then((u) => {
-        const sorted = [...u].sort((a, b) =>
-          a.role === b.role
-            ? a.username.localeCompare(b.username)
-            : a.role === "admin"
-              ? -1
-              : 1,
-        );
-        putCached("/api/users", sorted);
-        setUsers(sorted);
-        setLoad("ready");
-      })
-      .catch((e) => {
-        setMessage((e as Error).message);
-        setLoad((s) => (s === "ready" ? s : "error"));
-      });
+  const mountedRef = useRef(true);
   useEffect(() => {
-    reload();
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
   }, []);
+
+  const reload = useCallback(
+    () =>
+      api<Account[]>("/api/users")
+        .then((u) => {
+          const sorted = [...(u || [])].sort((a, b) =>
+            a.role === b.role
+              ? a.username.localeCompare(b.username)
+              : a.role === "admin"
+                ? -1
+                : 1,
+          );
+          putCached("/api/users", sorted);
+          if (!mountedRef.current) return;
+          setUsers(sorted);
+          setLoad("ready");
+        })
+        .catch((e) => {
+          if (!mountedRef.current) return;
+          setMessage((e as Error).message);
+          setLoad((s) => (s === "ready" ? s : "error"));
+        }),
+    [],
+  );
+  useEffect(() => {
+    void reload();
+  }, [reload]);
 
   const q = query.trim().toLowerCase();
   const { iam, reload: reloadIAM } = useIAM();
-  const rolesOf = (u: Account) =>
-    iam?.grants[u.username]?.roles || u.roles || [];
-  const roleNames = (u: Account) =>
-    rolesOf(u)
-      .map((id) => {
-        const found = iam?.roles.find((r) => r.id === id);
-        return found ? roleTitle(found) : id;
-      })
-      .join(bi("、", ", "));
+  const roleMap = useMemo(
+    () => new Map((iam?.roles || []).map((r) => [r.id, r])),
+    [iam?.roles],
+  );
+  const roleSummaryMap = useMemo(() => {
+    const m = new Map<string, string>();
+    const sep = bi("、", ", ");
+    for (const u of users) {
+      const rids = iam?.grants[u.username]?.roles || u.roles || [];
+      m.set(
+        u.username,
+        rids
+          .map((id) => {
+            const found = roleMap.get(id);
+            return found ? roleTitle(found) : id;
+          })
+          .join(sep),
+      );
+    }
+    return m;
+  }, [users, iam, roleMap]);
   const list = useMemo(
     () =>
-      users.filter(
-        (u) =>
-          (filter === "all" || rolesOf(u).includes(filter)) &&
-          u.username.includes(q),
-      ),
+      users.filter((u) => {
+        const rids = iam?.grants[u.username]?.roles || u.roles || [];
+        return (
+          (filter === "all" || rids.includes(filter)) && u.username.includes(q)
+        );
+      }),
     [users, filter, q, iam],
-  ); // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const hasSelectedRef = useRef(Boolean(selected));
+  hasSelectedRef.current = Boolean(selected);
+  const handleSelectAccount = useCallback((username: string) => {
+    go({ name: "accounts", id: username }, { replace: hasSelectedRef.current });
+  }, []);
 
   useEffect(() => {
     if (!can("iam.user") && !selected)
@@ -496,51 +587,14 @@ export function AccountsPage({
               aria-label={bi("账户", "Accounts")}
             >
               {list.map((u) => (
-                <a
+                <AccountListItem
                   key={u.username}
-                  href={`#/iam/${encodeURIComponent(u.username)}`}
-                  role="option"
-                  aria-selected={u.username === selected}
-                  className={`row acc-row ${u.username === selected ? "on" : ""}`}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    go(
-                      { name: "accounts", id: u.username },
-                      { replace: !!selected },
-                    );
-                  }}
-                >
-                  <Avatar name={u.username} role={u.role} />
-                  <div className="row-main">
-                    <div className="row-top">
-                      <span className="row-name sans">
-                        {u.username}
-                        {u.username === me.username && (
-                          <span className="you">{bi("你", "You")}</span>
-                        )}
-                      </span>
-                      {!!u.active && (
-                        <span className="sbadge s-running small-badge">
-                          {bi(`${u.active} 生成中`, `${u.active} building`)}
-                        </span>
-                      )}
-                      {u.disabled && (
-                        <span className="acc-off sm">
-                          {bi("已停用", "Disabled")}
-                        </span>
-                      )}
-                    </div>
-                    <div className="row-sub">
-                      {roleNames(u) || roleName(u.role)} ·{" "}
-                      {u.deliveries
-                        ? bi(
-                            `${u.deliveries} 份交付 · ${ago(u.last_delivery!)}`,
-                            `${u.deliveries} ${u.deliveries === 1 ? "delivery" : "deliveries"} · ${ago(u.last_delivery!)}`,
-                          )
-                        : bi("还没有交付", "No deliveries")}
-                    </div>
-                  </div>
-                </a>
+                  u={u}
+                  isSelected={u.username === selected}
+                  isMe={u.username === me.username}
+                  roleSummary={roleSummaryMap.get(u.username) || ""}
+                  onSelect={handleSelectAccount}
+                />
               ))}
             </div>
           )}
@@ -655,21 +709,36 @@ function AccountDetail({
   const [tab, setTab] = useState<"access" | "activity">("access");
   const [removing, setRemoving] = useState(false);
   const [moveTo, setMoveTo] = useState("");
-  const load = () =>
-    api<Activity>(`/api/users/${u.username}/activity`)
-      .then(setAct)
-      .catch(() =>
-        setAct({
-          events: [],
-          ai: { calls: 0, errors: 0, in: 0, out: 0, cost: 0 },
-          currency: "CNY",
-          jobs: [],
-        }),
-      );
+  const mountedRef = useRef(true);
   useEffect(() => {
-    load();
-  }, [u.username]); // eslint-disable-line react-hooks/exhaustive-deps
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  const load = useCallback(
+    () =>
+      api<Activity>(`/api/users/${u.username}/activity`)
+        .then((res) => {
+          if (mountedRef.current) setAct(res);
+        })
+        .catch(() => {
+          if (mountedRef.current) {
+            setAct({
+              events: [],
+              ai: { calls: 0, errors: 0, in: 0, out: 0, cost: 0 },
+              currency: "CNY",
+              jobs: [],
+            });
+          }
+        }),
+    [u.username],
+  );
+  useEffect(() => {
+    void load();
+  }, [load]);
   const patch = async (what: string, body: Record<string, unknown>) => {
+    if (busy) return;
     setBusy(what);
     try {
       const r = await api<{ password?: string }>(`/api/users/${u.username}`, {
@@ -679,14 +748,15 @@ function AccountDetail({
       if (r.password) setPassword(r.password);
       else Message.success(bi("已保存", "Saved"));
       changed();
-      load();
+      void load();
     } catch (e) {
       err(e);
     } finally {
-      setBusy("");
+      if (mountedRef.current) setBusy("");
     }
   };
   const remove = async () => {
+    if (busy) return;
     setBusy("del");
     try {
       const r = await api<{ moved: number }>(`/api/users/${u.username}`, {
@@ -812,7 +882,7 @@ function AccountDetail({
               </span>
             )}
             {u.last_delivery && (
-              <span>
+              <span className="num">
                 {bi(
                   `最近一次交付 ${ago(u.last_delivery)}`,
                   `Last delivery ${ago(u.last_delivery)}`,
@@ -948,14 +1018,14 @@ function AccountDetail({
                       <span className="me-row-t">
                         <b className="mono">{j.cluster_id}</b>
                         <small>
-                          {j.app_name} {j.version.split("·")[0].trim()}
+                          {j.app_name} {(j.version || "").split("·")[0].trim()}
                           {` · ${bi(
                             planTitle(j).replace(/首次部署/g, "集群部署"),
                             planTitle(j).replace(/Initial Deploy/g, "Cluster Deploy"),
                           )}`}
                         </small>
                       </span>
-                      <time className="faint small" title={fullTime(j.created)}>
+                      <time className="faint small num" title={fullTime(j.created)}>
                         {ago(j.created)}
                       </time>
                     </a>
@@ -987,7 +1057,7 @@ function AccountDetail({
                       {auditText(e)}
                       {e.job && <code className="iam-ev-obj">{e.job}</code>}
                     </span>
-                    <time className="faint small" title={fullTime(e.time)}>
+                    <time className="faint small num" title={fullTime(e.time)}>
                       {ago(e.time)}
                       {e.ip ? ` · ${e.ip}` : ""}
                     </time>
@@ -1140,7 +1210,7 @@ function AddAccount({
   const pwShort = password.length < 12;
 
   const submit = async () => {
-    if (!name || nameError || pwShort) return;
+    if (busy || !name || nameError || pwShort || roles.length === 0) return;
     setBusy(true);
     setError("");
     try {
@@ -1333,6 +1403,7 @@ function AddAccount({
               status={pwShort ? "error" : undefined}
             />
             <Button
+              htmlType="button"
               icon={<IconSync />}
               onClick={() => setPassword(generate())}
               aria-label={bi("重新生成密码", "Regenerate password")}
@@ -1365,6 +1436,7 @@ function AddAccount({
             {bi("创建账户", "Create Account")}
           </Button>
           <Button
+            htmlType="button"
             onClick={() =>
               history.length > 1 ? history.back() : go({ name: "accounts" })
             }

@@ -123,22 +123,35 @@ export function MePage({
     () => cached<Activity>("/api/me/activity") ?? null,
   );
   const tabs = useRef<HTMLDivElement>(null);
+  const focusRafRef = useRef<number | null>(null);
   const [bar, setBar] = useState<{ x: number; w: number } | null>(null);
   const [barReady, setBarReady] = useState(false);
   const cur = SECTIONS.some((s) => s.id === section) ? section : "";
+  useEffect(
+    () => () => {
+      if (focusRafRef.current !== null) cancelAnimationFrame(focusRafRef.current);
+    },
+    [],
+  );
   useEffect(() => {
+    let live = true;
     api<Me>("/api/me")
       .then((r) => {
+        if (!live) return;
         putCached("/api/me", r);
         setInfo(r);
       })
-      .catch(err);
+      .catch((e) => {
+        if (live) err(e);
+      });
     api<Activity>("/api/me/activity")
       .then((r) => {
+        if (!live) return;
         putCached("/api/me/activity", r);
         setAct(r);
       })
-      .catch(() =>
+      .catch(() => {
+        if (!live) return;
         setAct((prev) =>
           prev ?? {
             events: [],
@@ -146,9 +159,12 @@ export function MePage({
             currency: "CNY",
             jobs: [],
           },
-        ),
-      );
-  }, []);
+        );
+      });
+    return () => {
+      live = false;
+    };
+  }, [lang]);
   useLayoutEffect(() => {
     const host = tabs.current;
     if (!host) return;
@@ -166,6 +182,9 @@ export function MePage({
     const ro =
       typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
     ro?.observe(host);
+    host.querySelectorAll<HTMLElement>('button[role="tab"]').forEach((btn) => {
+      ro?.observe(btn);
+    });
     window.addEventListener("resize", measure);
     let cancelled = false;
     document.fonts?.ready
@@ -257,13 +276,14 @@ export function MePage({
             e.preventDefault();
             const next = SECTIONS[(i + d + SECTIONS.length) % SECTIONS.length];
             open(next.id);
-            window.setTimeout(
-              () =>
-                tabs.current
-                  ?.querySelector<HTMLElement>(`[data-k="${next.id}"]`)
-                  ?.focus(),
-              0,
-            );
+            if (focusRafRef.current !== null) {
+              cancelAnimationFrame(focusRafRef.current);
+            }
+            focusRafRef.current = requestAnimationFrame(() => {
+              tabs.current
+                ?.querySelector<HTMLElement>(`[data-k="${next.id}"]`)
+                ?.focus();
+            });
           }}
         >
           {bar && (
@@ -636,6 +656,7 @@ function SecurityView({ me, act }: { me: Session; act: Activity | null }) {
   const [again, setAgain] = useState("");
   const [busy, setBusy] = useState(false);
   const [sessBusy, setSessBusy] = useState(false);
+  const [revokingId, setRevokingId] = useState<string | null>(null);
   const [sessLoading, setSessLoading] = useState(false);
   const [sessErr, setSessErr] = useState("");
   const [devFilter, setDevFilter] = useState<"all" | "browser" | "cli">("all");
@@ -645,28 +666,45 @@ function SecurityView({ me, act }: { me: Session; act: Activity | null }) {
     active: AuditSessionRow[];
     history: AuditSessionRow[];
   } | null>(null);
+  const mountedRef = useRef(true);
+  const sessSeqRef = useRef(0);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const loadSessions = () => {
+    const seq = ++sessSeqRef.current;
     setSessErr("");
     setSessLoading(true);
     api<typeof sessData>("/api/me/sessions")
       .then((d) => {
+        if (!mountedRef.current || seq !== sessSeqRef.current) return;
         setSessData(d);
         setSessErr("");
       })
-      .catch((e) =>
+      .catch((e) => {
+        if (!mountedRef.current || seq !== sessSeqRef.current) return;
         setSessErr(
           (e as Error).message ||
             bi("加载已登录设备失败", "Failed to load active sessions"),
-        ),
-      )
-      .finally(() => setSessLoading(false));
+        );
+      })
+      .finally(() => {
+        if (mountedRef.current && seq === sessSeqRef.current) {
+          setSessLoading(false);
+        }
+      });
   };
   useEffect(() => {
     loadSessions();
   }, [me.session_id]);
 
   const revokeOwn = async (id: string) => {
+    if (revokingId || sessBusy) return;
+    setRevokingId(id);
     try {
       await api(`/api/me/sessions/${encodeURIComponent(id)}`, {
         method: "DELETE",
@@ -675,6 +713,8 @@ function SecurityView({ me, act }: { me: Session; act: Activity | null }) {
       loadSessions();
     } catch (e) {
       err(e);
+    } finally {
+      if (mountedRef.current) setRevokingId(null);
     }
   };
   const revokeOthers = async () => {
@@ -1080,6 +1120,11 @@ function SecurityView({ me, act }: { me: Session; act: Activity | null }) {
                                   status="danger"
                                   type="text"
                                   icon={<IconPoweroff />}
+                                  loading={revokingId === s.id}
+                                  disabled={
+                                    sessBusy ||
+                                    Boolean(revokingId && revokingId !== s.id)
+                                  }
                                 >
                                   {bi("退出", "Sign Out")}
                                 </Button>
@@ -1206,7 +1251,9 @@ function SecurityView({ me, act }: { me: Session; act: Activity | null }) {
                           <b>
                             {browser(h.agent) ||
                               bi("历史设备", "Previous Device")}
-                            <span className="me-kind-tag">{reason}</span>
+                            {reason ? (
+                              <span className="me-kind-tag">{reason}</span>
+                            ) : null}
                           </b>
                           <div className="me-log-sub">
                             <span className="me-ip-chip mono">

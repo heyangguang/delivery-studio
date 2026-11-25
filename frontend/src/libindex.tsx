@@ -78,7 +78,7 @@ function TaskHistory({
   }, [open, platform, running]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <Drawer
-      width={560}
+      width="min(560px, 100vw)"
       visible={open}
       onCancel={close}
       title={bi("更新与下载记录", "Update & Download History")}
@@ -314,7 +314,7 @@ export function SourcePanel({
           </div>
         </div>
       )}
-      <button className="lp-foot" onClick={onGuide}>
+      <button type="button" className="lp-foot" onClick={onGuide}>
         <span className="lp-foot-ic" aria-hidden>
           <IconBook />
         </span>
@@ -527,7 +527,7 @@ export function GuideDrawer({
     ) : null;
   return (
     <Drawer
-      width={narrow ? "100%" : 900}
+      width={narrow ? "100%" : "min(900px, 96vw)"}
       visible={open}
       onCancel={onClose}
       title={bi("离线使用指南", "Offline Workflow Guide")}
@@ -692,6 +692,7 @@ export function ImportDrawer({
   const narrow = useMedia("(max-width: 900px)");
   const [file, setFile] = useState<File | undefined>();
   const [busy, setBusy] = useState(false);
+  const busyLockRef = useRef(false);
   const [result, setResult] = useState("");
   const [error, setError] = useState("");
   useEffect(() => {
@@ -710,7 +711,8 @@ export function ImportDrawer({
     ((isIndex && file.name.startsWith("library-")) ||
       (!isIndex && file.name.startsWith("source-index-")));
   const submit = async () => {
-    if (!file) return;
+    if (!file || busyLockRef.current) return;
+    busyLockRef.current = true;
     setBusy(true);
     setError("");
     try {
@@ -744,6 +746,7 @@ export function ImportDrawer({
     } catch (e) {
       setError((e as Error).message);
     } finally {
+      busyLockRef.current = false;
       setBusy(false);
     }
   };
@@ -801,7 +804,7 @@ export function ImportDrawer({
   ];
   return (
     <Drawer
-      width={narrow ? "100%" : 580}
+      width={narrow ? "100%" : "min(580px, 100vw)"}
       visible={open}
       onCancel={onClose}
       title={
@@ -1016,6 +1019,13 @@ function VersionPicker({
 }) {
   useLang();
   const [all, setAll] = useState(false);
+  const focusTimerRef = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (focusTimerRef.current !== null) window.clearTimeout(focusTimerRef.current);
+    },
+    [],
+  );
   const mixed = new Set(versions.map((v) => channel(v).text)).size > 1;
   const i = versions.findIndex((v) => v.version === value);
   const shown = all || i >= 4 ? versions : versions.slice(0, 4);
@@ -1028,7 +1038,8 @@ function VersionPicker({
     );
     if (n >= 4) setAll(true);
     onChange(versions[n].version);
-    setTimeout(
+    if (focusTimerRef.current !== null) window.clearTimeout(focusTimerRef.current);
+    focusTimerRef.current = window.setTimeout(
       () =>
         (document.querySelector(".vp-row.on") as HTMLElement | null)?.focus(),
       0,
@@ -1045,6 +1056,7 @@ function VersionPicker({
         const on = v.version === value;
         return (
           <button
+            type="button"
             key={v.version}
             role="radio"
             aria-checked={on}
@@ -1070,7 +1082,7 @@ function VersionPicker({
         );
       })}
       {versions.length > 4 && i < 4 && (
-        <button className="link vp-more small" onClick={() => setAll(!all)}>
+        <button type="button" className="link vp-more small" onClick={() => setAll(!all)}>
           {all
             ? bi("收起", "Collapse")
             : bi(
@@ -1132,9 +1144,11 @@ export function AddDrawer({
   const [recent, setRecent] = useLocal<string[]>("mh-lib-recent", []);
   const seq = useRef(0);
   const planSeq = useRef(0);
+  const startLockRef = useRef(false);
   const input = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
+    startLockRef.current = false;
     if (open) {
       setQ("");
       setHits(null);
@@ -1144,7 +1158,8 @@ export function AddDrawer({
       setPlan(null);
       setList([]);
       setActive(0);
-      setTimeout(() => input.current?.focus(), 120);
+      const t = window.setTimeout(() => input.current?.focus(), 120);
+      return () => window.clearTimeout(t);
     }
   }, [open]);
 
@@ -1290,6 +1305,7 @@ export function AddDrawer({
                         : x.req.version}
                     </span>
                     <button
+                      type="button"
                       aria-label={bi(`移除 ${x.req.name}`, `Remove ${x.req.name}`)}
                       onClick={() => setList(list.filter((y) => y !== x))}
                     >
@@ -1313,7 +1329,11 @@ export function AddDrawer({
               type="primary"
               icon={<IconDownload />}
               disabled={!list.length}
-              onClick={() => start(list.map((x) => x.req))}
+              onClick={() => {
+                if (!list.length || startLockRef.current) return;
+                startLockRef.current = true;
+                start(list.map((x) => x.req));
+              }}
             >
               {bi("下载到本地", "Download to library")}
               {list.length ? bi(`（${list.length}）`, ` (${list.length})`) : ""}
@@ -1397,6 +1417,7 @@ export function AddDrawer({
                         .slice(0, 8)
                         .map((x) => (
                           <button
+                            type="button"
                             key={x}
                             className="ad-chip ghost mono"
                             onClick={() => (setQ(x), input.current?.focus())}
@@ -1420,12 +1441,15 @@ export function AddDrawer({
                 )}
                 {hits?.map((h, i) => (
                   <button
+                    type="button"
                     key={h.name}
                     role="option"
                     aria-selected={picked?.name === h.name}
                     className={`ad-hit ${picked?.name === h.name ? "on" : ""} ${i === active ? "cur" : ""}`}
                     onClick={() => pick(h)}
-                    onMouseMove={() => setActive(i)}
+                    onMouseMove={() => {
+                      if (active !== i) setActive(i);
+                    }}
                   >
                     <span className="mono ad-name">{h.name}</span>
                     <span

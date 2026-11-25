@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   Input,
@@ -62,6 +62,7 @@ export function PricesView() {
   const [rate, setRate] = useState(() => initBook?.rate ?? 7.2);
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
+  const savingRef = useRef(false);
   const [io, setIo] = useState<"" | "export" | "import">("");
   const [text, setText] = useState("");
   const dirty =
@@ -80,9 +81,26 @@ export function PricesView() {
       })
       .catch(err);
   useEffect(() => {
-    load();
+    let alive = true;
+    api<Book>("/api/settings/ai/prices")
+      .then((r) => {
+        putCached("/api/settings/ai/prices", r);
+        if (!alive) return;
+        setD(r);
+        setCustom(r.custom);
+        setDisplay(r.display);
+        setRate(r.rate);
+      })
+      .catch((e) => {
+        if (alive) err(e);
+      });
+    return () => {
+      alive = false;
+    };
   }, []);
   const save = async () => {
+    if (savingRef.current) return;
+    savingRef.current = true;
     setBusy(true);
     try {
       await api("/api/settings/ai/prices", {
@@ -94,30 +112,52 @@ export function PricesView() {
     } catch (e) {
       err(e);
     } finally {
+      savingRef.current = false;
       setBusy(false);
     }
   };
   const patch = (i: number, f: Partial<PriceEntry>) =>
     setCustom((c) => c.map((x, k) => (k === i ? { ...x, ...f } : x)));
-  const fromBuiltin = (e: PriceEntry) =>
+  const fromBuiltin = (e: PriceEntry) => {
+    const keySig = e.models.join(",");
+    if (custom.some((x) => x.models.join(",") === keySig)) {
+      Message.info(
+        bi(
+          "「我的价格」中已有该模型条目，可在上方直接修改",
+          "Already added to My pricing above—edit it there",
+        ),
+      );
+      return;
+    }
     setCustom((c) => [
       ...c,
       { ...e, vendor: bi("自定义", "Custom"), source: "", note: "" },
     ]);
-  const builtin = useMemo(
-    () =>
-      (d?.builtin || []).filter(
-        (e) =>
-          !q.trim() ||
-          (e.vendor + e.models.join(" "))
-            .toLowerCase()
-            .includes(q.trim().toLowerCase()),
+    Message.success(
+      bi(
+        "已加入上方「我的价格」，修改后点右上角「保存」生效",
+        "Added to My pricing above; edit and click Save",
       ),
-    [d, q],
-  );
-  const vendors = [...new Set(builtin.map((e) => e.vendor))];
+    );
+  };
+  const groupedBuiltin = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    const map = new Map<string, PriceEntry[]>();
+    for (const e of d?.builtin || []) {
+      if (
+        needle &&
+        !(e.vendor + " " + e.models.join(" ")).toLowerCase().includes(needle)
+      ) {
+        continue;
+      }
+      const list = map.get(e.vendor);
+      if (list) list.push(e);
+      else map.set(e.vendor, [e]);
+    }
+    return [...map.entries()];
+  }, [d, q]);
   return (
-    <article className="sx-page st-main enter">
+    <article className="sx-page st-main pr-page enter">
       <header className="sx-page-h">
         <div>
           <h1>{bi("模型价格", "Model pricing")}</h1>
@@ -338,11 +378,17 @@ export function PricesView() {
                 placeholder={bi("筛选模型或厂商", "Filter models or vendors")}
                 value={q}
                 onChange={setQ}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    setQ("");
+                    (e.target as HTMLElement).blur();
+                  }
+                }}
                 style={{ width: 200 }}
                 aria-label={bi("筛选", "Filter")}
               />
             </div>
-            {vendors.map((v) => (
+            {groupedBuiltin.map(([v, entries]) => (
               <div key={v} className="pr-group">
                 <h3>{v}</h3>
                 <div className="pr-table" role="table">
@@ -354,9 +400,7 @@ export function PricesView() {
                     <span>{bi("备注与来源", "Notes & source")}</span>
                     <span className="pr-act-h">{bi("操作", "Action")}</span>
                   </div>
-                  {builtin
-                    .filter((e) => e.vendor === v)
-                    .map((e, i) => (
+                  {entries.map((e, i) => (
                       <div key={i} className="pr-row b" role="row">
                         <span className="pr-models">
                           {e.models.map((m) => (

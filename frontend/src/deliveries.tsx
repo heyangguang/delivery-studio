@@ -95,8 +95,7 @@ import {
   deliveryModeKeywords,
   normalizeDeliveryMode,
 } from "./ui";
-import { ExecutionPanel } from "./executions";
-import { Runbook } from "./runbook";
+import { lazySubView } from "./topology";
 import { AIDock, Spark, useAIDock, useAIStatus } from "./aichat";
 import { LineagePanel } from "./lineage";
 import { OutcomeBar } from "./outcome";
@@ -106,6 +105,28 @@ import {
   parseClusterUrlCompat,
 } from "./clusters";
 import { bi, catLabel, useLang, withLang } from "./i18n";
+
+const LazyExecutionPanel = lazySubView(() =>
+  import("./executions").then((m) => ({ default: m.ExecutionPanel })),
+);
+const LazyRunbook = lazySubView(() =>
+  import("./runbook").then((m) => ({ default: m.Runbook })),
+);
+
+function splitClusterTail(name: string): [string, string] {
+  if (name.length <= 20) return [name, ""];
+  const parts = name.split("-");
+  if (parts.length < 3) return [name, ""];
+  const lastTwo = `-${parts.slice(-2).join("-")}`;
+  if (lastTwo.length <= 15 && name.length - lastTwo.length >= 6) {
+    return [name.slice(0, name.length - lastTwo.length), lastTwo];
+  }
+  const lastOne = `-${parts[parts.length - 1]}`;
+  if (lastOne.length <= 12 && name.length - lastOne.length >= 6) {
+    return [name.slice(0, name.length - lastOne.length), lastOne];
+  }
+  return [name, ""];
+}
 
 export type LoadState = "loading" | "error" | "ready";
 
@@ -331,6 +352,7 @@ function FilterPanel({
       </section>
       <footer>
         <button
+          type="button"
           className="link quiet"
           onClick={() =>
             set({ apps: [], mode: "all", range: "all", sort: "new", group: "day" })
@@ -881,7 +903,7 @@ export function DeliveriesPage({
               <div className="result-line num" aria-live="polite">
                 {bi(`显示 ${list.length} / ${rows.length} 个集群`, `Showing ${list.length} of ${rows.length} ${rows.length === 1 ? "cluster" : "clusters"}`)}
                 {list.length > 0 && (
-                  <button className="link quiet" onClick={clear}>
+                  <button type="button" className="link quiet" onClick={clear}>
                     {bi("清除筛选", "Clear filters")}
                   </button>
                 )}
@@ -1130,9 +1152,33 @@ function JobList({
                 </span>
                 <div className="row-main">
                   <div className="row-top">
-                    <span className="row-name" title={j.cluster_id}>
-                      {j.cluster_id}
-                    </span>
+                    {(() => {
+                      const [stem, tail] = splitClusterTail(j.cluster_id);
+                      return tail ? (
+                        <span
+                          className="row-name"
+                          title={j.cluster_id}
+                          style={{ display: "inline-flex", minWidth: 0, overflow: "hidden" }}
+                        >
+                          <span
+                            style={{
+                              flex: "0 1 auto",
+                              minWidth: 0,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {stem}
+                          </span>
+                          <span style={{ flex: "0 0 auto", whiteSpace: "nowrap" }}>{tail}</span>
+                        </span>
+                      ) : (
+                        <span className="row-name" title={j.cluster_id}>
+                          {j.cluster_id}
+                        </span>
+                      );
+                    })()}
                     {j.owner && j.owner !== meName() && (
                       <span className="row-owner">{j.owner}</span>
                     )}
@@ -1236,6 +1282,7 @@ export function VerificationPromoteBanner({
       okText: bi("确认删除", "Delete"),
       okButtonProps: { status: "danger" },
       onOk: async () => {
+        if (deleting) return;
         setDeleting(true);
         try {
           await api(`/api/jobs/${encodeURIComponent(jobId)}`, {
@@ -1525,6 +1572,7 @@ export function DeliveryDetail({
   const g = groupFiles(files);
   const done = !running(job.state);
 
+  const deletingRef = useRef(false);
   const remove = () =>
     Modal.confirm({
       title:
@@ -1544,19 +1592,23 @@ export function DeliveryDetail({
       okText: bi("删除", "Delete"),
       okButtonProps: { status: "danger" },
       onOk: async () => {
+        if (deletingRef.current) return;
+        deletingRef.current = true;
         try {
           await api(`/api/jobs/${job.id}`, { method: "DELETE" });
           detailCache.delete(job.id);
           Message.success(bi("已删除", "Deleted"));
           await onChanged();
           go(
-            cluster.plans.length > 1
+            (cluster.plans || []).length > 1
               ? { name: "deliveries", id: cluster.id, tab: "plans" }
               : { name: "deliveries" },
             { replace: true },
           );
         } catch (e) {
           err(e);
+        } finally {
+          deletingRef.current = false;
         }
       },
     });
@@ -1919,23 +1971,25 @@ export function DeliveryDetail({
                 {bi("现场执行", "On-site Execution")}
                 <DeliveryModeTag mode={effectiveMode} />
               </h2>
-              <ExecutionPanel
-                key={job.id}
-                jobId={job.id}
-                cluster={job.cluster_id}
-                deliveryMode={effectiveMode}
-              />
-              <Runbook
-                key={`${job.id}-${(job.syncs || []).length}`}
-                plan={plan}
-                docs={g.docs}
-                jobId={job.id}
-                files={files0}
-                deliveryMode={effectiveMode}
-                latestSync={latestSync}
-                onSyncConfirmed={refreshJob}
-                focusSyncTick={focusSyncTick}
-              />
+              <React.Suspense fallback={<Skeleton animation text={{ rows: 4 }} />}>
+                <LazyExecutionPanel
+                  key={job.id}
+                  jobId={job.id}
+                  cluster={job.cluster_id}
+                  deliveryMode={effectiveMode}
+                />
+                <LazyRunbook
+                  key={`${job.id}-${(job.syncs || []).length}`}
+                  plan={plan}
+                  docs={g.docs}
+                  jobId={job.id}
+                  files={files0}
+                  deliveryMode={effectiveMode}
+                  latestSync={latestSync}
+                  onSyncConfirmed={refreshJob}
+                  focusSyncTick={focusSyncTick}
+                />
+              </React.Suspense>
             </section>
           )}
           {job.state === "succeeded" && (!plan || plan.delivery_mode==="configuration") && g.docs.length > 0 && (
@@ -2293,6 +2347,7 @@ function SyncCard({
         ? bi("采用更新（续跑自动下发）", "Adopt Update")
         : bi("采用更新并生成更新包", "Adopt & Generate Update"),
       onOk: async () => {
+        if (busy) return;
         setBusy(true);
         try {
           await api(`/api/jobs/${job.id}/sync`, { method: "POST" });
@@ -2475,7 +2530,7 @@ function SyncCard({
                 {ph.changed.map((c) => (
                   <div key={c.key || c.title} className="sync-step">
                     <div className="sync-step-top">
-                      {legacySteps ? <span>{c.title}</span> : <button className="wb-link" onClick={() => window.dispatchEvent(new CustomEvent("mh-runbook-focus", { detail: { key: c.key, title: c.title } }))}>{c.title}</button>}
+                      {legacySteps ? <span>{c.title}</span> : <button type="button" className="wb-link" onClick={() => window.dispatchEvent(new CustomEvent("mh-runbook-focus", { detail: { key: c.key, title: c.title } }))}>{c.title}</button>}
                       {c.new ? (
                         <em className="new">{bi("新增步骤", "New step")}</em>
                       ) : c.recorded ? (

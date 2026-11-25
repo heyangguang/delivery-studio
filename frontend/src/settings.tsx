@@ -337,7 +337,9 @@ export function SettingsPage({
       { replace: true },
     );
   useLayoutEffect(() => {
+    let rafId: number | null = null;
     const reveal = () => {
+      rafId = null;
       const rail = nav.current;
       const active = rail?.querySelector<HTMLElement>('[aria-current="page"]');
       if (!rail || !active) return;
@@ -354,9 +356,16 @@ export function SettingsPage({
         else if (item.top < box.top) rail.scrollTop -= box.top - item.top + 12;
       }
     };
+    const onResize = () => {
+      if (rafId !== null) return;
+      rafId = window.requestAnimationFrame(reveal);
+    };
     reveal();
-    window.addEventListener("resize", reveal);
-    return () => window.removeEventListener("resize", reveal);
+    window.addEventListener("resize", onResize, { passive: true });
+    return () => {
+      window.removeEventListener("resize", onResize);
+      if (rafId !== null) window.cancelAnimationFrame(rafId);
+    };
   }, [view]);
   if (!items.length)
     return (

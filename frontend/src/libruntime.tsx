@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { OsLogo, OsName } from "./oslogo";
 import {
   Button,
@@ -107,6 +107,7 @@ function NewRuntime({
   const [offline, setOffline] = useState(false);
   const [defs, setDefs] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const busyLockRef = useRef(false);
   useEffect(() => {
     if (!open) return;
     setPins("");
@@ -124,6 +125,7 @@ function NewRuntime({
       });
   }, [open]);
   const submit = async () => {
+    if (!ansible || busyLockRef.current) return;
     const p: Record<string, string> = {};
     for (const line of pins.split(/\n|,/)) {
       const m = /^\s*([A-Za-z0-9._-]+)\s*==\s*([0-9][^\s]*)\s*$/.exec(line);
@@ -136,6 +138,7 @@ function NewRuntime({
           ),
         );
     }
+    busyLockRef.current = true;
     setBusy(true);
     try {
       const t = await api<FetchTask>("/api/library/python/build", {
@@ -147,6 +150,7 @@ function NewRuntime({
     } catch (e) {
       err(e);
     } finally {
+      busyLockRef.current = false;
       setBusy(false);
     }
   };
@@ -159,6 +163,7 @@ function NewRuntime({
       okText={bi("开始准备", "Build")}
       confirmLoading={busy}
       okButtonProps={{ disabled: !ansible }}
+      style={{ width: 520, maxWidth: "94vw" }}
     >
       <div className="st-form">
         <div className="st-field">
@@ -374,7 +379,11 @@ function RuntimeRow({
     !!aiStatus.features?.assistant &&
     can("ai.use");
   const [open, setOpen] = useState(false);
+  const defaultLockRef = useRef(false);
+  const removeLockRef = useRef(false);
   const setDefault = async (pl: string) => {
+    if (defaultLockRef.current) return;
+    defaultLockRef.current = true;
     try {
       await api("/api/library/python/default", {
         method: "PUT",
@@ -384,6 +393,8 @@ function RuntimeRow({
       changed();
     } catch (e) {
       err(e);
+    } finally {
+      defaultLockRef.current = false;
     }
   };
   const remove = () =>
@@ -396,6 +407,8 @@ function RuntimeRow({
       okText: bi("确认清理", "Delete"),
       okButtonProps: { status: "danger" },
       onOk: async () => {
+        if (removeLockRef.current) return;
+        removeLockRef.current = true;
         try {
           await api(`/api/library/python/runtimes/${r.id}`, {
             method: "DELETE",
@@ -404,6 +417,8 @@ function RuntimeRow({
           changed();
         } catch (e) {
           err(e);
+        } finally {
+          removeLockRef.current = false;
         }
       },
     });
@@ -744,6 +759,7 @@ export function RuntimesView({
   const [task, setTask] = useState<FetchTask | null>(null);
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
+  const importLockRef = useRef(false);
   const load = () =>
     api<State>("/api/library/python")
       .then(setSt)
@@ -753,7 +769,10 @@ export function RuntimesView({
   }, [lang]);
   useEffect(() => {
     if (!task || task.state !== "running") return;
-    const t = setInterval(() => {
+    let inFlight = false;
+    const poll = () => {
+      if (document.visibilityState !== "visible" || inFlight) return;
+      inFlight = true;
       api<FetchTask>(`/api/library/tasks/${task.id}`)
         .then((x) => {
           setTask(x);
@@ -766,11 +785,21 @@ export function RuntimesView({
                 );
           }
         })
-        .catch(() => undefined);
-    }, 1000);
-    return () => clearInterval(t);
+        .catch(() => undefined)
+        .finally(() => {
+          inFlight = false;
+        });
+    };
+    const t = setInterval(poll, 1000);
+    document.addEventListener("visibilitychange", poll);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", poll);
+    };
   }, [task?.id, task?.state]);
   const doImport = async (file: File) => {
+    if (importLockRef.current) return;
+    importLockRef.current = true;
     setImporting(true);
     try {
       const f = new FormData();
@@ -784,6 +813,7 @@ export function RuntimesView({
         content: (e as ApiError).message,
       });
     } finally {
+      importLockRef.current = false;
       setImporting(false);
     }
   };

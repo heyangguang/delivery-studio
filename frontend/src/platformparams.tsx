@@ -126,7 +126,7 @@ export function PlatformParameters({
             )}
           </strong>
           {fileProblems.map((p, i) => (
-            <button key={i} onClick={() => onSource(p.line)}>
+            <button key={i} type="button" onClick={() => onSource(p.line)}>
               {p.message}
               <span>
                 {bi("定位到源码", "Go to source")}
@@ -143,12 +143,12 @@ export function PlatformParameters({
             "设置用户创建交付时可以填写的内容。发布后，表单与部署校验同步生效。",
             "Define fields users fill in when creating a delivery. Once published, both the form and deployment validation update together.",
           )}
-          <button className="pp-source" onClick={() => onSource()}>
+          <button type="button" className="pp-source" onClick={() => onSource()}>
             {bi("查看参数定义 →", "View definition →")}
           </button>
         </p>
       </div>
-      {c.parameters.map((p, i) => (
+      {(c.parameters || []).map((p, i) => (
         <section key={i} className="pp-card">
           <div className="pp-card-head">
             <strong>{p.label || bi("新参数", "New parameter")}</strong>

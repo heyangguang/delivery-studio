@@ -431,6 +431,9 @@ export function useFormAI(o: {
   const toolsRef = useRef(tools.opts);
   toolsRef.current = tools.opts;
   const abort = useRef<AbortController | null>(null);
+  const sendingRef = useRef(false);
+  const liveRafRef = useRef<number>(0);
+  const flashTimersRef = useRef<Set<number>>(new Set());
   const depRef = useRef(o.dep);
   depRef.current = o.dep;
   const snapRef = useRef(saved.snapshot);
@@ -458,6 +461,12 @@ export function useFormAI(o: {
     () => () => {
       abort.current?.abort();
       ctl.current?.cancel();
+      if (liveRafRef.current) {
+        cancelAnimationFrame(liveRafRef.current);
+        liveRafRef.current = 0;
+      }
+      flashTimersRef.current.forEach((tid) => window.clearTimeout(tid));
+      flashTimersRef.current.clear();
     },
     [],
   );
@@ -583,10 +592,11 @@ export function useFormAI(o: {
             if (el) {
               el.scrollIntoView({ block: "nearest", behavior: "smooth" });
               el.setAttribute("data-ai-flash", "");
-              window.setTimeout(
-                () => el.removeAttribute("data-ai-flash"),
-                1400,
-              );
+              const tid = window.setTimeout(() => {
+                flashTimersRef.current.delete(tid);
+                el.removeAttribute("data-ai-flash");
+              }, 1400);
+              flashTimersRef.current.add(tid);
             }
           }
           await wait(Math.max(170, 460 - all.length * 14));
@@ -606,7 +616,8 @@ export function useFormAI(o: {
       isRetry = false,
     ) => {
       const text = raw.trim();
-      if (!text || live || !on) return;
+      if (!text || live || sendingRef.current || !on) return;
+      sendingRef.current = true;
       ctl.current?.finish();
       setError(null);
       setSaved((s) => (s.used ? s : { ...s, used: true }));
@@ -643,6 +654,34 @@ export function useFormAI(o: {
       const ac = new AbortController();
       abort.current = ac;
       let filled: FormFill | undefined;
+      const flushLive = () => {
+        if (liveRafRef.current) {
+          cancelAnimationFrame(liveRafRef.current);
+          liveRafRef.current = 0;
+        }
+        setLive({
+          ...cur,
+          tools: [...cur.tools],
+          steps: cur.steps.map((x) => ({ ...x })),
+          sandboxConfirms: cur.sandboxConfirms
+            ? [...cur.sandboxConfirms]
+            : undefined,
+        });
+      };
+      const scheduleLive = () => {
+        if (liveRafRef.current) return;
+        liveRafRef.current = requestAnimationFrame(() => {
+          liveRafRef.current = 0;
+          setLive({
+            ...cur,
+            tools: [...cur.tools],
+            steps: cur.steps.map((x) => ({ ...x })),
+            sandboxConfirms: cur.sandboxConfirms
+              ? [...cur.sandboxConfirms]
+              : undefined,
+          });
+        });
+      };
       const done = (): Msg => ({
         role: "assistant",
         text: cur.text,
@@ -674,15 +713,7 @@ export function useFormAI(o: {
           },
           ac.signal,
           cur,
-          () =>
-            setLive({
-              ...cur,
-              tools: [...cur.tools],
-              steps: cur.steps.map((x) => ({ ...x })),
-              sandboxConfirms: cur.sandboxConfirms
-                ? [...cur.sandboxConfirms]
-                : undefined,
-            }),
+          scheduleLive,
           undefined,
           (e) => {
             if (e.t === "formfiles" && Array.isArray(e.v))
@@ -697,6 +728,7 @@ export function useFormAI(o: {
             }
           },
         );
+        flushLive();
         setMsgs((m) => [...m, done()]);
         if (filled?.target_component) {
           try {
@@ -749,6 +781,11 @@ export function useFormAI(o: {
           });
         }
       } finally {
+        if (liveRafRef.current) {
+          cancelAnimationFrame(liveRafRef.current);
+          liveRafRef.current = 0;
+        }
+        sendingRef.current = false;
         setLive(null);
         abort.current = null;
       }
@@ -1007,6 +1044,18 @@ export function Composer({
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [told, setTold] = useState("");
   const [dragging, setDragging] = useState(false);
+  useEffect(() => {
+    if (!dragging) return;
+    const clearDrag = () => setDragging(false);
+    window.addEventListener("dragend", clearDrag);
+    window.addEventListener("drop", clearDrag);
+    window.addEventListener("blur", clearDrag);
+    return () => {
+      window.removeEventListener("dragend", clearDrag);
+      window.removeEventListener("drop", clearDrag);
+      window.removeEventListener("blur", clearDrag);
+    };
+  }, [dragging]);
   const pick = useRef<HTMLInputElement>(null);
   const composeW = useElementWidth(formRef);
   const compactBar = !isStart || (composeW > 0 && composeW < 680);

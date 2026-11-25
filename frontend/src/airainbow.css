@@ -316,11 +316,13 @@ body[arco-theme="dark"] .ad-empty-mark {
   animation: none;
 }
 
-:root .fc-compose:not(.open):not(:hover)::before {
+:root .fc-compose:not(.open):not(:hover)::before,
+:root .ad-win:not(.open) .ad-compose::before {
   animation-play-state: paused;
 }
 
-/* Layer 2 (z-index: -2): strictly behind ::before's opaque fill — casts ONLY the tight outer edge halo */
+/* Layer 2 (z-index: -2): strictly behind ::before's opaque fill — casts ONLY the tight outer edge halo.
+   Paused when idle so blurred Gaussian layer never repaints at 120Hz at rest; wakes smoothly on hover/focus/writing. */
 :root .ap-compose::after,
 :root .ad-compose::after {
   inset: -1px;
@@ -329,7 +331,8 @@ body[arco-theme="dark"] .ad-empty-mark {
   filter: blur(8px);
   opacity: 0.14;
   animation: ai-orbit 7.5s linear infinite;
-  transition: opacity 0.28s ease;
+  animation-play-state: paused;
+  transition: opacity 0.28s var(--apple-ease, ease);
 }
 
 body[arco-theme="dark"] .ap-compose::after,
@@ -339,7 +342,8 @@ body[arco-theme="dark"] .ad-compose::after {
 
 :root .ap-compose.off::after,
 :root .ad-compose.off::after,
-:root .fc-compose:not(.open):not(:hover)::after {
+:root .fc-compose:not(.open):not(:hover)::after,
+:root .ad-win:not(.open) .ad-compose::after {
   opacity: 0;
   animation-play-state: paused;
 }
@@ -353,12 +357,14 @@ body[arco-theme="dark"] .ad-compose::after {
 :root .ap-compose:not(.off):is(:hover, :focus-within, .is-writing, :has(.arco-dropdown-open), :has(.arco-popover-open), :has(.tm-open))::before,
 :root .ad-compose:not(.off):is(:hover, :focus-within, :has(.arco-dropdown-open), :has(.arco-popover-open), :has(.tm-open))::before {
   animation: ai-orbit 4.2s linear infinite;
+  animation-play-state: running;
 }
 
 :root .ap-compose:not(.off):is(:hover, :focus-within, .is-writing, :has(.arco-dropdown-open), :has(.arco-popover-open), :has(.tm-open))::after,
 :root .ad-compose:not(.off):is(:hover, :focus-within, :has(.arco-dropdown-open), :has(.arco-popover-open), :has(.tm-open))::after {
   opacity: 0.34;
   animation: ai-orbit 4.2s linear infinite;
+  animation-play-state: running;
 }
 
 body[arco-theme="dark"] .ap-compose:not(.off):is(:hover, :focus-within, .is-writing, :has(.arco-dropdown-open), :has(.arco-popover-open), :has(.tm-open))::after,
@@ -689,8 +695,9 @@ body[arco-theme="dark"] .ai-quick-toggle.is-interactive:not(:disabled):is(:hover
 :root .wz-pane-foot .fw-chatbtn.arco-btn:not(:disabled):active,
 :root .rstep-ai:active,
 :root .wb-stage-chat:active,
+:root .vex-ai-btn:not(:disabled):active,
 :root .ai-quick-toggle.is-interactive:not(:disabled):active {
-  transform: scale(0.97);
+  transform: scale(0.975);
 }
 
 :root .ai-pill:focus-visible,
@@ -1053,9 +1060,15 @@ body[arco-theme="dark"] .tm-tog.web.on {
   .rstep-ai,
   .rstep-ai::before,
   .rstep-ai::after,
-  .ai-quick-toggle.is-interactive.is-on,
-  .ai-quick-toggle.is-interactive.is-on::before,
-  .ai-quick-toggle.is-interactive.is-on::after,
+  .wb-stage-chat,
+  .wb-stage-chat::before,
+  .wb-stage-chat::after,
+  .vex-ai-btn,
+  .vex-ai-btn::before,
+  .vex-ai-btn::after,
+  .ai-quick-toggle.is-interactive,
+  .ai-quick-toggle.is-interactive::before,
+  .ai-quick-toggle.is-interactive::after,
   .tm-tog,
   .mp {
     animation: none !important;
@@ -1071,7 +1084,9 @@ body[arco-theme="dark"] .tm-tog.web.on {
   :root .fc-callai:is(:hover, :focus-visible),
   :root .wz-pane-foot .fw-chatbtn.arco-btn:not(:disabled):is(:hover, :focus-visible),
   :root .rstep-ai:is(:hover, :focus-visible),
-  :root .ai-quick-toggle.is-interactive.is-on:not(:disabled):is(:hover, :focus-visible) {
+  :root .wb-stage-chat:is(:hover, :focus-visible),
+  :root .vex-ai-btn:not(:disabled):is(:hover, :focus-visible),
+  :root .ai-quick-toggle.is-interactive:not(:disabled):is(:hover, :focus-visible) {
     transform: none !important;
   }
 }

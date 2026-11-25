@@ -1,4 +1,12 @@
-import {displayInstances,hostStorage} from "./topology";
+import {
+  companionKindMeta,
+  computeEffectiveClusterChanges,
+  detectMissingCompanionsFromMeta,
+  displayInstances,
+  hostStorage,
+  lazySubView,
+  localizeEndpointTitle,
+} from "./topology";
 import { ExecutionHostSummary } from "./execution-placement";
 import {SchemeInfo, schemeName} from "./scheme";
 import {
@@ -77,24 +85,29 @@ import {
   prefetchDetail,
   putDetailCache,
 } from "./deliveries";
-import { DocsTab, prefetchClusterDocs } from "./docs";
 import { AIDock, Spark, useAIStatus } from "./aichat";
-import { ClusterConfig } from "./clusterconfig";
-import { ClusterSecurityTab } from "./clustersecurity";
 import {
-  ImportedBaselineModal,
-  companionKindMeta,
-  detectMissingCompanionsFromMeta,
-  localizeEndpointTitle,
-} from "./importcluster";
-import {
-  ClusterRehearsal,
-  computeEffectiveClusterChanges,
   launchRehearsalIntent,
-} from "./rehearsal";
-import type { RehearsalPresetKind } from "./rehearsal";
+  type RehearsalPresetKind,
+} from "./rehearsal_intent";
 import { bi, useLang } from "./i18n";
 import "./clusters.css";
+
+const LazyDocsTab = lazySubView(() =>
+  import("./docs").then((m) => ({ default: m.DocsTab })),
+);
+const LazyClusterConfig = lazySubView(() =>
+  import("./clusterconfig").then((m) => ({ default: m.ClusterConfig })),
+);
+const LazyClusterSecurityTab = lazySubView(() =>
+  import("./clustersecurity").then((m) => ({ default: m.ClusterSecurityTab })),
+);
+const LazyImportedBaselineModal = lazySubView(() =>
+  import("./importcluster").then((m) => ({ default: m.ImportedBaselineModal })),
+);
+const LazyClusterRehearsal = lazySubView(() =>
+  import("./rehearsal").then((m) => ({ default: m.ClusterRehearsal })),
+);
 
 /* A cluster is deployed once; its tabs show the overview, saved configuration,
    deployment runbook, documents, and — when AI is enabled — guided change rehearsals. */
@@ -403,14 +416,14 @@ export function ClusterDetail({
     refreshRehearsals();
   }, [refreshRehearsals]);
 
-  const hasDocs = c.plans.some((p) => p.state === "succeeded");
-  const basePlanId = c.current || c.holder || c.plans[0]?.id || "";
+  const hasDocs = (c.plans || []).some((p) => p.state === "succeeded");
+  const basePlanId = c.current || c.holder || c.plans?.[0]?.id || "";
   useEffect(() => {
     if (basePlanId) prefetchDetail(basePlanId);
-    if (hasDocs) prefetchClusterDocs(c.id);
-  }, [c.id, basePlanId, hasDocs]);
+  }, [c.id, basePlanId]);
   const isImported = c.delivery_mode === "imported";
   const [baselineModal, setBaselineModal] = useState<null | "edit" | "probe">(null);
+  const deletingImportedRef = useRef(false);
   const effectiveTab =
     (resolvedTab === "plans" && isImported) ||
     (resolvedTab === "rehearsal" && !canRehearse) ||
@@ -626,13 +639,19 @@ export function ClusterDetail({
                           okButtonProps: { status: "danger" },
                           cancelText: bi("取消", "Cancel"),
                           onOk: async () => {
-                            await api(`/api/jobs/${encodeURIComponent(c.current!)}`, {
-                              method: "DELETE",
-                            });
-                            Message.success(bi(`已移除纳管集群 ${c.id}`, `Removed ${c.id}`));
-                            window.dispatchEvent(new Event("mh-clusters-changed"));
-                            await reload();
-                            go({ name: "deliveries" });
+                            if (deletingImportedRef.current) return;
+                            deletingImportedRef.current = true;
+                            try {
+                              await api(`/api/jobs/${encodeURIComponent(c.current!)}`, {
+                                method: "DELETE",
+                              });
+                              Message.success(bi(`已移除纳管集群 ${c.id}`, `Removed ${c.id}`));
+                              window.dispatchEvent(new Event("mh-clusters-changed"));
+                              await reload();
+                              go({ name: "deliveries" });
+                            } finally {
+                              deletingImportedRef.current = false;
+                            }
                           },
                         });
                       }
@@ -657,7 +676,13 @@ export function ClusterDetail({
                   </Menu>
                 }
               >
-                <Button icon={<IconMore />} aria-label={bi("更多操作", "More actions")} />
+                <Button
+                  icon={<IconMore />}
+                  aria-label={bi("更多操作", "More actions")}
+                  onMouseEnter={() => {
+                    if (isImported) void import("./importcluster");
+                  }}
+                />
               </Dropdown>
             </div>
           </header>
@@ -669,8 +694,15 @@ export function ClusterDetail({
             onHover={(next) => {
               if ((next === "overview" || next === "config" || next === "plans") && basePlanId) {
                 prefetchDetail(basePlanId);
+              }
+              if (next === "config") {
+                void import("./clusterconfig");
+              } else if (next === "security" && hasDocs) {
+                void import("./clustersecurity");
+              } else if (next === "rehearsal" && canRehearse) {
+                void import("./rehearsal");
               } else if (next === "docs" && hasDocs) {
-                prefetchClusterDocs(c.id);
+                void import("./docs").then((m) => m.prefetchClusterDocs(c.id));
               }
             }}
             onChange={(next) => {
@@ -702,12 +734,14 @@ export function ClusterDetail({
         role="tabpanel"
       >
         {effectiveTab === "config" ? (
-          <ClusterConfig
-            c={c}
-            source={resolvedSource}
-            section={resolvedSection}
-            rehearsals={rehearsals}
-          />
+          <React.Suspense fallback={<div className="dsec"><Skeleton animation text={{ rows: 6 }} /></div>}>
+            <LazyClusterConfig
+              c={c}
+              source={resolvedSource}
+              section={resolvedSection}
+              rehearsals={rehearsals}
+            />
+          </React.Suspense>
         ) : effectiveTab === "plans" ? (
           <InitialDeploymentView
             c={c}
@@ -716,22 +750,28 @@ export function ClusterDetail({
             reload={reload}
           />
         ) : effectiveTab === "security" ? (
-          <ClusterSecurityTab c={c} canRehearse={canRehearse} />
+          <React.Suspense fallback={<div className="dsec"><Skeleton animation text={{ rows: 6 }} /></div>}>
+            <LazyClusterSecurityTab c={c} canRehearse={canRehearse} />
+          </React.Suspense>
         ) : effectiveTab === "rehearsal" && canRehearse ? (
-          <ClusterRehearsal
-            c={c}
-            rehearsalId={resolvedRehearsal}
-            initialList={rehearsals}
-            focused={isFocusedRehearsal}
-            onFocusChange={onRehearsalFocusChange}
-            onListUpdated={refreshRehearsals}
-            onClusterChanged={() => {
-              refreshRehearsals();
-              void reload();
-            }}
-          />
+          <React.Suspense fallback={<div className="dsec"><Skeleton animation text={{ rows: 6 }} /></div>}>
+            <LazyClusterRehearsal
+              c={c}
+              rehearsalId={resolvedRehearsal}
+              initialList={rehearsals}
+              focused={isFocusedRehearsal}
+              onFocusChange={onRehearsalFocusChange}
+              onListUpdated={refreshRehearsals}
+              onClusterChanged={() => {
+                refreshRehearsals();
+                void reload();
+              }}
+            />
+          </React.Suspense>
         ) : effectiveTab === "docs" ? (
-          <DocsTab c={c} doc={resolvedDoc} />
+          <React.Suspense fallback={<div className="dsec"><Skeleton animation text={{ rows: 6 }} /></div>}>
+            <LazyDocsTab c={c} doc={resolvedDoc} />
+          </React.Suspense>
         ) : (
           <Overview
             c={c}
@@ -755,22 +795,24 @@ export function ClusterDetail({
           />
         )}
       </div>
-      {isImported && (
-        <ImportedBaselineModal
-          visible={baselineModal !== null}
-          mode={baselineModal || "edit"}
-          cluster={c}
-          onClose={() => setBaselineModal(null)}
-          onSaved={async () => {
-            if (c.current) {
-              putDetailCache(
-                c.current,
-                await api<JobDetail>(`/api/jobs/${encodeURIComponent(c.current)}`),
-              );
-            }
-            await reload();
-          }}
-        />
+      {isImported && baselineModal !== null && (
+        <React.Suspense fallback={null}>
+          <LazyImportedBaselineModal
+            visible
+            mode={baselineModal}
+            cluster={c}
+            onClose={() => setBaselineModal(null)}
+            onSaved={async () => {
+              if (c.current) {
+                putDetailCache(
+                  c.current,
+                  await api<JobDetail>(`/api/jobs/${encodeURIComponent(c.current)}`),
+                );
+              }
+              await reload();
+            }}
+          />
+        </React.Suspense>
       )}
     </article>
   );
@@ -1235,6 +1277,7 @@ function Overview({
   const visibleNotes = notesExpanded ? noteItems : noteItems.slice(0, 2);
 
   const handleAutoAdoptCompanions = async () => {
+    if (recoveringStack) return;
     setRecoveringStack(true);
     try {
       const base = await api<Record<string, unknown>>(
@@ -2377,7 +2420,8 @@ function ClusterUnifiedOverview({
 /** The cluster's plans as a row of dots, oldest first: what happened to it at a glance. */
 export function HistoryDots({ c }: { c: ClusterView }) {
   useLang();
-  const plans = [...c.plans].reverse().slice(-8);
+  const planList = Array.isArray(c.plans) ? c.plans : [];
+  const plans = [...planList].reverse().slice(-8);
   if (plans.length < 2) return null;
   const labelOf = (p: PlanEntry) =>
     p.delivery_mode === "configuration" ? bi("配置交付", "Config delivery") : bi("部署交付", "Deploy delivery");
@@ -2385,7 +2429,7 @@ export function HistoryDots({ c }: { c: ClusterView }) {
     <span
       className="cl-hist"
       aria-label={
-        bi(`${c.plans.length} 份交付记录：`, `${c.plans.length} deliveries: `) +
+        bi(`${planList.length} 份交付记录：`, `${planList.length} deliveries: `) +
         plans
           .map((p) => `${labelOf(p)} ${PLAN_PHASE[planPhase(p)].label}`)
           .join(bi("，", ", "))

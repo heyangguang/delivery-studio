@@ -106,6 +106,8 @@ body {
   --r-lg: 11px;
   --r-xl: 12px;
   --rail-w: 304px;
+  --apple-ease: cubic-bezier(0.25, 0.1, 0.25, 1);
+  --apple-sheet: cubic-bezier(0.32, 0.72, 0, 1);
   --spring: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", "Noto Sans CJK SC", sans-serif;
@@ -444,10 +446,17 @@ kbd {
   font-weight: 500;
   line-height: 1.2;
   transition:
-    background-color 0.16s ease,
-    border-color 0.16s ease,
-    color 0.16s ease,
-    box-shadow 0.16s ease;
+    background-color 0.16s var(--apple-ease),
+    border-color 0.16s var(--apple-ease),
+    color 0.16s var(--apple-ease),
+    box-shadow 0.16s var(--apple-ease),
+    transform 0.18s var(--spring);
+}
+.arco-btn:active:not(:disabled):not(.arco-btn-disabled):not(.arco-btn-loading):not(.arco-dropdown-open):not(.arco-dropdown-popup-visible):not(.arco-popover-open):not(.arco-popconfirm-open):not(.arco-trigger-open):not(.ib-submit) {
+  transform: scale(0.975);
+}
+.arco-btn-group > .arco-btn:active {
+  transform: none;
 }
 .arco-btn > .arco-icon + span,
 .arco-btn > span + .arco-icon,
@@ -530,9 +539,10 @@ kbd {
     inset 0 1px 0 rgba(255, 255, 255, 0.2),
     0 1px 2px rgba(180, 38, 18, 0.24);
   transition:
-    box-shadow 0.16s ease,
-    background-color 0.16s ease,
-    border-color 0.16s ease;
+    box-shadow 0.16s var(--apple-ease),
+    background-color 0.16s var(--apple-ease),
+    border-color 0.16s var(--apple-ease),
+    transform 0.18s var(--spring);
 }
 .arco-btn-primary:not(.arco-btn-disabled):not(.arco-btn-status-danger):not(.arco-btn-status-warning):not(.arco-btn-status-success):hover {
   background-color: #cf321d;
@@ -603,9 +613,10 @@ body[arco-theme="dark"] .arco-btn-secondary:not(.arco-btn-disabled):not(.arco-bt
   color: var(--ink);
   box-shadow: var(--shadow-sm);
   transition:
-    border-color 0.16s ease,
-    background-color 0.16s ease,
-    box-shadow 0.16s ease;
+    border-color 0.16s var(--apple-ease),
+    background-color 0.16s var(--apple-ease),
+    box-shadow 0.16s var(--apple-ease),
+    transform 0.18s var(--spring);
 }
 .arco-btn-secondary:not(.arco-btn-disabled):not(.arco-btn-status-danger):hover,
 body[arco-theme="dark"] .arco-btn-secondary:not(.arco-btn-disabled):not(.arco-btn-status-danger):hover {
@@ -829,8 +840,8 @@ body[arco-theme="dark"] .arco-textarea {
   background: var(--surface) !important;
   border: 1px solid var(--line-strong) !important;
   transition:
-    border-color 0.18s ease,
-    box-shadow 0.18s ease !important;
+    border-color 0.18s var(--apple-ease),
+    box-shadow 0.18s var(--apple-ease) !important;
 }
 .arco-input-inner-wrapper .arco-input,
 .arco-input-inner-wrapper input.arco-input,
@@ -953,13 +964,18 @@ body[arco-theme="dark"] .arco-switch-checked {
 .arco-modal {
   border-radius: 12px;
   border: 1px solid var(--line-strong);
-  box-shadow: var(--shadow-lg);
+  box-shadow:
+    var(--shadow-lg),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55);
   overflow: hidden;
   transform-origin: center center !important;
   contain: layout style;
 }
 body[arco-theme="dark"] .arco-modal {
   border-color: var(--line-strong);
+  box-shadow:
+    var(--shadow-lg),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 .arco-modal-header {
   height: auto;
@@ -980,19 +996,19 @@ body[arco-theme="dark"] .arco-modal {
 .arco-drawer-mask {
   background: rgba(11, 13, 18, 0.42);
 }
-/* Snappy GPU-composited modal transitions replacing Arco's heavy 400ms scale(0.5) overshoot zoom. */
+/* Snappy GPU-composited modal & sheet transitions tuned to Apple spatial curves. */
 .zoomModal-enter,
 .zoomModal-appear {
   opacity: 0;
-  transform: translate3d(0, 8px, 0) scale(0.985);
+  transform: translate3d(0, 8px, 0) scale(0.98);
 }
 .zoomModal-enter-active,
 .zoomModal-appear-active {
   opacity: 1;
   transform: translate3d(0, 0, 0) scale(1);
   transition:
-    opacity 0.16s cubic-bezier(0.22, 1, 0.36, 1),
-    transform 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+    opacity 0.2s var(--apple-ease),
+    transform 0.24s var(--apple-sheet);
 }
 .zoomModal-exit {
   opacity: 1;
@@ -1003,8 +1019,8 @@ body[arco-theme="dark"] .arco-modal {
   transform: translate3d(0, 6px, 0) scale(0.985);
   pointer-events: none;
   transition:
-    opacity 0.13s ease-in,
-    transform 0.13s ease-in;
+    opacity 0.15s var(--apple-ease),
+    transform 0.16s var(--apple-ease);
 }
 .fadeModal-enter,
 .fadeModal-appear {
@@ -1013,7 +1029,7 @@ body[arco-theme="dark"] .arco-modal {
 .fadeModal-enter-active,
 .fadeModal-appear-active {
   opacity: 1;
-  transition: opacity 0.16s ease-out;
+  transition: opacity 0.2s var(--apple-ease);
 }
 .fadeModal-exit {
   opacity: 1;
@@ -1021,7 +1037,23 @@ body[arco-theme="dark"] .arco-modal {
 .fadeModal-exit-active {
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.13s ease-in;
+  transition: opacity 0.15s var(--apple-ease);
+}
+.slideLeft-enter-active,
+.slideLeft-appear-active,
+.slideRight-enter-active,
+.slideRight-appear-active,
+.slideTop-enter-active,
+.slideTop-appear-active,
+.slideBottom-enter-active,
+.slideBottom-appear-active {
+  transition: transform 0.28s var(--apple-sheet) !important;
+}
+.slideLeft-exit-active,
+.slideRight-exit-active,
+.slideTop-exit-active,
+.slideBottom-exit-active {
+  transition: transform 0.2s var(--apple-ease) !important;
 }
 /* Zero-jitter in-place fade transitions for ALL Arco popups (Dropdowns, Selects, Popovers,
    Popconfirms, DatePickers, Cascaders, and Tooltips).
@@ -1072,7 +1104,7 @@ body[arco-theme="dark"] .arco-modal {
 .fadeIn-appear-active {
   opacity: 1 !important;
   transform: none !important;
-  transition: opacity 0.1s ease-out !important;
+  transition: opacity 0.14s var(--apple-ease) !important;
 }
 .slideDynamicOrigin-enter-done,
 .slideDynamicOrigin-appear-done,
@@ -1112,7 +1144,7 @@ body[arco-theme="dark"] .arco-modal {
   opacity: 0 !important;
   transform: none !important;
   pointer-events: none;
-  transition: opacity 0.08s ease-in !important;
+  transition: opacity 0.1s var(--apple-ease) !important;
 }
 
 /* Layering: AI dock window (980) < modal/drawer (1001) < Change Report modal (1030) < Arco popovers/dropdowns/tooltips (1050) < toast messages (1080). */
@@ -1226,9 +1258,12 @@ body[arco-theme="dark"] .arco-trigger-popup .arco-popconfirm-content {
   backdrop-filter: saturate(160%) blur(14px);
 }
 .arco-tooltip-content {
-  border-radius: 6px;
+  border-radius: 7px;
   font-size: 12px;
   line-height: 1.45;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: saturate(160%) blur(12px);
+  -webkit-backdrop-filter: saturate(160%) blur(12px);
   box-shadow: var(--shadow-md);
 }
 .arco-upload-list-item-name-text {

@@ -36,7 +36,7 @@ export const osVariants = (title: string) => /（(.*?)）/.exec(title)?.[1] || "
 
 export function OsLogo({ id, size = 18 }: { id: string; size?: number }) {
   const k = osKind(id);
-  const box = { width: size, height: size };
+  const box: React.CSSProperties = { width: size, height: size, flexShrink: 0 };
   if (k === "ubuntu")
     return (
       <svg className="os-logo" style={box} viewBox="0 0 24 24" aria-hidden>

@@ -188,7 +188,7 @@ export function useMessageQueue<F extends QueuedAttachment = QueuedAttachment>(
   };
 }
 
-export function MessageQueueTray<
+function MessageQueueTrayInner<
   F extends QueuedAttachment = QueuedAttachment,
 >({
   items,
@@ -233,15 +233,34 @@ export function MessageQueueTray<
   }, [items, editingId]);
 
   useEffect(() => {
-    if (editingId) {
-      requestAnimationFrame(() => {
-        const el = editRef.current;
-        if (!el) return;
-        el.focus();
-        el.setSelectionRange(el.value.length, el.value.length);
-      });
-    }
+    if (!editingId) return;
+    const raf = window.requestAnimationFrame(() => {
+      const el = editRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(el.value.length, el.value.length);
+    });
+    return () => window.cancelAnimationFrame(raf);
   }, [editingId]);
+
+  useEffect(() => {
+    if (dragIdx === null) return;
+    if (dragIdx >= items.length) {
+      setDragIdx(null);
+      setOverIdx(null);
+      return;
+    }
+    const resetDrag = () => {
+      setDragIdx(null);
+      setOverIdx(null);
+    };
+    window.addEventListener("dragend", resetDrag);
+    window.addEventListener("blur", resetDrag);
+    return () => {
+      window.removeEventListener("dragend", resetDrag);
+      window.removeEventListener("blur", resetDrag);
+    };
+  }, [dragIdx, items.length]);
 
   if (!items.length) return null;
 
@@ -346,6 +365,14 @@ export function MessageQueueTray<
                   e.preventDefault();
                   e.dataTransfer.dropEffect = "move";
                   if (overIdx !== idx) setOverIdx(idx);
+                }}
+                onDragLeave={(e) => {
+                  if (
+                    overIdx === idx &&
+                    !e.currentTarget.contains(e.relatedTarget as Node)
+                  ) {
+                    setOverIdx(null);
+                  }
                 }}
                 onDrop={(e) => {
                   if (dragIdx === null) return;
@@ -515,3 +542,7 @@ export function MessageQueueTray<
     </div>
   );
 }
+
+export const MessageQueueTray = React.memo(
+  MessageQueueTrayInner,
+) as typeof MessageQueueTrayInner;

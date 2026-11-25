@@ -126,19 +126,23 @@ export function SizeInput({
   label: string;
 }) {
   useLang();
-  const m = /^([0-9]*)(kB|MB|GB|TB)$/.exec(value) || ["", "", "MB"];
+  const raw = /^\s*([0-9]+(?:\.[0-9]+)?)\s*(kB|MB|GB|TB)\s*$/i.exec(value);
+  const amount = raw ? raw[1] : "";
+  const unit = raw
+    ? UNITS.find((u) => u.toLowerCase() === raw[2].toLowerCase()) || "MB"
+    : "MB";
   return (
     <div className="size-in">
       <InputNumber
-        value={m[1] === "" ? undefined : Number(m[1])}
+        value={amount === "" ? undefined : Number(amount)}
         min={0}
-        precision={0}
-        onChange={(n) => onChange(`${n ?? ""}${m[2]}`)}
+        precision={amount.includes(".") ? 2 : 0}
+        onChange={(n) => onChange(`${n ?? ""}${unit}`)}
         aria-label={label}
       />
       <Select
-        value={m[2]}
-        onChange={(u) => onChange(`${m[1] || 0}${u}`)}
+        value={unit}
+        onChange={(u) => onChange(`${amount || 0}${u}`)}
         options={UNITS}
         aria-label={bi(`${label} 单位`, `${label} unit`)}
       />
@@ -331,6 +335,7 @@ export const ParamField = React.memo(function ParamField({
         {control}
         <Tooltip content={def ? bi(`恢复默认 ${def}`, `Reset to ${def}`) : bi("恢复默认", "Reset to default")} mini>
           <button
+            type="button"
             className={`reset ${changed ? "" : "hidden"}`}
             onClick={doReset}
             aria-label={bi(`${d.label} 恢复默认`, `Reset ${d.label} to default`)}

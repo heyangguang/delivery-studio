@@ -722,6 +722,7 @@ function useLiveStepLog(
   const [loadErr, setLoadErr] = useState("");
   const offsetRef = useRef(0);
   const keyRef = useRef("");
+  const abortRef = useRef<AbortController | null>(null);
   const reqKey = jobId && runId && stepId ? `${jobId}/${runId}/${stepId}` : "";
 
   const fetchChunk = useCallback(
@@ -737,17 +738,21 @@ function useLiveStepLog(
         }
         return;
       }
+      abortRef.current?.abort();
+      const ctrl = new AbortController();
+      abortRef.current = ctrl;
       const startOffset = reset ? 0 : offsetRef.current;
       const url = `/api/jobs/${encodeURIComponent(jobId)}/executions/${encodeURIComponent(runId)}/logs/${encodeURIComponent(stepId)}${startOffset > 0 ? `?offset=${startOffset}` : ""}`;
       if (reset) setLoading(true);
       try {
         const resp = await fetch(withLang(url), {
           headers: { "X-Lang": getLang() },
+          signal: ctrl.signal,
         });
-        if (keyRef.current !== reqKey) return;
+        if (keyRef.current !== reqKey || ctrl.signal.aborted) return;
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const chunk = await resp.text();
-        if (keyRef.current !== reqKey) return;
+        if (keyRef.current !== reqKey || ctrl.signal.aborted) return;
         const sizeHdr = Number(resp.headers.get("X-Log-Size") || "");
         if (reset) {
           setText(chunk);
@@ -771,12 +776,15 @@ function useLiveStepLog(
         }
         setLoadErr("");
       } catch (e) {
+        if (ctrl.signal.aborted || (e instanceof DOMException && e.name === "AbortError")) {
+          return;
+        }
         if (keyRef.current === reqKey) {
           const msg = e instanceof Error ? e.message : String(e);
           setLoadErr(bi(`日志读取失败：${msg}`, `Failed to load log: ${msg}`));
         }
       } finally {
-        if (keyRef.current === reqKey) setLoading(false);
+        if (keyRef.current === reqKey && !ctrl.signal.aborted) setLoading(false);
       }
     },
     [reqKey, jobId, runId, stepId, stepSeq, stepState],
@@ -790,6 +798,9 @@ function useLiveStepLog(
     setLoadErr("");
     if (!reqKey) return;
     void fetchChunk(true);
+    return () => {
+      abortRef.current?.abort();
+    };
   }, [reqKey]);
 
   useEffect(() => {
@@ -810,6 +821,144 @@ function useLiveStepLog(
 
   return { text, byteSize, loading, loadErr, reload: () => fetchChunk(true) };
 }
+
+/* ---------- Isolated 1s Elapsed Clock Leaves (prevents MonitorWorkspace & Log DOM re-renders!) ---------- */
+
+function useLiveSecond(active: boolean) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    setNow(Date.now());
+    const id = window.setInterval(() => {
+      if (document.visibilityState === "visible") setNow(Date.now());
+    }, 1000);
+    return () => clearInterval(id);
+  }, [active]);
+  return now;
+}
+
+function LiveStepDur({
+  step,
+  prefix = "",
+  wrapParen = false,
+  className,
+}: {
+  step: ExecStep;
+  prefix?: string;
+  wrapParen?: boolean;
+  className?: string;
+}) {
+  const now = useLiveSecond(isStepLive(step.state));
+  const dur = fmtStepDur(step, now);
+  if (!dur) return null;
+  const content = `${prefix}${wrapParen ? `(${dur})` : dur}`;
+  return className ? <span className={className}>{content}</span> : <>{content}</>;
+}
+
+function LivePhaseDur({
+  rows,
+  live,
+}: {
+  rows: PipelineRow[];
+  live: boolean;
+}) {
+  const now = useLiveSecond(live);
+  let totalMs = 0;
+  for (const x of rows) {
+    if (x.step.started) {
+      const a = Date.parse(x.step.started);
+      const b = x.step.finished
+        ? Date.parse(x.step.finished)
+        : isStepLive(x.state)
+          ? now
+          : NaN;
+      if (Number.isFinite(a) && Number.isFinite(b) && b >= a) totalMs += b - a;
+    }
+  }
+  if (totalMs <= 0) return null;
+  return <span>{fmtDurMs(totalMs)}</span>;
+}
+
+function LiveTotalDur({
+  scopedRun,
+  runsChrono,
+  active,
+}: {
+  scopedRun?: ExecRun;
+  runsChrono: ExecRun[];
+  active: boolean;
+}) {
+  useLang();
+  const now = useLiveSecond(active);
+  let ms = 0;
+  const targetRuns = scopedRun ? [scopedRun] : runsChrono;
+  for (const r of targetRuns) {
+    for (const st of r.steps) {
+      if (!st.started) continue;
+      const a = Date.parse(st.started);
+      const b = st.finished
+        ? Date.parse(st.finished)
+        : isStepLive(st.state)
+          ? now
+          : NaN;
+      if (Number.isFinite(a) && Number.isFinite(b) && b >= a) ms += b - a;
+    }
+  }
+  if (ms <= 0) return null;
+  return (
+    <span className={`mon-kpi ${active ? "run" : ""}`}>
+      {bi("耗时", "Elapsed")}
+      <b>{fmtDurMs(ms)}</b>
+    </span>
+  );
+}
+
+const LOG_WINDOW_STEP = 1500;
+
+const MemoLogLines = React.memo(function MemoLogLines({
+  lines,
+  query,
+  searchMatches,
+  activeMatchLine,
+  focusedLine,
+  isTaskOutline,
+  onSelectTaskLine,
+}: {
+  lines: ParsedLine[];
+  query: string;
+  searchMatches: number[];
+  activeMatchLine?: number;
+  focusedLine: number | null;
+  isTaskOutline: boolean;
+  onSelectTaskLine: (lineNum: number) => void;
+}) {
+  const matchSet = useMemo(
+    () => (query ? new Set(searchMatches) : null),
+    [query, searchMatches],
+  );
+  return (
+    <>
+      {lines.map((l) => {
+        const isMatch = matchSet?.has(l.num);
+        const isActiveMatch =
+          activeMatchLine === l.num || focusedLine === l.num;
+        return (
+          <div
+            key={l.num}
+            data-line={l.num}
+            className={`mon-line k-${l.kind}${isTaskOutline ? " clickable" : ""}${isMatch ? " is-match" : ""}${isActiveMatch ? " is-active-match" : ""}`}
+            onClick={isTaskOutline ? () => onSelectTaskLine(l.num) : undefined}
+          >
+            <span className="mon-ln">{l.num}</span>
+            <span className="mon-lt">
+              {query ? renderHighlightedText(l.text, query) : l.text || " "}
+            </span>
+          </div>
+        );
+      })}
+    </>
+  );
+});
 
 /* ---------- AI Diagnose Trigger (inside AIDock) ---------- */
 
@@ -1574,13 +1723,20 @@ function MonitorWorkspace({
   const [focusedLine, setFocusedLine] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
   const [diagCollapsed, setDiagCollapsed] = useState(false);
-  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [logTailLimit, setLogTailLimit] = useState(LOG_WINDOW_STEP);
+  const [resizingPipe, setResizingPipe] = useState(false);
   const [hotfixStep, setHotfixStep] = useState<{
     key: string;
     title: string;
   } | null>(null);
 
+  const workspaceRef = useRef<HTMLDivElement>(null);
   const termBodyRef = useRef<HTMLDivElement>(null);
+  const copyTimerRef = useRef<number>(0);
+  const busyLockRef = useRef(false);
+  const syncLockRef = useRef(false);
+  const syncConfirmLockRef = useRef(false);
+  const pipeResizeCleanupRef = useRef<(() => void) | null>(null);
   const suppressScrollUntilRef = useRef(0);
   const scopeInitializedRef = useRef(Boolean(view.data && !initialStep));
   const reqSeqRef = useRef(0);
@@ -1722,17 +1878,72 @@ function MonitorWorkspace({
 
   useEffect(() => {
     const ms = activeRun ? 1500 : 10000;
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void loadDetail();
+    };
     const id = window.setInterval(() => {
       if (document.visibilityState === "visible") void loadDetail();
     }, ms);
-    return () => clearInterval(id);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [activeRun, loadDetail]);
 
   useEffect(() => {
-    if (!activeRun) return;
-    const id = window.setInterval(() => setNowMs(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, [activeRun]);
+    return () => {
+      if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
+      pipeResizeCleanupRef.current?.();
+    };
+  }, []);
+
+  const startPipeResize = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0 || !workspaceRef.current) return;
+    e.preventDefault();
+    pipeResizeCleanupRef.current?.();
+    const ws = workspaceRef.current;
+    const pipeEl = ws.querySelector<HTMLElement>(".mon-pipeline");
+    const startX = e.clientX;
+    const startW = pipeEl ? pipeEl.getBoundingClientRect().width : 332;
+    let rafId = 0;
+    let latestW = startW;
+
+    setResizingPipe(true);
+    document.body.classList.add("is-resizing-pane");
+
+    const onMove = (ev: PointerEvent) => {
+      const wsRect = ws.getBoundingClientRect();
+      const maxW = Math.max(260, Math.min(540, wsRect.width - 360));
+      latestW = Math.round(Math.max(220, Math.min(maxW, startW + (ev.clientX - startX))));
+      if (!rafId) {
+        rafId = window.requestAnimationFrame(() => {
+          rafId = 0;
+          ws.style.setProperty("--mon-pipe-w", `${latestW}px`);
+        });
+      }
+    };
+
+    const cleanup = () => {
+      if (rafId) {
+        window.cancelAnimationFrame(rafId);
+        rafId = 0;
+      }
+      document.body.classList.remove("is-resizing-pane");
+      setResizingPipe(false);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", cleanup);
+      window.removeEventListener("pointercancel", cleanup);
+      window.removeEventListener("blur", cleanup);
+      pipeResizeCleanupRef.current = null;
+    };
+
+    pipeResizeCleanupRef.current = cleanup;
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", cleanup);
+    window.addEventListener("pointercancel", cleanup);
+    window.addEventListener("blur", cleanup);
+  }, []);
 
   useEffect(() => {
     if (!data || scopeInitializedRef.current) return;
@@ -2210,28 +2421,15 @@ function MonitorWorkspace({
       const done = rows.filter((x) => isStepSettled(x.state)).length;
       const failed = rows.filter((x) => isStepFail(x.state)).length;
       const live = rows.some((x) => isStepLive(x.state));
-      let totalMs = 0;
-      for (const x of rows) {
-        if (x.step.started) {
-          const a = Date.parse(x.step.started);
-          const b = x.step.finished
-            ? Date.parse(x.step.finished)
-            : isStepLive(x.state)
-              ? nowMs
-              : NaN;
-          if (Number.isFinite(a) && Number.isFinite(b) && b >= a) totalMs += b - a;
-        }
-      }
       return {
         phase,
         rows,
         done,
         failed,
         live,
-        dur: totalMs > 0 ? fmtDurMs(totalMs) : "",
       };
     });
-  }, [pipelineRows, pipeFilter, effectiveScope, nowMs]);
+  }, [pipelineRows, pipeFilter, effectiveScope]);
 
   // Live Pipeline Event Stream
   const streamEvents = useMemo<StreamEvent[]>(() => {
@@ -2280,7 +2478,7 @@ function MonitorWorkspace({
                 (st.playbook
                   ? `${st.playbook}${st.hosts?.length ? ` · ${st.hosts.join(", ")}` : ""}`
                   : bi("执行节点已接单启动", "Started by runner")),
-              durText: isStepLive(st.state) ? fmtStepDur(st, nowMs) : "",
+              durText: "",
               failed: false,
             });
           }
@@ -2288,7 +2486,7 @@ function MonitorWorkspace({
             const stFail = isStepFail(st.state);
             if (stFail) failed = true;
             else if (isStepSettled(st.state)) passed++;
-            const durText = fmtStepDur(st, nowMs);
+            const durText = st.started && st.finished ? fmtStepDur(st, 0) : "";
             if (st.started && st.finished) {
               const a = Date.parse(st.started);
               const b = Date.parse(st.finished);
@@ -2345,7 +2543,7 @@ function MonitorWorkspace({
       }
     }
     return out;
-  }, [scopedRun, runsChrono, runNumById, nowMs]);
+  }, [scopedRun, runsChrono, runNumById]);
 
   const visibleStreamEvents = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -2388,29 +2586,39 @@ function MonitorWorkspace({
 
   useEffect(() => {
     setDiagCollapsed(false);
+    setLogTailLimit(LOG_WINDOW_STEP);
   }, [activeStepRef?.step.id]);
 
-  const jumpToLineNum = useCallback((lineNum: number) => {
-    suppressScrollUntilRef.current = Date.now() + 650;
-    setAutoScroll(false);
-    setFocusedLine(lineNum);
-    const apply = () => {
-      const term = termBodyRef.current;
-      if (!term) return;
-      const el = term.querySelector<HTMLElement>(`[data-line="${lineNum}"]`);
-      if (!el) return;
-      const delta =
-        el.getBoundingClientRect().top - term.getBoundingClientRect().top;
-      term.scrollTop = Math.max(
-        0,
-        term.scrollTop + delta - Math.floor(term.clientHeight * 0.3),
-      );
-    };
-    requestAnimationFrame(() => {
-      apply();
-      requestAnimationFrame(apply);
-    });
-  }, []);
+  const jumpToLineNum = useCallback(
+    (lineNum: number) => {
+      suppressScrollUntilRef.current = Date.now() + 650;
+      setAutoScroll(false);
+      setFocusedLine(lineNum);
+      if (parsedLines.length > logTailLimit) {
+        const needed = parsedLines.length - lineNum + 200;
+        if (needed > logTailLimit) {
+          setLogTailLimit(Math.min(parsedLines.length, needed));
+        }
+      }
+      const apply = () => {
+        const term = termBodyRef.current;
+        if (!term) return;
+        const el = term.querySelector<HTMLElement>(`[data-line="${lineNum}"]`);
+        if (!el) return;
+        const delta =
+          el.getBoundingClientRect().top - term.getBoundingClientRect().top;
+        term.scrollTop = Math.max(
+          0,
+          term.scrollTop + delta - Math.floor(term.clientHeight * 0.3),
+        );
+      };
+      requestAnimationFrame(() => {
+        apply();
+        requestAnimationFrame(apply);
+      });
+    },
+    [parsedLines.length, logTailLimit],
+  );
 
   const jumpFirstError = useCallback(() => {
     const targetLine =
@@ -2435,8 +2643,12 @@ function MonitorWorkspace({
 
   useEffect(() => {
     if (!autoScroll || !termBodyRef.current) return;
-    const el = termBodyRef.current;
-    el.scrollTop = el.scrollHeight;
+    const raf = window.requestAnimationFrame(() => {
+      if (termBodyRef.current) {
+        termBodyRef.current.scrollTop = termBodyRef.current.scrollHeight;
+      }
+    });
+    return () => window.cancelAnimationFrame(raf);
   }, [autoScroll, logText, visibleStreamEvents.length, consoleMode, logView]);
 
   const handleTermScroll = () => {
@@ -2450,6 +2662,8 @@ function MonitorWorkspace({
 
   // Batch controls
   const runAction = async (r: ExecRun, act: string) => {
+    if (busyLockRef.current) return;
+    busyLockRef.current = true;
     setBusy(true);
     try {
       await api(
@@ -2469,6 +2683,7 @@ function MonitorWorkspace({
     } catch (e) {
       err(e);
     } finally {
+      busyLockRef.current = false;
       setBusy(false);
     }
   };
@@ -2485,6 +2700,8 @@ function MonitorWorkspace({
 
   // Check & sync component updates (including workspace drafts for verification deliveries!) directly from the Execution Monitor
   const checkAndSyncComponent = async () => {
+    if (syncLockRef.current) return;
+    syncLockRef.current = true;
     setSyncBusy(true);
     try {
       const res = await api<{
@@ -2554,6 +2771,8 @@ function MonitorWorkspace({
           ? bi("热同步草稿并准备续跑", "Hot-Sync Draft")
           : bi("立即同步更新", "Sync Update Now"),
         onOk: async () => {
+          if (syncConfirmLockRef.current) return;
+          syncConfirmLockRef.current = true;
           try {
             await api(`/api/jobs/${encodeURIComponent(jobId)}/sync`, {
               method: "POST",
@@ -2577,12 +2796,15 @@ function MonitorWorkspace({
             }
           } catch (e) {
             err(e);
+          } finally {
+            syncConfirmLockRef.current = false;
           }
         },
       });
     } catch (e) {
       err(e);
     } finally {
+      syncLockRef.current = false;
       setSyncBusy(false);
     }
   };
@@ -2592,24 +2814,6 @@ function MonitorWorkspace({
   const failCount = pipelineRows.filter((r) => isStepFail(r.state)).length;
   const totalCount = pipelineRows.length;
   const pct = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
-
-  const totalDurText = useMemo(() => {
-    let ms = 0;
-    const targetRuns = scopedRun ? [scopedRun] : runsChrono;
-    for (const r of targetRuns) {
-      for (const st of r.steps) {
-        if (!st.started) continue;
-        const a = Date.parse(st.started);
-        const b = st.finished
-          ? Date.parse(st.finished)
-          : isStepLive(st.state)
-            ? nowMs
-            : NaN;
-        if (Number.isFinite(a) && Number.isFinite(b) && b >= a) ms += b - a;
-      }
-    }
-    return ms > 0 ? fmtDurMs(ms) : "";
-  }, [scopedRun, runsChrono, nowMs]);
 
   const headerRun = scopedRun || activeRun || runsNewest[0];
   const runnerNode = data?.nodes.find((n) => n.id === headerRun?.node);
@@ -2754,7 +2958,7 @@ function MonitorWorkspace({
                   <IconMenuFold
                     style={{
                       transform: railHidden ? "rotate(180deg)" : undefined,
-                      transition: "transform 0.18s",
+                      transition: "transform 0.2s var(--spring)",
                     }}
                   />
                 }
@@ -3023,12 +3227,11 @@ function MonitorWorkspace({
                   <b>{failCount}</b>
                 </span>
               )}
-              {totalDurText && (
-                <span className={`mon-kpi ${activeRun ? "run" : ""}`}>
-                  {bi("耗时", "Elapsed")}
-                  <b>{totalDurText}</b>
-                </span>
-              )}
+              <LiveTotalDur
+                scopedRun={scopedRun}
+                runsChrono={runsChrono}
+                active={Boolean(activeRun)}
+              />
             </div>
           </div>
         )}
@@ -3219,7 +3422,7 @@ function MonitorWorkspace({
           </Button>
         </div>
       ) : (
-        <div className="mon-workspace">
+        <div className="mon-workspace" ref={workspaceRef}>
           {/* Left Pane: Phase-Grouped Step Pipeline (collapsible) */}
           <aside
             className={`mon-pipeline ${pipeHidden ? "collapsed" : ""}`}
@@ -3319,7 +3522,7 @@ function MonitorWorkspace({
                         <span>{phaseLabel(grp.phase)}</span>
                       </span>
                       <span className="mon-phase-right">
-                        {grp.dur && <span>{grp.dur}</span>}
+                        <LivePhaseDur rows={grp.rows} live={grp.live} />
                         <span className={`mon-phase-frac ${fracCls}`}>
                           {grp.done}/{grp.rows.length}
                         </span>
@@ -3335,7 +3538,6 @@ function MonitorWorkspace({
                               ? activeStepRef?.run.id === row.run.id &&
                                 activeStepRef?.step.id === row.step.id
                               : activeStepRef?.step.key === row.key);
-                          const dur = fmtStepDur(row.step, nowMs);
                           const live = isStepLive(row.state);
                           const fail = isStepFail(row.state);
                           const hadPriorFail =
@@ -3361,7 +3563,10 @@ function MonitorWorkspace({
                               <div className="mon-step-body">
                                 <div className="mon-step-title-line">
                                   <span className="mon-step-title">{row.title}</span>
-                                  {dur && <span className="mon-step-dur">{dur}</span>}
+                                  <LiveStepDur
+                                    step={row.step}
+                                    className="mon-step-dur"
+                                  />
                                 </div>
                                 <div className="mon-step-sub">
                                   <span className="mon-step-key" title={row.key}>
@@ -3404,6 +3609,20 @@ function MonitorWorkspace({
               </div>
             </div>
           </aside>
+
+          {!pipeHidden && (
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label={bi("调整步骤栏宽度", "Resize pipeline pane")}
+              title={bi("拖动调整宽度 · 双击还原默认", "Drag to resize · Double-click to reset")}
+              className={`mon-pipe-resizer ${resizingPipe ? "is-dragging" : ""}`}
+              onPointerDown={startPipeResize}
+              onDoubleClick={() =>
+                workspaceRef.current?.style.removeProperty("--mon-pipe-w")
+              }
+            />
+          )}
 
           {/* Right Pane: Dual-Mode Live Console & Failure Diagnostics */}
           <div className="mon-console-pane">
@@ -3572,7 +3791,13 @@ function MonitorWorkspace({
                         consoleMode === "log" ? logText : buildPlainStreamText(),
                       );
                       setCopied(true);
-                      setTimeout(() => setCopied(false), 1400);
+                      if (copyTimerRef.current) {
+                        window.clearTimeout(copyTimerRef.current);
+                      }
+                      copyTimerRef.current = window.setTimeout(
+                        () => setCopied(false),
+                        1400,
+                      );
                     }}
                     aria-label={bi("复制", "Copy")}
                   />
@@ -3666,9 +3891,7 @@ function MonitorWorkspace({
                   <div className="mon-diag-title-right">
                     <span className="mon-diag-quick num">
                       {bi(`第 #${activeStepRef.runNum} 批`, `Batch #${activeStepRef.runNum}`)}
-                      {fmtStepDur(activeStepRef.step, nowMs)
-                        ? ` · ${fmtStepDur(activeStepRef.step, nowMs)}`
-                        : ""}
+                      <LiveStepDur step={activeStepRef.step} prefix=" · " />
                     </span>
                     <Button
                       size="mini"
@@ -3733,7 +3956,8 @@ function MonitorWorkspace({
                     )}
                     <Popover
                       trigger="click"
-                      position="br"
+                      position="tr"
+                      triggerProps={{ autoFitPosition: true }}
                       content={
                         <div className="mon-step-info-pop">
                           <div>
@@ -3849,7 +4073,7 @@ function MonitorWorkspace({
                         <IconDown
                           style={{
                             transform: diagCollapsed ? undefined : "rotate(180deg)",
-                            transition: "transform 0.16s",
+                            transition: "transform 0.2s var(--spring)",
                           }}
                         />
                       </button>
@@ -4121,9 +4345,16 @@ function MonitorWorkspace({
                               <span className="mon-ev-detail">
                                 {renderHighlightedText(ev.detail, search.trim())}
                               </span>
-                              {ev.durText && (
+                              {ev.durText ? (
                                 <span className="mon-ev-dur">({ev.durText})</span>
-                              )}
+                              ) : ev.evType === "started" &&
+                                isStepLive(ev.step.state) ? (
+                                <LiveStepDur
+                                  step={ev.step}
+                                  wrapParen
+                                  className="mon-ev-dur"
+                                />
+                              ) : null}
                               <span className="mon-ev-jump">
                                 {bi("查看日志 →", "View log →")}
                               </span>
@@ -4282,35 +4513,71 @@ function MonitorWorkspace({
                 ) : (
                   (() => {
                     const q = search.trim();
-                    const matchSet = q ? new Set(searchMatches) : null;
-                    return visibleLogLines.map((l) => {
-                      const isMatch = matchSet?.has(l.num);
-                      const isActiveMatch =
-                        activeMatchLine === l.num || focusedLine === l.num;
-                      const isTaskOutline = logView === "tasks";
-                      return (
-                        <div
-                          key={l.num}
-                          data-line={l.num}
-                          className={`mon-line k-${l.kind}${isTaskOutline ? " clickable" : ""}${isMatch ? " is-match" : ""}${isActiveMatch ? " is-active-match" : ""}`}
-                          onClick={
-                            isTaskOutline
-                              ? () => {
-                                  setLogView("full");
-                                  jumpToLineNum(l.num);
+                    const isTaskOutline = logView === "tasks";
+                    const canWindow =
+                      logView === "full" &&
+                      !q &&
+                      visibleLogLines.length > logTailLimit;
+                    const hiddenCount = canWindow
+                      ? visibleLogLines.length - logTailLimit
+                      : 0;
+                    const renderedLines = canWindow
+                      ? visibleLogLines.slice(hiddenCount)
+                      : visibleLogLines;
+                    return (
+                      <>
+                        {hiddenCount > 0 && (
+                          <div className="mon-log-window-bar">
+                            <span>
+                              {bi(
+                                `已折叠较早的 ${hiddenCount.toLocaleString()} 行以保持 60fps 流畅滚动（共 ${visibleLogLines.length.toLocaleString()} 行）`,
+                                `Collapsed ${hiddenCount.toLocaleString()} earlier lines for 60fps performance (${visibleLogLines.length.toLocaleString()} total)`,
+                              )}
+                            </span>
+                            <span className="mon-log-window-acts">
+                              <button
+                                type="button"
+                                className="mon-log-window-btn"
+                                onClick={() =>
+                                  setLogTailLimit((prev) =>
+                                    Math.min(
+                                      visibleLogLines.length,
+                                      prev + LOG_WINDOW_STEP,
+                                    ),
+                                  )
                                 }
-                              : undefined
-                          }
-                        >
-                          <span className="mon-ln">{l.num}</span>
-                          <span className="mon-lt">
-                            {q
-                              ? renderHighlightedText(l.text, q)
-                              : l.text || " "}
-                          </span>
-                        </div>
-                      );
-                    });
+                              >
+                                {bi(
+                                  `加载前 ${Math.min(hiddenCount, LOG_WINDOW_STEP).toLocaleString()} 行`,
+                                  `Load ${Math.min(hiddenCount, LOG_WINDOW_STEP).toLocaleString()} earlier`,
+                                )}
+                              </button>
+                              <button
+                                type="button"
+                                className="mon-log-window-btn"
+                                onClick={() =>
+                                  setLogTailLimit(visibleLogLines.length)
+                                }
+                              >
+                                {bi("显示全部", "Show all")}
+                              </button>
+                            </span>
+                          </div>
+                        )}
+                        <MemoLogLines
+                          lines={renderedLines}
+                          query={q}
+                          searchMatches={searchMatches}
+                          activeMatchLine={activeMatchLine}
+                          focusedLine={focusedLine}
+                          isTaskOutline={isTaskOutline}
+                          onSelectTaskLine={(lineNum) => {
+                            setLogView("full");
+                            jumpToLineNum(lineNum);
+                          }}
+                        />
+                      </>
+                    );
                   })()
                 )}
                 </div>

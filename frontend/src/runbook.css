@@ -410,6 +410,10 @@ body[arco-theme="dark"] .term {
   color: #fff;
   animation: pop 0.42s var(--spring);
 }
+[data-theme="dark"] .rstep.done .rstep-check,
+body[arco-theme="dark"] .rstep.done .rstep-check {
+  color: #062814;
+}
 .rstep.skipped .rstep-check {
   background: var(--sunken);
   border: 1.5px dashed var(--mute);
@@ -1039,6 +1043,10 @@ body[arco-theme="dark"] .term {
   border-color: var(--bad);
   color: #fff;
 }
+[data-theme="dark"] .rstep.failed .rstep-check,
+body[arco-theme="dark"] .rstep.failed .rstep-check {
+  color: #2c0707;
+}
 .rstep-log {
   all: unset;
   cursor: pointer;
@@ -1288,9 +1296,9 @@ body[arco-theme="dark"] .term {
   background: var(--surface);
   cursor: pointer;
   transition:
-    background 0.15s,
-    border-color 0.15s,
-    transform 0.12s var(--ease-out);
+    background 0.16s var(--spring),
+    border-color 0.16s var(--spring),
+    transform 0.16s var(--spring);
 }
 .rb-btn:hover:not(:disabled) {
   border-color: var(--ink-2);
@@ -1340,7 +1348,13 @@ body[arco-theme="dark"] .term {
   border-left: 3px solid var(--ok);
   border-radius: 0 12px 12px 0;
   background: var(--surface-2);
-  animation: ad-rise 0.22s var(--ease-out) both;
+  animation: rb-form-in 0.2s var(--spring) backwards;
+}
+@keyframes rb-form-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
 }
 .rb-form.m-failed {
   border-left-color: var(--bad);
@@ -1447,6 +1461,13 @@ body[arco-theme="dark"] .term {
   border: 1px dashed var(--line-strong);
   border-radius: var(--r-sm);
   cursor: pointer;
+  transition:
+    color 0.16s var(--spring),
+    border-color 0.16s var(--spring),
+    transform 0.16s var(--spring);
+}
+.shots-add:active {
+  transform: scale(0.975);
 }
 .shots-add:hover {
   color: var(--brand);
@@ -1626,7 +1647,7 @@ body[arco-theme="dark"] .term {
 .rb-skipped summary { display: flex; align-items: center; gap: 8px; padding: 14px 16px; cursor: pointer; list-style: none; font-size: 13px; color: var(--ink-2); }
 .rb-skipped summary::-webkit-details-marker { display: none; }
 .rb-skipped summary:focus-visible { outline: 2px solid var(--brand-ink); outline-offset: -3px; }
-.rb-skipped-arrow { flex: none; transform: rotate(-90deg); transition: transform .15s; }
+.rb-skipped-arrow { flex: none; transform: rotate(-90deg); transition: transform 0.2s var(--spring); }
 .rb-skipped details[open] .rb-skipped-arrow { transform: rotate(0); }
 .rb-skipped-count { flex: none; white-space: nowrap; color: var(--mute); font-size: 12px; }
 .rb-skipped-toggle { margin-left: auto; flex: none; white-space: nowrap; color: var(--brand-ink); }
@@ -1689,7 +1710,7 @@ body[arco-theme="dark"] .term {
 .rstep-live-pill.blocked {
   color: var(--warn);
   background: var(--warn-soft);
-  border-color: rgba(255, 159, 10, 0.35);
+  border-color: var(--warn-line);
 }
 .rstep-live-pill.unknown i,
 .rstep-live-pill.blocked i {
@@ -1798,7 +1819,7 @@ body[arco-theme="dark"] .term {
   color: var(--ink-2);
 }
 .rec-recap-chip.bad {
-  border-color: rgba(255, 59, 48, 0.35);
+  border-color: var(--bad-line);
   background: var(--bad-soft);
   color: var(--bad);
 }
@@ -2031,7 +2052,11 @@ body[arco-theme="dark"] .term {
   .rb-summary .chev,
   .rb-nextphase,
   .rb-btn,
+  .shots-add,
   .rb-skipped-arrow {
     transition: none;
+  }
+  .shots-add:active {
+    transform: none;
   }
 }

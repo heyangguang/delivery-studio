@@ -1374,6 +1374,7 @@ function DeliveryForm({
             {g.scope && <span className="scope">{g.scope}</span>}
             {adv.length > 0 && (
               <button
+                type="button"
                 className="link"
                 onClick={() => setAdvanced((a) => ({ ...a, [k]: !a[k] }))}
                 aria-expanded={!!advanced[k]}
@@ -1704,6 +1705,7 @@ function DeliveryForm({
             </div>
           ))}
           <button
+            type="button"
             className="link"
             onClick={() =>
               edit(inst.id, (x) => ({
@@ -1732,7 +1734,7 @@ function DeliveryForm({
           <>
             <h5>{bi("放置", "Placement")}</h5>
             {placementEditor(inst)}
-            <button className="link" onClick={() => addHost(inst.id)}>
+            <button type="button" className="link" onClick={() => addHost(inst.id)}>
               {bi("+ 为它添加一台新机器", "+ Add a new host for this")}
             </button>
           </>
@@ -3168,7 +3170,7 @@ function DeliveryForm({
         const sec = sections.find((s) => s.id === issueSection(x));
         // a plan only edits what it is about; a problem elsewhere is the source delivery's, and is said as such
         return sec ? (
-          <button key={i} onClick={() => goIssue(x)}>
+          <button key={i} type="button" onClick={() => goIssue(x)}>
             <span className="issue-sec">{sec.title}</span>
             {x.message}
           </button>
@@ -3180,7 +3182,7 @@ function DeliveryForm({
         );
       })}
       {certBad.map(([inst, c]) => (
-        <button key={`cert-${inst}`} onClick={() => openSection("access")}>
+        <button key={`cert-${inst}`} type="button" onClick={() => openSection("access")}>
           <span className="issue-sec">{bi("入口与证书", "Access & TLS")}</span>
           {bi(`${inst} 的证书：${c.error}`, `${inst} cert: ${c.error}`)}
         </button>
@@ -3190,6 +3192,7 @@ function DeliveryForm({
         .map(({ i, p }) => (
           <button
             key={`${i.instance}${p}`}
+            type="button"
             onClick={() => openSection("access")}
           >
             <span className="issue-sec">{bi("入口与证书", "Access & TLS")}</span>
@@ -3480,7 +3483,7 @@ function DeliveryForm({
               </span>
             )}
           {!revise && (
-            <button className="link" onClick={startOver}>
+            <button type="button" className="link" onClick={startOver}>
               {from ? bi("重新填写", "Reset") : bi("新建一份", "Start new")}
             </button>
           )}
@@ -3493,6 +3496,7 @@ function DeliveryForm({
             return (
               <button
                 key={x.id}
+                type="button"
                 className={sec === x.id ? "on" : ""}
                 aria-current={sec === x.id ? "step" : undefined}
                 onClick={() => openSection(x.id)}
@@ -3531,6 +3535,7 @@ function DeliveryForm({
           })}
         </nav>
         <button
+          type="button"
           className="yaml-btn"
           onClick={() => {
             window.dispatchEvent(new Event(FLUSH_INPUTS_EVENT));
@@ -3598,6 +3603,7 @@ function DeliveryForm({
           >
             {secIssues(sec) ? (
               <button
+                type="button"
                 className="link bad"
                 onClick={() =>
                   goIssue(errors.find((x) => issueSection(x) === sec)!)
@@ -3702,6 +3708,7 @@ function DeliveryForm({
       {narrow && (
         <div className="wz-bar">
           <button
+            type="button"
             className={`wz-bar-state ${untouched ? "idle" : totalBlocking ? "bad" : "ok"}`}
             onClick={() =>
               totalBlocking
@@ -4084,7 +4091,17 @@ function YamlDrawer({
       .then((r) => setText(r.yaml))
       .catch((e) => setError((e as Error).message));
   }, [open]);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !busy) onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, busy, onClose]);
+
   const apply = async () => {
+    if (busy) return;
     setBusy(true);
     setError("");
     try {
@@ -4108,9 +4125,9 @@ function YamlDrawer({
   };
   return (
     <Drawer
-      width={narrow ? "100%" : 640}
+      width={narrow ? "100%" : "min(640px, 100vw)"}
       visible={open}
-      onCancel={onClose}
+      onCancel={() => !busy && onClose()}
       title={bi("部署规格（YAML）", "Deployment Spec (YAML)")}
       footer={
         <div className="review-foot">
@@ -4234,7 +4251,7 @@ function DeliverySecurityNotice({
   if (!summary?.has_scan || !summary.policy?.warn_delivery_critical) return null;
   const mwOnly = Boolean(summary.policy?.gate_middleware_only);
   const risks = instances
-    .map((inst) => summary.component_risks[`${inst.component}@${inst.version}@${platform}`])
+    .map((inst) => summary.component_risks?.[`${inst.component}@${inst.version}@${platform}`])
     .filter((b): b is NonNullable<typeof b> => {
       if (!b) return false;
       const c = mwOnly ? (b.middleware_critical ?? 0) : b.critical;
@@ -4260,12 +4277,12 @@ function DeliverySecurityNotice({
     <div
       className="review-block"
       style={{
-        borderColor: "rgba(217, 119, 6, 0.4)",
-        background: "rgba(217, 119, 6, 0.06)",
+        borderColor: "var(--warn-line)",
+        background: "var(--warn-soft)",
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-        <b style={{ color: "#b45309", fontSize: 13 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+        <b style={{ color: "var(--warn)", fontSize: 13 }}>
           <IconExclamationCircleFill style={{ marginRight: 6 }} />
           {mwOnly
             ? bi(

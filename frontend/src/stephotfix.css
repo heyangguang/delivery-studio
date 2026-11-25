@@ -31,12 +31,6 @@
   background: var(--brand-soft);
   border-color: var(--brand-line);
 }
-[data-theme="dark"] .shf-mode-pill.patched,
-body[arco-theme="dark"] .shf-mode-pill.patched {
-  color: var(--ink);
-  background: var(--brand-soft);
-  border-color: var(--brand-line);
-}
 
 .shf-shell {
   display: flex;
@@ -89,7 +83,10 @@ body[arco-theme="dark"] .shf-mode-pill.patched {
   border-radius: 7px;
   cursor: pointer;
   border: 1px solid transparent;
-  transition: background 0.12s, border-color 0.12s;
+  transition: background 0.16s var(--spring), border-color 0.16s var(--spring), transform 0.16s var(--spring);
+}
+.shf-file-btn:active {
+  transform: scale(0.985);
 }
 .shf-file-btn:hover {
   background: var(--surface);
@@ -98,7 +95,7 @@ body[arco-theme="dark"] .shf-mode-pill.patched {
 .shf-file-btn.on {
   background: var(--surface);
   border-color: var(--brand-line);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  box-shadow: var(--shadow-sm);
 }
 .shf-file-top {
   display: flex;
@@ -135,11 +132,6 @@ body[arco-theme="dark"] .shf-mode-pill.patched {
   padding: 0 5px;
   line-height: 16px;
   border-radius: 4px;
-  color: var(--ink);
-  background: var(--brand-soft);
-}
-[data-theme="dark"] .shf-patch-dot,
-body[arco-theme="dark"] .shf-patch-dot {
   color: var(--ink);
   background: var(--brand-soft);
 }
@@ -208,10 +200,6 @@ body[arco-theme="dark"] .shf-patch-dot {
   flex-wrap: wrap;
 }
 .shf-patch-banner strong {
-  color: var(--ink);
-}
-[data-theme="dark"] .shf-patch-banner strong,
-body[arco-theme="dark"] .shf-patch-banner strong {
   color: var(--ink);
 }
 
@@ -337,11 +325,11 @@ body[arco-theme="dark"] .shf-patch-banner strong {
   white-space: pre;
 }
 .shf-diff-line.add {
-  background: rgba(22, 163, 74, 0.12);
+  background: var(--ok-soft);
   color: var(--ok);
 }
 .shf-diff-line.del {
-  background: rgba(220, 38, 38, 0.11);
+  background: var(--bad-soft);
   color: var(--bad);
 }
 .shf-diff-line.hunk {
@@ -383,5 +371,12 @@ body[arco-theme="dark"] .shf-patch-banner strong {
     max-height: 180px;
     border-right: none;
     border-bottom: 1px solid var(--line);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shf-file-btn {
+    transition: none;
+    transform: none;
   }
 }

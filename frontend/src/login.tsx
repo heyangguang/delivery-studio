@@ -417,6 +417,7 @@ export function Login({
 
   const nameRef = useRef<any>(null);
   const pwRef = useRef<any>(null);
+  const enterTimerRef = useRef<number | null>(null);
   const conn = useConnectivity();
   const busy = phase !== "idle";
 
@@ -438,6 +439,9 @@ export function Login({
     return () => {
       window.cancelAnimationFrame(t);
       window.clearTimeout(sync);
+      if (enterTimerRef.current !== null) {
+        window.clearTimeout(enterTimerRef.current);
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -484,7 +488,10 @@ export function Login({
       setAuthToken(s.access_token);
       setCsrf(s.csrf);
       setPhase("entering");
-      window.setTimeout(() => done(s), reduceMotion() ? 0 : 480);
+      if (enterTimerRef.current !== null) {
+        window.clearTimeout(enterTimerRef.current);
+      }
+      enterTimerRef.current = window.setTimeout(() => done(s), reduceMotion() ? 0 : 480);
     } catch (ex) {
       setPhase("idle");
       setPw("");
@@ -672,7 +679,7 @@ export function Login({
                 className={`ib-submit ib-in${phase === "entering" ? " is-done" : ""}`}
                 style={d(5)}
                 loading={phase === "verifying"}
-                disabled={conn === "offline"}
+                disabled={conn === "offline" || phase === "entering"}
               >
                 <span>
                   {phase === "entering"

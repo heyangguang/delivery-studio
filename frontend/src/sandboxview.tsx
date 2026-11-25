@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Button,
   Input,
@@ -194,24 +194,39 @@ export function SandboxView() {
   );
   const [showBuiltin, setShowBuiltin] = useState(false);
   const [busy, setBusy] = useState("");
-  const load = () =>
-    api<Data>("/api/settings/sandbox")
-      .then((r) => {
-        putCached("/api/settings/sandbox", r);
-        setD(r);
-        setF(r.settings);
-        setDomainsText((r.settings.net_allow_domains || []).join("\n"));
-      })
-      .catch(err);
+  const mountedRef = useRef(true);
   useEffect(() => {
-    load();
-  }, [lang]); // eslint-disable-line react-hooks/exhaustive-deps
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  const load = useCallback(
+    () =>
+      api<Data>("/api/settings/sandbox")
+        .then((r) => {
+          putCached("/api/settings/sandbox", r);
+          if (!mountedRef.current) return;
+          setD(r);
+          setF(r.settings);
+          setDomainsText((r.settings.net_allow_domains || []).join("\n"));
+        })
+        .catch((e) => {
+          if (mountedRef.current) err(e);
+        }),
+    [],
+  );
+  useEffect(() => {
+    void load();
+  }, [lang, load]);
   const check = async () => {
+    if (busy) return;
     setBusy("check");
     try {
       const r = await api<Data>("/api/settings/sandbox/check", {
         method: "POST",
       });
+      if (!mountedRef.current) return;
       setF((x) =>
         x
           ? {
@@ -239,12 +254,13 @@ export function SandboxView() {
           : bi("有安全检查未通过", "Some security checks failed"),
       );
     } catch (e) {
-      err(e);
+      if (mountedRef.current) err(e);
     } finally {
-      setBusy("");
+      if (mountedRef.current) setBusy("");
     }
   };
   const save = async (next: Settings) => {
+    if (busy) return;
     setBusy("save");
     try {
       const payload: Settings = {
@@ -258,6 +274,7 @@ export function SandboxView() {
         method: "PUT",
         body: JSON.stringify(payload),
       });
+      if (!mountedRef.current) return;
       setD((x) => {
         const merged = x
           ? {
@@ -274,10 +291,12 @@ export function SandboxView() {
       setDomainsText((r.settings.net_allow_domains || []).join("\n"));
       Message.success(bi("已保存", "Saved"));
     } catch (e) {
-      err(e);
-      load();
+      if (mountedRef.current) {
+        err(e);
+        void load();
+      }
     } finally {
-      setBusy("");
+      if (mountedRef.current) setBusy("");
     }
   };
   const s = d?.settings;
@@ -342,7 +361,7 @@ export function SandboxView() {
                     </span>
                   )}
                 </div>
-                <p className={`small ${!d.runtime_ok ? "bad" : "faint"}`}>
+                <p className={`small num ${!d.runtime_ok ? "bad" : "faint"}`}>
                   {!d.runtime_ok
                     ? d.runtime_error ||
                       bi(
@@ -524,7 +543,7 @@ export function SandboxView() {
                       {(d.builtin_net_domains || []).length > 0 && (
                         <button
                           type="button"
-                          className="sb-domain-toggle"
+                          className="sb-domain-toggle num"
                           onClick={() => setShowBuiltin((v) => !v)}
                         >
                           {showBuiltin ? (

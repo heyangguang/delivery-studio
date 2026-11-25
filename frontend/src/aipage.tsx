@@ -462,6 +462,57 @@ function Outline({
   );
 }
 
+const NOOP_DECIDE = () => undefined;
+
+const MemoMessageItem = React.memo(function MemoMessageItem({
+  m,
+  jobBase,
+  props,
+  deciding,
+  decide,
+  comp,
+  busy,
+  canRetry,
+  retryText,
+  canAnswer,
+  onRetryText,
+  onAnswerText,
+}: {
+  m: Msg;
+  jobBase: string;
+  props: Record<string, StepProposal | CompProposal>;
+  deciding: string;
+  decide: (
+    id: string,
+    v: "accept" | "reject",
+    body?: Record<string, unknown>,
+  ) => void;
+  comp: boolean;
+  busy: boolean;
+  canRetry: boolean;
+  retryText?: string;
+  canAnswer: boolean;
+  onRetryText: (t: string) => void;
+  onAnswerText: (t: string) => void;
+}) {
+  const handleRetry = useCallback(() => {
+    if (retryText) onRetryText(retryText);
+  }, [retryText, onRetryText]);
+  return (
+    <Bubble
+      m={m}
+      jobBase={jobBase}
+      props={props}
+      deciding={deciding}
+      decide={decide}
+      comp={comp}
+      busy={busy}
+      onRetry={canRetry && retryText ? handleRetry : undefined}
+      answer={canAnswer ? onAnswerText : undefined}
+    />
+  );
+});
+
 export function AIPage({
   me,
   chatId,
@@ -480,6 +531,7 @@ export function AIPage({
   jobs: Job[];
 }) {
   useLang();
+  const lang = useLang();
   const status = useAIStatus();
   const net = useConnectivity();
   const linkedMode = !!(job && sessionKey);
@@ -562,6 +614,16 @@ export function AIPage({
     Boolean(input.trim() || imgs.length || atts.length),
   );
   const abort = useRef<AbortController | null>(null);
+  const liveRafRef = useRef(0);
+  const autoScrollRafRef = useRef(0);
+  const scrollCheckRafRef = useRef(0);
+  const atBottomRef = useRef(true);
+  const userScrollLockRef = useRef(false);
+  const lastScrollTopRef = useRef(0);
+  const sendingRef = useRef(false);
+  const decidingRef = useRef(false);
+  const resolvingRef = useRef(false);
+  const archivingRef = useRef<Set<string>>(new Set());
   const seeded = useRef(false);
   const promotedId = useRef("");
   const [draftId, setDraftId] = useState(newId);
@@ -737,6 +799,10 @@ export function AIPage({
     promotedId.current = "";
     abort.current?.abort();
     abort.current = null;
+    if (liveRafRef.current) {
+      window.cancelAnimationFrame(liveRafRef.current);
+      liveRafRef.current = 0;
+    }
     setLive(null);
     setRemote(false);
     setError(null);
@@ -746,8 +812,11 @@ export function AIPage({
     setProps({});
     setCompProps({});
     setDeciding("");
+    userScrollLockRef.current = false;
+    atBottomRef.current = true;
     setAtBottom(true);
     setSide(false);
+    setDrop(false);
     seeded.current = false;
     let alive = true;
     if (linkedMode) {
@@ -937,7 +1006,42 @@ export function AIPage({
       window.clearInterval(t);
     };
   }, [remote, linkedMode, jobBase, sessionKey, loadProps, loadList]);
-  useEffect(() => () => abort.current?.abort(), []);
+  useEffect(
+    () => () => {
+      abort.current?.abort();
+      if (liveRafRef.current) window.cancelAnimationFrame(liveRafRef.current);
+      if (autoScrollRafRef.current)
+        window.cancelAnimationFrame(autoScrollRafRef.current);
+      if (scrollCheckRafRef.current)
+        window.cancelAnimationFrame(scrollCheckRafRef.current);
+    },
+    [],
+  );
+  useEffect(() => {
+    if (!side) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSide(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [side]);
+  useEffect(() => {
+    if (!drop) return;
+    const clearDrop = () => setDrop(false);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setDrop(false);
+    };
+    window.addEventListener("dragend", clearDrop);
+    window.addEventListener("drop", clearDrop);
+    window.addEventListener("blur", clearDrop);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("dragend", clearDrop);
+      window.removeEventListener("drop", clearDrop);
+      window.removeEventListener("blur", clearDrop);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [drop]);
   const savedSideScroll = useRef<number | null>(null);
   const keepSideScroll = (fn: () => void) => {
     if (sideRows.current) savedSideScroll.current = sideRows.current.scrollTop;
@@ -971,8 +1075,23 @@ export function AIPage({
       : chat?.messages || [];
   useLayoutEffect(() => {
     const el = list.current;
-    if (el && atBottom) el.scrollTop = el.scrollHeight;
-  }, [activeThreadId, messages.length, live, atBottom]);
+    if (el && atBottomRef.current && !userScrollLockRef.current) {
+      el.scrollTop = el.scrollHeight;
+      lastScrollTopRef.current = el.scrollTop;
+    }
+  }, [activeThreadId, messages.length]);
+  useEffect(() => {
+    if (!live || !atBottomRef.current || userScrollLockRef.current) return;
+    if (autoScrollRafRef.current) return;
+    autoScrollRafRef.current = window.requestAnimationFrame(() => {
+      autoScrollRafRef.current = 0;
+      const el = list.current;
+      if (el && atBottomRef.current && !userScrollLockRef.current) {
+        el.scrollTop = el.scrollHeight;
+        lastScrollTopRef.current = el.scrollTop;
+      }
+    });
+  }, [live]);
   useLayoutEffect(() => {
     const el = box.current;
     if (!el) return;
@@ -1099,9 +1218,16 @@ export function AIPage({
       : override !== undefined
         ? []
         : atts;
-    if ((!text && !sent.length && !sentFiles.length) || busy || !on || (!queued && uploading > 0))
+    if (
+      (!text && !sent.length && !sentFiles.length) ||
+      busy ||
+      sendingRef.current ||
+      !on ||
+      (!queued && uploading > 0)
+    )
       return;
     if (compMode && !canReplyComp) return;
+    sendingRef.current = true;
     const myThread = threadRef.current;
     const here = () => threadRef.current === myThread;
     setError(null);
@@ -1174,6 +1300,8 @@ export function AIPage({
       setImgs([]);
       setAtts([]);
     }
+    userScrollLockRef.current = false;
+    atBottomRef.current = true;
     setAtBottom(true);
     const cur = newLive();
     setLive({ ...cur });
@@ -1236,13 +1364,11 @@ export function AIPage({
               options: reqOpts,
               retry: again,
             };
-      await streamChat(
-        url,
-        body,
-        ac.signal,
-        cur,
-        () =>
-          here() &&
+      const scheduleLive = () => {
+        if (!here() || liveRafRef.current) return;
+        liveRafRef.current = window.requestAnimationFrame(() => {
+          liveRafRef.current = 0;
+          if (!here()) return;
           setLive({
             ...cur,
             tools: [...cur.tools],
@@ -1254,7 +1380,15 @@ export function AIPage({
             sandboxConfirms: cur.sandboxConfirms
               ? [...cur.sandboxConfirms]
               : undefined,
-          }),
+          });
+        });
+      };
+      await streamChat(
+        url,
+        body,
+        ac.signal,
+        cur,
+        scheduleLive,
         () =>
           here()
             ? compMode
@@ -1319,12 +1453,25 @@ export function AIPage({
       }
       if (!stopped && queue.items.length > 0) queue.setPaused(true);
     } finally {
+      sendingRef.current = false;
+      if (liveRafRef.current) {
+        window.cancelAnimationFrame(liveRafRef.current);
+        liveRafRef.current = 0;
+      }
       if (here()) {
         setLive(null);
         abort.current = null;
       }
     }
   };
+  const sendRef = useRef(send);
+  sendRef.current = send;
+  const onRetryText = useCallback((t: string) => {
+    void sendRef.current(t, true);
+  }, []);
+  const onAnswerText = useCallback((t: string) => {
+    void sendRef.current(t);
+  }, []);
 
   const submitComposer = () => {
     if (busy) {
@@ -1410,18 +1557,20 @@ export function AIPage({
     if (!seed) return;
     seeded.current = true;
     const enableWeb = seedWeb && (tools.options ? Boolean(tools.options.web) : true);
-    window.setTimeout(
-      () => send(seed, false, enableWeb ? { web: true } : undefined),
+    const t = window.setTimeout(
+      () => void sendRef.current(seed, false, enableWeb ? { web: true } : undefined),
       150,
     );
-  }); // eslint-disable-line react-hooks/exhaustive-deps
+    return () => window.clearTimeout(t);
+  }, [threadMode, chatId, prefsMode, on, busy, loading, tools.options]);
 
   const decide = async (
     pid: string,
     verb: "accept" | "reject",
     body?: Record<string, unknown>,
   ) => {
-    if (compArchMode) return;
+    if (compArchMode || decidingRef.current) return;
+    decidingRef.current = true;
     setDeciding(pid);
     try {
       if (compLiveMode) {
@@ -1481,10 +1630,21 @@ export function AIPage({
     } catch (e) {
       err(e);
     } finally {
+      decidingRef.current = false;
       setDeciding("");
     }
   };
+  const decideRef = useRef(decide);
+  decideRef.current = decide;
+  const stableDecide = useCallback(
+    (pid: string, verb: "accept" | "reject", body?: Record<string, unknown>) => {
+      void decideRef.current(pid, verb, body);
+    },
+    [],
+  );
   const resolve = async () => {
+    if (resolvingRef.current) return;
+    resolvingRef.current = true;
     setResolving(true);
     try {
       const rep = await api<AIReport>(`${jobBase}/resolve`, {
@@ -1519,6 +1679,7 @@ export function AIPage({
     } catch (e) {
       err(e);
     } finally {
+      resolvingRef.current = false;
       setResolving(false);
     }
   };
@@ -1574,6 +1735,8 @@ export function AIPage({
   };
 
   const archive = async (c: ChatRow, on: boolean) => {
+    if (archivingRef.current.has(c.id)) return;
+    archivingRef.current.add(c.id);
     try {
       await api(`/api/ai/chats/${c.id}`, {
         method: "PATCH",
@@ -1591,6 +1754,8 @@ export function AIPage({
       loadList();
     } catch (e) {
       err(e);
+    } finally {
+      archivingRef.current.delete(c.id);
     }
   };
   const needle = q.trim().toLowerCase();
@@ -1776,24 +1941,28 @@ export function AIPage({
       });
   }, [started]); // eslint-disable-line react-hooks/exhaustive-deps
   // one entry per cluster: the delivery that describes it now (the newest one carried out, else the newest generated)
-  const doneJobs = (() => {
+  const doneJobs = useMemo(() => {
     const ok = jobs
       .filter((j) => j.state === "succeeded" && j.outcome !== "void")
       .sort((a, b) => b.created.localeCompare(a.created));
+    const settledByCluster = new Map<string, Job>();
+    for (const j of ok) {
+      if (
+        !settledByCluster.has(j.cluster_id) &&
+        (j.outcome === "done" || j.outcome === "deviated")
+      ) {
+        settledByCluster.set(j.cluster_id, j);
+      }
+    }
     const seen = new Set<string>();
-    const out: typeof ok = [];
+    const out: Job[] = [];
     for (const j of ok) {
       if (seen.has(j.cluster_id)) continue;
-      const settled = ok.find(
-        (x) =>
-          x.cluster_id === j.cluster_id &&
-          (x.outcome === "done" || x.outcome === "deviated"),
-      );
-      out.push(settled || j);
+      out.push(settledByCluster.get(j.cluster_id) || j);
       seen.add(j.cluster_id);
     }
     return out;
-  })();
+  }, [jobs]);
   const activeCompTitle =
     compMetaRow?.comp_title ||
     compThread?.compTitle ||
@@ -2051,7 +2220,10 @@ export function AIPage({
                 accept="image/*"
                 multiple
                 hidden
-                onChange={(e) => e.target.files && addFiles(e.target.files)}
+                onChange={(e) => {
+                  if (e.target.files) void addFiles(e.target.files);
+                  e.target.value = "";
+                }}
               />
             </label>
           </Tooltip>
@@ -2189,7 +2361,40 @@ export function AIPage({
     </div>
   );
 
-  const suggest = getSuggest();
+  const suggest = useMemo(() => getSuggest(), [lang]);
+  const handleListScroll = useCallback(() => {
+    if (scrollCheckRafRef.current) return;
+    scrollCheckRafRef.current = window.requestAnimationFrame(() => {
+      scrollCheckRafRef.current = 0;
+      const el = list.current;
+      if (!el) return;
+      const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+      const nearBottom = dist < 36;
+      if (el.scrollTop < lastScrollTopRef.current - 2 && !nearBottom) {
+        userScrollLockRef.current = true;
+      } else if (dist < 18) {
+        userScrollLockRef.current = false;
+      }
+      lastScrollTopRef.current = el.scrollTop;
+      const nextAtBottom = !userScrollLockRef.current && nearBottom;
+      if (atBottomRef.current !== nextAtBottom) {
+        atBottomRef.current = nextAtBottom;
+        setAtBottom(nextAtBottom);
+      }
+    });
+  }, []);
+  const handleListWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
+    if (e.deltaY < -2) {
+      userScrollLockRef.current = true;
+      const el = list.current;
+      if (el && el.scrollHeight - el.scrollTop - el.clientHeight >= 18) {
+        if (atBottomRef.current) {
+          atBottomRef.current = false;
+          setAtBottom(false);
+        }
+      }
+    }
+  }, []);
   return (
     <div className={`ap ${side ? "side-open" : ""}`}>
       <aside className="ap-side" aria-label={bi("对话", "Conversations")}>
@@ -2647,10 +2852,13 @@ export function AIPage({
                             : go({ name: "components", id: ctxChip.id })
                     }
                   >
-                    {compMode
-                      ? bi("组件工作台", "Workbench")
-                      : ctxWord(ctxChip.kind)}{" "}
-                    {ctxChip.name} <IconLaunch />
+                    <span>
+                      {compMode
+                        ? bi("组件工作台", "Workbench")
+                        : ctxWord(ctxChip.kind)}{" "}
+                      {ctxChip.name}
+                    </span>
+                    <IconLaunch />
                   </button>
                 )}
                 {linkedMode && (
@@ -2840,13 +3048,8 @@ export function AIPage({
                 <div
                   className="ap-list"
                   ref={list}
-                  onScroll={() => {
-                    const el = list.current;
-                    if (el)
-                      setAtBottom(
-                        el.scrollHeight - el.scrollTop - el.clientHeight < 40,
-                      );
-                  }}
+                  onWheel={handleListWheel}
+                  onScroll={handleListScroll}
                   aria-live="polite"
                   aria-busy={busy}
                 >
@@ -2878,30 +3081,29 @@ export function AIPage({
                               .find((x) => x.role === "user" && x.text?.trim())
                           : undefined;
                       return (
-                        <Bubble
+                        <MemoMessageItem
                           key={`${activeThreadId}-${i}`}
                           m={m}
                           jobBase={imgBase}
                           props={compMode ? compProps : props}
                           deciding={deciding}
-                          decide={compArchMode ? () => undefined : decide}
+                          decide={compArchMode ? NOOP_DECIDE : stableDecide}
                           comp={compMode}
                           busy={busy}
-                          onRetry={
+                          canRetry={Boolean(
                             isLast &&
-                            !busy &&
-                            on &&
-                            canReplyThread &&
-                            m.error &&
-                            prevUser?.text
-                              ? () => send(prevUser.text, true)
-                              : undefined
-                          }
-                          answer={
-                            isLast && !busy && on && !threadMode
-                              ? (t) => send(t)
-                              : undefined
-                          }
+                              !busy &&
+                              on &&
+                              canReplyThread &&
+                              m.error &&
+                              prevUser?.text,
+                          )}
+                          retryText={prevUser?.text}
+                          canAnswer={Boolean(
+                            isLast && !busy && on && !threadMode,
+                          )}
+                          onRetryText={onRetryText}
+                          onAnswerText={onAnswerText}
                         />
                       );
                     })}
@@ -2927,7 +3129,7 @@ export function AIPage({
                         live={live}
                         props={compMode ? compProps : props}
                         deciding={deciding}
-                        decide={decide}
+                        decide={stableDecide}
                         comp={compMode}
                       />
                     )}
@@ -2950,12 +3152,18 @@ export function AIPage({
                     <button
                       type="button"
                       className="ap-down"
-                      onClick={() =>
+                      onClick={() => {
+                        userScrollLockRef.current = false;
+                        atBottomRef.current = true;
+                        setAtBottom(true);
+                        const reduced = window.matchMedia(
+                          "(prefers-reduced-motion: reduce)",
+                        ).matches;
                         list.current?.scrollTo({
                           top: list.current.scrollHeight,
-                          behavior: "smooth",
-                        })
-                      }
+                          behavior: reduced ? "auto" : "smooth",
+                        });
+                      }}
                       aria-label={bi("回到最新", "Jump to latest")}
                     >
                       <IconArrowDown />

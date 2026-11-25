@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useId, useMemo } from "react";
 import { PROVIDER_LOGOS } from "./providerlogos";
 
 /** A provider's mark: its own picture or a vendor logo it borrows, a vendor's logo for a known preset, else a tinted letter. */
@@ -15,20 +15,25 @@ export function ProviderLogo({
   color?: string;
   size?: number;
 }) {
-  const box = { width: size, height: size };
+  const uid = useId().replace(/[^a-zA-Z0-9_-]/g, "");
+  const box: React.CSSProperties = { width: size, height: size, flexShrink: 0 };
+  const rawSvg =
+    PROVIDER_LOGOS[icon?.startsWith("preset:") ? icon.slice(7) : preset];
+  const scopedSvg = useMemo(() => {
+    if (!rawSvg) return "";
+    return rawSvg.replace(/_R_0_/g, `_${uid}_`);
+  }, [rawSvg, uid]);
   if (icon?.startsWith("data:"))
     return (
       <img className="ai-logo pic" style={box} src={icon} alt="" aria-hidden />
     );
-  const svg =
-    PROVIDER_LOGOS[icon?.startsWith("preset:") ? icon.slice(7) : preset];
-  if (svg)
+  if (scopedSvg)
     return (
       <span
         className="ai-logo"
         style={box}
         aria-hidden
-        dangerouslySetInnerHTML={{ __html: svg }}
+        dangerouslySetInnerHTML={{ __html: scopedSvg }}
       />
     );
   const letter =

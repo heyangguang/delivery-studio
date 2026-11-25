@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   Checkbox,
@@ -237,6 +237,116 @@ function memberStatusMeta(m: RolloutBoardMember): {
  * 1. RolloutBoardDrawer — Enterprise Multi-Cluster Rollout Console
  * ========================================================================== */
 
+const RolloutMemberRow = React.memo(function RolloutMemberRow({
+  member: m,
+  isHere,
+  onJump,
+}: {
+  member: RolloutBoardMember;
+  isHere: boolean;
+  onJump: (clusterId: string, rehearsalId: string) => void;
+}) {
+  const st = memberStatusMeta(m);
+  return (
+    <tr
+      className={`${isHere ? "is-here" : ""}${m.voided ? " is-voided" : ""}`}
+    >
+      <td>
+        <div className="ro-cell-cl">
+          <b className="mono">{m.cluster_id}</b>
+          {m.is_origin && (
+            <span className="ro-tag is-origin">
+              {bi("样板源", "Pilot")}
+            </span>
+          )}
+          {isHere && (
+            <span className="ro-tag is-here">
+              {bi("当前", "Current")}
+            </span>
+          )}
+        </div>
+        <small className="ro-cell-sub">
+          {m.app_name} {m.version}
+          {m.hosts > 0 ? ` · ${m.hosts} ${bi("节点", "nodes")}` : ""}
+        </small>
+      </td>
+      <td>
+        <div className="ro-match-col">
+          <span
+            className={`ro-match-pill ${m.match_tier === "compatible" ? "is-diff" : "is-same"}`}
+          >
+            {m.match_tier === "origin"
+              ? bi("已验证样板", "Verified Pilot")
+              : m.match_tier === "exact"
+                ? bi("同架构", "Exact Match")
+                : bi("架构差异", "Diff Arch")}
+          </span>
+          {!m.is_origin && (
+            <small className="ro-cell-sub">
+              {m.strict_precheck
+                ? bi("严格预检直达", "Strict Precheck")
+                : bi("探针引入", "Via Probe")}
+            </small>
+          )}
+        </div>
+      </td>
+      <td>
+        <div className="ro-stage-col">
+          <span className={`ro-st-pill ${st.cls}`}>
+            {m.status_key === "applied" && <IconCheck />}
+            {st.label}
+          </span>
+          {typeof st.progress === "number" && m.steps_total > 0 && (
+            <div className="ro-mini-bar" aria-hidden>
+              <div style={{ width: `${st.progress}%` }} />
+            </div>
+          )}
+        </div>
+      </td>
+      <td>
+        {m.conflict_count > 0 ? (
+          <Tooltip mini content={m.conflict_summary}>
+            <span className="ro-risk-warn">
+              <IconExclamationCircle />
+              {bi(`${m.conflict_count} 项冲突`, `${m.conflict_count} conflict`)}
+            </span>
+          </Tooltip>
+        ) : m.applied ? (
+          <span className="ro-cell-sub num">
+            {m.applied_by} · {ago(m.applied_at || m.updated_at)}
+          </span>
+        ) : m.voided ? (
+          <span className="ro-cell-sub">
+            {m.void_reason || bi("已作废", "Voided")}
+          </span>
+        ) : (
+          <span className="ro-cell-sub">
+            {bi("无冲突 · 待处理", "Ready")}
+          </span>
+        )}
+      </td>
+      <td className="ro-col-act">
+        {isHere ? (
+          <span className="ro-here-txt">
+            {bi("当前页", "Here")}
+          </span>
+        ) : (
+          <button
+            type="button"
+            className={`ro-go-btn${!m.applied && !m.voided ? " primary" : ""}`}
+            onClick={() => onJump(m.cluster_id, m.rehearsal_id)}
+          >
+            {!m.applied && !m.voided
+              ? bi("去处理", "Work")
+              : bi("查看", "View")}
+            <IconRight />
+          </button>
+        )}
+      </td>
+    </tr>
+  );
+});
+
 export function RolloutBoardDrawer({
   rolloutId,
   visible,
@@ -262,6 +372,15 @@ export function RolloutBoardDrawer({
     "all" | "pending" | "applied" | "attention"
   >("all");
   const [query, setQuery] = useState("");
+  const reqSeqRef = useRef(0);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (initialBoard && initialBoard.rollout_id === rolloutId) {
@@ -271,17 +390,22 @@ export function RolloutBoardDrawer({
 
   const load = useCallback(async () => {
     if (!rolloutId) return;
+    const seq = ++reqSeqRef.current;
     setLoading(true);
     setErr("");
     try {
       const res = await api<RolloutBoardResponse>(
         `/api/rehearsals/rollout/${encodeURIComponent(rolloutId)}`,
       );
+      if (!mountedRef.current || seq !== reqSeqRef.current) return;
       setBoard(res);
     } catch (e: unknown) {
+      if (!mountedRef.current || seq !== reqSeqRef.current) return;
       setErr((e as Error).message || bi("读取推广看板失败", "Failed to load rollout board"));
     } finally {
-      setLoading(false);
+      if (mountedRef.current && seq === reqSeqRef.current) {
+        setLoading(false);
+      }
     }
   }, [rolloutId]);
 
@@ -290,6 +414,18 @@ export function RolloutBoardDrawer({
       void load();
     }
   }, [visible, rolloutId, load]);
+
+  useEffect(() => {
+    if (!visible) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      const t = e.target as HTMLElement | null;
+      if (t?.closest?.(".arco-modal-wrapper")) return;
+      onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [visible, onClose]);
 
   const pct = useMemo(() => {
     if (!board || board.total <= 0) return 0;
@@ -311,15 +447,18 @@ export function RolloutBoardDrawer({
     });
   }, [board, filter, query]);
 
-  const jumpTo = (clusterId: string, rehearsalId: string) => {
-    onClose();
-    go({
-      name: "deliveries",
-      id: clusterId,
-      tab: "rehearsal",
-      rehearsal: rehearsalId,
-    });
-  };
+  const jumpTo = useCallback(
+    (clusterId: string, rehearsalId: string) => {
+      onClose();
+      go({
+        name: "deliveries",
+        id: clusterId,
+        tab: "rehearsal",
+        rehearsal: rehearsalId,
+      });
+    },
+    [onClose],
+  );
 
   return (
     <Modal
@@ -469,109 +608,14 @@ export function RolloutBoardDrawer({
                     </td>
                   </tr>
                 ) : (
-                  filtered.map((m) => {
-                    const st = memberStatusMeta(m);
-                    const isHere = m.cluster_id === currentClusterId;
-                    return (
-                      <tr
-                        key={`${m.cluster_id}-${m.rehearsal_id}`}
-                        className={`${isHere ? "is-here" : ""}${m.voided ? " is-voided" : ""}`}
-                      >
-                        <td>
-                          <div className="ro-cell-cl">
-                            <b className="mono">{m.cluster_id}</b>
-                            {m.is_origin && (
-                              <span className="ro-tag is-origin">
-                                {bi("样板源", "Pilot")}
-                              </span>
-                            )}
-                            {isHere && (
-                              <span className="ro-tag is-here">
-                                {bi("当前", "Current")}
-                              </span>
-                            )}
-                          </div>
-                          <small className="ro-cell-sub">
-                            {m.app_name} {m.version}
-                            {m.hosts > 0 ? ` · ${m.hosts} ${bi("节点", "nodes")}` : ""}
-                          </small>
-                        </td>
-                        <td>
-                          <div className="ro-match-col">
-                            <span
-                              className={`ro-match-pill ${m.match_tier === "compatible" ? "is-diff" : "is-same"}`}
-                            >
-                              {m.match_tier === "origin"
-                                ? bi("已验证样板", "Verified Pilot")
-                                : m.match_tier === "exact"
-                                  ? bi("同架构", "Exact Match")
-                                  : bi("架构差异", "Diff Arch")}
-                            </span>
-                            {!m.is_origin && (
-                              <small className="ro-cell-sub">
-                                {m.strict_precheck
-                                  ? bi("严格预检直达", "Strict Precheck")
-                                  : bi("探针引入", "Via Probe")}
-                              </small>
-                            )}
-                          </div>
-                        </td>
-                        <td>
-                          <div className="ro-stage-col">
-                            <span className={`ro-st-pill ${st.cls}`}>
-                              {m.status_key === "applied" && <IconCheck />}
-                              {st.label}
-                            </span>
-                            {typeof st.progress === "number" && m.steps_total > 0 && (
-                              <div className="ro-mini-bar" aria-hidden>
-                                <div style={{ width: `${st.progress}%` }} />
-                              </div>
-                            )}
-                          </div>
-                        </td>
-                        <td>
-                          {m.conflict_count > 0 ? (
-                            <Tooltip mini content={m.conflict_summary}>
-                              <span className="ro-risk-warn">
-                                <IconExclamationCircle />
-                                {bi(`${m.conflict_count} 项冲突`, `${m.conflict_count} conflict`)}
-                              </span>
-                            </Tooltip>
-                          ) : m.applied ? (
-                            <span className="ro-cell-sub num">
-                              {m.applied_by} · {ago(m.applied_at || m.updated_at)}
-                            </span>
-                          ) : m.voided ? (
-                            <span className="ro-cell-sub">
-                              {m.void_reason || bi("已作废", "Voided")}
-                            </span>
-                          ) : (
-                            <span className="ro-cell-sub">
-                              {bi("无冲突 · 待处理", "Ready")}
-                            </span>
-                          )}
-                        </td>
-                        <td className="ro-col-act">
-                          {isHere ? (
-                            <span className="ro-here-txt">
-                              {bi("当前页", "Here")}
-                            </span>
-                          ) : (
-                            <button
-                              type="button"
-                              className={`ro-go-btn${!m.applied && !m.voided ? " primary" : ""}`}
-                              onClick={() => jumpTo(m.cluster_id, m.rehearsal_id)}
-                            >
-                              {!m.applied && !m.voided
-                                ? bi("去处理", "Work")
-                                : bi("查看", "View")}
-                              <IconRight />
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })
+                  filtered.map((m) => (
+                    <RolloutMemberRow
+                      key={`${m.cluster_id}-${m.rehearsal_id}`}
+                      member={m}
+                      isHere={m.cluster_id === currentClusterId}
+                      onJump={jumpTo}
+                    />
+                  ))
                 )}
               </tbody>
             </table>
@@ -842,6 +886,113 @@ export function RolloutProgressStrip({
  * 3. PropagateRehearsalModal — Entry A (1-to-N Push from Production-Applied Pilot)
  * ========================================================================== */
 
+const PropagateTargetRow = React.memo(function PropagateTargetRow({
+  target: t,
+  checked,
+  mode,
+  onToggle,
+  onSetChecked,
+  onJumpExisting,
+}: {
+  target: PropagateTargetItem;
+  checked: boolean;
+  mode: "probe" | "steps";
+  onToggle: (clusterId: string) => void;
+  onSetChecked: (clusterId: string, next: boolean) => void;
+  onJumpExisting: (clusterId: string, rehearsalId?: string) => void;
+}) {
+  const willDowngrade =
+    mode === "steps" && !t.allow_skip_probe && !t.already_imported;
+  return (
+    <div
+      className={`ro-pick-row${t.already_imported ? " is-done" : ""}${checked ? " is-checked" : ""}`}
+      onClick={() => {
+        if (t.already_imported) return;
+        onToggle(t.cluster_id);
+      }}
+    >
+      <div className="ro-pick-chk" onClick={(e) => e.stopPropagation()}>
+        <Checkbox
+          disabled={t.already_imported}
+          checked={t.already_imported ? true : checked}
+          onChange={(v) => onSetChecked(t.cluster_id, Boolean(v))}
+        />
+      </div>
+      <div className="ro-pick-main">
+        <div className="ro-pick-top">
+          <b className="mono">{t.cluster_id}</b>
+          <span className="ro-pick-ver mono">
+            {t.app_name} {t.version}
+          </span>
+          {t.scheme_name && (
+            <span className="ro-pick-scheme">{t.scheme_name}</span>
+          )}
+          {t.hosts > 0 && (
+            <span className="ro-pick-hosts num">
+              {t.hosts} {bi("节点", "nodes")}
+            </span>
+          )}
+        </div>
+        <div className="ro-pick-sub">
+          <span>{t.match_reason}</span>
+          {t.conflict_summary && (
+            <span className="ro-pick-warn">
+              <IconExclamationCircle /> {t.conflict_summary}
+            </span>
+          )}
+          {t.already_effective && !t.already_imported && (
+            <span className="ro-pick-warn">
+              {bi("目标集群似乎已生效相同配置", "Identical config already effective")}
+            </span>
+          )}
+          {willDowngrade && (
+            <span className="ro-pick-note">
+              {bi("→ 安全护栏：将自动以只读探针引入", "→ Safety guard: will import via probe")}
+            </span>
+          )}
+        </div>
+      </div>
+      <div className="ro-pick-right">
+        {t.already_imported ? (
+          <button
+            type="button"
+            className="ro-go-btn"
+            onClick={(e) => {
+              e.stopPropagation();
+              onJumpExisting(t.cluster_id, t.existing_rehearsal_id);
+            }}
+          >
+            {t.existing_applied
+              ? bi("已落地 · 查看", "Applied · View")
+              : bi("已引入 · 查看", "Imported · View")}
+            <IconRight />
+          </button>
+        ) : t.already_effective && t.existing_rehearsal_id ? (
+          <button
+            type="button"
+            className="ro-go-btn is-eff"
+            onClick={(e) => {
+              e.stopPropagation();
+              onJumpExisting(t.cluster_id, t.existing_rehearsal_id);
+            }}
+          >
+            {bi("已独立生效 · 查看", "Already Effective · View")}
+            <IconRight />
+          </button>
+        ) : (
+          <span
+            className={`ro-match-pill ${t.match_tier === "exact" ? "is-same" : "is-diff"}`}
+          >
+            {t.match_tier === "exact"
+              ? bi("同架构", "Exact")
+              : bi("有差异", "Diff")}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+});
+
 export function PropagateRehearsalModal({
   clusterId,
   rehearsal,
@@ -859,6 +1010,7 @@ export function PropagateRehearsalModal({
   const [data, setData] = useState<PropagateTargetsResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
   const [err, setErr] = useState("");
   const [mode, setMode] = useState<"probe" | "steps">("probe");
   const [picked, setPicked] = useState<Record<string, boolean>>({});
@@ -867,6 +1019,7 @@ export function PropagateRehearsalModal({
 
   useEffect(() => {
     if (!visible) return;
+    let alive = true;
     setLoading(true);
     setErr("");
     setQuery("");
@@ -875,6 +1028,7 @@ export function PropagateRehearsalModal({
       `/api/clusters/${encodeURIComponent(clusterId)}/rehearsals/${encodeURIComponent(rehearsal.id)}/propagate-targets`,
     )
       .then((res) => {
+        if (!alive) return;
         setData(res);
         setMode(res.default_mode || "probe");
         const init: Record<string, boolean> = {};
@@ -892,10 +1046,28 @@ export function PropagateRehearsalModal({
         setPicked(init);
       })
       .catch((e: unknown) => {
+        if (!alive) return;
         setErr((e as Error).message || bi("读取候选集群失败", "Failed to load target clusters"));
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
   }, [visible, clusterId, rehearsal.id, lang]);
+
+  useEffect(() => {
+    if (!visible) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented || submittingRef.current) return;
+      const t = e.target as HTMLElement | null;
+      if (t?.closest?.(".arco-modal-wrapper")) return;
+      onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [visible, onClose]);
 
   const targets = data?.targets || [];
   const targetCounts = useMemo(() => {
@@ -923,21 +1095,46 @@ export function PropagateRehearsalModal({
     });
   }, [targets, query, targetFilter]);
 
-  const exactReady = filteredTargets.filter(
-    (t) =>
-      !t.already_imported && !t.already_effective && t.match_tier === "exact",
-  );
-  const diffReady = filteredTargets.filter(
-    (t) =>
-      !t.already_imported && !t.already_effective && t.match_tier !== "exact",
-  );
-  const doneList = filteredTargets.filter(
-    (t) => t.already_imported || t.already_effective,
+  const { exactReady, diffReady, doneList } = useMemo(() => {
+    const exact: PropagateTargetItem[] = [];
+    const diff: PropagateTargetItem[] = [];
+    const done: PropagateTargetItem[] = [];
+    for (const t of filteredTargets) {
+      if (t.already_imported || t.already_effective) done.push(t);
+      else if (t.match_tier === "exact") exact.push(t);
+      else diff.push(t);
+    }
+    return { exactReady: exact, diffReady: diff, doneList: done };
+  }, [filteredTargets]);
+
+  const pickedIds = useMemo(
+    () =>
+      Object.entries(picked)
+        .filter(([, v]) => v)
+        .map(([k]) => k),
+    [picked],
   );
 
-  const pickedIds = Object.entries(picked)
-    .filter(([, v]) => v)
-    .map(([k]) => k);
+  const toggleCluster = useCallback((cid: string) => {
+    setPicked((prev) => ({ ...prev, [cid]: !prev[cid] }));
+  }, []);
+
+  const setClusterChecked = useCallback((cid: string, next: boolean) => {
+    setPicked((prev) => ({ ...prev, [cid]: next }));
+  }, []);
+
+  const jumpExisting = useCallback(
+    (cid: string, existingRehearsalId?: string) => {
+      onClose();
+      go({
+        name: "deliveries",
+        id: cid,
+        tab: "rehearsal",
+        rehearsal: existingRehearsalId,
+      });
+    },
+    [onClose],
+  );
 
   const selectAllExact = () => {
     const next = { ...picked };
@@ -952,7 +1149,8 @@ export function PropagateRehearsalModal({
   const clearAll = () => setPicked({});
 
   const submit = async () => {
-    if (pickedIds.length === 0) return;
+    if (pickedIds.length === 0 || submittingRef.current) return;
+    submittingRef.current = true;
     setSubmitting(true);
     setErr("");
     try {
@@ -985,125 +1183,28 @@ export function PropagateRehearsalModal({
     } catch (e: unknown) {
       setErr((e as Error).message || bi("推广失败", "Propagation failed"));
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };
 
-  const renderTargetRow = (t: PropagateTargetItem) => {
-    const checked = Boolean(picked[t.cluster_id]);
-    const willDowngrade = mode === "steps" && !t.allow_skip_probe && !t.already_imported;
-    return (
-      <div
-        key={t.cluster_id}
-        className={`ro-pick-row${t.already_imported ? " is-done" : ""}${checked ? " is-checked" : ""}`}
-        onClick={() => {
-          if (t.already_imported) return;
-          setPicked((prev) => ({ ...prev, [t.cluster_id]: !prev[t.cluster_id] }));
-        }}
-      >
-        <div
-          className="ro-pick-chk"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <Checkbox
-            disabled={t.already_imported}
-            checked={t.already_imported ? true : checked}
-            onChange={(v) =>
-              setPicked((prev) => ({ ...prev, [t.cluster_id]: Boolean(v) }))
-            }
-          />
-        </div>
-        <div className="ro-pick-main">
-          <div className="ro-pick-top">
-            <b className="mono">{t.cluster_id}</b>
-            <span className="ro-pick-ver mono">
-              {t.app_name} {t.version}
-            </span>
-            {t.scheme_name && (
-              <span className="ro-pick-scheme">{t.scheme_name}</span>
-            )}
-            {t.hosts > 0 && (
-              <span className="ro-pick-hosts num">
-                {t.hosts} {bi("节点", "nodes")}
-              </span>
-            )}
-          </div>
-          <div className="ro-pick-sub">
-            <span>{t.match_reason}</span>
-            {t.conflict_summary && (
-              <span className="ro-pick-warn">
-                <IconExclamationCircle /> {t.conflict_summary}
-              </span>
-            )}
-            {t.already_effective && !t.already_imported && (
-              <span className="ro-pick-warn">
-                {bi("目标集群似乎已生效相同配置", "Identical config already effective")}
-              </span>
-            )}
-            {willDowngrade && (
-              <span className="ro-pick-note">
-                {bi("→ 安全护栏：将自动以只读探针引入", "→ Safety guard: will import via probe")}
-              </span>
-            )}
-          </div>
-        </div>
-        <div className="ro-pick-right">
-          {t.already_imported ? (
-            <button
-              type="button"
-              className="ro-go-btn"
-              onClick={(e) => {
-                e.stopPropagation();
-                onClose();
-                go({
-                  name: "deliveries",
-                  id: t.cluster_id,
-                  tab: "rehearsal",
-                  rehearsal: t.existing_rehearsal_id,
-                });
-              }}
-            >
-              {t.existing_applied
-                ? bi("已落地 · 查看", "Applied · View")
-                : bi("已引入 · 查看", "Imported · View")}
-              <IconRight />
-            </button>
-          ) : t.already_effective && t.existing_rehearsal_id ? (
-            <button
-              type="button"
-              className="ro-go-btn is-eff"
-              onClick={(e) => {
-                e.stopPropagation();
-                onClose();
-                go({
-                  name: "deliveries",
-                  id: t.cluster_id,
-                  tab: "rehearsal",
-                  rehearsal: t.existing_rehearsal_id,
-                });
-              }}
-            >
-              {bi("已独立生效 · 查看", "Already Effective · View")}
-              <IconRight />
-            </button>
-          ) : (
-            <span
-              className={`ro-match-pill ${t.match_tier === "exact" ? "is-same" : "is-diff"}`}
-            >
-              {t.match_tier === "exact"
-                ? bi("同架构", "Exact")
-                : bi("有差异", "Diff")}
-            </span>
-          )}
-        </div>
-      </div>
-    );
-  };
+  const renderTargetRow = (t: PropagateTargetItem) => (
+    <PropagateTargetRow
+      key={t.cluster_id}
+      target={t}
+      checked={Boolean(picked[t.cluster_id])}
+      mode={mode}
+      onToggle={toggleCluster}
+      onSetChecked={setClusterChecked}
+      onJumpExisting={jumpExisting}
+    />
+  );
 
   return (
     <Modal
       visible={visible}
       onCancel={onClose}
+      alignCenter
       focusLock={false}
       autoFocus={false}
       title={bi("推广已落地变更到其他同组件集群", "Propagate Applied Change to Other Clusters")}
@@ -1161,6 +1262,8 @@ export function PropagateRehearsalModal({
         <div className="ro-mode-grid" role="radiogroup" aria-label={bi("目标集群引入起点", "Import starting stage")}>
           <button
             type="button"
+            role="radio"
+            aria-checked={mode === "probe"}
             className={`ro-mode-card${mode === "probe" ? " on" : ""}`}
             onClick={() => setMode("probe")}
           >
@@ -1178,6 +1281,8 @@ export function PropagateRehearsalModal({
           </button>
           <button
             type="button"
+            role="radio"
+            aria-checked={mode === "steps"}
             className={`ro-mode-card${mode === "steps" ? " on" : ""}`}
             onClick={() => setMode("steps")}
           >
@@ -1359,19 +1464,48 @@ export function ImportTemplateBar({
   const [modeFilter, setModeFilter] = useState<string>("");
   const [sortBy, setSortBy] = useState<"recommended" | "recent" | "clusters">("recommended");
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
+  const reqSeqRef = useRef(0);
+  const mountedRef = useRef(true);
   const [err, setErr] = useState("");
 
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   const loadTemplates = useCallback(() => {
+    const seq = ++reqSeqRef.current;
     api<RehearsalTemplateItem[]>(
       `/api/rehearsals/templates?app_id=${encodeURIComponent(cluster.app_id)}&target_cluster=${encodeURIComponent(cluster.id)}`,
     )
-      .then((list) => setTemplates(list || []))
-      .catch(() => setTemplates([]));
+      .then((list) => {
+        if (!mountedRef.current || seq !== reqSeqRef.current) return;
+        setTemplates(list || []);
+      })
+      .catch(() => {
+        if (!mountedRef.current || seq !== reqSeqRef.current) return;
+        setTemplates([]);
+      });
   }, [cluster.app_id, cluster.id]);
 
   useEffect(() => {
     loadTemplates();
   }, [loadTemplates, lang]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented || submittingRef.current) return;
+      const t = e.target as HTMLElement | null;
+      if (t?.closest?.(".arco-modal-wrapper")) return;
+      setOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
 
   const templateKeyOf = (t: RehearsalTemplateItem) =>
     `${t.origin_cluster_id}/${t.origin_rehearsal_id}`;
@@ -1555,7 +1689,8 @@ export function ImportTemplateBar({
   if (!templates || templates.length === 0) return null;
 
   const submitImport = async () => {
-    if (!chosen || !chosenPilot) return;
+    if (!chosen || !chosenPilot || chosen.already_imported || submittingRef.current) return;
+    submittingRef.current = true;
     setSubmitting(true);
     setErr("");
     try {
@@ -1590,6 +1725,7 @@ export function ImportTemplateBar({
     } catch (e: unknown) {
       setErr((e as Error).message || bi("引入变更失败", "Failed to import change"));
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };
@@ -1651,6 +1787,7 @@ export function ImportTemplateBar({
       <Modal
         visible={open}
         onCancel={() => setOpen(false)}
+        alignCenter
         focusLock={false}
         autoFocus={false}
         title={bi(
@@ -2083,9 +2220,15 @@ export function ImportTemplateBar({
           )}
 
           {chosen && chosenPilot && !chosen.already_imported && (
-            <div className="ro-mode-grid">
+            <div
+              className="ro-mode-grid"
+              role="radiogroup"
+              aria-label={bi("当前集群引入起点", "Import starting stage")}
+            >
               <button
                 type="button"
+                role="radio"
+                aria-checked={mode === "probe"}
                 className={`ro-mode-card${mode === "probe" ? " on" : ""}`}
                 onClick={() => setMode("probe")}
               >
@@ -2103,6 +2246,8 @@ export function ImportTemplateBar({
               </button>
               <button
                 type="button"
+                role="radio"
+                aria-checked={mode === "steps"}
                 className={`ro-mode-card${mode === "steps" ? " on" : ""}${!chosenPilot.allowSkipProbe ? " is-disabled" : ""}`}
                 disabled={!chosenPilot.allowSkipProbe}
                 onClick={() => chosenPilot.allowSkipProbe && setMode("steps")}

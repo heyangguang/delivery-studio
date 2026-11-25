@@ -50,12 +50,16 @@ import { AppGlyph, Segmented } from "./ui";
 import { cachedDetail, putDetailCache } from "./deliveries";
 import {
   computeEffectiveClusterChanges,
+  hostStorage,
+  lazySubView,
   type EffectiveClusterChange,
-} from "./rehearsal";
+} from "./topology";
 import { bi, useLang, withLang } from "./i18n";
-import { hostStorage } from "./topology";
-import { ImportedBaselineModal } from "./importcluster";
 import "./clusterconfig.css";
+
+const LazyImportedBaselineModal = lazySubView(() =>
+  import("./importcluster").then((m) => ({ default: m.ImportedBaselineModal })),
+);
 
 const schemaCache = new Map<string, Schema>();
 if (typeof window !== "undefined") {
@@ -1069,6 +1073,15 @@ function ConfigRecord({
 
   const [baselineEdit, setBaselineEdit] = useState<null | "edit" | "probe">(null);
 
+  useEffect(() => {
+    if (!historyOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setHistoryOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [historyOpen]);
+
   return (
     <div className="cx">
       <div className="cx-source">
@@ -1081,10 +1094,20 @@ function ConfigRecord({
         <div className="cx-source-actions">
           {isImported && can("delivery.create") && (
             <>
-              <Button size="small" icon={<IconEdit />} onClick={() => setBaselineEdit("edit")}>
+              <Button
+                size="small"
+                icon={<IconEdit />}
+                onMouseEnter={() => void import("./importcluster")}
+                onClick={() => setBaselineEdit("edit")}
+              >
                 {bi("编辑基线", "Edit Baseline")}
               </Button>
-              <Button size="small" icon={<IconRefresh />} onClick={() => setBaselineEdit("probe")}>
+              <Button
+                size="small"
+                icon={<IconRefresh />}
+                onMouseEnter={() => void import("./importcluster")}
+                onClick={() => setBaselineEdit("probe")}
+              >
                 {bi("重新只读采集", "Re-Run Probe")}
               </Button>
             </>
@@ -1164,6 +1187,7 @@ function ConfigRecord({
               "Another delivery is still pending; current records have not changed yet.",
             )}
             <button
+              type="button"
               className="link"
               onClick={() =>
                 go({
@@ -2395,7 +2419,7 @@ function ConfigRecord({
       <Drawer
         visible={historyOpen}
         onCancel={() => setHistoryOpen(false)}
-        width={560}
+        width="min(560px, 100vw)"
         footer={null}
         className="cx-chg-drawer"
         title={
@@ -2554,22 +2578,24 @@ function ConfigRecord({
           </div>
         </div>
       </Drawer>
-      {isImported && (
-        <ImportedBaselineModal
-          visible={baselineEdit !== null}
-          mode={baselineEdit || "edit"}
-          cluster={c}
-          onClose={() => setBaselineEdit(null)}
-          onSaved={async () => {
-            if (p.id) {
-              putDetailCache(
-                p.id,
-                await api<JobDetail>(`/api/jobs/${encodeURIComponent(p.id)}`),
-              );
-            }
-            setRetry((x) => x + 1);
-          }}
-        />
+      {isImported && baselineEdit !== null && (
+        <React.Suspense fallback={null}>
+          <LazyImportedBaselineModal
+            visible
+            mode={baselineEdit}
+            cluster={c}
+            onClose={() => setBaselineEdit(null)}
+            onSaved={async () => {
+              if (p.id) {
+                putDetailCache(
+                  p.id,
+                  await api<JobDetail>(`/api/jobs/${encodeURIComponent(p.id)}`),
+                );
+              }
+              setRetry((x) => x + 1);
+            }}
+          />
+        </React.Suspense>
       )}
     </div>
   );

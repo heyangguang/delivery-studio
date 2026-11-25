@@ -19,8 +19,12 @@
   background: var(--surface);
   cursor: pointer;
   transition:
-    border-color 0.15s,
-    background 0.15s;
+    border-color 0.16s var(--spring),
+    background-color 0.16s var(--spring),
+    transform 0.16s var(--spring);
+}
+.wk-head:not(.plain):active {
+  transform: scale(0.985);
 }
 .wk-label {
   flex: none;
@@ -183,7 +187,7 @@
 }
 .wk-n.bad .wk-dot {
   color: var(--bad);
-  border-color: rgba(215, 0, 21, 0.3);
+  border-color: var(--bad-line);
   background: var(--bad-soft);
 }
 .k-said .wk-dot::after {
@@ -218,12 +222,18 @@
   text-align: left;
   background: none;
   cursor: pointer;
+  transition:
+    background-color 0.15s var(--spring),
+    transform 0.15s var(--spring);
 }
 .wk-line:disabled {
   cursor: default;
 }
 .wk-line:hover:not(:disabled) {
   background: var(--hover);
+}
+.wk-line:active:not(:disabled) {
+  transform: scale(0.99);
 }
 .wk-line:focus-visible {
   outline: none;
@@ -232,6 +242,11 @@
 .wk-line > b {
   flex: none;
   font-weight: 550;
+}
+.wk-line > small {
+  flex: none;
+  color: var(--mute);
+  font-variant-numeric: tabular-nums;
 }
 .wk-line > code {
   flex: 0 1 auto;
@@ -250,7 +265,7 @@
   flex: none;
   color: var(--faint);
   font-size: 11px;
-  transition: transform 0.2s var(--ease-out);
+  transition: transform 0.22s var(--spring);
 }
 .wk-meta {
   display: flex;
@@ -367,6 +382,7 @@
   color: var(--ok);
   font-size: 12px;
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 .wk-term-f.bad {
   color: var(--bad);
@@ -405,10 +421,18 @@
   font: 12.5px var(--sans);
   background: none;
   cursor: pointer;
+  transition:
+    border-color 0.16s var(--spring),
+    background-color 0.16s var(--spring),
+    color 0.16s var(--spring),
+    transform 0.16s var(--spring);
 }
-.mp:hover {
+.mp:not(.static):hover {
   border-color: var(--line);
   background: var(--hover);
+}
+.mp:not(.static):active {
+  transform: scale(0.975);
 }
 .mp:focus-visible {
   outline: none;
@@ -424,7 +448,7 @@
   flex: none;
   color: var(--faint);
   font-size: 11px;
-  transition: transform 0.2s var(--ease-out);
+  transition: transform 0.2s var(--spring);
 }
 .mp > svg.mp-flip {
   transform: rotate(180deg);
@@ -536,10 +560,16 @@
   color: var(--ink);
   font: 13px/1.35 var(--sans);
   cursor: pointer;
-  transition: background 0.14s ease, color 0.14s ease;
+  transition:
+    background-color 0.15s var(--spring),
+    color 0.15s var(--spring),
+    transform 0.15s var(--spring);
 }
 .mp-item:hover {
   background: var(--hover);
+}
+.mp-item:active {
+  transform: scale(0.985);
 }
 .mp-item:focus-visible {
   outline: none;
@@ -570,17 +600,23 @@
 }
 .ai-logo.plain {
   border-radius: 28%;
-  color: #fff;
+  color: #ffffff;
   font-weight: 700;
-  background: linear-gradient(160deg, #8e8e93, #636366);
+  background: linear-gradient(160deg, #6e737d, #4b5059);
 }
 @media (prefers-reduced-motion: reduce) {
   .wk-n,
   .wk-detail {
     animation: none;
   }
+  .wk-head,
+  .wk-line,
+  .wk-line > svg,
   .wk-fold,
-  .wk-chev {
+  .wk-chev,
+  .mp,
+  .mp > svg,
+  .mp-item {
     transition: none;
   }
   .wk-spin {

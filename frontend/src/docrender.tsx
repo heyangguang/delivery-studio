@@ -1,5 +1,6 @@
 import React, { useMemo } from "react";
 import { Markdown } from "./aimd";
+import { reducedMotion } from "./shared";
 import { bi, useLang } from "./i18n";
 
 export type DocSectionTone =
@@ -408,7 +409,10 @@ export function DocToc({
                 e.preventDefault();
                 document
                   .getElementById(sec.id)
-                  ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  ?.scrollIntoView({
+                    behavior: reducedMotion() ? "auto" : "smooth",
+                    block: "start",
+                  });
               }}
             >
               <span className={`rp-toc-idx tone-${sec.tone}`}>

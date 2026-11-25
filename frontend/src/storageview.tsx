@@ -1,4 +1,10 @@
-import React, { useEffect, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Button,
   Input,
@@ -34,6 +40,7 @@ export function editQuota(
   let v: number | undefined = current.custom
     ? +(current.quota / (1 << 30)).toFixed(2)
     : undefined;
+  let saving = false;
   Modal.confirm({
     title: bi(`${user} 的存储额度`, `Storage quota for ${user}`),
     content: (
@@ -63,6 +70,8 @@ export function editQuota(
     okText: bi("保存", "Save"),
     cancelText: bi("取消", "Cancel"),
     onOk: async () => {
+      if (saving) return;
+      saving = true;
       try {
         await api(`/api/users/${encodeURIComponent(user)}/quota`, {
           method: "PUT",
@@ -77,6 +86,8 @@ export function editQuota(
       } catch (e) {
         err(e);
         throw e;
+      } finally {
+        saving = false;
       }
     },
   });
@@ -90,22 +101,35 @@ export function StorageView() {
   const [mb, setMb] = useState(() => initStorage?.settings.max_file_mb ?? 200);
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
-  const load = () =>
-    api<Data>("/api/settings/storage")
-      .then((r) => {
-        putCached("/api/settings/storage", r);
-        setD(r);
-        setGb(r.settings.default_gb);
-        setMb(r.settings.max_file_mb);
-      })
-      .catch(err);
+  const mountedRef = useRef(true);
   useEffect(() => {
-    load();
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
   }, []);
+  const load = useCallback(
+    () =>
+      api<Data>("/api/settings/storage")
+        .then((r) => {
+          putCached("/api/settings/storage", r);
+          if (!mountedRef.current) return;
+          setD(r);
+          setGb(r.settings.default_gb);
+          setMb(r.settings.max_file_mb);
+        })
+        .catch((e) => {
+          if (mountedRef.current) err(e);
+        }),
+    [],
+  );
+  useEffect(() => {
+    void load();
+  }, [load]);
   const dirty =
     !!d && (gb !== d.settings.default_gb || mb !== d.settings.max_file_mb);
   const save = async () => {
-    if (!d) return;
+    if (!d || busy) return;
     setBusy(true);
     try {
       await api("/api/settings/storage", {
@@ -117,19 +141,20 @@ export function StorageView() {
         }),
       });
       Message.success(bi("已保存", "Saved"));
-      load();
+      void load();
     } catch (e) {
       err(e);
     } finally {
-      setBusy(false);
+      if (mountedRef.current) setBusy(false);
     }
   };
   const aiStatus = useAIStatus();
-  const rows = (d?.users || [])
-    .filter(
-      (r) => !q.trim() || r.user.toLowerCase().includes(q.trim().toLowerCase()),
-    )
-    .sort((a, b) => b.used - a.used);
+  const rows = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return (d?.users || [])
+      .filter((r) => !needle || r.user.toLowerCase().includes(needle))
+      .sort((a, b) => b.used - a.used);
+  }, [d?.users, q]);
   return (
     <article className="sx-page st-main enter">
       <header className="sx-page-h">
@@ -182,7 +207,7 @@ export function StorageView() {
                 />
               </label>
             </div>
-            <p className="faint small">
+            <p className="faint small num">
               {bi(
                 `已使用 ${bytesText(d.total_used)}（所有账户合计）。调低默认额度不会删除任何文件，只是超出额度的人不能再上传。`,
                 `${bytesText(d.total_used)} used across all accounts. Lowering the default quota does not delete existing files, but prevents new uploads once exceeded.`,
@@ -214,7 +239,7 @@ export function StorageView() {
               </div>
               {rows.map((r) => (
                 <div key={r.user} className="sv-row" role="row">
-                  <b>{r.user}</b>
+                  <b title={r.user}>{r.user}</b>
                   <UsageBar u={{ used: r.used, quota: r.quota, max_file: 0 }} />
                   <span className="faint small">
                     {r.override !== undefined

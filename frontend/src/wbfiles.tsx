@@ -473,6 +473,16 @@ function CheatPanel({ close }: { close: () => void }) {
   const { ops } = useWb();
   const js = ops.js;
   const [q, setQ] = useState("");
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        close();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [close]);
   const rows: [string, string][] = [
     ["mw.id", bi("这个实例的名字", "Name of this instance")],
     ["mw.version", bi("选用的版本", "Selected version")],
@@ -609,9 +619,60 @@ export function FilesTab(p: {
   );
   const isBinary = p.binaries.includes(p.active);
   const text = p.files[p.active];
+  const filesWrapRef = useRef<HTMLDivElement>(null);
+  const treeRef = useRef<HTMLElement>(null);
+  const resizerRef = useRef<HTMLDivElement>(null);
+  const dragCleanupRef = useRef<(() => void) | null>(null);
+  useEffect(() => () => dragCleanupRef.current?.(), []);
+
+  const startResize = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    const wrap = filesWrapRef.current;
+    const tree = treeRef.current;
+    const handle = resizerRef.current;
+    if (!wrap || !tree || !handle) return;
+    e.preventDefault();
+    dragCleanupRef.current?.();
+    const startX = e.clientX;
+    const startW = tree.getBoundingClientRect().width;
+    const wrapW = wrap.getBoundingClientRect().width;
+    let rafId = 0;
+    let nextW = startW;
+    handle.classList.add("is-dragging");
+    document.body.classList.add("is-resizing-pane");
+
+    const apply = () => {
+      rafId = 0;
+      wrap.style.setProperty("--wb-tree-w", `${Math.round(nextW)}px`);
+    };
+    const onMove = (ev: PointerEvent) => {
+      const maxW = Math.max(220, Math.min(520, wrapW - 320));
+      nextW = Math.min(maxW, Math.max(200, startW + (ev.clientX - startX)));
+      if (!rafId) rafId = window.requestAnimationFrame(apply);
+    };
+    const cleanup = () => {
+      if (rafId) {
+        window.cancelAnimationFrame(rafId);
+        rafId = 0;
+      }
+      handle.classList.remove("is-dragging");
+      document.body.classList.remove("is-resizing-pane");
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", cleanup);
+      window.removeEventListener("pointercancel", cleanup);
+      window.removeEventListener("blur", cleanup);
+      if (dragCleanupRef.current === cleanup) dragCleanupRef.current = null;
+    };
+    dragCleanupRef.current = cleanup;
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", cleanup);
+    window.addEventListener("pointercancel", cleanup);
+    window.addEventListener("blur", cleanup);
+  };
+
   return (
-    <div className="wb-files">
-      <aside className="wb-tree" aria-label={bi("文件", "Files")}>
+    <div className="wb-files" ref={filesWrapRef}>
+      <aside className="wb-tree" ref={treeRef} aria-label={bi("文件", "Files")}>
         <div className="wb-tree-head">
           <b>{bi("文件", "Files")}</b>
           {!p.readOnly && (
@@ -641,6 +702,27 @@ export function FilesTab(p: {
           )}
         </p>
       </aside>
+      <div
+        ref={resizerRef}
+        className="wb-files-resizer"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label={bi("调整文件树宽度", "Resize file tree")}
+        tabIndex={0}
+        onPointerDown={startResize}
+        onDoubleClick={() => filesWrapRef.current?.style.removeProperty("--wb-tree-w")}
+        onKeyDown={(e) => {
+          if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+          const wrap = filesWrapRef.current;
+          const tree = treeRef.current;
+          if (!wrap || !tree) return;
+          e.preventDefault();
+          const cur = tree.getBoundingClientRect().width;
+          const maxW = Math.max(220, Math.min(520, wrap.getBoundingClientRect().width - 320));
+          const w = Math.min(maxW, Math.max(200, cur + (e.key === "ArrowRight" ? 20 : -20)));
+          wrap.style.setProperty("--wb-tree-w", `${Math.round(w)}px`);
+        }}
+      />
       <div className="wb-editor">
         {!p.active || (text === undefined && !isBinary) ? (
           <div className="wb-editor-empty">
@@ -865,18 +947,22 @@ function RenderPane({
   const [preset, setPreset] = useState("");
   const [host, setHost] = useState("");
   const [busy, setBusy] = useState(false);
+  const busyLockRef = useRef(false);
   const [out, setOut] = useState<{
     ok: boolean;
     text?: string;
     error?: string;
   } | null>(null);
   const run = async () => {
+    if (busyLockRef.current) return;
+    busyLockRef.current = true;
     setBusy(true);
     try {
       setOut(await render(path, preset, host));
     } catch (e) {
       setOut({ ok: false, error: (e as Error).message });
     } finally {
+      busyLockRef.current = false;
       setBusy(false);
     }
   };

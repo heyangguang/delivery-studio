@@ -287,8 +287,19 @@ export function StepHotfixDrawer({
     setSelectedPath(nextPath);
   };
 
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !saving && !reverting && !promoting) {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, saving, reverting, promoting, onClose]);
+
   const handleSave = async () => {
-    if (!fileMeta || !canEdit) return;
+    if (!fileMeta || !canEdit || saving) return;
     const trimmedReason = reason.trim();
     if (!trimmedReason) {
       Message.warning(
@@ -346,6 +357,7 @@ export function StepHotfixDrawer({
       okText: bi("确认还原", "Revert"),
       okButtonProps: { status: "warning" },
       onOk: async () => {
+        if (reverting) return;
         setReverting(true);
         try {
           const res = await api<{
@@ -382,6 +394,7 @@ export function StepHotfixDrawer({
       ),
       okText: bi("写入组件草稿", "Save to Draft"),
       onOk: async () => {
+        if (promoting) return;
         setPromoting(true);
         try {
           const res = await api<{ component: string; path: string }>(

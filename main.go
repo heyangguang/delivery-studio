@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.337-dev"
+	version            = "1.0.338-dev"
 	currentReleaseDate = "2026-11-25"
 )
 
@@ -65,6 +65,24 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.338-dev",
+		Date:    "2026-11-25",
+		Title:   "全站前端 Apple 级视觉、弹簧动效、拖拽跟手性与 60/120fps 性能大整顿",
+		TitleEn: "全站前端 Apple 级视觉、弹簧动效、拖拽跟手性与 60/120fps 性能大整顿",
+		Highlights: []string{
+			"首屏代码分包瘦身 73.6%（index.js 从 3.39 MB 降至 895 kB），全量二级路由与重型子面板支持按需懒加载、空闲预热与悬停预取",
+			"统一全局 Apple 物理阻尼曲线（--apple-ease / --apple-sheet / --spring）、微按压回弹（scale 0.975）、滑动指示器 ResizeObserver 跟手与毛玻璃弹窗层级",
+			"重构 AI 悬浮球 1:1 rAF 拖拽磁吸贴边、AI 抽屉四向无重绘缩放、监控与组件工作台分栏拖拽及步骤拖拽排序，彻底消除拖影粘连与误触点击",
+			"隔离演练 120ms 计时器及监控/AI/任务 1Hz 计时器至叶子节点，合并 SSE 流式帧更新与日志窗口化渲染，补齐深浅色 WCAG 对比度、tabular-nums 与全站防连击锁",
+		},
+		HighlightsEn: []string{
+			"首屏代码分包瘦身 73.6%（index.js 从 3.39 MB 降至 895 kB），全量二级路由与重型子面板支持按需懒加载、空闲预热与悬停预取",
+			"统一全局 Apple 物理阻尼曲线（--apple-ease / --apple-sheet / --spring）、微按压回弹（scale 0.975）、滑动指示器 ResizeObserver 跟手与毛玻璃弹窗层级",
+			"重构 AI 悬浮球 1:1 rAF 拖拽磁吸贴边、AI 抽屉四向无重绘缩放、监控与组件工作台分栏拖拽及步骤拖拽排序，彻底消除拖影粘连与误触点击",
+			"隔离演练 120ms 计时器及监控/AI/任务 1Hz 计时器至叶子节点，合并 SSE 流式帧更新与日志窗口化渲染，补齐深浅色 WCAG 对比度、tabular-nums 与全站防连击锁",
+		},
+	},
 	{
 		Version: "1.0.337-dev",
 		Date:    "2026-11-25",

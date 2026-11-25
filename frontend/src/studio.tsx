@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useMemo } from "react";
 import { Tooltip } from "@arco-design/web-react";
 import { IconBook, IconCode, IconLink } from "@arco-design/web-react/icon";
 import { KnowledgePage } from "./kb";
@@ -61,57 +61,59 @@ export function StudioPage({
   selected?: string;
   features?: AIStatus["features"];
 }) {
-  useLang();
+  const lang = useLang();
 
   useEffect(() => {
     rememberStudioTab(active);
   }, [active]);
 
-  const enabled = enabledStudioTabs(features);
-  const modules: StudioModule[] = [
-    ...(enabled.includes("kb")
-      ? [
-          {
-            key: "kb" as const,
-            label: bi("知识库", "Docs"),
-            tip: bi(
-              "知识库 · 沉淀团队与个人运维资料，供 AI 实时检索引用",
-              "Knowledge Base · Team & personal runbooks indexed for AI",
-            ),
-            tone: "kb" as const,
-            icon: <IconBook />,
-          },
-        ]
-      : []),
-    ...(enabled.includes("skills")
-      ? [
-          {
-            key: "skills" as const,
-            label: bi("技能", "Skills"),
-            tip: bi(
-              "技能 · 结构化操作规范与安全沙箱脚本",
-              "Skills · Structured operational manuals & sandbox scripts",
-            ),
-            tone: "skills" as const,
-            icon: <IconCode />,
-          },
-        ]
-      : []),
-    ...(enabled.includes("mcp")
-      ? [
-          {
-            key: "mcp" as const,
-            label: "MCP",
-            tip: bi(
-              "MCP 服务 · 接入外部工具与只读数据源扩展 AI 能力",
-              "MCP Servers · Connect external tools & data sources",
-            ),
-            tone: "mcp" as const,
-            icon: <IconLink />,
-          },
-        ]
-      : []),
-  ];
+  const modules = useMemo<StudioModule[]>(() => {
+    const enabled = enabledStudioTabs(features);
+    return [
+      ...(enabled.includes("kb")
+        ? [
+            {
+              key: "kb" as const,
+              label: bi("知识库", "Docs"),
+              tip: bi(
+                "知识库 · 沉淀团队与个人运维资料，供 AI 实时检索引用",
+                "Knowledge Base · Team & personal runbooks indexed for AI",
+              ),
+              tone: "kb" as const,
+              icon: <IconBook />,
+            },
+          ]
+        : []),
+      ...(enabled.includes("skills")
+        ? [
+            {
+              key: "skills" as const,
+              label: bi("技能", "Skills"),
+              tip: bi(
+                "技能 · 结构化操作规范与安全沙箱脚本",
+                "Skills · Structured operational manuals & sandbox scripts",
+              ),
+              tone: "skills" as const,
+              icon: <IconCode />,
+            },
+          ]
+        : []),
+      ...(enabled.includes("mcp")
+        ? [
+            {
+              key: "mcp" as const,
+              label: "MCP",
+              tip: bi(
+                "MCP 服务 · 接入外部工具与只读数据源扩展 AI 能力",
+                "MCP Servers · Connect external tools & data sources",
+              ),
+              tone: "mcp" as const,
+              icon: <IconLink />,
+            },
+          ]
+        : []),
+    ];
+  }, [features?.kb, features?.skills, features?.mcp, lang]);
 
   const showTabs = modules.length > 1;
   const studioNav = showTabs ? (

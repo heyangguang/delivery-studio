@@ -28,6 +28,7 @@
 }
 .pf-back {
   display: grid;
+  flex: none;
   place-items: center;
   width: 36px;
   height: 36px;
@@ -36,9 +37,21 @@
   color: var(--ink-2);
   background: none;
   cursor: pointer;
+  transition:
+    background-color 0.16s var(--spring),
+    color 0.16s var(--spring),
+    transform 0.16s var(--spring);
 }
 .pf-back:hover {
+  color: var(--ink);
   background: var(--hover);
+}
+.pf-back:active {
+  transform: scale(0.94);
+}
+.pf-back:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
 }
 .pf-state {
   min-width: 64px;
@@ -95,6 +108,9 @@
   flex: none;
   width: 190px;
 }
+.pf-ctl .arco-select {
+  width: 100%;
+}
 .pf-ctl .arco-switch {
   display: block;
   margin-left: auto;
@@ -115,6 +131,9 @@
   gap: 10px;
   align-items: center;
   padding: 8px 0;
+}
+.pf-mem-h > span {
+  font-variant-numeric: tabular-nums;
 }
 .pf-mem-h .arco-btn {
   margin-left: auto;
@@ -142,6 +161,7 @@
   display: block;
   color: var(--faint);
   font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
 }
 .pf-mem li button {
   display: grid;
@@ -154,9 +174,25 @@
   color: var(--mute);
   background: none;
   cursor: pointer;
+  transition:
+    background-color 0.15s var(--spring),
+    color 0.15s var(--spring),
+    transform 0.15s var(--spring);
 }
-.pf-mem li button:hover {
+.pf-mem li button:hover:not(:disabled) {
+  color: var(--ink);
   background: var(--hover);
+}
+.pf-mem li button.is-del:hover:not(:disabled) {
+  color: var(--bad);
+  background: var(--bad-soft);
+}
+.pf-mem li button:active:not(:disabled) {
+  transform: scale(0.93);
+}
+.pf-mem li button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 .pf-none {
   margin: 0;
@@ -171,5 +207,11 @@
   }
   .pf-ctl {
     width: 100%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pf-back,
+  .pf-mem li button {
+    transition: none;
   }
 }

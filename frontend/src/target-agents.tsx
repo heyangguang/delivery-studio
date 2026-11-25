@@ -57,16 +57,22 @@ export function TargetAgents({
   useEffect(() => {
     let dead = false;
     const refresh = () => {
-      if (!dead) void load();
+      if (!dead && document.visibilityState === "visible") void load();
     };
-    refresh();
+    void load();
     const timer = setInterval(refresh, 5000);
+    document.addEventListener("visibilitychange", refresh);
     return () => {
       dead = true;
       clearInterval(timer);
+      document.removeEventListener("visibilitychange", refresh);
     };
   }, [job, node]);
+  const busyLockRef = useRef("");
+  const revokeLockRef = useRef(false);
   const register = async (host: string) => {
+    if (busyLockRef.current) return;
+    busyLockRef.current = host;
     setBusy(host);
     try {
       const result = await api<{ agent: Agent; enrollment_token: string }>(
@@ -80,6 +86,7 @@ export function TargetAgents({
     } catch (e) {
       setError((e as Error).message);
     } finally {
+      busyLockRef.current = "";
       setBusy("");
     }
   };
@@ -231,6 +238,8 @@ export function TargetAgents({
                                 : bi("取消接入", "Cancel Enrollment"),
                               cancelText: bi("取消", "Cancel"),
                               onOk: async () => {
+                                if (revokeLockRef.current) return;
+                                revokeLockRef.current = true;
                                 try {
                                   await api(
                                     `/api/jobs/${job}/executions/agents`,
@@ -247,6 +256,8 @@ export function TargetAgents({
                                 } catch (e) {
                                   Message.error((e as Error).message);
                                   throw e;
+                                } finally {
+                                  revokeLockRef.current = false;
                                 }
                               },
                             })

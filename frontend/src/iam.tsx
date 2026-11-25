@@ -450,7 +450,18 @@ export function useIAM() {
       })
       .catch(err);
   useEffect(() => {
-    load();
+    let alive = true;
+    api<IAM>("/api/iam")
+      .then((x) => {
+        memo = x;
+        if (alive) setD(x);
+      })
+      .catch((e) => {
+        if (alive) err(e);
+      });
+    return () => {
+      alive = false;
+    };
   }, [lang]);
   return { iam: d, reload: load, set: (x: IAM) => ((memo = x), setD(x)) };
 }
@@ -489,11 +500,15 @@ export function EffectivePerms({
   scope: string;
 }) {
   useLang();
-  const groups = modules(iam.perms)
-    .map(
-      ([m, ps]) => [m, ps.filter((p) => perms.has(p.id))] as [string, Perm[]],
-    )
-    .filter(([, ps]) => ps.length);
+  const groups = useMemo(
+    () =>
+      modules(iam.perms)
+        .map(
+          ([m, ps]) => [m, ps.filter((p) => perms.has(p.id))] as [string, Perm[]],
+        )
+        .filter(([, ps]) => ps.length),
+    [iam.perms, perms],
+  );
   if (!groups.length)
     return (
       <p className="faint small">
@@ -563,13 +578,18 @@ export function RolePicker({
     <div className="iam-picks" role="group" aria-label={bi("角色", "Roles")}>
       {iam.roles.map((r) => {
         const on = value.includes(r.id);
+        const toggleRole = (v: boolean) =>
+          onChange(v ? [...value, r.id] : value.filter((x) => x !== r.id));
         return (
-          <label key={r.id} className={`iam-pick ${on ? "on" : ""}`}>
+          <div
+            key={r.id}
+            className={`iam-pick ${on ? "on" : ""}`}
+            onClick={() => toggleRole(!on)}
+          >
             <Checkbox
               checked={on}
-              onChange={(v) =>
-                onChange(v ? [...value, r.id] : value.filter((x) => x !== r.id))
-              }
+              onClick={(e) => e.stopPropagation()}
+              onChange={toggleRole}
             />
             <span>
               <b>
@@ -581,7 +601,7 @@ export function RolePicker({
               </b>
               {r.desc && <small>{roleDesc(r)}</small>}
             </span>
-          </label>
+          </div>
         );
       })}
     </div>
@@ -613,6 +633,7 @@ export function GrantEditor({
   const eff = effective(iam, roles);
   const editable = can("iam.user");
   const save = async () => {
+    if (busy || !dirty || roles.length === 0) return;
     setBusy(true);
     try {
       await api(`/api/users/${user}/grant`, {
@@ -731,6 +752,10 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
   const [busy, setBusy] = useState(false);
   const editable = can("iam.role");
   const role = iam?.roles.find((r) => r.id === sel) || iam?.roles[0];
+  const permModules = useMemo(
+    () => (iam ? modules(iam.perms) : []),
+    [iam],
+  );
   if (!iam) return <Skeleton animation text={{ rows: 8 }} />;
   const cur: Draft | null =
     draft ||
@@ -775,7 +800,7 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
     });
   };
   const save = async () => {
-    if (!draft) return;
+    if (busy || !draft || !draft.name.trim()) return;
     setBusy(true);
     try {
       const body = JSON.stringify({
@@ -806,7 +831,8 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
       setBusy(false);
     }
   };
-  const remove = (r: Role) =>
+  const remove = (r: Role) => {
+    let deleting = false;
     Modal.confirm({
       title: bi(`删除角色「${r.name}」？`, `Delete role “${r.name}”?`),
       content: r.holders
@@ -819,15 +845,20 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
       cancelText: bi("取消", "Cancel"),
       okButtonProps: { status: "danger" },
       onOk: async () => {
+        if (deleting) return;
+        deleting = true;
         try {
           set(await api<IAM>(`/api/iam/roles/${r.id}`, { method: "DELETE" }));
           setSel("");
           setDraft(null);
         } catch (e) {
           err(e);
+        } finally {
+          deleting = false;
         }
       },
     });
+  };
 
   return (
     <article className="detail iam-page enter">
@@ -907,7 +938,7 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
               </tr>
             </thead>
             <tbody>
-              {modules(iam.perms).map(([m, ps]) => (
+              {permModules.map(([m, ps]) => (
                 <React.Fragment key={m}>
                   <tr className="iam-cmp-m">
                     <td colSpan={iam.roles.length + 1}>{permModule(m)}</td>
@@ -1101,15 +1132,27 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
                   <em className="num">{cur.perms.length}</em>
                 </h3>
                 <div className="iam-tree">
-                  {modules(iam.perms).map(([m, ps]) => {
+                  {permModules.map(([m, ps]) => {
                     const n = ps.filter((p) => cur.perms.includes(p.id)).length;
+                    const allModChecked = n === ps.length;
                     return (
                       <div key={m} className="iam-mod">
-                        <label className="iam-mod-h">
+                        <div
+                          className="iam-mod-h"
+                          onClick={() => {
+                            if (!locked) {
+                              toggle(
+                                ps.map((p) => p.id),
+                                !allModChecked,
+                              );
+                            }
+                          }}
+                        >
                           <Checkbox
-                            checked={n === ps.length}
+                            checked={allModChecked}
                             indeterminate={n > 0 && n < ps.length}
                             disabled={locked}
+                            onClick={(e) => e.stopPropagation()}
                             onChange={(v) =>
                               toggle(
                                 ps.map((p) => p.id),
@@ -1118,10 +1161,10 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
                             }
                           />
                           <b>{permModule(m)}</b>
-                          <small>
+                          <small className="num">
                             {n} / {ps.length}
                           </small>
-                        </label>
+                        </div>
                         <div className="iam-perms">
                           {m === "AI" ? (
                             <>
@@ -1130,6 +1173,7 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
                                 .map((p) => {
                                   const isUse = p.id === "ai.use";
                                   const useOn = cur.perms.includes("ai.use");
+                                  const checked = cur.perms.includes(p.id);
                                   const subPerms = isUse
                                     ? ps.filter((x) =>
                                         x.id.startsWith("ai.feat."),
@@ -1137,19 +1181,23 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
                                     : [];
                                   return (
                                     <React.Fragment key={p.id}>
-                                      <label
-                                        className={`iam-perm ${cur.perms.includes(p.id) ? "on" : ""}`}
+                                      <div
+                                        className={`iam-perm ${checked ? "on" : ""}`}
+                                        onClick={() => {
+                                          if (!locked) toggle([p.id], !checked);
+                                        }}
                                       >
                                         <Checkbox
-                                          checked={cur.perms.includes(p.id)}
+                                          checked={checked}
                                           disabled={locked}
+                                          onClick={(e) => e.stopPropagation()}
                                           onChange={(v) => toggle([p.id], v)}
                                         />
                                         <span>
                                           <b>{permTitle(p)}</b>
                                           <small>{permDesc(p)}</small>
                                         </span>
-                                      </label>
+                                      </div>
                                       {isUse && subPerms.length > 0 && (
                                         <div
                                           className={`iam-ai-sub ${!useOn ? "is-locked" : ""}`}
@@ -1179,26 +1227,37 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
                                             )}
                                           </div>
                                           <div className="iam-ai-sub-grid">
-                                            {subPerms.map((sp) => (
-                                              <label
-                                                key={sp.id}
-                                                className={`iam-ai-sub-item ${cur.perms.includes(sp.id) ? "on" : ""}`}
-                                              >
-                                                <Checkbox
-                                                  checked={cur.perms.includes(
-                                                    sp.id,
-                                                  )}
-                                                  disabled={locked || !useOn}
-                                                  onChange={(v) =>
-                                                    toggle([sp.id], v)
-                                                  }
-                                                />
-                                                <span>
-                                                  <b>{permTitle(sp)}</b>
-                                                  <small>{permDesc(sp)}</small>
-                                                </span>
-                                              </label>
-                                            ))}
+                                            {subPerms.map((sp) => {
+                                              const spOn = cur.perms.includes(
+                                                sp.id,
+                                              );
+                                              return (
+                                                <div
+                                                  key={sp.id}
+                                                  className={`iam-ai-sub-item ${spOn ? "on" : ""}`}
+                                                  onClick={() => {
+                                                    if (!locked && useOn) {
+                                                      toggle([sp.id], !spOn);
+                                                    }
+                                                  }}
+                                                >
+                                                  <Checkbox
+                                                    checked={spOn}
+                                                    disabled={locked || !useOn}
+                                                    onClick={(e) =>
+                                                      e.stopPropagation()
+                                                    }
+                                                    onChange={(v) =>
+                                                      toggle([sp.id], v)
+                                                    }
+                                                  />
+                                                  <span>
+                                                    <b>{permTitle(sp)}</b>
+                                                    <small>{permDesc(sp)}</small>
+                                                  </span>
+                                                </div>
+                                              );
+                                            })}
                                           </div>
                                         </div>
                                       )}
@@ -1207,22 +1266,29 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
                                 })}
                             </>
                           ) : (
-                            ps.map((p) => (
-                              <label
-                                key={p.id}
-                                className={`iam-perm ${cur.perms.includes(p.id) ? "on" : ""}`}
-                              >
-                                <Checkbox
-                                  checked={cur.perms.includes(p.id)}
-                                  disabled={locked}
-                                  onChange={(v) => toggle([p.id], v)}
-                                />
-                                <span>
-                                  <b>{permTitle(p)}</b>
-                                  <small>{permDesc(p)}</small>
-                                </span>
-                              </label>
-                            ))
+                            ps.map((p) => {
+                              const pOn = cur.perms.includes(p.id);
+                              return (
+                                <div
+                                  key={p.id}
+                                  className={`iam-perm ${pOn ? "on" : ""}`}
+                                  onClick={() => {
+                                    if (!locked) toggle([p.id], !pOn);
+                                  }}
+                                >
+                                  <Checkbox
+                                    checked={pOn}
+                                    disabled={locked}
+                                    onClick={(e) => e.stopPropagation()}
+                                    onChange={(v) => toggle([p.id], v)}
+                                  />
+                                  <span>
+                                    <b>{permTitle(p)}</b>
+                                    <small>{permDesc(p)}</small>
+                                  </span>
+                                </div>
+                              );
+                            })
                           )}
                         </div>
                       </div>
@@ -1293,7 +1359,7 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
           : true,
     );
     const save = async () => {
-      if (!edit) return;
+      if (busy || !edit || !edit.name.trim()) return;
       setBusy(true);
       try {
         set(
@@ -1431,7 +1497,8 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
                       status="danger"
                       icon={<IconDelete />}
                       aria-label={bi("删除团队", "Delete team")}
-                      onClick={() =>
+                      onClick={() => {
+                        let deleting = false;
                         Modal.confirm({
                           title: bi(
                             `删除团队「${t.name}」？`,
@@ -1445,6 +1512,8 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
                           cancelText: bi("取消", "Cancel"),
                           okButtonProps: { status: "danger" },
                           onOk: async () => {
+                            if (deleting) return;
+                            deleting = true;
                             try {
                               set(
                                 await api<IAM>(`/api/iam/teams/${t.id}`, {
@@ -1453,10 +1522,12 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
                               );
                             } catch (e) {
                               err(e);
+                            } finally {
+                              deleting = false;
                             }
                           },
-                        })
-                      }
+                        });
+                      }}
                     />
                   </span>
                 )}
@@ -1552,7 +1623,7 @@ export function DeletedPane({
   if (!iam) return <Skeleton animation text={{ rows: 5 }} />;
   const move = async (d: Deleted) => {
     const to = pick[d.username];
-    if (!to) return;
+    if (!to || busy) return;
     setBusy(d.username);
     try {
       const r = await api<{ moved: number }>(
@@ -1645,7 +1716,7 @@ export function DeletedPane({
                   <Button
                     type="primary"
                     loading={busy === d.username}
-                    disabled={!pick[d.username]}
+                    disabled={!pick[d.username] || (Boolean(busy) && busy !== d.username)}
                     onClick={() => move(d)}
                   >
                     {bi("转交", "Transfer")}

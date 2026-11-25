@@ -45,14 +45,75 @@ export function isRehearsalTaskLive(
 
 const tasksMap = new Map<string, RehearsalLiveTask<unknown, unknown>>();
 const mountedKeyCounts = new Map<string, number>();
+const gcTimers = new Map<string, number>();
 const listeners = new Set<() => void>();
 let runningSnapshot: RehearsalLiveTask<unknown, unknown>[] = [];
+let rafHandle: number | null = null;
 
-function emit() {
-  runningSnapshot = Array.from(tasksMap.values()).filter(
+function clearGcTimer(key: string) {
+  const timer = gcTimers.get(key);
+  if (timer !== undefined) {
+    if (typeof window !== "undefined") {
+      window.clearTimeout(timer);
+    }
+    gcTimers.delete(key);
+  }
+}
+
+function cancelScheduledNotify() {
+  if (
+    rafHandle !== null &&
+    typeof window !== "undefined" &&
+    typeof window.cancelAnimationFrame === "function"
+  ) {
+    window.cancelAnimationFrame(rafHandle);
+  }
+  rafHandle = null;
+}
+
+function refreshRunningSnapshot() {
+  const next = Array.from(tasksMap.values()).filter(
     (t) => t.status === "running",
   );
+  if (
+    next.length === runningSnapshot.length &&
+    next.every(
+      (t, i) =>
+        t.key === runningSnapshot[i].key &&
+        t.ac === runningSnapshot[i].ac &&
+        t.status === runningSnapshot[i].status,
+    )
+  ) {
+    return;
+  }
+  runningSnapshot = next;
+}
+
+function notifyListeners() {
   listeners.forEach((fn) => fn());
+}
+
+function flushEmit(refreshRunning: boolean) {
+  cancelScheduledNotify();
+  if (refreshRunning) {
+    refreshRunningSnapshot();
+  }
+  notifyListeners();
+}
+
+function scheduleLiveEmit() {
+  if (rafHandle !== null) return;
+  if (
+    typeof window !== "undefined" &&
+    typeof window.requestAnimationFrame === "function"
+  ) {
+    rafHandle = window.requestAnimationFrame(() => {
+      rafHandle = null;
+      notifyListeners();
+    });
+  } else {
+    notifyListeners();
+  }
 }
 
 function subscribe(listener: () => void) {
@@ -69,12 +130,14 @@ export function getRehearsalTask<TLive = unknown, TResult = unknown>(
 }
 
 export function clearRehearsalTask(key: string): void {
+  clearGcTimer(key);
   if (!tasksMap.has(key)) return;
   tasksMap.delete(key);
-  emit();
+  flushEmit(true);
 }
 
 export function abortRehearsalTask(key: string): boolean {
+  clearGcTimer(key);
   const cur = tasksMap.get(key);
   if (!cur) return false;
   tasksMap.delete(key);
@@ -83,7 +146,7 @@ export function abortRehearsalTask(key: string): boolean {
   } catch {
     // ignore abort exceptions
   }
-  emit();
+  flushEmit(true);
   return true;
 }
 
@@ -105,6 +168,7 @@ export function startRehearsalTask<TLive, TResult>(opts: {
   onBackgroundDone?: (result: TResult) => void;
   onBackgroundError?: (err: unknown) => void;
 }): AbortController {
+  clearGcTimer(opts.key);
   // Abort any previous in-flight task with the exact same key before starting fresh
   const existing = tasksMap.get(opts.key);
   if (existing && existing.status === "running") {
@@ -129,7 +193,7 @@ export function startRehearsalTask<TLive, TResult>(opts: {
     draft: opts.draft,
   };
   tasksMap.set(opts.key, initialEntry);
-  emit();
+  flushEmit(true);
 
   const updateLive = (updater: (prev: TLive) => TLive) => {
     const cur = tasksMap.get(opts.key) as
@@ -139,7 +203,7 @@ export function startRehearsalTask<TLive, TResult>(opts: {
     const nextLive = updater(cur.live);
     if (nextLive === cur.live) return;
     tasksMap.set(opts.key, { ...cur, live: nextLive });
-    emit();
+    scheduleLiveEmit();
   };
 
   void opts
@@ -163,20 +227,25 @@ export function startRehearsalTask<TLive, TResult>(opts: {
         notified: !isMounted,
       };
       tasksMap.set(opts.key, doneEntry);
-      emit();
+      flushEmit(true);
 
       if (!isMounted && opts.onBackgroundDone) {
         opts.onBackgroundDone(result);
       }
 
       // Garbage-collect unconsumed completed results after 10 minutes
-      window.setTimeout(() => {
-        const latest = tasksMap.get(opts.key);
-        if (latest && latest.ac === ac && latest.status === "done") {
-          tasksMap.delete(opts.key);
-          emit();
-        }
-      }, 10 * 60 * 1000);
+      clearGcTimer(opts.key);
+      if (typeof window !== "undefined") {
+        const timer = window.setTimeout(() => {
+          gcTimers.delete(opts.key);
+          const latest = tasksMap.get(opts.key);
+          if (latest && latest.ac === ac && latest.status === "done") {
+            tasksMap.delete(opts.key);
+            flushEmit(true);
+          }
+        }, 10 * 60 * 1000);
+        gcTimers.set(opts.key, timer);
+      }
     })
     .catch((rawErr) => {
       const cur = tasksMap.get(opts.key) as
@@ -189,8 +258,9 @@ export function startRehearsalTask<TLive, TResult>(opts: {
         cur.ac !== ac
       ) {
         if (cur && cur.ac === ac) {
+          clearGcTimer(opts.key);
           tasksMap.delete(opts.key);
-          emit();
+          flushEmit(true);
         }
         return;
       }
@@ -203,7 +273,7 @@ export function startRehearsalTask<TLive, TResult>(opts: {
         notified: !isMounted,
       };
       tasksMap.set(opts.key, errEntry);
-      emit();
+      flushEmit(true);
       if (!isMounted && opts.onBackgroundError) {
         opts.onBackgroundError(rawErr);
       }

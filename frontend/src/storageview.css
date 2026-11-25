@@ -29,6 +29,13 @@
   align-items: center;
   min-height: 48px;
   border-bottom: 1px solid var(--line);
+  font-variant-numeric: tabular-nums;
+}
+.sv-row > b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .sv-row.head {
   min-height: 34px;

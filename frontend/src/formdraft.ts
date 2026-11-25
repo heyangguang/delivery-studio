@@ -65,11 +65,14 @@ export function readFormDraft(app: string, scope = ""): FormDraft | null {
     return {
       ...draft,
       plan: typeof draft.plan === "string" ? draft.plan : "",
+      section: typeof draft.section === "string" ? draft.section : undefined,
+      aiView: typeof draft.aiView === "string" ? draft.aiView : undefined,
       mode: ["choose", "form", "ai"].includes(draft.mode || "")
         ? draft.mode
         : undefined,
       updated:
-        draft.updated && Number.isFinite(Date.parse(draft.updated))
+        typeof draft.updated === "string" &&
+        Number.isFinite(Date.parse(draft.updated))
           ? draft.updated
           : undefined,
     };

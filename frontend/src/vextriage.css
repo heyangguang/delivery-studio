@@ -62,12 +62,24 @@
   font-size: 12.5px;
   font-weight: 540;
   white-space: nowrap;
-  transition: all 0.14s;
+  transition:
+    border-color 0.18s var(--spring),
+    background-color 0.18s var(--spring),
+    color 0.18s var(--spring),
+    box-shadow 0.18s var(--spring),
+    transform 0.16s var(--spring);
 }
 .vex-st-btn:hover {
   border-color: var(--brand-line);
   background: var(--surface-2);
   color: var(--ink);
+}
+.vex-st-btn:active:not(:disabled) {
+  transform: scale(0.975);
+}
+.vex-st-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
 }
 .vex-st-dot {
   width: 7px;
@@ -171,10 +183,18 @@
   border-color: transparent !important;
   color: var(--ink) !important;
   background: none !important;
+  transition:
+    background-color 0.18s var(--spring),
+    color 0.18s var(--spring),
+    transform 0.16s var(--spring);
 }
-.vex-ai-btn:hover {
+.vex-ai-btn:hover:not(:disabled) {
   border-color: transparent !important;
-  background: none !important;
+  background: var(--hover) !important;
+  color: var(--brand-ink) !important;
+}
+.vex-ai-btn:active:not(:disabled) {
+  transform: scale(0.975);
 }
 
 .vex-quick-row {
@@ -194,12 +214,23 @@
   border-radius: 99px;
   padding: 2px 9px;
   line-height: 1.5;
-  transition: all 0.12s;
+  transition:
+    border-color 0.18s var(--spring),
+    background-color 0.18s var(--spring),
+    color 0.18s var(--spring),
+    transform 0.16s var(--spring);
 }
 .vex-quick-chip:hover {
   color: var(--brand-ink, var(--ink));
   border-color: var(--brand-line);
   background: var(--brand-soft);
+}
+.vex-quick-chip:active:not(:disabled) {
+  transform: scale(0.975);
+}
+.vex-quick-chip:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
 }
 
 .vex-exp-row {
@@ -214,9 +245,9 @@
 
 .vex-ai-hint {
   font-size: 12px;
-  color: var(--brand-ink, #c52b16);
-  background: var(--brand-soft, rgba(255, 70, 45, 0.08));
-  border: 1px solid var(--brand-line, rgba(255, 70, 45, 0.25));
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+  border: 1px solid var(--brand-line);
   border-radius: 6px;
   padding: 6px 10px;
   line-height: 1.5;
@@ -228,4 +259,13 @@
   font-size: 12.5px;
   color: var(--ink-2);
   padding-top: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vex-st-btn,
+  .vex-ai-btn,
+  .vex-quick-chip {
+    transition: none !important;
+    transform: none !important;
+  }
 }

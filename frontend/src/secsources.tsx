@@ -191,6 +191,7 @@ export function SecSourcesCard({
   };
 
   const saveSource = async () => {
+    if (saving) return;
     if (!name.trim() || !urlVal.trim()) {
       Message.warning(bi("请填写漏洞源名称与 URL 地址", "Please enter source name and URL"));
       return;
@@ -250,6 +251,7 @@ export function SecSourcesCard({
   };
 
   const toggleEnabled = async (s: SecFeedSource, next: boolean) => {
+    if (togglingId === s.id) return;
     setTogglingId(s.id);
     try {
       const res = await api<{ sources: SecFeedSource[] }>(
@@ -268,6 +270,7 @@ export function SecSourcesCard({
   };
 
   const testSource = async (s: SecFeedSource) => {
+    if (testingId) return;
     setTestingId(s.id);
     try {
       const res = await api<TestResult>(
@@ -287,6 +290,7 @@ export function SecSourcesCard({
   };
 
   const syncSingle = async (s: SecFeedSource) => {
+    if (syncing || syncingId) return;
     setSyncingId(s.id);
     try {
       await onSyncOne(s.id);
@@ -296,6 +300,7 @@ export function SecSourcesCard({
   };
 
   const confirmDelete = (s: SecFeedSource) => {
+    let deleting = false;
     Modal.confirm({
       title: bi(`删除漏洞源「${s.name}」？`, `Delete source "${s.name}"?`),
       content: bi(
@@ -306,6 +311,8 @@ export function SecSourcesCard({
       cancelText: bi("取消", "Cancel"),
       okButtonProps: { status: "danger" },
       onOk: async () => {
+        if (deleting) return;
+        deleting = true;
         try {
           const res = await api<{ sources: SecFeedSource[] }>(
             `/api/security/sources/${encodeURIComponent(s.id)}`,
@@ -315,6 +322,8 @@ export function SecSourcesCard({
           Message.success(bi("已删除漏洞源", "CVE source deleted"));
         } catch (e) {
           err(e);
+        } finally {
+          deleting = false;
         }
       },
     });
@@ -432,11 +441,11 @@ export function SecSourcesCard({
                 </Tooltip>
               ) : s.last_sync_at ? (
                 <>
-                  <span className="sec-src-st ok">
+                  <span className="sec-src-st ok num">
                     <IconCheckCircleFill />
                     {bi(`${s.last_sync_count || 0} 条`, `${s.last_sync_count || 0} items`)}
                   </span>
-                  <span className="faint small" title={fullTime(s.last_sync_at)}>
+                  <span className="faint small num" title={fullTime(s.last_sync_at)}>
                     {ago(s.last_sync_at)}
                     {s.last_sync_ms ? ` · ${s.last_sync_ms}ms` : ""}
                   </span>
@@ -540,7 +549,7 @@ export function SecSourcesCard({
           )}
 
           <div className="sec-src-form-grid">
-            <label className="sec-field">
+            <div className="sec-field">
               <span>{bi("数据源名称", "Source Name")} *</span>
               <Input
                 value={name}
@@ -548,8 +557,8 @@ export function SecSourcesCard({
                 maxLength={80}
                 placeholder={bi("例如：企业内网 OSV 漏洞镜像", "e.g. Internal OSV Mirror")}
               />
-            </label>
-            <label className="sec-field">
+            </div>
+            <div className="sec-field">
               <span>{bi("源协议类型", "Feed Protocol")} *</span>
               <Select
                 value={kind}
@@ -560,22 +569,22 @@ export function SecSourcesCard({
                   label: o.label,
                 }))}
               />
-            </label>
+            </div>
           </div>
 
           <div className="sec-src-kind-hint">{kindMeta.hint}</div>
 
-          <label className="sec-field">
+          <div className="sec-field">
             <span>{bi("源地址 URL", "Endpoint URL")} *</span>
             <Input
               value={urlVal}
               onChange={setUrlVal}
               placeholder={kindMeta.placeholder}
             />
-          </label>
+          </div>
 
           {kind !== "cisa_kev" && (
-            <label className="sec-field">
+            <div className="sec-field">
               <span>
                 {bi("生态筛选（可选，留空同步全部资产生态）", "Ecosystem Filter (optional)")}
               </span>
@@ -584,19 +593,19 @@ export function SecSourcesCard({
                 onChange={setEcosText}
                 placeholder="Ubuntu:24.04:LTS, Rocky Linux:9, PyPI"
               />
-            </label>
+            </div>
           )}
 
           <div className="sec-src-form-grid">
-            <label className="sec-field">
+            <div className="sec-field">
               <span>{bi("鉴权请求头（可选）", "Auth Header (optional)")}</span>
               <Input
                 value={authHeader}
                 onChange={setAuthHeader}
                 placeholder="Authorization / X-API-Key"
               />
-            </label>
-            <label className="sec-field">
+            </div>
+            <div className="sec-field">
               <span>
                 {editing?.has_auth_token
                   ? bi("鉴权密钥（留空保留原密钥）", "Auth Token (blank to keep existing)")
@@ -614,7 +623,7 @@ export function SecSourcesCard({
                     : "Bearer xxx..."
                 }
               />
-            </label>
+            </div>
           </div>
 
           <div className="sec-src-switches">
@@ -634,7 +643,7 @@ export function SecSourcesCard({
             )}
           </div>
 
-          <label className="sec-field">
+          <div className="sec-field">
             <span>{bi("备注说明（可选）", "Notes (optional)")}</span>
             <Input
               value={note}
@@ -642,7 +651,7 @@ export function SecSourcesCard({
               maxLength={240}
               placeholder={bi("记录该源的维护团队或同步周期说明", "Owner team or sync schedule notes")}
             />
-          </label>
+          </div>
         </div>
       </Modal>
     </section>

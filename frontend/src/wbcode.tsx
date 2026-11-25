@@ -334,25 +334,35 @@ export function CodeEditor({
       });
   }, [value]);
 
+  const lintFirstRun = useRef(true);
   useEffect(() => {
-    const v = view.current;
-    if (!v) return;
-    const doc = v.state.doc;
-    const diags: Diagnostic[] = [];
-    for (const p of problems) {
-      if (!p.line || p.line < 1 || p.line > doc.lines) continue;
-      const l = doc.line(p.line);
-      diags.push({
-        from: l.from,
-        to: Math.max(l.to, l.from + 1 > doc.length ? l.from : l.from + 1),
-        severity: p.severity,
-        message: p.message,
-      });
+    const run = () => {
+      const v = view.current;
+      if (!v) return;
+      const doc = v.state.doc;
+      const diags: Diagnostic[] = [];
+      for (const p of problems) {
+        if (!p.line || p.line < 1 || p.line > doc.lines) continue;
+        const l = doc.line(p.line);
+        diags.push({
+          from: l.from,
+          to: Math.max(l.to, l.from + 1 > doc.length ? l.from : l.from + 1),
+          severity: p.severity,
+          message: p.message,
+        });
+      }
+      if (lang === "yaml" || lang === "manifest") {
+        for (const d of yamlSyntax(doc.toString())) diags.push(d);
+      }
+      v.dispatch(setDiagnostics(v.state, diags));
+    };
+    if (lintFirstRun.current) {
+      lintFirstRun.current = false;
+      run();
+      return;
     }
-    if (lang === "yaml" || lang === "manifest") {
-      for (const d of yamlSyntax(value)) diags.push(d);
-    }
-    v.dispatch(setDiagnostics(v.state, diags));
+    const timer = window.setTimeout(run, lang === "yaml" || lang === "manifest" ? 120 : 0);
+    return () => window.clearTimeout(timer);
   }, [problems, value, lang]);
 
   useEffect(() => {

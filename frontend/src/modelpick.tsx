@@ -142,11 +142,21 @@ export function ModelPicker({
     );
     return [...m.entries()];
   }, [pick.models]);
+  const labelByRef = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const m of pick.models) {
+      map.set(m.ref, disambiguatedLabel(m, pick.models));
+    }
+    if (pick.current && !map.has(pick.current.ref)) {
+      map.set(pick.current.ref, disambiguatedLabel(pick.current, pick.models));
+    }
+    return map;
+  }, [pick.models, pick.current]);
   const cur = pick.current;
   if (pick.models.length === 0 && !cur) return null;
   const selected = pick.ref || pick.defaultRef || cur?.ref || "";
   const curText = cur
-    ? disambiguatedLabel(cur, pick.models)
+    ? labelByRef.get(cur.ref) || disambiguatedLabel(cur, pick.models)
     : bi("选择模型", "Select model");
   const hasMenu = pick.models.length > 1;
   const label = (
@@ -239,7 +249,7 @@ export function ModelPicker({
                         size={18}
                       />
                       <span className="mp-t">
-                        <b>{disambiguatedLabel(m, pick.models)}</b>
+                        <b>{labelByRef.get(m.ref) || disambiguatedLabel(m, pick.models)}</b>
                         <small>
                           <span className="mono">{m.model}</span>
                           {m.ref === pick.defaultRef

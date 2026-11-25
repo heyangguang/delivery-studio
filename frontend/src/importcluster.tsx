@@ -190,84 +190,16 @@ export const COMPANION_SUGGESTIONS_BY_PRIMARY: Record<string, string[]> = {
   apisix: ["etcd", "keepalived"],
 };
 
-export function companionKindMeta(kind?: string): { label: string; tone: string } {
-  switch ((kind || "").toLowerCase()) {
-    case "ha_manager":
-      return { label: bi("高可用管理", "HA Manager"), tone: "t-brand" };
-    case "dcs":
-      return { label: bi("分布式协调", "DCS / Quorum"), tone: "t-cobalt" };
-    case "proxy":
-      return { label: bi("代理 / 均衡", "Proxy / LB"), tone: "t-violet" };
-    case "vip":
-      return { label: bi("虚拟 IP", "VIP / VRRP"), tone: "t-brand" };
-    case "pooler":
-      return { label: bi("连接池", "Pooler"), tone: "t-cobalt" };
-    case "backup":
-      return { label: bi("备份工具", "Backup"), tone: "t-ok" };
-    case "monitoring":
-      return { label: bi("监控采集", "Monitoring"), tone: "" };
-    default:
-      return { label: bi("伴生组件", "Companion"), tone: "" };
-  }
-}
-
-export function localizeEndpointTitle(epName?: string, role?: string): string {
-  const lowName = (epName || "").trim().toLowerCase();
-  const lowRole = (role || "").trim().toLowerCase();
-  const generic = new Set([
-    "", "readwrite", "rw", "write", "writer", "primary", "master",
-    "readonly", "ro", "read", "reader", "replica", "standby",
-    "admin", "console", "mgmt", "management", "endpoint", "vip",
-  ]);
-  if (epName && !generic.has(lowName)) return epName.trim();
-  if (["readonly", "ro", "read", "reader", "replica", "standby"].includes(lowRole) || ["readonly", "ro", "read", "reader"].includes(lowName)) {
-    return bi("只读入口", "Read-Only");
-  }
-  if (["admin", "console", "mgmt", "management"].includes(lowRole) || ["admin", "console", "mgmt"].includes(lowName)) {
-    return bi("管理入口", "Admin");
-  }
-  return bi("读写入口", "Read/Write");
-}
-
-/** Light client-side detector for legacy single-instance clusters whose metadata mentions unmodeled companions. */
-export function detectMissingCompanionsFromMeta(
-  primaryComp: string,
-  meta?: ImportedMeta,
-): string[] {
-  if (!meta) return [];
-  const primary = (primaryComp || "").toLowerCase();
-  const existing = new Set((meta.companions || []).map((c) => (c.component || "").toLowerCase()));
-  const positiveBag = [
-    ...(meta.service_units || []),
-    ...(meta.config_paths || []),
-    ...(meta.data_dirs || []),
-    ...(meta.packages || []).map((p) => p.name),
-    meta.arch_summary || "",
-  ]
-    .join(" ")
-    .toLowerCase();
-  if (!positiveBag.trim()) return [];
-  const rules: [string, string, string][] = [
-    ["patroni", "patroni", "Patroni"],
-    ["etcd", "etcd", "etcd"],
-    ["pgbackrest", "pgbackrest", "pgBackRest"],
-    ["pgbouncer", "pgbouncer", "PgBouncer"],
-    ["haproxy", "haproxy", "HAProxy"],
-    ["keepalived", "keepalived", "Keepalived"],
-    ["zookeeper", "zookeeper", "ZooKeeper"],
-    ["clickhouse-keeper", "clickhouse-keeper", "ClickHouse Keeper"],
-    ["proxysql", "proxysql", "ProxySQL"],
-  ];
-  const out: string[] = [];
-  for (const [id, token, label] of rules) {
-    if (id === primary || existing.has(id)) continue;
-    if (positiveBag.includes(token)) out.push(label);
-  }
-  if ((primary === "redis" || primary === "valkey") && !existing.has("redis-sentinel") && positiveBag.includes("sentinel")) {
-    out.push("Redis Sentinel");
-  }
-  return out;
-}
+import {
+  companionKindMeta,
+  detectMissingCompanionsFromMeta,
+  localizeEndpointTitle,
+} from "./topology";
+export {
+  companionKindMeta,
+  detectMissingCompanionsFromMeta,
+  localizeEndpointTitle,
+};
 
 const normalizeTagList = (vals: string[]): string[] => {
   const seen = new Set<string>();
@@ -719,7 +651,7 @@ function ParsingStagePanel({ active, aiEnabled }: { active: boolean; aiEnabled: 
             ? bi("AI 正在解析现场回显并识别多组件架构…", "AI is analyzing input & detecting companion stack...")
             : bi("内置规则引擎正在提取基线与伴生组件…", "Rule engine is extracting baseline & companions...")}
         </span>
-        <span className="mono small muted">{elapsed.toFixed(1)}s</span>
+        <span className="mono small muted num">{elapsed.toFixed(1)}s</span>
       </div>
       <div className="imp-ai-steps">
         {stages.map((label, idx) => {
@@ -1242,6 +1174,7 @@ export function ImportClusterPage({
   };
 
   const runParseAndProceed = async () => {
+    if (parsing) return;
     if (!pasteText.trim() && images.length === 0) {
       Message.warning(bi("请先粘贴采集脚本输出或文档文本，或上传截图", "Paste probe output / text or upload screenshots first"));
       return;
@@ -1397,6 +1330,7 @@ export function ImportClusterPage({
   );
 
   const submitImport = async () => {
+    if (submitting) return;
     if (!CLUSTER_ID_RE.test(clusterId.trim())) {
       Message.error(bi("集群标识仅支持小写字母开头，含小写字母、数字和连字符", "Invalid cluster ID format"));
       return;
@@ -1513,7 +1447,7 @@ export function ImportClusterPage({
 
         {/* ---------------- STEP 1: Split Middleware Picker + Sticky Identity Rail ---------------- */}
         {step === 1 && (
-          <div className="imp-step1-grid">
+          <div className="imp-step1-grid imp-step-pane">
             <section className="imp-card">
               <div className="imp-card-head">
                 <div className="imp-card-head-title">
@@ -1753,7 +1687,7 @@ export function ImportClusterPage({
 
         {/* ---------------- STEP 2: 3-in-1 Capture / Parse / Manual ---------------- */}
         {step === 2 && (
-          <section className="imp-card">
+          <section className="imp-card imp-step-pane">
             <div className="imp-ctx-strip">
               <div className="imp-ctx-left">
                 <AppGlyph
@@ -2094,7 +2028,7 @@ export function ImportClusterPage({
 
         {/* ---------------- STEP 3: Multi-Component Baseline Review & Live Topology ---------------- */}
         {step === 3 && (
-          <div className="imp-review-grid">
+          <div className="imp-review-grid imp-step-pane">
             <div className="imp-review-main">
               {parseInfo && (
                 <div className="imp-parse-banner">
@@ -2760,7 +2694,17 @@ export function ImportedBaselineModal({
     Message.success(bi("已将伴生组件纳入架构栈，点击保存基线即可刷新拓扑", "Companions added to stack; save to update topology"));
   };
 
+  useEffect(() => {
+    if (!visible) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !saving && !parsing) onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [visible, saving, parsing, onClose]);
+
   const parseAndMergeProbe = async () => {
+    if (parsing) return;
     if (!probeOutput.trim()) {
       Message.warning(bi("请先粘贴采集脚本终端输出", "Paste probe terminal output first"));
       return;
@@ -2809,6 +2753,7 @@ export function ImportedBaselineModal({
   };
 
   const saveBaseline = async () => {
+    if (saving) return;
     const paramsObj: Record<string, unknown> = {};
     for (const r of paramRows) {
       if (r.key.trim()) paramsObj[r.key.trim()] = r.value.trim();

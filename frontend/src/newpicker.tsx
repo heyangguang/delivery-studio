@@ -87,10 +87,13 @@ export function NewDeliveryPicker({
   const [q, setQ] = useState("");
   const [cat, setCat] = useState("all");
 
+  const safeApps = Array.isArray(apps) ? apps : [];
+  const safeJobs = Array.isArray(jobs) ? jobs : [];
+
   // Count distinct active clusters per app so frequently deployed apps feel natural
   const clusterCounts = useMemo(() => {
     const byApp = new Map<string, Set<string>>();
-    for (const j of jobs) {
+    for (const j of safeJobs) {
       if (!j.app_id || !j.cluster_id) continue;
       let s = byApp.get(j.app_id);
       if (!s) {
@@ -102,11 +105,11 @@ export function NewDeliveryPicker({
     const out = new Map<string, number>();
     byApp.forEach((s, k) => out.set(k, s.size));
     return out;
-  }, [jobs]);
+  }, [safeJobs]);
 
   const submittedIds = useMemo(
-    () => new Set(jobs.map((j) => j.cluster_id).filter(Boolean)),
-    [jobs],
+    () => new Set(safeJobs.map((j) => j.cluster_id).filter(Boolean)),
+    [safeJobs],
   );
 
   const formalReady = (a: AppInfo) => a.available && hasReleasedVersion(a);
@@ -119,38 +122,38 @@ export function NewDeliveryPicker({
       hostCount: number;
       updated?: string;
     }[] = [];
-    for (const a of apps) {
+    for (const a of safeApps) {
       if (!formalReady(a)) continue;
       const d = readFormDraft(a.id);
       if (!d) continue;
       if (d.dep.id && submittedIds.has(d.dep.id)) continue;
       const hasMeaningfulInput =
-        Boolean(d.dep.id) || d.dep.hosts.some((h) => Boolean(h.ip));
+        Boolean(d.dep.id) || (d.dep.hosts || []).some((h) => Boolean(h.ip));
       if (!hasMeaningfulInput) continue;
       list.push({
         app: a,
         clusterId: d.dep.id || bi("未命名集群", "Unnamed cluster"),
-        hostCount: d.dep.hosts.length,
+        hostCount: (d.dep.hosts || []).length,
         updated: d.updated,
       });
     }
     return list;
-  }, [apps, submittedIds, lang]);
+  }, [safeApps, submittedIds, lang]);
 
   const categories = useMemo(() => {
     const seen = new Map<string, number>();
-    for (const a of apps) {
+    for (const a of safeApps) {
       const c = catKey(a.category);
       seen.set(c, (seen.get(c) || 0) + 1);
     }
     return Array.from(seen.entries()).sort(
       (a, b) => categoryRank(a[0]) - categoryRank(b[0]),
     );
-  }, [apps]);
+  }, [safeApps]);
 
   const sorted = useMemo(() => {
     const kw = q.trim().toLowerCase();
-    return [...apps]
+    return [...safeApps]
       .filter((a) => {
         if (cat !== "all" && catKey(a.category) !== cat) return false;
         if (!kw) return true;

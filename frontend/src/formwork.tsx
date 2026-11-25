@@ -1,4 +1,10 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { Button } from "@arco-design/web-react";
 import {
   IconArrowLeft,
@@ -271,7 +277,7 @@ function RunCard({
   );
 }
 
-function Filled({
+const Filled = React.memo(function Filled({
   m,
   titles,
   onGo,
@@ -329,7 +335,7 @@ function Filled({
       )}
     </div>
   );
-}
+});
 
 const baselineCatLabel = (cat: string) => {
   switch (cat) {
@@ -351,7 +357,7 @@ const baselineCatLabel = (cat: string) => {
 };
 
 /** Interactive production-baseline reminder card shown beneath the latest AI form fill. */
-function BaselineCard({
+const BaselineCard = React.memo(function BaselineCard({
   items,
   active,
   busy,
@@ -666,7 +672,10 @@ function BaselineCard({
       )}
     </section>
   );
-}
+});
+
+const EMPTY_PROPS: Record<string, never> = {};
+const NOOP_DECIDE = () => undefined;
 
 /** The conversation, as the whole middle of the page. */
 export function FormWorkspace({
@@ -685,22 +694,68 @@ export function FormWorkspace({
   useLang();
   const list = useRef<HTMLDivElement>(null);
   const [stick, setStick] = useState(true);
+  const stickRef = useRef(true);
+  const progScrollRef = useRef(false);
+  const scrollRafRef = useRef<number>(0);
+  const sendRef = useRef(fa.send);
+  sendRef.current = fa.send;
+  const handleAnswer = useCallback((t: string) => {
+    void sendRef.current(t);
+  }, []);
   const lastForm = (() => {
     for (let i = fa.msgs.length - 1; i >= 0; i--) if (fa.msgs[i].form) return i;
     return -1;
   })();
-  // follow the conversation as it grows, unless the person scrolled up to read something
-  useLayoutEffect(() => {
-    const el = list.current;
-    if (el && stick) el.scrollTop = el.scrollHeight;
-  }, [fa.msgs.length, fa.live, fa.run?.items.length, fa.error, stick]);
+  // follow the conversation as it grows via coalesced rAF, unless the person scrolled up to read something
   useEffect(() => {
-    // answering or sending always brings the newest into view
-    if (fa.busy) setStick(true);
-  }, [fa.busy]);
+    if (!stickRef.current) return;
+    if (scrollRafRef.current) return;
+    scrollRafRef.current = requestAnimationFrame(() => {
+      scrollRafRef.current = 0;
+      const el = list.current;
+      if (!el || !stickRef.current) return;
+      progScrollRef.current = true;
+      el.scrollTop = el.scrollHeight;
+      requestAnimationFrame(() => {
+        progScrollRef.current = false;
+      });
+    });
+  }, [fa.msgs.length, fa.live, fa.run?.items.length, fa.error, stick]);
+  useEffect(
+    () => () => {
+      if (scrollRafRef.current) {
+        cancelAnimationFrame(scrollRafRef.current);
+        scrollRafRef.current = 0;
+      }
+    },
+    [],
+  );
+  const prevMsgCountRef = useRef(fa.msgs.length);
+  useEffect(() => {
+    // sending a new user turn brings the newest into view; streaming chunks preserve user scroll-up lock
+    if (fa.msgs.length > prevMsgCountRef.current) {
+      const newest = fa.msgs[fa.msgs.length - 1];
+      if (newest?.role === "user") {
+        stickRef.current = true;
+        setStick(true);
+      }
+    }
+    prevMsgCountRef.current = fa.msgs.length;
+  }, [fa.msgs]);
+  const onWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    if (e.deltaY < -2 && stickRef.current) {
+      stickRef.current = false;
+      setStick(false);
+    }
+  };
   const onScroll = () => {
     const el = list.current;
-    if (el) setStick(el.scrollHeight - el.scrollTop - el.clientHeight < 60);
+    if (!el || progScrollRef.current) return;
+    const near = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    if (stickRef.current !== near) {
+      stickRef.current = near;
+      setStick(near);
+    }
   };
   const empty = !fa.started && !fa.live;
   return (
@@ -708,6 +763,7 @@ export function FormWorkspace({
       <div
         className="fw-list"
         ref={list}
+        onWheel={onWheel}
         onScroll={onScroll}
         aria-live="polite"
         aria-busy={fa.busy}
@@ -742,12 +798,12 @@ export function FormWorkspace({
                 <Bubble
                   m={m}
                   jobBase=""
-                  props={{}}
+                  props={EMPTY_PROPS}
                   deciding=""
-                  decide={() => undefined}
+                  decide={NOOP_DECIDE}
                   comp={false}
                   busy={fa.busy}
-                  answer={isLast && !fa.busy ? (t) => fa.send(t) : undefined}
+                  answer={isLast && !fa.busy ? handleAnswer : undefined}
                   answered={nextUser?.text}
                   onRetry={
                     isLast && !fa.busy && m.error && prevUser?.text
@@ -765,7 +821,7 @@ export function FormWorkspace({
                         busy={fa.busy}
                         titles={titles}
                         onGo={onGo}
-                        onApply={(prompt) => fa.send(prompt)}
+                        onApply={handleAnswer}
                       />
                     )}
                   </>
@@ -776,9 +832,9 @@ export function FormWorkspace({
           {fa.live && (
             <LiveBubble
               live={fa.live}
-              props={{}}
+              props={EMPTY_PROPS}
               deciding=""
-              decide={() => undefined}
+              decide={NOOP_DECIDE}
               comp={false}
             />
           )}
@@ -818,13 +874,14 @@ export function FormWorkspace({
           <button
             type="button"
             className="fw-down"
-            onClick={() => (
-              setStick(true),
+            onClick={() => {
+              stickRef.current = true;
+              setStick(true);
               list.current?.scrollTo({
                 top: list.current.scrollHeight,
                 behavior: "smooth",
-              })
-            )}
+              });
+            }}
           >
             {bi("回到最新", "Jump to latest")}
           </button>

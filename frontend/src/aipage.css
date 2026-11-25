@@ -73,16 +73,23 @@
   background: transparent;
   cursor: pointer;
   white-space: nowrap;
-  transition: background 0.14s, color 0.14s, box-shadow 0.14s;
+  transition:
+    background-color 0.16s var(--spring),
+    color 0.16s var(--spring),
+    box-shadow 0.16s var(--spring),
+    transform 0.16s var(--spring);
 }
 .ap-tab:hover {
   color: var(--ink);
+}
+.ap-tab:active:not(:disabled) {
+  transform: scale(0.97);
 }
 .ap-tab.on {
   color: var(--ink);
   font-weight: 620;
   background: var(--surface);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+  box-shadow: var(--shadow-sm);
 }
 .ap-tab em {
   font-style: normal;
@@ -157,10 +164,17 @@
   font-size: 16px;
   background: none;
   cursor: pointer;
+  transition:
+    background-color 0.16s var(--spring),
+    color 0.16s var(--spring),
+    transform 0.16s var(--spring);
 }
 .ap-new:hover {
   color: var(--ink);
   background: var(--press);
+}
+.ap-new:active:not(:disabled) {
+  transform: scale(0.94);
 }
 .ap-new:focus-visible {
   outline: none;
@@ -222,7 +236,7 @@
   align-items: center;
   margin: 2px 0;
   border-radius: 8px;
-  transition: background 0.12s;
+  transition: background-color 0.15s var(--spring);
 }
 .ap-row:hover {
   background: var(--hover);
@@ -322,16 +336,22 @@
   letter-spacing: 0.02em;
   background: transparent;
   cursor: pointer;
-  transition: background 0.13s, color 0.13s;
+  transition:
+    background-color 0.15s var(--spring),
+    color 0.15s var(--spring),
+    transform 0.15s var(--spring);
 }
 .ap-sec-h:hover {
   color: var(--ink);
   background: var(--hover);
 }
+.ap-sec-h:active {
+  transform: scale(0.985);
+}
 .ap-sec-chev {
   font-size: 11px;
   color: var(--faint);
-  transition: transform 0.16s var(--ease-out);
+  transition: transform 0.18s var(--spring);
   flex: none;
 }
 .ap-sec-chev.open {
@@ -371,6 +391,7 @@
 }
 .ap-more {
   display: grid;
+  flex: none;
   place-items: center;
   width: 28px;
   height: 28px;
@@ -382,6 +403,11 @@
   background: none;
   cursor: pointer;
   opacity: 0;
+  transition:
+    opacity 0.15s var(--spring),
+    background-color 0.15s var(--spring),
+    color 0.15s var(--spring),
+    transform 0.15s var(--spring);
 }
 .ap-row:hover .ap-more,
 .ap-row:focus-within .ap-more,
@@ -392,6 +418,14 @@
 .ap-more:hover {
   color: var(--ink);
   background: var(--press);
+}
+.ap-more:active {
+  transform: scale(0.94);
+}
+.ap-more:focus-visible {
+  outline: none;
+  opacity: 1;
+  box-shadow: var(--ring);
 }
 .ap-dgroup {
   margin-bottom: 6px;
@@ -425,7 +459,7 @@
 }
 .ap-ddot.comp {
   border-radius: 50%;
-  background: #0d9488;
+  background: var(--teal);
 }
 .ap-row.sub > button:first-child {
   padding-left: 20px;
@@ -497,7 +531,9 @@
 }
 .ap-ctx {
   display: inline-flex;
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: min(260px, 42vw);
   align-items: center;
   gap: 5px;
   padding: 2px 10px;
@@ -507,12 +543,24 @@
   font: 12px var(--sans);
   background: var(--surface);
   cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition:
+    border-color 0.16s var(--spring),
+    color 0.16s var(--spring),
+    background-color 0.16s var(--spring),
+    transform 0.16s var(--spring);
 }
 .ap-ctx:hover {
   border-color: var(--brand-line);
   color: var(--brand-ink);
 }
+.ap-ctx:active {
+  transform: scale(0.975);
+}
 .ap-ctx svg {
+  flex: none;
   font-size: 11px;
 }
 .ap-badge {
@@ -644,6 +692,7 @@
   display: flex;
   align-items: flex-start;
   gap: 12px;
+  min-width: 0;
   padding: 12px 14px;
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -653,10 +702,13 @@
   background: var(--surface);
   cursor: pointer;
   transition:
-    border-color 0.16s,
-    background 0.16s,
-    transform 0.16s var(--ease-out),
-    box-shadow 0.16s;
+    border-color 0.18s var(--spring),
+    background-color 0.18s var(--spring),
+    transform 0.18s var(--spring),
+    box-shadow 0.18s var(--spring);
+}
+.ap-suggest button > span:last-child {
+  min-width: 0;
 }
 .ap-suggest button:hover:not(:disabled) {
   border-color: var(--brand-line);
@@ -664,7 +716,7 @@
   transform: translateY(-1px);
 }
 .ap-suggest button:active:not(:disabled) {
-  transform: scale(0.99);
+  transform: scale(0.98);
 }
 .ap-suggest button:disabled {
   opacity: 0.5;
@@ -706,6 +758,10 @@
   font-size: 12.5px;
 }
 .ap-recent button {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   padding: 3px 10px;
   border: 1px solid var(--line);
   border-radius: 999px;
@@ -713,10 +769,18 @@
   font: 12px var(--mono);
   background: var(--surface);
   cursor: pointer;
+  transition:
+    border-color 0.16s var(--spring),
+    color 0.16s var(--spring),
+    background-color 0.16s var(--spring),
+    transform 0.16s var(--spring);
 }
 .ap-recent button:hover {
   border-color: var(--brand-line);
   color: var(--brand-ink);
+}
+.ap-recent button:active {
+  transform: scale(0.97);
 }
 .ap-off {
   margin: 0;
@@ -784,6 +848,17 @@
   box-shadow: var(--shadow-md);
   cursor: pointer;
   animation: ad-pop-in 0.24s var(--spring) both;
+  transition:
+    transform 0.18s var(--spring),
+    border-color 0.18s var(--spring),
+    box-shadow 0.18s var(--spring);
+}
+.ap-down:hover {
+  border-color: var(--line-strong);
+  transform: translateY(-1px);
+}
+.ap-down:active {
+  transform: scale(0.94);
 }
 
 /* composer */
@@ -909,10 +984,21 @@ body[arco-theme="dark"] .ap-hint kbd {
   font: 12.5px var(--sans);
   background: none;
   cursor: pointer;
+  transition:
+    border-color 0.16s var(--spring),
+    background-color 0.16s var(--spring),
+    color 0.16s var(--spring),
+    transform 0.16s var(--spring);
+}
+.ap-chipbtn svg {
+  flex: none;
 }
 .ap-chipbtn:hover {
   border-color: var(--line-strong);
   background: var(--hover);
+}
+.ap-chipbtn:active:not(:disabled) {
+  transform: scale(0.975);
 }
 .ap-chipbtn.on {
   border-color: var(--brand-line);
@@ -921,6 +1007,7 @@ body[arco-theme="dark"] .ap-hint kbd {
 }
 .ap-icon {
   display: grid;
+  flex: none;
   place-items: center;
   width: 34px;
   height: 34px;
@@ -928,10 +1015,17 @@ body[arco-theme="dark"] .ap-hint kbd {
   color: var(--mute);
   font-size: 16px;
   cursor: pointer;
+  transition:
+    background-color 0.16s var(--spring),
+    color 0.16s var(--spring),
+    transform 0.16s var(--spring);
 }
 .ap-icon:hover {
   color: var(--ink);
   background: var(--hover);
+}
+.ap-icon:active {
+  transform: scale(0.94);
 }
 .ap-send {
   display: grid;
@@ -943,13 +1037,13 @@ body[arco-theme="dark"] .ap-hint kbd {
   padding: 0;
   border: 0;
   border-radius: 50%;
-  color: #fff;
+  color: var(--surface);
   font-size: 15px;
   background: var(--ink);
   cursor: pointer;
   transition:
-    transform 0.15s var(--ease-out),
-    opacity 0.15s;
+    transform 0.18s var(--spring),
+    opacity 0.16s var(--spring);
 }
 .ap-send:hover:not(:disabled) {
   transform: scale(1.06);
@@ -969,38 +1063,64 @@ body[arco-theme="dark"] .ap-hint kbd {
   box-shadow: var(--ring);
 }
 body[arco-theme="dark"] .ap-send {
-  color: #111;
-  background: #f2f2f4;
+  color: var(--sunken);
+  background: var(--ink);
 }
 .ap-thumbs {
   display: flex;
-  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+  gap: 10px;
   padding: 12px 16px 0;
 }
-.ap-thumbs span {
+.ap-thumbs > span {
   position: relative;
+  flex: 0 0 120px;
+  width: 120px;
+  max-width: 100%;
+  height: 72px;
+  min-width: 0;
 }
 .ap-thumbs img {
   display: block;
-  height: 60px;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  box-sizing: border-box;
   border: 1px solid var(--line);
   border-radius: 10px;
+  background: var(--surface-2);
 }
 .ap-thumbs button {
   position: absolute;
-  top: -6px;
-  right: -6px;
+  top: 4px;
+  right: 4px;
   display: grid;
   place-items: center;
-  width: 18px;
-  height: 18px;
+  width: 22px;
+  height: 22px;
   padding: 0;
-  border: 2px solid var(--surface);
+  border: 1.5px solid rgba(255, 255, 255, 0.28);
   border-radius: 50%;
-  color: #fff;
-  font-size: 9px;
-  background: var(--ink-2);
+  color: #ffffff;
+  font-size: 11px;
+  background: rgba(15, 18, 24, 0.76);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   cursor: pointer;
+  transition:
+    transform 0.15s var(--spring),
+    background-color 0.15s var(--spring);
+}
+.ap-thumbs button:hover {
+  background: rgba(15, 18, 24, 0.92);
+}
+.ap-thumbs button:active {
+  transform: scale(0.92);
+}
+.ap-thumbs button:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
 }
 .ap-scrim {
   display: none;
@@ -1027,7 +1147,10 @@ body[arco-theme="dark"] .ap-send {
     inset: 52px 0 0 0;
     z-index: 25;
     display: block;
-    background: rgba(0, 0, 0, 0.18);
+    background: rgba(0, 0, 0, 0.24);
+  }
+  body[arco-theme="dark"] .ap-scrim {
+    background: rgba(0, 0, 0, 0.52);
   }
   .ap-menu {
     display: grid;
@@ -1052,10 +1175,29 @@ body[arco-theme="dark"] .ap-send {
 }
 @media (prefers-reduced-motion: reduce) {
   .ap-hero-in,
-  .ap-down {
+  .ap-down,
+  .ap-ol-card {
     animation: none;
   }
-  .ap-side {
+  .ap-side,
+  .ap-tab,
+  .ap-new,
+  .ap-row,
+  .ap-sec-h,
+  .ap-sec-chev,
+  .ap-more,
+  .ap-ctx,
+  .ap-suggest button,
+  .ap-recent button,
+  .ap-down,
+  .ap-chipbtn,
+  .ap-icon,
+  .ap-send,
+  .ap-thumbs button,
+  .ap-att button,
+  .ap-fold::after,
+  .ap-side-foot button,
+  .ap-ol-i > button i {
     transition: none;
   }
 }
@@ -1070,6 +1212,7 @@ body[arco-theme="dark"] .ap-send {
   display: inline-flex;
   gap: 8px;
   align-items: center;
+  min-width: 0;
   max-width: 240px;
   padding: 4px 6px 4px 4px;
   border: 1px solid var(--line);
@@ -1077,6 +1220,7 @@ body[arco-theme="dark"] .ap-send {
   background: var(--surface);
 }
 .ap-att em {
+  min-width: 0;
   overflow: hidden;
   font-size: 12.5px;
   font-style: normal;
@@ -1087,6 +1231,7 @@ body[arco-theme="dark"] .ap-send {
   padding: 8px 12px;
   color: var(--mute);
   font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
 }
 .ap-att button {
   display: grid;
@@ -1101,9 +1246,17 @@ body[arco-theme="dark"] .ap-send {
   font-size: 11px;
   background: none;
   cursor: pointer;
+  transition:
+    background-color 0.15s var(--spring),
+    color 0.15s var(--spring),
+    transform 0.15s var(--spring);
 }
 .ap-att button:hover {
+  color: var(--ink);
   background: var(--hover);
+}
+.ap-att button:active {
+  transform: scale(0.92);
 }
 .ap-compose.drop {
   box-shadow: 0 0 0 2px var(--brand);
@@ -1128,7 +1281,7 @@ body[arco-theme="dark"] .ap-send {
   border-right: 1.5px solid currentColor;
   border-bottom: 1.5px solid currentColor;
   transform: translateY(-2px) rotate(45deg);
-  transition: transform 0.2s;
+  transition: transform 0.2s var(--spring);
 }
 .ap-fold[aria-expanded="true"]::after {
   transform: translateY(1px) rotate(-135deg);
@@ -1153,10 +1306,18 @@ body[arco-theme="dark"] .ap-send {
   font-size: 13.5px;
   background: none;
   cursor: pointer;
+  transition:
+    background-color 0.16s var(--spring),
+    color 0.16s var(--spring),
+    transform 0.16s var(--spring);
 }
 .ap-side-foot button:hover,
 .ap-side-foot button.on {
+  color: var(--ink);
   background: var(--hover);
+}
+.ap-side-foot button:active {
+  transform: scale(0.985);
 }
 
 .ap-dropzone {
@@ -1272,6 +1433,7 @@ body[arco-theme="dark"] .ap-send {
 .ap-formback,
 .ap-compback {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   padding: 11px 14px;
@@ -1287,13 +1449,8 @@ body[arco-theme="dark"] .ap-send {
 }
 .ap-formback span,
 .ap-compback span {
-  flex: 1;
+  flex: 1 1 240px;
+  min-width: 0;
 }
 
-/* Bounded thumbnails: wide terminal screenshots never stretch the composer. */
-.ap-thumbs { flex-wrap: wrap; min-width: 0; gap: 10px; }
-.ap-thumbs > span { flex: 0 0 120px; width: 120px; max-width: 100%; height: 72px; min-width: 0; }
-.ap-thumbs img { width: 100%; height: 100%; object-fit: contain; box-sizing: border-box; background: var(--surface-2); }
-.ap-thumbs button { top: 4px; right: 4px; width: 22px; height: 22px; font-size: 11px; }
-.ap-thumbs button:focus-visible { outline: 2px solid var(--brand-ink); outline-offset: 2px; }
 .ap-prefs .arco-textarea { resize: none; }

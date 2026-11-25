@@ -21,22 +21,36 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 2px 4px;
+  padding: 2px 6px;
   border: 0;
   border-radius: 6px;
   color: var(--ink-2);
   font: 12.5px var(--sans);
   background: none;
   cursor: pointer;
+  transition:
+    background-color 0.15s var(--apple-ease, ease),
+    color 0.15s var(--apple-ease, ease),
+    transform 0.18s var(--spring);
 }
 .ch-legend button:hover {
   background: var(--hover);
+  color: var(--ink);
+}
+.ch-legend button:active {
+  transform: scale(0.975);
+}
+.ch-legend button:focus-visible,
+.ch-view:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
 }
 .ch-legend button.off {
   opacity: 0.45;
   text-decoration: line-through;
 }
 .ch-legend i {
+  flex: none;
   width: 10px;
   height: 10px;
   border-radius: 3px;
@@ -56,9 +70,16 @@
   font-weight: 500;
   background: none;
   cursor: pointer;
+  transition:
+    background-color 0.15s var(--apple-ease, ease),
+    color 0.15s var(--apple-ease, ease),
+    transform 0.18s var(--spring);
 }
 .ch-view:hover {
   background: var(--teal-soft);
+}
+.ch-view:active {
+  transform: scale(0.975);
 }
 .ch-plot {
   position: relative;
@@ -81,6 +102,7 @@
 }
 .ch-tip {
   position: absolute;
+  left: 0;
   top: 0;
   z-index: 3;
   box-sizing: border-box;
@@ -95,8 +117,11 @@
   font-size: 12px;
   background: var(--glass-strong);
   backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   box-shadow: var(--shadow-md);
   transform: translateX(-50%);
+  will-change: transform;
+  transition: transform 0.14s var(--apple-ease, ease);
   pointer-events: none;
 }
 .ch-tip b {
@@ -108,6 +133,7 @@
   gap: 6px;
 }
 .ch-tip i {
+  flex: none;
   width: 8px;
   height: 8px;
   border-radius: 2px;
@@ -194,7 +220,10 @@
   font-size: 11.5px;
 }
 @media (prefers-reduced-motion: reduce) {
-  .hb-t i {
+  .hb-t i,
+  .ch-tip,
+  .ch-legend button,
+  .ch-view {
     transition: none;
   }
 }

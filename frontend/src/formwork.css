@@ -53,14 +53,18 @@
   border-radius: 999px;
   cursor: pointer;
   transition:
-    color 0.15s var(--ease-out),
-    border-color 0.15s var(--ease-out),
-    background 0.15s var(--ease-out);
+    color 0.16s var(--spring),
+    border-color 0.16s var(--spring),
+    background 0.16s var(--spring),
+    transform 0.16s cubic-bezier(0.32, 0.72, 0, 1);
 }
 .fw-back:hover {
   color: var(--brand-ink);
   background: var(--brand-soft);
   border-color: var(--brand-line);
+}
+.fw-back:active:not(:disabled) {
+  transform: scale(0.95);
 }
 .fw-back:focus-visible,
 .fw-tab:focus-visible {
@@ -106,14 +110,18 @@
   border-radius: 9px;
   cursor: pointer;
   transition:
-    color 0.15s var(--ease-out),
-    background 0.15s var(--ease-out),
-    border-color 0.15s var(--ease-out),
-    box-shadow 0.2s var(--ease-out);
+    color 0.16s var(--spring),
+    background 0.16s var(--spring),
+    border-color 0.16s var(--spring),
+    box-shadow 0.2s var(--spring),
+    transform 0.16s cubic-bezier(0.32, 0.72, 0, 1);
 }
 .fw-tab:hover {
   color: var(--ink);
   background: var(--hover);
+}
+.fw-tab:active:not(:disabled) {
+  transform: scale(0.975);
 }
 .fw-tab.on {
   color: var(--teal-ink);
@@ -243,6 +251,11 @@ body[arco-theme="dark"] .fw-tab.on {
     0 14px 30px -8px rgba(11, 13, 18, 0.3),
     0 4px 12px -3px rgba(255, 70, 45, 0.16);
 }
+body[arco-theme="dark"] .fw-hero-orb {
+  box-shadow:
+    0 16px 34px -8px rgba(0, 0, 0, 0.65),
+    0 4px 14px -3px rgba(255, 107, 87, 0.22);
+}
 .fw-hero h2 {
   margin: 0;
   font-size: 22px;
@@ -280,6 +293,17 @@ body[arco-theme="dark"] .fw-tab.on {
   border-radius: 999px;
   box-shadow: var(--shadow-md);
   cursor: pointer;
+  transition:
+    background-color 0.16s var(--spring),
+    border-color 0.16s var(--spring),
+    transform 0.16s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.fw-down:hover {
+  background: var(--surface-2);
+  border-color: var(--brand);
+}
+.fw-down:active {
+  transform: scale(0.975);
 }
 .fw .ad-msg {
   animation: fc-in 0.3s var(--ease-out) backwards;
@@ -361,6 +385,7 @@ body[arco-theme="dark"] .fw-tab.on {
   background: var(--surface-2);
   color: var(--ink-2);
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 .fw-base-mini > svg {
   flex: none;
@@ -454,6 +479,7 @@ body[arco-theme="dark"] .fw-tab.on {
   border-radius: 999px;
   font-size: 11.5px;
   font-weight: 550;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 .fw-base-pill.is-action {
@@ -487,12 +513,16 @@ body[arco-theme="dark"] .fw-tab.on {
   cursor: pointer;
   white-space: nowrap;
   transition:
-    color 0.15s,
-    background-color 0.15s;
+    color 0.16s var(--spring),
+    background-color 0.16s var(--spring),
+    transform 0.16s cubic-bezier(0.32, 0.72, 0, 1);
 }
 .fw-base-fold:hover {
   color: var(--ink);
   background: var(--hover);
+}
+.fw-base-fold:active {
+  transform: scale(0.975);
 }
 .fw-base-fold:focus-visible {
   outline: none;
@@ -682,9 +712,14 @@ body[arco-theme="dark"] .fw-tab.on {
   white-space: nowrap;
   cursor: pointer;
   transition:
-    color 0.15s,
-    background-color 0.15s,
-    border-color 0.15s;
+    color 0.16s var(--spring),
+    background-color 0.16s var(--spring),
+    border-color 0.16s var(--spring),
+    transform 0.16s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.fw-base-loc:active:not(:disabled),
+.fw-base-one:active:not(:disabled) {
+  transform: scale(0.975);
 }
 .fw-base-loc {
   color: var(--ink-2);
@@ -946,14 +981,18 @@ body[arco-theme="dark"] .fw-run::after {
   cursor: pointer;
   white-space: nowrap;
   transition:
-    background-color 0.15s,
-    border-color 0.15s,
-    color 0.15s;
+    background-color 0.16s var(--spring),
+    border-color 0.16s var(--spring),
+    color 0.16s var(--spring),
+    transform 0.16s cubic-bezier(0.32, 0.72, 0, 1);
 }
 .fw-run-skip:hover {
   background: var(--hover);
   border-color: var(--line-strong);
   color: var(--ink);
+}
+.fw-run-skip:active {
+  transform: scale(0.975);
 }
 .fw-run-skip:focus-visible {
   outline: none;
@@ -1205,7 +1244,10 @@ body[arco-theme="dark"] .fw-run::after {
 }
 .fc-file button:hover {
   color: var(--ink);
-  background: rgba(0, 0, 0, 0.06);
+  background: var(--hover);
+}
+.fc-file button:active {
+  transform: scale(0.92);
 }
 .fc-attach {
   display: grid;

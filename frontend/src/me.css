@@ -74,7 +74,11 @@
   border-radius: 8px;
 }
 .me-tabs button svg {
+  flex: none;
   font-size: 15px;
+}
+.me-tabs button:active:not(:disabled) {
+  transform: scale(0.975);
 }
 .me-tabs button em {
   min-width: 18px;
@@ -83,6 +87,7 @@
   color: var(--mute);
   font-size: 11.5px;
   font-style: normal;
+  font-variant-numeric: tabular-nums;
   line-height: 18px;
   text-align: center;
   background: var(--sunken);
@@ -94,11 +99,13 @@
   height: 2px;
   border-radius: 2px;
   background: var(--brand);
+  pointer-events: none;
+  will-change: transform, width;
 }
 .me-tabs-bar.ready {
   transition:
-    transform 0.32s var(--spring),
-    width 0.32s var(--spring);
+    transform 0.28s var(--apple-sheet, cubic-bezier(0.32, 0.72, 0, 1)),
+    width 0.28s var(--apple-sheet, cubic-bezier(0.32, 0.72, 0, 1));
 }
 
 .me-pane .sx-page-h {
@@ -160,10 +167,15 @@
   text-align: left;
   background: var(--surface);
   cursor: pointer;
-  transition: background 0.15s;
+  transition:
+    background 0.15s var(--apple-ease, ease),
+    transform 0.18s var(--spring);
 }
 .me-objs button:hover {
   background: var(--hover);
+}
+.me-objs button:active {
+  background: var(--press);
 }
 .me-objs button:focus-visible {
   outline: none;
@@ -173,7 +185,8 @@
   transform: translateX(3px);
   color: var(--ink-2);
 }
-.me-obj-ic {
+.me-obj-ic,
+.me-res .rp-ic {
   display: grid;
   flex: none;
   place-items: center;
@@ -182,15 +195,24 @@
   border-radius: 11px;
   font-size: 17px;
 }
-.me-obj-ic.k-kb {
+.me-res .rp-ic {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  font-size: 16px;
+}
+.me-obj-ic.k-kb,
+.me-res .rp-ic.k-doc {
   color: #0a6fd6;
   background: rgba(10, 132, 255, 0.1);
 }
-.me-obj-ic.k-skills {
+.me-obj-ic.k-skills,
+.me-res .rp-ic.k-built {
   color: #c27500;
   background: var(--warn-soft);
 }
-.me-obj-ic.k-mcp {
+.me-obj-ic.k-mcp,
+.me-res .rp-ic.k-mcp {
   color: var(--ok);
   background: var(--ok-soft);
 }
@@ -314,6 +336,7 @@ body[arco-theme="dark"] .me-res .rp-ic.k-mcp {
   color: var(--ink);
   font-size: 20px;
   font-weight: 650;
+  font-variant-numeric: tabular-nums;
 }
 
 /* password */
@@ -392,7 +415,13 @@ body[arco-theme="dark"] .me-res .rp-ic.k-mcp {
   text-align: left;
   background: none;
   cursor: pointer;
-  transition: background 0.15s;
+  transition:
+    background 0.15s var(--apple-ease, ease),
+    transform 0.18s var(--spring);
+}
+.kb-docs button:active,
+.kb-hits button:active {
+  transform: scale(0.985);
 }
 .kb-docs button:hover,
 .kb-hits button:hover {
@@ -564,7 +593,13 @@ body[arco-theme="dark"] .me-res .rp-ic.k-mcp {
 }
 @media (prefers-reduced-motion: reduce) {
   .me-tabs-bar,
-  .me-chev {
+  .me-tabs button,
+  .me-chev,
+  .me-res button,
+  .me-dev-filters button,
+  .me-dev-more,
+  .kb-docs button,
+  .kb-hits button {
     transition: none;
   }
 }
@@ -899,7 +934,13 @@ body[arco-theme="dark"] .me-res .rp-ic.k-mcp {
 }
 .me-tl li > span {
   flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
   color: var(--ink-2);
+}
+.me-tl li > time {
+  flex: none;
+  font-variant-numeric: tabular-nums;
 }
 .me-tl li.bad > i {
   background: var(--bad);
@@ -1070,11 +1111,19 @@ body[arco-theme="dark"] .me-res .rp-ic.k-mcp {
   background: transparent;
   cursor: pointer;
   transition:
-    background 0.15s,
-    color 0.15s;
+    background 0.15s var(--apple-ease, ease),
+    color 0.15s var(--apple-ease, ease),
+    transform 0.18s var(--spring);
 }
 .me-dev-filters button:hover {
   color: var(--ink);
+}
+.me-dev-filters button:active {
+  transform: scale(0.975);
+}
+.me-dev-filters button:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
 }
 .me-dev-filters button.on {
   color: var(--brand-ink);
@@ -1087,6 +1136,7 @@ body[arco-theme="dark"] .me-res .rp-ic.k-mcp {
   color: var(--faint);
   font-size: 11px;
   font-style: normal;
+  font-variant-numeric: tabular-nums;
   line-height: 16px;
   background: var(--surface-2);
 }
@@ -1247,14 +1297,22 @@ body[arco-theme="dark"] .me-res .rp-ic.k-mcp {
   background: var(--surface-2);
   cursor: pointer;
   transition:
-    border-color 0.15s,
-    color 0.15s,
-    background 0.15s;
+    border-color 0.15s var(--apple-ease, ease),
+    color 0.15s var(--apple-ease, ease),
+    background 0.15s var(--apple-ease, ease),
+    transform 0.18s var(--spring);
 }
 .me-dev-more:hover {
   border-color: var(--brand-line);
   color: var(--brand-ink);
   background: var(--brand-soft);
+}
+.me-dev-more:active {
+  transform: scale(0.99);
+}
+.me-dev-more:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
 }
 
 /* Recent Sign-ins Log List */
@@ -1331,6 +1389,7 @@ body[arco-theme="dark"] .me-res .rp-ic.k-mcp {
   flex: none;
   color: var(--faint);
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 

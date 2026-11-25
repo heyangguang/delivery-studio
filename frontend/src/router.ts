@@ -283,11 +283,14 @@ function kindOf(a: Route, b: Route): Kind {
   return db > da ? "forward" : db < da ? "back" : "swap";
 }
 
+const MAX_SCROLL_HISTORY = 200;
 const scrolls = new Map<string, number>();
 /** Pages open at the top; going back returns to where the page was left. */
 const settle = (kind: Kind | "none", to: Route) => {
-  if (kind !== "pane")
-    window.scrollTo(0, kind === "back" ? scrolls.get(href(to)) || 0 : 0);
+  if (kind !== "pane") {
+    const top = kind === "back" ? scrolls.get(href(to)) || 0 : 0;
+    window.scrollTo({ top, left: 0, behavior: "instant" as ScrollBehavior });
+  }
 };
 
 let skipNext = false;
@@ -298,7 +301,13 @@ window.addEventListener("hashchange", () => {
   const instant = skipNext;
   skipNext = false;
   const kind = kindOf(current, next);
-  scrolls.set(href(current), window.scrollY);
+  const prevHref = href(current);
+  if (scrolls.has(prevHref)) scrolls.delete(prevHref);
+  else if (scrolls.size >= MAX_SCROLL_HISTORY) {
+    const oldest = scrolls.keys().next().value;
+    if (oldest !== undefined) scrolls.delete(oldest);
+  }
+  scrolls.set(prevHref, window.scrollY);
   apply(next);
   if (!instant) settle(kind, next);
 });

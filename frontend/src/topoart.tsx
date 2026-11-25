@@ -51,6 +51,7 @@ export function TopoArt({
     <svg
       className="topo-art"
       viewBox={`0 0 ${W} ${H}`}
+      style={{ display: "block", maxWidth: "100%" }}
       role="img"
       aria-label={bi(`${app.name} 的典型部署`, `Typical deployment of ${app.name}`)}
     >

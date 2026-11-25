@@ -330,6 +330,10 @@ export function ExecutionNodes() {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const mounted = useRef(true);
+  const busyLockRef = useRef(false);
+  const bundleLockRef = useRef(false);
+  const updatingLockRef = useRef("");
+  const deletingLockRef = useRef(false);
 
   const load = async (manual = false) => {
     if (manual) setRefreshing(true);
@@ -385,8 +389,17 @@ export function ExecutionNodes() {
 
   useEffect(() => {
     const intervalMs = fastPoll ? 1500 : 10000;
-    const timer = setInterval(() => void load(), intervalMs);
-    return () => clearInterval(timer);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void load();
+    };
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") void load();
+    }, intervalMs);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [fastPoll]);
 
   const begin = () => {
@@ -402,6 +415,8 @@ export function ExecutionNodes() {
   };
 
   const create = async () => {
+    if (busyLockRef.current) return;
+    busyLockRef.current = true;
     setBusy(true);
     setCreateError("");
     try {
@@ -420,6 +435,7 @@ export function ExecutionNodes() {
     } catch (e) {
       setCreateError((e as Error).message);
     } finally {
+      busyLockRef.current = false;
       setBusy(false);
     }
   };
@@ -439,7 +455,8 @@ export function ExecutionNodes() {
   const oneLineInstallCmd = `tar -xzf ${bundleFile}\nsudo bash ${bundleDir}/install.sh`;
 
   const downloadBundle = async () => {
-    if (!registration) return;
+    if (!registration || bundleLockRef.current) return;
+    bundleLockRef.current = true;
     setBundling(true);
     setBundleError("");
     try {
@@ -488,6 +505,7 @@ export function ExecutionNodes() {
     } catch (e) {
       setBundleError((e as Error).message);
     } finally {
+      bundleLockRef.current = false;
       setBundling(false);
     }
   };
@@ -524,6 +542,8 @@ export function ExecutionNodes() {
   };
 
   const toggle = async (node: ExecutionNode) => {
+    if (updatingLockRef.current === node.id) return;
+    updatingLockRef.current = node.id;
     setUpdating(node.id);
     try {
       await api("/api/settings/execution-nodes", {
@@ -542,6 +562,7 @@ export function ExecutionNodes() {
     } catch (e) {
       Message.error((e as Error).message);
     } finally {
+      updatingLockRef.current = "";
       setUpdating("");
     }
   };
@@ -578,6 +599,8 @@ export function ExecutionNodes() {
       cancelText: bi("取消", "Cancel"),
       okButtonProps: { status: "danger" },
       onOk: async () => {
+        if (deletingLockRef.current) return;
+        deletingLockRef.current = true;
         try {
           await api("/api/settings/execution-nodes", {
             method: "DELETE",
@@ -598,6 +621,8 @@ export function ExecutionNodes() {
         } catch (e) {
           Message.error((e as Error).message);
           throw e;
+        } finally {
+          deletingLockRef.current = false;
         }
       },
     });

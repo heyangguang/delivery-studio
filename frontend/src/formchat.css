@@ -17,7 +17,7 @@
 /* ---- the line ---- */
 .fc .fc-compose {
   border-radius: 14px;
-  transition: box-shadow 0.3s;
+  transition: box-shadow 0.28s var(--spring);
 }
 .fc .fc-compose:not(.open) {
   box-shadow: none;
@@ -192,6 +192,9 @@ body[arco-theme="dark"] .fc-orb {
   border-color: var(--brand-line);
   background: var(--brand-soft);
   transform: translateY(-1px);
+}
+.fc-chips button:active:not(:disabled) {
+  transform: scale(0.975);
 }
 
 /* ---- the conversation ---- */
@@ -384,15 +387,19 @@ body[arco-theme="dark"] .fc-card:hover::after {
   background: var(--surface-2);
   cursor: pointer;
   transition:
-    background-color 0.15s,
-    border-color 0.15s,
-    color 0.15s;
+    background-color 0.16s var(--spring),
+    border-color 0.16s var(--spring),
+    color 0.16s var(--spring),
+    transform 0.16s cubic-bezier(0.32, 0.72, 0, 1);
 }
 .fc-card-more:hover {
   background: var(--hover);
   border-color: var(--line-strong);
   color: var(--ink);
   text-decoration: none;
+}
+.fc-card-more:active:not(:disabled) {
+  transform: scale(0.975);
 }
 .fc-check {
   display: inline-flex;
@@ -404,6 +411,7 @@ body[arco-theme="dark"] .fc-card:hover::after {
   border-radius: 999px;
   font-size: 12px;
   font-weight: 550;
+  font-variant-numeric: tabular-nums;
 }
 .fc-check.ok {
   color: var(--ok);
@@ -454,7 +462,7 @@ body[arco-theme="dark"] .fc-card:hover::after {
   z-index: 5;
   pointer-events: none;
   opacity: 0;
-  transition: opacity 0.6s ease;
+  transition: opacity 0.36s var(--spring);
 }
 .fc-glow.on {
   opacity: 1;
@@ -727,6 +735,11 @@ body[arco-theme="dark"] .fc-card:hover::after {
     0 14px 30px -8px rgba(11, 13, 18, 0.3),
     0 4px 12px -3px rgba(255, 70, 45, 0.16);
 }
+body[arco-theme="dark"] .fc-start-orb {
+  box-shadow:
+    0 16px 34px -8px rgba(0, 0, 0, 0.65),
+    0 4px 14px -3px rgba(255, 107, 87, 0.22);
+}
 .fc-start-head h2 {
   margin: 0;
   font-size: 24px;
@@ -791,7 +804,7 @@ html.fc-vt .fc .fc-compose {
   background: var(--surface-2);
 }
 .fc-start-form:active {
-  transform: scale(0.99);
+  transform: scale(0.98);
 }
 .fc-start-form:focus-visible {
   outline: none;

@@ -610,6 +610,7 @@ function ComponentDetail({
     loadManifest(false);
   }, [c.id, c.source, lang]); // eslint-disable-line react-hooks/exhaustive-deps
   const [fork, setFork] = useState(false);
+  const deletingLockRef = useRef(false);
   const edit = () => go({ name: "components", id: c.id, edit: "overview" });
   const remove = () =>
     Modal.confirm({
@@ -633,6 +634,8 @@ function ComponentDetail({
           : bi("删除", "Delete"),
       okButtonProps: { status: "danger" },
       onOk: async () => {
+        if (deletingLockRef.current) return;
+        deletingLockRef.current = true;
         try {
           await api(`/api/components/${c.id}`, { method: "DELETE" });
           Message.success(bi("已删除", "Deleted"));
@@ -640,6 +643,8 @@ function ComponentDetail({
           go({ name: "components" }, { replace: true });
         } catch (e) {
           err(e);
+        } finally {
+          deletingLockRef.current = false;
         }
       },
     });
@@ -847,6 +852,7 @@ function ImportDrawer({
   const [edited, setEdited] = useState(false);
   const [result, setResult] = useState<Validation | null>(null);
   const [busy, setBusy] = useState(false);
+  const busyLockRef = useRef(false);
   useEffect(() => {
     if (open) setResult(null);
   }, [open]);
@@ -855,6 +861,8 @@ function ImportDrawer({
   }, [lang, edited]);
 
   const validate = async () => {
+    if (busyLockRef.current) return;
+    busyLockRef.current = true;
     setBusy(true);
     try {
       setResult(
@@ -866,10 +874,13 @@ function ImportDrawer({
     } catch (e) {
       err(e);
     } finally {
+      busyLockRef.current = false;
       setBusy(false);
     }
   };
   const submit = async () => {
+    if (busyLockRef.current) return;
+    busyLockRef.current = true;
     setBusy(true);
     setResult(null);
     try {
@@ -896,6 +907,7 @@ function ImportDrawer({
       if ((e as ApiError).status === 422 && body?.problems) setResult(body);
       else err(e);
     } finally {
+      busyLockRef.current = false;
       setBusy(false);
     }
   };
@@ -903,7 +915,7 @@ function ImportDrawer({
   const warns = result?.problems.filter((p) => p.severity === "warning") || [];
   return (
     <Drawer
-      width={narrow ? "100%" : 680}
+      width={narrow ? "100%" : "min(680px, 100vw)"}
       visible={open}
       onCancel={onClose}
       title={bi("导入组件", "Import Component")}

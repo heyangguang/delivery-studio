@@ -695,9 +695,13 @@ input.mono-in {
   font-weight: 550;
   cursor: pointer;
   transition:
-    color 0.15s,
-    border-color 0.15s,
-    background 0.15s;
+    color 0.16s var(--spring),
+    border-color 0.16s var(--spring),
+    background 0.16s var(--spring),
+    transform 0.16s var(--spring);
+}
+.wz-switch-app:active {
+  transform: scale(0.975);
 }
 .wz-switch-app:hover {
   color: var(--brand-ink);
@@ -745,17 +749,18 @@ input.mono-in {
   border-radius: 10px;
   color: var(--ink-2);
   transition:
-    background-color 0.16s ease,
-    border-color 0.16s ease,
-    color 0.16s ease,
-    box-shadow 0.2s ease;
+    background-color 0.18s var(--spring),
+    border-color 0.18s var(--spring),
+    color 0.18s var(--spring),
+    box-shadow 0.22s var(--spring),
+    transform 0.16s var(--spring);
 }
 .wz-nav button:hover {
   color: var(--ink);
   background: var(--hover);
 }
-.wz-nav button:active {
-  transform: scale(0.99);
+.wz-nav button:active:not(:disabled) {
+  transform: scale(0.98);
 }
 .wz-nav button.on {
   color: var(--ink);
@@ -765,6 +770,7 @@ input.mono-in {
     0 1px 2px rgba(11, 13, 18, 0.05),
     0 4px 12px -6px color-mix(in srgb, var(--teal) 26%, transparent);
 }
+[data-theme="dark"] .wz-nav button.on,
 body[arco-theme="dark"] .wz-nav button.on {
   background: var(--surface-raised);
   border-color: color-mix(in srgb, var(--teal) 54%, var(--line-strong));
@@ -990,7 +996,7 @@ body[arco-theme="dark"] .wz-nav button.on {
 }
 .wz .params {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(460px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(440px, 100%), 1fr));
   gap: 12px 20px;
 }
 /* separated sculpted parameter cards with generous breathing room */
@@ -1001,8 +1007,8 @@ body[arco-theme="dark"] .wz-nav button.on {
   border-radius: 11px;
   background: var(--surface);
   transition:
-    border-color 0.16s ease,
-    background-color 0.16s ease;
+    border-color 0.16s var(--spring),
+    background-color 0.16s var(--spring);
 }
 .wz .param:hover {
   border-color: var(--line-strong);
@@ -1915,4 +1921,17 @@ body[arco-theme="dark"] .wz-nav button.on {
 .param-was b {
   color: var(--brand-ink);
   font-weight: 600;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wz-sec {
+    animation: none;
+  }
+  .plan,
+  .wz-switch-app,
+  .wz-nav button,
+  .wz .param {
+    transition: none;
+    transform: none;
+  }
 }

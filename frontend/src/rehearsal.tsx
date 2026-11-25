@@ -1518,7 +1518,7 @@ const SHELL_COMMANDS = new Set([
   "ss",
   "netstat",
   "ip",
-  " lsof",
+  "lsof",
   "systemctl",
   "journalctl",
   "service",
@@ -1685,7 +1685,7 @@ function CopyCodeBtn({
   );
 }
 
-function ShellCodeBlock({
+const ShellCodeBlock = React.memo(function ShellCodeBlock({
   code,
   title,
   compact = false,
@@ -1713,11 +1713,11 @@ function ShellCodeBlock({
         : { text: code, pasteSafe: false, autoWrapped: false },
     [code, pasteSafe],
   );
-  const lines = useMemo(() => {
+  const tokenizedLines = useMemo(() => {
     const clean = code.replace(/\r\n/g, "\n").replace(/\n$/, "");
-    return clean.split("\n");
+    return clean.split("\n").map((ln) => tokenizeBashLine(ln));
   }, [code]);
-  const collapsible = lines.length > (compact ? 10 : 16);
+  const collapsible = tokenizedLines.length > (compact ? 10 : 16);
 
   return (
     <div
@@ -1733,8 +1733,10 @@ function ShellCodeBlock({
           </span>
           <span className="rh-code-lines num">
             {bi(
-              `${lines.length} 行`,
-              lines.length === 1 ? "1 line" : `${lines.length} lines`,
+              `${tokenizedLines.length} 行`,
+              tokenizedLines.length === 1
+                ? "1 line"
+                : `${tokenizedLines.length} lines`,
             )}
           </span>
           {safeCopy.pasteSafe && (
@@ -1816,34 +1818,31 @@ function ShellCodeBlock({
       <div className="rh-code-scroll">
         <pre className="rh-code-pre mono">
           <code>
-            {lines.map((ln, idx) => {
-              const toks = tokenizeBashLine(ln);
-              return (
-                <span key={idx} className="rh-code-row">
-                  <span className="rh-code-ln num" aria-hidden>
-                    {idx + 1}
-                  </span>
-                  <span className="rh-code-txt">
-                    {toks.map((tk, ti) =>
-                      tk.cls ? (
-                        <span key={ti} className={`rh-tk-${tk.cls}`}>
-                          {tk.text}
-                        </span>
-                      ) : (
-                        <React.Fragment key={ti}>{tk.text}</React.Fragment>
-                      ),
-                    )}
-                    {"\n"}
-                  </span>
+            {tokenizedLines.map((toks, idx) => (
+              <span key={idx} className="rh-code-row">
+                <span className="rh-code-ln num" aria-hidden>
+                  {idx + 1}
                 </span>
-              );
-            })}
+                <span className="rh-code-txt">
+                  {toks.map((tk, ti) =>
+                    tk.cls ? (
+                      <span key={ti} className={`rh-tk-${tk.cls}`}>
+                        {tk.text}
+                      </span>
+                    ) : (
+                      <React.Fragment key={ti}>{tk.text}</React.Fragment>
+                    ),
+                  )}
+                  {"\n"}
+                </span>
+              </span>
+            ))}
           </code>
         </pre>
       </div>
     </div>
   );
-}
+});
 
 /* ---------- Live & Persisted AI Choreographed Pipeline Card ---------- */
 
@@ -1933,13 +1932,53 @@ function resolveCartoonScene(
   }
 }
 
-function RehearsalStageCartoon({
+const LiveElapsedSpan = React.memo(function LiveElapsedSpan({
+  startedAt,
+  endedAt,
+  integer = false,
+  prefix = "",
+  suffix = "s",
+  className,
+}: {
+  startedAt: number;
+  endedAt?: number;
+  integer?: boolean;
+  prefix?: string;
+  suffix?: string;
+  className?: string;
+}) {
+  const [now, setNow] = useState(() => endedAt || Date.now());
+  useEffect(() => {
+    if (endedAt) {
+      setNow(endedAt);
+      return;
+    }
+    setNow(Date.now());
+    const timer = window.setInterval(() => {
+      setNow(Date.now());
+    }, 120);
+    return () => window.clearInterval(timer);
+  }, [startedAt, endedAt]);
+
+  const end = endedAt || now;
+  const sec = Math.max(0.1, (end - startedAt) / 1000);
+  const formatted = integer ? String(Math.floor(sec)) : sec.toFixed(1);
+  return (
+    <span className={className}>
+      {prefix}
+      {formatted}
+      {suffix}
+    </span>
+  );
+});
+
+const RehearsalStageCartoon = React.memo(function RehearsalStageCartoon({
   scene,
   stepTitle,
   stepDetail,
   provider,
   model,
-  waitSec,
+  waitStartedAt,
   errorBadge,
 }: {
   scene: CartoonScene;
@@ -1947,13 +1986,13 @@ function RehearsalStageCartoon({
   stepDetail?: string;
   provider?: string;
   model?: string;
-  waitSec?: number;
+  waitStartedAt?: number;
   errorBadge?: string;
 }) {
   useLang();
   const actMeta: Record<
     CartoonScene,
-    { tag: string; headline: string; sub: string }
+    { tag: string; headline: string; sub: React.ReactNode }
   > = {
     inspect: {
       tag: bi("ACT 01 · 基线扫描", "ACT 01 · BASELINE SCAN"),
@@ -1993,12 +2032,22 @@ function RehearsalStageCartoon({
           "平台底座正在与 AI 模型网关双向握手",
           "Handshaking with AI model gateway",
         ),
-      sub:
-        stepDetail ||
-        bi(
-          `正在向 ${provider || "模型网关"}${model ? ` (${model})` : ""} 投递脱敏基线并等待首包响应${waitSec ? ` · ${waitSec.toFixed(1)}s` : ""}`,
-          `Sending redacted baseline to ${provider || "model gateway"}${model ? ` (${model})` : ""} and awaiting first token${waitSec ? ` · ${waitSec.toFixed(1)}s` : ""}`,
-        ),
+      sub: stepDetail || (
+        <>
+          {bi(
+            `正在向 ${provider || "模型网关"}${model ? ` (${model})` : ""} 投递脱敏基线并等待首包响应`,
+            `Sending redacted baseline to ${provider || "model gateway"}${model ? ` (${model})` : ""} and awaiting first token`,
+          )}
+          {waitStartedAt ? (
+            <LiveElapsedSpan
+              startedAt={waitStartedAt}
+              prefix=" · "
+              suffix="s"
+              className="num"
+            />
+          ) : null}
+        </>
+      ),
     },
     think: {
       tag: bi("ACT 04 · 沙盘推演", "ACT 04 · REASONING"),
@@ -2367,7 +2416,7 @@ function RehearsalStageCartoon({
       </div>
     </div>
   );
-}
+});
 
 function isTechnicalErrorText(raw?: string): boolean {
   if (!raw) return false;
@@ -2586,7 +2635,7 @@ function renderThinkingInline(text: string): React.ReactNode {
   return out.length === 1 && typeof out[0] === "string" ? out[0] : out;
 }
 
-function RehearsalThinkingContent({
+const RehearsalThinkingContent = React.memo(function RehearsalThinkingContent({
   text,
   streaming = false,
   compact = false,
@@ -2698,7 +2747,7 @@ function RehearsalThinkingContent({
   return (
     <div className={`rh-think-flow ${compact ? "is-compact" : ""}`}>{nodes}</div>
   );
-}
+});
 
 function RehearsalAIProcess({
   live,
@@ -2720,7 +2769,7 @@ function RehearsalAIProcess({
   useLang();
   const [open, setOpen] = useState(defaultOpen || Boolean(live));
   const [rawDiagOpen, setRawDiagOpen] = useState(false);
-  const [now, setNow] = useState(() => Date.now());
+  const [slowHandshake, setSlowHandshake] = useState(false);
   const [playState, setPlayState] = useState<{
     startedAt: number;
     idx: number;
@@ -2736,6 +2785,8 @@ function RehearsalAIProcess({
   const procRef = useRef<HTMLDivElement | null>(null);
   const lastScrolledStartRef = useRef<number>(0);
   const thinkBoxRef = useRef<HTMLDivElement | null>(null);
+  const thinkStickRef = useRef<boolean>(true);
+  const thinkScrollRafRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (defaultOpen) setOpen(true);
@@ -2744,10 +2795,10 @@ function RehearsalAIProcess({
   const hasLive = Boolean(live);
   const liveStartedAt = live?.startedAt ?? 0;
   const hasLiveError = Boolean(live?.error);
-  const liveErrorAt = live?.errorAt ?? 0;
 
   useEffect(() => {
     setRawDiagOpen(false);
+    thinkStickRef.current = true;
   }, [liveStartedAt]);
 
   useEffect(() => {
@@ -2776,16 +2827,10 @@ function RehearsalAIProcess({
   }, [liveStartedAt]);
 
   useEffect(() => {
-    if (!hasLive) return;
-    setOpen(true);
-    if (hasLiveError) {
-      setNow(liveErrorAt || Date.now());
-      return;
+    if (hasLive) {
+      setOpen(true);
     }
-    setNow(Date.now());
-    const t = setInterval(() => setNow(Date.now()), 120);
-    return () => clearInterval(t);
-  }, [hasLive, liveStartedAt, hasLiveError, liveErrorAt]);
+  }, [hasLive, liveStartedAt]);
 
   const targetIdx = useMemo(
     () => (live ? computeTargetStepIndex(live.steps) : 0),
@@ -2852,32 +2897,101 @@ function RehearsalAIProcess({
     targetIdx,
   ]);
 
-  // Keep streaming thoughts scrolled to the latest line automatically
+  const activeLivePlayIdx = live
+    ? live.error
+      ? targetIdx
+      : playState.startedAt === live.startedAt
+        ? playState.idx
+        : 0
+    : 0;
+  const activeLiveStepId = live
+    ? live.steps[
+        Math.min(
+          Math.max(activeLivePlayIdx, 0),
+          Math.max(live.steps.length - 1, 0),
+        )
+      ]?.id || ""
+    : "";
+  const activeStepEnteredAt = live
+    ? playState.startedAt === live.startedAt
+      ? playState.enteredAt
+      : live.startedAt
+    : 0;
+  const liveThinkingConsoleVisible = Boolean(
+    live && !live.error && activeLivePlayIdx >= 3,
+  );
+
+  // One-shot 25s slow-handshake notice without 120ms full-tree polling
   useEffect(() => {
-    if (!live?.thinking || !thinkBoxRef.current) return;
+    if (
+      !hasLive ||
+      hasLiveError ||
+      activeLiveStepId !== "connect-model" ||
+      !activeStepEnteredAt
+    ) {
+      setSlowHandshake(false);
+      return;
+    }
+    const elapsed = Date.now() - activeStepEnteredAt;
+    if (elapsed >= 25000) {
+      setSlowHandshake(true);
+      return;
+    }
+    setSlowHandshake(false);
+    const timer = window.setTimeout(
+      () => setSlowHandshake(true),
+      25000 - elapsed,
+    );
+    return () => window.clearTimeout(timer);
+  }, [hasLive, hasLiveError, activeLiveStepId, activeStepEnteredAt]);
+
+  // Passive scroll listener to respect user scroll-up lock while reading live thoughts
+  useEffect(() => {
+    if (!liveThinkingConsoleVisible) return;
     const el = thinkBoxRef.current;
-    el.scrollTop = el.scrollHeight;
-  }, [live?.thinking]);
+    if (!el) return;
+    const onScroll = () => {
+      const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+      thinkStickRef.current = dist <= 48;
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, [liveThinkingConsoleVisible, liveStartedAt]);
+
+  // Coalesce streaming auto-scroll via requestAnimationFrame (zero synchronous layout thrash)
+  useEffect(() => {
+    if (
+      !live?.thinking ||
+      !liveThinkingConsoleVisible ||
+      !thinkStickRef.current ||
+      !thinkBoxRef.current
+    ) {
+      return;
+    }
+    if (thinkScrollRafRef.current !== null) return;
+    thinkScrollRafRef.current = window.requestAnimationFrame(() => {
+      thinkScrollRafRef.current = null;
+      const el = thinkBoxRef.current;
+      if (el && thinkStickRef.current) {
+        el.scrollTop = el.scrollHeight;
+      }
+    });
+  }, [live?.thinking, liveThinkingConsoleVisible]);
+
+  useEffect(() => {
+    return () => {
+      if (thinkScrollRafRef.current !== null) {
+        window.cancelAnimationFrame(thinkScrollRafRef.current);
+        thinkScrollRafRef.current = null;
+      }
+    };
+  }, []);
 
   if (live) {
     const steps = live.steps;
     const hasError = Boolean(live.error);
-    const activePlayIdx = hasError
-      ? targetIdx
-      : playState.startedAt === live.startedAt
-        ? playState.idx
-        : 0;
-    const clockEnd = hasError ? live.errorAt || now : now;
-    const elapsedSecNum = Math.max(0.1, (clockEnd - live.startedAt) / 1000);
-    const elapsedSec = elapsedSecNum.toFixed(1);
-    const stepWaitSec = Math.max(
-      0.1,
-      (clockEnd -
-        (playState.startedAt === live.startedAt
-          ? playState.enteredAt
-          : live.startedAt)) /
-        1000,
-    );
+    const activePlayIdx = activeLivePlayIdx;
+    const stepEnteredAt = activeStepEnteredAt;
     const stageHumanIdx = Math.min(steps.length, activePlayIdx + 1);
     const showThinkingConsole = !hasError && activePlayIdx >= 3;
     const currentStep =
@@ -2912,9 +3026,7 @@ function RehearsalAIProcess({
     const rawSinglePane = !(diag?.request_summary && diag?.response_raw);
     const isTechErr = isTechnicalErrorText(live.error);
     const isSlowHandshake =
-      !hasError &&
-      currentStep?.id === "connect-model" &&
-      stepWaitSec >= 25;
+      !hasError && currentStep?.id === "connect-model" && slowHandshake;
     const liveSplit = steps.length > 0;
 
     return (
@@ -2986,9 +3098,12 @@ function RehearsalAIProcess({
             )}
           </div>
           <div className="rh-ai-head-right">
-            <span className={`rh-ai-timer num ${hasError ? "is-error" : ""}`}>
-              {elapsedSec}s
-            </span>
+            <LiveElapsedSpan
+              startedAt={live.startedAt}
+              endedAt={hasError ? live.errorAt || live.startedAt : undefined}
+              suffix="s"
+              className={`rh-ai-timer num ${hasError ? "is-error" : ""}`}
+            />
             {!hasError && onAbort && (
               <button
                 type="button"
@@ -3107,9 +3222,14 @@ function RehearsalAIProcess({
                                   ? bi("需留意", "Warning")
                                   : vStatus === "running"
                                     ? st.id === "connect-model"
-                                      ? bi(
-                                          `握手 ${stepWaitSec.toFixed(1)}s`,
-                                          `Handshake ${stepWaitSec.toFixed(1)}s`,
+                                      ? (
+                                          <>
+                                            {bi("握手 ", "Handshake ")}
+                                            <LiveElapsedSpan
+                                              startedAt={stepEnteredAt}
+                                              suffix="s"
+                                            />
+                                          </>
                                         )
                                       : bi("进行中", "Running")
                                     : hasError
@@ -3144,9 +3264,9 @@ function RehearsalAIProcess({
               stepDetail={currentStep?.detail}
               provider={live.provider}
               model={live.model}
-              waitSec={
+              waitStartedAt={
                 !hasError && currentStep?.id === "connect-model"
-                  ? stepWaitSec
+                  ? stepEnteredAt
                   : undefined
               }
               errorBadge={errGuide?.badge}
@@ -3185,9 +3305,16 @@ function RehearsalAIProcess({
                   <Smooth>
                     {isSlowHandshake && (
                       <div className="rh-pstep-slow">
+                        {bi("已等待 ", "Waiting ")}
+                        <LiveElapsedSpan
+                          startedAt={stepEnteredAt}
+                          integer
+                          suffix="s"
+                          className="num"
+                        />
                         {bi(
-                          `已等待 ${Math.floor(stepWaitSec)}s 暂未收到正文首字（开启深度思考或中转网关自动重试上游渠道时，首包等待 20～90s 属正常现象；若使用中转网关调用 Claude 等非 OpenAI 模型，建议在「设置 → AI」将接口方式设为 Chat Completions 以直连流式输出）。`,
-                          `Waiting ${Math.floor(stepWaitSec)}s for first token (20–90s is normal with deep reasoning or proxy retries; for non-OpenAI models via proxy gateways, try setting API mode to Chat Completions in Settings → AI).`,
+                          " 暂未收到正文首字（开启深度思考或中转网关自动重试上游渠道时，首包等待 20～90s 属正常现象；若使用中转网关调用 Claude 等非 OpenAI 模型，建议在「设置 → AI」将接口方式设为 Chat Completions 以直连流式输出）。",
+                          " for first token (20–90s is normal with deep reasoning or proxy retries; for non-OpenAI models via proxy gateways, try setting API mode to Chat Completions in Settings → AI).",
                         )}
                       </div>
                     )}
@@ -3815,11 +3942,33 @@ function ImageLightbox({
   onIndexChange: (next: number) => void;
 }) {
   useLang();
+  useEffect(() => {
+    if (index === null || items.length === 0) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
+      if (e.key === "ArrowLeft" && index > 0) {
+        e.preventDefault();
+        onIndexChange(index - 1);
+      } else if (e.key === "ArrowRight" && index < items.length - 1) {
+        e.preventDefault();
+        onIndexChange(index + 1);
+      } else if (
+        e.key === "Escape" &&
+        !(e.target as HTMLElement | null)?.closest?.(".arco-modal-wrapper")
+      ) {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [index, items.length, onClose, onIndexChange]);
+
   if (index === null || !items[index]) return null;
   const cur = items[index];
   return (
     <Modal
       visible
+      alignCenter
       footer={null}
       title={
         <span className="rh-lb-title">
@@ -3975,7 +4124,7 @@ function SavedImageGallery({
 
 const SENSITIVE_KEY_RE = /(pass|pwd|secret|token|key|cert|auth)/i;
 
-function DeliveryBaselineAside({
+const DeliveryBaselineAside = React.memo(function DeliveryBaselineAside({
   c,
   onClose,
   onReturnToDelivery,
@@ -4230,7 +4379,7 @@ function DeliveryBaselineAside({
       </div>
     </aside>
   );
-}
+});
 
 /* ---------- Bespoke Business SVG Visuals ---------- */
 
@@ -4682,6 +4831,23 @@ export function ClusterRehearsal({
         | undefined) || [],
   );
   const [dragGoal, setDragGoal] = useState(false);
+  useEffect(() => {
+    if (!dragGoal) return;
+    const clear = () => setDragGoal(false);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") clear();
+    };
+    window.addEventListener("dragend", clear);
+    window.addEventListener("drop", clear);
+    window.addEventListener("blur", clear);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("dragend", clear);
+      window.removeEventListener("drop", clear);
+      window.removeEventListener("blur", clear);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [dragGoal]);
   const [ledgerCollapsed, setLedgerCollapsed] = useState(false);
   const [deliveryOpen, setDeliveryOpen] = useState(false);
   const [sessMenuOpen, setSessMenuOpen] = useState(false);
@@ -5175,7 +5341,14 @@ export function ClusterRehearsal({
   };
 
   const startNew = async () => {
-    if (!goal.trim() || creatingBusy || offline) return;
+    if (
+      !goal.trim() ||
+      creatingBusy ||
+      offline ||
+      getRehearsalTask(createKey)?.status === "running"
+    ) {
+      return;
+    }
     engageFocus();
     const effectiveMode: RehearsalModeChoice = secCtxDraft ? "full" : launchMode;
     const initialLive = createInitialLiveState(
@@ -6117,10 +6290,14 @@ export function ClusterRehearsal({
                 onDragOver={(e) => {
                   if (e.dataTransfer?.types?.includes("Files")) {
                     e.preventDefault();
-                    setDragGoal(true);
+                    if (!dragGoal) setDragGoal(true);
                   }
                 }}
-                onDragLeave={() => setDragGoal(false)}
+                onDragLeave={(e) => {
+                  if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                    setDragGoal(false);
+                  }
+                }}
                 onDrop={(e) => {
                   e.preventDefault();
                   setDragGoal(false);
@@ -6901,7 +7078,7 @@ function summarizeAnswerChip(curAns: string, parsedOpts: ParsedScopeOpt[]): stri
   return a;
 }
 
-function ScopeAlignmentDeck({
+const ScopeAlignmentDeck = React.memo(function ScopeAlignmentDeck({
   rehearsalId,
   questions,
   answers,
@@ -7714,7 +7891,7 @@ function ScopeAlignmentDeck({
       </div>
     </>
   );
-}
+});
 
 /* ---------- Stage 2: Structured Probe Execution Kit ---------- */
 
@@ -7855,7 +8032,7 @@ function renderProbeInline(text: string): React.ReactNode {
   return out.length === 1 && typeof out[0] === "string" ? out[0] : out;
 }
 
-function ProbeExecutionKit({
+const ProbeExecutionKit = React.memo(function ProbeExecutionKit({
   script,
   fileName,
   probeSafe,
@@ -8096,7 +8273,7 @@ function ProbeExecutionKit({
       )}
     </div>
   );
-}
+});
 
 /* ---------- Session Detail View ---------- */
 
@@ -8175,6 +8352,11 @@ function RehearsalSessionView({
   const [stageAnimated, setStageAnimated] = useState(false);
   const [loading, setLoading] = useState(() => !initialSession);
   const [busyFinalize, setBusyFinalize] = useState(false);
+  const busyFinalizeRef = useRef(false);
+  const [busyDelete, setBusyDelete] = useState(false);
+  const busyDeleteRef = useRef(false);
+  const [exportingDoc, setExportingDoc] = useState(false);
+  const exportCooldownRef = useRef<number | null>(null);
 
   const [freshTraceStage, setFreshTraceStage] = useState<string>(
     autoExpandCreateTrace ? "create" : "",
@@ -8186,6 +8368,7 @@ function RehearsalSessionView({
   const [refineMode, setRefineMode] = useState<RehearsalModeChoice>("auto");
   const [refineKeepImgs, setRefineKeepImgs] = useState<string[]>([]);
   const [refineAddImgs, setRefineAddImgs] = useState<DraftImage[]>([]);
+  const [refinePreviewIdx, setRefinePreviewIdx] = useState<number | null>(null);
   const refineImgInputRef = useRef<HTMLInputElement | null>(null);
   const refineGoalRef = useRef<HTMLTextAreaElement | null>(null);
   const [stripPropagateOpen, setStripPropagateOpen] = useState(false);
@@ -8230,6 +8413,23 @@ function RehearsalSessionView({
     return draftImgs ? [...draftImgs] : [];
   });
   const [dragProbe, setDragProbe] = useState(false);
+  useEffect(() => {
+    if (!dragProbe) return;
+    const clear = () => setDragProbe(false);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") clear();
+    };
+    window.addEventListener("dragend", clear);
+    window.addEventListener("drop", clear);
+    window.addEventListener("blur", clear);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("dragend", clear);
+      window.removeEventListener("drop", clear);
+      window.removeEventListener("blur", clear);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [dragProbe]);
   const [testEnvNote, setTestEnvNote] = useState(() => {
     const draftEnv = getRehearsalTask(probeKey)?.draft?.testEnvNote;
     if (typeof draftEnv === "string") return draftEnv;
@@ -8256,69 +8456,96 @@ function RehearsalSessionView({
   const gateRef = useRef<HTMLDivElement | null>(null);
   const forwardStepsRef = useRef<RehearsalStep[]>([]);
   const arrivalTimerRef = useRef<number | null>(null);
+  const settleRafRef = useRef<{ r1: number | null; r2: number | null }>({
+    r1: null,
+    r2: null,
+  });
+
+  const cancelSettleRaf = useCallback(() => {
+    if (settleRafRef.current.r1 !== null) {
+      window.cancelAnimationFrame(settleRafRef.current.r1);
+      settleRafRef.current.r1 = null;
+    }
+    if (settleRafRef.current.r2 !== null) {
+      window.cancelAnimationFrame(settleRafRef.current.r2);
+      settleRafRef.current.r2 = null;
+    }
+  }, []);
 
   useEffect(() => {
     setGoalOpen(false);
     setRefineOpen(false);
     setRefineAddImgs([]);
+    setRefinePreviewIdx(null);
     setRolloutBoardOverride(null);
     setStripPropagateOpen(false);
     setStripRolloutOpen(false);
     setArrivalStepId(null);
+    cancelSettleRaf();
     if (arrivalTimerRef.current !== null) {
       window.clearTimeout(arrivalTimerRef.current);
       arrivalTimerRef.current = null;
     }
-  }, [id]);
+  }, [id, cancelSettleRaf]);
 
   useEffect(() => {
     return () => {
+      cancelSettleRaf();
       if (arrivalTimerRef.current !== null) {
         window.clearTimeout(arrivalTimerRef.current);
       }
+      if (exportCooldownRef.current !== null) {
+        window.clearTimeout(exportCooldownRef.current);
+      }
     };
-  }, []);
+  }, [cancelSettleRaf]);
 
-  const handleStepSettled = useCallback((completedStepId: string) => {
-    const reduced =
-      typeof window !== "undefined" &&
-      window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => {
-        const list = forwardStepsRef.current;
-        const doneIdx = list.findIndex((s) => s.id === completedStepId);
-        const isPending = (s: RehearsalStep) =>
-          s.status !== "passed" && s.status !== "skipped";
-        const nextStep =
-          (doneIdx >= 0 ? list.slice(doneIdx + 1).find(isPending) : undefined) ||
-          list.find(isPending);
-        if (nextStep) {
-          const el = timelineRef.current?.querySelector<HTMLElement>(
-            `li[data-step-id="${nextStep.id.replace(/"/g, '\\"')}"]`,
-          );
-          if (el) {
-            el.scrollIntoView({
+  const handleStepSettled = useCallback(
+    (completedStepId: string) => {
+      const reduced =
+        typeof window !== "undefined" &&
+        window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+      cancelSettleRaf();
+      settleRafRef.current.r1 = window.requestAnimationFrame(() => {
+        settleRafRef.current.r1 = null;
+        settleRafRef.current.r2 = window.requestAnimationFrame(() => {
+          settleRafRef.current.r2 = null;
+          const list = forwardStepsRef.current;
+          const doneIdx = list.findIndex((s) => s.id === completedStepId);
+          const isPending = (s: RehearsalStep) =>
+            s.status !== "passed" && s.status !== "skipped";
+          const nextStep =
+            (doneIdx >= 0 ? list.slice(doneIdx + 1).find(isPending) : undefined) ||
+            list.find(isPending);
+          if (nextStep) {
+            const el = timelineRef.current?.querySelector<HTMLElement>(
+              `li[data-step-id="${nextStep.id.replace(/"/g, '\\"')}"]`,
+            );
+            if (el) {
+              el.scrollIntoView({
+                behavior: reduced ? "auto" : "smooth",
+                block: "start",
+              });
+            }
+            setArrivalStepId(nextStep.id);
+            if (arrivalTimerRef.current !== null) {
+              window.clearTimeout(arrivalTimerRef.current);
+            }
+            arrivalTimerRef.current = window.setTimeout(() => {
+              setArrivalStepId(null);
+              arrivalTimerRef.current = null;
+            }, 1400);
+          } else if (gateRef.current) {
+            gateRef.current.scrollIntoView({
               behavior: reduced ? "auto" : "smooth",
               block: "start",
             });
           }
-          setArrivalStepId(nextStep.id);
-          if (arrivalTimerRef.current !== null) {
-            window.clearTimeout(arrivalTimerRef.current);
-          }
-          arrivalTimerRef.current = window.setTimeout(() => {
-            setArrivalStepId(null);
-            arrivalTimerRef.current = null;
-          }, 1400);
-        } else if (gateRef.current) {
-          gateRef.current.scrollIntoView({
-            behavior: reduced ? "auto" : "smooth",
-            block: "start",
-          });
-        }
+        });
       });
-    });
-  }, []);
+    },
+    [cancelSettleRaf],
+  );
 
   const switchStage = (
     next: ChangeRehearsal["stage"],
@@ -8595,6 +8822,27 @@ function RehearsalSessionView({
     }
   };
 
+  const probeStampSource =
+    (r?.probe_issue?.fixed_script ? r.traces?.probe?.at : undefined) ||
+    r?.traces?.scope?.at ||
+    r?.traces?.create?.at ||
+    r?.created_at ||
+    r?.updated_at;
+  const probeFileName = r
+    ? `collect-${c.id}-${r.id.slice(0, 6)}-${formatProbeFileStamp(probeStampSource)}.sh`
+    : "";
+
+  const probeScript = r?.probe_script || "";
+  const downloadProbe = useCallback(() => {
+    if (!probeScript || !probeFileName) return;
+    const blob = new Blob([probeScript], { type: "text/x-shellscript" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = probeFileName;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }, [probeScript, probeFileName]);
+
   if (loading) {
     return (
       <div className="rh-skel">
@@ -8701,7 +8949,14 @@ function RehearsalSessionView({
 
   const submitRefine = async () => {
     const trimmedGoal = refineGoal.trim();
-    if (!trimmedGoal || offline || anyBusy) return;
+    if (
+      !trimmedGoal ||
+      offline ||
+      anyBusy ||
+      getRehearsalTask(refineKey)?.status === "running"
+    ) {
+      return;
+    }
     if (Array.from(trimmedGoal).length < 4) {
       Message.warning(
         bi(
@@ -8800,7 +9055,13 @@ function RehearsalSessionView({
   };
 
   const submitScope = async () => {
-    if (offline || scopeBusy) return;
+    if (
+      offline ||
+      scopeBusy ||
+      getRehearsalTask(scopeKey)?.status === "running"
+    ) {
+      return;
+    }
     onEngageFocus?.();
     const effortVal = pick.current?.effort?.includes(aiOpts.pref.think)
       ? aiOpts.pref.think
@@ -8873,7 +9134,13 @@ function RehearsalSessionView({
   };
 
   const submitProbe = async (action: "analyze" | "diagnose" = "analyze") => {
-    if (offline || probeBusy) return;
+    if (
+      offline ||
+      probeBusy ||
+      getRehearsalTask(probeKey)?.status === "running"
+    ) {
+      return;
+    }
     onEngageFocus?.();
     setLocalProbeAction(action);
     const effortVal = pick.current?.effort?.includes(aiOpts.pref.think)
@@ -8983,7 +9250,8 @@ function RehearsalSessionView({
   };
 
   const finalizeSOP = async () => {
-    if (offline) return;
+    if (offline || busyFinalize || busyFinalizeRef.current) return;
+    busyFinalizeRef.current = true;
     setBusyFinalize(true);
     switchStage("finalized", true);
     try {
@@ -9015,11 +9283,15 @@ function RehearsalSessionView({
       }
       err(e);
     } finally {
+      busyFinalizeRef.current = false;
       setBusyFinalize(false);
     }
   };
 
   const removeSession = async () => {
+    if (offline || busyDeleteRef.current) return;
+    busyDeleteRef.current = true;
+    setBusyDelete(true);
     try {
       await api(
         `/api/clusters/${encodeURIComponent(c.id)}/rehearsals/${encodeURIComponent(r.id)}`,
@@ -9033,25 +9305,10 @@ function RehearsalSessionView({
       );
     } catch (e) {
       err(e);
+    } finally {
+      busyDeleteRef.current = false;
+      setBusyDelete(false);
     }
-  };
-
-  const probeStampSource =
-    (r.probe_issue?.fixed_script ? r.traces?.probe?.at : undefined) ||
-    r.traces?.scope?.at ||
-    r.traces?.create?.at ||
-    r.created_at ||
-    r.updated_at;
-  const probeFileName = `collect-${c.id}-${r.id.slice(0, 6)}-${formatProbeFileStamp(probeStampSource)}.sh`;
-
-  const downloadProbe = () => {
-    if (!r.probe_script) return;
-    const blob = new Blob([r.probe_script], { type: "text/x-shellscript" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = probeFileName;
-    a.click();
-    URL.revokeObjectURL(a.href);
   };
 
   const steps = r.steps || [];
@@ -9187,7 +9444,7 @@ function RehearsalSessionView({
               )}
               okText={bi("删除", "Delete")}
               cancelText={bi("取消", "Cancel")}
-              okButtonProps={{ status: "danger" }}
+              okButtonProps={{ status: "danger", loading: busyDelete }}
               onOk={removeSession}
             >
               <Button
@@ -9195,6 +9452,8 @@ function RehearsalSessionView({
                 type="text"
                 status="danger"
                 icon={<IconDelete />}
+                loading={busyDelete}
+                disabled={offline || busyDelete}
                 aria-label={bi("删除演练", "Delete rehearsal")}
               >
                 {bi("删除", "Delete")}
@@ -9212,6 +9471,9 @@ function RehearsalSessionView({
               if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
                 e.preventDefault();
                 void submitRefine();
+              } else if (e.key === "Escape" && !anyBusy) {
+                e.preventDefault();
+                setRefineOpen(false);
               }
             }}
           >
@@ -9293,47 +9555,82 @@ function RehearsalSessionView({
             />
 
             {(refineKeepImgs.length > 0 || refineAddImgs.length > 0) && (
-              <div className="rh-img-strip rh-refine-imgs">
-                {refineKeepImgs.map((name, idx) => (
-                  <div key={name} className="rh-img-thumb">
-                    <img
-                      src={rehearsalImgUrl(c.id, r.id, name)}
-                      alt={bi(`已有截图 ${idx + 1}`, `Saved image ${idx + 1}`)}
-                    />
-                    <button
-                      type="button"
-                      className="rh-img-rm"
-                      disabled={anyBusy}
-                      aria-label={bi("移除截图", "Remove screenshot")}
-                      onClick={() =>
-                        setRefineKeepImgs((prev) =>
-                          prev.filter((x) => x !== name),
-                        )
-                      }
-                    >
-                      <IconClose />
-                    </button>
-                  </div>
-                ))}
-                {refineAddImgs.map((im) => (
-                  <div key={im.id} className="rh-img-thumb">
-                    <img src={im.dataUrl} alt={im.name} />
-                    <button
-                      type="button"
-                      className="rh-img-rm"
-                      disabled={anyBusy}
-                      aria-label={bi("移除截图", "Remove screenshot")}
-                      onClick={() =>
-                        setRefineAddImgs((prev) =>
-                          prev.filter((x) => x.id !== im.id),
-                        )
-                      }
-                    >
-                      <IconClose />
-                    </button>
-                  </div>
-                ))}
-              </div>
+              <>
+                <div className="rh-img-strip rh-refine-imgs">
+                  {refineKeepImgs.map((name, idx) => (
+                    <div key={name} className="rh-img-thumb">
+                      <button
+                        type="button"
+                        className="rh-img-open"
+                        onClick={() => setRefinePreviewIdx(idx)}
+                        title={bi("点击放大查看截图", "Click to zoom")}
+                      >
+                        <img
+                          src={rehearsalImgUrl(c.id, r.id, name)}
+                          alt={bi(`已有截图 ${idx + 1}`, `Saved image ${idx + 1}`)}
+                        />
+                      </button>
+                      <button
+                        type="button"
+                        className="rh-img-rm"
+                        disabled={anyBusy}
+                        aria-label={bi("移除截图", "Remove screenshot")}
+                        onClick={() =>
+                          setRefineKeepImgs((prev) =>
+                            prev.filter((x) => x !== name),
+                          )
+                        }
+                      >
+                        <IconClose />
+                      </button>
+                    </div>
+                  ))}
+                  {refineAddImgs.map((im, idx) => (
+                    <div key={im.id} className="rh-img-thumb">
+                      <button
+                        type="button"
+                        className="rh-img-open"
+                        onClick={() =>
+                          setRefinePreviewIdx(refineKeepImgs.length + idx)
+                        }
+                        title={bi("点击放大查看截图", "Click to zoom")}
+                      >
+                        <img src={im.dataUrl} alt={im.name} />
+                      </button>
+                      <button
+                        type="button"
+                        className="rh-img-rm"
+                        disabled={anyBusy}
+                        aria-label={bi("移除截图", "Remove screenshot")}
+                        onClick={() =>
+                          setRefineAddImgs((prev) =>
+                            prev.filter((x) => x.id !== im.id),
+                          )
+                        }
+                      >
+                        <IconClose />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <ImageLightbox
+                  items={[
+                    ...refineKeepImgs.map((name, idx) => ({
+                      src: rehearsalImgUrl(c.id, r.id, name),
+                      label: `${bi("已有截图", "Saved image")} ${idx + 1} (${name})`,
+                    })),
+                    ...refineAddImgs.map((im, idx) => ({
+                      src: im.dataUrl,
+                      label: im.name
+                        ? `${im.name} (${im.sizeKB} KB)`
+                        : bi(`新增截图 ${idx + 1}`, `New screenshot ${idx + 1}`),
+                    })),
+                  ]}
+                  index={refinePreviewIdx}
+                  onClose={() => setRefinePreviewIdx(null)}
+                  onIndexChange={setRefinePreviewIdx}
+                />
+              </>
             )}
 
             <div className="rh-mode-bar rh-refine-mode-bar">
@@ -10013,10 +10310,14 @@ function RehearsalSessionView({
                   onDragOver={(e) => {
                     if (e.dataTransfer?.types?.includes("Files")) {
                       e.preventDefault();
-                      setDragProbe(true);
+                      if (!dragProbe) setDragProbe(true);
                     }
                   }}
-                  onDragLeave={() => setDragProbe(false)}
+                  onDragLeave={(e) => {
+                    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                      setDragProbe(false);
+                    }
+                  }}
                   onDrop={(e) => {
                     e.preventDefault();
                     setDragProbe(false);
@@ -11200,7 +11501,18 @@ function RehearsalSessionView({
                   {r.doc_id && can("report.export") && (
                     <Button
                       icon={<IconDownload />}
+                      disabled={exportingDoc}
+                      loading={exportingDoc}
                       onClick={() => {
+                        if (exportingDoc) return;
+                        setExportingDoc(true);
+                        if (exportCooldownRef.current !== null) {
+                          window.clearTimeout(exportCooldownRef.current);
+                        }
+                        exportCooldownRef.current = window.setTimeout(() => {
+                          exportCooldownRef.current = null;
+                          setExportingDoc(false);
+                        }, 1500);
                         window.location.href = withLang(
                           `/api/clusters/${encodeURIComponent(c.id)}/export?docs=${encodeURIComponent(r.doc_id!)}`,
                         );
@@ -11518,7 +11830,7 @@ function splitFlattenedSubCommands(
   }));
 }
 
-function StepRow({
+const StepRow = React.memo(function StepRow({
   c,
   rehearsalId,
   rehearsalTitle,
@@ -11611,14 +11923,45 @@ function StepRow({
     return d ? [...d] : [];
   });
   const [dragEvid, setDragEvid] = useState(false);
+  useEffect(() => {
+    if (!dragEvid) return;
+    const clear = () => setDragEvid(false);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") clear();
+    };
+    window.addEventListener("dragend", clear);
+    window.addEventListener("drop", clear);
+    window.addEventListener("blur", clear);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("dragend", clear);
+      window.removeEventListener("drop", clear);
+      window.removeEventListener("blur", clear);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [dragEvid]);
   const [freshVerify, setFreshVerify] = useState(false);
   const [verifyFlash, setVerifyFlash] = useState(false);
   const [busy, setBusy] = useState("");
+  const stepBusyRef = useRef(false);
+  const flashTimerRef = useRef<number | null>(null);
+  const focusScrollTimerRef = useRef<number | null>(null);
 
   const evidImgInputRef = useRef<HTMLInputElement | null>(null);
   const verifyBoxRef = useRef<HTMLDivElement | null>(null);
   const onStepSettledRef = useRef(onStepSettled);
   onStepSettledRef.current = onStepSettled;
+
+  useEffect(() => {
+    return () => {
+      if (flashTimerRef.current !== null) {
+        window.clearTimeout(flashTimerRef.current);
+      }
+      if (focusScrollTimerRef.current !== null) {
+        window.clearTimeout(focusScrollTimerRef.current);
+      }
+    };
+  }, []);
 
   // Trigger Ichiban Kuji tear-off peel animation when a step freshly transitions to passed/skipped
   useEffect(() => {
@@ -11675,8 +12018,18 @@ function StepRow({
       setEvidImages([]);
     }
     setVerifyFlash(true);
-    window.setTimeout(() => setVerifyFlash(false), 1600);
-    window.setTimeout(() => {
+    if (flashTimerRef.current !== null) {
+      window.clearTimeout(flashTimerRef.current);
+    }
+    flashTimerRef.current = window.setTimeout(() => {
+      flashTimerRef.current = null;
+      setVerifyFlash(false);
+    }, 1600);
+    if (focusScrollTimerRef.current !== null) {
+      window.clearTimeout(focusScrollTimerRef.current);
+    }
+    focusScrollTimerRef.current = window.setTimeout(() => {
+      focusScrollTimerRef.current = null;
       const box = verifyBoxRef.current;
       if (!box) return;
       box.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -11786,6 +12139,8 @@ function StepRow({
       proposal_target_role?: string;
     },
   ) => {
+    if (offline || stepBusyRef.current) return;
+    stepBusyRef.current = true;
     setBusy("patch");
     try {
       const next = await api<ChangeRehearsal>(baseUrl, {
@@ -11807,6 +12162,7 @@ function StepRow({
     } catch (e) {
       err(e);
     } finally {
+      stepBusyRef.current = false;
       setBusy("");
     }
   };
@@ -11845,7 +12201,14 @@ function StepRow({
   }, [verifyTask, verifyKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const askVerify = async () => {
-    if (!hasEvidInput || offline || verifyBusy) return;
+    if (
+      !hasEvidInput ||
+      offline ||
+      verifyBusy ||
+      getRehearsalTask(verifyKey)?.status === "running"
+    ) {
+      return;
+    }
     onEngageFocus?.();
     const effortVal = pick.current?.effort?.includes(aiOpts.pref.think)
       ? aiOpts.pref.think
@@ -11927,6 +12290,8 @@ function StepRow({
   };
 
   const applyProposal = async () => {
+    if (offline || stepBusyRef.current) return;
+    stepBusyRef.current = true;
     setBusy("apply");
     try {
       const next = await api<ChangeRehearsal>(`${baseUrl}/apply`, {
@@ -11940,6 +12305,7 @@ function StepRow({
     } catch (e) {
       err(e);
     } finally {
+      stepBusyRef.current = false;
       setBusy("");
     }
   };
@@ -12530,10 +12896,14 @@ function StepRow({
                   onDragOver={(e) => {
                     if (e.dataTransfer?.types?.includes("Files")) {
                       e.preventDefault();
-                      setDragEvid(true);
+                      if (!dragEvid) setDragEvid(true);
                     }
                   }}
-                  onDragLeave={() => setDragEvid(false)}
+                  onDragLeave={(e) => {
+                    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                      setDragEvid(false);
+                    }
+                  }}
                   onDrop={(e) => {
                     e.preventDefault();
                     setDragEvid(false);
@@ -13310,7 +13680,7 @@ function StepRow({
       </div>
     </li>
   );
-}
+});
 
 function RehearsalSecurityBanner({
   clusterId,
@@ -13328,6 +13698,7 @@ function RehearsalSecurityBanner({
   );
   const [vexNote, setVexNote] = useState("");
   const [busy, setBusy] = useState(false);
+  const vexBusyRef = useRef(false);
 
   if (!sc) return null;
 
@@ -13364,6 +13735,8 @@ function RehearsalSecurityBanner({
   };
 
   const submitSyncVex = async () => {
+    if (vexBusyRef.current) return;
+    vexBusyRef.current = true;
     setBusy(true);
     try {
       const res = await api<{ rehearsal: ChangeRehearsal; updated: number }>(
@@ -13391,6 +13764,7 @@ function RehearsalSecurityBanner({
     } catch (e) {
       err(e);
     } finally {
+      vexBusyRef.current = false;
       setBusy(false);
     }
   };
@@ -13862,9 +14236,22 @@ const ProductionApplyModal = React.memo(function ProductionApplyModal({
     return hits;
   }, [visible, changes, isApplied, otherAppliedEffective]);
 
+  useEffect(() => {
+    if (!visible) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented || busy) return;
+      const t = e.target as HTMLElement | null;
+      if (t?.closest?.(".arco-modal-wrapper")) return;
+      onCancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [visible, busy, onCancel]);
+
   return (
     <Modal
       visible={visible}
+      alignCenter
       wrapClassName="ad-wu-wrap"
       className="rh-apply-modal"
       style={{ transformOrigin: "center center" }}
@@ -14243,9 +14630,22 @@ const ProductionVoidModal = React.memo(function ProductionVoidModal({
     bi("仅作演练参考，不上生产", "Staging reference only"),
   ];
 
+  useEffect(() => {
+    if (!visible) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented || busy) return;
+      const t = e.target as HTMLElement | null;
+      if (t?.closest?.(".arco-modal-wrapper")) return;
+      onCancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [visible, busy, onCancel]);
+
   return (
     <Modal
       visible={visible}
+      alignCenter
       wrapClassName="ad-wu-wrap"
       className="rh-void-modal"
       style={{ transformOrigin: "center center" }}
@@ -14394,6 +14794,7 @@ export function RehearsalProductionApplyCard({
     setRolloutBoardData(null);
   }, [clusterId, rehearsal.id]);
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
 
   const isApplied = Boolean(rehearsal.applied);
   const isVoided = Boolean(rehearsal.voided);
@@ -14488,7 +14889,8 @@ export function RehearsalProductionApplyCard({
         supersedeIds: string[];
       },
     ) => {
-      if (offline || busy) return;
+      if (offline || busy || busyRef.current) return;
+      busyRef.current = true;
       setBusy(true);
       try {
         const nextSummary = payload?.summary ?? "";
@@ -14534,6 +14936,7 @@ export function RehearsalProductionApplyCard({
       } catch (e) {
         err(e);
       } finally {
+        busyRef.current = false;
         setBusy(false);
       }
     },
@@ -14545,7 +14948,8 @@ export function RehearsalProductionApplyCard({
       wantVoid: boolean,
       payload?: { reason: string; supersededBy: string },
     ) => {
-      if (offline || busy) return;
+      if (offline || busy || busyRef.current) return;
+      busyRef.current = true;
       setBusy(true);
       try {
         const nextReason = payload?.reason ?? "";
@@ -14580,6 +14984,7 @@ export function RehearsalProductionApplyCard({
       } catch (e) {
         err(e);
       } finally {
+        busyRef.current = false;
         setBusy(false);
       }
     },

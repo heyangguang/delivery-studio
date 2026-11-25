@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   Dropdown,
@@ -6,6 +6,7 @@ import {
   Menu,
   Message,
   Modal,
+  Skeleton,
 } from "@arco-design/web-react";
 import {
   IconDelete,
@@ -56,6 +57,9 @@ export const isImage = (n: { mime?: string }) => !!n.mime?.startsWith("image/");
 export const rawUrl = (id: string, download = false) =>
   withLang(`/api/me/files/${id}/raw${download ? "?download=1" : ""}`);
 
+const hasFileTransfer = (dt?: DataTransfer | null) =>
+  !!dt && Array.from(dt.types || []).includes("Files");
+
 /** Puts files into the storage space; `chat` marks what came from a conversation. */
 export async function uploadFiles(
   files: File[],
@@ -75,16 +79,25 @@ export async function uploadFiles(
 }
 
 export function FileIcon({ n, size = 36 }: { n: FileNode; size?: number }) {
+  const [broken, setBroken] = useState(false);
+  useEffect(() => {
+    setBroken(false);
+  }, [n.id]);
   if (n.kind === "folder")
     return (
       <span className="mf-ic mf-folder" style={{ width: size, height: size }}>
         <IconFolder />
       </span>
     );
-  if (isImage(n) && n.size < 8 << 20)
+  if (isImage(n) && n.size < 8 << 20 && !broken)
     return (
       <span className="mf-ic mf-thumb" style={{ width: size, height: size }}>
-        <img src={rawUrl(n.id)} alt="" loading="lazy" />
+        <img
+          src={rawUrl(n.id)}
+          alt=""
+          loading="lazy"
+          onError={() => setBroken(true)}
+        />
       </span>
     );
   return (
@@ -125,13 +138,25 @@ export function UsageBar({ u }: { u: Usage | null }) {
 
 function useListing(parent: string, name = "") {
   const [data, setData] = useState<Listing | null>(null);
+  const reqSeq = useRef(0);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   const load = useCallback(() => {
+    const seq = ++reqSeq.current;
     const q = new URLSearchParams();
     if (parent) q.set("parent", parent);
     if (name) q.set("name", name);
     return api<Listing>(`/api/me/files?${q}`)
-      .then(setData)
+      .then((res) => {
+        if (mountedRef.current && seq === reqSeq.current) setData(res);
+      })
       .catch((e) => {
+        if (!mountedRef.current || seq !== reqSeq.current) return;
         err(e);
         setData(
           (d) =>
@@ -172,6 +197,7 @@ function Crumbs({
           <IconRight aria-hidden />
           <button
             type="button"
+            title={p.name}
             onClick={() => onGo(p.id)}
             aria-current={i === path.length - 1 ? "page" : undefined}
           >
@@ -187,11 +213,13 @@ function Crumbs({
 function FolderPicker({
   visible,
   moving,
+  loading,
   onClose,
   onPick,
 }: {
   visible: boolean;
   moving: FileNode | null;
+  loading?: boolean;
   onClose: () => void;
   onPick: (parent: string) => void;
 }) {
@@ -201,8 +229,12 @@ function FolderPicker({
   useEffect(() => {
     if (visible) setAt("");
   }, [visible]);
-  const folders = (data?.nodes || []).filter(
-    (n) => n.kind === "folder" && n.id !== moving?.id,
+  const folders = useMemo(
+    () =>
+      (data?.nodes || []).filter(
+        (n) => n.kind === "folder" && n.id !== moving?.id,
+      ),
+    [data?.nodes, moving?.id],
   );
   return (
     <Modal
@@ -211,7 +243,12 @@ function FolderPicker({
         `移动「${moving?.name || ""}」`,
         `Move "${moving?.name || ""}"`,
       )}
-      onCancel={onClose}
+      onCancel={() => {
+        if (!loading) onClose();
+      }}
+      maskClosable={!loading}
+      escToExit={!loading}
+      confirmLoading={loading}
       okText={bi("移动到这里", "Move here")}
       cancelText={bi("取消", "Cancel")}
       onOk={() => onPick(at)}
@@ -223,7 +260,7 @@ function FolderPicker({
           <li key={f.id}>
             <button type="button" onClick={() => setAt(f.id)}>
               <FileIcon n={f} size={28} />
-              <span>{f.name}</span>
+              <span title={f.name}>{f.name}</span>
               <IconRight />
             </button>
           </li>
@@ -244,12 +281,49 @@ export function MyFiles({ open }: { open: (n: FileNode) => void }) {
   const [q, setQ] = useState("");
   const [data, load] = useListing(parent, q.trim());
   const [busy, setBusy] = useState(false);
+  const [moveBusy, setMoveBusy] = useState(false);
   const [drag, setDrag] = useState(false);
   const [moving, setMoving] = useState<FileNode | null>(null);
   const pick = useRef<HTMLInputElement>(null);
+  const uploadingRef = useRef(false);
+  const movingRef = useRef(false);
+  const deletingRef = useRef(false);
+  const askingRef = useRef(false);
+  const dragDepthRef = useRef(0);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      dragDepthRef.current = 0;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!drag) return;
+    const clearDrag = () => {
+      dragDepthRef.current = 0;
+      setDrag(false);
+    };
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") clearDrag();
+    };
+    window.addEventListener("dragend", clearDrag);
+    window.addEventListener("drop", clearDrag);
+    window.addEventListener("blur", clearDrag);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("dragend", clearDrag);
+      window.removeEventListener("drop", clearDrag);
+      window.removeEventListener("blur", clearDrag);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [drag]);
 
   const upload = async (files: File[]) => {
-    if (!files.length) return;
+    if (!files.length || uploadingRef.current) return;
+    uploadingRef.current = true;
     setBusy(true);
     try {
       const r = await uploadFiles(files, parent);
@@ -264,7 +338,8 @@ export function MyFiles({ open }: { open: (n: FileNode) => void }) {
     } catch (e) {
       err(e);
     } finally {
-      setBusy(false);
+      uploadingRef.current = false;
+      if (mountedRef.current) setBusy(false);
       load();
     }
   };
@@ -288,12 +363,21 @@ export function MyFiles({ open }: { open: (n: FileNode) => void }) {
       okText: bi("好", "OK"),
       cancelText: bi("取消", "Cancel"),
       onOk: async () => {
+        if (askingRef.current) return;
+        const trimmed = v.trim();
+        if (!trimmed) {
+          Message.warning(bi("请输入名称", "Please enter a name"));
+          throw new Error("empty");
+        }
+        askingRef.current = true;
         try {
-          await ok(v.trim());
+          await ok(trimmed);
           load();
         } catch (e) {
           err(e);
           throw e;
+        } finally {
+          askingRef.current = false;
         }
       },
     });
@@ -326,25 +410,35 @@ export function MyFiles({ open }: { open: (n: FileNode) => void }) {
       cancelText: bi("取消", "Cancel"),
       okButtonProps: { status: "danger" },
       onOk: async () => {
+        if (deletingRef.current) return;
+        deletingRef.current = true;
         try {
           await api(`/api/me/files/${n.id}`, { method: "DELETE" });
           load();
         } catch (e) {
           err(e);
+          throw e;
+        } finally {
+          deletingRef.current = false;
         }
       },
     });
   const move = async (to: string) => {
-    if (!moving) return;
+    if (!moving || movingRef.current) return;
+    movingRef.current = true;
+    setMoveBusy(true);
     try {
       await api(`/api/me/files/${moving.id}`, {
         method: "PATCH",
         body: JSON.stringify({ parent: to }),
       });
-      setMoving(null);
+      if (mountedRef.current) setMoving(null);
       load();
     } catch (e) {
       err(e);
+    } finally {
+      movingRef.current = false;
+      if (mountedRef.current) setMoveBusy(false);
     }
   };
 
@@ -354,17 +448,34 @@ export function MyFiles({ open }: { open: (n: FileNode) => void }) {
   return (
     <div
       className={`mf ${drag ? "drag" : ""}`}
+      onDragEnter={(e) => {
+        if (!hasFileTransfer(e.dataTransfer)) return;
+        e.preventDefault();
+        dragDepthRef.current += 1;
+        setDrag(true);
+      }}
       onDragOver={(e) => {
-        if (e.dataTransfer.types.includes("Files")) {
-          e.preventDefault();
-          setDrag(true);
-        }
+        if (!hasFileTransfer(e.dataTransfer)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+        if (!drag) setDrag(true);
       }}
       onDragLeave={(e) => {
-        if (e.currentTarget === e.target) setDrag(false);
+        if (!hasFileTransfer(e.dataTransfer)) return;
+        dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+        if (
+          dragDepthRef.current === 0 ||
+          (e.relatedTarget &&
+            !e.currentTarget.contains(e.relatedTarget as Node))
+        ) {
+          dragDepthRef.current = 0;
+          setDrag(false);
+        }
       }}
       onDrop={(e) => {
+        if (!hasFileTransfer(e.dataTransfer)) return;
         e.preventDefault();
+        dragDepthRef.current = 0;
         setDrag(false);
         upload(Array.from(e.dataTransfer.files));
       }}
@@ -418,14 +529,15 @@ export function MyFiles({ open }: { open: (n: FileNode) => void }) {
           multiple
           hidden
           onChange={(e) => {
-            if (e.target.files) upload(Array.from(e.target.files));
+            const files = e.target.files ? Array.from(e.target.files) : [];
             e.target.value = "";
+            if (files.length) upload(files);
           }}
         />
       </header>
       <div className="mf-bar">
         {searching ? (
-          <span className="mf-found">
+          <span className="mf-found" title={q.trim()}>
             {bi(`搜索「${q.trim()}」`, `Search "${q.trim()}"`)}
           </span>
         ) : (
@@ -474,7 +586,7 @@ export function MyFiles({ open }: { open: (n: FileNode) => void }) {
               >
                 <FileIcon n={n} />
                 <span className="mf-name">
-                  <b>{n.name}</b>
+                  <b title={n.name}>{n.name}</b>
                   <small>
                     {n.kind === "folder"
                       ? bi("文件夹", "Folder")
@@ -492,11 +604,16 @@ export function MyFiles({ open }: { open: (n: FileNode) => void }) {
                 position="br"
                 droplist={
                   <Menu
+                    className="mf-menu"
                     onClickMenuItem={(k) => {
                       if (k === "rename") rename(n);
                       else if (k === "move") setMoving(n);
                       else if (k === "down")
-                        window.open(rawUrl(n.id, true), "_blank");
+                        window.open(
+                          rawUrl(n.id, true),
+                          "_blank",
+                          "noopener,noreferrer",
+                        );
                       else remove(n);
                     }}
                   >
@@ -551,6 +668,7 @@ export function MyFiles({ open }: { open: (n: FileNode) => void }) {
       <FolderPicker
         visible={!!moving}
         moving={moving}
+        loading={moveBusy}
         onClose={() => setMoving(null)}
         onPick={move}
       />
@@ -570,6 +688,7 @@ export function FileView({
 }) {
   useLang();
   const aiStatus = useAIStatus();
+  const deletingRef = useRef(false);
   const [d, setD] = useState<{
     node: FileNode;
     path: FileNode[];
@@ -577,18 +696,30 @@ export function FileView({
     truncated?: boolean;
   } | null>(null);
   useEffect(() => {
+    let cancelled = false;
     setD(null);
     api<typeof d>(`/api/me/files/${id}`)
-      .then(setD)
+      .then((res) => {
+        if (!cancelled) setD(res);
+      })
       .catch((e) => {
+        if (cancelled) return;
         err(e);
         gone();
       });
+    return () => {
+      cancelled = true;
+    };
   }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
-  if (!d) return <div className="mf-view" aria-busy />;
+  if (!d)
+    return (
+      <div className="mf-view" aria-busy>
+        <Skeleton animation text={{ rows: 5 }} />
+      </div>
+    );
   const n = d.node;
   return (
-    <article className="mf-view">
+    <article className="mf-view enter">
       <header>
         <FileIcon n={n} size={44} />
         <div>
@@ -602,7 +733,9 @@ export function FileView({
         <span className="mf-actions">
           <Button
             icon={<IconDownload />}
-            onClick={() => window.open(rawUrl(n.id, true), "_blank")}
+            onClick={() =>
+              window.open(rawUrl(n.id, true), "_blank", "noopener,noreferrer")
+            }
           >
             {bi("下载", "Download")}
           </Button>
@@ -617,12 +750,17 @@ export function FileView({
                 cancelText: bi("取消", "Cancel"),
                 okButtonProps: { status: "danger" },
                 onOk: async () => {
+                  if (deletingRef.current) return;
+                  deletingRef.current = true;
                   try {
                     await api(`/api/me/files/${n.id}`, { method: "DELETE" });
                     changed();
                     gone();
                   } catch (e) {
                     err(e);
+                    throw e;
+                  } finally {
+                    deletingRef.current = false;
                   }
                 },
               })
@@ -699,10 +837,14 @@ export function FilePicker({
       setQ("");
     }
   }, [visible]);
-  const nodes = (data?.nodes || []).filter(
-    (n) => n.kind === "folder" || !images || isImage(n),
+  const nodes = useMemo(
+    () =>
+      (data?.nodes || []).filter(
+        (n) => n.kind === "folder" || !images || isImage(n),
+      ),
+    [data?.nodes, images],
   );
-  const chosen = Object.values(sel);
+  const chosen = useMemo(() => Object.values(sel), [sel]);
   return (
     <Modal
       visible={visible}
@@ -749,12 +891,10 @@ export function FilePicker({
               }}
             >
               <FileIcon n={n} size={28} />
-              <span>
-                {n.name}{" "}
-                {n.kind !== "folder" && (
-                  <small className="faint">{bytesText(n.size)}</small>
-                )}
-              </span>
+              <span title={n.name}>{n.name}</span>
+              {n.kind !== "folder" && (
+                <em className="mf-pick-size">{bytesText(n.size)}</em>
+              )}
               {n.kind === "folder" ? (
                 <IconRight />
               ) : sel[n.id] ? (

@@ -48,25 +48,11 @@ import { installAIRainbowPointer } from "./airainbow";
 import "./polish.css";
 
 installAIRainbowPointer();
-import { NewDelivery } from "./Wizard";
-import { NewDeliveryPicker } from "./newpicker";
-import { ImportClusterPage } from "./importcluster";
-import { SettingsPage } from "./settings";
-import { AIPage } from "./aipage";
-import { MePage } from "./me";
-import {
-  StudioPage,
-  enabledStudioTabs,
-  isStudioRoute,
-  preferredStudioTab,
-} from "./studio";
 import { DeliveriesPage } from "./deliveries";
 import type { LoadState } from "./deliveries";
-import { ExecutionMonitorPage } from "./monitor";
 import type { MonitorListPayload } from "./monitor";
+import type { StudioTab } from "./studio";
 import { AppsPage } from "./apps";
-import { AccountsPage } from "./accounts";
-import { ComponentsPage } from "./components";
 import { registerStyles } from "./glyphs";
 /* After the platform is upgraded, a page opened before the upgrade asks for code files that no longer exist. That is
    not an error the person should see: load the new version once, quietly, and carry on where they were. */
@@ -83,25 +69,132 @@ window.addEventListener("vite:preloadError", (e) => {
   if (reloadForNewVersion()) e.preventDefault();
 });
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const lazyPage = <M extends { default: React.ComponentType<any> }>(
-  load: () => Promise<M>,
-) =>
-  lazy(
-    () =>
-      load().catch((e: Error) => {
+function lazyPage<C extends React.ComponentType<any>>(
+  load: () => Promise<{ default: C }>,
+) {
+  let pending: Promise<{ default: C }> | null = null;
+  const loadOnce = (): Promise<{ default: C }> => {
+    if (!pending) {
+      pending = load().catch((e: Error) => {
+        pending = null;
         if (STALE.test(e?.message || "") && reloadForNewVersion())
-          return new Promise<M>(() => {});
+          return new Promise<{ default: C }>(() => {});
         throw e;
-      }) as Promise<M>,
-  );
+      });
+    }
+    return pending;
+  };
+  return Object.assign(lazy(loadOnce), {
+    preload: () => {
+      void loadOnce().catch(() => undefined);
+    },
+  });
+}
+const NewDelivery = lazyPage(() =>
+  import("./Wizard").then((m) => ({ default: m.NewDelivery })),
+);
+const NewDeliveryPicker = lazyPage(() =>
+  import("./newpicker").then((m) => ({ default: m.NewDeliveryPicker })),
+);
+const ImportClusterPage = lazyPage(() =>
+  import("./importcluster").then((m) => ({ default: m.ImportClusterPage })),
+);
+const SettingsPage = lazyPage(() =>
+  import("./settings").then((m) => ({ default: m.SettingsPage })),
+);
+const AIPage = lazyPage(() =>
+  import("./aipage").then((m) => ({ default: m.AIPage })),
+);
+const MePage = lazyPage(() =>
+  import("./me").then((m) => ({ default: m.MePage })),
+);
+const StudioPage = lazyPage(() =>
+  import("./studio").then((m) => ({ default: m.StudioPage })),
+);
+const ExecutionMonitorPage = lazyPage(() =>
+  import("./monitor").then((m) => ({ default: m.ExecutionMonitorPage })),
+);
+const AccountsPage = lazyPage(() =>
+  import("./accounts").then((m) => ({ default: m.AccountsPage })),
+);
+const ComponentsPage = lazyPage(() =>
+  import("./components").then((m) => ({ default: m.ComponentsPage })),
+);
+const LibraryPage = lazyPage(() =>
+  import("./library").then((m) => ({ default: m.LibraryPage })),
+);
+const SecurityPage = lazyPage(() =>
+  import("./security").then((m) => ({ default: m.SecurityPage })),
+);
 const WorkbenchPage = lazyPage(() =>
   import("./workbench").then((m) => ({ default: m.WorkbenchPage })),
 );
 const GuidePage = lazyPage(() =>
   import("./wbguide").then((m) => ({ default: m.GuidePage })),
 );
-import { LibraryPage } from "./library";
-import { SecurityPage } from "./security";
+
+const STUDIO_TAB_KEY = "mh-studio-tab";
+function isStudioRoute(name: string): name is StudioTab {
+  return name === "kb" || name === "skills" || name === "mcp";
+}
+function enabledStudioTabs(features?: AIStatus["features"]): StudioTab[] {
+  const out: StudioTab[] = [];
+  if (features?.kb) out.push("kb");
+  if (features?.skills) out.push("skills");
+  if (features?.mcp) out.push("mcp");
+  return out;
+}
+function preferredStudioTab(features?: AIStatus["features"]): StudioTab {
+  const list = enabledStudioTabs(features);
+  try {
+    const saved = sessionStorage.getItem(STUDIO_TAB_KEY) as StudioTab | null;
+    if (saved && list.includes(saved)) return saved;
+  } catch {
+    /* ignore */
+  }
+  return list[0] || "kb";
+}
+function preloadRouteChunk(key: string) {
+  switch (key) {
+    case "executions":
+      ExecutionMonitorPage.preload();
+      break;
+    case "components":
+      ComponentsPage.preload();
+      break;
+    case "library":
+      LibraryPage.preload();
+      break;
+    case "security":
+      SecurityPage.preload();
+      break;
+    case "ai":
+      AIPage.preload();
+      break;
+    case "studio":
+    case "kb":
+    case "skills":
+    case "mcp":
+      StudioPage.preload();
+      break;
+    case "accounts":
+      AccountsPage.preload();
+      break;
+    case "settings":
+      SettingsPage.preload();
+      break;
+    case "me":
+      MePage.preload();
+      break;
+    case "new":
+      NewDeliveryPicker.preload();
+      NewDelivery.preload();
+      break;
+    case "import":
+      ImportClusterPage.preload();
+      break;
+  }
+}
 import { Login } from "./login";
 import { Palette } from "./palette";
 import {
@@ -128,6 +221,7 @@ import {
   typing,
   useAIStatus,
   useConnectivity,
+  useDelayed,
   useMedia,
 } from "./shared";
 import type { AIStatus, AppInfo, Job, Session } from "./shared";
@@ -432,10 +526,12 @@ function NavTabs({
   useLayoutEffect(() => {
     const nav = ref.current;
     if (!nav) return;
-    const measureBar = () => {
-      const el = activeInOverflow
+    const getActiveEl = () =>
+      activeInOverflow
         ? nav.querySelector<HTMLElement>('[data-k="__more__"]')
         : nav.querySelector<HTMLElement>(`a[data-k="${active}"]`);
+    const measureBar = () => {
+      const el = getActiveEl();
       const next = el ? { x: el.offsetLeft, w: el.offsetWidth } : null;
       setBar((prev) => {
         if (!next) return prev === null ? prev : null;
@@ -450,6 +546,8 @@ function NavTabs({
         ? new ResizeObserver(measureBar)
         : null;
     ro?.observe(nav);
+    const activeEl = getActiveEl();
+    if (activeEl) ro?.observe(activeEl);
     window.addEventListener("resize", measureBar);
     let cancelled = false;
     document.fonts?.ready
@@ -497,6 +595,8 @@ function NavTabs({
             href={href(it.to)}
             className={active === it.key ? "on" : ""}
             aria-current={active === it.key ? "page" : undefined}
+            onPointerEnter={() => preloadRouteChunk(it.key)}
+            onFocus={() => preloadRouteChunk(it.key)}
           >
             {it.key === "ai" ? (
               <span className="ai-word">{it.label}</span>
@@ -520,7 +620,10 @@ function NavTabs({
           trigger="click"
           position="bl"
           popupVisible={moreOpen}
-          onVisibleChange={setMoreOpen}
+          onVisibleChange={(open) => {
+            setMoreOpen(open);
+            if (open) overflowItems.forEach((it) => preloadRouteChunk(it.key));
+          }}
           droplist={
             <Menu
               className="tabs-more-menu"
@@ -537,7 +640,10 @@ function NavTabs({
                     NAV_GROUP[it.key] !== NAV_GROUP[overflowItems[i - 1].key] && (
                       <div className="menu-sep" role="separator" />
                     )}
-                  <Menu.Item key={it.key}>
+                  <Menu.Item
+                    key={it.key}
+                    onMouseEnter={() => preloadRouteChunk(it.key)}
+                  >
                     <span className="menu-row">
                       <span className={it.key === "ai" ? "ai-word" : ""}>
                         {it.label}
@@ -577,7 +683,11 @@ function NavTabs({
         <span className="tabs-sep" />
         {items.map((it) => (
           <span key={it.key} data-mk={it.key} className="tabs-m-item">
-            {it.label}
+            {it.key === "ai" ? (
+              <span className="ai-word">{it.label}</span>
+            ) : (
+              it.label
+            )}
             {it.badge && it.badge > 0 ? (
               <span className="tabs-live-badge">
                 <i />
@@ -592,7 +702,9 @@ function NavTabs({
         </span>
         {activeItem && (
           <span data-more-active="" className="tabs-more on">
-            <span>{activeItem.label}</span>
+            <span className={activeItem.key === "ai" ? "ai-word" : ""}>
+              {activeItem.label}
+            </span>
             <IconDown className="tabs-more-caret" />
           </span>
         )}
@@ -1176,6 +1288,23 @@ function AIStatusBadge({
   );
 }
 
+function RouteFallback() {
+  const show = useDelayed(true, 160);
+  return (
+    <div
+      className="route-fallback"
+      style={{
+        minHeight: "calc(100vh - 96px)",
+        display: "grid",
+        placeItems: "center",
+      }}
+      aria-busy="true"
+    >
+      {show ? <Spin size={22} /> : null}
+    </div>
+  );
+}
+
 function GlobeIcon() {
   return (
     <svg
@@ -1338,6 +1467,53 @@ function App() {
         void fetchCached("/api/ai/chats").catch(() => undefined);
     }, 150);
     return () => window.clearTimeout(t);
+  }, [user, aiOn]);
+  // Warm-prefetch primary lazy route chunks during browser idle time after sign-in so tab switches feel instant.
+  useEffect(() => {
+    if (!user) return;
+    const conn = (navigator as { connection?: { saveData?: boolean } }).connection;
+    if (conn?.saveData) return;
+    const queue: string[] = [
+      "executions",
+      "components",
+      "library",
+      ...(can("security.view") ? ["security"] : []),
+      ...(aiOn && can("ai.use") ? ["ai", "studio"] : []),
+      ...(can("iam.user|iam.role|iam.team|audit.view") ? ["accounts"] : []),
+      "settings",
+      "me",
+      ...(can("delivery.create") ? ["new"] : []),
+    ];
+    let cancelled = false;
+    let idleId: number | null = null;
+    let timerId: number | null = null;
+    const ric = (
+      window as Window & {
+        requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+        cancelIdleCallback?: (id: number) => void;
+      }
+    ).requestIdleCallback;
+    const cic = (
+      window as Window & { cancelIdleCallback?: (id: number) => void }
+    ).cancelIdleCallback;
+    const step = (idx: number) => {
+      if (cancelled || idx >= queue.length) return;
+      preloadRouteChunk(queue[idx]);
+      if (ric) {
+        idleId = ric(() => step(idx + 1), { timeout: 2500 });
+      } else {
+        timerId = window.setTimeout(() => step(idx + 1), 220);
+      }
+    };
+    timerId = window.setTimeout(() => {
+      if (ric) idleId = ric(() => step(0), { timeout: 2000 });
+      else step(0);
+    }, 600);
+    return () => {
+      cancelled = true;
+      if (timerId !== null) window.clearTimeout(timerId);
+      if (idleId !== null && cic) cic(idleId);
+    };
   }, [user, aiOn]);
   // something that changes the components (a version's status) asks for the list again
   useEffect(() => {
@@ -1704,21 +1880,15 @@ function App() {
       />
     );
   else if (route.name === "components" && route.id === "guide")
-    page = (
-      <Suspense fallback={null}>
-        <GuidePage me={user} />
-      </Suspense>
-    );
+    page = <GuidePage me={user} />;
   else if (route.name === "components" && route.id && route.edit !== undefined)
     page = (
-      <Suspense fallback={null}>
-        <WorkbenchPage
-          key={route.id}
-          me={user}
-          name={route.id}
-          tab={route.edit}
-        />
-      </Suspense>
+      <WorkbenchPage
+        key={route.id}
+        me={user}
+        name={route.id}
+        tab={route.edit}
+      />
     );
   else if (route.name === "components")
     page = <ComponentsPage me={user} selected={route.id} />;
@@ -1870,7 +2040,7 @@ function App() {
           jobs={jobs}
           jobsLoading={jobsLoad === "loading"}
           back={leave}
-          created={(j) => {
+          created={(j: Job) => {
             loadJobs();
             go(
               {
@@ -2092,7 +2262,9 @@ function App() {
         className="main"
         key={isStudioRoute(route.name) ? "studio" : route.name}
       >
-        <PageBoundary resetKey={href(route)}>{page}</PageBoundary>
+        <PageBoundary resetKey={href(route)}>
+          <Suspense fallback={<RouteFallback />}>{page}</Suspense>
+        </PageBoundary>
       </main>
       <ConnectivityPill
         onBack={() => {

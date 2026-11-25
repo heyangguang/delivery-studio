@@ -25,16 +25,20 @@
   color: var(--ink);
   text-decoration: none;
   transition:
-    background 0.15s,
-    box-shadow 0.2s;
+    background 0.16s var(--spring),
+    box-shadow 0.2s var(--spring),
+    transform 0.16s var(--spring);
 }
 .rp-row:hover {
   background: var(--hover);
 }
+.rp-row:active {
+  transform: scale(0.985);
+}
 .rp-row.on {
   background: var(--surface);
   box-shadow:
-    0 1px 2px rgba(16, 16, 40, 0.06),
+    var(--shadow-sm),
     0 0 0 1px var(--brand-line);
 }
 .rp-row:focus-visible {
@@ -255,6 +259,7 @@ body[arco-theme="dark"] .rp-ic.k-mine {
   color: var(--faint);
   font-style: normal;
   font-weight: 500;
+  font-variant-numeric: tabular-nums;
 }
 
 /* nothing chosen yet */
@@ -533,8 +538,8 @@ body[arco-theme="dark"] .rp-ic.k-mine {
   box-shadow: var(--shadow-sm);
   overflow: hidden;
   transition:
-    border-color 0.16s ease,
-    box-shadow 0.16s ease;
+    border-color 0.18s var(--spring),
+    box-shadow 0.18s var(--spring);
 }
 .rp-sdoc-sec:hover {
   border-color: color-mix(in srgb, var(--line-strong) 78%, var(--brand) 22%);
@@ -543,7 +548,7 @@ body[arco-theme="dark"] .rp-ic.k-mine {
   border-color: var(--brand-line);
   box-shadow:
     0 0 0 3px var(--brand-soft),
-    0 2px 8px rgba(15, 23, 42, 0.06);
+    var(--shadow-sm);
 }
 .rp-sdoc-sec-h {
   display: flex;
@@ -577,6 +582,7 @@ body[arco-theme="dark"] .rp-ic.k-mine {
   font-family: var(--mono);
   font-size: 11.5px;
   font-weight: 650;
+  font-variant-numeric: tabular-nums;
 }
 .rp-sdoc-num svg {
   display: block;
@@ -610,13 +616,13 @@ body[arco-theme="dark"] .rp-ic.k-mine {
 .rp-sdoc-num.tone-ok {
   color: var(--ok);
   background: var(--ok-soft);
-  border-color: rgba(52, 199, 89, 0.28);
+  border-color: var(--ok-line);
   font-family: inherit;
 }
 .rp-sdoc-num.tone-danger {
   color: var(--bad);
-  background: rgba(255, 59, 48, 0.11);
-  border-color: rgba(255, 59, 48, 0.25);
+  background: var(--bad-soft);
+  border-color: var(--bad-line);
   font-family: inherit;
 }
 .rp-sdoc-sec-b {
@@ -713,6 +719,7 @@ body[arco-theme="dark"] .rp-ic.k-mine {
 .rp-toc-title em {
   font-style: normal;
   font-weight: 500;
+  font-variant-numeric: tabular-nums;
 }
 .rp-toc-list {
   display: flex;
@@ -732,17 +739,24 @@ body[arco-theme="dark"] .rp-ic.k-mine {
   font-size: 12.5px;
   line-height: 1.4;
   text-decoration: none;
-  transition: background 0.14s, color 0.14s;
+  transition:
+    background 0.16s var(--spring),
+    color 0.16s var(--spring),
+    transform 0.14s var(--spring);
 }
 .rp-toc-list a:hover {
   color: var(--brand-ink);
   background: var(--hover);
+}
+.rp-toc-list a:active {
+  transform: scale(0.985);
 }
 .rp-toc-idx {
   flex: none;
   color: var(--faint);
   font-family: var(--mono);
   font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 .rp-toc-txt {
   overflow: hidden;
@@ -762,8 +776,8 @@ body[arco-theme="dark"] .rp-ic.k-mine {
   background: var(--brand-soft);
 }
 .rp-sec-box.plat {
-  border-color: rgba(31, 138, 76, 0.24);
-  background: rgba(52, 199, 89, 0.05);
+  border-color: var(--ok-line);
+  background: var(--ok-soft);
 }
 .rp-sec-box-h {
   display: flex;
@@ -839,6 +853,7 @@ body[arco-theme="dark"] .rp-ic.k-mine {
   background: var(--brand-soft);
   font-size: 12px;
   font-style: normal;
+  font-variant-numeric: tabular-nums;
 }
 .rp-scripts-title p {
   margin: 0;
@@ -856,7 +871,7 @@ body[arco-theme="dark"] .rp-ic.k-mine {
   border-radius: 12px;
   background: var(--surface);
   overflow: hidden;
-  transition: border-color 0.15s ease;
+  transition: border-color 0.18s var(--spring);
 }
 .rp-script-card:hover {
   border-color: var(--line-strong);
@@ -869,7 +884,7 @@ body[arco-theme="dark"] .rp-ic.k-mine {
   padding: 10px 14px;
   background: color-mix(in srgb, var(--sunken) 55%, var(--surface));
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: background 0.16s var(--spring);
 }
 .rp-script-bar:hover {
   background: var(--hover);
@@ -905,6 +920,7 @@ body[arco-theme="dark"] .rp-ic.k-mine {
 .rp-script-lines {
   color: var(--faint);
   font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
 }
 .rp-script-desc {
   margin: 0;
@@ -934,14 +950,18 @@ body[arco-theme="dark"] .rp-ic.k-mine {
   background: var(--surface);
   cursor: pointer;
   transition:
-    background 0.14s ease,
-    border-color 0.14s ease,
-    color 0.14s ease;
+    background 0.16s var(--spring),
+    border-color 0.16s var(--spring),
+    color 0.16s var(--spring),
+    transform 0.14s var(--spring);
 }
 .rp-script-act:hover {
   color: var(--ink);
   border-color: var(--line-strong);
   background: var(--hover);
+}
+.rp-script-act:active:not(:disabled) {
+  transform: scale(0.96);
 }
 .rp-script-act.ok {
   color: var(--ok);
@@ -963,12 +983,16 @@ body[arco-theme="dark"] .rp-ic.k-mine {
   color: var(--mute);
   cursor: pointer;
   transition:
-    background 0.14s ease,
-    border-color 0.14s ease,
-    color 0.14s ease;
+    background 0.16s var(--spring),
+    border-color 0.16s var(--spring),
+    color 0.16s var(--spring),
+    transform 0.14s var(--spring);
+}
+.rp-script-chev:active {
+  transform: scale(0.94);
 }
 .rp-script-chev svg {
-  transition: transform 0.2s ease;
+  transition: transform 0.22s var(--spring);
 }
 .rp-script-chev:hover {
   color: var(--ink);
@@ -1079,8 +1103,8 @@ body[arco-theme="dark"] .rp-ic.k-mine {
 }
 .rp-sec-guard.platform {
   color: var(--ink-2);
-  background: rgba(52, 199, 89, 0.07);
-  border: 1px solid rgba(52, 199, 89, 0.24);
+  background: var(--ok-soft);
+  border: 1px solid var(--ok-line);
 }
 .rp-sec-guard.platform svg {
   color: var(--ok);

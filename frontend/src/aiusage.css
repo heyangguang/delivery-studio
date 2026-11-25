@@ -1,4 +1,7 @@
 /* AI usage and cost pages. Prefix au- */
+.au-page {
+  padding-bottom: 88px;
+}
 .au-range .seg {
   margin: 0;
 }
@@ -24,6 +27,7 @@
   margin: 12px 0 6px;
   color: var(--mute);
   font-size: 13px;
+  font-variant-numeric: tabular-nums;
 }
 .au-table {
   border-top: 1px solid var(--line);
@@ -60,9 +64,13 @@
   text-align: left;
   background: none;
   cursor: pointer;
+  transition: background-color 0.15s var(--spring);
 }
 .au-row-b:hover {
   background: var(--hover);
+}
+.au-row-b:not(.aud):active {
+  background: var(--press);
 }
 .au-row-b:focus-visible {
   outline: none;
@@ -163,6 +171,7 @@
 .au-cost {
   text-align: right;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 .au-ip-h,
 .au-ip {
@@ -182,6 +191,7 @@
   margin: 0;
   padding: 6px 14px 16px 156px;
   font: 12.5px/1.55 var(--sans);
+  animation: ad-rise 0.2s var(--spring) both;
 }
 .au-model-id {
   font-size: 12.5px;
@@ -223,14 +233,18 @@
   background: var(--surface-2);
   cursor: pointer;
   transition:
-    border-color 0.15s,
-    background 0.15s,
-    color 0.15s;
+    border-color 0.16s var(--spring),
+    background-color 0.16s var(--spring),
+    color 0.16s var(--spring),
+    transform 0.16s var(--spring);
 }
 .au-copy-btn:hover {
   color: var(--brand-ink);
   border-color: var(--brand-line);
   background: var(--brand-soft);
+}
+.au-copy-btn:active {
+  transform: scale(0.96);
 }
 .au-dd-inline {
   display: flex;
@@ -355,10 +369,17 @@
   font: 11.5px var(--sans);
   background: none;
   cursor: pointer;
+  transition:
+    background-color 0.15s var(--spring),
+    color 0.15s var(--spring),
+    transform 0.15s var(--spring);
 }
 .au-raw-bar button:hover {
   color: var(--ink);
   background: var(--hover);
+}
+.au-raw-bar button:active {
+  transform: scale(0.96);
 }
 .au-raw {
   margin: 0;
@@ -450,6 +471,7 @@
 .au-kpi span {
   color: var(--faint);
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 .au-kpi span.is-warn {
   color: var(--warn);
@@ -484,6 +506,17 @@
   font: 12.5px var(--sans);
   background: none;
   cursor: pointer;
+  transition:
+    background-color 0.16s var(--spring),
+    color 0.16s var(--spring),
+    box-shadow 0.16s var(--spring),
+    transform 0.16s var(--spring);
+}
+.au-seg button:hover:not(:disabled):not(.on) {
+  color: var(--ink);
+}
+.au-seg button:active:not(:disabled) {
+  transform: scale(0.97);
 }
 .au-seg button.on {
   color: var(--ink);
@@ -566,5 +599,16 @@
   .au-row-b.aud {
     grid-template-columns: 1fr 1fr;
     row-gap: 6px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .au-more {
+    animation: none;
+  }
+  .au-row-b,
+  .au-copy-btn,
+  .au-raw-bar button,
+  .au-seg button {
+    transition: none;
   }
 }

@@ -90,33 +90,63 @@ export function AIPrefs({ onBack }: { onBack: () => void }) {
   useLang();
   const [p, setP] = useState<Prefs | null>(null);
   const [state, setState] = useState<"" | "saving" | "saved">("");
+  const [deletingId, setDeletingId] = useState("");
   const timer = useRef(0);
-  const first = useRef(true);
+  const aliveRef = useRef(true);
+  const latestRef = useRef<Prefs | null>(null);
+  latestRef.current = p;
+  const deletingRef = useRef<Set<string>>(new Set());
+  const clearingRef = useRef(false);
 
   useEffect(() => {
-    api<Prefs>("/api/me/ai-prefs").then(setP).catch(err);
-    return () => window.clearTimeout(timer.current);
+    aliveRef.current = true;
+    api<Prefs>("/api/me/ai-prefs")
+      .then((r) => {
+        if (!aliveRef.current) return;
+        latestRef.current = r;
+        setP(r);
+      })
+      .catch((e) => {
+        if (aliveRef.current) err(e);
+      });
+    return () => {
+      aliveRef.current = false;
+      window.clearTimeout(timer.current);
+    };
   }, []);
 
   const save = (next: Prefs, wait = 0) => {
+    latestRef.current = next;
     setP(next);
     window.clearTimeout(timer.current);
     setState("saving");
     timer.current = window.setTimeout(async () => {
+      const payload = latestRef.current || next;
       try {
         await api("/api/me/ai-prefs", {
           method: "PUT",
-          body: JSON.stringify(next),
+          body: JSON.stringify(payload),
         });
-        setState("saved");
+        if (aliveRef.current) setState("saved");
       } catch (e) {
-        setState("");
-        err(e);
+        if (aliveRef.current) {
+          setState("");
+          err(e);
+        }
       }
     }, wait);
   };
   const set = (patch: Partial<Prefs>, wait = 0) =>
-    p && save({ ...p, ...patch }, wait);
+    latestRef.current && save({ ...latestRef.current, ...patch }, wait);
+
+  const applyServerMemories = (res: Prefs) => {
+    setP((cur) => {
+      if (!cur) return res;
+      const merged = { ...cur, memories: res.memories };
+      latestRef.current = merged;
+      return merged;
+    });
+  };
 
   const editMemory = (m: Memory) => {
     let text = m.text;
@@ -136,12 +166,11 @@ export function AIPrefs({ onBack }: { onBack: () => void }) {
       cancelText: bi("取消", "Cancel"),
       onOk: async () => {
         try {
-          setP(
-            await api<Prefs>(`/api/me/ai-prefs/memory/${m.id}`, {
-              method: "PUT",
-              body: JSON.stringify({ text }),
-            }),
-          );
+          const res = await api<Prefs>(`/api/me/ai-prefs/memory/${m.id}`, {
+            method: "PUT",
+            body: JSON.stringify({ text }),
+          });
+          if (aliveRef.current) applyServerMemories(res);
         } catch (e) {
           err(e);
           throw e;
@@ -150,14 +179,19 @@ export function AIPrefs({ onBack }: { onBack: () => void }) {
     });
   };
   const dropMemory = async (m: Memory) => {
+    if (deletingRef.current.has(m.id)) return;
+    deletingRef.current.add(m.id);
+    setDeletingId(m.id);
     try {
-      setP(
-        await api<Prefs>(`/api/me/ai-prefs/memory/${m.id}`, {
-          method: "DELETE",
-        }),
-      );
+      const res = await api<Prefs>(`/api/me/ai-prefs/memory/${m.id}`, {
+        method: "DELETE",
+      });
+      if (aliveRef.current) applyServerMemories(res);
     } catch (e) {
-      err(e);
+      if (aliveRef.current) err(e);
+    } finally {
+      deletingRef.current.delete(m.id);
+      if (aliveRef.current) setDeletingId((cur) => (cur === m.id ? "" : cur));
     }
   };
   const clearMemory = () =>
@@ -171,13 +205,20 @@ export function AIPrefs({ onBack }: { onBack: () => void }) {
       cancelText: bi("取消", "Cancel"),
       okButtonProps: { status: "danger" },
       onOk: async () => {
+        if (clearingRef.current) return;
+        clearingRef.current = true;
         try {
-          setP(
-            await api<Prefs>("/api/me/ai-prefs/memory", { method: "DELETE" }),
-          );
-          Message.success(bi("已清空", "Cleared"));
+          const res = await api<Prefs>("/api/me/ai-prefs/memory", {
+            method: "DELETE",
+          });
+          if (aliveRef.current) {
+            applyServerMemories(res);
+            Message.success(bi("已清空", "Cleared"));
+          }
         } catch (e) {
           err(e);
+        } finally {
+          clearingRef.current = false;
         }
       },
     });
@@ -392,8 +433,10 @@ export function AIPrefs({ onBack }: { onBack: () => void }) {
                     </button>
                     <button
                       type="button"
+                      className="is-del"
+                      disabled={deletingId === m.id}
                       aria-label={bi("删除", "Delete")}
-                      onClick={() => dropMemory(m)}
+                      onClick={() => void dropMemory(m)}
                     >
                       <IconDelete />
                     </button>

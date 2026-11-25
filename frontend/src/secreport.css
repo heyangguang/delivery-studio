@@ -81,7 +81,9 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
-  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+  transition:
+    border-color 0.18s var(--spring),
+    box-shadow 0.18s var(--spring);
   position: relative;
   min-width: 0;
 }
@@ -118,6 +120,8 @@
   flex: none;
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.14);
 }
+:root[arco-theme="dark"] .srt-swatch,
+html[data-theme="dark"] .srt-swatch,
 body[arco-theme="dark"] .srt-swatch {
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.24);
 }
@@ -160,6 +164,8 @@ body[arco-theme="dark"] .srt-swatch {
   color: #0e7490;
   border: 1px solid rgba(14, 116, 144, 0.22);
 }
+:root[arco-theme="dark"] .srt-badge-custom,
+html[data-theme="dark"] .srt-badge-custom,
 body[arco-theme="dark"] .srt-badge-custom {
   background: rgba(56, 189, 248, 0.14);
   color: #67e8f9;
@@ -205,11 +211,15 @@ body[arco-theme="dark"] .srt-badge-custom {
   border: 1px solid var(--line);
 }
 
+:root[arco-theme="dark"] .srt-fmt-docx,
+html[data-theme="dark"] .srt-fmt-docx,
 body[arco-theme="dark"] .srt-fmt-docx {
   background: rgba(59, 130, 246, 0.16);
   color: #93c5fd;
   border-color: rgba(147, 197, 253, 0.26);
 }
+:root[arco-theme="dark"] .srt-fmt-xlsx,
+html[data-theme="dark"] .srt-fmt-xlsx,
 body[arco-theme="dark"] .srt-fmt-xlsx {
   background: rgba(16, 185, 129, 0.16);
   color: #6ee7b7;
@@ -253,15 +263,15 @@ body[arco-theme="dark"] .srt-fmt-xlsx {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 10px;
-  flex-wrap: nowrap;
+  gap: 8px 10px;
+  flex-wrap: wrap;
 }
 
 .srt-quick-exports {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   flex: none;
 }
 
@@ -279,7 +289,11 @@ body[arco-theme="dark"] .srt-fmt-xlsx {
   font: 500 11.5px/1 var(--sans);
   cursor: pointer;
   white-space: nowrap;
-  transition: border-color 0.14s ease, color 0.14s ease, background-color 0.14s ease;
+  transition:
+    border-color 0.18s var(--spring),
+    color 0.18s var(--spring),
+    background-color 0.18s var(--spring),
+    transform 0.16s var(--spring);
 }
 
 .srt-exp-btn svg {
@@ -288,14 +302,23 @@ body[arco-theme="dark"] .srt-fmt-xlsx {
   flex: none;
 }
 
-.srt-exp-btn:hover {
+.srt-exp-btn:hover:not(:disabled) {
   border-color: var(--brand-line);
   color: var(--brand-ink);
   background: var(--brand-soft);
 }
 
-.srt-exp-btn:hover svg {
+.srt-exp-btn:hover:not(:disabled) svg {
   color: var(--brand-ink);
+}
+
+.srt-exp-btn:active:not(:disabled) {
+  transform: scale(0.975);
+}
+
+.srt-exp-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .srt-manage-acts {
@@ -305,6 +328,7 @@ body[arco-theme="dark"] .srt-fmt-xlsx {
   gap: 1px;
   flex-wrap: nowrap;
   flex: none;
+  margin-left: auto;
 }
 
 .srt-act-link {
@@ -320,7 +344,14 @@ body[arco-theme="dark"] .srt-fmt-xlsx {
   font: 500 12px/1 var(--sans);
   cursor: pointer;
   white-space: nowrap;
-  transition: color 0.14s ease, background-color 0.14s ease;
+  transition:
+    color 0.18s var(--spring),
+    background-color 0.18s var(--spring),
+    transform 0.16s var(--spring);
+}
+
+.srt-act-link:active:not(:disabled) {
+  transform: scale(0.975);
 }
 
 .srt-act-link.is-sub {
@@ -460,13 +491,29 @@ body[arco-theme="dark"] .srt-fmt-xlsx {
   cursor: pointer;
   font-size: 12px;
   color: var(--ink-2);
-  transition: all 0.14s ease;
+  transition:
+    border-color 0.18s var(--spring),
+    background-color 0.18s var(--spring),
+    color 0.18s var(--spring),
+    transform 0.16s var(--spring);
 }
 
 .srt-theme-btn:hover {
   border-color: var(--brand-line);
   background: var(--surface-2);
   color: var(--ink);
+}
+
+.srt-theme-btn:active:not(:disabled) {
+  transform: scale(0.975);
+}
+
+.srt-theme-btn:focus-visible,
+.srt-fmt-card:focus-visible,
+.sexp-tpl-item:focus-visible,
+.sexp-mini-fmt:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
 }
 
 .srt-theme-btn.on {
@@ -493,12 +540,20 @@ body[arco-theme="dark"] .srt-fmt-xlsx {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  transition: all 0.15s ease;
+  transition:
+    border-color 0.18s var(--spring),
+    background-color 0.18s var(--spring),
+    box-shadow 0.18s var(--spring),
+    transform 0.16s var(--spring);
 }
 
 .srt-fmt-card:hover {
   border-color: var(--brand-line);
   background: var(--surface-2);
+}
+
+.srt-fmt-card:active:not(:disabled) {
+  transform: scale(0.98);
 }
 
 .srt-fmt-card.on {
@@ -540,7 +595,15 @@ body[arco-theme="dark"] .srt-fmt-xlsx {
   border: 1px solid var(--line);
   background: var(--surface);
   cursor: pointer;
-  transition: border-color 0.14s ease, background-color 0.14s ease;
+  user-select: none;
+  transition:
+    border-color 0.18s var(--spring),
+    background-color 0.18s var(--spring),
+    transform 0.16s var(--spring);
+}
+
+.srt-sec-opt:active {
+  transform: scale(0.985);
 }
 
 .srt-sec-opt:hover {
@@ -639,12 +702,20 @@ body[arco-theme="dark"] .srt-fmt-xlsx {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  transition: all 0.14s ease;
+  transition:
+    border-color 0.18s var(--spring),
+    background-color 0.18s var(--spring),
+    box-shadow 0.18s var(--spring),
+    transform 0.16s var(--spring);
 }
 
 .sexp-tpl-item:hover {
   border-color: var(--brand-line);
   background: var(--surface-2);
+}
+
+.sexp-tpl-item:active:not(:disabled) {
+  transform: scale(0.98);
 }
 
 .sexp-tpl-item.on {
@@ -706,7 +777,15 @@ body[arco-theme="dark"] .srt-fmt-xlsx {
   color: var(--ink-2);
   font-size: 12px;
   cursor: pointer;
-  transition: border-color 0.14s ease, background-color 0.14s ease, color 0.14s ease;
+  transition:
+    border-color 0.18s var(--spring),
+    background-color 0.18s var(--spring),
+    color 0.18s var(--spring),
+    transform 0.16s var(--spring);
+}
+
+.sexp-mini-fmt:active:not(:disabled) {
+  transform: scale(0.975);
 }
 
 .sexp-mini-fmt:hover {
@@ -755,5 +834,19 @@ body[arco-theme="dark"] .srt-fmt-xlsx {
   .srt-sec-grid,
   .sexp-tpl-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .srt-card,
+  .srt-exp-btn,
+  .srt-act-link,
+  .srt-theme-btn,
+  .srt-fmt-card,
+  .srt-sec-opt,
+  .sexp-tpl-item,
+  .sexp-mini-fmt {
+    transition: none !important;
+    transform: none !important;
   }
 }

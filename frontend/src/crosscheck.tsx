@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Button, Checkbox, Modal, Spin } from "@arco-design/web-react";
 import {
   IconCheckCircleFill,
@@ -60,8 +60,18 @@ export function CrossCheck({
   const [names, setNames] = useState<string[]>([]);
   const [result, setResult] = useState<Result | null>(null);
   const [error, setError] = useState("");
+  const busyRef = useRef(false);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   async function show() {
+    if (busyRef.current) return;
+    busyRef.current = true;
     setOpen(true);
     setBusy(true);
     setError("");
@@ -82,37 +92,43 @@ export function CrossCheck({
           "/api/components/platform-shared/workspace",
         ),
       ]);
-      const choices = components
+      if (!mountedRef.current) return;
+      const choices = (components || [])
         .filter((c) => c.has_draft && !c.broken && c.source !== "draft")
         .map((c) => ({ name: c.id, title: c.name }));
-      if (shared.draft?.exists) {
+      if (shared?.draft?.exists) {
         choices.unshift({ name: "platform-shared", title: "" });
       }
       setOptions(choices);
       setNames(choices.some((c) => c.name === name) ? [name] : []);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (mountedRef.current)
+        setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setBusy(false);
+      busyRef.current = false;
+      if (mountedRef.current) setBusy(false);
     }
   }
 
   async function run() {
+    if (busyRef.current || !names.length) return;
+    busyRef.current = true;
     setBusy(true);
     setError("");
     setResult(null);
     try {
       await flush();
-      setResult(
-        await api<Result>("/api/components/cross-check", {
-          method: "POST",
-          body: JSON.stringify({ names }),
-        }),
-      );
+      const res = await api<Result>("/api/components/cross-check", {
+        method: "POST",
+        body: JSON.stringify({ names }),
+      });
+      if (mountedRef.current) setResult(res);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (mountedRef.current)
+        setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setBusy(false);
+      busyRef.current = false;
+      if (mountedRef.current) setBusy(false);
     }
   }
 
@@ -137,11 +153,13 @@ export function CrossCheck({
 
   return (
     <>
-      <Button onClick={show}>{bi("联合检查", "Cross-check")}</Button>
+      <Button loading={busy && !open} onClick={show}>
+        {bi("联合检查", "Cross-check")}
+      </Button>
       <Modal
         title={bi("公共流程与组件联合检查", "Shared Flows & Components Cross-check")}
         visible={open}
-        onCancel={() => setOpen(false)}
+        onCancel={() => !busy && setOpen(false)}
         footer={null}
         className="cc-modal"
         style={{ width: "min(760px, calc(100vw - 32px))" }}
@@ -236,7 +254,7 @@ export function CrossCheck({
                         )
                       : bi("联合检查通过", "Cross-check passed")}
                 </b>
-                <span className="cc-banner-counts">
+                <span className="cc-banner-counts num">
                   {totalErrors > 0 && (
                     <em className="bad">
                       {bi(`${totalErrors} 项错误`, `${totalErrors} errors`)}

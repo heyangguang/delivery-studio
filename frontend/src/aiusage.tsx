@@ -179,6 +179,12 @@ function FilterBar({
           placeholder={bi("搜索用户、IP、对象、错误…", "Search user, IP, target, error…")}
           value={f.q}
           onChange={f.setQ}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              f.setQ("");
+              (e.target as HTMLElement).blur();
+            }
+          }}
           style={{ width: 240 }}
           aria-label={bi("搜索", "Search")}
         />
@@ -277,9 +283,17 @@ function Tokens({ u }: { u: Usage }) {
   );
 }
 
-function UsageMore({ u }: { u: Usage }) {
+const UsageMore = React.memo(function UsageMore({ u }: { u: Usage }) {
   useLang();
   const diag = u.diag;
+  const prettyReq = useMemo(
+    () => prettyDiagPayload(diag?.request_summary),
+    [diag?.request_summary],
+  );
+  const prettyRaw = useMemo(
+    () => prettyDiagPayload(diag?.response_raw),
+    [diag?.response_raw],
+  );
   const httpStatus = u.http_status ?? diag?.http_status;
   const responseId = u.response_id || diag?.response_id;
   const endpoint = diag?.endpoint || u.endpoint || "/chat/completions";
@@ -495,7 +509,7 @@ function UsageMore({ u }: { u: Usage }) {
           </dd>
         </>
       )}
-      {diag?.request_summary && (
+      {prettyReq && (
         <>
           <dt>{bi("请求摘要", "Request summary")}</dt>
           <dd className="au-dd-block">
@@ -504,19 +518,17 @@ function UsageMore({ u }: { u: Usage }) {
                 <span>{bi("请求参数摘要", "Request parameter summary")}</span>
                 <button
                   type="button"
-                  onClick={() => copy(prettyDiagPayload(diag.request_summary))}
+                  onClick={() => copy(prettyReq)}
                 >
                   <IconCopy /> {bi("复制", "Copy")}
                 </button>
               </div>
-              <pre className="au-raw">
-                {prettyDiagPayload(diag.request_summary)}
-              </pre>
+              <pre className="au-raw">{prettyReq}</pre>
             </div>
           </dd>
         </>
       )}
-      {diag?.response_raw && (
+      {prettyRaw && (
         <>
           <dt>{bi("原始响应", "Raw response")}</dt>
           <dd className="au-dd-block">
@@ -530,21 +542,121 @@ function UsageMore({ u }: { u: Usage }) {
                 </span>
                 <button
                   type="button"
-                  onClick={() => copy(prettyDiagPayload(diag.response_raw))}
+                  onClick={() => copy(prettyRaw)}
                 >
                   <IconCopy /> {bi("复制", "Copy")}
                 </button>
               </div>
-              <pre className="au-raw">
-                {prettyDiagPayload(diag.response_raw)}
-              </pre>
+              <pre className="au-raw">{prettyRaw}</pre>
             </div>
           </dd>
         </>
       )}
     </dl>
   );
-}
+});
+
+const UsageRow = React.memo(function UsageRow({
+  u,
+  expanded,
+  onToggle,
+}: {
+  u: Usage;
+  expanded: boolean;
+  onToggle: (id: string) => void;
+}) {
+  useLang();
+  const suspectTrunc = isSuspectZeroTruncated(u);
+  return (
+    <div
+      className={`au-item ${!u.ok ? "is-bad" : suspectTrunc ? "is-warn" : ""}`}
+    >
+      <button
+        type="button"
+        className="au-row-b"
+        role="row"
+        onClick={() => onToggle(u.id)}
+        aria-expanded={expanded}
+      >
+        <span className="au-time num">{stamp(u.at)}</span>
+        <span className="au-status-cell">
+          {!u.ok ? (
+            <span
+              className="au-state-pill bad"
+              title={u.error || bi("调用失败", "Call failed")}
+            >
+              <IconCloseCircleFill /> {bi("失败", "Failed")}
+            </span>
+          ) : suspectTrunc ? (
+            <span
+              className="au-state-pill warn"
+              title={bi(
+                "达到旧版 120s 上限截断且未返回 Token 计量",
+                "Truncated at legacy 120s timeout with no token usage returned",
+              )}
+            >
+              {bi("截断", "Truncated")}
+            </span>
+          ) : (
+            <span className="au-state-pill ok">
+              <IconCheckCircleFill /> {bi("成功", "OK")}
+            </span>
+          )}
+        </span>
+        <span className="au-user" title={u.user}>
+          {u.user}
+        </span>
+        <span className="au-what">
+          <b>{FEATURE[u.feature] || u.feature}</b>
+          <small title={u.target || u.job || undefined}>
+            {u.target || u.job || "—"}
+          </small>
+        </span>
+        <span className="au-model">
+          <b className="mono au-model-id" title={u.model}>
+            {u.model}
+          </b>
+          <small>
+            {u.provider}
+            {u.failover ? bi(" · 备用", " · Failover") : ""}
+            {u.diag?.fallback_used ? bi(" · 协议回退", " · Fallback") : ""}
+            {u.stream ? bi(" · 流式", " · Stream") : ""}
+          </small>
+        </span>
+        {u.ok || u.in || u.out || u.diag?.in_tokens ? (
+          <Tokens
+            u={{
+              ...u,
+              in: u.in || u.diag?.in_tokens || 0,
+              out: u.out || u.diag?.out_tokens || 0,
+              cached: u.cached ?? u.diag?.cached_tokens,
+            }}
+          />
+        ) : (
+          <span className="faint">—</span>
+        )}
+        <span className="au-time2">
+          <span>
+            <small>{bi("首字", "TTFT")}</small> {secs(u.first_ms)}
+          </span>
+          <span>
+            <small>{bi("总耗时", "Total")}</small> {secs(u.ms)}
+          </span>
+        </span>
+        <span className="au-cost num">
+          {u.cost ? money(u.cost, u.currency) : "—"}
+        </span>
+        <span
+          className={u.ip ? "au-ip mono" : "au-ip faint"}
+          title={u.ip || undefined}
+        >
+          {u.ip || "—"}
+        </span>
+      </button>
+      {expanded && <UsageMore u={u} />}
+    </div>
+  );
+});
 
 /* ---------------------------------------------------------------- detail */
 
@@ -594,8 +706,12 @@ export function UsageView() {
       window.clearTimeout(t);
     };
   }, [f.qs, f.q, page]);
+  const toggleRow = useCallback(
+    (id: string) => setOpen((cur) => (cur === id ? "" : id)),
+    [],
+  );
   return (
-    <article className="sx-page st-main enter">
+    <article className="sx-page st-main au-page enter">
       <header className="sx-page-h">
         <div>
           <h1>{bi("用量明细", "Usage log")}</h1>
@@ -630,87 +746,14 @@ export function UsageView() {
           <span className="au-cost">{bi("费用", "Cost")}</span>
           <span className="au-ip-h">{bi("来源 IP", "Source IP")}</span>
         </div>
-        {d?.rows.map((u) => {
-          const suspectTrunc = isSuspectZeroTruncated(u);
-          return (
-          <div key={u.id} className={`au-item ${!u.ok ? "bad" : suspectTrunc ? "warn" : ""}`}>
-            <button
-              type="button"
-              className="au-row-b"
-              role="row"
-              onClick={() => setOpen(open === u.id ? "" : u.id)}
-              aria-expanded={open === u.id}
-            >
-              <span className="au-time num">{stamp(u.at)}</span>
-              <span className="au-status-cell">
-                {!u.ok ? (
-                  <span
-                    className="au-state-pill bad"
-                    title={u.error || bi("调用失败", "Call failed")}
-                  >
-                    <IconCloseCircleFill /> {bi("失败", "Failed")}
-                  </span>
-                ) : suspectTrunc ? (
-                  <span
-                    className="au-state-pill warn"
-                    title={bi(
-                      "达到旧版 120s 上限截断且未返回 Token 计量",
-                      "Truncated at legacy 120s timeout with no token usage returned",
-                    )}
-                  >
-                    {bi("截断", "Truncated")}
-                  </span>
-                ) : (
-                  <span className="au-state-pill ok">
-                    <IconCheckCircleFill /> {bi("成功", "OK")}
-                  </span>
-                )}
-              </span>
-              <span className="au-user">{u.user}</span>
-              <span className="au-what">
-                <b>{FEATURE[u.feature] || u.feature}</b>
-                <small>{u.target || u.job || "—"}</small>
-              </span>
-              <span className="au-model">
-                <b className="mono au-model-id">{u.model}</b>
-                <small>
-                  {u.provider}
-                  {u.failover ? bi(" · 备用", " · Failover") : ""}
-                  {u.diag?.fallback_used ? bi(" · 协议回退", " · Fallback") : ""}
-                  {u.stream ? bi(" · 流式", " · Stream") : ""}
-                </small>
-              </span>
-              {u.ok || u.in || u.out || u.diag?.in_tokens ? (
-                <Tokens
-                  u={{
-                    ...u,
-                    in: u.in || u.diag?.in_tokens || 0,
-                    out: u.out || u.diag?.out_tokens || 0,
-                    cached: u.cached ?? u.diag?.cached_tokens,
-                  }}
-                />
-              ) : (
-                <span className="faint">—</span>
-              )}
-              <span className="au-time2">
-                <span>
-                  <small>{bi("首字", "TTFT")}</small> {secs(u.first_ms)}
-                </span>
-                <span>
-                  <small>{bi("总耗时", "Total")}</small> {secs(u.ms)}
-                </span>
-              </span>
-              <span className="au-cost num">
-                {u.cost ? money(u.cost, u.currency) : "—"}
-              </span>
-              <span className={u.ip ? "au-ip mono" : "au-ip faint"}>
-                {u.ip || "—"}
-              </span>
-            </button>
-            {open === u.id && <UsageMore u={u} />}
-          </div>
-          );
-        })}
+        {d?.rows.map((u) => (
+          <UsageRow
+            key={u.id}
+            u={u}
+            expanded={open === u.id}
+            onToggle={toggleRow}
+          />
+        ))}
         {d && d.rows.length === 0 && (
           <div className="au-empty">
             {bi("这个范围里没有调用记录。", "No usage records in this range.")}
@@ -755,7 +798,7 @@ const Tile = ({
 );
 
 export function CostView() {
-  useLang();
+  const lang = useLang();
   const f = useFilters();
   const statsUrl = `/api/settings/ai/usage/stats?${f.qs()}`;
   const metaUrl = `/api/settings/ai/usage?${f.qs({ size: 1 })}`;
@@ -767,14 +810,19 @@ export function CostView() {
   const [by, setBy] = useState<"cost" | "tokens">("cost");
   const prevQ = useRef(f.q);
   useEffect(() => {
+    let live = true;
     const u = `/api/settings/ai/usage?${f.qs({ size: 1 })}`;
     api<{ users: string[]; models: string[] }>(u)
       .then((r) => {
         putCached(u, r);
+        if (!live) return;
         setUsers(r.users);
         setModels(r.models);
       })
       .catch(() => undefined);
+    return () => {
+      live = false;
+    };
   }, [f.range]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     let live = true;
@@ -829,21 +877,42 @@ export function CostView() {
       })),
     [s, by],
   );
-  const fmtCost = (n: number) => (n === 0 ? "0" : money(n, cur));
-  const value = (a: Agg) => (by === "cost" ? a.cost : a.in + a.out);
+  const fmtCost = useCallback(
+    (n: number) => (n === 0 ? "0" : money(n, cur)),
+    [cur],
+  );
   const fmt = by === "cost" ? fmtCost : num;
-  const bars = (list: Agg[], label?: (a: Agg) => string) =>
-    list.map((a) => ({
-      key: a.key,
-      label: label ? label(a) : a.key,
-      value: value(a),
-      sub: bi(
-        `${num(a.calls)} 次 · ${num(a.in + a.out)} Token${a.cost ? ` · ${money(a.cost, cur)}` : ""}`,
-        `${num(a.calls)} call${a.calls === 1 ? "" : "s"} · ${num(a.in + a.out)} tokens${a.cost ? ` · ${money(a.cost, cur)}` : ""}`,
-      ),
-    }));
+  const makeBars = useCallback(
+    (list: Agg[], label?: (a: Agg) => string) =>
+      list.map((a) => ({
+        key: a.key,
+        label: label ? label(a) : a.key,
+        value: by === "cost" ? a.cost : a.in + a.out,
+        sub: bi(
+          `${num(a.calls)} 次 · ${num(a.in + a.out)} Token${a.cost ? ` · ${money(a.cost, cur)}` : ""}`,
+          `${num(a.calls)} call${a.calls === 1 ? "" : "s"} · ${num(a.in + a.out)} tokens${a.cost ? ` · ${money(a.cost, cur)}` : ""}`,
+        ),
+      })),
+    [by, cur, lang], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const modelBars = useMemo(
+    () => (s ? makeBars(s.by_model) : []),
+    [s, makeBars],
+  );
+  const userBars = useMemo(
+    () => (s ? makeBars(s.by_user) : []),
+    [s, makeBars],
+  );
+  const featureBars = useMemo(
+    () => (s ? makeBars(s.by_feature, (a) => FEATURE[a.key] || a.key) : []),
+    [s, makeBars],
+  );
+  const targetBars = useMemo(
+    () => (s ? makeBars(s.by_target, (a) => a.label || a.key) : []),
+    [s, makeBars],
+  );
   return (
-    <article className="sx-page st-main enter">
+    <article className="sx-page st-main au-page enter">
       <header className="sx-page-h">
         <div>
           <h1>{bi("用量与成本", "Usage & cost")}</h1>
@@ -1024,7 +1093,7 @@ export function CostView() {
             <section className="sx-sec">
               <h2>{bi("按模型", "By model")}</h2>
               <HBars
-                rows={bars(s.by_model)}
+                rows={modelBars}
                 format={fmt}
                 color="var(--teal)"
               />
@@ -1032,7 +1101,7 @@ export function CostView() {
             <section className="sx-sec">
               <h2>{bi("按用户", "By user")}</h2>
               <HBars
-                rows={bars(s.by_user)}
+                rows={userBars}
                 format={fmt}
                 color="var(--cobalt)"
               />
@@ -1040,7 +1109,7 @@ export function CostView() {
             <section className="sx-sec">
               <h2>{bi("按功能", "By feature")}</h2>
               <HBars
-                rows={bars(s.by_feature, (a) => FEATURE[a.key] || a.key)}
+                rows={featureBars}
                 format={fmt}
                 color="var(--kyndryl)"
               />
@@ -1048,7 +1117,7 @@ export function CostView() {
             <section className="sx-sec">
               <h2>{bi("按交付与组件", "By delivery & component")}</h2>
               <HBars
-                rows={bars(s.by_target, (a) => a.label || a.key)}
+                rows={targetBars}
                 format={fmt}
                 color="var(--ok)"
               />

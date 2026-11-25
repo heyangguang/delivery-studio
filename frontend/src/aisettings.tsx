@@ -625,6 +625,7 @@ function IconPick({
       trigger="click"
       position="bl"
       popupVisible={open}
+      escToClose
       onVisibleChange={setOpen}
       content={
         <div className="ip">
@@ -636,7 +637,10 @@ function IconPick({
                 type="file"
                 accept="image/png,image/jpeg,image/webp,image/svg+xml"
                 hidden
-                onChange={(e) => upload(e.target.files?.[0])}
+                onChange={(e) => {
+                  upload(e.target.files?.[0]);
+                  e.target.value = "";
+                }}
               />
             </label>
             {p.icon && (
@@ -798,6 +802,11 @@ function ProviderModal({
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState("");
   const [more, setMore] = useState(false);
+  const savingRef = useRef(false);
+  const fetchingRef = useRef(false);
+  const testingRef = useRef(false);
+  const openRef = useRef(open);
+  openRef.current = open;
   const curId = savedProvider?.id;
   useEffect(() => {
     if (!open) return;
@@ -838,6 +847,8 @@ function ProviderModal({
   const patch = (mid: string, f: Partial<AIModel>) =>
     setModels((x) => x.map((m) => (m.id === mid ? { ...m, ...f } : m)));
   const fetchModels = async () => {
+    if (fetchingRef.current) return;
+    fetchingRef.current = true;
     setFetching(true);
     try {
       const r = await api<{ models: AIModel[] }>("/api/settings/ai/models", {
@@ -850,6 +861,7 @@ function ProviderModal({
           api_version: p.api_version,
         }),
       });
+      if (!openRef.current) return;
       setRemote(r.models || []);
       setTab("remote");
       if (!r.models?.length)
@@ -860,9 +872,10 @@ function ProviderModal({
           ),
         );
     } catch (e) {
-      err(e);
+      if (openRef.current) err(e);
     } finally {
-      setFetching(false);
+      fetchingRef.current = false;
+      if (openRef.current) setFetching(false);
     }
   };
   const isDirty = useMemo(
@@ -875,6 +888,7 @@ function ProviderModal({
     models.some((m) => m.enabled);
 
   const persistProvider = async (auto: boolean): Promise<AIProvider | null> => {
+    if (savingRef.current) return null;
     if (!p.name?.trim()) {
       Message.warning(bi("请先填写供应商名称", "Enter a provider name first"));
       return null;
@@ -887,6 +901,7 @@ function ProviderModal({
       Message.warning(bi("请至少启用一个模型", "Enable at least one model"));
       return null;
     }
+    savingRef.current = true;
     setBusy(true);
     try {
       const r = await api<AIProvider>(
@@ -898,17 +913,20 @@ function ProviderModal({
           body: JSON.stringify({ ...p, models, key }),
         },
       );
-      setSavedProvider(r);
-      setP({ ...r });
-      setModels(r.models.map((m) => ({ ...m })));
-      setKey("");
+      if (openRef.current) {
+        setSavedProvider(r);
+        setP({ ...r });
+        setModels(r.models.map((m) => ({ ...m })));
+        setKey("");
+      }
       await saved(r, auto);
       return r;
     } catch (e) {
-      err(e);
+      if (openRef.current) err(e);
       return null;
     } finally {
-      setBusy(false);
+      savingRef.current = false;
+      if (openRef.current) setBusy(false);
     }
   };
 
@@ -976,21 +994,34 @@ function ProviderModal({
   };
 
   const test = async (mid: string) => {
-    const active = await ensureSavedForTest();
-    if (!active?.id) return;
-    const tested = await runSingleTest(active.id, mid);
-    if (tested) await saved(active, true);
+    if (testingRef.current || savingRef.current) return;
+    testingRef.current = true;
+    try {
+      const active = await ensureSavedForTest();
+      if (!active?.id || !openRef.current) return;
+      const tested = await runSingleTest(active.id, mid);
+      if (tested) await saved(active, true);
+    } finally {
+      testingRef.current = false;
+    }
   };
 
   const testAll = async () => {
-    const active = await ensureSavedForTest();
-    if (!active?.id) return;
-    let anyTested = false;
-    for (const m of active.models.filter((x) => x.enabled)) {
-      const res = await runSingleTest(active.id, m.id);
-      if (res) anyTested = true;
+    if (testingRef.current || savingRef.current) return;
+    testingRef.current = true;
+    try {
+      const active = await ensureSavedForTest();
+      if (!active?.id || !openRef.current) return;
+      let anyTested = false;
+      for (const m of active.models.filter((x) => x.enabled)) {
+        if (!openRef.current) break;
+        const res = await runSingleTest(active.id, m.id);
+        if (res) anyTested = true;
+      }
+      if (anyTested) await saved(active, true);
+    } finally {
+      testingRef.current = false;
     }
-    if (anyTested) await saved(active, true);
   };
 
   const shown = useMemo(
@@ -1476,6 +1507,7 @@ function ProviderModal({
                         <Popover
                           trigger="click"
                           position="bl"
+                          escToClose
                           triggerProps={{ autoFitPosition: true }}
                           content={
                             <div className="ai-eff">
@@ -1735,7 +1767,7 @@ function assignModelLabel(m: AIModel, siblings: AIModel[]): string {
     : `${m.name} · ${m.id}`;
 }
 
-function AssignModelPicker({
+const AssignModelPicker = React.memo(function AssignModelPicker({
   value,
   placeholder,
   clearLabel,
@@ -1923,7 +1955,7 @@ function AssignModelPicker({
       {trigger}
     </Popover>
   );
-}
+});
 
 export function AISettingsView() {
   const lang = useLang();
@@ -1935,6 +1967,12 @@ export function AISettingsView() {
   const [modal, setModal] = useState<{ edit: AIProvider | null } | null>(null);
   const [error, setError] = useState("");
   const [toggling, setToggling] = useState(false);
+  const [togglingProv, setTogglingProv] = useState("");
+  const togglingProvRef = useRef<Set<string>>(new Set());
+  const deletingProvRef = useRef<Set<string>>(new Set());
+  const savedLimitRef = useRef<number | null>(
+    canEdit ? cached<AISettings>("/api/settings/ai")?.monthly_limit ?? null : null,
+  );
   const [pane, setPane] = useState<
     "all" | "providers" | "features" | "boundary"
   >("all");
@@ -1943,6 +1981,7 @@ export function AISettingsView() {
     return (fresh ? api : fetchCached)<AISettings>("/api/settings/ai")
       .then((r) => {
         putCached("/api/settings/ai", r);
+        savedLimitRef.current = r.monthly_limit;
         setD(r);
         setError("");
         return r;
@@ -1954,10 +1993,26 @@ export function AISettingsView() {
   };
   const prevLang = useRef(lang);
   useEffect(() => {
+    let alive = true;
     const langChanged = prevLang.current !== lang;
     prevLang.current = lang;
-    void load(langChanged);
-  }, [canEdit, lang]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (canEdit) {
+      (langChanged ? api : fetchCached)<AISettings>("/api/settings/ai")
+        .then((r) => {
+          putCached("/api/settings/ai", r);
+          if (!alive) return;
+          savedLimitRef.current = r.monthly_limit;
+          setD(r);
+          setError("");
+        })
+        .catch((e) => {
+          if (alive) setError((e as Error).message);
+        });
+    }
+    return () => {
+      alive = false;
+    };
+  }, [canEdit, lang]);
   const validRefs = useMemo(() => {
     const s = new Set<string>();
     for (const p of d?.providers || []) {
@@ -2038,8 +2093,10 @@ export function AISettingsView() {
           user_models: cleaned.user_models,
         }),
       });
+      savedLimitRef.current = cleaned.monthly_limit;
       await refreshAIStatus();
     } catch (e) {
+      if (prev) putCached("/api/settings/ai", prev);
       setD(prev);
       err(e);
     }
@@ -2055,16 +2112,23 @@ export function AISettingsView() {
       okText: bi("删除", "Delete"),
       cancelText: bi("取消", "Cancel"),
       onOk: async () => {
+        if (deletingProvRef.current.has(p.id)) return;
+        deletingProvRef.current.add(p.id);
         try {
           await api(`/api/settings/ai/providers/${p.id}`, { method: "DELETE" });
           await load(true);
           await refreshAIStatus();
         } catch (e) {
           err(e);
+        } finally {
+          deletingProvRef.current.delete(p.id);
         }
       },
     });
   const toggle = async (p: AIProvider) => {
+    if (togglingProvRef.current.has(p.id)) return;
+    togglingProvRef.current.add(p.id);
+    setTogglingProv(p.id);
     try {
       await api(`/api/settings/ai/providers/${p.id}`, {
         method: "PUT",
@@ -2074,6 +2138,9 @@ export function AISettingsView() {
       await refreshAIStatus();
     } catch (e) {
       err(e);
+    } finally {
+      togglingProvRef.current.delete(p.id);
+      setTogglingProv((cur) => (cur === p.id ? "" : cur));
     }
   };
   // an assignment is "<provider>|<model>"; bare provider IDs resolve to their first enabled model, and stale/deleted refs fall back cleanly to undefined
@@ -2545,7 +2612,8 @@ export function AISettingsView() {
                               </div>
                               <Switch
                                 checked={p.enabled}
-                                onChange={() => toggle(p)}
+                                loading={togglingProv === p.id}
+                                onChange={() => void toggle(p)}
                                 aria-label={bi(
                                   `启用 ${p.name}`,
                                   `Enable ${p.name}`,
@@ -2998,9 +3066,13 @@ export function AISettingsView() {
                         max={100000}
                         value={d.monthly_limit}
                         onChange={(v) =>
-                          setD({ ...d, monthly_limit: Number(v) })
+                          setD({ ...d, monthly_limit: Number(v) || 0 })
                         }
-                        onBlur={() => put(d)}
+                        onBlur={() => {
+                          if (d.monthly_limit !== savedLimitRef.current) {
+                            void put(d);
+                          }
+                        }}
                         aria-label={bi("每月次数上限", "Monthly call limit")}
                       />
                     </div>

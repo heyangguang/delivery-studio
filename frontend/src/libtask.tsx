@@ -53,13 +53,41 @@ function txStep(s: string): string {
 
 const finished = (s: TaskStep) => s.state === "done" || s.state === "skipped";
 
-const seconds = (task: FetchTask) => {
+const seconds = (task: FetchTask, nowMs = Date.now()) => {
   const a = Date.parse(task.started);
-  const b = task.finished ? Date.parse(task.finished) : Date.now();
+  const b = task.finished ? Date.parse(task.finished) : nowMs;
   return Number.isFinite(a) && Number.isFinite(b)
     ? Math.max(1, Math.round((b - a) / 1000))
     : 0;
 };
+
+const TASK_LOG_WINDOW_STEP = 1000;
+
+/** Isolated 1Hz elapsed clock leaf so ticking never re-renders TaskCard step groups or multi-thousand-line logs. */
+function LiveTaskElapsed({ task }: { task: FetchTask }) {
+  useLang();
+  const running = task.state === "running" && !task.finished;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!running) return;
+    const tick = () => {
+      if (document.visibilityState === "visible") setNow(Date.now());
+    };
+    const t = window.setInterval(tick, 1000);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      window.clearInterval(t);
+      document.removeEventListener("visibilitychange", tick);
+    };
+  }, [running]);
+  const secs = seconds(task, now);
+  if (secs <= 0) return null;
+  return (
+    <span className="tk-stat time num">
+      <ClockGlyph /> {bi(`用时 ${secs} 秒`, `${secs}s elapsed`)}
+    </span>
+  );
+}
 
 type StepFilter = "all" | "done" | "skipped" | "failed";
 
@@ -497,6 +525,16 @@ function renderLogLine(line: string, lineNo: number) {
   );
 }
 
+const MemoTaskLogLines = React.memo(function MemoTaskLogLines({
+  lines,
+  offset,
+}: {
+  lines: string[];
+  offset: number;
+}) {
+  return <>{lines.map((l, idx) => renderLogLine(l, offset + idx))}</>;
+});
+
 /**
  * Structured operation progress and result panel for source index refreshes, package fetches, and Python runtimes.
  */
@@ -519,7 +557,17 @@ export function TaskCard({
   const [filter, setFilter] = useState<StepFilter>("all");
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [wrap, setWrap] = useState(true);
+  const [logLimit, setLogLimit] = useState(TASK_LOG_WINDOW_STEP);
   const logRef = useRef<HTMLDivElement>(null);
+  const nearBottomRef = useRef(true);
+  const copyTimerRef = useRef<number | null>(null);
+
+  useEffect(
+    () => () => {
+      if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (failed) setOpen(true);
@@ -528,10 +576,17 @@ export function TaskCard({
   useEffect(() => {
     setFilter("all");
     setCollapsed({});
+    setLogLimit(TASK_LOG_WINDOW_STEP);
+    nearBottomRef.current = true;
   }, [task.id]);
 
   useEffect(() => {
-    if (raw) logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
+    if (!raw || !nearBottomRef.current) return;
+    const raf = window.requestAnimationFrame(() => {
+      const el = logRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+    });
+    return () => window.cancelAnimationFrame(raf);
   }, [raw, task.logs.length]);
 
   const reqs = steps.filter((s) => s.id.startsWith("req|"));
@@ -558,7 +613,6 @@ export function TaskCard({
   );
   const doneSteps = steps.filter((s) => s.state === "done");
   const failedSteps = steps.filter((s) => s.state === "failed");
-  const secs = seconds(task);
 
   const title = isPy
     ? running
@@ -623,12 +677,15 @@ export function TaskCard({
   const renderSummaryChips = () => {
     if (running) {
       return (
-        <span className="tk-sub muted">
-          {now
-            ? `${txStep(now.label)}${now.detail ? " · " + txStep(now.detail) : ""}`
-            : task.logs[task.logs.length - 1]?.trim() ||
-              bi("准备中…", "Preparing…")}
-        </span>
+        <div className="tk-summary-pills">
+          <span className="tk-sub muted">
+            {now
+              ? `${txStep(now.label)}${now.detail ? " · " + txStep(now.detail) : ""}`
+              : task.logs[task.logs.length - 1]?.trim() ||
+                bi("准备中…", "Preparing…")}
+          </span>
+          <LiveTaskElapsed task={task} />
+        </div>
       );
     }
     if (failed) {
@@ -640,11 +697,7 @@ export function TaskCard({
               ? `${txStep(bad.label)}${bi("：", ": ")}${bad.detail ? txStep(bad.detail) : task.error || bi("失败", "Failed")}`
               : task.error || bi("操作失败", "Operation failed")}
           </span>
-          {secs > 0 && (
-            <span className="tk-stat time num">
-              <ClockGlyph /> {bi(`用时 ${secs} 秒`, `${secs}s elapsed`)}
-            </span>
-          )}
+          <LiveTaskElapsed task={task} />
         </div>
       );
     }
@@ -659,11 +712,7 @@ export function TaskCard({
           <span className="tk-stat ok">
             <i /> {pySummary ? txStep(pySummary) : bi("已完成", "Completed")}
           </span>
-          {secs > 0 && (
-            <span className="tk-stat time num">
-              <ClockGlyph /> {bi(`用时 ${secs} 秒`, `${secs}s elapsed`)}
-            </span>
-          )}
+          <LiveTaskElapsed task={task} />
         </div>
       );
     }
@@ -678,11 +727,7 @@ export function TaskCard({
               <i /> {bi(`${skipped.length} 项沿用本地`, `${skipped.length} cached`)}
             </span>
           )}
-          {secs > 0 && (
-            <span className="tk-stat time num">
-              <ClockGlyph /> {bi(`用时 ${secs} 秒`, `${secs}s elapsed`)}
-            </span>
-          )}
+          <LiveTaskElapsed task={task} />
         </div>
       );
     }
@@ -701,11 +746,7 @@ export function TaskCard({
             <i /> {bi(`${skipped.length} 个库中已有`, `${skipped.length} in library`)}
           </span>
         )}
-        {secs > 0 && (
-          <span className="tk-stat time num">
-            <ClockGlyph /> {bi(`用时 ${secs} 秒`, `${secs}s elapsed`)}
-          </span>
-        )}
+        <LiveTaskElapsed task={task} />
       </div>
     );
   };
@@ -918,7 +959,12 @@ export function TaskCard({
                   onClick={() => {
                     copy(task.logs.join("\n"));
                     setCopied(true);
-                    setTimeout(() => setCopied(false), 1500);
+                    if (copyTimerRef.current !== null)
+                      window.clearTimeout(copyTimerRef.current);
+                    copyTimerRef.current = window.setTimeout(
+                      () => setCopied(false),
+                      1500,
+                    );
                   }}
                 >
                   {copied ? <IconCheck /> : <IconCopy />}
@@ -934,9 +980,56 @@ export function TaskCard({
             ref={logRef}
             role="log"
             aria-label={bi("原始日志", "Raw logs")}
+            onScroll={(e) => {
+              const el = e.currentTarget;
+              nearBottomRef.current =
+                el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+            }}
           >
             {task.logs.length ? (
-              task.logs.map((l, idx) => renderLogLine(l, idx))
+              (() => {
+                const startIdx = Math.max(0, task.logs.length - logLimit);
+                const visibleLogs =
+                  startIdx > 0 ? task.logs.slice(startIdx) : task.logs;
+                return (
+                  <>
+                    {startIdx > 0 && (
+                      <div className="tk-log-window-bar">
+                        <span>
+                          {bi(
+                            `已折叠较早的 ${startIdx} 行输出`,
+                            `${startIdx} earlier lines hidden`,
+                          )}
+                        </span>
+                        <span className="tk-log-window-acts">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              nearBottomRef.current = false;
+                              setLogLimit((n) => n + TASK_LOG_WINDOW_STEP);
+                            }}
+                          >
+                            {bi(
+                              `加载前 ${Math.min(startIdx, TASK_LOG_WINDOW_STEP)} 行`,
+                              `Load ${Math.min(startIdx, TASK_LOG_WINDOW_STEP)} earlier`,
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              nearBottomRef.current = false;
+                              setLogLimit(task.logs.length);
+                            }}
+                          >
+                            {bi("显示全部", "Show all")}
+                          </button>
+                        </span>
+                      </div>
+                    )}
+                    <MemoTaskLogLines lines={visibleLogs} offset={startIdx} />
+                  </>
+                );
+              })()
             ) : (
               <div className="tk-log-ln is-plain">
                 <span className="tk-ln-no num">1</span>

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Button, Input, Message, Modal, Switch } from "@arco-design/web-react";
 import {
   IconBook,
@@ -34,25 +34,33 @@ export function SkillsView({ mine }: { mine?: boolean } = {}) {
   const [open, setOpen] = useState("");
   const [edit, setEdit] = useState<Skill | null>(null);
   const [busy, setBusy] = useState(false);
+  const savingRef = useRef(false);
   const [platform, setPlatform] = useState<Skill[]>([]);
-  const load = () =>
+  useEffect(() => {
+    let alive = true;
     (mine
       ? api<{ skills: Skill[]; platform: Skill[] }>("/api/me/skills").then(
           (r) => {
+            if (!alive) return;
             setSkills(
               r.skills.map((x) => ({ ...x, enabled: true, builtin: false })),
             );
             setPlatform(r.platform);
           },
         )
-      : api<{ skills: Skill[] }>("/api/settings/ai/skills").then((r) =>
-          setSkills(r.skills),
-        )
-    ).catch(err);
-  useEffect(() => {
-    load();
-  }, [mine, lang]); // eslint-disable-line react-hooks/exhaustive-deps
+      : api<{ skills: Skill[] }>("/api/settings/ai/skills").then((r) => {
+          if (alive) setSkills(r.skills);
+        })
+    ).catch((e) => {
+      if (alive) err(e);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [mine, lang]);
   const save = async (next: Skill[]) => {
+    if (savingRef.current) return false;
+    savingRef.current = true;
     setBusy(true);
     try {
       const custom = next
@@ -86,11 +94,18 @@ export function SkillsView({ mine }: { mine?: boolean } = {}) {
       err(e);
       return false;
     } finally {
+      savingRef.current = false;
       setBusy(false);
     }
   };
-  const builtin = mine ? platform : (skills || []).filter((s) => s.builtin);
-  const custom = (skills || []).filter((s) => !s.builtin);
+  const builtin = useMemo(
+    () => (mine ? platform : (skills || []).filter((s) => s.builtin)),
+    [mine, platform, skills],
+  );
+  const custom = useMemo(
+    () => (skills || []).filter((s) => !s.builtin),
+    [skills],
+  );
   const row = (s: Skill) => (
     <li key={s.name} className={s.enabled ? "" : "off"}>
       <button
@@ -162,7 +177,7 @@ export function SkillsView({ mine }: { mine?: boolean } = {}) {
     </li>
   );
   return (
-    <article className={mine ? "me-pane enter" : "sx-page st-main enter"}>
+    <article className={mine ? "me-pane ex-page enter" : "sx-page st-main ex-page enter"}>
       <header className="sx-page-h">
         <div>
           <h1>{mine ? bi("我的技能", "My skills") : bi("技能", "Skills")}</h1>
@@ -376,22 +391,39 @@ export function MCPView({ mine }: { mine?: boolean } = {}) {
     (Partial<MCPServer> & { token?: string }) | null
   >(null);
   const [busy, setBusy] = useState("");
+  const [togglingUserMCP, setTogglingUserMCP] = useState(false);
+  const busyRef = useRef("");
+  const puttingRef = useRef<Set<string>>(new Set());
   const load = () =>
     api<{ servers: MCPServer[] }>(base)
       .then((r) => setList(r.servers))
       .catch(err);
   useEffect(() => {
-    load();
+    let alive = true;
+    api<{ servers: MCPServer[] }>(base)
+      .then((r) => {
+        if (alive) setList(r.servers);
+      })
+      .catch((e) => {
+        if (alive) err(e);
+      });
     (mine
       ? api<{ user_mcp: boolean }>("/api/me")
       : api<{ no_user_mcp?: boolean }>("/api/settings/ai").then((r) => ({
           user_mcp: !r.no_user_mcp,
         }))
     )
-      .then((r) => setUserMCP(r.user_mcp))
+      .then((r) => {
+        if (alive) setUserMCP(r.user_mcp);
+      })
       .catch(() => undefined);
-  }, [mine]); // eslint-disable-line react-hooks/exhaustive-deps
+    return () => {
+      alive = false;
+    };
+  }, [mine, base]);
   const setAllowUsers = async (v: boolean) => {
+    if (togglingUserMCP) return;
+    setTogglingUserMCP(true);
     try {
       await api("/api/settings/ai/user-mcp", {
         method: "PUT",
@@ -400,32 +432,42 @@ export function MCPView({ mine }: { mine?: boolean } = {}) {
       setUserMCP(v);
     } catch (e) {
       err(e);
+    } finally {
+      setTogglingUserMCP(false);
     }
   };
   const put = async (sv: MCPServer, patch: Partial<MCPServer>) => {
+    if (puttingRef.current.has(sv.id)) return;
+    puttingRef.current.add(sv.id);
     try {
       await api(`${base}/${sv.id}`, {
         method: "PUT",
         body: JSON.stringify({ ...sv, ...patch, token: "" }),
       });
-      load();
+      await load();
     } catch (e) {
       err(e);
+    } finally {
+      puttingRef.current.delete(sv.id);
     }
   };
   const refresh = async (id: string) => {
+    if (busyRef.current) return;
+    busyRef.current = id;
     setBusy(id);
     try {
       await api(`${base}/${id}/refresh`, { method: "POST" });
     } catch (e) {
       err(e);
     } finally {
+      busyRef.current = "";
       setBusy("");
       load();
     }
   };
   const save = async () => {
-    if (!edit) return;
+    if (!edit || busyRef.current) return;
+    busyRef.current = "save";
     setBusy("save");
     try {
       const r = await api<{ id: string }>(
@@ -436,15 +478,17 @@ export function MCPView({ mine }: { mine?: boolean } = {}) {
         },
       );
       setEdit(null);
+      busyRef.current = "";
       await refresh(r.id);
     } catch (e) {
       err(e);
     } finally {
+      busyRef.current = "";
       setBusy("");
     }
   };
   return (
-    <article className={mine ? "me-pane enter" : "sx-page st-main enter"}>
+    <article className={mine ? "me-pane ex-page enter" : "sx-page st-main ex-page enter"}>
       <header className="sx-page-h">
         <div>
           <h1>{mine ? bi("我的 MCP 服务", "My MCP servers") : bi("MCP 服务", "MCP servers")}</h1>
@@ -476,6 +520,7 @@ export function MCPView({ mine }: { mine?: boolean } = {}) {
           <Switch
             size="small"
             checked={userMCP}
+            loading={togglingUserMCP}
             onChange={setAllowUsers}
             aria-label={bi("允许每个人接入自己的服务", "Allow personal MCP servers")}
           />
@@ -535,7 +580,9 @@ export function MCPView({ mine }: { mine?: boolean } = {}) {
                         <small className="faint">{sv.server_name}</small>
                       )}
                     </b>
-                    <small className="mono">{sv.url}</small>
+                    <small className="mono" title={sv.url}>
+                      {sv.url}
+                    </small>
                     <small>
                       {sv.error ? (
                         <span className="bad">
@@ -748,6 +795,7 @@ export function WebView() {
   const [w, setW] = useState<WebCfg | null>(() => initWeb?.web ?? null);
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState("");
+  const webBusyRef = useRef("");
   const [q, setQ] = useState("etcd database space exceeded");
   const [res, setRes] = useState<{
     results: { title: string; url: string; snippet: string }[];
@@ -762,9 +810,24 @@ export function WebView() {
       })
       .catch(err);
   useEffect(() => {
-    load();
-  }, [lang]); // eslint-disable-line react-hooks/exhaustive-deps
+    let alive = true;
+    api<{ web: WebCfg; providers: WebProvider[] }>("/api/settings/ai/web")
+      .then((r) => {
+        putCached("/api/settings/ai/web", r);
+        if (!alive) return;
+        setD(r);
+        setW(r.web);
+      })
+      .catch((e) => {
+        if (alive) err(e);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [lang]);
   const save = async (next: WebCfg) => {
+    if (webBusyRef.current) return;
+    webBusyRef.current = "save";
     setBusy("save");
     try {
       await api("/api/settings/ai/web", {
@@ -777,10 +840,13 @@ export function WebView() {
     } catch (e) {
       err(e);
     } finally {
+      webBusyRef.current = "";
       setBusy("");
     }
   };
   const test = async () => {
+    if (webBusyRef.current || !q.trim()) return;
+    webBusyRef.current = "test";
     setBusy("test");
     setRes(null);
     try {
@@ -793,6 +859,7 @@ export function WebView() {
     } catch (e) {
       err(e);
     } finally {
+      webBusyRef.current = "";
       setBusy("");
     }
   };
@@ -800,7 +867,7 @@ export function WebView() {
   const dirty =
     !!w && !!d && (JSON.stringify(w) !== JSON.stringify(d.web) || !!key);
   return (
-    <article className="sx-page st-main enter">
+    <article className="sx-page st-main ex-page enter">
       <header className="sx-page-h">
         <div>
           <h1>{bi("联网搜索与安全核查", "Web search & security lookup")}</h1>
@@ -814,7 +881,8 @@ export function WebView() {
         {w && (
           <Switch
             checked={w.enabled}
-            onChange={(v) => save({ ...w, enabled: v })}
+            loading={busy === "save"}
+            onChange={(v) => void save({ ...w, enabled: v })}
             checkedText={bi("已开启", "On")}
             uncheckedText={bi("未开启", "Off")}
             aria-label={bi("开启联网搜索", "Enable web search")}

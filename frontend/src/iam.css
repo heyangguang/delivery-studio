@@ -1,7 +1,4 @@
 /* IAM: roles, teams and what a person holds. Prefix iam-. */
-.iam-page {
-  max-width: 1760px;
-}
 .iam-h {
   display: flex;
   align-items: flex-start;
@@ -74,10 +71,16 @@
 }
 .iam-roles button {
   cursor: pointer;
-  transition: background 0.15s, box-shadow 0.15s;
+  transition:
+    background-color 0.18s var(--spring),
+    box-shadow 0.18s var(--spring),
+    transform 0.16s var(--spring);
 }
 .iam-roles button:hover {
   background: var(--hover);
+}
+.iam-roles button:active:not(:disabled) {
+  transform: scale(0.985);
 }
 .iam-roles button.on {
   background: var(--surface);
@@ -97,11 +100,15 @@
 .iam-roles b,
 .iam-team-h b {
   font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .iam-roles small,
 .iam-team-h small {
   color: var(--mute);
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 .iam-role-ic {
   display: grid;
@@ -212,14 +219,18 @@
   border-bottom: 1px solid var(--line);
   background: var(--surface-2);
   cursor: pointer;
+  user-select: none;
+  transition: background-color 0.16s var(--spring);
 }
 .iam-mod-h b {
   flex: 1;
+  min-width: 0;
   font-weight: 600;
 }
 .iam-mod-h small {
   color: var(--faint);
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 .iam-perms {
   display: flex;
@@ -231,7 +242,8 @@
   gap: 8px;
   padding: 8px 12px;
   cursor: pointer;
-  transition: background 0.15s;
+  user-select: none;
+  transition: background-color 0.16s var(--spring);
 }
 .iam-perm:hover {
   background: var(--hover);
@@ -299,7 +311,14 @@
   border: 1px solid var(--line);
   background: var(--surface);
   cursor: pointer;
-  transition: border-color 0.15s ease, background-color 0.15s ease;
+  user-select: none;
+  transition:
+    border-color 0.18s var(--spring),
+    background-color 0.18s var(--spring),
+    transform 0.16s var(--spring);
+}
+.iam-ai-sub-item:active {
+  transform: scale(0.985);
 }
 .iam-ai-sub-item.on {
   border-color: var(--brand-line);
@@ -410,16 +429,25 @@
   padding: 0 12px;
 }
 .iam-members a {
+  display: inline-flex;
+  align-items: center;
   padding: 2px 9px;
   border-radius: 6px;
   color: var(--ink-2);
   font-size: 12.5px;
   text-decoration: none;
   background: var(--sunken);
+  transition:
+    color 0.18s var(--spring),
+    background-color 0.18s var(--spring),
+    transform 0.16s var(--spring);
 }
 .iam-members a:hover {
   color: var(--brand-ink);
   background: var(--brand-soft);
+}
+.iam-members a:active {
+  transform: scale(0.975);
 }
 .iam-empty {
   display: flex;
@@ -458,18 +486,23 @@
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding: 10px 12px;
+  padding: 12px 14px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 12px;
   background: var(--surface);
   cursor: pointer;
+  user-select: none;
   transition:
-    border-color 0.15s,
-    background 0.15s,
-    box-shadow 0.15s;
+    border-color 0.18s var(--spring),
+    background-color 0.18s var(--spring),
+    box-shadow 0.18s var(--spring),
+    transform 0.16s var(--spring);
 }
 .iam-pick:hover {
   background: var(--hover);
+}
+.iam-pick:active {
+  transform: scale(0.99);
 }
 .iam-pick.on {
   border-color: var(--brand-line);
@@ -478,6 +511,8 @@
 }
 .iam-pick > span {
   display: flex;
+  flex: 1;
+  min-width: 0;
   flex-direction: column;
   gap: 2px;
 }
@@ -533,6 +568,13 @@
   font-style: normal;
   background: var(--surface);
 }
+/* ---------------------------------------------------------------- one person */
+.iam-user,
+.au-page,
+.iam-page {
+  max-width: 1560px;
+  padding: 30px clamp(20px, 3.2vw, 52px) 80px;
+}
 @media (max-width: 900px) {
   .iam-page,
   .iam-user,
@@ -561,14 +603,6 @@
 }
 .acc-access {
   margin: 22px 0 6px;
-}
-
-/* ---------------------------------------------------------------- one person */
-.iam-user,
-.au-page,
-.iam-page {
-  max-width: 1560px;
-  padding: 30px clamp(20px, 3.2vw, 52px) 80px;
 }
 .iam-user-h {
   display: flex;
@@ -672,20 +706,18 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
 }
 .iam-del-name small,
 .iam-del-jobs {
   color: var(--mute);
   font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
 }
 
 /* the grant editor, roomier */
 .iam-grant-cols {
   gap: 48px;
-}
-.iam-pick {
-  padding: 12px 14px;
-  border-radius: 12px;
 }
 
 /* ---------------------------------------------------------------- the audit */
@@ -713,10 +745,13 @@
   text-align: left;
   background: none;
   cursor: pointer;
-  transition: background 0.12s;
+  transition: background-color 0.16s var(--spring);
 }
 .au2-row:hover {
   background: var(--hover);
+}
+.au2-row:not(.au2-head):active {
+  background: var(--press);
 }
 .au2-row.on {
   background: var(--brand-soft);
@@ -737,6 +772,7 @@
 .au2-time {
   color: var(--ink-2);
   font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
 }
 .au2-who,
 .au2-what {
@@ -829,7 +865,9 @@
 .au-detail dd {
   display: block;
   margin: 0;
+  min-width: 0;
   line-height: 22px;
+  overflow-wrap: anywhere;
   word-break: break-word;
 }
 .au-detail dd small {
@@ -984,6 +1022,7 @@
 .au-stat strong {
   font-size: 20px;
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
   letter-spacing: -0.02em;
   color: var(--ink);
 }
@@ -1052,13 +1091,19 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  transition: background-color 0.14s ease, box-shadow 0.18s var(--spring);
+  transition:
+    background-color 0.18s var(--spring),
+    box-shadow 0.18s var(--spring),
+    transform 0.16s var(--spring);
 }
 .au-member-item:first-child {
   border-top: 0;
 }
 .au-member-item:hover {
   background: var(--hover);
+}
+.au-member-item:active:not(:disabled) {
+  transform: scale(0.985);
 }
 .au-member-item.on {
   background: var(--brand-soft);
@@ -1140,6 +1185,20 @@
   color: var(--brand-ink);
   font: 550 12px var(--sans);
   cursor: pointer;
+  transition:
+    background-color 0.18s var(--spring),
+    border-color 0.18s var(--spring),
+    transform 0.16s var(--spring);
+}
+.au-filter-pill:hover {
+  border-color: var(--brand);
+}
+.au-filter-pill:active:not(:disabled) {
+  transform: scale(0.975);
+}
+.au-filter-pill:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
 }
 
 .au2-shead,
@@ -1258,5 +1317,21 @@
   .au2-shead > :nth-child(4),
   .au2-srow > :nth-child(4) {
     display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .iam-roles button,
+  .iam-mod-h,
+  .iam-perm,
+  .iam-ai-sub-item,
+  .iam-members a,
+  .iam-pick,
+  .au2-row,
+  .au-member-item,
+  .au-filter-pill,
+  .au-row-go {
+    transition: none !important;
+    transform: none !important;
   }
 }

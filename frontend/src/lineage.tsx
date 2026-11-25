@@ -98,7 +98,7 @@ export function LineagePanel({ lineage }: { lineage?: Lineage | null }) {
           <Ref r={source} />
         </div>
       )}
-      {source_gone && <p className="dv-note">{bi("它取代的那一份已被删除。", "The replaced delivery has been deleted.")}</p>}
+      {source_gone && <p className="dv-note is-muted">{bi("它取代的那一份已被删除。", "The replaced delivery has been deleted.")}</p>}
       {children.length > 0 && (
         <div className="dv-row top">
           <span className="dv-k">{bi("后续修订", "Subsequent revisions")}</span>
@@ -130,7 +130,7 @@ export function LineagePanel({ lineage }: { lineage?: Lineage | null }) {
             </ul>
           )}
           {changes.length > 12 && (
-            <button className="link" onClick={() => setAll(!all)}>
+            <button type="button" className="link" onClick={() => setAll(!all)}>
               {all ? bi("收起", "Show less") : bi(`显示全部 ${changes.length} 项`, `Show all ${changes.length}`)}
             </button>
           )}

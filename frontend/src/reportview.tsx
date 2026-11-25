@@ -1,16 +1,20 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Button, Input, Message, Modal } from "@arco-design/web-react";
+import { Button, Input, Message, Modal, Skeleton } from "@arco-design/web-react";
 import {
   IconDelete,
   IconDownload,
   IconUpload,
 } from "@arco-design/web-react/icon";
 import { api, cached, can, csrfToken, err, putCached } from "./shared";
+import { lazySubView } from "./topology";
 import { Segmented } from "./ui";
-import { SecReportTemplatesSection } from "./secreport";
 import { bi, biv, getLang, useLang, withLang } from "./i18n";
 import "./storageview.css";
 import "./docs.css";
+
+const LazySecReportTemplatesSection = lazySubView(() =>
+  import("./secreport").then((m) => ({ default: m.SecReportTemplatesSection })),
+);
 
 /* Settings -> Report template: controls the enterprise manual cover, TOC, version-control page, visual palette,
    header/footer variables, and custom .docx corporate templates for every exported cluster document. */
@@ -99,8 +103,11 @@ export function ReportView() {
   const pickBanner = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadingBanner, setUploadingBanner] = useState(false);
+  const [removingBanner, setRemovingBanner] = useState(false);
+  const removingTplRef = useRef(false);
 
   const upload = async (f: File) => {
+    if (uploading) return;
     setUploading(true);
     try {
       const fd = new FormData();
@@ -139,6 +146,8 @@ export function ReportView() {
       cancelText: bi("取消", "Cancel"),
       okButtonProps: { status: "danger" },
       onOk: async () => {
+        if (removingTplRef.current) return;
+        removingTplRef.current = true;
         try {
           const r = await api<RS>("/api/settings/report/template", {
             method: "DELETE",
@@ -149,11 +158,14 @@ export function ReportView() {
           );
         } catch (e) {
           err(e);
+        } finally {
+          removingTplRef.current = false;
         }
       },
     });
 
   const uploadBanner = async (f: File) => {
+    if (uploadingBanner) return;
     setUploadingBanner(true);
     try {
       const fd = new FormData();
@@ -178,6 +190,8 @@ export function ReportView() {
   };
 
   const removeBanner = async () => {
+    if (removingBanner) return;
+    setRemovingBanner(true);
     try {
       const r = await api<RS>("/api/settings/report/banner", {
         method: "DELETE",
@@ -186,12 +200,14 @@ export function ReportView() {
       Message.success(bi("已移除封面横幅", "Cover banner removed"));
     } catch (e) {
       err(e);
+    } finally {
+      setRemovingBanner(false);
     }
   };
 
   const dirty = !!v && JSON.stringify(v) !== JSON.stringify(saved);
   const save = async () => {
-    if (!v) return;
+    if (!v || busy) return;
     setBusy(true);
     try {
       const r = await api<RS>("/api/settings/report", {
@@ -265,7 +281,9 @@ export function ReportView() {
         </div>
       )}
       {mode === "security" ? (
-        <SecReportTemplatesSection embeddedInCard={false} />
+        <React.Suspense fallback={<Skeleton animation text={{ rows: 5 }} />}>
+          <LazySecReportTemplatesSection embeddedInCard={false} />
+        </React.Suspense>
       ) : (
         <>
       {!v && <div className="st-skel" aria-label={bi("载入中", "Loading")} />}
@@ -437,6 +455,7 @@ export function ReportView() {
                       size="small"
                       status="danger"
                       icon={<IconDelete />}
+                      loading={removingBanner}
                       onClick={removeBanner}
                     >
                       {bi("移除横幅", "Remove Banner")}

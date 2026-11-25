@@ -148,6 +148,8 @@ function AttemptLogDrawer({
   const [loading, setLoading] = useState(false);
   const [loadErr, setLoadErr] = useState("");
   const [copied, setCopied] = useState(false);
+  const [showFullLog, setShowFullLog] = useState(false);
+  const copyTimerRef = useRef<number>(0);
 
   const run = item?.run;
   const step = item?.step;
@@ -158,34 +160,46 @@ function AttemptLogDrawer({
       : "";
 
   useEffect(() => {
+    return () => {
+      if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
     setText(null);
     setLoadErr("");
     setCopied(false);
+    setShowFullLog(false);
     if (!hasLog || !logUrl) return;
-    let cancelled = false;
+    const ctrl = new AbortController();
     setLoading(true);
-    fetch(withLang(logUrl), { headers: { "X-Lang": getLang() } })
+    fetch(withLang(logUrl), {
+      headers: { "X-Lang": getLang() },
+      signal: ctrl.signal,
+    })
       .then(async (resp) => {
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         return resp.text();
       })
       .then((t) => {
-        if (!cancelled) setText(t);
+        if (!ctrl.signal.aborted) setText(t);
       })
       .catch((e) => {
-        if (!cancelled)
-          setLoadErr(
-            bi(
-              `加载该次尝试日志失败：${err(e)}`,
-              `Failed to load attempt log: ${err(e)}`,
-            ),
-          );
+        if (ctrl.signal.aborted || (e instanceof DOMException && e.name === "AbortError")) {
+          return;
+        }
+        setLoadErr(
+          bi(
+            `加载该次尝试日志失败：${err(e)}`,
+            `Failed to load attempt log: ${err(e)}`,
+          ),
+        );
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!ctrl.signal.aborted) setLoading(false);
       });
     return () => {
-      cancelled = true;
+      ctrl.abort();
     };
   }, [hasLog, logUrl]);
 
@@ -196,7 +210,7 @@ function AttemptLogDrawer({
 
   return (
     <Drawer
-      width={680}
+      width="min(680px, 100vw)"
       visible={Boolean(item)}
       onCancel={onClose}
       footer={null}
@@ -307,7 +321,13 @@ function AttemptLogDrawer({
                   onClick={() => {
                     copy(text || "");
                     setCopied(true);
-                    setTimeout(() => setCopied(false), 1400);
+                    if (copyTimerRef.current) {
+                      window.clearTimeout(copyTimerRef.current);
+                    }
+                    copyTimerRef.current = window.setTimeout(
+                      () => setCopied(false),
+                      1400,
+                    );
                   }}
                 >
                   {copied ? bi("已复制", "Copied") : bi("复制完整日志", "Copy log")}
@@ -362,9 +382,46 @@ function AttemptLogDrawer({
                 {bi("正在加载该次执行的完整日志…", "Loading execution log…")}
               </p>
             ) : (
-              <pre className="mono">
-                {text || bi("（暂无输出）", "(No output)")}
-              </pre>
+              <>
+                {text && text.length > 120_000 && !showFullLog && (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 10,
+                      marginBottom: 8,
+                      padding: "6px 10px",
+                      borderRadius: 6,
+                      background: "var(--surface)",
+                      border: "1px solid var(--line)",
+                      fontSize: 12,
+                      color: "var(--mute)",
+                    }}
+                  >
+                    <span>
+                      {bi(
+                        `日志较长（约 ${Math.round(text.length / 1024)} KB），当前仅展示末尾片段以保持流畅`,
+                        `Large log (~${Math.round(text.length / 1024)} KB); showing tail excerpt for smooth scrolling`,
+                      )}
+                    </span>
+                    <Button
+                      size="mini"
+                      type="outline"
+                      onClick={() => setShowFullLog(true)}
+                    >
+                      {bi("显示完整日志", "Show full log")}
+                    </Button>
+                  </div>
+                )}
+                <pre className="mono">
+                  {text
+                    ? text.length > 120_000 && !showFullLog
+                      ? `…\n${text.slice(-120_000)}`
+                      : text
+                    : bi("（暂无输出）", "(No output)")}
+                </pre>
+              </>
             )}
           </div>
         </div>
@@ -444,6 +501,7 @@ export function ExecutionPanel({
   const request = useRef(""),
     last = useRef(""),
     reviewRevision = useRef(""),
+    busyLockRef = useRef(false),
     current = useRef(jobId);
   current.current = jobId;
   const load = async () => {
@@ -468,19 +526,23 @@ export function ExecutionPanel({
     last.current = "";
     let dead = false;
     const tick = () => {
-      if (!dead) void load();
+      if (!dead && document.visibilityState === "visible") void load();
     };
-    tick();
+    void load();
     const id = window.setInterval(tick, 5000);
+    document.addEventListener("visibilitychange", tick);
     return () => {
       dead = true;
       clearInterval(id);
+      document.removeEventListener("visibilitychange", tick);
     };
   }, [jobId]);
   // Speed up polling to 2s while pre-flight check is actively running in the modal
   useEffect(() => {
     if (!open || preparation?.state !== "pending") return;
-    const id = window.setInterval(() => void load(), 2000);
+    const id = window.setInterval(() => {
+      if (document.visibilityState === "visible") void load();
+    }, 2000);
     return () => clearInterval(id);
   }, [open, preparation?.state, jobId]);
   // Auto-open check details when a pre-flight check fails so root cause is immediately visible
@@ -488,6 +550,8 @@ export function ExecutionPanel({
     if (open && prepFailed) setChecksOpen(true);
   }, [open, prepFailed]);
   const action = async (r: Run, action: string) => {
+    if (busyLockRef.current) return;
+    busyLockRef.current = true;
     setBusy(true);
     try {
       await api(`/api/jobs/${jobId}/executions/${r.id}`, {
@@ -501,11 +565,13 @@ export function ExecutionPanel({
     } catch (e) {
       err(e);
     } finally {
+      busyLockRef.current = false;
       setBusy(false);
     }
   };
   const authorizeNode = async () => {
-    if (!node) return;
+    if (!node || busyLockRef.current) return;
+    busyLockRef.current = true;
     setBusy(true);
     setSetupError("");
     try {
@@ -520,11 +586,13 @@ export function ExecutionPanel({
     } catch (e) {
       setSetupError((e as Error).message);
     } finally {
+      busyLockRef.current = false;
       setBusy(false);
     }
   };
   const runPrecheck = async () => {
-    if (!node) return;
+    if (!node || busyLockRef.current) return;
+    busyLockRef.current = true;
     setBusy(true);
     setSetupError("");
     try {
@@ -539,6 +607,7 @@ export function ExecutionPanel({
     } catch (e) {
       setSetupError((e as Error).message);
     } finally {
+      busyLockRef.current = false;
       setBusy(false);
     }
   };
@@ -677,11 +746,12 @@ export function ExecutionPanel({
   }, [data, jobId]);
 
   const start = async () => {
-    if (!data) return;
+    if (!data || busyLockRef.current) return;
     const hasRisky = picked.some((s) =>
       ["disruptive", "destructive"].includes(s.effect),
     );
     const effectiveConfirm = hasRisky ? confirm : safeConfirmed ? cluster : "";
+    busyLockRef.current = true;
     setBusy(true);
     try {
       const created = await api<Run>(`/api/jobs/${jobId}/executions`, {
@@ -721,6 +791,7 @@ export function ExecutionPanel({
         err(e);
       }
     } finally {
+      busyLockRef.current = false;
       setBusy(false);
     }
   };

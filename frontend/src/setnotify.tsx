@@ -1,4 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Button,
   Input,
@@ -173,6 +179,7 @@ function ChannelModal({
     if (open) setC(edit ? { ...edit } : blank);
   }, [open, edit]); // eslint-disable-line react-hooks/exhaustive-deps
   const save = async () => {
+    if (busy || !c.name?.trim() || !c.url?.trim()) return;
     setBusy(true);
     try {
       await api(
@@ -283,18 +290,33 @@ export function ChannelsView() {
     null,
   );
   const [testing, setTesting] = useState("");
-  const load = () =>
-    api<Channels>("/api/settings/channels")
-      .then((x) => {
-        putCached("/api/settings/channels", x);
-        setD(x);
-        setError("");
-      })
-      .catch((e) => setError((e as Error).message));
+  const [togglingId, setTogglingId] = useState("");
+  const mountedRef = useRef(true);
   useEffect(() => {
-    load();
-  }, [lang]); // eslint-disable-line react-hooks/exhaustive-deps
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  const load = useCallback(
+    () =>
+      api<Channels>("/api/settings/channels")
+        .then((x) => {
+          putCached("/api/settings/channels", x);
+          if (!mountedRef.current) return;
+          setD(x);
+          setError("");
+        })
+        .catch((e) => {
+          if (mountedRef.current) setError((e as Error).message);
+        }),
+    [],
+  );
+  useEffect(() => {
+    void load();
+  }, [lang, load]);
   const test = async (c: NotifyChannel) => {
+    if (testing) return;
     setTesting(c.id);
     try {
       await api(`/api/settings/channels/${c.id}/test`, { method: "POST" });
@@ -307,22 +329,27 @@ export function ChannelsView() {
         content: (e as Error).message,
       });
     } finally {
-      setTesting("");
-      load();
+      if (mountedRef.current) setTesting("");
+      void load();
     }
   };
   const toggle = async (c: NotifyChannel) => {
+    if (togglingId) return;
+    setTogglingId(c.id);
     try {
       await api(`/api/settings/channels/${c.id}`, {
         method: "PUT",
         body: JSON.stringify({ ...c, enabled: !c.enabled }),
       });
-      load();
+      await load();
     } catch (e) {
       err(e);
+    } finally {
+      if (mountedRef.current) setTogglingId("");
     }
   };
-  const remove = (c: NotifyChannel) =>
+  const remove = (c: NotifyChannel) => {
+    let deleting = false;
     Modal.confirm({
       title: bi(`删除「${c.name}」？`, `Delete “${c.name}”?`),
       content: bi(
@@ -333,14 +360,19 @@ export function ChannelsView() {
       okText: bi("删除", "Delete"),
       cancelText: bi("取消", "Cancel"),
       onOk: async () => {
+        if (deleting) return;
+        deleting = true;
         try {
           await api(`/api/settings/channels/${c.id}`, { method: "DELETE" });
-          load();
+          await load();
         } catch (e) {
           err(e);
+        } finally {
+          deleting = false;
         }
       },
     });
+  };
   const lastOf = (id: string) => d?.log.find((a) => a.channel === id);
   return (
     <article className="sx-page st-main enter">
@@ -393,11 +425,11 @@ export function ChannelsView() {
               <li key={c.id} className={c.enabled ? "" : "off"}>
                 <KindMark kind={c.kind} size={40} />
                 <span className="st-chan-main">
-                  <b>{c.name}</b>
-                  <small>
+                  <b title={c.name}>{c.name}</b>
+                  <small title={c.url}>
                     {kindName(c.kind, d.kinds[c.kind])} ·{" "}
                     <span className="mono">
-                      {c.url.replace(/^(https?:\/\/[^/]+).*$/, "$1/…")}
+                      {(c.url || "").replace(/^(https?:\/\/[^/]+).*$/, "$1/…")}
                     </span>
                   </small>
                 </span>
@@ -425,7 +457,9 @@ export function ChannelsView() {
                 </span>
                 <Switch
                   checked={c.enabled}
-                  onChange={() => toggle(c)}
+                  loading={togglingId === c.id}
+                  disabled={Boolean(togglingId) && togglingId !== c.id}
+                  onChange={() => void toggle(c)}
                   aria-label={bi(`启用 ${c.name}`, `Enable ${c.name}`)}
                 />
                 <span className="row-gap">
@@ -433,7 +467,8 @@ export function ChannelsView() {
                     size="small"
                     icon={<IconSend />}
                     loading={testing === c.id}
-                    onClick={() => test(c)}
+                    disabled={Boolean(testing) && testing !== c.id}
+                    onClick={() => void test(c)}
                   >
                     {bi("发送测试", "Send Test")}
                   </Button>
@@ -568,7 +603,13 @@ const varDesc = (v: { key: string; desc: string }) =>
  *  weight or size, so the text behind lines up exactly with the field in front. */
 const MD_TOKEN =
   /(\{\{\w+\}\}|\*\*[^*\n]+\*\*|`[^`\n]+`|\[[^\]\n]+\]\([^)\s]+\)|https?:\/\/[^\s)]+)/g;
-function Marked({ text, known }: { text: string; known: Set<string> }) {
+const Marked = React.memo(function Marked({
+  text,
+  known,
+}: {
+  text: string;
+  known: Set<string>;
+}) {
   return (
     <>
       {text.split("\n").map((line, n) => {
@@ -623,7 +664,9 @@ function Marked({ text, known }: { text: string; known: Set<string> }) {
       })}
     </>
   );
-}
+});
+
+const SAMPLE_WEBHOOK_AT = "2026-01-15T08:30:00Z";
 
 /** What a message will look like where it lands, for the kind of channel it goes to. */
 function Delivered({
@@ -649,7 +692,7 @@ function Delivered({
             lines,
             text: link ? `${text}\n${link}` : text,
             link,
-            at: new Date().toISOString(),
+            at: SAMPLE_WEBHOOK_AT,
             source: "kyndryl-delivery-studio",
           },
           null,
@@ -700,6 +743,7 @@ export function TemplatesView() {
   const [sel, setSel] = useState("test");
   const [drafts, setDrafts] = useState<Record<string, Tpl>>({});
   const [busy, setBusy] = useState(false);
+  const [sendingTest, setSendingTest] = useState(false);
   const [target, setTarget] = useState("");
   const [kind, setKind] = useState<string>(() => {
     const first =
@@ -710,31 +754,73 @@ export function TemplatesView() {
   const body = useRef<HTMLTextAreaElement>(null);
   const title = useRef<HTMLInputElement>(null);
   const titlePre = useRef<HTMLPreElement>(null);
+  const titleRafRef = useRef<number | null>(null);
+  const caretTimerRef = useRef<number | null>(null);
+  const mountedRef = useRef(true);
   const [focus, setFocus] = useState<"title" | "body">("body");
-  const syncTitleScroll = (el?: HTMLInputElement | null) => {
+  const syncTitleScrollNow = useCallback((el?: HTMLInputElement | null) => {
     const input = el ?? title.current;
     if (input && titlePre.current) {
       titlePre.current.scrollLeft = input.scrollLeft;
     }
-  };
-  const load = () =>
-    api<NonNullable<typeof d>>("/api/settings/templates")
-      .then((r) => {
-        putCached("/api/settings/templates", r);
-        setD(r);
-      })
-      .catch((e) => err(e));
+  }, []);
+  const syncTitleScroll = useCallback(
+    (el?: HTMLInputElement | null) => {
+      if (titleRafRef.current !== null) {
+        window.cancelAnimationFrame(titleRafRef.current);
+      }
+      titleRafRef.current = window.requestAnimationFrame(() => {
+        titleRafRef.current = null;
+        syncTitleScrollNow(el);
+      });
+    },
+    [syncTitleScrollNow],
+  );
+  const scheduleCaretTask = useCallback((fn: () => void) => {
+    if (caretTimerRef.current !== null) {
+      window.clearTimeout(caretTimerRef.current);
+    }
+    caretTimerRef.current = window.setTimeout(() => {
+      caretTimerRef.current = null;
+      fn();
+    }, 0);
+  }, []);
   useEffect(() => {
-    load();
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (titleRafRef.current !== null) {
+        window.cancelAnimationFrame(titleRafRef.current);
+      }
+      if (caretTimerRef.current !== null) {
+        window.clearTimeout(caretTimerRef.current);
+      }
+    };
+  }, []);
+  const load = useCallback(
+    () =>
+      api<NonNullable<typeof d>>("/api/settings/templates")
+        .then((r) => {
+          putCached("/api/settings/templates", r);
+          if (mountedRef.current) setD(r);
+        })
+        .catch((e) => {
+          if (mountedRef.current) err(e);
+        }),
+    [],
+  );
+  useEffect(() => {
+    void load();
     api<Channels>("/api/settings/channels")
       .then((r) => {
         putCached("/api/settings/channels", r);
+        if (!mountedRef.current) return;
         setChannels(r.channels);
         const first = r.channels.find((c) => c.enabled) || r.channels[0];
         if (first) setKind(first.kind);
       })
       .catch(() => undefined);
-  }, [lang]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [lang, load]);
   const ev = d?.events.find((e) => e.id === sel);
   const saved = (id: string): Tpl =>
     d?.custom[id] ||
@@ -790,11 +876,11 @@ export function TemplatesView() {
           tag +
           draft.title.slice(el?.selectionEnd ?? at),
       });
-      window.setTimeout(() => {
+      scheduleCaretTask(() => {
         el?.focus();
         el?.setSelectionRange(at + tag.length, at + tag.length);
         syncTitleScroll(el);
-      }, 0);
+      });
     } else {
       const el = body.current;
       const at = el?.selectionStart ?? draft.body.length;
@@ -805,10 +891,10 @@ export function TemplatesView() {
           tag +
           draft.body.slice(el?.selectionEnd ?? at),
       });
-      window.setTimeout(() => {
+      scheduleCaretTask(() => {
         el?.focus();
         el?.setSelectionRange(at + tag.length, at + tag.length);
-      }, 0);
+      });
     }
   };
   // formatting around the selection in the body, or at the start of its lines
@@ -822,10 +908,10 @@ export function TemplatesView() {
       body:
         draft.body.slice(0, a) + open + chosen + close + draft.body.slice(b),
     });
-    window.setTimeout(() => {
+    scheduleCaretTask(() => {
       el.focus();
       el.setSelectionRange(a + open.length, a + open.length + chosen.length);
-    }, 0);
+    });
   };
   const lead = (mark: string) => {
     const el = body.current;
@@ -841,9 +927,10 @@ export function TemplatesView() {
       ...draft,
       body: draft.body.slice(0, from) + block + draft.body.slice(b),
     });
-    window.setTimeout(() => el.focus(), 0);
+    scheduleCaretTask(() => el.focus());
   };
   const save = async (reset = false) => {
+    if (busy) return;
     setBusy(true);
     try {
       await api(`/api/settings/templates/${sel}`, {
@@ -862,12 +949,14 @@ export function TemplatesView() {
     } catch (e) {
       err(e);
     } finally {
-      setBusy(false);
+      if (mountedRef.current) setBusy(false);
     }
   };
   const sendTest = async () => {
+    if (sendingTest) return;
     if (!target)
       return Message.warning(bi("先选一个渠道", "Select a channel first"));
+    setSendingTest(true);
     try {
       await api(`/api/settings/templates/${sel}/test`, {
         method: "POST",
@@ -879,28 +968,39 @@ export function TemplatesView() {
         title: bi("发送失败", "Send Failed"),
         content: (e as Error).message,
       });
+    } finally {
+      if (mountedRef.current) setSendingTest(false);
     }
   };
+  const shortcutStateRef = useRef({ dirty, busy, hasUnknown: unknown.length > 0, save });
+  shortcutStateRef.current = { dirty, busy, hasUnknown: unknown.length > 0, save };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const st = shortcutStateRef.current;
       if (
         (e.metaKey || e.ctrlKey) &&
         e.key.toLowerCase() === "s" &&
-        dirty &&
-        !busy &&
-        unknown.length === 0
+        st.dirty &&
+        !st.busy &&
+        !st.hasUnknown
       ) {
         e.preventDefault();
-        save();
+        void st.save();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => {
-    const id = window.requestAnimationFrame(() => syncTitleScroll());
-    return () => window.cancelAnimationFrame(id);
-  }, [draft.title, sel]);
+    const input = title.current;
+    if (!input) return;
+    const onScroll = () => syncTitleScroll(input);
+    input.addEventListener("scroll", onScroll, { passive: true });
+    return () => input.removeEventListener("scroll", onScroll);
+  }, [Boolean(ev), sel, syncTitleScroll]);
+  useEffect(() => {
+    syncTitleScroll();
+  }, [draft.title, sel, syncTitleScroll]);
   const t = q.trim().toLowerCase();
   const shown = (d?.events || []).filter(
     (e) =>
@@ -1034,10 +1134,8 @@ export function TemplatesView() {
                       value={draft.title}
                       onChange={(e) => {
                         setDraft({ ...draft, title: e.target.value });
-                        const el = e.currentTarget;
-                        window.requestAnimationFrame(() => syncTitleScroll(el));
+                        syncTitleScroll(e.currentTarget);
                       }}
-                      onScroll={(e) => syncTitleScroll(e.currentTarget)}
                       onKeyUp={(e) => syncTitleScroll(e.currentTarget)}
                       onSelect={(e) => syncTitleScroll(e.currentTarget)}
                       onClick={(e) => syncTitleScroll(e.currentTarget)}
@@ -1243,7 +1341,8 @@ export function TemplatesView() {
                     />
                     <Button
                       icon={<IconSend />}
-                      onClick={sendTest}
+                      loading={sendingTest}
+                      onClick={() => void sendTest()}
                       disabled={!target}
                     >
                       {bi("发送示例", "Send")}

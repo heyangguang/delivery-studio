@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   Input,
@@ -101,14 +101,23 @@ const STATUS: Record<string, string> = {
   },
 };
 
+const hasFileTransfer = (dt?: DataTransfer | null) =>
+  !!dt && Array.from(dt.types || []).includes("Files");
+
 /** The teams a document can be meant for: those of the person, or every team for someone who manages the base. */
 function useTeams(): Team[] {
   const [all, setAll] = useState<Team[]>([]);
   useEffect(() => {
+    let cancelled = false;
     if (can("iam.user|iam.role|iam.team"))
       api<{ teams: Team[] }>("/api/iam")
-        .then((r) => setAll(r.teams))
+        .then((r) => {
+          if (!cancelled) setAll(r.teams);
+        })
         .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
   }, []);
   return can("kb.manage") && all.length ? all : myTeams();
 }
@@ -153,6 +162,7 @@ export function useSubmitKB(): [
     team: string;
   } | null>(null);
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
   const teams = useTeams();
   const open = (pre: { title?: string; text?: string; source?: string } = {}) =>
     setDraft({
@@ -162,7 +172,9 @@ export function useSubmitKB(): [
       team: "",
     });
   const submit = async () => {
-    if (!draft) return;
+    if (!draft || busyRef.current || !draft.title.trim() || !draft.text.trim())
+      return;
+    busyRef.current = true;
     setBusy(true);
     try {
       await api("/api/kb/submissions", {
@@ -179,6 +191,7 @@ export function useSubmitKB(): [
     } catch (e) {
       err(e);
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   };
@@ -186,7 +199,11 @@ export function useSubmitKB(): [
     <Modal
       visible={!!draft}
       title={bi("提交到团队知识库", "Submit to team knowledge base")}
-      onCancel={() => setDraft(null)}
+      onCancel={() => {
+        if (!busyRef.current) setDraft(null);
+      }}
+      maskClosable={!busy}
+      escToExit={!busy}
       okText={bi("提交审核", "Submit for review")}
       cancelText={bi("取消", "Cancel")}
       confirmLoading={busy}
@@ -195,14 +212,14 @@ export function useSubmitKB(): [
       style={{ width: 760, maxWidth: "96vw" }}
     >
       {draft && (
-        <div className="st-form">
+        <div className="st-form kb-modal-form">
           <p className="muted small kb-sub-lead">
             {bi(
               "审核通过后，大家和 AI 都能用到它。可以先改得更通用一些：去掉只和这一次有关的细节，写清楚什么情况下会遇到。口令、私钥这类内容会在交给 AI 前被去掉。",
               "Once approved, everyone and the assistant can use it. You can generalize it first by removing one-off details and clarifying when it applies. Passwords and private keys are stripped before AI sees it.",
             )}
           </p>
-          <div className="st-field">
+          <div className="st-field kb-modal-field">
             <span>{bi("标题", "Title")}</span>
             <Input
               value={draft.title}
@@ -215,7 +232,7 @@ export function useSubmitKB(): [
               aria-label={bi("标题", "Title")}
             />
           </div>
-          <div className="st-field">
+          <div className="st-field kb-modal-field">
             <span>{bi("内容（Markdown）", "Content (Markdown)")}</span>
             <Input.TextArea
               className="mono"
@@ -225,7 +242,7 @@ export function useSubmitKB(): [
               aria-label={bi("内容", "Content")}
             />
           </div>
-          <div className="st-field">
+          <div className="st-field kb-modal-field">
             <span>{bi("给谁用", "Audience")}</span>
             <Select
               value={draft.team}
@@ -275,6 +292,7 @@ export function KnowledgePage({
 }) {
   useLang();
   const narrow = useMedia("(max-width: 900px)");
+  const mountedRef = useRef(true);
   const initFiles = cached<{ nodes: FileNode[]; usage: Usage }>(
     "/api/me/files?recent=1",
   );
@@ -303,44 +321,71 @@ export function KnowledgePage({
       : selected && !selected.startsWith("~")
         ? "team"
         : scopePick;
-  const load = () => {
+
+  const load = useCallback(() => {
     if (can("kb.view|kb.submit"))
       api<Home>("/api/kb")
         .then((r) => {
           putCached("/api/kb", r);
-          setHome(r);
+          if (mountedRef.current) setHome(r);
         })
         .catch(err);
-    else setHome({ docs: [], mine: [], can_submit: false, can_manage: false });
+    else if (mountedRef.current)
+      setHome({ docs: [], mine: [], can_submit: false, can_manage: false });
     api<{ nodes: FileNode[]; usage: Usage }>("/api/me/files?recent=1")
       .then((r) => {
         putCached("/api/me/files?recent=1", r);
-        setOwn(r.nodes || []);
-        setUsage(r.usage);
+        if (mountedRef.current) {
+          setOwn(r.nodes || []);
+          setUsage(r.usage);
+        }
       })
       .catch(err);
-  };
-  useEffect(load, []);
+  }, []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    load();
+    return () => {
+      mountedRef.current = false;
+    };
+  }, [load]);
+
   useEffect(() => {
     const t = q.trim();
-    if (!t) return setHits(null);
+    if (!t) {
+      setHits(null);
+      return;
+    }
+    let cancelled = false;
     const h = window.setTimeout(
       () =>
         api<{ hits: Hit[] }>(
           `${docBase(scope)}/search?q=${encodeURIComponent(t)}`,
         )
-          .then((r) => setHits(r.hits))
-          .catch(() => setHits([])),
+          .then((r) => {
+            if (!cancelled) setHits(r.hits);
+          })
+          .catch(() => {
+            if (!cancelled) setHits([]);
+          }),
       250,
     );
-    return () => window.clearTimeout(h);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(h);
+    };
   }, [q, scope]);
+
   const nav = (id?: string) =>
     go({ name: "kb", id }, { replace: !narrow && !!selected });
-  const teamName = (id?: string) =>
-    !id
-      ? bi("全平台", "All platform")
-      : teams.find((t) => t.id === id)?.name || bi("某个团队", "Team");
+  const teamName = useCallback(
+    (id?: string) =>
+      !id
+        ? bi("全平台", "All platform")
+        : teams.find((t) => t.id === id)?.name || bi("某个团队", "Team"),
+    [teams],
+  );
   const docs: Doc[] | null =
     scope === "mine" ? (own ? [] : null) : home?.docs || null;
   const total = useMemo(
@@ -348,6 +393,11 @@ export function KnowledgePage({
       scope === "mine" ? 0 : (home?.docs || []).reduce((n, d) => n + d.size, 0),
     [home, scope],
   );
+  const pendingMineCount = useMemo(
+    () => (home?.mine || []).filter((x) => x.status === "pending").length,
+    [home?.mine],
+  );
+  const recentOwn = useMemo(() => (own || []).slice(0, 12), [own]);
   const teamOK =
     !!home &&
     (home.docs.length > 0 ||
@@ -371,7 +421,7 @@ export function KnowledgePage({
                 : "home";
 
   return (
-    <div className="md-split">
+    <div className="md-split kb-split-page">
       {(!narrow || !selected) && (
         <aside className="md-list kb-side" aria-label={bi("知识库", "Knowledge base")}>
           <div className="list-head">
@@ -474,8 +524,8 @@ export function KnowledgePage({
                       <small>
                         {home.mine.length
                           ? bi(
-                              `${home.mine.length} 份 · ${home.mine.filter((x) => x.status === "pending").length} 份待审核`,
-                              `${home.mine.length} total · ${home.mine.filter((x) => x.status === "pending").length} pending`,
+                              `${home.mine.length} 份 · ${pendingMineCount} 份待审核`,
+                              `${home.mine.length} total · ${pendingMineCount} pending`,
                             )
                           : bi("还没有提交过", "None yet")}
                       </small>
@@ -507,9 +557,9 @@ export function KnowledgePage({
                     }}
                   >
                     <span className="rp-t">
-                      <b>
-                        {h.title}{" "}
-                        <small className="faint">
+                      <b className="kb-hit-head" title={h.title}>
+                        <span className="kb-hit-title">{h.title}</span>
+                        <small className="faint kb-hit-sec">
                           {bi(`第 ${h.part} 段`, `Section ${h.part}`)}
                         </small>
                       </b>
@@ -540,10 +590,10 @@ export function KnowledgePage({
                 </span>
               </button>
               <UsageBar u={usage} />
-              {(own || []).length > 0 && (
+              {recentOwn.length > 0 && (
                 <div className="rp-group">{bi("最近", "Recent")}</div>
               )}
-              {(own || []).slice(0, 12).map((n) => (
+              {recentOwn.map((n) => (
                 <a
                   key={n.id}
                   href={`#/kb/my-${n.id}`}
@@ -555,7 +605,7 @@ export function KnowledgePage({
                 >
                   <FileIcon n={n} size={32} />
                   <span className="rp-t">
-                    <b>{n.name}</b>
+                    <b title={n.name}>{n.name}</b>
                     <small>
                       {bytesText(n.size)} · {ago(n.updated)}
                     </small>
@@ -595,7 +645,7 @@ export function KnowledgePage({
                     <IconFile />
                   </span>
                   <span className="rp-t">
-                    <b>{d.title}</b>
+                    <b title={d.title}>{d.title}</b>
                     <small>{`${teamName(d.team)} · ${d.by} · ${ago(d.updated)}`}</small>
                   </span>
                 </a>
@@ -751,11 +801,22 @@ function DocView({
   const [missing, setMissing] = useState(false);
   const [raw, setRaw] = useState(false);
   const [editing, setEditing] = useState(false);
+  const deletingRef = useRef(false);
   const base = docBase(scope);
   useEffect(() => {
+    let cancelled = false;
+    setD(null);
+    setMissing(false);
     api<Doc>(`${base}/${id}`)
-      .then(setD)
-      .catch(() => setMissing(true));
+      .then((res) => {
+        if (!cancelled) setD(res);
+      })
+      .catch(() => {
+        if (!cancelled) setMissing(true);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [id, base]);
   const docSections = useMemo(
     () =>
@@ -786,13 +847,15 @@ function DocView({
         onDone={() => {
           setEditing(false);
           changed();
-          api<Doc>(`${base}/${id}`).then(setD);
+          api<Doc>(`${base}/${id}`)
+            .then(setD)
+            .catch(err);
         }}
         onCancel={() => setEditing(false)}
       />
     );
   return (
-    <article className="rp-doc enter">
+    <article className="rp-doc kb-doc enter">
       <header className="rp-head">
         <span className={`rp-ic lg ${scope === "mine" ? "k-mine" : "k-doc"}`}>
           <IconFile />
@@ -848,11 +911,16 @@ function DocView({
                     cancelText: bi("取消", "Cancel"),
                     okButtonProps: { status: "danger" },
                     onOk: async () => {
+                      if (deletingRef.current) return;
+                      deletingRef.current = true;
                       try {
                         await api(`${base}/${d.id}`, { method: "DELETE" });
                         gone();
                       } catch (e) {
                         err(e);
+                        throw e;
+                      } finally {
+                        deletingRef.current = false;
                       }
                     },
                   })
@@ -937,9 +1005,59 @@ function DocEditor({
   const [team, setTeam] = useState(doc?.team || "");
   const [preview, setPreview] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [drag, setDrag] = useState(false);
+  const savingRef = useRef(false);
+  const dragDepthRef = useRef(0);
   const file = useRef<HTMLInputElement>(null);
   const base = docBase(scope);
+
+  useEffect(() => {
+    if (!drag) return;
+    const clearDrag = () => {
+      dragDepthRef.current = 0;
+      setDrag(false);
+    };
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") clearDrag();
+    };
+    window.addEventListener("dragend", clearDrag);
+    window.addEventListener("drop", clearDrag);
+    window.addEventListener("blur", clearDrag);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("dragend", clearDrag);
+      window.removeEventListener("drop", clearDrag);
+      window.removeEventListener("blur", clearDrag);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [drag]);
+
+  useEffect(
+    () => () => {
+      dragDepthRef.current = 0;
+    },
+    [],
+  );
+
+  const loadTextFile = async (f: File) => {
+    if (f.size > 1 << 20) {
+      Message.warning(
+        bi("单份资料不能超过 1 MiB", "Max file size is 1 MiB"),
+      );
+      return;
+    }
+    try {
+      const content = await f.text();
+      setText(content);
+      setTitle((prev) => prev || f.name.replace(/\.[^.]+$/, "").slice(0, 120));
+    } catch (e) {
+      err(e);
+    }
+  };
+
   const save = async () => {
+    if (savingRef.current || !title.trim() || !text.trim()) return;
+    savingRef.current = true;
     setBusy(true);
     try {
       const body = JSON.stringify(
@@ -956,11 +1074,49 @@ function DocEditor({
     } catch (e) {
       err(e);
     } finally {
+      savingRef.current = false;
       setBusy(false);
     }
   };
+
+  const showSecondCol = scope === "team" || !doc;
+
   return (
-    <div className="rp-edit enter">
+    <div
+      className={`rp-edit kb-edit-wrap enter ${drag ? "is-drag" : ""}`}
+      onDragEnter={(e) => {
+        if (!hasFileTransfer(e.dataTransfer)) return;
+        e.preventDefault();
+        dragDepthRef.current += 1;
+        setDrag(true);
+      }}
+      onDragOver={(e) => {
+        if (!hasFileTransfer(e.dataTransfer)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+        if (!drag) setDrag(true);
+      }}
+      onDragLeave={(e) => {
+        if (!hasFileTransfer(e.dataTransfer)) return;
+        dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+        if (
+          dragDepthRef.current === 0 ||
+          (e.relatedTarget &&
+            !e.currentTarget.contains(e.relatedTarget as Node))
+        ) {
+          dragDepthRef.current = 0;
+          setDrag(false);
+        }
+      }}
+      onDrop={(e) => {
+        if (!hasFileTransfer(e.dataTransfer)) return;
+        e.preventDefault();
+        dragDepthRef.current = 0;
+        setDrag(false);
+        const f = e.dataTransfer.files?.[0];
+        if (f) void loadTextFile(f);
+      }}
+    >
       <header className="rp-edit-h">
         <h1>
           {doc
@@ -970,7 +1126,11 @@ function DocEditor({
               : bi("新建团队资料", "New team document")}
         </h1>
         <span className="rp-acts">
-          {onCancel && <Button onClick={onCancel}>{bi("取消", "Cancel")}</Button>}
+          {onCancel && (
+            <Button disabled={busy} onClick={onCancel}>
+              {bi("取消", "Cancel")}
+            </Button>
+          )}
           <Button
             type="primary"
             loading={busy}
@@ -981,7 +1141,7 @@ function DocEditor({
           </Button>
         </span>
       </header>
-      <div className="rp-grid2">
+      <div className={`rp-grid2 ${showSecondCol ? "" : "kb-grid-single"}`}>
         <div className="rp-field">
           <span>{bi("标题", "Title")}</span>
           <Input
@@ -1016,38 +1176,28 @@ function DocEditor({
               aria-label={bi("给谁用", "Audience")}
             />
           </div>
-        ) : (
+        ) : !doc ? (
           <div className="rp-field">
             <span>&nbsp;</span>
-            {!doc && (
-              <>
-                <Button
-                  icon={<IconUpload />}
-                  onClick={() => file.current?.click()}
-                >
-                  {bi("从文件读取内容", "Load from file")}
-                </Button>
-                <input
-                  ref={file}
-                  type="file"
-                  hidden
-                  accept=".md,.markdown,.txt,.log,.yaml,.yml,.json,.conf,.cfg,.ini,.toml,.sh,.sql,.csv,.xml"
-                  onChange={async (e) => {
-                    const f = e.target.files?.[0];
-                    if (!f) return;
-                    if (f.size > 1 << 20)
-                      return Message.warning(
-                        bi("单份资料不能超过 1 MiB", "Max file size is 1 MiB"),
-                      );
-                    setText(await f.text());
-                    if (!title) setTitle(f.name.replace(/\.[^.]+$/, ""));
-                    e.target.value = "";
-                  }}
-                />
-              </>
-            )}
+            <Button
+              icon={<IconUpload />}
+              onClick={() => file.current?.click()}
+            >
+              {bi("从文件读取内容", "Load from file")}
+            </Button>
+            <input
+              ref={file}
+              type="file"
+              hidden
+              accept=".md,.markdown,.txt,.log,.yaml,.yml,.json,.conf,.cfg,.ini,.toml,.sh,.sql,.csv,.xml"
+              onChange={async (e) => {
+                const f = e.target.files?.[0];
+                e.target.value = "";
+                if (f) await loadTextFile(f);
+              }}
+            />
           </div>
-        )}
+        ) : null}
       </div>
       <div className="rp-field">
         <span className="rp-field-h">
@@ -1077,20 +1227,28 @@ function DocEditor({
             value={text}
             onChange={setText}
             placeholder={bi(
-              "粘贴或写下内容，支持 Markdown。",
-              "Paste or write content in Markdown.",
+              "粘贴或写下内容，支持 Markdown（也可直接拖入文本文件）。",
+              "Paste or write content in Markdown (or drop a text file here).",
             )}
             autoSize={{ minRows: 16, maxRows: 40 }}
             aria-label={bi("内容", "Content")}
           />
         )}
-        <small>
+        <small className="kb-char-count">
           {bi(
             `${text.length.toLocaleString(getLang())} 字 · 口令、私钥这类内容会在交给 AI 前被去掉`,
             `${text.length.toLocaleString(getLang())} chars · Passwords and private keys are stripped before AI sees it`,
           )}
         </small>
       </div>
+      {drag && (
+        <div className="kb-ed-drop-mask">
+          {bi(
+            "松开即可读取文本文件内容（≤ 1 MiB）",
+            "Drop text file to load into editor (≤ 1 MiB)",
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1103,6 +1261,8 @@ function ReviewView({
   changed: () => void;
 }) {
   useLang();
+  const mountedRef = useRef(true);
+  const busyRef = useRef(false);
   const [subs, setSubs] = useState<Sub[] | null>(null);
   const [cur, setCur] = useState<Sub | null>(null);
   const [edit, setEdit] = useState<{
@@ -1113,13 +1273,22 @@ function ReviewView({
   } | null>(null);
   const [busy, setBusy] = useState("");
   const [showDone, setShowDone] = useState(false);
-  const load = () =>
-    api<{ submissions: Sub[] }>("/api/kb/submissions")
-      .then((r) => setSubs(r.submissions))
-      .catch(err);
+  const load = useCallback(
+    () =>
+      api<{ submissions: Sub[] }>("/api/kb/submissions")
+        .then((r) => {
+          if (mountedRef.current) setSubs(r.submissions);
+        })
+        .catch(err),
+    [],
+  );
   useEffect(() => {
+    mountedRef.current = true;
     load();
-  }, []);
+    return () => {
+      mountedRef.current = false;
+    };
+  }, [load]);
   const pick = (x: Sub) => {
     setCur(x);
     setEdit({
@@ -1130,7 +1299,9 @@ function ReviewView({
     });
   };
   const decide = async (verb: "approve" | "reject") => {
-    if (!cur || !edit) return;
+    if (!cur || !edit || busyRef.current) return;
+    if (verb === "approve" && (!edit.title.trim() || !edit.text.trim())) return;
+    busyRef.current = true;
     setBusy(verb);
     try {
       await api(`/api/kb/submissions/${cur.id}/${verb}`, {
@@ -1145,20 +1316,26 @@ function ReviewView({
               "Rejected; the submitter will see your note",
             ),
       );
-      setCur(null);
-      setEdit(null);
+      if (mountedRef.current) {
+        setCur(null);
+        setEdit(null);
+      }
       load();
       changed();
     } catch (e) {
       err(e);
     } finally {
-      setBusy("");
+      busyRef.current = false;
+      if (mountedRef.current) setBusy("");
     }
   };
-  const list = (subs || []).filter((x) => showDone || x.status === "pending");
+  const list = useMemo(
+    () => (subs || []).filter((x) => showDone || x.status === "pending"),
+    [subs, showDone],
+  );
   return (
     <div className="kb-review enter">
-      <header className="iam-h">
+      <header className="iam-h kb-subpage-h">
         <div>
           <h1>{bi("待审核", "Pending review")}</h1>
           <p>
@@ -1168,19 +1345,19 @@ function ReviewView({
             )}
           </p>
         </div>
-        <label className="sec-check">
+        <label className="sec-check kb-rv-check">
           <input
             type="checkbox"
             checked={showDone}
             onChange={(e) => setShowDone(e.target.checked)}
-          />{" "}
-          {bi("也显示审核过的", "Show reviewed")}
+          />
+          <span>{bi("也显示审核过的", "Show reviewed")}</span>
         </label>
       </header>
       {!subs ? (
         <Skeleton animation text={{ rows: 6 }} />
       ) : list.length === 0 ? (
-        <div className="iam-empty">
+        <div className="iam-empty kb-subpage-empty">
           <IconCheck />
           <b>{bi("没有待审核的提交", "No pending submissions")}</b>
         </div>
@@ -1194,9 +1371,11 @@ function ReviewView({
                   className={cur?.id === x.id ? "on" : ""}
                   onClick={() => pick(x)}
                 >
-                  <b>{x.title}</b>
+                  <b title={x.title}>{x.title}</b>
                   <small>
-                    {x.by} · {ago(x.at)}
+                    <span>
+                      {x.by} · {ago(x.at)}
+                    </span>
                     {x.status !== "pending" && (
                       <span className={`kb-st ${x.status}`}>
                         {STATUS[x.status]}
@@ -1218,14 +1397,14 @@ function ReviewView({
                 className="kb-title-in"
                 value={edit.title}
                 onChange={(v) => setEdit({ ...edit, title: v })}
-                disabled={cur.status !== "pending"}
+                disabled={cur.status !== "pending" || !!busy}
                 aria-label={bi("标题", "Title")}
               />
               <Input.TextArea
                 className="mono kb-text-in"
                 value={edit.text}
                 onChange={(v) => setEdit({ ...edit, text: v })}
-                disabled={cur.status !== "pending"}
+                disabled={cur.status !== "pending" || !!busy}
                 autoSize={{ minRows: 12, maxRows: 30 }}
                 aria-label={bi("内容", "Content")}
               />
@@ -1234,6 +1413,7 @@ function ReviewView({
                   <Select
                     value={edit.team}
                     onChange={(v) => setEdit({ ...edit, team: v })}
+                    disabled={!!busy}
                     triggerProps={{
                       autoFitPosition: true,
                       autoAlignPopupWidth: false,
@@ -1251,6 +1431,7 @@ function ReviewView({
                   <Input
                     value={edit.note}
                     onChange={(v) => setEdit({ ...edit, note: v })}
+                    disabled={!!busy}
                     placeholder={bi(
                       "说明（退回时告诉对方原因）",
                       "Note (explain reason if rejecting)",
@@ -1262,6 +1443,7 @@ function ReviewView({
                     status="danger"
                     icon={<IconClose />}
                     loading={busy === "reject"}
+                    disabled={!!busy}
                     onClick={() => decide("reject")}
                   >
                     {bi("退回", "Reject")}
@@ -1270,7 +1452,7 @@ function ReviewView({
                     type="primary"
                     icon={<IconCheck />}
                     loading={busy === "approve"}
-                    disabled={!edit.title.trim() || !edit.text.trim()}
+                    disabled={!!busy || !edit.title.trim() || !edit.text.trim()}
                     onClick={() => decide("approve")}
                   >
                     {bi("通过并入库", "Approve & publish")}
@@ -1305,7 +1487,7 @@ function MineView({
   useLang();
   return (
     <div className="enter">
-      <header className="iam-h">
+      <header className="iam-h kb-subpage-h">
         <div>
           <h1>{bi("我的提交", "My submissions")}</h1>
           <p>
@@ -1317,7 +1499,7 @@ function MineView({
         </div>
       </header>
       {subs.length === 0 ? (
-        <div className="iam-empty">
+        <div className="iam-empty kb-subpage-empty">
           <IconSend />
           <b>{bi("还没有提交过", "No submissions yet")}</b>
           <span>
@@ -1380,11 +1562,25 @@ function MineNode({
 }) {
   const [kind, setKind] = useState("");
   useEffect(() => {
+    let cancelled = false;
+    setKind("");
     api<{ node: FileNode }>(`/api/me/files/${id}`)
-      .then((r) => setKind(r.node.kind))
-      .catch(() => gone());
+      .then((r) => {
+        if (!cancelled) setKind(r.node.kind);
+      })
+      .catch(() => {
+        if (!cancelled) gone();
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
-  if (!kind) return <div className="mf-view" aria-busy />;
+  if (!kind)
+    return (
+      <div className="mf-view" aria-busy>
+        <Skeleton animation text={{ rows: 5 }} />
+      </div>
+    );
   return kind === "doc" ? (
     <>{render()}</>
   ) : (

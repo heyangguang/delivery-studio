@@ -23,6 +23,14 @@
   cursor: pointer;
   padding: 0 0 0 12px;
   font: inherit;
+  transition: color 0.16s var(--spring), transform 0.16s var(--spring);
+}
+.pp-source:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.pp-source:active {
+  transform: scale(0.98);
 }
 .pp-card {
   border: 1px solid var(--line);
@@ -186,5 +194,11 @@
   .pp-source {
     display: block;
     padding: 6px 0 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pp-source {
+    transition: none;
+    transform: none;
   }
 }

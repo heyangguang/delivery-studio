@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Input, Modal, Popover, Tooltip } from "@arco-design/web-react";
 import { IconEdit, IconInfoCircle } from "@arco-design/web-react/icon";
 import { api, cached, err, fetchCached } from "./shared";
@@ -23,8 +23,11 @@ export function ForkModal({
   const [name, setName] = useState("");
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
+  const busyLockRef = useRef(false);
   const ok = /^[a-z][a-z0-9-]{0,40}$/.test(name);
   const submit = async () => {
+    if (!ok || busyLockRef.current) return;
+    busyLockRef.current = true;
     setBusy(true);
     try {
       await api(`/api/components/${from}/fork`, {
@@ -36,6 +39,7 @@ export function ForkModal({
     } catch (e) {
       err(e);
     } finally {
+      busyLockRef.current = false;
       setBusy(false);
     }
   };
@@ -157,6 +161,7 @@ export function NewComponentModal({
   });
   const [pickOpen, setPickOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const busyLockRef = useRef(false);
   useEffect(() => {
     if (open)
       fetchCached<Kind[]>("/api/components/templates")
@@ -185,6 +190,8 @@ export function NewComponentModal({
     Number(f.port) > 0 &&
     Number(f.port) < 65536;
   const submit = async () => {
+    if (!ok || busyLockRef.current) return;
+    busyLockRef.current = true;
     setBusy(true);
     try {
       await api("/api/components/new", {
@@ -205,6 +212,7 @@ export function NewComponentModal({
     } catch (e) {
       err(e);
     } finally {
+      busyLockRef.current = false;
       setBusy(false);
     }
   };

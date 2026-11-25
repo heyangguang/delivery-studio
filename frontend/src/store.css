@@ -59,7 +59,7 @@
   border-radius: 8px;
   text-decoration: none;
   color: var(--ink);
-  transition: background-color 0.15s;
+  transition: background-color 0.18s var(--spring);
 }
 .job-tl-item:hover {
   background: var(--hover);
@@ -130,10 +130,13 @@
   font-size: 13.5px;
   font-weight: 500;
   color: var(--ink-2);
-  transition: background-color 0.15s, color 0.15s, box-shadow 0.15s;
+  transition: background-color 0.18s var(--spring), color 0.18s var(--spring), box-shadow 0.18s var(--spring), transform 0.15s var(--spring);
 }
 .rail-group > button:hover:not(:disabled) {
   background: var(--hover);
+}
+.rail-group > button:active:not(:disabled) {
+  transform: scale(0.985);
 }
 .rail-group > button.on {
   background: var(--surface);
@@ -168,7 +171,7 @@
   color: var(--ink-2);
   background: var(--surface);
   border: 1px solid var(--line-strong);
-  transition: background-color 0.15s, border-color 0.15s, color 0.15s, transform 0.16s var(--spring);
+  transition: background-color 0.18s var(--spring), border-color 0.18s var(--spring), color 0.18s var(--spring), transform 0.16s var(--spring);
 }
 .rail-tags .arco-tag .arco-tag-content {
   display: inline-flex;
@@ -234,8 +237,6 @@
   display: flex;
   align-items: center;
   gap: 12px;
-}
-.store-bar-tools {
   flex-wrap: wrap;
   justify-content: flex-end;
 }
@@ -316,26 +317,40 @@
 .feature .row-gap {
   margin-top: 8px;
 }
-.feature-cta.arco-btn {
-  background: #fff !important;
-  color: #2b2a6e !important;
-  border: 0 !important;
+.feature .arco-btn.feature-cta,
+.product-banner .arco-btn.feature-cta {
+  background: #ffffff;
+  color: #14161d;
+  border-color: transparent;
   font-weight: 650;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+  transition: background-color 0.18s var(--spring), transform 0.16s var(--spring), box-shadow 0.18s var(--spring);
 }
-.feature-cta.arco-btn:hover:not(:disabled) {
-  background: #f6f6ff !important;
+.feature .arco-btn.feature-cta:hover:not(:disabled),
+.product-banner .arco-btn.feature-cta:hover:not(:disabled) {
+  background: #f4f5f8;
+  color: #14161d;
+  border-color: transparent;
 }
-.feature-cta.arco-btn[disabled] {
-  background: rgba(255, 255, 255, 0.35) !important;
-  color: rgba(255, 255, 255, 0.85) !important;
+.feature .arco-btn.feature-cta:active:not(:disabled),
+.product-banner .arco-btn.feature-cta:active:not(:disabled) {
+  transform: scale(0.98);
+}
+.feature .arco-btn.feature-cta[disabled],
+.product-banner .arco-btn.feature-cta[disabled] {
+  background: rgba(255, 255, 255, 0.28);
+  color: rgba(255, 255, 255, 0.82);
+  border-color: transparent;
   box-shadow: none;
 }
-.feature-more.arco-btn {
-  color: #fff !important;
+.feature .arco-btn.feature-more,
+.product-banner .arco-btn.feature-more {
+  color: #ffffff;
 }
-.feature-more.arco-btn:hover {
-  background: rgba(255, 255, 255, 0.12) !important;
+.feature .arco-btn.feature-more:hover,
+.product-banner .arco-btn.feature-more:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
 }
 .feature-art {
   width: 100%;
@@ -428,18 +443,16 @@
   border-radius: 11px;
   background: var(--surface);
   border: 1px solid var(--line);
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+  box-shadow: var(--shadow-sm);
   transition:
-    transform 0.24s cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow 0.26s cubic-bezier(0.22, 1, 0.36, 1),
-    border-color 0.18s ease;
+    transform 0.24s var(--spring),
+    box-shadow 0.26s var(--spring),
+    border-color 0.2s var(--spring);
 }
 .tile2:hover {
   transform: translateY(-1px);
   border-color: color-mix(in srgb, var(--brand) 30%, var(--line));
-  box-shadow:
-    0 14px 34px -12px rgba(15, 23, 42, 0.068),
-    0 4px 10px -3px rgba(15, 23, 42, 0.03);
+  box-shadow: var(--shadow-md);
 }
 .tile2:focus-within {
   box-shadow: var(--ring), var(--shadow-sm);
@@ -580,7 +593,7 @@
   align-items: center;
   gap: 18px;
   padding: 14px 18px;
-  transition: background-color 0.15s;
+  transition: background-color 0.18s var(--spring);
 }
 .cat-row + .cat-row {
   border-top: 1px solid var(--line);
@@ -691,9 +704,9 @@
   border: 1px solid var(--line);
   box-shadow: var(--shadow-sm);
   transition:
-    transform 0.3s cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow 0.3s cubic-bezier(0.22, 1, 0.36, 1),
-    border-color 0.2s ease;
+    transform 0.3s var(--spring),
+    box-shadow 0.3s var(--spring),
+    border-color 0.2s var(--spring);
 }
 .plan-card.is-rec {
   border-color: color-mix(in srgb, var(--kyndryl-line) 78%, var(--line));
@@ -771,7 +784,7 @@ body[arco-theme="dark"] .plan-card:hover:not(:disabled) {
   font-size: 12.5px;
   font-weight: 600;
   color: var(--ink-2);
-  transition: gap 0.25s cubic-bezier(0.22, 1, 0.36, 1), color 0.2s ease;
+  transition: gap 0.25s var(--spring), color 0.2s var(--spring);
 }
 .plan-card.is-rec .plan-card-go {
   color: var(--kyndryl-ink);
@@ -1071,6 +1084,7 @@ body[arco-theme="dark"] .pg-arbiter-sen {
   margin: 0;
   font-size: 18px;
   font-weight: 650;
+  font-variant-numeric: tabular-nums;
   color: var(--ink-2);
 }
 .product-body {
@@ -1129,7 +1143,7 @@ body[arco-theme="dark"] .pg-arbiter-sen {
   font-size: 13.5px;
   color: var(--mute);
   background: transparent;
-  transition: background-color 0.15s, color 0.15s;
+  transition: background-color 0.18s var(--spring), color 0.18s var(--spring);
 }
 .side-menu .arco-menu-item:hover {
   color: var(--ink);
@@ -1156,6 +1170,7 @@ body[arco-theme="dark"] .pg-arbiter-sen {
   margin-left: auto;
   font-style: normal;
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
   color: var(--faint);
 }
 .side-menu .arco-menu-selected .side-count {
@@ -1381,8 +1396,9 @@ body[arco-theme="dark"] .pg-arbiter-sen {
 .acc-grid .dsec-title {
   margin: 0 0 10px;
 }
+.acc-detail .dsec.acc-gap,
 .acc-gap {
-  margin-top: 28px !important;
+  margin-top: 28px;
 }
 .acc-jobs,
 .acc-tl {
@@ -1517,7 +1533,7 @@ body[arco-theme="dark"] .pg-arbiter-sen {
   flex: none;
 }
 .acc-done {
-  color: #fff;
+  color: var(--on-brand);
   background: var(--ok);
   animation: pop 0.5s var(--spring);
 }
@@ -1554,6 +1570,7 @@ body[arco-theme="dark"] .pg-arbiter-sen {
   margin: 0;
   font-size: 20px;
   font-weight: 650;
+  font-variant-numeric: tabular-nums;
 }
 .acc-detail .dsec:first-of-type {
   border-top: 0;
@@ -1618,10 +1635,13 @@ body[arco-theme="dark"] .pg-arbiter-sen {
   border-radius: 12px;
   border: 1px solid var(--line-strong);
   background: var(--surface);
-  transition: border-color 0.2s, background-color 0.2s, box-shadow 0.25s var(--spring);
+  transition: border-color 0.2s var(--spring), background-color 0.2s var(--spring), box-shadow 0.25s var(--spring), transform 0.16s var(--spring);
 }
 .role-card:hover {
   border-color: var(--brand-line);
+}
+.role-card:active {
+  transform: scale(0.985);
 }
 .role-card.on {
   border-color: var(--brand);
@@ -1753,8 +1773,7 @@ body[arco-theme="dark"] .pg-arbiter-sen {
   .store-main {
     padding: 0;
   }
-  .rail-group.rail-cats,
-  .rail-group[aria-label="分类"] {
+  .rail-group.rail-cats {
     flex-direction: row;
     overflow-x: auto;
     gap: 6px;
@@ -1762,12 +1781,10 @@ body[arco-theme="dark"] .pg-arbiter-sen {
     margin: 0 -16px;
     padding: 0 16px;
   }
-  .rail-group.rail-cats h3,
-  .rail-group[aria-label="分类"] h3 {
+  .rail-group.rail-cats h3 {
     display: none;
   }
-  .rail-group.rail-cats > button,
-  .rail-group[aria-label="分类"] > button {
+  .rail-group.rail-cats > button {
     flex: none;
     gap: 6px;
     border: 1px solid var(--line-strong);
@@ -1775,21 +1792,17 @@ body[arco-theme="dark"] .pg-arbiter-sen {
     padding: 5px 12px;
     background: var(--surface);
   }
-  .rail-group.rail-cats > button.on,
-  .rail-group[aria-label="分类"] > button.on {
+  .rail-group.rail-cats > button.on {
     border-color: var(--brand);
     color: var(--brand-ink);
     background: var(--brand-soft);
     box-shadow: none;
   }
   .rail-group.rail-tags,
-  .rail-group[aria-label="标签"],
-  .rail-group.rail-scope h3,
-  .rail-group[aria-label="范围"] h3 {
+  .rail-group.rail-scope h3 {
     display: none;
   }
-  .rail-group.rail-scope,
-  .rail-group[aria-label="范围"] {
+  .rail-group.rail-scope {
     flex-direction: row;
     flex-wrap: wrap;
   }
@@ -1866,11 +1879,11 @@ body[arco-theme="dark"] .pg-arbiter-sen {
   border-radius: 18px;
   background: var(--surface);
   border: 1px solid var(--line);
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.025);
+  box-shadow: var(--shadow-sm);
   transition:
-    transform 0.32s cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow 0.34s cubic-bezier(0.22, 1, 0.36, 1),
-    border-color 0.24s ease;
+    transform 0.32s var(--spring),
+    box-shadow 0.34s var(--spring),
+    border-color 0.24s var(--spring);
 }
 .appwide::before {
   content: "";
@@ -1883,14 +1896,12 @@ body[arco-theme="dark"] .pg-arbiter-sen {
     color-mix(in srgb, var(--app-accent, var(--brand)) 6.5%, transparent),
     transparent 68%
   );
-  transition: opacity 0.32s ease;
+  transition: opacity 0.32s var(--spring);
 }
 .appwide:hover {
   transform: translateY(-1.5px);
   border-color: color-mix(in srgb, var(--app-accent, var(--brand)) 26%, var(--line));
-  box-shadow:
-    0 16px 40px -14px rgba(15, 23, 42, 0.068),
-    0 5px 14px -5px rgba(15, 23, 42, 0.032);
+  box-shadow: var(--shadow-md);
 }
 .appwide:hover::before {
   opacity: 1;
@@ -1901,7 +1912,7 @@ body[arco-theme="dark"] .pg-arbiter-sen {
 .appwide.off:hover {
   transform: none;
   border-color: var(--line);
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.025);
+  box-shadow: var(--shadow-sm);
 }
 .appwide.off::before {
   display: none;
@@ -1938,7 +1949,7 @@ body[arco-theme="dark"] .pg-arbiter-sen {
   font-size: 17.5px;
   font-weight: 700;
   letter-spacing: -0.015em;
-  transition: color 0.16s ease;
+  transition: color 0.18s var(--spring);
 }
 .wide-name .tile2-link:hover {
   color: var(--brand-ink);
@@ -1959,6 +1970,7 @@ body[arco-theme="dark"] .pg-arbiter-sen {
   color: var(--ink-2);
   font-family: var(--mono);
   font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
   line-height: 18px;
 }
 .wide-dot {
@@ -2109,10 +2121,10 @@ body[arco-theme="dark"] .pg-arbiter-sen {
   background: color-mix(in srgb, var(--surface-2) 68%, var(--surface));
   border: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
   transition:
-    background-color 0.2s ease,
-    border-color 0.2s ease,
-    box-shadow 0.25s cubic-bezier(0.22, 1, 0.36, 1),
-    transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+    background-color 0.2s var(--spring),
+    border-color 0.2s var(--spring),
+    box-shadow 0.25s var(--spring),
+    transform 0.25s var(--spring);
 }
 .wide-plans button.wide-plan-tile.is-rec {
   border-color: color-mix(in srgb, var(--kyndryl-line) 72%, var(--line));
@@ -2158,7 +2170,7 @@ body[arco-theme="dark"] .wide-plans button.wide-plan-tile:hover:not(:disabled) {
   background-size: 7px 7px;
   border: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
   flex: none;
-  transition: border-color 0.2s ease, background-color 0.2s ease;
+  transition: border-color 0.2s var(--spring), background-color 0.2s var(--spring);
 }
 .wide-plan-well.is-custom {
   background-color: color-mix(in srgb, var(--surface-2) 55%, var(--surface));
@@ -2212,9 +2224,9 @@ body[arco-theme="dark"] .wide-plans button.wide-plan-tile:hover:not(:disabled) {
   flex: none;
   color: var(--faint);
   transition:
-    background-color 0.2s ease,
-    color 0.2s ease,
-    transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+    background-color 0.2s var(--spring),
+    color 0.2s var(--spring),
+    transform 0.25s var(--spring);
 }
 .wide-plan-arrow {
   flex: none;
@@ -2235,11 +2247,14 @@ body[arco-theme="dark"] .wide-plans button.wide-plan-tile:hover:not(:disabled) {
   background: color-mix(in srgb, var(--surface-2) 70%, var(--surface));
   border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
   color: var(--ink);
-  transition: background-color 0.16s, border-color 0.16s;
+  transition: background-color 0.18s var(--spring), border-color 0.18s var(--spring), transform 0.15s var(--spring);
 }
 .wide-jobs a:hover {
   background: var(--surface);
   border-color: var(--brand-line);
+}
+.wide-jobs a:active {
+  transform: scale(0.985);
 }
 .wide-jobs a:hover .mono {
   color: var(--brand-ink);

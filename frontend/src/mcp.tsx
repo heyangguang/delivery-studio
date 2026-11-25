@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   Input,
@@ -31,6 +31,7 @@ import { go } from "./router";
 import { Segmented } from "./ui";
 import { bi, useLang } from "./i18n";
 import "./respage.css";
+import "./kb.css";
 
 /* Outside services the assistant can call (MCP over HTTP): the platform's, kept by those with AI settings, and each
    person's own, which only offer tools that declare they change nothing. */
@@ -82,6 +83,11 @@ export function MCPPage({
   useLang();
   const narrow = useMedia("(max-width: 900px)");
   const admin = can("ai.settings");
+  const mountedRef = useRef(true);
+  const busyRef = useRef(false);
+  const putRef = useRef(false);
+  const allowRef = useRef(false);
+  const deleteRef = useRef(false);
   const initMe = cached<{ servers: Server[] }>("/api/me/mcp");
   const initPlat = cached<Server[]>("/api/mcp#platform");
   const initInfo = cached<{ user_mcp: boolean }>("/api/me");
@@ -95,62 +101,93 @@ export function MCPPage({
   const [q, setQ] = useState("");
   const [edit, setEdit] = useState<Edit | null>(null);
   const [busy, setBusy] = useState("");
+  const [putting, setPutting] = useState(false);
+  const [allowBusy, setAllowBusy] = useState(false);
 
-  const load = () =>
-    Promise.all([
-      api<{ servers: Server[] }>("/api/me/mcp"),
-      admin
-        ? api<{ servers: Server[] }>("/api/settings/ai/mcp").then(
-            (r) => r.servers,
-          )
-        : api<{
-            mcp: { id: string; name: string; tools: number; mine?: boolean }[];
-          }>("/api/ai/options").then((r) =>
-            r.mcp
-              .filter((m) => !m.mine)
-              .map(
-                (m) =>
-                  ({
-                    id: m.id,
-                    name: m.name,
-                    url: "",
-                    enabled: true,
-                    allow_write: false,
-                    tools: null,
-                    brief: true,
-                    tool_count: m.tools,
-                  }) as Server,
-              ),
-          ),
-      api<{ user_mcp: boolean }>("/api/me"),
-    ])
-      .then(([me, plat, info]) => {
-        putCached("/api/me/mcp", me);
-        putCached("/api/mcp#platform", plat);
-        setMine(me.servers.map((x) => ({ ...x, mine: true })));
-        setPlatform(plat);
-        setAllowMine(info.user_mcp);
-        setError("");
-      })
-      .catch((e) => setError((e as Error).message));
+  const load = useCallback(
+    () =>
+      Promise.all([
+        api<{ servers: Server[] }>("/api/me/mcp"),
+        admin
+          ? api<{ servers: Server[] }>("/api/settings/ai/mcp").then(
+              (r) => r.servers,
+            )
+          : api<{
+              mcp: { id: string; name: string; tools: number; mine?: boolean }[];
+            }>("/api/ai/options").then((r) =>
+              r.mcp
+                .filter((m) => !m.mine)
+                .map(
+                  (m) =>
+                    ({
+                      id: m.id,
+                      name: m.name,
+                      url: "",
+                      enabled: true,
+                      allow_write: false,
+                      tools: null,
+                      brief: true,
+                      tool_count: m.tools,
+                    }) as Server,
+                ),
+            ),
+        api<{ user_mcp: boolean }>("/api/me"),
+      ])
+        .then(([me, plat, info]) => {
+          putCached("/api/me/mcp", me);
+          putCached("/api/mcp#platform", plat);
+          if (!mountedRef.current) return;
+          setMine(me.servers.map((x) => ({ ...x, mine: true })));
+          setPlatform(plat);
+          setAllowMine(info.user_mcp);
+          setError("");
+        })
+        .catch((e) => {
+          if (mountedRef.current) setError((e as Error).message);
+        }),
+    [admin],
+  );
+
   useEffect(() => {
+    mountedRef.current = true;
     load();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    return () => {
+      mountedRef.current = false;
+    };
+  }, [load]);
 
   const all = useMemo(() => [...(mine || []), ...platform], [mine, platform]);
   const t = q.trim().toLowerCase();
-  const shown = all.filter(
-    (s) =>
-      (kind === "all" || (kind === "mine") === !!s.mine) &&
-      (!t ||
-        `${s.name} ${s.url} ${s.server_name || ""}`.toLowerCase().includes(t)),
+  const shown = useMemo(
+    () =>
+      all.filter(
+        (s) =>
+          (kind === "all" || (kind === "mine") === !!s.mine) &&
+          (!t ||
+            `${s.name} ${s.url} ${s.server_name || ""}`
+              .toLowerCase()
+              .includes(t)),
+      ),
+    [all, kind, t],
   );
-  const cur = all.find((s) => s.id === selected);
+  const groupedRows = useMemo(
+    () => ({
+      mine: shown.filter((s) => !!s.mine),
+      platform: shown.filter((s) => !s.mine),
+    }),
+    [shown],
+  );
+  const cur = useMemo(
+    () => all.find((s) => s.id === selected),
+    [all, selected],
+  );
   const base = (s: { mine?: boolean }) =>
     s.mine ? "/api/me/mcp" : "/api/settings/ai/mcp";
   const mayChange = (s: Server) => !!s.mine || admin;
 
   const refresh = async (s: Server) => {
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy("refresh");
     try {
       await api(`${base(s)}/${s.id}/refresh`, { method: "POST" });
@@ -158,31 +195,45 @@ export function MCPPage({
     } catch (e) {
       err(e);
     } finally {
-      setBusy("");
+      busyRef.current = false;
+      if (mountedRef.current) setBusy("");
       load();
     }
   };
   const put = async (s: Server, patch: Partial<Server>) => {
+    if (putRef.current) return;
+    putRef.current = true;
+    setPutting(true);
     try {
       await api(`${base(s)}/${s.id}`, {
         method: "PUT",
         body: JSON.stringify({ ...s, ...patch, token: "" }),
       });
-      load();
+      await load();
     } catch (e) {
       err(e);
+    } finally {
+      putRef.current = false;
+      if (mountedRef.current) setPutting(false);
     }
   };
   const save = async () => {
-    if (!edit) return;
+    if (!edit || busyRef.current || !edit.name.trim() || !edit.url.trim())
+      return;
+    busyRef.current = true;
     setBusy("save");
     try {
       const b = edit.mine ? "/api/me/mcp" : "/api/settings/ai/mcp";
       const r = await api<{ id: string }>(edit.id ? `${b}/${edit.id}` : b, {
         method: edit.id ? "PUT" : "POST",
-        body: JSON.stringify({ ...edit, tools: undefined }),
+        body: JSON.stringify({
+          ...edit,
+          name: edit.name.trim(),
+          url: edit.url.trim(),
+          tools: undefined,
+        }),
       });
-      setEdit(null);
+      if (mountedRef.current) setEdit(null);
       await api(`${b}/${r.id}/refresh`, { method: "POST" }).catch((e) =>
         Message.warning(
           bi(
@@ -196,7 +247,8 @@ export function MCPPage({
     } catch (e) {
       err(e);
     } finally {
-      setBusy("");
+      busyRef.current = false;
+      if (mountedRef.current) setBusy("");
     }
   };
   const remove = (s: Server) =>
@@ -212,24 +264,35 @@ export function MCPPage({
       cancelText: bi("取消", "Cancel"),
       okButtonProps: { status: "danger" },
       onOk: async () => {
+        if (deleteRef.current) return;
+        deleteRef.current = true;
         try {
           await api(`${base(s)}/${s.id}`, { method: "DELETE" });
           await load();
           go({ name: "mcp" }, { replace: true });
         } catch (e) {
           err(e);
+          throw e;
+        } finally {
+          deleteRef.current = false;
         }
       },
     });
   const setAllowUsers = async (v: boolean) => {
+    if (allowRef.current) return;
+    allowRef.current = true;
+    setAllowBusy(true);
     try {
       await api("/api/settings/ai/user-mcp", {
         method: "PUT",
         body: JSON.stringify({ allowed: v }),
       });
-      setAllowMine(v);
+      if (mountedRef.current) setAllowMine(v);
     } catch (e) {
       err(e);
+    } finally {
+      allowRef.current = false;
+      if (mountedRef.current) setAllowBusy(false);
     }
   };
   const startNew = () =>
@@ -244,7 +307,7 @@ export function MCPPage({
   const canAdd = allowMine || admin;
 
   return (
-    <div className="md-split">
+    <div className="md-split mcp-split-page">
       {(!narrow || !selected) && (
         <aside className="md-list" aria-label={bi("MCP 服务", "MCP servers")}>
           <div className="list-head">
@@ -317,7 +380,7 @@ export function MCPPage({
               aria-label={bi("MCP 服务", "MCP servers")}
             >
               {(["mine", "platform"] as const).map((g) => {
-                const rows = shown.filter((s) => (g === "mine") === !!s.mine);
+                const rows = groupedRows[g];
                 if (!rows.length) return null;
                 return (
                   <React.Fragment key={g}>
@@ -330,6 +393,21 @@ export function MCPPage({
                       const n = (s.tools || []).filter(
                         (x) => x.read_only || s.allow_write,
                       ).length;
+                      const subText = s.brief
+                        ? s.tool_count !== undefined
+                          ? bi(
+                              `${s.tool_count} 个工具`,
+                              `${s.tool_count} tool${s.tool_count === 1 ? "" : "s"}`,
+                            )
+                          : s.server_name
+                        : s.error
+                          ? s.error
+                          : s.checked
+                            ? bi(
+                                `${host(s.url)} · ${n} 个工具`,
+                                `${host(s.url)} · ${n} tool${n === 1 ? "" : "s"}`,
+                              )
+                            : host(s.url);
                       return (
                         <a
                           key={s.id}
@@ -351,23 +429,9 @@ export function MCPPage({
                             <IconLink />
                           </span>
                           <span className="rp-t">
-                            <b>{s.name}</b>
-                            <small>
-                              {s.brief
-                                ? s.tool_count !== undefined
-                                  ? bi(
-                                      `${s.tool_count} 个工具`,
-                                      `${s.tool_count} tool${s.tool_count === 1 ? "" : "s"}`,
-                                    )
-                                  : s.server_name
-                                : s.error
-                                  ? s.error
-                                  : s.checked
-                                    ? bi(
-                                        `${host(s.url)} · ${n} 个工具`,
-                                        `${host(s.url)} · ${n} tool${n === 1 ? "" : "s"}`,
-                                      )
-                                    : host(s.url)}
+                            <b title={s.name}>{s.name}</b>
+                            <small title={s.error || s.url || subText}>
+                              {subText}
                             </small>
                           </span>
                           {!s.brief && (
@@ -410,6 +474,7 @@ export function MCPPage({
                 s={cur}
                 admin={admin}
                 busy={busy}
+                putting={putting}
                 change={mayChange(cur)}
                 refresh={() => refresh(cur)}
                 put={(p) => put(cur, p)}
@@ -462,6 +527,7 @@ export function MCPPage({
                   <label className="rp-switch rp-allow">
                     <Switch
                       size="small"
+                      loading={allowBusy}
                       checked={allowMine}
                       onChange={setAllowUsers}
                       aria-label={bi(
@@ -487,7 +553,11 @@ export function MCPPage({
             ? bi("编辑服务", "Edit server")
             : bi("接入 MCP 服务", "Connect MCP server")
         }
-        onCancel={() => setEdit(null)}
+        onCancel={() => {
+          if (busy !== "save") setEdit(null);
+        }}
+        maskClosable={busy !== "save"}
+        escToExit={busy !== "save"}
         okText={
           edit?.id
             ? bi("保存", "Save")
@@ -497,11 +567,12 @@ export function MCPPage({
         confirmLoading={busy === "save"}
         okButtonProps={{ disabled: !edit?.name.trim() || !edit?.url.trim() }}
         onOk={save}
+        style={{ width: 520, maxWidth: "96vw" }}
       >
         {edit && (
-          <div className="st-form">
+          <div className="st-form kb-modal-form">
             {admin && !edit.id && (
-              <div className="st-field">
+              <div className="st-field kb-modal-field">
                 <span>{bi("给谁用", "Availability")}</span>
                 <Segmented<string>
                   size="sm"
@@ -520,7 +591,7 @@ export function MCPPage({
                 />
               </div>
             )}
-            <div className="st-field">
+            <div className="st-field kb-modal-field">
               <span>{bi("名称", "Name")}</span>
               <Input
                 value={edit.name}
@@ -530,7 +601,7 @@ export function MCPPage({
                 aria-label={bi("名称", "Name")}
               />
             </div>
-            <div className="st-field">
+            <div className="st-field kb-modal-field">
               <span>{bi("地址", "URL")}</span>
               <Input
                 value={edit.url}
@@ -545,7 +616,7 @@ export function MCPPage({
                 )}
               </small>
             </div>
-            <div className="st-field">
+            <div className="st-field kb-modal-field">
               <span>{bi("访问令牌（可选）", "Access token (optional)")}</span>
               <Input.Password
                 value={edit.token}
@@ -570,6 +641,7 @@ function ServerView({
   s,
   admin,
   busy,
+  putting,
   change,
   refresh,
   put,
@@ -579,6 +651,7 @@ function ServerView({
   s: Server;
   admin: boolean;
   busy: string;
+  putting: boolean;
   change: boolean;
   refresh: () => void;
   put: (p: Partial<Server>) => void;
@@ -586,11 +659,18 @@ function ServerView({
   edit: () => void;
 }) {
   useLang();
-  const off = new Set(s.disabled_tools || []);
+  const off = useMemo(
+    () => new Set(s.disabled_tools || []),
+    [s.disabled_tools],
+  );
   const tools = s.tools || [];
-  const offered = tools.filter(
-    (t) => !off.has(t.name) && (t.read_only || (!s.mine && s.allow_write)),
-  ).length;
+  const offered = useMemo(
+    () =>
+      tools.filter(
+        (t) => !off.has(t.name) && (t.read_only || (!s.mine && s.allow_write)),
+      ).length,
+    [tools, off, s.mine, s.allow_write],
+  );
   const briefCount =
     s.tool_count !== undefined
       ? bi(
@@ -599,7 +679,7 @@ function ServerView({
         )
       : s.server_name;
   return (
-    <article className="rp-doc enter" key={s.id}>
+    <article className="rp-doc mcp-doc enter" key={s.id}>
       <header className="rp-head">
         <span className={`rp-ic lg ${s.mine ? "k-mine" : "k-mcp"}`}>
           <IconLink />
@@ -607,7 +687,7 @@ function ServerView({
         <div className="rp-head-t">
           <h1>{s.name}</h1>
           {s.brief ? (
-            <p>
+            <p className="num">
               {bi(
                 `平台接入的服务，${briefCount}。由管理员维护。`,
                 `Platform-connected server (${briefCount}). Managed by administrators.`,
@@ -615,13 +695,16 @@ function ServerView({
             </p>
           ) : (
             <div className="rp-meta">
-              <span className="mono">{s.url}</span>
+              <span className="mono mcp-url" title={s.url}>
+                {s.url}
+              </span>
               {s.server_name && (
                 <span>{bi(`服务名 ${s.server_name}`, `Server: ${s.server_name}`)}</span>
               )}
               {s.error ? (
-                <span className="bad">
-                  <IconExclamationCircle /> {s.error}
+                <span className="bad mcp-err">
+                  <IconExclamationCircle />
+                  <span>{s.error}</span>
                 </span>
               ) : s.checked ? (
                 <span title={fullTime(s.checked)}>
@@ -641,22 +724,25 @@ function ServerView({
             <Button
               icon={<IconRefresh />}
               loading={busy === "refresh"}
+              disabled={putting}
               onClick={refresh}
             >
               {bi("重新读取", "Refresh")}
             </Button>
-            <Button icon={<IconEdit />} onClick={edit}>
+            <Button icon={<IconEdit />} disabled={putting} onClick={edit}>
               {bi("编辑", "Edit")}
             </Button>
             <Button
               status="danger"
               icon={<IconDelete />}
+              disabled={putting}
               onClick={remove}
               aria-label={bi("移除", "Remove")}
             />
             <label className="rp-switch">
               <Switch
                 size="small"
+                loading={putting}
                 checked={s.enabled}
                 onChange={(v) => put({ enabled: v })}
                 aria-label={bi("启用", "Enable")}
@@ -694,7 +780,7 @@ function ServerView({
                         <Switch
                           size="small"
                           checked={allowed && !off.has(t.name)}
-                          disabled={!allowed || !change}
+                          disabled={!allowed || !change || putting}
                           onChange={(v) =>
                             put({
                               disabled_tools: v
@@ -705,7 +791,9 @@ function ServerView({
                           aria-label={bi(`开放 ${t.name}`, `Enable ${t.name}`)}
                         />
                         <span className="mcp-tool-t">
-                          <b className="mono">{t.name}</b>
+                          <b className="mono" title={t.name}>
+                            {t.name}
+                          </b>
                           {t.description && <small>{t.description}</small>}
                         </span>
                         {t.read_only ? (
@@ -724,6 +812,7 @@ function ServerView({
                 <label className="mcp-write">
                   <Switch
                     size="small"
+                    disabled={putting}
                     checked={s.allow_write}
                     onChange={(v) => put({ allow_write: v })}
                     aria-label={bi(

@@ -196,7 +196,13 @@ const INLINE =
   /(`[^`\n]+`|\\\([^\n]+?\\\)|\$\$[^\n]+?\$\$|\$[^\s$](?:[^$\n]*?[^\s$])?\$(?!\d)|\*\*[^*\n]+\*\*|__[^_\n]+__|~~[^~\n]+~~|\*[^*\s][^*\n]*\*|\[[^\]\n]+\]\(\s*\/(?:out|in|tmp)\/[^)\n]*\)|!?\[[^\]\n]*\]\(https?:\/\/[^)\s]+\)|https?:\/\/[^\s)<>，。；）]+)/g;
 
 /** A formula as HTML (KaTeX, bundled with the page). A formula it cannot read stays as the text that was written. */
-export function Tex({ src, block }: { src: string; block?: boolean }) {
+export const Tex = React.memo(function Tex({
+  src,
+  block,
+}: {
+  src: string;
+  block?: boolean;
+}) {
   const html = React.useMemo(() => {
     try {
       return katex.renderToString(src, {
@@ -222,9 +228,9 @@ export function Tex({ src, block }: { src: string; block?: boolean }) {
   ) : (
     <span className="md-math" dangerouslySetInnerHTML={{ __html: html }} />
   );
-}
+});
 
-export function Inline({ text }: { text: string }) {
+export const Inline = React.memo(function Inline({ text }: { text: string }) {
   useLang();
   const parts = text.split(INLINE);
   return (
@@ -283,7 +289,7 @@ export function Inline({ text }: { text: string }) {
       })}
     </>
   );
-}
+});
 
 const LANG: Record<string, string> = {
   bash: "Shell",
@@ -349,7 +355,7 @@ async function scriptFolder(): Promise<string> {
   return made.id;
 }
 
-export function CodeBlock({
+export const CodeBlock = React.memo(function CodeBlock({
   text,
   lang,
   caption,
@@ -361,6 +367,20 @@ export function CodeBlock({
   useLang();
   const [done, setDone] = useState(false);
   const [saving, setSaving] = useState(false);
+  const savingRef = React.useRef(false);
+  const copyTimerRef = React.useRef<number>(0);
+  const revokeUrlsRef = React.useRef<Map<number, string>>(new Map());
+  React.useEffect(
+    () => () => {
+      if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
+      revokeUrlsRef.current.forEach((href, tid) => {
+        window.clearTimeout(tid);
+        URL.revokeObjectURL(href);
+      });
+      revokeUrlsRef.current.clear();
+    },
+    [],
+  );
   const ext = EXT[(lang || "").toLowerCase()];
   // a one-line command is just copied; a script or a config can be kept
   const keep = !!ext || text.includes("\n");
@@ -373,12 +393,19 @@ export function CodeBlock({
   const download = () => {
     const f = file();
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(f);
+    const href = URL.createObjectURL(f);
+    a.href = href;
     a.download = f.name;
     a.click();
-    window.setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    const tid = window.setTimeout(() => {
+      revokeUrlsRef.current.delete(tid);
+      URL.revokeObjectURL(href);
+    }, 2000);
+    revokeUrlsRef.current.set(tid, href);
   };
   const save = async () => {
+    if (savingRef.current) return;
+    savingRef.current = true;
     setSaving(true);
     try {
       const r = await uploadFiles([file()], await scriptFolder());
@@ -393,13 +420,14 @@ export function CodeBlock({
     } catch (e) {
       err(e);
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
   return (
     <figure className="md-code">
       <figcaption>
-        <span>
+        <span className="md-code-cap">
           {caption ||
             LANG[(lang || "").toLowerCase()] ||
             lang ||
@@ -434,7 +462,11 @@ export function CodeBlock({
               const payload = isShell ? toPasteSafeShell(text).text : text;
               copy(payload);
               setDone(true);
-              window.setTimeout(() => setDone(false), 1400);
+              if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
+              copyTimerRef.current = window.setTimeout(() => {
+                copyTimerRef.current = 0;
+                setDone(false);
+              }, 1400);
             }}
             aria-label={bi("复制代码", "Copy code")}
           >
@@ -448,111 +480,167 @@ export function CodeBlock({
       </pre>
     </figure>
   );
+});
+
+function blocksEqual(a: Block[], b: Block[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (!blockEqual(a[i], b[i])) return false;
+  }
+  return true;
 }
+
+function blockEqual(a: Block, b: Block): boolean {
+  if (a === b) return true;
+  if (a.t !== b.t) return false;
+  switch (a.t) {
+    case "hr":
+      return true;
+    case "code":
+      return b.t === "code" && a.lang === b.lang && a.text === b.text;
+    case "h":
+      return b.t === "h" && a.level === b.level && a.text === b.text;
+    case "p":
+    case "quote":
+    case "math":
+      return (
+        (b.t === "p" || b.t === "quote" || b.t === "math") && a.text === b.text
+      );
+    case "table":
+      return (
+        b.t === "table" &&
+        a.head.length === b.head.length &&
+        a.rows.length === b.rows.length &&
+        a.align.length === b.align.length &&
+        a.head.every((c, k) => c === b.head[k]) &&
+        a.align.every((c, k) => c === b.align[k]) &&
+        a.rows.every(
+          (r, k) =>
+            r.length === b.rows[k].length &&
+            r.every((c, m) => c === b.rows[k][m]),
+        )
+      );
+    case "list":
+      return (
+        b.t === "list" &&
+        a.ordered === b.ordered &&
+        a.start === b.start &&
+        a.items.length === b.items.length &&
+        a.items.every(
+          (it, k) =>
+            it.text === b.items[k].text &&
+            blocksEqual(it.children, b.items[k].children),
+        )
+      );
+  }
+}
+
+const BlockNode = React.memo(
+  function BlockNode({ b }: { b: Block }) {
+    useLang();
+    switch (b.t) {
+      case "code":
+        return <CodeBlock text={b.text} lang={b.lang} />;
+      case "h":
+        return React.createElement(
+          `h${Math.min(6, b.level + 2)}`,
+          { className: "md-h" },
+          <Inline text={b.text} />,
+        );
+      case "hr":
+        return <hr />;
+      case "math":
+        return <Tex src={b.text} block />;
+      case "quote":
+        return (
+          <blockquote>
+            <Inline text={b.text} />
+          </blockquote>
+        );
+      case "table":
+        return (
+          <div className="md-table">
+            <table>
+              <thead>
+                <tr>
+                  {b.head.map((c, k) => (
+                    <th
+                      key={k}
+                      style={{
+                        textAlign: b.align[
+                          k
+                        ] as React.CSSProperties["textAlign"],
+                      }}
+                    >
+                      <Inline text={c} />
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {b.rows.map((r, k) => (
+                  <tr key={k}>
+                    {r.map((c, m) => (
+                      <td
+                        key={m}
+                        style={{
+                          textAlign: b.align[
+                            m
+                          ] as React.CSSProperties["textAlign"],
+                        }}
+                      >
+                        <Inline text={c} />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+      case "list": {
+        const items = b.items.map((it, k) => (
+          <li
+            key={k}
+            className={/^\[[ xX]\]\s/.test(it.text) ? "md-task" : undefined}
+          >
+            {/^\[[ xX]\]\s/.test(it.text) && (
+              <input
+                type="checkbox"
+                checked={/^\[[xX]\]/.test(it.text)}
+                readOnly
+                tabIndex={-1}
+                aria-label={
+                  /^\[[xX]\]/.test(it.text)
+                    ? bi("已完成", "Completed")
+                    : bi("未完成", "Incomplete")
+                }
+              />
+            )}
+            <Inline text={it.text.replace(/^\[[ xX]\]\s/, "")} />
+            {it.children.length > 0 && <Blocks blocks={it.children} />}
+          </li>
+        ));
+        return b.ordered ? <ol start={b.start}>{items}</ol> : <ul>{items}</ul>;
+      }
+      default:
+        return (
+          <p>
+            <Inline text={b.text} />
+          </p>
+        );
+    }
+  },
+  (prev, next) => blockEqual(prev.b, next.b),
+);
 
 function Blocks({ blocks }: { blocks: Block[] }) {
   return (
     <>
-      {blocks.map((b, i) => {
-        switch (b.t) {
-          case "code":
-            return <CodeBlock key={i} text={b.text} lang={b.lang} />;
-          case "h":
-            return React.createElement(
-              `h${Math.min(6, b.level + 2)}`,
-              { key: i, className: "md-h" },
-              <Inline text={b.text} />,
-            );
-          case "hr":
-            return <hr key={i} />;
-          case "math":
-            return <Tex key={i} src={b.text} block />;
-          case "quote":
-            return (
-              <blockquote key={i}>
-                <Inline text={b.text} />
-              </blockquote>
-            );
-          case "table":
-            return (
-              <div key={i} className="md-table">
-                <table>
-                  <thead>
-                    <tr>
-                      {b.head.map((c, k) => (
-                        <th
-                          key={k}
-                          style={{
-                            textAlign: b.align[
-                              k
-                            ] as React.CSSProperties["textAlign"],
-                          }}
-                        >
-                          <Inline text={c} />
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {b.rows.map((r, k) => (
-                      <tr key={k}>
-                        {r.map((c, m) => (
-                          <td
-                            key={m}
-                            style={{
-                              textAlign: b.align[
-                                m
-                              ] as React.CSSProperties["textAlign"],
-                            }}
-                          >
-                            <Inline text={c} />
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            );
-          case "list": {
-            const items = b.items.map((it, k) => (
-              <li
-                key={k}
-                className={/^\[[ xX]\]\s/.test(it.text) ? "md-task" : undefined}
-              >
-                {/^\[[ xX]\]\s/.test(it.text) && (
-                  <input
-                    type="checkbox"
-                    checked={/^\[[xX]\]/.test(it.text)}
-                    readOnly
-                    tabIndex={-1}
-                    aria-label={
-                      /^\[[xX]\]/.test(it.text)
-                        ? bi("已完成", "Completed")
-                        : bi("未完成", "Incomplete")
-                    }
-                  />
-                )}
-                <Inline text={it.text.replace(/^\[[ xX]\]\s/, "")} />
-                {it.children.length > 0 && <Blocks blocks={it.children} />}
-              </li>
-            ));
-            return b.ordered ? (
-              <ol key={i} start={b.start}>
-                {items}
-              </ol>
-            ) : (
-              <ul key={i}>{items}</ul>
-            );
-          }
-          default:
-            return (
-              <p key={i}>
-                <Inline text={b.text} />
-              </p>
-            );
-        }
-      })}
+      {blocks.map((b, i) => (
+        <BlockNode key={i} b={b} />
+      ))}
     </>
   );
 }

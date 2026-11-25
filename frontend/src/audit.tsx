@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Button,
@@ -676,8 +676,227 @@ const pretty = (t?: string) =>
     })
     .join("\n");
 
-export function AuditView() {
+const AuditEventRow = React.memo(function AuditEventRow({
+  r,
+  isSelected,
+  onOpen,
+}: {
+  r: Row;
+  isSelected: boolean;
+  onOpen: (row: Row) => void;
+}) {
   useLang();
+  return (
+    <button
+      type="button"
+      className={`au2-row ${isSelected ? "on" : ""}`}
+      role="row"
+      onClick={() => onOpen(r)}
+    >
+      <span className="au2-time num">{stamp(r.time)}</span>
+      <span className="au2-who">
+        <b>{r.user || "—"}</b>
+        <small className="mono">
+          {r.ip || (r.user === "system" ? bi("系统自动", "System") : "")}
+        </small>
+      </span>
+      <span className="au2-what">
+        <b>{what(r)}</b>
+        <small className="mono">
+          {r.path ? `${r.method} ${r.path}` : ""}
+          {r.duration_sec && r.duration_sec > 0
+            ? bi(
+                ` · 在线 ${formatDuration(r.duration_sec)}`,
+                ` · online ${formatDuration(r.duration_sec)}`,
+              )
+            : ""}
+        </small>
+      </span>
+      <span className="au2-res">
+        {r.resource ? (
+          <>
+            <em>{resourceLabel(r.resource.type)}</em>
+            <span>{r.resource.name || r.resource.id || r.job || ""}</span>
+          </>
+        ) : (
+          <span className="mono">{r.job || "—"}</span>
+        )}
+      </span>
+      <span className={`au2-st ${r.result || "ok"}`}>
+        {RESULT[r.result || "ok"]}
+        {r.status ? <small className="num">{r.status}</small> : null}
+      </span>
+    </button>
+  );
+});
+
+const AuditMemberItem = React.memo(function AuditMemberItem({
+  u,
+  selected,
+  onToggleUser,
+}: {
+  u: AuditSessionUser;
+  selected: boolean;
+  onToggleUser: (username: string) => void;
+}) {
+  useLang();
+  return (
+    <button
+      type="button"
+      className={`au-member-item ${selected ? "on" : ""}`}
+      onClick={() => onToggleUser(u.user)}
+    >
+      <div className="au-member-top">
+        <span className="au-member-name">
+          <StatusDot state={u.online ? "done" : "void"} />
+          <b>{u.user}</b>
+        </span>
+        <span className={`au-member-state num ${u.online ? "ok" : ""}`}>
+          {u.online
+            ? bi(`${u.active_sessions} 台在线`, `${u.active_sessions} online`)
+            : bi("离线", "Offline")}
+        </span>
+      </div>
+      <div className="au-member-meta num">
+        <span>
+          {bi("在线", "Online")} {formatDuration(u.total_duration_seconds)}
+        </span>
+        <span>
+          {bi("活跃", "Active")} {formatDuration(u.total_active_seconds)} ·{" "}
+          {bi(
+            `${u.login_count} 次`,
+            `${u.login_count} ${u.login_count === 1 ? "login" : "logins"}`,
+          )}
+          {u.failed_login_count > 0 && (
+            <>
+              {" · "}
+              <span style={{ whiteSpace: "nowrap" }}>
+                {bi(
+                  `失败 ${u.failed_login_count}`,
+                  `${u.failed_login_count} failed`,
+                )}
+              </span>
+            </>
+          )}
+        </span>
+      </div>
+    </button>
+  );
+});
+
+const AuditSessionItemRow = React.memo(function AuditSessionItemRow({
+  s,
+  isSelected,
+  canManageUsers,
+  isKicking,
+  onSelect,
+  onKick,
+}: {
+  s: AuditSessionRow;
+  isSelected: boolean;
+  canManageUsers: boolean;
+  isKicking: boolean;
+  onSelect: (row: AuditSessionRow) => void;
+  onKick: (row: AuditSessionRow) => void;
+}) {
+  useLang();
+  const meta = SESSION_REASON[s.end_reason] || [
+    s.end_reason || bi("已结束", "Ended"),
+    "mute",
+  ];
+  const tone = TONE_STATE[meta[1]] || "void";
+  const dev = browser(s.agent) || bi("未知客户端", "Unknown Client");
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      className={`au2-row au2-srow ${isSelected ? "on" : ""}`}
+      onClick={() => onSelect(s)}
+      onKeyDown={(e) => {
+        if (e.target !== e.currentTarget) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect(s);
+        }
+      }}
+    >
+      <span className="au2-who">
+        <StatusBadge
+          state={tone}
+          label={`${meta[0]}${s.current ? bi(" · 本机", " · This device") : ""}`}
+        />
+        <small title={s.agent}>{dev}</small>
+      </span>
+      <span className="au2-who">
+        <b>{s.user}</b>
+        <small className="mono">
+          {s.role === "admin"
+            ? bi("管理员", "Admin")
+            : bi("普通用户", "User")}
+          {s.ip ? ` · ${s.ip}` : ""}
+        </small>
+      </span>
+      <span className="au2-what">
+        <b className="num">{stamp(s.created_at)}</b>
+        <small className="num">
+          {s.status === "active"
+            ? bi(
+                `最近活跃 ${stamp(s.last_active_at)}`,
+                `Last active ${stamp(s.last_active_at)}`,
+              )
+            : bi(
+                `结束 ${stamp(s.ended_at || s.expires_at)}`,
+                `Ended ${stamp(s.ended_at || s.expires_at)}`,
+              )}
+        </small>
+      </span>
+      <span className="au2-what">
+        <b className="num">{formatDuration(s.duration_seconds)}</b>
+        <small className="num">
+          {bi("活跃", "Active")} {formatDuration(s.active_seconds)} ·{" "}
+          {bi(
+            `${s.requests} 次请求`,
+            `${s.requests} ${s.requests === 1 ? "req" : "reqs"}`,
+          )}
+        </small>
+      </span>
+      <span className="au2-sact" onClick={(e) => e.stopPropagation()}>
+        {s.status === "active" && !s.current && canManageUsers ? (
+          <Popconfirm
+            title={bi(
+              `确认下线 ${s.user} 的该终端会话？`,
+              `Revoke this session for ${s.user}?`,
+            )}
+            onOk={() => onKick(s)}
+          >
+            <Button
+              size="mini"
+              status="danger"
+              loading={isKicking}
+              icon={<IconPoweroff />}
+            >
+              {bi("下线", "Revoke")}
+            </Button>
+          </Popconfirm>
+        ) : null}
+        <button
+          type="button"
+          className="au-row-go"
+          aria-label={bi(
+            `查看 ${s.user} 的会话详情`,
+            `View session details for ${s.user}`,
+          )}
+          onClick={() => onSelect(s)}
+        >
+          <IconRight />
+        </button>
+      </span>
+    </div>
+  );
+});
+
+export function AuditView() {
+  const lang = useLang();
   const conn = useConnectivity();
   const [tab, setTab] = useState<"events" | "sessions">("events");
   const [range, setRange] = useState<Range>(() => rangeOf("7d"));
@@ -707,6 +926,7 @@ export function AuditView() {
   const [sessErr, setSessErr] = useState("");
   const [sessDetail, setSessDetail] = useState<AuditSessionRow | null>(null);
   const [sessTick, setSessTick] = useState(0);
+  const [kickingId, setKickingId] = useState("");
 
   // Bidirectional trace context between "登录与在线" and "操作记录"
   const [trace, setTrace] = useState<{
@@ -740,73 +960,90 @@ export function AuditView() {
   useEffect(() => {
     if (tab !== "events") return;
     let live = true;
-    setEvLoading(true);
+    const ac = new AbortController();
     const t = window.setTimeout(() => {
+      if (!live) return;
+      setEvLoading(true);
       const p = params();
       p.set("page", String(page));
       p.set("size", String(size));
-      api<typeof d>(`/api/audit?${p}`)
+      api<typeof d>(`/api/audit?${p}`, { signal: ac.signal })
         .then((r) => {
           if (!live) return;
           setD(r);
           setError("");
         })
         .catch((e) => {
-          if (!live) return;
+          if (!live || ac.signal.aborted) return;
           setError((e as Error).message || bi("加载操作记录失败", "Failed to load audit events"));
         })
         .finally(() => {
-          if (live) setEvLoading(false);
+          if (live && !ac.signal.aborted) setEvLoading(false);
         });
     }, 150);
     return () => {
       live = false;
       window.clearTimeout(t);
+      ac.abort();
     };
   }, [tab, params, page, evTick]);
 
   useEffect(() => {
     if (tab !== "sessions") return;
     let live = true;
-    setSessLoading(true);
+    const ac = new AbortController();
     const t = window.setTimeout(() => {
+      if (!live) return;
+      setSessLoading(true);
       const p = sessParams();
       p.set("page", String(sessPage));
       p.set("size", String(size));
-      api<AuditSessionsResp>(`/api/audit/sessions?${p}`)
+      api<AuditSessionsResp>(`/api/audit/sessions?${p}`, { signal: ac.signal })
         .then((r) => {
           if (!live) return;
           setSessResp(r);
           setSessErr("");
         })
         .catch((e) => {
-          if (!live) return;
+          if (!live || ac.signal.aborted) return;
           setSessErr((e as Error).message || bi("加载会话记录失败", "Failed to load session records"));
         })
         .finally(() => {
-          if (live) setSessLoading(false);
+          if (live && !ac.signal.aborted) setSessLoading(false);
         });
     }, 130);
     return () => {
       live = false;
       window.clearTimeout(t);
+      ac.abort();
     };
   }, [tab, sessParams, sessPage, sessTick]);
 
-  const kickSession = async (row: AuditSessionRow) => {
-    try {
-      await api(`/api/audit/sessions/${encodeURIComponent(row.id)}`, {
-        method: "DELETE",
-      });
-      Message.success(
-        bi(`已下线 ${row.user} 的会话`, `Revoked session for ${row.user}`),
-      );
-      setSessDetail(null);
-      setSessTick((n) => n + 1);
-    } catch (e) {
-      Message.error((e as Error).message);
-    }
-  };
+  const kickSession = useCallback(
+    async (row: AuditSessionRow) => {
+      if (kickingId) return;
+      setKickingId(row.id);
+      try {
+        await api(`/api/audit/sessions/${encodeURIComponent(row.id)}`, {
+          method: "DELETE",
+        });
+        Message.success(
+          bi(`已下线 ${row.user} 的会话`, `Revoked session for ${row.user}`),
+        );
+        setSessDetail(null);
+        setSessTick((n) => n + 1);
+      } catch (e) {
+        Message.error((e as Error).message);
+      } finally {
+        setKickingId("");
+      }
+    },
+    [kickingId],
+  );
+
+  const handleToggleUser = useCallback((u: string) => {
+    setUser((cur) => (cur === u ? "" : u));
+  }, []);
 
   const traceSessionEvents = (
     sid: string,
@@ -859,27 +1096,47 @@ export function AuditView() {
       ? Boolean(user || action || kind || result || q)
       : Boolean(user || sessStatus || q);
 
-  const groups = new Map<string, { value: string; label: string }[]>();
-  Object.keys(d?.actions || {}).forEach((a) => {
-    const g =
-      a === "http"
-        ? bi("其他", "Other")
-        : actionEntry(a)?.[1] || bi("其他", "Other");
-    groups.set(g, [
-      ...(groups.get(g) || []),
-      {
+  const actionGroups = useMemo(() => {
+    const m = new Map<string, { value: string; label: string }[]>();
+    const acts = d?.actions || {};
+    for (const a of Object.keys(acts)) {
+      const g =
+        a === "http"
+          ? bi("其他", "Other")
+          : actionEntry(a)?.[1] || bi("其他", "Other");
+      const list = m.get(g) || [];
+      list.push({
         value: a,
         label: bi(
-          `${a === "http" ? "其他请求" : auditLabel(a)}（${d!.actions[a]}）`,
-          `${a === "http" ? "Other Requests" : auditLabel(a)} (${d!.actions[a]})`,
+          `${a === "http" ? "其他请求" : auditLabel(a)}（${acts[a]}）`,
+          `${a === "http" ? "Other Requests" : auditLabel(a)} (${acts[a]})`,
         ),
-      },
-    ]);
-  });
+      });
+      m.set(g, list);
+    }
+    return [...m.entries()];
+  }, [d?.actions, lang]);
+
+  const resourceOptions = useMemo(
+    () =>
+      Object.entries(d?.resources || {}).map(([k, n]) => ({
+        value: k,
+        label: bi(`${k}（${n}）`, `${resourceLabel(k)} (${n})`),
+      })),
+    [d?.resources, lang],
+  );
 
   const canManageUsers = can("iam.user");
   const allUsers =
     tab === "sessions" ? sessResp?.users || [] : d?.users || [];
+  const userOptions = useMemo(
+    () => allUsers.map((u) => ({ value: u, label: u })),
+    [allUsers],
+  );
+  const prettyRequest = useMemo(
+    () => (open?.request ? pretty(open.request) : ""),
+    [open?.request],
+  );
   const activeTrace = Boolean(trace && q === trace.sid);
   const summary = sessResp?.summary;
 
@@ -1007,7 +1264,7 @@ export function AuditView() {
             placeholder={bi("成员", "User")}
             value={user || undefined}
             onChange={(v) => setUser(v || "")}
-            options={allUsers.map((u) => ({ value: u, label: u }))}
+            options={userOptions}
             style={{ width: 136 }}
             aria-label={bi("按成员筛选", "Filter by user")}
           />
@@ -1018,10 +1275,7 @@ export function AuditView() {
                 placeholder={bi("资源", "Resource")}
                 value={kind || undefined}
                 onChange={(v) => setKind(v || "")}
-                options={Object.entries(d?.resources || {}).map(([k, n]) => ({
-                  value: k,
-                  label: bi(`${k}（${n}）`, `${resourceLabel(k)} (${n})`),
-                }))}
+                options={resourceOptions}
                 style={{ width: 152 }}
                 aria-label={bi("按资源筛选", "Filter by resource")}
               />
@@ -1034,7 +1288,7 @@ export function AuditView() {
                 style={{ width: 204 }}
                 aria-label={bi("按操作类型筛选", "Filter by action")}
               >
-                {[...groups.entries()].map(([g, opts]) => (
+                {actionGroups.map(([g, opts]) => (
                   <Select.OptGroup key={g} label={g}>
                     {opts.map((o) => (
                       <Select.Option key={o.value} value={o.value}>
@@ -1179,50 +1433,12 @@ export function AuditView() {
                 <span>{bi("结果", "Result")}</span>
               </div>
               {d.rows.map((r, i) => (
-                <button
+                <AuditEventRow
                   key={`${r.time}-${i}`}
-                  type="button"
-                  className={`au2-row ${open === r ? "on" : ""}`}
-                  role="row"
-                  onClick={() => setOpen(r)}
-                >
-                  <span className="au2-time num">{stamp(r.time)}</span>
-                  <span className="au2-who">
-                    <b>{r.user || "—"}</b>
-                    <small className="mono">
-                      {r.ip ||
-                        (r.user === "system" ? bi("系统自动", "System") : "")}
-                    </small>
-                  </span>
-                  <span className="au2-what">
-                    <b>{what(r)}</b>
-                    <small className="mono">
-                      {r.path ? `${r.method} ${r.path}` : ""}
-                      {r.duration_sec && r.duration_sec > 0
-                        ? bi(
-                            ` · 在线 ${formatDuration(r.duration_sec)}`,
-                            ` · online ${formatDuration(r.duration_sec)}`,
-                          )
-                        : ""}
-                    </small>
-                  </span>
-                  <span className="au2-res">
-                    {r.resource ? (
-                      <>
-                        <em>{resourceLabel(r.resource.type)}</em>
-                        <span>
-                          {r.resource.name || r.resource.id || r.job || ""}
-                        </span>
-                      </>
-                    ) : (
-                      <span className="mono">{r.job || "—"}</span>
-                    )}
-                  </span>
-                  <span className={`au2-st ${r.result || "ok"}`}>
-                    {RESULT[r.result || "ok"]}
-                    {r.status ? <small className="num">{r.status}</small> : null}
-                  </span>
-                </button>
+                  r={r}
+                  isSelected={open === r}
+                  onOpen={setOpen}
+                />
               ))}
             </div>
           ) : (
@@ -1322,10 +1538,10 @@ export function AuditView() {
               <span className="au-stat-k">
                 {bi("平均在线时长", "Avg Session Duration")}
               </span>
-              <strong>
+              <strong className="num">
                 {summary ? formatDuration(summary.avg_duration_seconds) : "—"}
               </strong>
-              <small>
+              <small className="num">
                 {bi("最长", "Max")}{" "}
                 {summary ? formatDuration(summary.max_duration_seconds) : "—"}
               </small>
@@ -1376,61 +1592,14 @@ export function AuditView() {
                 </div>
               ) : sessResp && sessResp.by_user.length > 0 ? (
                 <div className="au-member-list">
-                  {sessResp.by_user.map((u) => {
-                    const selected = user === u.user;
-                    return (
-                      <button
-                        key={u.user}
-                        type="button"
-                        className={`au-member-item ${selected ? "on" : ""}`}
-                        onClick={() =>
-                          setUser((cur) => (cur === u.user ? "" : u.user))
-                        }
-                      >
-                        <div className="au-member-top">
-                          <span className="au-member-name">
-                            <StatusDot state={u.online ? "done" : "void"} />
-                            <b>{u.user}</b>
-                          </span>
-                          <span
-                            className={`au-member-state ${u.online ? "ok" : ""}`}
-                          >
-                            {u.online
-                              ? bi(
-                                  `${u.active_sessions} 台在线`,
-                                  `${u.active_sessions} online`,
-                                )
-                              : bi("离线", "Offline")}
-                          </span>
-                        </div>
-                        <div className="au-member-meta num">
-                          <span>
-                            {bi("在线", "Online")}{" "}
-                            {formatDuration(u.total_duration_seconds)}
-                          </span>
-                          <span>
-                            {bi("活跃", "Active")}{" "}
-                            {formatDuration(u.total_active_seconds)} ·{" "}
-                            {bi(
-                              `${u.login_count} 次`,
-                              `${u.login_count} ${u.login_count === 1 ? "login" : "logins"}`,
-                            )}
-                            {u.failed_login_count > 0 && (
-                              <>
-                                {" · "}
-                                <span style={{ whiteSpace: "nowrap" }}>
-                                  {bi(
-                                    `失败 ${u.failed_login_count}`,
-                                    `${u.failed_login_count} failed`,
-                                  )}
-                                </span>
-                              </>
-                            )}
-                          </span>
-                        </div>
-                      </button>
-                    );
-                  })}
+                  {sessResp.by_user.map((u) => (
+                    <AuditMemberItem
+                      key={u.user}
+                      u={u}
+                      selected={user === u.user}
+                      onToggleUser={handleToggleUser}
+                    />
+                  ))}
                 </div>
               ) : (
                 <p className="au-members-empty">
@@ -1480,109 +1649,17 @@ export function AuditView() {
                     <span>{bi("在线与活跃", "Duration & Activity")}</span>
                     <span>{bi("操作", "Actions")}</span>
                   </div>
-                  {sessResp.rows.map((s) => {
-                    const meta = SESSION_REASON[s.end_reason] || [
-                      s.end_reason || bi("已结束", "Ended"),
-                      "mute",
-                    ];
-                    const tone = TONE_STATE[meta[1]] || "void";
-                    const dev =
-                      browser(s.agent) || bi("未知客户端", "Unknown Client");
-                    return (
-                      <div
-                        key={s.id}
-                        role="button"
-                        tabIndex={0}
-                        className={`au2-row au2-srow ${sessDetail?.id === s.id ? "on" : ""}`}
-                        onClick={() => setSessDetail(s)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            setSessDetail(s);
-                          }
-                        }}
-                      >
-                        <span className="au2-who">
-                          <StatusBadge
-                            state={tone}
-                            label={`${meta[0]}${s.current ? bi(" · 本机", " · This device") : ""}`}
-                          />
-                          <small title={s.agent}>{dev}</small>
-                        </span>
-                        <span className="au2-who">
-                          <b>{s.user}</b>
-                          <small className="mono">
-                            {s.role === "admin"
-                              ? bi("管理员", "Admin")
-                              : bi("普通用户", "User")}
-                            {s.ip ? ` · ${s.ip}` : ""}
-                          </small>
-                        </span>
-                        <span className="au2-what">
-                          <b className="num">{stamp(s.created_at)}</b>
-                          <small className="num">
-                            {s.status === "active"
-                              ? bi(
-                                  `最近活跃 ${stamp(s.last_active_at)}`,
-                                  `Last active ${stamp(s.last_active_at)}`,
-                                )
-                              : bi(
-                                  `结束 ${stamp(s.ended_at || s.expires_at)}`,
-                                  `Ended ${stamp(s.ended_at || s.expires_at)}`,
-                                )}
-                          </small>
-                        </span>
-                        <span className="au2-what">
-                          <b className="num">
-                            {formatDuration(s.duration_seconds)}
-                          </b>
-                          <small className="num">
-                            {bi("活跃", "Active")}{" "}
-                            {formatDuration(s.active_seconds)} ·{" "}
-                            {bi(
-                              `${s.requests} 次请求`,
-                              `${s.requests} ${s.requests === 1 ? "req" : "reqs"}`,
-                            )}
-                          </small>
-                        </span>
-                        <span
-                          className="au2-sact"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          {s.status === "active" &&
-                          !s.current &&
-                          canManageUsers ? (
-                            <Popconfirm
-                              title={bi(
-                                `确认下线 ${s.user} 的该终端会话？`,
-                                `Revoke this session for ${s.user}?`,
-                              )}
-                              onOk={() => kickSession(s)}
-                            >
-                              <Button
-                                size="mini"
-                                status="danger"
-                                icon={<IconPoweroff />}
-                              >
-                                {bi("下线", "Revoke")}
-                              </Button>
-                            </Popconfirm>
-                          ) : null}
-                          <button
-                            type="button"
-                            className="au-row-go"
-                            aria-label={bi(
-                              `查看 ${s.user} 的会话详情`,
-                              `View session details for ${s.user}`,
-                            )}
-                            onClick={() => setSessDetail(s)}
-                          >
-                            <IconRight />
-                          </button>
-                        </span>
-                      </div>
-                    );
-                  })}
+                  {sessResp.rows.map((s) => (
+                    <AuditSessionItemRow
+                      key={s.id}
+                      s={s}
+                      isSelected={sessDetail?.id === s.id}
+                      canManageUsers={canManageUsers}
+                      isKicking={kickingId === s.id}
+                      onSelect={setSessDetail}
+                      onKick={kickSession}
+                    />
+                  ))}
                 </div>
               ) : (
                 <div className="au-empty-wrap">
@@ -1686,7 +1763,7 @@ export function AuditView() {
             {open.duration_sec !== undefined && open.duration_sec > 0 && (
               <>
                 <dt>{bi("累计在线", "Online Duration")}</dt>
-                <dd>{formatDuration(open.duration_sec)}</dd>
+                <dd className="num">{formatDuration(open.duration_sec)}</dd>
               </>
             )}
             <dt>{bi("对象资源", "Resource")}</dt>
@@ -1726,8 +1803,8 @@ export function AuditView() {
             )}
             <dt>{bi("请求摘要", "Request Payload")}</dt>
             <dd>
-              {open.request ? (
-                <pre className="au-req mono">{pretty(open.request)}</pre>
+              {prettyRequest ? (
+                <pre className="au-req mono">{prettyRequest}</pre>
               ) : (
                 <span className="faint">
                   {bi("无补充请求体", "No request body")}
@@ -1777,7 +1854,11 @@ export function AuditView() {
                     )}
                     onOk={() => kickSession(sessDetail)}
                   >
-                    <Button status="danger" icon={<IconPoweroff />}>
+                    <Button
+                      status="danger"
+                      loading={kickingId === sessDetail.id}
+                      icon={<IconPoweroff />}
+                    >
                       {bi("强制下线", "Revoke Session")}
                     </Button>
                   </Popconfirm>

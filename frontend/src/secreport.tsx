@@ -268,6 +268,30 @@ export function SecReportTemplatesSection({
   const [editing, setEditing] = useState<SecReportTemplate | null>(null);
   const [isNew, setIsNew] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [exportCooldown, setExportCooldown] = useState(false);
+  const cooldownTimerRef = React.useRef<number | null>(null);
+
+  useEffect(
+    () => () => {
+      if (cooldownTimerRef.current !== null) {
+        window.clearTimeout(cooldownTimerRef.current);
+      }
+    },
+    [],
+  );
+
+  const triggerQuickExport = (url: string) => {
+    if (exportCooldown) return;
+    setExportCooldown(true);
+    window.location.href = url;
+    if (cooldownTimerRef.current !== null) {
+      window.clearTimeout(cooldownTimerRef.current);
+    }
+    cooldownTimerRef.current = window.setTimeout(() => {
+      cooldownTimerRef.current = null;
+      setExportCooldown(false);
+    }, 800);
+  };
 
   const list = controlledTemplates ?? localList;
 
@@ -323,7 +347,7 @@ export function SecReportTemplatesSection({
   };
 
   const saveEditor = async () => {
-    if (!editing) return;
+    if (!editing || saving) return;
     if (!editing.name.trim()) {
       Message.warning(bi("请填写模板名称", "Please enter a template name"));
       return;
@@ -360,6 +384,7 @@ export function SecReportTemplatesSection({
   };
 
   const setDefault = async (tpl: SecReportTemplate) => {
+    if (busyId) return;
     setBusyId(tpl.id);
     try {
       const resp = await api<{ templates: SecReportTemplate[] }>(
@@ -378,6 +403,7 @@ export function SecReportTemplatesSection({
   };
 
   const resetBuiltin = async (tpl: SecReportTemplate) => {
+    if (busyId) return;
     setBusyId(tpl.id);
     try {
       const resp = await api<{ templates: SecReportTemplate[] }>(
@@ -396,6 +422,8 @@ export function SecReportTemplatesSection({
   };
 
   const removeTemplate = (tpl: SecReportTemplate) => {
+    if (busyId) return;
+    let deleting = false;
     Modal.confirm({
       title: bi("删除安全报告模板", "Delete Report Template"),
       content: bi(
@@ -404,6 +432,8 @@ export function SecReportTemplatesSection({
       ),
       okButtonProps: { status: "danger" },
       onOk: async () => {
+        if (deleting) return;
+        deleting = true;
         setBusyId(tpl.id);
         try {
           const resp = await api<{ templates: SecReportTemplate[] }>(
@@ -415,6 +445,7 @@ export function SecReportTemplatesSection({
         } catch (e) {
           err(e);
         } finally {
+          deleting = false;
           setBusyId("");
         }
       },
@@ -426,7 +457,7 @@ export function SecReportTemplatesSection({
       {hideHeader ? (
         <div className="srt-subbar">
           <div className="srt-subbar-l">
-            <b>{bi(`共 ${list.length} 套导出模板`, `${list.length} Export Templates`)}</b>
+            <b className="num">{bi(`共 ${list.length} 套导出模板`, `${list.length} Export Templates`)}</b>
             <span className="faint small">
               {bi(
                 "支持 Word (.docx)、Excel (.xlsx) 与单文件离线 HTML；可按需定制封面配色、筛选口径与包含章节。",
@@ -525,13 +556,16 @@ export function SecReportTemplatesSection({
                     <button
                       type="button"
                       className="srt-exp-btn"
-                      onClick={() => {
-                        window.location.href = buildSecExportUrl({
-                          format: "docx",
-                          templateId: tpl.id,
-                          clusterId,
-                        });
-                      }}
+                      disabled={exportCooldown}
+                      onClick={() =>
+                        triggerQuickExport(
+                          buildSecExportUrl({
+                            format: "docx",
+                            templateId: tpl.id,
+                            clusterId,
+                          }),
+                        )
+                      }
                       title={bi("导出 Word (.docx)", "Export Word (.docx)")}
                     >
                       <IconDownload />
@@ -540,13 +574,16 @@ export function SecReportTemplatesSection({
                     <button
                       type="button"
                       className="srt-exp-btn"
-                      onClick={() => {
-                        window.location.href = buildSecExportUrl({
-                          format: "xlsx",
-                          templateId: tpl.id,
-                          clusterId,
-                        });
-                      }}
+                      disabled={exportCooldown}
+                      onClick={() =>
+                        triggerQuickExport(
+                          buildSecExportUrl({
+                            format: "xlsx",
+                            templateId: tpl.id,
+                            clusterId,
+                          }),
+                        )
+                      }
                       title={bi("导出 Excel (.xlsx)", "Export Excel (.xlsx)")}
                     >
                       <IconDownload />
@@ -581,7 +618,7 @@ export function SecReportTemplatesSection({
                           <button
                             type="button"
                             className="srt-act-link is-sub"
-                            disabled={busyId === tpl.id}
+                            disabled={Boolean(busyId)}
                             onClick={() => void setDefault(tpl)}
                           >
                             {bi("设为默认", "Default")}
@@ -607,7 +644,7 @@ export function SecReportTemplatesSection({
                         <button
                           type="button"
                           className="srt-act-link is-sub"
-                          disabled={busyId === tpl.id}
+                          disabled={Boolean(busyId)}
                           onClick={() => void resetBuiltin(tpl)}
                         >
                           {bi("重置", "Reset")}
@@ -616,7 +653,7 @@ export function SecReportTemplatesSection({
                         <button
                           type="button"
                           className="srt-act-link is-danger"
-                          disabled={busyId === tpl.id}
+                          disabled={Boolean(busyId)}
                           onClick={() => removeTemplate(tpl)}
                         >
                           {bi("删除", "Delete")}
@@ -892,26 +929,28 @@ export function SecReportTemplatesSection({
 
               <div className="srt-sec-grid">
                 {SEC_REPORT_SECTION_META.map((m) => {
-                  const checked = Boolean(editing.sections[m.key]);
+                  const checked = Boolean(editing.sections?.[m.key]);
+                  const toggleSec = (v: boolean) =>
+                    setEditing({
+                      ...editing,
+                      sections: { ...editing.sections, [m.key]: v },
+                    });
                   return (
-                    <label
+                    <div
                       key={m.key}
                       className={`srt-sec-opt ${checked ? "on" : ""}`}
+                      onClick={() => toggleSec(!checked)}
                     >
                       <Checkbox
                         checked={checked}
-                        onChange={(v) =>
-                          setEditing({
-                            ...editing,
-                            sections: { ...editing.sections, [m.key]: v },
-                          })
-                        }
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={toggleSec}
                       />
                       <span className="srt-sec-opt-txt">
                         <b>{bi(m.zh, m.en)}</b>
                         <small>{bi(m.descZh, m.descEn)}</small>
                       </span>
-                    </label>
+                    </div>
                   );
                 })}
               </div>
@@ -955,6 +994,7 @@ export function SecExportModal({
   const [selectedId, setSelectedId] = useState<string>("");
   const [format, setFormat] = useState<string>("docx");
   const [scopeOverride, setScopeOverride] = useState<string>("template");
+  const [exporting, setExporting] = useState(false);
 
   const list =
     providedTemplates && providedTemplates.length > 0
@@ -979,7 +1019,11 @@ export function SecExportModal({
   }, [visible, providedTemplates]);
 
   useEffect(() => {
-    if (!visible || list.length === 0) return;
+    if (!visible) {
+      setExporting(false);
+      return;
+    }
+    if (list.length === 0) return;
     const def = list.find((t) => t.is_default) ?? list[0];
     setSelectedId(def.id);
     setFormat(def.default_format || "docx");
@@ -1001,6 +1045,8 @@ export function SecExportModal({
   };
 
   const triggerDownload = () => {
+    if (exporting) return;
+    setExporting(true);
     const url = buildSecExportUrl({
       format,
       templateId: activeTpl?.id,
@@ -1049,6 +1095,7 @@ export function SecExportModal({
             <Button
               type="primary"
               icon={<IconDownload />}
+              loading={exporting}
               onClick={triggerDownload}
             >
               {bi(`导出 ${formatLabelOf(format)}`, `Export ${formatLabelOf(format)}`)}
@@ -1071,7 +1118,7 @@ export function SecExportModal({
                 )}
           </span>
           {activeTpl && (
-            <span className="faint small">
+            <span className="faint small num">
               {bi(
                 `含 ${enabledSectionLabels(activeTpl.sections).length} 个章节`,
                 `${enabledSectionLabels(activeTpl.sections).length} sections`,
@@ -1127,7 +1174,7 @@ export function SecExportModal({
                     <span>·</span>
                     <span>{minSevLabelOf(t.min_severity)}</span>
                     <span>·</span>
-                    <span>
+                    <span className="num">
                       {bi(
                         `${enabledSectionLabels(t.sections).length} 章节`,
                         `${enabledSectionLabels(t.sections).length} sections`,

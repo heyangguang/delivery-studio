@@ -29,6 +29,9 @@
   gap: 2px;
   min-width: 0;
 }
+.ai-pinfo b {
+  overflow-wrap: anywhere;
+}
 .ai-pinfo small {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -164,12 +167,16 @@
   cursor: pointer;
   user-select: none;
   transition:
-    border-color 0.16s ease,
-    box-shadow 0.16s ease,
-    background-color 0.16s ease;
+    border-color 0.16s var(--spring),
+    box-shadow 0.16s var(--spring),
+    background-color 0.16s var(--spring),
+    transform 0.16s var(--spring);
 }
 .ai-mp:hover:not(.is-disabled) {
   border-color: color-mix(in srgb, var(--brand) 38%, var(--line-strong));
+}
+.ai-mp:active:not(.is-disabled) {
+  transform: scale(0.985);
 }
 .ai-mp:focus-visible,
 .ai-mp.is-open {
@@ -212,8 +219,9 @@
   background: transparent;
   cursor: pointer;
   transition:
-    color 0.14s ease,
-    background-color 0.14s ease;
+    color 0.15s var(--spring),
+    background-color 0.15s var(--spring),
+    transform 0.15s var(--spring);
 }
 .ai-mp-clear > svg {
   font-size: 11px;
@@ -222,13 +230,16 @@
   color: var(--ink);
   background: var(--hover);
 }
+.ai-mp-clear:active {
+  transform: scale(0.9);
+}
 .ai-mp-chev {
   flex: none;
   color: var(--faint);
   font-size: 12px;
   transition:
-    transform 0.16s ease,
-    color 0.16s ease;
+    transform 0.18s var(--spring),
+    color 0.18s var(--spring);
 }
 .ai-mp-chev.open {
   color: var(--brand);
@@ -282,10 +293,16 @@
   text-align: left;
   background: transparent;
   cursor: pointer;
-  transition: background-color 0.12s ease;
+  transition:
+    background-color 0.15s var(--spring),
+    color 0.15s var(--spring),
+    transform 0.15s var(--spring);
 }
 .ai-mp-opt:hover {
   background: var(--hover);
+}
+.ai-mp-opt:active {
+  transform: scale(0.985);
 }
 .ai-mp-opt.on {
   color: var(--brand-ink);
@@ -346,6 +363,9 @@
   color: var(--brand);
   font-size: 14px;
 }
+.ai-settings {
+  padding-bottom: 88px;
+}
 .ai-settings > .sx-page-h > .arco-switch {
   flex-shrink: 0;
 }
@@ -360,8 +380,8 @@
   border: 1px solid var(--line);
   background: var(--sunken);
   transition:
-    border-color 0.2s ease,
-    background-color 0.2s ease;
+    border-color 0.22s var(--spring),
+    background-color 0.22s var(--spring);
 }
 .ai-master-card.is-on {
   border-color: var(--brand-line);
@@ -463,6 +483,7 @@
   border-radius: 999px;
   font-size: 11.5px;
   font-weight: 550;
+  font-variant-numeric: tabular-nums;
   color: var(--mute);
   background: var(--sunken);
   border: 1px solid var(--line);
@@ -504,7 +525,9 @@
   border-radius: 10px;
   border: 1px solid var(--line);
   background: var(--sunken);
-  transition: border-color 0.15s ease, background-color 0.15s ease;
+  transition:
+    border-color 0.18s var(--spring),
+    background-color 0.18s var(--spring);
 }
 .ai-feat-card.is-on {
   border-color: var(--brand-line);
@@ -619,14 +642,22 @@
   gap: 12px;
   padding: 9px 12px;
   border-color: transparent;
+  transition:
+    background-color 0.16s var(--spring),
+    border-color 0.16s var(--spring),
+    transform 0.16s var(--spring);
 }
 .ai-pick:hover:not(:disabled) {
   background: var(--hover);
   border-color: transparent;
 }
+.ai-pick:active:not(:disabled) {
+  transform: scale(0.975);
+}
 .ai-custom {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
   width: 100%;
   margin-top: 16px;
@@ -638,6 +669,9 @@
   text-align: left;
   background: none;
   cursor: pointer;
+  transition:
+    background-color 0.16s var(--spring),
+    transform 0.16s var(--spring);
 }
 .ai-custom span {
   color: var(--mute);
@@ -645,6 +679,9 @@
 }
 .ai-custom:hover {
   background: var(--hover);
+}
+.ai-custom:active {
+  transform: scale(0.99);
 }
 .ai-picker h3 {
   margin: 16px 0 6px;
@@ -663,18 +700,30 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  max-width: 100%;
   padding: 2px 9px;
   border: 1px solid transparent;
   border-radius: 999px;
   color: var(--ink-2);
   font: 12px/1.4 var(--sans);
+  font-variant-numeric: tabular-nums;
   background: var(--sunken);
+}
+.ai-pm > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 button.ai-pm {
   cursor: pointer;
   transition:
-    border-color 0.15s,
-    background 0.15s;
+    border-color 0.16s var(--spring),
+    background-color 0.16s var(--spring),
+    transform 0.16s var(--spring);
+}
+button.ai-pm:active:not(:disabled) {
+  transform: scale(0.975);
 }
 button.ai-pm:focus-visible {
   outline: none;
@@ -751,8 +800,9 @@ button.ai-pm:focus-visible {
 }
 .ai-models-h {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 8px 10px;
 }
 .ai-sp {
   flex: 1;
@@ -800,6 +850,7 @@ button.ai-pm:focus-visible {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  max-width: 100%;
   padding: 4px 10px;
   border: 1px dashed var(--line-strong);
   border-radius: 999px;
@@ -807,10 +858,24 @@ button.ai-pm:focus-visible {
   font: 13px var(--sans);
   background: none;
   cursor: pointer;
+  transition:
+    border-color 0.16s var(--spring),
+    background-color 0.16s var(--spring),
+    color 0.16s var(--spring),
+    transform 0.16s var(--spring);
+}
+.ai-chip > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .ai-chip:hover {
   border-color: var(--brand-line);
   color: var(--ink);
+}
+.ai-chip:active:not(:disabled) {
+  transform: scale(0.975);
 }
 .ai-chip.on {
   border-style: solid;
@@ -819,11 +884,13 @@ button.ai-pm:focus-visible {
   background: var(--brand-soft);
 }
 .ai-chip em {
+  flex: none;
   padding: 0 6px;
   border-radius: 5px;
   color: var(--mute);
   font-size: 11px;
   font-style: normal;
+  font-variant-numeric: tabular-nums;
   background: var(--sunken);
 }
 .ai-chip em.v {
@@ -831,12 +898,17 @@ button.ai-pm:focus-visible {
 }
 .ai-mtable {
   border-top: 1px solid var(--line);
-  max-height: 340px;
+  max-height: min(300px, 38vh);
   overflow: auto;
+  overscroll-behavior: contain;
+}
+.ai-prov-modal {
+  max-height: calc(100vh - 64px);
 }
 .ai-prov-modal .arco-modal-content {
-  max-height: calc(100vh - 180px);
+  max-height: calc(100vh - 216px);
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .ai-mrow {
   display: grid;
@@ -884,9 +956,14 @@ button.ai-pm:focus-visible {
 }
 .ai-mname small.ok {
   color: var(--ok);
+  font-variant-numeric: tabular-nums;
 }
 .ai-mname small.bad {
   color: var(--bad);
+  font-variant-numeric: tabular-nums;
+}
+.ai-mrow .arco-input-number input {
+  font-variant-numeric: tabular-nums;
 }
 .ai-mtest {
   display: flex;
@@ -905,6 +982,7 @@ button.ai-pm:focus-visible {
   color: var(--bad);
   font-size: 11.5px;
   line-height: 1.4;
+  font-variant-numeric: tabular-nums;
 }
 .ai-mtest-sum > svg {
   flex: none;
@@ -924,8 +1002,13 @@ button.ai-pm:focus-visible {
   background: var(--surface);
   cursor: pointer;
   transition:
-    border-color 0.15s,
-    background 0.15s;
+    border-color 0.16s var(--spring),
+    background-color 0.16s var(--spring),
+    color 0.16s var(--spring),
+    transform 0.16s var(--spring);
+}
+.ai-diag-trig:active {
+  transform: scale(0.96);
 }
 .ai-diag-trig.bad {
   color: var(--bad);
@@ -952,11 +1035,19 @@ button.ai-pm:focus-visible {
   border-radius: 999px;
   color: var(--warn);
   font: 550 11.5px/18px var(--sans);
+  font-variant-numeric: tabular-nums;
   background: var(--warn-soft);
   cursor: pointer;
+  transition:
+    border-color 0.16s var(--spring),
+    background-color 0.16s var(--spring),
+    transform 0.16s var(--spring);
 }
 .ai-mtest-warnbtn:hover {
   border-color: var(--warn);
+}
+.ai-mtest-warnbtn:active {
+  transform: scale(0.975);
 }
 .ai-mtest-warnbtn > svg {
   flex: none;
@@ -1018,6 +1109,7 @@ button.ai-pm:focus-visible {
   border-radius: 999px;
   font-size: 12px;
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 .ai-diag-badge.bad {
   color: var(--bad);
@@ -1052,11 +1144,19 @@ button.ai-pm:focus-visible {
   font: 500 12.5px/1 var(--sans);
   background: var(--surface);
   cursor: pointer;
+  transition:
+    border-color 0.16s var(--spring),
+    background-color 0.16s var(--spring),
+    color 0.16s var(--spring),
+    transform 0.16s var(--spring);
 }
 .ai-diag-copy:hover {
   color: var(--brand-ink);
   border-color: var(--brand-line);
   background: var(--brand-soft);
+}
+.ai-diag-copy:active {
+  transform: scale(0.97);
 }
 .ai-diag-alert {
   display: flex;
@@ -1213,6 +1313,7 @@ button.ai-pm:focus-visible {
   border-radius: 999px;
   font-size: 11.5px;
   line-height: 19px;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
   background: var(--sunken);
   color: var(--mute);
@@ -1272,8 +1373,9 @@ button.ai-pm:focus-visible {
 .ai-picker h3 {
   margin-top: 10px;
 }
-.ai-defprice {
-  color: var(--brand-ink) !important;
+.ai-mname small.ai-defprice {
+  color: var(--brand-ink);
+  font-variant-numeric: tabular-nums;
 }
 
 /* the icon of a provider */
@@ -1293,12 +1395,20 @@ button.ai-pm:focus-visible {
   border-radius: 10px;
   background: var(--surface);
   cursor: pointer;
+  transition:
+    border-color 0.16s var(--spring),
+    background-color 0.16s var(--spring),
+    transform 0.16s var(--spring);
 }
 .ip-btn:hover {
   border-color: var(--brand-line);
 }
+.ip-btn:active {
+  transform: scale(0.95);
+}
 .ip {
   width: 300px;
+  max-width: calc(100vw - 40px);
 }
 .ip-h {
   display: flex;
@@ -1337,9 +1447,16 @@ button.ai-pm:focus-visible {
   border-radius: 8px;
   background: none;
   cursor: pointer;
+  transition:
+    background-color 0.15s var(--spring),
+    border-color 0.15s var(--spring),
+    transform 0.15s var(--spring);
 }
 .ip-grid button:hover {
   background: var(--hover);
+}
+.ip-grid button:active {
+  transform: scale(0.93);
 }
 .ip-grid button.on {
   border-color: var(--brand);
@@ -1358,6 +1475,12 @@ button.ai-pm:focus-visible {
   border-radius: 50%;
   box-shadow: 0 0 0 1px var(--line-strong);
   cursor: pointer;
+  transition:
+    transform 0.15s var(--spring),
+    box-shadow 0.15s var(--spring);
+}
+.ip-sw button:active {
+  transform: scale(0.9);
 }
 .ip-sw button.on {
   box-shadow: 0 0 0 2px var(--brand);
@@ -1417,14 +1540,23 @@ button.ai-pm:focus-visible {
   border: 1px solid var(--line-strong);
   border-radius: 10px;
   cursor: pointer;
+  transition:
+    background-color 0.16s var(--spring),
+    border-color 0.16s var(--spring),
+    transform 0.16s var(--spring);
 }
 .ai-um-m > .arco-checkbox {
   margin-top: 2px;
+  flex: none;
 }
 .ai-um-m:hover {
   background: var(--hover);
 }
+.ai-um-m:active {
+  transform: scale(0.985);
+}
 .ai-um-m.on {
+  border-color: var(--brand-line);
   background: var(--brand-soft);
 }
 .ai-um-m > span {
@@ -1463,4 +1595,31 @@ button.ai-pm:focus-visible {
 .ai-sel-opt small {
   color: var(--mute);
   font-size: 11.5px;
+}
+@media (max-width: 640px) {
+  .ai-two,
+  .ai-three {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ai-mp,
+  .ai-mp-clear,
+  .ai-mp-chev,
+  .ai-mp-opt,
+  .ai-master-card,
+  .ai-feat-card,
+  .ai-pick,
+  .ai-custom,
+  button.ai-pm,
+  .ai-chip,
+  .ai-diag-trig,
+  .ai-diag-copy,
+  .ai-mtest-warnbtn,
+  .ip-btn,
+  .ip-grid button,
+  .ip-sw button,
+  .ai-um-m {
+    transition: none;
+  }
 }

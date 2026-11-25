@@ -1,6 +1,6 @@
 @media (prefers-color-scheme: dark) {
   html:not([style*="color-scheme: light"]) {
-    background: #0b0d11;
+    background: #11141a;
   }
 }
 .muted {
@@ -118,7 +118,7 @@
   align-items: center;
   gap: 16px;
   padding: 0 16px;
-  background: rgba(255, 255, 255, 0.86);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
   backdrop-filter: saturate(180%) blur(16px);
   -webkit-backdrop-filter: saturate(180%) blur(16px);
   border-bottom: 1px solid var(--line);
@@ -293,8 +293,8 @@
 }
 .tabs-bar.ready {
   transition:
-    transform 0.34s var(--spring),
-    width 0.34s var(--spring);
+    transform 0.3s var(--apple-sheet, cubic-bezier(0.32, 0.72, 0, 1)),
+    width 0.3s var(--apple-sheet, cubic-bezier(0.32, 0.72, 0, 1));
 }
 .top-right {
   margin-left: auto;
@@ -1297,14 +1297,18 @@ body[arco-theme="dark"] .dm-tag.dm-imported {
   cursor: pointer;
   white-space: nowrap;
   transition:
-    background-color 0.15s ease,
-    border-color 0.15s ease,
-    color 0.15s ease;
+    background-color 0.15s var(--apple-ease, ease),
+    border-color 0.15s var(--apple-ease, ease),
+    color 0.15s var(--apple-ease, ease),
+    transform 0.18s var(--spring);
 }
 .dm-filter-pill:hover {
   border-color: var(--line-strong);
   color: var(--ink);
   background: var(--hover);
+}
+.dm-filter-pill:active:not(:disabled) {
+  transform: scale(0.975);
 }
 .dm-filter-pill:focus-visible {
   box-shadow: var(--ring);
@@ -1312,6 +1316,7 @@ body[arco-theme="dark"] .dm-tag.dm-imported {
 .dm-filter-pill em {
   font-style: normal;
   font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
   color: var(--faint);
 }
 .dm-filter-pill.on {
@@ -1385,14 +1390,14 @@ body[arco-theme="dark"] .dm-filter-pill.is-imported.on {
   gap: 5px;
   padding: 0 13px;
   height: 28px;
-  border-radius: 8px;
+  border-radius: 5.5px;
   font-size: 13px;
   font-weight: 500;
   line-height: 1.2;
   color: var(--mute);
   white-space: nowrap;
   user-select: none;
-  transition: color 0.18s ease, transform 0.16s var(--spring);
+  transition: color 0.18s var(--apple-ease, ease), transform 0.18s var(--spring);
 }
 .seg button svg {
   display: block;
@@ -1408,7 +1413,7 @@ body[arco-theme="dark"] .dm-filter-pill.is-imported.on {
   gap: 5px;
 }
 .seg button:not(:disabled):active {
-  transform: scale(0.985);
+  transform: scale(0.975);
 }
 .seg-sm {
   height: 28px;
@@ -1462,7 +1467,7 @@ body[arco-theme="dark"] .dm-filter-pill.is-imported.on {
   top: 2px;
   bottom: 2px;
   left: 0;
-  border-radius: 6px;
+  border-radius: 5.5px;
   background: var(--surface);
   box-shadow: 0 1px 2.5px rgba(15, 23, 42, 0.08), 0 0 0 0.5px var(--line-strong);
   pointer-events: none;
@@ -1470,8 +1475,8 @@ body[arco-theme="dark"] .dm-filter-pill.is-imported.on {
 }
 .seg-thumb.ready {
   transition:
-    transform 0.3s var(--spring),
-    width 0.3s var(--spring);
+    transform 0.28s var(--apple-sheet, cubic-bezier(0.32, 0.72, 0, 1)),
+    width 0.28s var(--apple-sheet, cubic-bezier(0.32, 0.72, 0, 1));
 }
 body[arco-theme="dark"] .seg-thumb {
   background: var(--surface-3);
@@ -2053,11 +2058,12 @@ body[arco-theme="dark"] .seg-thumb {
   z-index: 1200;
   background: rgba(10, 12, 18, 0.34);
   backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
   display: flex;
   justify-content: center;
   align-items: flex-start;
   padding: 11vh 16px 16px;
-  animation: fade 0.16s var(--ease-out);
+  animation: fade 0.16s var(--apple-ease, ease);
 }
 body[arco-theme="dark"] .pal-mask {
   background: rgba(0, 0, 0, 0.56);
@@ -2074,7 +2080,7 @@ body[arco-theme="dark"] .pal-mask {
   border-radius: 15px;
   box-shadow: var(--shadow-lg);
   overflow: hidden;
-  animation: pal-in 0.32s var(--spring);
+  animation: pal-in 0.24s var(--apple-sheet, cubic-bezier(0.32, 0.72, 0, 1));
 }
 @keyframes pal-in {
   from {
@@ -2128,7 +2134,10 @@ body[arco-theme="dark"] .pal-mask {
   color: var(--mute);
   font-size: 13px;
   line-height: 0;
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition:
+    background-color 0.15s var(--apple-ease, ease),
+    color 0.15s var(--apple-ease, ease),
+    transform 0.16s var(--spring);
 }
 .pal-clear > svg {
   display: block;
@@ -2136,6 +2145,9 @@ body[arco-theme="dark"] .pal-mask {
 .pal-clear:hover {
   background: var(--hover);
   color: var(--ink);
+}
+.pal-clear:active {
+  transform: scale(0.92);
 }
 .pal-clear:focus-visible {
   box-shadow: var(--ring);
@@ -2187,7 +2199,16 @@ body[arco-theme="dark"] .pal-mask {
   font-size: 13.5px;
   line-height: 1.3;
   color: var(--ink);
-  transition: background-color 0.12s ease, color 0.12s ease;
+  transition:
+    background-color 0.12s var(--apple-ease, ease),
+    color 0.12s var(--apple-ease, ease),
+    transform 0.16s var(--spring);
+}
+.pal-item:hover:not(.on) {
+  background: var(--hover);
+}
+.pal-item:active {
+  transform: scale(0.992);
 }
 .pal-item.on {
   background: var(--brand-soft);
@@ -2230,6 +2251,9 @@ body[arco-theme="dark"] .pal-mask {
 .pal-hint {
   margin-left: auto;
   padding-left: 12px;
+  max-width: 48%;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: 12px;
   color: var(--faint);
   white-space: nowrap;
@@ -3719,9 +3743,15 @@ body[arco-theme="dark"] .login-policy-box {
   place-items: center;
   border-radius: 50%;
   font-size: 10px;
+  transition:
+    background-color 0.14s var(--apple-ease, ease),
+    transform 0.16s var(--spring);
 }
 .fchip2 button:hover {
   background: var(--press);
+}
+.fchip2 button:active {
+  transform: scale(0.92);
 }
 .fchip2 button:focus-visible {
   box-shadow: var(--ring);
@@ -3915,12 +3945,16 @@ body[arco-theme="dark"] .upd-toast {
   white-space: nowrap;
   cursor: pointer;
   transition:
-    background-color 0.15s,
-    color 0.15s;
+    background-color 0.15s var(--apple-ease, ease),
+    color 0.15s var(--apple-ease, ease),
+    transform 0.18s var(--spring);
 }
 .upd-toast-notes:hover {
   background: var(--surface-2);
   color: var(--ink);
+}
+.upd-toast-notes:active {
+  transform: scale(0.975);
 }
 .upd-toast-notes:focus-visible,
 .upd-toast-refresh:focus-visible,
@@ -3945,8 +3979,8 @@ body[arco-theme="dark"] .upd-toast {
   color: var(--on-brand);
   box-shadow: 0 1px 2px rgba(11, 13, 18, 0.14);
   transition:
-    opacity 0.15s,
-    transform 0.12s;
+    opacity 0.15s var(--apple-ease, ease),
+    transform 0.18s var(--spring);
 }
 .upd-toast-refresh svg {
   font-size: 12.5px;
@@ -3955,7 +3989,7 @@ body[arco-theme="dark"] .upd-toast {
   opacity: 0.9;
 }
 .upd-toast-refresh:active {
-  transform: scale(0.97);
+  transform: scale(0.975);
 }
 .upd-toast-close {
   all: unset;
@@ -3968,8 +4002,9 @@ body[arco-theme="dark"] .upd-toast {
   color: var(--mute);
   cursor: pointer;
   transition:
-    background-color 0.15s,
-    color 0.15s;
+    background-color 0.15s var(--apple-ease, ease),
+    color 0.15s var(--apple-ease, ease),
+    transform 0.18s var(--spring);
 }
 .upd-toast-close svg {
   font-size: 13px;
@@ -3977,6 +4012,9 @@ body[arco-theme="dark"] .upd-toast {
 .upd-toast-close:hover {
   background: var(--surface-2);
   color: var(--ink);
+}
+.upd-toast-close:active {
+  transform: scale(0.94);
 }
 @media (max-width: 820px) {
   .upd-toast {
@@ -4249,6 +4287,7 @@ body[arco-theme="dark"] .scheme-summary {
 }
 .rn-bar-count {
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
   color: var(--mute);
 }
 .rn-bar-acts {
@@ -4308,14 +4347,18 @@ body[arco-theme="dark"] .scheme-summary {
   font-weight: 550;
   cursor: pointer;
   transition:
-    background 0.14s ease,
-    border-color 0.14s ease,
-    color 0.14s ease;
+    background 0.14s var(--apple-ease, ease),
+    border-color 0.14s var(--apple-ease, ease),
+    color 0.14s var(--apple-ease, ease),
+    transform 0.18s var(--spring);
 }
 .rn-toggle-all:hover {
   background: var(--hover);
   border-color: var(--line-strong);
   color: var(--ink);
+}
+.rn-toggle-all:active {
+  transform: scale(0.975);
 }
 .rn-toggle-all:focus-visible {
   outline: none;
@@ -4491,6 +4534,7 @@ body[arco-theme="dark"] .scheme-summary {
   border: 1px solid var(--line);
   background: var(--surface);
   font-size: 11px;
+  font-variant-numeric: tabular-nums;
   line-height: 17px;
   color: var(--mute);
 }
@@ -4624,4 +4668,16 @@ body[arco-theme="dark"] .scheme-summary {
   .ver-pill {
     display: none;
   }
+}
+:where(.ai-logo) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  line-height: 0;
+}
+:where(.ai-logo > svg) {
+  width: 100%;
+  height: 100%;
+  display: block;
 }

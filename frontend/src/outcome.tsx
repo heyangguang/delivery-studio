@@ -285,6 +285,7 @@ export function OutcomeBar({
     setRevealed((prev) => ({ ...prev, [key]: !prev[key] }));
 
   const send = async (outcome: Outcome | "", text = "") => {
+    if (busy) return;
     setBusy(true);
     try {
       const j = await api<Job>(`/api/jobs/${job.id}`, {
@@ -309,6 +310,7 @@ export function OutcomeBar({
     }
   };
   const open = async (k: "deviated" | "failed" | "void") => {
+    if (busy) return;
     setNote(k === job.outcome ? job.outcome_note || "" : "");
     setAsk(k);
     if (k === "deviated" && !job.outcome_note) {
@@ -491,7 +493,11 @@ export function OutcomeBar({
       <Modal
         visible={!!a}
         title={a?.title}
-        onCancel={() => setAsk(null)}
+        onCancel={() => {
+          if (!busy) setAsk(null);
+        }}
+        maskClosable={!busy}
+        cancelButtonProps={{ disabled: busy }}
         okText={a?.ok}
         okButtonProps={{
           status: ask === "void" ? "danger" : undefined,

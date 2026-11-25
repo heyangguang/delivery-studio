@@ -15,10 +15,15 @@
   cursor: pointer;
   transition:
     transform 0.2s var(--spring),
-    background 0.15s;
+    background-color 0.16s var(--spring),
+    color 0.16s var(--spring);
 }
 .tm-btn:hover {
+  color: var(--ink);
   background: var(--hover);
+}
+.tm-btn:active:not(:disabled) {
+  transform: scale(0.94);
 }
 .tm-btn.on {
   background: var(--sunken);
@@ -49,15 +54,17 @@
   padding: 6px;
 }
 .tm {
-  width: 320px;
+  width: min(320px, calc(100vw - 24px));
   max-height: min(420px, 55vh);
   overflow: auto;
+  overscroll-behavior: contain;
 }
 .tm-row {
   display: flex;
   align-items: center;
   gap: 10px;
   width: 100%;
+  min-width: 0;
   padding: 8px 8px;
   border: 0;
   border-radius: 10px;
@@ -66,9 +73,18 @@
   text-align: left;
   background: none;
   cursor: pointer;
+  transition:
+    background-color 0.15s var(--spring),
+    transform 0.15s var(--spring);
+}
+.tm-row > .arco-switch {
+  flex: none;
 }
 .tm-row:hover {
   background: var(--hover);
+}
+.tm-row:not(.dis):not(.tm-think):active {
+  transform: scale(0.985);
 }
 .tm-row.dis {
   cursor: default;
@@ -77,9 +93,10 @@
   color: var(--mute);
 }
 .tm-head > svg {
+  flex: none;
   color: var(--faint);
   font-size: 12px;
-  transition: transform 0.2s var(--ease-out);
+  transition: transform 0.22s var(--spring);
 }
 .tm-head > svg.tm-flip {
   transform: rotate(180deg);
@@ -119,10 +136,13 @@
 .tm-t b {
   font-size: 13.5px;
   font-weight: 550;
+  overflow-wrap: anywhere;
 }
 .tm-t small {
   color: var(--mute);
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 .tm-sec {
   margin-top: 4px;
@@ -150,14 +170,27 @@
   font: 12px var(--sans);
   background: none;
   cursor: pointer;
+  transition: opacity 0.15s var(--spring);
+}
+.tm-all button:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 .tm-item {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
   padding: 4px 0;
   font-size: 13px;
   cursor: pointer;
+}
+.tm-item > .arco-switch {
+  flex: none;
+}
+.tm-item > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .tm-chip {
   display: inline-flex;
@@ -195,7 +228,7 @@
 }
 .tm-chip button:hover {
   opacity: 1;
-  background: rgba(0, 0, 0, 0.06);
+  background: var(--hover);
 }
 @media (prefers-reduced-motion: reduce) {
   .tm-btn,
@@ -283,7 +316,7 @@
   font-weight: 660;
   line-height: 1.25;
   color: var(--ink-2);
-  transition: color 0.2s ease;
+  transition: color 0.2s var(--spring);
 }
 .thk-slider-wrap.in-menu .thk-slider-title {
   font-size: 13px;
@@ -374,8 +407,8 @@ body[arco-theme="dark"] .thk-track {
   clip-path: inset(0 calc((100% - 26px) * (1 - var(--p, 0))) 0 0 round 999px);
   will-change: clip-path, opacity;
   transition:
-    clip-path 0.32s cubic-bezier(0.22, 1, 0.36, 1),
-    opacity 0.2s ease;
+    clip-path 0.32s var(--spring),
+    opacity 0.2s var(--spring);
   pointer-events: none;
 }
 .thk-fill.max-low {
@@ -426,7 +459,7 @@ body[arco-theme="dark"] .thk-track {
     radial-gradient(circle at 71% 56%, rgba(255, 255, 255, 0.92) 1.3px, transparent 1.8px),
     radial-gradient(circle at 82% 28%, rgba(255, 255, 255, 0.85) 1.1px, transparent 1.5px),
     radial-gradient(circle at 90% 66%, rgba(255, 255, 255, 0.75) 1px, transparent 1.4px);
-  transition: opacity 0.28s ease;
+  transition: opacity 0.28s var(--spring);
 }
 .thk-fill.tone-ultra .thk-stars {
   animation: thk-twinkle 2.6s ease-in-out infinite alternate;
@@ -440,9 +473,15 @@ body[arco-theme="dark"] .thk-track {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .thk-fill,
-  .thk-thumb {
-    transition: none !important;
+  .thk-track .thk-fill,
+  .thk-track .thk-thumb,
+  .thk-slider-title,
+  .thk-dot,
+  .tm-row,
+  .sbp-row,
+  .sbp-cfg,
+  .ai-eff-btn {
+    transition: none;
   }
   .thk-fill.tone-ultra .thk-stars {
     animation: none;
@@ -462,8 +501,8 @@ body[arco-theme="dark"] .thk-track {
   background: rgba(15, 23, 42, 0.24);
   transform: translate(-50%, -50%);
   transition:
-    background-color 0.16s ease,
-    opacity 0.16s ease;
+    background-color 0.16s var(--spring),
+    opacity 0.16s var(--spring);
 }
 body[arco-theme="dark"] .thk-dot {
   background: rgba(255, 255, 255, 0.28);
@@ -488,9 +527,14 @@ body[arco-theme="dark"] .thk-dot {
   pointer-events: none;
   will-change: left, transform;
   transition:
-    left 0.32s cubic-bezier(0.22, 1, 0.36, 1),
-    transform 0.18s cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow 0.2s ease;
+    left 0.32s var(--spring),
+    transform 0.18s var(--spring),
+    box-shadow 0.2s var(--spring);
+}
+body[arco-theme="dark"] .thk-thumb {
+  box-shadow:
+    0 2px 7px rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(255, 255, 255, 0.14);
 }
 .thk-track:hover .thk-thumb {
   transform: scale(1.04);
@@ -540,12 +584,21 @@ body[arco-theme="dark"] .thk-dot {
   border-radius: 8px;
   color: var(--ink-2);
   font: 500 12.5px/1 var(--sans);
+  font-variant-numeric: tabular-nums;
   background: var(--surface);
   cursor: pointer;
+  transition:
+    border-color 0.16s var(--spring),
+    color 0.16s var(--spring),
+    background-color 0.16s var(--spring),
+    transform 0.16s var(--spring);
 }
 .ai-eff-btn:hover {
   border-color: var(--brand-line);
   color: var(--brand-ink);
+}
+.ai-eff-btn:active {
+  transform: scale(0.97);
 }
 .tm-ic.upl {
   color: var(--violet-ink);
@@ -575,9 +628,10 @@ body[arco-theme="dark"] .thk-dot {
   background: transparent;
   cursor: pointer;
   transition:
-    background 0.15s,
-    border-color 0.15s,
-    color 0.15s;
+    background 0.16s var(--spring),
+    border-color 0.16s var(--spring),
+    color 0.16s var(--spring),
+    transform 0.16s var(--spring);
 }
 .tm-tog svg {
   display: block;
@@ -590,6 +644,7 @@ body[arco-theme="dark"] .thk-dot {
 }
 .tm-tog:active:not(:disabled) {
   background: var(--press);
+  transform: scale(0.975);
 }
 .tm-tog:disabled {
   opacity: 0.45;
@@ -784,11 +839,15 @@ body[arco-theme="dark"] .tm-tog.web.on {
   background: transparent;
   cursor: pointer;
   transition:
-    background 0.14s,
-    border-color 0.14s;
+    background-color 0.15s var(--spring),
+    border-color 0.15s var(--spring),
+    transform 0.15s var(--spring);
 }
 .sbp-row:hover:not(:disabled) {
   background: var(--hover);
+}
+.sbp-row:active:not(:disabled) {
+  transform: scale(0.985);
 }
 .sbp-row.on {
   border-color: color-mix(in srgb, var(--brand) 22%, transparent);
@@ -897,12 +956,16 @@ body[arco-theme="dark"] .tm-tog.web.on {
   background: transparent;
   cursor: pointer;
   transition:
-    background 0.14s,
-    color 0.14s;
+    background-color 0.15s var(--spring),
+    color 0.15s var(--spring),
+    transform 0.15s var(--spring);
 }
 .sbp-cfg:hover {
   color: var(--brand-ink);
   background: var(--hover);
+}
+.sbp-cfg:active {
+  transform: scale(0.985);
 }
 .sbp-cfg svg {
   font-size: 13px;
@@ -918,7 +981,7 @@ body[arco-theme="dark"] .tm-tog.web.on {
 .sbp-pill .sbp-caret {
   font-size: 11px;
   opacity: 0.65;
-  transition: transform 0.18s var(--ease-out);
+  transition: transform 0.2s var(--spring);
 }
 .sbp-pill.tm-open .sbp-caret {
   transform: rotate(180deg);

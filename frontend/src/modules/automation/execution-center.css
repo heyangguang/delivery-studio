@@ -4,9 +4,9 @@
 .ec-rail-tabs {
   display: flex;
   align-items: center;
-  gap: 2px;
-  margin: -2px -16px 0;
-  padding: 0 10px;
+  gap: 6px;
+  margin: 0 -16px 2px;
+  padding: 0 12px;
   border-bottom: 1px solid var(--line);
 }
 
@@ -17,12 +17,12 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
+  gap: 6px;
   height: 36px;
-  padding: 0 4px;
+  padding: 0 8px;
   color: var(--mute);
   text-decoration: none;
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 500;
   line-height: 1;
   white-space: nowrap;
@@ -40,9 +40,9 @@
 .ec-rail-tab::after {
   content: "";
   position: absolute;
-  left: 6px;
-  right: 6px;
-  bottom: -1px;
+  left: 10px;
+  right: 10px;
+  bottom: 0;
   height: 2px;
   border-radius: 2px 2px 0 0;
   background: var(--ec-accent, var(--brand));
@@ -57,12 +57,8 @@
   --ec-accent: var(--kyndryl);
 }
 
-.ec-rail-tab.tone-controllers {
-  --ec-accent: var(--brand);
-}
-
 .ec-rail-tab.tone-agents {
-  --ec-accent: var(--ok);
+  --ec-accent: var(--brand);
 }
 
 .ec-rail-tab-ic {
@@ -136,28 +132,62 @@
   text-overflow: ellipsis;
 }
 
-.ec-rail-upgrade-bar {
+.ec-role-pills {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 6px 10px;
-  border-radius: 7px;
-  background: var(--warn-soft);
-  border: 1px solid color-mix(in srgb, var(--warn) 28%, var(--line));
-  color: var(--warn);
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+
+.ec-role-pill {
+  all: unset;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 6px;
   font-size: 11.5px;
-  font-weight: 560;
+  font-weight: 540;
+  color: var(--mute);
+  background: var(--surface);
+  border: 1px solid var(--line);
   cursor: pointer;
-  transition: background-color 0.14s ease;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease;
 }
 
-.ec-rail-upgrade-bar:hover {
-  background: color-mix(in srgb, var(--warn) 18%, var(--surface));
+.ec-role-pill:hover {
+  color: var(--ink);
+  border-color: var(--line-strong);
+  background: var(--hover);
 }
 
-.ec-rail-upgrade-bar.is-on {
-  box-shadow: 0 0 0 1.5px var(--warn);
+.ec-role-pill em {
+  font-style: normal;
+  font-size: 11px;
+  opacity: 0.78;
+  font-variant-numeric: tabular-nums;
+}
+
+.ec-role-pill.on {
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+  border-color: var(--brand-line);
+  font-weight: 600;
+}
+
+.ec-role-pill.is-upgrade {
+  color: var(--warn);
+  background: var(--warn-soft);
+  border-color: color-mix(in srgb, var(--warn) 30%, var(--line));
+}
+
+.ec-role-pill.is-upgrade.on {
+  box-shadow: 0 0 0 1px var(--warn);
 }
 
 .ec-rail-group {
@@ -178,9 +208,47 @@
   letter-spacing: 0.01em;
 }
 
-.ec-rail-group-h em {
+.ec-rail-group-btn {
+  all: unset;
+  box-sizing: border-box;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 6px 8px 4px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--faint);
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: color 0.14s ease, background-color 0.14s ease;
+}
+
+.ec-rail-group-btn:hover {
+  color: var(--ink-2);
+  background: color-mix(in srgb, var(--hover) 60%, transparent);
+}
+
+.ec-rail-group-btn-l {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.ec-rail-group-btn-l span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ec-rail-group-h em,
+.ec-rail-group-btn em {
   font-style: normal;
   font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
 }
 
 .ec-rail-row {

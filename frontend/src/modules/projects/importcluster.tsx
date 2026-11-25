@@ -3,7 +3,6 @@ import {
   Button,
   Drawer,
   Input,
-  InputTag,
   Message,
   Popover,
   Select,
@@ -24,6 +23,7 @@ import {
   IconDownload,
   IconEdit,
   IconFile,
+  IconFolder,
   IconImage,
   IconPlus,
   IconRefresh,
@@ -33,6 +33,7 @@ import {
   IconUp,
   IconUpload,
 } from "@arco-design/web-react/icon";
+import { canonicalCompanionTitle, cleanDisplayVersion } from "./topology";
 import { Spark } from "../ai/aichat";
 import { ModelPicker, useModelPick } from "../ai/modelpick";
 import { ThinkLevel, useAIOptions } from "../ai/aitools";
@@ -483,8 +484,8 @@ function buildPreviewInstances(
     result.push({
       id: cid,
       component: cid,
-      title: cm.display_name || def?.name || cid,
-      version: cm.version || "",
+      title: canonicalCompanionTitle(cid, cm.display_name || def?.name),
+      version: cleanDisplayVersion(cm.version),
       status: "published",
       managed_context: cid === "patroni" && primaryID === "postgresql" ? primaryID : undefined,
       roles: cRoles,
@@ -2083,6 +2084,190 @@ function ImportEvidenceComposer({
   );
 }
 
+function RuntimePathListCard({
+  title,
+  items,
+  onChange,
+  placeholder,
+  kind,
+  twoCol = false,
+}: {
+  title: string;
+  items: string[];
+  onChange: (next: string[]) => void;
+  placeholder: string;
+  kind: "service" | "file" | "dir";
+  twoCol?: boolean;
+}) {
+  const [draft, setDraft] = useState("");
+  const commit = () => {
+    const parts = draft
+      .split(/[\r\n,;]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (parts.length === 0) return;
+    onChange(normalizeTagList([...items, ...parts]));
+    setDraft("");
+  };
+  const removeAt = (idx: number) => {
+    onChange(items.filter((_, i) => i !== idx));
+  };
+
+  if (kind === "service") {
+    return (
+      <div className="imp-rpath-card is-service">
+        <div className="imp-rpath-head">
+          <span className="imp-rpath-title">{title}</span>
+          <span className="imp-rpath-count num">{items.length}</span>
+        </div>
+        <div className="imp-rpath-chips">
+          {items.map((sv, idx) => (
+            <span key={`${sv}-${idx}`} className="imp-rpath-svc-chip mono">
+              <span>{sv}</span>
+              <button
+                type="button"
+                aria-label={bi(`移除 ${sv}`, `Remove ${sv}`)}
+                onClick={() => removeAt(idx)}
+              >
+                <IconClose />
+              </button>
+            </span>
+          ))}
+          <div className="imp-rpath-inline-add">
+            <Input
+              size="mini"
+              className="mono"
+              value={draft}
+              placeholder={placeholder}
+              onChange={setDraft}
+              onPressEnter={commit}
+              onBlur={commit}
+            />
+            <button
+              type="button"
+              className="imp-rpath-add-btn"
+              disabled={!draft.trim()}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={commit}
+              aria-label={bi("添加服务单元", "Add service unit")}
+            >
+              <IconPlus />
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="imp-rpath-card">
+      <div className="imp-rpath-head">
+        <span className="imp-rpath-title">{title}</span>
+        <span className="imp-rpath-count num">{items.length}</span>
+      </div>
+      {items.length > 0 && (
+        <div className={`imp-rpath-rows ${twoCol ? "is-two-col" : ""}`}>
+          {items.map((p, idx) => (
+            <div key={`${p}-${idx}`} className="imp-rpath-row">
+              <span className="imp-rpath-ic" aria-hidden>
+                {kind === "file" ? <IconFile /> : <IconFolder />}
+              </span>
+              <Tooltip content={p} mini>
+                <span className="imp-rpath-val mono">{p}</span>
+              </Tooltip>
+              <button
+                type="button"
+                className="imp-rpath-del"
+                aria-label={bi(`移除 ${p}`, `Remove ${p}`)}
+                onClick={() => removeAt(idx)}
+              >
+                <IconClose />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="imp-rpath-foot-add">
+        <Input
+          size="small"
+          className="mono"
+          value={draft}
+          placeholder={placeholder}
+          onChange={setDraft}
+          onPressEnter={commit}
+        />
+        <Button size="small" icon={<IconPlus />} disabled={!draft.trim()} onClick={commit}>
+          {bi("添加", "Add")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function RuntimePathsEditor({
+  serviceUnits,
+  onServiceUnitsChange,
+  configPaths,
+  onConfigPathsChange,
+  dataDirs,
+  onDataDirsChange,
+  logDirs,
+  onLogDirsChange,
+  servicePlaceholder,
+  configPlaceholder,
+  dataPlaceholder,
+  logPlaceholder,
+}: {
+  serviceUnits: string[];
+  onServiceUnitsChange: (v: string[]) => void;
+  configPaths: string[];
+  onConfigPathsChange: (v: string[]) => void;
+  dataDirs: string[];
+  onDataDirsChange: (v: string[]) => void;
+  logDirs: string[];
+  onLogDirsChange: (v: string[]) => void;
+  servicePlaceholder?: string;
+  configPlaceholder?: string;
+  dataPlaceholder?: string;
+  logPlaceholder?: string;
+}) {
+  return (
+    <div className="imp-rpath-grid">
+      <RuntimePathListCard
+        title={bi("系统服务单元", "Service Units")}
+        items={serviceUnits}
+        onChange={onServiceUnitsChange}
+        placeholder={servicePlaceholder || "patroni.service"}
+        kind="service"
+      />
+      <RuntimePathListCard
+        title={bi("配置文件路径", "Config Paths")}
+        items={configPaths}
+        onChange={onConfigPathsChange}
+        placeholder={configPlaceholder || "/etc/patroni/patroni.yml"}
+        kind="file"
+        twoCol
+      />
+      <div className="imp-rpath-dirs">
+        <RuntimePathListCard
+          title={bi("数据目录", "Data Directories")}
+          items={dataDirs}
+          onChange={onDataDirsChange}
+          placeholder={dataPlaceholder || "/data/pg"}
+          kind="dir"
+        />
+        <RuntimePathListCard
+          title={bi("日志目录", "Log Directories")}
+          items={logDirs}
+          onChange={onLogDirsChange}
+          placeholder={logPlaceholder || "/var/log/postgresql"}
+          kind="dir"
+        />
+      </div>
+    </div>
+  );
+}
+
 const COMPANION_GENERAL_ICONS = [
   "balance",
   "vip",
@@ -2578,7 +2763,7 @@ function CompanionStackEditor({
               </CompanionIconPicker>
               <div className="imp-stack-main">
                 <div className="imp-stack-top">
-                  <strong>{cm.display_name || def?.name || cm.component}</strong>
+                  <strong>{canonicalCompanionTitle(cm.component, cm.display_name || def?.name)}</strong>
                   <span className={`imp-kind-pill ${km.tone}`}>{km.label}</span>
                   {cm.ports && cm.ports.length > 0 && (
                     <span className="mono small muted imp-stack-ports">:{cm.ports.join(", :")}</span>
@@ -4420,52 +4605,20 @@ export function ImportClusterPage({
 
                 {reviewDetailsOpen && (
                   <div className="imp-review-adv-body">
-                    <div className="imp-form-grid-2">
-                      <div className="imp-field">
-                        <label>
-                          <span className="imp-lbl-left">{bi("系统服务单元", "Service Units")}</span>
-                        </label>
-                        <InputTag
-                          saveOnBlur
-                          placeholder={selectedPreset?.service_hints?.join(", ") || "patroni.service"}
-                          value={serviceUnits}
-                          onChange={(vals) => setServiceUnits(normalizeTagList(vals as string[]))}
-                        />
-                      </div>
-                      <div className="imp-field">
-                        <label>
-                          <span className="imp-lbl-left">{bi("配置文件路径", "Config Paths")}</span>
-                        </label>
-                        <InputTag
-                          saveOnBlur
-                          placeholder={selectedPreset?.config_hints?.[0] || "/etc/patroni/patroni.yml"}
-                          value={configPaths}
-                          onChange={(vals) => setConfigPaths(normalizeTagList(vals as string[]))}
-                        />
-                      </div>
-                      <div className="imp-field">
-                        <label>
-                          <span className="imp-lbl-left">{bi("数据目录", "Data Directories")}</span>
-                        </label>
-                        <InputTag
-                          saveOnBlur
-                          placeholder={selectedPreset?.data_hints?.[0] || "/data/pg"}
-                          value={dataDirs}
-                          onChange={(vals) => setDataDirs(normalizeTagList(vals as string[]))}
-                        />
-                      </div>
-                      <div className="imp-field">
-                        <label>
-                          <span className="imp-lbl-left">{bi("日志目录", "Log Directories")}</span>
-                        </label>
-                        <InputTag
-                          saveOnBlur
-                          placeholder={selectedPreset?.log_hints?.[0] || "/var/log/postgresql"}
-                          value={logDirs}
-                          onChange={(vals) => setLogDirs(normalizeTagList(vals as string[]))}
-                        />
-                      </div>
-                    </div>
+                    <RuntimePathsEditor
+                      serviceUnits={serviceUnits}
+                      onServiceUnitsChange={setServiceUnits}
+                      configPaths={configPaths}
+                      onConfigPathsChange={setConfigPaths}
+                      dataDirs={dataDirs}
+                      onDataDirsChange={setDataDirs}
+                      logDirs={logDirs}
+                      onLogDirsChange={setLogDirs}
+                      servicePlaceholder={selectedPreset?.service_hints?.join(", ") || "patroni.service"}
+                      configPlaceholder={selectedPreset?.config_hints?.[0] || "/etc/patroni/patroni.yml"}
+                      dataPlaceholder={selectedPreset?.data_hints?.[0] || "/data/pg"}
+                      logPlaceholder={selectedPreset?.log_hints?.[0] || "/var/log/postgresql"}
+                    />
 
                     <div className="imp-field">
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -6242,57 +6395,25 @@ export function ImportedBaselineModal({
             />
           </div>
 
-          {/* Section 5: Paths & Service Units (Tag Chips - ZERO concatenation bug!) */}
+          {/* Section 5: Structured Runtime Paths & Service Units Editor */}
           <div className="imp-drawer-sec">
             <div className="imp-drawer-sec-h">
               <h4>{bi("服务单元与运行路径", "Service Units & Paths")}</h4>
             </div>
-            <div className="imp-form-grid-2">
-              <div className="imp-field">
-                <label>
-                  <span className="imp-lbl-left">{bi("系统服务单元", "Service Units")}</span>
-                </label>
-                <InputTag
-                  saveOnBlur
-                  value={serviceUnits}
-                  placeholder="patroni.service, etcd.service"
-                  onChange={(vals) => setServiceUnits(normalizeTagList(vals as string[]))}
-                />
-              </div>
-              <div className="imp-field">
-                <label>
-                  <span className="imp-lbl-left">{bi("配置文件路径", "Config Paths")}</span>
-                </label>
-                <InputTag
-                  saveOnBlur
-                  value={configPaths}
-                  placeholder="/etc/patroni/patroni.yml"
-                  onChange={(vals) => setConfigPaths(normalizeTagList(vals as string[]))}
-                />
-              </div>
-              <div className="imp-field">
-                <label>
-                  <span className="imp-lbl-left">{bi("数据目录", "Data Dirs")}</span>
-                </label>
-                <InputTag
-                  saveOnBlur
-                  value={dataDirs}
-                  placeholder="/data/pg, /data/etcd"
-                  onChange={(vals) => setDataDirs(normalizeTagList(vals as string[]))}
-                />
-              </div>
-              <div className="imp-field">
-                <label>
-                  <span className="imp-lbl-left">{bi("日志目录", "Log Dirs")}</span>
-                </label>
-                <InputTag
-                  saveOnBlur
-                  value={logDirs}
-                  placeholder="/var/log/postgresql"
-                  onChange={(vals) => setLogDirs(normalizeTagList(vals as string[]))}
-                />
-              </div>
-            </div>
+            <RuntimePathsEditor
+              serviceUnits={serviceUnits}
+              onServiceUnitsChange={setServiceUnits}
+              configPaths={configPaths}
+              onConfigPathsChange={setConfigPaths}
+              dataDirs={dataDirs}
+              onDataDirsChange={setDataDirs}
+              logDirs={logDirs}
+              onLogDirsChange={setLogDirs}
+              servicePlaceholder="patroni.service, etcd.service"
+              configPlaceholder="/etc/patroni/patroni.yml"
+              dataPlaceholder="/data/pg, /data/etcd"
+              logPlaceholder="/var/log/postgresql"
+            />
           </div>
 
           {/* Section 6: Key Parameters & Notes */}

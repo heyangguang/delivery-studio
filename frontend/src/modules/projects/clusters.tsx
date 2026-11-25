@@ -1,5 +1,7 @@
 import {
   buildClusterStackPills,
+  cleanDisplayVersion,
+  compactHostLabels,
   computeEffectiveClusterChanges,
   detectMissingCompanionsFromMeta,
   displayInstances,
@@ -2172,7 +2174,19 @@ function ClusterUnifiedOverview({
   const insts = plan?.instances || [];
   const real = displayInstances(insts).filter((i) => !i.external);
   const defaultIp = plan?.hosts?.[0]?.ip || input?.hosts?.[0]?.ip || "";
-  const entries = insts
+  const importedEpRoleByAddr = new Map<string, string>();
+  const importedEpRoleByName = new Map<string, string>();
+  for (const iep of c.imported?.endpoints || []) {
+    const r = (iep.role || "").trim().toLowerCase();
+    if (!r) continue;
+    if (iep.address) {
+      const bare = iep.address.trim().replace(/:\d+$/, "").toLowerCase();
+      importedEpRoleByAddr.set(bare, r);
+      importedEpRoleByAddr.set(iep.address.trim().toLowerCase(), r);
+    }
+    if (iep.name) importedEpRoleByName.set(iep.name.trim().toLowerCase(), r);
+  }
+  const rawEntries = insts
     .flatMap((i) =>
       Object.entries(i.fronts || {}).map(([epName, f]) => {
         const ep = (i.endpoints || []).find((x) => x.name === epName);
@@ -2186,7 +2200,14 @@ function ClusterUnifiedOverview({
             ? bi(`外部 · ${niceTitle}`, `External · ${niceTitle}`)
             : bi("外部入口", "External entry")
           : niceTitle || bi("访问入口", "Entrypoint");
-        const isPrimary = /write|primary|master|主|写/i.test(`${epName} ${niceTitle}`);
+        const impRole =
+          importedEpRoleByAddr.get((f.address || "").trim().toLowerCase()) ||
+          importedEpRoleByName.get(epName.trim().toLowerCase()) ||
+          "";
+        const isPrimary =
+          impRole === "readwrite" ||
+          impRole === "primary" ||
+          /write|primary|master|主|写/i.test(`${epName} ${niceTitle}`);
         return {
           key: `${i.id}.${epName}.${f.listen}`,
           label,
@@ -2201,6 +2222,10 @@ function ClusterUnifiedOverview({
       }),
     )
     .sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary) || a.listen - b.listen);
+  const entries =
+    rawEntries.length === 1 && !rawEntries[0].isPrimary
+      ? [{ ...rawEntries[0], isPrimary: true }]
+      : rawEntries;
 
   const stackPills = buildClusterStackPills(c, real);
   const ports = real
@@ -2258,11 +2283,24 @@ function ClusterUnifiedOverview({
         ),
     )
     .slice(0, 8);
-  const roleLine = (i: (typeof insts)[number]) =>
-    Object.entries(i.roles || {})
-      .filter(([, hs]) => Array.isArray(hs) && hs.length > 0)
-      .map(([r, hs]) => `${i.role_titles?.[r] || r} ${(hs || []).join(bi("、", ", "))}`)
-      .join(" · ");
+  const hostIpByName = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const h of plan?.hosts || []) {
+      if (h.name && h.ip) m.set(h.name, h.ip);
+    }
+    for (const h of input?.hosts || []) {
+      if (h.name && h.ip && !m.has(h.name)) m.set(h.name, h.ip);
+    }
+    return m;
+  }, [input?.hosts, plan?.hosts]);
+  const shortHostMap = useMemo(() => {
+    const names = [
+      ...(plan?.hosts || []).map((h) => h.name),
+      ...(input?.hosts || []).map((h) => h.name),
+      ...real.flatMap((i) => i.hosts || []),
+    ];
+    return compactHostLabels(names);
+  }, [input?.hosts, plan?.hosts, real]);
   const hostCount = Array.isArray(input?.hosts) ? input.hosts.length : c.hosts;
 
   return (
@@ -2382,30 +2420,78 @@ function ClusterUnifiedOverview({
                 <span>{bi("组件组成", "Components")}</span>
               </div>
               <div className="cl-u-comps">
-                {real.map((i) => (
-                  <div key={i.id} className="cl-u-comp">
-                    <div className="cl-u-comp-top">
-                      <AppGlyph
-                        id={i.component}
-                        icon={i.component === c.app_id ? c.icon : undefined}
-                        color={i.component === c.app_id ? c.imported?.color : undefined}
-                        size={16}
-                      />
-                      <b>
-                        {i.title} {i.version}
-                      </b>
-                      {i.embedded ? (
-                        <span className="flag info">{bi("内置管理", "Embedded")}</span>
-                      ) : (
-                        i.auto && <span className="flag info">{bi("自动加入", "Auto-added")}</span>
-                      )}
-                      {i.status !== "published" && (
-                        <span className="flag warn">{bi("待验证", "Unverified")}</span>
-                      )}
+                {real.map((i) => {
+                  const roleEntries = Object.entries(i.roles || {}).filter(
+                    ([, hs]) => Array.isArray(hs) && hs.length > 0,
+                  );
+                  const cleanVer = cleanDisplayVersion(i.version);
+                  const compHostCount = (i.hosts || []).length;
+                  return (
+                    <div key={i.id} className="cl-u-comp">
+                      <div className="cl-u-comp-top">
+                        <div className="cl-u-comp-id">
+                          <AppGlyph
+                            id={i.component}
+                            icon={i.component === c.app_id ? c.icon : undefined}
+                            color={i.component === c.app_id ? c.imported?.color : undefined}
+                            size={16}
+                          />
+                          <b>{i.title}</b>
+                          {cleanVer && <span className="cl-u-comp-ver mono">{cleanVer}</span>}
+                        </div>
+                        <div className="cl-u-comp-flags">
+                          {compHostCount > 0 && (
+                            <span className="cl-u-comp-count num">
+                              {compHostCount} {bi("节点", "hosts")}
+                            </span>
+                          )}
+                          {i.embedded ? (
+                            <span className="flag info">{bi("内置管理", "Embedded")}</span>
+                          ) : (
+                            i.auto && <span className="flag info">{bi("自动加入", "Auto-added")}</span>
+                          )}
+                          {i.status !== "published" && (
+                            <span className="flag warn">{bi("待验证", "Unverified")}</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="cl-u-comp-roles">
+                        {roleEntries.length > 0 ? (
+                          roleEntries.map(([r, hs]) => (
+                            <div key={r} className="cl-u-comp-role-row">
+                              <span className="cl-u-comp-role-k">{i.role_titles?.[r] || r}</span>
+                              <div className="cl-u-comp-role-hosts">
+                                {(hs || []).map((hn) => {
+                                  const ip = hostIpByName.get(hn);
+                                  const shortName = shortHostMap.get(hn) || hn;
+                                  const fullTip = ip ? `${hn} (${ip})` : hn;
+                                  return (
+                                    <Tooltip key={hn} content={fullTip} mini>
+                                      <span className="cl-u-host-chip mono">{shortName}</span>
+                                    </Tooltip>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="cl-u-comp-role-hosts">
+                            {(i.hosts || []).map((hn) => {
+                              const ip = hostIpByName.get(hn);
+                              const shortName = shortHostMap.get(hn) || hn;
+                              const fullTip = ip ? `${hn} (${ip})` : hn;
+                              return (
+                                <Tooltip key={hn} content={fullTip} mini>
+                                  <span className="cl-u-host-chip mono">{shortName}</span>
+                                </Tooltip>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                    <small>{roleLine(i) || i.hosts.join(bi("、", ", "))}</small>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}

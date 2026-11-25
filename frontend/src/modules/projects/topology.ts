@@ -269,6 +269,118 @@ function inferCompanionKind(component?: string): string {
   return 'other';
 }
 
+/** Strips Debian epochs (e.g. "2:") and distro packaging suffixes ("-1.noble", "-2.el9", "+dfsg") for clean display. */
+export function cleanDisplayVersion(raw?: string): string {
+  const s = (raw || '').trim();
+  if (!s) return '';
+  return s
+    .replace(/^\d+:/, '')
+    .replace(/(?:[-+~](?:\d+\.)?(?:noble|jammy|focal|bionic|bookworm|bullseye|buster|el\d+|rhel\d+|almalinux\d+|rocky\d+|ubuntu[\w.]*|debian[\w.]*|dfsg[\w.]*|ds[\w.]*).*)$/i, '')
+    .replace(/-\d+\.\d+(?:ubuntu|deb)[\w.]*$/i, '')
+    .trim();
+}
+
+const CANONICAL_COMPANION_NAMES: Record<string, string> = {
+  'node-exporter': 'Prometheus Node Exporter',
+  'process-exporter': 'Process Exporter',
+  'postgres-exporter': 'Postgres Exporter',
+  'mysqld-exporter': 'MySQLd Exporter',
+  'redis-exporter': 'Redis Exporter',
+  'haproxy-exporter': 'HAProxy Exporter',
+  'nginx-exporter': 'Nginx Exporter',
+  'kafka-exporter': 'Kafka Exporter',
+  'blackbox-exporter': 'Blackbox Exporter',
+  'systemd-exporter': 'Systemd Exporter',
+  cadvisor: 'cAdvisor',
+  pgbackrest: 'pgBackRest',
+  pgbouncer: 'PgBouncer',
+  patroni: 'Patroni',
+  etcd: 'etcd',
+  haproxy: 'HAProxy',
+  keepalived: 'Keepalived',
+  nginx: 'Nginx',
+  proxysql: 'ProxySQL',
+  maxscale: 'MaxScale',
+  obproxy: 'OBProxy',
+  zookeeper: 'ZooKeeper',
+  consul: 'Consul',
+  'redis-sentinel': 'Redis Sentinel',
+  'clickhouse-keeper': 'ClickHouse Keeper',
+};
+
+/** Maps raw binary/snake_case companion identifiers (e.g. "node_exporter") to clean unified display titles. */
+export function canonicalCompanionTitle(component: string, rawTitle?: string): string {
+  const compKey = (component || '').trim().toLowerCase().replace(/_/g, '-');
+  const title = (rawTitle || '').trim();
+  const titleKey = title.toLowerCase().replace(/_/g, '-');
+  if (!title || titleKey === compKey) {
+    if (CANONICAL_COMPANION_NAMES[compKey]) {
+      return CANONICAL_COMPANION_NAMES[compKey];
+    }
+  }
+  if (CANONICAL_COMPANION_NAMES[titleKey]) {
+    return CANONICAL_COMPANION_NAMES[titleKey];
+  }
+  return title || component;
+}
+
+/**
+ * Compresses verbose cloud hostnames sharing a long boilerplate prefix (e.g.
+ * "ecs-unified-toolchain-private-prod-edc-jfrog-pg-ha-001") into scannable tail
+ * labels ("…jfrog-pg-ha-001") while leaving short hostnames ("db-node-01") verbatim.
+ */
+export function compactHostLabels(names: string[]): Map<string, string> {
+  const unique = [...new Set(names.filter(Boolean))];
+  const map = new Map<string, string>();
+  if (unique.length === 0) return map;
+  if (unique.length === 1) {
+    const only = unique[0];
+    if (only.length > 30) {
+      const parts = only.split('-');
+      if (parts.length >= 4) {
+        map.set(only, `…${parts.slice(-3).join('-')}`);
+        return map;
+      }
+    }
+    map.set(only, only);
+    return map;
+  }
+
+  let lcp = unique[0];
+  for (let i = 1; i < unique.length; i++) {
+    let j = 0;
+    const maxLen = Math.min(lcp.length, unique[i].length);
+    while (j < maxLen && lcp[j] === unique[i][j]) j++;
+    lcp = lcp.slice(0, j);
+    if (!lcp) break;
+  }
+
+  // Trim LCP back to a clean separator boundary so we keep 2 meaningful context segments before the suffix.
+  let cut = 0;
+  if (lcp.length >= 18) {
+    const sepRe = /[-_.]/g;
+    const seps: number[] = [];
+    let m: RegExpExecArray | null;
+    while ((m = sepRe.exec(lcp)) !== null) {
+      seps.push(m.index + 1);
+    }
+    if (seps.length >= 3) {
+      cut = seps[seps.length - 3];
+    } else if (seps.length >= 1) {
+      cut = seps[seps.length - 1];
+    }
+  }
+
+  for (const name of unique) {
+    if (cut >= 12 && name.length > 26 && name.length - cut >= 6) {
+      map.set(name, `…${name.slice(cut)}`);
+    } else {
+      map.set(name, name);
+    }
+  }
+  return map;
+}
+
 /** Extracts a clean upstream version (e.g. "4.1.5" from "1:4.1.5-1.noble") from locked instance packages. */
 export function packageUpstreamVersion(
   packages: PackageRequest[] | undefined,
@@ -306,7 +418,7 @@ export function buildClusterStackPills(
     component: primaryComp || c.app_id,
     icon: imp?.icon || c.icon || primaryComp || c.app_id,
     title: imp?.display_name || main?.title || c.app_name || c.app_id,
-    version: (imp?.exact_version || main?.version || c.version || '').trim() || undefined,
+    version: cleanDisplayVersion(imp?.exact_version || main?.version || c.version) || undefined,
     kindLabel: bi('主组件', 'Primary'),
     primary: true,
   };
@@ -321,8 +433,8 @@ export function buildClusterStackPills(
       key: ck,
       component: inst.component,
       icon: inst.component,
-      title: inst.title || inst.component,
-      version: (inst.version || '').trim() || undefined,
+      title: canonicalCompanionTitle(inst.component, inst.title),
+      version: cleanDisplayVersion(inst.version) || undefined,
       kindLabel: companionKindMeta(inferCompanionKind(inst.component)).label,
     };
     out.push(pill);
@@ -371,10 +483,12 @@ export function buildClusterStackPills(
     const ck = canon(cm.component);
     if (!ck) continue;
     const effKind = effectiveCompanionKind(cm.component, cm.kind);
+    const cleanVer = cleanDisplayVersion(cm.version) || undefined;
+    const cleanTitle = canonicalCompanionTitle(cm.component, cm.display_name);
     const existing = byKey.get(ck);
     if (existing) {
-      if (!existing.version && cm.version) existing.version = cm.version;
-      if (cm.display_name) existing.title = cm.display_name;
+      if (!existing.version && cleanVer) existing.version = cleanVer;
+      if (cleanTitle) existing.title = cleanTitle;
       if (effKind && !existing.primary) {
         existing.kindLabel = companionKindMeta(effKind).label;
       }
@@ -384,8 +498,8 @@ export function buildClusterStackPills(
       key: ck,
       component: cm.component,
       icon: cm.icon || companionIcon(cm.component),
-      title: cm.display_name || cm.component,
-      version: (cm.version || '').trim() || undefined,
+      title: cleanTitle,
+      version: cleanVer,
       kindLabel: companionKindMeta(effKind).label,
     };
     out.push(pill);

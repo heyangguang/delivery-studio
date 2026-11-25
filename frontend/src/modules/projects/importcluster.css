@@ -3246,6 +3246,218 @@ body[arco-theme="dark"] .imp-compose-box::after {
   letter-spacing: 0.01em;
 }
 
+/* Structured Runtime Paths & Service Units Editor (replaces jagged InputTag clouds) */
+.imp-rpath-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.imp-rpath-dirs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  align-items: start;
+}
+
+.imp-rpath-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  min-width: 0;
+}
+
+.imp-rpath-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.imp-rpath-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.imp-rpath-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--mute);
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+
+.imp-rpath-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.imp-rpath-svc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 6px 0 9px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.imp-rpath-svc-chip button {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--mute);
+  cursor: pointer;
+}
+
+.imp-rpath-svc-chip button:hover {
+  color: var(--err);
+  background: color-mix(in srgb, var(--err) 12%, transparent);
+}
+
+.imp-rpath-inline-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: 190px;
+  max-width: 100%;
+}
+
+.imp-rpath-add-btn {
+  all: unset;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink-2);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.imp-rpath-add-btn:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--line-strong);
+}
+
+.imp-rpath-add-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.imp-rpath-rows {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 5px;
+}
+
+.imp-rpath-rows.is-two-col {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 8px;
+}
+
+.imp-rpath-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 6px 0 9px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  min-width: 0;
+}
+
+.imp-rpath-ic {
+  display: inline-flex;
+  align-items: center;
+  font-size: 12.5px;
+  color: var(--mute);
+  flex-shrink: 0;
+}
+
+.imp-rpath-val {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.imp-rpath-del {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  font-size: 11px;
+  color: var(--mute);
+  cursor: pointer;
+  flex-shrink: 0;
+  opacity: 0.65;
+  transition: opacity 0.14s ease, color 0.14s ease, background-color 0.14s ease;
+}
+
+.imp-rpath-row:hover .imp-rpath-del,
+.imp-rpath-del:focus-visible {
+  opacity: 1;
+}
+
+.imp-rpath-del:hover {
+  color: var(--err);
+  background: color-mix(in srgb, var(--err) 12%, transparent);
+}
+
+.imp-rpath-foot-add {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.imp-rpath-foot-add > .arco-input-inner-wrapper,
+.imp-rpath-foot-add > .arco-input {
+  flex: 1;
+  min-width: 0;
+}
+
+@media (max-width: 700px) {
+  .imp-rpath-dirs,
+  .imp-rpath-rows.is-two-col {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* Step 3: Focused Review Hero, Numbered Sections, Collapsible Details & Commit Rail */
 .imp-ctx-right {
   display: inline-flex;

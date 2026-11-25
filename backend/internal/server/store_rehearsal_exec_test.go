@@ -399,40 +399,127 @@ func TestGlobalExecutionAgentsAPI(t *testing.T) {
 	if p, ok := routePermFor("GET", "/api/executions/agents"); !ok || p != "execution.manage|delivery.view" {
 		t.Fatalf("expected execution.manage|delivery.view for GET /api/executions/agents, got %q %v", p, ok)
 	}
+	if p, ok := routePermFor("POST", "/api/executions/agents"); !ok || p != "execution.manage" {
+		t.Fatalf("expected execution.manage for POST /api/executions/agents, got %q %v", p, ok)
+	}
 	if p, ok := routePermFor("PATCH", "/api/executions/agents"); !ok || p != "execution.manage" {
 		t.Fatalf("expected execution.manage for PATCH /api/executions/agents, got %q %v", p, ok)
 	}
-
-	importBody := `{
-		"id": "pg-global-ag",
-		"component": "postgresql",
-		"display_name": "PostgreSQL",
-		"version": "17",
-		"exact_version": "17.11",
-		"platform": "ubuntu2404",
-		"deploy_method": "systemd",
-		"hosts": [{"name": "db-g1", "ip": "10.30.0.11", "role": "primary"}]
-	}`
-	if rr := storeRequest(srv, "POST", "/api/clusters/import", strings.NewReader(importBody), cookie, csrf); rr.Code != 200 && rr.Code != 201 {
-		t.Fatalf("import failed: %d %s", rr.Code, rr.Body.String())
+	if p, ok := routePermFor("POST", "/api/executions/agents/abc123/bundle"); !ok || p != "execution.manage" {
+		t.Fatalf("expected execution.manage for POST /api/executions/agents/{id}/bundle, got %q %v", p, ok)
 	}
-	enrRR := storeRequest(srv, "POST", "/api/clusters/pg-global-ag/automation/agents", strings.NewReader(`{"host":"db-g1","ip":"10.30.0.11","allow_mutating":true}`), cookie, csrf)
+
+	// Seed a legacy per-delivery ssh_trust record (Mode == "" and Mode == "ssh_trust")
+	// to guarantee ephemeral delivery bootstrap helpers NEVER pollute the global Agent pool.
+	executionMu.Lock()
+	seedDB, err := srv.readExecutions()
+	if err != nil {
+		executionMu.Unlock()
+		t.Fatalf("readExecutions failed: %v", err)
+	}
+	if seedDB.Agents == nil {
+		seedDB.Agents = map[string]targetAgent{}
+	}
+	seedDB.Agents["legacy-ssh-1"] = targetAgent{
+		ID:      "legacy-ssh-1",
+		Cluster: "auto-etcd-ha",
+		Mode:    "",
+		Host:    "etcd-2",
+		IP:      "172.26.198.118",
+		Desired: "active",
+	}
+	seedDB.Agents["legacy-ssh-2"] = targetAgent{
+		ID:      "legacy-ssh-2",
+		Cluster: "pg-global-ag",
+		Mode:    "ssh_trust",
+		Host:    "db-g1",
+		IP:      "10.30.0.11",
+		Desired: "active",
+	}
+	if err := srv.saveExecutions(seedDB); err != nil {
+		executionMu.Unlock()
+		t.Fatalf("saveExecutions failed: %v", err)
+	}
+	executionMu.Unlock()
+
+	// Import two clusters sharing host IP 10.30.0.11 to verify Host-First cross-cluster IP auto-matching.
+	for _, imp := range []string{
+		`{"id":"pg-global-ag","component":"postgresql","display_name":"PostgreSQL","version":"17","exact_version":"17.11","platform":"ubuntu2404","deploy_method":"systemd","hosts":[{"name":"db-g1","ip":"10.30.0.11","role":"primary"}]}`,
+		`{"id":"etcd-global-ag","component":"etcd","display_name":"etcd","version":"3.5","exact_version":"3.5.17","platform":"ubuntu2404","deploy_method":"systemd","hosts":[{"name":"etcd-g1","ip":"10.30.0.11","role":"member"}]}`,
+	} {
+		if rr := storeRequest(srv, "POST", "/api/clusters/import", strings.NewReader(imp), cookie, csrf); rr.Code != 200 && rr.Code != 201 {
+			t.Fatalf("import failed: %d %s", rr.Code, rr.Body.String())
+		}
+	}
+
+	// Before enrolling any direct agent, GET /api/executions/agents must return empty (ssh_trust excluded).
+	emptyRR := storeRequest(srv, "GET", "/api/executions/agents", nil, cookie, "")
+	if emptyRR.Code != 200 {
+		t.Fatalf("GET /api/executions/agents failed: %d %s", emptyRR.Code, emptyRR.Body.String())
+	}
+	var emptyList []automationAgentView
+	_ = json.Unmarshal(emptyRR.Body.Bytes(), &emptyList)
+	if len(emptyList) != 0 {
+		t.Fatalf("expected legacy ssh_trust agents excluded, got %+v", emptyList)
+	}
+
+	// Host-First enrollment directly in Execution Center (POST /api/executions/agents).
+	enrRR := storeRequest(srv, "POST", "/api/executions/agents", strings.NewReader(`{"host":"db-g1","ip":"10.30.0.11","allow_mutating":true}`), cookie, csrf)
 	if enrRR.Code != 201 {
-		t.Fatalf("enroll agent failed: %d %s", enrRR.Code, enrRR.Body.String())
+		t.Fatalf("global enroll agent failed: %d %s", enrRR.Code, enrRR.Body.String())
 	}
 	var enr struct {
-		Agent targetAgent `json:"agent"`
+		Agent           automationAgentView `json:"agent"`
+		EnrollmentToken string              `json:"enrollment_token"`
 	}
 	_ = json.Unmarshal(enrRR.Body.Bytes(), &enr)
+	if enr.Agent.Mode != "direct" || enr.Agent.Cluster != "" || len(enr.EnrollmentToken) < 40 {
+		t.Fatalf("unexpected global agent response: %+v", enr)
+	}
 
+	// Duplicate active IP enrollment from either global or cluster endpoint must return 409.
+	dupGlobalRR := storeRequest(srv, "POST", "/api/executions/agents", strings.NewReader(`{"host":"db-g1-dup","ip":"10.30.0.11"}`), cookie, csrf)
+	if dupGlobalRR.Code != 409 {
+		t.Fatalf("expected 409 for duplicate global IP, got %d %s", dupGlobalRR.Code, dupGlobalRR.Body.String())
+	}
+	dupClusterRR := storeRequest(srv, "POST", "/api/clusters/pg-global-ag/automation/agents", strings.NewReader(`{"host":"db-g1","ip":"10.30.0.11"}`), cookie, csrf)
+	if dupClusterRR.Code != 409 {
+		t.Fatalf("expected 409 for duplicate cluster IP already in global pool, got %d %s", dupClusterRR.Code, dupClusterRR.Body.String())
+	}
+
+	// Global bundle endpoint rejects wrong token with 403 and validates URL scheme.
+	badTokBundle := storeRequest(srv, "POST", "/api/executions/agents/"+enr.Agent.ID+"/bundle", strings.NewReader(`{"token":"`+strings.Repeat("a", 44)+`","url":"https://10.30.0.5:8443"}`), cookie, csrf)
+	if badTokBundle.Code != 403 {
+		t.Fatalf("expected 403 for wrong bundle token, got %d %s", badTokBundle.Code, badTokBundle.Body.String())
+	}
+
+	// GET /api/executions/agents returns only the 1 persistent direct agent and lists BOTH matched clusters!
 	listRR := storeRequest(srv, "GET", "/api/executions/agents", nil, cookie, "")
 	if listRR.Code != 200 {
 		t.Fatalf("GET /api/executions/agents failed: %d %s", listRR.Code, listRR.Body.String())
 	}
 	var list []automationAgentView
 	_ = json.Unmarshal(listRR.Body.Bytes(), &list)
-	if len(list) != 1 || list[0].ID != enr.Agent.ID || list[0].Cluster != "pg-global-ag" {
+	if len(list) != 1 || list[0].ID != enr.Agent.ID || list[0].Cluster != "" {
 		t.Fatalf("unexpected global agents list: %+v", list)
+	}
+	if len(list[0].MatchedClusters) != 2 || list[0].MatchedClusters[0] != "etcd-global-ag" || list[0].MatchedClusters[1] != "pg-global-ag" {
+		t.Fatalf("expected matched_clusters [etcd-global-ag pg-global-ag], got %+v", list[0].MatchedClusters)
+	}
+
+	// Both clusters' Automation summary automatically match this global direct agent (and exclude legacy ssh_trust).
+	for _, cid := range []string{"pg-global-ag", "etcd-global-ag"} {
+		sumRR := storeRequest(srv, "GET", "/api/clusters/"+cid+"/automation", nil, cookie, "")
+		if sumRR.Code != 200 {
+			t.Fatalf("GET automation for %s failed: %d %s", cid, sumRR.Code, sumRR.Body.String())
+		}
+		var sum struct {
+			Agents []automationAgentView `json:"agents"`
+		}
+		_ = json.Unmarshal(sumRR.Body.Bytes(), &sum)
+		if len(sum.Agents) != 1 || sum.Agents[0].ID != enr.Agent.ID {
+			t.Fatalf("expected cluster %s to auto-match global direct agent %s, got %+v", cid, enr.Agent.ID, sum.Agents)
+		}
 	}
 
 	// Toggle allow_mutating=false globally
@@ -470,5 +557,17 @@ func TestGlobalExecutionAgentsAPI(t *testing.T) {
 	}
 	if stored := execData.Agents[enr.Agent.ID]; stored.EnrollmentHash != "" {
 		t.Fatalf("expected enrollment_hash cleared after global revoke, got %q", stored.EnrollmentHash)
+	}
+
+	// Delete revoked direct agent record cleanly
+	delRR := storeRequest(srv, "PATCH", "/api/executions/agents", strings.NewReader(`{"id":"`+enr.Agent.ID+`","action":"delete"}`), cookie, csrf)
+	if delRR.Code != 200 {
+		t.Fatalf("PATCH delete failed: %d %s", delRR.Code, delRR.Body.String())
+	}
+	afterDelRR := storeRequest(srv, "GET", "/api/executions/agents", nil, cookie, "")
+	var afterDel []automationAgentView
+	_ = json.Unmarshal(afterDelRR.Body.Bytes(), &afterDel)
+	if len(afterDel) != 0 {
+		t.Fatalf("expected 0 direct agents after delete, got %+v", afterDel)
 	}
 }

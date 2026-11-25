@@ -173,7 +173,8 @@ type automationNodeView struct {
 
 type automationAgentView struct {
 	targetAgent
-	Online bool `json:"online"`
+	Online          bool     `json:"online"`
+	MatchedClusters []string `json:"matched_clusters,omitempty"`
 }
 
 var (
@@ -449,9 +450,112 @@ func (s *storeServer) clusterAutomationHostsFor(f clusterFacts, cfg clusterAutom
 	return out
 }
 
+// clusterIPIndex maps each normalized host IP across clusters visible to user
+// to the sorted list of cluster IDs referencing that host. Callers must NOT hold executionMu.
+func (s *storeServer) clusterIPIndex(user string) map[string][]string {
+	vis := s.visibleJobs(user)
+	byCluster := map[string][]storeJob{}
+	s.mu.Lock()
+	for _, j := range s.jobs {
+		if j.State != "succeeded" || !vis(j.Owner) {
+			continue
+		}
+		cid := j.ClusterID
+		if cid == "" {
+			cid = j.ID
+		}
+		byCluster[cid] = append(byCluster[cid], j)
+	}
+	s.mu.Unlock()
+
+	ipSet := map[string]map[string]bool{}
+	add := func(rawIP, cid string) {
+		p := net.ParseIP(strings.TrimSpace(rawIP))
+		if p == nil || cid == "" {
+			return
+		}
+		ip := p.String()
+		if ipSet[ip] == nil {
+			ipSet[ip] = map[string]bool{}
+		}
+		ipSet[ip][cid] = true
+	}
+
+	for cid, jobs := range byCluster {
+		cur, ok := clusterCurrent(jobs)
+		if !ok && len(jobs) > 0 {
+			cur = jobs[len(jobs)-1]
+		}
+		if spec := s.readSpec(cur.ID); spec != nil {
+			for _, h := range spec.Hosts {
+				add(h.IP, cid)
+			}
+		}
+		cfg := s.loadClusterAutomationConfig(cid)
+		for _, ch := range cfg.CustomHosts {
+			add(ch.IP, cid)
+		}
+	}
+
+	out := make(map[string][]string, len(ipSet))
+	for ip, cids := range ipSet {
+		list := make([]string, 0, len(cids))
+		for cid := range cids {
+			list = append(list, cid)
+		}
+		sort.Strings(list)
+		out[ip] = list
+	}
+	return out
+}
+
+func mergeMatchedClusters(a targetAgent, ipClusters map[string][]string) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	add := func(cid string) {
+		cid = strings.TrimSpace(cid)
+		if cid == "" || seen[cid] {
+			return
+		}
+		seen[cid] = true
+		out = append(out, cid)
+	}
+	ipKey := strings.TrimSpace(a.IP)
+	if p := net.ParseIP(ipKey); p != nil {
+		ipKey = p.String()
+	}
+	for _, cid := range ipClusters[ipKey] {
+		add(cid)
+	}
+	if a.Cluster != "" {
+		add(a.Cluster)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	sort.Strings(out)
+	return out
+}
+
+func hostIPMap(hosts []clusterAutomationHost) map[string]bool {
+	m := make(map[string]bool, len(hosts))
+	for _, h := range hosts {
+		raw := strings.TrimSpace(h.IP)
+		if raw == "" {
+			continue
+		}
+		m[raw] = true
+		if p := net.ParseIP(raw); p != nil {
+			m[p.String()] = true
+		}
+	}
+	return m
+}
+
 func (s *storeServer) buildClusterAutomationSummary(r *http.Request, f clusterFacts) map[string]any {
 	cfg := s.loadClusterAutomationConfig(f.ID)
 	hosts := s.clusterAutomationHostsFor(f, cfg)
+	hostIPs := hostIPMap(hosts)
 
 	executionMu.Lock()
 	d, _ := s.readExecutions()
@@ -478,7 +582,10 @@ func (s *storeServer) buildClusterAutomationSummary(r *http.Request, f clusterFa
 
 	agents := []automationAgentView{}
 	for _, a := range d.Agents {
-		if a.Cluster != f.ID {
+		if a.Mode != "direct" {
+			continue
+		}
+		if a.Cluster != f.ID && !hostIPs[a.IP] {
 			continue
 		}
 		pub := localizeTargetAgent(wLangFromReq(r), publicTargetAgent(a))
@@ -725,6 +832,22 @@ func revokeTargetAgent(d *executionDB, a *targetAgent) {
 }
 
 func (s *storeServer) handleGlobalExecutionAgents(w http.ResponseWriter, r *http.Request, session storeSession) {
+	rest := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/executions/agents"), "/")
+	if rest != "" {
+		parts := strings.Split(rest, "/")
+		if len(parts) == 2 && parts[1] == "bundle" && r.Method == "POST" {
+			s.writeDirectTargetAgentBundle(w, r, session, "", parts[0])
+			return
+		}
+		s.fail(w, 404, "接口不存在")
+		return
+	}
+
+	var ipClusters map[string][]string
+	if r.Method == "GET" || r.Method == "POST" || r.Method == "PATCH" {
+		ipClusters = s.clusterIPIndex(session.User)
+	}
+
 	executionMu.Lock()
 	defer executionMu.Unlock()
 	d, err := s.readExecutions()
@@ -732,15 +855,24 @@ func (s *storeServer) handleGlobalExecutionAgents(w http.ResponseWriter, r *http
 		s.fail(w, 500, err.Error())
 		return
 	}
+	if d.Agents == nil {
+		d.Agents = map[string]targetAgent{}
+	}
 	lang := reqLang(r)
 	switch r.Method {
 	case "GET":
 		out := make([]automationAgentView, 0, len(d.Agents))
 		for _, a := range d.Agents {
+			// Only persistent Direct Target Agents belong in the platform Agent pool;
+			// ephemeral per-delivery ssh_trust bootstrap records stay internal to delivery runs.
+			if a.Mode != "direct" {
+				continue
+			}
 			pub := localizeTargetAgent(lang, publicTargetAgent(a))
 			out = append(out, automationAgentView{
-				targetAgent: pub,
-				Online:      targetAgentOnline(a),
+				targetAgent:     pub,
+				Online:          targetAgentOnline(a),
+				MatchedClusters: mergeMatchedClusters(a, ipClusters),
 			})
 		}
 		sort.Slice(out, func(i, j int) bool {
@@ -752,16 +884,82 @@ func (s *storeServer) handleGlobalExecutionAgents(w http.ResponseWriter, r *http
 			if out[i].Online != out[j].Online {
 				return out[i].Online
 			}
-			if out[i].Cluster != out[j].Cluster {
-				return out[i].Cluster < out[j].Cluster
+			ih := strings.ToLower(out[i].Host)
+			jh := strings.ToLower(out[j].Host)
+			if ih != jh {
+				return ih < jh
 			}
 			return out[i].Created > out[j].Created
 		})
 		s.writeJSON(w, 200, out)
+	case "POST":
+		var req struct {
+			Host          string `json:"host"`
+			IP            string `json:"ip"`
+			AllowMutating *bool  `json:"allow_mutating"`
+			Cluster       string `json:"cluster"`
+		}
+		if decodeBody(w, r, 8192, &req) != nil {
+			s.fail(w, 400, "请求参数无效")
+			return
+		}
+		targetHost := strings.TrimSpace(req.Host)
+		parsedIP := net.ParseIP(strings.TrimSpace(req.IP))
+		if targetHost == "" || parsedIP == nil {
+			s.failBi(w, 400, "请填写有效的目标主机名称和 IP 地址", "Please enter a valid target host name and IP address")
+			return
+		}
+		targetHost = truncRunes(targetHost, 80)
+		targetIP := parsedIP.String()
+		for id, existing := range d.Agents {
+			if existing.Mode == "direct" && existing.IP == targetIP && existing.Desired == "active" {
+				exp, _ := time.Parse(time.RFC3339Nano, existing.Expires)
+				if existing.TokenHash != "" || time.Now().Before(exp) {
+					s.failBi(w, 409,
+						fmt.Sprintf("主机 %s (%s) 已接入直连 Agent，请直接使用或先撤销旧配置", existing.Host, existing.IP),
+						fmt.Sprintf("Host %s (%s) already has an active Direct Target Agent", existing.Host, existing.IP))
+					return
+				}
+				delete(d.Agents, id)
+			}
+		}
+		allowMut := true
+		if req.AllowMutating != nil {
+			allowMut = *req.AllowMutating
+		}
+		token := randomStoreToken(32)
+		a := targetAgent{
+			ID:             randomStoreToken(12),
+			Cluster:        strings.TrimSpace(req.Cluster),
+			Mode:           "direct",
+			Host:           targetHost,
+			IP:             targetIP,
+			AllowMutating:  allowMut,
+			Created:        executionNow(),
+			Expires:        time.Now().Add(2 * time.Hour).UTC().Format(time.RFC3339Nano),
+			EnrollmentHash: digest([]byte(token)),
+			Desired:        "active",
+		}
+		d.Agents[a.ID] = a
+		if err := s.saveExecutions(d); err != nil {
+			s.fail(w, 500, "保存直连 Agent 配置失败")
+			return
+		}
+		s.auditReq(r, "execution-agent-enroll", session.User, fmt.Sprintf("%s %s (%s)", a.ID, a.Host, a.IP))
+		pub := localizeTargetAgent(lang, publicTargetAgent(a))
+		s.writeJSON(w, 201, map[string]any{
+			"agent": automationAgentView{
+				targetAgent:     pub,
+				Online:          false,
+				MatchedClusters: mergeMatchedClusters(a, ipClusters),
+			},
+			"enrollment_token": token,
+			"bootstrap":        s.executionBootstrapInfo(r),
+		})
 	case "PATCH":
 		var req struct {
 			ID            string `json:"id"`
-			Action        string `json:"action"` // update | revoke
+			Action        string `json:"action"` // update | revoke | delete
 			AllowMutating *bool  `json:"allow_mutating"`
 		}
 		if decodeBody(w, r, 4096, &req) != nil || strings.TrimSpace(req.ID) == "" {
@@ -769,21 +967,26 @@ func (s *storeServer) handleGlobalExecutionAgents(w http.ResponseWriter, r *http
 			return
 		}
 		a, ok := d.Agents[req.ID]
-		if !ok {
+		if !ok || a.Mode != "direct" {
 			s.fail(w, 404, "目标 Agent 不存在")
 			return
 		}
 		action := strings.TrimSpace(req.Action)
 		switch {
-		case action == "revoke":
-			if a.Mode != "direct" {
-				for _, run := range d.Runs {
-					if run.Node == a.Node && run.Cluster == a.Cluster && activeExecution(run) {
-						s.fail(w, 409, "该集群仍有执行批次，请先暂停并处理现场任务")
-						return
-					}
-				}
+		case action == "delete":
+			if a.Desired == "active" && targetAgentOnline(a) {
+				s.failBi(w, 409, "该目标机 Agent 当前在线，请先撤销授权再删除", "Target Agent is online; revoke it before deleting")
+				return
 			}
+			delete(d.Agents, a.ID)
+			if err := s.saveExecutions(d); err != nil {
+				s.fail(w, 500, "删除 Agent 记录失败")
+				return
+			}
+			s.auditReq(r, "execution-agent-delete", session.User, fmt.Sprintf("%s %s (%s)", a.ID, a.Host, a.IP))
+			s.writeJSON(w, 200, map[string]any{"deleted": a.ID})
+			return
+		case action == "revoke":
 			revokeTargetAgent(&d, &a)
 		case (action == "" || action == "update") && req.AllowMutating != nil:
 			a.AllowMutating = *req.AllowMutating
@@ -797,19 +1000,21 @@ func (s *storeServer) handleGlobalExecutionAgents(w http.ResponseWriter, r *http
 			return
 		}
 		if action == "revoke" {
-			s.auditReq(r, "execution-agent-revoke", session.User, fmt.Sprintf("%s %s (%s)", a.Cluster, a.Host, a.IP))
+			s.auditReq(r, "execution-agent-revoke", session.User, fmt.Sprintf("%s %s (%s)", a.ID, a.Host, a.IP))
 			pub := localizeTargetAgent(lang, publicTargetAgent(a))
 			s.writeJSON(w, 200, automationAgentView{
-				targetAgent: pub,
-				Online:      false,
+				targetAgent:     pub,
+				Online:          false,
+				MatchedClusters: mergeMatchedClusters(a, ipClusters),
 			})
 			return
 		}
-		s.auditReq(r, "execution-agent-update", session.User, fmt.Sprintf("%s %s allow_mutating=%v", a.Cluster, a.Host, a.AllowMutating))
+		s.auditReq(r, "execution-agent-update", session.User, fmt.Sprintf("%s %s allow_mutating=%v", a.ID, a.Host, a.AllowMutating))
 		pub := localizeTargetAgent(lang, publicTargetAgent(a))
 		s.writeJSON(w, 200, automationAgentView{
-			targetAgent: pub,
-			Online:      targetAgentOnline(a),
+			targetAgent:     pub,
+			Online:          targetAgentOnline(a),
+			MatchedClusters: mergeMatchedClusters(a, ipClusters),
 		})
 	default:
 		s.fail(w, 405, "不支持的请求方式")
@@ -817,6 +1022,10 @@ func (s *storeServer) handleGlobalExecutionAgents(w http.ResponseWriter, r *http
 }
 
 func (s *storeServer) handleClusterDirectAgents(w http.ResponseWriter, r *http.Request, session storeSession, f clusterFacts) {
+	cfg := s.loadClusterAutomationConfig(f.ID)
+	hosts := s.clusterAutomationHostsFor(f, cfg)
+	hostIPs := hostIPMap(hosts)
+
 	executionMu.Lock()
 	defer executionMu.Unlock()
 	d, err := s.readExecutions()
@@ -830,9 +1039,12 @@ func (s *storeServer) handleClusterDirectAgents(w http.ResponseWriter, r *http.R
 	if r.Method == "GET" {
 		out := []automationAgentView{}
 		for _, a := range d.Agents {
-			if a.Cluster == f.ID {
+			if a.Mode != "direct" {
+				continue
+			}
+			if a.Cluster == f.ID || hostIPs[a.IP] {
 				out = append(out, automationAgentView{
-					targetAgent: localizeTargetAgent(wLang(w), publicTargetAgent(a)),
+					targetAgent: localizeTargetAgent(wLangFromReq(r), publicTargetAgent(a)),
 					Online:      targetAgentOnline(a),
 				})
 			}
@@ -851,8 +1063,6 @@ func (s *storeServer) handleClusterDirectAgents(w http.ResponseWriter, r *http.R
 			s.fail(w, 400, "请求参数无效")
 			return
 		}
-		cfg := s.loadClusterAutomationConfig(f.ID)
-		hosts := s.clusterAutomationHostsFor(f, cfg)
 		targetHost := strings.TrimSpace(req.Host)
 		targetIP := strings.TrimSpace(req.IP)
 		for _, h := range hosts {
@@ -873,12 +1083,14 @@ func (s *storeServer) handleClusterDirectAgents(w http.ResponseWriter, r *http.R
 		}
 		targetIP = parsedIP.String()
 
-		// Cleanly supersede stale un-enrolled expired direct agents for the same IP; prevent duplicate active direct agents.
+		// Global Host-First deduplication: 1 physical/VM IP = 1 active Direct Target Agent across the platform.
 		for id, a := range d.Agents {
-			if a.Cluster == f.ID && a.Mode == "direct" && a.IP == targetIP && a.Desired == "active" {
+			if a.Mode == "direct" && a.IP == targetIP && a.Desired == "active" {
 				exp, _ := time.Parse(time.RFC3339Nano, a.Expires)
 				if a.TokenHash != "" || time.Now().Before(exp) {
-					s.fail(w, 409, "该目标机已存在有效直连 Agent 配置，请使用已有配置或先撤销旧配置")
+					s.failBi(w, 409,
+						fmt.Sprintf("目标机 %s (%s) 已在执行中心接入直连 Agent，无需重复签发", a.Host, a.IP),
+						fmt.Sprintf("Host %s (%s) already has an active Direct Target Agent", a.Host, a.IP))
 					return
 				}
 				delete(d.Agents, id)
@@ -891,10 +1103,8 @@ func (s *storeServer) handleClusterDirectAgents(w http.ResponseWriter, r *http.R
 		token := randomStoreToken(32)
 		a := targetAgent{
 			ID:             randomStoreToken(12),
-			Job:            f.Current.ID,
-			Cluster:        f.ID,
 			Mode:           "direct",
-			Host:           targetHost,
+			Host:           truncRunes(targetHost, 80),
 			IP:             targetIP,
 			AllowMutating:  allowMut,
 			Created:        executionNow(),
@@ -926,7 +1136,7 @@ func (s *storeServer) handleClusterDirectAgents(w http.ResponseWriter, r *http.R
 			return
 		}
 		a, ok := d.Agents[req.ID]
-		if !ok || a.Cluster != f.ID {
+		if !ok || a.Mode != "direct" || (a.Cluster != f.ID && !hostIPs[a.IP]) {
 			s.fail(w, 404, "目标 Agent 不存在")
 			return
 		}
@@ -938,7 +1148,7 @@ func (s *storeServer) handleClusterDirectAgents(w http.ResponseWriter, r *http.R
 				return
 			}
 			s.auditReq(r, "target-agent-revoke", session.User, a.ID+" "+f.ID)
-			s.writeJSON(w, 200, automationAgentView{targetAgent: localizeTargetAgent(wLang(w), publicTargetAgent(a)), Online: false})
+			s.writeJSON(w, 200, automationAgentView{targetAgent: localizeTargetAgent(wLangFromReq(r), publicTargetAgent(a)), Online: false})
 			return
 		}
 		if req.AllowMutating != nil {
@@ -1042,6 +1252,10 @@ fi
 }
 
 func (s *storeServer) handleClusterTargetAgentBundle(w http.ResponseWriter, r *http.Request, session storeSession, f clusterFacts, agentID string) {
+	s.writeDirectTargetAgentBundle(w, r, session, f.ID, agentID)
+}
+
+func (s *storeServer) writeDirectTargetAgentBundle(w http.ResponseWriter, r *http.Request, session storeSession, clusterScope, agentID string) {
 	var req struct {
 		Token     string `json:"token"`
 		URL       string `json:"url"`
@@ -1070,7 +1284,9 @@ func (s *storeServer) handleClusterTargetAgentBundle(w http.ResponseWriter, r *h
 		return
 	}
 	a, ok := d.Agents[agentID]
-	if !ok || a.Cluster != f.ID || a.Desired != "active" || !constantStoreEqual(digest([]byte(req.Token)), a.EnrollmentHash) {
+	if !ok || a.Mode != "direct" || a.Desired != "active" ||
+		(clusterScope != "" && a.Cluster != "" && a.Cluster != clusterScope) ||
+		!constantStoreEqual(digest([]byte(req.Token)), a.EnrollmentHash) {
 		s.failBi(w, 403, "接入令牌校验失败或已过期，请重新生成目标机 Agent", "Enrollment token verification failed or expired")
 		return
 	}
@@ -1109,7 +1325,11 @@ func (s *storeServer) handleClusterTargetAgentBundle(w http.ResponseWriter, r *h
 	fileName := dirName + ".tar.gz"
 	nowTime := time.Now().UTC()
 
-	s.auditReq(r, "cluster-agent-bundle", session.User, fmt.Sprintf("%s %s %s", f.ID, a.ID, hubURL))
+	if clusterScope == "" {
+		s.auditReq(r, "execution-agent-bundle", session.User, fmt.Sprintf("%s %s %s", a.ID, a.Host, hubURL))
+	} else {
+		s.auditReq(r, "cluster-agent-bundle", session.User, fmt.Sprintf("%s %s %s", clusterScope, a.ID, hubURL))
+	}
 	w.Header().Set("Content-Type", "application/gzip")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", fileName))
 	w.Header().Set("Cache-Control", "no-store")
@@ -1285,11 +1505,12 @@ func (s *storeServer) enqueueRehearsalExecTask(spec enqueueRehearsalTaskSpec) (r
 		}
 		nodeName = n.Name
 	} else {
-		// Direct Target Agent mode: every target host must resolve to an online active targetAgent for this cluster
+		// Direct Target Agent mode: every target host resolves to an online active Direct Target Agent
+		// from the global host pool (or a legacy cluster-scoped direct agent matching this IP).
 		for i := range targets {
 			var matched *targetAgent
 			for _, a := range execDB.Agents {
-				if a.Cluster != spec.ClusterID || a.Desired != "active" {
+				if a.Mode != "direct" || a.Desired != "active" {
 					continue
 				}
 				if targets[i].AgentID != "" && a.ID == targets[i].AgentID {
@@ -1297,15 +1518,15 @@ func (s *storeServer) enqueueRehearsalExecTask(spec enqueueRehearsalTaskSpec) (r
 					matched = &cp
 					break
 				}
-				if a.IP == targets[i].IP && (a.Mode == "direct" || matched == nil) {
+				if a.IP == targets[i].IP && (matched == nil || (targetAgentOnline(a) && !targetAgentOnline(*matched))) {
 					cp := a
 					matched = &cp
 				}
 			}
 			if matched == nil {
 				return rehearsalExecTask{}, 409, tr(spec.Lang,
-					fmt.Sprintf("目标主机 %s (%s) 尚未部署直连 Agent，请先在自动化设置中为该主机生成并启动 Agent", targets[i].Host, targets[i].IP),
-					fmt.Sprintf("Target host %s (%s) has no enrolled Target Agent", targets[i].Host, targets[i].IP))
+					fmt.Sprintf("目标主机 %s (%s) 尚未接入直连 Agent，请先在「执行中心 → Agent」为该主机接入并启动 Agent", targets[i].Host, targets[i].IP),
+					fmt.Sprintf("Target host %s (%s) has no enrolled Direct Target Agent; add it in Execution Center → Agent", targets[i].Host, targets[i].IP))
 			}
 			if !targetAgentOnline(*matched) {
 				return rehearsalExecTask{}, 409, tr(spec.Lang,
@@ -1751,17 +1972,24 @@ func (s *storeServer) pollRehearsalTaskForNode(n executionNode, heartbeat bool) 
 }
 
 func (s *storeServer) pollRehearsalTaskForAgent(a targetAgent, heartbeat bool) (*rehearsalExecDispatch, string) {
+	if a.Mode != "direct" {
+		return nil, ""
+	}
 	rehearsalExecMu.Lock()
 	defer rehearsalExecMu.Unlock()
 	active := s.listAllActiveRehearsalExecTasks()
 	cancelID := ""
 	var dispatch *rehearsalExecDispatch
 	for _, t := range active {
-		if t.Transport != "agent" || t.ClusterID != a.Cluster {
+		if t.Transport != "agent" {
 			continue
 		}
 		for idx, tg := range t.Targets {
-			if tg.AgentID != a.ID && tg.IP != a.IP {
+			if tg.AgentID != "" {
+				if tg.AgentID != a.ID {
+					continue
+				}
+			} else if tg.IP != a.IP {
 				continue
 			}
 			if idx >= len(t.Results) {

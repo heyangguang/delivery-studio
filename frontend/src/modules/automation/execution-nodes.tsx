@@ -17,11 +17,9 @@ import {
   IconBook,
   IconCheck,
   IconCheckCircle,
-  IconCommand,
   IconCopy,
   IconDelete,
   IconDesktop,
-  IconDown,
   IconDownload,
   IconExclamationCircle,
   IconInfoCircle,
@@ -29,7 +27,6 @@ import {
   IconPlus,
   IconRefresh,
   IconRight,
-  IconSafe,
   IconSearch,
   IconThunderbolt,
 } from "@arco-design/web-react/icon";
@@ -51,6 +48,7 @@ import { bi, biv, getLang, useLang, withLang } from "../../app/i18n";
 import {
   AutomationAgentView,
   ExecutionNode,
+  consumeAgentEnrollPrefill,
   isExecutionNodeOnline,
   nodeConnection,
 } from "./execution-types";
@@ -60,6 +58,8 @@ import "./execution-center.css";
 import "./rehearsal-automation.css";
 
 type Registration = { node: ExecutionNode; token: string };
+type TargetRegistration = { agent: AutomationAgentView; token: string };
+type EnrollRole = "controller" | "target";
 type Guide = "install" | "maintain";
 type StatusFilter = "all" | "online" | "offline" | "disabled";
 type RoleFilter = "all" | "controller" | "target" | "upgrade";
@@ -351,9 +351,10 @@ export function ExecutionNodes({
   const [updatingAgent, setUpdatingAgent] = useState("");
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<SelectedItem | null>(null);
-  const [collapsedClusters, setCollapsedClusters] = useState<Record<string, boolean>>({});
   const [mobileDetail, setMobileDetail] = useState(false);
+  const [enrollRole, setEnrollRole] = useState<EnrollRole>("controller");
   const [registration, setRegistration] = useState<Registration | null>(null);
+  const [targetRegistration, setTargetRegistration] = useState<TargetRegistration | null>(null);
   const [downloaded, setDownloaded] = useState(false);
   const [hubUrl, setHubUrl] = useState(() => location.origin);
   const [includeCA, setIncludeCA] = useState(true);
@@ -361,6 +362,9 @@ export function ExecutionNodes({
   const [name, setName] = useState("");
   const [kind, setKind] = useState<"independent" | "embedded">("independent");
   const [controller, setController] = useState("");
+  const [targetHost, setTargetHost] = useState("");
+  const [targetIP, setTargetIP] = useState("");
+  const [targetAllowMutating, setTargetAllowMutating] = useState(true);
   const [createError, setCreateError] = useState("");
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -417,7 +421,7 @@ export function ExecutionNodes({
 
   const updateGlobalAgent = async (
     ag: AutomationAgentView,
-    payload: { action: "update" | "revoke"; allow_mutating?: boolean },
+    payload: { action: "update" | "revoke" | "delete"; allow_mutating?: boolean },
   ) => {
     if (updatingAgentLockRef.current) return;
     updatingAgentLockRef.current = ag.id;
@@ -427,11 +431,18 @@ export function ExecutionNodes({
         method: "PATCH",
         body: JSON.stringify({ id: ag.id, ...payload }),
       });
+      if (payload.action === "delete" && targetRegistration?.agent.id === ag.id) {
+        setTargetRegistration(null);
+        setDownloaded(false);
+        setBundleError("");
+      }
       await load();
       Message.success(
-        payload.action === "revoke"
-          ? bi(`已撤销目标机「${ag.host}」的 Agent 授权`, `Revoked agent on "${ag.host}"`)
-          : bi(`已更新目标机「${ag.host}」写操作权限`, `Updated write permission for "${ag.host}"`),
+        payload.action === "delete"
+          ? bi(`已删除目标机「${ag.host}」的 Agent 记录`, `Deleted target agent "${ag.host}"`)
+          : payload.action === "revoke"
+            ? bi(`已撤销目标机「${ag.host}」的 Agent 授权`, `Revoked agent on "${ag.host}"`)
+            : bi(`已更新目标机「${ag.host}」写操作权限`, `Updated write permission for "${ag.host}"`),
       );
     } catch (e) {
       Message.error((e as Error).message);
@@ -460,16 +471,41 @@ export function ExecutionNodes({
   };
 
   const all = nodes || [];
+  const allAgents = agents || [];
   const registeredNode = all.find((n) => n.id === registration?.node.id);
   const registeredOnline = !!(
     registeredNode && isExecutionNodeOnline(registeredNode)
   );
-  const fastPoll = !!(open && registration && !registeredOnline);
+  const registeredTarget = allAgents.find((a) => a.id === targetRegistration?.agent.id);
+  const targetRegisteredOnline = !!(
+    registeredTarget && registeredTarget.desired === "active" && registeredTarget.online
+  );
+  const activeStep2 = !!(registration || targetRegistration);
+  const activeStep2Online = registration ? registeredOnline : targetRegisteredOnline;
+  const fastPoll = !!(open && activeStep2 && !activeStep2Online);
 
   useEffect(() => {
     mounted.current = true;
     void load();
     void loadBootInfo();
+    const prefill = consumeAgentEnrollPrefill();
+    if (prefill && canManage) {
+      setEnrollRole(prefill.role === "controller" ? "controller" : "target");
+      if (prefill.role === "controller") {
+        setName(prefill.host || "");
+        setController(prefill.ip || "");
+      } else {
+        setTargetHost(prefill.host || "");
+        setTargetIP(prefill.ip || "");
+        setTargetAllowMutating(true);
+      }
+      setRegistration(null);
+      setTargetRegistration(null);
+      setDownloaded(false);
+      setCreateError("");
+      setBundleError("");
+      setOpen(true);
+    }
     return () => {
       mounted.current = false;
     };
@@ -490,16 +526,34 @@ export function ExecutionNodes({
     };
   }, [fastPoll]);
 
-  const begin = () => {
-    if (!registration) {
+  const begin = (preferredRole?: EnrollRole) => {
+    if (!registration && !targetRegistration) {
+      const nextRole: EnrollRole =
+        preferredRole ?? (roleFilter === "target" ? "target" : "controller");
+      setEnrollRole(nextRole);
       setName("");
       setKind("independent");
       setController("");
+      setTargetHost("");
+      setTargetIP("");
+      setTargetAllowMutating(true);
       setCreateError("");
       setBundleError("");
     }
     void loadBootInfo();
     setOpen(true);
+  };
+
+  const enrollNextTarget = () => {
+    setTargetRegistration(null);
+    setRegistration(null);
+    setEnrollRole("target");
+    setTargetHost("");
+    setTargetIP("");
+    setTargetAllowMutating(true);
+    setDownloaded(false);
+    setCreateError("");
+    setBundleError("");
   };
 
   const create = async () => {
@@ -508,18 +562,48 @@ export function ExecutionNodes({
     setBusy(true);
     setCreateError("");
     try {
-      const result = await api<Registration>("/api/settings/execution-nodes", {
-        method: "POST",
-        body: JSON.stringify({
-          name: name.trim(),
-          kind,
-          controller_ip: controller.trim(),
-        }),
-      });
-      setRegistration(result);
-      setDownloaded(false);
-      setBundleError("");
-      void load();
+      if (enrollRole === "target") {
+        const res = await api<{
+          agent: AutomationAgentView;
+          enrollment_token: string;
+          bootstrap?: BootstrapInfo;
+        }>("/api/executions/agents", {
+          method: "POST",
+          body: JSON.stringify({
+            host: targetHost.trim(),
+            ip: targetIP.trim(),
+            allow_mutating: targetAllowMutating,
+          }),
+        });
+        setTargetRegistration({ agent: res.agent, token: res.enrollment_token });
+        setSelected({ role: "target", id: res.agent.id });
+        if (res.bootstrap) {
+          setBootInfo(res.bootstrap);
+          setIncludeCA(res.bootstrap.ca_available);
+          if (res.bootstrap.is_loopback && res.bootstrap.suggested_urls.length > 0) {
+            setHubUrl(res.bootstrap.suggested_urls[0]);
+          } else if (res.bootstrap.origin) {
+            setHubUrl(res.bootstrap.origin);
+          }
+        }
+        setDownloaded(false);
+        setBundleError("");
+        void load();
+      } else {
+        const result = await api<Registration>("/api/settings/execution-nodes", {
+          method: "POST",
+          body: JSON.stringify({
+            name: name.trim(),
+            kind,
+            controller_ip: controller.trim(),
+          }),
+        });
+        setRegistration(result);
+        setSelected({ role: "controller", id: result.node.id });
+        setDownloaded(false);
+        setBundleError("");
+        void load();
+      }
     } catch (e) {
       setCreateError((e as Error).message);
     } finally {
@@ -530,20 +614,42 @@ export function ExecutionNodes({
 
   const cleanHubUrl = hubUrl.trim().replace(/\/+$/, "");
   const remoteTargetLoopbackWarn = !!(
-    registration &&
-    isLoopbackURL(cleanHubUrl) &&
-    !isLoopbackIP(registration.node.controller_ip)
+    (registration &&
+      isLoopbackURL(cleanHubUrl) &&
+      !isLoopbackIP(registration.node.controller_ip)) ||
+    (targetRegistration &&
+      isLoopbackURL(cleanHubUrl) &&
+      !isLoopbackIP(targetRegistration.agent.ip))
   );
 
   const bundleDir = useMemo(() => {
-    if (!registration) return "mw-runner-node";
-    return `mw-runner-${runnerSlug(registration.node.name, registration.node.controller_ip)}`;
-  }, [registration]);
+    if (registration) {
+      return `mw-runner-${runnerSlug(registration.node.name, registration.node.controller_ip)}`;
+    }
+    if (targetRegistration) {
+      return `mw-target-agent-${runnerSlug(targetRegistration.agent.host, targetRegistration.agent.ip)}`;
+    }
+    return "mw-runner-node";
+  }, [registration, targetRegistration]);
   const bundleFile = `${bundleDir}.tar.gz`;
   const oneLineInstallCmd = `tar -xzf ${bundleFile}\nsudo bash ${bundleDir}/install.sh`;
 
+  const targetConfigJSON = useMemo(() => {
+    if (!targetRegistration) return "";
+    const obj: Record<string, string> = {
+      url: cleanHubUrl || location.origin,
+      id: targetRegistration.agent.id,
+      enrollment_token: targetRegistration.token,
+      state: `/var/lib/middleware-target/${targetRegistration.agent.id}`,
+    };
+    if (includeCA && bootInfo?.ca_available) {
+      obj.ca_file = "/etc/middleware-execution/platform-ca.pem";
+    }
+    return JSON.stringify(obj, null, 2) + "\n";
+  }, [targetRegistration, cleanHubUrl, includeCA, bootInfo?.ca_available]);
+
   const downloadBundle = async () => {
-    if (!registration || bundleLockRef.current) return;
+    if ((!registration && !targetRegistration) || bundleLockRef.current) return;
     bundleLockRef.current = true;
     setBundling(true);
     setBundleError("");
@@ -555,16 +661,26 @@ export function ExecutionNodes({
       });
       const tok = authToken();
       if (tok) headers.set("Authorization", `Bearer ${tok}`);
-      const res = await fetch("/api/settings/execution-nodes/bundle", {
+      const endpoint = registration
+        ? "/api/settings/execution-nodes/bundle"
+        : `/api/executions/agents/${encodeURIComponent(targetRegistration!.agent.id)}/bundle`;
+      const bodyPayload = registration
+        ? {
+            node_id: registration.node.id,
+            token: registration.token,
+            url: cleanHubUrl,
+            include_ca: includeCA && !!bootInfo?.ca_available,
+          }
+        : {
+            token: targetRegistration!.token,
+            url: cleanHubUrl,
+            include_ca: includeCA && !!bootInfo?.ca_available,
+          };
+      const res = await fetch(endpoint, {
         method: "POST",
         headers,
         credentials: "same-origin",
-        body: JSON.stringify({
-          node_id: registration.node.id,
-          token: registration.token,
-          url: cleanHubUrl,
-          include_ca: includeCA && !!bootInfo?.ca_available,
-        }),
+        body: JSON.stringify(bodyPayload),
       });
       if (!res.ok) {
         let msg = `HTTP ${res.status}`;
@@ -584,10 +700,13 @@ export function ExecutionNodes({
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 1500);
       setDownloaded(true);
+      const hostIP = registration
+        ? registration.node.controller_ip
+        : targetRegistration!.agent.ip;
       Message.success(
         bi(
-          `已下载 ${bundleFile}，上传至 ${registration.node.controller_ip} 执行安装命令即可`,
-          `Downloaded ${bundleFile}. Transfer to ${registration.node.controller_ip} and run install.sh.`,
+          `已下载 ${bundleFile}，上传至 ${hostIP} 执行安装命令即可`,
+          `Downloaded ${bundleFile}. Transfer to ${hostIP} and run install.sh.`,
         ),
       );
     } catch (e) {
@@ -599,6 +718,18 @@ export function ExecutionNodes({
   };
 
   const downloadConfigOnly = () => {
+    if (targetRegistration) {
+      const url = URL.createObjectURL(
+        new Blob([targetConfigJSON], { type: "application/json" }),
+      );
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "target-agent.json";
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setDownloaded(true);
+      return;
+    }
     if (!registration) return;
     const config: Record<string, string> = {
       url: cleanHubUrl || location.origin,
@@ -625,6 +756,7 @@ export function ExecutionNodes({
   const finish = () => {
     setOpen(false);
     setRegistration(null);
+    setTargetRegistration(null);
     setDownloaded(false);
     setBundleError("");
   };
@@ -743,7 +875,6 @@ export function ExecutionNodes({
   const needsUpgrade = (n: ExecutionNode) =>
     Boolean(n.last_seen) && (n.protocol || 0) < 3;
 
-  const allAgents = agents || [];
   const upgradeCount = all.filter(needsUpgrade).length;
 
   const statusCounts = {
@@ -792,22 +923,14 @@ export function ExecutionNodes({
             : a.desired === "active" && !a.online);
       if (!matchStatus) return false;
       if (!q) return true;
-      return [a.host, a.ip, a.cluster, a.mode || ""].some((s) =>
-        s.toLowerCase().includes(q),
-      );
+      return [
+        a.host,
+        a.ip,
+        a.cluster || "",
+        ...(a.matched_clusters || []),
+      ].some((s) => s.toLowerCase().includes(q));
     });
   }, [allAgents, roleFilter, statusFilter, query]);
-
-  const groupedAgents = useMemo(() => {
-    const map = new Map<string, AutomationAgentView[]>();
-    for (const a of agentRows) {
-      const key = a.cluster || bi("未归属集群", "Unassigned");
-      const list = map.get(key) || [];
-      list.push(a);
-      map.set(key, list);
-    }
-    return Array.from(map.entries());
-  }, [agentRows]);
 
   const activeSelection = useMemo<SelectedItem | null>(() => {
     if (selected?.role === "controller" && rows.some((n) => n.id === selected.id)) {
@@ -831,17 +954,14 @@ export function ExecutionNodes({
     return agentRows.find((a) => a.id === activeSelection.id) || null;
   }, [activeSelection, agentRows]);
 
-  const peerAgents = useMemo(() => {
+  const activeAgentClusters = useMemo(() => {
     if (!activeAgent) return [];
-    return allAgents.filter((a) => a.cluster === activeAgent.cluster);
-  }, [allAgents, activeAgent]);
+    const list = activeAgent.matched_clusters || [];
+    if (list.length > 0) return list;
+    return activeAgent.cluster ? [activeAgent.cluster] : [];
+  }, [activeAgent]);
 
   const loadingList = (!nodes && !error && canManage) || (!agents && !agentsError);
-  const toggleClusterFold = (clusterName: string) =>
-    setCollapsedClusters((prev) => ({
-      ...prev,
-      [clusterName]: !prev[clusterName],
-    }));
 
   const upgradeCmd = `${bi(
     "# 1. 将新版执行器上传至控制机（点击上方按钮下载 Linux amd64 二进制）",
@@ -875,8 +995,13 @@ sudo systemctl status middleware-execution --no-pager`;
                   aria-label={bi("刷新列表", "Refresh list")}
                 />
                 {canManage && (
-                  <Button size="small" type="primary" icon={<IconPlus />} onClick={begin}>
-                    {registration ? bi("继续", "Resume") : bi("接入", "Add")}
+                  <Button
+                    size="small"
+                    type="primary"
+                    icon={<IconPlus />}
+                    onClick={() => begin()}
+                  >
+                    {activeStep2 ? bi("继续", "Resume") : bi("接入", "Add")}
                   </Button>
                 )}
               </div>
@@ -964,7 +1089,7 @@ sudo systemctl status middleware-execution --no-pager`;
               <div style={{ padding: 14 }}>
                 <Skeleton animation text={{ rows: 5 }} />
               </div>
-            ) : rows.length > 0 || groupedAgents.length > 0 ? (
+            ) : rows.length > 0 || agentRows.length > 0 ? (
               <>
                 {rows.length > 0 && (
                   <div className="ec-rail-group">
@@ -1017,79 +1142,66 @@ sudo systemctl status middleware-execution --no-pager`;
                   </div>
                 )}
 
-                {groupedAgents.map(([clusterName, list]) => {
-                  const folded = !query.trim() && Boolean(collapsedClusters[clusterName]);
-                  const onlineCnt = list.filter((a) => a.desired === "active" && a.online).length;
-                  return (
-                    <div key={clusterName} className="ec-rail-group">
-                      <button
-                        type="button"
-                        className="ec-rail-group-btn"
-                        aria-expanded={!folded}
-                        onClick={() => toggleClusterFold(clusterName)}
-                      >
-                        <span className="ec-rail-group-btn-l">
-                          {folded ? (
-                            <IconRight style={{ fontSize: 10, flexShrink: 0 }} />
-                          ) : (
-                            <IconDown style={{ fontSize: 10, flexShrink: 0 }} />
-                          )}
-                          <span className="mono" title={clusterName}>
-                            {clusterName}
-                          </span>
-                        </span>
-                        <em>
-                          {onlineCnt}/{list.length}
-                        </em>
-                      </button>
-                      {!folded &&
-                        list.map((ag) => {
-                          const isRevoked = ag.desired !== "active";
-                          const dotCls = isRevoked
-                            ? "is-revoked"
-                            : ag.online
-                              ? "is-online"
-                              : "is-offline";
-                          const isSel = activeAgent?.id === ag.id;
-                          return (
-                            <button
-                              key={ag.id}
-                              type="button"
-                              className={`ec-rail-row ${isSel ? "on" : ""}`}
-                              onClick={() => {
-                                setSelected({ role: "target", id: ag.id });
-                                setMobileDetail(true);
-                              }}
-                            >
-                              <span className={`ec-state-dot ${dotCls}`} />
-                              <div className="ec-rail-row-body">
-                                <div className="ec-rail-row-top">
-                                  <b>{ag.host}</b>
-                                  <span
-                                    className={`ec-micro-pill ${ag.allow_mutating ? "is-ok" : ""}`}
-                                  >
-                                    {ag.allow_mutating ? bi("可写", "RW") : bi("只读", "RO")}
-                                  </span>
-                                </div>
-                                <div className="ec-rail-row-sub">
-                                  <code className="mono">{ag.ip}</code>
-                                  <span>
-                                    {isRevoked
-                                      ? bi("已撤销", "Revoked")
-                                      : ag.online
-                                        ? bi("在线", "Online")
-                                        : ag.last_seen
-                                          ? ago(ag.last_seen)
-                                          : bi("待上线", "Pending")}
-                                  </span>
-                                </div>
-                              </div>
-                            </button>
-                          );
-                        })}
+                {agentRows.length > 0 && (
+                  <div className="ec-rail-group">
+                    <div className="ec-rail-group-h">
+                      <span>{bi("目标机（免密直连）", "Direct Target Agents")}</span>
+                      <em>{agentRows.length}</em>
                     </div>
-                  );
-                })}
+                    {agentRows.map((ag) => {
+                      const isRevoked = ag.desired !== "active";
+                      const dotCls = isRevoked
+                        ? "is-revoked"
+                        : ag.online
+                          ? "is-online"
+                          : "is-offline";
+                      const isSel = activeAgent?.id === ag.id;
+                      const matchCnt =
+                        ag.matched_clusters && ag.matched_clusters.length > 0
+                          ? ag.matched_clusters.length
+                          : ag.cluster
+                            ? 1
+                            : 0;
+                      return (
+                        <button
+                          key={ag.id}
+                          type="button"
+                          className={`ec-rail-row ${isSel ? "on" : ""}`}
+                          onClick={() => {
+                            setSelected({ role: "target", id: ag.id });
+                            setMobileDetail(true);
+                          }}
+                        >
+                          <span className={`ec-state-dot ${dotCls}`} />
+                          <div className="ec-rail-row-body">
+                            <div className="ec-rail-row-top">
+                              <b>{ag.host}</b>
+                              <span
+                                className={`ec-micro-pill ${ag.allow_mutating ? "is-ok" : ""}`}
+                              >
+                                {ag.allow_mutating ? bi("可写", "RW") : bi("只读", "RO")}
+                              </span>
+                            </div>
+                            <div className="ec-rail-row-sub">
+                              <code className="mono">{ag.ip}</code>
+                              <span>
+                                {isRevoked
+                                  ? bi("已撤销", "Revoked")
+                                  : matchCnt > 0
+                                    ? bi(`${matchCnt} 集群`, `${matchCnt} cl`)
+                                    : ag.online
+                                      ? bi("在线", "Online")
+                                      : ag.last_seen
+                                        ? ago(ag.last_seen)
+                                        : bi("待上线", "Pending")}
+                              </span>
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </>
             ) : (
               <div className="ec-rail-empty">
@@ -1137,21 +1249,34 @@ sudo systemctl status middleware-execution --no-pager`;
             </div>
           )}
 
-          {registration && !open && (
+          {activeStep2 && !open && (
             <div className="detail enter ec-detail-article" style={{ paddingBottom: 0 }}>
               <div className="en-pending" role="status">
                 <IconInfoCircle />
                 <span>
-                  {biv(
-                    <>
-                      <b>{registration.node.name}</b>{" "}
-                      已登记，继续下载安装包并在控制机完成连接。
-                    </>,
-                    <>
-                      <b>{registration.node.name}</b> is registered—download the
-                      installer bundle and finish connecting.
-                    </>,
-                  )}
+                  {registration
+                    ? biv(
+                        <>
+                          <b>{registration.node.name}</b>{" "}
+                          已登记，继续下载安装包并在控制机完成连接。
+                        </>,
+                        <>
+                          <b>{registration.node.name}</b> is registered—download the
+                          installer bundle and finish connecting.
+                        </>,
+                      )
+                    : biv(
+                        <>
+                          目标机 <b>{targetRegistration?.agent.host}</b> (
+                          <code>{targetRegistration?.agent.ip}</code>)
+                          已签发直连 Agent，继续下载安装包并完成上线。
+                        </>,
+                        <>
+                          Target Agent for <b>{targetRegistration?.agent.host}</b> (
+                          <code>{targetRegistration?.agent.ip}</code>) is ready—download the
+                          installer bundle to connect.
+                        </>,
+                      )}
                 </span>
                 <Button size="small" type="text" onClick={() => setOpen(true)}>
                   {bi("继续接入", "Continue Setup")} <IconArrowRight />
@@ -1500,14 +1625,19 @@ sudo systemctl status middleware-execution --no-pager`;
                       </span>
                       <StatusBadge state={badgeState} label={badgeLabel} />
                       <span className="ec-micro-pill">
-                        {activeAgent.mode === "direct"
-                          ? bi("直连执行模式", "Direct Exec")
-                          : bi("托管 SSH 信任", "SSH Trust")}
+                        {bi("免密直连", "Direct HTTPS")}
                       </span>
                     </div>
                     <div className="detail-meta">
                       <code className="mono">{activeAgent.ip}</code>
-                      <span>{bi("集群", "Cluster")}: {activeAgent.cluster}</span>
+                      <span>
+                        {activeAgentClusters.length > 0
+                          ? bi(
+                              `已自动匹配 ${activeAgentClusters.length} 个集群`,
+                              `Matched ${activeAgentClusters.length} cluster(s)`,
+                            )
+                          : bi("按主机 IP 自动匹配集群", "Auto-matches clusters by IP")}
+                      </span>
                       {activeAgent.version && (
                         <span className="mono">v{activeAgent.version}</span>
                       )}
@@ -1521,20 +1651,22 @@ sudo systemctl status middleware-execution --no-pager`;
                       </span>
                     </div>
                     <div className="detail-actions">
-                      <Button
-                        size="small"
-                        type="outline"
-                        icon={<IconThunderbolt />}
-                        onClick={() =>
-                          go({
-                            name: "deliveries",
-                            id: activeAgent.cluster,
-                            tab: "automation",
-                          })
-                        }
-                      >
-                        {bi("打开集群自动化", "Cluster Automation")}
-                      </Button>
+                      {activeAgentClusters.length === 1 && (
+                        <Button
+                          size="small"
+                          type="outline"
+                          icon={<IconThunderbolt />}
+                          onClick={() =>
+                            go({
+                              name: "deliveries",
+                              id: activeAgentClusters[0],
+                              tab: "automation",
+                            })
+                          }
+                        >
+                          {bi("打开集群自动化", "Cluster Automation")}
+                        </Button>
+                      )}
                       {canManage && !isRevoked && (
                         <Popconfirm
                           title={bi(
@@ -1556,6 +1688,30 @@ sudo systemctl status middleware-execution --no-pager`;
                           </Button>
                         </Popconfirm>
                       )}
+                      {canManage && (isRevoked || !activeAgent.online) && (
+                        <Popconfirm
+                          title={bi(
+                            `确定彻底删除 ${activeAgent.host} (${activeAgent.ip}) 的 Agent 记录？`,
+                            `Delete agent record for ${activeAgent.host} (${activeAgent.ip})?`,
+                          )}
+                          okText={bi("删除", "Delete")}
+                          cancelText={bi("取消", "Cancel")}
+                          onOk={() =>
+                            void updateGlobalAgent(activeAgent, { action: "delete" })
+                          }
+                        >
+                          <Button
+                            size="small"
+                            status="danger"
+                            icon={<IconDelete />}
+                            loading={updatingAgent === activeAgent.id}
+                            aria-label={bi(
+                              `删除目标机 Agent ${activeAgent.host}`,
+                              `Delete target agent ${activeAgent.host}`,
+                            )}
+                          />
+                        </Popconfirm>
+                      )}
                     </div>
                   </header>
 
@@ -1570,22 +1726,8 @@ sudo systemctl status middleware-execution --no-pager`;
                           <code className="mono">{activeAgent.ip}</code>
                         </div>
                         <div className="ec-kv">
-                          <span>{bi("所属集群", "Cluster")}</span>
-                          <button
-                            type="button"
-                            className="ec-cluster-link mono"
-                            style={{ alignSelf: "flex-start" }}
-                            onClick={() =>
-                              go({
-                                name: "deliveries",
-                                id: activeAgent.cluster,
-                                tab: "automation",
-                              })
-                            }
-                          >
-                            <span>{activeAgent.cluster}</span>
-                            <IconRight />
-                          </button>
+                          <span>{bi("接入模式", "Connection Mode")}</span>
+                          <b>{bi("HTTPS 主动外连（无需 SSH 密码）", "Outbound HTTPS (No SSH)")}</b>
                         </div>
                         <div className="ec-kv">
                           <span>{bi("签发时间", "Created")}</span>
@@ -1621,57 +1763,70 @@ sudo systemctl status middleware-execution --no-pager`;
                       </div>
                     </section>
 
-                    {peerAgents.length > 1 && (
-                      <section className="cx-spec-card">
-                        <div className="cx-spec-card-head">
-                          <h3>
-                            <span>
+                    <section className="cx-spec-card">
+                      <div className="cx-spec-card-head">
+                        <h3>
+                          <span>{bi("自动匹配的集群", "Auto-Matched Clusters")}</span>
+                          <span className="cx-card-cnt num">{activeAgentClusters.length}</span>
+                        </h3>
+                      </div>
+                      <div className="ec-scope-body">
+                        <p className="ec-scope-hint">
+                          {bi(
+                            "1 台主机仅需接入 1 次目标机 Agent；任意集群的节点列表包含此 IP 时，将在集群「自动化 → 方式 B」中自动识别并复用。",
+                            "Enroll each host once; any cluster referencing this IP automatically matches and reuses this Agent in Automation → Mode B.",
+                          )}
+                        </p>
+                        <div className="ec-chip-wrap">
+                          {activeAgentClusters.length === 0 ? (
+                            <span style={{ fontSize: 12, color: "var(--faint)" }}>
                               {bi(
-                                `同集群主机 Agent（${activeAgent.cluster}）`,
-                                `Cluster Agents (${activeAgent.cluster})`,
+                                `暂未匹配到已有集群；纳管或交付包含 ${activeAgent.ip} 的集群后将自动关联。`,
+                                `No clusters reference ${activeAgent.ip} yet; it will associate automatically once a cluster includes this IP.`,
                               )}
                             </span>
-                            <span className="cx-card-cnt num">{peerAgents.length}</span>
-                          </h3>
-                        </div>
-                        <div className="ec-peer-list">
-                          {peerAgents.map((peer) => {
-                            const pRev = peer.desired !== "active";
-                            const pDot = pRev
-                              ? "is-revoked"
-                              : peer.online
-                                ? "is-online"
-                                : "is-offline";
-                            return (
-                              <div
-                                key={peer.id}
-                                className={`ec-peer-row ${peer.id === activeAgent.id ? "is-current" : ""}`}
-                                onClick={() => setSelected({ role: "target", id: peer.id })}
+                          ) : (
+                            activeAgentClusters.map((cid) => (
+                              <button
+                                key={cid}
+                                type="button"
+                                className="ec-cluster-link mono"
+                                onClick={() =>
+                                  go({ name: "deliveries", id: cid, tab: "automation" })
+                                }
                               >
-                                <div className="ec-peer-row-l">
-                                  <span className={`ec-state-dot ${pDot}`} />
-                                  <b>{peer.host}</b>
-                                  <code className="mono">{peer.ip}</code>
-                                </div>
-                                <div className="ec-row-acts">
-                                  <span className="ec-micro-pill">
-                                    {pRev
-                                      ? bi("已撤销", "Revoked")
-                                      : peer.online
-                                        ? bi("在线", "Online")
-                                        : bi("离线", "Offline")}
-                                  </span>
-                                  <span className="ec-micro-pill">
-                                    {peer.allow_mutating
-                                      ? bi("允许写入", "RW")
-                                      : bi("仅只读", "RO")}
-                                  </span>
-                                </div>
-                              </div>
-                            );
-                          })}
+                                <span>{cid}</span>
+                                <IconRight />
+                              </button>
+                            ))
+                          )}
                         </div>
-                      </section>
+                      </div>
+                    </section>
+
+                    {!isRevoked && !activeAgent.online && (
+                      <div className="ec-diag-bar">
+                        <span>
+                          {bi(
+                            "目标机 Agent 暂未上线？检查 systemd 服务状态、HTTPS 连通性或让 AI 快速排查。",
+                            "Target Agent offline? Inspect systemd status, HTTPS reachability, or ask AI to troubleshoot.",
+                          )}
+                        </span>
+                        <AIHelpButton
+                          variant="pill"
+                          topic={`target-agent-offline-${activeAgent.id}`}
+                          title={bi(`排查目标机「${activeAgent.host}」Agent 未上线`, `Troubleshoot "${activeAgent.host}"`)}
+                          page={bi("执行中心 · 目标机 Agent", "Execution Center · Target Agent")}
+                          summary={bi(
+                            `目标机 ${activeAgent.host} (${activeAgent.ip})，Agent ID=${activeAgent.id}，上次心跳=${activeAgent.last_seen || "无"}`,
+                            `Target ${activeAgent.host} (${activeAgent.ip}), ID=${activeAgent.id}, lastSeen=${activeAgent.last_seen || "none"}`,
+                          )}
+                          prompt={bi(
+                            `目标机直连 Agent「${activeAgent.host}」(${activeAgent.ip}) 当前未上线，服务名为 middleware-target-agent-${activeAgent.id}，请给出最快排查日志和网络连通的命令。`,
+                            `Direct Target Agent "${activeAgent.host}" (${activeAgent.ip}, service middleware-target-agent-${activeAgent.id}) is offline. Give the fastest diagnostic commands.`,
+                          )}
+                        />
+                      </div>
                     )}
                   </div>
                 </article>
@@ -1688,21 +1843,31 @@ sudo systemctl status middleware-execution --no-pager`;
               <p>
                 {all.length === 0 && allAgents.length === 0
                   ? bi(
-                      "接入控制机 Agent 可统一通过 SSH/Ansible 调度交付与演练；也可在任意集群的「自动化」页签生成目标机直连 Agent。",
-                      "Connect a Control Agent for SSH/Ansible orchestration, or enroll Target Agents inside any cluster's Automation tab.",
+                      "先在此处把需要连接的主机接入平台（支持控制机 SSH/Ansible 或目标机免密直连），后续在任意集群中可直接选用或按 IP 自动匹配。",
+                      "Enroll your control or target hosts here first; any cluster can then bind a controller or auto-match target Agents by IP.",
                     )
                   : bi("调整左侧搜索、状态或角色筛选条件以查看其他 Agent。", "Adjust the search, status, or role filter to view other Agents.")}
               </p>
               {all.length === 0 && allAgents.length === 0 ? (
                 <div className="ec-row-acts">
                   {canManage && (
-                    <Button type="primary" icon={<IconPlus />} onClick={begin}>
-                      {bi("接入控制机 Agent", "Add Control Agent")}
-                    </Button>
+                    <>
+                      <Button
+                        type="primary"
+                        icon={<IconPlus />}
+                        onClick={() => begin("target")}
+                      >
+                        {bi("接入目标机 Agent", "Add Target Agent")}
+                      </Button>
+                      <Button
+                        type="outline"
+                        icon={<IconDesktop />}
+                        onClick={() => begin("controller")}
+                      >
+                        {bi("接入控制机 Agent", "Add Control Agent")}
+                      </Button>
+                    </>
                   )}
-                  <Button type="outline" onClick={() => go({ name: "deliveries" })}>
-                    {bi("前往集群接入目标机", "Open Clusters")} <IconArrowRight />
-                  </Button>
                 </div>
               ) : (
                 <Button
@@ -1723,9 +1888,11 @@ sudo systemctl status middleware-execution --no-pager`;
       <Modal
         className="exec-modal en-modal"
         title={
-          registration
-            ? bi("安装并连接节点", "Install & Connect Node")
-            : bi("接入执行节点", "Add Execution Node")
+          activeStep2
+            ? targetRegistration
+              ? bi("安装并连接目标机 Agent", "Install & Connect Target Agent")
+              : bi("安装并连接控制机 Agent", "Install & Connect Control Agent")
+            : bi("接入 Agent", "Add Agent")
         }
         visible={open}
         style={{ width: 680, maxWidth: "calc(100vw - 32px)" }}
@@ -1733,13 +1900,13 @@ sudo systemctl status middleware-execution --no-pager`;
         focusLock={false}
         onCancel={() => !busy && !bundling && setOpen(false)}
         footer={
-          registration ? (
+          activeStep2 ? (
             <>
               <span className="en-footer-note">
-                {registeredOnline ? (
+                {activeStep2Online ? (
                   <>
                     <IconCheck />{" "}
-                    {bi("节点已在线，可以关闭此窗口", "Node is online—you can close this window")}
+                    {bi("Agent 已在线，可以关闭窗口或继续接入下一台", "Agent is online—close or enroll next host")}
                   </>
                 ) : downloaded ? (
                   <>
@@ -1748,18 +1915,25 @@ sudo systemctl status middleware-execution --no-pager`;
                   </>
                 ) : (
                   bi(
-                    "先下载安装包或连接配置，再完成接入",
-                    "Download the installer bundle or config before finishing",
+                    "先下载安装包或复制配置，再完成接入",
+                    "Download the installer bundle or copy config before finishing",
                   )
                 )}
               </span>
-              <Button
-                type="primary"
-                disabled={!downloaded && !registeredOnline}
-                onClick={finish}
-              >
-                {bi("完成", "Done")}
-              </Button>
+              <div className="ec-row-acts">
+                {targetRegistration && (
+                  <Button onClick={enrollNextTarget}>
+                    {bi("继续接入下一台", "Add Next Host")}
+                  </Button>
+                )}
+                <Button
+                  type="primary"
+                  disabled={!downloaded && !activeStep2Online}
+                  onClick={finish}
+                >
+                  {bi("完成", "Done")}
+                </Button>
+              </div>
             </>
           ) : (
             <>
@@ -1769,7 +1943,11 @@ sudo systemctl status middleware-execution --no-pager`;
               <Button
                 type="primary"
                 loading={busy}
-                disabled={!name.trim() || !controller.trim()}
+                disabled={
+                  enrollRole === "target"
+                    ? !targetHost.trim() || !targetIP.trim()
+                    : !name.trim() || !controller.trim()
+                }
                 onClick={create}
               >
                 {bi("下一步：安装并连接", "Next: Install & Connect")}
@@ -1779,28 +1957,75 @@ sudo systemctl status middleware-execution --no-pager`;
         }
       >
         <div className="en-setup-steps">
-          <span className={registration ? "done" : "current"}>
-            <i>{registration ? <IconCheck /> : 1}</i>
-            {bi("登记执行机器", "Register Host")}
+          <span className={activeStep2 ? "done" : "current"}>
+            <i>{activeStep2 ? <IconCheck /> : 1}</i>
+            {bi("选择角色并登记主机", "Choose Role & Host")}
           </span>
           <span aria-hidden className="en-setup-line" />
           <span
             className={
-              registeredOnline ? "done" : registration ? "current" : ""
+              activeStep2Online ? "done" : activeStep2 ? "current" : ""
             }
           >
-            <i>{registeredOnline ? <IconCheck /> : 2}</i>
+            <i>{activeStep2Online ? <IconCheck /> : 2}</i>
             {bi("安装并连接", "Install & Connect")}
           </span>
         </div>
-        {!registration ? (
+        {!activeStep2 ? (
           <div className="en-form">
-            <p className="en-lead">
-              {bi(
-                "这里只登记 1 台负责调度的主控机。业务目标机器在具体交付中自动带入并授权，无需在这里逐台填写。",
-                "Register only the single control host here. Target workload hosts are automatically populated and authorized inside each delivery.",
-              )}
-            </p>
+            <div className="en-field en-field-wide">
+              <span className="en-field-label" id="en-role-label">
+                {bi("Agent 角色", "Agent Role")}
+              </span>
+              <div
+                className="en-kind-options"
+                role="radiogroup"
+                aria-labelledby="en-role-label"
+              >
+                {(
+                  [
+                    {
+                      value: "controller" as const,
+                      title: bi("控制机 Agent（SSH / Ansible）", "Control Agent (SSH / Ansible)"),
+                      desc: bi(
+                        "装在 1 台管理/跳板机上，通过 SSH 或 Ansible 统一调度多台业务主机与交付任务",
+                        "Install on 1 control/bastion host to orchestrate multiple hosts via SSH or Ansible",
+                      ),
+                    },
+                    {
+                      value: "target" as const,
+                      title: bi("目标机 Agent（免密直连）", "Target Agent (Direct HTTPS)"),
+                      desc: bi(
+                        "直接装在业务目标机上（主动外连 HTTPS），无需 SSH 密码，1 台主机接入一次即可跨集群自动匹配",
+                        "Install on each target host (outbound HTTPS, no SSH). Enroll once, auto-matched by IP across clusters",
+                      ),
+                    },
+                  ] as const
+                ).map((o) => {
+                  const on = enrollRole === o.value;
+                  return (
+                    <button
+                      key={o.value}
+                      type="button"
+                      role="radio"
+                      aria-checked={on}
+                      className={`en-kind-option${on ? " on" : ""}`}
+                      onClick={() => {
+                        setEnrollRole(o.value);
+                        setCreateError("");
+                      }}
+                    >
+                      <i aria-hidden="true" />
+                      <span>
+                        <b>{o.title}</b>
+                        <small>{o.desc}</small>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             {createError && (
               <div className="en-error" role="alert">
                 <IconExclamationCircle />
@@ -1808,137 +2033,192 @@ sudo systemctl status middleware-execution --no-pager`;
                 <AIHelpButton
                   variant="pill"
                   topic="execution-node-register-error"
-                  title={bi("登记节点失败", "Node registration error")}
-                  page={bi("接入执行节点", "Add Execution Node")}
+                  title={bi("登记 Agent 失败", "Agent registration error")}
+                  page={bi("接入 Agent", "Add Agent")}
                   error={createError}
                   prompt={bi(
-                    `登记执行节点时报错：${createError}，请告诉我哪里填错了以及该怎么填。`,
-                    `Got error registering an execution node: ${createError}. How do I fix it?`,
+                    `接入 Agent 时报错：${createError}，请告诉我哪里填错了以及该怎么填。`,
+                    `Got error registering an Agent: ${createError}. How do I fix it?`,
                   )}
                 />
               </div>
             )}
-            <div className="en-form-grid">
-              <div className="en-field">
-                <label htmlFor="en-name">{bi("节点名称", "Node Name")}</label>
-                <Input
-                  id="en-name"
-                  value={name}
-                  onChange={setName}
-                  placeholder={bi(
-                    "例如：pass-4 或 生产管理机",
-                    "e.g., pass-4 or Prod Control Host",
-                  )}
-                  autoFocus
-                />
-                <small>
-                  {bi(
-                    "用于在交付中识别这台主控机",
-                    "Displayed when selecting an execution node in deliveries",
-                  )}
-                </small>
-              </div>
-              <div className="en-field">
-                <label htmlFor="en-controller">
-                  {bi("执行机器 IP", "Control Host IP")}
-                </label>
-                <Input
-                  id="en-controller"
-                  value={controller}
-                  onChange={setController}
-                  placeholder={bi("例如：192.168.31.153", "e.g., 192.168.31.153")}
-                />
-                <small>
-                  {bi(
-                    "安装执行器的主控机 IP，不是数据库节点 IP",
-                    "IP of the control host running the executor, not the database nodes",
-                  )}
-                </small>
-              </div>
-              <div className="en-field en-field-wide">
-                <span className="en-field-label en-label-with-help" id="en-kind-label">
-                  {bi("安装位置", "Deployment Placement")}
-                  <AIHelpButton
-                    topic="execution-node-placement"
-                    title={bi("独立管理机 vs 集群内机器", "Dedicated vs In-Cluster Host")}
-                    page={bi("接入执行节点 · 安装位置", "Add Execution Node · Placement")}
-                    prompt={bi(
-                      "接入执行节点时，「独立管理机」和「集群内机器」应该怎么选？各自有什么区别和注意事项？",
-                      "Should I choose Dedicated Control Host or In-Cluster Host when enrolling an execution node? Explain the differences.",
-                    )}
-                    tooltip={bi("问 AI：这两种安装位置怎么选？", "Ask AI: Which placement should I choose?")}
+
+            {enrollRole === "target" ? (
+              <div className="en-form-grid">
+                <div className="en-field">
+                  <label htmlFor="en-target-host">{bi("目标主机名称", "Target Hostname")}</label>
+                  <Input
+                    id="en-target-host"
+                    value={targetHost}
+                    onChange={setTargetHost}
+                    placeholder={bi("例如：pg-node-01 或 业务库 A", "e.g., pg-node-01")}
+                    autoFocus
                   />
-                </span>
-                <div
-                  className="en-kind-options"
-                  role="radiogroup"
-                  aria-labelledby="en-kind-label"
-                >
-                  {(
-                    [
-                      {
-                        value: "independent",
-                        title: bi("独立管理机", "Dedicated Control Host"),
-                        desc: bi(
-                          "不承载数据库，每集群独立目录，可复用管理多套集群",
-                          "No workloads, isolated per-cluster directories, reusable across clusters",
-                        ),
-                      },
-                      {
-                        value: "embedded",
-                        title: bi("集群内机器", "In-Cluster Host"),
-                        desc: bi(
-                          "没有额外管理机时，复用集群中 1 台机器兼任执行",
-                          "Reuses one cluster node as the executor when no dedicated host is available",
-                        ),
-                      },
-                    ] as const
-                  ).map((o) => {
-                    const on = kind === o.value;
-                    return (
-                      <button
-                        key={o.value}
-                        type="button"
-                        role="radio"
-                        aria-checked={on}
-                        tabIndex={on ? 0 : -1}
-                        className={`en-kind-option${on ? " on" : ""}`}
-                        onClick={() => setKind(o.value)}
-                        onKeyDown={(e) => {
-                          if (
-                            [
-                              "ArrowLeft",
-                              "ArrowRight",
-                              "ArrowUp",
-                              "ArrowDown",
-                            ].includes(e.key)
-                          ) {
-                            e.preventDefault();
-                            const next =
-                              o.value === "independent"
-                                ? "embedded"
-                                : "independent";
-                            setKind(next);
-                            (
-                              e.currentTarget.parentElement?.querySelector(
-                                `[data-kind="${next}"]`,
-                              ) as HTMLButtonElement | null
-                            )?.focus();
-                          }
-                        }}
-                        data-kind={o.value}
-                      >
-                        <i aria-hidden="true" />
-                        <span>
-                          <b>{o.title}</b>
-                          <small>{o.desc}</small>
-                        </span>
-                      </button>
-                    );
-                  })}
+                  <small>
+                    {bi(
+                      "用于在 Agent 列表与演练日志中识别这台主机",
+                      "Displayed in Agent inventory and execution logs",
+                    )}
+                  </small>
+                </div>
+                <div className="en-field">
+                  <label htmlFor="en-target-ip">{bi("目标主机 IP", "Target Host IP")}</label>
+                  <Input
+                    id="en-target-ip"
+                    value={targetIP}
+                    onChange={setTargetIP}
+                    placeholder={bi("例如：10.0.1.11", "e.g., 10.0.1.11")}
+                  />
+                  <small>
+                    {bi(
+                      "需与目标机实际网卡 IP 一致，集群将按此 IP 自动匹配",
+                      "Must match an interface IP on the host; clusters auto-match by this IP",
+                    )}
+                  </small>
+                </div>
+                <div className="en-field en-field-wide">
+                  <div className="ec-modal-switch-row">
+                    <div>
+                      <b>{bi("允许执行变更写操作", "Allow Mutating Steps")}</b>
+                      <small>
+                        {bi(
+                          "关闭后该目标机仅放行 100% 只读基线与演练前探针；上线后也可随时在详情页切换。",
+                          "When off, only 100% read-only probes are allowed; toggleable anytime after enrollment.",
+                        )}
+                      </small>
+                    </div>
+                    <Switch
+                      size="small"
+                      checked={targetAllowMutating}
+                      onChange={setTargetAllowMutating}
+                    />
+                  </div>
                 </div>
               </div>
-            </div>
+            ) : (
+              <div className="en-form-grid">
+                <div className="en-field">
+                  <label htmlFor="en-name">{bi("节点名称", "Node Name")}</label>
+                  <Input
+                    id="en-name"
+                    value={name}
+                    onChange={setName}
+                    placeholder={bi(
+                      "例如：pass-4 或 生产管理机",
+                      "e.g., pass-4 or Prod Control Host",
+                    )}
+                    autoFocus
+                  />
+                  <small>
+                    {bi(
+                      "用于在交付与演练中识别这台主控机",
+                      "Displayed when selecting a control host in deliveries and rehearsals",
+                    )}
+                  </small>
+                </div>
+                <div className="en-field">
+                  <label htmlFor="en-controller">
+                    {bi("执行机器 IP", "Control Host IP")}
+                  </label>
+                  <Input
+                    id="en-controller"
+                    value={controller}
+                    onChange={setController}
+                    placeholder={bi("例如：192.168.31.153", "e.g., 192.168.31.153")}
+                  />
+                  <small>
+                    {bi(
+                      "安装执行器的主控机 IP，不是数据库节点 IP",
+                      "IP of the control host running the executor, not the database nodes",
+                    )}
+                  </small>
+                </div>
+                <div className="en-field en-field-wide">
+                  <span className="en-field-label en-label-with-help" id="en-kind-label">
+                    {bi("安装位置", "Deployment Placement")}
+                    <AIHelpButton
+                      topic="execution-node-placement"
+                      title={bi("独立管理机 vs 集群内机器", "Dedicated vs In-Cluster Host")}
+                      page={bi("接入执行节点 · 安装位置", "Add Execution Node · Placement")}
+                      prompt={bi(
+                        "接入执行节点时，「独立管理机」和「集群内机器」应该怎么选？各自有什么区别和注意事项？",
+                        "Should I choose Dedicated Control Host or In-Cluster Host when enrolling an execution node? Explain the differences.",
+                      )}
+                      tooltip={bi("问 AI：这两种安装位置怎么选？", "Ask AI: Which placement should I choose?")}
+                    />
+                  </span>
+                  <div
+                    className="en-kind-options"
+                    role="radiogroup"
+                    aria-labelledby="en-kind-label"
+                  >
+                    {(
+                      [
+                        {
+                          value: "independent",
+                          title: bi("独立管理机", "Dedicated Control Host"),
+                          desc: bi(
+                            "不承载数据库，每集群独立目录，可复用管理多套集群",
+                            "No workloads, isolated per-cluster directories, reusable across clusters",
+                          ),
+                        },
+                        {
+                          value: "embedded",
+                          title: bi("集群内机器", "In-Cluster Host"),
+                          desc: bi(
+                            "没有额外管理机时，复用集群中 1 台机器兼任执行",
+                            "Reuses one cluster node as the executor when no dedicated host is available",
+                          ),
+                        },
+                      ] as const
+                    ).map((o) => {
+                      const on = kind === o.value;
+                      return (
+                        <button
+                          key={o.value}
+                          type="button"
+                          role="radio"
+                          aria-checked={on}
+                          tabIndex={on ? 0 : -1}
+                          className={`en-kind-option${on ? " on" : ""}`}
+                          onClick={() => setKind(o.value)}
+                          onKeyDown={(e) => {
+                            if (
+                              [
+                                "ArrowLeft",
+                                "ArrowRight",
+                                "ArrowUp",
+                                "ArrowDown",
+                              ].includes(e.key)
+                            ) {
+                              e.preventDefault();
+                              const next =
+                                o.value === "independent"
+                                  ? "embedded"
+                                  : "independent";
+                              setKind(next);
+                              (
+                                e.currentTarget.parentElement?.querySelector(
+                                  `[data-kind="${next}"]`,
+                                ) as HTMLButtonElement | null
+                              )?.focus();
+                            }
+                          }}
+                          data-kind={o.value}
+                        >
+                          <i aria-hidden="true" />
+                          <span>
+                            <b>{o.title}</b>
+                            <small>{o.desc}</small>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           <div className="en-connect">
@@ -1946,28 +2226,44 @@ sudo systemctl status middleware-execution --no-pager`;
               <IconCheckCircle />
               <div>
                 <b>
-                  {bi(
-                    `${registration.node.name} 已登记`,
-                    `${registration.node.name} Registered`,
-                  )}
+                  {registration
+                    ? bi(
+                        `${registration.node.name} 已登记`,
+                        `${registration.node.name} Registered`,
+                      )
+                    : bi(
+                        `${targetRegistration!.agent.host} 直连 Agent 已签发`,
+                        `${targetRegistration!.agent.host} Direct Agent Ready`,
+                      )}
                 </b>
                 <span>
-                  {biv(
-                    <>
-                      {registration.node.kind === "independent"
-                        ? "独立管理机"
-                        : "集群内机器"}{" "}
-                      <code>{registration.node.controller_ip}</code> ·{" "}
-                      目标机器授权将在交付页「现场执行」中完成
-                    </>,
-                    <>
-                      {registration.node.kind === "independent"
-                        ? "Dedicated host"
-                        : "In-cluster host"}{" "}
-                      <code>{registration.node.controller_ip}</code> · Target
-                      authorization is configured per delivery
-                    </>,
-                  )}
+                  {registration
+                    ? biv(
+                        <>
+                          {registration.node.kind === "independent"
+                            ? "独立管理机"
+                            : "集群内机器"}{" "}
+                          <code>{registration.node.controller_ip}</code> ·{" "}
+                          目标机器授权将在交付或集群自动化中完成
+                        </>,
+                        <>
+                          {registration.node.kind === "independent"
+                            ? "Dedicated host"
+                            : "In-cluster host"}{" "}
+                          <code>{registration.node.controller_ip}</code> · Target
+                          authorization is configured per delivery or cluster
+                        </>,
+                      )
+                    : biv(
+                        <>
+                          目标机 <code>{targetRegistration!.agent.ip}</code> ·{" "}
+                          1 台主机接入一次，任意包含该 IP 的集群将自动识别并复用
+                        </>,
+                        <>
+                          Target host <code>{targetRegistration!.agent.ip}</code> ·{" "}
+                          Enroll once and auto-match across all clusters referencing this IP
+                        </>,
+                      )}
                 </span>
               </div>
             </div>
@@ -1975,22 +2271,27 @@ sudo systemctl status middleware-execution --no-pager`;
             <section>
               <div className="en-sec-head">
                 <h3>
-                  {bi(
-                    "1. 确认平台访问地址（供主控机回连）",
-                    "1. Confirm Reachable Hub URL",
-                  )}
+                  {registration
+                    ? bi(
+                        "1. 确认平台访问地址（供主控机回连）",
+                        "1. Confirm Reachable Hub URL",
+                      )
+                    : bi(
+                        "1. 确认平台访问地址（HTTPS，供目标机主动外连）",
+                        "1. Confirm Reachable Hub URL (HTTPS)",
+                      )}
                 </h3>
                 <AIHelpButton
                   topic="execution-node-hub-url"
                   title={bi("平台访问地址与 CA 证书", "Hub URL & CA Certificate")}
-                  page={bi("安装并连接节点 · 平台地址", "Install Node · Hub URL")}
+                  page={bi("安装并连接 Agent · 平台地址", "Install Agent · Hub URL")}
                   summary={bi(
-                    `主控机 ${registration.node.controller_ip}，当前所选平台地址 ${cleanHubUrl}，自签名TLS=${bootInfo?.tls_self_signed ? "是" : "否"}`,
-                    `Control host ${registration.node.controller_ip}, Hub URL ${cleanHubUrl}, self-signed=${bootInfo?.tls_self_signed}`,
+                    `主机 ${registration ? registration.node.controller_ip : targetRegistration!.agent.ip}，当前所选平台地址 ${cleanHubUrl}，自签名TLS=${bootInfo?.tls_self_signed ? "是" : "否"}`,
+                    `Host ${registration ? registration.node.controller_ip : targetRegistration!.agent.ip}, Hub URL ${cleanHubUrl}, self-signed=${bootInfo?.tls_self_signed}`,
                   )}
                   prompt={bi(
-                    `我正在把执行节点 ${registration.node.name} (${registration.node.controller_ip}) 接入平台，当前填的平台地址是 ${cleanHubUrl}。请帮我确认这个地址和 CA 证书设置有没有问题？`,
-                    `I'm connecting node ${registration.node.name} (${registration.node.controller_ip}) to ${cleanHubUrl}. Please check if the URL and CA cert setup are valid.`,
+                    `我正在把 ${registration ? registration.node.name : targetRegistration!.agent.host} (${registration ? registration.node.controller_ip : targetRegistration!.agent.ip}) 接入平台，当前填的平台地址是 ${cleanHubUrl}。请帮我确认这个地址和 CA 证书设置有没有问题？`,
+                    `I'm connecting ${registration ? registration.node.name : targetRegistration!.agent.host} to ${cleanHubUrl}. Please check if the URL and CA cert setup are valid.`,
                   )}
                   tooltip={bi("问 AI：这里该填什么地址？", "Ask AI: What URL should I enter here?")}
                 />
@@ -2026,8 +2327,8 @@ sudo systemctl status middleware-execution --no-pager`;
                     <IconExclamationCircle />
                     <span>
                       {bi(
-                        `127.0.0.1 / localhost 仅本机可达，远端主控机 (${registration.node.controller_ip}) 无法连回平台。请改用上方局域网或公网地址。`,
-                        `127.0.0.1 / localhost is only reachable locally—remote host (${registration.node.controller_ip}) cannot reach it. Select a LAN or public URL above.`,
+                        `127.0.0.1 / localhost 仅本机可达，远端主机 (${registration ? registration.node.controller_ip : targetRegistration!.agent.ip}) 无法连回平台。请改用上方局域网或公网地址。`,
+                        `127.0.0.1 / localhost is only reachable locally—remote host (${registration ? registration.node.controller_ip : targetRegistration!.agent.ip}) cannot reach it. Select a LAN or public URL above.`,
                       )}
                     </span>
                   </div>
@@ -2053,32 +2354,42 @@ sudo systemctl status middleware-execution --no-pager`;
             <section>
               <div className="en-sec-head">
                 <h3>
-                  {bi(
-                    "2. 下载一键安装包并在主控机执行",
-                    "2. Download Bundle & Install as Background Service",
-                  )}
+                  {registration
+                    ? bi(
+                        "2. 下载一键安装包并在主控机执行",
+                        "2. Download Bundle & Install as Background Service",
+                      )
+                    : bi(
+                        "2. 下载一键安装包并在目标机执行",
+                        "2. Download Bundle & Install on Target Host",
+                      )}
                 </h3>
                 <AIHelpButton
                   topic="execution-node-install-cmd"
                   title={bi("安装包与后台服务说明", "Installer Bundle & Background Service")}
-                  page={bi("安装并连接节点 · 一键安装", "Install Node · One-Command Install")}
+                  page={bi("安装并连接 Agent · 一键安装", "Install Agent · One-Command Install")}
                   command={oneLineInstallCmd}
                   summary={bi(
-                    `主控机 ${registration.node.controller_ip}，安装包 ${bundleFile}`,
-                    `Control host ${registration.node.controller_ip}, bundle ${bundleFile}`,
+                    `主机 ${registration ? registration.node.controller_ip : targetRegistration!.agent.ip}，安装包 ${bundleFile}`,
+                    `Host ${registration ? registration.node.controller_ip : targetRegistration!.agent.ip}, bundle ${bundleFile}`,
                   )}
                   prompt={bi(
-                    "这个 .tar.gz 一键安装包里面包含什么？install.sh 会对我的主控机做哪些修改，后面怎么看日志或卸载？",
+                    "这个 .tar.gz 一键安装包里面包含什么？install.sh 会对我的机器做哪些修改，后面怎么看日志或卸载？",
                     "What is inside the .tar.gz bundle, what does install.sh change on my host, and how do I view logs or uninstall it?",
                   )}
                   tooltip={bi("问 AI：安装包里面有什么？会改什么？", "Ask AI: What does install.sh do?")}
                 />
               </div>
               <p>
-                {bi(
-                  "安装包已内置 Linux x64 执行器、专属连接配置、CA 证书及 systemd 后台脚本，解压执行一行命令即完成安装、后台启动与连通自检。",
-                  "Self-contained bundle with Linux x64 runner, unique credentials, CA cert, and systemd installer. Extract and run one command to install, start in background, and verify connectivity.",
-                )}
+                {registration
+                  ? bi(
+                      "安装包已内置 Linux x64 执行器、专属连接配置、CA 证书及 systemd 后台脚本，解压执行一行命令即完成安装、后台启动与连通自检。",
+                      "Self-contained bundle with Linux x64 runner, unique credentials, CA cert, and systemd installer. Extract and run one command to install and start.",
+                    )
+                  : bi(
+                      "安装包已内置 Linux x64 轻量 Agent、一次性接入令牌、CA 证书及 systemd 后台脚本，解压以 root 执行后自动外连上线（全程无需 SSH 密码）。",
+                      "Self-contained bundle with lightweight Linux x64 Agent, one-time enrollment token, CA cert, and systemd installer—zero SSH passwords required.",
+                    )}
               </p>
               {bundleError && (
                 <div className="en-error" role="alert">
@@ -2088,11 +2399,11 @@ sudo systemctl status middleware-execution --no-pager`;
                     variant="pill"
                     topic="execution-node-bundle-error"
                     title={bi("生成安装包失败", "Bundle generation failed")}
-                    page={bi("安装并连接节点", "Install & Connect Node")}
+                    page={bi("安装并连接 Agent", "Install & Connect Agent")}
                     error={bundleError}
                     prompt={bi(
-                      `下载执行节点一键安装包时报错：${bundleError}，请帮我排查原因。`,
-                      `Downloading the execution node installer bundle failed: ${bundleError}. Help diagnose.`,
+                      `下载 Agent 一键安装包时报错：${bundleError}，请帮我排查原因。`,
+                      `Downloading the Agent installer bundle failed: ${bundleError}. Help diagnose.`,
                     )}
                   />
                 </div>
@@ -2109,11 +2420,24 @@ sudo systemctl status middleware-execution --no-pager`;
                     ? bi(`重新下载 ${bundleFile}`, `Re-download ${bundleFile}`)
                     : bi("下载一键安装包 (.tar.gz)", "Download Installer Bundle (.tar.gz)")}
                 </Button>
+                {targetRegistration && (
+                  <Button
+                    type="outline"
+                    icon={<IconCopy />}
+                    onClick={() => {
+                      copy(targetConfigJSON);
+                      setDownloaded(true);
+                      Message.success(bi("已复制 target-agent.json 配置", "Copied target-agent.json"));
+                    }}
+                  >
+                    {bi("复制配置文件 JSON", "Copy Config JSON")}
+                  </Button>
+                )}
               </div>
               <Command
                 title={bi(
-                  `上传到 ${registration.node.controller_ip} 后执行（自动后台运行）`,
-                  `Run on ${registration.node.controller_ip} (runs in background via systemd)`,
+                  `上传到 ${registration ? registration.node.controller_ip : targetRegistration!.agent.ip} 后执行（自动后台运行）`,
+                  `Run on ${registration ? registration.node.controller_ip : targetRegistration!.agent.ip} (runs in background via systemd)`,
                 )}
               >
                 {oneLineInstallCmd}
@@ -2135,7 +2459,9 @@ sudo systemctl status middleware-execution --no-pager`;
                     icon={<IconDownload />}
                     onClick={downloadConfigOnly}
                   >
-                    {bi("连接配置 (execution-node.json)", "Config (execution-node.json)")}
+                    {targetRegistration
+                      ? bi("连接配置 (target-agent.json)", "Config (target-agent.json)")
+                      : bi("连接配置 (execution-node.json)", "Config (execution-node.json)")}
                   </Button>
                   {bootInfo?.ca_available && (
                     <Button
@@ -2151,36 +2477,41 @@ sudo systemctl status middleware-execution --no-pager`;
             </section>
 
             <div
-              className={`en-connection ${registeredOnline ? "connected" : ""}`}
+              className={`en-connection ${activeStep2Online ? "connected" : ""}`}
             >
               <div className="en-connection-left">
                 <span className="en-live-dot" />
                 <b>
-                  {registeredOnline
-                    ? bi(
-                        `节点已连接${registeredNode?.version ? " · v" + registeredNode.version : ""}，请前往交付页授权并开始自动部署`,
-                        `Connected${registeredNode?.version ? " · v" + registeredNode.version : ""}! Return to a delivery to authorize and deploy`,
-                      )
+                  {activeStep2Online
+                    ? registration
+                      ? bi(
+                          `控制机已连接${registeredNode?.version ? " · v" + registeredNode.version : ""}，可在集群交付或自动化中直接选用`,
+                          `Connected${registeredNode?.version ? " · v" + registeredNode.version : ""}! Ready to bind in deliveries or cluster automation`,
+                        )
+                      : bi(
+                          `目标机 Agent 已上线${registeredTarget?.version ? " · v" + registeredTarget.version : ""}，包含该 IP 的集群将自动匹配`,
+                          `Target Agent online${registeredTarget?.version ? " · v" + registeredTarget.version : ""}! Matching clusters will detect it automatically`,
+                        )
                     : bi(
-                        "等待执行机器连接… · 每 1.5 秒自动检测",
-                        "Waiting for execution host to connect… · Checking every 1.5s",
+                        "等待主机 Agent 连接上线… · 每 1.5 秒自动检测",
+                        "Waiting for Agent to connect… · Checking every 1.5s",
                       )}
                 </b>
               </div>
-              {!registeredOnline && (
+              {!activeStep2Online && (
                 <AIHelpButton
                   variant="pill"
-                  topic={`connect-help-${registration.node.id}`}
-                  title={bi("排查节点连接问题", "Troubleshoot Node Connection")}
-                  page={bi("安装并连接节点 · 等待连接", "Install & Connect Node · Waiting")}
+                  topic={`connect-help-${registration ? registration.node.id : targetRegistration!.agent.id}`}
+                  title={bi("排查 Agent 连接问题", "Troubleshoot Agent Connection")}
+                  page={bi("安装并连接 Agent · 等待连接", "Install & Connect Agent · Waiting")}
                   summary={bi(
-                    `主控机 ${registration.node.name} (${registration.node.controller_ip})，配置地址 ${cleanHubUrl}，含CA=${includeCA}`,
-                    `Control host ${registration.node.name} (${registration.node.controller_ip}), Hub URL ${cleanHubUrl}, includeCA=${includeCA}`,
+                    `主机 ${registration ? registration.node.name : targetRegistration!.agent.host} (${registration ? registration.node.controller_ip : targetRegistration!.agent.ip})，配置地址 ${cleanHubUrl}，含CA=${includeCA}`,
+                    `Host ${registration ? registration.node.name : targetRegistration!.agent.host} (${registration ? registration.node.controller_ip : targetRegistration!.agent.ip}), Hub URL ${cleanHubUrl}, includeCA=${includeCA}`,
                   )}
                   command={oneLineInstallCmd}
                   draft={bi(
-                    `我在 ${registration.node.controller_ip} 上执行了安装命令，但页面一直显示等待连接。下面是终端输出：\n`,
-                    `I ran the install command on ${registration.node.controller_ip} but it's still waiting to connect. Here is the terminal output:\n`,
+                    `我在 ${registration ? registration.node.controller_ip : targetRegistration!.agent.ip} 上执行了安装命令，但页面一直显示等待连接。下面是终端输出：\n`,
+                    `I ran the install command on ${registration ? registration.node.controller_ip : targetRegistration!.agent.ip} but it's still waiting to connect. Here is the terminal output:\n`,
                   )}
                   label={bi("启动报错？问 AI", "Stuck? Ask AI")}
                 />

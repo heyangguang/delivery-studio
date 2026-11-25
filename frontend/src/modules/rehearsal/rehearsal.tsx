@@ -8661,16 +8661,14 @@ function RehearsalSessionView({
                     <div className="rh-drift-tbl-box">
                       <table className="rh-drift-tbl">
                         <colgroup>
-                          <col style={{ width: "86px" }} />
-                          <col style={{ width: "120px" }} />
-                          <col style={{ width: "26%" }} />
-                          <col style={{ width: "22%" }} />
-                          <col />
+                          <col style={{ width: "25%" }} />
+                          <col style={{ width: "19%" }} />
+                          <col style={{ width: "17%" }} />
+                          <col style={{ width: "39%" }} />
                         </colgroup>
                         <thead>
                           <tr>
-                            <th>{bi("节点", "Node")}</th>
-                            <th>{bi("地址", "Address")}</th>
+                            <th>{bi("节点与地址", "Node & IP")}</th>
                             <th>{bi("角色比对（初始 → 现场）", "Role (Initial → Live)")}</th>
                             <th>{bi("版本", "Version")}</th>
                             <th>{bi("运行状态", "Status")}</th>
@@ -8695,22 +8693,30 @@ function RehearsalSessionView({
                               !isVerPlaceholder &&
                               verText.length <= 24 &&
                               !/[\u4e00-\u9fa5]/.test(verText);
-                            const roleSample = `${liveRole} ${initRole}`.toLowerCase();
-                            const roleTone = /(leader|primary|master|主库|主节点|读写|writer)/i.test(
-                              roleSample,
-                            )
-                              ? "primary"
-                              : /(standby|replica|slave|secondary|follower|从库|从节点|备库|只读|reader)/i.test(
-                                    roleSample,
-                                  )
-                                ? "replica"
-                                : "neutral";
+                            const roleKindOf = (txt: string) => {
+                              if (/(leader|primary|master|主库|主节点|读写|writer)/i.test(txt)) {
+                                return "primary" as const;
+                              }
+                              if (/(standby|replica|slave|secondary|follower|从库|从节点|备库|只读|reader)/i.test(txt)) {
+                                return "replica" as const;
+                              }
+                              return "neutral" as const;
+                            };
+                            const initKind = roleKindOf(initRole);
+                            const liveKind = roleKindOf(liveRole);
+                            const roleFlipped =
+                              changed &&
+                              initKind !== "neutral" &&
+                              liveKind !== "neutral" &&
+                              initKind !== liveKind;
+                            const roleTone =
+                              liveKind !== "neutral" ? liveKind : initKind;
                             const statusText = (
                               h.status || bi("正常", "Healthy")
                             ).trim();
                             const cleanedStatus = statusText
                               .replace(
-                                /(?:接收及回放\s*)?(?:lag|延迟)\s*(?:均为|为|=|:|：)?\s*0(?:\s*(?:bytes?|kb|mb|ms|s))?/gi,
+                                /(?:接收及回放\s*|复制\s*)?(?:lag|延迟)(?:\s+in\s+\w+)?\s*(?:均为|为|=|:|：)?\s*0(?:\s*(?:bytes?|kb|mb|ms|s))?/gi,
                                 "",
                               )
                               .replace(/无\s*(?:pending_restart|延迟|lag|异常)/gi, "");
@@ -8723,14 +8729,18 @@ function RehearsalSessionView({
                             return (
                               <tr key={h.name + h.ip}>
                                 <td className="rh-cell-node">
-                                  <b>{h.name}</b>
+                                  <div className="rh-node-id">
+                                    <b title={h.name}>{h.name}</b>
+                                    {h.ip && (
+                                      <span className="rh-node-ip mono">{h.ip}</span>
+                                    )}
+                                  </div>
                                 </td>
-                                <td className="rh-cell-ip mono">{h.ip || "—"}</td>
                                 <td className="rh-cell-role">
                                   {changed ? (
                                     compactRole ? (
                                       <span
-                                        className={`rh-role-shift${r.drift!.drifted ? "" : ` is-soft tone-${roleTone}`}`}
+                                        className={`rh-role-shift${roleFlipped ? "" : ` is-soft tone-${roleTone}`}`}
                                       >
                                         <i className="rh-role-dot" aria-hidden />
                                         <span>{initRole}</span>
@@ -8749,7 +8759,7 @@ function RehearsalSessionView({
                                         </div>
                                         <div className="rh-role-row">
                                           <span
-                                            className={`rh-mini-lbl ${r.drift!.drifted ? "is-warn" : "is-live"}`}
+                                            className={`rh-mini-lbl ${roleFlipped ? "is-warn" : "is-live"}`}
                                           >
                                             {bi("现场", "Live")}
                                           </span>

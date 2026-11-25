@@ -6,7 +6,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { Button, Input, Message, Modal, Popover, Tooltip } from "@arco-design/web-react";
+import { Button, Checkbox, Input, Message, Modal, Popover, Tooltip } from "@arco-design/web-react";
 import {
   IconAlignLeft,
   IconArrowDown,
@@ -21,6 +21,7 @@ import {
   IconDownload,
   IconEdit,
   IconExclamationCircleFill,
+  IconFilter,
   IconInfoCircle,
   IconLaunch,
   IconList,
@@ -57,8 +58,9 @@ import {
   putCached,
   useAIStatus,
   useMedia,
+  useStored,
 } from "../../shared/shared";
-import { AppGlyph, Segmented, StatusBadge, StatusDot } from "../../design/ui";
+import { AppGlyph, FilterChip, Kbd, Segmented, StatusBadge, StatusDot } from "../../design/ui";
 import { dispatchExecLaunchIntent, StepHotfixDrawer } from "../projects/stephotfix";
 import "./monitor.css";
 
@@ -1162,11 +1164,85 @@ export function ExecutionMonitorPage({
   const [railHidden, setRailHidden] = useState(() => compact);
   const prevCompactRef = useRef(compact);
   const prevNarrowRef = useRef(narrow);
-  const [railSearch, setRailSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<RailStatusFilter>("all");
-  const [appFilter, setAppFilter] = useState<string>("all");
+
+  type MonitorRange = "all" | "today" | "7d" | "30d";
+  type MonitorSort = "new" | "old" | "name";
+  type MonitorGroup = "day" | "app" | "none";
+  type MonitorFilter = {
+    q: string;
+    status: RailStatusFilter;
+    apps: string[];
+    range: MonitorRange;
+    sort: MonitorSort;
+    group: MonitorGroup;
+  };
+  const MF0: MonitorFilter = useMemo(
+    () => ({
+      q: "",
+      status: "all",
+      apps: [],
+      range: "all",
+      sort: "new",
+      group: "day",
+    }),
+    [],
+  );
+  const [storedFilter, setStoredFilter] = useStored<MonitorFilter>("mh-mon-filters", MF0);
+  const mf: MonitorFilter = useMemo(
+    () => ({
+      ...MF0,
+      ...storedFilter,
+      q: typeof storedFilter.q === "string" ? storedFilter.q : "",
+      apps: Array.isArray(storedFilter.apps) ? storedFilter.apps : [],
+      status: ["all", "active", "failed", "done"].includes(storedFilter.status)
+        ? storedFilter.status
+        : "all",
+      range: ["all", "today", "7d", "30d"].includes(storedFilter.range)
+        ? storedFilter.range
+        : "all",
+      sort: ["new", "old", "name"].includes(storedFilter.sort)
+        ? storedFilter.sort
+        : "new",
+      group: ["day", "app", "none"].includes(storedFilter.group)
+        ? storedFilter.group
+        : "day",
+    }),
+    [MF0, storedFilter],
+  );
+  const setMF = (patch: Partial<MonitorFilter>) =>
+    setStoredFilter((cur) => ({ ...MF0, ...cur, ...patch }));
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [appSearch, setAppSearch] = useState("");
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const listBodyRef = useRef<HTMLDivElement>(null);
   const [ind, setInd] = useState<{ y: number; h: number } | null>(null);
+
+  const rangeLabel: Record<MonitorRange, string> = {
+    all: bi("不限", "Any time"),
+    today: bi("今天", "Today"),
+    "7d": bi("近 7 天", "Last 7d"),
+    "30d": bi("近 30 天", "Last 30d"),
+  };
+
+  useEffect(() => {
+    const onSlash = (e: KeyboardEvent) => {
+      if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (
+        t &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.isContentEditable ||
+          t.closest(".arco-modal,.arco-drawer"))
+      )
+        return;
+      e.preventDefault();
+      if (railHidden) setRailHidden(false);
+      requestAnimationFrame(() => searchInputRef.current?.focus());
+    };
+    window.addEventListener("keydown", onSlash);
+    return () => window.removeEventListener("keydown", onSlash);
+  }, [railHidden]);
 
   useEffect(() => {
     // Auto-collapse rail when resizing into narrow/compact viewports; auto-restore above 1100px.
@@ -1231,44 +1307,102 @@ export function ExecutionMonitorPage({
     }
   }, [selectedJob, items]);
 
+  const matchMonitorItem = useCallback(
+    (it: MonitorListItem, f: typeof mf, skip?: "status" | "apps") => {
+      const q = f.q.trim().toLowerCase();
+      if (
+        q &&
+        !(
+          it.cluster.toLowerCase().includes(q) ||
+          it.app_name.toLowerCase().includes(q) ||
+          (it.executor_name || "").toLowerCase().includes(q)
+        )
+      ) {
+        return false;
+      }
+      if (skip !== "status") {
+        if (f.status === "active" && !it.active) return false;
+        if (f.status === "failed" && it.state !== "failed") return false;
+        if (f.status === "done" && (it.active || it.state === "failed")) return false;
+      }
+      const appKey = it.app_id || it.app_name;
+      if (skip !== "apps" && f.apps.length > 0 && !f.apps.includes(appKey)) {
+        return false;
+      }
+      if (f.range !== "all") {
+        const now = new Date();
+        const since =
+          f.range === "today"
+            ? new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+            : f.range === "7d"
+              ? now.getTime() - 7 * 86400000
+              : now.getTime() - 30 * 86400000;
+        const ts = Date.parse(it.updated || it.created);
+        if (Number.isFinite(ts) && ts < since) return false;
+      }
+      return true;
+    },
+    [],
+  );
+
   const statusCounts = useMemo(() => {
+    const base = items.filter((it) => matchMonitorItem(it, mf, "status"));
     let active = 0;
     let failed = 0;
     let done = 0;
-    for (const it of items) {
+    for (const it of base) {
       if (it.active) active++;
       else if (it.state === "failed") failed++;
       else done++;
     }
-    return { all: items.length, active, failed, done };
-  }, [items]);
+    return { all: base.length, active, failed, done };
+  }, [items, mf, matchMonitorItem]);
 
-  const appCounts = useMemo(() => {
-    const m = new Map<string, { id: string; name: string; count: number }>();
+  const allApps = useMemo(() => {
+    const m = new Map<string, { id: string; name: string; total: number }>();
     for (const it of items) {
       const id = it.app_id || it.app_name;
       const cur = m.get(id);
-      if (cur) cur.count++;
-      else m.set(id, { id, name: it.app_name || id, count: 1 });
+      if (cur) cur.total++;
+      else m.set(id, { id, name: it.app_name || id, total: 1 });
     }
-    return [...m.values()].sort((a, b) => b.count - a.count);
+    return [...m.values()].sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
   }, [items]);
 
+  const appNameMap = useMemo(
+    () => new Map(allApps.map((a) => [a.id, a.name])),
+    [allApps],
+  );
+
+  const facetAppCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    items
+      .filter((it) => matchMonitorItem(it, mf, "apps"))
+      .forEach((it) => {
+        const id = it.app_id || it.app_name;
+        m.set(id, (m.get(id) || 0) + 1);
+      });
+    return m;
+  }, [items, mf, matchMonitorItem]);
+
   const filteredItems = useMemo(() => {
-    const q = railSearch.trim().toLowerCase();
-    return items.filter((it) => {
-      if (statusFilter === "active" && !it.active) return false;
-      if (statusFilter === "failed" && it.state !== "failed") return false;
-      if (statusFilter === "done" && (it.active || it.state === "failed")) return false;
-      if (appFilter !== "all" && (it.app_id || it.app_name) !== appFilter) return false;
-      if (!q) return true;
-      return (
-        it.cluster.toLowerCase().includes(q) ||
-        it.app_name.toLowerCase().includes(q) ||
-        (it.executor_name || "").toLowerCase().includes(q)
-      );
-    });
-  }, [items, statusFilter, appFilter, railSearch]);
+    const matched = items.filter((it) => matchMonitorItem(it, mf));
+    return matched.sort(
+      mf.sort === "name"
+        ? (a, b) => a.cluster.localeCompare(b.cluster)
+        : mf.sort === "old"
+          ? (a, b) => (a.updated || a.created).localeCompare(b.updated || b.created)
+          : (a, b) => (b.updated || b.created).localeCompare(a.updated || a.created),
+    );
+  }, [items, mf, matchMonitorItem]);
+
+  const extraFilters =
+    mf.apps.length +
+    (mf.range !== "all" ? 1 : 0) +
+    (mf.sort !== "new" ? 1 : 0) +
+    (mf.group !== "day" ? 1 : 0);
+  const isFiltered = Boolean(mf.q.trim()) || mf.status !== "all" || extraFilters > 0;
+  const clearAllFilters = () => setStoredFilter(MF0);
 
   const canManageNodes = can("execution.manage");
 
@@ -1402,54 +1536,212 @@ export function ExecutionMonitorPage({
 
           {centerNav}
 
-          <Input
-            prefix={<IconSearch />}
-            allowClear
-            value={railSearch}
-            onChange={setRailSearch}
-            placeholder={bi("搜索集群、组件或节点", "Search clusters, apps, runners")}
-            aria-label={bi("搜索集群", "Search clusters")}
-          />
-
-          <div className="mon-status-seg">
-            <Segmented<RailStatusFilter>
-              size="sm"
-              label={bi("按执行状态筛选", "Filter by execution status")}
-              value={statusFilter}
-              onChange={setStatusFilter}
-              options={[
-                { value: "all", label: bi("全部", "All"), count: statusCounts.all },
-                { value: "active", label: bi("运行", "Live"), count: statusCounts.active },
-                { value: "failed", label: bi("失败", "Fail"), count: statusCounts.failed },
-                { value: "done", label: bi("通过", "Pass"), count: statusCounts.done },
-              ]}
+          <div className="search-row">
+            <Input
+              ref={(r) => {
+                searchInputRef.current =
+                  (r as unknown as { dom?: HTMLInputElement })?.dom ?? null;
+              }}
+              prefix={<IconSearch />}
+              suffix={!mf.q ? <Kbd>/</Kbd> : undefined}
+              allowClear
+              value={mf.q}
+              onChange={(v) => setMF({ q: v })}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && filteredItems[0]) {
+                  go({ name: "executions", id: filteredItems[0].job_id });
+                }
+                if (e.key === "Escape") {
+                  setMF({ q: "" });
+                  (e.target as HTMLInputElement).blur();
+                }
+              }}
+              placeholder={bi("搜索集群、应用或节点", "Search clusters, apps, nodes…")}
+              aria-label={bi("搜索执行任务", "Search execution tasks")}
             />
+            <Popover
+              className="fpanel-pop"
+              trigger="click"
+              position="bl"
+              triggerProps={{ autoFitPosition: true }}
+              popupVisible={filterOpen}
+              onVisibleChange={(vis) => {
+                setFilterOpen(vis);
+                if (!vis) setAppSearch("");
+              }}
+              unmountOnExit
+              content={
+                <div
+                  className="fpanel"
+                  role="dialog"
+                  aria-label={bi("筛选执行任务", "Filter execution tasks")}
+                >
+                  {allApps.length > 0 && (
+                    <section>
+                      <h4>{bi("应用", "Application")}</h4>
+                      {allApps.length > 6 && (
+                        <Input
+                          size="small"
+                          allowClear
+                          prefix={<IconSearch />}
+                          placeholder={bi("找应用", "Find app")}
+                          value={appSearch}
+                          onChange={setAppSearch}
+                          aria-label={bi("在应用中查找", "Filter applications")}
+                        />
+                      )}
+                      <div className="fpanel-apps">
+                        {allApps
+                          .filter((a) =>
+                            `${a.name} ${a.id}`
+                              .toLowerCase()
+                              .includes(appSearch.trim().toLowerCase()),
+                          )
+                          .map((a) => (
+                            <Checkbox
+                              key={a.id}
+                              checked={mf.apps.includes(a.id)}
+                              onChange={(c) =>
+                                setMF({
+                                  apps: c
+                                    ? [...mf.apps, a.id]
+                                    : mf.apps.filter((x) => x !== a.id),
+                                })
+                              }
+                            >
+                              <span className="fpanel-app">
+                                <AppGlyph id={a.id} size={18} />
+                                <span>{a.name}</span>
+                                <em className="num">{facetAppCounts.get(a.id) || 0}</em>
+                              </span>
+                            </Checkbox>
+                          ))}
+                      </div>
+                    </section>
+                  )}
+                  <section>
+                    <h4>{bi("更新时间", "Updated")}</h4>
+                    <Segmented<MonitorRange>
+                      size="sm"
+                      label={bi("更新时间", "Updated")}
+                      value={mf.range}
+                      onChange={(v) => setMF({ range: v })}
+                      options={(["all", "today", "7d", "30d"] as MonitorRange[]).map(
+                        (v) => ({ value: v, label: rangeLabel[v] }),
+                      )}
+                    />
+                  </section>
+                  <section>
+                    <h4>{bi("排序", "Sort")}</h4>
+                    <Segmented<MonitorSort>
+                      size="sm"
+                      label={bi("排序", "Sort")}
+                      value={mf.sort}
+                      onChange={(v) => setMF({ sort: v })}
+                      options={[
+                        { value: "new", label: bi("最新", "Newest") },
+                        { value: "old", label: bi("最早", "Oldest") },
+                        { value: "name", label: bi("名称", "Name") },
+                      ]}
+                    />
+                  </section>
+                  <section>
+                    <h4>{bi("分组", "Group by")}</h4>
+                    <Segmented<MonitorGroup>
+                      size="sm"
+                      label={bi("分组", "Group by")}
+                      value={mf.sort === "name" && mf.group === "day" ? "none" : mf.group}
+                      onChange={(v) => setMF({ group: v })}
+                      options={[
+                        {
+                          value: "day",
+                          label: bi("按日期", "Date"),
+                          disabled: mf.sort === "name",
+                        },
+                        { value: "app", label: bi("按应用", "Application") },
+                        { value: "none", label: bi("不分组", "None") },
+                      ]}
+                    />
+                  </section>
+                  <footer>
+                    <button
+                      type="button"
+                      className="link quiet"
+                      onClick={() =>
+                        setMF({ apps: [], range: "all", sort: "new", group: "day" })
+                      }
+                    >
+                      {bi("恢复默认", "Reset")}
+                    </button>
+                    <Button
+                      size="small"
+                      type="primary"
+                      onClick={() => setFilterOpen(false)}
+                    >
+                      {bi("完成", "Done")}
+                    </Button>
+                  </footer>
+                </div>
+              }
+            >
+              <Button
+                className={`filter-btn ${extraFilters > 0 ? "on" : ""}`}
+                icon={<IconFilter />}
+                aria-label={bi(
+                  `筛选${extraFilters ? `，已设置 ${extraFilters} 项` : ""}`,
+                  `Filter${extraFilters ? ` (${extraFilters} active)` : ""}`,
+                )}
+                aria-expanded={filterOpen}
+              >
+                {extraFilters > 0 && <em className="num">{extraFilters}</em>}
+              </Button>
+            </Popover>
           </div>
 
-          {appCounts.length > 1 && (
-            <div
-              className="mon-app-strip"
-              role="group"
-              aria-label={bi("按组件快捷筛选", "Quick filter by component")}
-            >
-              <button
-                type="button"
-                className={`mon-app-chip ${appFilter === "all" ? "on" : ""}`}
-                onClick={() => setAppFilter("all")}
-              >
-                {bi("全部", "All")}
-              </button>
-              {appCounts.map((a) => (
-                <button
-                  key={a.id}
-                  type="button"
-                  className={`mon-app-chip ${appFilter === a.id ? "on" : ""}`}
-                  onClick={() => setAppFilter(appFilter === a.id ? "all" : a.id)}
-                >
-                  <span>{a.name}</span>
-                  <em className="num">{a.count}</em>
-                </button>
+          <Segmented<RailStatusFilter>
+            size="sm"
+            label={bi("按执行状态筛选", "Filter by execution status")}
+            value={mf.status}
+            onChange={(v) => setMF({ status: v })}
+            options={[
+              { value: "all", label: bi("全部", "All"), count: statusCounts.all },
+              { value: "active", label: bi("运行", "Live"), count: statusCounts.active },
+              { value: "failed", label: bi("失败", "Fail"), count: statusCounts.failed },
+              { value: "done", label: bi("通过", "Pass"), count: statusCounts.done },
+            ]}
+          />
+
+          {(mf.apps.length > 0 || mf.range !== "all") && (
+            <div className="active-filters tight">
+              {mf.apps.map((id) => (
+                <FilterChip
+                  key={id}
+                  size="small"
+                  label={appNameMap.get(id) || id}
+                  onClose={() => setMF({ apps: mf.apps.filter((x) => x !== id) })}
+                />
               ))}
+              {mf.range !== "all" && (
+                <FilterChip
+                  size="small"
+                  label={rangeLabel[mf.range]}
+                  onClose={() => setMF({ range: "all" })}
+                />
+              )}
+            </div>
+          )}
+
+          {isFiltered && listData && (
+            <div className="result-line num" aria-live="polite">
+              {bi(
+                `显示 ${filteredItems.length} / ${items.length} 个任务`,
+                `Showing ${filteredItems.length} of ${items.length} runs`,
+              )}
+              {filteredItems.length > 0 && (
+                <button type="button" className="link quiet" onClick={clearAllFilters}>
+                  {bi("清除筛选", "Clear filters")}
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -1476,34 +1768,44 @@ export function ExecutionMonitorPage({
                     )
                   : bi("没有符合当前筛选条件的集群", "No matching clusters")}
               </p>
-              {(statusFilter !== "all" || appFilter !== "all" || railSearch) && (
-                <Button
-                  size="small"
-                  onClick={() => {
-                    setStatusFilter("all");
-                    setAppFilter("all");
-                    setRailSearch("");
-                  }}
-                >
+              {isFiltered && (
+                <Button size="small" onClick={clearAllFilters}>
                   {bi("重置筛选", "Reset filters")}
                 </Button>
               )}
             </div>
           ) : (
             (() => {
+              const effGroup: MonitorGroup =
+                mf.sort === "name" && mf.group === "day" ? "none" : mf.group;
               const groups: { key: string; items: MonitorListItem[] }[] = [];
-              for (const it of filteredItems) {
-                const key = dayLabel(it.updated);
-                let g = groups[groups.length - 1];
-                if (!g || g.key !== key) {
-                  g = { key, items: [] };
-                  groups.push(g);
+              if (effGroup === "none") {
+                groups.push({ key: "", items: filteredItems });
+              } else if (effGroup === "app") {
+                const byApp = new Map<string, MonitorListItem[]>();
+                for (const it of filteredItems) {
+                  const key = it.app_name || it.app_id || bi("其他", "Other");
+                  const list = byApp.get(key) || [];
+                  list.push(it);
+                  byApp.set(key, list);
                 }
-                g.items.push(it);
+                for (const [key, list] of byApp.entries()) {
+                  groups.push({ key, items: list });
+                }
+              } else {
+                for (const it of filteredItems) {
+                  const key = dayLabel(it.updated);
+                  let g = groups[groups.length - 1];
+                  if (!g || g.key !== key) {
+                    g = { key, items: [] };
+                    groups.push(g);
+                  }
+                  g.items.push(it);
+                }
               }
               return groups.map((g) => (
-                <div key={g.key} role="group" aria-label={g.key}>
-                  <div className="list-day">{g.key}</div>
+                <div key={g.key || "__all"} role="group" aria-label={g.key || bi("全部任务", "All runs")}>
+                  {g.key && <div className="list-day">{g.key}</div>}
                   {g.items.map((it) => {
                     const pct =
                       it.total_steps > 0

@@ -7,6 +7,7 @@ import {
   Message,
   Modal,
   Popconfirm,
+  Popover,
   Skeleton,
   Switch,
   Tooltip,
@@ -22,6 +23,7 @@ import {
   IconDesktop,
   IconDownload,
   IconExclamationCircle,
+  IconFilter,
   IconInfoCircle,
   IconLink,
   IconPlus,
@@ -43,7 +45,7 @@ import {
   useMedia,
 } from "../../shared/shared";
 import { go } from "../../app/router";
-import { Segmented, StatusBadge } from "../../design/ui";
+import { FilterChip, Kbd, Segmented, StatusBadge } from "../../design/ui";
 import { bi, biv, getLang, useLang, withLang } from "../../app/i18n";
 import {
   AutomationAgentView,
@@ -369,11 +371,33 @@ export function ExecutionNodes({
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [roleFilter, setRoleFilter] = useState<RoleFilter>(initialRole);
+  const [onlyWritable, setOnlyWritable] = useState(false);
+  const [agentSort, setAgentSort] = useState<"status" | "name" | "heartbeat">("status");
+  const [filterOpen, setFilterOpen] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   useEffect(() => {
     if (initialRole === "target") {
       setRoleFilter("target");
     }
   }, [initialRole]);
+  useEffect(() => {
+    const onSlash = (e: KeyboardEvent) => {
+      if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (
+        t &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.isContentEditable ||
+          t.closest(".arco-modal,.arco-drawer"))
+      )
+        return;
+      e.preventDefault();
+      searchInputRef.current?.focus();
+    };
+    window.addEventListener("keydown", onSlash);
+    return () => window.removeEventListener("keydown", onSlash);
+  }, []);
   const mounted = useRef(true);
   const busyLockRef = useRef(false);
   const bundleLockRef = useRef(false);
@@ -891,9 +915,9 @@ export function ExecutionNodes({
   };
 
   const rows = useMemo(() => {
-    if (roleFilter === "target") return [];
+    if (roleFilter === "target" || onlyWritable) return [];
     const q = query.trim().toLowerCase();
-    return all.filter((n) => {
+    const list = all.filter((n) => {
       if (roleFilter === "upgrade" && !needsUpgrade(n)) return false;
       const matchStatus =
         statusFilter === "all" ||
@@ -908,12 +932,20 @@ export function ExecutionNodes({
         s.toLowerCase().includes(q),
       );
     });
-  }, [all, roleFilter, statusFilter, query]);
+    if (agentSort === "name") {
+      return [...list].sort((a, b) => a.name.localeCompare(b.name));
+    }
+    if (agentSort === "heartbeat") {
+      return [...list].sort((a, b) => (b.last_seen || "").localeCompare(a.last_seen || ""));
+    }
+    return list;
+  }, [all, roleFilter, onlyWritable, statusFilter, query, agentSort]);
 
   const agentRows = useMemo(() => {
     if (roleFilter === "controller" || roleFilter === "upgrade") return [];
     const q = query.trim().toLowerCase();
-    return allAgents.filter((a) => {
+    const list = allAgents.filter((a) => {
+      if (onlyWritable && !a.allow_mutating) return false;
       const matchStatus =
         statusFilter === "all" ||
         (statusFilter === "online"
@@ -930,7 +962,27 @@ export function ExecutionNodes({
         ...(a.matched_clusters || []),
       ].some((s) => s.toLowerCase().includes(q));
     });
-  }, [allAgents, roleFilter, statusFilter, query]);
+    if (agentSort === "name") {
+      return [...list].sort((a, b) => a.host.localeCompare(b.host));
+    }
+    if (agentSort === "heartbeat") {
+      return [...list].sort((a, b) => (b.last_seen || "").localeCompare(a.last_seen || ""));
+    }
+    return list;
+  }, [allAgents, roleFilter, onlyWritable, statusFilter, query, agentSort]);
+
+  const extraFilters =
+    (roleFilter !== "all" ? 1 : 0) +
+    (onlyWritable ? 1 : 0) +
+    (agentSort !== "status" ? 1 : 0);
+  const hasAnyFilter = Boolean(query.trim()) || statusFilter !== "all" || extraFilters > 0;
+  const resetAllFilters = () => {
+    setQuery("");
+    setStatusFilter("all");
+    setRoleFilter("all");
+    setOnlyWritable(false);
+    setAgentSort("status");
+  };
 
   const activeSelection = useMemo<SelectedItem | null>(() => {
     if (selected?.role === "controller" && rows.some((n) => n.id === selected.id)) {
@@ -1009,38 +1061,156 @@ sudo systemctl status middleware-execution --no-pager`;
 
             {centerNav}
 
-            <Input
-              prefix={<IconSearch />}
-              allowClear
-              value={query}
-              onChange={setQuery}
-              placeholder={bi("搜索 Agent 名称、IP 或集群", "Search Agent, IP, or cluster")}
-              aria-label={bi("搜索 Agent", "Search Agents")}
-            />
-
-            <div className="ec-rail-seg">
-              <Segmented<StatusFilter>
-                size="sm"
-                label={bi("按在线状态筛选", "Filter by online status")}
-                value={statusFilter}
-                onChange={setStatusFilter}
-                options={[
-                  { value: "all", label: bi("全部", "All"), count: statusCounts.all },
-                  { value: "online", label: bi("在线", "On"), count: statusCounts.online },
-                  { value: "offline", label: bi("离线", "Off"), count: statusCounts.offline },
-                  { value: "disabled", label: bi("停用", "Off"), count: statusCounts.disabled },
-                ]}
+            <div className="search-row">
+              <Input
+                ref={(r) => {
+                  searchInputRef.current =
+                    (r as unknown as { dom?: HTMLInputElement })?.dom ?? null;
+                }}
+                prefix={<IconSearch />}
+                suffix={!query ? <Kbd>/</Kbd> : undefined}
+                allowClear
+                value={query}
+                onChange={setQuery}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    setQuery("");
+                    (e.target as HTMLInputElement).blur();
+                  }
+                }}
+                placeholder={bi("搜索 Agent 名称、IP 或集群", "Search Agent, IP, or cluster…")}
+                aria-label={bi("搜索 Agent", "Search Agents")}
               />
+              <Popover
+                className="fpanel-pop"
+                trigger="click"
+                position="bl"
+                triggerProps={{ autoFitPosition: true }}
+                popupVisible={filterOpen}
+                onVisibleChange={setFilterOpen}
+                unmountOnExit
+                content={
+                  <div
+                    className="fpanel"
+                    role="dialog"
+                    aria-label={bi("筛选 Agent", "Filter Agents")}
+                  >
+                    <section>
+                      <h4>{bi("Agent 角色", "Agent Role")}</h4>
+                      <Segmented<RoleFilter>
+                        size="sm"
+                        label={bi("Agent 角色", "Agent Role")}
+                        value={roleFilter === "upgrade" ? "controller" : roleFilter}
+                        onChange={(v) => setRoleFilter(v)}
+                        options={[
+                          { value: "all", label: bi("全部", "All") },
+                          { value: "controller", label: bi("控制机", "Control") },
+                          { value: "target", label: bi("目标机", "Target") },
+                        ]}
+                      />
+                    </section>
+                    {(upgradeCount > 0 || allAgents.length > 0) && (
+                      <section>
+                        <h4>{bi("属性筛选", "Attributes")}</h4>
+                        {upgradeCount > 0 && (
+                          <Checkbox
+                            checked={roleFilter === "upgrade"}
+                            onChange={(c) => setRoleFilter(c ? "upgrade" : "all")}
+                          >
+                            <span className="fpanel-app">
+                              <span>{bi("仅显示可升级控制机", "Upgradable control agents only")}</span>
+                              <em className="num">{upgradeCount}</em>
+                            </span>
+                          </Checkbox>
+                        )}
+                        {allAgents.length > 0 && (
+                          <Checkbox
+                            checked={onlyWritable}
+                            onChange={setOnlyWritable}
+                          >
+                            <span className="fpanel-app">
+                              <span>{bi("仅显示允许写操作目标机", "Writable target agents only")}</span>
+                              <em className="num">
+                                {allAgents.filter((a) => a.allow_mutating).length}
+                              </em>
+                            </span>
+                          </Checkbox>
+                        )}
+                      </section>
+                    )}
+                    <section>
+                      <h4>{bi("排序", "Sort")}</h4>
+                      <Segmented<"status" | "name" | "heartbeat">
+                        size="sm"
+                        label={bi("排序", "Sort")}
+                        value={agentSort}
+                        onChange={setAgentSort}
+                        options={[
+                          { value: "status", label: bi("状态优先", "Status") },
+                          { value: "name", label: bi("名称", "Name") },
+                          { value: "heartbeat", label: bi("最近心跳", "Heartbeat") },
+                        ]}
+                      />
+                    </section>
+                    <footer>
+                      <button
+                        type="button"
+                        className="link quiet"
+                        onClick={() => {
+                          setRoleFilter("all");
+                          setOnlyWritable(false);
+                          setAgentSort("status");
+                        }}
+                      >
+                        {bi("恢复默认", "Reset")}
+                      </button>
+                      <Button
+                        size="small"
+                        type="primary"
+                        onClick={() => setFilterOpen(false)}
+                      >
+                        {bi("完成", "Done")}
+                      </Button>
+                    </footer>
+                  </div>
+                }
+              >
+                <Button
+                  className={`filter-btn ${extraFilters > 0 ? "on" : ""}`}
+                  icon={<IconFilter />}
+                  aria-label={bi(
+                    `筛选${extraFilters ? `，已设置 ${extraFilters} 项` : ""}`,
+                    `Filter${extraFilters ? ` (${extraFilters} active)` : ""}`,
+                  )}
+                  aria-expanded={filterOpen}
+                >
+                  {extraFilters > 0 && <em className="num">{extraFilters}</em>}
+                </Button>
+              </Popover>
             </div>
 
+            <Segmented<StatusFilter>
+              size="sm"
+              label={bi("按在线状态筛选", "Filter by online status")}
+              value={statusFilter}
+              onChange={setStatusFilter}
+              options={[
+                { value: "all", label: bi("全部", "All"), count: statusCounts.all },
+                { value: "online", label: bi("在线", "On"), count: statusCounts.online },
+                { value: "offline", label: bi("离线", "Off"), count: statusCounts.offline },
+                { value: "disabled", label: bi("停用", "Off"), count: statusCounts.disabled },
+              ]}
+            />
+
             <div
-              className="ec-role-pills"
+              className="dm-filter-bar"
               role="group"
               aria-label={bi("按 Agent 角色筛选", "Filter by Agent role")}
             >
               <button
                 type="button"
-                className={`ec-role-pill ${roleFilter === "all" ? "on" : ""}`}
+                className={`dm-filter-pill ${roleFilter === "all" ? "on" : ""}`}
+                aria-pressed={roleFilter === "all"}
                 onClick={() => setRoleFilter("all")}
               >
                 {bi("全部", "All")}
@@ -1048,40 +1218,67 @@ sudo systemctl status middleware-execution --no-pager`;
               {(canManage || all.length > 0) && (
                 <button
                   type="button"
-                  className={`ec-role-pill ${roleFilter === "controller" ? "on" : ""}`}
+                  className={`dm-filter-pill is-auto ${roleFilter === "controller" ? "on" : ""}`}
+                  aria-pressed={roleFilter === "controller"}
                   onClick={() =>
                     setRoleFilter(roleFilter === "controller" ? "all" : "controller")
                   }
                 >
                   <IconDesktop style={{ fontSize: 11 }} />
                   <span>{bi("控制机", "Control")}</span>
-                  <em>{all.length}</em>
+                  <em className="num">{all.length}</em>
                 </button>
               )}
               <button
                 type="button"
-                className={`ec-role-pill ${roleFilter === "target" ? "on" : ""}`}
+                className={`dm-filter-pill is-imported ${roleFilter === "target" ? "on" : ""}`}
+                aria-pressed={roleFilter === "target"}
                 onClick={() =>
                   setRoleFilter(roleFilter === "target" ? "all" : "target")
                 }
               >
                 <IconLink style={{ fontSize: 11 }} />
                 <span>{bi("目标机", "Target")}</span>
-                <em>{allAgents.length}</em>
+                <em className="num">{allAgents.length}</em>
               </button>
               {upgradeCount > 0 && (
                 <button
                   type="button"
-                  className={`ec-role-pill is-upgrade ${roleFilter === "upgrade" ? "on" : ""}`}
+                  className={`dm-filter-pill ${roleFilter === "upgrade" ? "on" : ""}`}
+                  aria-pressed={roleFilter === "upgrade"}
                   onClick={() =>
                     setRoleFilter(roleFilter === "upgrade" ? "all" : "upgrade")
                   }
                 >
                   <span>{bi("可升级", "Upgrade")}</span>
-                  <em>{upgradeCount}</em>
+                  <em className="num">{upgradeCount}</em>
                 </button>
               )}
             </div>
+
+            {onlyWritable && (
+              <div className="active-filters tight">
+                <FilterChip
+                  size="small"
+                  label={bi("仅允许写操作", "Writable only")}
+                  onClose={() => setOnlyWritable(false)}
+                />
+              </div>
+            )}
+
+            {hasAnyFilter && !loadingList && (
+              <div className="result-line num" aria-live="polite">
+                {bi(
+                  `显示 ${rows.length + agentRows.length} / ${all.length + allAgents.length} 台 Agent`,
+                  `Showing ${rows.length + agentRows.length} of ${all.length + allAgents.length} Agents`,
+                )}
+                {rows.length + agentRows.length > 0 && (
+                  <button type="button" className="link quiet" onClick={resetAllFilters}>
+                    {bi("清除筛选", "Clear filters")}
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="list-body">
@@ -1870,13 +2067,7 @@ sudo systemctl status middleware-execution --no-pager`;
                   )}
                 </div>
               ) : (
-                <Button
-                  onClick={() => {
-                    setQuery("");
-                    setStatusFilter("all");
-                    setRoleFilter("all");
-                  }}
-                >
+                <Button onClick={resetAllFilters}>
                   {bi("清除筛选", "Clear Filters")}
                 </Button>
               )}

@@ -4,8 +4,8 @@
 .ec-rail-tabs {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin: 0 -16px 2px;
+  gap: 2px;
+  margin: -2px -16px 0;
   padding: 0 12px;
   border-bottom: 1px solid var(--line);
 }
@@ -17,9 +17,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 5px;
   height: 36px;
-  padding: 0 8px;
+  padding: 0 6px;
   color: var(--mute);
   text-decoration: none;
   font-size: 13px;
@@ -40,9 +40,9 @@
 .ec-rail-tab::after {
   content: "";
   position: absolute;
-  left: 10px;
-  right: 10px;
-  bottom: 0;
+  left: 6px;
+  right: 6px;
+  bottom: -1px;
   height: 2px;
   border-radius: 2px 2px 0 0;
   background: var(--ec-accent, var(--brand));
@@ -66,7 +66,7 @@
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  font-size: 13.5px;
+  font-size: 14px;
   line-height: 0;
   color: var(--faint);
   transition: color 0.18s var(--spring);
@@ -110,85 +110,7 @@
   transform: scaleX(1);
 }
 
-/* ---- Compact Left-Rail Controls & Rows for Control Nodes & Agents ---- */
-.ec-rail-seg .seg,
-.ec-rail-seg .arco-radio-group-type-button {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  width: 100%;
-}
-
-.ec-rail-seg .arco-radio-button {
-  margin: 0;
-  text-align: center;
-  min-width: 0;
-}
-
-.ec-rail-seg .arco-radio-button-inner {
-  padding: 0 4px;
-  font-size: 11.5px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.ec-role-pills {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 5px;
-  min-width: 0;
-}
-
-.ec-role-pill {
-  all: unset;
-  box-sizing: border-box;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 24px;
-  padding: 0 8px;
-  border-radius: 6px;
-  font-size: 11.5px;
-  font-weight: 540;
-  color: var(--mute);
-  background: var(--surface);
-  border: 1px solid var(--line);
-  cursor: pointer;
-  white-space: nowrap;
-  flex-shrink: 0;
-  transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease;
-}
-
-.ec-role-pill:hover {
-  color: var(--ink);
-  border-color: var(--line-strong);
-  background: var(--hover);
-}
-
-.ec-role-pill em {
-  font-style: normal;
-  font-size: 11px;
-  opacity: 0.78;
-  font-variant-numeric: tabular-nums;
-}
-
-.ec-role-pill.on {
-  color: var(--brand-ink);
-  background: var(--brand-soft);
-  border-color: var(--brand-line);
-  font-weight: 600;
-}
-
-.ec-role-pill.is-upgrade {
-  color: var(--warn);
-  background: var(--warn-soft);
-  border-color: color-mix(in srgb, var(--warn) 30%, var(--line));
-}
-
-.ec-role-pill.is-upgrade.on {
-  box-shadow: 0 0 0 1px var(--warn);
-}
+/* ---- Left-Rail Groups & Rows for Control Nodes & Agents ---- */
 
 .ec-rail-group {
   display: flex;

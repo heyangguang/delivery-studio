@@ -1140,10 +1140,12 @@ function prefetchExecDetail(jobId: string): Promise<ExecDetailData | null> {
 }
 
 export function ExecutionMonitorPage({
+  centerNav,
   selectedJob,
   initialRun,
   initialStep,
 }: {
+  centerNav?: React.ReactNode;
   selectedJob?: string;
   initialRun?: string;
   initialStep?: string;
@@ -1360,12 +1362,12 @@ export function ExecutionMonitorPage({
       >
         <div className="list-head">
           <div className="list-title">
-            <h1>{bi("任务监控", "Task Monitor")}</h1>
+            <h1>{centerNav ? bi("执行中心", "Execution Center") : bi("任务监控", "Task Monitor")}</h1>
             <div className="mon-list-title-right">
               {listData && (
                 <Tooltip
                   content={bi(
-                    `在线执行节点 ${listData.online_runners} / ${listData.total_runners}${canManageNodes ? " · 点击切换至执行节点" : ""}`,
+                    `在线执行节点 ${listData.online_runners} / ${listData.total_runners}${canManageNodes ? " · 点击切换至控制机" : ""}`,
                     `${listData.online_runners} / ${listData.total_runners} runners online`,
                   )}
                   mini
@@ -1397,6 +1399,8 @@ export function ExecutionMonitorPage({
               )}
             </div>
           </div>
+
+          {centerNav}
 
           <Input
             prefix={<IconSearch />}

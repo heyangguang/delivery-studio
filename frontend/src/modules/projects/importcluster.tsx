@@ -8,6 +8,7 @@ import {
   Select,
   Skeleton,
   Tag,
+  Tooltip,
 } from "@arco-design/web-react";
 import {
   IconArrowLeft,
@@ -939,6 +940,7 @@ function ProbeCodeBlock({
   const [expanded, setExpanded] = useState(false);
   const [aiBarOpen, setAiBarOpen] = useState(false);
   const [focusText, setFocusText] = useState("");
+  const [copied, setCopied] = useState(false);
   const previewLimit = compact ? 9 : 12;
   const lines = useMemo(() => (script ? script.split("\n") : []), [script]);
   const previewText = useMemo(
@@ -959,86 +961,101 @@ function ProbeCodeBlock({
     URL.revokeObjectURL(url);
   };
 
+  const handleCopy = () => {
+    copy(script);
+    setCopied(true);
+    Message.success(bi("已复制 100% 只读采集脚本", "100% read-only probe script copied"));
+    window.setTimeout(() => setCopied(false), 1600);
+  };
+
+  const hasSubMeta = coveredGaps.length > 0 || Boolean(runHint) || Boolean(modelName);
+
   return (
     <div className="imp-probe-box">
       <div className="imp-probe-bar">
         <div className="imp-probe-bar-l">
-          <span className="imp-probe-shield">
-            <IconCheckCircle />
-            <span>
-              {safe
-                ? bi("100% 静态只读安全校验", "100% Static Read-Only Verified")
-                : bi("只读探针脚本", "Read-Only Probe")}
+          <code className="imp-probe-fname" title={filename}>
+            {filename}
+          </code>
+          <Tooltip
+            content={
+              safe
+                ? bi("已通过 100% 静态只读安全校验，绝不修改任何线上配置或进程", "Passed 100% static read-only safety verification")
+                : bi("只读探针采集脚本", "Read-only probe script")
+            }
+            mini
+          >
+            <span className="imp-probe-shield">
+              <IconCheckCircle />
+              <span>{safe ? bi("只读校验", "Read-Only") : bi("只读", "RO")}</span>
             </span>
-          </span>
+          </Tooltip>
           <span className={`imp-probe-mode-tag ${source === "ai" ? "is-ai" : ""}`}>
-            {source === "ai" && <Spark size={11} />}
+            {source === "ai" && <Spark size={10} />}
             {source === "ai"
               ? mode === "gap"
-                ? bi("AI 专项补采", "AI Gap Probe")
-                : bi("AI 精炼定制", "AI Tailored")
+                ? bi("AI 补采", "AI Gap")
+                : bi("AI 定制", "AI Tailored")
               : mode === "gap"
-                ? bi("缺口补采探针", "Gap Probe")
-                : bi("标准全量探针", "Standard Probe")}
+                ? bi("缺口补采", "Gap")
+                : bi("标准探针", "Standard")}
           </span>
           <span className="imp-probe-lines num">
             {lines.length} {bi("行", "lines")}
           </span>
         </div>
+
         <div className="imp-probe-actions">
           {!hideTailorBar && onCustomizeWithAI && aiEnabled && (
-            <Button
-              size="mini"
-              type={aiBarOpen ? "secondary" : "outline"}
-              loading={aiBusy}
-              icon={<Spark size={12} rainbow={!aiBarOpen} />}
+            <button
+              type="button"
+              className={`imp-probe-act is-ai ${aiBarOpen ? "is-on" : ""}`}
+              disabled={aiBusy}
               onClick={() => setAiBarOpen((v) => !v)}
             >
-              {bi("AI 定制", "AI Tailor")}
-            </Button>
+              <Spark size={11} rainbow={!aiBarOpen} />
+              <span>{bi("AI 定制", "AI Tailor")}</span>
+            </button>
           )}
           {lines.length > previewLimit && (
-            <Button
-              size="mini"
-              type="text"
-              icon={expanded ? <IconUp /> : <IconDown />}
+            <button
+              type="button"
+              className="imp-probe-act"
               onClick={() => setExpanded((v) => !v)}
             >
-              {expanded ? bi("收起", "Collapse") : bi("展开全部", "Expand")}
-            </Button>
+              {expanded ? <IconUp /> : <IconDown />}
+              <span>{expanded ? bi("收起", "Fold") : bi("展开", "Expand")}</span>
+            </button>
           )}
-          <Button size="mini" type="outline" icon={<IconDownload />} onClick={downloadScript}>
-            {bi("下载", "Download")}
-          </Button>
-          <Button
-            size="mini"
-            type="secondary"
-            icon={<IconCopy />}
-            onClick={() => {
-              copy(script);
-              Message.success(bi("已复制 100% 只读采集脚本", "100% read-only probe script copied"));
-            }}
+          <button type="button" className="imp-probe-act" onClick={downloadScript}>
+            <IconDownload />
+            <span>{bi("下载", "Download")}</span>
+          </button>
+          <button
+            type="button"
+            className={`imp-probe-act is-primary ${copied ? "is-copied" : ""}`}
+            onClick={handleCopy}
           >
-            {bi("复制脚本", "Copy")}
-          </Button>
+            {copied ? <IconCheck /> : <IconCopy />}
+            <span>{copied ? bi("已复制", "Copied") : bi("复制脚本", "Copy")}</span>
+          </button>
         </div>
       </div>
 
-      <div className="imp-probe-meta-strip">
-        <code className="imp-probe-fname" title={filename}>
-          {filename}
-        </code>
-        {coveredGaps.length > 0 && (
-          <div className="imp-probe-cov">
-            <span>{bi("覆盖：", "Covers:")}</span>
-            {coveredGaps.map((g, i) => (
-              <em key={i}>{g}</em>
-            ))}
-          </div>
-        )}
-        {modelName && <span className="imp-probe-model mono">{modelName}</span>}
-        {runHint && <span className="imp-probe-hint">{runHint}</span>}
-      </div>
+      {hasSubMeta && (
+        <div className="imp-probe-meta-strip">
+          {coveredGaps.length > 0 && (
+            <div className="imp-probe-cov">
+              <span>{bi("覆盖：", "Covers:")}</span>
+              {coveredGaps.map((g, i) => (
+                <em key={i}>{g}</em>
+              ))}
+            </div>
+          )}
+          {modelName && <span className="imp-probe-model mono">{modelName}</span>}
+          {runHint && <span className="imp-probe-hint">{runHint}</span>}
+        </div>
+      )}
 
       {!hideTailorBar && aiBarOpen && onCustomizeWithAI && (
         <div className="imp-probe-ai-bar">
@@ -1050,19 +1067,18 @@ function ProbeCodeBlock({
             onChange={setFocusText}
             onPressEnter={() => void onCustomizeWithAI(focusText)}
             placeholder={bi(
-              "可选：说明现场特点（如容器部署、带 HAProxy/Keepalived、重点采 TLS 证书与备份状态）",
-              "Optional: describe environment hints (e.g. Docker, HAProxy/Keepalived, TLS certs & backup)",
+              "补充现场特点（如容器部署、HAProxy/Keepalived、重点采 TLS 与备份状态）",
+              "Describe environment hints (e.g. Docker, HAProxy/Keepalived, TLS certs & backup)",
             )}
           />
           <Button
             size="small"
-            shape="round"
-            className="ai-pill"
+            type="primary"
             loading={aiBusy}
-            icon={<Spark size={12} rainbow />}
+            icon={<Spark size={12} />}
             onClick={() => void onCustomizeWithAI(focusText)}
           >
-            {bi("生成精炼只读探针", "Generate Probe")}
+            {bi("生成精炼探针", "Generate")}
           </Button>
           {source === "ai" && onResetTemplate && (
             <Button size="small" type="text" disabled={aiBusy} onClick={onResetTemplate}>

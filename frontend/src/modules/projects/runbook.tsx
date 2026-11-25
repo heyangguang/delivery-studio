@@ -38,7 +38,11 @@ import {
 } from "../../shared/shared";
 import type { DeliveryPlan, JobFile, JobSync, PlanStep } from "../../shared/shared";
 import { Segmented } from "../../design/ui";
-import { dispatchExecLaunchIntent, StepHotfixDrawer } from "./stephotfix";
+import {
+  dispatchExecLaunchIntent,
+  StepHotfixDrawer,
+  type OpenStepHotfixDetail,
+} from "./stephotfix";
 import { bi, getLang, useLang, withLang } from "../../app/i18n";
 
 const KEYWORDS = new Set([
@@ -892,9 +896,25 @@ export function Runbook({
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [editing, setEditing] = useState<string | null>(null);
   const [hotfixTarget, setHotfixTarget] = useState<{
-    key: string;
-    title: string;
+    key?: string;
+    title?: string;
+    path?: string;
+    view?: "edit" | "diff";
   } | null>(null);
+  useEffect(() => {
+    const onOpenHotfix = (ev: Event) => {
+      const detail = (ev as CustomEvent<OpenStepHotfixDetail>).detail;
+      if (detail?.jobId && detail.jobId !== jobId) return;
+      setHotfixTarget({
+        key: detail?.stepKey,
+        title: detail?.stepTitle,
+        path: detail?.path,
+        view: detail?.view || "diff",
+      });
+    };
+    window.addEventListener("mh-open-step-hotfix", onOpenHotfix);
+    return () => window.removeEventListener("mh-open-step-hotfix", onOpenHotfix);
+  }, [jobId]);
   const dock = useAIDock();
   const aiStatus = useAIStatus();
   const [reports, setReports] = useState<AIReport[]>([]);
@@ -2319,6 +2339,8 @@ export function Runbook({
         jobId={jobId}
         stepKey={hotfixTarget?.key}
         stepTitle={hotfixTarget?.title}
+        initialPath={hotfixTarget?.path}
+        initialView={hotfixTarget?.view}
         deliveryMode={deliveryMode}
         onClose={() => setHotfixTarget(null)}
         onPatched={() => {

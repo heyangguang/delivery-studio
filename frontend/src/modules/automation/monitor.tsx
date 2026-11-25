@@ -61,7 +61,11 @@ import {
   useStored,
 } from "../../shared/shared";
 import { AppGlyph, FilterChip, Kbd, Segmented, StatusBadge, StatusDot } from "../../design/ui";
-import { dispatchExecLaunchIntent, StepHotfixDrawer } from "../projects/stephotfix";
+import {
+  dispatchExecLaunchIntent,
+  StepHotfixDrawer,
+  type OpenStepHotfixDetail,
+} from "../projects/stephotfix";
 import "./monitor.css";
 
 /* ---------- Types ---------- */
@@ -1013,7 +1017,7 @@ function AIDiagnoseButton({
                 ? `异常主机：${diag.failedHosts.join("、")}`
                 : "",
               `核心报错：\n${diag.errorDetail}`,
-              "请帮我判断：1）这是目标主机/现场环境问题，还是组件脚本/断言问题？2）若属于组件脚本/断言问题，请先通过 component_sync_status 核对当前已发布组件和草稿是否已经修复、本次交付能否直接「同步组件更新」：如果当前组件已经没问题，直接告诉我无需再去组件工作台修改，以及同步并重跑前需要核对的现场前置状态；只有确认当前组件尚未修复时，再给出组件工作台的最小修改方案。",
+              "请帮我完成诊断并给出可直接落地的修复方案：\n1）先判断根因：这是目标主机/现场环境问题，还是本次交付脚本/断言/参数问题？请讲清具体原因和修复方案（改哪个文件、删除/新增哪段内容、如何验证）。\n2）若属于脚本/剧本/断言问题，请先通过 component_sync_status 核对当前已发布组件和草稿是否已经修复：如果最新已发布组件已经修复且可直接同步，直接告诉我无需再去组件工作台修改，以及点击「同步组件/草稿更新」与重跑前需要核对的现场状态；如果当前组件尚未修复且修改本次交付里的脚本即可解决，请先用 read_file 看清原文，再主动调用 propose_file_change 提交「修改本次交付脚本」热修补丁卡片（带增删高亮差异），让我确认后一键写入本次交付热修并在「脚本查看与热修」里直接查看改动高亮与重跑；若属通用组件缺陷，可一并输出组件改进建议。",
               tail ? `\n最近终端日志：\n\`\`\`\n${tail}\n\`\`\`` : "",
             ]
               .filter(Boolean)
@@ -1027,7 +1031,7 @@ function AIDiagnoseButton({
                 ? `Affected hosts: ${diag.failedHosts.join(", ")}`
                 : "",
               `Error:\n${diag.errorDetail}`,
-              "Please diagnose: (1) whether this is an environment/host issue or a component playbook/assertion issue; (2) if it is a component issue, FIRST call component_sync_status to check whether the latest published component or draft has already fixed it and whether this delivery can simply click 'Sync Fix' — tell me clearly if no component edit is needed (plus any host state to verify before rerunning), and only suggest component workbench edits if the current component is still unfixed.",
+              "Please provide a full diagnosis and actionable fix plan:\n(1) Identify whether this is a host/environment issue or a delivery script/playbook/assertion issue, and explain the exact fix (which file, what to delete/add, and how to verify).\n(2) If it is a script/playbook/assertion issue, FIRST call component_sync_status to check whether the latest published component or draft already fixed it: if published component already fixed it and can sync, tell me no component edit is needed and list any host state to verify before syncing & rerunning; if not yet fixed and editing this delivery's script resolves the issue, inspect the file with read_file and proactively call propose_file_change to submit a delivery script hotfix patch card (with highlighted diff) so I can apply it in one click and review the highlighted changes in Step Hotfix (and also emit a component improvement suggestion if it is a general component bug).",
               tail ? `\nRecent log output:\n\`\`\`\n${tail}\n\`\`\`` : "",
             ]
               .filter(Boolean)
@@ -1918,6 +1922,7 @@ export function ExecutionMonitorPage({
       {activeJobId ? (
         <AIDock
           scope={{ kind: "job", jobId: activeJobId }}
+          onChanged={loadList}
           start={{
             key: "review",
             title: bi("执行诊断助手", "Execution Assistant"),
@@ -2032,8 +2037,10 @@ function MonitorWorkspace({
   const [logTailLimit, setLogTailLimit] = useState(LOG_WINDOW_STEP);
   const [resizingPipe, setResizingPipe] = useState(false);
   const [hotfixStep, setHotfixStep] = useState<{
-    key: string;
-    title: string;
+    key?: string;
+    title?: string;
+    path?: string;
+    view?: "edit" | "diff";
   } | null>(null);
 
   const workspaceRef = useRef<HTMLDivElement>(null);
@@ -2196,6 +2203,31 @@ function MonitorWorkspace({
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, [activeRun, loadDetail]);
+
+  useEffect(() => {
+    const onPatched = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ jobId?: string }>).detail;
+      if (detail?.jobId && detail.jobId !== jobId) return;
+      void loadDetail();
+      void onListRefresh();
+    };
+    const onOpenHotfix = (ev: Event) => {
+      const detail = (ev as CustomEvent<OpenStepHotfixDetail>).detail;
+      if (detail?.jobId && detail.jobId !== jobId) return;
+      setHotfixStep({
+        key: detail?.stepKey,
+        title: detail?.stepTitle,
+        path: detail?.path,
+        view: detail?.view || "diff",
+      });
+    };
+    window.addEventListener("mh-delivery-patched", onPatched);
+    window.addEventListener("mh-open-step-hotfix", onOpenHotfix);
+    return () => {
+      window.removeEventListener("mh-delivery-patched", onPatched);
+      window.removeEventListener("mh-open-step-hotfix", onOpenHotfix);
+    };
+  }, [jobId, loadDetail, onListRefresh]);
 
   useEffect(() => {
     return () => {
@@ -3314,14 +3346,33 @@ function MonitorWorkspace({
                       )}
                     </span>
                   )}
-                {(data?.patches?.length || 0) > 0 && (
-                  <span style={{ color: "var(--brand-ink)", fontWeight: 560 }}>
-                    {bi(
-                      `· 本交付已热修 ${new Set(data!.patches!.map((p) => p.path)).size} 个脚本（续跑自动推送）`,
-                      `· ${new Set(data!.patches!.map((p) => p.path)).size} hotfixed (auto-pushed)`,
-                    )}
-                  </span>
-                )}
+                {(data?.patches?.length || 0) > 0 && (() => {
+                  const uniquePatched = new Set(data!.patches!.map((p) => p.path));
+                  const latestPatch = data!.patches![data!.patches!.length - 1];
+                  return (
+                    <button
+                      type="button"
+                      className="mon-patched-link"
+                      title={bi(
+                        "点击打开脚本热修抽屉，查看所有已修改文件与增删高亮差异",
+                        "Open Step Hotfix to inspect modified files and highlighted diff",
+                      )}
+                      onClick={() =>
+                        setHotfixStep({
+                          key: activeStepRef?.step.key,
+                          title: activeStepRef?.step.title,
+                          path: latestPatch?.path,
+                          view: "diff",
+                        })
+                      }
+                    >
+                      {bi(
+                        `· 本交付已热修 ${uniquePatched.size} 个脚本（查看改动高亮）`,
+                        `· ${uniquePatched.size} script(s) hotfixed (view diff)`,
+                      )}
+                    </button>
+                  );
+                })()}
               </div>
             </div>
           </div>
@@ -4425,7 +4476,12 @@ function MonitorWorkspace({
                                   })
                                 }
                               >
-                                {bi("直接热修本步脚本", "Hotfix Step Script")}
+                                {(data?.patches?.length || 0) > 0
+                                  ? bi(
+                                      `直接热修本步脚本（已改 ${new Set(data!.patches!.map((p) => p.path)).size}）`,
+                                      `Hotfix Script (${new Set(data!.patches!.map((p) => p.path)).size} patched)`,
+                                    )
+                                  : bi("直接热修本步脚本", "Hotfix Step Script")}
                               </Button>
                             )}
                             {can("component.edit") && (
@@ -4926,6 +4982,8 @@ function MonitorWorkspace({
         jobId={jobId}
         stepKey={hotfixStep?.key}
         stepTitle={hotfixStep?.title}
+        initialPath={hotfixStep?.path}
+        initialView={hotfixStep?.view}
         deliveryMode={shownSummary?.delivery_mode || "automatic"}
         onClose={() => setHotfixStep(null)}
         onPatched={() => {

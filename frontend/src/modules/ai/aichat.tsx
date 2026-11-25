@@ -53,6 +53,7 @@ import {
 } from "@arco-design/web-react/icon";
 import { reportDoc, useSubmitKB } from "./kb";
 import { MessageQueueTray, useMessageQueue } from "./aiqueue";
+import { dispatchOpenStepHotfix } from "../projects/stephotfix";
 import type { QueuedMsg } from "./aiqueue";
 import { go } from "../../app/router";
 import {
@@ -3016,6 +3017,20 @@ function ChatWindow({
                       "Saved to your personal Knowledge Base",
                     ),
             );
+          } else if (curProp?.kind === "file") {
+            if (scope.kind === "job") {
+              window.dispatchEvent(
+                new CustomEvent("mh-delivery-patched", {
+                  detail: { jobId: scope.jobId, path: curProp.file?.path },
+                }),
+              );
+            }
+            Message.success(
+              bi(
+                "已采纳并写入本次交付热修补丁，可在「脚本查看与热修」查看增删高亮",
+                "Hotfix patch applied to this delivery — inspect highlighted diff in Step Hotfix",
+              ),
+            );
           } else if (curProp?.kind !== "component") {
             Message.success(
               scope.kind === "comp"
@@ -5342,6 +5357,8 @@ export const Bubble = React.memo(function Bubble({
       </div>
     );
   const isErrorOnly = Boolean(m.error && !m.text?.trim());
+  const jobIdMatch = /^\/api\/jobs\/([^/]+)\/ai/.exec(jobBase);
+  const cardJobId = jobIdMatch ? decodeURIComponent(jobIdMatch[1]) : undefined;
   return (
     <div className={`ad-msg ai ${isErrorOnly ? "is-err" : ""}`}>
       <span className="ad-avatar" aria-hidden>
@@ -5388,6 +5405,7 @@ export const Bubble = React.memo(function Bubble({
                 key={id}
                 p={props[id]}
                 comp={comp}
+                jobId={cardJobId}
                 busy={deciding === id}
                 decide={decide}
                 feedback={answer}
@@ -6366,14 +6384,81 @@ function SuggestCard({
   );
 }
 
+function parseCompactDiff(diff: string): {
+  lines: { kind: "add" | "del" | "hunk" | "ctx"; sign: string; text: string }[];
+  added: number;
+  deleted: number;
+} {
+  const raw = diff.replace(/\r\n/g, "\n").split("\n");
+  if (raw.length > 0 && raw[raw.length - 1] === "") raw.pop();
+  let added = 0;
+  let deleted = 0;
+  const lines = raw.map((line) => {
+    if (line.startsWith("@@") || line.startsWith("…")) {
+      return { kind: "hunk" as const, sign: "", text: line };
+    }
+    if (line.startsWith("+") && !line.startsWith("+++")) {
+      added++;
+      const text = line.startsWith("+ ") ? line.slice(2) : line.slice(1);
+      return { kind: "add" as const, sign: "+", text };
+    }
+    if (line.startsWith("-") && !line.startsWith("---")) {
+      deleted++;
+      const text = line.startsWith("- ") ? line.slice(2) : line.slice(1);
+      return { kind: "del" as const, sign: "-", text };
+    }
+    const text = line.startsWith("  ")
+      ? line.slice(2)
+      : line.startsWith(" ")
+        ? line.slice(1)
+        : line;
+    return { kind: "ctx" as const, sign: " ", text };
+  });
+  return { lines, added, deleted };
+}
+
+function DiffPreview({ diff }: { diff: string }) {
+  useLang();
+  const parsed = useMemo(() => parseCompactDiff(diff), [diff]);
+  return (
+    <div className="ad-diff" role="region" aria-label={bi("代码增删差异", "Code diff")}>
+      <div className="ad-diff-head">
+        <span>{bi("变更差异预览", "Patch Diff")}</span>
+        <span className="ad-card-file-stats">
+          {parsed.added > 0 && (
+            <span className="ad-card-stat-add">
+              {bi(`+${parsed.added} 新增`, `+${parsed.added}`)}
+            </span>
+          )}
+          {parsed.deleted > 0 && (
+            <span className="ad-card-stat-del">
+              {bi(`-${parsed.deleted} 删除`, `-${parsed.deleted}`)}
+            </span>
+          )}
+        </span>
+      </div>
+      <div className="ad-diff-body">
+        {parsed.lines.map((l, idx) => (
+          <div key={idx} className={`ad-diff-line ${l.kind}`}>
+            {l.kind !== "hunk" && <span className="ad-diff-sign">{l.sign}</span>}
+            <span>{l.text || " "}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /** A change to one file of the delivery's own automation: the diff, why, and what happens when it is accepted. */
 function FileCard({
   s,
+  jobId,
   busy,
   decide,
   feedback,
 }: {
   s: StepProposal;
+  jobId?: string;
   busy: boolean;
   decide: (id: string, v: "accept" | "reject") => void;
   feedback?: (text: string) => void;
@@ -6383,21 +6468,35 @@ function FileCard({
   const [why, setWhy] = useState("");
   const f = s.file;
   const done = s.status !== "pending";
+  const diffCounts = useMemo(
+    () => (f?.diff ? parseCompactDiff(f.diff) : { added: 0, deleted: 0 }),
+    [f?.diff],
+  );
   return (
     <article className={`ad-card s-${s.status}`}>
       <header>
         <span className="ad-card-k">
-          {bi("修改自动化文件", "Edit automation file")}
+          {bi("热修本次交付脚本", "Hotfix Delivery Script")}
         </span>
         <span className="ad-card-m">
-          {bi("只改这一份交付", "This delivery only")}
+          {bi("仅修改当前交付 · 不改动组件库", "This delivery only")}
         </span>
       </header>
       <p className="ad-card-t">
         <code>{f?.path}</code>
-        {f?.new && <span className="ad-tag">{bi("新增", "New")}</span>}
+        {f?.new && <span className="ad-tag">{bi("新增文件", "New")}</span>}
+        {(diffCounts.added > 0 || diffCounts.deleted > 0) && (
+          <span className="ad-card-file-stats">
+            {diffCounts.added > 0 && (
+              <span className="ad-card-stat-add">+{diffCounts.added}</span>
+            )}
+            {diffCounts.deleted > 0 && (
+              <span className="ad-card-stat-del">-{diffCounts.deleted}</span>
+            )}
+          </span>
+        )}
       </p>
-      {f?.diff && <CodeBlock text={f.diff} caption={bi("差异", "Diff")} />}
+      {f?.diff && <DiffPreview diff={f.diff} />}
       <dl className="ad-card-dl">
         <dt>{bi("缘由", "Reason")}</dt>
         <dd>{s.reason}</dd>
@@ -6409,17 +6508,37 @@ function FileCard({
             <span>
               {s.decided_by}{" "}
               {s.status === "accepted"
-                ? bi("已采纳", "accepted")
+                ? bi("已采纳并写入热修", "accepted & applied")
                 : bi("已拒绝", "rejected")}
             </span>
           </span>
           {s.status === "accepted" && (
-            <span className="ad-card-where">
-              {bi(
-                "已生成更新包，在页面「现场执行」上方按提示放到控制节点，之后这份交付的自动化就是改过的样子。",
-                "Update bundle generated—follow the instructions above Field Execution to place it on the control node.",
+            <>
+              <span className="ad-card-where">
+                {bi(
+                  "已写入本次交付热修补丁：自动执行下次续跑将自动推送到执行节点；离线交付可直接下载增量更新包。",
+                  "Hotfix patch saved: auto-execution pushes it automatically on next resume; offline deliveries get an incremental update archive.",
+                )}
+              </span>
+              {f?.path && (
+                <div className="ad-card-done-acts">
+                  <Button
+                    size="mini"
+                    type="outline"
+                    icon={<IconCode />}
+                    onClick={() =>
+                      dispatchOpenStepHotfix({
+                        jobId,
+                        path: f.path,
+                        view: "diff",
+                      })
+                    }
+                  >
+                    {bi("在「脚本查看与热修」查看增删高亮", "Inspect Highlighted Diff")}
+                  </Button>
+                </div>
               )}
-            </span>
+            </>
           )}
         </div>
       ) : rejecting ? (
@@ -6474,7 +6593,7 @@ function FileCard({
             loading={busy}
             onClick={() => decide(s.id, "accept")}
           >
-            {bi("采纳，生成更新包", "Accept & build update")}
+            {bi("采纳并写入本次热修补丁", "Accept & Apply Hotfix")}
           </Button>
           <Button
             size="small"
@@ -7330,6 +7449,7 @@ const getWhyNot = () => [
 export function Card({
   p,
   comp,
+  jobId,
   busy,
   decide,
   feedback,
@@ -7339,6 +7459,7 @@ export function Card({
   ask?: (text: string) => void;
   p: StepProposal | CompProposal;
   comp: boolean;
+  jobId?: string;
   busy: boolean;
   decide: (
     id: string,
@@ -7596,7 +7717,15 @@ export function Card({
   if (s.kind === "component")
     return <SuggestCard s={s} busy={busy} decide={decide} />;
   if (s.kind === "file")
-    return <FileCard s={s} busy={busy} decide={decide} feedback={feedback} />;
+    return (
+      <FileCard
+        s={s}
+        jobId={jobId}
+        busy={busy}
+        decide={decide}
+        feedback={feedback}
+      />
+    );
   const change = s.kind === "replace";
   return (
     <article className={`ad-card s-${s.status}`}>

@@ -1696,6 +1696,40 @@ func TestRehearsalExtractQuotedPatroniParamsAndHBARuleAndNoFalseCollision(t *tes
 			t.Fatalf("expected NO false conflict between logging_collector plan and pg_hba plan, got %+v", al)
 		}
 	}
+
+	// Patroni long flags (--set / --parameter) and dotted postgresql.parameters.* keys must also extract cleanly.
+	longFlagPlan := changeRehearsal{
+		ID:    "longflag1",
+		Title: "在线调整慢查询阈值至500ms",
+		Drift: &rehearsalDrift{
+			ParamDiffs: []rehearsalDriftParam{
+				{Key: "log_min_duration_statement", Initial: "1000", Actual: "1000"},
+			},
+		},
+		Steps: []rehearsalStep{
+			{
+				ID:      "s1",
+				Phase:   "execute",
+				Status:  "passed",
+				Title:   "在线修改集群慢查询阈值",
+				Command: `patronictl -c /etc/patroni/patroni.yml edit-config pg-ha-live-qa-pg --set postgresql.parameters.log_min_duration_statement=500 --parameter max_connections=1000 --set=ttl=40 --force`,
+			},
+		},
+	}
+	_, lfChanges := extractDefaultAppliedChanges(longFlagPlan)
+	gotKV := map[string]rehearsalAppliedChange{}
+	for _, ch := range lfChanges {
+		gotKV[ch.Key] = ch
+	}
+	if ch, ok := gotKV["log_min_duration_statement"]; !ok || ch.After != "500" || ch.Before != "1000" {
+		t.Fatalf("expected --set postgresql.parameters.log_min_duration_statement=500 with before=1000, got %+v", lfChanges)
+	}
+	if ch, ok := gotKV["max_connections"]; !ok || ch.After != "1000" {
+		t.Fatalf("expected --parameter max_connections=1000, got %+v", lfChanges)
+	}
+	if ch, ok := gotKV["ttl"]; !ok || ch.After != "40" {
+		t.Fatalf("expected --set=ttl=40, got %+v", lfChanges)
+	}
 }
 
 func TestRehearsalIntentUnclearGateAndRefineGoal(t *testing.T) {

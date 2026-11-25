@@ -21,6 +21,7 @@ import {
   IconCopy,
   IconDelete,
   IconDesktop,
+  IconDown,
   IconDownload,
   IconExclamationCircle,
   IconInfoCircle,
@@ -60,9 +61,11 @@ import "./rehearsal-automation.css";
 
 type Registration = { node: ExecutionNode; token: string };
 type Guide = "install" | "maintain";
-type Filter = "all" | "online" | "offline" | "upgrade" | "disabled";
-type AgentFilter = "all" | "online" | "offline" | "revoked";
-type FleetTab = "controllers" | "agents";
+type StatusFilter = "all" | "online" | "offline" | "disabled";
+type RoleFilter = "all" | "controller" | "target" | "upgrade";
+type SelectedItem =
+  | { role: "controller"; id: string }
+  | { role: "target"; id: string };
 
 type BootstrapInfo = {
   origin: string;
@@ -322,10 +325,10 @@ const nodeStatusLabel = (key: string, fallback: string) =>
 
 export function ExecutionNodes({
   centerNav,
-  fleet = "controllers",
+  initialRole = "all",
 }: {
   centerNav?: React.ReactNode;
-  fleet?: FleetTab;
+  initialRole?: RoleFilter;
 } = {}) {
   useLang();
   const canManage = can("execution.manage");
@@ -347,8 +350,8 @@ export function ExecutionNodes({
   const [updating, setUpdating] = useState("");
   const [updatingAgent, setUpdatingAgent] = useState("");
   const [open, setOpen] = useState(false);
-  const [selectedNodeId, setSelectedNodeId] = useState<string>("");
-  const [selectedAgentId, setSelectedAgentId] = useState<string>("");
+  const [selected, setSelected] = useState<SelectedItem | null>(null);
+  const [collapsedClusters, setCollapsedClusters] = useState<Record<string, boolean>>({});
   const [mobileDetail, setMobileDetail] = useState(false);
   const [registration, setRegistration] = useState<Registration | null>(null);
   const [downloaded, setDownloaded] = useState(false);
@@ -360,9 +363,13 @@ export function ExecutionNodes({
   const [controller, setController] = useState("");
   const [createError, setCreateError] = useState("");
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState<Filter>("all");
-  const [agentQuery, setAgentQuery] = useState("");
-  const [agentFilter, setAgentFilter] = useState<AgentFilter>("all");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [roleFilter, setRoleFilter] = useState<RoleFilter>(initialRole);
+  useEffect(() => {
+    if (initialRole === "target") {
+      setRoleFilter("target");
+    }
+  }, [initialRole]);
   const mounted = useRef(true);
   const busyLockRef = useRef(false);
   const bundleLockRef = useRef(false);
@@ -736,57 +743,60 @@ export function ExecutionNodes({
   const needsUpgrade = (n: ExecutionNode) =>
     Boolean(n.last_seen) && (n.protocol || 0) < 3;
 
-  const counts = {
-    all: all.length,
-    online: all.filter(isExecutionNodeOnline).length,
-    offline: all.filter((n) => !n.disabled && !isExecutionNodeOnline(n)).length,
-    upgrade: all.filter(needsUpgrade).length,
-    disabled: all.filter((n) => n.disabled).length,
+  const allAgents = agents || [];
+  const upgradeCount = all.filter(needsUpgrade).length;
+
+  const statusCounts = {
+    all: all.length + allAgents.length,
+    online:
+      all.filter(isExecutionNodeOnline).length +
+      allAgents.filter((a) => a.desired === "active" && a.online).length,
+    offline:
+      all.filter((n) => !n.disabled && !isExecutionNodeOnline(n)).length +
+      allAgents.filter((a) => a.desired === "active" && !a.online).length,
+    disabled:
+      all.filter((n) => n.disabled).length +
+      allAgents.filter((a) => a.desired !== "active").length,
   };
+
   const rows = useMemo(() => {
+    if (roleFilter === "target") return [];
     const q = query.trim().toLowerCase();
     return all.filter((n) => {
-      const matchFilter =
-        filter === "all" ||
-        (filter === "online"
+      if (roleFilter === "upgrade" && !needsUpgrade(n)) return false;
+      const matchStatus =
+        statusFilter === "all" ||
+        (statusFilter === "online"
           ? isExecutionNodeOnline(n)
-          : filter === "disabled"
+          : statusFilter === "disabled"
             ? n.disabled
-            : filter === "upgrade"
-              ? needsUpgrade(n)
-              : !n.disabled && !isExecutionNodeOnline(n));
-      if (!matchFilter) return false;
+            : !n.disabled && !isExecutionNodeOnline(n));
+      if (!matchStatus) return false;
       if (!q) return true;
       return [n.name, n.controller_ip, ...n.clusters, ...n.ips].some((s) =>
         s.toLowerCase().includes(q),
       );
     });
-  }, [all, filter, query]);
+  }, [all, roleFilter, statusFilter, query]);
 
-  const allAgents = agents || [];
-  const agentCounts = {
-    all: allAgents.length,
-    online: allAgents.filter((a) => a.desired === "active" && a.online).length,
-    offline: allAgents.filter((a) => a.desired === "active" && !a.online).length,
-    revoked: allAgents.filter((a) => a.desired !== "active").length,
-  };
   const agentRows = useMemo(() => {
-    const q = agentQuery.trim().toLowerCase();
+    if (roleFilter === "controller" || roleFilter === "upgrade") return [];
+    const q = query.trim().toLowerCase();
     return allAgents.filter((a) => {
-      const matchFilter =
-        agentFilter === "all" ||
-        (agentFilter === "online"
+      const matchStatus =
+        statusFilter === "all" ||
+        (statusFilter === "online"
           ? a.desired === "active" && a.online
-          : agentFilter === "offline"
-            ? a.desired === "active" && !a.online
-            : a.desired !== "active");
-      if (!matchFilter) return false;
+          : statusFilter === "disabled"
+            ? a.desired !== "active"
+            : a.desired === "active" && !a.online);
+      if (!matchStatus) return false;
       if (!q) return true;
       return [a.host, a.ip, a.cluster, a.mode || ""].some((s) =>
         s.toLowerCase().includes(q),
       );
     });
-  }, [allAgents, agentFilter, agentQuery]);
+  }, [allAgents, roleFilter, statusFilter, query]);
 
   const groupedAgents = useMemo(() => {
     const map = new Map<string, AutomationAgentView[]>();
@@ -799,20 +809,39 @@ export function ExecutionNodes({
     return Array.from(map.entries());
   }, [agentRows]);
 
+  const activeSelection = useMemo<SelectedItem | null>(() => {
+    if (selected?.role === "controller" && rows.some((n) => n.id === selected.id)) {
+      return selected;
+    }
+    if (selected?.role === "target" && agentRows.some((a) => a.id === selected.id)) {
+      return selected;
+    }
+    if (rows.length > 0) return { role: "controller", id: rows[0].id };
+    if (agentRows.length > 0) return { role: "target", id: agentRows[0].id };
+    return null;
+  }, [selected, rows, agentRows]);
+
   const activeNode = useMemo(() => {
-    if (!rows.length) return null;
-    return rows.find((n) => n.id === selectedNodeId) || rows[0];
-  }, [rows, selectedNodeId]);
+    if (activeSelection?.role !== "controller") return null;
+    return rows.find((n) => n.id === activeSelection.id) || null;
+  }, [activeSelection, rows]);
 
   const activeAgent = useMemo(() => {
-    if (!agentRows.length) return null;
-    return agentRows.find((a) => a.id === selectedAgentId) || agentRows[0];
-  }, [agentRows, selectedAgentId]);
+    if (activeSelection?.role !== "target") return null;
+    return agentRows.find((a) => a.id === activeSelection.id) || null;
+  }, [activeSelection, agentRows]);
 
   const peerAgents = useMemo(() => {
     if (!activeAgent) return [];
     return allAgents.filter((a) => a.cluster === activeAgent.cluster);
   }, [allAgents, activeAgent]);
+
+  const loadingList = (!nodes && !error && canManage) || (!agents && !agentsError);
+  const toggleClusterFold = (clusterName: string) =>
+    setCollapsedClusters((prev) => ({
+      ...prev,
+      [clusterName]: !prev[clusterName],
+    }));
 
   const upgradeCmd = `${bi(
     "# 1. 将新版执行器上传至控制机（点击上方按钮下载 Linux amd64 二进制）",
@@ -831,11 +860,7 @@ sudo systemctl status middleware-execution --no-pager`;
       {showRail && (
         <aside
           className="md-list"
-          aria-label={
-            fleet === "controllers"
-              ? bi("控制机执行节点列表", "Control host execution nodes")
-              : bi("目标机直连 Agent 列表", "Direct target agents")
-          }
+          aria-label={bi("全平台 Agent 列表", "Platform Agent inventory")}
         >
           <div className="list-head">
             <div className="list-title">
@@ -849,7 +874,7 @@ sudo systemctl status middleware-execution --no-pager`;
                   onClick={() => void load(true)}
                   aria-label={bi("刷新列表", "Refresh list")}
                 />
-                {canManage && fleet === "controllers" && (
+                {canManage && (
                   <Button size="small" type="primary" icon={<IconPlus />} onClick={begin}>
                     {registration ? bi("继续", "Resume") : bi("接入", "Add")}
                   </Button>
@@ -859,196 +884,220 @@ sudo systemctl status middleware-execution --no-pager`;
 
             {centerNav}
 
-            {fleet === "controllers" ? (
-              <>
-                <Input
-                  prefix={<IconSearch />}
-                  allowClear
-                  value={query}
-                  onChange={setQuery}
-                  placeholder={bi("搜索节点名、IP 或集群", "Search node, IP, or cluster")}
-                  aria-label={bi("搜索控制机节点", "Search control nodes")}
-                />
-                <div className="ec-rail-seg">
-                  <Segmented<Filter>
-                    size="sm"
-                    label={bi("按节点状态筛选", "Filter control nodes")}
-                    value={filter === "upgrade" ? "all" : filter}
-                    onChange={setFilter}
-                    options={[
-                      { value: "all", label: bi("全部", "All"), count: counts.all },
-                      { value: "online", label: bi("在线", "On"), count: counts.online },
-                      { value: "offline", label: bi("离线", "Off"), count: counts.offline },
-                      { value: "disabled", label: bi("停用", "Off"), count: counts.disabled },
-                    ]}
-                  />
-                </div>
-                {counts.upgrade > 0 && (
-                  <button
-                    type="button"
-                    className={`ec-rail-upgrade-bar ${filter === "upgrade" ? "is-on" : ""}`}
-                    onClick={() => setFilter(filter === "upgrade" ? "all" : "upgrade")}
-                  >
-                    <span>{bi(`${counts.upgrade} 台控制机可升级以支持演练`, `${counts.upgrade} node(s) upgradable`)}</span>
-                    <span>{filter === "upgrade" ? bi("显示全部", "Show all") : bi("仅看可升级", "Filter")}</span>
-                  </button>
-                )}
-              </>
-            ) : (
-              <>
-                <Input
-                  prefix={<IconSearch />}
-                  allowClear
-                  value={agentQuery}
-                  onChange={setAgentQuery}
-                  placeholder={bi("搜索主机名、IP 或所属集群", "Search host, IP, or cluster")}
-                  aria-label={bi("搜索目标机 Agent", "Search target agents")}
-                />
-                <div className="ec-rail-seg">
-                  <Segmented<AgentFilter>
-                    size="sm"
-                    label={bi("按 Agent 状态筛选", "Filter target agents")}
-                    value={agentFilter}
-                    onChange={setAgentFilter}
-                    options={[
-                      { value: "all", label: bi("全部", "All"), count: agentCounts.all },
-                      { value: "online", label: bi("在线", "On"), count: agentCounts.online },
-                      { value: "offline", label: bi("离线", "Off"), count: agentCounts.offline },
-                      { value: "revoked", label: bi("撤销", "Rev"), count: agentCounts.revoked },
-                    ]}
-                  />
-                </div>
-              </>
-            )}
+            <Input
+              prefix={<IconSearch />}
+              allowClear
+              value={query}
+              onChange={setQuery}
+              placeholder={bi("搜索 Agent 名称、IP 或集群", "Search Agent, IP, or cluster")}
+              aria-label={bi("搜索 Agent", "Search Agents")}
+            />
+
+            <div className="ec-rail-seg">
+              <Segmented<StatusFilter>
+                size="sm"
+                label={bi("按在线状态筛选", "Filter by online status")}
+                value={statusFilter}
+                onChange={setStatusFilter}
+                options={[
+                  { value: "all", label: bi("全部", "All"), count: statusCounts.all },
+                  { value: "online", label: bi("在线", "On"), count: statusCounts.online },
+                  { value: "offline", label: bi("离线", "Off"), count: statusCounts.offline },
+                  { value: "disabled", label: bi("停用", "Off"), count: statusCounts.disabled },
+                ]}
+              />
+            </div>
+
+            <div
+              className="ec-role-pills"
+              role="group"
+              aria-label={bi("按 Agent 角色筛选", "Filter by Agent role")}
+            >
+              <button
+                type="button"
+                className={`ec-role-pill ${roleFilter === "all" ? "on" : ""}`}
+                onClick={() => setRoleFilter("all")}
+              >
+                {bi("全部", "All")}
+              </button>
+              {(canManage || all.length > 0) && (
+                <button
+                  type="button"
+                  className={`ec-role-pill ${roleFilter === "controller" ? "on" : ""}`}
+                  onClick={() =>
+                    setRoleFilter(roleFilter === "controller" ? "all" : "controller")
+                  }
+                >
+                  <IconDesktop style={{ fontSize: 11 }} />
+                  <span>{bi("控制机", "Control")}</span>
+                  <em>{all.length}</em>
+                </button>
+              )}
+              <button
+                type="button"
+                className={`ec-role-pill ${roleFilter === "target" ? "on" : ""}`}
+                onClick={() =>
+                  setRoleFilter(roleFilter === "target" ? "all" : "target")
+                }
+              >
+                <IconLink style={{ fontSize: 11 }} />
+                <span>{bi("目标机", "Target")}</span>
+                <em>{allAgents.length}</em>
+              </button>
+              {upgradeCount > 0 && (
+                <button
+                  type="button"
+                  className={`ec-role-pill is-upgrade ${roleFilter === "upgrade" ? "on" : ""}`}
+                  onClick={() =>
+                    setRoleFilter(roleFilter === "upgrade" ? "all" : "upgrade")
+                  }
+                >
+                  <span>{bi("可升级", "Upgrade")}</span>
+                  <em>{upgradeCount}</em>
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="list-body">
-            {fleet === "controllers" ? (
-              !nodes && !error ? (
-                <div style={{ padding: 14 }}>
-                  <Skeleton animation text={{ rows: 4 }} />
-                </div>
-              ) : rows.length > 0 ? (
-                <div className="ec-rail-group">
-                  {rows.map((node) => {
-                    const st = nodeConnection(node);
-                    const oldProto = needsUpgrade(node);
-                    const selected = activeNode?.id === node.id;
-                    return (
-                      <button
-                        key={node.id}
-                        type="button"
-                        className={`ec-rail-row ${selected ? "on" : ""}`}
-                        onClick={() => {
-                          setSelectedNodeId(node.id);
-                          setMobileDetail(true);
-                        }}
-                      >
-                        <span className={`ec-state-dot is-${st.key}`} />
-                        <div className="ec-rail-row-body">
-                          <div className="ec-rail-row-top">
-                            <b>{node.name}</b>
-                            {oldProto ? (
-                              <span className="ec-micro-pill is-upgrade">
-                                {bi("可升级", "Upgrade")}
-                              </span>
-                            ) : (node.protocol || 0) >= 3 ? (
-                              <span className="ec-micro-pill is-ok">
-                                {bi("就绪", "Ready")}
-                              </span>
-                            ) : null}
-                          </div>
-                          <div className="ec-rail-row-sub">
-                            <code className="mono">{node.controller_ip}</code>
-                            <span>
-                              {node.clusters.length > 0
-                                ? bi(`${node.clusters.length} 集群`, `${node.clusters.length} cl`)
-                                : node.last_seen
-                                  ? ago(node.last_seen)
-                                  : bi("待连接", "New")}
-                            </span>
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="ec-rail-empty">
-                  <IconDesktop />
-                  <span>
-                    {!canManage
-                      ? bi("仅具备只读查看权限", "Read-only access")
-                      : all.length === 0
-                        ? bi("暂无控制机节点", "No control nodes yet")
-                        : bi("没有匹配的控制机", "No matching nodes")}
-                  </span>
-                </div>
-              )
-            ) : !agents && !agentsError ? (
+            {loadingList ? (
               <div style={{ padding: 14 }}>
                 <Skeleton animation text={{ rows: 5 }} />
               </div>
-            ) : groupedAgents.length > 0 ? (
-              groupedAgents.map(([clusterName, list]) => (
-                <div key={clusterName} className="ec-rail-group">
-                  <div className="ec-rail-group-h">
-                    <span className="mono">{clusterName}</span>
-                    <em>{list.length}</em>
+            ) : rows.length > 0 || groupedAgents.length > 0 ? (
+              <>
+                {rows.length > 0 && (
+                  <div className="ec-rail-group">
+                    <div className="ec-rail-group-h">
+                      <span>{bi("控制机", "Control Agents")}</span>
+                      <em>{rows.length}</em>
+                    </div>
+                    {rows.map((node) => {
+                      const st = nodeConnection(node);
+                      const oldProto = needsUpgrade(node);
+                      const isSel = activeNode?.id === node.id;
+                      return (
+                        <button
+                          key={node.id}
+                          type="button"
+                          className={`ec-rail-row ${isSel ? "on" : ""}`}
+                          onClick={() => {
+                            setSelected({ role: "controller", id: node.id });
+                            setMobileDetail(true);
+                          }}
+                        >
+                          <span className={`ec-state-dot is-${st.key}`} />
+                          <div className="ec-rail-row-body">
+                            <div className="ec-rail-row-top">
+                              <b>{node.name}</b>
+                              {oldProto ? (
+                                <span className="ec-micro-pill is-upgrade">
+                                  {bi("可升级", "Upgrade")}
+                                </span>
+                              ) : (
+                                <span className="ec-micro-pill is-brand">
+                                  {bi("控制机", "Ctrl")}
+                                </span>
+                              )}
+                            </div>
+                            <div className="ec-rail-row-sub">
+                              <code className="mono">{node.controller_ip}</code>
+                              <span>
+                                {node.clusters.length > 0
+                                  ? bi(`${node.clusters.length} 集群`, `${node.clusters.length} cl`)
+                                  : node.last_seen
+                                    ? ago(node.last_seen)
+                                    : bi("待连接", "New")}
+                              </span>
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
                   </div>
-                  {list.map((ag) => {
-                    const isRevoked = ag.desired !== "active";
-                    const dotCls = isRevoked
-                      ? "is-revoked"
-                      : ag.online
-                        ? "is-online"
-                        : "is-offline";
-                    const selected = activeAgent?.id === ag.id;
-                    return (
+                )}
+
+                {groupedAgents.map(([clusterName, list]) => {
+                  const folded = !query.trim() && Boolean(collapsedClusters[clusterName]);
+                  const onlineCnt = list.filter((a) => a.desired === "active" && a.online).length;
+                  return (
+                    <div key={clusterName} className="ec-rail-group">
                       <button
-                        key={ag.id}
                         type="button"
-                        className={`ec-rail-row ${selected ? "on" : ""}`}
-                        onClick={() => {
-                          setSelectedAgentId(ag.id);
-                          setMobileDetail(true);
-                        }}
+                        className="ec-rail-group-btn"
+                        aria-expanded={!folded}
+                        onClick={() => toggleClusterFold(clusterName)}
                       >
-                        <span className={`ec-state-dot ${dotCls}`} />
-                        <div className="ec-rail-row-body">
-                          <div className="ec-rail-row-top">
-                            <b>{ag.host}</b>
-                            <span
-                              className={`ec-micro-pill ${ag.mode === "direct" ? "is-brand" : ""}`}
-                            >
-                              {ag.mode === "direct" ? bi("直连", "Direct") : bi("托管", "Trust")}
-                            </span>
-                          </div>
-                          <div className="ec-rail-row-sub">
-                            <code className="mono">{ag.ip}</code>
-                            <span>
-                              {isRevoked
-                                ? bi("已撤销", "Revoked")
-                                : ag.online
-                                  ? bi("在线", "Online")
-                                  : ag.last_seen
-                                    ? ago(ag.last_seen)
-                                    : bi("待上线", "Pending")}
-                            </span>
-                          </div>
-                        </div>
+                        <span className="ec-rail-group-btn-l">
+                          {folded ? (
+                            <IconRight style={{ fontSize: 10, flexShrink: 0 }} />
+                          ) : (
+                            <IconDown style={{ fontSize: 10, flexShrink: 0 }} />
+                          )}
+                          <span className="mono" title={clusterName}>
+                            {clusterName}
+                          </span>
+                        </span>
+                        <em>
+                          {onlineCnt}/{list.length}
+                        </em>
                       </button>
-                    );
-                  })}
-                </div>
-              ))
+                      {!folded &&
+                        list.map((ag) => {
+                          const isRevoked = ag.desired !== "active";
+                          const dotCls = isRevoked
+                            ? "is-revoked"
+                            : ag.online
+                              ? "is-online"
+                              : "is-offline";
+                          const isSel = activeAgent?.id === ag.id;
+                          return (
+                            <button
+                              key={ag.id}
+                              type="button"
+                              className={`ec-rail-row ${isSel ? "on" : ""}`}
+                              onClick={() => {
+                                setSelected({ role: "target", id: ag.id });
+                                setMobileDetail(true);
+                              }}
+                            >
+                              <span className={`ec-state-dot ${dotCls}`} />
+                              <div className="ec-rail-row-body">
+                                <div className="ec-rail-row-top">
+                                  <b>{ag.host}</b>
+                                  <span
+                                    className={`ec-micro-pill ${ag.allow_mutating ? "is-ok" : ""}`}
+                                  >
+                                    {ag.allow_mutating ? bi("可写", "RW") : bi("只读", "RO")}
+                                  </span>
+                                </div>
+                                <div className="ec-rail-row-sub">
+                                  <code className="mono">{ag.ip}</code>
+                                  <span>
+                                    {isRevoked
+                                      ? bi("已撤销", "Revoked")
+                                      : ag.online
+                                        ? bi("在线", "Online")
+                                        : ag.last_seen
+                                          ? ago(ag.last_seen)
+                                          : bi("待上线", "Pending")}
+                                  </span>
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                    </div>
+                  );
+                })}
+              </>
             ) : (
               <div className="ec-rail-empty">
                 <IconLink />
                 <span>
-                  {allAgents.length === 0
-                    ? bi("暂无目标机 Agent", "No target agents yet")
-                    : bi("没有匹配的 Agent", "No matching agents")}
+                  {all.length === 0 && allAgents.length === 0
+                    ? bi("暂无已接入的 Agent", "No Agents connected yet")
+                    : bi("没有匹配的 Agent", "No matching Agents")}
                 </span>
               </div>
             )}
@@ -1058,96 +1107,112 @@ sudo systemctl status middleware-execution --no-pager`;
 
       {showDetail && (
         <section className="md-detail" aria-live="polite">
-          {fleet === "controllers" ? (
-            <>
-              {error && (
-                <div className="detail enter ec-detail-article">
-                  <div className="en-error" role="alert">
-                    <IconExclamationCircle />
-                    <div>
-                      <b>{bi("节点状态未能更新", "Failed to refresh node status")}</b>
-                      <p>{error}</p>
-                    </div>
-                    <Button size="small" onClick={() => void load(true)} loading={refreshing}>
-                      {bi("重试", "Retry")}
-                    </Button>
-                  </div>
+          {error && canManage && (
+            <div className="detail enter ec-detail-article" style={{ paddingBottom: 0 }}>
+              <div className="en-error" role="alert">
+                <IconExclamationCircle />
+                <div>
+                  <b>{bi("控制机状态未能更新", "Failed to refresh control agents")}</b>
+                  <p>{error}</p>
                 </div>
-              )}
+                <Button size="small" onClick={() => void load(true)} loading={refreshing}>
+                  {bi("重试", "Retry")}
+                </Button>
+              </div>
+            </div>
+          )}
 
-              {registration && !open && (
-                <div className="detail enter ec-detail-article" style={{ paddingBottom: 0 }}>
-                  <div className="en-pending" role="status">
-                    <IconInfoCircle />
-                    <span>
-                      {biv(
-                        <>
-                          <b>{registration.node.name}</b>{" "}
-                          已登记，继续下载安装包并在主控机完成连接。
-                        </>,
-                        <>
-                          <b>{registration.node.name}</b> is registered—download the
-                          installer bundle and finish connecting.
-                        </>,
-                      )}
-                    </span>
-                    <Button size="small" type="text" onClick={() => setOpen(true)}>
-                      {bi("继续接入", "Continue Setup")} <IconArrowRight />
-                    </Button>
-                  </div>
+          {agentsError && (
+            <div className="detail enter ec-detail-article" style={{ paddingBottom: 0 }}>
+              <div className="en-error" role="alert">
+                <IconExclamationCircle />
+                <div>
+                  <b>{bi("目标机 Agent 状态未能更新", "Failed to refresh target agents")}</b>
+                  <p>{agentsError}</p>
                 </div>
-              )}
+                <Button size="small" onClick={() => void load(true)} loading={refreshing}>
+                  {bi("重试", "Retry")}
+                </Button>
+              </div>
+            </div>
+          )}
 
-              {activeNode ? (
-                (() => {
-                  const st = nodeConnection(activeNode);
-                  const oldProto = needsUpgrade(activeNode);
-                  const badgeState =
-                    st.key === "online"
-                      ? "succeeded"
-                      : st.key === "offline"
-                        ? "failed"
-                        : "pending";
-                  return (
-                    <article
-                      className="detail enter ec-detail-article"
-                      key={activeNode.id}
+          {registration && !open && (
+            <div className="detail enter ec-detail-article" style={{ paddingBottom: 0 }}>
+              <div className="en-pending" role="status">
+                <IconInfoCircle />
+                <span>
+                  {biv(
+                    <>
+                      <b>{registration.node.name}</b>{" "}
+                      已登记，继续下载安装包并在控制机完成连接。
+                    </>,
+                    <>
+                      <b>{registration.node.name}</b> is registered—download the
+                      installer bundle and finish connecting.
+                    </>,
+                  )}
+                </span>
+                <Button size="small" type="text" onClick={() => setOpen(true)}>
+                  {bi("继续接入", "Continue Setup")} <IconArrowRight />
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {activeNode ? (
+            (() => {
+              const st = nodeConnection(activeNode);
+              const oldProto = needsUpgrade(activeNode);
+              const badgeState =
+                st.key === "online"
+                  ? "succeeded"
+                  : st.key === "offline"
+                    ? "failed"
+                    : "pending";
+              return (
+                <article
+                  className="detail enter ec-detail-article"
+                  key={activeNode.id}
+                >
+                  {narrow && (
+                    <Button
+                      type="text"
+                      className="back"
+                      icon={<IconArrowLeft />}
+                      onClick={() => setMobileDetail(false)}
                     >
-                      {narrow && (
-                        <Button
-                          type="text"
-                          className="back"
-                          icon={<IconArrowLeft />}
-                          onClick={() => setMobileDetail(false)}
-                        >
-                          {bi("控制机列表", "Control Nodes")}
-                        </Button>
-                      )}
-                      <header className="detail-head">
-                        <div className="detail-title">
-                          <h1>{activeNode.name}</h1>
-                          <StatusBadge
-                            state={badgeState}
-                            label={nodeStatusLabel(st.key, st.label)}
-                          />
-                          <span className="ec-micro-pill">
-                            {activeNode.kind === "independent"
-                              ? bi("独立管理机", "Dedicated Control Host")
-                              : bi("集群内执行机", "In-Cluster Host")}
-                          </span>
-                          {oldProto ? (
-                            <span className="ec-micro-pill is-upgrade">
-                              {bi("可升级", "Upgrade")}
-                            </span>
-                          ) : (activeNode.protocol || 0) >= 3 ? (
-                            <span className="ec-micro-pill is-ok">
-                              {bi("完整自动化就绪", "Full Automation Ready")}
-                            </span>
-                          ) : null}
-                        </div>
-                        <div className="detail-meta">
-                          <code className="mono">{activeNode.controller_ip}</code>
-                          {activeNode.version && (
+                      {bi("Agent 列表", "Agents")}
+                    </Button>
+                  )}
+                  <header className="detail-head">
+                    <div className="detail-title">
+                      <h1>{activeNode.name}</h1>
+                      <span className="ec-micro-pill is-brand">
+                        {bi("控制机 Agent", "Control Agent")}
+                      </span>
+                      <StatusBadge
+                        state={badgeState}
+                        label={nodeStatusLabel(st.key, st.label)}
+                      />
+                      <span className="ec-micro-pill">
+                        {activeNode.kind === "independent"
+                          ? bi("独立管理机", "Dedicated Host")
+                          : bi("集群内执行机", "In-Cluster Host")}
+                      </span>
+                      {oldProto ? (
+                        <span className="ec-micro-pill is-upgrade">
+                          {bi("可升级", "Upgrade")}
+                        </span>
+                      ) : (activeNode.protocol || 0) >= 3 ? (
+                        <span className="ec-micro-pill is-ok">
+                          {bi("完整自动化就绪", "Full Automation Ready")}
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="detail-meta">
+                      <code className="mono">{activeNode.controller_ip}</code>
+                      {activeNode.version && (
                             <span className="mono">v{activeNode.version}</span>
                           )}
                           <span>
@@ -1399,58 +1464,6 @@ sudo systemctl status middleware-execution --no-pager`;
                     </article>
                   );
                 })()
-              ) : (
-                <div className="detail-none enter">
-                  <IconDesktop style={{ fontSize: 28, color: "var(--faint)" }} />
-                  <h2>
-                    {!canManage
-                      ? bi("控制机节点仅管理员可配置", "Control Nodes Require Management Permission")
-                      : all.length === 0
-                        ? bi("连接第一台控制机执行节点", "Connect Your First Control Node")
-                        : bi("没有符合筛选条件的控制机", "No Matching Control Nodes")}
-                  </h2>
-                  <p>
-                    {!canManage
-                      ? bi(
-                          "当前账户仅具备只读查看权限，无法查看或配置控制机执行节点。请联系管理员配置控制机，或切换至「Agent」查看目标机直连 Agent。",
-                          "Your account has read-only access and cannot view or manage control nodes. Contact an administrator, or switch to the Agents tab to inspect target agents.",
-                        )
-                      : all.length === 0
-                        ? bi(
-                            "在主控机安装 1 个轻量后台执行器，即可统一调度集群交付、只读探针采集与变更演练。",
-                            "Install one background runner on a control host to orchestrate deliveries, probes, and rehearsals.",
-                          )
-                        : bi("调整左侧搜索或状态筛选条件以查看其他节点。", "Adjust the rail search or filter to view nodes.")}
-                  </p>
-                  {!canManage ? (
-                    <Button
-                      type="outline"
-                      onClick={() => go({ name: "executions", view: "nodes", fleet: "agents" })}
-                    >
-                      {bi("查看目标机 Agent", "View Target Agents")} <IconArrowRight />
-                    </Button>
-                  ) : all.length === 0 ? (
-                    <div className="ec-row-acts">
-                      <Button type="primary" icon={<IconPlus />} onClick={begin}>
-                        {bi("接入执行节点", "Add Control Node")}
-                      </Button>
-                      <Button icon={<IconBook />} onClick={() => setGuide("install")}>
-                        {bi("接入指南", "Setup Guide")}
-                      </Button>
-                    </div>
-                  ) : (
-                    <Button
-                      onClick={() => {
-                        setQuery("");
-                        setFilter("all");
-                      }}
-                    >
-                      {bi("清除筛选", "Clear Filters")}
-                    </Button>
-                  )}
-                </div>
-              )}
-            </>
           ) : activeAgent ? (
             (() => {
               const isRevoked = activeAgent.desired !== "active";
@@ -1482,10 +1495,11 @@ sudo systemctl status middleware-execution --no-pager`;
                   <header className="detail-head">
                     <div className="detail-title">
                       <h1>{activeAgent.host}</h1>
+                      <span className="ec-micro-pill is-ok">
+                        {bi("目标机 Agent", "Target Agent")}
+                      </span>
                       <StatusBadge state={badgeState} label={badgeLabel} />
-                      <span
-                        className={`ec-micro-pill ${activeAgent.mode === "direct" ? "is-brand" : ""}`}
-                      >
+                      <span className="ec-micro-pill">
                         {activeAgent.mode === "direct"
                           ? bi("直连执行模式", "Direct Exec")
                           : bi("托管 SSH 信任", "SSH Trust")}
@@ -1632,7 +1646,7 @@ sudo systemctl status middleware-execution --no-pager`;
                               <div
                                 key={peer.id}
                                 className={`ec-peer-row ${peer.id === activeAgent.id ? "is-current" : ""}`}
-                                onClick={() => setSelectedAgentId(peer.id)}
+                                onClick={() => setSelected({ role: "target", id: peer.id })}
                               >
                                 <div className="ec-peer-row-l">
                                   <span className={`ec-state-dot ${pDot}`} />
@@ -1667,27 +1681,35 @@ sudo systemctl status middleware-execution --no-pager`;
             <div className="detail-none enter">
               <IconLink style={{ fontSize: 28, color: "var(--faint)" }} />
               <h2>
-                {allAgents.length === 0
-                  ? bi("暂无目标机直连 Agent", "No Target Agents Enrolled")
-                  : bi("没有符合条件的 Agent", "No Matching Agents")}
+                {all.length === 0 && allAgents.length === 0
+                  ? bi("接入第一台 Agent", "Connect Your First Agent")
+                  : bi("没有符合筛选条件的 Agent", "No Matching Agents")}
               </h2>
               <p>
-                {allAgents.length === 0
+                {all.length === 0 && allAgents.length === 0
                   ? bi(
-                      "当集群无 SSH 免密或无独立控制机时，前往任意集群的「自动化」标签页选择方式 B 即可生成轻量 Agent 安装包。",
-                      "Enroll passwordless outbound Target Agents inside any cluster's Automation tab.",
+                      "接入控制机 Agent 可统一通过 SSH/Ansible 调度交付与演练；也可在任意集群的「自动化」页签生成目标机直连 Agent。",
+                      "Connect a Control Agent for SSH/Ansible orchestration, or enroll Target Agents inside any cluster's Automation tab.",
                     )
-                  : bi("调整左侧搜索或状态筛选条件以查看其他 Agent。", "Adjust the rail filter to view agents.")}
+                  : bi("调整左侧搜索、状态或角色筛选条件以查看其他 Agent。", "Adjust the search, status, or role filter to view other Agents.")}
               </p>
-              {allAgents.length === 0 ? (
-                <Button type="outline" onClick={() => go({ name: "deliveries" })}>
-                  {bi("前往集群列表", "Open Clusters")} <IconArrowRight />
-                </Button>
+              {all.length === 0 && allAgents.length === 0 ? (
+                <div className="ec-row-acts">
+                  {canManage && (
+                    <Button type="primary" icon={<IconPlus />} onClick={begin}>
+                      {bi("接入控制机 Agent", "Add Control Agent")}
+                    </Button>
+                  )}
+                  <Button type="outline" onClick={() => go({ name: "deliveries" })}>
+                    {bi("前往集群接入目标机", "Open Clusters")} <IconArrowRight />
+                  </Button>
+                </div>
               ) : (
                 <Button
                   onClick={() => {
-                    setAgentQuery("");
-                    setAgentFilter("all");
+                    setQuery("");
+                    setStatusFilter("all");
+                    setRoleFilter("all");
                   }}
                 >
                   {bi("清除筛选", "Clear Filters")}

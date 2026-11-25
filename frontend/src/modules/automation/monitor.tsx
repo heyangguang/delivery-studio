@@ -1367,8 +1367,8 @@ export function ExecutionMonitorPage({
               {listData && (
                 <Tooltip
                   content={bi(
-                    `在线执行节点 ${listData.online_runners} / ${listData.total_runners}${canManageNodes ? " · 点击切换至控制机" : ""}`,
-                    `${listData.online_runners} / ${listData.total_runners} runners online`,
+                    `在线控制机 ${listData.online_runners} / ${listData.total_runners}${canManageNodes ? " · 点击切换至 Agent" : ""}`,
+                    `${listData.online_runners} / ${listData.total_runners} control agents online`,
                   )}
                   mini
                 >
@@ -1381,8 +1381,8 @@ export function ExecutionMonitorPage({
                   >
                     <i aria-hidden />
                     {bi(
-                      `在线节点 ${listData.online_runners}/${listData.total_runners}`,
-                      `${listData.online_runners}/${listData.total_runners} online`,
+                      `控制机 ${listData.online_runners}/${listData.total_runners}`,
+                      `Ctrl ${listData.online_runners}/${listData.total_runners}`,
                     )}
                   </button>
                 </Tooltip>

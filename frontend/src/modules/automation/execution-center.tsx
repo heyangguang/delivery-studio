@@ -1,6 +1,6 @@
 import React, { useMemo } from "react";
 import { Tooltip } from "@arco-design/web-react";
-import { IconDesktop, IconLink, IconThunderbolt } from "@arco-design/web-react/icon";
+import { IconLink, IconThunderbolt } from "@arco-design/web-react/icon";
 import { href } from "../../app/router";
 import { bi, useLang } from "../../app/i18n";
 import { can } from "../../shared/shared";
@@ -8,7 +8,7 @@ import { ExecutionMonitorPage } from "./monitor";
 import { ExecutionNodes } from "./execution-nodes";
 import "./execution-center.css";
 
-type CenterTab = "runs" | "controllers" | "agents";
+type CenterTab = "runs" | "agents";
 
 export function ExecutionCenterPage({
   view = "runs",
@@ -29,12 +29,10 @@ export function ExecutionCenterPage({
 
   const activeTab: CenterTab =
     view === "nodes" && canViewNodes
-      ? fleet === "agents"
-        ? "agents"
-        : "controllers"
+      ? "agents"
       : canViewRuns
         ? "runs"
-        : "controllers";
+        : "agents";
 
   const tabs = useMemo(() => {
     const out: {
@@ -54,22 +52,13 @@ export function ExecutionCenterPage({
       });
     }
     if (canViewNodes) {
-      out.push(
-        {
-          key: "controllers",
-          label: bi("控制机", "Nodes"),
-          tip: bi("管理全平台 Ansible / SSH 执行节点与能力授权", "Manage control-host execution nodes & permissions"),
-          to: href({ name: "executions", view: "nodes" }),
-          icon: <IconDesktop />,
-        },
-        {
-          key: "agents",
-          label: "Agent",
-          tip: bi("管理跨集群部署的目标机直连 Agent 与写权限", "Manage Direct Target Agents across all clusters"),
-          to: href({ name: "executions", view: "nodes", fleet: "agents" }),
-          icon: <IconLink />,
-        },
-      );
+      out.push({
+        key: "agents",
+        label: "Agent",
+        tip: bi("统一管理全平台控制机与各集群目标机 Agent", "Manage all control-host and target-host Agents"),
+        to: href({ name: "executions", view: "nodes" }),
+        icon: <IconLink />,
+      });
     }
     return out;
   }, [canViewRuns, canViewNodes, lang]);
@@ -120,7 +109,7 @@ export function ExecutionCenterPage({
   return (
     <ExecutionNodes
       centerNav={centerNav}
-      fleet={activeTab === "agents" ? "agents" : "controllers"}
+      initialRole={fleet === "agents" ? "target" : "all"}
     />
   );
 }

@@ -84,3 +84,65 @@ func TestFillFormRefusesTakenClusterID(t *testing.T) {
 		t.Fatal("a free id was refused:", out)
 	}
 }
+
+func TestSpecDiffHostParamsPerKeyAndMultiField(t *testing.T) {
+	a := &mwpack.Deployment{
+		Platform: "ubuntu-24.04-amd64",
+		Hosts: []mwpack.Host{
+			{
+				Name: "pass-4",
+				IP:   "192.168.31.153",
+				Disk: "/dev/sdb",
+				Params: map[string]any{
+					"storage_mode":     "system_directory",
+					"data_root":        "/opt/nginx-change-data",
+					"data_min_free_mb": 1024,
+					"legacy_opt":       "old",
+				},
+			},
+		},
+	}
+	b := &mwpack.Deployment{
+		Platform: "ubuntu-24.04-amd64",
+		Hosts: []mwpack.Host{
+			{
+				Name: "pass-4",
+				IP:   "192.168.31.154",
+				Disk: "/dev/sdc",
+				Params: map[string]any{
+					"storage_mode":     "system_directory",
+					"data_root":        "/opt/nginx-change-data",
+					"data_min_free_mb": 512,
+					"extra_opt":        "new",
+				},
+			},
+		},
+	}
+
+	changes := specDiff(a, b)
+	byLabel := map[string]Change{}
+	for _, c := range changes {
+		if strings.Contains(c.From, "map[") || strings.Contains(c.To, "map[") {
+			t.Fatalf("host diff leaked raw Go map syntax: %+v", c)
+		}
+		byLabel[c.Label] = c
+	}
+	if ch, ok := byLabel["机器 pass-4 的 IP"]; !ok || ch.From != "192.168.31.153" || ch.To != "192.168.31.154" {
+		t.Fatalf("missing IP diff: %+v", changes)
+	}
+	if ch, ok := byLabel["机器 pass-4 · data_min_free_mb"]; !ok || ch.Op != "change" || ch.From != "1024" || ch.To != "512" {
+		t.Fatalf("missing per-key host param change: %+v", changes)
+	}
+	if ch, ok := byLabel["机器 pass-4 · extra_opt"]; !ok || ch.Op != "add" || ch.To != "new" {
+		t.Fatalf("missing per-key host param add: %+v", changes)
+	}
+	if ch, ok := byLabel["机器 pass-4 · legacy_opt"]; !ok || ch.Op != "remove" || ch.From != "old" {
+		t.Fatalf("missing per-key host param remove: %+v", changes)
+	}
+	if _, unchanged := byLabel["机器 pass-4 · storage_mode"]; unchanged {
+		t.Fatalf("unchanged host param should not appear in diff: %+v", changes)
+	}
+	if ch, ok := byLabel["机器 pass-4 的数据盘"]; !ok || ch.From != "/dev/sdb" || ch.To != "/dev/sdc" {
+		t.Fatalf("missing disk diff alongside IP/param changes: %+v", changes)
+	}
+}

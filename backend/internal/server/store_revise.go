@@ -178,15 +178,45 @@ func specDiff(a, b *mwpack.Deployment) []Change {
 	for _, h := range b.Hosts {
 		seen[h.Name] = true
 		old, ok := hosts[h.Name]
-		switch {
-		case !ok:
+		if !ok {
 			out = append(out, Change{"host", "add", "机器 " + h.Name, "", h.IP})
-		case old.IP != h.IP:
+			continue
+		}
+		if old.IP != h.IP {
 			out = append(out, Change{"host", "change", "机器 " + h.Name + " 的 IP", old.IP, h.IP})
-		case !reflect.DeepEqual(old.Params, h.Params):
-			out = append(out, Change{"host", "change", "机器 " + h.Name + " 的公共参数", fmt.Sprint(old.Params), fmt.Sprint(h.Params)})
-		case old.Disk != h.Disk || old.Partition != h.Partition:
-			out = append(out, Change{"host", "change", "机器 " + h.Name + " 的数据盘", old.Disk, h.Disk})
+		}
+		if !reflect.DeepEqual(old.Params, h.Params) {
+			keys := map[string]bool{}
+			for k := range old.Params {
+				keys[k] = true
+			}
+			for k := range h.Params {
+				keys[k] = true
+			}
+			pk := make([]string, 0, len(keys))
+			for k := range keys {
+				pk = append(pk, k)
+			}
+			sort.Strings(pk)
+			for _, k := range pk {
+				x, hx := old.Params[k]
+				y, hy := h.Params[k]
+				if hx && hy && reflect.DeepEqual(x, y) {
+					continue
+				}
+				op := "change"
+				if !hx {
+					op = "add"
+				} else if !hy {
+					op = "remove"
+				}
+				out = append(out, Change{"host", op, "机器 " + h.Name + " · " + k, show(x), show(y)})
+			}
+		}
+		if old.Disk != h.Disk || old.Partition != h.Partition {
+			oldDisk := strings.TrimSpace(strings.Join([]string{old.Disk, old.Partition}, " "))
+			newDisk := strings.TrimSpace(strings.Join([]string{h.Disk, h.Partition}, " "))
+			out = append(out, Change{"host", "change", "机器 " + h.Name + " 的数据盘", oldDisk, newDisk})
 		}
 	}
 	for _, h := range a.Hosts {

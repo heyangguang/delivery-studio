@@ -761,6 +761,107 @@ body[arco-theme="dark"] {
   box-shadow: var(--shadow-sm);
 }
 
+.imp-probe-box.is-folded .imp-probe-bar {
+  border-bottom: 0;
+}
+
+.imp-parse-focus-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 42px;
+  padding: 7px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--bg-subtle, var(--surface));
+  flex-wrap: wrap;
+}
+
+.imp-parse-focus-l {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.imp-parse-focus-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--ok);
+  flex-shrink: 0;
+}
+
+.imp-parse-focus-dot.is-live {
+  background: var(--accent, var(--primary));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, var(--primary)) 18%, transparent);
+  animation: imp-ai-pulse 1.5s ease-in-out infinite;
+}
+
+.imp-parse-focus-title {
+  font-size: 12.5px;
+  font-weight: 560;
+  color: var(--ink);
+}
+
+.imp-parse-focus-meta {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 5px;
+  font-size: 11.5px;
+  color: var(--ink-2);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.imp-parse-focus-shield {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 560;
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 11%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ok) 24%, transparent);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.imp-parse-focus-btn {
+  all: unset;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 550;
+  color: var(--ink-2);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: color 0.14s ease, border-color 0.14s ease, background-color 0.14s ease;
+}
+
+.imp-parse-focus-btn:hover {
+  color: var(--ink);
+  border-color: var(--line-strong);
+  background: var(--surface-hover, var(--surface));
+}
+
 .imp-probe-bar {
   display: flex;
   align-items: center;
@@ -3145,6 +3246,529 @@ body[arco-theme="dark"] .imp-compose-box::after {
   letter-spacing: 0.01em;
 }
 
+/* Structured Runtime Paths & Service Units Editor (replaces jagged InputTag clouds) */
+.imp-rpath-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.imp-rpath-dirs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  align-items: start;
+}
+
+.imp-rpath-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  min-width: 0;
+}
+
+.imp-rpath-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.imp-rpath-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.imp-rpath-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--mute);
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+
+.imp-rpath-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.imp-rpath-svc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 6px 0 9px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.imp-rpath-svc-chip button {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--mute);
+  cursor: pointer;
+}
+
+.imp-rpath-svc-chip button:hover {
+  color: var(--err);
+  background: color-mix(in srgb, var(--err) 12%, transparent);
+}
+
+.imp-rpath-inline-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: 190px;
+  max-width: 100%;
+}
+
+.imp-rpath-add-btn {
+  all: unset;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink-2);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.imp-rpath-add-btn:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--line-strong);
+}
+
+.imp-rpath-add-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.imp-rpath-rows {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 5px;
+}
+
+.imp-rpath-rows.is-two-col {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 8px;
+}
+
+.imp-rpath-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 6px 0 9px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  min-width: 0;
+}
+
+.imp-rpath-ic {
+  display: inline-flex;
+  align-items: center;
+  font-size: 12.5px;
+  color: var(--mute);
+  flex-shrink: 0;
+}
+
+.imp-rpath-val {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.imp-rpath-del {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  font-size: 11px;
+  color: var(--mute);
+  cursor: pointer;
+  flex-shrink: 0;
+  opacity: 0.65;
+  transition: opacity 0.14s ease, color 0.14s ease, background-color 0.14s ease;
+}
+
+.imp-rpath-row:hover .imp-rpath-del,
+.imp-rpath-del:focus-visible {
+  opacity: 1;
+}
+
+.imp-rpath-del:hover {
+  color: var(--err);
+  background: color-mix(in srgb, var(--err) 12%, transparent);
+}
+
+.imp-rpath-foot-add {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.imp-rpath-foot-add > .arco-input-inner-wrapper,
+.imp-rpath-foot-add > .arco-input {
+  flex: 1;
+  min-width: 0;
+}
+
+@media (max-width: 700px) {
+  .imp-rpath-dirs,
+  .imp-rpath-rows.is-two-col {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Step 3: Focused Review Hero, Numbered Sections, Collapsible Details & Commit Rail */
+.imp-ctx-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.imp-draft-return-btn {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 5px;
+  color: var(--ok) !important;
+  border-color: color-mix(in srgb, var(--ok) 28%, var(--line)) !important;
+  background: color-mix(in srgb, var(--ok) 9%, var(--surface)) !important;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.imp-review-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 13px 15px;
+  border-radius: var(--r-lg, 14px);
+  border: 1px solid color-mix(in srgb, var(--ok) 28%, var(--line));
+  background: color-mix(in srgb, var(--ok-soft, var(--surface)) 45%, var(--surface));
+}
+
+.imp-review-hero.has-warn {
+  border-color: color-mix(in srgb, var(--warn, #f59e0b) 32%, var(--line));
+  background: color-mix(in srgb, var(--warn-soft, var(--surface)) 45%, var(--surface));
+}
+
+.imp-review-hero-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.imp-review-hero-l {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+.imp-review-status-ic {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  flex-shrink: 0;
+  margin-top: 1px;
+  font-size: 14px;
+}
+
+.imp-review-status-ic.is-ok {
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+}
+
+.imp-review-status-ic.is-warn {
+  color: var(--warn, #d97706);
+  background: color-mix(in srgb, var(--warn, #f59e0b) 15%, transparent);
+}
+
+.imp-review-hero-txt {
+  min-width: 0;
+  flex: 1;
+}
+
+.imp-review-hero-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 13.5px;
+  color: var(--ink);
+}
+
+.imp-review-hero-sub {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+
+.imp-review-kpis {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.imp-review-kpi {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 560;
+  color: var(--ink-2);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.imp-review-hero-r {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.imp-review-ghost-btn {
+  all: unset;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 550;
+  color: var(--ink-2);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: color 0.14s ease, border-color 0.14s ease, background-color 0.14s ease;
+}
+
+.imp-review-ghost-btn:hover,
+.imp-review-ghost-btn.is-on {
+  color: var(--ink);
+  border-color: var(--line-strong);
+  background: var(--surface-hover, var(--surface));
+}
+
+.imp-review-attention {
+  padding: 8px 11px;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--warn, #f59e0b) 26%, var(--line));
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--ink-2);
+}
+
+.imp-review-attention b {
+  color: var(--warn, #b45309);
+}
+
+.imp-review-warn-line {
+  margin-top: 2px;
+}
+
+.imp-review-sec-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.imp-sec-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--brand-ink, var(--primary));
+  background: var(--brand-soft, color-mix(in srgb, var(--primary) 12%, transparent));
+  border: 1px solid color-mix(in srgb, var(--primary) 22%, transparent);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.imp-sec-index.is-soft {
+  color: var(--ink-2);
+  background: var(--surface-2);
+  border-color: var(--line);
+}
+
+.imp-sec-divider {
+  height: 1px;
+  background: var(--line);
+  margin: 4px 0;
+}
+
+.imp-review-adv {
+  padding: 0 !important;
+  overflow: hidden;
+}
+
+.imp-review-adv-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  cursor: pointer;
+  user-select: none;
+  flex-wrap: wrap;
+  transition: background-color 0.14s ease;
+}
+
+.imp-review-adv-head:hover {
+  background: var(--surface-hover, var(--surface-2));
+}
+
+.imp-review-adv-pills {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 5px;
+}
+
+.imp-review-adv-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 560;
+  color: var(--ink-2);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.imp-review-adv-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px 18px 18px;
+  border-top: 1px solid var(--line);
+}
+
+.imp-review-commit-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.imp-review-commit-head {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.imp-review-commit-id {
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.imp-ready-checks {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+
+.imp-ready-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink-2);
+}
+
+.imp-ready-item.is-ok svg {
+  color: var(--ok);
+  flex-shrink: 0;
+}
+
+.imp-ready-item.is-warn {
+  color: var(--warn, #b45309);
+}
+
+.imp-ready-item.is-warn svg {
+  color: var(--warn, #d97706);
+  flex-shrink: 0;
+}
+
+.imp-review-commit-acts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 /* Step 3: Review Split Layout */
 .imp-review-grid {
   display: grid;
@@ -3598,7 +4222,8 @@ body[arco-theme="dark"] .imp-compose-box::after {
 
 @media (prefers-reduced-motion: reduce) {
   .imp-step-pane,
-  .imp-ai-pulse {
+  .imp-ai-pulse,
+  .imp-parse-focus-dot.is-live {
     animation: none;
   }
   .imp-back-pill,

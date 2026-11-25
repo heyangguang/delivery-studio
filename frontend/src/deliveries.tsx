@@ -113,21 +113,6 @@ const LazyRunbook = lazySubView(() =>
   import("./runbook").then((m) => ({ default: m.Runbook })),
 );
 
-function splitClusterTail(name: string): [string, string] {
-  if (name.length <= 20) return [name, ""];
-  const parts = name.split("-");
-  if (parts.length < 3) return [name, ""];
-  const lastTwo = `-${parts.slice(-2).join("-")}`;
-  if (lastTwo.length <= 15 && name.length - lastTwo.length >= 6) {
-    return [name.slice(0, name.length - lastTwo.length), lastTwo];
-  }
-  const lastOne = `-${parts[parts.length - 1]}`;
-  if (lastOne.length <= 12 && name.length - lastOne.length >= 6) {
-    return [name.slice(0, name.length - lastOne.length), lastOne];
-  }
-  return [name, ""];
-}
-
 export type LoadState = "loading" | "error" | "ready";
 
 /* ---------- detail cache: switching is instant for anything already seen or hovered ---------- */
@@ -1152,33 +1137,9 @@ function JobList({
                 </span>
                 <div className="row-main">
                   <div className="row-top">
-                    {(() => {
-                      const [stem, tail] = splitClusterTail(j.cluster_id);
-                      return tail ? (
-                        <span
-                          className="row-name"
-                          title={j.cluster_id}
-                          style={{ display: "inline-flex", minWidth: 0, overflow: "hidden" }}
-                        >
-                          <span
-                            style={{
-                              flex: "0 1 auto",
-                              minWidth: 0,
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            {stem}
-                          </span>
-                          <span style={{ flex: "0 0 auto", whiteSpace: "nowrap" }}>{tail}</span>
-                        </span>
-                      ) : (
-                        <span className="row-name" title={j.cluster_id}>
-                          {j.cluster_id}
-                        </span>
-                      );
-                    })()}
+                    <span className="row-name" title={j.cluster_id}>
+                      {j.cluster_id}
+                    </span>
                     {j.owner && j.owner !== meName() && (
                       <span className="row-owner">{j.owner}</span>
                     )}

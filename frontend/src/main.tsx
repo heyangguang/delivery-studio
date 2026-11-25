@@ -37,6 +37,7 @@ import {
   IconExclamationCircle,
 } from "@arco-design/web-react/icon";
 import "@arco-design/web-react/dist/css/arco.css";
+import "katex/dist/katex.min.css";
 import "./theme.css";
 import "./app.css";
 import "./wizard.css";
@@ -46,6 +47,50 @@ import "./platform.css";
 import "./airainbow.css";
 import { installAIRainbowPointer } from "./airainbow";
 import "./polish.css";
+/* Keep all component/route stylesheets in a single deterministic bundle so lazy-loaded JS chunks
+   never suffer FOUC, cascade inversion, or missing cross-view styles (e.g. .cl-imp-* in clusters). */
+import "./platformparams.css";
+import "./aichat.css";
+import "./aipage.css";
+import "./formchat.css";
+import "./formwork.css";
+import "./newpicker.css";
+import "./importcluster.css";
+import "./settings.css";
+import "./setnotify.css";
+import "./aiwork.css";
+import "./aitools.css";
+import "./aisettings.css";
+import "./charts.css";
+import "./aiusage.css";
+import "./aiext.css";
+import "./aiprefs.css";
+import "./aiprices.css";
+import "./storageview.css";
+import "./sandboxview.css";
+import "./executions.css";
+import "./secreport.css";
+import "./aiqueue.css";
+import "./me.css";
+import "./respage.css";
+import "./kb.css";
+import "./myfiles.css";
+import "./studio.css";
+import "./lineage.css";
+import "./stephotfix.css";
+import "./docs.css";
+import "./clusterconfig.css";
+import "./security.css";
+import "./vextriage.css";
+import "./clustersecurity.css";
+import "./rehearsal_rollout.css";
+import "./rehearsal.css";
+import "./clusters.css";
+import "./monitor.css";
+import "./iam.css";
+import "./workbench.css";
+import "./libruntime.css";
+import "./login.css";
 
 installAIRainbowPointer();
 import { DeliveriesPage } from "./deliveries";

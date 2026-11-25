@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.338-dev"
+	version            = "1.0.339-dev"
 	currentReleaseDate = "2026-11-25"
 )
 
@@ -65,6 +65,20 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.339-dev",
+		Date:    "2026-11-25",
+		Title:   "修复懒加载分包引起的样式丢失与集群列表名称截断断层",
+		TitleEn: "修复懒加载分包引起的样式丢失与集群列表名称截断断层",
+		Highlights: []string{
+			"在 main.tsx 固定全站样式表级联顺序并开启 Vite cssCodeSplit:false，彻底解决路由/子面板懒加载后存量纳管基线档案（.cl-imp-card）及跨模块样式未加载乱序问题，同时完整保留首屏 JS 瘦身 73.6% 成果",
+			"恢复集群侧边栏名称标准单行省略展示，消除中段截断造成的名称断层与业务名不可读问题",
+		},
+		HighlightsEn: []string{
+			"在 main.tsx 固定全站样式表级联顺序并开启 Vite cssCodeSplit:false，彻底解决路由/子面板懒加载后存量纳管基线档案（.cl-imp-card）及跨模块样式未加载乱序问题，同时完整保留首屏 JS 瘦身 73.6% 成果",
+			"恢复集群侧边栏名称标准单行省略展示，消除中段截断造成的名称断层与业务名不可读问题",
+		},
+	},
 	{
 		Version: "1.0.338-dev",
 		Date:    "2026-11-25",

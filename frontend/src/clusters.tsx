@@ -92,6 +92,7 @@ import {
 } from "./rehearsal_intent";
 import { bi, useLang } from "./i18n";
 import "./clusters.css";
+import "./importcluster.css";
 
 const LazyDocsTab = lazySubView(() =>
   import("./docs").then((m) => ({ default: m.DocsTab })),

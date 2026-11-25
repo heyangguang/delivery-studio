@@ -2027,3 +2027,78 @@ func TestRehearsalPatchStepEditsProposalCommand(t *testing.T) {
 		t.Fatalf("expected original step.Command unchanged, got %q", got.Steps[0].Command)
 	}
 }
+
+func TestRehearsalExtraScopePersistedAndHonoredInProbeReplan(t *testing.T) {
+	s, _ := testStore(t)
+	alice, csrf := storeLogin(t, s, "alice")
+	spec := `{"id":"pg-extra-scope","hosts":[{"name":"node-1","ip":"10.0.9.11"},{"name":"node-2","ip":"10.0.9.12"},{"name":"node-3","ip":"10.0.9.13"}],"instances":[{"id":"etcd","component":"etcd","placement":{"member":["node-1","node-2","node-3"]}}]}`
+	cw := storeCreate(t, s, alice, csrf, spec, nil)
+	s.wg.Wait()
+	if cw.Code != 202 {
+		t.Fatalf("create job: %d %s", cw.Code, cw.Body.String())
+	}
+	var job storeJob
+	_ = json.Unmarshal(cw.Body.Bytes(), &job)
+	_ = storeRequest(s, "PATCH", "/api/jobs/"+job.ID, strings.NewReader(`{"outcome":"done"}`), alice, csrf)
+
+	rid := "c1d2e3f4a509"
+	rh := changeRehearsal{
+		ID:          rid,
+		ClusterID:   "pg-extra-scope",
+		Title:       "调整 PostgreSQL 日志轮转",
+		Goal:        "修改 logging_collector 并重启生效",
+		Stage:       "rehearsing",
+		Mode:        "full",
+		Owner:       "alice",
+		ProbeOutput: "HOST=node-1 ROLE=Leader PG=17.11 logging_collector=off",
+		ScopeQuestions: []rehearsalScopeQuestion{
+			{ID: "q1", Question: "是否允许短暂业务闪断？", Answer: "尽量无感"},
+		},
+		CreatedAt: nowStamp(),
+		UpdatedAt: nowStamp(),
+	}
+	rehearsalMu.Lock()
+	if err := s.saveRehearsal(rh); err != nil {
+		rehearsalMu.Unlock()
+		t.Fatalf("save seed rehearsal: %v", err)
+	}
+	rehearsalMu.Unlock()
+
+	planResp := `{"thinking":"遵循工程师补充约束直接操作主库，不切主","probe_status":"valid","drift":{"summary":"拓扑与基线一致","drifted":false,"hosts":[{"name":"node-1","ip":"10.0.9.11","initial_role":"主库","actual_role":"主库","version":"17.11","status":"正常"}]},"steps":[{"id":"s1","phase":"execute","order":1,"title":"直接重启主库生效","target_role":"当前主库 node-1","command":"systemctl restart patroni","expect":"服务恢复正常","risk_note":"短暂闪断数秒"}]}`
+	srv, bodies := fakeModel(t, planResp)
+	enableAI(t, s, srv.URL, 1)
+
+	// Re-plan from Stage 1 with updated extra_scope & answer and EMPTY probe_output (must reuse saved ProbeOutput!).
+	body := `{"answers":[{"id":"q1","question":"是否允许短暂业务闪断？","answer":"允许短暂闪断"}],"extra":"直接对主操作就行可以接受闪断"}`
+	w := storeRequest(s, "POST", "/api/clusters/pg-extra-scope/rehearsals/"+rid+"/probe", strings.NewReader(body), alice, csrf)
+	if w.Code != 200 {
+		t.Fatalf("POST /probe replan failed: %d %s", w.Code, w.Body.String())
+	}
+	var updated changeRehearsal
+	if err := json.Unmarshal(w.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("decode updated rehearsal: %v", err)
+	}
+	if updated.ExtraScope != "直接对主操作就行可以接受闪断" {
+		t.Fatalf("expected extra_scope persisted, got %q", updated.ExtraScope)
+	}
+	if len(updated.ScopeQuestions) != 1 || updated.ScopeQuestions[0].Answer != "允许短暂闪断" {
+		t.Fatalf("expected updated scope answer persisted, got %+v", updated.ScopeQuestions)
+	}
+	if updated.ProbeOutput != rh.ProbeOutput {
+		t.Fatalf("expected saved probe_output reused, got %q", updated.ProbeOutput)
+	}
+	if len(*bodies) != 1 {
+		t.Fatalf("expected 1 AI request, got %d", len(*bodies))
+	}
+	reqPrompt := (*bodies)[0]
+	for _, must := range []string{
+		"直接对主操作就行可以接受闪断",
+		"工程师特别补充的现场背景与操作指令",
+		"工程师已确认边界与补充现场背景最高优先级",
+		"HOST=node-1 ROLE=Leader PG=17.11 logging_collector=off",
+	} {
+		if !strings.Contains(reqPrompt, must) {
+			t.Fatalf("expected probe AI request to contain %q, got:\n%s", must, reqPrompt)
+		}
+	}
+}

@@ -2426,7 +2426,7 @@ func (s *storeServer) submitRehearsalScope(w http.ResponseWriter, r *http.Reques
 		fmt.Fprintf(&qa, "- 问：%s\n  答：%s\n", q.Question, firstNonEmptyStr(q.Answer, "（未填写，按常规生产保守策略处理）"))
 	}
 	if rh.ExtraScope != "" {
-		fmt.Fprintf(&qa, "- 补充约束：%s\n", rh.ExtraScope)
+		fmt.Fprintf(&qa, "- 【工程师补充现场背景与约束（最高优先级，务必遵循）】：%s\n", rh.ExtraScope)
 	}
 	pipeSpec := rehearsalPipelineSpec{
 		PreSteps: []rehearsalTraceStep{
@@ -2571,6 +2571,9 @@ const rehearsalPlanSystem = `你是资深中间件变更实施专家。现在你
 1. 漂移诊断（drift）：仔细读取文字回显与附带的终端/监控截图，对比初始交付规格与现场真实状态，明确每台节点的初始角色 vs 当前真实角色（特别是主从是否已切换）、当前版本、被人工修改过的关键参数以及潜在变更风险；
    - **字段简洁规范**：hosts[*].initial_role 与 actual_role 仅写简短角色标签（如「主库」「从库」「Leader」「Quorum Standby」「待核实」，不超过 12 字），详细映射或补充说明放入 status 字段；hosts[*].version 优先填写探针实测的精简版本号（如「17.11」或「17.11 / Patroni 4.1.0」），仅当该节点确实未执行本机探针回传时填「未在本机采集」，**不要**在 status 字段中重复抱怨「截图未提供实际软件版本」；param_diffs 尽量按单个参数拆行，initial/actual 只写简明值，目标策略与风险放入 risk 字段。
 2. 生成分步演练清单（steps）：围绕「步骤清晰、每步复制即跑、一看就懂在哪台机器执行」的原则，按以下 4 个阶段生成**精炼聚焦、按复杂度控制步数、输出简短易单屏核验**的步骤（严禁为了凑形式拆成十几步，严禁把命令写得像几十行脚本程序）：
+   - **【工程师已确认边界与补充现场背景最高优先级】**：
+     * 如果工程师在「边界对齐答案」或「补充现场背景」中明确指定了执行策略（例如「直接对主操作就行、可以接受闪断、无需切主」「允许直接重启主库」「保留新主不切回」「跳过测试环境/仅对指定节点操作」等），**必须严格遵循用户的明确要求编排步骤顺序与操作方式**！
+     * 例如用户明确要求「直接对主操作、可以接受闪断」时，直接按用户意图编排主库变更与重启步骤，**严禁**违背用户意愿强行插入计划内切主（switchover）与切回原主步骤，只需在对应步骤的 risk_note 中简明提示短暂中断影响与回退办法；只有在用户未明确放宽限制时，才按下方默认高可用先备后主滚动切主模板编排。
    - **总步数与命令篇幅严格控制**：
      * **轻量在线变更**（如补一条 pg_hba/白名单规则、在线动态调参 reload、补日志目录或轮转规则，无需重启和切主）：总步数严格控制在 **3～4 步**（1 步预检 → 1 步执行与 reload → 1 步验收 → 1 步回退）；
      * **中高风险变更**（需滚动重启、切主、升级、扩缩容、架构或证书改造）：常规变更严格控制在 **5～8 步**（把琐碎的小检查合并，例如日志落盘滚动重启：1 步只读核对现状 → 1 步所有节点建目录 → 1 步修改 DCS 参数 → 1 步滚动重启从库（通过 commands 拆成每台独立的命令框，或拆分为两步） → 1 步切主并重启原主库（切主与重启分框） → 1 步切回原主库恢复初始角色 → 1 步验收日志与入口 → 1 步回退）；
@@ -2598,7 +2601,7 @@ const rehearsalPlanSystem = `你是资深中间件变更实施专家。现在你
      * 写清本步究竟要 SSH 登录哪一类/哪几台机器执行，例如：「所有数据节点（node-1 / node-2 / node-3，逐台登录执行）」「任一数据库节点（如当前主库 node-1，修改共享 DCS）」「当前从库（先 node-2 再 node-3，逐台滚动重启）」「当前主库（如 node-1，切主后重启）」「集群外客户端/跳板机，或非当前主库的从库节点（如 node-2 / node-3）」。
      * 严禁把“控制机 + 三台节点”混写在同一句里让人不知该登哪台，也不要假设存在免密 ssh 控制机或一定存在集群外的独立第 4 台跳板机。
    - precheck（变更前预检：核对当前主从角色、复制同步状态、本次变更直接相关的配置与前置条件）
-   - execute（核心变更执行：严格遵循高可用滚动顺序，先备后主、计划内平滑切主，并在原主重启追平后切回原主库恢复初始角色）
+   - execute（核心变更执行：默认遵循高可用滚动顺序，先备后主、计划内平滑切主，并在原主重启追平后切回原主库恢复初始角色；但若工程师在边界对齐或补充现场背景中明确指定「直接对主操作、可接受闪断、无需切主」等策略，则严格按工程师指令执行，不强行切主）
    - verify（变更后验收：服务状态、目标参数/版本生效、数据复制恢复、入口连通性验证）
    - rollback（回退预案：一旦演练或生产执行受阻时的明确回退步骤与命令）
    - **ELB / 四层负载均衡入口验证（贴合现场，严禁强求不存在的独立主机）**：
@@ -2665,6 +2668,12 @@ func (s *storeServer) submitRehearsalProbe(w http.ResponseWriter, r *http.Reques
 		Mode        string     `json:"mode"` // "" | "analyze" | "diagnose"
 		Model       string     `json:"model"`
 		Effort      thinkLevel `json:"effort"`
+		Answers     []struct {
+			ID       string `json:"id"`
+			Question string `json:"question"`
+			Answer   string `json:"answer"`
+		} `json:"answers,omitempty"`
+		Extra *string `json:"extra,omitempty"`
 	}
 	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 30<<20)).Decode(&in) != nil {
 		s.fail(w, 400, "提交的内容格式不对或超过大小限制")
@@ -2674,10 +2683,7 @@ func (s *storeServer) submitRehearsalProbe(w http.ResponseWriter, r *http.Reques
 	probeOut := aiScrub(truncRunes(strings.TrimSpace(in.ProbeOutput), 24000))
 	manual := aiScrub(truncRunes(strings.TrimSpace(in.ManualState), 8000))
 	testEnv := truncRunes(strings.TrimSpace(in.TestEnvNote), 1000)
-	if probeOut == "" && manual == "" && len(in.Images) == 0 {
-		s.fail(w, 400, "请粘贴现场采集回显、上传/粘贴终端截图，或手动填写生产集群当前状态说明")
-		return
-	}
+
 	rehearsalMu.Lock()
 	rh, ok := s.loadRehearsal(f.ID, rid)
 	rehearsalMu.Unlock()
@@ -2685,15 +2691,59 @@ func (s *storeServer) submitRehearsalProbe(w http.ResponseWriter, r *http.Reques
 		s.fail(w, 404, "演练会话不存在")
 		return
 	}
-	lang := reqLang(r)
-	providers, code, err := s.rehearsalCheckAILang(session.User, len(in.Images) > 0, in.Model, lang)
-	if err != nil {
-		s.fail(w, code, err.Error())
+	scopeUpdated := false
+	if len(in.Answers) > 0 {
+		ansMap := map[string]string{}
+		for _, a := range in.Answers {
+			ansMap[a.ID] = truncRunes(strings.TrimSpace(a.Answer), 500)
+		}
+		for i := range rh.ScopeQuestions {
+			if v, exists := ansMap[rh.ScopeQuestions[i].ID]; exists {
+				rh.ScopeQuestions[i].Answer = v
+			}
+		}
+		scopeUpdated = true
+	}
+	if in.Extra != nil {
+		rh.ExtraScope = truncRunes(strings.TrimSpace(*in.Extra), 2000)
+		scopeUpdated = true
+	}
+	if probeOut == "" && manual == "" && len(in.Images) == 0 {
+		if strings.TrimSpace(rh.ProbeOutput) != "" {
+			probeOut = rh.ProbeOutput
+		}
+		if strings.TrimSpace(rh.ManualState) != "" {
+			manual = rh.ManualState
+		}
+	}
+	if testEnv == "" && strings.TrimSpace(rh.TestEnvNote) != "" {
+		testEnv = rh.TestEnvNote
+	}
+	var aiImages []string
+	var imgNames []string
+	var err error
+	if len(in.Images) > 0 {
+		imgNames, err = s.storeRehearsalImages(f.ID, rid, in.Images)
+		if err != nil {
+			s.fail(w, 400, err.Error())
+			return
+		}
+		aiImages = in.Images
+	} else if len(rh.ProbeImages) > 0 {
+		for _, name := range rh.ProbeImages {
+			if d := s.rehearsalImageData(f.ID, rid, name); d != "" {
+				aiImages = append(aiImages, d)
+			}
+		}
+	}
+	if probeOut == "" && manual == "" && len(aiImages) == 0 {
+		s.fail(w, 400, "请粘贴现场采集回显、上传/粘贴终端截图，或手动填写生产集群当前状态说明")
 		return
 	}
-	imgNames, err := s.storeRehearsalImages(f.ID, rid, in.Images)
+	lang := reqLang(r)
+	providers, code, err := s.rehearsalCheckAILang(session.User, len(aiImages) > 0, in.Model, lang)
 	if err != nil {
-		s.fail(w, 400, err.Error())
+		s.fail(w, code, err.Error())
 		return
 	}
 
@@ -2707,13 +2757,17 @@ func (s *storeServer) submitRehearsalProbe(w http.ResponseWriter, r *http.Reques
 	if rh.Mode == "light" {
 		prompt.WriteString("\n【当前推演档位：简单推演（light）】\n本次为轻量级推演：如确认现场状态有效且无高风险漂移，请严格将步骤精简控制在 3～5 步（1 步预检现状 → 1～2 步执行与 reload → 1 步验收 → 1 步回退）；若现场回显暴露出需要重启服务、切主或严重漂移的高风险问题，请在 drift.risks 中明确提示风险并建议升级为全量推演。\n")
 	}
+	var scopeBuf strings.Builder
 	for _, q := range rh.ScopeQuestions {
-		if q.Answer != "" {
-			fmt.Fprintf(&prompt, "- %s：%s\n", q.Question, q.Answer)
+		if strings.TrimSpace(q.Answer) != "" {
+			fmt.Fprintf(&scopeBuf, "- %s：%s\n", q.Question, q.Answer)
 		}
 	}
 	if rh.ExtraScope != "" {
-		fmt.Fprintf(&prompt, "- 补充约束：%s\n", rh.ExtraScope)
+		fmt.Fprintf(&scopeBuf, "- 【工程师特别补充的现场背景与操作指令（最高优先级，生成步骤务必严格遵循，优先于默认保守切主模板）】：%s\n", rh.ExtraScope)
+	}
+	if scopeBuf.Len() > 0 {
+		fmt.Fprintf(&prompt, "\n【已确认的变更边界与工程师补充指令（最高优先级）】\n%s", scopeBuf.String())
 	}
 	if scPrompt := securityContextPrompt(rh.SecurityContext, "probe"); scPrompt != "" {
 		prompt.WriteString(scPrompt)
@@ -2721,7 +2775,7 @@ func (s *storeServer) submitRehearsalProbe(w http.ResponseWriter, r *http.Reques
 	if bp := s.rehearsalSourceBlueprintPrompt(rh); bp != "" && !diagnoseOnly {
 		prompt.WriteString(bp)
 	}
-	if rh.ProbeScript != "" && (diagnoseOnly || len(probeOut) < 400 || len(imgNames) > 0) {
+	if rh.ProbeScript != "" && (diagnoseOnly || len(probeOut) < 400 || len(aiImages) > 0) {
 		fmt.Fprintf(&prompt, "\n【当前只读探针脚本（前 4000 字符）】\n%s\n", truncRunes(rh.ProbeScript, 4000))
 	}
 	if probeOut != "" {
@@ -2734,11 +2788,11 @@ func (s *storeServer) submitRehearsalProbe(w http.ResponseWriter, r *http.Reques
 	if manual != "" {
 		fmt.Fprintf(&prompt, "\n【工程师手动声明的现场现状】\n%s\n", manual)
 	}
-	if len(imgNames) > 0 {
+	if len(aiImages) > 0 {
 		if diagnoseOnly {
-			fmt.Fprintf(&prompt, "\n【附带探针报错截图】共 %d 张，请结合报错信息诊断根因并给出修复命令或修订版纯只读脚本。\n", len(imgNames))
+			fmt.Fprintf(&prompt, "\n【附带探针报错截图】共 %d 张，请结合报错信息诊断根因并给出修复命令或修订版纯只读脚本。\n", len(aiImages))
 		} else {
-			fmt.Fprintf(&prompt, "\n【附带现场终端/状态截图】共 %d 张，请先核验截图是否为有效采集输出；若是脚本报错截图则触发门禁阻断并给出修复指引，只有确认拿到有效现场状态后才进行漂移比对。\n", len(imgNames))
+			fmt.Fprintf(&prompt, "\n【附带现场终端/状态截图】共 %d 张，请先核验截图是否为有效采集输出；若是脚本报错截图则触发门禁阻断并给出修复指引，只有确认拿到有效现场状态后才进行漂移比对。\n", len(aiImages))
 		}
 	}
 	if testEnv != "" {
@@ -2750,8 +2804,8 @@ func (s *storeServer) submitRehearsalProbe(w http.ResponseWriter, r *http.Reques
 		lines := strings.Count(probeOut, "\n") + 1
 		evidenceParts = append(evidenceParts, tr(lang, fmt.Sprintf("回显文本 %d 行", lines), fmt.Sprintf("%d line(s) of output", lines)))
 	}
-	if len(imgNames) > 0 {
-		evidenceParts = append(evidenceParts, tr(lang, fmt.Sprintf("现场截图 %d 张", len(imgNames)), fmt.Sprintf("%d screenshot(s)", len(imgNames))))
+	if len(aiImages) > 0 {
+		evidenceParts = append(evidenceParts, tr(lang, fmt.Sprintf("现场截图 %d 张", len(aiImages)), fmt.Sprintf("%d screenshot(s)", len(aiImages))))
 	}
 	if manual != "" {
 		evidenceParts = append(evidenceParts, tr(lang, "人工现状说明", "Manual status notes"))
@@ -2821,7 +2875,7 @@ func (s *storeServer) submitRehearsalProbe(w http.ResponseWriter, r *http.Reques
 		},
 	}
 
-	text, trace, code, err := s.rehearsalRunAI(r, providers, session.User, f.ID, rid+"/probe", "probe", red, sysPrompt+skillBlock, prompt.String(), in.Images, pipeSpec, in.Effort, ev)
+	text, trace, code, err := s.rehearsalRunAI(r, providers, session.User, f.ID, rid+"/probe", "probe", red, sysPrompt+skillBlock, prompt.String(), aiImages, pipeSpec, in.Effort, ev)
 	if err != nil {
 		failRehearsalResp(s, w, ev, code, err.Error(), aiDiagFromErr(err), trace.Diag)
 		return
@@ -2920,6 +2974,10 @@ func (s *storeServer) submitRehearsalProbe(w http.ResponseWriter, r *http.Reques
 			failRehearsalResp(s, w, ev, 404, "演练会话不存在")
 			return
 		}
+		if scopeUpdated {
+			cur.ScopeQuestions = rh.ScopeQuestions
+			cur.ExtraScope = rh.ExtraScope
+		}
 		cur.ProbeOutput = probeOut
 		if len(imgNames) > 0 {
 			cur.ProbeImages = imgNames
@@ -2986,6 +3044,10 @@ func (s *storeServer) submitRehearsalProbe(w http.ResponseWriter, r *http.Reques
 		rehearsalMu.Unlock()
 		failRehearsalResp(s, w, ev, 404, "演练会话不存在")
 		return
+	}
+	if scopeUpdated {
+		cur.ScopeQuestions = rh.ScopeQuestions
+		cur.ExtraScope = rh.ExtraScope
 	}
 	cur.ProbeOutput = probeOut
 	if len(imgNames) > 0 {
@@ -4845,6 +4907,9 @@ func (s *storeServer) finalizeRehearsal(w http.ResponseWriter, r *http.Request, 
 		overview := rh.Goal
 		if rh.ScopeSummary != "" {
 			overview += tr(lang, "\n边界说明：", "\nScope Summary: ") + rh.ScopeSummary
+		}
+		if rh.ExtraScope != "" {
+			overview += tr(lang, "\n补充现场约束：", "\nExtra Constraints: ") + rh.ExtraScope
 		}
 		saved.Sections["overview"] = docSection{Text: overview, Source: "user", Confirmed: true, By: session.User, At: now, Basis: f.Current.ID}
 	}

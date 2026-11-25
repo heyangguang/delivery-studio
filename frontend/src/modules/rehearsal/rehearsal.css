@@ -4054,6 +4054,57 @@ body[arco-theme="dark"] .rh-mode-pill.is-light {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  flex-wrap: wrap;
+}
+.rh-extra-head-acts {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.rh-extra-status {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.rh-extra-status.is-pending {
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+.rh-extra-status.is-applied {
+  color: var(--ok);
+  background: var(--ok-soft);
+}
+.rh-extra-active-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px 10px;
+  flex-wrap: wrap;
+  padding: 9px 14px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--brand) 6%, var(--surface));
+  border: 1px solid var(--brand-line);
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+.rh-extra-active-tag {
+  flex: none;
+  font-size: 11px;
+  font-weight: 650;
+  padding: 1px 8px;
+  border-radius: 999px;
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+  white-space: nowrap;
+}
+.rh-extra-active-txt {
+  flex: 1 1 240px;
+  min-width: 0;
+  color: var(--ink);
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 740px) {

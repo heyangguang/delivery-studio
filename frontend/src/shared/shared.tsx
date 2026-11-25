@@ -1009,6 +1009,8 @@ export type ImportedEndpoint = {
 export type ImportedCompanion = {
   component: string;
   display_name?: string;
+  icon?: string;
+  color?: string;
   version?: string;
   kind?: "ha_manager" | "dcs" | "proxy" | "vip" | "pooler" | "backup" | "monitoring" | "companion" | string;
   role?: string;

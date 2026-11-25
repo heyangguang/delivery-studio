@@ -122,6 +122,16 @@ func TestPackageDeliveryLayoutAndPrivacy(t *testing.T) {
 			t.Errorf("Linux delivery file %s must use LF line endings (no CR bytes)", lfFile)
 		}
 	}
+	for _, lfFile := range []string{
+		"mw-setup/setup-root-ssh-trust.sh",
+		"middleware-automation/bootstrap/bootstrap-ansible.sh",
+		"middleware-automation/bin/ansible-playbook",
+		"middleware-automation/projects/pg-prod/callback_plugins/mw_log.py",
+	} {
+		if b, ok := ctl[lfFile]; ok && strings.Contains(string(b), "\r") {
+			t.Errorf("Linux delivery file %s must use LF line endings (no CR bytes)", lfFile)
+		}
+	}
 	if !strings.HasPrefix(string(ctl["mw-setup/nodes.conf"]), "10.0.1.11 db-1\n") {
 		t.Errorf("nodes.conf must start with the controller: %q", ctl["mw-setup/nodes.conf"])
 	}

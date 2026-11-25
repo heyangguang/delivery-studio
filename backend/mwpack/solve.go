@@ -1079,7 +1079,7 @@ func (s *solver) binds(lb *Instance, byID map[string]*Instance) {
 		bf := BindFacts{Name: name, Target: b.Endpoint, Listen: listen, Endpoint: *ep, Check: ep.Health}
 		lb.Binds = append(lb.Binds, bf)
 		addr := ""
-		if vip, ok := lb.Params["vip"].(string); ok && vip != "" {
+		if vip, ok := lb.Params["vip"].(string); ok && vip != "" && lb.Visible["vip"] {
 			addr = vip
 		} else if len(lb.Hosts) > 0 {
 			h, _ := s.plan.HostByName(lb.Hosts[0])

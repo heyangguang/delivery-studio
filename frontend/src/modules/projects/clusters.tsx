@@ -1,11 +1,8 @@
 import {
   buildClusterStackPills,
-  companionIcon,
-  companionKindMeta,
   computeEffectiveClusterChanges,
   detectMissingCompanionsFromMeta,
   displayInstances,
-  effectiveCompanionKind,
   hostStorage,
   lazySubView,
   localizeEndpointTitle,
@@ -1318,6 +1315,44 @@ function Overview({
 
   return (
     <div className="cl-over">
+      {!isImported && holder && <HolderCard c={c} p={holder} />}
+      {canReviseHolder && (
+        <div className="cl-revise">
+          <span>
+            {bi(
+              "部署尚未确认完成：如机器地址或参数有误，可修订配置并重新生成交付包（原草稿自动作废）。",
+              "Deployment not yet confirmed: if host IPs or parameters need changes, revise the config and rebuild (the current draft will be voided).",
+            )}
+          </span>
+          <Button
+            size="small"
+            onClick={() =>
+              go({
+                name: "new",
+                app: c.app_id,
+                revise: holder!.id,
+              })
+            }
+          >
+            {bi("修订配置", "Revise Config")}
+          </Button>
+        </div>
+      )}
+      {!holder && canRehearse && (
+        <RehearsalQuickStrip c={c} rehearsals={rehearsals} />
+      )}
+      {current ? (
+        <Now
+          key={current.id}
+          c={c}
+          p={current}
+          appliedRehearsals={appliedRehearsals}
+        />
+      ) : (
+        <section className="dsec">
+          <p className="muted">{bi("尚无已生成的交付材料。", "No generated delivery artifacts yet.")}</p>
+        </section>
+      )}
       {isImported && (
         <section className="cl-imp-card" aria-label={bi("存量纳管基线", "Imported Baseline")}>
           <div className="cl-imp-card-head">
@@ -1345,32 +1380,6 @@ function Overview({
                   </Button>
                 </>
               )}
-            </div>
-          </div>
-
-          {/* Component Architecture Stack Strip */}
-          <div className="cl-imp-stack">
-            <span className="cl-imp-stack-lbl">{bi("架构组件栈", "Stack")}</span>
-            <div className="cl-imp-stack-pills">
-              <span className="cl-imp-comp-pill is-primary">
-                <AppGlyph id={c.app_id} icon={c.icon} size={16} />
-                <b>{imp?.display_name || c.app_name}</b>
-                {(imp?.exact_version || c.version) && (
-                  <span className="cl-imp-comp-ver">{imp?.exact_version || c.version}</span>
-                )}
-                <span className="cl-imp-comp-kind">{bi("主组件", "Primary")}</span>
-              </span>
-              {(imp?.companions || []).map((cm) => {
-                const km = companionKindMeta(effectiveCompanionKind(cm.component, cm.kind));
-                return (
-                  <span key={cm.component} className="cl-imp-comp-pill">
-                    <AppGlyph id={cm.component} icon={companionIcon(cm.component)} size={16} />
-                    <b>{cm.display_name || cm.component}</b>
-                    {cm.version && <span className="cl-imp-comp-ver">{cm.version}</span>}
-                    <span className="cl-imp-comp-kind">{km.label}</span>
-                  </span>
-                );
-              })}
             </div>
           </div>
 
@@ -1467,44 +1476,6 @@ function Overview({
               </ul>
             </div>
           )}
-        </section>
-      )}
-      {!isImported && holder && <HolderCard c={c} p={holder} />}
-      {canReviseHolder && (
-        <div className="cl-revise">
-          <span>
-            {bi(
-              "部署尚未确认完成：如机器地址或参数有误，可修订配置并重新生成交付包（原草稿自动作废）。",
-              "Deployment not yet confirmed: if host IPs or parameters need changes, revise the config and rebuild (the current draft will be voided).",
-            )}
-          </span>
-          <Button
-            size="small"
-            onClick={() =>
-              go({
-                name: "new",
-                app: c.app_id,
-                revise: holder!.id,
-              })
-            }
-          >
-            {bi("修订配置", "Revise Config")}
-          </Button>
-        </div>
-      )}
-      {!holder && canRehearse && (
-        <RehearsalQuickStrip c={c} rehearsals={rehearsals} />
-      )}
-      {current ? (
-        <Now
-          key={current.id}
-          c={c}
-          p={current}
-          appliedRehearsals={appliedRehearsals}
-        />
-      ) : (
-        <section className="dsec">
-          <p className="muted">{bi("尚无已生成的交付材料。", "No generated delivery artifacts yet.")}</p>
         </section>
       )}
       {basePlan && (
@@ -2163,10 +2134,7 @@ function ClusterUnifiedOverview({
     )
     .sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary) || a.listen - b.listen);
 
-  const stackPills =
-    c.delivery_mode !== "imported" && !c.imported
-      ? buildClusterStackPills(c, real)
-      : [];
+  const stackPills = buildClusterStackPills(c, real);
   const ports = real
     .flatMap((i) =>
       (i.ports || []).map((x) => ({

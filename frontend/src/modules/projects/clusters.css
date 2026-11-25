@@ -1579,6 +1579,9 @@ body[arco-theme="dark"] .pt-act em {
 .cl-over > .cl-imp-card {
   margin: 0 0 18px;
 }
+.cl-over > .dsec + .cl-imp-card {
+  margin: 4px 0 18px;
+}
 .cl-over > .cl-holder {
   margin: 0 0 18px;
 }

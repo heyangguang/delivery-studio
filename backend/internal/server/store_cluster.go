@@ -1,8 +1,10 @@
 package server
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -382,6 +384,110 @@ func (s *storeServer) clusters(w http.ResponseWriter, r *http.Request, session s
 	s.writeJSON(w, 200, views)
 }
 
+var (
+	rePkgEpochPrefix  = regexp.MustCompile(`^\d+:`)
+	rePkgDistroSuffix = regexp.MustCompile(`[-+~].*$`)
+)
+
+func cleanLockedPkgVersion(raw string) string {
+	v := strings.TrimSpace(raw)
+	if v == "" {
+		return ""
+	}
+	v = rePkgEpochPrefix.ReplaceAllString(v, "")
+	v = rePkgDistroSuffix.ReplaceAllString(v, "")
+	return strings.TrimSpace(v)
+}
+
+func companionKindLabelZH(component, kind string) string {
+	eff := strings.ToLower(strings.TrimSpace(kind))
+	if mwpack.IsOSCompanion(component) && (eff == "" || eff == "monitoring" || eff == "companion") {
+		eff = "os_component"
+	}
+	switch eff {
+	case "ha_manager":
+		return "高可用管理"
+	case "dcs":
+		return "分布式协调"
+	case "proxy":
+		return "代理/均衡"
+	case "vip":
+		return "虚拟 IP"
+	case "pooler":
+		return "连接池"
+	case "backup":
+		return "备份工具"
+	case "monitoring":
+		return "监控采集"
+	case "os_component":
+		return "OS 组件"
+	default:
+		return "伴生组件"
+	}
+}
+
+func (s *storeServer) deployedStackSummaryText(jobID string) string {
+	raw := s.jobPlan(jobID)
+	if len(raw) == 0 {
+		return ""
+	}
+	var doc struct {
+		Instances []mwpack.InstanceView `json:"instances"`
+	}
+	if json.Unmarshal(raw, &doc) != nil || len(doc.Instances) == 0 {
+		return ""
+	}
+	findPkgVer := func(pks []mwpack.PackageRequest, substr string) string {
+		for _, pk := range pks {
+			if strings.Contains(strings.ToLower(pk.Name), substr) {
+				if v := cleanLockedPkgVersion(pk.Version); v != "" {
+					return v
+				}
+			}
+		}
+		return ""
+	}
+	var parts []string
+	var allPkgs []mwpack.PackageRequest
+	hasPatroni := false
+	hasPgBackRest := false
+	isPG := false
+	for _, iv := range doc.Instances {
+		if iv.External {
+			continue
+		}
+		allPkgs = append(allPkgs, iv.Packages...)
+		comp := strings.ToLower(iv.Component)
+		if comp == "postgresql" {
+			isPG = true
+			if iv.Params != nil && iv.Params["backup_retention_full"] != nil {
+				hasPgBackRest = true
+			}
+		}
+		if comp == "patroni" {
+			hasPatroni = true
+		}
+		label := firstNonEmptyStr(iv.Title, iv.Component)
+		if iv.Version != "" {
+			label += " " + iv.Version
+		}
+		parts = append(parts, label)
+	}
+	if isPG && !hasPatroni {
+		if pv := findPkgVer(allPkgs, "patroni"); pv != "" {
+			parts = append(parts, "Patroni "+pv+"（高可用管理）")
+		}
+	}
+	if isPG && hasPgBackRest {
+		if bv := findPkgVer(allPkgs, "pgbackrest"); bv != "" {
+			parts = append(parts, "pgBackRest "+bv+"（备份工具）")
+		} else {
+			parts = append(parts, "pgBackRest（备份工具）")
+		}
+	}
+	return strings.Join(parts, "、")
+}
+
 // clusterHistoryText is a cluster's history in words, for the assistant.
 func (s *storeServer) clusterHistoryText(cluster string) string {
 	s.mu.Lock()
@@ -396,8 +502,34 @@ func (s *storeServer) clusterHistoryText(cluster string) string {
 		fmt.Fprintf(&b, "集群 %s 当前状态：【存量纳管运行中集群】（非平台首次部署，于 %s 纳管建档，组件：%s %s）。\n", cluster, when, cur.AppName, cur.Version)
 		if dep := s.readSpec(cur.ID); dep != nil && dep.Imported != nil {
 			im := dep.Imported
+			if im.ExactVersion != "" || im.OSDetail != "" {
+				fmt.Fprintf(&b, "- 精确版本：%s；操作系统：%s\n", firstNonEmptyStr(im.ExactVersion, cur.Version, "—"), firstNonEmptyStr(im.OSDetail, dep.Platform, "—"))
+			}
 			if im.DeployMethod != "" || im.ArchSummary != "" {
 				fmt.Fprintf(&b, "- 部署形态：%s；架构摘要：%s\n", firstNonEmptyStr(im.DeployMethod, "未知"), firstNonEmptyStr(im.ArchSummary, "—"))
+			}
+			if len(im.Companions) > 0 {
+				var cParts []string
+				for _, cm := range im.Companions {
+					name := firstNonEmptyStr(cm.DisplayName, cm.Component)
+					if cm.Version != "" {
+						name += " " + cm.Version
+					}
+					meta := companionKindLabelZH(cm.Component, cm.Kind)
+					if len(cm.Ports) > 0 {
+						var ps []string
+						for _, p := range cm.Ports {
+							if p > 0 {
+								ps = append(ps, fmt.Sprintf(":%d", p))
+							}
+						}
+						if len(ps) > 0 {
+							meta += "，端口 " + strings.Join(ps, "/")
+						}
+					}
+					cParts = append(cParts, fmt.Sprintf("%s（%s）", name, meta))
+				}
+				fmt.Fprintf(&b, "- 架构组件栈（伴生与 OS 组件）：%s\n", strings.Join(cParts, "、"))
 			}
 			if len(im.ServiceUnits) > 0 {
 				fmt.Fprintf(&b, "- 系统服务：%s\n", strings.Join(im.ServiceUnits, ", "))
@@ -415,8 +547,16 @@ func (s *storeServer) clusterHistoryText(cluster string) string {
 	} else if hasHead {
 		when := firstNonEmptyStr(day(head.Marked), day(head.Created))
 		fmt.Fprintf(&b, "集群 %s 当前状态：【已部署完成 / 运行中（已投产）】，运行基线为 %s（编号 %s，%s 确认）；共 %d 份交付记录（旧的在前）。\n", cluster, jobTitle(head), head.ID, when, len(jobs))
+		if stack := s.deployedStackSummaryText(head.ID); stack != "" {
+			fmt.Fprintf(&b, "- 架构组件栈（含锁定版本）：%s\n", stack)
+		}
 	} else {
 		fmt.Fprintf(&b, "集群 %s 当前状态：【尚未完成首次部署（未投产）】，共 %d 份交付记录（旧的在前）。\n", cluster, len(jobs))
+		if cur.ID != "" {
+			if stack := s.deployedStackSummaryText(cur.ID); stack != "" {
+				fmt.Fprintf(&b, "- 架构组件栈（含锁定版本）：%s\n", stack)
+			}
+		}
 	}
 	for _, j := range jobs {
 		state := outcomeNames[j.Outcome]

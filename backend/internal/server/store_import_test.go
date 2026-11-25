@@ -523,4 +523,28 @@ prometheus-node-exporter	1.8.2+ds-1
 	if len(merged) != 1 || merged[0].Kind != "os_component" {
 		t.Fatalf("expected legacy node-exporter normalized to os_component, got %+v", merged)
 	}
+
+	// Verify AI cluster context summary includes companion stack versions and OS 组件 label
+	s, _ := testStore(t)
+	alice, csrf := storeLogin(t, s, "alice")
+	impReq := importClusterReq{
+		ID:           "pg-ai-ctx-test",
+		Component:    "postgresql",
+		Version:      "17",
+		ExactVersion: "17.11",
+		OSDetail:     "Ubuntu 24.04.5 LTS",
+		Hosts:        []importHostInput{{Name: "n1", IP: "10.88.1.11", Role: "primary"}},
+		Companions:   draft.Companions,
+	}
+	ib, _ := json.Marshal(impReq)
+	iw := storeRequest(s, "POST", "/api/clusters/import", bytes.NewReader(ib), alice, csrf)
+	if iw.Code != 201 {
+		t.Fatalf("import for AI context failed: %d %s", iw.Code, iw.Body.String())
+	}
+	hist := s.clusterHistoryText("pg-ai-ctx-test")
+	for _, want := range []string{"架构组件栈（伴生与 OS 组件）", "node_exporter 1.8.2（OS 组件", "postgres_exporter 0.15.0（监控采集", "custom_disk_exporter 0.3.1（监控采集"} {
+		if !strings.Contains(hist, want) {
+			t.Fatalf("clusterHistoryText missing %q; got:\n%s", want, hist)
+		}
+	}
 }

@@ -701,6 +701,83 @@ func (s *storeServer) handleClusterAutomation(w http.ResponseWriter, r *http.Req
 	}
 }
 
+func (s *storeServer) handleGlobalExecutionAgents(w http.ResponseWriter, r *http.Request, session storeSession) {
+	executionMu.Lock()
+	defer executionMu.Unlock()
+	d, err := s.readExecutions()
+	if err != nil {
+		s.fail(w, 500, err.Error())
+		return
+	}
+	lang := reqLang(r)
+	switch r.Method {
+	case "GET":
+		out := make([]automationAgentView, 0, len(d.Agents))
+		for _, a := range d.Agents {
+			pub := localizeTargetAgent(lang, publicTargetAgent(a))
+			out = append(out, automationAgentView{
+				targetAgent: pub,
+				Online:      targetAgentOnline(a),
+			})
+		}
+		sort.Slice(out, func(i, j int) bool {
+			iAct := out[i].Desired == "active"
+			jAct := out[j].Desired == "active"
+			if iAct != jAct {
+				return iAct
+			}
+			if out[i].Online != out[j].Online {
+				return out[i].Online
+			}
+			if out[i].Cluster != out[j].Cluster {
+				return out[i].Cluster < out[j].Cluster
+			}
+			return out[i].Created > out[j].Created
+		})
+		s.writeJSON(w, 200, out)
+	case "PATCH":
+		var req struct {
+			ID            string `json:"id"`
+			Action        string `json:"action"` // update | revoke
+			AllowMutating *bool  `json:"allow_mutating"`
+		}
+		if decodeBody(w, r, 4096, &req) != nil || strings.TrimSpace(req.ID) == "" {
+			s.fail(w, 400, "请求参数无效")
+			return
+		}
+		a, ok := d.Agents[req.ID]
+		if !ok {
+			s.fail(w, 404, "目标 Agent 不存在")
+			return
+		}
+		if req.Action == "revoke" {
+			a.Desired = "revoked"
+		} else if req.AllowMutating != nil {
+			a.AllowMutating = *req.AllowMutating
+		} else {
+			s.fail(w, 400, "未指定有效的 Agent 更新操作")
+			return
+		}
+		d.Agents[a.ID] = a
+		if err := s.saveExecutions(d); err != nil {
+			s.fail(w, 500, "保存 Agent 状态失败")
+			return
+		}
+		if req.Action == "revoke" {
+			s.auditReq(r, "execution-agent-revoke", session.User, fmt.Sprintf("%s %s (%s)", a.Cluster, a.Host, a.IP))
+		} else {
+			s.auditReq(r, "execution-agent-update", session.User, fmt.Sprintf("%s %s allow_mutating=%v", a.Cluster, a.Host, a.AllowMutating))
+		}
+		pub := localizeTargetAgent(lang, publicTargetAgent(a))
+		s.writeJSON(w, 200, automationAgentView{
+			targetAgent: pub,
+			Online:      targetAgentOnline(a),
+		})
+	default:
+		s.fail(w, 405, "不支持的请求方式")
+	}
+}
+
 func (s *storeServer) handleClusterDirectAgents(w http.ResponseWriter, r *http.Request, session storeSession, f clusterFacts) {
 	executionMu.Lock()
 	defer executionMu.Unlock()

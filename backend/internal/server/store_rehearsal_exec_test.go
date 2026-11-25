@@ -391,3 +391,69 @@ func TestClusterAutomationCheckUsesDraftOverridesWhileDisabled(t *testing.T) {
 		t.Fatalf("expected verified=false after changing ssh_port without re-check, got %+v", s)
 	}
 }
+
+func TestGlobalExecutionAgentsAPI(t *testing.T) {
+	srv, _ := testStore(t)
+	cookie, csrf := storeLogin(t, srv, "admin")
+
+	if p, ok := routePermFor("GET", "/api/executions/agents"); !ok || p != "execution.manage|delivery.view" {
+		t.Fatalf("expected execution.manage|delivery.view for GET /api/executions/agents, got %q %v", p, ok)
+	}
+	if p, ok := routePermFor("PATCH", "/api/executions/agents"); !ok || p != "execution.manage" {
+		t.Fatalf("expected execution.manage for PATCH /api/executions/agents, got %q %v", p, ok)
+	}
+
+	importBody := `{
+		"id": "pg-global-ag",
+		"component": "postgresql",
+		"display_name": "PostgreSQL",
+		"version": "17",
+		"exact_version": "17.11",
+		"platform": "ubuntu2404",
+		"deploy_method": "systemd",
+		"hosts": [{"name": "db-g1", "ip": "10.30.0.11", "role": "primary"}]
+	}`
+	if rr := storeRequest(srv, "POST", "/api/clusters/import", strings.NewReader(importBody), cookie, csrf); rr.Code != 200 && rr.Code != 201 {
+		t.Fatalf("import failed: %d %s", rr.Code, rr.Body.String())
+	}
+	enrRR := storeRequest(srv, "POST", "/api/clusters/pg-global-ag/automation/agents", strings.NewReader(`{"host":"db-g1","ip":"10.30.0.11","allow_mutating":true}`), cookie, csrf)
+	if enrRR.Code != 201 {
+		t.Fatalf("enroll agent failed: %d %s", enrRR.Code, enrRR.Body.String())
+	}
+	var enr struct {
+		Agent targetAgent `json:"agent"`
+	}
+	_ = json.Unmarshal(enrRR.Body.Bytes(), &enr)
+
+	listRR := storeRequest(srv, "GET", "/api/executions/agents", nil, cookie, "")
+	if listRR.Code != 200 {
+		t.Fatalf("GET /api/executions/agents failed: %d %s", listRR.Code, listRR.Body.String())
+	}
+	var list []automationAgentView
+	_ = json.Unmarshal(listRR.Body.Bytes(), &list)
+	if len(list) != 1 || list[0].ID != enr.Agent.ID || list[0].Cluster != "pg-global-ag" {
+		t.Fatalf("unexpected global agents list: %+v", list)
+	}
+
+	// Toggle allow_mutating=false globally
+	updRR := storeRequest(srv, "PATCH", "/api/executions/agents", strings.NewReader(`{"id":"`+enr.Agent.ID+`","action":"update","allow_mutating":false}`), cookie, csrf)
+	if updRR.Code != 200 {
+		t.Fatalf("PATCH update failed: %d %s", updRR.Code, updRR.Body.String())
+	}
+	var updated automationAgentView
+	_ = json.Unmarshal(updRR.Body.Bytes(), &updated)
+	if updated.AllowMutating {
+		t.Fatalf("expected allow_mutating=false, got true")
+	}
+
+	// Revoke globally
+	revRR := storeRequest(srv, "PATCH", "/api/executions/agents", strings.NewReader(`{"id":"`+enr.Agent.ID+`","action":"revoke"}`), cookie, csrf)
+	if revRR.Code != 200 {
+		t.Fatalf("PATCH revoke failed: %d %s", revRR.Code, revRR.Body.String())
+	}
+	var revoked automationAgentView
+	_ = json.Unmarshal(revRR.Body.Bytes(), &revoked)
+	if revoked.Desired != "revoked" {
+		t.Fatalf("expected desired=revoked, got %q", revoked.Desired)
+	}
+}

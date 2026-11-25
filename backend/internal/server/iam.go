@@ -411,6 +411,8 @@ var routePerms = []routePerm{
 	rp("POST", `/api/ai/toggle`, "ai.settings"),
 
 	rp("GET", `/api/executions/runs`, "delivery.view"),
+	rp("GET", `/api/executions/agents`, "execution.manage|delivery.view"),
+	rp("W", `/api/executions/agents`, "execution.manage"),
 	rp("GET", `/api/jobs`, "delivery.view"),
 	rp("W", `/api/jobs`, "delivery.create"),
 	rp("W", `/api/certificates/check`, "delivery.create"),

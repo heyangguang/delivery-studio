@@ -1000,9 +1000,9 @@ export function ClusterAutomationPanel({
               <button
                 type="button"
                 className="rha-link-btn"
-                onClick={() => go({ name: "settings", id: "execution-nodes" })}
+                onClick={() => go({ name: "executions", view: "nodes" })}
               >
-                <IconSettings /> {bi("前往设置 → 执行节点", "Open Settings → Execution Nodes")}
+                <IconSettings /> {bi("前往执行中心 → 执行节点", "Open Execution Center → Nodes")}
               </button>
             </div>
           </div>

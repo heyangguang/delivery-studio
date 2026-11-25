@@ -1360,12 +1360,12 @@ export function ExecutionMonitorPage({
       >
         <div className="list-head">
           <div className="list-title">
-            <h1>{bi("执行监控", "Executions")}</h1>
+            <h1>{bi("任务监控", "Task Monitor")}</h1>
             <div className="mon-list-title-right">
               {listData && (
                 <Tooltip
                   content={bi(
-                    `在线执行节点 ${listData.online_runners} / ${listData.total_runners}${canManageNodes ? " · 点击管理执行节点" : ""}`,
+                    `在线执行节点 ${listData.online_runners} / ${listData.total_runners}${canManageNodes ? " · 点击切换至执行节点" : ""}`,
                     `${listData.online_runners} / ${listData.total_runners} runners online`,
                   )}
                   mini
@@ -1374,7 +1374,7 @@ export function ExecutionMonitorPage({
                     type="button"
                     className={`mon-runner-pill num ${listData.online_runners > 0 ? "on" : ""} ${canManageNodes ? "clickable" : ""}`}
                     onClick={() =>
-                      canManageNodes && go({ name: "settings", id: "execution-nodes" })
+                      canManageNodes && go({ name: "executions", view: "nodes" })
                     }
                   >
                     <i aria-hidden />

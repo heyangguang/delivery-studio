@@ -1,9 +1,12 @@
 /dist/
 /runs/
 /cluster.json
+/delivery-studio
+/backend/delivery-studio
 /middleware-deployer
 *.exe
 *.log
+!/tests/fixtures/*.log
 *.pem
 *.key
 *.crt

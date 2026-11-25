@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-  Build Middleware Hub (frontend + Windows & Linux binaries) and zero-downtime hot-reload the running local Hub.
+  Build Kyndryl Delivery Studio (frontend + Windows & Linux binaries) and zero-downtime hot-reload the running local Hub.
 .EXAMPLE
   .\scripts\dev-reload.ps1
   .\scripts\dev-reload.ps1 -SkipFrontend
@@ -10,12 +10,26 @@ param(
     [switch]$SkipFrontend,
     [switch]$SkipLinux,
     [switch]$NoReload,
-    [string]$HubRunDir = "D:\DevProject\dazhong-vdi\middleware-hub-run",
+    [string]$HubRunDir = "",
     [string]$GoExe = ""
 )
 
 $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+$BackendDir = Join-Path $RepoRoot "backend"
+
+if (-not $HubRunDir) {
+    $parentDir = Split-Path -Parent $RepoRoot
+    $v2RunDir = Join-Path $parentDir "delivery-studio-run"
+    $legacyRunDir = Join-Path $parentDir "middleware-hub-run"
+    if (Test-Path (Join-Path $v2RunDir "config.windows.json")) {
+        $HubRunDir = $v2RunDir
+    } elseif (Test-Path (Join-Path $legacyRunDir "config.windows.json")) {
+        $HubRunDir = $legacyRunDir
+    } else {
+        $HubRunDir = $v2RunDir
+    }
+}
 
 if (-not $GoExe) {
     if (Test-Path "D:\BMW\_go_runtime\go\bin\go.exe") {
@@ -47,22 +61,25 @@ if (-not $SkipFrontend) {
     }
 }
 
-New-Item -ItemType Directory -Force -Path "$RepoRoot\dist" | Out-Null
+$DistDir = Join-Path $RepoRoot "dist"
+New-Item -ItemType Directory -Force -Path $DistDir | Out-Null
+$WinBin = Join-Path $DistDir "delivery-studio.exe"
+$LinuxBin = Join-Path $DistDir "delivery-studio"
 
-Push-Location $RepoRoot
+Push-Location $BackendDir
 try {
     $env:CGO_ENABLED = "0"
-    Write-Host "==> Building Windows binary (dist\middleware-store.exe)..." -ForegroundColor Cyan
+    Write-Host "==> Building Windows binary (dist\delivery-studio.exe)..." -ForegroundColor Cyan
     $env:GOOS = "windows"
     $env:GOARCH = "amd64"
-    & $GoExe build -ldflags $ldFlags -o "dist\middleware-store.exe" .
+    & $GoExe build -ldflags $ldFlags -o $WinBin ./cmd/studio
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
     if (-not $SkipLinux) {
-        Write-Host "==> Building Linux binary (dist\middleware-store)..." -ForegroundColor Cyan
+        Write-Host "==> Building Linux binary (dist\delivery-studio)..." -ForegroundColor Cyan
         $env:GOOS = "linux"
         $env:GOARCH = "amd64"
-        & $GoExe build -ldflags $ldFlags -o "dist\middleware-store" .
+        & $GoExe build -ldflags $ldFlags -o $LinuxBin ./cmd/studio
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
 } finally {
@@ -80,6 +97,6 @@ if (-not (Test-Path $ConfigFile)) {
     exit 0
 }
 
-Write-Host "==> Triggering zero-downtime hot reload..." -ForegroundColor Cyan
-& "$RepoRoot\dist\middleware-store.exe" store reload --config $ConfigFile --binary "$RepoRoot\dist\middleware-store.exe"
+Write-Host "==> Triggering zero-downtime hot reload ($HubRunDir)..." -ForegroundColor Cyan
+& $WinBin store reload --config $ConfigFile --binary $WinBin
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

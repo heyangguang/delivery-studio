@@ -1,0 +1,25 @@
+[Unit]
+Description=Kyndryl Delivery Studio 2.0 offline & automated delivery service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=delivery-studio
+Group=delivery-studio
+WorkingDirectory=/opt/delivery-studio
+EnvironmentFile=/etc/delivery-studio/service.env
+ExecStart=/opt/delivery-studio/bin/delivery-studio store supervise --config /etc/delivery-studio/config.json
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=300
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/delivery-studio
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target

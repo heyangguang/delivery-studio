@@ -1,0 +1,52 @@
+19:20:00 playbook   11-demo.yml
+19:20:00 started    2026-10-27 19:20:00 +0800
+19:20:00 controller development (root)
+19:20:00 ansible    2.20.10
+19:20:00 command    /home/root-relocated/data/dazhong-vdi/middleware-hub-run/ansible-venv/bin/ansible-playbook tests/11-demo.yml -e confirm_cluster=demo -e <hidden>
+19:20:00 ------------------------------------------------------------------------
+19:20:00 
+19:20:00 PLAY  localhost
+19:20:00 
+19:20:00 TASK  普通任务
+19:20:01   ok          localhost
+19:20:01     stdout: hello from test
+19:20:01     delta: 0:00:00.007407
+19:20:01     start: 2026-10-27 19:20:01.357648
+19:20:01     end: 2026-10-27 19:20:01.365055
+19:20:01 
+19:20:01 TASK  隐藏输出的任务
+19:20:02   ok          localhost
+19:20:02     (output hidden: no_log)
+19:20:02 
+19:20:02 TASK  循环
+19:20:03   ok          localhost
+19:20:03     item a: ok
+19:20:03     stdout: a
+19:20:03     delta: 0:00:00.014543
+19:20:03     start: 2026-10-27 19:20:02.586499
+19:20:03     end: 2026-10-27 19:20:02.601042
+19:20:03     item b: ok
+19:20:03     stdout: b
+19:20:03     delta: 0:00:00.013813
+19:20:03     start: 2026-10-27 19:20:03.178378
+19:20:03     end: 2026-10-27 19:20:03.192191
+19:20:03 
+19:20:03 TASK  会失败的任务
+19:20:03   FAILED (ignored) localhost
+19:20:03     msg: non-zero return code
+19:20:03     stdout: some-stdout
+19:20:03     stderr: some-stderr
+19:20:03     rc: 3
+19:20:03     delta: 0:00:00.013393
+19:20:03     start: 2026-10-27 19:20:03.758782
+19:20:03     end: 2026-10-27 19:20:03.772175
+19:20:03 
+19:20:03 TASK  最终失败
+19:20:03   FAILED      localhost
+19:20:03     msg: boom 失败了
+19:20:03     rc: None
+19:20:03 
+19:20:03 RECAP
+19:20:03   localhost            ok=4 changed=1 unreachable=0 failed=1 skipped=0
+19:20:03 RESULT  FAILED
+19:20:03 finished   2026-10-27 19:20:03 +0800

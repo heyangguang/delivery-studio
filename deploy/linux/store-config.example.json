@@ -1,0 +1,12 @@
+{
+  "listen": "127.0.0.1:8090",
+  "public_url": "https://delivery-studio.example.internal",
+  "data_dir": "/var/lib/delivery-studio",
+  "components_dir": "/var/lib/delivery-studio/components",
+  "artifacts_dir": "/var/lib/delivery-studio/artifacts",
+  "runtime_archive": "/var/lib/delivery-studio/artifacts/ansible-runtime.tar.gz",
+  "database_url_env": "DELIVERY_STUDIO_DATABASE_URL",
+  "max_parallel": 2,
+  "tls_cert": "",
+  "tls_key": ""
+}

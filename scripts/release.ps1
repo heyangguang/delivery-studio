@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-  Automate Middleware Hub version bump, release notes update, tests, Win+Linux build, optional Git commit/tag/push, and local zero-downtime reload.
+  Automate Kyndryl Delivery Studio version bump, release notes update, tests, Win+Linux build, optional Git commit/tag/push, and local zero-downtime reload.
 .EXAMPLE
   # Preview next version without modifying files
   .\scripts\release.ps1 -DryRun
@@ -22,13 +22,14 @@ param(
     [switch]$Push,
     [switch]$Reload,
     [switch]$DryRun,
-    [string]$HubRunDir = "D:\DevProject\dazhong-vdi\middleware-hub-run",
+    [string]$HubRunDir = "",
     [string]$GoExe = ""
 )
 
 $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$MainGo = Join-Path $RepoRoot "main.go"
+$BackendDir = Join-Path $RepoRoot "backend"
+$MainGo = Join-Path $BackendDir "internal\server\main.go"
 
 if (-not $GoExe) {
     if (Test-Path "D:\BMW\_go_runtime\go\bin\go.exe") {
@@ -46,12 +47,20 @@ if (-not $verMatch.Success) {
 $currentVer = $verMatch.Groups[1].Value
 
 if (-not $Version) {
-    $m = [regex]::Match($currentVer, '^(\d+)\.(\d+)\.(\d+)(.*)$')
-    if (-not $m.Success) {
-        throw "Unsupported version format: $currentVer (pass -Version explicitly)"
+    $preMatch = [regex]::Match($currentVer, '^(\d+)\.(\d+)\.(\d+)-(alpha|beta|rc)\.(\d+)$')
+    $relMatch = [regex]::Match($currentVer, '^(\d+)\.(\d+)\.(\d+)$')
+    if ($preMatch.Success) {
+        $nextPre = [int]$preMatch.Groups[5].Value + 1
+        $Version = "$($preMatch.Groups[1].Value).$($preMatch.Groups[2].Value).$($preMatch.Groups[3].Value)-$($preMatch.Groups[4].Value).$nextPre"
+    } elseif ($relMatch.Success) {
+        $nextPatch = [int]$relMatch.Groups[3].Value + 1
+        $Version = "$($relMatch.Groups[1].Value).$($relMatch.Groups[2].Value).$nextPatch"
+    } else {
+        throw "Unsupported version format: $currentVer (pass -Version explicitly, e.g. 2.0.3 or 2.1.0-rc.1)"
     }
-    $nextPatch = [int]$m.Groups[3].Value + 1
-    $Version = "$($m.Groups[1].Value).$($m.Groups[2].Value).$nextPatch$($m.Groups[4].Value)"
+}
+if ($Version -notmatch '^\d+\.\d+\.\d+(-(alpha|beta|rc)\.\d+)?$') {
+    throw "Invalid SemVer version '$Version'. Allowed formats: MAJOR.MINOR.PATCH (e.g. 2.0.3) or MAJOR.MINOR.PATCH-(alpha|beta|rc).N (e.g. 2.1.0-rc.1). Do not use X.Y.Z-dev tags; see docs/BRANCHING_AND_RELEASE_STANDARD.md."
 }
 $today = Get-Date -Format "yyyy-MM-dd"
 
@@ -107,10 +116,12 @@ $updated = $updated.Insert($insertPos, "`r`n" + $noteBlock)
 Write-Host "==> Updated main.go to v$Version ($today)" -ForegroundColor Green
 
 if (-not $SkipTests) {
-    Write-Host "==> Running Go verification tests..." -ForegroundColor Cyan
-    Push-Location $RepoRoot
+    Write-Host "==> Running Go release verification tests..." -ForegroundColor Cyan
+    Push-Location $BackendDir
     try {
-        & $GoExe test -run "TestGateway|TestAPIVersion|TestDev|TestRehearsal" -count=1 .
+        & $GoExe test -count=1 ./mwpack/... ./pkglib/... ./catalog/...
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        & $GoExe test -run "TestGateway|TestAPIVersion|TestDev|TestRehearsal|TestClusterImport|TestGlyphs|TestDocs" -count=1 ./internal/server
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     } finally {
         Pop-Location
@@ -118,9 +129,9 @@ if (-not $SkipTests) {
 }
 
 $devReloadArgs = @{
-    HubRunDir = $HubRunDir
-    GoExe     = $GoExe
+    GoExe = $GoExe
 }
+if ($HubRunDir) { $devReloadArgs["HubRunDir"] = $HubRunDir }
 if ($SkipFrontend) { $devReloadArgs["SkipFrontend"] = $true }
 if (-not $Reload)  { $devReloadArgs["NoReload"] = $true }
 

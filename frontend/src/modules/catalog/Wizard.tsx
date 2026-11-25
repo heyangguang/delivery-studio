@@ -782,8 +782,13 @@ function DeliveryForm({
     if (!ready) return;
     const n = ++seq.current;
     const ac = new AbortController();
-    const t = setTimeout(() => {
-      setResolving(true);
+    let spinTimer: number | null = null;
+    const t = window.setTimeout(() => {
+      // Only show the resolving spinner if the server takes >180ms so fast local solves
+      // never cause a double full-Wizard re-render on every toggle click.
+      spinTimer = window.setTimeout(() => {
+        if (n === seq.current) setResolving(true);
+      }, 180);
       api<Resolution>(
         verify ? "/api/resolve?purpose=verification" : "/api/resolve",
         {
@@ -797,10 +802,14 @@ function DeliveryForm({
           if ((e as Error)?.name === "AbortError") return;
           if (n === seq.current) err(e);
         })
-        .finally(() => n === seq.current && setResolving(false));
-    }, 250);
+        .finally(() => {
+          if (spinTimer !== null) window.clearTimeout(spinTimer);
+          if (n === seq.current) setResolving(false);
+        });
+    }, 100);
     return () => {
-      clearTimeout(t);
+      window.clearTimeout(t);
+      if (spinTimer !== null) window.clearTimeout(spinTimer);
       ac.abort();
     };
   }, [dep, ready, appsTick, review, lang, verify]);
@@ -1257,6 +1266,59 @@ function DeliveryForm({
 
   /* ---- render helpers ---- */
 
+  /** Evaluates simple `params.<key>` `when` guards locally for 0ms optimistic show/hide on switch/enum toggles. */
+  function evalOptimisticWhen(
+    expr: string | undefined,
+    params: Record<string, unknown>,
+    serverVisible: boolean,
+  ): boolean {
+    if (!expr) return serverVisible;
+    const parts = expr
+      .split("&&")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (!parts.length) return serverVisible;
+    let evaluatedAny = false;
+    let sawComplex = false;
+    for (const part of parts) {
+      let m = /^params\.([A-Za-z0-9_]+)$/.exec(part);
+      if (m) {
+        evaluatedAny = true;
+        if (!params[m[1]]) return false;
+        continue;
+      }
+      m = /^!params\.([A-Za-z0-9_]+)$/.exec(part);
+      if (m) {
+        evaluatedAny = true;
+        if (params[m[1]]) return false;
+        continue;
+      }
+      m = /^params\.([A-Za-z0-9_]+)\s*(==|!=)\s*['"]([^'"]*)['"]$/.exec(part);
+      if (m) {
+        evaluatedAny = true;
+        const actual = String(params[m[1]] ?? "");
+        const eq = actual === m[3];
+        if (m[2] === "==" ? !eq : eq) return false;
+        continue;
+      }
+      sawComplex = true;
+    }
+    if (!evaluatedAny) return serverVisible;
+    return sawComplex ? serverVisible : true;
+  }
+
+  /** Extracts boolean feature-toggle keys referenced positively in `when` (e.g. `params.log_to_file`). */
+  function whenBoolGates(expr: string | undefined): string[] {
+    if (!expr) return [];
+    const out: string[] = [];
+    const re = /(?:^|&&)\s*params\.([A-Za-z0-9_]+)(?=\s*(?:&&|$))/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(expr)) !== null) {
+      out.push(m[1]);
+    }
+    return out;
+  }
+
   /** All parameter groups of one instance, tabbed when the component declares tabs. */
   function paramsPanel(
     id: string,
@@ -1271,12 +1333,44 @@ function DeliveryForm({
     const sc = inst && schemaOf(inst.component, inst.version);
     if (!inst || !sc) return <Spin />;
     const revInst = revBase?.instances.find((i) => i.id === id);
-    const visible = (d: ParamDef) =>
-      !app.plans?.some(
-        (p) => p.params?.[d.key] !== undefined && d.key === "deployment_mode",
-      ) && view?.visible?.[d.key] !== false;
     const value = (d: ParamDef) =>
-      view?.params ? view.params[d.key] : d.default;
+      inst.params?.[d.key] !== undefined
+        ? inst.params[d.key]
+        : view?.params && view.params[d.key] !== undefined
+          ? view.params[d.key]
+          : d.default;
+    const resolvedParams: Record<string, unknown> = {};
+    const defsByKey = new Map<string, ParamDef>();
+    for (const d of sc.params) {
+      defsByKey.set(d.key, d);
+      resolvedParams[d.key] = value(d);
+    }
+    const visible = (d: ParamDef) => {
+      if (
+        app.plans?.some(
+          (p) => p.params?.[d.key] !== undefined && d.key === "deployment_mode",
+        )
+      ) {
+        return false;
+      }
+      return evalOptimisticWhen(
+        d.when,
+        resolvedParams,
+        view?.visible?.[d.key] !== false,
+      );
+    };
+    const revealedByGroupToggle = (d: ParamDef, groupId: string): boolean => {
+      if (!d.advanced || !d.when) return false;
+      return whenBoolGates(d.when).some((gk) => {
+        const gDef = defsByKey.get(gk);
+        return (
+          !!gDef &&
+          gDef.type === "bool" &&
+          (gDef.group || "") === groupId &&
+          resolvedParams[gk] === true
+        );
+      });
+    };
     const changedKey = (d: ParamDef) => inst.params?.[d.key] !== undefined;
     const q = opts.tabbed ? query.trim().toLowerCase() : "";
     const filterChanged = Boolean(opts.tabbed && opts.onlyChanged);
@@ -1362,17 +1456,26 @@ function DeliveryForm({
         (d) => (d.group || "") === g.id && visible(d),
       );
       if (!list.length) return null;
-      const adv = list.filter((d) => d.advanced);
+      const collapsibleAdv = list.filter(
+        (d) => d.advanced && !revealedByGroupToggle(d, g.id),
+      );
       const k = `${id}/${g.id}`;
       const shown = list.filter(
-        (d) => !d.advanced || advanced[k] || changedKey(d),
+        (d) =>
+          !d.advanced ||
+          revealedByGroupToggle(d, g.id) ||
+          advanced[k] ||
+          changedKey(d),
+      );
+      const hiddenAdv = collapsibleAdv.filter(
+        (d) => !advanced[k] && !changedKey(d),
       );
       return (
         <div className="pgroup" key={g.id}>
           <div className="pgroup-head">
             <h4>{g.label}</h4>
             {g.scope && <span className="scope">{g.scope}</span>}
-            {adv.length > 0 && (
+            {collapsibleAdv.length > 0 && (
               <button
                 type="button"
                 className="link"
@@ -1381,11 +1484,27 @@ function DeliveryForm({
               >
                 {advanced[k]
                   ? bi("收起高级参数", "Hide advanced")
-                  : bi(`显示高级参数 ${adv.length}`, `Show advanced (${adv.length})`)}
+                  : bi(`显示高级参数 ${collapsibleAdv.length}`, `Show advanced (${collapsibleAdv.length})`)}
               </button>
             )}
           </div>
-          <div className="params">{shown.map(field)}</div>
+          <div className="params">
+            {shown.map(field)}
+            {hiddenAdv.length > 0 && (
+              <button
+                type="button"
+                className="pgroup-more"
+                onClick={() => setAdvanced((a) => ({ ...a, [k]: true }))}
+              >
+                <span>
+                  {bi(
+                    `展开其余 ${hiddenAdv.length} 项高级参数：${hiddenAdv.slice(0, 3).map((d) => d.label).join("、")}${hiddenAdv.length > 3 ? "…" : ""}`,
+                    `Show ${hiddenAdv.length} more advanced: ${hiddenAdv.slice(0, 3).map((d) => d.label).join(", ")}${hiddenAdv.length > 3 ? "…" : ""}`,
+                  )}
+                </span>
+              </button>
+            )}
+          </div>
         </div>
       );
     };

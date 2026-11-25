@@ -9038,6 +9038,15 @@ function RehearsalSessionView({
             detail: { clusterId: cid, rehearsalId: next.id },
           }),
         );
+        if (next.baseline_enriched?.length) {
+          window.dispatchEvent(new Event("mh-clusters-changed"));
+          Message.success(
+            bi(
+              `已自动将新采集的现场信息反哺至集群基线：${next.baseline_enriched.join("、")}`,
+              `Cluster baseline auto-enriched from probe: ${next.baseline_enriched.join(", ")}`,
+            ),
+          );
+        }
       },
       onBackgroundDone: (next) => {
         Message.success(
@@ -9117,6 +9126,15 @@ function RehearsalSessionView({
             detail: { clusterId: cid, rehearsalId: next.id },
           }),
         );
+        if (next.baseline_enriched?.length) {
+          window.dispatchEvent(new Event("mh-clusters-changed"));
+          Message.success(
+            bi(
+              `已自动将新采集的现场信息反哺至集群基线：${next.baseline_enriched.join("、")}`,
+              `Cluster baseline auto-enriched from probe: ${next.baseline_enriched.join(", ")}`,
+            ),
+          );
+        }
       },
       onBackgroundDone: () => {
         Message.success(
@@ -9224,6 +9242,15 @@ function RehearsalSessionView({
             detail: { clusterId: cid, rehearsalId: next.id },
           }),
         );
+        if (next.baseline_enriched?.length) {
+          window.dispatchEvent(new Event("mh-clusters-changed"));
+          Message.success(
+            bi(
+              `已自动将新采集的现场信息反哺至集群基线：${next.baseline_enriched.join("、")}`,
+              `Cluster baseline auto-enriched from probe: ${next.baseline_enriched.join(", ")}`,
+            ),
+          );
+        }
       },
       onBackgroundDone: (next) => {
         if (next.probe_issue) {
@@ -12263,6 +12290,15 @@ const StepRow = React.memo(function StepRow({
             detail: { clusterId: cid, rehearsalId: next.id },
           }),
         );
+        if (next.baseline_enriched?.length) {
+          window.dispatchEvent(new Event("mh-clusters-changed"));
+          Message.success(
+            bi(
+              `已自动将新采集的现场信息反哺至集群基线：${next.baseline_enriched.join("、")}`,
+              `Cluster baseline auto-enriched from probe: ${next.baseline_enriched.join(", ")}`,
+            ),
+          );
+        }
       },
       onBackgroundDone: (next) => {
         const updatedStep = (next.steps || []).find((s) => s.id === sid);

@@ -913,6 +913,290 @@ body[arco-theme="dark"] {
   flex-wrap: wrap;
 }
 
+/* ---- AI-Tailored Probe Bar & Tag ---- */
+.imp-probe-ai-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+  color: var(--brand-ink);
+  background: color-mix(in srgb, var(--brand) 12%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--brand) 28%, var(--line));
+}
+
+.imp-probe-ai-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  background: color-mix(in srgb, var(--brand-soft) 38%, var(--surface));
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+
+.imp-probe-ai-bar > .arco-input-inner-wrapper,
+.imp-probe-ai-bar > .arco-input {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.imp-probe-ai-bar > .arco-btn {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* ---- Apple Intelligence Flowing Evidence Composer (aligned with AI Chat & Rehearsal .rh-probe-box) ---- */
+.imp-compose-box {
+  --ai-rim-op: 48%;
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  margin-block: 4px;
+  border-radius: 20px;
+  border: 1px solid transparent;
+  background: none;
+  overflow: visible;
+  box-shadow: var(--ai-card-shadow);
+  transition:
+    box-shadow 0.28s var(--ease-out),
+    --ai-rim-op 0.26s ease;
+}
+
+.imp-compose-box::before,
+.imp-compose-box::after {
+  content: "";
+  position: absolute;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.imp-compose-box::before {
+  inset: -1px;
+  z-index: -1;
+  border: 1.5px solid transparent;
+  background:
+    linear-gradient(180deg, var(--ai-card-bg-top), var(--ai-card-bg-bot)) padding-box,
+    conic-gradient(
+      from var(--ai-angle) at 50% 50%,
+      transparent 0deg,
+      color-mix(in srgb, #ff462d var(--ai-rim-op), transparent) 22deg,
+      color-mix(in srgb, #ffaa1d var(--ai-rim-op), transparent) 52deg,
+      color-mix(in srgb, #4285f4 var(--ai-rim-op), transparent) 88deg,
+      color-mix(in srgb, #22d3ee var(--ai-rim-op), transparent) 118deg,
+      transparent 150deg,
+      transparent 205deg,
+      color-mix(in srgb, #8b5cf6 var(--ai-rim-op), transparent) 238deg,
+      color-mix(in srgb, #38bdf8 var(--ai-rim-op), transparent) 272deg,
+      color-mix(in srgb, #ff5a42 var(--ai-rim-op), transparent) 308deg,
+      transparent 340deg,
+      transparent 360deg
+    ) border-box,
+    linear-gradient(var(--ai-border-base), var(--ai-border-base)) border-box;
+  animation: ai-orbit 7.5s linear infinite;
+}
+
+.imp-compose-box::after {
+  inset: -1px;
+  z-index: -2;
+  background: var(--ai-flow-ring);
+  filter: blur(8px);
+  opacity: 0.14;
+  animation: ai-orbit 7.5s linear infinite;
+  transition: opacity 0.28s ease;
+}
+
+[data-theme="dark"] .imp-compose-box::after,
+body[arco-theme="dark"] .imp-compose-box::after {
+  opacity: 0.24;
+}
+
+.imp-compose-box:is(:hover, :focus-within, .is-busy) {
+  --ai-rim-op: 100%;
+  box-shadow: var(--ai-card-shadow-hover);
+}
+
+.imp-compose-box:is(:hover, :focus-within, .is-busy)::before {
+  animation: ai-orbit 4.2s linear infinite;
+}
+
+.imp-compose-box:is(:hover, :focus-within, .is-busy)::after {
+  opacity: 0.38;
+  animation: ai-orbit 4.2s linear infinite;
+}
+
+.imp-compose-box.is-drag {
+  box-shadow: 0 0 0 2px var(--brand), var(--ai-card-shadow-hover);
+}
+
+.imp-compose-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 11px 16px 9px;
+  background: color-mix(in srgb, var(--ink) 2.2%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 46%, transparent);
+  border-radius: 19px 19px 0 0;
+}
+
+.imp-compose-head-left {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.imp-compose-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.imp-compose-title code {
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  font-size: 11.5px;
+  color: var(--ink);
+}
+
+.imp-compose-safety {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--mute);
+  white-space: nowrap;
+}
+
+.imp-compose-tools {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.imp-attach-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 11px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: 12px;
+  font-weight: 550;
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: border-color 0.16s ease, color 0.16s ease, background 0.16s ease;
+}
+
+.imp-attach-btn:hover:not(:disabled) {
+  border-color: var(--brand);
+  color: var(--brand-ink);
+  background: color-mix(in srgb, var(--brand) 6%, var(--surface));
+}
+
+.imp-attach-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.imp-inline-clear {
+  all: unset;
+  font-size: 12px;
+  color: var(--mute);
+  padding: 2px 6px;
+  border-radius: 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.imp-inline-clear:hover:not(:disabled) {
+  color: var(--ink);
+  background: var(--surface-2);
+}
+
+.imp-compose-box .arco-textarea-wrapper,
+.imp-compose-box .arco-input-textarea,
+.imp-compose-box textarea.arco-textarea,
+.imp-compose-box textarea.arco-textarea:focus,
+.imp-compose-box textarea.arco-textarea:focus-visible {
+  border: 0 !important;
+  outline: none !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+}
+
+.imp-compose-box textarea.arco-textarea.imp-compose-area {
+  padding: 14px 18px !important;
+  font-size: 13px !important;
+  line-height: 1.62 !important;
+}
+
+.imp-compose-imgs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 2px 16px 12px;
+}
+
+.imp-compose-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 14px 12px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 42%, transparent);
+}
+
+.imp-compose-foot-left {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.imp-compose-foot-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.imp-foot-note {
+  font-size: 11.5px;
+  color: var(--mute);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .imp-compose-box::before,
+  .imp-compose-box::after {
+    animation: none !important;
+  }
+}
+
 .imp-img-strip {
   display: flex;
   align-items: center;

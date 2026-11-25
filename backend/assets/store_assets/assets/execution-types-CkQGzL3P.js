@@ -1,0 +1,1 @@
+import{lt as e}from"./router-Bp5hGQ6y.js";var t=e=>!e.disabled&&!!e.last_seen&&Date.now()-Date.parse(e.last_seen)<35e3;function n(n){return n.disabled?{key:`disabled`,label:e(`已暂停接单`,`Paused`)}:t(n)?{key:`online`,label:e(`已连接`,`Connected`)}:n.last_seen?{key:`offline`,label:e(`连接中断`,`Disconnected`)}:{key:`waiting`,label:e(`等待连接`,`Waiting`)}}export{n,t};

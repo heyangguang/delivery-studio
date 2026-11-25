@@ -271,6 +271,7 @@ type changeRehearsal struct {
 	AppliedNote       string                      `json:"applied_note,omitempty"`
 	AppliedSummary    string                      `json:"applied_summary,omitempty"`
 	AppliedChanges    []rehearsalAppliedChange    `json:"applied_changes,omitempty"`
+	BaselineEnriched  []string                    `json:"baseline_enriched,omitempty"`
 	Voided            bool                        `json:"voided,omitempty"`
 	VoidedAt          string                      `json:"voided_at,omitempty"`
 	VoidedBy          string                      `json:"voided_by,omitempty"`
@@ -568,6 +569,17 @@ func (s *storeServer) clusterBaselinePrompt(f clusterFacts) (string, *aiRedactor
 			}
 			if im.ArchSummary != "" {
 				fmt.Fprintf(&b, "架构摘要：%s\n", im.ArchSummary)
+			}
+			if len(im.Companions) > 0 {
+				var cp []string
+				for _, cm := range im.Companions {
+					name := firstNonEmptyStr(cm.DisplayName, cm.Component)
+					if cm.Version != "" {
+						name += " " + cm.Version
+					}
+					cp = append(cp, fmt.Sprintf("%s(%s)", name, companionKindLabelZH(cm.Component, cm.Kind)))
+				}
+				fmt.Fprintf(&b, "伴生与 OS 组件栈：%s\n", strings.Join(cp, "、"))
 			}
 			if len(im.ServiceUnits) > 0 {
 				fmt.Fprintf(&b, "系统服务单元：%s\n", strings.Join(im.ServiceUnits, ", "))
@@ -3017,6 +3029,16 @@ func (s *storeServer) submitRehearsalProbe(w http.ResponseWriter, r *http.Reques
 		failRehearsalResp(s, w, ev, 500, "保存演练步骤失败")
 		return
 	}
+	// Automatically feed newly observed probe facts back into imported cluster baseline (strictly additive)
+	if enriched := s.enrichImportedBaselineFromEvidence(f, session.User, probeOut, manual, nil, cur.Title, lang); len(enriched) > 0 {
+		rehearsalMu.Lock()
+		if latest, ok := s.loadRehearsal(f.ID, rid); ok {
+			latest.BaselineEnriched = enriched
+			_ = s.saveRehearsal(latest)
+			cur = latest
+		}
+		rehearsalMu.Unlock()
+	}
 	s.auditReq(r, "rehearsal-probe", session.User, f.ID+" "+rid)
 	finishRehearsalResp(w, ev, 200, cur)
 }
@@ -5321,8 +5343,19 @@ func (s *storeServer) applyRehearsalProduction(w http.ResponseWriter, r *http.Re
 	if !wantApplied {
 		action = "rehearsal-unapply-prod"
 	}
-	s.auditReq(r, action, session.User, f.ID+" "+rid)
 	lang := reqLang(r)
+	if wantApplied {
+		if enriched := s.enrichImportedBaselineFromEvidence(f, session.User, rh.ProbeOutput, rh.ManualState, rh.AppliedChanges, rh.Title, lang); len(enriched) > 0 {
+			rehearsalMu.Lock()
+			if latest, ok := s.loadRehearsal(f.ID, rid); ok {
+				latest.BaselineEnriched = enriched
+				_ = s.saveRehearsal(latest)
+				rh = latest
+			}
+			rehearsalMu.Unlock()
+		}
+	}
+	s.auditReq(r, action, session.User, f.ID+" "+rid)
 	rh.RestorationAlerts = auditRehearsalRestorations(rh.Goal, rh.ExtraScope, rh.Steps, lang)
 	rh.ConflictAlerts = computeRehearsalConflicts(rh, peers, lang)
 	s.writeJSON(w, 200, rh)

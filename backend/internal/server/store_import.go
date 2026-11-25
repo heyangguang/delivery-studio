@@ -91,6 +91,8 @@ type importProbeScriptReq struct {
 	DeployMethod string   `json:"deploy_method,omitempty"`
 	ServiceUnits []string `json:"service_units,omitempty"`
 	ConfigPaths  []string `json:"config_paths,omitempty"`
+	UseAI        bool     `json:"use_ai,omitempty"`
+	Focus        string   `json:"focus,omitempty"`
 }
 
 type importParseReq struct {
@@ -285,7 +287,8 @@ func buildImportProbeScript(req importProbeScriptReq, lang string) (string, stri
 	sb.WriteString("[ -r /etc/os-release ] && grep -E '^(ID|VERSION_ID|PRETTY_NAME)=' /etc/os-release || uname -a\n\n")
 
 	sb.WriteString("echo '=== MW_IMPORT_STORAGE ==='\n")
-	sb.WriteString("df -hT -x tmpfs -x devtmpfs -x overlay 2>/dev/null | head -n 20 || true\n\n")
+	sb.WriteString("df -hT -x tmpfs -x devtmpfs -x overlay 2>/dev/null | head -n 20 || true\n")
+	sb.WriteString("command -v lsblk >/dev/null 2>&1 && lsblk -dn -o NAME,SIZE,TYPE,MOUNTPOINT 2>/dev/null | head -n 15 || true\n\n")
 
 	sb.WriteString("echo '=== MW_IMPORT_PORTS ==='\n")
 	sb.WriteString("if command -v ss >/dev/null 2>&1; then\n")
@@ -347,6 +350,7 @@ var (
 	reSafePathToken         = regexp.MustCompile(`^/[a-zA-Z0-9._/@*+-]+$`)
 	reExporterToken         = regexp.MustCompile(`(?i)\b([a-z][a-z0-9_-]*[_-]exporter)\b`)
 	reExporterVersionBanner = regexp.MustCompile(`(?i)\b([a-z][a-z0-9_-]*[_-]exporter)\b[,\s]+(?:version\s+|v)(\d+\.\d+(?:\.\d+)*)`)
+	rePGDataFlag            = regexp.MustCompile(`postgres[^\n]*\s-D\s+(/[a-zA-Z0-9._/@+-]+)`)
 )
 
 func (s *storeServer) importProbeScriptHandler(w http.ResponseWriter, r *http.Request, session storeSession) {
@@ -356,14 +360,110 @@ func (s *storeServer) importProbeScriptHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 	lang := wLang(w)
-	script, filename := buildImportProbeScript(req, lang)
+	baseScript, filename := buildImportProbeScript(req, lang)
+	script := baseScript
+	source := "template"
+	aiNote := ""
+
+	if req.UseAI {
+		if !s.aiStatusFor(session.User).Enabled {
+			aiNote = tr(lang, "未开启 AI 助手，已使用内置标准只读探针", "AI is disabled; using built-in standard read-only probe")
+		} else {
+			st := s.aiLoad()
+			providers := st.aiProvidersFor("chat")
+			if len(providers) == 0 {
+				providers = st.aiProvidersFor("rehearsal")
+			}
+			if len(providers) > 0 && (st.MonthlyLimit <= 0 || s.aiCallsThisMonth(session.User) < st.MonthlyLimit) {
+				aiScript, aiErr := s.aiBuildImportProbeScript(r.Context(), providers[0], session.User, req, baseScript, lang)
+				if aiErr == nil && strings.TrimSpace(aiScript) != "" {
+					aiSafe, aiWarns := validateReadOnlyProbeScriptLang(aiScript, lang)
+					if aiSafe && len(aiWarns) == 0 {
+						script = aiScript
+						source = "ai"
+					} else {
+						aiNote = tr(lang, "AI 生成脚本未通过静态只读安全门禁，已自动回退标准只读探针", "AI-generated probe failed static read-only gate; fell back to standard probe")
+					}
+				} else if aiErr != nil {
+					aiNote = tr(lang, "AI 定制探针暂不可用，已回退标准只读探针："+aiErr.Error(), "AI probe customization unavailable; fell back to standard probe: "+aiErr.Error())
+				}
+			} else {
+				aiNote = tr(lang, "暂无可用 AI 模型或已达月额度，已使用内置标准只读探针", "No AI model available or quota reached; using standard read-only probe")
+			}
+		}
+	}
+
 	safe, warns := validateReadOnlyProbeScriptLang(script, lang)
 	s.writeJSON(w, 200, map[string]any{
 		"script":   script,
 		"filename": filename,
 		"safe":     safe,
 		"warnings": nz(warns),
+		"source":   source,
+		"ai_note":  aiNote,
 	})
+}
+
+func (s *storeServer) aiBuildImportProbeScript(ctx context.Context, p aiProvider, user string, req importProbeScriptReq, baseScript, lang string) (string, error) {
+	compID := mwpack.NormalizeImportComponentID(firstNonEmptyStr(req.Component, req.DisplayName))
+	displayName := firstNonEmptyStr(strings.TrimSpace(req.DisplayName), compID)
+	sys := `你是一位企业级中间件与 Linux 基础设施运维专家，负责为「存量集群纳管」编写一份精炼、克制、100% 静态只读的 Bash 采集探针脚本。
+硬性约束（必须全部遵守）：
+1. 【合适且不冗余】脚本控制在 55~95 行左右、单机 2~4 秒内执行完毕；只采集后续集群纳管、变更演练、安全 CVE 体检与交付验收文档真正必用的关键信息（主机/OS/磁盘、监听端口与入口线索、主中间件精确版本与核心参数、真实数据/配置/日志目录、伴生高可用/DCS/备份/代理组件与 OS/中间件 exporter 版本及端口、关键 TLS 证书到期时间、相关软件包清单），禁止堆砌无关内核全量 sysctl 或大文件全量 cat。
+2. 【100% 静态只读与凭据脱敏】严禁任何写操作、重启、修改配置、交互式命令（严禁 su - / vim / systemctl restart / 重定向写入文件）；读取配置时必须用 grep -viE 过滤 pass/secret/token/key/auth 行。
+3. 【保留标准分段标记】必须保留标准回显分段：=== MW_IMPORT_BEGIN ===、=== MW_IMPORT_HOST ===、=== MW_IMPORT_OS ===、=== MW_IMPORT_STORAGE ===、=== MW_IMPORT_PORTS ===、=== MW_IMPORT_HOSTS_FILE ===、=== MW_IMPORT_MIDDLEWARE ===、=== MW_IMPORT_COMPANIONS ===、=== MW_IMPORT_PACKAGES ===、=== MW_IMPORT_END ===。
+4. 只输出纯 Bash 脚本内容（以 #!/usr/bin/env bash 开头），不要输出 Markdown 代码围栏或任何额外解释文字。`
+
+	var prompt strings.Builder
+	fmt.Fprintf(&prompt, "目标主中间件：%s (%s)\n部署形态：%s\n", displayName, compID, firstNonEmptyStr(req.DeployMethod, "systemd"))
+	if len(req.ServiceUnits) > 0 {
+		fmt.Fprintf(&prompt, "已知服务单元线索：%s\n", strings.Join(req.ServiceUnits, ", "))
+	}
+	if len(req.ConfigPaths) > 0 {
+		fmt.Fprintf(&prompt, "已知配置文件线索：%s\n", strings.Join(req.ConfigPaths, ", "))
+	}
+	if strings.TrimSpace(req.Focus) != "" {
+		fmt.Fprintf(&prompt, "用户补充现场特点与重点关注项：%s\n", truncRunes(strings.TrimSpace(req.Focus), 600))
+	}
+	prompt.WriteString("\n可基于以下标准基线脚本按现场特点精简或补强（保留核心结构，不要膨胀）：\n")
+	prompt.WriteString(baseScript)
+
+	callCtx, cancel := context.WithTimeout(ctx, 40*time.Second)
+	defer cancel()
+	started := time.Now()
+	rep, err := s.aiChat(callCtx, p, []aiMessage{
+		{Role: "system", Content: sys},
+		{Role: "user", Content: prompt.String()},
+	}, nil, nil)
+	if err != nil {
+		return "", err
+	}
+	s.aiRecordUsage(aiUsage{
+		At:        nowStamp(),
+		User:      user,
+		Feature:   "import_probe_gen",
+		Provider:  firstNonEmptyStr(p.Name, p.ID),
+		Model:     p.Model,
+		In:        rep.In,
+		Out:       rep.Out,
+		Cached:    rep.Cached,
+		Reasoning: rep.Reasoning,
+		MS:        time.Since(started).Milliseconds(),
+		OK:        true,
+	})
+	out := strings.TrimSpace(rep.Text)
+	// Strip accidental fenced code block wrapper if model emitted one
+	if strings.HasPrefix(out, "```") {
+		if nl := strings.IndexByte(out, '\n'); nl > 0 {
+			out = out[nl+1:]
+		}
+		out = strings.TrimSuffix(strings.TrimSpace(out), "```")
+		out = strings.TrimSpace(out)
+	}
+	if !strings.HasPrefix(out, "#!") || !strings.Contains(out, "=== MW_IMPORT_BEGIN ===") {
+		return "", fmt.Errorf("AI 返回脚本缺少标准探针结构")
+	}
+	return out + "\n", nil
 }
 
 func (s *storeServer) importParseHandler(w http.ResponseWriter, r *http.Request, session storeSession) {
@@ -831,6 +931,46 @@ func parseImportedDeterministic(text, component, displayName string, preset mwpa
 				draft.Params["shared_buffers"] = v
 			}
 			continue
+		}
+		if strings.HasPrefix(ln, "PG_WAL_LEVEL=") {
+			if v := strings.TrimSpace(strings.TrimPrefix(ln, "PG_WAL_LEVEL=")); v != "" {
+				draft.Params["wal_level"] = v
+			}
+			continue
+		}
+		if strings.HasPrefix(ln, "PG_SSL=") {
+			if v := strings.TrimSpace(strings.TrimPrefix(ln, "PG_SSL=")); v != "" {
+				draft.Params["ssl"] = v
+			}
+			continue
+		}
+		// Extract PG data dir from running `postgres -D /path/to/data` process lines even without psql privileges
+		if strings.Contains(ln, "postgres") && strings.Contains(ln, " -D ") {
+			if m := rePGDataFlag.FindStringSubmatch(ln); len(m) == 2 {
+				addDataDir(m[1])
+			}
+		}
+		// Extract key=value settings from postgresql.conf / postgresql.base.conf
+		if curConfigFile != "" && strings.Contains(ln, "=") && !strings.HasPrefix(ln, "#") {
+			eq := strings.IndexByte(ln, '=')
+			if eq > 0 {
+				k := strings.ToLower(strings.TrimSpace(ln[:eq]))
+				v := strings.TrimSpace(ln[eq+1:])
+				if hash := strings.IndexByte(v, '#'); hash >= 0 {
+					v = strings.TrimSpace(v[:hash])
+				}
+				v = strings.Trim(v, `"'`)
+				switch k {
+				case "log_directory":
+					if strings.HasPrefix(v, "/") {
+						addLogDir(v)
+					}
+				case "max_connections", "shared_buffers", "wal_level", "ssl", "port":
+					if v != "" && draft.Params[k] == nil {
+						draft.Params[k] = v
+					}
+				}
+			}
 		}
 		// Config YAML/INI key extraction (e.g., patroni.yml data_dir / log_directory, etcd.conf.yaml data-dir / initial-cluster)
 		if curConfigFile != "" && strings.Contains(ln, ":") {
@@ -2422,4 +2562,326 @@ func (s *storeServer) handleClusterBaseline(w http.ResponseWriter, r *http.Reque
 	default:
 		s.fail(w, 405, "方法不允许")
 	}
+}
+
+var (
+	reRehDataDir    = regexp.MustCompile(`(?im)\bdata_directory\s*[|=:]\s*['"]?(/[a-zA-Z0-9._/@+-]+)['"]?`)
+	reRehConfigFile = regexp.MustCompile(`(?im)\bconfig_file\s*[|=:]\s*['"]?(/[a-zA-Z0-9._/@+-]+)['"]?`)
+	reRehLogDir     = regexp.MustCompile(`(?im)\blog_directory\s*[|=:]\s*['"]?(/[a-zA-Z0-9._/@+-]+)['"]?`)
+	reRehKnownCfg   = regexp.MustCompile(`(?i)(/etc/(?:patroni/[^\s'";]+?\.ya?ml|pgbackrest/pgbackrest\.conf|pgbackrest\.conf|etcd/etcd\.conf(?:\.ya?ml)?|haproxy/haproxy\.cfg|keepalived/keepalived\.conf|pgbouncer/pgbouncer\.ini|redis/sentinel\.conf))`)
+)
+
+// enrichImportedBaselineFromEvidence incrementally merges newly observed facts from a change rehearsal's
+// read-only probe output or confirmed production changes back into an imported cluster's baseline archive.
+// It is strictly additive and non-destructive: existing user-curated fields are never wiped.
+func (s *storeServer) enrichImportedBaselineFromEvidence(
+	f clusterFacts,
+	user, probeOut, manualState string,
+	appliedChanges []rehearsalAppliedChange,
+	sourceTitle, lang string,
+) []string {
+	if f.Current.ID == "" || f.Current.DeliveryMode != "imported" {
+		return nil
+	}
+	dep := s.readSpec(f.Current.ID)
+	if dep == nil || dep.DeliveryMode != "imported" {
+		return nil
+	}
+	if dep.Imported == nil {
+		dep.Imported = &mwpack.ImportedMeta{}
+	}
+	meta := dep.Imported
+
+	compID := f.Current.AppID
+	displayName := firstNonEmptyStr(meta.DisplayName, f.Current.AppName, compID)
+	if len(dep.Instances) > 0 && dep.Instances[0].Component != "" {
+		compID = dep.Instances[0].Component
+	}
+	preset, _ := mwpack.LookupImportPreset(compID)
+
+	combined := strings.TrimSpace(probeOut)
+	if m := strings.TrimSpace(manualState); m != "" {
+		if combined != "" {
+			combined += "\n" + m
+		} else {
+			combined = m
+		}
+	}
+
+	var parsed importParseDraft
+	if combined != "" {
+		parsed = parseImportedDeterministic(combined, compID, displayName, preset)
+		// Also extract paths from ad-hoc rehearsal probe outputs that omit === MW_IMPORT_* === markers
+		for _, m := range reRehDataDir.FindAllStringSubmatch(combined, -1) {
+			if len(m) == 2 {
+				parsed.DataDirs = append(parsed.DataDirs, m[1])
+			}
+		}
+		for _, m := range reRehConfigFile.FindAllStringSubmatch(combined, -1) {
+			if len(m) == 2 {
+				parsed.ConfigPaths = append(parsed.ConfigPaths, m[1])
+			}
+		}
+		for _, m := range reRehLogDir.FindAllStringSubmatch(combined, -1) {
+			if len(m) == 2 {
+				parsed.LogDirs = append(parsed.LogDirs, m[1])
+			}
+		}
+		for _, m := range reRehKnownCfg.FindAllStringSubmatch(combined, -1) {
+			if len(m) == 2 {
+				parsed.ConfigPaths = append(parsed.ConfigPaths, m[1])
+			}
+		}
+	}
+
+	var summary []string
+	changed := false
+
+	mergeStrSlice := func(dst *[]string, extra []string, zhLabel, enLabel string) {
+		seen := map[string]bool{}
+		for _, v := range *dst {
+			t := strings.TrimSpace(v)
+			if t != "" {
+				seen[t] = true
+			}
+		}
+		added := 0
+		for _, v := range extra {
+			t := strings.TrimSpace(v)
+			if t != "" && !seen[t] {
+				seen[t] = true
+				*dst = append(*dst, t)
+				added++
+			}
+		}
+		if added > 0 {
+			changed = true
+			summary = append(summary, tr(lang, fmt.Sprintf("%s +%d", zhLabel, added), fmt.Sprintf("%s +%d", enLabel, added)))
+		}
+	}
+
+	if parsed.ExactVersion != "" && (meta.ExactVersion == "" || (len(parsed.ExactVersion) > len(meta.ExactVersion) && strings.HasPrefix(parsed.ExactVersion, meta.ExactVersion))) {
+		meta.ExactVersion = parsed.ExactVersion
+		changed = true
+		summary = append(summary, tr(lang, "精确版本 "+parsed.ExactVersion, "Exact version "+parsed.ExactVersion))
+	}
+	if parsed.OSDetail != "" && meta.OSDetail == "" {
+		meta.OSDetail = parsed.OSDetail
+		changed = true
+		summary = append(summary, tr(lang, "操作系统详情", "OS detail"))
+	}
+	if parsed.Platform != "" && dep.Platform == "" {
+		dep.Platform = parsed.Platform
+		changed = true
+	}
+
+	mergeStrSlice(&meta.ServiceUnits, parsed.ServiceUnits, "服务单元", "Services")
+	mergeStrSlice(&meta.ConfigPaths, parsed.ConfigPaths, "配置路径", "Config paths")
+	mergeStrSlice(&meta.DataDirs, parsed.DataDirs, "数据目录", "Data dirs")
+	mergeStrSlice(&meta.LogDirs, parsed.LogDirs, "日志目录", "Log dirs")
+
+	// Fill missing data disk on hosts from newly observed storage output
+	if len(parsed.Hosts) > 0 {
+		diskByIP := map[string]string{}
+		fallbackDisk := ""
+		for _, ph := range parsed.Hosts {
+			if ph.Disk != "" {
+				if ph.IP != "" {
+					diskByIP[ph.IP] = ph.Disk
+				}
+				if fallbackDisk == "" {
+					fallbackDisk = ph.Disk
+				}
+			}
+		}
+		diskFilled := 0
+		for i := range dep.Hosts {
+			if strings.TrimSpace(dep.Hosts[i].Disk) == "" {
+				if d := firstNonEmptyStr(diskByIP[dep.Hosts[i].IP], fallbackDisk); d != "" {
+					dep.Hosts[i].Disk = d
+					diskFilled++
+				}
+			}
+		}
+		if diskFilled > 0 {
+			changed = true
+			summary = append(summary, tr(lang, fmt.Sprintf("数据盘信息 +%d", diskFilled), fmt.Sprintf("Host disks +%d", diskFilled)))
+		}
+	}
+
+	// Merge newly observed packages (avoiding duplicates; updating version if package upgraded)
+	if len(parsed.Packages) > 0 {
+		idxByName := map[string]int{}
+		for i, pk := range meta.Packages {
+			idxByName[strings.ToLower(pk.Name)] = i
+		}
+		pkgUpdates := 0
+		for _, npk := range parsed.Packages {
+			pn := strings.TrimSpace(npk.Name)
+			pv := strings.TrimSpace(npk.Version)
+			if pn == "" || pv == "" {
+				continue
+			}
+			key := strings.ToLower(pn)
+			if idx, ok := idxByName[key]; ok {
+				if meta.Packages[idx].Version != pv {
+					meta.Packages[idx].Version = pv
+					pkgUpdates++
+				}
+			} else {
+				idxByName[key] = len(meta.Packages)
+				meta.Packages = append(meta.Packages, npk)
+				pkgUpdates++
+			}
+		}
+		if pkgUpdates > 0 {
+			changed = true
+			summary = append(summary, tr(lang, fmt.Sprintf("软件包清单 +%d", pkgUpdates), fmt.Sprintf("Packages +%d", pkgUpdates)))
+		}
+	}
+
+	// Merge newly discovered companions or newly resolved companion versions (e.g. node_exporter version)
+	if len(parsed.Companions) > 0 {
+		prevByID := map[string]mwpack.ImportedCompanion{}
+		for _, cm := range meta.Companions {
+			prevByID[mwpack.NormalizeCompanionID(cm.Component)] = cm
+		}
+		mergedComps := mergeCompanionLists(compID, meta.Companions, parsed.Companions)
+		compUpdated := 0
+		for _, cm := range mergedComps {
+			cid := mwpack.NormalizeCompanionID(cm.Component)
+			prev, existed := prevByID[cid]
+			if !existed || (prev.Version == "" && cm.Version != "") || len(cm.ConfigPaths) > len(prev.ConfigPaths) || len(cm.ServiceUnits) > len(prev.ServiceUnits) {
+				compUpdated++
+			}
+		}
+		if compUpdated > 0 {
+			meta.Companions = mergedComps
+			changed = true
+			summary = append(summary, tr(lang, fmt.Sprintf("组件栈/版本 +%d", compUpdated), fmt.Sprintf("Stack/versions +%d", compUpdated)))
+		}
+	}
+
+	// Merge newly observed params (fill missing only) & confirmed production applied changes (authoritative)
+	if len(dep.Instances) > 0 {
+		if dep.Instances[0].Params == nil {
+			dep.Instances[0].Params = map[string]any{}
+		}
+		paramAdded := 0
+		for k, v := range parsed.Params {
+			if _, exists := dep.Instances[0].Params[k]; !exists {
+				dep.Instances[0].Params[k] = v
+				paramAdded++
+			}
+		}
+		if paramAdded > 0 {
+			changed = true
+			summary = append(summary, tr(lang, fmt.Sprintf("运行参数 +%d", paramAdded), fmt.Sprintf("Params +%d", paramAdded)))
+		}
+		appliedUpdated := 0
+		for _, ch := range appliedChanges {
+			k := strings.TrimSpace(ch.Key)
+			after := strings.TrimSpace(ch.After)
+			if k == "" || after == "" {
+				continue
+			}
+			curVal := fmt.Sprint(dep.Instances[0].Params[k])
+			if curVal != after {
+				dep.Instances[0].Params[k] = after
+				appliedUpdated++
+			}
+		}
+		if appliedUpdated > 0 {
+			changed = true
+			summary = append(summary, tr(lang, fmt.Sprintf("已落地变更参数 +%d", appliedUpdated), fmt.Sprintf("Applied params +%d", appliedUpdated)))
+		}
+	}
+
+	if !changed {
+		return nil
+	}
+
+	now := nowStamp()
+	if strings.TrimSpace(probeOut) != "" {
+		meta.LastProbedAt = now
+	}
+	meta.BaselineUpdatedAt = now
+	meta.BaselineUpdatedBy = firstNonEmptyStr(user, "system")
+
+	// Rebuild solved deployment & plan cleanly using the existing baseline structure
+	hostsIn := make([]importHostInput, 0, len(dep.Hosts))
+	roleByHost := map[string]string{}
+	if len(dep.Instances) > 0 {
+		for rk, hs := range dep.Instances[0].Placement {
+			for _, hn := range hs {
+				if _, ok := roleByHost[hn]; !ok {
+					roleByHost[hn] = rk
+				}
+			}
+		}
+	}
+	for _, h := range dep.Hosts {
+		hostsIn = append(hostsIn, importHostInput{Name: h.Name, IP: h.IP, Role: roleByHost[h.Name], Disk: h.Disk})
+	}
+	var params map[string]any
+	ver := f.Current.Version
+	if len(dep.Instances) > 0 {
+		params = dep.Instances[0].Params
+		if dep.Instances[0].Version != "" {
+			ver = dep.Instances[0].Version
+		}
+	}
+	req := importClusterReq{
+		ID:           dep.ID,
+		Title:        dep.Title,
+		Component:    compID,
+		DisplayName:  displayName,
+		Category:     meta.Category,
+		Icon:         meta.Icon,
+		Color:        meta.Color,
+		Version:      ver,
+		ExactVersion: meta.ExactVersion,
+		Platform:     dep.Platform,
+		OSDetail:     meta.OSDetail,
+		SourceKind:   meta.SourceKind,
+		DeployMethod: meta.DeployMethod,
+		ArchSummary:  meta.ArchSummary,
+		Hosts:        hostsIn,
+		Endpoints:    meta.Endpoints,
+		Companions:   meta.Companions,
+		ServiceUnits: meta.ServiceUnits,
+		ConfigPaths:  meta.ConfigPaths,
+		DataDirs:     meta.DataDirs,
+		LogDirs:      meta.LogDirs,
+		Params:       params,
+		Packages:     meta.Packages,
+		Notes:        meta.Notes,
+		LastProbedAt: meta.LastProbedAt,
+	}
+	newDep, _, _, newVer, err := buildImportedDeployment(s.plat.cat(), req, meta.BaselineUpdatedBy, now)
+	if err != nil {
+		return nil
+	}
+	plan := mwpack.SolveImported(s.plat.cat(), newDep)
+
+	s.jobPersistMu.Lock()
+	defer s.jobPersistMu.Unlock()
+	if err := writeImportedPlanFiles(s.jobDir(f.Current.ID), newDep, plan); err != nil {
+		return nil
+	}
+	s.invalidateJobCaches(f.Current.ID)
+
+	s.mu.Lock()
+	j := s.jobs[f.Current.ID]
+	j.Version = newVer
+	j.Scheme = mwpack.ImportedSchemeSummary(newDep)
+	j.Updated = now
+	j.Logs = append(j.Logs, fmt.Sprintf("[%s] 由变更演练「%s」自动反哺基线档案（%s）", now, firstNonEmptyStr(sourceTitle, "演练"), strings.Join(summary, "、")))
+	s.mu.Unlock()
+	if err := s.persistJob(j); err == nil {
+		s.mu.Lock()
+		s.jobs[j.ID] = j
+		s.mu.Unlock()
+	}
+	return summary
 }

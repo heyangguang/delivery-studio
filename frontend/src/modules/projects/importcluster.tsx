@@ -26,7 +26,9 @@ import {
   IconRight,
   IconSearch,
   IconUp,
+  IconUpload,
 } from "@arco-design/web-react/icon";
+import { Spark } from "../ai/aichat";
 import { api, copy } from "../../shared/shared";
 import type {
   ClusterView,
@@ -552,14 +554,26 @@ function ProbeCodeBlock({
   script,
   filename,
   safe = true,
+  source = "template",
   compact = false,
+  aiEnabled = false,
+  aiBusy = false,
+  onCustomizeWithAI,
+  onResetTemplate,
 }: {
   script: string;
   filename: string;
   safe?: boolean;
+  source?: "template" | "ai";
   compact?: boolean;
+  aiEnabled?: boolean;
+  aiBusy?: boolean;
+  onCustomizeWithAI?: (focus: string) => void | Promise<void>;
+  onResetTemplate?: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [aiBarOpen, setAiBarOpen] = useState(false);
+  const [focusText, setFocusText] = useState("");
   const lines = useMemo(() => (script ? script.split("\n") : []), [script]);
   const previewText = useMemo(
     () => (expanded || lines.length <= 12 ? script : lines.slice(0, 12).join("\n") + `\n# ... (${lines.length - 12} more lines)`),
@@ -587,9 +601,25 @@ function ProbeCodeBlock({
               : bi("只读探针脚本", "Read-Only Probe")}
           </span>
           <code>{filename}</code>
+          {source === "ai" && (
+            <span className="imp-probe-ai-tag">
+              <Spark size={11} /> {bi("AI 定制", "AI Tailored")}
+            </span>
+          )}
           <span className="muted small">({lines.length} {bi("行", "lines")})</span>
         </span>
         <div className="imp-probe-actions">
+          {onCustomizeWithAI && aiEnabled && (
+            <Button
+              size="mini"
+              type={aiBarOpen ? "primary" : "secondary"}
+              loading={aiBusy}
+              icon={<Spark size={12} rainbow={!aiBarOpen} />}
+              onClick={() => setAiBarOpen((v) => !v)}
+            >
+              {bi("AI 定制探针", "AI Tailor Probe")}
+            </Button>
+          )}
           {lines.length > 12 && (
             <Button
               size="mini"
@@ -617,9 +647,350 @@ function ProbeCodeBlock({
           )}
         </div>
       </div>
+      {aiBarOpen && onCustomizeWithAI && (
+        <div className="imp-probe-ai-bar">
+          <Input
+            size="small"
+            allowClear
+            disabled={aiBusy}
+            value={focusText}
+            onChange={setFocusText}
+            onPressEnter={() => void onCustomizeWithAI(focusText)}
+            placeholder={bi(
+              "可选：说明现场特点（如容器部署、带 HAProxy/Keepalived、重点采 TLS 证书与备份状态）",
+              "Optional: describe environment hints (e.g. Docker, HAProxy/Keepalived, TLS certs & backup)",
+            )}
+          />
+          <Button
+            size="small"
+            type="primary"
+            loading={aiBusy}
+            icon={<Spark size={12} />}
+            onClick={() => void onCustomizeWithAI(focusText)}
+          >
+            {bi("生成精炼只读探针", "Generate Probe")}
+          </Button>
+          {source === "ai" && onResetTemplate && (
+            <Button size="small" disabled={aiBusy} onClick={onResetTemplate}>
+              {bi("恢复标准探针", "Reset Standard")}
+            </Button>
+          )}
+        </div>
+      )}
       <pre className={`imp-probe-pre ${expanded ? "is-expanded" : ""}`}>
         {previewText || bi("正在生成只读采集脚本…", "Generating read-only probe script...")}
       </pre>
+    </div>
+  );
+}
+
+const IMPORT_TEXT_EXT_RE = /\.(log|txt|out|json|ya?ml|conf|ini|cfg|csv|md|sh)$/i;
+
+async function compressImportImageIfNeeded(file: File): Promise<string> {
+  const rawUrl = await readFileAsDataURL(file);
+  if (file.size <= 1.2 * 1024 * 1024 || file.type === "image/gif") {
+    return rawUrl;
+  }
+  return await new Promise<string>((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const maxDim = 2048;
+      let { width, height } = img;
+      if (width > maxDim || height > maxDim) {
+        const scale = Math.min(maxDim / width, maxDim / height);
+        width = Math.max(1, Math.round(width * scale));
+        height = Math.max(1, Math.round(height * scale));
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        resolve(rawUrl);
+        return;
+      }
+      ctx.drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL("image/webp", 0.86));
+    };
+    img.onerror = () => resolve(rawUrl);
+    img.src = rawUrl;
+  });
+}
+
+function ImportEvidenceComposer({
+  title,
+  placeholder,
+  value,
+  onChange,
+  images,
+  onImagesChange,
+  busy = false,
+  aiEnabled = true,
+  minRows = 7,
+  maxRows = 18,
+  submitLabel,
+  onSubmit,
+  leftSlot,
+  imageBtnLabel,
+  footHint,
+}: {
+  title: React.ReactNode;
+  placeholder: string;
+  value: string;
+  onChange: (next: string) => void;
+  images: string[];
+  onImagesChange: React.Dispatch<React.SetStateAction<string[]>>;
+  busy?: boolean;
+  aiEnabled?: boolean;
+  minRows?: number;
+  maxRows?: number;
+  submitLabel: string;
+  onSubmit: () => void;
+  leftSlot?: React.ReactNode;
+  imageBtnLabel?: string;
+  footHint?: string;
+}) {
+  const [dragging, setDragging] = useState(false);
+  const imgInputRef = useRef<HTMLInputElement>(null);
+  const textInputRef = useRef<HTMLInputElement>(null);
+  const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent);
+  const hasInput = Boolean(value.trim()) || images.length > 0;
+
+  const ingestFiles = useCallback(
+    async (files: FileList | File[] | null) => {
+      if (!files) return;
+      const list = Array.from(files);
+      let imgRoom = Math.max(0, 4 - images.length);
+      const addedTexts: string[] = [];
+      let imgAdded = 0;
+
+      for (const f of list) {
+        if (f.type.startsWith("image/")) {
+          if (imgRoom <= 0) {
+            Message.warning(bi("单次最多上传 4 张截图", "Up to 4 screenshots allowed"));
+            continue;
+          }
+          if (f.size > 16 * 1024 * 1024) {
+            Message.warning(bi(`${f.name} 超过 16MB，请裁剪后重试`, `${f.name} exceeds 16MB limit`));
+            continue;
+          }
+          try {
+            const dataUrl = await compressImportImageIfNeeded(f);
+            onImagesChange((prev) => (prev.length < 4 ? [...prev, dataUrl] : prev));
+            imgRoom -= 1;
+            imgAdded += 1;
+          } catch {
+            // ignore
+          }
+        } else if (f.type.startsWith("text/") || IMPORT_TEXT_EXT_RE.test(f.name)) {
+          if (f.size > 2 * 1024 * 1024) {
+            Message.warning(bi(`${f.name} 超过 2MB，已跳过`, `${f.name} exceeds 2MB, skipped`));
+            continue;
+          }
+          try {
+            const txt = await f.text();
+            if (txt.trim()) {
+              addedTexts.push(`# file: ${f.name}\n${txt.trim()}`);
+            }
+          } catch {
+            // ignore
+          }
+        } else {
+          Message.warning(
+            bi(`暂不支持的文件类型：${f.name}（请上传截图或 .log/.txt/.yml/.conf）`, `Unsupported file: ${f.name}`),
+          );
+        }
+      }
+      if (addedTexts.length > 0) {
+        const prefix = value.trim() ? `${value.trimEnd()}\n\n` : "";
+        onChange(prefix + addedTexts.join("\n\n"));
+        Message.success(
+          bi(`已导入 ${addedTexts.length} 份文本/日志文件`, `Imported ${addedTexts.length} text/log file(s)`),
+        );
+      } else if (imgAdded > 0) {
+        Message.success(
+          bi(`已添加 ${imgAdded} 张截图，解析时将自动识图`, `Added ${imgAdded} screenshot(s) for extraction`),
+        );
+      }
+    },
+    [images.length, onChange, onImagesChange, value],
+  );
+
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      const imgs: File[] = [];
+      for (const it of Array.from(items)) {
+        if (it.kind === "file" && it.type.startsWith("image/")) {
+          const f = it.getAsFile();
+          if (f) imgs.push(f);
+        }
+      }
+      if (imgs.length > 0) {
+        if (!e.clipboardData?.getData("text/plain")) {
+          e.preventDefault();
+        }
+        void ingestFiles(imgs);
+      }
+    },
+    [ingestFiles],
+  );
+
+  return (
+    <div
+      className={`imp-compose-box ${dragging ? "is-drag" : ""} ${busy ? "is-busy" : ""}`}
+      onDragOver={(e) => {
+        if (e.dataTransfer?.types?.includes("Files")) {
+          e.preventDefault();
+          if (!dragging) setDragging(true);
+        }
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+          setDragging(false);
+        }
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDragging(false);
+        if (e.dataTransfer?.files?.length) {
+          void ingestFiles(e.dataTransfer.files);
+        }
+      }}
+      onPaste={handlePaste}
+      onKeyDown={(e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && hasInput && !busy) {
+          e.preventDefault();
+          onSubmit();
+        }
+      }}
+    >
+      <div className="imp-compose-head">
+        <div className="imp-compose-head-left">
+          <span className="imp-compose-title">{title}</span>
+          <span className="imp-compose-safety">
+            <svg width="12" height="12" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+              <path
+                d="M10 2.5L4 5v4.6c0 3.8 2.5 6.9 6 7.9 3.5-1 6-4.1 6-7.9V5l-6-2.5z"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinejoin="round"
+              />
+            </svg>
+            <span>{bi("口令与密钥自动脱敏", "Auto-redacts secrets")}</span>
+          </span>
+        </div>
+        <div className="imp-compose-tools">
+          <input
+            ref={imgInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            multiple
+            hidden
+            tabIndex={-1}
+            aria-hidden="true"
+            onChange={(e) => {
+              void ingestFiles(e.target.files);
+              e.target.value = "";
+            }}
+          />
+          <input
+            ref={textInputRef}
+            type="file"
+            accept=".log,.txt,.out,.json,.yml,.yaml,.conf,.ini,.cfg,.csv,.md"
+            multiple
+            hidden
+            tabIndex={-1}
+            aria-hidden="true"
+            onChange={(e) => {
+              void ingestFiles(e.target.files);
+              e.target.value = "";
+            }}
+          />
+          <button
+            type="button"
+            className="imp-attach-btn"
+            disabled={busy || images.length >= 4}
+            onClick={() => imgInputRef.current?.click()}
+          >
+            <IconImage />
+            <span>
+              {imageBtnLabel || bi("上传截图", "Upload Image")}
+              {images.length > 0 ? ` (${images.length}/4)` : ""}
+            </span>
+          </button>
+          <button
+            type="button"
+            className="imp-attach-btn"
+            disabled={busy}
+            onClick={() => textInputRef.current?.click()}
+          >
+            <IconUpload />
+            <span>{bi("上传 .log / .txt", "Upload .log / .txt")}</span>
+          </button>
+          {Boolean(value.trim()) && (
+            <button
+              type="button"
+              className="imp-inline-clear"
+              disabled={busy}
+              onClick={() => onChange("")}
+            >
+              {bi("清空", "Clear")}
+            </button>
+          )}
+        </div>
+      </div>
+
+      <Input.TextArea
+        className="mono imp-compose-area"
+        autoSize={{ minRows, maxRows }}
+        disabled={busy}
+        placeholder={placeholder}
+        value={value}
+        onChange={onChange}
+      />
+
+      {images.length > 0 && (
+        <div className="imp-compose-imgs">
+          {images.map((src, idx) => (
+            <div key={idx} className="imp-img-thumb">
+              <img src={src} alt={`capture-${idx + 1}`} />
+              <button
+                type="button"
+                className="imp-img-del"
+                aria-label={bi("删除截图", "Remove screenshot")}
+                onClick={() => onImagesChange((prev) => prev.filter((_, i) => i !== idx))}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="imp-compose-foot">
+        <div className="imp-compose-foot-left">
+          {leftSlot}
+          <span className="imp-foot-note">
+            {isMac ? bi("⌘ + Enter 提交识别", "⌘ + Enter Extract") : bi("Ctrl + Enter 提交识别", "Ctrl + Enter Extract")}
+            {footHint ? ` · ${footHint}` : ""}
+          </span>
+        </div>
+        <div className="imp-compose-foot-right">
+          <Button
+            type="primary"
+            shape="round"
+            className={`ai-pill ${hasInput ? "ai-pill-primary" : ""}`}
+            icon={aiEnabled ? <Spark size={14} rainbow={!hasInput} /> : <IconRight />}
+            loading={busy}
+            disabled={!hasInput || busy}
+            onClick={onSubmit}
+          >
+            {submitLabel}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -972,6 +1343,8 @@ export function ImportClusterPage({
   const [probeScript, setProbeScript] = useState("");
   const [probeFilename, setProbeFilename] = useState("mw-import-probe.sh");
   const [probeSafe, setProbeSafe] = useState(true);
+  const [probeSource, setProbeSource] = useState<"template" | "ai">("template");
+  const [probeGenerating, setProbeGenerating] = useState(false);
   const [pasteText, setPasteText] = useState("");
   const [images, setImages] = useState<string[]>([]);
   const [parsing, setParsing] = useState(false);
@@ -991,7 +1364,6 @@ export function ImportClusterPage({
   const [packages, setPackages] = useState<ImportedPkg[]>([]);
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const companionCatalog = useMemo(
     () => (presetsData?.companions?.length ? presetsData.companions : FALLBACK_COMPANIONS),
@@ -1060,29 +1432,53 @@ export function ImportClusterPage({
     ];
   }, [isCustom, selectedPreset]);
 
-  // Fetch read-only probe script when entering Step 2 in probe mode
-  useEffect(() => {
-    if (step !== 2 || inputMode !== "probe") return;
-    let alive = true;
-    api<{ script: string; filename: string; safe: boolean }>("/api/clusters/import/probe-script", {
-      method: "POST",
-      body: JSON.stringify({
-        component: effectiveCompID,
-        display_name: effectiveDisplayName,
-        deploy_method: deployMethod,
-      }),
-    })
-      .then((res) => {
-        if (!alive) return;
+  const fetchImportProbe = useCallback(
+    async (opts?: { useAI?: boolean; focus?: string }) => {
+      if (opts?.useAI) setProbeGenerating(true);
+      try {
+        const res = await api<{
+          script: string;
+          filename: string;
+          safe: boolean;
+          source?: "template" | "ai";
+          ai_note?: string;
+        }>("/api/clusters/import/probe-script", {
+          method: "POST",
+          body: JSON.stringify({
+            component: effectiveCompID,
+            display_name: effectiveDisplayName,
+            deploy_method: deployMethod,
+            use_ai: Boolean(opts?.useAI),
+            focus: opts?.focus?.trim() || undefined,
+          }),
+        });
         setProbeScript(res.script);
         setProbeFilename(res.filename);
         setProbeSafe(res.safe);
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, [step, inputMode, effectiveCompID, effectiveDisplayName, deployMethod]);
+        setProbeSource(res.source === "ai" ? "ai" : "template");
+        if (opts?.useAI) {
+          if (res.source === "ai") {
+            Message.success(bi("AI 已按现场特点定制精炼只读探针（已通过安全扫描）", "AI tailored a concise read-only probe (verified safe)"));
+          } else if (res.ai_note) {
+            Message.warning(res.ai_note);
+          }
+        }
+      } catch (e) {
+        if (opts?.useAI) {
+          Message.error((e as Error).message || bi("AI 定制探针失败", "AI probe generation failed"));
+        }
+      } finally {
+        if (opts?.useAI) setProbeGenerating(false);
+      }
+    },
+    [effectiveCompID, effectiveDisplayName, deployMethod],
+  );
+
+  // Fetch read-only probe script when entering Step 2 in probe mode
+  useEffect(() => {
+    if (step !== 2 || inputMode !== "probe") return;
+    void fetchImportProbe();
+  }, [step, inputMode, fetchImportProbe]);
 
   const categories = useMemo(
     () => [
@@ -1142,47 +1538,6 @@ export function ImportClusterPage({
     (isCustom ? customName.trim().length > 0 : selectedPreset !== null);
 
   const validHosts = useMemo(() => hosts.filter((h) => h.name.trim() || h.ip.trim()), [hosts]);
-
-  const handlePasteImage = async (e: React.ClipboardEvent) => {
-    const items = e.clipboardData?.items;
-    if (!items) return;
-    for (const it of Array.from(items)) {
-      if (it.type.startsWith("image/")) {
-        const file = it.getAsFile();
-        if (!file) continue;
-        if (images.length >= 4) {
-          Message.warning(bi("最多上传 4 张截图", "Up to 4 screenshots allowed"));
-          return;
-        }
-        try {
-          const dataUrl = await readFileAsDataURL(file);
-          setImages((prev) => (prev.length < 4 ? [...prev, dataUrl] : prev));
-          Message.success(bi("已粘贴截图，解析时将自动识别", "Screenshot pasted for extraction"));
-        } catch {
-          // ignore
-        }
-      }
-    }
-  };
-
-  const handleFilesSelected = async (files: FileList | null) => {
-    if (!files) return;
-    const room = 4 - images.length;
-    const picked = Array.from(files).slice(0, room);
-    for (const f of picked) {
-      if (!f.type.startsWith("image/")) continue;
-      if (f.size > 4 * 1024 * 1024) {
-        Message.warning(bi(`${f.name} 超过 4MB，已跳过`, `${f.name} exceeds 4MB, skipped`));
-        continue;
-      }
-      try {
-        const dataUrl = await readFileAsDataURL(f);
-        setImages((prev) => (prev.length < 4 ? [...prev, dataUrl] : prev));
-      } catch {
-        // ignore
-      }
-    }
-  };
 
   const runParseAndProceed = async () => {
     if (parsing) return;
@@ -1793,115 +2148,81 @@ export function ImportClusterPage({
 
             {inputMode === "probe" && (
               <>
-                <ProbeCodeBlock script={probeScript} filename={probeFilename} safe={probeSafe} />
+                <ProbeCodeBlock
+                  script={probeScript}
+                  filename={probeFilename}
+                  safe={probeSafe}
+                  source={probeSource}
+                  aiEnabled={Boolean(presetsData?.ai_enabled)}
+                  aiBusy={probeGenerating}
+                  onCustomizeWithAI={(focus) => fetchImportProbe({ useAI: true, focus })}
+                  onResetTemplate={() => void fetchImportProbe()}
+                />
 
-                <div className="imp-field">
-                  <label>
-                    <span className="imp-lbl-left">
+                <ImportEvidenceComposer
+                  title={
+                    <>
                       {bi("执行 ", "Run ")}
                       <code>bash {probeFilename}</code>
-                      {bi(" 后，将终端回显粘贴到下方（多台节点输出可直接拼接）", " and paste terminal output below (multi-node outputs can be concatenated)")}
-                    </span>
-                  </label>
-                  <Input.TextArea
-                    className="mono"
-                    autoSize={{ minRows: 7, maxRows: 16 }}
-                    placeholder={bi(
-                      "=== MW_IMPORT_BEGIN ===\nHOSTNAME=...\n支持直接 Ctrl+V 粘贴终端文本或截图",
-                      "=== MW_IMPORT_BEGIN ===\nHOSTNAME=...\nPaste terminal output or Ctrl+V screenshots",
-                    )}
-                    value={pasteText}
-                    onChange={setPasteText}
-                    onPaste={handlePasteImage}
-                  />
-                </div>
+                      {bi(" 后的终端回显 / 截图", " output & screenshots")}
+                    </>
+                  }
+                  placeholder={bi(
+                    "=== MW_IMPORT_BEGIN ===\nHOSTNAME=...\n直接粘贴终端回显、拖拽 .log/.txt 文件，或按 Ctrl+V 粘贴堡垒机/终端截图（多台节点输出可直接拼接）…",
+                    "=== MW_IMPORT_BEGIN ===\nHOSTNAME=...\nPaste terminal output, drag & drop .log/.txt files, or Ctrl+V screenshots (multi-node outputs can be concatenated)…",
+                  )}
+                  value={pasteText}
+                  onChange={setPasteText}
+                  images={images}
+                  onImagesChange={setImages}
+                  busy={parsing}
+                  aiEnabled={Boolean(presetsData?.ai_enabled)}
+                  imageBtnLabel={bi("上传终端截图", "Upload Screenshot")}
+                  footHint={bi("支持拖拽 .log/.txt/截图 · 自动识别伴生与 OS 组件", "Drag & drop .log/.txt/images · Auto-detects companions & OS agents")}
+                  leftSlot={
+                    <Button size="small" type="text" onClick={() => setStep(1)} disabled={parsing}>
+                      <IconArrowLeft /> {bi("上一步", "Back")}
+                    </Button>
+                  }
+                  submitLabel={
+                    presetsData?.ai_enabled
+                      ? bi("AI 智能识别并核对拓扑", "Extract & Review Topology")
+                      : bi("规则引擎解析并核对拓扑", "Parse & Review Topology")
+                  }
+                  onSubmit={() => void runParseAndProceed()}
+                />
               </>
             )}
 
             {inputMode === "ai_doc" && (
-              <div className="imp-field">
-                <label>
-                  <span className="imp-lbl-left">
-                    {bi(
-                      "粘贴 CMDB 表格、交接文档、配置文件或架构描述（凭据自动脱敏，支持 Ctrl+V 贴图）",
-                      "Paste CMDB tables, configs, or handover notes (secrets auto-redacted; Ctrl+V screenshots supported)",
-                    )}
-                  </span>
-                </label>
-                <Input.TextArea
-                  className="mono"
-                  autoSize={{ minRows: 8, maxRows: 16 }}
-                  placeholder={docPlaceholderFor(effectiveCompID, effectiveDisplayName, selectedPreset?.default_port)}
-                  value={pasteText}
-                  onChange={setPasteText}
-                  onPaste={handlePasteImage}
-                />
-              </div>
+              <ImportEvidenceComposer
+                title={bi("CMDB 表格 / 交接文档 / 配置文件 / 架构截图", "CMDB Tables / Handover Docs / Configs / Diagrams")}
+                placeholder={docPlaceholderFor(effectiveCompID, effectiveDisplayName, selectedPreset?.default_port)}
+                value={pasteText}
+                onChange={setPasteText}
+                images={images}
+                onImagesChange={setImages}
+                busy={parsing}
+                aiEnabled={Boolean(presetsData?.ai_enabled)}
+                minRows={8}
+                imageBtnLabel={bi("上传架构图 / 截图", "Upload Diagram")}
+                footHint={bi("支持拖拽 .yml/.conf/.txt/截图", "Drag & drop .yml/.conf/.txt/images")}
+                leftSlot={
+                  <Button size="small" type="text" onClick={() => setStep(1)} disabled={parsing}>
+                    <IconArrowLeft /> {bi("上一步", "Back")}
+                  </Button>
+                }
+                submitLabel={
+                  presetsData?.ai_enabled
+                    ? bi("AI 智能识别并核对拓扑", "Extract & Review Topology")
+                    : bi("规则引擎解析并核对拓扑", "Parse & Review Topology")
+                }
+                onSubmit={() => void runParseAndProceed()}
+              />
             )}
 
             {(inputMode === "probe" || inputMode === "ai_doc") && (
-              <>
-                <div className="imp-drop-foot">
-                  <div className="imp-img-strip">
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept="image/*"
-                      multiple
-                      style={{ display: "none" }}
-                      onChange={(e) => {
-                        handleFilesSelected(e.target.files);
-                        e.target.value = "";
-                      }}
-                    />
-                    <Button
-                      size="small"
-                      icon={<IconImage />}
-                      disabled={images.length >= 4}
-                      onClick={() => fileInputRef.current?.click()}
-                    >
-                      {inputMode === "probe"
-                        ? bi(`上传终端截图 (${images.length}/4)`, `Terminal Screenshots (${images.length}/4)`)
-                        : bi(`上传架构图 / 文档截图 (${images.length}/4)`, `Diagrams / Screenshots (${images.length}/4)`)}
-                    </Button>
-                    {images.map((src, idx) => (
-                      <div key={idx} className="imp-img-thumb">
-                        <img src={src} alt={`capture-${idx + 1}`} />
-                        <button
-                          type="button"
-                          className="imp-img-del"
-                          aria-label={bi("删除截图", "Remove screenshot")}
-                          onClick={() => setImages((prev) => prev.filter((_, i) => i !== idx))}
-                        >
-                          ×
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                  <span className="small muted">
-                    {bi("支持自动识别主从拓扑、Patroni / etcd / HAProxy / Keepalived 等伴生栈", "Auto-detects primary/replica roles + Patroni/etcd/HAProxy/Keepalived companions")}
-                  </span>
-                </div>
-
-                <ParsingStagePanel active={parsing} aiEnabled={Boolean(presetsData?.ai_enabled)} />
-
-                <div className="imp-footer-bar">
-                  <Button onClick={() => setStep(1)} disabled={parsing}>
-                    <IconArrowLeft /> {bi("上一步", "Back")}
-                  </Button>
-                  <Button
-                    type="primary"
-                    loading={parsing}
-                    disabled={!pasteText.trim() && images.length === 0}
-                    onClick={runParseAndProceed}
-                  >
-                    {presetsData?.ai_enabled
-                      ? bi("AI 智能识别并核对拓扑", "Extract & Review Topology")
-                      : bi("规则引擎解析并核对拓扑", "Parse & Review Topology")}{" "}
-                    <IconRight />
-                  </Button>
-                </div>
-              </>
+              <ParsingStagePanel active={parsing} aiEnabled={Boolean(presetsData?.ai_enabled)} />
             )}
 
             {inputMode === "manual" && (
@@ -2612,7 +2933,10 @@ export function ImportedBaselineModal({
   const [probeScript, setProbeScript] = useState("");
   const [probeFilename, setProbeFilename] = useState("mw-import-probe.sh");
   const [probeSafe, setProbeSafe] = useState(true);
+  const [probeSource, setProbeSource] = useState<"template" | "ai">("template");
+  const [probeGenerating, setProbeGenerating] = useState(false);
   const [probeOutput, setProbeOutput] = useState("");
+  const [probeImages, setProbeImages] = useState<string[]>([]);
   const [parsing, setParsing] = useState(false);
 
   const roleOptions = useMemo<RolePreset[]>(() => {
@@ -2683,29 +3007,53 @@ export function ImportedBaselineModal({
     };
   }, [visible, cluster.id]);
 
-  useEffect(() => {
-    if (!visible || tab !== "probe") return;
-    let alive = true;
-    api<{ script: string; filename: string; safe?: boolean }>("/api/clusters/import/probe-script", {
-      method: "POST",
-      body: JSON.stringify({
-        component: cluster.app_id,
-        display_name: cluster.app_name,
-        deploy_method: deployMethod,
-        service_units: serviceUnits,
-        config_paths: configPaths,
-      }),
-    })
-      .then((res) => {
-        if (!alive) return;
+  const fetchDrawerProbe = useCallback(
+    async (opts?: { useAI?: boolean; focus?: string }) => {
+      if (opts?.useAI) setProbeGenerating(true);
+      try {
+        const res = await api<{
+          script: string;
+          filename: string;
+          safe?: boolean;
+          source?: "template" | "ai";
+          ai_note?: string;
+        }>("/api/clusters/import/probe-script", {
+          method: "POST",
+          body: JSON.stringify({
+            component: cluster.app_id,
+            display_name: cluster.app_name,
+            deploy_method: deployMethod,
+            service_units: serviceUnits,
+            config_paths: configPaths,
+            use_ai: Boolean(opts?.useAI),
+            focus: opts?.focus?.trim() || undefined,
+          }),
+        });
         setProbeScript(res.script);
         setProbeFilename(res.filename);
         setProbeSafe(res.safe !== false);
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
+        setProbeSource(res.source === "ai" ? "ai" : "template");
+        if (opts?.useAI) {
+          if (res.source === "ai") {
+            Message.success(bi("AI 已定制精炼只读探针（已通过静态只读校验）", "AI tailored read-only probe (verified safe)"));
+          } else if (res.ai_note) {
+            Message.warning(res.ai_note);
+          }
+        }
+      } catch (e) {
+        if (opts?.useAI) {
+          Message.error((e as Error).message || bi("AI 定制探针失败", "AI probe generation failed"));
+        }
+      } finally {
+        if (opts?.useAI) setProbeGenerating(false);
+      }
+    },
+    [cluster.app_id, cluster.app_name, deployMethod, serviceUnits, configPaths],
+  );
+
+  useEffect(() => {
+    if (!visible || tab !== "probe") return;
+    void fetchDrawerProbe();
   }, [visible, tab, cluster.app_id, cluster.app_name, deployMethod]);
 
   const adoptAllSuggested = () => {
@@ -2734,8 +3082,8 @@ export function ImportedBaselineModal({
 
   const parseAndMergeProbe = async () => {
     if (parsing) return;
-    if (!probeOutput.trim()) {
-      Message.warning(bi("请先粘贴采集脚本终端输出", "Paste probe terminal output first"));
+    if (!probeOutput.trim() && probeImages.length === 0) {
+      Message.warning(bi("请先粘贴采集脚本终端输出或上传截图", "Paste probe terminal output or upload screenshots first"));
       return;
     }
     setParsing(true);
@@ -2747,6 +3095,8 @@ export function ImportedBaselineModal({
           display_name: cluster.app_name,
           source_kind: "probe",
           text: probeOutput,
+          images: probeImages,
+          use_ai: true,
         }),
       });
       const d = res.draft;
@@ -2858,16 +3208,7 @@ export function ImportedBaselineModal({
       }
       onCancel={onClose}
       footer={
-        tab === "probe" ? (
-          <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8, width: "100%" }}>
-            <Button onClick={() => setTab("edit")} disabled={parsing}>
-              {bi("返回基线编辑", "Back to Edit")}
-            </Button>
-            <Button type="primary" loading={parsing} disabled={!probeOutput.trim()} onClick={parseAndMergeProbe}>
-              <IconRefresh /> {bi("解析回显并合并基线", "Parse & Merge Baseline")}
-            </Button>
-          </div>
-        ) : (
+        tab === "probe" ? null : (
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, width: "100%" }}>
             <Button onClick={onClose}>{bi("取消", "Cancel")}</Button>
             <Button type="primary" loading={saving} onClick={saveBaseline}>
@@ -2881,19 +3222,41 @@ export function ImportedBaselineModal({
         <Skeleton text={{ rows: 9 }} animation />
       ) : tab === "probe" ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <ProbeCodeBlock script={probeScript} filename={probeFilename} safe={probeSafe} compact />
-          <div className="imp-field">
-            <label>
-              <span className="imp-lbl-left">{bi("粘贴最新采集终端回显", "Paste Latest Probe Output")}</span>
-            </label>
-            <Input.TextArea
-              className="mono"
-              autoSize={{ minRows: 8, maxRows: 15 }}
-              placeholder="=== MW_IMPORT_BEGIN === ..."
-              value={probeOutput}
-              onChange={setProbeOutput}
-            />
-          </div>
+          <ProbeCodeBlock
+            script={probeScript}
+            filename={probeFilename}
+            safe={probeSafe}
+            source={probeSource}
+            compact
+            aiEnabled
+            aiBusy={probeGenerating}
+            onCustomizeWithAI={(focus) => fetchDrawerProbe({ useAI: true, focus })}
+            onResetTemplate={() => void fetchDrawerProbe()}
+          />
+          <ImportEvidenceComposer
+            title={bi("最新只读采集回显 / 截图", "Latest Read-Only Probe Output / Screenshots")}
+            placeholder={bi(
+              "=== MW_IMPORT_BEGIN ===\n直接粘贴采集终端回显、拖拽 .log/.txt 文件，或按 Ctrl+V 粘贴终端截图…",
+              "=== MW_IMPORT_BEGIN ===\nPaste terminal output, drag & drop .log/.txt files, or Ctrl+V screenshots…",
+            )}
+            value={probeOutput}
+            onChange={setProbeOutput}
+            images={probeImages}
+            onImagesChange={setProbeImages}
+            busy={parsing}
+            aiEnabled
+            minRows={8}
+            maxRows={16}
+            imageBtnLabel={bi("上传回显截图", "Upload Image")}
+            footHint={bi("支持拖拽 .log/.txt/截图", "Drag & drop .log/.txt/images")}
+            leftSlot={
+              <Button size="small" type="text" onClick={() => setTab("edit")} disabled={parsing}>
+                <IconArrowLeft /> {bi("返回基线编辑", "Back to Edit")}
+              </Button>
+            }
+            submitLabel={bi("AI 解析回显并合并基线", "Parse & Merge Baseline")}
+            onSubmit={() => void parseAndMergeProbe()}
+          />
           <ParsingStagePanel active={parsing} aiEnabled />
         </div>
       ) : (

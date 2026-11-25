@@ -1991,6 +1991,7 @@ export type ChangeRehearsal = {
   applied_note?: string;
   applied_summary?: string;
   applied_changes?: RehearsalAppliedChange[];
+  baseline_enriched?: string[];
   voided?: boolean;
   voided_at?: string;
   voided_by?: string;

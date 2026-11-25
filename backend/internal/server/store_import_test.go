@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -546,5 +547,38 @@ prometheus-node-exporter	1.8.2+ds-1
 		if !strings.Contains(hist, want) {
 			t.Fatalf("clusterHistoryText missing %q; got:\n%s", want, hist)
 		}
+	}
+
+	// Verify rehearsal probe + applied changes incrementally enrich imported cluster baseline without clobbering existing facts
+	f, ok := s.clusterFactsFor("alice", "pg-ai-ctx-test")
+	if !ok {
+		t.Fatalf("clusterFactsFor pg-ai-ctx-test failed")
+	}
+	rehProbe := `
+# file: /etc/patroni/patroni.yml
+postgres -D /data/pg/17/main
+data_directory = /data/pg/17/main
+config_file = /data/pg/17/main/postgresql.conf
+log_directory = /var/log/postgresql
+# file: /etc/pgbackrest/pgbackrest.conf
+pgbackrest 2.59.1
+`
+	applied := []rehearsalAppliedChange{{Key: "max_connections", Before: "200", After: "500"}}
+	enriched := s.enrichImportedBaselineFromEvidence(f, "alice", rehProbe, "", applied, "调大连接数演练", "zh-CN")
+	if len(enriched) == 0 {
+		t.Fatalf("expected non-empty baseline enrichment summary from rehearsal evidence")
+	}
+	updatedDep := s.readSpec(f.Current.ID)
+	if updatedDep == nil || updatedDep.Imported == nil {
+		t.Fatalf("failed to reload enriched deployment")
+	}
+	joinedCfg := strings.Join(updatedDep.Imported.ConfigPaths, ",")
+	joinedData := strings.Join(updatedDep.Imported.DataDirs, ",")
+	joinedLog := strings.Join(updatedDep.Imported.LogDirs, ",")
+	if !strings.Contains(joinedCfg, "/etc/patroni/patroni.yml") || !strings.Contains(joinedData, "/data/pg/17/main") || !strings.Contains(joinedLog, "/var/log/postgresql") {
+		t.Fatalf("expected enriched paths, got cfg=%q data=%q log=%q", joinedCfg, joinedData, joinedLog)
+	}
+	if fmt.Sprint(updatedDep.Instances[0].Params["max_connections"]) != "500" {
+		t.Fatalf("expected applied change max_connections=500 reflected in baseline, got %v", updatedDep.Instances[0].Params["max_connections"])
 	}
 }

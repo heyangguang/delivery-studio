@@ -66,6 +66,8 @@ var ImportPresets = []ImportPreset{
 command -v psql >/dev/null 2>&1 && psql --version || true
 for b in /usr/lib/postgresql/*/bin/postgres /usr/pgsql-*/bin/postgres; do [ -x "$b" ] && "$b" --version; done 2>/dev/null || true
 ps -ef 2>/dev/null | grep -E 'postgres.*-D|patroni' | grep -v grep | head -n 10 || true
+PG_D_PROC="$(ps -eo args 2>/dev/null | grep -E 'postgres.*-D[[:space:]]+/' | grep -v grep | sed -nE 's/.*-D[[:space:]]+([^[:space:]]+).*/\1/p' | head -n 1 || true)"
+[ -n "$PG_D_PROC" ] && echo "PG_DATA_DIR=$PG_D_PROC"
 PATRONI_CFG=""
 for cand in /etc/patroni/patroni.yml /etc/patroni/patroni.yaml /etc/patroni.yml /data/patroni/patroni.yml; do
   [ -r "$cand" ] && { PATRONI_CFG="$cand"; break; }
@@ -73,24 +75,45 @@ done
 if [ -z "$PATRONI_CFG" ]; then
   PATRONI_CFG="$(systemctl show patroni -p ExecStart --no-pager 2>/dev/null | grep -oE '/[^[:space:];"]+patroni[^[:space:];"]*\.ya?ml' | head -n 1 || true)"
 fi
+if [ -z "$PATRONI_CFG" ]; then
+  PATRONI_CFG="$(ps -eo args 2>/dev/null | grep -i patroni | grep -v grep | grep -oE '/[^[:space:];"]+\.ya?ml' | head -n 1 || true)"
+fi
 if [ -n "$PATRONI_CFG" ] && [ -r "$PATRONI_CFG" ]; then
   echo "# file: $PATRONI_CFG"
-  grep -iE '^\s*(scope|name|data_dir|config_dir|bin_dir|listen|connect_address|hosts|log_directory|logging_collector|max_connections|shared_buffers|synchronous_mode|synchronous_node_count|use_pg_rewind|loop_wait|ttl|retry_timeout):' "$PATRONI_CFG" | grep -viE 'pass|secret|token|key|auth' | head -n 45 || true
+  grep -iE '^\s*(scope|name|data_dir|config_dir|bin_dir|listen|connect_address|hosts|log_directory|logging_collector|max_connections|shared_buffers|wal_level|ssl|ssl_cert_file|synchronous_mode|synchronous_node_count|use_pg_rewind|loop_wait|ttl|retry_timeout):' "$PATRONI_CFG" | grep -viE 'pass|secret|token|key|auth' | head -n 45 || true
+fi
+if [ -n "$PG_D_PROC" ]; then
+  for pcf in "$PG_D_PROC/postgresql.conf" "$PG_D_PROC/postgresql.base.conf"; do
+    if [ -r "$pcf" ]; then
+      echo "PG_CONFIG_FILE=$pcf"
+      echo "# file: $pcf"
+      grep -iE '^\s*(port|max_connections|shared_buffers|wal_level|log_directory|logging_collector|ssl|ssl_cert_file|archive_mode|archive_command)\s*=' "$pcf" | grep -viE 'pass|secret|token|key' | head -n 25 || true
+    fi
+  done
 fi
 if command -v patronictl >/dev/null 2>&1; then
   patronictl version 2>/dev/null || true
   [ -n "$PATRONI_CFG" ] && [ -r "$PATRONI_CFG" ] && patronictl -c "$PATRONI_CFG" list 2>/dev/null || true
 fi
 if command -v psql >/dev/null 2>&1; then
-  sudo -n -u postgres psql -X -w -Atc "SELECT 'PG_DATA_DIR='||setting FROM pg_settings WHERE name='data_directory' UNION ALL SELECT 'PG_CONFIG_FILE='||setting FROM pg_settings WHERE name='config_file' UNION ALL SELECT 'PG_LOG_DIR='||setting FROM pg_settings WHERE name='log_directory' UNION ALL SELECT 'PG_MAX_CONN='||setting FROM pg_settings WHERE name='max_connections' UNION ALL SELECT 'PG_SHARED_BUFFERS='||setting FROM pg_settings WHERE name='shared_buffers';" 2>/dev/null || true
+  sudo -n -u postgres psql -X -w -Atc "SELECT 'PG_DATA_DIR='||setting FROM pg_settings WHERE name='data_directory' UNION ALL SELECT 'PG_CONFIG_FILE='||setting FROM pg_settings WHERE name='config_file' UNION ALL SELECT 'PG_LOG_DIR='||setting FROM pg_settings WHERE name='log_directory' UNION ALL SELECT 'PG_MAX_CONN='||setting FROM pg_settings WHERE name='max_connections' UNION ALL SELECT 'PG_SHARED_BUFFERS='||setting FROM pg_settings WHERE name='shared_buffers' UNION ALL SELECT 'PG_WAL_LEVEL='||setting FROM pg_settings WHERE name='wal_level' UNION ALL SELECT 'PG_SSL='||setting FROM pg_settings WHERE name='ssl';" 2>/dev/null || true
 fi
 command -v etcd >/dev/null 2>&1 && etcd --version 2>/dev/null | head -n 3 || true
 for ef in /etc/etcd/etcd.conf.yaml /etc/etcd/etcd.conf.yml /etc/etcd/etcd.conf; do
   [ -r "$ef" ] && { echo "# file: $ef"; grep -vE '^\s*(#|$|.*pass|.*secret|.*token|.*key)' "$ef" | head -n 30; }
 done
 command -v etcdctl >/dev/null 2>&1 && ETCDCTL_API=3 etcdctl member list 2>/dev/null || true
-command -v pgbackrest >/dev/null 2>&1 && pgbackrest version 2>/dev/null || true
+if command -v pgbackrest >/dev/null 2>&1; then
+  pgbackrest version 2>/dev/null || true
+  for bf in /etc/pgbackrest/pgbackrest.conf /etc/pgbackrest.conf; do
+    [ -r "$bf" ] && { echo "# file: $bf"; grep -vE '^\s*(#|$|.*pass|.*secret|.*token|.*key)' "$bf" | head -n 25; }
+  done
+  sudo -n -u postgres pgbackrest info 2>/dev/null | head -n 20 || pgbackrest info 2>/dev/null | head -n 20 || true
+fi
 command -v pgbouncer >/dev/null 2>&1 && pgbouncer --version 2>/dev/null | head -n 2 || true
+for cert in /etc/patroni/*.crt /etc/etcd/*.crt /etc/postgresql/*/*/*.crt "${PG_D_PROC:-/nonexistent}"/*.crt; do
+  [ -r "$cert" ] && command -v openssl >/dev/null 2>&1 && echo "CERT=$cert $(openssl x509 -in "$cert" -noout -enddate 2>/dev/null || true)"
+done 2>/dev/null | head -n 6 || true
 systemctl list-units --type=service --all --no-pager 2>/dev/null | grep -iE 'patroni|postgres|etcd|pgbouncer|haproxy|keepalived' || true`,
 	},
 	{

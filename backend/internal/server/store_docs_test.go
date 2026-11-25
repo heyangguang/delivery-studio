@@ -336,7 +336,7 @@ func TestDocsStaleAndRCA(t *testing.T) {
 		t.Fatal(body)
 	}
 	_, body = call("GET", "/api/clusters/etcd-st/docs/"+created.ID, "")
-	if !strings.Contains(body, "经历过的交付") || !strings.Contains(body, "timeline") {
+	if !strings.Contains(body, "历史交付与变更记录") || !strings.Contains(body, "timeline") {
 		t.Fatal(body)
 	}
 	// the assistant asks before writing a root cause; the answers are kept and used next time
@@ -347,7 +347,7 @@ func TestDocsStaleAndRCA(t *testing.T) {
 		t.Fatal(code, body)
 	}
 	code, body = call("POST", "/api/clusters/etcd-st/docs/"+created.ID+"/sections/cause/draft", `{"answers":[{"question":"掉线前有没有人动过 n2？","answer":"有人在 n2 上拷了大文件"}]}`)
-	if code != 200 || !strings.Contains(body, "数据盘写满") || !strings.Contains(body, "现场补充的信息") || !strings.Contains((*bodies)[1], "拷了大文件") {
+	if code != 200 || !strings.Contains(body, "数据盘写满") || !strings.Contains(body, "附：现场补充信息") || !strings.Contains((*bodies)[1], "拷了大文件") {
 		t.Fatal(code, body)
 	}
 	// an assessment: the question is its first section; the platform supplies the cluster and, for a selection,
@@ -362,7 +362,7 @@ func TestDocsStaleAndRCA(t *testing.T) {
 		t.Fatal(code, body)
 	}
 	_, body = call("GET", "/api/clusters/etcd-st/docs/"+as.ID, "")
-	if !strings.Contains(body, "前面要不要加负载均衡") || !strings.Contains(body, "平台上可用的组件") || !strings.Contains(body, "HAProxy") || !strings.Contains(body, `"manual":true`) {
+	if !strings.Contains(body, "前面要不要加负载均衡") || !strings.Contains(body, "候选技术栈组件") || !strings.Contains(body, "HAProxy") || !strings.Contains(body, `"manual":true`) {
 		t.Fatal(body)
 	}
 	if code, _ = call("DELETE", "/api/clusters/etcd-st/docs/"+as.ID, ""); code != 200 {

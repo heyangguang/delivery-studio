@@ -18,6 +18,7 @@
 | `scripts/` | 本地开发、构建、打包、迁移与发版脚本 | `dev-reload.ps1`、`release.ps1`、`rename-local-workspace.ps1`、`build-store.py`、`build-sandbox-runtime.py` | 线上运行态数据或密钥 |
 | `tests/` | 非 Go 回归测试与测试夹具 | `tests/python/`（Python 契约单测）、`tests/fixtures/`（测试样本文件） | `__pycache__`、临时输出日志 |
 | `docs/` | 统一文档中心 | `DIRECTORY_STANDARD.md`、`BRANCHING_AND_RELEASE_STANDARD.md`、`assets/`（品牌 SVG）、`ops/`（现役运维手册）、`archive-1.0/`（1.0 历史设计/验收归档） | 可执行脚本、二进制 |
+| `.github/` | GitHub 工程治理配置 | `workflows/ci.yml`（PR/主干自动化 CI 检查）、`PULL_REQUEST_TEMPLATE.md`（PR 规范模板） | 业务源码、构建产物 |
 
 *(本地忽略目录：`dist/`、`frontend/node_modules/`、`__pycache__/` 均由 `.gitignore` 管控，不入库。)*
 

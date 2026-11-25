@@ -15,7 +15,7 @@
   - `scripts/`：开发热更、SemVer 发版、离线打包与工作区脚本；
   - `tests/`：Python 契约单测（`tests/python/`）与测试夹具（`tests/fixtures/`）；
   - `docs/`：工程与分支规范、运维手册（`docs/ops/`）、品牌素材（`docs/assets/`）及 1.0 历史归档（`docs/archive-1.0/`）；
-  - 顶层文件仅允许：`README.md`、`LICENSE`、`AGENTS.md`（以及 `.gitignore`）。
+  - 顶层元文件/隐藏目录仅允许：`README.md`、`LICENSE`、`AGENTS.md`、`.gitignore` 以及 `.github/`（CI 工作流与 PR 模板）。
 - **严禁堆放散落文件**：禁止在仓库根目录、`backend/` 根目录或 `frontend/src/` 根目录新增散落源码/文档，禁止再创建 `ops/`、`packaging/`、`store_deploy/`、`testdata/` 等平行目录。
 - **后端模块化与演进边界**：
   - 后续逐步演进的新独立领域包统一落在 `backend/internal/<domain>/`，领域包之间严禁互相 `import`，跨领域编排收敛于 `backend/internal/server/`；
@@ -30,14 +30,19 @@
 
 完整规范见 [`docs/BRANCHING_AND_RELEASE_STANDARD.md`](./docs/BRANCHING_AND_RELEASE_STANDARD.md)。
 
-### 2.1 分支模型（Trunk-Based + Release Branches）
-- `main`：活跃演进主干，必须始终可编译、核心测试绿灯；**严禁对 `main` 与 `release/*` 执行 `git push --force`**（除非用户显式要求重置历史）。
-- `release/<major>.<minor>`（如 `release/1.0`）：对应大/次版本的长期维护分支，仅接收稳定基线与 Bugfix/安全补丁。
-- 短期工作分支按类型命名，合入后立即删除：
-  - `feat/<scope>-<slug>`（新特性）
-  - `fix/<scope>-<slug>`（普通缺陷修复）
-  - `hotfix/<ver>-<slug>`（基于 `release/*` 的紧急热修）
-  - `refactor/<slug>`、`docs/<slug>`、`chore/<slug>`（重构/文档/工程）
+### 2.1 分支模型与 PR 强制门禁（GitFlow + Owner Merge）
+- `main`：**正式发布主干**（永久保护，仅对应已验证正式版本与 `vX.Y.Z` Tag）；**严禁直接 push**，仅通过 `release/*` 或 `hotfix/*` 的 PR 合入。
+- `develop`：**日常开发与集成测试主干**（永久保护）；**严禁直接 push**，所有新功能、修复与工程改动必须从 `develop` 切出短期分支并提 PR 合入。
+- `release/<major>.<minor>`（如 `release/1.0`、`release/1.1`）：对应大/次版本的预备与长期维护分支；正式发版后**冻结新特性**，仅通过 PR 接收 Bugfix/安全补丁。
+- 短期工作分支按类型命名（**严禁本地直接合入主干**）：
+  - `feat/<scope>-<slug>`（新特性，基于 `develop`）
+  - `fix/<scope>-<slug>`（普通缺陷修复，基于 `develop`）
+  - `hotfix/<ver>-<slug>`（紧急热修，基于对应 `release/*`）
+  - `refactor/<slug>`、`style/<slug>`、`docs/<slug>`、`chore/<slug>`（重构/样式/文档/工程，基于 `develop`）
+- **PR 与合入红线（最高优先级）**：
+  1. 任何代码或文档改动完成后，必须推送短期分支至 `origin` 并使用 `gh pr create --base develop`（发版/热修除外）创建结构化 Pull Request；
+  2. **AI 严禁擅自 Merge PR 或直推 `main`/`develop`/`release/*`**，等待 GitHub Actions CI 全绿后，统一由用户亲自审阅并在 GitHub 点击 Merge（合并后远端分支自动清理）；
+  3. **严禁对 `main`、`develop`、`release/*` 执行 `git push --force`**（除非用户显式要求重置历史）。
 
 ### 2.2 Commit 规范
 - 统一采用 Conventional Commits：`<type>(<scope>): <简明描述>`（`feat`/`fix`/`refactor`/`perf`/`style`/`docs`/`test`/`chore`）。

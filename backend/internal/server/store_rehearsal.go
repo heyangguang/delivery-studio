@@ -4873,9 +4873,10 @@ func (s *storeServer) finalizeRehearsal(w http.ResponseWriter, r *http.Request, 
 		saved.Sections["overview"] = docSection{Text: overview, Source: "user", Confirmed: true, By: session.User, At: now, Basis: f.Current.ID}
 	}
 	if _, exists := saved.Sections["signoff"]; !exists {
+		signer := resolveReportSigner(session.User, f.Meta, "confirmer", lang)
 		signoff := tr(lang,
-			fmt.Sprintf("本方案已由 %s 在测试环境完成全部必测步骤演练并核验通过。生产执行窗口内如遇单步超出预期耗时 2 倍或核心业务指标异常，立即按第 5 节应急回退预案执行回退。", session.User),
-			fmt.Sprintf("All required rehearsal steps have been validated and verified in staging by %s. During production execution, if any step exceeds 2x expected duration or critical business KPIs degrade, immediately execute Section 5 rollback procedures.", session.User),
+			fmt.Sprintf("本方案已由 %s 在测试环境完成全部必测步骤演练并核验通过。生产执行窗口内如遇单步超出预期耗时 2 倍或核心业务指标异常，立即按第 5 节应急回退预案执行回退。", signer),
+			fmt.Sprintf("All required rehearsal steps have been validated and verified in staging by %s. During production execution, if any step exceeds 2x expected duration or critical business KPIs degrade, immediately execute Section 5 rollback procedures.", signer),
 		)
 		saved.Sections["signoff"] = docSection{Text: signoff, Source: "user", Confirmed: true, By: session.User, At: now, Basis: f.Current.ID}
 	}

@@ -1266,7 +1266,14 @@ function FloatingFAB({
           ? bi("AI 正在回答…", "AI is replying…")
           : bi("AI 助手", "AI Assistant")}
       </span>
-      {!busy && <kbd>⌘J</kbd>}
+      {!busy && (
+        <kbd>
+          {typeof navigator !== "undefined" &&
+          /Mac|iPod|iPhone|iPad/i.test(navigator.platform || "")
+            ? "⌘J"
+            : "Ctrl+J"}
+        </kbd>
+      )}
     </button>
   );
 }

@@ -725,6 +725,11 @@ func advisoriesFromOSVDoc(doc osvFullDoc, source string) []secDBAdvisory {
 		var fixedIn []string
 		fixedSeen := map[string]bool{}
 		for _, rg := range af.Ranges {
+			if strings.EqualFold(strings.TrimSpace(rg.Type), "GIT") {
+				// OSV GIT ranges use raw commit SHAs rather than package versions; comparing them
+				// against PyPI/DEB/RPM version strings produces false positives and raw SHA fixes.
+				continue
+			}
 			var cur secAdvRange
 			cur.Type = rg.Type
 			hasOpen := false
@@ -743,7 +748,7 @@ func advisoriesFromOSVDoc(doc osvFullDoc, source string) []secDBAdvisory {
 					cur.Fixed = ev.Fixed
 					ranges = append(ranges, cur)
 					hasOpen = false
-					if !fixedSeen[ev.Fixed] {
+					if !fixedSeen[ev.Fixed] && !isGitCommitHash(ev.Fixed) {
 						fixedSeen[ev.Fixed] = true
 						fixedIn = append(fixedIn, ev.Fixed)
 					}

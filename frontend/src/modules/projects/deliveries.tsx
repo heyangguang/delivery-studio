@@ -1440,6 +1440,7 @@ export function DeliveryDetail({
   const [syncCheckTick, setSyncCheckTick] = useState(0);
   const [focusSyncTick, setFocusSyncTick] = useState(0);
   const wasRunning = useRef(!!cached && running(cached.job.state));
+  const deletingRef = useRef(false);
   // The detail pane is one scroller shared by every delivery; start each at the top.
   useLayoutEffect(() => {
     if (!embedded) document.querySelector(".md-detail")?.scrollTo({ top: 0 });
@@ -1533,7 +1534,6 @@ export function DeliveryDetail({
   const g = groupFiles(files);
   const done = !running(job.state);
 
-  const deletingRef = useRef(false);
   const remove = () =>
     Modal.confirm({
       title:

@@ -73,6 +73,28 @@ func (inst *Instance) fill(s, cluster string) string {
 	for k, v := range inst.Params {
 		s = strings.ReplaceAll(s, "${params."+k+"}", fmt.Sprint(v))
 	}
+	// Fallback to component parameter defaults (e.g. for imported clusters whose raw config params
+	// omit catalog deployment param keys like redis_port, data_dir, or maxmemory_policy).
+	if strings.Contains(s, "${params.") && inst.R != nil {
+		fillFrom := func(ps []Param) {
+			for _, p := range ps {
+				if p.Key == "" {
+					continue
+				}
+				tok := "${params." + p.Key + "}"
+				if !strings.Contains(s, tok) {
+					continue
+				}
+				if p.Default != nil && fmt.Sprint(p.Default) != "" {
+					s = strings.ReplaceAll(s, tok, fmt.Sprint(p.Default))
+				}
+			}
+		}
+		fillFrom(inst.R.Params)
+		if inst.R.C != nil && strings.Contains(s, "${params.") {
+			fillFrom(inst.R.C.Params)
+		}
+	}
 	return s
 }
 

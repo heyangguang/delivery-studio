@@ -450,7 +450,7 @@ func renderSecurityDocx(ds secExportDataset) ([]byte, error) {
 					{"安全综合评分", fmt.Sprintf("**%d 分（%s 级）**", ca.Score, ca.Grade), fmt.Sprintf("配置基线通过 %d / %d 项；临期/过期证书 %d 张", ca.BaselinePassed, ca.BaselineTotal, ca.CertExpiring)},
 					{"未豁免活跃漏洞", fmt.Sprintf("共 %d 条", ds.ActiveCounts.Total), fmt.Sprintf("严重 %d · 高危 %d · 中危 %d · 低危 %d", ds.ActiveCounts.Critical, ds.ActiveCounts.High, ds.ActiveCounts.Medium, ds.ActiveCounts.Low)},
 					{"风险来源分层", fmt.Sprintf("中间件 %d / OS %d", ds.MWCounts.Total, ds.OSCounts.Total), fmt.Sprintf("中间件（严 %d / 高 %d） · OS 底层包（严 %d / 高 %d）", ds.MWCounts.Critical, ds.MWCounts.High, ds.OSCounts.Critical, ds.OSCounts.High)},
-					{"统计口径与模板", ds.Template.Name, fmt.Sprintf("最低等级：%s · 包含豁免：%v · 扫描时间：%s", ds.Template.MinSeverity, ds.Template.IncludeWaived, firstNonEmptyStr(ca.ScannedAt, ds.GeneratedAt))},
+					{"统计口径与模板", ds.Template.Name, fmt.Sprintf("最低等级：%s · 包含豁免：%v · 扫描时间：%s", ds.Template.MinSeverity, ds.Template.IncludeWaived, formatSecDisplayTime(ca.ScannedAt, ds.GeneratedAt))},
 				},
 				[]int{2100, 2300, docxBodyWidth - 4400},
 				0,
@@ -468,7 +468,7 @@ func renderSecurityDocx(ds secExportDataset) ([]byte, error) {
 			body.tableWithWidths(
 				[]string{"评估指标", "统计值", "明细说明"},
 				[][]string{
-					{"漏洞库规模", fmt.Sprintf("%d 条公告", ds.Report.DBAdvisoryCount), fmt.Sprintf("最近同步：%s · 最近扫描：%s", firstNonEmptyStr(ds.Report.DBUpdatedAt, "—"), firstNonEmptyStr(ds.Report.ScannedAt, ds.GeneratedAt))},
+					{"漏洞库规模", fmt.Sprintf("%d 条公告", ds.Report.DBAdvisoryCount), fmt.Sprintf("最近同步：%s · 最近扫描：%s", formatSecDisplayTime(ds.Report.DBUpdatedAt, "—"), formatSecDisplayTime(ds.Report.ScannedAt, ds.GeneratedAt))},
 					{"盘点资产 (SBOM)", fmt.Sprintf("%d 个软件包", ds.Report.SBOMPackageCount), fmt.Sprintf("离线闭包 %d · 运行环境 %d · 纳管集群 %d", ds.Report.ClosureCount, ds.Report.RuntimeCount, ds.Report.ClusterCount)},
 					{"未豁免活跃风险", fmt.Sprintf("共 %d 条", ds.ActiveCounts.Total), fmt.Sprintf("严重 %d · 高危 %d · 中危 %d · 低危 %d（已豁免/缓解 %d 条）", ds.ActiveCounts.Critical, ds.ActiveCounts.High, ds.ActiveCounts.Medium, ds.ActiveCounts.Low, ds.WaivedCount)},
 					{"风险来源分层", fmt.Sprintf("中间件 %d / OS %d", ds.MWCounts.Total, ds.OSCounts.Total), fmt.Sprintf("中间件本体（严 %d / 高 %d） · OS 底层包（严 %d / 高 %d） · 运行环境 %d", ds.MWCounts.Critical, ds.MWCounts.High, ds.OSCounts.Critical, ds.OSCounts.High, ds.RuntimeCounts.Total)},
@@ -778,7 +778,7 @@ func renderSecurityXlsx(ds secExportDataset) ([]byte, error) {
 			)
 		} else {
 			rows = append(rows,
-				[]xlsxCell{xlsxStr("漏洞库公告数", xlsxStyleSubhead), xlsxInt(ds.Report.DBAdvisoryCount, xlsxStyleNum), xlsxStr("最近同步：" + firstNonEmptyStr(ds.Report.DBUpdatedAt, "—"), xlsxStyleBody)},
+				[]xlsxCell{xlsxStr("漏洞库公告数", xlsxStyleSubhead), xlsxInt(ds.Report.DBAdvisoryCount, xlsxStyleNum), xlsxStr("最近同步：" + formatSecDisplayTime(ds.Report.DBUpdatedAt, "—"), xlsxStyleBody)},
 				[]xlsxCell{xlsxStr("盘点资产包 (SBOM)", xlsxStyleSubhead), xlsxInt(ds.Report.SBOMPackageCount, xlsxStyleNum), xlsxStr(fmt.Sprintf("离线闭包 %d / 运行环境 %d / 纳管集群 %d", ds.Report.ClosureCount, ds.Report.RuntimeCount, ds.Report.ClusterCount), xlsxStyleBody)},
 				[]xlsxCell{xlsxStr("受影响生产集群", xlsxStyleSubhead), xlsxInt(len(ds.Clusters), xlsxStyleNum), xlsxStr(fmt.Sprintf("中间件受影响 %d / OS 受影响 %d", ds.Report.MiddlewareAffectedClusters, ds.Report.OSAffectedClusters), xlsxStyleBody)},
 			)

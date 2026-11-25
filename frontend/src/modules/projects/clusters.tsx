@@ -426,6 +426,9 @@ export function ClusterDetail({
   const isImported = c.delivery_mode === "imported";
   const [baselineModal, setBaselineModal] = useState<null | "edit" | "probe">(null);
   const deletingImportedRef = useRef(false);
+  useEffect(() => {
+    setBaselineModal(null);
+  }, [c.id, resolvedTab]);
   const effectiveTab =
     (resolvedTab === "plans" && isImported) ||
     (resolvedTab === "rehearsal" && !canRehearse) ||

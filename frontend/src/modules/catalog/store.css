@@ -323,7 +323,9 @@
   margin-top: 8px;
 }
 .feature .arco-btn.feature-cta,
-.product-banner .arco-btn.feature-cta {
+.product-banner .arco-btn.feature-cta,
+body[arco-theme="dark"] .feature .arco-btn.feature-cta,
+body[arco-theme="dark"] .product-banner .arco-btn.feature-cta {
   background: #ffffff;
   color: #14161d;
   border-color: transparent;
@@ -332,7 +334,9 @@
   transition: background-color 0.18s var(--spring), transform 0.16s var(--spring), box-shadow 0.18s var(--spring);
 }
 .feature .arco-btn.feature-cta:hover:not(:disabled),
-.product-banner .arco-btn.feature-cta:hover:not(:disabled) {
+.product-banner .arco-btn.feature-cta:hover:not(:disabled),
+body[arco-theme="dark"] .feature .arco-btn.feature-cta:hover:not(:disabled),
+body[arco-theme="dark"] .product-banner .arco-btn.feature-cta:hover:not(:disabled) {
   background: #f4f5f8;
   color: #14161d;
   border-color: transparent;
@@ -695,7 +699,7 @@
 /* plan editions & semantic blueprint glyphs */
 .plan-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 14px;
 }
 .plan-card {

@@ -732,3 +732,49 @@ func TestImportedBaselineGapDiagnosisAndReadOnlyGapProbe(t *testing.T) {
 		t.Fatalf("merged health missing AI-discovered gap: %+v", gResp.Health.Gaps)
 	}
 }
+
+func TestImportNegatedCompanionAndDistroSchemaVersion(t *testing.T) {
+	s, _ := testStore(t)
+	alice, _ := storeLogin(t, s, "alice")
+
+	// 1. Negated ArchSummary like "单机部署（非 Sentinel / Cluster）" must NOT attach phantom redis-sentinel companion.
+	sig := companionSignals{
+		PrimaryComp: "redis",
+		ArchSummary: "Redis 6.0.16 单机部署（非 Sentinel / Cluster），仅监听本地与内网 6379",
+		Hosts:       []importHostInput{{Name: "pass-4", IP: "192.168.31.153"}},
+	}
+	comps := inferCompanionsFromSignals(sig)
+	for _, c := range comps {
+		if c.Component == "redis-sentinel" {
+			t.Fatalf("negated ArchSummary must not infer phantom redis-sentinel companion: %+v", comps)
+		}
+	}
+
+	// 2. Positive mention must still detect redis-sentinel.
+	sigPos := companionSignals{
+		PrimaryComp: "redis",
+		ArchSummary: "Redis 7.2 一主两从 + 3 节点 Sentinel 哨兵高可用",
+		Hosts:       []importHostInput{{Name: "r1", IP: "10.0.0.1"}},
+	}
+	compsPos := inferCompanionsFromSignals(sigPos)
+	foundSentinel := false
+	for _, c := range compsPos {
+		if c.Component == "redis-sentinel" {
+			foundSentinel = true
+		}
+	}
+	if !foundSentinel {
+		t.Fatalf("positive Sentinel mention should infer redis-sentinel companion, got %+v", compsPos)
+	}
+
+	// 3. Distro-suffixed versions on catalog components (e.g. 4.1.5-1.noble, 3.5.33-1.noble) normalize cleanly in schema API.
+	for _, path := range []string{
+		"/api/components/patroni?version=4.1.5-1.noble",
+		"/api/components/etcd?version=3.5.33-1.noble",
+	} {
+		rr := storeRequest(s, "GET", path, nil, alice, "")
+		if rr.Code != 200 {
+			t.Fatalf("GET %s expected 200 after distro version normalization, got %d: %s", path, rr.Code, rr.Body.String())
+		}
+	}
+}

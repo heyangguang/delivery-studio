@@ -77,6 +77,7 @@ import {
   can,
   copy,
   csrfToken,
+  downloadFile,
   toPasteSafeShell,
   unwrapOuterPasteGroup,
   err,
@@ -12208,16 +12209,23 @@ function RehearsalSessionView({
                       onClick={() => {
                         if (exportingDoc) return;
                         setExportingDoc(true);
-                        if (exportCooldownRef.current !== null) {
-                          window.clearTimeout(exportCooldownRef.current);
-                        }
-                        exportCooldownRef.current = window.setTimeout(() => {
-                          exportCooldownRef.current = null;
-                          setExportingDoc(false);
-                        }, 1500);
-                        window.location.href = withLang(
-                          `/api/clusters/${encodeURIComponent(c.id)}/export?docs=${encodeURIComponent(r.doc_id!)}`,
+                        Message.info(
+                          bi("正在生成并下载 Word 方案…", "Generating Word SOP download…"),
                         );
+                        void downloadFile(
+                          withLang(
+                            `/api/clusters/${encodeURIComponent(c.id)}/export?docs=${encodeURIComponent(r.doc_id!)}`,
+                          ),
+                          `${c.id}-sop.docx`,
+                        ).finally(() => {
+                          if (exportCooldownRef.current !== null) {
+                            window.clearTimeout(exportCooldownRef.current);
+                          }
+                          exportCooldownRef.current = window.setTimeout(() => {
+                            exportCooldownRef.current = null;
+                            setExportingDoc(false);
+                          }, 400);
+                        });
                       }}
                     >
                       {bi("导出 Word (.docx)", "Export Word (.docx)")}

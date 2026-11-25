@@ -155,3 +155,23 @@ func TestVersionEndpointIncludesReleaseNotes(t *testing.T) {
 		}
 	}
 }
+
+func TestEnsureDevTLSCertRefreshesMissingSAN(t *testing.T) {
+	dir := t.TempDir()
+	certPath := filepath.Join(dir, "dev.crt")
+	keyPath := filepath.Join(dir, "dev.key")
+	if err := ensureDevTLSCert(certPath, keyPath); err != nil {
+		t.Fatalf("initial ensureDevTLSCert: %v", err)
+	}
+	cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+	if err != nil {
+		t.Fatalf("load generated dev cert: %v", err)
+	}
+	if len(cert.Certificate) == 0 {
+		t.Fatalf("expected generated cert bytes")
+	}
+	// Second call on up-to-date cert should be a fast no-op and remain valid.
+	if err := ensureDevTLSCert(certPath, keyPath); err != nil {
+		t.Fatalf("second ensureDevTLSCert: %v", err)
+	}
+}

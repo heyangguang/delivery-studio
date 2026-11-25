@@ -903,17 +903,47 @@ func parseLeadingInt(s string) int {
 	return n
 }
 
+// isGitCommitHash returns true for 32..64 character hex git commit hashes (e.g. 40-char SHA-1).
+func isGitCommitHash(s string) bool {
+	s = strings.TrimSpace(s)
+	if len(s) < 32 || len(s) > 64 {
+		return false
+	}
+	hasAlpha := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c >= '0' && c <= '9' {
+			continue
+		}
+		if (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F') {
+			hasAlpha = true
+			continue
+		}
+		return false
+	}
+	return hasAlpha
+}
+
 // versionAffectedByAdvisory evaluates whether installed version v falls inside the advisory's affected versions or ranges.
 func versionAffectedByAdvisory(ecoKey, v string, adv secDBAdvisory) bool {
 	if v == "" {
 		return false
 	}
 	for _, ev := range adv.Versions {
+		if isGitCommitHash(ev) {
+			continue
+		}
 		if ev == v || compareVersionForEco(ecoKey, v, ev) == 0 {
 			return true
 		}
 	}
 	for _, rg := range adv.Ranges {
+		if strings.EqualFold(strings.TrimSpace(rg.Type), "GIT") {
+			continue
+		}
+		if isGitCommitHash(rg.Introduced) || isGitCommitHash(rg.Fixed) || isGitCommitHash(rg.LastAffected) {
+			continue
+		}
 		if rg.Introduced != "" && rg.Introduced != "0" {
 			if compareVersionForEco(ecoKey, v, rg.Introduced) < 0 {
 				continue
@@ -1629,16 +1659,25 @@ func buildPackageGroups(findings []secFinding) []secPackageGroup {
 				g.MaxCVSS = f.CVSSScore
 			}
 			if len(f.FixedIn) > 0 {
-				g.FixableCount++
-				// Pick the minimum fix for this CVE, then take the max across CVEs in the group so 1 upgrade fixes all.
-				minFix := f.FixedIn[0]
-				for _, fx := range f.FixedIn[1:] {
-					if compareVersionForEco(f.EcoKey, fx, minFix) < 0 {
+				// Pick the minimum valid upgrade fix (> installed version, non-SHA) for this CVE,
+				// then take the max across CVEs in the group so 1 upgrade fixes all without ever recommending downgrades.
+				minFix := ""
+				for _, fx := range f.FixedIn {
+					if isGitCommitHash(fx) {
+						continue
+					}
+					if g.InstalledVersion != "" && compareVersionForEco(f.EcoKey, fx, g.InstalledVersion) <= 0 {
+						continue
+					}
+					if minFix == "" || compareVersionForEco(f.EcoKey, fx, minFix) < 0 {
 						minFix = fx
 					}
 				}
-				if g.RecommendedFix == "" || compareVersionForEco(f.EcoKey, minFix, g.RecommendedFix) > 0 {
-					g.RecommendedFix = minFix
+				if minFix != "" {
+					g.FixableCount++
+					if g.RecommendedFix == "" || compareVersionForEco(f.EcoKey, minFix, g.RecommendedFix) > 0 {
+						g.RecommendedFix = minFix
+					}
 				}
 			}
 			if f.RepoFixVersion != "" {

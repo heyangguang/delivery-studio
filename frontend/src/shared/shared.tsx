@@ -1706,11 +1706,63 @@ export function useAIStatus(): AIStatus {
     () => aiSnapshot,
   );
   useEffect(() => {
-    if (!aiLoaded && !aiInflight) {
+    if (!aiLoaded && !aiInflight && csrf) {
       void refreshAIStatus();
     }
   }, []);
   return st;
+}
+
+/** Downloads a protected API file reliably via fetch -> Blob -> <a download>, with visible feedback. */
+export async function downloadFile(url: string, fallbackName?: string): Promise<boolean> {
+  try {
+    const tok = authToken();
+    const res = await fetch(url, {
+      credentials: "same-origin",
+      headers: {
+        "X-Lang": getLang(),
+        ...(tok ? { Authorization: `Bearer ${tok}` } : {}),
+      },
+    });
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}`;
+      try {
+        const j = await res.json();
+        if (j?.error) msg = j.error;
+      } catch {
+        /* ignore */
+      }
+      Message.error(bi(`导出失败：${msg}`, `Export failed: ${msg}`));
+      return false;
+    }
+    const cd = res.headers.get("Content-Disposition") || "";
+    let filename = fallbackName || "download";
+    const mUtf8 = /filename\*=UTF-8''([^;\s]+)/i.exec(cd);
+    const mPlain = /filename="?([^";]+)"?/i.exec(cd);
+    if (mUtf8?.[1]) {
+      try {
+        filename = decodeURIComponent(mUtf8[1]);
+      } catch {
+        filename = mUtf8[1];
+      }
+    } else if (mPlain?.[1]) {
+      filename = mPlain[1];
+    }
+    const blob = await res.blob();
+    const objUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = objUrl;
+    a.download = filename;
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.setTimeout(() => URL.revokeObjectURL(objUrl), 5000);
+    return true;
+  } catch (e) {
+    err(e);
+    return false;
+  }
 }
 
 /** Whether one AI feature is on for this person (reactive to the global master switch). */

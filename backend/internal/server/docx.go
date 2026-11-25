@@ -952,7 +952,13 @@ func (w *docxWriter) cover(c docxCover) {
 	w.b.WriteString(`</w:tc></w:tr></w:tbl>`)
 
 	// Generous vertical space above left-aligned corporate manual title.
-	eyebrow := firstNonEmptyStr(project, org)
+	// Avoid duplicating project text if it was already rendered in the top brand band.
+	eyebrow := ""
+	if project == "" && org != "" {
+		eyebrow = org
+	} else if project != "" && org != "" && org != project {
+		eyebrow = org
+	}
 	if eyebrow != "" {
 		fmt.Fprintf(&w.b, `<w:p><w:pPr><w:spacing w:before="1300" w:after="100"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="22"/><w:color w:val="%s"/></w:rPr><w:t xml:space="preserve">%s</w:t></w:r></w:p>`, th.Primary, esc(eyebrow))
 	} else {

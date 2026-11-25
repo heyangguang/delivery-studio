@@ -277,7 +277,7 @@ func resolveReportSigner(rawUser string, meta docMeta, role, lang string) string
 		if !isGenericSystemUser(raw) {
 			return raw
 		}
-		return firstNonEmptyStr(strings.TrimSpace(meta.Author), strings.TrimSpace(meta.Confirmer), tr(lang, "交付负责人", "Delivery Lead"))
+		return tr(lang, "交付负责人", "Delivery Lead")
 	case "author":
 		if strings.TrimSpace(meta.Author) != "" {
 			return strings.TrimSpace(meta.Author)
@@ -610,7 +610,11 @@ func topology(b *docBuilder, p *mwpack.Plan, langOpt ...string) {
 		}
 		note := ""
 		if inst.Auto {
-			note = tr(lang, "自动配套组件：", "Auto-provisioned companion: ") + mwpack.TranslateCatalogText(lang, inst.AutoReason)
+			if strings.TrimSpace(inst.AutoReason) != "" {
+				note = tr(lang, "自动配套组件：", "Auto-provisioned companion: ") + mwpack.TranslateCatalogText(lang, inst.AutoReason)
+			} else {
+				note = tr(lang, "伴生支撑组件", "Companion component")
+			}
 		}
 		rows = append(rows, []string{inst.ID, mwpack.TranslateCatalogText(lang, inst.Title) + " " + inst.Version, place, note})
 	}
@@ -1015,8 +1019,23 @@ func (s *storeServer) buildImportedBaselineDoc(f clusterFacts, first storeJob) *
 		if len(rows) > 0 {
 			b.table([]string{tr(lang, "基线项", "Baseline Field"), tr(lang, "配置基线", "Recorded Value")}, rows)
 		}
-		if meta.Notes != "" {
-			b.note(tr(lang, "架构补充说明：", "Architecture Notes: ") + meta.Notes)
+		if strings.TrimSpace(meta.Notes) != "" {
+			rawLines := strings.Split(strings.ReplaceAll(strings.TrimSpace(meta.Notes), "\r\n", "\n"), "\n")
+			var bulletItems []string
+			for _, ln := range rawLines {
+				t := strings.TrimSpace(ln)
+				t = strings.TrimLeft(t, "•-*· ")
+				t = strings.TrimSpace(t)
+				if t != "" {
+					bulletItems = append(bulletItems, t)
+				}
+			}
+			if len(bulletItems) > 1 {
+				b.h(2, tr(lang, "架构补充说明", "Architecture Notes"))
+				b.list(bulletItems)
+			} else if len(bulletItems) == 1 {
+				b.note(tr(lang, "架构补充说明：", "Architecture Notes: ") + bulletItems[0])
+			}
 		}
 	}
 	b.h(2, tr(lang, "3.1 关键运行参数", "3.1 Key Parameters"))
@@ -1091,10 +1110,36 @@ func (s *storeServer) buildKT(f clusterFacts) *clusterDoc {
 		b.h(2, tr(lang, "2.1 端口", "2.1 Ports"))
 		b.table([]string{tr(lang, "实例", "Instance"), tr(lang, "用途", "Purpose"), tr(lang, "端口", "Port"), tr(lang, "主机节点", "Hosts")}, rows)
 		b.h(2, tr(lang, "2.2 交付资产与凭据位置", "2.2 Deployment Assets & Credentials"))
-		b.list([]string{
-			tr(lang, "自动化部署工程位于控制节点 "+f.Plan.Controller+" 的 "+f.Plan.RuntimeRoot()+"/projects/"+f.Plan.ProjectName()+" 目录。", "Automation project resides on controller "+f.Plan.Controller+" under "+f.Plan.RuntimeRoot()+"/projects/"+f.Plan.ProjectName()+"."),
-			tr(lang, "敏感凭据存放于项目 secrets/ 受控目录（仅限 root 权限访问），本文档已做脱敏处理，交接时请同步完成访问权限移交。", "Credentials are stored in the project's secrets/ directory (root-only permissions) and redacted from this document; verify authorized access during handover."),
-		})
+		if f.Current.DeliveryMode == "imported" && f.Plan.Dep != nil && f.Plan.Dep.Imported != nil {
+			im := f.Plan.Dep.Imported
+			var assetItems []string
+			assetItems = append(assetItems, tr(lang,
+				"本集群为存量生产环境纳管集群，沿用主机既有运行目录与系统服务，未生成平台初始部署工程目录。",
+				"This cluster is an imported existing environment using its original host paths and services (no platform initial-deployment directory).",
+			))
+			if len(im.ConfigPaths) > 0 {
+				assetItems = append(assetItems, tr(lang, "配置文件路径：", "Configuration paths: ")+strings.Join(im.ConfigPaths, "、"))
+			}
+			if len(im.DataDirs) > 0 {
+				assetItems = append(assetItems, tr(lang, "数据目录：", "Data directories: ")+strings.Join(im.DataDirs, "、"))
+			}
+			if len(im.LogDirs) > 0 {
+				assetItems = append(assetItems, tr(lang, "日志目录：", "Log directories: ")+strings.Join(im.LogDirs, "、"))
+			}
+			if len(im.ServiceUnits) > 0 {
+				assetItems = append(assetItems, tr(lang, "托管服务单元：", "Service units: ")+strings.Join(im.ServiceUnits, "、"))
+			}
+			assetItems = append(assetItems, tr(lang,
+				"数据库/组件访问凭据由现场运维凭据库或主机受控配置维护，本文档已做脱敏处理，交接时请同步核实权限移交。",
+				"Component credentials are managed via existing on-site vault/host configurations and redacted here; verify authorized access during handover.",
+			))
+			b.list(assetItems)
+		} else {
+			b.list([]string{
+				tr(lang, "自动化部署工程位于控制节点 "+f.Plan.Controller+" 的 "+f.Plan.RuntimeRoot()+"/projects/"+f.Plan.ProjectName()+" 目录。", "Automation project resides on controller "+f.Plan.Controller+" under "+f.Plan.RuntimeRoot()+"/projects/"+f.Plan.ProjectName()+"."),
+				tr(lang, "敏感凭据存放于项目 secrets/ 受控目录（仅限 root 权限访问），本文档已做脱敏处理，交接时请同步完成访问权限移交。", "Credentials are stored in the project's secrets/ directory (root-only permissions) and redacted from this document; verify authorized access during handover."),
+			})
+		}
 	}
 	ops := 0
 	if f.Plan != nil {
@@ -1584,7 +1629,13 @@ func (s *storeServer) buildDoc(f clusterFacts, id string) (*clusterDoc, bool) {
 		}
 		d.Sections++
 		if sec, ok := saved.Sections[b.Key]; ok && strings.TrimSpace(sec.Text) != "" {
-			b.Text, b.Source, b.Confirmed, b.By, b.At = sec.Text, sec.Source, sec.Confirmed, formatSectionBy(sec.By, f.Meta, f.Lang), sec.At
+			txt := sec.Text
+			if d.Kind == "change" && b.Key == "signoff" {
+				signer := resolveReportSigner(sec.By, f.Meta, "confirmer", f.Lang)
+				txt = strings.ReplaceAll(txt, "本方案已由 admin ", "本方案已由 "+signer+" ")
+				txt = strings.ReplaceAll(txt, "in staging by admin.", "in staging by "+signer+".")
+			}
+			b.Text, b.Source, b.Confirmed, b.By, b.At = txt, sec.Source, sec.Confirmed, formatSectionBy(sec.By, f.Meta, f.Lang), sec.At
 			if sec.Source == "ai" && !sec.Confirmed {
 				d.Drafts++
 			}
@@ -1792,11 +1843,24 @@ func (s *storeServer) handleReportSummary(w http.ResponseWriter, r *http.Request
 	lang := wLang(w)
 	rs := s.reportSettingsFor(lang)
 	th := themeOf(rs.Theme)
+	themeName := th.Name
+	if isEnLang(lang) {
+		switch th.ID {
+		case "teal":
+			themeName = "Teal Standard"
+		case "navy":
+			themeName = "Classic Navy"
+		case "indigo":
+			themeName = "Tech Indigo"
+		case "slate":
+			themeName = "Graphite Slate"
+		}
+	}
 	s.writeJSON(w, 200, map[string]any{
 		"use_template": rs.UseTemplate,
 		"template":     rs.Template,
 		"theme":        th.ID,
-		"theme_name":   th.Name,
+		"theme_name":   themeName,
 		"org":          rs.Org,
 		"doc_version":  firstNonEmptyStr(rs.DocVersion, "V1.0"),
 		"has_banner":   rs.Banner != "",

@@ -57,22 +57,25 @@ type importHostInput struct {
 }
 
 type baselineGap struct {
-	ID          string `json:"id"`
-	Severity    string `json:"severity"` // high | medium | low
-	Category    string `json:"category"`
-	Title       string `json:"title"`
-	Detail      string `json:"detail"`
-	ProbeAction string `json:"probe_action"`
-	Selected    bool   `json:"selected"`
-	Source      string `json:"source,omitempty"` // rule | ai
+	ID           string `json:"id"`
+	Severity     string `json:"severity"` // high | medium | low
+	Category     string `json:"category"`
+	Title        string `json:"title"`
+	Detail       string `json:"detail"`
+	ProbeAction  string `json:"probe_action"`
+	Selected     bool   `json:"selected"`
+	Source       string `json:"source,omitempty"`        // rule | ai
+	ManualTarget string `json:"manual_target,omitempty"` // endpoints | paths | params
+	DismissHint  string `json:"dismiss_hint,omitempty"`  // why host-side probing may not apply
 }
 
 type baselineHealth struct {
-	Score   int           `json:"score"`
-	Passed  int           `json:"passed"`
-	Total   int           `json:"total"`
-	Summary string        `json:"summary"`
-	Gaps    []baselineGap `json:"gaps"`
+	Score         int           `json:"score"`
+	Passed        int           `json:"passed"`
+	Total         int           `json:"total"`
+	Summary       string        `json:"summary"`
+	Gaps          []baselineGap `json:"gaps"`
+	DismissedGaps []baselineGap `json:"dismissed_gaps,omitempty"`
 }
 
 type importClusterReq struct {
@@ -101,6 +104,7 @@ type importClusterReq struct {
 	Params              map[string]any             `json:"params,omitempty"`
 	Packages            []mwpack.ImportedPkg       `json:"packages,omitempty"`
 	Notes               string                     `json:"notes,omitempty"`
+	DismissedGaps       []string                   `json:"dismissed_gaps,omitempty"`
 	LastProbedAt        string                     `json:"last_probed_at,omitempty"`
 	Health              *baselineHealth            `json:"health,omitempty"`
 }
@@ -420,15 +424,32 @@ func analyzeImportedBaselineHealth(compID, displayName string, req importCluster
 		return false
 	}
 
-	var gaps []baselineGap
+	dismissedSet := map[string]bool{}
+	for _, raw := range req.DismissedGaps {
+		if id := strings.ToLower(strings.TrimSpace(raw)); id != "" {
+			dismissedSet[id] = true
+		}
+	}
+
+	gaps := []baselineGap{}
+	var dismissed []baselineGap
 	total := 0
 	passed := 0
 	check := func(ok bool, gap baselineGap) {
-		total++
 		if ok {
+			total++
 			passed++
 			return
 		}
+		if dismissedSet[strings.ToLower(strings.TrimSpace(gap.ID))] {
+			if gap.Source == "" {
+				gap.Source = "rule"
+			}
+			gap.Selected = false
+			dismissed = append(dismissed, gap)
+			return
+		}
+		total++
 		gaps = append(gaps, gap)
 	}
 
@@ -470,7 +491,8 @@ func analyzeImportedBaselineHealth(compID, displayName string, req importCluster
 			fmt.Sprintf("只读定位 %s 主配置文件、真实数据目录与日志落盘路径", dname),
 			fmt.Sprintf("Read-only lookup of %s config file, active data dir, and log dir", dname),
 		),
-		Selected: true,
+		Selected:     true,
+		ManualTarget: "paths",
 	})
 
 	// 2. Key runtime parameters baseline
@@ -496,7 +518,8 @@ func analyzeImportedBaselineHealth(compID, displayName string, req importCluster
 			fmt.Sprintf("只读采集 %s 核心生效运行参数（脱敏过滤口令）", dname),
 			fmt.Sprintf("Read-only query of active %s parameters (secrets redacted)", dname),
 		),
-		Selected: true,
+		Selected:     true,
+		ManualTarget: "params",
 	})
 
 	// 3. Backup & recovery baseline (for stateful / DB workloads)
@@ -519,6 +542,7 @@ func analyzeImportedBaselineHealth(compID, displayName string, req importCluster
 			Detail:      backupDetail,
 			ProbeAction: backupAction,
 			Selected:    true,
+			DismissHint: tr(lang, "若备份由外部存储快照或云平台统一托管（不在主机侧），可点「无需探测」关闭", "If backups are managed externally by cloud/storage snapshots, dismiss this item"),
 		})
 	}
 
@@ -547,20 +571,37 @@ func analyzeImportedBaselineHealth(compID, displayName string, req importCluster
 	}
 
 	// 5. Access endpoint & HA failover routing verification
-	hasProxyOrVIP := hasCompanion("haproxy") || hasCompanion("keepalived") || hasCompanion("nginx") || hasCompanion("pgbouncer") || hasCompanion("proxysql") || hasCompanion("maxscale") || hasCompanion("obproxy")
-	unverifiedVIP := strings.Contains(notesLower, "未见其监听") || strings.Contains(notesLower, "疑为 vip") || strings.Contains(notesLower, "待确认 vip")
-	epOK := len(req.Endpoints) > 0 && !unverifiedVIP && (len(req.Hosts) <= 1 || hasProxyOrVIP)
+	// External load balancers (F5 / Cloud ELB / SLB / EIP / DNS / VIP) are configured upstream of Linux hosts
+	// and cannot be probed on the OS. Once at least one valid endpoint is already recorded (and not solely an
+	// unverified host-side VIP guess), treat the endpoint baseline as satisfied rather than falsely demanding
+	// host-local HAProxy/Keepalived probing.
+	hasValidEndpoint := false
+	hasCuratedExternalEP := false
+	for _, ep := range req.Endpoints {
+		if strings.TrimSpace(ep.Address) == "" {
+			continue
+		}
+		hasValidEndpoint = true
+		n := strings.ToLower(strings.TrimSpace(ep.Name))
+		if n == "eip" || n == "f5" || n == "elb" || n == "slb" || n == "alb" || n == "nlb" || n == "clb" || n == "lvs" || n == "vip" || n == "lb" || n == "dns" || n == "domain" || n == "writer" || n == "readwrite" || n == "rw" {
+			hasCuratedExternalEP = true
+		}
+	}
+	unverifiedVIP := (strings.Contains(notesLower, "未见其监听") || strings.Contains(notesLower, "疑为 vip") || strings.Contains(notesLower, "待确认 vip")) && !hasCuratedExternalEP
+	epOK := hasValidEndpoint && !unverifiedVIP
 	check(epOK, baselineGap{
 		ID:       "endpoint",
 		Severity: "medium",
 		Category: tr(lang, "访问入口", "Endpoints & HA"),
 		Title:    tr(lang, "统一访问入口 / VIP 承载与切换机制待核实", "Access Endpoint / VIP Routing & Failover Unverified"),
-		Detail:   tr(lang, "核清业务读写入口实际挂载在 VIP、LB 还是直连节点，确保主备切换演练期间流量切换可控。", "Verify whether the read/write endpoint terminates on a VIP, load balancer, or direct host for safe failover."),
+		Detail:   tr(lang, "核清业务读写入口实际挂载在外部 F5/云 LB/VIP 还是主机代理，便于主备切换演练期间评估流量切换。", "Clarify whether read/write traffic enters via upstream F5/Cloud LB/VIP or host proxy for safe failover."),
 		ProbeAction: tr(lang,
-			"只读核查网卡 VIP 绑定（ip -br addr）、端口监听与代理/Keepalived 配置",
-			"Read-only inspection of VIP bindings (ip -br addr), listening sockets, and proxy/Keepalived config",
+			"若在主机侧部署 Keepalived/HAProxy，可只读核查网卡 VIP 绑定与代理配置",
+			"If using host-side Keepalived/HAProxy, inspect local VIP bindings and proxy config",
 		),
-		Selected: unverifiedVIP || len(req.Endpoints) == 0,
+		Selected:     false,
+		ManualTarget: "endpoints",
+		DismissHint:  tr(lang, "前端 VIP / F5 / 云 LB / EIP 配置在网络侧，主机脚本无法探测，可直接手工填写或点「无需探测」关闭", "Frontend VIP / F5 / Cloud LB / EIP lives upstream of hosts — fill manually or dismiss"),
 	})
 
 	// 6. TLS encryption & access control security baseline
@@ -576,7 +617,8 @@ func analyzeImportedBaselineHealth(compID, displayName string, req importCluster
 			"只读检查 TLS/SSL 开关、证书到期时间与脱敏后的访问控制规则",
 			"Read-only check of TLS/SSL flags, cert expiry dates, and redacted access rules",
 		),
-		Selected: false,
+		Selected:    false,
+		DismissHint: tr(lang, "若内网隔离环境按策略未启用 TLS，可点「无需探测」关闭", "If TLS is intentionally disabled in an isolated VPC, dismiss this item"),
 	})
 
 	// 7. Exact version, OS detail & CVE package inventory
@@ -636,21 +678,27 @@ func analyzeImportedBaselineHealth(compID, displayName string, req importCluster
 		score = passed * 100 / total
 	}
 	summary := tr(lang,
-		fmt.Sprintf("对照标准生产交付基线已达标 %d/%d 项，可直接使用；如有变动可随时发起增量核验。", passed, total),
+		fmt.Sprintf("标准基线已全部齐备（%d/%d），可直接使用；如需抽查特定运行状态可随时按需发起只读探针。", passed, total),
 		fmt.Sprintf("Baseline meets %d/%d standard production checks; ready for rehearsal and reporting.", passed, total),
 	)
-	if len(gaps) > 0 {
+	if len(gaps) == 0 && len(dismissed) > 0 {
 		summary = tr(lang,
-			fmt.Sprintf("对照标准生产基线已齐备 %d/%d 项，识别出 %d 项待补采缺口；勾选后可让 AI 一键生成专项 100%% 只读探针补齐。", passed, total, len(gaps)),
-			fmt.Sprintf("Baseline covers %d/%d standard checks with %d gap(s); select items to generate a targeted 100%% read-only AI probe.", passed, total, len(gaps)),
+			fmt.Sprintf("适用基线项已全部齐备（%d/%d），已按现场架构忽略 %d 项无需主机侧探测的条目。", passed, total, len(dismissed)),
+			fmt.Sprintf("Applicable baseline checks complete (%d/%d); %d non-host item(s) dismissed.", passed, total, len(dismissed)),
+		)
+	} else if len(gaps) > 0 {
+		summary = tr(lang,
+			fmt.Sprintf("对照标准生产基线已齐备 %d/%d 项，识别出 %d 项待确认缺口；可按需勾选生成只读探针，对不在主机侧的项目也可直接忽略。", passed, total, len(gaps)),
+			fmt.Sprintf("Baseline covers %d/%d checks with %d gap(s); select items to generate a read-only probe, or dismiss non-host items.", passed, total, len(gaps)),
 		)
 	}
 	return baselineHealth{
-		Score:   score,
-		Passed:  passed,
-		Total:   total,
-		Summary: summary,
-		Gaps:    gaps,
+		Score:         score,
+		Passed:        passed,
+		Total:         total,
+		Summary:       summary,
+		Gaps:          gaps,
+		DismissedGaps: dismissed,
 	}
 }
 
@@ -866,9 +914,10 @@ func (s *storeServer) loadImportedBaselineReq(user, clusterID, lang string) (*im
 		DataDirs:     meta.DataDirs,
 		LogDirs:      meta.LogDirs,
 		Params:       params,
-		Packages:     meta.Packages,
-		Notes:        meta.Notes,
-		LastProbedAt: meta.LastProbedAt,
+		Packages:      meta.Packages,
+		Notes:         meta.Notes,
+		DismissedGaps: append([]string(nil), meta.DismissedGaps...),
+		LastProbedAt:  meta.LastProbedAt,
 	}
 	h := analyzeImportedBaselineHealth(compID, req.DisplayName, *req, lang)
 	req.Health = &h
@@ -1331,6 +1380,12 @@ func (s *storeServer) importDiagnoseGapsHandler(w http.ResponseWriter, r *http.R
 	if len(baseHealth.Gaps) > 0 {
 		prompt.WriteString("\n固定规则已经检出的缺口（请勿重复，仅补充更有针对性的遗漏项）：\n")
 		for _, g := range baseHealth.Gaps {
+			fmt.Fprintf(&prompt, "- [%s] %s\n", g.Category, g.Title)
+		}
+	}
+	if len(baseHealth.DismissedGaps) > 0 {
+		prompt.WriteString("\n工程师已明确忽略/关闭的维度（不在主机侧或无需探测，严禁再次推荐相同或近似项）：\n")
+		for _, g := range baseHealth.DismissedGaps {
 			fmt.Fprintf(&prompt, "- [%s] %s\n", g.Category, g.Title)
 		}
 	}
@@ -3203,6 +3258,7 @@ func buildImportedDeployment(cat *mwpack.Catalog, req importClusterReq, user, no
 		Companions:        normCompanions,
 		Packages:          pkgs,
 		Notes:             strings.TrimSpace(req.Notes),
+		DismissedGaps:     cleanSlice(req.DismissedGaps),
 		LastProbedAt:      strings.TrimSpace(req.LastProbedAt),
 		BaselineUpdatedAt: now,
 		BaselineUpdatedBy: user,
@@ -3645,6 +3701,7 @@ func (s *storeServer) handleClusterBaseline(w http.ResponseWriter, r *http.Reque
 			Params:              params,
 			Packages:            meta.Packages,
 			Notes:               meta.Notes,
+			DismissedGaps:       append([]string(nil), meta.DismissedGaps...),
 			LastProbedAt:        meta.LastProbedAt,
 		}
 		h := analyzeImportedBaselineHealth(compID, outReq.DisplayName, outReq, wLang(w))
@@ -3670,6 +3727,9 @@ func (s *storeServer) handleClusterBaseline(w http.ResponseWriter, r *http.Reque
 			}
 			if req.LastProbedAt == "" {
 				req.LastProbedAt = dep.Imported.LastProbedAt
+			}
+			if req.DismissedGaps == nil && len(dep.Imported.DismissedGaps) > 0 {
+				req.DismissedGaps = append([]string(nil), dep.Imported.DismissedGaps...)
 			}
 		}
 		now := nowStamp()
@@ -3717,6 +3777,89 @@ func (s *storeServer) handleClusterBaseline(w http.ResponseWriter, r *http.Reque
 	default:
 		s.fail(w, 405, "方法不允许")
 	}
+}
+
+// handleClusterBaselineGaps persists immediate dismiss/restore actions for baseline probe gaps
+// (e.g. dismissing host-side VIP/F5 checks when traffic routing lives upstream of Linux hosts).
+func (s *storeServer) handleClusterBaselineGaps(w http.ResponseWriter, r *http.Request, session storeSession, f clusterFacts) {
+	if r.Method != "POST" {
+		s.fail(w, 405, "方法不允许")
+		return
+	}
+	if !s.need(w, session.User, "delivery.create") {
+		return
+	}
+	dep := s.readSpec(f.Current.ID)
+	if dep == nil || (dep.DeliveryMode != "imported" && f.Current.DeliveryMode != "imported") {
+		s.fail(w, 400, "仅存量纳管集群支持管理基线补采项")
+		return
+	}
+	var req struct {
+		Action string `json:"action"` // dismiss | restore
+		GapID  string `json:"gap_id"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 32<<10)).Decode(&req); err != nil {
+		s.fail(w, 400, "请求参数无法解析")
+		return
+	}
+	action := strings.ToLower(strings.TrimSpace(req.Action))
+	gapID := strings.ToLower(strings.TrimSpace(req.GapID))
+	if gapID == "" || (action != "dismiss" && action != "restore") {
+		s.fail(w, 400, "请指定有效的操作类型（dismiss / restore）与缺口标识")
+		return
+	}
+
+	s.jobPersistMu.Lock()
+	dep = s.readSpec(f.Current.ID)
+	if dep == nil {
+		s.jobPersistMu.Unlock()
+		s.fail(w, 404, "未找到该集群基线配置")
+		return
+	}
+	if dep.Imported == nil {
+		dep.Imported = &mwpack.ImportedMeta{}
+	}
+	var next []string
+	seen := map[string]bool{}
+	for _, raw := range dep.Imported.DismissedGaps {
+		id := strings.ToLower(strings.TrimSpace(raw))
+		if id == "" || seen[id] {
+			continue
+		}
+		if action == "restore" && id == gapID {
+			continue
+		}
+		seen[id] = true
+		next = append(next, id)
+	}
+	if action == "dismiss" && !seen[gapID] {
+		next = append(next, gapID)
+	}
+	now := nowStamp()
+	dep.Imported.DismissedGaps = next
+	dep.Imported.BaselineUpdatedAt = now
+	dep.Imported.BaselineUpdatedBy = session.User
+	plan := mwpack.SolveImported(s.plat.cat(), dep)
+	if err := writeImportedPlanFiles(s.jobDir(f.Current.ID), dep, plan); err != nil {
+		s.jobPersistMu.Unlock()
+		s.fail(w, 500, "保存基线忽略状态失败："+err.Error())
+		return
+	}
+	s.invalidateJobCaches(f.Current.ID)
+	s.jobPersistMu.Unlock()
+
+	s.auditReq(r, "cluster-baseline-gaps-update", session.User, fmt.Sprintf("%s %s=%s", f.ID, action, gapID))
+	lang := wLang(w)
+	updatedReq, _ := s.loadImportedBaselineReq(session.User, f.ID, lang)
+	var health *baselineHealth
+	if updatedReq != nil {
+		health = updatedReq.Health
+	}
+	s.writeJSON(w, 200, map[string]any{
+		"cluster_id":     f.ID,
+		"dismissed_gaps": next,
+		"health":         health,
+	})
 }
 
 var (

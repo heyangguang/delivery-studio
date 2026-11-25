@@ -733,6 +733,75 @@ func TestImportedBaselineGapDiagnosisAndReadOnlyGapProbe(t *testing.T) {
 	if !foundAIGap {
 		t.Fatalf("merged health missing AI-discovered gap: %+v", gResp.Health.Gaps)
 	}
+
+	// 4. External curated endpoint (e.g. EIP/F5/writer) on multi-node cluster without host-side proxy must NOT trigger false-positive endpoint gap.
+	for _, g := range got.Health.Gaps {
+		if g.ID == "endpoint" {
+			t.Fatalf("curated external endpoint on multi-node cluster should not trigger false-positive endpoint gap: %+v", g)
+		}
+	}
+
+	// 5. Verify POST /api/clusters/{id}/baseline/gaps RBAC + persistent dismiss & restore.
+	if perm, ok := routePermFor("POST", "/api/clusters/pg-gap-check/baseline/gaps"); !ok || perm != "delivery.create" {
+		t.Fatalf("expected delivery.create perm for baseline/gaps, got ok=%v perm=%q", ok, perm)
+	}
+	dw := storeRequest(s, "POST", "/api/clusters/pg-gap-check/baseline/gaps",
+		strings.NewReader(`{"action":"dismiss","gap_id":"backup"}`), alice, csrf)
+	if dw.Code != 200 {
+		t.Fatalf("POST dismiss gap failed: %d %s", dw.Code, dw.Body.String())
+	}
+	var dResp struct {
+		DismissedGaps []string       `json:"dismissed_gaps"`
+		Health        baselineHealth `json:"health"`
+	}
+	if err := json.Unmarshal(dw.Body.Bytes(), &dResp); err != nil {
+		t.Fatal(err)
+	}
+	if len(dResp.DismissedGaps) != 1 || dResp.DismissedGaps[0] != "backup" {
+		t.Fatalf("expected dismissed_gaps=[backup], got %+v", dResp.DismissedGaps)
+	}
+	for _, g := range dResp.Health.Gaps {
+		if g.ID == "backup" {
+			t.Fatalf("dismissed gap 'backup' must not appear in active gaps: %+v", dResp.Health.Gaps)
+		}
+	}
+	if len(dResp.Health.DismissedGaps) != 1 || dResp.Health.DismissedGaps[0].ID != "backup" {
+		t.Fatalf("expected backup in health.dismissed_gaps, got %+v", dResp.Health.DismissedGaps)
+	}
+
+	// Restore the dismissed gap and verify it returns to active gaps.
+	rw := storeRequest(s, "POST", "/api/clusters/pg-gap-check/baseline/gaps",
+		strings.NewReader(`{"action":"restore","gap_id":"backup"}`), alice, csrf)
+	if rw.Code != 200 {
+		t.Fatalf("POST restore gap failed: %d %s", rw.Code, rw.Body.String())
+	}
+	var rResp struct {
+		DismissedGaps []string       `json:"dismissed_gaps"`
+		Health        baselineHealth `json:"health"`
+	}
+	_ = json.Unmarshal(rw.Body.Bytes(), &rResp)
+	restored := false
+	for _, g := range rResp.Health.Gaps {
+		if g.ID == "backup" {
+			restored = true
+		}
+	}
+	if len(rResp.DismissedGaps) != 0 || !restored {
+		t.Fatalf("expected backup restored into active gaps, got dismissed=%+v gaps=%+v", rResp.DismissedGaps, rResp.Health.Gaps)
+	}
+
+	// Dismissing every remaining gap must serialize health.gaps as [] (not JSON null) so the UI never crashes on .length.
+	allDismissed := analyzeImportedBaselineHealth("postgresql", "PostgreSQL", importClusterReq{
+		DismissedGaps: []string{"paths", "params", "backup", "endpoint", "security", "packages"},
+	}, "zh")
+	if allDismissed.Gaps == nil || len(allDismissed.Gaps) != 0 {
+		t.Fatalf("expected non-nil empty slice for zero active gaps, got %#v", allDismissed.Gaps)
+	}
+	if rawJSON, err := json.Marshal(allDismissed); err != nil {
+		t.Fatal(err)
+	} else if !strings.Contains(string(rawJSON), `"gaps":[]`) {
+		t.Fatalf("expected JSON \"gaps\":[] when all gaps are dismissed, got: %s", string(rawJSON))
+	}
 }
 
 func TestImportNegatedCompanionAndDistroSchemaVersion(t *testing.T) {

@@ -668,11 +668,13 @@ export function RolloutProgressStrip({
   currentClusterId,
   boardOverride,
   onOpenPropagate,
+  compact = false,
 }: {
   rehearsal: ChangeRehearsal;
   currentClusterId: string;
   boardOverride?: RolloutBoardResponse | null;
   onOpenPropagate?: () => void;
+  compact?: boolean;
 }) {
   useLang();
   const src = rehearsal.source;
@@ -719,6 +721,82 @@ export function RolloutProgressStrip({
       : null;
   const previewMembers = board?.members ? board.members.slice(0, 2) : [];
   const extraMembers = board?.members ? Math.max(0, board.members.length - previewMembers.length) : 0;
+
+  if (compact) {
+    const dotCls = allApplied
+      ? "is-ok"
+      : board && board.attention > 0
+        ? "is-warn"
+        : "is-run";
+    return (
+      <>
+        <button
+          type="button"
+          className={`ro-inline-pill${allApplied ? " is-done" : ""}${board && board.attention > 0 ? " is-warn" : ""}`}
+          onClick={() => setDrawerOpen(true)}
+          title={
+            src.is_origin
+              ? bi(
+                  "当前为跨集群推广样板源，点击打开推广看板",
+                  "Pilot source for cross-cluster rollout — click to open Rollout Board",
+                )
+              : bi(
+                  `引用自样板集群 ${src.origin_cluster_id}，点击打开跨集群推广看板`,
+                  `Promoted from ${src.origin_cluster_id} — click to open Rollout Board`,
+                )
+          }
+        >
+          <i className={`ro-strip-dot ${dotCls}`} aria-hidden />
+          <span className="ro-inline-origin">
+            {src.is_origin ? (
+              bi("样板源", "Pilot")
+            ) : (
+              <>
+                {bi("引用自", "From")}{" "}
+                <code className="mono">{src.origin_cluster_id}</code>
+              </>
+            )}
+          </span>
+          {board && board.total > 0 && (
+            <>
+              <span className="ro-inline-sep" aria-hidden>
+                ·
+              </span>
+              <span className="ro-inline-bar" aria-hidden>
+                <i style={{ width: `${pct}%` }} />
+              </span>
+              <span className="ro-inline-stat num">
+                {bi(
+                  `${board.applied}/${board.total} 已落地`,
+                  `${board.applied}/${board.total} applied`,
+                )}
+              </span>
+              {board.attention > 0 && (
+                <span className="ro-inline-warn num">
+                  <IconExclamationCircle />
+                  {board.attention}
+                </span>
+              )}
+            </>
+          )}
+          <IconRight className="ro-inline-chev" aria-hidden />
+        </button>
+
+        <RolloutBoardDrawer
+          rolloutId={rolloutId}
+          visible={drawerOpen}
+          currentClusterId={currentClusterId}
+          initialBoard={board}
+          onClose={() => setDrawerOpen(false)}
+          onAddMore={
+            src.is_origin && rehearsal.applied && !rehearsal.voided && onOpenPropagate
+              ? () => onOpenPropagate()
+              : undefined
+          }
+        />
+      </>
+    );
+  }
 
   return (
     <>

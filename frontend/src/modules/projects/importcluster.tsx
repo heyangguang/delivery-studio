@@ -36,8 +36,8 @@ import { ModelPicker, useModelPick } from "../ai/modelpick";
 import { ThinkLevel, useAIOptions } from "../ai/aitools";
 import { api, can, copy } from "../../shared/shared";
 import {
-  ClusterAutomationDrawer,
   LiveExecLogCard,
+  navigateToClusterAutomation,
   pollRehearsalExecTask,
 } from "../automation/rehearsal-automation";
 import type {
@@ -3367,7 +3367,6 @@ export function ImportedBaselineModal({
   const [step2Open, setStep2Open] = useState(false);
   const [step3Open, setStep3Open] = useState(false);
   const [autoSummary, setAutoSummary] = useState<ClusterAutomationSummary | null>(null);
-  const [autoDrawerOpen, setAutoDrawerOpen] = useState(false);
   const [autoProbeBusy, setAutoProbeBusy] = useState(false);
   const [autoProbeTask, setAutoProbeTask] = useState<RehearsalExecTask | null>(null);
   const autoProbeAbortRef = useRef<AbortController | null>(null);
@@ -4383,9 +4382,12 @@ export function ImportedBaselineModal({
                               size="small"
                               type="outline"
                               icon={<IconThunderbolt style={{ color: "var(--warn)" }} />}
-                              onClick={() => setAutoDrawerOpen(true)}
+                              onClick={() => {
+                                onClose();
+                                navigateToClusterAutomation(cluster.id);
+                              }}
                             >
-                              {bi("配置自动采集", "Setup Automation")}
+                              {bi("前往配置自动采集", "Configure Automation")}
                             </Button>
                           )
                         )}
@@ -4850,12 +4852,6 @@ export function ImportedBaselineModal({
           {lang ? null : null}
         </div>
       )}
-      <ClusterAutomationDrawer
-        visible={autoDrawerOpen}
-        clusterId={cluster.id}
-        onClose={() => setAutoDrawerOpen(false)}
-        onChanged={setAutoSummary}
-      />
     </Drawer>
   );
 }

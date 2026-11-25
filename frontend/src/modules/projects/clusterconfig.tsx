@@ -60,14 +60,15 @@ import {
   type EffectiveClusterChange,
 } from "./topology";
 import { bi, useLang, withLang } from "../../app/i18n";
+import type { ClusterAutomationSummary } from "../automation/execution-types";
 import "./clusterconfig.css";
 
 const LazyImportedBaselineModal = lazySubView(() =>
   import("./importcluster").then((m) => ({ default: m.ImportedBaselineModal })),
 );
-const LazyClusterAutomationDrawer = lazySubView(() =>
+const LazyClusterAutomationPanel = lazySubView(() =>
   import("../automation/rehearsal-automation").then((m) => ({
-    default: m.ClusterAutomationDrawer,
+    default: m.ClusterAutomationPanel,
   })),
 );
 
@@ -732,6 +733,19 @@ function ConfigRecord({
     (i.ports || []).map((port) => ({ i, port })),
   );
 
+  const [autoSummary, setAutoSummary] = useState<ClusterAutomationSummary | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    setAutoSummary(null);
+    api<ClusterAutomationSummary>(`/api/clusters/${encodeURIComponent(c.id)}/automation`)
+      .then((res) => alive && setAutoSummary(res))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [c.id]);
+
   const nav = [
     {
       id: "hosts",
@@ -743,6 +757,7 @@ function ConfigRecord({
       icon: <IconDesktop />,
       changeCount: 0,
       embedded: false,
+      statusDot: "" as "" | "is-ok" | "is-warn",
     },
     {
       id: "access",
@@ -754,6 +769,34 @@ function ConfigRecord({
       icon: <IconLink />,
       changeCount: 0,
       embedded: false,
+      statusDot: "" as "" | "is-ok" | "is-warn",
+    },
+    {
+      id: "automation",
+      label: bi("自动化执行", "Automation"),
+      note: autoSummary?.config.enabled
+        ? autoSummary.ready
+          ? bi("通道就绪", "Ready")
+          : bi("通道待处理", "Needs Attention")
+        : bi("未开启 · 手工模式", "Off · Manual"),
+      icon: (
+        <IconThunderbolt
+          style={{
+            color: autoSummary?.config.enabled
+              ? autoSummary.ready
+                ? "var(--ok)"
+                : "var(--warn)"
+              : undefined,
+          }}
+        />
+      ),
+      changeCount: 0,
+      embedded: false,
+      statusDot: (autoSummary?.config.enabled
+        ? autoSummary.ready
+          ? "is-ok"
+          : "is-warn"
+        : "") as "" | "is-ok" | "is-warn",
     },
     ...displayInstances.map((i) => ({
       id: `component:${i.id}`,
@@ -771,6 +814,7 @@ function ConfigRecord({
       ),
       changeCount: (effectiveByInstance.get(i.id) || []).length,
       embedded: Boolean(i.embeddedFrom),
+      statusDot: "" as "" | "is-ok" | "is-warn",
     })),
     {
       id: "spec",
@@ -779,6 +823,7 @@ function ConfigRecord({
       icon: <IconFile />,
       changeCount: 0,
       embedded: false,
+      statusDot: "" as "" | "is-ok" | "is-warn",
     },
   ];
   const selected = section || "hosts";
@@ -1088,7 +1133,6 @@ function ConfigRecord({
   }, [instance, allInstanceRows]);
 
   const [baselineEdit, setBaselineEdit] = useState<null | "edit" | "probe">(null);
-  const [autoDrawerOpen, setAutoDrawerOpen] = useState(false);
 
   useEffect(() => {
     if (!historyOpen) return;
@@ -1109,16 +1153,6 @@ function ConfigRecord({
           </span>
         </div>
         <div className="cx-source-actions">
-          {(can("delivery.execute") || can("execution.manage")) && (
-            <Button
-              size="small"
-              icon={<IconThunderbolt style={{ color: "var(--warn)" }} />}
-              onMouseEnter={() => void import("../automation/rehearsal-automation")}
-              onClick={() => setAutoDrawerOpen(true)}
-            >
-              {bi("自动化接入", "Automation")}
-            </Button>
-          )}
           {isImported && can("delivery.create") && (
             <>
               <Button
@@ -1394,11 +1428,17 @@ function ConfigRecord({
                     aria-current={
                       !tokens.length && selected === n.id ? "page" : undefined
                     }
+                    onMouseEnter={
+                      n.id === "automation"
+                        ? () => void import("../automation/rehearsal-automation")
+                        : undefined
+                    }
                     onClick={() => navigate(n.id)}
                     title={`${n.label} · ${n.note}`}
                   >
                     {n.icon}
                     <span>{n.label}</span>
+                    {n.statusDot && <i className={`cx-nav-auto-dot ${n.statusDot}`} aria-hidden />}
                     {n.changeCount > 0 && (
                       <em
                         className="cx-nav-chg-cnt num"
@@ -1505,7 +1545,7 @@ function ConfigRecord({
               ) : (
                 <section className="cx-section" key={selected}>
                   {/* Non-component section heading (Hosts / Access / Spec) */}
-                  {!instance && (
+                  {!instance && selected !== "automation" && (
                     <div className="cx-heading">
                       <div>
                         <h2>{active.label}</h2>
@@ -1538,6 +1578,16 @@ function ConfigRecord({
                         )}
                       </div>
                     </div>
+                  )}
+
+                  {/* Section: Automation Execution (Single Source of Truth) */}
+                  {selected === "automation" && (
+                    <React.Suspense fallback={<Skeleton animation text={{ rows: 6 }} />}>
+                      <LazyClusterAutomationPanel
+                        clusterId={c.id}
+                        onChanged={setAutoSummary}
+                      />
+                    </React.Suspense>
                   )}
 
                   {/* Section: Hosts & Roles */}
@@ -2663,15 +2713,6 @@ function ConfigRecord({
               }
               setRetry((x) => x + 1);
             }}
-          />
-        </React.Suspense>
-      )}
-      {autoDrawerOpen && (
-        <React.Suspense fallback={null}>
-          <LazyClusterAutomationDrawer
-            visible
-            clusterId={c.id}
-            onClose={() => setAutoDrawerOpen(false)}
           />
         </React.Suspense>
       )}

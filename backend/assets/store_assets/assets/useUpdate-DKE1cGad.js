@@ -1,0 +1,1 @@
+import{or as e,rr as t}from"./router-ty_7XCXO.js";var n=e(t());function r(e,t){t===void 0&&(t=[]);var r=(0,n.useRef)(!1);(0,n.useEffect)(function(){r.current?e():r.current=!0},t)}export{r as t};

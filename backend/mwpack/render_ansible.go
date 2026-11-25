@@ -149,7 +149,7 @@ func Render(p *Plan, opt RenderOptions) (*Bundle, error) {
 		return nil, fmt.Errorf("生成步骤依赖清单：%w", err)
 	}
 	b := &Bundle{Plan: p, Steps: st, Project: map[string]File{}, Docs: map[string][]byte{}}
-	put := func(name string, data []byte, mode int64) { b.Project[name] = File{data, mode} }
+	put := func(name string, data []byte, mode int64) { b.Project[name] = File{normalizeLinuxText(data), mode} }
 
 	// Artifacts must exist and carry a digest.
 	arts := p.Artifacts()
@@ -171,7 +171,7 @@ func Render(p *Plan, opt RenderOptions) (*Bundle, error) {
 	put("ansible.cfg", []byte(ansibleCfg), 0o600)
 	// every run leaves a full log under logs/ (see platform/files/mw_log.py)
 	if cb, err := fs.ReadFile(p.Cat.platformFS(), "files/mw_log.py"); err == nil {
-		put("callback_plugins/mw_log.py", cb, 0o600)
+		put("callback_plugins/mw_log.py", normalizeLinuxText(cb), 0o600)
 	}
 	inv, err := inventoryDoc(p)
 	if err != nil {
@@ -233,6 +233,15 @@ func Render(p *Plan, opt RenderOptions) (*Bundle, error) {
 
 var tlsFiles = []string{"server.crt", "server.key", "ca.crt"}
 
+// normalizeLinuxText converts Windows CRLF line endings to Unix LF for Linux-bound scripts,
+// playbooks, templates, and configs (skipping binary blobs containing NUL bytes).
+func normalizeLinuxText(b []byte) []byte {
+	if len(b) == 0 || bytes.IndexByte(b, 0) >= 0 {
+		return b
+	}
+	return bytes.ReplaceAll(b, []byte("\r\n"), []byte("\n"))
+}
+
 // SSHTrustScript is the root SSH trust helper that every machine package carries.
 func SSHTrustScript(catalog ...*Catalog) []byte {
 	var c *Catalog
@@ -240,7 +249,7 @@ func SSHTrustScript(catalog ...*Catalog) []byte {
 		c = catalog[0]
 	}
 	b, _ := fs.ReadFile(c.platformFS(), "files/setup-root-ssh-trust.sh")
-	return b
+	return normalizeLinuxText(b)
 }
 
 const ansibleCfg = `[defaults]
@@ -738,6 +747,7 @@ func copyRoles(p *Plan, b *Bundle) error {
 			if err != nil {
 				return err
 			}
+			data = normalizeLinuxText(data)
 			rel := strings.TrimPrefix(fp, root+"/")
 			mode := int64(0o600)
 			if strings.HasSuffix(fp, ".sh") || strings.HasSuffix(fp, ".py") {

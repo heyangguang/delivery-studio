@@ -56,6 +56,24 @@ type importHostInput struct {
 	Disk string `json:"disk,omitempty"`
 }
 
+type baselineGap struct {
+	ID          string `json:"id"`
+	Severity    string `json:"severity"` // high | medium | low
+	Category    string `json:"category"`
+	Title       string `json:"title"`
+	Detail      string `json:"detail"`
+	ProbeAction string `json:"probe_action"`
+	Selected    bool   `json:"selected"`
+}
+
+type baselineHealth struct {
+	Score   int           `json:"score"`
+	Passed  int           `json:"passed"`
+	Total   int           `json:"total"`
+	Summary string        `json:"summary"`
+	Gaps    []baselineGap `json:"gaps"`
+}
+
 type importClusterReq struct {
 	ID                  string                     `json:"id"`
 	Title               string                     `json:"title,omitempty"`
@@ -83,25 +101,34 @@ type importClusterReq struct {
 	Packages            []mwpack.ImportedPkg       `json:"packages,omitempty"`
 	Notes               string                     `json:"notes,omitempty"`
 	LastProbedAt        string                     `json:"last_probed_at,omitempty"`
+	Health              *baselineHealth            `json:"health,omitempty"`
 }
 
 type importProbeScriptReq struct {
+	ClusterID    string   `json:"cluster_id,omitempty"`
 	Component    string   `json:"component"`
 	DisplayName  string   `json:"display_name,omitempty"`
 	DeployMethod string   `json:"deploy_method,omitempty"`
 	ServiceUnits []string `json:"service_units,omitempty"`
 	ConfigPaths  []string `json:"config_paths,omitempty"`
+	MissingGaps  []string `json:"missing_gaps,omitempty"`
+	Mode         string   `json:"mode,omitempty"` // gap | full
 	UseAI        bool     `json:"use_ai,omitempty"`
 	Focus        string   `json:"focus,omitempty"`
+	Model        string   `json:"model,omitempty"`
+	Think        string   `json:"think,omitempty"`
 }
 
 type importParseReq struct {
+	ClusterID   string   `json:"cluster_id,omitempty"`
 	Component   string   `json:"component,omitempty"`
 	DisplayName string   `json:"display_name,omitempty"`
 	SourceKind  string   `json:"source_kind,omitempty"` // probe | ai_doc
 	Text        string   `json:"text,omitempty"`
 	Images      []string `json:"images,omitempty"`
 	UseAI       *bool    `json:"use_ai,omitempty"`
+	Model       string   `json:"model,omitempty"`
+	Think       string   `json:"think,omitempty"`
 }
 
 type importParseDraft struct {
@@ -353,6 +380,492 @@ var (
 	rePGDataFlag            = regexp.MustCompile(`postgres[^\n]*\s-D\s+(/[a-zA-Z0-9._/@+-]+)`)
 )
 
+func analyzeImportedBaselineHealth(compID, displayName string, req importClusterReq, lang string) baselineHealth {
+	cid := mwpack.NormalizeImportComponentID(firstNonEmptyStr(compID, req.Component, displayName))
+	dname := firstNonEmptyStr(strings.TrimSpace(displayName), req.DisplayName, cid)
+	notesLower := strings.ToLower(req.Notes)
+	hasCompanion := func(target string) bool {
+		t := mwpack.NormalizeCompanionID(target)
+		for _, cm := range req.Companions {
+			if mwpack.NormalizeCompanionID(cm.Component) == t {
+				return true
+			}
+		}
+		return false
+	}
+	hasParamKey := func(subs ...string) bool {
+		for k := range req.Params {
+			kl := strings.ToLower(k)
+			for _, sub := range subs {
+				if strings.Contains(kl, sub) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	hasPathMatching := func(paths []string, subs ...string) bool {
+		for _, p := range paths {
+			pl := strings.ToLower(p)
+			for _, sub := range subs {
+				if strings.Contains(pl, sub) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+
+	var gaps []baselineGap
+	total := 0
+	passed := 0
+	check := func(ok bool, gap baselineGap) {
+		total++
+		if ok {
+			passed++
+			return
+		}
+		gaps = append(gaps, gap)
+	}
+
+	// 1. Core config / data / log path baseline
+	pathsOK := len(req.ConfigPaths) > 0 && len(req.DataDirs) > 0 && len(req.LogDirs) > 0
+	pathMissingParts := []string{}
+	if cid == "postgresql" {
+		hasPGCfg := hasPathMatching(req.ConfigPaths, "patroni", "postgresql", "postgres")
+		hasPGData := hasPathMatching(req.DataDirs, "pg", "postgres", "postgresql")
+		hasPGLog := hasPathMatching(req.LogDirs, "pg", "postgres", "postgresql")
+		pathsOK = hasPGCfg && hasPGData && hasPGLog
+		if !hasPGCfg {
+			pathMissingParts = append(pathMissingParts, tr(lang, "Patroni/PG 配置文件路径", "Patroni/PG config path"))
+		}
+		if !hasPGData {
+			pathMissingParts = append(pathMissingParts, tr(lang, "PostgreSQL 数据目录", "PostgreSQL data dir"))
+		}
+		if !hasPGLog {
+			pathMissingParts = append(pathMissingParts, tr(lang, "PostgreSQL 日志目录", "PostgreSQL log dir"))
+		}
+	} else {
+		if len(req.ConfigPaths) == 0 {
+			pathMissingParts = append(pathMissingParts, tr(lang, "配置文件路径", "config path"))
+		}
+		if len(req.DataDirs) == 0 {
+			pathMissingParts = append(pathMissingParts, tr(lang, "数据目录", "data directory"))
+		}
+		if len(req.LogDirs) == 0 {
+			pathMissingParts = append(pathMissingParts, tr(lang, "日志目录", "log directory"))
+		}
+	}
+	check(pathsOK, baselineGap{
+		ID:       "paths",
+		Severity: "high",
+		Category: tr(lang, "路径基线", "Paths"),
+		Title:    tr(lang, fmt.Sprintf("缺少%s", strings.Join(pathMissingParts, "、")), fmt.Sprintf("Missing %s", strings.Join(pathMissingParts, ", "))),
+		Detail:   tr(lang, "后续变更演练、日志巡检与故障恢复预案均依赖准确的运行目录与主配置路径。", "Change rehearsal, log inspection, and recovery runbooks require exact config/data/log paths."),
+		ProbeAction: tr(lang,
+			fmt.Sprintf("只读定位 %s 主配置文件、真实数据目录与日志落盘路径", dname),
+			fmt.Sprintf("Read-only lookup of %s config file, active data dir, and log dir", dname),
+		),
+		Selected: true,
+	})
+
+	// 2. Key runtime parameters baseline
+	paramsOK := len(req.Params) >= 3
+	paramHint := tr(lang, "关键运行参数与连接/内存配置", "core runtime tuning parameters")
+	switch cid {
+	case "postgresql":
+		paramHint = "max_connections / shared_buffers / wal_level / archive_mode / synchronous_commit"
+	case "mysql", "mariadb":
+		paramHint = "innodb_buffer_pool_size / max_connections / binlog_format / gtid_mode"
+	case "redis", "valkey":
+		paramHint = "maxmemory / maxmemory-policy / appendonly / save / timeout"
+	case "etcd":
+		paramHint = "quota-backend-bytes / auto-compaction-retention / snapshot-count"
+	}
+	check(paramsOK, baselineGap{
+		ID:       "params",
+		Severity: "high",
+		Category: tr(lang, "核心参数", "Parameters"),
+		Title:    tr(lang, fmt.Sprintf("核心运行参数不足（当前仅 %d 项）", len(req.Params)), fmt.Sprintf("Core runtime parameters incomplete (%d recorded)", len(req.Params))),
+		Detail:   tr(lang, fmt.Sprintf("对照标准生产基线，建议采集 %s 等关键参数用于调优与漂移比对。", paramHint), fmt.Sprintf("Standard baseline expects key parameters such as %s for tuning and drift comparison.", paramHint)),
+		ProbeAction: tr(lang,
+			fmt.Sprintf("只读采集 %s 核心生效运行参数（脱敏过滤口令）", dname),
+			fmt.Sprintf("Read-only query of active %s parameters (secrets redacted)", dname),
+		),
+		Selected: true,
+	})
+
+	// 3. Backup & recovery baseline (for stateful / DB workloads)
+	isStateful := cid == "postgresql" || cid == "mysql" || cid == "mariadb" || cid == "redis" || cid == "valkey" || cid == "etcd" || cid == "mongodb" || cid == "clickhouse" || cid == "oceanbase" || cid == "kingbase" || cid == "dm"
+	if isStateful {
+		hasBackupEvidence := hasParamKey("backup", "stanza", "archive_command", "repo", "rdb", "aof") ||
+			(strings.Contains(notesLower, "stanza") && !strings.Contains(notesLower, "未发现") && !strings.Contains(notesLower, "无 stanza") && !strings.Contains(notesLower, "未配置")) ||
+			(strings.Contains(notesLower, "全量备份") && !strings.Contains(notesLower, "无备份"))
+		backupDetail := tr(lang, "尚未核实集群备份仓库、定时调度及最近一次成功备份记录。", "Backup repository, schedule, and latest verified backup status are not yet confirmed.")
+		backupAction := tr(lang, "只读核查备份工具配置、定时任务及归档/快照状态", "Read-only check of backup config, cron schedules, and archive/snapshot status")
+		if cid == "postgresql" && hasCompanion("pgbackrest") {
+			backupDetail = tr(lang, "已检测到 pgBackRest，但尚未核验 Stanza、备份仓库位置、归档模式与最近备份记录。", "pgBackRest is installed, but stanza, repo path, archive_mode, and latest backup remain unverified.")
+			backupAction = tr(lang, "只读执行 pgbackrest info、检查 /etc/pgbackrest* 配置与定时备份任务", "Read-only pgbackrest info, /etc/pgbackrest* check, and backup cron inspection")
+		}
+		check(hasBackupEvidence, baselineGap{
+			ID:          "backup",
+			Severity:    "high",
+			Category:    tr(lang, "备份容灾", "Backup & DR"),
+			Title:       tr(lang, "备份仓库与恢复闭环状态待核验", "Backup Repository & Recovery Status Unverified"),
+			Detail:      backupDetail,
+			ProbeAction: backupAction,
+			Selected:    true,
+		})
+	}
+
+	// 4. Multi-node peer host verification
+	if len(req.Hosts) > 1 {
+		singleNodeOnly := strings.Contains(notesLower, "仅在") && (strings.Contains(notesLower, "执行") || strings.Contains(notesLower, "采集"))
+		missingDisk := 0
+		for _, h := range req.Hosts {
+			if strings.TrimSpace(h.Disk) == "" {
+				missingDisk++
+			}
+		}
+		peersOK := !singleNodeOnly && missingDisk == 0
+		check(peersOK, baselineGap{
+			ID:       "peers",
+			Severity: "medium",
+			Category: tr(lang, "全节点覆盖", "Peer Coverage"),
+			Title:    tr(lang, fmt.Sprintf("多节点集群（%d 台）部分从库/成员节点待核验", len(req.Hosts)), fmt.Sprintf("Peer nodes in %d-host cluster pending local verification", len(req.Hosts))),
+			Detail:   tr(lang, "当前部分节点信息来自成员表推断或缺少独立数据盘/本地服务状态核验，建议在备节点补跑轻量只读探针。", "Some peer nodes were inferred from cluster membership or lack local disk/service verification."),
+			ProbeAction: tr(lang,
+				"只读核验备节点 systemd 服务状态、磁盘挂载与主从/DCS 成员健康",
+				"Read-only verification of peer systemd services, disk mounts, and member health",
+			),
+			Selected: true,
+		})
+	}
+
+	// 5. Access endpoint & HA failover routing verification
+	hasProxyOrVIP := hasCompanion("haproxy") || hasCompanion("keepalived") || hasCompanion("nginx") || hasCompanion("pgbouncer") || hasCompanion("proxysql") || hasCompanion("maxscale") || hasCompanion("obproxy")
+	unverifiedVIP := strings.Contains(notesLower, "未见其监听") || strings.Contains(notesLower, "疑为 vip") || strings.Contains(notesLower, "待确认 vip")
+	epOK := len(req.Endpoints) > 0 && !unverifiedVIP && (len(req.Hosts) <= 1 || hasProxyOrVIP)
+	check(epOK, baselineGap{
+		ID:       "endpoint",
+		Severity: "medium",
+		Category: tr(lang, "访问入口", "Endpoints & HA"),
+		Title:    tr(lang, "统一访问入口 / VIP 承载与切换机制待核实", "Access Endpoint / VIP Routing & Failover Unverified"),
+		Detail:   tr(lang, "核清业务读写入口实际挂载在 VIP、LB 还是直连节点，确保主备切换演练期间流量切换可控。", "Verify whether the read/write endpoint terminates on a VIP, load balancer, or direct host for safe failover."),
+		ProbeAction: tr(lang,
+			"只读核查网卡 VIP 绑定（ip -br addr）、端口监听与代理/Keepalived 配置",
+			"Read-only inspection of VIP bindings (ip -br addr), listening sockets, and proxy/Keepalived config",
+		),
+		Selected: unverifiedVIP || len(req.Endpoints) == 0,
+	})
+
+	// 6. TLS encryption & access control security baseline
+	secOK := hasParamKey("ssl", "tls", "hba", "requirepass", "cert") ||
+		(strings.Contains(notesLower, "tls") && !strings.Contains(notesLower, "未启用") && !strings.Contains(notesLower, "http 协议"))
+	check(secOK, baselineGap{
+		ID:       "security",
+		Severity: "medium",
+		Category: tr(lang, "安全合规", "Security & TLS"),
+		Title:    tr(lang, "TLS 传输加密、证书有效期与访问控制策略待核验", "TLS Encryption, Cert Expiry & Access Policy Unverified"),
+		Detail:   tr(lang, "采集 TLS 开关、证书到期时间及白名单策略（如 pg_hba / etcd 协议），完善集群安全审计基线。", "Collect TLS status, certificate expiry dates, and access rules (secrets redacted) for security audit."),
+		ProbeAction: tr(lang,
+			"只读检查 TLS/SSL 开关、证书到期时间与脱敏后的访问控制规则",
+			"Read-only check of TLS/SSL flags, cert expiry dates, and redacted access rules",
+		),
+		Selected: false,
+	})
+
+	// 7. Exact version, OS detail & CVE package inventory
+	pkgsOK := strings.TrimSpace(req.ExactVersion) != "" && strings.TrimSpace(req.OSDetail) != "" && len(req.Packages) >= 2
+	check(pkgsOK, baselineGap{
+		ID:       "packages",
+		Severity: "high",
+		Category: tr(lang, "版本与 CVE", "Versions & CVE"),
+		Title:    tr(lang, "精确版本、OS 详情或软件包清单不完整", "Exact Version, OS Detail, or Package Inventory Incomplete"),
+		Detail:   tr(lang, "精确版本号与 dpkg/rpm 软件清单直接决定离线 CVE 漏洞扫描与升级路径准确性。", "Exact versions and dpkg/rpm inventories drive offline CVE scanning and upgrade planning."),
+		ProbeAction: tr(lang,
+			"只读采集 OS 发行版、内核、组件精确版本及 dpkg/rpm 软件包清单",
+			"Read-only collection of OS release, kernel, exact versions, and dpkg/rpm packages",
+		),
+		Selected: true,
+	})
+
+	// 8. Monitoring exporter versions (low severity enhancement)
+	missingExpVer := false
+	for _, cm := range req.Companions {
+		if (cm.Kind == "os_component" || cm.Kind == "monitoring" || strings.Contains(strings.ToLower(cm.Component), "exporter")) && strings.TrimSpace(cm.Version) == "" {
+			missingExpVer = true
+			break
+		}
+	}
+	if missingExpVer {
+		check(false, baselineGap{
+			ID:       "monitoring",
+			Severity: "low",
+			Category: tr(lang, "监控组件", "Monitoring"),
+			Title:    tr(lang, "已发现 Exporter 监控采集组件缺少精确版本信息", "Detected Exporter Component Missing Exact Version"),
+			Detail:   tr(lang, "补采 node_exporter / 中间件 exporter 版本与监听端口，完善组件栈档案与 CVE 纳管。", "Collect exporter binary version and listening port to complete stack inventory."),
+			ProbeAction: tr(lang,
+				"只读执行 *_exporter --version 并核对监听端口",
+				"Read-only *_exporter --version and listening port verification",
+			),
+			Selected: false,
+		})
+	} else {
+		total++
+		passed++
+	}
+
+	// Sort gaps: high -> medium -> low
+	sevRank := map[string]int{"high": 0, "medium": 1, "low": 2}
+	sort.SliceStable(gaps, func(i, j int) bool {
+		return sevRank[gaps[i].Severity] < sevRank[gaps[j].Severity]
+	})
+
+	score := 100
+	if total > 0 {
+		score = passed * 100 / total
+	}
+	summary := tr(lang,
+		fmt.Sprintf("对照标准生产交付基线已达标 %d/%d 项，可直接使用；如有变动可随时发起增量核验。", passed, total),
+		fmt.Sprintf("Baseline meets %d/%d standard production checks; ready for rehearsal and reporting.", passed, total),
+	)
+	if len(gaps) > 0 {
+		summary = tr(lang,
+			fmt.Sprintf("对照标准生产基线已齐备 %d/%d 项，识别出 %d 项待补采缺口；勾选后可让 AI 一键生成专项 100%% 只读探针补齐。", passed, total, len(gaps)),
+			fmt.Sprintf("Baseline covers %d/%d standard checks with %d gap(s); select items to generate a targeted 100%% read-only AI probe.", passed, total, len(gaps)),
+		)
+	}
+	return baselineHealth{
+		Score:   score,
+		Passed:  passed,
+		Total:   total,
+		Summary: summary,
+		Gaps:    gaps,
+	}
+}
+
+// buildGapReadOnlyProbeScript constructs a lean, deterministic, 100% read-only Bash probe strictly targeting
+// the selected baseline gaps so customers only run minimal safe checks instead of bloated full scripts.
+func buildGapReadOnlyProbeScript(req importProbeScriptReq, existing *importClusterReq, selectedGaps []baselineGap, lang string) (string, string, []string, string) {
+	compID := mwpack.NormalizeImportComponentID(firstNonEmptyStr(req.Component, req.DisplayName))
+	preset, _ := mwpack.LookupImportPreset(compID)
+	displayName := firstNonEmptyStr(strings.TrimSpace(req.DisplayName), preset.Name, compID)
+
+	want := map[string]bool{}
+	var covered []string
+	for _, g := range selectedGaps {
+		want[g.ID] = true
+		covered = append(covered, g.Category)
+	}
+	for _, rawID := range req.MissingGaps {
+		id := strings.ToLower(strings.TrimSpace(rawID))
+		if id != "" {
+			want[id] = true
+		}
+	}
+	if len(want) == 0 {
+		want["paths"] = true
+		want["params"] = true
+	}
+
+	var sb strings.Builder
+	sb.WriteString("#!/usr/bin/env bash\n")
+	sb.WriteString("# ============================================================================\n")
+	sb.WriteString(fmt.Sprintf("# Kyndryl Delivery Studio - Targeted Gap Read-Only Probe (%s)\n", displayName))
+	sb.WriteString("# 100% READ-ONLY IRON LAW: zero writes, zero restarts, zero mutations, secrets redacted.\n")
+	if len(covered) > 0 {
+		sb.WriteString(fmt.Sprintf("# Target Gaps: %s\n", strings.Join(covered, ", ")))
+	}
+	sb.WriteString("# ============================================================================\n")
+	sb.WriteString("set -u\nexport LC_ALL=C\n\n")
+	sb.WriteString("echo '=== MW_IMPORT_BEGIN ==='\n")
+	sb.WriteString(fmt.Sprintf("echo 'PROBE_COMPONENT=%s'\n", compID))
+	sb.WriteString("echo 'PROBE_MODE=gap_enrichment'\n")
+	sb.WriteString("echo 'PROBE_TIME='\"$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || date)\"\n\n")
+
+	sb.WriteString("echo '=== MW_IMPORT_HOST ==='\n")
+	sb.WriteString("echo \"HOSTNAME=$(hostname -s 2>/dev/null || hostname)\"\n")
+	sb.WriteString("echo \"IPS=$(hostname -I 2>/dev/null | xargs)\"\n")
+
+	if want["peers"] {
+		sb.WriteString("echo \"KERNEL=$(uname -sr)\"\n")
+		sb.WriteString("df -hT -x tmpfs -x devtmpfs -x overlay 2>/dev/null | head -n 15 || true\n")
+		sb.WriteString("command -v lsblk >/dev/null 2>&1 && lsblk -dn -o NAME,SIZE,TYPE,MOUNTPOINT 2>/dev/null | head -n 12 || true\n")
+	}
+
+	if want["endpoint"] || want["monitoring"] {
+		sb.WriteString("\necho '=== MW_IMPORT_PORTS ==='\n")
+		sb.WriteString("command -v ss >/dev/null 2>&1 && ss -tlnp 2>/dev/null | head -n 35 || true\n")
+		if want["endpoint"] {
+			sb.WriteString("command -v ip >/dev/null 2>&1 && ip -br addr 2>/dev/null | head -n 15 || true\n")
+			sb.WriteString("for f in /etc/keepalived/keepalived.conf /etc/haproxy/haproxy.cfg; do [ -r \"$f\" ] && { echo \"# file: $f\"; grep -viE '^\\s*(#|\\s*$|.*pass|.*secret|.*auth_pass)' \"$f\" | head -n 35; }; done || true\n")
+		}
+	}
+
+	sb.WriteString("\necho '=== MW_IMPORT_MIDDLEWARE ==='\n")
+	switch compID {
+	case "postgresql":
+		if want["paths"] {
+			sb.WriteString("# Locate PostgreSQL data dir, config file, log dir & Patroni YAML (read-only)\n")
+			sb.WriteString("ps -ef 2>/dev/null | grep -iE 'postgres|patroni' | grep -v grep | head -n 12 || true\n")
+			sb.WriteString("systemctl cat patroni patroni.service postgresql postgresql.service 2>/dev/null | grep -iE 'ExecStart|Environment|PGDATA' | head -n 15 || true\n")
+			sb.WriteString("for f in /etc/patroni/patroni.yml /etc/patroni/patroni.yaml /etc/patroni.yml /etc/patroni.yaml; do [ -r \"$f\" ] && { echo \"# file: $f\"; grep -viE '^\\s*(#|\\s*$|.*pass|.*secret|.*token|.*key)' \"$f\" | head -n 45; }; done || true\n")
+		}
+		if want["params"] {
+			sb.WriteString("# Core PostgreSQL runtime parameters (read-only SQL / config)\n")
+			sb.WriteString("if command -v psql >/dev/null 2>&1; then\n")
+			sb.WriteString("  sudo -n -u postgres psql -Atc \"SELECT name||'='||setting||COALESCE(' '||unit,'') FROM pg_settings WHERE name IN ('data_directory','config_file','hba_file','log_directory','max_connections','shared_buffers','effective_cache_size','work_mem','wal_level','archive_mode','archive_command','synchronous_commit','synchronous_standby_names','ssl') ORDER BY name;\" 2>/dev/null || true\n")
+			sb.WriteString("fi\n")
+		}
+		if want["backup"] {
+			sb.WriteString("# Backup & WAL archive status (read-only)\n")
+			sb.WriteString("command -v pgbackrest >/dev/null 2>&1 && { pgbackrest version 2>/dev/null; sudo -n -u postgres pgbackrest info 2>/dev/null || pgbackrest info 2>/dev/null; } || true\n")
+			sb.WriteString("for f in /etc/pgbackrest/pgbackrest.conf /etc/pgbackrest.conf; do [ -r \"$f\" ] && { echo \"# file: $f\"; grep -viE '^\\s*(#|\\s*$|.*pass|.*secret|.*key|.*token)' \"$f\" | head -n 30; }; done || true\n")
+			sb.WriteString("ls -1 /etc/cron.d /var/spool/cron/crontabs 2>/dev/null | head -n 15 || true\n")
+		}
+		if want["peers"] {
+			sb.WriteString("command -v patronictl >/dev/null 2>&1 && patronictl list 2>/dev/null || true\n")
+			sb.WriteString("systemctl is-active patroni etcd postgresql 2>/dev/null || true\n")
+			sb.WriteString("command -v etcdctl >/dev/null 2>&1 && etcdctl endpoint health 2>/dev/null || true\n")
+		}
+		if want["security"] {
+			sb.WriteString("# TLS certificate expiry & sanitized pg_hba rules (read-only)\n")
+			sb.WriteString("for c in /etc/patroni/*.crt /etc/etcd/*.crt /etc/ssl/certs/*postgres*.crt; do [ -r \"$c\" ] && { echo \"# cert: $c\"; openssl x509 -in \"$c\" -noout -subject -dates 2>/dev/null; }; done || true\n")
+			sb.WriteString("for h in /etc/postgresql/*/*/pg_hba.conf /data/*/pg_hba.conf /var/lib/postgresql/*/*/pg_hba.conf; do [ -r \"$h\" ] && { echo \"# file: $h\"; grep -vE '^\\s*(#|$)' \"$h\" | head -n 25; }; done || true\n")
+		}
+	case "mysql", "mariadb":
+		if want["paths"] || want["params"] {
+			sb.WriteString("ps -ef 2>/dev/null | grep -iE 'mysqld|mariadbd' | grep -v grep | head -n 8 || true\n")
+			sb.WriteString("for f in /etc/my.cnf /etc/mysql/my.cnf /etc/mysql/mysql.conf.d/mysqld.cnf; do [ -r \"$f\" ] && { echo \"# file: $f\"; grep -viE '^\\s*(#|;|\\s*$|.*pass|.*secret|.*key)' \"$f\" | head -n 45; }; done || true\n")
+		}
+		if want["backup"] {
+			sb.WriteString("command -v xtrabackup >/dev/null 2>&1 && xtrabackup --version 2>&1 | head -n 2 || true\n")
+			sb.WriteString("ls -1 /etc/cron.d 2>/dev/null | head -n 15 || true\n")
+		}
+		if want["security"] {
+			sb.WriteString("for c in /etc/mysql/*.pem /var/lib/mysql/server-cert.pem; do [ -r \"$c\" ] && { echo \"# cert: $c\"; openssl x509 -in \"$c\" -noout -subject -dates 2>/dev/null; }; done || true\n")
+		}
+	case "redis", "valkey":
+		if want["paths"] || want["params"] {
+			sb.WriteString("ps -ef 2>/dev/null | grep -iE 'redis|valkey' | grep -v grep | head -n 10 || true\n")
+			sb.WriteString("for f in /etc/redis/redis.conf /etc/redis.conf /etc/redis/sentinel.conf; do [ -r \"$f\" ] && { echo \"# file: $f\"; grep -viE '^\\s*(#|\\s*$|.*pass|.*auth|.*secret)' \"$f\" | head -n 45; }; done || true\n")
+		}
+	default:
+		if strings.TrimSpace(preset.ProbeSnippet) != "" {
+			sb.WriteString(strings.TrimSpace(preset.ProbeSnippet) + "\n")
+		} else {
+			sb.WriteString(fmt.Sprintf("systemctl list-units --type=service --all --no-pager 2>/dev/null | grep -iE '%s' || true\n", regexp.QuoteMeta(compID)))
+			sb.WriteString(fmt.Sprintf("ps -ef 2>/dev/null | grep -iE '%s' | grep -v grep | head -n 15 || true\n", regexp.QuoteMeta(compID)))
+		}
+	}
+
+	if want["monitoring"] || want["peers"] {
+		sb.WriteString("\necho '=== MW_IMPORT_COMPANIONS ==='\n")
+		sb.WriteString("systemctl list-units --type=service --all --no-pager 2>/dev/null | grep -iE 'patroni|etcd|haproxy|keepalived|pgbouncer|sentinel|[a-z0-9_-]*exporter' || true\n")
+		if want["monitoring"] {
+			sb.WriteString("for exp in node_exporter process_exporter postgres_exporter mysqld_exporter redis_exporter haproxy_exporter; do command -v \"$exp\" >/dev/null 2>&1 && \"$exp\" --version 2>&1 | head -n 2; done || true\n")
+		}
+	}
+
+	if want["packages"] {
+		pkgMatch := firstNonEmptyStr(preset.PkgMatch, regexp.QuoteMeta(compID))
+		fullPkgMatch := pkgMatch + "|patroni|etcd|haproxy|keepalived|pgbackrest|pgbouncer|sentinel|exporter"
+		sb.WriteString("\necho '=== MW_IMPORT_OS ==='\n")
+		sb.WriteString("[ -r /etc/os-release ] && grep -E '^(ID|VERSION_ID|PRETTY_NAME)=' /etc/os-release || uname -a\n")
+		sb.WriteString("\necho '=== MW_IMPORT_PACKAGES ==='\n")
+		sb.WriteString("if command -v dpkg-query >/dev/null 2>&1; then\n")
+		sb.WriteString(fmt.Sprintf("  dpkg-query -W -f='${Package}\\t${Version}\\n' 2>/dev/null | grep -iE '%s' | sort -u | head -n 80 || true\n", fullPkgMatch))
+		sb.WriteString("elif command -v rpm >/dev/null 2>&1; then\n")
+		sb.WriteString(fmt.Sprintf("  rpm -qa --qf '%%{NAME}\\t%%{VERSION}-%%{RELEASE}\\n' 2>/dev/null | grep -iE '%s' | sort -u | head -n 80 || true\n", fullPkgMatch))
+		sb.WriteString("fi\n")
+	}
+
+	sb.WriteString("echo '=== MW_IMPORT_END ==='\n")
+	filename := fmt.Sprintf("mw-gap-probe-%s.sh", compID)
+	runHint := tr(lang, "建议在主节点执行（预计耗时 2~3 秒），复制回显粘贴至下方即可自动增量合并基线", "Run on primary node (~2-3s) and paste output below for incremental baseline merge")
+	if want["peers"] && existing != nil && len(existing.Hosts) > 1 {
+		runHint = tr(lang, "建议在主节点及待核验备节点分别执行，可直接拼接多台节点回显一并粘贴", "Run on primary and unverified peer nodes; paste combined outputs below")
+	}
+	return sb.String(), filename, covered, runHint
+}
+
+func (s *storeServer) loadImportedBaselineReq(user, clusterID, lang string) (*importClusterReq, bool) {
+	f, ok := s.clusterFactsFor(user, clusterID)
+	if !ok {
+		return nil, false
+	}
+	dep := s.readSpec(f.Current.ID)
+	if dep == nil || dep.DeliveryMode != "imported" {
+		return nil, false
+	}
+	meta := dep.Imported
+	if meta == nil {
+		meta = &mwpack.ImportedMeta{}
+	}
+	var hosts []importHostInput
+	roleByHost := map[string]string{}
+	compID := f.Current.AppID
+	ver := f.Current.Version
+	var params map[string]any
+	if len(dep.Instances) > 0 {
+		inst := dep.Instances[0]
+		compID = inst.Component
+		ver = inst.Version
+		params = inst.Params
+		for rk, hs := range inst.Placement {
+			for _, hn := range hs {
+				roleByHost[hn] = rk
+			}
+		}
+	}
+	for _, h := range dep.Hosts {
+		hosts = append(hosts, importHostInput{
+			Name: h.Name,
+			IP:   h.IP,
+			Role: firstNonEmptyStr(roleByHost[h.Name], "node"),
+			Disk: h.Disk,
+		})
+	}
+	normEps := make([]mwpack.ImportedEndpoint, len(meta.Endpoints))
+	for i, ep := range meta.Endpoints {
+		ep.Role = normalizeImportEndpointRole(ep.Role)
+		normEps[i] = ep
+	}
+	companions := make([]mwpack.ImportedCompanion, len(meta.Companions))
+	copy(companions, meta.Companions)
+	req := &importClusterReq{
+		ID:           dep.ID,
+		Title:        dep.Title,
+		Component:    compID,
+		DisplayName:  firstNonEmptyStr(meta.DisplayName, f.Current.AppName),
+		Category:     meta.Category,
+		Icon:         meta.Icon,
+		Color:        meta.Color,
+		Version:      ver,
+		ExactVersion: meta.ExactVersion,
+		Platform:     dep.Platform,
+		OSDetail:     meta.OSDetail,
+		SourceKind:   meta.SourceKind,
+		DeployMethod: meta.DeployMethod,
+		ArchSummary:  meta.ArchSummary,
+		Hosts:        hosts,
+		Endpoints:    normEps,
+		Companions:   companions,
+		ServiceUnits: meta.ServiceUnits,
+		ConfigPaths:  meta.ConfigPaths,
+		DataDirs:     meta.DataDirs,
+		LogDirs:      meta.LogDirs,
+		Params:       params,
+		Packages:     meta.Packages,
+		Notes:        meta.Notes,
+		LastProbedAt: meta.LastProbedAt,
+	}
+	h := analyzeImportedBaselineHealth(compID, req.DisplayName, *req, lang)
+	req.Health = &h
+	return req, true
+}
+
 func (s *storeServer) importProbeScriptHandler(w http.ResponseWriter, r *http.Request, session storeSession) {
 	var req importProbeScriptReq
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
@@ -360,76 +873,170 @@ func (s *storeServer) importProbeScriptHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 	lang := wLang(w)
-	baseScript, filename := buildImportProbeScript(req, lang)
+
+	var existing *importClusterReq
+	var selectedGaps []baselineGap
+	if strings.TrimSpace(req.ClusterID) != "" {
+		if ex, ok := s.loadImportedBaselineReq(session.User, strings.TrimSpace(req.ClusterID), lang); ok {
+			existing = ex
+			if req.Component == "" {
+				req.Component = ex.Component
+			}
+			if req.DisplayName == "" {
+				req.DisplayName = ex.DisplayName
+			}
+			if req.DeployMethod == "" {
+				req.DeployMethod = ex.DeployMethod
+			}
+			if len(req.ServiceUnits) == 0 {
+				req.ServiceUnits = ex.ServiceUnits
+			}
+			if len(req.ConfigPaths) == 0 {
+				req.ConfigPaths = ex.ConfigPaths
+			}
+			if ex.Health != nil {
+				wantID := map[string]bool{}
+				for _, g := range req.MissingGaps {
+					wantID[strings.ToLower(strings.TrimSpace(g))] = true
+				}
+				for _, g := range ex.Health.Gaps {
+					if len(wantID) == 0 {
+						if g.Selected {
+							selectedGaps = append(selectedGaps, g)
+						}
+					} else if wantID[g.ID] || wantID[strings.ToLower(g.Title)] {
+						selectedGaps = append(selectedGaps, g)
+					}
+				}
+			}
+		}
+	}
+
+	effMode := strings.ToLower(strings.TrimSpace(req.Mode))
+	if effMode == "" {
+		if len(req.MissingGaps) > 0 || (existing != nil && len(selectedGaps) > 0) {
+			effMode = "gap"
+		} else {
+			effMode = "full"
+		}
+	}
+
+	var baseScript, filename, runHint string
+	var covered []string
+	if effMode == "gap" && (len(selectedGaps) > 0 || len(req.MissingGaps) > 0) {
+		baseScript, filename, covered, runHint = buildGapReadOnlyProbeScript(req, existing, selectedGaps, lang)
+	} else {
+		effMode = "full"
+		baseScript, filename = buildImportProbeScript(req, lang)
+		runHint = tr(lang, "在目标集群节点执行后复制完整回显，粘贴至下方即可识别全部组件与路径", "Run on target node(s) and paste output below to extract full topology & paths")
+	}
+
 	script := baseScript
 	source := "template"
 	aiNote := ""
+	usedModel := ""
 
 	if req.UseAI {
 		if !s.aiStatusFor(session.User).Enabled {
-			aiNote = tr(lang, "未开启 AI 助手，已使用内置标准只读探针", "AI is disabled; using built-in standard read-only probe")
+			aiNote = tr(lang, "未开启 AI 助手，已自动使用 100% 静态只读标准探针", "AI is disabled; using 100% static read-only probe")
 		} else {
 			st := s.aiLoad()
-			providers := st.aiProvidersFor("chat")
+			providers := st.aiProvidersForPick("chat", req.Model)
 			if len(providers) == 0 {
-				providers = st.aiProvidersFor("rehearsal")
+				providers = st.aiProvidersForPick("rehearsal", req.Model)
 			}
 			if len(providers) > 0 && (st.MonthlyLimit <= 0 || s.aiCallsThisMonth(session.User) < st.MonthlyLimit) {
-				aiScript, aiErr := s.aiBuildImportProbeScript(r.Context(), providers[0], session.User, req, baseScript, lang)
+				aiScript, aiErr := s.aiBuildImportProbeScript(r.Context(), providers[0], session.User, req, existing, selectedGaps, effMode, baseScript, lang)
 				if aiErr == nil && strings.TrimSpace(aiScript) != "" {
 					aiSafe, aiWarns := validateReadOnlyProbeScriptLang(aiScript, lang)
 					if aiSafe && len(aiWarns) == 0 {
 						script = aiScript
 						source = "ai"
+						usedModel = providers[0].Model
 					} else {
-						aiNote = tr(lang, "AI 生成脚本未通过静态只读安全门禁，已自动回退标准只读探针", "AI-generated probe failed static read-only gate; fell back to standard probe")
+						aiNote = tr(lang, "AI 生成脚本未通过 100% 静态只读安全门禁，已自动回退已校验的安全只读探针", "AI-generated script failed static read-only gate; fell back to verified read-only probe")
 					}
 				} else if aiErr != nil {
-					aiNote = tr(lang, "AI 定制探针暂不可用，已回退标准只读探针："+aiErr.Error(), "AI probe customization unavailable; fell back to standard probe: "+aiErr.Error())
+					aiNote = tr(lang, "AI 定制探针暂不可用，已回退已校验的安全只读探针："+aiErr.Error(), "AI probe customization unavailable; fell back to verified read-only probe: "+aiErr.Error())
 				}
 			} else {
-				aiNote = tr(lang, "暂无可用 AI 模型或已达月额度，已使用内置标准只读探针", "No AI model available or quota reached; using standard read-only probe")
+				aiNote = tr(lang, "暂无可用 AI 模型或已达月额度，已使用已校验的安全只读探针", "No AI model available or quota reached; using verified read-only probe")
 			}
 		}
 	}
 
 	safe, warns := validateReadOnlyProbeScriptLang(script, lang)
 	s.writeJSON(w, 200, map[string]any{
-		"script":   script,
-		"filename": filename,
-		"safe":     safe,
-		"warnings": nz(warns),
-		"source":   source,
-		"ai_note":  aiNote,
+		"script":       script,
+		"filename":     filename,
+		"safe":         safe,
+		"warnings":     nz(warns),
+		"source":       source,
+		"mode":         effMode,
+		"covered_gaps": nz(covered),
+		"run_hint":     runHint,
+		"model":        usedModel,
+		"ai_note":      aiNote,
 	})
 }
 
-func (s *storeServer) aiBuildImportProbeScript(ctx context.Context, p aiProvider, user string, req importProbeScriptReq, baseScript, lang string) (string, error) {
+func (s *storeServer) aiBuildImportProbeScript(ctx context.Context, p aiProvider, user string, req importProbeScriptReq, existing *importClusterReq, selectedGaps []baselineGap, mode, baseScript, lang string) (string, error) {
 	compID := mwpack.NormalizeImportComponentID(firstNonEmptyStr(req.Component, req.DisplayName))
 	displayName := firstNonEmptyStr(strings.TrimSpace(req.DisplayName), compID)
-	sys := `你是一位企业级中间件与 Linux 基础设施运维专家，负责为「存量集群纳管」编写一份精炼、克制、100% 静态只读的 Bash 采集探针脚本。
-硬性约束（必须全部遵守）：
-1. 【合适且不冗余】脚本控制在 55~95 行左右、单机 2~4 秒内执行完毕；只采集后续集群纳管、变更演练、安全 CVE 体检与交付验收文档真正必用的关键信息（主机/OS/磁盘、监听端口与入口线索、主中间件精确版本与核心参数、真实数据/配置/日志目录、伴生高可用/DCS/备份/代理组件与 OS/中间件 exporter 版本及端口、关键 TLS 证书到期时间、相关软件包清单），禁止堆砌无关内核全量 sysctl 或大文件全量 cat。
-2. 【100% 静态只读与凭据脱敏】严禁任何写操作、重启、修改配置、交互式命令（严禁 su - / vim / systemctl restart / 重定向写入文件）；读取配置时必须用 grep -viE 过滤 pass/secret/token/key/auth 行。
-3. 【保留标准分段标记】必须保留标准回显分段：=== MW_IMPORT_BEGIN ===、=== MW_IMPORT_HOST ===、=== MW_IMPORT_OS ===、=== MW_IMPORT_STORAGE ===、=== MW_IMPORT_PORTS ===、=== MW_IMPORT_HOSTS_FILE ===、=== MW_IMPORT_MIDDLEWARE ===、=== MW_IMPORT_COMPANIONS ===、=== MW_IMPORT_PACKAGES ===、=== MW_IMPORT_END ===。
-4. 只输出纯 Bash 脚本内容（以 #!/usr/bin/env bash 开头），不要输出 Markdown 代码围栏或任何额外解释文字。`
+	sys := `你是一位企业级中间件与 Linux 基础设施运维专家，负责编写一份极简、克制、100% 静态只读的 Bash 采集探针脚本。
+
+最高铁律（违反任何一条脚本都会被安全门禁直接拦截）：
+1. 【100% 绝对只读与零副作用】严禁任何写入、修改、创建/删除文件、输出重定向写入文件（只允许 2>/dev/null 或 >/dev/null）、服务启停/重载（systemctl start/stop/restart/reload）、交互式切用户（严禁 su -，仅允许 sudo -n -u ... 执行只读查询）、修改参数或写 SQL（严禁 INSERT/UPDATE/DELETE/ALTER/DROP）。
+2. 【凭据与密钥强制脱敏】读取任何配置文件或环境变量时，必须用 grep -viE 过滤 pass/secret/token/key/auth/pwd 行，严禁输出口令或私钥明文。
+3. 【精准补采、严禁冗余】若是缺口补采模式，只针对缺失项精准探测（脚本控制在 30~70 行、单机 2~3 秒执行完毕），不要重复大段采集已知信息，也不要堆砌全量 sysctl 或大文件 cat。
+4. 【保留标准分段标记】必须以 #!/usr/bin/env bash 开头，并包含 === MW_IMPORT_BEGIN ===、=== MW_IMPORT_HOST ===、=== MW_IMPORT_MIDDLEWARE === 及 === MW_IMPORT_END ===（按需保留 PORTS / COMPANIONS / PACKAGES 段）。
+5. 只输出纯 Bash 脚本正文，不要输出 Markdown 代码围栏或任何额外解释文字。`
 
 	var prompt strings.Builder
-	fmt.Fprintf(&prompt, "目标主中间件：%s (%s)\n部署形态：%s\n", displayName, compID, firstNonEmptyStr(req.DeployMethod, "systemd"))
-	if len(req.ServiceUnits) > 0 {
-		fmt.Fprintf(&prompt, "已知服务单元线索：%s\n", strings.Join(req.ServiceUnits, ", "))
+	fmt.Fprintf(&prompt, "目标主中间件：%s (%s)\n部署形态：%s\n采集模式：%s\n", displayName, compID, firstNonEmptyStr(req.DeployMethod, "systemd"), mode)
+	if existing != nil {
+		var hNames []string
+		for _, h := range existing.Hosts {
+			hNames = append(hNames, fmt.Sprintf("%s(%s/%s)", h.Name, h.IP, h.Role))
+		}
+		var compNames []string
+		for _, cm := range existing.Companions {
+			compNames = append(compNames, firstNonEmptyStr(cm.DisplayName, cm.Component)+" "+cm.Version)
+		}
+		fmt.Fprintf(&prompt, "\n当前集群已有基线摘要（无需重复冗余采集）：\n- 集群：%s | 精确版本：%s | OS：%s\n- 节点：%s\n- 伴生组件：%s\n- 已知服务：%s\n- 已知配置路径：%s\n- 已知数据目录：%s\n- 已知日志目录：%s\n",
+			existing.ID, firstNonEmptyStr(existing.ExactVersion, existing.Version), firstNonEmptyStr(existing.OSDetail, existing.Platform),
+			strings.Join(hNames, ", "),
+			strings.Join(compNames, ", "),
+			strings.Join(existing.ServiceUnits, ", "),
+			strings.Join(existing.ConfigPaths, ", "),
+			strings.Join(existing.DataDirs, ", "),
+			strings.Join(existing.LogDirs, ", "),
+		)
+	} else {
+		if len(req.ServiceUnits) > 0 {
+			fmt.Fprintf(&prompt, "已知服务单元线索：%s\n", strings.Join(req.ServiceUnits, ", "))
+		}
+		if len(req.ConfigPaths) > 0 {
+			fmt.Fprintf(&prompt, "已知配置文件线索：%s\n", strings.Join(req.ConfigPaths, ", "))
+		}
 	}
-	if len(req.ConfigPaths) > 0 {
-		fmt.Fprintf(&prompt, "已知配置文件线索：%s\n", strings.Join(req.ConfigPaths, ", "))
+	if len(selectedGaps) > 0 {
+		prompt.WriteString("\n本次对照标准基线需重点补采的缺口项（请逐一用精炼 100% 只读命令覆盖）：\n")
+		for _, g := range selectedGaps {
+			fmt.Fprintf(&prompt, "- [%s] %s：%s（建议动作：%s）\n", g.Category, g.Title, g.Detail, g.ProbeAction)
+		}
 	}
 	if strings.TrimSpace(req.Focus) != "" {
-		fmt.Fprintf(&prompt, "用户补充现场特点与重点关注项：%s\n", truncRunes(strings.TrimSpace(req.Focus), 600))
+		fmt.Fprintf(&prompt, "\n工程师额外补充的关注重点：%s\n", truncRunes(strings.TrimSpace(req.Focus), 600))
 	}
-	prompt.WriteString("\n可基于以下标准基线脚本按现场特点精简或补强（保留核心结构，不要膨胀）：\n")
+	prompt.WriteString("\n参考安全基线骨架（请在此基础上按上述缺口精准优化，保持极简与 100% 只读）：\n")
 	prompt.WriteString(baseScript)
 
-	callCtx, cancel := context.WithTimeout(ctx, 40*time.Second)
+	callCtx, cancel := context.WithTimeout(ctx, 50*time.Second)
 	defer cancel()
+	if strings.TrimSpace(req.Think) != "" {
+		callCtx = withEffort(callCtx, strings.TrimSpace(req.Think))
+	}
 	started := time.Now()
 	rep, err := s.aiChat(callCtx, p, []aiMessage{
 		{Role: "system", Content: sys},
@@ -452,7 +1059,6 @@ func (s *storeServer) aiBuildImportProbeScript(ctx context.Context, p aiProvider
 		OK:        true,
 	})
 	out := strings.TrimSpace(rep.Text)
-	// Strip accidental fenced code block wrapper if model emitted one
 	if strings.HasPrefix(out, "```") {
 		if nl := strings.IndexByte(out, '\n'); nl > 0 {
 			out = out[nl+1:]
@@ -504,9 +1110,9 @@ func (s *storeServer) importParseHandler(w http.ResponseWriter, r *http.Request,
 
 	if wantAI && s.aiStatusFor(session.User).Enabled {
 		st := s.aiLoad()
-		providers := st.aiProvidersFor("chat")
+		providers := st.aiProvidersForPick("chat", req.Model)
 		if len(providers) == 0 {
-			providers = st.aiProvidersFor("rehearsal")
+			providers = st.aiProvidersForPick("rehearsal", req.Model)
 		}
 		if len(providers) > 0 && (st.MonthlyLimit <= 0 || s.aiCallsThisMonth(session.User) < st.MonthlyLimit) {
 			p := providers[0]
@@ -626,8 +1232,11 @@ func (s *storeServer) aiExtractImportDraft(ctx context.Context, p aiProvider, us
 		userContent = parts
 	}
 
-	callCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	callCtx, cancel := context.WithTimeout(ctx, 50*time.Second)
 	defer cancel()
+	if strings.TrimSpace(req.Think) != "" {
+		callCtx = withEffort(callCtx, strings.TrimSpace(req.Think))
+	}
 	started := time.Now()
 	rep, err := s.aiChat(callCtx, p, []aiMessage{
 		{Role: "system", Content: sys},
@@ -2467,7 +3076,7 @@ func (s *storeServer) handleClusterBaseline(w http.ResponseWriter, r *http.Reque
 				suggestedCompanions = append(suggestedCompanions, cand)
 			}
 		}
-		s.writeJSON(w, 200, importClusterReq{
+		outReq := importClusterReq{
 			ID:                  dep.ID,
 			Title:               dep.Title,
 			Component:           compID,
@@ -2494,7 +3103,10 @@ func (s *storeServer) handleClusterBaseline(w http.ResponseWriter, r *http.Reque
 			Packages:            meta.Packages,
 			Notes:               meta.Notes,
 			LastProbedAt:        meta.LastProbedAt,
-		})
+		}
+		h := analyzeImportedBaselineHealth(compID, outReq.DisplayName, outReq, wLang(w))
+		outReq.Health = &h
+		s.writeJSON(w, 200, outReq)
 
 	case "PUT":
 		if !s.need(w, session.User, "delivery.create") {

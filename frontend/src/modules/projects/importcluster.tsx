@@ -29,6 +29,8 @@ import {
   IconUpload,
 } from "@arco-design/web-react/icon";
 import { Spark } from "../ai/aichat";
+import { ModelPicker, useModelPick } from "../ai/modelpick";
+import { ThinkLevel, useAIOptions } from "../ai/aitools";
 import { api, copy } from "../../shared/shared";
 import type {
   ClusterView,
@@ -94,6 +96,24 @@ type PresetsResp = {
 type HostRow = { name: string; ip: string; role: string; disk?: string };
 type ParamRow = { key: string; value: string };
 
+type BaselineGap = {
+  id: string;
+  severity: "high" | "medium" | "low";
+  category: string;
+  title: string;
+  detail: string;
+  probe_action: string;
+  selected: boolean;
+};
+
+type BaselineHealth = {
+  score: number;
+  passed: number;
+  total: number;
+  summary: string;
+  gaps: BaselineGap[];
+};
+
 type ImportPayload = {
   id: string;
   component: string;
@@ -120,6 +140,7 @@ type ImportPayload = {
   packages?: ImportedPkg[];
   notes?: string;
   last_probed_at?: string;
+  health?: BaselineHealth;
 };
 
 type ParseResp = {
@@ -550,14 +571,298 @@ const Step1PlatformSelects = React.memo(function Step1PlatformSelects({
   );
 });
 
+function splitNotesToClues(raw: string): string[] {
+  const txt = (raw || "").trim();
+  if (!txt) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (s: string) => {
+    const clean = s
+      .replace(/^\s*(?:[•·\-*]|\d+[.)、])\s*/, "")
+      .replace(/[。；;]+$/, "")
+      .trim();
+    if (!clean) return;
+    const key = clean.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      out.push(clean);
+    }
+  };
+  for (const line of txt.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    // Split dense prose sentences on Chinese full stop (。) without breaking IPs or version numbers (.)
+    if (trimmed.includes("。")) {
+      for (const seg of trimmed.split(/。+/)) {
+        push(seg);
+      }
+    } else {
+      push(trimmed);
+    }
+  }
+  return out;
+}
+
+function joinCluesToNotes(clues: string[]): string {
+  return clues
+    .map((c) => c.trim())
+    .filter(Boolean)
+    .map((c) => `• ${c}`)
+    .join("\n");
+}
+
+function clueCategoryMeta(text: string): { label: string; tone: string } {
+  const low = text.toLowerCase();
+  if (/发行版|percona|版本|version|内核|ubuntu|centos|rocky|kylin|openeuler/.test(low)) {
+    return { label: bi("版本环境", "Edition"), tone: "blue" };
+  }
+  if (/patroni|leader|standby|quorum|主库|从库|复制|lag|lsn|etcd|sentinel|高可用|切换|tl=/.test(low)) {
+    return { label: bi("高可用", "HA"), tone: "teal" };
+  }
+  if (/备份|pgbackrest|stanza|archive|wal|恢复|xtrabackup|rdb|aof/.test(low)) {
+    return { label: bi("备份容灾", "Backup"), tone: "amber" };
+  }
+  if (/vip|入口|域名|haproxy|keepalived|nginx|端口|监听/.test(low)) {
+    return { label: bi("访问入口", "Endpoint"), tone: "indigo" };
+  }
+  if (/tls|ssl|证书|加密|http|hba|权限|安全|cve|审计/.test(low)) {
+    return { label: bi("安全合规", "Security"), tone: "coral" };
+  }
+  if (/日志|log|exporter|监控|告警|metrics|目录|磁盘|路径/.test(low)) {
+    return { label: bi("路径监控", "Ops"), tone: "neutral" };
+  }
+  if (/节点|主机|node-|探针|仅在|hosts/.test(low)) {
+    return { label: bi("节点范围", "Nodes"), tone: "neutral" };
+  }
+  return { label: bi("现场线索", "Clue"), tone: "neutral" };
+}
+
+/** Structured, scannable field-clue list replacing cramped paragraph textareas (with raw text toggle). */
+function FieldCluesEditor({
+  value,
+  onChange,
+  title,
+  placeholder,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  title?: string;
+  placeholder?: string;
+}) {
+  useLang();
+  const [rawMode, setRawMode] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [editingIdx, setEditingIdx] = useState<number | null>(null);
+  const [editingText, setEditingText] = useState("");
+  const clues = useMemo(() => splitNotesToClues(value), [value]);
+
+  const commitClues = (next: string[]) => {
+    onChange(joinCluesToNotes(next));
+  };
+
+  const addClue = () => {
+    const t = draft.trim();
+    if (!t) return;
+    commitClues([...clues, t]);
+    setDraft("");
+  };
+
+  const saveEdit = (idx: number) => {
+    const t = editingText.trim();
+    if (!t) {
+      commitClues(clues.filter((_, i) => i !== idx));
+    } else {
+      commitClues(clues.map((c, i) => (i === idx ? t : c)));
+    }
+    setEditingIdx(null);
+    setEditingText("");
+  };
+
+  return (
+    <div className="imp-clues-wrap">
+      <div className="imp-clues-head">
+        <div className="imp-clues-head-l">
+          <span className="imp-lbl-left">
+            {title || bi("现场线索与运维约束", "Field Clues & Operational Notes")}
+          </span>
+          {clues.length > 0 && <span className="imp-count-badge">{clues.length}</span>}
+        </div>
+        <button
+          type="button"
+          className="imp-inline-clear"
+          onClick={() => setRawMode((v) => !v)}
+        >
+          {rawMode ? bi("切换卡片条理视图", "Structured View") : bi("切换纯文本编辑", "Plain Text")}
+        </button>
+      </div>
+
+      {rawMode ? (
+        <Input.TextArea
+          autoSize={{ minRows: 4, maxRows: 10 }}
+          value={value}
+          onChange={onChange}
+          placeholder={
+            placeholder ||
+            bi(
+              "每行一条现场线索或运维约束（如维护窗口、特殊配置、待核对事项）",
+              "One operational clue or constraint per line",
+            )
+          }
+        />
+      ) : (
+        <div className="imp-clues-card">
+          {clues.length === 0 ? (
+            <div className="imp-clues-empty">
+              {bi(
+                "暂无线索记录。运行只读探针、变更演练或手动在下方添加维护窗口与环境约束，将自动沉淀于此。",
+                "No clues recorded yet. Run a read-only probe, change rehearsal, or add notes below.",
+              )}
+            </div>
+          ) : (
+            <div className="imp-clues-list">
+              {clues.map((item, idx) => {
+                const cat = clueCategoryMeta(item);
+                const isEditing = editingIdx === idx;
+                return (
+                  <div key={idx} className="imp-clue-row">
+                    <span className={`imp-clue-tag is-${cat.tone}`}>{cat.label}</span>
+                    {isEditing ? (
+                      <div className="imp-clue-edit">
+                        <Input
+                          size="small"
+                          value={editingText}
+                          onChange={setEditingText}
+                          autoFocus
+                          onPressEnter={() => saveEdit(idx)}
+                          onBlur={() => saveEdit(idx)}
+                        />
+                      </div>
+                    ) : (
+                      <span
+                        className="imp-clue-txt"
+                        title={bi("点击就地编辑", "Click to edit")}
+                        onClick={() => {
+                          setEditingIdx(idx);
+                          setEditingText(item);
+                        }}
+                      >
+                        {item}
+                      </span>
+                    )}
+                    <div className="imp-clue-acts">
+                      {!isEditing && (
+                        <button
+                          type="button"
+                          className="imp-clue-icon"
+                          aria-label={bi("编辑线索", "Edit clue")}
+                          onClick={() => {
+                            setEditingIdx(idx);
+                            setEditingText(item);
+                          }}
+                        >
+                          <IconEdit />
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="imp-clue-icon is-del"
+                        aria-label={bi("删除线索", "Delete clue")}
+                        onClick={() => commitClues(clues.filter((_, i) => i !== idx))}
+                      >
+                        <IconDelete />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <div className="imp-clues-add">
+            <Input
+              size="small"
+              value={draft}
+              onChange={setDraft}
+              onPressEnter={addClue}
+              placeholder={
+                placeholder ||
+                bi(
+                  "补充一条现场线索或约束（如：每周日 02:00-04:00 为生产维护窗口），回车添加…",
+                  "Add a field clue or constraint (e.g., maintenance window Sun 02:00-04:00) and press Enter…",
+                )
+              }
+            />
+            <Button size="small" icon={<IconPlus />} disabled={!draft.trim()} onClick={addClue}>
+              {bi("添加", "Add")}
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProbeGeneratingBanner({ active, gapCount }: { active: boolean; gapCount?: number }) {
+  useLang();
+  const stages = useMemo(
+    () => [
+      bi(
+        gapCount && gapCount > 0
+          ? `正在对照标准交付基线分析已选 ${gapCount} 项缺口…`
+          : "正在分析组件形态与现场采集诉求…",
+        gapCount && gapCount > 0
+          ? `Analyzing ${gapCount} selected baseline gap(s)…`
+          : "Analyzing component layout & collection scope…",
+      ),
+      bi("正在编排极简 100% 静态只读探测命令（口令自动脱敏）…", "Composing lean 100% read-only probe commands (secrets redacted)…"),
+      bi("正在执行 100% 静态只读安全门禁与零写操作校验…", "Running 100% static read-only security gate verification…"),
+    ],
+    [gapCount],
+  );
+  const [idx, setIdx] = useState(0);
+  const [secs, setSecs] = useState(0);
+
+  useEffect(() => {
+    if (!active) {
+      setIdx(0);
+      setSecs(0);
+      return;
+    }
+    const t0 = Date.now();
+    const tick = window.setInterval(() => setSecs((Date.now() - t0) / 1000), 200);
+    const rot = window.setInterval(() => setIdx((p) => (p + 1) % stages.length), 2000);
+    return () => {
+      window.clearInterval(tick);
+      window.clearInterval(rot);
+    };
+  }, [active, stages.length]);
+
+  if (!active) return null;
+
+  return (
+    <div className="imp-probe-gen" role="status" aria-live="polite">
+      <Spark size={14} rainbow />
+      <span className="imp-probe-gen-txt">{stages[idx]}</span>
+      <span className="imp-probe-gen-meta num">
+        {idx + 1}/{stages.length} · {secs.toFixed(1)}s
+      </span>
+    </div>
+  );
+}
+
 function ProbeCodeBlock({
   script,
   filename,
   safe = true,
   source = "template",
+  mode = "full",
+  coveredGaps = [],
+  runHint,
+  modelName,
   compact = false,
+  hideTailorBar = false,
   aiEnabled = false,
   aiBusy = false,
+  gapCount,
   onCustomizeWithAI,
   onResetTemplate,
 }: {
@@ -565,19 +870,29 @@ function ProbeCodeBlock({
   filename: string;
   safe?: boolean;
   source?: "template" | "ai";
+  mode?: "gap" | "full";
+  coveredGaps?: string[];
+  runHint?: string;
+  modelName?: string;
   compact?: boolean;
+  hideTailorBar?: boolean;
   aiEnabled?: boolean;
   aiBusy?: boolean;
+  gapCount?: number;
   onCustomizeWithAI?: (focus: string) => void | Promise<void>;
   onResetTemplate?: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [aiBarOpen, setAiBarOpen] = useState(false);
   const [focusText, setFocusText] = useState("");
+  const previewLimit = compact ? 9 : 12;
   const lines = useMemo(() => (script ? script.split("\n") : []), [script]);
   const previewText = useMemo(
-    () => (expanded || lines.length <= 12 ? script : lines.slice(0, 12).join("\n") + `\n# ... (${lines.length - 12} more lines)`),
-    [expanded, lines, script],
+    () =>
+      expanded || lines.length <= previewLimit
+        ? script
+        : lines.slice(0, previewLimit).join("\n") + `\n# ... (${lines.length - previewLimit} more lines)`,
+    [expanded, lines, previewLimit, script],
   );
 
   const downloadScript = () => {
@@ -593,34 +908,42 @@ function ProbeCodeBlock({
   return (
     <div className="imp-probe-box">
       <div className="imp-probe-bar">
-        <span className="imp-probe-shield">
-          <IconCheckCircle />
-          <span>
-            {safe
-              ? bi("100% 静态只读安全校验", "100% Static Read-Only Verified")
-              : bi("只读探针脚本", "Read-Only Probe")}
-          </span>
-          <code>{filename}</code>
-          {source === "ai" && (
-            <span className="imp-probe-ai-tag">
-              <Spark size={11} /> {bi("AI 定制", "AI Tailored")}
+        <div className="imp-probe-bar-l">
+          <span className="imp-probe-shield">
+            <IconCheckCircle />
+            <span>
+              {safe
+                ? bi("100% 静态只读安全校验", "100% Static Read-Only Verified")
+                : bi("只读探针脚本", "Read-Only Probe")}
             </span>
-          )}
-          <span className="muted small">({lines.length} {bi("行", "lines")})</span>
-        </span>
+          </span>
+          <span className={`imp-probe-mode-tag ${source === "ai" ? "is-ai" : ""}`}>
+            {source === "ai" && <Spark size={11} />}
+            {source === "ai"
+              ? mode === "gap"
+                ? bi("AI 专项补采", "AI Gap Probe")
+                : bi("AI 精炼定制", "AI Tailored")
+              : mode === "gap"
+                ? bi("缺口补采探针", "Gap Probe")
+                : bi("标准全量探针", "Standard Probe")}
+          </span>
+          <span className="imp-probe-lines num">
+            {lines.length} {bi("行", "lines")}
+          </span>
+        </div>
         <div className="imp-probe-actions">
-          {onCustomizeWithAI && aiEnabled && (
+          {!hideTailorBar && onCustomizeWithAI && aiEnabled && (
             <Button
               size="mini"
-              type={aiBarOpen ? "primary" : "secondary"}
+              type={aiBarOpen ? "secondary" : "outline"}
               loading={aiBusy}
               icon={<Spark size={12} rainbow={!aiBarOpen} />}
               onClick={() => setAiBarOpen((v) => !v)}
             >
-              {bi("AI 定制探针", "AI Tailor Probe")}
+              {bi("AI 定制", "AI Tailor")}
             </Button>
           )}
-          {lines.length > 12 && (
+          {lines.length > previewLimit && (
             <Button
               size="mini"
               type="text"
@@ -630,24 +953,40 @@ function ProbeCodeBlock({
               {expanded ? bi("收起", "Collapse") : bi("展开全部", "Expand")}
             </Button>
           )}
+          <Button size="mini" type="outline" icon={<IconDownload />} onClick={downloadScript}>
+            {bi("下载", "Download")}
+          </Button>
           <Button
             size="mini"
+            type="secondary"
             icon={<IconCopy />}
             onClick={() => {
               copy(script);
-              Message.success(bi("已复制只读采集脚本", "Read-only probe script copied"));
+              Message.success(bi("已复制 100% 只读采集脚本", "100% read-only probe script copied"));
             }}
           >
             {bi("复制脚本", "Copy")}
           </Button>
-          {!compact && (
-            <Button size="mini" icon={<IconDownload />} onClick={downloadScript}>
-              {bi("下载 .sh", "Download .sh")}
-            </Button>
-          )}
         </div>
       </div>
-      {aiBarOpen && onCustomizeWithAI && (
+
+      <div className="imp-probe-meta-strip">
+        <code className="imp-probe-fname" title={filename}>
+          {filename}
+        </code>
+        {coveredGaps.length > 0 && (
+          <div className="imp-probe-cov">
+            <span>{bi("覆盖：", "Covers:")}</span>
+            {coveredGaps.map((g, i) => (
+              <em key={i}>{g}</em>
+            ))}
+          </div>
+        )}
+        {modelName && <span className="imp-probe-model mono">{modelName}</span>}
+        {runHint && <span className="imp-probe-hint">{runHint}</span>}
+      </div>
+
+      {!hideTailorBar && aiBarOpen && onCustomizeWithAI && (
         <div className="imp-probe-ai-bar">
           <Input
             size="small"
@@ -663,20 +1002,24 @@ function ProbeCodeBlock({
           />
           <Button
             size="small"
-            type="primary"
+            shape="round"
+            className="ai-pill"
             loading={aiBusy}
-            icon={<Spark size={12} />}
+            icon={<Spark size={12} rainbow />}
             onClick={() => void onCustomizeWithAI(focusText)}
           >
             {bi("生成精炼只读探针", "Generate Probe")}
           </Button>
           {source === "ai" && onResetTemplate && (
-            <Button size="small" disabled={aiBusy} onClick={onResetTemplate}>
-              {bi("恢复标准探针", "Reset Standard")}
+            <Button size="small" type="text" disabled={aiBusy} onClick={onResetTemplate}>
+              {bi("恢复标准", "Reset")}
             </Button>
           )}
         </div>
       )}
+
+      <ProbeGeneratingBanner active={aiBusy} gapCount={gapCount} />
+
       <pre className={`imp-probe-pre ${expanded ? "is-expanded" : ""}`}>
         {previewText || bi("正在生成只读采集脚本…", "Generating read-only probe script...")}
       </pre>
@@ -733,6 +1076,8 @@ function ImportEvidenceComposer({
   leftSlot,
   imageBtnLabel,
   footHint,
+  modelPick,
+  aiOpts,
 }: {
   title: React.ReactNode;
   placeholder: string;
@@ -749,6 +1094,8 @@ function ImportEvidenceComposer({
   leftSlot?: React.ReactNode;
   imageBtnLabel?: string;
   footHint?: string;
+  modelPick?: ReturnType<typeof useModelPick>;
+  aiOpts?: ReturnType<typeof useAIOptions>;
 }) {
   const [dragging, setDragging] = useState(false);
   const imgInputRef = useRef<HTMLInputElement>(null);
@@ -978,6 +1325,15 @@ function ImportEvidenceComposer({
           </span>
         </div>
         <div className="imp-compose-foot-right">
+          {aiEnabled && aiOpts && modelPick && (
+            <ThinkLevel
+              levels={modelPick.current?.effort}
+              value={aiOpts.pref.think}
+              onChange={(v) => aiOpts.update({ think: v })}
+              compact
+            />
+          )}
+          {aiEnabled && modelPick && <ModelPicker pick={modelPick} compact />}
           <Button
             type="primary"
             shape="round"
@@ -1432,6 +1788,9 @@ export function ImportClusterPage({
     ];
   }, [isCustom, selectedPreset]);
 
+  const wizardModelPick = useModelPick("chat");
+  const wizardAIOpts = useAIOptions();
+
   const fetchImportProbe = useCallback(
     async (opts?: { useAI?: boolean; focus?: string }) => {
       if (opts?.useAI) setProbeGenerating(true);
@@ -1450,6 +1809,8 @@ export function ImportClusterPage({
             deploy_method: deployMethod,
             use_ai: Boolean(opts?.useAI),
             focus: opts?.focus?.trim() || undefined,
+            model: wizardModelPick.ref || undefined,
+            think: wizardAIOpts.pref.think || undefined,
           }),
         });
         setProbeScript(res.script);
@@ -1556,6 +1917,8 @@ export function ImportClusterPage({
           text: pasteText,
           images,
           use_ai: true,
+          model: wizardModelPick.ref || undefined,
+          think: wizardAIOpts.pref.think || undefined,
         }),
       });
       const d = res.draft;
@@ -2177,6 +2540,8 @@ export function ImportClusterPage({
                   onImagesChange={setImages}
                   busy={parsing}
                   aiEnabled={Boolean(presetsData?.ai_enabled)}
+                  modelPick={wizardModelPick}
+                  aiOpts={wizardAIOpts}
                   imageBtnLabel={bi("上传终端截图", "Upload Screenshot")}
                   footHint={bi("支持拖拽 .log/.txt/截图 · 自动识别伴生与 OS 组件", "Drag & drop .log/.txt/images · Auto-detects companions & OS agents")}
                   leftSlot={
@@ -2204,6 +2569,8 @@ export function ImportClusterPage({
                 onImagesChange={setImages}
                 busy={parsing}
                 aiEnabled={Boolean(presetsData?.ai_enabled)}
+                modelPick={wizardModelPick}
+                aiOpts={wizardAIOpts}
                 minRows={8}
                 imageBtnLabel={bi("上传架构图 / 截图", "Upload Diagram")}
                 footHint={bi("支持拖拽 .yml/.conf/.txt/截图", "Drag & drop .yml/.conf/.txt/images")}
@@ -2768,20 +3135,11 @@ export function ImportClusterPage({
                   </div>
                 )}
 
-                <div className="imp-field">
-                  <label>
-                    <span className="imp-lbl-left">{bi("现场线索与运维备注", "Field Notes & Maintenance Window")}</span>
-                  </label>
-                  <Input.TextArea
-                    autoSize={{ minRows: 2, maxRows: 6 }}
-                    placeholder={bi(
-                      "• 承载业务与维护窗口（如周日 02:00-04:00）\n• 特殊注意事项或待人工核对项",
-                      "• Workload & maintenance window\n• Special notes or verification items",
-                    )}
-                    value={notes}
-                    onChange={setNotes}
-                  />
-                </div>
+                <FieldCluesEditor
+                  title={bi("现场线索与运维约束", "Field Clues & Maintenance Window")}
+                  value={notes}
+                  onChange={setNotes}
+                />
               </section>
             </div>
 
@@ -2929,15 +3287,25 @@ export function ImportedBaselineModal({
   const [packages, setPackages] = useState<ImportedPkg[]>([]);
   const [notes, setNotes] = useState("");
 
-  // Re-probe state
+  // Re-probe & Gap Diagnosis state
+  const [health, setHealth] = useState<BaselineHealth | null>(null);
+  const [selectedGapIDs, setSelectedGapIDs] = useState<string[]>([]);
+  const [probeMode, setProbeMode] = useState<"gap" | "full">("gap");
+  const [probeFocus, setProbeFocus] = useState("");
   const [probeScript, setProbeScript] = useState("");
   const [probeFilename, setProbeFilename] = useState("mw-import-probe.sh");
   const [probeSafe, setProbeSafe] = useState(true);
   const [probeSource, setProbeSource] = useState<"template" | "ai">("template");
+  const [probeCoveredGaps, setProbeCoveredGaps] = useState<string[]>([]);
+  const [probeRunHint, setProbeRunHint] = useState("");
+  const [probeModelName, setProbeModelName] = useState("");
   const [probeGenerating, setProbeGenerating] = useState(false);
   const [probeOutput, setProbeOutput] = useState("");
   const [probeImages, setProbeImages] = useState<string[]>([]);
   const [parsing, setParsing] = useState(false);
+  const [mergeDiff, setMergeDiff] = useState<string[]>([]);
+  const modelPick = useModelPick("chat");
+  const aiOpts = useAIOptions();
 
   const roleOptions = useMemo<RolePreset[]>(() => {
     const cid = (cluster.app_id || "").toLowerCase();
@@ -2999,6 +3367,15 @@ export function ImportedBaselineModal({
         );
         setPackages(res.packages || []);
         setNotes(res.notes || "");
+        setHealth(res.health || null);
+        const defaultGaps = (res.health?.gaps || []).filter((g) => g.selected).map((g) => g.id);
+        const fallbackGaps =
+          defaultGaps.length > 0
+            ? defaultGaps
+            : (res.health?.gaps || []).slice(0, 3).map((g) => g.id);
+        setSelectedGapIDs(fallbackGaps);
+        setProbeMode(res.health && res.health.gaps.length > 0 ? "gap" : "full");
+        setMergeDiff([]);
       })
       .catch((e: Error) => Message.error(e.message))
       .finally(() => alive && setLoading(false));
@@ -3008,7 +3385,9 @@ export function ImportedBaselineModal({
   }, [visible, cluster.id]);
 
   const fetchDrawerProbe = useCallback(
-    async (opts?: { useAI?: boolean; focus?: string }) => {
+    async (opts?: { useAI?: boolean; focus?: string; mode?: "gap" | "full"; gapIDs?: string[] }) => {
+      const targetMode = opts?.mode || probeMode;
+      const targetGaps = opts?.gapIDs ?? selectedGapIDs;
       if (opts?.useAI) setProbeGenerating(true);
       try {
         const res = await api<{
@@ -3016,45 +3395,80 @@ export function ImportedBaselineModal({
           filename: string;
           safe?: boolean;
           source?: "template" | "ai";
+          mode?: "gap" | "full";
+          covered_gaps?: string[];
+          run_hint?: string;
+          model?: string;
           ai_note?: string;
         }>("/api/clusters/import/probe-script", {
           method: "POST",
           body: JSON.stringify({
+            cluster_id: cluster.id,
             component: cluster.app_id,
             display_name: cluster.app_name,
             deploy_method: deployMethod,
             service_units: serviceUnits,
             config_paths: configPaths,
+            mode: targetMode,
+            missing_gaps: targetMode === "gap" ? targetGaps : [],
             use_ai: Boolean(opts?.useAI),
-            focus: opts?.focus?.trim() || undefined,
+            focus: (opts?.focus ?? probeFocus).trim() || undefined,
+            model: modelPick.ref || undefined,
+            think: aiOpts.pref.think || undefined,
           }),
         });
         setProbeScript(res.script);
         setProbeFilename(res.filename);
         setProbeSafe(res.safe !== false);
         setProbeSource(res.source === "ai" ? "ai" : "template");
+        setProbeCoveredGaps(res.covered_gaps || []);
+        setProbeRunHint(res.run_hint || "");
+        setProbeModelName(res.model || "");
         if (opts?.useAI) {
           if (res.source === "ai") {
-            Message.success(bi("AI 已定制精炼只读探针（已通过静态只读校验）", "AI tailored read-only probe (verified safe)"));
+            Message.success(
+              bi(
+                "AI 已按缺口生成专项 100% 只读探针（已通过静态安全门禁）",
+                "AI generated targeted 100% read-only probe (verified safe)",
+              ),
+            );
           } else if (res.ai_note) {
             Message.warning(res.ai_note);
           }
         }
       } catch (e) {
         if (opts?.useAI) {
-          Message.error((e as Error).message || bi("AI 定制探针失败", "AI probe generation failed"));
+          Message.error((e as Error).message || bi("AI 生成只读探针失败", "AI probe generation failed"));
         }
       } finally {
         if (opts?.useAI) setProbeGenerating(false);
       }
     },
-    [cluster.app_id, cluster.app_name, deployMethod, serviceUnits, configPaths],
+    [
+      cluster.id,
+      cluster.app_id,
+      cluster.app_name,
+      deployMethod,
+      serviceUnits,
+      configPaths,
+      probeMode,
+      selectedGapIDs,
+      probeFocus,
+      modelPick.ref,
+      aiOpts.pref.think,
+    ],
   );
 
+  const toggleGapID = (gid: string) => {
+    setSelectedGapIDs((prev) =>
+      prev.includes(gid) ? prev.filter((x) => x !== gid) : [...prev, gid],
+    );
+  };
+
   useEffect(() => {
-    if (!visible || tab !== "probe") return;
-    void fetchDrawerProbe();
-  }, [visible, tab, cluster.app_id, cluster.app_name, deployMethod]);
+    if (!visible || tab !== "probe" || loading) return;
+    void fetchDrawerProbe({ mode: probeMode, gapIDs: selectedGapIDs });
+  }, [visible, tab, loading, probeMode, cluster.id]);
 
   const adoptAllSuggested = () => {
     if (suggestedCompanions.length === 0) return;
@@ -3091,37 +3505,171 @@ export function ImportedBaselineModal({
       const res = await api<ParseResp>("/api/clusters/import/parse", {
         method: "POST",
         body: JSON.stringify({
+          cluster_id: cluster.id,
           component: cluster.app_id,
           display_name: cluster.app_name,
           source_kind: "probe",
           text: probeOutput,
           images: probeImages,
           use_ai: true,
+          model: modelPick.ref || undefined,
+          think: aiOpts.pref.think || undefined,
         }),
       });
       const d = res.draft;
-      if (d.version) setVersion(d.version);
-      if (d.exact_version) setExactVersion(d.exact_version);
+      const changes: string[] = [];
+      const unionStrings = (cur: string[], incoming?: string[], label?: string) => {
+        if (!incoming?.length) return cur;
+        const set = new Set(cur.map((x) => x.trim()).filter(Boolean));
+        const next = [...cur];
+        let added = 0;
+        for (const v of incoming) {
+          const t = v.trim();
+          if (t && !set.has(t)) {
+            set.add(t);
+            next.push(t);
+            added++;
+          }
+        }
+        if (added > 0 && label) changes.push(`+${added} ${label}`);
+        return next;
+      };
+
+      if (d.version && d.version !== version) setVersion(d.version);
+      if (d.exact_version && d.exact_version !== exactVersion) {
+        setExactVersion(d.exact_version);
+        changes.push(bi(`精确版本 → ${d.exact_version}`, `Exact version → ${d.exact_version}`));
+      }
       if (d.platform) setPlatform(d.platform);
       if (d.deploy_method) setDeployMethod(d.deploy_method);
-      if (d.arch_summary) setArchSummary(d.arch_summary);
-      if (d.hosts?.length) setHosts(d.hosts);
+      if (d.arch_summary && !archSummary) setArchSummary(d.arch_summary);
+
+      // Additive merge for hosts (preserve existing hosts, fill missing disk/role/IP)
+      if (d.hosts?.length) {
+        const nextHosts = [...hosts];
+        let hostUpdated = 0;
+        for (const nh of d.hosts) {
+          const idx = nextHosts.findIndex(
+            (eh) =>
+              (nh.ip && eh.ip === nh.ip) ||
+              (nh.name && eh.name.toLowerCase() === nh.name.toLowerCase()),
+          );
+          if (idx >= 0) {
+            const curH = nextHosts[idx];
+            const mergedH = {
+              name: curH.name || nh.name,
+              ip: curH.ip || nh.ip,
+              role: nh.role || curH.role,
+              disk: nh.disk || curH.disk,
+            };
+            if (mergedH.disk !== curH.disk || mergedH.role !== curH.role) hostUpdated++;
+            nextHosts[idx] = mergedH;
+          } else if (nh.name || nh.ip) {
+            nextHosts.push(nh);
+            hostUpdated++;
+          }
+        }
+        setHosts(nextHosts);
+        if (hostUpdated > 0) changes.push(bi(`更新 ${hostUpdated} 台主机信息`, `Updated ${hostUpdated} host(s)`));
+      }
+
+      // Additive merge for endpoints
+      if (d.endpoints?.length) {
+        const seenEp = new Set(endpoints.map((e) => e.address.trim().toLowerCase()));
+        const nextEps = [...endpoints];
+        let epAdded = 0;
+        for (const ep of d.endpoints) {
+          const addr = (ep.address || "").trim();
+          if (addr && !seenEp.has(addr.toLowerCase())) {
+            seenEp.add(addr.toLowerCase());
+            nextEps.push({ ...ep, role: normalizeEndpointRole(ep.role) });
+            epAdded++;
+          }
+        }
+        if (epAdded > 0) {
+          setEndpoints(nextEps);
+          changes.push(bi(`+${epAdded} 访问入口`, `+${epAdded} endpoint(s)`));
+        }
+      }
+
+      // Additive merge for companions (preserve existing + enrich versions/ports)
       if (d.companions?.length) {
-        const byID = new Map(companions.map((c) => [c.component.toLowerCase(), c]));
+        const byID = new Map(companions.map((c) => [c.component.toLowerCase(), { ...c }]));
+        let compChanged = 0;
         for (const cm of d.companions) {
-          byID.set(cm.component.toLowerCase(), cm);
+          const k = cm.component.toLowerCase();
+          const ex = byID.get(k);
+          if (ex) {
+            const nextVer = cm.version || ex.version;
+            const nextPorts = Array.from(new Set([...(ex.ports || []), ...(cm.ports || [])]));
+            if (nextVer !== ex.version || nextPorts.length !== (ex.ports || []).length) compChanged++;
+            byID.set(k, {
+              ...ex,
+              ...cm,
+              version: nextVer,
+              ports: nextPorts,
+              hosts: cm.hosts?.length ? cm.hosts : ex.hosts,
+            });
+          } else {
+            byID.set(k, cm);
+            compChanged++;
+          }
         }
         setCompanions(Array.from(byID.values()));
         setSuggestedCompanions([]);
+        if (compChanged > 0) changes.push(bi(`完善 ${compChanged} 个组件栈条目`, `Enriched ${compChanged} stack component(s)`));
       }
-      if (d.service_units?.length) setServiceUnits(d.service_units);
-      if (d.config_paths?.length) setConfigPaths(d.config_paths);
-      if (d.data_dirs?.length) setDataDirs(d.data_dirs);
-      if (d.log_dirs?.length) setLogDirs(d.log_dirs);
-      if (d.packages?.length) setPackages(d.packages);
-      if (d.notes) setNotes(d.notes);
+
+      setServiceUnits((cur) => unionStrings(cur, d.service_units, bi("服务单元", "service(s)")));
+      setConfigPaths((cur) => unionStrings(cur, d.config_paths, bi("配置路径", "config path(s)")));
+      setDataDirs((cur) => unionStrings(cur, d.data_dirs, bi("数据目录", "data dir(s)")));
+      setLogDirs((cur) => unionStrings(cur, d.log_dirs, bi("日志目录", "log dir(s)")));
+
+      // Additive merge for runtime parameters!
+      if (d.params && Object.keys(d.params).length > 0) {
+        const map = new Map(paramRows.filter((r) => r.key.trim()).map((r) => [r.key.trim(), r.value]));
+        let pChanged = 0;
+        for (const [k, v] of Object.entries(d.params)) {
+          const key = k.trim();
+          const val = typeof v === "string" ? v : (JSON.stringify(v) ?? "");
+          if (key && val && map.get(key) !== val) {
+            map.set(key, val);
+            pChanged++;
+          }
+        }
+        if (pChanged > 0) {
+          setParamRows(Array.from(map.entries()).map(([key, value]) => ({ key, value })));
+          changes.push(bi(`+${pChanged} 项核心运行参数`, `+${pChanged} runtime param(s)`));
+        }
+      }
+
+      // Additive merge for packages
+      if (d.packages?.length) {
+        const pkgMap = new Map(packages.map((p) => [p.name.toLowerCase(), p]));
+        let pkgAdded = 0;
+        for (const pk of d.packages) {
+          if (!pkgMap.has(pk.name.toLowerCase())) pkgAdded++;
+          pkgMap.set(pk.name.toLowerCase(), pk);
+        }
+        setPackages(Array.from(pkgMap.values()));
+        if (pkgAdded > 0) changes.push(bi(`+${pkgAdded} 软件包`, `+${pkgAdded} package(s)`));
+      }
+
+      // Additive merge for structured clues/notes
+      if (d.notes) {
+        const mergedClues = splitNotesToClues(`${notes}\n${d.notes}`);
+        const oldCount = splitNotesToClues(notes).length;
+        setNotes(joinCluesToNotes(mergedClues));
+        if (mergedClues.length > oldCount) {
+          changes.push(bi(`+${mergedClues.length - oldCount} 条现场线索`, `+${mergedClues.length - oldCount} field clue(s)`));
+        }
+      }
+
+      setMergeDiff(changes);
       Message.success(
-        bi("采集输出已解析并合并（含伴生组件栈），请核对后保存基线", "Probe parsed and merged (including companions); review and save"),
+        changes.length > 0
+          ? bi(`已增量合并：${changes.join(" · ")}，请核对后保存基线`, `Merged: ${changes.join(" · ")}; review and save`)
+          : bi("采集回显已核验完毕，未发现新增差异字段", "Probe verified; no additional changes found"),
       );
       setTab("edit");
     } catch (e) {
@@ -3178,7 +3726,7 @@ export function ImportedBaselineModal({
   return (
     <Drawer
       visible={visible}
-      width="min(760px, 94vw)"
+      width="min(880px, 95vw)"
       unmountOnExit
       title={
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, paddingRight: 20, flexWrap: "wrap" }}>
@@ -3201,7 +3749,10 @@ export function ImportedBaselineModal({
               className={`imp-drawer-tab ${tab === "probe" ? "on" : ""}`}
               onClick={() => setTab("probe")}
             >
-              {bi("只读探针刷新", "Re-Run Probe")}
+              {bi("AI 只读补采", "AI Read-Only Probe")}
+              {health && health.gaps.length > 0 && (
+                <em className="imp-tab-dot">{health.gaps.length}</em>
+              )}
             </button>
           </div>
         </div>
@@ -3221,23 +3772,151 @@ export function ImportedBaselineModal({
       {loading ? (
         <Skeleton text={{ rows: 9 }} animation />
       ) : tab === "probe" ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <div className="imp-probe-studio">
+          {/* Stage 1: Standard Baseline Completeness Diagnosis & Gap Selector */}
+          <section className="imp-gap-panel">
+            <div className="imp-gap-head">
+              <div className="imp-gap-score-wrap">
+                {health && (
+                  <span
+                    className={`imp-gap-score num ${
+                      health.score >= 85 ? "is-ok" : health.score >= 55 ? "is-warn" : "is-low"
+                    }`}
+                  >
+                    {health.score}%
+                  </span>
+                )}
+                <div className="imp-gap-head-text">
+                  <div className="imp-gap-title-row">
+                    <h4>{bi("标准基线完整度诊断与只读补采建议", "Standard Baseline Gap Diagnosis")}</h4>
+                    <span className="imp-iron-badge">
+                      <IconCheckCircle /> {bi("100% 只读铁律", "100% Read-Only")}
+                    </span>
+                  </div>
+                  <p className="imp-gap-sub">
+                    {health?.summary ||
+                      bi(
+                        "对照标准生产交付基线识别缺失项，按需生成精炼且零副作用的只读采集脚本。",
+                        "Compares current inventory against standard production baselines to generate lean, safe read-only probes.",
+                      )}
+                  </p>
+                </div>
+              </div>
+              <div className="imp-gap-mode-sw">
+                <button
+                  type="button"
+                  className={probeMode === "gap" ? "on" : ""}
+                  onClick={() => setProbeMode("gap")}
+                  disabled={!health || health.gaps.length === 0}
+                >
+                  {bi("专项缺口补采", "Gap Probe")}
+                </button>
+                <button
+                  type="button"
+                  className={probeMode === "full" ? "on" : ""}
+                  onClick={() => setProbeMode("full")}
+                >
+                  {bi("全量标准探针", "Full Standard")}
+                </button>
+              </div>
+            </div>
+
+            {probeMode === "gap" && health && health.gaps.length > 0 && (
+              <div className="imp-gap-grid">
+                {health.gaps.map((g) => {
+                  const picked = selectedGapIDs.includes(g.id);
+                  return (
+                    <button
+                      key={g.id}
+                      type="button"
+                      className={`imp-gap-item ${picked ? "is-on" : ""}`}
+                      onClick={() => toggleGapID(g.id)}
+                    >
+                      <div className="imp-gap-item-top">
+                        <span className={`imp-gap-chk ${picked ? "is-on" : ""}`}>
+                          {picked && <IconCheck />}
+                        </span>
+                        <span className={`imp-gap-sev is-${g.severity}`}>
+                          {g.severity === "high"
+                            ? bi("建议优先", "High")
+                            : g.severity === "medium"
+                              ? bi("建议完善", "Medium")
+                              : bi("可选", "Optional")}
+                        </span>
+                        <span className="imp-gap-cat">{g.category}</span>
+                      </div>
+                      <div className="imp-gap-item-title">{g.title}</div>
+                      <div className="imp-gap-item-act">{g.probe_action}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="imp-gap-bar">
+              <Input
+                size="small"
+                allowClear
+                disabled={probeGenerating}
+                value={probeFocus}
+                onChange={setProbeFocus}
+                onPressEnter={() =>
+                  void fetchDrawerProbe({
+                    useAI: true,
+                    focus: probeFocus,
+                    mode: probeMode,
+                    gapIDs: selectedGapIDs,
+                  })
+                }
+                placeholder={bi(
+                  "可选补充现场诉求（例如：重点核查 VIP 172.30.2.120 承载位置，或只查从库同步与磁盘）",
+                  "Optional extra focus (e.g. check VIP 172.30.2.120 binding or standby disk/replication)",
+                )}
+              />
+              <Button
+                size="small"
+                shape="round"
+                className="ai-pill"
+                loading={probeGenerating}
+                icon={<Spark size={13} rainbow />}
+                onClick={() =>
+                  void fetchDrawerProbe({
+                    useAI: true,
+                    focus: probeFocus,
+                    mode: probeMode,
+                    gapIDs: selectedGapIDs,
+                  })
+                }
+              >
+                {probeMode === "gap" && selectedGapIDs.length > 0
+                  ? bi(`AI 针对 ${selectedGapIDs.length} 项缺口生成只读探针`, `AI Generate Probe (${selectedGapIDs.length})`)
+                  : bi("AI 生成精炼只读探针", "AI Generate Read-Only Probe")}
+              </Button>
+            </div>
+          </section>
+
+          {/* Stage 2: Clean 100% Read-Only Probe Code Viewer */}
           <ProbeCodeBlock
             script={probeScript}
             filename={probeFilename}
             safe={probeSafe}
             source={probeSource}
+            mode={probeMode}
+            coveredGaps={probeCoveredGaps}
+            runHint={probeRunHint}
+            modelName={probeModelName}
             compact
-            aiEnabled
+            hideTailorBar
             aiBusy={probeGenerating}
-            onCustomizeWithAI={(focus) => fetchDrawerProbe({ useAI: true, focus })}
-            onResetTemplate={() => void fetchDrawerProbe()}
+            gapCount={selectedGapIDs.length}
           />
+
+          {/* Stage 3: Full AI Evidence Composer (with ModelPicker + ThinkLevel) */}
           <ImportEvidenceComposer
-            title={bi("最新只读采集回显 / 截图", "Latest Read-Only Probe Output / Screenshots")}
+            title={bi("回显文本 / 截图（自动增量合并，不覆盖已有基线）", "Probe Output / Screenshots (Additive Merge)")}
             placeholder={bi(
-              "=== MW_IMPORT_BEGIN ===\n直接粘贴采集终端回显、拖拽 .log/.txt 文件，或按 Ctrl+V 粘贴终端截图…",
-              "=== MW_IMPORT_BEGIN ===\nPaste terminal output, drag & drop .log/.txt files, or Ctrl+V screenshots…",
+              "=== MW_IMPORT_BEGIN ===\n直接粘贴采集终端回显、拖拽 .log/.txt 文件，或按 Ctrl+V 粘贴终端截图；AI 将自动提取缺失字段并增量合并…",
+              "=== MW_IMPORT_BEGIN ===\nPaste terminal output, drag & drop .log/.txt files, or Ctrl+V screenshots; AI will extract and merge incrementally…",
             )}
             value={probeOutput}
             onChange={setProbeOutput}
@@ -3245,7 +3924,9 @@ export function ImportedBaselineModal({
             onImagesChange={setProbeImages}
             busy={parsing}
             aiEnabled
-            minRows={8}
+            modelPick={modelPick}
+            aiOpts={aiOpts}
+            minRows={7}
             maxRows={16}
             imageBtnLabel={bi("上传回显截图", "Upload Image")}
             footHint={bi("支持拖拽 .log/.txt/截图", "Drag & drop .log/.txt/images")}
@@ -3254,13 +3935,61 @@ export function ImportedBaselineModal({
                 <IconArrowLeft /> {bi("返回基线编辑", "Back to Edit")}
               </Button>
             }
-            submitLabel={bi("AI 解析回显并合并基线", "Parse & Merge Baseline")}
+            submitLabel={bi("AI 解析并增量合并基线", "AI Parse & Merge")}
             onSubmit={() => void parseAndMergeProbe()}
           />
           <ParsingStagePanel active={parsing} aiEnabled />
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+          {mergeDiff.length > 0 && (
+            <div className="imp-merge-banner">
+              <div className="imp-merge-banner-l">
+                <IconCheckCircle />
+                <div>
+                  <b>{bi("本次只读补采已增量合并至下方表单", "Read-only probe results merged incrementally")}</b>
+                  <div className="small muted">{mergeDiff.join(" · ")} — {bi("核对无误后点击右下角「保存基线并刷新拓扑」生效", "Review and click Save below to persist")}</div>
+                </div>
+              </div>
+              <Button size="mini" type="primary" loading={saving} onClick={saveBaseline}>
+                {bi("立即保存", "Save Now")}
+              </Button>
+            </div>
+          )}
+
+          {health && health.gaps.length > 0 && mergeDiff.length === 0 && (
+            <div className="imp-health-strip">
+              <div className="imp-health-strip-l">
+                <span className={`imp-gap-score sm num ${health.score >= 85 ? "is-ok" : health.score >= 55 ? "is-warn" : "is-low"}`}>
+                  {health.score}%
+                </span>
+                <div className="imp-health-strip-t">
+                  <b>
+                    {bi(
+                      `标准基线已齐备 ${health.passed}/${health.total} 项 · 发现 ${health.gaps.length} 项待补采`,
+                      `Standard baseline ${health.passed}/${health.total} complete · ${health.gaps.length} gap(s)`,
+                    )}
+                  </b>
+                  <span className="small muted">
+                    {health.gaps
+                      .slice(0, 2)
+                      .map((g) => g.title)
+                      .join("；")}
+                    {health.gaps.length > 2 ? bi(" 等", "…") : ""}
+                  </span>
+                </div>
+              </div>
+              <Button
+                size="small"
+                shape="round"
+                className="ai-pill"
+                icon={<Spark size={12} rainbow />}
+                onClick={() => setTab("probe")}
+              >
+                {bi("AI 只读补采", "AI Gap Probe")}
+              </Button>
+            </div>
+          )}
           {/* Section 1: Companion Architecture Stack */}
           <div className="imp-drawer-sec">
             <div className="imp-drawer-sec-h">
@@ -3552,12 +4281,9 @@ export function ImportedBaselineModal({
                 ))}
               </div>
             )}
-            <div className="imp-field" style={{ marginTop: 4 }}>
-              <label>
-                <span className="imp-lbl-left">{bi("现场线索与运维备注", "Operations Notes")}</span>
-              </label>
-              <Input.TextArea
-                autoSize={{ minRows: 2, maxRows: 6 }}
+            <div style={{ marginTop: 6 }}>
+              <FieldCluesEditor
+                title={bi("现场线索与运维约束", "Field Clues & Operational Notes")}
                 value={notes}
                 onChange={setNotes}
               />

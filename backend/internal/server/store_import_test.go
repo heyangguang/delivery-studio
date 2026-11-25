@@ -582,3 +582,121 @@ pgbackrest 2.59.1
 		t.Fatalf("expected applied change max_connections=500 reflected in baseline, got %v", updatedDep.Instances[0].Params["max_connections"])
 	}
 }
+
+func TestImportedBaselineGapDiagnosisAndReadOnlyGapProbe(t *testing.T) {
+	s, _ := testStore(t)
+	alice, csrf := storeLogin(t, s, "alice")
+	impReq := importClusterReq{
+		ID:           "pg-gap-check",
+		Component:    "postgresql",
+		DisplayName:  "PostgreSQL",
+		Version:      "17",
+		ExactVersion: "17.11",
+		OSDetail:     "Ubuntu 24.04.5 LTS",
+		DeployMethod: "systemd",
+		Hosts: []importHostInput{
+			{Name: "db-node-01", IP: "172.30.2.67", Role: "primary", Disk: "/dev/vdb"},
+			{Name: "db-node-02", IP: "172.30.2.82", Role: "replica"},
+		},
+		Endpoints: []mwpack.ImportedEndpoint{
+			{Name: "writer", Address: "pg.internal:5432", Role: "readwrite"},
+		},
+		Companions: []mwpack.ImportedCompanion{
+			{Component: "patroni", DisplayName: "Patroni", Kind: "ha_manager", Version: "4.1.5"},
+			{Component: "pgbackrest", DisplayName: "pgBackRest", Kind: "backup", Version: "2.59.1"},
+			{Component: "node-exporter", DisplayName: "node_exporter", Kind: "os_component"},
+		},
+		ConfigPaths: []string{"/etc/etcd/etcd.conf.yaml"},
+		DataDirs:    []string{"/data/etcd"},
+		Notes:       "探针仅在 db-node-01 上执行。pgBackRest 未发现 stanza 配置。",
+	}
+	ib, _ := json.Marshal(impReq)
+	iw := storeRequest(s, "POST", "/api/clusters/import", bytes.NewReader(ib), alice, csrf)
+	if iw.Code != 201 {
+		t.Fatalf("import failed: %d %s", iw.Code, iw.Body.String())
+	}
+
+	// 1. GET /api/clusters/{id}/baseline must return structured standard-baseline completeness health & gaps.
+	bw := storeRequest(s, "GET", "/api/clusters/pg-gap-check/baseline", nil, alice, "")
+	if bw.Code != 200 {
+		t.Fatalf("GET baseline failed: %d %s", bw.Code, bw.Body.String())
+	}
+	var got importClusterReq
+	if err := json.Unmarshal(bw.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Health == nil || got.Health.Total < 6 || len(got.Health.Gaps) < 4 {
+		t.Fatalf("expected baseline health with concrete gaps, got %+v", got.Health)
+	}
+	gapIDs := map[string]bool{}
+	for _, g := range got.Health.Gaps {
+		gapIDs[g.ID] = true
+	}
+	for _, want := range []string{"paths", "params", "backup", "peers", "monitoring"} {
+		if !gapIDs[want] {
+			t.Errorf("expected gap %q in %+v", want, got.Health.Gaps)
+		}
+	}
+
+	// 2. Targeted gap probe generation (deterministic + AI iron-law gate):
+	//    a) Deterministic gap probe passes 100% static read-only validation.
+	pw := storeRequest(s, "POST", "/api/clusters/import/probe-script",
+		strings.NewReader(`{"cluster_id":"pg-gap-check","mode":"gap","missing_gaps":["paths","backup","params"],"use_ai":false}`), alice, csrf)
+	if pw.Code != 200 {
+		t.Fatalf("POST gap probe-script failed: %d %s", pw.Code, pw.Body.String())
+	}
+	var pResp struct {
+		Script      string   `json:"script"`
+		Filename    string   `json:"filename"`
+		Safe        bool     `json:"safe"`
+		Mode        string   `json:"mode"`
+		Source      string   `json:"source"`
+		CoveredGaps []string `json:"covered_gaps"`
+		AINote      string   `json:"ai_note"`
+	}
+	_ = json.Unmarshal(pw.Body.Bytes(), &pResp)
+	if !pResp.Safe || pResp.Mode != "gap" || !strings.Contains(pResp.Script, "pgbackrest") || !strings.Contains(pResp.Script, "patroni.yml") {
+		t.Fatalf("unexpected deterministic gap probe: %+v", pResp)
+	}
+
+	//    b) AI generating a MUTATING command (systemctl restart) MUST be blocked by the 100% read-only iron law and fall back safely!
+	badAI, _ := fakeModel(t, "#!/usr/bin/env bash\necho '=== MW_IMPORT_BEGIN ==='\nsystemctl restart patroni\necho '=== MW_IMPORT_END ==='\n")
+	defer badAI.Close()
+	enableAI(t, s, badAI.URL, 0)
+
+	pwBad := storeRequest(s, "POST", "/api/clusters/import/probe-script",
+		strings.NewReader(`{"cluster_id":"pg-gap-check","mode":"gap","missing_gaps":["paths","backup"],"use_ai":true}`), alice, csrf)
+	if pwBad.Code != 200 {
+		t.Fatalf("POST AI probe-script failed: %d %s", pwBad.Code, pwBad.Body.String())
+	}
+	var pBadResp struct {
+		Script string `json:"script"`
+		Safe   bool   `json:"safe"`
+		Source string `json:"source"`
+		AINote string `json:"ai_note"`
+	}
+	_ = json.Unmarshal(pwBad.Body.Bytes(), &pBadResp)
+	if !pBadResp.Safe || pBadResp.Source != "template" || strings.Contains(pBadResp.Script, "systemctl restart") || !strings.Contains(pBadResp.AINote, "只读") {
+		t.Fatalf("read-only iron law failed to block mutating AI script: %+v", pBadResp)
+	}
+
+	//    c) AI generating a clean read-only targeted gap script MUST succeed with source="ai" and safe=true.
+	goodAI, aiBodies := fakeModel(t, "#!/usr/bin/env bash\nset -u\necho '=== MW_IMPORT_BEGIN ==='\necho '=== MW_IMPORT_HOST ==='\nhostname -s\necho '=== MW_IMPORT_MIDDLEWARE ==='\nsudo -n -u postgres pgbackrest info 2>/dev/null || true\necho '=== MW_IMPORT_END ==='\n")
+	defer goodAI.Close()
+	enableAI(t, s, goodAI.URL, 0)
+
+	pwGood := storeRequest(s, "POST", "/api/clusters/import/probe-script",
+		strings.NewReader(`{"cluster_id":"pg-gap-check","mode":"gap","missing_gaps":["paths","backup"],"focus":"重点核对 pgBackRest 仓库","use_ai":true}`), alice, csrf)
+	var pGoodResp struct {
+		Script string `json:"script"`
+		Safe   bool   `json:"safe"`
+		Source string `json:"source"`
+	}
+	_ = json.Unmarshal(pwGood.Body.Bytes(), &pGoodResp)
+	if !pGoodResp.Safe || pGoodResp.Source != "ai" || !strings.Contains(pGoodResp.Script, "pgbackrest info") {
+		t.Fatalf("expected safe AI gap probe, got %+v", pGoodResp)
+	}
+	if joined := strings.Join(*aiBodies, "\n"); !strings.Contains(joined, "pg-gap-check") || !strings.Contains(joined, "重点核对 pgBackRest 仓库") {
+		t.Errorf("expected AI probe prompt to include existing cluster baseline & user focus")
+	}
+}

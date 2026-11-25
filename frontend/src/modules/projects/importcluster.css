@@ -752,10 +752,10 @@ body[arco-theme="dark"] {
   flex: none;
 }
 
-/* Swiss Porcelain/Obsidian Read-Only Code Viewer (Aligned with Rehearsal) */
+/* Swiss Porcelain/Obsidian Read-Only Code Viewer (Zero-Wrap 2-Tier Header) */
 .imp-probe-box {
   border: 1px solid var(--imp-code-line);
-  border-radius: var(--r-md);
+  border-radius: var(--r-lg, 12px);
   overflow: hidden;
   background: var(--imp-code-bg);
 }
@@ -765,45 +765,157 @@ body[arco-theme="dark"] {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 8px 12px;
+  padding: 9px 14px;
   background: var(--imp-code-head);
   border-bottom: 1px solid var(--imp-code-line);
+  flex-wrap: wrap;
+}
+
+.imp-probe-bar-l {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
   flex-wrap: wrap;
 }
 
 .imp-probe-shield {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  flex: 1 1 240px;
-  min-width: 0;
+  gap: 5px;
   font-size: 12px;
   font-weight: 600;
   color: var(--ok);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
-.imp-probe-shield code {
-  font-family: var(--mono);
-  font-size: 11.5px;
-  font-weight: 550;
-  color: var(--ink-2);
+.imp-probe-mode-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+  color: var(--mute);
   background: var(--surface);
   border: 1px solid var(--line);
-  padding: 1px 6px;
-  border-radius: 5px;
+}
+
+.imp-probe-mode-tag.is-ai {
+  color: var(--brand-ink);
+  background: color-mix(in srgb, var(--brand) 10%, var(--surface));
+  border-color: color-mix(in srgb, var(--brand) 28%, var(--line));
+}
+
+.imp-probe-lines {
+  font-size: 11.5px;
+  color: var(--faint);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .imp-probe-actions {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  flex: none;
+  flex-shrink: 0;
+}
+
+.imp-probe-actions > .arco-btn {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.imp-probe-meta-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--imp-code-line);
+  background: color-mix(in srgb, var(--imp-code-head) 55%, var(--imp-code-bg));
+  font-size: 11.5px;
+}
+
+.imp-probe-fname {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 550;
+  color: var(--ink-2);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  padding: 1px 7px;
+  border-radius: 5px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.imp-probe-cov {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  color: var(--faint);
+}
+
+.imp-probe-cov em {
+  font-style: normal;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--brand) 9%, var(--surface));
+  color: var(--brand-ink);
+  font-weight: 550;
+  white-space: nowrap;
+}
+
+.imp-probe-model {
+  font-size: 11px;
+  color: var(--faint);
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.imp-probe-hint {
+  color: var(--mute);
+  min-width: 0;
+}
+
+.imp-probe-gen {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--imp-code-line);
+  background: color-mix(in srgb, var(--brand-soft) 45%, var(--surface));
+  font-size: 12.5px;
+}
+
+.imp-probe-gen-txt {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  color: var(--brand-ink);
+}
+
+.imp-probe-gen-meta {
+  font-size: 11.5px;
+  color: var(--faint);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .imp-probe-pre {
   margin: 0;
   padding: 10px 14px;
-  max-height: 176px;
+  max-height: 170px;
   overflow: auto;
   font-family: var(--mono);
   font-size: 11.5px;
@@ -815,6 +927,510 @@ body[arco-theme="dark"] {
 
 .imp-probe-pre.is-expanded {
   max-height: 360px;
+}
+
+/* ---- Gap-Aware AI Read-Only Probe Studio (Drawer Tab 2) ---- */
+.imp-probe-studio {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.imp-tab-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  margin-left: 5px;
+  border-radius: 999px;
+  font-style: normal;
+  font-size: 10.5px;
+  font-weight: 700;
+  background: color-mix(in srgb, var(--warn) 16%, transparent);
+  color: var(--warn);
+}
+
+.imp-gap-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: var(--r-lg, 12px);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.imp-gap-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.imp-gap-score-wrap {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+  flex: 1 1 320px;
+}
+
+.imp-gap-score {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 52px;
+  height: 44px;
+  padding: 0 10px;
+  border-radius: 11px;
+  font-size: 15px;
+  font-weight: 750;
+  white-space: nowrap;
+  flex-shrink: 0;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.imp-gap-score.sm {
+  min-width: 44px;
+  height: 34px;
+  font-size: 13px;
+  border-radius: 9px;
+}
+
+.imp-gap-score.is-ok {
+  color: var(--ok);
+  background: var(--ok-soft);
+  border-color: var(--ok-line);
+}
+
+.imp-gap-score.is-warn {
+  color: var(--warn);
+  background: var(--warn-soft);
+  border-color: color-mix(in srgb, var(--warn) 32%, var(--line));
+}
+
+.imp-gap-score.is-low {
+  color: var(--bad);
+  background: var(--bad-soft);
+  border-color: color-mix(in srgb, var(--bad) 30%, var(--line));
+}
+
+.imp-gap-head-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.imp-gap-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.imp-gap-title-row h4 {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--ink);
+}
+
+.imp-iron-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+  color: var(--ok);
+  background: var(--ok-soft);
+  border: 1px solid var(--ok-line);
+}
+
+.imp-gap-sub {
+  margin: 0;
+  font-size: 12px;
+  color: var(--mute);
+  line-height: 1.5;
+}
+
+.imp-gap-mode-sw {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--sunken);
+  flex-shrink: 0;
+}
+
+.imp-gap-mode-sw > button {
+  border: 0;
+  background: transparent;
+  color: var(--mute);
+  font-size: 12px;
+  font-weight: 550;
+  padding: 4px 10px;
+  border-radius: 7px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.14s ease, color 0.14s ease;
+}
+
+.imp-gap-mode-sw > button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.imp-gap-mode-sw > button.on {
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
+.imp-gap-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 8px;
+}
+
+.imp-gap-item {
+  all: unset;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 9px 11px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  cursor: pointer;
+  transition: border-color 0.16s ease, background-color 0.16s ease;
+}
+
+.imp-gap-item:hover {
+  border-color: var(--line-strong);
+}
+
+.imp-gap-item.is-on {
+  border-color: color-mix(in srgb, var(--brand) 42%, var(--line));
+  background: color-mix(in srgb, var(--brand-soft) 42%, var(--surface));
+}
+
+.imp-gap-item-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.imp-gap-chk {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 4px;
+  border: 1.5px solid var(--line-strong);
+  background: var(--surface);
+  font-size: 10px;
+  color: var(--on-brand);
+  flex-shrink: 0;
+}
+
+.imp-gap-chk.is-on {
+  border-color: var(--brand);
+  background: var(--brand);
+}
+
+.imp-gap-sev {
+  font-size: 10.5px;
+  font-weight: 650;
+  padding: 0 6px;
+  height: 17px;
+  line-height: 17px;
+  border-radius: 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.imp-gap-sev.is-high {
+  color: var(--bad);
+  background: var(--bad-soft);
+}
+
+.imp-gap-sev.is-medium {
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+
+.imp-gap-sev.is-low {
+  color: var(--mute);
+  background: var(--sunken);
+}
+
+.imp-gap-cat {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--faint);
+  white-space: nowrap;
+}
+
+.imp-gap-item-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1.4;
+}
+
+.imp-gap-item-act {
+  font-size: 11.5px;
+  color: var(--mute);
+  line-height: 1.45;
+}
+
+.imp-gap-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 2px;
+}
+
+.imp-gap-bar > .arco-input-inner-wrapper,
+.imp-gap-bar > .arco-input {
+  flex: 1 1 280px;
+  min-width: 0;
+}
+
+.imp-gap-bar > .arco-btn {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* Tab 1 Health Strip & Incremental Merge Diff Banner */
+.imp-health-strip,
+.imp-merge-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 11px 14px;
+  border-radius: var(--r-lg, 12px);
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+}
+
+.imp-merge-banner {
+  border-color: var(--ok-line);
+  background: color-mix(in srgb, var(--ok-soft) 65%, var(--surface));
+}
+
+.imp-health-strip-l,
+.imp-merge-banner-l {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1 1 320px;
+}
+
+.imp-merge-banner-l > svg {
+  color: var(--ok);
+  font-size: 17px;
+  flex-shrink: 0;
+}
+
+.imp-health-strip-t {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.imp-health-strip-t b,
+.imp-merge-banner-l b {
+  font-size: 12.5px;
+  color: var(--ink);
+}
+
+/* ---- Structured Field Clues Editor (replaces cramped paragraph textarea) ---- */
+.imp-clues-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.imp-clues-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.imp-clues-head-l {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.imp-clues-card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md, 10px);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.imp-clues-empty {
+  padding: 14px 16px;
+  font-size: 12.5px;
+  color: var(--faint);
+  line-height: 1.5;
+}
+
+.imp-clues-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.imp-clue-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 8px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  transition: background-color 0.14s ease;
+}
+
+.imp-clue-row:hover {
+  background: var(--hover);
+}
+
+.imp-clue-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-top: 1px;
+  background: var(--sunken);
+  color: var(--mute);
+}
+
+.imp-clue-tag.is-blue {
+  color: var(--cobalt, #2563eb);
+  background: color-mix(in srgb, var(--cobalt, #2563eb) 11%, var(--surface));
+}
+
+.imp-clue-tag.is-teal {
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+}
+
+.imp-clue-tag.is-amber {
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+
+.imp-clue-tag.is-indigo {
+  color: var(--violet-ink, #6366f1);
+  background: var(--violet-soft, rgba(99, 102, 241, 0.1));
+}
+
+.imp-clue-tag.is-coral {
+  color: var(--bad);
+  background: var(--bad-soft);
+}
+
+.imp-clue-txt {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--ink-2);
+  cursor: text;
+  overflow-wrap: anywhere;
+}
+
+.imp-clue-edit {
+  flex: 1;
+  min-width: 0;
+}
+
+.imp-clue-acts {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  opacity: 0.45;
+  transition: opacity 0.14s ease;
+}
+
+.imp-clue-row:hover .imp-clue-acts,
+.imp-clue-row:focus-within .imp-clue-acts {
+  opacity: 1;
+}
+
+.imp-clue-icon {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  color: var(--mute);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.imp-clue-icon:hover {
+  color: var(--ink);
+  background: var(--sunken);
+}
+
+.imp-clue-icon.is-del:hover {
+  color: var(--bad);
+  background: var(--bad-soft);
+}
+
+.imp-clues-add {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--surface-2);
+  border-top: 1px solid var(--line);
+}
+
+.imp-clues-add > .arco-input-inner-wrapper,
+.imp-clues-add > .arco-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.imp-clues-add > .arco-btn {
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 /* Staged Live AI Analysis Panel (Aligned with Rehearsal AI Panel) */

@@ -13,9 +13,12 @@ import (
 // machine matching by IP alone, shared enrollment token, or arbitrary commands.
 type targetAgent struct {
 	ID             string   `json:"id"`
-	Job            string   `json:"job"`
+	Job            string   `json:"job,omitempty"`
 	Cluster        string   `json:"cluster"`
-	Node           string   `json:"node"`
+	Node           string   `json:"node,omitempty"`
+	Mode           string   `json:"mode,omitempty"` // "" / "ssh_trust" | "direct" (direct execution without SSH/control host)
+	AllowMutating  bool     `json:"allow_mutating,omitempty"`
+	Capabilities   []string `json:"capabilities,omitempty"`
 	Host           string   `json:"host"`
 	IP             string   `json:"ip"`
 	Created        string   `json:"created"`
@@ -247,13 +250,20 @@ func (s *storeServer) handleTargetAgent(w http.ResponseWriter, r *http.Request) 
 			s.fail(w, 401, "接入配置已失效，请重新获取")
 			return
 		}
-		if n.Disabled || !targetAgentInScope(a, n) {
-			s.fail(w, 403, "执行机或目标授权已失效，请重新登记")
-			return
-		}
-		if req.Hostname != a.Host || !contains(req.IPs, a.IP) {
-			s.fail(w, 409, "机器名称或地址与接入配置不符；请核对目标机器，不能将配置用于其他机器")
-			return
+		if a.Mode != "direct" {
+			if n.Disabled || !targetAgentInScope(a, n) {
+				s.fail(w, 403, "执行机或目标授权已失效，请重新登记")
+				return
+			}
+			if req.Hostname != a.Host || !contains(req.IPs, a.IP) {
+				s.fail(w, 409, "机器名称或地址与接入配置不符；请核对目标机器，不能将配置用于其他机器")
+				return
+			}
+		} else {
+			if !contains(req.IPs, a.IP) {
+				s.fail(w, 409, "目标机器 IP 地址与直连 Agent 配置不符，请确认是否在目标机上启动")
+				return
+			}
 		}
 		if a.MachineID != "" && (a.MachineID != req.MachineID || a.TokenHash != digest([]byte(req.Token))) {
 			s.fail(w, 409, "该接入配置已绑定其他 Agent 身份")
@@ -262,6 +272,9 @@ func (s *storeServer) handleTargetAgent(w http.ResponseWriter, r *http.Request) 
 		a.MachineID = req.MachineID
 		a.TokenHash = digest([]byte(req.Token))
 		a.LastSeen = executionNow()
+		if a.Mode == "direct" {
+			a.Applied = "active"
+		}
 		d.Agents[a.ID] = a
 		if s.saveExecutions(d) != nil {
 			s.fail(w, 500, "登记未保存，请重试")
@@ -281,13 +294,35 @@ func (s *storeServer) handleTargetAgent(w http.ResponseWriter, r *http.Request) 
 		s.fail(w, 401, "目标 Agent 认证失败")
 		return
 	}
+	if r.URL.Path == "/api/target-agent/event" {
+		var req struct {
+			MachineID string             `json:"machine_id"`
+			Event     rehearsalExecEvent `json:"event"`
+		}
+		if decodeBody(w, r, 65536, &req) != nil || req.MachineID != a.MachineID || !executionID.MatchString(req.Event.TaskID) {
+			s.fail(w, 403, "目标 Agent 事件身份校验失败")
+			return
+		}
+		a.LastSeen = executionNow()
+		d.Agents[a.ID] = a
+		_ = s.saveExecutions(d)
+		task, err := s.applyRehearsalExecEvent("agent", a.ID, req.Event)
+		if err != nil {
+			s.fail(w, 409, err.Error())
+			return
+		}
+		s.writeJSON(w, 200, map[string]any{"ack": req.Event.Seq, "state": task.State, "cancel": task.Cancel})
+		return
+	}
 	var req struct {
-		MachineID string   `json:"machine_id"`
-		Version   string   `json:"version"`
-		Applied   string   `json:"applied"`
-		PublicKey string   `json:"public_key"`
-		HostKeys  []string `json:"host_keys"`
-		Message   string   `json:"message"`
+		MachineID    string   `json:"machine_id"`
+		Version      string   `json:"version"`
+		Applied      string   `json:"applied"`
+		PublicKey    string   `json:"public_key"`
+		HostKeys     []string `json:"host_keys"`
+		Message      string   `json:"message"`
+		Heartbeat    bool     `json:"heartbeat"`
+		Capabilities []string `json:"capabilities"`
 	}
 	if decodeBody(w, r, 16384, &req) != nil || req.MachineID != a.MachineID {
 		s.fail(w, 403, "目标 Agent 身份不符")
@@ -309,32 +344,65 @@ func (s *storeServer) handleTargetAgent(w http.ResponseWriter, r *http.Request) 
 	}
 	a.LastSeen = executionNow()
 	n := d.Nodes[a.Node]
-	if a.Desired == "active" && !targetAgentInScope(a, n) {
-		a.Desired = "revoked"
-		a.Applied = ""
-		invalidateExecutionPreparations(&d, a.Node, a.Job)
+	if a.Mode != "direct" {
+		if a.Desired == "active" && !targetAgentInScope(a, n) {
+			a.Desired = "revoked"
+			a.Applied = ""
+			invalidateExecutionPreparations(&d, a.Node, a.Job)
+		}
 	}
 	a.Version = truncRunes(req.Version, 80)
-	a.Message = req.Message
-	if (req.Applied == "active" && a.Desired == "active" && req.PublicKey == a.PublicKey && a.PublicKey != "") || (req.Applied == "revoked" && a.Desired == "revoked") {
-		a.Applied = req.Applied
-		a.HostKeys = req.HostKeys
-	} else {
-		a.Applied = ""
+	if len(req.Capabilities) > 0 && len(req.Capabilities) <= 8 {
+		a.Capabilities = req.Capabilities
+	}
+	if !req.Heartbeat {
+		a.Message = req.Message
+		if a.Mode == "direct" {
+			if a.Desired == "active" {
+				a.Applied = "active"
+			} else {
+				a.Applied = "revoked"
+			}
+			if len(req.HostKeys) > 0 {
+				a.HostKeys = req.HostKeys
+			}
+		} else if (req.Applied == "active" && a.Desired == "active" && req.PublicKey == a.PublicKey && a.PublicKey != "") || (req.Applied == "revoked" && a.Desired == "revoked") {
+			a.Applied = req.Applied
+			a.HostKeys = req.HostKeys
+		} else {
+			a.Applied = ""
+		}
 	}
 	d.Agents[a.ID] = a
 	if s.saveExecutions(d) != nil {
 		s.fail(w, 500, "回传未保存")
 		return
 	}
-	if n.Disabled && a.Desired == "active" {
+	if a.Mode != "direct" && n.Disabled && a.Desired == "active" {
 		s.writeJSON(w, 200, map[string]any{"id": a.ID, "desired": "paused"})
 		return
 	}
-	s.writeJSON(w, 200, map[string]any{"id": a.ID, "desired": a.Desired, "public_key": a.PublicKey, "source_ip": n.ControllerIP})
+	task, cancelTask := s.pollRehearsalTaskForAgent(a, req.Heartbeat)
+	resp := map[string]any{
+		"id":         a.ID,
+		"mode":       a.Mode,
+		"desired":    a.Desired,
+		"public_key": a.PublicKey,
+		"source_ip":  n.ControllerIP,
+	}
+	if task != nil {
+		resp["task"] = task
+	}
+	if cancelTask != "" {
+		resp["cancel_task"] = cancelTask
+	}
+	s.writeJSON(w, 200, resp)
 }
 
 func targetAgentInScope(a targetAgent, n executionNode) bool {
+	if a.Mode == "direct" {
+		return a.Desired == "active"
+	}
 	if n.ID == "" || !contains(n.Clusters, a.Cluster) || a.IP == n.ControllerIP {
 		return false
 	}

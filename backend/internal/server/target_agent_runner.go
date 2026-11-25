@@ -27,10 +27,13 @@ type targetAgentConfig struct {
 	Enrolled   bool   `json:"enrolled"`
 }
 type targetAgentInstruction struct {
-	ID        string `json:"id"`
-	Desired   string `json:"desired"`
-	PublicKey string `json:"public_key"`
-	SourceIP  string `json:"source_ip"`
+	ID         string                 `json:"id"`
+	Mode       string                 `json:"mode,omitempty"`
+	Desired    string                 `json:"desired"`
+	PublicKey  string                 `json:"public_key"`
+	SourceIP   string                 `json:"source_ip"`
+	Task       *rehearsalExecDispatch `json:"task,omitempty"`
+	CancelTask string                 `json:"cancel_task,omitempty"`
 }
 
 func targetAgentCommand(args []string) error {
@@ -132,17 +135,25 @@ func targetAgentCommand(args []string) error {
 			}
 		} else {
 			var instruction targetAgentInstruction
-			e = call("poll", cfg.Token, map[string]any{"machine_id": identity, "version": version, "applied": applied, "public_key": pub, "host_keys": targetHostKeys(), "message": message}, &instruction)
+			e = call("poll", cfg.Token, map[string]any{
+				"machine_id":   identity,
+				"version":      version,
+				"applied":      applied,
+				"public_key":   pub,
+				"host_keys":    targetHostKeys(),
+				"message":      message,
+				"capabilities": []string{"ssh_trust", "rehearsal_exec"},
+			}, &instruction)
 			if e == nil {
 				if !connected {
-					logAgent("INFO", "connected to platform id=%s, polling for SSH trust instructions", cfg.ID)
+					logAgent("INFO", "connected to platform id=%s mode=%s, polling for instructions & tasks", cfg.ID, instruction.Mode)
 					connected = true
 					lastErr = ""
 				}
 				if instruction.ID != cfg.ID {
 					return errors.New("target instruction ID mismatch")
 				}
-				if instruction.Desired == "revoked" || instruction.PublicKey != "" {
+				if instruction.Mode != "direct" && (instruction.Desired == "revoked" || instruction.PublicKey != "") {
 					prevApplied, prevPub := applied, pub
 					e = applyTargetTrust("/root/.ssh", instruction)
 					if e == nil {
@@ -155,6 +166,16 @@ func targetAgentCommand(args []string) error {
 					} else {
 						applied = ""
 						message = truncRunes(e.Error(), 1500)
+					}
+				} else if instruction.Mode == "direct" {
+					applied = instruction.Desired
+				}
+				if instruction.Task != nil && instruction.Desired == "active" {
+					logAgent("INFO", "executing direct target-agent task=%s kind=%s", instruction.Task.TaskID, instruction.Task.Kind)
+					if te := executeTargetAgentTask(call, cfg.Token, identity, *instruction.Task); te != nil {
+						logAgent("WARN", "direct task finished with warning task=%s err=%v", instruction.Task.TaskID, te)
+					} else {
+						logAgent("INFO", "direct task completed task=%s", instruction.Task.TaskID)
 					}
 				}
 			}

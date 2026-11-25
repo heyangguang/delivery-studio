@@ -27,13 +27,23 @@ import {
   IconRefresh,
   IconRight,
   IconSearch,
+  IconThunderbolt,
   IconUp,
   IconUpload,
 } from "@arco-design/web-react/icon";
 import { Spark } from "../ai/aichat";
 import { ModelPicker, useModelPick } from "../ai/modelpick";
 import { ThinkLevel, useAIOptions } from "../ai/aitools";
-import { api, copy } from "../../shared/shared";
+import { api, can, copy } from "../../shared/shared";
+import {
+  ClusterAutomationDrawer,
+  LiveExecLogCard,
+  pollRehearsalExecTask,
+} from "../automation/rehearsal-automation";
+import type {
+  ClusterAutomationSummary,
+  RehearsalExecTask,
+} from "../automation/execution-types";
 import type {
   ClusterView,
   ImportedCompanion,
@@ -3356,6 +3366,11 @@ export function ImportedBaselineModal({
   const [step1Open, setStep1Open] = useState(true);
   const [step2Open, setStep2Open] = useState(false);
   const [step3Open, setStep3Open] = useState(false);
+  const [autoSummary, setAutoSummary] = useState<ClusterAutomationSummary | null>(null);
+  const [autoDrawerOpen, setAutoDrawerOpen] = useState(false);
+  const [autoProbeBusy, setAutoProbeBusy] = useState(false);
+  const [autoProbeTask, setAutoProbeTask] = useState<RehearsalExecTask | null>(null);
+  const autoProbeAbortRef = useRef<AbortController | null>(null);
   const modelPick = useModelPick("chat");
   const aiOpts = useAIOptions();
 
@@ -3609,6 +3624,56 @@ export function ImportedBaselineModal({
     if (!visible || tab !== "probe" || loading || probeGenerating || probeSource === "ai") return;
     void fetchDrawerProbe({ mode: probeMode, gapIDs: selectedGapIDs });
   }, [selectedGapKey]);
+
+  useEffect(() => {
+    if (!visible || tab !== "probe") return;
+    let alive = true;
+    api<ClusterAutomationSummary>(`/api/clusters/${encodeURIComponent(cluster.id)}/automation`)
+      .then((res) => alive && setAutoSummary(res))
+      .catch(() => {});
+    return () => {
+      alive = false;
+      autoProbeAbortRef.current?.abort();
+    };
+  }, [visible, tab, cluster.id]);
+
+  const runAutoBaselineProbe = async () => {
+    if (!probeScript.trim() || autoProbeBusy) return;
+    autoProbeAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    autoProbeAbortRef.current = ctrl;
+    setStep2Open(true);
+    setAutoProbeBusy(true);
+    try {
+      const task = await api<RehearsalExecTask>(
+        `/api/clusters/${encodeURIComponent(cluster.id)}/automation/probe`,
+        {
+          method: "POST",
+          body: JSON.stringify({ script: probeScript }),
+        },
+      );
+      setAutoProbeTask(task);
+      const fin = await pollRehearsalExecTask(cluster.id, task.id, setAutoProbeTask, ctrl.signal);
+      if (fin.combined_output?.trim()) {
+        setProbeOutput(fin.combined_output);
+        setStep3Open(true);
+        Message.success(
+          bi(
+            "只读探针已自动采集完成并填入下方回显框，点击「AI 解析并增量合并基线」即可合入",
+            "Read-only probe auto-collected and populated below; click AI Parse & Merge to apply",
+          ),
+        );
+      } else if (fin.state !== "succeeded") {
+        Message.warning(bi("自动采集未成功，请查看下方脱敏日志", "Automated probe did not succeed; inspect log below"));
+      }
+    } catch (e) {
+      if ((e as Error).name !== "AbortError") {
+        Message.error((e as Error).message || bi("自动执行只读探针失败", "Auto-run probe failed"));
+      }
+    } finally {
+      setAutoProbeBusy(false);
+    }
+  };
 
   const adoptAllSuggested = () => {
     if (suggestedCompanions.length === 0) return;
@@ -4285,14 +4350,45 @@ export function ImportedBaselineModal({
                       aiBusy={probeGenerating}
                       gapCount={selectedGapIDs.length}
                     />
+                    {autoProbeTask && (
+                      <LiveExecLogCard
+                        task={autoProbeTask}
+                        clusterId={cluster.id}
+                        compact
+                        onCancelled={setAutoProbeTask}
+                      />
+                    )}
                     <div className="imp-step-next">
                       <span className="imp-step-next-hint">
                         {bi(
-                          "在目标主/备节点终端执行后复制完整回显；支持拼接多台节点回显一并粘贴",
-                          "Run on target primary/standby terminals and copy output; multi-node outputs can be concatenated",
+                          "在目标主/备节点终端执行后复制完整回显；若已配置自动化通道也可直接一键采集",
+                          "Run on target terminals and copy output, or use 1-click automated collection if configured",
                         )}
                       </span>
                       <div className="imp-step-next-acts">
+                        {can("delivery.execute") && (
+                          autoSummary?.ready ? (
+                            <Button
+                              size="small"
+                              type="secondary"
+                              loading={autoProbeBusy}
+                              disabled={probeGenerating || !probeScript}
+                              icon={<IconThunderbolt />}
+                              onClick={() => void runAutoBaselineProbe()}
+                            >
+                              {bi("自动执行只读探针", "Auto-Run Probe")}
+                            </Button>
+                          ) : (
+                            <Button
+                              size="small"
+                              type="outline"
+                              icon={<IconThunderbolt />}
+                              onClick={() => setAutoDrawerOpen(true)}
+                            >
+                              {bi("配置自动采集", "Setup Automation")}
+                            </Button>
+                          )
+                        )}
                         <Button
                           size="small"
                           type="text"
@@ -4754,6 +4850,12 @@ export function ImportedBaselineModal({
           {lang ? null : null}
         </div>
       )}
+      <ClusterAutomationDrawer
+        visible={autoDrawerOpen}
+        clusterId={cluster.id}
+        onClose={() => setAutoDrawerOpen(false)}
+        onChanged={setAutoSummary}
+      />
     </Drawer>
   );
 }

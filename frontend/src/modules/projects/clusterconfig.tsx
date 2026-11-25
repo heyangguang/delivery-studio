@@ -25,6 +25,7 @@ import {
   IconRefresh,
   IconRight,
   IconSearch,
+  IconThunderbolt,
 } from "@arco-design/web-react/icon";
 import {
   ago,
@@ -63,6 +64,11 @@ import "./clusterconfig.css";
 
 const LazyImportedBaselineModal = lazySubView(() =>
   import("./importcluster").then((m) => ({ default: m.ImportedBaselineModal })),
+);
+const LazyClusterAutomationDrawer = lazySubView(() =>
+  import("../automation/rehearsal-automation").then((m) => ({
+    default: m.ClusterAutomationDrawer,
+  })),
 );
 
 const schemaCache = new Map<string, Schema>();
@@ -1082,6 +1088,7 @@ function ConfigRecord({
   }, [instance, allInstanceRows]);
 
   const [baselineEdit, setBaselineEdit] = useState<null | "edit" | "probe">(null);
+  const [autoDrawerOpen, setAutoDrawerOpen] = useState(false);
 
   useEffect(() => {
     if (!historyOpen) return;
@@ -1102,6 +1109,16 @@ function ConfigRecord({
           </span>
         </div>
         <div className="cx-source-actions">
+          {(can("delivery.execute") || can("execution.manage")) && (
+            <Button
+              size="small"
+              icon={<IconThunderbolt />}
+              onMouseEnter={() => void import("../automation/rehearsal-automation")}
+              onClick={() => setAutoDrawerOpen(true)}
+            >
+              {bi("自动化接入", "Automation")}
+            </Button>
+          )}
           {isImported && can("delivery.create") && (
             <>
               <Button
@@ -2646,6 +2663,15 @@ function ConfigRecord({
               }
               setRetry((x) => x + 1);
             }}
+          />
+        </React.Suspense>
+      )}
+      {autoDrawerOpen && (
+        <React.Suspense fallback={null}>
+          <LazyClusterAutomationDrawer
+            visible
+            clusterId={c.id}
+            onClose={() => setAutoDrawerOpen(false)}
           />
         </React.Suspense>
       )}

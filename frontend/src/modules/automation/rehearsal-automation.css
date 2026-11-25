@@ -1,0 +1,847 @@
+/* ---- Cluster Rehearsal Automation Drawer & Live Streaming Execution Cards ---- */
+.rha-drawer-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 650;
+}
+
+.rha-drawer-title > svg {
+  color: var(--brand);
+}
+
+.rha-cluster-pill {
+  font-size: 12px;
+  font-weight: 550;
+  padding: 1px 8px;
+  border-radius: 6px;
+  background: var(--sunken);
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+}
+
+.rha-drawer-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.rha-drawer-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  flex-wrap: wrap;
+}
+
+.rha-drawer-foot-r {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.rha-master-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+}
+
+.rha-master-card.is-ready {
+  border-color: var(--ok-line);
+  background: color-mix(in srgb, var(--ok-soft) 55%, var(--surface));
+}
+
+.rha-master-card.is-warn {
+  border-color: color-mix(in srgb, var(--warn) 36%, var(--line));
+  background: color-mix(in srgb, var(--warn-soft) 55%, var(--surface));
+}
+
+.rha-master-l {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.rha-master-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 13.5px;
+  color: var(--ink);
+}
+
+.rha-master-sub {
+  margin: 0;
+  font-size: 12px;
+  color: var(--mute);
+  line-height: 1.5;
+}
+
+.rha-ready-dot {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+  flex-shrink: 0;
+  background: var(--sunken);
+  color: var(--mute);
+  border: 1px solid var(--line);
+}
+
+.rha-ready-dot.is-ok {
+  color: var(--ok);
+  background: var(--ok-soft);
+  border-color: var(--ok-line);
+}
+
+.rha-ready-dot.is-warn {
+  color: var(--warn);
+  background: var(--warn-soft);
+  border-color: color-mix(in srgb, var(--warn) 32%, var(--line));
+}
+
+.rha-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rha-sec-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.rha-sec-h h4 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--ink);
+}
+
+.rha-transport-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+}
+
+.rha-transport-card {
+  all: unset;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1.5px solid var(--line);
+  background: var(--surface);
+  cursor: pointer;
+  transition: border-color 0.16s ease, background-color 0.16s ease;
+}
+
+.rha-transport-card:hover:not(:disabled) {
+  border-color: var(--line-strong);
+}
+
+.rha-transport-card.is-on {
+  border-color: var(--brand);
+  background: color-mix(in srgb, var(--brand-soft) 45%, var(--surface));
+}
+
+.rha-tc-top {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.rha-tc-top > svg {
+  color: var(--brand);
+  flex-shrink: 0;
+}
+
+.rha-tc-badge {
+  margin-left: auto;
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  background: var(--sunken);
+  color: var(--mute);
+  border: 1px solid var(--line);
+}
+
+.rha-tc-badge.is-brand {
+  color: var(--brand-ink);
+  background: color-mix(in srgb, var(--brand) 11%, var(--surface));
+  border-color: color-mix(in srgb, var(--brand) 28%, var(--line));
+}
+
+.rha-transport-card p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--mute);
+  line-height: 1.5;
+}
+
+.rha-panel-box {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 13px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.rha-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.rha-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.rha-field > label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.rha-field-hint {
+  font-size: 11.5px;
+  color: var(--faint);
+  line-height: 1.45;
+}
+
+.rha-link-btn {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--brand-ink);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.rha-link-btn:hover {
+  text-decoration: underline;
+}
+
+.rha-agents-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.rha-agent-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.rha-agent-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 75%, transparent);
+  background: var(--surface);
+}
+
+.rha-agent-row:last-child {
+  border-bottom: 0;
+}
+
+.rha-agent-row-l {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1 1 240px;
+}
+
+.rha-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--line-strong);
+  flex-shrink: 0;
+}
+
+.rha-dot.is-on {
+  background: var(--ok);
+  box-shadow: 0 0 0 3px var(--ok-soft);
+}
+
+.rha-dot.is-wait {
+  background: var(--warn);
+}
+
+.rha-agent-host {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+
+.rha-agent-host code {
+  font-size: 11.5px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--sunken);
+  color: var(--ink-2);
+}
+
+.rha-role-tag {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 0 6px;
+  height: 18px;
+  line-height: 18px;
+  border-radius: 4px;
+  background: var(--brand-soft);
+  color: var(--brand-ink);
+  white-space: nowrap;
+}
+
+.rha-agent-meta {
+  font-size: 11.5px;
+  color: var(--faint);
+  margin-top: 2px;
+}
+
+.rha-agent-row-r {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.rha-mini-sw {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--mute);
+  white-space: nowrap;
+}
+
+.rha-enroll-box {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 13px;
+  border-radius: 10px;
+  border: 1px solid var(--ok-line);
+  background: color-mix(in srgb, var(--ok-soft) 45%, var(--surface));
+}
+
+.rha-enroll-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+
+.rha-enroll-head svg {
+  color: var(--ok);
+}
+
+.rha-enroll-url-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rha-enroll-url-row > label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.rha-enroll-acts {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.rha-enroll-cmd {
+  margin: 0;
+  padding: 9px 11px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--code-bg);
+  color: var(--ink);
+  font-size: 11.5px;
+  line-height: 1.55;
+  overflow-x: auto;
+}
+
+.rha-add-host-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 110px auto;
+  gap: 6px;
+}
+
+.rha-guard-switches {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 75%, transparent);
+}
+
+.rha-guard-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.rha-guard-row b {
+  font-size: 12.5px;
+  color: var(--ink);
+}
+
+.rha-guard-row p {
+  margin: 2px 0 0;
+  font-size: 11.5px;
+  color: var(--mute);
+  line-height: 1.45;
+}
+
+/* ---- Live Streaming Execution Log Card ---- */
+.rha-log-card {
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+
+.rha-log-card.is-running,
+.rha-log-card.is-queued {
+  border-color: color-mix(in srgb, var(--brand) 42%, var(--line));
+}
+
+.rha-log-card.is-succeeded {
+  border-color: var(--ok-line);
+}
+
+.rha-log-card.is-failed,
+.rha-log-card.is-blocked {
+  border-color: color-mix(in srgb, var(--bad) 36%, var(--line));
+}
+
+.rha-log-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+}
+
+.rha-log-head-l {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  min-width: 0;
+}
+
+.rha-log-head-r {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.rha-log-head-r > .arco-btn {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.rha-state-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 650;
+  white-space: nowrap;
+  flex-shrink: 0;
+  background: var(--sunken);
+  color: var(--ink-2);
+}
+
+.rha-state-pill.is-running,
+.rha-state-pill.is-queued {
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+}
+
+.rha-state-pill.is-succeeded {
+  color: var(--ok);
+  background: var(--ok-soft);
+}
+
+.rha-state-pill.is-failed,
+.rha-state-pill.is-blocked {
+  color: var(--bad);
+  background: var(--bad-soft);
+}
+
+.rha-state-pill.is-stopped,
+.rha-state-pill.is-unknown {
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+
+.rha-transport-tag,
+.rha-ro-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--mute);
+}
+
+.rha-ro-tag {
+  color: var(--ok);
+  background: var(--ok-soft);
+  border-color: var(--ok-line);
+}
+
+.rha-log-title {
+  font-size: 12px;
+  font-weight: 550;
+  color: var(--ink-2);
+}
+
+.rha-log-dur {
+  font-size: 11.5px;
+  color: var(--faint);
+}
+
+.rha-target-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 7px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 65%, transparent);
+  background: color-mix(in srgb, var(--surface-2) 45%, var(--surface));
+}
+
+.rha-target-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.rha-target-chip > i {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--line-strong);
+}
+
+.rha-target-chip.is-running > i,
+.rha-target-chip.is-leased > i {
+  background: var(--brand);
+}
+
+.rha-target-chip.is-succeeded > i {
+  background: var(--ok);
+}
+
+.rha-target-chip.is-failed > i,
+.rha-target-chip.is-blocked > i {
+  background: var(--bad);
+}
+
+.rha-target-chip em {
+  font-style: normal;
+  font-size: 10.5px;
+  color: var(--faint);
+}
+
+.rha-log-pre {
+  margin: 0;
+  padding: 10px 12px;
+  max-height: 240px;
+  overflow: auto;
+  background: var(--code-bg);
+  color: var(--ink);
+  font-size: 11.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ---- Rehearsal Workbench Automation Control Ribbon & Step Bar ---- */
+.rha-ribbon {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--brand) 28%, var(--line));
+  background: color-mix(in srgb, var(--brand-soft) 32%, var(--surface));
+}
+
+.rha-ribbon-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.rha-ribbon-l {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.rha-ribbon-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.rha-ribbon-title svg {
+  color: var(--brand);
+}
+
+.rha-ribbon-r {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.rha-ribbon-r > .arco-btn {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.rha-ribbon-bot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+}
+
+.rha-map-pills {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--mute);
+}
+
+.rha-map-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: 6px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.rha-prod-lock {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.rha-prod-lock .arco-input {
+  width: 170px;
+}
+
+.rha-breakpoint-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 13px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--line));
+  background: var(--warn-soft);
+  color: var(--ink);
+  font-size: 12.5px;
+}
+
+.rha-step-exec-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--brand) 22%, var(--line));
+  background: color-mix(in srgb, var(--brand-soft) 24%, var(--surface));
+}
+
+.rha-step-exec-l {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink-2);
+  min-width: 0;
+}
+
+.rha-step-exec-r {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.rha-step-exec-r > .arco-btn {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.rha-probe-auto-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--brand) 28%, var(--line));
+  background: color-mix(in srgb, var(--brand-soft) 32%, var(--surface));
+}
+
+.rha-probe-auto-l {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+
+.rha-probe-auto-l svg {
+  color: var(--brand);
+  flex-shrink: 0;
+}
+
+.rha-node-caps {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding-top: 10px;
+  margin-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 75%, transparent);
+}
+
+.rha-node-cap-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.rha-proto-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 19px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  background: var(--brand-soft);
+  color: var(--brand-ink);
+}
+
+.rha-proto-pill.is-old {
+  background: var(--warn-soft);
+  color: var(--warn);
+}

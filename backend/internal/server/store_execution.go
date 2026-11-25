@@ -50,9 +50,12 @@ type executionNode struct {
 	IPs          []string            `json:"ips"`
 	ControllerIP string              `json:"controller_ip"`
 	TokenHash    string              `json:"token_hash,omitempty"`
-	LastSeen     string              `json:"last_seen,omitempty"`
-	Version      string              `json:"version,omitempty"`
-	Disabled     bool                `json:"disabled"`
+	LastSeen       string              `json:"last_seen,omitempty"`
+	Version        string              `json:"version,omitempty"`
+	Disabled       bool                `json:"disabled"`
+	AllowDelivery  *bool               `json:"allow_delivery,omitempty"`
+	AllowProbe     *bool               `json:"allow_probe,omitempty"`
+	AllowRehearsal *bool               `json:"allow_rehearsal,omitempty"`
 }
 type executionStep struct {
 	ID        string         `json:"id"`
@@ -704,8 +707,11 @@ func (s *storeServer) handleExecutionNodes(w http.ResponseWriter, r *http.Reques
 		s.writeJSON(w, 201, map[string]any{"node": publicExecutionNode(n), "token": token})
 	case "PATCH":
 		var req struct {
-			ID       string `json:"id"`
-			Disabled bool   `json:"disabled"`
+			ID             string `json:"id"`
+			Disabled       *bool  `json:"disabled"`
+			AllowDelivery  *bool  `json:"allow_delivery"`
+			AllowProbe     *bool  `json:"allow_probe"`
+			AllowRehearsal *bool  `json:"allow_rehearsal"`
 		}
 		if decodeBody(w, r, 4096, &req) != nil {
 			s.fail(w, 400, "请求无效")
@@ -717,7 +723,21 @@ func (s *storeServer) handleExecutionNodes(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		// Disabling stops new leases. The same credential can still return already-authorized evidence.
-		n.Disabled = req.Disabled
+		if req.Disabled != nil {
+			n.Disabled = *req.Disabled
+		}
+		if req.AllowDelivery != nil {
+			v := *req.AllowDelivery
+			n.AllowDelivery = &v
+		}
+		if req.AllowProbe != nil {
+			v := *req.AllowProbe
+			n.AllowProbe = &v
+		}
+		if req.AllowRehearsal != nil {
+			v := *req.AllowRehearsal
+			n.AllowRehearsal = &v
+		}
 		d.Nodes[n.ID] = n
 		if s.saveExecutions(d) != nil {
 			s.fail(w, 500, "保存失败")
@@ -1446,6 +1466,18 @@ func (s *storeServer) handleExecutionAgent(w http.ResponseWriter, r *http.Reques
 		s.handleExecutionTrustKey(w, r, &d, n)
 	case "/api/execution-agent/prepared":
 		s.handleExecutionPrepared(w, r, &d, n)
+	case "/api/execution-agent/rehearsal-event":
+		var ev rehearsalExecEvent
+		if decodeBody(w, r, 65536, &ev) != nil || !executionID.MatchString(ev.TaskID) {
+			s.fail(w, 400, "演练回传格式不正确")
+			return
+		}
+		task, err := s.applyRehearsalExecEvent("node", n.ID, ev)
+		if err != nil {
+			s.fail(w, 409, err.Error())
+			return
+		}
+		s.writeJSON(w, 200, map[string]any{"ack": ev.Seq, "state": task.State, "cancel": task.Cancel})
 	case "/api/execution-agent/event":
 		var ev executionEvent
 		if decodeBody(w, r, 48000, &ev) != nil {
@@ -1559,7 +1591,21 @@ func (s *storeServer) handleExecutionAgent(w http.ResponseWriter, r *http.Reques
 			s.fail(w, 500, "执行状态保存失败")
 			return
 		}
-		s.writeJSON(w, 200, map[string]any{"work": work})
+		var rhTask *rehearsalExecDispatch
+		var cancelTasks []string
+		if work == nil {
+			rhTask, cancelTasks = s.pollRehearsalTaskForNode(n, req.Heartbeat)
+		} else {
+			_, cancelTasks = s.pollRehearsalTaskForNode(n, true)
+		}
+		resp := map[string]any{"work": work}
+		if rhTask != nil {
+			resp["rehearsal_task"] = rhTask
+		}
+		if len(cancelTasks) > 0 {
+			resp["cancel_tasks"] = cancelTasks
+		}
+		s.writeJSON(w, 200, resp)
 	default:
 		s.fail(w, 404, "接口不存在")
 	}

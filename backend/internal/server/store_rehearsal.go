@@ -1658,6 +1658,8 @@ func (s *storeServer) handleRehearsals(w http.ResponseWriter, r *http.Request, s
 		s.applyRehearsalProposal(w, r, session, f, rid, parts[2])
 	case len(parts) == 2 && parts[1] == "finalize" && r.Method == "POST":
 		s.finalizeRehearsal(w, r, session, f, rid)
+	case len(parts) >= 3 && parts[1] == "exec":
+		s.handleRehearsalExec(w, r, session, f, rid, parts[2:])
 	default:
 		s.fail(w, 404, "接口不存在")
 	}

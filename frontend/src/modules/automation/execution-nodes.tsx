@@ -7,6 +7,7 @@ import {
   Message,
   Modal,
   Skeleton,
+  Switch,
   Tooltip,
 } from "@arco-design/web-react";
 import {
@@ -44,6 +45,7 @@ import {
 } from "./execution-types";
 import { AIHelpButton } from "../ai/aichat";
 import "./executions.css";
+import "./rehearsal-automation.css";
 
 type Registration = { node: ExecutionNode; token: string };
 type Guide = "install" | "maintain";
@@ -567,6 +569,30 @@ export function ExecutionNodes() {
     }
   };
 
+  const updateNodeCap = async (
+    node: ExecutionNode,
+    patch: Partial<Pick<ExecutionNode, "allow_delivery" | "allow_probe" | "allow_rehearsal">>,
+  ) => {
+    if (updatingLockRef.current === node.id) return;
+    updatingLockRef.current = node.id;
+    setUpdating(node.id);
+    try {
+      await api("/api/settings/execution-nodes", {
+        method: "PATCH",
+        body: JSON.stringify({ id: node.id, ...patch }),
+      });
+      await load();
+      Message.success(
+        bi(`已更新执行节点「${node.name}」能力授权`, `Updated capabilities for "${node.name}"`),
+      );
+    } catch (e) {
+      Message.error((e as Error).message);
+    } finally {
+      updatingLockRef.current = "";
+      setUpdating("");
+    }
+  };
+
   const remove = (node: ExecutionNode) => {
     Modal.confirm({
       title: bi(
@@ -1079,6 +1105,45 @@ export function ExecutionNodes() {
                         </dd>
                       </div>
                     </dl>
+                    <div className="rha-node-caps">
+                      <span
+                        className={`rha-proto-pill ${(node.protocol || 0) >= 3 ? "" : "is-old"}`}
+                      >
+                        {(node.protocol || 0) >= 3
+                          ? bi("Protocol v3 · 支持演练自动化", "Protocol v3 · Rehearsal Ready")
+                          : bi(
+                              `Protocol v${node.protocol || 2} · 更新节点二进制后支持演练`,
+                              `Protocol v${node.protocol || 2} · Upgrade for Rehearsal`,
+                            )}
+                      </span>
+                      <label className="rha-node-cap-item">
+                        <Switch
+                          size="small"
+                          checked={node.allow_delivery !== false}
+                          disabled={updating === node.id}
+                          onChange={(v) => void updateNodeCap(node, { allow_delivery: v })}
+                        />
+                        <span>{bi("首次交付部署", "Delivery Runs")}</span>
+                      </label>
+                      <label className="rha-node-cap-item">
+                        <Switch
+                          size="small"
+                          checked={node.allow_probe !== false}
+                          disabled={updating === node.id}
+                          onChange={(v) => void updateNodeCap(node, { allow_probe: v })}
+                        />
+                        <span>{bi("只读探针采集", "Read-Only Probes")}</span>
+                      </label>
+                      <label className="rha-node-cap-item">
+                        <Switch
+                          size="small"
+                          checked={Boolean(node.allow_rehearsal)}
+                          disabled={updating === node.id}
+                          onChange={(v) => void updateNodeCap(node, { allow_rehearsal: v })}
+                        />
+                        <span>{bi("变更演练步骤执行", "Rehearsal Steps")}</span>
+                      </label>
+                    </div>
                   </article>
                 );
               })}

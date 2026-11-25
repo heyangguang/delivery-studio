@@ -116,7 +116,7 @@ func executionNodeCommand(args []string) error {
 	}
 	if *check {
 		start := time.Now()
-		if e = runner.call("poll", map[string]any{"version": version, "protocol": 2, "heartbeat": true}, nil); e != nil {
+		if e = runner.call("poll", map[string]any{"version": version, "protocol": 3, "heartbeat": true}, nil); e != nil {
 			return fmt.Errorf("platform connectivity check failed (%s): %w", runner.cfg.URL, e)
 		}
 		logAgent("INFO", "connectivity check passed version=%s url=%s latency=%dms", version, runner.cfg.URL, time.Since(start).Milliseconds())
@@ -163,11 +163,13 @@ func executionNodeCommand(args []string) error {
 			continue
 		}
 		var resp struct {
-			Work        *executionWork        `json:"work"`
-			Preparation *executionPreparation `json:"preparation"`
+			Work          *executionWork         `json:"work"`
+			Preparation   *executionPreparation  `json:"preparation"`
+			RehearsalTask *rehearsalExecDispatch `json:"rehearsal_task"`
+			CancelTasks   []string               `json:"cancel_tasks"`
 		}
 		pollStart := time.Now()
-		e = runner.call("poll", map[string]any{"version": version, "protocol": 2}, &resp)
+		e = runner.call("poll", map[string]any{"version": version, "protocol": 3}, &resp)
 		if e != nil {
 			logPollErr("platform poll failed", e)
 		} else {
@@ -197,6 +199,14 @@ func executionNodeCommand(args []string) error {
 					logAgent("WARN", "step execution halted run=%s step=%s err=%v", resp.Work.Run.ID, resp.Work.Step.Key, e)
 				} else {
 					logAgent("INFO", "step completed run=%s step=%s", resp.Work.Run.ID, resp.Work.Step.Key)
+				}
+			} else if resp.RehearsalTask != nil {
+				logAgent("INFO", "executing rehearsal task=%s kind=%s targets=%d", resp.RehearsalTask.TaskID, resp.RehearsalTask.Kind, len(resp.RehearsalTask.Targets))
+				e = runner.executeRehearsalTask(*resp.RehearsalTask)
+				if e != nil {
+					logAgent("WARN", "rehearsal task ended task=%s err=%v", resp.RehearsalTask.TaskID, e)
+				} else {
+					logAgent("INFO", "rehearsal task completed task=%s", resp.RehearsalTask.TaskID)
 				}
 			}
 		}
@@ -675,7 +685,7 @@ func (r *executionRunner) execute(w executionWork) error {
 			case <-heartbeatDone:
 				return
 			case <-tick.C:
-				_ = r.call("poll", map[string]any{"version": version, "protocol": 2, "heartbeat": true}, nil)
+				_ = r.call("poll", map[string]any{"version": version, "protocol": 3, "heartbeat": true}, nil)
 			}
 		}
 	}()

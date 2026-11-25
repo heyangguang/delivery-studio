@@ -2195,6 +2195,8 @@ func (s *storeServer) handleCluster(w http.ResponseWriter, r *http.Request, sess
 		s.writeJSON(w, 200, out)
 	case len(parts) >= 2 && parts[1] == "rehearsals":
 		s.handleRehearsals(w, r, session, f, parts[2:])
+	case len(parts) >= 2 && parts[1] == "automation":
+		s.handleClusterAutomation(w, r, session, f, parts[2:])
 	case len(parts) >= 2 && parts[1] == "security":
 		s.handleClusterSecurity(w, r, session, f, parts[2:])
 	case len(parts) == 2 && parts[1] == "baseline":

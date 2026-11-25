@@ -1119,6 +1119,17 @@ export type DocMeta = {
   doc_version?: string;
   confidential?: string;
 };
+export type DocClarifyItem = {
+  id: string;
+  topic: string;
+  question: string;
+  options?: string[];
+  default?: string;
+  optional?: boolean;
+  placeholder?: string;
+  answer?: string;
+};
+
 export type ClusterDoc = {
   id: string;
   kind: "delivery" | "change" | "kt" | "rca" | "assess";
@@ -1128,6 +1139,7 @@ export type ClusterDoc = {
   job?: string;
   cover?: [string, string][];
   meta?: DocMeta;
+  clarifications?: DocClarifyItem[];
   blocks?: DocBlock[];
   sections: number;
   empty: number;

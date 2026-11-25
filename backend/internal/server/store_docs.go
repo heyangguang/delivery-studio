@@ -69,16 +69,28 @@ type docMeta struct {
 	Confidential string `json:"confidential,omitempty"`
 }
 
+type docClarifyItem struct {
+	ID          string   `json:"id"`
+	Topic       string   `json:"topic"`
+	Question    string   `json:"question"`
+	Options     []string `json:"options,omitempty"`
+	Default     string   `json:"default,omitempty"`
+	Optional    bool     `json:"optional,omitempty"`
+	Placeholder string   `json:"placeholder,omitempty"`
+	Answer      string   `json:"answer,omitempty"`
+}
+
 type clusterDoc struct {
-	ID       string      `json:"id"`
-	Kind     string      `json:"kind"` // delivery | change | kt | rca | assess
-	Title    string      `json:"title"`
-	Subtitle string      `json:"subtitle,omitempty"`
-	Cluster  string      `json:"cluster"`
-	Job      string      `json:"job,omitempty"`
-	Cover    [][2]string `json:"cover"`
-	Meta     docMeta     `json:"meta,omitempty"`
-	Blocks   []docBlock  `json:"blocks"`
+	ID             string           `json:"id"`
+	Kind           string           `json:"kind"` // delivery | change | kt | rca | assess
+	Title          string           `json:"title"`
+	Subtitle       string           `json:"subtitle,omitempty"`
+	Cluster        string           `json:"cluster"`
+	Job            string           `json:"job,omitempty"`
+	Cover          [][2]string      `json:"cover"`
+	Meta           docMeta          `json:"meta,omitempty"`
+	Clarifications []docClarifyItem `json:"clarifications,omitempty"`
+	Blocks         []docBlock       `json:"blocks"`
 	// Counts over the sections: how many there are, how many are empty, how many are assistant drafts nobody has
 	// confirmed yet.
 	Sections int    `json:"sections"`
@@ -812,7 +824,7 @@ func (s *storeServer) buildDelivery(f clusterFacts) *clusterDoc {
 	d := &clusterDoc{ID: "delivery", Kind: "delivery", Title: tr(lang, "交付报告", "Delivery Report"), Subtitle: f.ID, Cluster: f.ID,
 		Cover: f.cover([2]string{tr(lang, "首次部署", "Initial Deploy"), day(first.Created)}, [2]string{tr(lang, "交付负责人", "Delivery Lead"), ownerName})}
 	b := &docBuilder{}
-	b.section(1, "summary", tr(lang, "1 概述", "1 Overview"), tr(lang, "阐述本集群的业务定位、服务对象、高可用部署架构及当前投产运行状态。", "Business role, served workloads, HA deployment architecture, and current operational status."), true)
+	b.section(1, "summary", tr(lang, "1 概述", "1 Overview"), tr(lang, "凝练陈述本集群的部署架构、组件版本、核心高可用策略与当前运行状态；仅在已知时写入业务系统/归属，未知信息直接省略，严禁写【待补充】。", "Concise overview of deployment architecture, component versions, HA policy, and current status. Omit unknown business metadata instead of writing placeholders."), true)
 	b.h(1, tr(lang, "2 架构与拓扑", "2 Architecture & Topology"))
 	b.p(tr(lang, fmt.Sprintf("本节呈现本次「%s」的标准架构拓扑与接入规范，实际运行状态详见后续实施验证与变更台账。", jobTitleLang(f.Current, lang)), fmt.Sprintf("Standard architecture topology and access specification for %q; verified operational status is recorded in the execution and change sections below.", jobTitleLang(f.Current, lang))))
 	topology(b, f.Plan, lang)
@@ -890,7 +902,7 @@ func (s *storeServer) buildDelivery(f clusterFacts) *clusterDoc {
 			}, deltaRows)
 		}
 	}
-	b.section(1, "risks", tr(lang, "6 风险与遗留问题", "6 Risks & Open Issues"), tr(lang, "客观呈现当前存在的架构隐患、实施偏差、安全合规及备份监控短板，并给出可落地的分级治理建议。", "Objective assessment of architecture risks, deviations, security compliance, and backup/monitoring gaps with actionable recommendations."), true)
+	b.section(1, "risks", tr(lang, "6 风险与遗留问题", "6 Risks & Open Issues"), tr(lang, "仅客观记录经确认的真实未闭环风险与遗留事项；验收阶段正常测试清理及客户按需选定的架构口径不得误列为风险。若无阻断风险，简明给出无未闭环风险的交接结论。", "Record only verified open risks or blockers. Never flag normal acceptance test cleanup or intentional customer architecture choices as risks; state a concise clean handover closure when no blockers exist."), true)
 	b.section(1, "acceptance", tr(lang, "7 验收结论", "7 Acceptance Conclusion"), tr(lang, "基于实际部署验证、功能测试及安全基线结果，形成客观、可签字的最终交付验收结论。", "Final sign-off acceptance conclusion grounded in deployment verification, testing, and security baseline checks."), true)
 	d.Blocks = b.blocks
 	return d
@@ -917,7 +929,7 @@ func (s *storeServer) buildImportedBaselineDoc(f clusterFacts, first storeJob) *
 		),
 	}
 	b := &docBuilder{}
-	b.section(1, "summary", tr(lang, "1 集群概述", "1 Cluster Overview"), tr(lang, "概述本集群承载的核心业务、高可用架构形态、关键组件版本及运维管理边界。", "Overview of core workloads, HA architecture, component versions, and day-2 operational boundaries."), true)
+	b.section(1, "summary", tr(lang, "1 集群概述", "1 Cluster Overview"), tr(lang, "凝练概述本集群的高可用架构形态、关键组件版本及运维管理边界；若未提供业务系统名称则直接省略，严禁写【待补充】。", "Concise overview of HA architecture, component versions, and operational boundaries. Omit unknown business metadata instead of writing placeholders."), true)
 	b.h(1, tr(lang, "2 架构与拓扑", "2 Architecture & Topology"))
 	b.p(tr(lang, "本节汇总该生产集群的节点拓扑、访问入口与伴生组件栈配置基线。", "Node topology, access endpoints, and companion component stack baseline for this production cluster."))
 	topology(b, f.Plan, lang)
@@ -1615,6 +1627,9 @@ func (s *storeServer) buildDoc(f clusterFacts, id string) (*clusterDoc, bool) {
 		d.Manual = true
 	}
 	saved := s.docLoad(f.ID, id)
+	if d.Kind == "delivery" {
+		d.Clarifications = s.detectDeliveryClarifications(f, saved, f.Lang)
+	}
 	if (d.Kind == "rca" || d.Kind == "assess") && len(saved.Answers) > 0 {
 		var items []string
 		for _, a := range saved.Answers {

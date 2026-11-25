@@ -268,3 +268,71 @@ func TestRehearsalAutomationDualTransportAndSafetyGates(t *testing.T) {
 		t.Fatalf("unexpected rehearsal tasks list: %s", listRR.Body.String())
 	}
 }
+
+func TestClusterAutomationCheckUsesDraftOverridesWhileDisabled(t *testing.T) {
+	srv, _ := testStore(t)
+	cookie, csrf := storeLogin(t, srv, "admin")
+
+	importBody := `{
+		"id": "pg-draft-check",
+		"component": "postgresql",
+		"display_name": "PostgreSQL",
+		"version": "17",
+		"exact_version": "17.11",
+		"platform": "ubuntu2404",
+		"deploy_method": "systemd",
+		"hosts": [{"name": "db-01", "ip": "10.20.0.11", "role": "primary"}]
+	}`
+	rr := storeRequest(srv, "POST", "/api/clusters/import", strings.NewReader(importBody), cookie, csrf)
+	if rr.Code != 200 && rr.Code != 201 {
+		t.Fatalf("import cluster failed: %d %s", rr.Code, rr.Body.String())
+	}
+
+	nodeRR := storeRequest(srv, "POST", "/api/settings/execution-nodes", strings.NewReader(`{"name":"ctrl-draft","kind":"independent","controller_ip":"10.20.0.5"}`), cookie, csrf)
+	if nodeRR.Code != 201 {
+		t.Fatalf("create node failed: %d %s", nodeRR.Code, nodeRR.Body.String())
+	}
+	var nodeCreate struct {
+		Node  executionNode `json:"node"`
+		Token string        `json:"token"`
+	}
+	_ = json.Unmarshal(nodeRR.Body.Bytes(), &nodeCreate)
+
+	// Heartbeat node as Protocol v3.
+	r := httptest.NewRequest("POST", "http://127.0.0.1:8090/api/execution-agent/poll", bytes.NewReader([]byte(`{"protocol":3,"version":"1.0.0","heartbeat":true}`)))
+	r.Header.Set("Authorization", "Bearer "+nodeCreate.Token)
+	r.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, r)
+	if w.Code != 200 {
+		t.Fatalf("node heartbeat failed: %d %s", w.Code, w.Body.String())
+	}
+
+	// Automation is still disabled (wizard Step 2), yet /automation/check must apply draft SSH/method overrides.
+	checkBody := `{
+		"transport": "node",
+		"node_id": "` + nodeCreate.Node.ID + `",
+		"node_exec_method": "ssh",
+		"ssh_user": "postgres",
+		"ssh_port": 2222
+	}`
+	checkRR := storeRequest(srv, "POST", "/api/clusters/pg-draft-check/automation/check", strings.NewReader(checkBody), cookie, csrf)
+	if checkRR.Code != 201 {
+		t.Fatalf("expected 201 for draft connectivity check, got %d %s", checkRR.Code, checkRR.Body.String())
+	}
+	var task rehearsalExecTask
+	_ = json.Unmarshal(checkRR.Body.Bytes(), &task)
+	if task.NodeExecMethod != "ssh" || task.SSHUser != "postgres" || task.SSHPort != 2222 {
+		t.Fatalf("expected draft overrides (ssh/postgres/2222), got method=%q user=%q port=%d", task.NodeExecMethod, task.SSHUser, task.SSHPort)
+	}
+
+	// Invalid SSH user or port in draft override must be rejected with 400.
+	badUserRR := storeRequest(srv, "POST", "/api/clusters/pg-draft-check/automation/check", strings.NewReader(`{"transport":"node","node_id":"`+nodeCreate.Node.ID+`","ssh_user":"root;rm -rf /"}`), cookie, csrf)
+	if badUserRR.Code != 400 {
+		t.Fatalf("expected 400 for unsafe ssh_user override, got %d %s", badUserRR.Code, badUserRR.Body.String())
+	}
+	badPortRR := storeRequest(srv, "POST", "/api/clusters/pg-draft-check/automation/check", strings.NewReader(`{"transport":"node","node_id":"`+nodeCreate.Node.ID+`","ssh_port":70000}`), cookie, csrf)
+	if badPortRR.Code != 400 {
+		t.Fatalf("expected 400 for invalid ssh_port override, got %d %s", badPortRR.Code, badPortRR.Body.String())
+	}
+}

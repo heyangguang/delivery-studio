@@ -1001,6 +1001,9 @@ type enqueueRehearsalTaskSpec struct {
 	ConfirmCluster string
 	Transport      string // optional override: node | agent
 	NodeID         string // optional override
+	NodeExecMethod string // optional override: auto | ansible | ssh
+	SSHUser        string // optional override
+	SSHPort        int    // optional override
 	User           string
 	Lang           string
 }
@@ -1013,6 +1016,27 @@ func (s *storeServer) enqueueRehearsalExecTask(spec enqueueRehearsalTaskSpec) (r
 	}
 	if transport != "node" && transport != "agent" {
 		transport = "node"
+	}
+	nodeExecMethod := strings.TrimSpace(spec.NodeExecMethod)
+	if nodeExecMethod == "" {
+		nodeExecMethod = cfg.NodeExecMethod
+	}
+	if nodeExecMethod != "auto" && nodeExecMethod != "ansible" && nodeExecMethod != "ssh" {
+		return rehearsalExecTask{}, 400, tr(spec.Lang, "控制机执行方式仅支持 auto、ansible 或 ssh", "Controller execution method must be auto, ansible, or ssh")
+	}
+	sshUser := strings.TrimSpace(spec.SSHUser)
+	if sshUser == "" {
+		sshUser = cfg.SSHUser
+	}
+	if len(sshUser) > 48 || strings.ContainsAny(sshUser, " \t\r\n;|&$`'\"\\") {
+		return rehearsalExecTask{}, 400, tr(spec.Lang, "SSH 用户名格式无效", "Invalid SSH username")
+	}
+	sshPort := spec.SSHPort
+	if sshPort == 0 {
+		sshPort = cfg.SSHPort
+	}
+	if sshPort < 1 || sshPort > 65535 {
+		return rehearsalExecTask{}, 400, tr(spec.Lang, "SSH 端口须在 1～65535 之间", "SSH port must be between 1 and 65535")
 	}
 	if !cfg.Enabled && spec.Kind != "connectivity_check" {
 		return rehearsalExecTask{}, 409, tr(spec.Lang, "当前集群尚未开启自动化执行，请先在自动化配置中启用", "Cluster automation is disabled; enable it in Automation Settings first")
@@ -1215,9 +1239,9 @@ func (s *storeServer) enqueueRehearsalExecTask(spec enqueueRehearsalTaskSpec) (r
 		Transport:      transport,
 		NodeID:         nodeID,
 		NodeName:       nodeName,
-		NodeExecMethod: cfg.NodeExecMethod,
-		SSHUser:        cfg.SSHUser,
-		SSHPort:        cfg.SSHPort,
+		NodeExecMethod: nodeExecMethod,
+		SSHUser:        sshUser,
+		SSHPort:        sshPort,
 		EnvKind:        cfg.EnvKind,
 		Script:         script,
 		ScriptSHA256:   digest([]byte(script)),
@@ -1238,9 +1262,12 @@ func (s *storeServer) enqueueRehearsalExecTask(spec enqueueRehearsalTaskSpec) (r
 
 func (s *storeServer) handleClusterAutomationCheck(w http.ResponseWriter, r *http.Request, session storeSession, f clusterFacts) {
 	var req struct {
-		Targets   []rehearsalExecTarget `json:"targets"`
-		Transport string                `json:"transport"`
-		NodeID    string                `json:"node_id"`
+		Targets        []rehearsalExecTarget `json:"targets"`
+		Transport      string                `json:"transport"`
+		NodeID         string                `json:"node_id"`
+		NodeExecMethod string                `json:"node_exec_method"`
+		SSHUser        string                `json:"ssh_user"`
+		SSHPort        int                   `json:"ssh_port"`
 	}
 	_ = decodeBody(w, r, 16384, &req)
 	cfg := s.loadClusterAutomationConfig(f.ID)
@@ -1260,17 +1287,20 @@ echo "OS=$(uname -srm)"
 echo "IPS=$(hostname -I 2>/dev/null || true)"
 `
 	task, code, msg := s.enqueueRehearsalExecTask(enqueueRehearsalTaskSpec{
-		ClusterID:  f.ID,
-		SubIndex:   -1,
-		Kind:       "connectivity_check",
-		ReadOnly:   true,
-		Script:     script,
-		TimeoutSec: 45,
-		Targets:    targets,
-		Transport:  req.Transport,
-		NodeID:     req.NodeID,
-		User:       session.User,
-		Lang:       f.Lang,
+		ClusterID:      f.ID,
+		SubIndex:       -1,
+		Kind:           "connectivity_check",
+		ReadOnly:       true,
+		Script:         script,
+		TimeoutSec:     45,
+		Targets:        targets,
+		Transport:      req.Transport,
+		NodeID:         req.NodeID,
+		NodeExecMethod: req.NodeExecMethod,
+		SSHUser:        req.SSHUser,
+		SSHPort:        req.SSHPort,
+		User:           session.User,
+		Lang:           f.Lang,
 	})
 	if msg != "" {
 		s.fail(w, code, msg)

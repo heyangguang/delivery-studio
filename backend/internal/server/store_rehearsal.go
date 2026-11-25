@@ -108,17 +108,28 @@ type rehearsalDrift struct {
 	Recommendations []string              `json:"recommendations,omitempty"`
 }
 
+type rehearsalBaselineCorrection struct {
+	Kind     string `json:"kind"` // endpoint | port | config_path | service_unit | data_dir | log_dir | param | note
+	Label    string `json:"label,omitempty"`
+	Key      string `json:"key,omitempty"`
+	OldValue string `json:"old_value,omitempty"`
+	NewValue string `json:"new_value"`
+	Reason   string `json:"reason,omitempty"`
+}
+
 type rehearsalStepProposal struct {
-	Diagnosis     string   `json:"diagnosis"`
-	Action        string   `json:"action"` // replace | insert_before | retry
-	Title         string   `json:"title,omitempty"`
-	TargetRole    string   `json:"target_role,omitempty"`
-	Command       string   `json:"command"`
-	Expect        string   `json:"expect,omitempty"`
-	Rollback      string   `json:"rollback,omitempty"`
-	RiskNote      string   `json:"risk_note,omitempty"`
-	VerifiedFacts []string `json:"verified_facts,omitempty"`
-	MissingItems  []string `json:"missing_items,omitempty"`
+	Diagnosis           string                        `json:"diagnosis"`
+	Action              string                        `json:"action"` // replace | insert_before | retry | confirm_override
+	Title               string                        `json:"title,omitempty"`
+	TargetRole          string                        `json:"target_role,omitempty"`
+	Command             string                        `json:"command"`
+	Expect              string                        `json:"expect,omitempty"`
+	Rollback            string                        `json:"rollback,omitempty"`
+	RiskNote            string                        `json:"risk_note,omitempty"`
+	ConfirmSummary      string                        `json:"confirm_summary,omitempty"`
+	BaselineCorrections []rehearsalBaselineCorrection `json:"baseline_corrections,omitempty"`
+	VerifiedFacts       []string                      `json:"verified_facts,omitempty"`
+	MissingItems        []string                      `json:"missing_items,omitempty"`
 }
 
 type rehearsalStepRevision struct {
@@ -4086,15 +4097,25 @@ const rehearsalVerifyStepSystem = `你是资深中间件变更验收与排障专
      * 很多现场没有独立的第 4 台跳板机，只要工程师从**非当前主库的节点**（例如切主后在从库 node-1 上）连接 ELB/VIP 写入入口**已经成功连通并返回了目标主库 IP 且可写（如 pg_is_in_recovery=f）**，这就已经实打实证明了 ELB 路由生效且指向正确主库，**必须直接判 passed**！严禁以「不是集群外独立跳板机、违反 ELB 回环规避要求」为由教条拒收已经成功的实测结果！只有当后端节点连 VIP 确实发生超时/连接失败时，才提示可能是 ELB 回环限制并建议换非主库节点、业务端验证或跳过改查本机健康接口。
    - **忽略无害终端噪声**：终端里偶尔误粘了说明文字/注释导致的 command not found、多余换行或额外的只读查询回显，只要核心状态已经正确达成且无实际故障，不得以此判 failed。
    - **最终收尾/复位状态核验**：核验涉及恢复原状态或最终验收的步骤时，若输出显示集群仍处于临时异常/维护态（如 Patroni 仍显示 Maintenance mode / paused、HAProxy 后端仍为 MAINT/DRAIN、原主库尚未恢复且本步目标就是切回原主），必须判 failed 并给出最小恢复命令。
+   - **发现工程师现场修正端口/入口/路径并已实测成功时，严禁强迫重测错误旧值——改为征询确认并支持一键反哺集群基线（confirm_override）**：
+     * 实际运维中，集群基线或步骤命令里的端口/VIP/Socket/服务名/配置路径可能本身登记有误或已过期（例如原步骤写了 port=5432，工程师在现场发现真实入口是 port=5433，自行改用 5433 执行且已经成功连通、返回正确主库 IP 与读写状态）。
+     * **只要工程师用调整后的参数/入口已经实测达成核心业务验收目标**，**严禁**生硬地给 action="retry" 强迫工程师回头去测那个大概率本来就是错的旧值！
+     * 此时请返回 verdict="failed" 但将 **action 设为 "confirm_override"**（由平台以“请确认是否以现场实测为准”卡片向工程师征询确认，而非强迫复测）：
+       1) diagnosis：先明确肯定已按现场参数验证达标，再向工程师征询确认（例如：「检测到你现场改用 5433 已验证连通原主库且可读写，但原步骤与集群基线登记的是 5432。请确认是否以现场实测 5433 为准直接通过此步，并同步修正本步命令与反哺集群基线？」）；
+       2) confirm_summary：写出一旦工程师确认后直接记入本步通过结论与生产 SOP 的 1～2 句客观实测摘要；
+       3) command：给出已替换为正确现场参数（如 port=5433）的完整步骤命令（确认后同步更新本步与 SOP）；
+       4) expect：若原判据里写死了旧端口/旧路径，给出同步修正后的预期判据；
+       5) baseline_corrections：结构化列出需要反哺修正集群基线的差异项数组（每项含 kind="endpoint"|"port"|"config_path"|"service_unit"|"data_dir"|"log_dir"|"param"|"note"、label、key、old_value、new_value、reason），例如 {"kind":"endpoint","label":"访问入口端口","old_value":"example.com:5432","new_value":"example.com:5433","reason":"现场实测真实读写入口端口为 5433"}，让工程师一键采信并反哺基线，避免后续演练重复踩坑。
    - **只有真正的阻断或核心缺口未补齐才判 failed**：例如目标参数仍为旧值、仍有目标节点卡在 Pending restart、节点离线/复制断开、多节点验收中确实还有节点在所有轮次里都从未提供过达标证据。
 3. 输出规则：
    - **passed（通过）**：合并前序已证实事实与本轮新证据后，核心目标状态已全部满足且集群健康。输出精炼、可审计的实测结论 summary（1-2 句，同步写入最终生产 SOP；多轮补齐时简述全部节点已验证一致），并在 verified_facts 中列出本轮新证实的要点（可选；仅当输出明确可见耗时再填 elapsed）。
-   - **failed（未通过）**：核心目标尚未补齐或存在真阻断。必须同时填好：
+   - **failed（未通过，或 confirm_override 待工程师确认参数偏差）**：核心目标尚未补齐、存在真阻断，或工程师改用不同现场参数已跑通需确认是否以实测为准。必须同时填好：
      * **verified_facts（极重要！）**：逐条列出**本轮从截图/文本中新证实已经达标的每一项具体事实**（务必写清具体节点名、关键参数或状态，例如 "node-1: logging_collector=on 等参数生效且当日日志持续增长"、"node-3: 参数生效且当日日志持续增长"），平台会自动持久化并在下一轮传回给你，防止遗忘！若本轮无新达标项则填 []。
-     * **missing_items（极重要！）**：仅列出合并前序轮次后**仍然真正缺少的剩余缺口**（例如 ["node-2 参数生效与日志持续增长验证"]），禁止把已经通过的节点再列进来！
-     * **diagnosis**：准确简明的未通过原因（明确指出哪些已确认 OK、仅剩什么未补齐）。
+     * **missing_items（极重要！）**：仅列出合并前序轮次后**仍然真正缺少的剩余缺口**（例如 ["node-2 参数生效与日志持续增长验证"]），禁止把已经通过的节点再列进来！若 action="confirm_override" 且核心目标已按现场修正参数验证达标，missing_items 应为空数组 []。
+     * **diagnosis**：准确简明的未通过原因或待确认差异说明（明确指出哪些已确认 OK、仅剩什么未补齐或差异何在）。
      * **action、target_role & command**：尽量最小化、**只针对剩余缺口**给出下一步动作（不要让用户重跑已经通过的节点或前半段），并且 **target_role 必须必填且写清具体要登录哪台/哪几台机器与 IP**（例如「仅在从库 node-3 (172.30.4.20) 上执行」或「在 node-1 / node-2 / node-3 逐台执行」，严禁留空让工程师猜在哪台机器跑）：
-       - 若当前步骤命令本身需要修改：action="replace"，给出修正后的完整 command 与 target_role；
+       - 若工程师现场修改了端口/入口/路径等参数并已实测达标、只需确认是否以现场为准并反哺基线：action="confirm_override"，填好 confirm_summary、修正后 command、expect 与 baseline_corrections；
+       - 若当前步骤命令本身需要修改且尚需重跑：action="replace"，给出修正后的完整 command 与 target_role；
        - 若缺少前置步骤：action="insert_before"，给出前置步骤 title、target_role、command、expect；
        - 若只需补测剩余节点或补跑一条轻量补救命令：action="retry"，给出只针对剩余缺口的最小复测命令，并在 target_role 中明确指出该命令要登录哪台/哪几台机器执行。
        - **防吞行格式**：若 command 包含 2 条及以上命令（尤其含 sudo/psql/patronictl/sleep），请整块包在 ( ... ) </dev/null 中（不要裸写多行，也不要用 bash <<'EOF'），保证堡垒机/WebSSH 一次复制粘贴即可按序跑全。
@@ -4102,8 +4123,8 @@ const rehearsalVerifyStepSystem = `你是资深中间件变更验收与排障专
 严格只输出一个 JSON 对象：
 - 通过时：
 {"thinking":"...","verdict":"passed","verified_facts":["本轮新证实的达标项（可选）"],"summary":"客观实测通过摘要（同步写入 SOP）","elapsed":""}
-- 未通过时：
-{"thinking":"...","verdict":"failed","verified_facts":["本轮已证实达标的节点/指标（写清节点名与状态，供下轮沿用）"],"missing_items":["合并前序后仅剩的待补缺口"],"diagnosis":"未通过或尚缺证据的准确根因","action":"replace|insert_before|retry","title":"前置步骤标题（insert_before必填）","target_role":"复测/修正命令的具体执行机器（必填，写清节点名与 IP，如：仅在从库 node-3 (172.30.4.20) 执行）","command":"修正后命令或仅针对剩余缺口的最小复测命令","expect":"成功判据","rollback":"回退命令（可选）","risk_note":"注意事项（可选）"}`
+- 未通过或参数偏差待确认时：
+{"thinking":"...","verdict":"failed","verified_facts":["本轮已证实达标的节点/指标（写清节点名与状态，供下轮沿用）"],"missing_items":["合并前序后仅剩的待补缺口；confirm_override 且已达标时填 []"],"diagnosis":"未通过根因，或 confirm_override 征询确认说明","action":"confirm_override|replace|insert_before|retry","confirm_summary":"confirm_override 必填：确认后直接写入本步与 SOP 的通过摘要","baseline_corrections":[{"kind":"endpoint|port|config_path|service_unit|data_dir|log_dir|param|note","label":"差异项名称","key":"可选参数名","old_value":"基线/步骤旧值","new_value":"现场实测正确值","reason":"原因"}],"title":"前置步骤标题（insert_before必填）","target_role":"复测/修正命令的具体执行机器（必填，写清节点名与 IP，如：仅在从库 node-3 (172.30.4.20) 执行）","command":"修正后命令或仅针对剩余缺口的最小复测命令","expect":"成功判据","rollback":"回退命令（可选）","risk_note":"注意事项（可选）"}`
 
 func cleanFactSlice(xs []string, maxItems, maxRunes int) []string {
 	if len(xs) == 0 {
@@ -4498,19 +4519,46 @@ func (s *storeServer) verifyRehearsalStep(w http.ResponseWriter, r *http.Request
 		prop.Command = ensurePasteSafeShellCommand(prop.Command)
 		prop.TargetRole = truncRunes(strings.TrimSpace(prop.TargetRole), 160)
 		prop.Diagnosis = truncRunes(strings.TrimSpace(prop.Diagnosis), 600)
+		prop.ConfirmSummary = truncRunes(strings.TrimSpace(prop.ConfirmSummary), 500)
+		if len(prop.BaselineCorrections) > 0 {
+			cleanedCorr := make([]rehearsalBaselineCorrection, 0, min(len(prop.BaselineCorrections), 8))
+			for _, bc := range prop.BaselineCorrections {
+				bc.Kind = strings.ToLower(strings.TrimSpace(bc.Kind))
+				if bc.Kind == "" {
+					bc.Kind = "note"
+				}
+				bc.Label = truncRunes(strings.TrimSpace(bc.Label), 60)
+				bc.Key = truncRunes(strings.TrimSpace(bc.Key), 80)
+				bc.OldValue = truncRunes(strings.TrimSpace(bc.OldValue), 220)
+				bc.NewValue = truncRunes(strings.TrimSpace(bc.NewValue), 220)
+				bc.Reason = truncRunes(strings.TrimSpace(bc.Reason), 220)
+				if bc.NewValue == "" {
+					continue
+				}
+				cleanedCorr = append(cleanedCorr, bc)
+				if len(cleanedCorr) >= 8 {
+					break
+				}
+			}
+			prop.BaselineCorrections = cleanedCorr
+		}
 		prop.VerifiedFacts = roundFacts
 		prop.MissingItems = roundMissing
-		if prop.Action != "insert_before" && prop.Action != "retry" {
+		if prop.Action != "insert_before" && prop.Action != "retry" && prop.Action != "confirm_override" {
 			prop.Action = "replace"
 		}
-		if prop.Action != "retry" && prop.Command == "" {
+		if prop.Action != "retry" && prop.Action != "confirm_override" && prop.Command == "" {
 			prop.Action = "retry"
+		}
+		synthMsg := tr(lang, "核验未通过 · 已生成根因诊断与处理建议", "Verification FAILED · Root cause & fix ready")
+		if prop.Action == "confirm_override" {
+			synthMsg = tr(lang, "检测到现场参数修正 · 待工程师确认是否以实测为准", "Live parameter override detected · Awaiting confirmation")
 		}
 		finalizeTraceSynth(
 			&trace,
 			ev,
 			"verify-verdict",
-			tr(lang, "核验未通过 · 已生成根因诊断与处理建议", "Verification FAILED · Root cause & fix ready"),
+			synthMsg,
 			false,
 			max(1, time.Since(parseStart).Milliseconds()),
 		)
@@ -4751,6 +4799,14 @@ func (s *storeServer) troubleshootRehearsalStep(w http.ResponseWriter, r *http.R
 }
 
 func (s *storeServer) applyRehearsalProposal(w http.ResponseWriter, r *http.Request, session storeSession, f clusterFacts, rid, sid string) {
+	var in struct {
+		AcceptPassed *bool `json:"accept_passed,omitempty"`
+		FeedBaseline *bool `json:"feed_baseline,omitempty"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&in)
+	}
+
 	rehearsalMu.Lock()
 	rh, ok := s.loadRehearsal(f.ID, rid)
 	if !ok {
@@ -4774,7 +4830,65 @@ func (s *storeServer) applyRehearsalProposal(w http.ResponseWriter, r *http.Requ
 	st := rh.Steps[idx]
 	prop := *st.Proposal
 	now := nowStamp()
-	if prop.Action == "insert_before" {
+	acceptPassed := prop.Action == "confirm_override"
+	if in.AcceptPassed != nil {
+		acceptPassed = *in.AcceptPassed
+	}
+	feedBaseline := prop.Action == "confirm_override" && len(prop.BaselineCorrections) > 0
+	if in.FeedBaseline != nil {
+		feedBaseline = *in.FeedBaseline
+	}
+	var correctionsToFeed []rehearsalBaselineCorrection
+	if acceptPassed {
+		if strings.TrimSpace(prop.Command) != "" {
+			nextCmd, nextSubs := reconcileStepCommands(st.Commands, prop.Command, firstNonEmptyStr(strings.TrimSpace(prop.TargetRole), st.TargetRole), lang)
+			rh.Steps[idx].Revisions = append(rh.Steps[idx].Revisions, rehearsalStepRevision{
+				At:           now,
+				By:           session.User,
+				ErrorSnippet: truncRunes(st.LastError, 300),
+				Diagnosis:    tr(lang, "确认以现场实测参数为准并同步修订本步：", "Confirmed live parameter override and updated step: ") + prop.Diagnosis,
+				OldCommand:   st.Command,
+				NewCommand:   nextCmd,
+			})
+			rh.Steps[idx].Command = nextCmd
+			rh.Steps[idx].Commands = nextSubs
+		}
+		if strings.TrimSpace(prop.TargetRole) != "" {
+			rh.Steps[idx].TargetRole = truncRunes(strings.TrimSpace(prop.TargetRole), 160)
+		}
+		if strings.TrimSpace(prop.Expect) != "" {
+			rh.Steps[idx].Expect = truncRunes(strings.TrimSpace(prop.Expect), 300)
+		}
+		if strings.TrimSpace(prop.Rollback) != "" {
+			rh.Steps[idx].Rollback = strings.TrimSpace(prop.Rollback)
+		}
+		if strings.TrimSpace(prop.RiskNote) != "" {
+			rh.Steps[idx].RiskNote = truncRunes(strings.TrimSpace(prop.RiskNote), 300)
+		}
+		passNote := firstNonEmptyStr(
+			strings.TrimSpace(prop.ConfirmSummary),
+			strings.Join(prop.VerifiedFacts, "；"),
+			strings.TrimSpace(prop.Diagnosis),
+			tr(lang, "工程师已确认以现场实测参数为准通过核验。", "Confirmed passed with live observed parameters."),
+		)
+		backfillLegacyVerifyHistory(&rh.Steps[idx])
+		rh.Steps[idx].VerifyHistory = append(rh.Steps[idx].VerifyHistory, rehearsalVerifyAttempt{
+			Round:         len(rh.Steps[idx].VerifyHistory) + 1,
+			At:            now,
+			By:            session.User,
+			Verdict:       "passed",
+			Summary:       passNote,
+			VerifiedFacts: append([]string(nil), prop.VerifiedFacts...),
+		})
+		rh.Steps[idx].Status = "passed"
+		rh.Steps[idx].VerifiedByAI = true
+		rh.Steps[idx].Note = truncRunes(passNote, 500)
+		rh.Steps[idx].LastError = ""
+		rh.Steps[idx].Proposal = nil
+		if feedBaseline && len(prop.BaselineCorrections) > 0 {
+			correctionsToFeed = append([]rehearsalBaselineCorrection(nil), prop.BaselineCorrections...)
+		}
+	} else if prop.Action == "insert_before" {
 		newID := fmt.Sprintf("pre-%s-%d", st.ID, len(st.Revisions)+1)
 		inserted := rehearsalStep{
 			ID:         newID,
@@ -4835,7 +4949,22 @@ func (s *storeServer) applyRehearsalProposal(w http.ResponseWriter, r *http.Requ
 		s.fail(w, 500, "采纳修正提案失败")
 		return
 	}
-	s.auditReq(r, "rehearsal-apply", session.User, f.ID+" "+rid+" "+sid)
+	if len(correctionsToFeed) > 0 {
+		if enriched := s.applyBaselineCorrectionsToCluster(f, session.User, correctionsToFeed, rh.Title, lang); len(enriched) > 0 {
+			rehearsalMu.Lock()
+			if latest, ok := s.loadRehearsal(f.ID, rid); ok {
+				latest.BaselineEnriched = enriched
+				_ = s.saveRehearsal(latest)
+				rh = latest
+			}
+			rehearsalMu.Unlock()
+		}
+	}
+	auditAction := "rehearsal-apply"
+	if acceptPassed {
+		auditAction = "rehearsal-apply-confirm"
+	}
+	s.auditReq(r, auditAction, session.User, f.ID+" "+rid+" "+sid)
 	rh.RestorationAlerts = auditRehearsalRestorations(rh.Goal, rh.ExtraScope, rh.Steps, reqLang(r))
 	s.writeJSON(w, 200, rh)
 }

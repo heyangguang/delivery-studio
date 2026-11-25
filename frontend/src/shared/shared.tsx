@@ -1809,15 +1809,35 @@ export type DriftSummary = {
   recommendations?: string[];
 };
 
+export type BaselineCorrection = {
+  kind:
+    | "endpoint"
+    | "port"
+    | "config_path"
+    | "service_unit"
+    | "data_dir"
+    | "log_dir"
+    | "param"
+    | "note"
+    | string;
+  label?: string;
+  key?: string;
+  old_value?: string;
+  new_value: string;
+  reason?: string;
+};
+
 export type StepProposal = {
   diagnosis: string;
-  action: "replace" | "insert_before" | "retry";
+  action: "replace" | "insert_before" | "retry" | "confirm_override";
   title?: string;
   target_role?: string;
   command: string;
   expect?: string;
   rollback?: string;
   risk_note?: string;
+  confirm_summary?: string;
+  baseline_corrections?: BaselineCorrection[];
   verified_facts?: string[];
   missing_items?: string[];
 };

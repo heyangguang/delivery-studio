@@ -10507,19 +10507,48 @@ const StepRow = React.memo(function StepRow({
     });
   };
 
-  const applyProposal = async () => {
+  const applyProposal = async (opts?: {
+    acceptPassed?: boolean;
+    feedBaseline?: boolean;
+  }) => {
     if (offline || stepBusyRef.current) return;
     stepBusyRef.current = true;
     setBusy("apply");
     try {
       const next = await api<ChangeRehearsal>(`${baseUrl}/apply`, {
         method: "POST",
+        body: opts
+          ? JSON.stringify({
+              accept_passed: opts.acceptPassed,
+              feed_baseline: opts.feedBaseline,
+            })
+          : undefined,
       });
       onUpdated(next);
       setEvidText("");
-      Message.success(
-        bi("已更新步骤命令，请在测试环境复测并贴回结果", "Step command updated; re-test and paste output"),
-      );
+      if (next.baseline_enriched?.length) {
+        window.dispatchEvent(new Event("mh-clusters-changed"));
+      }
+      if (opts?.acceptPassed) {
+        Message.success(
+          next.baseline_enriched?.length
+            ? bi(
+                `已按现场实测参数通过本步，并反哺校准集群基线：${next.baseline_enriched.join("、")}`,
+                `Confirmed passed with live params & fed back to cluster baseline: ${next.baseline_enriched.join(", ")}`,
+              )
+            : bi(
+                "已按现场实测参数通过本步，并同步更新步骤命令与 SOP",
+                "Confirmed passed with live params; step command & SOP updated",
+              ),
+        );
+      } else {
+        Message.success(
+          bi(
+            "已更新步骤命令，请在测试环境复测并贴回结果",
+            "Step command updated; re-test and paste output",
+          ),
+        );
+      }
     } catch (e) {
       err(e);
     } finally {
@@ -10532,44 +10561,50 @@ const StepRow = React.memo(function StepRow({
   const canAskStepAI = Boolean(
     dock && !offline && dock.available(`step:rehearsal:${rehearsalId}:${step.id}`),
   );
-  const openStepInAIDock = useCallback(() => {
-    if (!dock) return;
-    const key = `step:rehearsal:${rehearsalId}:${step.id}`;
-    const stepMeta: Record<string, unknown> = {
-      kind: "rehearsal_step",
-      cluster_id: c.id,
-      rehearsal_id: rehearsalId,
-      rehearsal_title: rehearsalTitle || "",
-      step_id: step.id,
-      order: num,
-      phase: step.phase,
-      title: step.title,
-      target_role: step.target_role,
-      command: step.command,
-      expect: step.expect,
-      rollback: step.rollback || "",
-      risk_note: step.risk_note || "",
-      status: step.status,
-      note: step.note || "",
-    };
-    if (step.last_error) stepMeta.last_error = step.last_error;
-    if (step.proposal?.diagnosis) stepMeta.diagnosis = step.proposal.diagnosis;
-    dock.open({
-      key,
-      title: bi(`演练步骤 #${num} · ${step.title}`, `Rehearsal #${num} · ${step.title}`),
-      context: `${rehearsalTitle || rehearsalId} · ${c.id}`,
-      step: stepMeta,
-      hello: bi(
-        `正在聚焦演练步骤 #${num}「${step.title}」。直接告诉我哪里有问题或想怎么调整（例如拆成两步、修改命令或目标机器、放宽/调整判据、删除冗余步），我会和你确认后给出「一键更新演练步骤」卡片。`,
-        `Focused on rehearsal step #${num} "${step.title}". Tell me what looks off or how you want to change it (split steps, revise command/target host, adjust criteria), and I'll generate a 1-click update card.`,
-      ),
-    });
-  }, [c.id, dock, num, rehearsalId, rehearsalTitle, step]);
+  const openStepInAIDock = useCallback(
+    (prefill?: string) => {
+      if (!dock) return;
+      const key = `step:rehearsal:${rehearsalId}:${step.id}`;
+      const stepMeta: Record<string, unknown> = {
+        kind: "rehearsal_step",
+        cluster_id: c.id,
+        rehearsal_id: rehearsalId,
+        rehearsal_title: rehearsalTitle || "",
+        step_id: step.id,
+        order: num,
+        phase: step.phase,
+        title: step.title,
+        target_role: step.target_role,
+        command: step.command,
+        expect: step.expect,
+        rollback: step.rollback || "",
+        risk_note: step.risk_note || "",
+        status: step.status,
+        note: step.note || "",
+      };
+      if (step.last_error) stepMeta.last_error = step.last_error;
+      if (step.proposal?.diagnosis) stepMeta.diagnosis = step.proposal.diagnosis;
+      dock.open({
+        key,
+        title: bi(`演练步骤 #${num} · ${step.title}`, `Rehearsal #${num} · ${step.title}`),
+        context: `${rehearsalTitle || rehearsalId} · ${c.id}`,
+        step: stepMeta,
+        prefill: typeof prefill === "string" ? prefill : undefined,
+        hello: bi(
+          `正在聚焦演练步骤 #${num}「${step.title}」。直接告诉我哪里有问题或想怎么调整（例如拆成两步、修改命令或目标机器、放宽/调整判据、删除冗余步，或将组件默认配置偏差反哺为组件改进建议），我会和你确认后给出「一键更新」卡片。`,
+          `Focused on rehearsal step #${num} "${step.title}". Tell me what looks off or how you want to change it (split steps, revise command/target host, adjust criteria, or suggest a component fix), and I'll generate a 1-click update card.`,
+        ),
+      });
+    },
+    [c.id, dock, num, rehearsalId, rehearsalTitle, step],
+  );
   const statusInfo =
     step.status === "passed"
       ? { label: bi("实测通过", "Passed"), cls: "passed" }
       : step.status === "failed"
-        ? { label: bi("执行受阻", "Blocked"), cls: "failed" }
+        ? step.proposal?.action === "confirm_override"
+          ? { label: bi("待确认参数", "Confirm Override"), cls: "failed" }
+          : { label: bi("执行受阻", "Blocked"), cls: "failed" }
         : step.status === "skipped"
           ? {
               label: isRollback
@@ -10694,7 +10729,7 @@ const StepRow = React.memo(function StepRow({
                   <button
                     type="button"
                     className="rh-code-btn is-ai"
-                    onClick={openStepInAIDock}
+                    onClick={() => openStepInAIDock()}
                     title={bi(
                       "在右下角 AI 助手中讨论或对话修改此演练步骤",
                       "Discuss or modify this step with AI Assistant",
@@ -11436,19 +11471,24 @@ const StepRow = React.memo(function StepRow({
 
               {step.proposal && (
                 <div
-                  className={`rh-proposal${freshVerify ? " is-fresh-proposal" : ""}`}
+                  className={`rh-proposal${step.proposal.action === "confirm_override" ? " is-confirm" : ""}${freshVerify ? " is-fresh-proposal" : ""}`}
                 >
                   <div className="rh-proposal-head">
                     <b>
                       <Spark size={14} rainbow />{" "}
-                      {step.proposal.action === "insert_before"
+                      {step.proposal.action === "confirm_override"
                         ? bi(
-                            `建议插入前置步骤：${step.proposal.title || "前置准备"}`,
-                            `Insert prerequisite step: ${step.proposal.title || "Prerequisite"}`,
+                            "检测到现场参数修正 · 请确认是否以实测为准",
+                            "Live Parameter Override Detected · Confirm to Pass",
                           )
-                        : step.proposal.action === "retry"
-                          ? bi("核验未通过 · 复测建议", "Verification Failed · Retry Guidance")
-                          : bi("核验未通过 · 建议更新此步命令", "Verification Failed · Update Command")}
+                        : step.proposal.action === "insert_before"
+                          ? bi(
+                              `建议插入前置步骤：${step.proposal.title || "前置准备"}`,
+                              `Insert prerequisite step: ${step.proposal.title || "Prerequisite"}`,
+                            )
+                          : step.proposal.action === "retry"
+                            ? bi("核验未通过 · 复测建议", "Verification Failed · Retry Guidance")
+                            : bi("核验未通过 · 建议更新此步命令", "Verification Failed · Update Command")}
                     </b>
                   </div>
                   <div className="rh-proposal-diag">
@@ -11457,6 +11497,43 @@ const StepRow = React.memo(function StepRow({
                       compact
                     />
                   </div>
+                  {step.proposal.action === "confirm_override" &&
+                    step.proposal.baseline_corrections &&
+                    step.proposal.baseline_corrections.length > 0 && (
+                      <div className="rh-corr-box">
+                        <div className="rh-corr-head">
+                          <span>
+                            {bi(
+                              "确认后将同步反哺修正以下集群基线项（后续演练自动生效）",
+                              "Baseline items to calibrate on confirmation (auto-used in future rehearsals)",
+                            )}
+                          </span>
+                        </div>
+                        <ul className="rh-corr-list">
+                          {step.proposal.baseline_corrections.map((bc, idx) => (
+                            <li key={idx} className="rh-corr-item">
+                              <span className="rh-corr-lbl">
+                                {bc.label || bc.key || bc.kind}
+                              </span>
+                              <span className="rh-corr-diff mono">
+                                {bc.old_value && (
+                                  <>
+                                    <del>{bc.old_value}</del>
+                                    <span className="rh-corr-arrow" aria-hidden>
+                                      →
+                                    </span>
+                                  </>
+                                )}
+                                <ins>{bc.new_value}</ins>
+                              </span>
+                              {bc.reason && (
+                                <span className="rh-corr-why">{bc.reason}</span>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                   {((step.proposal.verified_facts &&
                     step.proposal.verified_facts.length > 0) ||
                     (step.proposal.missing_items &&
@@ -11662,9 +11739,11 @@ const StepRow = React.memo(function StepRow({
                       <ShellCodeBlock
                         code={step.proposal.command}
                         title={
-                          step.proposal.action === "retry"
-                            ? bi("建议复测命令", "Recommended Command")
-                            : bi("修正后命令", "Revised Command")
+                          step.proposal.action === "confirm_override"
+                            ? bi("确认后同步更新本步命令与 SOP", "Step & SOP Command After Confirmation")
+                            : step.proposal.action === "retry"
+                              ? bi("建议复测命令", "Recommended Command")
+                              : bi("修正后命令", "Revised Command")
                         }
                         compact
                         pasteSafe
@@ -11678,7 +11757,59 @@ const StepRow = React.memo(function StepRow({
                       />
                     ))}
                   <div className="row-gap">
-                    {step.proposal.action !== "retry" ? (
+                    {step.proposal.action === "confirm_override" ? (
+                      <>
+                        <Button
+                          size="small"
+                          type="primary"
+                          icon={<IconCheck />}
+                          loading={busy === "apply"}
+                          onClick={() =>
+                            void applyProposal({
+                              acceptPassed: true,
+                              feedBaseline: Boolean(
+                                step.proposal?.baseline_corrections?.length,
+                              ),
+                            })
+                          }
+                        >
+                          {step.proposal.baseline_corrections?.length
+                            ? bi(
+                                "确认以实测为准通过，并反哺集群基线",
+                                "Confirm & Feed Back to Baseline",
+                              )
+                            : bi(
+                                "确认以实测为准通过并更新本步",
+                                "Confirm Passed & Update Step",
+                              )}
+                        </Button>
+                        {step.proposal.baseline_corrections &&
+                          step.proposal.baseline_corrections.length > 0 && (
+                            <Button
+                              size="small"
+                              type="outline"
+                              loading={busy === "apply"}
+                              onClick={() =>
+                                void applyProposal({
+                                  acceptPassed: true,
+                                  feedBaseline: false,
+                                })
+                              }
+                            >
+                              {bi(
+                                "仅修正本步并通过（不改基线）",
+                                "Pass & Update Step Only",
+                              )}
+                            </Button>
+                          )}
+                        <Button
+                          size="small"
+                          onClick={() => focusVerifyBox(true)}
+                        >
+                          {bi("仍按原目标复测", "Re-test Original Target")}
+                        </Button>
+                      </>
+                    ) : step.proposal.action !== "retry" ? (
                       <>
                         {can("delivery.execute") && autoSummary?.ready && (
                           <Button
@@ -11728,9 +11859,20 @@ const StepRow = React.memo(function StepRow({
                         size="small"
                         type="text"
                         icon={<Spark size={12} />}
-                        onClick={openStepInAIDock}
+                        onClick={() =>
+                          step.proposal?.action === "confirm_override"
+                            ? openStepInAIDock(
+                                bi(
+                                  `步骤 #${num}「${step.title}」在现场执行时发现参数与登记基线/默认模板不一致：${step.proposal.diagnosis}\n请判断这是否属于组件默认配置/模板缺陷（先调用 component_sync_status 核对），若属于组件通用问题请直接输出「组件改进建议」卡片反哺组件库。`,
+                                  `Step #${num} "${step.title}" revealed a mismatch between live parameters and baseline/template: ${step.proposal.diagnosis}\nCheck component_sync_status and emit a component improvement card if this is a component-level default bug.`,
+                                ),
+                              )
+                            : openStepInAIDock()
+                        }
                       >
-                        {bi("找 AI 对话修改此步", "Discuss / Edit with AI")}
+                        {step.proposal.action === "confirm_override"
+                          ? bi("同步反哺组件改进", "Suggest Component Fix")
+                          : bi("找 AI 对话修改此步", "Discuss / Edit with AI")}
                       </Button>
                     )}
                   </div>

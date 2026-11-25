@@ -2767,8 +2767,16 @@ export function ImportClusterPage({
   const [loadingPresets, setLoadingPresets] = useState(true);
 
   const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [maxStepReached, setMaxStepReached] = useState<1 | 2 | 3>(1);
+  const [reviewTraceOpen, setReviewTraceOpen] = useState(false);
+  const [reviewDetailsOpen, setReviewDetailsOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [catFilter, setCatFilter] = useState("all");
+
+  const goStep = useCallback((next: 1 | 2 | 3) => {
+    setStep(next);
+    setMaxStepReached((prev) => (next > prev ? next : prev));
+  }, []);
 
   // Step 1: Middleware & Cluster identity
   const [isCustom, setIsCustom] = useState(false);
@@ -3023,20 +3031,30 @@ export function ImportClusterPage({
   const filteredCatalog = useMemo(() => filterList(presetsData?.catalog || []), [presetsData, search, catFilter]);
   const filteredPresets = useMemo(() => filterList(presetsData?.presets || []), [presetsData, search, catFilter]);
 
-  const selectPreset = useCallback((item: ImportPresetItem) => {
-    setIsCustom(false);
-    setSelectedPreset(item);
-    setVersion(item.versions?.[0] || "");
-    setExactVersion("");
-    if (item.roles?.length) {
-      setHosts((prev) =>
-        prev.map((h, i) => ({
-          ...h,
-          role: item.roles[Math.min(i, item.roles.length - 1)]?.id || item.roles[0].id,
-        })),
-      );
-    }
-  }, []);
+  const selectPreset = useCallback(
+    (item: ImportPresetItem) => {
+      if (!isCustom && selectedPreset?.id === item.id) {
+        return;
+      }
+      setIsCustom(false);
+      setSelectedPreset(item);
+      setVersion((cur) => (cur.trim() ? cur : item.versions?.[0] || ""));
+      if (!parseInfo) {
+        setExactVersion("");
+      }
+      if (item.roles?.length) {
+        setHosts((prev) => {
+          const hasPopulatedHosts = prev.some((h) => h.ip.trim().length > 0);
+          if (hasPopulatedHosts) return prev;
+          return prev.map((h, i) => ({
+            ...h,
+            role: item.roles[Math.min(i, item.roles.length - 1)]?.id || item.roles[0].id,
+          }));
+        });
+      }
+    },
+    [isCustom, parseInfo, selectedPreset?.id],
+  );
 
   const handlePlatformChange = useCallback((v: string) => setPlatform(v), []);
   const handleDeployMethodChange = useCallback((v: string) => setDeployMethod(v), []);
@@ -3148,7 +3166,9 @@ export function ImportClusterPage({
             )
           : bi("已按内置规则提取基线草稿，请核对后建档", "Baseline extracted by built-in parser; please review"),
       );
-      setStep(3);
+      setReviewTraceOpen(false);
+      setReviewDetailsOpen(false);
+      goStep(3);
     } catch (e) {
       if (ac.signal.aborted || (e as Error)?.name === "AbortError") {
         setParseLive(null);
@@ -3315,6 +3335,7 @@ export function ImportClusterPage({
   }, [effectiveCompID, companionCatalog]);
 
   const idValid = CLUSTER_ID_RE.test(clusterId.trim());
+  const hasReviewDraft = maxStepReached >= 3 || Boolean(parseInfo);
 
   return (
     <div className="imp-page">
@@ -3346,24 +3367,34 @@ export function ImportClusterPage({
               { n: 1 as const, label: bi("识别中间件", "Middleware") },
               { n: 2 as const, label: bi("采集录入节点", "Capture") },
               { n: 3 as const, label: bi("核对基线拓扑", "Review") },
-            ].map((st, i) => (
-              <React.Fragment key={st.n}>
-                {i > 0 && <IconRight className="imp-step-sep" aria-hidden="true" />}
-                <button
-                  type="button"
-                  className={`imp-step-btn ${step === st.n ? "is-active" : step > st.n ? "is-done" : ""}`}
-                  disabled={st.n > step && !(st.n === 2 && canProceedStep1)}
-                  onClick={() => {
-                    if (st.n <= step || (st.n === 2 && canProceedStep1)) setStep(st.n);
-                  }}
-                >
-                  <span className="imp-step-num">
-                    {step > st.n ? <IconCheck /> : st.n}
-                  </span>
-                  <span>{st.label}</span>
-                </button>
-              </React.Fragment>
-            ))}
+            ].map((st, i) => {
+              const unlocked =
+                !parsing &&
+                (st.n === 1 ||
+                  (st.n === 2 && canProceedStep1) ||
+                  (st.n === 3 && canProceedStep1 && (hasReviewDraft || step === 3)));
+              const isDone =
+                st.n !== step &&
+                (st.n < step || (st.n === 3 && hasReviewDraft && canProceedStep1) || (st.n === 2 && maxStepReached >= 2 && canProceedStep1));
+              return (
+                <React.Fragment key={st.n}>
+                  {i > 0 && <IconRight className="imp-step-sep" aria-hidden="true" />}
+                  <button
+                    type="button"
+                    className={`imp-step-btn ${step === st.n ? "is-active" : isDone ? "is-done" : ""}`}
+                    disabled={!unlocked}
+                    onClick={() => {
+                      if (unlocked) goStep(st.n);
+                    }}
+                  >
+                    <span className="imp-step-num">
+                      {isDone ? <IconCheck /> : st.n}
+                    </span>
+                    <span>{st.label}</span>
+                  </button>
+                </React.Fragment>
+              );
+            })}
           </nav>
         </header>
 
@@ -3593,10 +3624,24 @@ export function ImportClusterPage({
                   long
                   size="large"
                   disabled={!canProceedStep1}
-                  onClick={() => setStep(2)}
+                  onClick={() => goStep(2)}
                 >
                   {bi("下一步：采集与识别节点", "Next: Capture & Recognize")} <IconRight />
                 </Button>
+                {hasReviewDraft && canProceedStep1 && (
+                  <Button
+                    long
+                    size="default"
+                    type="secondary"
+                    onClick={() => goStep(3)}
+                  >
+                    {bi(
+                      `直接返回第 3 步核对草稿（${validHosts.length} 台节点）`,
+                      `Return to Step 3 Review (${validHosts.length} hosts)`,
+                    )}{" "}
+                    <IconRight />
+                  </Button>
+                )}
                 {!canProceedStep1 && (
                   <span className="imp-cta-hint">
                     {bi("填写合规的集群标识后即可进入下一步", "Enter a valid Cluster ID to continue")}
@@ -3627,9 +3672,28 @@ export function ImportClusterPage({
                 <span className="imp-ctx-chip">{effectiveDisplayName}</span>
                 {version && <span className="imp-ctx-chip mono">{version}</span>}
               </div>
-              <Button size="mini" type="text" disabled={parsing} onClick={() => setStep(1)}>
-                <IconEdit /> {bi("修改中间件或标识", "Change Middleware / ID")}
-              </Button>
+              <div className="imp-ctx-right">
+                {hasReviewDraft && !parsing && (
+                  <Button
+                    size="mini"
+                    type="secondary"
+                    className="imp-draft-return-btn"
+                    onClick={() => goStep(3)}
+                  >
+                    <IconCheckCircle />
+                    <span>
+                      {bi(
+                        `已保留草稿（${validHosts.length} 节点）· 返回第 3 步`,
+                        `Draft Kept (${validHosts.length} hosts) · Step 3`,
+                      )}
+                    </span>
+                    <IconRight />
+                  </Button>
+                )}
+                <Button size="mini" type="text" disabled={parsing} onClick={() => goStep(1)}>
+                  <IconEdit /> {bi("修改中间件或标识", "Change Middleware / ID")}
+                </Button>
+              </div>
             </div>
 
             {!focusParseView && (
@@ -3974,7 +4038,7 @@ export function ImportClusterPage({
                   <Button
                     type="primary"
                     disabled={validHosts.length === 0}
-                    onClick={() => setStep(3)}
+                    onClick={() => goStep(3)}
                   >
                     {bi("下一步：核对基线与拓扑预览", "Next: Review & Live Topology")} <IconRight />
                   </Button>
@@ -3985,84 +4049,149 @@ export function ImportClusterPage({
           );
         })()}
 
-        {/* ---------------- STEP 3: Multi-Component Baseline Review & Live Topology ---------------- */}
-        {step === 3 && (
+        {/* ---------------- STEP 3: Focused Baseline Review & Live Topology ---------------- */}
+        {step === 3 && (() => {
+          const validEndpoints = endpoints.filter((e) => e.address.trim());
+          const hostsWithIP = validHosts.filter((h) => h.ip.trim()).length;
+          const pathTotal =
+            serviceUnits.length + configPaths.length + dataDirs.length + logDirs.length;
+          const clueCount = splitNotesToClues(notes).length;
+          const hasAttention =
+            Boolean(parseInfo?.missing?.length) ||
+            Boolean(parseInfo?.warnings?.length) ||
+            !idValid ||
+            validHosts.length === 0 ||
+            hostsWithIP < validHosts.length;
+
+          return (
           <div className="imp-review-grid imp-step-pane">
             <div className="imp-review-main">
-              {parseInfo && (
-                <div className="imp-parse-banner">
-                  <div>
-                    <b>
-                      {parseInfo.parser === "ai"
-                        ? bi("✓ 已由 AI 提取多组件基线草稿", "✓ Multi-component baseline extracted by AI")
-                        : bi("✓ 已由内置规则提取多组件基线草稿", "✓ Multi-component baseline extracted by rules")}
-                    </b>
-                    {parseInfo.companionCount > 0 && (
-                      <span className="imp-kind-pill t-brand" style={{ marginLeft: 8 }}>
-                        {bi(`已识别 ${parseInfo.companionCount} 个伴生组件`, `${parseInfo.companionCount} companion(s) detected`)}
-                      </span>
+              {/* Calm Readiness Strip (replaces noisy banner + open trace wall) */}
+              <section className={`imp-review-hero ${hasAttention ? "has-warn" : ""}`}>
+                <div className="imp-review-hero-top">
+                  <div className="imp-review-hero-l">
+                    <span className={`imp-review-status-ic ${hasAttention ? "is-warn" : "is-ok"}`}>
+                      <IconCheckCircle />
+                    </span>
+                    <div className="imp-review-hero-txt">
+                      <div className="imp-review-hero-title">
+                        <b>
+                          {parseInfo
+                            ? parseInfo.parser === "ai"
+                              ? bi("AI 已提取多组件基线草稿", "AI Multi-Component Baseline Ready")
+                              : bi("规则引擎已提取基线草稿", "Baseline Draft Extracted")
+                            : bi("核对集群基线草稿", "Review Cluster Baseline Draft")}
+                        </b>
+                        <div className="imp-review-kpis">
+                          <span className="imp-review-kpi num">
+                            {validHosts.length} {bi("台节点", "hosts")}
+                          </span>
+                          <span className="imp-review-kpi num">
+                            {1 + companions.length} {bi("个组件", "components")}
+                          </span>
+                          <span className="imp-review-kpi num">
+                            {validEndpoints.length} {bi("个入口", "endpoints")}
+                          </span>
+                          {packages.length > 0 && (
+                            <span className="imp-review-kpi num">
+                              {packages.length} {bi("软件包", "pkgs")}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <p className="imp-review-hero-sub">
+                        {bi(
+                          "只需重点核对 ① 身份与节点 IP、② 访问入口与组件栈，确认右侧拓扑无误即可建档。",
+                          "Verify ① Identity & Hosts and ② Endpoints & Stack, confirm the live topology on the right, then complete onboarding.",
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="imp-review-hero-r">
+                    {parseTrace && (
+                      <button
+                        type="button"
+                        className={`imp-review-ghost-btn ${reviewTraceOpen ? "is-on" : ""}`}
+                        aria-expanded={reviewTraceOpen}
+                        onClick={() => setReviewTraceOpen((v) => !v)}
+                      >
+                        <Spark size={11} />
+                        <span>{reviewTraceOpen ? bi("收起推演", "Hide Trace") : bi("推演过程", "AI Trace")}</span>
+                        {reviewTraceOpen ? <IconUp /> : <IconDown />}
+                      </button>
                     )}
+                    <button
+                      type="button"
+                      className="imp-review-ghost-btn"
+                      onClick={() => goStep(2)}
+                    >
+                      <IconArrowLeft />
+                      <span>{bi("返回补充采集", "Back to Capture")}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {(parseInfo?.missing?.length || parseInfo?.warnings?.length) ? (
+                  <div className="imp-review-attention">
                     {parseInfo.missing.length > 0 && (
-                      <div className="muted small" style={{ marginTop: 3 }}>
-                        {bi("建议核对补齐：", "Suggested to review: ")}
-                        {parseInfo.missing.join(" · ")}
+                      <div>
+                        <b>{bi("待核对补齐：", "Suggested to verify: ")}</b>
+                        <span>{parseInfo.missing.join(" · ")}</span>
                       </div>
                     )}
                     {parseInfo.warnings.map((w, i) => (
-                      <div key={i} className="muted small" style={{ marginTop: 2 }}>
+                      <div key={i} className="imp-review-warn-line">
                         {w}
                       </div>
                     ))}
                   </div>
-                  <Button size="mini" onClick={() => setStep(2)}>
-                    {bi("返回补充采集", "Re-parse")}
-                  </Button>
-                </div>
-              )}
+                ) : null}
+              </section>
 
-              {parseTrace && (
+              {parseTrace && reviewTraceOpen && (
                 <AIProcessCard
                   trace={parseTrace}
                   title={bi("AI 架构识别与推演过程", "AI Architecture Parsing Trace")}
                 />
               )}
 
-              {/* NEW: First-Class Multi-Component Architecture Stack Editor */}
-              <section className="imp-card">
+              {/* Focus ①: Cluster Identity + Host Inventory (Unified Primary Card) */}
+              <section className="imp-card imp-review-sec">
                 <div className="imp-card-head">
-                  <div className="imp-card-head-title">
-                    <h2>
-                      {bi("架构组件栈（主中间件 + 伴生组件）", "Architecture Stack (Primary + Companions)")}
-                      <span className="imp-count-badge">{1 + companions.length}</span>
-                    </h2>
-                    <p>
-                      {bi(
-                        "Patroni、etcd、HAProxy、Keepalived 等高可用/协调/代理组件将作为真实实例建入运行拓扑与端口清单。",
-                        "HA, DCS, proxy, and VIP companions are modeled as real topology instances with ports and flows.",
-                      )}
-                    </p>
+                  <div className="imp-review-sec-title">
+                    <span className="imp-sec-index">1</span>
+                    <div className="imp-card-head-title">
+                      <h2>
+                        {bi("集群身份与主机节点", "Cluster Identity & Hosts")}
+                        <span className="imp-count-badge">{validHosts.length}</span>
+                      </h2>
+                      <p>
+                        {bi(
+                          "确认集群标识、主精确版本以及每台节点的主机名、业务 IP 与主从角色。",
+                          "Verify Cluster ID, version, and each host's hostname, IP address, and role.",
+                        )}
+                      </p>
+                    </div>
                   </div>
+                  <Button
+                    size="small"
+                    icon={<IconPlus />}
+                    onClick={() =>
+                      setHosts((prev) => [
+                        ...prev,
+                        {
+                          name: `node-${prev.length + 1}`,
+                          ip: "",
+                          role: effectiveRoles[Math.min(1, effectiveRoles.length - 1)]?.id || "node",
+                          disk: "",
+                        },
+                      ])
+                    }
+                  >
+                    {bi("添加节点", "Add Host")}
+                  </Button>
                 </div>
-                <CompanionStackEditor
-                  primaryCompID={effectiveCompID}
-                  primaryDisplayName={effectiveDisplayName}
-                  primaryVersion={exactVersion || version}
-                  primaryIcon={isCustom ? customIcon : selectedPreset?.icon || "server"}
-                  primaryColor={isCustom ? customColor : selectedPreset?.color || "blue"}
-                  hosts={validHosts}
-                  companions={companions}
-                  catalog={companionCatalog}
-                  onChange={setCompanions}
-                />
-              </section>
 
-              {/* Identity & Version Review (Zero Overflow!) */}
-              <section className="imp-card">
-                <div className="imp-card-head">
-                  <div className="imp-card-head-title">
-                    <h2>{bi("集群身份与版本基线", "Identity & Version Baseline")}</h2>
-                  </div>
-                </div>
                 <div className="imp-form-grid-2">
                   <div className="imp-field">
                     <label>
@@ -4070,18 +4199,9 @@ export function ImportClusterPage({
                     </label>
                     <Input
                       className="mono"
+                      status={clusterId && !idValid ? "error" : undefined}
                       value={clusterId}
                       onChange={(v) => setClusterId(v.toLowerCase().replace(/[^a-z0-9-]/g, ""))}
-                    />
-                  </div>
-                  <div className="imp-field">
-                    <label>
-                      <span className="imp-lbl-left">{bi("架构形态摘要", "Architecture Summary")}</span>
-                    </label>
-                    <Input
-                      placeholder={bi("例如：3节点 Patroni + etcd 高可用集群", "e.g. 3-node Patroni + etcd HA cluster")}
-                      value={archSummary}
-                      onChange={setArchSummary}
                     />
                   </div>
                   <div className="imp-field">
@@ -4131,36 +4251,20 @@ export function ImportClusterPage({
                       </Select>
                     </div>
                   </div>
-                </div>
-              </section>
-
-              {/* Hosts Review with Explicit Column Headers */}
-              <section className="imp-card">
-                <div className="imp-card-head">
-                  <div className="imp-card-head-title">
-                    <h2>
-                      {bi("主机节点清单", "Cluster Hosts")}
-                      <span className="imp-count-badge">{validHosts.length}</span>
-                    </h2>
+                  <div className="imp-field">
+                    <label>
+                      <span className="imp-lbl-left">{bi("架构形态摘要", "Architecture Summary")}</span>
+                    </label>
+                    <Input
+                      placeholder={bi("例如：3节点 Patroni + etcd 高可用集群", "e.g. 3-node Patroni + etcd HA cluster")}
+                      value={archSummary}
+                      onChange={setArchSummary}
+                    />
                   </div>
-                  <Button
-                    size="small"
-                    icon={<IconPlus />}
-                    onClick={() =>
-                      setHosts((prev) => [
-                        ...prev,
-                        {
-                          name: `node-${prev.length + 1}`,
-                          ip: "",
-                          role: effectiveRoles[Math.min(1, effectiveRoles.length - 1)]?.id || "node",
-                          disk: "",
-                        },
-                      ])
-                    }
-                  >
-                    {bi("添加节点", "Add Host")}
-                  </Button>
                 </div>
+
+                <div className="imp-sec-divider" />
+
                 <div className="imp-table-rows">
                   <div className="imp-host-row imp-col-heads">
                     <span>{bi("主机名", "Hostname")}</span>
@@ -4220,11 +4324,23 @@ export function ImportClusterPage({
                 </div>
               </section>
 
-              {/* Access Endpoints & Runtime Paths (Tag Chips - Never Concatenates!) */}
-              <section className="imp-card">
+              {/* Focus ②: Access Endpoints + Multi-Component Architecture Stack */}
+              <section className="imp-card imp-review-sec">
                 <div className="imp-card-head">
-                  <div className="imp-card-head-title">
-                    <h2>{bi("访问入口、运行路径与关键参数（选填）", "Endpoints, Paths & Key Params")}</h2>
+                  <div className="imp-review-sec-title">
+                    <span className="imp-sec-index">2</span>
+                    <div className="imp-card-head-title">
+                      <h2>
+                        {bi("访问入口与架构组件栈", "Endpoints & Architecture Stack")}
+                        <span className="imp-count-badge">{1 + companions.length}</span>
+                      </h2>
+                      <p>
+                        {bi(
+                          "确认业务入口（VIP / EIP / F5 / 域名）及 Patroni、etcd、HAProxy、备份等伴生高可用组件。",
+                          "Verify business endpoints (VIP / EIP / domain) and co-located HA, DCS, LB, and backup components.",
+                        )}
+                      </p>
+                    </div>
                   </div>
                   <Button
                     size="small"
@@ -4246,133 +4362,193 @@ export function ImportClusterPage({
                   onChange={setEndpoints}
                 />
 
-                <div className="imp-form-grid-2">
-                  <div className="imp-field">
-                    <label>
-                      <span className="imp-lbl-left">{bi("系统服务单元", "Service Units")}</span>
-                    </label>
-                    <InputTag
-                      saveOnBlur
-                      placeholder={selectedPreset?.service_hints?.join(", ") || "patroni.service"}
-                      value={serviceUnits}
-                      onChange={(vals) => setServiceUnits(normalizeTagList(vals as string[]))}
-                    />
-                  </div>
-                  <div className="imp-field">
-                    <label>
-                      <span className="imp-lbl-left">{bi("配置文件路径", "Config Paths")}</span>
-                    </label>
-                    <InputTag
-                      saveOnBlur
-                      placeholder={selectedPreset?.config_hints?.[0] || "/etc/patroni/patroni.yml"}
-                      value={configPaths}
-                      onChange={(vals) => setConfigPaths(normalizeTagList(vals as string[]))}
-                    />
-                  </div>
-                  <div className="imp-field">
-                    <label>
-                      <span className="imp-lbl-left">{bi("数据目录", "Data Directories")}</span>
-                    </label>
-                    <InputTag
-                      saveOnBlur
-                      placeholder={selectedPreset?.data_hints?.[0] || "/data/pg"}
-                      value={dataDirs}
-                      onChange={(vals) => setDataDirs(normalizeTagList(vals as string[]))}
-                    />
-                  </div>
-                  <div className="imp-field">
-                    <label>
-                      <span className="imp-lbl-left">{bi("日志目录", "Log Directories")}</span>
-                    </label>
-                    <InputTag
-                      saveOnBlur
-                      placeholder={selectedPreset?.log_hints?.[0] || "/var/log/postgresql"}
-                      value={logDirs}
-                      onChange={(vals) => setLogDirs(normalizeTagList(vals as string[]))}
-                    />
-                  </div>
-                </div>
+                <div className="imp-sec-divider" />
 
-                <div className="imp-field">
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <label>
-                      <span className="imp-lbl-left">{bi("关键运行参数（键值对）", "Key Runtime Parameters")}</span>
-                    </label>
-                    <Button
-                      size="mini"
-                      icon={<IconPlus />}
-                      onClick={() => setParamRows((prev) => [...prev, { key: "", value: "" }])}
-                    >
-                      {bi("添加参数", "Add Param")}
-                    </Button>
-                  </div>
-                  {paramRows.length > 0 && (
-                    <div className="imp-table-rows">
-                      {paramRows.map((pr, idx) => (
-                        <div key={idx} className="imp-kv-row">
-                          <Input
-                            className="mono"
-                            placeholder="max_connections"
-                            value={pr.key}
-                            onChange={(v) =>
-                              setParamRows((prev) => prev.map((r, i) => (i === idx ? { ...r, key: v } : r)))
-                            }
-                          />
-                          <Input
-                            className="mono"
-                            placeholder="500"
-                            value={pr.value}
-                            onChange={(v) =>
-                              setParamRows((prev) => prev.map((r, i) => (i === idx ? { ...r, value: v } : r)))
-                            }
-                          />
-                          <Button
-                            size="small"
-                            type="text"
-                            status="danger"
-                            icon={<IconDelete />}
-                            onClick={() => setParamRows((prev) => prev.filter((_, i) => i !== idx))}
-                          />
-                        </div>
-                      ))}
+                <CompanionStackEditor
+                  primaryCompID={effectiveCompID}
+                  primaryDisplayName={effectiveDisplayName}
+                  primaryVersion={exactVersion || version}
+                  primaryIcon={isCustom ? customIcon : selectedPreset?.icon || "server"}
+                  primaryColor={isCustom ? customColor : selectedPreset?.color || "blue"}
+                  hosts={validHosts}
+                  companions={companions}
+                  catalog={companionCatalog}
+                  onChange={setCompanions}
+                />
+              </section>
+
+              {/* Progressive Disclosure ③: Runtime Paths, Parameters, Packages & Field Clues (Collapsed by Default) */}
+              <section className={`imp-card imp-review-adv ${reviewDetailsOpen ? "is-open" : ""}`}>
+                <div
+                  className="imp-review-adv-head"
+                  role="button"
+                  tabIndex={0}
+                  aria-expanded={reviewDetailsOpen}
+                  onClick={() => setReviewDetailsOpen((v) => !v)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setReviewDetailsOpen((v) => !v);
+                    }
+                  }}
+                >
+                  <div className="imp-review-sec-title">
+                    <span className="imp-sec-index is-soft">3</span>
+                    <div className="imp-card-head-title">
+                      <h2>{bi("运行路径、参数与现场档案", "Runtime Paths, Params & Field Notes")}</h2>
+                      <div className="imp-review-adv-pills">
+                        <span className="imp-review-kpi num">
+                          {bi(`服务/路径 ${pathTotal}`, `Paths ${pathTotal}`)}
+                        </span>
+                        <span className="imp-review-kpi num">
+                          {bi(`运行参数 ${paramRows.length}`, `Params ${paramRows.length}`)}
+                        </span>
+                        <span className="imp-review-kpi num">
+                          {bi(`CVE 软件包 ${packages.length}`, `Packages ${packages.length}`)}
+                        </span>
+                        <span className="imp-review-kpi num">
+                          {bi(`现场线索 ${clueCount}`, `Notes ${clueCount}`)}
+                        </span>
+                      </div>
                     </div>
-                  )}
+                  </div>
+                  <span className="imp-review-adv-toggle">
+                    <span>{reviewDetailsOpen ? bi("收起细节", "Fold") : bi("展开微调", "Inspect / Edit")}</span>
+                    {reviewDetailsOpen ? <IconUp /> : <IconDown />}
+                  </span>
                 </div>
 
-                {packages.length > 0 && (
-                  <div className="imp-field">
-                    <label>
-                      <span className="imp-lbl-left">
-                        {bi(`已采集软件包（${packages.length} 项，纳入安全 CVE 扫描）`, `Collected Packages (${packages.length}, CVE indexed)`)}
-                      </span>
-                    </label>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                      {packages.slice(0, 12).map((pk, idx) => (
-                        <Tag key={idx} size="small" className="mono">
-                          {pk.name}={pk.version}
-                        </Tag>
-                      ))}
-                      {packages.length > 12 && (
-                        <Tag size="small" color="gray">
-                          +{packages.length - 12}
-                        </Tag>
+                {reviewDetailsOpen && (
+                  <div className="imp-review-adv-body">
+                    <div className="imp-form-grid-2">
+                      <div className="imp-field">
+                        <label>
+                          <span className="imp-lbl-left">{bi("系统服务单元", "Service Units")}</span>
+                        </label>
+                        <InputTag
+                          saveOnBlur
+                          placeholder={selectedPreset?.service_hints?.join(", ") || "patroni.service"}
+                          value={serviceUnits}
+                          onChange={(vals) => setServiceUnits(normalizeTagList(vals as string[]))}
+                        />
+                      </div>
+                      <div className="imp-field">
+                        <label>
+                          <span className="imp-lbl-left">{bi("配置文件路径", "Config Paths")}</span>
+                        </label>
+                        <InputTag
+                          saveOnBlur
+                          placeholder={selectedPreset?.config_hints?.[0] || "/etc/patroni/patroni.yml"}
+                          value={configPaths}
+                          onChange={(vals) => setConfigPaths(normalizeTagList(vals as string[]))}
+                        />
+                      </div>
+                      <div className="imp-field">
+                        <label>
+                          <span className="imp-lbl-left">{bi("数据目录", "Data Directories")}</span>
+                        </label>
+                        <InputTag
+                          saveOnBlur
+                          placeholder={selectedPreset?.data_hints?.[0] || "/data/pg"}
+                          value={dataDirs}
+                          onChange={(vals) => setDataDirs(normalizeTagList(vals as string[]))}
+                        />
+                      </div>
+                      <div className="imp-field">
+                        <label>
+                          <span className="imp-lbl-left">{bi("日志目录", "Log Directories")}</span>
+                        </label>
+                        <InputTag
+                          saveOnBlur
+                          placeholder={selectedPreset?.log_hints?.[0] || "/var/log/postgresql"}
+                          value={logDirs}
+                          onChange={(vals) => setLogDirs(normalizeTagList(vals as string[]))}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="imp-field">
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <label>
+                          <span className="imp-lbl-left">{bi("关键运行参数（键值对）", "Key Runtime Parameters")}</span>
+                        </label>
+                        <Button
+                          size="mini"
+                          icon={<IconPlus />}
+                          onClick={() => setParamRows((prev) => [...prev, { key: "", value: "" }])}
+                        >
+                          {bi("添加参数", "Add Param")}
+                        </Button>
+                      </div>
+                      {paramRows.length > 0 && (
+                        <div className="imp-table-rows">
+                          {paramRows.map((pr, idx) => (
+                            <div key={idx} className="imp-kv-row">
+                              <Input
+                                className="mono"
+                                placeholder="max_connections"
+                                value={pr.key}
+                                onChange={(v) =>
+                                  setParamRows((prev) => prev.map((r, i) => (i === idx ? { ...r, key: v } : r)))
+                                }
+                              />
+                              <Input
+                                className="mono"
+                                placeholder="500"
+                                value={pr.value}
+                                onChange={(v) =>
+                                  setParamRows((prev) => prev.map((r, i) => (i === idx ? { ...r, value: v } : r)))
+                                }
+                              />
+                              <Button
+                                size="small"
+                                type="text"
+                                status="danger"
+                                icon={<IconDelete />}
+                                onClick={() => setParamRows((prev) => prev.filter((_, i) => i !== idx))}
+                              />
+                            </div>
+                          ))}
+                        </div>
                       )}
                     </div>
+
+                    {packages.length > 0 && (
+                      <div className="imp-field">
+                        <label>
+                          <span className="imp-lbl-left">
+                            {bi(`已采集软件包（${packages.length} 项，纳入安全 CVE 扫描）`, `Collected Packages (${packages.length}, CVE indexed)`)}
+                          </span>
+                        </label>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                          {packages.slice(0, 16).map((pk, idx) => (
+                            <Tag key={idx} size="small" className="mono">
+                              {pk.name}={pk.version}
+                            </Tag>
+                          ))}
+                          {packages.length > 16 && (
+                            <Tag size="small" color="gray">
+                              +{packages.length - 16}
+                            </Tag>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    <FieldCluesEditor
+                      title={bi("现场线索与运维约束", "Field Clues & Maintenance Window")}
+                      value={notes}
+                      onChange={setNotes}
+                    />
                   </div>
                 )}
-
-                <FieldCluesEditor
-                  title={bi("现场线索与运维约束", "Field Clues & Maintenance Window")}
-                  value={notes}
-                  onChange={setNotes}
-                />
               </section>
             </div>
 
-            {/* Right Sticky Live Multi-Component Topology Preview & Submit */}
+            {/* Right Sticky Live Topology Preview & Readiness Commit Card */}
             <aside className="imp-review-side">
-              <section className="imp-card">
-                <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
+              <section className="imp-card imp-review-commit-card">
+                <div className="imp-review-commit-head">
                   <AppGlyph
                     id={effectiveCompID}
                     icon={isCustom ? customIcon : selectedPreset?.icon}
@@ -4380,43 +4556,14 @@ export function ImportClusterPage({
                     size={36}
                   />
                   <div style={{ minWidth: 0, flex: 1 }}>
-                    <div className="mono" style={{ fontSize: 15, fontWeight: 650, color: "var(--ink)" }}>
+                    <div className="mono imp-review-commit-id">
                       {clusterId || "—"}
                     </div>
                     <div className="small muted">
-                      {effectiveDisplayName} {exactVersion || version} · {validHosts.length} {bi("台节点", "hosts")}
+                      {effectiveDisplayName} {exactVersion || version} · {validHosts.length} {bi("台节点", "hosts")} · {1 + companions.length} {bi("组件", "components")}
                     </div>
                   </div>
                 </div>
-
-                {companions.length > 0 && (
-                  <div className="cl-imp-stack">
-                    <span className="cl-imp-stack-lbl">{bi("架构组件栈", "Stack")}</span>
-                    <div className="cl-imp-stack-pills">
-                      <span className="cl-imp-comp-pill is-primary">
-                        <AppGlyph
-                          id={effectiveCompID}
-                          icon={isCustom ? customIcon : selectedPreset?.icon}
-                          color={isCustom ? customColor : selectedPreset?.color}
-                          size={15}
-                        />
-                        <b>{effectiveDisplayName}</b>
-                        {(exactVersion || version) && (
-                          <span className="cl-imp-comp-ver">{exactVersion || version}</span>
-                        )}
-                        <span className="cl-imp-comp-kind">{bi("主组件", "Primary")}</span>
-                      </span>
-                      {companions.map((cm) => (
-                        <span key={cm.component} className="cl-imp-comp-pill">
-                          <AppGlyph id={cm.component} icon={cm.icon || companionIcon(cm.component)} color={cm.color} size={15} />
-                          <b>{cm.display_name || cm.component}</b>
-                          {cm.version && <span className="cl-imp-comp-ver">{cm.version}</span>}
-                          <span className="cl-imp-comp-kind">{companionKindMeta(effectiveCompanionKind(cm.component, cm.kind)).label}</span>
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
 
                 <div className="imp-topo-wrap">
                   {previewHosts.length > 0 ? (
@@ -4433,42 +4580,59 @@ export function ImportClusterPage({
                   )}
                 </div>
 
-                <div className="imp-footer-bar" style={{ paddingTop: 12 }}>
-                  <Button onClick={() => setStep(2)}>
-                    <IconArrowLeft /> {bi("返回修改", "Back")}
-                  </Button>
-                  <Button type="primary" loading={submitting} onClick={submitImport}>
+                <div className="imp-ready-checks">
+                  <div className={`imp-ready-item ${idValid ? "is-ok" : "is-warn"}`}>
+                    <IconCheckCircle />
+                    <span>
+                      {idValid
+                        ? bi("集群标识合规", "Cluster ID valid")
+                        : bi("请填写合规集群标识", "Valid Cluster ID required")}
+                    </span>
+                  </div>
+                  <div className={`imp-ready-item ${validHosts.length > 0 && hostsWithIP === validHosts.length ? "is-ok" : "is-warn"}`}>
+                    <IconCheckCircle />
+                    <span>
+                      {validHosts.length === 0
+                        ? bi("至少需要 1 台主机节点", "At least 1 host required")
+                        : hostsWithIP === validHosts.length
+                          ? bi(`已核对 ${validHosts.length} 台节点与业务 IP`, `${validHosts.length} host(s) with IPs ready`)
+                          : bi(
+                              `共 ${validHosts.length} 台节点，其中 ${validHosts.length - hostsWithIP} 台待补 IP`,
+                              `${validHosts.length - hostsWithIP} of ${validHosts.length} host(s) missing IP`,
+                            )}
+                    </span>
+                  </div>
+                  <div className="imp-ready-item is-ok">
+                    <IconCheckCircle />
+                    <span>
+                      {bi(
+                        `已就绪 ${1 + companions.length} 个组件 · ${validEndpoints.length} 个入口 · ${packages.length} 项软件包`,
+                        `${1 + companions.length} component(s) · ${validEndpoints.length} endpoint(s) · ${packages.length} pkg(s)`,
+                      )}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="imp-review-commit-acts">
+                  <Button
+                    type="primary"
+                    size="large"
+                    long
+                    loading={submitting}
+                    disabled={!idValid || validHosts.length === 0}
+                    onClick={submitImport}
+                  >
                     <IconCheck /> {bi("完成纳管建档", "Complete Onboarding")}
                   </Button>
+                  <Button long type="text" size="small" onClick={() => goStep(2)}>
+                    <IconArrowLeft /> {bi("返回第 2 步补充采集（保留当前数据）", "Back to Step 2 (keeps draft)")}
+                  </Button>
                 </div>
-              </section>
-
-              <section className="imp-card">
-                <div className="imp-card-head">
-                  <h2>{bi("建档后立即解锁", "Unlocked Immediately")}</h2>
-                </div>
-                <ul className="imp-unlock-list">
-                  <li>
-                    <span className="imp-unlock-dot" />
-                    {bi("多组件运行拓扑与完整纳管基线档案", "Multi-component topology & baseline archive")}
-                  </li>
-                  <li>
-                    <span className="imp-unlock-dot" />
-                    {bi("AI 变更演练工作台 & 导出 Word 实施方案", "AI Change Rehearsal & Word SOP export")}
-                  </li>
-                  <li>
-                    <span className="imp-unlock-dot" />
-                    {bi("同类中间件跨集群变更推广", "Cross-cluster change rollout")}
-                  </li>
-                  <li>
-                    <span className="imp-unlock-dot" />
-                    {bi("安全 CVE 漏洞扫描与升级演练联动", "CVE scanning & upgrade rehearsal")}
-                  </li>
-                </ul>
               </section>
             </aside>
           </div>
-        )}
+          );
+        })()}
       </div>
     </div>
   );

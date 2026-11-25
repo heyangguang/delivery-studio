@@ -976,9 +976,390 @@ function buildImportInitialLive(
   };
 }
 
+type ProbeTailorPreset = {
+  id: string;
+  tag: string;
+  tone: "brand" | "teal" | "ok" | "warn" | "violet" | "neutral";
+  title: string;
+  desc: string;
+  prompt: string;
+  recommended?: boolean;
+};
+
+function formatProbeStamp(date = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
+}
+
+function buildTimestampedProbeFilename(
+  base: string,
+  source: "template" | "ai",
+  mode: "gap" | "full",
+  stamp: string,
+): string {
+  const clean = (base || "mw-import-probe.sh").trim();
+  const dot = clean.lastIndexOf(".");
+  const stem = (dot > 0 ? clean.slice(0, dot) : clean).replace(/-\d{8}-\d{6}$/, "");
+  const ext = dot > 0 ? clean.slice(dot) : ".sh";
+  const tag =
+    source === "ai"
+      ? mode === "gap"
+        ? "-ai-gap"
+        : "-ai"
+      : mode === "gap"
+        ? "-gap"
+        : "";
+  return `${stem}${tag}-${stamp}${ext}`;
+}
+
+function getProbeTailorSuggestions(
+  componentId?: string,
+  deployMethod?: string,
+): ProbeTailorPreset[] {
+  const cid = (componentId || "").trim().toLowerCase();
+  const isContainer = deployMethod === "docker" || deployMethod === "k8s";
+
+  if (cid === "postgresql" || cid.includes("postgres") || cid === "pg") {
+    return [
+      {
+        id: "pg-ha",
+        tag: bi("高可用", "HA"),
+        tone: "brand",
+        title: bi("Patroni + etcd 高可用拓扑", "Patroni + etcd HA Stack"),
+        desc: bi("采 patronictl list、etcd 成员健康、主从角色与 WAL 延迟", "Collect patronictl list, etcd member health, roles & WAL lag"),
+        prompt: "重点采集 Patroni (patronictl list / patroni.yml) 与 etcd 成员健康状态、主从角色及同步延迟",
+        recommended: true,
+      },
+      {
+        id: "pg-backup",
+        tag: bi("备份", "Backup"),
+        tone: "ok",
+        title: bi("pgBackRest 与 WAL 归档", "pgBackRest & WAL Archive"),
+        desc: bi("采 stanza 状态、最近全量/增量备份与 archive_command", "Collect stanza info, latest backups & archive_command"),
+        prompt: "重点采集 pgBackRest stanza 配置、最近备份状态、archive_command 与 WAL 归档目录",
+        recommended: true,
+      },
+      {
+        id: "pg-proxy",
+        tag: bi("入口代理", "Proxy/VIP"),
+        tone: "teal",
+        title: bi("PgBouncer / HAProxy / VIP", "PgBouncer / HAProxy / VIP"),
+        desc: bi("采连接池模式、代理监听端口与 Keepalived VIP 归属", "Collect pool mode, proxy listeners & Keepalived VIP"),
+        prompt: "重点探测 PgBouncer 连接池配置、HAProxy/Nginx 监听端口与 Keepalived VIP 归属",
+      },
+      {
+        id: "pg-tls",
+        tag: bi("安全证书", "TLS/Auth"),
+        tone: "violet",
+        title: bi("TLS 证书有效期与 pg_hba", "TLS Certs & pg_hba Rules"),
+        desc: bi("采 SSL 证书到期时间、协议版本与脱敏认证规则", "Collect SSL cert expiry, TLS version & redacted pg_hba"),
+        prompt: "重点采集 PostgreSQL SSL 证书链有效期、TLS 版本以及脱敏后的 pg_hba.conf 认证方式",
+      },
+      {
+        id: "pg-container",
+        tag: bi("部署形态", "Runtime"),
+        tone: "warn",
+        title: bi("容器 / 非标准路径部署", "Container / Custom PGDATA"),
+        desc: bi("适配 Docker/Podman/K8s 与自定义 PGDATA、多实例目录", "Support Docker/Podman/K8s & custom PGDATA paths"),
+        prompt: "适配容器（Docker/Podman/K8s）及非标准 PGDATA 路径、多实例 systemd 服务名探测",
+        recommended: isContainer,
+      },
+      {
+        id: "pg-fast",
+        tag: bi("极速模式", "Fast"),
+        tone: "neutral",
+        title: bi("极速核心拓扑（10 秒内）", "Fast Core Topology (<10s)"),
+        desc: bi("跳过耗时目录扫描，仅快采主机、版本、角色与核心参数", "Skip heavy scans; grab hosts, versions, roles & key params"),
+        prompt: "保持极速精简（10 秒内完成），跳过大目录遍历，仅采主机、版本、主从角色、端口与核心参数",
+      },
+    ];
+  }
+
+  if (cid === "mysql" || cid === "mariadb") {
+    return [
+      {
+        id: "my-ha",
+        tag: bi("高可用", "HA"),
+        tone: "brand",
+        title: bi("MGR / MHA / 主从复制", "MGR / MHA / Replication"),
+        desc: bi("采组复制成员、GTID、半同步与主从 IO/SQL 延迟", "Collect group replication, GTID, semi-sync & lag"),
+        prompt: "重点采集 MySQL/MariaDB 主从复制或 MGR 组复制状态、GTID 配置与复制延迟",
+        recommended: true,
+      },
+      {
+        id: "my-proxy",
+        tag: bi("入口代理", "Proxy/VIP"),
+        tone: "teal",
+        title: bi("ProxySQL / HAProxy / VIP", "ProxySQL / HAProxy / VIP"),
+        desc: bi("采读写分离路由、代理监听端口与 Keepalived VIP", "Collect read/write split rules, proxy ports & VIP"),
+        prompt: "重点探测 ProxySQL/MaxScale/HAProxy 读写分离代理配置与 Keepalived VIP",
+        recommended: true,
+      },
+      {
+        id: "my-innodb",
+        tag: bi("核心参数", "InnoDB"),
+        tone: "ok",
+        title: bi("InnoDB 与 Binlog 基线", "InnoDB & Binlog Baseline"),
+        desc: bi("采缓冲池大小、最大连接、binlog 格式与慢日志配置", "Collect buffer pool, max_connections, binlog & slow log"),
+        prompt: "重点采集 InnoDB 缓冲池、连接数上限、binlog 格式/保留策略与慢日志路径",
+      },
+      {
+        id: "my-tls",
+        tag: bi("安全备份", "TLS/Backup"),
+        tone: "violet",
+        title: bi("TLS 证书与定时备份线索", "TLS Certs & Backup Cron"),
+        desc: bi("采 SSL 证书到期时间、XtraBackup/mysqldump 定时任务", "Collect SSL expiry & XtraBackup/mysqldump schedules"),
+        prompt: "重点采集 MySQL SSL 证书有效期以及 XtraBackup/mysqldump 定时备份脚本线索",
+      },
+      {
+        id: "my-container",
+        tag: bi("部署形态", "Runtime"),
+        tone: "warn",
+        title: bi("容器 / 多实例部署", "Container / Multi-Instance"),
+        desc: bi("适配 Docker/Podman 与多端口 mysqld、非标准 my.cnf", "Support Docker/Podman & multi-port mysqld instances"),
+        prompt: "适配容器（Docker/Podman）及同机多实例 mysqld 端口、非标准 my.cnf 路径探测",
+        recommended: isContainer,
+      },
+      {
+        id: "my-fast",
+        tag: bi("极速模式", "Fast"),
+        tone: "neutral",
+        title: bi("极速核心拓扑（10 秒内）", "Fast Core Topology (<10s)"),
+        desc: bi("跳过耗时扫描，快速采出主机、版本、角色与核心参数", "Skip heavy scans; grab hosts, version, role & key params"),
+        prompt: "保持极速精简（10 秒内完成），仅采主机、版本、主从角色、端口、目录与核心参数",
+      },
+    ];
+  }
+
+  if (cid === "redis" || cid === "valkey") {
+    return [
+      {
+        id: "rd-ha",
+        tag: bi("高可用", "HA"),
+        tone: "brand",
+        title: bi("Sentinel / Cluster 分片", "Sentinel / Cluster Slots"),
+        desc: bi("采 CLUSTER NODES、哨兵仲裁状态与主从复制偏移", "Collect CLUSTER NODES, Sentinel quorum & repl offset"),
+        prompt: "重点采集 Redis/Valkey Cluster 分片拓扑或 Sentinel 哨兵仲裁状态、主从复制关系",
+        recommended: true,
+      },
+      {
+        id: "rd-mem",
+        tag: bi("持久化", "Persist"),
+        tone: "ok",
+        title: bi("RDB/AOF 与内存水位", "RDB/AOF & Memory Policy"),
+        desc: bi("采 maxmemory 淘汰策略、内存碎片率与落盘目录", "Collect maxmemory policy, fragmentation & persistence dir"),
+        prompt: "重点采集 maxmemory 及淘汰策略、内存碎片率、RDB/AOF 持久化配置与数据目录水位",
+        recommended: true,
+      },
+      {
+        id: "rd-sec",
+        tag: bi("安全鉴权", "Security"),
+        tone: "violet",
+        title: bi("TLS 证书与 ACL / 禁危命令", "TLS Certs & ACL Rules"),
+        desc: bi("采 TLS 证书有效期、ACL 开关与 rename-command（全脱敏）", "Collect TLS expiry, ACL mode & rename-command (redacted)"),
+        prompt: "重点采集 TLS 证书有效期、是否启用 ACL/密码鉴权（严禁输出密码原文）与 rename-command 规则",
+      },
+      {
+        id: "rd-proxy",
+        tag: bi("入口代理", "Proxy/VIP"),
+        tone: "teal",
+        title: bi("HAProxy / Keepalived 入口", "HAProxy / Keepalived Entry"),
+        desc: bi("采前置代理监听端口、后端探测与 VIP 归属", "Collect proxy listeners, health checks & VIP"),
+        prompt: "重点探测 HAProxy / Keepalived / Twemproxy 前置入口配置与 VIP 归属",
+      },
+      {
+        id: "rd-container",
+        tag: bi("部署形态", "Runtime"),
+        tone: "warn",
+        title: bi("容器 / 同机多端口实例", "Container / Multi-Port"),
+        desc: bi("适配 Docker/Podman 与单机多端口 Redis 进程探测", "Support Docker/Podman & multi-port instances"),
+        prompt: "适配容器部署及同机多端口 Redis 实例配置路径定位",
+        recommended: isContainer,
+      },
+      {
+        id: "rd-fast",
+        tag: bi("极速模式", "Fast"),
+        tone: "neutral",
+        title: bi("极速核心拓扑（10 秒内）", "Fast Core Topology (<10s)"),
+        desc: bi("轻量只读快采角色、版本、端口、内存上限与配置路径", "Fast read-only capture of role, version, ports & memory"),
+        prompt: "保持极速精简（10 秒内完成），仅采节点角色、版本、端口、内存上限与核心配置",
+      },
+    ];
+  }
+
+  if (cid === "kafka") {
+    return [
+      {
+        id: "kf-coord",
+        tag: bi("集群协调", "Quorum"),
+        tone: "brand",
+        title: bi("KRaft / ZooKeeper 协调栈", "KRaft / ZooKeeper Quorum"),
+        desc: bi("采 Broker/Controller 角色、Quorum 状态与元数据路径", "Collect Broker/Controller roles, quorum & metadata dir"),
+        prompt: "重点识别 Kafka 采用 KRaft 还是 ZooKeeper 模式，采集协调节点列表与 Quorum 状态",
+        recommended: true,
+      },
+      {
+        id: "kf-disk",
+        tag: bi("存储分区", "Storage"),
+        tone: "ok",
+        title: bi("log.dirs 数据盘与保留策略", "log.dirs Disk & Retention"),
+        desc: bi("采多块数据盘挂载水位、副本因子与日志保留周期", "Collect log.dirs mount usage, replication & retention"),
+        prompt: "重点采集 log.dirs 多盘挂载点与磁盘水位、默认副本因子、min.insync.replicas 与保留策略",
+        recommended: true,
+      },
+      {
+        id: "kf-sec",
+        tag: bi("安全认证", "Security"),
+        tone: "violet",
+        title: bi("SASL / TLS 安全监听", "SASL / TLS Listeners"),
+        desc: bi("采 listeners 协议、Kerberos/SASL 线索与证书有效期", "Collect listeners protocol, SASL hints & cert expiry"),
+        prompt: "重点采集 Kafka listeners / security.protocol、SASL 认证方式（全脱敏）与 TLS 证书有效期",
+      },
+      {
+        id: "kf-eco",
+        tag: bi("伴生生态", "Ecosystem"),
+        tone: "teal",
+        title: bi("Connect / Schema / Exporter", "Connect / Schema / Exporter"),
+        desc: bi("识别 Kafka Connect、Schema Registry 与监控采集器", "Detect Kafka Connect, Schema Registry & exporters"),
+        prompt: "重点探测 Kafka Connect、Schema Registry、JMX/Kafka Exporter 等伴生进程与端口",
+      },
+      {
+        id: "kf-container",
+        tag: bi("部署形态", "Runtime"),
+        tone: "warn",
+        title: bi("容器 / 自定义 JVM 路径", "Container / Custom JVM"),
+        desc: bi("适配 Docker/K8s 与非标准 server.properties、堆内存参数", "Support Docker/K8s, custom config & JVM heap flags"),
+        prompt: "适配容器部署及非标准 server.properties 路径，采集 JVM 堆内存与 GC 参数",
+        recommended: isContainer,
+      },
+      {
+        id: "kf-fast",
+        tag: bi("极速模式", "Fast"),
+        tone: "neutral",
+        title: bi("极速核心拓扑（10 秒内）", "Fast Core Topology (<10s)"),
+        desc: bi("跳过重度 Topic 遍历，快采 Broker、版本、端口与磁盘", "Skip topic scans; grab Broker, version, ports & disks"),
+        prompt: "保持极速精简（10 秒内完成），跳过全量 Topic 遍历，仅采 Broker、版本、监听端口与磁盘",
+      },
+    ];
+  }
+
+  if (cid === "nginx" || cid === "haproxy" || cid === "keepalived" || cid === "apisix") {
+    return [
+      {
+        id: "lb-vrrp",
+        tag: bi("高可用", "VRRP/VIP"),
+        tone: "brand",
+        title: bi("Keepalived VRRP 与 VIP", "Keepalived VRRP & VIP"),
+        desc: bi("采 VRRP 优先级、漂移网卡、健康检测脚本与 VIP 归属", "Collect VRRP priority, interface, check script & VIP"),
+        prompt: "重点采集 Keepalived VRRP 实例状态、优先级、绑定网卡、健康检查脚本与当前 VIP 归属",
+        recommended: true,
+      },
+      {
+        id: "lb-up",
+        tag: bi("转发路由", "Upstreams"),
+        tone: "teal",
+        title: bi("Upstream 与后端健康池", "Upstreams & Backends"),
+        desc: bi("梳理四/七层上游后端列表、均衡算法与超时参数", "Collect L4/L7 upstream pools, balance policy & timeouts"),
+        prompt: "重点梳理所有四层/七层 Upstream 后端地址池、负载均衡算法、连接超时与限流参数",
+        recommended: true,
+      },
+      {
+        id: "lb-tls",
+        tag: bi("证书安全", "HTTPS/TLS"),
+        tone: "violet",
+        title: bi("HTTPS / TLS 证书有效期", "HTTPS / TLS Cert Expiry"),
+        desc: bi("扫描所有生效站点证书到期时间、协议版本与密码套件", "Scan active site cert expiry, TLS versions & ciphers"),
+        prompt: "重点扫描生效配置引用的全部 TLS/SSL 证书到期时间、TLS 协议版本与加密套件",
+      },
+      {
+        id: "lb-obs",
+        tag: bi("监控日志", "Metrics"),
+        tone: "ok",
+        title: bi("Exporter 与日志切割路径", "Exporters & Log Rotation"),
+        desc: bi("采 stub_status/stats 端口、日志目录水位与 Exporter", "Collect stats endpoint, log usage & exporters"),
+        prompt: "重点采集 stub_status/HAProxy stats 监控端口、日志路径磁盘水位与 Prometheus Exporter",
+      },
+      {
+        id: "lb-container",
+        tag: bi("部署形态", "Runtime"),
+        tone: "warn",
+        title: bi("容器 / 多配置包含目录", "Container / Include Dirs"),
+        desc: bi("适配 Docker/OpenResty 与 conf.d/sites-enabled 多文件", "Support Docker/OpenResty & nested include configs"),
+        prompt: "适配容器或 OpenResty 部署，完整跟随 include 展开 conf.d / sites-enabled 配置结构",
+        recommended: isContainer,
+      },
+      {
+        id: "lb-fast",
+        tag: bi("极速模式", "Fast"),
+        tone: "neutral",
+        title: bi("极速核心拓扑（10 秒内）", "Fast Core Topology (<10s)"),
+        desc: bi("快采版本、编译模块、监听端口、VIP 与上游概览", "Grab version, modules, listeners, VIP & upstreams"),
+        prompt: "保持极速精简（10 秒内完成），仅采版本、监听端口、VIP 归属与上游概览",
+      },
+    ];
+  }
+
+  return [
+    {
+      id: "gen-ha",
+      tag: bi("高可用", "HA"),
+      tone: "brand",
+      title: bi("集群拓扑与主从/仲裁状态", "Cluster Topology & Quorum"),
+      desc: bi("重点采节点角色、成员健康、复制同步状态与仲裁端口", "Collect node roles, member health, sync & quorum ports"),
+      prompt: "重点采集集群节点角色、成员健康与主从/仲裁同步状态、内部通信端口",
+      recommended: true,
+    },
+    {
+      id: "gen-proxy",
+      tag: bi("入口代理", "Proxy/VIP"),
+      tone: "teal",
+      title: bi("VIP / HAProxy / Nginx 入口", "VIP / HAProxy / Nginx Entry"),
+      desc: bi("识别前置负载均衡、Keepalived VIP 与对外访问端口", "Detect front load balancers, Keepalived VIP & ports"),
+      prompt: "重点探测前置 Keepalived VIP、HAProxy/Nginx 代理转发配置及对外监听端口",
+      recommended: true,
+    },
+    {
+      id: "gen-tls",
+      tag: bi("安全证书", "TLS/Auth"),
+      tone: "violet",
+      title: bi("TLS 证书有效期与访问控制", "TLS Certs & Access Control"),
+      desc: bi("采服务证书到期时间、监听绑定地址与脱敏认证方式", "Collect cert expiry, bind addresses & redacted auth"),
+      prompt: "重点采集服务 TLS 证书链有效期、监听绑定地址以及脱敏后的访问控制配置",
+    },
+    {
+      id: "gen-disk",
+      tag: bi("存储备份", "Storage"),
+      tone: "ok",
+      title: bi("数据盘挂载与备份策略", "Data Disks & Backup Jobs"),
+      desc: bi("采数据/日志目录磁盘水位、文件系统与定时备份线索", "Collect data/log mount usage, FS & backup schedules"),
+      prompt: "重点采集数据盘与日志盘挂载点、文件系统水位以及 crontab/systemd 定时备份线索",
+    },
+    {
+      id: "gen-container",
+      tag: bi("部署形态", "Runtime"),
+      tone: "warn",
+      title: bi("容器 / 自定义安装路径", "Container / Custom Paths"),
+      desc: bi("适配 Docker/Podman/K8s 与非标准 systemd 服务路径", "Support Docker/Podman/K8s & custom service paths"),
+      prompt: "适配容器（Docker/Podman/K8s）部署及非标准配置/数据目录路径探测",
+      recommended: isContainer,
+    },
+    {
+      id: "gen-fast",
+      tag: bi("极速模式", "Fast"),
+      tone: "neutral",
+      title: bi("极速核心拓扑（10 秒内）", "Fast Core Topology (<10s)"),
+      desc: bi("跳过耗时目录扫描，快采主机、版本、端口与核心参数", "Skip heavy scans; grab hosts, version, ports & params"),
+      prompt: "保持极速精简（10 秒内完成），跳过耗时目录扫描，仅采主机、版本、角色、端口与核心参数",
+    },
+  ];
+}
+
 function ProbeCodeBlock({
   script,
   filename,
+  componentId,
+  componentName,
+  deployMethod,
   safe = true,
   source = "template",
   mode = "full",
@@ -995,6 +1376,9 @@ function ProbeCodeBlock({
 }: {
   script: string;
   filename: string;
+  componentId?: string;
+  componentName?: string;
+  deployMethod?: string;
   safe?: boolean;
   source?: "template" | "ai";
   mode?: "gap" | "full";
@@ -1011,10 +1395,34 @@ function ProbeCodeBlock({
 }) {
   const [expanded, setExpanded] = useState(false);
   const [aiBarOpen, setAiBarOpen] = useState(false);
+  const [selectedPresetIds, setSelectedPresetIds] = useState<string[]>([]);
   const [focusText, setFocusText] = useState("");
   const [copied, setCopied] = useState(false);
+  const [scriptStamp, setScriptStamp] = useState(() => formatProbeStamp());
   const previewLimit = compact ? 9 : 12;
   const lines = useMemo(() => (script ? script.split("\n") : []), [script]);
+
+  useEffect(() => {
+    if (script) {
+      setScriptStamp(formatProbeStamp());
+    }
+  }, [script, source, mode]);
+
+  useEffect(() => {
+    // Reset selections if the user switches middleware type in Step 1.
+    setSelectedPresetIds([]);
+  }, [componentId]);
+
+  const tailorPresets = useMemo(
+    () => getProbeTailorSuggestions(componentId, deployMethod),
+    [componentId, deployMethod],
+  );
+
+  const displayFilename = useMemo(
+    () => buildTimestampedProbeFilename(filename, source, mode, scriptStamp),
+    [filename, source, mode, scriptStamp],
+  );
+
   const previewText = useMemo(
     () =>
       expanded || lines.length <= previewLimit
@@ -1024,13 +1432,22 @@ function ProbeCodeBlock({
   );
 
   const downloadScript = () => {
+    const stampedName = buildTimestampedProbeFilename(
+      filename,
+      source,
+      mode,
+      formatProbeStamp(),
+    );
     const blob = new Blob([script], { type: "text/x-shellscript;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = filename;
+    a.download = stampedName;
     a.click();
-    URL.revokeObjectURL(url);
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    Message.success(
+      bi(`已下载 ${stampedName}`, `Downloaded ${stampedName}`),
+    );
   };
 
   const handleCopy = () => {
@@ -1040,129 +1457,243 @@ function ProbeCodeBlock({
     window.setTimeout(() => setCopied(false), 1600);
   };
 
+  const togglePreset = (id: string) => {
+    setSelectedPresetIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  };
+
+  const handleRunTailor = () => {
+    if (!onCustomizeWithAI || aiBusy) return;
+    const pickedPrompts = tailorPresets
+      .filter((p) => selectedPresetIds.includes(p.id))
+      .map((p) => p.prompt);
+    const custom = focusText.trim();
+    const combined = [...pickedPrompts, ...(custom ? [custom] : [])].join("；");
+    setAiBarOpen(false);
+    void onCustomizeWithAI(combined);
+  };
+
   const hasSubMeta = coveredGaps.length > 0 || Boolean(runHint) || Boolean(modelName);
+  const selectedCount = selectedPresetIds.length;
 
   return (
-    <div className="imp-probe-box">
-      <div className="imp-probe-bar">
-        <div className="imp-probe-bar-l">
-          <code className="imp-probe-fname" title={filename}>
-            {filename}
-          </code>
-          <Tooltip
-            content={
-              safe
-                ? bi("已通过 100% 静态只读安全校验，绝不修改任何线上配置或进程", "Passed 100% static read-only safety verification")
-                : bi("只读探针采集脚本", "Read-only probe script")
-            }
-            mini
-          >
-            <span className="imp-probe-shield">
-              <IconCheckCircle />
-              <span>{safe ? bi("只读校验", "Read-Only") : bi("只读", "RO")}</span>
-            </span>
-          </Tooltip>
-          <span className={`imp-probe-mode-tag ${source === "ai" ? "is-ai" : ""}`}>
-            {source === "ai" && <Spark size={10} />}
-            {source === "ai"
-              ? mode === "gap"
-                ? bi("AI 补采", "AI Gap")
-                : bi("AI 定制", "AI Tailored")
-              : mode === "gap"
-                ? bi("缺口补采", "Gap")
-                : bi("标准探针", "Standard")}
-          </span>
-          <span className="imp-probe-lines num">
-            {lines.length} {bi("行", "lines")}
-          </span>
-        </div>
-
-        <div className="imp-probe-actions">
-          {!hideTailorBar && onCustomizeWithAI && aiEnabled && (
-            <button
-              type="button"
-              className={`imp-probe-act is-ai ${aiBarOpen ? "is-on" : ""}`}
-              disabled={aiBusy}
-              onClick={() => setAiBarOpen((v) => !v)}
-            >
-              <Spark size={11} rainbow={!aiBarOpen} />
-              <span>{bi("AI 定制", "AI Tailor")}</span>
-            </button>
-          )}
-          {lines.length > previewLimit && (
-            <button
-              type="button"
-              className="imp-probe-act"
-              onClick={() => setExpanded((v) => !v)}
-            >
-              {expanded ? <IconUp /> : <IconDown />}
-              <span>{expanded ? bi("收起", "Fold") : bi("展开", "Expand")}</span>
-            </button>
-          )}
-          <button type="button" className="imp-probe-act" onClick={downloadScript}>
-            <IconDownload />
-            <span>{bi("下载", "Download")}</span>
-          </button>
-          <button
-            type="button"
-            className={`imp-probe-act is-primary ${copied ? "is-copied" : ""}`}
-            onClick={handleCopy}
-          >
-            {copied ? <IconCheck /> : <IconCopy />}
-            <span>{copied ? bi("已复制", "Copied") : bi("复制脚本", "Copy")}</span>
-          </button>
-        </div>
-      </div>
-
-      {hasSubMeta && (
-        <div className="imp-probe-meta-strip">
-          {coveredGaps.length > 0 && (
-            <div className="imp-probe-cov">
-              <span>{bi("覆盖：", "Covers:")}</span>
-              {coveredGaps.map((g, i) => (
-                <em key={i}>{g}</em>
-              ))}
-            </div>
-          )}
-          {modelName && <span className="imp-probe-model mono">{modelName}</span>}
-          {runHint && <span className="imp-probe-hint">{runHint}</span>}
-        </div>
-      )}
-
+    <div className="imp-probe-stack">
       {!hideTailorBar && aiBarOpen && onCustomizeWithAI && (
-        <div className="imp-probe-ai-bar">
-          <Input
-            size="small"
-            allowClear
-            disabled={aiBusy}
-            value={focusText}
-            onChange={setFocusText}
-            onPressEnter={() => void onCustomizeWithAI(focusText)}
-            placeholder={bi(
-              "补充现场特点（如容器部署、HAProxy/Keepalived、重点采 TLS 与备份状态）",
-              "Describe environment hints (e.g. Docker, HAProxy/Keepalived, TLS certs & backup)",
-            )}
-          />
-          <Button
-            size="small"
-            type="primary"
-            loading={aiBusy}
-            icon={<Spark size={12} />}
-            onClick={() => void onCustomizeWithAI(focusText)}
-          >
-            {bi("生成精炼探针", "Generate")}
-          </Button>
-          {source === "ai" && onResetTemplate && (
-            <Button size="small" type="text" disabled={aiBusy} onClick={onResetTemplate}>
-              {bi("恢复标准", "Reset")}
-            </Button>
-          )}
+        <div
+          className="imp-tailor-card enter"
+          role="region"
+          aria-label={bi("AI 智能定制只读探针", "AI Read-Only Probe Tailor")}
+        >
+          <div className="imp-tailor-head">
+            <div className="imp-tailor-head-l">
+              <span className="imp-tailor-spark-badge" aria-hidden>
+                <Spark size={14} rainbow />
+              </span>
+              <div className="imp-tailor-title-group">
+                <div className="imp-tailor-title-row">
+                  <b>{bi("AI 智能定制只读探针", "AI Read-Only Probe Tailor")}</b>
+                  {componentName && (
+                    <span className="imp-tailor-scope-pill">
+                      {bi(`${componentName} 场景推荐`, `${componentName} Presets`)}
+                    </span>
+                  )}
+                </div>
+                <p>
+                  {bi(
+                    "点选现场特征卡片（可多选），或补充自定义需求，AI 将精炼生成 100% 只读专属脚本。",
+                    "Select scenario cards below (multi-select) or add custom hints; AI crafts a 100% read-only script.",
+                  )}
+                </p>
+              </div>
+            </div>
+            <div className="imp-tailor-head-r">
+              {selectedCount > 0 && (
+                <>
+                  <span className="imp-tailor-sel-pill num">
+                    {bi(`已选 ${selectedCount} 项`, `${selectedCount} selected`)}
+                  </span>
+                  <Button
+                    size="mini"
+                    type="text"
+                    disabled={aiBusy}
+                    onClick={() => setSelectedPresetIds([])}
+                  >
+                    {bi("清空", "Clear")}
+                  </Button>
+                </>
+              )}
+              <Button
+                size="mini"
+                type="text"
+                icon={<IconClose />}
+                onClick={() => setAiBarOpen(false)}
+                aria-label={bi("收起 AI 定制面板", "Close AI tailor panel")}
+              />
+            </div>
+          </div>
+
+          <div className="imp-tailor-grid" role="group" aria-label={bi("AI 推荐现场场景", "AI Recommended Scenarios")}>
+            {tailorPresets.map((item) => {
+              const on = selectedPresetIds.includes(item.id);
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={`imp-tailor-opt ${on ? "is-selected" : ""}`}
+                  aria-pressed={on}
+                  disabled={aiBusy}
+                  onClick={() => togglePreset(item.id)}
+                >
+                  <div className="imp-tailor-opt-top">
+                    <div className="imp-tailor-opt-tags">
+                      <span className={`imp-tailor-tag is-${item.tone}`}>{item.tag}</span>
+                      {item.recommended && (
+                        <span className="imp-tailor-rec">
+                          <Spark size={9} /> {bi("推荐", "Pick")}
+                        </span>
+                      )}
+                    </div>
+                    <span className={`imp-tailor-check ${on ? "is-on" : ""}`} aria-hidden>
+                      {on && <IconCheck />}
+                    </span>
+                  </div>
+                  <b>{item.title}</b>
+                  <p>{item.desc}</p>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="imp-tailor-foot">
+            <Input
+              allowClear
+              disabled={aiBusy}
+              value={focusText}
+              onChange={setFocusText}
+              onPressEnter={handleRunTailor}
+              placeholder={bi(
+                "可选：补充其他现场特点（如自定义端口 15432、指定配置目录 /data/conf、过滤敏感目录…）",
+                "Optional: add custom hints (e.g. custom port 15432, config dir /data/conf…)",
+              )}
+              aria-label={bi("补充自定义探针要求", "Custom probe instructions")}
+            />
+            <div className="imp-tailor-foot-acts">
+              {source === "ai" && onResetTemplate && (
+                <Button size="small" disabled={aiBusy} onClick={onResetTemplate}>
+                  {bi("恢复标准探针", "Reset Standard")}
+                </Button>
+              )}
+              <Button
+                size="small"
+                type="primary"
+                loading={aiBusy}
+                icon={<Spark size={12} />}
+                onClick={handleRunTailor}
+              >
+                {selectedCount > 0
+                  ? bi(`生成专属探针 (${selectedCount})`, `Generate Tailored (${selectedCount})`)
+                  : bi("生成精炼探针", "Generate Probe")}
+              </Button>
+            </div>
+          </div>
         </div>
       )}
 
-      <pre className={`imp-probe-pre ${expanded ? "is-expanded" : ""}`}>
-        {previewText || bi("正在生成只读采集脚本…", "Generating read-only probe script...")}
-      </pre>
+      <div className="imp-probe-box">
+        <div className="imp-probe-bar">
+          <div className="imp-probe-bar-l">
+            <code className="imp-probe-fname" title={displayFilename}>
+              {displayFilename}
+            </code>
+            <Tooltip
+              content={
+                safe
+                  ? bi("已通过 100% 静态只读安全校验，绝不修改任何线上配置或进程", "Passed 100% static read-only safety verification")
+                  : bi("只读探针采集脚本", "Read-only probe script")
+              }
+              mini
+            >
+              <span className="imp-probe-shield">
+                <IconCheckCircle />
+                <span>{safe ? bi("只读校验", "Read-Only") : bi("只读", "RO")}</span>
+              </span>
+            </Tooltip>
+            <span className={`imp-probe-mode-tag ${source === "ai" ? "is-ai" : ""}`}>
+              {source === "ai" && <Spark size={10} />}
+              {source === "ai"
+                ? mode === "gap"
+                  ? bi("AI 补采", "AI Gap")
+                  : bi("AI 定制", "AI Tailored")
+                : mode === "gap"
+                  ? bi("缺口补采", "Gap")
+                  : bi("标准探针", "Standard")}
+            </span>
+            <span className="imp-probe-lines num">
+              {lines.length} {bi("行", "lines")}
+            </span>
+          </div>
+
+          <div className="imp-probe-actions">
+            {!hideTailorBar && onCustomizeWithAI && aiEnabled && (
+              <button
+                type="button"
+                className={`imp-probe-act is-ai ${aiBarOpen ? "is-on" : ""}`}
+                disabled={aiBusy}
+                onClick={() => setAiBarOpen((v) => !v)}
+              >
+                <Spark size={11} rainbow={!aiBarOpen} />
+                <span>
+                  {selectedCount > 0 && !aiBarOpen
+                    ? bi(`AI 定制 · ${selectedCount}`, `AI Tailor · ${selectedCount}`)
+                    : bi("AI 定制", "AI Tailor")}
+                </span>
+              </button>
+            )}
+            {lines.length > previewLimit && (
+              <button
+                type="button"
+                className="imp-probe-act"
+                onClick={() => setExpanded((v) => !v)}
+              >
+                {expanded ? <IconUp /> : <IconDown />}
+                <span>{expanded ? bi("收起", "Fold") : bi("展开", "Expand")}</span>
+              </button>
+            )}
+            <button type="button" className="imp-probe-act" onClick={downloadScript}>
+              <IconDownload />
+              <span>{bi("下载", "Download")}</span>
+            </button>
+            <button
+              type="button"
+              className={`imp-probe-act is-primary ${copied ? "is-copied" : ""}`}
+              onClick={handleCopy}
+            >
+              {copied ? <IconCheck /> : <IconCopy />}
+              <span>{copied ? bi("已复制", "Copied") : bi("复制脚本", "Copy")}</span>
+            </button>
+          </div>
+        </div>
+
+        {hasSubMeta && (
+          <div className="imp-probe-meta-strip">
+            {coveredGaps.length > 0 && (
+              <div className="imp-probe-cov">
+                <span>{bi("覆盖：", "Covers:")}</span>
+                {coveredGaps.map((g, i) => (
+                  <em key={i}>{g}</em>
+                ))}
+              </div>
+            )}
+            {modelName && <span className="imp-probe-model mono">{modelName}</span>}
+            {runHint && <span className="imp-probe-hint">{runHint}</span>}
+          </div>
+        )}
+
+        <pre className={`imp-probe-pre ${expanded ? "is-expanded" : ""}`}>
+          {previewText || bi("正在生成只读采集脚本…", "Generating read-only probe script...")}
+        </pre>
+      </div>
     </div>
   );
 }
@@ -3115,6 +3646,9 @@ export function ImportClusterPage({
                 <ProbeCodeBlock
                   script={probeScript}
                   filename={probeFilename}
+                  componentId={effectiveCompID}
+                  componentName={effectiveDisplayName}
+                  deployMethod={deployMethod}
                   safe={probeSafe}
                   source={probeSource}
                   aiEnabled={Boolean(presetsData?.ai_enabled)}

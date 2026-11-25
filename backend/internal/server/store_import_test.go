@@ -699,4 +699,36 @@ func TestImportedBaselineGapDiagnosisAndReadOnlyGapProbe(t *testing.T) {
 	if joined := strings.Join(*aiBodies, "\n"); !strings.Contains(joined, "pg-gap-check") || !strings.Contains(joined, "重点核对 pgBackRest 仓库") {
 		t.Errorf("expected AI probe prompt to include existing cluster baseline & user focus")
 	}
+
+	// 3. Verify POST /api/clusters/import/diagnose-gaps RBAC + AI deep gap discovery merged with rule gaps.
+	if perm, ok := routePermFor("POST", "/api/clusters/import/diagnose-gaps"); !ok || perm != "delivery.create" {
+		t.Fatalf("expected delivery.create perm for diagnose-gaps, got ok=%v perm=%q", ok, perm)
+	}
+	aiGapSrv, _ := fakeModel(t, `{"summary":"结合 Patroni 与 Percona 17.11 架构，建议额外核验复制槽与日志保留策略。","gaps":[{"category":"复制机制","severity":"high","title":"核验复制槽与 WAL 保留上限","detail":"避免从库短暂离线引发主库 WAL 积压撑爆磁盘","probe_action":"只读查询 pg_replication_slots 与 wal_keep_size 参数"},{"category":"日志治理","severity":"medium","title":"核验 PostgreSQL 日志清理策略","detail":"确认历史日志轮转周期避免长期占满 /data 分区","probe_action":"只读检查 /etc/logrotate.d 及日志目录占用"}]}`)
+	defer aiGapSrv.Close()
+	enableAI(t, s, aiGapSrv.URL, 0)
+
+	gw := storeRequest(s, "POST", "/api/clusters/import/diagnose-gaps",
+		strings.NewReader(`{"cluster_id":"pg-gap-check","focus":"重点排查高可用切换隐患"}`), alice, csrf)
+	if gw.Code != 200 {
+		t.Fatalf("POST diagnose-gaps failed: %d %s", gw.Code, gw.Body.String())
+	}
+	var gResp struct {
+		Health  baselineHealth `json:"health"`
+		AIUsed  bool           `json:"ai_used"`
+		AIAdded int            `json:"ai_added"`
+	}
+	_ = json.Unmarshal(gw.Body.Bytes(), &gResp)
+	if !gResp.AIUsed || gResp.AIAdded != 2 {
+		t.Fatalf("expected 2 AI-discovered gaps, got %+v", gResp)
+	}
+	foundAIGap := false
+	for _, g := range gResp.Health.Gaps {
+		if g.Source == "ai" && strings.Contains(g.Title, "复制槽") {
+			foundAIGap = true
+		}
+	}
+	if !foundAIGap {
+		t.Fatalf("merged health missing AI-discovered gap: %+v", gResp.Health.Gaps)
+	}
 }

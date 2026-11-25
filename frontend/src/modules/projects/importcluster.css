@@ -929,11 +929,472 @@ body[arco-theme="dark"] {
   max-height: 360px;
 }
 
-/* ---- Gap-Aware AI Read-Only Probe Studio (Drawer Tab 2) ---- */
+/* ---- Progressive 3-Step Collapsible AI Probe Studio (Drawer Tab 2) ---- */
 .imp-probe-studio {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
+}
+
+.imp-step-card {
+  display: flex;
+  flex-direction: column;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.imp-step-card:hover {
+  border-color: var(--line-strong);
+}
+
+.imp-step-card.is-open {
+  border-color: color-mix(in srgb, var(--brand) 26%, var(--line-strong));
+}
+
+.imp-step-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 15px;
+  cursor: pointer;
+  user-select: none;
+  border-radius: 14px;
+  transition: background-color 0.15s ease;
+}
+
+.imp-step-head:hover {
+  background: var(--hover);
+}
+
+.imp-step-card.is-open > .imp-step-head {
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 75%, transparent);
+  border-radius: 14px 14px 0 0;
+  background: color-mix(in srgb, var(--surface-2) 55%, var(--surface));
+}
+
+.imp-step-head-l {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+.imp-step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-2);
+  color: var(--mute);
+}
+
+.imp-step-num.is-active {
+  border-color: var(--brand);
+  background: var(--brand);
+  color: var(--on-brand);
+}
+
+.imp-step-num.is-done {
+  border-color: var(--ok-line);
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.imp-step-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.imp-step-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  min-width: 0;
+}
+
+.imp-step-title-row h4 {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.imp-step-summary {
+  font-size: 12px;
+  color: var(--mute);
+  line-height: 1.45;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.imp-step-head-r {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.imp-step-head-r > .arco-btn {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.imp-step-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 550;
+  color: var(--mute);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.imp-step-head:hover .imp-step-toggle {
+  color: var(--ink);
+}
+
+.imp-step-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 15px 15px;
+}
+
+.imp-step-next {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.imp-step-next-hint {
+  font-size: 12px;
+  color: var(--mute);
+  min-width: 0;
+  flex: 1 1 260px;
+}
+
+.imp-step-next-acts {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.imp-step-next-acts > .arco-btn {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.imp-gap-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 12px;
+}
+
+.imp-gap-toolbar-l {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1 1 280px;
+}
+
+.imp-gap-src-meta {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 11.5px;
+  color: var(--faint);
+}
+
+.imp-gap-src-meta .is-ai {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--brand-ink);
+  font-weight: 600;
+}
+
+.imp-gap-toolbar-r {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.imp-ai-discover-btn {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.imp-gap-diag-prog {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 13px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--brand) 28%, var(--line));
+  background: color-mix(in srgb, var(--brand-soft) 50%, var(--surface));
+  font-size: 12.5px;
+}
+
+.imp-gap-ai-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 650;
+  white-space: nowrap;
+  flex-shrink: 0;
+  color: var(--brand-ink);
+  background: color-mix(in srgb, var(--brand) 12%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--brand) 28%, var(--line));
+}
+
+.imp-gap-item.is-ai {
+  border-color: color-mix(in srgb, var(--brand) 28%, var(--line));
+}
+
+.imp-gap-score.xs {
+  min-width: 40px;
+  height: 24px;
+  padding: 0 7px;
+  font-size: 12px;
+  border-radius: 7px;
+}
+
+/* ---- Flagship Apple Intelligence Flowing-Rim AI Intent Composer (Step 1) ---- */
+.imp-intent-box {
+  --ai-rim-op: 54%;
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  margin-top: 2px;
+  border-radius: 18px;
+  border: 1px solid transparent;
+  background: none;
+  overflow: visible;
+  box-shadow: var(--ai-card-shadow);
+  transition:
+    box-shadow 0.28s var(--ease-out),
+    --ai-rim-op 0.26s ease;
+}
+
+.imp-intent-box::before,
+.imp-intent-box::after {
+  content: "";
+  position: absolute;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.imp-intent-box::before {
+  inset: -1px;
+  z-index: -1;
+  border: 1.5px solid transparent;
+  background:
+    linear-gradient(180deg, var(--ai-card-bg-top), var(--ai-card-bg-bot)) padding-box,
+    conic-gradient(
+      from var(--ai-angle) at 50% 50%,
+      transparent 0deg,
+      color-mix(in srgb, #ff462d var(--ai-rim-op), transparent) 22deg,
+      color-mix(in srgb, #ffaa1d var(--ai-rim-op), transparent) 52deg,
+      color-mix(in srgb, #4285f4 var(--ai-rim-op), transparent) 88deg,
+      color-mix(in srgb, #22d3ee var(--ai-rim-op), transparent) 118deg,
+      transparent 150deg,
+      transparent 205deg,
+      color-mix(in srgb, #8b5cf6 var(--ai-rim-op), transparent) 238deg,
+      color-mix(in srgb, #38bdf8 var(--ai-rim-op), transparent) 272deg,
+      color-mix(in srgb, #ff5a42 var(--ai-rim-op), transparent) 308deg,
+      transparent 340deg,
+      transparent 360deg
+    ) border-box,
+    linear-gradient(var(--ai-border-base), var(--ai-border-base)) border-box;
+  animation: ai-orbit 7.5s linear infinite;
+}
+
+.imp-intent-box::after {
+  inset: -1px;
+  z-index: -2;
+  background: var(--ai-flow-ring);
+  filter: blur(8px);
+  opacity: 0.14;
+  animation: ai-orbit 7.5s linear infinite;
+  transition: opacity 0.28s ease;
+}
+
+[data-theme="dark"] .imp-intent-box::after,
+body[arco-theme="dark"] .imp-intent-box::after {
+  opacity: 0.24;
+}
+
+.imp-intent-box:is(:hover, :focus-within, .is-busy) {
+  --ai-rim-op: 100%;
+  box-shadow: var(--ai-card-shadow-hover);
+}
+
+.imp-intent-box:is(:hover, :focus-within, .is-busy)::before {
+  animation: ai-orbit 4.2s linear infinite;
+}
+
+.imp-intent-box:is(:hover, :focus-within, .is-busy)::after {
+  opacity: 0.36;
+  animation: ai-orbit 4.2s linear infinite;
+}
+
+.imp-intent-head {
+  padding: 10px 14px 8px;
+  background: color-mix(in srgb, var(--ink) 2.2%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 46%, transparent);
+  border-radius: 17px 17px 0 0;
+}
+
+.imp-intent-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.imp-intent-lbl {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-right: 2px;
+}
+
+.imp-intent-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 5px 0 8px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 550;
+  color: var(--ink-2);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.imp-intent-chip.is-ai {
+  color: var(--brand-ink);
+  background: color-mix(in srgb, var(--brand) 9%, var(--surface));
+  border-color: color-mix(in srgb, var(--brand) 30%, var(--line));
+}
+
+.imp-intent-chip > button {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 999px;
+  font-size: 10px;
+  color: var(--faint);
+  cursor: pointer;
+}
+
+.imp-intent-chip > button:hover {
+  color: var(--ink);
+  background: var(--sunken);
+}
+
+.imp-intent-empty-hint {
+  font-size: 11.5px;
+  color: var(--faint);
+}
+
+.imp-intent-box .arco-textarea-wrapper,
+.imp-intent-box .arco-input-textarea,
+.imp-intent-box textarea.arco-textarea,
+.imp-intent-box textarea.arco-textarea:focus,
+.imp-intent-box textarea.arco-textarea:focus-visible {
+  border: 0 !important;
+  outline: none !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+}
+
+.imp-intent-box textarea.arco-textarea.imp-intent-area {
+  padding: 12px 16px !important;
+  font-size: 13px !important;
+  line-height: 1.6 !important;
+}
+
+.imp-intent-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 9px 13px 11px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 42%, transparent);
+}
+
+.imp-intent-foot-l {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.imp-intent-foot-r {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.imp-intent-foot-r > .arco-btn {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .imp-intent-box::before,
+  .imp-intent-box::after {
+    animation: none !important;
+  }
 }
 
 .imp-tab-dot {

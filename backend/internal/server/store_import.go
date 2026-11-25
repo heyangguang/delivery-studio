@@ -64,6 +64,7 @@ type baselineGap struct {
 	Detail      string `json:"detail"`
 	ProbeAction string `json:"probe_action"`
 	Selected    bool   `json:"selected"`
+	Source      string `json:"source,omitempty"` // rule | ai
 }
 
 type baselineHealth struct {
@@ -105,18 +106,19 @@ type importClusterReq struct {
 }
 
 type importProbeScriptReq struct {
-	ClusterID    string   `json:"cluster_id,omitempty"`
-	Component    string   `json:"component"`
-	DisplayName  string   `json:"display_name,omitempty"`
-	DeployMethod string   `json:"deploy_method,omitempty"`
-	ServiceUnits []string `json:"service_units,omitempty"`
-	ConfigPaths  []string `json:"config_paths,omitempty"`
-	MissingGaps  []string `json:"missing_gaps,omitempty"`
-	Mode         string   `json:"mode,omitempty"` // gap | full
-	UseAI        bool     `json:"use_ai,omitempty"`
-	Focus        string   `json:"focus,omitempty"`
-	Model        string   `json:"model,omitempty"`
-	Think        string   `json:"think,omitempty"`
+	ClusterID    string        `json:"cluster_id,omitempty"`
+	Component    string        `json:"component"`
+	DisplayName  string        `json:"display_name,omitempty"`
+	DeployMethod string        `json:"deploy_method,omitempty"`
+	ServiceUnits []string      `json:"service_units,omitempty"`
+	ConfigPaths  []string      `json:"config_paths,omitempty"`
+	MissingGaps  []string      `json:"missing_gaps,omitempty"`
+	CustomGaps   []baselineGap `json:"custom_gaps,omitempty"`
+	Mode         string        `json:"mode,omitempty"` // gap | full
+	UseAI        bool          `json:"use_ai,omitempty"`
+	Focus        string        `json:"focus,omitempty"`
+	Model        string        `json:"model,omitempty"`
+	Think        string        `json:"think,omitempty"`
 }
 
 type importParseReq struct {
@@ -163,6 +165,8 @@ func (s *storeServer) handleClusterImport(w http.ResponseWriter, r *http.Request
 		s.importPresetsHandler(w, r, session)
 	case sub == "probe-script" && r.Method == "POST":
 		s.importProbeScriptHandler(w, r, session)
+	case sub == "diagnose-gaps" && r.Method == "POST":
+		s.importDiagnoseGapsHandler(w, r, session)
 	case sub == "parse" && r.Method == "POST":
 		s.importParseHandler(w, r, session)
 	default:
@@ -616,7 +620,12 @@ func analyzeImportedBaselineHealth(compID, displayName string, req importCluster
 		passed++
 	}
 
-	// Sort gaps: high -> medium -> low
+	// Tag deterministic baseline rules cleanly and sort high -> medium -> low
+	for i := range gaps {
+		if gaps[i].Source == "" {
+			gaps[i].Source = "rule"
+		}
+	}
 	sevRank := map[string]int{"high": 0, "medium": 1, "low": 2}
 	sort.SliceStable(gaps, func(i, j int) bool {
 		return sevRank[gaps[i].Severity] < sevRank[gaps[j].Severity]
@@ -912,9 +921,25 @@ func (s *storeServer) importProbeScriptHandler(w http.ResponseWriter, r *http.Re
 		}
 	}
 
+	for _, cg := range req.CustomGaps {
+		if strings.TrimSpace(cg.Title) == "" {
+			continue
+		}
+		dup := false
+		for _, sg := range selectedGaps {
+			if sg.ID == cg.ID || strings.EqualFold(strings.TrimSpace(sg.Title), strings.TrimSpace(cg.Title)) {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			selectedGaps = append(selectedGaps, cg)
+		}
+	}
+
 	effMode := strings.ToLower(strings.TrimSpace(req.Mode))
 	if effMode == "" {
-		if len(req.MissingGaps) > 0 || (existing != nil && len(selectedGaps) > 0) {
+		if len(req.MissingGaps) > 0 || len(req.CustomGaps) > 0 || (existing != nil && len(selectedGaps) > 0) {
 			effMode = "gap"
 		} else {
 			effMode = "full"
@@ -923,7 +948,7 @@ func (s *storeServer) importProbeScriptHandler(w http.ResponseWriter, r *http.Re
 
 	var baseScript, filename, runHint string
 	var covered []string
-	if effMode == "gap" && (len(selectedGaps) > 0 || len(req.MissingGaps) > 0) {
+	if effMode == "gap" && (len(selectedGaps) > 0 || len(req.MissingGaps) > 0 || len(req.CustomGaps) > 0) {
 		baseScript, filename, covered, runHint = buildGapReadOnlyProbeScript(req, existing, selectedGaps, lang)
 	} else {
 		effMode = "full"
@@ -1070,6 +1095,205 @@ func (s *storeServer) aiBuildImportProbeScript(ctx context.Context, p aiProvider
 		return "", fmt.Errorf("AI 返回脚本缺少标准探针结构")
 	}
 	return out + "\n", nil
+}
+
+// importDiagnoseGapsHandler combines deterministic standard-baseline checks with deep AI discovery
+// so subtle, cluster-specific missing operational facts (not covered by static rules) are surfaced
+// and paired with strictly 100% read-only verification actions.
+func (s *storeServer) importDiagnoseGapsHandler(w http.ResponseWriter, r *http.Request, session storeSession) {
+	var req struct {
+		ClusterID string `json:"cluster_id"`
+		Focus     string `json:"focus,omitempty"`
+		Model     string `json:"model,omitempty"`
+		Think     string `json:"think,omitempty"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 256<<10)).Decode(&req); err != nil || strings.TrimSpace(req.ClusterID) == "" {
+		s.fail(w, 400, "缺少有效的集群标识")
+		return
+	}
+	lang := wLang(w)
+	cid := strings.TrimSpace(req.ClusterID)
+	existing, ok := s.loadImportedBaselineReq(session.User, cid, lang)
+	if !ok || existing == nil || existing.Health == nil {
+		s.fail(w, 404, "未找到该存量纳管集群基线")
+		return
+	}
+	baseHealth := *existing.Health
+	if !s.aiStatusFor(session.User).Enabled {
+		s.writeJSON(w, 200, map[string]any{
+			"health":  baseHealth,
+			"ai_used": false,
+			"ai_note": tr(lang, "AI 助手未开启，当前展示标准规则基线检查结果", "AI is disabled; showing deterministic baseline checks"),
+		})
+		return
+	}
+	st := s.aiLoad()
+	providers := st.aiProvidersForPick("chat", req.Model)
+	if len(providers) == 0 {
+		providers = st.aiProvidersForPick("rehearsal", req.Model)
+	}
+	if len(providers) == 0 || (st.MonthlyLimit > 0 && s.aiCallsThisMonth(session.User) >= st.MonthlyLimit) {
+		s.writeJSON(w, 200, map[string]any{
+			"health":  baseHealth,
+			"ai_used": false,
+			"ai_note": tr(lang, "暂无可用 AI 模型或已达月额度，当前保留规则基线检查结果", "No AI model available or quota reached; keeping rule-based checks"),
+		})
+		return
+	}
+
+	sys := `你是一位拥有 15 年生产交付与应急排障经验的企业级中间件架构师。
+你的任务是审阅该存量纳管集群当前的真实基线档案、已落地变更记录与安全态势，找出「固定规则尚未覆盖、但对后续生产变更演练、高可用切换、故障排障与交付验收至关重要的遗漏信息」。
+
+严格规则：
+1. 【只补充固定规则没覆盖的深度缺口】下方会列出固定规则已经检出的缺口，禁止重复输出相同内容；请聚焦该集群架构独有的高价值盲区（例如：Patroni DCS TTL/loop_wait/复制槽与 WAL 保留策略、备库 clonefrom 标签或同步模式细节、连接池/连接数水位、日志轮转与保留清理策略、数据盘/WAL 挂载独立性与 inode 水位、etcd 压缩与存储配额、内核 HugePages/swappiness/ulimit 等）。
+2. 【100% 只读核验铁律】每条建议的 probe_action 必须是 100% 静态只读、零副作用、可安全在生产执行的只读检查动作（严禁建议修改参数、重启服务、写入文件或测试破坏性切换）。
+3. 数量克制精准：最多输出 2~4 条真正有含金量的缺口，不要凑数。
+4. 只输出严格 JSON，不要 Markdown 围栏或多余文字：
+{"summary":"1句面向工程师的整体基线评估结论（中文，简练直接）","gaps":[{"category":"4字以内分类如 复制机制/容量水位/日志治理/高可用参数","severity":"high|medium|low","title":"简明缺口标题（22字以内）","detail":"1句说明为什么后续变更演练或排障需要这项信息","probe_action":"1句具体的只读探测核验动作（100% 只读）"}]}`
+
+	var prompt strings.Builder
+	fmt.Fprintf(&prompt, "集群：%s（%s %s，精确版本：%s，OS：%s，部署形态：%s）\n",
+		existing.ID, existing.DisplayName, existing.Version, firstNonEmptyStr(existing.ExactVersion, existing.Version),
+		firstNonEmptyStr(existing.OSDetail, existing.Platform), firstNonEmptyStr(existing.DeployMethod, "systemd"))
+	if existing.ArchSummary != "" {
+		fmt.Fprintf(&prompt, "架构摘要：%s\n", existing.ArchSummary)
+	}
+	if len(existing.Hosts) > 0 {
+		var hs []string
+		for _, h := range existing.Hosts {
+			hs = append(hs, fmt.Sprintf("%s(%s/%s/disk=%s)", h.Name, h.IP, h.Role, firstNonEmptyStr(h.Disk, "未知")))
+		}
+		fmt.Fprintf(&prompt, "节点清单：%s\n", strings.Join(hs, "; "))
+	}
+	if len(existing.Endpoints) > 0 {
+		var eps []string
+		for _, ep := range existing.Endpoints {
+			eps = append(eps, fmt.Sprintf("%s:%s(%s)", ep.Name, ep.Address, ep.Role))
+		}
+		fmt.Fprintf(&prompt, "访问入口：%s\n", strings.Join(eps, "; "))
+	}
+	if len(existing.Companions) > 0 {
+		var cms []string
+		for _, cm := range existing.Companions {
+			cms = append(cms, fmt.Sprintf("%s %s(%s)", firstNonEmptyStr(cm.DisplayName, cm.Component), cm.Version, cm.Kind))
+		}
+		fmt.Fprintf(&prompt, "伴生组件栈：%s\n", strings.Join(cms, "; "))
+	}
+	fmt.Fprintf(&prompt, "配置路径：%s\n数据目录：%s\n日志目录：%s\n",
+		firstNonEmptyStr(strings.Join(existing.ConfigPaths, ", "), "无"),
+		firstNonEmptyStr(strings.Join(existing.DataDirs, ", "), "无"),
+		firstNonEmptyStr(strings.Join(existing.LogDirs, ", "), "无"))
+	if len(existing.Params) > 0 {
+		pb, _ := json.Marshal(existing.Params)
+		fmt.Fprintf(&prompt, "已采集运行参数：%s\n", truncRunes(aiScrub(string(pb)), 1200))
+	}
+	if strings.TrimSpace(existing.Notes) != "" {
+		fmt.Fprintf(&prompt, "当前已记录现场线索：\n%s\n", truncRunes(aiScrub(existing.Notes), 2000))
+	}
+	if hist := strings.TrimSpace(s.clusterHistoryText(cid)); hist != "" {
+		fmt.Fprintf(&prompt, "\n近期变更与台账上下文：\n%s\n", truncRunes(aiScrub(hist), 2500))
+	}
+	if f, fok := s.clusterFactsFor(session.User, cid); fok {
+		prompt.WriteString(s.clusterSecurityFactsSummary(session.User, f))
+	}
+	if len(baseHealth.Gaps) > 0 {
+		prompt.WriteString("\n固定规则已经检出的缺口（请勿重复，仅补充更有针对性的遗漏项）：\n")
+		for _, g := range baseHealth.Gaps {
+			fmt.Fprintf(&prompt, "- [%s] %s\n", g.Category, g.Title)
+		}
+	}
+	if strings.TrimSpace(req.Focus) != "" {
+		fmt.Fprintf(&prompt, "\n工程师特别关注方向：%s\n", truncRunes(strings.TrimSpace(req.Focus), 500))
+	}
+
+	p := providers[0]
+	callCtx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
+	defer cancel()
+	if strings.TrimSpace(req.Think) != "" {
+		callCtx = withEffort(callCtx, strings.TrimSpace(req.Think))
+	}
+	started := time.Now()
+	rep, err := s.aiChat(callCtx, p, []aiMessage{
+		{Role: "system", Content: sys},
+		{Role: "user", Content: prompt.String()},
+	}, nil, nil)
+	if err != nil {
+		s.writeJSON(w, 200, map[string]any{
+			"health":  baseHealth,
+			"ai_used": false,
+			"ai_note": tr(lang, "AI 深度诊断暂不可用，已保留规则初检结果："+err.Error(), "AI gap discovery unavailable: "+err.Error()),
+		})
+		return
+	}
+	s.aiRecordUsage(aiUsage{
+		At:        nowStamp(),
+		User:      session.User,
+		Feature:   "import_gap_diagnose",
+		Provider:  firstNonEmptyStr(p.Name, p.ID),
+		Model:     p.Model,
+		In:        rep.In,
+		Out:       rep.Out,
+		Cached:    rep.Cached,
+		Reasoning: rep.Reasoning,
+		MS:        time.Since(started).Milliseconds(),
+		OK:        true,
+	})
+
+	var parsed struct {
+		Summary string        `json:"summary"`
+		Gaps    []baselineGap `json:"gaps"`
+	}
+	raw := extractJSON(rep.Text)
+	if raw == "" || json.Unmarshal([]byte(raw), &parsed) != nil {
+		s.writeJSON(w, 200, map[string]any{
+			"health":  baseHealth,
+			"ai_used": false,
+			"ai_note": tr(lang, "AI 返回格式异常，已保留规则初检结果", "AI output could not be parsed; keeping rule-based results"),
+		})
+		return
+	}
+
+	seenTitles := map[string]bool{}
+	for _, g := range baseHealth.Gaps {
+		seenTitles[strings.ToLower(strings.TrimSpace(g.Title))] = true
+	}
+	added := 0
+	for i, ag := range parsed.Gaps {
+		if added >= 4 {
+			break
+		}
+		ag.Title = truncRunes(strings.TrimSpace(ag.Title), 60)
+		ag.Detail = truncRunes(strings.TrimSpace(ag.Detail), 200)
+		ag.ProbeAction = truncRunes(strings.TrimSpace(ag.ProbeAction), 160)
+		ag.Category = truncRunes(firstNonEmptyStr(strings.TrimSpace(ag.Category), tr(lang, "AI 洞察", "AI Insight")), 24)
+		if ag.Title == "" || seenTitles[strings.ToLower(ag.Title)] {
+			continue
+		}
+		seenTitles[strings.ToLower(ag.Title)] = true
+		switch strings.ToLower(strings.TrimSpace(ag.Severity)) {
+		case "high", "critical":
+			ag.Severity = "high"
+		case "low":
+			ag.Severity = "low"
+		default:
+			ag.Severity = "medium"
+		}
+		ag.ID = fmt.Sprintf("ai-%d-%s", i+1, randomStoreToken(3))
+		ag.Source = "ai"
+		ag.Selected = ag.Severity != "low"
+		baseHealth.Gaps = append(baseHealth.Gaps, ag)
+		added++
+	}
+	if strings.TrimSpace(parsed.Summary) != "" {
+		baseHealth.Summary = truncRunes(strings.TrimSpace(parsed.Summary), 220)
+	}
+	s.auditReq(r, "cluster-baseline-ai-gaps", session.User, fmt.Sprintf("%s added=%d model=%s", cid, added, p.Model))
+	s.writeJSON(w, 200, map[string]any{
+		"health":   baseHealth,
+		"ai_used":  true,
+		"ai_added": added,
+		"model":    p.Model,
+	})
 }
 
 func (s *storeServer) importParseHandler(w http.ResponseWriter, r *http.Request, session storeSession) {

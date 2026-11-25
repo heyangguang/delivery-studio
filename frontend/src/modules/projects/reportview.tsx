@@ -5,7 +5,7 @@ import {
   IconDownload,
   IconUpload,
 } from "@arco-design/web-react/icon";
-import { api, cached, can, csrfToken, err, putCached } from "../../shared/shared";
+import { api, cached, can, csrfToken, downloadFile, err, putCached } from "../../shared/shared";
 import { lazySubView } from "./topology";
 import { Segmented } from "../../design/ui";
 import { bi, biv, getLang, useLang, withLang } from "../../app/i18n";
@@ -325,7 +325,12 @@ export function ReportView() {
                   <Button
                     size="small"
                     icon={<IconDownload />}
-                    href={withLang("/api/settings/report/template")}
+                    onClick={() => {
+                      void downloadFile(
+                        withLang("/api/settings/report/template"),
+                        "report-template.docx",
+                      );
+                    }}
                   >
                     {bi("下载当前模板", "Download Current")}
                   </Button>
@@ -349,7 +354,15 @@ export function ReportView() {
               )}
               <Button
                 icon={<IconDownload />}
-                href={withLang("/api/settings/report/starter-template")}
+                onClick={() => {
+                  Message.info(
+                    bi("正在生成标准 Word 模板…", "Downloading starter Word template…"),
+                  );
+                  void downloadFile(
+                    withLang("/api/settings/report/starter-template"),
+                    "starter-template.docx",
+                  );
+                }}
               >
                 {bi(
                   "下载可编辑标准模板 (.docx)",

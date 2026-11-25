@@ -601,7 +601,9 @@ function AppWide({ a, mine }: { a: AppInfo; mine: Job[] }) {
                         disabled={!ready || !canCreate}
                         onClick={() => go({ name: "new", app: a.id, plan: p.id })}
                         aria-label={bi(
-                          `用${p.name}方案新建 ${a.name} 集群`,
+                          p.name.endsWith("方案")
+                            ? `用${p.name}新建 ${a.name} 集群`
+                            : `用${p.name}方案新建 ${a.name} 集群`,
                           `New ${a.name} cluster with ${p.name}`,
                         )}
                       >
@@ -816,36 +818,6 @@ export function AppsPage({
     );
   }, [apps, f, usage, lang]);
 
-  const app = apps.find((a) => a.id === selected);
-  if (selected) {
-    if (app)
-      return (
-        <Product
-          key={app.id}
-          app={app}
-          jobs={jobs.filter((j) => j.app_id === app.id)}
-        />
-      );
-    if (load === "loading")
-      return (
-        <div className="product-wrap enter">
-          <Skeleton
-            animation
-            text={{ rows: 6, width: ["35%", "80%", "60%", "95%", "70%", "50%"] }}
-          />
-        </div>
-      );
-    return (
-      <div className="detail-none enter">
-        <h2>{bi("找不到这个应用", "App not found")}</h2>
-        <p>{bi("应用目录中没有这一项。", "This application is not in the catalog.")}</p>
-        <Button onClick={() => go({ name: "apps" }, { replace: true })}>
-          {bi("返回应用", "Back to Apps")}
-        </Button>
-      </div>
-    );
-  }
-
   const plain = isDefault(f);
   const grouped = plain;
   const byCat = useMemo(() => {
@@ -875,6 +847,36 @@ export function AppsPage({
     }
     return m;
   }, [jobs]);
+
+  const app = apps.find((a) => a.id === selected);
+  if (selected) {
+    if (app)
+      return (
+        <Product
+          key={app.id}
+          app={app}
+          jobs={jobs.filter((j) => j.app_id === app.id)}
+        />
+      );
+    if (load === "loading")
+      return (
+        <div className="product-wrap enter">
+          <Skeleton
+            animation
+            text={{ rows: 6, width: ["35%", "80%", "60%", "95%", "70%", "50%"] }}
+          />
+        </div>
+      );
+    return (
+      <div className="detail-none enter">
+        <h2>{bi("找不到这个应用", "App not found")}</h2>
+        <p>{bi("应用目录中没有这一项。", "This application is not in the catalog.")}</p>
+        <Button onClick={() => go({ name: "apps" }, { replace: true })}>
+          {bi("返回应用", "Back to Apps")}
+        </Button>
+      </div>
+    );
+  }
   const jobsOf = (id: string) => jobsByApp.get(id) || [];
   const grid = (items: AppInfo[]) =>
     f.view === "wide" ? (
@@ -1026,7 +1028,7 @@ export function AppsPage({
   return (
     <div className="store2">
       {rail}
-      <main className="store-main">
+      <div className="store-main">
         <header className="store-bar">
           <div>
             <h2>
@@ -1188,7 +1190,7 @@ export function AppsPage({
             )}
           </>
         )}
-      </main>
+      </div>
     </div>
   );
 }

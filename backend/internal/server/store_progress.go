@@ -643,6 +643,9 @@ func (s *storeServer) handleProgress(w http.ResponseWriter, r *http.Request, ses
 func truncRunes(s string, n int) string {
 	r := []rune(s)
 	if len(r) > n {
+		if n >= 2 {
+			return string(r[:n-1]) + "…"
+		}
 		return string(r[:n])
 	}
 	return s

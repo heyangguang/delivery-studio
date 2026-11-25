@@ -2452,7 +2452,19 @@ function DeliveryForm({
               className="cluster-in"
               value={dep.id}
               onChange={(v) => set({ id: v.trim() })}
-              placeholder="pg-order-prod"
+              placeholder={
+                app.id === "redis"
+                  ? "redis-cache-prod"
+                  : app.id === "nginx"
+                    ? "nginx-edge-prod"
+                    : app.id === "haproxy"
+                      ? "haproxy-lb-prod"
+                      : app.id === "etcd"
+                        ? "etcd-dcs-prod"
+                        : app.id === "keepalived"
+                          ? "keepalived-vip-prod"
+                          : `${app.id}-order-prod`
+              }
               aria-label={bi("集群标识", "Cluster ID")}
               autoFocus={!origin}
               disabled={!!revise}
@@ -2578,7 +2590,15 @@ function DeliveryForm({
             <Input
               value={dep.title || ""}
               onChange={(v) => set({ title: v })}
-              placeholder={bi("订单库生产集群", "Orders production cluster")}
+              placeholder={
+                app.id === "redis"
+                  ? bi("核心缓存集群", "Core cache cluster")
+                  : app.id === "nginx" || app.id === "haproxy"
+                    ? bi("生产四层转发入口", "Production load balancer")
+                    : app.id === "etcd"
+                      ? bi("核心配置协调集群", "Core DCS cluster")
+                      : bi("订单库生产集群", "Orders production cluster")
+              }
               aria-label={bi("说明", "Description")}
             />
           </Row>

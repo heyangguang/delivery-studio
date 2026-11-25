@@ -662,12 +662,12 @@ body[arco-theme="dark"] .avatar.admin {
 .list-day {
   position: sticky;
   top: -6px;
-  z-index: 2;
+  z-index: 4;
   padding: 12px 10px 6px;
   font-size: 12px;
   font-weight: 600;
   color: var(--faint);
-  background: linear-gradient(var(--surface-2) 70%, transparent);
+  background: var(--surface-2);
 }
 .row {
   position: relative;
@@ -730,6 +730,12 @@ body[arco-theme="dark"] .avatar.admin {
   white-space: normal;
   word-break: normal;
   overflow-wrap: break-word;
+}
+.row.row-dlv .row-name {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .row-time {
   margin-left: auto;

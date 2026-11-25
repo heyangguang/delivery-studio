@@ -631,7 +631,7 @@ export function ClusterAutomationDrawer({
                       {summary.nodes.length === 0 ? (
                         <span>{bi("尚未接入任何执行节点，", "No execution nodes enrolled yet; ")}</span>
                       ) : (
-                        <span>{bi("变更写步骤需在节点卡片开启「允许变更演练」，", "Mutating steps require enabling Rehearsal on the node; ")}</span>
+                        <span>{bi("变更写步骤需在节点卡片开启「变更演练步骤执行」，", "Mutating steps require enabling Rehearsal Steps on the node; ")}</span>
                       )}
                       <button
                         type="button"

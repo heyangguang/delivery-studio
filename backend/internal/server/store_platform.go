@@ -25,7 +25,34 @@ func (s *storeServer) componentSchema(w http.ResponseWriter, r *http.Request, na
 		s.fail(w, 404, "组件不存在")
 		return
 	}
-	sc, err := c.Describe(r.URL.Query().Get("version"))
+	rawVer := strings.TrimSpace(r.URL.Query().Get("version"))
+	sc, err := c.Describe(rawVer)
+	if err != nil && rawVer != "" {
+		// Normalize distro package versions from imported baselines (e.g. "4.1.5-1.noble" -> "4.1" or "4",
+		// "1:3.5.33-1.noble" -> "3.5") before falling back to the component's default version schema.
+		norm := rawVer
+		if idx := strings.Index(norm, ":"); idx >= 0 {
+			norm = norm[idx+1:]
+		}
+		if idx := strings.IndexAny(norm, "-+~ "); idx >= 0 {
+			norm = norm[:idx]
+		}
+		parts := strings.Split(norm, ".")
+		candidates := []string{norm}
+		if len(parts) >= 2 {
+			candidates = append(candidates, parts[0]+"."+parts[1])
+		}
+		if len(parts) >= 1 && parts[0] != "" {
+			candidates = append(candidates, parts[0])
+		}
+		candidates = append(candidates, "")
+		for _, cand := range candidates {
+			if sc2, err2 := c.Describe(cand); err2 == nil {
+				sc, err = sc2, nil
+				break
+			}
+		}
+	}
 	if err != nil {
 		s.fail(w, 404, err.Error())
 		return

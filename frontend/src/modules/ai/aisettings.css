@@ -822,17 +822,25 @@ button.ai-pm:focus-visible {
 }
 .ai-tabs {
   display: inline-flex;
+  flex-wrap: wrap;
   align-self: flex-start;
+  max-width: 100%;
+  gap: 2px;
   padding: 2px;
   border-radius: 9px;
   background: var(--sunken);
 }
+.ai-tabs::-webkit-scrollbar {
+  display: none;
+}
 .ai-tabs button {
-  padding: 4px 14px;
+  padding: 4px 12px;
   border: 0;
   border-radius: 7px;
   color: var(--mute);
   font: 13px var(--sans);
+  white-space: nowrap;
+  flex-shrink: 0;
   background: none;
   cursor: pointer;
 }

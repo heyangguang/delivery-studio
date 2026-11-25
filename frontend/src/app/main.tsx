@@ -69,6 +69,7 @@ import "../modules/ai/aiprices.css";
 import "../modules/settings/storageview.css";
 import "../modules/settings/sandboxview.css";
 import "../modules/automation/executions.css";
+import "../modules/automation/rehearsal-automation.css";
 import "../modules/security/secreport.css";
 import "../modules/ai/aiqueue.css";
 import "../modules/iam/me.css";

@@ -499,10 +499,19 @@ body[arco-theme="dark"] .ad-compose:not(.off):is(:hover, :focus-within, :has(.ar
 /* Quiet secondary pill defaults */
 :root .ai-pill.arco-btn:not(.ai-pill-primary):not(:disabled):not(.arco-btn-disabled),
 :root .wz-pane-foot .fw-chatbtn.arco-btn:not(:disabled),
+:root .ad-launch,
 :root .fc-callai,
 :root .rstep-ai,
 :root .wb-stage-chat {
   color: var(--ink);
+}
+
+body[arco-theme="dark"] .ad-launch {
+  color: #f3f5fa;
+}
+body[arco-theme="dark"] .ad-launch kbd {
+  color: #cbd5e1;
+  background: rgba(255, 255, 255, 0.1);
 }
 
 /* Shared Layer 1 (::before at z-index: -1): opaque interior + 1.5px flowing rim

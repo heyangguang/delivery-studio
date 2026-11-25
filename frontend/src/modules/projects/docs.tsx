@@ -30,6 +30,7 @@ import {
   cached,
   can,
   copy,
+  downloadFile,
   err,
   fetchCached,
   fullTime,
@@ -2674,8 +2675,14 @@ function ExportDialog({
             icon={<IconDownload />}
             disabled={!sel.length}
             onClick={() => {
-              window.location.href = withLang(url);
+              const targetUrl = withLang(url);
+              const fallback =
+                sel.length > 1 && merge === "each"
+                  ? `${c.id}-docs.zip`
+                  : `${c.id}-report.docx`;
               close();
+              Message.info(bi("正在生成并下载文档…", "Preparing document download…"));
+              void downloadFile(targetUrl, fallback);
             }}
           >
             {sel.length > 1 && merge === "each"

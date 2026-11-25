@@ -316,15 +316,23 @@ func SolveImported(cat *Catalog, d *Deployment) *Plan {
 			synComp.Operations = catComp.Operations
 			synComp.Context = catComp.Context
 			synComp.Provides = catComp.Provides
+			synComp.Params = catComp.Params
 			synComp.sum = catComp.sum
+		}
+		var synParams []Param
+		if catRes != nil && len(catRes.Params) > 0 {
+			synParams = catRes.Params
+		} else if catComp != nil && len(catComp.Params) > 0 {
+			synParams = catComp.Params
 		}
 		synRes := &Resolved{
 			C:         synComp,
 			Version:   Version{ID: ver, Status: "published"},
 			Platforms: []string{platDef.ID},
 			Overlay: Overlay{
-				Roles: roleSpecs,
-				Flows: flowSpecs,
+				Roles:  roleSpecs,
+				Flows:  flowSpecs,
+				Params: synParams,
 			},
 		}
 

@@ -3,6 +3,8 @@ package mwpack_test
 import (
 	"strings"
 	"testing"
+
+	"delivery-studio/mwpack"
 )
 
 func TestOperationsFollowTheInstance(t *testing.T) {
@@ -43,5 +45,55 @@ func TestOperationsFollowTheInstance(t *testing.T) {
 		if strings.Contains(c.Cmd, "patronictl") {
 			t.Fatalf("a single node got a Patroni check: %s", c.Title)
 		}
+	}
+}
+
+func TestImportedOperationsResolvePlaceholders(t *testing.T) {
+	dep := &mwpack.Deployment{
+		Schema:       mwpack.DeploymentSchema,
+		ID:           "redis-imported-qa",
+		DeliveryMode: "imported",
+		Platform:     "ubuntu-22.04-amd64",
+		Imported: &mwpack.ImportedMeta{
+			ExactVersion: "6.0.16",
+			DataDirs:     []string{"/var/lib/redis"},
+			LogDirs:      []string{"/var/log/redis"},
+		},
+		Hosts: []mwpack.Host{{Name: "pass-4", IP: "192.168.31.153"}},
+		Instances: []mwpack.InstanceSpec{{
+			ID:        "redis",
+			Component: "redis",
+			Version:   "6.0.16",
+			Placement: map[string][]string{"primary": {"pass-4"}},
+			Params:    map[string]any{"redis_port": 6379, "data_dir": "/var/lib/redis"},
+		}},
+	}
+	p := mwpack.SolveImported(fullCatalog(t), dep)
+	if p == nil || len(p.Issues) > 0 {
+		t.Fatalf("imported solve failed: %+v", p)
+	}
+	ops := p.Instance("redis").InstanceOperations(dep.ID)
+	if ops == nil {
+		t.Fatalf("expected operations for imported redis")
+	}
+	var all strings.Builder
+	all.WriteString(ops.Overview)
+	for _, c := range ops.Checks {
+		all.WriteString(c.Cmd)
+		all.WriteString(c.Expect)
+	}
+	for _, tk := range ops.Tasks {
+		all.WriteString(tk.Cmd)
+		all.WriteString(tk.Note)
+	}
+	for _, f := range ops.Faults {
+		all.WriteString(f.Cmd)
+		all.WriteString(strings.Join(f.Steps, " "))
+	}
+	for _, l := range ops.Logs {
+		all.WriteString(l.Text)
+	}
+	if strings.Contains(all.String(), "${params.") {
+		t.Fatalf("unsubstituted ${params.*} leaked in imported operations: %s", all.String())
 	}
 }

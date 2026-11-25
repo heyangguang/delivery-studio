@@ -464,7 +464,7 @@ func analyzeImportedBaselineHealth(compID, displayName string, req importCluster
 		ID:       "paths",
 		Severity: "high",
 		Category: tr(lang, "路径基线", "Paths"),
-		Title:    tr(lang, fmt.Sprintf("缺少%s", strings.Join(pathMissingParts, "、")), fmt.Sprintf("Missing %s", strings.Join(pathMissingParts, ", "))),
+		Title:    tr(lang, fmt.Sprintf("缺少 %s", strings.Join(pathMissingParts, "、")), fmt.Sprintf("Missing %s", strings.Join(pathMissingParts, ", "))),
 		Detail:   tr(lang, "后续变更演练、日志巡检与故障恢复预案均依赖准确的运行目录与主配置路径。", "Change rehearsal, log inspection, and recovery runbooks require exact config/data/log paths."),
 		ProbeAction: tr(lang,
 			fmt.Sprintf("只读定位 %s 主配置文件、真实数据目录与日志落盘路径", dname),
@@ -1264,7 +1264,7 @@ func (s *storeServer) importDiagnoseGapsHandler(w http.ResponseWriter, r *http.R
 		}
 		ag.Title = truncRunes(strings.TrimSpace(ag.Title), 60)
 		ag.Detail = truncRunes(strings.TrimSpace(ag.Detail), 200)
-		ag.ProbeAction = truncRunes(strings.TrimSpace(ag.ProbeAction), 160)
+		ag.ProbeAction = truncRunes(strings.TrimSpace(ag.ProbeAction), 240)
 		ag.Category = truncRunes(firstNonEmptyStr(strings.TrimSpace(ag.Category), tr(lang, "AI 洞察", "AI Insight")), 24)
 		if ag.Title == "" || seenTitles[strings.ToLower(ag.Title)] {
 			continue
@@ -2317,22 +2317,28 @@ func inferCompanionsFromSignals(sig companionSignals) []mwpack.ImportedCompanion
 	}
 
 	// Text signals from ArchSummary (positive architecture declaration) and non-negated Notes lines
-	// Prevents false positives when AI notes say "未采集到 VIP / HAProxy 等统一入口".
-	archLow := strings.ToLower(sig.ArchSummary)
-	reNegated := regexp.MustCompile(`(?i)(未采集|未发现|未安装|未见|未配置|没有|不含|无\s*[a-z]|not\s+found|not\s+installed|without\s+|no\s+)`)
-	positiveNoteLines := []string{}
-	for _, rawLn := range strings.Split(strings.ReplaceAll(sig.Notes, "\r\n", "\n"), "\n") {
-		for _, sent := range strings.Split(rawLn, "。") {
-			s := strings.TrimSpace(sent)
-			if s == "" || reNegated.MatchString(s) {
-				continue
+	// Filter out negated clauses in BOTH ArchSummary and Notes so statements like
+	// "未发现 Sentinel 或从节点配置" or "未采集到 VIP / HAProxy" never hallucinate phantom companions.
+	reNegated := regexp.MustCompile(`(?i)(未采集|未发现|未安装|未见|未配置|未部署|未启用|未检测|没有|不含|非高可用|非\s*[a-z]|无\s*[\p{Han}a-z]|not\s+found|not\s+installed|not\s+configured|without\s+|no\s+)`)
+	filterPositiveClauses := func(raw string) string {
+		var pos []string
+		for _, rawLn := range strings.Split(strings.ReplaceAll(raw, "\r\n", "\n"), "\n") {
+			for _, seg := range strings.FieldsFunc(rawLn, func(r rune) bool {
+				return r == '。' || r == '；' || r == ';' || r == '，' || r == ',' || r == '（' || r == '）' || r == '(' || r == ')'
+			}) {
+				s := strings.TrimSpace(seg)
+				if s == "" || reNegated.MatchString(s) {
+					continue
+				}
+				pos = append(pos, strings.ToLower(s))
 			}
-			positiveNoteLines = append(positiveNoteLines, strings.ToLower(s))
 		}
+		return strings.Join(pos, "\n")
 	}
-	notesPositive := strings.Join(positiveNoteLines, "\n")
+	archPositive := filterPositiveClauses(sig.ArchSummary)
+	notesPositive := filterPositiveClauses(sig.Notes)
 
-	if strings.TrimSpace(archLow) != "" || strings.TrimSpace(notesPositive) != "" {
+	if strings.TrimSpace(archPositive) != "" || strings.TrimSpace(notesPositive) != "" {
 		textMatchers := []struct {
 			cid          string
 			token        string
@@ -2351,7 +2357,7 @@ func inferCompanionsFromSignals(sig companionSignals) []mwpack.ImportedCompanion
 			{"node-exporter", "node_exporter", true},
 		}
 		for _, m := range textMatchers {
-			inArch := strings.Contains(archLow, m.token)
+			inArch := strings.Contains(archPositive, m.token)
 			inNotes := m.allowInNotes && strings.Contains(notesPositive, m.token)
 			if inArch || inNotes {
 				// Avoid false positive on generic "sentinel" unless primary is redis/valkey
@@ -2367,8 +2373,8 @@ func inferCompanionsFromSignals(sig companionSignals) []mwpack.ImportedCompanion
 				}
 			}
 		}
-		// Generically recognize any *_exporter / *-exporter mentioned in ArchSummary or positive Notes
-		for _, em := range reExporterToken.FindAllString(archLow, -1) {
+		// Generically recognize any *_exporter / *-exporter mentioned in positive ArchSummary or Notes
+		for _, em := range reExporterToken.FindAllString(archPositive, -1) {
 			cid := strings.TrimPrefix(mwpack.NormalizeCompanionID(em), "prometheus-")
 			if a := touch(cid); a != nil {
 				addStrUniq(&a.ev, "架构摘要")
@@ -2941,12 +2947,54 @@ func buildImportedDeployment(cat *mwpack.Catalog, req importClusterReq, user, no
 		}
 	}
 
+	primParams := map[string]any{}
+	for k, v := range req.Params {
+		primParams[k] = v
+	}
+	// Populate canonical param aliases from discovered baseline paths/ports so KT operations commands
+	// render real discovered directories & ports instead of raw template placeholders.
+	if len(meta.DataDirs) > 0 {
+		if _, ok := primParams["data_dir"]; !ok {
+			primParams["data_dir"] = meta.DataDirs[0]
+		}
+	}
+	if len(meta.LogDirs) > 0 {
+		if _, ok := primParams["log_dir"]; !ok {
+			primParams["log_dir"] = meta.LogDirs[0]
+		}
+	}
+	primaryPort := 0
+	if pVal, ok := primParams["port"]; ok {
+		_, _ = fmt.Sscanf(fmt.Sprint(pVal), "%d", &primaryPort)
+	}
+	if primaryPort == 0 && len(meta.Endpoints) > 0 && meta.Endpoints[0].Address != "" {
+		if _, pStr, err := net.SplitHostPort(strings.TrimSpace(meta.Endpoints[0].Address)); err == nil {
+			_, _ = fmt.Sscanf(pStr, "%d", &primaryPort)
+		}
+	}
+	if primaryPort > 0 {
+		switch compID {
+		case "redis":
+			if _, ok := primParams["redis_port"]; !ok {
+				primParams["redis_port"] = primaryPort
+			}
+		case "postgresql":
+			if _, ok := primParams["pg_port"]; !ok {
+				primParams["pg_port"] = primaryPort
+			}
+		case "etcd":
+			if _, ok := primParams["client_port"]; !ok {
+				primParams["client_port"] = primaryPort
+			}
+		}
+	}
+
 	instances := []mwpack.InstanceSpec{{
 		ID:        instID,
 		Component: compID,
 		Version:   ver,
 		Placement: placement,
-		Params:    req.Params,
+		Params:    primParams,
 	}}
 	usedInstIDs := map[string]bool{instID: true}
 	compInstID := map[string]string{compID: instID}

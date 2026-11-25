@@ -459,7 +459,7 @@
 
 .rha-add-host-row {
   display: grid;
-  grid-template-columns: 1fr 1fr 110px auto;
+  grid-template-columns: 1fr 1fr minmax(145px, 0.9fr) auto;
   gap: 6px;
 }
 

@@ -295,6 +295,10 @@ func (s *storeServer) loadSecReportTemplates() []secReportTemplate {
 		saved[i] = normalizeSecReportTemplate(saved[i])
 		if isBuiltinSecReportTemplateID(saved[i].ID) {
 			saved[i].Builtin = true
+			// Auto-migrate legacy pre-rebrand product name on built-in templates loaded from disk.
+			saved[i].OrgName = strings.ReplaceAll(saved[i].OrgName, "Middleware Hub", "Kyndryl Delivery Studio")
+			saved[i].FooterText = strings.ReplaceAll(saved[i].FooterText, "Middleware Hub", "Kyndryl Delivery Studio")
+			saved[i].HeaderText = strings.ReplaceAll(saved[i].HeaderText, "Middleware Hub", "Kyndryl Delivery Studio")
 		}
 		byID[saved[i].ID] = true
 	}
@@ -340,13 +344,55 @@ func (s *storeServer) resolveSecReportTemplate(id string) secReportTemplate {
 
 // ---- HTTP Handlers: /api/security/report-templates* ----
 
+func localizeSecReportTemplate(lang string, t secReportTemplate) secReportTemplate {
+	if !isEnLang(lang) || !t.Builtin {
+		return t
+	}
+	switch t.ID {
+	case "builtin-compliance":
+		if t.Name == "合规审计完整报告" {
+			t.Name = "Full Compliance Audit Report"
+		}
+		if strings.Contains(t.Description, "面向等保合规") {
+			t.Description = "Comprehensive audit layout covering posture overview, affected clusters, package remediation groups, CVE details, config baselines, TLS certs, and sign-off."
+		}
+	case "builtin-executive":
+		if t.Name == "管理层安全摘要" {
+			t.Name = "Executive Security Summary"
+		}
+		if strings.Contains(t.Description, "面向管理层") {
+			t.Description = "Concise briefing focusing on Critical/High active risks, affected production clusters, and priority remediation plans."
+		}
+	case "builtin-remediation":
+		if t.Name == "运维修复工单清单" {
+			t.Name = "Ops Remediation Worklist"
+		}
+		if strings.Contains(t.Description, "面向一线运维") || strings.Contains(t.Description, "修复") {
+			t.Description = "Actionable remediation checklist grouped by package and cluster for operations teams and change rehearsals."
+		}
+	case "builtin-html-brief":
+		if t.Name == "交互式安全简报 (HTML)" {
+			t.Name = "Interactive Security Brief (HTML)"
+		}
+		if strings.Contains(t.Description, "单文件") || strings.Contains(t.Description, "HTML") {
+			t.Description = "Self-contained interactive HTML security report for browser viewing and offline distribution."
+		}
+	}
+	return t
+}
+
 func (s *storeServer) handleSecurityReportTemplates(w http.ResponseWriter, r *http.Request, session storeSession, parts []string) {
+	lang := wLang(w)
 	switch {
 	case len(parts) == 0 && r.Method == "GET":
 		secDBMu.Lock()
 		list := s.loadSecReportTemplates()
 		secDBMu.Unlock()
-		s.writeJSON(w, 200, map[string]any{"templates": list})
+		out := make([]secReportTemplate, len(list))
+		for i, t := range list {
+			out[i] = localizeSecReportTemplate(lang, t)
+		}
+		s.writeJSON(w, 200, map[string]any{"templates": out})
 
 	case len(parts) == 0 && r.Method == "POST":
 		var in secReportTemplate

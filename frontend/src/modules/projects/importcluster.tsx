@@ -1245,24 +1245,18 @@ function ImportEvidenceComposer({
     async (files: FileList | File[] | null) => {
       if (!files) return;
       const list = Array.from(files);
-      let imgRoom = Math.max(0, 4 - images.length);
       const addedTexts: string[] = [];
       let imgAdded = 0;
 
       for (const f of list) {
         if (f.type.startsWith("image/")) {
-          if (imgRoom <= 0) {
-            Message.warning(bi("单次最多上传 4 张截图", "Up to 4 screenshots allowed"));
-            continue;
-          }
           if (f.size > 16 * 1024 * 1024) {
             Message.warning(bi(`${f.name} 超过 16MB，请裁剪后重试`, `${f.name} exceeds 16MB limit`));
             continue;
           }
           try {
             const dataUrl = await compressImportImageIfNeeded(f);
-            onImagesChange((prev) => (prev.length < 4 ? [...prev, dataUrl] : prev));
-            imgRoom -= 1;
+            onImagesChange((prev) => [...prev, dataUrl]);
             imgAdded += 1;
           } catch {
             // ignore
@@ -1396,13 +1390,13 @@ function ImportEvidenceComposer({
           <button
             type="button"
             className="imp-attach-btn"
-            disabled={busy || images.length >= 4}
+            disabled={busy}
             onClick={() => imgInputRef.current?.click()}
           >
             <IconImage />
             <span>
               {imageBtnLabel || bi("上传截图", "Upload Image")}
-              {images.length > 0 ? ` (${images.length}/4)` : ""}
+              {images.length > 0 ? ` (${images.length})` : ""}
             </span>
           </button>
           <button

@@ -1478,17 +1478,13 @@ func (s *storeServer) importDiagnoseGapsHandler(w http.ResponseWriter, r *http.R
 
 func (s *storeServer) importParseHandler(w http.ResponseWriter, r *http.Request, session storeSession) {
 	var req importParseReq
-	if err := json.NewDecoder(io.LimitReader(r.Body, 20<<20)).Decode(&req); err != nil {
+	if err := json.NewDecoder(io.LimitReader(r.Body, 128<<20)).Decode(&req); err != nil {
 		s.fail(w, 400, "请求内容无法解析或超出大小限制")
 		return
 	}
 	text := strings.TrimSpace(req.Text)
 	if text == "" && len(req.Images) == 0 {
 		s.fail(w, 400, "请先粘贴采集脚本输出、CMDB/配置文本，或上传架构/终端截图")
-		return
-	}
-	if len(req.Images) > 4 {
-		s.fail(w, 400, "单次最多上传 4 张截图")
 		return
 	}
 	for _, img := range req.Images {

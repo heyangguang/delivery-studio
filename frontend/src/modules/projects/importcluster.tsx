@@ -173,7 +173,11 @@ export const FALLBACK_COMPANIONS: CompanionCatalogItem[] = [
   { id: "proxysql", name: "ProxySQL", kind: "proxy", icon: "mysql", color: "blue", default_role: "router", role_title: "代理路由", topology: true, default_ports: [{ name: "ProxySQL", port: 6033 }] },
   { id: "maxscale", name: "MariaDB MaxScale", kind: "proxy", icon: "mariadb", color: "indigo", default_role: "router", role_title: "代理路由", topology: true, default_ports: [{ name: "MaxScale", port: 4006 }] },
   { id: "obproxy", name: "OBProxy", kind: "proxy", icon: "oceanbase", color: "teal", default_role: "router", role_title: "代理路由", topology: true, default_ports: [{ name: "OBProxy", port: 2883 }] },
-  { id: "node-exporter", name: "node_exporter", kind: "monitoring", icon: "prometheus", color: "coral", default_role: "exporter", role_title: "指标采集", topology: false, default_ports: [{ name: "Metrics", port: 9100 }] },
+  { id: "node-exporter", name: "node_exporter", kind: "os_component", icon: "prometheus", color: "coral", default_role: "exporter", role_title: "OS 指标采集", topology: false, default_ports: [{ name: "Metrics", port: 9100 }] },
+  { id: "process-exporter", name: "process_exporter", kind: "os_component", icon: "prometheus", color: "coral", default_role: "exporter", role_title: "OS 进程采集", topology: false, default_ports: [{ name: "Metrics", port: 9256 }] },
+  { id: "postgres-exporter", name: "postgres_exporter", kind: "monitoring", icon: "prometheus", color: "coral", default_role: "exporter", role_title: "PG 指标采集", topology: false, default_ports: [{ name: "Metrics", port: 9187 }] },
+  { id: "mysqld-exporter", name: "mysqld_exporter", kind: "monitoring", icon: "prometheus", color: "coral", default_role: "exporter", role_title: "MySQL 指标采集", topology: false, default_ports: [{ name: "Metrics", port: 9104 }] },
+  { id: "redis-exporter", name: "redis_exporter", kind: "monitoring", icon: "prometheus", color: "coral", default_role: "exporter", role_title: "Redis 指标采集", topology: false, default_ports: [{ name: "Metrics", port: 9121 }] },
 ];
 
 export const COMPANION_SUGGESTIONS_BY_PRIMARY: Record<string, string[]> = {
@@ -191,8 +195,10 @@ export const COMPANION_SUGGESTIONS_BY_PRIMARY: Record<string, string[]> = {
 };
 
 import {
+  companionIcon,
   companionKindMeta,
   detectMissingCompanionsFromMeta,
+  effectiveCompanionKind,
   localizeEndpointTitle,
 } from "./topology";
 export {
@@ -801,7 +807,8 @@ function CompanionStackEditor({
         {/* Companion component rows */}
         {companions.map((cm, idx) => {
           const def = catalogByID.get(cm.component);
-          const km = companionKindMeta(cm.kind);
+          const effKind = effectiveCompanionKind(cm.component, cm.kind);
+          const km = companionKindMeta(effKind);
           const hostCount = cm.placement
             ? new Set(Object.values(cm.placement).flat()).size
             : cm.hosts?.length || validHostNames.length;
@@ -809,7 +816,7 @@ function CompanionStackEditor({
             <div key={`${cm.component}-${idx}`} className="imp-stack-item">
               <AppGlyph
                 id={cm.component}
-                icon={def?.icon || cm.component}
+                icon={def?.icon || companionIcon(cm.component)}
                 color={def?.color || "slate"}
                 size={28}
               />
@@ -823,7 +830,7 @@ function CompanionStackEditor({
                 </div>
                 <div className="imp-stack-meta">
                   <span>{bi(`${hostCount} 台节点`, `${hostCount} host(s)`)}</span>
-                  {validHostNames.length > 1 && hostCount < validHostNames.length && cm.kind !== "backup" && cm.kind !== "monitoring" && (
+                  {validHostNames.length > 1 && hostCount < validHostNames.length && effKind !== "backup" && effKind !== "monitoring" && effKind !== "os_component" && (
                     <button
                       type="button"
                       className="cl-imp-notes-toggle"
@@ -909,6 +916,8 @@ function CompanionStackEditor({
             <Select.Option value="vip">{bi("虚拟 IP", "VIP")}</Select.Option>
             <Select.Option value="pooler">{bi("连接池", "Pooler")}</Select.Option>
             <Select.Option value="backup">{bi("备份工具", "Backup")}</Select.Option>
+            <Select.Option value="monitoring">{bi("监控采集", "Monitoring")}</Select.Option>
+            <Select.Option value="os_component">{bi("OS 组件", "OS Component")}</Select.Option>
             <Select.Option value="companion">{bi("其他伴生组件", "Companion")}</Select.Option>
           </Select>
           <Input
@@ -2494,10 +2503,10 @@ export function ImportClusterPage({
                       </span>
                       {companions.map((cm) => (
                         <span key={cm.component} className="cl-imp-comp-pill">
-                          <AppGlyph id={cm.component} icon={cm.component} size={15} />
+                          <AppGlyph id={cm.component} icon={companionIcon(cm.component)} size={15} />
                           <b>{cm.display_name || cm.component}</b>
                           {cm.version && <span className="cl-imp-comp-ver">{cm.version}</span>}
-                          <span className="cl-imp-comp-kind">{companionKindMeta(cm.kind).label}</span>
+                          <span className="cl-imp-comp-kind">{companionKindMeta(effectiveCompanionKind(cm.component, cm.kind)).label}</span>
                         </span>
                       ))}
                     </div>

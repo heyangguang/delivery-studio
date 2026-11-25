@@ -493,10 +493,43 @@ func (s *storeServer) jobPlan(id string) json.RawMessage {
 	var insts []map[string]json.RawMessage
 	if json.Unmarshal(b, &doc) == nil && json.Unmarshal(doc["instances"], &insts) == nil {
 		needsBackfill := false
+		needsPackages := false
 		for _, in := range insts {
 			if _, has := in["role_titles"]; !has {
 				needsBackfill = true
-				break
+			}
+			if _, has := in["packages"]; !has {
+				needsPackages = true
+			}
+		}
+		changed := false
+		if needsPackages {
+			if lb, err := os.ReadFile(filepath.Join(s.jobDir(id), "output", "deployment.lock.json")); err == nil {
+				var lockDoc struct {
+					Instances []struct {
+						ID       string                  `json:"id"`
+						Packages []mwpack.PackageRequest `json:"packages"`
+					} `json:"instances"`
+				}
+				if json.Unmarshal(lb, &lockDoc) == nil {
+					pkgByID := map[string][]mwpack.PackageRequest{}
+					for _, li := range lockDoc.Instances {
+						if li.ID != "" && len(li.Packages) > 0 {
+							pkgByID[li.ID] = li.Packages
+						}
+					}
+					for _, in := range insts {
+						if _, has := in["packages"]; has {
+							continue
+						}
+						var iid string
+						_ = json.Unmarshal(in["id"], &iid)
+						if pks := pkgByID[iid]; len(pks) > 0 {
+							in["packages"], _ = json.Marshal(pks)
+							changed = true
+						}
+					}
+				}
 			}
 		}
 		if needsBackfill {
@@ -507,7 +540,6 @@ func (s *storeServer) jobPlan(id string) json.RawMessage {
 					for _, iv := range view.Instances {
 						byID[iv.ID] = iv
 					}
-					changed := false
 					for _, in := range insts {
 						var iid string
 						_ = json.Unmarshal(in["id"], &iid)
@@ -523,14 +555,18 @@ func (s *storeServer) jobPlan(id string) json.RawMessage {
 							in["role_titles"], _ = json.Marshal(iv.RoleTitles)
 							changed = true
 						}
-					}
-					if changed {
-						doc["instances"], _ = json.Marshal(insts)
-						if out, err := json.Marshal(doc); err == nil {
-							res = out
+						if _, has := in["packages"]; !has && len(iv.Packages) > 0 {
+							in["packages"], _ = json.Marshal(iv.Packages)
+							changed = true
 						}
 					}
 				}
+			}
+		}
+		if changed {
+			doc["instances"], _ = json.Marshal(insts)
+			if out, err := json.Marshal(doc); err == nil {
+				res = out
 			}
 		}
 	}

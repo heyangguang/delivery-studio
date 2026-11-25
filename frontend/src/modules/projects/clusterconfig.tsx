@@ -55,6 +55,7 @@ import {
   lazySubView,
   localizeEndpointTitle,
   localizePortName,
+  packageUpstreamVersion,
   type EffectiveClusterChange,
 } from "./topology";
 import { bi, useLang, withLang } from "../../app/i18n";
@@ -457,7 +458,7 @@ function ConfigRecord({
           id: virtId,
           component: "patroni",
           title: "Patroni",
-          version: "",
+          version: packageUpstreamVersion(inst.packages, /patroni/i),
           status: inst.status,
           auto: true,
           auto_reason: bi(

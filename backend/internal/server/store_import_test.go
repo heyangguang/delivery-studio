@@ -463,3 +463,64 @@ pgbackrest	2.59.1-1.noble
 		}
 	}
 }
+
+func TestClusterImportExportersAndOSComponentClassification(t *testing.T) {
+	probeOut := `=== MW_IMPORT_BEGIN ===
+PROBE_COMPONENT=postgresql
+=== MW_IMPORT_HOST ===
+HOSTNAME=db-node-01
+IPS=10.88.1.11
+=== MW_IMPORT_OS ===
+PRETTY_NAME="Ubuntu 24.04.5 LTS"
+=== MW_IMPORT_PORTS ===
+LISTEN 0 4096 0.0.0.0:5432 0.0.0.0:* users:(("postgres",pid=101,fd=5))
+LISTEN 0 4096 0.0.0.0:9100 0.0.0.0:* users:(("node_exporter",pid=102,fd=3))
+LISTEN 0 4096 0.0.0.0:9187 0.0.0.0:* users:(("postgres_exporter",pid=103,fd=3))
+LISTEN 0 4096 0.0.0.0:9777 0.0.0.0:* users:(("custom_disk_exporter",pid=104,fd=3))
+=== MW_IMPORT_MIDDLEWARE ===
+psql (PostgreSQL) 17.11
+=== MW_IMPORT_COMPANIONS ===
+node_exporter.service loaded active running Prometheus Node Exporter
+postgres_exporter.service loaded active running Prometheus PostgreSQL Exporter
+custom_disk_exporter.service loaded active running Custom Disk Exporter
+node_exporter, version 1.8.2 (branch: HEAD, revision: abc)
+postgres_exporter, version 0.15.0 (branch: HEAD, revision: def)
+custom_disk_exporter, version 0.3.1 (branch: HEAD, revision: ghi)
+=== MW_IMPORT_PACKAGES ===
+percona-postgresql-17	2:17.11-1.noble
+prometheus-node-exporter	1.8.2+ds-1
+=== MW_IMPORT_END ===`
+
+	preset, _ := mwpack.LookupImportPreset("postgresql")
+	draft := parseImportedDeterministic(probeOut, "postgresql", "PostgreSQL", preset)
+	if draft.ExactVersion != "17.11" {
+		t.Fatalf("expected primary ExactVersion 17.11 (must not be overwritten by exporter banner), got %q", draft.ExactVersion)
+	}
+	byID := map[string]mwpack.ImportedCompanion{}
+	for _, cm := range draft.Companions {
+		byID[cm.Component] = cm
+	}
+	ne, ok := byID["node-exporter"]
+	if !ok || ne.Kind != "os_component" || ne.Version != "1.8.2" {
+		t.Fatalf("expected node-exporter as os_component v1.8.2, got ok=%v %+v", ok, ne)
+	}
+	pe, ok := byID["postgres-exporter"]
+	if !ok || pe.Kind != "monitoring" || pe.Version != "0.15.0" {
+		t.Fatalf("expected postgres-exporter as monitoring v0.15.0, got ok=%v %+v", ok, pe)
+	}
+	ce, ok := byID["custom-disk-exporter"]
+	if !ok || ce.Kind != "monitoring" || ce.DisplayName != "custom_disk_exporter" || ce.Version != "0.3.1" {
+		t.Fatalf("expected generic custom_disk_exporter as monitoring v0.3.1, got ok=%v %+v", ok, ce)
+	}
+	if len(ce.Ports) == 0 || ce.Ports[0] != 9777 {
+		t.Fatalf("expected custom_disk_exporter port 9777, got %+v", ce.Ports)
+	}
+
+	// Verify legacy saved node-exporter with kind="monitoring" is normalized to os_component
+	merged := mergeCompanionLists("postgresql", []mwpack.ImportedCompanion{
+		{Component: "node-exporter", DisplayName: "node_exporter", Kind: "monitoring", Ports: []int{9100}},
+	})
+	if len(merged) != 1 || merged[0].Kind != "os_component" {
+		t.Fatalf("expected legacy node-exporter normalized to os_component, got %+v", merged)
+	}
+}

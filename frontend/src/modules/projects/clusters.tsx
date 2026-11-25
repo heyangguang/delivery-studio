@@ -1,9 +1,11 @@
 import {
   buildClusterStackPills,
+  companionIcon,
   companionKindMeta,
   computeEffectiveClusterChanges,
   detectMissingCompanionsFromMeta,
   displayInstances,
+  effectiveCompanionKind,
   hostStorage,
   lazySubView,
   localizeEndpointTitle,
@@ -1359,10 +1361,10 @@ function Overview({
                 <span className="cl-imp-comp-kind">{bi("主组件", "Primary")}</span>
               </span>
               {(imp?.companions || []).map((cm) => {
-                const km = companionKindMeta(cm.kind);
+                const km = companionKindMeta(effectiveCompanionKind(cm.component, cm.kind));
                 return (
                   <span key={cm.component} className="cl-imp-comp-pill">
-                    <AppGlyph id={cm.component} icon={cm.component} size={16} />
+                    <AppGlyph id={cm.component} icon={companionIcon(cm.component)} size={16} />
                     <b>{cm.display_name || cm.component}</b>
                     {cm.version && <span className="cl-imp-comp-ver">{cm.version}</span>}
                     <span className="cl-imp-comp-kind">{km.label}</span>

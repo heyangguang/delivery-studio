@@ -257,7 +257,7 @@ func buildImportProbeScript(req importProbeScriptReq, lang string) (string, stri
 	if pkgMatch == "" {
 		pkgMatch = regexp.QuoteMeta(compID)
 	}
-	fullPkgMatch := pkgMatch + "|patroni|etcd|haproxy|keepalived|pgbackrest|pgbouncer|sentinel|zookeeper|proxysql|clickhouse-keeper"
+	fullPkgMatch := pkgMatch + "|patroni|etcd|haproxy|keepalived|pgbackrest|pgbouncer|sentinel|zookeeper|proxysql|clickhouse-keeper|exporter"
 	var sb strings.Builder
 	sb.WriteString("#!/usr/bin/env bash\n")
 	sb.WriteString("# ============================================================================\n")
@@ -310,8 +310,9 @@ func buildImportProbeScript(req importProbeScriptReq, lang string) (string, stri
 	}
 
 	sb.WriteString("\necho '=== MW_IMPORT_COMPANIONS ==='\n")
-	sb.WriteString("systemctl list-units --type=service --all --no-pager 2>/dev/null | grep -iE 'patroni|etcd|consul|zookeeper|haproxy|keepalived|nginx|openresty|pgbouncer|sentinel|proxysql|maxscale|obproxy|clickhouse-keeper|node_exporter' || true\n")
-	sb.WriteString("ps -ef 2>/dev/null | grep -iE 'patroni|etcd|consul|QuorumPeerMain|haproxy|keepalived|pgbouncer|redis-sentinel|proxysql|clickhouse-keeper' | grep -v grep | head -n 20 || true\n")
+	sb.WriteString("systemctl list-units --type=service --all --no-pager 2>/dev/null | grep -iE 'patroni|etcd|consul|zookeeper|haproxy|keepalived|nginx|openresty|pgbouncer|sentinel|proxysql|maxscale|obproxy|clickhouse-keeper|[a-z0-9_-]*exporter' || true\n")
+	sb.WriteString("ps -ef 2>/dev/null | grep -iE 'patroni|etcd|consul|QuorumPeerMain|haproxy|keepalived|pgbouncer|redis-sentinel|proxysql|clickhouse-keeper|[a-z0-9_-]*exporter' | grep -v grep | head -n 25 || true\n")
+	sb.WriteString("for exp in node_exporter process_exporter postgres_exporter mysqld_exporter redis_exporter haproxy_exporter nginx_exporter kafka_exporter blackbox_exporter; do command -v \"$exp\" >/dev/null 2>&1 && \"$exp\" --version 2>&1 | head -n 2; done || true\n")
 
 	// Custom service units or config paths hints provided by user
 	for _, u := range req.ServiceUnits {
@@ -342,8 +343,10 @@ func buildImportProbeScript(req importProbeScriptReq, lang string) (string, stri
 }
 
 var (
-	reSafeShellToken = regexp.MustCompile(`^[a-zA-Z0-9._:@-]+$`)
-	reSafePathToken  = regexp.MustCompile(`^/[a-zA-Z0-9._/@*+-]+$`)
+	reSafeShellToken        = regexp.MustCompile(`^[a-zA-Z0-9._:@-]+$`)
+	reSafePathToken         = regexp.MustCompile(`^/[a-zA-Z0-9._/@*+-]+$`)
+	reExporterToken         = regexp.MustCompile(`(?i)\b([a-z][a-z0-9_-]*[_-]exporter)\b`)
+	reExporterVersionBanner = regexp.MustCompile(`(?i)\b([a-z][a-z0-9_-]*[_-]exporter)\b[,\s]+(?:version\s+|v)(\d+\.\d+(?:\.\d+)*)`)
 )
 
 func (s *storeServer) importProbeScriptHandler(w http.ResponseWriter, r *http.Request, session storeSession) {
@@ -462,9 +465,9 @@ func (s *storeServer) aiExtractImportDraft(ctx context.Context, p aiProvider, us
 1. 只输出一个合法 JSON 对象，不要包含 Markdown 代码块围栏或额外解释文字。
 2. 所有信息必须严格来自输入文本或截图，严禁凭空编造 IP、主机名或版本号；未在输入中出现的可留空。
 3. 严禁在 params 或 notes 中输出任何密码、私钥或密钥明文（如有请脱敏为 <redacted>）。
-4. 【核心要求：识别多组件 / 伴生高可用架构】如果现场存在伴生/支撑组件（如 Patroni、etcd、HAProxy、Keepalived、Nginx、PgBouncer、pgBackRest、Redis Sentinel、ZooKeeper、Consul、ClickHouse Keeper、ProxySQL、MaxScale、OBProxy、node_exporter 等），必须全部结构化填入 companions 数组，不得只写入 notes！
+4. 【核心要求：识别多组件 / 伴生高可用架构】如果现场存在伴生/支撑组件（如 Patroni、etcd、HAProxy、Keepalived、Nginx、PgBouncer、pgBackRest、Redis Sentinel、ZooKeeper、Consul、ClickHouse Keeper、ProxySQL、MaxScale、OBProxy、node_exporter、postgres_exporter 等各类 exporter），必须全部结构化填入 companions 数组，不得只写入 notes！
    - 例如 PostgreSQL + Patroni + etcd + pgBackRest：主 component="postgresql"，companions 必须分别列出 patroni(kind="ha_manager", ports:[8008], placement:{primary:[...],replica:[...]})、etcd(kind="dcs", role="member", hosts:[...], ports:[2379,2380])、pgbackrest(kind="backup", version:"...")。
-   - companion 的 kind 仅取：ha_manager | dcs | proxy | vip | pooler | backup | monitoring | companion。
+   - companion 的 kind 仅取：ha_manager | dcs | proxy | vip | pooler | backup | monitoring | os_component | companion；其中宿主机/操作系统层采集器或代理（如 node_exporter、process_exporter、cadvisor）必须使用 kind="os_component"，中间件专属采集器（如 postgres_exporter、mysqld_exporter、redis_exporter 等）使用 kind="monitoring"。
 5. hosts[].disk 从存储输出（df -hT / lsblk）中提取数据盘设备（如 /dev/vdb），不要填系统根盘 /dev/vda。
 6. params 仅保留有运维价值的中间件配置参数（如 port、max_connections、shared_buffers、replication、synchronous_mode、cluster_name 等），不要把宿主机硬件信息（arch、cpu_cores、kernel、mem）塞进 params。
 7. platform 如能识别，优先映射到以下标准 ID 之一：ubuntu-24.04-amd64, ubuntu-22.04-amd64, el9-amd64, el8-amd64, debian-12-amd64, kylin-v10-amd64, openeuler-22.03-amd64；无法映射可留空并在 os_detail 填写原始发行版名称。
@@ -935,6 +938,7 @@ func parseImportedDeterministic(text, component, displayName string, preset mwpa
 
 		// Extract companion version banners
 		low := strings.ToLower(ln)
+		isExporterBanner := false
 		if strings.HasPrefix(low, "etcd version:") {
 			if m := reVersionSemver.FindStringSubmatch(ln); len(m) == 2 {
 				compVersions["etcd"] = m[1]
@@ -954,6 +958,13 @@ func parseImportedDeterministic(text, component, displayName string, preset mwpa
 			if m := reVersionSemver.FindStringSubmatch(ln); len(m) == 2 {
 				compVersions["pgbouncer"] = m[1]
 				addCompEv("pgbouncer", "pgbouncer --version")
+			}
+		} else if m := reExporterVersionBanner.FindStringSubmatch(ln); len(m) == 3 {
+			cid := mwpack.NormalizeCompanionID(m[1])
+			if cid != "" {
+				compVersions[cid] = m[2]
+				addCompEv(cid, m[1]+" --version")
+				isExporterBanner = true
 			}
 		}
 
@@ -975,7 +986,7 @@ func parseImportedDeterministic(text, component, displayName string, preset mwpa
 		}
 		// Extract version from typical middleware --version banners (skip companion-only banners if primary != companion)
 		if draft.ExactVersion == "" {
-			isCompanionBanner := strings.HasPrefix(low, "etcd version:") || strings.HasPrefix(low, "patronictl version") || strings.HasPrefix(low, "pgbackrest ")
+			isCompanionBanner := isExporterBanner || strings.HasPrefix(low, "etcd version:") || strings.HasPrefix(low, "patronictl version") || strings.HasPrefix(low, "pgbackrest ")
 			if !isCompanionBanner || strings.EqualFold(draft.Component, "etcd") || strings.EqualFold(draft.Component, "patroni") {
 				if strings.Contains(low, "version") || strings.Contains(low, "ver ") || strings.Contains(low, "(postgresql)") || strings.Contains(low, "redis server v=") || strings.Contains(low, "nginx/") || strings.Contains(low, "haproxy") || strings.Contains(low, "mysqld") || strings.Contains(low, "mongod") || strings.Contains(low, "clickhouse") {
 					if m := reVersionSemver.FindStringSubmatch(ln); len(m) == 2 {
@@ -1176,6 +1187,12 @@ func inferCompanionsFromSignals(sig companionSignals) []mwpack.ImportedCompanion
 				}
 			}
 		}
+		for _, em := range reExporterToken.FindAllString(low, -1) {
+			if a := touch(em); a != nil {
+				addStrUniq(&a.units, u)
+				addStrUniq(&a.ev, u)
+			}
+		}
 	}
 
 	// Config paths
@@ -1191,6 +1208,12 @@ func inferCompanionsFromSignals(sig companionSignals) []mwpack.ImportedCompanion
 		}
 		if strings.Contains(low, "pgbackrest") {
 			if a := touch("pgbackrest"); a != nil {
+				addStrUniq(&a.cfgs, cf)
+				addStrUniq(&a.ev, filepath.Base(cf))
+			}
+		}
+		for _, em := range reExporterToken.FindAllString(low, -1) {
+			if a := touch(em); a != nil {
 				addStrUniq(&a.cfgs, cf)
 				addStrUniq(&a.ev, filepath.Base(cf))
 			}
@@ -1255,6 +1278,20 @@ func inferCompanionsFromSignals(sig companionSignals) []mwpack.ImportedCompanion
 				}
 			}
 		}
+		for _, em := range reExporterToken.FindAllString(low, -1) {
+			// Strip leading "prometheus-" package prefix (e.g. "prometheus-node-exporter" -> "node-exporter")
+			cid := strings.TrimPrefix(mwpack.NormalizeCompanionID(em), "prometheus-")
+			if a := touch(cid); a != nil {
+				if a.ver == "" && pk.Version != "" {
+					if mv := reVersionSemver.FindStringSubmatch(pk.Version); len(mv) == 2 {
+						a.ver = mv[1]
+					} else {
+						a.ver = pk.Version
+					}
+				}
+				addStrUniq(&a.ev, "pkg:"+pk.Name)
+			}
+		}
 	}
 
 	// Listening ports
@@ -1268,15 +1305,35 @@ func inferCompanionsFromSignals(sig companionSignals) []mwpack.ImportedCompanion
 		9181:  "clickhouse-keeper",
 		6033:  "proxysql",
 		9100:  "node-exporter",
+		9187:  "postgres-exporter",
+		9104:  "mysqld-exporter",
+		9121:  "redis-exporter",
+		9101:  "haproxy-exporter",
+		9113:  "nginx-exporter",
+		9256:  "process-exporter",
+		9308:  "kafka-exporter",
+		9115:  "blackbox-exporter",
 	}
 	for pn, rawLine := range sig.ListeningPorts {
+		low := strings.ToLower(rawLine)
+		matchedExporter := false
+		for _, em := range reExporterToken.FindAllString(low, -1) {
+			cid := strings.TrimPrefix(mwpack.NormalizeCompanionID(em), "prometheus-")
+			if a := touch(cid); a != nil {
+				addIntUniq(&a.ports, pn)
+				addStrUniq(&a.ev, fmt.Sprintf(":%d", pn))
+				matchedExporter = true
+			}
+		}
+		if matchedExporter {
+			continue
+		}
 		if cid, ok := portMap[pn]; ok {
-			low := strings.ToLower(rawLine)
-			// Only infer from ambiguous ports like 8008 or 9100 if process name or already-hit companion corroborates
+			// Only infer from ambiguous ports like 8008 or exporter ports if process name or already-hit companion corroborates
 			if pn == 8008 && !strings.Contains(low, "patroni") && hits["patroni"] == nil && primary != "postgresql" {
 				continue
 			}
-			if pn == 9100 && !strings.Contains(low, "node_exporter") && !strings.Contains(low, "exporter") {
+			if mwpack.IsExporterCompanion(cid) && !strings.Contains(low, "exporter") {
 				continue
 			}
 			if a := touch(cid); a != nil {
@@ -1321,15 +1378,33 @@ func inferCompanionsFromSignals(sig companionSignals) []mwpack.ImportedCompanion
 			{"node-exporter", "node_exporter", true},
 		}
 		for _, m := range textMatchers {
-			matched := strings.Contains(archLow, m.token) || (m.allowInNotes && strings.Contains(notesPositive, m.token))
-			if matched {
+			inArch := strings.Contains(archLow, m.token)
+			inNotes := m.allowInNotes && strings.Contains(notesPositive, m.token)
+			if inArch || inNotes {
 				// Avoid false positive on generic "sentinel" unless primary is redis/valkey
 				if m.cid == "redis-sentinel" && primary != "redis" && primary != "valkey" {
 					continue
 				}
 				if a := touch(m.cid); a != nil {
-					addStrUniq(&a.ev, "架构摘要")
+					if inArch {
+						addStrUniq(&a.ev, "架构摘要")
+					} else {
+						addStrUniq(&a.ev, "基线备注")
+					}
 				}
+			}
+		}
+		// Generically recognize any *_exporter / *-exporter mentioned in ArchSummary or positive Notes
+		for _, em := range reExporterToken.FindAllString(archLow, -1) {
+			cid := strings.TrimPrefix(mwpack.NormalizeCompanionID(em), "prometheus-")
+			if a := touch(cid); a != nil {
+				addStrUniq(&a.ev, "架构摘要")
+			}
+		}
+		for _, em := range reExporterToken.FindAllString(notesPositive, -1) {
+			cid := strings.TrimPrefix(mwpack.NormalizeCompanionID(em), "prometheus-")
+			if a := touch(cid); a != nil {
+				addStrUniq(&a.ev, "基线备注")
 			}
 		}
 	}
@@ -1385,6 +1460,16 @@ func inferCompanionsFromSignals(sig companionSignals) []mwpack.ImportedCompanion
 					cm.Ports = append(cm.Ports, dp.Port)
 				}
 			}
+		} else if mwpack.IsExporterCompanion(cid) {
+			cm.DisplayName = mwpack.ExporterDisplayName(cid)
+			cm.Role = "exporter"
+			if mwpack.IsOSCompanion(cid) {
+				cm.Kind = "os_component"
+			} else {
+				cm.Kind = "monitoring"
+			}
+		} else if mwpack.IsOSCompanion(cid) {
+			cm.Kind = "os_component"
 		}
 		if cid == "patroni" {
 			if len(sig.PatroniPlacement) > 0 {
@@ -1410,7 +1495,7 @@ func synthesizeImportArchSummary(compID, displayName string, hosts []importHostI
 	}
 	var compNames []string
 	for _, cm := range companions {
-		if cm.Kind == "monitoring" || cm.Kind == "backup" {
+		if cm.Kind == "monitoring" || cm.Kind == "os_component" || cm.Kind == "backup" {
 			continue
 		}
 		compNames = append(compNames, firstNonEmptyStr(cm.DisplayName, cm.Component))
@@ -1490,13 +1575,19 @@ func mergeCompanionLists(primaryComp string, lists ...[]mwpack.ImportedCompanion
 			if cm.DisplayName == "" {
 				if hasDef {
 					cm.DisplayName = def.Name
+				} else if mwpack.IsExporterCompanion(cid) {
+					cm.DisplayName = mwpack.ExporterDisplayName(cid)
 				} else {
 					cm.DisplayName = cid
 				}
 			}
-			if cm.Kind == "" {
+			if mwpack.IsOSCompanion(cid) && (cm.Kind == "" || cm.Kind == "monitoring" || cm.Kind == "companion") {
+				cm.Kind = "os_component"
+			} else if cm.Kind == "" {
 				if hasDef {
 					cm.Kind = def.Kind
+				} else if mwpack.IsExporterCompanion(cid) {
+					cm.Kind = "monitoring"
 				} else {
 					cm.Kind = "companion"
 				}
@@ -1890,7 +1981,7 @@ func buildImportedDeployment(cat *mwpack.Catalog, req importClusterReq, user, no
 	for _, cm := range normCompanions {
 		def, hasDef := mwpack.LookupCompanionDef(cm.Component)
 		isTopo := true
-		if cm.Kind == "backup" || cm.Kind == "monitoring" {
+		if cm.Kind == "backup" || cm.Kind == "monitoring" || cm.Kind == "os_component" || mwpack.IsExporterCompanion(cm.Component) || mwpack.IsOSCompanion(cm.Component) {
 			isTopo = false
 		} else if hasDef && !def.Topology {
 			isTopo = false
@@ -2191,6 +2282,11 @@ func (s *storeServer) handleClusterBaseline(w http.ResponseWriter, r *http.Reque
 			normEps = append(normEps, ep)
 		}
 		companions := append([]mwpack.ImportedCompanion(nil), meta.Companions...)
+		for i := range companions {
+			if mwpack.IsOSCompanion(companions[i].Component) && (companions[i].Kind == "" || companions[i].Kind == "monitoring" || companions[i].Kind == "companion") {
+				companions[i].Kind = "os_component"
+			}
+		}
 		if len(companions) == 0 && len(dep.Instances) > 1 {
 			for _, sp := range dep.Instances[1:] {
 				def, hasDef := mwpack.LookupCompanionDef(sp.Component)

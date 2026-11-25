@@ -5,6 +5,7 @@ import type {
   FlowView,
   ImportedMeta,
   InstanceView,
+  PackageRequest,
 } from '../../shared/shared';
 import { bi } from '../../app/i18n';
 
@@ -110,6 +111,40 @@ export function computeEffectiveClusterChanges(
   return { items, latestByKey };
 }
 
+export function isOSCompanion(component?: string): boolean {
+  const low = (component || '').trim().toLowerCase().replace(/_/g, '-');
+  return [
+    'node-exporter',
+    'process-exporter',
+    'systemd-exporter',
+    'host-exporter',
+    'linux-exporter',
+    'cadvisor',
+    'telegraf',
+    'filebeat',
+    'fluent-bit',
+    'fluentbit',
+    'vector',
+    'alloy',
+  ].includes(low);
+}
+
+export function effectiveCompanionKind(component?: string, kind?: string): string {
+  const k = (kind || '').trim().toLowerCase();
+  if (isOSCompanion(component) && (!k || k === 'monitoring' || k === 'companion')) {
+    return 'os_component';
+  }
+  return k || inferCompanionKind(component);
+}
+
+export function companionIcon(component?: string): string {
+  const low = (component || '').trim().toLowerCase().replace(/_/g, '-');
+  if (low === 'prometheus' || low.endsWith('-exporter')) {
+    return 'prometheus';
+  }
+  return component || '';
+}
+
 export function companionKindMeta(kind?: string): { label: string; tone: string } {
   switch ((kind || '').toLowerCase()) {
     case 'ha_manager':
@@ -126,6 +161,8 @@ export function companionKindMeta(kind?: string): { label: string; tone: string 
       return { label: bi('备份工具', 'Backup'), tone: 't-ok' };
     case 'monitoring':
       return { label: bi('监控采集', 'Monitoring'), tone: '' };
+    case 'os_component':
+      return { label: bi('OS 组件', 'OS Component'), tone: '' };
     default:
       return { label: bi('伴生组件', 'Companion'), tone: '' };
   }
@@ -208,14 +245,30 @@ function inferCompanionKind(component?: string): string {
   if (['pgbackrest', 'barman', 'wal-g', 'xtrabackup'].includes(low)) {
     return 'backup';
   }
-  if (
-    low === 'prometheus' ||
-    low === 'node-exporter' ||
-    low.endsWith('-exporter')
-  ) {
+  if (isOSCompanion(low)) {
+    return 'os_component';
+  }
+  if (low === 'prometheus' || low.endsWith('-exporter')) {
     return 'monitoring';
   }
   return 'other';
+}
+
+/** Extracts a clean upstream version (e.g. "4.1.5" from "1:4.1.5-1.noble") from locked instance packages. */
+export function packageUpstreamVersion(
+  packages: PackageRequest[] | undefined,
+  nameRe: RegExp,
+): string {
+  if (!Array.isArray(packages) || packages.length === 0) return '';
+  const hit = packages.find(
+    (p) => p && typeof p.name === 'string' && nameRe.test(p.name),
+  );
+  if (!hit || typeof hit.version !== 'string') return '';
+  return hit.version
+    .trim()
+    .replace(/^\d+:/, '')
+    .replace(/[-+~].*$/, '')
+    .trim();
 }
 
 export function buildClusterStackPills(
@@ -228,6 +281,7 @@ export function buildClusterStackPills(
     real.find((i) => i.id === c.app_id || i.component === c.app_id) || real[0];
   const primaryComp = (main?.component || c.app_id || '').trim();
   const primaryKey = canon(primaryComp) || 'primary';
+  const allPackages = real.flatMap((i) => i.packages || []);
 
   const out: ClusterStackPill[] = [];
   const byKey = new Map<string, ClusterStackPill>();
@@ -270,6 +324,7 @@ export function buildClusterStackPills(
       component: 'pgbackrest',
       icon: 'pgbackrest',
       title: 'pgBackRest',
+      version: packageUpstreamVersion(allPackages, /pgbackrest/i) || undefined,
       kindLabel: bi('备份工具', 'Backup'),
     };
     out.push(pill);
@@ -287,6 +342,10 @@ export function buildClusterStackPills(
       component: 'redis',
       icon: 'redis',
       title: 'Redis Sentinel',
+      version:
+        packageUpstreamVersion(allPackages, /redis-sentinel/i) ||
+        (main?.version || '').trim() ||
+        undefined,
       kindLabel: bi('高可用管理', 'HA Sentinel'),
     };
     out.push(pill);
@@ -296,22 +355,23 @@ export function buildClusterStackPills(
   for (const cm of imp?.companions || []) {
     const ck = canon(cm.component);
     if (!ck) continue;
+    const effKind = effectiveCompanionKind(cm.component, cm.kind);
     const existing = byKey.get(ck);
     if (existing) {
       if (!existing.version && cm.version) existing.version = cm.version;
       if (cm.display_name) existing.title = cm.display_name;
-      if (cm.kind && !existing.primary) {
-        existing.kindLabel = companionKindMeta(cm.kind).label;
+      if (effKind && !existing.primary) {
+        existing.kindLabel = companionKindMeta(effKind).label;
       }
       continue;
     }
     const pill: ClusterStackPill = {
       key: ck,
       component: cm.component,
-      icon: cm.component,
+      icon: companionIcon(cm.component),
       title: cm.display_name || cm.component,
       version: (cm.version || '').trim() || undefined,
-      kindLabel: companionKindMeta(cm.kind).label,
+      kindLabel: companionKindMeta(effKind).label,
     };
     out.push(pill);
     byKey.set(ck, pill);
@@ -376,7 +436,7 @@ export function displayInstances(instances: InstanceView[]): DisplayInstance[] {
     if (!embedded) return [inst];
     return [inst, {
       id: inst.id + '/embedded-patroni', component: 'patroni', title: 'Patroni',
-      version: '', status: inst.status, auto: true, embedded: true, managed_context: inst.id,
+      version: packageUpstreamVersion(inst.packages, /patroni/i), status: inst.status, auto: true, embedded: true, managed_context: inst.id,
       roles: inst.roles, role_titles: inst.role_titles, hosts: inst.hosts,
       params: {}, visible: {},
     }];

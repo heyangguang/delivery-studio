@@ -829,7 +829,7 @@ type CompanionPortDef struct {
 type CompanionDef struct {
 	ID            string             `json:"id"`
 	Name          string             `json:"name"`
-	Kind          string             `json:"kind"` // ha_manager | dcs | proxy | vip | pooler | backup | monitoring | companion
+	Kind          string             `json:"kind"` // ha_manager | dcs | proxy | vip | pooler | backup | monitoring | os_component | companion
 	Icon          string             `json:"icon"`
 	Color         string             `json:"color"`
 	DefaultRole   string             `json:"default_role"`
@@ -934,10 +934,58 @@ var CompanionCatalog = []CompanionDef{
 		ServiceHints: []string{"obproxy.service"},
 	},
 	{
-		ID: "node-exporter", Name: "node_exporter", Kind: "monitoring", Icon: "prometheus", Color: "coral",
-		DefaultRole: "exporter", RoleTitle: "指标采集", Topology: false,
+		ID: "node-exporter", Name: "node_exporter", Kind: "os_component", Icon: "prometheus", Color: "coral",
+		DefaultRole: "exporter", RoleTitle: "OS 指标采集", Topology: false,
 		DefaultPorts: []CompanionPortDef{{Name: "Metrics", Port: 9100}},
 		ServiceHints: []string{"node_exporter.service"},
+	},
+	{
+		ID: "process-exporter", Name: "process_exporter", Kind: "os_component", Icon: "prometheus", Color: "coral",
+		DefaultRole: "exporter", RoleTitle: "OS 进程采集", Topology: false,
+		DefaultPorts: []CompanionPortDef{{Name: "Metrics", Port: 9256}},
+		ServiceHints: []string{"process_exporter.service"},
+	},
+	{
+		ID: "postgres-exporter", Name: "postgres_exporter", Kind: "monitoring", Icon: "prometheus", Color: "coral",
+		DefaultRole: "exporter", RoleTitle: "PG 指标采集", Topology: false,
+		DefaultPorts: []CompanionPortDef{{Name: "Metrics", Port: 9187}},
+		ServiceHints: []string{"postgres_exporter.service"},
+	},
+	{
+		ID: "mysqld-exporter", Name: "mysqld_exporter", Kind: "monitoring", Icon: "prometheus", Color: "coral",
+		DefaultRole: "exporter", RoleTitle: "MySQL 指标采集", Topology: false,
+		DefaultPorts: []CompanionPortDef{{Name: "Metrics", Port: 9104}},
+		ServiceHints: []string{"mysqld_exporter.service"},
+	},
+	{
+		ID: "redis-exporter", Name: "redis_exporter", Kind: "monitoring", Icon: "prometheus", Color: "coral",
+		DefaultRole: "exporter", RoleTitle: "Redis 指标采集", Topology: false,
+		DefaultPorts: []CompanionPortDef{{Name: "Metrics", Port: 9121}},
+		ServiceHints: []string{"redis_exporter.service"},
+	},
+	{
+		ID: "haproxy-exporter", Name: "haproxy_exporter", Kind: "monitoring", Icon: "prometheus", Color: "coral",
+		DefaultRole: "exporter", RoleTitle: "HAProxy 指标采集", Topology: false,
+		DefaultPorts: []CompanionPortDef{{Name: "Metrics", Port: 9101}},
+		ServiceHints: []string{"haproxy_exporter.service"},
+	},
+	{
+		ID: "nginx-exporter", Name: "nginx_exporter", Kind: "monitoring", Icon: "prometheus", Color: "coral",
+		DefaultRole: "exporter", RoleTitle: "Nginx 指标采集", Topology: false,
+		DefaultPorts: []CompanionPortDef{{Name: "Metrics", Port: 9113}},
+		ServiceHints: []string{"nginx_exporter.service"},
+	},
+	{
+		ID: "kafka-exporter", Name: "kafka_exporter", Kind: "monitoring", Icon: "prometheus", Color: "coral",
+		DefaultRole: "exporter", RoleTitle: "Kafka 指标采集", Topology: false,
+		DefaultPorts: []CompanionPortDef{{Name: "Metrics", Port: 9308}},
+		ServiceHints: []string{"kafka_exporter.service"},
+	},
+	{
+		ID: "blackbox-exporter", Name: "blackbox_exporter", Kind: "monitoring", Icon: "prometheus", Color: "coral",
+		DefaultRole: "exporter", RoleTitle: "拨测采集", Topology: false,
+		DefaultPorts: []CompanionPortDef{{Name: "Metrics", Port: 9115}},
+		ServiceHints: []string{"blackbox_exporter.service"},
 	},
 }
 
@@ -947,24 +995,54 @@ func NormalizeCompanionID(raw string) string {
 	k = strings.ReplaceAll(k, "_", "-")
 	k = strings.ReplaceAll(k, " ", "-")
 	aliases := map[string]string{
-		"zk":                "zookeeper",
-		"sentinel":          "redis-sentinel",
-		"redis-sentinel":    "redis-sentinel",
-		"ch-keeper":         "clickhouse-keeper",
-		"clickhouse-keeper": "clickhouse-keeper",
-		"pg-backrest":       "pgbackrest",
-		"pgbackrest":        "pgbackrest",
-		"pg-bouncer":        "pgbouncer",
-		"pgbouncer":         "pgbouncer",
-		"node-exporter":     "node-exporter",
-		"openresty":         "nginx",
-		"nginx-stream":      "nginx",
-		"odp":               "obproxy",
+		"zk":                        "zookeeper",
+		"sentinel":                  "redis-sentinel",
+		"redis-sentinel":            "redis-sentinel",
+		"ch-keeper":                 "clickhouse-keeper",
+		"clickhouse-keeper":         "clickhouse-keeper",
+		"pg-backrest":               "pgbackrest",
+		"pgbackrest":                "pgbackrest",
+		"pg-bouncer":                "pgbouncer",
+		"pgbouncer":                 "pgbouncer",
+		"node-exporter":             "node-exporter",
+		"pg-exporter":               "postgres-exporter",
+		"postgresql-exporter":       "postgres-exporter",
+		"mysql-exporter":            "mysqld-exporter",
+		"nginx-prometheus-exporter": "nginx-exporter",
+		"openresty":                 "nginx",
+		"nginx-stream":              "nginx",
+		"odp":                       "obproxy",
 	}
 	if mapped, ok := aliases[k]; ok {
 		return mapped
 	}
 	return NormalizeImportComponentID(k)
+}
+
+// IsOSCompanion reports whether a companion ID represents an OS/host-level agent or exporter
+// (such as node_exporter or process_exporter) rather than a middleware-specific component.
+func IsOSCompanion(id string) bool {
+	switch NormalizeCompanionID(id) {
+	case "node-exporter", "process-exporter", "systemd-exporter", "host-exporter", "linux-exporter",
+		"cadvisor", "telegraf", "filebeat", "fluent-bit", "fluentbit", "vector", "alloy":
+		return true
+	}
+	return false
+}
+
+// IsExporterCompanion reports whether a companion ID represents a Prometheus-style exporter (*-exporter).
+func IsExporterCompanion(id string) bool {
+	norm := NormalizeCompanionID(id)
+	return strings.HasSuffix(norm, "-exporter") && len(norm) > len("-exporter")
+}
+
+// ExporterDisplayName returns the canonical Prometheus-style display name (using underscores) for an exporter ID.
+func ExporterDisplayName(id string) string {
+	norm := NormalizeCompanionID(id)
+	if def, ok := LookupCompanionDef(norm); ok && def.Name != "" {
+		return def.Name
+	}
+	return strings.ReplaceAll(norm, "-", "_")
 }
 
 // LookupCompanionDef returns canonical companion metadata by ID or alias.

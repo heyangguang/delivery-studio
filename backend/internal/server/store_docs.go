@@ -774,12 +774,17 @@ func (s *storeServer) buildImportedBaselineDoc(f clusterFacts, first storeJob) *
 			"proxy":      tr(lang, "代理与负载均衡", "Proxy / LB"),
 			"vip":        tr(lang, "虚拟 IP (VRRP)", "VIP / VRRP"),
 			"pooler":     tr(lang, "连接池", "Connection Pooler"),
-			"backup":     tr(lang, "备份工具", "Backup"),
-			"monitoring": tr(lang, "监控采集", "Monitoring"),
-			"companion":  tr(lang, "伴生组件", "Companion"),
+			"backup":       tr(lang, "备份工具", "Backup"),
+			"monitoring":   tr(lang, "监控采集", "Monitoring"),
+			"os_component": tr(lang, "OS 组件", "OS Component"),
+			"companion":    tr(lang, "伴生组件", "Companion"),
 		}
 		var compRows [][]string
 		for _, cm := range meta.Companions {
+			effKind := cm.Kind
+			if mwpack.IsOSCompanion(cm.Component) && (effKind == "" || effKind == "monitoring" || effKind == "companion") {
+				effKind = "os_component"
+			}
 			var portStrs []string
 			for _, pn := range cm.Ports {
 				if pn > 0 {
@@ -796,7 +801,7 @@ func (s *storeServer) buildImportedBaselineDoc(f clusterFacts, first storeJob) *
 			}
 			compRows = append(compRows, []string{
 				firstNonEmptyStr(cm.DisplayName, cm.Component),
-				firstNonEmptyStr(kindLabel[cm.Kind], cm.Kind, tr(lang, "伴生组件", "Companion")),
+				firstNonEmptyStr(kindLabel[effKind], effKind, tr(lang, "伴生组件", "Companion")),
 				firstNonEmptyStr(cm.Version, "—"),
 				firstNonEmptyStr(strings.Join(portStrs, ", "), "—"),
 				firstNonEmptyStr(hostSummary, "—"),

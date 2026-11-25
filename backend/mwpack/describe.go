@@ -163,6 +163,7 @@ type InstanceView struct {
 	Fronts         map[string]FrontFacts `json:"fronts,omitempty"`
 	Uses           map[string]*Use       `json:"uses,omitempty"`
 	Ports          []PortUse             `json:"ports,omitempty"`
+	Packages       []PackageRequest      `json:"packages,omitempty"`
 }
 
 // FlowView is a declared data flow resolved against this instance: the machines it starts on and ends on.
@@ -247,6 +248,12 @@ func (p *Plan) View() PlanView {
 		iv := InstanceView{ID: i.ID, Component: i.Component, Title: i.Title, Version: i.Version, Status: status, Manifest: manifestSum,
 			Auto: i.Auto, AutoReason: i.AutoReason, External: i.External, Roles: i.Roles, Hosts: i.Hosts, Params: i.Params, Visible: i.Visible,
 			Endpoints: i.Endpoints, Fronts: i.Fronts, Uses: i.Uses, Ports: i.Ports}
+		if len(i.Packages) > 0 {
+			iv.Packages = make([]PackageRequest, 0, len(i.Packages))
+			for _, pk := range i.Packages {
+				iv.Packages = append(iv.Packages, PackageRequest{Name: pk.Name, Version: pk.Version})
+			}
+		}
 		if u := i.Uses[compCtx]; compCtx != "" && u != nil {
 			iv.ManagedContext = u.Instance
 		}

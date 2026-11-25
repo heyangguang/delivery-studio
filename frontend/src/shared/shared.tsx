@@ -377,6 +377,7 @@ export type InstanceView = {
     string,
     { capability: string; instance: string; component: string }
   >;
+  packages?: PackageRequest[];
 };
 /** A declared data flow between roles of one instance, resolved to machine names. */
 export type FlowView = {

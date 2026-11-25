@@ -1917,6 +1917,103 @@ body[arco-theme="dark"] .ad-thumbs button {
 .ad-card-done.s-accepted {
   color: var(--ok);
 }
+.ad-card-file-stats {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.ad-card-stat-add {
+  padding: 0 5px;
+  line-height: 18px;
+  border-radius: 4px;
+  color: var(--ok);
+  background: var(--ok-soft);
+  white-space: nowrap;
+}
+.ad-card-stat-del {
+  padding: 0 5px;
+  line-height: 18px;
+  border-radius: 4px;
+  color: var(--bad);
+  background: var(--bad-soft);
+  white-space: nowrap;
+}
+.ad-diff {
+  margin: 8px 0 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.ad-diff-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  font-size: 11.5px;
+  color: var(--mute);
+}
+.ad-diff-body {
+  max-height: 280px;
+  overflow: auto;
+  padding: 5px 0;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+.ad-diff-line {
+  display: flex;
+  align-items: baseline;
+  min-width: max-content;
+  padding: 0 10px 0 8px;
+  border-left: 3px solid transparent;
+  white-space: pre;
+  color: var(--ink-2);
+}
+.ad-diff-line.add {
+  background: color-mix(in srgb, var(--ok) 13%, transparent);
+  border-left-color: var(--ok);
+  color: color-mix(in srgb, var(--ok) 82%, var(--ink));
+}
+.ad-diff-line.del {
+  background: color-mix(in srgb, var(--bad) 13%, transparent);
+  border-left-color: var(--bad);
+  color: color-mix(in srgb, var(--bad) 82%, var(--ink));
+}
+.ad-diff-line.hunk {
+  background: color-mix(in srgb, var(--brand) 10%, var(--surface));
+  color: var(--brand-ink);
+  font-weight: 600;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+.ad-diff-sign {
+  width: 14px;
+  flex: none;
+  font-weight: 700;
+  user-select: none;
+}
+.ad-diff-line.add .ad-diff-sign {
+  color: var(--ok);
+}
+.ad-diff-line.del .ad-diff-sign {
+  color: var(--bad);
+}
+.ad-card-done-acts {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
 .ad-card-ok {
   display: flex;
   align-items: center;

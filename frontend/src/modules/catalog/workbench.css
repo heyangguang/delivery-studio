@@ -11,6 +11,15 @@
 .wb.wb-fill > :not(.wb-body) {
   flex-shrink: 0;
 }
+/* Inside .wb.wb-fill (overflow: hidden scroll container already starting at y=52px below .topbar),
+   sticky top:52px / top:117px offsets .wb-head/.wb-stage downward and leaves a 52px blank strip. */
+@media (min-width: 901px) {
+  .wb.wb-fill > .wb-head,
+  .wb.wb-fill > .wb-stage {
+    position: relative;
+    top: 0;
+  }
+}
 .wb-load {
   padding: 32px;
   max-width: 860px;

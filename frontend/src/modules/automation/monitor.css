@@ -1257,6 +1257,25 @@ body.is-resizing-pane .mon-pipeline {
   gap: 8px;
   flex-wrap: wrap;
 }
+.mon-patched-link {
+  all: unset;
+  cursor: pointer;
+  color: var(--brand-ink);
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+  border-radius: 4px;
+  padding: 0 3px;
+  transition: background 0.16s var(--spring), color 0.16s var(--spring);
+}
+.mon-patched-link:hover {
+  background: var(--brand-soft);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.mon-patched-link:focus-visible {
+  box-shadow: var(--ring);
+}
 
 /* ---------- Refined Obsidian-Slate Terminal Surface ---------- */
 .mon-term-wrap {

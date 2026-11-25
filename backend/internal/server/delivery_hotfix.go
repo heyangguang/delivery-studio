@@ -35,6 +35,73 @@ type deliveryFileItem struct {
 	PatchBy   string `json:"patch_by,omitempty"`
 	PatchAt   string `json:"patch_at,omitempty"`
 	PatchNote string `json:"patch_note,omitempty"`
+	Added     int    `json:"added,omitempty"`
+	Deleted   int    `json:"deleted,omitempty"`
+}
+
+func splitDiffLines(s string) []string {
+	if s == "" {
+		return nil
+	}
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.TrimSuffix(s, "\n")
+	return strings.Split(s, "\n")
+}
+
+// lineDiffCounts returns exact added/deleted line counts between two texts using prefix/suffix
+// trimming and O(min(n,m))-space LCS DP (gracefully falling back on very large files).
+func lineDiffCounts(before, after string) (added, deleted int) {
+	if before == after {
+		return 0, 0
+	}
+	a := splitDiffLines(before)
+	b := splitDiffLines(after)
+	start := 0
+	for start < len(a) && start < len(b) && a[start] == b[start] {
+		start++
+	}
+	ea := len(a) - 1
+	eb := len(b) - 1
+	for ea >= start && eb >= start && a[ea] == b[eb] {
+		ea--
+		eb--
+	}
+	la := ea - start + 1
+	lb := eb - start + 1
+	if la <= 0 && lb <= 0 {
+		return 0, 0
+	}
+	if la <= 0 {
+		return lb, 0
+	}
+	if lb <= 0 {
+		return 0, la
+	}
+	if la*lb > 4_000_000 {
+		return lb, la
+	}
+	subA := a[start : ea+1]
+	subB := b[start : eb+1]
+	if len(subB) > len(subA) {
+		subA, subB = subB, subA
+	}
+	prev := make([]int, len(subB)+1)
+	curr := make([]int, len(subB)+1)
+	for i := 1; i <= len(subA); i++ {
+		for j := 1; j <= len(subB); j++ {
+			if subA[i-1] == subB[j-1] {
+				curr[j] = prev[j-1] + 1
+			} else if prev[j] >= curr[j-1] {
+				curr[j] = prev[j]
+			} else {
+				curr[j] = curr[j-1]
+			}
+		}
+		prev, curr = curr, prev
+		clear(curr)
+	}
+	lcs := prev[len(subB)]
+	return lb - lcs, la - lcs
 }
 
 var reRoleRef = regexp.MustCompile(`(?m)^\s*-\s*(?:role:\s*)?([a-zA-Z0-9_-]+)\s*$`)
@@ -301,6 +368,10 @@ func (s *storeServer) handleDeliveryFiles(w http.ResponseWriter, r *http.Request
 		for _, p := range patches {
 			latestPatch[p.Path] = p
 		}
+		var rawFiles map[string][]byte
+		if len(latestPatch) > 0 {
+			rawFiles, _ = s.rawTarProjectFiles(j.ID)
+		}
 		items := make([]deliveryFileItem, 0, len(files))
 		for fp, data := range files {
 			if patchablePath(fp) != nil {
@@ -317,15 +388,17 @@ func (s *storeServer) handleDeliveryFiles(w http.ResponseWriter, r *http.Request
 				it.PatchBy = lp.By
 				it.PatchAt = lp.At
 				it.PatchNote = lp.Reason
+				orig := string(rawFiles[fp])
+				it.Added, it.Deleted = lineDiffCounts(orig, string(data))
 			}
 			items = append(items, it)
 		}
 		sort.Slice(items, func(i, j int) bool {
-			if items[i].Related != items[j].Related {
-				return items[i].Related
-			}
 			if items[i].Patched != items[j].Patched {
 				return items[i].Patched
+			}
+			if items[i].Related != items[j].Related {
+				return items[i].Related
 			}
 			return items[i].Path < items[j].Path
 		})
@@ -357,10 +430,7 @@ func (s *storeServer) handleDeliveryFiles(w http.ResponseWriter, r *http.Request
 			return
 		}
 		rawFiles, _ := s.rawTarProjectFiles(j.ID)
-		orig := string(rawFiles[rel])
-		if orig == "" && len(cur) > 0 {
-			orig = string(cur)
-		}
+		rawBytes, existedInTar := rawFiles[rel]
 		var latest *deliveryPatch
 		for _, p := range s.loadPatches(j.ID) {
 			if p.Path == rel {
@@ -368,9 +438,15 @@ func (s *storeServer) handleDeliveryFiles(w http.ResponseWriter, r *http.Request
 				latest = &cp
 			}
 		}
+		orig := string(rawBytes)
+		if !existedInTar && latest == nil && len(cur) > 0 {
+			orig = string(cur)
+		}
 		diffText := ""
+		addedLines, deletedLines := 0, 0
 		if orig != string(cur) {
 			diffText = lineDiff(orig, string(cur), 200)
+			addedLines, deletedLines = lineDiffCounts(orig, string(cur))
 		}
 		s.writeJSON(w, 200, map[string]any{
 			"path":     rel,
@@ -379,6 +455,8 @@ func (s *storeServer) handleDeliveryFiles(w http.ResponseWriter, r *http.Request
 			"patched":  latest != nil,
 			"patch":    latest,
 			"diff":     diffText,
+			"added":    addedLines,
+			"deleted":  deletedLines,
 		})
 
 	case len(parts) == 1 && parts[0] == "content" && r.Method == "PUT":

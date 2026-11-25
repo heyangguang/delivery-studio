@@ -64,7 +64,6 @@ import {
   Bubble,
   ChatErrorCard,
   LiveBubble,
-  Spark,
   UnansweredTurnCard,
   newLive,
   readFile,
@@ -2399,11 +2398,21 @@ export function AIPage({
     <div className={`ap ${side ? "side-open" : ""}`}>
       <aside className="ap-side" aria-label={bi("对话", "Conversations")}>
         <div className="ap-side-top">
-          <div className="ap-brand">
-            <span className="ap-brand-spark" aria-hidden>
-              <Spark size={15} />
-            </span>
-            <b>{bi("AI 助手", "AI Assistant")}</b>
+          <div className="ap-search-row">
+            <Input
+              allowClear
+              prefix={<IconSearch />}
+              placeholder={bi("搜索对话、集群或组件…", "Search chats, clusters, components…")}
+              value={q}
+              onChange={setQ}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  setQ("");
+                  (e.target as HTMLElement).blur();
+                }
+              }}
+              aria-label={bi("搜索对话", "Search chats")}
+            />
             <Tooltip content={bi("新对话", "New chat")} mini>
               <button
                 type="button"
@@ -2415,20 +2424,6 @@ export function AIPage({
               </button>
             </Tooltip>
           </div>
-          <Input
-            allowClear
-            prefix={<IconSearch />}
-            placeholder={bi("搜索对话、集群或组件…", "Search chats, clusters, components…")}
-            value={q}
-            onChange={setQ}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") {
-                setQ("");
-                (e.target as HTMLElement).blur();
-              }
-            }}
-            aria-label={bi("搜索对话", "Search chats")}
-          />
           <div
             className="ap-tabs"
             role="tablist"

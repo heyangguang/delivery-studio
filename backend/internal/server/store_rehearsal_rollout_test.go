@@ -577,3 +577,150 @@ func TestEnsurePasteSafeShellCommand(t *testing.T) {
 		}
 	}
 }
+
+func TestRolloutCoreArchEquivalenceImportedVsDeployedAndVersionParsing(t *testing.T) {
+	// 1. Verify majorVersionOf handles vendor/distro prefixes cleanly.
+	for in, want := range map[string]string{
+		"17":                                      "17",
+		"17.11":                                   "17",
+		"v17.11.1":                                "17",
+		"PostgreSQL 17.11":                        "17",
+		"Percona Server for PostgreSQL 17.11.1":   "17",
+		"7.2.5":                                   "7",
+		"16.4":                                    "16",
+		"":                                        "",
+	} {
+		if got := majorVersionOf(in); got != want {
+			t.Fatalf("majorVersionOf(%q) = %q, want %q", in, got, want)
+		}
+	}
+
+	s, _ := testStore(t)
+	srv, _ := fakeModel(t)
+	enableAI(t, s, srv.URL, 1)
+	admin, csrf := storeLogin(t, s, "admin")
+
+	// 2. Create a platform-deployed 3-node PostgreSQL 17 + Patroni + etcd cluster as pilot.
+	depBody := `{"id":"pg-deployed-pilot","hosts":[{"name":"p1","ip":"10.50.1.11","disk":"/dev/vdb"},{"name":"p2","ip":"10.50.1.12","disk":"/dev/vdb"},{"name":"p3","ip":"10.50.1.13","disk":"/dev/vdb"}],"instances":[{"id":"pg","component":"postgresql","version":"17","placement":{"primary":["p1"],"replica":["p2","p3"]},"params":{"client_cidr":"10.0.0.0/8","tls":false}},{"id":"etcd","component":"etcd","placement":{"member":["p1","p2","p3"]}}]}`
+	cw := storeCreate(t, s, admin, csrf, depBody, nil)
+	s.wg.Wait()
+	if cw.Code != 202 {
+		t.Fatalf("create deployed pilot: %d %s", cw.Code, cw.Body.String())
+	}
+	var pilotJob storeJob
+	_ = json.Unmarshal(cw.Body.Bytes(), &pilotJob)
+	s.mu.Lock()
+	j := s.jobs[pilotJob.ID]
+	j.State = "succeeded"
+	j.Outcome = outcomeDone
+	j.Marked = time.Now().UTC().Format(time.RFC3339)
+	s.jobs[pilotJob.ID] = j
+	s.mu.Unlock()
+
+	// 3. Import 3 clusters:
+	//    - pg-imp-same: 3-node PG 17 + Patroni + etcd + pgBackRest + node-exporter (same core arch, Percona exact_version)
+	//    - pg-imp-v16:  3-node PG 16 + Patroni + etcd (major version mismatch)
+	//    - pg-imp-single: 1-node PG 17 standalone (architecture mismatch)
+	imports := []string{
+		`{"id":"pg-imp-same","component":"postgresql","version":"Percona Server for PostgreSQL 17.11.1","exact_version":"Percona Server for PostgreSQL 17.11.1","arch_summary":"3 节点 PostgreSQL 一主两从，由 Patroni 管理、3 成员 etcd 提供 DCS，配套 pgBackRest 归档及 node_exporter 主机监控","hosts":[{"name":"n1","ip":"10.50.2.11","role":"primary"},{"name":"n2","ip":"10.50.2.12","role":"replica"},{"name":"n3","ip":"10.50.2.13","role":"replica"}],"companions":[{"component":"patroni","kind":"ha_manager","version":"4.1.5"},{"component":"etcd","kind":"dcs","version":"3.5.33"},{"component":"pgbackrest","kind":"backup","version":"2.59.1"},{"component":"node-exporter","kind":"os_component","version":"1.13.0"}]}`,
+		`{"id":"pg-imp-v16","component":"postgresql","version":"16.4","hosts":[{"name":"v1","ip":"10.50.3.11","role":"primary"},{"name":"v2","ip":"10.50.3.12","role":"replica"},{"name":"v3","ip":"10.50.3.13","role":"replica"}],"companions":[{"component":"patroni","kind":"ha_manager","version":"4.0.0"},{"component":"etcd","kind":"dcs","version":"3.5.12"}]}`,
+		`{"id":"pg-imp-single","component":"postgresql","version":"17.11","hosts":[{"name":"s1","ip":"10.50.4.11","role":"primary"}]}`,
+	}
+	for _, ib := range imports {
+		iw := storeRequest(s, "POST", "/api/clusters/import", strings.NewReader(ib), admin, csrf)
+		if iw.Code != 200 && iw.Code != 201 {
+			t.Fatalf("import failed: %d %s", iw.Code, iw.Body.String())
+		}
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	rh := changeRehearsal{
+		ID:        "ccdd11223344",
+		ClusterID: "pg-deployed-pilot",
+		AppID:     "postgresql",
+		AppName:   "PostgreSQL",
+		BaseJobID: pilotJob.ID,
+		Title:     "Patroni 集群共享 pg_hba 补充 127.0.0.1 replicator 复制规则",
+		Goal:      "补充 pg_hba 规则",
+		Owner:     "admin",
+		Mode:      "light",
+		Stage:     "finalized",
+		Applied:   true,
+		AppliedAt: now,
+		AppliedChanges: []rehearsalAppliedChange{
+			{Key: "pg_hba", After: "+ hostssl replication replicator 127.0.0.1/32 scram-sha-256"},
+		},
+		Steps: []rehearsalStep{
+			{ID: "s1", Phase: "execute", Order: 1, Title: "写入 pg_hba", Command: "patronictl edit-config", Status: "passed"},
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := s.saveRehearsal(rh); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify templates API (pull direction) from pg-imp-same sees pg-deployed-pilot as EXACT + AllowSkipProbe=true!
+	wSame := storeRequest(s, "GET", "/api/rehearsals/templates?target_cluster=pg-imp-same", nil, admin, "")
+	if wSame.Code != 200 {
+		t.Fatalf("templates pg-imp-same: %d %s", wSame.Code, wSame.Body.String())
+	}
+	var sameItems []rehearsalTemplateItem
+	if err := json.Unmarshal(wSame.Body.Bytes(), &sameItems); err != nil {
+		t.Fatalf("decode sameItems: %v body=%s", err, wSame.Body.String())
+	}
+	if len(sameItems) != 1 {
+		t.Fatalf("expected 1 template for pg-imp-same, got %d body=%s", len(sameItems), wSame.Body.String())
+	}
+	if sameItems[0].MatchTier != "exact" || !sameItems[0].AllowSkipProbe {
+		t.Fatalf("expected imported PG 17 Patroni + pgBackRest cluster to match deployed PG 17 Patroni as exact & AllowSkipProbe=true, got tier=%q allow=%v reason=%q",
+			sameItems[0].MatchTier, sameItems[0].AllowSkipProbe, sameItems[0].SkipProbeBlockReason)
+	}
+
+	// Verify propagate targets API (push direction) from pg-deployed-pilot also marks pg-imp-same as exact & AllowSkipProbe=true!
+	wTargets := storeRequest(s, "GET", "/api/clusters/pg-deployed-pilot/rehearsals/ccdd11223344/propagate-targets", nil, admin, "")
+	if wTargets.Code != 200 {
+		t.Fatalf("propagate targets: %d %s", wTargets.Code, wTargets.Body.String())
+	}
+	var tgtResp struct {
+		Targets []propagateTargetItem `json:"targets"`
+	}
+	if err := json.Unmarshal(wTargets.Body.Bytes(), &tgtResp); err != nil {
+		t.Fatalf("decode targets: %v", err)
+	}
+	byID := map[string]propagateTargetItem{}
+	for _, it := range tgtResp.Targets {
+		byID[it.ClusterID] = it
+	}
+	if it := byID["pg-imp-same"]; it.MatchTier != "exact" || !it.AllowSkipProbe {
+		t.Fatalf("expected push-direction pg-imp-same exact & AllowSkipProbe=true, got %+v", it)
+	}
+	if it := byID["pg-imp-v16"]; it.MatchTier != "compatible" || it.AllowSkipProbe || !strings.Contains(it.SkipProbeBlockReason, "主版本") {
+		t.Fatalf("expected push-direction pg-imp-v16 blocked by major version, got %+v", it)
+	}
+	if it := byID["pg-imp-single"]; it.MatchTier != "compatible" || it.AllowSkipProbe || !strings.Contains(it.SkipProbeBlockReason, "核心架构") || !strings.Contains(it.SkipProbeBlockReason, "单节点") {
+		t.Fatalf("expected push-direction pg-imp-single blocked by core arch with readable label, got %+v", it)
+	}
+
+	// Verify pg-imp-v16 templates API is blocked with explicit major version diff reason.
+	wV16 := storeRequest(s, "GET", "/api/rehearsals/templates?target_cluster=pg-imp-v16", nil, admin, "")
+	var v16Items []rehearsalTemplateItem
+	_ = json.Unmarshal(wV16.Body.Bytes(), &v16Items)
+	if len(v16Items) != 1 || v16Items[0].MatchTier != "compatible" || v16Items[0].AllowSkipProbe {
+		t.Fatalf("expected pg-imp-v16 compatible & AllowSkipProbe=false, got: %+v", v16Items)
+	}
+	if !strings.Contains(v16Items[0].SkipProbeBlockReason, "主版本") {
+		t.Fatalf("expected explicit major version block reason, got %q", v16Items[0].SkipProbeBlockReason)
+	}
+
+	// Verify pg-imp-single templates API is blocked with explicit architecture diff reason.
+	wSingle := storeRequest(s, "GET", "/api/rehearsals/templates?target_cluster=pg-imp-single", nil, admin, "")
+	var singleItems []rehearsalTemplateItem
+	_ = json.Unmarshal(wSingle.Body.Bytes(), &singleItems)
+	if len(singleItems) != 1 || singleItems[0].MatchTier != "compatible" || singleItems[0].AllowSkipProbe {
+		t.Fatalf("expected pg-imp-single compatible & AllowSkipProbe=false, got: %+v", singleItems)
+	}
+	if !strings.Contains(singleItems[0].SkipProbeBlockReason, "核心架构") {
+		t.Fatalf("expected explicit core architecture block reason, got %q", singleItems[0].SkipProbeBlockReason)
+	}
+}

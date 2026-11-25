@@ -172,11 +172,17 @@ type rolloutBoardResponse struct {
 
 var reRolloutID = regexp.MustCompile(`^ro-[a-f0-9]{8,24}$`)
 
+var reMajorVerNum = regexp.MustCompile(`(?:^|[^0-9])(\d{1,3})(?:\.\d+|\b)`)
+
 func majorVersionOf(v string) string {
-	s := strings.TrimSpace(strings.TrimPrefix(strings.ToLower(v), "v"))
+	s := strings.TrimSpace(v)
 	if s == "" {
 		return ""
 	}
+	if m := reMajorVerNum.FindStringSubmatch(s); len(m) == 2 {
+		return m[1]
+	}
+	s = strings.TrimPrefix(strings.ToLower(s), "v")
 	for i, ch := range s {
 		if ch == '.' || ch == '-' || ch == ' ' {
 			return s[:i]
@@ -185,51 +191,199 @@ func majorVersionOf(v string) string {
 	return s
 }
 
+// canonicalCoreArch normalizes a cluster's core architecture identity across platform-deployed
+// and imported clusters (ignoring peripheral observability/backup companions such as
+// node_exporter, postgres_exporter, or pgBackRest) so two clusters with the same core middleware
+// and HA orchestration (e.g. PostgreSQL + Patroni + etcd) are recognized as architecturally identical.
+func canonicalCoreArch(f clusterFacts, dep *mwpack.Deployment, sc *mwpack.SchemeSummary, hostCount int) string {
+	app := strings.ToLower(strings.TrimSpace(f.Current.AppID))
+	if app == "" && dep != nil && len(dep.Instances) > 0 {
+		app = strings.ToLower(strings.TrimSpace(dep.Instances[0].Component))
+	}
+	rawID := ""
+	var textSignals []string
+	if sc != nil {
+		rawID = strings.ToLower(strings.TrimSpace(sc.ID))
+		if rawID == "imported" {
+			rawID = ""
+		}
+		if sc.Name != "" {
+			textSignals = append(textSignals, strings.ToLower(sc.Name))
+		}
+		if sc.Contract != nil && sc.Contract.Mechanism != "" {
+			textSignals = append(textSignals, strings.ToLower(sc.Contract.Mechanism))
+		}
+	}
+
+	compSet := map[string]bool{}
+	roleSet := map[string]bool{}
+	hasPatroniPort := false
+	if f.Plan != nil {
+		for _, inst := range f.Plan.Instances {
+			if inst.External {
+				continue
+			}
+			c := strings.ToLower(strings.TrimSpace(inst.Component))
+			if c != "" {
+				compSet[c] = true
+			}
+			for rName, hs := range inst.Roles {
+				if len(hs) > 0 {
+					roleSet[strings.ToLower(strings.TrimSpace(rName))] = true
+				}
+			}
+			for _, pt := range inst.Ports {
+				if strings.Contains(strings.ToLower(pt.Name), "patroni") {
+					hasPatroniPort = true
+				}
+			}
+		}
+	}
+	if dep != nil {
+		for _, inst := range dep.Instances {
+			c := strings.ToLower(strings.TrimSpace(inst.Component))
+			if c != "" {
+				compSet[c] = true
+			}
+			for rName, hs := range inst.Placement {
+				if len(hs) > 0 {
+					roleSet[strings.ToLower(strings.TrimSpace(rName))] = true
+				}
+			}
+		}
+		if dep.Imported != nil {
+			if dep.Imported.ArchSummary != "" {
+				textSignals = append(textSignals, strings.ToLower(dep.Imported.ArchSummary))
+			}
+			for _, su := range dep.Imported.ServiceUnits {
+				textSignals = append(textSignals, strings.ToLower(su))
+			}
+			for _, cm := range dep.Imported.Companions {
+				// Peripheral monitoring, backup & OS exporter companions do not alter core HA architecture equivalence.
+				if cm.Kind == "monitoring" || cm.Kind == "backup" || cm.Kind == "os_component" || cm.Kind == "exporter" {
+					continue
+				}
+				if c := strings.ToLower(strings.TrimSpace(cm.Component)); c != "" {
+					compSet[c] = true
+				}
+				if cm.DisplayName != "" {
+					textSignals = append(textSignals, strings.ToLower(cm.DisplayName))
+				}
+			}
+		}
+	}
+	joinedSignals := strings.Join(textSignals, " ")
+	hasSignal := func(tok string) bool {
+		if compSet[tok] {
+			return true
+		}
+		return strings.Contains(joinedSignals, tok)
+	}
+
+	switch app {
+	case "postgresql", "postgres":
+		hasPatroni := rawID == "patroni" || hasPatroniPort || hasSignal("patroni") || (hostCount > 1 && hasSignal("etcd"))
+		switch {
+		case hostCount <= 1 || rawID == "single" || rawID == "basic":
+			return "pg-single"
+		case hasPatroni:
+			return "pg-patroni"
+		case hasSignal("repmgr"):
+			return "pg-repmgr"
+		case hasSignal("pgpool"):
+			return "pg-pgpool"
+		default:
+			return "pg-replication"
+		}
+	case "redis":
+		hasCluster := rawID == "cluster" || roleSet["cluster"] || strings.Contains(joinedSignals, "redis cluster") || strings.Contains(joinedSignals, "redis-cluster")
+		hasSentinel := rawID == "standard" || rawID == "sentinel" || roleSet["sentinel"] || hasSignal("sentinel")
+		switch {
+		case hasCluster:
+			return "redis-cluster"
+		case hasSentinel:
+			return "redis-sentinel"
+		case hostCount <= 1 || rawID == "single" || rawID == "basic":
+			return "redis-single"
+		default:
+			return "redis-replication"
+		}
+	case "etcd":
+		if hostCount <= 1 || rawID == "single" || rawID == "basic" {
+			return "etcd-single"
+		}
+		return "etcd-ha"
+	case "nginx", "haproxy", "keepalived":
+		if hostCount <= 1 || rawID == "single" || rawID == "basic" {
+			return app + "-single"
+		}
+		return app + "-ha"
+	default:
+		if rawID != "" {
+			if app != "" {
+				return app + ":" + rawID
+			}
+			return rawID
+		}
+		if hostCount <= 1 {
+			return app + "-single"
+		}
+		return app + "-ha"
+	}
+}
+
+func canonicalArchDisplayName(schemeID, schemeName, lang string) string {
+	sn := strings.TrimSpace(schemeName)
+	generic := sn == "" || sn == "存量纳管" || strings.EqualFold(sn, "Imported") || sn == "历史部署架构"
+	if !generic {
+		return sn
+	}
+	switch schemeID {
+	case "pg-patroni":
+		return tr(lang, "PostgreSQL + Patroni 高可用", "PostgreSQL + Patroni HA")
+	case "pg-single":
+		return tr(lang, "PostgreSQL 单节点", "PostgreSQL Standalone")
+	case "pg-repmgr":
+		return tr(lang, "PostgreSQL + repmgr 高可用", "PostgreSQL + repmgr HA")
+	case "pg-pgpool":
+		return tr(lang, "PostgreSQL + Pgpool 高可用", "PostgreSQL + Pgpool HA")
+	case "pg-replication":
+		return tr(lang, "PostgreSQL 主从复制", "PostgreSQL Replication")
+	case "redis-cluster":
+		return tr(lang, "Redis Cluster 集群", "Redis Cluster")
+	case "redis-sentinel":
+		return tr(lang, "Redis 哨兵高可用", "Redis Sentinel HA")
+	case "redis-single":
+		return tr(lang, "Redis 单节点", "Redis Standalone")
+	case "redis-replication":
+		return tr(lang, "Redis 主从复制", "Redis Replication")
+	case "etcd-ha":
+		return tr(lang, "etcd 高可用集群", "etcd HA Cluster")
+	case "etcd-single":
+		return tr(lang, "etcd 单节点", "etcd Standalone")
+	default:
+		return firstNonEmptyStr(sn, schemeID, tr(lang, "未标注", "unspecified"))
+	}
+}
+
 func (s *storeServer) clusterSchemeMeta(f clusterFacts, lang string) (schemeID, schemeName, version string, hostCount int, deployed bool) {
+	dep := s.readSpec(f.Current.ID)
 	sc := s.deliveryScheme(f.Current.ID, f.Current.AppID, f.Current.Scheme)
 	if sc != nil {
 		sc = mwpack.LocalizeSchemeSummary(lang, sc)
-		schemeID = strings.ToLower(strings.TrimSpace(sc.ID))
 		schemeName = strings.TrimSpace(sc.Name)
 	}
 	version = s.deliveryAppVersion(f.Current.ID, f.Current.AppID, f.Current.Version)
+	if version == "" && dep != nil && dep.Imported != nil {
+		version = strings.TrimSpace(dep.Imported.ExactVersion)
+	}
 	if f.Plan != nil {
 		hostCount = len(f.Plan.Hosts)
-		if schemeID == "" {
-			hasPatroni := false
-			hasSentinel := false
-			var comps []string
-			seenComp := map[string]bool{}
-			for _, inst := range f.Plan.Instances {
-				if inst.External {
-					continue
-				}
-				if inst.Component == "patroni" {
-					hasPatroni = true
-				}
-				if inst.Component == "redis" && len(inst.Roles["sentinel"]) > 0 {
-					hasSentinel = true
-				}
-				if !seenComp[inst.Component] {
-					seenComp[inst.Component] = true
-					comps = append(comps, inst.Component)
-				}
-			}
-			sort.Strings(comps)
-			switch {
-			case hasPatroni:
-				schemeID = "patroni"
-			case hasSentinel:
-				schemeID = "sentinel"
-			case hostCount <= 1:
-				schemeID = "standalone:" + strings.Join(comps, "+")
-			default:
-				schemeID = "cluster:" + strings.Join(comps, "+")
-			}
-		}
-	} else if d := s.readSpec(f.Current.ID); d != nil {
-		hostCount = len(d.Hosts)
+	} else if dep != nil {
+		hostCount = len(dep.Hosts)
 	}
+	schemeID = canonicalCoreArch(f, dep, sc, hostCount)
+	schemeName = canonicalArchDisplayName(schemeID, schemeName, lang)
 	_, deployed = clusterHead(f.Jobs)
 	return
 }
@@ -422,7 +576,7 @@ func (s *storeServer) evaluatePropagateTarget(
 	targetFacts clusterFacts,
 	lang string,
 ) propagateTargetItem {
-	oSchemeID, _, oVer, oHosts, _ := s.clusterSchemeMeta(originFacts, lang)
+	oSchemeID, oSchemeName, oVer, oHosts, _ := s.clusterSchemeMeta(originFacts, lang)
 	tSchemeID, tSchemeName, tVer, tHosts, tDeployed := s.clusterSchemeMeta(targetFacts, lang)
 
 	sameShape := (oHosts <= 1) == (tHosts <= 1)
@@ -556,7 +710,20 @@ func (s *storeServer) evaluatePropagateTarget(
 		item.SkipProbeBlockReason = tr(lang, "目标集群尚未确认首次部署完成，须先跑只读探针核实现场", "Initial deployment not confirmed; read-only probe required")
 	case tier != "exact":
 		item.AllowSkipProbe = false
-		item.SkipProbeBlockReason = tr(lang, "架构或主版本与样板集群不同，须先跑只读探针核实现场", "Architecture or major version differs; read-only probe required")
+		switch {
+		case !sameScheme && !sameMajor:
+			item.SkipProbeBlockReason = tr(lang,
+				fmt.Sprintf("核心架构与主版本均与样板不同（%s / %s vs %s / %s），须先跑只读探针核实现场", firstNonEmptyStr(tSchemeName, tSchemeID), firstNonEmptyStr(tVer, "未知"), firstNonEmptyStr(oSchemeName, oSchemeID), firstNonEmptyStr(oVer, "未知")),
+				fmt.Sprintf("Architecture & major version differ (%s / %s vs %s / %s); read-only probe required", firstNonEmptyStr(tSchemeName, tSchemeID), firstNonEmptyStr(tVer, "unknown"), firstNonEmptyStr(oSchemeName, oSchemeID), firstNonEmptyStr(oVer, "unknown")))
+		case !sameScheme:
+			item.SkipProbeBlockReason = tr(lang,
+				fmt.Sprintf("核心架构与样板集群不同（当前：%s，样板：%s），须先跑只读探针核实现场", firstNonEmptyStr(tSchemeName, tSchemeID), firstNonEmptyStr(oSchemeName, oSchemeID)),
+				fmt.Sprintf("Core architecture differs (target: %s vs pilot: %s); read-only probe required", firstNonEmptyStr(tSchemeName, tSchemeID), firstNonEmptyStr(oSchemeName, oSchemeID)))
+		default:
+			item.SkipProbeBlockReason = tr(lang,
+				fmt.Sprintf("主版本与样板集群不同（当前：%s，样板：%s），须先跑只读探针核实现场", firstNonEmptyStr(tVer, "未知"), firstNonEmptyStr(oVer, "未知")),
+				fmt.Sprintf("Major version differs (target: %s vs pilot: %s); read-only probe required", firstNonEmptyStr(tVer, "unknown"), firstNonEmptyStr(oVer, "unknown")))
+		}
 	case len(item.ConflictKeys) > 0:
 		item.AllowSkipProbe = false
 		item.SkipProbeBlockReason = tr(lang, "目标集群存在同参数冲突变更，须先跑只读探针核实当前生效值", "Overlapping parameter changes detected; read-only probe required")

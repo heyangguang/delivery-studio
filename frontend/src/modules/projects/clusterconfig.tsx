@@ -25,7 +25,6 @@ import {
   IconRefresh,
   IconRight,
   IconSearch,
-  IconThunderbolt,
 } from "@arco-design/web-react/icon";
 import {
   ago,
@@ -60,16 +59,10 @@ import {
   type EffectiveClusterChange,
 } from "./topology";
 import { bi, useLang, withLang } from "../../app/i18n";
-import type { ClusterAutomationSummary } from "../automation/execution-types";
 import "./clusterconfig.css";
 
 const LazyImportedBaselineModal = lazySubView(() =>
   import("./importcluster").then((m) => ({ default: m.ImportedBaselineModal })),
-);
-const LazyClusterAutomationPanel = lazySubView(() =>
-  import("../automation/rehearsal-automation").then((m) => ({
-    default: m.ClusterAutomationPanel,
-  })),
 );
 
 const schemaCache = new Map<string, Schema>();
@@ -733,19 +726,6 @@ function ConfigRecord({
     (i.ports || []).map((port) => ({ i, port })),
   );
 
-  const [autoSummary, setAutoSummary] = useState<ClusterAutomationSummary | null>(null);
-
-  useEffect(() => {
-    let alive = true;
-    setAutoSummary(null);
-    api<ClusterAutomationSummary>(`/api/clusters/${encodeURIComponent(c.id)}/automation`)
-      .then((res) => alive && setAutoSummary(res))
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, [c.id]);
-
   const nav = [
     {
       id: "hosts",
@@ -757,7 +737,6 @@ function ConfigRecord({
       icon: <IconDesktop />,
       changeCount: 0,
       embedded: false,
-      statusDot: "" as "" | "is-ok" | "is-warn",
     },
     {
       id: "access",
@@ -769,34 +748,6 @@ function ConfigRecord({
       icon: <IconLink />,
       changeCount: 0,
       embedded: false,
-      statusDot: "" as "" | "is-ok" | "is-warn",
-    },
-    {
-      id: "automation",
-      label: bi("自动化执行", "Automation"),
-      note: autoSummary?.config.enabled
-        ? autoSummary.ready
-          ? bi("通道就绪", "Ready")
-          : bi("通道待处理", "Needs Attention")
-        : bi("未开启 · 手工模式", "Off · Manual"),
-      icon: (
-        <IconThunderbolt
-          style={{
-            color: autoSummary?.config.enabled
-              ? autoSummary.ready
-                ? "var(--ok)"
-                : "var(--warn)"
-              : undefined,
-          }}
-        />
-      ),
-      changeCount: 0,
-      embedded: false,
-      statusDot: (autoSummary?.config.enabled
-        ? autoSummary.ready
-          ? "is-ok"
-          : "is-warn"
-        : "") as "" | "is-ok" | "is-warn",
     },
     ...displayInstances.map((i) => ({
       id: `component:${i.id}`,
@@ -814,7 +765,6 @@ function ConfigRecord({
       ),
       changeCount: (effectiveByInstance.get(i.id) || []).length,
       embedded: Boolean(i.embeddedFrom),
-      statusDot: "" as "" | "is-ok" | "is-warn",
     })),
     {
       id: "spec",
@@ -823,7 +773,6 @@ function ConfigRecord({
       icon: <IconFile />,
       changeCount: 0,
       embedded: false,
-      statusDot: "" as "" | "is-ok" | "is-warn",
     },
   ];
   const selected = section || "hosts";
@@ -1428,17 +1377,11 @@ function ConfigRecord({
                     aria-current={
                       !tokens.length && selected === n.id ? "page" : undefined
                     }
-                    onMouseEnter={
-                      n.id === "automation"
-                        ? () => void import("../automation/rehearsal-automation")
-                        : undefined
-                    }
                     onClick={() => navigate(n.id)}
                     title={`${n.label} · ${n.note}`}
                   >
                     {n.icon}
                     <span>{n.label}</span>
-                    {n.statusDot && <i className={`cx-nav-auto-dot ${n.statusDot}`} aria-hidden />}
                     {n.changeCount > 0 && (
                       <em
                         className="cx-nav-chg-cnt num"
@@ -1545,7 +1488,7 @@ function ConfigRecord({
               ) : (
                 <section className="cx-section" key={selected}>
                   {/* Non-component section heading (Hosts / Access / Spec) */}
-                  {!instance && selected !== "automation" && (
+                  {!instance && (
                     <div className="cx-heading">
                       <div>
                         <h2>{active.label}</h2>
@@ -1578,16 +1521,6 @@ function ConfigRecord({
                         )}
                       </div>
                     </div>
-                  )}
-
-                  {/* Section: Automation Execution (Single Source of Truth) */}
-                  {selected === "automation" && (
-                    <React.Suspense fallback={<Skeleton animation text={{ rows: 6 }} />}>
-                      <LazyClusterAutomationPanel
-                        clusterId={c.id}
-                        onChanged={setAutoSummary}
-                      />
-                    </React.Suspense>
                   )}
 
                   {/* Section: Hosts & Roles */}

@@ -212,7 +212,7 @@ def isolated(name,port,check,extra=''):
  _prepare_isolated_conf(target)
  try:
   try:
-   run(['runuser','-u','postgres','--',BIN+'pg_ctl','-D',target,'-l',logf,'-o',"-p "+str(port)+" -k "+str(testroot)+" -c listen_addresses='' -c ssl=off -c archive_mode=off"+extra,'-w','-t','300','start'],show=True)
+   run(['runuser','-u','postgres','--',BIN+'pg_ctl','-D',target,'-l',logf,'-o',"-p "+str(port)+" -k "+str(testroot)+" -c listen_addresses='' -c ssl=off -c archive_mode=off -c shared_buffers=128MB -c huge_pages=off"+extra,'-w','-t','300','start'],show=True)
   except RuntimeError:
    if logf.exists():log('Isolated postgres log ('+str(logf)+'):\n'+logf.read_text()[-4000:])
    raise

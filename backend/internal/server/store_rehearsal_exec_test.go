@@ -335,4 +335,59 @@ func TestClusterAutomationCheckUsesDraftOverridesWhileDisabled(t *testing.T) {
 	if badPortRR.Code != 400 {
 		t.Fatalf("expected 400 for invalid ssh_port override, got %d %s", badPortRR.Code, badPortRR.Body.String())
 	}
+
+	// Simulate the draft connectivity check succeeding while automation is still disabled:
+	// verified must stay false until enabled, flip true once saved with matching params,
+	// and flip back to false if connection parameters change without re-testing.
+	zero := 0
+	for _, ev := range []rehearsalExecEvent{
+		{TaskID: task.ID, TargetIndex: 0, Host: "db-01", IP: "10.20.0.11", Seq: 1, Kind: "started"},
+		{TaskID: task.ID, TargetIndex: 0, Host: "db-01", IP: "10.20.0.11", Seq: 2, Kind: "finished", ExitCode: &zero},
+	} {
+		raw, _ := json.Marshal(ev)
+		evReq := httptest.NewRequest("POST", "http://127.0.0.1:8090/api/execution-agent/rehearsal-event", bytes.NewReader(raw))
+		evReq.Header.Set("Authorization", "Bearer "+nodeCreate.Token)
+		evReq.Header.Set("Content-Type", "application/json")
+		evW := httptest.NewRecorder()
+		srv.ServeHTTP(evW, evReq)
+		if evW.Code != 200 {
+			t.Fatalf("event failed: %d %s", evW.Code, evW.Body.String())
+		}
+	}
+
+	getSummary := func() struct {
+		Ready    bool `json:"ready"`
+		Verified bool `json:"verified"`
+	} {
+		gr := storeRequest(srv, "GET", "/api/clusters/pg-draft-check/automation", nil, cookie, "")
+		var s struct {
+			Ready    bool `json:"ready"`
+			Verified bool `json:"verified"`
+		}
+		_ = json.Unmarshal(gr.Body.Bytes(), &s)
+		return s
+	}
+	if s := getSummary(); s.Verified {
+		t.Fatalf("expected verified=false while automation disabled")
+	}
+
+	// Save & enable with matching checked channel -> verified turns true!
+	enableBody := `{"enabled":true,"transport":"node","node_id":"` + nodeCreate.Node.ID + `","node_exec_method":"ssh","ssh_user":"postgres","ssh_port":2222,"env_kind":"test","default_pacing":"step_confirm"}`
+	enRR := storeRequest(srv, "PUT", "/api/clusters/pg-draft-check/automation", strings.NewReader(enableBody), cookie, csrf)
+	if enRR.Code != 200 {
+		t.Fatalf("enable automation failed: %d %s", enRR.Code, enRR.Body.String())
+	}
+	if s := getSummary(); !s.Ready || !s.Verified {
+		t.Fatalf("expected ready=true verified=true after enabling checked channel, got %+v", s)
+	}
+
+	// Changing ssh_port invalidates verification until re-tested!
+	chgBody := `{"enabled":true,"transport":"node","node_id":"` + nodeCreate.Node.ID + `","node_exec_method":"ssh","ssh_user":"postgres","ssh_port":22,"env_kind":"test","default_pacing":"step_confirm"}`
+	chgRR := storeRequest(srv, "PUT", "/api/clusters/pg-draft-check/automation", strings.NewReader(chgBody), cookie, csrf)
+	if chgRR.Code != 200 {
+		t.Fatalf("update automation failed: %d %s", chgRR.Code, chgRR.Body.String())
+	}
+	if s := getSummary(); s.Verified {
+		t.Fatalf("expected verified=false after changing ssh_port without re-check, got %+v", s)
+	}
 }

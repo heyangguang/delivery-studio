@@ -48,8 +48,34 @@ type clusterAutomationConfig struct {
 	AllowProdMutate   bool                    `json:"allow_prod_mutate"`
 	TestClusterID     string                  `json:"test_cluster_id,omitempty"`
 	CustomHosts       []clusterAutomationHost `json:"custom_hosts,omitempty"`
+	LastCheckState    string                  `json:"last_check_state,omitempty"` // succeeded | failed | blocked | stopped
+	LastCheckAt       string                  `json:"last_check_at,omitempty"`
+	LastCheckSig      string                  `json:"last_check_sig,omitempty"`
 	UpdatedAt         string                  `json:"updated_at,omitempty"`
 	UpdatedBy         string                  `json:"updated_by,omitempty"`
+}
+
+func automationChannelSig(transport, nodeID, method, sshUser string, sshPort int) string {
+	t := strings.TrimSpace(transport)
+	if t != "agent" {
+		t = "node"
+	}
+	if t == "agent" {
+		return "agent"
+	}
+	m := strings.TrimSpace(method)
+	if m != "ansible" && m != "ssh" {
+		m = "auto"
+	}
+	u := strings.TrimSpace(sshUser)
+	if u == "" {
+		u = "root"
+	}
+	p := sshPort
+	if p <= 0 || p > 65535 {
+		p = 22
+	}
+	return fmt.Sprintf("node|%s|%s|%s|%d", strings.TrimSpace(nodeID), m, u, p)
 }
 
 type rehearsalExecTarget struct {
@@ -501,16 +527,29 @@ func (s *storeServer) buildClusterAutomationSummary(r *http.Request, f clusterFa
 		}
 	}
 
+	sig := automationChannelSig(cfg.Transport, cfg.NodeID, cfg.NodeExecMethod, cfg.SSHUser, cfg.SSHPort)
+	checkMatches := cfg.LastCheckSig != "" && cfg.LastCheckSig == sig
+	lastCheckState := ""
+	lastCheckAt := ""
+	if checkMatches {
+		lastCheckState = cfg.LastCheckState
+		lastCheckAt = cfg.LastCheckAt
+	}
+	verified := cfg.Enabled && ready && checkMatches && cfg.LastCheckState == "succeeded"
+
 	return map[string]any{
-		"config":        cfg,
-		"hosts":         hosts,
-		"nodes":         nodes,
-		"agents":        agents,
-		"online_agents": onlineAgents,
-		"ready":         ready,
-		"ready_reason":  readyReason,
-		"bootstrap":     s.executionBootstrapInfo(r),
-		"recent_tasks":  recent,
+		"config":           cfg,
+		"hosts":            hosts,
+		"nodes":            nodes,
+		"agents":           agents,
+		"online_agents":    onlineAgents,
+		"ready":            ready,
+		"ready_reason":     readyReason,
+		"verified":         verified,
+		"last_check_state": lastCheckState,
+		"last_check_at":    lastCheckAt,
+		"bootstrap":        s.executionBootstrapInfo(r),
+		"recent_tasks":     recent,
 	}
 }
 
@@ -595,6 +634,17 @@ func (s *storeServer) handleClusterAutomation(w http.ResponseWriter, r *http.Req
 				IP:   net.ParseIP(ip).String(),
 				Role: truncRunes(strings.TrimSpace(ch.Role), 40),
 			})
+		}
+		prev := s.loadClusterAutomationConfig(f.ID)
+		nextSig := automationChannelSig(req.Transport, req.NodeID, req.NodeExecMethod, req.SSHUser, req.SSHPort)
+		if prev.LastCheckSig != "" && prev.LastCheckSig == nextSig {
+			req.LastCheckState = prev.LastCheckState
+			req.LastCheckAt = prev.LastCheckAt
+			req.LastCheckSig = prev.LastCheckSig
+		} else {
+			req.LastCheckState = ""
+			req.LastCheckAt = ""
+			req.LastCheckSig = ""
 		}
 		req.ClusterID = f.ID
 		req.CustomHosts = cleanedHosts
@@ -1810,6 +1860,13 @@ func (s *storeServer) applyRehearsalExecEvent(actorKind, actorID string, ev rehe
 	}
 	if err := s.saveRehearsalExecTask(t); err != nil {
 		return rehearsalExecTask{}, err
+	}
+	if allDone && t.Kind == "connectivity_check" {
+		cfg := s.loadClusterAutomationConfig(t.ClusterID)
+		cfg.LastCheckState = t.State
+		cfg.LastCheckAt = t.FinishedAt
+		cfg.LastCheckSig = automationChannelSig(t.Transport, t.NodeID, t.NodeExecMethod, t.SSHUser, t.SSHPort)
+		_ = s.saveClusterAutomationConfig(cfg)
 	}
 	return t, nil
 }

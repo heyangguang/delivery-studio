@@ -241,7 +241,7 @@ type AutomationReturnContext = {
 const AUTO_RETURN_PREFIX = "ds:auto-return:";
 const AUTO_RETURN_TTL_MS = 15 * 60 * 1000;
 
-/** Navigates to the single source of truth: Cluster → Config → Automation. */
+/** Navigates to the single source of truth: Cluster → Automation tab. */
 export function navigateToClusterAutomation(
   clusterId: string,
   returnCtx?: { tab: "rehearsal"; rehearsal?: string },
@@ -259,7 +259,7 @@ export function navigateToClusterAutomation(
   } catch {
     // Ignore storage quota / private-mode errors
   }
-  go({ name: "deliveries", id: clusterId, tab: "config", section: "automation" });
+  go({ name: "deliveries", id: clusterId, tab: "automation" });
 }
 
 function readAutomationReturnContext(clusterId: string): AutomationReturnContext | null {
@@ -776,6 +776,7 @@ export function ClusterAutomationPanel({
       );
       setCheckTask(task);
       const fin = await pollRehearsalExecTask(clusterId, task.id, setCheckTask, ctrl.signal);
+      await load(true);
       if (fin.state === "succeeded") {
         Message.success(
           bi("只读连通性自检全部通过，通道已验证可用", "Read-only connectivity check passed"),
@@ -999,7 +1000,7 @@ export function ClusterAutomationPanel({
               <button
                 type="button"
                 className="rha-link-btn"
-                onClick={() => go({ name: "settings", id: "nodes" })}
+                onClick={() => go({ name: "settings", id: "execution-nodes" })}
               >
                 <IconSettings /> {bi("前往设置 → 执行节点", "Open Settings → Execution Nodes")}
               </button>
@@ -1323,26 +1324,28 @@ sudo bash mw-target-agent-*/install.sh`}</pre>
   ];
 
   const statusPill = summary.config.enabled
-    ? summary.ready
-      ? { cls: "is-ok", label: bi("通道就绪", "Ready") }
-      : { cls: "is-warn", label: bi("通道待处理", "Needs Attention") }
+    ? summary.verified
+      ? { cls: "is-ok", label: bi("已测试连通", "Verified") }
+      : summary.ready
+        ? { cls: "is-warn", label: bi("待连通自检", "Unverified") }
+        : { cls: "is-warn", label: bi("通道待处理", "Needs Attention") }
     : savedSetup
       ? { cls: "", label: bi("已暂停", "Paused") }
       : { cls: "", label: bi("未开启", "Off") };
 
   return (
     <div className="rha-embedded">
-      {/* Native ClusterConfig Section Heading */}
+      {/* Native Cluster Tab Section Heading */}
       <div className="cx-heading">
         <div>
           <h2>
-            <span>{bi("自动化执行", "Automation")}</span>
+            <span>{bi("集群自动化", "Cluster Automation")}</span>
             <span className={`rha-ready-dot ${statusPill.cls}`}>{statusPill.label}</span>
           </h2>
           <p>
             {bi(
-              "集中管理本集群的只读探针采集与变更演练自动执行通道；变更演练与基线补采统一共用此处配置。",
-              "Single place to configure read-only probes and automated rehearsal execution for this cluster.",
+              "集中配置本集群的只读探针采集与变更演练自动执行通道；配置并测试连通后，上方「自动化」标签将自动点亮。",
+              "Configure read-only probe collection and automated rehearsal execution; the Automation tab lights up once connectivity check passes.",
             )}
           </p>
         </div>
@@ -1846,17 +1849,40 @@ sudo bash mw-target-agent-*/install.sh`}</pre>
       {/* ---- Mode 3: Active Management Mode (Native .cx-spec-stack) ---- */}
       {viewMode === "manage" && (
         <div className="rha-manage-stack">
-          <div className={`rha-status-bar ${summary.ready ? "is-ready" : "is-warn"}`}>
+          <div className={`rha-status-bar ${summary.verified ? "is-ready" : "is-warn"}`}>
             <div className="rha-status-bar-l">
               <div className="rha-master-title">
-                <span className={`rha-ready-dot ${summary.ready ? "is-ok" : "is-warn"}`}>
-                  {summary.ready ? bi("通道就绪", "Ready") : bi("通道待处理", "Needs Attention")}
+                <span className={`rha-ready-dot ${summary.verified ? "is-ok" : "is-warn"}`}>
+                  {summary.verified
+                    ? bi("已测试连通", "Verified")
+                    : summary.ready
+                      ? bi("待连通自检", "Unverified")
+                      : bi("通道待处理", "Needs Attention")}
                 </span>
                 <b>{channelSummaryText}</b>
               </div>
-              {!summary.ready && summary.ready_reason && (
+              {!summary.ready && summary.ready_reason ? (
                 <p className="rha-master-sub">{summary.ready_reason}</p>
-              )}
+              ) : !summary.verified ? (
+                <p className="rha-master-sub">
+                  {summary.last_check_state && summary.last_check_state !== "succeeded"
+                    ? bi(
+                        "最近一次只读连通性自检未通过，排查后重新自检通过即可点亮「自动化」标签状态。",
+                        "Last connectivity check failed. Resolve issues and re-run self-check to mark verified.",
+                      )
+                    : bi(
+                        "尚未对当前连接参数完成只读连通性自检；点击右上角「只读连通性自检」通过后将自动点亮「自动化」标签。",
+                        "Run a quick read-only self-check on the current settings to verify connectivity and light up the Automation tab.",
+                      )}
+                </p>
+              ) : summary.last_check_at ? (
+                <p className="rha-master-sub">
+                  {bi(
+                    `最近一次只读连通性自检通过：${fullTime(summary.last_check_at)}`,
+                    `Last verified read-only check: ${fullTime(summary.last_check_at)}`,
+                  )}
+                </p>
+              ) : null}
             </div>
             {justActivated && returnCtx && (
               <Button size="small" type="primary" icon={<IconArrowLeft />} onClick={goBackToRehearsal}>

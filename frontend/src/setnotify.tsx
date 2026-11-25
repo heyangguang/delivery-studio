@@ -1014,43 +1014,40 @@ export function TemplatesView() {
   const link = (vars as Record<string, string>).link || "";
   return (
     <article className="sx-page tp2-page enter">
+      <header className="sx-page-h tp2-page-h">
+        <div>
+          <h1>{bi("通知模板", "Notification Templates")}</h1>
+          <p>
+            {bi(
+              "自定义各类通知消息的标题与正文，保存后统一对所有推送渠道生效。",
+              "Customize title and body templates for each event across all delivery channels.",
+            )}
+          </p>
+        </div>
+        {ev && (
+          <div className="tp2-head-acts">
+            <Button
+              icon={<IconRefresh />}
+              disabled={!custom || busy}
+              onClick={() => save(true)}
+            >
+              {bi("恢复默认", "Reset Default")}
+            </Button>
+            <Button
+              type="primary"
+              loading={busy}
+              disabled={!dirty || unknown.length > 0}
+              onClick={() => save()}
+            >
+              {bi("保存模板", "Save Template")}
+            </Button>
+          </div>
+        )}
+      </header>
       {!d ? (
         <div className="st-skel" aria-label={bi("载入中", "Loading")} />
       ) : (
         <>
-          <header className="sx-page-h tp2-page-h">
-            <div>
-              <h1>{bi("通知模板", "Notification Templates")}</h1>
-              <p>
-                {bi(
-                  "自定义各类通知消息的标题与正文，保存后统一对所有推送渠道生效。",
-                  "Customize title and body templates for each event across all delivery channels.",
-                )}
-              </p>
-            </div>
-            {ev && (
-              <div className="tp2-head-acts">
-                <Button
-                  size="small"
-                  icon={<IconRefresh />}
-                  disabled={!custom || busy}
-                  onClick={() => save(true)}
-                >
-                  {bi("恢复默认", "Reset Default")}
-                </Button>
-                <Button
-                  size="small"
-                  type="primary"
-                  loading={busy}
-                  disabled={!dirty || unknown.length > 0}
-                  onClick={() => save()}
-                >
-                  {bi("保存模板", "Save Template")}
-                </Button>
-              </div>
-            )}
-          </header>
-
           <section className="tp2-picker-bar" aria-label={bi("消息类型", "Event types")}>
             <div className="tp2-picker-tabs" role="listbox">
               {groups.map((g) =>
@@ -1091,7 +1088,6 @@ export function TemplatesView() {
             {totalEvents > 4 && (
               <div className="tp2-picker-search">
                 <Input
-                  size="small"
                   prefix={<IconSearch />}
                   allowClear
                   placeholder={bi("筛选消息类型", "Filter events")}

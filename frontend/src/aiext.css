@@ -2,6 +2,10 @@
 .ex-page {
   padding-bottom: 88px;
 }
+.ex-page > .note {
+  margin: 0 0 16px;
+  border: 1px solid color-mix(in srgb, var(--warn) 28%, var(--line));
+}
 .ex-n {
   margin-left: 4px;
   color: var(--faint);
@@ -196,6 +200,7 @@
 .mc-tool > span,
 .mc-write > span {
   display: flex;
+  flex: 1;
   flex-wrap: wrap;
   align-items: baseline;
   gap: 2px 8px;

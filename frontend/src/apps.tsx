@@ -551,7 +551,7 @@ function AppWide({ a, mine }: { a: AppInfo; mine: Job[] }) {
           <dl className="wide-caps" aria-label={bi("能力要点", "Key capabilities")}>
             {a.detail!.capabilities!.slice(0, 3).map((c) => (
               <div key={c.name}>
-                <dt>{c.name}</dt>
+                <dt title={c.name}>{c.name}</dt>
                 <dd title={c.text}>{c.text}</dd>
               </div>
             ))}
@@ -1344,7 +1344,20 @@ function Product({ app, jobs }: { app: AppInfo; jobs: Job[] }) {
   ];
   const info: [string, React.ReactNode][] = [
     [bi("规模", "Scale"), d?.scale || "—"],
-    [bi("版本", "Versions"), app.versions.map((v) => v.id).join(" · ") || "—"],
+    [
+      bi("版本", "Versions"),
+      app.versions.length ? (
+        <span className="info-strip-chips">
+          {app.versions.map((v) => (
+            <span key={v.id} className="info-strip-chip mono">
+              {v.id}
+            </span>
+          ))}
+        </span>
+      ) : (
+        "—"
+      ),
+    ],
     [bi("系统", "OS"), os || "—"],
     [
       bi("软件库", "Library"),
@@ -1566,9 +1579,11 @@ function Product({ app, jobs }: { app: AppInfo; jobs: Job[] }) {
                       <span
                         className={v.status === "published" ? "faint" : "warn"}
                       >
-                        {v.status === "published"
-                          ? bi("已发布", "Published")
-                          : bi("未发布", "Unpublished")}
+                        <span className="spec-ver-st">
+                          {v.status === "published"
+                            ? bi("已发布", "Published")
+                            : bi("未发布", "Unpublished")}
+                        </span>
                         {(v.platforms || Object.keys(v.coverage || {})).map((pl) => {
                           const cv = v.coverage?.[pl];
                           const released = isVersionPlatformReleased(v, pl);

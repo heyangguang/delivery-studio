@@ -102,7 +102,6 @@ export function PackageList({
         />
         <Button
           type="text"
-          size="small"
           onClick={() => setOpen(allOpen ? [] : list.map(keyOf))}
         >
           {allOpen ? bi("全部收起", "Collapse all") : bi("全部展开", "Expand all")}
@@ -163,9 +162,11 @@ export function PackageList({
                     aria-controls={`pk-${k}`}
                   >
                     <IconRight className="pk-chev" />
-                    <span className="mono pk-name">{r.request.name}</span>
-                    <span className="mono small faint pk-ver">
-                      {r.request.version}
+                    <span className="pk-id">
+                      <span className="mono pk-name">{r.request.name}</span>
+                      <span className="mono small faint pk-ver">
+                        {r.request.version}
+                      </span>
                     </span>
                   </button>
                   <div className="pk-use small">

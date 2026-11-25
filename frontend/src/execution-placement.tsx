@@ -7,7 +7,20 @@ import "./executions.css";
 export function ExecutionHostSummary({ host }: { host?: Deployment["execution_host"] }) {
   useLang();
   if (!host) return null;
-  return <div className="ex-host-summary"><b>{bi("独立执行机", "Standalone executor")}</b><code>{host.name}</code><code>{host.ip}</code><span>{bi("负责执行部署，不计入业务机器", "Runs deployment tasks; excluded from cluster nodes")}</span></div>;
+  return (
+    <div className="ex-host-summary">
+      <b className="ex-host-summary-lbl">{bi("独立执行机", "Standalone executor")}</b>
+      <div className="ex-host-summary-body">
+        <span className="ex-host-summary-codes">
+          <code>{host.name}</code>
+          {host.ip && <code>{host.ip}</code>}
+        </span>
+        <span className="ex-host-summary-note">
+          {bi("负责执行部署，不计入业务机器", "Runs deployment tasks; excluded from cluster nodes")}
+        </span>
+      </div>
+    </div>
+  );
 }
 
 export function ExecutionPlacement({

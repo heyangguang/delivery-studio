@@ -411,26 +411,28 @@ function PresetRoles({ path, item }: { path: Path; item: any }) {
           "Series type must match actual capabilities. Acceptance format is \"component/test-id\"; declaring tests does not imply live environment sign-off.",
         )}
       </p>
-      <label>{bi("系列类型", "Series Type")}</label>
-      <Select aria-label={bi("系列类型", "Series type")} disabled={readOnly} value={item.contract?.series}
-        options={[
-          {value:"basic",label:bi("基础系列", "Basic")},
-          {value:"replication",label:bi("主从系列", "Primary-Replica")},
-          {value:"ha",label:bi("高可用系列", "High Availability")},
-          {value:"sharded",label:bi("分片集群系列", "Sharded Cluster")},
-        ]}
-        onChange={(value) => {
-          const names: Record<string,string> = {
-            basic:bi("基础系列", "Basic"),
-            replication:bi("主从系列", "Primary-Replica"),
-            ha:bi("高可用系列", "High Availability"),
-            sharded:bi("分片集群系列", "Sharded Cluster"),
-          };
-          ops.batch((doc) => {
-            setValue(doc,[...path,"contract","series"],value);
-            if (!item.name) setValue(doc,[...path,"name"],names[value]);
-          });
-        }} />
+      <div className="wb-field w-m wb-contract-series">
+        <span className="wb-flabel">{bi("系列类型", "Series Type")}</span>
+        <Select aria-label={bi("系列类型", "Series type")} disabled={readOnly} value={item.contract?.series}
+          options={[
+            {value:"basic",label:bi("基础系列", "Basic")},
+            {value:"replication",label:bi("主从系列", "Primary-Replica")},
+            {value:"ha",label:bi("高可用系列", "High Availability")},
+            {value:"sharded",label:bi("分片集群系列", "Sharded Cluster")},
+          ]}
+          onChange={(value) => {
+            const names: Record<string,string> = {
+              basic:bi("基础系列", "Basic"),
+              replication:bi("主从系列", "Primary-Replica"),
+              ha:bi("高可用系列", "High Availability"),
+              sharded:bi("分片集群系列", "Sharded Cluster"),
+            };
+            ops.batch((doc) => {
+              setValue(doc,[...path,"contract","series"],value);
+              if (!item.name) setValue(doc,[...path,"name"],names[value]);
+            });
+          }} />
+      </div>
       <Fields path={[...path, "contract"]} item={item.contract || {}} specs={[
         {key:"when",label:bi("系列匹配条件", "Match Expression"),kind:"expr",required:true,width:"l",hint:bi("识别架构，不要绑定内存大小等可调配置", "Identify topology/architecture, not tunable sizing like memory")},
         {key:"failover",label:bi("故障切换", "Failover"),kind:"select",required:true,options:[{value:"none",label:bi("无切换", "None")},{value:"manual",label:bi("人工切换", "Manual")},{value:"automatic",label:bi("自动切换", "Automatic")}]},
@@ -460,9 +462,9 @@ function PresetRoles({ path, item }: { path: Path; item: any }) {
           {!readOnly && <Button size="mini" type="text" onClick={() => ops.set([...path,"params",key],undefined)}>{bi("恢复公共默认值", "Reset to default")}</Button>}
         </div>;
       })}
-      {!readOnly && <Select aria-label={bi("添加方案参数", "Add scheme parameter")} placeholder={bi("选择需要单独设置的参数", "Select a parameter to override")} value={undefined} showSearch
+      {!readOnly && <div className="wb-scheme-add"><Select aria-label={bi("添加方案参数", "Add scheme parameter")} placeholder={bi("选择需要单独设置的参数", "Select a parameter to override")} value={undefined} showSearch
         options={(ops.js.params || []).filter((p: any) => !(p.key in (item.params || {}))).map((p: any) => ({value:p.key,label:p.label || p.key}))}
-        onChange={(key) => {const def=(ops.js.params || []).find((p: any) => p.key===key);ops.batch(doc => doc.setIn([...path,"params",key],doc.createNode(def?.default ?? "")));}}/>}
+        onChange={(key) => {const def=(ops.js.params || []).find((p: any) => p.key===key);ops.batch(doc => doc.setIn([...path,"params",key],doc.createNode(def?.default ?? "")));}}/></div>}
     </div>
   );
 }
@@ -1777,7 +1779,15 @@ function AddonsEditor({ path }: { path: Path }) {
   );
 }
 
-export function RawBlock({ path, label }: { path: Path; label: string }) {
+export function RawBlock({
+  path,
+  label,
+  hideLabel,
+}: {
+  path: Path;
+  label: string;
+  hideLabel?: boolean;
+}) {
   useLang();
   const { ops, readOnly, aiMarks } = useWb();
   const value = get(ops.js, path);
@@ -1814,6 +1824,7 @@ export function RawBlock({ path, label }: { path: Path; label: string }) {
       data-wb={path.join(".")}
       data-wb-ai={aiTouched(aiMarks, path) ? "" : undefined}
     >
+      {!hideLabel && <span className="wb-flabel">{label}</span>}
       <textarea
         className="wb-raw-text mono"
         disabled={readOnly}

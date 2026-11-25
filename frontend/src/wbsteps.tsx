@@ -1,4 +1,4 @@
-import { Button, Radio, Select } from "@arco-design/web-react";
+import { Button, Input, Radio, Select } from "@arco-design/web-react";
 import { IconEdit } from "@arco-design/web-react/icon";
 import { get, itemFlags, useWb } from "./wbdoc";
 import type { Path } from "./wbdoc";
@@ -294,11 +294,11 @@ function TaskEditor({ path, task }: { path: Path; task: any }) {
             ? bi("命令", "Command")
             : bi("脚本（files/ 下的文件，可带参数）", "Script (file under files/, optional args)")}
         </span>
-        <input
-          className="wb-mono arco-input arco-input-size-default"
+        <Input
+          className="wb-mono"
           disabled={readOnly}
           value={args}
-          onChange={(e) => ops.set([...path, key], e.target.value)}
+          onChange={(v) => ops.set([...path, key], v)}
           aria-label={bi("命令", "Command")}
         />
         <span className="wb-fhint">
@@ -337,11 +337,10 @@ function TaskEditor({ path, task }: { path: Path; task: any }) {
             {bi("这一步做什么", "Task Name")}
             <i className="req">{bi("必填", "Required")}</i>
           </span>
-          <input
-            className="arco-input arco-input-size-default"
+          <Input
             disabled={readOnly}
             value={task.name ?? ""}
-            onChange={(e) => ops.set([...path, "name"], e.target.value)}
+            onChange={(v) => ops.set([...path, "name"], v)}
             aria-label={bi("任务名称", "Task name")}
           />
         </div>
@@ -380,7 +379,7 @@ function TaskEditor({ path, task }: { path: Path; task: any }) {
           ]}
         />
         <h4 className="wb-minor">{bi("循环（loop）", "Loop")}</h4>
-        <RawBlock path={[...path, "loop"]} label="loop" />
+        <RawBlock path={[...path, "loop"]} label="loop" hideLabel />
       </details>
     </div>
   );
@@ -470,7 +469,6 @@ function RunEditor({ path, step }: { path: Path; step: any }) {
         <div className="wb-field w-s wb-open">
           {run.role && run.tasks && (
             <Button
-              size="small"
               icon={<IconEdit />}
               onClick={() =>
                 openFile(`roles/${run.role}/tasks/${run.tasks}.yml`)

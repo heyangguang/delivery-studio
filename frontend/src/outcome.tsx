@@ -436,58 +436,60 @@ export function OutcomeBar({
       {showAccess && (
         <div className="oc-access" role="region" aria-label={bi("连接地址与凭据", "Endpoints & credentials")}>
           <span className="oc-access-lbl">{bi("连接与凭据", "Endpoints & Credentials")}</span>
-          {access.endpoints.map((ep) => {
-            const isCopied = copiedKey === ep.key;
-            return (
-              <span key={ep.key} className="oc-cred-pill">
-                <span className="oc-cred-label">{ep.label}</span>
-                <code className="oc-cred-val mono">{ep.value}</code>
-                <Tooltip content={isCopied ? bi("已复制", "Copied") : bi("复制连接串", "Copy endpoint")} mini>
-                  <button
-                    type="button"
-                    className={`oc-cred-btn ${isCopied ? "copied" : ""}`}
-                    aria-label={bi(`复制 ${ep.label}`, `Copy ${ep.label}`)}
-                    onClick={() => triggerCopy(ep.key, ep.value)}
-                  >
-                    {isCopied ? <IconCheck /> : <IconCopy />}
-                  </button>
-                </Tooltip>
-              </span>
-            );
-          })}
-          {access.credentials.map((cr) => {
-            const isShown = !!revealed[cr.key];
-            const isCopied = copiedKey === cr.key;
-            return (
-              <span key={cr.key} className="oc-cred-pill is-secret">
-                <span className="oc-cred-label">{cr.label}</span>
-                <code className="oc-cred-val mono">
-                  {isShown ? cr.value : "••••••••"}
-                </code>
-                <Tooltip content={isShown ? bi("隐藏凭据", "Hide credential") : bi("显示凭据", "Show credential")} mini>
-                  <button
-                    type="button"
-                    className="oc-cred-btn"
-                    aria-label={`${isShown ? bi("隐藏", "Hide") : bi("显示", "Show")} ${cr.label}`}
-                    aria-pressed={isShown}
-                    onClick={() => toggleReveal(cr.key)}
-                  >
-                    {isShown ? <IconEyeInvisible /> : <IconEye />}
-                  </button>
-                </Tooltip>
-                <Tooltip content={isCopied ? bi("已复制", "Copied") : bi("复制凭据", "Copy credential")} mini>
-                  <button
-                    type="button"
-                    className={`oc-cred-btn ${isCopied ? "copied" : ""}`}
-                    aria-label={bi(`复制 ${cr.label}`, `Copy ${cr.label}`)}
-                    onClick={() => triggerCopy(cr.key, cr.value)}
-                  >
-                    {isCopied ? <IconCheck /> : <IconCopy />}
-                  </button>
-                </Tooltip>
-              </span>
-            );
-          })}
+          <div className="oc-access-pills">
+            {access.endpoints.map((ep) => {
+              const isCopied = copiedKey === ep.key;
+              return (
+                <span key={ep.key} className="oc-cred-pill">
+                  <span className="oc-cred-label">{ep.label}</span>
+                  <code className="oc-cred-val mono">{ep.value}</code>
+                  <Tooltip content={isCopied ? bi("已复制", "Copied") : bi("复制连接串", "Copy endpoint")} mini>
+                    <button
+                      type="button"
+                      className={`oc-cred-btn ${isCopied ? "copied" : ""}`}
+                      aria-label={bi(`复制 ${ep.label}`, `Copy ${ep.label}`)}
+                      onClick={() => triggerCopy(ep.key, ep.value)}
+                    >
+                      {isCopied ? <IconCheck /> : <IconCopy />}
+                    </button>
+                  </Tooltip>
+                </span>
+              );
+            })}
+            {access.credentials.map((cr) => {
+              const isShown = !!revealed[cr.key];
+              const isCopied = copiedKey === cr.key;
+              return (
+                <span key={cr.key} className="oc-cred-pill is-secret">
+                  <span className="oc-cred-label">{cr.label}</span>
+                  <code className="oc-cred-val mono">
+                    {isShown ? cr.value : "••••••••"}
+                  </code>
+                  <Tooltip content={isShown ? bi("隐藏凭据", "Hide credential") : bi("显示凭据", "Show credential")} mini>
+                    <button
+                      type="button"
+                      className="oc-cred-btn"
+                      aria-label={`${isShown ? bi("隐藏", "Hide") : bi("显示", "Show")} ${cr.label}`}
+                      aria-pressed={isShown}
+                      onClick={() => toggleReveal(cr.key)}
+                    >
+                      {isShown ? <IconEyeInvisible /> : <IconEye />}
+                    </button>
+                  </Tooltip>
+                  <Tooltip content={isCopied ? bi("已复制", "Copied") : bi("复制凭据", "Copy credential")} mini>
+                    <button
+                      type="button"
+                      className={`oc-cred-btn ${isCopied ? "copied" : ""}`}
+                      aria-label={bi(`复制 ${cr.label}`, `Copy ${cr.label}`)}
+                      onClick={() => triggerCopy(cr.key, cr.value)}
+                    >
+                      {isCopied ? <IconCheck /> : <IconCopy />}
+                    </button>
+                  </Tooltip>
+                </span>
+              );
+            })}
+          </div>
         </div>
       )}
       <Modal

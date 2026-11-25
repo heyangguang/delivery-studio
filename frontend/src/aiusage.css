@@ -16,7 +16,11 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
-  margin-bottom: 6px;
+  margin-bottom: 14px;
+}
+.au-page > .note {
+  margin: 0 0 14px;
+  border: 1px solid color-mix(in srgb, var(--warn) 28%, var(--line));
 }
 .au-row {
   display: flex;
@@ -24,7 +28,7 @@
   gap: 8px;
 }
 .au-count {
-  margin: 12px 0 6px;
+  margin: 12px 0 10px;
   color: var(--mute);
   font-size: 13px;
   font-variant-numeric: tabular-nums;
@@ -421,7 +425,7 @@
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 0;
-  margin: 16px 0 6px;
+  margin: 14px 0 8px;
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
 }
@@ -558,6 +562,9 @@
   .au-kpi:nth-child(3n + 1) {
     border-left: 0;
   }
+  .au-kpi:nth-child(n + 4) {
+    border-top: 1px solid var(--line);
+  }
   .au-cols {
     grid-template-columns: 1fr;
   }
@@ -571,6 +578,9 @@
   }
   .au-kpi:nth-child(odd) {
     border-left: 0;
+  }
+  .au-kpi:nth-child(n + 3) {
+    border-top: 1px solid var(--line);
   }
   .au-kpi:last-child:nth-child(odd) {
     grid-column: 1 / -1;

@@ -320,7 +320,8 @@ div.auto small {
   display: flex;
   gap: 16px;
   align-items: flex-start;
-  margin-bottom: 20px;
+  padding-bottom: 4px;
+  margin-bottom: 14px;
 }
 .detail-head.flat .detail-title {
   display: block;
@@ -1230,6 +1231,11 @@ body[arco-theme="dark"] .ig-legend path.link-live.f2 {
   background: var(--surface);
   box-shadow: var(--shadow-sm);
   overflow: hidden;
+}
+.tk + .tk,
+.tk + .note,
+.tk + .callout {
+  margin-top: 12px;
 }
 .tk.done {
   border-top: 2px solid var(--ok);
@@ -2846,10 +2852,20 @@ ol.imp-steps code {
 .lp .lib-empty {
   border-top: 1px solid var(--line);
 }
+.lp-body > .lib-empty {
+  border-top: 0;
+}
+.lp-body + .lp-missing {
+  margin-top: 14px;
+}
 
 /* the package list inside its panel */
 .lp .pk-wrap {
   gap: 0;
+}
+.lp-body + .pk-wrap {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
 }
 .lp .pk-bar {
   padding: 2px 20px 14px;
@@ -3248,8 +3264,8 @@ ol.imp-steps code {
   box-sizing: border-box;
   width: 100%;
   display: flex;
-  align-items: center;
-  gap: 8px;
+  align-items: flex-start;
+  gap: 6px 10px;
   flex-wrap: wrap;
   padding: 5px 8px;
   margin: -4px -8px;
@@ -3265,15 +3281,19 @@ ol.imp-steps code {
   box-shadow: var(--ring);
 }
 .host-params-k {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
   font-size: 12px;
   font-weight: 550;
   color: var(--mute);
   flex: none;
 }
 .host-params-chips {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   flex-wrap: wrap;
+  flex: 1 1 200px;
   gap: 6px;
   min-width: 0;
 }
@@ -3282,6 +3302,7 @@ ol.imp-steps code {
   align-items: center;
   height: 22px;
   padding: 0 8px;
+  box-sizing: border-box;
   border-radius: 6px;
   border: 1px solid var(--line);
   background: var(--surface-2);
@@ -3293,18 +3314,21 @@ ol.imp-steps code {
 .host-params-mod {
   display: inline-flex;
   align-items: center;
-  height: 20px;
-  padding: 0 7px;
+  height: 22px;
+  padding: 0 8px;
+  box-sizing: border-box;
   border-radius: 999px;
   background: var(--kyndryl-soft);
   color: var(--kyndryl);
   font-size: 11px;
   font-weight: 600;
+  line-height: 1;
 }
 .host-params-tog {
   margin-left: auto;
   display: inline-flex;
   align-items: center;
+  min-height: 22px;
   gap: 4px;
   font-size: 12px;
   font-weight: 500;

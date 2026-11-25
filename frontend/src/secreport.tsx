@@ -1244,24 +1244,26 @@ export function SecExportModal({
             <span className="sexp-other-lbl">
               {bi("其他标准格式：", "Other formats:")}
             </span>
-            {(
-              [
-                ["markdown", "Markdown (.md)"],
-                ["csv", "CSV 明细 (.csv)"],
-                ...(clusterId
-                  ? []
-                  : ([["cyclonedx", "CycloneDX 1.5 SBOM + VEX"]] as const)),
-              ] as const
-            ).map(([k, lbl]) => (
-              <button
-                key={k}
-                type="button"
-                className={`sexp-mini-fmt ${format === k ? "on" : ""}`}
-                onClick={() => setFormat(k)}
-              >
-                {lbl}
-              </button>
-            ))}
+            <div className="sexp-other-chips">
+              {(
+                [
+                  ["markdown", "Markdown (.md)"],
+                  ["csv", "CSV 明细 (.csv)"],
+                  ...(clusterId
+                    ? []
+                    : ([["cyclonedx", "CycloneDX 1.5 SBOM + VEX"]] as const)),
+                ] as const
+              ).map(([k, lbl]) => (
+                <button
+                  key={k}
+                  type="button"
+                  className={`sexp-mini-fmt ${format === k ? "on" : ""}`}
+                  onClick={() => setFormat(k)}
+                >
+                  {lbl}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 

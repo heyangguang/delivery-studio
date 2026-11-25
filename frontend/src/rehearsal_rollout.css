@@ -7,11 +7,14 @@
   flex-wrap: wrap;
   gap: 8px 14px;
   padding: 9px 13px;
-  margin-bottom: 14px;
+  margin-bottom: 12px;
   border-radius: 10px;
   background: var(--surface-2);
   border: 1px solid var(--line);
   font-size: 12.5px;
+}
+.rh-session > .ro-strip {
+  margin-bottom: 0;
 }
 .ro-strip.is-done {
   background: color-mix(in srgb, #10b981 4%, var(--surface-2));
@@ -19,11 +22,17 @@
 }
 .ro-strip-left {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 7px;
-  flex: 0 1 auto;
+  align-items: flex-start;
+  gap: 8px;
+  flex: 1 1 260px;
   min-width: 0;
+}
+.ro-strip-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  flex: none;
 }
 .ro-strip-right {
   display: inline-flex;
@@ -31,13 +40,20 @@
   flex-wrap: wrap;
   gap: 8px;
   flex: none;
+  margin-left: auto;
 }
 .ro-strip-members {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 5px;
+  flex: 1 1 auto;
   min-width: 0;
+}
+@media (max-width: 520px) {
+  .ro-strip-left {
+    flex-wrap: wrap;
+  }
 }
 .ro-strip-chip {
   all: unset;
@@ -256,20 +272,21 @@ body[arco-theme="dark"] .ro-strip-warn {
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 8px 12px;
-  margin-top: 10px;
-  padding: 8px 12px;
-  border-radius: 9px;
+  margin-top: 0;
+  padding: 9px 13px;
+  border-radius: 10px;
   background: color-mix(in srgb, #10b981 5.5%, var(--surface-2));
   border: 1px solid color-mix(in srgb, #10b981 24%, var(--line));
   font-size: 12.5px;
   color: var(--ink);
 }
 .ro-import-bar-left {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
   min-width: 0;
   flex: 1 1 260px;
+  line-height: 1.5;
 }
 .ro-import-bar-left small {
   color: var(--mute);
@@ -279,6 +296,7 @@ body[arco-theme="dark"] .ro-strip-warn {
   color: #047857;
   font-size: 14px;
   flex: none;
+  margin-top: 2.5px;
 }
 [data-theme="dark"] .ro-import-ic,
 body[arco-theme="dark"] .ro-import-ic {
@@ -290,9 +308,9 @@ body[arco-theme="dark"] .ro-import-ic {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding: 10px 13px;
-  margin-bottom: 12px;
-  border-radius: 9px;
+  padding: 11px 14px;
+  margin-bottom: 0;
+  border-radius: 10px;
   background: color-mix(in srgb, #f59e0b 9%, var(--surface));
   border: 1px solid color-mix(in srgb, #f59e0b 40%, var(--line));
 }
@@ -324,22 +342,30 @@ body[arco-theme="dark"] .ro-strict-gate-body b {
   color: var(--ink-2);
 }
 
-/* Rollout Board Modal */
-.ro-board-modal .arco-modal-header {
+/* Rollout Board, Propagate & Import Modals */
+.ro-board-modal .arco-modal-header,
+.ro-modal .arco-modal-header {
   height: auto;
-  padding: 18px 52px 14px 24px;
+  padding: 16px 52px 14px 24px;
   border-bottom: 1px solid var(--line);
 }
-.ro-board-modal .arco-modal-header .arco-modal-title {
+.ro-board-modal .arco-modal-header .arco-modal-title,
+.ro-modal .arco-modal-header .arco-modal-title {
   text-align: left;
   min-width: 0;
 }
-.ro-board-modal .arco-modal-close-icon {
-  top: 18px;
-  right: 20px;
+.ro-board-modal .arco-modal-close-icon,
+.ro-modal .arco-modal-close-icon {
+  top: 16px;
+  right: 18px;
 }
-.ro-board-modal .arco-modal-content {
+.ro-board-modal .arco-modal-content,
+.ro-modal .arco-modal-content {
   padding: 18px 24px 20px;
+}
+.ro-modal .arco-modal-footer {
+  padding: 12px 24px 16px;
+  border-top: 1px solid var(--line);
 }
 .ro-drawer-head {
   display: flex;
@@ -394,7 +420,7 @@ body[arco-theme="dark"] .ro-strict-gate-body b {
   gap: 2px;
   min-width: 0;
   padding: 9px 12px;
-  border-radius: 9px;
+  border-radius: 10px;
   background: var(--surface-2);
   border: 1px solid var(--line);
   transition:
@@ -608,10 +634,12 @@ body[arco-theme="dark"] .ro-tag.is-here {
   min-width: 0;
 }
 .ro-match-pill {
+  display: inline-flex;
+  align-items: center;
   font-size: 11px;
   font-weight: 600;
-  padding: 1px 7px;
-  border-radius: 5px;
+  padding: 1.5px 7px;
+  border-radius: 6px;
 }
 .ro-match-pill.is-same {
   color: #047857;
@@ -776,8 +804,8 @@ body[arco-theme="dark"] .ro-risk-warn {
 }
 .ro-origin-card {
   min-width: 0;
-  padding: 10px 12px;
-  border-radius: 9px;
+  padding: 10px 13px;
+  border-radius: 10px;
   background: color-mix(in srgb, #10b981 5%, var(--surface-2));
   border: 1px solid color-mix(in srgb, #10b981 24%, var(--line));
   display: flex;
@@ -816,8 +844,8 @@ body[arco-theme="dark"] .ro-risk-warn {
   flex-direction: column;
   gap: 5px;
   min-width: 0;
-  padding: 10px 12px;
-  border-radius: 9px;
+  padding: 10px 13px;
+  border-radius: 10px;
   background: var(--surface);
   border: 1px solid var(--line-strong);
   text-align: left;
@@ -854,6 +882,7 @@ body[arco-theme="dark"] .ro-risk-warn {
 }
 .ro-mode-card p {
   margin: 0;
+  padding-left: 20px;
   font-size: 11.5px;
   line-height: 1.5;
   color: var(--mute);
@@ -912,7 +941,7 @@ body[arco-theme="dark"] .ro-rec {
   max-height: 310px;
   overflow-y: auto;
   border: 1px solid var(--line);
-  border-radius: 9px;
+  border-radius: 10px;
   background: var(--surface);
   scrollbar-width: thin;
   scrollbar-color: var(--line-strong) transparent;
@@ -1178,7 +1207,7 @@ body[arco-theme="dark"] .ro-filter-chip.is-toggle.on em {
   display: inline-flex;
   align-items: center;
   padding: 1.5px 7px;
-  border-radius: 5px;
+  border-radius: 6px;
   font-size: 11px;
   font-weight: 600;
   line-height: 1.4;
@@ -1268,15 +1297,17 @@ body[arco-theme="dark"] .ro-match-pill.is-eff {
   flex-wrap: wrap;
   align-items: center;
   gap: 5px;
-  padding-left: 22px;
+  padding-left: 21px;
 }
 .ro-param-chip {
+  box-sizing: border-box;
   display: inline-block;
   vertical-align: middle;
-  padding: 2px 7px;
-  border-radius: 5px;
+  height: 22px;
+  padding: 1px 7px;
+  border-radius: 6px;
   font-size: 11px;
-  line-height: 1.35;
+  line-height: 18px;
   color: var(--ink-2, var(--ink));
   background: var(--surface-2);
   border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
@@ -1291,14 +1322,18 @@ body[arco-theme="dark"] .ro-match-pill.is-eff {
   color: var(--brand-ink, var(--brand));
 }
 .ro-param-more {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
   border: none;
   background: transparent;
   color: var(--brand-ink, var(--brand));
   font-size: 11px;
   font-weight: 550;
   font-variant-numeric: tabular-nums;
-  padding: 2px 5px;
-  border-radius: 4px;
+  padding: 0 6px;
+  border-radius: 6px;
   cursor: pointer;
   transition:
     background-color 0.16s var(--spring, cubic-bezier(0.22, 1, 0.36, 1)),
@@ -1316,7 +1351,7 @@ body[arco-theme="dark"] .ro-match-pill.is-eff {
   flex-wrap: wrap;
   align-items: center;
   gap: 5px 11px;
-  padding-left: 22px;
+  padding-left: 21px;
   font-size: 11.5px;
   font-variant-numeric: tabular-nums;
   color: var(--mute);
@@ -1367,7 +1402,7 @@ body[arco-theme="dark"] .ro-tpl-batch {
 }
 
 .ro-tpl-warn {
-  padding-left: 22px;
+  padding-left: 21px;
 }
 
 @keyframes ro-variants-in {
@@ -1382,7 +1417,7 @@ body[arco-theme="dark"] .ro-tpl-batch {
 }
 
 .ro-tpl-variants {
-  margin-left: 22px;
+  margin-left: 21px;
   margin-top: 2px;
   padding: 9px 10px;
   border-radius: 8px;
@@ -1512,8 +1547,8 @@ body[arco-theme="dark"] .ro-var-tag {
 }
 
 .ro-err {
-  padding: 8px 11px;
-  border-radius: 7px;
+  padding: 8px 12px;
+  border-radius: 8px;
   background: var(--bad-soft);
   border: 1px solid var(--bad-line);
   color: var(--bad);
@@ -1529,7 +1564,7 @@ body[arco-theme="dark"] .ro-var-tag {
   color: var(--mute);
   font-size: 13px;
   border: 1px dashed var(--line-strong);
-  border-radius: 9px;
+  border-radius: 10px;
 }
 .ro-modal-foot {
   display: flex;

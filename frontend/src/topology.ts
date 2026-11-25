@@ -1,5 +1,11 @@
 import React from 'react';
-import type { ChangeRehearsal, FlowView, ImportedMeta, InstanceView } from './shared';
+import type {
+  ChangeRehearsal,
+  ClusterView,
+  FlowView,
+  ImportedMeta,
+  InstanceView,
+} from './shared';
 import { bi } from './i18n';
 
 const STALE_CHUNK_RE =
@@ -141,6 +147,177 @@ export function localizeEndpointTitle(epName?: string, role?: string): string {
     return bi('管理入口', 'Admin');
   }
   return bi('读写入口', 'Read/Write');
+}
+
+export function localizePortName(name?: string, component?: string): string {
+  const raw = (name || '').trim();
+  const low = raw.toLowerCase();
+  const comp = (component || '').trim().toLowerCase();
+  if (low === 'postgresql' || low === 'postgres') return 'PostgreSQL';
+  if (low === 'mysql') return 'MySQL';
+  if (low === 'redis') return 'Redis';
+  if (low === 'sentinel' || low === 'redis-sentinel') return 'Redis Sentinel';
+  if (low === 'patroni-rest' || low === 'patroni') return 'Patroni API';
+  if (low === 'client') {
+    return comp === 'etcd'
+      ? bi('etcd 客户端', 'etcd client')
+      : bi('客户端', 'Client');
+  }
+  if (low === 'peer') {
+    return comp === 'etcd'
+      ? bi('etcd 节点间', 'etcd peer')
+      : bi('节点间', 'Peer');
+  }
+  if (low === 'stats') return bi('监控统计', 'Stats');
+  if (low === 'metrics') return bi('监控指标', 'Metrics');
+  if (low === 'readwrite' || low === 'writer' || low === 'rw') {
+    return bi('读写', 'RW');
+  }
+  if (low === 'readonly' || low === 'reader' || low === 'ro') {
+    return bi('只读', 'RO');
+  }
+  if (low === 'admin' || low === 'mgmt' || low === 'console') {
+    return bi('管理', 'Admin');
+  }
+  return raw;
+}
+
+export type ClusterStackPill = {
+  key: string;
+  component: string;
+  icon?: string;
+  title: string;
+  version?: string;
+  kindLabel: string;
+  primary?: boolean;
+};
+
+function inferCompanionKind(component?: string): string {
+  const low = (component || '').trim().toLowerCase().replace(/_/g, '-');
+  if (['patroni', 'redis-sentinel', 'sentinel', 'orchestrator', 'repmgr'].includes(low)) {
+    return 'ha_manager';
+  }
+  if (['etcd', 'zookeeper', 'consul', 'clickhouse-keeper'].includes(low)) {
+    return 'dcs';
+  }
+  if (low === 'keepalived') return 'vip';
+  if (['haproxy', 'nginx', 'proxysql', 'maxscale', 'obproxy', 'envoy'].includes(low)) {
+    return 'proxy';
+  }
+  if (['pgbouncer', 'odyssey'].includes(low)) return 'pooler';
+  if (['pgbackrest', 'barman', 'wal-g', 'xtrabackup'].includes(low)) {
+    return 'backup';
+  }
+  if (
+    low === 'prometheus' ||
+    low === 'node-exporter' ||
+    low.endsWith('-exporter')
+  ) {
+    return 'monitoring';
+  }
+  return 'other';
+}
+
+export function buildClusterStackPills(
+  c: ClusterView,
+  real: DisplayInstance[],
+): ClusterStackPill[] {
+  const canon = (s?: string) => (s || '').trim().toLowerCase().replace(/_/g, '-');
+  const imp = c.imported;
+  const main =
+    real.find((i) => i.id === c.app_id || i.component === c.app_id) || real[0];
+  const primaryComp = (main?.component || c.app_id || '').trim();
+  const primaryKey = canon(primaryComp) || 'primary';
+
+  const out: ClusterStackPill[] = [];
+  const byKey = new Map<string, ClusterStackPill>();
+
+  const primaryPill: ClusterStackPill = {
+    key: primaryKey,
+    component: primaryComp || c.app_id,
+    icon: imp?.icon || c.icon || primaryComp || c.app_id,
+    title: imp?.display_name || main?.title || c.app_name || c.app_id,
+    version: (imp?.exact_version || main?.version || c.version || '').trim() || undefined,
+    kindLabel: bi('主组件', 'Primary'),
+    primary: true,
+  };
+  out.push(primaryPill);
+  byKey.set(primaryKey, primaryPill);
+
+  for (const inst of real) {
+    if (inst === main || inst.external) continue;
+    const ck = canon(inst.component);
+    if (!ck || byKey.has(ck)) continue;
+    const pill: ClusterStackPill = {
+      key: ck,
+      component: inst.component,
+      icon: inst.component,
+      title: inst.title || inst.component,
+      version: (inst.version || '').trim() || undefined,
+      kindLabel: companionKindMeta(inferCompanionKind(inst.component)).label,
+    };
+    out.push(pill);
+    byKey.set(ck, pill);
+  }
+
+  if (
+    (primaryKey === 'postgresql' || canon(c.app_id) === 'postgresql') &&
+    Boolean(main?.params?.backup_retention_full) &&
+    !byKey.has('pgbackrest')
+  ) {
+    const pill: ClusterStackPill = {
+      key: 'pgbackrest',
+      component: 'pgbackrest',
+      icon: 'pgbackrest',
+      title: 'pgBackRest',
+      kindLabel: bi('备份工具', 'Backup'),
+    };
+    out.push(pill);
+    byKey.set('pgbackrest', pill);
+  }
+
+  if (
+    (primaryKey === 'redis' || primaryKey === 'valkey') &&
+    ((main?.roles?.sentinel?.length || 0) > 0 ||
+      (main?.ports || []).some((pt) => (pt.Name || '').toLowerCase() === 'sentinel')) &&
+    !byKey.has('redis-sentinel')
+  ) {
+    const pill: ClusterStackPill = {
+      key: 'redis-sentinel',
+      component: 'redis',
+      icon: 'redis',
+      title: 'Redis Sentinel',
+      kindLabel: bi('高可用管理', 'HA Sentinel'),
+    };
+    out.push(pill);
+    byKey.set('redis-sentinel', pill);
+  }
+
+  for (const cm of imp?.companions || []) {
+    const ck = canon(cm.component);
+    if (!ck) continue;
+    const existing = byKey.get(ck);
+    if (existing) {
+      if (!existing.version && cm.version) existing.version = cm.version;
+      if (cm.display_name) existing.title = cm.display_name;
+      if (cm.kind && !existing.primary) {
+        existing.kindLabel = companionKindMeta(cm.kind).label;
+      }
+      continue;
+    }
+    const pill: ClusterStackPill = {
+      key: ck,
+      component: cm.component,
+      icon: cm.component,
+      title: cm.display_name || cm.component,
+      version: (cm.version || '').trim() || undefined,
+      kindLabel: companionKindMeta(cm.kind).label,
+    };
+    out.push(pill);
+    byKey.set(ck, pill);
+  }
+
+  return out;
 }
 
 /** Light client-side detector for legacy single-instance clusters whose metadata mentions unmodeled companions. */

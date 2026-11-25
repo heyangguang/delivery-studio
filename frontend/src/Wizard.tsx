@@ -4274,13 +4274,7 @@ function DeliverySecurityNotice({
   const osHigh = risks.reduce((s, r) => s + (r.os_high ?? 0), 0);
 
   return (
-    <div
-      className="review-block"
-      style={{
-        borderColor: "var(--warn-line)",
-        background: "var(--warn-soft)",
-      }}
-    >
+    <div className="review-block is-sec-notice">
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
         <b style={{ color: "var(--warn)", fontSize: 13 }}>
           <IconExclamationCircleFill style={{ marginRight: 6 }} />

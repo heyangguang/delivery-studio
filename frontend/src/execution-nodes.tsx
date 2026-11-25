@@ -190,7 +190,7 @@ journalctl -u middleware-execution -f`}
             <summary>
               {bi("手工分步安装与文件下载（高级）", "Manual step-by-step installation (Advanced)")}
             </summary>
-            <div className="en-downloads" style={{ margin: "12px 0" }}>
+            <div className="en-downloads">
               <Button
                 size="small"
                 href={withLang("/api/settings/execution-nodes/binary")}
@@ -1425,16 +1425,18 @@ export function ExecutionNodes() {
                     <span className="en-url-chips-label">
                       {bi("检测到本机地址：", "Detected addresses:")}
                     </span>
-                    {bootInfo.suggested_urls.map((u) => (
-                      <button
-                        key={u}
-                        type="button"
-                        className={`en-url-chip${cleanHubUrl === u ? " on" : ""}`}
-                        onClick={() => setHubUrl(u)}
-                      >
-                        {u}
-                      </button>
-                    ))}
+                    <div className="en-url-chip-list">
+                      {bootInfo.suggested_urls.map((u) => (
+                        <button
+                          key={u}
+                          type="button"
+                          className={`en-url-chip${cleanHubUrl === u ? " on" : ""}`}
+                          onClick={() => setHubUrl(u)}
+                        >
+                          {u}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 )}
                 {remoteTargetLoopbackWarn && (
@@ -1497,7 +1499,7 @@ export function ExecutionNodes() {
                 )}
               </p>
               {bundleError && (
-                <div className="en-error" role="alert" style={{ marginBottom: 12 }}>
+                <div className="en-error" role="alert">
                   <IconExclamationCircle />
                   <span>{bundleError}</span>
                   <AIHelpButton

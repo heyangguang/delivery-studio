@@ -28,7 +28,7 @@
     -webkit-backdrop-filter: saturate(180%) blur(16px);
     border-bottom: 1px solid color-mix(in srgb, var(--line) 65%, transparent);
   }
-  .ap-head ~ .ap-list {
+  .ap-head:not(:has(+ .ap-step)) ~ .ap-list {
     margin-top: -104px;
     padding-top: 104px;
     scroll-padding-top: 116px;
@@ -594,12 +594,14 @@
   cursor: pointer;
 }
 .ap-step {
+  position: relative;
+  z-index: 5;
   display: flex;
   flex: none;
   align-items: center;
   gap: 10px;
   min-width: 0;
-  margin: 0 auto;
+  margin: 10px auto 8px;
   padding: 7px 14px;
   width: min(820px, calc(100% - 40px));
   border: 1px solid var(--line);
@@ -681,6 +683,11 @@
 .ap-hero .ap-compose {
   width: 100%;
 }
+.ap-hero .aq-tray {
+  width: 100%;
+  margin: 0;
+  box-sizing: border-box;
+}
 .ap-suggest {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -748,14 +755,33 @@
   font-size: 12px;
 }
 .ap-recent {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  gap: 6px 8px;
+  display: inline-grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 6px 10px;
+  max-width: 100%;
   margin-top: 6px;
   color: var(--faint);
   font-size: 12.5px;
+}
+.ap-recent > span:first-child {
+  white-space: nowrap;
+}
+.ap-recent-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  min-width: 0;
+}
+@media (max-width: 560px) {
+  .ap-recent {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+  }
+  .ap-recent-chips {
+    justify-content: center;
+  }
 }
 .ap-recent button {
   max-width: 240px;
@@ -819,6 +845,7 @@
   gap: 10px;
   margin-bottom: 8px;
   padding: 8px 10px 8px 14px;
+  border: 1px solid var(--ok-line);
   border-radius: 12px;
   color: var(--ink-2);
   font-size: 13px;

@@ -1043,7 +1043,7 @@ export function TaskCard({
       )}
 
       {failed && task.error && !bad && (
-        <div className="note warn">{task.error}</div>
+        <div className="note warn tk-err-note">{task.error}</div>
       )}
     </section>
   );

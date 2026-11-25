@@ -10,7 +10,7 @@
   transition: border-color 0.16s var(--spring);
 }
 .aq-tray.compact {
-  margin: 6px 18px 0;
+  margin: 8px 14px 0;
   border-radius: 12px;
 }
 

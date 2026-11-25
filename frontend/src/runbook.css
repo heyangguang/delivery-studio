@@ -83,7 +83,7 @@ body[arco-theme="dark"] .term {
   align-items: center;
   justify-content: space-between;
   gap: 10px 14px;
-  margin: 10px 0 4px;
+  margin: 0;
   padding: 10px 14px;
   border-radius: 10px;
   border: 1px solid color-mix(in srgb, var(--warn) 36%, transparent);
@@ -1527,7 +1527,7 @@ body[arco-theme="dark"] .rstep.failed .rstep-check {
 }
 
 .rb-logs {
-  margin: 0 0 12px;
+  margin: 0;
   font-size: 13px;
 }
 .rb-logs summary {
@@ -1855,10 +1855,10 @@ body[arco-theme="dark"] .rstep.failed .rstep-check {
   border-color: color-mix(in srgb, var(--warn) 26%, transparent);
 }
 .rec-attempts {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 6px 10px;
   margin-bottom: 10px;
   padding-bottom: 10px;
   border-bottom: 1px solid color-mix(in srgb, var(--line) 85%, transparent);
@@ -1866,6 +1866,7 @@ body[arco-theme="dark"] .rstep.failed .rstep-check {
 .rec-attempts-label {
   font-size: 11.5px;
   font-weight: 580;
+  line-height: 24px;
   color: var(--mute);
   white-space: nowrap;
 }
@@ -1873,6 +1874,7 @@ body[arco-theme="dark"] .rstep.failed .rstep-check {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  min-width: 0;
 }
 .rec-att-tab {
   all: unset;

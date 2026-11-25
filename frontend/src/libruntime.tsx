@@ -223,6 +223,7 @@ function NewRuntime({
         <div className="st-field">
           <span>{bi("准备好后设为默认", "Set as default when ready")}</span>
           <Checkbox.Group
+            className="rtl-os-checks"
             value={defs}
             onChange={setDefs}
             options={st.platforms.map((p) => ({
@@ -301,17 +302,19 @@ function RuntimeGroup({
             onClick={() => setSiblingsOpen(!siblingsOpen)}
           >
             <span className="rtl-siblings-left">
-              <span className="rtl-siblings-dot" aria-hidden />
-              <span className="rtl-siblings-label">
-                {siblingsOpen
-                  ? bi(
-                      `同版本历史构建（仅快照留档，当前生效为上方默认版）`,
-                      `Historical builds of v${main.ansible} (archived snapshots; default above is active)`,
-                    )
-                  : bi(
-                      `同版本另有 ${twins.length} 个历史构建`,
-                      `${twins.length} historical ${twins.length === 1 ? "build" : "builds"} of v${main.ansible}`,
-                    )}
+              <span className="rtl-siblings-head">
+                <span className="rtl-siblings-dot" aria-hidden />
+                <span className="rtl-siblings-label">
+                  {siblingsOpen
+                    ? bi(
+                        `同版本历史构建（仅快照留档，当前生效为上方默认版）`,
+                        `Historical builds of v${main.ansible} (archived snapshots; default above is active)`,
+                      )
+                    : bi(
+                        `同版本另有 ${twins.length} 个历史构建`,
+                        `${twins.length} historical ${twins.length === 1 ? "build" : "builds"} of v${main.ansible}`,
+                      )}
+                </span>
               </span>
               {siblingsOpen ? (
                 <em className="rtl-siblings-count num">{twins.length}</em>
@@ -519,36 +522,44 @@ function RuntimeRow({
             </span>
           )}
           <span className="rtl-name">
-            <span className="rtl-title-line">
-              {isSibling ? (
-                <>
-                  <span className="rtl-sub-title">
-                    {bi("历史构建", "Historical build")}
-                  </span>
-                  <code className="rtl-id mono is-strong" title={r.id}>
-                    {r.id.slice(0, 10)}
-                  </code>
-                </>
-              ) : (
-                <>
-                  <b>ansible-core {r.ansible}</b>
-                  <code className="rtl-id mono" title={r.id}>
-                    {r.id.slice(0, 8)}
-                  </code>
-                </>
-              )}
-              {r.default.map((pl) => (
-                <span key={pl} className="rtl-os-badge">
-                  <OsLogo id={pl} size={14} />
-                  {short(st.platforms.find((p) => p.id === pl)?.title || pl)}{" "}
-                  {bi("默认", "Default")}
-                </span>
-              ))}
-              {diffSummary && (
-                <span
-                  className={`rtl-diff-pill ${wheelDiffs.length ? "has-diff" : ""}`}
-                >
-                  {diffSummary}
+            <span
+              className={`rtl-title-line ${r.default.length > 0 || diffSummary ? "has-tags" : ""}`}
+            >
+              <span className="rtl-title-id">
+                {isSibling ? (
+                  <>
+                    <span className="rtl-sub-title">
+                      {bi("历史构建", "Historical build")}
+                    </span>
+                    <code className="rtl-id mono is-strong" title={r.id}>
+                      {r.id.slice(0, 10)}
+                    </code>
+                  </>
+                ) : (
+                  <>
+                    <b>ansible-core {r.ansible}</b>
+                    <code className="rtl-id mono" title={r.id}>
+                      {r.id.slice(0, 8)}
+                    </code>
+                  </>
+                )}
+              </span>
+              {(r.default.length > 0 || Boolean(diffSummary)) && (
+                <span className="rtl-title-tags">
+                  {r.default.map((pl) => (
+                    <span key={pl} className="rtl-os-badge">
+                      <OsLogo id={pl} size={14} />
+                      {short(st.platforms.find((p) => p.id === pl)?.title || pl)}{" "}
+                      {bi("默认", "Default")}
+                    </span>
+                  ))}
+                  {diffSummary && (
+                    <span
+                      className={`rtl-diff-pill ${wheelDiffs.length ? "has-diff" : ""}`}
+                    >
+                      {diffSummary}
+                    </span>
+                  )}
                 </span>
               )}
             </span>
@@ -711,18 +722,20 @@ function RuntimeRow({
                   <li key={w.file} className={isChanged ? "is-diff" : ""}>
                     <span className="rtl-pkg-id">
                       <span className="mono rtl-w">{w.name}</span>
-                      <span className="mono rtl-ver">{w.version}</span>
-                      {isChanged && (
-                        <span
-                          className="rtl-ver-diff mono"
-                          title={bi(
-                            `当前默认构建（${baseIdShort}）使用版本：${baseVer ?? "无"}`,
-                            `Current default build (${baseIdShort}) uses: ${baseVer ?? "none"}`,
-                          )}
-                        >
-                          {bi(`当前默认 ${baseVer ?? "无"}`, `default ${baseVer ?? "none"}`)}
-                        </span>
-                      )}
+                      <span className="rtl-pkg-vers">
+                        <span className="mono rtl-ver">{w.version}</span>
+                        {isChanged && (
+                          <span
+                            className="rtl-ver-diff mono"
+                            title={bi(
+                              `当前默认构建（${baseIdShort}）使用版本：${baseVer ?? "无"}`,
+                              `Current default build (${baseIdShort}) uses: ${baseVer ?? "none"}`,
+                            )}
+                          >
+                            {bi(`当前默认 ${baseVer ?? "无"}`, `default ${baseVer ?? "none"}`)}
+                          </span>
+                        )}
+                      </span>
                     </span>
                     <span className="rtl-via">
                       <span className={`rtl-via-tag via-${w.via || "lib"}`}>

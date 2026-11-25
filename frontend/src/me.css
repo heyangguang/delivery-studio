@@ -97,8 +97,8 @@
   bottom: -1px;
   left: 0;
   height: 2px;
-  border-radius: 2px;
-  background: var(--brand);
+  border-radius: 2px 2px 0 0;
+  background: var(--kyndryl);
   pointer-events: none;
   will-change: transform, width;
 }
@@ -668,20 +668,25 @@ body[arco-theme="dark"] .me-res .rp-ic.k-mcp {
 .me-chip {
   display: inline-flex;
   align-items: center;
-  padding: 2px 9px;
+  height: 22px;
+  padding: 0 9px;
+  box-sizing: border-box;
   border-radius: 999px;
+  border: 1px solid transparent;
   font-size: 12px;
   font-weight: 550;
-  line-height: 18px;
+  line-height: 1;
+  white-space: nowrap;
 }
 .me-chip.role {
   color: var(--brand-ink);
   background: var(--brand-soft);
-  border: 1px solid color-mix(in srgb, var(--brand) 16%, transparent);
+  border-color: color-mix(in srgb, var(--brand) 18%, transparent);
 }
 .me-chip.team {
   color: var(--ok);
   background: var(--ok-soft);
+  border-color: color-mix(in srgb, var(--ok) 22%, transparent);
 }
 .me-facts-inline {
   display: flex;
@@ -723,9 +728,12 @@ body[arco-theme="dark"] .me-res .rp-ic.k-mcp {
   padding: 0 12px;
   font-size: 13.5px;
 }
+.me-banner .me-tabs button.on svg {
+  color: var(--kyndryl);
+}
 .me-banner .me-tabs-bar {
   bottom: 0;
-  height: 2.5px;
+  height: 2px;
 }
 
 /* Shared Elevated Card Surface */
@@ -814,12 +822,15 @@ body[arco-theme="dark"] .me-res .rp-ic.k-mcp {
 .me-pill {
   display: inline-flex;
   align-items: center;
-  padding: 1px 8px;
+  height: 22px;
+  padding: 0 8px;
+  box-sizing: border-box;
   border-radius: 999px;
   color: var(--mute);
   font-size: 11.5px;
   font-weight: 600;
-  line-height: 19px;
+  line-height: 1;
+  white-space: nowrap;
   background: var(--surface-2);
   border: 1px solid var(--line);
 }
@@ -847,7 +858,7 @@ body[arco-theme="dark"] .me-res .rp-ic.k-mcp {
 .me-aside {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 20px;
   min-width: 0;
 }
 .me-card-rows {
@@ -987,8 +998,13 @@ body[arco-theme="dark"] .me-res .rp-ic.k-mcp {
 /* ---------------------------------------------------------------- Sign-in & Security Tab */
 .me-offline,
 .me-sess-err {
+  align-items: center;
   margin-bottom: 16px;
   border-radius: 10px;
+}
+.me-offline + .me-offline,
+.me-sess-err + .me-sess-err {
+  margin-top: -4px;
 }
 
 /* 3-card security KPI strip */
@@ -1220,21 +1236,31 @@ body[arco-theme="dark"] .me-res .rp-ic.k-mcp {
   font-weight: 600;
 }
 .me-cur-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
   padding: 0 7px;
+  box-sizing: border-box;
   border-radius: 999px;
   font-size: 11px;
   font-weight: 600;
-  line-height: 18px;
+  line-height: 1;
+  white-space: nowrap;
   color: var(--brand-ink);
   background: var(--brand-soft);
   border: 1px solid color-mix(in srgb, var(--brand) 22%, transparent);
 }
 .me-kind-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
   padding: 0 6px;
+  box-sizing: border-box;
   border-radius: 5px;
   font-size: 11px;
   font-weight: 500;
-  line-height: 18px;
+  line-height: 1;
+  white-space: nowrap;
   color: var(--mute);
   background: var(--surface-2);
   border: 1px solid var(--line);
@@ -1242,21 +1268,36 @@ body[arco-theme="dark"] .me-res .rp-ic.k-mcp {
 .me-dev-meta {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 7px;
+  align-items: flex-start;
+  gap: 4px 8px;
   color: var(--mute);
   font-size: 12px;
 }
-.me-dev-meta i {
-  font-style: normal;
-  color: var(--faint);
+.me-dev-times {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  flex: 1 1 200px;
+  min-width: 0;
+  min-height: 20px;
+  gap: 2px 10px;
+  line-height: 1.45;
+}
+.me-dev-times > span {
+  white-space: nowrap;
 }
 .me-ip-chip {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  height: 20px;
   padding: 0 6px;
+  box-sizing: border-box;
   border-radius: 5px;
   color: var(--ink-2);
   font-size: 11.5px;
-  line-height: 18px;
+  line-height: 1;
+  white-space: nowrap;
   background: var(--surface-2);
   border: 1px solid var(--line);
 }
@@ -1268,12 +1309,16 @@ body[arco-theme="dark"] .me-res .rp-ic.k-mcp {
 .me-using-pill {
   display: inline-flex;
   align-items: center;
+  height: 24px;
   gap: 6px;
-  padding: 3px 10px;
+  padding: 0 10px;
+  box-sizing: border-box;
   border-radius: 999px;
   color: var(--ok);
   font-size: 12px;
   font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
   background: var(--ok-soft);
 }
 .me-using-pill i {

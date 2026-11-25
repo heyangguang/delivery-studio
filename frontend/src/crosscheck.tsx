@@ -225,7 +225,7 @@ export function CrossCheck({
         </Spin>
 
         {error && (
-          <div className="cc-banner bad" role="alert">
+          <div className="cc-banner bad" role="alert" style={{ marginTop: 12 }}>
             <IconCloseCircleFill />
             <span>{error}</span>
           </div>

@@ -384,7 +384,7 @@ export function RuntimePanel({ p }: { p: PlatformStatus }) {
             </span>
           )}
         </div>
-        <span className="row-gap">
+        <div className="lp-actions">
           {r && (
             <Button
               type="secondary"
@@ -399,7 +399,7 @@ export function RuntimePanel({ p }: { p: PlatformStatus }) {
               ? bi("管理运行环境", "Manage runtimes")
               : bi("查看运行环境", "View runtimes")}
           </Button>
-        </span>
+        </div>
       </div>
       {r && open && (
         <div className="lp-body rt">
@@ -1065,18 +1065,22 @@ function VersionPicker({
             onClick={() => onChange(v.version)}
           >
             <span className="vp-radio" aria-hidden />
-            <span className="mono vp-ver">{v.version}</span>
-            {k === 0 && <span className="vp-tag new">{bi("最新", "Latest")}</span>}
-            {mixed && (
-              <span className={`vp-tag ${channel(v).tone}`}>
-                {channel(v).text}
-              </span>
-            )}
-            {v.have && (
-              <span className="vp-have">
-                <IconCheck /> {bi("已在库", "In library")}
-              </span>
-            )}
+            <span className="vp-main">
+              <span className="mono vp-ver">{v.version}</span>
+              {k === 0 && (
+                <span className="vp-tag new">{bi("最新", "Latest")}</span>
+              )}
+              {mixed && (
+                <span className={`vp-tag ${channel(v).tone}`}>
+                  {channel(v).text}
+                </span>
+              )}
+              {v.have && (
+                <span className="vp-have">
+                  <IconCheck /> {bi("已在库", "In library")}
+                </span>
+              )}
+            </span>
             <span className="num small faint vp-size">{size(v.size)}</span>
           </button>
         );

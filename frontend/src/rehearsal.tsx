@@ -3970,6 +3970,7 @@ function ImageLightbox({
       visible
       alignCenter
       footer={null}
+      className="rh-modal"
       title={
         <span className="rh-lb-title">
           <span>{cur.label}</span>
@@ -6694,6 +6695,7 @@ export function ClusterRehearsal({
         <Modal
           visible
           footer={null}
+          className="rh-modal"
           title={bi("当前交付基线", "Delivery Baseline")}
           onCancel={() => setDeliveryOpen(false)}
           style={{ width: "min(94vw, 480px)" }}
@@ -8189,13 +8191,15 @@ const ProbeExecutionKit = React.memo(function ProbeExecutionKit({
             <span className="rh-probe-runbar-lbl">
               {bi("现场运行方式", "Run command")}
             </span>
-            <code className="mono">{`bash /tmp/${fileName}`}</code>
-            <span className="rh-probe-runbar-tip">
-              {bi(
-                "请用 bash 执行（勿用 sh，脚本已内置 bash 自切换保护）",
-                "Run with bash (not sh; script includes auto bash guard)",
-              )}
-            </span>
+            <div className="rh-probe-runbar-val">
+              <code className="mono">{`bash /tmp/${fileName}`}</code>
+              <span className="rh-probe-runbar-tip">
+                {bi(
+                  "请用 bash 执行（勿用 sh，脚本已内置 bash 自切换保护）",
+                  "Run with bash (not sh; script includes auto bash guard)",
+                )}
+              </span>
+            </div>
           </div>
           <CopyCodeBtn
             text={`bash /tmp/${fileName}`}
@@ -13854,6 +13858,8 @@ function RehearsalSecurityBanner({
 
       <Modal
         visible={modalOpen}
+        alignCenter
+        className="rh-modal"
         title={bi("回写安全中心 VEX 处置状态", "Sync VEX Status to Security Center")}
         onCancel={() => !busy && setModalOpen(false)}
         onOk={() => void submitSyncVex()}
@@ -14253,7 +14259,7 @@ const ProductionApplyModal = React.memo(function ProductionApplyModal({
       visible={visible}
       alignCenter
       wrapClassName="ad-wu-wrap"
-      className="rh-apply-modal"
+      className="rh-modal rh-apply-modal"
       style={{ transformOrigin: "center center" }}
       focusLock={false}
       autoFocus={false}
@@ -14647,7 +14653,7 @@ const ProductionVoidModal = React.memo(function ProductionVoidModal({
       visible={visible}
       alignCenter
       wrapClassName="ad-wu-wrap"
-      className="rh-void-modal"
+      className="rh-modal rh-void-modal"
       style={{ transformOrigin: "center center" }}
       focusLock={false}
       autoFocus={false}

@@ -6,6 +6,12 @@
   padding: 28px clamp(16px, 3vw, 40px) 64px;
   transition: background-color 0.2s var(--spring);
 }
+.rp-detail > .mf,
+.rp-detail > .mf-view {
+  max-width: 1100px;
+  margin: 0;
+  padding: 0;
+}
 .mf.drag {
   border-radius: 20px;
   background: var(--brand-soft);
@@ -23,9 +29,10 @@
   min-width: 0;
 }
 .mf-head h2 {
-  margin: 0 0 4px;
-  font-size: 22px;
+  margin: 0 0 6px;
+  font-size: 24px;
   font-weight: 700;
+  letter-spacing: -0.025em;
 }
 .mf-head p {
   max-width: 560px;
@@ -46,7 +53,7 @@
   flex-wrap: wrap;
   gap: 10px 16px;
   align-items: center;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
   padding-bottom: 12px;
   border-bottom: 1px solid var(--line);
 }
@@ -165,9 +172,17 @@
     background-color 0.18s var(--spring),
     transform 0.16s var(--spring);
 }
-.mf-all:hover,
-.mf-all.on {
+.mf-all:hover {
   background: var(--hover);
+}
+.mf-all.on {
+  background: var(--surface);
+  box-shadow:
+    var(--shadow-sm),
+    0 0 0 1px var(--brand-line);
+}
+.mf-all.on .rp-t b {
+  color: var(--brand-ink);
 }
 .mf-all:focus-visible {
   outline: none;
@@ -393,10 +408,14 @@
   background: color-mix(in srgb, var(--ink) 28%, transparent);
 }
 
+.arco-input-inner-wrapper + .mf-crumbs {
+  margin-top: 10px;
+}
 .mf-pick {
   max-height: 280px;
-  margin: 6px 0 0;
-  padding: 0;
+  margin: 10px 0 0;
+  padding: 6px 0 0;
+  border-top: 1px solid var(--line);
   overflow: auto;
   list-style: none;
 }
@@ -468,17 +487,20 @@
   flex-wrap: wrap;
   gap: 14px;
   align-items: center;
-  margin-bottom: 18px;
+  padding-bottom: 18px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--line);
 }
 .mf-view > header > div {
   flex: 1;
   min-width: min(200px, 100%);
 }
 .mf-view h2 {
-  margin: 0 0 2px;
+  margin: 0 0 4px;
   overflow-wrap: anywhere;
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 700;
+  letter-spacing: -0.02em;
 }
 .mf-view header p {
   margin: 0;

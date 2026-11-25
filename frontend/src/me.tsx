@@ -305,7 +305,9 @@ export function MePage({
               onClick={() => open(s.id)}
             >
               {s.icon}
-              {s.title}
+              <span className="utabs-txt" data-text={s.title}>
+                {s.title}
+              </span>
             </button>
           ))}
         </div>
@@ -1086,18 +1088,19 @@ function SecurityView({ me, act }: { me: Session; act: Activity | null }) {
                               <span className="me-ip-chip mono">
                                 {s.ip || bi("未知来源", "Unknown IP")}
                               </span>
-                              <span>
-                                {bi(
-                                  `登录于 ${stamp(s.created_at)}`,
-                                  `Signed in ${stamp(s.created_at)}`,
-                                )}
-                              </span>
-                              <i aria-hidden>·</i>
-                              <span>
-                                {bi(
-                                  `在线 ${formatDuration(s.duration_seconds)}（活跃 ${formatDuration(s.active_seconds)}）`,
-                                  `Online ${formatDuration(s.duration_seconds)} (active ${formatDuration(s.active_seconds)})`,
-                                )}
+                              <span className="me-dev-times">
+                                <span>
+                                  {bi(
+                                    `登录于 ${stamp(s.created_at)}`,
+                                    `Signed in ${stamp(s.created_at)}`,
+                                  )}
+                                </span>
+                                <span>
+                                  {bi(
+                                    `在线 ${formatDuration(s.duration_seconds)}（活跃 ${formatDuration(s.active_seconds)}）`,
+                                    `Online ${formatDuration(s.duration_seconds)} (active ${formatDuration(s.active_seconds)})`,
+                                  )}
+                                </span>
                               </span>
                             </div>
                           </div>

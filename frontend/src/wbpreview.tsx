@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Button, Drawer, Select, Spin } from "@arco-design/web-react";
+import { Button, Drawer, Input, Select, Spin } from "@arco-design/web-react";
 import {
   IconCheckCircle,
   IconCloseCircle,
@@ -1035,15 +1035,16 @@ function SampleEditor({
                   aria-label={bi("值", "Value")}
                 />
               ) : (
-                <input
-                  className="arco-input arco-input-size-small wb-mono"
+                <Input
+                  size="small"
+                  className="wb-mono"
                   value={v}
                   placeholder={
                     def?.default !== undefined
                       ? bi(`默认 ${String(def.default)}`, `Default ${String(def.default)}`)
                       : bi("值", "Value")
                   }
-                  onChange={(e) => setRow(i, k, e.target.value)}
+                  onChange={(nv) => setRow(i, k, nv)}
                   aria-label={bi("值", "Value")}
                 />
               )}

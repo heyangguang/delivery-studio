@@ -1,4 +1,5 @@
 import {
+  buildClusterStackPills,
   companionKindMeta,
   computeEffectiveClusterChanges,
   detectMissingCompanionsFromMeta,
@@ -6,6 +7,7 @@ import {
   hostStorage,
   lazySubView,
   localizeEndpointTitle,
+  localizePortName,
 } from "./topology";
 import { ExecutionHostSummary } from "./execution-placement";
 import {SchemeInfo, schemeName} from "./scheme";
@@ -1347,25 +1349,27 @@ function Overview({
           {/* Component Architecture Stack Strip */}
           <div className="cl-imp-stack">
             <span className="cl-imp-stack-lbl">{bi("架构组件栈", "Stack")}</span>
-            <span className="cl-imp-comp-pill is-primary">
-              <AppGlyph id={c.app_id} icon={c.icon} size={16} />
-              <b>{imp?.display_name || c.app_name}</b>
-              {(imp?.exact_version || c.version) && (
-                <span className="cl-imp-comp-ver">{imp?.exact_version || c.version}</span>
-              )}
-              <span className="cl-imp-comp-kind">{bi("主组件", "Primary")}</span>
-            </span>
-            {(imp?.companions || []).map((cm) => {
-              const km = companionKindMeta(cm.kind);
-              return (
-                <span key={cm.component} className="cl-imp-comp-pill">
-                  <AppGlyph id={cm.component} icon={cm.component} size={16} />
-                  <b>{cm.display_name || cm.component}</b>
-                  {cm.version && <span className="cl-imp-comp-ver">{cm.version}</span>}
-                  <span className="cl-imp-comp-kind">{km.label}</span>
-                </span>
-              );
-            })}
+            <div className="cl-imp-stack-pills">
+              <span className="cl-imp-comp-pill is-primary">
+                <AppGlyph id={c.app_id} icon={c.icon} size={16} />
+                <b>{imp?.display_name || c.app_name}</b>
+                {(imp?.exact_version || c.version) && (
+                  <span className="cl-imp-comp-ver">{imp?.exact_version || c.version}</span>
+                )}
+                <span className="cl-imp-comp-kind">{bi("主组件", "Primary")}</span>
+              </span>
+              {(imp?.companions || []).map((cm) => {
+                const km = companionKindMeta(cm.kind);
+                return (
+                  <span key={cm.component} className="cl-imp-comp-pill">
+                    <AppGlyph id={cm.component} icon={cm.component} size={16} />
+                    <b>{cm.display_name || cm.component}</b>
+                    {cm.version && <span className="cl-imp-comp-ver">{cm.version}</span>}
+                    <span className="cl-imp-comp-kind">{km.label}</span>
+                  </span>
+                );
+              })}
+            </div>
           </div>
 
           {/* Non-destructive 1-click recovery callout for legacy clusters with unmodeled companions */}
@@ -2157,18 +2161,14 @@ function ClusterUnifiedOverview({
     )
     .sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary) || a.listen - b.listen);
 
-  const localizePortName = (name: string) => {
-    const low = (name || "").trim().toLowerCase();
-    if (low === "readwrite" || low === "writer" || low === "rw") return bi("读写", "RW");
-    if (low === "readonly" || low === "reader" || low === "ro") return bi("只读", "RO");
-    if (low === "admin" || low === "mgmt") return bi("管理", "Admin");
-    if (low === "patroni-rest") return "Patroni API";
-    return name;
-  };
+  const stackPills =
+    c.delivery_mode !== "imported" && !c.imported
+      ? buildClusterStackPills(c, real)
+      : [];
   const ports = real
     .flatMap((i) =>
       (i.ports || []).map((x) => ({
-        name: localizePortName(x.Name),
+        name: localizePortName(x.Name, i.component),
         port: x.Port,
       })),
     )
@@ -2229,8 +2229,26 @@ function ClusterUnifiedOverview({
 
   return (
     <div className="cl-now-unified">
-      {(entries.length > 0 || ports.length > 0 || secrets.length > 0) && (
+      {(stackPills.length > 0 || entries.length > 0 || ports.length > 0 || secrets.length > 0) && (
         <div className="cl-u-access">
+          {stackPills.length > 0 && (
+            <div className="cl-u-acc-row">
+              <span className="cl-u-eyebrow">{bi("架构组件", "Stack")}</span>
+              <div className="cl-imp-stack-pills">
+                {stackPills.map((sp) => (
+                  <span
+                    key={sp.key}
+                    className={`cl-imp-comp-pill${sp.primary ? " is-primary" : ""}`}
+                  >
+                    <AppGlyph id={sp.component} icon={sp.icon} size={16} />
+                    <b>{sp.title}</b>
+                    {sp.version && <span className="cl-imp-comp-ver">{sp.version}</span>}
+                    <span className="cl-imp-comp-kind">{sp.kindLabel}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
           {entries.length > 0 && (
             <div className="cl-u-acc-row">
               <span className="cl-u-eyebrow">{bi("访问入口", "Endpoints")}</span>
@@ -2329,6 +2347,12 @@ function ClusterUnifiedOverview({
                 {real.map((i) => (
                   <div key={i.id} className="cl-u-comp">
                     <div className="cl-u-comp-top">
+                      <AppGlyph
+                        id={i.component}
+                        icon={i.component === c.app_id ? c.icon : undefined}
+                        color={i.component === c.app_id ? c.imported?.color : undefined}
+                        size={16}
+                      />
                       <b>
                         {i.title} {i.version}
                       </b>

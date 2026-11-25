@@ -123,83 +123,91 @@ function ReportOptions({
     <div className={`dc-ropts ${compact ? "compact" : ""}`}>
       <div className="dc-ropt">
         <span className="dc-ropt-l">{bi("报告内容", "Report detail")}</span>
-        <Segmented
-          value={view.detail ? "detail" : "summary"}
-          onChange={(v) => setView({ ...view, detail: v === "detail" })}
-          label={bi("报告内容", "Report detail")}
-          options={[
-            { value: "summary", label: bi("结果摘要", "Summary") },
-            { value: "detail", label: bi("摘要与详细证据", "Summary & Evidence") },
-          ]}
-        />
+        <div className="dc-ropt-main">
+          <Segmented
+            value={view.detail ? "detail" : "summary"}
+            onChange={(v) => setView({ ...view, detail: v === "detail" })}
+            label={bi("报告内容", "Report detail")}
+            options={[
+              { value: "summary", label: bi("结果摘要", "Summary") },
+              { value: "detail", label: bi("摘要与详细证据", "Summary & Evidence") },
+            ]}
+          />
+        </div>
       </div>
       {view.detail && (
         <div className="dc-ropt">
           <span className="dc-ropt-l">{bi("步骤内容", "Steps")}</span>
-          <Segmented<ReportView["steps"]>
-            value={view.steps}
-            onChange={(steps) =>
-              setView({
-                ...view,
-                steps,
-                logStyle: steps,
-              })
-            }
-            label={bi("步骤写法", "Step format")}
-            options={[
-              { value: "cmd", label: bi("命令版", "Commands") },
-              { value: "auto", label: bi("Playbook 步骤", "Playbooks") },
-              { value: "both", label: bi("两种都要", "Both") },
-            ]}
-          />
-          <span className="faint small">
-            {view.steps === "cmd"
-              ? bi("按机器整理的 Linux 命令与成功判据，适合直接作为客户交付手册", "Per-host Linux commands and pass criteria in ops-manual style")
-              : view.steps === "auto"
-                ? bi("计划中的 Playbook 和任务，实际结果以证据为准", "Planned playbooks and tasks; actual outcomes come from evidence")
-                : bi("每一步先写自动化执行，再写分机器的命令", "Lists automation execution first, followed by per-host commands")}
-          </span>
+          <div className="dc-ropt-main">
+            <Segmented<ReportView["steps"]>
+              value={view.steps}
+              onChange={(steps) =>
+                setView({
+                  ...view,
+                  steps,
+                  logStyle: steps,
+                })
+              }
+              label={bi("步骤写法", "Step format")}
+              options={[
+                { value: "cmd", label: bi("命令版", "Commands") },
+                { value: "auto", label: bi("Playbook 步骤", "Playbooks") },
+                { value: "both", label: bi("两种都要", "Both") },
+              ]}
+            />
+            <span className="faint small">
+              {view.steps === "cmd"
+                ? bi("按机器整理的 Linux 命令与成功判据，适合直接作为客户交付手册", "Per-host Linux commands and pass criteria in ops-manual style")
+                : view.steps === "auto"
+                  ? bi("计划中的 Playbook 和任务，实际结果以证据为准", "Planned playbooks and tasks; actual outcomes come from evidence")
+                  : bi("每一步先写自动化执行，再写分机器的命令", "Lists automation execution first, followed by per-host commands")}
+            </span>
+          </div>
         </div>
       )}
       {view.detail && (
         <div className="dc-ropt">
           <span className="dc-ropt-l">{bi("执行结果", "Execution results")}</span>
-          <Segmented<"yes" | "no">
-            value={view.results ? "yes" : "no"}
-            onChange={(v) => setView({ ...view, results: v === "yes" })}
-            label={bi("执行结果", "Execution results")}
-            options={[
-              { value: "yes", label: bi("带上现场结果", "Include on-site results") },
-              { value: "no", label: bi("只要执行步骤", "Steps only") },
-            ]}
-          />
-          <span className="faint small">
-            {view.results
-              ? bi("包含执行节点回传的证据，以及现场人员补充的记录", "Includes execution node evidence and notes added on-site")
-              : bi("不含现场记录，可当作操作手册交给下一个现场", "Excludes on-site records; suitable as a reusable runbook")}
-          </span>
+          <div className="dc-ropt-main">
+            <Segmented<"yes" | "no">
+              value={view.results ? "yes" : "no"}
+              onChange={(v) => setView({ ...view, results: v === "yes" })}
+              label={bi("执行结果", "Execution results")}
+              options={[
+                { value: "yes", label: bi("带上现场结果", "Include on-site results") },
+                { value: "no", label: bi("只要执行步骤", "Steps only") },
+              ]}
+            />
+            <span className="faint small">
+              {view.results
+                ? bi("包含执行节点回传的证据，以及现场人员补充的记录", "Includes execution node evidence and notes added on-site")
+                : bi("不含现场记录，可当作操作手册交给下一个现场", "Excludes on-site records; suitable as a reusable runbook")}
+            </span>
+          </div>
         </div>
       )}
       {view.detail && view.results && (
         <div className="dc-ropt">
           <span className="dc-ropt-l">{bi("执行日志", "Log format")}</span>
-          <Segmented<ReportView["logStyle"]>
-            value={view.logStyle}
-            onChange={(logStyle) => setView({ ...view, logStyle })}
-            label={bi("执行日志样式", "Execution log format")}
-            options={[
-              { value: "cmd", label: bi("命令终端版", "Terminal Log") },
-              { value: "auto", label: bi("Ansible 日志", "Ansible Log") },
-              { value: "both", label: bi("两种都要", "Both") },
-            ]}
-          />
-          <span className="faint small">
-            {view.logStyle === "cmd"
-              ? bi("紧贴每一步展示 Linux 终端命令与真实回显（[root@host ~]#），简洁直观", "Clean Linux terminal prompt & real stdout right beneath each step")
-              : view.logStyle === "auto"
-                ? bi("保留 Ansible 主机执行汇总表（Recap）与 Playbook 原始输出日志", "Ansible host Recap summary tables and raw playbook output logs")
-                : bi("同时保留命令终端回显与完整 Ansible 自动化执行日志", "Includes both Linux terminal transcripts and Ansible execution logs")}
-          </span>
+          <div className="dc-ropt-main">
+            <Segmented<ReportView["logStyle"]>
+              value={view.logStyle}
+              onChange={(logStyle) => setView({ ...view, logStyle })}
+              label={bi("执行日志样式", "Execution log format")}
+              options={[
+                { value: "cmd", label: bi("命令终端版", "Terminal Log") },
+                { value: "auto", label: bi("Ansible 日志", "Ansible Log") },
+                { value: "both", label: bi("两种都要", "Both") },
+              ]}
+            />
+            <span className="faint small">
+              {view.logStyle === "cmd"
+                ? bi("紧贴每一步展示 Linux 终端命令与真实回显（[root@host ~]#），简洁直观", "Clean Linux terminal prompt & real stdout right beneath each step")
+                : view.logStyle === "auto"
+                  ? bi("保留 Ansible 主机执行汇总表（Recap）与 Playbook 原始输出日志", "Ansible host Recap summary tables and raw playbook output logs")
+                  : bi("同时保留命令终端回显与完整 Ansible 自动化执行日志", "Includes both Linux terminal transcripts and Ansible execution logs")}
+            </span>
+          </div>
         </div>
       )}
     </div>

@@ -3010,21 +3010,23 @@ export function AIPage({
                   {doneJobs.length > 0 && !ctx.kind && (
                     <div className="ap-recent">
                       <span>{bi("就某份交付提问", "Ask about a delivery")}</span>
-                      {doneJobs.slice(0, 4).map((j) => (
-                        <button
-                          key={j.id}
-                          type="button"
-                          onClick={() =>
-                            setCtx({
-                              kind: "job",
-                              id: j.id,
-                              name: j.cluster_id,
-                            })
-                          }
-                        >
-                          {j.cluster_id}
-                        </button>
-                      ))}
+                      <span className="ap-recent-chips">
+                        {doneJobs.slice(0, 4).map((j) => (
+                          <button
+                            key={j.id}
+                            type="button"
+                            onClick={() =>
+                              setCtx({
+                                kind: "job",
+                                id: j.id,
+                                name: j.cluster_id,
+                              })
+                            }
+                          >
+                            {j.cluster_id}
+                          </button>
+                        ))}
+                      </span>
                     </div>
                   )}
                   {!on && (

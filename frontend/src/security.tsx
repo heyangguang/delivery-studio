@@ -1035,7 +1035,7 @@ function FindingDrawer({
               </ul>
             </div>
           ) : (
-            <p className="faint small" style={{ margin: "0 0 8px" }}>
+            <p className="faint small" style={{ margin: 0 }}>
               {bi(
                 "当前未命中任何已交付生产集群（仅影响软件库 / 运行环境 / 组件基线）。",
                 "No delivered production clusters affected (library/runtime/component baseline only).",
@@ -1358,25 +1358,27 @@ const VulnGroupCard = React.memo(function VulnGroupCard({
 
         <div className="sec-pkg-c3">
           {(g.clusters || []).length > 0 ? (
-            <div className="sec-pkg-sub-line">
+            <div className="sec-pkg-cl-row">
               <span className={`sec-cl-pill ${isResolved ? "" : "bad"} num`}>
                 {bi(
                   `${g.clusters!.length} 个集群`,
                   `${g.clusters!.length} cluster(s)`,
                 )}
               </span>
-              {g.clusters!.slice(0, 2).map((cl) => (
-                <a
-                  key={cl.cluster_id}
-                  href={`#/d/${encodeURIComponent(cl.cluster_id)}/security`}
-                  className="sec-link-chip mono"
-                >
-                  {cl.cluster_id}
-                </a>
-              ))}
-              {g.clusters!.length > 2 && (
-                <span className="faint small num">+{g.clusters!.length - 2}</span>
-              )}
+              <span className="sec-cl-chips">
+                {g.clusters!.slice(0, 2).map((cl) => (
+                  <a
+                    key={cl.cluster_id}
+                    href={`#/d/${encodeURIComponent(cl.cluster_id)}/security`}
+                    className="sec-link-chip mono"
+                  >
+                    {cl.cluster_id}
+                  </a>
+                ))}
+                {g.clusters!.length > 2 && (
+                  <span className="faint small num">+{g.clusters!.length - 2}</span>
+                )}
+              </span>
             </div>
           ) : (
             <div className="sec-pkg-sub-line">
@@ -3376,22 +3378,24 @@ export function SecurityPage({
           {rep?.diff && (rep.diff.added_count > 0 || rep.diff.resolved_count > 0) && (
             <div className="sec-diff-bar">
               <b>{bi("较上次扫描变化：", "Since last scan: ")}</b>
-              {rep.diff.added_count > 0 && (
-                <span className="sec-diff-pill add">
-                  +{rep.diff.added_count} {bi("新增活跃漏洞", "added")}
-                </span>
-              )}
-              {rep.diff.resolved_count > 0 && (
-                <span className="sec-diff-pill ok">
-                  -{rep.diff.resolved_count} {bi("已修复或核销", "resolved")}
-                </span>
-              )}
-              {rep.diff.added_critical_high && rep.diff.added_critical_high.length > 0 && (
-                <span className="faint small mono">
-                  {bi("新增严/高危：", "New C/H: ")}
-                  {rep.diff.added_critical_high.slice(0, 4).join(" · ")}
-                </span>
-              )}
+              <div className="sec-diff-items">
+                {rep.diff.added_count > 0 && (
+                  <span className="sec-diff-pill add">
+                    +{rep.diff.added_count} {bi("新增活跃漏洞", "added")}
+                  </span>
+                )}
+                {rep.diff.resolved_count > 0 && (
+                  <span className="sec-diff-pill ok">
+                    -{rep.diff.resolved_count} {bi("已修复或核销", "resolved")}
+                  </span>
+                )}
+                {rep.diff.added_critical_high && rep.diff.added_critical_high.length > 0 && (
+                  <span className="faint small mono">
+                    {bi("新增严/高危：", "New C/H: ")}
+                    {rep.diff.added_critical_high.slice(0, 4).join(" · ")}
+                  </span>
+                )}
+              </div>
             </div>
           )}
 
@@ -3737,7 +3741,7 @@ export function SecurityPage({
                 ]}
               />
               {hasAnyVulnFilter && (
-                <Button size="mini" type="text" onClick={resetVulnFilters}>
+                <Button size="small" type="text" onClick={resetVulnFilters}>
                   {bi("重置筛选", "Reset")}
                 </Button>
               )}
@@ -4341,7 +4345,7 @@ export function SecurityPage({
                   </div>
                 </div>
               ) : (
-                <p className="faint small">
+                <p className="faint small sec-card-note">
                   {bi(
                     "需要「漏洞扫描与库同步」权限才能同步或导入漏洞库。",
                     "Requires Security Scan permission to sync or import advisory bundles.",
@@ -4663,7 +4667,7 @@ export function SecurityPage({
                   )}
                 </small>
               </div>
-              <div style={{ display: "flex", gap: 8 }}>
+              <div className="sec-src-head-acts">
                 <Button
                   size="small"
                   loading={supplyBusy}

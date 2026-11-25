@@ -521,7 +521,6 @@ export function AccountsPage({
             </div>
             {iam && (
               <Select
-                size="small"
                 value={filter}
                 onChange={setFilter}
                 aria-label={bi("按角色筛选", "Filter by role")}
@@ -1423,9 +1422,11 @@ function AddAccount({
                 )}
           </span>
         </div>
-        <div className="login-error" role="alert">
-          {error}
-        </div>
+        {error && (
+          <div className="acc-form-err" role="alert">
+            {error}
+          </div>
+        )}
         <div className="row-gap">
           <Button
             type="primary"

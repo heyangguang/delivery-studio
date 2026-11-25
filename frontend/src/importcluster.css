@@ -1055,18 +1055,27 @@ body[arco-theme="dark"] {
 }
 
 .imp-quick-add {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 6px 8px;
   padding-top: 4px;
 }
 
 .imp-quick-add-lbl {
   font-size: 11.5px;
   font-weight: 600;
+  line-height: 25px;
+  white-space: nowrap;
   color: var(--mute);
-  margin-right: 2px;
+}
+
+.imp-quick-add-pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 
 .imp-quick-chip {
@@ -1350,33 +1359,55 @@ body[arco-theme="dark"] {
 
 /* Recognized Component Architecture Strip inside Overview Card */
 .cl-imp-stack {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  flex-wrap: wrap;
-  padding: 9px 11px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 8px 12px;
+  padding: 9px 12px;
   border-radius: var(--r-md);
   background: var(--surface-2);
   border: 1px solid var(--line);
 }
 
 .cl-imp-stack-lbl {
-  font-size: 11px;
+  font-size: 11.5px;
   font-weight: 650;
+  line-height: 24px;
+  white-space: nowrap;
   color: var(--mute);
-  margin-right: 2px;
+}
+
+.cl-imp-stack-pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
 }
 
 .cl-imp-comp-pill {
+  box-sizing: border-box;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 9px 3px 6px;
+  min-height: 24px;
+  padding: 2px 9px 2px 6px;
   border-radius: 999px;
   background: var(--surface);
   border: 1px solid var(--line-strong);
   font-size: 12px;
+  line-height: 1.3;
   color: var(--ink);
+}
+
+@media (max-width: 520px) {
+  .cl-imp-stack {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+  .cl-imp-stack-lbl {
+    line-height: 1.4;
+  }
 }
 
 .cl-imp-comp-pill.is-primary {

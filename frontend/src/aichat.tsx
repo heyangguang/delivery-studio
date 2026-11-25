@@ -5729,18 +5729,22 @@ export function SandboxConfirmCard({ req }: { req: SandboxConfirm }) {
       )}
       {req.files && req.files.length > 0 && (
         <div className="ad-sbc-files">
-          <span>{bi("只读挂载文件：", "Read-only input files: ")}</span>
-          {req.files.map((f) => (
-            <code key={f} className="mono">
-              {f}
-            </code>
-          ))}
+          <span>{bi("只读挂载文件：", "Read-only input files:")}</span>
+          <span className="ad-sbc-file-list">
+            {req.files.map((f) => (
+              <code key={f} className="mono">
+                {f}
+              </code>
+            ))}
+          </span>
         </div>
       )}
       {req.workspace && (
         <div className="ad-sbc-files">
-          <span>{bi("只读工作区：", "Read-only workspace: ")}</span>
-          <code className="mono">{req.workspace} → /workspace</code>
+          <span>{bi("只读工作区：", "Read-only workspace:")}</span>
+          <span className="ad-sbc-file-list">
+            <code className="mono">{req.workspace} → /workspace</code>
+          </span>
         </div>
       )}
       {req.code && (
@@ -6965,7 +6969,7 @@ function RehearsalLaunchCard({
       <p className="ad-card-t">{r.title}</p>
       {((r.packages && r.packages.length > 0) ||
         (r.cves && r.cves.length > 0)) && (
-        <div className="ad-sec-cves" style={{ marginBottom: 6 }}>
+        <div className="ad-sec-cves">
           {(r.packages || []).map((pk) => (
             <span key={pk} className="ad-tag">
               {pk}

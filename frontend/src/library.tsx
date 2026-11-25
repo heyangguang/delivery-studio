@@ -1333,69 +1333,71 @@ function SourcesDrawer({
         </div>
       }
     >
-      <p className="muted small">
-        {biv(
-          <>
-            平台内置了各系统官方源。下面的“自定义”会按 <code>id</code>{" "}
-            覆盖同名内置源：把地址改成内网镜像、或加 <code>disabled: true</code>{" "}
-            关掉某个源，也可以新增。获取软件包时始终验证签名，所以{" "}
-            <code>key_file</code> 必填。
-          </>,
-          <>
-            Official OS sources are built in. Custom entries below override
-            matching built-in sources by <code>id</code> (for example, to use an
-            internal mirror or set <code>disabled: true</code>), or add new
-            ones. Signature verification is always enforced, so{" "}
-            <code>key_file</code> is required.
-          </>,
+      <div className="lib-src-drawer">
+        <p className="muted small">
+          {biv(
+            <>
+              平台内置了各系统官方源。下面的“自定义”会按 <code>id</code>{" "}
+              覆盖同名内置源：把地址改成内网镜像、或加 <code>disabled: true</code>{" "}
+              关掉某个源，也可以新增。获取软件包时始终验证签名，所以{" "}
+              <code>key_file</code> 必填。
+            </>,
+            <>
+              Official OS sources are built in. Custom entries below override
+              matching built-in sources by <code>id</code> (for example, to use an
+              internal mirror or set <code>disabled: true</code>), or add new
+              ones. Signature verification is always enforced, so{" "}
+              <code>key_file</code> is required.
+            </>,
+          )}
+        </p>
+        {error && <div className="note warn">{error}</div>}
+        <h4>{bi("当前生效", "Active Sources")}</h4>
+        <table className="rtable">
+          <tbody>
+            {(data?.effective || []).map((s) => (
+              <tr key={s.id} className={s.disabled ? "old" : ""}>
+                <th>
+                  <span className="mono">{s.id}</span>
+                  <div className="small faint">{s.title}</div>
+                </th>
+                <td className="small">
+                  {s.platforms.join(bi("、", ", "))}
+                  <div className="mono faint">{s.url || s.baseurl}</div>
+                </td>
+                <td>
+                  {s.disabled ? (
+                    <span className="flag">{bi("已停用", "Disabled")}</span>
+                  ) : s.builtin ? (
+                    <span className="flag">{bi("内置", "Built-in")}</span>
+                  ) : (
+                    <span className="flag warn">{bi("自定义", "Custom")}</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <h4>{bi("自定义（YAML）", "Custom (YAML)")}</h4>
+        <textarea
+          className="yaml-edit mono"
+          spellCheck={false}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          aria-label={bi("自定义软件源 YAML", "Custom sources YAML")}
+          placeholder={
+            "- id: ubuntu-noble\n  platforms: [ubuntu-24.04-amd64]\n  kind: apt\n  url: https://mirrors.example.com/ubuntu\n  suites: [noble, noble-updates, noble-security]\n  components: [main, universe]\n  key_file: ubuntu-archive-keyring.gpg"
+          }
+        />
+        {data?.builtin && (
+          <details>
+            <summary className="small muted">
+              {bi("查看内置列表", "View built-in sources")}
+            </summary>
+            <Terminal code={data.builtin} host="sources.yaml" />
+          </details>
         )}
-      </p>
-      {error && <div className="note warn">{error}</div>}
-      <h4>{bi("当前生效", "Active Sources")}</h4>
-      <table className="rtable">
-        <tbody>
-          {(data?.effective || []).map((s) => (
-            <tr key={s.id} className={s.disabled ? "old" : ""}>
-              <th>
-                <span className="mono">{s.id}</span>
-                <div className="small faint">{s.title}</div>
-              </th>
-              <td className="small">
-                {s.platforms.join(bi("、", ", "))}
-                <div className="mono faint">{s.url || s.baseurl}</div>
-              </td>
-              <td>
-                {s.disabled ? (
-                  <span className="flag">{bi("已停用", "Disabled")}</span>
-                ) : s.builtin ? (
-                  <span className="flag">{bi("内置", "Built-in")}</span>
-                ) : (
-                  <span className="flag warn">{bi("自定义", "Custom")}</span>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <h4>{bi("自定义（YAML）", "Custom (YAML)")}</h4>
-      <textarea
-        className="yaml-edit mono"
-        spellCheck={false}
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        aria-label={bi("自定义软件源 YAML", "Custom sources YAML")}
-        placeholder={
-          "- id: ubuntu-noble\n  platforms: [ubuntu-24.04-amd64]\n  kind: apt\n  url: https://mirrors.example.com/ubuntu\n  suites: [noble, noble-updates, noble-security]\n  components: [main, universe]\n  key_file: ubuntu-archive-keyring.gpg"
-        }
-      />
-      {data?.builtin && (
-        <details>
-          <summary className="small muted">
-            {bi("查看内置列表", "View built-in sources")}
-          </summary>
-          <Terminal code={data.builtin} host="sources.yaml" />
-        </details>
-      )}
+      </div>
     </Drawer>
   );
 }

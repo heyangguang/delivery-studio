@@ -1654,64 +1654,68 @@ export function ComponentPanes({
                           <li key={p} className="cv-os-row">
                             <div className="cv-os-main">
                             <div className="cv-os-id">
-                              <OsLogo id={p} size={15} />
-                              <b>{platformShort(p)}</b>
-                              <span
-                                className={`cv-os-pill ${released ? "ok" : "draft"}`}
-                              >
-                                {released
-                                  ? bi("已发布", "Published")
-                                  : bi("未发布", "Unpublished")}
+                              <span className="cv-os-name">
+                                <OsLogo id={p} size={15} />
+                                <b>{platformShort(p)}</b>
                               </span>
-                              {secRisk && (() => {
-                                const mwOnly = Boolean(
-                                  secSummary?.policy?.gate_middleware_only ||
-                                    secSummary?.policy?.hide_os_cves,
-                                );
-                                const mwC = secRisk.middleware_critical ?? 0;
-                                const mwH = secRisk.middleware_high ?? 0;
-                                const osC = secRisk.os_critical ?? 0;
-                                const osH = secRisk.os_high ?? 0;
-                                const crit = mwOnly ? mwC : secRisk.critical;
-                                const high = mwOnly ? mwH : secRisk.high;
-                                if (crit <= 0 && high <= 0) return null;
-                                const isOSOnly = !mwOnly && mwC === 0 && mwH === 0 && (osC > 0 || osH > 0);
-                                return (
+                              <span className="cv-os-badges">
+                                <span
+                                  className={`cv-os-pill ${released ? "ok" : "draft"}`}
+                                >
+                                  {released
+                                    ? bi("已发布", "Published")
+                                    : bi("未发布", "Unpublished")}
+                                </span>
+                                {secRisk && (() => {
+                                  const mwOnly = Boolean(
+                                    secSummary?.policy?.gate_middleware_only ||
+                                      secSummary?.policy?.hide_os_cves,
+                                  );
+                                  const mwC = secRisk.middleware_critical ?? 0;
+                                  const mwH = secRisk.middleware_high ?? 0;
+                                  const osC = secRisk.os_critical ?? 0;
+                                  const osH = secRisk.os_high ?? 0;
+                                  const crit = mwOnly ? mwC : secRisk.critical;
+                                  const high = mwOnly ? mwH : secRisk.high;
+                                  if (crit <= 0 && high <= 0) return null;
+                                  const isOSOnly = !mwOnly && mwC === 0 && mwH === 0 && (osC > 0 || osH > 0);
+                                  return (
+                                    <Tooltip
+                                      mini
+                                      content={bi(
+                                        `中间件本体：严重 ${mwC} / 高危 ${mwH}；OS 底层包：严重 ${osC} / 高危 ${osH}（点击前往安全中心查看）`,
+                                        `Middleware: ${mwC} Crit / ${mwH} High; OS Base: ${osC} Crit / ${osH} High. Click to inspect.`,
+                                      )}
+                                    >
+                                      <a
+                                        href={`#/security/vulns?q=${encodeURIComponent(entry.id)}`}
+                                        className={`cv-sec-chip ${crit > 0 ? "crit" : "high"}`}
+                                      >
+                                        {crit > 0
+                                          ? isOSOnly
+                                            ? bi(`${crit} OS 严重 CVE`, `${crit} OS Crit`)
+                                            : bi(`${crit} 严重 CVE`, `${crit} Crit CVE`)
+                                          : isOSOnly
+                                            ? bi(`${high} OS 高危 CVE`, `${high} OS High`)
+                                            : bi(`${high} 高危 CVE`, `${high} High CVE`)}
+                                      </a>
+                                    </Tooltip>
+                                  );
+                                })()}
+                                {released && latestRec?.stale && (
                                   <Tooltip
                                     mini
                                     content={bi(
-                                      `中间件本体：严重 ${mwC} / 高危 ${mwH}；OS 底层包：严重 ${osC} / 高危 ${osH}（点击前往安全中心查看）`,
-                                      `Middleware: ${mwC} Crit / ${mwH} High; OS Base: ${osC} Crit / ${osH} High. Click to inspect.`,
+                                      "组件剧本或清单在上次测试后发生变更；正式交付仍可使用，建议复测刷新报告",
+                                      "Component files changed after last test; formal deliveries remain allowed, retest recommended",
                                     )}
                                   >
-                                    <a
-                                      href={`#/security/vulns?q=${encodeURIComponent(entry.id)}`}
-                                      className={`cv-sec-chip ${crit > 0 ? "crit" : "high"}`}
-                                    >
-                                      {crit > 0
-                                        ? isOSOnly
-                                          ? bi(`${crit} OS 严重 CVE`, `${crit} OS Crit`)
-                                          : bi(`${crit} 严重 CVE`, `${crit} Crit CVE`)
-                                        : isOSOnly
-                                          ? bi(`${high} OS 高危 CVE`, `${high} OS High`)
-                                          : bi(`${high} 高危 CVE`, `${high} High CVE`)}
-                                    </a>
+                                    <span className="cv-os-pill stale">
+                                      {bi("有变更", "Changed")}
+                                    </span>
                                   </Tooltip>
-                                );
-                              })()}
-                              {released && latestRec?.stale && (
-                                <Tooltip
-                                  mini
-                                  content={bi(
-                                    "组件剧本或清单在上次测试后发生变更；正式交付仍可使用，建议复测刷新报告",
-                                    "Component files changed after last test; formal deliveries remain allowed, retest recommended",
-                                  )}
-                                >
-                                  <span className="cv-os-pill stale">
-                                    {bi("有变更", "Changed")}
-                                  </span>
-                                </Tooltip>
-                              )}
+                                )}
+                              </span>
                             </div>
 
                             <div className="cv-os-ev">

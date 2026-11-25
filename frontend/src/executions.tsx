@@ -210,6 +210,7 @@ function AttemptLogDrawer({
 
   return (
     <Drawer
+      className="exec-log-drawer"
       width="min(680px, 100vw)"
       visible={Boolean(item)}
       onCancel={onClose}
@@ -384,21 +385,7 @@ function AttemptLogDrawer({
             ) : (
               <>
                 {text && text.length > 120_000 && !showFullLog && (
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      gap: 10,
-                      marginBottom: 8,
-                      padding: "6px 10px",
-                      borderRadius: 6,
-                      background: "var(--surface)",
-                      border: "1px solid var(--line)",
-                      fontSize: 12,
-                      color: "var(--mute)",
-                    }}
-                  >
+                  <div className="exec-log-window-bar">
                     <span>
                       {bi(
                         `日志较长（约 ${Math.round(text.length / 1024)} KB），当前仅展示末尾片段以保持流畅`,
@@ -1029,23 +1016,28 @@ export function ExecutionPanel({
         </div>
       </div>
       {error && (
-        <p role="alert" className="warn">
+        <div role="alert" className="exec-inline-error">
           {bi("执行状态加载失败：", "Failed to load execution status: ")}{error}
-        </p>
+        </div>
       )}
       {data && !available.length && (
         <p className="exec-hint">
-          {bi(
-            "当前交付的组件版本暂未声明自动执行契约，请按下方手册手动执行。",
-            "Component revisions in this delivery do not declare automated execution contracts; follow the manual runbook below.",
-          )}
+          <span>
+            {bi(
+              "当前交付的组件版本暂未声明自动执行契约，请按下方手册手动执行。",
+              "Component revisions in this delivery do not declare automated execution contracts; follow the manual runbook below.",
+            )}
+          </span>
         </p>
       )}
       {data && available.length > 0 && !data.nodes.length && (
         <p className="exec-hint">
-          {bi("还没有授权给这个集群的执行节点。", "No execution nodes authorized for this cluster yet.")}
+          <span>
+            {bi("还没有授权给这个集群的执行节点。", "No execution nodes authorized for this cluster yet.")}
+          </span>
           {can("execution.manage") && (
             <Button
+              size="small"
               type="text"
               href="/#/settings/execution-nodes"
               target="_blank"
@@ -1636,19 +1628,23 @@ export function ExecutionPanel({
                 {/* Secondary strip: target chips + compact expandable drawers for Check Details & SSH/Agent */}
                 <div className="ex-ready-sub">
                   <div className="ex-target-chips">
-                    <span className="ex-target-cap">
-                      {data?.executor?.kind === "independent"
-                        ? bi("独立管理机", "Standalone")
-                        : bi("集群内执行机", "In-cluster")}{" "}
-                      <code>{data?.executor?.ip}</code>
-                    </span>
-                    <span className="ex-target-sep" aria-hidden>→</span>
-                    {(data?.targets || []).map((h) => (
-                      <span key={h.name} className="ex-host-chip">
-                        <b>{h.name}</b>
-                        <code>{h.ip}</code>
+                    <span className="ex-target-lead">
+                      <span className="ex-target-cap">
+                        {data?.executor?.kind === "independent"
+                          ? bi("独立管理机", "Standalone")
+                          : bi("集群内执行机", "In-cluster")}{" "}
+                        <code>{data?.executor?.ip}</code>
                       </span>
-                    ))}
+                      <span className="ex-target-sep" aria-hidden>→</span>
+                    </span>
+                    <div className="ex-host-chip-list">
+                      {(data?.targets || []).map((h) => (
+                        <span key={h.name} className="ex-host-chip">
+                          <b>{h.name}</b>
+                          <code>{h.ip}</code>
+                        </span>
+                      ))}
+                    </div>
                   </div>
                   <div className="ex-ready-toggles">
                     {totalChecks > 0 && (
@@ -1798,69 +1794,71 @@ export function ExecutionPanel({
                 <div className="ex-scope-bar">
                   <div className="ex-scope-presets">
                     <span className="ex-scope-k">{bi("快捷勾选", "Quick select")}</span>
-                    {failedResumeKeys.length > 0 && (
-                      <button
-                        type="button"
-                        className={`ex-preset-pill bad ${
-                          keys.length === failedResumeKeys.length &&
-                          failedResumeKeys.every((k) => keys.includes(k))
-                            ? "on"
-                            : ""
-                        }`}
-                        onClick={() => applyPreset(failedResumeKeys)}
-                      >
-                        {bi(
-                          `从失败处续跑 (${failedResumeKeys.length})`,
-                          `Resume failed (${failedResumeKeys.length})`,
-                        )}
-                      </button>
-                    )}
-                    {nextTodoPhase &&
-                      (failedResumeKeys.length === 0 ||
-                        nextTodoPhase.keys.join(",") !==
-                          failedResumeKeys.join(",")) && (
+                    <div className="ex-scope-preset-list">
+                      {failedResumeKeys.length > 0 && (
                         <button
                           type="button"
-                          className={`ex-preset-pill ${
-                            keys.length === nextTodoPhase.keys.length &&
-                            nextTodoPhase.keys.every((k) => keys.includes(k))
+                          className={`ex-preset-pill bad ${
+                            keys.length === failedResumeKeys.length &&
+                            failedResumeKeys.every((k) => keys.includes(k))
                               ? "on"
                               : ""
                           }`}
-                          onClick={() => applyPreset(nextTodoPhase.keys)}
+                          onClick={() => applyPreset(failedResumeKeys)}
                         >
                           {bi(
-                            `${nextTodoPhase.label}未完成 (${nextTodoPhase.keys.length})`,
-                            `${nextTodoPhase.label} remaining (${nextTodoPhase.keys.length})`,
+                            `从失败处续跑 (${failedResumeKeys.length})`,
+                            `Resume failed (${failedResumeKeys.length})`,
                           )}
                         </button>
                       )}
-                    {allTodoKeys.length > 0 && (
-                      <button
-                        type="button"
-                        className={`ex-preset-pill ${
-                          keys.length === allTodoKeys.length &&
-                          allTodoKeys.every((k) => keys.includes(k))
-                            ? "on"
-                            : ""
-                        }`}
-                        onClick={() => applyPreset(allTodoKeys)}
-                      >
-                        {bi(
-                          `全部未完成 (${allTodoKeys.length})`,
-                          `All remaining (${allTodoKeys.length})`,
+                      {nextTodoPhase &&
+                        (failedResumeKeys.length === 0 ||
+                          nextTodoPhase.keys.join(",") !==
+                            failedResumeKeys.join(",")) && (
+                          <button
+                            type="button"
+                            className={`ex-preset-pill ${
+                              keys.length === nextTodoPhase.keys.length &&
+                              nextTodoPhase.keys.every((k) => keys.includes(k))
+                                ? "on"
+                                : ""
+                            }`}
+                            onClick={() => applyPreset(nextTodoPhase.keys)}
+                          >
+                            {bi(
+                              `${nextTodoPhase.label}未完成 (${nextTodoPhase.keys.length})`,
+                              `${nextTodoPhase.label} remaining (${nextTodoPhase.keys.length})`,
+                            )}
+                          </button>
                         )}
-                      </button>
-                    )}
-                    {keys.length > 0 && (
-                      <button
-                        type="button"
-                        className="ex-preset-pill ghost"
-                        onClick={() => setKeys([])}
-                      >
-                        {bi("清空", "Clear")}
-                      </button>
-                    )}
+                      {allTodoKeys.length > 0 && (
+                        <button
+                          type="button"
+                          className={`ex-preset-pill ${
+                            keys.length === allTodoKeys.length &&
+                            allTodoKeys.every((k) => keys.includes(k))
+                              ? "on"
+                              : ""
+                          }`}
+                          onClick={() => applyPreset(allTodoKeys)}
+                        >
+                          {bi(
+                            `全部未完成 (${allTodoKeys.length})`,
+                            `All remaining (${allTodoKeys.length})`,
+                          )}
+                        </button>
+                      )}
+                      {keys.length > 0 && (
+                        <button
+                          type="button"
+                          className="ex-preset-pill ghost"
+                          onClick={() => setKeys([])}
+                        >
+                          {bi("清空", "Clear")}
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <span className="ex-scope-count num">
                     {bi(

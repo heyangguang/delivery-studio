@@ -7,12 +7,12 @@
 
 .vex-ctx-card {
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--surface-2, var(--bg));
   border: 1px solid var(--line);
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 6px;
 }
 .vex-ctx-top {
   display: flex;
@@ -241,6 +241,14 @@
 }
 .vex-exp-row .arco-input {
   width: 170px;
+}
+.vex-exp-row .vex-quick-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  padding: 0 10px;
+  line-height: 1;
 }
 
 .vex-ai-hint {

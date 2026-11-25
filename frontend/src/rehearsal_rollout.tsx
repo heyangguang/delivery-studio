@@ -728,32 +728,34 @@ export function RolloutProgressStrip({
         aria-label={bi("跨集群推广进度", "Cross-cluster rollout status")}
       >
         <div className="ro-strip-left">
-          {src.is_origin ? (
-            <span className="ro-tag is-origin">{bi("样板源", "Pilot")}</span>
-          ) : previewMembers.some((m) => m.cluster_id === src.origin_cluster_id) ? (
-            <span className="ro-tag">{bi("跨集群推广", "Rollout")}</span>
-          ) : (
-            <button
-              type="button"
-              className="ro-origin-link"
-              onClick={() =>
-                go({
-                  name: "deliveries",
-                  id: src.origin_cluster_id,
-                  tab: "rehearsal",
-                  rehearsal: src.origin_rehearsal_id,
-                })
-              }
-              title={bi("点击查看样板集群方案", "Open origin pilot rehearsal")}
-            >
-              {bi("引用自", "From")} <code className="mono">{src.origin_cluster_id}</code>
-            </button>
-          )}
-          {!src.is_origin && src.strict_precheck && (
-            <span className="ro-mode-badge is-strict">
-              {bi("含严格首步预检", "Strict Precheck")}
-            </span>
-          )}
+          <div className="ro-strip-eyebrow">
+            {src.is_origin ? (
+              <span className="ro-tag is-origin">{bi("样板源", "Pilot")}</span>
+            ) : previewMembers.some((m) => m.cluster_id === src.origin_cluster_id) ? (
+              <span className="ro-tag">{bi("跨集群推广", "Rollout")}</span>
+            ) : (
+              <button
+                type="button"
+                className="ro-origin-link"
+                onClick={() =>
+                  go({
+                    name: "deliveries",
+                    id: src.origin_cluster_id,
+                    tab: "rehearsal",
+                    rehearsal: src.origin_rehearsal_id,
+                  })
+                }
+                title={bi("点击查看样板集群方案", "Open origin pilot rehearsal")}
+              >
+                {bi("引用自", "From")} <code className="mono">{src.origin_cluster_id}</code>
+              </button>
+            )}
+            {!src.is_origin && src.strict_precheck && (
+              <span className="ro-mode-badge is-strict">
+                {bi("含严格首步预检", "Strict Precheck")}
+              </span>
+            )}
+          </div>
           {previewMembers.length > 0 && (
             <div className="ro-strip-members" aria-label={bi("参与集群", "Participating clusters")}>
               {previewMembers.map((m) => {
@@ -1207,6 +1209,7 @@ export function PropagateRehearsalModal({
       alignCenter
       focusLock={false}
       autoFocus={false}
+      className="ro-modal"
       title={bi("推广已落地变更到其他同组件集群", "Propagate Applied Change to Other Clusters")}
       style={{ width: "min(720px, 94vw)", transformOrigin: "center center" }}
       footer={
@@ -1790,6 +1793,7 @@ export function ImportTemplateBar({
         alignCenter
         focusLock={false}
         autoFocus={false}
+        className="ro-modal"
         title={bi(
           `引入已落地变更到 ${cluster.id}`,
           `Import Applied Change into ${cluster.id}`,

@@ -57,10 +57,12 @@
   }
 }
 .cl-utabs + .cl-pane > .cl-over > .dsec:first-child,
+.cl-utabs + .cl-pane > .cl-over > .cl-imp-card + .dsec,
 .cl-utabs + .cl-pane > .cl-over > .cl-holder + .dsec,
 .cl-utabs + .cl-pane > .cl-over > .cl-revise + .dsec,
 .cl-utabs + .cl-pane > .cl-tl-sec,
 .cl-chrome-shell + .cl-pane > .cl-over > .dsec:first-child,
+.cl-chrome-shell + .cl-pane > .cl-over > .cl-imp-card + .dsec,
 .cl-chrome-shell + .cl-pane > .cl-over > .cl-holder + .dsec,
 .cl-chrome-shell + .cl-pane > .cl-over > .cl-revise + .dsec,
 .cl-chrome-shell + .cl-pane > .cl-tl-sec {
@@ -369,17 +371,27 @@
   border-bottom: 1px solid var(--line);
 }
 .cl-u-acc-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
   gap: 8px 14px;
 }
 .cl-u-eyebrow {
-  flex: none;
   min-width: 60px;
   font-size: 12px;
   font-weight: 600;
+  line-height: 26px;
+  white-space: nowrap;
   color: var(--faint);
+}
+@media (max-width: 520px) {
+  .cl-u-acc-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 5px;
+  }
+  .cl-u-eyebrow {
+    line-height: 1.4;
+  }
 }
 .cl-u-entries,
 .cl-u-ports,
@@ -1180,18 +1192,34 @@
   border-color: color-mix(in srgb, var(--bad) 24%, var(--line));
 }
 .oc-access {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px 12px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 8px 12px;
   padding-top: 0;
 }
 .oc-access-lbl {
   font-size: 12.5px;
   font-weight: 550;
+  line-height: 34px;
   color: var(--mute);
-  margin-right: 6px;
   white-space: nowrap;
+}
+.oc-access-pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  min-width: 0;
+}
+@media (max-width: 560px) {
+  .oc-access {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+  .oc-access-lbl {
+    line-height: 1.4;
+  }
 }
 .oc-cred-pill {
   display: inline-flex;
@@ -1511,15 +1539,15 @@ body[arco-theme="dark"] .pt-act em {
 /* the parts of a cluster page sit apart: a card, then the next section with air between them */
 .cl-pane > .dsec,
 .cl-pane > div > .dsec {
-  padding: 34px 0 30px;
-  gap: 18px;
+  padding: 24px 0;
+  gap: 16px;
 }
 .cl-pane > .dsec:first-child {
-  padding-top: 8px;
+  padding-top: 20px;
   border-top: 0;
 }
 .cl-pane > .dsec + .dsec {
-  margin-top: 6px;
+  margin-top: 0;
 }
 
 /* inline revision notice while deployment is not yet confirmed */
@@ -1548,15 +1576,32 @@ body[arco-theme="dark"] .pt-act em {
 .cl-over {
   padding-top: 20px;
 }
+.cl-over > .cl-imp-card {
+  margin: 0 0 18px;
+}
 .cl-over > .cl-holder {
-  margin: 0 0 12px;
+  margin: 0 0 18px;
+}
+.cl-over > .cl-holder:has(+ .cl-revise) {
+  margin-bottom: 8px;
 }
 .cl-over > .cl-revise {
-  margin: 0 0 14px;
+  margin: 0 0 18px;
 }
+.cl-over > .dsec:has(> .verify-promote-bar) {
+  padding: 0;
+  margin: 0 0 18px;
+  border-top: 0;
+}
+.detail-main > .dsec:has(> .verify-promote-bar) {
+  padding: 14px 0 16px;
+  border-top: 0;
+}
+.cl-over > .cl-imp-card + .dsec,
 .cl-over > .cl-holder + .dsec,
 .cl-over > .cl-revise + .dsec,
-.cl-over > .cl-rh-strip + .dsec {
+.cl-over > .cl-rh-strip + .dsec,
+.cl-over > .dsec:has(> .verify-promote-bar) + .dsec {
   border-top: 0;
   padding-top: 10px;
 }
@@ -1590,6 +1635,7 @@ body[arco-theme="dark"] .pt-act em {
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
+  min-width: 0;
 }
 
 .cl-init-draft-pill {
@@ -1710,8 +1756,9 @@ body[arco-theme="dark"] .pt-act em {
   border-top: 0;
 }
 
-.cl-init-deploy > .lin {
-  margin: 12px 0 4px;
+.cl-init-deploy > .lin,
+.cl-init-deploy > .dv {
+  margin: 14px 0 10px;
 }
 
 /* ---------- Overview: Continuous Hairline Baseline & Change Ledger ---------- */

@@ -354,24 +354,26 @@ export function ComponentsPage({
               }}
               aria-label={bi("搜索组件", "Search components")}
             />
-            {admin && (
+            <div className="list-guides">
+              {admin && (
+                <a
+                  className="list-guide"
+                  href="#/components/platform-shared/edit/files"
+                >
+                  <IconCode /> {bi("平台公共流程", "Platform Shared Flows")}
+                </a>
+              )}
               <a
                 className="list-guide"
-                href="#/components/platform-shared/edit/files"
+                href="#/components/guide"
+                onClick={(e) => {
+                  e.preventDefault();
+                  go({ name: "components", id: "guide" });
+                }}
               >
-                <IconCode /> {bi("平台公共流程", "Platform Shared Flows")}
+                <IconBook /> {bi("怎么编写和修改组件", "How to build & customize")}
               </a>
-            )}
-            <a
-              className="list-guide"
-              href="#/components/guide"
-              onClick={(e) => {
-                e.preventDefault();
-                go({ name: "components", id: "guide" });
-              }}
-            >
-              <IconBook /> {bi("怎么编写和修改组件", "How to build & customize")}
-            </a>
+            </div>
           </div>
           {load === "loading" && !list.length ? (
             <div className="list-body">
@@ -672,19 +674,26 @@ function ComponentDetail({
             {c.name} <span className="mono small faint">{c.id}</span>
           </h1>
           <p className="muted">{c.description}</p>
-          <div className="row-gap">
-            <CompMarks c={c} />
-            {c.provides?.map((p) => (
-              <span className="flag" key={p} title={bi("提供的能力", "Provided capability")}>
-                {bi(`提供 ${p}`, `Provides ${p}`)}
-              </span>
-            ))}
-            {c.kind === "external" && (
-              <span className="flag warn">
-                {bi("由客户运维，平台只出配置清单", "Customer-managed; platform outputs config only")}
-              </span>
-            )}
-          </div>
+          {(c.broken ||
+            c.source === "custom" ||
+            c.source === "draft" ||
+            c.has_draft ||
+            (c.provides && c.provides.length > 0) ||
+            c.kind === "external") && (
+            <div className="row-gap cv-head-tags">
+              <CompMarks c={c} />
+              {c.provides?.map((p) => (
+                <span className="flag" key={p} title={bi("提供的能力", "Provided capability")}>
+                  {bi(`提供 ${p}`, `Provides ${p}`)}
+                </span>
+              ))}
+              {c.kind === "external" && (
+                <span className="flag warn">
+                  {bi("由客户运维，平台只出配置清单", "Customer-managed; platform outputs config only")}
+                </span>
+              )}
+            </div>
+          )}
         </div>
         <div className="detail-actions">
           {admin && c.source === "builtin" && (
@@ -725,22 +734,26 @@ function ComponentDetail({
       </header>
 
       {c.source === "draft" && (
-        <div className="note">
-          {bi("这是一个还没有发布的新组件，只有草稿。", "This new component is an unpublished draft.")}
-          {admin
-            ? bi(
-                "继续编辑，检查、试生成之后发布，它才会出现在可用的组件里。",
-                "Continue editing, check, trial-generate, and publish to make it available in the catalog.",
-              )
-            : bi("由管理员编辑并发布后才能使用。", "Available after an administrator edits and publishes it.")}
+        <div className="note cv-draft-note">
+          <span>
+            {bi("这是一个还没有发布的新组件，只有草稿。", "This new component is an unpublished draft. ")}
+            {admin
+              ? bi(
+                  "继续编辑，检查、试生成之后发布，它才会出现在可用的组件里。",
+                  "Continue editing, check, trial-generate, and publish to make it available in the catalog.",
+                )
+              : bi("由管理员编辑并发布后才能使用。", "Available after an administrator edits and publishes it.")}
+          </span>
         </div>
       )}
       {c.has_draft && c.source !== "draft" && (
-        <div className="note">
-          {bi(
-            "这个组件有一份未发布的草稿，不影响现在生成的交付。",
-            "This component has an unpublished draft; current deliveries are unaffected.",
-          )}
+        <div className="note cv-draft-note">
+          <span>
+            {bi(
+              "这个组件有一份未发布的草稿，不影响现在生成的交付。",
+              "This component has an unpublished draft; current deliveries are unaffected.",
+            )}
+          </span>
           {admin && (
             <button type="button" className="wb-link" onClick={edit}>
               {bi("继续编辑", "Resume editing")}

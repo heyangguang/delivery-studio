@@ -3459,7 +3459,7 @@ function MonitorWorkspace({
 
               {activeRun && (
                 <Button
-                  size="mini"
+                  size="small"
                   type={followLive ? "primary" : "secondary"}
                   onClick={() => setFollowLive((v) => !v)}
                 >
@@ -3848,44 +3848,6 @@ function MonitorWorkspace({
                         label={bi("后续已重跑通过", "Later passed")}
                       />
                     )}
-                    {showActiveStepAttemptPills && (
-                      <div className="mon-attempt-inline">
-                        {activeStepAttempts.map((att, idx) => {
-                          const on = att.step.id === activeStepRef.step.id;
-                          return (
-                            <button
-                              key={att.step.id}
-                              type="button"
-                              className={`mon-attempt-pill ${on ? "on" : ""}`}
-                              title={bi(
-                                `第 #${att.runNum} 批 · 该步骤第 ${idx + 1} 次执行（${stepStateLabel(att.step.state)}）`,
-                                `Batch #${att.runNum} · Attempt ${idx + 1} (${stepStateLabel(att.step.state)})`,
-                              )}
-                              onClick={() => {
-                                setFollowLive(false);
-                                if (effectiveScope !== "all") {
-                                  setScope(att.run.id);
-                                }
-                                setSelectedRef({
-                                  runId: att.run.id,
-                                  stepId: att.step.id,
-                                  stepKey: att.step.key,
-                                });
-                              }}
-                            >
-                              <span
-                                className={`mon-dot ${att.step.state}`}
-                                aria-hidden
-                              />
-                              <span>#{att.runNum}</span>
-                              <span className="faint">
-                                {bi(`第${idx + 1}次`, `Run ${idx + 1}`)}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
                   </div>
 
                   <div className="mon-diag-title-right">
@@ -4003,33 +3965,82 @@ function MonitorWorkspace({
                   </div>
                 </div>
 
+                {showActiveStepAttemptPills && (
+                  <div className="mon-attempt-bar">
+                    <span className="mon-attempt-label">
+                      {bi("执行尝试", "Attempts")}
+                    </span>
+                    <div className="mon-attempt-inline">
+                      {activeStepAttempts.map((att, idx) => {
+                        const on = att.step.id === activeStepRef.step.id;
+                        return (
+                          <button
+                            key={att.step.id}
+                            type="button"
+                            className={`mon-attempt-pill ${on ? "on" : ""}`}
+                            title={bi(
+                              `第 #${att.runNum} 批 · 该步骤第 ${idx + 1} 次执行（${stepStateLabel(att.step.state)}）`,
+                              `Batch #${att.runNum} · Attempt ${idx + 1} (${stepStateLabel(att.step.state)})`,
+                            )}
+                            onClick={() => {
+                              setFollowLive(false);
+                              if (effectiveScope !== "all") {
+                                setScope(att.run.id);
+                              }
+                              setSelectedRef({
+                                runId: att.run.id,
+                                stepId: att.step.id,
+                                stepKey: att.step.key,
+                              });
+                            }}
+                          >
+                            <span
+                              className={`mon-dot ${att.step.state}`}
+                              aria-hidden
+                            />
+                            <span>#{att.runNum}</span>
+                            <span className="faint">
+                              {bi(`第${idx + 1}次`, `Run ${idx + 1}`)}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 {/* Compact Host Recap Strip */}
                 {activeStepRecap.length > 0 && (
                   <div className="mon-recap-row">
-                    {activeStepRecap.map((h) => {
-                      const bad = h.failed > 0 || h.unreachable > 0;
-                      return (
-                        <span
-                          key={h.host}
-                          className={`mon-recap-chip ${bad ? "bad" : ""}`}
-                        >
-                          <b>{h.host}</b>
-                          <span className="rc-ok">ok={h.ok}</span>
-                          {h.changed > 0 && (
-                            <span className="rc-chg">chg={h.changed}</span>
-                          )}
-                          {h.skipped > 0 && <span>skip={h.skipped}</span>}
-                          {h.failed > 0 && (
-                            <span className="rc-bad">fail={h.failed}</span>
-                          )}
-                          {h.unreachable > 0 && (
-                            <span className="rc-bad">
-                              unreach={h.unreachable}
-                            </span>
-                          )}
-                        </span>
-                      );
-                    })}
+                    <span className="mon-recap-label">
+                      {bi("主机汇总", "Host recap")}
+                    </span>
+                    <div className="mon-recap-chips">
+                      {activeStepRecap.map((h) => {
+                        const bad = h.failed > 0 || h.unreachable > 0;
+                        return (
+                          <span
+                            key={h.host}
+                            className={`mon-recap-chip ${bad ? "bad" : ""}`}
+                          >
+                            <b>{h.host}</b>
+                            <span className="rc-ok">ok={h.ok}</span>
+                            {h.changed > 0 && (
+                              <span className="rc-chg">chg={h.changed}</span>
+                            )}
+                            {h.skipped > 0 && <span>skip={h.skipped}</span>}
+                            {h.failed > 0 && (
+                              <span className="rc-bad">fail={h.failed}</span>
+                            )}
+                            {h.unreachable > 0 && (
+                              <span className="rc-bad">
+                                unreach={h.unreachable}
+                              </span>
+                            )}
+                          </span>
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
 

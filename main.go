@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version            = "1.0.339-dev"
+	version            = "1.0.340-dev"
 	currentReleaseDate = "2026-11-25"
 )
 
@@ -65,6 +65,22 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.0.340-dev",
+		Date:    "2026-11-25",
+		Title:   "全站视觉间距节奏、多行胶囊列对齐与全模式集群架构组件栈统一",
+		TitleEn: "全站视觉间距节奏、多行胶囊列对齐与全模式集群架构组件栈统一",
+		Highlights: []string{
+			"统一纳管集群与离线/自动交付集群的「架构组件栈」胶囊展示（自动推导主组件、Patroni、etcd、Keepalived、HAProxy、pgBackRest、Redis Sentinel 等）及端口中文化标签",
+			"修复集群概览基线卡片与变更演练条 0px 贴边碰撞，清理全站 74 个文件中的卡片贴边、双重间隙、幽灵空容器间距与 2px 重叠双边框",
+			"将全站 30+ 处「标签 + 多行胶囊」升级为两列左对齐网格，彻底消除第二行胶囊折行缩进到左侧标题下方的问题，并对齐同行控件 34px/28px 等高基线",
+		},
+		HighlightsEn: []string{
+			"统一纳管集群与离线/自动交付集群的「架构组件栈」胶囊展示（自动推导主组件、Patroni、etcd、Keepalived、HAProxy、pgBackRest、Redis Sentinel 等）及端口中文化标签",
+			"修复集群概览基线卡片与变更演练条 0px 贴边碰撞，清理全站 74 个文件中的卡片贴边、双重间隙、幽灵空容器间距与 2px 重叠双边框",
+			"将全站 30+ 处「标签 + 多行胶囊」升级为两列左对齐网格，彻底消除第二行胶囊折行缩进到左侧标题下方的问题，并对齐同行控件 34px/28px 等高基线",
+		},
+	},
 	{
 		Version: "1.0.339-dev",
 		Date:    "2026-11-25",

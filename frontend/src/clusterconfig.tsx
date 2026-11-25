@@ -49,9 +49,12 @@ import { go } from "./router";
 import { AppGlyph, Segmented } from "./ui";
 import { cachedDetail, putDetailCache } from "./deliveries";
 import {
+  buildClusterStackPills,
   computeEffectiveClusterChanges,
   hostStorage,
   lazySubView,
+  localizeEndpointTitle,
+  localizePortName,
   type EffectiveClusterChange,
 } from "./topology";
 import { bi, useLang, withLang } from "./i18n";
@@ -879,18 +882,24 @@ function ConfigRecord({
         focus: r.key,
       })),
     ),
-    ...routes.map(({ i, ep, front }) => ({
-      id: `endpoint:${i.id}.${ep.name}`,
-      section: "access",
-      title: `${i.title} · ${ep.title || ep.name}`,
-      context: `${(ep.protocol || "").toUpperCase()} · ${front ? `${front.balancer} · ${front.resolve_ip || ""}` : bi("节点直连", "Direct node access")}`,
-      value: front
-        ? `${front.address}:${front.listen} → ${bi("后端", "backend")} ${ep.port}`
-        : (ep.backends || [])
-            .map((b) => `${b.ip}:${b.port}`)
-            .join(bi("、", ", ")),
-      focus: `endpoint:${i.id}.${ep.name}`,
-    })),
+    ...routes.map(({ i, ep, front }) => {
+      const epLabel =
+        /^(readwrite|readonly|admin|writer|reader)$/i.test((ep.title || "").trim()) || !ep.title
+          ? localizeEndpointTitle(ep.title || ep.name, ep.name)
+          : ep.title;
+      return {
+        id: `endpoint:${i.id}.${ep.name}`,
+        section: "access",
+        title: `${i.title} · ${epLabel}`,
+        context: `${(ep.protocol || "").toUpperCase()} · ${front ? `${front.balancer} · ${front.resolve_ip || ""}` : bi("节点直连", "Direct node access")}`,
+        value: front
+          ? `${front.address}:${front.listen} → ${bi("后端", "backend")} ${ep.port}`
+          : (ep.backends || [])
+              .map((b) => `${b.ip}:${b.port}`)
+              .join(bi("、", ", ")),
+        focus: `endpoint:${i.id}.${ep.name}`,
+      };
+    }),
   ];
 
   const tokens = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
@@ -1157,6 +1166,30 @@ function ConfigRecord({
         <p>
           <span title={fullTime(p.marked || p.created)}>{titleOf(p)}</span>
         </p>
+        {data && (() => {
+          const stackPills = buildClusterStackPills(
+            c,
+            displayInstances.filter((x) => !x.external),
+          );
+          return stackPills.length > 0 ? (
+            <div className="cx-stack-row">
+              <span className="cx-stack-lbl">{bi("架构组件栈", "Stack")}</span>
+              <div className="cx-stack-pills">
+                {stackPills.map((sp) => (
+                  <span
+                    key={sp.key}
+                    className={`cx-stack-pill${sp.primary ? " is-primary" : ""}`}
+                  >
+                    <AppGlyph id={sp.component} icon={sp.icon} size={15} />
+                    <b>{sp.title}</b>
+                    {sp.version && <span className="cx-stack-ver">{sp.version}</span>}
+                    <span className="cx-stack-kind">{sp.kindLabel}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          ) : null;
+        })()}
         {!sameScheme(data?.job.scheme || p.scheme, c.scheme) && (
           <SchemeInfo
             scheme={data?.job.scheme || p.scheme}
@@ -1639,7 +1672,13 @@ function ConfigRecord({
                             <div className="cx-spec-card-head">
                               <div className="cx-ep-title">
                                 <IconLink />
-                                <h3>{ep.title || ep.name}</h3>
+                                <h3>
+                                  {/^(readwrite|readonly|admin|writer|reader)$/i.test(
+                                    (ep.title || "").trim(),
+                                  ) || !ep.title
+                                    ? localizeEndpointTitle(ep.title || ep.name, ep.name)
+                                    : ep.title}
+                                </h3>
                                 <code className="cx-ep-key">
                                   {i.id}.{ep.name}
                                 </code>
@@ -1767,27 +1806,39 @@ function ConfigRecord({
                             </h3>
                           </div>
                           <div className="cx-port-list">
-                            {portRows.map(({ i, port }, index) => (
-                              <div
-                                className="cx-port"
-                                key={`${i.id}.${port.Name}.${index}`}
-                              >
-                                <span className="cx-port-comp">
-                                  <AppGlyph
-                                    id={i.component}
-                                    icon={i.component === c.app_id ? c.icon : undefined}
-                                    color={i.component === c.app_id ? c.imported?.color : undefined}
-                                    size={15}
-                                  />
-                                  <b>{i.title}</b>
-                                  <code>{port.Name}</code>
-                                </span>
-                                <code className="cx-port-num">
-                                  {port.Port}/{(port.Proto || "tcp").toUpperCase()}
-                                </code>
-                                <small>{(port.Hosts || []).join(bi("、", ", "))}</small>
-                              </div>
-                            ))}
+                            {portRows.map(({ i, port }, index) => {
+                              const portLabel = localizePortName(port.Name, i.component);
+                              const showPortRole =
+                                portLabel &&
+                                portLabel.toLowerCase() !== (i.title || "").toLowerCase();
+                              const showRawKey =
+                                port.Name &&
+                                port.Name.toLowerCase() !== (portLabel || "").toLowerCase();
+                              return (
+                                <div
+                                  className="cx-port"
+                                  key={`${i.id}.${port.Name}.${index}`}
+                                >
+                                  <span className="cx-port-comp">
+                                    <AppGlyph
+                                      id={i.component}
+                                      icon={i.component === c.app_id ? c.icon : undefined}
+                                      color={i.component === c.app_id ? c.imported?.color : undefined}
+                                      size={15}
+                                    />
+                                    <b>{i.title}</b>
+                                    {showPortRole && (
+                                      <span className="cx-port-role">{portLabel}</span>
+                                    )}
+                                    {showRawKey && <code>{port.Name}</code>}
+                                  </span>
+                                  <code className="cx-port-num">
+                                    {port.Port}/{(port.Proto || "tcp").toUpperCase()}
+                                  </code>
+                                  <small>{(port.Hosts || []).join(bi("、", ", "))}</small>
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
                       )}

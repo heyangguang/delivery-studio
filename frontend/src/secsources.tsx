@@ -530,21 +530,23 @@ export function SecSourcesCard({
           {!editing && (
             <div className="sec-src-presets">
               <span className="faint small">{bi("快速模板：", "Quick presets:")}</span>
-              {PRESETS().map((p) => (
-                <button
-                  key={p.label}
-                  type="button"
-                  className="sec-src-preset-chip"
-                  onClick={() => {
-                    setName(p.name);
-                    setKind(p.kind);
-                    setUrlVal(p.url);
-                    setNote(p.note);
-                  }}
-                >
-                  + {p.label}
-                </button>
-              ))}
+              <div className="sec-src-preset-list">
+                {PRESETS().map((p) => (
+                  <button
+                    key={p.label}
+                    type="button"
+                    className="sec-src-preset-chip"
+                    onClick={() => {
+                      setName(p.name);
+                      setKind(p.kind);
+                      setUrlVal(p.url);
+                      setNote(p.note);
+                    }}
+                  >
+                    + {p.label}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 

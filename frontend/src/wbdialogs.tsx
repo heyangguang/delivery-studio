@@ -329,7 +329,12 @@ export function NewComponentModal({
             <div className="wb-new-field">
               <label className="wb-new-label">
                 {bi("组件标识", "Component ID")} <span className="wb-req-star">*</span>
-                <span className="wb-new-sub">{bi("小写字母/数字/短横线，创建后不可改", "lowercase, immutable")}</span>
+                <span
+                  className="wb-new-sub"
+                  title={bi("小写字母/数字/短横线，创建后不可改", "lowercase, immutable")}
+                >
+                  {bi("小写字母/数字/短横线，创建后不可改", "lowercase, immutable")}
+                </span>
               </label>
               <Input
                 className="wb-mono"

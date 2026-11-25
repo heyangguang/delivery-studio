@@ -1087,12 +1087,14 @@ export function WorkbenchPage({
   ) : tab === "source" ? (
     <div className="wb-source">
       {Object.keys(files).some((f) => f.startsWith("manifest/")) && (
-        <div className="note" style={{ margin: "10px 16px" }}>
-          {bi(
-            "component.yaml 是组件入口。方案、公共定义和动作在独立文件中，点击文件即可编辑。",
-            "component.yaml is the entry point. Schemes, shared definitions, and actions live in separate files—click any to edit.",
-          )}
-          <div>
+        <div className="wb-source-fragments">
+          <span>
+            {bi(
+              "component.yaml 是组件入口。方案、公共定义和动作在独立文件中，点击文件即可编辑。",
+              "component.yaml is the entry point. Schemes, shared definitions, and actions live in separate files—click any to edit.",
+            )}
+          </span>
+          <div className="wb-source-frag-list">
             {Object.keys(files)
               .filter((f) => f.startsWith("manifest/"))
               .sort()
@@ -1328,7 +1330,7 @@ export function WorkbenchPage({
               }}
             />
           )}
-          <div className="note" style={{ margin: "12px 24px" }}>
+          <div className="note wb-banner wb-shared-note">
             {name === "platform-shared" ? (
               <>
                 {bi(
@@ -2108,10 +2110,12 @@ function RevisionsDrawer({
                 onClick={() => setSel(sel === r.rev ? null : r.rev)}
                 aria-expanded={sel === r.rev}
               >
-                <b>{bi(`修订 ${r.rev}`, `Rev ${r.rev}`)}</b>
-                {r.rev === ws.rev && <span className="flag">{bi("当前", "Current")}</span>}
-                <span className="muted small">
-                  {r.user} · {ago(r.time)}
+                <span className="wb-rev-top">
+                  <b>{bi(`修订 ${r.rev}`, `Rev ${r.rev}`)}</b>
+                  {r.rev === ws.rev && <span className="flag">{bi("当前", "Current")}</span>}
+                  <span className="wb-rev-who muted small">
+                    {r.user} · {ago(r.time)}
+                  </span>
                 </span>
                 <span className="wb-rev-note">{r.note || bi("（无说明）", "(No note)")}</span>
                 <span className="faint small">

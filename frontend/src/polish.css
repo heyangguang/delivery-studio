@@ -710,10 +710,55 @@ body[arco-theme="dark"] .arco-trigger-popup .arco-menu {
   overflow-wrap: anywhere;
 }
 
-/* notices that follow each other keep a gap */
-.note + .note,
-.callout + .callout {
-  margin-top: 8px;
+/* notices, callouts, and diagnostic banners that follow each other or precede tabs keep crisp breathing room */
+:is(.note, .callout, .cv-err-panel, .wz-verify-banner) + :is(.note, .callout, .cv-err-panel, .wz-verify-banner) {
+  margin-top: 10px;
+}
+.preview-warns > .note + .note {
+  margin-top: 0;
+}
+:is(.note, .callout) + .utabs,
+:is(.note, .callout) + .utabs.cv-utabs {
+  margin-top: 14px;
+}
+
+/* ParamField (fields.tsx): wrapped badges/keys, untruncated validation errors, and full-width string inputs */
+.param-label {
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  min-width: 0;
+}
+.param-label > .flag {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  box-sizing: border-box;
+  line-height: 1;
+}
+.param-key {
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 3px 8px;
+  margin-top: 3px;
+}
+.param-key > span.bad {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  color: var(--bad);
+}
+.param-key > .param-was {
+  flex-basis: 100%;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+.param-control > .arco-input-inner-wrapper,
+.param-control > .arco-input-wrapper,
+.param-control > input.arco-input {
+  flex: 1;
+  min-width: 0;
 }
 
 /* groups in the top menu: daily work, the assistant, administration */

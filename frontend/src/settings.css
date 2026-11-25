@@ -33,6 +33,9 @@
   padding: 0;
   list-style: none;
 }
+.st-log {
+  border-top: 1px solid var(--line);
+}
 .st-chans > li {
   display: grid;
   grid-template-columns: 40px minmax(0, 1fr) 150px auto auto;
@@ -258,6 +261,11 @@ body[arco-theme="dark"] .st-kind.k-webhook {
 .st-body > .sx-page .sx-page-h p,
 .st-pane > .sx-page .sx-page-h p {
   max-width: 760px;
+}
+.st-main > .note,
+.sx-page > .note {
+  margin-bottom: 16px;
+  border-radius: 10px;
 }
 .st-nav-grp + .st-nav-grp {
   margin-top: 14px;

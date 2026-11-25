@@ -21,7 +21,7 @@
   align-items: center;
   gap: 11px;
   padding: 9px 10px;
-  border-radius: 11px;
+  border-radius: 9px;
   color: var(--ink);
   text-decoration: none;
   transition:
@@ -176,6 +176,7 @@ body[arco-theme="dark"] .rp-ic.k-mine {
 .rp-head-t .rp-meta {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 6px 14px;
   margin-top: 8px;
   color: var(--mute);
@@ -196,7 +197,7 @@ body[arco-theme="dark"] .rp-ic.k-mine {
   padding: 0 12px 0 10px;
   height: 34px;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 7px;
   color: var(--ink-2);
   font-size: 13px;
   cursor: pointer;
@@ -209,6 +210,9 @@ body[arco-theme="dark"] .rp-ic.k-mine {
 }
 .rp-main {
   min-width: 0;
+}
+.rp-main > .rp-sec:first-child {
+  padding-top: 0;
 }
 .rp-md {
   max-width: 920px;
@@ -225,6 +229,12 @@ body[arco-theme="dark"] .rp-ic.k-mine {
   flex-direction: column;
   margin: 0;
   border-top: 1px solid var(--line);
+}
+.rp-side > dl:first-child {
+  border-top: 0;
+}
+.rp-side > dl:first-child > dt:first-child {
+  padding-top: 0;
 }
 .rp-side dt {
   padding-top: 12px;
@@ -246,6 +256,12 @@ body[arco-theme="dark"] .rp-ic.k-mine {
 }
 .rp-sec:last-child {
   border-bottom: 0;
+}
+.rp-sec:not(:last-child) > .mcp-tools:last-child > li:last-child {
+  border-bottom: 0;
+}
+.rp-sec:not(:last-child):has(> .mcp-tools:last-child) {
+  padding-bottom: 10px;
 }
 .rp-sec > h2 {
   display: flex;
@@ -526,14 +542,14 @@ body[arco-theme="dark"] .rp-ic.k-mine {
 .rp-sdoc-card {
   padding: 18px 20px;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 12px;
   background: var(--surface);
   box-shadow: var(--shadow-sm);
 }
 .rp-sdoc-sec {
   scroll-margin-top: 20px;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 12px;
   background: var(--surface);
   box-shadow: var(--shadow-sm);
   overflow: hidden;
@@ -703,7 +719,7 @@ body[arco-theme="dark"] .rp-ic.k-mine {
   margin-bottom: 16px;
   padding: 13px 14px;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 12px;
   background: var(--surface);
   box-shadow: var(--shadow-sm);
 }
@@ -767,7 +783,7 @@ body[arco-theme="dark"] .rp-ic.k-mine {
 .rp-sec-box {
   margin-bottom: 16px;
   padding: 13px 14px;
-  border-radius: 14px;
+  border-radius: 12px;
   border: 1px solid var(--line);
   background: var(--sunken);
 }
@@ -811,7 +827,7 @@ body[arco-theme="dark"] .rp-ic.k-mine {
   margin-top: 16px;
   padding: 18px 20px;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 12px;
   background: var(--surface);
   box-shadow: var(--shadow-sm);
 }
@@ -868,7 +884,7 @@ body[arco-theme="dark"] .rp-ic.k-mine {
 }
 .rp-script-card {
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 10px;
   background: var(--surface);
   overflow: hidden;
   transition: border-color 0.18s var(--spring);
@@ -1050,7 +1066,7 @@ body[arco-theme="dark"] .rp-ic.k-mine {
   gap: 14px;
   padding: 18px 20px;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 12px;
   background: var(--surface);
 }
 .rp-scripts-ed-h {
@@ -1120,7 +1136,7 @@ body[arco-theme="dark"] .rp-ic.k-mine {
   gap: 10px;
   padding: 14px 16px;
   border: 1px solid var(--line);
-  border-radius: 11px;
+  border-radius: 10px;
   background: var(--sunken);
 }
 .rp-script-ed-top {

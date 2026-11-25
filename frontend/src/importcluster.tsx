@@ -868,28 +868,30 @@ function CompanionStackEditor({
       {/* Quick-add companion pills */}
       <div className="imp-quick-add">
         <span className="imp-quick-add-lbl">{bi("补充伴生组件：", "Add companion:")}</span>
-        {quickIDs.map((id) => {
-          const def = catalogByID.get(id)!;
-          return (
-            <button
-              key={id}
-              type="button"
-              className="imp-quick-chip"
-              onClick={() => addCatalogCompanion(id)}
-            >
-              <IconPlus style={{ fontSize: 10 }} />
-              {def.name}
-            </button>
-          );
-        })}
-        <button
-          type="button"
-          className="imp-quick-chip"
-          onClick={() => setCustomOpen((v) => !v)}
-        >
-          <IconPlus style={{ fontSize: 10 }} />
-          {bi("其他组件", "Custom")}
-        </button>
+        <div className="imp-quick-add-pills">
+          {quickIDs.map((id) => {
+            const def = catalogByID.get(id)!;
+            return (
+              <button
+                key={id}
+                type="button"
+                className="imp-quick-chip"
+                onClick={() => addCatalogCompanion(id)}
+              >
+                <IconPlus style={{ fontSize: 10 }} />
+                {def.name}
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            className="imp-quick-chip"
+            onClick={() => setCustomOpen((v) => !v)}
+          >
+            <IconPlus style={{ fontSize: 10 }} />
+            {bi("其他组件", "Custom")}
+          </button>
+        </div>
       </div>
 
       {customOpen && (
@@ -2474,13 +2476,31 @@ export function ImportClusterPage({
                 </div>
 
                 {companions.length > 0 && (
-                  <div className="imp-topo-pills">
-                    <span className="imp-kind-pill t-brand">{effectiveDisplayName}</span>
-                    {companions.map((cm) => (
-                      <span key={cm.component} className={`imp-kind-pill ${companionKindMeta(cm.kind).tone}`}>
-                        + {cm.display_name || cm.component}
+                  <div className="cl-imp-stack">
+                    <span className="cl-imp-stack-lbl">{bi("架构组件栈", "Stack")}</span>
+                    <div className="cl-imp-stack-pills">
+                      <span className="cl-imp-comp-pill is-primary">
+                        <AppGlyph
+                          id={effectiveCompID}
+                          icon={isCustom ? customIcon : selectedPreset?.icon}
+                          color={isCustom ? customColor : selectedPreset?.color}
+                          size={15}
+                        />
+                        <b>{effectiveDisplayName}</b>
+                        {(exactVersion || version) && (
+                          <span className="cl-imp-comp-ver">{exactVersion || version}</span>
+                        )}
+                        <span className="cl-imp-comp-kind">{bi("主组件", "Primary")}</span>
                       </span>
-                    ))}
+                      {companions.map((cm) => (
+                        <span key={cm.component} className="cl-imp-comp-pill">
+                          <AppGlyph id={cm.component} icon={cm.component} size={15} />
+                          <b>{cm.display_name || cm.component}</b>
+                          {cm.version && <span className="cl-imp-comp-ver">{cm.version}</span>}
+                          <span className="cl-imp-comp-kind">{companionKindMeta(cm.kind).label}</span>
+                        </span>
+                      ))}
+                    </div>
                   </div>
                 )}
 

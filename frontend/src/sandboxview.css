@@ -17,6 +17,10 @@
 .sb-on h2 {
   margin: 0;
 }
+.sb-on p {
+  margin: 0;
+  line-height: 1.55;
+}
 .sb-badge {
   padding: 2px 8px;
   border: 1px solid var(--line);
@@ -277,7 +281,7 @@
 }
 
 .sb-note {
-  margin: 10px 0 0;
+  margin: 12px 0 0;
   padding: 10px 14px;
   border-radius: 12px;
   border: 1px solid var(--bad-line);
@@ -289,12 +293,15 @@
   margin: 14px 0 0;
   padding: 0;
   list-style: none;
+  border-bottom: 1px solid var(--line);
 }
 .sb-checks li {
   display: flex;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 6px 10px;
   align-items: center;
   min-height: 36px;
+  padding: 8px 2px;
   border-top: 1px solid var(--line);
   font-size: 13.5px;
 }

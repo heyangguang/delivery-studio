@@ -8,7 +8,9 @@ import React, {
   useState,
 } from "react";
 import {
+  Alert,
   Button,
+  Drawer,
   Input,
   Message,
   Modal,
@@ -40,6 +42,7 @@ import {
   putCached,
   typing,
   useAIStatus,
+  useConnectivity,
   useMedia,
 } from "../../shared/shared";
 import { AuditView, auditText } from "./audit";
@@ -62,7 +65,7 @@ import type { ClusterAccessLevel, IAM } from "./iam";
 import { bi, getLang, useLang } from "../../app/i18n";
 
 export const roleName = (r: string) =>
-  r === "admin" ? bi("管理员", "Admin") : bi("交付使用者", "Delivery User");
+  r === "admin" ? bi("管理员", "Admin") : bi("交付成员", "Member");
 
 const icoProps = {
   width: 15,
@@ -145,7 +148,7 @@ export function Avatar({
   return (
     <span
       className={`avatar ${role}`}
-      style={{ width: size, height: size, fontSize: size * 0.42 }}
+      style={{ width: size, height: size, fontSize: Math.round(size * 0.42) }}
       aria-hidden
     >
       {name.slice(0, 1).toUpperCase()}
@@ -162,6 +165,7 @@ export function AccountsPage({
 }) {
   useLang();
   const narrow = useMedia("(max-width: 900px)");
+  const conn = useConnectivity();
   const initUsers = cached<Account[]>("/api/users");
   const [users, setUsers] = useState<Account[]>(() => initUsers ?? []);
   const [load, setLoad] = useState<"loading" | "error" | "ready">(() =>
@@ -194,6 +198,7 @@ export function AccountsPage({
         putCached("/api/users", sorted);
         if (!mountedRef.current) return;
         setUsers(sorted);
+        setMessage("");
         setLoad("ready");
       })
       .catch((e) => {
@@ -207,9 +212,8 @@ export function AccountsPage({
     void reload();
   }, [reload]);
 
-  const { iam, reload: reloadIAM } = useIAM();
+  const { iam, error: iamError, reload: reloadIAM } = useIAM();
 
-  // Redirect non-user-managers away from the default user directory to their permitted IAM view.
   useEffect(() => {
     if (!can("iam.user") && !selected) {
       const target = can("iam.team")
@@ -255,7 +259,6 @@ export function AccountsPage({
       routeId?: string;
       icon: React.ReactNode;
       title: string;
-      hint: string;
       count?: number;
     }[] = [];
     if (can("iam.user")) {
@@ -264,8 +267,7 @@ export function AccountsPage({
         routeId: undefined,
         icon: AccIcons.users,
         title: bi("用户账户", "Users"),
-        hint: bi("平台登录成员与个人授权", "Accounts & personal access"),
-        count: users.length,
+        count: users.length || undefined,
       });
     }
     if (can("iam.user|iam.role|iam.team")) {
@@ -274,7 +276,6 @@ export function AccountsPage({
         routeId: "~teams",
         icon: AccIcons.teams,
         title: bi("协作团队", "Teams"),
-        hint: bi("按项目分组共享集群权限", "Group members & share clusters"),
         count: iam?.teams.length,
       });
     }
@@ -283,8 +284,7 @@ export function AccountsPage({
         id: "~deleted",
         routeId: "~deleted",
         icon: AccIcons.deleted,
-        title: bi("已归档账户", "Archived Users"),
-        hint: bi("已删除成员的交付转交", "Reassign orphaned deliveries"),
+        title: bi("已归档账户", "Archived"),
         count: iam.deleted.length,
       });
     }
@@ -296,7 +296,6 @@ export function AccountsPage({
         routeId: "~clusters",
         icon: AccIcons.clusters,
         title: bi("集群授权", "Cluster Access"),
-        hint: bi("按集群分配运维或只读权限", "Per-cluster operate / read-only"),
         count: iam?.clusters?.length,
       });
     }
@@ -305,8 +304,7 @@ export function AccountsPage({
         id: "~roles",
         routeId: "~roles",
         icon: AccIcons.roles,
-        title: bi("角色与矩阵", "Roles & Matrix"),
-        hint: bi("功能权限集合与对比矩阵", "Role definitions & matrix"),
+        title: bi("角色权限", "Roles"),
         count: iam?.roles.length,
       });
     }
@@ -316,16 +314,15 @@ export function AccountsPage({
         routeId: "~audit",
         icon: AccIcons.audit,
         title: bi("操作审计", "Audit Log"),
-        hint: bi("登录会话与全平台操作记录", "Sessions & activity trail"),
       });
     }
 
     return [
       ...(orgItems.length
-        ? [{ id: "org", label: bi("成员与组织", "Members & Teams"), items: orgItems }]
+        ? [{ id: "org", label: bi("组织与成员", "Directory"), items: orgItems }]
         : []),
       ...(accessItems.length
-        ? [{ id: "access", label: bi("权限与审计", "Access & Audit"), items: accessItems }]
+        ? [{ id: "access", label: bi("访问与审计", "Access & Audit"), items: accessItems }]
         : []),
     ];
   }, [users.length, iam]);
@@ -353,8 +350,13 @@ export function AccountsPage({
     );
   }
 
+  const refreshAll = () => {
+    void reload();
+    void reloadIAM();
+  };
+
   return (
-    <div className="iam-shell enter">
+    <div className="iam-shell">
       {narrow ? (
         <div className="iam-mobile-bar">
           <UnderlineTabs
@@ -373,46 +375,26 @@ export function AccountsPage({
       ) : (
         <aside className="iam-rail" aria-label="IAM">
           <div className="iam-rail-head">
-            <div className="iam-rail-title-row">
-              <h1>IAM</h1>
-              {can("iam.user") && (
-                <Button
-                  type="primary"
-                  size="small"
-                  icon={<IconPlus />}
-                  onClick={() => go({ name: "accounts", id: "+new" })}
-                >
-                  {bi("添加用户", "Add User")}
-                </Button>
-              )}
-            </div>
-            <p>
-              {bi(
-                "统一管理登录账户、协作团队、角色权限边界与按集群访问授权。",
-                "Unified identity, teams, role permissions, and per-cluster access control.",
-              )}
-            </p>
+            <h1>IAM</h1>
+            <span>{bi("身份与访问控制", "Identity & Access")}</span>
           </div>
 
           <nav className="iam-rail-nav" aria-label={bi("IAM 导航", "IAM navigation")}>
             {navGroups.map((grp) => (
               <div key={grp.id} className="iam-rail-grp">
-                <div className="st-nav-g">{grp.label}</div>
+                <div className="iam-rail-grp-label">{grp.label}</div>
                 {grp.items.map((item) => {
                   const on = activeNavKey === item.id;
                   return (
                     <button
                       key={item.id}
                       type="button"
-                      className={`sx-nav-i iam-nav-i ${on ? "on" : ""}`}
+                      className={`iam-nav-item ${on ? "on" : ""}`}
                       aria-current={on ? "page" : undefined}
                       onClick={() => switchSection(item.id)}
                     >
-                      <span className="sx-nav-ic">{item.icon}</span>
-                      <span className="sx-nav-t">
-                        <b>{item.title}</b>
-                        <small>{item.hint}</small>
-                      </span>
+                      <span className="iam-nav-ic">{item.icon}</span>
+                      <span className="iam-nav-lbl">{item.title}</span>
                       {item.count !== undefined && (
                         <em className="iam-nav-cnt num">{item.count}</em>
                       )}
@@ -422,35 +404,46 @@ export function AccountsPage({
               </div>
             ))}
           </nav>
-
-          <div className="iam-rail-foot">
-            <div className="iam-rail-rule">
-              <div className="iam-rail-rule-top">
-                <i className="iam-rail-rule-dot" aria-hidden />
-                <b>{bi("默认隔离与授权机制", "Default Access Model")}</b>
-              </div>
-              <p>
-                {bi(
-                  "成员自己创建的集群默认归本人运维；管理员可见全部；跨人协作可在「集群授权」按需分配运维或只读权限。",
-                  "Creators own their clusters by default; global roles see all; grant cross-user Operate or Read-only access per cluster.",
-                )}
-              </p>
-            </div>
-          </div>
         </aside>
       )}
 
       <main className="iam-canvas">
+        {conn !== "online" && !auditView && (
+          <div className="iam-conn-banner">
+            <Alert
+              type="warning"
+              showIcon
+              content={
+                conn === "offline"
+                  ? bi(
+                      "当前网络连接已断开，正在展示本地缓存；恢复网络后可刷新同步最新权限。",
+                      "You appear to be offline. Showing cached data until connectivity returns.",
+                    )
+                  : bi(
+                      "暂时无法连接平台服务，请检查服务状态后重试。",
+                      "Unable to reach platform service. Please retry shortly.",
+                    )
+              }
+              action={
+                <Button size="mini" onClick={refreshAll}>
+                  {bi("重试", "Retry")}
+                </Button>
+              }
+            />
+          </div>
+        )}
+
         {auditView ? (
           <AuditView />
         ) : deletedView ? (
-          <DeletedPane users={users} narrow={false} />
+          <DeletedPane users={users} narrow={false} iamError={iamError} />
         ) : rolesView ? (
-          <RolesPane narrow={false} />
+          <RolesPane narrow={false} iamError={iamError} />
         ) : teamsView ? (
           <TeamsPane
             narrow={false}
             users={users.map((u) => u.username)}
+            iamError={iamError}
             onSaved={() => {
               if (can("iam.user")) void reload();
             }}
@@ -459,6 +452,7 @@ export function AccountsPage({
           <ClustersAccessPane
             narrow={false}
             users={users}
+            iamError={iamError}
             onSaved={() => {
               if (can("iam.user")) void reload();
             }}
@@ -469,7 +463,7 @@ export function AccountsPage({
             taken={(n) => users.some((u) => u.username === n)}
             refresh={async () => {
               await reload();
-              reloadIAM();
+              void reloadIAM();
             }}
             done={async (name) => {
               await reload();
@@ -485,14 +479,28 @@ export function AccountsPage({
             u={current}
             me={me}
             users={users}
-            changed={() => (void reload(), reloadIAM())}
+            changed={() => {
+              void reload();
+              void reloadIAM();
+            }}
           />
         ) : selected && selected !== "~users" && load === "ready" ? (
-          <div className="detail-none enter">
-            <h2>{bi("找不到这个账户", "Account not found")}</h2>
-            <Button onClick={() => go({ name: "accounts" }, { replace: true })}>
-              {bi("返回用户账户", "Back to Users")}
-            </Button>
+          <div className="iam-page iam-stage">
+            <div className="iam-empty iam-empty-line">
+              <b>{bi("找不到该成员账户", "Account not found")}</b>
+              <span>
+                {bi(
+                  "该账户可能已被删除或用户名输入有误。",
+                  "This account may have been removed or renamed.",
+                )}
+              </span>
+              <Button
+                size="small"
+                onClick={() => go({ name: "accounts" }, { replace: true })}
+              >
+                {bi("返回用户账户", "Back to Users")}
+              </Button>
+            </div>
           </div>
         ) : (
           <UsersDirectory
@@ -502,6 +510,10 @@ export function AccountsPage({
             load={load}
             message={message}
             onReload={reload}
+            onChanged={() => {
+              void reload();
+              void reloadIAM();
+            }}
           />
         )}
       </main>
@@ -518,6 +530,7 @@ function UsersDirectory({
   load,
   message,
   onReload,
+  onChanged,
 }: {
   users: Account[];
   me: Session;
@@ -525,11 +538,15 @@ function UsersDirectory({
   load: "loading" | "error" | "ready";
   message: string;
   onReload: () => Promise<void>;
+  onChanged: () => void;
 }) {
   useLang();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<string>("all");
+  const [focusIdx, setFocusIdx] = useState<number>(-1);
+  const [quickGrantUser, setQuickGrantUser] = useState<string>("");
   const searchRef = useRef<HTMLInputElement | null>(null);
+  const rowRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -537,7 +554,7 @@ function UsersDirectory({
         e.metaKey ||
         e.ctrlKey ||
         e.altKey ||
-        document.querySelector(".pal-mask")
+        document.querySelector(".pal-mask,.arco-modal,.arco-drawer")
       )
         return;
       if (e.key === "/" && !typing(e)) {
@@ -558,7 +575,6 @@ function UsersDirectory({
     [iam?.teams],
   );
 
-  // Compute each user's effective scope, direct+team cluster grants, and owned cluster count
   const userAccessMeta = useMemo(() => {
     const ownedCountByUser = new Map<string, number>();
     for (const c of iam?.clusters || []) {
@@ -578,8 +594,14 @@ function UsersDirectory({
       const g = iam?.grants[u.username];
       const rids = g?.roles || u.roles || [];
       const tids = g?.teams || u.teams || [];
-      const scope = iam ? effective(iam, rids).scope : u.role === "admin" ? "all" : "own";
-      const grantedSet = new Set<string>(Object.keys(g?.clusters || u.clusters || {}));
+      const scope = iam
+        ? effective(iam, rids).scope
+        : u.role === "admin"
+          ? "all"
+          : "own";
+      const grantedSet = new Set<string>(
+        Object.keys(g?.clusters || u.clusters || {}),
+      );
       for (const tid of tids) {
         const t = teamMap.get(tid);
         if (t?.clusters) {
@@ -597,24 +619,17 @@ function UsersDirectory({
     return meta;
   }, [users, iam, teamMap]);
 
-  const stats = useMemo(() => {
+  const counts = useMemo(() => {
     let enabled = 0;
     let globalUsers = 0;
-    let collabUsers = 0;
-    let totalDeliveries = 0;
     for (const u of users) {
       if (!u.disabled) enabled++;
-      totalDeliveries += u.deliveries || 0;
-      const m = userAccessMeta.get(u.username);
-      if (m?.scope === "all") globalUsers++;
-      else if ((m?.grantedCount || 0) > 0) collabUsers++;
+      if (userAccessMeta.get(u.username)?.scope === "all") globalUsers++;
     }
     return {
       enabled,
       disabled: users.length - enabled,
       globalUsers,
-      collabUsers,
-      totalDeliveries,
     };
   }, [users, userAccessMeta]);
 
@@ -627,6 +642,8 @@ function UsersDirectory({
         const tids = m?.tids || [];
         if (filter === "disabled") {
           if (!u.disabled) return false;
+        } else if (filter === "global") {
+          if (m?.scope !== "all") return false;
         } else if (filter !== "all" && !rids.includes(filter)) {
           return false;
         }
@@ -650,77 +667,70 @@ function UsersDirectory({
     [users, userAccessMeta, filter, q, roleMap, teamMap],
   );
 
+  useEffect(() => {
+    setFocusIdx(-1);
+  }, [q, filter]);
+
+  const handleRowKeyDown = (e: React.KeyboardEvent, idx: number, uname: string) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      go({ name: "accounts", id: uname });
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      const next = Math.min(filtered.length - 1, idx + 1);
+      setFocusIdx(next);
+      rowRefs.current[next]?.focus();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      if (idx === 0) {
+        setFocusIdx(-1);
+        searchRef.current?.focus();
+      } else {
+        const prev = Math.max(0, idx - 1);
+        setFocusIdx(prev);
+        rowRefs.current[prev]?.focus();
+      }
+    }
+  };
+
+  const quickUserObj = quickGrantUser
+    ? users.find((u) => u.username === quickGrantUser)
+    : undefined;
+
   return (
-    <article className="iam-page enter">
+    <article className="iam-page iam-stage">
       <header className="iam-h">
-        <div>
-          <h1>{bi("用户账户", "User Accounts")}</h1>
+        <div className="iam-h-main">
+          <div className="iam-h-title-row">
+            <h1>{bi("用户账户", "Users")}</h1>
+            {users.length > 0 && (
+              <span className="iam-h-meta num">
+                {bi(
+                  `${counts.enabled} 启用${counts.disabled ? ` · ${counts.disabled} 已停用` : ""}`,
+                  `${counts.enabled} active${counts.disabled ? ` · ${counts.disabled} disabled` : ""}`,
+                )}
+              </span>
+            )}
+          </div>
           <p>
             {bi(
-              "管理平台登录成员，配置角色、所属团队及可访问的集群范围。点击任意成员可查看活动明细与精细授权。",
-              "Manage platform accounts, assign roles and teams, and configure accessible clusters per user.",
+              "查看成员所属角色、团队与可访问的集群范围；可就地快捷调整权限，或进入详情查看近期交付与操作记录。",
+              "Inspect member roles, teams, and cluster visibility; adjust permissions in place or open full activity details.",
             )}
           </p>
         </div>
-        {can("iam.user") && (
-          <Button
-            type="primary"
-            icon={<IconPlus />}
-            onClick={() => go({ name: "accounts", id: "+new" })}
-          >
-            {bi("添加用户", "Add User")}
-          </Button>
-        )}
+        <div className="iam-h-acts">
+          {can("iam.user") && (
+            <Button
+              type="primary"
+              icon={<IconPlus />}
+              onClick={() => go({ name: "accounts", id: "+new" })}
+            >
+              {bi("添加用户", "Add User")}
+            </Button>
+          )}
+        </div>
       </header>
-
-      <div className="au-strip iam-kpi-strip">
-        <div className="au-stat">
-          <span className="au-stat-k">{bi("平台总账户", "Total Users")}</span>
-          <strong>{users.length}</strong>
-          <small>
-            {bi(
-              `正常启用 ${stats.enabled} · 已停用 ${stats.disabled}`,
-              `${stats.enabled} active · ${stats.disabled} disabled`,
-            )}
-          </small>
-        </div>
-        <div className="au-stat">
-          <span className="au-stat-k">
-            {bi("全局视野成员", "Global Visibility")}
-          </span>
-          <strong>{stats.globalUsers}</strong>
-          <small>
-            {bi(
-              "自动可见全平台所有集群",
-              "Automatically see all platform clusters",
-            )}
-          </small>
-        </div>
-        <div className="au-stat">
-          <span className="au-stat-k">
-            {bi("跨集群协作成员", "Per-Cluster Collaborators")}
-          </span>
-          <strong>{stats.collabUsers}</strong>
-          <small>
-            {bi(
-              "已额外分配指定集群的运维或只读权限",
-              "Granted Operate or Read-only on extra clusters",
-            )}
-          </small>
-        </div>
-        <div className="au-stat">
-          <span className="au-stat-k">
-            {bi("名下交付与纳管记录", "Total Deliveries")}
-          </span>
-          <strong>{stats.totalDeliveries}</strong>
-          <small>
-            {bi(
-              "默认归各自创建者可见与运维",
-              "Owned and operated by their creators by default",
-            )}
-          </small>
-        </div>
-      </div>
 
       <div className="iam-toolbar">
         <Input
@@ -734,15 +744,31 @@ function UsersDirectory({
           allowClear
           value={query}
           onChange={setQuery}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              setQuery("");
+              (e.target as HTMLInputElement).blur();
+            } else if (e.key === "ArrowDown" && filtered.length > 0) {
+              e.preventDefault();
+              setFocusIdx(0);
+              rowRefs.current[0]?.focus();
+            }
+          }}
           placeholder={bi(
-            "搜索用户名、角色或所属团队...",
-            "Search username, role, or team...",
+            "搜索用户名、角色或团队…",
+            "Search username, role, or team…",
           )}
           aria-label={bi("搜索用户", "Search users")}
         />
-        <div className="iam-pills" role="tablist" aria-label={bi("角色筛选", "Role filter")}>
+        <div
+          className="iam-pills"
+          role="tablist"
+          aria-label={bi("按角色或状态筛选", "Filter by role or status")}
+        >
           <button
             type="button"
+            role="tab"
+            aria-selected={filter === "all"}
             className={`iam-pill ${filter === "all" ? "on" : ""}`}
             onClick={() => setFilter("all")}
           >
@@ -754,30 +780,44 @@ function UsersDirectory({
               <button
                 key={r.id}
                 type="button"
+                role="tab"
+                aria-selected={filter === r.id}
                 className={`iam-pill ${filter === r.id ? "on" : ""}`}
-                onClick={() => setFilter(r.id)}
+                onClick={() => setFilter(filter === r.id ? "all" : r.id)}
               >
                 {roleTitle(r)} <em>{r.holders}</em>
               </button>
             ))}
-          {stats.disabled > 0 && (
+          {counts.disabled > 0 && (
             <button
               type="button"
+              role="tab"
+              aria-selected={filter === "disabled"}
               className={`iam-pill ${filter === "disabled" ? "on" : ""}`}
-              onClick={() => setFilter("disabled")}
+              onClick={() =>
+                setFilter(filter === "disabled" ? "all" : "disabled")
+              }
             >
-              {bi("已停用", "Disabled")} <em>{stats.disabled}</em>
+              {bi("已停用", "Disabled")} <em>{counts.disabled}</em>
             </button>
           )}
         </div>
+        {(q || filter !== "all") && users.length > 0 && (
+          <span className="iam-toolbar-count num">
+            {bi(
+              `显示 ${filtered.length} / ${users.length}`,
+              `${filtered.length} of ${users.length}`,
+            )}
+          </span>
+        )}
       </div>
 
       {load === "loading" && !users.length ? (
-        <div className="iam-card-pad">
+        <div className="iam-skel-list">
           <Skeleton animation text={{ rows: 5 }} />
         </div>
       ) : load === "error" && !users.length ? (
-        <div className="iam-empty">
+        <div className="iam-empty iam-empty-line">
           <IconExclamationCircle className="bad" />
           <b>{message || bi("账户列表加载失败", "Failed to load accounts")}</b>
           <Button size="small" icon={<IconRefresh />} onClick={onReload}>
@@ -785,8 +825,14 @@ function UsersDirectory({
           </Button>
         </div>
       ) : filtered.length === 0 ? (
-        <div className="iam-empty">
-          <b>{bi("没有匹配的账户", "No matching accounts")}</b>
+        <div className="iam-empty iam-empty-line">
+          <b>{bi("没有匹配的成员账户", "No matching accounts")}</b>
+          <span>
+            {bi(
+              "换个关键词试试，或清除角色与状态筛选。",
+              "Try a different keyword or clear the active filter.",
+            )}
+          </span>
           <Button
             size="small"
             onClick={() => {
@@ -794,39 +840,38 @@ function UsersDirectory({
               setFilter("all");
             }}
           >
-            {bi("清除筛选条件", "Clear Filters")}
+            {bi("清除筛选", "Clear Filters")}
           </Button>
         </div>
       ) : (
-        <div className="iam-ledger-card">
-          <div className="iam-u-head">
-            <span>{bi("成员账户", "Account")}</span>
-            <span>{bi("分配角色", "Roles")}</span>
-            <span>{bi("所属团队", "Teams")}</span>
-            <span>{bi("集群可见范围", "Cluster Scope")}</span>
-            <span>{bi("交付动态", "Deliveries")}</span>
+        <div className="iam-ledger" role="table" aria-label={bi("用户账户列表", "Users list")}>
+          <div className="iam-u-head" role="row">
+            <span>{bi("成员", "Member")}</span>
+            <span>{bi("角色与团队", "Roles & Teams")}</span>
+            <span>{bi("可访问集群", "Cluster Scope")}</span>
+            <span>{bi("交付记录", "Deliveries")}</span>
             <span className="is-right">{bi("操作", "Actions")}</span>
           </div>
           <div className="iam-u-body">
-            {filtered.map((u) => {
+            {filtered.map((u, idx) => {
               const m = userAccessMeta.get(u.username);
               const isMe = u.username === me.username;
+              const isQuickOpen = quickGrantUser === u.username;
               return (
                 <div
                   key={u.username}
-                  className={`iam-u-row ${u.disabled ? "is-disabled" : ""}`}
-                  role="button"
+                  ref={(el) => {
+                    rowRefs.current[idx] = el;
+                  }}
+                  className={`iam-u-row ${u.disabled ? "is-disabled" : ""} ${focusIdx === idx || isQuickOpen ? "is-active" : ""}`}
+                  role="row"
                   tabIndex={0}
                   onClick={() => go({ name: "accounts", id: u.username })}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      go({ name: "accounts", id: u.username });
-                    }
-                  }}
+                  onFocus={() => setFocusIdx(idx)}
+                  onKeyDown={(e) => handleRowKeyDown(e, idx, u.username)}
                 >
                   <div className="iam-u-who">
-                    <Avatar name={u.username} role={u.role} size={34} />
+                    <Avatar name={u.username} role={u.role} size={32} />
                     <div className="iam-u-who-txt">
                       <span className="iam-u-name">
                         <b>{u.username}</b>
@@ -845,23 +890,16 @@ function UsersDirectory({
                     {(m?.rids || []).map((rid) => {
                       const r = roleMap.get(rid);
                       return (
-                        <span key={rid} className="iam-chip is-role">
+                        <span key={`r:${rid}`} className="iam-chip is-role">
                           {r ? roleTitle(r) : rid}
                         </span>
                       );
                     })}
-                  </div>
-
-                  <div className="iam-u-chips">
-                    {m?.tids.length ? (
-                      m.tids.map((tid) => (
-                        <span key={tid} className="iam-chip is-team">
-                          {teamMap.get(tid)?.name || tid}
-                        </span>
-                      ))
-                    ) : (
-                      <span className="faint small">—</span>
-                    )}
+                    {(m?.tids || []).map((tid) => (
+                      <span key={`t:${tid}`} className="iam-chip is-team">
+                        {teamMap.get(tid)?.name || tid}
+                      </span>
+                    ))}
                   </div>
 
                   <div className="iam-u-scope">
@@ -886,8 +924,8 @@ function UsersDirectory({
                         {(m?.grantedCount || 0) > 0 && (
                           <span className="iam-scope-badge is-extra">
                             {bi(
-                              `+ ${m!.grantedCount} 个授权集群`,
-                              `+ ${m!.grantedCount} granted`,
+                              `+${m!.grantedCount} 授权集群`,
+                              `+${m!.grantedCount} granted`,
                             )}
                           </span>
                         )}
@@ -910,7 +948,7 @@ function UsersDirectory({
                       </>
                     ) : (
                       <span className="faint small">
-                        {bi("暂无交付", "None")}
+                        {bi("暂无", "None")}
                       </span>
                     )}
                   </div>
@@ -919,13 +957,26 @@ function UsersDirectory({
                     className="iam-u-act"
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <Button
-                      size="small"
+                    {can("iam.user") && iam && (
+                      <Button
+                        size="small"
+                        type="secondary"
+                        onClick={() => setQuickGrantUser(u.username)}
+                      >
+                        {bi("快捷授权", "Quick Grant")}
+                      </Button>
+                    )}
+                    <button
+                      type="button"
+                      className="iam-row-go"
+                      aria-label={bi(
+                        `查看 ${u.username} 详情`,
+                        `Open ${u.username}`,
+                      )}
                       onClick={() => go({ name: "accounts", id: u.username })}
                     >
-                      {bi("配置权限", "Configure")}
-                    </Button>
-                    <IconRight className="iam-row-arrow" />
+                      <IconRight />
+                    </button>
                   </div>
                 </div>
               );
@@ -933,6 +984,47 @@ function UsersDirectory({
           </div>
         </div>
       )}
+
+      <Drawer
+        width={620}
+        style={{ maxWidth: "100vw" }}
+        visible={Boolean(quickUserObj && iam)}
+        onCancel={() => setQuickGrantUser("")}
+        footer={null}
+        title={
+          quickUserObj ? (
+            <span className="iam-drawer-title">
+              <span>{bi("快捷权限配置", "Quick Access Setup")}</span>
+              <code className="mono">{quickUserObj.username}</code>
+              <Button
+                size="mini"
+                type="text"
+                onClick={() => {
+                  const u = quickUserObj.username;
+                  setQuickGrantUser("");
+                  go({ name: "accounts", id: u });
+                }}
+              >
+                {bi("完整详情", "Full Profile")} <IconRight />
+              </Button>
+            </span>
+          ) : (
+            ""
+          )
+        }
+      >
+        {quickUserObj && iam && (
+          <GrantEditor
+            user={quickUserObj.username}
+            iam={iam}
+            compact
+            onSaved={() => {
+              onChanged();
+              setQuickGrantUser("");
+            }}
+          />
+        )}
+      </Drawer>
     </article>
   );
 }
@@ -976,8 +1068,9 @@ function AccountDetail({
 }) {
   useLang();
   const aiStatus = useAIStatus();
-  const { iam } = useIAM();
+  const { iam, error: iamError, reload: reloadIAM } = useIAM();
   const [act, setAct] = useState<Activity | null>(null);
+  const [actErr, setActErr] = useState("");
   const [busy, setBusy] = useState("");
   const [password, setPassword] = useState("");
   const [tab, setTab] = useState<"access" | "activity">("access");
@@ -992,24 +1085,19 @@ function AccountDetail({
     };
   }, []);
 
-  const load = useCallback(
-    () =>
-      api<Activity>(`/api/users/${u.username}/activity`)
-        .then((res) => {
-          if (mountedRef.current) setAct(res);
-        })
-        .catch(() => {
-          if (mountedRef.current) {
-            setAct({
-              events: [],
-              ai: { calls: 0, errors: 0, in: 0, out: 0, cost: 0 },
-              currency: "CNY",
-              jobs: [],
-            });
-          }
-        }),
-    [u.username],
-  );
+  const load = useCallback(() => {
+    setActErr("");
+    return api<Activity>(`/api/users/${u.username}/activity`)
+      .then((res) => {
+        if (mountedRef.current) setAct(res);
+      })
+      .catch((e) => {
+        if (mountedRef.current) {
+          setActErr((e as Error).message || bi("活动数据加载失败", "Failed to load activity"));
+        }
+      });
+  }, [u.username]);
+
   useEffect(() => {
     void load();
   }, [load]);
@@ -1044,12 +1132,12 @@ function AccountDetail({
       Message.success(
         r.moved
           ? bi(
-              `已删除，${r.moved} 份交付交给了 ${moveTo}`,
+              `已删除，${r.moved} 份交付已转交给 ${moveTo}`,
               `Deleted; transferred ${r.moved} ${r.moved === 1 ? "delivery" : "deliveries"} to ${moveTo}`,
             )
           : bi(
-              "已删除，交付和操作记录都保留着",
-              "Deleted; delivery and audit records preserved",
+              "账户已归档，历史交付与审计记录已完整保留",
+              "Account archived; delivery and audit records preserved",
             ),
       );
       setRemoving(false);
@@ -1085,7 +1173,7 @@ function AccountDetail({
   const g = iam?.grants[u.username];
 
   return (
-    <article className="iam-user enter">
+    <article className="iam-user iam-stage">
       <div className="iam-crumb-bar">
         <button
           type="button"
@@ -1093,7 +1181,7 @@ function AccountDetail({
           onClick={() => go({ name: "accounts" })}
         >
           <IconArrowLeft />
-          <span>{bi("用户账户", "User Accounts")}</span>
+          <span>{bi("用户账户", "Users")}</span>
         </button>
         <span className="iam-crumb-sep" aria-hidden>
           /
@@ -1102,30 +1190,31 @@ function AccountDetail({
       </div>
 
       <header className="iam-user-h">
-        <Avatar name={u.username} role={u.role} size={56} />
+        <Avatar name={u.username} role={u.role} size={48} />
         <div className="iam-user-t">
-          <h1>
-            {u.username}
+          <div className="iam-user-title-line">
+            <h1>{u.username}</h1>
             {self && <span className="you">{bi("你", "You")}</span>}
             {u.disabled && (
               <span className="acc-off">{bi("已停用", "Disabled")}</span>
             )}
-          </h1>
-          <span className="me-chips">
-            {(g?.roles || []).map((id) => {
-              const found = iam?.roles.find((r) => r.id === id);
-              return (
-                <span key={id} className="me-chip role">
-                  {found ? roleTitle(found) : id}
+            <span className="me-chips">
+              {(g?.roles || []).map((id) => {
+                const found = iam?.roles.find((r) => r.id === id);
+                return (
+                  <span key={id} className="iam-chip is-role">
+                    {found ? roleTitle(found) : id}
+                  </span>
+                );
+              })}
+              {(g?.teams || []).map((id) => (
+                <span key={id} className="iam-chip is-team">
+                  {iam?.teams.find((t) => t.id === id)?.name || id}
                 </span>
-              );
-            })}
-            {(g?.teams || []).map((id) => (
-              <span key={id} className="me-chip team">
-                {iam?.teams.find((t) => t.id === id)?.name || id}
-              </span>
-            ))}
-          </span>
+              ))}
+            </span>
+          </div>
+
           <p className="iam-user-facts">
             <span>
               <b className="num">{u.deliveries ?? 0}</b>{" "}
@@ -1134,26 +1223,23 @@ function AccountDetail({
                 (u.deliveries ?? 0) === 1 ? "delivery" : "deliveries",
               )}
               {u.active
-                ? bi(`（${u.active} 份生成中）`, ` (${u.active} building)`)
+                ? bi(`（${u.active} 进行中）`, ` (${u.active} active)`)
                 : ""}
             </span>
-            {aiStatus.enabled && (
+            {aiStatus.enabled && act && (
               <span>
-                {bi("本月 AI", "AI this month")}{" "}
-                <b className="num">{act ? act.ai.calls : "—"}</b>{" "}
-                {bi("次", act?.ai.calls === 1 ? "call" : "calls")} ·{" "}
+                {bi("本月 AI", "AI (30d)")}{" "}
+                <b className="num">{act.ai.calls}</b>{" "}
+                {bi("次", act.ai.calls === 1 ? "call" : "calls")} ·{" "}
                 <b className="num">
-                  {act
-                    ? (act.ai.in + act.ai.out).toLocaleString(getLang())
-                    : "—"}
+                  {(act.ai.in + act.ai.out).toLocaleString(getLang())}
                 </b>{" "}
-                {bi("Token", "tokens")} · {bi("约", "Est.")}{" "}
-                <b className="num">{cost}</b>
+                {bi("Token", "tokens")} · <b className="num">{cost}</b>
               </span>
             )}
             {act?.storage && (
               <span>
-                {bi("存储", "Storage")}{" "}
+                {bi("个人空间", "Storage")}{" "}
                 <b className="num">{bytesText(act.storage.used)}</b> /{" "}
                 {bytesText(act.storage.quota)}
                 {can("settings.storage") && (
@@ -1163,7 +1249,7 @@ function AccountDetail({
                     style={{ marginLeft: 6 }}
                     onClick={() => editQuota(u.username, act.storage!, load)}
                   >
-                    {bi("调整额度", "Adjust Quota")}
+                    {bi("调整额度", "Adjust")}
                   </button>
                 )}
               </span>
@@ -1171,29 +1257,31 @@ function AccountDetail({
             {u.last_delivery && (
               <span className="num">
                 {bi(
-                  `最近一次交付 ${ago(u.last_delivery)}`,
+                  `最近交付 ${ago(u.last_delivery)}`,
                   `Last delivery ${ago(u.last_delivery)}`,
                 )}
               </span>
             )}
           </p>
         </div>
-        {manage && (
-          <span className="iam-user-acts">
+
+        {manage ? (
+          <div className="iam-user-acts">
             <Button
+              size="small"
               loading={busy === "pw"}
               icon={<IconLock />}
               onClick={() =>
                 confirm(
                   bi(
-                    `重置 ${u.username} 的密码？`,
+                    `重置 ${u.username} 的登录密码？`,
                     `Reset password for ${u.username}?`,
                   ),
                   bi(
-                    "会生成一个新密码，只显示一次；对方当前的登录会失效。",
-                    "Generates a new password shown only once; all existing sessions for this user will be signed out.",
+                    "将生成新的随机强口令（仅展示一次），该成员当前已登录的会话将立即下线。",
+                    "Generates a one-time password and signs out all active sessions for this user.",
                   ),
-                  bi("重置", "Reset"),
+                  bi("确认重置", "Reset"),
                   () => patch("pw", { reset_password: true }),
                 )
               }
@@ -1203,20 +1291,23 @@ function AccountDetail({
             {!self &&
               (u.disabled ? (
                 <Button
+                  size="small"
+                  type="primary"
                   loading={busy === "dis"}
                   onClick={() => patch("dis", { disabled: false })}
                 >
-                  {bi("启用", "Enable")}
+                  {bi("恢复启用", "Enable")}
                 </Button>
               ) : (
                 <Button
+                  size="small"
                   loading={busy === "dis"}
                   onClick={() =>
                     confirm(
-                      bi(`停用 ${u.username}？`, `Disable ${u.username}?`),
+                      bi(`停用账户 ${u.username}？`, `Disable ${u.username}?`),
                       bi(
-                        "停用后不能登录，当前登录立即失效；交付和记录都保留，随时可以再启用。",
-                        "User cannot sign in and active sessions end immediately; deliveries and logs are preserved and the account can be re-enabled anytime.",
+                        "停用后无法登录且现有会话立即失效；名下集群与历史记录完整保留，可随时恢复启用。",
+                        "Blocks sign-in and revokes active sessions; clusters and logs remain intact.",
                       ),
                       bi("停用", "Disable"),
                       () => patch("dis", { disabled: true }),
@@ -1229,16 +1320,19 @@ function AccountDetail({
               ))}
             {!self && (
               <Button
+                size="small"
                 status="danger"
                 icon={<IconDelete />}
-                onClick={() => (setMoveTo(""), setRemoving(true))}
+                onClick={() => {
+                  setMoveTo("");
+                  setRemoving(true);
+                }}
               >
                 {bi("删除", "Delete")}
               </Button>
             )}
-          </span>
-        )}
-        {!manage && (
+          </div>
+        ) : (
           <span className="iam-ro-pill" role="status">
             {bi("只读浏览", "Read-only")}
           </span>
@@ -1247,19 +1341,19 @@ function AccountDetail({
 
       <UnderlineTabs
         className="iam-utabs"
-        label={bi("账户详情分区", "Account detail tabs")}
+        label={bi("账户详情视图", "Account detail views")}
         value={tab}
         onChange={(v) => setTab(v as "access" | "activity")}
         items={[
           {
             value: "access",
-            label: bi("角色与集群权限", "Roles & Cluster Access"),
+            label: bi("权限与集群范围", "Roles & Cluster Access"),
             count: (g?.roles?.length || 0) || undefined,
             icon: AccIcons.roles,
           },
           {
             value: "activity",
-            label: bi("活动记录", "Activity"),
+            label: bi("交付与操作动态", "Deliveries & Activity"),
             count: act ? act.jobs.length + act.events.length : undefined,
             icon: AccIcons.activity,
           },
@@ -1267,129 +1361,151 @@ function AccountDetail({
       />
 
       {tab === "access" ? (
-        <section className="iam-user-sec">
-          {iam ? (
+        <section className="iam-user-sec iam-stage" key="access">
+          {iamError && !iam ? (
+            <div className="iam-empty iam-empty-line">
+              <IconExclamationCircle className="bad" />
+              <b>{iamError}</b>
+              <Button size="small" icon={<IconRefresh />} onClick={reloadIAM}>
+                {bi("重试", "Retry")}
+              </Button>
+            </div>
+          ) : iam ? (
             <GrantEditor user={u.username} iam={iam} onSaved={changed} />
           ) : (
             <Skeleton animation text={{ rows: 6 }} />
           )}
         </section>
       ) : (
-        <div className="iam-user-act">
-          <section className="iam-card-box">
-            <h2 className="iam-card-box-title">
-              {bi("名下最近的交付与集群", "Recent Deliveries")}
-            </h2>
-            {!act ? (
-              <Skeleton animation text={{ rows: 3 }} />
-            ) : act.jobs.length === 0 ? (
-              <p className="me-empty">
-                {bi("还没有交付。", "No deliveries yet.")}
-              </p>
-            ) : (
-              <ul className="me-rows">
-                {act.jobs.map((j) => (
-                  <li key={j.id}>
-                    <a
-                      href={`#/d/${encodeURIComponent(j.cluster_id)}/plans/${j.id}`}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        go({
-                          name: "deliveries",
-                          id: j.cluster_id,
-                          tab: "plans",
-                          plan: j.id,
-                        });
-                      }}
-                    >
-                      <span
-                        className={`me-dot s-${j.outcome === "failed" ? "failed" : j.state}`}
-                        aria-hidden
-                      />
-                      <span className="me-row-t">
-                        <b className="mono">{j.cluster_id}</b>
-                        <small>
-                          {j.app_name} {(j.version || "").split("·")[0].trim()}
-                          {` · ${bi(
-                            planTitle(j).replace(/首次部署/g, "集群部署"),
-                            planTitle(j).replace(
-                              /Initial Deploy/g,
-                              "Cluster Deploy",
-                            ),
-                          )}`}
-                        </small>
-                      </span>
-                      <time
-                        className="faint small num"
-                        title={fullTime(j.created)}
-                      >
-                        {ago(j.created)}
-                      </time>
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-          <section className="iam-card-box">
-            <h2 className="iam-card-box-title">
-              {bi("最近 30 天的操作", "Activity (Last 30 Days)")}
-            </h2>
-            {!act ? (
-              <Skeleton animation text={{ rows: 5 }} />
-            ) : act.events.length === 0 ? (
-              <p className="me-empty">
-                {bi("这段时间没有操作记录。", "No activity during this period.")}
-              </p>
-            ) : (
-              <ol className="me-tl">
-                {act.events.map((e, i) => (
-                  <li
-                    key={i}
-                    className={e.action.includes("failed") ? "bad" : ""}
-                  >
-                    <i aria-hidden />
-                    <span>
-                      {auditText(e)}
-                      {e.job && <code className="iam-ev-obj">{e.job}</code>}
-                    </span>
-                    <time className="faint small num" title={fullTime(e.time)}>
-                      {ago(e.time)}
-                      {e.ip ? ` · ${e.ip}` : ""}
-                    </time>
-                  </li>
-                ))}
-              </ol>
-            )}
-            {can("audit.view") && (
-              <Button
-                type="text"
-                size="small"
-                onClick={() => go({ name: "accounts", id: "~audit" })}
-              >
-                {bi("在操作审计里查看全部", "View all in Audit Log")}{" "}
-                <IconRight />
+        <div className="iam-user-act iam-stage" key="activity">
+          {actErr && !act ? (
+            <div className="iam-empty iam-empty-line" style={{ gridColumn: "1 / -1" }}>
+              <IconExclamationCircle className="bad" />
+              <b>{actErr}</b>
+              <Button size="small" icon={<IconRefresh />} onClick={() => void load()}>
+                {bi("重试", "Retry")}
               </Button>
-            )}
-          </section>
+            </div>
+          ) : (
+            <>
+              <section className="iam-cont-sec">
+                <div className="iam-cont-sec-h">
+                  <h2>{bi("名下集群与交付记录", "Clusters & Deliveries")}</h2>
+                  {act && <span className="num">{act.jobs.length}</span>}
+                </div>
+                {!act ? (
+                  <Skeleton animation text={{ rows: 4 }} />
+                ) : act.jobs.length === 0 ? (
+                  <p className="iam-inline-empty">
+                    {bi("该成员暂未创建任何交付或纳管集群。", "No deliveries or clusters created yet.")}
+                  </p>
+                ) : (
+                  <ul className="me-rows iam-flat-rows">
+                    {act.jobs.map((j) => (
+                      <li key={j.id}>
+                        <a
+                          href={`#/d/${encodeURIComponent(j.cluster_id)}/plans/${j.id}`}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            go({
+                              name: "deliveries",
+                              id: j.cluster_id,
+                              tab: "plans",
+                              plan: j.id,
+                            });
+                          }}
+                        >
+                          <span
+                            className={`me-dot s-${j.outcome === "failed" ? "failed" : j.state}`}
+                            aria-hidden
+                          />
+                          <span className="me-row-t">
+                            <b className="mono">{j.cluster_id}</b>
+                            <small>
+                              {j.app_name} {(j.version || "").split("·")[0].trim()}
+                              {` · ${bi(
+                                planTitle(j).replace(/首次部署/g, "集群部署"),
+                                planTitle(j).replace(
+                                  /Initial Deploy/g,
+                                  "Cluster Deploy",
+                                ),
+                              )}`}
+                            </small>
+                          </span>
+                          <time
+                            className="faint small num"
+                            title={fullTime(j.created)}
+                          >
+                            {ago(j.created)}
+                          </time>
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+
+              <section className="iam-cont-sec">
+                <div className="iam-cont-sec-h">
+                  <h2>{bi("近 30 天操作轨迹", "Recent Activity (30d)")}</h2>
+                  {can("audit.view") && (
+                    <button
+                      type="button"
+                      className="iam-text-act"
+                      onClick={() => go({ name: "accounts", id: "~audit" })}
+                    >
+                      {bi("全部审计记录", "Full Audit Log")} →
+                    </button>
+                  )}
+                </div>
+                {!act ? (
+                  <Skeleton animation text={{ rows: 5 }} />
+                ) : act.events.length === 0 ? (
+                  <p className="iam-inline-empty">
+                    {bi("近 30 天内暂无操作记录。", "No activity recorded in the last 30 days.")}
+                  </p>
+                ) : (
+                  <ol className="me-tl iam-flat-tl">
+                    {act.events.map((e, i) => (
+                      <li
+                        key={i}
+                        className={e.action.includes("failed") ? "bad" : ""}
+                      >
+                        <i aria-hidden />
+                        <span>
+                          {auditText(e)}
+                          {e.job && <code className="iam-ev-obj">{e.job}</code>}
+                        </span>
+                        <time className="faint small num" title={fullTime(e.time)}>
+                          {ago(e.time)}
+                          {e.ip ? ` · ${e.ip}` : ""}
+                        </time>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </section>
+            </>
+          )}
         </div>
       )}
 
       <Modal
         visible={!!password}
-        title={bi(`${u.username} 的新密码`, `New Password for ${u.username}`)}
+        title={bi(`${u.username} 的新密码`, `New Password · ${u.username}`)}
         onCancel={() => setPassword("")}
         footer={null}
       >
         <p className="muted small">
           {bi(
-            "只显示这一次，请发给对方。",
+            "新密码仅在此展示一次，关闭后无法再次查看，请通过安全渠道发送给本人。",
             "Shown only once—please share securely with the user.",
           )}
         </p>
         <div className="acc-pw">
           <code>{password}</code>
           <Button
+            type="primary"
             icon={<IconCopy />}
             onClick={() =>
               void copy(
@@ -1397,11 +1513,11 @@ function AccountDetail({
                   `平台地址：${location.origin}\n用户名：${u.username}\n新密码：${password}`,
                   `Platform URL: ${location.origin}\nUsername: ${u.username}\nNew Password: ${password}`,
                 ),
-                bi("已复制登录信息", "Credentials copied"),
+                bi("已复制登录凭据", "Credentials copied"),
               )
             }
           >
-            {bi("复制登录信息", "Copy Credentials")}
+            {bi("复制凭据", "Copy Credentials")}
           </Button>
         </div>
       </Modal>
@@ -1422,7 +1538,7 @@ function AccountDetail({
         <div className="st-form">
           <p className="iam-del-lead">
             {bi(
-              "删除后该用户名永久归档保留，不能再注册同名账户；已有审计与历史记录完整留存。",
+              "删除后该用户名将归档锁定不可复用，以保证审计链完整可追溯。",
               "The username will be permanently retired to preserve audit integrity.",
             )}
           </p>
@@ -1430,10 +1546,10 @@ function AccountDetail({
             <span>
               {u.deliveries
                 ? bi(
-                    `名下 ${u.deliveries} 份交付的处理方式`,
-                    `How to handle ${u.deliveries} deliveries`,
+                    `名下 ${u.deliveries} 份交付与集群的归属处理`,
+                    `Reassign ${u.deliveries} deliveries`,
                   )
-                : bi("名下没有交付记录", "No deliveries under this account")}
+                : bi("该账户名下暂无交付记录", "No deliveries under this account")}
             </span>
             {!!u.deliveries && (
               <Select
@@ -1444,8 +1560,8 @@ function AccountDetail({
                   {
                     value: "",
                     label: bi(
-                      "暂不转交（管理员可见，后续仍可在已归档账户中转交）",
-                      "Do not transfer now (global-scope users can reassign later)",
+                      "暂不转交（后续仍可在「已归档账户」中转交）",
+                      "Keep unassigned for now (can reassign later)",
                     ),
                   },
                   ...users
@@ -1455,7 +1571,7 @@ function AccountDetail({
                       label: bi(`转交给 ${x.username}`, `Transfer to ${x.username}`),
                     })),
                 ]}
-                aria-label={bi("交给谁", "Transfer to")}
+                aria-label={bi("转交目标成员", "Transfer to")}
               />
             )}
           </div>
@@ -1500,11 +1616,11 @@ function AddAccount({
     ? ""
     : !NAME.test(name)
       ? bi(
-          "小写字母开头，只含小写字母、数字和 -",
+          "小写字母开头，仅支持小写字母、数字和连字符 -",
           "Must start with a lowercase letter and contain only a–z, 0–9, and -",
         )
       : taken(name)
-        ? bi("这个用户名已存在", "This username already exists")
+        ? bi("该用户名已存在", "This username already exists")
         : "";
   const pwShort = password.length < 12;
 
@@ -1547,7 +1663,7 @@ function AddAccount({
       `Platform URL: ${location.origin}\nUsername: ${created.name}\nInitial Password: ${created.password}`,
     );
     return (
-      <article className="iam-page acc-detail enter">
+      <article className="iam-page acc-detail iam-stage">
         <div className="iam-crumb-bar">
           <button
             type="button"
@@ -1555,7 +1671,7 @@ function AddAccount({
             onClick={() => go({ name: "accounts" })}
           >
             <IconArrowLeft />
-            <span>{bi("用户账户", "User Accounts")}</span>
+            <span>{bi("用户账户", "Users")}</span>
           </button>
         </div>
         <header className="acc-hero">
@@ -1563,14 +1679,14 @@ function AddAccount({
             <IconCheck />
           </span>
           <div>
-            <h1>{bi(`已创建 ${created.name}`, `Created ${created.name}`)}</h1>
-            <span className="role-tag">{created.role}</span>
+            <h1>{bi(`账户 ${created.name} 已创建`, `Created ${created.name}`)}</h1>
+            <span className="iam-chip is-role">{created.role}</span>
           </div>
         </header>
-        <section className="dsec">
-          <h2 className="dsec-title">
-            {bi("发给对方的登录信息", "Credentials to Share")}
-          </h2>
+        <section className="iam-cont-sec" style={{ maxWidth: 640 }}>
+          <div className="iam-cont-sec-h">
+            <h2>{bi("一次性初始登录凭据", "One-Time Initial Credentials")}</h2>
+          </div>
           <div className="cred">
             <dl>
               <div>
@@ -1589,21 +1705,23 @@ function AddAccount({
             <Button
               type="primary"
               icon={<IconCopy />}
-              onClick={() => copy(text)}
+              onClick={() =>
+                void copy(text, bi("已复制登录凭据", "Credentials copied"))
+              }
             >
               {bi("复制登录信息", "Copy Credentials")}
             </Button>
           </div>
-          <p className="warn small">
+          <p className="warn small" style={{ marginTop: 10 }}>
             {bi(
-              "离开此页后不能再次查看密码，请通过安全渠道发送。",
-              "This password cannot be viewed again after leaving this page—send via a secure channel.",
+              "离开此页面后将无法再次查看初始密码，请立即复制并通过安全渠道发送。",
+              "This password will not be shown again after leaving this page.",
             )}
           </p>
         </section>
-        <div className="row-gap">
+        <div className="row-gap" style={{ marginTop: 20 }}>
           <Button type="primary" onClick={() => done(created.name)}>
-            {bi("查看并配置账户", "Open Account")}
+            {bi("查看成员详情", "Open Profile")}
           </Button>
           <Button
             onClick={() => {
@@ -1614,7 +1732,7 @@ function AddAccount({
               void done("+new");
             }}
           >
-            {bi("继续添加下一个", "Add Another")}
+            {bi("继续添加下一位", "Add Another")}
           </Button>
         </div>
       </article>
@@ -1622,7 +1740,7 @@ function AddAccount({
   }
 
   return (
-    <article className="iam-page acc-detail enter">
+    <article className="iam-page acc-detail iam-stage">
       <div className="iam-crumb-bar">
         <button
           type="button"
@@ -1630,181 +1748,183 @@ function AddAccount({
           onClick={() => go({ name: "accounts" })}
         >
           <IconArrowLeft />
-          <span>{bi("用户账户", "User Accounts")}</span>
+          <span>{bi("用户账户", "Users")}</span>
         </button>
         <span className="iam-crumb-sep" aria-hidden>
           /
         </span>
         <span className="iam-crumb-cur">
-          {bi("添加新账户", "Create Account")}
+          {bi("添加用户", "Add User")}
         </span>
       </div>
 
       <header className="iam-h">
-        <div>
-          <h1>{bi("添加用户账户", "Create User Account")}</h1>
+        <div className="iam-h-main">
+          <h1>{bi("添加用户账户", "Add User Account")}</h1>
           <p>
             {bi(
-              "创建账户并设定角色与初始集群访问范围；生成的一次性初始密码将在创建完成后展示。",
-              "Set up username, roles, and initial cluster access; a one-time initial password will be shown upon creation.",
+              "设定登录用户名、角色与初始集群授权；创建完成后将生成一次性初始密码。",
+              "Configure username, roles, and initial cluster access; a one-time password is generated on creation.",
             )}
           </p>
         </div>
       </header>
 
       <form
-        className="iam-new-user-grid"
+        className="iam-new-user-split"
         onSubmit={(e) => {
           e.preventDefault();
           void submit();
         }}
       >
-        <div className="iam-card-box iam-form-stack">
-          <div className="frow">
-            <label className="frow-label" htmlFor="acc-name">
-              {bi("用户名", "Username")}
-            </label>
-            <Input
-              id="acc-name"
-              value={name}
-              onChange={(v) => setName(v.trim())}
-              placeholder={bi("zhang-san", "jane-doe")}
-              autoComplete="off"
-              autoFocus
-              status={nameError ? "error" : undefined}
-              aria-label={bi("用户名", "Username")}
-              className="mono-in"
-            />
-            <span className={`frow-hint ${nameError ? "bad" : ""}`}>
-              {nameError ||
-                bi(
-                  "小写字母开头，仅支持 a–z、0–9 和连字符 -",
-                  "Start with a lowercase letter; a–z, 0–9, and - only",
+        <div className="iam-form-col">
+          <div className="iam-cont-sec">
+            <div className="iam-cont-sec-h">
+              <h2>{bi("身份与角色", "Identity & Roles")}</h2>
+            </div>
+
+            <div className="iam-form-stack">
+              <div className="frow">
+                <label className="frow-label" htmlFor="acc-name">
+                  {bi("用户名", "Username")}
+                </label>
+                <Input
+                  id="acc-name"
+                  value={name}
+                  onChange={(v) => setName(v.trim())}
+                  placeholder={bi("例如：zhang-san", "e.g., jane-doe")}
+                  autoComplete="off"
+                  autoFocus
+                  status={nameError ? "error" : undefined}
+                  aria-label={bi("用户名", "Username")}
+                  className="mono-in"
+                />
+                <span className={`frow-hint ${nameError ? "bad" : ""}`}>
+                  {nameError ||
+                    bi(
+                      "小写字母开头，仅含 a–z、0–9 和连字符 -",
+                      "Lowercase letter start; a–z, 0–9, and - only",
+                    )}
+                </span>
+              </div>
+
+              <div className="frow">
+                <label className="frow-label" htmlFor="acc-pw">
+                  {bi("初始密码", "Initial Password")}
+                </label>
+                <div className="pw-row">
+                  <Input.Password
+                    id="acc-pw"
+                    value={password}
+                    onChange={setPassword}
+                    visibilityToggle
+                    defaultVisibility
+                    autoComplete="new-password"
+                    aria-label={bi("初始密码", "Initial password")}
+                    className="mono-in"
+                    status={pwShort ? "error" : undefined}
+                  />
+                  <Button
+                    htmlType="button"
+                    icon={<IconSync />}
+                    onClick={() => setPassword(generate())}
+                  >
+                    {bi("重新生成", "Regenerate")}
+                  </Button>
+                </div>
+                <span className={`frow-hint ${pwShort ? "bad" : ""}`}>
+                  {pwShort
+                    ? bi(
+                        `至少 12 位（当前 ${password.length} 位）`,
+                        `Minimum 12 characters (currently ${password.length})`,
+                      )
+                    : bi(
+                        `${password.length} 位随机强口令，创建后仅展示一次`,
+                        `${password.length}-char strong password; shown once`,
+                      )}
+                </span>
+              </div>
+
+              <div className="frow">
+                <span className="frow-label">{bi("分配角色", "Roles")}</span>
+                {iam ? (
+                  <RolePicker iam={iam} value={roles} onChange={setRoles} />
+                ) : (
+                  <Skeleton animation text={{ rows: 3 }} />
                 )}
-            </span>
-          </div>
+              </div>
 
-          <div className="frow">
-            <label className="frow-label" htmlFor="acc-pw">
-              {bi("初始密码", "Initial Password")}
-            </label>
-            <div className="pw-row">
-              <Input.Password
-                id="acc-pw"
-                value={password}
-                onChange={setPassword}
-                visibilityToggle
-                defaultVisibility
-                autoComplete="new-password"
-                aria-label={bi("初始密码", "Initial password")}
-                className="mono-in"
-                status={pwShort ? "error" : undefined}
-              />
-              <Button
-                htmlType="button"
-                icon={<IconSync />}
-                onClick={() => setPassword(generate())}
-              >
-                {bi("换一个", "Regenerate")}
-              </Button>
+              {iam && iam.teams.length > 0 && (
+                <div className="frow">
+                  <span className="frow-label">
+                    {bi("加入协作团队（可选）", "Teams (Optional)")}
+                  </span>
+                  <Select
+                    mode="multiple"
+                    value={teams}
+                    onChange={setTeams}
+                    triggerProps={{ autoFitPosition: true }}
+                    placeholder={bi("选择所属团队，自动继承团队授权集群…", "Select teams…")}
+                    options={iam.teams.map((t) => ({ value: t.id, label: t.name }))}
+                    allowClear
+                    aria-label={bi("团队", "Teams")}
+                  />
+                </div>
+              )}
+
+              {error && (
+                <div className="acc-form-err" role="alert">
+                  {error}
+                </div>
+              )}
+
+              <div className="iam-form-actions">
+                <Button
+                  type="primary"
+                  htmlType="submit"
+                  loading={busy}
+                  disabled={!name || !!nameError || pwShort || roles.length === 0}
+                >
+                  {bi("创建账户", "Create Account")}
+                </Button>
+                <Button
+                  htmlType="button"
+                  onClick={() =>
+                    history.length > 1 ? history.back() : go({ name: "accounts" })
+                  }
+                >
+                  {bi("取消", "Cancel")}
+                </Button>
+              </div>
             </div>
-            <span className={`frow-hint ${pwShort ? "bad" : ""}`}>
-              {pwShort
-                ? bi(
-                    `至少 12 位，当前 ${password.length} 位`,
-                    `Minimum 12 characters (currently ${password.length})`,
-                  )
-                : bi(
-                    `${password.length} 位随机强口令，创建后仅显示一次`,
-                    `${password.length}-char password; shown once after creation`,
-                  )}
-            </span>
-          </div>
-
-          <div className="frow">
-            <span className="frow-label">{bi("分配角色", "Roles")}</span>
-            {iam ? (
-              <RolePicker iam={iam} value={roles} onChange={setRoles} />
-            ) : (
-              <Skeleton animation text={{ rows: 3 }} />
-            )}
-          </div>
-
-          {iam && iam.teams.length > 0 && (
-            <div className="frow">
-              <span className="frow-label">
-                {bi("加入团队（可选）", "Teams (Optional)")}
-              </span>
-              <Select
-                mode="multiple"
-                value={teams}
-                onChange={setTeams}
-                triggerProps={{ autoFitPosition: true }}
-                placeholder={bi("选择所属协作团队...", "Select teams...")}
-                options={iam.teams.map((t) => ({ value: t.id, label: t.name }))}
-                allowClear
-                aria-label={bi("团队", "Teams")}
-              />
-            </div>
-          )}
-
-          {error && (
-            <div className="acc-form-err" role="alert">
-              {error}
-            </div>
-          )}
-
-          <div className="row-gap">
-            <Button
-              type="primary"
-              htmlType="submit"
-              loading={busy}
-              disabled={!name || !!nameError || pwShort || roles.length === 0}
-            >
-              {bi("创建账户", "Create Account")}
-            </Button>
-            <Button
-              htmlType="button"
-              onClick={() =>
-                history.length > 1 ? history.back() : go({ name: "accounts" })
-              }
-            >
-              {bi("取消", "Cancel")}
-            </Button>
           </div>
         </div>
 
-        <div className="iam-card-box">
-          <h3 className="iam-card-box-title">
-            {bi("初始集群授权（可选）", "Initial Cluster Access (Optional)")}
-          </h3>
-          {effScope === "all" ? (
-            <div className="iam-cl-all-note">
-              <IconCheck />
-              <span>
-                {bi(
-                  "所选角色具备全平台视野，创建后自动可查看全部集群，无需单独勾选。",
-                  "Selected role grants global visibility across all clusters automatically.",
-                )}
-              </span>
+        <div className="iam-form-side">
+          <div className="iam-cont-sec">
+            <div className="iam-cont-sec-h">
+              <h2>{bi("初始集群授权（可选）", "Initial Cluster Access (Optional)")}</h2>
             </div>
-          ) : iam ? (
-            <>
-              <p className="faint small iam-cl-subhint">
-                {bi(
-                  "该用户后续自己创建的集群默认归其本人管理；如需让他协助运维或查看现有集群，可在下方直接点选。",
-                  "Clusters created by this user will belong to them automatically; toggle existing clusters below to grant immediate access.",
-                )}
-              </p>
+            {effScope === "all" ? (
+              <div className="iam-cl-all-note">
+                <IconCheck />
+                <span>
+                  {bi(
+                    "所选角色具备全平台视野，创建后自动可查看全部集群，无需单独分配。",
+                    "Selected role grants global visibility across all clusters automatically.",
+                  )}
+                </span>
+              </div>
+            ) : iam ? (
               <ClusterGrantPicker
                 clusters={iam.clusters || []}
                 value={clusters}
                 onChange={setClusters}
               />
-            </>
-          ) : (
-            <Skeleton animation text={{ rows: 4 }} />
-          )}
+            ) : (
+              <Skeleton animation text={{ rows: 4 }} />
+            )}
+          </div>
         </div>
       </form>
     </article>

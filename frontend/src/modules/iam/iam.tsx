@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   Checkbox,
@@ -6,8 +6,10 @@ import {
   Input,
   Message,
   Modal,
+  Popover,
   Select,
   Skeleton,
+  Switch,
   Tooltip,
 } from "@arco-design/web-react";
 import {
@@ -16,18 +18,27 @@ import {
   IconClose,
   IconCopy,
   IconDelete,
+  IconExclamationCircle,
   IconLock,
   IconPlus,
+  IconRefresh,
   IconRight,
   IconSearch,
   IconStorage,
   IconUser,
   IconUserGroup,
 } from "@arco-design/web-react/icon";
-import { api, can, err, fullTime, refreshAIStatus } from "../../shared/shared";
+import {
+  api,
+  can,
+  err,
+  fullTime,
+  refreshAIStatus,
+  typing,
+} from "../../shared/shared";
 import type { Account, ClusterAccessLevel } from "../../shared/shared";
 import { go } from "../../app/router";
-import { UnderlineTabs } from "../../design/ui";
+import { Kbd, UnderlineTabs } from "../../design/ui";
 import { bi, biv, useLang } from "../../app/i18n";
 import "./iam.css";
 
@@ -305,60 +316,6 @@ const IAMIcons = {
       <path d="M2.5 6.3h11M6.3 2.5v11" />
     </svg>
   ),
-  teamAll: (
-    <svg
-      width={14}
-      height={14}
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.6}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      style={{ display: "block", flex: "none" }}
-      aria-hidden="true"
-    >
-      <circle cx="6.2" cy="5.6" r="2.2" />
-      <path d="M2.4 12.8c0-2 1.7-3.4 3.8-3.4s3.8 1.4 3.8 3.4" />
-      <circle cx="11.2" cy="6.1" r="1.7" />
-      <path d="M11.4 9.6c1.4.2 2.4 1.3 2.4 2.9" />
-    </svg>
-  ),
-  teamActive: (
-    <svg
-      width={14}
-      height={14}
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.6}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      style={{ display: "block", flex: "none" }}
-      aria-hidden="true"
-    >
-      <circle cx="6.5" cy="5.5" r="2.3" />
-      <path d="M2.5 13c0-2.1 1.8-3.5 4-3.5 1.1 0 2.1.4 2.8 1" />
-      <path d="M10.3 11.4l1.3 1.3 2.4-2.5" />
-    </svg>
-  ),
-  teamEmpty: (
-    <svg
-      width={14}
-      height={14}
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.6}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      style={{ display: "block", flex: "none" }}
-      aria-hidden="true"
-    >
-      <circle cx="8" cy="8" r="5.5" strokeDasharray="2.4 2.2" />
-      <path d="M8 5.5v5M5.5 8h5" />
-    </svg>
-  ),
 };
 
 export type { ClusterAccessLevel };
@@ -446,8 +403,8 @@ export const SCOPES: {
     },
     get hint() {
       return bi(
-        "默认只看得到自己创建的集群和交付；其他集群通过「集群授权」按需分配",
-        "Sees own clusters by default; extra clusters can be granted individually",
+        "默认只看得到本人创建的集群；协作集群通过「集群授权」按需分配",
+        "Sees own clusters by default; extra clusters granted per cluster",
       );
     },
   },
@@ -458,7 +415,7 @@ export const SCOPES: {
     },
     get hint() {
       return bi(
-        "自动可见本人及同一团队成员创建的全部集群和交付",
+        "自动可见本人及同一团队成员创建的全部集群",
         "Sees own clusters plus clusters created by teammates",
       );
     },
@@ -470,7 +427,7 @@ export const SCOPES: {
     },
     get hint() {
       return bi(
-        "自动可见平台上所有人创建和纳管的全部集群",
+        "自动可见平台上所有成员创建与纳管的全部集群",
         "Automatically sees every cluster across the platform",
       );
     },
@@ -489,28 +446,41 @@ if (typeof window !== "undefined") {
 export function useIAM() {
   const lang = useLang();
   const [d, setD] = useState<IAM | null>(memo);
-  const load = () =>
-    api<IAM>("/api/iam")
+  const [error, setError] = useState<string>("");
+  const load = () => {
+    setError("");
+    return api<IAM>("/api/iam")
       .then((x) => {
         memo = x;
         setD(x);
       })
-      .catch(err);
+      .catch((e) => {
+        setError((e as Error).message || bi("权限数据加载失败", "Failed to load IAM data"));
+      });
+  };
   useEffect(() => {
     let alive = true;
+    setError("");
     api<IAM>("/api/iam")
       .then((x) => {
         memo = x;
         if (alive) setD(x);
       })
       .catch((e) => {
-        if (alive) err(e);
+        if (alive) {
+          setError((e as Error).message || bi("权限数据加载失败", "Failed to load IAM data"));
+        }
       });
     return () => {
       alive = false;
     };
   }, [lang]);
-  return { iam: d, reload: load, set: (x: IAM) => ((memo = x), setD(x)) };
+  return {
+    iam: d,
+    error,
+    reload: load,
+    set: (x: IAM) => ((memo = x), setD(x)),
+  };
 }
 
 const modules = (perms: Perm[]) => {
@@ -535,7 +505,7 @@ export function effective(iam: IAM, roleIds: string[]) {
   return { perms: ps, scope };
 }
 
-/** Crisp 3-state inline access switch: None / Read-only / Operate */
+/** Apple-inspired gliding 3-state inline access switch: None / Read-only / Operate */
 function TriAccessSwitch({
   value,
   onChange,
@@ -546,9 +516,11 @@ function TriAccessSwitch({
   disabled?: boolean;
 }) {
   useLang();
+  const idx = value === "operate" ? 2 : value === "view" ? 1 : 0;
   return (
     <span
-      className={`iam-tri-switch ${disabled ? "is-disabled" : ""}`}
+      className={`iam-tri-switch ${disabled ? "is-disabled" : ""} idx-${idx}`}
+      style={{ "--tri-idx": idx } as React.CSSProperties}
       role="radiogroup"
       aria-label={bi("集群访问权限", "Cluster access")}
     >
@@ -570,7 +542,7 @@ function TriAccessSwitch({
         className={value === "view" ? "on is-view" : ""}
         onClick={() => onChange("view")}
       >
-        {bi("只读查看", "Read-only")}
+        {bi("只读", "View")}
       </button>
       <button
         type="button"
@@ -580,13 +552,13 @@ function TriAccessSwitch({
         className={value === "operate" ? "on is-op" : ""}
         onClick={() => onChange("operate")}
       >
-        {bi("运维管理", "Operate")}
+        {bi("运维", "Operate")}
       </button>
     </span>
   );
 }
 
-/** Interactive cluster grant table shared by User GrantEditor, AddAccount, and Team Drawer. */
+/** Interactive cluster grant list shared by User GrantEditor, AddAccount, and Team Drawer. */
 export function ClusterGrantPicker({
   clusters,
   value,
@@ -653,8 +625,8 @@ export function ClusterGrantPicker({
 
   if (clusters.length === 0) {
     return (
-      <p className="faint small">
-        {bi("平台上还没有已创建或纳管的集群。", "No clusters created yet.")}
+      <p className="iam-inline-empty">
+        {bi("平台上暂无已创建或纳管的集群。", "No clusters created yet.")}
       </p>
     );
   }
@@ -665,8 +637,8 @@ export function ClusterGrantPicker({
         <div className="iam-cl-owned-banner">
           <span>
             {bi(
-              `本人创建的 ${ownedClusters.length} 个集群已默认拥有运维管理权限`,
-              `${ownedClusters.length} cluster(s) created by this user have Operate access by default`,
+              `本人创建的 ${ownedClusters.length} 个集群已默认具备运维权限`,
+              `${ownedClusters.length} own cluster(s) have Operate access by default`,
             )}
           </span>
           <span className="iam-cl-owned-samples mono">
@@ -680,7 +652,7 @@ export function ClusterGrantPicker({
       )}
 
       {assignable.length === 0 ? (
-        <p className="faint small">
+        <p className="iam-inline-empty">
           {bi(
             "当前全部集群均由该成员本人创建，已默认具备完整运维权限。",
             "All existing clusters were created by this user and are accessible by default.",
@@ -696,25 +668,25 @@ export function ClusterGrantPicker({
               value={q}
               onChange={setQ}
               placeholder={bi(
-                "筛选集群、中间件或创建者...",
-                "Filter cluster, middleware, or owner...",
+                "搜索集群、中间件或创建者…",
+                "Search cluster, middleware, or owner…",
               )}
               className="iam-cl-picker-search"
             />
             <div className="iam-pills">
               <button
                 type="button"
-                className={`iam-pill ${!onlyGranted ? "on" : ""}`}
+                className={`iam-pill sm ${!onlyGranted ? "on" : ""}`}
                 onClick={() => setOnlyGranted(false)}
               >
-                {bi("全部可分配", "Assignable")} <em>{assignable.length}</em>
+                {bi("全部可分配", "All")} <em>{assignable.length}</em>
               </button>
               <button
                 type="button"
-                className={`iam-pill ${onlyGranted ? "on" : ""}`}
+                className={`iam-pill sm ${onlyGranted ? "on" : ""}`}
                 onClick={() => setOnlyGranted(true)}
               >
-                {bi("已获授权", "Granted")} <em>{grantedCount}</em>
+                {bi("已授权", "Granted")} <em>{grantedCount}</em>
               </button>
             </div>
             {!disabled && shown.length > 1 && (
@@ -724,14 +696,14 @@ export function ClusterGrantPicker({
                   className="iam-text-act"
                   onClick={() => batchShown("operate")}
                 >
-                  {bi("全设为运维", "All Operate")}
+                  {bi("全设运维", "All Operate")}
                 </button>
                 <button
                   type="button"
                   className="iam-text-act"
                   onClick={() => batchShown("view")}
                 >
-                  {bi("全设为只读", "All Read-only")}
+                  {bi("全设只读", "All Read-only")}
                 </button>
                 {Object.keys(value).length > 0 && (
                   <button
@@ -795,7 +767,7 @@ export function ClusterGrantPicker({
   );
 }
 
-/** A list of what someone can do, grouped by module; what they cannot do is left out. */
+/** Grouped effective permissions summary. */
 export function EffectivePerms({
   iam,
   perms,
@@ -824,9 +796,9 @@ export function EffectivePerms({
   );
   if (!groups.length)
     return (
-      <p className="faint small">
+      <p className="iam-inline-empty">
         {bi(
-          "没有任何功能权限：只能登录并管理自己的账户。",
+          "暂无功能权限：仅可登录并管理个人账户设置。",
           "No permissions granted: can only manage own account.",
         )}
       </p>
@@ -843,16 +815,16 @@ export function EffectivePerms({
                   {scope === "all"
                     ? "全平台所有"
                     : scope === "team"
-                      ? "自己创建与同团队"
-                      : "自己创建"}
+                      ? "本人及同团队"
+                      : "本人创建"}
                 </b>{" "}
-                的集群和交付
+                集群
                 {scope !== "all" && clusterEntries.length > 0
-                  ? `，另已授权 ${clusterEntries.length} 个协作集群`
+                  ? `，另含 ${clusterEntries.length} 个授权集群`
                   : ""}
               </>,
               <>
-                Default visibility:{" "}
+                Default:{" "}
                 <b>
                   {scope === "all"
                     ? "all platform clusters"
@@ -861,7 +833,7 @@ export function EffectivePerms({
                       : "own clusters"}
                 </b>
                 {scope !== "all" && clusterEntries.length > 0
-                  ? ` + ${clusterEntries.length} assigned`
+                  ? ` + ${clusterEntries.length} granted`
                   : ""}
               </>,
             )}
@@ -890,23 +862,25 @@ export function EffectivePerms({
           )}
         </div>
       )}
-      {groups.map(([m, ps]) => (
-        <div key={m} className="iam-eff-g">
-          <span>{permModule(m)}</span>
-          <span className="iam-eff-ps">
-            {ps.map((p) => (
-              <em key={p.id} title={permDesc(p)}>
-                {permTitle(p)}
-              </em>
-            ))}
-          </span>
-        </div>
-      ))}
+      <div className="iam-eff-list">
+        {groups.map(([m, ps]) => (
+          <div key={m} className="iam-eff-g">
+            <span>{permModule(m)}</span>
+            <span className="iam-eff-ps">
+              {ps.map((p) => (
+                <em key={p.id} title={permDesc(p)}>
+                  {permTitle(p)}
+                </em>
+              ))}
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
 
-/** Choosing roles: compact 2-column porcelain card grid. */
+/** Clean hairline role selector list/grid (zero nested heavy card shadows). */
 export function RolePicker({
   iam,
   value,
@@ -919,7 +893,7 @@ export function RolePicker({
   useLang();
   return (
     <div
-      className="iam-picks iam-picks-grid"
+      className="iam-picks-grid"
       role="group"
       aria-label={bi("角色", "Roles")}
     >
@@ -955,15 +929,17 @@ export function RolePicker({
   );
 }
 
-/** Roles, teams, and per-cluster grants of one person, in a crisp 2-column card workspace. */
+/** Continuous section GrantEditor for User Profile or Quick Slide-Over Drawer. */
 export function GrantEditor({
   user,
   iam,
   onSaved,
+  compact = false,
 }: {
   user: string;
   iam: IAM;
   onSaved: () => void;
+  compact?: boolean;
 }) {
   useLang();
   const g = iam.grants[user] || { roles: [], teams: [], clusters: {} };
@@ -1042,15 +1018,22 @@ export function GrantEditor({
   };
 
   return (
-    <div className="iam-grant">
-      <div className="iam-grant-cols">
+    <div className={`iam-grant ${compact ? "is-compact" : ""}`}>
+      <div className={compact ? "iam-grant-single" : "iam-grant-cols"}>
         <div className="iam-grant-main">
-          <section className="iam-card-box">
-            <h3 className="iam-card-box-title">{bi("角色分配", "Assigned Roles")}</h3>
+          <section className="iam-cont-sec">
+            <div className="iam-cont-sec-h">
+              <h2>{bi("角色分配", "Assigned Roles")}</h2>
+              {roles.length === 0 && (
+                <span className="bad small">
+                  {bi("请至少勾选 1 个角色", "Select at least 1 role")}
+                </span>
+              )}
+            </div>
             {editable ? (
               <RolePicker iam={iam} value={roles} onChange={setRoles} />
             ) : (
-              <p>
+              <p className="iam-readonly-line">
                 {roles
                   .map((id) => {
                     const found = iam.roles.find((r) => r.id === id);
@@ -1059,10 +1042,12 @@ export function GrantEditor({
                   .join(bi("、", ", "))}
               </p>
             )}
+          </section>
 
-            <h3 className="iam-card-box-title iam-gap">
-              {bi("所属协作团队", "Team Memberships")}
-            </h3>
+          <section className="iam-cont-sec">
+            <div className="iam-cont-sec-h">
+              <h2>{bi("所属协作团队", "Team Memberships")}</h2>
+            </div>
             {editable ? (
               <Select
                 mode="multiple"
@@ -1071,32 +1056,32 @@ export function GrantEditor({
                 triggerProps={{ autoFitPosition: true }}
                 placeholder={
                   iam.teams.length
-                    ? bi("选择所属团队（自动继承团队的集群授权）", "Select teams")
-                    : bi("尚未创建团队", "No teams yet")
+                    ? bi("选择所属团队（自动继承团队的集群权限）…", "Select teams…")
+                    : bi("尚未创建协作团队", "No teams created yet")
                 }
                 options={iam.teams.map((t) => ({ value: t.id, label: t.name }))}
                 allowClear
                 aria-label={bi("团队", "Teams")}
               />
             ) : (
-              <p>
+              <p className="iam-readonly-line">
                 {teams
                   .map((id) => iam.teams.find((t) => t.id === id)?.name || id)
-                  .join(bi("、", ", ")) || bi("不在任何团队", "No team memberships")}
+                  .join(bi("、", ", ")) || bi("未加入任何团队", "No team memberships")}
               </p>
             )}
           </section>
 
-          <section className="iam-card-box">
-            <h3 className="iam-card-box-title">
-              {bi("按集群分配权限", "Per-Cluster Access")}
-            </h3>
+          <section className="iam-cont-sec">
+            <div className="iam-cont-sec-h">
+              <h2>{bi("跨集群附加授权", "Per-Cluster Access")}</h2>
+            </div>
             {eff.scope === "all" ? (
               <div className="iam-cl-all-note">
                 <IconCheck />
                 <span>
                   {bi(
-                    "当前角色数据范围为「全平台全部」，该成员自动拥有所有集群的可见权限，无需逐个分配。",
+                    "所选角色具备「全平台全部」数据视野，自动可见所有集群，无需单独分配。",
                     "Selected role scope is “All Clusters”, granting automatic access across every cluster.",
                   )}
                 </span>
@@ -1114,56 +1099,66 @@ export function GrantEditor({
           </section>
         </div>
 
-        <aside className="iam-grant-side">
-          <div className="iam-card-box iam-grant-summary-card">
-            <h3 className="iam-card-box-title">
-              {dirty
-                ? bi("保存后生效的权限预览", "Effective Access Preview")
-                : bi("当前生效权限总览", "Current Effective Access")}
-            </h3>
-            <EffectivePerms
-              iam={iam}
-              perms={eff.perms}
-              scope={eff.scope}
-              clusters={mergedClusters}
-            />
-            {editable && (
-              <div className="iam-grant-foot">
-                <Button
-                  type="primary"
-                  long={false}
-                  loading={busy}
-                  disabled={!dirty || roles.length === 0}
-                  onClick={save}
-                >
-                  {bi("保存权限配置", "Save Changes")}
-                </Button>
-                {dirty && (
-                  <Button
-                    onClick={() => {
-                      setRoles(g.roles);
-                      setTeams(g.teams);
-                      setClusters({ ...(g.clusters || {}) });
-                    }}
-                  >
-                    {bi("还原", "Reset")}
-                  </Button>
-                )}
-                {roles.length === 0 && (
-                  <span className="bad small">
-                    {bi("至少选择一个角色", "Select at least one role")}
-                  </span>
-                )}
+        {!compact && (
+          <aside className="iam-grant-side">
+            <div className="iam-cont-sec">
+              <div className="iam-cont-sec-h">
+                <h2>
+                  {dirty
+                    ? bi("变更后生效预览", "Preview After Save")
+                    : bi("生效权限速览", "Effective Access")}
+                </h2>
               </div>
-            )}
-          </div>
-        </aside>
+              <EffectivePerms
+                iam={iam}
+                perms={eff.perms}
+                scope={eff.scope}
+                clusters={mergedClusters}
+              />
+            </div>
+          </aside>
+        )}
       </div>
+
+      {editable && (dirty || compact) && (
+        <div className={`iam-float-save ${dirty ? "is-dirty" : ""}`}>
+          <span className="iam-float-note">
+            {roles.length === 0
+              ? bi("请至少保留一个角色后再保存", "Select at least one role to save")
+              : dirty
+                ? bi("有未保存的权限变更，保存后立即生效", "Unsaved permission changes")
+                : bi("当前未做修改", "No unsaved changes")}
+          </span>
+          <div className="iam-float-acts">
+            {dirty && (
+              <Button
+                size="small"
+                onClick={() => {
+                  setRoles(g.roles);
+                  setTeams(g.teams);
+                  setClusters({ ...(g.clusters || {}) });
+                }}
+              >
+                {bi("还原", "Reset")}
+              </Button>
+            )}
+            <Button
+              size="small"
+              type="primary"
+              loading={busy}
+              disabled={!dirty || roles.length === 0}
+              onClick={save}
+            >
+              {bi("保存权限配置", "Save Changes")}
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-/* ---------------------------------------------------------------- roles & full-width matrix */
+/* ---------------------------------------------------------------- roles & matrix */
 
 type Draft = {
   id?: string;
@@ -1173,15 +1168,22 @@ type Draft = {
   scope: string;
 };
 
-export function RolesPane({ narrow }: { narrow: boolean }) {
+export function RolesPane({
+  narrow,
+  iamError,
+}: {
+  narrow: boolean;
+  iamError?: string;
+}) {
   useLang();
-  const { iam, set } = useIAM();
+  const { iam, reload, set } = useIAM();
   const [sel, setSel] = useState("");
   const [draft, setDraft] = useState<Draft | null>(null);
   const [compare, setCompare] = useState(false);
   const [matrixMod, setMatrixMod] = useState<string>("all");
   const [onlyDiff, setOnlyDiff] = useState(false);
   const [busy, setBusy] = useState(false);
+  const roleBtnRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   const editable = can("iam.role");
   const role = iam?.roles.find((r) => r.id === sel) || iam?.roles[0];
@@ -1189,7 +1191,27 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
     () => (iam ? modules(iam.perms) : []),
     [iam],
   );
-  if (!iam) return <Skeleton animation text={{ rows: 8 }} />;
+
+  if (iamError && !iam) {
+    return (
+      <article className="iam-page iam-stage">
+        <div className="iam-empty iam-empty-line">
+          <IconExclamationCircle className="bad" />
+          <b>{iamError}</b>
+          <Button size="small" icon={<IconRefresh />} onClick={reload}>
+            {bi("重试", "Retry")}
+          </Button>
+        </div>
+      </article>
+    );
+  }
+  if (!iam) {
+    return (
+      <article className="iam-page">
+        <Skeleton animation text={{ rows: 8 }} />
+      </article>
+    );
+  }
 
   const cur: Draft | null =
     draft ||
@@ -1255,7 +1277,7 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
       if (made) setSel(made.id);
       Message.success(
         bi(
-          "已保存，持有该角色的成员立即按新权限生效",
+          "角色已保存，持有该角色的成员立即按新权限生效",
           "Role saved; updated permissions apply immediately",
         ),
       );
@@ -1309,7 +1331,7 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
     .filter(([, rows]) => rows.length > 0);
 
   return (
-    <article className="iam-page enter">
+    <article className="iam-page iam-stage">
       {narrow && (
         <Button
           type="text"
@@ -1321,50 +1343,60 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
         </Button>
       )}
       <header className="iam-h">
-        <div>
-          <h1>{bi("角色与权限矩阵", "Roles & Permission Matrix")}</h1>
+        <div className="iam-h-main">
+          <div className="iam-h-title-row">
+            <h1>{bi("角色权限", "Roles")}</h1>
+            <span className="iam-h-meta num">
+              {bi(
+                `${iam.roles.length} 个角色 · ${iam.perms.length} 项权限`,
+                `${iam.roles.length} roles · ${iam.perms.length} permissions`,
+              )}
+            </span>
+          </div>
           <p>
             {bi(
-              "角色定义成员可执行的功能动作与默认数据视野（仅本人 / 所在团队 / 全平台）。内置角色锁定保护，一键复制即可自定义裁剪。",
-              "Roles bundle functional permissions with default data visibility. Built-in roles are protected—duplicate any role to customize.",
+              "按岗位定义功能动作开关与默认数据视野；内置角色只读保护，一键复制即可派生自定义角色。",
+              "Define functional permissions and default visibility per role. Duplicate any built-in role to customize.",
             )}
           </p>
         </div>
-        {editable && (
-          <Button
-            type="primary"
-            icon={<IconPlus />}
-            onClick={() => {
-              setCompare(false);
-              setSel("");
-              setDraft({
-                name: "",
-                desc: "",
-                perms: ["delivery.view"],
-                scope: "own",
-              });
-            }}
-          >
-            {bi("新建角色", "New Role")}
-          </Button>
-        )}
+        <div className="iam-h-acts">
+          {editable && (
+            <Button
+              type="primary"
+              icon={<IconPlus />}
+              onClick={() => {
+                setCompare(false);
+                setSel("");
+                setDraft({
+                  name: "",
+                  desc: "",
+                  perms: ["delivery.view"],
+                  scope: "own",
+                });
+              }}
+            >
+              {bi("新建角色", "New Role")}
+            </Button>
+          )}
+        </div>
       </header>
 
       <UnderlineTabs
         className="iam-subtabs"
-        label={bi("角色管理视图", "Role views")}
+        label={bi("角色视图", "Role views")}
         value={compare ? "compare" : "edit"}
         onChange={(v) => setCompare(v === "compare")}
         items={[
           {
             value: "edit",
-            label: bi("角色配置", "Role Configuration"),
+            label: bi("角色配置", "Configuration"),
             count: iam.roles.length,
             icon: IAMIcons.roleEdit,
           },
           {
             value: "compare",
-            label: bi("权限对比矩阵", "Permission Matrix"),
+            label: bi("权限对比矩阵", "Comparison Matrix"),
             count: iam.perms.length,
             icon: IAMIcons.roleMatrix,
           },
@@ -1372,7 +1404,7 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
       />
 
       {compare ? (
-        <div className="iam-matrix-sec">
+        <div className="iam-matrix-sec iam-stage" key="matrix">
           <div className="iam-toolbar">
             <div className="iam-pills" role="tablist">
               <button
@@ -1380,25 +1412,26 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
                 className={`iam-pill ${matrixMod === "all" ? "on" : ""}`}
                 onClick={() => setMatrixMod("all")}
               >
-                {bi("全部模块", "All Modules")} <em>{iam.perms.length}</em>
+                {bi("全部模块", "All")} <em>{iam.perms.length}</em>
               </button>
               {permModules.map(([m, ps]) => (
                 <button
                   key={m}
                   type="button"
                   className={`iam-pill ${matrixMod === m ? "on" : ""}`}
-                  onClick={() => setMatrixMod(m)}
+                  onClick={() => setMatrixMod(matrixMod === m ? "all" : m)}
                 >
                   {permModule(m)} <em>{ps.length}</em>
                 </button>
               ))}
             </div>
-            <Checkbox checked={onlyDiff} onChange={setOnlyDiff}>
-              {bi("仅看角色间差异项", "Differences only")}
-            </Checkbox>
+            <label className="iam-inline-switch">
+              <Switch size="small" checked={onlyDiff} onChange={setOnlyDiff} />
+              <span>{bi("仅显示角色间差异项", "Differences only")}</span>
+            </label>
           </div>
 
-          <div className="iam-matrix-card">
+          <div className="iam-ledger iam-matrix-wrap">
             <div className="iam-cmp-wrap">
               <table className="iam-cmp">
                 <thead>
@@ -1473,45 +1506,56 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
           </div>
         </div>
       ) : (
-        <div className="iam-roles-full">
-          <div
-            className="iam-role-cards"
+        <div className="iam-role-split iam-stage" key="edit">
+          <aside
+            className="iam-role-list"
             role="listbox"
-            aria-label={bi("选择角色", "Select role")}
+            aria-label={bi("角色列表", "Role list")}
           >
-            {iam.roles.map((r) => {
+            {iam.roles.map((r, idx) => {
               const active = draft ? draft.id === r.id : role?.id === r.id;
               return (
                 <button
                   key={r.id}
+                  ref={(el) => {
+                    roleBtnRefs.current[idx] = el;
+                  }}
                   type="button"
                   role="option"
                   aria-selected={active}
-                  className={`iam-role-card ${active ? "on" : ""}`}
-                  onClick={() => (setDraft(null), setSel(r.id))}
+                  className={`iam-role-item ${active ? "on" : ""}`}
+                  onClick={() => {
+                    setDraft(null);
+                    setSel(r.id);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "ArrowDown") {
+                      e.preventDefault();
+                      const next = Math.min(iam.roles.length - 1, idx + 1);
+                      setDraft(null);
+                      setSel(iam.roles[next].id);
+                      roleBtnRefs.current[next]?.focus();
+                    } else if (e.key === "ArrowUp") {
+                      e.preventDefault();
+                      const prev = Math.max(0, idx - 1);
+                      setDraft(null);
+                      setSel(iam.roles[prev].id);
+                      roleBtnRefs.current[prev]?.focus();
+                    }
+                  }}
                 >
-                  <div className="iam-role-card-top">
-                    <span className="iam-role-ic">
-                      {r.builtin ? <IconLock /> : <IconUserGroup />}
-                    </span>
-                    <div className="iam-role-card-t">
-                      <b>
-                        {roleTitle(r)}
-                        {r.builtin && (
-                          <small className="iam-tag">
-                            {bi("内置", "Built-in")}
-                          </small>
-                        )}
-                      </b>
-                    </div>
+                  <div className="iam-role-item-top">
+                    <b>{roleTitle(r)}</b>
+                    {r.builtin && (
+                      <span className="iam-tag">{bi("内置", "Built-in")}</span>
+                    )}
                   </div>
-                  <p className="iam-role-card-desc">{roleDesc(r)}</p>
-                  <div className="iam-role-card-foot num">
-                    <span className="iam-cmp-scope">{scopeName(r.scope)}</span>
+                  <div className="iam-role-item-meta num">
+                    <span>{scopeName(r.scope)}</span>
                     <span>
                       {bi(
-                        `${r.perms.length} 项权限 · ${r.holders} 人`,
-                        `${r.perms.length} perms · ${r.holders} users`,
+                        `${r.holders} 人 · ${r.perms.length} 项`,
+                        `${r.holders} u · ${r.perms.length} p`,
                       )}
                     </span>
                   </div>
@@ -1519,28 +1563,26 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
               );
             })}
             {draft && !draft.id && (
-              <button type="button" className="iam-role-card on is-draft">
-                <div className="iam-role-card-top">
-                  <span className="iam-role-ic">
-                    <IconPlus />
-                  </span>
-                  <div className="iam-role-card-t">
-                    <b>{draft.name || bi("新建自定义角色", "New Custom Role")}</b>
-                  </div>
+              <button
+                type="button"
+                role="option"
+                aria-selected
+                className="iam-role-item on is-draft"
+              >
+                <div className="iam-role-item-top">
+                  <b>{draft.name || bi("新建自定义角色", "New Custom Role")}</b>
+                  <span className="iam-tag">{bi("草稿", "Draft")}</span>
                 </div>
-                <p className="iam-role-card-desc">
-                  {draft.desc || bi("正在编辑新角色权限配置…", "Configuring new role…")}
-                </p>
-                <div className="iam-role-card-foot">
-                  <span className="iam-cmp-scope">{scopeName(draft.scope)}</span>
-                  <span>{bi("未保存草稿", "Unsaved draft")}</span>
+                <div className="iam-role-item-meta">
+                  <span>{scopeName(draft.scope)}</span>
+                  <span>{bi("尚未保存", "Unsaved")}</span>
                 </div>
               </button>
             )}
-          </div>
+          </aside>
 
           {cur && (
-            <section className="iam-role-workspace" key={cur.id || "new"}>
+            <section className="iam-role-detail iam-stage" key={cur.id || "new"}>
               <div className="iam-role-ws-head">
                 {locked ? (
                   <div className="iam-role-ws-title">
@@ -1552,7 +1594,7 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
                         <span className="iam-ro-pill">
                           <IconLock />{" "}
                           {bi(
-                            "内置角色只读 · 可复制为新角色修改",
+                            "内置只读 · 可复制为新角色裁剪",
                             "Built-in read-only · Duplicate to customize",
                           )}
                         </span>
@@ -1574,19 +1616,19 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
                         value={cur.name}
                         onChange={(v) => setDraft({ ...cur, name: v })}
                         placeholder={bi(
-                          "例如：华东生产运维工程师",
+                          "例如：生产数据库运维",
                           "e.g., Production DBA",
                         )}
                         maxLength={30}
                       />
                     </div>
                     <div className="iam-role-in-col is-wide">
-                      <label>{bi("角色职责说明", "Description")}</label>
+                      <label>{bi("职责描述", "Description")}</label>
                       <Input
                         value={cur.desc}
                         onChange={(v) => setDraft({ ...cur, desc: v })}
                         placeholder={bi(
-                          "简述该角色适用的岗位职责与权限边界",
+                          "简述适用人群与权限边界",
                           "Brief summary of responsibilities",
                         )}
                         maxLength={200}
@@ -1595,9 +1637,10 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
                   </div>
                 )}
 
-                <span className="row-gap">
+                <div className="iam-role-ws-acts">
                   {editable && role && !draft && (
                     <Button
+                      size="small"
                       icon={<IconCopy />}
                       onClick={() =>
                         setDraft({
@@ -1611,11 +1654,12 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
                         })
                       }
                     >
-                      {bi("复制为新角色", "Duplicate Role")}
+                      {bi("复制为新角色", "Duplicate")}
                     </Button>
                   )}
                   {editable && role && !role.builtin && !draft && (
                     <Button
+                      size="small"
                       status="danger"
                       icon={<IconDelete />}
                       onClick={() => remove(role)}
@@ -1623,16 +1667,13 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
                       {bi("删除", "Delete")}
                     </Button>
                   )}
-                </span>
+                </div>
               </div>
 
-              <div className="iam-sec">
-                <h3>
-                  {bi(
-                    "默认集群与交付可见范围",
-                    "Default Cluster & Delivery Visibility",
-                  )}
-                </h3>
+              <div className="iam-cont-sec">
+                <div className="iam-cont-sec-h">
+                  <h2>{bi("默认数据可见范围", "Default Data Visibility")}</h2>
+                </div>
                 <div className="iam-scope-cards" role="radiogroup">
                   {SCOPES.map((s) => {
                     const active = cur.scope === s.id;
@@ -1647,8 +1688,7 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
                         disabled={disabledScope}
                         className={`iam-scope-card ${active ? "on" : ""}`}
                         onClick={() => {
-                          if (!disabledScope)
-                            setDraft({ ...cur, scope: s.id });
+                          if (!disabledScope) setDraft({ ...cur, scope: s.id });
                         }}
                       >
                         <div className="iam-scope-card-top">
@@ -1662,24 +1702,22 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
                 </div>
               </div>
 
-              <div className="iam-sec">
-                <h3>
-                  {bi("功能模块权限", "Module Permissions")}{" "}
-                  <em className="num">
+              <div className="iam-cont-sec">
+                <div className="iam-cont-sec-h">
+                  <h2>{bi("功能模块权限", "Module Permissions")}</h2>
+                  <span className="num">
                     {cur.perms.length} / {iam.perms.length}
-                  </em>
-                </h3>
-                <div className="iam-tree">
+                  </span>
+                </div>
+
+                <div className="iam-perm-sections">
                   {permModules.map(([m, ps]) => {
                     const n = ps.filter((p) => cur.perms.includes(p.id)).length;
                     const allModChecked = n === ps.length;
                     return (
-                      <div
-                        className={`iam-mod ${m === "AI" ? "is-ai-mod" : ""}`}
-                        key={m}
-                      >
+                      <div className="iam-perm-group" key={m}>
                         <div
-                          className="iam-mod-h"
+                          className={`iam-perm-group-h ${locked ? "is-locked" : ""}`}
                           onClick={() => {
                             if (!locked)
                               toggle(
@@ -1705,116 +1743,110 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
                             {n} / {ps.length}
                           </small>
                         </div>
-                        <div className="iam-perms">
-                          {m === "AI" ? (
-                            <>
+
+                        {m === "AI" ? (
+                          <div className="iam-perm-ai-body">
+                            <div className="iam-perm-grid">
                               {ps
                                 .filter((p) => !p.id.startsWith("ai.feat."))
                                 .map((p) => {
-                                  const isUse = p.id === "ai.use";
-                                  const useOn = cur.perms.includes("ai.use");
                                   const checked = cur.perms.includes(p.id);
-                                  const subPerms = isUse
-                                    ? ps.filter((x) =>
-                                        x.id.startsWith("ai.feat."),
-                                      )
-                                    : [];
                                   return (
-                                    <React.Fragment key={p.id}>
-                                      <div
-                                        className={`iam-perm ${checked ? "on" : ""}`}
-                                        onClick={() => {
-                                          if (!locked)
-                                            toggle([p.id], !checked);
-                                        }}
-                                      >
-                                        <Checkbox
-                                          checked={checked}
-                                          disabled={locked}
-                                          onClick={(e) => e.stopPropagation()}
-                                          onChange={(v) => toggle([p.id], v)}
-                                        />
-                                        <span>
-                                          <b>{permTitle(p)}</b>
-                                          <small>{permDesc(p)}</small>
-                                        </span>
-                                      </div>
-                                      {isUse && subPerms.length > 0 && (
-                                        <div
-                                          className={`iam-ai-sub ${!useOn ? "is-locked" : ""}`}
-                                        >
-                                          <div className="iam-ai-sub-h">
-                                            <span>
-                                              {bi(
-                                                "细粒度 AI 子模块开关",
-                                                "Per-module AI permissions",
-                                              )}
-                                              <em className="num">
-                                                {
-                                                  subPerms.filter((x) =>
-                                                    cur.perms.includes(x.id),
-                                                  ).length
-                                                }{" "}
-                                                / {subPerms.length}
-                                              </em>
-                                            </span>
-                                            {!useOn && (
-                                              <small>
-                                                {bi(
-                                                  "请先勾选上方「使用 AI（总入口）」",
-                                                  "Enable “Use AI (master gate)” first",
-                                                )}
-                                              </small>
-                                            )}
-                                          </div>
-                                          <div className="iam-ai-sub-grid">
-                                            {subPerms.map((sp) => {
-                                              const spOn = cur.perms.includes(
-                                                sp.id,
-                                              );
-                                              return (
-                                                <div
-                                                  key={sp.id}
-                                                  className={`iam-ai-sub-item ${spOn ? "on" : ""}`}
-                                                  onClick={() => {
-                                                    if (!locked && useOn) {
-                                                      toggle([sp.id], !spOn);
-                                                    }
-                                                  }}
-                                                >
-                                                  <Checkbox
-                                                    checked={spOn}
-                                                    disabled={locked || !useOn}
-                                                    onClick={(e) =>
-                                                      e.stopPropagation()
-                                                    }
-                                                    onChange={(v) =>
-                                                      toggle([sp.id], v)
-                                                    }
-                                                  />
-                                                  <span>
-                                                    <b>{permTitle(sp)}</b>
-                                                    <small>
-                                                      {permDesc(sp)}
-                                                    </small>
-                                                  </span>
-                                                </div>
-                                              );
-                                            })}
-                                          </div>
-                                        </div>
-                                      )}
-                                    </React.Fragment>
+                                    <div
+                                      key={p.id}
+                                      className={`iam-perm-row ${checked ? "on" : ""} ${locked ? "is-locked" : ""}`}
+                                      onClick={() => {
+                                        if (!locked) toggle([p.id], !checked);
+                                      }}
+                                    >
+                                      <Checkbox
+                                        checked={checked}
+                                        disabled={locked}
+                                        onClick={(e) => e.stopPropagation()}
+                                        onChange={(v) => toggle([p.id], v)}
+                                      />
+                                      <span>
+                                        <b>{permTitle(p)}</b>
+                                        <small>{permDesc(p)}</small>
+                                      </span>
+                                    </div>
                                   );
                                 })}
-                            </>
-                          ) : (
-                            ps.map((p) => {
+                            </div>
+
+                            {(() => {
+                              const subPerms = ps.filter((x) =>
+                                x.id.startsWith("ai.feat."),
+                              );
+                              const useOn = cur.perms.includes("ai.use");
+                              if (!subPerms.length) return null;
+                              return (
+                                <div
+                                  className={`iam-ai-sub-block ${!useOn ? "is-locked" : ""}`}
+                                >
+                                  <div className="iam-ai-sub-bar">
+                                    <span>
+                                      {bi(
+                                        "细粒度 AI 场景权限",
+                                        "Granular AI Capabilities",
+                                      )}{" "}
+                                      <em className="num">
+                                        {
+                                          subPerms.filter((x) =>
+                                            cur.perms.includes(x.id),
+                                          ).length
+                                        }{" "}
+                                        / {subPerms.length}
+                                      </em>
+                                    </span>
+                                    {!useOn && (
+                                      <small>
+                                        {bi(
+                                          "请先勾选上方「使用 AI（总入口）」",
+                                          "Enable “Use AI (master gate)” above first",
+                                        )}
+                                      </small>
+                                    )}
+                                  </div>
+                                  <div className="iam-perm-grid">
+                                    {subPerms.map((sp) => {
+                                      const spOn = cur.perms.includes(sp.id);
+                                      return (
+                                        <div
+                                          key={sp.id}
+                                          className={`iam-perm-row ${spOn ? "on" : ""} ${locked || !useOn ? "is-locked" : ""}`}
+                                          onClick={() => {
+                                            if (!locked && useOn) {
+                                              toggle([sp.id], !spOn);
+                                            }
+                                          }}
+                                        >
+                                          <Checkbox
+                                            checked={spOn}
+                                            disabled={locked || !useOn}
+                                            onClick={(e) => e.stopPropagation()}
+                                            onChange={(v) => toggle([sp.id], v)}
+                                          />
+                                          <span>
+                                            <b>{permTitle(sp)}</b>
+                                            <small>{permDesc(sp)}</small>
+                                          </span>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              );
+                            })()}
+                          </div>
+                        ) : (
+                          <div className="iam-perm-grid">
+                            {ps.map((p) => {
                               const pOn = cur.perms.includes(p.id);
                               return (
                                 <div
                                   key={p.id}
-                                  className={`iam-perm ${pOn ? "on" : ""}`}
+                                  className={`iam-perm-row ${pOn ? "on" : ""} ${locked ? "is-locked" : ""}`}
                                   onClick={() => {
                                     if (!locked) toggle([p.id], !pOn);
                                   }}
@@ -1831,9 +1863,9 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
                                   </span>
                                 </div>
                               );
-                            })
-                          )}
-                        </div>
+                            })}
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -1841,26 +1873,29 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
               </div>
 
               {dirty && (
-                <div className="iam-save">
-                  <span className="faint small">
+                <div className="iam-float-save is-dirty">
+                  <span className="iam-float-note">
                     {bi(
-                      "仅可授出你自己已持有的权限与数据范围。",
-                      "You can only grant permissions that you hold yourself.",
+                      "仅可授出你自己已持有的功能权限与数据范围",
+                      "You can only grant permissions that you hold yourself",
                     )}
                   </span>
-                  <Button onClick={() => setDraft(null)}>
-                    {bi("取消", "Cancel")}
-                  </Button>
-                  <Button
-                    type="primary"
-                    loading={busy}
-                    disabled={!draft!.name.trim()}
-                    onClick={save}
-                  >
-                    {draft!.id
-                      ? bi("保存角色", "Save Role")
-                      : bi("创建角色", "Create Role")}
-                  </Button>
+                  <div className="iam-float-acts">
+                    <Button size="small" onClick={() => setDraft(null)}>
+                      {bi("取消", "Cancel")}
+                    </Button>
+                    <Button
+                      size="small"
+                      type="primary"
+                      loading={busy}
+                      disabled={!draft!.name.trim()}
+                      onClick={save}
+                    >
+                      {draft!.id
+                        ? bi("保存角色", "Save Role")
+                        : bi("创建角色", "Create Role")}
+                    </Button>
+                  </div>
                 </div>
               )}
             </section>
@@ -1876,14 +1911,16 @@ export function RolesPane({ narrow }: { narrow: boolean }) {
 export function TeamsPane({
   narrow,
   users,
+  iamError,
   onSaved,
 }: {
   narrow: boolean;
   users: string[];
+  iamError?: string;
   onSaved?: () => void;
 }) {
   useLang();
-  const { iam, set } = useIAM();
+  const { iam, reload, set } = useIAM();
   const [edit, setEdit] = useState<{
     id?: string;
     name: string;
@@ -1891,25 +1928,66 @@ export function TeamsPane({
     members: string[];
     clusters: Record<string, ClusterAccessLevel>;
   } | null>(null);
+  const [query, setQuery] = useState("");
   const [tab, setTab] = useState<"all" | "active" | "empty">("all");
   const [busy, setBusy] = useState(false);
+  const searchRef = useRef<HTMLInputElement | null>(null);
   const editable = can("iam.team");
   const sorted = useMemo(() => [...users].sort(), [users]);
 
-  if (!iam) return <Skeleton animation text={{ rows: 6 }} />;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (
+        e.metaKey ||
+        e.ctrlKey ||
+        e.altKey ||
+        document.querySelector(".pal-mask,.arco-modal,.arco-drawer")
+      )
+        return;
+      if (e.key === "/" && !typing(e)) {
+        e.preventDefault();
+        searchRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  if (iamError && !iam) {
+    return (
+      <article className="iam-page iam-stage">
+        <div className="iam-empty iam-empty-line">
+          <IconExclamationCircle className="bad" />
+          <b>{iamError}</b>
+          <Button size="small" icon={<IconRefresh />} onClick={reload}>
+            {bi("重试", "Retry")}
+          </Button>
+        </div>
+      </article>
+    );
+  }
+  if (!iam) {
+    return (
+      <article className="iam-page">
+        <Skeleton animation text={{ rows: 6 }} />
+      </article>
+    );
+  }
 
   const activeCount = iam.teams.filter((t) => t.members.length > 0).length;
   const emptyCount = iam.teams.length - activeCount;
-  const teamsWithClusters = iam.teams.filter(
-    (t) => Object.keys(t.clusters || {}).length > 0,
-  ).length;
-  const shownTeams = iam.teams.filter((t) =>
-    tab === "active"
-      ? t.members.length > 0
-      : tab === "empty"
-        ? t.members.length === 0
-        : true,
-  );
+  const q = query.trim().toLowerCase();
+  const shownTeams = iam.teams.filter((t) => {
+    if (tab === "active" && t.members.length === 0) return false;
+    if (tab === "empty" && t.members.length > 0) return false;
+    if (!q) return true;
+    return (
+      t.name.toLowerCase().includes(q) ||
+      (t.desc || "").toLowerCase().includes(q) ||
+      t.members.some((m) => m.toLowerCase().includes(q)) ||
+      Object.keys(t.clusters || {}).some((cid) => cid.toLowerCase().includes(q))
+    );
+  });
 
   const save = async () => {
     if (busy || !edit || !edit.name.trim()) return;
@@ -1932,7 +2010,7 @@ export function TeamsPane({
   };
 
   return (
-    <article className="iam-page enter">
+    <article className="iam-page iam-stage">
       {narrow && (
         <Button
           type="text"
@@ -1944,99 +2022,47 @@ export function TeamsPane({
         </Button>
       )}
       <header className="iam-h">
-        <div>
-          <h1>{bi("协作团队", "Collaboration Teams")}</h1>
+        <div className="iam-h-main">
+          <div className="iam-h-title-row">
+            <h1>{bi("协作团队", "Teams")}</h1>
+            {iam.teams.length > 0 && (
+              <span className="iam-h-meta num">
+                {bi(
+                  `${iam.teams.length} 个团队 · ${activeCount} 个有成员`,
+                  `${iam.teams.length} teams · ${activeCount} active`,
+                )}
+              </span>
+            )}
+          </div>
           <p>
             {bi(
-              "按项目组或运维班组管理成员，支持将一批集群统一授权给团队，团队内成员自动继承对应的运维或只读权限。",
-              "Organize users by project or squad and grant cluster access at the team level so members inherit it automatically.",
+              "按项目或运维班组归拢成员并集中分配集群权限，加入团队的成员自动继承对应的运维或只读权限。",
+              "Group members by project or squad and assign shared cluster access inherited automatically by all members.",
             )}
           </p>
         </div>
-        {editable && (
-          <Button
-            type="primary"
-            icon={<IconPlus />}
-            onClick={() =>
-              setEdit({ name: "", desc: "", members: [], clusters: {} })
-            }
-          >
-            {bi("新建团队", "New Team")}
-          </Button>
-        )}
+        <div className="iam-h-acts">
+          {editable && (
+            <Button
+              type="primary"
+              icon={<IconPlus />}
+              onClick={() =>
+                setEdit({ name: "", desc: "", members: [], clusters: {} })
+              }
+            >
+              {bi("新建团队", "New Team")}
+            </Button>
+          )}
+        </div>
       </header>
 
-      {iam.teams.length > 0 && (
-        <>
-          <div className="au-strip iam-kpi-strip">
-            <div className="au-stat">
-              <span className="au-stat-k">{bi("团队总数", "Total Teams")}</span>
-              <strong>{iam.teams.length}</strong>
-              <small>{bi("按项目或业务线划分", "Grouped by project or site")}</small>
-            </div>
-            <div className="au-stat">
-              <span className="au-stat-k">
-                {bi("已有成员团队", "Active Teams")}
-              </span>
-              <strong>{activeCount}</strong>
-              <small>{bi("成员自动共享团队授权", "Members inherit team grants")}</small>
-            </div>
-            <div className="au-stat">
-              <span className="au-stat-k">
-                {bi("已绑定集群的团队", "With Cluster Grants")}
-              </span>
-              <strong>{teamsWithClusters}</strong>
-              <small>{bi("已配置集群运维或只读权限", "Assigned per-cluster access")}</small>
-            </div>
-            <div className="au-stat">
-              <span className="au-stat-k">
-                {bi("平台可选成员", "Available Users")}
-              </span>
-              <strong>{sorted.length}</strong>
-              <small>{bi("支持一人同时加入多个团队", "Multi-team membership supported")}</small>
-            </div>
-          </div>
-
-          <UnderlineTabs
-            className="iam-subtabs"
-            label={bi("团队筛选", "Team filter")}
-            value={tab}
-            onChange={(v) => setTab(v as "all" | "active" | "empty")}
-            items={[
-              {
-                value: "all",
-                label: bi("全部团队", "All Teams"),
-                count: iam.teams.length,
-                icon: IAMIcons.teamAll,
-              },
-              {
-                value: "active",
-                label: bi("已有成员", "With Members"),
-                count: activeCount,
-                icon: IAMIcons.teamActive,
-              },
-              ...(emptyCount > 0
-                ? [
-                    {
-                      value: "empty",
-                      label: bi("待添加成员", "Empty"),
-                      count: emptyCount,
-                      icon: IAMIcons.teamEmpty,
-                    },
-                  ]
-                : []),
-            ]}
-          />
-        </>
-      )}
-
       {iam.teams.length === 0 ? (
-        <div className="iam-empty iam-empty-card">
+        <div className="iam-empty iam-empty-line">
           <IconUserGroup />
-          <b>{bi("还没有创建协作团队", "No collaboration teams yet")}</b>
+          <b>{bi("尚未创建协作团队", "No collaboration teams yet")}</b>
           <span>
             {bi(
-              "当多个集群需要同时开放给同一批工程师时，建一个团队即可批量授权、统一维护。",
+              "当多套集群需要开放给同一批工程师协同维护时，创建一个团队即可批量授权、统一管理。",
               "Create a team to grant multiple clusters to a group of engineers in one place.",
             )}
           </span>
@@ -2044,7 +2070,7 @@ export function TeamsPane({
             <Button
               type="primary"
               icon={<IconPlus />}
-              style={{ marginTop: 8 }}
+              style={{ marginTop: 6 }}
               onClick={() =>
                 setEdit({ name: "", desc: "", members: [], clusters: {} })
               }
@@ -2053,147 +2079,210 @@ export function TeamsPane({
             </Button>
           )}
         </div>
-      ) : shownTeams.length === 0 ? (
-        <div className="iam-empty">
-          <IconUserGroup />
-          <b>{bi("当前筛选下没有团队", "No teams match this filter")}</b>
-          <Button size="small" onClick={() => setTab("all")}>
-            {bi("查看全部团队", "Show All Teams")}
-          </Button>
-        </div>
       ) : (
-        <ul className="iam-teams">
-          {shownTeams.map((t) => {
-            const clEntries = stableClusterEntries(t.clusters);
-            return (
-              <li key={t.id}>
-                <div className="iam-team-h">
-                  <span className="iam-role-ic">
-                    <IconUserGroup />
-                  </span>
-                  <span>
-                    <b>{t.name}</b>
-                    <small>
-                      {t.desc ||
-                        bi(
-                          `${t.members.length} 名成员 · ${clEntries.length} 个授权集群`,
-                          `${t.members.length} members · ${clEntries.length} clusters`,
+        <>
+          <div className="iam-toolbar">
+            <Input
+              ref={(r) => {
+                searchRef.current =
+                  (r as unknown as { dom?: HTMLInputElement })?.dom ?? null;
+              }}
+              className="iam-search-in"
+              prefix={<IconSearch />}
+              suffix={!query ? <Kbd>/</Kbd> : undefined}
+              allowClear
+              value={query}
+              onChange={setQuery}
+              placeholder={bi(
+                "搜索团队名称、成员或集群…",
+                "Search team, member, or cluster…",
+              )}
+              aria-label={bi("搜索团队", "Search teams")}
+            />
+            <div className="iam-pills" role="tablist">
+              <button
+                type="button"
+                className={`iam-pill ${tab === "all" ? "on" : ""}`}
+                onClick={() => setTab("all")}
+              >
+                {bi("全部", "All")} <em>{iam.teams.length}</em>
+              </button>
+              <button
+                type="button"
+                className={`iam-pill ${tab === "active" ? "on" : ""}`}
+                onClick={() => setTab(tab === "active" ? "all" : "active")}
+              >
+                {bi("已有成员", "With Members")} <em>{activeCount}</em>
+              </button>
+              {emptyCount > 0 && (
+                <button
+                  type="button"
+                  className={`iam-pill ${tab === "empty" ? "on" : ""}`}
+                  onClick={() => setTab(tab === "empty" ? "all" : "empty")}
+                >
+                  {bi("待加成员", "Empty")} <em>{emptyCount}</em>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {shownTeams.length === 0 ? (
+            <div className="iam-empty iam-empty-line">
+              <b>{bi("没有匹配的团队", "No matching teams")}</b>
+              <Button
+                size="small"
+                onClick={() => {
+                  setQuery("");
+                  setTab("all");
+                }}
+              >
+                {bi("清除筛选", "Clear Filters")}
+              </Button>
+            </div>
+          ) : (
+            <div className="iam-ledger" role="table" aria-label={bi("团队列表", "Teams list")}>
+              <div className="iam-t-head" role="row">
+                <span>{bi("团队", "Team")}</span>
+                <span>{bi("团队成员", "Members")}</span>
+                <span>{bi("授权集群（成员自动继承）", "Shared Clusters")}</span>
+                <span className="is-right">{bi("操作", "Actions")}</span>
+              </div>
+              <div className="iam-t-body">
+                {shownTeams.map((t) => {
+                  const clEntries = stableClusterEntries(t.clusters);
+                  return (
+                    <div key={t.id} className="iam-t-row" role="row">
+                      <div className="iam-t-info">
+                        <span className="iam-role-ic">
+                          <IconUserGroup />
+                        </span>
+                        <div className="iam-t-txt">
+                          <b>{t.name}</b>
+                          <small>
+                            {t.desc ||
+                              bi(
+                                `${t.members.length} 名成员 · ${clEntries.length} 个集群`,
+                                `${t.members.length} members · ${clEntries.length} clusters`,
+                              )}
+                          </small>
+                        </div>
+                      </div>
+
+                      <div className="iam-t-members">
+                        {t.members.length ? (
+                          t.members.map((m) => (
+                            <a
+                              key={m}
+                              href={`#/iam/${encodeURIComponent(m)}`}
+                              className="iam-member-link"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                go({ name: "accounts", id: m });
+                              }}
+                            >
+                              {m}
+                            </a>
+                          ))
+                        ) : (
+                          <span className="faint small">
+                            {bi("暂未添加成员", "No members")}
+                          </span>
                         )}
-                    </small>
-                  </span>
-                  {editable && (
-                    <span className="row-gap">
-                      <Button
-                        size="small"
-                        onClick={() =>
-                          setEdit({
-                            id: t.id,
-                            name: t.name,
-                            desc: t.desc || "",
-                            members: t.members,
-                            clusters: { ...(t.clusters || {}) },
-                          })
-                        }
-                      >
-                        {bi("管理成员与集群", "Edit")}
-                      </Button>
-                      <Button
-                        size="small"
-                        status="danger"
-                        icon={<IconDelete />}
-                        aria-label={bi("删除团队", "Delete team")}
-                        onClick={() => {
-                          let deleting = false;
-                          Modal.confirm({
-                            title: bi(
-                              `删除团队「${t.name}」？`,
-                              `Delete team “${t.name}”?`,
-                            ),
-                            content: bi(
-                              "成员账户不会被删除，仅解除该团队关系及团队级集群授权。",
-                              "User accounts are kept; team membership and team cluster grants will be removed.",
-                            ),
-                            okText: bi("删除", "Delete"),
-                            cancelText: bi("取消", "Cancel"),
-                            okButtonProps: { status: "danger" },
-                            onOk: async () => {
-                              if (deleting) return;
-                              deleting = true;
-                              try {
-                                set(
-                                  await api<IAM>(`/api/iam/teams/${t.id}`, {
-                                    method: "DELETE",
-                                  }),
-                                );
-                                onSaved?.();
-                              } catch (e) {
-                                err(e);
-                              } finally {
-                                deleting = false;
+                      </div>
+
+                      <div className="iam-t-clusters">
+                        {clEntries.length > 0 ? (
+                          clEntries.map(([cid, lvl]) => (
+                            <a
+                              key={cid}
+                              href={`#/d/${encodeURIComponent(cid)}`}
+                              className="iam-eff-cl-chip"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                go({ name: "deliveries", id: cid });
+                              }}
+                            >
+                              <span className="mono">{cid}</span>
+                              <em className={`iam-lvl-tag is-${lvl}`}>
+                                {lvl === "operate"
+                                  ? bi("运维", "Operate")
+                                  : bi("只读", "View")}
+                              </em>
+                            </a>
+                          ))
+                        ) : (
+                          <span className="faint small">
+                            {bi("未分配额外集群", "No clusters assigned")}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="iam-t-acts">
+                        {editable && (
+                          <>
+                            <Button
+                              size="small"
+                              onClick={() =>
+                                setEdit({
+                                  id: t.id,
+                                  name: t.name,
+                                  desc: t.desc || "",
+                                  members: t.members,
+                                  clusters: { ...(t.clusters || {}) },
+                                })
                               }
-                            },
-                          });
-                        }}
-                      />
-                    </span>
-                  )}
-                </div>
-                <div className="iam-members">
-                  <span className="iam-team-cl-label">
-                    {bi("成员", "Members")}
-                  </span>
-                  {t.members.length ? (
-                    t.members.map((m) => (
-                      <a
-                        key={m}
-                        href={`#/iam/${m}`}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          go({ name: "accounts", id: m });
-                        }}
-                      >
-                        {m}
-                      </a>
-                    ))
-                  ) : (
-                    <span className="faint small">
-                      {bi("暂未添加成员", "No members yet")}
-                    </span>
-                  )}
-                </div>
-                <div className="iam-team-clusters">
-                  <span className="iam-team-cl-label">
-                    {bi("授权集群", "Clusters")}
-                  </span>
-                  {clEntries.length > 0 ? (
-                    clEntries.map(([cid, lvl]) => (
-                      <a
-                        key={cid}
-                        href={`#/d/${encodeURIComponent(cid)}`}
-                        className="iam-eff-cl-chip"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          go({ name: "deliveries", id: cid });
-                        }}
-                      >
-                        <span className="mono">{cid}</span>
-                        <em className={`iam-lvl-tag is-${lvl}`}>
-                          {lvl === "operate"
-                            ? bi("运维", "Operate")
-                            : bi("只读", "View")}
-                        </em>
-                      </a>
-                    ))
-                  ) : (
-                    <span className="faint small">
-                      {bi("未绑定额外集群", "No clusters assigned")}
-                    </span>
-                  )}
-                </div>
-              </li>
-            );
-          })}
-        </ul>
+                            >
+                              {bi("配置", "Configure")}
+                            </Button>
+                            <Button
+                              size="small"
+                              status="danger"
+                              type="text"
+                              icon={<IconDelete />}
+                              aria-label={bi("删除团队", "Delete team")}
+                              onClick={() => {
+                                let deleting = false;
+                                Modal.confirm({
+                                  title: bi(
+                                    `删除团队「${t.name}」？`,
+                                    `Delete team “${t.name}”?`,
+                                  ),
+                                  content: bi(
+                                    "成员账户不会被删除，仅解除团队关系及团队级集群授权。",
+                                    "User accounts are kept; team membership and team cluster grants will be removed.",
+                                  ),
+                                  okText: bi("删除", "Delete"),
+                                  cancelText: bi("取消", "Cancel"),
+                                  okButtonProps: { status: "danger" },
+                                  onOk: async () => {
+                                    if (deleting) return;
+                                    deleting = true;
+                                    try {
+                                      set(
+                                        await api<IAM>(`/api/iam/teams/${t.id}`, {
+                                          method: "DELETE",
+                                        }),
+                                      );
+                                      onSaved?.();
+                                    } catch (e) {
+                                      err(e);
+                                    } finally {
+                                      deleting = false;
+                                    }
+                                  },
+                                });
+                              }}
+                            />
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       <Drawer
@@ -2202,8 +2291,8 @@ export function TeamsPane({
         visible={!!edit}
         title={
           edit?.id
-            ? bi(`管理团队 · ${edit.name}`, `Edit Team · ${edit.name}`)
-            : bi("新建协作团队", "New Collaboration Team")
+            ? bi(`配置团队 · ${edit.name}`, `Configure Team · ${edit.name}`)
+            : bi("新建协作团队", "New Team")
         }
         onCancel={() => setEdit(null)}
         footer={
@@ -2231,16 +2320,16 @@ export function TeamsPane({
               <Input
                 value={edit.name}
                 onChange={(v) => setEdit({ ...edit, name: v })}
-                placeholder={bi("例如：数据库核心运维组", "e.g., Core DBA Squad")}
+                placeholder={bi("例如：核心数据库运维组", "e.g., Core DBA Squad")}
                 maxLength={30}
               />
             </div>
             <div className="st-field">
-              <span>{bi("职责备注（可选）", "Description (Optional)")}</span>
+              <span>{bi("职责说明（可选）", "Description (Optional)")}</span>
               <Input
                 value={edit.desc}
                 onChange={(v) => setEdit({ ...edit, desc: v })}
-                placeholder={bi("简要说明该团队负责的环境或项目", "Optional notes")}
+                placeholder={bi("简要说明负责的环境或业务线", "Optional notes")}
                 maxLength={200}
               />
             </div>
@@ -2252,7 +2341,7 @@ export function TeamsPane({
                 onChange={(v) => setEdit({ ...edit, members: v })}
                 triggerProps={{ autoFitPosition: true }}
                 options={sorted.map((u) => ({ value: u, label: u }))}
-                placeholder={bi("选择加入该团队的成员...", "Select members...")}
+                placeholder={bi("选择加入该团队的成员…", "Select members…")}
                 allowClear
               />
             </div>
@@ -2278,19 +2367,185 @@ export function TeamsPane({
   );
 }
 
-/* ---------------------------------------------------------------- full-width cluster access ledger */
+/* ---------------------------------------------------------------- cluster access ledger */
+
+function QuickClusterGrantPopover({
+  cluster,
+  users,
+  teams,
+  canUsers,
+  canTeams,
+  userHasGlobalScope,
+  busy,
+  onGrant,
+}: {
+  cluster: IAMCluster;
+  users: Account[];
+  teams: Team[];
+  canUsers: boolean;
+  canTeams: boolean;
+  userHasGlobalScope: (uname: string) => boolean;
+  busy: boolean;
+  onGrant: (
+    kind: "u" | "t",
+    id: string,
+    lvl: ClusterAccessLevel,
+    close: () => void,
+  ) => void;
+}) {
+  useLang();
+  const [open, setOpen] = useState(false);
+  const [kw, setKw] = useState("");
+  const q = kw.trim().toLowerCase();
+
+  const candUsers = canUsers
+    ? users.filter(
+        (u) =>
+          !u.disabled &&
+          u.username !== cluster.owner &&
+          !userHasGlobalScope(u.username) &&
+          !cluster.users?.[u.username] &&
+          (!q || u.username.toLowerCase().includes(q)),
+      )
+    : [];
+  const candTeams = canTeams
+    ? teams.filter(
+        (t) =>
+          !cluster.teams?.[t.id] && (!q || t.name.toLowerCase().includes(q)),
+      )
+    : [];
+
+  return (
+    <Popover
+      trigger="click"
+      position="br"
+      popupVisible={open}
+      onVisibleChange={(v) => {
+        setOpen(v);
+        if (!v) setKw("");
+      }}
+      unmountOnExit
+      content={
+        <div
+          className="iam-quick-pop"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="iam-quick-pop-head">
+            <b>{bi(`授权访问 ${cluster.id}`, `Grant on ${cluster.id}`)}</b>
+          </div>
+          {users.length + teams.length > 4 && (
+            <Input
+              size="small"
+              prefix={<IconSearch />}
+              allowClear
+              value={kw}
+              onChange={setKw}
+              placeholder={bi("搜索成员或团队…", "Filter user or team…")}
+            />
+          )}
+          <div className="iam-quick-pop-list">
+            {candUsers.length === 0 && candTeams.length === 0 ? (
+              <p className="faint small" style={{ margin: "10px 4px", textAlign: "center" }}>
+                {bi(
+                  "无可新增的普通成员或团队",
+                  "No unassigned non-global users or teams",
+                )}
+              </p>
+            ) : (
+              <>
+                {candUsers.map((u) => (
+                  <div key={`u:${u.username}`} className="iam-quick-pop-row">
+                    <span className="iam-quick-pop-who">
+                      <IconUser />
+                      <b>{u.username}</b>
+                    </span>
+                    <span className="iam-quick-pop-btns">
+                      <button
+                        type="button"
+                        disabled={busy}
+                        className="iam-lvl-tag is-view is-btn"
+                        onClick={() =>
+                          onGrant("u", u.username, "view", () => setOpen(false))
+                        }
+                      >
+                        {bi("+ 只读", "+ View")}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        className="iam-lvl-tag is-operate is-btn"
+                        onClick={() =>
+                          onGrant("u", u.username, "operate", () =>
+                            setOpen(false),
+                          )
+                        }
+                      >
+                        {bi("+ 运维", "+ Operate")}
+                      </button>
+                    </span>
+                  </div>
+                ))}
+                {candTeams.map((t) => (
+                  <div key={`t:${t.id}`} className="iam-quick-pop-row">
+                    <span className="iam-quick-pop-who">
+                      <IconUserGroup />
+                      <b>{t.name}</b>
+                    </span>
+                    <span className="iam-quick-pop-btns">
+                      <button
+                        type="button"
+                        disabled={busy}
+                        className="iam-lvl-tag is-view is-btn"
+                        onClick={() =>
+                          onGrant("t", t.id, "view", () => setOpen(false))
+                        }
+                      >
+                        {bi("+ 只读", "+ View")}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        className="iam-lvl-tag is-operate is-btn"
+                        onClick={() =>
+                          onGrant("t", t.id, "operate", () => setOpen(false))
+                        }
+                      >
+                        {bi("+ 运维", "+ Operate")}
+                      </button>
+                    </span>
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        </div>
+      }
+    >
+      <button
+        type="button"
+        className="iam-add-grant-chip"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <IconPlus />
+        <span>{bi("授权", "Grant")}</span>
+      </button>
+    </Popover>
+  );
+}
 
 export function ClustersAccessPane({
   narrow,
   users,
+  iamError,
   onSaved,
 }: {
   narrow: boolean;
   users: Account[];
+  iamError?: string;
   onSaved?: () => void;
 }) {
   useLang();
-  const { iam, set } = useIAM();
+  const { iam, reload, set } = useIAM();
   const [query, setQuery] = useState("");
   const [appFilter, setAppFilter] = useState<string>("all");
   const [shareFilter, setShareFilter] = useState<"all" | "shared" | "private">(
@@ -2303,8 +2558,8 @@ export function ClustersAccessPane({
     "operate" | "view" | "revoke"
   >("operate");
   const [batchBusy, setBatchBusy] = useState(false);
+  const searchRef = useRef<HTMLInputElement | null>(null);
 
-  // Focused cluster Drawer (also auto-opened when jumping from Cluster Detail -> 集群权限设置)
   const [drawerClusterId, setDrawerClusterId] = useState<string>(() => {
     try {
       const f = sessionStorage.getItem("ds:iam-cluster-focus") || "";
@@ -2316,6 +2571,24 @@ export function ClustersAccessPane({
   });
   const [drawerQuery, setDrawerQuery] = useState("");
   const [savingKey, setSavingKey] = useState<string>("");
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (
+        e.metaKey ||
+        e.ctrlKey ||
+        e.altKey ||
+        document.querySelector(".pal-mask,.arco-modal,.arco-drawer")
+      )
+        return;
+      if (e.key === "/" && !typing(e)) {
+        e.preventDefault();
+        searchRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const clusters = useMemo(() => iam?.clusters || [], [iam?.clusters]);
   const globalRoles = useMemo(
@@ -2375,23 +2648,28 @@ export function ClustersAccessPane({
     [clusters],
   );
 
-  const globalUsersCount = useMemo(
-    () => users.filter((u) => !u.disabled && userHasGlobalScope(u.username)).length,
-    [users, iam, globalRoleIds], // eslint-disable-line react-hooks/exhaustive-deps
-  );
-
-  // Effective access level of a specific member on a cluster (for memberFilter perspective)
-  const memberEffectiveOnCluster = (uname: string, c: IAMCluster): string => {
-    if (!uname) return "";
-    if (userHasGlobalScope(uname)) return "operate";
-    if (c.owner === uname) return "operate";
+  const memberEffectiveDetail = (
+    uname: string,
+    c: IAMCluster,
+  ): { level: "" | ClusterAccessLevel; via: string } => {
+    if (!uname) return { level: "", via: "" };
+    if (c.owner === uname) {
+      return { level: "operate", via: bi("创建者", "Owner") };
+    }
+    if (userHasGlobalScope(uname)) {
+      return { level: "operate", via: bi("全局角色", "Global") };
+    }
     const g = iam?.grants[uname];
-    let best = g?.clusters?.[c.id] || "";
+    let best: "" | ClusterAccessLevel = g?.clusters?.[c.id] || "";
+    let via = best ? bi("个人授权", "Direct") : "";
     for (const tid of g?.teams || []) {
       const tlvl = c.teams?.[tid] || "";
-      if (LEVEL_RANK[tlvl] > LEVEL_RANK[best]) best = tlvl;
+      if (LEVEL_RANK[tlvl] > LEVEL_RANK[best]) {
+        best = tlvl as ClusterAccessLevel;
+        via = teamMap.get(tid)?.name || bi("团队继承", "Team");
+      }
     }
-    return best;
+    return { level: best, via };
   };
 
   const q = query.trim().toLowerCase();
@@ -2403,7 +2681,7 @@ export function ClustersAccessPane({
         if (shareFilter === "shared" && grantTotal === 0) return false;
         if (shareFilter === "private" && grantTotal > 0) return false;
         if (appFilter !== "all" && c.app_name !== appFilter) return false;
-        if (memberFilter && !memberEffectiveOnCluster(memberFilter, c))
+        if (memberFilter && !memberEffectiveDetail(memberFilter, c).level)
           return false;
         if (!q) return true;
         if (
@@ -2425,13 +2703,85 @@ export function ClustersAccessPane({
     [clusters, shareFilter, appFilter, memberFilter, q, teamMap, iam], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
-  if (!iam) return <Skeleton animation text={{ rows: 8 }} />;
+  const drawerCluster = drawerClusterId
+    ? clusters.find((c) => c.id === drawerClusterId) || null
+    : null;
+  const dq = drawerQuery.trim().toLowerCase();
+  const eligibleDrawerUsers = useMemo(
+    () =>
+      users
+        .filter(
+          (u) =>
+            !u.disabled &&
+            (!drawerCluster || u.username !== drawerCluster.owner) &&
+            (!dq || u.username.toLowerCase().includes(dq)),
+        )
+        .sort((a, b) => {
+          const ag = userHasGlobalScope(a.username) ? 1 : 0;
+          const bg = userHasGlobalScope(b.username) ? 1 : 0;
+          return ag !== bg ? ag - bg : a.username.localeCompare(b.username);
+        }),
+    [users, drawerCluster, dq, iam], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const eligibleDrawerTeams = useMemo(
+    () =>
+      (iam?.teams || []).filter(
+        (t) => !dq || t.name.toLowerCase().includes(dq),
+      ),
+    [iam?.teams, dq],
+  );
 
   const canUsers = can("iam.user");
   const canTeams = can("iam.team");
   const editable = canUsers || canTeams;
 
-  // Instant single-cluster mutation (no bottom save bar needed!)
+  const batchTargetOptions = useMemo(() => {
+    const opts: { label: string; value: string }[] = [];
+    if (!iam) return opts;
+    if (canUsers) {
+      for (const u of users) {
+        if (u.disabled || userHasGlobalScope(u.username)) continue;
+        opts.push({
+          value: `u:${u.username}`,
+          label: bi(`成员 · ${u.username}`, `User · ${u.username}`),
+        });
+      }
+    }
+    if (canTeams) {
+      for (const t of iam.teams) {
+        opts.push({
+          value: `t:${t.id}`,
+          label: bi(
+            `团队 · ${t.name} (${t.members.length}人)`,
+            `Team · ${t.name} (${t.members.length})`,
+          ),
+        });
+      }
+    }
+    return opts;
+  }, [users, iam, canUsers, canTeams]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (iamError && !iam) {
+    return (
+      <article className="iam-page iam-stage">
+        <div className="iam-empty iam-empty-line">
+          <IconExclamationCircle className="bad" />
+          <b>{iamError}</b>
+          <Button size="small" icon={<IconRefresh />} onClick={reload}>
+            {bi("重试", "Retry")}
+          </Button>
+        </div>
+      </article>
+    );
+  }
+  if (!iam) {
+    return (
+      <article className="iam-page">
+        <Skeleton animation text={{ rows: 8 }} />
+      </article>
+    );
+  }
+
   const updateClusterAccess = async (
     c: IAMCluster,
     nextUsers: Record<string, ClusterAccessLevel>,
@@ -2457,7 +2807,6 @@ export function ClustersAccessPane({
     }
   };
 
-  // Batch apply to all checked clusters
   const applyBatch = async () => {
     if (batchBusy || selectedIds.size === 0 || batchTargets.length === 0)
       return;
@@ -2537,62 +2886,10 @@ export function ClustersAccessPane({
     });
   };
 
-  const drawerCluster = drawerClusterId
-    ? clusters.find((c) => c.id === drawerClusterId) || null
-    : null;
-  const dq = drawerQuery.trim().toLowerCase();
-  const eligibleDrawerUsers = useMemo(
-    () =>
-      users
-        .filter(
-          (u) =>
-            !u.disabled &&
-            (!drawerCluster || u.username !== drawerCluster.owner) &&
-            (!dq || u.username.toLowerCase().includes(dq)),
-        )
-        .sort((a, b) => {
-          const ag = userHasGlobalScope(a.username) ? 1 : 0;
-          const bg = userHasGlobalScope(b.username) ? 1 : 0;
-          return ag !== bg ? ag - bg : a.username.localeCompare(b.username);
-        }),
-    [users, drawerCluster, dq, iam], // eslint-disable-line react-hooks/exhaustive-deps
-  );
-  const eligibleDrawerTeams = useMemo(
-    () =>
-      (iam.teams || []).filter(
-        (t) => !dq || t.name.toLowerCase().includes(dq),
-      ),
-    [iam.teams, dq],
-  );
-
-  // Options for batch target selector
-  const batchTargetOptions = useMemo(() => {
-    const opts: { label: string; value: string }[] = [];
-    if (canUsers) {
-      for (const u of users) {
-        if (u.disabled || userHasGlobalScope(u.username)) continue;
-        opts.push({
-          value: `u:${u.username}`,
-          label: bi(`成员 · ${u.username}`, `User · ${u.username}`),
-        });
-      }
-    }
-    if (canTeams) {
-      for (const t of iam.teams) {
-        opts.push({
-          value: `t:${t.id}`,
-          label: bi(
-            `团队 · ${t.name} (${t.members.length}人)`,
-            `Team · ${t.name} (${t.members.length})`,
-          ),
-        });
-      }
-    }
-    return opts;
-  }, [users, iam.teams, canUsers, canTeams, iam]); // eslint-disable-line react-hooks/exhaustive-deps
+  const batchIdx = batchAction === "revoke" ? 0 : batchAction === "view" ? 1 : 2;
 
   return (
-    <article className="iam-page enter">
+    <article className="iam-page iam-stage">
       {narrow && (
         <Button
           type="text"
@@ -2604,61 +2901,34 @@ export function ClustersAccessPane({
         </Button>
       )}
       <header className="iam-h">
-        <div>
-          <h1>{bi("集群授权", "Cluster Access Control")}</h1>
+        <div className="iam-h-main">
+          <div className="iam-h-title-row">
+            <h1>{bi("集群授权", "Cluster Access")}</h1>
+            {clusters.length > 0 && (
+              <span className="iam-h-meta num">
+                {bi(
+                  `${clusters.length} 个集群 · ${sharedCount} 已共享协作`,
+                  `${clusters.length} clusters · ${sharedCount} shared`,
+                )}
+              </span>
+            )}
+          </div>
           <p>
             {bi(
-              "每个集群默认归创建者本人运维，管理员与全局角色自动可见全部集群；勾选多行可一键批量授权，或点击单行直接切换「运维管理 / 只读查看」。",
-              "Creators own their clusters by default and global roles see all. Toggle per-cluster access inline or select rows to grant in bulk.",
+              "集群默认归创建者本人运维，全局角色自动可见全部；可在行内一键增删协作成员、点击标签切换「运维 / 只读」，或勾选多行批量分配。",
+              "Creators operate their own clusters by default and global roles see all. Add collaborators inline, click badges to toggle Operate / View, or select rows for bulk assignment.",
             )}
           </p>
         </div>
       </header>
 
-      <div className="au-strip iam-kpi-strip">
-        <div className="au-stat">
-          <span className="au-stat-k">
-            {bi("可管理集群总数", "Total Clusters")}
-          </span>
-          <strong>{clusters.length}</strong>
-          <small>{bi("含平台部署与存量纳管集群", "Deployed & onboarded clusters")}</small>
-        </div>
-        <div className="au-stat">
-          <span className="au-stat-k">
-            {bi("已共享协作集群", "Shared Clusters")}
-          </span>
-          <strong>{sharedCount}</strong>
-          <small>
-            {bi("已额外分配成员或团队权限", "With explicit user or team grants")}
-          </small>
-        </div>
-        <div className="au-stat">
-          <span className="au-stat-k">
-            {bi("默认创建者私有", "Creator-Only")}
-          </span>
-          <strong>{clusters.length - sharedCount}</strong>
-          <small>
-            {bi("仅创建者与全局角色可见", "Visible to creator & global roles")}
-          </small>
-        </div>
-        <div className="au-stat">
-          <span className="au-stat-k">
-            {bi("全局视野成员", "Global Viewers")}
-          </span>
-          <strong>{globalUsersCount}</strong>
-          <small>
-            {globalRoles.map((r) => roleTitle(r)).join(" / ") || "—"}
-          </small>
-        </div>
-      </div>
-
       {clusters.length === 0 ? (
-        <div className="iam-empty iam-empty-card">
+        <div className="iam-empty iam-empty-line">
           <IconStorage />
-          <b>{bi("还没有可分配权限的集群", "No clusters yet")}</b>
+          <b>{bi("暂无可分配权限的集群", "No clusters yet")}</b>
           <span>
             {bi(
-              "新建交付或纳管存量集群后，即可在此统一配置协作访问权限。",
+              "新建交付或纳管存量集群后，即可在此按集群精细分配协作成员与团队权限。",
               "Create or onboard clusters first to configure per-cluster access.",
             )}
           </span>
@@ -2667,20 +2937,31 @@ export function ClustersAccessPane({
         <>
           <div className="iam-toolbar">
             <Input
+              ref={(r) => {
+                searchRef.current =
+                  (r as unknown as { dom?: HTMLInputElement })?.dom ?? null;
+              }}
               className="iam-search-in"
               prefix={<IconSearch />}
+              suffix={!query ? <Kbd>/</Kbd> : undefined}
               allowClear
               value={query}
               onChange={setQuery}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  setQuery("");
+                  (e.target as HTMLInputElement).blur();
+                }
+              }}
               placeholder={bi(
-                "搜索集群标识、组件、创建者或已授权成员...",
-                "Search cluster, middleware, owner, or member...",
+                "搜索集群标识、组件、创建者或协作成员…",
+                "Search cluster, middleware, owner, or member…",
               )}
               aria-label={bi("搜索集群", "Search clusters")}
             />
             {appOptions.length > 1 && (
               <Select
-                style={{ width: 176 }}
+                className="iam-filter-sel"
                 value={appFilter}
                 onChange={setAppFilter}
                 triggerProps={{ autoFitPosition: true }}
@@ -2701,20 +2982,17 @@ export function ClustersAccessPane({
             )}
             {users.length > 0 && (
               <Select
-                style={{ width: 200 }}
+                className="iam-filter-sel is-member"
                 value={memberFilter || undefined}
                 allowClear
-                placeholder={bi("按成员视角查看...", "View as member...")}
+                placeholder={bi("按成员视角核查…", "Audit as member…")}
                 onChange={(v) => setMemberFilter(v || "")}
                 triggerProps={{ autoFitPosition: true }}
                 options={users
                   .filter((u) => !u.disabled)
                   .map((u) => ({
                     value: u.username,
-                    label: bi(
-                      `视角：${u.username}`,
-                      `Member: ${u.username}`,
-                    ),
+                    label: bi(`视角：${u.username}`, `View as: ${u.username}`),
                   }))}
               />
             )}
@@ -2729,14 +3007,18 @@ export function ClustersAccessPane({
               <button
                 type="button"
                 className={`iam-pill ${shareFilter === "shared" ? "on" : ""}`}
-                onClick={() => setShareFilter("shared")}
+                onClick={() =>
+                  setShareFilter(shareFilter === "shared" ? "all" : "shared")
+                }
               >
                 {bi("已共享", "Shared")} <em>{sharedCount}</em>
               </button>
               <button
                 type="button"
                 className={`iam-pill ${shareFilter === "private" ? "on" : ""}`}
-                onClick={() => setShareFilter("private")}
+                onClick={() =>
+                  setShareFilter(shareFilter === "private" ? "all" : "private")
+                }
               >
                 {bi("仅创建者", "Creator Only")}{" "}
                 <em>{clusters.length - sharedCount}</em>
@@ -2760,7 +3042,7 @@ export function ClustersAccessPane({
                     onClick={() => toggleSelectAllFiltered(true)}
                   >
                     {bi(
-                      `全选当前筛选 (${filtered.length})`,
+                      `全选筛选结果 (${filtered.length})`,
                       `Select all ${filtered.length}`,
                     )}
                   </button>
@@ -2776,45 +3058,49 @@ export function ClustersAccessPane({
               <div className="iam-batch-right">
                 <Select
                   mode="multiple"
-                  style={{ minWidth: 240, maxWidth: 380 }}
+                  style={{ minWidth: 230, maxWidth: 360 }}
                   value={batchTargets}
                   onChange={setBatchTargets}
                   options={batchTargetOptions}
                   placeholder={
                     batchTargetOptions.length
                       ? bi(
-                          "选择要批量授权的成员或团队...",
-                          "Select users or teams...",
+                          "选择要批量授权的成员或团队…",
+                          "Select users or teams…",
                         )
                       : bi("暂无可授权普通成员或团队", "No target users/teams")
                   }
                   allowClear
                   triggerProps={{ autoFitPosition: true }}
                 />
-                <span className="iam-tri-switch">
+                <span
+                  className={`iam-tri-switch idx-${batchIdx}`}
+                  style={{ "--tri-idx": batchIdx } as React.CSSProperties}
+                >
                   <button
                     type="button"
-                    className={batchAction === "operate" ? "on is-op" : ""}
-                    onClick={() => setBatchAction("operate")}
+                    className={batchAction === "revoke" ? "on is-none" : ""}
+                    onClick={() => setBatchAction("revoke")}
                   >
-                    {bi("运维管理", "Operate")}
+                    {bi("撤销", "Revoke")}
                   </button>
                   <button
                     type="button"
                     className={batchAction === "view" ? "on is-view" : ""}
                     onClick={() => setBatchAction("view")}
                   >
-                    {bi("只读查看", "Read-only")}
+                    {bi("只读", "View")}
                   </button>
                   <button
                     type="button"
-                    className={batchAction === "revoke" ? "on is-none" : ""}
-                    onClick={() => setBatchAction("revoke")}
+                    className={batchAction === "operate" ? "on is-op" : ""}
+                    onClick={() => setBatchAction("operate")}
                   >
-                    {bi("撤销权限", "Revoke")}
+                    {bi("运维", "Operate")}
                   </button>
                 </span>
                 <Button
+                  size="small"
                   type="primary"
                   loading={batchBusy}
                   disabled={batchTargets.length === 0}
@@ -2830,7 +3116,7 @@ export function ClustersAccessPane({
           )}
 
           {filtered.length === 0 ? (
-            <div className="iam-empty">
+            <div className="iam-empty iam-empty-line">
               <b>{bi("没有符合筛选条件的集群", "No clusters match filters")}</b>
               <Button
                 size="small"
@@ -2845,8 +3131,8 @@ export function ClustersAccessPane({
               </Button>
             </div>
           ) : (
-            <div className="iam-ledger-card">
-              <div className="iam-cl-lhead">
+            <div className="iam-ledger" role="table" aria-label={bi("集群授权台账", "Cluster access ledger")}>
+              <div className="iam-cl-lhead" role="row">
                 <span className="iam-cl-chk-col">
                   {editable && (
                     <Checkbox
@@ -2857,13 +3143,18 @@ export function ClustersAccessPane({
                     />
                   )}
                 </span>
-                <span>{bi("集群标识与中间件", "Cluster & Middleware")}</span>
-                <span>{bi("创建者（默认运维）", "Creator (Default Operate)")}</span>
+                <span>{bi("集群与中间件", "Cluster & Middleware")}</span>
+                <span>{bi("创建者", "Creator")}</span>
                 <span>
-                  {bi(
-                    "已授权协作成员与团队（点击标签可切换只读/运维）",
-                    "Authorized Users & Teams (Click badge to toggle)",
-                  )}
+                  {memberFilter
+                    ? bi(
+                        `${memberFilter} 的生效权限与协作成员`,
+                        `${memberFilter}'s Access & Collaborators`,
+                      )
+                    : bi(
+                        "协作成员与团队（点击权限标签可切换）",
+                        "Authorized Collaborators & Teams",
+                      )}
                 </span>
                 <span className="is-right">{bi("操作", "Actions")}</span>
               </div>
@@ -2874,9 +3165,13 @@ export function ClustersAccessPane({
                   const tEntries = stableClusterEntries(c.teams);
                   const checked = selectedIds.has(c.id);
                   const isDrawerOpen = drawerClusterId === c.id;
+                  const effView = memberFilter
+                    ? memberEffectiveDetail(memberFilter, c)
+                    : null;
                   return (
                     <div
                       key={c.id}
+                      role="row"
                       className={`iam-cl-lrow ${checked ? "is-checked" : ""} ${isDrawerOpen ? "is-focused" : ""}`}
                     >
                       <div className="iam-cl-chk-col">
@@ -2920,13 +3215,23 @@ export function ClustersAccessPane({
                       </div>
 
                       <div className="iam-cl-lgrants">
-                        {uEntries.length === 0 && tEntries.length === 0 ? (
-                          <span className="faint small">
-                            {bi(
-                              "仅创建者与全局角色可见",
-                              "Creator & global roles only",
-                            )}
+                        {effView && effView.level && (
+                          <span className="iam-eff-perspective">
+                            <em className={`iam-lvl-tag is-${effView.level}`}>
+                              {effView.level === "operate"
+                                ? bi("可运维", "Operate")
+                                : bi("仅只读", "View")}
+                            </em>
+                            <small>{effView.via}</small>
                           </span>
+                        )}
+
+                        {uEntries.length === 0 && tEntries.length === 0 ? (
+                          !effView && (
+                            <span className="faint small">
+                              {bi("仅创建者与全局角色", "Creator & global roles")}
+                            </span>
+                          )
                         ) : (
                           <>
                             {uEntries.map(([uname, lvl]) => {
@@ -2947,7 +3252,7 @@ export function ClustersAccessPane({
                                       canUsers
                                         ? bi(
                                             `点击切换为「${clusterLevelLabel(nextLvl)}」`,
-                                            `Click to switch to ${clusterLevelLabel(nextLvl)}`,
+                                            `Switch to ${clusterLevelLabel(nextLvl)}`,
                                           )
                                         : undefined
                                     }
@@ -3067,27 +3372,62 @@ export function ClustersAccessPane({
                             })}
                           </>
                         )}
+
+                        {editable && (
+                          <QuickClusterGrantPopover
+                            cluster={c}
+                            users={users}
+                            teams={iam.teams || []}
+                            canUsers={canUsers}
+                            canTeams={canTeams}
+                            userHasGlobalScope={userHasGlobalScope}
+                            busy={Boolean(savingKey)}
+                            onGrant={(kind, id, lvl, close) => {
+                              close();
+                              if (kind === "u") {
+                                void updateClusterAccess(
+                                  c,
+                                  { ...(c.users || {}), [id]: lvl },
+                                  c.teams || {},
+                                  `${c.id}:u:${id}`,
+                                );
+                              } else {
+                                void updateClusterAccess(
+                                  c,
+                                  c.users || {},
+                                  { ...(c.teams || {}), [id]: lvl },
+                                  `${c.id}:t:${id}`,
+                                );
+                              }
+                            }}
+                          />
+                        )}
                       </div>
 
                       <div className="iam-cl-lact">
                         {editable && (
                           <Button
                             size="small"
+                            type="secondary"
                             onClick={() => {
                               setDrawerQuery("");
                               setDrawerClusterId(c.id);
                             }}
                           >
-                            {bi("分配权限", "Assign")}
+                            {bi("全部成员", "Manage")}
                           </Button>
                         )}
-                        <Button
-                          size="small"
-                          type="text"
+                        <button
+                          type="button"
+                          className="iam-row-go"
+                          aria-label={bi(
+                            `打开集群 ${c.id}`,
+                            `Open cluster ${c.id}`,
+                          )}
                           onClick={() => go({ name: "deliveries", id: c.id })}
                         >
-                          {bi("打开", "Open")} <IconRight />
-                        </Button>
+                          <IconRight />
+                        </button>
                       </div>
                     </div>
                   );
@@ -3107,7 +3447,7 @@ export function ClustersAccessPane({
         title={
           drawerCluster ? (
             <span className="iam-drawer-title">
-              <span>{bi("集群访问权限", "Cluster Access")}</span>
+              <span>{bi("集群权限明细", "Cluster Access")}</span>
               <code className="mono">{drawerCluster.id}</code>
             </span>
           ) : (
@@ -3118,17 +3458,15 @@ export function ClustersAccessPane({
         {drawerCluster && (
           <div className="iam-cl-drawer">
             <div className="iam-cl-drawer-meta">
-              <div>
-                <span className="iam-app-pill">
-                  {drawerCluster.app_name} {drawerCluster.version}
-                </span>
-                <span className="faint small" style={{ marginLeft: 8 }}>
-                  {bi(
-                    `创建者 ${drawerCluster.owner} 默认具备运维权限；点击下方开关立即生效`,
-                    `Owner ${drawerCluster.owner} has Operate access by default; switches apply instantly`,
-                  )}
-                </span>
-              </div>
+              <span className="iam-app-pill">
+                {drawerCluster.app_name} {drawerCluster.version}
+              </span>
+              <span className="faint small">
+                {bi(
+                  `创建者 ${drawerCluster.owner} 默认拥有运维权限；下方切换实时保存生效`,
+                  `Owner ${drawerCluster.owner} has Operate access by default; changes apply immediately`,
+                )}
+              </span>
             </div>
 
             {users.length + iam.teams.length > 5 && (
@@ -3139,8 +3477,8 @@ export function ClustersAccessPane({
                 value={drawerQuery}
                 onChange={setDrawerQuery}
                 placeholder={bi(
-                  "搜索成员或团队...",
-                  "Filter users or teams...",
+                  "搜索成员或团队…",
+                  "Filter users or teams…",
                 )}
               />
             )}
@@ -3151,7 +3489,7 @@ export function ClustersAccessPane({
                 <em className="num">{eligibleDrawerUsers.length}</em>
               </h4>
               {eligibleDrawerUsers.length === 0 ? (
-                <p className="faint small">
+                <p className="iam-inline-empty">
                   {bi(
                     "除创建者外暂无其他启用的成员账户。",
                     "No other active user accounts besides the creator.",
@@ -3221,7 +3559,7 @@ export function ClustersAccessPane({
                 )}
               </div>
               {eligibleDrawerTeams.length === 0 ? (
-                <p className="faint small">
+                <p className="iam-inline-empty">
                   {bi(
                     "尚未创建团队；创建团队后可将集群一键授权给整组成员。",
                     "No teams created yet.",
@@ -3277,20 +3615,43 @@ export function ClustersAccessPane({
   );
 }
 
-/* ---------------------------------------------------------------- removed accounts */
+/* ---------------------------------------------------------------- archived accounts */
 
 export function DeletedPane({
   users,
   narrow,
+  iamError,
 }: {
   users: { username: string; disabled?: boolean }[];
   narrow: boolean;
+  iamError?: string;
 }) {
   useLang();
   const { iam, reload } = useIAM();
   const [pick, setPick] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState("");
-  if (!iam) return <Skeleton animation text={{ rows: 5 }} />;
+
+  if (iamError && !iam) {
+    return (
+      <article className="iam-page iam-stage">
+        <div className="iam-empty iam-empty-line">
+          <IconExclamationCircle className="bad" />
+          <b>{iamError}</b>
+          <Button size="small" icon={<IconRefresh />} onClick={reload}>
+            {bi("重试", "Retry")}
+          </Button>
+        </div>
+      </article>
+    );
+  }
+  if (!iam) {
+    return (
+      <article className="iam-page">
+        <Skeleton animation text={{ rows: 5 }} />
+      </article>
+    );
+  }
+
   const move = async (d: Deleted) => {
     const to = pick[d.username];
     if (!to || busy) return;
@@ -3302,19 +3663,20 @@ export function DeletedPane({
       );
       Message.success(
         bi(
-          `${r.moved} 份交付已交给 ${to}`,
+          `${r.moved} 份交付已转交给 ${to}`,
           `Transferred ${r.moved} ${r.moved === 1 ? "delivery" : "deliveries"} to ${to}`,
         ),
       );
-      reload();
+      void reload();
     } catch (e) {
       err(e);
     } finally {
       setBusy("");
     }
   };
+
   return (
-    <article className="iam-page enter">
+    <article className="iam-page iam-stage">
       {narrow && (
         <Button
           type="text"
@@ -3326,78 +3688,90 @@ export function DeletedPane({
         </Button>
       )}
       <header className="iam-h">
-        <div>
-          <h1>{bi("已归档账户", "Archived Accounts")}</h1>
+        <div className="iam-h-main">
+          <div className="iam-h-title-row">
+            <h1>{bi("已归档账户", "Archived Users")}</h1>
+            <span className="iam-h-meta num">
+              {bi(`${iam.deleted?.length || 0} 个`, `${iam.deleted?.length || 0}`)}
+            </span>
+          </div>
           <p>
             {bi(
-              "已删除账户的用户名永久锁定不可复用，以保证历史审计可追溯；其名下留存的集群与交付可一键转交给在职同事。",
+              "已删除账户的用户名永久锁定不可复用，以保证审计链完整；其名下剩余集群与交付可转交给在职成员。",
               "Deleted usernames remain retired for audit traceability; remaining deliveries can be reassigned to active users.",
             )}
           </p>
         </div>
       </header>
-      <ul className="iam-dels">
-        {(iam.deleted || [])
-          .slice()
-          .reverse()
-          .map((d) => (
-            <li key={d.username}>
-              <span className="iam-del-name">
-                <b className="mono">{d.username}</b>
-                <small>
-                  {bi(
-                    `${d.by} 在 ${fullTime(d.at)} 删除`,
-                    `Deleted by ${d.by} on ${fullTime(d.at)}`,
-                  )}
-                  {d.moved
-                    ? bi(
-                        ` · ${d.moved_n || 0} 份交付已交给 ${d.moved}`,
-                        ` · ${d.moved_n || 0} transferred to ${d.moved}`,
-                      )
-                    : ""}
-                </small>
-              </span>
-              <span className="iam-del-jobs">
-                {d.jobs
-                  ? bi(
-                      `名下还有 ${d.jobs} 份交付`,
-                      `${d.jobs} ${d.jobs === 1 ? "delivery" : "deliveries"} remaining`,
-                    )
-                  : bi("名下没有交付", "No deliveries")}
-              </span>
-              {d.jobs > 0 && can("iam.user") && (
-                <span className="row-gap">
-                  <Select
-                    style={{ minWidth: 200 }}
-                    placeholder={bi("选择接手成员", "Transfer to")}
-                    value={pick[d.username]}
-                    onChange={(v) => setPick({ ...pick, [d.username]: v })}
-                    triggerProps={{
-                      autoFitPosition: true,
-                      autoAlignPopupWidth: false,
-                      autoAlignPopupMinWidth: true,
-                      position: "br",
-                    }}
-                    options={users
-                      .filter((u) => !u.disabled)
-                      .map((u) => ({ value: u.username, label: u.username }))}
-                  />
-                  <Button
-                    type="primary"
-                    loading={busy === d.username}
-                    disabled={
-                      !pick[d.username] ||
-                      (Boolean(busy) && busy !== d.username)
-                    }
-                    onClick={() => move(d)}
-                  >
-                    {bi("转交", "Transfer")}
-                  </Button>
+
+      <div className="iam-ledger">
+        <ul className="iam-dels">
+          {(iam.deleted || [])
+            .slice()
+            .reverse()
+            .map((d) => (
+              <li key={d.username}>
+                <span className="iam-del-name">
+                  <b className="mono">{d.username}</b>
+                  <small>
+                    {bi(
+                      `${d.by} 于 ${fullTime(d.at)} 删除`,
+                      `Deleted by ${d.by} on ${fullTime(d.at)}`,
+                    )}
+                    {d.moved
+                      ? bi(
+                          ` · ${d.moved_n || 0} 份交付已转交 ${d.moved}`,
+                          ` · ${d.moved_n || 0} transferred to ${d.moved}`,
+                        )
+                      : ""}
+                  </small>
                 </span>
-              )}
-            </li>
-          ))}
-      </ul>
+                <span className="iam-del-jobs">
+                  {d.jobs
+                    ? bi(
+                        `待转交 ${d.jobs} 份交付`,
+                        `${d.jobs} ${d.jobs === 1 ? "delivery" : "deliveries"} remaining`,
+                      )
+                    : bi("无待转交交付", "No deliveries")}
+                </span>
+                {d.jobs > 0 && can("iam.user") ? (
+                  <span className="row-gap">
+                    <Select
+                      style={{ minWidth: 190 }}
+                      size="small"
+                      placeholder={bi("选择接手成员…", "Transfer to…")}
+                      value={pick[d.username]}
+                      onChange={(v) => setPick({ ...pick, [d.username]: v })}
+                      triggerProps={{
+                        autoFitPosition: true,
+                        autoAlignPopupWidth: false,
+                        autoAlignPopupMinWidth: true,
+                        position: "br",
+                      }}
+                      options={users
+                        .filter((u) => !u.disabled)
+                        .map((u) => ({ value: u.username, label: u.username }))}
+                    />
+                    <Button
+                      size="small"
+                      type="primary"
+                      loading={busy === d.username}
+                      disabled={
+                        !pick[d.username] ||
+                        (Boolean(busy) && busy !== d.username)
+                      }
+                      onClick={() => move(d)}
+                    >
+                      {bi("转交", "Transfer")}
+                    </Button>
+                  </span>
+                ) : (
+                  <span />
+                )}
+              </li>
+            ))}
+        </ul>
+      </div>
     </article>
   );
 }

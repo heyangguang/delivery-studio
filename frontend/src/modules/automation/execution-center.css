@@ -2149,3 +2149,57 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+
+/* ---- Refined Unified Agent Alignment Overrides ---- */
+
+.ua-list-title-acts {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.ua-list-title-acts > .arco-btn {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.ua-hero-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ua-hero-main .ua-detail-meta {
+  margin-top: 0;
+}
+
+.ua-probe-inline-note {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 15px;
+  border-radius: 11px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  font-size: 12.5px;
+  color: var(--mute);
+  line-height: 1.5;
+}
+
+.ua-cluster-empty-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.ua-status-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}

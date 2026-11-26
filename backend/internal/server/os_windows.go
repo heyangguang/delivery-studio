@@ -19,9 +19,10 @@ import (
 )
 
 var (
-	modkernel32      = syscall.NewLazyDLL("kernel32.dll")
-	procLockFileEx   = modkernel32.NewProc("LockFileEx")
-	procUnlockFileEx = modkernel32.NewProc("UnlockFileEx")
+	modkernel32             = syscall.NewLazyDLL("kernel32.dll")
+	procLockFileEx          = modkernel32.NewProc("LockFileEx")
+	procUnlockFileEx        = modkernel32.NewProc("UnlockFileEx")
+	procGetDiskFreeSpaceExW = modkernel32.NewProc("GetDiskFreeSpaceExW")
 )
 
 const (
@@ -148,3 +149,35 @@ func prepareGatewayWorkerIPC(cmd *exec.Cmd, dir string) (
 func signalGatewayWorkerGraceful(_ *exec.Cmd) {
 	// Windows workers receive graceful shutdown via authenticated POST /__gateway/shutdown.
 }
+
+func diskStatFS(path string) (totalGB, usedPct float64) {
+	target := path
+	if target == "" || target == "/" {
+		if vol := filepath.VolumeName(os.TempDir()); vol != "" {
+			target = vol + `\`
+		} else {
+			target = `C:\`
+		}
+	}
+	ptr, err := syscall.UTF16PtrFromString(target)
+	if err != nil {
+		return 0, 0
+	}
+	var freeAvail, totalBytes, totalFree uint64
+	r1, _, _ := procGetDiskFreeSpaceExW.Call(
+		uintptr(unsafe.Pointer(ptr)),
+		uintptr(unsafe.Pointer(&freeAvail)),
+		uintptr(unsafe.Pointer(&totalBytes)),
+		uintptr(unsafe.Pointer(&totalFree)),
+	)
+	if r1 == 0 || totalBytes == 0 {
+		return 0, 0
+	}
+	used := float64(totalBytes - freeAvail)
+	if freeAvail > totalBytes {
+		used = 0
+	}
+	tot := float64(totalBytes)
+	return tot / (1024 * 1024 * 1024), (used / tot) * 100
+}
+

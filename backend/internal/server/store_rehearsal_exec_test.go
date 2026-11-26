@@ -442,7 +442,8 @@ func TestGlobalExecutionAgentsAPI(t *testing.T) {
 	}
 	executionMu.Unlock()
 
-	// Import two clusters sharing host IP 10.30.0.11 to verify Host-First cross-cluster IP auto-matching.
+	// Import two clusters sharing host IP 10.30.0.11 to verify that clusters are NEVER silently auto-bound by IP;
+	// only customer-selected clusters are authorized on the Direct Target Agent.
 	for _, imp := range []string{
 		`{"id":"pg-global-ag","component":"postgresql","display_name":"PostgreSQL","version":"17","exact_version":"17.11","platform":"ubuntu2404","deploy_method":"systemd","hosts":[{"name":"db-g1","ip":"10.30.0.11","role":"primary"}]}`,
 		`{"id":"etcd-global-ag","component":"etcd","display_name":"etcd","version":"3.5","exact_version":"3.5.17","platform":"ubuntu2404","deploy_method":"systemd","hosts":[{"name":"etcd-g1","ip":"10.30.0.11","role":"member"}]}`,
@@ -463,7 +464,8 @@ func TestGlobalExecutionAgentsAPI(t *testing.T) {
 		t.Fatalf("expected legacy ssh_trust agents excluded, got %+v", emptyList)
 	}
 
-	// Host-First enrollment directly in Execution Center (POST /api/executions/agents).
+	// Host-First enrollment in Execution Center without selecting clusters starts with 0 bound clusters
+	// (only suggested_clusters hints at clusters containing 10.30.0.11).
 	enrRR := storeRequest(srv, "POST", "/api/executions/agents", strings.NewReader(`{"host":"db-g1","ip":"10.30.0.11","allow_mutating":true}`), cookie, csrf)
 	if enrRR.Code != 201 {
 		t.Fatalf("global enroll agent failed: %d %s", enrRR.Code, enrRR.Body.String())
@@ -473,8 +475,11 @@ func TestGlobalExecutionAgentsAPI(t *testing.T) {
 		EnrollmentToken string              `json:"enrollment_token"`
 	}
 	_ = json.Unmarshal(enrRR.Body.Bytes(), &enr)
-	if enr.Agent.Mode != "direct" || enr.Agent.Cluster != "" || len(enr.EnrollmentToken) < 40 {
+	if enr.Agent.Mode != "direct" || len(enr.Agent.Clusters) != 0 || len(enr.EnrollmentToken) < 40 {
 		t.Fatalf("unexpected global agent response: %+v", enr)
+	}
+	if len(enr.Agent.SuggestedClusters) != 2 {
+		t.Fatalf("expected suggested_clusters hint for 2 clusters with IP 10.30.0.11, got %+v", enr.Agent.SuggestedClusters)
 	}
 
 	// Duplicate active IP enrollment from either global or cluster endpoint must return 409.
@@ -493,33 +498,109 @@ func TestGlobalExecutionAgentsAPI(t *testing.T) {
 		t.Fatalf("expected 403 for wrong bundle token, got %d %s", badTokBundle.Code, badTokBundle.Body.String())
 	}
 
-	// GET /api/executions/agents returns only the 1 persistent direct agent and lists BOTH matched clusters!
-	listRR := storeRequest(srv, "GET", "/api/executions/agents", nil, cookie, "")
-	if listRR.Code != 200 {
-		t.Fatalf("GET /api/executions/agents failed: %d %s", listRR.Code, listRR.Body.String())
-	}
-	var list []automationAgentView
-	_ = json.Unmarshal(listRR.Body.Bytes(), &list)
-	if len(list) != 1 || list[0].ID != enr.Agent.ID || list[0].Cluster != "" {
-		t.Fatalf("unexpected global agents list: %+v", list)
-	}
-	if len(list[0].MatchedClusters) != 2 || list[0].MatchedClusters[0] != "etcd-global-ag" || list[0].MatchedClusters[1] != "pg-global-ag" {
-		t.Fatalf("expected matched_clusters [etcd-global-ag pg-global-ag], got %+v", list[0].MatchedClusters)
-	}
-
-	// Both clusters' Automation summary automatically match this global direct agent (and exclude legacy ssh_trust).
+	// Neither cluster has bound this agent yet: Automation summary must report agents=[] and unbound_agents=[enr.Agent.ID]!
 	for _, cid := range []string{"pg-global-ag", "etcd-global-ag"} {
 		sumRR := storeRequest(srv, "GET", "/api/clusters/"+cid+"/automation", nil, cookie, "")
 		if sumRR.Code != 200 {
 			t.Fatalf("GET automation for %s failed: %d %s", cid, sumRR.Code, sumRR.Body.String())
 		}
 		var sum struct {
-			Agents []automationAgentView `json:"agents"`
+			Agents        []automationAgentView `json:"agents"`
+			UnboundAgents []automationAgentView `json:"unbound_agents"`
 		}
 		_ = json.Unmarshal(sumRR.Body.Bytes(), &sum)
-		if len(sum.Agents) != 1 || sum.Agents[0].ID != enr.Agent.ID {
-			t.Fatalf("expected cluster %s to auto-match global direct agent %s, got %+v", cid, enr.Agent.ID, sum.Agents)
+		if len(sum.Agents) != 0 {
+			t.Fatalf("expected cluster %s NOT to auto-bind agent before user selection, got %+v", cid, sum.Agents)
 		}
+		if len(sum.UnboundAgents) != 1 || sum.UnboundAgents[0].ID != enr.Agent.ID {
+			t.Fatalf("expected cluster %s to surface unbound_agents=[%s], got %+v", cid, enr.Agent.ID, sum.UnboundAgents)
+		}
+	}
+
+	// Customer explicitly selects ONLY pg-global-ag in Execution Center (PATCH clusters=["pg-global-ag"]).
+	bindRR := storeRequest(srv, "PATCH", "/api/executions/agents", strings.NewReader(`{"id":"`+enr.Agent.ID+`","action":"update","clusters":["pg-global-ag"]}`), cookie, csrf)
+	if bindRR.Code != 200 {
+		t.Fatalf("PATCH bind clusters failed: %d %s", bindRR.Code, bindRR.Body.String())
+	}
+
+	// Verify GET /api/executions/agents shows ONLY pg-global-ag as bound.
+	listRR := storeRequest(srv, "GET", "/api/executions/agents", nil, cookie, "")
+	if listRR.Code != 200 {
+		t.Fatalf("GET /api/executions/agents failed: %d %s", listRR.Code, listRR.Body.String())
+	}
+	var list []automationAgentView
+	_ = json.Unmarshal(listRR.Body.Bytes(), &list)
+	if len(list) != 1 || len(list[0].Clusters) != 1 || list[0].Clusters[0] != "pg-global-ag" {
+		t.Fatalf("expected explicitly bound clusters=[pg-global-ag], got %+v", list)
+	}
+
+	// pg-global-ag sees the bound agent, while etcd-global-ag still sees agents=[]!
+	{
+		sumPG := storeRequest(srv, "GET", "/api/clusters/pg-global-ag/automation", nil, cookie, "")
+		var sPG struct {
+			Agents []automationAgentView `json:"agents"`
+		}
+		_ = json.Unmarshal(sumPG.Body.Bytes(), &sPG)
+		if len(sPG.Agents) != 1 || sPG.Agents[0].ID != enr.Agent.ID {
+			t.Fatalf("expected pg-global-ag to see bound agent, got %+v", sPG.Agents)
+		}
+		sumEtcd := storeRequest(srv, "GET", "/api/clusters/etcd-global-ag/automation", nil, cookie, "")
+		var sEtcd struct {
+			Agents []automationAgentView `json:"agents"`
+		}
+		_ = json.Unmarshal(sumEtcd.Body.Bytes(), &sEtcd)
+		if len(sEtcd.Agents) != 0 {
+			t.Fatalf("expected etcd-global-ag to remain unbound, got %+v", sEtcd.Agents)
+		}
+	}
+
+	// Test real-time heartbeat + lightweight host probe telemetry via /api/target-agent/enroll & /api/target-agent/poll!
+	agentSecTok := strings.Repeat("t", 48)
+	machineHash := strings.Repeat("b", 64)
+	enrCall := httptest.NewRequest("POST", "http://127.0.0.1:8090/api/target-agent/enroll", strings.NewReader(`{"id":"`+enr.Agent.ID+`","machine_id":"`+machineHash+`","hostname":"db-g1","ips":["10.30.0.11"],"token":"`+agentSecTok+`"}`))
+	enrCall.Header.Set("Authorization", "Bearer "+enr.EnrollmentToken)
+	enrCall.Header.Set("Content-Type", "application/json")
+	enrW := httptest.NewRecorder()
+	srv.ServeHTTP(enrW, enrCall)
+	if enrW.Code != 200 {
+		t.Fatalf("target-agent enroll failed: %d %s", enrW.Code, enrW.Body.String())
+	}
+
+	pollCall := httptest.NewRequest("POST", "http://127.0.0.1:8090/api/target-agent/poll", strings.NewReader(`{"machine_id":"`+machineHash+`","version":"1.0.0","heartbeat":true,"probe":{"hostname":"db-g1","os":"Ubuntu 24.04.1 LTS","kernel":"6.8.0-45","arch":"amd64","cpu_cores":8,"load1":0.42,"load5":0.31,"mem_total_mb":16384,"mem_used_pct":38.5,"disk_total_gb":200,"disk_used_pct":24.2,"uptime_sec":86400,"interval_sec":5}}`))
+	pollCall.Header.Set("Authorization", "Bearer "+agentSecTok)
+	pollCall.Header.Set("Content-Type", "application/json")
+	pollW := httptest.NewRecorder()
+	srv.ServeHTTP(pollW, pollCall)
+	if pollW.Code != 200 {
+		t.Fatalf("target-agent heartbeat poll with probe failed: %d %s", pollW.Code, pollW.Body.String())
+	}
+
+	// Verify online=true, last_seen populated, and probe telemetry returned!
+	liveRR := storeRequest(srv, "GET", "/api/executions/agents", nil, cookie, "")
+	var liveList []automationAgentView
+	_ = json.Unmarshal(liveRR.Body.Bytes(), &liveList)
+	if len(liveList) != 1 || !liveList[0].Online || liveList[0].Probe == nil || liveList[0].Probe.CPUCores != 8 || liveList[0].Probe.MemUsedPct != 38.5 {
+		t.Fatalf("expected online agent with live host probe telemetry, got %+v", liveList)
+	}
+
+	// Unbound cluster etcd-global-ag MUST NOT be allowed to dispatch connectivity check to this agent until bound!
+	deniedCheckRR := storeRequest(srv, "POST", "/api/clusters/etcd-global-ag/automation/check", strings.NewReader(`{"transport":"agent","targets":[{"host":"etcd-g1","ip":"10.30.0.11"}]}`), cookie, csrf)
+	if deniedCheckRR.Code != 409 {
+		t.Fatalf("expected 409 when unbound cluster attempts to dispatch to agent, got %d %s", deniedCheckRR.Code, deniedCheckRR.Body.String())
+	}
+
+	// Cluster-side bind & unbind via PATCH /api/clusters/etcd-global-ag/automation/agents
+	cBindRR := storeRequest(srv, "PATCH", "/api/clusters/etcd-global-ag/automation/agents", strings.NewReader(`{"id":"`+enr.Agent.ID+`","action":"bind"}`), cookie, csrf)
+	if cBindRR.Code != 200 {
+		t.Fatalf("cluster-side bind failed: %d %s", cBindRR.Code, cBindRR.Body.String())
+	}
+	okCheckRR := storeRequest(srv, "POST", "/api/clusters/etcd-global-ag/automation/check", strings.NewReader(`{"transport":"agent","targets":[{"host":"etcd-g1","ip":"10.30.0.11"}]}`), cookie, csrf)
+	if okCheckRR.Code != 201 {
+		t.Fatalf("expected 201 after binding etcd-global-ag, got %d %s", okCheckRR.Code, okCheckRR.Body.String())
+	}
+	cUnbindRR := storeRequest(srv, "PATCH", "/api/clusters/etcd-global-ag/automation/agents", strings.NewReader(`{"id":"`+enr.Agent.ID+`","action":"unbind"}`), cookie, csrf)
+	if cUnbindRR.Code != 200 {
+		t.Fatalf("cluster-side unbind failed: %d %s", cUnbindRR.Code, cUnbindRR.Body.String())
 	}
 
 	// Toggle allow_mutating=false globally
@@ -529,8 +610,8 @@ func TestGlobalExecutionAgentsAPI(t *testing.T) {
 	}
 	var updated automationAgentView
 	_ = json.Unmarshal(updRR.Body.Bytes(), &updated)
-	if updated.AllowMutating {
-		t.Fatalf("expected allow_mutating=false, got true")
+	if updated.AllowMutating || len(updated.Clusters) != 1 || updated.Clusters[0] != "pg-global-ag" {
+		t.Fatalf("expected allow_mutating=false and clusters=[pg-global-ag] preserved, got %+v", updated)
 	}
 
 	// Reject unknown action even when allow_mutating is provided

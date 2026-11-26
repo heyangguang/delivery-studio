@@ -97,3 +97,21 @@ func signalGatewayWorkerGraceful(cmd *exec.Cmd) {
 		_ = cmd.Process.Signal(syscall.SIGTERM)
 	}
 }
+
+func diskStatFS(path string) (totalGB, usedPct float64) {
+	var st syscall.Statfs_t
+	if err := syscall.Statfs(path, &st); err != nil || st.Blocks == 0 || st.Bsize <= 0 {
+		return 0, 0
+	}
+	totalBytes := float64(st.Blocks) * float64(st.Bsize)
+	availBytes := float64(st.Bavail) * float64(st.Bsize)
+	if totalBytes <= 0 {
+		return 0, 0
+	}
+	usedBytes := totalBytes - availBytes
+	if usedBytes < 0 {
+		usedBytes = 0
+	}
+	return totalBytes / (1024 * 1024 * 1024), (usedBytes / totalBytes) * 100
+}
+

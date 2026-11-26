@@ -111,6 +111,8 @@ func targetAgentCommand(args []string) error {
 	connected := false
 	lastErr := ""
 	lastErrAt := time.Time{}
+	var cachedProbe *agentHostProbe
+	var probeAt time.Time
 	for ctx.Err() == nil {
 		if !cfg.Enrolled {
 			name, _ := os.Hostname()
@@ -134,6 +136,10 @@ func targetAgentCommand(args []string) error {
 				}
 			}
 		} else {
+			if cachedProbe == nil || time.Since(probeAt) >= 15*time.Second {
+				cachedProbe = collectAgentHostProbe(5)
+				probeAt = time.Now()
+			}
 			var instruction targetAgentInstruction
 			e = call("poll", cfg.Token, map[string]any{
 				"machine_id":   identity,
@@ -143,6 +149,7 @@ func targetAgentCommand(args []string) error {
 				"host_keys":    targetHostKeys(),
 				"message":      message,
 				"capabilities": []string{"ssh_trust", "rehearsal_exec"},
+				"probe":        cachedProbe,
 			}, &instruction)
 			if e == nil {
 				if !connected {

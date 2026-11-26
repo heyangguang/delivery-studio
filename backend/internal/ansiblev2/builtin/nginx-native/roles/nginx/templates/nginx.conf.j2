@@ -1,0 +1,54 @@
+user nginx;
+worker_processes {{ nginx_worker_processes }};
+error_log /var/log/nginx/error.log warn;
+pid /run/nginx.pid;
+
+events {
+    worker_connections {{ nginx_worker_connections }};
+}
+
+{% if nginx_proxy_mode == 'stream' %}
+stream {
+    upstream backend_pool {
+{% for srv in nginx_upstream_servers %}
+        server {{ srv }} max_fails=3 fail_timeout=15s;
+{% endfor %}
+    }
+
+    server {
+        listen {{ nginx_listen_address }}:{{ nginx_listen_port }};
+        proxy_connect_timeout {{ nginx_proxy_connect_timeout }};
+        proxy_timeout {{ nginx_proxy_read_timeout }};
+        proxy_pass backend_pool;
+    }
+}
+{% else %}
+http {
+    include       /etc/nginx/mime.types;
+    default_type  application/octet-stream;
+{% if nginx_enable_access_log %}
+    access_log    /var/log/nginx/access.log;
+{% else %}
+    access_log    off;
+{% endif %}
+    sendfile      on;
+    keepalive_timeout 65;
+
+    upstream backend_http {
+{% for srv in nginx_upstream_servers %}
+        server {{ srv }} max_fails=3 fail_timeout=15s;
+{% endfor %}
+    }
+
+    server {
+        listen {{ nginx_listen_address }}:{{ nginx_listen_port }};
+        location / {
+            proxy_pass http://backend_http;
+            proxy_connect_timeout {{ nginx_proxy_connect_timeout }};
+            proxy_read_timeout {{ nginx_proxy_read_timeout }};
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+        }
+    }
+}
+{% endif %}

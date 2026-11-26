@@ -1,0 +1,48 @@
+---
+argument_specs:
+  main:
+    short_description: Deploy Redis standalone or primary/replica + Sentinel HA
+    options:
+      redis_bind_address:
+        type: str
+        default: "0.0.0.0"
+        description: Redis 实例绑定监听地址
+      redis_port:
+        type: int
+        required: true
+        default: 6379
+        description: Redis 服务端口
+      redis_sentinel_port:
+        type: int
+        default: 26379
+        description: Redis Sentinel 哨兵端口（有哨兵节点时生效）
+      redis_maxmemory:
+        type: str
+        default: "4gb"
+        description: 最大内存上限（例如 2gb、6gb）
+      redis_maxmemory_policy:
+        type: str
+        default: "allkeys-lru"
+        choices: ["allkeys-lru", "volatile-lru", "allkeys-lfu", "noeviction"]
+        description: 内存淘汰策略
+      redis_persistence_mode:
+        type: str
+        default: "none"
+        choices: ["none", "rdb", "aof"]
+        description: 持久化模式：none（纯缓存）、rdb 或 aof
+      redis_password:
+        type: str
+        default: ""
+        description: 访问认证密码（留空则不设密码，生产建议配置强密码）
+      redis_data_dir:
+        type: str
+        default: "/var/lib/redis"
+        description: 数据目录路径
+      redis_sentinel_quorum:
+        type: int
+        default: 2
+        description: 哨兵故障转移仲裁票数
+      redis_sentinel_master_name:
+        type: str
+        default: "mymaster"
+        description: Sentinel 监控主库逻辑名

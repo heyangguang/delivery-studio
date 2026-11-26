@@ -1,0 +1,24 @@
+---
+- name: 只读实测采集线上 Redis 角色、版本与生效参数
+  hosts: primary:replica
+  become: true
+  tags:
+    - probe
+  tasks:
+    - name: 采集 Redis 服务端版本
+      ansible.builtin.command: redis-server --version
+      register: redis_ver
+      changed_when: false
+
+    - name: 采集实时主从角色与内存配置
+      ansible.builtin.command: "redis-cli -p {{ redis_port }} {% if redis_password %}-a {{ redis_password }} --no-auth-warning{% endif %} INFO server replication memory"
+      register: redis_info
+      changed_when: false
+      failed_when: false
+
+    - name: 输出只读实测摘要
+      ansible.builtin.debug:
+        msg:
+          host: "{{ inventory_hostname }}"
+          version: "{{ redis_ver.stdout | default('') | trim }}"
+          info_lines: "{{ (redis_info.stdout_lines | default([]))[:20] }}"

@@ -426,9 +426,17 @@ func (r *storeRepository) deleteComponentAll(name string) error {
 }
 
 func (r *storeRepository) listLiveComponents() ([]compSlotRow, error) {
+	return r.listComponentsBySlot("live")
+}
+
+func (r *storeRepository) listV2Components() ([]compSlotRow, error) {
+	return r.listComponentsBySlot("v2")
+}
+
+func (r *storeRepository) listComponentsBySlot(slot string) ([]compSlotRow, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	rows, err := r.db.QueryContext(ctx, "SELECT name, rev, files, meta FROM middleware_store_components WHERE slot='live' ORDER BY name")
+	rows, err := r.db.QueryContext(ctx, "SELECT name, rev, files, meta FROM middleware_store_components WHERE slot=$1 ORDER BY name", slot)
 	if err != nil {
 		return nil, err
 	}
@@ -443,7 +451,7 @@ func (r *storeRepository) listLiveComponents() ([]compSlotRow, error) {
 		}
 		files := fileSet{}
 		_ = json.Unmarshal(fb, &files)
-		out = append(out, compSlotRow{Name: name, Slot: "live", Rev: rev, Files: files, Meta: mb})
+		out = append(out, compSlotRow{Name: name, Slot: slot, Rev: rev, Files: files, Meta: mb})
 	}
 	return out, rows.Err()
 }

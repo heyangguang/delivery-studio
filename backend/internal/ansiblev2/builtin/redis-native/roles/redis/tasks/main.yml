@@ -1,0 +1,38 @@
+---
+- name: 安装 Redis 软件包
+  ansible.builtin.package:
+    name:
+      - redis-server
+      - redis-tools
+    state: present
+  tags:
+    - install
+
+- name: 确保数据目录存在
+  ansible.builtin.file:
+    path: "{{ redis_data_dir }}"
+    state: directory
+    owner: redis
+    group: redis
+    mode: "0750"
+  tags:
+    - configure
+
+- name: 写入标准 redis.conf 配置
+  ansible.builtin.template:
+    src: redis.conf.j2
+    dest: /etc/redis/redis.conf
+    owner: redis
+    group: redis
+    mode: "0640"
+  notify: restart redis
+  tags:
+    - configure
+
+- name: 启动并设为开机自启
+  ansible.builtin.service:
+    name: redis-server
+    state: started
+    enabled: true
+  tags:
+    - start

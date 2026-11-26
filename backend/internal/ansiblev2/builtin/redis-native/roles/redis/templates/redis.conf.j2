@@ -1,0 +1,25 @@
+bind {{ redis_bind_address }}
+port {{ redis_port }}
+protected-mode yes
+dir {{ redis_data_dir }}
+maxmemory {{ redis_maxmemory }}
+maxmemory-policy {{ redis_maxmemory_policy }}
+{% if redis_persistence_mode == 'none' %}
+save ""
+appendonly no
+{% elif redis_persistence_mode == 'rdb' %}
+save 900 1
+save 300 10
+appendonly no
+{% else %}
+save ""
+appendonly yes
+{% endif %}
+{% if redis_password %}
+requirepass {{ redis_password }}
+masterauth {{ redis_password }}
+{% endif %}
+{% if inventory_hostname in (groups['replica'] | default([])) and (groups['primary'] | default([])) | length > 0 %}
+replicaof {{ hostvars[groups['primary'][0]]['ansible_host'] | default(groups['primary'][0]) }} {{ redis_port }}
+replica-read-only yes
+{% endif %}

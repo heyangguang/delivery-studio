@@ -580,6 +580,14 @@ var routePerms = []routePerm{
 	rp("W", `/api/components(/.*)?`, "component.edit"),
 	rp("GET", `/api/components(/.*)?`, ""),
 
+	rp("W", `/api/v2/ansible/inspect`, "component.import|component.edit"),
+	rp("W", `/api/v2/ansible/import`, "component.import"),
+	rp("W", `/api/v2/ansible/components/[^/]+/preview`, "delivery.create|component.edit"),
+	rp("W", `/api/v2/ansible/components/[^/]+/deliver`, "delivery.create"),
+	rp("DELETE", `/api/v2/ansible/components/[^/]+`, "component.publish|component.edit"),
+	rp("W", `/api/v2/ansible/components/[^/]+`, "component.edit"),
+	rp("GET", `/api/v2/ansible(/.*)?`, ""),
+
 	rp("GET", `/api/library/python(/.*)?`, ""),
 	rp("W", `/api/library/python(/.*)?`, "library.runtime"),
 	rp("GET", `/api/library/(index/export|export)`, "library.manage"),

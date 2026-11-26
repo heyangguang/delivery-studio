@@ -1,0 +1,28 @@
+---
+- name: 安装 Nginx 软件包
+  ansible.builtin.package:
+    name:
+      - nginx
+    state: present
+  tags:
+    - install
+
+- name: 写入标准 Nginx 主配置
+  ansible.builtin.template:
+    src: nginx.conf.j2
+    dest: /etc/nginx/nginx.conf
+    owner: root
+    group: root
+    mode: "0644"
+    validate: nginx -t -c %s
+  notify: reload nginx
+  tags:
+    - configure
+
+- name: 启动并设为开机自启
+  ansible.builtin.service:
+    name: nginx
+    state: started
+    enabled: true
+  tags:
+    - start

@@ -1,0 +1,11 @@
+---
+nginx_listen_address: "0.0.0.0"
+nginx_listen_port: 8080
+nginx_worker_processes: "auto"
+nginx_worker_connections: 4096
+nginx_proxy_mode: "http"
+nginx_upstream_servers:
+  - "127.0.0.1:5432"
+nginx_proxy_connect_timeout: "5s"
+nginx_proxy_read_timeout: "60s"
+nginx_enable_access_log: true

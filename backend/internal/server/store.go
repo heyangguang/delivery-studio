@@ -691,6 +691,8 @@ func (s *storeServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.writeJSON(w, 200, localizeCatalogEntries(wLang(w), s.plat.entriesWith(r.URL.Query().Get("fronts") == "1")))
 	case r.URL.Path == "/api/components" || strings.HasPrefix(r.URL.Path, "/api/components/"):
 		s.handleComponents(w, r, session)
+	case strings.HasPrefix(r.URL.Path, "/api/v2/ansible"):
+		s.handleAnsibleV2(w, r, session)
 	case r.URL.Path == "/api/library/python" || strings.HasPrefix(r.URL.Path, "/api/library/python/"):
 		s.handlePython(w, r, session)
 	case r.URL.Path == "/api/library" || strings.HasPrefix(r.URL.Path, "/api/library/"):

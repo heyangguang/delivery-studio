@@ -1,0 +1,49 @@
+schema: studio/v2
+name: nginx-native
+title: Nginx 负载均衡（原生 Ansible 2.0）
+title_en: Nginx Load Balancer (Native Ansible 2.0)
+category: 负载均衡
+version: "1.24"
+summary: 100% 标准 Ansible Role 驱动的 Nginx 四层/七层反向代理与负载均衡组件，脱离平台亦可直接 ansible-playbook 运行。
+summary_en: 100% standard Ansible Role-driven Nginx L4/L7 proxy & load balancer; runs natively with ansible-playbook standalone.
+icon: nginx
+color: green
+asset_kind: playbook_project
+delivery_modes:
+  - offline
+  - automatic
+entrypoints:
+  deploy: playbooks/deploy.yml
+  verify: playbooks/verify.yml
+  probe: playbooks/probe.yml
+groups:
+  - name: nginx
+    title: Nginx 负载均衡节点
+    title_en: Nginx LB Nodes
+    min: 1
+    max: 6
+    default_count: 2
+schemes:
+  - id: single
+    title: 单节点代理
+    title_en: Single Proxy
+    summary: 1 台 Nginx 节点，适用于开发测试或单点入口
+    group_counts:
+      nginx: 1
+    vars:
+      nginx_worker_connections: 2048
+  - id: ha
+    title: 双节点高可用
+    title_en: 2-Node HA
+    summary: 2 台 Nginx 负载均衡节点，面向生产双活/主备入口
+    group_counts:
+      nginx: 2
+    vars:
+      nginx_worker_connections: 8192
+ports:
+  - name: http
+    var: nginx_listen_port
+    protocol: tcp
+tags:
+  - 负载均衡
+  - 原生 Ansible

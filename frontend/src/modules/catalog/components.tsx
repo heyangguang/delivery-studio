@@ -43,6 +43,7 @@ import { ForkModal, NewComponentModal } from "./wbdialogs";
 import { ComponentPanes } from "./compview";
 import { registerStyles } from "../../design/glyphs";
 import { bi, canonicalCat, catLabel, useLang, withLang } from "../../app/i18n";
+import { AnsibleV2Studio, EngineSwitcher } from "./ansiblev2";
 
 type Entry = AppInfo & {
   source: "builtin" | "custom" | "override" | "draft";
@@ -199,6 +200,30 @@ export function ComponentsPage({
   const lang = useLang();
   const narrow = useMedia("(max-width: 900px)");
   const admin = can("component.edit");
+  const [engine, setEngine] = useState<"v2" | "v1">(() => {
+    if (selected) return "v1";
+    try {
+      const saved = window.sessionStorage.getItem("ds_components_engine");
+      if (saved === "v1" || saved === "v2") return saved;
+    } catch {
+      /* ignore storage errors */
+    }
+    return "v2";
+  });
+  useEffect(() => {
+    if (selected) setEngine("v1");
+  }, [selected]);
+  const switchEngine = (next: "v2" | "v1") => {
+    setEngine(next);
+    try {
+      window.sessionStorage.setItem("ds_components_engine", next);
+    } catch {
+      /* ignore */
+    }
+    if (next === "v2" && selected) {
+      go({ name: "components" }, { replace: true, instant: true });
+    }
+  };
   const [list, setList] = useState<Entry[]>(
     () => cached<Entry[]>("/api/components") ?? [],
   );
@@ -258,14 +283,15 @@ export function ComponentsPage({
 
   // Desktop always shows a detail; pick the first one when nothing is selected. Not something the user asked for, so no transition.
   useEffect(() => {
-    if (!narrow && !selected && load === "ready" && list.length)
+    if (engine === "v1" && !narrow && !selected && load === "ready" && list.length)
       go(
         { name: "components", id: list[0].id },
         { replace: true, instant: true },
       );
-  }, [narrow, selected, load, list.length]);
+  }, [engine, narrow, selected, load, list.length]);
 
   useEffect(() => {
+    if (engine !== "v1") return;
     const onKey = (e: KeyboardEvent) => {
       if (
         e.metaKey ||
@@ -296,12 +322,15 @@ export function ComponentsPage({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [shown, selected, narrow, list]);
+  }, [engine, shown, selected, narrow, list]);
 
   // on a wide screen the first component is drawn straight away; the address catches up without a second paint
   const shownId = selected || (!narrow ? list[0]?.id : undefined);
   const current = list.find((c) => c.id === shownId);
   const slowList = useDelayed(load === "loading");
+  if (engine === "v2") {
+    return <AnsibleV2Studio onSwitchEngine={switchEngine} />;
+  }
   return (
     <div className="md-split">
       {(!narrow || !selected) && (
@@ -335,6 +364,7 @@ export function ComponentsPage({
                 </span>
               )}
             </div>
+            <EngineSwitcher engine="v1" onChange={switchEngine} />
             <Input
               ref={(r) => {
                 search.current =

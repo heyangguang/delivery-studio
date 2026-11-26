@@ -1,0 +1,72 @@
+schema: studio/v2
+name: redis-native
+title: Redis 缓存集群（原生 Ansible 2.0）
+title_en: Redis Cluster (Native Ansible 2.0)
+category: 缓存
+version: "7.2"
+summary: 100% 标准 Ansible Playbook + Role 驱动的 Redis 单机与主从哨兵高可用组件，直接支持 ansible-playbook 独立部署与 --check 预演。
+summary_en: 100% standard Ansible Playbook + Role driven Redis standalone & Sentinel HA component; runs natively with ansible-playbook.
+icon: redis
+color: red
+asset_kind: playbook_project
+delivery_modes:
+  - offline
+  - automatic
+entrypoints:
+  deploy: playbooks/deploy.yml
+  verify: playbooks/verify.yml
+  probe: playbooks/probe.yml
+  cleanup: playbooks/cleanup.yml
+groups:
+  - name: primary
+    title: 主节点
+    title_en: Primary
+    min: 1
+    max: 1
+    default_count: 1
+    exclusive: true
+  - name: replica
+    title: 从节点
+    title_en: Replicas
+    min: 0
+    max: 4
+    default_count: 2
+    exclusive: true
+  - name: sentinel
+    title: 哨兵节点
+    title_en: Sentinels
+    min: 0
+    max: 5
+    default_count: 3
+schemes:
+  - id: single
+    title: 单节点缓存
+    title_en: Standalone
+    summary: 1 台 Redis 实例，无从库与哨兵，适合开发测试与轻量缓存
+    group_counts:
+      primary: 1
+      replica: 0
+      sentinel: 0
+    vars:
+      redis_maxmemory: "2gb"
+  - id: sentinel-ha
+    title: 一主二从三哨兵（自动故障切换）
+    title_en: 1P2R + 3 Sentinels HA
+    summary: 3 台节点同机部署哨兵多数派仲裁，主库故障自动选主
+    group_counts:
+      primary: 1
+      replica: 2
+      sentinel: 3
+    vars:
+      redis_maxmemory: "6gb"
+ports:
+  - name: redis
+    var: redis_port
+    protocol: tcp
+  - name: sentinel
+    var: redis_sentinel_port
+    protocol: tcp
+tags:
+  - 缓存
+  - 高可用
+  - 原生 Ansible

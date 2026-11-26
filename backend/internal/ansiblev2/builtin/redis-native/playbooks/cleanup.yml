@@ -1,0 +1,10 @@
+---
+- name: 清理 Redis 验收测试键（安全只删测试前缀）
+  hosts: primary
+  become: true
+  tags:
+    - cleanup
+  tasks:
+    - name: 清除测试前缀键
+      ansible.builtin.command: "redis-cli -p {{ redis_port }} {% if redis_password %}-a {{ redis_password }} --no-auth-warning{% endif %} DEL ds_smoke_test_key"
+      changed_when: false

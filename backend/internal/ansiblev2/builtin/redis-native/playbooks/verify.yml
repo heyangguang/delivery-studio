@@ -1,0 +1,17 @@
+---
+- name: 校验 Redis 服务连通性与主从复制状态
+  hosts: primary:replica
+  become: true
+  tags:
+    - verify
+  tasks:
+    - name: 执行 PING 连通性检查
+      ansible.builtin.command: "redis-cli -p {{ redis_port }} {% if redis_password %}-a {{ redis_password }} --no-auth-warning{% endif %} PING"
+      register: redis_ping
+      changed_when: false
+      failed_when: "'PONG' not in redis_ping.stdout"
+
+    - name: 核对主从复制角色
+      ansible.builtin.command: "redis-cli -p {{ redis_port }} {% if redis_password %}-a {{ redis_password }} --no-auth-warning{% endif %} INFO replication"
+      register: redis_repl
+      changed_when: false

@@ -1,0 +1,16 @@
+---
+- name: 校验 Nginx 配置语法、服务状态与端口监听
+  hosts: nginx
+  become: true
+  tags:
+    - verify
+  tasks:
+    - name: 校验 nginx.conf 语法
+      ansible.builtin.command: nginx -t
+      changed_when: false
+
+    - name: 核对监听端口就绪
+      ansible.builtin.wait_for:
+        host: "{{ nginx_listen_address | default('127.0.0.1') }}"
+        port: "{{ nginx_listen_port | default(8080) }}"
+        timeout: 15

@@ -1,0 +1,28 @@
+---
+- name: 部署 Redis 主节点与从节点
+  hosts: primary:replica
+  become: true
+  tags:
+    - redis
+  roles:
+    - role: redis
+
+- name: 部署并启动 Redis Sentinel 哨兵仲裁集群
+  hosts: sentinel
+  become: true
+  tags:
+    - sentinel
+  tasks:
+    - name: 写入 Sentinel 配置文件
+      ansible.builtin.template:
+        src: ../roles/redis/templates/sentinel.conf.j2
+        dest: /etc/redis/sentinel.conf
+        owner: redis
+        group: redis
+        mode: "0640"
+
+    - name: 启动并启用 redis-sentinel 服务
+      ansible.builtin.service:
+        name: redis-sentinel
+        state: started
+        enabled: true

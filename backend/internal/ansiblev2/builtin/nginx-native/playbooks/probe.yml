@@ -1,0 +1,26 @@
+---
+- name: 只读采集线上 Nginx 版本、服务与生效配置
+  hosts: nginx
+  become: true
+  gather_facts: true
+  tags:
+    - probe
+  tasks:
+    - name: 读取 Nginx 版本与编译参数
+      ansible.builtin.command: nginx -v
+      register: nginx_ver
+      changed_when: false
+
+    - name: 检查 systemd 服务状态
+      ansible.builtin.command: systemctl is-active nginx
+      register: nginx_active
+      changed_when: false
+      failed_when: false
+
+    - name: 输出只读探测摘要
+      ansible.builtin.debug:
+        msg:
+          host: "{{ inventory_hostname }}"
+          version: "{{ nginx_ver.stderr | default('') | trim }}"
+          service: "{{ nginx_active.stdout | default('unknown') | trim }}"
+          listen_port: "{{ nginx_listen_port | default(8080) }}"

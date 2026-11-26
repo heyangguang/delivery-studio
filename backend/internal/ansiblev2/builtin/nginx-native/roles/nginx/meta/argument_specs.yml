@@ -1,0 +1,43 @@
+---
+argument_specs:
+  main:
+    short_description: Deploy and configure Nginx L4/L7 proxy
+    options:
+      nginx_listen_address:
+        type: str
+        default: "0.0.0.0"
+        description: 监听网卡地址（默认 0.0.0.0）
+      nginx_listen_port:
+        type: int
+        required: true
+        default: 8080
+        description: 对外监听端口
+      nginx_worker_processes:
+        type: str
+        default: "auto"
+        description: Worker 进程数（推荐 auto）
+      nginx_worker_connections:
+        type: int
+        default: 4096
+        description: 单 Worker 最大并发连接数
+      nginx_proxy_mode:
+        type: str
+        default: "http"
+        choices: ["http", "stream"]
+        description: 转发模式：http（七层）或 stream（四层 TCP）
+      nginx_upstream_servers:
+        type: list
+        default: ["127.0.0.1:5432"]
+        description: 后端上游地址列表（IP:Port）
+      nginx_proxy_connect_timeout:
+        type: str
+        default: "5s"
+        description: 上游连接超时
+      nginx_proxy_read_timeout:
+        type: str
+        default: "60s"
+        description: 上游读写超时
+      nginx_enable_access_log:
+        type: bool
+        default: true
+        description: 是否开启访问日志

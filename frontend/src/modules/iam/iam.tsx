@@ -1453,6 +1453,9 @@ export function RolesPane({
   const [compare, setCompare] = useState(false);
   const [matrixMod, setMatrixMod] = useState<string>("all");
   const [onlyDiff, setOnlyDiff] = useState(false);
+  const [permModFilter, setPermModFilter] = useState<string>("all");
+  const [permQ, setPermQ] = useState("");
+  const [onlyGranted, setOnlyGranted] = useState(false);
   const [busy, setBusy] = useState(false);
   const roleBtnRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
@@ -1811,9 +1814,9 @@ export function RolesPane({
           </div>
         </div>
       ) : (
-        <div className="iam-role-split">
-          <aside
-            className="iam-role-list"
+        <div className="iam-role-stack">
+          <div
+            className="iam-role-cards-strip"
             role="listbox"
             aria-label={bi("角色列表", "Role list")}
           >
@@ -1834,13 +1837,13 @@ export function RolesPane({
                     setSel(r.id);
                   }}
                   onKeyDown={(e) => {
-                    if (e.key === "ArrowDown") {
+                    if (e.key === "ArrowRight" || e.key === "ArrowDown") {
                       e.preventDefault();
                       const next = Math.min(iam.roles.length - 1, idx + 1);
                       setDraft(null);
                       setSel(iam.roles[next].id);
                       roleBtnRefs.current[next]?.focus();
-                    } else if (e.key === "ArrowUp") {
+                    } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
                       e.preventDefault();
                       const prev = Math.max(0, idx - 1);
                       setDraft(null);
@@ -1851,16 +1854,18 @@ export function RolesPane({
                 >
                   <div className="iam-role-item-top">
                     <b>{roleTitle(r)}</b>
-                    {r.builtin && (
+                    {r.builtin ? (
                       <span className="iam-tag">{bi("内置", "Built-in")}</span>
+                    ) : (
+                      <span className="iam-tag">{bi("自定义", "Custom")}</span>
                     )}
                   </div>
                   <div className="iam-role-item-meta num">
                     <span>{scopeName(r.scope)}</span>
                     <span>
                       {bi(
-                        `${r.holders} 人 · ${r.perms.length} 项`,
-                        `${r.holders} u · ${r.perms.length} p`,
+                        `${r.holders} 人 · ${r.perms.length}/${iam.perms.length} 项`,
+                        `${r.holders} u · ${r.perms.length}/${iam.perms.length}`,
                       )}
                     </span>
                   </div>
@@ -1880,14 +1885,19 @@ export function RolesPane({
                 </div>
                 <div className="iam-role-item-meta">
                   <span>{scopeName(draft.scope)}</span>
-                  <span>{bi("尚未保存", "Unsaved")}</span>
+                  <span>
+                    {bi(
+                      `已选 ${draft.perms.length} 项`,
+                      `${draft.perms.length} selected`,
+                    )}
+                  </span>
                 </div>
               </button>
             )}
-          </aside>
+          </div>
 
           {cur && (
-            <section className="iam-role-detail">
+            <section className="iam-role-workbench">
               <div className="iam-role-ws-head">
                 {locked ? (
                   <div className="iam-role-ws-title">
@@ -1899,7 +1909,7 @@ export function RolesPane({
                         <span className="iam-ro-pill">
                           <IconLock />{" "}
                           {bi(
-                            "内置只读 · 可复制为新角色裁剪",
+                            "内置只读 · 复制为新角色即可按需裁剪",
                             "Built-in read-only · Duplicate to customize",
                           )}
                         </span>
@@ -1946,8 +1956,10 @@ export function RolesPane({
                   {editable && role && !draft && (
                     <Button
                       size="small"
+                      type={role.builtin ? "primary" : "secondary"}
                       icon={<IconCopy />}
-                      onClick={() =>
+                      onClick={() => {
+                        setOnlyGranted(false);
                         setDraft({
                           name: bi(
                             `${roleTitle(role)}（副本）`,
@@ -1956,8 +1968,8 @@ export function RolesPane({
                           desc: roleDesc(role) || "",
                           perms: role.perms,
                           scope: role.scope,
-                        })
-                      }
+                        });
+                      }}
                     >
                       {bi("复制为新角色", "Duplicate")}
                     </Button>
@@ -1972,12 +1984,36 @@ export function RolesPane({
                       {bi("删除", "Delete")}
                     </Button>
                   )}
+                  {dirty && (
+                    <>
+                      <Button size="small" onClick={() => setDraft(null)}>
+                        {bi("取消", "Cancel")}
+                      </Button>
+                      <Button
+                        size="small"
+                        type="primary"
+                        loading={busy}
+                        disabled={!draft!.name.trim()}
+                        onClick={save}
+                      >
+                        {draft!.id
+                          ? bi("保存角色", "Save Role")
+                          : bi("创建角色", "Create Role")}
+                      </Button>
+                    </>
+                  )}
                 </div>
               </div>
 
-              <div className="iam-cont-sec">
-                <div className="iam-cont-sec-h">
-                  <h2>{bi("默认数据可见范围", "Default Data Visibility")}</h2>
+              <div className="iam-role-wb-sec">
+                <div className="iam-role-wb-sec-h">
+                  <h3>{bi("默认数据可见范围", "Default Data Visibility")}</h3>
+                  <span className="faint small">
+                    {bi(
+                      "决定持有该角色的成员默认能看到哪些集群；跨集群例外可通过「集群权限」单独授予",
+                      "Controls which clusters holders can see by default",
+                    )}
+                  </span>
                 </div>
                 <div className="iam-scope-cards" role="radiogroup">
                   {SCOPES.map((s) => {
@@ -1991,14 +2027,23 @@ export function RolesPane({
                         role="radio"
                         aria-checked={active}
                         disabled={disabledScope}
-                        className={`iam-scope-card ${active ? "on" : ""}`}
+                        className={`iam-scope-card ${active ? "on" : ""} ${disabledScope ? "is-readonly" : ""}`}
                         onClick={() => {
                           if (!disabledScope) setDraft({ ...cur, scope: s.id });
                         }}
                       >
                         <div className="iam-scope-card-top">
-                          <span className="iam-scope-dot" aria-hidden />
-                          <b>{s.title}</b>
+                          <span className="iam-scope-card-title">
+                            {!disabledScope && (
+                              <span className="iam-scope-dot" aria-hidden />
+                            )}
+                            <b>{s.title}</b>
+                          </span>
+                          {disabledScope && active && (
+                            <span className="iam-scope-active-badge">
+                              <IconCheck /> {bi("当前生效", "Active")}
+                            </span>
+                          )}
                         </div>
                         <small>{s.hint}</small>
                       </button>
@@ -2007,69 +2052,288 @@ export function RolesPane({
                 </div>
               </div>
 
-              <div className="iam-cont-sec">
-                <div className="iam-cont-sec-h">
-                  <h2>{bi("功能模块权限", "Module Permissions")}</h2>
-                  <span className="num">
-                    {cur.perms.length} / {iam.perms.length}
-                  </span>
+              <div className="iam-role-wb-sec">
+                <div className="iam-role-wb-sec-h">
+                  <h3>
+                    <span>{bi("功能模块权限", "Module Permissions")}</span>
+                    <span className="iam-h-meta num">
+                      {bi(
+                        `已启用 ${cur.perms.length} / ${iam.perms.length} 项`,
+                        `${cur.perms.length} / ${iam.perms.length} enabled`,
+                      )}
+                    </span>
+                  </h3>
+
+                  <div className="iam-perm-filter-right">
+                    <Input
+                      size="small"
+                      allowClear
+                      style={{ width: 210 }}
+                      prefix={<IconSearch />}
+                      value={permQ}
+                      onChange={setPermQ}
+                      placeholder={bi("搜索权限名称或说明…", "Filter permissions…")}
+                    />
+                    {locked && (
+                      <span className="iam-lvl-seg" style={{ height: 28 }}>
+                        <button
+                          type="button"
+                          className={!onlyGranted ? "on is-op" : ""}
+                          onClick={() => setOnlyGranted(false)}
+                        >
+                          {bi(`全部 (${iam.perms.length})`, `All (${iam.perms.length})`)}
+                        </button>
+                        <button
+                          type="button"
+                          className={onlyGranted ? "on is-op" : ""}
+                          onClick={() => setOnlyGranted(true)}
+                        >
+                          {bi(
+                            `仅看已具备 (${cur.perms.length})`,
+                            `Granted (${cur.perms.length})`,
+                          )}
+                        </button>
+                      </span>
+                    )}
+                  </div>
                 </div>
 
-                <div className="iam-perm-sections">
-                  {permModules.map(([m, ps]) => {
-                    const n = ps.filter((p) => cur.perms.includes(p.id)).length;
-                    const allModChecked = n === ps.length;
-                    return (
-                      <div className="iam-perm-group" key={m}>
-                        <div
-                          className={`iam-perm-group-h ${locked ? "is-locked" : ""}`}
-                          onClick={() => {
-                            if (!locked)
-                              toggle(
-                                ps.map((p) => p.id),
-                                !allModChecked,
-                              );
-                          }}
+                <div className="iam-perm-filter-bar">
+                  <div className="iam-pills" role="tablist">
+                    <button
+                      type="button"
+                      className={`iam-pill ${permModFilter === "all" ? "on" : ""}`}
+                      onClick={() => setPermModFilter("all")}
+                    >
+                      {bi("全部模块", "All")}{" "}
+                      <em className="num">
+                        {cur.perms.length}/{iam.perms.length}
+                      </em>
+                    </button>
+                    {permModules.map(([m, ps]) => {
+                      const n = ps.filter((p) => cur.perms.includes(p.id)).length;
+                      return (
+                        <button
+                          key={m}
+                          type="button"
+                          className={`iam-pill ${permModFilter === m ? "on" : ""}`}
+                          onClick={() =>
+                            setPermModFilter(permModFilter === m ? "all" : m)
+                          }
                         >
-                          <Checkbox
-                            checked={allModChecked}
-                            indeterminate={n > 0 && n < ps.length}
-                            disabled={locked}
-                            onClick={(e) => e.stopPropagation()}
-                            onChange={(v) =>
-                              toggle(
-                                ps.map((p) => p.id),
-                                v,
-                              )
-                            }
-                          />
-                          <b>{permModule(m)}</b>
-                          <small className="num">
-                            {n} / {ps.length}
-                          </small>
-                        </div>
+                          {permModule(m)} <em className="num">{n}/{ps.length}</em>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
 
-                        {m === "AI" ? (
-                          <div className="iam-perm-ai-body">
-                            <div className="iam-perm-grid">
-                              {ps
-                                .filter((p) => !p.id.startsWith("ai.feat."))
-                                .map((p) => {
-                                  const checked = cur.perms.includes(p.id);
+                {(() => {
+                  const pkw = permQ.trim().toLowerCase();
+                  const matchPerm = (p: Perm) => {
+                    if (locked && onlyGranted && !cur.perms.includes(p.id)) {
+                      return false;
+                    }
+                    if (!pkw) return true;
+                    return (
+                      permTitle(p).toLowerCase().includes(pkw) ||
+                      permDesc(p).toLowerCase().includes(pkw) ||
+                      p.id.toLowerCase().includes(pkw)
+                    );
+                  };
+
+                  const visibleModules = permModules
+                    .filter(([m]) => permModFilter === "all" || m === permModFilter)
+                    .map(([m, ps]) => [m, ps.filter(matchPerm), ps] as const)
+                    .filter(([, shown]) => shown.length > 0);
+
+                  const renderPermControl = (
+                    checked: boolean,
+                    disabledCtrl: boolean,
+                    onToggle: (v: boolean) => void,
+                  ) =>
+                    disabledCtrl ? (
+                      <span
+                        className={`iam-perm-mark ${checked ? "is-yes" : "is-no"}`}
+                        aria-label={
+                          checked
+                            ? bi("已具备", "Granted")
+                            : bi("未具备", "Not granted")
+                        }
+                      >
+                        {checked ? <IconCheck /> : "—"}
+                      </span>
+                    ) : (
+                      <Checkbox
+                        checked={checked}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={onToggle}
+                      />
+                    );
+
+                  if (visibleModules.length === 0) {
+                    return (
+                      <div className="iam-inline-empty" style={{ padding: "20px 14px", textAlign: "center" }}>
+                        {bi("没有符合筛选条件的权限项", "No matching permissions")}
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="iam-perm-sections">
+                      {visibleModules.map(([m, shown, fullPs]) => {
+                        const n = fullPs.filter((p) => cur.perms.includes(p.id)).length;
+                        const allModChecked = n === fullPs.length;
+                        const countCls =
+                          n === fullPs.length
+                            ? "is-all"
+                            : n > 0
+                              ? "is-some"
+                              : "is-zero";
+                        return (
+                          <div className="iam-perm-group" key={m}>
+                            <div
+                              className={`iam-perm-group-h ${locked ? "is-locked" : ""}`}
+                              onClick={() => {
+                                if (!locked) {
+                                  toggle(
+                                    fullPs.map((p) => p.id),
+                                    !allModChecked,
+                                  );
+                                }
+                              }}
+                            >
+                              {!locked && (
+                                <Checkbox
+                                  checked={allModChecked}
+                                  indeterminate={n > 0 && n < fullPs.length}
+                                  onClick={(e) => e.stopPropagation()}
+                                  onChange={(v) =>
+                                    toggle(
+                                      fullPs.map((p) => p.id),
+                                      v,
+                                    )
+                                  }
+                                />
+                              )}
+                              <b>{permModule(m)}</b>
+                              <span className={`iam-perm-mod-count num ${countCls}`}>
+                                {n} / {fullPs.length}
+                              </span>
+                            </div>
+
+                            {m === "AI" ? (
+                              <div className="iam-perm-ai-body">
+                                {shown.some((p) => !p.id.startsWith("ai.feat.")) && (
+                                  <div className="iam-perm-grid">
+                                    {shown
+                                      .filter((p) => !p.id.startsWith("ai.feat."))
+                                      .map((p) => {
+                                        const checked = cur.perms.includes(p.id);
+                                        return (
+                                          <div
+                                            key={p.id}
+                                            className={`iam-perm-row ${checked ? "on" : "is-off"} ${locked ? "is-locked" : ""}`}
+                                            onClick={() => {
+                                              if (!locked) toggle([p.id], !checked);
+                                            }}
+                                          >
+                                            {renderPermControl(checked, locked, (v) =>
+                                              toggle([p.id], v),
+                                            )}
+                                            <span>
+                                              <b>{permTitle(p)}</b>
+                                              <small>{permDesc(p)}</small>
+                                            </span>
+                                          </div>
+                                        );
+                                      })}
+                                  </div>
+                                )}
+
+                                {(() => {
+                                  const subPerms = shown.filter((x) =>
+                                    x.id.startsWith("ai.feat."),
+                                  );
+                                  const allSubPerms = fullPs.filter((x) =>
+                                    x.id.startsWith("ai.feat."),
+                                  );
+                                  const useOn = cur.perms.includes("ai.use");
+                                  if (!subPerms.length) return null;
+                                  return (
+                                    <div
+                                      className={`iam-ai-sub-block ${!useOn ? "is-locked" : ""}`}
+                                    >
+                                      <div className="iam-ai-sub-bar">
+                                        <span>
+                                          {bi(
+                                            "细粒度 AI 场景权限",
+                                            "Granular AI Capabilities",
+                                          )}{" "}
+                                          <em className="num">
+                                            {
+                                              allSubPerms.filter((x) =>
+                                                cur.perms.includes(x.id),
+                                              ).length
+                                            }{" "}
+                                            / {allSubPerms.length}
+                                          </em>
+                                        </span>
+                                        {!useOn && !locked && (
+                                          <small>
+                                            {bi(
+                                              "请先勾选上方「使用 AI（总入口）」",
+                                              "Enable “Use AI (master gate)” above first",
+                                            )}
+                                          </small>
+                                        )}
+                                      </div>
+                                      <div className="iam-perm-grid">
+                                        {subPerms.map((sp) => {
+                                          const spOn = cur.perms.includes(sp.id);
+                                          const rowLocked = locked || !useOn;
+                                          return (
+                                            <div
+                                              key={sp.id}
+                                              className={`iam-perm-row ${spOn ? "on" : "is-off"} ${rowLocked ? "is-locked" : ""}`}
+                                              onClick={() => {
+                                                if (!rowLocked) {
+                                                  toggle([sp.id], !spOn);
+                                                }
+                                              }}
+                                            >
+                                              {renderPermControl(
+                                                spOn,
+                                                rowLocked,
+                                                (v) => toggle([sp.id], v),
+                                              )}
+                                              <span>
+                                                <b>{permTitle(sp)}</b>
+                                                <small>{permDesc(sp)}</small>
+                                              </span>
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
+                              </div>
+                            ) : (
+                              <div className="iam-perm-grid">
+                                {shown.map((p) => {
+                                  const pOn = cur.perms.includes(p.id);
                                   return (
                                     <div
                                       key={p.id}
-                                      className={`iam-perm-row ${checked ? "on" : ""} ${locked ? "is-locked" : ""}`}
+                                      className={`iam-perm-row ${pOn ? "on" : "is-off"} ${locked ? "is-locked" : ""}`}
                                       onClick={() => {
-                                        if (!locked) toggle([p.id], !checked);
+                                        if (!locked) toggle([p.id], !pOn);
                                       }}
                                     >
-                                      <Checkbox
-                                        checked={checked}
-                                        disabled={locked}
-                                        onClick={(e) => e.stopPropagation()}
-                                        onChange={(v) => toggle([p.id], v)}
-                                      />
+                                      {renderPermControl(pOn, locked, (v) =>
+                                        toggle([p.id], v),
+                                      )}
                                       <span>
                                         <b>{permTitle(p)}</b>
                                         <small>{permDesc(p)}</small>
@@ -2077,108 +2341,18 @@ export function RolesPane({
                                     </div>
                                   );
                                 })}
-                            </div>
-
-                            {(() => {
-                              const subPerms = ps.filter((x) =>
-                                x.id.startsWith("ai.feat."),
-                              );
-                              const useOn = cur.perms.includes("ai.use");
-                              if (!subPerms.length) return null;
-                              return (
-                                <div
-                                  className={`iam-ai-sub-block ${!useOn ? "is-locked" : ""}`}
-                                >
-                                  <div className="iam-ai-sub-bar">
-                                    <span>
-                                      {bi(
-                                        "细粒度 AI 场景权限",
-                                        "Granular AI Capabilities",
-                                      )}{" "}
-                                      <em className="num">
-                                        {
-                                          subPerms.filter((x) =>
-                                            cur.perms.includes(x.id),
-                                          ).length
-                                        }{" "}
-                                        / {subPerms.length}
-                                      </em>
-                                    </span>
-                                    {!useOn && (
-                                      <small>
-                                        {bi(
-                                          "请先勾选上方「使用 AI（总入口）」",
-                                          "Enable “Use AI (master gate)” above first",
-                                        )}
-                                      </small>
-                                    )}
-                                  </div>
-                                  <div className="iam-perm-grid">
-                                    {subPerms.map((sp) => {
-                                      const spOn = cur.perms.includes(sp.id);
-                                      return (
-                                        <div
-                                          key={sp.id}
-                                          className={`iam-perm-row ${spOn ? "on" : ""} ${locked || !useOn ? "is-locked" : ""}`}
-                                          onClick={() => {
-                                            if (!locked && useOn) {
-                                              toggle([sp.id], !spOn);
-                                            }
-                                          }}
-                                        >
-                                          <Checkbox
-                                            checked={spOn}
-                                            disabled={locked || !useOn}
-                                            onClick={(e) => e.stopPropagation()}
-                                            onChange={(v) => toggle([sp.id], v)}
-                                          />
-                                          <span>
-                                            <b>{permTitle(sp)}</b>
-                                            <small>{permDesc(sp)}</small>
-                                          </span>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                </div>
-                              );
-                            })()}
+                              </div>
+                            )}
                           </div>
-                        ) : (
-                          <div className="iam-perm-grid">
-                            {ps.map((p) => {
-                              const pOn = cur.perms.includes(p.id);
-                              return (
-                                <div
-                                  key={p.id}
-                                  className={`iam-perm-row ${pOn ? "on" : ""} ${locked ? "is-locked" : ""}`}
-                                  onClick={() => {
-                                    if (!locked) toggle([p.id], !pOn);
-                                  }}
-                                >
-                                  <Checkbox
-                                    checked={pOn}
-                                    disabled={locked}
-                                    onClick={(e) => e.stopPropagation()}
-                                    onChange={(v) => toggle([p.id], v)}
-                                  />
-                                  <span>
-                                    <b>{permTitle(p)}</b>
-                                    <small>{permDesc(p)}</small>
-                                  </span>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
               </div>
 
               {dirty && (
-                <div className="iam-float-save is-dirty">
+                <div className="iam-float-save is-dirty" style={{ margin: "0 20px 16px" }}>
                   <span className="iam-float-note">
                     {bi(
                       "仅可授出你自己已持有的功能权限与数据范围",

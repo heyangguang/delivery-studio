@@ -2120,8 +2120,281 @@
   }
 }
 
-/* ---- Cluster Target Hosts Coverage Strip & Onboarding Surface ---- */
+/* ---- Cluster Target Hosts Bar, Mutually-Exclusive Mode Cards & Node Direct Table ---- */
 
+.rha-target-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px 10px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+}
+
+.rha-target-lbl {
+  font-size: 12.5px;
+  font-weight: 630;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.rha-target-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  font-size: 12px;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.rha-target-chip code {
+  font-size: 11.5px;
+  color: var(--mute);
+  cursor: pointer;
+}
+
+.rha-target-chip code:hover {
+  color: var(--brand-ink);
+  text-decoration: underline;
+}
+
+.rha-mode-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.rha-mode-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.rha-mode-title h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 670;
+  color: var(--ink);
+}
+
+.rha-sub-hosts-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px 10px;
+  flex-wrap: wrap;
+  padding: 9px 14px;
+  background: var(--surface-2);
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--mute);
+}
+
+.rha-node-direct-ledger {
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.rha-nd-head,
+.rha-nd-row {
+  display: grid;
+  grid-template-columns: 180px 96px 148px 186px minmax(160px, 1fr) 136px;
+  align-items: stretch;
+  gap: 0;
+}
+
+.rha-nd-head > span,
+.rha-nd-row > div {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 13px;
+  border-right: 1px solid color-mix(in srgb, var(--line) 68%, transparent);
+  min-width: 0;
+}
+
+.rha-nd-head > span:last-child,
+.rha-nd-row > div:last-child {
+  border-right: 0;
+  justify-content: flex-end;
+}
+
+.rha-nd-head {
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line-strong);
+  font-size: 12px;
+  font-weight: 620;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.rha-nd-row {
+  border-bottom: 1px solid var(--line);
+  transition: background-color 0.12s ease;
+}
+
+.rha-nd-row:last-child {
+  border-bottom: 0;
+}
+
+.rha-nd-row:hover {
+  background: var(--hover);
+}
+
+@media (max-width: 920px) {
+  .rha-nd-head {
+    display: none;
+  }
+  .rha-nd-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding: 10px 12px;
+    gap: 6px 10px;
+  }
+  .rha-nd-row > div {
+    padding: 0;
+    border-right: 0;
+  }
+  .rha-nd-row > :nth-child(2),
+  .rha-nd-row > :nth-child(5) {
+    display: none;
+  }
+}
+
+/* EnrollAgentModal Cluster-Scoped Node Checklist & Step 2 Tabs */
+.eam-cluster-tag {
+  padding: 1px 8px;
+  border-radius: 6px;
+  background: var(--sunken);
+  border: 1px solid var(--line);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--brand-ink);
+}
+
+.eam-lead-note {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink-2);
+}
+
+.eam-node-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.eam-node-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.12s ease;
+}
+
+.eam-node-row:last-child {
+  border-bottom: 0;
+}
+
+.eam-node-row:hover:not(.is-done) {
+  background: var(--hover);
+}
+
+.eam-node-row.is-checked {
+  background: color-mix(in srgb, var(--brand-soft) 26%, var(--surface));
+}
+
+.eam-node-row.is-done {
+  cursor: default;
+  background: var(--surface-2);
+  opacity: 0.85;
+}
+
+.eam-node-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+
+.eam-node-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.eam-node-top b {
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--ink);
+}
+
+.eam-node-top code {
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.eam-node-sub {
+  font-size: 12px;
+  color: var(--mute);
+}
+
+.eam-enr-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 4px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--sunken);
+}
+
+.eam-enr-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--mute);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.eam-enr-tab code {
+  font-size: 11.5px;
+  opacity: 0.8;
+}
+
+.eam-enr-tab.on {
+  background: var(--surface-raised);
+  color: var(--ink);
+  box-shadow: var(--shadow-sm);
+}
+
+/* ---- Legacy Host Strip Cleanup ---- */
 .rha-hosts-card {
   border: 1px solid var(--line);
   border-radius: 12px;

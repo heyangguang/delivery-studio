@@ -39,6 +39,7 @@ import {
 import type { Account, ClusterAccessLevel } from "../../shared/shared";
 import { go } from "../../app/router";
 import { Kbd, UnderlineTabs } from "../../design/ui";
+import { ProTransfer, ProTransferItem } from "../../design/transfer";
 import { bi, biv, useLang } from "../../app/i18n";
 import "./iam.css";
 
@@ -581,7 +582,7 @@ function TriAccessSwitch({
   );
 }
 
-/** Dual-pane cluster transfer box shared by User GrantEditor, AddAccount, QuickGrantDrawer, and Team Drawer. */
+/** Equal-height ProTransfer cluster picker shared by User GrantEditor, AddAccount, QuickGrantDrawer, and Team Drawer. */
 export function ClusterGrantPicker({
   clusters,
   value,
@@ -598,11 +599,7 @@ export function ClusterGrantPicker({
   inherited?: Record<string, { level: ClusterAccessLevel; from: string[] }>;
 }) {
   useLang();
-  const [leftQ, setLeftQ] = useState("");
-  const [rightQ, setRightQ] = useState("");
   const [appFilter, setAppFilter] = useState("all");
-  const [leftSel, setLeftSel] = useState<Set<string>>(() => new Set());
-  const [rightSel, setRightSel] = useState<Set<string>>(() => new Set());
 
   const ownedClusters = useMemo(
     () => (ownedBy ? clusters.filter((c) => c.owner === ownedBy) : []),
@@ -612,9 +609,6 @@ export function ClusterGrantPicker({
     () => (ownedBy ? clusters.filter((c) => c.owner !== ownedBy) : clusters),
     [clusters, ownedBy],
   );
-
-  const lkw = leftQ.trim().toLowerCase();
-  const rkw = rightQ.trim().toLowerCase();
 
   const unassigned = useMemo(
     () => assignable.filter((c) => !value[c.id]),
@@ -633,23 +627,6 @@ export function ClusterGrantPicker({
     return Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
   }, [unassigned]);
 
-  const filteredLeft = useMemo(
-    () =>
-      unassigned.filter(
-        (c) =>
-          (appFilter === "all" || c.app_name === appFilter) &&
-          matchIAMClusterSearch(c, lkw),
-      ),
-    [unassigned, appFilter, lkw],
-  );
-  const filteredRight = useMemo(
-    () => granted.filter((c) => matchIAMClusterSearch(c, rkw)),
-    [granted, rkw],
-  );
-
-  const validLeftSel = filteredLeft.filter((c) => leftSel.has(c.id));
-  const validRightSel = filteredRight.filter((c) => rightSel.has(c.id));
-
   const setOne = (cid: string, nextLvl: "" | ClusterAccessLevel) => {
     const next = { ...value };
     if (!nextLvl) delete next[cid];
@@ -657,21 +634,112 @@ export function ClusterGrantPicker({
     onChange(next);
   };
 
-  const batchGrantLeft = (lvl: ClusterAccessLevel) => {
-    if (validLeftSel.length === 0) return;
+  const batchGrant = (keys: string[], lvl: ClusterAccessLevel) => {
+    if (!keys.length) return;
     const next = { ...value };
-    for (const c of validLeftSel) next[c.id] = lvl;
-    setLeftSel(new Set());
+    for (const cid of keys) next[cid] = lvl;
     onChange(next);
   };
 
-  const batchRevokeRight = () => {
-    if (validRightSel.length === 0) return;
+  const batchRevoke = (keys: string[]) => {
+    if (!keys.length) return;
     const next = { ...value };
-    for (const c of validRightSel) delete next[c.id];
-    setRightSel(new Set());
+    for (const cid of keys) delete next[cid];
     onChange(next);
   };
+
+  const buildClusterSub = (c: IAMCluster) => {
+    const ips = c.host_ips || [];
+    const inh = inherited?.[c.id];
+    const parts: string[] = [];
+    if (ips.length > 0) {
+      parts.push(
+        `IP: ${ips.slice(0, 2).join(", ")}${ips.length > 2 ? ` +${ips.length - 2}` : ""}`,
+      );
+    }
+    if (c.platform) parts.push(platformShort(c.platform));
+    parts.push(bi(`创建者 ${c.owner}`, `Owner ${c.owner}`));
+    if (inh) {
+      parts.push(
+        bi(
+          `团队继承 ${clusterLevelLabel(inh.level)}`,
+          `Team ${clusterLevelLabel(inh.level)}`,
+        ),
+      );
+    }
+    return parts.join(" · ");
+  };
+
+  const buildSearchText = (c: IAMCluster) =>
+    [
+      c.id,
+      c.app_name,
+      c.version,
+      c.owner,
+      c.platform || "",
+      platformShort(c.platform),
+      ...(c.host_ips || []),
+      ...(c.host_names || []),
+    ].join(" ");
+
+  const leftItems: ProTransferItem[] = unassigned
+    .filter((c) => appFilter === "all" || c.app_name === appFilter)
+    .map((c) => ({
+      key: c.id,
+      title: c.id,
+      monoTitle: true,
+      badge: `${c.app_name} ${c.version}`,
+      subtitle: buildClusterSub(c),
+      searchText: buildSearchText(c),
+      leftExtra: (
+        <span className="iam-tf-quick-grp">
+          <button
+            type="button"
+            className="iam-tf-qbtn"
+            onClick={() => setOne(c.id, "view")}
+          >
+            +{bi("只读", "View")}
+          </button>
+          <button
+            type="button"
+            className="iam-tf-qbtn is-op"
+            onClick={() => setOne(c.id, "operate")}
+          >
+            +{bi("运维", "Op")}
+          </button>
+        </span>
+      ),
+    }));
+
+  const rightItems: ProTransferItem[] = granted.map((c) => {
+    const lvl = value[c.id] || "view";
+    return {
+      key: c.id,
+      title: c.id,
+      monoTitle: true,
+      badge: `${c.app_name} ${c.version}`,
+      subtitle: buildClusterSub(c),
+      searchText: buildSearchText(c),
+      rightExtra: (
+        <span className="iam-lvl-seg">
+          <button
+            type="button"
+            className={lvl === "view" ? "on is-view" : ""}
+            onClick={() => setOne(c.id, "view")}
+          >
+            {bi("只读", "View")}
+          </button>
+          <button
+            type="button"
+            className={lvl === "operate" ? "on is-op" : ""}
+            onClick={() => setOne(c.id, "operate")}
+          >
+            {bi("运维", "Op")}
+          </button>
+        </span>
+      ),
+    };
+  });
 
   if (clusters.length === 0) {
     return (
@@ -749,280 +817,60 @@ export function ClusterGrantPicker({
           )}
         </div>
       ) : (
-        <div className="iam-transfer">
-          <div className="iam-tf-pane">
-            <div className="iam-tf-head">
-              <label className="iam-tf-head-chk">
-                <Checkbox
-                  checked={
-                    filteredLeft.length > 0 &&
-                    validLeftSel.length === filteredLeft.length
-                  }
-                  indeterminate={
-                    validLeftSel.length > 0 &&
-                    validLeftSel.length < filteredLeft.length
-                  }
-                  disabled={filteredLeft.length === 0}
-                  onChange={(chk) => {
-                    const next = new Set(leftSel);
-                    for (const c of filteredLeft) {
-                      if (chk) next.add(c.id);
-                      else next.delete(c.id);
-                    }
-                    setLeftSel(next);
-                  }}
-                />
-                <b>{bi("未授权集群", "Available Clusters")}</b>
-              </label>
-              <span className="iam-tf-cnt num">
-                {validLeftSel.length > 0
-                  ? `${validLeftSel.length} / ${unassigned.length}`
-                  : unassigned.length}
-              </span>
-            </div>
-            <div className="iam-tf-search">
-              <Input
-                size="small"
-                prefix={<IconSearch />}
-                allowClear
-                value={leftQ}
-                onChange={setLeftQ}
-                placeholder={bi(
-                  "搜索集群、节点 IP、系统或创建者…",
-                  "Search cluster, IP, OS, or owner…",
-                )}
-              />
-              {appOptions.length > 1 && (
+        <ProTransfer
+          height={310}
+          leftTitle={bi("未授权集群", "Available Clusters")}
+          rightTitle={bi("已授权集群", "Granted Clusters")}
+          leftItems={leftItems}
+          rightItems={rightItems}
+          leftPlaceholder={bi(
+            "空格组合检索：集群名、节点 IP、系统或创建者…",
+            "Multi-keyword search: cluster, IP, OS, owner…",
+          )}
+          rightPlaceholder={bi("筛选已授权集群…", "Filter granted clusters…")}
+          leftEmptyText={
+            unassigned.length === 0
+              ? bi("全部可分配集群均已授权", "All assignable clusters are granted")
+              : bi("没有匹配的未授权集群", "No matching clusters")
+          }
+          topBar={
+            appOptions.length > 1 ? (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", gap: 8 }}>
+                <span className="faint small">
+                  {bi("按中间件快速筛选未授权集群：", "Filter by middleware:")}
+                </span>
                 <Select
-                  size="small"
-                  style={{ width: 132, flexShrink: 0 }}
+                  size="mini"
+                  style={{ width: 156 }}
                   value={appFilter}
                   onChange={setAppFilter}
                   getPopupContainer={() => document.body}
                   triggerProps={{ autoFitPosition: true }}
                   options={[
-                    { value: "all", label: bi("全部组件", "All Apps") },
+                    { value: "all", label: bi("全部中间件", "All Apps") },
                     ...appOptions.map(([app, n]) => ({
                       value: app,
                       label: `${app} (${n})`,
                     })),
                   ]}
                 />
-              )}
-            </div>
-            <div className="iam-tf-list">
-              {filteredLeft.length === 0 ? (
-                <div className="iam-tf-empty">
-                  {unassigned.length === 0
-                    ? bi("全部可分配集群均已授权", "All assignable clusters are granted")
-                    : bi("没有匹配的未授权集群", "No matching clusters")}
-                </div>
-              ) : (
-                filteredLeft.map((c) => {
-                  const checked = leftSel.has(c.id);
-                  const inh = inherited?.[c.id];
-                  const ips = c.host_ips || [];
-                  return (
-                    <div
-                      key={c.id}
-                      className={`iam-tf-row ${checked ? "is-checked" : ""}`}
-                      onClick={() => {
-                        const next = new Set(leftSel);
-                        if (checked) next.delete(c.id);
-                        else next.add(c.id);
-                        setLeftSel(next);
-                      }}
-                    >
-                      <Checkbox checked={checked} />
-                      <div className="iam-tf-main">
-                        <div className="iam-tf-line1">
-                          <b className="iam-tf-id mono" title={c.id}>
-                            {c.id}
-                          </b>
-                          <span className="iam-app-pill">{c.app_name}</span>
-                        </div>
-                        <small className="iam-tf-sub">
-                          {ips.length > 0
-                            ? `IP: ${ips.slice(0, 2).join(", ")}${
-                                ips.length > 2 ? ` +${ips.length - 2}` : ""
-                              } · `
-                            : ""}
-                          {c.platform ? `${platformShort(c.platform)} · ` : ""}
-                          {bi(`创建者 ${c.owner}`, `Owner ${c.owner}`)}
-                          {inh
-                            ? bi(
-                                ` · 团队继承 ${clusterLevelLabel(inh.level)}`,
-                                ` · Team ${clusterLevelLabel(inh.level)}`,
-                              )
-                            : ""}
-                        </small>
-                      </div>
-                      <span
-                        className="iam-tf-quick-grp"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <button
-                          type="button"
-                          className="iam-tf-qbtn"
-                          title={bi("设为只读", "Grant Read-only")}
-                          onClick={() => setOne(c.id, "view")}
-                        >
-                          +{bi("只读", "View")}
-                        </button>
-                        <button
-                          type="button"
-                          className="iam-tf-qbtn is-op"
-                          title={bi("设为运维", "Grant Operate")}
-                          onClick={() => setOne(c.id, "operate")}
-                        >
-                          +{bi("运维", "Op")}
-                        </button>
-                      </span>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </div>
-
-          <div className="iam-tf-mid">
-            <Button
-              type="primary"
-              size="small"
-              disabled={validLeftSel.length === 0}
-              onClick={() => batchGrantLeft("operate")}
-            >
-              {bi("设为运维", "Operate")} <IconRight />
-            </Button>
-            <Button
-              type="secondary"
-              size="small"
-              disabled={validLeftSel.length === 0}
-              onClick={() => batchGrantLeft("view")}
-            >
-              {bi("设为只读", "Read-only")} <IconRight />
-            </Button>
-            <Button
-              size="small"
-              status="danger"
-              disabled={validRightSel.length === 0}
-              onClick={batchRevokeRight}
-            >
-              <IconLeft /> {bi("移除", "Remove")}
-            </Button>
-          </div>
-
-          <div className="iam-tf-pane is-target">
-            <div className="iam-tf-head">
-              <label className="iam-tf-head-chk">
-                <Checkbox
-                  checked={
-                    filteredRight.length > 0 &&
-                    validRightSel.length === filteredRight.length
-                  }
-                  indeterminate={
-                    validRightSel.length > 0 &&
-                    validRightSel.length < filteredRight.length
-                  }
-                  disabled={filteredRight.length === 0}
-                  onChange={(chk) => {
-                    const next = new Set(rightSel);
-                    for (const c of filteredRight) {
-                      if (chk) next.add(c.id);
-                      else next.delete(c.id);
-                    }
-                    setRightSel(next);
-                  }}
-                />
-                <b>{bi("已授权集群", "Granted Clusters")}</b>
-              </label>
-              <span className="iam-tf-cnt is-brand num">
-                {validRightSel.length > 0
-                  ? `${validRightSel.length} / ${granted.length}`
-                  : granted.length}
-              </span>
-            </div>
-            <div className="iam-tf-search">
-              <Input
-                size="small"
-                prefix={<IconSearch />}
-                allowClear
-                value={rightQ}
-                onChange={setRightQ}
-                placeholder={bi("筛选已授权集群…", "Filter granted clusters…")}
-              />
-            </div>
-            <div className="iam-tf-list">
-              {filteredRight.length === 0 ? (
-                <div className="iam-tf-empty">
-                  {granted.length === 0
-                    ? bi("从左侧勾选集群并分配「只读」或「运维」", "Select clusters from the left pane")
-                    : bi("没有匹配的已授权集群", "No matching clusters")}
-                </div>
-              ) : (
-                filteredRight.map((c) => {
-                  const checked = rightSel.has(c.id);
-                  const lvl = value[c.id] || "view";
-                  return (
-                    <div
-                      key={c.id}
-                      className={`iam-tf-row ${checked ? "is-checked" : ""}`}
-                      onClick={() => {
-                        const next = new Set(rightSel);
-                        if (checked) next.delete(c.id);
-                        else next.add(c.id);
-                        setRightSel(next);
-                      }}
-                    >
-                      <Checkbox checked={checked} />
-                      <div className="iam-tf-main">
-                        <div className="iam-tf-line1">
-                          <b className="iam-tf-id mono" title={c.id}>
-                            {c.id}
-                          </b>
-                          <span className="iam-app-pill">{c.app_name}</span>
-                        </div>
-                        <small className="iam-tf-sub">
-                          {bi(`创建者 ${c.owner}`, `Owner ${c.owner}`)}
-                        </small>
-                      </div>
-                      <span
-                        className="iam-lvl-seg"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <button
-                          type="button"
-                          className={lvl === "view" ? "on is-view" : ""}
-                          onClick={() => setOne(c.id, "view")}
-                        >
-                          {bi("只读", "View")}
-                        </button>
-                        <button
-                          type="button"
-                          className={lvl === "operate" ? "on is-op" : ""}
-                          onClick={() => setOne(c.id, "operate")}
-                        >
-                          {bi("运维", "Op")}
-                        </button>
-                      </span>
-                      <button
-                        type="button"
-                        className="iam-tf-rm"
-                        title={bi("移除授权", "Revoke")}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setOne(c.id, "");
-                        }}
-                      >
-                        <IconClose />
-                      </button>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </div>
-        </div>
+              </div>
+            ) : undefined
+          }
+          dualAddActions={[
+            {
+              label: bi("设为运维", "Operate"),
+              type: "primary",
+              onTrigger: (keys) => batchGrant(keys, "operate"),
+            },
+            {
+              label: bi("设为只读", "Read-only"),
+              type: "secondary",
+              onTrigger: (keys) => batchGrant(keys, "view"),
+            },
+          ]}
+          onRemove={batchRevoke}
+        />
       )}
     </div>
   );
@@ -4003,6 +3851,93 @@ export function ClustersAccessPane({
           const validDR = selectableRight.filter((it) => drawerRightSel.has(it.key));
           const drawerBusy = savingKey.startsWith(`${drawerCluster.id}:`);
 
+          const leftPtfItems: ProTransferItem[] = drawerUnassigned.map((it) => {
+            const allowed = canPickItem(it);
+            return {
+              key: it.key,
+              title: it.title,
+              avatarText:
+                it.kind === "user" ? it.title.slice(0, 1).toUpperCase() : undefined,
+              avatarIcon: it.kind === "team" ? <IconUserGroup /> : undefined,
+              avatarTeam: it.kind === "team",
+              tag:
+                it.kind === "team"
+                  ? { text: bi("团队", "Team"), tone: "ok" }
+                  : undefined,
+              subtitle: it.sub,
+              disabled: !allowed,
+              searchText: `${it.title} ${it.sub}`,
+              leftExtra: allowed ? (
+                <span className="iam-tf-quick-grp">
+                  <button
+                    type="button"
+                    className="iam-tf-qbtn"
+                    disabled={drawerBusy}
+                    onClick={() =>
+                      void applyDrawerTargets(drawerCluster, [it.key], "view")
+                    }
+                  >
+                    +{bi("只读", "View")}
+                  </button>
+                  <button
+                    type="button"
+                    className="iam-tf-qbtn is-op"
+                    disabled={drawerBusy}
+                    onClick={() =>
+                      void applyDrawerTargets(drawerCluster, [it.key], "operate")
+                    }
+                  >
+                    +{bi("运维", "Op")}
+                  </button>
+                </span>
+              ) : undefined,
+            };
+          });
+
+          const rightPtfItems: ProTransferItem[] = drawerGranted.map((it) => {
+            const allowed = canPickItem(it);
+            const lvl = it.level || "view";
+            return {
+              key: it.key,
+              title: it.title,
+              avatarText:
+                it.kind === "user" ? it.title.slice(0, 1).toUpperCase() : undefined,
+              avatarIcon: it.kind === "team" ? <IconUserGroup /> : undefined,
+              avatarTeam: it.kind === "team",
+              tag:
+                it.kind === "team"
+                  ? { text: bi("团队", "Team"), tone: "ok" }
+                  : undefined,
+              subtitle: it.sub,
+              disabled: !allowed,
+              searchText: `${it.title} ${it.sub}`,
+              rightExtra: (
+                <span className="iam-lvl-seg">
+                  <button
+                    type="button"
+                    disabled={!allowed || drawerBusy}
+                    className={lvl === "view" ? "on is-view" : ""}
+                    onClick={() =>
+                      void applyDrawerTargets(drawerCluster, [it.key], "view")
+                    }
+                  >
+                    {bi("只读", "View")}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!allowed || drawerBusy}
+                    className={lvl === "operate" ? "on is-op" : ""}
+                    onClick={() =>
+                      void applyDrawerTargets(drawerCluster, [it.key], "operate")
+                    }
+                  >
+                    {bi("运维", "Op")}
+                  </button>
+                </span>
+              ),
+            };
+          });
+
           return (
             <div className="iam-cl-drawer">
               <div className="iam-cl-drawer-meta">
@@ -4037,358 +3972,68 @@ export function ClustersAccessPane({
                 )}
               </div>
 
-              <div className="iam-drawer-kind-bar">
-                <div className="iam-kind-seg" role="tablist">
-                  {(
-                    [
-                      ["all", bi("全部对象", "All")],
-                      ["users", bi("平台成员", "Users")],
-                      ["teams", bi("协作团队", "Teams")],
-                    ] as const
-                  ).map(([k, lbl]) => (
-                    <button
-                      key={k}
-                      type="button"
-                      role="tab"
-                      aria-selected={drawerKind === k}
-                      className={drawerKind === k ? "on" : ""}
-                      onClick={() => setDrawerKind(k)}
-                    >
-                      {lbl}
-                    </button>
-                  ))}
-                </div>
-                <span className="faint small">
-                  {bi("穿梭或切换后实时保存生效", "Changes save automatically")}
-                </span>
-              </div>
-
-              <div className="iam-transfer">
-                <div className="iam-tf-pane">
-                  <div className="iam-tf-head">
-                    <label className="iam-tf-head-chk">
-                      <Checkbox
-                        checked={
-                          selectableLeft.length > 0 &&
-                          validDL.length === selectableLeft.length
-                        }
-                        indeterminate={
-                          validDL.length > 0 &&
-                          validDL.length < selectableLeft.length
-                        }
-                        disabled={drawerBusy || selectableLeft.length === 0}
-                        onChange={(chk) => {
-                          const next = new Set(drawerLeftSel);
-                          for (const it of selectableLeft) {
-                            if (chk) next.add(it.key);
-                            else next.delete(it.key);
-                          }
-                          setDrawerLeftSel(next);
-                        }}
-                      />
-                      <b>{bi("未授权成员与团队", "Unassigned")}</b>
-                    </label>
-                    <span className="iam-tf-cnt num">
-                      {validDL.length > 0
-                        ? `${validDL.length} / ${drawerUnassigned.length}`
-                        : drawerUnassigned.length}
+              <ProTransfer
+                height={336}
+                busy={drawerBusy}
+                leftTitle={bi("未授权成员与团队", "Unassigned")}
+                rightTitle={bi("已授权协作成员与团队", "Authorized")}
+                leftItems={leftPtfItems}
+                rightItems={rightPtfItems}
+                leftPlaceholder={bi("搜索成员姓名、角色或团队…", "Search user, role, or team…")}
+                rightPlaceholder={bi("筛选已授权成员或团队…", "Filter authorized…")}
+                leftEmptyText={bi(
+                  "暂无更多可分配的普通成员或团队",
+                  "No unassigned users or teams",
+                )}
+                rightEmptyText={bi(
+                  "从左侧勾选成员或团队，授予「只读」或「运维」",
+                  "Select users or teams from the left pane",
+                )}
+                topBar={
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", gap: 8, flexWrap: "wrap" }}>
+                    <div className="ptf-pills" role="tablist">
+                      {(
+                        [
+                          ["all", bi("全部对象", "All")],
+                          ["users", bi("平台成员", "Users")],
+                          ["teams", bi("协作团队", "Teams")],
+                        ] as const
+                      ).map(([k, lbl]) => (
+                        <button
+                          key={k}
+                          type="button"
+                          role="tab"
+                          aria-selected={drawerKind === k}
+                          className={`ptf-pill ${drawerKind === k ? "on" : ""}`}
+                          onClick={() => setDrawerKind(k)}
+                        >
+                          {lbl}
+                        </button>
+                      ))}
+                    </div>
+                    <span className="faint small">
+                      {bi("穿梭或切换后实时保存生效", "Changes save automatically")}
                     </span>
                   </div>
-                  <div className="iam-tf-search">
-                    <Input
-                      size="small"
-                      prefix={<IconSearch />}
-                      allowClear
-                      value={drawerLeftQ}
-                      onChange={setDrawerLeftQ}
-                      placeholder={bi("搜索成员姓名、角色或团队…", "Search user or team…")}
-                    />
-                  </div>
-                  <div className="iam-tf-list">
-                    {filteredDrawerLeft.length === 0 ? (
-                      <div className="iam-tf-empty">
-                        {drawerUnassigned.length === 0
-                          ? bi("暂无更多可分配的普通成员或团队", "No unassigned users or teams")
-                          : bi("没有匹配的未授权对象", "No matching items")}
-                      </div>
-                    ) : (
-                      filteredDrawerLeft.map((it) => {
-                        const allowed = canPickItem(it);
-                        const checked = drawerLeftSel.has(it.key);
-                        return (
-                          <div
-                            key={it.key}
-                            className={`iam-tf-row ${checked ? "is-checked" : ""}`}
-                            onClick={() => {
-                              if (!allowed || drawerBusy) return;
-                              const next = new Set(drawerLeftSel);
-                              if (checked) next.delete(it.key);
-                              else next.add(it.key);
-                              setDrawerLeftSel(next);
-                            }}
-                          >
-                            <Checkbox
-                              checked={checked}
-                              disabled={!allowed || drawerBusy}
-                            />
-                            <span
-                              className={`iam-mini-ava ${it.kind === "team" ? "is-team" : ""}`}
-                              aria-hidden
-                            >
-                              {it.kind === "team" ? (
-                                <IconUserGroup />
-                              ) : (
-                                it.title.slice(0, 1).toUpperCase()
-                              )}
-                            </span>
-                            <div className="iam-tf-main">
-                              <div className="iam-tf-line1">
-                                <b className="iam-tf-id">{it.title}</b>
-                                {it.kind === "team" && (
-                                  <span className="iam-chip is-team" style={{ height: 18, fontSize: 10.5, padding: "0 5px" }}>
-                                    {bi("团队", "Team")}
-                                  </span>
-                                )}
-                              </div>
-                              <small className="iam-tf-sub">{it.sub}</small>
-                            </div>
-                            {allowed && (
-                              <span
-                                className="iam-tf-quick-grp"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                <button
-                                  type="button"
-                                  className="iam-tf-qbtn"
-                                  disabled={drawerBusy}
-                                  onClick={() =>
-                                    void applyDrawerTargets(
-                                      drawerCluster,
-                                      [it.key],
-                                      "view",
-                                    )
-                                  }
-                                >
-                                  +{bi("只读", "View")}
-                                </button>
-                                <button
-                                  type="button"
-                                  className="iam-tf-qbtn is-op"
-                                  disabled={drawerBusy}
-                                  onClick={() =>
-                                    void applyDrawerTargets(
-                                      drawerCluster,
-                                      [it.key],
-                                      "operate",
-                                    )
-                                  }
-                                >
-                                  +{bi("运维", "Op")}
-                                </button>
-                              </span>
-                            )}
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
-
-                <div className="iam-tf-mid">
-                  <Button
-                    type="primary"
-                    size="small"
-                    disabled={drawerBusy || validDL.length === 0}
-                    loading={drawerBusy && validDL.length > 0}
-                    onClick={() =>
-                      void applyDrawerTargets(
-                        drawerCluster,
-                        validDL.map((x) => x.key),
-                        "operate",
-                      )
-                    }
-                  >
-                    {bi("设为运维", "Operate")} <IconRight />
-                  </Button>
-                  <Button
-                    type="secondary"
-                    size="small"
-                    disabled={drawerBusy || validDL.length === 0}
-                    loading={drawerBusy && validDL.length > 0}
-                    onClick={() =>
-                      void applyDrawerTargets(
-                        drawerCluster,
-                        validDL.map((x) => x.key),
-                        "view",
-                      )
-                    }
-                  >
-                    {bi("设为只读", "Read-only")} <IconRight />
-                  </Button>
-                  <Button
-                    size="small"
-                    status="danger"
-                    disabled={drawerBusy || validDR.length === 0}
-                    loading={drawerBusy && validDR.length > 0}
-                    onClick={() =>
-                      void applyDrawerTargets(
-                        drawerCluster,
-                        validDR.map((x) => x.key),
-                        "",
-                      )
-                    }
-                  >
-                    <IconLeft /> {bi("移除授权", "Revoke")}
-                  </Button>
-                </div>
-
-                <div className="iam-tf-pane is-target">
-                  <div className="iam-tf-head">
-                    <label className="iam-tf-head-chk">
-                      <Checkbox
-                        checked={
-                          selectableRight.length > 0 &&
-                          validDR.length === selectableRight.length
-                        }
-                        indeterminate={
-                          validDR.length > 0 &&
-                          validDR.length < selectableRight.length
-                        }
-                        disabled={drawerBusy || selectableRight.length === 0}
-                        onChange={(chk) => {
-                          const next = new Set(drawerRightSel);
-                          for (const it of selectableRight) {
-                            if (chk) next.add(it.key);
-                            else next.delete(it.key);
-                          }
-                          setDrawerRightSel(next);
-                        }}
-                      />
-                      <b>{bi("已授权协作成员与团队", "Authorized")}</b>
-                    </label>
-                    <span className="iam-tf-cnt is-brand num">
-                      {validDR.length > 0
-                        ? `${validDR.length} / ${drawerGranted.length}`
-                        : drawerGranted.length}
-                    </span>
-                  </div>
-                  <div className="iam-tf-search">
-                    <Input
-                      size="small"
-                      prefix={<IconSearch />}
-                      allowClear
-                      value={drawerRightQ}
-                      onChange={setDrawerRightQ}
-                      placeholder={bi("筛选已授权成员或团队…", "Filter authorized…")}
-                    />
-                  </div>
-                  <div className="iam-tf-list">
-                    {filteredDrawerRight.length === 0 ? (
-                      <div className="iam-tf-empty">
-                        {drawerGranted.length === 0
-                          ? bi("从左侧勾选成员或团队，一键授予「只读」或「运维」", "Select users or teams from the left pane")
-                          : bi("没有匹配的已授权对象", "No matching items")}
-                      </div>
-                    ) : (
-                      filteredDrawerRight.map((it) => {
-                        const allowed = canPickItem(it);
-                        const checked = drawerRightSel.has(it.key);
-                        const lvl = it.level || "view";
-                        return (
-                          <div
-                            key={it.key}
-                            className={`iam-tf-row ${checked ? "is-checked" : ""}`}
-                            onClick={() => {
-                              if (!allowed || drawerBusy) return;
-                              const next = new Set(drawerRightSel);
-                              if (checked) next.delete(it.key);
-                              else next.add(it.key);
-                              setDrawerRightSel(next);
-                            }}
-                          >
-                            <Checkbox
-                              checked={checked}
-                              disabled={!allowed || drawerBusy}
-                            />
-                            <span
-                              className={`iam-mini-ava ${it.kind === "team" ? "is-team" : ""}`}
-                              aria-hidden
-                            >
-                              {it.kind === "team" ? (
-                                <IconUserGroup />
-                              ) : (
-                                it.title.slice(0, 1).toUpperCase()
-                              )}
-                            </span>
-                            <div className="iam-tf-main">
-                              <div className="iam-tf-line1">
-                                <b className="iam-tf-id">{it.title}</b>
-                                {it.kind === "team" && (
-                                  <span className="iam-chip is-team" style={{ height: 18, fontSize: 10.5, padding: "0 5px" }}>
-                                    {bi("团队", "Team")}
-                                  </span>
-                                )}
-                              </div>
-                              <small className="iam-tf-sub">{it.sub}</small>
-                            </div>
-                            <span
-                              className="iam-lvl-seg"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              <button
-                                type="button"
-                                disabled={!allowed || drawerBusy}
-                                className={lvl === "view" ? "on is-view" : ""}
-                                onClick={() =>
-                                  void applyDrawerTargets(
-                                    drawerCluster,
-                                    [it.key],
-                                    "view",
-                                  )
-                                }
-                              >
-                                {bi("只读", "View")}
-                              </button>
-                              <button
-                                type="button"
-                                disabled={!allowed || drawerBusy}
-                                className={lvl === "operate" ? "on is-op" : ""}
-                                onClick={() =>
-                                  void applyDrawerTargets(
-                                    drawerCluster,
-                                    [it.key],
-                                    "operate",
-                                  )
-                                }
-                              >
-                                {bi("运维", "Op")}
-                              </button>
-                            </span>
-                            {allowed && (
-                              <button
-                                type="button"
-                                className="iam-tf-rm"
-                                disabled={drawerBusy}
-                                title={bi("移除授权", "Revoke")}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  void applyDrawerTargets(
-                                    drawerCluster,
-                                    [it.key],
-                                    "",
-                                  );
-                                }}
-                              >
-                                <IconClose />
-                              </button>
-                            )}
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
-              </div>
+                }
+                dualAddActions={[
+                  {
+                    label: bi("设为运维", "Operate"),
+                    type: "primary",
+                    onTrigger: (keys) =>
+                      void applyDrawerTargets(drawerCluster, keys, "operate"),
+                  },
+                  {
+                    label: bi("设为只读", "Read-only"),
+                    type: "secondary",
+                    onTrigger: (keys) =>
+                      void applyDrawerTargets(drawerCluster, keys, "view"),
+                  },
+                ]}
+                onRemove={(keys) =>
+                  void applyDrawerTargets(drawerCluster, keys, "")
+                }
+              />
 
               <div className="iam-tf-modal-foot">
                 <span className="faint small">

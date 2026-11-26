@@ -8,16 +8,11 @@ import {
   Select,
 } from "@arco-design/web-react";
 import {
-  IconArrowLeft,
-  IconArrowRight,
   IconCheck,
   IconCheckCircle,
-  IconClose,
   IconCopy,
   IconDownload,
   IconLoading,
-  IconPlus,
-  IconSearch,
   IconThunderbolt,
 } from "@arco-design/web-react/icon";
 import {
@@ -27,6 +22,7 @@ import {
   err,
   platformShort,
 } from "../../shared/shared";
+import { ProTransfer, ProTransferItem } from "../../design/transfer";
 import { bi, useLang, withLang } from "../../app/i18n";
 import {
   AgentClusterCatalogItem,
@@ -67,21 +63,42 @@ export const agentBundleSlug = (name: string, ip: string): string => {
   return base.slice(0, 36).replace(/[-.]+$/, "") || "agent";
 };
 
-function matchCatalogCluster(c: AgentClusterCatalogItem, kw: string): boolean {
-  if (!kw) return true;
-  if (
-    c.id.toLowerCase().includes(kw) ||
-    c.app_name.toLowerCase().includes(kw) ||
-    (c.version || "").toLowerCase().includes(kw) ||
-    (c.owner || "").toLowerCase().includes(kw) ||
-    (c.platform || "").toLowerCase().includes(kw) ||
-    platformShort(c.platform).toLowerCase().includes(kw)
-  ) {
-    return true;
+function buildClusterTransferItem(
+  c: AgentClusterCatalogItem,
+  trimmedAgentIP: string,
+): ProTransferItem {
+  const ips = c.host_ips || [];
+  const sameIP = Boolean(
+    trimmedAgentIP && ips.some((x) => x.trim() === trimmedAgentIP),
+  );
+  const plat = c.platform ? platformShort(c.platform) : "";
+  const subParts: string[] = [];
+  if (ips.length > 0) {
+    subParts.push(
+      `IP: ${ips.slice(0, 2).join(", ")}${ips.length > 2 ? ` +${ips.length - 2}` : ""}`,
+    );
   }
-  if (c.host_ips?.some((ip) => ip.toLowerCase().includes(kw))) return true;
-  if (c.host_names?.some((h) => h.toLowerCase().includes(kw))) return true;
-  return false;
+  if (plat) subParts.push(plat);
+  if (c.owner) subParts.push(c.owner);
+
+  return {
+    key: c.id,
+    title: c.id,
+    monoTitle: true,
+    badge: [c.app_name, c.version].filter(Boolean).join(" "),
+    tag: sameIP ? { text: bi("同机 IP", "Same IP"), tone: "ok" } : undefined,
+    subtitle: subParts.join(" · "),
+    searchText: [
+      c.id,
+      c.app_name,
+      c.version || "",
+      c.owner || "",
+      c.platform || "",
+      plat,
+      ...(c.host_ips || []),
+      ...(c.host_names || []),
+    ].join(" "),
+  };
 }
 
 export function EnrollAgentModal({
@@ -89,77 +106,121 @@ export function EnrollAgentModal({
   onClose,
   onEnrolled,
   defaultClusterId,
+  clusterMode = "cluster_hosts",
   defaultHostName,
   defaultHostIP,
   clusterHosts,
+  existingAgents,
   initialCatalog,
   initialBootstrap,
 }: {
   visible: boolean;
   onClose: () => void;
   onEnrolled?: (agent: UnifiedAgentView) => void;
+  /** When set, scopes enrollment strictly to THIS cluster (zero other-cluster clutter!) */
   defaultClusterId?: string;
+  /** Used when defaultClusterId is set: "cluster_hosts" lists this cluster's machines; "jumpbox" enrolls 1 jumpbox */
+  clusterMode?: "cluster_hosts" | "jumpbox";
   defaultHostName?: string;
   defaultHostIP?: string;
   clusterHosts?: ClusterAutomationHost[];
+  existingAgents?: UnifiedAgentView[];
   initialCatalog?: AgentClusterCatalogItem[];
   initialBootstrap?: AutomationBootstrapInfo | null;
 }) {
   useLang();
+  const isClusterScoped = Boolean(defaultClusterId);
+  const effectiveClusterMode: "cluster_hosts" | "jumpbox" =
+    isClusterScoped && (clusterHosts?.length || 0) > 0
+      ? clusterMode
+      : "jumpbox";
+
+  // Single-host / global fields
   const [name, setName] = useState("");
   const [ip, setIp] = useState("");
   const [selectedClusters, setSelectedClusters] = useState<string[]>([]);
+
+  // Cluster-hosts batch checklist (`cluster_hosts` mode)
+  const [checkedHostIPs, setCheckedHostIPs] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [allPlatformAgents, setAllPlatformAgents] = useState<UnifiedAgentView[]>(
+    existingAgents || [],
+  );
+
+  // Global catalog (only used when !isClusterScoped)
   const [catalog, setCatalog] = useState<AgentClusterCatalogItem[]>(
     initialCatalog || [],
   );
   const [bootInfo, setBootInfo] = useState<AutomationBootstrapInfo | null>(
     initialBootstrap || null,
   );
+  const [scopeFilter, setScopeFilter] = useState<"all" | "same_ip">("all");
+  const [appFilter, setAppFilter] = useState("all");
+
+  // Submission & Step 2 results (supports 1 or multiple enrolled cluster nodes!)
   const [submitBusy, setSubmitBusy] = useState(false);
-  const [enrollment, setEnrollment] = useState<UnifiedEnrollmentResp | null>(null);
-  const [liveOnline, setLiveOnline] = useState(false);
+  const [enrollments, setEnrollments] = useState<UnifiedEnrollmentResp[]>([]);
+  const [activeTabIdx, setActiveTabIdx] = useState(0);
+  const [onlineMap, setOnlineMap] = useState<Record<string, boolean>>({});
   const [hubURL, setHubURL] = useState("");
   const [includeCA, setIncludeCA] = useState(true);
   const [bundleBusy, setBundleBusy] = useState(false);
 
-  // Transfer box states
-  const [leftKw, setLeftKw] = useState("");
-  const [rightKw, setRightKw] = useState("");
-  const [scopeFilter, setScopeFilter] = useState<"all" | "same_ip">("all");
-  const [appFilter, setAppFilter] = useState("all");
-  const [leftChecked, setLeftChecked] = useState<Set<string>>(() => new Set());
-  const [rightChecked, setRightChecked] = useState<Set<string>>(() => new Set());
-
   useEffect(() => {
     if (!visible) return;
-    setEnrollment(null);
-    setLiveOnline(false);
-    setName(defaultHostName || clusterHosts?.[0]?.name || "");
-    setIp(defaultHostIP || clusterHosts?.[0]?.ip || "");
-    setSelectedClusters(defaultClusterId ? [defaultClusterId] : []);
-    setLeftKw("");
-    setRightKw("");
+    setEnrollments([]);
+    setActiveTabIdx(0);
+    setOnlineMap({});
     setScopeFilter("all");
     setAppFilter("all");
-    setLeftChecked(new Set());
-    setRightChecked(new Set());
 
-    if (initialCatalog && initialCatalog.length > 0) {
-      setCatalog(initialCatalog);
+    if (isClusterScoped) {
+      setSelectedClusters(defaultClusterId ? [defaultClusterId] : []);
+      if (effectiveClusterMode === "cluster_hosts" && clusterHosts?.length) {
+        const agList = existingAgents || [];
+        setAllPlatformAgents(agList);
+        // Pre-select all cluster hosts that aren't already bound to this cluster!
+        const nextChecked = new Set<string>();
+        for (const h of clusterHosts) {
+          const alreadyBound = agList.some(
+            (a) =>
+              a.ip.trim() === h.ip.trim() &&
+              a.clusters.includes(defaultClusterId!),
+          );
+          if (!alreadyBound) {
+            nextChecked.add(h.ip.trim());
+          }
+        }
+        if (defaultHostIP && nextChecked.has(defaultHostIP.trim())) {
+          setCheckedHostIPs(new Set([defaultHostIP.trim()]));
+        } else {
+          setCheckedHostIPs(nextChecked);
+        }
+      } else {
+        setName(defaultHostName || "");
+        setIp(defaultHostIP || "");
+      }
+    } else {
+      setName(defaultHostName || "");
+      setIp(defaultHostIP || "");
+      setSelectedClusters([]);
     }
+
+    if (initialCatalog?.length) setCatalog(initialCatalog);
     if (initialBootstrap) {
       setBootInfo(initialBootstrap);
-      const u =
+      setHubURL(
         initialBootstrap.suggested_urls?.[0] ||
-        initialBootstrap.origin ||
-        window.location.origin;
-      setHubURL(u);
+          initialBootstrap.origin ||
+          window.location.origin,
+      );
       setIncludeCA(Boolean(initialBootstrap.ca_available));
     }
 
-    // Always refresh catalog + bootstrap silently so standalone callers have full IP metadata
     void api<UnifiedAgentsListResp>("/api/executions/unified-agents")
       .then((res) => {
+        if (res.agents) setAllPlatformAgents(res.agents);
         if (res.cluster_catalog) setCatalog(res.cluster_catalog);
         if (res.bootstrap) {
           setBootInfo(res.bootstrap);
@@ -176,29 +237,40 @@ export function EnrollAgentModal({
 
   // Poll heartbeat while on Step 2
   useEffect(() => {
-    if (!visible || !enrollment) return;
+    if (!visible || enrollments.length === 0) return;
     const poll = () => {
       if (document.visibilityState !== "visible") return;
       void api<UnifiedAgentsListResp>("/api/executions/unified-agents")
         .then((res) => {
-          const hit = (res.agents || []).find((a) => a.id === enrollment.agent.id);
-          if (hit?.online) {
-            setLiveOnline(true);
-            onEnrolled?.(hit);
+          const nextOnline: Record<string, boolean> = {};
+          let latestHit: UnifiedAgentView | null = null;
+          for (const enr of enrollments) {
+            const hit = (res.agents || []).find((a) => a.id === enr.agent.id);
+            if (hit?.online) {
+              nextOnline[enr.agent.id] = true;
+              latestHit = hit;
+            }
           }
+          setOnlineMap((prev) => ({ ...prev, ...nextOnline }));
+          if (latestHit) onEnrolled?.(latestHit);
         })
         .catch(() => undefined);
     };
     const timer = window.setInterval(poll, 2500);
     return () => window.clearInterval(timer);
-  }, [visible, enrollment]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [visible, enrollments]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const agentByIP = useMemo(() => {
+    const m = new Map<string, UnifiedAgentView>();
+    for (const a of allPlatformAgents) {
+      if (!a.revoked) m.set(a.ip.trim(), a);
+    }
+    return m;
+  }, [allPlatformAgents]);
+
+  // Global transfer items (only when !isClusterScoped)
   const operableCatalog = useMemo(
     () => catalog.filter((c) => c.can_op),
-    [catalog],
-  );
-  const catalogById = useMemo(
-    () => new Map(catalog.map((c) => [c.id, c])),
     [catalog],
   );
   const selectedSet = useMemo(() => new Set(selectedClusters), [selectedClusters]);
@@ -208,23 +280,14 @@ export function EnrollAgentModal({
     () => operableCatalog.filter((c) => !selectedSet.has(c.id)),
     [operableCatalog, selectedSet],
   );
-  const sameIPUnbound = useMemo(
+  const sameIPUnboundCount = useMemo(
     () =>
       trimmedIP
         ? allUnbound.filter((c) => c.host_ips?.some((x) => x.trim() === trimmedIP))
-        : [],
+            .length
+        : 0,
     [allUnbound, trimmedIP],
   );
-  const totalSameIPOperable = useMemo(
-    () =>
-      trimmedIP
-        ? operableCatalog.filter((c) =>
-            c.host_ips?.some((x) => x.trim() === trimmedIP),
-          ).length
-        : 0,
-    [operableCatalog, trimmedIP],
-  );
-
   const appOptions = useMemo(() => {
     const counts = new Map<string, number>();
     for (const c of allUnbound) {
@@ -233,52 +296,117 @@ export function EnrollAgentModal({
     return Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
   }, [allUnbound]);
 
-  const lq = leftKw.trim().toLowerCase();
-  const filteredLeft = useMemo(
+  const leftTransferItems = useMemo<ProTransferItem[]>(
     () =>
-      allUnbound.filter((c) => {
-        if (
-          scopeFilter === "same_ip" &&
-          (!trimmedIP || !c.host_ips?.some((x) => x.trim() === trimmedIP))
-        ) {
-          return false;
+      allUnbound
+        .filter((c) => {
+          if (
+            scopeFilter === "same_ip" &&
+            (!trimmedIP || !c.host_ips?.some((x) => x.trim() === trimmedIP))
+          ) {
+            return false;
+          }
+          if (appFilter !== "all" && c.app_name !== appFilter) return false;
+          return true;
+        })
+        .map((c) => buildClusterTransferItem(c, trimmedIP)),
+    [allUnbound, scopeFilter, trimmedIP, appFilter],
+  );
+
+  const rightTransferItems = useMemo<ProTransferItem[]>(() => {
+    const byId = new Map(catalog.map((c) => [c.id, c]));
+    return selectedClusters.map((cid) => {
+      const c = byId.get(cid);
+      if (c) return buildClusterTransferItem(c, trimmedIP);
+      return { key: cid, title: cid, monoTitle: true, searchText: cid };
+    });
+  }, [selectedClusters, catalog, trimmedIP]);
+
+  const handleClusterHostsSubmit = async () => {
+    if (submitBusy || !defaultClusterId || !clusterHosts?.length) return;
+    const chosen = clusterHosts.filter((h) => checkedHostIPs.has(h.ip.trim()));
+    if (chosen.length === 0) {
+      Message.warning(bi("请至少勾选 1 台本集群机器", "Select at least 1 cluster host"));
+      return;
+    }
+    setSubmitBusy(true);
+    try {
+      const created: UnifiedEnrollmentResp[] = [];
+      let boundExistingCount = 0;
+      let lastAgent: UnifiedAgentView | null = null;
+
+      for (const h of chosen) {
+        const existing = agentByIP.get(h.ip.trim());
+        if (existing) {
+          if (!existing.clusters.includes(defaultClusterId)) {
+            const updated = await api<UnifiedAgentView>(
+              "/api/executions/unified-agents",
+              {
+                method: "PATCH",
+                body: JSON.stringify({
+                  id: existing.id,
+                  bind_clusters: [defaultClusterId],
+                }),
+              },
+            );
+            lastAgent = updated;
+            boundExistingCount++;
+          }
+        } else {
+          const res = await api<UnifiedEnrollmentResp>(
+            "/api/executions/unified-agents",
+            {
+              method: "POST",
+              body: JSON.stringify({
+                name: h.name || h.ip,
+                ip: h.ip.trim(),
+                clusters: [defaultClusterId],
+              }),
+            },
+          );
+          created.push(res);
+          lastAgent = res.agent;
         }
-        if (appFilter !== "all" && c.app_name !== appFilter) return false;
-        return matchCatalogCluster(c, lq);
-      }),
-    [allUnbound, scopeFilter, trimmedIP, appFilter, lq],
-  );
+      }
 
-  const rq = rightKw.trim().toLowerCase();
-  const filteredRight = useMemo(
-    () =>
-      selectedClusters.filter((cid) => {
-        if (!rq) return true;
-        const m = catalogById.get(cid);
-        return m ? matchCatalogCluster(m, rq) : cid.toLowerCase().includes(rq);
-      }),
-    [selectedClusters, catalogById, rq],
-  );
+      // Persist cluster automation transport preference as per-host ("agent")
+      await api(`/api/clusters/${encodeURIComponent(defaultClusterId)}/automation`, {
+        method: "PUT",
+        body: JSON.stringify({ enabled: true, transport: "agent" }),
+      }).catch(() => undefined);
 
-  const validLeftIds = filteredLeft
-    .filter((c) => leftChecked.has(c.id))
-    .map((c) => c.id);
-  const validRightIds = filteredRight.filter((cid) => rightChecked.has(cid));
+      if (lastAgent) onEnrolled?.(lastAgent);
 
-  const addClusters = (cids: string[]) => {
-    if (!cids.length) return;
-    setSelectedClusters((prev) => Array.from(new Set([...prev, ...cids])));
-    setLeftChecked(new Set());
+      if (created.length === 0) {
+        Message.success(
+          bi(
+            `已直接关联 ${boundExistingCount} 台已有机器 Agent`,
+            `Associated ${boundExistingCount} existing host Agent(s)`,
+          ),
+        );
+        onClose();
+        return;
+      }
+
+      const firstBoot = created[0].bootstrap || bootInfo;
+      if (firstBoot) {
+        setHubURL(
+          firstBoot.suggested_urls?.[0] ||
+            firstBoot.origin ||
+            window.location.origin,
+        );
+        setIncludeCA(Boolean(firstBoot.ca_available));
+      }
+      setEnrollments(created);
+      setActiveTabIdx(0);
+    } catch (e) {
+      err(e);
+    } finally {
+      setSubmitBusy(false);
+    }
   };
 
-  const removeClusters = (cids: string[]) => {
-    if (!cids.length) return;
-    const rm = new Set(cids);
-    setSelectedClusters((prev) => prev.filter((x) => !rm.has(x)));
-    setRightChecked(new Set());
-  };
-
-  const handleSubmit = async () => {
+  const handleSingleSubmit = async () => {
     if (submitBusy) return;
     const cleanName = name.trim();
     const cleanIP = ip.trim();
@@ -290,6 +418,9 @@ export function EnrollAgentModal({
     }
     setSubmitBusy(true);
     try {
+      const targetClusters = isClusterScoped
+        ? [defaultClusterId!]
+        : selectedClusters;
       const res = await api<UnifiedEnrollmentResp>(
         "/api/executions/unified-agents",
         {
@@ -297,11 +428,23 @@ export function EnrollAgentModal({
           body: JSON.stringify({
             name: cleanName,
             ip: cleanIP,
-            clusters: selectedClusters,
+            clusters: targetClusters,
           }),
         },
       );
-      setEnrollment(res);
+      if (isClusterScoped && defaultClusterId) {
+        await api(
+          `/api/clusters/${encodeURIComponent(defaultClusterId)}/automation`,
+          {
+            method: "PUT",
+            body: JSON.stringify({
+              enabled: true,
+              transport: "node",
+              node_id: res.agent.id,
+            }),
+          },
+        ).catch(() => undefined);
+      }
       const defURL =
         res.bootstrap?.suggested_urls?.[0] ||
         res.bootstrap?.origin ||
@@ -309,6 +452,8 @@ export function EnrollAgentModal({
         window.location.origin;
       setHubURL(defURL);
       setIncludeCA(Boolean(res.bootstrap?.ca_available ?? bootInfo?.ca_available));
+      setEnrollments([res]);
+      setActiveTabIdx(0);
       onEnrolled?.(res.agent);
     } catch (e) {
       err(e);
@@ -317,8 +462,10 @@ export function EnrollAgentModal({
     }
   };
 
-  const handleDownloadBundle = async () => {
-    if (!enrollment || bundleBusy) return;
+  const activeEnrollment = enrollments[activeTabIdx] || enrollments[0] || null;
+
+  const handleDownloadBundle = async (enr: UnifiedEnrollmentResp) => {
+    if (!enr || bundleBusy) return;
     setBundleBusy(true);
     try {
       const resp = await fetch(withLang("/api/executions/unified-agents/bundle"), {
@@ -329,8 +476,8 @@ export function EnrollAgentModal({
           "X-CSRF-Token": csrfToken(),
         },
         body: JSON.stringify({
-          agent_id: enrollment.agent.id,
-          token: enrollment.token,
+          agent_id: enr.agent.id,
+          token: enr.token,
           url: hubURL.trim(),
           include_ca: includeCA,
         }),
@@ -340,7 +487,7 @@ export function EnrollAgentModal({
         throw new Error(j.error || `HTTP ${resp.status}`);
       }
       const blob = await resp.blob();
-      const slug = agentBundleSlug(enrollment.agent.name, enrollment.agent.ip);
+      const slug = agentBundleSlug(enr.agent.name, enr.agent.ip);
       const fname = `ds-agent-${slug}.tar.gz`;
       const u = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -358,32 +505,53 @@ export function EnrollAgentModal({
     }
   };
 
-  const bundleSlug = enrollment
-    ? `ds-agent-${agentBundleSlug(enrollment.agent.name, enrollment.agent.ip)}`
+  const modalWidth = isClusterScoped
+    ? effectiveClusterMode === "jumpbox"
+      ? 560
+      : 640
+    : 840;
+
+  const hasStep2 = enrollments.length > 0;
+  const activeSlug = activeEnrollment
+    ? `ds-agent-${agentBundleSlug(activeEnrollment.agent.name, activeEnrollment.agent.ip)}`
     : "ds-agent";
-  const installCmd = `tar -xzf ${bundleSlug}.tar.gz && sudo bash ${bundleSlug}/install.sh`;
+  const installCmd = `tar -xzf ${activeSlug}.tar.gz && sudo bash ${activeSlug}/install.sh`;
+  const onlineTotal = enrollments.filter((e) => onlineMap[e.agent.id]).length;
 
   return (
     <Modal
       visible={visible}
       onCancel={onClose}
       footer={null}
-      style={{ width: 820, maxWidth: "96vw" }}
+      style={{ width: modalWidth, maxWidth: "96vw" }}
       title={
         <div className="eam-head">
           <span className="eam-head-title">
             <span className="eam-head-ic">
               <IconThunderbolt />
             </span>
-            <span>{bi("接入执行 Agent", "Enroll Execution Agent")}</span>
+            <span>
+              {isClusterScoped
+                ? effectiveClusterMode === "cluster_hosts"
+                  ? bi("安装本集群节点直连 Agent", "Install Cluster Node Agents")
+                  : bi("接入跳板机 / 控制机 Agent", "Enroll Jumpbox Agent")
+                : bi("接入执行 Agent", "Enroll Execution Agent")}
+            </span>
+            {defaultClusterId && (
+              <code className="eam-cluster-tag mono">{defaultClusterId}</code>
+            )}
           </span>
           <div className="eam-steps" aria-label={bi("接入步骤", "Steps")}>
-            <span className={`eam-step ${!enrollment ? "is-active" : "is-done"}`}>
-              <i>{enrollment ? <IconCheck /> : "1"}</i>
-              <span>{bi("登记机器与关联集群", "Host & Clusters")}</span>
+            <span className={`eam-step ${!hasStep2 ? "is-active" : "is-done"}`}>
+              <i>{hasStep2 ? <IconCheck /> : "1"}</i>
+              <span>
+                {isClusterScoped && effectiveClusterMode === "cluster_hosts"
+                  ? bi("确认本集群机器", "Select Nodes")
+                  : bi("登记机器信息", "Register Host")}
+              </span>
             </span>
             <span className="eam-step-line" />
-            <span className={`eam-step ${enrollment ? "is-active" : ""}`}>
+            <span className={`eam-step ${hasStep2 ? "is-active" : ""}`}>
               <i>2</i>
               <span>{bi("下载安装并连接", "Install & Connect")}</span>
             </span>
@@ -391,490 +559,397 @@ export function EnrollAgentModal({
         </div>
       }
     >
-      {!enrollment ? (
-        <div className="eam-body">
-          {clusterHosts && clusterHosts.length > 0 && (
-            <div className="eam-host-picks">
-              <span className="eam-sec-lbl">
-                {bi(
-                  "快捷填入本集群机器（也可手动输入跳板机 / 管理机 IP）：",
-                  "Quick-fill a cluster node (or enter a jumpbox IP manually):",
-                )}
-              </span>
-              <div className="eam-host-chips">
-                {clusterHosts.map((h) => {
-                  const active = ip.trim() === h.ip.trim();
-                  return (
-                    <button
-                      key={`${h.name}-${h.ip}`}
-                      type="button"
-                      className={`eam-host-chip ${active ? "on" : ""}`}
-                      onClick={() => {
-                        setName(h.name || h.ip);
-                        setIp(h.ip);
-                      }}
-                    >
-                      <b>{h.name}</b>
-                      <code className="mono">{h.ip}</code>
-                      {h.role && <em>{h.role}</em>}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
+      {!hasStep2 ? (
+        isClusterScoped && effectiveClusterMode === "cluster_hosts" ? (
+          /* ---- CLUSTER-SCOPED NODE CHECKLIST (ONLY THIS CLUSTER'S MACHINES!) ---- */
+          <div className="eam-body">
+            <p className="eam-lead-note">
+              {bi(
+                `以下为集群「${defaultClusterId}」的 ${clusterHosts?.length || 0} 台目标机器。勾选后将直接为这些机器签发免密直连 Agent 安装包并自动绑定本集群：`,
+                `Below are the ${clusterHosts?.length || 0} target nodes of cluster "${defaultClusterId}". Selected nodes will receive passwordless local Agent bundles bound automatically to this cluster:`,
+              )}
+            </p>
 
-          <div className="eam-id-card">
-            <label className="ua-field">
-              <span>{bi("Agent 名称", "Agent Name")}</span>
-              <Input
-                value={name}
-                onChange={setName}
-                placeholder={bi(
-                  "例如 prod-jumpbox-01 或 db-node-01",
-                  "e.g. prod-jumpbox-01 or db-node-01",
-                )}
-              />
-            </label>
-            <label className="ua-field">
-              <span>{bi("部署机器 IP 地址", "Machine IP Address")}</span>
-              <Input
-                value={ip}
-                onChange={setIp}
-                placeholder={bi(
-                  "输入部署该 Agent 的机器实际网卡 IP",
-                  "IP address of the host running this Agent",
-                )}
-              />
-            </label>
-            {totalSameIPOperable > 0 && (
-              <div className="eam-ip-match-bar">
-                <IconCheckCircle />
-                <span>
-                  {bi(
-                    `检测到 ${totalSameIPOperable} 个可运维集群包含节点 IP ${trimmedIP}，关联后自动走本机免密直连`,
-                    `${totalSameIPOperable} cluster(s) contain IP ${trimmedIP} and will use passwordless local execution`,
-                  )}
-                </span>
-                {sameIPUnbound.length > 0 && (
-                  <button
-                    type="button"
-                    className="iam-text-act"
-                    onClick={() => addClusters(sameIPUnbound.map((c) => c.id))}
+            <div className="eam-node-list">
+              {(clusterHosts || []).map((h) => {
+                const ipKey = h.ip.trim();
+                const existing = agentByIP.get(ipKey);
+                const alreadyBound = Boolean(
+                  existing &&
+                    defaultClusterId &&
+                    existing.clusters.includes(defaultClusterId),
+                );
+                const checked = checkedHostIPs.has(ipKey);
+
+                return (
+                  <div
+                    key={`${h.name}-${ipKey}`}
+                    className={`eam-node-row ${
+                      alreadyBound
+                        ? "is-done"
+                        : checked
+                          ? "is-checked"
+                          : ""
+                    }`}
+                    onClick={() => {
+                      if (alreadyBound || submitBusy) return;
+                      setCheckedHostIPs((prev) => {
+                        const next = new Set(prev);
+                        if (checked) next.delete(ipKey);
+                        else next.add(ipKey);
+                        return next;
+                      });
+                    }}
                   >
-                    {bi(
-                      `一键加入同机集群 (${sameIPUnbound.length})`,
-                      `Add Same-IP (${sameIPUnbound.length})`,
-                    )}
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-
-          {operableCatalog.length > 0 && (
-            <div className="eam-transfer-sec">
-              <div className="eam-sec-top">
-                <span className="eam-sec-lbl">
-                  {bi("关联集群范围（可选，随时可调整）", "Associated Clusters (Optional)")}
-                </span>
-                <span className="faint small">
-                  {bi(
-                    "支持按集群名、节点 IP、中间件、系统或创建者搜索",
-                    "Search by cluster, node IP, app, OS, or owner",
-                  )}
-                </span>
-              </div>
-
-              <div className="ds-transfer">
-                <div className="ds-tf-pane">
-                  <div className="ds-tf-head">
-                    <label className="ds-tf-head-chk">
-                      <Checkbox
-                        checked={
-                          filteredLeft.length > 0 &&
-                          validLeftIds.length === filteredLeft.length
-                        }
-                        indeterminate={
-                          validLeftIds.length > 0 &&
-                          validLeftIds.length < filteredLeft.length
-                        }
-                        disabled={filteredLeft.length === 0}
-                        onChange={(chk) => {
-                          const next = new Set(leftChecked);
-                          for (const c of filteredLeft) {
-                            if (chk) next.add(c.id);
-                            else next.delete(c.id);
-                          }
-                          setLeftChecked(next);
-                        }}
-                      />
-                      <b>{bi("可关联集群", "Available")}</b>
-                    </label>
-                    <span className="ds-tf-cnt num">
-                      {validLeftIds.length > 0
-                        ? `${validLeftIds.length} / ${filteredLeft.length}`
-                        : filteredLeft.length}
+                    <Checkbox
+                      checked={alreadyBound || checked}
+                      disabled={alreadyBound || submitBusy}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(v) => {
+                        setCheckedHostIPs((prev) => {
+                          const next = new Set(prev);
+                          if (v) next.add(ipKey);
+                          else next.delete(ipKey);
+                          return next;
+                        });
+                      }}
+                    />
+                    <div className="eam-node-info">
+                      <div className="eam-node-top">
+                        <b>{h.name}</b>
+                        <code className="mono">{ipKey}</code>
+                        {h.role && <span className="rha-host-role">{h.role}</span>}
+                      </div>
+                      <span className="eam-node-sub">
+                        {alreadyBound
+                          ? bi(
+                              `已关联 Agent「${existing?.name}」`,
+                              `Already associated ("${existing?.name}")`,
+                            )
+                          : existing
+                            ? bi(
+                                `平台已接入该 IP（${existing.name}），勾选后直接关联免重装`,
+                                `Existing Agent "${existing.name}" found — will associate directly`,
+                              )
+                            : bi(
+                                "将在该机器本机安装轻量 Agent（免 SSH 密码）",
+                                "Will generate local passwordless Agent installer",
+                              )}
+                      </span>
+                    </div>
+                    <span
+                      className={`ptf-tag ${
+                        alreadyBound
+                          ? "is-ok"
+                          : existing
+                            ? "is-cobalt"
+                            : "is-brand"
+                      }`}
+                    >
+                      {alreadyBound
+                        ? bi("已就绪", "Bound")
+                        : existing
+                          ? bi("直接复用", "Reuse")
+                          : bi("待新装", "New")}
                     </span>
                   </div>
+                );
+              })}
+            </div>
 
-                  {(sameIPUnbound.length > 0 || appOptions.length > 1) && (
-                    <div className="ds-tf-facets">
-                      <div className="ds-tf-scope-pills">
-                        <button
-                          type="button"
-                          className={`ds-tf-pill ${scopeFilter === "all" ? "on" : ""}`}
-                          onClick={() => setScopeFilter("all")}
-                        >
-                          {bi("全部", "All")} ({allUnbound.length})
-                        </button>
-                        {sameIPUnbound.length > 0 && (
+            <div className="eam-foot">
+              <Button onClick={onClose}>{bi("取消", "Cancel")}</Button>
+              <Button
+                type="primary"
+                loading={submitBusy}
+                disabled={checkedHostIPs.size === 0}
+                onClick={() => void handleClusterHostsSubmit()}
+              >
+                {bi(
+                  `下一步：配置所选 ${checkedHostIPs.size} 台机器`,
+                  `Next: Configure ${checkedHostIPs.size} Node(s)`,
+                )}
+              </Button>
+            </div>
+          </div>
+        ) : (
+          /* ---- JUMPBOX MODE (CLUSTER-SCOPED) OR GLOBAL ENROLLMENT ---- */
+          <div className="eam-body">
+            {isClusterScoped && (
+              <p className="eam-lead-note">
+                {bi(
+                  `在 1 台能通过 SSH / Ansible 访问「${defaultClusterId}」各节点的跳板机或管理机上部署 Agent，接入后自动关联至本集群。`,
+                  `Deploy one Agent on a jumpbox/management host with SSH access to "${defaultClusterId}" nodes.`,
+                )}
+              </p>
+            )}
+
+            <div className="eam-id-card">
+              <label className="ua-field">
+                <span>
+                  {isClusterScoped
+                    ? bi("跳板机 / 控制机名称", "Jumpbox Name")
+                    : bi("Agent 名称", "Agent Name")}
+                </span>
+                <Input
+                  value={name}
+                  onChange={setName}
+                  placeholder={
+                    isClusterScoped
+                      ? bi("例如 prod-jumpbox-01", "e.g. prod-jumpbox-01")
+                      : bi(
+                          "例如 prod-jumpbox-01 或 db-node-01",
+                          "e.g. prod-jumpbox-01 or db-node-01",
+                        )
+                  }
+                />
+              </label>
+              <label className="ua-field">
+                <span>{bi("部署机器 IP 地址", "Machine IP Address")}</span>
+                <Input
+                  value={ip}
+                  onChange={setIp}
+                  placeholder={bi(
+                    "输入部署该 Agent 的机器实际网卡 IP",
+                    "IP address of the host running this Agent",
+                  )}
+                />
+              </label>
+            </div>
+
+            {!isClusterScoped && operableCatalog.length > 0 && (
+              <div className="eam-transfer-sec">
+                <div className="eam-sec-top">
+                  <span className="eam-sec-lbl">
+                    {bi("初始关联集群（可选）", "Initial Cluster Associations (Optional)")}
+                  </span>
+                  <span className="faint small">
+                    {bi(
+                      "支持空格组合检索，如「pg 172.30 ubuntu」",
+                      "Multi-keyword search, e.g. 'pg 172.30'",
+                    )}
+                  </span>
+                </div>
+
+                <ProTransfer
+                  height={296}
+                  leftTitle={bi("可关联集群", "Available Clusters")}
+                  rightTitle={bi("初始关联集群", "Selected Clusters")}
+                  leftItems={leftTransferItems}
+                  rightItems={rightTransferItems}
+                  leftPlaceholder={bi(
+                    "搜索集群名、节点 IP、中间件、系统或创建者…",
+                    "Search cluster, node IP, app, OS, or owner…",
+                  )}
+                  rightEmptyText={bi(
+                    "可不选仅接入机器，后续随时在详情页关联",
+                    "Optional — you can also associate clusters later",
+                  )}
+                  topBar={
+                    sameIPUnboundCount > 0 || appOptions.length > 1 ? (
+                      <>
+                        <div className="ptf-pills">
                           <button
                             type="button"
-                            className={`ds-tf-pill is-match ${scopeFilter === "same_ip" ? "on" : ""}`}
-                            onClick={() => setScopeFilter("same_ip")}
+                            className={`ptf-pill ${scopeFilter === "all" ? "on" : ""}`}
+                            onClick={() => setScopeFilter("all")}
                           >
-                            {bi("同机 IP", "Same IP")} ({sameIPUnbound.length})
+                            {bi("全部", "All")} ({allUnbound.length})
                           </button>
+                          {sameIPUnboundCount > 0 && (
+                            <button
+                              type="button"
+                              className={`ptf-pill is-ok ${
+                                scopeFilter === "same_ip" ? "on" : ""
+                              }`}
+                              onClick={() => setScopeFilter("same_ip")}
+                            >
+                              {bi("同机 IP", "Same IP")} ({sameIPUnboundCount})
+                            </button>
+                          )}
+                        </div>
+                        {appOptions.length > 1 && (
+                          <Select
+                            size="mini"
+                            style={{ width: 146 }}
+                            value={appFilter}
+                            onChange={setAppFilter}
+                            getPopupContainer={() => document.body}
+                            triggerProps={{ autoFitPosition: true }}
+                            options={[
+                              { value: "all", label: bi("全部中间件", "All Apps") },
+                              ...appOptions.map(([app, n]) => ({
+                                value: app,
+                                label: `${app} (${n})`,
+                              })),
+                            ]}
+                          />
                         )}
-                      </div>
-                      {appOptions.length > 1 && (
-                        <Select
-                          size="mini"
-                          style={{ width: 132 }}
-                          value={appFilter}
-                          onChange={setAppFilter}
-                          getPopupContainer={() => document.body}
-                          triggerProps={{ autoFitPosition: true }}
-                          options={[
-                            { value: "all", label: bi("全部组件", "All Apps") },
-                            ...appOptions.map(([app, n]) => ({
-                              value: app,
-                              label: `${app} (${n})`,
-                            })),
-                          ]}
-                        />
-                      )}
-                    </div>
-                  )}
-
-                  <div className="ds-tf-search">
-                    <Input
-                      size="small"
-                      prefix={<IconSearch />}
-                      allowClear
-                      value={leftKw}
-                      onChange={setLeftKw}
-                      placeholder={bi(
-                        "搜索集群名、节点 IP、中间件或创建者…",
-                        "Search cluster, node IP, app, or owner…",
-                      )}
-                    />
-                  </div>
-
-                  <div className="ds-tf-list" style={{ height: 210 }}>
-                    {filteredLeft.length === 0 ? (
-                      <div className="ds-tf-empty">
-                        {allUnbound.length === 0
-                          ? bi("全部可运维集群已选入右侧", "All clusters selected")
-                          : bi("没有匹配的集群", "No matching clusters")}
-                      </div>
-                    ) : (
-                      filteredLeft.map((c) => {
-                        const checked = leftChecked.has(c.id);
-                        const ips = c.host_ips || [];
-                        const sameIP = Boolean(
-                          trimmedIP && ips.some((x) => x.trim() === trimmedIP),
-                        );
-                        return (
-                          <div
-                            key={c.id}
-                            className={`ds-tf-row ${checked ? "is-checked" : ""}`}
-                            onClick={() => {
-                              const next = new Set(leftChecked);
-                              if (checked) next.delete(c.id);
-                              else next.add(c.id);
-                              setLeftChecked(next);
-                            }}
-                          >
-                            <Checkbox checked={checked} />
-                            <div className="ds-tf-item-col">
-                              <div className="ds-tf-item-main">
-                                <span className="ds-tf-id mono" title={c.id}>
-                                  {c.id}
-                                </span>
-                                <span className="iam-app-pill">{c.app_name}</span>
-                                {sameIP && (
-                                  <span className="ua-path-badge is-local">
-                                    {bi("同机 IP", "Same IP")}
-                                  </span>
-                                )}
-                              </div>
-                              <div className="ds-tf-item-sub">
-                                {ips.length > 0 && (
-                                  <span>
-                                    IP: {ips.slice(0, 2).join(", ")}
-                                    {ips.length > 2 ? ` +${ips.length - 2}` : ""}
-                                  </span>
-                                )}
-                                {c.platform && (
-                                  <span>· {platformShort(c.platform)}</span>
-                                )}
-                                {c.owner && <span>· {c.owner}</span>}
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              className="ds-tf-quick-btn"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                addClusters([c.id]);
-                              }}
-                            >
-                              <IconPlus />
-                            </button>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
-
-                <div className="ds-tf-mid">
-                  <Button
-                    size="small"
-                    type="primary"
-                    disabled={validLeftIds.length === 0}
-                    onClick={() => addClusters(validLeftIds)}
-                  >
-                    <span>
-                      {validLeftIds.length > 0
-                        ? bi(`关联 (${validLeftIds.length})`, `Add (${validLeftIds.length})`)
-                        : bi("关联", "Add")}
-                    </span>
-                    <IconArrowRight />
-                  </Button>
-                  <Button
-                    size="small"
-                    type="secondary"
-                    disabled={validRightIds.length === 0}
-                    onClick={() => removeClusters(validRightIds)}
-                  >
-                    <IconArrowLeft />
-                    <span>
-                      {validRightIds.length > 0
-                        ? bi(`移除 (${validRightIds.length})`, `Remove (${validRightIds.length})`)
-                        : bi("移除", "Remove")}
-                    </span>
-                  </Button>
-                </div>
-
-                <div className="ds-tf-pane is-target">
-                  <div className="ds-tf-head">
-                    <label className="ds-tf-head-chk">
-                      <Checkbox
-                        checked={
-                          filteredRight.length > 0 &&
-                          validRightIds.length === filteredRight.length
-                        }
-                        indeterminate={
-                          validRightIds.length > 0 &&
-                          validRightIds.length < filteredRight.length
-                        }
-                        disabled={filteredRight.length === 0}
-                        onChange={(chk) => {
-                          const next = new Set(rightChecked);
-                          for (const cid of filteredRight) {
-                            if (chk) next.add(cid);
-                            else next.delete(cid);
-                          }
-                          setRightChecked(next);
-                        }}
-                      />
-                      <b>{bi("初始关联集群", "Selected")}</b>
-                    </label>
-                    <span className="ds-tf-cnt is-brand num">
-                      {selectedClusters.length}
-                    </span>
-                  </div>
-
-                  <div className="ds-tf-search">
-                    <Input
-                      size="small"
-                      prefix={<IconSearch />}
-                      allowClear
-                      value={rightKw}
-                      onChange={setRightKw}
-                      placeholder={bi("筛选已选集群…", "Filter selected…")}
-                    />
-                  </div>
-
-                  <div className="ds-tf-list" style={{ height: 249 }}>
-                    {filteredRight.length === 0 ? (
-                      <div className="ds-tf-empty">
-                        {selectedClusters.length === 0
-                          ? bi(
-                              "未选集群时仅接入机器，后续也可随时关联",
-                              "Optional — you can also associate clusters anytime later",
-                            )
-                          : bi("无匹配的已选集群", "No matching clusters")}
-                      </div>
-                    ) : (
-                      filteredRight.map((cid) => {
-                        const cMeta = catalogById.get(cid);
-                        const checked = rightChecked.has(cid);
-                        const ips = cMeta?.host_ips || [];
-                        return (
-                          <div
-                            key={cid}
-                            className={`ds-tf-row ${checked ? "is-checked" : ""}`}
-                            onClick={() => {
-                              const next = new Set(rightChecked);
-                              if (checked) next.delete(cid);
-                              else next.add(cid);
-                              setRightChecked(next);
-                            }}
-                          >
-                            <Checkbox checked={checked} />
-                            <div className="ds-tf-item-col">
-                              <div className="ds-tf-item-main">
-                                <span className="ds-tf-id mono">{cid}</span>
-                                {cMeta && (
-                                  <span className="iam-app-pill">
-                                    {cMeta.app_name}
-                                  </span>
-                                )}
-                              </div>
-                              {ips.length > 0 && (
-                                <div className="ds-tf-item-sub">
-                                  IP: {ips.slice(0, 2).join(", ")}
-                                  {ips.length > 2 ? ` +${ips.length - 2}` : ""}
-                                </div>
-                              )}
-                            </div>
-                            <button
-                              type="button"
-                              className="ds-tf-quick-btn is-rm"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                removeClusters([cid]);
-                              }}
-                            >
-                              <IconClose />
-                            </button>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
+                      </>
+                    ) : undefined
+                  }
+                  onAdd={(keys) =>
+                    setSelectedClusters((prev) =>
+                      Array.from(new Set([...prev, ...keys])),
+                    )
+                  }
+                  onRemove={(keys) => {
+                    const rm = new Set(keys);
+                    setSelectedClusters((prev) => prev.filter((k) => !rm.has(k)));
+                  }}
+                />
               </div>
-            </div>
-          )}
+            )}
 
-          <div className="eam-foot">
-            <Button onClick={onClose}>{bi("取消", "Cancel")}</Button>
-            <Button
-              type="primary"
-              loading={submitBusy}
-              onClick={() => void handleSubmit()}
-            >
-              {bi("下一步：生成安装包与命令", "Next: Generate Installer")}
-            </Button>
+            <div className="eam-foot">
+              <Button onClick={onClose}>{bi("取消", "Cancel")}</Button>
+              <Button
+                type="primary"
+                loading={submitBusy}
+                onClick={() => void handleSingleSubmit()}
+              >
+                {bi("下一步：生成安装包与命令", "Next: Generate Installer")}
+              </Button>
+            </div>
           </div>
-        </div>
+        )
       ) : (
+        /* ---- STEP 2: INSTALLER BUNDLE & LIVE CONNECTION TABS ---- */
         <div className="eam-body">
-          <div className={`ua-live-banner ${liveOnline ? "is-ok" : ""}`}>
-            {liveOnline ? <IconCheckCircle /> : <IconLoading />}
+          <div
+            className={`ua-live-banner ${
+              onlineTotal === enrollments.length ? "is-ok" : ""
+            }`}
+          >
+            {onlineTotal === enrollments.length ? (
+              <IconCheckCircle />
+            ) : (
+              <IconLoading />
+            )}
             <div>
               <b>
-                {liveOnline
+                {onlineTotal === enrollments.length
                   ? bi(
-                      "Agent 已成功连接上线并开始同步主机探针！",
-                      "Agent Connected & Syncing Host Telemetry!",
+                      enrollments.length > 1
+                        ? `全部 ${enrollments.length} 台机器 Agent 已成功连接上线！`
+                        : "Agent 已成功连接上线并同步主机探针！",
+                      "All enrolled Agent(s) connected & online!",
                     )
                   : bi(
-                      "等待目标机器执行安装脚本并上报首次心跳（自动刷新检测中）…",
-                      "Waiting for machine installation & first heartbeat…",
+                      enrollments.length > 1
+                        ? `正在等待机器执行安装脚本并上报首次心跳（已上线 ${onlineTotal} / ${enrollments.length} 台）…`
+                        : "等待目标机器执行安装脚本并上报首次心跳（自动检测中）…",
+                      "Waiting for installation & first heartbeat…",
                     )}
               </b>
-              <small className="mono">
-                {enrollment.agent.name} · {enrollment.agent.ip}
-                {enrollment.agent.clusters.length > 0
-                  ? bi(
-                      ` · 已关联 ${enrollment.agent.clusters.length} 个集群`,
-                      ` · ${enrollment.agent.clusters.length} cluster(s) associated`,
-                    )
-                  : ""}
-              </small>
-            </div>
-          </div>
-
-          <div className="eam-step2-grid">
-            <label className="ua-field">
-              <span>{bi("1. 确认 Agent 回连平台的 HTTPS 地址", "1. Platform Callback HTTPS URL")}</span>
-              <Input
-                value={hubURL}
-                onChange={setHubURL}
-                placeholder="https://192.168.1.10:8443"
-              />
-              {isLoopbackURL(hubURL) && (
-                <small className="warn">
+              {defaultClusterId && (
+                <small>
                   {bi(
-                    "127.0.0.1 仅限本机测试；远程机器请填写平台所在服务器可达 IP 地址。",
-                    "127.0.0.1 only works locally; use a reachable LAN IP for remote hosts.",
+                    `已自动绑定至集群「${defaultClusterId}」`,
+                    `Automatically associated with cluster "${defaultClusterId}"`,
                   )}
                 </small>
               )}
-            </label>
+            </div>
+          </div>
 
-            <div className="eam-dl-card">
-              <div>
-                <b>{bi("2. 下载自包含离线安装包", "2. Download Self-Contained Bundle")}</b>
-                <small>
-                  {bi(
-                    "内含 Linux 二进制、0600 专属凭证与 systemd 守护服务",
-                    "Includes binary, 0600 credentials & systemd unit",
+          {enrollments.length > 1 && (
+            <div className="eam-enr-tabs" role="tablist">
+              {enrollments.map((enr, idx) => {
+                const isOn = Boolean(onlineMap[enr.agent.id]);
+                return (
+                  <button
+                    key={enr.agent.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={activeTabIdx === idx}
+                    className={`eam-enr-tab ${activeTabIdx === idx ? "on" : ""}`}
+                    onClick={() => setActiveTabIdx(idx)}
+                  >
+                    <span
+                      className={`ptf-dot ${isOn ? "is-online" : "is-offline"}`}
+                    />
+                    <b>{enr.agent.name}</b>
+                    <code className="mono">{enr.agent.ip}</code>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {activeEnrollment && (
+            <>
+              <div className="eam-step2-grid">
+                <label className="ua-field">
+                  <span>
+                    {bi(
+                      "1. 确认 Agent 回连平台的 HTTPS 地址",
+                      "1. Platform Callback HTTPS URL",
+                    )}
+                  </span>
+                  <Input
+                    value={hubURL}
+                    onChange={setHubURL}
+                    placeholder="https://192.168.1.10:8443"
+                  />
+                  {isLoopbackURL(hubURL) && (
+                    <small className="warn">
+                      {bi(
+                        "127.0.0.1 仅限本机测试；远程机器请改为平台所在服务器可达 IP。",
+                        "127.0.0.1 only works locally; use a reachable LAN IP.",
+                      )}
+                    </small>
                   )}
-                </small>
-              </div>
-              <Button
-                type="primary"
-                icon={<IconDownload />}
-                loading={bundleBusy}
-                onClick={() => void handleDownloadBundle()}
-              >
-                {bi("下载 .tar.gz", "Download .tar.gz")}
-              </Button>
-            </div>
-          </div>
+                </label>
 
-          <div className="eam-cmd-box">
-            <div className="eam-cmd-head">
-              <span>
-                {bi(
-                  "3. 上传至机器任意目录后执行一键安装命令",
-                  "3. Upload to host and run one-line installer",
-                )}
-              </span>
-              <Button
-                size="mini"
-                type="secondary"
-                icon={<IconCopy />}
-                onClick={() =>
-                  copy(installCmd, bi("已复制安装命令", "Copied command"))
-                }
-              >
-                {bi("复制命令", "Copy")}
-              </Button>
-            </div>
-            <pre className="eam-cmd-pre mono">{installCmd}</pre>
-          </div>
+                <div className="eam-dl-card">
+                  <div>
+                    <b>
+                      {bi(
+                        `2. 下载 ${activeEnrollment.agent.name} 专属安装包`,
+                        `2. Download Bundle (${activeEnrollment.agent.name})`,
+                      )}
+                    </b>
+                    <small className="mono">{activeEnrollment.agent.ip}</small>
+                  </div>
+                  <Button
+                    type="primary"
+                    icon={<IconDownload />}
+                    loading={bundleBusy}
+                    onClick={() => void handleDownloadBundle(activeEnrollment)}
+                  >
+                    {bi("下载 .tar.gz", "Download .tar.gz")}
+                  </Button>
+                </div>
+              </div>
+
+              <div className="eam-cmd-box">
+                <div className="eam-cmd-head">
+                  <span>
+                    {bi(
+                      `3. 上传至 ${activeEnrollment.agent.ip} 后执行一键安装命令`,
+                      `3. Upload to ${activeEnrollment.agent.ip} and run installer`,
+                    )}
+                  </span>
+                  <Button
+                    size="mini"
+                    type="secondary"
+                    icon={<IconCopy />}
+                    onClick={() =>
+                      copy(installCmd, bi("已复制安装命令", "Copied command"))
+                    }
+                  >
+                    {bi("复制命令", "Copy")}
+                  </Button>
+                </div>
+                <pre className="eam-cmd-pre mono">{installCmd}</pre>
+              </div>
+            </>
+          )}
 
           <div className="eam-foot">
             <Button type="primary" onClick={onClose}>
-              {liveOnline
+              {onlineTotal === enrollments.length
                 ? bi("完成", "Done")
                 : bi("完成（后台继续等待上线）", "Close & Wait in Background")}
             </Button>

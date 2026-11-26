@@ -2,11 +2,11 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Button,
   Checkbox,
-  Drawer,
   Input,
   InputNumber,
   Message,
   Modal,
+  Popconfirm,
   Select,
   Skeleton,
 } from "@arco-design/web-react";
@@ -41,6 +41,7 @@ import {
   isRehearsalTaskTerminal,
 } from "./execution-types";
 import { EnrollAgentModal } from "./enroll-agent-modal";
+import { ProTransfer, ProTransferItem } from "../../design/transfer";
 import "./rehearsal-automation.css";
 
 export type ExecutionAgentChoice = {
@@ -776,7 +777,10 @@ function InPlaceEnrollButton({
 }
 
 /**
- * Clean Cluster Automation Panel (under Cluster Detail -> Automation tab).
+ * Clean, Mutually-Exclusive Cluster Automation Panel (under Cluster Detail -> Automation tab).
+ * A cluster operates in ONE chosen mode at a time:
+ *   - Mode A ("jumpbox"): Unified Controller / Jumpbox Agent schedules all cluster nodes via SSH/Ansible
+ *   - Mode B ("per_host"): Lightweight passwordless Direct Agents installed on each of this cluster's machines
  */
 export function ClusterAutomationPanel({
   clusterId,
@@ -798,39 +802,46 @@ export function ClusterAutomationPanel({
   const [busy, setBusy] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
   const [enrollOpen, setEnrollOpen] = useState(false);
+  const [enrollMode, setEnrollMode] = useState<"cluster_hosts" | "jumpbox">(
+    "cluster_hosts",
+  );
   const [enrollHostPrefill, setEnrollHostPrefill] = useState<{
     name?: string;
     ip?: string;
   }>({});
-  const [scopeFilter, setScopeFilter] = useState<"all" | "online" | "local">("all");
-  const [leftQ, setLeftQ] = useState("");
-  const [rightQ, setRightQ] = useState("");
-  const [leftChecked, setLeftChecked] = useState<Set<string>>(() => new Set());
-  const [rightChecked, setRightChecked] = useState<Set<string>>(() => new Set());
+  const [scopeFilter, setScopeFilter] = useState<"all" | "online">("all");
   const [checkModalOpen, setCheckModalOpen] = useState(false);
   const [checkBusy, setCheckBusy] = useState(false);
-  const [liveCheckTask, setLiveCheckTask] = useState<RehearsalExecTask | null>(null);
+  const [liveCheckTask, setLiveCheckTask] =
+    useState<RehearsalExecTask | null>(null);
 
-  const load = useCallback(async (silent = false) => {
-    if (!silent) setLoading(true);
-    try {
-      const res = await api<ClusterAutomationSummary>(
-        `/api/clusters/${encodeURIComponent(clusterId)}/automation`,
-      );
-      setSummary(res);
-      onChanged?.(res);
-    } catch (e) {
-      if (!silent) err(e);
-    } finally {
-      if (!silent) setLoading(false);
-    }
-  }, [clusterId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const load = useCallback(
+    async (silent = false) => {
+      if (!silent) setLoading(true);
+      try {
+        const res = await api<ClusterAutomationSummary>(
+          `/api/clusters/${encodeURIComponent(clusterId)}/automation`,
+        );
+        setSummary(res);
+        onChanged?.(res);
+      } catch (e) {
+        if (!silent) err(e);
+      } finally {
+        if (!silent) setLoading(false);
+      }
+    },
+    [clusterId], // eslint-disable-line react-hooks/exhaustive-deps
+  );
 
   useEffect(() => {
     void load(false);
   }, [load]);
 
-  const batchSetAgentsBound = async (agentIds: string[], bound: boolean) => {
+  const batchSetAgentsBound = async (
+    agentIds: string[],
+    bound: boolean,
+    setTransport?: "node" | "agent",
+  ) => {
     if (busy || agentIds.length === 0) return;
     setBusy(true);
     try {
@@ -844,8 +855,15 @@ export function ClusterAutomationPanel({
           ),
         });
       }
-      setLeftChecked(new Set());
-      setRightChecked(new Set());
+      if (setTransport) {
+        await api(
+          `/api/clusters/${encodeURIComponent(clusterId)}/automation`,
+          {
+            method: "PUT",
+            body: JSON.stringify({ enabled: true, transport: setTransport }),
+          },
+        ).catch(() => undefined);
+      }
       await load(true);
     } catch (e) {
       err(e);
@@ -887,53 +905,20 @@ export function ClusterAutomationPanel({
   }
 
   const clusterHosts = summary?.hosts || [];
+  const clusterIPSet = new Set(clusterHosts.map((h) => h.ip.trim()));
   const bound = summary?.unified_agents || [];
   const available = summary?.available_agents || [];
   const recent = summary?.recent_tasks || [];
-  const lkw = leftQ.trim().toLowerCase();
-  const rkw = rightQ.trim().toLowerCase();
 
-  const isLocalAgent = (a: UnifiedAgentView) =>
-    a.backing === "direct" ||
-    Boolean(clusterHosts.some((h) => h.ip.trim() === a.ip.trim()));
+  // Determine the single active mode when bound.length > 0 (zero mixing / contradiction!)
+  const isPerHostDirectMode =
+    bound.length > 0 &&
+    (summary?.config?.transport === "agent" ||
+      bound.some((a) => a.backing === "direct") ||
+      (bound.length > 1 && bound.every((a) => clusterIPSet.has(a.ip.trim()))));
 
-  const matchAgent = (a: UnifiedAgentView, kw: string) => {
-    if (!kw) return true;
-    return (
-      a.name.toLowerCase().includes(kw) ||
-      a.ip.toLowerCase().includes(kw) ||
-      (a.probe?.hostname || "").toLowerCase().includes(kw) ||
-      (a.probe?.os || "").toLowerCase().includes(kw)
-    );
-  };
-
-  const filteredAvailable = available.filter((a) => {
-    if (scopeFilter === "online" && (a.disabled || !a.online)) return false;
-    if (scopeFilter === "local" && !isLocalAgent(a)) return false;
-    return matchAgent(a, lkw);
-  });
-  const filteredBound = bound.filter((a) => matchAgent(a, rkw));
-  const validLeftChecked = filteredAvailable.filter((a) => leftChecked.has(a.id));
-  const validRightChecked = filteredBound.filter((a) => rightChecked.has(a.id));
-  const localAvail = available.filter((a) => isLocalAgent(a));
-  const localAvailCount = localAvail.length;
-  const onlineAvailCount = available.filter((a) => a.online && !a.disabled).length;
-
-  const onlineJumpbox = bound.find(
-    (a) => !a.disabled && a.online && a.backing !== "direct" && !clusterHosts.some((h) => h.ip.trim() === a.ip.trim()),
-  );
-  const onlineSameHostFallback = bound.find(
-    (a) => !a.disabled && a.online && a.backing !== "direct",
-  );
-
-  const readyHostCount = clusterHosts.filter((h) => {
-    const directHit = bound.some(
-      (a) => !a.disabled && a.online && a.ip.trim() === h.ip.trim(),
-    );
-    return directHit || Boolean(onlineJumpbox || onlineSameHostFallback);
-  }).length;
-
-  const fmtAgentProbe = (a: UnifiedAgentView) => {
+  const fmtAgentProbe = (a?: UnifiedAgentView) => {
+    if (!a) return "";
     const parts: string[] = [];
     if (a.probe?.os) parts.push(a.probe.os);
     else if (a.probe?.hostname) parts.push(a.probe.hostname);
@@ -943,208 +928,113 @@ export function ClusterAutomationPanel({
     return parts.join(" · ");
   };
 
-  const openEnrollInPlace = (host?: { name?: string; ip?: string }) => {
+  const onlineAvailCount = available.filter(
+    (a) => a.online && !a.disabled,
+  ).length;
+
+  const makeAgentTransferItem = (a: UnifiedAgentView): ProTransferItem => {
+    const sub = fmtAgentProbe(a);
+    return {
+      key: a.id,
+      title: a.name,
+      badge: a.ip,
+      statusDot: a.disabled
+        ? "disabled"
+        : a.online
+          ? "online"
+          : "offline",
+      subtitle:
+        sub ||
+        (a.online ? bi("在线就绪", "Online") : bi("离线", "Offline")),
+      searchText: [
+        a.name,
+        a.ip,
+        a.probe?.hostname || "",
+        a.probe?.os || "",
+      ].join(" "),
+    };
+  };
+
+  const leftTransferAgents = available
+    .filter((a) => (scopeFilter === "online" ? a.online && !a.disabled : true))
+    .map(makeAgentTransferItem);
+  const rightTransferAgents = bound.map(makeAgentTransferItem);
+
+  const openEnrollModalWith = (
+    mode: "cluster_hosts" | "jumpbox",
+    host?: { name?: string; ip?: string },
+  ) => {
+    setEnrollMode(mode);
     setEnrollHostPrefill(host || {});
     setEnrollOpen(true);
   };
 
+  const boundHostCount = clusterHosts.filter((h) =>
+    bound.some((a) => a.ip.trim() === h.ip.trim()),
+  ).length;
+  const missingHostCount = Math.max(0, clusterHosts.length - boundHostCount);
+  const primaryController =
+    bound.find((a) => a.online && !a.disabled) || bound[0] || null;
+
   return (
     <div className="rha-clean-panel">
-      {clusterHosts.length > 0 && (
-        <section className="rha-hosts-card">
-          <div className="rha-hosts-head">
-            <span className="rha-hosts-title">
-              <span>{bi("集群目标机器与自动化覆盖", "Cluster Target Nodes & Coverage")}</span>
-              <span
-                className={`rha-cov-pill num ${
-                  readyHostCount === clusterHosts.length
-                    ? "is-ok"
-                    : readyHostCount > 0
-                      ? "is-warn"
-                      : ""
-                }`}
-              >
+      {bound.length === 0 ? (
+        /* ==================== STATE 0: CHOOSE ONE EXECUTION MODE ==================== */
+        <section className="ua-sec">
+          <div className="ua-sec-head">
+            <div>
+              <h2>{bi("配置集群自动化执行方式", "Configure Cluster Automation")}</h2>
+              <p className="faint small">
                 {bi(
-                  `${readyHostCount} / ${clusterHosts.length} 台就绪`,
-                  `${readyHostCount} / ${clusterHosts.length} ready`,
+                  "请为当前集群选择一种执行模式（跳板机统一代管 或 集群机器本机直连），避免多模式混用。",
+                  "Choose one execution mode for this cluster (Jumpbox Controller or Per-Node Direct Agents).",
+                )}
+              </p>
+            </div>
+          </div>
+
+          {clusterHosts.length > 0 && (
+            <div className="rha-target-strip">
+              <span className="rha-target-lbl">
+                {bi(
+                  `本集群目标机器 (${clusterHosts.length} 台)：`,
+                  `Cluster Target Nodes (${clusterHosts.length}):`,
                 )}
               </span>
-            </span>
-            <span className="faint small">
-              {bi(
-                "支持在业务机本机部署免密直连 Agent，或关联 1 台跳板机 Agent 统一调度全集群节点",
-                "Deploy local passwordless Agents on hosts, or associate one jumpbox Agent for all nodes",
-              )}
-            </span>
-          </div>
-          <div className="rha-hosts-grid">
-            {clusterHosts.map((h) => {
-              const directOnline = bound.find(
-                (a) => !a.disabled && a.online && a.ip.trim() === h.ip.trim(),
-              );
-              const directOffline = bound.find(
-                (a) => (a.disabled || !a.online) && a.ip.trim() === h.ip.trim(),
-              );
-              const jumpCover = onlineJumpbox || onlineSameHostFallback;
-              const unboundSameIP = available.find(
-                (a) => a.ip.trim() === h.ip.trim(),
-              );
-              return (
-                <div key={`${h.name}-${h.ip}`} className="rha-host-tile">
-                  <div className="rha-host-meta">
-                    <div className="rha-host-line1">
-                      <b title={h.name}>{h.name}</b>
-                      {h.role && <span className="rha-host-role">{h.role}</span>}
-                    </div>
-                    <code
-                      className="rha-host-ip mono"
-                      title={bi("点击复制机器 IP", "Click to copy IP")}
-                      onClick={() => copy(h.ip, bi("已复制 IP", "Copied IP"))}
-                    >
-                      {h.ip}
-                    </code>
-                  </div>
-                  <div className="rha-host-right">
-                    {directOnline ? (
-                      <span className="rha-host-cov is-direct">
-                        ● {bi("本机直连", "Direct")} · {directOnline.name}
-                      </span>
-                    ) : jumpCover ? (
-                      <span className="rha-host-cov is-jump">
-                        ● {bi("跳板代管", "Jumpbox")} · {jumpCover.name}
-                      </span>
-                    ) : directOffline ? (
-                      <span className="rha-host-cov is-off">
-                        ● {bi("Agent 离线", "Offline")} · {directOffline.name}
-                      </span>
-                    ) : (
-                      <>
-                        <span className="rha-host-cov is-none">
-                          ○ {bi("待关联执行器", "Unassigned")}
-                        </span>
-                        {canOperateCluster && unboundSameIP ? (
-                          <button
-                            type="button"
-                            className="iam-text-act"
-                            disabled={busy}
-                            onClick={() =>
-                              void batchSetAgentsBound([unboundSameIP.id], true)
-                            }
-                          >
-                            {bi(
-                              `一键关联 ${unboundSameIP.name}`,
-                              `Bind ${unboundSameIP.name}`,
-                            )}
-                          </button>
-                        ) : (
-                          canEnrollAgent &&
-                          !readOnly && (
-                            <button
-                              type="button"
-                              className="iam-text-act"
-                              onClick={() =>
-                                openEnrollInPlace({ name: h.name, ip: h.ip })
-                              }
-                            >
-                              +{bi("在此机接入 Agent", "Enroll on Host")}
-                            </button>
-                          )
-                        )}
-                      </>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      )}
+              {clusterHosts.map((h) => (
+                <span key={`${h.name}-${h.ip}`} className="rha-target-chip">
+                  <b>{h.name}</b>
+                  <code
+                    className="mono"
+                    title={bi("点击复制 IP", "Click to copy IP")}
+                    onClick={() => copy(h.ip, bi("已复制 IP", "Copied IP"))}
+                  >
+                    {h.ip}
+                  </code>
+                  {h.role && <span className="rha-host-role">{h.role}</span>}
+                </span>
+              ))}
+            </div>
+          )}
 
-      <section className="ua-sec">
-        <div className="ua-sec-head">
-          <div>
-            <h2>
-              {bi("本集群关联的执行 Agent", "Associated Execution Agents")}{" "}
-              <em className="num">{bound.length}</em>
-            </h2>
-            <p className="faint small">
-              {bi(
-                "在集群中运行只读探针或变更演练步骤时，直接从下方已关联的 Agent 中选择执行。",
-                "Pick from associated Agents below when running probes or change steps in this cluster.",
-              )}
-            </p>
-          </div>
-          <div className="ua-sec-head-acts">
-            {canExec && bound.length > 0 && (
-              <Button
-                size="small"
-                type="secondary"
-                icon={<IconPlayArrow />}
-                onClick={() => setCheckModalOpen(true)}
-              >
-                {bi("连通测试", "Test Connectivity")}
-              </Button>
-            )}
-            {canOperateCluster && (available.length > 0 || bound.length > 0) && (
-              <Button
-                size="small"
-                type={bound.length === 0 && available.length > 0 ? "primary" : "secondary"}
-                icon={<IconSettings />}
-                onClick={() => {
-                  setScopeFilter("all");
-                  setLeftQ("");
-                  setRightQ("");
-                  setTransferOpen(true);
-                }}
-              >
-                {bound.length === 0
-                  ? bi(`关联已有 Agent (${available.length})`, `Associate (${available.length})`)
-                  : bi("配置关联 Agent", "Configure Agents")}
-              </Button>
-            )}
-            {canEnrollAgent && !readOnly && (
-              <Button
-                size="small"
-                type={
-                  bound.length === 0 && available.length === 0
-                    ? "primary"
-                    : "outline"
-                }
-                icon={<IconPlus />}
-                onClick={() =>
-                  openEnrollInPlace({
-                    name: clusterHosts[0]?.name,
-                    ip: clusterHosts[0]?.ip,
-                  })
-                }
-              >
-                {bi("接入新 Agent", "Enroll Agent")}
-              </Button>
-            )}
-          </div>
-        </div>
-
-        {bound.length === 0 ? (
-          canOperateCluster ? (
+          {canOperateCluster ? (
             <div className="rha-onboard-grid">
               <div className="rha-onboard-card">
                 <div className="rha-onboard-top">
                   <div className="rha-onboard-title">
-                    <b>{bi("方式一：关联平台已有 Agent", "Option 1: Associate Existing Agent")}</b>
-                    <span className="ds-tf-cnt num">
-                      {bi(`${available.length} 台可用`, `${available.length} available`)}
-                    </span>
+                    <b>
+                      {bi(
+                        "模式一：跳板机 / 控制机统一调度",
+                        "Mode 1: Unified Jumpbox Controller",
+                      )}
+                    </b>
+                    <span className="ptf-tag">SSH / Ansible</span>
                   </div>
                   <p>
-                    {available.length > 0
-                      ? bi(
-                          "平台已部署有执行 Agent，通过双栏穿梭框一键关联至本集群即可复用，无需重复安装。",
-                          "Reuse existing Agents already deployed on your hosts or jumpboxes.",
-                        )
-                      : bi(
-                          "平台暂未发现其他已接入的空闲 Agent；请先通过右侧接入一台机器。",
-                          "No existing Agents available on the platform yet.",
-                        )}
+                    {bi(
+                      "绑定 1 台可 SSH 访问全集群节点的控制机或跳板机 Agent，统一调度本集群全部目标机器。",
+                      "Bind one jumpbox/controller Agent with SSH access to schedule all cluster nodes.",
+                    )}
                   </p>
                   {available.length > 0 && (
                     <div className="rha-onboard-pills">
@@ -1152,7 +1042,9 @@ export function ClusterAutomationPanel({
                         <span key={a.id} className="rha-onboard-pill">
                           <span
                             className={`iam-ag-dot ${
-                              a.online && !a.disabled ? "is-online" : "is-offline"
+                              a.online && !a.disabled
+                                ? "is-online"
+                                : "is-offline"
                             }`}
                           />
                           <b>{a.name}</b>
@@ -1174,91 +1066,366 @@ export function ClusterAutomationPanel({
                     disabled={available.length === 0}
                     onClick={() => {
                       setScopeFilter("all");
-                      setLeftQ("");
-                      setRightQ("");
                       setTransferOpen(true);
                     }}
                   >
-                    {bi("打开穿梭框选择 Agent", "Select Existing Agents")}
+                    {bi(
+                      `选择已有控制 Agent (${available.length})`,
+                      `Select Existing Agent (${available.length})`,
+                    )}
                   </Button>
-                  {localAvail.length > 0 && (
+                  {canEnrollAgent && (
                     <Button
                       size="small"
                       type="outline"
-                      loading={busy}
-                      onClick={() =>
-                        void batchSetAgentsBound(
-                          localAvail.map((a) => a.id),
-                          true,
-                        )
-                      }
+                      icon={<IconPlus />}
+                      onClick={() => openEnrollModalWith("jumpbox")}
                     >
-                      {bi(
-                        `一键关联同机 IP (${localAvail.length})`,
-                        `Bind Same-IP (${localAvail.length})`,
-                      )}
+                      {bi("新接入跳板机", "Enroll Jumpbox")}
                     </Button>
                   )}
                 </div>
               </div>
 
-              {canEnrollAgent && (
-                <div className="rha-onboard-card is-primary">
-                  <div className="rha-onboard-top">
-                    <div className="rha-onboard-title">
-                      <b>{bi("方式二：就地部署并接入新 Agent", "Option 2: Enroll a New Agent")}</b>
-                      <span className="ua-path-badge is-local">
-                        {bi("当前页弹窗完成", "In-Place Setup")}
-                      </span>
+              {(canEnrollAgent ||
+                available.some((a) => clusterIPSet.has(a.ip.trim()))) &&
+                clusterHosts.length > 0 && (
+                  <div className="rha-onboard-card is-primary">
+                    <div className="rha-onboard-top">
+                      <div className="rha-onboard-title">
+                        <b>
+                          {bi(
+                            "模式二：本集群机器免密直连",
+                            "Mode 2: Per-Node Direct Agents",
+                          )}
+                        </b>
+                        <span className="ptf-tag is-ok">
+                          {bi("免 SSH 密码", "Passwordless")}
+                        </span>
+                      </div>
+                      <p>
+                        {bi(
+                          `直接为本集群这 ${clusterHosts.length} 台机器（${clusterHosts
+                            .map((h) => h.name)
+                            .join("、")}）配置本机直连 Agent，无需任何跨机 SSH 密钥或密码。`,
+                          `Install lightweight local Agents directly on all ${clusterHosts.length} cluster machines without SSH keys or passwords.`,
+                        )}
+                      </p>
                     </div>
-                    <p>
-                      {bi(
-                        "直接在当前页面生成离线自包含安装包，装在目标机走免密直连，装在管理机可跨集群远程代管。",
-                        "Generate a self-contained bundle right here without leaving this cluster.",
-                      )}
-                    </p>
+                    <div className="rha-onboard-foot">
+                      <Button
+                        size="small"
+                        type="primary"
+                        icon={<IconThunderbolt />}
+                        onClick={() => openEnrollModalWith("cluster_hosts")}
+                      >
+                        {bi(
+                          `配置本集群 ${clusterHosts.length} 台机器 Agent`,
+                          `Configure ${clusterHosts.length} Cluster Nodes`,
+                        )}
+                      </Button>
+                    </div>
                   </div>
-                  <div className="rha-onboard-foot">
-                    <Button
-                      size="small"
-                      type="outline"
-                      icon={<IconPlus />}
-                      onClick={() =>
-                        openEnrollInPlace({
-                          name: clusterHosts[0]?.name,
-                          ip: clusterHosts[0]?.ip,
-                        })
-                      }
-                    >
-                      {bi("立即接入新 Agent", "Enroll New Agent")}
-                    </Button>
-                  </div>
-                </div>
-              )}
+                )}
             </div>
           ) : (
             <div className="ua-cluster-empty">
               <span className="faint">
                 {bi(
-                  "当前集群尚未关联执行 Agent（你对本集群为只读权限，需集群创建者或运维成员配置关联）。",
-                  "No Agent associated yet (read-only access on this cluster).",
+                  "当前集群尚未配置执行 Agent（你对本集群为只读权限，需创建者或运维成员配置）。",
+                  "No execution Agent configured yet (read-only access).",
                 )}
               </span>
             </div>
-          )
-        ) : (
+          )}
+        </section>
+      ) : isPerHostDirectMode ? (
+        /* ==================== STATE 2: PER-HOST DIRECT MODE ==================== */
+        <section className="ua-sec">
+          <div className="rha-mode-banner">
+            <div>
+              <div className="rha-mode-title">
+                <h2>
+                  {bi(
+                    "自动化执行模式：本集群节点免密直连",
+                    "Active Mode: Per-Node Direct Agents",
+                  )}
+                </h2>
+                <span
+                  className={`rha-cov-pill num ${
+                    boundHostCount === clusterHosts.length &&
+                    clusterHosts.length > 0
+                      ? "is-ok"
+                      : "is-warn"
+                  }`}
+                >
+                  {bi(
+                    `${boundHostCount} / ${clusterHosts.length} 台已接入`,
+                    `${boundHostCount} / ${clusterHosts.length} bound`,
+                  )}
+                </span>
+              </div>
+              <p className="faint small" style={{ margin: "3px 0 0" }}>
+                {bi(
+                  "每台集群机器通过本机 Agent 直接拉取任务，无需 SSH 密码与跳板机。",
+                  "Each cluster node runs tasks locally via its own Agent without SSH.",
+                )}
+              </p>
+            </div>
+
+            <div className="ua-sec-head-acts">
+              {canExec && (
+                <Button
+                  size="small"
+                  type="secondary"
+                  icon={<IconPlayArrow />}
+                  onClick={() => setCheckModalOpen(true)}
+                >
+                  {bi("连通测试", "Test Connectivity")}
+                </Button>
+              )}
+              {canEnrollAgent && !readOnly && missingHostCount > 0 && (
+                <Button
+                  size="small"
+                  type="primary"
+                  icon={<IconPlus />}
+                  onClick={() => openEnrollModalWith("cluster_hosts")}
+                >
+                  {bi(
+                    `补齐剩余 ${missingHostCount} 台节点`,
+                    `Install Remaining (${missingHostCount})`,
+                  )}
+                </Button>
+              )}
+              {canOperateCluster && (
+                <Popconfirm
+                  position="br"
+                  title={bi(
+                    "解除当前全部关联并重选执行模式？",
+                    "Unbind all Agents to switch execution mode?",
+                  )}
+                  content={bi(
+                    "仅解除与本集群的绑定关系，不会卸载机器上的 Agent 服务。",
+                    "Only removes cluster association; Agent services remain intact.",
+                  )}
+                  onOk={() =>
+                    void batchSetAgentsBound(
+                      bound.map((a) => a.id),
+                      false,
+                    )
+                  }
+                >
+                  <Button size="small" type="text" status="danger" disabled={busy}>
+                    {bi("切换执行模式", "Switch Mode")}
+                  </Button>
+                </Popconfirm>
+              )}
+            </div>
+          </div>
+
+          <div className="rha-node-direct-ledger" role="table">
+            <div className="rha-nd-head" role="row">
+              <span>{bi("集群节点", "Node")}</span>
+              <span>{bi("角色", "Role")}</span>
+              <span>{bi("节点 IP", "Node IP")}</span>
+              <span>{bi("本机 Agent 状态", "Local Agent Status")}</span>
+              <span>{bi("主机系统与实时探针", "OS & Probe")}</span>
+              <span style={{ justifyContent: "flex-end" }}>
+                {bi("操作", "Action")}
+              </span>
+            </div>
+            {clusterHosts.map((h) => {
+              const hit = bound.find((a) => a.ip.trim() === h.ip.trim());
+              const availSameIP = !hit
+                ? available.find((a) => a.ip.trim() === h.ip.trim())
+                : undefined;
+              const probeStr = fmtAgentProbe(hit);
+              return (
+                <div key={`${h.name}-${h.ip}`} className="rha-nd-row" role="row">
+                  <div>
+                    <b className="ds-tf-id" title={h.name}>
+                      {h.name}
+                    </b>
+                  </div>
+                  <div>
+                    {h.role ? (
+                      <span className="rha-host-role">{h.role}</span>
+                    ) : (
+                      <span className="faint small">—</span>
+                    )}
+                  </div>
+                  <div>
+                    <code className="mono small">{h.ip}</code>
+                  </div>
+                  <div>
+                    {hit ? (
+                      <span
+                        className={`rha-host-cov ${
+                          hit.online && !hit.disabled ? "is-direct" : "is-off"
+                        }`}
+                      >
+                        ●{" "}
+                        {hit.disabled
+                          ? bi("已禁用", "Disabled")
+                          : hit.online
+                            ? bi("在线就绪", "Online")
+                            : bi("等待上线", "Offline")}
+                      </span>
+                    ) : (
+                      <span className="rha-host-cov is-none">
+                        ○ {bi("未安装", "Not Installed")}
+                      </span>
+                    )}
+                  </div>
+                  <div>
+                    <span
+                      className="small faint"
+                      style={{
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {hit
+                        ? probeStr || bi("等待心跳上报探针…", "Awaiting probe…")
+                        : "—"}
+                    </span>
+                  </div>
+                  <div>
+                    {hit ? (
+                      canOperateCluster && (
+                        <Button
+                          size="mini"
+                          type="secondary"
+                          status="danger"
+                          disabled={busy}
+                          onClick={() => void batchSetAgentsBound([hit.id], false)}
+                        >
+                          {bi("解除", "Unbind")}
+                        </Button>
+                      )
+                    ) : canOperateCluster && availSameIP ? (
+                      <Button
+                        size="mini"
+                        type="primary"
+                        disabled={busy}
+                        onClick={() =>
+                          void batchSetAgentsBound(
+                            [availSameIP.id],
+                            true,
+                            "agent",
+                          )
+                        }
+                      >
+                        {bi("直接关联", "Bind")}
+                      </Button>
+                    ) : (
+                      canEnrollAgent &&
+                      !readOnly && (
+                        <Button
+                          size="mini"
+                          type="outline"
+                          icon={<IconPlus />}
+                          onClick={() =>
+                            openEnrollModalWith("cluster_hosts", {
+                              name: h.name,
+                              ip: h.ip,
+                            })
+                          }
+                        >
+                          {bi("安装", "Install")}
+                        </Button>
+                      )
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      ) : (
+        /* ==================== STATE 1: UNIFIED CONTROLLER / JUMPBOX MODE ==================== */
+        <section className="ua-sec">
+          <div className="rha-mode-banner">
+            <div>
+              <div className="rha-mode-title">
+                <h2>
+                  {bi(
+                    "自动化执行模式：控制机统一调度",
+                    "Active Mode: Unified Controller",
+                  )}
+                </h2>
+                <span className="ptf-tag">SSH / Ansible</span>
+              </div>
+              <p className="faint small" style={{ margin: "3px 0 0" }}>
+                {bi(
+                  "由下方已关联的控制机 / 跳板机 Agent 统一连接并调度本集群全部目标节点。",
+                  "All target nodes in this cluster are uniformly scheduled through the associated controller Agent(s).",
+                )}
+              </p>
+            </div>
+
+            <div className="ua-sec-head-acts">
+              {canExec && (
+                <Button
+                  size="small"
+                  type="secondary"
+                  icon={<IconPlayArrow />}
+                  onClick={() => setCheckModalOpen(true)}
+                >
+                  {bi("连通测试", "Test Connectivity")}
+                </Button>
+              )}
+              {canOperateCluster && (
+                <Button
+                  size="small"
+                  type="secondary"
+                  icon={<IconSettings />}
+                  onClick={() => {
+                    setScopeFilter("all");
+                    setTransferOpen(true);
+                  }}
+                >
+                  {bi("更换 / 管理控制 Agent", "Change Controller")}
+                </Button>
+              )}
+              {canOperateCluster && (
+                <Popconfirm
+                  position="br"
+                  title={bi(
+                    "解除当前控制机关联并重选执行模式？",
+                    "Unbind controller Agent(s) to switch mode?",
+                  )}
+                  content={bi(
+                    "解除后可重新选择「跳板机统一调度」或「本集群节点各自免密直连」。",
+                    "After unbinding, you can choose Jumpbox or Per-Node Direct mode.",
+                  )}
+                  onOk={() =>
+                    void batchSetAgentsBound(
+                      bound.map((a) => a.id),
+                      false,
+                    )
+                  }
+                >
+                  <Button size="small" type="text" status="danger" disabled={busy}>
+                    {bi("切换执行模式", "Switch Mode")}
+                  </Button>
+                </Popconfirm>
+              )}
+            </div>
+          </div>
+
           <div className="rha-ag-ledger" role="table">
             <div className="rha-ag-head" role="row">
-              <span>{bi("Agent 名称", "Agent")}</span>
+              <span>{bi("控制 Agent 名称", "Controller Agent")}</span>
               <span>{bi("机器 IP", "Host IP")}</span>
               <span>{bi("主机系统与探针负载", "OS & Probe Telemetry")}</span>
-              <span>{bi("执行链路", "Execution Path")}</span>
+              <span>{bi("调度范围", "Scope")}</span>
               <span style={{ justifyContent: "flex-end" }}>
                 {bi("状态与操作", "Status & Action")}
               </span>
             </div>
             {bound.map((a) => {
-              const local = isLocalAgent(a);
               const probeSummary = fmtAgentProbe(a);
               return (
                 <div key={a.id} className="rha-ag-row" role="row">
@@ -1290,10 +1457,11 @@ export function ClusterAutomationPanel({
                     </span>
                   </div>
                   <div>
-                    <span className={`ua-path-badge ${local ? "is-local" : ""}`}>
-                      {local
-                        ? bi("本机免密直连", "Local Direct")
-                        : bi("SSH 远程代管", "Jumpbox SSH")}
+                    <span className="ptf-tag is-cobalt">
+                      {bi(
+                        `全集群 ${clusterHosts.length || 1} 节点`,
+                        `All ${clusterHosts.length || 1} Nodes`,
+                      )}
                     </span>
                   </div>
                   <div>
@@ -1319,17 +1487,42 @@ export function ClusterAutomationPanel({
                 </div>
               );
             })}
+
+            {clusterHosts.length > 0 && (
+              <div className="rha-sub-hosts-foot">
+                <span>
+                  {primaryController?.online && !primaryController.disabled
+                    ? bi(
+                        `受管节点（均由 ${primaryController.name} 统一调度）：`,
+                        `Managed nodes (scheduled via ${primaryController.name}):`,
+                      )
+                    : bi(
+                        `受管节点（等待控制机 ${primaryController?.name || ""} 恢复在线）：`,
+                        `Managed nodes (waiting for ${primaryController?.name || "controller"}):`,
+                      )}
+                </span>
+                {clusterHosts.map((h) => (
+                  <span key={`${h.name}-${h.ip}`} className="rha-target-chip">
+                    <b>{h.name}</b>
+                    <code className="mono">{h.ip}</code>
+                    {h.role && <span className="rha-host-role">{h.role}</span>}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
-        )}
-      </section>
+        </section>
+      )}
 
       <EnrollAgentModal
         visible={enrollOpen}
         onClose={() => setEnrollOpen(false)}
         defaultClusterId={clusterId}
+        clusterMode={enrollMode}
         defaultHostName={enrollHostPrefill.name}
         defaultHostIP={enrollHostPrefill.ip}
         clusterHosts={clusterHosts}
+        existingAgents={[...bound, ...available]}
         onEnrolled={() => void load(true)}
       />
 
@@ -1340,300 +1533,70 @@ export function ClusterAutomationPanel({
         footer={null}
         title={
           <span className="iam-drawer-title">
-            <span>{bi("配置本集群关联 Agent", "Configure Associated Agents")}</span>
+            <span>{bi("选择控制机 / 跳板机 Agent", "Select Controller Agent")}</span>
             <code className="mono">{clusterId}</code>
           </span>
         }
       >
-        <div className="rha-clean-panel rha-tf-drawer">
-          <div className="ds-transfer">
-            <div className="ds-tf-pane">
-              <div className="ds-tf-head">
-                <label className="ds-tf-head-chk">
-                  <Checkbox
-                    checked={
-                      filteredAvailable.length > 0 &&
-                      validLeftChecked.length === filteredAvailable.length
-                    }
-                    indeterminate={
-                      validLeftChecked.length > 0 &&
-                      validLeftChecked.length < filteredAvailable.length
-                    }
-                    disabled={busy || filteredAvailable.length === 0}
-                    onChange={(chk) => {
-                      const next = new Set(leftChecked);
-                      for (const a of filteredAvailable) {
-                        if (chk) next.add(a.id);
-                        else next.delete(a.id);
-                      }
-                      setLeftChecked(next);
-                    }}
-                  />
-                  <b>{bi("可关联 Agent", "Available Agents")}</b>
-                </label>
-                <span className="ds-tf-cnt num">
-                  {validLeftChecked.length > 0
-                    ? `${validLeftChecked.length} / ${filteredAvailable.length}`
-                    : filteredAvailable.length}
-                </span>
-              </div>
-
-              <div className="ds-tf-facets">
-                <div className="ds-tf-scope-pills">
+        <div className="rha-clean-panel">
+          <ProTransfer
+            height={340}
+            busy={busy}
+            leftTitle={bi("平台可用 Agent", "Available Agents")}
+            rightTitle={bi("本集群已关联 Agent", "Associated Agents")}
+            leftItems={leftTransferAgents}
+            rightItems={rightTransferAgents}
+            leftPlaceholder={bi(
+              "搜索 Agent 名称、机器 IP、主机名或操作系统…",
+              "Search Agent name, IP, hostname, or OS…",
+            )}
+            topBar={
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", gap: 8 }}>
+                <div className="ptf-pills">
                   <button
                     type="button"
-                    className={`ds-tf-pill ${scopeFilter === "all" ? "on" : ""}`}
+                    className={`ptf-pill ${scopeFilter === "all" ? "on" : ""}`}
                     onClick={() => setScopeFilter("all")}
                   >
-                    {bi("全部", "All")} ({available.length})
+                    {bi("全部可用", "All")} ({available.length})
                   </button>
                   <button
                     type="button"
-                    className={`ds-tf-pill ${scopeFilter === "online" ? "on" : ""}`}
+                    className={`ptf-pill is-ok ${
+                      scopeFilter === "online" ? "on" : ""
+                    }`}
                     onClick={() => setScopeFilter("online")}
                   >
-                    {bi("在线", "Online")} ({onlineAvailCount})
+                    {bi("仅在线", "Online")} ({onlineAvailCount})
                   </button>
-                  {localAvailCount > 0 && (
-                    <button
-                      type="button"
-                      className={`ds-tf-pill ${scopeFilter === "local" ? "on" : ""}`}
-                      onClick={() => setScopeFilter("local")}
-                    >
-                      {bi("同机直连", "Same IP")} ({localAvailCount})
-                    </button>
-                  )}
                 </div>
-              </div>
-
-              <div className="ds-tf-search">
-                <Input
-                  size="small"
-                  prefix={<IconSearch />}
-                  allowClear
-                  value={leftQ}
-                  onChange={setLeftQ}
-                  placeholder={bi(
-                    "搜索 Agent 名称、机器 IP、主机名或操作系统…",
-                    "Search Agent name, IP, hostname, or OS…",
-                  )}
-                />
-              </div>
-
-              <div className="ds-tf-list" style={{ minHeight: 196, maxHeight: 320 }}>
-                {filteredAvailable.length === 0 ? (
-                  <div className="ds-tf-empty">
-                    {available.length === 0
-                      ? bi("全部可用 Agent 已关联至本集群", "All available Agents are associated")
-                      : bi("没有符合筛选条件的 Agent", "No matching Agents")}
-                  </div>
-                ) : (
-                  filteredAvailable.map((a) => {
-                    const checked = leftChecked.has(a.id);
-                    const local = isLocalAgent(a);
-                    const sub = fmtAgentProbe(a);
-                    return (
-                      <div
-                        key={a.id}
-                        className={`ds-tf-row ${checked ? "is-checked" : ""}`}
-                        onClick={() => {
-                          if (busy) return;
-                          const next = new Set(leftChecked);
-                          if (checked) next.delete(a.id);
-                          else next.add(a.id);
-                          setLeftChecked(next);
-                        }}
-                      >
-                        <Checkbox checked={checked} disabled={busy} />
-                        <div className="ds-tf-item-col">
-                          <div className="ds-tf-item-main">
-                            <span
-                              className={`iam-ag-dot ${
-                                a.disabled
-                                  ? "is-disabled"
-                                  : a.online
-                                    ? "is-online"
-                                    : "is-offline"
-                              }`}
-                            />
-                            <b className="ds-tf-id">{a.name}</b>
-                            <code className="mono faint small">{a.ip}</code>
-                            {local && (
-                              <span className="ua-path-badge is-local">
-                                {bi("本机直连", "Direct")}
-                              </span>
-                            )}
-                          </div>
-                          {sub && <div className="ds-tf-item-sub">{sub}</div>}
-                        </div>
-                        <button
-                          type="button"
-                          className="ds-tf-quick-btn"
-                          disabled={busy}
-                          title={bi("立即关联", "Associate")}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void batchSetAgentsBound([a.id], true);
-                          }}
-                        >
-                          <IconPlus />
-                        </button>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-
-            <div className="ds-tf-mid">
-              <Button
-                type="primary"
-                size="small"
-                disabled={busy || validLeftChecked.length === 0}
-                loading={busy && validLeftChecked.length > 0}
-                onClick={() =>
-                  void batchSetAgentsBound(
-                    validLeftChecked.map((a) => a.id),
-                    true,
-                  )
-                }
-              >
-                {validLeftChecked.length > 0
-                  ? bi(`关联 (${validLeftChecked.length})`, `Add (${validLeftChecked.length})`)
-                  : bi("关联", "Add")}{" "}
-                <IconRight />
-              </Button>
-              <Button
-                size="small"
-                disabled={busy || validRightChecked.length === 0}
-                loading={busy && validRightChecked.length > 0}
-                onClick={() =>
-                  void batchSetAgentsBound(
-                    validRightChecked.map((a) => a.id),
-                    false,
-                  )
-                }
-              >
-                <IconLeft />{" "}
-                {validRightChecked.length > 0
-                  ? bi(`移除 (${validRightChecked.length})`, `Remove (${validRightChecked.length})`)
-                  : bi("移除", "Remove")}
-              </Button>
-            </div>
-
-            <div className="ds-tf-pane is-target">
-              <div className="ds-tf-head">
-                <label className="ds-tf-head-chk">
-                  <Checkbox
-                    checked={
-                      filteredBound.length > 0 &&
-                      validRightChecked.length === filteredBound.length
-                    }
-                    indeterminate={
-                      validRightChecked.length > 0 &&
-                      validRightChecked.length < filteredBound.length
-                    }
-                    disabled={busy || filteredBound.length === 0}
-                    onChange={(chk) => {
-                      const next = new Set(rightChecked);
-                      for (const a of filteredBound) {
-                        if (chk) next.add(a.id);
-                        else next.delete(a.id);
-                      }
-                      setRightChecked(next);
+                {canEnrollAgent && (
+                  <Button
+                    size="mini"
+                    type="outline"
+                    icon={<IconPlus />}
+                    onClick={() => {
+                      setTransferOpen(false);
+                      openEnrollModalWith("jumpbox");
                     }}
-                  />
-                  <b>{bi("已关联 Agent", "Associated Agents")}</b>
-                </label>
-                <span className="ds-tf-cnt is-brand num">
-                  {validRightChecked.length > 0
-                    ? `${validRightChecked.length} / ${bound.length}`
-                    : bound.length}
-                </span>
-              </div>
-
-              <div className="ds-tf-search">
-                <Input
-                  size="small"
-                  prefix={<IconSearch />}
-                  allowClear
-                  value={rightQ}
-                  onChange={setRightQ}
-                  placeholder={bi("按名称、IP、主机名或系统筛选…", "Filter by name, IP, or OS…")}
-                />
-              </div>
-
-              <div className="ds-tf-list" style={{ flex: 1, minHeight: 196, maxHeight: 356 }}>
-                {filteredBound.length === 0 ? (
-                  <div className="ds-tf-empty">
-                    {bound.length === 0
-                      ? bi("从左侧勾选要用于本集群执行的 Agent", "Select Agents from the left pane")
-                      : bi("无匹配的已关联 Agent", "No matching Agents")}
-                  </div>
-                ) : (
-                  filteredBound.map((a) => {
-                    const checked = rightChecked.has(a.id);
-                    const local = isLocalAgent(a);
-                    const sub = fmtAgentProbe(a);
-                    return (
-                      <div
-                        key={a.id}
-                        className={`ds-tf-row ${checked ? "is-checked" : ""}`}
-                        onClick={() => {
-                          if (busy) return;
-                          const next = new Set(rightChecked);
-                          if (checked) next.delete(a.id);
-                          else next.add(a.id);
-                          setRightChecked(next);
-                        }}
-                      >
-                        <Checkbox checked={checked} disabled={busy} />
-                        <div className="ds-tf-item-col">
-                          <div className="ds-tf-item-main">
-                            <span
-                              className={`iam-ag-dot ${
-                                a.disabled
-                                  ? "is-disabled"
-                                  : a.online
-                                    ? "is-online"
-                                    : "is-offline"
-                              }`}
-                            />
-                            <b className="ds-tf-id">{a.name}</b>
-                            <code className="mono faint small">{a.ip}</code>
-                            <span className={`ua-path-badge ${local ? "is-local" : ""}`}>
-                              {local
-                                ? bi("本机免密直连", "Local Direct")
-                                : bi("SSH 远程代管", "Jumpbox SSH")}
-                            </span>
-                          </div>
-                          {sub && <div className="ds-tf-item-sub">{sub}</div>}
-                        </div>
-                        <button
-                          type="button"
-                          className="ds-tf-quick-btn is-rm"
-                          disabled={busy}
-                          title={bi("解除关联", "Unbind")}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void batchSetAgentsBound([a.id], false);
-                          }}
-                        >
-                          <IconClose />
-                        </button>
-                      </div>
-                    );
-                  })
+                  >
+                    {bi("新接入跳板机 Agent", "Enroll New Jumpbox")}
+                  </Button>
                 )}
               </div>
-            </div>
-          </div>
+            }
+            onAdd={(ids) => void batchSetAgentsBound(ids, true, "node")}
+            onRemove={(ids) => void batchSetAgentsBound(ids, false)}
+          />
 
-          <div className="eam-foot">
+          <div
+            className="eam-foot"
+            style={{ paddingTop: 10, borderTop: "1px solid var(--line)" }}
+          >
             <span className="faint small" style={{ marginRight: "auto" }}>
               {bi(
-                `当前已关联 ${bound.length} 台执行 Agent（操作实时保存生效）`,
-                `${bound.length} Agent(s) associated (changes save automatically)`,
+                `当前已关联 ${bound.length} 台控制 Agent（操作实时保存生效）`,
+                `${bound.length} controller Agent(s) associated`,
               )}
             </span>
             <Button type="primary" onClick={() => setTransferOpen(false)}>

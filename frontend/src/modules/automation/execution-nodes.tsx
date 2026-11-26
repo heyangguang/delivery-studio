@@ -47,6 +47,7 @@ import {
 } from "../../shared/shared";
 import { go } from "../../app/router";
 import { Kbd, StatusBadge } from "../../design/ui";
+import { ProTransfer, ProTransferItem } from "../../design/transfer";
 import { bi, useLang, withLang } from "../../app/i18n";
 import {
   AgentClusterCatalogItem,
@@ -582,7 +583,7 @@ function isSameMachineCluster(agent: UnifiedAgentView, c?: AgentClusterCatalogIt
   return Boolean(c && agent.suggested_clusters?.includes(c.id));
 }
 
-/** Slide-Over Rich Dual-Pane Cluster Transfer Drawer (supports IP, subnet, hostname, middleware, OS, owner search) */
+/** Centered Equal-Height ProTransfer Modal for associating clusters with an Agent */
 function AgentClusterTransferDrawer({
   agent,
   visible,
@@ -605,28 +606,15 @@ function AgentClusterTransferDrawer({
   onUnbind: (cids: string[]) => void;
 }) {
   useLang();
-  const [leftKw, setLeftKw] = useState("");
-  const [rightKw, setRightKw] = useState("");
   const [scopeFilter, setScopeFilter] = useState<"all" | "same_ip">(initialScope);
   const [appFilter, setAppFilter] = useState<string>("all");
-  const [leftChecked, setLeftChecked] = useState<Set<string>>(() => new Set());
-  const [rightChecked, setRightChecked] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     if (visible) {
       setScopeFilter(initialScope);
-      setLeftKw("");
-      setRightKw("");
       setAppFilter("all");
-      setLeftChecked(new Set());
-      setRightChecked(new Set());
     }
   }, [visible, initialScope, agent?.id]);
-
-  useEffect(() => {
-    setLeftChecked(new Set());
-    setRightChecked(new Set());
-  }, [agent?.clusters.join(",")]);
 
   const clusterById = useMemo(
     () => new Map(catalog.map((c) => [c.id, c])),
@@ -635,7 +623,10 @@ function AgentClusterTransferDrawer({
   const boundSet = useMemo(() => new Set(agent?.clusters || []), [agent?.clusters]);
 
   const allUnboundOperable = useMemo(
-    () => catalog.filter((c) => !boundSet.has(c.id) && (c.can_op || manageableSet.has(c.id))),
+    () =>
+      catalog.filter(
+        (c) => !boundSet.has(c.id) && (c.can_op || manageableSet.has(c.id)),
+      ),
     [catalog, boundSet, manageableSet],
   );
 
@@ -659,61 +650,94 @@ function AgentClusterTransferDrawer({
     return Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
   }, [allUnboundOperable]);
 
-  const lq = leftKw.trim().toLowerCase();
-  const availableList = useMemo(
+  const makeClusterItem = (
+    cid: string,
+    cMeta: AgentClusterCatalogItem | undefined,
+    inRightPane: boolean,
+  ): ProTransferItem => {
+    const ips = cMeta?.host_ips || [];
+    const isLocal = agent ? isSameMachineCluster(agent, cMeta) : false;
+    const hasSameIP = Boolean(
+      agent &&
+        (cMeta?.host_ips?.includes(agent.ip) ||
+          agent.suggested_clusters?.includes(cid)),
+    );
+    const plat = cMeta?.platform ? platformShort(cMeta.platform) : "";
+    const subParts: string[] = [];
+    if (ips.length > 0) {
+      subParts.push(
+        `IP: ${ips.slice(0, 2).join(", ")}${ips.length > 2 ? ` +${ips.length - 2}` : ""}`,
+      );
+    }
+    if (plat) subParts.push(plat);
+    if (cMeta?.owner) subParts.push(cMeta.owner);
+
+    const canOp = Boolean(cMeta?.can_op || manageableSet.has(cid));
+    return {
+      key: cid,
+      title: cid,
+      monoTitle: true,
+      href: inRightPane ? `#/d/${encodeURIComponent(cid)}` : undefined,
+      onOpenLink: inRightPane
+        ? () => {
+            onClose();
+            go({ name: "deliveries", id: cid });
+          }
+        : undefined,
+      badge: cMeta
+        ? [cMeta.app_name, cMeta.version].filter(Boolean).join(" ")
+        : undefined,
+      tag: inRightPane
+        ? {
+            text: isLocal ? bi("本机直连", "Direct") : bi("远程代管", "Jumpbox"),
+            tone: isLocal ? "ok" : "neutral",
+          }
+        : hasSameIP
+          ? { text: bi("同机 IP", "Same IP"), tone: "ok" }
+          : undefined,
+      subtitle: subParts.join(" · "),
+      disabled: inRightPane && !canOp,
+      searchText: [
+        cid,
+        cMeta?.app_name || "",
+        cMeta?.version || "",
+        cMeta?.owner || "",
+        cMeta?.platform || "",
+        plat,
+        ...ips,
+        ...(cMeta?.host_names || []),
+      ].join(" "),
+    };
+  };
+
+  const leftItems = useMemo<ProTransferItem[]>(
     () =>
-      allUnboundOperable.filter((c) => {
-        if (
-          scopeFilter === "same_ip" &&
-          agent &&
-          !(c.host_ips?.includes(agent.ip) || agent.suggested_clusters?.includes(c.id))
-        ) {
-          return false;
-        }
-        if (appFilter !== "all" && c.app_name !== appFilter) return false;
-        return matchClusterQuery(c, lq);
-      }),
-    [allUnboundOperable, scopeFilter, appFilter, agent, lq],
+      allUnboundOperable
+        .filter((c) => {
+          if (
+            scopeFilter === "same_ip" &&
+            agent &&
+            !(
+              c.host_ips?.includes(agent.ip) ||
+              agent.suggested_clusters?.includes(c.id)
+            )
+          ) {
+            return false;
+          }
+          if (appFilter !== "all" && c.app_name !== appFilter) return false;
+          return true;
+        })
+        .map((c) => makeClusterItem(c.id, c, false)),
+    [allUnboundOperable, scopeFilter, appFilter, agent], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
-  const rq = rightKw.trim().toLowerCase();
-  const boundList = useMemo(
+  const rightItems = useMemo<ProTransferItem[]>(
     () =>
-      (agent?.clusters || []).filter((cid) => {
-        if (!rq) return true;
-        const m = clusterById.get(cid);
-        if (m) return matchClusterQuery(m, rq);
-        return cid.toLowerCase().includes(rq);
-      }),
-    [agent?.clusters, clusterById, rq],
+      (agent?.clusters || []).map((cid) =>
+        makeClusterItem(cid, clusterById.get(cid), true),
+      ),
+    [agent?.clusters, clusterById, agent], // eslint-disable-line react-hooks/exhaustive-deps
   );
-
-  const manageableBoundList = useMemo(
-    () =>
-      boundList.filter((cid) => {
-        const m = clusterById.get(cid);
-        return Boolean(m?.can_op || manageableSet.has(cid));
-      }),
-    [boundList, clusterById, manageableSet],
-  );
-
-  const validLeftIds = useMemo(
-    () => availableList.filter((c) => leftChecked.has(c.id)).map((c) => c.id),
-    [availableList, leftChecked],
-  );
-  const validRightIds = useMemo(
-    () => manageableBoundList.filter((cid) => rightChecked.has(cid)),
-    [manageableBoundList, rightChecked],
-  );
-
-  const allLeftChecked =
-    availableList.length > 0 && validLeftIds.length === availableList.length;
-  const someLeftChecked = validLeftIds.length > 0 && !allLeftChecked;
-
-  const allRightChecked =
-    manageableBoundList.length > 0 &&
-    validRightIds.length === manageableBoundList.length;
-  const someRightChecked = validRightIds.length > 0 && !allRightChecked;
 
   return (
     <Modal
@@ -736,385 +760,94 @@ function AgentClusterTransferDrawer({
     >
       {agent && (
         <div className="ds-tf-drawer-wrap">
-          <div className="ds-tf-drawer-lead">
-            <span>
-              {bi(
-                "支持按集群标识、节点 IP / 网段、主机名、中间件、操作系统或创建者检索；移至右侧即刻保存生效。",
-                "Search by cluster ID, node IP/subnet, hostname, middleware, OS, or creator. Changes save immediately.",
-              )}
-            </span>
-            {sameIPUnbound.length > 0 && (
-              <Button
-                size="mini"
-                type="outline"
-                disabled={busy}
-                onClick={() => onBind(sameIPUnbound.map((c) => c.id))}
-              >
-                {bi(
-                  `一键关联同机 IP 集群 (${sameIPUnbound.length})`,
-                  `Bind Same-IP (${sameIPUnbound.length})`,
-                )}
-              </Button>
+          <ProTransfer
+            height={364}
+            busy={busy}
+            leftTitle={bi("可关联集群", "Available Clusters")}
+            rightTitle={bi("已关联集群", "Associated Clusters")}
+            leftItems={leftItems}
+            rightItems={rightItems}
+            leftPlaceholder={bi(
+              "空格组合检索：集群名、节点 IP、中间件、系统或创建者…",
+              "Multi-keyword search: cluster, IP, app, OS, owner…",
             )}
-          </div>
-
-          <div className="ds-transfer">
-            {/* Left Pane: Available Manageable Clusters */}
-            <div className="ds-tf-pane">
-              <div className="ds-tf-head">
-                <label className="ds-tf-head-chk">
-                  <Checkbox
-                    checked={allLeftChecked}
-                    indeterminate={someLeftChecked}
-                    disabled={availableList.length === 0 || busy}
-                    onChange={(chk) => {
-                      const next = new Set(leftChecked);
-                      for (const c of availableList) {
-                        if (chk) next.add(c.id);
-                        else next.delete(c.id);
-                      }
-                      setLeftChecked(next);
-                    }}
-                  />
-                  <b>{bi("可关联集群", "Available Clusters")}</b>
-                </label>
-                <span className="ds-tf-cnt num">
-                  {validLeftIds.length > 0
-                    ? `${validLeftIds.length} / ${availableList.length}`
-                    : availableList.length}
-                </span>
-              </div>
-
-              <div className="ds-tf-facets">
-                <div className="ds-tf-scope-pills">
-                  <button
-                    type="button"
-                    className={`ds-tf-pill ${scopeFilter === "all" ? "on" : ""}`}
-                    onClick={() => setScopeFilter("all")}
-                  >
-                    {bi("全部", "All")} ({allUnboundOperable.length})
-                  </button>
-                  {sameIPUnbound.length > 0 && (
+            rightPlaceholder={bi(
+              "筛选已关联集群（名称 / IP / 组件）…",
+              "Filter associated clusters…",
+            )}
+            leftEmptyText={
+              allUnboundOperable.length === 0
+                ? bi("你有权限的全部集群均已关联", "All operable clusters are associated")
+                : bi("没有符合筛选条件的可关联集群", "No matching clusters")
+            }
+            topBar={
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", gap: 8, flexWrap: "wrap" }}>
+                <div style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <div className="ptf-pills">
                     <button
                       type="button"
-                      className={`ds-tf-pill is-match ${scopeFilter === "same_ip" ? "on" : ""}`}
-                      onClick={() => setScopeFilter("same_ip")}
+                      className={`ptf-pill ${scopeFilter === "all" ? "on" : ""}`}
+                      onClick={() => setScopeFilter("all")}
                     >
-                      {bi("同机 IP", "Same IP")} ({sameIPUnbound.length})
+                      {bi("全部可关联", "All")} ({allUnboundOperable.length})
                     </button>
+                    {sameIPUnbound.length > 0 && (
+                      <button
+                        type="button"
+                        className={`ptf-pill is-ok ${
+                          scopeFilter === "same_ip" ? "on" : ""
+                        }`}
+                        onClick={() => setScopeFilter("same_ip")}
+                      >
+                        {bi("同机 IP", "Same IP")} ({sameIPUnbound.length})
+                      </button>
+                    )}
+                  </div>
+                  {appOptions.length > 1 && (
+                    <Select
+                      size="mini"
+                      style={{ width: 148 }}
+                      value={appFilter}
+                      onChange={setAppFilter}
+                      getPopupContainer={() => document.body}
+                      triggerProps={{ autoFitPosition: true }}
+                      options={[
+                        { value: "all", label: bi("全部中间件", "All Apps") },
+                        ...appOptions.map(([app, n]) => ({
+                          value: app,
+                          label: `${app} (${n})`,
+                        })),
+                      ]}
+                    />
                   )}
                 </div>
-                {appOptions.length > 1 && (
-                  <Select
+                {sameIPUnbound.length > 0 && (
+                  <Button
                     size="mini"
-                    style={{ width: 138 }}
-                    value={appFilter}
-                    onChange={setAppFilter}
-                    getPopupContainer={() => document.body}
-                    triggerProps={{ autoFitPosition: true }}
-                    options={[
-                      { value: "all", label: bi("全部中间件", "All Apps") },
-                      ...appOptions.map(([app, n]) => ({
-                        value: app,
-                        label: `${app} (${n})`,
-                      })),
-                    ]}
-                  />
+                    type="outline"
+                    disabled={busy}
+                    onClick={() => onBind(sameIPUnbound.map((c) => c.id))}
+                  >
+                    {bi(
+                      `一键关联同机 IP (${sameIPUnbound.length})`,
+                      `Bind Same-IP (${sameIPUnbound.length})`,
+                    )}
+                  </Button>
                 )}
               </div>
+            }
+            onAdd={onBind}
+            onRemove={onUnbind}
+          />
 
-              <div className="ds-tf-search">
-                <Input
-                  size="small"
-                  prefix={<IconSearch />}
-                  allowClear
-                  value={leftKw}
-                  onChange={setLeftKw}
-                  placeholder={bi(
-                    "搜索集群名、节点 IP、主机名、中间件或创建者…",
-                    "Search cluster, node IP, hostname, app, or owner…",
-                  )}
-                />
-              </div>
-
-              <div className="ds-tf-list">
-                {availableList.length === 0 ? (
-                  <div className="ds-tf-empty">
-                    {lq || scopeFilter !== "all" || appFilter !== "all"
-                      ? bi("没有符合筛选条件的可关联集群", "No clusters match filters")
-                      : allUnboundOperable.length === 0
-                        ? bi("你有权限的全部集群均已关联", "All operable clusters are associated")
-                        : bi("暂无可关联的集群", "No operable clusters")}
-                  </div>
-                ) : (
-                  availableList.map((c) => {
-                    const checked = leftChecked.has(c.id);
-                    const hasSameIP = Boolean(
-                      c.host_ips?.includes(agent.ip) ||
-                        agent.suggested_clusters?.includes(c.id),
-                    );
-                    const ips = c.host_ips || [];
-                    return (
-                      <div
-                        key={c.id}
-                        className={`ds-tf-row ${checked ? "is-checked" : ""}`}
-                        onClick={() => {
-                          if (busy) return;
-                          setLeftChecked((prev) => {
-                            const next = new Set(prev);
-                            if (checked) next.delete(c.id);
-                            else next.add(c.id);
-                            return next;
-                          });
-                        }}
-                      >
-                        <Checkbox checked={checked} disabled={busy} />
-                        <div className="ds-tf-item-col">
-                          <div className="ds-tf-item-main">
-                            <span className="ds-tf-id mono" title={c.id}>
-                              {c.id}
-                            </span>
-                            <span className="iam-app-pill">
-                              {c.app_name} {c.version}
-                            </span>
-                            {hasSameIP && (
-                              <span className="ua-path-badge is-local">
-                                {bi("同机 IP", "Same IP")}
-                              </span>
-                            )}
-                          </div>
-                          <div className="ds-tf-item-sub">
-                            {ips.length > 0 ? (
-                              <span>
-                                IP:{" "}
-                                {ips.slice(0, 2).map((ip, idx) => (
-                                  <React.Fragment key={ip}>
-                                    {idx > 0 && ", "}
-                                    <code
-                                      className={`mono ${
-                                        ip === agent.ip || (lq && ip.includes(lq))
-                                          ? "is-match"
-                                          : ""
-                                      }`}
-                                    >
-                                      {ip}
-                                    </code>
-                                  </React.Fragment>
-                                ))}
-                                {ips.length > 2 ? ` +${ips.length - 2}` : ""}
-                              </span>
-                            ) : (
-                              <span>{bi("未登记节点 IP", "No node IP")}</span>
-                            )}
-                            {c.platform && <span>· {platformShort(c.platform)}</span>}
-                            {c.owner && <span>· {c.owner}</span>}
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          disabled={busy}
-                          className="ds-tf-quick-btn"
-                          title={bi("立即关联此集群", "Associate immediately")}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onBind([c.id]);
-                          }}
-                        >
-                          <IconPlus />
-                        </button>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-
-            {/* Center Action Buttons */}
-            <div className="ds-tf-mid">
-              <Button
-                size="small"
-                type="primary"
-                disabled={validLeftIds.length === 0 || busy}
-                loading={busy && validLeftIds.length > 0}
-                onClick={() => onBind(validLeftIds)}
-              >
-                <span>
-                  {validLeftIds.length > 0
-                    ? bi(`关联 (${validLeftIds.length})`, `Add (${validLeftIds.length})`)
-                    : bi("关联", "Add")}
-                </span>
-                <IconArrowRight />
-              </Button>
-              <Button
-                size="small"
-                type="secondary"
-                disabled={validRightIds.length === 0 || busy}
-                loading={busy && validRightIds.length > 0}
-                onClick={() => onUnbind(validRightIds)}
-              >
-                <IconArrowLeft />
-                <span>
-                  {validRightIds.length > 0
-                    ? bi(`移除 (${validRightIds.length})`, `Remove (${validRightIds.length})`)
-                    : bi("移除", "Remove")}
-                </span>
-              </Button>
-            </div>
-
-            {/* Right Pane: Associated Clusters */}
-            <div className="ds-tf-pane is-target">
-              <div className="ds-tf-head">
-                <label className="ds-tf-head-chk">
-                  <Checkbox
-                    checked={allRightChecked}
-                    indeterminate={someRightChecked}
-                    disabled={manageableBoundList.length === 0 || busy}
-                    onChange={(chk) => {
-                      const next = new Set(rightChecked);
-                      for (const cid of manageableBoundList) {
-                        if (chk) next.add(cid);
-                        else next.delete(cid);
-                      }
-                      setRightChecked(next);
-                    }}
-                  />
-                  <b>{bi("已关联集群", "Associated Clusters")}</b>
-                </label>
-                <span className="ds-tf-cnt is-brand num">
-                  {validRightIds.length > 0
-                    ? `${validRightIds.length} / ${boundList.length}`
-                    : boundList.length}
-                </span>
-              </div>
-
-              <div className="ds-tf-search">
-                <Input
-                  size="small"
-                  prefix={<IconSearch />}
-                  allowClear
-                  value={rightKw}
-                  onChange={setRightKw}
-                  placeholder={bi(
-                    "按集群名、节点 IP、中间件或创建者筛选…",
-                    "Filter by cluster, IP, app, or owner…",
-                  )}
-                />
-              </div>
-
-              <div className="ds-tf-list">
-                {boundList.length === 0 ? (
-                  <div className="ds-tf-empty">
-                    {rq
-                      ? bi("没有匹配的已关联集群", "No matching clusters")
-                      : bi(
-                          "尚未关联集群；从左侧勾选或点击「+」即可移入",
-                          "None associated yet. Select on the left to add.",
-                        )}
-                  </div>
-                ) : (
-                  boundList.map((cid) => {
-                    const cMeta = clusterById.get(cid);
-                    const canOp = Boolean(cMeta?.can_op || manageableSet.has(cid));
-                    const checked = rightChecked.has(cid);
-                    const isLocal = isSameMachineCluster(agent, cMeta);
-                    const ips = cMeta?.host_ips || [];
-                    return (
-                      <div
-                        key={cid}
-                        className={`ds-tf-row ${checked ? "is-checked" : ""}`}
-                        onClick={() => {
-                          if (!canOp || busy) return;
-                          setRightChecked((prev) => {
-                            const next = new Set(prev);
-                            if (checked) next.delete(cid);
-                            else next.add(cid);
-                            return next;
-                          });
-                        }}
-                      >
-                        <Checkbox checked={checked} disabled={!canOp || busy} />
-                        <div className="ds-tf-item-col">
-                          <div className="ds-tf-item-main">
-                            <a
-                              href={`#/d/${encodeURIComponent(cid)}`}
-                              className="ds-tf-link mono"
-                              title={bi(`打开集群 ${cid}`, `Open ${cid}`)}
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                onClose();
-                                go({ name: "deliveries", id: cid });
-                              }}
-                            >
-                              {cid}
-                            </a>
-                            {cMeta && (
-                              <span className="iam-app-pill">
-                                {cMeta.app_name} {cMeta.version}
-                              </span>
-                            )}
-                            <span className={`ua-path-badge ${isLocal ? "is-local" : ""}`}>
-                              {isLocal
-                                ? bi("本机直连", "Local Direct")
-                                : bi("远程代管", "Jumpbox")}
-                            </span>
-                          </div>
-                          {cMeta && (
-                            <div className="ds-tf-item-sub">
-                              {ips.length > 0 && (
-                                <span>
-                                  IP:{" "}
-                                  {ips.slice(0, 2).map((ip, idx) => (
-                                    <React.Fragment key={ip}>
-                                      {idx > 0 && ", "}
-                                      <code
-                                        className={`mono ${
-                                          ip === agent.ip || (rq && ip.includes(rq))
-                                            ? "is-match"
-                                            : ""
-                                        }`}
-                                      >
-                                        {ip}
-                                      </code>
-                                    </React.Fragment>
-                                  ))}
-                                  {ips.length > 2 ? ` +${ips.length - 2}` : ""}
-                                </span>
-                              )}
-                              {cMeta.platform && (
-                                <span>· {platformShort(cMeta.platform)}</span>
-                              )}
-                              {cMeta.owner && <span>· {cMeta.owner}</span>}
-                            </div>
-                          )}
-                        </div>
-                        {canOp && (
-                          <button
-                            type="button"
-                            disabled={busy}
-                            className="ds-tf-quick-btn is-rm"
-                            title={bi("解除关联", "Unbind")}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onUnbind([cid]);
-                            }}
-                          >
-                            <IconClose />
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="eam-foot" style={{ paddingTop: 10, borderTop: "1px solid var(--line)" }}>
+          <div
+            className="eam-foot"
+            style={{ paddingTop: 10, borderTop: "1px solid var(--line)" }}
+          >
             <span className="faint small" style={{ marginRight: "auto" }}>
               {bi(
-                `当前已关联 ${agent.clusters.length} 个集群（穿梭操作实时保存生效）`,
-                `${agent.clusters.length} cluster(s) associated (changes save automatically)`,
+                `当前已关联 ${agent.clusters.length} 个集群（支持双击条目或中间按钮快速穿梭）`,
+                `${agent.clusters.length} cluster(s) associated (double-click or use center buttons)`,
               )}
             </span>
             <Button type="primary" onClick={onClose}>

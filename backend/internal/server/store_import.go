@@ -3832,7 +3832,7 @@ func (s *storeServer) handleClusterBaselineGaps(w http.ResponseWriter, r *http.R
 	}
 
 	s.jobPersistMu.Lock()
-	dep = s.readSpec(f.Current.ID)
+	dep = s.readSpecFresh(f.Current.ID)
 	if dep == nil {
 		s.jobPersistMu.Unlock()
 		s.fail(w, 404, "未找到该集群基线配置")
@@ -3903,7 +3903,17 @@ func (s *storeServer) enrichImportedBaselineFromEvidence(
 	if f.Current.ID == "" || f.Current.DeliveryMode != "imported" {
 		return nil
 	}
-	dep := s.readSpec(f.Current.ID)
+	s.jobPersistMu.Lock()
+	persistLocked := true
+	unlockPersist := func() {
+		if persistLocked {
+			persistLocked = false
+			s.jobPersistMu.Unlock()
+		}
+	}
+	defer unlockPersist()
+
+	dep := s.readSpecFresh(f.Current.ID)
 	if dep == nil || dep.DeliveryMode != "imported" {
 		return nil
 	}
@@ -4185,12 +4195,11 @@ func (s *storeServer) enrichImportedBaselineFromEvidence(
 	}
 	plan := mwpack.SolveImported(s.plat.cat(), newDep)
 
-	s.jobPersistMu.Lock()
-	defer s.jobPersistMu.Unlock()
 	if err := s.saveImportedPlanFiles(f.Current.ID, newDep, plan); err != nil {
 		return nil
 	}
 	s.invalidateJobCaches(f.Current.ID)
+	unlockPersist()
 
 	s.mu.Lock()
 	j := s.jobs[f.Current.ID]
@@ -4305,7 +4314,17 @@ func (s *storeServer) applyBaselineCorrectionsToCluster(
 		return summary
 	}
 
-	dep := s.readSpec(f.Current.ID)
+	s.jobPersistMu.Lock()
+	persistLocked := true
+	unlockPersist := func() {
+		if persistLocked {
+			persistLocked = false
+			s.jobPersistMu.Unlock()
+		}
+	}
+	defer unlockPersist()
+
+	dep := s.readSpecFresh(f.Current.ID)
 	if dep == nil || dep.DeliveryMode != "imported" {
 		return nil
 	}
@@ -4545,12 +4564,11 @@ func (s *storeServer) applyBaselineCorrectionsToCluster(
 	}
 	plan := mwpack.SolveImported(s.plat.cat(), newDep)
 
-	s.jobPersistMu.Lock()
-	defer s.jobPersistMu.Unlock()
 	if err := s.saveImportedPlanFiles(f.Current.ID, newDep, plan); err != nil {
 		return nil
 	}
 	s.invalidateJobCaches(f.Current.ID)
+	unlockPersist()
 
 	s.mu.Lock()
 	j := s.jobs[f.Current.ID]

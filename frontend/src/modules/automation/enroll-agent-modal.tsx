@@ -19,6 +19,7 @@ import {
 } from "@arco-design/web-react/icon";
 import {
   api,
+  authToken,
   copy,
   csrfToken,
   err,
@@ -470,12 +471,14 @@ export function EnrollAgentModal({
     if (!enr || bundleBusy) return;
     setBundleBusy(true);
     try {
+      const tok = authToken();
       const resp = await fetch(withLang("/api/executions/unified-agents/bundle"), {
         method: "POST",
         credentials: "same-origin",
         headers: {
           "Content-Type": "application/json",
           "X-CSRF-Token": csrfToken(),
+          ...(tok ? { Authorization: `Bearer ${tok}` } : {}),
         },
         body: JSON.stringify({
           agent_id: enr.agent.id,

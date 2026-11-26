@@ -660,10 +660,13 @@ func hostIPMap(hosts []clusterAutomationHost) map[string]bool {
 	return m
 }
 
-func (s *storeServer) buildClusterAutomationSummary(r *http.Request, f clusterFacts) map[string]any {
+func (s *storeServer) buildClusterAutomationSummary(r *http.Request, session storeSession, f clusterFacts) map[string]any {
 	cfg := s.loadClusterAutomationConfig(f.ID)
 	hosts := s.clusterAutomationHostsFor(f, cfg)
 	hostIPs := hostIPMap(hosts)
+	owners := s.clusterOwners()
+	canManageGlobal := s.can(session.User, "execution.manage")
+	userAccess := s.clusterAccess(session.User)
 
 	executionMu.Lock()
 	d, _ := s.readExecutions()
@@ -672,6 +675,20 @@ func (s *storeServer) buildClusterAutomationSummary(r *http.Request, f clusterFa
 	nodes := make([]automationNodeView, 0, len(d.Nodes))
 	for _, n := range d.Nodes {
 		pub := publicExecutionNode(n)
+		if !canManageGlobal {
+			visModes := filterVisibleAgentModes(effectiveNodeClusterModes(n), false, owners, userAccess)
+			pub.ClusterModes = visModes
+			pub.Clusters = sortedMapKeys(visModes)
+			if len(pub.Grants) > 0 {
+				fg := map[string][]string{}
+				for cid, ips := range pub.Grants {
+					if _, ok := visModes[strings.TrimSpace(cid)]; ok {
+						fg[cid] = ips
+					}
+				}
+				pub.Grants = fg
+			}
+		}
 		nodes = append(nodes, automationNodeView{
 			executionNode:  pub,
 			Online:         executionOnline(n),
@@ -696,7 +713,10 @@ func (s *storeServer) buildClusterAutomationSummary(r *http.Request, f clusterFa
 			continue
 		}
 		pub := localizeTargetAgent(lang, publicTargetAgent(a))
-		pub.Clusters = targetAgentClusters(a)
+		if !canManageGlobal {
+			pub.ClusterModes = filterVisibleAgentModes(effectiveTargetAgentClusterModes(a), false, owners, userAccess)
+		}
+		pub.Clusters = visibleAgentClustersFor(a, canManageGlobal, owners, userAccess)
 		view := automationAgentView{
 			targetAgent:     pub,
 			Online:          targetAgentOnline(a),
@@ -715,10 +735,8 @@ func (s *storeServer) buildClusterAutomationSummary(r *http.Request, f clusterFa
 	recent := s.listRehearsalExecTasks(f.ID, "", 12)
 	rehearsalExecMu.Unlock()
 
-	owners := s.clusterOwners()
-	allPassAccess := func(_, _ string) string { return "operate" }
 	hbPol := s.loadHeartbeatPolicy()
-	allUnified := applyHeartbeatPolicyToViews(listUnifiedAgentsFromDB(d, true, owners, allPassAccess, nil), hbPol.DefaultIntervalSec)
+	allUnified := applyHeartbeatPolicyToViews(listUnifiedAgentsFromDB(d, canManageGlobal, owners, userAccess, nil), hbPol.DefaultIntervalSec)
 	unifiedBound := []unifiedAgentView{}
 	availableAgents := []unifiedAgentView{}
 	onlineUnifiedBound := 0
@@ -815,7 +833,7 @@ func wLangFromReq(r *http.Request) string {
 func (s *storeServer) handleClusterAutomation(w http.ResponseWriter, r *http.Request, session storeSession, f clusterFacts, parts []string) {
 	switch {
 	case len(parts) == 0 && r.Method == "GET":
-		s.writeJSON(w, 200, s.buildClusterAutomationSummary(r, f))
+		s.writeJSON(w, 200, s.buildClusterAutomationSummary(r, session, f))
 		return
 
 	case len(parts) == 0 && r.Method == "PUT":
@@ -907,7 +925,7 @@ func (s *storeServer) handleClusterAutomation(w http.ResponseWriter, r *http.Req
 			return
 		}
 		s.auditReq(r, "cluster-automation-update", session.User, fmt.Sprintf("%s enabled=%v transport=%s env=%s", f.ID, req.Enabled, req.Transport, req.EnvKind))
-		s.writeJSON(w, 200, s.buildClusterAutomationSummary(r, f))
+		s.writeJSON(w, 200, s.buildClusterAutomationSummary(r, session, f))
 		return
 
 	case len(parts) == 1 && parts[0] == "agents":
@@ -1182,6 +1200,20 @@ func (s *storeServer) handleGlobalExecutionAgents(w http.ResponseWriter, r *http
 				}
 				a.Clusters = bound
 				a.Cluster = ""
+				if len(a.ClusterModes) > 0 {
+					boundSet := make(map[string]bool, len(bound))
+					for _, cid := range bound {
+						boundSet[cid] = true
+					}
+					for cid := range a.ClusterModes {
+						if !boundSet[strings.TrimSpace(cid)] {
+							delete(a.ClusterModes, cid)
+						}
+					}
+					if len(a.ClusterModes) == 0 {
+						a.ClusterModes = nil
+					}
+				}
 			}
 			if req.AllowMutating != nil {
 				a.AllowMutating = *req.AllowMutating
@@ -1369,6 +1401,12 @@ func (s *storeServer) handleClusterDirectAgents(w http.ResponseWriter, r *http.R
 			}
 			a.Cluster = ""
 			a.Clusters = kept
+			if len(a.ClusterModes) > 0 {
+				delete(a.ClusterModes, f.ID)
+				if len(a.ClusterModes) == 0 {
+					a.ClusterModes = nil
+				}
+			}
 			d.Agents[a.ID] = a
 			if err := s.saveExecutions(d); err != nil {
 				s.fail(w, 500, "保存失败")

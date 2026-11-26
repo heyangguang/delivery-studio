@@ -896,7 +896,7 @@ func (s *storeServer) syncLiveIntoImportedBaseline(f clusterFacts, snap clusterL
 	s.jobPersistMu.Lock()
 	defer s.jobPersistMu.Unlock()
 
-	dep = s.readSpec(f.Current.ID)
+	dep = s.readSpecFresh(f.Current.ID)
 	if dep == nil || dep.DeliveryMode != "imported" {
 		return
 	}

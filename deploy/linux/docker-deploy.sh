@@ -16,7 +16,8 @@ NET_NAME="delivery-studio-net"
 PG_CONTAINER="delivery-studio-postgres"
 APP_CONTAINER="delivery-studio-app"
 PG_IMAGE="postgres:16-alpine"
-APP_IMAGE="delivery-studio:1.0.0"
+APP_VERSION="1.5.0"
+APP_IMAGE="delivery-studio:${APP_VERSION}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -80,7 +81,7 @@ fi
 
 echo "==> [2/6] 导入离线 Docker 镜像（PostgreSQL + Delivery Studio）..."
 ${DOCKER_CMD} load -i "${BUNDLE_DIR}/images/postgres-16-alpine-amd64.tar"
-${DOCKER_CMD} load -i "${BUNDLE_DIR}/images/delivery-studio-1.0.0-amd64.tar"
+${DOCKER_CMD} load -i "${BUNDLE_DIR}/images/delivery-studio-${APP_VERSION}-amd64.tar"
 
 echo "==> [3/6] 初始化持久化目录与离线文件资源 (${INSTALL_DIR})..."
 ${SUDO_PREFIX} mkdir -p "${INSTALL_DIR}/pgdata" "${INSTALL_DIR}/data/artifacts" "${INSTALL_DIR}/data/components" "${INSTALL_DIR}/data/library" "${INSTALL_DIR}/seed"

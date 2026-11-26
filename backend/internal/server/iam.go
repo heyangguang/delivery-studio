@@ -526,7 +526,7 @@ var routePerms = []routePerm{
 
 	rp("GET", `/api/executions/runs`, "delivery.view"),
 	rp("GET", `/api/executions/unified-agents`, "execution.manage|delivery.view"),
-	rp("W", `/api/executions/unified-agents(/.*)?`, "execution.manage|delivery.view|delivery.create|delivery.execute"),
+	rp("W", `/api/executions/unified-agents(/.*)?`, "execution.manage|delivery.create|delivery.execute"),
 	rp("GET", `/api/executions/agents`, "execution.manage|delivery.view"),
 	rp("W", `/api/executions/agents(/.*)?`, "execution.manage"),
 	rp("GET", `/api/jobs`, "delivery.view"),

@@ -138,3 +138,95 @@ func TestLegacyNodeGrantsUnbindClusterDoesNotResurrect(t *testing.T) {
 		t.Fatalf("expected ecs-pg-keep to remain bound, got %+v", updated.ClusterModes)
 	}
 }
+
+func TestUnifiedAgentReadonlyGuardAuditorRBACAndSummaryIsolation(t *testing.T) {
+	srv, _ := testStore(t)
+	adminCookie, adminCSRF := storeLogin(t, srv, "admin")
+	aliceCookie, aliceCSRF := storeLogin(t, srv, "alice")
+	bobCookie, bobCSRF := storeLogin(t, srv, "bob")
+
+	// Alice owns cluster-alice; Admin owns cluster-admin.
+	if rr := storeRequest(srv, "POST", "/api/clusters/import", strings.NewReader(`{"id":"cluster-alice","component":"postgresql","display_name":"PostgreSQL","version":"17","platform":"ubuntu2404","hosts":[{"name":"a1","ip":"10.50.0.11","role":"primary"}]}`), aliceCookie, aliceCSRF); rr.Code != 200 && rr.Code != 201 {
+		t.Fatalf("import cluster-alice failed: %d %s", rr.Code, rr.Body.String())
+	}
+	if rr := storeRequest(srv, "POST", "/api/clusters/import", strings.NewReader(`{"id":"cluster-admin","component":"postgresql","display_name":"PostgreSQL","version":"17","platform":"ubuntu2404","hosts":[{"name":"m1","ip":"10.50.0.12","role":"primary"}]}`), adminCookie, adminCSRF); rr.Code != 200 && rr.Code != 201 {
+		t.Fatalf("import cluster-admin failed: %d %s", rr.Code, rr.Body.String())
+	}
+
+	// 1. Enroll an online Unified Agent bound to cluster-admin (readwrite) and cluster-alice (readonly).
+	enrRR := storeRequest(srv, "POST", "/api/executions/unified-agents", strings.NewReader(`{"name":"ro-test-node","ip":"10.50.0.5","cluster_modes":{"cluster-admin":"readwrite","cluster-alice":"readonly"}}`), adminCookie, adminCSRF)
+	if enrRR.Code != 201 {
+		t.Fatalf("enroll failed: %d %s", enrRR.Code, enrRR.Body.String())
+	}
+	var enr struct {
+		Agent unifiedAgentView `json:"agent"`
+		Token string           `json:"token"`
+	}
+	_ = json.Unmarshal(enrRR.Body.Bytes(), &enr)
+	if enr.Agent.ClusterModes["cluster-alice"] != "readonly" {
+		t.Fatalf("expected cluster-alice mode to stay readonly, got %+v", enr.Agent.ClusterModes)
+	}
+	pollReq := httptest.NewRequest("POST", "http://127.0.0.1:8090/api/execution-agent/poll", bytes.NewReader([]byte(`{"protocol":3,"version":"1.0.0","heartbeat":true}`)))
+	pollReq.Header.Set("Authorization", "Bearer "+enr.Token)
+	pollReq.Header.Set("Content-Type", "application/json")
+	pollW := httptest.NewRecorder()
+	srv.ServeHTTP(pollW, pollReq)
+	if pollW.Code != 200 {
+		t.Fatalf("poll failed: %d %s", pollW.Code, pollW.Body.String())
+	}
+
+	// 2. Mutating rehearsal task on cluster-alice using the readonly-bound Agent must be rejected with 403.
+	_, code, msg := srv.enqueueRehearsalExecTask(enqueueRehearsalTaskSpec{
+		ClusterID: "cluster-alice",
+		StepTitle: "mutating step",
+		Kind:      "step",
+		ReadOnly:  false,
+		Script:    "echo test",
+		Targets:   []rehearsalExecTarget{{Host: "a1", IP: "10.50.0.11"}},
+		AgentID:   enr.Agent.ID,
+		User:      "alice",
+	})
+	if code != 403 {
+		t.Fatalf("expected 403 for mutating task on readonly agent, got code=%d msg=%s", code, msg)
+	}
+
+	// 3. Summary endpoint GET /api/clusters/cluster-alice/automation must not disclose cluster-admin to Alice.
+	sumRR := storeRequest(srv, "GET", "/api/clusters/cluster-alice/automation", nil, aliceCookie, "")
+	if sumRR.Code != 200 {
+		t.Fatalf("automation summary failed: %d %s", sumRR.Code, sumRR.Body.String())
+	}
+	if strings.Contains(sumRR.Body.String(), "cluster-admin") {
+		t.Fatalf("automation summary leaked admin's private cluster ID to alice: %s", sumRR.Body.String())
+	}
+
+	// 4. Grant Bob the read-only auditor role -> Bob must get 403 on PATCH /api/executions/unified-agents.
+	if rr := storeRequest(srv, "PUT", "/api/users/bob/grant", strings.NewReader(`{"roles":["auditor"]}`), adminCookie, adminCSRF); rr.Code != 200 {
+		t.Fatalf("grant bob auditor failed: %d %s", rr.Code, rr.Body.String())
+	}
+	bobCookie, bobCSRF = storeLogin(t, srv, "bob")
+	if rr := storeRequest(srv, "PATCH", "/api/executions/unified-agents", strings.NewReader(`{"id":"`+enr.Agent.ID+`","bind_clusters":["cluster-alice"]}`), bobCookie, bobCSRF); rr.Code != 403 {
+		t.Fatalf("expected 403 for auditor PATCH unified-agents, got %d %s", rr.Code, rr.Body.String())
+	}
+
+	// 5. Direct target agent unbind removes cluster from both Clusters and ClusterModes.
+	dirRR := storeRequest(srv, "POST", "/api/executions/agents", strings.NewReader(`{"host":"a1","ip":"10.50.0.11","clusters":["cluster-alice","cluster-admin"]}`), adminCookie, adminCSRF)
+	if dirRR.Code != 201 {
+		t.Fatalf("direct enroll failed: %d %s", dirRR.Code, dirRR.Body.String())
+	}
+	var dirEnr struct {
+		Agent targetAgent `json:"agent"`
+	}
+	_ = json.Unmarshal(dirRR.Body.Bytes(), &dirEnr)
+	if rr := storeRequest(srv, "PATCH", "/api/executions/unified-agents", strings.NewReader(`{"id":"`+dirEnr.Agent.ID+`","set_cluster":{"cluster_id":"cluster-alice","mode":"readonly"}}`), adminCookie, adminCSRF); rr.Code != 200 {
+		t.Fatalf("set_cluster on direct agent failed: %d %s", rr.Code, rr.Body.String())
+	}
+	if rr := storeRequest(srv, "PATCH", "/api/clusters/cluster-alice/automation/agents", strings.NewReader(`{"id":"`+dirEnr.Agent.ID+`","action":"unbind"}`), adminCookie, adminCSRF); rr.Code != 200 {
+		t.Fatalf("unbind direct agent failed: %d %s", rr.Code, rr.Body.String())
+	}
+	executionMu.Lock()
+	execDB, _ := srv.readExecutions()
+	executionMu.Unlock()
+	if targetAgentAllowsCluster(execDB.Agents[dirEnr.Agent.ID], "cluster-alice") {
+		t.Fatalf("expected cluster-alice to be fully unbound from direct agent, got %+v", execDB.Agents[dirEnr.Agent.ID])
+	}
+}

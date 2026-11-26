@@ -1467,6 +1467,11 @@ export function RolesPane({
     () => (iam ? modules(iam.perms) : []),
     [iam],
   );
+  const comparedRoles = useMemo(() => {
+    const roles = iam?.roles ?? [];
+    const kept = roles.filter((r) => !excludedCmpRoles.includes(r.id));
+    return kept.length >= 2 ? kept : roles;
+  }, [iam?.roles, excludedCmpRoles]);
 
   if (iamError && !iam) {
     return (
@@ -1592,11 +1597,6 @@ export function RolesPane({
       },
     });
   };
-
-  const comparedRoles = useMemo(() => {
-    const kept = iam.roles.filter((r) => !excludedCmpRoles.includes(r.id));
-    return kept.length >= 2 ? kept : iam.roles;
-  }, [iam.roles, excludedCmpRoles]);
 
   const isPermDiff = (p: Perm) => {
     if (comparedRoles.length < 2) return false;
@@ -3769,27 +3769,6 @@ export function ClustersAccessPane({
     return opts;
   }, [users, iam, canUsers, canTeams]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (iamError && !iam) {
-    return (
-      <article className="iam-page iam-stage">
-        <div className="iam-empty iam-empty-line">
-          <IconExclamationCircle className="bad" />
-          <b>{iamError}</b>
-          <Button size="small" icon={<IconRefresh />} onClick={reload}>
-            {bi("重试", "Retry")}
-          </Button>
-        </div>
-      </article>
-    );
-  }
-  if (!iam) {
-    return (
-      <article className="iam-page">
-        <Skeleton animation text={{ rows: 8 }} />
-      </article>
-    );
-  }
-
   const updateClusterAccess = useCallback(
     async (
       c: IAMCluster,
@@ -3826,6 +3805,36 @@ export function ClustersAccessPane({
     setDrawerClusterId(cid);
   }, []);
 
+  const toggleRowSelect = useCallback((cid: string, checked: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(cid);
+      else next.delete(cid);
+      return next;
+    });
+  }, []);
+
+  if (iamError && !iam) {
+    return (
+      <article className="iam-page iam-stage">
+        <div className="iam-empty iam-empty-line">
+          <IconExclamationCircle className="bad" />
+          <b>{iamError}</b>
+          <Button size="small" icon={<IconRefresh />} onClick={reload}>
+            {bi("重试", "Retry")}
+          </Button>
+        </div>
+      </article>
+    );
+  }
+  if (!iam) {
+    return (
+      <article className="iam-page">
+        <Skeleton animation text={{ rows: 8 }} />
+      </article>
+    );
+  }
+
   const applyDrawerTargets = async (
     c: IAMCluster,
     keys: string[],
@@ -3849,15 +3858,6 @@ export function ClustersAccessPane({
     if (nextLevel) setDrawerLeftSel(new Set());
     else setDrawerRightSel(new Set());
   };
-
-  const toggleRowSelect = useCallback((cid: string, checked: boolean) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (checked) next.add(cid);
-      else next.delete(cid);
-      return next;
-    });
-  }, []);
 
   const applyBatch = async () => {
     if (batchBusy || selectedIds.size === 0 || batchTargets.length === 0)

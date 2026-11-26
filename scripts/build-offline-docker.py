@@ -395,8 +395,17 @@ def main() -> None:
         bundle_name = f"delivery-studio-v{version}-offline-docker-amd64"
         out_archive = dist / f"{bundle_name}.tar.gz"
 
-        install_bytes = (ROOT / "deploy/linux/docker-deploy.sh").read_bytes().replace(b"\r\n", b"\n")
-        compose_bytes = (ROOT / "deploy/linux/docker-compose.offline.yml").read_bytes().replace(b"\r\n", b"\n")
+        install_text = (ROOT / "deploy/linux/docker-deploy.sh").read_text(encoding="utf-8")
+        install_text = re.sub(r'^APP_VERSION="[^"]+"', f'APP_VERSION="{version}"', install_text, flags=re.MULTILINE)
+        install_bytes = install_text.replace("\r\n", "\n").encode("utf-8")
+
+        compose_text = (ROOT / "deploy/linux/docker-compose.offline.yml").read_text(encoding="utf-8")
+        compose_text = re.sub(
+            r"image:\s*delivery-studio:[^\s]+",
+            f"image: delivery-studio:{version}",
+            compose_text,
+        )
+        compose_bytes = compose_text.replace("\r\n", "\n").encode("utf-8")
         readme_bytes = (
             f"Kyndryl Delivery Studio v{version} 离线 Docker 全量安装包（含 PostgreSQL 16 + 全量数据库数据）\n"
             "=========================================================================\n\n"

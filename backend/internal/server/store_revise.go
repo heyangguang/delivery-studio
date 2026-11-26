@@ -131,6 +131,20 @@ func (s *storeServer) readSpec(id string) *mwpack.Deployment {
 	return d
 }
 
+// readSpecFresh parses a standalone *mwpack.Deployment copy for mutating workflows,
+// preventing in-place data races on the shared s.specCache entry.
+func (s *storeServer) readSpecFresh(id string) *mwpack.Deployment {
+	b, err := s.readJobSpecBytes(id)
+	if err != nil {
+		return nil
+	}
+	d, err := mwpack.ParseSavedDeployment(b)
+	if err != nil {
+		return nil
+	}
+	return d
+}
+
 func show(v any) string {
 	switch x := v.(type) {
 	case nil:

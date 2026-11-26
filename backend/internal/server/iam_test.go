@@ -136,7 +136,7 @@ func TestEveryChangingRouteHasAPermission(t *testing.T) {
 		{"GET", "/api/settings/ai/usage/stats", "ai.usage"},
 		{"PUT", "/api/iam/clusters/pg-prod", "iam.user|iam.team"},
 		{"GET", "/api/executions/unified-agents", "execution.manage|delivery.view"},
-		{"POST", "/api/executions/unified-agents", "execution.manage|delivery.view|delivery.create|delivery.execute"},
+		{"POST", "/api/executions/unified-agents", "execution.manage|delivery.create|delivery.execute"},
 		{"POST", "/api/me/kb", ""},
 		{"POST", "/api/kb/submissions", "kb.submit"},
 	} {

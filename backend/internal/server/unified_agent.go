@@ -47,7 +47,9 @@ type unifiedAgentView struct {
 
 func normalizeAgentClusterMode(raw string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "readonly", "ro", "view", "readwrite", "rw", "operate", "bound", "true", "1":
+	case "readonly", "ro", "view":
+		return "readonly", true
+	case "readwrite", "rw", "operate", "bound", "true", "1":
 		return "readwrite", true
 	default:
 		return "", false
@@ -637,6 +639,11 @@ func (s *storeServer) handleUnifiedAgents(w http.ResponseWriter, r *http.Request
 		})
 
 	case "PATCH":
+		canEditAny := canManageGlobal || actor.can("delivery.create") || actor.can("delivery.execute")
+		if !canEditAny {
+			s.failBi(w, 403, "仅只读查看权限无法调整 Agent 配置或集群绑定", "Read-only permission cannot modify Agent settings or cluster bindings")
+			return
+		}
 		var req struct {
 			ID                   string             `json:"id"`
 			Name                 *string            `json:"name"`
@@ -724,7 +731,7 @@ func (s *storeServer) handleUnifiedAgents(w http.ResponseWriter, r *http.Request
 					merged = map[string]string{}
 				}
 				for cid := range oldModes {
-					if access(owners[cid], cid) != "" {
+					if access(owners[cid], cid) == "operate" {
 						delete(merged, cid)
 					}
 				}

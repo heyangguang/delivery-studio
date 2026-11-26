@@ -11,7 +11,7 @@ import {
   IconRefresh,
   IconUp,
 } from "@arco-design/web-react/icon";
-import { ApiError, can, copy, csrfToken } from "./shared";
+import { ApiError, authToken, can, copy, csrfToken } from "./shared";
 import type {
   AIAttemptDiag,
   AICallDiag,
@@ -451,6 +451,7 @@ export async function streamPipelineSSE<T, TKind extends string = string>(
   const url = `${path}${sep}stream=1`;
   let res: Response;
   try {
+    const tok = authToken();
     res = await fetch(url, {
       method: "POST",
       credentials: "same-origin",
@@ -460,6 +461,7 @@ export async function streamPipelineSSE<T, TKind extends string = string>(
         Accept: "text/event-stream",
         "X-CSRF-Token": csrfToken(),
         "X-Lang": getLang(),
+        ...(tok ? { Authorization: `Bearer ${tok}` } : {}),
       },
       body: JSON.stringify(body),
     });
@@ -627,6 +629,8 @@ export async function streamPipelineSSE<T, TKind extends string = string>(
     );
   } finally {
     signal?.removeEventListener("abort", onAbortRead);
+    void reader.cancel().catch(() => {});
+    reader.releaseLock();
   }
   if (!finalResult) {
     throw new ApiError(

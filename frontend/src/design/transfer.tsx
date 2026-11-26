@@ -91,6 +91,13 @@ export function ProTransfer({
   const [rightKw, setRightKw] = useState("");
   const [leftSel, setLeftSel] = useState<Set<string>>(() => new Set());
   const [rightSel, setRightSel] = useState<Set<string>>(() => new Set());
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!busy) {
+      setPendingAction(null);
+    }
+  }, [busy]);
 
   const leftKeySig = useMemo(
     () => leftItems.map((x) => x.key).join("|"),
@@ -181,9 +188,11 @@ export function ProTransfer({
   const triggerAdd = (keys: string[]) => {
     if (!keys.length || busy) return;
     if (onAdd) {
+      setPendingAction("add");
       onAdd(keys);
       setLeftSel(new Set());
     } else if (dualAddActions?.[0]) {
+      setPendingAction("dual-0");
       dualAddActions[0].onTrigger(keys);
       setLeftSel(new Set());
     }
@@ -191,6 +200,7 @@ export function ProTransfer({
 
   const triggerRemove = (keys: string[]) => {
     if (!keys.length || busy) return;
+    setPendingAction("remove");
     onRemove(keys);
     setRightSel(new Set());
   };
@@ -385,8 +395,9 @@ export function ProTransfer({
                   size="small"
                   type={act.type || (idx === 0 ? "primary" : "secondary")}
                   disabled={busy || validLeftIds.length === 0}
-                  loading={busy && validLeftIds.length > 0 && idx === 0}
+                  loading={busy && pendingAction === `dual-${idx}`}
                   onClick={() => {
+                    setPendingAction(`dual-${idx}`);
                     act.onTrigger(validLeftIds);
                     setLeftSel(new Set());
                   }}
@@ -398,7 +409,7 @@ export function ProTransfer({
                 size="small"
                 status="danger"
                 disabled={busy || validRightIds.length === 0}
-                loading={busy && validRightIds.length > 0}
+                loading={busy && pendingAction === "remove"}
                 onClick={() => triggerRemove(validRightIds)}
               >
                 <IconLeft /> {bi("移除", "Remove")}
@@ -410,7 +421,7 @@ export function ProTransfer({
                 size="small"
                 type="primary"
                 disabled={busy || validLeftIds.length === 0}
-                loading={busy && validLeftIds.length > 0}
+                loading={busy && pendingAction === "add"}
                 onClick={() => triggerAdd(validLeftIds)}
                 aria-label={bi("移入右侧", "Move selected")}
               >
@@ -420,7 +431,7 @@ export function ProTransfer({
                 size="small"
                 type="secondary"
                 disabled={busy || validRightIds.length === 0}
-                loading={busy && validRightIds.length > 0}
+                loading={busy && pendingAction === "remove"}
                 onClick={() => triggerRemove(validRightIds)}
                 aria-label={bi("移出已选", "Remove selected")}
               >

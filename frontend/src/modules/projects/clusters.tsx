@@ -652,21 +652,27 @@ export function ClusterDetail({
               )}
             </div>
             <div className="detail-meta">
-              {owner && <span className="row-owner">{bi(`${owner} 的集群`, `${owner}'s cluster`)}</span>}
-              {readOnly && (
-                <span>
-                  <Tooltip
-                    content={bi(
-                      "你对该集群拥有只读查看权限，可浏览配置、文档与演练记录，不可执行变更或删除",
-                      "You have read-only access to this cluster; viewing and exports are allowed, mutations are restricted",
-                    )}
-                    mini
-                  >
-                    <span className="cl-ro-chip">
-                      <IconLock />
-                      <span>{bi("只读授权", "Read-only")}</span>
+              {(owner || readOnly) && (
+                <span className="cl-meta-badges">
+                  {owner && (
+                    <span className="row-owner">
+                      {bi(`${owner} 的集群`, `${owner}'s cluster`)}
                     </span>
-                  </Tooltip>
+                  )}
+                  {readOnly && (
+                    <Tooltip
+                      content={bi(
+                        "你对该集群拥有只读查看权限，可浏览配置、文档与演练记录，不可执行变更或删除",
+                        "You have read-only access to this cluster; viewing and exports are allowed, mutations are restricted",
+                      )}
+                      mini
+                    >
+                      <span className="cl-ro-chip">
+                        <IconLock />
+                        <span>{bi("只读授权", "Read-only")}</span>
+                      </span>
+                    </Tooltip>
+                  )}
                 </span>
               )}
               <span>

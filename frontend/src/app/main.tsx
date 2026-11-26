@@ -1290,12 +1290,10 @@ function AIStatusBadge({
   const shortSub = on ? "" : pendingCfg ? bi(" · 待配", " · Setup") : bi(" · Off", " · Off");
   const canUseAI = can("ai.use");
   const readonlyTip = on
-    ? canUseAI
-      ? bi("平台 AI 服务已就绪 · 点击打开 AI 助手", "AI Suite is ready · Click to open AI Assistant")
-      : bi("平台 AI 服务已开启（模型参数由管理员维护）", "Platform AI suite is active (managed by administrators)")
+    ? bi("平台 AI 套件已启用", "Platform AI suite is enabled")
     : pendingCfg
-      ? bi("平台 AI 模型待管理员完成配置", "Platform AI suite awaits model setup by an administrator")
-      : bi("平台 AI 服务暂未开启（由管理员在平台设置中启用）", "Platform AI suite is disabled (managed in Platform Settings)");
+      ? bi("平台 AI 套件待配置", "Platform AI suite setup needed")
+      : bi("平台 AI 套件未启用", "Platform AI suite is disabled");
   const warmAISettings = () => {
     if (!cached("/api/settings/ai"))
       void fetchCached("/api/settings/ai").catch(() => undefined);

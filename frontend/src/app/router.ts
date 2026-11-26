@@ -6,7 +6,7 @@ export type Route =
   | {
       name: "deliveries";
       id?: string;
-      tab?: "config" | "plans" | "docs" | "rehearsal" | "security";
+      tab?: "config" | "plans" | "docs" | "rehearsal" | "security" | "automation";
       plan?: string;
       doc?: string;
       rehearsal?: string;
@@ -27,7 +27,14 @@ export type Route =
     }
   | { name: "import"; component?: string }
   | { name: "apps"; id?: string }
-  | { name: "executions"; id?: string; run?: string; step?: string }
+  | {
+      name: "executions";
+      view?: "runs" | "nodes";
+      fleet?: "controllers" | "agents";
+      id?: string;
+      run?: string;
+      step?: string;
+    }
   | { name: "components"; id?: string; edit?: string }
   | { name: "library"; id?: string }
   | {
@@ -71,7 +78,9 @@ export function parse(hash: string): Route {
             ? { name: "deliveries", id: p[1], tab: "rehearsal", rehearsal: p[3] }
             : p[2] === "security"
               ? { name: "deliveries", id: p[1], tab: "security" }
-              : { name: "deliveries", id: p[1] };
+              : p[2] === "automation"
+                ? { name: "deliveries", id: p[1], tab: "automation" }
+                : { name: "deliveries", id: p[1] };
   if (p[0] === "new")
     return {
       name: "new",
@@ -87,13 +96,22 @@ export function parse(hash: string): Route {
   if (p[0] === "import")
     return { name: "import", component: p[1] || undefined };
   if (p[0] === "apps") return { name: "apps", id: p[1] };
-  if (p[0] === "executions")
+  if (p[0] === "executions") {
+    if (p[1] === "nodes") {
+      return {
+        name: "executions",
+        view: "nodes",
+        fleet: q.get("fleet") === "agents" ? "agents" : undefined,
+      };
+    }
     return {
       name: "executions",
-      id: p[1],
+      view: "runs",
+      id: p[1] === "runs" ? undefined : p[1],
       run: q.get("run") || undefined,
       step: q.get("step") || undefined,
     };
+  }
   if (p[0] === "library") return { name: "library", id: p[1] };
   if (p[0] === "security") {
     const t = p[1];
@@ -117,7 +135,12 @@ export function parse(hash: string): Route {
   if (p[0] === "kb") return { name: "kb", id: p[1] };
   if (p[0] === "skills") return { name: "skills", id: p[1] };
   if (p[0] === "mcp") return { name: "mcp", id: p[1] };
-  if (p[0] === "settings") return { name: "settings", id: p[1] };
+  if (p[0] === "settings") {
+    if (p[1] === "execution-nodes" || p[1] === "nodes") {
+      return { name: "executions", view: "nodes" };
+    }
+    return { name: "settings", id: p[1] };
+  }
   if (p[0] === "ai")
     return {
       name: "ai",
@@ -161,6 +184,11 @@ export const href = (r: Route): string => {
     case "apps":
       return r.id ? `#/apps/${encodeURIComponent(r.id)}` : "#/apps";
     case "executions": {
+      if (r.view === "nodes") {
+        return r.fleet === "agents"
+          ? "#/executions/nodes?fleet=agents"
+          : "#/executions/nodes";
+      }
       const q = new URLSearchParams();
       if (r.run) q.set("run", r.run);
       if (r.step) q.set("step", r.step);

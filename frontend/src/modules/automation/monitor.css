@@ -20,30 +20,6 @@
   }
 }
 
-/* Status Segmented inside Left Rail — balanced 4-column fit at both 284px and 304px */
-.mon-status-seg {
-  width: 100%;
-  min-width: 0;
-}
-.mon-status-seg .seg,
-.mon-status-seg .arco-radio-group-type-button {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  width: 100%;
-}
-.mon-status-seg .arco-radio-button {
-  margin: 0;
-  text-align: center;
-  min-width: 0;
-}
-.mon-status-seg .arco-radio-button-inner {
-  padding: 0 4px;
-  font-size: 12px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 /* Left Rail Header — extends native .list-head cleanly */
 .mon-runner-pill {
   all: unset;
@@ -86,62 +62,6 @@
 }
 .mon-runner-pill.on i {
   background: var(--ok);
-}
-
-/* Clean wrapped component filter chips so every middleware (incl. etcd) stays visible */
-.mon-app-strip {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  padding-top: 2px;
-  min-width: 0;
-}
-.mon-app-chip {
-  all: unset;
-  box-sizing: border-box;
-  flex: none;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 24px;
-  padding: 0 7px;
-  border-radius: 5px;
-  font-size: 11px;
-  font-weight: 540;
-  line-height: 1;
-  color: var(--mute);
-  background: var(--surface);
-  border: 1px solid var(--line);
-  white-space: nowrap;
-  transition: background-color 0.18s var(--spring), border-color 0.18s var(--spring), color 0.18s var(--spring), transform 0.16s var(--spring);
-}
-.mon-app-chip:hover {
-  color: var(--ink);
-  border-color: var(--line-strong);
-  background: var(--hover);
-}
-.mon-app-chip:active {
-  transform: scale(0.975);
-}
-.mon-app-chip:focus-visible {
-  box-shadow: var(--ring);
-}
-.mon-app-chip em {
-  font-style: normal;
-  font-size: 10.5px;
-  color: var(--faint);
-}
-.mon-app-chip.on {
-  color: var(--teal-ink);
-  background: var(--teal-soft);
-  border-color: var(--teal-line);
-  font-weight: 600;
-}
-.mon-app-chip.on em {
-  color: var(--teal-ink);
-  opacity: 0.78;
 }
 
 /* Left Rail Cluster Row — harmonized 1:1 with Deliveries .row.row-dlv;
@@ -1336,6 +1256,25 @@ body.is-resizing-pane .mon-pipeline {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+.mon-patched-link {
+  all: unset;
+  cursor: pointer;
+  color: var(--brand-ink);
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+  border-radius: 4px;
+  padding: 0 3px;
+  transition: background 0.16s var(--spring), color 0.16s var(--spring);
+}
+.mon-patched-link:hover {
+  background: var(--brand-soft);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.mon-patched-link:focus-visible {
+  box-shadow: var(--ring);
 }
 
 /* ---------- Refined Obsidian-Slate Terminal Surface ---------- */

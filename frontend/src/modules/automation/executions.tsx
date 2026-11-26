@@ -1039,7 +1039,7 @@ export function ExecutionPanel({
             <Button
               size="small"
               type="text"
-              href="/#/settings/execution-nodes"
+              href="#/executions/nodes"
               target="_blank"
               rel="noopener noreferrer"
             >
@@ -1529,7 +1529,7 @@ export function ExecutionPanel({
                     {can("execution.manage") && (
                       <a
                         className="ex-ready-link"
-                        href="/#/settings/execution-nodes"
+                        href="#/executions/nodes"
                         target="_blank"
                         rel="noopener noreferrer"
                       >

@@ -18,20 +18,24 @@ const docSystem = `你是一名资深企业级中间件交付架构师，正在�
 
 核心撰写规范（严格遵守）：
 1. 写结论与结果，不写过程与讨论：
-   - 交付报告面向客户技术负责人、架构师及一线运维团队，须直接陈述架构现状、验证结论、风险分级与可执行建议；
-   - 严禁出现工具视角或自我解释式开头（如“本节依据……探针采集结果整理”“以下风险为纳管时已知或证据不足的事项”“当前资料未记录”“档案中没有……”“需要补录基线”）；
-   - 严禁把平台内部编号或工具机制带入正文（如 sop-xxxxxxxx、job-xxx、pkg:xxx、mwctl、探针仅在某节点执行、平台全局视角已屏蔽 OS 底层包等）；引用历史变更时直接写出变更主题或内容（如“PostgreSQL 日志落盘与轮转配置调整”）。
-2. 克制占位符，杜绝【待补充】轰炸：
-   - 严禁对未在事实中体现的运维制度、告警规则、备份保留周期、升级窗口、加密策略等逐条堆砌【待补充：……】；
-   - 对于未检测到或待完善的治理项，直接以正式咨询口径客观陈述现状并给出具体建议即可（例如：“集群已部署 pgBackRest 2.59.1，尚未检测到已初始化的 Stanza 与备份仓库配置；建议投产前明确 RPO/RTO 目标，完成独立备份仓库配置、首次全量备份及隔离环境恢复演练。”）；
-   - 整节正文原则上不出现【待补充】标记，仅当核心业务归属（如未标明的服务业务系统名称）缺失且确需人工落笔时，全节最多保留 1 处简明占位。
-3. 事实客观红线（不可违背）：
+   - 交付报告面向客户技术负责人、架构师及一线运维团队，须直接陈述架构现状、验证结论与客观交接要点；
+   - 严禁出现工具视角或自我解释式开头（如“本节依据……探针采集结果整理”“当前资料未记录”“档案中没有……”“需要补录基线”）；
+   - 严禁把平台内部编号或工具机制带入正文（如 sop-xxxxxxxx、job-xxx、pkg:xxx、mwctl、探针仅在某节点执行等）；引用历史变更时直接写出变更主题或内容。
+2. 零占位符红线（没有就不要写）：
+   - 严禁在正式报告正文中输出任何【待补充：……】、[待填写]、TBD、占位符或空白模板提示！
+   - 若事实或现场口径中未提供业务系统名称、归属部门、运维制度、SLA 等外部信息，直接省略该维度，绝对不要硬写一条“业务定位：【待补充……】”来破坏正式报告质感。
+3. 严禁把正常业务需求或交付收尾误写成“风险点”（极其重要）：
+   - 验收收尾阶段执行测试表清理、测试产物清理、测试备份历史重置/清除（如 clean-tests、clean-artifacts、reset-backups / 「放弃全部备份历史」）属于正式投产前清场的标准正常动作，**绝非高危/中危风险或故障**（如需提醒，仅在交接建议中温和注明“投产前按策略执行首次生产全量备份”即可）。
+   - 严禁吹毛求疵编造伪风险：不得挑刺步骤确认与记录的分钟级时间差（所谓“验收记录一致性”），不得将合理的常规参数（如 sync_strict=false 保障可用性、max_connections、log_lock_waits=off、app_user 留空待应用接入等）或未纳入本交付包的外围体系（独立监控平台、客户侧前置 ELB/VIP、异地备份介质、同机控制节点）擅自定级为「高危/中危风险短板」。
+   - 凡是「已确认的现场口径」中明确为客户按需选择/既有配套的事项（如客户明确不启用 TLS 或 TDE、前端已有独立 ELB/F5/VIP、已有外部监控与备份体系、按可用性优先关闭严格同步等），必须视为**正常交付范围与架构现状**，可在概述/架构中如实中性陈述，**严禁列入「风险与遗留问题」**。
+   - 仅将真正未闭环的实质风险（如存在失败未恢复步骤、活跃未修复的严重/高危 CVE、证书即将过期、或现场明确勾选“确属待整改风险”的事项）列入风险；若无实质阻断风险，第 6 节应简明扼要地写明“本次交付验收项全部通过，当前无阻断投产的未闭环风险”（可附 1~2 条中性投产交接提醒），切忌为凑篇幅强行罗列“高/中/低风险”。
+4. 事实客观红线（不可违背）：
    - 仅依据给出的真实数据撰写，严禁编造版本号、主机、IP、参数值、时间、人名或未发生的验收结果；
-   - 真实存在的失败步骤、执行偏差、单点故障隐患（SPOF）、未修复高危/严重漏洞或安全基线不合规项必须如实客观呈现，禁止美化或回避。
-4. 版式与语言风格：
-   - 简体中文，书面、凝练、专业、可读性强，像资深顾问亲手定稿的正式交付文档；
+   - 确实存在的失败未恢复步骤或未修复的高危/严重漏洞必须如实呈现，禁止隐瞒。
+5. 版式与语言风格：
+   - 简体中文，书面、凝练、专业、克制，像资深交付顾问亲手定稿的正式交付文档；
    - 直接输出本节正文：不要重复章节标题，不要寒暄或解释说明；
-   - 建议采用“1~2 句总述结论 + 分维度要点（每条以 "- **维度标题**：..." 开头，将现状、影响与建议清晰收束）+ 优先行动项”的结构；不要使用 Markdown 标题（#）、代码块或表格。`
+   - 建议采用“1~2 句总述结论 + 精炼要点（每条以 "- **维度标题**：..." 开头）”的结构；不要使用 Markdown 标题（#）、代码块或表格。`
 
 // docFacts renders the facts of a document (everything but its sections) and the sections already written, as text
 // for the model.
@@ -112,7 +116,7 @@ func (s *storeServer) clusterSecurityFactsSummary(user string, f clusterFacts) s
 		b.WriteString("- CVE 漏洞扫描：尚未执行离线扫描\n")
 	}
 	if rep.BaselineTotal > 0 {
-		fmt.Fprintf(&b, "- 配置安全基线：通过 %d/%d 项\n", rep.BaselinePassed, rep.BaselineTotal)
+		fmt.Fprintf(&b, "- 配置安全基线：通过 %d/%d 项（注：未开启项如 TLS/TDE 可能是客户按需不启用，须严格以已确认现场口径为准，不得机械定级为高危故障）\n", rep.BaselinePassed, rep.BaselineTotal)
 		for _, ck := range rep.BaselineChecks {
 			if ck.Status == "fail" || ck.Status == "warn" {
 				fmt.Fprintf(&b, "  - [%s/%s] %s：%s\n", ck.Status, ck.Severity, ck.Title, ck.Detail)
@@ -165,6 +169,239 @@ func (s *storeServer) docAI(r *http.Request, user, target, session string, msgs 
 	return "", "", 502, err
 }
 
+// detectDeliveryClarifications deterministically inspects cluster topology and parameters
+// to surface ambiguous customer-decision items (e.g., disabled TLS/TDE, external LB/monitoring,
+// optional business workload name) as an interactive confirmation card before AI drafting.
+func (s *storeServer) detectDeliveryClarifications(f clusterFacts, saved docSaved, lang string) []docClarifyItem {
+	dep := s.readSpec(f.Current.ID)
+	app := strings.ToLower(strings.TrimSpace(f.Current.AppID))
+	ansByQ := map[string]string{}
+	for _, a := range saved.Answers {
+		q := strings.TrimSpace(a.Question)
+		if q != "" {
+			ansByQ[q] = strings.TrimSpace(a.Answer)
+		}
+	}
+	lookupAns := func(q string) string {
+		if v, ok := ansByQ[strings.TrimSpace(q)]; ok {
+			return v
+		}
+		return ""
+	}
+
+	params := map[string]any{}
+	hostCount := 0
+	hasFront := false
+	hasMonitoring := false
+	if f.Plan != nil {
+		hostCount = len(f.Plan.Hosts)
+		for _, inst := range f.Plan.Instances {
+			if !inst.External && (app == "" || strings.EqualFold(inst.Component, app)) {
+				for k, v := range inst.Params {
+					params[strings.ToLower(k)] = v
+				}
+			}
+			if len(inst.Fronts) > 0 || inst.External {
+				hasFront = true
+			}
+			if strings.Contains(strings.ToLower(inst.Component), "exporter") || strings.Contains(strings.ToLower(inst.Component), "prometheus") {
+				hasMonitoring = true
+			}
+		}
+	}
+	if dep != nil {
+		if hostCount == 0 {
+			hostCount = len(dep.Hosts)
+		}
+		for _, inst := range dep.Instances {
+			if app == "" || strings.EqualFold(inst.Component, app) {
+				for k, v := range inst.Params {
+					lk := strings.ToLower(k)
+					if _, exists := params[lk]; !exists {
+						params[lk] = v
+					}
+				}
+			}
+		}
+		if dep.Imported != nil {
+			if len(dep.Imported.Endpoints) > 0 {
+				hasFront = true
+			}
+			for _, cm := range dep.Imported.Companions {
+				if cm.Kind == "monitoring" || cm.Kind == "exporter" || strings.Contains(strings.ToLower(cm.Component), "exporter") {
+					hasMonitoring = true
+				}
+				if cm.Kind == "proxy" || cm.Kind == "vip" {
+					hasFront = true
+				}
+			}
+		}
+	}
+
+	isExplicitFalse := func(keys ...string) bool {
+		for _, k := range keys {
+			if v, ok := params[k]; ok {
+				switch x := v.(type) {
+				case bool:
+					if !x {
+						return true
+					}
+				case string:
+					lx := strings.ToLower(strings.TrimSpace(x))
+					if lx == "false" || lx == "off" || lx == "0" || lx == "no" {
+						return true
+					}
+				}
+			}
+		}
+		return false
+	}
+
+	var items []docClarifyItem
+	add := func(it docClarifyItem) {
+		it.Answer = lookupAns(it.Question)
+		items = append(items, it)
+	}
+
+	// 1. Optional business context (leave blank -> omitted cleanly, never emits 【待补充】).
+	bizQ := tr(lang, "本集群承载的业务系统或服务对象（选填；留空则报告直接省略，不写占位符）", "Business system or workload served by this cluster (optional; leave blank to omit cleanly)")
+	add(docClarifyItem{
+		ID:          "biz_context",
+		Topic:       tr(lang, "业务归属（选填）", "Workload (Optional)"),
+		Question:    bizQ,
+		Optional:    true,
+		Placeholder: tr(lang, "例如：研发工具链 Artifactory 生产数据库（可留空）", "e.g., DevOps Artifactory production DB (optional)"),
+	})
+
+	// 2. TLS disabled
+	if isExplicitFalse("tls", "ssl") {
+		opt1 := tr(lang, "客户按需不启用（内网隔离 / 前置终止），属正常交付配置，不列为风险", "Disabled by customer requirement (isolated VPC / upstream TLS); normal config, not a risk")
+		opt2 := tr(lang, "仅作为后续可选加固建议，不列为阻断风险", "Optional future hardening suggestion only, not a blocker risk")
+		opt3 := tr(lang, "确属待整改安全风险，需写入风险清单", "Confirmed open security risk; include in Risks section")
+		add(docClarifyItem{
+			ID:       "tls_disabled",
+			Topic:    tr(lang, "传输加密 (TLS)", "Transport TLS"),
+			Question: tr(lang, "当前未启用 TLS 传输加密，请确认交付口径：", "TLS transport encryption is disabled — how should the report treat this?"),
+			Options:  []string{opt1, opt2, opt3},
+			Default:  opt1,
+		})
+	}
+
+	// 3. TDE disabled
+	if isExplicitFalse("tde") {
+		opt1 := tr(lang, "客户无需开启 / 底层存储已加密，属正常交付配置，不列为风险", "Not required / storage-layer encryption used; normal config, not a risk")
+		opt2 := tr(lang, "后续按合规要求再评估，不列为风险", "Evaluate later if compliance requires; not a risk")
+		opt3 := tr(lang, "确属待整改安全风险，需写入风险清单", "Confirmed open security risk; include in Risks section")
+		add(docClarifyItem{
+			ID:       "tde_disabled",
+			Topic:    tr(lang, "静态加密 (TDE)", "At-Rest TDE"),
+			Question: tr(lang, "当前未启用 TDE 透明数据加密，请确认交付口径：", "TDE at-rest encryption is disabled — how should the report treat this?"),
+			Options:  []string{opt1, opt2, opt3},
+			Default:  opt1,
+		})
+	}
+
+	// 4. Multi-node cluster without in-package LB / frontend endpoint
+	if hostCount > 1 && !hasFront {
+		opt1 := tr(lang, "前端由客户侧独立 ELB / F5 / VIP 承载，属正常交付边界，不列为风险", "Handled by external customer ELB/F5/VIP; normal boundary, not a risk")
+		opt2 := tr(lang, "应用采用多节点连接串直连，无需独立负载均衡，不列为风险", "Applications connect via multi-host connection string; normal design, not a risk")
+		opt3 := tr(lang, "前端入口尚未配置，需记为投产前待办", "Frontend ingress pending; note as pre-go-live action item")
+		add(docClarifyItem{
+			ID:       "no_lb_front",
+			Topic:    tr(lang, "前端访问入口", "Access Endpoint"),
+			Question: tr(lang, "交付包未含独立负载均衡，业务实际接入方式为：", "No dedicated load balancer is inside this package — how will traffic connect?"),
+			Options:  []string{opt1, opt2, opt3},
+			Default:  opt1,
+		})
+	}
+
+	// 5. PostgreSQL non-strict sync
+	if (app == "postgresql" || app == "postgres") && hostCount > 1 && isExplicitFalse("sync_strict") {
+		opt1 := tr(lang, "按可用性优先设计（从库异常时不阻塞主库写入），属正常配置，不列为风险", "Designed for write availability when a standby fails; normal config, not a risk")
+		opt2 := tr(lang, "需在交接中温和提示降级异步时的 RPO 边界", "Add a brief handover note on RPO behavior during standby outage")
+		add(docClarifyItem{
+			ID:       "sync_non_strict",
+			Topic:    tr(lang, "同步复制策略", "Sync Policy"),
+			Question: tr(lang, "当前关闭严格同步（sync_strict=false），请确认设计意图：", "Strict synchronous commit (sync_strict=false) is off — confirm intent:"),
+			Options:  []string{opt1, opt2},
+			Default:  opt1,
+		})
+	}
+
+	// 6. Single-node deployment
+	if hostCount == 1 {
+		opt1 := tr(lang, "按需单节点部署（测试/非核心环境），接受单点架构", "Intentional standalone deployment (non-critical/test); single-node accepted")
+		opt2 := tr(lang, "生产暂行单节点，需在风险章节提示单点隐患", "Production standalone; flag SPOF risk in Risks section")
+		add(docClarifyItem{
+			ID:       "single_node",
+			Topic:    tr(lang, "单节点定位", "Single-Node Scope"),
+			Question: tr(lang, "当前为单节点部署，请确认交付口径：", "Cluster is deployed as a single node — confirm scope:"),
+			Options:  []string{opt1, opt2},
+			Default:  opt1,
+		})
+	}
+
+	// 7. External monitoring / backup storage scope
+	if !hasMonitoring {
+		opt1 := tr(lang, "监控告警与异地备份由客户现有运维体系统一纳管，属正常交付边界，不列为风险", "Monitoring and off-host backup are managed by customer ops platform; normal scope, not a risk")
+		opt2 := tr(lang, "需在投产交接提醒中注明接入监控及配置异地备份介质", "Include a concise handover reminder to hook up monitoring & off-host backup")
+		add(docClarifyItem{
+			ID:       "external_ops",
+			Topic:    tr(lang, "监控与备份边界", "Monitoring & Backup"),
+			Question: tr(lang, "监控告警与外部备份介质不在本次交付包内，现场口径为：", "Monitoring and off-host backup are outside this package — confirm boundary:"),
+			Options:  []string{opt1, opt2},
+			Default:  opt1,
+		})
+	}
+
+	return items
+}
+
+func upsertDocAnswers(existing, incoming []planQA) []planQA {
+	out := append([]planQA(nil), existing...)
+	for _, a := range incoming {
+		q := truncRunes(strings.TrimSpace(a.Question), 300)
+		ans := truncRunes(strings.TrimSpace(a.Answer), 1000)
+		if q == "" {
+			continue
+		}
+		replaced := false
+		for i := range out {
+			if strings.TrimSpace(out[i].Question) == q {
+				out[i].Answer = ans
+				replaced = true
+				break
+			}
+		}
+		if !replaced && ans != "" && len(out) < 60 {
+			out = append(out, planQA{Question: q, Answer: ans})
+		}
+	}
+	// Remove entries whose answer was explicitly cleared.
+	cleaned := out[:0]
+	for _, a := range out {
+		if strings.TrimSpace(a.Answer) != "" {
+			cleaned = append(cleaned, a)
+		}
+	}
+	return cleaned
+}
+
+func formatDocClarificationContext(saved docSaved) string {
+	if len(saved.Answers) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n\n【客户与交付工程师已确认的现场口径（最高优先级，必须严格遵守；凡确认为「正常交付配置/正常交付边界/不列为风险」的事项，严禁写入「风险与遗留问题」！）】：\n")
+	for _, a := range saved.Answers {
+		if strings.TrimSpace(a.Answer) == "" {
+			continue
+		}
+		b.WriteString("- 事项：" + a.Question + "\n  已确认口径：" + aiScrub(a.Answer) + "\n")
+	}
+	return b.String()
+}
+
 func (s *storeServer) draftSection(w http.ResponseWriter, r *http.Request, session storeSession, f clusterFacts, d *clusterDoc, key string) {
 	sec := docSectionOf(d, key)
 	if sec == nil || !sec.AI {
@@ -173,26 +410,16 @@ func (s *storeServer) draftSection(w http.ResponseWriter, r *http.Request, sessi
 	}
 	var in struct {
 		Ask     string   `json:"ask"`     // what the person wants in it, optional
-		Answers []planQA `json:"answers"` // answers to the assistant's questions
+		Answers []planQA `json:"answers"` // answers to the assistant's questions / delivery clarifications
 	}
 	_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&in)
 	saved := s.docLoad(f.ID, d.ID)
-	for _, a := range in.Answers {
-		if strings.TrimSpace(a.Answer) != "" && len(saved.Answers) < 60 {
-			saved.Answers = append(saved.Answers, planQA{truncRunes(a.Question, 300), truncRunes(a.Answer, 1000)})
-		}
-	}
 	if len(in.Answers) > 0 {
+		saved.Answers = upsertDocAnswers(saved.Answers, in.Answers)
 		_ = s.docSave(f.ID, d.ID, saved)
 	}
-	prompt := "下面是平台整理的事实和文档里已经写好的部分：\n\n" + docFacts(d, key) + s.clusterSecurityFactsSummary(session.User, f)
-	if len(saved.Answers) > 0 {
-		prompt += "\n\n现场人员补充的信息（问答）：\n"
-		for _, a := range saved.Answers {
-			prompt += "- 问：" + a.Question + "\n  答：" + aiScrub(a.Answer) + "\n"
-		}
-	}
-	prompt += "\n\n请起草「" + sec.Title + "」这一节的正文。本节目标：" + sec.Hint + "\n注意：直接输出面向客户签收的正式报告结论，不要写“本节依据……整理”等过程性套话，不要暴露内部编号（如 sop-xxxx）或工具采集过程，也不要堆砌【待补充】占位符。"
+	prompt := "下面是平台整理的事实和文档里已经写好的部分：\n\n" + docFacts(d, key) + s.clusterSecurityFactsSummary(session.User, f) + formatDocClarificationContext(saved)
+	prompt += "\n\n请起草「" + sec.Title + "」这一节的正文。本节目标：" + sec.Hint + "\n注意：直接输出面向客户签收的正式报告结论，严禁输出任何【待补充】/TBD 占位符（未知信息直接省略），严禁把验收阶段清理测试备份/测试数据或客户按需选定的配置误判为风险，不要写过程性套话或暴露内部编号。"
 	if d.Kind == "assess" {
 		prompt += "\n\n这是一份" + d.Title + "。给出依据和计算过程，结论要落到具体的做法（建议通过变更演练实施的调整方向、关键参数）。如果缺少只有现场才知道、又直接影响结论的信息（例如业务每秒请求数、数据量与增长速度、机器的 CPU 内存磁盘、可接受的停机时间），不要编造：只输出 JSON {\"questions\":[{\"question\":\"问题\",\"options\":[\"选项\"]}]}，最多 3 个问题，每个 2-4 个选项。上面已经回答过的不要再问；不重要的信息写成假设，不要为它提问。"
 	}
@@ -244,20 +471,41 @@ func (s *storeServer) draftSection(w http.ResponseWriter, r *http.Request, sessi
 const docDraftAllSystem = `你是一名资深企业级中间件交付架构师，正在一次性为客户补全正式交付报告中尚未填写的章节。
 
 核心撰写规范（严格遵守）：
-1. 写结论与结果，不写过程与讨论：面向客户技术负责人与运维团队直接输出定稿级正文，严禁出现“本节依据……整理”“探针采集显示”“档案中没有记录”“需要补录基线”“平台全局视角已屏蔽”等内部工具视角或对话式表述，严禁泄露内部编号（如 sop-xxxxxxxx、pkg:xxx）。
-2. 杜绝【待补充】轰炸：未在事实中体现的运维制度、告警策略、备份保留周期或维护窗口，直接客观陈述当前现状并提出具体工程建议，不要逐条写【待补充：……】（每节原则上 0 处，仅核心业务归属缺失时最多 1 处）。
-3. 严守事实红线：仅基于给出的拓扑、规格、执行记录与安全态势撰写，不编造版本、数字、时间、人名或未发生事件；真实存在的失败、偏差、单点风险、活跃高危/严重漏洞与安全基线不合规项必须客观披露。
-4. 版式规范：简体中文、书面凝练，优先采用“总述结论 + 分条要点（每行以 "- **主题**：..." 开头）”结构，不使用 Markdown 标题、代码块或表格；不要重复章节标题。
-5. 只输出严格 JSON：{"sections":{"章节key":"该节正文内容"}}，不要输出 Markdown 围栏或多余说明。`
+1. 写结论与结果，不写过程与讨论：面向客户技术负责人与运维团队直接输出定稿级正文，严禁出现“本节依据……整理”“探针采集显示”“档案中没有记录”“需要补录基线”等内部工具视角或对话式表述，严禁泄露内部编号（如 sop-xxxxxxxx、pkg:xxx）。
+2. 零占位符红线（没有就不要写）：严禁输出任何【待补充：……】、[待填写]、TBD 占位符！未提供的业务系统名称、归属部门或外部运维制度直接省略，切勿硬写空壳条目。
+3. 严禁将正常交付行为或客户按需选择误写成“风险点”：
+   - 验收收尾阶段清理测试表、测试产物或「放弃全部备份历史/清理测试备份」是标准投产前清场动作，绝非风险；
+   - 严禁挑刺步骤执行/确认的分钟级时间差；
+   - 凡「已确认的现场口径」中明确为客户按需选择或既有配套的事项（如不启用 TLS/TDE、前端已有独立 ELB/F5/VIP、已有外部监控与备份体系、按可用性优先关闭严格同步等），必须视为正常交付范围，严禁写入「风险与遗留问题」；
+   - 若无真实未闭环风险，第 6 节应简明给出“无阻断投产的未闭环风险”的干净交接结论，切忌凑数罗列伪风险。
+4. 严守事实红线：仅基于给出的拓扑、规格、执行记录、现场口径与安全态势撰写，不编造版本、数字、时间、人名或未发生事件；确实存在的失败未恢复项或未修复严重/高危漏洞须如实披露。
+5. 版式规范：简体中文、书面凝练，优先采用“总述结论 + 分条要点（每行以 "- **主题**：..." 开头）”结构，不使用 Markdown 标题、代码块或表格；不要重复章节标题。
+6. 只输出严格 JSON：{"sections":{"章节key":"该节正文内容"}}，不要输出 Markdown 围栏或多余说明。`
 
 // draftAllSections drafts all currently empty (and optionally stale) AI-draftable sections in one fast LLM round-trip.
 func (s *storeServer) draftAllSections(w http.ResponseWriter, r *http.Request, session storeSession, f clusterFacts, d *clusterDoc) {
 	var in struct {
-		IncludeStale bool   `json:"include_stale"`
-		Ask          string `json:"ask"`
+		IncludeStale bool     `json:"include_stale"`
+		ForceAll     bool     `json:"force_all"`
+		SaveOnly     bool     `json:"save_only"`
+		Ask          string   `json:"ask"`
+		Answers      []planQA `json:"answers"`
 	}
 	if r.Body != nil {
-		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&in)
+		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&in)
+	}
+	saved := s.docLoad(f.ID, d.ID)
+	if len(in.Answers) > 0 {
+		saved.Answers = upsertDocAnswers(saved.Answers, in.Answers)
+		if err := s.docSave(f.ID, d.ID, saved); err != nil {
+			s.fail(w, 500, "保存交付口径失败")
+			return
+		}
+	}
+	if in.SaveOnly {
+		nd, _ := s.buildDoc(f, d.ID)
+		s.writeJSON(w, 200, map[string]any{"drafted": 0, "doc": nd})
+		return
 	}
 	var targets []docBlock
 	for _, b := range d.Blocks {
@@ -265,12 +513,13 @@ func (s *storeServer) draftAllSections(w http.ResponseWriter, r *http.Request, s
 			continue
 		}
 		empty := strings.TrimSpace(b.Text) == ""
-		if empty || (in.IncludeStale && b.Stale != "") {
+		if in.ForceAll || empty || (in.IncludeStale && b.Stale != "") {
 			targets = append(targets, b)
 		}
 	}
 	if len(targets) == 0 {
-		s.writeJSON(w, 200, map[string]any{"drafted": 0, "doc": d})
+		nd, _ := s.buildDoc(f, d.ID)
+		s.writeJSON(w, 200, map[string]any{"drafted": 0, "doc": nd})
 		return
 	}
 
@@ -278,6 +527,7 @@ func (s *storeServer) draftAllSections(w http.ResponseWriter, r *http.Request, s
 	p.WriteString("下面是平台整理的文档事实与实时安全态势：\n\n")
 	p.WriteString(docFacts(d, ""))
 	p.WriteString(s.clusterSecurityFactsSummary(session.User, f))
+	p.WriteString(formatDocClarificationContext(saved))
 	p.WriteString("\n\n请一次性起草以下章节的正文内容（按 key 输出 JSON {\"sections\":{...}}）：\n")
 	for _, t := range targets {
 		fmt.Fprintf(&p, "- key=%q | 标题：%s | 撰写要点：%s\n", t.Key, t.Title, t.Hint)
@@ -301,7 +551,7 @@ func (s *storeServer) draftAllSections(w http.ResponseWriter, r *http.Request, s
 		s.fail(w, 502, "模型未能返回结构化章节草稿，请重试或单节起草")
 		return
 	}
-	saved := s.docLoad(f.ID, d.ID)
+	saved = s.docLoad(f.ID, d.ID)
 	stamp := time.Now().UTC().Format(time.RFC3339Nano)
 	drafted := 0
 	for _, t := range targets {
@@ -372,11 +622,11 @@ const docCheckSystem = `你是资深企业级中间件交付审阅官，正在�
 1. completeness（完整性）：检查必填章节是否为空、是否残留【待补充】占位符、关键交付结论是否缺位；
 2. consistency（事实一致性）：核对正文中的节点数、IP、版本、高可用模式、执行步数、变更结果是否与平台事实矛盾；
 3. honesty（客观坦诚）：检查是否回避或美化了失败步骤、执行偏差、未执行项或单点风险；
-4. security（安全与合规）：对照实时安全态势（活跃 CVE、TLS 证书有效期、配置安全基线未通过项），检查「风险与遗留问题」「验收结论」是否如实披露并给出可落地治理建议；
-5. clarity（正式公文规范）：重点排查 AI 对话口吻、过程性套话（如“本节依据……探针整理”“档案中没有”“需要补录基线”）、内部系统编号泄露（如 sop-xxxx）以及堆砌【待补充】的问题，确保全文具备面向客户签收的正式交付报告质感。
+4. security（安全与合规）：对照实时安全态势（活跃 CVE、TLS 证书有效期）与已确认的现场口径，检查「风险与遗留问题」「验收结论」是否如实披露真实漏洞与未闭环事项；注意不得强求将客户已明确按需不启用的项（如按需不启用 TLS/TDE、外部 ELB/监控）或正常验收清理（清理测试备份/数据）误判为风险；
+5. clarity（正式公文规范）：重点排查 AI 对话口吻、过程性套话、内部系统编号泄露、任何残留的【待补充】占位符，以及把正常验收清理/客户正常业务需求误写成“高/中危风险”的问题，确保全文具备面向客户签收的正式交付报告质感。
 
 极其重要（让审阅结果真正可用）：
-- 对于每一个可编辑章节（给出 key 的章节），如果该节为空、过时、与事实不符、口语化/偏过程叙述或遗漏关键信息，你**必须**在 proposed_text 中直接给出一份**可直接一键采纳写入该节的定稿级正式正文**（简体中文、结论导向、只基于给出事实、不编造数据、不含标题与寒暄、不使用内部编号与工具视角、不堆砌【待补充】、列表用 "- **维度**：..." 开头）。
+- 对于每一个可编辑章节（给出 key 的章节），如果该节为空、过时、与事实不符、含【待补充】占位符、误把正常配置/测试清理写成风险或口语化，你**必须**在 proposed_text 中直接给出一份**可直接一键采纳写入该节的定稿级正式正文**（简体中文、结论导向、只基于给出事实与已确认现场口径、不编造数据、不含标题与寒暄、不使用内部编号、零【待补充】占位符、列表用 "- **维度**：..." 开头）。
 - 每条 finding 尽量给出 evidence 字段，精确引用文档或安全态势里的具体数字/主机/版本/基线项/CVE 编号作为核查依据。
 - 只输出严格 JSON，不要任何多余文本：
 {"summary":"1-2句总结当前文档是否达到对外交付标准及核心改进点","findings":[{"section_key":"可编辑章节的key(若非可编辑章节留空)","section":"章节标题","category":"completeness|consistency|honesty|security|clarity","level":"error|warn|tip","problem":"具体问题","evidence":"引用的具体事实依据","suggest":"具体改进方向","proposed_text":"针对该可编辑章节可直接采纳的完整正文（若无需重写则留空）"}]}`
@@ -467,11 +717,13 @@ func (s *storeServer) checkDoc(w http.ResponseWriter, r *http.Request, session s
 		}
 	}
 
-	// 2. Build rich grounded prompt (doc facts + live cluster security posture + editable section schema).
+	// 2. Build rich grounded prompt (doc facts + live cluster security posture + confirmed customer clarifications + editable section schema).
+	savedDoc := s.docLoad(f.ID, d.ID)
 	secFacts := s.clusterSecurityFactsSummary(session.User, f)
 	var prompt strings.Builder
 	prompt.WriteString(docFacts(d, ""))
 	prompt.WriteString(secFacts)
+	prompt.WriteString(formatDocClarificationContext(savedDoc))
 	if len(secOrder) > 0 {
 		prompt.WriteString("\n\n可编辑章节清单（请务必准确填写 section_key，并对空缺/待改进章节在 proposed_text 中提供可直接采纳写入的完整正文）：\n")
 		for _, b := range secOrder {

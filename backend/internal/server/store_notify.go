@@ -11,7 +11,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -65,22 +64,25 @@ func (s *storeServer) channels() []notifyChannel {
 
 func (s *storeServer) readChannels() []notifyChannel {
 	var out []notifyChannel
-	if b, err := os.ReadFile(filepath.Join(s.settingsDir(), "channels.json")); err == nil {
-		_ = json.Unmarshal(b, &out)
-	}
+	_ = s.loadSettingDoc("notify_channels", filepath.Join(s.settingsDir(), "channels.json"), &out)
 	if out == nil {
 		out = []notifyChannel{}
 	}
 	return out
 }
 
+func (s *storeServer) saveChannels(list []notifyChannel) error {
+	if list == nil {
+		list = []notifyChannel{}
+	}
+	return s.saveSettingDoc("notify_channels", filepath.Join(s.settingsDir(), "channels.json"), list)
+}
+
 func (s *storeServer) notifyLog() []notifyAttempt {
 	notifyMu.Lock()
 	defer notifyMu.Unlock()
 	var out []notifyAttempt
-	if b, err := os.ReadFile(filepath.Join(s.settingsDir(), "notify-log.json")); err == nil {
-		_ = json.Unmarshal(b, &out)
-	}
+	_ = s.loadSettingDoc("notify_log", filepath.Join(s.settingsDir(), "notify-log.json"), &out)
 	if out == nil {
 		out = []notifyAttempt{}
 	}
@@ -92,14 +94,12 @@ func (s *storeServer) logAttempt(a notifyAttempt) {
 	defer notifyMu.Unlock()
 	var all []notifyAttempt
 	path := filepath.Join(s.settingsDir(), "notify-log.json")
-	if b, err := os.ReadFile(path); err == nil {
-		_ = json.Unmarshal(b, &all)
-	}
+	_ = s.loadSettingDoc("notify_log", path, &all)
 	all = append([]notifyAttempt{a}, all...)
 	if len(all) > 200 {
 		all = all[:200]
 	}
-	_ = writeJSONFile(path, all)
+	_ = s.saveSettingDoc("notify_log", path, all)
 }
 
 var notifyClient = &http.Client{Timeout: 10 * time.Second}
@@ -255,7 +255,7 @@ func (s *storeServer) handleSettings(w http.ResponseWriter, r *http.Request, ses
 				return
 			}
 		}
-		err := writeJSONFile(filepath.Join(s.settingsDir(), "channels.json"), all)
+		err := s.saveChannels(all)
 		notifyMu.Unlock()
 		if err != nil {
 			s.fail(w, 500, "保存失败，请稍后重试")
@@ -272,7 +272,7 @@ func (s *storeServer) handleSettings(w http.ResponseWriter, r *http.Request, ses
 				keep = append(keep, c)
 			}
 		}
-		err := writeJSONFile(filepath.Join(s.settingsDir(), "channels.json"), keep)
+		err := s.saveChannels(keep)
 		notifyMu.Unlock()
 		if err != nil {
 			s.fail(w, 500, "保存失败，请稍后重试")

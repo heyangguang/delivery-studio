@@ -276,7 +276,7 @@ func (s *storeServer) handlePortalAIChat(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	st := s.aiLoad()
-	providers := st.aiProvidersForPick("assistant", in.Model)
+	providers := s.aiProvidersForUser(st, user.User, "assistant", in.Model)
 	if len(providers) == 0 {
 		s.fail(w, 409, "「AI 助手」未配置可用模型，请管理员在平台设置 → AI 中配置模型")
 		return

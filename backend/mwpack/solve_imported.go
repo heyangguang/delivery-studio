@@ -137,8 +137,16 @@ func SolveImported(cat *Catalog, d *Deployment) *Plan {
 				category = catComp.Category
 			}
 		}
-		if idx > 0 && hasCompMeta && strings.TrimSpace(compMeta.DisplayName) != "" {
-			title = strings.TrimSpace(compMeta.DisplayName)
+		if idx > 0 && hasCompMeta {
+			if strings.TrimSpace(compMeta.DisplayName) != "" {
+				title = strings.TrimSpace(compMeta.DisplayName)
+			}
+			if strings.TrimSpace(compMeta.Icon) != "" {
+				icon = strings.TrimSpace(compMeta.Icon)
+			}
+			if strings.TrimSpace(compMeta.Color) != "" {
+				color = strings.TrimSpace(compMeta.Color)
+			}
 		}
 		if idx == 0 && d.Imported != nil {
 			if strings.TrimSpace(d.Imported.DisplayName) != "" {
@@ -316,15 +324,23 @@ func SolveImported(cat *Catalog, d *Deployment) *Plan {
 			synComp.Operations = catComp.Operations
 			synComp.Context = catComp.Context
 			synComp.Provides = catComp.Provides
+			synComp.Params = catComp.Params
 			synComp.sum = catComp.sum
+		}
+		var synParams []Param
+		if catRes != nil && len(catRes.Params) > 0 {
+			synParams = catRes.Params
+		} else if catComp != nil && len(catComp.Params) > 0 {
+			synParams = catComp.Params
 		}
 		synRes := &Resolved{
 			C:         synComp,
 			Version:   Version{ID: ver, Status: "published"},
 			Platforms: []string{platDef.ID},
 			Overlay: Overlay{
-				Roles: roleSpecs,
-				Flows: flowSpecs,
+				Roles:  roleSpecs,
+				Flows:  flowSpecs,
+				Params: synParams,
 			},
 		}
 
@@ -588,10 +604,34 @@ func ImportedSchemeSummary(d *Deployment) *SchemeSummary {
 func importedEndpointTitle(epName, role string) string {
 	lowName := strings.ToLower(strings.TrimSpace(epName))
 	lowRole := strings.ToLower(strings.TrimSpace(role))
+	switch lowName {
+	case "eip":
+		return "EIP 弹性公网"
+	case "vip":
+		return "VIP 虚拟 IP"
+	case "f5":
+		return "F5 负载均衡"
+	case "elb":
+		return "ELB 负载均衡"
+	case "slb":
+		return "SLB 负载均衡"
+	case "lvs":
+		return "LVS 四层均衡"
+	case "haproxy":
+		return "HAProxy 代理"
+	case "nginx":
+		return "Nginx 代理"
+	case "pooler", "pgbouncer":
+		return "连接池入口"
+	case "dns":
+		return "DNS 域名入口"
+	case "metrics":
+		return "监控指标入口"
+	}
 	genericNames := map[string]bool{
 		"": true, "readwrite": true, "rw": true, "write": true, "writer": true, "primary": true, "master": true,
 		"readonly": true, "ro": true, "read": true, "reader": true, "replica": true, "standby": true,
-		"admin": true, "console": true, "mgmt": true, "management": true, "endpoint": true, "vip": true,
+		"admin": true, "console": true, "mgmt": true, "management": true, "endpoint": true,
 	}
 	if !genericNames[lowName] && epName != "" {
 		return epName

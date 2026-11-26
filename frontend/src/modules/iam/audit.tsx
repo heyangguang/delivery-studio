@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Button,
@@ -19,10 +19,10 @@ import {
   IconRight,
   IconSearch,
 } from "@arco-design/web-react/icon";
-import { api, can, formatDuration, num, stamp, useConnectivity } from "../../shared/shared";
+import { api, can, formatDuration, num, stamp, typing, useConnectivity } from "../../shared/shared";
 import { RangeBar, rangeOf } from "../../design/rangebar";
 import type { Range } from "../../design/rangebar";
-import { Segmented, StatusBadge, StatusDot } from "../../design/ui";
+import { Kbd, Segmented, StatusBadge, StatusDot } from "../../design/ui";
 import { bi, biv, useLang, withLang } from "../../app/i18n";
 import "../ai/aiusage.css";
 import "./iam.css";
@@ -41,7 +41,18 @@ const ACTION_DATA: Record<string, [string, string, string, string]> = {
   "user-disable": ["停用账户", "账户", "Disable user", "Account"],
   "user-enable": ["启用账户", "账户", "Enable user", "Account"],
   "user-delete": ["删除账户", "账户", "Delete user", "Account"],
-  "user-grant": ["分配角色和团队", "账户", "Assign roles & teams", "Account"],
+  "user-grant": [
+    "分配角色、团队与集群权限",
+    "账户",
+    "Assign roles, teams & cluster access",
+    "Account",
+  ],
+  "iam-cluster-grant": [
+    "分配集群访问权限",
+    "账户",
+    "Assign cluster access",
+    "Account",
+  ],
   "user-deliveries-move": [
     "转交已删除账户的交付",
     "账户",
@@ -67,6 +78,7 @@ const ACTION_DATA: Record<string, [string, string, string, string]> = {
   "job-runlogs-delete": ["清理执行日志", "交付", "Clear run logs", "Delivery"],
   "cluster-import": ["导入存量集群", "交付", "Import existing cluster", "Delivery"],
   "cluster-baseline-update": ["更新集群基线配置", "交付", "Update cluster baseline", "Delivery"],
+  "cluster-baseline-gaps-update": ["更新基线补采忽略项", "交付", "Update dismissed baseline gaps", "Delivery"],
   "cluster-baseline-ai-gaps": ["AI 深度诊断基线缺口", "AI", "AI diagnose baseline gaps", "AI"],
   "delivery-file-patch": ["热修补交付脚本文件", "交付", "Patch delivery script file", "Delivery"],
   "delivery-file-patch-revert": [
@@ -120,6 +132,22 @@ const ACTION_DATA: Record<string, [string, string, string, string]> = {
   "cluster-agent-enroll": ["签发集群直连目标机 Agent", "交付", "Enroll cluster direct target agent", "Delivery"],
   "cluster-agent-update": ["修改直连目标机 Agent 权限", "交付", "Update direct target agent policy", "Delivery"],
   "cluster-agent-bundle": ["下载直连目标机 Agent 安装包", "交付", "Download direct target agent bundle", "Delivery"],
+  "execution-agent-enroll": ["接入全局目标机 Agent", "交付", "Enroll global target agent", "Delivery"],
+  "execution-agent-bundle": ["下载目标机 Agent 安装包", "交付", "Download target agent bundle", "Delivery"],
+  "execution-agent-update": ["修改目标机 Agent 权限与关联集群", "交付", "Update target agent policy & clusters", "Delivery"],
+  "execution-agent-revoke": ["撤销目标机 Agent 授权", "交付", "Revoke target agent authorization", "Delivery"],
+  "execution-agent-delete": ["删除目标机 Agent 记录", "交付", "Delete target agent record", "Delivery"],
+  "unified-agent-create": ["接入 Agent", "交付", "Enroll Agent", "Delivery"],
+  "unified-agent-update": ["更新 Agent 状态或集群权限", "交付", "Update Agent status or cluster permissions", "Delivery"],
+  "unified-agent-delete": ["删除 Agent", "交付", "Delete Agent", "Delivery"],
+  "unified-agent-bundle": ["下载 Agent 安装包", "交付", "Download Agent installer bundle", "Delivery"],
+  "agent-heartbeat-policy": ["配置 Agent 默认心跳周期", "交付", "Update default Agent heartbeat interval", "Delivery"],
+  "cluster-inspect-policy": ["配置集群定时实况巡检策略", "交付", "Update cluster auto-inspection policy", "Delivery"],
+  "cluster-live-inspect": ["发起集群主机只读实测采集", "交付", "Trigger cluster live host inspection", "Delivery"],
+  "cluster-probe-ingest": ["导入离线只读探针实测快照", "交付", "Import offline read-only probe snapshot", "Delivery"],
+  "cluster-drift-accept": ["采纳主机实测漂移为基线", "交付", "Accept live config drift into baseline", "Delivery"],
+  "cluster-agent-bind": ["关联目标机 Agent 到集群", "交付", "Bind target agent to cluster", "Delivery"],
+  "cluster-agent-unbind": ["解除目标机 Agent 与集群关联", "交付", "Unbind target agent from cluster", "Delivery"],
   "rehearsal-exec-probe": ["自动执行演练只读探针", "交付", "Auto-run rehearsal read-only probe", "Delivery"],
   "rehearsal-exec-step": ["自动执行变更演练步骤", "交付", "Auto-run rehearsal step", "Delivery"],
   "rehearsal-exec-rollback": ["自动执行演练回滚命令", "交付", "Auto-run rehearsal rollback", "Delivery"],
@@ -1151,16 +1179,49 @@ export function AuditView() {
   );
   const activeTrace = Boolean(trace && q === trace.sid);
   const summary = sessResp?.summary;
+  const searchRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (
+        e.metaKey ||
+        e.ctrlKey ||
+        e.altKey ||
+        document.querySelector(".pal-mask,.arco-modal,.arco-drawer")
+      )
+        return;
+      if (e.key === "/" && !typing(e)) {
+        e.preventDefault();
+        searchRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   return (
-    <article className="au-page enter">
+    <article className="au-page iam-stage">
       <header className="iam-h au-h">
-        <div>
-          <h1>{bi("操作审计", "Audit Log")}</h1>
+        <div className="iam-h-main">
+          <div className="iam-h-title-row">
+            <h1>{bi("操作审计", "Audit Log")}</h1>
+            {tab === "events" && d ? (
+              <span className="iam-h-meta num">
+                {bi(`${num(d.total)} 条记录`, `${num(d.total)} events`)}
+              </span>
+            ) : tab === "sessions" && summary ? (
+              <span className="iam-h-meta num">
+                {bi(
+                  `${summary.online_users} 人在线 · ${summary.active_sessions} 台设备`,
+                  `${summary.online_users} online · ${summary.active_sessions} devices`,
+                )}
+              </span>
+            ) : null}
+          </div>
           <p>
             {bi(
-              "按时间、成员与资源检索操作记录，查看终端登录与在线时长。",
-              "Search activity by time, user, and resource; track sign-in sessions and active durations.",
+              "按时间跨度、成员与资源检索操作轨迹，实时查看在线会话并可强制下线异常终端。",
+              "Search activity by time, user, and resource; monitor active sessions and revoke unauthorized devices.",
             )}
           </p>
         </div>
@@ -1198,7 +1259,7 @@ export function AuditView() {
                 : `/api/audit/sessions/export?${sessParams()}`,
             )}
           >
-            {bi("导出表格", "Export CSV")}
+            {bi("导出 CSV", "Export CSV")}
           </Button>
         </div>
       </header>
@@ -1238,29 +1299,34 @@ export function AuditView() {
         <div className="au-filter-top">
           <RangeBar value={range} onChange={setRange} />
           {hasFilters && (
-            <Button
-              type="text"
-              size="small"
-              className="au-clear-btn"
+            <button
+              type="button"
+              className="iam-text-act"
               onClick={clearFilters}
             >
-              {bi("清空筛选", "Clear Filters")}
-            </Button>
+              {bi("清空筛选条件", "Clear Filters")}
+            </button>
           )}
         </div>
-        <div className="au-row">
+        <div className="au-filter-grid">
           <Input
+            ref={(r) => {
+              searchRef.current =
+                (r as unknown as { dom?: HTMLInputElement })?.dom ?? null;
+            }}
             allowClear
+            className="au-search-in"
             prefix={<IconSearch />}
+            suffix={!q ? <Kbd>/</Kbd> : undefined}
             placeholder={
               tab === "events"
                 ? bi(
-                    "搜索成员、资源、路径或请求内容",
-                    "Search user, resource, path, or payload",
+                    "搜索成员、资源、路径或请求内容…",
+                    "Search user, resource, path, or payload…",
                   )
                 : bi(
-                    "搜索成员、设备、IP 或会话编号",
-                    "Search user, device, IP, or session ID",
+                    "搜索成员、设备、IP 或会话编号…",
+                    "Search user, device, IP, or session ID…",
                   )
             }
             value={q}
@@ -1268,36 +1334,44 @@ export function AuditView() {
               setQ(val);
               if (trace && val !== trace.sid) setTrace(null);
             }}
-            style={{ width: 260 }}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                setQ("");
+                (e.target as HTMLInputElement).blur();
+              }
+            }}
             aria-label={bi("搜索", "Search")}
           />
           <Select
             allowClear
+            className="au-sel"
             placeholder={bi("成员", "User")}
             value={user || undefined}
             onChange={(v) => setUser(v || "")}
             options={userOptions}
-            style={{ width: 136 }}
+            triggerProps={{ autoFitPosition: true }}
             aria-label={bi("按成员筛选", "Filter by user")}
           />
           {tab === "events" ? (
             <>
               <Select
                 allowClear
-                placeholder={bi("资源", "Resource")}
+                className="au-sel"
+                placeholder={bi("资源类型", "Resource")}
                 value={kind || undefined}
                 onChange={(v) => setKind(v || "")}
                 options={resourceOptions}
-                style={{ width: 152 }}
+                triggerProps={{ autoFitPosition: true }}
                 aria-label={bi("按资源筛选", "Filter by resource")}
               />
               <Select
                 allowClear
                 showSearch
-                placeholder={bi("操作类型", "Action")}
+                className="au-sel is-wide"
+                placeholder={bi("操作动作", "Action")}
                 value={action || undefined}
                 onChange={(v) => setAction(v || "")}
-                style={{ width: 204 }}
+                triggerProps={{ autoFitPosition: true }}
                 aria-label={bi("按操作类型筛选", "Filter by action")}
               >
                 {actionGroups.map(([g, opts]) => (
@@ -1312,6 +1386,7 @@ export function AuditView() {
               </Select>
               <Select
                 allowClear
+                className="au-sel is-compact"
                 placeholder={bi("结果", "Result")}
                 value={result || undefined}
                 onChange={(v) => setResult(v || "")}
@@ -1319,13 +1394,14 @@ export function AuditView() {
                   value: k,
                   label: v,
                 }))}
-                style={{ width: 108 }}
+                triggerProps={{ autoFitPosition: true }}
                 aria-label={bi("按结果筛选", "Filter by result")}
               />
             </>
           ) : (
             <Select
               allowClear
+              className="au-sel"
               placeholder={bi("会话状态", "Session Status")}
               value={sessStatus || undefined}
               onChange={(v) => setSessStatus(v || "")}
@@ -1340,7 +1416,7 @@ export function AuditView() {
                   label: bi("改密失效", "Password Changed"),
                 },
               ]}
-              style={{ width: 150 }}
+              triggerProps={{ autoFitPosition: true }}
               aria-label={bi("按会话状态筛选", "Filter by session status")}
             />
           )}
@@ -1416,24 +1492,13 @@ export function AuditView() {
             />
           )}
 
-          <div className="au-count">
-            {d
-              ? bi(
-                  `共 ${num(d.total)} 条记录`,
-                  `${num(d.total)} ${d.total === 1 ? "event" : "events"}`,
-                )
-              : evLoading
-                ? bi("正在载入…", "Loading…")
-                : ""}
-          </div>
-
           {evLoading && !d ? (
-            <div className="au-skel">
+            <div className="iam-skel-list">
               <Skeleton animation text={{ rows: 6 }} />
             </div>
           ) : d && d.rows.length > 0 ? (
             <div
-              className="au2"
+              className="iam-ledger au2"
               role="table"
               aria-label={bi("操作记录明细", "Audit events table")}
             >
@@ -1504,84 +1569,39 @@ export function AuditView() {
             />
           )}
 
-          <div
-            className="au-strip"
-            aria-label={bi("统计概况", "Session summary")}
-          >
-            <div className="au-stat">
-              <span className="au-stat-k">
-                <StatusDot
-                  state={summary && summary.online_users > 0 ? "done" : "void"}
-                />
-                {bi("当前在线", "Online Now")}
-              </span>
-              <strong className="num">
-                {summary
-                  ? bi(
-                      `${summary.online_users} 人`,
-                      `${summary.online_users} ${summary.online_users === 1 ? "user" : "users"}`,
-                    )
-                  : "—"}
-              </strong>
-              <small>
-                {summary
-                  ? bi(
-                      `${summary.active_sessions} 台设备`,
-                      `${summary.active_sessions} ${summary.active_sessions === 1 ? "device" : "devices"}`,
-                    )
-                  : ""}
-              </small>
-            </div>
-            <div className="au-stat">
-              <span className="au-stat-k">{bi("累计登录", "Total Sign-ins")}</span>
-              <strong className="num">
-                {summary
-                  ? bi(
-                      `${num(summary.total_sessions)} 次`,
-                      `${num(summary.total_sessions)} ${summary.total_sessions === 1 ? "session" : "sessions"}`,
-                    )
-                  : "—"}
-              </strong>
-              <small>
-                {bi("含在线与已结束会话", "Includes active & ended sessions")}
-              </small>
-            </div>
-            <div className="au-stat">
-              <span className="au-stat-k">
-                {bi("平均在线时长", "Avg Session Duration")}
-              </span>
-              <strong className="num">
-                {summary ? formatDuration(summary.avg_duration_seconds) : "—"}
-              </strong>
-              <small className="num">
-                {bi("最长", "Max")}{" "}
-                {summary ? formatDuration(summary.max_duration_seconds) : "—"}
-              </small>
-            </div>
+          {summary && (
             <div
-              className={`au-stat ${(summary?.failed_logins || 0) > 0 ? "is-warn" : ""}`}
+              className="au-summary-inline"
+              aria-label={bi("会话概览", "Session summary")}
             >
-              <span className="au-stat-k">
-                {bi("异常尝试", "Failed Attempts")}
+              <span>
+                <StatusDot state={summary.online_users > 0 ? "done" : "void"} />
+                {bi("当前在线", "Online")}{" "}
+                <b className="num">
+                  {bi(
+                    `${summary.online_users} 人 / ${summary.active_sessions} 设备`,
+                    `${summary.online_users} u / ${summary.active_sessions} dev`,
+                  )}
+                </b>
               </span>
-              <strong className="num">
-                {summary
-                  ? bi(
-                      `${summary.failed_logins} 次`,
-                      `${summary.failed_logins}`,
-                    )
-                  : "—"}
-              </strong>
-              <small>
-                {bi(
-                  "密码错误或受限登录",
-                  "Wrong password or restricted sign-in",
-                )}
-              </small>
+              <span>
+                {bi("累计会话", "Total")}{" "}
+                <b className="num">{num(summary.total_sessions)}</b>
+              </span>
+              <span>
+                {bi("平均在线", "Avg")}{" "}
+                <b className="num">
+                  {formatDuration(summary.avg_duration_seconds)}
+                </b>
+              </span>
+              <span className={summary.failed_logins > 0 ? "is-warn" : ""}>
+                {bi("失败登录", "Failed")}{" "}
+                <b className="num">{summary.failed_logins}</b>
+              </span>
             </div>
-          </div>
+          )}
 
-          <div className="au-split">
+          <div className="iam-ledger au-split">
             <aside
               className="au-members"
               aria-label={bi("按成员筛选", "Filter by user")}

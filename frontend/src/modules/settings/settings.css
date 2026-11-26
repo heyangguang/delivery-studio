@@ -197,6 +197,32 @@ body[arco-theme="dark"] .st-kind.k-webhook {
 .st-group-bar .st-subtabs {
   border-bottom: 0;
 }
+@media (max-width: 1180px) {
+  .st-group-bar {
+    padding: 6px 24px 0;
+  }
+  .st-group-bar .utabs.st-subtabs {
+    flex-wrap: wrap;
+    row-gap: 0;
+    overflow-x: visible;
+  }
+  .st-group-bar .utabs.st-subtabs .utabs-bar {
+    display: none;
+  }
+  .st-group-bar .utabs.st-subtabs button[role="tab"] {
+    height: 36px;
+  }
+  .st-group-bar .utabs.st-subtabs button[role="tab"].on::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 2px;
+    border-radius: 2px 2px 0 0;
+    background: var(--kyndryl);
+  }
+}
 .st-group-bar + .sx-page,
 .st-group-bar + .st-pane > .sx-page {
   padding-top: 20px;

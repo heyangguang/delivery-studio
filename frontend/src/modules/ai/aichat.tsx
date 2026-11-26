@@ -53,6 +53,7 @@ import {
 } from "@arco-design/web-react/icon";
 import { reportDoc, useSubmitKB } from "./kb";
 import { MessageQueueTray, useMessageQueue } from "./aiqueue";
+import { dispatchOpenStepHotfix } from "../projects/stephotfix";
 import type { QueuedMsg } from "./aiqueue";
 import { go } from "../../app/router";
 import {
@@ -1266,7 +1267,14 @@ function FloatingFAB({
           ? bi("AI 正在回答…", "AI is replying…")
           : bi("AI 助手", "AI Assistant")}
       </span>
-      {!busy && <kbd>⌘J</kbd>}
+      {!busy && (
+        <kbd>
+          {typeof navigator !== "undefined" &&
+          /Mac|iPod|iPhone|iPad/i.test(navigator.platform || "")
+            ? "⌘J"
+            : "Ctrl+J"}
+        </kbd>
+      )}
     </button>
   );
 }
@@ -3009,6 +3017,20 @@ function ChatWindow({
                       "Saved to your personal Knowledge Base",
                     ),
             );
+          } else if (curProp?.kind === "file") {
+            if (scope.kind === "job") {
+              window.dispatchEvent(
+                new CustomEvent("mh-delivery-patched", {
+                  detail: { jobId: scope.jobId, path: curProp.file?.path },
+                }),
+              );
+            }
+            Message.success(
+              bi(
+                "已采纳并写入本次交付热修补丁，可在「脚本查看与热修」查看增删高亮",
+                "Hotfix patch applied to this delivery — inspect highlighted diff in Step Hotfix",
+              ),
+            );
           } else if (curProp?.kind !== "component") {
             Message.success(
               scope.kind === "comp"
@@ -3540,15 +3562,17 @@ function ChatWindow({
               }
               mini
             >
-              <button
-                type="button"
-                className="ad-whole"
-                onClick={startGeneral}
-                aria-label={bi("新对话", "New chat")}
-                disabled={!newChatEnabled}
-              >
-                <IconMessage />
-              </button>
+              <span style={{ display: "inline-flex" }}>
+                <button
+                  type="button"
+                  className="ad-whole"
+                  onClick={startGeneral}
+                  aria-label={bi("新对话", "New chat")}
+                  disabled={!newChatEnabled}
+                >
+                  <IconMessage />
+                </button>
+              </span>
             </Tooltip>
           )}
           {scope.kind === "comp" && mode !== "min" && (
@@ -3577,14 +3601,16 @@ function ChatWindow({
               content={bi("清空这段对话", "Clear conversation")}
               mini
             >
-              <button
-                type="button"
-                onClick={restart}
-                aria-label={bi("清空这段对话", "Clear conversation")}
-                disabled={busy}
-              >
-                <IconDelete />
-              </button>
+              <span style={{ display: "inline-flex" }}>
+                <button
+                  type="button"
+                  onClick={restart}
+                  aria-label={bi("清空这段对话", "Clear conversation")}
+                  disabled={busy}
+                >
+                  <IconDelete />
+                </button>
+              </span>
             </Tooltip>
           )}
           {mode === "min" ? (
@@ -3977,18 +4003,20 @@ function ChatWindow({
                   )}
                   mini
                 >
-                  <button
-                    type="button"
-                    className="ad-attach ad-solve-chip"
-                    aria-label={bi(
-                      "归档变更报告 / 存入知识库",
-                      "Archive Change Report / KB",
-                    )}
-                    disabled={resolving}
-                    onClick={resolve}
-                  >
-                    <IconCheckCircle />
-                  </button>
+                  <span style={{ display: "inline-flex" }}>
+                    <button
+                      type="button"
+                      className="ad-attach ad-solve-chip"
+                      aria-label={bi(
+                        "归档变更报告 / 存入知识库",
+                        "Archive Change Report / KB",
+                      )}
+                      disabled={resolving}
+                      onClick={resolve}
+                    >
+                      <IconCheckCircle />
+                    </button>
+                  </span>
                 </Tooltip>
               )}
               <div className="ad-bar-right">
@@ -5335,6 +5363,8 @@ export const Bubble = React.memo(function Bubble({
       </div>
     );
   const isErrorOnly = Boolean(m.error && !m.text?.trim());
+  const jobIdMatch = /^\/api\/jobs\/([^/]+)\/ai/.exec(jobBase);
+  const cardJobId = jobIdMatch ? decodeURIComponent(jobIdMatch[1]) : undefined;
   return (
     <div className={`ad-msg ai ${isErrorOnly ? "is-err" : ""}`}>
       <span className="ad-avatar" aria-hidden>
@@ -5381,6 +5411,7 @@ export const Bubble = React.memo(function Bubble({
                 key={id}
                 p={props[id]}
                 comp={comp}
+                jobId={cardJobId}
                 busy={deciding === id}
                 decide={decide}
                 feedback={answer}
@@ -5418,7 +5449,7 @@ export const Bubble = React.memo(function Bubble({
   );
 }, areBubblesEqual);
 
-/** Questions the assistant asks instead of guessing: pick an option or type an answer; the answer goes back as the next message. */
+/** Questions the assistant asks instead of guessing: pick an option or type a custom value directly; the answer goes back as the next message. */
 export function AskCard({
   ask,
   answer,
@@ -5431,14 +5462,15 @@ export function AskCard({
   useLang();
   const [pick, setPick] = useState<Record<number, string[]>>({});
   const [other, setOther] = useState<Record<number, string>>({});
-  const [otherOpen, setOtherOpen] = useState<Record<number, boolean>>({});
   const live = !!answer;
-  // one question with one choice: the choice is the answer, no extra button to press
+  // one question with one choice: clicking a preset option submits directly, while the inline input lets you type any custom value
   const instant = ask.questions.length === 1 && !ask.questions[0].multi;
-  const value = (qi: number, p = pick, o = other) => [
-    ...(p[qi] || []),
-    ...(o[qi]?.trim() ? [o[qi].trim()] : []),
-  ];
+  const value = (qi: number, p = pick, o = other) => {
+    const custom = o[qi]?.trim() || "";
+    const chosen = p[qi] || [];
+    if (!ask.questions[qi]?.multi && custom) return [custom];
+    return [...chosen, ...(custom ? [custom] : [])];
+  };
   const ready = ask.questions.every((_, i) => value(i).length > 0);
   const submit = (p = pick, o = other) =>
     answer?.(
@@ -5452,7 +5484,7 @@ export function AskCard({
     );
   const toggle = (qi: number, label: string, multi?: boolean) => {
     const cur = pick[qi] || [];
-    const next = {
+    const nextPick = {
       ...pick,
       [qi]: multi
         ? cur.includes(label)
@@ -5460,77 +5492,114 @@ export function AskCard({
           : [...cur, label]
         : [label],
     };
-    setPick(next);
-    if (instant && !multi) submit(next, {});
+    const nextOther = multi ? other : { ...other, [qi]: "" };
+    setPick(nextPick);
+    if (!multi && other[qi]) setOther(nextOther);
+    if (instant && !multi) submit(nextPick, {});
   };
+  const onChangeOther = (qi: number, text: string, multi?: boolean) => {
+    const nextOther = { ...other, [qi]: text };
+    setOther(nextOther);
+    if (!multi && text.trim() && (pick[qi] || []).length > 0) {
+      setPick((prev) => ({ ...prev, [qi]: [] }));
+    }
+  };
+  const ansLines = (answered || "")
+    .split(/\n+/)
+    .map((l) => l.trim())
+    .filter(Boolean);
   return (
     <div
       className={`ad-ask ${live ? "" : "done"}`}
       role="group"
       aria-label={bi("AI 的提问", "Questions from AI")}
     >
-      {ask.questions.map((q, qi) => (
-        <fieldset key={qi} disabled={!live}>
-          <legend>
-            <span
-              className={`ad-ask-n ${ask.questions.length > 1 ? "is-num" : "is-spark"}`}
-              aria-hidden
+      {ask.questions.map((q, qi) => {
+        const opts = q.options || [];
+        const rawAns =
+          !live && answered
+            ? ask.questions.length > 1
+              ? (
+                  ansLines.find((l) => l.startsWith(`${qi + 1}.`)) || ""
+                ).replace(/^\d+\.\s*/, "")
+              : answered.trim()
+            : "";
+        let anyOptionMatched = false;
+        const optionNodes = opts.map((o) => {
+          const ans = (rawAns || answered || "").trim();
+          const picked =
+            !live &&
+            !!ans &&
+            (ans === o.label.trim() ||
+              ans
+                .split(/[；;、,\n]/)
+                .some((part) => part.trim() === o.label.trim()) ||
+              (o.label.trim().length >= 3 && ans.includes(o.label.trim())));
+          if (picked) anyOptionMatched = true;
+          const on = live
+            ? (pick[qi] || []).includes(o.label) &&
+              (q.multi || !other[qi]?.trim())
+            : picked;
+          return (
+            <button
+              key={o.label}
+              type="button"
+              className={on ? (live ? "on" : "on picked") : ""}
+              role={q.multi ? "checkbox" : "radio"}
+              aria-checked={on}
+              onClick={() => toggle(qi, o.label, q.multi)}
             >
-              {ask.questions.length > 1 ? (
-                qi + 1
-              ) : (
-                <Spark size={12} rainbow />
-              )}
-            </span>
-            <span className="ad-ask-q">{q.question}</span>
-            {q.multi && <small>{bi("可多选", "Multi-select")}</small>}
-          </legend>
-          {(q.options || []).length > 0 && (
-            <div
-              className="ad-ask-opts"
-              role={q.multi ? "group" : "radiogroup"}
-            >
-              {(q.options || []).map((o) => {
-                const ans = (answered || "").trim();
-                const picked =
-                  !live &&
-                  !!ans &&
-                  (ans === o.label.trim() ||
-                    ans.split(/[；;\n]/).some((part) => part.trim() === o.label.trim()) ||
-                    (o.label.trim().length >= 3 && ans.includes(o.label.trim())));
-                const on = live ? (pick[qi] || []).includes(o.label) : picked;
-                return (
-                  <button
-                    key={o.label}
-                    type="button"
-                    className={on ? (live ? "on" : "on picked") : ""}
-                    role={q.multi ? "checkbox" : "radio"}
-                    aria-checked={on}
-                    onClick={() => toggle(qi, o.label, q.multi)}
-                  >
-                    <span className="ad-ask-tick" aria-hidden>
-                      {on && <IconCheck />}
-                    </span>
-                    <span className="ad-ask-txt">
-                      <b>{o.label}</b>
-                      {o.description && <small>{o.description}</small>}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-          {live &&
-            ((q.options || []).length === 0 ||
-            otherOpen[qi] ||
-            Boolean(other[qi]?.trim()) ? (
-              <div className="ad-ask-other">
+              <span className="ad-ask-tick" aria-hidden>
+                {on && <IconCheck />}
+              </span>
+              <span className="ad-ask-txt">
+                <b>{o.label}</b>
+                {o.description && <small>{o.description}</small>}
+              </span>
+            </button>
+          );
+        });
+        const hasCustomVal = Boolean(other[qi]?.trim());
+        const showDoneCustom = !live && !!rawAns && !anyOptionMatched;
+        return (
+          <fieldset key={qi} disabled={!live}>
+            <legend>
+              <span
+                className={`ad-ask-n ${ask.questions.length > 1 ? "is-num" : "is-spark"}`}
+                aria-hidden
+              >
+                {ask.questions.length > 1 ? (
+                  qi + 1
+                ) : (
+                  <Spark size={12} rainbow />
+                )}
+              </span>
+              <span className="ad-ask-q">{q.question}</span>
+              {q.multi && <small>{bi("可多选", "Multi-select")}</small>}
+            </legend>
+            {opts.length > 0 && (
+              <div
+                className="ad-ask-opts"
+                role={q.multi ? "group" : "radiogroup"}
+              >
+                {optionNodes}
+              </div>
+            )}
+            {showDoneCustom && (
+              <div className="ad-ask-custom-ans">
+                <span className="ad-ask-tick" aria-hidden>
+                  <IconCheck />
+                </span>
+                <span>{rawAns}</span>
+              </div>
+            )}
+            {live && (
+              <div className={`ad-ask-other ${hasCustomVal ? "has-val" : ""}`}>
                 <input
                   type="text"
-                  autoFocus={Boolean(otherOpen[qi])}
                   value={other[qi] || ""}
                   onChange={(e) =>
-                    setOther({ ...other, [qi]: e.target.value })
+                    onChangeOther(qi, e.target.value, q.multi)
                   }
                   onKeyDown={(e) =>
                     e.key === "Enter" &&
@@ -5539,51 +5608,40 @@ export function AskCard({
                     (e.preventDefault(), submit())
                   }
                   placeholder={
-                    (q.options || []).length
-                      ? bi(
-                          "补充或填写其他现场情况…",
-                          "Add details or specify another option…",
-                        )
-                      : bi("写下你的回答…", "Type your answer…")
+                    opts.length
+                      ? instant
+                        ? bi(
+                            "或直接输入自定义值（如具体网段、IP、路径等），回车发送…",
+                            "Or type a custom value (e.g. CIDR, IP, path) and press Enter…",
+                          )
+                        : bi(
+                            "或直接输入自定义值（如具体网段、IP、路径等）…",
+                            "Or type a custom value (e.g. CIDR, IP, path)…",
+                          )
+                      : bi("输入你的回答，回车发送…", "Type your answer and press Enter…")
                   }
-                  aria-label={bi(`${q.question} 自己写`, `${q.question} custom answer`)}
+                  aria-label={bi(
+                    `${q.question} 自定义输入`,
+                    `${q.question} custom input`,
+                  )}
                 />
-                {instant && other[qi]?.trim() && (
+                {instant && (
                   <button
                     type="button"
                     className="ad-ask-go"
-                    onClick={() => submit()}
-                    aria-label={bi("发送这个回答", "Submit answer")}
+                    disabled={!hasCustomVal}
+                    onClick={() => hasCustomVal && submit()}
+                    aria-label={bi("发送自定义回答", "Submit custom answer")}
+                    title={bi("发送回答", "Send answer")}
                   >
                     <IconSend />
                   </button>
                 )}
-                {(q.options || []).length > 0 && !other[qi]?.trim() && (
-                  <button
-                    type="button"
-                    className="ad-ask-cancel"
-                    onClick={() =>
-                      setOtherOpen((prev) => ({ ...prev, [qi]: false }))
-                    }
-                  >
-                    {bi("收起", "Collapse")}
-                  </button>
-                )}
               </div>
-            ) : (
-              <button
-                type="button"
-                className="ad-ask-custom-btn"
-                onClick={() =>
-                  setOtherOpen((prev) => ({ ...prev, [qi]: true }))
-                }
-              >
-                <IconPlus />
-                <span>{bi("其他情况 / 自由说明", "Other / custom note")}</span>
-              </button>
-            ))}
-        </fieldset>
-      ))}
+            )}
+          </fieldset>
+        );
+      })}
       {live && !instant && (
         <div className="ad-ask-acts">
           <Button
@@ -6359,14 +6417,81 @@ function SuggestCard({
   );
 }
 
+function parseCompactDiff(diff: string): {
+  lines: { kind: "add" | "del" | "hunk" | "ctx"; sign: string; text: string }[];
+  added: number;
+  deleted: number;
+} {
+  const raw = diff.replace(/\r\n/g, "\n").split("\n");
+  if (raw.length > 0 && raw[raw.length - 1] === "") raw.pop();
+  let added = 0;
+  let deleted = 0;
+  const lines = raw.map((line) => {
+    if (line.startsWith("@@") || line.startsWith("…")) {
+      return { kind: "hunk" as const, sign: "", text: line };
+    }
+    if (line.startsWith("+") && !line.startsWith("+++")) {
+      added++;
+      const text = line.startsWith("+ ") ? line.slice(2) : line.slice(1);
+      return { kind: "add" as const, sign: "+", text };
+    }
+    if (line.startsWith("-") && !line.startsWith("---")) {
+      deleted++;
+      const text = line.startsWith("- ") ? line.slice(2) : line.slice(1);
+      return { kind: "del" as const, sign: "-", text };
+    }
+    const text = line.startsWith("  ")
+      ? line.slice(2)
+      : line.startsWith(" ")
+        ? line.slice(1)
+        : line;
+    return { kind: "ctx" as const, sign: " ", text };
+  });
+  return { lines, added, deleted };
+}
+
+function DiffPreview({ diff }: { diff: string }) {
+  useLang();
+  const parsed = useMemo(() => parseCompactDiff(diff), [diff]);
+  return (
+    <div className="ad-diff" role="region" aria-label={bi("代码增删差异", "Code diff")}>
+      <div className="ad-diff-head">
+        <span>{bi("变更差异预览", "Patch Diff")}</span>
+        <span className="ad-card-file-stats">
+          {parsed.added > 0 && (
+            <span className="ad-card-stat-add">
+              {bi(`+${parsed.added} 新增`, `+${parsed.added}`)}
+            </span>
+          )}
+          {parsed.deleted > 0 && (
+            <span className="ad-card-stat-del">
+              {bi(`-${parsed.deleted} 删除`, `-${parsed.deleted}`)}
+            </span>
+          )}
+        </span>
+      </div>
+      <div className="ad-diff-body">
+        {parsed.lines.map((l, idx) => (
+          <div key={idx} className={`ad-diff-line ${l.kind}`}>
+            {l.kind !== "hunk" && <span className="ad-diff-sign">{l.sign}</span>}
+            <span>{l.text || " "}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /** A change to one file of the delivery's own automation: the diff, why, and what happens when it is accepted. */
 function FileCard({
   s,
+  jobId,
   busy,
   decide,
   feedback,
 }: {
   s: StepProposal;
+  jobId?: string;
   busy: boolean;
   decide: (id: string, v: "accept" | "reject") => void;
   feedback?: (text: string) => void;
@@ -6376,21 +6501,35 @@ function FileCard({
   const [why, setWhy] = useState("");
   const f = s.file;
   const done = s.status !== "pending";
+  const diffCounts = useMemo(
+    () => (f?.diff ? parseCompactDiff(f.diff) : { added: 0, deleted: 0 }),
+    [f?.diff],
+  );
   return (
     <article className={`ad-card s-${s.status}`}>
       <header>
         <span className="ad-card-k">
-          {bi("修改自动化文件", "Edit automation file")}
+          {bi("热修本次交付脚本", "Hotfix Delivery Script")}
         </span>
         <span className="ad-card-m">
-          {bi("只改这一份交付", "This delivery only")}
+          {bi("仅修改当前交付 · 不改动组件库", "This delivery only")}
         </span>
       </header>
       <p className="ad-card-t">
         <code>{f?.path}</code>
-        {f?.new && <span className="ad-tag">{bi("新增", "New")}</span>}
+        {f?.new && <span className="ad-tag">{bi("新增文件", "New")}</span>}
+        {(diffCounts.added > 0 || diffCounts.deleted > 0) && (
+          <span className="ad-card-file-stats">
+            {diffCounts.added > 0 && (
+              <span className="ad-card-stat-add">+{diffCounts.added}</span>
+            )}
+            {diffCounts.deleted > 0 && (
+              <span className="ad-card-stat-del">-{diffCounts.deleted}</span>
+            )}
+          </span>
+        )}
       </p>
-      {f?.diff && <CodeBlock text={f.diff} caption={bi("差异", "Diff")} />}
+      {f?.diff && <DiffPreview diff={f.diff} />}
       <dl className="ad-card-dl">
         <dt>{bi("缘由", "Reason")}</dt>
         <dd>{s.reason}</dd>
@@ -6402,17 +6541,37 @@ function FileCard({
             <span>
               {s.decided_by}{" "}
               {s.status === "accepted"
-                ? bi("已采纳", "accepted")
+                ? bi("已采纳并写入热修", "accepted & applied")
                 : bi("已拒绝", "rejected")}
             </span>
           </span>
           {s.status === "accepted" && (
-            <span className="ad-card-where">
-              {bi(
-                "已生成更新包，在页面「现场执行」上方按提示放到控制节点，之后这份交付的自动化就是改过的样子。",
-                "Update bundle generated—follow the instructions above Field Execution to place it on the control node.",
+            <>
+              <span className="ad-card-where">
+                {bi(
+                  "已写入本次交付热修补丁：自动执行下次续跑将自动推送到执行节点；离线交付可直接下载增量更新包。",
+                  "Hotfix patch saved: auto-execution pushes it automatically on next resume; offline deliveries get an incremental update archive.",
+                )}
+              </span>
+              {f?.path && (
+                <div className="ad-card-done-acts">
+                  <Button
+                    size="mini"
+                    type="outline"
+                    icon={<IconCode />}
+                    onClick={() =>
+                      dispatchOpenStepHotfix({
+                        jobId,
+                        path: f.path,
+                        view: "diff",
+                      })
+                    }
+                  >
+                    {bi("在「脚本查看与热修」查看增删高亮", "Inspect Highlighted Diff")}
+                  </Button>
+                </div>
               )}
-            </span>
+            </>
           )}
         </div>
       ) : rejecting ? (
@@ -6467,7 +6626,7 @@ function FileCard({
             loading={busy}
             onClick={() => decide(s.id, "accept")}
           >
-            {bi("采纳，生成更新包", "Accept & build update")}
+            {bi("采纳并写入本次热修补丁", "Accept & Apply Hotfix")}
           </Button>
           <Button
             size="small"
@@ -7323,6 +7482,7 @@ const getWhyNot = () => [
 export function Card({
   p,
   comp,
+  jobId,
   busy,
   decide,
   feedback,
@@ -7332,6 +7492,7 @@ export function Card({
   ask?: (text: string) => void;
   p: StepProposal | CompProposal;
   comp: boolean;
+  jobId?: string;
   busy: boolean;
   decide: (
     id: string,
@@ -7589,7 +7750,15 @@ export function Card({
   if (s.kind === "component")
     return <SuggestCard s={s} busy={busy} decide={decide} />;
   if (s.kind === "file")
-    return <FileCard s={s} busy={busy} decide={decide} feedback={feedback} />;
+    return (
+      <FileCard
+        s={s}
+        jobId={jobId}
+        busy={busy}
+        decide={decide}
+        feedback={feedback}
+      />
+    );
   const change = s.kind === "replace";
   return (
     <article className={`ad-card s-${s.status}`}>

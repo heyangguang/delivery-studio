@@ -44,10 +44,12 @@
 }
 .pr-table {
   border-top: 1px solid var(--line);
+  overflow-x: auto;
+  max-width: 100%;
 }
 .pr-row {
   display: grid;
-  grid-template-columns: 110px minmax(160px, 1.6fr) 90px 90px 90px 78px 36px;
+  grid-template-columns: 100px minmax(140px, 1.5fr) 82px 82px 82px 72px 36px;
   align-items: center;
   gap: 10px;
   padding: 7px 4px;
@@ -59,7 +61,7 @@
   background: var(--hover);
 }
 .pr-row.b {
-  grid-template-columns: minmax(180px, 1.6fr) 84px 92px 84px minmax(140px, 1.4fr) 64px;
+  grid-template-columns: minmax(140px, 1.5fr) 72px 80px 72px minmax(110px, 1.2fr) minmax(76px, auto);
 }
 .pr-row.head {
   padding: 6px 4px;

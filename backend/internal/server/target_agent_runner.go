@@ -27,13 +27,14 @@ type targetAgentConfig struct {
 	Enrolled   bool   `json:"enrolled"`
 }
 type targetAgentInstruction struct {
-	ID         string                 `json:"id"`
-	Mode       string                 `json:"mode,omitempty"`
-	Desired    string                 `json:"desired"`
-	PublicKey  string                 `json:"public_key"`
-	SourceIP   string                 `json:"source_ip"`
-	Task       *rehearsalExecDispatch `json:"task,omitempty"`
-	CancelTask string                 `json:"cancel_task,omitempty"`
+	ID                   string                 `json:"id"`
+	Mode                 string                 `json:"mode,omitempty"`
+	Desired              string                 `json:"desired"`
+	PublicKey            string                 `json:"public_key"`
+	SourceIP             string                 `json:"source_ip"`
+	Task                 *rehearsalExecDispatch `json:"task,omitempty"`
+	CancelTask           string                 `json:"cancel_task,omitempty"`
+	HeartbeatIntervalSec int                    `json:"heartbeat_interval_sec,omitempty"`
 }
 
 func targetAgentCommand(args []string) error {
@@ -111,7 +112,11 @@ func targetAgentCommand(args []string) error {
 	connected := false
 	lastErr := ""
 	lastErrAt := time.Time{}
+	var cachedProbe *agentHostProbe
+	var probeAt time.Time
+	hbSec := 5
 	for ctx.Err() == nil {
+		ranTask := false
 		if !cfg.Enrolled {
 			name, _ := os.Hostname()
 			ips := []string{}
@@ -134,6 +139,11 @@ func targetAgentCommand(args []string) error {
 				}
 			}
 		} else {
+			probeRefresh := time.Duration(max(10, hbSec)) * time.Second
+			if cachedProbe == nil || time.Since(probeAt) >= probeRefresh {
+				cachedProbe = collectAgentHostProbe(hbSec)
+				probeAt = time.Now()
+			}
 			var instruction targetAgentInstruction
 			e = call("poll", cfg.Token, map[string]any{
 				"machine_id":   identity,
@@ -143,8 +153,12 @@ func targetAgentCommand(args []string) error {
 				"host_keys":    targetHostKeys(),
 				"message":      message,
 				"capabilities": []string{"ssh_trust", "rehearsal_exec"},
+				"probe":        cachedProbe,
 			}, &instruction)
 			if e == nil {
+				if instruction.HeartbeatIntervalSec >= 3 && instruction.HeartbeatIntervalSec <= 300 {
+					hbSec = instruction.HeartbeatIntervalSec
+				}
 				if !connected {
 					logAgent("INFO", "connected to platform id=%s mode=%s, polling for instructions & tasks", cfg.ID, instruction.Mode)
 					connected = true
@@ -171,6 +185,7 @@ func targetAgentCommand(args []string) error {
 					applied = instruction.Desired
 				}
 				if instruction.Task != nil && instruction.Desired == "active" {
+					ranTask = true
 					logAgent("INFO", "executing direct target-agent task=%s kind=%s", instruction.Task.TaskID, instruction.Task.Kind)
 					if te := executeTargetAgentTask(call, cfg.Token, identity, *instruction.Task); te != nil {
 						logAgent("WARN", "direct task finished with warning task=%s err=%v", instruction.Task.TaskID, te)
@@ -188,11 +203,15 @@ func targetAgentCommand(args []string) error {
 				lastErrAt = time.Now()
 			}
 		}
+		waitDur := time.Duration(hbSec) * time.Second
+		if ranTask {
+			waitDur = time.Second
+		}
 		select {
 		case <-ctx.Done():
 			logAgent("INFO", "target-agent stopped cleanly id=%s", cfg.ID)
 			return nil
-		case <-time.After(5 * time.Second):
+		case <-time.After(waitDur):
 		}
 	}
 	return nil

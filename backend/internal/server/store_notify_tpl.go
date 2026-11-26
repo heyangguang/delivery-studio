@@ -3,7 +3,6 @@ package server
 import (
 	"encoding/json"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 )
@@ -49,8 +48,9 @@ func notifyEventByID(id string) (notifyEvent, bool) {
 
 func (s *storeServer) notifyTemplates() map[string]notifyTpl {
 	out := map[string]notifyTpl{}
-	if b, err := os.ReadFile(filepath.Join(s.settingsDir(), "notify-templates.json")); err == nil {
-		_ = json.Unmarshal(b, &out)
+	_ = s.loadSettingDoc("notify_templates", filepath.Join(s.settingsDir(), "notify-templates.json"), &out)
+	if out == nil {
+		out = map[string]notifyTpl{}
 	}
 	return out
 }
@@ -121,7 +121,7 @@ func (s *storeServer) handleNotifyTemplates(w http.ResponseWriter, r *http.Reque
 		} else {
 			all[parts[0]] = in
 		}
-		err := writeJSONFile(filepath.Join(s.settingsDir(), "notify-templates.json"), all)
+		err := s.saveSettingDoc("notify_templates", filepath.Join(s.settingsDir(), "notify-templates.json"), all)
 		notifyMu.Unlock()
 		if err != nil {
 			s.fail(w, 500, "保存失败，请稍后重试")

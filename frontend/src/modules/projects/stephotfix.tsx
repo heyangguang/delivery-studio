@@ -64,6 +64,20 @@ export function consumeExecLaunchIntent(jobId: string): ExecLaunchIntent | null 
   }
 }
 
+export type OpenStepHotfixDetail = {
+  jobId?: string;
+  path?: string;
+  stepKey?: string;
+  stepTitle?: string;
+  view?: "edit" | "diff";
+};
+
+export function dispatchOpenStepHotfix(detail: OpenStepHotfixDetail) {
+  window.dispatchEvent(
+    new CustomEvent("mh-open-step-hotfix", { detail }),
+  );
+}
+
 type DeliveryFileItem = {
   path: string;
   size: number;
@@ -73,6 +87,8 @@ type DeliveryFileItem = {
   patch_by?: string;
   patch_at?: string;
   patch_note?: string;
+  added?: number;
+  deleted?: number;
 };
 
 type DeliveryPatchRecord = {
@@ -98,6 +114,8 @@ type FileContentResp = {
   patched: boolean;
   patch?: DeliveryPatchRecord | null;
   diff?: string;
+  added?: number;
+  deleted?: number;
 };
 
 type SaveHotfixResp = {
@@ -117,10 +135,35 @@ function splitPath(p: string): { name: string; dir: string } {
   return { name: p.slice(idx + 1), dir: p.slice(0, idx) };
 }
 
-function buildSimpleLineDiff(before: string, after: string): string {
-  if (before === after) return "";
-  const a = before.replace(/\r\n/g, "\n").split("\n");
-  const b = after.replace(/\r\n/g, "\n").split("\n");
+type DiffRow =
+  | { kind: "hunk"; text: string }
+  | {
+      kind: "ctx" | "add" | "del";
+      oldLine: number | null;
+      newLine: number | null;
+      text: string;
+    };
+
+type DiffResult = {
+  rows: DiffRow[];
+  added: number;
+  deleted: number;
+  hasDiff: boolean;
+  truncated: boolean;
+};
+
+function splitDiffLines(s: string): string[] {
+  if (!s) return [];
+  const norm = s.replace(/\r\n/g, "\n");
+  return (norm.endsWith("\n") ? norm.slice(0, -1) : norm).split("\n");
+}
+
+function computeLineDiff(before: string, after: string): DiffResult {
+  if (before === after) {
+    return { rows: [], added: 0, deleted: 0, hasDiff: false, truncated: false };
+  }
+  const a = splitDiffLines(before);
+  const b = splitDiffLines(after);
   let start = 0;
   while (start < a.length && start < b.length && a[start] === b[start]) start++;
   let ea = a.length - 1;
@@ -129,17 +172,165 @@ function buildSimpleLineDiff(before: string, after: string): string {
     ea--;
     eb--;
   }
-  const ctxStart = Math.max(0, start - 2);
-  const ctxEndA = Math.min(a.length - 1, ea + 2);
-  const ctxEndB = Math.min(b.length - 1, eb + 2);
-  const out: string[] = [
-    `@@ -${ctxStart + 1},${ctxEndA - ctxStart + 1} +${ctxStart + 1},${ctxEndB - ctxStart + 1} @@`,
-  ];
-  for (let i = ctxStart; i < start; i++) out.push(" " + a[i]);
-  for (let i = start; i <= ea; i++) out.push("-" + a[i]);
-  for (let i = start; i <= eb; i++) out.push("+" + b[i]);
-  for (let i = ea + 1; i <= ctxEndA; i++) out.push(" " + a[i]);
-  return out.join("\n");
+
+  type Op = {
+    kind: "ctx" | "add" | "del";
+    oldLine: number | null;
+    newLine: number | null;
+    text: string;
+  };
+  const ops: Op[] = [];
+  for (let i = 0; i < start; i++) {
+    ops.push({ kind: "ctx", oldLine: i + 1, newLine: i + 1, text: a[i] });
+  }
+
+  const la = ea - start + 1;
+  const lb = eb - start + 1;
+  if (la > 0 && lb > 0 && la * lb <= 250000) {
+    const stride = lb + 1;
+    const dp = new Int32Array((la + 1) * stride);
+    for (let i = la - 1; i >= 0; i--) {
+      const rowOff = i * stride;
+      const nextOff = (i + 1) * stride;
+      const ai = a[start + i];
+      for (let j = lb - 1; j >= 0; j--) {
+        if (ai === b[start + j]) {
+          dp[rowOff + j] = dp[nextOff + j + 1] + 1;
+        } else {
+          const down = dp[nextOff + j];
+          const right = dp[rowOff + j + 1];
+          dp[rowOff + j] = down >= right ? down : right;
+        }
+      }
+    }
+    let i = 0;
+    let j = 0;
+    while (i < la && j < lb) {
+      if (a[start + i] === b[start + j]) {
+        ops.push({
+          kind: "ctx",
+          oldLine: start + i + 1,
+          newLine: start + j + 1,
+          text: a[start + i],
+        });
+        i++;
+        j++;
+      } else if (dp[(i + 1) * stride + j] >= dp[i * stride + j + 1]) {
+        ops.push({
+          kind: "del",
+          oldLine: start + i + 1,
+          newLine: null,
+          text: a[start + i],
+        });
+        i++;
+      } else {
+        ops.push({
+          kind: "add",
+          oldLine: null,
+          newLine: start + j + 1,
+          text: b[start + j],
+        });
+        j++;
+      }
+    }
+    while (i < la) {
+      ops.push({
+        kind: "del",
+        oldLine: start + i + 1,
+        newLine: null,
+        text: a[start + i],
+      });
+      i++;
+    }
+    while (j < lb) {
+      ops.push({
+        kind: "add",
+        oldLine: null,
+        newLine: start + j + 1,
+        text: b[start + j],
+      });
+      j++;
+    }
+  } else {
+    for (let i = start; i <= ea; i++) {
+      ops.push({ kind: "del", oldLine: i + 1, newLine: null, text: a[i] });
+    }
+    for (let j = start; j <= eb; j++) {
+      ops.push({ kind: "add", oldLine: null, newLine: j + 1, text: b[j] });
+    }
+  }
+
+  for (let k = 1; ea + k < a.length && eb + k < b.length; k++) {
+    ops.push({
+      kind: "ctx",
+      oldLine: ea + k + 1,
+      newLine: eb + k + 1,
+      text: a[ea + k],
+    });
+  }
+
+  let added = 0;
+  let deleted = 0;
+  const keep = new Uint8Array(ops.length);
+  const CTX = 3;
+  for (let idx = 0; idx < ops.length; idx++) {
+    if (ops[idx].kind === "add") added++;
+    else if (ops[idx].kind === "del") deleted++;
+    if (ops[idx].kind !== "ctx") {
+      const lo = Math.max(0, idx - CTX);
+      const hi = Math.min(ops.length - 1, idx + CTX);
+      for (let d = lo; d <= hi; d++) keep[d] = 1;
+    }
+  }
+
+  const MAX_ROWS = 1200;
+  const rows: DiffRow[] = [];
+  let truncated = false;
+  let idx = 0;
+  while (idx < ops.length) {
+    if (!keep[idx]) {
+      idx++;
+      continue;
+    }
+    let end = idx;
+    while (end < ops.length && keep[end]) end++;
+    let oldStart = 0;
+    let newStart = 0;
+    let oldCount = 0;
+    let newCount = 0;
+    for (let k = idx; k < end; k++) {
+      const op = ops[k];
+      if (op.oldLine !== null) {
+        if (!oldStart) oldStart = op.oldLine;
+        oldCount++;
+      }
+      if (op.newLine !== null) {
+        if (!newStart) newStart = op.newLine;
+        newCount++;
+      }
+    }
+    rows.push({
+      kind: "hunk",
+      text: `@@ -${oldStart || 0},${oldCount} +${newStart || 0},${newCount} @@`,
+    });
+    for (let k = idx; k < end; k++) {
+      if (rows.length >= MAX_ROWS) {
+        truncated = true;
+        break;
+      }
+      rows.push(ops[k]);
+    }
+    if (truncated) break;
+    idx = end;
+  }
+
+  return {
+    rows,
+    added,
+    deleted,
+    hasDiff: added > 0 || deleted > 0,
+    truncated,
+  };
 }
 
 export function StepHotfixDrawer({
@@ -148,6 +339,8 @@ export function StepHotfixDrawer({
   stepKey,
   stepTitle,
   deliveryMode,
+  initialPath,
+  initialView,
   onClose,
   onPatched,
   onLaunchStep,
@@ -157,6 +350,8 @@ export function StepHotfixDrawer({
   stepKey?: string;
   stepTitle?: string;
   deliveryMode?: string;
+  initialPath?: string;
+  initialView?: "edit" | "diff";
   onClose: () => void;
   onPatched?: (res: { revision?: string; patchCount?: number }) => void;
   onLaunchStep?: (mode: "single" | "from", stepKey: string) => void;
@@ -177,6 +372,7 @@ export function StepHotfixDrawer({
   const [draft, setDraft] = useState("");
   const [reason, setReason] = useState("");
   const [viewMode, setViewMode] = useState<"edit" | "diff">("edit");
+  const pendingViewRef = React.useRef<"edit" | "diff" | null>(null);
 
   const [saving, setSaving] = useState(false);
   const [reverting, setReverting] = useState(false);
@@ -192,13 +388,22 @@ export function StepHotfixDrawer({
       const res = await api<FileListResp>(
         `/api/jobs/${encodeURIComponent(jobId)}/scripts${qs}`,
       );
-      setFiles(res.files || []);
+      const list = res.files || [];
+      setFiles(list);
       setPatches(res.patches || []);
       if (res.delivery_mode) setMode(res.delivery_mode);
       const nextSel =
-        keepSelected && (res.files || []).some((f) => f.path === keepSelected)
+        (keepSelected && list.some((f) => f.path === keepSelected)
           ? keepSelected
-          : (res.files || [])[0]?.path || "";
+          : "") ||
+        (initialPath && list.some((f) => f.path === initialPath)
+          ? initialPath
+          : "") ||
+        list.find((f) => f.related && f.patched)?.path ||
+        list.find((f) => f.related)?.path ||
+        list.find((f) => f.patched)?.path ||
+        list[0]?.path ||
+        "";
       setSelectedPath(nextSel);
     } catch (e) {
       err(e);
@@ -207,7 +412,7 @@ export function StepHotfixDrawer({
     }
   };
 
-  const loadFile = async (rel: string) => {
+  const loadFile = async (rel: string, preferredView?: "edit" | "diff") => {
     if (!rel) {
       setFileMeta(null);
       setDraft("");
@@ -220,7 +425,18 @@ export function StepHotfixDrawer({
       );
       setFileMeta(res);
       setDraft(res.content);
-      setViewMode("edit");
+      const requested = preferredView || pendingViewRef.current;
+      pendingViewRef.current = null;
+      const hasChanges = res.patched || res.content !== res.original;
+      if (requested === "diff" && hasChanges) {
+        setViewMode("diff");
+      } else if (requested === "edit") {
+        setViewMode("edit");
+      } else if (res.patched && res.content !== res.original) {
+        setViewMode("diff");
+      } else {
+        setViewMode("edit");
+      }
     } catch (e) {
       err(e);
     } finally {
@@ -233,9 +449,10 @@ export function StepHotfixDrawer({
     setSavedBanner(null);
     setReason("");
     setQuery("");
-    void loadList();
+    pendingViewRef.current = initialView || null;
+    void loadList(initialPath);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, jobId, stepKey]);
+  }, [open, jobId, stepKey, initialPath, initialView]);
 
   useEffect(() => {
     if (!open || !selectedPath) return;
@@ -249,23 +466,26 @@ export function StepHotfixDrawer({
     return files.filter((f) => f.path.toLowerCase().includes(q));
   }, [files, query]);
 
+  const patchedFiles = useMemo(
+    () => filteredFiles.filter((f) => f.patched),
+    [filteredFiles],
+  );
   const relatedFiles = useMemo(
-    () => filteredFiles.filter((f) => f.related),
+    () => filteredFiles.filter((f) => f.related && !f.patched),
     [filteredFiles],
   );
   const otherFiles = useMemo(
-    () => filteredFiles.filter((f) => !f.related),
+    () => filteredFiles.filter((f) => !f.related && !f.patched),
     [filteredFiles],
   );
 
   const isDirty = Boolean(fileMeta && draft !== fileMeta.content);
 
-  const liveDiff = useMemo(() => {
-    if (!fileMeta) return "";
-    if (draft !== fileMeta.original) {
-      return buildSimpleLineDiff(fileMeta.original, draft);
+  const diffInfo = useMemo<DiffResult>(() => {
+    if (!fileMeta) {
+      return { rows: [], added: 0, deleted: 0, hasDiff: false, truncated: false };
     }
-    return fileMeta.diff || "";
+    return computeLineDiff(fileMeta.original, draft);
   }, [fileMeta, draft]);
 
   const selectFile = (nextPath: string) => {
@@ -334,7 +554,7 @@ export function StepHotfixDrawer({
             ),
       );
       await loadList(fileMeta.path);
-      await loadFile(fileMeta.path);
+      await loadFile(fileMeta.path, "diff");
       onPatched?.({
         revision: res.revision,
         patchCount: res.patches?.length,
@@ -424,28 +644,58 @@ export function StepHotfixDrawer({
     [patches],
   );
 
+  const patchedTotals = useMemo(() => {
+    let added = 0;
+    let deleted = 0;
+    for (const f of files) {
+      if (!f.patched) continue;
+      added += f.added || 0;
+      deleted += f.deleted || 0;
+    }
+    return { added, deleted };
+  }, [files]);
+
   const renderFileBtn = (f: DeliveryFileItem) => {
     const { name, dir } = splitPath(f.path);
     const active = f.path === selectedPath;
+    const rowAdded = active && fileMeta ? diffInfo.added : f.added || 0;
+    const rowDeleted = active && fileMeta ? diffInfo.deleted : f.deleted || 0;
+    const hasRowStats = rowAdded > 0 || rowDeleted > 0;
     return (
       <button
         key={f.path}
         type="button"
-        className={`shf-file-btn ${active ? "on" : ""}`}
+        className={`shf-file-btn ${active ? "on" : ""} ${f.patched ? "is-patched" : ""} ${active && isDirty ? "is-dirty" : ""}`}
         onClick={() => selectFile(f.path)}
         title={
           f.patched
-            ? `${f.path} · ${bi("已热修", "Patched")}${f.patch_note ? ` (${f.patch_note})` : ""}`
+            ? `${f.path} · ${bi("已热修", "Patched")}${hasRowStats ? ` (+${rowAdded} -${rowDeleted})` : ""}${f.patch_note ? ` — ${f.patch_note}` : ""}`
             : f.path
         }
       >
         <div className="shf-file-top">
           <span className="shf-file-name">{name}</span>
-          {f.patched && (
-            <span className="shf-patch-dot">{bi("已热修", "Patched")}</span>
+          {active && isDirty ? (
+            <span className="shf-dirty-pill">{bi("未保存", "Edited")}</span>
+          ) : f.patched ? (
+            <span className="shf-patch-dot">{bi("已改", "Patched")}</span>
+          ) : null}
+        </div>
+        <div className="shf-file-sub">
+          {dir ? <span className="shf-file-dir">{dir}</span> : <span className="shf-file-dir">/</span>}
+          {hasRowStats && (
+            <span className="shf-stat-pills" aria-label={`+${rowAdded} -${rowDeleted}`}>
+              {rowAdded > 0 && <span className="shf-stat-add">+{rowAdded}</span>}
+              {rowDeleted > 0 && <span className="shf-stat-del">-{rowDeleted}</span>}
+            </span>
           )}
         </div>
-        {dir && <span className="shf-file-dir">{dir}</span>}
+        {f.patched && f.patch_note && (
+          <div className="shf-file-note" title={f.patch_note}>
+            {f.related && <span className="shf-rel-chip">{bi("本步", "Step")}</span>}
+            <span>{f.patch_note}</span>
+          </div>
+        )}
       </button>
     );
   };
@@ -499,6 +749,27 @@ export function StepHotfixDrawer({
               <div className="shf-empty">{bi("没有匹配的可编辑文件", "No matching files")}</div>
             ) : (
               <>
+                {patchedFiles.length > 0 && (
+                  <div className="shf-rail-group is-patched-group">
+                    <div className="shf-rail-cap is-patched">
+                      <span>{bi("本次已修改文件", "Modified in this delivery")}</span>
+                      <span className="shf-rail-cap-meta">
+                        {(patchedTotals.added > 0 || patchedTotals.deleted > 0) && (
+                          <span className="shf-stat-pills">
+                            {patchedTotals.added > 0 && (
+                              <span className="shf-stat-add">+{patchedTotals.added}</span>
+                            )}
+                            {patchedTotals.deleted > 0 && (
+                              <span className="shf-stat-del">-{patchedTotals.deleted}</span>
+                            )}
+                          </span>
+                        )}
+                        <span className="num">{patchedFiles.length}</span>
+                      </span>
+                    </div>
+                    {patchedFiles.map(renderFileBtn)}
+                  </div>
+                )}
                 {relatedFiles.length > 0 && (
                   <div className="shf-rail-group">
                     <div className="shf-rail-cap">
@@ -512,7 +783,7 @@ export function StepHotfixDrawer({
                   <div className="shf-rail-group">
                     <div className="shf-rail-cap">
                       <span>
-                        {relatedFiles.length > 0
+                        {relatedFiles.length > 0 || patchedFiles.length > 0
                           ? bi("其他可编辑交付文件", "Other delivery files")
                           : bi("可编辑交付文件", "Editable delivery files")}
                       </span>
@@ -537,6 +808,16 @@ export function StepHotfixDrawer({
               <div className="shf-toolbar">
                 <div className="shf-toolbar-path">
                   <code title={selectedPath}>{selectedPath}</code>
+                  {diffInfo.hasDiff && (
+                    <span className="shf-stat-pills shf-toolbar-stats">
+                      {diffInfo.added > 0 && (
+                        <span className="shf-stat-add">+{diffInfo.added}</span>
+                      )}
+                      {diffInfo.deleted > 0 && (
+                        <span className="shf-stat-del">-{diffInfo.deleted}</span>
+                      )}
+                    </span>
+                  )}
                   {isDirty && (
                     <span className="shf-dirty-tag">
                       {bi("未保存修改", "Unsaved")}
@@ -555,10 +836,15 @@ export function StepHotfixDrawer({
                     <Button
                       size="mini"
                       type={viewMode === "diff" ? "primary" : "secondary"}
-                      disabled={!liveDiff}
+                      disabled={!diffInfo.hasDiff}
                       onClick={() => setViewMode("diff")}
                     >
-                      {bi("Diff 对比", "Diff")}
+                      {diffInfo.hasDiff
+                        ? bi(
+                            `改动高亮 (+${diffInfo.added} / -${diffInfo.deleted})`,
+                            `Diff (+${diffInfo.added} / -${diffInfo.deleted})`,
+                          )
+                        : bi("Diff 对比", "Diff")}
                     </Button>
                   </Button.Group>
                   {fileMeta?.patched && canPromote && selectedPath.startsWith("roles/") && (
@@ -603,14 +889,29 @@ export function StepHotfixDrawer({
 
               {fileMeta?.patched && fileMeta.patch && (
                 <div className="shf-patch-banner">
-                  <span>
-                    <strong>{bi("已热修", "Patched")}</strong>
-                    {" · "}
-                    {fileMeta.patch.by} · {ago(fileMeta.patch.at)}
-                    {fileMeta.patch.reason ? ` — ${fileMeta.patch.reason}` : ""}
+                  <span className="shf-patch-meta">
+                    <span className="shf-patch-badge">{bi("本次已热修", "Patched")}</span>
+                    <span>
+                      {fileMeta.patch.by} · {ago(fileMeta.patch.at)}
+                      {fileMeta.patch.reason ? ` — ${fileMeta.patch.reason}` : ""}
+                    </span>
                   </span>
-                  <span className="faint small">
-                    {bi("仅影响当前交付，不影响组件库已发布版本", "Scoped to this delivery only")}
+                  <span className="shf-patch-banner-right">
+                    {viewMode === "edit" && diffInfo.hasDiff && (
+                      <Button
+                        size="mini"
+                        type="outline"
+                        onClick={() => setViewMode("diff")}
+                      >
+                        {bi(
+                          `查看增删高亮 (+${diffInfo.added} / -${diffInfo.deleted})`,
+                          `View Diff (+${diffInfo.added} / -${diffInfo.deleted})`,
+                        )}
+                      </Button>
+                    )}
+                    <span className="faint small">
+                      {bi("仅影响当前交付，不影响组件库已发布版本", "Scoped to this delivery only")}
+                    </span>
                   </span>
                 </div>
               )}
@@ -663,10 +964,12 @@ export function StepHotfixDrawer({
                       <Button
                         size="mini"
                         icon={<IconCopy />}
-                        onClick={() => {
-                          copy(savedBanner.verify_cmd!);
-                          Message.success(bi("已复制覆盖命令", "Command copied"));
-                        }}
+                        onClick={() =>
+                          void copy(
+                            savedBanner.verify_cmd!,
+                            bi("已复制覆盖命令", "Command copied"),
+                          )
+                        }
                       >
                         {bi("复制命令", "Copy")}
                       </Button>
@@ -700,21 +1003,72 @@ export function StepHotfixDrawer({
                   <div className="shf-empty">{bi("正在读取文件内容…", "Loading content…")}</div>
                 ) : viewMode === "diff" ? (
                   <div className="shf-diff-box">
-                    {liveDiff ? (
-                      liveDiff.split("\n").map((line, i) => {
-                        const cls = line.startsWith("@@")
-                          ? "hunk"
-                          : line.startsWith("+")
-                            ? "add"
-                            : line.startsWith("-")
-                              ? "del"
-                              : "";
-                        return (
-                          <div key={i} className={`shf-diff-line ${cls}`}>
-                            {line || " "}
+                    {diffInfo.hasDiff ? (
+                      <>
+                        <div className="shf-diff-summary">
+                          <div className="shf-diff-summary-left">
+                            <span className="shf-diff-summary-label">
+                              {isDirty
+                                ? bi("当前未保存编辑对比原始交付文件：", "Unsaved edits vs original delivery file:")
+                                : bi("当前热修版本对比原始交付文件：", "Patched file vs original delivery file:")}
+                            </span>
+                            <span className="shf-diff-chip add">
+                              {bi(`+${diffInfo.added} 行新增`, `+${diffInfo.added} added`)}
+                            </span>
+                            <span className="shf-diff-chip del">
+                              {bi(`-${diffInfo.deleted} 行删除`, `-${diffInfo.deleted} deleted`)}
+                            </span>
                           </div>
-                        );
-                      })
+                          {canEdit && (
+                            <Button
+                              size="mini"
+                              type="text"
+                              onClick={() => setViewMode("edit")}
+                            >
+                              {bi("切换到源码编辑", "Switch to Editor")}
+                            </Button>
+                          )}
+                        </div>
+                        <div className="shf-diff-rows" role="region" aria-label={bi("文件改动差异", "File diff")}>
+                          {diffInfo.rows.map((row, i) => {
+                            if (row.kind === "hunk") {
+                              return (
+                                <div key={i} className="shf-diff-hunk">
+                                  {row.text}
+                                </div>
+                              );
+                            }
+                            const sign =
+                              row.kind === "add"
+                                ? "+"
+                                : row.kind === "del"
+                                  ? "-"
+                                  : " ";
+                            return (
+                              <div key={i} className={`shf-diff-row ${row.kind}`}>
+                                <span className="shf-diff-ln old">
+                                  {row.oldLine ?? ""}
+                                </span>
+                                <span className="shf-diff-ln new">
+                                  {row.newLine ?? ""}
+                                </span>
+                                <span className="shf-diff-sign">{sign}</span>
+                                <span className="shf-diff-code">
+                                  {row.text || " "}
+                                </span>
+                              </div>
+                            );
+                          })}
+                          {diffInfo.truncated && (
+                            <div className="shf-diff-hunk">
+                              {bi(
+                                "… 差异超过 1200 行，已截断显示（统计计数仍为完整行数）",
+                                "… Diff truncated at 1200 rows (line counts remain exact)",
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </>
                     ) : (
                       <div className="shf-empty">
                         {bi("当前内容与原始交付文件一致，暂无差异", "Identical to original delivery file")}

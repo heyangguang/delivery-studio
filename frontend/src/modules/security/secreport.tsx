@@ -13,7 +13,7 @@ import {
   IconEye,
   IconPlus,
 } from "@arco-design/web-react/icon";
-import { api, can, err } from "../../shared/shared";
+import { api, can, downloadFile, err } from "../../shared/shared";
 import { go } from "../../app/router";
 import { bi, useLang } from "../../app/i18n";
 import "./secreport.css";
@@ -280,17 +280,19 @@ export function SecReportTemplatesSection({
     [],
   );
 
-  const triggerQuickExport = (url: string) => {
+  const triggerQuickExport = (url: string, fallbackName = "security-report") => {
     if (exportCooldown) return;
     setExportCooldown(true);
-    window.location.href = url;
-    if (cooldownTimerRef.current !== null) {
-      window.clearTimeout(cooldownTimerRef.current);
-    }
-    cooldownTimerRef.current = window.setTimeout(() => {
-      cooldownTimerRef.current = null;
-      setExportCooldown(false);
-    }, 800);
+    Message.info(bi("正在生成并下载安全报告…", "Generating security report download…"));
+    void downloadFile(url, fallbackName).finally(() => {
+      if (cooldownTimerRef.current !== null) {
+        window.clearTimeout(cooldownTimerRef.current);
+      }
+      cooldownTimerRef.current = window.setTimeout(() => {
+        cooldownTimerRef.current = null;
+        setExportCooldown(false);
+      }, 400);
+    });
   };
 
   const list = controlledTemplates ?? localList;
@@ -1053,13 +1055,15 @@ export function SecExportModal({
       clusterId,
       scope: scopeOverride,
     });
-    window.location.href = url;
-    Message.success(
+    Message.info(
       bi(
         `正在导出 ${formatLabelOf(format)} 安全报告…`,
         `Exporting ${formatLabelOf(format)} security report…`,
       ),
     );
+    void downloadFile(url, `security-report.${format}`).finally(() => {
+      setExporting(false);
+    });
     onClose();
   };
 

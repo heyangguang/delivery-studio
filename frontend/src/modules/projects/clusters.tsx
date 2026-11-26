@@ -1,5 +1,7 @@
 import {
   buildClusterStackPills,
+  cleanDisplayVersion,
+  compactHostLabels,
   computeEffectiveClusterChanges,
   detectMissingCompanionsFromMeta,
   displayInstances,
@@ -45,6 +47,7 @@ import {
   IconCheck,
   IconExclamationCircle,
   IconLoading,
+  IconLock,
   IconRefresh,
   IconRight,
 } from "@arco-design/web-react/icon";
@@ -85,6 +88,7 @@ import {
   cachedDetail,
   prefetchDetail,
   putDetailCache,
+  subscribeDetailCache,
 } from "./deliveries";
 import { AIDock, Spark, useAIStatus } from "../ai/aichat";
 import {
@@ -92,6 +96,7 @@ import {
   type RehearsalPresetKind,
 } from "../rehearsal/rehearsal_intent";
 import { bi, useLang } from "../../app/i18n";
+import type { ClusterAutomationSummary } from "../automation/execution-types";
 import "./clusters.css";
 import "./importcluster.css";
 
@@ -103,6 +108,11 @@ const LazyClusterConfig = lazySubView(() =>
 );
 const LazyClusterSecurityTab = lazySubView(() =>
   import("../security/clustersecurity").then((m) => ({ default: m.ClusterSecurityTab })),
+);
+const LazyClusterAutomationPanel = lazySubView(() =>
+  import("../automation/rehearsal-automation").then((m) => ({
+    default: m.ClusterAutomationPanel,
+  })),
 );
 const LazyImportedBaselineModal = lazySubView(() =>
   import("./importcluster").then((m) => ({ default: m.ImportedBaselineModal })),
@@ -189,10 +199,25 @@ function TabSecurityIcon() {
   );
 }
 
+function TabAutomationIcon({ lit }: { lit?: boolean }) {
+  return (
+    <svg
+      {...TAB_SVG_PROPS}
+      style={{
+        display: "block",
+        flex: "none",
+        color: lit ? "var(--ok)" : undefined,
+      }}
+    >
+      <path d="M9.15 2.05L3.65 8.85H8.05L6.85 13.95L12.35 7.15H7.95L9.15 2.05Z" />
+    </svg>
+  );
+}
+
 /* ---------- URL compatibility for ?tab=deploy and legacy ?tab=deliveries ---------- */
 
 type ClusterTabCompat = {
-  tab?: "config" | "plans" | "docs" | "rehearsal" | "security";
+  tab?: "config" | "plans" | "docs" | "rehearsal" | "security" | "automation";
   plan?: string;
   doc?: string;
   rehearsal?: string;
@@ -278,6 +303,12 @@ export function parseClusterUrlCompat(clusterId?: string): ClusterTabCompat {
       canonicalize: true,
     };
   }
+  if (qTab === "automation") {
+    return {
+      tab: "automation",
+      canonicalize: true,
+    };
+  }
   if (qTab === "overview") {
     return { canonicalize: true };
   }
@@ -307,7 +338,7 @@ export function ClusterDetail({
   onRehearsalFocusChange,
 }: {
   c: ClusterView;
-  tab?: "config" | "plans" | "docs" | "rehearsal" | "security";
+  tab?: "config" | "plans" | "docs" | "rehearsal" | "security" | "automation";
   plan?: string;
   doc?: string;
   rehearsal?: string;
@@ -378,6 +409,7 @@ export function ClusterDetail({
     .replace(/^Initial Deploy\b/, "Deploy");
   const app = appMap.get(c.app_id);
   const owner = c.owner && c.owner !== meName() ? c.owner : "";
+  const readOnly = c.access_level === "view";
   const entry = resolvedPlan
     ? c.plans.find((p) => p.id === resolvedPlan)
     : undefined;
@@ -424,8 +456,52 @@ export function ClusterDetail({
     if (basePlanId) prefetchDetail(basePlanId);
   }, [c.id, basePlanId]);
   const isImported = c.delivery_mode === "imported";
-  const [baselineModal, setBaselineModal] = useState<null | "edit" | "probe">(null);
+  const [baselineModal, setBaselineModal] = useState<null | "edit" | "notes" | "probe">(null);
+  const [liveInspecting, setLiveInspecting] = useState(false);
+  const [autoSummary, setAutoSummary] = useState<ClusterAutomationSummary | null>(null);
   const deletingImportedRef = useRef(false);
+
+  const runHeaderLiveInspect = async () => {
+    if (liveInspecting) return;
+    setLiveInspecting(true);
+    try {
+      const m = await import("../automation/rehearsal-automation");
+      await m.triggerAndPollClusterLiveInspect(c.id);
+      const targetJobId = c.current || c.holder || c.plans?.[0]?.id;
+      if (targetJobId) {
+        const freshDetail = await api<JobDetail>(
+          `/api/jobs/${encodeURIComponent(targetJobId)}`,
+          { cache: "no-store" },
+        );
+        putDetailCache(targetJobId, freshDetail);
+      }
+      await reload();
+      Message.success(
+        bi(
+          "主机只读实测完成：实时角色、生效参数、证书与软件包已增量更新",
+          "Host read-only telemetry updated non-destructively",
+        ),
+      );
+    } catch (e) {
+      Message.error((e as Error).message || bi("实测采集失败", "Live inspection failed"));
+    } finally {
+      setLiveInspecting(false);
+    }
+  };
+  useEffect(() => {
+    setBaselineModal(null);
+  }, [c.id, resolvedTab]);
+  useEffect(() => {
+    let alive = true;
+    setAutoSummary(null);
+    api<ClusterAutomationSummary>(`/api/clusters/${encodeURIComponent(c.id)}/automation`)
+      .then((res) => alive && setAutoSummary(res))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [c.id]);
+  const autoLit = Boolean(autoSummary?.verified);
   const effectiveTab =
     (resolvedTab === "plans" && isImported) ||
     (resolvedTab === "rehearsal" && !canRehearse) ||
@@ -470,6 +546,21 @@ export function ClusterDetail({
     ...(hasDocs
       ? [{ value: "docs", label: bi("文档", "Docs"), icon: <TabDocsIcon /> }]
       : []),
+    {
+      value: "automation",
+      label: autoLit ? (
+        <span
+          className="cl-auto-tab-label"
+          title={bi("自动化通道已测试连通", "Automation verified & ready")}
+        >
+          {bi("自动化", "Automation")}
+          <span className="cl-auto-tab-dot" aria-hidden />
+        </span>
+      ) : (
+        bi("自动化", "Automation")
+      ),
+      icon: <TabAutomationIcon lit={autoLit} />,
+    },
   ];
   const prevTabIdx = useRef(0);
   const curTabIdx = Math.max(
@@ -536,6 +627,76 @@ export function ClusterDetail({
               <h1>{c.id}</h1>
               <StatusBadge state={st.dot} label={stLabel} />
               <DeliveryModeTag mode={c.delivery_mode} />
+              {c.live_summary?.data_source === "live_agent" &&
+                c.live_summary.data_source_label && (
+                <Tooltip
+                  mini
+                  content={
+                    c.live_summary.last_probed_at
+                      ? bi(
+                          `Agent 实测数据（最近采集 ${fullTime(c.live_summary.last_probed_at)}）· 点击查看巡检设置`,
+                          `Live Agent telemetry (probed ${fullTime(c.live_summary.last_probed_at)}) · Click for inspection settings`,
+                        )
+                      : bi(
+                          `Agent 实测驱动 · 点击查看自动巡检设置`,
+                          `Live Agent telemetry · Click to configure inspection`,
+                        )
+                  }
+                >
+                  <button
+                    type="button"
+                    className="cl-applied-chip"
+                    onClick={() =>
+                      go(
+                        { name: "deliveries", id: c.id, tab: "automation" },
+                        { replace: true },
+                      )
+                    }
+                  >
+                    <span>
+                      {c.live_summary.data_source_label}
+                      {c.live_summary.last_probed_at
+                        ? ` · ${ago(c.live_summary.last_probed_at)}`
+                        : ""}
+                    </span>
+                  </button>
+                </Tooltip>
+              )}
+              {(c.live_summary?.drift_count || 0) +
+                (c.live_summary?.role_drift_count || 0) >
+                0 && (
+                <Tooltip
+                  mini
+                  content={bi(
+                    "主机实测配置或主从角色与基线存在漂移，点击查看比对明细",
+                    "Live host config or role drifted from baseline; click to inspect",
+                  )}
+                >
+                  <button
+                    type="button"
+                    className="cl-applied-chip"
+                    style={{
+                      background: "var(--warn-soft)",
+                      borderColor: "var(--warn-line)",
+                      color: "var(--warn)",
+                    }}
+                    onClick={() =>
+                      go(
+                        { name: "deliveries", id: c.id, tab: "config" },
+                        { replace: true },
+                      )
+                    }
+                  >
+                    <IconExclamationCircle />
+                    <span>
+                      {bi(
+                        `${(c.live_summary?.drift_count || 0) + (c.live_summary?.role_drift_count || 0)} 项实测漂移`,
+                        `${(c.live_summary?.drift_count || 0) + (c.live_summary?.role_drift_count || 0)} drift(s)`,
+                      )}
+                    </span>
+                  </button>
+                </Tooltip>
+              )}
               {(() => {
                 const appliedList = (rehearsals || []).filter(
                   (x) => x.stage === "finalized" && x.applied && !x.voided,
@@ -590,7 +751,29 @@ export function ClusterDetail({
               )}
             </div>
             <div className="detail-meta">
-              {owner && <span className="row-owner">{bi(`${owner} 的集群`, `${owner}'s cluster`)}</span>}
+              {(owner || readOnly) && (
+                <span className="cl-meta-badges">
+                  {owner && (
+                    <span className="row-owner">
+                      {bi(`${owner} 的集群`, `${owner}'s cluster`)}
+                    </span>
+                  )}
+                  {readOnly && (
+                    <Tooltip
+                      content={bi(
+                        "你对该集群拥有只读查看权限，可浏览配置、文档与演练记录，不可执行变更或删除",
+                        "You have read-only access to this cluster; viewing and exports are allowed, mutations are restricted",
+                      )}
+                      mini
+                    >
+                      <span className="cl-ro-chip">
+                        <IconLock />
+                        <span>{bi("只读授权", "Read-only")}</span>
+                      </span>
+                    </Tooltip>
+                  )}
+                </span>
+              )}
               <span>
                 {c.app_name} {c.version}
               </span>
@@ -621,6 +804,22 @@ export function ClusterDetail({
               label={c.head ? bi("当前运行方案", "Active scheme") : bi("目标部署方案", "Target scheme")}
             />
             <div className="detail-actions">
+              {!readOnly &&
+                can("delivery.execute|execution.manage|security.scan") &&
+                (c.live_summary?.has_online_agent ||
+                  autoSummary?.unified_agents?.some(
+                    (a) => a.online && !a.disabled,
+                  )) && (
+                  <Button
+                    size="small"
+                    type="primary"
+                    icon={<IconRefresh />}
+                    loading={liveInspecting}
+                    onClick={() => void runHeaderLiveInspect()}
+                  >
+                    {bi("立即实测采集", "Inspect Now")}
+                  </Button>
+                )}
               <Dropdown
                 trigger="click"
                 position="br"
@@ -628,7 +827,14 @@ export function ClusterDetail({
                   <Menu
                     onClickMenuItem={(k) => {
                       if (k === "copy") copy(c.id);
-                      else if (k === "edit-baseline") setBaselineModal("edit");
+                      else if (k === "cluster-access") {
+                        try {
+                          sessionStorage.setItem("ds:iam-cluster-focus", c.id);
+                        } catch {
+                          /* ignore */
+                        }
+                        go({ name: "accounts", id: "~clusters" });
+                      } else if (k === "edit-baseline") setBaselineModal("edit");
                       else if (k === "reprobe") setBaselineModal("probe");
                       else if (k === "delete-imported" && c.current) {
                         Modal.confirm({
@@ -662,7 +868,12 @@ export function ClusterDetail({
                     <Menu.Item key="copy">
                       <IconCopy /> {bi("复制集群标识", "Copy Cluster ID")}
                     </Menu.Item>
-                    {isImported && can("delivery.create") && (
+                    {!readOnly && can("iam.user|iam.team") && (
+                      <Menu.Item key="cluster-access">
+                        <IconLock /> {bi("集群权限设置", "Cluster Access")}
+                      </Menu.Item>
+                    )}
+                    {!readOnly && isImported && can("delivery.create") && (
                       <>
                         <Menu.Item key="edit-baseline">
                           <IconEdit /> {bi("编辑纳管基线", "Edit Baseline")}
@@ -705,6 +916,8 @@ export function ClusterDetail({
                 void import("../rehearsal/rehearsal");
               } else if (next === "docs" && hasDocs) {
                 void import("./docs").then((m) => m.prefetchClusterDocs(c.id));
+              } else if (next === "automation") {
+                void import("../automation/rehearsal-automation");
               }
             }}
             onChange={(next) => {
@@ -721,7 +934,7 @@ export function ClusterDetail({
                   {
                     name: "deliveries",
                     id: c.id,
-                    tab: next as "plans" | "rehearsal" | "docs" | "security",
+                    tab: next as "plans" | "rehearsal" | "docs" | "security" | "automation",
                   },
                   { replace: true },
                 );
@@ -774,6 +987,16 @@ export function ClusterDetail({
           <React.Suspense fallback={<div className="dsec"><Skeleton animation text={{ rows: 6 }} /></div>}>
             <LazyDocsTab c={c} doc={resolvedDoc} />
           </React.Suspense>
+        ) : effectiveTab === "automation" ? (
+          <div className="dsec rha-tab-pane">
+            <React.Suspense fallback={<Skeleton animation text={{ rows: 6 }} />}>
+              <LazyClusterAutomationPanel
+                clusterId={c.id}
+                readOnly={readOnly}
+                onChanged={setAutoSummary}
+              />
+            </React.Suspense>
+          </div>
         ) : (
           <Overview
             c={c}
@@ -784,10 +1007,13 @@ export function ClusterDetail({
             onSavedBaseline={
               isImported
                 ? async () => {
-                    if (c.current) {
+                    const targetJobId = c.current || c.holder || c.plans?.[0]?.id;
+                    if (targetJobId) {
                       putDetailCache(
-                        c.current,
-                        await api<JobDetail>(`/api/jobs/${encodeURIComponent(c.current)}`),
+                        targetJobId,
+                        await api<JobDetail>(`/api/jobs/${encodeURIComponent(targetJobId)}`, {
+                          cache: "no-store",
+                        }),
                       );
                     }
                     await reload();
@@ -805,10 +1031,13 @@ export function ClusterDetail({
             cluster={c}
             onClose={() => setBaselineModal(null)}
             onSaved={async () => {
-              if (c.current) {
+              const targetJobId = c.current || c.holder || c.plans?.[0]?.id;
+              if (targetJobId) {
                 putDetailCache(
-                  c.current,
-                  await api<JobDetail>(`/api/jobs/${encodeURIComponent(c.current)}`),
+                  targetJobId,
+                  await api<JobDetail>(`/api/jobs/${encodeURIComponent(targetJobId)}`, {
+                    cache: "no-store",
+                  }),
                 );
               }
               await reload();
@@ -1224,7 +1453,7 @@ function Overview({
   appIcon?: string;
   canRehearse: boolean;
   rehearsals: ChangeRehearsal[] | null;
-  onOpenBaseline?: (mode: "edit" | "probe") => void;
+  onOpenBaseline?: (mode: "edit" | "notes" | "probe") => void;
   onSavedBaseline?: () => Promise<void>;
 }) {
   useLang();
@@ -1451,29 +1680,56 @@ function Overview({
             </div>
           </div>
 
-          {noteItems.length > 0 && (
+          {(noteItems.length > 0 || (can("delivery.create") && onOpenBaseline)) && (
             <div className="cl-imp-notes-box">
               <div className="cl-imp-notes-head">
                 <span className="cl-imp-notes-lbl">
-                  {bi(`现场线索与备注（${noteItems.length} 条）`, `Field Notes (${noteItems.length})`)}
+                  {noteItems.length > 0
+                    ? bi(`现场线索与运维约束（${noteItems.length} 条）`, `Field Clues & Guardrails (${noteItems.length})`)
+                    : bi("现场线索与运维约束", "Field Clues & Guardrails")}
                 </span>
-                {noteItems.length > 2 && (
-                  <button
-                    type="button"
-                    className="cl-imp-notes-toggle"
-                    onClick={() => setNotesExpanded((v) => !v)}
-                  >
-                    {notesExpanded
-                      ? bi("收起", "Collapse")
-                      : bi(`展开全部 ${noteItems.length} 条`, `Show all ${noteItems.length}`)}
-                  </button>
-                )}
+                <div className="cl-imp-notes-acts">
+                  {noteItems.length > 2 && (
+                    <button
+                      type="button"
+                      className="cl-imp-notes-toggle"
+                      onClick={() => setNotesExpanded((v) => !v)}
+                    >
+                      {notesExpanded
+                        ? bi("收起", "Collapse")
+                        : bi(`展开全部 ${noteItems.length} 条`, `Show all ${noteItems.length}`)}
+                    </button>
+                  )}
+                  {can("delivery.create") && onOpenBaseline && (
+                    <button
+                      type="button"
+                      className="cl-imp-notes-edit-btn"
+                      onClick={() => onOpenBaseline("notes")}
+                    >
+                      <IconEdit />
+                      <span>
+                        {noteItems.length > 0
+                          ? bi("补充 / 管理", "Add / Manage")
+                          : bi("添加维护窗口或约束", "Add Guardrail")}
+                      </span>
+                    </button>
+                  )}
+                </div>
               </div>
-              <ul className="cl-imp-notes-list">
-                {visibleNotes.map((line, i) => (
-                  <li key={i}>{line}</li>
-                ))}
-              </ul>
+              {noteItems.length > 0 ? (
+                <ul className="cl-imp-notes-list">
+                  {visibleNotes.map((line, i) => (
+                    <li key={i}>{line}</li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="cl-imp-notes-empty">
+                  {bi(
+                    "尚未登记维护窗口、切主红线等运维约束；添加后将自动带入 AI 变更演练与排障上下文。",
+                    "No maintenance windows or guardrails recorded yet; added notes auto-feed into AI Rehearsal.",
+                  )}
+                </div>
+              )}
             </div>
           )}
         </section>
@@ -1882,12 +2138,27 @@ function Now({
   const [d, setD] = useState<JobDetail | null>(() => cachedDetail(p.id));
   const [loadError, setLoadError] = useState("");
   const [retry, setRetry] = useState(0);
+  useEffect(
+    () =>
+      subscribeDetailCache((changedId, next) => {
+        if (changedId === p.id) {
+          setD(next);
+          setLoadError("");
+        }
+      }),
+    [p.id],
+  );
+  useEffect(() => {
+    const onChanged = () => setRetry((n) => n + 1);
+    window.addEventListener("mh-clusters-changed", onChanged);
+    return () => window.removeEventListener("mh-clusters-changed", onChanged);
+  }, []);
   useEffect(() => {
     let live = true;
     const hit = cachedDetail(p.id);
     if (hit) setD(hit);
     setLoadError("");
-    api<JobDetail>(`/api/jobs/${p.id}`)
+    api<JobDetail>(`/api/jobs/${encodeURIComponent(p.id)}`, { cache: "no-store" })
       .then((r) => {
         putDetailCache(p.id, r);
         if (live) setD(r);
@@ -2104,7 +2375,19 @@ function ClusterUnifiedOverview({
   const insts = plan?.instances || [];
   const real = displayInstances(insts).filter((i) => !i.external);
   const defaultIp = plan?.hosts?.[0]?.ip || input?.hosts?.[0]?.ip || "";
-  const entries = insts
+  const importedEpRoleByAddr = new Map<string, string>();
+  const importedEpRoleByName = new Map<string, string>();
+  for (const iep of c.imported?.endpoints || []) {
+    const r = (iep.role || "").trim().toLowerCase();
+    if (!r) continue;
+    if (iep.address) {
+      const bare = iep.address.trim().replace(/:\d+$/, "").toLowerCase();
+      importedEpRoleByAddr.set(bare, r);
+      importedEpRoleByAddr.set(iep.address.trim().toLowerCase(), r);
+    }
+    if (iep.name) importedEpRoleByName.set(iep.name.trim().toLowerCase(), r);
+  }
+  const rawEntries = insts
     .flatMap((i) =>
       Object.entries(i.fronts || {}).map(([epName, f]) => {
         const ep = (i.endpoints || []).find((x) => x.name === epName);
@@ -2118,7 +2401,14 @@ function ClusterUnifiedOverview({
             ? bi(`外部 · ${niceTitle}`, `External · ${niceTitle}`)
             : bi("外部入口", "External entry")
           : niceTitle || bi("访问入口", "Entrypoint");
-        const isPrimary = /write|primary|master|主|写/i.test(`${epName} ${niceTitle}`);
+        const impRole =
+          importedEpRoleByAddr.get((f.address || "").trim().toLowerCase()) ||
+          importedEpRoleByName.get(epName.trim().toLowerCase()) ||
+          "";
+        const isPrimary =
+          impRole === "readwrite" ||
+          impRole === "primary" ||
+          /write|primary|master|主|写/i.test(`${epName} ${niceTitle}`);
         return {
           key: `${i.id}.${epName}.${f.listen}`,
           label,
@@ -2133,6 +2423,10 @@ function ClusterUnifiedOverview({
       }),
     )
     .sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary) || a.listen - b.listen);
+  const entries =
+    rawEntries.length === 1 && !rawEntries[0].isPrimary
+      ? [{ ...rawEntries[0], isPrimary: true }]
+      : rawEntries;
 
   const stackPills = buildClusterStackPills(c, real);
   const ports = real
@@ -2190,11 +2484,24 @@ function ClusterUnifiedOverview({
         ),
     )
     .slice(0, 8);
-  const roleLine = (i: (typeof insts)[number]) =>
-    Object.entries(i.roles || {})
-      .filter(([, hs]) => Array.isArray(hs) && hs.length > 0)
-      .map(([r, hs]) => `${i.role_titles?.[r] || r} ${(hs || []).join(bi("、", ", "))}`)
-      .join(" · ");
+  const hostIpByName = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const h of plan?.hosts || []) {
+      if (h.name && h.ip) m.set(h.name, h.ip);
+    }
+    for (const h of input?.hosts || []) {
+      if (h.name && h.ip && !m.has(h.name)) m.set(h.name, h.ip);
+    }
+    return m;
+  }, [input?.hosts, plan?.hosts]);
+  const shortHostMap = useMemo(() => {
+    const names = [
+      ...(plan?.hosts || []).map((h) => h.name),
+      ...(input?.hosts || []).map((h) => h.name),
+      ...real.flatMap((i) => i.hosts || []),
+    ];
+    return compactHostLabels(names);
+  }, [input?.hosts, plan?.hosts, real]);
   const hostCount = Array.isArray(input?.hosts) ? input.hosts.length : c.hosts;
 
   return (
@@ -2314,30 +2621,78 @@ function ClusterUnifiedOverview({
                 <span>{bi("组件组成", "Components")}</span>
               </div>
               <div className="cl-u-comps">
-                {real.map((i) => (
-                  <div key={i.id} className="cl-u-comp">
-                    <div className="cl-u-comp-top">
-                      <AppGlyph
-                        id={i.component}
-                        icon={i.component === c.app_id ? c.icon : undefined}
-                        color={i.component === c.app_id ? c.imported?.color : undefined}
-                        size={16}
-                      />
-                      <b>
-                        {i.title} {i.version}
-                      </b>
-                      {i.embedded ? (
-                        <span className="flag info">{bi("内置管理", "Embedded")}</span>
-                      ) : (
-                        i.auto && <span className="flag info">{bi("自动加入", "Auto-added")}</span>
-                      )}
-                      {i.status !== "published" && (
-                        <span className="flag warn">{bi("待验证", "Unverified")}</span>
-                      )}
+                {real.map((i) => {
+                  const roleEntries = Object.entries(i.roles || {}).filter(
+                    ([, hs]) => Array.isArray(hs) && hs.length > 0,
+                  );
+                  const cleanVer = cleanDisplayVersion(i.version);
+                  const compHostCount = (i.hosts || []).length;
+                  return (
+                    <div key={i.id} className="cl-u-comp">
+                      <div className="cl-u-comp-top">
+                        <div className="cl-u-comp-id">
+                          <AppGlyph
+                            id={i.component}
+                            icon={i.component === c.app_id ? c.icon : undefined}
+                            color={i.component === c.app_id ? c.imported?.color : undefined}
+                            size={16}
+                          />
+                          <b>{i.title}</b>
+                          {cleanVer && <span className="cl-u-comp-ver mono">{cleanVer}</span>}
+                        </div>
+                        <div className="cl-u-comp-flags">
+                          {compHostCount > 0 && (
+                            <span className="cl-u-comp-count num">
+                              {compHostCount} {bi("节点", "hosts")}
+                            </span>
+                          )}
+                          {i.embedded ? (
+                            <span className="flag info">{bi("内置管理", "Embedded")}</span>
+                          ) : (
+                            i.auto && <span className="flag info">{bi("自动加入", "Auto-added")}</span>
+                          )}
+                          {i.status !== "published" && (
+                            <span className="flag warn">{bi("待验证", "Unverified")}</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="cl-u-comp-roles">
+                        {roleEntries.length > 0 ? (
+                          roleEntries.map(([r, hs]) => (
+                            <div key={r} className="cl-u-comp-role-row">
+                              <span className="cl-u-comp-role-k">{i.role_titles?.[r] || r}</span>
+                              <div className="cl-u-comp-role-hosts">
+                                {(hs || []).map((hn) => {
+                                  const ip = hostIpByName.get(hn);
+                                  const shortName = shortHostMap.get(hn) || hn;
+                                  const fullTip = ip ? `${hn} (${ip})` : hn;
+                                  return (
+                                    <Tooltip key={hn} content={fullTip} mini>
+                                      <span className="cl-u-host-chip mono">{shortName}</span>
+                                    </Tooltip>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="cl-u-comp-role-hosts">
+                            {(i.hosts || []).map((hn) => {
+                              const ip = hostIpByName.get(hn);
+                              const shortName = shortHostMap.get(hn) || hn;
+                              const fullTip = ip ? `${hn} (${ip})` : hn;
+                              return (
+                                <Tooltip key={hn} content={fullTip} mini>
+                                  <span className="cl-u-host-chip mono">{shortName}</span>
+                                </Tooltip>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                    <small>{roleLine(i) || i.hosts.join(bi("、", ", "))}</small>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}

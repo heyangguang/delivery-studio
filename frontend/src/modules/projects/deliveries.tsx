@@ -118,6 +118,8 @@ export type LoadState = "loading" | "error" | "ready";
 /* ---------- detail cache: switching is instant for anything already seen or hovered ---------- */
 
 const detailCache = new Map<string, JobDetail>();
+type DetailListener = (id: string, d: JobDetail) => void;
+const detailListeners = new Set<DetailListener>();
 if (typeof window !== "undefined") {
   window.addEventListener("mh-lang-change", () => detailCache.clear());
 }
@@ -125,9 +127,16 @@ const inflight = new Set<string>();
 const jobApiPath = (id: string) => `/api/jobs/${encodeURIComponent(id)}`;
 export const cachedDetail = (id: string) =>
   detailCache.get(id) || cached<JobDetail>(jobApiPath(id)) || null;
+export function subscribeDetailCache(fn: DetailListener): () => void {
+  detailListeners.add(fn);
+  return () => {
+    detailListeners.delete(fn);
+  };
+}
 export function putDetailCache(id: string, d: JobDetail) {
   detailCache.set(id, d);
   putCached(jobApiPath(id), d);
+  for (const fn of detailListeners) fn(id, d);
 }
 export function prefetchDetail(id: string) {
   if (!id || detailCache.has(id) || inflight.has(id)) return;
@@ -404,7 +413,7 @@ export function DeliveriesPage({
   load: LoadState;
   reload: () => Promise<void>;
   selected?: string;
-  tab?: "config" | "plans" | "docs" | "rehearsal" | "security";
+  tab?: "config" | "plans" | "docs" | "rehearsal" | "security" | "automation";
   plan?: string;
   doc?: string;
   rehearsal?: string;
@@ -448,8 +457,10 @@ export function DeliveriesPage({
   const [cload, setCload] = useState<LoadState>(clusters ? "ready" : "loading");
   const loadClusters = async () => {
     try {
-      const r = await api<ClusterView[]>("/api/clusters");
-      setClusters(Array.isArray(r) ? r : []);
+      const r = await api<ClusterView[]>("/api/clusters", { cache: "no-store" });
+      const list = Array.isArray(r) ? r : [];
+      putCached("/api/clusters", list);
+      setClusters(list);
       setCload("ready");
     } catch {
       setCload((x) => (clusters ? x : "error"));
@@ -987,7 +998,7 @@ function JobList({
 }: {
   jobs: Row[];
   selected?: string;
-  activeTab?: "config" | "plans" | "docs" | "rehearsal" | "security";
+  activeTab?: "config" | "plans" | "docs" | "rehearsal" | "security" | "automation";
   load: LoadState;
   reload: () => Promise<void>;
   filtered: boolean;
@@ -1440,6 +1451,7 @@ export function DeliveryDetail({
   const [syncCheckTick, setSyncCheckTick] = useState(0);
   const [focusSyncTick, setFocusSyncTick] = useState(0);
   const wasRunning = useRef(!!cached && running(cached.job.state));
+  const deletingRef = useRef(false);
   // The detail pane is one scroller shared by every delivery; start each at the top.
   useLayoutEffect(() => {
     if (!embedded) document.querySelector(".md-detail")?.scrollTo({ top: 0 });
@@ -1470,6 +1482,16 @@ export function DeliveryDetail({
       }
     }
   };
+  useEffect(
+    () =>
+      subscribeDetailCache((changedId, next) => {
+        if (changedId === id) {
+          setD(next);
+          setState("ready");
+        }
+      }),
+    [id],
+  );
   useEffect(() => {
     fetchDetail();
   }, [id, lang]);
@@ -1533,7 +1555,6 @@ export function DeliveryDetail({
   const g = groupFiles(files);
   const done = !running(job.state);
 
-  const deletingRef = useRef(false);
   const remove = () =>
     Modal.confirm({
       title:

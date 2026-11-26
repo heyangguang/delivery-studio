@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS middleware_store_audit(id bigint GENERATED ALWAYS AS 
 CREATE TABLE IF NOT EXISTS middleware_store_catalog(app_id text PRIMARY KEY,document jsonb NOT NULL);
 CREATE TABLE IF NOT EXISTS middleware_store_sessions(id text PRIMARY KEY,username text NOT NULL,status text NOT NULL,updated_at timestamptz NOT NULL DEFAULT now(),document jsonb NOT NULL);
 CREATE INDEX IF NOT EXISTS middleware_store_sessions_user ON middleware_store_sessions(username,updated_at DESC);
-ALTER TABLE middleware_store_users ADD COLUMN IF NOT EXISTS disabled boolean NOT NULL DEFAULT false;`
+ALTER TABLE middleware_store_users ADD COLUMN IF NOT EXISTS disabled boolean NOT NULL DEFAULT false;` + fullStoreSchemaSQL
 	if _, err = db.ExecContext(ctx, schema); err != nil {
 		db.Close()
 		return nil, errors.New("平台数据库表初始化失败，请检查账户权限和数据库版本")
@@ -110,6 +110,7 @@ func (r *storeRepository) jobs() (map[string]storeJob, error) {
 func (r *storeRepository) deleteJob(id string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	_, _ = r.db.ExecContext(ctx, "DELETE FROM middleware_store_job_specs WHERE job_id=$1", id)
 	_, err := r.db.ExecContext(ctx, "DELETE FROM middleware_store_jobs WHERE id=$1", id)
 	return err
 }

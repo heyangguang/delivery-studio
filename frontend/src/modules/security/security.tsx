@@ -36,6 +36,7 @@ import {
   api,
   cached,
   can,
+  downloadFile,
   err,
   fullTime,
   platformShort,
@@ -4337,7 +4338,13 @@ export function SecurityPage({
                       icon={<IconCloudDownload />}
                       disabled={meta.advisory_count === 0}
                       onClick={() => {
-                        window.location.href = "/api/security/db/export";
+                        Message.info(
+                          bi("正在打包并下载离线漏洞库…", "Downloading offline vulnerability bundle…"),
+                        );
+                        void downloadFile(
+                          "/api/security/db/export",
+                          "osv-offline-bundle.tar.gz",
+                        );
                       }}
                     >
                       {bi("导出离线漏洞库 (.tar.gz)", "Export Offline Bundle")}

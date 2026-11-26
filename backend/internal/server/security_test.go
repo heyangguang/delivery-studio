@@ -1239,3 +1239,54 @@ instances:
 		t.Fatalf("expected full restoration to 3 active & score %d, got active=%d supp=%d score=%d", baseSec.Score, restoredSec.ActiveCounts.Total, restoredSec.SuppressedCount, restoredSec.Score)
 	}
 }
+
+func TestSecuritySkipGitRangesAndNeverDowngrade(t *testing.T) {
+	// 1. OSV GIT commit-SHA range must be ignored when indexing & matching advisories.
+	if !isGitCommitHash("fedcba9876543210fedcba9876543210fedcba98") || isGitCommitHash("42.0.4") {
+		t.Fatalf("unexpected isGitCommitHash classification")
+	}
+	gitAdv := secDBAdvisory{
+		ID:        "GHSA-git-sha-test",
+		Package:   "cryptography",
+		Ecosystem: "PyPI",
+		Ranges: []secAdvRange{{
+			Type:       "GIT",
+			Introduced: "0123456789abcdef0123456789abcdef01234567",
+			Fixed:      "fedcba9876543210fedcba9876543210fedcba98",
+		}},
+	}
+	if versionAffectedByAdvisory("pypi", "50.0.2", gitAdv) {
+		t.Fatalf("GIT commit-SHA range must never match installed SemVer version")
+	}
+
+	// 2. Installed version newer than fixed version must NOT match or recommend downgrade.
+	if versionAffectedByAdvisory("pypi", "50.0.2", secDBAdvisory{
+		Ranges: []secAdvRange{{Type: "ECOSYSTEM", Introduced: "0", Fixed: "42.0.4"}},
+	}) {
+		t.Fatalf("50.0.2 must not be marked affected by fixed=42.0.4")
+	}
+	if versionAffectedByAdvisory("pypi", "3.1.6", secDBAdvisory{
+		Ranges: []secAdvRange{{Type: "ECOSYSTEM", Introduced: "0", Fixed: "2.8.1"}},
+	}) {
+		t.Fatalf("3.1.6 must not be marked affected by fixed=2.8.1")
+	}
+	if !versionAffectedByAdvisory("pypi", "25.3", secDBAdvisory{
+		Ranges: []secAdvRange{{Type: "ECOSYSTEM", Introduced: "0", Fixed: "26.0"}},
+	}) {
+		t.Fatalf("25.3 should still be marked affected by fixed=26.0")
+	}
+
+	// 3. buildPackageGroups must never recommend a downgrade or commit SHA.
+	groups := buildPackageGroups([]secFinding{{
+		CVE:              "CVE-2026-90001",
+		Package:          "cryptography",
+		EcoKey:           "pypi",
+		Ecosystem:        "PyPI",
+		InstalledVersion: "50.0.2",
+		Severity:         "high",
+		FixedIn:          []string{"42.0.4", "fedcba9876543210fedcba9876543210fedcba98"},
+	}})
+	if len(groups) != 1 || groups[0].RecommendedFix != "" || groups[0].FixableCount != 0 {
+		t.Fatalf("expected no downgrade/SHA recommendation for cryptography 50.0.2, got %+v", groups)
+	}
+}

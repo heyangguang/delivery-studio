@@ -906,7 +906,7 @@ var CompanionCatalog = []CompanionDef{
 		ServiceHints: []string{"pgbouncer.service"}, ConfigHints: []string{"/etc/pgbouncer/pgbouncer.ini"},
 	},
 	{
-		ID: "pgbackrest", Name: "pgBackRest", Kind: "backup", Icon: "storage", Color: "emerald",
+		ID: "pgbackrest", Name: "pgBackRest", Kind: "backup", Icon: "storage", Color: "green",
 		DefaultRole: "backup", RoleTitle: "物理备份", Topology: false,
 		ConfigHints: []string{"/etc/pgbackrest/pgbackrest.conf"},
 	},

@@ -383,10 +383,11 @@ const aiSystemBase = `你是 Kyndryl Delivery Studio 的交付助手，协助现
 - 要在手册里增加一步（补一条命令、一项检查）时，调用 propose_step；要改已有某一步的命令或参数时，调用 propose_change（不要为此建议重新生成交付）。命令必须能直接照抄执行，effect 如实标注，会修改系统的要写回退办法，after_title 用 runbook 里的原标题。平台校验没通过时按提示改好再提交。提案之外，仍然要在回答里讲清原因。
 - 平台不会把格式化、分区、删除数据这类高危操作写进手册，也不会替用户做决定：遇到这类操作，不要反复提案，也不要说“被拒绝所以做不了”。直接在回答里给出完整步骤、风险、前置检查和回退办法，明确交给用户在现场自己评估、自己决定要不要执行。
 - 问题出在自动化本身（某个 Playbook、角色任务、测试脚本或断言的逻辑、跑在了不该跑的机器上）而不是手册命令时，**必须先调用 component_sync_status（传入相关文件路径）核对当前平台已发布组件和草稿的状态**：
+  · 先在正文里讲清楚**根因结论**和**具体修复方案**（明确指出要修改哪个文件、删除/新增/替换哪段逻辑、以及修改后如何验证）。
   · 若当前最新已发布组件已经修复了这个问题且本次交付可同步（sync_available=true），直接在回答里明确告知用户「当前组件已修复，无需再去组件工作台修改代码」，说明最新组件具体修复了什么，并引导用户在交付页或执行监控台点击「同步组件更新」（同时提醒重跑前需要核对的现场残留状态，如旧主是否拉起）；不要再给过时的组件修改方案，也不要重复提交 suggest_component_change 或 propose_file_change。
-  · 若仅未发布草稿中已有修复，告知用户先去组件工作台检查并发布草稿，再回来同步本次交付。
-  · 只有核实当前已发布组件和草稿均尚未修复时，才用 propose_file_change 修改这份交付项目里的文件（先 list_files / read_file 看清原文，用 edits 局部替换；采纳后平台生成更新包和覆盖命令，无需重新生成交付），并同时用 suggest_component_change 建议修组件。
-- 手册里的命令能解决的用 propose_step / propose_change；自动化文件有问题且组件尚未修复时用 propose_file_change。不要让用户自己去控制节点手改文件。
+  · 若仅未发布草稿中已有修复，告知用户先去组件工作台检查并发布草稿，再回来同步本次交付；若现场急需立刻继续执行，也可以同时用 propose_file_change 给本次交付出一张局部热修补丁卡片（采纳后本次执行立即生效）。
+  · 只要确认当前已发布组件尚未修复且修改本次交付里的脚本即可解决问题，**必须主动先用 list_files / read_file 看清原文，再调用 propose_file_change 提交本次交付的最小热修补丁卡片**（优先用 edits 局部精准替换；卡片会高亮展示删除与新增行，采纳后自动写入本次交付热修补丁，自动执行下次续跑自动推送、离线交付生成更新包，用户也可以在「脚本查看与热修」抽屉直接查看改了哪个文件以及增删高亮），无需重新生成交付；如果属于通用组件缺陷，再同步用 suggest_component_change 建议修组件。
+- 手册里的命令能解决的用 propose_step / propose_change；自动化文件有问题且组件尚未修复时用 propose_file_change。不要让用户自己去控制节点手改文件，也不要只口头给代码片段却不调用 propose_file_change。
 - 严禁向用户反问平台已经记录的状态：当前集群是否已部署完成/已投产、执行进度与已有演练记录均已提供或可通过 delivery_info / cluster_history 查到，直接以平台真实状态为准，不要反问“这个集群已经投产了吗？”。
 - 对已部署完成并处于运行中（已投产）的集群讨论后续操作时，**严守「零未留痕变更」分级铁律**：
   · **纯只读排查（零修改，不进演练）**：仅查状态、看日志、查主从/连接/复制延迟或核对配置现状（不修改任何配置、文件或服务）→ 直接给 1～3 条只读命令，**不要调用 propose_rehearsal**。
@@ -472,7 +473,7 @@ func (s *storeServer) aiChatHandler(w http.ResponseWriter, r *http.Request, user
 		return
 	}
 	st := s.aiLoad()
-	providers := st.aiProvidersForPick(feature, in.Model)
+	providers := s.aiProvidersForUser(st, user.User, feature, in.Model)
 	if len(providers) == 0 {
 		s.fail(w, 409, "没有可用的模型供应商，请管理员在平台设置 → AI 中配置")
 		return

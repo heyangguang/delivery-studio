@@ -30,6 +30,7 @@ type Models = {
 };
 
 const KEY = "mh-ai-model";
+const MODEL_CHANGE_EVT = "mh-ai-model-change";
 
 const read = (feature: string) => {
   try {
@@ -50,6 +51,9 @@ const write = (feature: string, ref: string) => {
   } catch {
     /* the choice is only a convenience */
   }
+  window.dispatchEvent(
+    new CustomEvent(MODEL_CHANGE_EVT, { detail: { feature, ref } }),
+  );
 };
 
 export const modelLabel = (m?: { name?: string; model: string }) =>
@@ -87,11 +91,23 @@ export function useModelPick(feature: string) {
   );
   const [pick, setPick] = useState(() => read(feature));
   useEffect(() => {
+    setPick(read(feature));
+  }, [feature]);
+  useEffect(() => {
+    const onChanged = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ feature?: string; ref?: string }>).detail;
+      if (detail?.feature === feature && typeof detail.ref === "string") {
+        setPick(detail.ref);
+      }
+    };
+    window.addEventListener(MODEL_CHANGE_EVT, onChanged);
+    return () => window.removeEventListener(MODEL_CHANGE_EVT, onChanged);
+  }, [feature]);
+  useEffect(() => {
     fetchCached<Models>("/api/ai/models")
       .then(setD)
       .catch(() => undefined);
   }, [aiStatus]);
-  const userModels = d?.models || [];
   const defModel = d?.default_models?.[feature];
   const defaultRef = defModel?.ref || d?.defaults?.[feature] || "";
   const offered = useMemo(() => {
@@ -102,11 +118,19 @@ export function useModelPick(feature: string) {
     }
     return list;
   }, [d, feature]);
-  const valid = userModels.some((m) => m.ref === pick);
-  const ref = valid ? pick : "";
-  const activeRef = ref || defaultRef;
+  const valid = Boolean(pick) && offered.some((m) => m.ref === pick);
+  const activeRef = (valid ? pick : "") || defaultRef || offered[0]?.ref || "";
   const current =
     offered.find((m) => m.ref === activeRef) || defModel || offered[0];
+  // Guarantee UI == Backend invariant: never show Model A in the button while sending ""
+  // that resolves to Model B on the server.
+  const ref = current
+    ? valid
+      ? current.ref
+      : current.ref === defaultRef
+        ? ""
+        : current.ref
+    : "";
   return {
     models: offered,
     ref,
@@ -236,7 +260,7 @@ export function ModelPicker({
                     aria-selected={isOn}
                     className={`mp-item ${isOn ? "mp-item-on" : ""}`}
                     onClick={() => {
-                      pick.choose(m.ref === pick.defaultRef ? "" : m.ref);
+                      pick.choose(m.ref);
                       setOpen(false);
                     }}
                   >

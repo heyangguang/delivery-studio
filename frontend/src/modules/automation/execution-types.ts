@@ -1,4 +1,27 @@
 import { bi } from "../../app/i18n";
+import type { ClusterLiveSummary } from "../../shared/shared";
+
+export type AgentHeartbeatPolicy = {
+  default_interval_sec: number;
+  updated_at?: string;
+  updated_by?: string;
+};
+
+export type AgentHostProbe = {
+  hostname?: string;
+  os?: string;
+  kernel?: string;
+  arch?: string;
+  cpu_cores?: number;
+  load1?: number;
+  load5?: number;
+  mem_total_mb?: number;
+  mem_used_pct?: number;
+  disk_total_gb?: number;
+  disk_used_pct?: number;
+  uptime_sec?: number;
+  interval_sec?: number;
+};
 
 export type ExecutionNode = {
   kind?: "independent" | "embedded";
@@ -17,6 +40,7 @@ export type ExecutionNode = {
   allow_delivery?: boolean;
   allow_probe?: boolean;
   allow_rehearsal?: boolean;
+  probe?: AgentHostProbe;
 };
 
 export type ExecutionPreparation = {
@@ -46,11 +70,54 @@ export type ClusterAutomationHost = {
   role?: string;
 };
 
+export type AgentClusterMode = "readonly" | "readwrite";
+
+export type AgentHeartbeatSample = {
+  at: string;
+  load1?: number;
+  mem_pct?: number;
+  disk_pct?: number;
+};
+
+export type AgentClusterCatalogItem = {
+  id: string;
+  app_name: string;
+  version?: string;
+  platform?: string;
+  owner?: string;
+  host_ips?: string[];
+  host_names?: string[];
+  can_op: boolean;
+};
+
+export type UnifiedAgentView = {
+  id: string;
+  backing: "node" | "direct";
+  name: string;
+  ip: string;
+  online: boolean;
+  disabled: boolean;
+  revoked?: boolean;
+  last_seen?: string;
+  version?: string;
+  protocol?: number;
+  supports_exec: boolean;
+  cluster_modes: Record<string, AgentClusterMode>;
+  clusters: string[];
+  suggested_clusters?: string[];
+  heartbeat_interval_sec?: number;
+  effective_heartbeat_sec?: number;
+  probe?: AgentHostProbe;
+  heartbeats?: AgentHeartbeatSample[];
+  service_name?: string;
+};
+
 export type ClusterAutomationConfig = {
   cluster_id: string;
   enabled: boolean;
   transport: "node" | "agent";
   node_id?: string;
+  last_agent_id?: string;
   node_exec_method?: "auto" | "ansible" | "ssh";
   ssh_user?: string;
   ssh_port?: number;
@@ -75,7 +142,8 @@ export type AutomationNodeView = ExecutionNode & {
 export type AutomationAgentView = {
   id: string;
   job?: string;
-  cluster: string;
+  cluster?: string;
+  clusters?: string[];
   node?: string;
   mode?: string; // "" / "ssh_trust" | "direct"
   allow_mutating?: boolean;
@@ -88,9 +156,49 @@ export type AutomationAgentView = {
   version?: string;
   desired: string;
   applied?: string;
+  matched_clusters?: string[];
+  suggested_clusters?: string[];
   message?: string;
+  probe?: AgentHostProbe;
   online: boolean;
 };
+
+export type AgentEnrollPrefill = {
+  role?: "controller" | "target";
+  host?: string;
+  ip?: string;
+  cluster?: string;
+  ts?: number;
+};
+
+const AGENT_ENROLL_PREFILL_KEY = "ds:agent-enroll-prefill";
+const AGENT_ENROLL_PREFILL_TTL_MS = 5 * 60 * 1000;
+
+export function saveAgentEnrollPrefill(prefill: Omit<AgentEnrollPrefill, "ts">) {
+  try {
+    sessionStorage.setItem(
+      AGENT_ENROLL_PREFILL_KEY,
+      JSON.stringify({ ...prefill, ts: Date.now() } satisfies AgentEnrollPrefill),
+    );
+  } catch {
+    // Ignore private-mode storage failures
+  }
+}
+
+export function consumeAgentEnrollPrefill(): AgentEnrollPrefill | null {
+  try {
+    const raw = sessionStorage.getItem(AGENT_ENROLL_PREFILL_KEY);
+    if (!raw) return null;
+    sessionStorage.removeItem(AGENT_ENROLL_PREFILL_KEY);
+    const parsed = JSON.parse(raw) as AgentEnrollPrefill;
+    if (!parsed || (parsed.ts && Date.now() - parsed.ts > AGENT_ENROLL_PREFILL_TTL_MS)) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
 
 export type RehearsalExecTarget = {
   host: string;
@@ -132,6 +240,7 @@ export type RehearsalExecTask = {
   sub_index: number;
   kind:
     | "connectivity_check"
+    | "live_inspect"
     | "baseline_probe"
     | "rehearsal_probe"
     | "rehearsal_step"
@@ -182,11 +291,20 @@ export type ClusterAutomationSummary = {
   hosts: ClusterAutomationHost[];
   nodes: AutomationNodeView[];
   agents: AutomationAgentView[];
+  unbound_agents?: AutomationAgentView[];
+  unified_agents?: UnifiedAgentView[];
+  available_agents?: UnifiedAgentView[];
+  last_agent_id?: string;
   online_agents: number;
   ready: boolean;
   ready_reason?: string;
+  verified?: boolean;
+  last_check_state?: string;
+  last_check_at?: string;
   bootstrap: AutomationBootstrapInfo;
   recent_tasks: RehearsalExecTask[];
+  live_summary?: ClusterLiveSummary;
+  heartbeat_policy?: AgentHeartbeatPolicy;
 };
 
 export const isExecutionNodeOnline = (node: ExecutionNode) =>

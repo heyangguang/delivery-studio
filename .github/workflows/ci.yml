@@ -3,18 +3,16 @@ name: CI
 on:
   pull_request:
     branches:
-      - develop
       - main
       - "release/**"
   push:
     branches:
-      - develop
       - main
       - "release/**"
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -96,7 +94,7 @@ jobs:
         run: go test -count=1 -timeout 3m ./mwpack/... ./pkglib/... ./catalog/...
 
       - name: Run Server Verification Tests
-        run: go test -short -count=1 -timeout 5m -run "TestGateway|TestAPIVersion|TestDev|TestRehearsal|TestClusterImport|TestImported|TestGlyphs|TestDocs|TestIAM|TestSecurity|TestTargetEnrollment|TestExecutionNodeBootstrap|TestExecutionDurable|TestExecutionReport|TestExecutionAuthorization|TestExecutionOutbox|TestAIMasterSwitch" ./internal/server
+        run: go test -short -count=1 -timeout 5m -run "TestGateway|TestAPIVersion|TestDev|TestRehearsal|TestClusterImport|TestImported|TestGlyphs|TestDocs|TestIAM|TestSecurity|TestTargetEnrollment|TestExecutionNodeBootstrap|TestExecutionDurable|TestExecutionReport|TestExecutionAuthorization|TestExecutionOutbox|TestAIMasterSwitch|TestClusterLive" ./internal/server
 
       - name: Verify Linux amd64 Build
         env:

@@ -77,27 +77,16 @@ func isLocalDevHostname(host string) bool {
 	if strings.EqualFold(host, "localhost") || host == "0.0.0.0" {
 		return true
 	}
-	ip := net.ParseIP(host)
-	if ip == nil {
-		return false
-	}
-	if ip.IsLoopback() || ip.IsUnspecified() {
+	// Allow any IP literal (loopback, private LAN, or server IP mapped into a Docker bridge container);
+	// DNS rebinding only applies to domain names, never raw IP literals in the Host header.
+	if ip := net.ParseIP(host); ip != nil {
 		return true
 	}
-	addrs, err := net.InterfaceAddrs()
-	if err != nil {
-		return false
-	}
-	for _, a := range addrs {
-		var ifIP net.IP
-		switch v := a.(type) {
-		case *net.IPNet:
-			ifIP = v.IP
-		case *net.IPAddr:
-			ifIP = v.IP
-		}
-		if ifIP != nil && ifIP.Equal(ip) {
-			return true
+	if extra := strings.TrimSpace(os.Getenv("DELIVERY_STUDIO_ALLOWED_HOSTS")); extra != "" {
+		for _, item := range strings.Split(extra, ",") {
+			if h := strings.TrimSpace(item); h != "" && strings.EqualFold(h, host) {
+				return true
+			}
 		}
 	}
 	return false
@@ -202,21 +191,12 @@ func (d *dualProtocolListener) Close() error {
 }
 
 // ensureDevTLSCert creates a local self-signed TLS certificate covering localhost, loopback,
-// and all current host network interfaces if certPath/keyPath do not yet exist.
+// and all current host network interfaces if certPath/keyPath do not yet exist, or refreshes
+// an existing auto-generated dev cert ("middleware-hub-dev") when host IPv4 addresses change.
 func ensureDevTLSCert(certPath, keyPath string) error {
-	if fileExistsRegular(certPath) && fileExistsRegular(keyPath) {
-		return nil
-	}
-	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return err
-	}
-	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
-	if err != nil {
-		return err
-	}
 	ips := []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("::1"), net.ParseIP("0.0.0.0")}
 	seen := map[string]bool{"127.0.0.1": true, "::1": true, "0.0.0.0": true}
+	var activeIPv4 []string
 	if addrs, err := net.InterfaceAddrs(); err == nil {
 		for _, a := range addrs {
 			if ipnet, ok := a.(*net.IPNet); ok && ipnet.IP != nil {
@@ -225,8 +205,45 @@ func ensureDevTLSCert(certPath, keyPath string) error {
 					seen[s] = true
 					ips = append(ips, ipnet.IP)
 				}
+				if v4 := ipnet.IP.To4(); v4 != nil && !v4.IsLoopback() && !v4.IsLinkLocalUnicast() {
+					activeIPv4 = append(activeIPv4, v4.String())
+				}
 			}
 		}
+	}
+	if fileExistsRegular(certPath) && fileExistsRegular(keyPath) {
+		needRefresh := false
+		if raw, err := os.ReadFile(certPath); err == nil {
+			if blk, _ := pem.Decode(raw); blk != nil {
+				if parsed, perr := x509.ParseCertificate(blk.Bytes); perr == nil && parsed.Subject.CommonName == "middleware-hub-dev" {
+					if time.Until(parsed.NotAfter) < 30*24*time.Hour {
+						needRefresh = true
+					} else {
+						certIPs := map[string]bool{}
+						for _, ip := range parsed.IPAddresses {
+							certIPs[ip.String()] = true
+						}
+						for _, ipStr := range activeIPv4 {
+							if !certIPs[ipStr] {
+								needRefresh = true
+								break
+							}
+						}
+					}
+				}
+			}
+		}
+		if !needRefresh {
+			return nil
+		}
+	}
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return err
+	}
+	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		return err
 	}
 	tmpl := x509.Certificate{
 		SerialNumber: serial,

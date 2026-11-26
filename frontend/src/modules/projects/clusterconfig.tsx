@@ -4,6 +4,7 @@ import {
   Button,
   Drawer,
   Input,
+  Message,
   Select,
   Skeleton,
   Tag,
@@ -17,6 +18,7 @@ import {
   IconDown,
   IconDownload,
   IconEdit,
+  IconExclamationCircle,
   IconEye,
   IconEyeInvisible,
   IconFile,
@@ -25,7 +27,6 @@ import {
   IconRefresh,
   IconRight,
   IconSearch,
-  IconThunderbolt,
 } from "@arco-design/web-react/icon";
 import {
   ago,
@@ -38,6 +39,8 @@ import {
 } from "../../shared/shared";
 import type {
   ChangeRehearsal,
+  ClusterEffectiveView,
+  ClusterParamDrift,
   ClusterView,
   HostSpec,
   InstanceView,
@@ -48,7 +51,7 @@ import type {
 } from "../../shared/shared";
 import { go } from "../../app/router";
 import { AppGlyph, Segmented } from "../../design/ui";
-import { cachedDetail, putDetailCache } from "./deliveries";
+import { cachedDetail, putDetailCache, subscribeDetailCache } from "./deliveries";
 import {
   buildClusterStackPills,
   computeEffectiveClusterChanges,
@@ -64,11 +67,6 @@ import "./clusterconfig.css";
 
 const LazyImportedBaselineModal = lazySubView(() =>
   import("./importcluster").then((m) => ({ default: m.ImportedBaselineModal })),
-);
-const LazyClusterAutomationDrawer = lazySubView(() =>
-  import("../automation/rehearsal-automation").then((m) => ({
-    default: m.ClusterAutomationDrawer,
-  })),
 );
 
 const schemaCache = new Map<string, Schema>();
@@ -208,6 +206,8 @@ type ParamRow = {
   specified: boolean;
   active: boolean;
   applied?: EffectiveClusterChange;
+  drifted?: ClusterParamDrift;
+  liveSource?: string;
   runtimeAdded?: boolean;
 };
 
@@ -373,9 +373,11 @@ function ConfigRecord({
   const [focusKey, setFocusKey] = useState("");
   const [rawView, setRawView] = useState("yaml");
   const [roleFilter, setRoleFilter] = useState("all");
-  const [paramFilter, setParamFilter] = useState<"all" | "changed" | "specified">("all");
+  const [paramFilter, setParamFilter] = useState<"all" | "drifted" | "changed" | "specified">("all");
   const [groupFilter, setGroupFilter] = useState("all");
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [liveBusy, setLiveBusy] = useState(false);
+  const [acceptBusy, setAcceptBusy] = useState("");
   const [expandedHistoryIds, setExpandedHistoryIds] = useState<Record<string, boolean>>({});
   const [shownSecrets, setShownSecrets] = useState<Record<string, boolean>>({});
   const [rawCopied, setRawCopied] = useState(false);
@@ -400,11 +402,25 @@ function ConfigRecord({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [historyOpen]);
+  useEffect(
+    () =>
+      subscribeDetailCache((changedId, next) => {
+        if (changedId === p.id) {
+          setData(next);
+          setLoading(false);
+          setError("");
+        }
+      }),
+    [p.id],
+  );
   useEffect(() => {
     const abort = new AbortController();
     if (!cachedDetail(p.id)) setLoading(true);
     setError("");
-    api<JobDetail>(`/api/jobs/${p.id}`, { signal: abort.signal })
+    api<JobDetail>(`/api/jobs/${encodeURIComponent(p.id)}`, {
+      signal: abort.signal,
+      cache: "no-store",
+    })
       .then((d) => {
         if (!abort.signal.aborted) {
           putDetailCache(p.id, d);
@@ -643,6 +659,69 @@ function ConfigRecord({
   }, [displayInstances, schemas, effectiveChanges.items, c.app_id]);
 
   const runtimeGroupLabel = bi("运行期生产变更", "Production Runtime Changes");
+  const effState: ClusterEffectiveView | null =
+    current || !c.current ? data?.effective_state || null : null;
+
+  const driftByNorm = useMemo(() => {
+    const m = new Map<string, ClusterParamDrift>();
+    for (const d of effState?.drift?.param_drifts || []) {
+      m.set(normParamKey(d.key), d);
+    }
+    return m;
+  }, [effState?.drift?.param_drifts]);
+
+  const refreshDetailWithLive = async () => {
+    if (!p.id) return;
+    const fresh = await api<JobDetail>(`/api/jobs/${encodeURIComponent(p.id)}`, {
+      cache: "no-store",
+    });
+    putDetailCache(p.id, fresh);
+    setData(fresh);
+    window.dispatchEvent(new Event("mh-clusters-changed"));
+  };
+
+  const runConfigLiveInspect = async () => {
+    if (liveBusy) return;
+    setLiveBusy(true);
+    try {
+      const m = await import("../automation/rehearsal-automation");
+      await m.triggerAndPollClusterLiveInspect(c.id);
+      await refreshDetailWithLive();
+      Message.success(
+        bi(
+          "目标主机只读实测完成：生效参数、漂移对比与角色状态已更新",
+          "Live host telemetry updated & config drift computed",
+        ),
+      );
+    } catch (e) {
+      Message.error((e as Error).message || bi("实测采集失败", "Live inspection failed"));
+    } finally {
+      setLiveBusy(false);
+    }
+  };
+
+  const acceptDriftKeys = async (keys?: string[]) => {
+    const busyId = keys && keys.length === 1 ? keys[0] : "__all__";
+    if (acceptBusy) return;
+    setAcceptBusy(busyId);
+    try {
+      await api(`/api/clusters/${encodeURIComponent(c.id)}/live-state/accept-drift`, {
+        method: "POST",
+        body: JSON.stringify({ keys: keys || [] }),
+      });
+      await refreshDetailWithLive();
+      Message.success(
+        bi(
+          "已将实测值采纳同步至运行基线",
+          "Accepted live value(s) into cluster baseline",
+        ),
+      );
+    } catch (e) {
+      Message.error((e as Error).message || bi("采纳失败", "Failed to accept drift"));
+    } finally {
+      setAcceptBusy("");
+    }
+  };
 
   const parameterRows = useMemo(
     () =>
@@ -666,6 +745,7 @@ function ConfigRecord({
             instChanges.map((ef) => [normParamKey(ef.key), ef]),
           );
           const matchedNorms = new Set<string>();
+          const isPrimaryComp = i.component === c.app_id || displayInstances[0]?.id === i.id;
 
           const baseRows: ParamRow[] = Object.entries(i.params || {})
             .filter(([key]) => ownsParamKey(i, key, defs.get(key)?.group))
@@ -674,6 +754,8 @@ function ConfigRecord({
               const nk = normParamKey(key);
               const applied = changeByNorm.get(nk);
               if (applied) matchedNorms.add(nk);
+              const drifted = isPrimaryComp ? driftByNorm.get(nk) : undefined;
+              const liveSource = isPrimaryComp ? effState?.param_sources?.[nk] : undefined;
               const defaultGroup =
                 i.component === "patroni" && key === "restapi_port"
                   ? bi("管理接口", "Management API")
@@ -688,6 +770,8 @@ function ConfigRecord({
                 specified: Object.hasOwn(explicit, key),
                 active: i.visible?.[key] !== false,
                 applied,
+                drifted,
+                liveSource,
               };
             })
             .sort((a, b) => {
@@ -702,7 +786,8 @@ function ConfigRecord({
           const extraRows: ParamRow[] = instChanges
             .filter((ef) => !matchedNorms.has(normParamKey(ef.key)))
             .map((ef) => {
-              const def = defsNorm.get(normParamKey(ef.key));
+              const nk = normParamKey(ef.key);
+              const def = defsNorm.get(nk);
               return {
                 key: ef.key,
                 value: ef.after,
@@ -712,6 +797,8 @@ function ConfigRecord({
                 specified: false,
                 active: true,
                 applied: ef,
+                drifted: isPrimaryComp ? driftByNorm.get(nk) : undefined,
+                liveSource: isPrimaryComp ? effState?.param_sources?.[nk] : undefined,
                 runtimeAdded: true,
               };
             });
@@ -719,7 +806,7 @@ function ConfigRecord({
           return [i.id, [...extraRows, ...baseRows]] as [string, ParamRow[]];
         }),
       ),
-    [displayInstances, schemas, dep, lang, effectiveByInstance, runtimeGroupLabel],
+    [displayInstances, schemas, dep, lang, effectiveByInstance, runtimeGroupLabel, driftByNorm, effState?.param_sources, c.app_id],
   );
 
   const rowsFor = (i: DisplayInstance): ParamRow[] =>
@@ -783,7 +870,7 @@ function ConfigRecord({
   ];
   const selected = section || "hosts";
   const active = nav.find((n) => n.id === selected);
-  const pendingFilterRef = useRef<"all" | "changed" | "specified" | null>(null);
+  const pendingFilterRef = useRef<"all" | "drifted" | "changed" | "specified" | null>(null);
 
   useEffect(() => {
     const list = navigation.current;
@@ -811,7 +898,7 @@ function ConfigRecord({
   const navigate = (
     next: string,
     focus = "",
-    initialFilter: "all" | "changed" | "specified" = "all",
+    initialFilter: "all" | "drifted" | "changed" | "specified" = "all",
   ) => {
     setQuery("");
     setFocusKey(focus);
@@ -1024,18 +1111,21 @@ function ConfigRecord({
     : hosts;
 
   const allInstanceRows = instance ? rowsFor(instance) : [];
+  const driftedCount = allInstanceRows.filter((r) => Boolean(r.drifted)).length;
   const changedCount = allInstanceRows.filter((r) => Boolean(r.applied)).length;
   const specifiedCount = allInstanceRows.filter((r) => r.specified).length;
   const canFilterSpecified =
     Boolean(plan) && specifiedCount > 0 && specifiedCount < allInstanceRows.length;
-  const canFilterRows = changedCount > 0 || canFilterSpecified;
+  const canFilterRows = driftedCount > 0 || changedCount > 0 || canFilterSpecified;
 
   const scopeFilteredRows =
-    paramFilter === "changed" && changedCount > 0
-      ? allInstanceRows.filter((r) => Boolean(r.applied))
-      : paramFilter === "specified" && canFilterSpecified
-        ? allInstanceRows.filter((r) => r.specified)
-        : allInstanceRows;
+    paramFilter === "drifted" && driftedCount > 0
+      ? allInstanceRows.filter((r) => Boolean(r.drifted))
+      : paramFilter === "changed" && changedCount > 0
+        ? allInstanceRows.filter((r) => Boolean(r.applied))
+        : paramFilter === "specified" && canFilterSpecified
+          ? allInstanceRows.filter((r) => r.specified)
+          : allInstanceRows;
 
   const allParamGroups = useMemo(() => {
     if (!instance) return [] as { name: string; count: number; isRuntime: boolean }[];
@@ -1088,7 +1178,6 @@ function ConfigRecord({
   }, [instance, allInstanceRows]);
 
   const [baselineEdit, setBaselineEdit] = useState<null | "edit" | "probe">(null);
-  const [autoDrawerOpen, setAutoDrawerOpen] = useState(false);
 
   useEffect(() => {
     if (!historyOpen) return;
@@ -1109,16 +1198,6 @@ function ConfigRecord({
           </span>
         </div>
         <div className="cx-source-actions">
-          {(can("delivery.execute") || can("execution.manage")) && (
-            <Button
-              size="small"
-              icon={<IconThunderbolt style={{ color: "var(--warn)" }} />}
-              onMouseEnter={() => void import("../automation/rehearsal-automation")}
-              onClick={() => setAutoDrawerOpen(true)}
-            >
-              {bi("自动化接入", "Automation")}
-            </Button>
-          )}
           {isImported && can("delivery.create") && (
             <>
               <Button
@@ -1305,6 +1384,95 @@ function ConfigRecord({
                 )}
               </button>
             </span>
+          </div>
+        )}
+        {effState &&
+          (current || !c.current) &&
+          (effState.summary.has_bound_agent ||
+            effState.summary.has_online_agent ||
+            effState.summary.data_source === "live_agent" ||
+            Boolean(effState.drift?.has_drift)) && (
+          <div
+            className={`cx-live-strip ${
+              effState.drift?.has_drift
+                ? "is-drift"
+                : effState.summary.data_source === "live_agent"
+                  ? "is-live"
+                  : ""
+            }`}
+            role="status"
+          >
+            <div className="cx-live-strip-main">
+              <b>
+                {effState.summary.data_source === "live_agent"
+                  ? effState.summary.data_source_label
+                  : bi("已关联 Agent · 待首次实测采集", "Agent Associated · Pending First Probe")}
+              </b>
+              {effState.summary.last_probed_at ? (
+                <span className="faint small">
+                  {bi(
+                    `· 最近实测 ${ago(effState.summary.last_probed_at)}`,
+                    `· Last probed ${ago(effState.summary.last_probed_at)}`,
+                  )}
+                </span>
+              ) : (
+                <span className="faint small">
+                  {bi(
+                    "· 可一键触发在线 Agent 实时核对主机角色、生效参数与配置漂移",
+                    "· Trigger online Agent to inspect live roles, runtime params & drift",
+                  )}
+                </span>
+              )}
+              {(effState.drift?.param_drifts?.length || 0) > 0 && (
+                <Tag size="small" color="orange">
+                  {bi(
+                    `${effState.drift!.param_drifts.length} 项参数漂移`,
+                    `${effState.drift!.param_drifts.length} param drift(s)`,
+                  )}
+                </Tag>
+              )}
+              {(effState.drift?.role_drifts?.length || 0) > 0 && (
+                <Tag size="small" color="orangered">
+                  {effState.drift!.role_drifts
+                    .map((rd) => `${rd.host}: ${rd.expected_role} → ${rd.actual_role}`)
+                    .join(" · ")}
+                </Tag>
+              )}
+            </div>
+            <div className="cx-live-strip-acts">
+              {(effState.drift?.param_drifts?.length || 0) > 0 &&
+                can("delivery.create|delivery.execute|security.manage") && (
+                  <Button
+                    size="mini"
+                    type="outline"
+                    loading={acceptBusy === "__all__"}
+                    onClick={() => void acceptDriftKeys()}
+                  >
+                    {bi("一键采纳实测为基线", "Accept All into Baseline")}
+                  </Button>
+                )}
+              {effState.summary.has_online_agent &&
+                can("delivery.execute|execution.manage|security.scan") && (
+                  <Button
+                    size="mini"
+                    type="primary"
+                    icon={<IconRefresh />}
+                    loading={liveBusy}
+                    onClick={() => void runConfigLiveInspect()}
+                  >
+                    {bi("立即实测采集", "Inspect Now")}
+                  </Button>
+                )}
+              <Button
+                size="mini"
+                type="text"
+                onClick={() =>
+                  go({ name: "deliveries", id: c.id, tab: "automation" })
+                }
+              >
+                {bi("巡检设置", "Auto-Inspect")} <IconRight />
+              </Button>
+            </div>
           </div>
         )}
       </div>
@@ -1955,6 +2123,19 @@ function ConfigRecord({
                                 {bi("全部", "All")}{" "}
                                 <em>{allInstanceRows.length}</em>
                               </button>
+                              {driftedCount > 0 && (
+                                <button
+                                  type="button"
+                                  className={`cx-filter-pill is-drift ${paramFilter === "drifted" ? "on" : ""}`}
+                                  onClick={() => {
+                                    setParamFilter("drifted");
+                                    setGroupFilter("all");
+                                  }}
+                                >
+                                  {bi("实测漂移", "Drifted")}{" "}
+                                  <em>{driftedCount}</em>
+                                </button>
+                              )}
                               {changedCount > 0 && (
                                 <button
                                   type="button"
@@ -2089,6 +2270,7 @@ function ConfigRecord({
                                       shownSecrets[secretKey],
                                     );
                                     const ef = r.applied;
+                                    const dr = r.drifted;
                                     const oldDiffVal = ef
                                       ? ef.before ||
                                         (!r.runtimeAdded
@@ -2102,7 +2284,7 @@ function ConfigRecord({
                                     return (
                                       <div
                                         key={r.key}
-                                        className={`cx-spec-row${!r.active ? " is-inactive" : ""}${ef ? " is-changed" : ""}${focusKey === r.key ? " focused" : ""}`}
+                                        className={`cx-spec-row${!r.active ? " is-inactive" : ""}${ef ? " is-changed" : ""}${dr ? " is-drifted" : ""}${focusKey === r.key ? " focused" : ""}`}
                                         data-config-key={r.key}
                                         tabIndex={-1}
                                       >
@@ -2132,9 +2314,32 @@ function ConfigRecord({
                                         </div>
 
                                         <div
-                                          className={`cx-spec-v${ef ? " is-diff" : ""}`}
+                                          className={`cx-spec-v${ef || dr ? " is-diff" : ""}`}
                                         >
-                                          {ef ? (
+                                          {dr && !secret ? (
+                                            <>
+                                              <del
+                                                className="cx-val-old mono"
+                                                title={bi("基线预期值", "Expected baseline")}
+                                              >
+                                                {dr.expected}
+                                              </del>
+                                              <span className="cx-hist-next">
+                                                <span
+                                                  className="cx-val-arrow"
+                                                  aria-hidden
+                                                >
+                                                  →
+                                                </span>
+                                                <code
+                                                  className="cx-val-drift mono"
+                                                  title={bi("主机实测运行值", "Live measured value")}
+                                                >
+                                                  {dr.actual}
+                                                </code>
+                                              </span>
+                                            </>
+                                          ) : ef ? (
                                             <>
                                               {oldDiffVal && (
                                                 <del className="cx-val-old mono">
@@ -2228,7 +2433,28 @@ function ConfigRecord({
                                         </div>
 
                                         <div className="cx-spec-meta">
-                                          {ef ? (
+                                          {dr ? (
+                                            <>
+                                              <span className="cx-origin-pill is-drift">
+                                                <IconExclamationCircle />
+                                                <span>
+                                                  {bi("实测漂移", "Drifted")}
+                                                </span>
+                                              </span>
+                                              {can("delivery.create|delivery.execute|security.manage") && (
+                                                <Button
+                                                  size="mini"
+                                                  type="text"
+                                                  loading={acceptBusy === r.key}
+                                                  onClick={() =>
+                                                    void acceptDriftKeys([r.key])
+                                                  }
+                                                >
+                                                  {bi("采纳", "Accept")}
+                                                </Button>
+                                              )}
+                                            </>
+                                          ) : ef ? (
                                             <Tooltip
                                               mini
                                               content={bi(
@@ -2254,6 +2480,13 @@ function ConfigRecord({
                                                 )}
                                               </button>
                                             </Tooltip>
+                                          ) : r.liveSource === "live_agent" || r.liveSource === "manual_probe" ? (
+                                            <span className="cx-origin-pill is-live">
+                                              <IconCheck />
+                                              <span>
+                                                {bi("实测一致", "Verified Live")}
+                                              </span>
+                                            </span>
                                           ) : !r.active ? (
                                             <span className="cx-origin-pill is-off">
                                               {bi("未启用", "Inactive")}
@@ -2272,7 +2505,7 @@ function ConfigRecord({
                                             </span>
                                           )}
                                           <CopyValue
-                                            value={ef ? ef.after : r.value}
+                                            value={dr ? dr.actual : ef ? ef.after : r.value}
                                             label={r.label}
                                           />
                                         </div>
@@ -2658,20 +2891,13 @@ function ConfigRecord({
               if (p.id) {
                 putDetailCache(
                   p.id,
-                  await api<JobDetail>(`/api/jobs/${encodeURIComponent(p.id)}`),
+                  await api<JobDetail>(`/api/jobs/${encodeURIComponent(p.id)}`, {
+                    cache: "no-store",
+                  }),
                 );
               }
               setRetry((x) => x + 1);
             }}
-          />
-        </React.Suspense>
-      )}
-      {autoDrawerOpen && (
-        <React.Suspense fallback={null}>
-          <LazyClusterAutomationDrawer
-            visible
-            clusterId={c.id}
-            onClose={() => setAutoDrawerOpen(false)}
           />
         </React.Suspense>
       )}

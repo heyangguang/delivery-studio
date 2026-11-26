@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"delivery-studio/mwpack"
 )
 
 func TestRehearsalRolloutPropagateGateStrictPrecheckAndBoard(t *testing.T) {
@@ -575,5 +577,442 @@ func TestEnsurePasteSafeShellCommand(t *testing.T) {
 		if !strings.HasPrefix(sub.Command, "(\n") || !strings.HasSuffix(sub.Command, "\n) </dev/null") {
 			t.Fatalf("expected sub-box %d wrapped in (...) </dev/null, got:\n%s", i, sub.Command)
 		}
+	}
+}
+
+func TestRolloutCoreArchEquivalenceImportedVsDeployedAndVersionParsing(t *testing.T) {
+	// 1. Verify majorVersionOf handles vendor/distro prefixes cleanly.
+	for in, want := range map[string]string{
+		"17":                                      "17",
+		"17.11":                                   "17",
+		"v17.11.1":                                "17",
+		"PostgreSQL 17.11":                        "17",
+		"Percona Server for PostgreSQL 17.11.1":   "17",
+		"7.2.5":                                   "7",
+		"16.4":                                    "16",
+		"":                                        "",
+	} {
+		if got := majorVersionOf(in); got != want {
+			t.Fatalf("majorVersionOf(%q) = %q, want %q", in, got, want)
+		}
+	}
+
+	s, _ := testStore(t)
+	srv, _ := fakeModel(t)
+	enableAI(t, s, srv.URL, 1)
+	admin, csrf := storeLogin(t, s, "admin")
+
+	// 2. Create a platform-deployed 3-node PostgreSQL 17 + Patroni + etcd cluster as pilot.
+	depBody := `{"id":"pg-deployed-pilot","hosts":[{"name":"p1","ip":"10.50.1.11","disk":"/dev/vdb"},{"name":"p2","ip":"10.50.1.12","disk":"/dev/vdb"},{"name":"p3","ip":"10.50.1.13","disk":"/dev/vdb"}],"instances":[{"id":"pg","component":"postgresql","version":"17","placement":{"primary":["p1"],"replica":["p2","p3"]},"params":{"client_cidr":"10.0.0.0/8","tls":false}},{"id":"etcd","component":"etcd","placement":{"member":["p1","p2","p3"]}}]}`
+	cw := storeCreate(t, s, admin, csrf, depBody, nil)
+	s.wg.Wait()
+	if cw.Code != 202 {
+		t.Fatalf("create deployed pilot: %d %s", cw.Code, cw.Body.String())
+	}
+	var pilotJob storeJob
+	_ = json.Unmarshal(cw.Body.Bytes(), &pilotJob)
+	s.mu.Lock()
+	j := s.jobs[pilotJob.ID]
+	j.State = "succeeded"
+	j.Outcome = outcomeDone
+	j.Marked = time.Now().UTC().Format(time.RFC3339)
+	s.jobs[pilotJob.ID] = j
+	s.mu.Unlock()
+
+	// 3. Import 3 clusters:
+	//    - pg-imp-same: 3-node PG 17 + Patroni + etcd + pgBackRest + node-exporter (same core arch, Percona exact_version)
+	//    - pg-imp-v16:  3-node PG 16 + Patroni + etcd (major version mismatch)
+	//    - pg-imp-single: 1-node PG 17 standalone (architecture mismatch)
+	imports := []string{
+		`{"id":"pg-imp-same","component":"postgresql","version":"Percona Server for PostgreSQL 17.11.1","exact_version":"Percona Server for PostgreSQL 17.11.1","arch_summary":"3 节点 PostgreSQL 一主两从，由 Patroni 管理、3 成员 etcd 提供 DCS，配套 pgBackRest 归档及 node_exporter 主机监控","hosts":[{"name":"n1","ip":"10.50.2.11","role":"primary"},{"name":"n2","ip":"10.50.2.12","role":"replica"},{"name":"n3","ip":"10.50.2.13","role":"replica"}],"companions":[{"component":"patroni","kind":"ha_manager","version":"4.1.5"},{"component":"etcd","kind":"dcs","version":"3.5.33"},{"component":"pgbackrest","kind":"backup","version":"2.59.1"},{"component":"node-exporter","kind":"os_component","version":"1.13.0"}]}`,
+		`{"id":"pg-imp-v16","component":"postgresql","version":"16.4","hosts":[{"name":"v1","ip":"10.50.3.11","role":"primary"},{"name":"v2","ip":"10.50.3.12","role":"replica"},{"name":"v3","ip":"10.50.3.13","role":"replica"}],"companions":[{"component":"patroni","kind":"ha_manager","version":"4.0.0"},{"component":"etcd","kind":"dcs","version":"3.5.12"}]}`,
+		`{"id":"pg-imp-single","component":"postgresql","version":"17.11","hosts":[{"name":"s1","ip":"10.50.4.11","role":"primary"}]}`,
+	}
+	for _, ib := range imports {
+		iw := storeRequest(s, "POST", "/api/clusters/import", strings.NewReader(ib), admin, csrf)
+		if iw.Code != 200 && iw.Code != 201 {
+			t.Fatalf("import failed: %d %s", iw.Code, iw.Body.String())
+		}
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	rh := changeRehearsal{
+		ID:        "ccdd11223344",
+		ClusterID: "pg-deployed-pilot",
+		AppID:     "postgresql",
+		AppName:   "PostgreSQL",
+		BaseJobID: pilotJob.ID,
+		Title:     "Patroni 集群共享 pg_hba 补充 127.0.0.1 replicator 复制规则",
+		Goal:      "补充 pg_hba 规则",
+		Owner:     "admin",
+		Mode:      "light",
+		Stage:     "finalized",
+		Applied:   true,
+		AppliedAt: now,
+		AppliedChanges: []rehearsalAppliedChange{
+			{Key: "pg_hba", After: "+ hostssl replication replicator 127.0.0.1/32 scram-sha-256"},
+		},
+		Steps: []rehearsalStep{
+			{ID: "s1", Phase: "execute", Order: 1, Title: "写入 pg_hba", Command: "patronictl edit-config", Status: "passed"},
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := s.saveRehearsal(rh); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify templates API (pull direction) from pg-imp-same sees pg-deployed-pilot as EXACT + AllowSkipProbe=true!
+	wSame := storeRequest(s, "GET", "/api/rehearsals/templates?target_cluster=pg-imp-same", nil, admin, "")
+	if wSame.Code != 200 {
+		t.Fatalf("templates pg-imp-same: %d %s", wSame.Code, wSame.Body.String())
+	}
+	var sameItems []rehearsalTemplateItem
+	if err := json.Unmarshal(wSame.Body.Bytes(), &sameItems); err != nil {
+		t.Fatalf("decode sameItems: %v body=%s", err, wSame.Body.String())
+	}
+	if len(sameItems) != 1 {
+		t.Fatalf("expected 1 template for pg-imp-same, got %d body=%s", len(sameItems), wSame.Body.String())
+	}
+	if sameItems[0].MatchTier != "exact" || !sameItems[0].AllowSkipProbe {
+		t.Fatalf("expected imported PG 17 Patroni + pgBackRest cluster to match deployed PG 17 Patroni as exact & AllowSkipProbe=true, got tier=%q allow=%v reason=%q",
+			sameItems[0].MatchTier, sameItems[0].AllowSkipProbe, sameItems[0].SkipProbeBlockReason)
+	}
+
+	// Verify propagate targets API (push direction) from pg-deployed-pilot also marks pg-imp-same as exact & AllowSkipProbe=true!
+	wTargets := storeRequest(s, "GET", "/api/clusters/pg-deployed-pilot/rehearsals/ccdd11223344/propagate-targets", nil, admin, "")
+	if wTargets.Code != 200 {
+		t.Fatalf("propagate targets: %d %s", wTargets.Code, wTargets.Body.String())
+	}
+	var tgtResp struct {
+		Targets []propagateTargetItem `json:"targets"`
+	}
+	if err := json.Unmarshal(wTargets.Body.Bytes(), &tgtResp); err != nil {
+		t.Fatalf("decode targets: %v", err)
+	}
+	byID := map[string]propagateTargetItem{}
+	for _, it := range tgtResp.Targets {
+		byID[it.ClusterID] = it
+	}
+	if it := byID["pg-imp-same"]; it.MatchTier != "exact" || !it.AllowSkipProbe {
+		t.Fatalf("expected push-direction pg-imp-same exact & AllowSkipProbe=true, got %+v", it)
+	}
+	if it := byID["pg-imp-v16"]; it.MatchTier != "compatible" || it.AllowSkipProbe || !strings.Contains(it.SkipProbeBlockReason, "主版本") {
+		t.Fatalf("expected push-direction pg-imp-v16 blocked by major version, got %+v", it)
+	}
+	if it := byID["pg-imp-single"]; it.MatchTier != "compatible" || it.AllowSkipProbe || !strings.Contains(it.SkipProbeBlockReason, "核心架构") || !strings.Contains(it.SkipProbeBlockReason, "单节点") {
+		t.Fatalf("expected push-direction pg-imp-single blocked by core arch with readable label, got %+v", it)
+	}
+
+	// Verify pg-imp-v16 templates API is blocked with explicit major version diff reason.
+	wV16 := storeRequest(s, "GET", "/api/rehearsals/templates?target_cluster=pg-imp-v16", nil, admin, "")
+	var v16Items []rehearsalTemplateItem
+	_ = json.Unmarshal(wV16.Body.Bytes(), &v16Items)
+	if len(v16Items) != 1 || v16Items[0].MatchTier != "compatible" || v16Items[0].AllowSkipProbe {
+		t.Fatalf("expected pg-imp-v16 compatible & AllowSkipProbe=false, got: %+v", v16Items)
+	}
+	if !strings.Contains(v16Items[0].SkipProbeBlockReason, "主版本") {
+		t.Fatalf("expected explicit major version block reason, got %q", v16Items[0].SkipProbeBlockReason)
+	}
+
+	// Verify pg-imp-single templates API is blocked with explicit architecture diff reason.
+	wSingle := storeRequest(s, "GET", "/api/rehearsals/templates?target_cluster=pg-imp-single", nil, admin, "")
+	var singleItems []rehearsalTemplateItem
+	_ = json.Unmarshal(wSingle.Body.Bytes(), &singleItems)
+	if len(singleItems) != 1 || singleItems[0].MatchTier != "compatible" || singleItems[0].AllowSkipProbe {
+		t.Fatalf("expected pg-imp-single compatible & AllowSkipProbe=false, got: %+v", singleItems)
+	}
+	if !strings.Contains(singleItems[0].SkipProbeBlockReason, "核心架构") {
+		t.Fatalf("expected explicit core architecture block reason, got %q", singleItems[0].SkipProbeBlockReason)
+	}
+}
+
+func TestRolloutHardenedRemapperPortsRolesProbeScriptAndDedup(t *testing.T) {
+	s, _ := testStore(t)
+	srv, _ := fakeModel(t)
+	enableAI(t, s, srv.URL, 1)
+	admin, csrf := storeLogin(t, s, "admin")
+
+	// Import origin (pg-sonarqube-private-prod, port 5435, primary=db-node-01) and 3 targets:
+	// 1) pg-onedevops-private-prod: port 5436, different endpoint name ("vip" vs "eip"), primary=db-node-02 (ROLE INVERTED!)
+	// 2) pg-noep-private-prod: NO endpoint registered (must scrub origin VIP & port to prevent cross-cluster connect!)
+	imports := []string{
+		`{"id":"pg-sonarqube-private-prod","component":"postgresql","version":"17.11.1","hosts":[{"name":"db-node-01","ip":"172.30.2.101","role":"primary"},{"name":"db-node-02","ip":"172.30.2.102","role":"replica"},{"name":"db-node-03","ip":"172.30.2.107","role":"replica"}],"endpoints":[{"name":"eip","address":"sonarqube.postgresql.private.toolchain.cn.vwgroup.com:5435","role":"readwrite"}],"config_paths":["/etc/patroni/patroni.yml"],"companions":[{"component":"patroni","kind":"ha_manager","version":"4.1.5"},{"component":"etcd","kind":"dcs","version":"3.5.33"}]}`,
+		`{"id":"pg-onedevops-private-prod","component":"postgresql","version":"17.11.1","hosts":[{"name":"db-node-01","ip":"172.30.2.106","role":"replica"},{"name":"db-node-02","ip":"172.30.2.108","role":"primary"},{"name":"db-node-03","ip":"172.30.2.99","role":"replica"}],"endpoints":[{"name":"vip","address":"onedevops.postgresql.private.toolchain.cn.vwgroup.com:5436","role":"readwrite"}],"config_paths":["/etc/patroni/custom-patroni.yml"],"companions":[{"component":"patroni","kind":"ha_manager","version":"4.1.5","config_paths":["/etc/patroni/custom-patroni.yml"]},{"component":"etcd","kind":"dcs","version":"3.5.33"}]}`,
+		`{"id":"pg-noep-private-prod","component":"postgresql","version":"17.11.1","hosts":[{"name":"n1","ip":"10.60.1.11","role":"primary"},{"name":"n2","ip":"10.60.1.12","role":"replica"},{"name":"n3","ip":"10.60.1.13","role":"replica"}],"companions":[{"component":"patroni","kind":"ha_manager","version":"4.1.5"},{"component":"etcd","kind":"dcs","version":"3.5.33"}]}`,
+	}
+	for _, ib := range imports {
+		iw := storeRequest(s, "POST", "/api/clusters/import", strings.NewReader(ib), admin, csrf)
+		if iw.Code != 200 && iw.Code != 201 {
+			t.Fatalf("import failed: %d %s", iw.Code, iw.Body.String())
+		}
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	originRh := changeRehearsal{
+		ID:        "aabb11223344",
+		ClusterID: "pg-sonarqube-private-prod",
+		AppID:     "postgresql",
+		AppName:   "PostgreSQL",
+		Title:     "PostgreSQL 日志落盘到 /data/logs/postgresql",
+		Goal:      "在 pg-sonarqube-private-prod 开启日志落盘",
+		Owner:     "admin",
+		Mode:      "full",
+		Stage:     "finalized",
+		Applied:   true,
+		AppliedAt: now,
+		ProbeScript: "#!/usr/bin/env bash\nip=$(ip -o -4 addr show scope global | awk '$4 ~ /^172\\.30\\.2\\.(58|38|60)\\// {print $4}')\npatronictl -c /etc/patroni/patroni.yml list\n",
+		ProbeNotes: []string{
+			"本变更引用自已落地样板集群 pg-jfrog-artifactory-private-prod（旧记录），已自动继承边界约束并映射至当前集群 pg-sonarqube-private-prod 的基线地址；请在本集群节点执行探针核实现场后继续。",
+			"本变更引用自已落地样板集群 pg-gitlab-private-prod（更旧记录），已自动继承边界约束并映射至当前集群 pg-sonarqube-private-prod 的基线地址；请在本集群节点执行探针核实现场后继续。",
+			"请在 db-node-01、db-node-02、db-node-03 分别执行。",
+		},
+		AppliedChanges: []rehearsalAppliedChange{
+			{Key: "logging_collector", After: "on"},
+			{Key: "log_directory", After: "/data/logs/postgresql"},
+		},
+		Steps: []rehearsalStep{
+			{
+				ID:     "s1",
+				Phase:  "precheck",
+				Order:  1,
+				Title:  "【严格前置预检】旧步",
+				Expect: "1) 节点名/IP 与本集群基线（db-node-01 (172.30.2.101)）一致； 2) 集群拓扑全健康； 3) 目标配置项已核清。 补充核对：目录空间满足现场容量要求。",
+				Status: "passed",
+			},
+			{
+				ID:         "s2",
+				Phase:      "execute",
+				Order:      2,
+				Title:      "切主 db-node-01 → db-node-02",
+				TargetRole: "001 / 172.30.2.101 执行",
+				Command:    "sudo -n -u postgres patronictl -c /etc/patroni/patroni.yml switchover --leader db-node-01 --candidate db-node-02 --force",
+				Expect:     "db-node-02 升主，db-node-01 降级为从库",
+				Status:     "passed",
+			},
+			{
+				ID:         "s3",
+				Phase:      "verify",
+				Order:      3,
+				Title:      "验证日志与写入入口",
+				TargetRole: "非当前主库的 003 / 172.30.2.107 执行",
+				Command:    "sudo -n -u postgres psql -p 5432 -c 'RAISE LOG $msg$jfrog_log_verify_first$msg$;'\npsql -X -W \"host=sonarqube.postgresql.private.toolchain.cn.vwgroup.com port=5435 dbname=postgres user=postgres\" -Atc \"SELECT inet_server_addr()\"",
+				Expect:     "返回主库 172.30.2.101；经入口 sonarqube.postgresql.private.toolchain.cn.vwgroup.com:5435 连接成功",
+				Status:     "passed",
+			},
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := s.saveRehearsal(originRh); err != nil {
+		t.Fatal(err)
+	}
+
+	// Propagate in fast-track "steps" mode to BOTH targets.
+	pw := storeRequest(s, "POST", "/api/clusters/pg-sonarqube-private-prod/rehearsals/aabb11223344/propagate",
+		strings.NewReader(`{"target_clusters":["pg-onedevops-private-prod","pg-noep-private-prod"],"mode":"steps"}`), admin, csrf)
+	if pw.Code != 200 {
+		t.Fatalf("propagate failed: %d %s", pw.Code, pw.Body.String())
+	}
+
+	// ---- Assert pg-onedevops-private-prod ----
+	oneList := s.listRehearsals("pg-onedevops-private-prod")
+	if len(oneList) != 1 {
+		t.Fatalf("expected 1 rehearsal on onedevops, got %d", len(oneList))
+	}
+	one := oneList[0]
+
+	// 1. Probe script awk IPv4 group must be rewritten to target IPs (108|106|99), NOT stale jfrog (58|38|60)!
+	if strings.Contains(one.ProbeScript, "58|38|60") || !strings.Contains(one.ProbeScript, `172\.30\.2\.(`) || !strings.Contains(one.ProbeScript, "108") || !strings.Contains(one.ProbeScript, "106") || !strings.Contains(one.ProbeScript, "99") {
+		t.Fatalf("expected probe_script awk IP regex rewritten to onedevops IPs, got:\n%s", one.ProbeScript)
+	}
+
+	// 2. Probe notes must NOT snowball old provenance banners (only 1 auto banner + 1 genuine note).
+	autoCount := 0
+	for _, n := range one.ProbeNotes {
+		if strings.HasPrefix(n, "本变更引用自已落地样板集群") {
+			autoCount++
+		}
+	}
+	if autoCount != 1 {
+		t.Fatalf("expected exactly 1 auto provenance probe_note (no snowball), got %d: %v", autoCount, one.ProbeNotes)
+	}
+
+	// 3. Step 1 strict precheck must include patronictl show-config with custom config path, valid bash-safe Python quoting, AND unwrapped Expect (only 1 "补充核对：").
+	s1 := one.Steps[0]
+	if !strings.Contains(s1.Command, "sudo -n -u postgres patronictl -c /etc/patroni/custom-patroni.yml show-config") || !strings.Contains(s1.Command, `("logging_collector","log_directory",)`) {
+		t.Fatalf("expected Step 1 strict precheck to include sudo patronictl show-config with valid double-quoted python keys, got:\n%s", s1.Command)
+	}
+	if strings.Count(s1.Expect, "补充核对：") != 1 || !strings.Contains(s1.Expect, "目录空间满足现场容量要求") {
+		t.Fatalf("expected Step 1 Expect unwrapped cleanly without snowball duplication, got: %q", s1.Expect)
+	}
+
+	// 4. Step 2 must align hosts BY ROLE without transitive swap corruption:
+	//    origin primary=db-node-01 -> target primary=db-node-02; origin replica=db-node-02 -> target replica=db-node-01!
+	s2 := one.Steps[1]
+	if !strings.Contains(s2.Command, "--leader db-node-02 --candidate db-node-01") {
+		t.Fatalf("expected role-aligned non-transitive swap (--leader db-node-02 --candidate db-node-01), got:\n%s", s2.Command)
+	}
+	if !strings.Contains(s2.Command, "/etc/patroni/custom-patroni.yml") {
+		t.Fatalf("expected custom patroni config path remapped in Step 2, got:\n%s", s2.Command)
+	}
+	if !strings.Contains(s2.TargetRole, "db-node-02 / 172.30.2.108") || strings.Contains(s2.TargetRole, "001 /") {
+		t.Fatalf("expected orphan '001 / IP' normalized to 'db-node-02 / 172.30.2.108', got: %q", s2.TargetRole)
+	}
+
+	// 5. Step 3 must remap BOTH endpoint host ("eip" -> "vip" by role!) AND port (5435 -> 5436) while keeping local psql -p 5432 intact,
+	//    normalize jfrog_log_verify_first -> onedevops_log_verify_first, and normalize 003 / 172.30.2.99 -> db-node-03 / 172.30.2.99!
+	s3 := one.Steps[2]
+	if !strings.Contains(s3.Command, "host=onedevops.postgresql.private.toolchain.cn.vwgroup.com port=5436") {
+		t.Fatalf("expected endpoint host AND port 5435->5436 remapped, got:\n%s", s3.Command)
+	}
+	if strings.Contains(s3.Command, "5435") || strings.Contains(s3.Command, "sonarqube") {
+		t.Fatalf("origin endpoint host/port leaked into Step 3:\n%s", s3.Command)
+	}
+	if !strings.Contains(s3.Command, "psql -p 5432") {
+		t.Fatalf("local psql port 5432 must remain untouched, got:\n%s", s3.Command)
+	}
+	if !strings.Contains(s3.Command, "onedevops_log_verify_first") || strings.Contains(s3.Command, "jfrog_log_verify") {
+		t.Fatalf("expected stale ancestor slug jfrog_log_verify normalized to onedevops_log_verify, got:\n%s", s3.Command)
+	}
+	if !strings.Contains(s3.TargetRole, "db-node-03 / 172.30.2.99") || strings.Contains(s3.TargetRole, "003 /") {
+		t.Fatalf("expected orphan '003 / 172.30.2.99' normalized to 'db-node-03 / 172.30.2.99', got: %q", s3.TargetRole)
+	}
+	if !strings.Contains(s3.Expect, "172.30.2.108") || !strings.Contains(s3.Expect, "onedevops.postgresql.private.toolchain.cn.vwgroup.com:5436") {
+		t.Fatalf("expected Step 3 Expect to have target primary IP 172.30.2.108 and host:5436, got: %q", s3.Expect)
+	}
+
+	// ---- Assert pg-noep-private-prod (missing endpoint safety scrub) ----
+	noepList := s.listRehearsals("pg-noep-private-prod")
+	if len(noepList) != 1 {
+		t.Fatalf("expected 1 rehearsal on noep, got %d", len(noepList))
+	}
+	noepS3 := noepList[0].Steps[2]
+	if strings.Contains(noepS3.Command, "sonarqube") || strings.Contains(noepS3.Command, "5435") {
+		t.Fatalf("expected origin VIP & port scrubbed when target has no endpoint, got:\n%s", noepS3.Command)
+	}
+	if !strings.Contains(noepS3.Command, "<待补齐目标集群访问入口>") || !strings.Contains(noepS3.Command, "port=<入口端口>") {
+		t.Fatalf("expected explicit placeholder host/port in noep Step 3, got:\n%s", noepS3.Command)
+	}
+	if !strings.Contains(noepS3.RiskNote, "尚未登记访问入口") {
+		t.Fatalf("expected missing-endpoint warning added to RiskNote, got: %q", noepS3.RiskNote)
+	}
+}
+
+func TestRehearsalRolloutRemapsFactoredIPRegexAndImportedEndpoints(t *testing.T) {
+	originDep := &mwpack.Deployment{
+		Schema: mwpack.DeploymentSchema,
+		ID:     "pg-gitlab-private-prod",
+		Hosts: []mwpack.Host{
+			{Name: "db-node-01", IP: "172.30.2.67"},
+			{Name: "db-node-02", IP: "172.30.2.82"},
+			{Name: "db-node-03", IP: "172.30.2.91"},
+		},
+		Imported: &mwpack.ImportedMeta{
+			DisplayName: "PostgreSQL",
+			Endpoints:   []mwpack.ImportedEndpoint{{Name: "", Address: "gitlab.postgresql.private.toolchain.cn.vwgroup.com", Role: "readwrite"}},
+		},
+	}
+	targetDep := &mwpack.Deployment{
+		Schema: mwpack.DeploymentSchema,
+		ID:     "pg-jfrog-artifactory-private-prod",
+		Hosts: []mwpack.Host{
+			{Name: "ecs-jfrog-pg-001", IP: "172.30.2.58"},
+			{Name: "ecs-jfrog-pg-002", IP: "172.30.2.38"},
+			{Name: "ecs-jfrog-pg-003", IP: "172.30.2.60"},
+		},
+		Imported: &mwpack.ImportedMeta{
+			DisplayName: "PostgreSQL",
+			Endpoints:   []mwpack.ImportedEndpoint{{Name: "eip", Address: "jfrog-artifactory.postgresql.private.toolchain.cn.vwgroup.com", Role: "readwrite"}},
+		},
+	}
+	originFacts := clusterFacts{ID: originDep.ID, Current: storeJob{AppID: "postgresql"}, Plan: mwpack.SolveImported(nil, originDep)}
+	targetFacts := clusterFacts{ID: targetDep.ID, Current: storeJob{AppID: "postgresql"}, Plan: mwpack.SolveImported(nil, targetDep)}
+	rm := buildClusterRemapperWithDeps(originFacts, targetFacts, originDep, targetDep, "zh-CN")
+
+	rawScript := strings.Join([]string{
+		`#!/usr/bin/env bash`,
+		`ip=$(ip -o -4 addr show scope global | awk '$4 ~ /^172\.30\.2\.(67|82|91)\// {split($4,a,"/"); print a[1]; exit}')`,
+		`echo "escaped-single=172\.30\.2\.67 double=172\\.30\\.2\\.(67|82|91) unesc=172.30.2.(67|82|91)"`,
+		`echo "two-octet=172\.30\.(2\.67|2\.82|2\.91) full=(172\.30\.2\.67|172\.30\.2\.82|172\.30\.2\.91)"`,
+		`echo "brace=172.30.2.{67,82,91} case=172.30.2.67|172.30.2.82|172.30.2.91"`,
+		`echo "keep-loopback=127\.0\.0\.(1|2) keep-prefix=172.30.2.670"`,
+		`psql "host=gitlab.postgresql.private.toolchain.cn.vwgroup.com" --stanza=pg-gitlab-private-prod # db-node-01 db-node-02 db-node-03`,
+	}, "\n")
+	got := rm.RemapProbeScript(rawScript)
+
+	for _, want := range []string{
+		`awk '$4 ~ /^172\.30\.2\.(58|38|60)\//`,
+		`escaped-single=172\.30\.2\.58`,
+		`double=172\\.30\\.2\\.(58|38|60)`,
+		`unesc=172.30.2.(58|38|60)`,
+		`two-octet=172\.30\.2\.(58|38|60)`,
+		`full=172\.30\.2\.(58|38|60)`,
+		`brace=172.30.2.{58,38,60}`,
+		`case=172.30.2.58|172.30.2.38|172.30.2.60`,
+		`keep-loopback=127\.0\.0\.(1|2)`,
+		`keep-prefix=172.30.2.670`,
+		`host=jfrog-artifactory.postgresql.private.toolchain.cn.vwgroup.com`,
+		`--stanza=pg-jfrog-artifactory-private-prod`,
+		`ecs-jfrog-pg-001 ecs-jfrog-pg-002 ecs-jfrog-pg-003`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("remapped script missing %q:\n%s", want, got)
+		}
+	}
+	if leaks := rm.detectResidualOriginRefs(got); len(leaks) != 0 {
+		t.Fatalf("expected zero residual origin refs, got %+v:\n%s", leaks, got)
+	}
+
+	// Cross-subnet target wraps multi-subnet alternation in (...) for safe anchoring.
+	crossTarget := &mwpack.Deployment{
+		Schema: mwpack.DeploymentSchema,
+		ID:     "pg-cross-subnet",
+		Hosts:  []mwpack.Host{{Name: "n1", IP: "10.10.1.5"}, {Name: "n2", IP: "192.168.50.6"}},
+	}
+	rmCross := buildClusterRemapperWithDeps(originFacts, clusterFacts{ID: crossTarget.ID, Plan: &mwpack.Plan{Hosts: crossTarget.Hosts}}, originDep, crossTarget, "zh-CN")
+	gotCross := rmCross.RemapProbeScript(`awk '$4 ~ /^172\.30\.2\.(67|82|91)\//'`)
+	if gotCross != `awk '$4 ~ /^(10\.10\.1\.5|192\.168\.50\.6)\//'` {
+		t.Fatalf("expected safe anchored cross-subnet regex, got: %s", gotCross)
+	}
+
+	// Single-node target collapses factored IP-set regex into single escaped IP.
+	singleTarget := &mwpack.Deployment{
+		Schema: mwpack.DeploymentSchema,
+		ID:     "pg-single",
+		Hosts:  []mwpack.Host{{Name: "solo-1", IP: "10.88.0.9"}},
+	}
+	rmSingle := buildClusterRemapperWithDeps(originFacts, clusterFacts{ID: singleTarget.ID, Plan: &mwpack.Plan{Hosts: singleTarget.Hosts}}, originDep, singleTarget, "zh-CN")
+	gotSingle := rmSingle.RemapProbeScript(`awk '$4 ~ /^172\.30\.2\.(67|82|91)\//'`)
+	if gotSingle != `awk '$4 ~ /^10\.88\.0\.9\//'` {
+		t.Fatalf("expected single-node escaped IP, got: %s", gotSingle)
+	}
+
+	// Simultaneous swap safety & role alignment without cascade corruption.
+	swapOrig := clusterFacts{ID: "c-a", Plan: &mwpack.Plan{
+		Hosts: []mwpack.Host{{Name: "node-1", IP: "10.0.0.1"}, {Name: "node-2", IP: "10.0.0.2"}},
+		Instances: []*mwpack.Instance{{
+			Component: "postgresql",
+			Roles:     map[string][]string{"primary": {"node-1"}, "replica": {"node-2"}},
+		}},
+	}}
+	swapTgt := clusterFacts{ID: "c-b", Plan: &mwpack.Plan{
+		Hosts: []mwpack.Host{{Name: "node-1", IP: "10.0.0.1"}, {Name: "node-2", IP: "10.0.0.2"}},
+		Instances: []*mwpack.Instance{{
+			Component: "postgresql",
+			Roles:     map[string][]string{"primary": {"node-2"}, "replica": {"node-1"}},
+		}},
+	}}
+	rmSwap := buildClusterRemapperWithDeps(swapOrig, swapTgt, nil, nil, "zh-CN")
+	gotSwap := rmSwap.RemapText(`leader=node-1 (10.0.0.1) replica=node-2 (10.0.0.2) keep=node-10 (10.0.0.10)`)
+	if gotSwap != `leader=node-2 (10.0.0.2) replica=node-1 (10.0.0.1) keep=node-10 (10.0.0.10)` {
+		t.Fatalf("expected non-cascading role-aligned swap with boundary protection, got: %s", gotSwap)
+	}
+
+	// Residual leak detector catches unremapped origin IP when target has no baseline IPs.
+	emptyTarget := clusterFacts{ID: "pg-no-ips", Plan: &mwpack.Plan{}}
+	rmEmpty := buildClusterRemapperWithDeps(originFacts, emptyTarget, originDep, nil, "zh-CN")
+	if leaks := rmEmpty.detectResidualOriginRefs(`awk '$4 ~ /^172\.30\.2\.(67|82|91)\//'`); len(leaks) == 0 {
+		t.Fatalf("expected residual origin IP leak detected when target has no IPs")
 	}
 }

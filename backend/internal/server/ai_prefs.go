@@ -54,7 +54,11 @@ func (s *storeServer) loadPrefs(user string) aiPrefs {
 	if !userNameOK(user) {
 		return p
 	}
-	if b, err := os.ReadFile(s.userFile(user, "ai-prefs.json")); err == nil {
+	if s.repo != nil {
+		if b, ok, err := s.repo.getKV("user_ai_prefs", user); err == nil && ok {
+			_ = json.Unmarshal(b, &p)
+		}
+	} else if b, err := os.ReadFile(s.userFile(user, "ai-prefs.json")); err == nil {
 		_ = json.Unmarshal(b, &p)
 	}
 	if p.Memories == nil {
@@ -64,6 +68,13 @@ func (s *storeServer) loadPrefs(user string) aiPrefs {
 }
 
 func (s *storeServer) savePrefs(user string, p aiPrefs) error {
+	if s.repo != nil {
+		b, err := json.Marshal(p)
+		if err != nil {
+			return err
+		}
+		return s.repo.putKV("user_ai_prefs", user, "", b)
+	}
 	return writeJSONFile(s.userFile(user, "ai-prefs.json"), p)
 }
 

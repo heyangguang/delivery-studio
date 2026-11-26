@@ -59,30 +59,20 @@ func (s *storeServer) signingKey() ([]byte, error) {
 }
 
 func (s *storeServer) loadOrCreateAuthKeyLocked() error {
+	fallback := ""
 	if s.cfg.DataDir != "" {
-		p := filepath.Join(s.cfg.DataDir, "auth_signing.key")
-		if b, err := os.ReadFile(p); err == nil && len(b) == 32 {
-			s.authKey = b
-			return nil
-		}
+		fallback = filepath.Join(s.cfg.DataDir, "auth_signing.key")
+	}
+	if b, ok := s.loadBinaryKeySetting("auth_signing_key", fallback, 32); ok {
+		s.authKey = b
+		return nil
 	}
 	key := make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {
 		return err
 	}
-	if s.cfg.DataDir != "" {
-		if err := os.MkdirAll(s.cfg.DataDir, 0o700); err != nil {
-			return err
-		}
-		p := filepath.Join(s.cfg.DataDir, "auth_signing.key")
-		tmp := p + ".tmp"
-		if err := os.WriteFile(tmp, key, 0o600); err != nil {
-			return err
-		}
-		if err := os.Rename(tmp, p); err != nil {
-			_ = os.Remove(tmp)
-			return err
-		}
+	if err := s.saveBinaryKeySetting("auth_signing_key", fallback, key); err != nil {
+		return err
 	}
 	s.authKey = key
 	return nil

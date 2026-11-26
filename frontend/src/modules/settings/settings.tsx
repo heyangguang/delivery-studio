@@ -4,7 +4,6 @@ import type { Session } from "../../shared/shared";
 import { can, useAIStatus, useMedia } from "../../shared/shared";
 import { UnderlineTabs } from "../../design/ui";
 import { bi, useLang } from "../../app/i18n";
-import { ExecutionNodes } from "../automation/execution-nodes";
 import { AISettingsView } from "../ai/aisettings";
 import { CostView, UsageView } from "../ai/aiusage";
 import { PricesView } from "../ai/aiprices";
@@ -257,25 +256,6 @@ const SECTIONS: {
       },
     ],
   },
-  {
-    id: "exec",
-    get group() {
-      return bi("自动执行", "Automation");
-    },
-    items: [
-      {
-        id: "execution-nodes",
-        get title() {
-          return bi("执行节点", "Execution Nodes");
-        },
-        get hint() {
-          return bi("授权范围、连接与运行", "Scope, connection & runs");
-        },
-        icon: SetIcons.nodes,
-        perm: "execution.manage",
-      },
-    ],
-  },
 ];
 
 const AI_ONLY_SETTINGS = new Set([
@@ -380,9 +360,7 @@ export function SettingsPage({
       </div>
     );
   const body =
-    view === "execution-nodes" ? (
-      <ExecutionNodes />
-    ) : view === "templates" ? (
+    view === "templates" ? (
       <TemplatesView />
     ) : view === "ai" ? (
       <AISettingsView />

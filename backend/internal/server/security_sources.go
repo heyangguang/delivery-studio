@@ -14,7 +14,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -75,15 +74,8 @@ func defaultSecFeedSources() []secFeedSource {
 
 func (s *storeServer) loadSecSources() []secFeedSource {
 	defaults := defaultSecFeedSources()
-	if s.cfg.DataDir == "" {
-		return defaults
-	}
-	b, err := os.ReadFile(filepath.Join(s.secDir(), "sources.json"))
-	if err != nil {
-		return defaults
-	}
 	var saved []secFeedSource
-	if json.Unmarshal(b, &saved) != nil || len(saved) == 0 {
+	if !s.loadSettingDoc("security_sources", filepath.Join(s.secDir(), "sources.json"), &saved) || len(saved) == 0 {
 		return defaults
 	}
 	// Ensure all builtin defaults exist even after upgrades.
@@ -103,15 +95,12 @@ func (s *storeServer) loadSecSources() []secFeedSource {
 }
 
 func (s *storeServer) saveSecSources(list []secFeedSource) error {
-	if s.cfg.DataDir == "" {
-		return nil
-	}
 	clean := make([]secFeedSource, len(list))
 	for i, x := range list {
 		x.HasAuthToken = false
 		clean[i] = x
 	}
-	return writeJSONFile(filepath.Join(s.secDir(), "sources.json"), clean)
+	return s.saveSettingDoc("security_sources", filepath.Join(s.secDir(), "sources.json"), clean)
 }
 
 func sanitizeSecSourcesForAPI(list []secFeedSource) []secFeedSource {

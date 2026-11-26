@@ -4,7 +4,6 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -42,10 +41,12 @@ func (s *storeServer) patchesPath(id string) string {
 
 func (s *storeServer) loadPatches(id string) []deliveryPatch {
 	var out []deliveryPatch
-	if b, err := os.ReadFile(s.patchesPath(id)); err == nil {
-		_ = json.Unmarshal(b, &out)
-	}
+	_ = s.loadJobDocValue(id, "patches_json", s.patchesPath(id), &out)
 	return out
+}
+
+func (s *storeServer) savePatches(id string, patches []deliveryPatch) error {
+	return s.saveJobDocValue(id, "patches_json", s.patchesPath(id), patches)
 }
 
 // patchedFiles is each patched file as it is now (the latest patch of a path wins).
@@ -161,7 +162,7 @@ func (c aiToolCtx) proposeFile(a map[string]any) string {
 		}
 	}
 	all = append(all, p)
-	if err := writeJSONFile(c.s.proposalsPath(c.job.ID), all); err != nil {
+	if err := c.s.saveProposals(c.job.ID, all); err != nil {
 		return "提案无法保存"
 	}
 	*c.proposed = append(*c.proposed, p.ID)
@@ -200,7 +201,7 @@ func (s *storeServer) acceptFilePatch(j storeJob, p aiProposal, user string) (jo
 	}
 	at := time.Now().UTC().Format(time.RFC3339)
 	patches := append(s.loadPatches(j.ID), deliveryPatch{ID: p.ID, Path: p.File.Path, Content: p.File.Content, Before: p.File.Before, New: p.File.New, Reason: p.Reason, By: user, At: at})
-	if err := writeJSONFile(s.patchesPath(j.ID), patches); err != nil {
+	if err := s.savePatches(j.ID, patches); err != nil {
 		return jobSync{}, err
 	}
 	n := len(j.Syncs) + 1

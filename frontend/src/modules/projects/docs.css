@@ -1133,6 +1133,9 @@
   flex-shrink: 0;
   margin-left: auto;
 }
+.dc-page {
+  padding-bottom: 96px;
+}
 .dc-ex-mode {
   display: flex;
   flex-direction: column;
@@ -1285,6 +1288,152 @@
   justify-content: flex-end;
   gap: 6px;
 }
+
+/* Delivery pre-draft clarification card (light/dark adaptive Apple porcelain) */
+.dc-clarify {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0 0 14px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--brand-line);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+.dc-clarify.is-inline {
+  margin: 10px 0 4px;
+  background: var(--surface-2);
+}
+.dc-clarify-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.dc-clarify-title {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.dc-clarify-title strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--ink);
+}
+.dc-clarify-title span {
+  font-size: 12px;
+  color: var(--mute);
+  line-height: 1.45;
+}
+.dc-clarify-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.dc-clarify-item {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+}
+.dc-clarify.is-inline .dc-clarify-item {
+  background: var(--surface);
+}
+.dc-clarify-q {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  font-size: 12.5px;
+  font-weight: 560;
+  color: var(--ink);
+}
+.dc-clarify-topic {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+  border: 1px solid var(--brand-line);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.dc-clarify-opts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.dc-clarify-opt {
+  all: unset;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 4px 11px;
+  border-radius: 7px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.35;
+  cursor: pointer;
+  transition: color 0.14s ease, background-color 0.14s ease, border-color 0.14s ease;
+}
+.dc-clarify-opt:hover {
+  color: var(--ink);
+  border-color: var(--brand-line);
+  background: var(--brand-soft);
+}
+.dc-clarify-opt.on {
+  color: var(--on-brand);
+  background: var(--brand);
+  border-color: var(--brand);
+  font-weight: 580;
+}
+.dc-clarify-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding-top: 2px;
+}
+.dc-clarify-tip {
+  font-size: 11.5px;
+  color: var(--mute);
+}
+.dc-clarify-acts {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.dc-clarify-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--ok);
+  margin-right: 2px;
+}
+.dc-paper.is-updating,
+.dc-paper-wrap.is-updating .dc-paper {
+  opacity: 0.72;
+  transition: opacity 0.12s ease;
+}
 /* starting a root-cause analysis */
 .dc-rca-opts {
   display: flex;
@@ -1343,7 +1492,7 @@
 }
 .dc-ropt {
   display: grid;
-  grid-template-columns: 64px minmax(0, 1fr);
+  grid-template-columns: minmax(64px, max-content) minmax(0, 1fr);
   align-items: start;
   gap: 8px 12px;
 }
@@ -1541,6 +1690,8 @@
 .dc-code-wrap {
   position: relative;
   margin: 8px 0 10px;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 120px;
 }
 .dc-code-wrap .dc-code {
   margin: 0;
@@ -1636,6 +1787,14 @@ body[arco-theme="dark"] .dc-sh-warn {
   background: #0d1117;
   overflow: hidden;
   box-shadow: 0 2px 10px rgba(15, 23, 42, 0.14);
+  content-visibility: auto;
+  contain-intrinsic-size: auto 140px;
+}
+@media print {
+  .dc-code-wrap,
+  .dc-term {
+    content-visibility: visible;
+  }
 }
 .dc-term-bar {
   display: flex;

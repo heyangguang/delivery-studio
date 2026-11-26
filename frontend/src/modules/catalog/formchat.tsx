@@ -834,6 +834,7 @@ export function useFormAI(o: {
   return {
     on,
     app: o.app,
+    chatId: saved.chat,
     msgs,
     loaded,
     live,

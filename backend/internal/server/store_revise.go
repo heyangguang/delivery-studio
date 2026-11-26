@@ -84,24 +84,38 @@ func (s *storeServer) lineageOf(j storeJob) *lineage {
 }
 
 func (s *storeServer) readSpec(id string) *mwpack.Deployment {
-	path := filepath.Join(s.jobDir(id), "deployment.yml")
-	st, statErr := os.Stat(path)
-	if statErr != nil {
-		return nil
-	}
-	mod := st.ModTime().UnixNano()
-	sz := st.Size()
-
-	s.cacheMu.RLock()
-	if hit, ok := s.specCache[id]; ok && hit.modTime == mod && hit.size == sz {
+	var mod, sz int64
+	if s.repo != nil {
+		s.cacheMu.RLock()
+		if hit, ok := s.specCache[id]; ok && hit.modTime == -1 {
+			s.cacheMu.RUnlock()
+			return hit.dep
+		}
 		s.cacheMu.RUnlock()
-		return hit.dep
-	}
-	s.cacheMu.RUnlock()
+		mod = -1
+	} else {
+		path := filepath.Join(s.jobDir(id), "deployment.yml")
+		st, statErr := os.Stat(path)
+		if statErr != nil {
+			return nil
+		}
+		mod = st.ModTime().UnixNano()
+		sz = st.Size()
 
-	b, err := os.ReadFile(path)
+		s.cacheMu.RLock()
+		if hit, ok := s.specCache[id]; ok && hit.modTime == mod && hit.size == sz {
+			s.cacheMu.RUnlock()
+			return hit.dep
+		}
+		s.cacheMu.RUnlock()
+	}
+
+	b, err := s.readJobSpecBytes(id)
 	if err != nil {
 		return nil
+	}
+	if sz == 0 {
+		sz = int64(len(b))
 	}
 	d, err := mwpack.ParseSavedDeployment(b)
 	if err != nil {
@@ -114,6 +128,20 @@ func (s *storeServer) readSpec(id string) *mwpack.Deployment {
 	}
 	s.specCache[id] = cachedJobSpec{modTime: mod, size: sz, dep: d}
 	s.cacheMu.Unlock()
+	return d
+}
+
+// readSpecFresh parses a standalone *mwpack.Deployment copy for mutating workflows,
+// preventing in-place data races on the shared s.specCache entry.
+func (s *storeServer) readSpecFresh(id string) *mwpack.Deployment {
+	b, err := s.readJobSpecBytes(id)
+	if err != nil {
+		return nil
+	}
+	d, err := mwpack.ParseSavedDeployment(b)
+	if err != nil {
+		return nil
+	}
 	return d
 }
 
@@ -141,7 +169,7 @@ func (s *storeServer) specChanges(from, to string) []Change {
 		var lock struct {
 			Instances []struct{ ID, Component, Version string }
 		}
-		if raw, err := os.ReadFile(filepath.Join(s.jobDir(from), "output", "deployment.lock.json")); err == nil && json.Unmarshal(raw, &lock) == nil {
+		if raw, err := s.readJobLockBytes(from); err == nil && json.Unmarshal(raw, &lock) == nil {
 			cp := *a
 			cp.Instances = append([]mwpack.InstanceSpec{}, a.Instances...)
 			for _, li := range lock.Instances {
@@ -178,15 +206,45 @@ func specDiff(a, b *mwpack.Deployment) []Change {
 	for _, h := range b.Hosts {
 		seen[h.Name] = true
 		old, ok := hosts[h.Name]
-		switch {
-		case !ok:
+		if !ok {
 			out = append(out, Change{"host", "add", "机器 " + h.Name, "", h.IP})
-		case old.IP != h.IP:
+			continue
+		}
+		if old.IP != h.IP {
 			out = append(out, Change{"host", "change", "机器 " + h.Name + " 的 IP", old.IP, h.IP})
-		case !reflect.DeepEqual(old.Params, h.Params):
-			out = append(out, Change{"host", "change", "机器 " + h.Name + " 的公共参数", fmt.Sprint(old.Params), fmt.Sprint(h.Params)})
-		case old.Disk != h.Disk || old.Partition != h.Partition:
-			out = append(out, Change{"host", "change", "机器 " + h.Name + " 的数据盘", old.Disk, h.Disk})
+		}
+		if !reflect.DeepEqual(old.Params, h.Params) {
+			keys := map[string]bool{}
+			for k := range old.Params {
+				keys[k] = true
+			}
+			for k := range h.Params {
+				keys[k] = true
+			}
+			pk := make([]string, 0, len(keys))
+			for k := range keys {
+				pk = append(pk, k)
+			}
+			sort.Strings(pk)
+			for _, k := range pk {
+				x, hx := old.Params[k]
+				y, hy := h.Params[k]
+				if hx && hy && reflect.DeepEqual(x, y) {
+					continue
+				}
+				op := "change"
+				if !hx {
+					op = "add"
+				} else if !hy {
+					op = "remove"
+				}
+				out = append(out, Change{"host", op, "机器 " + h.Name + " · " + k, show(x), show(y)})
+			}
+		}
+		if old.Disk != h.Disk || old.Partition != h.Partition {
+			oldDisk := strings.TrimSpace(strings.Join([]string{old.Disk, old.Partition}, " "))
+			newDisk := strings.TrimSpace(strings.Join([]string{h.Disk, h.Partition}, " "))
+			out = append(out, Change{"host", "change", "机器 " + h.Name + " 的数据盘", oldDisk, newDisk})
 		}
 	}
 	for _, h := range a.Hosts {
@@ -295,7 +353,7 @@ func specDiff(a, b *mwpack.Deployment) []Change {
 
 // lockPackages reads name -> versions from a delivery's package lock; empty when the lock is missing.
 func (s *storeServer) lockPackages(id string) map[string][]string {
-	b, err := os.ReadFile(filepath.Join(s.jobDir(id), "output", "deployment.lock.json"))
+	b, err := s.readJobLockBytes(id)
 	if err != nil {
 		return nil
 	}
@@ -453,11 +511,15 @@ func (s *storeServer) sourceCertificates(id string) map[string][]byte {
 
 // reviseBlocker says why the first deployment id cannot be revised into a delivery for cluster; empty when it can.
 func (s *storeServer) reviseBlocker(id, user, cluster string) string {
-	vis := s.visibleJobs(user)
+	lvlFn := s.clusterAccess(user)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if src, ok := s.jobs[id]; !ok || !vis(src.Owner) {
+	src, ok := s.jobs[id]
+	if !ok || lvlFn(src.Owner, src.ClusterID) == "" {
 		return "找不到要修改的首次部署"
+	}
+	if lvlFn(src.Owner, src.ClusterID) != "operate" {
+		return "你对集群「" + src.ClusterID + "」仅有只读查看权限，无法修订配置"
 	}
 	return s.reviseBlockerLocked(id, user, cluster)
 }

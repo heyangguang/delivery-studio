@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"delivery-studio/mwpack"
 )
@@ -57,22 +57,25 @@ type importHostInput struct {
 }
 
 type baselineGap struct {
-	ID          string `json:"id"`
-	Severity    string `json:"severity"` // high | medium | low
-	Category    string `json:"category"`
-	Title       string `json:"title"`
-	Detail      string `json:"detail"`
-	ProbeAction string `json:"probe_action"`
-	Selected    bool   `json:"selected"`
-	Source      string `json:"source,omitempty"` // rule | ai
+	ID           string `json:"id"`
+	Severity     string `json:"severity"` // high | medium | low
+	Category     string `json:"category"`
+	Title        string `json:"title"`
+	Detail       string `json:"detail"`
+	ProbeAction  string `json:"probe_action"`
+	Selected     bool   `json:"selected"`
+	Source       string `json:"source,omitempty"`        // rule | ai
+	ManualTarget string `json:"manual_target,omitempty"` // endpoints | paths | params
+	DismissHint  string `json:"dismiss_hint,omitempty"`  // why host-side probing may not apply
 }
 
 type baselineHealth struct {
-	Score   int           `json:"score"`
-	Passed  int           `json:"passed"`
-	Total   int           `json:"total"`
-	Summary string        `json:"summary"`
-	Gaps    []baselineGap `json:"gaps"`
+	Score         int           `json:"score"`
+	Passed        int           `json:"passed"`
+	Total         int           `json:"total"`
+	Summary       string        `json:"summary"`
+	Gaps          []baselineGap `json:"gaps"`
+	DismissedGaps []baselineGap `json:"dismissed_gaps,omitempty"`
 }
 
 type importClusterReq struct {
@@ -101,6 +104,7 @@ type importClusterReq struct {
 	Params              map[string]any             `json:"params,omitempty"`
 	Packages            []mwpack.ImportedPkg       `json:"packages,omitempty"`
 	Notes               string                     `json:"notes,omitempty"`
+	DismissedGaps       []string                   `json:"dismissed_gaps,omitempty"`
 	LastProbedAt        string                     `json:"last_probed_at,omitempty"`
 	Health              *baselineHealth            `json:"health,omitempty"`
 }
@@ -420,15 +424,32 @@ func analyzeImportedBaselineHealth(compID, displayName string, req importCluster
 		return false
 	}
 
-	var gaps []baselineGap
+	dismissedSet := map[string]bool{}
+	for _, raw := range req.DismissedGaps {
+		if id := strings.ToLower(strings.TrimSpace(raw)); id != "" {
+			dismissedSet[id] = true
+		}
+	}
+
+	gaps := []baselineGap{}
+	var dismissed []baselineGap
 	total := 0
 	passed := 0
 	check := func(ok bool, gap baselineGap) {
-		total++
 		if ok {
+			total++
 			passed++
 			return
 		}
+		if dismissedSet[strings.ToLower(strings.TrimSpace(gap.ID))] {
+			if gap.Source == "" {
+				gap.Source = "rule"
+			}
+			gap.Selected = false
+			dismissed = append(dismissed, gap)
+			return
+		}
+		total++
 		gaps = append(gaps, gap)
 	}
 
@@ -464,13 +485,14 @@ func analyzeImportedBaselineHealth(compID, displayName string, req importCluster
 		ID:       "paths",
 		Severity: "high",
 		Category: tr(lang, "路径基线", "Paths"),
-		Title:    tr(lang, fmt.Sprintf("缺少%s", strings.Join(pathMissingParts, "、")), fmt.Sprintf("Missing %s", strings.Join(pathMissingParts, ", "))),
+		Title:    tr(lang, fmt.Sprintf("缺少 %s", strings.Join(pathMissingParts, "、")), fmt.Sprintf("Missing %s", strings.Join(pathMissingParts, ", "))),
 		Detail:   tr(lang, "后续变更演练、日志巡检与故障恢复预案均依赖准确的运行目录与主配置路径。", "Change rehearsal, log inspection, and recovery runbooks require exact config/data/log paths."),
 		ProbeAction: tr(lang,
 			fmt.Sprintf("只读定位 %s 主配置文件、真实数据目录与日志落盘路径", dname),
 			fmt.Sprintf("Read-only lookup of %s config file, active data dir, and log dir", dname),
 		),
-		Selected: true,
+		Selected:     true,
+		ManualTarget: "paths",
 	})
 
 	// 2. Key runtime parameters baseline
@@ -496,7 +518,8 @@ func analyzeImportedBaselineHealth(compID, displayName string, req importCluster
 			fmt.Sprintf("只读采集 %s 核心生效运行参数（脱敏过滤口令）", dname),
 			fmt.Sprintf("Read-only query of active %s parameters (secrets redacted)", dname),
 		),
-		Selected: true,
+		Selected:     true,
+		ManualTarget: "params",
 	})
 
 	// 3. Backup & recovery baseline (for stateful / DB workloads)
@@ -519,6 +542,7 @@ func analyzeImportedBaselineHealth(compID, displayName string, req importCluster
 			Detail:      backupDetail,
 			ProbeAction: backupAction,
 			Selected:    true,
+			DismissHint: tr(lang, "若备份由外部存储快照或云平台统一托管（不在主机侧），可点「无需探测」关闭", "If backups are managed externally by cloud/storage snapshots, dismiss this item"),
 		})
 	}
 
@@ -547,20 +571,37 @@ func analyzeImportedBaselineHealth(compID, displayName string, req importCluster
 	}
 
 	// 5. Access endpoint & HA failover routing verification
-	hasProxyOrVIP := hasCompanion("haproxy") || hasCompanion("keepalived") || hasCompanion("nginx") || hasCompanion("pgbouncer") || hasCompanion("proxysql") || hasCompanion("maxscale") || hasCompanion("obproxy")
-	unverifiedVIP := strings.Contains(notesLower, "未见其监听") || strings.Contains(notesLower, "疑为 vip") || strings.Contains(notesLower, "待确认 vip")
-	epOK := len(req.Endpoints) > 0 && !unverifiedVIP && (len(req.Hosts) <= 1 || hasProxyOrVIP)
+	// External load balancers (F5 / Cloud ELB / SLB / EIP / DNS / VIP) are configured upstream of Linux hosts
+	// and cannot be probed on the OS. Once at least one valid endpoint is already recorded (and not solely an
+	// unverified host-side VIP guess), treat the endpoint baseline as satisfied rather than falsely demanding
+	// host-local HAProxy/Keepalived probing.
+	hasValidEndpoint := false
+	hasCuratedExternalEP := false
+	for _, ep := range req.Endpoints {
+		if strings.TrimSpace(ep.Address) == "" {
+			continue
+		}
+		hasValidEndpoint = true
+		n := strings.ToLower(strings.TrimSpace(ep.Name))
+		if n == "eip" || n == "f5" || n == "elb" || n == "slb" || n == "alb" || n == "nlb" || n == "clb" || n == "lvs" || n == "vip" || n == "lb" || n == "dns" || n == "domain" || n == "writer" || n == "readwrite" || n == "rw" {
+			hasCuratedExternalEP = true
+		}
+	}
+	unverifiedVIP := (strings.Contains(notesLower, "未见其监听") || strings.Contains(notesLower, "疑为 vip") || strings.Contains(notesLower, "待确认 vip")) && !hasCuratedExternalEP
+	epOK := hasValidEndpoint && !unverifiedVIP
 	check(epOK, baselineGap{
 		ID:       "endpoint",
 		Severity: "medium",
 		Category: tr(lang, "访问入口", "Endpoints & HA"),
 		Title:    tr(lang, "统一访问入口 / VIP 承载与切换机制待核实", "Access Endpoint / VIP Routing & Failover Unverified"),
-		Detail:   tr(lang, "核清业务读写入口实际挂载在 VIP、LB 还是直连节点，确保主备切换演练期间流量切换可控。", "Verify whether the read/write endpoint terminates on a VIP, load balancer, or direct host for safe failover."),
+		Detail:   tr(lang, "核清业务读写入口实际挂载在外部 F5/云 LB/VIP 还是主机代理，便于主备切换演练期间评估流量切换。", "Clarify whether read/write traffic enters via upstream F5/Cloud LB/VIP or host proxy for safe failover."),
 		ProbeAction: tr(lang,
-			"只读核查网卡 VIP 绑定（ip -br addr）、端口监听与代理/Keepalived 配置",
-			"Read-only inspection of VIP bindings (ip -br addr), listening sockets, and proxy/Keepalived config",
+			"若在主机侧部署 Keepalived/HAProxy，可只读核查网卡 VIP 绑定与代理配置",
+			"If using host-side Keepalived/HAProxy, inspect local VIP bindings and proxy config",
 		),
-		Selected: unverifiedVIP || len(req.Endpoints) == 0,
+		Selected:     false,
+		ManualTarget: "endpoints",
+		DismissHint:  tr(lang, "前端 VIP / F5 / 云 LB / EIP 配置在网络侧，主机脚本无法探测，可直接手工填写或点「无需探测」关闭", "Frontend VIP / F5 / Cloud LB / EIP lives upstream of hosts — fill manually or dismiss"),
 	})
 
 	// 6. TLS encryption & access control security baseline
@@ -576,7 +617,8 @@ func analyzeImportedBaselineHealth(compID, displayName string, req importCluster
 			"只读检查 TLS/SSL 开关、证书到期时间与脱敏后的访问控制规则",
 			"Read-only check of TLS/SSL flags, cert expiry dates, and redacted access rules",
 		),
-		Selected: false,
+		Selected:    false,
+		DismissHint: tr(lang, "若内网隔离环境按策略未启用 TLS，可点「无需探测」关闭", "If TLS is intentionally disabled in an isolated VPC, dismiss this item"),
 	})
 
 	// 7. Exact version, OS detail & CVE package inventory
@@ -636,21 +678,27 @@ func analyzeImportedBaselineHealth(compID, displayName string, req importCluster
 		score = passed * 100 / total
 	}
 	summary := tr(lang,
-		fmt.Sprintf("对照标准生产交付基线已达标 %d/%d 项，可直接使用；如有变动可随时发起增量核验。", passed, total),
+		fmt.Sprintf("标准基线已全部齐备（%d/%d），可直接使用；如需抽查特定运行状态可随时按需发起只读探针。", passed, total),
 		fmt.Sprintf("Baseline meets %d/%d standard production checks; ready for rehearsal and reporting.", passed, total),
 	)
-	if len(gaps) > 0 {
+	if len(gaps) == 0 && len(dismissed) > 0 {
 		summary = tr(lang,
-			fmt.Sprintf("对照标准生产基线已齐备 %d/%d 项，识别出 %d 项待补采缺口；勾选后可让 AI 一键生成专项 100%% 只读探针补齐。", passed, total, len(gaps)),
-			fmt.Sprintf("Baseline covers %d/%d standard checks with %d gap(s); select items to generate a targeted 100%% read-only AI probe.", passed, total, len(gaps)),
+			fmt.Sprintf("适用基线项已全部齐备（%d/%d），已按现场架构忽略 %d 项无需主机侧探测的条目。", passed, total, len(dismissed)),
+			fmt.Sprintf("Applicable baseline checks complete (%d/%d); %d non-host item(s) dismissed.", passed, total, len(dismissed)),
+		)
+	} else if len(gaps) > 0 {
+		summary = tr(lang,
+			fmt.Sprintf("对照标准生产基线已齐备 %d/%d 项，识别出 %d 项待确认缺口；可按需勾选生成只读探针，对不在主机侧的项目也可直接忽略。", passed, total, len(gaps)),
+			fmt.Sprintf("Baseline covers %d/%d checks with %d gap(s); select items to generate a read-only probe, or dismiss non-host items.", passed, total, len(gaps)),
 		)
 	}
 	return baselineHealth{
-		Score:   score,
-		Passed:  passed,
-		Total:   total,
-		Summary: summary,
-		Gaps:    gaps,
+		Score:         score,
+		Passed:        passed,
+		Total:         total,
+		Summary:       summary,
+		Gaps:          gaps,
+		DismissedGaps: dismissed,
 	}
 }
 
@@ -866,9 +914,10 @@ func (s *storeServer) loadImportedBaselineReq(user, clusterID, lang string) (*im
 		DataDirs:     meta.DataDirs,
 		LogDirs:      meta.LogDirs,
 		Params:       params,
-		Packages:     meta.Packages,
-		Notes:        meta.Notes,
-		LastProbedAt: meta.LastProbedAt,
+		Packages:      meta.Packages,
+		Notes:         meta.Notes,
+		DismissedGaps: append([]string(nil), meta.DismissedGaps...),
+		LastProbedAt:  meta.LastProbedAt,
 	}
 	h := analyzeImportedBaselineHealth(compID, req.DisplayName, *req, lang)
 	req.Health = &h
@@ -960,28 +1009,40 @@ func (s *storeServer) importProbeScriptHandler(w http.ResponseWriter, r *http.Re
 	source := "template"
 	aiNote := ""
 	usedModel := ""
+	var trace *rehearsalTrace
+	ev := startRehearsalSSE(w, r)
 
 	if req.UseAI {
 		if !s.aiStatusFor(session.User).Enabled {
 			aiNote = tr(lang, "未开启 AI 助手，已自动使用 100% 静态只读标准探针", "AI is disabled; using 100% static read-only probe")
 		} else {
 			st := s.aiLoad()
-			providers := st.aiProvidersForPick("chat", req.Model)
+			providers := s.aiProvidersForUser(st, session.User, "assistant", req.Model)
 			if len(providers) == 0 {
-				providers = st.aiProvidersForPick("rehearsal", req.Model)
+				providers = s.aiProvidersForUser(st, session.User, "change_rehearsal", req.Model)
 			}
 			if len(providers) > 0 && (st.MonthlyLimit <= 0 || s.aiCallsThisMonth(session.User) < st.MonthlyLimit) {
-				aiScript, aiErr := s.aiBuildImportProbeScript(r.Context(), providers[0], session.User, req, existing, selectedGaps, effMode, baseScript, lang)
+				aiScript, aiTrace, status, aiErr := s.aiBuildImportProbeScript(r, providers, session.User, req, existing, selectedGaps, effMode, baseScript, lang, ev)
 				if aiErr == nil && strings.TrimSpace(aiScript) != "" {
+					guardStart := time.Now()
 					aiSafe, aiWarns := validateReadOnlyProbeScriptLang(aiScript, lang)
+					guardMS := max(1, time.Since(guardStart).Milliseconds())
 					if aiSafe && len(aiWarns) == 0 {
 						script = aiScript
 						source = "ai"
-						usedModel = providers[0].Model
+						usedModel = aiTrace.Model
+						finalizeTraceSynth(&aiTrace, ev, "readonly-ast-guard", tr(lang, fmt.Sprintf("静态安全门禁通过（%d 行 · 100%% 纯只读零写操作）", strings.Count(aiScript, "\n")), fmt.Sprintf("Static read-only gate passed (%d lines · zero mutations)", strings.Count(aiScript, "\n"))), true, guardMS)
+						trace = &aiTrace
 					} else {
 						aiNote = tr(lang, "AI 生成脚本未通过 100% 静态只读安全门禁，已自动回退已校验的安全只读探针", "AI-generated script failed static read-only gate; fell back to verified read-only probe")
+						finalizeTraceSynth(&aiTrace, ev, "readonly-ast-guard", aiNote, false, guardMS)
+						trace = &aiTrace
 					}
 				} else if aiErr != nil {
+					if ev != nil {
+						failRehearsalResp(s, w, ev, status, aiErr.Error(), aiTrace.Diag)
+						return
+					}
 					aiNote = tr(lang, "AI 定制探针暂不可用，已回退已校验的安全只读探针："+aiErr.Error(), "AI probe customization unavailable; fell back to verified read-only probe: "+aiErr.Error())
 				}
 			} else {
@@ -991,7 +1052,7 @@ func (s *storeServer) importProbeScriptHandler(w http.ResponseWriter, r *http.Re
 	}
 
 	safe, warns := validateReadOnlyProbeScriptLang(script, lang)
-	s.writeJSON(w, 200, map[string]any{
+	payload := map[string]any{
 		"script":       script,
 		"filename":     filename,
 		"safe":         safe,
@@ -1002,10 +1063,92 @@ func (s *storeServer) importProbeScriptHandler(w http.ResponseWriter, r *http.Re
 		"run_hint":     runHint,
 		"model":        usedModel,
 		"ai_note":      aiNote,
-	})
+	}
+	if trace != nil {
+		payload["trace"] = trace
+	}
+	finishImportStreamResp(w, ev, payload)
 }
 
-func (s *storeServer) aiBuildImportProbeScript(ctx context.Context, p aiProvider, user string, req importProbeScriptReq, existing *importClusterReq, selectedGaps []baselineGap, mode, baseScript, lang string) (string, error) {
+func finishImportStreamResp(w http.ResponseWriter, ev *sse, payload map[string]any) {
+	if ev != nil {
+		ev.send(map[string]any{"t": "done", "result": payload})
+		return
+	}
+	sWriteJSON(w, 200, payload)
+}
+
+func parseImportDraftStreamMetaLang(raw, lang string) (thinking string, phase string) {
+	thinking, _ = extractLiveJSONThinking(raw)
+	switch {
+	case strings.Contains(raw, `"notes"`):
+		phase = tr(lang, "正在收敛现场线索与待人工核对清单…", "Summarizing live evidence & review checklist...")
+	case strings.Contains(raw, `"packages"`):
+		phase = tr(lang, "正在整理已识别软件包与版本信息…", "Cataloging detected packages & versions...")
+	case strings.Contains(raw, `"params"`):
+		phase = tr(lang, "正在提取关键中间件运行参数与路径…", "Extracting key middleware runtime params & paths...")
+	case strings.Contains(raw, `"companions"`):
+		phase = tr(lang, "正在识别 Patroni / etcd / 代理等伴生架构组件栈…", "Detecting companion HA stack (Patroni / etcd / proxy / exporters)...")
+	case strings.Contains(raw, `"endpoints"`):
+		phase = tr(lang, "正在整理集群读写与管理访问入口…", "Mapping cluster read-write & admin endpoints...")
+	case strings.Contains(raw, `"hosts"`):
+		phase = tr(lang, "正在提取主机节点、角色与数据盘拓扑…", "Extracting hosts, roles & data disk layout...")
+	}
+	return thinking, phase
+}
+
+func parseImportProbeStreamMetaLang(raw, lang string) (thinking string, phase string) {
+	thinking, _ = extractLiveJSONThinking(raw)
+	switch {
+	case strings.Contains(raw, "=== MW_IMPORT_END ==="):
+		phase = tr(lang, "探针脚本正文编写完成，即将执行静态只读安全扫描…", "Probe script drafted; preparing static read-only security scan...")
+	case strings.Contains(raw, "=== MW_IMPORT_COMPANIONS ===") || strings.Contains(raw, "=== MW_IMPORT_PORTS ==="):
+		phase = tr(lang, "正在编写伴生组件栈与监听端口只读探测段…", "Writing companion stack & listening port probes...")
+	case strings.Contains(raw, "=== MW_IMPORT_MIDDLEWARE ==="):
+		phase = tr(lang, "正在编写主中间件配置与版本只读探测段…", "Writing primary middleware version & config probes...")
+	case strings.Contains(raw, "=== MW_IMPORT_BEGIN ===") || strings.Contains(raw, "#!/usr/bin/env bash"):
+		phase = tr(lang, "正在编写 100% 纯只读现场采集 Bash 脚本…", "Writing 100% read-only Bash discovery probe script...")
+	}
+	return thinking, phase
+}
+
+func parseImportGapStreamMetaLang(raw, lang string) (thinking string, phase string) {
+	thinking, _ = extractLiveJSONThinking(raw)
+	switch {
+	case strings.Contains(raw, `"gaps"`):
+		phase = tr(lang, "正在收敛固定规则之外的高价值补采项与只读探测动作…", "Compiling high-value blind spots & read-only probe actions...")
+	case strings.Contains(raw, `"summary"`):
+		phase = tr(lang, "正在总结当前集群基线完整度与风险评估…", "Summarizing baseline completeness & operational risks...")
+	}
+	return thinking, phase
+}
+
+func extractProbeScriptOutput(raw string) (string, error) {
+	out := strings.TrimSpace(raw)
+	if strings.HasPrefix(out, "```") {
+		if nl := strings.IndexByte(out, '\n'); nl > 0 {
+			out = out[nl+1:]
+		}
+		out = strings.TrimSuffix(strings.TrimSpace(out), "```")
+		out = strings.TrimSpace(out)
+	}
+	if !strings.HasPrefix(out, "#!") || !strings.Contains(out, "=== MW_IMPORT_BEGIN ===") {
+		return "", fmt.Errorf("AI 返回脚本缺少标准探针结构")
+	}
+	return out + "\n", nil
+}
+
+func (s *storeServer) aiBuildImportProbeScript(
+	r *http.Request,
+	providers []aiProvider,
+	user string,
+	req importProbeScriptReq,
+	existing *importClusterReq,
+	selectedGaps []baselineGap,
+	mode, baseScript, lang string,
+	ev *sse,
+) (string, rehearsalTrace, int, error) {
+	prepStart := time.Now()
 	compID := mwpack.NormalizeImportComponentID(firstNonEmptyStr(req.Component, req.DisplayName))
 	displayName := firstNonEmptyStr(strings.TrimSpace(req.DisplayName), compID)
 	sys := `你是一位企业级中间件与 Linux 基础设施运维专家，负责编写一份极简、克制、100% 静态只读的 Bash 采集探针脚本。
@@ -1057,44 +1200,80 @@ func (s *storeServer) aiBuildImportProbeScript(ctx context.Context, p aiProvider
 	prompt.WriteString("\n参考安全基线骨架（请在此基础上按上述缺口精准优化，保持极简与 100% 只读）：\n")
 	prompt.WriteString(baseScript)
 
-	callCtx, cancel := context.WithTimeout(ctx, 50*time.Second)
-	defer cancel()
-	if strings.TrimSpace(req.Think) != "" {
-		callCtx = withEffort(callCtx, strings.TrimSpace(req.Think))
+	prepMS := max(1, time.Since(prepStart).Milliseconds())
+	scopeDetail := tr(lang,
+		fmt.Sprintf("已装载 %s (%s) 基线上下文%s", displayName, firstNonEmptyStr(req.DeployMethod, "systemd"), func() string {
+			if len(selectedGaps) > 0 {
+				return fmt.Sprintf(" · 聚焦 %d 项待补采缺口", len(selectedGaps))
+			}
+			return ""
+		}()),
+		fmt.Sprintf("Loaded %s (%s) context%s", displayName, firstNonEmptyStr(req.DeployMethod, "systemd"), func() string {
+			if len(selectedGaps) > 0 {
+				return fmt.Sprintf(" · targeting %d baseline gap(s)", len(selectedGaps))
+			}
+			return ""
+		}()),
+	)
+	spec := rehearsalPipelineSpec{
+		Feature: "import_probe_gen",
+		PreSteps: []rehearsalTraceStep{
+			{
+				ID:     "inspect-baseline",
+				Kind:   "inspect",
+				Title:  tr(lang, "读取集群基线与采集目标", "Inspect Baseline & Probe Targets"),
+				Detail: scopeDetail,
+				MS:     prepMS,
+				OK:     true,
+				Status: "done",
+			},
+			{
+				ID:     "inject-ro-policy",
+				Kind:   "guard",
+				Title:  tr(lang, "注入 100% 纯只读安全红线规则", "Inject 100% Read-Only Safety Guardrails"),
+				Detail: tr(lang, "已锁定零写操作、零服务重启、零文件重定向与凭据脱敏约束", "Locked zero-write, zero-restart, zero-redirect & credential redaction rules"),
+				MS:     1,
+				OK:     true,
+				Status: "done",
+			},
+		},
+		ThinkTitle:     tr(lang, "设计精炼只读现场采集策略", "Design Lean Read-Only Probe Strategy"),
+		ThinkWait:      tr(lang, "正在结合组件形态与补采重点编排 100% 只读探测策略…", "Designing targeted 100% read-only probe strategy..."),
+		ThinkDone:      tr(lang, "已完成精炼只读采集策略规划", "Completed lean read-only probe strategy"),
+		SynthID:        "readonly-ast-guard",
+		SynthKind:      "guard",
+		SynthTitle:     tr(lang, "生成探针脚本与静态安全门禁校验", "Generate Probe & Static Read-Only Gate"),
+		SynthWait:      tr(lang, "等待脚本编写完成后执行静态只读安全扫描", "Waiting for script output before static read-only verification"),
+		PhaseExtractor: parseImportProbeStreamMetaLang,
+		Validate: func(txt string) error {
+			_, err := extractProbeScriptOutput(txt)
+			return err
+		},
 	}
-	started := time.Now()
-	rep, err := s.aiChat(callCtx, p, []aiMessage{
-		{Role: "system", Content: sys},
-		{Role: "user", Content: prompt.String()},
-	}, nil, nil)
+
+	txt, trace, status, err := s.rehearsalRunAI(
+		r,
+		providers,
+		user,
+		firstNonEmptyStr(req.ClusterID, compID),
+		"import-probe",
+		"probe",
+		nil,
+		sys,
+		prompt.String(),
+		nil,
+		spec,
+		thinkLevel(strings.TrimSpace(req.Think)),
+		ev,
+	)
 	if err != nil {
-		return "", err
+		return "", trace, status, err
 	}
-	s.aiRecordUsage(aiUsage{
-		At:        nowStamp(),
-		User:      user,
-		Feature:   "import_probe_gen",
-		Provider:  firstNonEmptyStr(p.Name, p.ID),
-		Model:     p.Model,
-		In:        rep.In,
-		Out:       rep.Out,
-		Cached:    rep.Cached,
-		Reasoning: rep.Reasoning,
-		MS:        time.Since(started).Milliseconds(),
-		OK:        true,
-	})
-	out := strings.TrimSpace(rep.Text)
-	if strings.HasPrefix(out, "```") {
-		if nl := strings.IndexByte(out, '\n'); nl > 0 {
-			out = out[nl+1:]
-		}
-		out = strings.TrimSuffix(strings.TrimSpace(out), "```")
-		out = strings.TrimSpace(out)
+	out, err := extractProbeScriptOutput(txt)
+	if err != nil {
+		return "", trace, 502, err
 	}
-	if !strings.HasPrefix(out, "#!") || !strings.Contains(out, "=== MW_IMPORT_BEGIN ===") {
-		return "", fmt.Errorf("AI 返回脚本缺少标准探针结构")
-	}
-	return out + "\n", nil
+	return out, trace, 200, nil
 }
 
 // importDiagnoseGapsHandler combines deterministic standard-baseline checks with deep AI discovery
@@ -1118,9 +1297,10 @@ func (s *storeServer) importDiagnoseGapsHandler(w http.ResponseWriter, r *http.R
 		s.fail(w, 404, "未找到该存量纳管集群基线")
 		return
 	}
+	ev := startRehearsalSSE(w, r)
 	baseHealth := *existing.Health
 	if !s.aiStatusFor(session.User).Enabled {
-		s.writeJSON(w, 200, map[string]any{
+		finishImportStreamResp(w, ev, map[string]any{
 			"health":  baseHealth,
 			"ai_used": false,
 			"ai_note": tr(lang, "AI 助手未开启，当前展示标准规则基线检查结果", "AI is disabled; showing deterministic baseline checks"),
@@ -1128,12 +1308,12 @@ func (s *storeServer) importDiagnoseGapsHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 	st := s.aiLoad()
-	providers := st.aiProvidersForPick("chat", req.Model)
+	providers := s.aiProvidersForUser(st, session.User, "assistant", req.Model)
 	if len(providers) == 0 {
-		providers = st.aiProvidersForPick("rehearsal", req.Model)
+		providers = s.aiProvidersForUser(st, session.User, "change_rehearsal", req.Model)
 	}
 	if len(providers) == 0 || (st.MonthlyLimit > 0 && s.aiCallsThisMonth(session.User) >= st.MonthlyLimit) {
-		s.writeJSON(w, 200, map[string]any{
+		finishImportStreamResp(w, ev, map[string]any{
 			"health":  baseHealth,
 			"ai_used": false,
 			"ai_note": tr(lang, "暂无可用 AI 模型或已达月额度，当前保留规则基线检查结果", "No AI model available or quota reached; keeping rule-based checks"),
@@ -1141,6 +1321,7 @@ func (s *storeServer) importDiagnoseGapsHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	prepStart := time.Now()
 	sys := `你是一位拥有 15 年生产交付与应急排障经验的企业级中间件架构师。
 你的任务是审阅该存量纳管集群当前的真实基线档案、已落地变更记录与安全态势，找出「固定规则尚未覆盖、但对后续生产变更演练、高可用切换、故障排障与交付验收至关重要的遗漏信息」。
 
@@ -1148,8 +1329,8 @@ func (s *storeServer) importDiagnoseGapsHandler(w http.ResponseWriter, r *http.R
 1. 【只补充固定规则没覆盖的深度缺口】下方会列出固定规则已经检出的缺口，禁止重复输出相同内容；请聚焦该集群架构独有的高价值盲区（例如：Patroni DCS TTL/loop_wait/复制槽与 WAL 保留策略、备库 clonefrom 标签或同步模式细节、连接池/连接数水位、日志轮转与保留清理策略、数据盘/WAL 挂载独立性与 inode 水位、etcd 压缩与存储配额、内核 HugePages/swappiness/ulimit 等）。
 2. 【100% 只读核验铁律】每条建议的 probe_action 必须是 100% 静态只读、零副作用、可安全在生产执行的只读检查动作（严禁建议修改参数、重启服务、写入文件或测试破坏性切换）。
 3. 数量克制精准：最多输出 2~4 条真正有含金量的缺口，不要凑数。
-4. 只输出严格 JSON，不要 Markdown 围栏或多余文字：
-{"summary":"1句面向工程师的整体基线评估结论（中文，简练直接）","gaps":[{"category":"4字以内分类如 复制机制/容量水位/日志治理/高可用参数","severity":"high|medium|low","title":"简明缺口标题（22字以内）","detail":"1句说明为什么后续变更演练或排障需要这项信息","probe_action":"1句具体的只读探测核验动作（100% 只读）"}]}`
+4. 只输出严格 JSON，不要 Markdown 围栏或多余文字；请将 "thinking" 放在第一个字段用于流式展示研判思路：
+{"thinking":"2~3条简洁研判要点（以 1. / 2. / 3. 开头，简述当前基线已覆盖事实、该架构特有运维盲区及补采价值）","summary":"1句面向工程师的整体基线评估结论（中文，简练直接）","gaps":[{"category":"4字以内分类如 复制机制/容量水位/日志治理/高可用参数","severity":"high|medium|low","title":"简明缺口标题（22字以内）","detail":"1句说明为什么后续变更演练或排障需要这项信息","probe_action":"1句具体的只读探测核验动作（100% 只读）"}]}`
 
 	var prompt strings.Builder
 	fmt.Fprintf(&prompt, "集群：%s（%s %s，精确版本：%s，OS：%s，部署形态：%s）\n",
@@ -1202,22 +1383,87 @@ func (s *storeServer) importDiagnoseGapsHandler(w http.ResponseWriter, r *http.R
 			fmt.Fprintf(&prompt, "- [%s] %s\n", g.Category, g.Title)
 		}
 	}
+	if len(baseHealth.DismissedGaps) > 0 {
+		prompt.WriteString("\n工程师已明确忽略/关闭的维度（不在主机侧或无需探测，严禁再次推荐相同或近似项）：\n")
+		for _, g := range baseHealth.DismissedGaps {
+			fmt.Fprintf(&prompt, "- [%s] %s\n", g.Category, g.Title)
+		}
+	}
 	if strings.TrimSpace(req.Focus) != "" {
 		fmt.Fprintf(&prompt, "\n工程师特别关注方向：%s\n", truncRunes(strings.TrimSpace(req.Focus), 500))
 	}
 
-	p := providers[0]
-	callCtx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
-	defer cancel()
-	if strings.TrimSpace(req.Think) != "" {
-		callCtx = withEffort(callCtx, strings.TrimSpace(req.Think))
+	prepMS := max(1, time.Since(prepStart).Milliseconds())
+	var parsed struct {
+		Summary string        `json:"summary"`
+		Gaps    []baselineGap `json:"gaps"`
 	}
-	started := time.Now()
-	rep, err := s.aiChat(callCtx, p, []aiMessage{
-		{Role: "system", Content: sys},
-		{Role: "user", Content: prompt.String()},
-	}, nil, nil)
+	spec := rehearsalPipelineSpec{
+		Feature: "import_gap_diagnose",
+		PreSteps: []rehearsalTraceStep{
+			{
+				ID:     "scan-baseline",
+				Kind:   "inspect",
+				Title:  tr(lang, "通读集群基线、架构栈与变更台账", "Read Baseline, Stack & History"),
+				Detail: tr(lang, fmt.Sprintf("已加载 %d 台节点 · %d 个伴生组件 · %d 项规则初检缺口", len(existing.Hosts), len(existing.Companions), len(baseHealth.Gaps)), fmt.Sprintf("Loaded %d host(s) · %d companion(s) · %d rule gap(s)", len(existing.Hosts), len(existing.Companions), len(baseHealth.Gaps))),
+				MS:     prepMS,
+				OK:     true,
+				Status: "done",
+			},
+			{
+				ID:     "redact-context",
+				Kind:   "guard",
+				Title:  tr(lang, "敏感凭据自动脱敏与只读核验锁定", "Scrub Credentials & Lock Read-Only"),
+				Detail: tr(lang, "已清除配置与台账中的凭据片段，仅允许输出 100% 只读核验项", "Scrubbed secrets from baseline context; enforcing 100% read-only checks"),
+				MS:     1,
+				OK:     true,
+				Status: "done",
+			},
+		},
+		ThinkTitle:     tr(lang, "研判固定规则之外的架构盲区", "Identify Architecture-Specific Blind Spots"),
+		ThinkWait:      tr(lang, "正在对照生产高可用、备份与演练标准定位专属遗漏项…", "Comparing baseline against HA, backup & rehearsal standards..."),
+		ThinkDone:      tr(lang, "已完成基线盲区深度研判", "Completed baseline blind-spot analysis"),
+		SynthID:        "synth-gaps",
+		SynthKind:      "synthesize",
+		SynthTitle:     tr(lang, "收敛只读补采清单与优先级", "Compile Read-Only Gap Checklist"),
+		SynthWait:      tr(lang, "等待盲区研判完成后生成只读补采建议", "Waiting for analysis before compiling read-only gaps"),
+		PhaseExtractor: parseImportGapStreamMetaLang,
+		Validate: func(txt string) error {
+			raw := extractJSON(txt)
+			if raw == "" {
+				return fmt.Errorf("AI 未返回有效 JSON")
+			}
+			var tmp struct {
+				Summary string        `json:"summary"`
+				Gaps    []baselineGap `json:"gaps"`
+			}
+			if err := json.Unmarshal([]byte(raw), &tmp); err != nil {
+				return fmt.Errorf("AI 返回格式解析失败: %v", err)
+			}
+			return nil
+		},
+	}
+
+	txt, trace, status, err := s.rehearsalRunAI(
+		r,
+		providers,
+		session.User,
+		cid,
+		"import-gap-diagnose",
+		"diagnose",
+		nil,
+		sys,
+		prompt.String(),
+		nil,
+		spec,
+		thinkLevel(strings.TrimSpace(req.Think)),
+		ev,
+	)
 	if err != nil {
+		if ev != nil {
+			failRehearsalResp(s, w, ev, status, err.Error(), trace.Diag)
+			return
+		}
 		s.writeJSON(w, 200, map[string]any{
 			"health":  baseHealth,
 			"ai_used": false,
@@ -1225,26 +1471,13 @@ func (s *storeServer) importDiagnoseGapsHandler(w http.ResponseWriter, r *http.R
 		})
 		return
 	}
-	s.aiRecordUsage(aiUsage{
-		At:        nowStamp(),
-		User:      session.User,
-		Feature:   "import_gap_diagnose",
-		Provider:  firstNonEmptyStr(p.Name, p.ID),
-		Model:     p.Model,
-		In:        rep.In,
-		Out:       rep.Out,
-		Cached:    rep.Cached,
-		Reasoning: rep.Reasoning,
-		MS:        time.Since(started).Milliseconds(),
-		OK:        true,
-	})
 
-	var parsed struct {
-		Summary string        `json:"summary"`
-		Gaps    []baselineGap `json:"gaps"`
-	}
-	raw := extractJSON(rep.Text)
+	raw := extractJSON(txt)
 	if raw == "" || json.Unmarshal([]byte(raw), &parsed) != nil {
+		if ev != nil {
+			failRehearsalResp(s, w, ev, 502, tr(lang, "AI 返回格式异常，未能解析深度诊断结果", "AI output could not be parsed"), trace.Diag)
+			return
+		}
 		s.writeJSON(w, 200, map[string]any{
 			"health":  baseHealth,
 			"ai_used": false,
@@ -1264,7 +1497,7 @@ func (s *storeServer) importDiagnoseGapsHandler(w http.ResponseWriter, r *http.R
 		}
 		ag.Title = truncRunes(strings.TrimSpace(ag.Title), 60)
 		ag.Detail = truncRunes(strings.TrimSpace(ag.Detail), 200)
-		ag.ProbeAction = truncRunes(strings.TrimSpace(ag.ProbeAction), 160)
+		ag.ProbeAction = truncRunes(strings.TrimSpace(ag.ProbeAction), 240)
 		ag.Category = truncRunes(firstNonEmptyStr(strings.TrimSpace(ag.Category), tr(lang, "AI 洞察", "AI Insight")), 24)
 		if ag.Title == "" || seenTitles[strings.ToLower(ag.Title)] {
 			continue
@@ -1287,28 +1520,26 @@ func (s *storeServer) importDiagnoseGapsHandler(w http.ResponseWriter, r *http.R
 	if strings.TrimSpace(parsed.Summary) != "" {
 		baseHealth.Summary = truncRunes(strings.TrimSpace(parsed.Summary), 220)
 	}
-	s.auditReq(r, "cluster-baseline-ai-gaps", session.User, fmt.Sprintf("%s added=%d model=%s", cid, added, p.Model))
-	s.writeJSON(w, 200, map[string]any{
+	finalizeTraceSynth(&trace, ev, "synth-gaps", tr(lang, fmt.Sprintf("已完成基线深度诊断，新增 %d 项架构专属只读补采项", added), fmt.Sprintf("Completed deep diagnosis; discovered %d new read-only gap(s)", added)), true, 0)
+	s.auditReq(r, "cluster-baseline-ai-gaps", session.User, fmt.Sprintf("%s added=%d model=%s", cid, added, trace.Model))
+	finishImportStreamResp(w, ev, map[string]any{
 		"health":   baseHealth,
 		"ai_used":  true,
 		"ai_added": added,
-		"model":    p.Model,
+		"model":    trace.Model,
+		"trace":    trace,
 	})
 }
 
 func (s *storeServer) importParseHandler(w http.ResponseWriter, r *http.Request, session storeSession) {
 	var req importParseReq
-	if err := json.NewDecoder(io.LimitReader(r.Body, 20<<20)).Decode(&req); err != nil {
+	if err := json.NewDecoder(io.LimitReader(r.Body, 128<<20)).Decode(&req); err != nil {
 		s.fail(w, 400, "请求内容无法解析或超出大小限制")
 		return
 	}
 	text := strings.TrimSpace(req.Text)
 	if text == "" && len(req.Images) == 0 {
 		s.fail(w, 400, "请先粘贴采集脚本输出、CMDB/配置文本，或上传架构/终端截图")
-		return
-	}
-	if len(req.Images) > 4 {
-		s.fail(w, 400, "单次最多上传 4 张截图")
 		return
 	}
 	for _, img := range req.Images {
@@ -1319,8 +1550,11 @@ func (s *storeServer) importParseHandler(w http.ResponseWriter, r *http.Request,
 	}
 
 	lang := wLang(w)
+	ev := startRehearsalSSE(w, r)
+	detStart := time.Now()
 	preset, _ := mwpack.LookupImportPreset(req.Component)
 	det := parseImportedDeterministic(text, req.Component, req.DisplayName, preset)
+	detMS := max(1, time.Since(detStart).Milliseconds())
 
 	wantAI := true
 	if req.UseAI != nil {
@@ -1331,29 +1565,52 @@ func (s *storeServer) importParseHandler(w http.ResponseWriter, r *http.Request,
 	parserMode := "deterministic"
 	var warns []string
 	draft := det
+	var trace *rehearsalTrace
 
 	if wantAI && s.aiStatusFor(session.User).Enabled {
 		st := s.aiLoad()
-		providers := st.aiProvidersForPick("chat", req.Model)
+		providers := s.aiProvidersForUser(st, session.User, "assistant", req.Model)
 		if len(providers) == 0 {
-			providers = st.aiProvidersForPick("rehearsal", req.Model)
+			providers = s.aiProvidersForUser(st, session.User, "change_rehearsal", req.Model)
 		}
 		if len(providers) > 0 && (st.MonthlyLimit <= 0 || s.aiCallsThisMonth(session.User) < st.MonthlyLimit) {
-			p := providers[0]
-			if len(req.Images) > 0 && p.Vision == "no" {
+			if len(req.Images) > 0 && providers[0].Vision == "no" {
+				if strings.TrimSpace(req.Model) != "" {
+					msg := tr(lang,
+						fmt.Sprintf("所选模型（%s）不支持识别截图，请切换支持视觉的模型或改贴文本回显", providers[0].Model),
+						fmt.Sprintf("Selected model (%s) does not support images; pick a vision-capable model or paste text", providers[0].Model),
+					)
+					failRehearsalResp(s, w, ev, 409, msg, nil)
+					return
+				}
+				var visionFirst, others []aiProvider
 				for _, cand := range providers {
 					if cand.Vision != "no" {
-						p = cand
-						break
+						visionFirst = append(visionFirst, cand)
+					} else {
+						others = append(others, cand)
 					}
 				}
+				if len(visionFirst) > 0 {
+					providers = append(visionFirst, others...)
+				}
 			}
-			aiDraft, aiErr := s.aiExtractImportDraft(r.Context(), p, session.User, req, det, preset, lang)
+			aiDraft, aiTrace, status, aiErr := s.aiExtractImportDraft(r, providers, session.User, req, det, detMS, preset, lang, ev)
 			if aiErr == nil && aiDraft != nil {
 				draft = mergeImportDrafts(*aiDraft, det)
 				aiUsed = true
 				parserMode = "ai"
+				synthSummary := tr(lang,
+					fmt.Sprintf("已提取 %d 台主机 · %d 个伴生组件 · %d 个访问入口", len(draft.Hosts), len(draft.Companions), len(draft.Endpoints)),
+					fmt.Sprintf("Extracted %d host(s) · %d companion(s) · %d endpoint(s)", len(draft.Hosts), len(draft.Companions), len(draft.Endpoints)),
+				)
+				finalizeTraceSynth(&aiTrace, ev, "synth-baseline", synthSummary, true, 0)
+				trace = &aiTrace
 			} else if aiErr != nil {
+				if ev != nil {
+					failRehearsalResp(s, w, ev, status, aiErr.Error(), aiTrace.Diag)
+					return
+				}
 				warns = append(warns, tr(lang, "AI 解析暂时不可用，已自动回退为内置规则解析："+aiErr.Error(), "AI extraction unavailable; fell back to deterministic parser: "+aiErr.Error()))
 			}
 		}
@@ -1376,23 +1633,38 @@ func (s *storeServer) importParseHandler(w http.ResponseWriter, r *http.Request,
 		missing = append(missing, tr(lang, "操作系统平台", "Operating system platform"))
 	}
 
-	s.writeJSON(w, 200, map[string]any{
+	payload := map[string]any{
 		"draft":          draft,
 		"parser":         parserMode,
 		"ai_used":        aiUsed,
 		"warnings":       nz(warns),
 		"missing_fields": nz(missing),
-	})
+	}
+	if trace != nil {
+		payload["trace"] = trace
+	}
+	finishImportStreamResp(w, ev, payload)
 }
 
-func (s *storeServer) aiExtractImportDraft(ctx context.Context, p aiProvider, user string, req importParseReq, det importParseDraft, preset mwpack.ImportPreset, lang string) (*importParseDraft, error) {
+func (s *storeServer) aiExtractImportDraft(
+	r *http.Request,
+	providers []aiProvider,
+	user string,
+	req importParseReq,
+	det importParseDraft,
+	detMS int64,
+	preset mwpack.ImportPreset,
+	lang string,
+	ev *sse,
+) (*importParseDraft, rehearsalTrace, int, error) {
+	scrubStart := time.Now()
 	var roleHint []string
-	for _, r := range preset.Roles {
-		roleHint = append(roleHint, r.ID+"("+r.Title+")")
+	for _, rl := range preset.Roles {
+		roleHint = append(roleHint, rl.ID+"("+rl.Title+")")
 	}
 	sys := `你是一位企业级中间件架构师，负责把运维工程师粘贴的只读采集脚本输出、CMDB 表格、配置文件或截图整理为严格的 JSON 纳管基线草稿。
 严格要求：
-1. 只输出一个合法 JSON 对象，不要包含 Markdown 代码块围栏或额外解释文字。
+1. 只输出一个合法 JSON 对象，不要包含 Markdown 代码块围栏或额外解释文字；请将 "thinking" 作为第一个字段用于实时展示你的分析路径。
 2. 所有信息必须严格来自输入文本或截图，严禁凭空编造 IP、主机名或版本号；未在输入中出现的可留空。
 3. 严禁在 params 或 notes 中输出任何密码、私钥或密钥明文（如有请脱敏为 <redacted>）。
 4. 【核心要求：识别多组件 / 伴生高可用架构】如果现场存在伴生/支撑组件（如 Patroni、etcd、HAProxy、Keepalived、Nginx、PgBouncer、pgBackRest、Redis Sentinel、ZooKeeper、Consul、ClickHouse Keeper、ProxySQL、MaxScale、OBProxy、node_exporter、postgres_exporter 等各类 exporter），必须全部结构化填入 companions 数组，不得只写入 notes！
@@ -1402,10 +1674,11 @@ func (s *storeServer) aiExtractImportDraft(ctx context.Context, p aiProvider, us
 6. params 仅保留有运维价值的中间件配置参数（如 port、max_connections、shared_buffers、replication、synchronous_mode、cluster_name 等），不要把宿主机硬件信息（arch、cpu_cores、kernel、mem）塞进 params。
 7. platform 如能识别，优先映射到以下标准 ID 之一：ubuntu-24.04-amd64, ubuntu-22.04-amd64, el9-amd64, el8-amd64, debian-12-amd64, kylin-v10-amd64, openeuler-22.03-amd64；无法映射可留空并在 os_detail 填写原始发行版名称。
 8. deploy_method 取值为 systemd / docker / binary / k8s / other 之一。
-9. endpoints[].role 仅取 readwrite | readonly | admin 之一；endpoints[].name 使用简短标识如 writer / reader / admin。
+9. endpoints[].role 仅取 readwrite | readonly | admin 之一；endpoints[].name 优先使用清晰入口类型标识，如 vip / eip / f5 / elb / slb / lvs / haproxy / nginx / pooler / dns / writer / reader / admin / metrics（或保留现场实际入口名称）。
 10. notes 用简洁的分条要点（每行以 "• " 开头，3~6 条）列出高价值现场线索或待人工核对项（如发行版类型、单节点采集范围、待确认 VIP、未采集到的目录等），避免长段堆砌。
 11. JSON 结构：
 {
+  "thinking": "1. 主机与发行版核对：... 2. 伴生高可用架构识别：... 3. 目录、端口与运行参数收敛：...",
   "suggested_id": "小写字母数字连字符集群标识，如 pg-gitlab-private-prod",
   "component": "主中间件标识，如 postgresql / mysql / redis / kafka",
   "display_name": "展示名称，如 PostgreSQL / MySQL",
@@ -1439,58 +1712,111 @@ func (s *storeServer) aiExtractImportDraft(ctx context.Context, p aiProvider, us
 	if req.SourceKind != "" {
 		fmt.Fprintf(&prompt, "输入来源类型：%s\n", req.SourceKind)
 	}
+	scrubbedText := truncRunes(aiScrub(req.Text), 14000)
 	if strings.TrimSpace(req.Text) != "" {
 		prompt.WriteString("\n--- 原始粘贴文本 ---\n")
-		prompt.WriteString(truncRunes(aiScrub(req.Text), 14000))
+		prompt.WriteString(scrubbedText)
 		prompt.WriteString("\n")
 	} else {
 		prompt.WriteString("\n请结合附图提取集群主机、角色、版本、入口地址与关键参数。\n")
 	}
+	scrubMS := max(1, time.Since(scrubStart).Milliseconds())
 
-	var userContent any = prompt.String()
-	if len(req.Images) > 0 && p.Vision != "no" {
-		parts := []map[string]any{{"type": "text", "text": prompt.String()}}
-		for _, img := range req.Images {
-			parts = append(parts, map[string]any{"type": "image_url", "image_url": map[string]string{"url": img}})
-		}
-		userContent = parts
+	detSummary := tr(lang,
+		fmt.Sprintf("规则预扫描 %d 字%s · 初检 %d 台主机 / %d 个伴生线索",
+			utf8.RuneCountInString(req.Text),
+			func() string {
+				if len(req.Images) > 0 {
+					return fmt.Sprintf(" + %d 张截图", len(req.Images))
+				}
+				return ""
+			}(),
+			len(det.Hosts),
+			len(det.Companions),
+		),
+		fmt.Sprintf("Pre-scanned %d chars%s · %d host(s) / %d companion clue(s)",
+			utf8.RuneCountInString(req.Text),
+			func() string {
+				if len(req.Images) > 0 {
+					return fmt.Sprintf(" + %d image(s)", len(req.Images))
+				}
+				return ""
+			}(),
+			len(det.Hosts),
+			len(det.Companions),
+		),
+	)
+
+	spec := rehearsalPipelineSpec{
+		Feature: "import_parse",
+		PreSteps: []rehearsalTraceStep{
+			{
+				ID:     "det-scan",
+				Kind:   "inspect",
+				Title:  tr(lang, "扫描现场回显与架构线索", "Scan Live Evidence & Clues"),
+				Detail: detSummary,
+				MS:     detMS,
+				OK:     true,
+				Status: "done",
+			},
+			{
+				ID:     "redact-secrets",
+				Kind:   "guard",
+				Title:  tr(lang, "敏感凭据自动脱敏与规范化", "Scrub Credentials & Normalize Input"),
+				Detail: tr(lang, "已剥离口令、私钥与敏感连接串，仅投递架构元数据", "Credentials, keys & tokens scrubbed locally; topology metadata only"),
+				MS:     scrubMS,
+				OK:     true,
+				Status: "done",
+			},
+		},
+		ThinkTitle:     tr(lang, "识别主机角色与多组件架构栈", "Analyze Hosts & Companion Stack"),
+		ThinkWait:      tr(lang, "正在逐段核对主机、版本、磁盘与伴生高可用组件…", "Evaluating hosts, versions, disks & companion HA stack..."),
+		ThinkDone:      tr(lang, "已完成现场回显与多组件架构推演", "Completed live evidence & companion stack analysis"),
+		SynthID:        "synth-baseline",
+		SynthKind:      "synthesize",
+		SynthTitle:     tr(lang, "合成结构化纳管基线草稿", "Synthesize Structured Baseline Draft"),
+		SynthWait:      tr(lang, "等待架构推演完成后组装基线拓扑草稿", "Waiting for analysis before assembling baseline draft"),
+		PhaseExtractor: parseImportDraftStreamMetaLang,
+		Validate: func(txt string) error {
+			raw := extractJSONObject(txt)
+			if raw == "" {
+				return fmt.Errorf("AI 未返回有效 JSON")
+			}
+			var tmp importParseDraft
+			if err := json.Unmarshal([]byte(raw), &tmp); err != nil {
+				return fmt.Errorf("AI 返回 JSON 解析失败: %v", err)
+			}
+			return nil
+		},
 	}
 
-	callCtx, cancel := context.WithTimeout(ctx, 50*time.Second)
-	defer cancel()
-	if strings.TrimSpace(req.Think) != "" {
-		callCtx = withEffort(callCtx, strings.TrimSpace(req.Think))
-	}
-	started := time.Now()
-	rep, err := s.aiChat(callCtx, p, []aiMessage{
-		{Role: "system", Content: sys},
-		{Role: "user", Content: userContent},
-	}, nil, nil)
+	txt, trace, status, err := s.rehearsalRunAI(
+		r,
+		providers,
+		user,
+		firstNonEmptyStr(req.ClusterID, req.Component, "import"),
+		"import-parse",
+		"parse",
+		nil,
+		sys,
+		prompt.String(),
+		req.Images,
+		spec,
+		thinkLevel(strings.TrimSpace(req.Think)),
+		ev,
+	)
 	if err != nil {
-		return nil, err
+		return nil, trace, status, err
 	}
-	s.aiRecordUsage(aiUsage{
-		At:        nowStamp(),
-		User:      user,
-		Feature:   "import_parse",
-		Provider:  firstNonEmptyStr(p.Name, p.ID),
-		Model:     p.Model,
-		In:        rep.In,
-		Out:       rep.Out,
-		Cached:    rep.Cached,
-		Reasoning: rep.Reasoning,
-		MS:        time.Since(started).Milliseconds(),
-		OK:        true,
-	})
-	raw := extractJSONObject(rep.Text)
+	raw := extractJSONObject(txt)
 	if raw == "" {
-		return nil, fmt.Errorf("AI 未返回有效 JSON")
+		return nil, trace, 502, fmt.Errorf("AI 未返回有效 JSON")
 	}
 	var out importParseDraft
 	if err := json.Unmarshal([]byte(raw), &out); err != nil {
-		return nil, fmt.Errorf("AI 返回 JSON 解析失败: %v", err)
+		return nil, trace, 502, fmt.Errorf("AI 返回 JSON 解析失败: %v", err)
 	}
-	return &out, nil
+	return &out, trace, 200, nil
 }
 
 func extractJSONObject(s string) string {
@@ -2317,22 +2643,28 @@ func inferCompanionsFromSignals(sig companionSignals) []mwpack.ImportedCompanion
 	}
 
 	// Text signals from ArchSummary (positive architecture declaration) and non-negated Notes lines
-	// Prevents false positives when AI notes say "未采集到 VIP / HAProxy 等统一入口".
-	archLow := strings.ToLower(sig.ArchSummary)
-	reNegated := regexp.MustCompile(`(?i)(未采集|未发现|未安装|未见|未配置|没有|不含|无\s*[a-z]|not\s+found|not\s+installed|without\s+|no\s+)`)
-	positiveNoteLines := []string{}
-	for _, rawLn := range strings.Split(strings.ReplaceAll(sig.Notes, "\r\n", "\n"), "\n") {
-		for _, sent := range strings.Split(rawLn, "。") {
-			s := strings.TrimSpace(sent)
-			if s == "" || reNegated.MatchString(s) {
-				continue
+	// Filter out negated clauses in BOTH ArchSummary and Notes so statements like
+	// "未发现 Sentinel 或从节点配置" or "未采集到 VIP / HAProxy" never hallucinate phantom companions.
+	reNegated := regexp.MustCompile(`(?i)(未采集|未发现|未安装|未见|未配置|未部署|未启用|未检测|没有|不含|非高可用|非\s*[a-z]|无\s*[\p{Han}a-z]|not\s+found|not\s+installed|not\s+configured|without\s+|no\s+)`)
+	filterPositiveClauses := func(raw string) string {
+		var pos []string
+		for _, rawLn := range strings.Split(strings.ReplaceAll(raw, "\r\n", "\n"), "\n") {
+			for _, seg := range strings.FieldsFunc(rawLn, func(r rune) bool {
+				return r == '。' || r == '；' || r == ';' || r == '，' || r == ',' || r == '（' || r == '）' || r == '(' || r == ')'
+			}) {
+				s := strings.TrimSpace(seg)
+				if s == "" || reNegated.MatchString(s) {
+					continue
+				}
+				pos = append(pos, strings.ToLower(s))
 			}
-			positiveNoteLines = append(positiveNoteLines, strings.ToLower(s))
 		}
+		return strings.Join(pos, "\n")
 	}
-	notesPositive := strings.Join(positiveNoteLines, "\n")
+	archPositive := filterPositiveClauses(sig.ArchSummary)
+	notesPositive := filterPositiveClauses(sig.Notes)
 
-	if strings.TrimSpace(archLow) != "" || strings.TrimSpace(notesPositive) != "" {
+	if strings.TrimSpace(archPositive) != "" || strings.TrimSpace(notesPositive) != "" {
 		textMatchers := []struct {
 			cid          string
 			token        string
@@ -2351,7 +2683,7 @@ func inferCompanionsFromSignals(sig companionSignals) []mwpack.ImportedCompanion
 			{"node-exporter", "node_exporter", true},
 		}
 		for _, m := range textMatchers {
-			inArch := strings.Contains(archLow, m.token)
+			inArch := strings.Contains(archPositive, m.token)
 			inNotes := m.allowInNotes && strings.Contains(notesPositive, m.token)
 			if inArch || inNotes {
 				// Avoid false positive on generic "sentinel" unless primary is redis/valkey
@@ -2367,8 +2699,8 @@ func inferCompanionsFromSignals(sig companionSignals) []mwpack.ImportedCompanion
 				}
 			}
 		}
-		// Generically recognize any *_exporter / *-exporter mentioned in ArchSummary or positive Notes
-		for _, em := range reExporterToken.FindAllString(archLow, -1) {
+		// Generically recognize any *_exporter / *-exporter mentioned in positive ArchSummary or Notes
+		for _, em := range reExporterToken.FindAllString(archPositive, -1) {
 			cid := strings.TrimPrefix(mwpack.NormalizeCompanionID(em), "prometheus-")
 			if a := touch(cid); a != nil {
 				addStrUniq(&a.ev, "架构摘要")
@@ -2926,6 +3258,7 @@ func buildImportedDeployment(cat *mwpack.Catalog, req importClusterReq, user, no
 		Companions:        normCompanions,
 		Packages:          pkgs,
 		Notes:             strings.TrimSpace(req.Notes),
+		DismissedGaps:     cleanSlice(req.DismissedGaps),
 		LastProbedAt:      strings.TrimSpace(req.LastProbedAt),
 		BaselineUpdatedAt: now,
 		BaselineUpdatedBy: user,
@@ -2941,12 +3274,54 @@ func buildImportedDeployment(cat *mwpack.Catalog, req importClusterReq, user, no
 		}
 	}
 
+	primParams := map[string]any{}
+	for k, v := range req.Params {
+		primParams[k] = v
+	}
+	// Populate canonical param aliases from discovered baseline paths/ports so KT operations commands
+	// render real discovered directories & ports instead of raw template placeholders.
+	if len(meta.DataDirs) > 0 {
+		if _, ok := primParams["data_dir"]; !ok {
+			primParams["data_dir"] = meta.DataDirs[0]
+		}
+	}
+	if len(meta.LogDirs) > 0 {
+		if _, ok := primParams["log_dir"]; !ok {
+			primParams["log_dir"] = meta.LogDirs[0]
+		}
+	}
+	primaryPort := 0
+	if pVal, ok := primParams["port"]; ok {
+		_, _ = fmt.Sscanf(fmt.Sprint(pVal), "%d", &primaryPort)
+	}
+	if primaryPort == 0 && len(meta.Endpoints) > 0 && meta.Endpoints[0].Address != "" {
+		if _, pStr, err := net.SplitHostPort(strings.TrimSpace(meta.Endpoints[0].Address)); err == nil {
+			_, _ = fmt.Sscanf(pStr, "%d", &primaryPort)
+		}
+	}
+	if primaryPort > 0 {
+		switch compID {
+		case "redis":
+			if _, ok := primParams["redis_port"]; !ok {
+				primParams["redis_port"] = primaryPort
+			}
+		case "postgresql":
+			if _, ok := primParams["pg_port"]; !ok {
+				primParams["pg_port"] = primaryPort
+			}
+		case "etcd":
+			if _, ok := primParams["client_port"]; !ok {
+				primParams["client_port"] = primaryPort
+			}
+		}
+	}
+
 	instances := []mwpack.InstanceSpec{{
 		ID:        instID,
 		Component: compID,
 		Version:   ver,
 		Placement: placement,
-		Params:    req.Params,
+		Params:    primParams,
 	}}
 	usedInstIDs := map[string]bool{instID: true}
 	compInstID := map[string]string{compID: instID}
@@ -3091,17 +3466,10 @@ func buildImportedDeployment(cat *mwpack.Catalog, req importClusterReq, user, no
 	return dep, compID, displayName, ver, nil
 }
 
-func writeImportedPlanFiles(dir string, dep *mwpack.Deployment, plan *mwpack.Plan) error {
-	outDir := filepath.Join(dir, "output")
-	if err := os.MkdirAll(outDir, 0o700); err != nil {
-		return err
-	}
+func encodeImportedPlanBytes(dep *mwpack.Deployment, plan *mwpack.Plan) ([]byte, []byte, error) {
 	specBytes, err := dep.YAML()
 	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(dir, "deployment.yml"), specBytes, 0o600); err != nil {
-		return err
+		return nil, nil, err
 	}
 	pv := plan.View()
 	planDoc := map[string]any{
@@ -3122,9 +3490,38 @@ func writeImportedPlanFiles(dir string, dep *mwpack.Deployment, plan *mwpack.Pla
 	}
 	planBytes, err := json.MarshalIndent(planDoc, "", "  ")
 	if err != nil {
+		return nil, nil, err
+	}
+	return specBytes, planBytes, nil
+}
+
+func writeImportedPlanFiles(dir string, dep *mwpack.Deployment, plan *mwpack.Plan) error {
+	specBytes, planBytes, err := encodeImportedPlanBytes(dep, plan)
+	if err != nil {
+		return err
+	}
+	outDir := filepath.Join(dir, "output")
+	if err := os.MkdirAll(outDir, 0o700); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dir, "deployment.yml"), specBytes, 0o600); err != nil {
 		return err
 	}
 	return os.WriteFile(filepath.Join(outDir, "plan.json"), planBytes, 0o600)
+}
+
+func (s *storeServer) saveImportedPlanFiles(jobID string, dep *mwpack.Deployment, plan *mwpack.Plan) error {
+	specBytes, planBytes, err := encodeImportedPlanBytes(dep, plan)
+	if err != nil {
+		return err
+	}
+	if s.repo != nil {
+		if err := s.writeJobSpecBytes(jobID, dep.ID, specBytes); err != nil {
+			return err
+		}
+		return s.writeJobPlanAndLock(jobID, dep.ID, planBytes, nil)
+	}
+	return writeImportedPlanFiles(s.jobDir(jobID), dep, plan)
 }
 
 func (s *storeServer) invalidateJobCaches(jobID string) {
@@ -3184,7 +3581,7 @@ func (s *storeServer) importCluster(w http.ResponseWriter, r *http.Request, sess
 	s.mu.Unlock()
 
 	dir := s.jobDir(jobID)
-	if err := writeImportedPlanFiles(dir, dep, plan); err != nil {
+	if err := s.saveImportedPlanFiles(jobID, dep, plan); err != nil {
 		s.removeFailedReservation(jobID)
 		_ = os.RemoveAll(dir)
 		s.fail(w, 500, "保存纳管基线文件失败："+err.Error())
@@ -3326,6 +3723,7 @@ func (s *storeServer) handleClusterBaseline(w http.ResponseWriter, r *http.Reque
 			Params:              params,
 			Packages:            meta.Packages,
 			Notes:               meta.Notes,
+			DismissedGaps:       append([]string(nil), meta.DismissedGaps...),
 			LastProbedAt:        meta.LastProbedAt,
 		}
 		h := analyzeImportedBaselineHealth(compID, outReq.DisplayName, outReq, wLang(w))
@@ -3352,6 +3750,9 @@ func (s *storeServer) handleClusterBaseline(w http.ResponseWriter, r *http.Reque
 			if req.LastProbedAt == "" {
 				req.LastProbedAt = dep.Imported.LastProbedAt
 			}
+			if req.DismissedGaps == nil && len(dep.Imported.DismissedGaps) > 0 {
+				req.DismissedGaps = append([]string(nil), dep.Imported.DismissedGaps...)
+			}
 		}
 		now := nowStamp()
 		newDep, compID, displayName, ver, err := buildImportedDeployment(s.plat.cat(), req, session.User, now)
@@ -3363,7 +3764,7 @@ func (s *storeServer) handleClusterBaseline(w http.ResponseWriter, r *http.Reque
 
 		s.jobPersistMu.Lock()
 		defer s.jobPersistMu.Unlock()
-		if err := writeImportedPlanFiles(s.jobDir(f.Current.ID), newDep, plan); err != nil {
+		if err := s.saveImportedPlanFiles(f.Current.ID, newDep, plan); err != nil {
 			s.fail(w, 500, "更新基线文件失败："+err.Error())
 			return
 		}
@@ -3400,6 +3801,89 @@ func (s *storeServer) handleClusterBaseline(w http.ResponseWriter, r *http.Reque
 	}
 }
 
+// handleClusterBaselineGaps persists immediate dismiss/restore actions for baseline probe gaps
+// (e.g. dismissing host-side VIP/F5 checks when traffic routing lives upstream of Linux hosts).
+func (s *storeServer) handleClusterBaselineGaps(w http.ResponseWriter, r *http.Request, session storeSession, f clusterFacts) {
+	if r.Method != "POST" {
+		s.fail(w, 405, "方法不允许")
+		return
+	}
+	if !s.need(w, session.User, "delivery.create") {
+		return
+	}
+	dep := s.readSpec(f.Current.ID)
+	if dep == nil || (dep.DeliveryMode != "imported" && f.Current.DeliveryMode != "imported") {
+		s.fail(w, 400, "仅存量纳管集群支持管理基线补采项")
+		return
+	}
+	var req struct {
+		Action string `json:"action"` // dismiss | restore
+		GapID  string `json:"gap_id"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 32<<10)).Decode(&req); err != nil {
+		s.fail(w, 400, "请求参数无法解析")
+		return
+	}
+	action := strings.ToLower(strings.TrimSpace(req.Action))
+	gapID := strings.ToLower(strings.TrimSpace(req.GapID))
+	if gapID == "" || (action != "dismiss" && action != "restore") {
+		s.fail(w, 400, "请指定有效的操作类型（dismiss / restore）与缺口标识")
+		return
+	}
+
+	s.jobPersistMu.Lock()
+	dep = s.readSpecFresh(f.Current.ID)
+	if dep == nil {
+		s.jobPersistMu.Unlock()
+		s.fail(w, 404, "未找到该集群基线配置")
+		return
+	}
+	if dep.Imported == nil {
+		dep.Imported = &mwpack.ImportedMeta{}
+	}
+	var next []string
+	seen := map[string]bool{}
+	for _, raw := range dep.Imported.DismissedGaps {
+		id := strings.ToLower(strings.TrimSpace(raw))
+		if id == "" || seen[id] {
+			continue
+		}
+		if action == "restore" && id == gapID {
+			continue
+		}
+		seen[id] = true
+		next = append(next, id)
+	}
+	if action == "dismiss" && !seen[gapID] {
+		next = append(next, gapID)
+	}
+	now := nowStamp()
+	dep.Imported.DismissedGaps = next
+	dep.Imported.BaselineUpdatedAt = now
+	dep.Imported.BaselineUpdatedBy = session.User
+	plan := mwpack.SolveImported(s.plat.cat(), dep)
+	if err := s.saveImportedPlanFiles(f.Current.ID, dep, plan); err != nil {
+		s.jobPersistMu.Unlock()
+		s.fail(w, 500, "保存基线忽略状态失败："+err.Error())
+		return
+	}
+	s.invalidateJobCaches(f.Current.ID)
+	s.jobPersistMu.Unlock()
+
+	s.auditReq(r, "cluster-baseline-gaps-update", session.User, fmt.Sprintf("%s %s=%s", f.ID, action, gapID))
+	lang := wLang(w)
+	updatedReq, _ := s.loadImportedBaselineReq(session.User, f.ID, lang)
+	var health *baselineHealth
+	if updatedReq != nil {
+		health = updatedReq.Health
+	}
+	s.writeJSON(w, 200, map[string]any{
+		"cluster_id":     f.ID,
+		"dismissed_gaps": next,
+		"health":         health,
+	})
+}
+
 var (
 	reRehDataDir    = regexp.MustCompile(`(?im)\bdata_directory\s*[|=:]\s*['"]?(/[a-zA-Z0-9._/@+-]+)['"]?`)
 	reRehConfigFile = regexp.MustCompile(`(?im)\bconfig_file\s*[|=:]\s*['"]?(/[a-zA-Z0-9._/@+-]+)['"]?`)
@@ -3419,7 +3903,17 @@ func (s *storeServer) enrichImportedBaselineFromEvidence(
 	if f.Current.ID == "" || f.Current.DeliveryMode != "imported" {
 		return nil
 	}
-	dep := s.readSpec(f.Current.ID)
+	s.jobPersistMu.Lock()
+	persistLocked := true
+	unlockPersist := func() {
+		if persistLocked {
+			persistLocked = false
+			s.jobPersistMu.Unlock()
+		}
+	}
+	defer unlockPersist()
+
+	dep := s.readSpecFresh(f.Current.ID)
 	if dep == nil || dep.DeliveryMode != "imported" {
 		return nil
 	}
@@ -3690,9 +4184,10 @@ func (s *storeServer) enrichImportedBaselineFromEvidence(
 		DataDirs:     meta.DataDirs,
 		LogDirs:      meta.LogDirs,
 		Params:       params,
-		Packages:     meta.Packages,
-		Notes:        meta.Notes,
-		LastProbedAt: meta.LastProbedAt,
+		Packages:      meta.Packages,
+		Notes:         meta.Notes,
+		DismissedGaps: append([]string(nil), meta.DismissedGaps...),
+		LastProbedAt:  meta.LastProbedAt,
 	}
 	newDep, _, _, newVer, err := buildImportedDeployment(s.plat.cat(), req, meta.BaselineUpdatedBy, now)
 	if err != nil {
@@ -3700,12 +4195,11 @@ func (s *storeServer) enrichImportedBaselineFromEvidence(
 	}
 	plan := mwpack.SolveImported(s.plat.cat(), newDep)
 
-	s.jobPersistMu.Lock()
-	defer s.jobPersistMu.Unlock()
-	if err := writeImportedPlanFiles(s.jobDir(f.Current.ID), newDep, plan); err != nil {
+	if err := s.saveImportedPlanFiles(f.Current.ID, newDep, plan); err != nil {
 		return nil
 	}
 	s.invalidateJobCaches(f.Current.ID)
+	unlockPersist()
 
 	s.mu.Lock()
 	j := s.jobs[f.Current.ID]
@@ -3713,6 +4207,375 @@ func (s *storeServer) enrichImportedBaselineFromEvidence(
 	j.Scheme = mwpack.ImportedSchemeSummary(newDep)
 	j.Updated = now
 	j.Logs = append(j.Logs, fmt.Sprintf("[%s] 由变更演练「%s」自动反哺基线档案（%s）", now, firstNonEmptyStr(sourceTitle, "演练"), strings.Join(summary, "、")))
+	s.mu.Unlock()
+	if err := s.persistJob(j); err == nil {
+		s.mu.Lock()
+		s.jobs[j.ID] = j
+		s.mu.Unlock()
+	}
+	return summary
+}
+
+// applyBaselineCorrectionsToCluster applies engineer-confirmed live corrections (e.g., port 5432 -> 5433,
+// endpoint address, config path, service unit, or param) back into the cluster's baseline so future
+// rehearsals, probes, and overviews use the authoritative live values.
+func (s *storeServer) applyBaselineCorrectionsToCluster(
+	f clusterFacts,
+	user string,
+	corrections []rehearsalBaselineCorrection,
+	sourceTitle, lang string,
+) []string {
+	if f.Current.ID == "" || len(corrections) == 0 {
+		return nil
+	}
+	now := nowStamp()
+	by := firstNonEmptyStr(user, "system")
+
+	// Platform-deployed clusters: never rewrite immutable signed delivery archives; persist confirmed live
+	// corrections cleanly into OutcomeNote & audit logs so all subsequent rehearsals/AI read them directly.
+	if f.Current.DeliveryMode != "imported" {
+		var notes []string
+		var summary []string
+		for _, c := range corrections {
+			nv := strings.TrimSpace(c.NewValue)
+			if nv == "" {
+				continue
+			}
+			lbl := firstNonEmptyStr(strings.TrimSpace(c.Label), strings.TrimSpace(c.Key), c.Kind)
+			ov := strings.TrimSpace(c.OldValue)
+			entry := fmt.Sprintf("%s：%s", lbl, nv)
+			if ov != "" && ov != nv {
+				entry = fmt.Sprintf("%s：%s → %s", lbl, ov, nv)
+			}
+			notes = append(notes, entry)
+			summary = append(summary, entry)
+		}
+		if len(notes) == 0 {
+			return nil
+		}
+		line := fmt.Sprintf("[%s] 演练「%s」实测校准：%s", now[:min(10, len(now))], firstNonEmptyStr(sourceTitle, "变更演练"), strings.Join(notes, "；"))
+		s.mu.Lock()
+		j, exists := s.jobs[f.Current.ID]
+		if !exists {
+			s.mu.Unlock()
+			return nil
+		}
+		if !strings.Contains(j.OutcomeNote, strings.Join(notes, "；")) {
+			if strings.TrimSpace(j.OutcomeNote) != "" {
+				j.OutcomeNote = strings.TrimSpace(j.OutcomeNote) + "\n" + line
+			} else {
+				j.OutcomeNote = line
+			}
+		}
+		j.Updated = now
+		j.Logs = append(j.Logs, fmt.Sprintf("[%s] 由 %s 确认并反哺现场基线校准（%s）", now, by, strings.Join(summary, "、")))
+		s.mu.Unlock()
+		if err := s.persistJob(j); err == nil {
+			s.mu.Lock()
+			s.jobs[j.ID] = j
+			s.mu.Unlock()
+		}
+		rec := s.loadClusterStateRecord(f.ID)
+		if rec.Overrides.Params == nil {
+			rec.Overrides.Params = map[string]string{}
+		}
+		for _, c := range corrections {
+			nv := strings.TrimSpace(c.NewValue)
+			if nv == "" {
+				continue
+			}
+			switch c.Kind {
+			case "port", "param":
+				pk := firstNonEmptyStr(strings.TrimSpace(c.Key), c.Kind)
+				nk := normClusterParamKey(pk)
+				if nk != "" {
+					rec.Overrides.Params[nk] = nv
+					rec.Overrides.Entries = upsertOverrideEntry(rec.Overrides.Entries, clusterOverrideEntry{
+						Key:         pk,
+						Before:      strings.TrimSpace(c.OldValue),
+						After:       nv,
+						SourceID:    "manual_calibration",
+						SourceTitle: firstNonEmptyStr(sourceTitle, "现场基线校准"),
+						By:          by,
+						At:          now,
+					})
+				}
+			case "service_unit":
+				rec.Overrides.ServiceUnits = mergeUniqueStrings(rec.Overrides.ServiceUnits, []string{nv})
+			case "config_path":
+				rec.Overrides.ConfigPaths = mergeUniqueStrings(rec.Overrides.ConfigPaths, []string{nv})
+			case "data_dir":
+				rec.Overrides.DataDirs = mergeUniqueStrings(rec.Overrides.DataDirs, []string{nv})
+			}
+		}
+		rec.Overrides.UpdatedAt = now
+		rec.Overrides.UpdatedBy = by
+		_ = s.saveClusterStateRecord(rec)
+		return summary
+	}
+
+	s.jobPersistMu.Lock()
+	persistLocked := true
+	unlockPersist := func() {
+		if persistLocked {
+			persistLocked = false
+			s.jobPersistMu.Unlock()
+		}
+	}
+	defer unlockPersist()
+
+	dep := s.readSpecFresh(f.Current.ID)
+	if dep == nil || dep.DeliveryMode != "imported" {
+		return nil
+	}
+	if dep.Imported == nil {
+		dep.Imported = &mwpack.ImportedMeta{}
+	}
+	meta := dep.Imported
+
+	compID := f.Current.AppID
+	displayName := firstNonEmptyStr(meta.DisplayName, f.Current.AppName, compID)
+	if len(dep.Instances) > 0 && dep.Instances[0].Component != "" {
+		compID = dep.Instances[0].Component
+	}
+
+	replaceOrAddSlice := func(dst *[]string, oldVal, newVal string) bool {
+		if newVal == "" {
+			return false
+		}
+		for i, cur := range *dst {
+			if oldVal != "" && strings.EqualFold(strings.TrimSpace(cur), oldVal) {
+				if strings.TrimSpace(cur) == newVal {
+					return false
+				}
+				(*dst)[i] = newVal
+				return true
+			}
+		}
+		for _, cur := range *dst {
+			if strings.EqualFold(strings.TrimSpace(cur), newVal) {
+				return false
+			}
+		}
+		*dst = append(*dst, newVal)
+		return true
+	}
+
+	extractPort := func(v string) string {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			return ""
+		}
+		if idx := strings.LastIndex(v, ":"); idx >= 0 && idx+1 < len(v) {
+			p := strings.TrimSpace(v[idx+1:])
+			if _, err := strconv.Atoi(p); err == nil {
+				return p
+			}
+		}
+		if _, err := strconv.Atoi(v); err == nil {
+			return v
+		}
+		return ""
+	}
+
+	var summary []string
+	changed := false
+	for _, c := range corrections {
+		nv := strings.TrimSpace(c.NewValue)
+		ov := strings.TrimSpace(c.OldValue)
+		if nv == "" {
+			continue
+		}
+		lbl := firstNonEmptyStr(strings.TrimSpace(c.Label), strings.TrimSpace(c.Key), c.Kind)
+		applied := false
+
+		switch strings.ToLower(strings.TrimSpace(c.Kind)) {
+		case "endpoint", "port":
+			oldPort := extractPort(ov)
+			newPort := extractPort(nv)
+			oldHost := ""
+			if idx := strings.LastIndex(ov, ":"); idx > 0 {
+				oldHost = strings.ToLower(strings.TrimSpace(ov[:idx]))
+			}
+			newHost := ""
+			if idx := strings.LastIndex(nv, ":"); idx > 0 {
+				newHost = strings.ToLower(strings.TrimSpace(nv[:idx]))
+			}
+			for i := range meta.Endpoints {
+				addr := strings.TrimSpace(meta.Endpoints[i].Address)
+				if addr == "" {
+					continue
+				}
+				addrLower := strings.ToLower(addr)
+				if ov != "" && strings.EqualFold(addr, ov) {
+					meta.Endpoints[i].Address = nv
+					applied = true
+					continue
+				}
+				if newHost != "" && strings.HasPrefix(addrLower, newHost+":") && addr != nv {
+					meta.Endpoints[i].Address = nv
+					applied = true
+					continue
+				}
+				if oldHost != "" && strings.HasPrefix(addrLower, oldHost+":") {
+					if newHost != "" {
+						meta.Endpoints[i].Address = nv
+					} else if newPort != "" {
+						meta.Endpoints[i].Address = addr[:strings.LastIndex(addr, ":")+1] + newPort
+					}
+					applied = true
+					continue
+				}
+				if oldPort != "" && newPort != "" && strings.HasSuffix(addr, ":"+oldPort) {
+					meta.Endpoints[i].Address = strings.TrimSuffix(addr, ":"+oldPort) + ":" + newPort
+					applied = true
+				}
+			}
+			if !applied && strings.Contains(nv, ":") && newPort != "" {
+				dup := false
+				for _, ep := range meta.Endpoints {
+					if strings.EqualFold(strings.TrimSpace(ep.Address), nv) {
+						dup = true
+						break
+					}
+				}
+				if !dup {
+					meta.Endpoints = append(meta.Endpoints, mwpack.ImportedEndpoint{
+						Name:    firstNonEmptyStr(strings.TrimSpace(c.Key), strings.TrimSpace(c.Label), tr(lang, "访问入口", "Endpoint")),
+						Address: nv,
+					})
+					applied = true
+				}
+			}
+			// Also calibrate matching port param if present in baseline params
+			if len(dep.Instances) > 0 && dep.Instances[0].Params != nil && newPort != "" {
+				for pk, pv := range dep.Instances[0].Params {
+					pStr := strings.TrimSpace(fmt.Sprint(pv))
+					if (strings.EqualFold(pk, c.Key) || strings.Contains(strings.ToLower(pk), "port")) && (oldPort != "" && pStr == oldPort) {
+						dep.Instances[0].Params[pk] = newPort
+						applied = true
+					}
+				}
+			}
+		case "config_path":
+			applied = replaceOrAddSlice(&meta.ConfigPaths, ov, nv)
+		case "service_unit":
+			applied = replaceOrAddSlice(&meta.ServiceUnits, ov, nv)
+		case "data_dir":
+			applied = replaceOrAddSlice(&meta.DataDirs, ov, nv)
+		case "log_dir":
+			applied = replaceOrAddSlice(&meta.LogDirs, ov, nv)
+		case "param":
+			if len(dep.Instances) > 0 && strings.TrimSpace(c.Key) != "" {
+				if dep.Instances[0].Params == nil {
+					dep.Instances[0].Params = map[string]any{}
+				}
+				if fmt.Sprint(dep.Instances[0].Params[c.Key]) != nv {
+					dep.Instances[0].Params[c.Key] = nv
+					applied = true
+				}
+			}
+		}
+
+		if !applied {
+			noteLine := fmt.Sprintf("现场实测校准（%s）：%s", lbl, nv)
+			if ov != "" && ov != nv {
+				noteLine = fmt.Sprintf("现场实测校准（%s）：%s → %s", lbl, ov, nv)
+			}
+			if !strings.Contains(meta.Notes, noteLine) {
+				if strings.TrimSpace(meta.Notes) != "" {
+					meta.Notes = strings.TrimSpace(meta.Notes) + "\n" + noteLine
+				} else {
+					meta.Notes = noteLine
+				}
+				applied = true
+			}
+		}
+		if applied {
+			changed = true
+			if ov != "" && ov != nv {
+				summary = append(summary, fmt.Sprintf("%s %s→%s", lbl, ov, nv))
+			} else {
+				summary = append(summary, fmt.Sprintf("%s %s", lbl, nv))
+			}
+		}
+	}
+
+	if !changed {
+		return nil
+	}
+
+	meta.BaselineUpdatedAt = now
+	meta.BaselineUpdatedBy = by
+
+	hostsIn := make([]importHostInput, 0, len(dep.Hosts))
+	roleByHost := map[string]string{}
+	if len(dep.Instances) > 0 {
+		for rk, hs := range dep.Instances[0].Placement {
+			for _, hn := range hs {
+				if _, ok := roleByHost[hn]; !ok {
+					roleByHost[hn] = rk
+				}
+			}
+		}
+	}
+	for _, h := range dep.Hosts {
+		hostsIn = append(hostsIn, importHostInput{Name: h.Name, IP: h.IP, Role: roleByHost[h.Name], Disk: h.Disk})
+	}
+	var params map[string]any
+	ver := f.Current.Version
+	if len(dep.Instances) > 0 {
+		params = dep.Instances[0].Params
+		if dep.Instances[0].Version != "" {
+			ver = dep.Instances[0].Version
+		}
+	}
+	req := importClusterReq{
+		ID:            dep.ID,
+		Title:         dep.Title,
+		Component:     compID,
+		DisplayName:   displayName,
+		Category:      meta.Category,
+		Icon:          meta.Icon,
+		Color:         meta.Color,
+		Version:       ver,
+		ExactVersion:  meta.ExactVersion,
+		Platform:      dep.Platform,
+		OSDetail:      meta.OSDetail,
+		SourceKind:    meta.SourceKind,
+		DeployMethod:  meta.DeployMethod,
+		ArchSummary:   meta.ArchSummary,
+		Hosts:         hostsIn,
+		Endpoints:     meta.Endpoints,
+		Companions:    meta.Companions,
+		ServiceUnits:  meta.ServiceUnits,
+		ConfigPaths:   meta.ConfigPaths,
+		DataDirs:      meta.DataDirs,
+		LogDirs:       meta.LogDirs,
+		Params:        params,
+		Packages:      meta.Packages,
+		Notes:         meta.Notes,
+		DismissedGaps: append([]string(nil), meta.DismissedGaps...),
+		LastProbedAt:  meta.LastProbedAt,
+	}
+	newDep, _, _, newVer, err := buildImportedDeployment(s.plat.cat(), req, by, now)
+	if err != nil {
+		return nil
+	}
+	plan := mwpack.SolveImported(s.plat.cat(), newDep)
+
+	if err := s.saveImportedPlanFiles(f.Current.ID, newDep, plan); err != nil {
+		return nil
+	}
+	s.invalidateJobCaches(f.Current.ID)
+	unlockPersist()
+
+	s.mu.Lock()
+	j := s.jobs[f.Current.ID]
+	j.Version = newVer
+	j.Scheme = mwpack.ImportedSchemeSummary(newDep)
+	j.Updated = now
+	j.Logs = append(j.Logs, fmt.Sprintf("[%s] 由 %s 在演练「%s」确认并反哺校准基线（%s）", now, by, firstNonEmptyStr(sourceTitle, "演练"), strings.Join(summary, "、")))
 	s.mu.Unlock()
 	if err := s.persistJob(j); err == nil {
 		s.mu.Lock()

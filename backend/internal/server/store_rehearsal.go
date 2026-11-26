@@ -48,14 +48,17 @@ type rehearsalTraceStep struct {
 }
 
 type rehearsalPipelineSpec struct {
-	PreSteps   []rehearsalTraceStep
-	ThinkTitle string
-	ThinkWait  string
-	SynthID    string
-	SynthKind  string
-	SynthTitle string
-	SynthWait  string
-	Validate   func(string) error
+	PreSteps       []rehearsalTraceStep
+	Feature        string
+	ThinkTitle     string
+	ThinkWait      string
+	ThinkDone      string
+	SynthID        string
+	SynthKind      string
+	SynthTitle     string
+	SynthWait      string
+	PhaseExtractor func(raw, lang string) (thinking, phase string)
+	Validate       func(string) error
 }
 
 type rehearsalTrace struct {
@@ -105,17 +108,28 @@ type rehearsalDrift struct {
 	Recommendations []string              `json:"recommendations,omitempty"`
 }
 
+type rehearsalBaselineCorrection struct {
+	Kind     string `json:"kind"` // endpoint | port | config_path | service_unit | data_dir | log_dir | param | note
+	Label    string `json:"label,omitempty"`
+	Key      string `json:"key,omitempty"`
+	OldValue string `json:"old_value,omitempty"`
+	NewValue string `json:"new_value"`
+	Reason   string `json:"reason,omitempty"`
+}
+
 type rehearsalStepProposal struct {
-	Diagnosis     string   `json:"diagnosis"`
-	Action        string   `json:"action"` // replace | insert_before | retry
-	Title         string   `json:"title,omitempty"`
-	TargetRole    string   `json:"target_role,omitempty"`
-	Command       string   `json:"command"`
-	Expect        string   `json:"expect,omitempty"`
-	Rollback      string   `json:"rollback,omitempty"`
-	RiskNote      string   `json:"risk_note,omitempty"`
-	VerifiedFacts []string `json:"verified_facts,omitempty"`
-	MissingItems  []string `json:"missing_items,omitempty"`
+	Diagnosis           string                        `json:"diagnosis"`
+	Action              string                        `json:"action"` // replace | insert_before | retry | confirm_override
+	Title               string                        `json:"title,omitempty"`
+	TargetRole          string                        `json:"target_role,omitempty"`
+	Command             string                        `json:"command"`
+	Expect              string                        `json:"expect,omitempty"`
+	Rollback            string                        `json:"rollback,omitempty"`
+	RiskNote            string                        `json:"risk_note,omitempty"`
+	ConfirmSummary      string                        `json:"confirm_summary,omitempty"`
+	BaselineCorrections []rehearsalBaselineCorrection `json:"baseline_corrections,omitempty"`
+	VerifiedFacts       []string                      `json:"verified_facts,omitempty"`
+	MissingItems        []string                      `json:"missing_items,omitempty"`
 }
 
 type rehearsalStepRevision struct {
@@ -346,6 +360,14 @@ func (s *storeServer) loadRehearsal(cluster, rid string) (changeRehearsal, bool)
 	if !docClusterID.MatchString(cluster) || !reRehearsalID.MatchString(rid) {
 		return rh, false
 	}
+	if s.repo != nil {
+		got, ok, err := s.repo.getRehearsal(cluster, rid)
+		if err != nil || !ok || got.ID == "" {
+			return changeRehearsal{}, false
+		}
+		got.RestorationAlerts = auditRehearsalRestorations(got.Goal, got.ExtraScope, got.Steps, "zh-CN")
+		return got, true
+	}
 	b, err := os.ReadFile(s.rehearsalPath(cluster, rid))
 	if err != nil || json.Unmarshal(b, &rh) != nil || rh.ID == "" {
 		return changeRehearsal{}, false
@@ -358,7 +380,19 @@ func (s *storeServer) saveRehearsal(rh changeRehearsal) error {
 	rh.RestorationAlerts = auditRehearsalRestorations(rh.Goal, rh.ExtraScope, rh.Steps, "zh-CN")
 	rh.ConflictAlerts = nil // always computed dynamically against live cluster peers
 	rh.UpdatedAt = nowStamp()
+	if s.repo != nil {
+		return s.repo.saveRehearsal(rh)
+	}
 	return writeJSONFile(s.rehearsalPath(rh.ClusterID, rh.ID), rh)
+}
+
+func (s *storeServer) deleteRehearsalRecord(cluster, rid string) {
+	if s.repo != nil {
+		_ = s.repo.deleteRehearsal(cluster, rid)
+	} else {
+		_ = os.Remove(s.rehearsalPath(cluster, rid))
+	}
+	_ = os.RemoveAll(s.rehearsalImgDir(cluster, rid))
 }
 
 func (s *storeServer) listRehearsalsLang(cluster, lang string) []changeRehearsal {
@@ -374,6 +408,16 @@ func (s *storeServer) listRehearsals(cluster string) []changeRehearsal {
 	out := []changeRehearsal{}
 	if !docClusterID.MatchString(cluster) {
 		return out
+	}
+	if s.repo != nil {
+		list, err := s.repo.listClusterRehearsals(cluster)
+		if err != nil || list == nil {
+			return out
+		}
+		for i := range list {
+			list[i].RestorationAlerts = auditRehearsalRestorations(list[i].Goal, list[i].ExtraScope, list[i].Steps, "zh-CN")
+		}
+		return list
 	}
 	entries, err := os.ReadDir(s.rehearsalDir(cluster))
 	if err != nil {
@@ -989,39 +1033,7 @@ func (s *storeServer) rehearsalCheckAI(user string, needVision bool, pick string
 	}
 	st := s.aiLoad()
 	pick = strings.TrimSpace(pick)
-	providers := st.aiProvidersForPick("change_rehearsal", pick)
-	if pick != "" && s.can(user, "ai.settings") {
-		pid, mid, _ := strings.Cut(pick, "|")
-		for _, p := range st.Providers {
-			if p.ID != pid || !p.Enabled || (p.KeyEnc == "" && !p.Private) || (st.PrivateOnly && !p.Private) {
-				continue
-			}
-			var chosen aiModel
-			found := false
-			if mid != "" {
-				if m, ok := p.model(mid); ok && m.Enabled {
-					chosen, found = m, true
-				}
-			} else {
-				for _, m := range p.Models {
-					if m.Enabled {
-						chosen, found = m, true
-						break
-					}
-				}
-			}
-			if found {
-				picked := []aiProvider{p.withModel(chosen)}
-				for _, b := range providers {
-					if b.ID != p.ID || b.Model != chosen.ID {
-						picked = append(picked, b)
-					}
-				}
-				providers = picked
-				break
-			}
-		}
-	}
+	providers := s.aiProvidersForUser(st, user, "change_rehearsal", pick)
 	if len(providers) == 0 {
 		return nil, 409, fmt.Errorf("没有可用的模型供应商，请管理员在平台设置 → AI 中配置模型")
 	}
@@ -1302,7 +1314,12 @@ func (s *storeServer) rehearsalRunAI(
 			if red != nil {
 				curRaw = red.back(curRaw)
 			}
-			jt, ph := parseRehearsalStreamMetaLang(curRaw, lang)
+			var jt, ph string
+			if spec.PhaseExtractor != nil {
+				jt, ph = spec.PhaseExtractor(curRaw, lang)
+			} else {
+				jt, ph = parseRehearsalStreamMetaLang(curRaw, lang)
+			}
 			if strings.TrimSpace(nativeThinking.String()) == "" && len(jt) > sentJSONThinkLen {
 				chunk := jt[sentJSONThinkLen:]
 				sentJSONThinkLen = len(jt)
@@ -1316,7 +1333,7 @@ func (s *storeServer) rehearsalRunAI(
 					thinkStep.Status = "done"
 					thinkStep.OK = true
 					thinkStep.MS = max(1, time.Since(firstTokenAt).Milliseconds())
-					thinkStep.Detail = tr(lang, "已完成集群拓扑与高可用风险推演", "Completed cluster topology & HA risk analysis")
+					thinkStep.Detail = firstNonEmptyStr(spec.ThinkDone, tr(lang, "已完成集群拓扑与高可用风险推演", "Completed cluster topology & HA risk analysis"))
 					ev.send(map[string]any{"t": "step", "step": thinkStep})
 				}
 				if synthStartedAt.IsZero() {
@@ -1370,14 +1387,14 @@ func (s *storeServer) rehearsalRunAI(
 					thinkStep.Status = "done"
 					thinkStep.OK = true
 					thinkStep.MS = max(1, time.Since(firstTokenAt).Milliseconds())
-					thinkStep.Detail = tr(lang, "已完成集群拓扑与高可用风险推演", "Completed cluster topology & HA risk analysis")
+					thinkStep.Detail = firstNonEmptyStr(spec.ThinkDone, tr(lang, "已完成集群拓扑与高可用风险推演", "Completed cluster topology & HA risk analysis"))
 				}
 				err = &aiCallError{Msg: vErr.Error(), Diag: &dCopy, Err: vErr}
 			}
 		}
 
 		u := usageFrom(p, reply)
-		u.User, u.IP, u.Feature, u.Target, u.Session = user, clientIP(r), "change_rehearsal", target, session
+		u.User, u.IP, u.Feature, u.Target, u.Session = user, clientIP(r), firstNonEmptyStr(spec.Feature, "change_rehearsal"), target, session
 		u.MS, u.OK, u.Failover = time.Since(start).Milliseconds(), err == nil, i > 0
 		if err != nil {
 			u.Error = truncRunes(err.Error(), 200)
@@ -1418,7 +1435,7 @@ func (s *storeServer) rehearsalRunAI(
 				thinkStep.Status = "done"
 				thinkStep.OK = true
 				thinkStep.MS = max(1, time.Since(firstTokenAt).Milliseconds())
-				thinkStep.Detail = tr(lang, "已完成集群拓扑与高可用风险推演", "Completed cluster topology & HA risk analysis")
+				thinkStep.Detail = firstNonEmptyStr(spec.ThinkDone, tr(lang, "已完成集群拓扑与高可用风险推演", "Completed cluster topology & HA risk analysis"))
 				if ev != nil {
 					ev.send(map[string]any{"t": "step", "step": thinkStep})
 				}
@@ -1632,8 +1649,7 @@ func (s *storeServer) handleRehearsals(w http.ResponseWriter, r *http.Request, s
 		rehearsalMu.Lock()
 		_, ok := s.loadRehearsal(f.ID, rid)
 		if ok {
-			_ = os.Remove(s.rehearsalPath(f.ID, rid))
-			_ = os.RemoveAll(s.rehearsalImgDir(f.ID, rid))
+			s.deleteRehearsalRecord(f.ID, rid)
 		}
 		rehearsalMu.Unlock()
 		if !ok {
@@ -1753,7 +1769,7 @@ func securityContextPrompt(sc *rehearsalSecurityContext, stage string) string {
 const rehearsalLightCreateSystem = `你是资深中间件运维与变更专家。用户对一个已投产集群发起了「简单推演（light）」——跳过繁琐的维护窗口多选题，直接生成一份 **100% 纯只读、极简一屏** 的 Bash 现场状态采集脚本（probe_script），以便先核实生产真实状态再做 3～5 步快速验证。
 
 核心采集约束（克制聚焦、一屏可截图，严禁发散）：
-1. **固定 1～2 行基础身份头（必采，对齐下游「节点角色与状态」表的 节点/地址/角色/版本/状态 5 列）**：无论本次变更是否涉及升级，脚本开头都必须用 1～2 行精简输出本机 hostname -s、本机业务 IP、**主组件及关键伴随组件的实测版本号**（如 PostgreSQL server_version + patroni --version、Redis redis-server -v、Nginx nginx -v、HAProxy haproxy -v、Keepalived keepalived -v、etcd etcd --version 等，单行合并输出，绝不遗漏导致下游表出现「待采集」）以及当前真实主从/集群健康状态；
+1. **固定 1～2 行基础身份头（必采，对齐下游「节点角色与状态」表的 节点/地址/角色/版本/状态 5 列）**：无论本次变更是否涉及升级，脚本开头都必须用 1～2 行精简输出本机 hostname -s、本机业务 IP、**主组件及关键伴随组件的实测版本号**（如 PostgreSQL server_version + patroni --version、Redis redis-server -v、Nginx nginx -v、HAProxy haproxy -v、Keepalived keepalived -v、etcd etcd --version 等，单行合并输出，绝不遗漏导致下游表出现「待采集」）以及当前真实主从/集群健康状态；采集本机 IP 时必须使用通用动态探测（如 hostname -I | awk '{print $1}' 或 ip -o -4 addr show scope global | awk '{split($4,a,"/"); print a[1]; exit}'），**严禁把当前集群节点 IP 写死为正则白名单过滤条件**，确保后续跨集群推广复用时不会误报未找到 IP；
 2. 除上述基础身份头外，只采本次变更真正需要知道的 2～3 个核心配置项、参数或目录状态，严禁做成全量巡检脚本；
 3. 终端总输出严格控制在约 12～28 行以内（单屏可完整截图），脚本总行数尽量不超过 40 行，严禁 cat 整份配置文件或打印无过滤长列表；
 4. 规避 ELB / 四层负载均衡回环（Hairpinning）：后端节点本机采集脚本严禁访问指向自身的云 ELB / SLB / LVS VIP，本机只查本地监听与 127.0.0.1/本机 IP；如需测 VIP 请在 probe_notes 说明在集群外客户端验证。
@@ -2377,7 +2393,7 @@ func normalizeScopeQuestionsLang(in []rehearsalScopeQuestion, lang string) []reh
 const rehearsalProbeSystem = `你是资深中间件运维与变更专家。请根据「集群初始交付基线」「变更目标」「已确认的变更边界」以及下方注入的平台技能规范，生成一份在生产节点执行的 **100% 纯只读、极简聚焦** Bash 现场状态采集脚本（probe_script）。
 
 核心采集约束（克制聚焦、一屏可截图，严禁发散）：
-1. **固定 1～2 行基础身份头（必采，与下游「节点角色与状态」表 5 列强对齐）**：无论本次变更是否涉及升级，脚本开头必须用 1～2 行紧凑输出本机 hostname -s、本机业务 IP、**主组件及关键伴随组件的实测版本号**（如 PostgreSQL server_version + patroni --version、Redis redis-server -v、Nginx nginx -v、HAProxy haproxy -v、Keepalived keepalived -v、etcd etcd --version 等，单行合并输出，绝不遗漏导致下游漂移表出现「待采集」），并输出当前真实主从/集群角色与健康状态；
+1. **固定 1～2 行基础身份头（必采，与下游「节点角色与状态」表 5 列强对齐）**：无论本次变更是否涉及升级，脚本开头必须用 1～2 行紧凑输出本机 hostname -s、本机业务 IP、**主组件及关键伴随组件的实测版本号**（如 PostgreSQL server_version + patroni --version、Redis redis-server -v、Nginx nginx -v、HAProxy haproxy -v、Keepalived keepalived -v、etcd etcd --version 等，单行合并输出，绝不遗漏导致下游漂移表出现「待采集」），并输出当前真实主从/集群角色与健康状态；采集本机 IP 时必须使用通用动态探测（如 hostname -I | awk '{print $1}' 或 ip -o -4 addr show scope global | awk '{split($4,a,"/"); print a[1]; exit}'），**严禁把当前集群节点 IP 写死为正则白名单过滤条件**，确保后续跨集群推广复用时不会误报未找到 IP；
 2. **业务核查项克制聚焦**：除上述基础身份头外，只采本次变更直接涉及的 2～5 个核心参数/配置项/目标目录权限或目标路径磁盘余量。**严禁发散做成大而全的巡检脚本**！与本次变更无关的项（如全量 pg_hba、全量已安装包、全量 sysctl/ss/ps、大段 journalctl 日志、AppArmor/SELinux 冗长输出、无关备份历史等）一律不查。
 2. **输出严格控制在 1 屏以内（目标总输出约 15～35 行，适配堡垒机/VDI 单张截图或复制受限环境）**：
    - 脚本本身保持简短清晰（通常 3～5 个核心检查块、总行数尽量不超过 45 行），不要堆砌大段辅助函数或重复样板；
@@ -2450,7 +2466,7 @@ func (s *storeServer) submitRehearsalScope(w http.ResponseWriter, r *http.Reques
 		fmt.Fprintf(&qa, "- 问：%s\n  答：%s\n", q.Question, firstNonEmptyStr(q.Answer, "（未填写，按常规生产保守策略处理）"))
 	}
 	if rh.ExtraScope != "" {
-		fmt.Fprintf(&qa, "- 补充约束：%s\n", rh.ExtraScope)
+		fmt.Fprintf(&qa, "- 【工程师补充现场背景与约束（最高优先级，务必遵循）】：%s\n", rh.ExtraScope)
 	}
 	pipeSpec := rehearsalPipelineSpec{
 		PreSteps: []rehearsalTraceStep{
@@ -2595,6 +2611,9 @@ const rehearsalPlanSystem = `你是资深中间件变更实施专家。现在你
 1. 漂移诊断（drift）：仔细读取文字回显与附带的终端/监控截图，对比初始交付规格与现场真实状态，明确每台节点的初始角色 vs 当前真实角色（特别是主从是否已切换）、当前版本、被人工修改过的关键参数以及潜在变更风险；
    - **字段简洁规范**：hosts[*].initial_role 与 actual_role 仅写简短角色标签（如「主库」「从库」「Leader」「Quorum Standby」「待核实」，不超过 12 字），详细映射或补充说明放入 status 字段；hosts[*].version 优先填写探针实测的精简版本号（如「17.11」或「17.11 / Patroni 4.1.0」），仅当该节点确实未执行本机探针回传时填「未在本机采集」，**不要**在 status 字段中重复抱怨「截图未提供实际软件版本」；param_diffs 尽量按单个参数拆行，initial/actual 只写简明值，目标策略与风险放入 risk 字段。
 2. 生成分步演练清单（steps）：围绕「步骤清晰、每步复制即跑、一看就懂在哪台机器执行」的原则，按以下 4 个阶段生成**精炼聚焦、按复杂度控制步数、输出简短易单屏核验**的步骤（严禁为了凑形式拆成十几步，严禁把命令写得像几十行脚本程序）：
+   - **【工程师已确认边界与补充现场背景最高优先级】**：
+     * 如果工程师在「边界对齐答案」或「补充现场背景」中明确指定了执行策略（例如「直接对主操作就行、可以接受闪断、无需切主」「允许直接重启主库」「保留新主不切回」「跳过测试环境/仅对指定节点操作」等），**必须严格遵循用户的明确要求编排步骤顺序与操作方式**！
+     * 例如用户明确要求「直接对主操作、可以接受闪断」时，直接按用户意图编排主库变更与重启步骤，**严禁**违背用户意愿强行插入计划内切主（switchover）与切回原主步骤，只需在对应步骤的 risk_note 中简明提示短暂中断影响与回退办法；只有在用户未明确放宽限制时，才按下方默认高可用先备后主滚动切主模板编排。
    - **总步数与命令篇幅严格控制**：
      * **轻量在线变更**（如补一条 pg_hba/白名单规则、在线动态调参 reload、补日志目录或轮转规则，无需重启和切主）：总步数严格控制在 **3～4 步**（1 步预检 → 1 步执行与 reload → 1 步验收 → 1 步回退）；
      * **中高风险变更**（需滚动重启、切主、升级、扩缩容、架构或证书改造）：常规变更严格控制在 **5～8 步**（把琐碎的小检查合并，例如日志落盘滚动重启：1 步只读核对现状 → 1 步所有节点建目录 → 1 步修改 DCS 参数 → 1 步滚动重启从库（通过 commands 拆成每台独立的命令框，或拆分为两步） → 1 步切主并重启原主库（切主与重启分框） → 1 步切回原主库恢复初始角色 → 1 步验收日志与入口 → 1 步回退）；
@@ -2622,7 +2641,7 @@ const rehearsalPlanSystem = `你是资深中间件变更实施专家。现在你
      * 写清本步究竟要 SSH 登录哪一类/哪几台机器执行，例如：「所有数据节点（node-1 / node-2 / node-3，逐台登录执行）」「任一数据库节点（如当前主库 node-1，修改共享 DCS）」「当前从库（先 node-2 再 node-3，逐台滚动重启）」「当前主库（如 node-1，切主后重启）」「集群外客户端/跳板机，或非当前主库的从库节点（如 node-2 / node-3）」。
      * 严禁把“控制机 + 三台节点”混写在同一句里让人不知该登哪台，也不要假设存在免密 ssh 控制机或一定存在集群外的独立第 4 台跳板机。
    - precheck（变更前预检：核对当前主从角色、复制同步状态、本次变更直接相关的配置与前置条件）
-   - execute（核心变更执行：严格遵循高可用滚动顺序，先备后主、计划内平滑切主，并在原主重启追平后切回原主库恢复初始角色）
+   - execute（核心变更执行：默认遵循高可用滚动顺序，先备后主、计划内平滑切主，并在原主重启追平后切回原主库恢复初始角色；但若工程师在边界对齐或补充现场背景中明确指定「直接对主操作、可接受闪断、无需切主」等策略，则严格按工程师指令执行，不强行切主）
    - verify（变更后验收：服务状态、目标参数/版本生效、数据复制恢复、入口连通性验证）
    - rollback（回退预案：一旦演练或生产执行受阻时的明确回退步骤与命令）
    - **ELB / 四层负载均衡入口验证（贴合现场，严禁强求不存在的独立主机）**：
@@ -2689,6 +2708,12 @@ func (s *storeServer) submitRehearsalProbe(w http.ResponseWriter, r *http.Reques
 		Mode        string     `json:"mode"` // "" | "analyze" | "diagnose"
 		Model       string     `json:"model"`
 		Effort      thinkLevel `json:"effort"`
+		Answers     []struct {
+			ID       string `json:"id"`
+			Question string `json:"question"`
+			Answer   string `json:"answer"`
+		} `json:"answers,omitempty"`
+		Extra *string `json:"extra,omitempty"`
 	}
 	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 30<<20)).Decode(&in) != nil {
 		s.fail(w, 400, "提交的内容格式不对或超过大小限制")
@@ -2698,10 +2723,7 @@ func (s *storeServer) submitRehearsalProbe(w http.ResponseWriter, r *http.Reques
 	probeOut := aiScrub(truncRunes(strings.TrimSpace(in.ProbeOutput), 24000))
 	manual := aiScrub(truncRunes(strings.TrimSpace(in.ManualState), 8000))
 	testEnv := truncRunes(strings.TrimSpace(in.TestEnvNote), 1000)
-	if probeOut == "" && manual == "" && len(in.Images) == 0 {
-		s.fail(w, 400, "请粘贴现场采集回显、上传/粘贴终端截图，或手动填写生产集群当前状态说明")
-		return
-	}
+
 	rehearsalMu.Lock()
 	rh, ok := s.loadRehearsal(f.ID, rid)
 	rehearsalMu.Unlock()
@@ -2709,15 +2731,59 @@ func (s *storeServer) submitRehearsalProbe(w http.ResponseWriter, r *http.Reques
 		s.fail(w, 404, "演练会话不存在")
 		return
 	}
-	lang := reqLang(r)
-	providers, code, err := s.rehearsalCheckAILang(session.User, len(in.Images) > 0, in.Model, lang)
-	if err != nil {
-		s.fail(w, code, err.Error())
+	scopeUpdated := false
+	if len(in.Answers) > 0 {
+		ansMap := map[string]string{}
+		for _, a := range in.Answers {
+			ansMap[a.ID] = truncRunes(strings.TrimSpace(a.Answer), 500)
+		}
+		for i := range rh.ScopeQuestions {
+			if v, exists := ansMap[rh.ScopeQuestions[i].ID]; exists {
+				rh.ScopeQuestions[i].Answer = v
+			}
+		}
+		scopeUpdated = true
+	}
+	if in.Extra != nil {
+		rh.ExtraScope = truncRunes(strings.TrimSpace(*in.Extra), 2000)
+		scopeUpdated = true
+	}
+	if probeOut == "" && manual == "" && len(in.Images) == 0 {
+		if strings.TrimSpace(rh.ProbeOutput) != "" {
+			probeOut = rh.ProbeOutput
+		}
+		if strings.TrimSpace(rh.ManualState) != "" {
+			manual = rh.ManualState
+		}
+	}
+	if testEnv == "" && strings.TrimSpace(rh.TestEnvNote) != "" {
+		testEnv = rh.TestEnvNote
+	}
+	var aiImages []string
+	var imgNames []string
+	var err error
+	if len(in.Images) > 0 {
+		imgNames, err = s.storeRehearsalImages(f.ID, rid, in.Images)
+		if err != nil {
+			s.fail(w, 400, err.Error())
+			return
+		}
+		aiImages = in.Images
+	} else if len(rh.ProbeImages) > 0 {
+		for _, name := range rh.ProbeImages {
+			if d := s.rehearsalImageData(f.ID, rid, name); d != "" {
+				aiImages = append(aiImages, d)
+			}
+		}
+	}
+	if probeOut == "" && manual == "" && len(aiImages) == 0 {
+		s.fail(w, 400, "请粘贴现场采集回显、上传/粘贴终端截图，或手动填写生产集群当前状态说明")
 		return
 	}
-	imgNames, err := s.storeRehearsalImages(f.ID, rid, in.Images)
+	lang := reqLang(r)
+	providers, code, err := s.rehearsalCheckAILang(session.User, len(aiImages) > 0, in.Model, lang)
 	if err != nil {
-		s.fail(w, 400, err.Error())
+		s.fail(w, code, err.Error())
 		return
 	}
 
@@ -2731,13 +2797,17 @@ func (s *storeServer) submitRehearsalProbe(w http.ResponseWriter, r *http.Reques
 	if rh.Mode == "light" {
 		prompt.WriteString("\n【当前推演档位：简单推演（light）】\n本次为轻量级推演：如确认现场状态有效且无高风险漂移，请严格将步骤精简控制在 3～5 步（1 步预检现状 → 1～2 步执行与 reload → 1 步验收 → 1 步回退）；若现场回显暴露出需要重启服务、切主或严重漂移的高风险问题，请在 drift.risks 中明确提示风险并建议升级为全量推演。\n")
 	}
+	var scopeBuf strings.Builder
 	for _, q := range rh.ScopeQuestions {
-		if q.Answer != "" {
-			fmt.Fprintf(&prompt, "- %s：%s\n", q.Question, q.Answer)
+		if strings.TrimSpace(q.Answer) != "" {
+			fmt.Fprintf(&scopeBuf, "- %s：%s\n", q.Question, q.Answer)
 		}
 	}
 	if rh.ExtraScope != "" {
-		fmt.Fprintf(&prompt, "- 补充约束：%s\n", rh.ExtraScope)
+		fmt.Fprintf(&scopeBuf, "- 【工程师特别补充的现场背景与操作指令（最高优先级，生成步骤务必严格遵循，优先于默认保守切主模板）】：%s\n", rh.ExtraScope)
+	}
+	if scopeBuf.Len() > 0 {
+		fmt.Fprintf(&prompt, "\n【已确认的变更边界与工程师补充指令（最高优先级）】\n%s", scopeBuf.String())
 	}
 	if scPrompt := securityContextPrompt(rh.SecurityContext, "probe"); scPrompt != "" {
 		prompt.WriteString(scPrompt)
@@ -2745,7 +2815,7 @@ func (s *storeServer) submitRehearsalProbe(w http.ResponseWriter, r *http.Reques
 	if bp := s.rehearsalSourceBlueprintPrompt(rh); bp != "" && !diagnoseOnly {
 		prompt.WriteString(bp)
 	}
-	if rh.ProbeScript != "" && (diagnoseOnly || len(probeOut) < 400 || len(imgNames) > 0) {
+	if rh.ProbeScript != "" && (diagnoseOnly || len(probeOut) < 400 || len(aiImages) > 0) {
 		fmt.Fprintf(&prompt, "\n【当前只读探针脚本（前 4000 字符）】\n%s\n", truncRunes(rh.ProbeScript, 4000))
 	}
 	if probeOut != "" {
@@ -2758,11 +2828,11 @@ func (s *storeServer) submitRehearsalProbe(w http.ResponseWriter, r *http.Reques
 	if manual != "" {
 		fmt.Fprintf(&prompt, "\n【工程师手动声明的现场现状】\n%s\n", manual)
 	}
-	if len(imgNames) > 0 {
+	if len(aiImages) > 0 {
 		if diagnoseOnly {
-			fmt.Fprintf(&prompt, "\n【附带探针报错截图】共 %d 张，请结合报错信息诊断根因并给出修复命令或修订版纯只读脚本。\n", len(imgNames))
+			fmt.Fprintf(&prompt, "\n【附带探针报错截图】共 %d 张，请结合报错信息诊断根因并给出修复命令或修订版纯只读脚本。\n", len(aiImages))
 		} else {
-			fmt.Fprintf(&prompt, "\n【附带现场终端/状态截图】共 %d 张，请先核验截图是否为有效采集输出；若是脚本报错截图则触发门禁阻断并给出修复指引，只有确认拿到有效现场状态后才进行漂移比对。\n", len(imgNames))
+			fmt.Fprintf(&prompt, "\n【附带现场终端/状态截图】共 %d 张，请先核验截图是否为有效采集输出；若是脚本报错截图则触发门禁阻断并给出修复指引，只有确认拿到有效现场状态后才进行漂移比对。\n", len(aiImages))
 		}
 	}
 	if testEnv != "" {
@@ -2774,8 +2844,8 @@ func (s *storeServer) submitRehearsalProbe(w http.ResponseWriter, r *http.Reques
 		lines := strings.Count(probeOut, "\n") + 1
 		evidenceParts = append(evidenceParts, tr(lang, fmt.Sprintf("回显文本 %d 行", lines), fmt.Sprintf("%d line(s) of output", lines)))
 	}
-	if len(imgNames) > 0 {
-		evidenceParts = append(evidenceParts, tr(lang, fmt.Sprintf("现场截图 %d 张", len(imgNames)), fmt.Sprintf("%d screenshot(s)", len(imgNames))))
+	if len(aiImages) > 0 {
+		evidenceParts = append(evidenceParts, tr(lang, fmt.Sprintf("现场截图 %d 张", len(aiImages)), fmt.Sprintf("%d screenshot(s)", len(aiImages))))
 	}
 	if manual != "" {
 		evidenceParts = append(evidenceParts, tr(lang, "人工现状说明", "Manual status notes"))
@@ -2845,7 +2915,7 @@ func (s *storeServer) submitRehearsalProbe(w http.ResponseWriter, r *http.Reques
 		},
 	}
 
-	text, trace, code, err := s.rehearsalRunAI(r, providers, session.User, f.ID, rid+"/probe", "probe", red, sysPrompt+skillBlock, prompt.String(), in.Images, pipeSpec, in.Effort, ev)
+	text, trace, code, err := s.rehearsalRunAI(r, providers, session.User, f.ID, rid+"/probe", "probe", red, sysPrompt+skillBlock, prompt.String(), aiImages, pipeSpec, in.Effort, ev)
 	if err != nil {
 		failRehearsalResp(s, w, ev, code, err.Error(), aiDiagFromErr(err), trace.Diag)
 		return
@@ -2944,6 +3014,10 @@ func (s *storeServer) submitRehearsalProbe(w http.ResponseWriter, r *http.Reques
 			failRehearsalResp(s, w, ev, 404, "演练会话不存在")
 			return
 		}
+		if scopeUpdated {
+			cur.ScopeQuestions = rh.ScopeQuestions
+			cur.ExtraScope = rh.ExtraScope
+		}
 		cur.ProbeOutput = probeOut
 		if len(imgNames) > 0 {
 			cur.ProbeImages = imgNames
@@ -3010,6 +3084,10 @@ func (s *storeServer) submitRehearsalProbe(w http.ResponseWriter, r *http.Reques
 		rehearsalMu.Unlock()
 		failRehearsalResp(s, w, ev, 404, "演练会话不存在")
 		return
+	}
+	if scopeUpdated {
+		cur.ScopeQuestions = rh.ScopeQuestions
+		cur.ExtraScope = rh.ExtraScope
 	}
 	cur.ProbeOutput = probeOut
 	if len(imgNames) > 0 {
@@ -4048,15 +4126,25 @@ const rehearsalVerifyStepSystem = `你是资深中间件变更验收与排障专
      * 很多现场没有独立的第 4 台跳板机，只要工程师从**非当前主库的节点**（例如切主后在从库 node-1 上）连接 ELB/VIP 写入入口**已经成功连通并返回了目标主库 IP 且可写（如 pg_is_in_recovery=f）**，这就已经实打实证明了 ELB 路由生效且指向正确主库，**必须直接判 passed**！严禁以「不是集群外独立跳板机、违反 ELB 回环规避要求」为由教条拒收已经成功的实测结果！只有当后端节点连 VIP 确实发生超时/连接失败时，才提示可能是 ELB 回环限制并建议换非主库节点、业务端验证或跳过改查本机健康接口。
    - **忽略无害终端噪声**：终端里偶尔误粘了说明文字/注释导致的 command not found、多余换行或额外的只读查询回显，只要核心状态已经正确达成且无实际故障，不得以此判 failed。
    - **最终收尾/复位状态核验**：核验涉及恢复原状态或最终验收的步骤时，若输出显示集群仍处于临时异常/维护态（如 Patroni 仍显示 Maintenance mode / paused、HAProxy 后端仍为 MAINT/DRAIN、原主库尚未恢复且本步目标就是切回原主），必须判 failed 并给出最小恢复命令。
+   - **发现工程师现场修正端口/入口/路径并已实测成功时，严禁强迫重测错误旧值——改为征询确认并支持一键反哺集群基线（confirm_override）**：
+     * 实际运维中，集群基线或步骤命令里的端口/VIP/Socket/服务名/配置路径可能本身登记有误或已过期（例如原步骤写了 port=5432，工程师在现场发现真实入口是 port=5433，自行改用 5433 执行且已经成功连通、返回正确主库 IP 与读写状态）。
+     * **只要工程师用调整后的参数/入口已经实测达成核心业务验收目标**，**严禁**生硬地给 action="retry" 强迫工程师回头去测那个大概率本来就是错的旧值！
+     * 此时请返回 verdict="failed" 但将 **action 设为 "confirm_override"**（由平台以“请确认是否以现场实测为准”卡片向工程师征询确认，而非强迫复测）：
+       1) diagnosis：先明确肯定已按现场参数验证达标，再向工程师征询确认（例如：「检测到你现场改用 5433 已验证连通原主库且可读写，但原步骤与集群基线登记的是 5432。请确认是否以现场实测 5433 为准直接通过此步，并同步修正本步命令与反哺集群基线？」）；
+       2) confirm_summary：写出一旦工程师确认后直接记入本步通过结论与生产 SOP 的 1～2 句客观实测摘要；
+       3) command：给出已替换为正确现场参数（如 port=5433）的完整步骤命令（确认后同步更新本步与 SOP）；
+       4) expect：若原判据里写死了旧端口/旧路径，给出同步修正后的预期判据；
+       5) baseline_corrections：结构化列出需要反哺修正集群基线的差异项数组（每项含 kind="endpoint"|"port"|"config_path"|"service_unit"|"data_dir"|"log_dir"|"param"|"note"、label、key、old_value、new_value、reason），例如 {"kind":"endpoint","label":"访问入口端口","old_value":"example.com:5432","new_value":"example.com:5433","reason":"现场实测真实读写入口端口为 5433"}，让工程师一键采信并反哺基线，避免后续演练重复踩坑。
    - **只有真正的阻断或核心缺口未补齐才判 failed**：例如目标参数仍为旧值、仍有目标节点卡在 Pending restart、节点离线/复制断开、多节点验收中确实还有节点在所有轮次里都从未提供过达标证据。
 3. 输出规则：
    - **passed（通过）**：合并前序已证实事实与本轮新证据后，核心目标状态已全部满足且集群健康。输出精炼、可审计的实测结论 summary（1-2 句，同步写入最终生产 SOP；多轮补齐时简述全部节点已验证一致），并在 verified_facts 中列出本轮新证实的要点（可选；仅当输出明确可见耗时再填 elapsed）。
-   - **failed（未通过）**：核心目标尚未补齐或存在真阻断。必须同时填好：
+   - **failed（未通过，或 confirm_override 待工程师确认参数偏差）**：核心目标尚未补齐、存在真阻断，或工程师改用不同现场参数已跑通需确认是否以实测为准。必须同时填好：
      * **verified_facts（极重要！）**：逐条列出**本轮从截图/文本中新证实已经达标的每一项具体事实**（务必写清具体节点名、关键参数或状态，例如 "node-1: logging_collector=on 等参数生效且当日日志持续增长"、"node-3: 参数生效且当日日志持续增长"），平台会自动持久化并在下一轮传回给你，防止遗忘！若本轮无新达标项则填 []。
-     * **missing_items（极重要！）**：仅列出合并前序轮次后**仍然真正缺少的剩余缺口**（例如 ["node-2 参数生效与日志持续增长验证"]），禁止把已经通过的节点再列进来！
-     * **diagnosis**：准确简明的未通过原因（明确指出哪些已确认 OK、仅剩什么未补齐）。
+     * **missing_items（极重要！）**：仅列出合并前序轮次后**仍然真正缺少的剩余缺口**（例如 ["node-2 参数生效与日志持续增长验证"]），禁止把已经通过的节点再列进来！若 action="confirm_override" 且核心目标已按现场修正参数验证达标，missing_items 应为空数组 []。
+     * **diagnosis**：准确简明的未通过原因或待确认差异说明（明确指出哪些已确认 OK、仅剩什么未补齐或差异何在）。
      * **action、target_role & command**：尽量最小化、**只针对剩余缺口**给出下一步动作（不要让用户重跑已经通过的节点或前半段），并且 **target_role 必须必填且写清具体要登录哪台/哪几台机器与 IP**（例如「仅在从库 node-3 (172.30.4.20) 上执行」或「在 node-1 / node-2 / node-3 逐台执行」，严禁留空让工程师猜在哪台机器跑）：
-       - 若当前步骤命令本身需要修改：action="replace"，给出修正后的完整 command 与 target_role；
+       - 若工程师现场修改了端口/入口/路径等参数并已实测达标、只需确认是否以现场为准并反哺基线：action="confirm_override"，填好 confirm_summary、修正后 command、expect 与 baseline_corrections；
+       - 若当前步骤命令本身需要修改且尚需重跑：action="replace"，给出修正后的完整 command 与 target_role；
        - 若缺少前置步骤：action="insert_before"，给出前置步骤 title、target_role、command、expect；
        - 若只需补测剩余节点或补跑一条轻量补救命令：action="retry"，给出只针对剩余缺口的最小复测命令，并在 target_role 中明确指出该命令要登录哪台/哪几台机器执行。
        - **防吞行格式**：若 command 包含 2 条及以上命令（尤其含 sudo/psql/patronictl/sleep），请整块包在 ( ... ) </dev/null 中（不要裸写多行，也不要用 bash <<'EOF'），保证堡垒机/WebSSH 一次复制粘贴即可按序跑全。
@@ -4064,8 +4152,8 @@ const rehearsalVerifyStepSystem = `你是资深中间件变更验收与排障专
 严格只输出一个 JSON 对象：
 - 通过时：
 {"thinking":"...","verdict":"passed","verified_facts":["本轮新证实的达标项（可选）"],"summary":"客观实测通过摘要（同步写入 SOP）","elapsed":""}
-- 未通过时：
-{"thinking":"...","verdict":"failed","verified_facts":["本轮已证实达标的节点/指标（写清节点名与状态，供下轮沿用）"],"missing_items":["合并前序后仅剩的待补缺口"],"diagnosis":"未通过或尚缺证据的准确根因","action":"replace|insert_before|retry","title":"前置步骤标题（insert_before必填）","target_role":"复测/修正命令的具体执行机器（必填，写清节点名与 IP，如：仅在从库 node-3 (172.30.4.20) 执行）","command":"修正后命令或仅针对剩余缺口的最小复测命令","expect":"成功判据","rollback":"回退命令（可选）","risk_note":"注意事项（可选）"}`
+- 未通过或参数偏差待确认时：
+{"thinking":"...","verdict":"failed","verified_facts":["本轮已证实达标的节点/指标（写清节点名与状态，供下轮沿用）"],"missing_items":["合并前序后仅剩的待补缺口；confirm_override 且已达标时填 []"],"diagnosis":"未通过根因，或 confirm_override 征询确认说明","action":"confirm_override|replace|insert_before|retry","confirm_summary":"confirm_override 必填：确认后直接写入本步与 SOP 的通过摘要","baseline_corrections":[{"kind":"endpoint|port|config_path|service_unit|data_dir|log_dir|param|note","label":"差异项名称","key":"可选参数名","old_value":"基线/步骤旧值","new_value":"现场实测正确值","reason":"原因"}],"title":"前置步骤标题（insert_before必填）","target_role":"复测/修正命令的具体执行机器（必填，写清节点名与 IP，如：仅在从库 node-3 (172.30.4.20) 执行）","command":"修正后命令或仅针对剩余缺口的最小复测命令","expect":"成功判据","rollback":"回退命令（可选）","risk_note":"注意事项（可选）"}`
 
 func cleanFactSlice(xs []string, maxItems, maxRunes int) []string {
 	if len(xs) == 0 {
@@ -4460,19 +4548,46 @@ func (s *storeServer) verifyRehearsalStep(w http.ResponseWriter, r *http.Request
 		prop.Command = ensurePasteSafeShellCommand(prop.Command)
 		prop.TargetRole = truncRunes(strings.TrimSpace(prop.TargetRole), 160)
 		prop.Diagnosis = truncRunes(strings.TrimSpace(prop.Diagnosis), 600)
+		prop.ConfirmSummary = truncRunes(strings.TrimSpace(prop.ConfirmSummary), 500)
+		if len(prop.BaselineCorrections) > 0 {
+			cleanedCorr := make([]rehearsalBaselineCorrection, 0, min(len(prop.BaselineCorrections), 8))
+			for _, bc := range prop.BaselineCorrections {
+				bc.Kind = strings.ToLower(strings.TrimSpace(bc.Kind))
+				if bc.Kind == "" {
+					bc.Kind = "note"
+				}
+				bc.Label = truncRunes(strings.TrimSpace(bc.Label), 60)
+				bc.Key = truncRunes(strings.TrimSpace(bc.Key), 80)
+				bc.OldValue = truncRunes(strings.TrimSpace(bc.OldValue), 220)
+				bc.NewValue = truncRunes(strings.TrimSpace(bc.NewValue), 220)
+				bc.Reason = truncRunes(strings.TrimSpace(bc.Reason), 220)
+				if bc.NewValue == "" {
+					continue
+				}
+				cleanedCorr = append(cleanedCorr, bc)
+				if len(cleanedCorr) >= 8 {
+					break
+				}
+			}
+			prop.BaselineCorrections = cleanedCorr
+		}
 		prop.VerifiedFacts = roundFacts
 		prop.MissingItems = roundMissing
-		if prop.Action != "insert_before" && prop.Action != "retry" {
+		if prop.Action != "insert_before" && prop.Action != "retry" && prop.Action != "confirm_override" {
 			prop.Action = "replace"
 		}
-		if prop.Action != "retry" && prop.Command == "" {
+		if prop.Action != "retry" && prop.Action != "confirm_override" && prop.Command == "" {
 			prop.Action = "retry"
+		}
+		synthMsg := tr(lang, "核验未通过 · 已生成根因诊断与处理建议", "Verification FAILED · Root cause & fix ready")
+		if prop.Action == "confirm_override" {
+			synthMsg = tr(lang, "检测到现场参数修正 · 待工程师确认是否以实测为准", "Live parameter override detected · Awaiting confirmation")
 		}
 		finalizeTraceSynth(
 			&trace,
 			ev,
 			"verify-verdict",
-			tr(lang, "核验未通过 · 已生成根因诊断与处理建议", "Verification FAILED · Root cause & fix ready"),
+			synthMsg,
 			false,
 			max(1, time.Since(parseStart).Milliseconds()),
 		)
@@ -4713,6 +4828,14 @@ func (s *storeServer) troubleshootRehearsalStep(w http.ResponseWriter, r *http.R
 }
 
 func (s *storeServer) applyRehearsalProposal(w http.ResponseWriter, r *http.Request, session storeSession, f clusterFacts, rid, sid string) {
+	var in struct {
+		AcceptPassed *bool `json:"accept_passed,omitempty"`
+		FeedBaseline *bool `json:"feed_baseline,omitempty"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&in)
+	}
+
 	rehearsalMu.Lock()
 	rh, ok := s.loadRehearsal(f.ID, rid)
 	if !ok {
@@ -4736,7 +4859,65 @@ func (s *storeServer) applyRehearsalProposal(w http.ResponseWriter, r *http.Requ
 	st := rh.Steps[idx]
 	prop := *st.Proposal
 	now := nowStamp()
-	if prop.Action == "insert_before" {
+	acceptPassed := prop.Action == "confirm_override"
+	if in.AcceptPassed != nil {
+		acceptPassed = *in.AcceptPassed
+	}
+	feedBaseline := prop.Action == "confirm_override" && len(prop.BaselineCorrections) > 0
+	if in.FeedBaseline != nil {
+		feedBaseline = *in.FeedBaseline
+	}
+	var correctionsToFeed []rehearsalBaselineCorrection
+	if acceptPassed {
+		if strings.TrimSpace(prop.Command) != "" {
+			nextCmd, nextSubs := reconcileStepCommands(st.Commands, prop.Command, firstNonEmptyStr(strings.TrimSpace(prop.TargetRole), st.TargetRole), lang)
+			rh.Steps[idx].Revisions = append(rh.Steps[idx].Revisions, rehearsalStepRevision{
+				At:           now,
+				By:           session.User,
+				ErrorSnippet: truncRunes(st.LastError, 300),
+				Diagnosis:    tr(lang, "确认以现场实测参数为准并同步修订本步：", "Confirmed live parameter override and updated step: ") + prop.Diagnosis,
+				OldCommand:   st.Command,
+				NewCommand:   nextCmd,
+			})
+			rh.Steps[idx].Command = nextCmd
+			rh.Steps[idx].Commands = nextSubs
+		}
+		if strings.TrimSpace(prop.TargetRole) != "" {
+			rh.Steps[idx].TargetRole = truncRunes(strings.TrimSpace(prop.TargetRole), 160)
+		}
+		if strings.TrimSpace(prop.Expect) != "" {
+			rh.Steps[idx].Expect = truncRunes(strings.TrimSpace(prop.Expect), 300)
+		}
+		if strings.TrimSpace(prop.Rollback) != "" {
+			rh.Steps[idx].Rollback = strings.TrimSpace(prop.Rollback)
+		}
+		if strings.TrimSpace(prop.RiskNote) != "" {
+			rh.Steps[idx].RiskNote = truncRunes(strings.TrimSpace(prop.RiskNote), 300)
+		}
+		passNote := firstNonEmptyStr(
+			strings.TrimSpace(prop.ConfirmSummary),
+			strings.Join(prop.VerifiedFacts, "；"),
+			strings.TrimSpace(prop.Diagnosis),
+			tr(lang, "工程师已确认以现场实测参数为准通过核验。", "Confirmed passed with live observed parameters."),
+		)
+		backfillLegacyVerifyHistory(&rh.Steps[idx])
+		rh.Steps[idx].VerifyHistory = append(rh.Steps[idx].VerifyHistory, rehearsalVerifyAttempt{
+			Round:         len(rh.Steps[idx].VerifyHistory) + 1,
+			At:            now,
+			By:            session.User,
+			Verdict:       "passed",
+			Summary:       passNote,
+			VerifiedFacts: append([]string(nil), prop.VerifiedFacts...),
+		})
+		rh.Steps[idx].Status = "passed"
+		rh.Steps[idx].VerifiedByAI = true
+		rh.Steps[idx].Note = truncRunes(passNote, 500)
+		rh.Steps[idx].LastError = ""
+		rh.Steps[idx].Proposal = nil
+		if feedBaseline && len(prop.BaselineCorrections) > 0 {
+			correctionsToFeed = append([]rehearsalBaselineCorrection(nil), prop.BaselineCorrections...)
+		}
+	} else if prop.Action == "insert_before" {
 		newID := fmt.Sprintf("pre-%s-%d", st.ID, len(st.Revisions)+1)
 		inserted := rehearsalStep{
 			ID:         newID,
@@ -4797,7 +4978,22 @@ func (s *storeServer) applyRehearsalProposal(w http.ResponseWriter, r *http.Requ
 		s.fail(w, 500, "采纳修正提案失败")
 		return
 	}
-	s.auditReq(r, "rehearsal-apply", session.User, f.ID+" "+rid+" "+sid)
+	if len(correctionsToFeed) > 0 {
+		if enriched := s.applyBaselineCorrectionsToCluster(f, session.User, correctionsToFeed, rh.Title, lang); len(enriched) > 0 {
+			rehearsalMu.Lock()
+			if latest, ok := s.loadRehearsal(f.ID, rid); ok {
+				latest.BaselineEnriched = enriched
+				_ = s.saveRehearsal(latest)
+				rh = latest
+			}
+			rehearsalMu.Unlock()
+		}
+	}
+	auditAction := "rehearsal-apply"
+	if acceptPassed {
+		auditAction = "rehearsal-apply-confirm"
+	}
+	s.auditReq(r, auditAction, session.User, f.ID+" "+rid+" "+sid)
 	rh.RestorationAlerts = auditRehearsalRestorations(rh.Goal, rh.ExtraScope, rh.Steps, reqLang(r))
 	s.writeJSON(w, 200, rh)
 }
@@ -4870,12 +5066,16 @@ func (s *storeServer) finalizeRehearsal(w http.ResponseWriter, r *http.Request, 
 		if rh.ScopeSummary != "" {
 			overview += tr(lang, "\n边界说明：", "\nScope Summary: ") + rh.ScopeSummary
 		}
+		if rh.ExtraScope != "" {
+			overview += tr(lang, "\n补充现场约束：", "\nExtra Constraints: ") + rh.ExtraScope
+		}
 		saved.Sections["overview"] = docSection{Text: overview, Source: "user", Confirmed: true, By: session.User, At: now, Basis: f.Current.ID}
 	}
 	if _, exists := saved.Sections["signoff"]; !exists {
+		signer := resolveReportSigner(session.User, f.Meta, "confirmer", lang)
 		signoff := tr(lang,
-			fmt.Sprintf("本方案已由 %s 在测试环境完成全部必测步骤演练并核验通过。生产执行窗口内如遇单步超出预期耗时 2 倍或核心业务指标异常，立即按第 5 节应急回退预案执行回退。", session.User),
-			fmt.Sprintf("All required rehearsal steps have been validated and verified in staging by %s. During production execution, if any step exceeds 2x expected duration or critical business KPIs degrade, immediately execute Section 5 rollback procedures.", session.User),
+			fmt.Sprintf("本方案已由 %s 在测试环境完成全部必测步骤演练并核验通过。生产执行窗口内如遇单步超出预期耗时 2 倍或核心业务指标异常，立即按第 5 节应急回退预案执行回退。", signer),
+			fmt.Sprintf("All required rehearsal steps have been validated and verified in staging by %s. During production execution, if any step exceeds 2x expected duration or critical business KPIs degrade, immediately execute Section 5 rollback procedures.", signer),
 		)
 		saved.Sections["signoff"] = docSection{Text: signoff, Source: "user", Confirmed: true, By: session.User, At: now, Basis: f.Current.ID}
 	}
@@ -4888,7 +5088,7 @@ func (s *storeServer) finalizeRehearsal(w http.ResponseWriter, r *http.Request, 
 }
 
 var (
-	reAppliedPatroniKV = regexp.MustCompile(`(?i)(?:^|\s)-[ps]\s+(?:'([a-zA-Z0-9_.-]+)=([^']+)'|"([a-zA-Z0-9_.-]+)=([^"]+)"|([a-zA-Z0-9_.-]+)=(?:'([^']+)'|"([^"]+)"|([^\s'"\\]+)))`)
+	reAppliedPatroniKV = regexp.MustCompile(`(?i)(?:^|\s)(?:-[ps]|--(?:set|parameter))(?:\s+|=)(?:'([a-zA-Z0-9_.-]+)=([^']+)'|"([a-zA-Z0-9_.-]+)=([^"]+)"|([a-zA-Z0-9_.-]+)=(?:'([^']+)'|"([^"]+)"|([^\s'"\\]+)))`)
 	reAppliedAlterSys  = regexp.MustCompile(`(?i)\bALTER\s+SYSTEM\s+SET\s+([a-zA-Z0-9_.-]+)\s*(?:=|TO)\s*'?([^';\n]+)'?`)
 	reAppliedRedisCfg  = regexp.MustCompile(`(?i)\bCONFIG\s+SET\s+([a-zA-Z0-9_.-]+)\s+([^\s'"\n;]+)`)
 	reAppliedHBA       = regexp.MustCompile(`(?i)\b(pg_hba|hostssl\s+\S+|hostnossl\s+\S+|host\s+\S+)`)
@@ -4899,16 +5099,23 @@ func matchPatroniKV(m []string) (string, string) {
 	if len(m) < 9 {
 		return "", ""
 	}
-	if m[1] != "" {
-		return m[1], m[2]
+	var k, v string
+	switch {
+	case m[1] != "":
+		k, v = m[1], m[2]
+	case m[3] != "":
+		k, v = m[3], m[4]
+	case m[5] != "":
+		k, v = m[5], firstNonEmptyStr(m[6], m[7], m[8])
+	default:
+		return "", ""
 	}
-	if m[3] != "" {
-		return m[3], m[4]
+	// Normalize Patroni --set/-s dotted parameter paths (e.g. postgresql.parameters.log_min_duration_statement)
+	// so they match -p keys, drift before-maps, and cross-plan conflict detection consistently.
+	if low := strings.ToLower(k); strings.HasPrefix(low, "postgresql.parameters.") {
+		k = k[len("postgresql.parameters."):]
 	}
-	if m[5] != "" {
-		return m[5], firstNonEmptyStr(m[6], m[7], m[8])
-	}
-	return "", ""
+	return k, v
 }
 
 func extractHBARuleDisplay(rh changeRehearsal, st rehearsalStep) string {
@@ -5357,6 +5564,7 @@ func (s *storeServer) applyRehearsalProduction(w http.ResponseWriter, r *http.Re
 			rehearsalMu.Unlock()
 		}
 	}
+	s.syncAppliedRehearsalsToClusterState(f.ID, session.User)
 	s.auditReq(r, action, session.User, f.ID+" "+rid)
 	rh.RestorationAlerts = auditRehearsalRestorations(rh.Goal, rh.ExtraScope, rh.Steps, lang)
 	rh.ConflictAlerts = computeRehearsalConflicts(rh, peers, lang)
@@ -5427,6 +5635,7 @@ func (s *storeServer) voidRehearsal(w http.ResponseWriter, r *http.Request, sess
 	if !wantVoid {
 		act = "rehearsal-restore"
 	}
+	s.syncAppliedRehearsalsToClusterState(f.ID, session.User)
 	s.auditReq(r, act, session.User, f.ID+" "+rid)
 	lang := reqLang(r)
 	rh.RestorationAlerts = auditRehearsalRestorations(rh.Goal, rh.ExtraScope, rh.Steps, lang)

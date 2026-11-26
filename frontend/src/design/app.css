@@ -662,12 +662,12 @@ body[arco-theme="dark"] .avatar.admin {
 .list-day {
   position: sticky;
   top: -6px;
-  z-index: 2;
+  z-index: 4;
   padding: 12px 10px 6px;
   font-size: 12px;
   font-weight: 600;
   color: var(--faint);
-  background: linear-gradient(var(--surface-2) 70%, transparent);
+  background: var(--surface-2);
 }
 .row {
   position: relative;
@@ -730,6 +730,12 @@ body[arco-theme="dark"] .avatar.admin {
   white-space: normal;
   word-break: normal;
   overflow-wrap: break-word;
+}
+.row.row-dlv .row-name {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .row-time {
   margin-left: auto;
@@ -872,8 +878,11 @@ body[arco-theme="dark"] .avatar.admin {
 .detail-side {
   position: sticky;
   top: 0;
+  align-self: start;
   padding-top: 22px;
   padding-bottom: 80px;
+  padding-left: 26px;
+  border-left: 1px solid var(--line);
   display: flex;
   flex-direction: column;
   gap: 26px;
@@ -914,22 +923,35 @@ body[arco-theme="dark"] .avatar.admin {
   color: var(--faint);
 }
 .detail-side .kvlist {
-  grid-template-columns: 1fr;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
 }
 .detail-side .kvlist div {
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 3px 12px;
+  padding: 7px 0;
 }
 .detail-side .kvlist code {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
   white-space: normal;
   overflow: visible;
   text-overflow: clip;
   overflow-wrap: anywhere;
-  font-size: 11.5px;
+  font-size: 12px;
 }
 .detail-side .kvlist .mono {
+  flex: 0 1 auto;
+  margin-left: auto;
   min-width: 0;
+  max-width: 100%;
+  text-align: right;
   overflow-wrap: anywhere;
 }
 .detail-none {
@@ -986,6 +1008,7 @@ body[arco-theme="dark"] .avatar.admin {
   grid-column: 1;
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 4px 0;
   color: var(--mute);
   font-size: 13px;
@@ -3508,6 +3531,8 @@ body[arco-theme="dark"] .login-policy-box {
   }
   .detail-side {
     position: static;
+    padding-left: 0;
+    border-left: 0;
     border-bottom: 1px solid var(--line);
     padding-bottom: 20px;
   }

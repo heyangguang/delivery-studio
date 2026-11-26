@@ -55,7 +55,11 @@ type executionNode struct {
 	Disabled       bool                `json:"disabled"`
 	AllowDelivery  *bool               `json:"allow_delivery,omitempty"`
 	AllowProbe     *bool               `json:"allow_probe,omitempty"`
-	AllowRehearsal *bool               `json:"allow_rehearsal,omitempty"`
+	AllowRehearsal       *bool                  `json:"allow_rehearsal,omitempty"`
+	ClusterModes         map[string]string      `json:"cluster_modes,omitempty"`
+	HeartbeatIntervalSec int                    `json:"heartbeat_interval_sec,omitempty"`
+	Probe                *agentHostProbe        `json:"probe,omitempty"`
+	Heartbeats           []agentHeartbeatSample `json:"heartbeats,omitempty"`
 }
 type executionStep struct {
 	ID        string         `json:"id"`
@@ -204,6 +208,12 @@ func cloneExecutionDB(src executionDB) executionDB {
 	if len(src.Agents) > 0 {
 		dst.Agents = make(map[string]targetAgent, len(src.Agents))
 		for k, v := range src.Agents {
+			if len(v.Clusters) > 0 {
+				v.Clusters = append([]string(nil), v.Clusters...)
+			}
+			if len(v.ClusterModes) > 0 {
+				v.ClusterModes = cloneStringMap(v.ClusterModes)
+			}
 			dst.Agents[k] = v
 		}
 	}
@@ -241,6 +251,9 @@ func cloneExecutionDB(src executionDB) executionDB {
 			}
 			n.Grants = m
 		}
+		if len(n.ClusterModes) > 0 {
+			n.ClusterModes = cloneStringMap(n.ClusterModes)
+		}
 		dst.Nodes[k] = n
 	}
 	for k, r := range src.Runs {
@@ -277,6 +290,31 @@ func cloneExecutionDB(src executionDB) executionDB {
 }
 
 func (s *storeServer) readExecutions() (executionDB, error) {
+	if s.repo != nil {
+		if s.execCache.valid {
+			return cloneExecutionDB(s.execCache.db), nil
+		}
+		d := executionDB{Nodes: map[string]executionNode{}, Runs: map[string]executionRun{}, Preparations: map[string]executionPreparation{}}
+		b, ok, err := s.repo.getExecStateSlot("main")
+		if err != nil {
+			return executionDB{}, err
+		}
+		if !ok || len(b) == 0 {
+			s.execCache = cachedExecDB{valid: true, db: cloneExecutionDB(d)}
+			return d, nil
+		}
+		if err := json.Unmarshal(b, &d); err != nil {
+			return d, err
+		}
+		if d.Nodes == nil || d.Runs == nil {
+			return d, errors.New("执行状态损坏，已停止接收任务")
+		}
+		if d.Preparations == nil {
+			d.Preparations = map[string]executionPreparation{}
+		}
+		s.execCache = cachedExecDB{valid: true, db: cloneExecutionDB(d)}
+		return d, nil
+	}
 	path := s.executionPath("state.json")
 	st, statErr := os.Stat(path)
 	if os.IsNotExist(statErr) {
@@ -310,6 +348,19 @@ func (s *storeServer) readExecutions() (executionDB, error) {
 	return d, e
 }
 func (s *storeServer) saveExecutions(d executionDB) error {
+	if s.repo != nil {
+		b, err := json.Marshal(d)
+		if err != nil {
+			s.execCache.valid = false
+			return err
+		}
+		if err := s.repo.saveExecStateSlot("main", b); err != nil {
+			s.execCache.valid = false
+			return err
+		}
+		s.execCache = cachedExecDB{valid: true, db: cloneExecutionDB(d)}
+		return nil
+	}
 	path := s.executionPath("state.json")
 	err := atomicExecutionJSON(path, d)
 	if err != nil {
@@ -385,7 +436,7 @@ func (s *storeServer) purgeJobExecutions(jobID string) {
 }
 func executionOnline(n executionNode) bool {
 	t, e := time.Parse(time.RFC3339Nano, n.LastSeen)
-	return e == nil && !n.Disabled && time.Since(t) < 35*time.Second
+	return e == nil && !n.Disabled && time.Since(t) < agentOnlineTimeout(n.HeartbeatIntervalSec, n.Probe)
 }
 func publicExecutionNode(n executionNode) executionNode { n.TokenHash = ""; return n }
 func (s *storeServer) executionRevision(job string) string {
@@ -824,7 +875,7 @@ func (s *storeServer) handleExecutions(w http.ResponseWriter, r *http.Request, s
 		nodes := []executionNodeOption{}
 		context := s.executionContext(j)
 		for _, n := range nodesSnapshot {
-			if contains(n.Clusters, j.ClusterID) || s.can(session.User, "execution.manage") {
+			if contains(n.Clusters, j.ClusterID) || nodeClusterMode(n, j.ClusterID) != "" || s.can(session.User, "execution.manage") {
 				nodes = append(nodes, executionNodeOptionFor(n, context))
 			}
 		}
@@ -1017,6 +1068,12 @@ func (s *storeServer) handleExecutions(w http.ResponseWriter, r *http.Request, s
 		n, ok := d.Nodes[req.Node]
 		if !ok || !executionOnline(n) {
 			s.fail(w, 409, "执行节点未连接或已停用")
+			return
+		}
+		if nodeClusterMode(n, j.ClusterID) == "readonly" {
+			s.failBi(w, 403,
+				"该 Agent 在本集群仅授予「只读」权限，请在「IAM → 集群权限」中切换为「读写」后再执行部署",
+				"This Agent only has read-only access on this cluster; switch it to read-write in IAM → Cluster Permissions before running deployments")
 			return
 		}
 		snap, e := s.executionSnapshotFor(j)
@@ -1505,18 +1562,26 @@ func (s *storeServer) handleExecutionAgent(w http.ResponseWriter, r *http.Reques
 		s.writeJSON(w, 200, map[string]any{"ack": ev.Seq, "state": state})
 	case "/api/execution-agent/poll":
 		var req struct {
-			Protocol  int    `json:"protocol"`
-			Version   string `json:"version"`
-			Heartbeat bool   `json:"heartbeat"`
+			Protocol  int             `json:"protocol"`
+			Version   string          `json:"version"`
+			Heartbeat bool            `json:"heartbeat"`
+			Probe     *agentHostProbe `json:"probe"`
 		}
-		if decodeBody(w, r, 4096, &req) != nil {
+		if decodeBody(w, r, 16384, &req) != nil {
 			s.fail(w, 400, "请求无效")
 			return
 		}
 		n.LastSeen = executionNow()
 		n.Version = truncRunes(req.Version, 80)
 		n.Protocol = req.Protocol
+		if p := sanitizeAgentHostProbe(req.Probe); p != nil {
+			n.Probe = p
+		}
+		n.Heartbeats = appendAgentHeartbeat(n.Heartbeats, n.LastSeen, n.Probe)
 		d.Nodes[n.ID] = n
+		if req.Heartbeat {
+			_ = s.saveExecutions(d)
+		}
 		if !n.Disabled && !req.Heartbeat && n.Protocol >= 2 {
 			if p := pendingExecutionPreparation(d, n); p != nil {
 				p.Snapshot, e = s.preparationSnapshot(*p)
@@ -1528,7 +1593,8 @@ func (s *storeServer) handleExecutionAgent(w http.ResponseWriter, r *http.Reques
 					s.fail(w, 500, "执行状态保存失败")
 					return
 				}
-				s.writeJSON(w, 200, map[string]any{"preparation": p})
+				effHB := effectiveAgentHeartbeatSec(n.HeartbeatIntervalSec, s.loadHeartbeatPolicy().DefaultIntervalSec)
+				s.writeJSON(w, 200, map[string]any{"preparation": p, "heartbeat_interval_sec": effHB})
 				return
 			}
 		}
@@ -1598,7 +1664,8 @@ func (s *storeServer) handleExecutionAgent(w http.ResponseWriter, r *http.Reques
 		} else {
 			_, cancelTasks = s.pollRehearsalTaskForNode(n, true)
 		}
-		resp := map[string]any{"work": work}
+		effHB := effectiveAgentHeartbeatSec(n.HeartbeatIntervalSec, s.loadHeartbeatPolicy().DefaultIntervalSec)
+		resp := map[string]any{"work": work, "heartbeat_interval_sec": effHB}
 		if rhTask != nil {
 			resp["rehearsal_task"] = rhTask
 		}
@@ -1791,7 +1858,7 @@ func (s *storeServer) handleExecutionRunsList(w http.ResponseWriter, r *http.Req
 	s.mu.Lock()
 	jobByID := make(map[string]storeJob, len(runsByJob))
 	for id, j := range s.jobs {
-		if !vis(j.Owner) {
+		if !vis(j.Owner, j.ClusterID) {
 			continue
 		}
 		visibleClusters[j.ClusterID] = true

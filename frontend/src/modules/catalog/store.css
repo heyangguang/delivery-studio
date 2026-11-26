@@ -323,7 +323,9 @@
   margin-top: 8px;
 }
 .feature .arco-btn.feature-cta,
-.product-banner .arco-btn.feature-cta {
+.product-banner .arco-btn.feature-cta,
+body[arco-theme="dark"] .feature .arco-btn.feature-cta,
+body[arco-theme="dark"] .product-banner .arco-btn.feature-cta {
   background: #ffffff;
   color: #14161d;
   border-color: transparent;
@@ -332,7 +334,9 @@
   transition: background-color 0.18s var(--spring), transform 0.16s var(--spring), box-shadow 0.18s var(--spring);
 }
 .feature .arco-btn.feature-cta:hover:not(:disabled),
-.product-banner .arco-btn.feature-cta:hover:not(:disabled) {
+.product-banner .arco-btn.feature-cta:hover:not(:disabled),
+body[arco-theme="dark"] .feature .arco-btn.feature-cta:hover:not(:disabled),
+body[arco-theme="dark"] .product-banner .arco-btn.feature-cta:hover:not(:disabled) {
   background: #f4f5f8;
   color: #14161d;
   border-color: transparent;
@@ -695,7 +699,7 @@
 /* plan editions & semantic blueprint glyphs */
 .plan-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 14px;
 }
 .plan-card {
@@ -2583,11 +2587,41 @@ body[arco-theme="dark"] .wide-plans button.wide-plan-tile:hover:not(:disabled) {
   opacity: 0.6;
 }
 .row-owner {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
   flex: none;
-  padding: 0 6px;
+  padding: 0 7px;
   border-radius: 5px;
   color: var(--mute);
   font-size: 11.5px;
-  line-height: 18px;
+  line-height: 1;
   background: var(--sunken);
+  white-space: nowrap;
+}
+.cl-meta-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.cl-ro-chip {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  gap: 4px;
+  flex: none;
+  padding: 0 7px;
+  border-radius: 5px;
+  border: 1px solid color-mix(in srgb, var(--warn) 30%, var(--line));
+  background: color-mix(in srgb, var(--warn-soft) 70%, var(--surface));
+  color: var(--warn);
+  font-size: 11.5px;
+  font-weight: 550;
+  line-height: 1;
+  white-space: nowrap;
+}
+.cl-ro-chip::before {
+  content: none !important;
 }

@@ -56,7 +56,13 @@ import "./me.css";
 /* My account: profile overview, personal AI resources, active sessions, password management, and sign-in history. */
 
 type Me = {
-  access?: { perms: Perm[]; scope: string; roles: string[]; teams: string[] };
+  access?: {
+    perms: Perm[];
+    scope: string;
+    roles: string[];
+    teams: string[];
+    clusters?: Record<string, "view" | "operate">;
+  };
   username: string;
   role: string;
   skills: number;
@@ -566,6 +572,7 @@ function Overview({ info, act }: { info: Me | null; act: Activity | null }) {
                 }}
                 perms={new Set(info.access.perms.map((p) => p.id))}
                 scope={info.access.scope}
+                clusters={info.access.clusters}
               />
             ) : (
               <Skeleton animation text={{ rows: 3 }} />

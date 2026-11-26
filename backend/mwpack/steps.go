@@ -370,7 +370,20 @@ func stepOf(sec, phase string, inst *Instance, s Step, pat string, hosts []strin
 	if rb == "" && eff == "read-only" {
 		rb = "只读，不需要回退。"
 	}
-	return &PlanStep{Automatic: inst.R.C.SupportsDelivery("automatic"), Timeout: s.Timeout, Postconditions: s.Postconditions, TaskRole: taskRole, TaskFile: taskFile, Section: sec, Phase: phase, Instance: inst.ID, ID: s.ID, Title: s.Title, Desc: s.Desc, Effect: eff, Expect: s.Expect, Hosts: hosts, Serial: s.Serial, Rollback: inst.FillText(rb), step: s, inst: inst, selector: pat}
+	title, desc, expect := s.Title, s.Desc, s.Expect
+	if inst != nil && len(inst.Roles["replica"]) == 0 {
+		switch title {
+		case "写入数据库与高可用配置":
+			title = "写入数据库配置"
+			desc = "初始化单节点数据库目录，写入 postgresql.conf、pg_hba.conf 与 systemd 覆盖项。"
+			expect = "部署归属标记及单节点 PostgreSQL 配置已写入。"
+		case "写入实例、哨兵与日志切割配置":
+			title = "写入实例与日志切割配置"
+			desc = "备份包自带配置后写入单节点 redis.conf、systemd 覆盖项与 logrotate。"
+			expect = "单节点 redis.conf 与 systemd/logrotate 配置已写入并校验通过。"
+		}
+	}
+	return &PlanStep{Automatic: inst.R.C.SupportsDelivery("automatic"), Timeout: s.Timeout, Postconditions: s.Postconditions, TaskRole: taskRole, TaskFile: taskFile, Section: sec, Phase: phase, Instance: inst.ID, ID: s.ID, Title: title, Desc: desc, Effect: eff, Expect: expect, Hosts: hosts, Serial: s.Serial, Rollback: inst.FillText(rb), step: s, inst: inst, selector: pat}
 }
 
 func (p *Plan) hasSecrets() bool {

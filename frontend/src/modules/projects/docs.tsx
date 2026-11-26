@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   Checkbox,
@@ -30,6 +30,7 @@ import {
   cached,
   can,
   copy,
+  downloadFile,
   err,
   fetchCached,
   fullTime,
@@ -40,7 +41,7 @@ import {
   putCached,
   reducedMotion,
 } from "../../shared/shared";
-import type { ClusterDoc, ClusterView, DocBlock, DocMeta } from "../../shared/shared";
+import type { ClusterDoc, ClusterView, DocBlock, DocClarifyItem, DocMeta } from "../../shared/shared";
 import { go } from "../../app/router";
 import { Segmented } from "../../design/ui";
 import { Spark, useAIStatus } from "../ai/aichat";
@@ -992,6 +993,152 @@ function jumpToDocEl(elId: string) {
   setTimeout(() => el.classList.remove("dc-flash"), 1400);
 }
 
+function DeliveryClarifyCard({
+  items,
+  inline,
+  busy,
+  submitLabel,
+  skipLabel,
+  onSubmit,
+  onSkip,
+  onSaveOnly,
+  onClose,
+}: {
+  items: DocClarifyItem[];
+  inline?: boolean;
+  busy?: boolean;
+  submitLabel: string;
+  skipLabel?: string;
+  onSubmit: (answers: { question: string; answer: string }[]) => void;
+  onSkip?: () => void;
+  onSaveOnly?: (answers: { question: string; answer: string }[]) => void;
+  onClose: () => void;
+}) {
+  useLang();
+  const buildInitial = (list: DocClarifyItem[]) => {
+    const m: Record<string, string> = {};
+    for (const it of list) {
+      m[it.id] = (it.answer || it.default || "").trim();
+    }
+    return m;
+  };
+  const [draft, setDraft] = useState<Record<string, string>>(() => buildInitial(items));
+  const sig = items.map((x) => `${x.id}:${x.answer || ""}`).join("|");
+  useEffect(() => {
+    setDraft(buildInitial(items));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sig]);
+
+  const collectAnswers = () =>
+    items.map((it) => ({
+      question: it.question,
+      answer: (draft[it.id] || "").trim(),
+    }));
+
+  return (
+    <section
+      className={`dc-clarify ${inline ? "is-inline" : ""}`}
+      role="region"
+      aria-label={bi("起草前确认交付口径", "Confirm delivery scope before drafting")}
+    >
+      <div className="dc-clarify-head">
+        <div className="dc-clarify-title">
+          <strong>
+            <Spark size={14} rainbow />
+            {bi("起草前确认几项交付口径，避免把正常选配误写成风险", "Confirm key delivery choices so normal configs aren't flagged as risks")}
+          </strong>
+          <span>
+            {bi(
+              "以下配置在交付中常见为客户按需选择或外部既有配套。已为您预选最常见口径，可直接点选调整；选填项留空则报告自动省略，绝不生成「待补充」占位符。",
+              "Common customer-chosen options are pre-selected below. Adjust if needed; leave optional fields blank to omit them cleanly with no TBD placeholders.",
+            )}
+          </span>
+        </div>
+        <Button size="mini" type="text" onClick={onClose} disabled={busy}>
+          {bi("收起", "Close")}
+        </Button>
+      </div>
+      <div className="dc-clarify-list">
+        {items.map((it) => {
+          const val = draft[it.id] ?? "";
+          const opts = it.options || [];
+          const isPreset = opts.length > 0 && opts.includes(val);
+          return (
+            <div key={it.id} className="dc-clarify-item">
+              <div className="dc-clarify-q">
+                <span className="dc-clarify-topic">{it.topic}</span>
+                <span>{it.question}</span>
+              </div>
+              {opts.length > 0 && (
+                <div className="dc-clarify-opts">
+                  {opts.map((opt) => (
+                    <button
+                      key={opt}
+                      type="button"
+                      className={`dc-clarify-opt ${val === opt ? "on" : ""}`}
+                      onClick={() => setDraft((prev) => ({ ...prev, [it.id]: opt }))}
+                    >
+                      {opt}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <Input
+                size="small"
+                allowClear
+                value={opts.length > 0 ? (isPreset ? "" : val) : val}
+                onChange={(v) =>
+                  setDraft((prev) => ({
+                    ...prev,
+                    [it.id]: v === "" && opts.length > 0 ? it.default || "" : v,
+                  }))
+                }
+                placeholder={
+                  it.placeholder ||
+                  (opts.length > 0
+                    ? bi("或补充其他说明（可选，输入后自动覆盖上方选项）", "Or enter custom clarification (optional)")
+                    : bi("选填；留空则报告直接省略", "Optional; leave blank to omit"))
+                }
+                aria-label={it.topic}
+              />
+            </div>
+          );
+        })}
+      </div>
+      <div className="dc-clarify-foot">
+        <span className="dc-clarify-tip">
+          {bi("确认后将保存至本交付报告，AI 补全、单节起草与深度审阅均自动遵循。", "Saved with this report and automatically respected by AI Draft and Audit.")}
+        </span>
+        <div className="dc-clarify-acts">
+          {skipLabel && onSkip && (
+            <Button size="small" type="text" disabled={busy} onClick={onSkip}>
+              {skipLabel}
+            </Button>
+          )}
+          {onSaveOnly && (
+            <Button
+              size="small"
+              disabled={busy}
+              onClick={() => onSaveOnly(collectAnswers())}
+            >
+              {bi("仅保存口径", "Save Scope Only")}
+            </Button>
+          )}
+          <Button
+            size="small"
+            type="primary"
+            icon={<Spark size={12} />}
+            loading={busy}
+            onClick={() => onSubmit(collectAnswers())}
+          >
+            {submitLabel}
+          </Button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function DocView({
   c,
   id,
@@ -1017,6 +1164,8 @@ function DocView({
   const [error, setError] = useState("");
   const [checking, setChecking] = useState(false);
   const [draftingAll, setDraftingAll] = useState(false);
+  const [clarifyOpen, setClarifyOpen] = useState<"" | "fill" | "redraft">("");
+  const [savingClarify, setSavingClarify] = useState(false);
   const [review, setReview] = useState<DocCheckResult | null>(null);
   const [appliedIDs, setAppliedIDs] = useState<Record<string, boolean>>({});
   const [busyItem, setBusyItem] = useState<string>("");
@@ -1024,6 +1173,12 @@ function DocView({
   const ai = useAIStatus();
   const aiOn = ai.enabled;
   const canAI = aiOn && !!ai.features?.docs && can("ai.use") && can("report.edit");
+  const deferredView = useDeferredValue(view);
+  const isViewPending = deferredView !== view;
+  const onChangedRef = useRef(onChanged);
+  onChangedRef.current = onChanged;
+  const listRef = useRef(list);
+  listRef.current = list;
   useEffect(() => {
     let alive = true;
     const hit = cached<ClusterDoc>(itemUrl);
@@ -1031,6 +1186,7 @@ function DocView({
     setError("");
     setReview(null);
     setAppliedIDs({});
+    setClarifyOpen("");
     api<ClusterDoc>(itemUrl)
       .then((r) => {
         putCached(itemUrl, r);
@@ -1043,26 +1199,33 @@ function DocView({
       alive = false;
     };
   }, [c.id, id, itemUrl, lang]);
-  const update = (nd: ClusterDoc) => {
-    putCached(itemUrl, nd);
-    setD(nd);
-    onChanged();
-  };
-  const onMetaSaved = (nd: ClusterDoc, appliedToCluster: boolean) => {
-    putCached(itemUrl, nd);
-    setD(nd);
-    if (appliedToCluster && list?.length) {
-      // Refresh cached sibling docs in background so navigating to KT/SOP reflects updated signers immediately.
-      for (const item of list) {
-        if (item.id === nd.id) continue;
-        const sibUrl = docItemPath(c.id, item.id);
-        void api<ClusterDoc>(sibUrl)
-          .then((fresh) => putCached(sibUrl, fresh))
-          .catch(() => {});
+  const update = useCallback(
+    (nd: ClusterDoc) => {
+      putCached(itemUrl, nd);
+      setD(nd);
+      onChangedRef.current();
+    },
+    [itemUrl],
+  );
+  const onMetaSaved = useCallback(
+    (nd: ClusterDoc, appliedToCluster: boolean) => {
+      putCached(itemUrl, nd);
+      setD(nd);
+      const curList = listRef.current;
+      if (appliedToCluster && curList?.length) {
+        // Refresh cached sibling docs in background so navigating to KT/SOP reflects updated signers immediately.
+        for (const item of curList) {
+          if (item.id === nd.id) continue;
+          const sibUrl = docItemPath(c.id, item.id);
+          void api<ClusterDoc>(sibUrl)
+            .then((fresh) => putCached(sibUrl, fresh))
+            .catch(() => {});
+        }
       }
-    }
-    onChanged();
-  };
+      onChangedRef.current();
+    },
+    [c.id, itemUrl],
+  );
   const check = async () => {
     if (checking) return;
     setChecking(true);
@@ -1082,20 +1245,37 @@ function DocView({
       setChecking(false);
     }
   };
-  const draftAllEmpty = async () => {
+  const clarifyItems = d?.kind === "delivery" ? d.clarifications || [] : [];
+  const hasUnansweredClarify = clarifyItems.some(
+    (it) => !it.optional && !(it.answer || "").trim(),
+  );
+  const confirmedClarifyCount = clarifyItems.filter(
+    (it) => Boolean((it.answer || "").trim()),
+  ).length;
+  const runDraftAll = async (
+    answers: { question: string; answer: string }[],
+    forceAll: boolean,
+  ) => {
     if (draftingAll) return;
     setDraftingAll(true);
+    setClarifyOpen("");
     try {
       const r = await api<{ drafted: number; doc: ClusterDoc }>(
         `/api/clusters/${c.id}/docs/${id}/draft-all`,
-        { method: "POST", body: JSON.stringify({}) },
+        {
+          method: "POST",
+          body: JSON.stringify({
+            answers,
+            force_all: forceAll,
+          }),
+        },
       );
       if (r.doc) update(r.doc);
       if (r.drafted > 0) {
         Message.success(
           bi(
-            `已一次性起草 ${r.drafted} 个待填章节草稿，请逐节核对确认`,
-            `Drafted ${r.drafted} empty section(s); please review and confirm`,
+            `已按交付口径起草 ${r.drafted} 个章节草稿，请逐节核对确认`,
+            `Drafted ${r.drafted} section(s) using confirmed scope; please review`,
           ),
         );
       } else {
@@ -1106,6 +1286,44 @@ function DocView({
     } finally {
       setDraftingAll(false);
     }
+  };
+  const saveClarifyOnly = async (
+    answers: { question: string; answer: string }[],
+  ) => {
+    if (savingClarify || draftingAll) return;
+    setSavingClarify(true);
+    try {
+      const r = await api<{ drafted: number; doc: ClusterDoc }>(
+        `/api/clusters/${c.id}/docs/${id}/draft-all`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            answers,
+            save_only: true,
+          }),
+        },
+      );
+      if (r.doc) update(r.doc);
+      setClarifyOpen("");
+      Message.success(
+        bi(
+          "已保存交付口径，后续 AI 起草与审阅将自动遵循",
+          "Delivery scope saved; future AI drafts & audits will respect it",
+        ),
+      );
+    } catch (e) {
+      err(e);
+    } finally {
+      setSavingClarify(false);
+    }
+  };
+  const draftAllEmpty = () => {
+    if (draftingAll) return;
+    if (d?.kind === "delivery" && clarifyItems.length > 0 && hasUnansweredClarify) {
+      setClarifyOpen("fill");
+      return;
+    }
+    void runDraftAll([], false);
   };
   const applyFindingProposal = async (
     f: Finding,
@@ -1291,6 +1509,31 @@ function DocView({
               </span>
             </div>
             <div className="dc-bar-acts">
+              {d.kind === "delivery" && clarifyItems.length > 0 && can("report.edit") && (
+                <Tooltip
+                  content={bi(
+                    "确认 TLS/TDE、前端入口、监控边界与业务归属等交付口径，避免正常选配被误判为风险",
+                    "Confirm TLS/TDE, ingress, monitoring & workload scope so normal choices aren't flagged as risks",
+                  )}
+                  mini
+                >
+                  <Button
+                    shape="round"
+                    type="secondary"
+                    disabled={checking || draftingAll}
+                    onClick={() =>
+                      setClarifyOpen((cur) =>
+                        cur ? "" : emptyAICount > 0 ? "fill" : "redraft",
+                      )
+                    }
+                  >
+                    {confirmedClarifyCount > 0 && <span className="dc-clarify-dot" aria-hidden />}
+                    {confirmedClarifyCount > 0
+                      ? bi(`交付口径 (${confirmedClarifyCount})`, `Scope (${confirmedClarifyCount})`)
+                      : bi("确认交付口径", "Confirm Scope")}
+                  </Button>
+                </Tooltip>
+              )}
               {canAI && emptyAICount > 0 && (
                 <Tooltip
                   content={bi(
@@ -1375,7 +1618,7 @@ function DocView({
           {(checking || draftingAll) && (
             <AIDraftingProgress
               mode={draftingAll ? "draft-all" : "audit"}
-              count={emptyAICount}
+              count={emptyAICount || d.sections}
             />
           )}
 
@@ -1623,16 +1866,44 @@ function DocView({
               )}
             </section>
           )}
+          {clarifyOpen && clarifyItems.length > 0 && !draftingAll && (
+            <DeliveryClarifyCard
+              items={clarifyItems}
+              busy={draftingAll || savingClarify}
+              submitLabel={
+                clarifyOpen === "fill" && emptyAICount > 0
+                  ? bi(`按确认口径补全待填 (${emptyAICount})`, `Draft Empty (${emptyAICount})`)
+                  : bi("按确认口径重新起草全部章节", "Redraft All with Confirmed Scope")
+              }
+              skipLabel={
+                clarifyOpen === "fill" && emptyAICount > 0
+                  ? bi("不询问，直接起草", "Skip & Draft Now")
+                  : undefined
+              }
+              onSubmit={(ans) =>
+                void runDraftAll(ans, clarifyOpen === "redraft" || emptyAICount === 0)
+              }
+              onSkip={
+                clarifyOpen === "fill" && emptyAICount > 0
+                  ? () => void runDraftAll([], false)
+                  : undefined
+              }
+              onSaveOnly={(ans) => void saveClarifyOnly(ans)}
+              onClose={() => setClarifyOpen("")}
+            />
+          )}
           {hasVariants(d) && <ReportOptions view={view} setView={setView} />}
-          <Paper
-            c={c}
-            d={d}
-            view={view}
-            aiOn={aiOn}
-            canAI={canAI}
-            onSaved={update}
-            onMetaSaved={onMetaSaved}
-          />
+          <div className={isViewPending ? "dc-paper-wrap is-updating" : "dc-paper-wrap"}>
+            <Paper
+              c={c}
+              d={d}
+              view={deferredView}
+              aiOn={aiOn}
+              canAI={canAI}
+              onSaved={update}
+              onMetaSaved={onMetaSaved}
+            />
+          </div>
         </>
       )}
     </div>
@@ -1640,7 +1911,7 @@ function DocView({
 }
 
 /** The document as a page: an optional section jump strip, a cover strip, then the blocks. */
-function Paper({
+const Paper = React.memo(function Paper({
   c,
   d,
   view,
@@ -1660,35 +1931,47 @@ function Paper({
   useLang();
   const [activeId, setActiveId] = useState<string>("");
   const [metaOpen, setMetaOpen] = useState(false);
-  const visibleBlocks = (d.blocks || []).filter(
-    (b) => (!b.detail || view.detail) && keeps(b.variant, view),
+  const indexedBlocks = useMemo(
+    () => (d.blocks || []).map((b, idx) => ({ b, idx })),
+    [d.blocks],
   );
-  const outline = visibleBlocks
-    .map((b, idx) => {
-      if (b.kind === "section" && b.key && b.title) {
-        const has = !!(b.text || "").trim();
-        const isDraft = has && b.source === "ai" && !b.confirmed;
-        return {
-          id: `sec-${b.key}`,
-          label: b.title,
-          tone: isDraft ? "draft" : has ? "done" : "empty",
-          editable: true,
-        };
-      }
-      if (b.kind === "h" && (b.level || 1) === 1 && b.text) {
-        return {
-          id: `doc-h-${idx}`,
-          label: b.text,
-          tone: "",
-          editable: false,
-        };
-      }
-      return null;
-    })
-    .filter(
-      (x): x is { id: string; label: string; tone: string; editable: boolean } =>
-        Boolean(x),
-    );
+  const visibleBlocks = useMemo(
+    () =>
+      indexedBlocks.filter(
+        ({ b }) => (!b.detail || view.detail) && keeps(b.variant, view),
+      ),
+    [indexedBlocks, view],
+  );
+  const outline = useMemo(
+    () =>
+      visibleBlocks
+        .map(({ b, idx }) => {
+          if (b.kind === "section" && b.key && b.title) {
+            const has = !!(b.text || "").trim();
+            const isDraft = has && b.source === "ai" && !b.confirmed;
+            return {
+              id: `sec-${b.key}`,
+              label: b.title,
+              tone: isDraft ? "draft" : has ? "done" : "empty",
+              editable: true,
+            };
+          }
+          if (b.kind === "h" && (b.level || 1) === 1 && b.text) {
+            return {
+              id: `doc-h-${idx}`,
+              label: b.text,
+              tone: "",
+              editable: false,
+            };
+          }
+          return null;
+        })
+        .filter(
+          (x): x is { id: string; label: string; tone: string; editable: boolean } =>
+            Boolean(x),
+        ),
+    [visibleBlocks],
+  );
   const editableTotal = outline.filter((x) => x.editable).length;
   const emptyTotal = outline.filter((x) => x.tone === "empty").length;
   const draftTotal = outline.filter((x) => x.tone === "draft").length;
@@ -1804,11 +2087,11 @@ function Paper({
           onClose={() => setMetaOpen(false)}
           onSaved={onMetaSaved}
         />
-        {visibleBlocks.map((b, i) => (
+        {visibleBlocks.map(({ b, idx }) => (
           <Block
-            key={b.key || i}
+            key={b.key || `blk-${idx}`}
             headingId={
-              b.kind === "h" && (b.level || 1) === 1 ? `doc-h-${i}` : undefined
+              b.kind === "h" && (b.level || 1) === 1 ? `doc-h-${idx}` : undefined
             }
             b={b}
             c={c}
@@ -1821,7 +2104,7 @@ function Paper({
       </article>
     </>
   );
-}
+});
 
 const CAUTION_RE = /注意|警告|WARN|严禁|务必|不可逆|必须确认|慎用|CAUTION|CRITICAL|DO NOT/i;
 const TERM_PROMPT_RE = /^(\[[^\]]+\][#$]\s+)(.*)$/;
@@ -2051,7 +2334,13 @@ function renderAnsibleLine(line: string, lineIdx: number): React.ReactNode {
   );
 }
 
-function DocCodeBlock({ text, style }: { text: string; style?: DocBlock["style"] }) {
+const DocCodeBlock = React.memo(function DocCodeBlock({
+  text,
+  style,
+}: {
+  text: string;
+  style?: DocBlock["style"];
+}) {
   useLang();
   const [copied, setCopied] = useState(false);
   const copyTimer = useRef<number | null>(null);
@@ -2066,8 +2355,12 @@ function DocCodeBlock({ text, style }: { text: string; style?: DocBlock["style"]
     (!style && (text.includes("TASK  ") || text.includes("PLAY  ") || text.includes("STEP_RESULT ")));
   const isTerminal = style === "terminal";
   const isShell = !isAnsible && !isTerminal;
-  const lines = text.replace(/\r\n/g, "\n").replace(/\n+$/, "").split("\n");
-  const copyPayload = isShell ? toPasteSafeShell(text).text : text;
+  const renderedLines = useMemo(() => {
+    const lines = text.replace(/\r\n/g, "\n").replace(/\n+$/, "").split("\n");
+    if (isTerminal) return lines.map((ln, idx) => renderTerminalLine(ln, idx));
+    if (isAnsible) return lines.map((ln, idx) => renderAnsibleLine(ln, idx));
+    return lines.map((ln, idx) => renderShellLine(ln, idx));
+  }, [text, isTerminal, isAnsible]);
 
   const copyBtn = text.trim() ? (
     <Tooltip content={copied ? bi("已复制", "Copied") : bi("复制内容", "Copy")} mini>
@@ -2076,7 +2369,7 @@ function DocCodeBlock({ text, style }: { text: string; style?: DocBlock["style"]
         className={`dc-code-copy ${copied ? "copied" : ""}`}
         aria-label={copied ? bi("已复制", "Copied") : bi("复制内容", "Copy")}
         onClick={() => {
-          copy(copyPayload);
+          copy(isShell ? toPasteSafeShell(text).text : text);
           setCopied(true);
           if (copyTimer.current) window.clearTimeout(copyTimer.current);
           copyTimer.current = window.setTimeout(() => setCopied(false), 1400);
@@ -2101,9 +2394,7 @@ function DocCodeBlock({ text, style }: { text: string; style?: DocBlock["style"]
           </span>
           {copyBtn}
         </div>
-        <pre className="dc-term-body">
-          {lines.map((ln, idx) => renderTerminalLine(ln, idx))}
-        </pre>
+        <pre className="dc-term-body">{renderedLines}</pre>
       </div>
     );
   }
@@ -2115,25 +2406,21 @@ function DocCodeBlock({ text, style }: { text: string; style?: DocBlock["style"]
           <span>{bi("Ansible 自动化日志", "Ansible Automation Log")}</span>
           {copyBtn}
         </div>
-        <pre className="dc-code dc-code-ans">
-          {lines.map((ln, idx) => renderAnsibleLine(ln, idx))}
-        </pre>
+        <pre className="dc-code dc-code-ans">{renderedLines}</pre>
       </div>
     );
   }
 
   return (
     <div className="dc-code-wrap is-shell">
-      <pre className="dc-code dc-code-shell">
-        {lines.map((ln, idx) => renderShellLine(ln, idx))}
-      </pre>
+      <pre className="dc-code dc-code-shell">{renderedLines}</pre>
       {copyBtn}
     </div>
   );
-}
+});
 
 /** Text with **bold** and "- " lists, as the Word file renders it. */
-function Rich({ text }: { text: string }) {
+const Rich = React.memo(function Rich({ text }: { text: string }) {
   const out: React.ReactNode[] = [];
   let items: string[] = [];
   const bold = (s: string) =>
@@ -2160,9 +2447,9 @@ function Rich({ text }: { text: string }) {
   }
   flush();
   return <>{out}</>;
-}
+});
 
-function Block({
+const Block = React.memo(function Block({
   b,
   headingId,
   c,
@@ -2278,7 +2565,7 @@ function Block({
       return <Section b={b} c={c} d={d} aiOn={aiOn} canAI={canAI} onSaved={onSaved} />;
   }
   return null;
-}
+});
 
 /** A section people write: empty, an assistant draft waiting for confirmation, or confirmed text. */
 function Section({
@@ -2300,6 +2587,7 @@ function Section({
   const [edit, setEdit] = useState(false);
   const [text, setText] = useState(b.text || "");
   const [asking, setAsking] = useState(false);
+  const [showClarify, setShowClarify] = useState(false);
   const [ask, setAsk] = useState("");
   const [busy, setBusy] = useState<"" | "save" | "draft">("");
   const [questions, setQuestions] = useState<
@@ -2311,6 +2599,24 @@ function Section({
   const has = !!(b.text || "").trim();
   const draft = has && b.source === "ai" && !b.confirmed;
   const url = `/api/clusters/${c.id}/docs/${d.id}/sections/${b.key}`;
+  const clarifyItems =
+    d.kind === "delivery" &&
+    (b.key === "summary" || b.key === "risks" || b.key === "acceptance")
+      ? d.clarifications || []
+      : [];
+  const hasUnansweredClarify = clarifyItems.some(
+    (it) => !it.optional && !(it.answer || "").trim(),
+  );
+
+  const openAIDraftFlow = () => {
+    if (clarifyItems.length > 0 && hasUnansweredClarify && !showClarify) {
+      setAsking(false);
+      setShowClarify(true);
+      return;
+    }
+    setShowClarify(false);
+    setAsking((x) => !x);
+  };
 
   const save = async (t: string, confirmed: boolean) => {
     if (busy) return;
@@ -2332,6 +2638,7 @@ function Section({
     if (busy) return;
     setBusy("draft");
     setAsking(false);
+    setShowClarify(false);
     try {
       const r = await api<
         ClusterDoc & { questions?: { question: string; options?: string[] }[] }
@@ -2421,7 +2728,7 @@ function Section({
                 shape="round"
                 className="ai-pill"
                 icon={<Spark size={12} rainbow />}
-                onClick={() => setAsking((x) => !x)}
+                onClick={openAIDraftFlow}
               >
                 {has ? bi("重新起草", "Redraft") : bi("AI 起草", "AI Draft")}
               </Button>
@@ -2429,6 +2736,18 @@ function Section({
           </span>
         )}
       </div>
+      {showClarify && clarifyItems.length > 0 && busy !== "draft" && (
+        <DeliveryClarifyCard
+          items={clarifyItems}
+          inline
+          busy={Boolean(busy)}
+          submitLabel={bi("确认口径并起草本节", "Confirm & Draft Section")}
+          skipLabel={bi("跳过，直接起草", "Skip & Draft")}
+          onSubmit={(ans) => void runDraft(ans)}
+          onSkip={() => void runDraft()}
+          onClose={() => setShowClarify(false)}
+        />
+      )}
       {asking && (
         <div className="dc-ask">
           <Input
@@ -2436,13 +2755,24 @@ function Section({
             value={ask}
             onChange={setAsk}
             placeholder={bi(
-              "补充要求（可选），例如：写得简短些；强调备份还没有定时任务",
-              "Additional instructions (optional), e.g., keep it brief; note backups have no cron yet",
+              "补充要求（可选），例如：写得简短些；仅保留实际未闭环事项",
+              "Additional instructions (optional), e.g., keep it concise",
             )}
             onPressEnter={() => runDraft()}
             autoFocus
             aria-label={bi("给 AI 的补充要求", "Instructions for AI")}
           />
+          {clarifyItems.length > 0 && (
+            <Button
+              size="small"
+              onClick={() => {
+                setAsking(false);
+                setShowClarify(true);
+              }}
+            >
+              {bi("调整交付口径", "Adjust Scope")}
+            </Button>
+          )}
           <Button size="small" type="primary" onClick={() => runDraft()}>
             {bi("开始起草", "Generate Draft")}
           </Button>
@@ -2587,7 +2917,7 @@ function Section({
                 <button
                   type="button"
                   className="link"
-                  onClick={() => setAsking(true)}
+                  onClick={openAIDraftFlow}
                 >
                   {bi("让 AI 起草", "Draft with AI")}
                 </button>
@@ -2674,8 +3004,14 @@ function ExportDialog({
             icon={<IconDownload />}
             disabled={!sel.length}
             onClick={() => {
-              window.location.href = withLang(url);
+              const targetUrl = withLang(url);
+              const fallback =
+                sel.length > 1 && merge === "each"
+                  ? `${c.id}-docs.zip`
+                  : `${c.id}-report.docx`;
               close();
+              Message.info(bi("正在生成并下载文档…", "Preparing document download…"));
+              void downloadFile(targetUrl, fallback);
             }}
           >
             {sel.length > 1 && merge === "each"

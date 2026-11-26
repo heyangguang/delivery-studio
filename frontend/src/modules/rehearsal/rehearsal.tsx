@@ -51,8 +51,10 @@ import {
   IconUpload,
 } from "@arco-design/web-react/icon";
 import {
-  ClusterAutomationDrawer,
+  type ExecutionAgentChoice,
   LiveExecLogCard,
+  SelectExecutionAgentModal,
+  navigateToClusterAutomation,
   pollRehearsalExecTask,
 } from "../automation/rehearsal-automation";
 import {
@@ -77,6 +79,7 @@ import {
   can,
   copy,
   csrfToken,
+  downloadFile,
   toPasteSafeShell,
   unwrapOuterPasteGroup,
   err,
@@ -101,6 +104,14 @@ import type {
   RehearsalTraceStep,
   ScopeQuestion,
 } from "../../shared/shared";
+import {
+  RehearsalAIProcess,
+  RehearsalThinkingContent,
+  markLiveStateError,
+  renderThinkingInline,
+  streamPipelineSSE,
+  type LiveAIState as SharedLiveAIState,
+} from "../../shared/ai-process";
 import { SchemeInfo, schemeName } from "../../design/scheme";
 import { go } from "../../app/router";
 import { Segmented, Smooth } from "../../design/ui";
@@ -307,22 +318,7 @@ type LivePipelineKind =
   | "verify"
   | "troubleshoot";
 
-type LiveAIState = {
-  kind: LivePipelineKind;
-  title: string;
-  startedAt: number;
-  model?: string;
-  provider?: string;
-  failover?: boolean;
-  steps: RehearsalTraceStep[];
-  thinking: string;
-  phase: string;
-  chars: number;
-  error?: string;
-  errorCode?: number;
-  errorAt?: number;
-  errorDiag?: AICallDiag;
-};
+type LiveAIState = SharedLiveAIState<LivePipelineKind>;
 
 function buildInitialPipelineSteps(kind: LivePipelineKind): RehearsalTraceStep[] {
   if (kind === "scope") {
@@ -757,593 +753,19 @@ function createInitialLiveState(
   };
 }
 
-function cleanClientErrText(raw: string): string {
-  let s = (raw || "").trim();
-  const fallback = bi(
-    "AI 模型通道调用中断，请稍后重试",
-    "AI model channel interrupted; please try again later",
-  );
-  if (!s) return fallback;
-  // Strip empty proxy JSON tails such as `: {"error":{"code":"server_error","message":""}}`
-  s = s.replace(
-    /[:\s]*\{\s*"error"\s*:\s*\{[^}]*"message"\s*:\s*""[^}]*\}\s*\}\s*$/i,
-    "",
-  );
-  s = s.replace(/[:\s]*\{\s*\}\s*$/, "").trim();
-  return s || fallback;
-}
-
-function extractDiagFromError(rawErr: unknown): AICallDiag | undefined {
-  if (!(rawErr instanceof ApiError) || !rawErr.body || typeof rawErr.body !== "object") {
-    return undefined;
-  }
-  const body = rawErr.body as Record<string, unknown>;
-  if (body.diag && typeof body.diag === "object") {
-    return body.diag as AICallDiag;
-  }
-  return undefined;
-}
-
-function markLiveStateError(prev: LiveAIState, rawErr: unknown): LiveAIState {
-  const msg = cleanClientErrText(
-    rawErr instanceof Error
-      ? rawErr.message
-      : String(rawErr || bi("AI 模型通道调用中断", "AI model channel interrupted")),
-  );
-  const bodyDiag = extractDiagFromError(rawErr);
-  const stepDiag = [...prev.steps]
-    .reverse()
-    .find((s) => (s.status === "error" || s.ok === false) && s.diag)?.diag;
-  const finalDiag = bodyDiag || prev.errorDiag || stepDiag;
-  const rawCode = rawErr instanceof ApiError ? rawErr.status : undefined;
-  const code =
-    finalDiag?.http_status &&
-    finalDiag.http_status > 0 &&
-    (!rawCode || rawCode === 502)
-      ? finalDiag.http_status
-      : rawCode;
-
-  const hasExplicitErr = prev.steps.some(
-    (s) => s.status === "error" || s.ok === false,
-  );
-  let nextSteps = prev.steps;
-  if (!hasExplicitErr && prev.steps.length > 0) {
-    let failIdx = prev.steps.findIndex((s) => s.status === "running");
-    if (failIdx < 0) {
-      failIdx = prev.steps.findIndex((s) => s.id === "connect-model");
-    }
-    if (failIdx < 0) {
-      failIdx = prev.steps.findIndex((s) => s.status === "pending");
-    }
-    if (failIdx < 0) failIdx = prev.steps.length - 1;
-    nextSteps = prev.steps.map((s, idx) =>
-      idx === failIdx
-        ? {
-            ...s,
-            status: "error",
-            ok: false,
-            detail: msg,
-            diag: s.diag || finalDiag,
-          }
-        : s,
-    );
-  }
-  return {
-    ...prev,
-    model: prev.model || finalDiag?.model,
-    provider: prev.provider || finalDiag?.provider,
-    steps: nextSteps,
-    error: msg,
-    errorCode: code,
-    errorAt: Date.now(),
-    errorDiag: finalDiag,
-  };
-}
-
-function parseAIErrorGuide(
-  errMsg: string,
-  errCode?: number,
-  diag?: AICallDiag,
-): {
-  badge: string;
-  summary: string;
-  hint: string;
-  suggestSettings: boolean;
-} {
-  const lower = errMsg.toLowerCase();
-  const httpStatus =
-    diag?.http_status && diag.http_status > 0
-      ? diag.http_status
-      : errCode && errCode >= 100 && errCode !== 502
-        ? errCode
-        : undefined;
-  const reasonCode = diag?.reason_code || "";
-
-  if (
-    reasonCode === "empty_output" ||
-    (httpStatus === 200 &&
-      diag?.out_tokens === 0 &&
-      typeof diag?.in_tokens === "number")
-  ) {
-    const inPart =
-      typeof diag?.in_tokens === "number" && diag.in_tokens > 0
-        ? bi(
-            `已接收 ${diag.in_tokens.toLocaleString("en-US")} 输入 Token${
-              diag.cached_tokens
-                ? `（缓存 ${diag.cached_tokens.toLocaleString("en-US")}）`
-                : ""
-            }`,
-            `received ${diag.in_tokens.toLocaleString("en-US")} input tokens${
-              diag.cached_tokens
-                ? ` (${diag.cached_tokens.toLocaleString("en-US")} cached)`
-                : ""
-            }`,
-          )
-        : bi("已返回成功状态码", "returned success status");
-    return {
-      badge: bi(
-        `HTTP ${httpStatus || 200} · 空输出响应 (0 Token)`,
-        `HTTP ${httpStatus || 200} · Empty output (0 tokens)`,
-      ),
-      summary: bi(
-        `上游模型网关${inPart}，但响应体 output: [] 为空，未生成任何有效输出 Token。`,
-        `Upstream gateway ${inPart}, but output: [] was empty with 0 tokens generated.`,
-      ),
-      hint: bi(
-        "常见于中转网关（如 Magpie / OneAPI）在 Responses 协议下转译 Claude 等非 OpenAI 模型时丢失输出流，或上游渠道中途断流、欠费截断。建议前往「设置 → AI」将该供应商接口方式改为「Chat Completions（通用）」，或检查上游渠道额度后重试。",
-        "Often caused by proxy gateways (e.g. Magpie / OneAPI) dropping streams when translating non-OpenAI models via Responses API, or upstream truncation/quota limits. Switch the provider API mode to Chat Completions in Settings → AI or check upstream quota and retry.",
-      ),
-      suggestSettings: true,
-    };
-  }
-
-  if (
-    httpStatus === 402 ||
-    lower.includes("402") ||
-    lower.includes("payment required") ||
-    lower.includes("insufficient") ||
-    lower.includes("quota") ||
-    lower.includes("balance") ||
-    errMsg.includes("额度") ||
-    errMsg.includes("余额") ||
-    errMsg.includes("欠费")
-  ) {
-    const afterFallback = Boolean(diag?.attempts && diag.attempts.length > 1);
-    return {
-      badge: bi(
-        `HTTP ${httpStatus || 402} · 额度或计费受限`,
-        `HTTP ${httpStatus || 402} · Quota or billing limit`,
-      ),
-      summary: afterFallback
-        ? bi(
-            `平台自动回退兼容重试后，上游模型渠道返回 HTTP ${httpStatus || 402} 配额或计费限制（Payment Required）。`,
-            `After automatic fallback retry, upstream returned HTTP ${httpStatus || 402} (Payment Required).`,
-          )
-        : bi(
-            `上游模型网关返回 HTTP ${httpStatus || 402} 配额或计费限制（Payment Required），当前渠道未能接收推演请求。`,
-            `Upstream gateway returned HTTP ${httpStatus || 402} (Payment Required); the channel rejected the request.`,
-          ),
-      hint: bi(
-        "您填写的变更诉求与截图已完整保留。请核查网关下游渠道余额，或前往「设置 → AI」切换其他可用模型后点击「重新发起」。",
-        "Your change goal and screenshots are preserved. Check channel balance or switch models in Settings → AI, then click Retry.",
-      ),
-      suggestSettings: true,
-    };
-  }
-
-  if (
-    httpStatus === 401 ||
-    httpStatus === 403 ||
-    lower.includes("401") ||
-    lower.includes("403") ||
-    lower.includes("unauthorized") ||
-    lower.includes("forbidden") ||
-    lower.includes("invalid api key") ||
-    errMsg.includes("密钥") ||
-    errMsg.includes("鉴权")
-  ) {
-    return {
-      badge: httpStatus
-        ? bi(`HTTP ${httpStatus} · 模型鉴权未通过`, `HTTP ${httpStatus} · Auth failed`)
-        : bi("模型鉴权未通过", "Authentication failed"),
-      summary: bi(
-        `上游模型网关返回 ${httpStatus ? `HTTP ${httpStatus} ` : ""}鉴权拒绝，当前访问密钥无效或无权调用该模型。`,
-        `Upstream gateway rejected ${httpStatus ? `(HTTP ${httpStatus}) ` : ""}authentication; API key is invalid or lacks model access.`,
-      ),
-      hint: bi(
-        "请前往「设置 → AI」核对模型供应商密钥与变更演练绑定模型，保存后点击「重新发起」。",
-        "Verify the provider API key and bound model in Settings → AI, save, and click Retry.",
-      ),
-      suggestSettings: true,
-    };
-  }
-
-  if (
-    httpStatus === 429 ||
-    lower.includes("429") ||
-    lower.includes("rate limit") ||
-    lower.includes("too many") ||
-    errMsg.includes("限流") ||
-    errMsg.includes("并发")
-  ) {
-    return {
-      badge: bi(
-        `HTTP ${httpStatus || 429} · 网关并发限流`,
-        `HTTP ${httpStatus || 429} · Rate limited`,
-      ),
-      summary: bi(
-        `上游模型通道返回 HTTP ${httpStatus || 429} 速率或并发保护限制。`,
-        `Upstream channel returned HTTP ${httpStatus || 429} rate or concurrency limit.`,
-      ),
-      hint: bi(
-        "稍候几秒即可点击「重新发起」重试，或在「设置 → AI」中配置备用模型节点。",
-        "Wait a few seconds and click Retry, or configure a fallback model in Settings → AI.",
-      ),
-      suggestSettings: true,
-    };
-  }
-
-  if (
-    httpStatus === 404 ||
-    lower.includes("model_not_found") ||
-    lower.includes("not found") ||
-    errMsg.includes("不存在")
-  ) {
-    return {
-      badge: httpStatus
-        ? bi(`HTTP ${httpStatus} · 端点或模型未找到`, `HTTP ${httpStatus} · Endpoint or model not found`)
-        : bi("模型标识未找到", "Model ID not found"),
-      summary: bi(
-        `上游网关返回 ${httpStatus ? `HTTP ${httpStatus}` : "404"}，未找到目标接口路径或当前配置的模型标识。`,
-        `Upstream gateway returned ${httpStatus ? `HTTP ${httpStatus}` : "404"}; endpoint path or configured model ID was not found.`,
-      ),
-      hint: bi(
-        "请前往「设置 → AI」检查模型名称与 Base URL；若使用中转网关且不支持 /responses，建议切换接口方式为「Chat Completions（通用）」。",
-        "Check the model name and Base URL in Settings → AI; if your proxy does not support /responses, switch API mode to Chat Completions.",
-      ),
-      suggestSettings: true,
-    };
-  }
-
-  if (reasonCode === "incomplete") {
-    return {
-      badge: bi(
-        `${httpStatus ? `HTTP ${httpStatus} · ` : ""}模型输出截断`,
-        `${httpStatus ? `HTTP ${httpStatus} · ` : ""}Output truncated`,
-      ),
-      summary: bi(
-        `上游模型在完成完整结构化输出前提前中止（状态：${diag?.upstream_status || "incomplete"}）。`,
-        `Upstream model stopped before completing structured output (status: ${diag?.upstream_status || "incomplete"}).`,
-      ),
-      hint: bi(
-        "常见于网关单次最大输出 Token 限制偏小或响应中途断流；可直接点击「重新发起」或在「设置 → AI」切换模型。",
-        "Usually caused by low max-output token limits or mid-stream drops. Click Retry or switch models in Settings → AI.",
-      ),
-      suggestSettings: true,
-    };
-  }
-
-  if (reasonCode === "invalid_output") {
-    return {
-      badge: bi(
-        `${httpStatus ? `HTTP ${httpStatus} · ` : ""}返回格式不完整`,
-        `${httpStatus ? `HTTP ${httpStatus} · ` : ""}Malformed output`,
-      ),
-      summary: bi(
-        "上游模型已返回文本，但未包含完整可解析的 JSON 结果（可能输出中途截断或模型未按结构化要求输出）。",
-        "Model returned text without complete parseable JSON (output may be truncated or unstructured).",
-      ),
-      hint: bi(
-        "您的输入已完整保留；可展开下方「查看网关原始诊断报文」查看模型实际输出，或直接点击「重新发起」重试。",
-        "Your input is preserved; expand Raw Gateway Diagnostics below to inspect output, or click Retry.",
-      ),
-      suggestSettings: true,
-    };
-  }
-
-  if (reasonCode === "sse_error") {
-    return {
-      badge: bi(
-        `${httpStatus ? `HTTP ${httpStatus} · ` : ""}SSE 流式帧报错`,
-        `${httpStatus ? `HTTP ${httpStatus} · ` : ""}SSE stream error`,
-      ),
-      summary: bi(
-        "模型网关建立流式连接后，在推送 SSE 事件流中途返回了上游错误帧。",
-        "Gateway opened stream but returned an upstream error frame mid-stream.",
-      ),
-      hint: bi(
-        "可展开下方「查看网关原始诊断报文」定位上游具体错误内容，修复或切换模型后点击「重新发起」。",
-        "Expand Raw Gateway Diagnostics below for upstream details, then fix or switch model and click Retry.",
-      ),
-      suggestSettings: true,
-    };
-  }
-
-  if (
-    reasonCode === "timeout" ||
-    reasonCode === "network_error" ||
-    errCode === 0 ||
-    httpStatus === 504 ||
-    lower.includes("timeout") ||
-    lower.includes("timed out") ||
-    lower.includes("unable to connect") ||
-    lower.includes("disconnected") ||
-    errMsg.includes("超时") ||
-    errMsg.includes("无法连接") ||
-    errMsg.includes("断开")
-  ) {
-    return {
-      badge: bi(
-        `${httpStatus ? `HTTP ${httpStatus} · ` : ""}网关连接超时或中断`,
-        `${httpStatus ? `HTTP ${httpStatus} · ` : ""}Connection timeout or drop`,
-      ),
-      summary: bi(
-        "连接上游模型服务超时或网络层中断，本次推演已安全中止。",
-        "Connection to upstream AI service timed out or dropped; run safely aborted.",
-      ),
-      hint: bi(
-        "您输入的变更内容已完整保留；确认模型网关网络可达后点击「重新发起」即可继续。",
-        "Your inputs are preserved; ensure gateway connectivity and click Retry.",
-      ),
-      suggestSettings: true,
-    };
-  }
-
-  if (httpStatus && httpStatus >= 400) {
-    return {
-      badge: bi(
-        `HTTP ${httpStatus} · 网关错误响应`,
-        `HTTP ${httpStatus} · Gateway error`,
-      ),
-      summary: bi(
-        `上游模型网关返回 HTTP ${httpStatus}${diag?.endpoint ? `（${diag.endpoint}）` : ""}，本次推演未完成落库。`,
-        `Upstream gateway returned HTTP ${httpStatus}${diag?.endpoint ? ` (${diag.endpoint})` : ""}; nothing was saved.`,
-      ),
-      hint: bi(
-        "您填写的内容均已保留；可展开下方「查看网关原始诊断报文」核查上游具体报错，或前往「设置 → AI」切换模型重试。",
-        "Your inputs are preserved; expand Raw Gateway Diagnostics or switch models in Settings → AI.",
-      ),
-      suggestSettings: true,
-    };
-  }
-
-  return {
-    badge: bi("模型通道调用异常", "Model channel error"),
-    summary: bi(
-      "模型网关未返回可解析的演练结果，本次推演未写入残缺记录。",
-      "Gateway returned no parseable result; no partial record was saved.",
-    ),
-    hint: bi(
-      "您填写的内容均已保留，可直接点击「重新发起」重试；若持续报错请查看网关诊断详情或在「设置 → AI」切换可用模型。",
-      "Your inputs are preserved. Click Retry, or check diagnostics / switch model in Settings → AI.",
-    ),
-    suggestSettings: true,
-  };
-}
-
-function formatDiagReport(live: LiveAIState, diag?: AICallDiag): string {
-  const payload = {
-    time: new Date(live.errorAt || Date.now()).toISOString(),
-    pipeline: live.kind,
-    error: live.error,
-    error_code: live.errorCode,
-    provider: diag?.provider || live.provider || undefined,
-    model: diag?.model || live.model || undefined,
-    diag: diag || null,
-  };
-  return JSON.stringify(payload, null, 2);
-}
-
-function describeAttemptOutcome(att: AIAttemptDiag): string {
-  if (att.reason) return att.reason;
-  if (
-    att.http_status === 200 &&
-    att.out_tokens === 0 &&
-    typeof att.in_tokens === "number"
-  ) {
-    return bi("空响应 (0 Token)", "Empty (0 tokens)");
-  }
-  if (att.http_status === 402) return "Payment Required";
-  if (att.http_status === 401 || att.http_status === 403)
-    return bi("鉴权拒绝", "Auth denied");
-  if (att.http_status === 429) return bi("速率受限", "Rate limited");
-  if (att.http_status === 404) return bi("端点未找到", "Not found");
-  if (att.upstream_status) return att.upstream_status;
-  return "";
-}
-
-async function streamRehearsalAPI(
+function streamRehearsalAPI(
   path: string,
   body: unknown,
   onEvent: (updater: (prev: LiveAIState) => LiveAIState) => void,
   signal?: AbortSignal,
 ): Promise<ChangeRehearsal> {
-  const sep = path.includes("?") ? "&" : "?";
-  const url = `${path}${sep}stream=1`;
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      method: "POST",
-      credentials: "same-origin",
-      signal,
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "text/event-stream",
-        "X-CSRF-Token": csrfToken(),
-        "X-Lang": getLang(),
-      },
-      body: JSON.stringify(body),
-    });
-  } catch (e) {
-    if (signal?.aborted) throw e;
-    throw new ApiError(
-      navigator.onLine
-        ? bi(
-            "无法连接到 Kyndryl Delivery Studio 后端服务（可能正在重启），请稍后重试",
-            "Unable to connect to Kyndryl Delivery Studio backend (may be restarting); please try again later",
-          )
-        : bi("本机网络已断开，请检查网络连接", "Device network disconnected"),
-      0,
-    );
-  }
-
-  const ct = res.headers.get("content-type") || "";
-  if (!res.ok || !ct.includes("text/event-stream") || !res.body) {
-    const txt = await res.text();
-    let parsed: Record<string, unknown> = {};
-    try {
-      parsed = txt ? (JSON.parse(txt) as Record<string, unknown>) : {};
-    } catch {
-      if (!res.ok) {
-        throw new ApiError(
-          bi(
-            `Kyndryl Delivery Studio 后端服务暂时不可用（HTTP ${res.status}）`,
-            `Kyndryl Delivery Studio backend temporarily unavailable (HTTP ${res.status})`,
-          ),
-          res.status,
-        );
-      }
-    }
-    if (!res.ok) {
-      throw new ApiError(
-        (typeof parsed.error === "string" && parsed.error) ||
-          bi(`请求失败（${res.status}）`, `Request failed (${res.status})`),
-        res.status,
-        parsed,
-      );
-    }
-    return parsed as unknown as ChangeRehearsal;
-  }
-
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buf = "";
-  let finalResult: ChangeRehearsal | null = null;
-
-  const handlePayload = (rawLine: string) => {
-    const trimmed = rawLine.trim();
-    if (!trimmed.startsWith("data:")) return;
-    const jsonStr = trimmed.slice(5).trim();
-    if (!jsonStr) return;
-    let ev: Record<string, unknown>;
-    try {
-      ev = JSON.parse(jsonStr) as Record<string, unknown>;
-    } catch {
-      return;
-    }
-    const kind = String(ev.t || "");
-    if (kind === "steps" && Array.isArray(ev.steps)) {
-      const serverSteps = ev.steps as RehearsalTraceStep[];
-      onEvent((prev) => ({
-        ...prev,
-        steps: serverSteps,
-      }));
-    } else if (kind === "step" && ev.step) {
-      const st = ev.step as RehearsalTraceStep;
-      onEvent((prev) => {
-        const idx = prev.steps.findIndex((x) => x.id === st.id);
-        const nextSteps =
-          idx >= 0
-            ? prev.steps.map((x, i) => (i === idx ? st : x))
-            : [...prev.steps, st];
-        const nextErrDiag =
-          (st.status === "error" || st.ok === false) && st.diag
-            ? st.diag
-            : prev.errorDiag;
-        return { ...prev, steps: nextSteps, errorDiag: nextErrDiag };
-      });
-    } else if (kind === "meta") {
-      onEvent((prev) => ({
-        ...prev,
-        model: typeof ev.model === "string" ? ev.model : prev.model,
-        provider: typeof ev.provider === "string" ? ev.provider : prev.provider,
-        failover: Boolean(ev.failover),
-      }));
-    } else if (kind === "think") {
-      const chunk = typeof ev.v === "string" ? ev.v : "";
-      if (chunk) {
-        onEvent((prev) => ({
-          ...prev,
-          thinking: prev.thinking + chunk,
-        }));
-      }
-    } else if (kind === "phase") {
-      const ph = typeof ev.v === "string" ? ev.v : "";
-      if (ph) {
-        onEvent((prev) => ({ ...prev, phase: ph }));
-      }
-    } else if (kind === "progress") {
-      const chars = typeof ev.chars === "number" ? ev.chars : 0;
-      if (chars > 0) {
-        onEvent((prev) => ({ ...prev, chars }));
-      }
-    } else if (kind === "done" && ev.rehearsal) {
-      finalResult = ev.rehearsal as ChangeRehearsal;
-    } else if (kind === "error") {
-      const msg =
-        typeof ev.v === "string" && ev.v
-          ? ev.v
-          : bi("AI 处理中断，请稍后重试", "AI processing interrupted; please try again later");
-      const code = typeof ev.code === "number" ? ev.code : 502;
-      const diag =
-        ev.diag && typeof ev.diag === "object"
-          ? (ev.diag as AICallDiag)
-          : undefined;
-      throw new ApiError(msg, code, diag ? { diag } : undefined);
-    }
-  };
-
-  const onAbortRead = () => {
-    void reader.cancel().catch(() => {});
-  };
-  signal?.addEventListener("abort", onAbortRead, { once: true });
-  try {
-    while (true) {
-      const { value, done } = await reader.read();
-      if (signal?.aborted) {
-        throw new DOMException("Aborted", "AbortError");
-      }
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      let nl = buf.indexOf("\n");
-      while (nl >= 0) {
-        const line = buf.slice(0, nl);
-        buf = buf.slice(nl + 1);
-        handlePayload(line);
-        nl = buf.indexOf("\n");
-      }
-    }
-    if (signal?.aborted) {
-      throw new DOMException("Aborted", "AbortError");
-    }
-    if (buf.trim()) {
-      for (const line of buf.split("\n")) {
-        handlePayload(line);
-      }
-    }
-  } catch (e) {
-    if (signal?.aborted || (e as Error)?.name === "AbortError") throw e;
-    if (e instanceof ApiError) throw e;
-    throw new ApiError(
-      bi(
-        "与 Kyndryl Delivery Studio 后端服务的流式连接意外中断（可能正在重启或网络抖动），请重试",
-        "Streaming connection to Kyndryl Delivery Studio backend was interrupted; please retry",
-      ),
-      0,
-    );
-  } finally {
-    signal?.removeEventListener("abort", onAbortRead);
-  }
-  if (!finalResult) {
-    throw new ApiError(
-      bi(
-        "与 Kyndryl Delivery Studio 后端服务的连接在生成完成前关闭，请重试",
-        "Connection to Kyndryl Delivery Studio backend closed before generation completed; please retry",
-      ),
-      502,
-    );
-  }
-  return finalResult;
+  return streamPipelineSSE<ChangeRehearsal, LivePipelineKind>(
+    path,
+    body,
+    onEvent,
+    signal,
+    (ev) => (ev.rehearsal ? (ev.rehearsal as ChangeRehearsal) : null),
+  );
 }
 
 /* ---------- Client-Side Image Attachment Helpers ---------- */
@@ -1860,2089 +1282,7 @@ const ShellCodeBlock = React.memo(function ShellCodeBlock({
   );
 });
 
-/* ---------- Live & Persisted AI Choreographed Pipeline Card ---------- */
-
-function fmtElapsedMs(ms?: number) {
-  if (!ms || ms < 80) return "";
-  if (ms < 1000) return `${ms}ms`;
-  const sec = ms / 1000;
-  if (sec < 60) return `${sec.toFixed(1)}s`;
-  return `${Math.floor(sec / 60)}m ${Math.round(sec % 60)}s`;
-}
-
-function fmtStepDuration(ms?: number) {
-  if (!ms || ms < 30) return bi("已就绪", "Ready");
-  if (ms < 1000) return `${ms}ms`;
-  const sec = ms / 1000;
-  if (sec < 60) return `${sec.toFixed(1)}s`;
-  return `${Math.floor(sec / 60)}m ${Math.round(sec % 60)}s`;
-}
-
-function pendingHintForStep(st: RehearsalTraceStep): string {
-  switch (st.kind) {
-    case "guard":
-      return bi(
-        "等待基线上下文读取完成后执行脱敏与安全红线校验",
-        "Waiting for baseline read to scrub secrets & run safety checks",
-      );
-    case "connect":
-      return bi(
-        "等待前序安全校验完成后建立模型流式通道",
-        "Waiting for safety checks to open AI model stream",
-      );
-    case "think":
-      return bi(
-        "等待模型网关返回首包 Token 后展开实时推演",
-        "Waiting for first token from model gateway",
-      );
-    case "synthesize":
-      return bi(
-        "等待架构风险推演完成后编排结构化结果",
-        "Waiting for analysis to structure final output",
-      );
-    default:
-      return bi("等待前序环节完成", "Waiting for previous step");
-  }
-}
-
-function computeTargetStepIndex(steps: RehearsalTraceStep[]): number {
-  if (steps.length === 0) return 0;
-  const errIdx = steps.findIndex(
-    (s) => s.status === "error" || s.ok === false,
-  );
-  if (errIdx >= 0) return errIdx;
-  const idx = steps.findIndex(
-    (s) => s.status === "running" || s.status === "pending",
-  );
-  return idx === -1 ? steps.length : idx;
-}
-
-type CartoonScene =
-  | "inspect"
-  | "guard"
-  | "connect"
-  | "think"
-  | "synthesize"
-  | "error";
-
-function resolveCartoonScene(
-  step: RehearsalTraceStep | undefined,
-  hasError: boolean,
-): CartoonScene {
-  if (hasError) return "error";
-  if (!step) return "inspect";
-  if (step.id === "readonly-ast-guard") return "synthesize";
-  switch (step.kind) {
-    case "inspect":
-      return "inspect";
-    case "guard":
-      return "guard";
-    case "connect":
-      return "connect";
-    case "think":
-      return "think";
-    case "synthesize":
-      return "synthesize";
-    default:
-      return "think";
-  }
-}
-
-const LiveElapsedSpan = React.memo(function LiveElapsedSpan({
-  startedAt,
-  endedAt,
-  integer = false,
-  prefix = "",
-  suffix = "s",
-  className,
-}: {
-  startedAt: number;
-  endedAt?: number;
-  integer?: boolean;
-  prefix?: string;
-  suffix?: string;
-  className?: string;
-}) {
-  const [now, setNow] = useState(() => endedAt || Date.now());
-  useEffect(() => {
-    if (endedAt) {
-      setNow(endedAt);
-      return;
-    }
-    setNow(Date.now());
-    const timer = window.setInterval(() => {
-      setNow(Date.now());
-    }, 120);
-    return () => window.clearInterval(timer);
-  }, [startedAt, endedAt]);
-
-  const end = endedAt || now;
-  const sec = Math.max(0.1, (end - startedAt) / 1000);
-  const formatted = integer ? String(Math.floor(sec)) : sec.toFixed(1);
-  return (
-    <span className={className}>
-      {prefix}
-      {formatted}
-      {suffix}
-    </span>
-  );
-});
-
-const RehearsalStageCartoon = React.memo(function RehearsalStageCartoon({
-  scene,
-  stepTitle,
-  stepDetail,
-  provider,
-  model,
-  waitStartedAt,
-  errorBadge,
-}: {
-  scene: CartoonScene;
-  stepTitle: string;
-  stepDetail?: string;
-  provider?: string;
-  model?: string;
-  waitStartedAt?: number;
-  errorBadge?: string;
-}) {
-  useLang();
-  const actMeta: Record<
-    CartoonScene,
-    { tag: string; headline: string; sub: React.ReactNode }
-  > = {
-    inspect: {
-      tag: bi("ACT 01 · 基线扫描", "ACT 01 · BASELINE SCAN"),
-      headline:
-        stepTitle ||
-        bi(
-          "扫描集群初始交付拓扑与参数基线",
-          "Scanning initial delivery topology & baseline params",
-        ),
-      sub:
-        stepDetail ||
-        bi(
-          "逐节点提取主从角色、端口与关键配置，构建演练数字沙盘",
-          "Extracting node roles, ports & key configs to build rehearsal sandbox",
-        ),
-    },
-    guard: {
-      tag: bi("ACT 02 · 安全脱敏", "ACT 02 · REDACTION"),
-      headline:
-        stepTitle ||
-        bi(
-          "敏感凭据自动剥离与只读红线锁定",
-          "Stripping credentials & locking read-only guardrails",
-        ),
-      sub:
-        stepDetail ||
-        bi(
-          "口令、私钥与连接串在本地安检门全部擦除，仅放行架构元数据",
-          "Passwords, keys & DSNs scrubbed locally; only topology metadata passes",
-        ),
-    },
-    connect: {
-      tag: bi("ACT 03 · 网关握手", "ACT 03 · GATEWAY HANDSHAKE"),
-      headline:
-        stepTitle ||
-        bi(
-          "平台底座正在与 AI 模型网关双向握手",
-          "Handshaking with AI model gateway",
-        ),
-      sub: stepDetail || (
-        <>
-          {bi(
-            `正在向 ${provider || "模型网关"}${model ? ` (${model})` : ""} 投递脱敏基线并等待首包响应`,
-            `Sending redacted baseline to ${provider || "model gateway"}${model ? ` (${model})` : ""} and awaiting first token`,
-          )}
-          {waitStartedAt ? (
-            <LiveElapsedSpan
-              startedAt={waitStartedAt}
-              prefix=" · "
-              suffix="s"
-              className="num"
-            />
-          ) : null}
-        </>
-      ),
-    },
-    think: {
-      tag: bi("ACT 04 · 沙盘推演", "ACT 04 · REASONING"),
-      headline:
-        stepTitle ||
-        bi(
-          "握手已建立 · 正在推演高可用变更路径",
-          "Connected · Reasoning HA-safe change path",
-        ),
-      sub:
-        stepDetail ||
-        bi(
-          "遵循「从库先行、主库守卫、随时可回退」原则逐节点模拟变更影响",
-          "Simulating impact node-by-node: replicas first, primary guarded, always reversible",
-        ),
-    },
-    synthesize: {
-      tag: bi("ACT 05 · 方案签章", "ACT 05 · FINALIZING"),
-      headline:
-        stepTitle ||
-        bi(
-          "编排结构化演练清单并加盖安全校验章",
-          "Structuring runbook & stamping safety verification",
-        ),
-      sub:
-        stepDetail ||
-        bi(
-          "收敛模型推演结论，完成静态安全红线复核与可执行步骤封装",
-          "Consolidating findings, verifying safety rules & packaging executable steps",
-        ),
-    },
-    error: {
-      tag: errorBadge || bi("通道熔断保护", "CIRCUIT BREAKER"),
-      headline: bi(
-        "模型网关握手中断 · 本地安全熔断已介入",
-        "Gateway handshake interrupted · Safety breaker active",
-      ),
-      sub: bi(
-        "生产与测试数据零改动，您填写的变更诉求与截图已完整保留，可随时重试",
-        "Zero changes made; your inputs and screenshots are preserved for retry",
-      ),
-    },
-  };
-
-  const cur = actMeta[scene];
-
-  return (
-    <div className={`rh-cartoon-stage is-${scene}`} aria-hidden>
-      <div className="rh-cartoon-canvas" key={scene}>
-        {scene === "inspect" && (
-          <svg viewBox="0 0 360 96" fill="none" className="rh-cartoon-svg">
-            <defs>
-              <linearGradient id="ct-scan-grad" x1="0" y1="0" x2="1" y2="0">
-                <stop offset="0%" stopColor="var(--brand)" stopOpacity="0" />
-                <stop offset="100%" stopColor="var(--brand)" stopOpacity="0.22" />
-              </linearGradient>
-            </defs>
-
-            {/* Server Rack Nodes */}
-            <g className="ct-rack">
-              <rect x="10" y="11" width="120" height="20" rx="5.5" className="ct-node-box" />
-              <circle cx="22" cy="21" r="3.2" className="ct-led ok" />
-              <rect x="32" y="18.5" width="48" height="5" rx="2.5" className="ct-bar" />
-              <rect x="89" y="14" width="32" height="14" rx="4" className="ct-role-chip" />
-              <text x="105" y="21" textAnchor="middle" dominantBaseline="central" className="ct-mini-txt">
-                PRI
-              </text>
-
-              <rect x="10" y="38" width="120" height="20" rx="5.5" className="ct-node-box" />
-              <circle cx="22" cy="48" r="3.2" className="ct-led brand" />
-              <rect x="32" y="45.5" width="42" height="5" rx="2.5" className="ct-bar" />
-              <rect x="89" y="41" width="32" height="14" rx="4" className="ct-role-chip" />
-              <text x="105" y="48" textAnchor="middle" dominantBaseline="central" className="ct-mini-txt">
-                REP
-              </text>
-
-              <rect x="10" y="65" width="120" height="20" rx="5.5" className="ct-node-box" />
-              <circle cx="22" cy="75" r="3.2" className="ct-led brand" />
-              <rect x="32" y="72.5" width="45" height="5" rx="2.5" className="ct-bar" />
-              <rect x="89" y="68" width="32" height="14" rx="4" className="ct-role-chip" />
-              <text x="105" y="75" textAnchor="middle" dominantBaseline="central" className="ct-mini-txt">
-                REP
-              </text>
-            </g>
-
-            {/* Gradient Laser Scanner Beam */}
-            <g className="ct-scan-beam">
-              <rect x="10" y="6" width="26" height="84" rx="4" fill="url(#ct-scan-grad)" />
-              <line x1="36" y1="6" x2="36" y2="90" className="ct-scan-line" />
-            </g>
-
-            {/* Animated Data Bus & Extracted Chips */}
-            <path d="M134 26 C176 26, 192 48, 234 48" className="ct-dash-path is-moving" />
-            <path d="M134 70 C176 70, 192 48, 234 48" className="ct-dash-path is-moving" />
-            <g className="ct-float-card c1">
-              <rect x="154" y="14" width="50" height="20" rx="6" className="ct-pill-card" />
-              <text x="179" y="24" textAnchor="middle" dominantBaseline="central" className="ct-pill-txt">
-                YAML
-              </text>
-            </g>
-            <g className="ct-float-card c2">
-              <rect x="162" y="62" width="50" height="20" rx="6" className="ct-pill-card" />
-              <text x="187" y="72" textAnchor="middle" dominantBaseline="central" className="ct-pill-txt">
-                TOPO
-              </text>
-            </g>
-
-            {/* Baseline Snapshot Receiver Pod */}
-            <g className="ct-capsule">
-              <rect x="236" y="20" width="114" height="56" rx="12" className="ct-hub-pod" />
-              <circle cx="258" cy="48" r="10.5" className="ct-check-disc" />
-              <path d="M253.5 48.2l3 3 6-6.2" className="ct-check-white" />
-              <text x="276" y="41" textAnchor="start" dominantBaseline="central" className="ct-pod-title">
-                {bi("基线快照", "Baseline")}
-              </text>
-              <text x="276" y="56" textAnchor="start" dominantBaseline="central" className="ct-pod-sub ok">
-                READY
-              </text>
-            </g>
-          </svg>
-        )}
-
-        {scene === "guard" && (
-          <svg viewBox="0 0 360 96" fill="none" className="rh-cartoon-svg">
-            {/* Conveyor Track */}
-            <line x1="12" y1="48" x2="348" y2="48" className="ct-dash-path is-moving" />
-
-            {/* Incoming Raw Secret Pills (Left -> Shield Gate) */}
-            <g className="ct-raw-pill p1">
-              <rect x="14" y="34" width="84" height="28" rx="8" className="ct-pill-warn" />
-              <circle cx="26" cy="48" r="3" className="ct-led warn" />
-              <text x="35" y="48" textAnchor="start" dominantBaseline="central" className="ct-pill-warn-txt">
-                pwd=••••
-              </text>
-            </g>
-            <g className="ct-raw-pill p2">
-              <rect x="14" y="34" width="80" height="28" rx="8" className="ct-pill-warn" />
-              <circle cx="26" cy="48" r="3" className="ct-led warn" />
-              <text x="35" y="48" textAnchor="start" dominantBaseline="central" className="ct-pill-warn-txt">
-                ssh_key
-              </text>
-            </g>
-
-            {/* Outgoing Sanitized Safe Pills (Shield Gate -> Right) */}
-            <g className="ct-clean-pill p1">
-              <rect x="196" y="34" width="88" height="28" rx="8" className="ct-pill-ok" />
-              <circle cx="211" cy="48" r="6" className="ct-check-disc" />
-              <path d="M208.3 48.1l1.9 1.9 3.7-3.9" className="ct-check-white sm" />
-              <text x="223" y="48" textAnchor="start" dominantBaseline="central" className="ct-pill-ok-txt">
-                {bi("已脱敏", "Redacted")}
-              </text>
-            </g>
-            <g className="ct-clean-pill p2">
-              <rect x="196" y="34" width="90" height="28" rx="8" className="ct-pill-ok" />
-              <circle cx="211" cy="48" r="6" className="ct-check-disc" />
-              <path d="M208.3 48.1l1.9 1.9 3.7-3.9" className="ct-check-white sm" />
-              <text x="223" y="48" textAnchor="start" dominantBaseline="central" className="ct-pill-ok-txt">
-                {bi("纯只读", "Read-Only")}
-              </text>
-            </g>
-
-            {/* Central Security Shield Gate (Layered above pills) */}
-            <g className="ct-shield-gate">
-              <circle cx="180" cy="48" r="34" className="ct-gate-pulse" />
-              <circle cx="180" cy="48" r="29" className="ct-gate-halo" />
-              <line x1="180" y1="8" x2="180" y2="88" className="ct-gate-laser" />
-              <path
-                d="M180 21L159 29.8v14.8c0 12.2 8.8 22.4 21 25.8 12.2-3.4 21-13.6 21-25.8V29.8L180 21z"
-                className="ct-shield-body"
-              />
-              <path d="M172.5 48.2l5 5 10.2-10.5" className="ct-shield-tick" />
-            </g>
-          </svg>
-        )}
-
-        {scene === "connect" && (
-          <svg viewBox="0 0 360 96" fill="none" className="rh-cartoon-svg">
-            {/* Signal Bridge & Concentric Ripples */}
-            <line x1="86" y1="48" x2="274" y2="48" className="ct-bridge-line" />
-            <circle cx="180" cy="48" r="18" className="ct-hs-ring r1" />
-            <circle cx="180" cy="48" r="29" className="ct-hs-ring r2" />
-
-            {/* Bidirectional Encrypted Data Packets */}
-            <circle cx="104" cy="48" r="3.4" className="ct-pkt p1" />
-            <circle cx="256" cy="48" r="3.4" className="ct-pkt p2" />
-
-            {/* Left Hub Station Pod */}
-            <g className="ct-endpoint left">
-              <rect x="10" y="20" width="76" height="56" rx="11" className="ct-hub-pod" />
-              <circle cx="22" cy="31" r="2.8" className="ct-led brand" />
-              <text x="48" y="42" textAnchor="middle" dominantBaseline="central" className="ct-pod-title">
-                HUB
-              </text>
-              <text x="48" y="58" textAnchor="middle" dominantBaseline="central" className="ct-pod-sub">
-                {bi("平台底座", "Platform")}
-              </text>
-            </g>
-
-            {/* Right AI Gateway Station Pod */}
-            <g className="ct-endpoint right">
-              <rect x="274" y="20" width="76" height="56" rx="11" className="ct-gw-pod" />
-              <circle cx="286" cy="31" r="2.8" className="ct-led ok" />
-              <text x="312" y="42" textAnchor="middle" dominantBaseline="central" className="ct-pod-title">
-                AI GW
-              </text>
-              <text x="312" y="58" textAnchor="middle" dominantBaseline="central" className="ct-pod-sub">
-                {bi("模型网关", "Gateway")}
-              </text>
-            </g>
-
-            {/* Sleek Left Interlocking Handshake Link */}
-            <g className="ct-hand-left">
-              <rect x="92" y="41" width="28" height="14" rx="7" className="ct-sleeve-left" />
-              <rect x="114" y="38" width="32" height="20" rx="10" className="ct-palm-left" />
-              <circle cx="136" cy="48" r="3.2" className="ct-led brand" />
-            </g>
-
-            {/* Sleek Right Interlocking Handshake Link */}
-            <g className="ct-hand-right">
-              <rect x="240" y="41" width="28" height="14" rx="7" className="ct-sleeve-right" />
-              <rect x="214" y="38" width="32" height="20" rx="10" className="ct-palm-right" />
-              <circle cx="224" cy="48" r="3.2" className="ct-led ok" />
-            </g>
-
-            {/* Center Handshake Spark Star */}
-            <g className="ct-hs-spark">
-              <path
-                d="M180 12l2.1 5.2 5.2 2.1-5.2 2.1-2.1 5.2-2.1-5.2-5.2-2.1 5.2-2.1 2.1-5.2z"
-                className="ct-spark-star"
-              />
-            </g>
-          </svg>
-        )}
-
-        {scene === "think" && (
-          <svg viewBox="0 0 360 96" fill="none" className="rh-cartoon-svg">
-            <defs>
-              <linearGradient id="ct-cone-grad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="var(--brand)" stopOpacity="0.32" />
-                <stop offset="100%" stopColor="var(--brand)" stopOpacity="0.02" />
-              </linearGradient>
-            </defs>
-
-            {/* Top-Left Connected Status Pill — generous spacing between vector tick & label */}
-            <g className="ct-hs-locked">
-              <rect x="10" y="6" width="102" height="22" rx="11" className="ct-pill-ok" />
-              <circle cx="22" cy="17" r="6.5" className="ct-check-disc" />
-              <path d="M19 17.1l2.1 2.1 4.1-4.2" className="ct-check-white sm" />
-              <text x="34" y="17" textAnchor="start" dominantBaseline="central" className="ct-pill-ok-txt">
-                {bi("握手已连通", "Connected")}
-              </text>
-            </g>
-
-            {/* HA Cluster Topology Flow Track — drawn strictly in the inter-node gaps so lines never bleed across pills */}
-            <path d="M108 69 L128 69 M220 69 L240 69" className="ct-flow-line" />
-
-            {/* Replica 01 */}
-            <g className="ct-sim-node n1">
-              <rect x="16" y="54" width="92" height="30" rx="8.5" className="ct-node-box" />
-              <circle cx="30" cy="69" r="3.6" className="ct-led ok" />
-              <text x="41" y="69" textAnchor="start" dominantBaseline="central" className="ct-sim-lbl">
-                {bi("从库 01", "Rep 01")}
-              </text>
-            </g>
-
-            {/* Replica 02 */}
-            <g className="ct-sim-node n2">
-              <rect x="128" y="54" width="92" height="30" rx="8.5" className="ct-node-box" />
-              <circle cx="142" cy="69" r="3.6" className="ct-led ok" />
-              <text x="153" y="69" textAnchor="start" dominantBaseline="central" className="ct-sim-lbl">
-                {bi("从库 02", "Rep 02")}
-              </text>
-            </g>
-
-            {/* Guarded Primary */}
-            <g className="ct-sim-node n3">
-              <rect x="240" y="52" width="106" height="34" rx="9.5" className="ct-hub-pod" />
-              <circle cx="255" cy="69" r="4" className="ct-led kyndryl" />
-              <text x="267" y="69" textAnchor="start" dominantBaseline="central" className="ct-pod-title">
-                {bi("主库守卫", "Primary")}
-              </text>
-            </g>
-
-            {/* Roaming AI Reasoning Probe — orbits cleanly below top pill (cy=38) */}
-            <g className="ct-think-rover">
-              <path d="M51 54 L62 41 L73 54 Z" fill="url(#ct-cone-grad)" />
-              <circle cx="62" cy="38" r="8.5" className="ct-rover-halo" />
-              <circle cx="62" cy="38" r="4" className="ct-rover-core" />
-              <line x1="62" y1="43" x2="62" y2="53" className="ct-rover-beam" />
-            </g>
-          </svg>
-        )}
-
-        {scene === "synthesize" && (
-          <svg viewBox="0 0 360 96" fill="none" className="rh-cartoon-svg">
-            {/* Runbook Blueprint Document Sheet */}
-            <rect x="14" y="10" width="196" height="76" rx="10" className="ct-doc-sheet" />
-            <circle cx="30" cy="26" r="3.6" className="ct-led ok" />
-            <line x1="42" y1="26" x2="164" y2="26" className="ct-draw-line l1" />
-            <circle cx="30" cy="42" r="3.6" className="ct-led brand" />
-            <line x1="42" y1="42" x2="190" y2="42" className="ct-draw-line l2" />
-            <circle cx="30" cy="58" r="3.6" className="ct-led ok" />
-            <line x1="42" y1="58" x2="156" y2="58" className="ct-draw-line l3" />
-            <circle cx="30" cy="74" r="3.4" className="ct-led warn" />
-            <line x1="42" y1="74" x2="134" y2="74" className="ct-draw-line l4" />
-
-            {/* Centered Safety Verification Seal Impact */}
-            <circle cx="286" cy="48" r="26" className="ct-seal-ring" />
-            <g className="ct-stamp-badge">
-              <rect x="226" y="22" width="120" height="52" rx="12" className="ct-pill-ok" />
-              <circle cx="246" cy="48" r="10" className="ct-check-disc" />
-              <path d="M241.5 48.2l3 3 5.8-6" className="ct-check-white" />
-              <text x="263" y="40" textAnchor="start" dominantBaseline="central" className="ct-pill-ok-txt lg">
-                SAFE
-              </text>
-              <text x="263" y="56" textAnchor="start" dominantBaseline="central" className="ct-mini-ok">
-                {bi("安全校验通过", "Verified")}
-              </text>
-            </g>
-          </svg>
-        )}
-
-        {scene === "error" && (
-          <svg viewBox="0 0 360 96" fill="none" className="rh-cartoon-svg">
-            {/* Preserved Draft Pod */}
-            <rect x="12" y="22" width="102" height="52" rx="11" className="ct-hub-pod" />
-            <circle cx="30" cy="48" r="9" className="ct-check-disc" />
-            <path d="M26 48.2l2.7 2.7 5.2-5.4" className="ct-check-white" />
-            <text x="46" y="40" textAnchor="start" dominantBaseline="central" className="ct-pod-title">
-              {bi("草稿完好", "Draft OK")}
-            </text>
-            <text x="46" y="56" textAnchor="start" dominantBaseline="central" className="ct-mini-ok">
-              {bi("已安全保护", "Preserved")}
-            </text>
-
-            <line x1="118" y1="48" x2="148" y2="48" className="ct-broken-line" />
-            <line x1="212" y1="48" x2="242" y2="48" className="ct-broken-line" />
-
-            {/* Central Circuit-Breaker Shield */}
-            <circle cx="180" cy="48" r="27" className="ct-err-halo" />
-            <path
-              d="M180 25L160 33.4v13.8c0 11.4 8.2 20.8 20 24 11.8-3.2 20-12.6 20-24V33.4L180 25z"
-              className="ct-err-shield"
-            />
-            <path d="M180 38v11M180 54.5h.01" className="ct-err-bang" />
-
-            {/* Blocked AI Gateway Pod */}
-            <rect x="246" y="22" width="102" height="52" rx="11" className="ct-err-pod" />
-            <circle cx="264" cy="48" r="4.5" className="ct-led bad" />
-            <text x="276" y="40" textAnchor="start" dominantBaseline="central" className="ct-err-pod-title">
-              {bi("AI 网关", "AI GW")}
-            </text>
-            <text x="276" y="56" textAnchor="start" dominantBaseline="central" className="ct-err-pod-sub">
-              {bi("响应受阻", "Blocked")}
-            </text>
-          </svg>
-        )}
-      </div>
-
-      <div className="rh-cartoon-story">
-        <span className={`rh-cartoon-act ${scene === "error" ? "is-err" : ""}`}>
-          {cur.tag}
-        </span>
-        <b className="rh-cartoon-headline">{cur.headline}</b>
-        <p className="rh-cartoon-sub">{cur.sub}</p>
-      </div>
-    </div>
-  );
-});
-
-function isTechnicalErrorText(raw?: string): boolean {
-  if (!raw) return false;
-  return /[{}\[\]]|https?:\/\/|\/v\d+\/|\bHTTP\s*[45]\d{2}\b|\btraceback\b|\bexception\b|"[a-zA-Z0-9_]+":/i.test(
-    raw,
-  );
-}
-
-/* ---------- Structured AI Reasoning Parser & Renderer ---------- */
-
-type ThinkingBlock =
-  | { kind: "step"; index: string; lead?: string; body: string }
-  | { kind: "bullet"; lead?: string; body: string }
-  | { kind: "heading"; text: string }
-  | { kind: "para"; text: string };
-
-const CIRCLED_NUM_MAP: Record<string, string> = {
-  "①": "1",
-  "②": "2",
-  "③": "3",
-  "④": "4",
-  "⑤": "5",
-  "⑥": "6",
-  "⑦": "7",
-  "⑧": "8",
-  "⑨": "9",
-  "⑩": "10",
-};
-
-function normalizeStepToken(digits?: string, circled?: string): string {
-  if (digits) return digits;
-  if (circled && CIRCLED_NUM_MAP[circled]) return CIRCLED_NUM_MAP[circled];
-  return "1";
-}
-
-// Split compressed single-paragraph chains like "1. 基线核对：...。 2. 风险核对：...。3. 高可用边界：..."
-// while never breaking version strings (7.2.16, Ubuntu 24.04) or IPs (172.30.6.100).
-function splitInlineThinkingSteps(line: string): string[] {
-  const markerRe =
-    /(?:(\d{1,2})[.、)）]|([①②③④⑤⑥⑦⑧⑨⑩]))\s*(?=[\u4e00-\u9fa5A-Za-z*`“"「『【\[（(])/g;
-  const cuts: number[] = [];
-  let prevNum = 0;
-  let m: RegExpExecArray | null;
-  while ((m = markerRe.exec(line)) !== null) {
-    const idx = m.index;
-    const numVal = parseInt(normalizeStepToken(m[1], m[2]), 10);
-    if (idx === 0) {
-      cuts.push(idx);
-      prevNum = numVal;
-      continue;
-    }
-    const before = line.slice(0, idx);
-    // Never split right after a digit+dot (IP addresses like 172.30.4.26 or versions like 17.11.1)
-    if (/\d\.$/.test(before)) {
-      continue;
-    }
-    const afterPunct = /(?:[。；！？;!?]\s*|\.\s+)$/.test(before);
-    const afterSequentialSpace =
-      /\s+$/.test(before) && prevNum >= 1 && numVal === prevNum + 1;
-    if (afterPunct || afterSequentialSpace) {
-      cuts.push(idx);
-      prevNum = numVal;
-    }
-  }
-  if (cuts.length <= 1) return [line];
-  const out: string[] = [];
-  if (cuts[0] > 0) {
-    const prefix = line.slice(0, cuts[0]).trim();
-    if (prefix) out.push(prefix);
-  }
-  for (let i = 0; i < cuts.length; i++) {
-    const start = cuts[i];
-    const end = i + 1 < cuts.length ? cuts[i + 1] : line.length;
-    const seg = line.slice(start, end).trim();
-    if (seg) out.push(seg);
-  }
-  return out.length ? out : [line];
-}
-
-function splitThinkingLead(text: string): { lead?: string; body: string } {
-  const m =
-    /^(?:\*\*([^*：:\n]{2,18})\*\*|([^：:\n，。；!?！？]{2,16}))[：:]\s*([\s\S]+)$/.exec(
-      text.trim(),
-    );
-  if (!m) return { body: text.trim() };
-  const lead = (m[1] || m[2] || "").replace(/^\*\*|\*\*$/g, "").trim();
-  const body = (m[3] || "").trim();
-  // Avoid splitting URLs like http:// or key:value tokens with ASCII slashes directly after ':'
-  if (!lead || !body || /^[/\\]/.test(body)) {
-    return { body: text.trim() };
-  }
-  return { lead, body };
-}
-
-function parseThinkingBlocks(raw: string): ThinkingBlock[] {
-  const src = (raw || "").replace(/\r\n/g, "\n").trim();
-  if (!src) return [];
-  const rawLines = src.split("\n");
-  const blocks: ThinkingBlock[] = [];
-  let hadBlank = true;
-
-  for (const rawLine of rawLines) {
-    const trimmed = rawLine.trim();
-    if (!trimmed) {
-      hadBlank = true;
-      continue;
-    }
-    const segments = splitInlineThinkingSteps(trimmed);
-    for (const seg of segments) {
-      const hMatch = /^#{1,4}\s+(.+)$/.exec(seg);
-      if (hMatch) {
-        blocks.push({ kind: "heading", text: hMatch[1].trim() });
-        hadBlank = false;
-        continue;
-      }
-      const stepMatch =
-        /^(?:(\d{1,2})[.、)）]|([①②③④⑤⑥⑦⑧⑨⑩]))\s*([\u4e00-\u9fa5A-Za-z*`“"「『【\[（(][\s\S]*)$/.exec(
-          seg,
-        );
-      if (stepMatch) {
-        const index = normalizeStepToken(stepMatch[1], stepMatch[2]);
-        const { lead, body } = splitThinkingLead(stepMatch[3]);
-        blocks.push({ kind: "step", index, lead, body });
-        hadBlank = false;
-        continue;
-      }
-      const bulletMatch = /^[-*+•]\s+([\s\S]+)$/.exec(seg);
-      if (bulletMatch) {
-        const { lead, body } = splitThinkingLead(bulletMatch[1]);
-        blocks.push({ kind: "bullet", lead, body });
-        hadBlank = false;
-        continue;
-      }
-      const last = blocks[blocks.length - 1];
-      if (!hadBlank && last) {
-        if (last.kind === "step" || last.kind === "bullet") {
-          last.body = `${last.body}\n${seg}`;
-          continue;
-        }
-        if (last.kind === "para") {
-          last.text = `${last.text}\n${seg}`;
-          continue;
-        }
-      }
-      blocks.push({ kind: "para", text: seg });
-      hadBlank = false;
-    }
-  }
-  return blocks;
-}
-
-function renderThinkingInline(text: string): React.ReactNode {
-  if (!text) return null;
-  const tokenRe =
-    /(`[^`\n]+`|\*\*[^*\n]+\*\*|[a-zA-Z_][\w.-]*=[^\s，。；、：（）()"`]+|\bnode-\d+(?:\/node-\d+)*\b|\b(?:\d{1,3}\.){3}\d{1,3}(?::\d{2,5})?\b|\bv?\d+\.\d+\.\d+(?:-[a-zA-Z0-9._-]+)?\b|\/(?:etc|var|opt|usr|data|tmp|home|root|srv|proc|sys|dev|run|mnt)(?:\/[a-zA-Z0-9_.*-]+)*|\/[a-zA-Z0-9_.-]+(?:\/[a-zA-Z0-9_.*-]+)+)/g;
-  const out: React.ReactNode[] = [];
-  let last = 0;
-  let k = 0;
-  let m: RegExpExecArray | null;
-  while ((m = tokenRe.exec(text)) !== null) {
-    const start = m.index;
-    const rawTok = m[0];
-    const prevCh = start > 0 ? text[start - 1] : "";
-    // Avoid highlighting slash paths inside URLs or words (e.g. a/b except node-1/node-2 handled explicitly)
-    if (rawTok.startsWith("/") && /[\w:/]/.test(prevCh)) {
-      continue;
-    }
-    if (start > last) {
-      out.push(text.slice(last, start));
-    }
-    if (rawTok.startsWith("`") && rawTok.endsWith("`")) {
-      const inner = rawTok.slice(1, -1);
-      out.push(
-        <code
-          key={k++}
-          className={`rh-think-code mono${inner.length <= 24 ? " is-atom" : ""}`}
-        >
-          {inner}
-        </code>,
-      );
-      last = start + rawTok.length;
-    } else if (rawTok.startsWith("**") && rawTok.endsWith("**")) {
-      out.push(
-        <strong key={k++} className="rh-think-strong">
-          {renderThinkingInline(rawTok.slice(2, -2))}
-        </strong>,
-      );
-      last = start + rawTok.length;
-    } else {
-      let cleanTok = rawTok;
-      let trailing = "";
-      const punct = /[.,;:!?)]+$/.exec(cleanTok);
-      if (punct) {
-        cleanTok = cleanTok.slice(0, -punct[0].length);
-        trailing = punct[0];
-      }
-      if (cleanTok) {
-        out.push(
-          <code
-            key={k++}
-            className={`rh-think-code mono${cleanTok.length <= 24 ? " is-atom" : ""}`}
-          >
-            {cleanTok}
-          </code>,
-        );
-      }
-      if (trailing) {
-        out.push(trailing);
-      }
-      last = start + rawTok.length;
-    }
-  }
-  if (last < text.length) {
-    out.push(text.slice(last));
-  }
-  return out.length === 1 && typeof out[0] === "string" ? out[0] : out;
-}
-
-const RehearsalThinkingContent = React.memo(function RehearsalThinkingContent({
-  text,
-  streaming = false,
-  compact = false,
-}: {
-  text: string;
-  streaming?: boolean;
-  compact?: boolean;
-}) {
-  const blocks = useMemo(() => parseThinkingBlocks(text), [text]);
-  if (!blocks.length) {
-    const trimmed = (text || "").trim();
-    if (!trimmed) return null;
-    return (
-      <div className={`rh-think-flow ${compact ? "is-compact" : ""}`}>
-        <p className="rh-think-para is-single">
-          {renderThinkingInline(trimmed)}
-          {streaming && <span className="rh-ai-caret" aria-hidden />}
-        </p>
-      </div>
-    );
-  }
-
-  const nodes: React.ReactNode[] = [];
-  let i = 0;
-  let k = 0;
-
-  while (i < blocks.length) {
-    const cur = blocks[i];
-    if (cur.kind === "step") {
-      const items: Extract<ThinkingBlock, { kind: "step" }>[] = [];
-      while (i < blocks.length && blocks[i].kind === "step") {
-        items.push(blocks[i] as Extract<ThinkingBlock, { kind: "step" }>);
-        i++;
-      }
-      const isLastGroup = i === blocks.length;
-      nodes.push(
-        <ol key={k++} className="rh-think-steps">
-          {items.map((st, idx) => {
-            const isLast = isLastGroup && idx === items.length - 1;
-            return (
-              <li key={`${st.index}-${idx}`} className="rh-think-item">
-                <span className="rh-think-idx num" aria-hidden>
-                  {st.index}
-                </span>
-                <div className="rh-think-body">
-                  {st.lead && <span className="rh-think-lead">{st.lead}</span>}
-                  <span>{renderThinkingInline(st.body)}</span>
-                  {isLast && streaming && (
-                    <span className="rh-ai-caret" aria-hidden />
-                  )}
-                </div>
-              </li>
-            );
-          })}
-        </ol>,
-      );
-      continue;
-    }
-    if (cur.kind === "bullet") {
-      const items: Extract<ThinkingBlock, { kind: "bullet" }>[] = [];
-      while (i < blocks.length && blocks[i].kind === "bullet") {
-        items.push(blocks[i] as Extract<ThinkingBlock, { kind: "bullet" }>);
-        i++;
-      }
-      const isLastGroup = i === blocks.length;
-      nodes.push(
-        <ul key={k++} className="rh-think-bullets">
-          {items.map((bt, idx) => {
-            const isLast = isLastGroup && idx === items.length - 1;
-            return (
-              <li key={idx} className="rh-think-bullet-item">
-                <span className="rh-think-bdot" aria-hidden />
-                <div className="rh-think-body">
-                  {bt.lead && <span className="rh-think-lead">{bt.lead}</span>}
-                  <span>{renderThinkingInline(bt.body)}</span>
-                  {isLast && streaming && (
-                    <span className="rh-ai-caret" aria-hidden />
-                  )}
-                </div>
-              </li>
-            );
-          })}
-        </ul>,
-      );
-      continue;
-    }
-    const isLast = i === blocks.length - 1;
-    if (cur.kind === "heading") {
-      nodes.push(
-        <div key={k++} className="rh-think-heading">
-          {renderThinkingInline(cur.text)}
-          {isLast && streaming && <span className="rh-ai-caret" aria-hidden />}
-        </div>,
-      );
-    } else {
-      nodes.push(
-        <p
-          key={k++}
-          className={`rh-think-para ${blocks.length === 1 ? "is-single" : ""}`}
-        >
-          {renderThinkingInline(cur.text)}
-          {isLast && streaming && <span className="rh-ai-caret" aria-hidden />}
-        </p>,
-      );
-    }
-    i++;
-  }
-
-  return (
-    <div className={`rh-think-flow ${compact ? "is-compact" : ""}`}>{nodes}</div>
-  );
-});
-
-function RehearsalAIProcess({
-  live,
-  trace,
-  title,
-  defaultOpen = false,
-  onAbort,
-  onRetry,
-  onDismiss,
-}: {
-  live?: LiveAIState | null;
-  trace?: RehearsalTrace | null;
-  title: string;
-  defaultOpen?: boolean;
-  onAbort?: () => void;
-  onRetry?: () => void;
-  onDismiss?: () => void;
-}) {
-  useLang();
-  const [open, setOpen] = useState(defaultOpen || Boolean(live));
-  const [rawDiagOpen, setRawDiagOpen] = useState(false);
-  const [slowHandshake, setSlowHandshake] = useState(false);
-  const [playState, setPlayState] = useState<{
-    startedAt: number;
-    idx: number;
-    enteredAt: number;
-  }>(() => {
-    const resuming = Boolean(live && Date.now() - live.startedAt > 1000);
-    return {
-      startedAt: live?.startedAt ?? 0,
-      idx: live && (live.error || resuming) ? computeTargetStepIndex(live.steps) : 0,
-      enteredAt: Date.now(),
-    };
-  });
-  const procRef = useRef<HTMLDivElement | null>(null);
-  const lastScrolledStartRef = useRef<number>(0);
-  const thinkBoxRef = useRef<HTMLDivElement | null>(null);
-  const thinkStickRef = useRef<boolean>(true);
-  const thinkScrollRafRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    if (defaultOpen) setOpen(true);
-  }, [defaultOpen]);
-
-  const hasLive = Boolean(live);
-  const liveStartedAt = live?.startedAt ?? 0;
-  const hasLiveError = Boolean(live?.error);
-
-  useEffect(() => {
-    setRawDiagOpen(false);
-    thinkStickRef.current = true;
-  }, [liveStartedAt]);
-
-  useEffect(() => {
-    if (!liveStartedAt || lastScrolledStartRef.current === liveStartedAt) {
-      return;
-    }
-    lastScrolledStartRef.current = liveStartedAt;
-    const reduced =
-      typeof window !== "undefined" &&
-      window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
-    const alignIntoSafeViewport = () => {
-      const el = procRef.current;
-      if (!el || typeof window === "undefined") return;
-      const rect = el.getBoundingClientRect();
-      const safeTop = 104;
-      const safeBottom = window.innerHeight - 24;
-      if (rect.top < safeTop || rect.bottom > safeBottom) {
-        el.scrollIntoView({
-          behavior: reduced ? "auto" : "smooth",
-          block: rect.top < safeTop ? "start" : "nearest",
-        });
-      }
-    };
-    const timer = window.setTimeout(alignIntoSafeViewport, reduced ? 0 : 120);
-    return () => window.clearTimeout(timer);
-  }, [liveStartedAt]);
-
-  useEffect(() => {
-    if (hasLive) {
-      setOpen(true);
-    }
-  }, [hasLive, liveStartedAt]);
-
-  const targetIdx = useMemo(
-    () => (live ? computeTargetStepIndex(live.steps) : 0),
-    [live?.steps],
-  );
-
-  // Stage-by-stage choreography sequencer:
-  // Fast local steps animate one-by-one (~260ms each), then hold honestly on
-  // Step 3 ("connect-model") until the upstream LLM handshakes/returns tokens.
-  // Depends ONLY on scalar primitives & targetIdx so high-frequency SSE chunks
-  // (think/progress/phase) NEVER cancel the step-advance timer!
-  useEffect(() => {
-    if (!hasLive) return;
-    if (playState.startedAt !== liveStartedAt) {
-      const resuming = Date.now() - liveStartedAt > 1000;
-      setPlayState({
-        startedAt: liveStartedAt,
-        idx: hasLiveError || resuming ? targetIdx : 0,
-        enteredAt: Date.now(),
-      });
-      return;
-    }
-    if (hasLiveError && playState.idx !== targetIdx) {
-      setPlayState((prev) => ({
-        ...prev,
-        idx: targetIdx,
-        enteredAt: Date.now(),
-      }));
-      return;
-    }
-    if (playState.idx >= targetIdx) return;
-    const minHold = targetIdx >= 3 ? 140 : 260;
-    const elapsed = Date.now() - playState.enteredAt;
-    if (elapsed >= minHold) {
-      setPlayState((prev) => {
-        if (prev.startedAt !== liveStartedAt || prev.idx >= targetIdx) return prev;
-        return {
-          startedAt: prev.startedAt,
-          idx: prev.idx + 1,
-          enteredAt: Date.now(),
-        };
-      });
-      return;
-    }
-    const wait = minHold - elapsed;
-    const timer = window.setTimeout(() => {
-      setPlayState((prev) => {
-        if (prev.startedAt !== liveStartedAt || prev.idx >= targetIdx) return prev;
-        return {
-          startedAt: prev.startedAt,
-          idx: prev.idx + 1,
-          enteredAt: Date.now(),
-        };
-      });
-    }, wait);
-    return () => window.clearTimeout(timer);
-  }, [
-    hasLive,
-    liveStartedAt,
-    hasLiveError,
-    playState.startedAt,
-    playState.idx,
-    playState.enteredAt,
-    targetIdx,
-  ]);
-
-  const activeLivePlayIdx = live
-    ? live.error
-      ? targetIdx
-      : playState.startedAt === live.startedAt
-        ? playState.idx
-        : 0
-    : 0;
-  const activeLiveStepId = live
-    ? live.steps[
-        Math.min(
-          Math.max(activeLivePlayIdx, 0),
-          Math.max(live.steps.length - 1, 0),
-        )
-      ]?.id || ""
-    : "";
-  const activeStepEnteredAt = live
-    ? playState.startedAt === live.startedAt
-      ? playState.enteredAt
-      : live.startedAt
-    : 0;
-  const liveThinkingConsoleVisible = Boolean(
-    live && !live.error && activeLivePlayIdx >= 3,
-  );
-
-  // One-shot 25s slow-handshake notice without 120ms full-tree polling
-  useEffect(() => {
-    if (
-      !hasLive ||
-      hasLiveError ||
-      activeLiveStepId !== "connect-model" ||
-      !activeStepEnteredAt
-    ) {
-      setSlowHandshake(false);
-      return;
-    }
-    const elapsed = Date.now() - activeStepEnteredAt;
-    if (elapsed >= 25000) {
-      setSlowHandshake(true);
-      return;
-    }
-    setSlowHandshake(false);
-    const timer = window.setTimeout(
-      () => setSlowHandshake(true),
-      25000 - elapsed,
-    );
-    return () => window.clearTimeout(timer);
-  }, [hasLive, hasLiveError, activeLiveStepId, activeStepEnteredAt]);
-
-  // Passive scroll listener to respect user scroll-up lock while reading live thoughts
-  useEffect(() => {
-    if (!liveThinkingConsoleVisible) return;
-    const el = thinkBoxRef.current;
-    if (!el) return;
-    const onScroll = () => {
-      const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
-      thinkStickRef.current = dist <= 48;
-    };
-    el.addEventListener("scroll", onScroll, { passive: true });
-    return () => el.removeEventListener("scroll", onScroll);
-  }, [liveThinkingConsoleVisible, liveStartedAt]);
-
-  // Coalesce streaming auto-scroll via requestAnimationFrame (zero synchronous layout thrash)
-  useEffect(() => {
-    if (
-      !live?.thinking ||
-      !liveThinkingConsoleVisible ||
-      !thinkStickRef.current ||
-      !thinkBoxRef.current
-    ) {
-      return;
-    }
-    if (thinkScrollRafRef.current !== null) return;
-    thinkScrollRafRef.current = window.requestAnimationFrame(() => {
-      thinkScrollRafRef.current = null;
-      const el = thinkBoxRef.current;
-      if (el && thinkStickRef.current) {
-        el.scrollTop = el.scrollHeight;
-      }
-    });
-  }, [live?.thinking, liveThinkingConsoleVisible]);
-
-  useEffect(() => {
-    return () => {
-      if (thinkScrollRafRef.current !== null) {
-        window.cancelAnimationFrame(thinkScrollRafRef.current);
-        thinkScrollRafRef.current = null;
-      }
-    };
-  }, []);
-
-  if (live) {
-    const steps = live.steps;
-    const hasError = Boolean(live.error);
-    const activePlayIdx = activeLivePlayIdx;
-    const stepEnteredAt = activeStepEnteredAt;
-    const stageHumanIdx = Math.min(steps.length, activePlayIdx + 1);
-    const showThinkingConsole = !hasError && activePlayIdx >= 3;
-    const currentStep =
-      steps[Math.min(Math.max(activePlayIdx, 0), Math.max(steps.length - 1, 0))];
-    const diag =
-      live.errorDiag ||
-      currentStep?.diag ||
-      [...steps].reverse().find((s) => s.diag)?.diag;
-    const errGuide = hasError
-      ? parseAIErrorGuide(live.error || "", live.errorCode, diag)
-      : null;
-    const cartoonScene = resolveCartoonScene(currentStep, hasError);
-    const hasTokens =
-      typeof diag?.in_tokens === "number" ||
-      typeof diag?.out_tokens === "number";
-    const hasSSE = Boolean(
-      (diag?.sse_events && diag.sse_events.length > 0) ||
-        (diag?.keepalives && diag.keepalives > 0),
-    );
-    const hasTelemetry = Boolean(
-      diag &&
-        (diag.endpoint ||
-          diag.http_status !== undefined ||
-          diag.upstream_status ||
-          diag.ms ||
-          hasTokens ||
-          diag.response_id ||
-          hasSSE),
-    );
-    const hasAttempts = Boolean(diag?.attempts && diag.attempts.length > 1);
-    const hasRawPayload = Boolean(diag?.request_summary || diag?.response_raw);
-    const rawSinglePane = !(diag?.request_summary && diag?.response_raw);
-    const isTechErr = isTechnicalErrorText(live.error);
-    const isSlowHandshake =
-      !hasError && currentStep?.id === "connect-model" && slowHandshake;
-    const liveSplit = steps.length > 0;
-
-    return (
-      <div
-        ref={procRef}
-        className={`rh-ai-proc is-live ${hasError ? "is-error" : ""}`}
-        role={hasError ? "alert" : "status"}
-        aria-live="polite"
-      >
-        <div className="rh-ai-head">
-          <div className="rh-ai-head-left">
-            {hasError ? (
-              <span className="rh-ai-err-ic" aria-hidden>
-                <IconExclamationCircle />
-              </span>
-            ) : (
-              <span className="rh-ai-pulse" aria-hidden>
-                <Spark size={14} rainbow />
-              </span>
-            )}
-            <b>{hasError ? bi("AI 推演通道受阻", "AI Pipeline Interrupted") : live.title}</b>
-            {steps.length > 0 && (
-              <span
-                className={`rh-ai-stage-pill num ${hasError ? "is-error" : ""}`}
-              >
-                {hasError
-                  ? bi(
-                      `中断于阶段 ${stageHumanIdx}/${steps.length}`,
-                      `Stopped at ${stageHumanIdx}/${steps.length}`,
-                    )
-                  : bi(
-                      `阶段 ${stageHumanIdx}/${steps.length}`,
-                      `Stage ${stageHumanIdx}/${steps.length}`,
-                    )}
-              </span>
-            )}
-            {(live.provider || live.model) && (
-              <span className="rh-ai-chip">
-                {live.provider && (
-                  <span className="rh-ai-chip-prov">{live.provider}</span>
-                )}
-                {live.provider && live.model && (
-                  <span className="rh-ai-chip-sep" aria-hidden>
-                    ·
-                  </span>
-                )}
-                {live.model && (
-                  <span className="rh-ai-chip-model mono">{live.model}</span>
-                )}
-                {live.failover && (
-                  <>
-                    <span className="rh-ai-chip-sep" aria-hidden>
-                      ·
-                    </span>
-                    <span className="rh-ai-chip-fb">
-                      {bi("备用节点", "Fallback")}
-                    </span>
-                  </>
-                )}
-              </span>
-            )}
-            {live.chars > 0 && showThinkingConsole && (
-              <span className="rh-ai-chip num">
-                {bi(
-                  `已输出 ${live.chars.toLocaleString("en-US")} 字`,
-                  `${live.chars.toLocaleString("en-US")} chars`,
-                )}
-              </span>
-            )}
-          </div>
-          <div className="rh-ai-head-right">
-            <LiveElapsedSpan
-              startedAt={live.startedAt}
-              endedAt={hasError ? live.errorAt || live.startedAt : undefined}
-              suffix="s"
-              className={`rh-ai-timer num ${hasError ? "is-error" : ""}`}
-            />
-            {!hasError && onAbort && (
-              <button
-                type="button"
-                className="rh-ai-stop"
-                onClick={onAbort}
-                title={bi("停止当前生成", "Stop generation")}
-              >
-                <IconRecordStop />
-                <span>{bi("停止", "Stop")}</span>
-              </button>
-            )}
-            {hasError && onDismiss && (
-              <button
-                type="button"
-                className="rh-ai-dismiss-top"
-                onClick={onDismiss}
-                title={bi("收起提示", "Dismiss")}
-              >
-                <IconClose />
-              </button>
-            )}
-          </div>
-        </div>
-
-        {steps.length > 0 && (
-          <div className="rh-ai-segbar" aria-hidden>
-            {steps.map((st, idx) => {
-              const segCls =
-                idx < activePlayIdx
-                  ? "is-done"
-                  : idx === activePlayIdx
-                    ? hasError
-                      ? "is-error"
-                      : "is-active"
-                    : "is-pending";
-              return (
-                <span key={st.id} className={`rh-ai-seg ${segCls}`}>
-                  <i />
-                </span>
-              );
-            })}
-          </div>
-        )}
-
-        <div className={`rh-ai-body ${liveSplit ? "is-split" : ""}`}>
-          {liveSplit && (
-            <div className="rh-ai-left">
-              <ol className="rh-pipe-steps">
-                {steps.map((st, idx) => {
-                  const vStatus:
-                    | "done"
-                    | "warn"
-                    | "error"
-                    | "running"
-                    | "pending" =
-                    idx < activePlayIdx
-                      ? st.ok === false || st.status === "warn"
-                        ? "warn"
-                        : "done"
-                      : idx === activePlayIdx
-                        ? hasError
-                          ? "error"
-                          : "running"
-                        : "pending";
-                  const isLast = idx === steps.length - 1;
-                  const displayDetail =
-                    vStatus === "pending"
-                      ? hasError
-                        ? bi(
-                            "因前序模型连接受阻，本环节未执行",
-                            "Skipped due to upstream connection failure",
-                          )
-                        : pendingHintForStep(st)
-                      : st.detail || "";
-
-                  return (
-                    <li key={st.id} className={`rh-pstep is-${vStatus}`}>
-                      <div className="rh-pstep-track" aria-hidden>
-                        <span className={`rh-pstep-node is-${vStatus}`}>
-                          {vStatus === "done" ? (
-                            <IconCheck className="rh-check-pop" />
-                          ) : vStatus === "error" ? (
-                            <IconClose />
-                          ) : vStatus === "warn" ? (
-                            <span className="rh-pstep-bang">!</span>
-                          ) : vStatus === "running" ? (
-                            <span className="rh-orb">
-                              <span className="rh-orb-ring" />
-                              <span className="rh-orb-core" />
-                            </span>
-                          ) : (
-                            <span className="rh-pstep-num num">{idx + 1}</span>
-                          )}
-                        </span>
-                        {!isLast && (
-                          <span className="rh-pstep-rail">
-                            <i
-                              className="rh-pstep-rail-fill"
-                              style={{
-                                transform: `scaleY(${idx < activePlayIdx ? 1 : 0})`,
-                              }}
-                            />
-                          </span>
-                        )}
-                      </div>
-
-                      <div className="rh-pstep-main">
-                        <div className="rh-pstep-top">
-                          <span className="rh-pstep-title">{st.title}</span>
-                          <span className={`rh-pstep-badge is-${vStatus} num`}>
-                            {vStatus === "done"
-                              ? fmtStepDuration(st.ms)
-                              : vStatus === "error"
-                                ? bi("连接受阻", "Blocked")
-                                : vStatus === "warn"
-                                  ? bi("需留意", "Warning")
-                                  : vStatus === "running"
-                                    ? st.id === "connect-model"
-                                      ? (
-                                          <>
-                                            {bi("握手 ", "Handshake ")}
-                                            <LiveElapsedSpan
-                                              startedAt={stepEnteredAt}
-                                              suffix="s"
-                                            />
-                                          </>
-                                        )
-                                      : bi("进行中", "Running")
-                                    : hasError
-                                      ? bi("已中止", "Aborted")
-                                      : bi("待执行", "Pending")}
-                          </span>
-                        </div>
-                        {displayDetail && (
-                          <p
-                            className="rh-pstep-detail"
-                            title={
-                              displayDetail.length > 44
-                                ? displayDetail
-                                : undefined
-                            }
-                          >
-                            {displayDetail}
-                          </p>
-                        )}
-                      </div>
-                    </li>
-                  );
-                })}
-              </ol>
-            </div>
-          )}
-
-          <div className="rh-ai-right">
-            <RehearsalStageCartoon
-              scene={cartoonScene}
-              stepTitle={currentStep?.title || live.title}
-              stepDetail={currentStep?.detail}
-              provider={live.provider}
-              model={live.model}
-              waitStartedAt={
-                !hasError && currentStep?.id === "connect-model"
-                  ? stepEnteredAt
-                  : undefined
-              }
-              errorBadge={errGuide?.badge}
-            />
-
-            {!hasError && !showThinkingConsole && (
-              <div className="rh-ai-stage-live">
-                <div className="rh-stage-live-main">
-                  <div className="rh-stage-live-head">
-                    <span className="rh-stage-live-k">
-                      <span className="rh-stage-live-dot" aria-hidden />
-                      <span>{bi("通道实时动态", "Live Channel Status")}</span>
-                    </span>
-                    {(live.provider || live.model) && (
-                      <span className="rh-stage-live-chan">
-                        {live.provider && <span>{live.provider}</span>}
-                        {live.provider && live.model && (
-                          <span className="rh-ai-chip-sep" aria-hidden>
-                            ·
-                          </span>
-                        )}
-                        {live.model && (
-                          <span className="mono">{live.model}</span>
-                        )}
-                      </span>
-                    )}
-                  </div>
-                  <p className="rh-stage-live-msg">
-                    {live.phase ||
-                      currentStep?.detail ||
-                      bi(
-                        "正在准备集群架构上下文并建立流式推演通道…",
-                        "Preparing cluster architecture context & opening AI stream…",
-                      )}
-                  </p>
-                  <Smooth>
-                    {isSlowHandshake && (
-                      <div className="rh-pstep-slow">
-                        {bi("已等待 ", "Waiting ")}
-                        <LiveElapsedSpan
-                          startedAt={stepEnteredAt}
-                          integer
-                          suffix="s"
-                          className="num"
-                        />
-                        {bi(
-                          " 暂未收到正文首字（开启深度思考或中转网关自动重试上游渠道时，首包等待 20～90s 属正常现象；若使用中转网关调用 Claude 等非 OpenAI 模型，建议在「设置 → AI」将接口方式设为 Chat Completions 以直连流式输出）。",
-                          " for first token (20–90s is normal with deep reasoning or proxy retries; for non-OpenAI models via proxy gateways, try setting API mode to Chat Completions in Settings → AI).",
-                        )}
-                      </div>
-                    )}
-                  </Smooth>
-                </div>
-                <div className="rh-stage-live-guard">
-                  <svg
-                    width="13"
-                    height="13"
-                    viewBox="0 0 20 20"
-                    fill="none"
-                    aria-hidden
-                  >
-                    <path
-                      d="M10 2.5L4 5v4.6c0 3.8 2.5 6.9 6 7.9 3.5-1 6-4.1 6-7.9V5l-6-2.5z"
-                      stroke="currentColor"
-                      strokeWidth="1.65"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                  <span>
-                    {bi(
-                      "自动剥离口令与私钥 · 仅投递架构拓扑与非敏感参数",
-                      "Passwords & keys scrubbed · Topology & non-sensitive params only",
-                    )}
-                  </span>
-                </div>
-              </div>
-            )}
-
-            {hasError && errGuide && (
-              <div className="rh-ai-err-card">
-                <div className="rh-ai-err-head">
-                  <div className="rh-ai-err-badges">
-                    <span className="rh-ai-err-tag">{errGuide.badge}</span>
-                    {diag?.fallback_used && (
-                      <span className="rh-ai-err-fb">
-                        {bi(
-                          `已尝试兼容回退 ${diag.fallback_used}`,
-                          `Fallback tried: ${diag.fallback_used}`,
-                        )}
-                      </span>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    className="rh-err-copy-btn"
-                    onClick={() => void copy(formatDiagReport(live, diag))}
-                    title={bi(
-                      "复制完整脱敏诊断 JSON",
-                      "Copy full redacted diagnostic JSON",
-                    )}
-                  >
-                    <IconCopy />
-                    <span>{bi("复制完整诊断", "Copy Diagnostics")}</span>
-                  </button>
-                </div>
-
-                {live.error && (
-                  <div
-                    className={`rh-ai-err-raw ${isTechErr ? "is-tech mono" : "is-prose"}`}
-                  >
-                    {live.error}
-                  </div>
-                )}
-                <p className="rh-ai-err-sum">{errGuide.summary}</p>
-                <p className="rh-ai-err-hint">{errGuide.hint}</p>
-
-                {hasTelemetry && diag && (
-                  <dl className="rh-err-telemetry">
-                    {diag.endpoint && (
-                      <div className="rh-err-kv is-wide">
-                        <dt>{bi("协议端点", "Endpoint")}</dt>
-                        <dd className="mono">{diag.endpoint}</dd>
-                      </div>
-                    )}
-                    {(diag.http_status !== undefined ||
-                      diag.upstream_status ||
-                      diag.reason_code) && (
-                      <div className="rh-err-kv">
-                        <dt>{bi("HTTP 状态", "HTTP Status")}</dt>
-                        <dd className="num">
-                          {diag.http_status && diag.http_status > 0
-                            ? `HTTP ${diag.http_status}`
-                            : bi("网络层中断", "Network error")}
-                          {diag.upstream_status
-                            ? ` · ${diag.upstream_status}`
-                            : ""}
-                        </dd>
-                      </div>
-                    )}
-                    {Boolean(diag.ms && diag.ms > 0) && (
-                      <div className="rh-err-kv">
-                        <dt>{bi("耗时", "Duration")}</dt>
-                        <dd className="num">{fmtStepDuration(diag.ms)}</dd>
-                      </div>
-                    )}
-                    {hasTokens && (
-                      <div className="rh-err-kv">
-                        <dt>{bi("Token 计量", "Tokens")}</dt>
-                        <dd className="num">
-                          {bi(
-                            `输入 ${(diag.in_tokens ?? 0).toLocaleString("en-US")} · 缓存 ${(diag.cached_tokens ?? 0).toLocaleString("en-US")} · 输出 ${(diag.out_tokens ?? 0).toLocaleString("en-US")}`,
-                            `In ${(diag.in_tokens ?? 0).toLocaleString("en-US")} · Cached ${(diag.cached_tokens ?? 0).toLocaleString("en-US")} · Out ${(diag.out_tokens ?? 0).toLocaleString("en-US")}`,
-                          )}
-                        </dd>
-                      </div>
-                    )}
-                    {diag.response_id && (
-                      <div className="rh-err-kv">
-                        <dt>{bi("上游响应 ID", "Upstream ID")}</dt>
-                        <dd>
-                          <button
-                            type="button"
-                            className="rh-err-copy-id mono"
-                            onClick={() => void copy(diag.response_id!)}
-                            title={bi(
-                              "点击复制上游响应 ID",
-                              "Click to copy upstream response ID",
-                            )}
-                          >
-                            <span>{diag.response_id}</span>
-                            <IconCopy />
-                          </button>
-                        </dd>
-                      </div>
-                    )}
-                    {hasSSE && (
-                      <div className="rh-err-kv is-wide">
-                        <dt>{bi("SSE 事件链", "SSE Events")}</dt>
-                        <dd
-                          className={
-                            diag.sse_events && diag.sse_events.length > 0
-                              ? "mono"
-                              : undefined
-                          }
-                        >
-                          {diag.sse_events && diag.sse_events.length > 0
-                            ? diag.sse_events.join(" → ")
-                            : bi("无数据帧", "No data frames")}
-                          {diag.keepalives
-                            ? ` (${diag.keepalives} keepalive)`
-                            : ""}
-                        </dd>
-                      </div>
-                    )}
-                  </dl>
-                )}
-
-                {hasAttempts && diag?.attempts && (
-                  <div className="rh-err-attempts">
-                    <span className="rh-err-sec-k">
-                      {bi(
-                        `自动重试与回退链路（${diag.attempts.length} 次尝试）`,
-                        `Retry & fallback chain (${diag.attempts.length} attempts)`,
-                      )}
-                    </span>
-                    <ol className="rh-err-attempt-list">
-                      {diag.attempts.map((att, aIdx) => {
-                        const outcome = describeAttemptOutcome(att);
-                        const httpLabel =
-                          att.http_status && att.http_status > 0
-                            ? `HTTP ${att.http_status}`
-                            : bi("网络中断", "Network error");
-                        const isBad = !att.http_status || att.http_status >= 400;
-                        const hasAttTok =
-                          typeof att.in_tokens === "number" ||
-                          typeof att.out_tokens === "number";
-                        const tokPart = hasAttTok
-                          ? bi(
-                              `输入 ${(att.in_tokens ?? 0).toLocaleString("en-US")}${
-                                att.cached_tokens
-                                  ? ` (缓存 ${att.cached_tokens.toLocaleString("en-US")})`
-                                  : ""
-                              } / 输出 ${(att.out_tokens ?? 0).toLocaleString("en-US")}`,
-                              `In ${(att.in_tokens ?? 0).toLocaleString("en-US")}${
-                                att.cached_tokens
-                                  ? ` (${att.cached_tokens.toLocaleString("en-US")} cached)`
-                                  : ""
-                              } / Out ${(att.out_tokens ?? 0).toLocaleString("en-US")}`,
-                            )
-                          : "";
-                        return (
-                          <li
-                            key={`${att.endpoint}-${aIdx}`}
-                            className="rh-err-attempt-row"
-                          >
-                            <span className="rh-err-attempt-idx num">
-                              #{aIdx + 1}
-                            </span>
-                            <code className="rh-err-attempt-ep mono">
-                              {att.endpoint || att.api}
-                            </code>
-                            <span aria-hidden>→</span>
-                            <span
-                              className={`rh-err-attempt-http num ${isBad ? "is-bad" : ""}`}
-                            >
-                              {httpLabel}
-                            </span>
-                            <span className="rh-err-attempt-meta num">
-                              · {fmtStepDuration(att.ms)}
-                              {tokPart ? ` · ${tokPart}` : ""}
-                              {outcome ? ` · ${outcome}` : ""}
-                              {att.request_note ? ` · ${att.request_note}` : ""}
-                            </span>
-                          </li>
-                        );
-                      })}
-                    </ol>
-                  </div>
-                )}
-
-                <Smooth>
-                  {rawDiagOpen && hasRawPayload && diag && (
-                    <div className="rh-err-raw-drawer">
-                      <div
-                        className={`rh-err-raw-grid ${rawSinglePane ? "is-single" : ""}`}
-                      >
-                        {diag.request_summary && (
-                          <div className="rh-err-raw-pane">
-                            <div className="rh-err-raw-head">
-                              <span>
-                                {bi("请求参数摘要（已脱敏）", "Request Summary (Redacted)")}
-                              </span>
-                              <button
-                                type="button"
-                                className="rh-err-raw-mini-copy"
-                                onClick={() => void copy(diag.request_summary!)}
-                              >
-                                <IconCopy />
-                                <span>{bi("复制", "Copy")}</span>
-                              </button>
-                            </div>
-                            <pre className="rh-err-pre mono">
-                              {diag.request_summary}
-                            </pre>
-                          </div>
-                        )}
-                        {diag.response_raw && (
-                          <div className="rh-err-raw-pane">
-                            <div className="rh-err-raw-head">
-                              <span>
-                                {bi("网关原始响应 / SSE 报文", "Raw Gateway Response / SSE")}
-                              </span>
-                              <button
-                                type="button"
-                                className="rh-err-raw-mini-copy"
-                                onClick={() => void copy(diag.response_raw!)}
-                              >
-                                <IconCopy />
-                                <span>{bi("复制", "Copy")}</span>
-                              </button>
-                            </div>
-                            <pre className="rh-err-pre mono">
-                              {diag.response_raw}
-                            </pre>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </Smooth>
-
-                <div className="rh-ai-err-actions">
-                  {onRetry && (
-                    <Button
-                      size="small"
-                      type="primary"
-                      icon={<IconRefresh />}
-                      onClick={onRetry}
-                    >
-                      {bi("重新发起", "Retry")}
-                    </Button>
-                  )}
-                  {errGuide.suggestSettings && can("ai.settings|ai.usage") && (
-                    <>
-                      <Button
-                        size="small"
-                        type="secondary"
-                        onClick={() => go({ name: "settings", id: "ai" })}
-                      >
-                        {bi("前往 AI 设置切换模型", "Switch Model in AI Settings")}
-                      </Button>
-                      <Button
-                        size="small"
-                        type="secondary"
-                        onClick={() => go({ name: "settings", id: "ai-usage" })}
-                      >
-                        {bi("查看 AI 用量明细", "View AI Usage")}
-                      </Button>
-                    </>
-                  )}
-                  {hasRawPayload && (
-                    <button
-                      type="button"
-                      className={`rh-err-raw-toggle ${rawDiagOpen ? "on" : ""}`}
-                      aria-expanded={rawDiagOpen}
-                      onClick={() => setRawDiagOpen((v) => !v)}
-                    >
-                      <span>
-                        {rawDiagOpen
-                          ? bi("收起网关原始诊断报文", "Hide Raw Gateway Diagnostics")
-                          : bi("查看网关原始诊断报文", "View Raw Gateway Diagnostics")}
-                      </span>
-                      {rawDiagOpen ? <IconUp /> : <IconDown />}
-                    </button>
-                  )}
-                  {onDismiss && (
-                    <Button size="small" type="text" onClick={onDismiss}>
-                      {bi("收起提示", "Dismiss")}
-                    </Button>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {showThinkingConsole && (
-              <div className="rh-ai-think-wrap is-fill">
-                <div className="rh-ai-think-label">
-                  <span className="rh-ai-think-label-left">
-                    <IconBulb />
-                    <span>{bi("AI 实时思考推演", "AI Live Reasoning")}</span>
-                  </span>
-                  {activePlayIdx >= 4 && (
-                    <span className="rh-ai-think-done-tag">
-                      {bi("推演已收敛", "Converged")}
-                    </span>
-                  )}
-                </div>
-                <div className="rh-ai-think-box" ref={thinkBoxRef}>
-                  {live.thinking && live.thinking.trim() ? (
-                    <RehearsalThinkingContent
-                      text={live.thinking}
-                      streaming={activePlayIdx === 3}
-                    />
-                  ) : activePlayIdx >= 4 ? (
-                    <p className="rh-ai-think-wait">
-                      {bi(
-                        `模型已完成思考收敛，正在组装与校验结构化方案${
-                          live.chars > 0
-                            ? `（已接收 ${live.chars.toLocaleString("en-US")} 字）`
-                            : ""
-                        }…`,
-                        `Reasoning converged; assembling & validating structured output${
-                          live.chars > 0
-                            ? ` (${live.chars.toLocaleString("en-US")} chars received)`
-                            : ""
-                        }…`,
-                      )}
-                      <span className="rh-ai-caret" aria-hidden />
-                    </p>
-                  ) : (
-                    <p className="rh-ai-think-wait">
-                      {bi(
-                        "已接收模型流式通道，正在解码架构风险与变更边界推演…",
-                        "Stream connected; decoding architecture risks & boundary analysis…",
-                      )}
-                      <span className="rh-ai-caret" aria-hidden />
-                    </p>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!trace) return null;
-  const steps = trace.steps || [];
-  const hasThinking = Boolean(trace.thinking && trace.thinking.trim());
-  const traceSplit = steps.length > 0 && hasThinking;
-  const dur = fmtElapsedMs(trace.ms);
-  const fallbackUsed =
-    trace.diag?.fallback_used ||
-    steps.find((s) => s.diag?.fallback_used)?.diag?.fallback_used;
-
-  const staticStepsNode = steps.length > 0 && (
-    <ol className="rh-pipe-steps is-static">
-      {steps.map((st, idx) => {
-        const vStatus =
-          st.ok === false || st.status === "warn" ? "warn" : "done";
-        const isLast = idx === steps.length - 1;
-        const stepDur = fmtElapsedMs(st.ms);
-        return (
-          <li key={st.id} className={`rh-pstep is-${vStatus}`}>
-            <div className="rh-pstep-track" aria-hidden>
-              <span className={`rh-pstep-node is-${vStatus}`}>
-                {vStatus === "done" ? (
-                  <IconCheck />
-                ) : (
-                  <span className="rh-pstep-bang">!</span>
-                )}
-              </span>
-              {!isLast && (
-                <span className="rh-pstep-rail">
-                  <i
-                    className="rh-pstep-rail-fill"
-                    style={{ transform: "scaleY(1)" }}
-                  />
-                </span>
-              )}
-            </div>
-            <div className="rh-pstep-main">
-              <div className="rh-pstep-top">
-                <span className="rh-pstep-title">{st.title}</span>
-                {stepDur && (
-                  <span className={`rh-pstep-badge is-${vStatus} num`}>
-                    {stepDur}
-                  </span>
-                )}
-              </div>
-              {st.detail && (
-                <p
-                  className="rh-pstep-detail"
-                  title={st.detail.length > 44 ? st.detail : undefined}
-                >
-                  {st.detail}
-                </p>
-              )}
-            </div>
-          </li>
-        );
-      })}
-    </ol>
-  );
-
-  const parsedThink = hasThinking
-    ? parseThinkingBlocks(trace.thinking || "")
-    : [];
-  const thinkStepCount = parsedThink.filter(
-    (b) => b.kind === "step" || b.kind === "bullet",
-  ).length;
-  const thinkPreviewSteps = parsedThink
-    .flatMap((b) =>
-      (b.kind === "step" || b.kind === "bullet") && b.lead
-        ? [
-            {
-              index: b.kind === "step" ? b.index : undefined,
-              lead: b.lead,
-              body: b.body,
-            },
-          ]
-        : [],
-    )
-    .slice(0, 4);
-  const firstPreviewBlock = parsedThink[0];
-  const primaryPreviewLine = firstPreviewBlock
-    ? (firstPreviewBlock.kind === "heading" ||
-      firstPreviewBlock.kind === "para"
-        ? firstPreviewBlock.text
-        : firstPreviewBlock.body
-      )
-        .replace(/\s*\n+\s*/g, " ")
-        .trim()
-    : "";
-  const fallbackPreviewText = parsedThink
-    .map((b) =>
-      (b.kind === "heading" || b.kind === "para" ? b.text : b.body)
-        .replace(/\s*\n+\s*/g, " ")
-        .trim(),
-    )
-    .filter(Boolean)
-    .join(" · ");
-
-  const metaItems: React.ReactNode[] = [];
-  if (steps.length > 0) {
-    metaItems.push(
-      <span
-        key="steps"
-        className={`rh-ai-meta-item ${steps.every((s) => s.ok) ? "is-ok" : ""}`}
-      >
-        {steps.every((s) => s.ok)
-          ? bi(`${steps.length} 步通过`, `${steps.length} passed`)
-          : bi(`${steps.length} 步记录`, `${steps.length} steps`)}
-      </span>,
-    );
-  }
-  if (dur) {
-    metaItems.push(
-      <span key="dur" className="rh-ai-meta-item num">
-        {bi(`耗时 ${dur}`, dur)}
-      </span>,
-    );
-  }
-  if (trace.model) {
-    metaItems.push(
-      <span key="model" className="rh-ai-meta-model mono">
-        {trace.model}
-      </span>,
-    );
-  }
-
-  const staticThinkNode = hasThinking && (
-    <div className={`rh-ai-think-wrap ${traceSplit ? "is-fill" : ""}`}>
-      <div className="rh-ai-think-label">
-        <span className="rh-ai-think-label-left">
-          <IconBulb />
-          <span>{bi("AI 架构研判与思考路径", "AI Reasoning & Risk Assessment")}</span>
-        </span>
-        {thinkStepCount >= 2 && (
-          <span className="rh-ai-think-count num">
-            {bi(`${thinkStepCount} 项研判要点`, `${thinkStepCount} key points`)}
-          </span>
-        )}
-      </div>
-      <div className="rh-ai-think-box done">
-        <RehearsalThinkingContent text={trace.thinking!} />
-      </div>
-    </div>
-  );
-
-  return (
-    <div
-      className={`rh-ai-proc ${open ? "is-open" : ""} ${!open && hasThinking ? "has-preview" : ""}`}
-    >
-      <button
-        type="button"
-        className="rh-ai-head clickable"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-      >
-        <div className="rh-ai-head-left">
-          <span className="rh-ai-badge-ic" aria-hidden>
-            <IconBulb />
-          </span>
-          <b>{title}</b>
-          {metaItems.length > 0 && (
-            <span className="rh-ai-meta">
-              {metaItems.map((item, idx) => (
-                <React.Fragment key={idx}>
-                  {idx > 0 && (
-                    <i className="rh-ai-meta-dot" aria-hidden>
-                      ·
-                    </i>
-                  )}
-                  {item}
-                </React.Fragment>
-              ))}
-            </span>
-          )}
-          {fallbackUsed && (
-            <span
-              className="rh-ai-chip is-fallback"
-              title={bi(
-                `上游 Responses 协议返回空内容或不兼容，已自动降级完成调用（${fallbackUsed}）`,
-                `Upstream Responses API returned empty or unsupported output; fell back automatically (${fallbackUsed})`,
-              )}
-            >
-              {fallbackUsed.includes("chat")
-                ? bi("已自动回退兼容 Chat Completions", "Fallback to Chat Completions")
-                : bi(`已自动兼容回退 (${fallbackUsed})`, `Auto fallback (${fallbackUsed})`)}
-            </span>
-          )}
-        </div>
-        <div className="rh-ai-head-right">
-          <span className="rh-ai-toggle-txt">
-            {open ? bi("收起推演", "Collapse") : bi("查看完整推演", "View reasoning")}
-          </span>
-          {open ? <IconUp /> : <IconDown />}
-        </div>
-      </button>
-
-      {!open && hasThinking && (
-        <div
-          className="rh-ai-preview"
-          onClick={() => setOpen(true)}
-          role="button"
-          tabIndex={-1}
-        >
-          {thinkPreviewSteps.length > 0 && (
-            <div className="rh-ai-preview-tags">
-              {thinkPreviewSteps.map((it, idx) => (
-                <span key={`${it.lead}-${idx}`} className="rh-ai-preview-tag">
-                  {it.index && <b className="num">{it.index}</b>}
-                  <span>{it.lead}</span>
-                </span>
-              ))}
-            </div>
-          )}
-          <div
-            className={`rh-ai-preview-clip ${thinkPreviewSteps.length > 0 ? "is-one-line" : ""}`}
-          >
-            {renderThinkingInline(
-              (thinkPreviewSteps.length > 0
-                ? primaryPreviewLine
-                : fallbackPreviewText) ||
-                trace.thinking ||
-                "",
-            )}
-          </div>
-        </div>
-      )}
-
-      <Smooth>
-        {open &&
-          (traceSplit ? (
-            <div className="rh-ai-body is-split">
-              <div className="rh-ai-left">{staticStepsNode}</div>
-              <div className="rh-ai-right">{staticThinkNode}</div>
-            </div>
-          ) : (
-            <div className="rh-ai-body">
-              {staticStepsNode}
-              {staticThinkNode}
-            </div>
-          ))}
-      </Smooth>
-    </div>
-  );
-}
+/* (RehearsalAIProcess, stage theater & thinking renderer extracted to ../../shared/ai-process.tsx) */
 
 /* ---------- Image Thumbnail Strip, Saved Gallery & Lightbox ---------- */
 
@@ -4798,7 +2138,6 @@ export function ClusterRehearsal({
   );
   const [loadErr, setLoadErr] = useState("");
   const [autoSummary, setAutoSummary] = useState<ClusterAutomationSummary | null>(null);
-  const [autoDrawerOpen, setAutoDrawerOpen] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -5839,36 +3178,25 @@ export function ClusterRehearsal({
           {(can("delivery.execute") || can("execution.manage")) && (
             <button
               type="button"
-              className={`rh-nav-pill rh-auto-pill ${
-                autoSummary?.config.enabled
-                  ? autoSummary.ready
-                    ? "is-ready"
-                    : "is-warn"
-                  : ""
-              }`}
-              onClick={() => setAutoDrawerOpen(true)}
+              className={`rh-nav-pill rh-auto-pill ${autoSummary?.ready ? "is-ready" : ""}`}
+              onClick={() =>
+                navigateToClusterAutomation(c.id, {
+                  tab: "rehearsal",
+                  rehearsal: activeId || undefined,
+                })
+              }
               title={bi(
-                "开启或配置变更演练自动化执行（控制机 Ansible/SSH 或目标机直连 Agent）",
-                "Configure automated rehearsal execution (Controller Ansible/SSH or Direct Target Agent)",
+                "查看本集群已关联的执行 Agent 与近期自动执行记录",
+                "View authorized Agents & recent automation tasks for this cluster",
               )}
             >
               <IconThunderbolt />
-              <span>
-                {autoSummary?.config.enabled
-                  ? autoSummary.ready
-                    ? autoSummary.config.transport === "agent"
-                      ? bi("自动化 · Agent", "Auto · Agent")
-                      : bi("自动化 · 控制机", "Auto · Node")
-                    : bi("自动化 · 待接入", "Auto · Setup")
-                  : bi("自动化执行", "Automation")}
-              </span>
-              {autoSummary?.config.enabled && (
+              <span>{bi("执行 Agent", "Agents")}</span>
+              {autoSummary && (
                 <em className="num">
-                  {autoSummary.ready
-                    ? autoSummary.config.transport === "agent"
-                      ? `${autoSummary.online_agents}/${autoSummary.hosts.length}`
-                      : bi("就绪", "Ready")
-                    : bi("离线", "Off")}
+                  {(autoSummary.unified_agents || []).length > 0
+                    ? `${(autoSummary.unified_agents || []).filter((a) => a.online && !a.disabled).length}/${(autoSummary.unified_agents || []).length}`
+                    : "0"}
                 </em>
               )}
             </button>
@@ -6731,7 +4059,12 @@ export function ClusterRehearsal({
               pick={pick}
               aiOpts={aiOpts}
               autoSummary={autoSummary}
-              onOpenAutoDrawer={() => setAutoDrawerOpen(true)}
+              onOpenAutoDrawer={() =>
+                navigateToClusterAutomation(c.id, {
+                  tab: "rehearsal",
+                  rehearsal: activeId || undefined,
+                })
+              }
               onListChanged={() => loadList(false)}
               onSessionSync={syncSessionInList}
               onClusterChanged={onClusterChanged}
@@ -6775,12 +4108,6 @@ export function ClusterRehearsal({
           />
         </Modal>
       )}
-      <ClusterAutomationDrawer
-        visible={autoDrawerOpen}
-        clusterId={c.id}
-        onClose={() => setAutoDrawerOpen(false)}
-        onChanged={setAutoSummary}
-      />
     </div>
   );
 }
@@ -7160,6 +4487,7 @@ const ScopeAlignmentDeck = React.memo(function ScopeAlignmentDeck({
   setAnswers,
   extraScope,
   setExtraScope,
+  savedExtraScope = "",
   disabled,
   freshReveal = false,
   baselineVersion,
@@ -7172,6 +4500,7 @@ const ScopeAlignmentDeck = React.memo(function ScopeAlignmentDeck({
   setAnswers: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   extraScope: string;
   setExtraScope: (v: string) => void;
+  savedExtraScope?: string;
   disabled: boolean;
   freshReveal?: boolean;
   baselineVersion?: string;
@@ -7938,15 +5267,35 @@ const ScopeAlignmentDeck = React.memo(function ScopeAlignmentDeck({
                   {bi("补充现场背景", "Extra Context")}{" "}
                   <span className="faint">{bi("（可选）", "(optional)")}</span>
                 </label>
-                {!extraScope.trim() && (
-                  <button
-                    type="button"
-                    className="rh-inline-cancel"
-                    onClick={() => setExtraOpen(false)}
-                  >
-                    {bi("收起", "Collapse")}
-                  </button>
-                )}
+                <div className="rh-extra-head-acts">
+                  {extraScope.trim() !== savedExtraScope.trim() ? (
+                    <span className="rh-extra-status is-pending">
+                      {bi("已修改 · 点击下方按钮生效", "Unsaved · click button below to apply")}
+                    </span>
+                  ) : extraScope.trim() ? (
+                    <span className="rh-extra-status is-applied">
+                      {bi("已生效于当前方案", "Active in plan")}
+                    </span>
+                  ) : null}
+                  {extraScope.trim() ? (
+                    <button
+                      type="button"
+                      disabled={disabled}
+                      className="rh-inline-cancel"
+                      onClick={() => setExtraScope("")}
+                    >
+                      {bi("清空", "Clear")}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="rh-inline-cancel"
+                      onClick={() => setExtraOpen(false)}
+                    >
+                      {bi("收起", "Collapse")}
+                    </button>
+                  )}
+                </div>
               </div>
               <Input.TextArea
                 id={`extra-${rehearsalId}`}
@@ -7955,8 +5304,8 @@ const ScopeAlignmentDeck = React.memo(function ScopeAlignmentDeck({
                 onChange={setExtraScope}
                 autoSize={{ minRows: 2, maxRows: 5 }}
                 placeholder={bi(
-                  "例如：生产近期发生过一次主备切换；测试环境为 2 台同系统虚拟机…",
-                  "e.g., Production had a failover recently; staging uses 2 matching VMs…",
+                  "例如：直接对主操作就行、可以接受短暂闪断无需切主；或生产近期发生过主备切换…",
+                  "e.g., Operate directly on primary (brief blip OK, no switchover); or recent failover…",
                 )}
                 aria-label={bi("补充约束说明", "Extra constraints")}
               />
@@ -8427,6 +5776,13 @@ function RehearsalSessionView({
   );
   const [prodConfirmInput, setProdConfirmInput] = useState("");
   const [prodUnlocked, setProdUnlocked] = useState(false);
+  const [execPrompt, setExecPrompt] = useState<{
+    title: string;
+    readOnly: boolean;
+    targets?: RehearsalExecTarget[];
+    onRun: (choice: ExecutionAgentChoice) => void;
+  } | null>(null);
+  const lastChoiceRef = useRef<ExecutionAgentChoice | null>(null);
   const [autoRunning, setAutoRunning] = useState(false);
   const [runningStepId, setRunningStepId] = useState("");
   const [verifyingStepId, setVerifyingStepId] = useState("");
@@ -8821,14 +6177,20 @@ function RehearsalSessionView({
     const next = scopeTask.result;
     clearRehearsalTask(scopeKey);
     setR(next);
+    const nextAns: Record<string, string> = {};
+    (next.scope_questions || []).forEach((q) => {
+      if (q.answer) nextAns[q.id] = q.answer;
+    });
+    setAnswers(nextAns);
+    setExtraScope(next.extra_scope || "");
     setFreshTraceStage("scope");
-    switchStage(next.stage, true);
+    switchStage("probing", true);
     void onListChanged();
     if (!scopeTask.notified) {
       Message.success(
         bi(
-          "已生成只读状态采集脚本并通过静态安全扫描",
-          "Read-only probe generated and passed static safety scan",
+          "已按最新边界生成只读采集脚本并通过静态安全扫描",
+          "Read-only probe generated with updated scope and passed static safety scan",
         ),
       );
     }
@@ -8839,6 +6201,12 @@ function RehearsalSessionView({
     const next = probeTask.result;
     clearRehearsalTask(probeKey);
     setR(next);
+    const nextAns: Record<string, string> = {};
+    (next.scope_questions || []).forEach((q) => {
+      if (q.answer) nextAns[q.id] = q.answer;
+    });
+    setAnswers(nextAns);
+    setExtraScope(next.extra_scope || "");
     setProbeImages([]);
     setFreshTraceStage("probe");
     void onListChanged();
@@ -9354,13 +6722,23 @@ function RehearsalSessionView({
         ? probeImages.map((im) => im.dataUrl)
         : undefined;
     const modelRef = pick.ref || undefined;
+    const effectiveProbeOut =
+      overrideOutput !== undefined
+        ? overrideOutput
+        : probeOut || r.probe_output || r.manual_state || "";
     const payload = {
-      probe_output: overrideOutput !== undefined ? overrideOutput : probeOut,
+      probe_output: effectiveProbeOut,
       test_env_note: testEnvNote,
       images: imgs,
       mode: action,
       model: modelRef,
       effort: effortVal,
+      answers: (r.scope_questions || []).map((q) => ({
+        id: q.id,
+        question: q.question,
+        answer: (answers[q.id] || "").trim(),
+      })),
+      extra: extraScope.trim(),
     };
     const cid = c.id;
     const rid = r.id;
@@ -9372,9 +6750,11 @@ function RehearsalSessionView({
       probeAction: action,
       initialLive,
       draft: {
-        probeOut,
+        probeOut: effectiveProbeOut,
         testEnvNote,
         probeImages: [...probeImages],
+        answers: { ...answers },
+        extraScope,
       },
       run: (updateLive, signal) =>
         streamRehearsalAPI(
@@ -9429,10 +6809,23 @@ function RehearsalSessionView({
     });
   };
 
-  const runAutoRehearsalProbe = async () => {
+  const runAutoRehearsalProbe = async (choice?: ExecutionAgentChoice) => {
     if (!r || autoProbeRunning) return;
-    if (!autoSummary?.ready) {
-      onOpenAutoDrawer?.();
+    if (!choice) {
+      setExecPrompt({
+        title: bi("演练前 100% 只读状态探针", "Pre-Rehearsal Read-Only Probe"),
+        readOnly: true,
+        targets: autoSummary?.hosts?.map((h) => ({
+          host: h.name,
+          ip: h.ip,
+          role: h.role,
+        })),
+        onRun: (picked) => {
+          setExecPrompt(null);
+          lastChoiceRef.current = picked;
+          void runAutoRehearsalProbe(picked);
+        },
+      });
       return;
     }
     execAbortRef.current?.abort();
@@ -9442,7 +6835,16 @@ function RehearsalSessionView({
     try {
       const task = await api<RehearsalExecTask>(
         `/api/clusters/${encodeURIComponent(c.id)}/rehearsals/${encodeURIComponent(r.id)}/exec/probe`,
-        { method: "POST", body: JSON.stringify({}) },
+        {
+          method: "POST",
+          body: JSON.stringify({
+            agent_id: choice.agent_id,
+            targets: choice.targets,
+            node_exec_method: choice.node_exec_method,
+            ssh_user: choice.ssh_user,
+            ssh_port: choice.ssh_port,
+          }),
+        },
       );
       setProbeExecTask(task);
       upsertExecTask(task);
@@ -9490,34 +6892,46 @@ function RehearsalSessionView({
       kind?: "step" | "rollback";
       targets?: RehearsalExecTarget[];
       autoVerify?: boolean;
+      choice?: ExecutionAgentChoice;
     },
   ): Promise<{ task?: RehearsalExecTask; passed: boolean; stopped?: boolean }> => {
     const curR = latestRRef.current;
-    if (!curR || !autoSummary) return { passed: false };
-    if (!autoSummary.ready) {
-      onOpenAutoDrawer?.();
-      return { passed: false };
-    }
+    if (!curR) return { passed: false };
     const kind = opts?.kind || "step";
-    const isProd = autoSummary.config.env_kind === "prod";
     const isPureReadOnlyPhase =
       kind === "step" && (step.phase === "precheck" || step.phase === "verify");
-    if (isProd && !isPureReadOnlyPhase && autoSummary.config.allow_prod_mutate && !prodUnlocked) {
-      Message.warning(
-        bi(
-          `生产环境执行变更步骤前，请先在上方自动化控制条输入集群标识「${c.id}」解锁`,
-          `Enter cluster ID "${c.id}" in the automation bar above to unlock production step execution`,
-        ),
-      );
+
+    const defaultTargets =
+      opts?.targets && opts.targets.length > 0
+        ? opts.targets
+        : resolveStepTargets(step.target_role, autoSummary?.hosts || [], curR.drift?.hosts);
+
+    const activeChoice = opts?.choice;
+    if (!activeChoice) {
+      setExecPrompt({
+        title:
+          kind === "rollback"
+            ? bi(`回滚步骤 #${step.order} · ${step.title}`, `Rollback #${step.order} · ${step.title}`)
+            : bi(`步骤 #${step.order} · ${step.title}`, `Step #${step.order} · ${step.title}`),
+        readOnly: isPureReadOnlyPhase,
+        targets: defaultTargets,
+        onRun: (picked) => {
+          setExecPrompt(null);
+          lastChoiceRef.current = picked;
+          void runSingleStepAndVerify(step, {
+            ...opts,
+            targets: picked.targets,
+            choice: picked,
+          });
+        },
+      });
       return { passed: false };
     }
 
     const targets =
-      opts?.targets && opts.targets.length > 0
-        ? opts.targets
-        : resolveStepTargets(step.target_role, autoSummary.hosts, curR.drift?.hosts);
+      activeChoice.targets.length > 0 ? activeChoice.targets : defaultTargets;
     if (targets.length === 0) {
-      Message.warning(bi("未匹配到可执行的目标主机，请在自动化配置中核对节点列表", "No target hosts resolved"));
+      Message.warning(bi("未匹配到可执行的目标主机", "No target hosts resolved"));
       return { passed: false };
     }
 
@@ -9535,7 +6949,11 @@ function RehearsalSessionView({
             step_id: step.id,
             kind,
             targets,
-            confirm_cluster: prodUnlocked ? c.id : "",
+            confirm_cluster: c.id,
+            agent_id: activeChoice.agent_id,
+            node_exec_method: activeChoice.node_exec_method,
+            ssh_user: activeChoice.ssh_user,
+            ssh_port: activeChoice.ssh_port,
           }),
         },
       );
@@ -9638,12 +7056,32 @@ function RehearsalSessionView({
     }
   };
 
-  const startAIGatedAutoRun = async (bypassBreakpointStepId?: string) => {
-    if (!autoSummary?.ready) {
-      onOpenAutoDrawer?.();
+  const startAIGatedAutoRun = async (
+    bypassBreakpointStepId?: string,
+    batchChoice?: ExecutionAgentChoice,
+  ) => {
+    if (autoRunning || runningStepId || verifyingStepId) return;
+    const chosen = batchChoice || (bypassBreakpointStepId ? lastChoiceRef.current || undefined : undefined);
+    if (!chosen) {
+      const hasMutate = (latestRRef.current?.steps || []).some(
+        (s) => s.phase === "execute" && s.status !== "passed" && s.status !== "skipped",
+      );
+      setExecPrompt({
+        title: bi("连续自动执行正向演练步骤（AI 逐单步验收）", "AI-Gated Auto Rehearsal Run"),
+        readOnly: !hasMutate,
+        targets: autoSummary?.hosts?.map((h) => ({
+          host: h.name,
+          ip: h.ip,
+          role: h.role,
+        })),
+        onRun: (picked) => {
+          setExecPrompt(null);
+          lastChoiceRef.current = picked;
+          void startAIGatedAutoRun(bypassBreakpointStepId, picked);
+        },
+      });
       return;
     }
-    if (autoRunning || runningStepId || verifyingStepId) return;
     autoStopRef.current = false;
     setAutoRunning(true);
     setAutoPauseReason(null);
@@ -9666,7 +7104,7 @@ function RehearsalSessionView({
           break;
         }
         if (
-          autoSummary.config.pause_before_mutate &&
+          autoSummary?.config.pause_before_mutate &&
           nextPending.phase === "execute" &&
           nextPending.id !== bypassID
         ) {
@@ -9683,7 +7121,16 @@ function RehearsalSessionView({
           break;
         }
         bypassID = "";
-        const res = await runSingleStepAndVerify(nextPending, { autoVerify: true });
+        const stepTargets = resolveStepTargets(
+          nextPending.target_role,
+          autoSummary?.hosts || [],
+          curR.drift?.hosts,
+        );
+        const res = await runSingleStepAndVerify(nextPending, {
+          autoVerify: true,
+          targets: stepTargets,
+          choice: { ...chosen, targets: stepTargets },
+        });
         if (res.stopped || autoStopRef.current) {
           break;
         }
@@ -9833,8 +7280,11 @@ function RehearsalSessionView({
     r.scope_summary && r.scope_summary.trim() !== r.goal.trim(),
   );
   const goalSections = parseRehearsalGoalSections(r.goal);
-  const isLongGoal = r.goal.trim().length > 140 || goalSections.length > 1;
-  const canToggleGoal = Boolean(r.goal.trim()) && (hasScopeSummary || isLongGoal);
+  const canToggleGoal = Boolean(
+    hasScopeSummary ||
+      r.goal.trim() ||
+      (r.goal_images && r.goal_images.length > 0),
+  );
   const hasDownstreamProgress = Boolean(
     r.probe_output ||
       r.manual_state ||
@@ -9883,15 +7333,31 @@ function RehearsalSessionView({
                   >
                     <span>
                       {goalOpen
-                        ? hasScopeSummary
-                          ? bi("收起原始诉求", "Hide original goal")
-                          : bi("收起完整诉求", "Collapse goal")
+                        ? bi("收起诉求与边界", "Hide goal & scope")
                         : hasScopeSummary
-                          ? bi("查看原始诉求", "View original goal")
-                          : bi("展开完整诉求", "Expand full goal")}
+                          ? bi("诉求与边界", "Goal & scope")
+                          : bi("变更诉求", "Change goal")}
                     </span>
                     <IconDown className={goalOpen ? "open" : ""} />
                   </button>
+                </>
+              )}
+              {r.source?.rollout_id && !refineOpen && (
+                <>
+                  <span className="rh-shead-dot" aria-hidden>
+                    ·
+                  </span>
+                  <RolloutProgressStrip
+                    compact
+                    rehearsal={r}
+                    currentClusterId={c.id}
+                    boardOverride={rolloutBoardOverride}
+                    onOpenPropagate={
+                      r.stage === "finalized" && r.applied && !r.voided
+                        ? () => setStripPropagateOpen(true)
+                        : undefined
+                    }
+                  />
                 </>
               )}
             </div>
@@ -10226,14 +7692,10 @@ function RehearsalSessionView({
           </div>
         ) : (
           <>
-            {hasScopeSummary ? (
-              <div
-                className={`rh-shead-summary${r.intent_unclear ? " is-intent" : ""}`}
-              >
+            {hasScopeSummary && r.intent_unclear && (
+              <div className="rh-shead-summary is-intent">
                 <span className="rh-shead-sum-tag">
-                  {r.intent_unclear
-                    ? bi("AI 识别诉求", "AI Recognized")
-                    : bi("收敛边界", "Scope Summary")}
+                  {bi("AI 识别诉求", "AI Recognized")}
                 </span>
                 <span className="rh-shead-sum-txt">
                   {renderThinkingInline(r.scope_summary!)}
@@ -10246,37 +7708,22 @@ function RehearsalSessionView({
                     onClick={openRefine}
                   >
                     <IconEdit />
-                    <span>
-                      {r.intent_unclear
-                        ? bi("识别有偏？修正", "Misread? Edit")
-                        : bi("修正", "Edit")}
-                    </span>
+                    <span>{bi("识别有偏？修正", "Misread? Edit")}</span>
                   </button>
                 )}
               </div>
-            ) : r.goal.trim() && !goalOpen ? (
-              <div className="rh-shead-summary is-goal">
-                <span className="rh-shead-sum-tag">
-                  {bi("变更诉求", "Change Goal")}
-                </span>
-                <span
-                  className={`rh-shead-sum-txt ${isLongGoal ? "is-clamped" : ""}`}
-                >
-                  {renderThinkingInline(r.goal)}
-                </span>
-              </div>
-            ) : null}
+            )}
 
-            {goalOpen && goalSections.length > 0 && (
+            {goalOpen && (hasScopeSummary || goalSections.length > 0 || (r.goal_images && r.goal_images.length > 0)) && (
               <div
                 className="rh-shead-goal-panel"
                 role="region"
-                aria-label={bi("完整变更诉求", "Full change goal")}
+                aria-label={bi("变更诉求与收敛边界", "Change goal and scope summary")}
               >
                 <div className="rh-shead-goal-head">
                   <span className="rh-shead-goal-title">
                     {hasScopeSummary
-                      ? bi("原始变更诉求", "Original Change Goal")
+                      ? bi("变更诉求与收敛边界", "Goal & Scope Summary")
                       : bi("完整变更诉求", "Full Change Goal")}
                   </span>
                   <div className="rh-shead-goal-acts">
@@ -10300,28 +7747,41 @@ function RehearsalSessionView({
                     </button>
                   </div>
                 </div>
-                <div className="rh-shead-goal-list">
-                  {goalSections.map((sec, idx) => (
-                    <div key={idx} className="rh-shead-goal-row">
-                      {sec.label && (
-                        <span className="rh-shead-goal-lbl">{sec.label}</span>
-                      )}
-                      <p className="rh-shead-goal-body">
-                        {renderThinkingInline(sec.body)}
-                      </p>
-                    </div>
-                  ))}
-                </div>
+                {hasScopeSummary && (
+                  <div className="rh-shead-goal-scope">
+                    <span className="rh-shead-sum-tag">
+                      {bi("收敛边界", "Scope Summary")}
+                    </span>
+                    <span className="rh-shead-sum-txt">
+                      {renderThinkingInline(r.scope_summary!)}
+                    </span>
+                  </div>
+                )}
+                {goalSections.length > 0 && (
+                  <div className="rh-shead-goal-list">
+                    {goalSections.map((sec, idx) => (
+                      <div key={idx} className="rh-shead-goal-row">
+                        {sec.label && (
+                          <span className="rh-shead-goal-lbl">{sec.label}</span>
+                        )}
+                        <p className="rh-shead-goal-body">
+                          {renderThinkingInline(sec.body)}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {r.goal_images && r.goal_images.length > 0 && (
+                  <div className="rh-shead-goal-imgs">
+                    <SavedImageGallery
+                      clusterId={c.id}
+                      rehearsalId={r.id}
+                      names={r.goal_images}
+                      label={bi("诉求参考截图", "Reference Screenshots")}
+                    />
+                  </div>
+                )}
               </div>
-            )}
-
-            {r.goal_images && r.goal_images.length > 0 && (
-              <SavedImageGallery
-                clusterId={c.id}
-                rehearsalId={r.id}
-                names={r.goal_images}
-                label={bi("诉求参考截图", "Reference Screenshots")}
-              />
             )}
           </>
         )}
@@ -10337,19 +7797,6 @@ function RehearsalSessionView({
         />
       ) : (
         <>
-
-      {r.source?.rollout_id && (
-        <RolloutProgressStrip
-          rehearsal={r}
-          currentClusterId={c.id}
-          boardOverride={rolloutBoardOverride}
-          onOpenPropagate={
-            r.stage === "finalized" && r.applied && !r.voided
-              ? () => setStripPropagateOpen(true)
-              : undefined
-          }
-        />
-      )}
 
       {r.security_context && (
         <RehearsalSecurityBanner
@@ -10485,13 +7932,30 @@ function RehearsalSessionView({
         className={`rh-stage-body${stageAnimated ? ` rh-anim-${stageDir}` : ""}`}
       >
         {/* ---- Stage 1: Scoping ---- */}
-        {curIdx === 0 && (
+        {curIdx === 0 && (() => {
+          const hasSavedProbeEvidence = Boolean(
+            probeOut.trim() ||
+              r.probe_output?.trim() ||
+              r.manual_state?.trim() ||
+              probeImages.length > 0 ||
+              (r.probe_images && r.probe_images.length > 0),
+          );
+          const scopeDirty =
+            extraScope.trim() !== (r.extra_scope || "").trim() ||
+            (r.scope_questions || []).some(
+              (q) => (answers[q.id] || "").trim() !== (q.answer || "").trim(),
+            );
+          return (
           <section
             className={`rh-sec${isFreshCreate ? " is-fresh-reveal" : ""}`}
             onKeyDown={(e) => {
               if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
                 e.preventDefault();
-                void submitScope();
+                if (hasSavedProbeEvidence) {
+                  void submitProbe("analyze");
+                } else {
+                  void submitScope();
+                }
               }
             }}
           >
@@ -10513,7 +7977,8 @@ function RehearsalSessionView({
               setAnswers={setAnswers}
               extraScope={extraScope}
               setExtraScope={setExtraScope}
-              disabled={scopeBusy || refineBusy}
+              savedExtraScope={r.extra_scope || ""}
+              disabled={scopeBusy || probeBusy || refineBusy}
               freshReveal={isFreshCreate}
               baselineVersion={c.version}
               intentUnclear={Boolean(r.intent_unclear)}
@@ -10523,10 +7988,20 @@ function RehearsalSessionView({
             <div className="rh-sec-foot">
               <div className="rh-sec-foot-tools">
                 <span className="rh-foot-note">
-                  {bi(
-                    "仅生成静态只读采集命令，零重启与写操作",
-                    "Generates static read-only commands only; zero restarts or writes",
-                  )}
+                  {hasSavedProbeEvidence
+                    ? scopeDirty
+                      ? bi(
+                          "边界或补充背景已更新：可直接复用已有探针证据重新生成演练步骤，无需再次登录节点采集",
+                          "Scope updated: regenerate rehearsal steps directly using saved probe evidence",
+                        )
+                      : bi(
+                          "已保留第 2 步现场采集证据，修改边界或补充背景后可直接重新编排演练步骤",
+                          "Saved probe evidence ready — edit scope/context and regenerate steps directly",
+                        )
+                    : bi(
+                        "仅生成静态只读采集命令，零重启与写操作",
+                        "Generates static read-only commands only; zero restarts or writes",
+                      )}
                 </span>
               </div>
               <div className="rh-compose-submit">
@@ -10537,28 +8012,59 @@ function RehearsalSessionView({
                   compact
                 />
                 <ModelPicker pick={pick} compact />
-                <Button
-                  type="primary"
-                  shape="round"
-                  className={`ai-pill ${!offline ? "ai-pill-primary" : ""}`}
-                  icon={<Spark size={14} rainbow={offline} />}
-                  title={
-                    isMac
-                      ? bi("⌘ + Enter 提交", "⌘ + Enter Submit")
-                      : bi("Ctrl + Enter 提交", "Ctrl + Enter Submit")
-                  }
-                  loading={scopeBusy}
-                  disabled={offline}
-                  onClick={() => void submitScope()}
-                >
-                  {r.probe_script
-                    ? bi("重新生成只读探针", "Regenerate Probe")
-                    : bi("生成只读采集脚本", "Generate Probe")}
-                </Button>
+                {hasSavedProbeEvidence ? (
+                  <>
+                    <Button
+                      shape="round"
+                      type="secondary"
+                      loading={scopeBusy}
+                      disabled={offline || probeBusy}
+                      onClick={() => void submitScope()}
+                    >
+                      {bi("重新生成只读探针", "Regenerate Probe")}
+                    </Button>
+                    <Button
+                      type="primary"
+                      shape="round"
+                      className={`ai-pill ${!offline ? "ai-pill-primary" : ""}`}
+                      icon={<Spark size={14} rainbow={offline} />}
+                      title={
+                        isMac
+                          ? bi("⌘ + Enter 应用边界并重排步骤", "⌘ + Enter Apply & Replan")
+                          : bi("Ctrl + Enter 应用边界并重排步骤", "Ctrl + Enter Apply & Replan")
+                      }
+                      loading={probeBusy && probeAction === "analyze"}
+                      disabled={offline || scopeBusy || probeBusy}
+                      onClick={() => void submitProbe("analyze")}
+                    >
+                      {bi("按最新边界重新生成演练步骤", "Apply Scope & Replan Steps")}
+                    </Button>
+                  </>
+                ) : (
+                  <Button
+                    type="primary"
+                    shape="round"
+                    className={`ai-pill ${!offline ? "ai-pill-primary" : ""}`}
+                    icon={<Spark size={14} rainbow={offline} />}
+                    title={
+                      isMac
+                        ? bi("⌘ + Enter 提交", "⌘ + Enter Submit")
+                        : bi("Ctrl + Enter 提交", "Ctrl + Enter Submit")
+                    }
+                    loading={scopeBusy}
+                    disabled={offline || probeBusy}
+                    onClick={() => void submitScope()}
+                  >
+                    {r.probe_script
+                      ? bi("重新生成只读探针", "Regenerate Probe")
+                      : bi("生成只读采集脚本", "Generate Probe")}
+                  </Button>
+                )}
               </div>
             </div>
           </section>
-        )}
+          );
+        })()}
 
         {/* ---- Stage 2: Read-Only Probing ---- */}
         {curIdx === 1 && (
@@ -10632,42 +8138,27 @@ function RehearsalSessionView({
               />
             )}
 
-            {can("delivery.execute") && (
+            {can("delivery.execute") && Boolean(r.probe_script) && (
               <div className="rha-probe-auto-bar">
                 <div className="rha-probe-auto-l">
                   <IconThunderbolt />
                   <span>
-                    {autoSummary?.ready
-                      ? bi(
-                          `自动化采集通道已就绪（${autoSummary.config.transport === "agent" ? `目标机 Agent ${autoSummary.online_agents}/${autoSummary.hosts.length} 在线` : `控制机直连`}），可一键自动运行 100% 只读探针并直接送交 AI 解析漂移`,
-                          `Automation ready (${autoSummary.config.transport === "agent" ? `Direct Agent ${autoSummary.online_agents}/${autoSummary.hosts.length}` : "Controller"}) — run 100% read-only probe & analyze drift in 1 click`,
-                        )
-                      : bi(
-                          "想免去手工复制脚本和贴回显？可接入控制机（Ansible/SSH）或目标机直连 Agent（免密码）",
-                          "Want 1-click automated read-only collection? Connect a Controller (Ansible/SSH) or passwordless Direct Target Agent",
-                        )}
+                    {bi(
+                      "无需手动登录机器复制粘贴：点击右侧按钮直接选择已授权的 Agent 自动采集 100% 只读探针并送交 AI 解析",
+                      "Skip manual copy-paste: select an authorized Agent to run the 100% read-only probe and analyze drift automatically",
+                    )}
                   </span>
                 </div>
                 <div className="rha-ribbon-r">
-                  {autoSummary?.ready ? (
-                    <Button
-                      size="small"
-                      type="primary"
-                      loading={autoProbeRunning}
-                      disabled={probeBusy || offline || !r.probe_script}
-                      icon={<IconPlayArrow />}
-                      onClick={() => void runAutoRehearsalProbe()}
-                    >
-                      {bi("自动采集并 AI 解析", "Auto-Collect & Analyze")}
-                    </Button>
-                  ) : null}
                   <Button
                     size="small"
-                    type={autoSummary?.ready ? "text" : "outline"}
-                    icon={<IconSettings />}
-                    onClick={onOpenAutoDrawer}
+                    type="primary"
+                    loading={autoProbeRunning}
+                    disabled={probeBusy || offline || !r.probe_script}
+                    icon={<IconPlayArrow />}
+                    onClick={() => void runAutoRehearsalProbe()}
                   >
-                    {autoSummary?.ready ? bi("切换接入方式", "Settings") : bi("开启自动化采集", "Enable Automation")}
+                    {bi("选择 Agent 自动采集", "Run Probe with Agent")}
                   </Button>
                 </div>
               </div>
@@ -11133,6 +8624,24 @@ function RehearsalSessionView({
               />
             )}
 
+            {r.extra_scope?.trim() && (
+              <div className="rh-extra-active-bar">
+                <span className="rh-extra-active-tag">
+                  {bi("已生效补充约束", "Active Constraint")}
+                </span>
+                <span className="rh-extra-active-txt">{r.extra_scope}</span>
+                {visibleStages.includes("scoping") && !r.applied && !r.voided && (
+                  <button
+                    type="button"
+                    className="rh-inline-cancel"
+                    onClick={() => switchStage("scoping")}
+                  >
+                    {bi("修改边界", "Edit Scope")}
+                  </button>
+                )}
+              </div>
+            )}
+
             {r.drift && (() => {
               const hosts = r.drift.hosts || [];
               const driftUnverified =
@@ -11204,16 +8713,14 @@ function RehearsalSessionView({
                     <div className="rh-drift-tbl-box">
                       <table className="rh-drift-tbl">
                         <colgroup>
-                          <col style={{ width: "86px" }} />
-                          <col style={{ width: "120px" }} />
-                          <col style={{ width: "26%" }} />
-                          <col style={{ width: "22%" }} />
-                          <col />
+                          <col style={{ width: "25%" }} />
+                          <col style={{ width: "19%" }} />
+                          <col style={{ width: "17%" }} />
+                          <col style={{ width: "39%" }} />
                         </colgroup>
                         <thead>
                           <tr>
-                            <th>{bi("节点", "Node")}</th>
-                            <th>{bi("地址", "Address")}</th>
+                            <th>{bi("节点与地址", "Node & IP")}</th>
                             <th>{bi("角色比对（初始 → 现场）", "Role (Initial → Live)")}</th>
                             <th>{bi("版本", "Version")}</th>
                             <th>{bi("运行状态", "Status")}</th>
@@ -11238,22 +8745,30 @@ function RehearsalSessionView({
                               !isVerPlaceholder &&
                               verText.length <= 24 &&
                               !/[\u4e00-\u9fa5]/.test(verText);
-                            const roleSample = `${liveRole} ${initRole}`.toLowerCase();
-                            const roleTone = /(leader|primary|master|主库|主节点|读写|writer)/i.test(
-                              roleSample,
-                            )
-                              ? "primary"
-                              : /(standby|replica|slave|secondary|follower|从库|从节点|备库|只读|reader)/i.test(
-                                    roleSample,
-                                  )
-                                ? "replica"
-                                : "neutral";
+                            const roleKindOf = (txt: string) => {
+                              if (/(leader|primary|master|主库|主节点|读写|writer)/i.test(txt)) {
+                                return "primary" as const;
+                              }
+                              if (/(standby|replica|slave|secondary|follower|从库|从节点|备库|只读|reader)/i.test(txt)) {
+                                return "replica" as const;
+                              }
+                              return "neutral" as const;
+                            };
+                            const initKind = roleKindOf(initRole);
+                            const liveKind = roleKindOf(liveRole);
+                            const roleFlipped =
+                              changed &&
+                              initKind !== "neutral" &&
+                              liveKind !== "neutral" &&
+                              initKind !== liveKind;
+                            const roleTone =
+                              liveKind !== "neutral" ? liveKind : initKind;
                             const statusText = (
                               h.status || bi("正常", "Healthy")
                             ).trim();
                             const cleanedStatus = statusText
                               .replace(
-                                /(?:接收及回放\s*)?(?:lag|延迟)\s*(?:均为|为|=|:|：)?\s*0(?:\s*(?:bytes?|kb|mb|ms|s))?/gi,
+                                /(?:接收及回放\s*|复制\s*)?(?:lag|延迟)(?:\s+in\s+\w+)?\s*(?:均为|为|=|:|：)?\s*0(?:\s*(?:bytes?|kb|mb|ms|s))?/gi,
                                 "",
                               )
                               .replace(/无\s*(?:pending_restart|延迟|lag|异常)/gi, "");
@@ -11266,14 +8781,18 @@ function RehearsalSessionView({
                             return (
                               <tr key={h.name + h.ip}>
                                 <td className="rh-cell-node">
-                                  <b>{h.name}</b>
+                                  <div className="rh-node-id">
+                                    <b title={h.name}>{h.name}</b>
+                                    {h.ip && (
+                                      <span className="rh-node-ip mono">{h.ip}</span>
+                                    )}
+                                  </div>
                                 </td>
-                                <td className="rh-cell-ip mono">{h.ip || "—"}</td>
                                 <td className="rh-cell-role">
                                   {changed ? (
                                     compactRole ? (
                                       <span
-                                        className={`rh-role-shift${r.drift!.drifted ? "" : ` is-soft tone-${roleTone}`}`}
+                                        className={`rh-role-shift${roleFlipped ? "" : ` is-soft tone-${roleTone}`}`}
                                       >
                                         <i className="rh-role-dot" aria-hidden />
                                         <span>{initRole}</span>
@@ -11292,7 +8811,7 @@ function RehearsalSessionView({
                                         </div>
                                         <div className="rh-role-row">
                                           <span
-                                            className={`rh-mini-lbl ${r.drift!.drifted ? "is-warn" : "is-live"}`}
+                                            className={`rh-mini-lbl ${roleFlipped ? "is-warn" : "is-live"}`}
                                           >
                                             {bi("现场", "Live")}
                                           </span>
@@ -11709,25 +9228,21 @@ function RehearsalSessionView({
               </div>
             )}
 
-            {can("delivery.execute") && autoSummary?.config.enabled && phaseFilter !== "rollback" && (
+            {can("delivery.execute") && autoSummary && phaseFilter !== "rollback" && (
               <section className="rha-ribbon" aria-label={bi("演练自动化执行控制条", "Rehearsal automation control bar")}>
                 <div className="rha-ribbon-top">
                   <div className="rha-ribbon-l">
                     <span className="rha-ribbon-title">
                       <IconThunderbolt />
-                      {bi("变更演练自动化执行", "Automated Rehearsal Execution")}
+                      {bi("Agent 自动化执行", "Agent Execution")}
                     </span>
                     <span className={`rha-ready-dot ${autoSummary.ready ? "is-ok" : "is-warn"}`}>
-                      {autoSummary.ready
-                        ? autoSummary.config.transport === "agent"
-                          ? bi(`Agent 直连 · ${autoSummary.online_agents}/${autoSummary.hosts.length} 在线`, `Direct Agent · ${autoSummary.online_agents}/${autoSummary.hosts.length}`)
-                          : bi(`控制机直连 · ${autoSummary.config.node_exec_method === "ansible" ? "Ansible" : "SSH/自动"}`, "Controller Online")
-                        : bi("通道未就绪", "Not Ready")}
-                    </span>
-                    <span className="rha-transport-tag">
-                      {autoSummary.config.env_kind === "prod"
-                        ? bi("生产环境", "Production")
-                        : bi("测试/演练环境", "Test Env")}
+                      {(autoSummary.unified_agents || []).length > 0
+                        ? bi(
+                            `已授权 ${(autoSummary.unified_agents || []).length} 台 Agent（${(autoSummary.unified_agents || []).filter((a) => a.online && !a.disabled).length} 在线）`,
+                            `${(autoSummary.unified_agents || []).filter((a) => a.online && !a.disabled).length}/${(autoSummary.unified_agents || []).length} Agents online`,
+                          )
+                        : bi("点击执行时可关联选择 Agent", "Select Agent when running")}
                     </span>
                   </div>
                   <div className="rha-ribbon-r">
@@ -11736,8 +9251,8 @@ function RehearsalSessionView({
                       value={pacingMode}
                       onChange={(v) => setPacingMode(v as "step_confirm" | "ai_gated_auto")}
                       options={[
-                        { value: "step_confirm", label: bi("逐单步人工点击", "Step Confirm") },
-                        { value: "ai_gated_auto", label: bi("AI 验收通过自动推进", "AI-Gated Auto") },
+                        { value: "step_confirm", label: bi("逐单步选择执行", "Per-Step") },
+                        { value: "ai_gated_auto", label: bi("连续自动推进", "Auto-Advance") },
                       ]}
                     />
                     {pacingMode === "ai_gated_auto" && (
@@ -11758,66 +9273,15 @@ function RehearsalSessionView({
                         <Button
                           size="small"
                           type="primary"
-                          disabled={!autoSummary.ready || Boolean(runningStepId) || Boolean(verifyingStepId) || gateReady}
+                          disabled={Boolean(runningStepId) || Boolean(verifyingStepId) || gateReady}
                           icon={<IconPlayArrow />}
                           onClick={() => void startAIGatedAutoRun()}
                         >
-                          {bi("启动 AI 把关自动推进", "Start AI-Gated Run")}
+                          {bi("选择 Agent 连续执行", "Select Agent & Run All")}
                         </Button>
                       )
                     )}
-                    <Button size="small" type="text" icon={<IconSettings />} onClick={onOpenAutoDrawer}>
-                      {bi("配置", "Setup")}
-                    </Button>
                   </div>
-                </div>
-
-                <div className="rha-ribbon-bot">
-                  <div className="rha-map-pills">
-                    <span>{bi("目标节点映射：", "Target Map:")}</span>
-                    {autoSummary.hosts.map((h) => {
-                      const dh = r.drift?.hosts?.find((d) => d.ip === h.ip || d.name === h.name);
-                      const roleTxt = dh?.actual_role || dh?.initial_role || h.role || "";
-                      return (
-                        <span key={`${h.name}-${h.ip}`} className="rha-map-pill">
-                          <b>{h.name}</b>
-                          <span className="mono">{h.ip}</span>
-                          {roleTxt && <em>· {roleTxt}</em>}
-                        </span>
-                      );
-                    })}
-                  </div>
-
-                  {autoSummary.config.env_kind === "prod" && autoSummary.config.allow_prod_mutate && (
-                    <div className="rha-prod-lock">
-                      {prodUnlocked ? (
-                        <span className="rha-ro-tag">
-                          <IconSafe /> {bi("已确认生产集群标识 · 可执行变更步骤", "Prod Confirmed")}
-                        </span>
-                      ) : (
-                        <>
-                          <Input
-                            size="mini"
-                            className="mono"
-                            value={prodConfirmInput}
-                            onChange={setProdConfirmInput}
-                            placeholder={bi(`输入 ${c.id} 解锁生产写步骤`, `Type ${c.id} to unlock`)}
-                          />
-                          <Button
-                            size="mini"
-                            type="primary"
-                            disabled={prodConfirmInput.trim() !== c.id}
-                            onClick={() => {
-                              setProdUnlocked(true);
-                              Message.success(bi(`已确认生产集群 ${c.id}，现可执行变更步骤`, `Production unlocked for ${c.id}`));
-                            }}
-                          >
-                            {bi("确认解锁", "Unlock")}
-                          </Button>
-                        </>
-                      )}
-                    </div>
-                  )}
                 </div>
 
                 {autoPauseReason && (
@@ -11844,6 +9308,17 @@ function RehearsalSessionView({
                 )}
               </section>
             )}
+            <SelectExecutionAgentModal
+              visible={Boolean(execPrompt)}
+              clusterId={c.id}
+              taskTitle={execPrompt?.title || ""}
+              readOnly={Boolean(execPrompt?.readOnly)}
+              initialTargets={execPrompt?.targets}
+              hostsFallback={autoSummary?.hosts}
+              confirmLoading={Boolean(runningStepId || autoProbeRunning)}
+              onCancel={() => setExecPrompt(null)}
+              onConfirm={(picked) => execPrompt?.onRun(picked)}
+            />
 
             {shownSteps.length === 0 ? (
               <div className="rh-empty-filter muted small">
@@ -12208,16 +9683,23 @@ function RehearsalSessionView({
                       onClick={() => {
                         if (exportingDoc) return;
                         setExportingDoc(true);
-                        if (exportCooldownRef.current !== null) {
-                          window.clearTimeout(exportCooldownRef.current);
-                        }
-                        exportCooldownRef.current = window.setTimeout(() => {
-                          exportCooldownRef.current = null;
-                          setExportingDoc(false);
-                        }, 1500);
-                        window.location.href = withLang(
-                          `/api/clusters/${encodeURIComponent(c.id)}/export?docs=${encodeURIComponent(r.doc_id!)}`,
+                        Message.info(
+                          bi("正在生成并下载 Word 方案…", "Generating Word SOP download…"),
                         );
+                        void downloadFile(
+                          withLang(
+                            `/api/clusters/${encodeURIComponent(c.id)}/export?docs=${encodeURIComponent(r.doc_id!)}`,
+                          ),
+                          `${c.id}-sop.docx`,
+                        ).finally(() => {
+                          if (exportCooldownRef.current !== null) {
+                            window.clearTimeout(exportCooldownRef.current);
+                          }
+                          exportCooldownRef.current = window.setTimeout(() => {
+                            exportCooldownRef.current = null;
+                            setExportingDoc(false);
+                          }, 400);
+                        });
                       }}
                     >
                       {bi("导出 Word (.docx)", "Export Word (.docx)")}
@@ -13033,19 +10515,48 @@ const StepRow = React.memo(function StepRow({
     });
   };
 
-  const applyProposal = async () => {
+  const applyProposal = async (opts?: {
+    acceptPassed?: boolean;
+    feedBaseline?: boolean;
+  }) => {
     if (offline || stepBusyRef.current) return;
     stepBusyRef.current = true;
     setBusy("apply");
     try {
       const next = await api<ChangeRehearsal>(`${baseUrl}/apply`, {
         method: "POST",
+        body: opts
+          ? JSON.stringify({
+              accept_passed: opts.acceptPassed,
+              feed_baseline: opts.feedBaseline,
+            })
+          : undefined,
       });
       onUpdated(next);
       setEvidText("");
-      Message.success(
-        bi("已更新步骤命令，请在测试环境复测并贴回结果", "Step command updated; re-test and paste output"),
-      );
+      if (next.baseline_enriched?.length) {
+        window.dispatchEvent(new Event("mh-clusters-changed"));
+      }
+      if (opts?.acceptPassed) {
+        Message.success(
+          next.baseline_enriched?.length
+            ? bi(
+                `已按现场实测参数通过本步，并反哺校准集群基线：${next.baseline_enriched.join("、")}`,
+                `Confirmed passed with live params & fed back to cluster baseline: ${next.baseline_enriched.join(", ")}`,
+              )
+            : bi(
+                "已按现场实测参数通过本步，并同步更新步骤命令与 SOP",
+                "Confirmed passed with live params; step command & SOP updated",
+              ),
+        );
+      } else {
+        Message.success(
+          bi(
+            "已更新步骤命令，请在测试环境复测并贴回结果",
+            "Step command updated; re-test and paste output",
+          ),
+        );
+      }
     } catch (e) {
       err(e);
     } finally {
@@ -13058,44 +10569,50 @@ const StepRow = React.memo(function StepRow({
   const canAskStepAI = Boolean(
     dock && !offline && dock.available(`step:rehearsal:${rehearsalId}:${step.id}`),
   );
-  const openStepInAIDock = useCallback(() => {
-    if (!dock) return;
-    const key = `step:rehearsal:${rehearsalId}:${step.id}`;
-    const stepMeta: Record<string, unknown> = {
-      kind: "rehearsal_step",
-      cluster_id: c.id,
-      rehearsal_id: rehearsalId,
-      rehearsal_title: rehearsalTitle || "",
-      step_id: step.id,
-      order: num,
-      phase: step.phase,
-      title: step.title,
-      target_role: step.target_role,
-      command: step.command,
-      expect: step.expect,
-      rollback: step.rollback || "",
-      risk_note: step.risk_note || "",
-      status: step.status,
-      note: step.note || "",
-    };
-    if (step.last_error) stepMeta.last_error = step.last_error;
-    if (step.proposal?.diagnosis) stepMeta.diagnosis = step.proposal.diagnosis;
-    dock.open({
-      key,
-      title: bi(`演练步骤 #${num} · ${step.title}`, `Rehearsal #${num} · ${step.title}`),
-      context: `${rehearsalTitle || rehearsalId} · ${c.id}`,
-      step: stepMeta,
-      hello: bi(
-        `正在聚焦演练步骤 #${num}「${step.title}」。直接告诉我哪里有问题或想怎么调整（例如拆成两步、修改命令或目标机器、放宽/调整判据、删除冗余步），我会和你确认后给出「一键更新演练步骤」卡片。`,
-        `Focused on rehearsal step #${num} "${step.title}". Tell me what looks off or how you want to change it (split steps, revise command/target host, adjust criteria), and I'll generate a 1-click update card.`,
-      ),
-    });
-  }, [c.id, dock, num, rehearsalId, rehearsalTitle, step]);
+  const openStepInAIDock = useCallback(
+    (prefill?: string) => {
+      if (!dock) return;
+      const key = `step:rehearsal:${rehearsalId}:${step.id}`;
+      const stepMeta: Record<string, unknown> = {
+        kind: "rehearsal_step",
+        cluster_id: c.id,
+        rehearsal_id: rehearsalId,
+        rehearsal_title: rehearsalTitle || "",
+        step_id: step.id,
+        order: num,
+        phase: step.phase,
+        title: step.title,
+        target_role: step.target_role,
+        command: step.command,
+        expect: step.expect,
+        rollback: step.rollback || "",
+        risk_note: step.risk_note || "",
+        status: step.status,
+        note: step.note || "",
+      };
+      if (step.last_error) stepMeta.last_error = step.last_error;
+      if (step.proposal?.diagnosis) stepMeta.diagnosis = step.proposal.diagnosis;
+      dock.open({
+        key,
+        title: bi(`演练步骤 #${num} · ${step.title}`, `Rehearsal #${num} · ${step.title}`),
+        context: `${rehearsalTitle || rehearsalId} · ${c.id}`,
+        step: stepMeta,
+        prefill: typeof prefill === "string" ? prefill : undefined,
+        hello: bi(
+          `正在聚焦演练步骤 #${num}「${step.title}」。直接告诉我哪里有问题或想怎么调整（例如拆成两步、修改命令或目标机器、放宽/调整判据、删除冗余步，或将组件默认配置偏差反哺为组件改进建议），我会和你确认后给出「一键更新」卡片。`,
+          `Focused on rehearsal step #${num} "${step.title}". Tell me what looks off or how you want to change it (split steps, revise command/target host, adjust criteria, or suggest a component fix), and I'll generate a 1-click update card.`,
+        ),
+      });
+    },
+    [c.id, dock, num, rehearsalId, rehearsalTitle, step],
+  );
   const statusInfo =
     step.status === "passed"
       ? { label: bi("实测通过", "Passed"), cls: "passed" }
       : step.status === "failed"
-        ? { label: bi("执行受阻", "Blocked"), cls: "failed" }
+        ? step.proposal?.action === "confirm_override"
+          ? { label: bi("待确认参数", "Confirm Override"), cls: "failed" }
+          : { label: bi("执行受阻", "Blocked"), cls: "failed" }
         : step.status === "skipped"
           ? {
               label: isRollback
@@ -13220,7 +10737,7 @@ const StepRow = React.memo(function StepRow({
                   <button
                     type="button"
                     className="rh-code-btn is-ai"
-                    onClick={openStepInAIDock}
+                    onClick={() => openStepInAIDock()}
                     title={bi(
                       "在右下角 AI 助手中讨论或对话修改此演练步骤",
                       "Discuss or modify this step with AI Assistant",
@@ -13624,11 +11141,11 @@ const StepRow = React.memo(function StepRow({
           )}
         </dl>
 
-        {can("delivery.execute") && autoSummary?.config.enabled && (
+        {can("delivery.execute") && autoSummary && (
           <div className="rha-step-exec-bar">
             <div className="rha-step-exec-l">
               <IconThunderbolt />
-              <span>{bi("自动目标机：", "Auto Targets:")}</span>
+              <span>{bi("目标机器：", "Targets:")}</span>
               <Select
                 mode="multiple"
                 size="mini"
@@ -13651,53 +11168,33 @@ const StepRow = React.memo(function StepRow({
               )}
             </div>
             <div className="rha-step-exec-r">
-              {autoSummary.ready ? (
-                <>
-                  <Button
-                    size="mini"
-                    type="primary"
-                    loading={isAutoRunningThis || isAutoVerifyingThis}
-                    disabled={
-                      offline ||
-                      anyAutoBusy ||
-                      effectiveStepTargets.length === 0
-                    }
-                    icon={<IconPlayArrow />}
-                    onClick={() => onAutoExecStep?.(effectiveStepTargets, "step")}
-                  >
-                    {isAutoRunningThis
-                      ? bi("正在执行…", "Running…")
-                      : isAutoVerifyingThis
-                        ? bi("AI 验收中…", "AI Verifying…")
-                        : bi("自动执行并 AI 验收", "Auto-Run & AI Verify")}
-                  </Button>
-                  {step.rollback && (
-                    <Popconfirm
-                      title={bi(
-                        `确认在选中节点执行步骤 #${num} 的回滚命令？`,
-                        `Execute rollback command for step #${num} on selected host(s)?`,
-                      )}
-                      onOk={() => onAutoExecStep?.(effectiveStepTargets, "rollback")}
-                    >
-                      <Button
-                        size="mini"
-                        status="warning"
-                        type="outline"
-                        disabled={anyAutoBusy || effectiveStepTargets.length === 0}
-                      >
-                        {bi("执行回滚", "Run Rollback")}
-                      </Button>
-                    </Popconfirm>
-                  )}
-                </>
-              ) : (
+              <Button
+                size="mini"
+                type="primary"
+                loading={isAutoRunningThis || isAutoVerifyingThis}
+                disabled={
+                  offline ||
+                  anyAutoBusy ||
+                  effectiveStepTargets.length === 0
+                }
+                icon={<IconPlayArrow />}
+                onClick={() => onAutoExecStep?.(effectiveStepTargets, "step")}
+              >
+                {isAutoRunningThis
+                  ? bi("正在执行…", "Running…")
+                  : isAutoVerifyingThis
+                    ? bi("AI 验收中…", "AI Verifying…")
+                    : bi("选择 Agent 执行", "Run with Agent")}
+              </Button>
+              {step.rollback && (
                 <Button
                   size="mini"
+                  status="warning"
                   type="outline"
-                  icon={<IconSettings />}
-                  onClick={onOpenAutoDrawer}
+                  disabled={anyAutoBusy || effectiveStepTargets.length === 0}
+                  onClick={() => onAutoExecStep?.(effectiveStepTargets, "rollback")}
                 >
-                  {bi("通道离线 · 点此接入", "Channel Offline · Setup")}
+                  {bi("执行回滚", "Run Rollback")}
                 </Button>
               )}
             </div>
@@ -13962,19 +11459,24 @@ const StepRow = React.memo(function StepRow({
 
               {step.proposal && (
                 <div
-                  className={`rh-proposal${freshVerify ? " is-fresh-proposal" : ""}`}
+                  className={`rh-proposal${step.proposal.action === "confirm_override" ? " is-confirm" : ""}${freshVerify ? " is-fresh-proposal" : ""}`}
                 >
                   <div className="rh-proposal-head">
                     <b>
                       <Spark size={14} rainbow />{" "}
-                      {step.proposal.action === "insert_before"
+                      {step.proposal.action === "confirm_override"
                         ? bi(
-                            `建议插入前置步骤：${step.proposal.title || "前置准备"}`,
-                            `Insert prerequisite step: ${step.proposal.title || "Prerequisite"}`,
+                            "检测到现场参数修正 · 请确认是否以实测为准",
+                            "Live Parameter Override Detected · Confirm to Pass",
                           )
-                        : step.proposal.action === "retry"
-                          ? bi("核验未通过 · 复测建议", "Verification Failed · Retry Guidance")
-                          : bi("核验未通过 · 建议更新此步命令", "Verification Failed · Update Command")}
+                        : step.proposal.action === "insert_before"
+                          ? bi(
+                              `建议插入前置步骤：${step.proposal.title || "前置准备"}`,
+                              `Insert prerequisite step: ${step.proposal.title || "Prerequisite"}`,
+                            )
+                          : step.proposal.action === "retry"
+                            ? bi("核验未通过 · 复测建议", "Verification Failed · Retry Guidance")
+                            : bi("核验未通过 · 建议更新此步命令", "Verification Failed · Update Command")}
                     </b>
                   </div>
                   <div className="rh-proposal-diag">
@@ -13983,6 +11485,43 @@ const StepRow = React.memo(function StepRow({
                       compact
                     />
                   </div>
+                  {step.proposal.action === "confirm_override" &&
+                    step.proposal.baseline_corrections &&
+                    step.proposal.baseline_corrections.length > 0 && (
+                      <div className="rh-corr-box">
+                        <div className="rh-corr-head">
+                          <span>
+                            {bi(
+                              "确认后将同步反哺修正以下集群基线项（后续演练自动生效）",
+                              "Baseline items to calibrate on confirmation (auto-used in future rehearsals)",
+                            )}
+                          </span>
+                        </div>
+                        <ul className="rh-corr-list">
+                          {step.proposal.baseline_corrections.map((bc, idx) => (
+                            <li key={idx} className="rh-corr-item">
+                              <span className="rh-corr-lbl">
+                                {bc.label || bc.key || bc.kind}
+                              </span>
+                              <span className="rh-corr-diff mono">
+                                {bc.old_value && (
+                                  <>
+                                    <del>{bc.old_value}</del>
+                                    <span className="rh-corr-arrow" aria-hidden>
+                                      →
+                                    </span>
+                                  </>
+                                )}
+                                <ins>{bc.new_value}</ins>
+                              </span>
+                              {bc.reason && (
+                                <span className="rh-corr-why">{bc.reason}</span>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                   {((step.proposal.verified_facts &&
                     step.proposal.verified_facts.length > 0) ||
                     (step.proposal.missing_items &&
@@ -14188,9 +11727,11 @@ const StepRow = React.memo(function StepRow({
                       <ShellCodeBlock
                         code={step.proposal.command}
                         title={
-                          step.proposal.action === "retry"
-                            ? bi("建议复测命令", "Recommended Command")
-                            : bi("修正后命令", "Revised Command")
+                          step.proposal.action === "confirm_override"
+                            ? bi("确认后同步更新本步命令与 SOP", "Step & SOP Command After Confirmation")
+                            : step.proposal.action === "retry"
+                              ? bi("建议复测命令", "Recommended Command")
+                              : bi("修正后命令", "Revised Command")
                         }
                         compact
                         pasteSafe
@@ -14204,7 +11745,59 @@ const StepRow = React.memo(function StepRow({
                       />
                     ))}
                   <div className="row-gap">
-                    {step.proposal.action !== "retry" ? (
+                    {step.proposal.action === "confirm_override" ? (
+                      <>
+                        <Button
+                          size="small"
+                          type="primary"
+                          icon={<IconCheck />}
+                          loading={busy === "apply"}
+                          onClick={() =>
+                            void applyProposal({
+                              acceptPassed: true,
+                              feedBaseline: Boolean(
+                                step.proposal?.baseline_corrections?.length,
+                              ),
+                            })
+                          }
+                        >
+                          {step.proposal.baseline_corrections?.length
+                            ? bi(
+                                "确认以实测为准通过，并反哺集群基线",
+                                "Confirm & Feed Back to Baseline",
+                              )
+                            : bi(
+                                "确认以实测为准通过并更新本步",
+                                "Confirm Passed & Update Step",
+                              )}
+                        </Button>
+                        {step.proposal.baseline_corrections &&
+                          step.proposal.baseline_corrections.length > 0 && (
+                            <Button
+                              size="small"
+                              type="outline"
+                              loading={busy === "apply"}
+                              onClick={() =>
+                                void applyProposal({
+                                  acceptPassed: true,
+                                  feedBaseline: false,
+                                })
+                              }
+                            >
+                              {bi(
+                                "仅修正本步并通过（不改基线）",
+                                "Pass & Update Step Only",
+                              )}
+                            </Button>
+                          )}
+                        <Button
+                          size="small"
+                          onClick={() => focusVerifyBox(true)}
+                        >
+                          {bi("仍按原目标复测", "Re-test Original Target")}
+                        </Button>
+                      </>
+                    ) : step.proposal.action !== "retry" ? (
                       <>
                         {can("delivery.execute") && autoSummary?.ready && (
                           <Button
@@ -14229,7 +11822,7 @@ const StepRow = React.memo(function StepRow({
                       </>
                     ) : (
                       <>
-                        {can("delivery.execute") && autoSummary?.ready && (
+                        {can("delivery.execute") && autoSummary && (
                           <Button
                             size="small"
                             type="primary"
@@ -14237,7 +11830,7 @@ const StepRow = React.memo(function StepRow({
                             disabled={anyAutoBusy || offline || effectiveStepTargets.length === 0}
                             onClick={() => onAutoExecStep?.(effectiveStepTargets, "step")}
                           >
-                            {bi("自动重跑并 AI 验收", "Auto-Retry & Verify")}
+                            {bi("选择 Agent 重跑", "Re-run with Agent")}
                           </Button>
                         )}
                         <Button
@@ -14254,9 +11847,20 @@ const StepRow = React.memo(function StepRow({
                         size="small"
                         type="text"
                         icon={<Spark size={12} />}
-                        onClick={openStepInAIDock}
+                        onClick={() =>
+                          step.proposal?.action === "confirm_override"
+                            ? openStepInAIDock(
+                                bi(
+                                  `步骤 #${num}「${step.title}」在现场执行时发现参数与登记基线/默认模板不一致：${step.proposal.diagnosis}\n请判断这是否属于组件默认配置/模板缺陷（先调用 component_sync_status 核对），若属于组件通用问题请直接输出「组件改进建议」卡片反哺组件库。`,
+                                  `Step #${num} "${step.title}" revealed a mismatch between live parameters and baseline/template: ${step.proposal.diagnosis}\nCheck component_sync_status and emit a component improvement card if this is a component-level default bug.`,
+                                ),
+                              )
+                            : openStepInAIDock()
+                        }
                       >
-                        {bi("找 AI 对话修改此步", "Discuss / Edit with AI")}
+                        {step.proposal.action === "confirm_override"
+                          ? bi("同步反哺组件改进", "Suggest Component Fix")
+                          : bi("找 AI 对话修改此步", "Discuss / Edit with AI")}
                       </Button>
                     )}
                   </div>

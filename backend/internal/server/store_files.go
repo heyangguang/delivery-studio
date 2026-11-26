@@ -68,9 +68,18 @@ func (s *storeServer) filesLoad(user string) fileIndex {
 	if !userNameOK(user) {
 		return ix
 	}
+	if s.repo != nil {
+		if b, ok, err := s.repo.getKV("user_file_index", user); err == nil && ok {
+			_ = json.Unmarshal(b, &ix)
+			return ix
+		}
+	}
 	f := filepath.Join(s.filesDir(user), "index.json")
 	if b, err := os.ReadFile(f); err == nil {
 		_ = json.Unmarshal(b, &ix)
+		if s.repo != nil {
+			_ = s.repo.putKV("user_file_index", user, "", b)
+		}
 		return ix
 	}
 	// the old knowledge base: one JSON per document
@@ -95,6 +104,13 @@ func (s *storeServer) filesLoad(user string) fileIndex {
 }
 
 func (s *storeServer) filesSave(user string, ix fileIndex) error {
+	if s.repo != nil {
+		b, err := json.Marshal(ix)
+		if err != nil {
+			return err
+		}
+		return s.repo.putKV("user_file_index", user, "", b)
+	}
 	return writeJSONFile(filepath.Join(s.filesDir(user), "index.json"), ix)
 }
 
@@ -220,9 +236,7 @@ type storageSettings struct {
 
 func (s *storeServer) storageSettings() storageSettings {
 	st := storageSettings{DefaultGB: 20, MaxFileMB: 200, Overrides: map[string]float64{}}
-	if b, err := os.ReadFile(filepath.Join(s.settingsDir(), "storage.json")); err == nil {
-		_ = json.Unmarshal(b, &st)
-	}
+	_ = s.loadSettingDoc("storage_settings", filepath.Join(s.settingsDir(), "storage.json"), &st)
 	if st.DefaultGB <= 0 {
 		st.DefaultGB = 20
 	}
@@ -835,7 +849,7 @@ func nzStrings(x []string) []string {
 // ---- settings: the default quota and the limit for one file, and a person's own quota ----
 
 func (s *storeServer) saveStorageSettings(st storageSettings) error {
-	return writeJSONFile(filepath.Join(s.settingsDir(), "storage.json"), st)
+	return s.saveSettingDoc("storage_settings", filepath.Join(s.settingsDir(), "storage.json"), st)
 }
 
 // userUsage is how much of the space a person has used.

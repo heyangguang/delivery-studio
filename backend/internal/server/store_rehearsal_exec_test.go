@@ -268,3 +268,387 @@ func TestRehearsalAutomationDualTransportAndSafetyGates(t *testing.T) {
 		t.Fatalf("unexpected rehearsal tasks list: %s", listRR.Body.String())
 	}
 }
+
+func TestClusterAutomationCheckUsesDraftOverridesWhileDisabled(t *testing.T) {
+	srv, _ := testStore(t)
+	cookie, csrf := storeLogin(t, srv, "admin")
+
+	importBody := `{
+		"id": "pg-draft-check",
+		"component": "postgresql",
+		"display_name": "PostgreSQL",
+		"version": "17",
+		"exact_version": "17.11",
+		"platform": "ubuntu2404",
+		"deploy_method": "systemd",
+		"hosts": [{"name": "db-01", "ip": "10.20.0.11", "role": "primary"}]
+	}`
+	rr := storeRequest(srv, "POST", "/api/clusters/import", strings.NewReader(importBody), cookie, csrf)
+	if rr.Code != 200 && rr.Code != 201 {
+		t.Fatalf("import cluster failed: %d %s", rr.Code, rr.Body.String())
+	}
+
+	nodeRR := storeRequest(srv, "POST", "/api/settings/execution-nodes", strings.NewReader(`{"name":"ctrl-draft","kind":"independent","controller_ip":"10.20.0.5"}`), cookie, csrf)
+	if nodeRR.Code != 201 {
+		t.Fatalf("create node failed: %d %s", nodeRR.Code, nodeRR.Body.String())
+	}
+	var nodeCreate struct {
+		Node  executionNode `json:"node"`
+		Token string        `json:"token"`
+	}
+	_ = json.Unmarshal(nodeRR.Body.Bytes(), &nodeCreate)
+
+	// Heartbeat node as Protocol v3.
+	r := httptest.NewRequest("POST", "http://127.0.0.1:8090/api/execution-agent/poll", bytes.NewReader([]byte(`{"protocol":3,"version":"1.0.0","heartbeat":true}`)))
+	r.Header.Set("Authorization", "Bearer "+nodeCreate.Token)
+	r.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, r)
+	if w.Code != 200 {
+		t.Fatalf("node heartbeat failed: %d %s", w.Code, w.Body.String())
+	}
+
+	// Automation is still disabled (wizard Step 2), yet /automation/check must apply draft SSH/method overrides.
+	checkBody := `{
+		"transport": "node",
+		"node_id": "` + nodeCreate.Node.ID + `",
+		"node_exec_method": "ssh",
+		"ssh_user": "postgres",
+		"ssh_port": 2222
+	}`
+	checkRR := storeRequest(srv, "POST", "/api/clusters/pg-draft-check/automation/check", strings.NewReader(checkBody), cookie, csrf)
+	if checkRR.Code != 201 {
+		t.Fatalf("expected 201 for draft connectivity check, got %d %s", checkRR.Code, checkRR.Body.String())
+	}
+	var task rehearsalExecTask
+	_ = json.Unmarshal(checkRR.Body.Bytes(), &task)
+	if task.NodeExecMethod != "ssh" || task.SSHUser != "postgres" || task.SSHPort != 2222 {
+		t.Fatalf("expected draft overrides (ssh/postgres/2222), got method=%q user=%q port=%d", task.NodeExecMethod, task.SSHUser, task.SSHPort)
+	}
+
+	// Invalid SSH user or port in draft override must be rejected with 400.
+	badUserRR := storeRequest(srv, "POST", "/api/clusters/pg-draft-check/automation/check", strings.NewReader(`{"transport":"node","node_id":"`+nodeCreate.Node.ID+`","ssh_user":"root;rm -rf /"}`), cookie, csrf)
+	if badUserRR.Code != 400 {
+		t.Fatalf("expected 400 for unsafe ssh_user override, got %d %s", badUserRR.Code, badUserRR.Body.String())
+	}
+	badPortRR := storeRequest(srv, "POST", "/api/clusters/pg-draft-check/automation/check", strings.NewReader(`{"transport":"node","node_id":"`+nodeCreate.Node.ID+`","ssh_port":70000}`), cookie, csrf)
+	if badPortRR.Code != 400 {
+		t.Fatalf("expected 400 for invalid ssh_port override, got %d %s", badPortRR.Code, badPortRR.Body.String())
+	}
+
+	// Simulate the draft connectivity check succeeding while automation is still disabled:
+	// verified must stay false until enabled, flip true once saved with matching params,
+	// and flip back to false if connection parameters change without re-testing.
+	zero := 0
+	for _, ev := range []rehearsalExecEvent{
+		{TaskID: task.ID, TargetIndex: 0, Host: "db-01", IP: "10.20.0.11", Seq: 1, Kind: "started"},
+		{TaskID: task.ID, TargetIndex: 0, Host: "db-01", IP: "10.20.0.11", Seq: 2, Kind: "finished", ExitCode: &zero},
+	} {
+		raw, _ := json.Marshal(ev)
+		evReq := httptest.NewRequest("POST", "http://127.0.0.1:8090/api/execution-agent/rehearsal-event", bytes.NewReader(raw))
+		evReq.Header.Set("Authorization", "Bearer "+nodeCreate.Token)
+		evReq.Header.Set("Content-Type", "application/json")
+		evW := httptest.NewRecorder()
+		srv.ServeHTTP(evW, evReq)
+		if evW.Code != 200 {
+			t.Fatalf("event failed: %d %s", evW.Code, evW.Body.String())
+		}
+	}
+
+	getSummary := func() struct {
+		Ready    bool `json:"ready"`
+		Verified bool `json:"verified"`
+	} {
+		gr := storeRequest(srv, "GET", "/api/clusters/pg-draft-check/automation", nil, cookie, "")
+		var s struct {
+			Ready    bool `json:"ready"`
+			Verified bool `json:"verified"`
+		}
+		_ = json.Unmarshal(gr.Body.Bytes(), &s)
+		return s
+	}
+	if s := getSummary(); s.Verified {
+		t.Fatalf("expected verified=false while automation disabled")
+	}
+
+	// Save & enable with matching checked channel -> verified turns true!
+	enableBody := `{"enabled":true,"transport":"node","node_id":"` + nodeCreate.Node.ID + `","node_exec_method":"ssh","ssh_user":"postgres","ssh_port":2222,"env_kind":"test","default_pacing":"step_confirm"}`
+	enRR := storeRequest(srv, "PUT", "/api/clusters/pg-draft-check/automation", strings.NewReader(enableBody), cookie, csrf)
+	if enRR.Code != 200 {
+		t.Fatalf("enable automation failed: %d %s", enRR.Code, enRR.Body.String())
+	}
+	if s := getSummary(); !s.Ready || !s.Verified {
+		t.Fatalf("expected ready=true verified=true after enabling checked channel, got %+v", s)
+	}
+
+	// Changing ssh_port invalidates verification until re-tested!
+	chgBody := `{"enabled":true,"transport":"node","node_id":"` + nodeCreate.Node.ID + `","node_exec_method":"ssh","ssh_user":"postgres","ssh_port":22,"env_kind":"test","default_pacing":"step_confirm"}`
+	chgRR := storeRequest(srv, "PUT", "/api/clusters/pg-draft-check/automation", strings.NewReader(chgBody), cookie, csrf)
+	if chgRR.Code != 200 {
+		t.Fatalf("update automation failed: %d %s", chgRR.Code, chgRR.Body.String())
+	}
+	if s := getSummary(); s.Verified {
+		t.Fatalf("expected verified=false after changing ssh_port without re-check, got %+v", s)
+	}
+}
+
+func TestGlobalExecutionAgentsAPI(t *testing.T) {
+	srv, _ := testStore(t)
+	cookie, csrf := storeLogin(t, srv, "admin")
+
+	if p, ok := routePermFor("GET", "/api/executions/agents"); !ok || p != "execution.manage|delivery.view" {
+		t.Fatalf("expected execution.manage|delivery.view for GET /api/executions/agents, got %q %v", p, ok)
+	}
+	if p, ok := routePermFor("POST", "/api/executions/agents"); !ok || p != "execution.manage" {
+		t.Fatalf("expected execution.manage for POST /api/executions/agents, got %q %v", p, ok)
+	}
+	if p, ok := routePermFor("PATCH", "/api/executions/agents"); !ok || p != "execution.manage" {
+		t.Fatalf("expected execution.manage for PATCH /api/executions/agents, got %q %v", p, ok)
+	}
+	if p, ok := routePermFor("POST", "/api/executions/agents/abc123/bundle"); !ok || p != "execution.manage" {
+		t.Fatalf("expected execution.manage for POST /api/executions/agents/{id}/bundle, got %q %v", p, ok)
+	}
+
+	// Seed a legacy per-delivery ssh_trust record (Mode == "" and Mode == "ssh_trust")
+	// to guarantee ephemeral delivery bootstrap helpers NEVER pollute the global Agent pool.
+	executionMu.Lock()
+	seedDB, err := srv.readExecutions()
+	if err != nil {
+		executionMu.Unlock()
+		t.Fatalf("readExecutions failed: %v", err)
+	}
+	if seedDB.Agents == nil {
+		seedDB.Agents = map[string]targetAgent{}
+	}
+	seedDB.Agents["legacy-ssh-1"] = targetAgent{
+		ID:      "legacy-ssh-1",
+		Cluster: "auto-etcd-ha",
+		Mode:    "",
+		Host:    "etcd-2",
+		IP:      "172.26.198.118",
+		Desired: "active",
+	}
+	seedDB.Agents["legacy-ssh-2"] = targetAgent{
+		ID:      "legacy-ssh-2",
+		Cluster: "pg-global-ag",
+		Mode:    "ssh_trust",
+		Host:    "db-g1",
+		IP:      "10.30.0.11",
+		Desired: "active",
+	}
+	if err := srv.saveExecutions(seedDB); err != nil {
+		executionMu.Unlock()
+		t.Fatalf("saveExecutions failed: %v", err)
+	}
+	executionMu.Unlock()
+
+	// Import two clusters sharing host IP 10.30.0.11 to verify that clusters are NEVER silently auto-bound by IP;
+	// only customer-selected clusters are authorized on the Direct Target Agent.
+	for _, imp := range []string{
+		`{"id":"pg-global-ag","component":"postgresql","display_name":"PostgreSQL","version":"17","exact_version":"17.11","platform":"ubuntu2404","deploy_method":"systemd","hosts":[{"name":"db-g1","ip":"10.30.0.11","role":"primary"}]}`,
+		`{"id":"etcd-global-ag","component":"etcd","display_name":"etcd","version":"3.5","exact_version":"3.5.17","platform":"ubuntu2404","deploy_method":"systemd","hosts":[{"name":"etcd-g1","ip":"10.30.0.11","role":"member"}]}`,
+	} {
+		if rr := storeRequest(srv, "POST", "/api/clusters/import", strings.NewReader(imp), cookie, csrf); rr.Code != 200 && rr.Code != 201 {
+			t.Fatalf("import failed: %d %s", rr.Code, rr.Body.String())
+		}
+	}
+
+	// Before enrolling any direct agent, GET /api/executions/agents must return empty (ssh_trust excluded).
+	emptyRR := storeRequest(srv, "GET", "/api/executions/agents", nil, cookie, "")
+	if emptyRR.Code != 200 {
+		t.Fatalf("GET /api/executions/agents failed: %d %s", emptyRR.Code, emptyRR.Body.String())
+	}
+	var emptyList []automationAgentView
+	_ = json.Unmarshal(emptyRR.Body.Bytes(), &emptyList)
+	if len(emptyList) != 0 {
+		t.Fatalf("expected legacy ssh_trust agents excluded, got %+v", emptyList)
+	}
+
+	// Host-First enrollment in Execution Center without selecting clusters starts with 0 bound clusters
+	// (only suggested_clusters hints at clusters containing 10.30.0.11).
+	enrRR := storeRequest(srv, "POST", "/api/executions/agents", strings.NewReader(`{"host":"db-g1","ip":"10.30.0.11","allow_mutating":true}`), cookie, csrf)
+	if enrRR.Code != 201 {
+		t.Fatalf("global enroll agent failed: %d %s", enrRR.Code, enrRR.Body.String())
+	}
+	var enr struct {
+		Agent           automationAgentView `json:"agent"`
+		EnrollmentToken string              `json:"enrollment_token"`
+	}
+	_ = json.Unmarshal(enrRR.Body.Bytes(), &enr)
+	if enr.Agent.Mode != "direct" || len(enr.Agent.Clusters) != 0 || len(enr.EnrollmentToken) < 40 {
+		t.Fatalf("unexpected global agent response: %+v", enr)
+	}
+	if len(enr.Agent.SuggestedClusters) != 2 {
+		t.Fatalf("expected suggested_clusters hint for 2 clusters with IP 10.30.0.11, got %+v", enr.Agent.SuggestedClusters)
+	}
+
+	// Duplicate active IP enrollment from either global or cluster endpoint must return 409.
+	dupGlobalRR := storeRequest(srv, "POST", "/api/executions/agents", strings.NewReader(`{"host":"db-g1-dup","ip":"10.30.0.11"}`), cookie, csrf)
+	if dupGlobalRR.Code != 409 {
+		t.Fatalf("expected 409 for duplicate global IP, got %d %s", dupGlobalRR.Code, dupGlobalRR.Body.String())
+	}
+	dupClusterRR := storeRequest(srv, "POST", "/api/clusters/pg-global-ag/automation/agents", strings.NewReader(`{"host":"db-g1","ip":"10.30.0.11"}`), cookie, csrf)
+	if dupClusterRR.Code != 409 {
+		t.Fatalf("expected 409 for duplicate cluster IP already in global pool, got %d %s", dupClusterRR.Code, dupClusterRR.Body.String())
+	}
+
+	// Global bundle endpoint rejects wrong token with 403 and validates URL scheme.
+	badTokBundle := storeRequest(srv, "POST", "/api/executions/agents/"+enr.Agent.ID+"/bundle", strings.NewReader(`{"token":"`+strings.Repeat("a", 44)+`","url":"https://10.30.0.5:8443"}`), cookie, csrf)
+	if badTokBundle.Code != 403 {
+		t.Fatalf("expected 403 for wrong bundle token, got %d %s", badTokBundle.Code, badTokBundle.Body.String())
+	}
+
+	// Neither cluster has bound this agent yet: Automation summary must report agents=[] and unbound_agents=[enr.Agent.ID]!
+	for _, cid := range []string{"pg-global-ag", "etcd-global-ag"} {
+		sumRR := storeRequest(srv, "GET", "/api/clusters/"+cid+"/automation", nil, cookie, "")
+		if sumRR.Code != 200 {
+			t.Fatalf("GET automation for %s failed: %d %s", cid, sumRR.Code, sumRR.Body.String())
+		}
+		var sum struct {
+			Agents        []automationAgentView `json:"agents"`
+			UnboundAgents []automationAgentView `json:"unbound_agents"`
+		}
+		_ = json.Unmarshal(sumRR.Body.Bytes(), &sum)
+		if len(sum.Agents) != 0 {
+			t.Fatalf("expected cluster %s NOT to auto-bind agent before user selection, got %+v", cid, sum.Agents)
+		}
+		if len(sum.UnboundAgents) != 1 || sum.UnboundAgents[0].ID != enr.Agent.ID {
+			t.Fatalf("expected cluster %s to surface unbound_agents=[%s], got %+v", cid, enr.Agent.ID, sum.UnboundAgents)
+		}
+	}
+
+	// Customer explicitly selects ONLY pg-global-ag in Execution Center (PATCH clusters=["pg-global-ag"]).
+	bindRR := storeRequest(srv, "PATCH", "/api/executions/agents", strings.NewReader(`{"id":"`+enr.Agent.ID+`","action":"update","clusters":["pg-global-ag"]}`), cookie, csrf)
+	if bindRR.Code != 200 {
+		t.Fatalf("PATCH bind clusters failed: %d %s", bindRR.Code, bindRR.Body.String())
+	}
+
+	// Verify GET /api/executions/agents shows ONLY pg-global-ag as bound.
+	listRR := storeRequest(srv, "GET", "/api/executions/agents", nil, cookie, "")
+	if listRR.Code != 200 {
+		t.Fatalf("GET /api/executions/agents failed: %d %s", listRR.Code, listRR.Body.String())
+	}
+	var list []automationAgentView
+	_ = json.Unmarshal(listRR.Body.Bytes(), &list)
+	if len(list) != 1 || len(list[0].Clusters) != 1 || list[0].Clusters[0] != "pg-global-ag" {
+		t.Fatalf("expected explicitly bound clusters=[pg-global-ag], got %+v", list)
+	}
+
+	// pg-global-ag sees the bound agent, while etcd-global-ag still sees agents=[]!
+	{
+		sumPG := storeRequest(srv, "GET", "/api/clusters/pg-global-ag/automation", nil, cookie, "")
+		var sPG struct {
+			Agents []automationAgentView `json:"agents"`
+		}
+		_ = json.Unmarshal(sumPG.Body.Bytes(), &sPG)
+		if len(sPG.Agents) != 1 || sPG.Agents[0].ID != enr.Agent.ID {
+			t.Fatalf("expected pg-global-ag to see bound agent, got %+v", sPG.Agents)
+		}
+		sumEtcd := storeRequest(srv, "GET", "/api/clusters/etcd-global-ag/automation", nil, cookie, "")
+		var sEtcd struct {
+			Agents []automationAgentView `json:"agents"`
+		}
+		_ = json.Unmarshal(sumEtcd.Body.Bytes(), &sEtcd)
+		if len(sEtcd.Agents) != 0 {
+			t.Fatalf("expected etcd-global-ag to remain unbound, got %+v", sEtcd.Agents)
+		}
+	}
+
+	// Test real-time heartbeat + lightweight host probe telemetry via /api/target-agent/enroll & /api/target-agent/poll!
+	agentSecTok := strings.Repeat("t", 48)
+	machineHash := strings.Repeat("b", 64)
+	enrCall := httptest.NewRequest("POST", "http://127.0.0.1:8090/api/target-agent/enroll", strings.NewReader(`{"id":"`+enr.Agent.ID+`","machine_id":"`+machineHash+`","hostname":"db-g1","ips":["10.30.0.11"],"token":"`+agentSecTok+`"}`))
+	enrCall.Header.Set("Authorization", "Bearer "+enr.EnrollmentToken)
+	enrCall.Header.Set("Content-Type", "application/json")
+	enrW := httptest.NewRecorder()
+	srv.ServeHTTP(enrW, enrCall)
+	if enrW.Code != 200 {
+		t.Fatalf("target-agent enroll failed: %d %s", enrW.Code, enrW.Body.String())
+	}
+
+	pollCall := httptest.NewRequest("POST", "http://127.0.0.1:8090/api/target-agent/poll", strings.NewReader(`{"machine_id":"`+machineHash+`","version":"1.0.0","heartbeat":true,"probe":{"hostname":"db-g1","os":"Ubuntu 24.04.1 LTS","kernel":"6.8.0-45","arch":"amd64","cpu_cores":8,"load1":0.42,"load5":0.31,"mem_total_mb":16384,"mem_used_pct":38.5,"disk_total_gb":200,"disk_used_pct":24.2,"uptime_sec":86400,"interval_sec":5}}`))
+	pollCall.Header.Set("Authorization", "Bearer "+agentSecTok)
+	pollCall.Header.Set("Content-Type", "application/json")
+	pollW := httptest.NewRecorder()
+	srv.ServeHTTP(pollW, pollCall)
+	if pollW.Code != 200 {
+		t.Fatalf("target-agent heartbeat poll with probe failed: %d %s", pollW.Code, pollW.Body.String())
+	}
+
+	// Verify online=true, last_seen populated, and probe telemetry returned!
+	liveRR := storeRequest(srv, "GET", "/api/executions/agents", nil, cookie, "")
+	var liveList []automationAgentView
+	_ = json.Unmarshal(liveRR.Body.Bytes(), &liveList)
+	if len(liveList) != 1 || !liveList[0].Online || liveList[0].Probe == nil || liveList[0].Probe.CPUCores != 8 || liveList[0].Probe.MemUsedPct != 38.5 {
+		t.Fatalf("expected online agent with live host probe telemetry, got %+v", liveList)
+	}
+
+	// Unbound cluster etcd-global-ag MUST NOT be allowed to dispatch connectivity check to this agent until bound!
+	deniedCheckRR := storeRequest(srv, "POST", "/api/clusters/etcd-global-ag/automation/check", strings.NewReader(`{"transport":"agent","targets":[{"host":"etcd-g1","ip":"10.30.0.11"}]}`), cookie, csrf)
+	if deniedCheckRR.Code != 409 {
+		t.Fatalf("expected 409 when unbound cluster attempts to dispatch to agent, got %d %s", deniedCheckRR.Code, deniedCheckRR.Body.String())
+	}
+
+	// Cluster-side bind & unbind via PATCH /api/clusters/etcd-global-ag/automation/agents
+	cBindRR := storeRequest(srv, "PATCH", "/api/clusters/etcd-global-ag/automation/agents", strings.NewReader(`{"id":"`+enr.Agent.ID+`","action":"bind"}`), cookie, csrf)
+	if cBindRR.Code != 200 {
+		t.Fatalf("cluster-side bind failed: %d %s", cBindRR.Code, cBindRR.Body.String())
+	}
+	okCheckRR := storeRequest(srv, "POST", "/api/clusters/etcd-global-ag/automation/check", strings.NewReader(`{"transport":"agent","targets":[{"host":"etcd-g1","ip":"10.30.0.11"}]}`), cookie, csrf)
+	if okCheckRR.Code != 201 {
+		t.Fatalf("expected 201 after binding etcd-global-ag, got %d %s", okCheckRR.Code, okCheckRR.Body.String())
+	}
+	cUnbindRR := storeRequest(srv, "PATCH", "/api/clusters/etcd-global-ag/automation/agents", strings.NewReader(`{"id":"`+enr.Agent.ID+`","action":"unbind"}`), cookie, csrf)
+	if cUnbindRR.Code != 200 {
+		t.Fatalf("cluster-side unbind failed: %d %s", cUnbindRR.Code, cUnbindRR.Body.String())
+	}
+
+	// Toggle allow_mutating=false globally
+	updRR := storeRequest(srv, "PATCH", "/api/executions/agents", strings.NewReader(`{"id":"`+enr.Agent.ID+`","action":"update","allow_mutating":false}`), cookie, csrf)
+	if updRR.Code != 200 {
+		t.Fatalf("PATCH update failed: %d %s", updRR.Code, updRR.Body.String())
+	}
+	var updated automationAgentView
+	_ = json.Unmarshal(updRR.Body.Bytes(), &updated)
+	if updated.AllowMutating || len(updated.Clusters) != 1 || updated.Clusters[0] != "pg-global-ag" {
+		t.Fatalf("expected allow_mutating=false and clusters=[pg-global-ag] preserved, got %+v", updated)
+	}
+
+	// Reject unknown action even when allow_mutating is provided
+	badActRR := storeRequest(srv, "PATCH", "/api/executions/agents", strings.NewReader(`{"id":"`+enr.Agent.ID+`","action":"unknown","allow_mutating":true}`), cookie, csrf)
+	if badActRR.Code != 400 {
+		t.Fatalf("expected 400 for invalid action, got %d %s", badActRR.Code, badActRR.Body.String())
+	}
+
+	// Revoke globally
+	revRR := storeRequest(srv, "PATCH", "/api/executions/agents", strings.NewReader(`{"id":"`+enr.Agent.ID+`","action":"revoke"}`), cookie, csrf)
+	if revRR.Code != 200 {
+		t.Fatalf("PATCH revoke failed: %d %s", revRR.Code, revRR.Body.String())
+	}
+	var revoked automationAgentView
+	_ = json.Unmarshal(revRR.Body.Bytes(), &revoked)
+	if revoked.Desired != "revoked" || revoked.Applied != "revoked" || revoked.Online || revoked.Message == "" {
+		t.Fatalf("unexpected revoked agent view: %+v", revoked)
+	}
+	executionMu.Lock()
+	execData, err := srv.readExecutions()
+	executionMu.Unlock()
+	if err != nil {
+		t.Fatalf("readExecutions failed: %v", err)
+	}
+	if stored := execData.Agents[enr.Agent.ID]; stored.EnrollmentHash != "" {
+		t.Fatalf("expected enrollment_hash cleared after global revoke, got %q", stored.EnrollmentHash)
+	}
+
+	// Delete revoked direct agent record cleanly
+	delRR := storeRequest(srv, "PATCH", "/api/executions/agents", strings.NewReader(`{"id":"`+enr.Agent.ID+`","action":"delete"}`), cookie, csrf)
+	if delRR.Code != 200 {
+		t.Fatalf("PATCH delete failed: %d %s", delRR.Code, delRR.Body.String())
+	}
+	afterDelRR := storeRequest(srv, "GET", "/api/executions/agents", nil, cookie, "")
+	var afterDel []automationAgentView
+	_ = json.Unmarshal(afterDelRR.Body.Bytes(), &afterDel)
+	if len(afterDel) != 0 {
+		t.Fatalf("expected 0 direct agents after delete, got %+v", afterDel)
+	}
+}

@@ -686,7 +686,48 @@ func (s *storeServer) extractSBOM() secSBOMInventory {
 			rawMode = dep.DeliveryMode
 		}
 		effMode := effectiveDeliveryMode(cur.ID, rawMode, autoJobs)
-		if effMode == "imported" && dep != nil && dep.Imported != nil {
+		stateRec := s.loadClusterStateRecord(cid)
+		if stateRec.Live != nil && len(stateRec.Live.Packages) > 0 {
+			ecos := platformToOSVEcosystems(pl)
+			ecoDisp := pl
+			if len(ecos) > 0 {
+				ecoDisp = ecos[0]
+			}
+			ecoKey := normalizeEcoKey(ecoDisp)
+			platTitle := pl
+			if def, ok := mwpack.PlatformByID(pl); ok && def.Title != "" {
+				platTitle = def.Title
+			}
+			for _, hl := range stateRec.Live.Hosts {
+				if hl.OSDetail != "" {
+					platTitle = hl.OSDetail
+					break
+				}
+			}
+			liveClusterKey := "live:" + cid
+			cvKeys = []string{liveClusterKey}
+			for _, pk := range stateRec.Live.Packages {
+				if pk.Name == "" || pk.Version == "" {
+					continue
+				}
+				role := pk.Role
+				if role == "" {
+					role = classifySecPkgRole("os_package", pk.Name, []string{cur.AppID}, primaryPkgNames)
+				}
+				addItem(secSBOMItem{
+					AssetType:     "os_package",
+					PkgRole:       role,
+					Platform:      pl,
+					PlatformTitle: platTitle,
+					Ecosystem:     ecoDisp,
+					OSVEcosystems: ecos,
+					EcoKey:        ecoKey,
+					Package:       pk.Name,
+					Version:       pk.Version,
+					Components:    []string{liveClusterKey},
+				})
+			}
+		} else if effMode == "imported" && dep != nil && dep.Imported != nil {
 			ecos := platformToOSVEcosystems(pl)
 			ecoDisp := pl
 			if len(ecos) > 0 {
@@ -699,10 +740,8 @@ func (s *storeServer) extractSBOM() secSBOMInventory {
 			} else if dep.Imported.OSDetail != "" {
 				platTitle = dep.Imported.OSDetail
 			}
-			cvKey := ""
-			if len(cvKeys) > 0 {
-				cvKey = cvKeys[0]
-			}
+			impClusterKey := "cluster:" + cid
+			cvKeys = []string{impClusterKey}
 			hasPrimaryPkg := false
 			for _, pk := range dep.Imported.Packages {
 				if pk.Name == "" || pk.Version == "" {
@@ -715,10 +754,6 @@ func (s *storeServer) extractSBOM() secSBOMInventory {
 				if role == "primary" {
 					hasPrimaryPkg = true
 				}
-				comps := []string{}
-				if cvKey != "" {
-					comps = []string{cvKey}
-				}
 				addItem(secSBOMItem{
 					AssetType:     "os_package",
 					PkgRole:       role,
@@ -729,16 +764,12 @@ func (s *storeServer) extractSBOM() secSBOMInventory {
 					EcoKey:        ecoKey,
 					Package:       pk.Name,
 					Version:       pk.Version,
-					Components:    comps,
+					Components:    []string{impClusterKey},
 				})
 			}
 			if !hasPrimaryPkg {
 				declVer := firstNonEmptyStr(dep.Imported.ExactVersion, cur.Version)
 				if declVer != "" && declVer != "unknown" && cur.AppID != "" {
-					comps := []string{}
-					if cvKey != "" {
-						comps = []string{cvKey}
-					}
 					addItem(secSBOMItem{
 						AssetType:     "component_declared",
 						PkgRole:       "primary",
@@ -749,7 +780,7 @@ func (s *storeServer) extractSBOM() secSBOMInventory {
 						EcoKey:        ecoKey,
 						Package:       cur.AppID,
 						Version:       declVer,
-						Components:    comps,
+						Components:    []string{impClusterKey},
 					})
 				}
 			}
@@ -903,17 +934,47 @@ func parseLeadingInt(s string) int {
 	return n
 }
 
+// isGitCommitHash returns true for 32..64 character hex git commit hashes (e.g. 40-char SHA-1).
+func isGitCommitHash(s string) bool {
+	s = strings.TrimSpace(s)
+	if len(s) < 32 || len(s) > 64 {
+		return false
+	}
+	hasAlpha := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c >= '0' && c <= '9' {
+			continue
+		}
+		if (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F') {
+			hasAlpha = true
+			continue
+		}
+		return false
+	}
+	return hasAlpha
+}
+
 // versionAffectedByAdvisory evaluates whether installed version v falls inside the advisory's affected versions or ranges.
 func versionAffectedByAdvisory(ecoKey, v string, adv secDBAdvisory) bool {
 	if v == "" {
 		return false
 	}
 	for _, ev := range adv.Versions {
+		if isGitCommitHash(ev) {
+			continue
+		}
 		if ev == v || compareVersionForEco(ecoKey, v, ev) == 0 {
 			return true
 		}
 	}
 	for _, rg := range adv.Ranges {
+		if strings.EqualFold(strings.TrimSpace(rg.Type), "GIT") {
+			continue
+		}
+		if isGitCommitHash(rg.Introduced) || isGitCommitHash(rg.Fixed) || isGitCommitHash(rg.LastAffected) {
+			continue
+		}
 		if rg.Introduced != "" && rg.Introduced != "0" {
 			if compareVersionForEco(ecoKey, v, rg.Introduced) < 0 {
 				continue
@@ -1629,16 +1690,25 @@ func buildPackageGroups(findings []secFinding) []secPackageGroup {
 				g.MaxCVSS = f.CVSSScore
 			}
 			if len(f.FixedIn) > 0 {
-				g.FixableCount++
-				// Pick the minimum fix for this CVE, then take the max across CVEs in the group so 1 upgrade fixes all.
-				minFix := f.FixedIn[0]
-				for _, fx := range f.FixedIn[1:] {
-					if compareVersionForEco(f.EcoKey, fx, minFix) < 0 {
+				// Pick the minimum valid upgrade fix (> installed version, non-SHA) for this CVE,
+				// then take the max across CVEs in the group so 1 upgrade fixes all without ever recommending downgrades.
+				minFix := ""
+				for _, fx := range f.FixedIn {
+					if isGitCommitHash(fx) {
+						continue
+					}
+					if g.InstalledVersion != "" && compareVersionForEco(f.EcoKey, fx, g.InstalledVersion) <= 0 {
+						continue
+					}
+					if minFix == "" || compareVersionForEco(f.EcoKey, fx, minFix) < 0 {
 						minFix = fx
 					}
 				}
-				if g.RecommendedFix == "" || compareVersionForEco(f.EcoKey, minFix, g.RecommendedFix) > 0 {
-					g.RecommendedFix = minFix
+				if minFix != "" {
+					g.FixableCount++
+					if g.RecommendedFix == "" || compareVersionForEco(f.EcoKey, minFix, g.RecommendedFix) > 0 {
+						g.RecommendedFix = minFix
+					}
 				}
 			}
 			if f.RepoFixVersion != "" {
@@ -1751,7 +1821,7 @@ func (s *storeServer) scopedScanReport(rep *secScanReport, user string) *secScan
 
 	clusterMap := map[string]*secClusterSummary{}
 	for _, cs := range rep.Clusters {
-		if !vis(cs.Owner) {
+		if !vis(cs.Owner, cs.ClusterID) {
 			continue
 		}
 		cp := cs
@@ -1784,7 +1854,7 @@ func (s *storeServer) scopedScanReport(rep *secScanReport, user string) *secScan
 		f.PkgRole = classifySecPkgRole(f.AssetType, f.Package, f.Closures, primarySet)
 		var visCls []secClusterImpact
 		for _, cl := range orig.Clusters {
-			if vis(cl.Owner) {
+			if vis(cl.Owner, cl.ClusterID) {
 				visCls = append(visCls, cl)
 			}
 		}

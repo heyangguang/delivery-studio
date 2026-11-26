@@ -839,3 +839,82 @@ func TestClusterDocSignersAndCleanReportProse(t *testing.T) {
 		t.Errorf("AI drafting system prompts missing formal result-oriented rules")
 	}
 }
+
+func TestDeliveryDocClarificationsAndPromptGuardrails(t *testing.T) {
+	s, _ := testStore(t)
+	srv, bodies := fakeModel(t, `{"sections":{"summary":"集群采用 3 节点 PostgreSQL 17 + Patroni 自动高可用架构，全部 51 步交付验收通过，已具备投产条件。","risks":"本次交付全部验收项均已通过，当前无阻断投产的未闭环风险。投产前请按计划执行首次生产全量备份。","acceptance":"验收通过，同意投产移交。"}}`)
+	enableAI(t, s, srv.URL, 1)
+	admin, acsrf := storeLogin(t, s, "admin")
+
+	// Create 3-node PG 17 cluster with tls=false, tde=false, sync_strict=false and NO LB front.
+	depBody := `{"id":"pg-clarify-demo","hosts":[{"name":"n1","ip":"10.88.1.11","disk":"/dev/vdb"},{"name":"n2","ip":"10.88.1.12","disk":"/dev/vdb"},{"name":"n3","ip":"10.88.1.13","disk":"/dev/vdb"}],"instances":[{"id":"pg","component":"postgresql","version":"17","placement":{"primary":["n1"],"replica":["n2","n3"]},"params":{"client_cidr":"10.88.1.0/24","tls":false,"tde":false,"sync_strict":false}}]}`
+	cw := storeCreate(t, s, admin, acsrf, depBody, nil)
+	s.wg.Wait()
+	if cw.Code != 202 {
+		t.Fatalf("create failed: %d %s", cw.Code, cw.Body.String())
+	}
+
+	// 1. GET /docs/delivery should deterministically return targeted clarification items.
+	wGet := storeRequest(s, "GET", "/api/clusters/pg-clarify-demo/docs/delivery", nil, admin, "")
+	if wGet.Code != 200 {
+		t.Fatalf("GET delivery failed: %d %s", wGet.Code, wGet.Body.String())
+	}
+	var doc clusterDoc
+	if err := json.Unmarshal(wGet.Body.Bytes(), &doc); err != nil {
+		t.Fatalf("decode delivery doc: %v", err)
+	}
+	byID := map[string]docClarifyItem{}
+	for _, it := range doc.Clarifications {
+		byID[it.ID] = it
+	}
+	for _, wantID := range []string{"biz_context", "tls_disabled", "tde_disabled", "no_lb_front", "sync_non_strict", "external_ops"} {
+		if _, ok := byID[wantID]; !ok {
+			t.Fatalf("expected clarification %q in delivery doc, got %+v", wantID, doc.Clarifications)
+		}
+	}
+	if !byID["biz_context"].Optional {
+		t.Fatalf("expected biz_context to be optional")
+	}
+
+	// 2. Submit customer answers via POST /draft-all and verify persistence + prompt injection + zero-placeholder guardrails.
+	answers := []planQA{
+		{Question: byID["tls_disabled"].Question, Answer: byID["tls_disabled"].Default},
+		{Question: byID["tde_disabled"].Question, Answer: byID["tde_disabled"].Default},
+		{Question: byID["no_lb_front"].Question, Answer: byID["no_lb_front"].Default},
+	}
+	payload, _ := json.Marshal(map[string]any{"answers": answers})
+	wDraft := storeRequest(s, "POST", "/api/clusters/pg-clarify-demo/docs/delivery/draft-all", strings.NewReader(string(payload)), admin, acsrf)
+	if wDraft.Code != 200 {
+		t.Fatalf("draft-all failed: %d %s", wDraft.Code, wDraft.Body.String())
+	}
+	var draftResp struct {
+		Drafted int        `json:"drafted"`
+		Doc     clusterDoc `json:"doc"`
+	}
+	if err := json.Unmarshal(wDraft.Body.Bytes(), &draftResp); err != nil {
+		t.Fatalf("decode draft-all resp: %v", err)
+	}
+	if draftResp.Drafted < 2 {
+		t.Fatalf("expected >=2 sections drafted, got %d", draftResp.Drafted)
+	}
+	// Verify answers are persisted back onto returned clarifications.
+	persistedTLS := ""
+	for _, it := range draftResp.Doc.Clarifications {
+		if it.ID == "tls_disabled" {
+			persistedTLS = it.Answer
+		}
+	}
+	if persistedTLS != byID["tls_disabled"].Default {
+		t.Fatalf("expected tls_disabled answer persisted, got %q", persistedTLS)
+	}
+	// Verify LLM request carried confirmed customer decisions AND hard anti-placeholder / anti-cleanup-false-risk rules.
+	if len(*bodies) == 0 {
+		t.Fatalf("expected fakeModel called")
+	}
+	lastReq := string((*bodies)[len(*bodies)-1])
+	for _, must := range []string{"客户与交付工程师已确认的现场口径", "客户按需不启用", "零占位符红线", "放弃全部备份历史"} {
+		if !strings.Contains(lastReq, must) {
+			t.Fatalf("expected prompt/system to contain %q", must)
+		}
+	}
+}

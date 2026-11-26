@@ -3,8 +3,6 @@ package server
 import (
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -30,7 +28,7 @@ func (s *storeServer) deliveryAppVersion(id, component, fallback string) string 
 	var lock struct {
 		Instances []struct{ Component, Version string }
 	}
-	b, err := os.ReadFile(filepath.Join(s.jobDir(id), "output", "deployment.lock.json"))
+	b, err := s.readJobLockBytes(id)
 	if err == nil && json.Unmarshal(b, &lock) == nil {
 		for _, i := range lock.Instances {
 			if i.Component == component && i.Version != "" {

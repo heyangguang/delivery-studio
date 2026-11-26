@@ -171,6 +171,13 @@ export type ClusterSecurityReport = {
   version: string;
   platform: string;
   delivery_mode: string;
+  data_source?: string;
+  data_source_label?: string;
+  last_probed_at?: string;
+  has_bound_agent?: boolean;
+  has_online_agent?: boolean;
+  active_inspect_task_id?: string;
+  drift_count?: number;
   hosts: string[];
   scanned_at?: string;
   has_scan: boolean;
@@ -245,6 +252,7 @@ export function ClusterSecurityTab({
   const [data, setData] = useState<ClusterSecurityReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
+  const [liveInspecting, setLiveInspecting] = useState(false);
   const [loadErr, setLoadErr] = useState("");
   const [roleFilter, setRoleFilter] = useState<"all" | "primary" | "dependency">("all");
   const [stateFilter, setStateFilter] = useState<"active" | "waived" | "ignored" | "all">("active");
@@ -336,6 +344,27 @@ export function ClusterSecurityTab({
       err(e);
     } finally {
       setScanning(false);
+    }
+  };
+
+  const triggerLiveInspectAndRescan = async () => {
+    if (liveInspecting || scanning) return;
+    setLiveInspecting(true);
+    try {
+      const m = await import("../automation/rehearsal-automation");
+      await m.triggerAndPollClusterLiveInspect(c.id);
+      await api("/api/security/scan", { method: "POST" });
+      await load();
+      Message.success(
+        bi(
+          "已从目标主机实测采集真实 RPM/DEB 包、线上证书与配置并完成重扫",
+          "Collected live packages, TLS certs & config from hosts and rescanned",
+        ),
+      );
+    } catch (e) {
+      err(e);
+    } finally {
+      setLiveInspecting(false);
     }
   };
 
@@ -751,6 +780,22 @@ export function ClusterSecurityTab({
             <div className="csec-hero-info">
               <div className="csec-hero-title">
                 <h3>{bi("集群安全态势评估", "Cluster Security Posture")}</h3>
+                {data.data_source === "live_agent" && data.data_source_label && (
+                  <span
+                    className="sec-mini-tag is-live"
+                    title={
+                      data.last_probed_at
+                        ? bi(
+                            `最近主机实测：${ago(data.last_probed_at)}`,
+                            `Last host telemetry: ${ago(data.last_probed_at)}`,
+                          )
+                        : undefined
+                    }
+                  >
+                    {data.data_source_label}
+                    {data.last_probed_at ? ` · ${ago(data.last_probed_at)}` : ""}
+                  </span>
+                )}
                 {data.hide_os_cves ? (
                   <span className="sec-shield-tag">
                     {bi("全局视角：已屏蔽 OS 底层包（隐藏且不扣分）", "Global: OS CVEs hidden & unscored")}
@@ -801,6 +846,17 @@ export function ClusterSecurityTab({
                 onClick={openAIOverview}
               >
                 {bi("AI 安全顾问", "Security AI")}
+              </Button>
+            )}
+            {data.has_online_agent && can("delivery.execute|execution.manage|security.scan") && (
+              <Button
+                size="small"
+                type="primary"
+                icon={<IconRefresh />}
+                loading={liveInspecting}
+                onClick={() => void triggerLiveInspectAndRescan()}
+              >
+                {bi("实测采集并重扫", "Live Inspect & Rescan")}
               </Button>
             )}
             {can("security.scan") && (
@@ -934,8 +990,10 @@ export function ClusterSecurityTab({
           </span>
           <span className="csec-kpi-sub">
             {certsList.length > 0
-              ? bi("基于交付包内嵌 X.509 实时解析", "Parsed from embedded X.509 bundle")
-              : bi("当前集群未启用 TLS 证书包", "No TLS bundle embedded")}
+              ? data.data_source === "live_agent" || data.data_source === "manual_probe"
+                ? bi("基于线上实测与交付包 X.509 解析", "Parsed from live & bundle X.509")
+                : bi("基于交付包内嵌 X.509 实时解析", "Parsed from embedded X.509 bundle")
+              : bi("当前未检测到 TLS 证书", "No TLS certificate detected")}
           </span>
         </div>
 
@@ -1305,13 +1363,23 @@ export function ClusterSecurityTab({
       <section className="csec-section">
         <div className="csec-sec-head">
           <h4>
-            {bi("2. 配置安全基线审计（确定性静态核查）", "2. Config Security Baseline Audit")}
+            {bi("2. 配置安全基线审计", "2. Config Security Baseline Audit")}
           </h4>
           <span className="faint small">
-            {bi(
-              "直接基于本集群 deployment.yml 与拓扑方案零侵入审计，不依赖 Agent 或 AI",
-              "Deterministic zero-agent audit directly on cluster deployment.yml & plan",
-            )}
+            {data.data_source === "live_agent" || data.data_source === "manual_probe"
+              ? bi(
+                  `基于主机实测配置与线上证书核查（${data.data_source_label || "主机实测"}）`,
+                  `Audited against live host telemetry (${data.data_source_label || "Live"})`,
+                )
+              : data.data_source === "applied_baseline"
+                ? bi(
+                    "基于初始交付规格叠加已确认落地的生产变更核查",
+                    "Audited against initial spec merged with applied production changes",
+                  )
+                : bi(
+                    "当前基于静态交付快照审计（关联在线 Agent 可升级为主机实测核查）",
+                    "Currently audited against static delivery spec (bind an online Agent for live checks)",
+                  )}
           </span>
         </div>
         <div className="csec-base-list">
@@ -1407,10 +1475,15 @@ export function ClusterSecurityTab({
             {bi("3. TLS 证书生命周期巡检", "3. TLS Certificate Lifecycle Watch")}
           </h4>
           <span className="faint small">
-            {bi(
-              "自动解析集群交付包内嵌的 server.crt / ca.crt 到期时间与密钥强度",
-              "Parses embedded server.crt / ca.crt expiry & key strength",
-            )}
+            {data.data_source === "live_agent" || data.data_source === "manual_probe"
+              ? bi(
+                  "优先解析目标主机实测监听端口与线上公钥证书到期时间及密钥强度（绝不读取私钥）",
+                  "Prioritizes live TLS handshake & host public certificates (never reads private keys)",
+                )
+              : bi(
+                  "自动解析集群交付包内嵌的 server.crt / ca.crt 到期时间与密钥强度",
+                  "Parses embedded server.crt / ca.crt expiry & key strength",
+                )}
           </span>
         </div>
         {certsList.length === 0 ? (

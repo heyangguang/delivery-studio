@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -730,5 +732,230 @@ func TestImportedBaselineGapDiagnosisAndReadOnlyGapProbe(t *testing.T) {
 	}
 	if !foundAIGap {
 		t.Fatalf("merged health missing AI-discovered gap: %+v", gResp.Health.Gaps)
+	}
+
+	// 4. External curated endpoint (e.g. EIP/F5/writer) on multi-node cluster without host-side proxy must NOT trigger false-positive endpoint gap.
+	for _, g := range got.Health.Gaps {
+		if g.ID == "endpoint" {
+			t.Fatalf("curated external endpoint on multi-node cluster should not trigger false-positive endpoint gap: %+v", g)
+		}
+	}
+
+	// 5. Verify POST /api/clusters/{id}/baseline/gaps RBAC + persistent dismiss & restore.
+	if perm, ok := routePermFor("POST", "/api/clusters/pg-gap-check/baseline/gaps"); !ok || perm != "delivery.create" {
+		t.Fatalf("expected delivery.create perm for baseline/gaps, got ok=%v perm=%q", ok, perm)
+	}
+	dw := storeRequest(s, "POST", "/api/clusters/pg-gap-check/baseline/gaps",
+		strings.NewReader(`{"action":"dismiss","gap_id":"backup"}`), alice, csrf)
+	if dw.Code != 200 {
+		t.Fatalf("POST dismiss gap failed: %d %s", dw.Code, dw.Body.String())
+	}
+	var dResp struct {
+		DismissedGaps []string       `json:"dismissed_gaps"`
+		Health        baselineHealth `json:"health"`
+	}
+	if err := json.Unmarshal(dw.Body.Bytes(), &dResp); err != nil {
+		t.Fatal(err)
+	}
+	if len(dResp.DismissedGaps) != 1 || dResp.DismissedGaps[0] != "backup" {
+		t.Fatalf("expected dismissed_gaps=[backup], got %+v", dResp.DismissedGaps)
+	}
+	for _, g := range dResp.Health.Gaps {
+		if g.ID == "backup" {
+			t.Fatalf("dismissed gap 'backup' must not appear in active gaps: %+v", dResp.Health.Gaps)
+		}
+	}
+	if len(dResp.Health.DismissedGaps) != 1 || dResp.Health.DismissedGaps[0].ID != "backup" {
+		t.Fatalf("expected backup in health.dismissed_gaps, got %+v", dResp.Health.DismissedGaps)
+	}
+
+	// Restore the dismissed gap and verify it returns to active gaps.
+	rw := storeRequest(s, "POST", "/api/clusters/pg-gap-check/baseline/gaps",
+		strings.NewReader(`{"action":"restore","gap_id":"backup"}`), alice, csrf)
+	if rw.Code != 200 {
+		t.Fatalf("POST restore gap failed: %d %s", rw.Code, rw.Body.String())
+	}
+	var rResp struct {
+		DismissedGaps []string       `json:"dismissed_gaps"`
+		Health        baselineHealth `json:"health"`
+	}
+	_ = json.Unmarshal(rw.Body.Bytes(), &rResp)
+	restored := false
+	for _, g := range rResp.Health.Gaps {
+		if g.ID == "backup" {
+			restored = true
+		}
+	}
+	if len(rResp.DismissedGaps) != 0 || !restored {
+		t.Fatalf("expected backup restored into active gaps, got dismissed=%+v gaps=%+v", rResp.DismissedGaps, rResp.Health.Gaps)
+	}
+
+	// Dismissing every remaining gap must serialize health.gaps as [] (not JSON null) so the UI never crashes on .length.
+	allDismissed := analyzeImportedBaselineHealth("postgresql", "PostgreSQL", importClusterReq{
+		DismissedGaps: []string{"paths", "params", "backup", "endpoint", "security", "packages"},
+	}, "zh")
+	if allDismissed.Gaps == nil || len(allDismissed.Gaps) != 0 {
+		t.Fatalf("expected non-nil empty slice for zero active gaps, got %#v", allDismissed.Gaps)
+	}
+	if rawJSON, err := json.Marshal(allDismissed); err != nil {
+		t.Fatal(err)
+	} else if !strings.Contains(string(rawJSON), `"gaps":[]`) {
+		t.Fatalf("expected JSON \"gaps\":[] when all gaps are dismissed, got: %s", string(rawJSON))
+	}
+}
+
+func TestImportNegatedCompanionAndDistroSchemaVersion(t *testing.T) {
+	s, _ := testStore(t)
+	alice, _ := storeLogin(t, s, "alice")
+
+	// 1. Negated ArchSummary like "单机部署（非 Sentinel / Cluster）" must NOT attach phantom redis-sentinel companion.
+	sig := companionSignals{
+		PrimaryComp: "redis",
+		ArchSummary: "Redis 6.0.16 单机部署（非 Sentinel / Cluster），仅监听本地与内网 6379",
+		Hosts:       []importHostInput{{Name: "pass-4", IP: "192.168.31.153"}},
+	}
+	comps := inferCompanionsFromSignals(sig)
+	for _, c := range comps {
+		if c.Component == "redis-sentinel" {
+			t.Fatalf("negated ArchSummary must not infer phantom redis-sentinel companion: %+v", comps)
+		}
+	}
+
+	// 2. Positive mention must still detect redis-sentinel.
+	sigPos := companionSignals{
+		PrimaryComp: "redis",
+		ArchSummary: "Redis 7.2 一主两从 + 3 节点 Sentinel 哨兵高可用",
+		Hosts:       []importHostInput{{Name: "r1", IP: "10.0.0.1"}},
+	}
+	compsPos := inferCompanionsFromSignals(sigPos)
+	foundSentinel := false
+	for _, c := range compsPos {
+		if c.Component == "redis-sentinel" {
+			foundSentinel = true
+		}
+	}
+	if !foundSentinel {
+		t.Fatalf("positive Sentinel mention should infer redis-sentinel companion, got %+v", compsPos)
+	}
+
+	// 3. Distro-suffixed versions on catalog components (e.g. 4.1.5-1.noble, 3.5.33-1.noble) normalize cleanly in schema API.
+	for _, path := range []string{
+		"/api/components/patroni?version=4.1.5-1.noble",
+		"/api/components/etcd?version=3.5.33-1.noble",
+	} {
+		rr := storeRequest(s, "GET", path, nil, alice, "")
+		if rr.Code != 200 {
+			t.Fatalf("GET %s expected 200 after distro version normalization, got %d: %s", path, rr.Code, rr.Body.String())
+		}
+	}
+}
+
+func TestImportParseSSEStreamingAndThinking(t *testing.T) {
+	s, _ := testStore(t)
+	alice, csrf := storeLogin(t, s, "alice")
+
+	aiReply := `{"thinking":"1. 主机与发行版核对：识别到 db-node-01 (10.10.0.11) Ubuntu 24.04\n2. 伴生架构识别：检测到 Patroni 4.0 + etcd 3.5 高可用栈","suggested_id":"pg-sse-prod","component":"postgresql","display_name":"PostgreSQL","version":"17","exact_version":"17.11","platform":"ubuntu-24.04-amd64","deploy_method":"systemd","arch_summary":"Patroni + etcd 高可用集群","hosts":[{"name":"db-node-01","ip":"10.10.0.11","role":"primary","disk":"/dev/vdb"}],"endpoints":[{"name":"writer","address":"10.10.0.11:5432","role":"readwrite"}],"companions":[{"component":"patroni","display_name":"Patroni","version":"4.0","kind":"ha_manager","ports":[8008]}],"service_units":["patroni.service"],"config_paths":["/etc/patroni/patroni.yml"],"data_dirs":["/data/pg"],"log_dirs":["/var/log/postgresql"],"params":{"port":5432},"packages":[],"notes":"• 主节点已核验"}`
+	srv, _ := fakeModel(t, aiReply)
+	enableAI(t, s, srv.URL, 1)
+
+	body := `{"component":"postgresql","display_name":"PostgreSQL","source_kind":"probe","text":"=== MW_IMPORT_BEGIN ===\nHOSTNAME=db-node-01\nIP=10.10.0.11\n=== MW_IMPORT_END ===","use_ai":true}`
+	w := storeRequest(s, "POST", "/api/clusters/import/parse?stream=1", strings.NewReader(body), alice, csrf)
+	if w.Code != 200 || !strings.Contains(w.Header().Get("Content-Type"), "text/event-stream") {
+		t.Fatalf("expected 200 text/event-stream, got %d ct=%q body=%s", w.Code, w.Header().Get("Content-Type"), w.Body.String())
+	}
+	raw := w.Body.String()
+	for _, want := range []string{
+		`"t":"steps"`,
+		`"id":"det-scan"`,
+		`"id":"redact-secrets"`,
+		`"id":"connect-model"`,
+		`"id":"model-think"`,
+		`"id":"synth-baseline"`,
+		`"t":"meta"`,
+		`"t":"think"`,
+		`"t":"phase"`,
+		`"t":"done"`,
+		`"ai_used":true`,
+		`"suggested_id":"pg-sse-prod"`,
+		`"patroni"`,
+	} {
+		if !strings.Contains(raw, want) {
+			t.Fatalf("SSE stream missing %q:\n%s", want, raw)
+		}
+	}
+}
+
+func TestImportParseAndProbeRespectSelectedModel(t *testing.T) {
+	s, _ := testStore(t)
+	alice, csrf := storeLogin(t, s, "alice")
+	admin, adminCSRF := storeLogin(t, s, "admin")
+
+	var requestedModels []string
+	aiReply := `{"thinking":"ok","suggested_id":"pg-model-check","component":"postgresql","display_name":"PostgreSQL","version":"17","hosts":[{"name":"db-01","ip":"10.10.0.11","role":"primary"}]}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Model string `json:"model"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		requestedModels = append(requestedModels, req.Model)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":` + string(mustJSON(aiReply)) + `}}]}`))
+	}))
+	defer srv.Close()
+
+	st := s.aiLoad()
+	enc, _ := s.aiEncrypt("test-key")
+	st.Enabled = true
+	st.Providers = []aiProvider{{
+		ID:      "magpie",
+		Name:    "Magpie",
+		Preset:  "custom",
+		URL:     srv.URL,
+		Enabled: true,
+		KeyEnc:  enc,
+		Models: []aiModel{
+			{ID: "zerotoken/claude-sonnet-5-5", Enabled: true, Tools: "yes", Vision: "yes"},
+			{ID: "codex/gpt-6.1-sol", Name: "GPT-6.1 Sol", Enabled: true, Tools: "yes", Vision: "yes"},
+			{ID: "text-only/mini", Enabled: true, Tools: "yes", Vision: "no"},
+			{ID: "admin-only/o3", Enabled: true, Tools: "yes", Vision: "yes"},
+		},
+	}}
+	st.UserModels = []string{"magpie|codex/gpt-6.1-sol", "magpie|zerotoken/claude-sonnet-5-5", "magpie|text-only/mini"}
+	st.Features = map[string]aiFeature{
+		"assistant":        {Enabled: true, Primary: "magpie|zerotoken/claude-sonnet-5-5"},
+		"change_rehearsal": {Enabled: true, Primary: "magpie|zerotoken/claude-sonnet-5-5"},
+	}
+	if err := s.aiSave(st); err != nil {
+		t.Fatalf("aiSave failed: %v", err)
+	}
+
+	// 1. Regular user explicitly selects GPT-6.1 Sol -> backend MUST execute codex/gpt-6.1-sol, NOT claude-sonnet-5-5!
+	body := `{"component":"postgresql","display_name":"PostgreSQL","source_kind":"probe","text":"HOSTNAME=db-01\nIP=10.10.0.11","use_ai":true,"model":"magpie|codex/gpt-6.1-sol"}`
+	w := storeRequest(s, "POST", "/api/clusters/import/parse?stream=1", strings.NewReader(body), alice, csrf)
+	if w.Code != 200 {
+		t.Fatalf("parse failed: %d %s", w.Code, w.Body.String())
+	}
+	if len(requestedModels) != 1 || requestedModels[0] != "codex/gpt-6.1-sol" {
+		t.Fatalf("expected requested model codex/gpt-6.1-sol, got %+v", requestedModels)
+	}
+	if !strings.Contains(w.Body.String(), `"model":"codex/gpt-6.1-sol"`) {
+		t.Fatalf("expected SSE meta model codex/gpt-6.1-sol, got %s", w.Body.String())
+	}
+
+	// 2. Admin selects an enabled model outside UserModels -> aiProvidersForUser honors it!
+	adminBody := `{"component":"postgresql","display_name":"PostgreSQL","source_kind":"probe","text":"HOSTNAME=db-01\nIP=10.10.0.11","use_ai":true,"model":"magpie|admin-only/o3"}`
+	w2 := storeRequest(s, "POST", "/api/clusters/import/parse?stream=1", strings.NewReader(adminBody), admin, adminCSRF)
+	if w2.Code != 200 {
+		t.Fatalf("admin parse failed: %d %s", w2.Code, w2.Body.String())
+	}
+	if len(requestedModels) != 2 || requestedModels[1] != "admin-only/o3" {
+		t.Fatalf("expected admin requested model admin-only/o3, got %+v", requestedModels)
+	}
+
+	// 3. Explicit selection of a non-vision model with screenshots must refuse (409 / error) rather than silently switching models!
+	imgBody := `{"component":"postgresql","display_name":"PostgreSQL","source_kind":"screenshot","images":["data:image/png;base64,iVBORw0KGgo="],"use_ai":true,"model":"magpie|text-only/mini"}`
+	w3 := storeRequest(s, "POST", "/api/clusters/import/parse", strings.NewReader(imgBody), alice, csrf)
+	if w3.Code != 409 || len(requestedModels) != 2 {
+		t.Fatalf("expected 409 refusal without silent fallback, got code=%d models=%+v body=%s", w3.Code, requestedModels, w3.Body.String())
 	}
 }

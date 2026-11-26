@@ -1072,18 +1072,22 @@ func (s *storeServer) amendmentsPath(job string) string {
 
 func (s *storeServer) loadProposals(job string) []aiProposal {
 	out := []aiProposal{}
-	if b, err := os.ReadFile(s.proposalsPath(job)); err == nil {
-		_ = json.Unmarshal(b, &out)
-	}
+	_ = s.loadJobDocValue(job, "proposals_json", s.proposalsPath(job), &out)
 	return out
+}
+
+func (s *storeServer) saveProposals(job string, list []aiProposal) error {
+	return s.saveJobDocValue(job, "proposals_json", s.proposalsPath(job), list)
 }
 
 func (s *storeServer) loadAmendments(job string) []aiAmendment {
 	out := []aiAmendment{}
-	if b, err := os.ReadFile(s.amendmentsPath(job)); err == nil {
-		_ = json.Unmarshal(b, &out)
-	}
+	_ = s.loadJobDocValue(job, "amendments_json", s.amendmentsPath(job), &out)
 	return out
+}
+
+func (s *storeServer) saveAmendments(job string, list []aiAmendment) error {
+	return s.saveJobDocValue(job, "amendments_json", s.amendmentsPath(job), list)
 }
 
 // stepTitles lists the titles a proposal can be placed after, per phase, as the runbook shows them.
@@ -1694,7 +1698,7 @@ func (s *storeServer) handleProposals(w http.ResponseWriter, r *http.Request, us
 				_ = v
 			}
 			ams := append(s.loadAmendments(id), aiAmendment{ID: p.ID, Kind: p.Kind, Phase: p.Phase, AfterTitle: p.AfterTitle, Step: p.Step, Reason: p.Reason, By: user.User, At: now})
-			if err := writeJSONFile(s.amendmentsPath(id), ams); err != nil {
+			if err := s.saveAmendments(id, ams); err != nil {
 				aiMu.Unlock()
 				s.fail(w, 500, "无法保存")
 				return
@@ -1710,7 +1714,7 @@ func (s *storeServer) handleProposals(w http.ResponseWriter, r *http.Request, us
 		}
 		p.DecidedBy, p.DecidedAt = user.User, now
 		all[idx] = p
-		err := writeJSONFile(s.proposalsPath(id), all)
+		err := s.saveProposals(id, all)
 		aiMu.Unlock()
 		if err != nil {
 			s.fail(w, 500, "无法保存")
@@ -1756,7 +1760,7 @@ func (s *storeServer) handleProposals(w http.ResponseWriter, r *http.Request, us
 			s.fail(w, 404, "没有这条补充")
 			return
 		}
-		if err := writeJSONFile(s.amendmentsPath(id), keep); err != nil {
+		if err := s.saveAmendments(id, keep); err != nil {
 			s.fail(w, 500, "无法保存")
 			return
 		}
@@ -1770,7 +1774,7 @@ func (s *storeServer) handleProposals(w http.ResponseWriter, r *http.Request, us
 				all[i].Status = "withdrawn"
 			}
 		}
-		_ = writeJSONFile(s.proposalsPath(id), all)
+		_ = s.saveProposals(id, all)
 		s.auditReq(r, "ai-amendment-withdraw", user.User, id+" "+parts[1])
 		s.writeJSON(w, 200, map[string]bool{"ok": true})
 	default:

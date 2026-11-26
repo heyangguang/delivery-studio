@@ -2357,11 +2357,11 @@ export function AISettingsView() {
                 </div>
                 <div className="ai-master-ctrl">
                   <Switch
+                    className="ai-master-switch"
+                    size="small"
                     checked={d.enabled}
                     loading={toggling}
                     onChange={flipMaster}
-                    checkedText={bi("已启用", "On")}
-                    uncheckedText={bi("未启用", "Off")}
                     aria-label={bi("启用 AI 能力套件", "Enable AI suite")}
                   />
                 </div>
@@ -2611,6 +2611,7 @@ export function AISettingsView() {
                                 </span>
                               </div>
                               <Switch
+                                size="small"
                                 checked={p.enabled}
                                 loading={togglingProv === p.id}
                                 onChange={() => void toggle(p)}
@@ -3024,6 +3025,7 @@ export function AISettingsView() {
                         </small>
                       </div>
                       <Switch
+                        size="small"
                         checked={d.redact_hosts}
                         onChange={(v) => put({ ...d, redact_hosts: v })}
                         aria-label={bi(
@@ -3043,6 +3045,7 @@ export function AISettingsView() {
                         </small>
                       </div>
                       <Switch
+                        size="small"
                         checked={d.private_only}
                         onChange={(v) => put({ ...d, private_only: v })}
                         aria-label={bi("只允许私有模型", "Private models only")}

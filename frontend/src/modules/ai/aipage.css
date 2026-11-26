@@ -46,8 +46,8 @@
 .ap-side-top {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 18px 14px 12px;
+  gap: 8px;
+  padding: 9px 12px 10px;
   border-bottom: 1px solid var(--line);
 }
 .ap-tabs {
@@ -101,39 +101,17 @@
 .ap-tab.on em {
   color: var(--brand-ink);
 }
-.ap-brand {
+.ap-search-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  height: 28px;
-  padding: 0;
-}
-.ap-brand b {
-  flex: 1;
-  font-size: 16.5px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  line-height: 1.25;
-  color: var(--ink);
-}
-.ap-brand-spark {
-  display: grid;
-  flex: none;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 7px;
-  background: var(--kyndryl-soft);
-  border: 1px solid var(--kyndryl-line);
-  color: var(--kyndryl);
-}
-.ap-brand-spark svg {
-  display: block;
-  flex: none;
+  gap: 7px;
+  min-width: 0;
 }
 .ap-side-top .arco-input-inner-wrapper {
+  flex: 1;
+  min-width: 0;
   height: 34px;
-  border-radius: 7px;
+  border-radius: 8px;
   background: var(--surface);
   border: 1px solid var(--line-strong);
 }
@@ -154,24 +132,27 @@
 }
 .ap-new {
   display: grid;
+  flex: none;
   place-items: center;
-  width: 32px;
-  height: 32px;
+  width: 34px;
+  height: 34px;
   padding: 0;
-  border: 0;
-  border-radius: 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
   color: var(--ink-2);
-  font-size: 16px;
-  background: none;
+  font-size: 15px;
+  background: var(--surface);
   cursor: pointer;
   transition:
     background-color 0.16s var(--spring),
+    border-color 0.16s var(--spring),
     color 0.16s var(--spring),
     transform 0.16s var(--spring);
 }
 .ap-new:hover {
-  color: var(--ink);
-  background: var(--press);
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+  border-color: var(--brand-line);
 }
 .ap-new:active:not(:disabled) {
   transform: scale(0.94);

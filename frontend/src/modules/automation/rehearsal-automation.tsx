@@ -1,47 +1,59 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
-  Drawer,
+  Checkbox,
   Input,
   InputNumber,
   Message,
+  Modal,
   Popconfirm,
+  Radio,
   Select,
   Skeleton,
   Switch,
-  Tooltip,
 } from "@arco-design/web-react";
 import {
-  IconCheck,
   IconCheckCircle,
+  IconClose,
   IconCloseCircle,
   IconCopy,
-  IconDesktop,
   IconDown,
-  IconDownload,
-  IconExclamationCircle,
+  IconLeft,
   IconLoading,
   IconPlayArrow,
   IconPlus,
   IconRecordStop,
   IconRefresh,
+  IconRight,
   IconSafe,
+  IconSearch,
   IconSettings,
   IconThunderbolt,
   IconUp,
 } from "@arco-design/web-react/icon";
 import { go } from "../../app/router";
-import { api, can, copy, csrfToken, err, fullTime } from "../../shared/shared";
-import { bi, useLang, withLang } from "../../app/i18n";
+import { ago, api, can, copy, err } from "../../shared/shared";
+import type { ClusterEffectiveView, ClusterLiveSummary, ClusterProbePolicy } from "../../shared/shared";
+import { bi, useLang } from "../../app/i18n";
 import {
-  AutomationAgentView,
-  ClusterAutomationConfig,
+  ClusterAutomationHost,
   ClusterAutomationSummary,
-  RehearsalExecTask,
   RehearsalExecTarget,
+  RehearsalExecTask,
+  UnifiedAgentView,
   isRehearsalTaskTerminal,
 } from "./execution-types";
+import { EnrollAgentModal } from "./enroll-agent-modal";
+import { ProTransfer, ProTransferItem } from "../../design/transfer";
 import "./rehearsal-automation.css";
+
+export type ExecutionAgentChoice = {
+  agent_id: string;
+  targets: RehearsalExecTarget[];
+  node_exec_method?: "auto" | "ansible" | "ssh";
+  ssh_user?: string;
+  ssh_port?: number;
+};
 
 /** Polls a running rehearsal/baseline automation task until it reaches a terminal state. */
 export async function pollRehearsalExecTask(
@@ -118,7 +130,7 @@ export function LiveExecLogCard({
 
   const stateLabel =
     task.state === "queued"
-      ? bi("等待执行端拉取", "Queued")
+      ? bi("等待 Agent 领取", "Queued")
       : task.state === "running"
         ? bi("正在执行", "Running")
         : task.state === "succeeded"
@@ -149,10 +161,10 @@ export function LiveExecLogCard({
           </span>
           <span className="rha-transport-tag">
             {task.transport === "agent"
-              ? bi("目标机 Agent 直连", "Direct Agent")
+              ? bi("Agent 本机直连", "Local Direct Agent")
               : bi(
-                  `控制机 · ${task.node_name || task.node_id || "Node"}${task.node_exec_method === "ansible" ? " (Ansible)" : ""}`,
-                  `Controller · ${task.node_name || task.node_id || "Node"}`,
+                  `Agent · ${task.node_name || task.node_id || "Runner"}`,
+                  `Agent · ${task.node_name || task.node_id || "Runner"}`,
                 )}
           </span>
           {task.read_only && (
@@ -181,10 +193,12 @@ export function LiveExecLogCard({
               size="mini"
               type="text"
               icon={<IconCopy />}
-              onClick={() => {
-                copy(task.combined_output || "");
-                Message.success(bi("已复制脱敏执行输出", "Redacted output copied"));
-              }}
+              onClick={() =>
+                void copy(
+                  task.combined_output || "",
+                  bi("已复制脱敏执行输出", "Redacted output copied"),
+                )
+              }
             >
               {bi("复制输出", "Copy")}
             </Button>
@@ -217,51 +231,631 @@ export function LiveExecLogCard({
       {expanded && (
         <pre ref={preRef} className="rha-log-pre mono">
           {task.combined_output ||
+            task.error ||
             (running
-              ? bi("已下发任务，等待执行端回传实时脱敏终端输出…", "Task dispatched; waiting for live redacted terminal output…")
-              : task.error || bi("（无标准输出）", "(No output)"))}
+              ? bi("正在等待 Agent 建立输出流…", "Waiting for Agent output stream…")
+              : bi("（本次执行无标准输出）", "(Empty stdout/stderr)"))}
         </pre>
       )}
     </div>
   );
 }
 
-export function ClusterAutomationDrawer({
+export function navigateToClusterAutomation(
+  clusterId: string,
+  _returnTo?: { tab?: string; rehearsal?: string },
+) {
+  go({ name: "deliveries", id: clusterId, tab: "automation" });
+}
+
+/**
+ * On-demand Execution Agent Picker Modal.
+ * Picks from Agents associated with this cluster; execution permission is governed cleanly by the user's IAM access.
+ */
+export function SelectExecutionAgentModal({
   visible,
   clusterId,
-  onClose,
-  onChanged,
+  taskTitle,
+  readOnly,
+  initialTargets,
+  hostsFallback,
+  confirmLoading,
+  onCancel,
+  onConfirm,
+  onSummaryUpdated,
 }: {
   visible: boolean;
   clusterId: string;
-  onClose: () => void;
+  taskTitle: string;
+  readOnly: boolean;
+  initialTargets?: RehearsalExecTarget[];
+  hostsFallback?: ClusterAutomationHost[];
+  confirmLoading?: boolean;
+  onCancel: () => void;
+  onConfirm: (choice: ExecutionAgentChoice) => void;
+  onSummaryUpdated?: (next: ClusterAutomationSummary) => void;
+}) {
+  useLang();
+  const canBindCluster = can("delivery.execute|delivery.create|execution.manage");
+  const canEnrollAgent = can("execution.manage");
+
+  const [summary, setSummary] = useState<ClusterAutomationSummary | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [selectedAgentId, setSelectedAgentId] = useState<string>("");
+  const [selectedIPs, setSelectedIPs] = useState<string[]>([]);
+  const [sshOpen, setSshOpen] = useState(false);
+  const [sshUser, setSshUser] = useState("root");
+  const [sshPort, setSshPort] = useState(22);
+  const [execMethod, setExecMethod] = useState<"auto" | "ansible" | "ssh">("auto");
+  const [bindBusy, setBindBusy] = useState("");
+
+  const refreshSummary = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await api<ClusterAutomationSummary>(
+        `/api/clusters/${encodeURIComponent(clusterId)}/automation`,
+      );
+      setSummary(res);
+      onSummaryUpdated?.(res);
+      setSshUser(res.config?.ssh_user || "root");
+      setSshPort(res.config?.ssh_port || 22);
+      setExecMethod(
+        (res.config?.node_exec_method as "auto" | "ansible" | "ssh") || "auto",
+      );
+
+      const allHosts = res.hosts?.length ? res.hosts : hostsFallback || [];
+      const initIPs =
+        initialTargets && initialTargets.length > 0
+          ? initialTargets.map((t) => t.ip)
+          : allHosts.map((h) => h.ip);
+      setSelectedIPs(initIPs);
+
+      const bound = res.unified_agents || [];
+      const isEligible = (a: UnifiedAgentView) =>
+        !a.disabled && a.online && a.supports_exec;
+      const remembered = res.last_agent_id || "";
+      if (remembered && bound.some((a) => a.id === remembered && isEligible(a))) {
+        setSelectedAgentId(remembered);
+      } else {
+        const firstOk = bound.find(isEligible);
+        setSelectedAgentId(firstOk ? firstOk.id : bound[0]?.id || "");
+      }
+    } catch (e) {
+      err(e);
+    } finally {
+      setLoading(false);
+    }
+  }, [clusterId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!visible) return;
+    setSshOpen(false);
+    void refreshSummary();
+  }, [visible, refreshSummary]);
+
+  const hosts = useMemo(
+    () => (summary?.hosts?.length ? summary.hosts : hostsFallback || []),
+    [summary?.hosts, hostsFallback],
+  );
+
+  const boundAgents = useMemo(
+    () => summary?.unified_agents || [],
+    [summary?.unified_agents],
+  );
+  const availableAgents = useMemo(
+    () => summary?.available_agents || [],
+    [summary?.available_agents],
+  );
+
+  const directCoverageCount = useMemo(() => {
+    if (selectedIPs.length <= 1) return 0;
+    let covered = 0;
+    for (const ip of selectedIPs) {
+      const ok = boundAgents.some(
+        (a) => a.backing === "direct" && a.ip === ip && a.online && !a.disabled,
+      );
+      if (ok) covered++;
+    }
+    return covered;
+  }, [boundAgents, selectedIPs]);
+
+  const pickedAgent = useMemo(
+    () => boundAgents.find((a) => a.id === selectedAgentId) || null,
+    [boundAgents, selectedAgentId],
+  );
+
+  const pickedCanRun =
+    selectedAgentId === "__direct__"
+      ? directCoverageCount === selectedIPs.length && selectedIPs.length > 0
+      : Boolean(
+          pickedAgent &&
+            pickedAgent.online &&
+            !pickedAgent.disabled &&
+            pickedAgent.supports_exec,
+        );
+
+  const isLocalDirect = useMemo(() => {
+    if (selectedAgentId === "__direct__") return true;
+    if (!pickedAgent) return false;
+    if (pickedAgent.backing === "direct") return true;
+    return (
+      selectedIPs.length === 1 &&
+      pickedAgent.ip.trim() === selectedIPs[0].trim()
+    );
+  }, [selectedAgentId, pickedAgent, selectedIPs]);
+
+  const quickBindAgent = async (agentId: string) => {
+    if (bindBusy) return;
+    setBindBusy(agentId);
+    try {
+      await api("/api/executions/unified-agents", {
+        method: "PATCH",
+        body: JSON.stringify({
+          id: agentId,
+          bind_clusters: [clusterId],
+        }),
+      });
+      await refreshSummary();
+      setSelectedAgentId(agentId);
+      Message.success(bi("已关联该 Agent", "Associated Agent"));
+    } catch (e) {
+      err(e);
+    } finally {
+      setBindBusy("");
+    }
+  };
+
+  const handleStart = () => {
+    if (!pickedCanRun) return;
+    const chosenTargets: RehearsalExecTarget[] = hosts
+      .filter((h) => selectedIPs.includes(h.ip))
+      .map((h) => ({ host: h.name, ip: h.ip, role: h.role }));
+    if (chosenTargets.length === 0 && initialTargets?.length) {
+      chosenTargets.push(...initialTargets);
+    }
+    if (chosenTargets.length === 0) {
+      Message.warning(bi("请至少勾选 1 台目标主机", "Select at least 1 target host"));
+      return;
+    }
+    onConfirm({
+      agent_id: selectedAgentId,
+      targets: chosenTargets,
+      node_exec_method: execMethod,
+      ssh_user: sshUser.trim() || "root",
+      ssh_port: sshPort || 22,
+    });
+  };
+
+  return (
+    <Modal
+      visible={visible}
+      onCancel={onCancel}
+      footer={null}
+      style={{ width: 560, maxWidth: "94vw" }}
+      title={
+        <span className="sea-modal-title">
+          <IconThunderbolt />
+          <span>{bi("选择执行 Agent", "Select Execution Agent")}</span>
+        </span>
+      }
+    >
+      <div className="sea-body">
+        <div className="sea-task-bar">
+          <span className="sea-task-name">{taskTitle}</span>
+          <span className={`sea-kind-badge ${readOnly ? "is-ro" : "is-rw"}`}>
+            {readOnly
+              ? bi("100% 只读采集", "Read-Only Probe")
+              : bi("变更步骤执行", "Change Step")}
+          </span>
+        </div>
+
+        {loading && !summary ? (
+          <Skeleton animation text={{ rows: 4 }} />
+        ) : (
+          <>
+            <div className="sea-sec">
+              <div className="sea-sec-head">
+                <b>{bi("1. 选择本集群关联的 Agent", "1. Associated Cluster Agents")}</b>
+                {canEnrollAgent && !readOnly && (
+                  <InPlaceEnrollButton
+                    asText
+                    clusterId={clusterId}
+                    hosts={hosts}
+                    label={bi("+ 接入新 Agent", "+ Enroll Agent")}
+                    onEnrolled={(ag) => {
+                      void refreshSummary().then(() => setSelectedAgentId(ag.id));
+                    }}
+                  />
+                )}
+              </div>
+
+              {boundAgents.length === 0 ? (
+                <div className="sea-empty-box">
+                  <p>
+                    {bi(
+                      `集群「${clusterId}」尚未关联执行 Agent。`,
+                      `No Agent is associated with cluster "${clusterId}" yet.`,
+                    )}
+                  </p>
+                  {canBindCluster && availableAgents.length > 0 && (
+                    <div className="sea-quick-bind">
+                      <span className="small faint">
+                        {bi("一键关联已有 Agent：", "Associate an existing Agent:")}
+                      </span>
+                      <div className="sea-quick-bind-list">
+                        {availableAgents.map((a) => (
+                          <div key={a.id} className="sea-quick-bind-row">
+                            <span>
+                              <span
+                                className={`iam-ag-dot ${a.online && !a.disabled ? "is-online" : "is-offline"}`}
+                              />{" "}
+                              <b>{a.name}</b>{" "}
+                              <code className="mono faint">{a.ip}</code>
+                            </span>
+                            <Button
+                              size="mini"
+                              type="primary"
+                              loading={bindBusy === a.id}
+                              onClick={() => void quickBindAgent(a.id)}
+                            >
+                              {bi("关联此集群", "Associate")}
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {canEnrollAgent && (
+                    <InPlaceEnrollButton
+                      clusterId={clusterId}
+                      hosts={hosts}
+                      label={bi("就地接入新 Agent", "Enroll New Agent")}
+                      onEnrolled={(ag) => {
+                        void refreshSummary().then(() => setSelectedAgentId(ag.id));
+                      }}
+                    />
+                  )}
+                </div>
+              ) : (
+                <div className="sea-agent-list" role="radiogroup">
+                  {selectedIPs.length > 1 && directCoverageCount > 0 && (
+                    <label
+                      className={`sea-agent-card ${selectedAgentId === "__direct__" ? "is-selected" : ""} ${directCoverageCount < selectedIPs.length ? "is-muted" : ""}`}
+                      onClick={() => {
+                        if (directCoverageCount === selectedIPs.length) {
+                          setSelectedAgentId("__direct__");
+                        }
+                      }}
+                    >
+                      <div className="sea-agent-main">
+                        <Radio
+                          checked={selectedAgentId === "__direct__"}
+                          disabled={directCoverageCount < selectedIPs.length}
+                          onChange={() => {
+                            if (directCoverageCount === selectedIPs.length) {
+                              setSelectedAgentId("__direct__");
+                            }
+                          }}
+                        />
+                        <span className="iam-ag-dot is-online" />
+                        <b>{bi("各目标节点本机 Agent 直连", "Per-Host Local Agents")}</b>
+                        <span className="ua-path-badge is-local">
+                          {bi(
+                            `${directCoverageCount}/${selectedIPs.length} 台就绪`,
+                            `${directCoverageCount}/${selectedIPs.length} ready`,
+                          )}
+                        </span>
+                      </div>
+                    </label>
+                  )}
+
+                  {boundAgents.map((a) => {
+                    const unusable =
+                      a.disabled || !a.online || !a.supports_exec;
+                    const isLocal =
+                      a.backing === "direct" ||
+                      hosts.some((h) => h.ip.trim() === a.ip.trim());
+                    const selected = selectedAgentId === a.id;
+                    return (
+                      <label
+                        key={a.id}
+                        className={`sea-agent-card ${selected ? "is-selected" : ""} ${unusable ? "is-muted" : ""}`}
+                        onClick={() => setSelectedAgentId(a.id)}
+                      >
+                        <div className="sea-agent-main">
+                          <Radio
+                            checked={selected}
+                            onChange={() => setSelectedAgentId(a.id)}
+                          />
+                          <span
+                            className={`iam-ag-dot ${
+                              a.disabled
+                                ? "is-disabled"
+                                : a.online
+                                  ? "is-online"
+                                  : "is-offline"
+                            }`}
+                          />
+                          <b>{a.name}</b>
+                          <code className="mono faint">{a.ip}</code>
+                          <span
+                            className={`ua-path-badge ${isLocal ? "is-local" : ""}`}
+                          >
+                            {isLocal
+                              ? bi("本机免密直连", "Local Direct")
+                              : bi("SSH 远程代管", "Jumpbox")}
+                          </span>
+                        </div>
+                        <div className="sea-agent-right">
+                          {a.online && !a.disabled && (
+                            <small className="ok">{bi("在线", "Online")}</small>
+                          )}
+                          {!a.online && !a.disabled && (
+                            <small className="warn">{bi("离线", "Offline")}</small>
+                          )}
+                          {a.disabled && (
+                            <small className="faint">{bi("已禁用", "Disabled")}</small>
+                          )}
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {hosts.length > 0 && (
+              <div className="sea-sec">
+                <div className="sea-sec-head">
+                  <b>
+                    {bi(
+                      `2. 目标机器（已选 ${selectedIPs.length}/${hosts.length} 台）`,
+                      `2. Target Hosts (${selectedIPs.length}/${hosts.length})`,
+                    )}
+                  </b>
+                  {hosts.length > 1 && (
+                    <button
+                      type="button"
+                      className="iam-text-act"
+                      onClick={() =>
+                        setSelectedIPs(
+                          selectedIPs.length === hosts.length
+                            ? [hosts[0].ip]
+                            : hosts.map((h) => h.ip),
+                        )
+                      }
+                    >
+                      {selectedIPs.length === hosts.length
+                        ? bi("仅选首节点", "First Host Only")
+                        : bi("全选节点", "Select All")}
+                    </button>
+                  )}
+                </div>
+                <div className="sea-host-grid">
+                  {hosts.map((h) => {
+                    const checked = selectedIPs.includes(h.ip);
+                    return (
+                      <label
+                        key={`${h.name}-${h.ip}`}
+                        className={`sea-host-chip ${checked ? "on" : ""}`}
+                      >
+                        <Checkbox
+                          checked={checked}
+                          onChange={(v) => {
+                            setSelectedIPs((prev) =>
+                              v
+                                ? [...prev, h.ip]
+                                : prev.filter((x) => x !== h.ip),
+                            );
+                          }}
+                        />
+                        <b>{h.name}</b>
+                        <code className="mono">{h.ip}</code>
+                        {h.role && <em>{h.role}</em>}
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {pickedAgent && !isLocalDirect && (
+              <div className="sea-ssh-box">
+                <div className="sea-ssh-summary">
+                  <span className="faint small">
+                    {bi(
+                      `由「${pickedAgent.name}」经远程连接下发：${sshUser}@<目标IP>:${sshPort}（${execMethod === "ansible" ? "Ansible" : "SSH 直连"}）`,
+                      `Via "${pickedAgent.name}": ${sshUser}@<target>:${sshPort} (${execMethod})`,
+                    )}
+                  </span>
+                  <button
+                    type="button"
+                    className="iam-text-act"
+                    onClick={() => setSshOpen((v) => !v)}
+                  >
+                    {sshOpen ? bi("收起参数", "Hide") : bi("调整 SSH 参数", "Edit SSH")}
+                  </button>
+                </div>
+                {sshOpen && (
+                  <div className="sea-ssh-grid">
+                    <label>
+                      <span>{bi("下发方式", "Method")}</span>
+                      <Select
+                        size="small"
+                        value={execMethod}
+                        getPopupContainer={() => document.body}
+                        onChange={(v) =>
+                          setExecMethod(v as "auto" | "ansible" | "ssh")
+                        }
+                        options={[
+                          { value: "auto", label: bi("SSH 自动优选", "SSH Auto") },
+                          { value: "ansible", label: "Ansible" },
+                          { value: "ssh", label: bi("纯 SSH", "SSH Only") },
+                        ]}
+                      />
+                    </label>
+                    <label>
+                      <span>{bi("SSH 用户", "SSH User")}</span>
+                      <Input
+                        size="small"
+                        value={sshUser}
+                        onChange={setSshUser}
+                        placeholder="root"
+                      />
+                    </label>
+                    <label>
+                      <span>{bi("SSH 端口", "Port")}</span>
+                      <InputNumber
+                        size="small"
+                        min={1}
+                        max={65535}
+                        value={sshPort}
+                        onChange={(v) => setSshPort(Number(v) || 22)}
+                      />
+                    </label>
+                  </div>
+                )}
+              </div>
+            )}
+          </>
+        )}
+
+        <div className="ua-modal-foot">
+          <Button onClick={onCancel}>{bi("取消", "Cancel")}</Button>
+          <Button
+            type="primary"
+            icon={<IconPlayArrow />}
+            loading={confirmLoading}
+            disabled={!pickedCanRun || selectedIPs.length === 0}
+            onClick={handleStart}
+          >
+            {bi("开始执行", "Run Now")}
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function InPlaceEnrollButton({
+  clusterId,
+  hosts,
+  label,
+  size = "small",
+  type = "outline",
+  asText = false,
+  onEnrolled,
+}: {
+  clusterId: string;
+  hosts?: ClusterAutomationHost[];
+  label: string;
+  size?: "mini" | "small" | "default";
+  type?: "primary" | "secondary" | "outline";
+  asText?: boolean;
+  onEnrolled: (ag: UnifiedAgentView) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      {asText ? (
+        <button
+          type="button"
+          className="iam-text-act"
+          onClick={() => setOpen(true)}
+        >
+          {label}
+        </button>
+      ) : (
+        <Button
+          size={size}
+          type={type}
+          icon={<IconPlus />}
+          onClick={() => setOpen(true)}
+        >
+          {label}
+        </Button>
+      )}
+      <EnrollAgentModal
+        visible={open}
+        onClose={() => setOpen(false)}
+        defaultClusterId={clusterId}
+        clusterHosts={hosts}
+        onEnrolled={onEnrolled}
+      />
+    </>
+  );
+}
+
+const AUTO_INSPECT_INTERVALS = [
+  { value: 300, zh: "每 5 分钟", en: "Every 5m" },
+  { value: 900, zh: "每 15 分钟", en: "Every 15m" },
+  { value: 1800, zh: "每 30 分钟（推荐）", en: "Every 30m (Default)" },
+  { value: 3600, zh: "每 1 小时", en: "Every 1h" },
+  { value: 21600, zh: "每 6 小时", en: "Every 6h" },
+  { value: 86400, zh: "每 24 小时", en: "Every 24h" },
+];
+
+export async function triggerAndPollClusterLiveInspect(
+  clusterId: string,
+  onTaskUpdate?: (t: RehearsalExecTask) => void,
+): Promise<ClusterEffectiveView | null> {
+  const res = await api<{ task: RehearsalExecTask; effective: ClusterEffectiveView }>(
+    `/api/clusters/${encodeURIComponent(clusterId)}/live-state/inspect`,
+    { method: "POST", body: JSON.stringify({}) },
+  );
+  if (res.task) {
+    onTaskUpdate?.(res.task);
+    await pollRehearsalExecTask(clusterId, res.task.id, (t) => onTaskUpdate?.(t));
+  }
+  const latest = await api<{ effective: ClusterEffectiveView }>(
+    `/api/clusters/${encodeURIComponent(clusterId)}/live-state`,
+  );
+  window.dispatchEvent(new Event("mh-clusters-changed"));
+  return latest.effective || null;
+}
+
+/**
+ * Clean, Mutually-Exclusive Cluster Automation Panel (under Cluster Detail -> Automation tab).
+ * A cluster operates in ONE chosen mode at a time:
+ *   - Mode A ("jumpbox"): Unified Controller / Jumpbox Agent schedules all cluster nodes via SSH/Ansible
+ *   - Mode B ("per_host"): Lightweight passwordless Direct Agents installed on each of this cluster's machines
+ */
+export function ClusterAutomationPanel({
+  clusterId,
+  readOnly = false,
+  onChanged,
+}: {
+  clusterId: string;
+  readOnly?: boolean;
   onChanged?: (summary: ClusterAutomationSummary) => void;
 }) {
   useLang();
-  const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const canOperateCluster =
+    !readOnly && can("delivery.execute|delivery.create|execution.manage");
+  const canEnrollAgent = can("execution.manage");
+  const canExec = !readOnly && can("delivery.execute|execution.manage");
+
   const [summary, setSummary] = useState<ClusterAutomationSummary | null>(null);
-  const [cfg, setCfg] = useState<ClusterAutomationConfig | null>(null);
-
-  // Direct Target Agent enrollment modal state
-  const [enrollingHost, setEnrollingHost] = useState("");
-  const [enrolledInfo, setEnrolledInfo] = useState<{
-    agent: AutomationAgentView;
-    token: string;
-    hubUrl: string;
-    includeCA: boolean;
-  } | null>(null);
-  const [downloadingBundle, setDownloadingBundle] = useState(false);
-  const [customHostName, setCustomHostName] = useState("");
-  const [customHostIP, setCustomHostIP] = useState("");
-  const [customHostRole, setCustomHostRole] = useState("");
-
-  // Connectivity check state
-  const [checking, setChecking] = useState(false);
-  const [checkTask, setCheckTask] = useState<RehearsalExecTask | null>(null);
-  const checkAbortRef = useRef<AbortController | null>(null);
-
-  const canManage = can("delivery.execute") || can("execution.manage");
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [enrollOpen, setEnrollOpen] = useState(false);
+  const [enrollMode, setEnrollMode] = useState<"cluster_hosts" | "jumpbox">(
+    "cluster_hosts",
+  );
+  const [enrollHostPrefill, setEnrollHostPrefill] = useState<{
+    name?: string;
+    ip?: string;
+  }>({});
+  const [scopeFilter, setScopeFilter] = useState<"all" | "online">("all");
+  const [checkModalOpen, setCheckModalOpen] = useState(false);
+  const [checkBusy, setCheckBusy] = useState(false);
+  const [liveCheckTask, setLiveCheckTask] =
+    useState<RehearsalExecTask | null>(null);
+  const [inspectBusy, setInspectBusy] = useState(false);
+  const [policyBusy, setPolicyBusy] = useState(false);
+  const [liveInspectTask, setLiveInspectTask] =
+    useState<RehearsalExecTask | null>(null);
 
   const load = useCallback(
     async (silent = false) => {
@@ -271,7 +865,6 @@ export function ClusterAutomationDrawer({
           `/api/clusters/${encodeURIComponent(clusterId)}/automation`,
         );
         setSummary(res);
-        setCfg((cur) => (cur && silent ? cur : res.config));
         onChanged?.(res);
       } catch (e) {
         if (!silent) err(e);
@@ -279,694 +872,1040 @@ export function ClusterAutomationDrawer({
         if (!silent) setLoading(false);
       }
     },
-    [clusterId, onChanged],
+    [clusterId], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
-  useEffect(() => {
-    if (!visible) return;
-    void load(false);
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible") void load(true);
-    }, 5000);
-    return () => {
-      window.clearInterval(timer);
-      checkAbortRef.current?.abort();
-    };
-  }, [visible, load]);
-
-  const saveConfig = async (override?: Partial<ClusterAutomationConfig>) => {
-    if (!cfg || saving) return;
-    const nextCfg: ClusterAutomationConfig = { ...cfg, ...override };
-    setSaving(true);
+  const updateInspectPolicy = async (patch: Partial<ClusterProbePolicy>) => {
+    if (policyBusy) return;
+    setPolicyBusy(true);
     try {
-      const res = await api<ClusterAutomationSummary>(
-        `/api/clusters/${encodeURIComponent(clusterId)}/automation`,
-        {
-          method: "PUT",
-          body: JSON.stringify(nextCfg),
-        },
-      );
-      setSummary(res);
-      setCfg(res.config);
-      onChanged?.(res);
-      Message.success(bi("集群自动化配置已保存", "Cluster automation settings saved"));
+      await api(`/api/clusters/${encodeURIComponent(clusterId)}/live-state/policy`, {
+        method: "PUT",
+        body: JSON.stringify(patch),
+      });
+      await load(true);
+      window.dispatchEvent(new Event("mh-clusters-changed"));
+      Message.success(bi("已保存实况自动巡检策略", "Saved auto-inspection policy"));
     } catch (e) {
       err(e);
     } finally {
-      setSaving(false);
+      setPolicyBusy(false);
     }
   };
 
-  const enrollDirectAgent = async (host: string, ip: string) => {
-    if (enrollingHost) return;
-    setEnrollingHost(ip);
+  const runLiveInspectNow = async () => {
+    if (inspectBusy) return;
+    setInspectBusy(true);
     try {
-      const res = await api<{
-        agent: AutomationAgentView;
-        enrollment_token: string;
-        bootstrap?: ClusterAutomationSummary["bootstrap"];
-      }>(`/api/clusters/${encodeURIComponent(clusterId)}/automation/agents`, {
-        method: "POST",
-        body: JSON.stringify({ host, ip, allow_mutating: true }),
-      });
-      const defaultUrl =
-        res.bootstrap?.suggested_urls?.[0] ||
-        summary?.bootstrap?.suggested_urls?.[0] ||
-        location.origin;
-      setEnrolledInfo({
-        agent: res.agent,
-        token: res.enrollment_token,
-        hubUrl: defaultUrl,
-        includeCA: Boolean(res.bootstrap?.ca_available ?? summary?.bootstrap?.ca_available),
-      });
+      await triggerAndPollClusterLiveInspect(clusterId, (t) => setLiveInspectTask(t));
       await load(true);
-      Message.success(bi(`已为 ${host} 生成直连 Agent 接入配置`, `Direct agent enrolled for ${host}`));
-    } catch (e) {
-      err(e);
-    } finally {
-      setEnrollingHost("");
-    }
-  };
-
-  const toggleAgentMutating = async (agent: AutomationAgentView, allow: boolean) => {
-    try {
-      await api(`/api/clusters/${encodeURIComponent(clusterId)}/automation/agents`, {
-        method: "PATCH",
-        body: JSON.stringify({ id: agent.id, action: "update", allow_mutating: allow }),
-      });
-      await load(true);
-    } catch (e) {
-      err(e);
-    }
-  };
-
-  const revokeAgent = async (agent: AutomationAgentView) => {
-    try {
-      await api(`/api/clusters/${encodeURIComponent(clusterId)}/automation/agents`, {
-        method: "PATCH",
-        body: JSON.stringify({ id: agent.id, action: "revoke" }),
-      });
-      if (enrolledInfo?.agent.id === agent.id) setEnrolledInfo(null);
-      await load(true);
-      Message.success(bi(`已撤销 ${agent.host} 的直连 Agent 授权`, `Revoked direct agent on ${agent.host}`));
-    } catch (e) {
-      err(e);
-    }
-  };
-
-  const downloadAgentBundle = async () => {
-    if (!enrolledInfo || downloadingBundle) return;
-    setDownloadingBundle(true);
-    try {
-      const resp = await fetch(
-        withLang(
-          `/api/clusters/${encodeURIComponent(clusterId)}/automation/agents/${encodeURIComponent(enrolledInfo.agent.id)}/bundle`,
+      Message.success(
+        bi(
+          "目标主机只读实测采集已完成，主从角色、生效参数、证书与软件包已同步",
+          "Live read-only host inspection completed & merged",
         ),
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-CSRF-Token": csrfToken(),
-          },
-          body: JSON.stringify({
-            token: enrolledInfo.token,
-            url: enrolledInfo.hubUrl,
-            include_ca: enrolledInfo.includeCA,
-          }),
-        },
       );
-      if (!resp.ok) {
-        const d = await resp.json().catch(() => ({}));
-        throw new Error(d.error || `HTTP ${resp.status}`);
-      }
-      const blob = await resp.blob();
-      const cd = resp.headers.get("Content-Disposition") || "";
-      const m = cd.match(/filename="?([^"]+)"?/i);
-      const fname = m?.[1] || `mw-target-agent-${enrolledInfo.agent.host}.tar.gz`;
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = fname;
-      a.click();
-      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-      Message.success(bi("已下载一键安装包，解压后执行 sudo bash install.sh 即可上线", "Bundle downloaded; extract and run sudo bash install.sh"));
     } catch (e) {
       err(e);
     } finally {
-      setDownloadingBundle(false);
+      setInspectBusy(false);
     }
   };
 
-  const runConnectivityCheck = async () => {
-    if (!cfg || checking) return;
-    checkAbortRef.current?.abort();
-    const ctrl = new AbortController();
-    checkAbortRef.current = ctrl;
-    setChecking(true);
+  useEffect(() => {
+    void load(false);
+  }, [load]);
+
+  const batchSetAgentsBound = async (
+    agentIds: string[],
+    bound: boolean,
+    setTransport?: "node" | "agent",
+  ) => {
+    if (busy || agentIds.length === 0) return;
+    setBusy(true);
     try {
-      const targets: RehearsalExecTarget[] = (summary?.hosts || []).map((h) => ({
-        host: h.name,
-        ip: h.ip,
-        role: h.role,
-      }));
+      for (const agentId of agentIds) {
+        await api("/api/executions/unified-agents", {
+          method: "PATCH",
+          body: JSON.stringify(
+            bound
+              ? { id: agentId, bind_clusters: [clusterId] }
+              : { id: agentId, unbind_clusters: [clusterId] },
+          ),
+        });
+      }
+      if (setTransport) {
+        await api(
+          `/api/clusters/${encodeURIComponent(clusterId)}/automation`,
+          {
+            method: "PUT",
+            body: JSON.stringify({ enabled: true, transport: setTransport }),
+          },
+        ).catch(() => undefined);
+      }
+      await load(true);
+    } catch (e) {
+      err(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const runConnectivityCheck = async (choice: ExecutionAgentChoice) => {
+    setCheckBusy(true);
+    try {
       const task = await api<RehearsalExecTask>(
         `/api/clusters/${encodeURIComponent(clusterId)}/automation/check`,
         {
           method: "POST",
           body: JSON.stringify({
-            targets,
-            transport: cfg.transport,
-            node_id: cfg.node_id,
+            agent_id: choice.agent_id,
+            targets: choice.targets,
+            node_exec_method: choice.node_exec_method,
+            ssh_user: choice.ssh_user,
+            ssh_port: choice.ssh_port,
+            remember_choice: true,
           }),
         },
       );
-      setCheckTask(task);
-      const fin = await pollRehearsalExecTask(clusterId, task.id, setCheckTask, ctrl.signal);
-      if (fin.state === "succeeded") {
-        Message.success(bi("只读连通性自检全部通过，可执行自动化探针与演练", "Read-only connectivity check passed"));
-      } else {
-        Message.warning(bi("部分节点连通自检未通过，请查看下方脱敏输出", "Connectivity check reported issues"));
-      }
+      setCheckModalOpen(false);
+      setLiveCheckTask(task);
+      await pollRehearsalExecTask(clusterId, task.id, setLiveCheckTask);
+      await load(true);
     } catch (e) {
-      if ((e as Error).name !== "AbortError") err(e);
+      err(e);
     } finally {
-      setChecking(false);
+      setCheckBusy(false);
     }
   };
 
-  const addCustomHost = () => {
-    if (!cfg) return;
-    const ip = customHostIP.trim();
-    const name = customHostName.trim() || ip;
-    if (!ip) {
-      Message.warning(bi("请填写主机 IP 地址", "Enter host IP"));
-      return;
-    }
-    const next = [...(cfg.custom_hosts || []), { name, ip, role: customHostRole.trim() || "node" }];
-    setCfg({ ...cfg, custom_hosts: next });
-    setCustomHostName("");
-    setCustomHostIP("");
-    setCustomHostRole("");
+  if (loading && !summary) {
+    return <Skeleton animation text={{ rows: 6 }} />;
+  }
+
+  const clusterHosts = summary?.hosts || [];
+  const clusterIPSet = new Set(clusterHosts.map((h) => h.ip.trim()));
+  const bound = summary?.unified_agents || [];
+  const available = summary?.available_agents || [];
+  const recent = summary?.recent_tasks || [];
+
+  // Determine the single active mode when bound.length > 0 (zero mixing / contradiction!)
+  const isPerHostDirectMode =
+    bound.length > 0 &&
+    (summary?.config?.transport === "agent" ||
+      bound.some((a) => a.backing === "direct") ||
+      (bound.length > 1 && bound.every((a) => clusterIPSet.has(a.ip.trim()))));
+
+  const fmtAgentProbe = (a?: UnifiedAgentView) => {
+    if (!a) return "";
+    const parts: string[] = [];
+    if (a.probe?.os) parts.push(a.probe.os);
+    else if (a.probe?.hostname) parts.push(a.probe.hostname);
+    if (a.probe?.cpu_cores) parts.push(`${a.probe.cpu_cores} vCPU`);
+    if (a.probe?.mem_used_pct !== undefined)
+      parts.push(`Mem ${a.probe.mem_used_pct.toFixed(0)}%`);
+    return parts.join(" · ");
   };
 
-  const activeAgentsByIP = useMemo(() => {
-    const map = new Map<string, AutomationAgentView>();
-    for (const a of summary?.agents || []) {
-      if (a.desired === "active" && (a.mode === "direct" || !map.has(a.ip))) {
-        map.set(a.ip, a);
-      }
-    }
-    return map;
-  }, [summary?.agents]);
+  const onlineAvailCount = available.filter(
+    (a) => a.online && !a.disabled,
+  ).length;
 
-  const directConfigJSON = useMemo(() => {
-    if (!enrolledInfo) return "";
-    const obj: Record<string, unknown> = {
-      url: enrolledInfo.hubUrl,
-      id: enrolledInfo.agent.id,
-      enrollment_token: enrolledInfo.token,
-      state: `/var/lib/middleware-target/${enrolledInfo.agent.id}`,
+  const makeAgentTransferItem = (a: UnifiedAgentView): ProTransferItem => {
+    const sub = fmtAgentProbe(a);
+    return {
+      key: a.id,
+      title: a.name,
+      badge: a.ip,
+      statusDot: a.disabled
+        ? "disabled"
+        : a.online
+          ? "online"
+          : "offline",
+      subtitle:
+        sub ||
+        (a.online ? bi("在线就绪", "Online") : bi("离线", "Offline")),
+      searchText: [
+        a.name,
+        a.ip,
+        a.probe?.hostname || "",
+        a.probe?.os || "",
+      ].join(" "),
     };
-    if (enrolledInfo.includeCA) {
-      obj.ca_file = "/etc/middleware-execution/platform-ca.pem";
-    }
-    return JSON.stringify(obj, null, 2);
-  }, [enrolledInfo]);
+  };
+
+  const leftTransferAgents = available
+    .filter((a) => (scopeFilter === "online" ? a.online && !a.disabled : true))
+    .map(makeAgentTransferItem);
+  const rightTransferAgents = bound.map(makeAgentTransferItem);
+
+  const openEnrollModalWith = (
+    mode: "cluster_hosts" | "jumpbox",
+    host?: { name?: string; ip?: string },
+  ) => {
+    setEnrollMode(mode);
+    setEnrollHostPrefill(host || {});
+    setEnrollOpen(true);
+  };
+
+  const boundHostCount = clusterHosts.filter((h) =>
+    bound.some((a) => a.ip.trim() === h.ip.trim()),
+  ).length;
+  const missingHostCount = Math.max(0, clusterHosts.length - boundHostCount);
+  const primaryController =
+    bound.find((a) => a.online && !a.disabled) || bound[0] || null;
 
   return (
-    <Drawer
-      visible={visible}
-      width="min(780px, 95vw)"
-      unmountOnExit
-      title={
-        <div className="rha-drawer-title">
-          <IconThunderbolt />
-          <span>{bi("集群变更演练自动化配置", "Cluster Rehearsal Automation")}</span>
-          <span className="mono rha-cluster-pill">{clusterId}</span>
-        </div>
-      }
-      onCancel={onClose}
-      footer={
-        <div className="rha-drawer-foot">
-          <Button
-            size="small"
-            type="outline"
-            loading={checking}
-            disabled={!cfg || !canManage}
-            icon={<IconPlayArrow />}
-            onClick={() => void runConnectivityCheck()}
+    <div className="rha-clean-panel">
+      {bound.length === 0 ? (
+        /* ==================== STATE 0: CHOOSE ONE EXECUTION MODE ==================== */
+        <section className="ua-sec">
+          <div className="ua-sec-head">
+            <div>
+              <h2>{bi("配置集群自动化执行方式", "Configure Cluster Automation")}</h2>
+              <p className="faint small">
+                {bi(
+                  "请为当前集群选择一种执行模式（跳板机统一代管 或 集群机器本机直连），避免多模式混用。",
+                  "Choose one execution mode for this cluster (Jumpbox Controller or Per-Node Direct Agents).",
+                )}
+              </p>
+            </div>
+          </div>
+
+          {clusterHosts.length > 0 && (
+            <div className="rha-target-strip">
+              <span className="rha-target-lbl">
+                {bi(
+                  `本集群目标机器 (${clusterHosts.length} 台)：`,
+                  `Cluster Target Nodes (${clusterHosts.length}):`,
+                )}
+              </span>
+              {clusterHosts.map((h) => (
+                <span key={`${h.name}-${h.ip}`} className="rha-target-chip">
+                  <b>{h.name}</b>
+                  <code
+                    className="mono"
+                    title={bi("点击复制 IP", "Click to copy IP")}
+                    onClick={() => copy(h.ip, bi("已复制 IP", "Copied IP"))}
+                  >
+                    {h.ip}
+                  </code>
+                  {h.role && <span className="rha-host-role">{h.role}</span>}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {canOperateCluster ? (
+            <div className="rha-onboard-grid">
+              <div className="rha-onboard-card">
+                <div className="rha-onboard-top">
+                  <div className="rha-onboard-title">
+                    <b>
+                      {bi(
+                        "模式一：跳板机 / 控制机统一调度",
+                        "Mode 1: Unified Jumpbox Controller",
+                      )}
+                    </b>
+                    <span className="ptf-tag">SSH / Ansible</span>
+                  </div>
+                  <p>
+                    {bi(
+                      "绑定 1 台可 SSH 访问全集群节点的控制机或跳板机 Agent，统一调度本集群全部目标机器。",
+                      "Bind one jumpbox/controller Agent with SSH access to schedule all cluster nodes.",
+                    )}
+                  </p>
+                  {available.length > 0 && (
+                    <div className="rha-onboard-pills">
+                      {available.slice(0, 3).map((a) => (
+                        <span key={a.id} className="rha-onboard-pill">
+                          <span
+                            className={`iam-ag-dot ${
+                              a.online && !a.disabled
+                                ? "is-online"
+                                : "is-offline"
+                            }`}
+                          />
+                          <b>{a.name}</b>
+                          <code className="mono faint">{a.ip}</code>
+                        </span>
+                      ))}
+                      {available.length > 3 && (
+                        <span className="rha-onboard-pill faint">
+                          +{available.length - 3}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <div className="rha-onboard-foot">
+                  <Button
+                    size="small"
+                    type="primary"
+                    disabled={available.length === 0}
+                    onClick={() => {
+                      setScopeFilter("all");
+                      setTransferOpen(true);
+                    }}
+                  >
+                    {bi(
+                      `选择已有控制 Agent (${available.length})`,
+                      `Select Existing Agent (${available.length})`,
+                    )}
+                  </Button>
+                  {canEnrollAgent && (
+                    <Button
+                      size="small"
+                      type="outline"
+                      icon={<IconPlus />}
+                      onClick={() => openEnrollModalWith("jumpbox")}
+                    >
+                      {bi("新接入跳板机", "Enroll Jumpbox")}
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              {(canEnrollAgent ||
+                available.some((a) => clusterIPSet.has(a.ip.trim()))) &&
+                clusterHosts.length > 0 && (
+                  <div className="rha-onboard-card is-primary">
+                    <div className="rha-onboard-top">
+                      <div className="rha-onboard-title">
+                        <b>
+                          {bi(
+                            "模式二：本集群机器免密直连",
+                            "Mode 2: Per-Node Direct Agents",
+                          )}
+                        </b>
+                        <span className="ptf-tag is-ok">
+                          {bi("免 SSH 密码", "Passwordless")}
+                        </span>
+                      </div>
+                      <p>
+                        {bi(
+                          `直接为本集群这 ${clusterHosts.length} 台机器（${clusterHosts
+                            .map((h) => h.name)
+                            .join("、")}）配置本机直连 Agent，无需任何跨机 SSH 密钥或密码。`,
+                          `Install lightweight local Agents directly on all ${clusterHosts.length} cluster machines without SSH keys or passwords.`,
+                        )}
+                      </p>
+                    </div>
+                    <div className="rha-onboard-foot">
+                      <Button
+                        size="small"
+                        type="primary"
+                        icon={<IconThunderbolt />}
+                        onClick={() => openEnrollModalWith("cluster_hosts")}
+                      >
+                        {bi(
+                          `配置本集群 ${clusterHosts.length} 台机器 Agent`,
+                          `Configure ${clusterHosts.length} Cluster Nodes`,
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+            </div>
+          ) : (
+            <div className="ua-cluster-empty">
+              <span className="faint">
+                {bi(
+                  "当前集群尚未配置执行 Agent（你对本集群为只读权限，需创建者或运维成员配置）。",
+                  "No execution Agent configured yet (read-only access).",
+                )}
+              </span>
+            </div>
+          )}
+        </section>
+      ) : isPerHostDirectMode ? (
+        /* ==================== STATE 2: PER-HOST DIRECT MODE ==================== */
+        <section className="ua-sec">
+          <div className="rha-mode-banner">
+            <div>
+              <div className="rha-mode-title">
+                <h2>
+                  {bi(
+                    "自动化执行模式：本集群节点免密直连",
+                    "Active Mode: Per-Node Direct Agents",
+                  )}
+                </h2>
+                <span
+                  className={`rha-cov-pill num ${
+                    boundHostCount === clusterHosts.length &&
+                    clusterHosts.length > 0
+                      ? "is-ok"
+                      : "is-warn"
+                  }`}
+                >
+                  {bi(
+                    `${boundHostCount} / ${clusterHosts.length} 台已接入`,
+                    `${boundHostCount} / ${clusterHosts.length} bound`,
+                  )}
+                </span>
+              </div>
+              <p className="faint small" style={{ margin: "3px 0 0" }}>
+                {bi(
+                  "每台集群机器通过本机 Agent 直接拉取任务，无需 SSH 密码与跳板机。",
+                  "Each cluster node runs tasks locally via its own Agent without SSH.",
+                )}
+              </p>
+            </div>
+
+            <div className="ua-sec-head-acts">
+              {canExec && (
+                <Button
+                  size="small"
+                  type="secondary"
+                  icon={<IconPlayArrow />}
+                  onClick={() => setCheckModalOpen(true)}
+                >
+                  {bi("连通测试", "Test Connectivity")}
+                </Button>
+              )}
+              {canEnrollAgent && !readOnly && missingHostCount > 0 && (
+                <Button
+                  size="small"
+                  type="primary"
+                  icon={<IconPlus />}
+                  onClick={() => openEnrollModalWith("cluster_hosts")}
+                >
+                  {bi(
+                    `补齐剩余 ${missingHostCount} 台节点`,
+                    `Install Remaining (${missingHostCount})`,
+                  )}
+                </Button>
+              )}
+              {canOperateCluster && (
+                <Popconfirm
+                  position="br"
+                  title={bi(
+                    "解除当前全部关联并重选执行模式？",
+                    "Unbind all Agents to switch execution mode?",
+                  )}
+                  content={bi(
+                    "仅解除与本集群的绑定关系，不会卸载机器上的 Agent 服务。",
+                    "Only removes cluster association; Agent services remain intact.",
+                  )}
+                  onOk={() =>
+                    void batchSetAgentsBound(
+                      bound.map((a) => a.id),
+                      false,
+                    )
+                  }
+                >
+                  <Button size="small" type="text" status="danger" disabled={busy}>
+                    {bi("切换执行模式", "Switch Mode")}
+                  </Button>
+                </Popconfirm>
+              )}
+            </div>
+          </div>
+
+          <div className="rha-node-direct-ledger" role="table">
+            <div className="rha-nd-head" role="row">
+              <span>{bi("集群节点", "Node")}</span>
+              <span>{bi("角色", "Role")}</span>
+              <span>{bi("节点 IP", "Node IP")}</span>
+              <span>{bi("本机 Agent 状态", "Local Agent Status")}</span>
+              <span>{bi("主机系统与实时探针", "OS & Probe")}</span>
+              <span style={{ justifyContent: "flex-end" }}>
+                {bi("操作", "Action")}
+              </span>
+            </div>
+            {clusterHosts.map((h) => {
+              const hit = bound.find((a) => a.ip.trim() === h.ip.trim());
+              const availSameIP = !hit
+                ? available.find((a) => a.ip.trim() === h.ip.trim())
+                : undefined;
+              const probeStr = fmtAgentProbe(hit);
+              return (
+                <div key={`${h.name}-${h.ip}`} className="rha-nd-row" role="row">
+                  <div>
+                    <b className="ds-tf-id" title={h.name}>
+                      {h.name}
+                    </b>
+                  </div>
+                  <div>
+                    {h.role ? (
+                      <span className="rha-host-role">{h.role}</span>
+                    ) : (
+                      <span className="faint small">—</span>
+                    )}
+                  </div>
+                  <div>
+                    <code className="mono small">{h.ip}</code>
+                  </div>
+                  <div>
+                    {hit ? (
+                      <span
+                        className={`rha-host-cov ${
+                          hit.online && !hit.disabled ? "is-direct" : "is-off"
+                        }`}
+                      >
+                        ●{" "}
+                        {hit.disabled
+                          ? bi("已禁用", "Disabled")
+                          : hit.online
+                            ? bi("在线就绪", "Online")
+                            : bi("等待上线", "Offline")}
+                      </span>
+                    ) : (
+                      <span className="rha-host-cov is-none">
+                        ○ {bi("未安装", "Not Installed")}
+                      </span>
+                    )}
+                  </div>
+                  <div>
+                    <span
+                      className="small faint"
+                      style={{
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {hit
+                        ? probeStr || bi("等待心跳上报探针…", "Awaiting probe…")
+                        : "—"}
+                    </span>
+                  </div>
+                  <div>
+                    {hit ? (
+                      canOperateCluster && (
+                        <Button
+                          size="mini"
+                          type="secondary"
+                          status="danger"
+                          disabled={busy}
+                          onClick={() => void batchSetAgentsBound([hit.id], false)}
+                        >
+                          {bi("解除", "Unbind")}
+                        </Button>
+                      )
+                    ) : canOperateCluster && availSameIP ? (
+                      <Button
+                        size="mini"
+                        type="primary"
+                        disabled={busy}
+                        onClick={() =>
+                          void batchSetAgentsBound(
+                            [availSameIP.id],
+                            true,
+                            "agent",
+                          )
+                        }
+                      >
+                        {bi("直接关联", "Bind")}
+                      </Button>
+                    ) : (
+                      canEnrollAgent &&
+                      !readOnly && (
+                        <Button
+                          size="mini"
+                          type="outline"
+                          icon={<IconPlus />}
+                          onClick={() =>
+                            openEnrollModalWith("cluster_hosts", {
+                              name: h.name,
+                              ip: h.ip,
+                            })
+                          }
+                        >
+                          {bi("安装", "Install")}
+                        </Button>
+                      )
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      ) : (
+        /* ==================== STATE 1: UNIFIED CONTROLLER / JUMPBOX MODE ==================== */
+        <section className="ua-sec">
+          <div className="rha-mode-banner">
+            <div>
+              <div className="rha-mode-title">
+                <h2>
+                  {bi(
+                    "自动化执行模式：控制机统一调度",
+                    "Active Mode: Unified Controller",
+                  )}
+                </h2>
+                <span className="ptf-tag">SSH / Ansible</span>
+              </div>
+              <p className="faint small" style={{ margin: "3px 0 0" }}>
+                {bi(
+                  "由下方已关联的控制机 / 跳板机 Agent 统一连接并调度本集群全部目标节点。",
+                  "All target nodes in this cluster are uniformly scheduled through the associated controller Agent(s).",
+                )}
+              </p>
+            </div>
+
+            <div className="ua-sec-head-acts">
+              {canExec && (
+                <Button
+                  size="small"
+                  type="secondary"
+                  icon={<IconPlayArrow />}
+                  onClick={() => setCheckModalOpen(true)}
+                >
+                  {bi("连通测试", "Test Connectivity")}
+                </Button>
+              )}
+              {canOperateCluster && (
+                <Button
+                  size="small"
+                  type="secondary"
+                  icon={<IconSettings />}
+                  onClick={() => {
+                    setScopeFilter("all");
+                    setTransferOpen(true);
+                  }}
+                >
+                  {bi("更换 / 管理控制 Agent", "Change Controller")}
+                </Button>
+              )}
+              {canOperateCluster && (
+                <Popconfirm
+                  position="br"
+                  title={bi(
+                    "解除当前控制机关联并重选执行模式？",
+                    "Unbind controller Agent(s) to switch mode?",
+                  )}
+                  content={bi(
+                    "解除后可重新选择「跳板机统一调度」或「本集群节点各自免密直连」。",
+                    "After unbinding, you can choose Jumpbox or Per-Node Direct mode.",
+                  )}
+                  onOk={() =>
+                    void batchSetAgentsBound(
+                      bound.map((a) => a.id),
+                      false,
+                    )
+                  }
+                >
+                  <Button size="small" type="text" status="danger" disabled={busy}>
+                    {bi("切换执行模式", "Switch Mode")}
+                  </Button>
+                </Popconfirm>
+              )}
+            </div>
+          </div>
+
+          <div className="rha-ag-ledger" role="table">
+            <div className="rha-ag-head" role="row">
+              <span>{bi("控制 Agent 名称", "Controller Agent")}</span>
+              <span>{bi("机器 IP", "Host IP")}</span>
+              <span>{bi("主机系统与探针负载", "OS & Probe Telemetry")}</span>
+              <span>{bi("调度范围", "Scope")}</span>
+              <span style={{ justifyContent: "flex-end" }}>
+                {bi("状态与操作", "Status & Action")}
+              </span>
+            </div>
+            {bound.map((a) => {
+              const probeSummary = fmtAgentProbe(a);
+              return (
+                <div key={a.id} className="rha-ag-row" role="row">
+                  <div>
+                    <span
+                      className={`iam-ag-dot ${
+                        a.disabled
+                          ? "is-disabled"
+                          : a.online
+                            ? "is-online"
+                            : "is-offline"
+                      }`}
+                    />
+                    <b className="ds-tf-id">{a.name}</b>
+                  </div>
+                  <div>
+                    <code className="mono small">{a.ip}</code>
+                  </div>
+                  <div>
+                    <span
+                      className="small faint"
+                      style={{
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {probeSummary || bi("等待探针上报", "Awaiting probe")}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="ptf-tag is-cobalt">
+                      {bi(
+                        `全集群 ${clusterHosts.length || 1} 节点`,
+                        `All ${clusterHosts.length || 1} Nodes`,
+                      )}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="small faint">
+                      {a.disabled
+                        ? bi("已禁用", "Disabled")
+                        : a.online
+                          ? bi("在线", "Online")
+                          : bi("离线", "Offline")}
+                    </span>
+                    {canOperateCluster && (
+                      <Button
+                        size="mini"
+                        type="secondary"
+                        status="danger"
+                        disabled={busy}
+                        onClick={() => void batchSetAgentsBound([a.id], false)}
+                      >
+                        {bi("解除关联", "Unbind")}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+
+            {clusterHosts.length > 0 && (
+              <div className="rha-sub-hosts-foot">
+                <span>
+                  {primaryController?.online && !primaryController.disabled
+                    ? bi(
+                        `受管节点（均由 ${primaryController.name} 统一调度）：`,
+                        `Managed nodes (scheduled via ${primaryController.name}):`,
+                      )
+                    : bi(
+                        `受管节点（等待控制机 ${primaryController?.name || ""} 恢复在线）：`,
+                        `Managed nodes (waiting for ${primaryController?.name || "controller"}):`,
+                      )}
+                </span>
+                {clusterHosts.map((h) => (
+                  <span key={`${h.name}-${h.ip}`} className="rha-target-chip">
+                    <b>{h.name}</b>
+                    <code className="mono">{h.ip}</code>
+                    {h.role && <span className="rha-host-role">{h.role}</span>}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
+      <section className="ua-sec">
+        <div
+          className="rha-mode-banner"
+          style={{ alignItems: "flex-start", gap: 14, flexWrap: "wrap" }}
+        >
+          <div style={{ flex: "1 1 320px", minWidth: 260 }}>
+            <div className="rha-mode-title" style={{ flexWrap: "wrap", gap: 8 }}>
+              <h2>
+                {bi(
+                  "Agent 实况采集与定时巡检",
+                  "Agent Live Telemetry & Scheduled Inspection",
+                )}
+              </h2>
+              {summary?.live_summary?.data_source === "live_agent" ? (
+                <span className="ptf-tag is-ok">
+                  {summary.live_summary.data_source_label}
+                </span>
+              ) : bound.some((a) => a.online && !a.disabled) ? (
+                <span className="ptf-tag is-ok">
+                  {bi("在线 Agent 就绪", "Online Agent Ready")}
+                </span>
+              ) : (
+                <span className="ptf-tag">
+                  {bi("待关联在线 Agent", "Requires Online Agent")}
+                </span>
+              )}
+              {(summary?.live_summary?.drift_count || 0) +
+                (summary?.live_summary?.role_drift_count || 0) >
+                0 && (
+                <button
+                  type="button"
+                  className="rha-cov-pill is-warn"
+                  style={{ cursor: "pointer", border: 0 }}
+                  onClick={() =>
+                    go({ name: "deliveries", id: clusterId, tab: "config" })
+                  }
+                >
+                  {bi(
+                    `发现 ${(summary?.live_summary?.drift_count || 0) + (summary?.live_summary?.role_drift_count || 0)} 项实测漂移 · 查看`,
+                    `${(summary?.live_summary?.drift_count || 0) + (summary?.live_summary?.role_drift_count || 0)} Drift(s) · View`,
+                  )}
+                </button>
+              )}
+            </div>
+            <p className="faint small" style={{ margin: "4px 0 0" }}>
+              {summary?.live_summary?.last_probed_at
+                ? bi(
+                    `最近实测：${ago(summary.live_summary.last_probed_at)} · 100% 只读增量更新实时角色、生效参数、线上证书与已安装软件包，绝不删除已有纳管配置。`,
+                    `Last probed ${ago(summary.live_summary.last_probed_at)} · Non-destructively updates live roles, effective params, certs, and installed packages.`,
+                  )
+                : bi(
+                    "开启定时自动巡检或点击「立即实测采集」，由在线 Agent 真实读取目标主机角色、生效参数、线上 TLS 证书与 RPM/DEB 包列表（增量合并，不覆盖已有数据）。",
+                    "Enable scheduled auto-inspection or click Inspect Now to collect real host roles, effective params, live TLS certs, and installed packages.",
+                  )}
+            </p>
+          </div>
+
+          <div
+            className="ua-sec-head-acts"
+            style={{ flexWrap: "wrap", gap: 8, alignItems: "center" }}
           >
-            {bi("只读连通性自检", "Read-Only Self-Check")}
-          </Button>
-          <div className="rha-drawer-foot-r">
-            <Button onClick={onClose}>{bi("关闭", "Close")}</Button>
-            {canManage && (
-              <Button type="primary" loading={saving} onClick={() => void saveConfig()}>
-                <IconCheck /> {bi("保存自动化配置", "Save Settings")}
+            {!readOnly && canOperateCluster && (
+              <Button
+                size="small"
+                type="primary"
+                icon={<IconThunderbolt />}
+                loading={inspectBusy}
+                disabled={
+                  !summary?.live_summary?.has_online_agent &&
+                  bound.every((a) => !a.online || a.disabled)
+                }
+                onClick={() => void runLiveInspectNow()}
+              >
+                {bi("立即实测采集", "Inspect Now")}
               </Button>
             )}
           </div>
         </div>
-      }
-    >
-      {loading || !cfg || !summary ? (
-        <Skeleton animation text={{ rows: 10 }} />
-      ) : (
-        <div className="rha-drawer-body">
-          {/* Master switch & Live Readiness Banner */}
-          <div className={`rha-master-card ${cfg.enabled ? (summary.ready ? "is-ready" : "is-warn") : ""}`}>
-            <div className="rha-master-l">
-              <div className="rha-master-title">
-                <b>{bi("开启本集群自动化执行（只读探针 + 演练步骤）", "Enable Automated Execution for This Cluster")}</b>
-                <span className={`rha-ready-dot ${cfg.enabled ? (summary.ready ? "is-ok" : "is-warn") : ""}`}>
-                  {!cfg.enabled
-                    ? bi("未开启", "Off")
-                    : summary.ready
-                      ? bi("通道就绪", "Ready")
-                      : bi("待接入", "Needs Setup")}
-                </span>
-              </div>
-              <p className="rha-master-sub">
-                {cfg.enabled && summary.ready_reason
-                  ? summary.ready_reason
-                  : bi(
-                      "支持「控制机直连（Ansible / SSH）」与「目标机直连 Agent（免密免控制机）」两种模式，存量纳管集群与平台交付集群通用。",
-                      "Supports Controller Ansible/SSH and passwordless Direct Target Agent for both delivered and imported clusters.",
-                    )}
-              </p>
-            </div>
+
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            alignItems: "center",
+            gap: "12px 20px",
+            marginTop: 12,
+            padding: "10px 14px",
+            borderRadius: 8,
+            border: "1px solid var(--line)",
+            background: "var(--surface-2)",
+          }}
+        >
+          <label
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              fontSize: 13,
+              fontWeight: 550,
+              whiteSpace: "nowrap",
+            }}
+          >
             <Switch
-              checked={cfg.enabled}
-              disabled={!canManage}
-              onChange={(v) => setCfg({ ...cfg, enabled: v })}
+              size="small"
+              disabled={!canOperateCluster || policyBusy}
+              loading={policyBusy}
+              checked={Boolean(
+                summary?.live_summary?.probe_policy?.auto_inspect_enabled,
+              )}
+              onChange={(checked) =>
+                void updateInspectPolicy({ auto_inspect_enabled: checked })
+              }
+            />
+            <span>{bi("开启定时自动巡检", "Scheduled Auto-Inspection")}</span>
+          </label>
+
+          <div
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              fontSize: 12.5,
+              whiteSpace: "nowrap",
+            }}
+          >
+            <span className="faint">{bi("巡检周期", "Interval")}:</span>
+            <Select
+              size="small"
+              style={{ width: 152 }}
+              disabled={!canOperateCluster || policyBusy}
+              value={
+                summary?.live_summary?.probe_policy?.auto_inspect_interval_sec ||
+                1800
+              }
+              onChange={(val) =>
+                void updateInspectPolicy({
+                  auto_inspect_interval_sec: Number(val),
+                })
+              }
+              options={AUTO_INSPECT_INTERVALS.map((it) => ({
+                value: it.value,
+                label: bi(it.zh, it.en),
+              }))}
             />
           </div>
 
-          {/* Dual Transport Mode Selector */}
-          <section className="rha-sec">
-            <div className="rha-sec-h">
-              <h4>{bi("1. 选择目标机接入方式", "1. Choose Target Access Transport")}</h4>
-            </div>
-            <div className="rha-transport-grid">
-              <button
-                type="button"
-                className={`rha-transport-card ${cfg.transport === "node" ? "is-on" : ""}`}
-                disabled={!canManage}
-                onClick={() => setCfg({ ...cfg, transport: "node" })}
-              >
-                <div className="rha-tc-top">
-                  <IconDesktop />
-                  <b>{bi("方式 A · 控制机直连（Ansible / SSH）", "Mode A · Controller (Ansible / SSH)")}</b>
-                  <span className="rha-tc-badge">{bi("1 台主控机", "1 Control Host")}</span>
-                </div>
-                <p>
-                  {bi(
-                    "由已接入的在线执行节点（控制机）通过 Ansible 或 SSH 直连各被控机，适合已有 SSH 免密或集中跳板机环境。",
-                    "Control host execution-node runs probes & steps over Ansible or SSH across cluster hosts.",
-                  )}
-                </p>
-              </button>
-
-              <button
-                type="button"
-                className={`rha-transport-card ${cfg.transport === "agent" ? "is-on" : ""}`}
-                disabled={!canManage}
-                onClick={() => setCfg({ ...cfg, transport: "agent" })}
-              >
-                <div className="rha-tc-top">
-                  <IconThunderbolt />
-                  <b>{bi("方式 B · 目标机直连 Agent（免密码）", "Mode B · Direct Target Agent (Passwordless)")}</b>
-                  <span className="rha-tc-badge is-brand">{bi("无需密码 / 控制机", "No SSH / No Ctrl")}</span>
-                </div>
-                <p>
-                  {bi(
-                    "无 SSH 密码或无独立控制机时，直接在目标机装轻量 Agent（主动外连 HTTPS），平台直发只读探针与演练命令。",
-                    "Zero SSH passwords or control host needed. Install lightweight outbound HTTPS Agent directly on target hosts.",
-                  )}
-                </p>
-              </button>
-            </div>
-
-            {cfg.transport === "node" ? (
-              <div className="rha-panel-box">
-                <div className="rha-form-grid">
-                  <div className="rha-field">
-                    <label>{bi("执行节点（控制机）", "Execution Node (Control Host)")}</label>
-                    <Select
-                      placeholder={bi("选择一台在线执行节点", "Select an online execution node")}
-                      value={cfg.node_id || undefined}
-                      disabled={!canManage}
-                      onChange={(v) => setCfg({ ...cfg, node_id: v })}
-                    >
-                      {summary.nodes.map((n) => (
-                        <Select.Option key={n.id} value={n.id}>
-                          {n.online ? "● " : "○ "}
-                          {n.name} ({n.controller_ip})
-                          {n.supports_v3 ? " · v3" : " · v2"}
-                          {n.allow_rehearsal ? bi(" · 已授权演练", " · Rehearsal OK") : bi(" · 仅只读", " · RO Only")}
-                        </Select.Option>
-                      ))}
-                    </Select>
-                    <div className="rha-field-hint">
-                      {summary.nodes.length === 0 ? (
-                        <span>{bi("尚未接入任何执行节点，", "No execution nodes enrolled yet; ")}</span>
-                      ) : (
-                        <span>{bi("变更写步骤需在节点卡片开启「允许变更演练」，", "Mutating steps require enabling Rehearsal on the node; ")}</span>
-                      )}
-                      <button
-                        type="button"
-                        className="rha-link-btn"
-                        onClick={() => {
-                          onClose();
-                          go({ name: "settings", id: "nodes" });
-                        }}
-                      >
-                        <IconSettings /> {bi("前往设置 → 执行节点", "Open Settings → Execution Nodes")}
-                      </button>
-                    </div>
-                  </div>
-                  <div className="rha-field">
-                    <label>{bi("控制机下发方式", "Controller Execution Method")}</label>
-                    <Select
-                      value={cfg.node_exec_method || "auto"}
-                      disabled={!canManage}
-                      onChange={(v) => setCfg({ ...cfg, node_exec_method: v })}
-                    >
-                      <Select.Option value="auto">
-                        {bi("自动优选（本机直跑 / 托管或已有 SSH）", "Auto (Local / Managed or Existing SSH)")}
-                      </Select.Option>
-                      <Select.Option value="ansible">
-                        {bi("Ansible（通过控制机 ansible -m script 访问被控机）", "Ansible (ansible -m script)")}
-                      </Select.Option>
-                      <Select.Option value="ssh">
-                        {bi("SSH 直连（非交互 ssh bash -s）", "Direct SSH (BatchMode bash -s)")}
-                      </Select.Option>
-                    </Select>
-                  </div>
-                  <div className="rha-field">
-                    <label>{bi("SSH 登录用户", "SSH User")}</label>
-                    <Input
-                      value={cfg.ssh_user || "root"}
-                      disabled={!canManage}
-                      onChange={(v) => setCfg({ ...cfg, ssh_user: v })}
-                      placeholder="root"
-                    />
-                  </div>
-                  <div className="rha-field">
-                    <label>{bi("SSH 端口", "SSH Port")}</label>
-                    <InputNumber
-                      min={1}
-                      max={65535}
-                      value={cfg.ssh_port || 22}
-                      disabled={!canManage}
-                      onChange={(v) => setCfg({ ...cfg, ssh_port: Number(v) || 22 })}
-                    />
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="rha-panel-box">
-                <div className="rha-agents-head">
-                  <span>
-                    {bi(
-                      `目标主机清单（${summary.online_agents}/${summary.hosts.length} 台 Agent 在线）`,
-                      `Target Hosts (${summary.online_agents}/${summary.hosts.length} Agents Online)`,
-                    )}
-                  </span>
-                  <Button
-                    size="mini"
-                    type="text"
-                    icon={<IconRefresh />}
-                    onClick={() => void load(true)}
-                  >
-                    {bi("刷新心跳", "Refresh")}
-                  </Button>
-                </div>
-
-                <div className="rha-agent-list">
-                  {summary.hosts.map((h) => {
-                    const ag = activeAgentsByIP.get(h.ip);
-                    return (
-                      <div key={`${h.name}-${h.ip}`} className="rha-agent-row">
-                        <div className="rha-agent-row-l">
-                          <span className={`rha-dot ${ag?.online ? "is-on" : ag ? "is-wait" : ""}`} />
-                          <div>
-                            <div className="rha-agent-host">
-                              <b>{h.name}</b>
-                              <code className="mono">{h.ip}</code>
-                              {h.role && <span className="rha-role-tag">{h.role}</span>}
-                            </div>
-                            <div className="rha-agent-meta">
-                              {!ag
-                                ? bi("未接入直连 Agent", "Not enrolled")
-                                : ag.online
-                                  ? bi(
-                                      `在线 · ${ag.mode === "direct" ? "直连执行模式" : "托管信任"} · 最近心跳 ${fullTime(ag.last_seen || "")}`,
-                                      `Online · ${ag.mode === "direct" ? "Direct Exec" : "SSH Trust"} · Last seen ${fullTime(ag.last_seen || "")}`,
-                                    )
-                                  : bi("已生成配置，等待在目标机启动 Agent 服务…", "Enrolled; waiting for target-agent daemon…")}
-                            </div>
-                          </div>
-                        </div>
-                        <div className="rha-agent-row-r">
-                          {ag ? (
-                            <>
-                              <Tooltip
-                                content={bi(
-                                  "关闭后该 Agent 仅放行 100% 只读探针，拒绝任何写操作命令",
-                                  "When off, this agent only accepts 100% read-only probes",
-                                )}
-                              >
-                                <label className="rha-mini-sw">
-                                  <span>{bi("允许写操作", "Allow Mutate")}</span>
-                                  <Switch
-                                    size="small"
-                                    checked={Boolean(ag.allow_mutating)}
-                                    disabled={!canManage}
-                                    onChange={(v) => void toggleAgentMutating(ag, v)}
-                                  />
-                                </label>
-                              </Tooltip>
-                              {canManage && (
-                                <Popconfirm
-                                  title={bi("确定撤销该目标机的直连 Agent 授权？", "Revoke direct agent on this host?")}
-                                  onOk={() => void revokeAgent(ag)}
-                                >
-                                  <Button size="mini" status="danger" type="text">
-                                    {bi("撤销", "Revoke")}
-                                  </Button>
-                                </Popconfirm>
-                              )}
-                            </>
-                          ) : (
-                            canManage && (
-                              <Button
-                                size="mini"
-                                type="primary"
-                                loading={enrollingHost === h.ip}
-                                icon={<IconPlus />}
-                                onClick={() => void enrollDirectAgent(h.name, h.ip)}
-                              >
-                                {bi("生成直连 Agent", "Enroll Agent")}
-                              </Button>
-                            )
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* Enrolled one-click bundle & install commands box */}
-                {enrolledInfo && (
-                  <div className="rha-enroll-box">
-                    <div className="rha-enroll-head">
-                      <b>
-                        <IconCheckCircle />{" "}
-                        {bi(
-                          `直连 Agent 已签发：${enrolledInfo.agent.host} (${enrolledInfo.agent.ip})`,
-                          `Direct Agent Ready: ${enrolledInfo.agent.host} (${enrolledInfo.agent.ip})`,
-                        )}
-                      </b>
-                      <Button size="mini" type="text" onClick={() => setEnrolledInfo(null)}>
-                        {bi("收起", "Dismiss")}
-                      </Button>
-                    </div>
-                    <div className="rha-enroll-url-row">
-                      <label>{bi("目标机可达的平台地址（HTTPS）", "Reachable Hub URL (HTTPS)")}</label>
-                      <Select
-                        allowCreate
-                        size="small"
-                        value={enrolledInfo.hubUrl}
-                        onChange={(v) => setEnrolledInfo({ ...enrolledInfo, hubUrl: v })}
-                      >
-                        {(summary.bootstrap.suggested_urls || []).map((u) => (
-                          <Select.Option key={u} value={u}>
-                            {u}
-                          </Select.Option>
-                        ))}
-                      </Select>
-                    </div>
-                    <div className="rha-enroll-acts">
-                      <Button
-                        size="small"
-                        type="primary"
-                        loading={downloadingBundle}
-                        icon={<IconDownload />}
-                        onClick={() => void downloadAgentBundle()}
-                      >
-                        {bi("下载一键安装包 (.tar.gz)", "Download One-Click Bundle (.tar.gz)")}
-                      </Button>
-                      <Button
-                        size="small"
-                        type="outline"
-                        icon={<IconCopy />}
-                        onClick={() => {
-                          copy(directConfigJSON);
-                          Message.success(bi("已复制 target-agent.json 配置", "Copied target-agent.json"));
-                        }}
-                      >
-                        {bi("复制配置文件 JSON", "Copy Config JSON")}
-                      </Button>
-                    </div>
-                    <pre className="rha-enroll-cmd mono">{`# 上传压缩包到目标机 ${enrolledInfo.agent.ip} 并以 root 执行：
-tar -xzf mw-target-agent-${enrolledInfo.agent.host.toLowerCase().replace(/[^a-z0-9._-]+/g, "-")}.tar.gz
-sudo bash mw-target-agent-*/install.sh`}</pre>
-                  </div>
-                )}
-
-                {/* Optional: append an extra/test host */}
-                {canManage && (
-                  <div className="rha-add-host-row">
-                    <Input
-                      size="small"
-                      placeholder={bi("补充主机名（可选，如 test-pg-01）", "Extra hostname")}
-                      value={customHostName}
-                      onChange={setCustomHostName}
-                    />
-                    <Input
-                      size="small"
-                      className="mono"
-                      placeholder={bi("IP 地址", "IP address")}
-                      value={customHostIP}
-                      onChange={setCustomHostIP}
-                    />
-                    <Input
-                      size="small"
-                      placeholder={bi("角色（primary/replica）", "Role")}
-                      value={customHostRole}
-                      onChange={setCustomHostRole}
-                    />
-                    <Button size="small" icon={<IconPlus />} onClick={addCustomHost}>
-                      {bi("添加主机", "Add")}
-                    </Button>
-                  </div>
-                )}
-              </div>
-            )}
-          </section>
-
-          {/* 2. Execution Pacing & Production Safety Guardrails */}
-          <section className="rha-sec">
-            <div className="rha-sec-h">
-              <h4>{bi("2. 推进节奏与生产安全护栏", "2. Execution Pacing & Safety Guardrails")}</h4>
-            </div>
-            <div className="rha-panel-box">
-              <div className="rha-form-grid">
-                <div className="rha-field">
-                  <label>{bi("集群环境属性", "Environment Classification")}</label>
-                  <Select
-                    value={cfg.env_kind}
-                    disabled={!canManage}
-                    onChange={(v) =>
-                      setCfg({
-                        ...cfg,
-                        env_kind: v,
-                        pause_before_mutate: v === "prod" ? true : cfg.pause_before_mutate,
-                      })
-                    }
-                  >
-                    <Select.Option value="prod">
-                      {bi("生产环境（强安全门禁 · 写操作需二次确认）", "Production (Strict Safety Gate)")}
-                    </Select.Option>
-                    <Select.Option value="test">
-                      {bi("测试 / 演练环境（允许顺畅自动推进）", "Test / Staging (Smooth Auto-Run)")}
-                    </Select.Option>
-                  </Select>
-                </div>
-
-                <div className="rha-field">
-                  <label>{bi("默认推进策略", "Default Pacing Strategy")}</label>
-                  <Select
-                    value={cfg.default_pacing || "step_confirm"}
-                    disabled={!canManage}
-                    onChange={(v) => setCfg({ ...cfg, default_pacing: v })}
-                  >
-                    <Select.Option value="step_confirm">
-                      {bi("逐单步人工确认（每步点击执行 + AI 自动验收）", "Step-by-Step Human Trigger + AI Verify")}
-                    </Select.Option>
-                    <Select.Option value="ai_gated_auto">
-                      {bi("AI 逐单步把关自动推进（跑一步 → AI 确认通过再跑下一步）", "AI-Gated Step Auto-Advance")}
-                    </Select.Option>
-                  </Select>
-                </div>
-              </div>
-
-              <div className="rha-guard-switches">
-                {cfg.env_kind === "prod" && (
-                  <div className="rha-guard-row">
-                    <div>
-                      <b>{bi("允许在生产环境执行变更写操作步骤", "Allow Mutating Steps in Production")}</b>
-                      <p>
-                        {bi(
-                          "关闭时仅放行 100% 只读探针与只读预检；开启后执行变更步骤前仍须核对集群标识，且与首次交付共享主机互斥锁。",
-                          "When off, only 100% read-only probes/checks run. When on, prod mutations require cluster ID confirmation and hold host locks.",
-                        )}
-                      </p>
-                    </div>
-                    <Switch
-                      checked={cfg.allow_prod_mutate}
-                      disabled={!canManage}
-                      onChange={(v) => setCfg({ ...cfg, allow_prod_mutate: v })}
-                    />
-                  </div>
-                )}
-
-                <div className="rha-guard-row">
-                  <div>
-                    <b>{bi("高危/变更步骤执行前暂停确认（断点保护）", "Pause Before Mutating Steps (Breakpoint)")}</b>
-                    <p>
-                      {bi(
-                        "开启时，在「AI 逐单步把关自动推进」模式下遇到核心变更步骤（execute）会停下等你点头；关闭后将完全由 AI 逐单步严格验收通过后自动继续，任何报错或 AI 存疑仍立刻停机。",
-                        "When on, AI-gated auto-advance pauses before execute-phase steps for human approval. When off, AI strictly gates every single step and halts on any failure or doubt.",
-                      )}
-                    </p>
-                  </div>
-                  <Switch
-                    checked={cfg.pause_before_mutate}
-                    disabled={!canManage}
-                    onChange={(v) => setCfg({ ...cfg, pause_before_mutate: v })}
-                  />
-                </div>
-              </div>
-            </div>
-          </section>
-
-          {/* Live Connectivity Check Result */}
-          {checkTask && (
-            <section className="rha-sec">
-              <div className="rha-sec-h">
-                <h4>{bi("只读连通性自检结果", "Connectivity Self-Check Result")}</h4>
-              </div>
-              <LiveExecLogCard
-                task={checkTask}
-                clusterId={clusterId}
-                onCancelled={setCheckTask}
-              />
-            </section>
-          )}
+          <Checkbox
+            disabled={!canOperateCluster || policyBusy}
+            checked={
+              summary?.live_summary?.probe_policy?.inspect_on_bind ?? true
+            }
+            onChange={(checked) =>
+              void updateInspectPolicy({ inspect_on_bind: Boolean(checked) })
+            }
+          >
+            <span className="small">
+              {bi(
+                "关联在线 Agent 后立即自动首采",
+                "Auto-inspect immediately when binding an online Agent",
+              )}
+            </span>
+          </Checkbox>
         </div>
+
+        {liveInspectTask && (
+          <div style={{ marginTop: 12 }}>
+            <LiveExecLogCard
+              task={liveInspectTask}
+              clusterId={clusterId}
+              onCancelled={setLiveInspectTask}
+              title={bi("主机只读实测采集输出", "Live Host Telemetry Output")}
+            />
+          </div>
+        )}
+      </section>
+
+      <EnrollAgentModal
+        visible={enrollOpen}
+        onClose={() => setEnrollOpen(false)}
+        defaultClusterId={clusterId}
+        clusterMode={enrollMode}
+        defaultHostName={enrollHostPrefill.name}
+        defaultHostIP={enrollHostPrefill.ip}
+        clusterHosts={clusterHosts}
+        existingAgents={[...bound, ...available]}
+        onEnrolled={() => void load(true)}
+      />
+
+      <Modal
+        style={{ width: 840, maxWidth: "96vw" }}
+        visible={transferOpen && canOperateCluster}
+        onCancel={() => setTransferOpen(false)}
+        footer={null}
+        title={
+          <span className="iam-drawer-title">
+            <span>{bi("选择控制机 / 跳板机 Agent", "Select Controller Agent")}</span>
+            <code className="mono">{clusterId}</code>
+          </span>
+        }
+      >
+        <div className="rha-clean-panel">
+          <ProTransfer
+            height={340}
+            busy={busy}
+            leftTitle={bi("平台可用 Agent", "Available Agents")}
+            rightTitle={bi("本集群已关联 Agent", "Associated Agents")}
+            leftItems={leftTransferAgents}
+            rightItems={rightTransferAgents}
+            leftPlaceholder={bi(
+              "搜索 Agent 名称、机器 IP、主机名或操作系统…",
+              "Search Agent name, IP, hostname, or OS…",
+            )}
+            topBar={
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", gap: 8 }}>
+                <Radio.Group
+                  type="button"
+                  size="small"
+                  value={scopeFilter}
+                  onChange={(v) => setScopeFilter(v as "all" | "online")}
+                >
+                  <Radio value="all">
+                    {bi("全部可用", "All")} ({available.length})
+                  </Radio>
+                  <Radio value="online">
+                    {bi("仅在线", "Online")} ({onlineAvailCount})
+                  </Radio>
+                </Radio.Group>
+                {canEnrollAgent && (
+                  <Button
+                    size="small"
+                    type="outline"
+                    icon={<IconPlus />}
+                    onClick={() => {
+                      setTransferOpen(false);
+                      openEnrollModalWith("jumpbox");
+                    }}
+                  >
+                    {bi("新接入跳板机 Agent", "Enroll New Jumpbox")}
+                  </Button>
+                )}
+              </div>
+            }
+            onAdd={(ids) => void batchSetAgentsBound(ids, true, "node")}
+            onRemove={(ids) => void batchSetAgentsBound(ids, false)}
+          />
+
+          <div
+            className="eam-foot"
+            style={{ paddingTop: 10, borderTop: "1px solid var(--line)" }}
+          >
+            <span className="faint small" style={{ marginRight: "auto" }}>
+              {bi(
+                `当前已关联 ${bound.length} 台控制 Agent（操作实时保存生效）`,
+                `${bound.length} controller Agent(s) associated`,
+              )}
+            </span>
+            <Button type="primary" onClick={() => setTransferOpen(false)}>
+              {bi("完成", "Done")}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {liveCheckTask && (
+        <LiveExecLogCard
+          task={liveCheckTask}
+          clusterId={clusterId}
+          onCancelled={setLiveCheckTask}
+          title={bi("连通性实测输出", "Connectivity Test")}
+        />
       )}
-    </Drawer>
+
+      {recent.length > 0 && (
+        <section className="ua-sec">
+          <div className="ua-sec-head">
+            <h2>
+              {bi("近期自动执行记录", "Recent Automated Tasks")}{" "}
+              <em className="num">{recent.length}</em>
+            </h2>
+            <Button
+              size="mini"
+              type="text"
+              icon={<IconRefresh />}
+              onClick={() => void load(false)}
+            >
+              {bi("刷新", "Refresh")}
+            </Button>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {recent.slice(0, 8).map((t) => (
+              <LiveExecLogCard
+                key={t.id}
+                task={t}
+                clusterId={clusterId}
+                compact
+                title={t.step_title || t.kind}
+              />
+            ))}
+          </div>
+        </section>
+      )}
+
+      <SelectExecutionAgentModal
+        visible={checkModalOpen}
+        clusterId={clusterId}
+        taskTitle={bi("集群节点连通性实测", "Cluster Host Connectivity Check")}
+        readOnly
+        hostsFallback={summary?.hosts}
+        confirmLoading={checkBusy}
+        onCancel={() => setCheckModalOpen(false)}
+        onConfirm={(choice) => void runConnectivityCheck(choice)}
+        onSummaryUpdated={setSummary}
+      />
+    </div>
   );
 }

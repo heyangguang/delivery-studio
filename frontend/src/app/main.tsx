@@ -69,6 +69,7 @@ import "../modules/ai/aiprices.css";
 import "../modules/settings/storageview.css";
 import "../modules/settings/sandboxview.css";
 import "../modules/automation/executions.css";
+import "../modules/automation/rehearsal-automation.css";
 import "../modules/security/secreport.css";
 import "../modules/ai/aiqueue.css";
 import "../modules/iam/me.css";
@@ -87,6 +88,7 @@ import "../modules/rehearsal/rehearsal_rollout.css";
 import "../modules/rehearsal/rehearsal.css";
 import "../modules/projects/clusters.css";
 import "../modules/automation/monitor.css";
+import "../modules/automation/execution-center.css";
 import "../modules/iam/iam.css";
 import "../modules/catalog/workbench.css";
 import "../modules/library/libruntime.css";
@@ -156,8 +158,10 @@ const MePage = lazyPage(() =>
 const StudioPage = lazyPage(() =>
   import("../modules/ai/studio").then((m) => ({ default: m.StudioPage })),
 );
-const ExecutionMonitorPage = lazyPage(() =>
-  import("../modules/automation/monitor").then((m) => ({ default: m.ExecutionMonitorPage })),
+const ExecutionCenterPage = lazyPage(() =>
+  import("../modules/automation/execution-center").then((m) => ({
+    default: m.ExecutionCenterPage,
+  })),
 );
 const AccountsPage = lazyPage(() =>
   import("../modules/iam/accounts").then((m) => ({ default: m.AccountsPage })),
@@ -202,7 +206,7 @@ function preferredStudioTab(features?: AIStatus["features"]): StudioTab {
 function preloadRouteChunk(key: string) {
   switch (key) {
     case "executions":
-      ExecutionMonitorPage.preload();
+      ExecutionCenterPage.preload();
       break;
     case "components":
       ComponentsPage.preload();
@@ -332,10 +336,12 @@ class PageBoundary extends React.Component<
             {bi("回到集群", "Back to Clusters")}
           </Button>
           <Button
-            onClick={() => {
-              copy(diagText);
-              Message.success(bi("已复制错误诊断信息", "Copied diagnostic info"));
-            }}
+            onClick={() =>
+              void copy(
+                diagText,
+                bi("已复制错误诊断信息", "Copied diagnostic info"),
+              )
+            }
           >
             {bi("复制诊断信息", "Copy Diagnostics")}
           </Button>
@@ -1282,11 +1288,12 @@ function AIStatusBadge({
   const stateCls = on ? "is-on" : pendingCfg ? "is-warn" : "is-off";
   const statusWord = on ? bi("已启用", "Enabled") : pendingCfg ? bi("待配置", "Setup needed") : bi("未启用", "Disabled");
   const shortSub = on ? "" : pendingCfg ? bi(" · 待配", " · Setup") : bi(" · Off", " · Off");
+  const canUseAI = can("ai.use");
   const readonlyTip = on
-    ? bi("平台 AI 套件已启用（当前账户只读，由管理员在平台设置中维护）", "Platform AI suite is enabled (read-only; managed in Platform Settings)")
+    ? bi("平台 AI 套件已启用", "Platform AI suite is enabled")
     : pendingCfg
-      ? bi("平台 AI 套件待管理员完成模型配置（只读）", "Platform AI suite awaits model setup by an administrator")
-      : bi("平台 AI 套件未启用（当前账户只读，需管理员在平台设置中开启）", "Platform AI suite is disabled (read-only; ask an admin to enable it)");
+      ? bi("平台 AI 套件待配置", "Platform AI suite setup needed")
+      : bi("平台 AI 套件未启用", "Platform AI suite is disabled");
   const warmAISettings = () => {
     if (!cached("/api/settings/ai"))
       void fetchCached("/api/settings/ai").catch(() => undefined);
@@ -1304,12 +1311,29 @@ function AIStatusBadge({
     </>
   );
   if (!canManage) {
+    if (on && canUseAI) {
+      return (
+        <Tooltip mini position="bottom" content={readonlyTip}>
+          <button
+            type="button"
+            className={`ai-quick-toggle is-interactive ${stateCls}`}
+            onClick={(e) => {
+              e.currentTarget.blur();
+              go({ name: "ai" });
+            }}
+            aria-label={bi("打开 AI 助手", "Open AI Assistant")}
+          >
+            {content}
+          </button>
+        </Tooltip>
+      );
+    }
     return (
       <Tooltip mini position="bottom" content={readonlyTip}>
         <span
           className={`ai-quick-toggle is-readonly ${stateCls}`}
           role="status"
-          aria-label={bi(`AI 套件${statusWord}（只读）`, `AI Suite ${statusWord} (read-only)`)}
+          aria-label={bi(`AI 套件${statusWord}`, `AI Suite ${statusWord}`)}
         >
           {content}
         </span>
@@ -1658,7 +1682,7 @@ function App() {
     }
     const titles: Record<Route["name"], string> = {
       deliveries: bi("集群", "Clusters"),
-      executions: bi("执行监控", "Execution Monitor"),
+      executions: bi("执行中心", "Execution Center"),
       settings: bi("平台设置", "Settings"),
       ai: bi("AI 助手", "AI Assistant"),
       new: bi("新建集群", "New Cluster"),
@@ -1676,38 +1700,17 @@ function App() {
     document.title = `${titles[route.name]} · Kyndryl Delivery Studio`;
   }, [route.name, lang, user]);
 
-  const routeId = "id" in route ? route.id : "";
+  const routeView = route.name === "executions" ? route.view : "";
   const portalStart = useMemo<AITarget>(() => {
     const pageMap: Record<
       string,
       { key: string; title: string; context: string; suggestions?: string[] }
     > = {
-      settings:
-        routeId === "execution-nodes"
-          ? {
-              key: "portal:execution-nodes",
-              title: bi("执行节点接入助手", "Execution Node Helper"),
-              context: bi("设置 · 执行节点", "Settings · Execution Nodes"),
-              suggestions: [
-                bi(
-                  "执行器和目标 Agent 有什么区别？分别装在哪？",
-                  "What is the difference between Runner and Target Agent?",
-                ),
-                bi(
-                  "检查当前平台的访问地址、CA 证书和节点在线状态",
-                  "Check Hub URLs, CA cert status, and connected nodes",
-                ),
-                bi(
-                  "只有堡垒机拿不到密码，怎么实现自动部署？",
-                  "How do I automate via bastion without target passwords?",
-                ),
-              ],
-            }
-          : {
-              key: "portal:settings",
-              title: bi("平台设置助手", "Settings Assistant"),
-              context: bi("平台设置", "Platform Settings"),
-            },
+      settings: {
+        key: "portal:settings",
+        title: bi("平台设置助手", "Settings Assistant"),
+        context: bi("平台设置", "Platform Settings"),
+      },
       apps: {
         key: "portal:apps",
         title: bi("应用与架构助手", "Apps & Architecture"),
@@ -1718,11 +1721,32 @@ function App() {
         title: bi("软件库助手", "Package Library Helper"),
         context: bi("离线软件库", "Offline Library"),
       },
-      executions: {
-        key: "portal:monitor",
-        title: bi("执行监控助手", "Execution Monitor Helper"),
-        context: bi("执行监控", "Execution Monitor"),
-      },
+      executions:
+        routeView === "nodes"
+          ? {
+              key: "portal:execution-nodes",
+              title: bi("执行节点接入助手", "Execution Node Helper"),
+              context: bi("执行中心 · 执行节点", "Execution Center · Nodes"),
+              suggestions: [
+                bi(
+                  "控制机执行节点和目标机直连 Agent 有什么区别？分别装在哪？",
+                  "What is the difference between Control Nodes and Direct Target Agents?",
+                ),
+                bi(
+                  "检查当前平台的访问地址、CA 证书和节点在线状态",
+                  "Check Hub URLs, CA cert status, and connected nodes",
+                ),
+                bi(
+                  "只有堡垒机拿不到密码，怎么实现自动部署与演练？",
+                  "How do I automate via bastion without target passwords?",
+                ),
+              ],
+            }
+          : {
+              key: "portal:monitor",
+              title: bi("执行中心助手", "Execution Center Helper"),
+              context: bi("执行中心 · 任务监控", "Execution Center · Monitor"),
+            },
       components: {
         key: "portal:components",
         title: bi("组件助手", "Component Helper"),
@@ -1761,7 +1785,7 @@ function App() {
       suggestions: p.suggestions,
       step: { page: p.context, title: p.title },
     };
-  }, [route.name, routeId, lang]);
+  }, [route.name, routeView, lang]);
   const portalScope = useMemo(() => ({ kind: "portal" as const }), []);
   const hidePortalDock = route.name === "ai" || route.name === "new";
 
@@ -1821,11 +1845,11 @@ function App() {
           },
         ]
       : []),
-    ...(can("delivery.view|delivery.execute")
+    ...(can("delivery.view|delivery.execute|execution.manage")
       ? [
           {
             key: "executions" as const,
-            label: bi("执行监控", "Executions"),
+            label: bi("执行中心", "Executions"),
             to: { name: "executions" } as Route,
             badge: activeExecCount > 0 ? activeExecCount : undefined,
           },
@@ -1865,7 +1889,7 @@ function App() {
         ]
       : []),
     ...(can(
-      "settings.notify|ai.settings|ai.usage|settings.report|settings.storage|settings.sandbox|execution.manage",
+      "settings.notify|ai.settings|ai.usage|settings.report|settings.storage|settings.sandbox",
     )
       ? [
           {
@@ -1908,7 +1932,9 @@ function App() {
     );
   else if (route.name === "executions")
     page = (
-      <ExecutionMonitorPage
+      <ExecutionCenterPage
+        view={route.view || "runs"}
+        fleet={route.fleet}
         selectedJob={route.id}
         initialRun={route.run}
         initialStep={route.step}

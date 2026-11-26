@@ -118,6 +118,32 @@ func TestDeliveryStepHotfixEditRevertPromoteAndDownloadPreserved(t *testing.T) {
 		t.Fatalf("update archive download failed %d: %s", dl.Code, dl.Body.String())
 	}
 
+	// Verify GET /scripts and /scripts/content expose exact added/deleted line counts for patched files.
+	wPatchedList := storeRequest(s, "GET", "/api/jobs/"+j.ID+"/scripts?step="+url.QueryEscape(healthStep), nil, admin, "")
+	if wPatchedList.Code != 200 {
+		t.Fatalf("list patched scripts failed %d: %s", wPatchedList.Code, wPatchedList.Body.String())
+	}
+	var patchedListResp struct {
+		Files []deliveryFileItem `json:"files"`
+	}
+	_ = json.Unmarshal(wPatchedList.Body.Bytes(), &patchedListResp)
+	if len(patchedListResp.Files) == 0 || !patchedListResp.Files[0].Patched || patchedListResp.Files[0].Path != targetPath {
+		t.Fatalf("expected patched file sorted first, got: %+v", patchedListResp.Files[:min(3, len(patchedListResp.Files))])
+	}
+	if patchedListResp.Files[0].Added != 4 || patchedListResp.Files[0].Deleted != 0 {
+		t.Fatalf("expected added=4 deleted=0 for patched file, got added=%d deleted=%d", patchedListResp.Files[0].Added, patchedListResp.Files[0].Deleted)
+	}
+	cwPatched := storeRequest(s, "GET", "/api/jobs/"+j.ID+"/scripts/content?path="+url.QueryEscape(targetPath), nil, admin, "")
+	var patchedContentResp struct {
+		Patched bool `json:"patched"`
+		Added   int  `json:"added"`
+		Deleted int  `json:"deleted"`
+	}
+	_ = json.Unmarshal(cwPatched.Body.Bytes(), &patchedContentResp)
+	if !patchedContentResp.Patched || patchedContentResp.Added != 4 || patchedContentResp.Deleted != 0 {
+		t.Fatalf("expected content response patched=true added=4 deleted=0, got: %+v", patchedContentResp)
+	}
+
 	// Promote hotfix into component workspace draft.
 	promBody, _ := json.Marshal(map[string]string{"path": targetPath})
 	prw := storeRequest(s, "POST", "/api/jobs/"+j.ID+"/patches/promote-draft", bytes.NewReader(promBody), admin, csrf)

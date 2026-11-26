@@ -297,6 +297,8 @@ var resourcePatterns = []struct {
 	{regexp.MustCompile(`^/api/settings/ai/usage`), "AI 用量"},
 	{regexp.MustCompile(`^/api/settings/ai`), "AI 设置"},
 	{regexp.MustCompile(`^/api/settings/execution-nodes/?([^/]*)`), "执行节点"},
+	{regexp.MustCompile(`^/api/executions/unified-agents/?([^/]*)`), "Agent"},
+	{regexp.MustCompile(`^/api/executions/agents/?([^/]*)`), "目标机 Agent"},
 	{regexp.MustCompile(`^/api/settings/sandbox`), "沙箱设置"},
 	{regexp.MustCompile(`^/api/settings/storage`), "存储设置"},
 	{regexp.MustCompile(`^/api/settings/report`), "交付文档设置"},

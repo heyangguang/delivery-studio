@@ -3,11 +3,12 @@ import {
   Button,
   Drawer,
   Input,
-  InputTag,
   Message,
+  Popover,
   Select,
   Skeleton,
   Tag,
+  Tooltip,
 } from "@arco-design/web-react";
 import {
   IconArrowLeft,
@@ -22,6 +23,7 @@ import {
   IconDownload,
   IconEdit,
   IconFile,
+  IconFolder,
   IconImage,
   IconPlus,
   IconRefresh,
@@ -31,13 +33,15 @@ import {
   IconUp,
   IconUpload,
 } from "@arco-design/web-react/icon";
+import { canonicalCompanionTitle, cleanDisplayVersion } from "./topology";
 import { Spark } from "../ai/aichat";
 import { ModelPicker, useModelPick } from "../ai/modelpick";
 import { ThinkLevel, useAIOptions } from "../ai/aitools";
 import { api, can, copy } from "../../shared/shared";
 import {
-  ClusterAutomationDrawer,
+  ExecutionAgentChoice,
   LiveExecLogCard,
+  SelectExecutionAgentModal,
   pollRehearsalExecTask,
 } from "../automation/rehearsal-automation";
 import type {
@@ -51,9 +55,18 @@ import type {
   ImportedMeta,
   ImportedPkg,
   InstanceView,
+  RehearsalTrace,
+  RehearsalTraceStep,
 } from "../../shared/shared";
+import {
+  AIProcessCard,
+  markLiveStateError,
+  streamPipelineSSE,
+  type LiveAIState,
+} from "../../shared/ai-process";
 import { go } from "../../app/router";
 import { AppGlyph, InstanceGraph } from "../../design/ui";
+import { COLORS, isBrandIcon } from "../../design/glyphs";
 import { bi, useLang } from "../../app/i18n";
 import "./importcluster.css";
 
@@ -117,6 +130,8 @@ type BaselineGap = {
   probe_action: string;
   selected: boolean;
   source?: "rule" | "ai";
+  manual_target?: "endpoints" | "paths" | "params" | string;
+  dismiss_hint?: string;
 };
 
 type BaselineHealth = {
@@ -125,6 +140,7 @@ type BaselineHealth = {
   total: number;
   summary: string;
   gaps: BaselineGap[];
+  dismissed_gaps?: BaselineGap[];
 };
 
 type ImportPayload = {
@@ -152,6 +168,7 @@ type ImportPayload = {
   params?: Record<string, unknown>;
   packages?: ImportedPkg[];
   notes?: string;
+  dismissed_gaps?: string[];
   last_probed_at?: string;
   health?: BaselineHealth;
 };
@@ -182,6 +199,7 @@ type ParseResp = {
   ai_used: boolean;
   warnings: string[];
   missing_fields: string[];
+  trace?: RehearsalTrace;
 };
 
 const CLUSTER_ID_RE = /^[a-z][a-z0-9-]{0,40}$/;
@@ -201,7 +219,7 @@ export const FALLBACK_COMPANIONS: CompanionCatalogItem[] = [
   { id: "keepalived", name: "Keepalived", kind: "vip", icon: "keepalived", color: "teal", default_role: "node", role_title: "VRRP 节点", topology: true },
   { id: "nginx", name: "Nginx", kind: "proxy", icon: "nginx", color: "green", default_role: "node", role_title: "代理节点", topology: true, default_ports: [{ name: "Nginx", port: 80 }] },
   { id: "pgbouncer", name: "PgBouncer", kind: "pooler", icon: "postgresql", color: "indigo", default_role: "node", role_title: "连接池", topology: true, default_ports: [{ name: "PgBouncer", port: 6432 }] },
-  { id: "pgbackrest", name: "pgBackRest", kind: "backup", icon: "storage", color: "emerald", default_role: "backup", role_title: "物理备份", topology: false },
+  { id: "pgbackrest", name: "pgBackRest", kind: "backup", icon: "storage", color: "green", default_role: "backup", role_title: "物理备份", topology: false },
   { id: "redis-sentinel", name: "Redis Sentinel", kind: "ha_manager", icon: "redis", color: "red", default_role: "sentinel", role_title: "哨兵", topology: true, default_ports: [{ name: "Sentinel", port: 26379 }] },
   { id: "zookeeper", name: "ZooKeeper", kind: "dcs", icon: "zookeeper", color: "amber", default_role: "node", role_title: "集群节点", topology: true, default_ports: [{ name: "ZooKeeper", port: 2181 }] },
   { id: "consul", name: "Consul", kind: "dcs", icon: "consul", color: "pink", default_role: "server", role_title: "Server", topology: true, default_ports: [{ name: "Consul", port: 8500 }] },
@@ -471,8 +489,8 @@ function buildPreviewInstances(
     result.push({
       id: cid,
       component: cid,
-      title: cm.display_name || def?.name || cid,
-      version: cm.version || "",
+      title: canonicalCompanionTitle(cid, cm.display_name || def?.name),
+      version: cleanDisplayVersion(cm.version),
       status: "published",
       managed_context: cid === "patroni" && primaryID === "postgresql" ? primaryID : undefined,
       roles: cRoles,
@@ -650,24 +668,76 @@ function clueCategoryMeta(text: string): { label: string; tone: string } {
   return { label: bi("现场线索", "Clue"), tone: "neutral" };
 }
 
-/** Structured, scannable field-clue list replacing cramped paragraph textareas (with raw text toggle). */
+const CLUE_QUICK_TEMPLATES = () => [
+  {
+    label: bi("+ 维护窗口", "+ Maint Window"),
+    text: bi("维护窗口：每周日 02:00-04:00，期间允许逐台滚动重启", "Maintenance window: Sun 02:00-04:00, rolling restarts permitted"),
+  },
+  {
+    label: bi("+ 切主/重启红线", "+ Failover Guard"),
+    text: bi("变更红线：工作时段禁止主库重启或计划内切主，须提前审批", "Guardrail: no primary restart or switchover during business hours without approval"),
+  },
+  {
+    label: bi("+ 入口 / VIP 约束", "+ VIP / LB Note"),
+    text: bi("访问入口：业务经外部 VIP/ELB 接入，后端节点禁止直连回环探测", "Endpoint: external VIP/ELB in front; avoid backend hairpinning probes"),
+  },
+  {
+    label: bi("+ 备份前提", "+ Backup Prereq"),
+    text: bi("备份约束：变更前须确认当日有效全量备份与 WAL 归档正常", "Backup prereq: verify fresh full backup and healthy WAL archiving before changes"),
+  },
+];
+
+/** Structured, scannable field-clue list with top quick-add bar, templates, and category filter. */
 function FieldCluesEditor({
   value,
   onChange,
   title,
   placeholder,
+  fullHeight = false,
+  showTemplates = false,
 }: {
   value: string;
   onChange: (next: string) => void;
   title?: string;
   placeholder?: string;
+  fullHeight?: boolean;
+  showTemplates?: boolean;
 }) {
   useLang();
   const [rawMode, setRawMode] = useState(false);
   const [draft, setDraft] = useState("");
+  const [activeCat, setActiveCat] = useState<string>("all");
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [editingText, setEditingText] = useState("");
+  const addInputRef = useRef<HTMLInputElement | null>(null);
   const clues = useMemo(() => splitNotesToClues(value), [value]);
+
+  const indexedClues = useMemo(
+    () => clues.map((text, idx) => ({ text, idx, cat: clueCategoryMeta(text) })),
+    [clues],
+  );
+  const catCounts = useMemo(() => {
+    const m = new Map<string, { label: string; tone: string; count: number }>();
+    for (const item of indexedClues) {
+      const prev = m.get(item.cat.label);
+      if (prev) prev.count += 1;
+      else m.set(item.cat.label, { label: item.cat.label, tone: item.cat.tone, count: 1 });
+    }
+    return Array.from(m.values());
+  }, [indexedClues]);
+  const visibleClues = useMemo(
+    () =>
+      activeCat === "all"
+        ? indexedClues
+        : indexedClues.filter((it) => it.cat.label === activeCat),
+    [activeCat, indexedClues],
+  );
+
+  useEffect(() => {
+    if (activeCat !== "all" && !catCounts.some((c) => c.label === activeCat)) {
+      setActiveCat("all");
+    }
+  }, [activeCat, catCounts]);
 
   const commitClues = (next: string[]) => {
     onChange(joinCluesToNotes(next));
@@ -676,8 +746,9 @@ function FieldCluesEditor({
   const addClue = () => {
     const t = draft.trim();
     if (!t) return;
-    commitClues([...clues, t]);
+    commitClues([t, ...clues]);
     setDraft("");
+    setActiveCat("all");
   };
 
   const saveEdit = (idx: number) => {
@@ -692,7 +763,7 @@ function FieldCluesEditor({
   };
 
   return (
-    <div className="imp-clues-wrap">
+    <div className={`imp-clues-wrap ${fullHeight ? "is-full" : ""}`}>
       <div className="imp-clues-head">
         <div className="imp-clues-head-l">
           <span className="imp-lbl-left">
@@ -711,7 +782,7 @@ function FieldCluesEditor({
 
       {rawMode ? (
         <Input.TextArea
-          autoSize={{ minRows: 4, maxRows: 10 }}
+          autoSize={{ minRows: fullHeight ? 10 : 4, maxRows: fullHeight ? 24 : 10 }}
           value={value}
           onChange={onChange}
           placeholder={
@@ -724,17 +795,80 @@ function FieldCluesEditor({
         />
       ) : (
         <div className="imp-clues-card">
-          {clues.length === 0 ? (
+          {/* Quick-Add Bar placed AT THE TOP so users never scroll past existing notes to add one */}
+          <div className="imp-clues-add is-top">
+            <Input
+              ref={(inst) => {
+                addInputRef.current = (inst as unknown as { dom?: HTMLInputElement } | null)?.dom || null;
+              }}
+              size="small"
+              value={draft}
+              onChange={setDraft}
+              onPressEnter={addClue}
+              placeholder={
+                placeholder ||
+                bi(
+                  "输入一条现场线索或运维约束（如：每周日 02:00-04:00 为生产维护窗口），回车立即置顶添加…",
+                  "Type a field clue or constraint (e.g., maintenance window Sun 02:00-04:00) and press Enter…",
+                )
+              }
+            />
+            <Button size="small" type="primary" icon={<IconPlus />} disabled={!draft.trim()} onClick={addClue}>
+              {bi("添加", "Add")}
+            </Button>
+          </div>
+
+          {showTemplates && (
+            <div className="imp-clues-tpls">
+              <span className="imp-clues-tpl-lbl">{bi("常用约束：", "Quick templates:")}</span>
+              {CLUE_QUICK_TEMPLATES().map((tpl, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  className="imp-clues-tpl-chip"
+                  onClick={() => {
+                    setDraft(tpl.text);
+                    window.setTimeout(() => addInputRef.current?.focus(), 0);
+                  }}
+                >
+                  {tpl.label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {fullHeight && catCounts.length > 1 && clues.length >= 4 && (
+            <div className="imp-clues-filters">
+              <button
+                type="button"
+                className={`imp-clues-flt ${activeCat === "all" ? "is-on" : ""}`}
+                onClick={() => setActiveCat("all")}
+              >
+                {bi("全部", "All")} <span className="num">{clues.length}</span>
+              </button>
+              {catCounts.map((c) => (
+                <button
+                  key={c.label}
+                  type="button"
+                  className={`imp-clues-flt ${activeCat === c.label ? "is-on" : ""}`}
+                  onClick={() => setActiveCat(c.label)}
+                >
+                  {c.label} <span className="num">{c.count}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {visibleClues.length === 0 ? (
             <div className="imp-clues-empty">
               {bi(
-                "暂无线索记录。运行只读探针、变更演练或手动在下方添加维护窗口与环境约束，将自动沉淀于此。",
-                "No clues recorded yet. Run a read-only probe, change rehearsal, or add notes below.",
+                "暂无线索记录。可在上方直接录入维护窗口、切主红线或环境备注，也会在运行只读探针与变更演练后自动沉淀于此。",
+                "No clues recorded yet. Add maintenance windows or operational guardrails above, or run a read-only probe.",
               )}
             </div>
           ) : (
-            <div className="imp-clues-list">
-              {clues.map((item, idx) => {
-                const cat = clueCategoryMeta(item);
+            <div className={`imp-clues-list ${fullHeight ? "is-full" : ""}`}>
+              {visibleClues.map(({ text: item, idx, cat }) => {
                 const isEditing = editingIdx === idx;
                 return (
                   <div key={idx} className="imp-clue-row">
@@ -790,122 +924,546 @@ function FieldCluesEditor({
               })}
             </div>
           )}
-          <div className="imp-clues-add">
-            <Input
-              size="small"
-              value={draft}
-              onChange={setDraft}
-              onPressEnter={addClue}
-              placeholder={
-                placeholder ||
-                bi(
-                  "补充一条现场线索或约束（如：每周日 02:00-04:00 为生产维护窗口），回车添加…",
-                  "Add a field clue or constraint (e.g., maintenance window Sun 02:00-04:00) and press Enter…",
-                )
-              }
-            />
-            <Button size="small" icon={<IconPlus />} disabled={!draft.trim()} onClick={addClue}>
-              {bi("添加", "Add")}
-            </Button>
-          </div>
         </div>
       )}
     </div>
   );
 }
 
-function ProbeGeneratingBanner({ active, gapCount }: { active: boolean; gapCount?: number }) {
-  useLang();
-  const stages = useMemo(
-    () => [
-      bi(
-        gapCount && gapCount > 0
-          ? `正在对照标准交付基线分析已选 ${gapCount} 项缺口…`
-          : "正在分析组件形态与现场采集诉求…",
-        gapCount && gapCount > 0
-          ? `Analyzing ${gapCount} selected baseline gap(s)…`
-          : "Analyzing component layout & collection scope…",
-      ),
-      bi("正在编排极简 100% 静态只读探测命令（口令自动脱敏）…", "Composing lean 100% read-only probe commands (secrets redacted)…"),
-      bi("正在执行 100% 静态只读安全门禁与零写操作校验…", "Running 100% static read-only security gate verification…"),
-    ],
-    [gapCount],
-  );
-  const [idx, setIdx] = useState(0);
-  const [secs, setSecs] = useState(0);
+type ImportLiveKind = "import-parse" | "import-probe" | "import-diagnose";
 
-  useEffect(() => {
-    if (!active) {
-      setIdx(0);
-      setSecs(0);
-      return;
-    }
-    const t0 = Date.now();
-    const tick = window.setInterval(() => setSecs((Date.now() - t0) / 1000), 200);
-    const rot = window.setInterval(() => setIdx((p) => (p + 1) % stages.length), 2000);
-    return () => {
-      window.clearInterval(tick);
-      window.clearInterval(rot);
-    };
-  }, [active, stages.length]);
+function buildImportInitialLive(
+  kind: ImportLiveKind,
+  title: string,
+  target?: { provider?: string; model?: string },
+): LiveAIState<ImportLiveKind> {
+  const steps: RehearsalTraceStep[] =
+    kind === "import-probe"
+      ? [
+          {
+            id: "inspect-baseline",
+            kind: "inspect",
+            title: bi("读取集群基线与采集目标", "Inspect Baseline & Probe Targets"),
+            detail: bi("正在装载组件形态与待补采缺口上下文…", "Loading component layout & selected gap context…"),
+            ok: true,
+            status: "running",
+          },
+          {
+            id: "inject-ro-policy",
+            kind: "guard",
+            title: bi("注入 100% 纯只读安全红线规则", "Inject 100% Read-Only Safety Guardrails"),
+            detail: bi("锁定零写操作、零服务重启与凭据脱敏约束", "Locking zero-write, zero-restart & secret redaction rules"),
+            ok: true,
+            status: "pending",
+          },
+          {
+            id: "connect-model",
+            kind: "connect",
+            title: bi("连接模型网关与投递上下文", "Connect Model Gateway & Dispatch Context"),
+            detail: bi("等待安全校验完成后建立模型流式连接", "Waiting for safety checks before opening AI stream"),
+            ok: true,
+            status: "pending",
+          },
+          {
+            id: "model-think",
+            kind: "think",
+            title: bi("设计精炼只读现场采集策略", "Design Lean Read-Only Probe Strategy"),
+            detail: bi("等待模型通道返回首包后展开推演", "Waiting for first token from model stream"),
+            ok: true,
+            status: "pending",
+          },
+          {
+            id: "readonly-ast-guard",
+            kind: "guard",
+            title: bi("生成探针脚本与静态安全门禁校验", "Generate Probe & Static Read-Only Gate"),
+            detail: bi("等待脚本编写完成后执行静态只读安全扫描", "Waiting for script output before static read-only scan"),
+            ok: true,
+            status: "pending",
+          },
+        ]
+      : kind === "import-diagnose"
+        ? [
+            {
+              id: "scan-baseline",
+              kind: "inspect",
+              title: bi("通读集群基线、架构栈与变更台账", "Read Baseline, Stack & History"),
+              detail: bi("正在加载当前拓扑、参数、历史变更与安全态势…", "Loading topology, params, change history & security context…"),
+              ok: true,
+              status: "running",
+            },
+            {
+              id: "redact-context",
+              kind: "guard",
+              title: bi("敏感凭据自动脱敏与只读核验锁定", "Scrub Credentials & Lock Read-Only"),
+              detail: bi("自动剥离敏感凭据，仅放行 100% 只读核验项", "Scrubbing secrets locally; allowing 100% read-only checks only"),
+              ok: true,
+              status: "pending",
+            },
+            {
+              id: "connect-model",
+              kind: "connect",
+              title: bi("连接模型网关与投递上下文", "Connect Model Gateway & Dispatch Context"),
+              detail: bi("等待脱敏完成后建立模型流式连接", "Waiting for redaction before opening AI stream"),
+              ok: true,
+              status: "pending",
+            },
+            {
+              id: "model-think",
+              kind: "think",
+              title: bi("研判固定规则之外的架构盲区", "Identify Architecture-Specific Blind Spots"),
+              detail: bi("等待模型通道返回首包后展开推演", "Waiting for first token from model stream"),
+              ok: true,
+              status: "pending",
+            },
+            {
+              id: "synth-gaps",
+              kind: "synthesize",
+              title: bi("收敛只读补采清单与优先级", "Compile Read-Only Gap Checklist"),
+              detail: bi("等待盲区研判完成后生成只读补采建议", "Waiting for analysis before compiling gap checklist"),
+              ok: true,
+              status: "pending",
+            },
+          ]
+        : [
+            {
+              id: "det-scan",
+              kind: "inspect",
+              title: bi("扫描现场回显与架构线索", "Scan Live Evidence & Clues"),
+              detail: bi("正在运行规则预扫描并整理输入回显与截图…", "Running pre-scan over pasted output & screenshots…"),
+              ok: true,
+              status: "running",
+            },
+            {
+              id: "redact-secrets",
+              kind: "guard",
+              title: bi("敏感凭据自动脱敏与规范化", "Scrub Credentials & Normalize Input"),
+              detail: bi("自动剥离口令、私钥与敏感连接串，仅投递架构元数据", "Scrubbing passwords, keys & DSNs; topology metadata only"),
+              ok: true,
+              status: "pending",
+            },
+            {
+              id: "connect-model",
+              kind: "connect",
+              title: bi("连接模型网关与投递上下文", "Connect Model Gateway & Dispatch Context"),
+              detail: bi("等待脱敏完成后建立模型流式连接", "Waiting for redaction before opening AI stream"),
+              ok: true,
+              status: "pending",
+            },
+            {
+              id: "model-think",
+              kind: "think",
+              title: bi("识别主机角色与多组件架构栈", "Analyze Hosts & Companion Stack"),
+              detail: bi("等待模型通道返回首包后展开推演", "Waiting for first token from model stream"),
+              ok: true,
+              status: "pending",
+            },
+            {
+              id: "synth-baseline",
+              kind: "synthesize",
+              title: bi("合成结构化纳管基线草稿", "Synthesize Structured Baseline Draft"),
+              detail: bi("等待架构推演完成后组装基线拓扑草稿", "Waiting for analysis before assembling baseline draft"),
+              ok: true,
+              status: "pending",
+            },
+          ];
 
-  if (!active) return null;
-
-  return (
-    <div className="imp-probe-gen" role="status" aria-live="polite">
-      <Spark size={14} rainbow />
-      <span className="imp-probe-gen-txt">{stages[idx]}</span>
-      <span className="imp-probe-gen-meta num">
-        {idx + 1}/{stages.length} · {secs.toFixed(1)}s
-      </span>
-    </div>
-  );
+  return {
+    kind,
+    title,
+    startedAt: Date.now(),
+    steps,
+    thinking: "",
+    phase: steps[0]?.detail || "",
+    chars: 0,
+    provider: target?.provider,
+    model: target?.model,
+  };
 }
 
-function GapDiagnosingBanner({ active }: { active: boolean }) {
-  const [idx, setIdx] = useState(0);
-  const [secs, setSecs] = useState(0);
-  const stages = useMemo(
-    () => [
-      bi("正在通读集群基线、架构栈与历史演练线索…", "Reading cluster baseline, stack & rehearsal history…"),
-      bi("对照生产高可用、备份与安全巡检最佳实践…", "Comparing against production HA, backup & security standards…"),
-      bi("定位固定规则之外的架构专属盲区…", "Spotting architecture-specific blind spots beyond fixed rules…"),
-      bi("整理 100% 只读核查项与优先级…", "Compiling 100% read-only verification items & priority…"),
-    ],
-    [],
-  );
+type ProbeTailorPreset = {
+  id: string;
+  tag: string;
+  tone: "brand" | "teal" | "ok" | "warn" | "violet" | "neutral";
+  title: string;
+  desc: string;
+  prompt: string;
+  recommended?: boolean;
+};
 
-  useEffect(() => {
-    if (!active) {
-      setIdx(0);
-      setSecs(0);
-      return;
-    }
-    const t0 = Date.now();
-    const tick = window.setInterval(() => setSecs((Date.now() - t0) / 1000), 200);
-    const rot = window.setInterval(() => setIdx((p) => (p + 1) % stages.length), 1900);
-    return () => {
-      window.clearInterval(tick);
-      window.clearInterval(rot);
-    };
-  }, [active, stages.length]);
+function formatProbeStamp(date = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
+}
 
-  if (!active) return null;
+function buildTimestampedProbeFilename(
+  base: string,
+  source: "template" | "ai",
+  mode: "gap" | "full",
+  stamp: string,
+): string {
+  const clean = (base || "mw-import-probe.sh").trim();
+  const dot = clean.lastIndexOf(".");
+  const stem = (dot > 0 ? clean.slice(0, dot) : clean).replace(/-\d{8}-\d{6}$/, "");
+  const ext = dot > 0 ? clean.slice(dot) : ".sh";
+  const tag =
+    source === "ai"
+      ? mode === "gap"
+        ? "-ai-gap"
+        : "-ai"
+      : mode === "gap"
+        ? "-gap"
+        : "";
+  return `${stem}${tag}-${stamp}${ext}`;
+}
 
-  return (
-    <div className="imp-gap-diag-prog" role="status" aria-live="polite">
-      <Spark size={14} rainbow />
-      <span className="imp-probe-gen-txt">{stages[idx]}</span>
-      <span className="imp-probe-gen-meta num">
-        {idx + 1}/{stages.length} · {secs.toFixed(1)}s
-      </span>
-    </div>
-  );
+function getProbeTailorSuggestions(
+  componentId?: string,
+  deployMethod?: string,
+): ProbeTailorPreset[] {
+  const cid = (componentId || "").trim().toLowerCase();
+  const isContainer = deployMethod === "docker" || deployMethod === "k8s";
+
+  if (cid === "postgresql" || cid.includes("postgres") || cid === "pg") {
+    return [
+      {
+        id: "pg-ha",
+        tag: bi("高可用", "HA"),
+        tone: "brand",
+        title: bi("Patroni + etcd 高可用拓扑", "Patroni + etcd HA Stack"),
+        desc: bi("采 patronictl list、etcd 成员健康、主从角色与 WAL 延迟", "Collect patronictl list, etcd member health, roles & WAL lag"),
+        prompt: "重点采集 Patroni (patronictl list / patroni.yml) 与 etcd 成员健康状态、主从角色及同步延迟",
+        recommended: true,
+      },
+      {
+        id: "pg-backup",
+        tag: bi("备份", "Backup"),
+        tone: "ok",
+        title: bi("pgBackRest 与 WAL 归档", "pgBackRest & WAL Archive"),
+        desc: bi("采 stanza 状态、最近全量/增量备份与 archive_command", "Collect stanza info, latest backups & archive_command"),
+        prompt: "重点采集 pgBackRest stanza 配置、最近备份状态、archive_command 与 WAL 归档目录",
+        recommended: true,
+      },
+      {
+        id: "pg-proxy",
+        tag: bi("入口代理", "Proxy/VIP"),
+        tone: "teal",
+        title: bi("PgBouncer / HAProxy / VIP", "PgBouncer / HAProxy / VIP"),
+        desc: bi("采连接池模式、代理监听端口与 Keepalived VIP 归属", "Collect pool mode, proxy listeners & Keepalived VIP"),
+        prompt: "重点探测 PgBouncer 连接池配置、HAProxy/Nginx 监听端口与 Keepalived VIP 归属",
+      },
+      {
+        id: "pg-tls",
+        tag: bi("安全证书", "TLS/Auth"),
+        tone: "violet",
+        title: bi("TLS 证书有效期与 pg_hba", "TLS Certs & pg_hba Rules"),
+        desc: bi("采 SSL 证书到期时间、协议版本与脱敏认证规则", "Collect SSL cert expiry, TLS version & redacted pg_hba"),
+        prompt: "重点采集 PostgreSQL SSL 证书链有效期、TLS 版本以及脱敏后的 pg_hba.conf 认证方式",
+      },
+      {
+        id: "pg-container",
+        tag: bi("部署形态", "Runtime"),
+        tone: "warn",
+        title: bi("容器 / 非标准路径部署", "Container / Custom PGDATA"),
+        desc: bi("适配 Docker/Podman/K8s 与自定义 PGDATA、多实例目录", "Support Docker/Podman/K8s & custom PGDATA paths"),
+        prompt: "适配容器（Docker/Podman/K8s）及非标准 PGDATA 路径、多实例 systemd 服务名探测",
+        recommended: isContainer,
+      },
+      {
+        id: "pg-fast",
+        tag: bi("极速模式", "Fast"),
+        tone: "neutral",
+        title: bi("极速核心拓扑（10 秒内）", "Fast Core Topology (<10s)"),
+        desc: bi("跳过耗时目录扫描，仅快采主机、版本、角色与核心参数", "Skip heavy scans; grab hosts, versions, roles & key params"),
+        prompt: "保持极速精简（10 秒内完成），跳过大目录遍历，仅采主机、版本、主从角色、端口与核心参数",
+      },
+    ];
+  }
+
+  if (cid === "mysql" || cid === "mariadb") {
+    return [
+      {
+        id: "my-ha",
+        tag: bi("高可用", "HA"),
+        tone: "brand",
+        title: bi("MGR / MHA / 主从复制", "MGR / MHA / Replication"),
+        desc: bi("采组复制成员、GTID、半同步与主从 IO/SQL 延迟", "Collect group replication, GTID, semi-sync & lag"),
+        prompt: "重点采集 MySQL/MariaDB 主从复制或 MGR 组复制状态、GTID 配置与复制延迟",
+        recommended: true,
+      },
+      {
+        id: "my-proxy",
+        tag: bi("入口代理", "Proxy/VIP"),
+        tone: "teal",
+        title: bi("ProxySQL / HAProxy / VIP", "ProxySQL / HAProxy / VIP"),
+        desc: bi("采读写分离路由、代理监听端口与 Keepalived VIP", "Collect read/write split rules, proxy ports & VIP"),
+        prompt: "重点探测 ProxySQL/MaxScale/HAProxy 读写分离代理配置与 Keepalived VIP",
+        recommended: true,
+      },
+      {
+        id: "my-innodb",
+        tag: bi("核心参数", "InnoDB"),
+        tone: "ok",
+        title: bi("InnoDB 与 Binlog 基线", "InnoDB & Binlog Baseline"),
+        desc: bi("采缓冲池大小、最大连接、binlog 格式与慢日志配置", "Collect buffer pool, max_connections, binlog & slow log"),
+        prompt: "重点采集 InnoDB 缓冲池、连接数上限、binlog 格式/保留策略与慢日志路径",
+      },
+      {
+        id: "my-tls",
+        tag: bi("安全备份", "TLS/Backup"),
+        tone: "violet",
+        title: bi("TLS 证书与定时备份线索", "TLS Certs & Backup Cron"),
+        desc: bi("采 SSL 证书到期时间、XtraBackup/mysqldump 定时任务", "Collect SSL expiry & XtraBackup/mysqldump schedules"),
+        prompt: "重点采集 MySQL SSL 证书有效期以及 XtraBackup/mysqldump 定时备份脚本线索",
+      },
+      {
+        id: "my-container",
+        tag: bi("部署形态", "Runtime"),
+        tone: "warn",
+        title: bi("容器 / 多实例部署", "Container / Multi-Instance"),
+        desc: bi("适配 Docker/Podman 与多端口 mysqld、非标准 my.cnf", "Support Docker/Podman & multi-port mysqld instances"),
+        prompt: "适配容器（Docker/Podman）及同机多实例 mysqld 端口、非标准 my.cnf 路径探测",
+        recommended: isContainer,
+      },
+      {
+        id: "my-fast",
+        tag: bi("极速模式", "Fast"),
+        tone: "neutral",
+        title: bi("极速核心拓扑（10 秒内）", "Fast Core Topology (<10s)"),
+        desc: bi("跳过耗时扫描，快速采出主机、版本、角色与核心参数", "Skip heavy scans; grab hosts, version, role & key params"),
+        prompt: "保持极速精简（10 秒内完成），仅采主机、版本、主从角色、端口、目录与核心参数",
+      },
+    ];
+  }
+
+  if (cid === "redis" || cid === "valkey") {
+    return [
+      {
+        id: "rd-ha",
+        tag: bi("高可用", "HA"),
+        tone: "brand",
+        title: bi("Sentinel / Cluster 分片", "Sentinel / Cluster Slots"),
+        desc: bi("采 CLUSTER NODES、哨兵仲裁状态与主从复制偏移", "Collect CLUSTER NODES, Sentinel quorum & repl offset"),
+        prompt: "重点采集 Redis/Valkey Cluster 分片拓扑或 Sentinel 哨兵仲裁状态、主从复制关系",
+        recommended: true,
+      },
+      {
+        id: "rd-mem",
+        tag: bi("持久化", "Persist"),
+        tone: "ok",
+        title: bi("RDB/AOF 与内存水位", "RDB/AOF & Memory Policy"),
+        desc: bi("采 maxmemory 淘汰策略、内存碎片率与落盘目录", "Collect maxmemory policy, fragmentation & persistence dir"),
+        prompt: "重点采集 maxmemory 及淘汰策略、内存碎片率、RDB/AOF 持久化配置与数据目录水位",
+        recommended: true,
+      },
+      {
+        id: "rd-sec",
+        tag: bi("安全鉴权", "Security"),
+        tone: "violet",
+        title: bi("TLS 证书与 ACL / 禁危命令", "TLS Certs & ACL Rules"),
+        desc: bi("采 TLS 证书有效期、ACL 开关与 rename-command（全脱敏）", "Collect TLS expiry, ACL mode & rename-command (redacted)"),
+        prompt: "重点采集 TLS 证书有效期、是否启用 ACL/密码鉴权（严禁输出密码原文）与 rename-command 规则",
+      },
+      {
+        id: "rd-proxy",
+        tag: bi("入口代理", "Proxy/VIP"),
+        tone: "teal",
+        title: bi("HAProxy / Keepalived 入口", "HAProxy / Keepalived Entry"),
+        desc: bi("采前置代理监听端口、后端探测与 VIP 归属", "Collect proxy listeners, health checks & VIP"),
+        prompt: "重点探测 HAProxy / Keepalived / Twemproxy 前置入口配置与 VIP 归属",
+      },
+      {
+        id: "rd-container",
+        tag: bi("部署形态", "Runtime"),
+        tone: "warn",
+        title: bi("容器 / 同机多端口实例", "Container / Multi-Port"),
+        desc: bi("适配 Docker/Podman 与单机多端口 Redis 进程探测", "Support Docker/Podman & multi-port instances"),
+        prompt: "适配容器部署及同机多端口 Redis 实例配置路径定位",
+        recommended: isContainer,
+      },
+      {
+        id: "rd-fast",
+        tag: bi("极速模式", "Fast"),
+        tone: "neutral",
+        title: bi("极速核心拓扑（10 秒内）", "Fast Core Topology (<10s)"),
+        desc: bi("轻量只读快采角色、版本、端口、内存上限与配置路径", "Fast read-only capture of role, version, ports & memory"),
+        prompt: "保持极速精简（10 秒内完成），仅采节点角色、版本、端口、内存上限与核心配置",
+      },
+    ];
+  }
+
+  if (cid === "kafka") {
+    return [
+      {
+        id: "kf-coord",
+        tag: bi("集群协调", "Quorum"),
+        tone: "brand",
+        title: bi("KRaft / ZooKeeper 协调栈", "KRaft / ZooKeeper Quorum"),
+        desc: bi("采 Broker/Controller 角色、Quorum 状态与元数据路径", "Collect Broker/Controller roles, quorum & metadata dir"),
+        prompt: "重点识别 Kafka 采用 KRaft 还是 ZooKeeper 模式，采集协调节点列表与 Quorum 状态",
+        recommended: true,
+      },
+      {
+        id: "kf-disk",
+        tag: bi("存储分区", "Storage"),
+        tone: "ok",
+        title: bi("log.dirs 数据盘与保留策略", "log.dirs Disk & Retention"),
+        desc: bi("采多块数据盘挂载水位、副本因子与日志保留周期", "Collect log.dirs mount usage, replication & retention"),
+        prompt: "重点采集 log.dirs 多盘挂载点与磁盘水位、默认副本因子、min.insync.replicas 与保留策略",
+        recommended: true,
+      },
+      {
+        id: "kf-sec",
+        tag: bi("安全认证", "Security"),
+        tone: "violet",
+        title: bi("SASL / TLS 安全监听", "SASL / TLS Listeners"),
+        desc: bi("采 listeners 协议、Kerberos/SASL 线索与证书有效期", "Collect listeners protocol, SASL hints & cert expiry"),
+        prompt: "重点采集 Kafka listeners / security.protocol、SASL 认证方式（全脱敏）与 TLS 证书有效期",
+      },
+      {
+        id: "kf-eco",
+        tag: bi("伴生生态", "Ecosystem"),
+        tone: "teal",
+        title: bi("Connect / Schema / Exporter", "Connect / Schema / Exporter"),
+        desc: bi("识别 Kafka Connect、Schema Registry 与监控采集器", "Detect Kafka Connect, Schema Registry & exporters"),
+        prompt: "重点探测 Kafka Connect、Schema Registry、JMX/Kafka Exporter 等伴生进程与端口",
+      },
+      {
+        id: "kf-container",
+        tag: bi("部署形态", "Runtime"),
+        tone: "warn",
+        title: bi("容器 / 自定义 JVM 路径", "Container / Custom JVM"),
+        desc: bi("适配 Docker/K8s 与非标准 server.properties、堆内存参数", "Support Docker/K8s, custom config & JVM heap flags"),
+        prompt: "适配容器部署及非标准 server.properties 路径，采集 JVM 堆内存与 GC 参数",
+        recommended: isContainer,
+      },
+      {
+        id: "kf-fast",
+        tag: bi("极速模式", "Fast"),
+        tone: "neutral",
+        title: bi("极速核心拓扑（10 秒内）", "Fast Core Topology (<10s)"),
+        desc: bi("跳过重度 Topic 遍历，快采 Broker、版本、端口与磁盘", "Skip topic scans; grab Broker, version, ports & disks"),
+        prompt: "保持极速精简（10 秒内完成），跳过全量 Topic 遍历，仅采 Broker、版本、监听端口与磁盘",
+      },
+    ];
+  }
+
+  if (cid === "nginx" || cid === "haproxy" || cid === "keepalived" || cid === "apisix") {
+    return [
+      {
+        id: "lb-vrrp",
+        tag: bi("高可用", "VRRP/VIP"),
+        tone: "brand",
+        title: bi("Keepalived VRRP 与 VIP", "Keepalived VRRP & VIP"),
+        desc: bi("采 VRRP 优先级、漂移网卡、健康检测脚本与 VIP 归属", "Collect VRRP priority, interface, check script & VIP"),
+        prompt: "重点采集 Keepalived VRRP 实例状态、优先级、绑定网卡、健康检查脚本与当前 VIP 归属",
+        recommended: true,
+      },
+      {
+        id: "lb-up",
+        tag: bi("转发路由", "Upstreams"),
+        tone: "teal",
+        title: bi("Upstream 与后端健康池", "Upstreams & Backends"),
+        desc: bi("梳理四/七层上游后端列表、均衡算法与超时参数", "Collect L4/L7 upstream pools, balance policy & timeouts"),
+        prompt: "重点梳理所有四层/七层 Upstream 后端地址池、负载均衡算法、连接超时与限流参数",
+        recommended: true,
+      },
+      {
+        id: "lb-tls",
+        tag: bi("证书安全", "HTTPS/TLS"),
+        tone: "violet",
+        title: bi("HTTPS / TLS 证书有效期", "HTTPS / TLS Cert Expiry"),
+        desc: bi("扫描所有生效站点证书到期时间、协议版本与密码套件", "Scan active site cert expiry, TLS versions & ciphers"),
+        prompt: "重点扫描生效配置引用的全部 TLS/SSL 证书到期时间、TLS 协议版本与加密套件",
+      },
+      {
+        id: "lb-obs",
+        tag: bi("监控日志", "Metrics"),
+        tone: "ok",
+        title: bi("Exporter 与日志切割路径", "Exporters & Log Rotation"),
+        desc: bi("采 stub_status/stats 端口、日志目录水位与 Exporter", "Collect stats endpoint, log usage & exporters"),
+        prompt: "重点采集 stub_status/HAProxy stats 监控端口、日志路径磁盘水位与 Prometheus Exporter",
+      },
+      {
+        id: "lb-container",
+        tag: bi("部署形态", "Runtime"),
+        tone: "warn",
+        title: bi("容器 / 多配置包含目录", "Container / Include Dirs"),
+        desc: bi("适配 Docker/OpenResty 与 conf.d/sites-enabled 多文件", "Support Docker/OpenResty & nested include configs"),
+        prompt: "适配容器或 OpenResty 部署，完整跟随 include 展开 conf.d / sites-enabled 配置结构",
+        recommended: isContainer,
+      },
+      {
+        id: "lb-fast",
+        tag: bi("极速模式", "Fast"),
+        tone: "neutral",
+        title: bi("极速核心拓扑（10 秒内）", "Fast Core Topology (<10s)"),
+        desc: bi("快采版本、编译模块、监听端口、VIP 与上游概览", "Grab version, modules, listeners, VIP & upstreams"),
+        prompt: "保持极速精简（10 秒内完成），仅采版本、监听端口、VIP 归属与上游概览",
+      },
+    ];
+  }
+
+  return [
+    {
+      id: "gen-ha",
+      tag: bi("高可用", "HA"),
+      tone: "brand",
+      title: bi("集群拓扑与主从/仲裁状态", "Cluster Topology & Quorum"),
+      desc: bi("重点采节点角色、成员健康、复制同步状态与仲裁端口", "Collect node roles, member health, sync & quorum ports"),
+      prompt: "重点采集集群节点角色、成员健康与主从/仲裁同步状态、内部通信端口",
+      recommended: true,
+    },
+    {
+      id: "gen-proxy",
+      tag: bi("入口代理", "Proxy/VIP"),
+      tone: "teal",
+      title: bi("VIP / HAProxy / Nginx 入口", "VIP / HAProxy / Nginx Entry"),
+      desc: bi("识别前置负载均衡、Keepalived VIP 与对外访问端口", "Detect front load balancers, Keepalived VIP & ports"),
+      prompt: "重点探测前置 Keepalived VIP、HAProxy/Nginx 代理转发配置及对外监听端口",
+      recommended: true,
+    },
+    {
+      id: "gen-tls",
+      tag: bi("安全证书", "TLS/Auth"),
+      tone: "violet",
+      title: bi("TLS 证书有效期与访问控制", "TLS Certs & Access Control"),
+      desc: bi("采服务证书到期时间、监听绑定地址与脱敏认证方式", "Collect cert expiry, bind addresses & redacted auth"),
+      prompt: "重点采集服务 TLS 证书链有效期、监听绑定地址以及脱敏后的访问控制配置",
+    },
+    {
+      id: "gen-disk",
+      tag: bi("存储备份", "Storage"),
+      tone: "ok",
+      title: bi("数据盘挂载与备份策略", "Data Disks & Backup Jobs"),
+      desc: bi("采数据/日志目录磁盘水位、文件系统与定时备份线索", "Collect data/log mount usage, FS & backup schedules"),
+      prompt: "重点采集数据盘与日志盘挂载点、文件系统水位以及 crontab/systemd 定时备份线索",
+    },
+    {
+      id: "gen-container",
+      tag: bi("部署形态", "Runtime"),
+      tone: "warn",
+      title: bi("容器 / 自定义安装路径", "Container / Custom Paths"),
+      desc: bi("适配 Docker/Podman/K8s 与非标准 systemd 服务路径", "Support Docker/Podman/K8s & custom service paths"),
+      prompt: "适配容器（Docker/Podman/K8s）部署及非标准配置/数据目录路径探测",
+      recommended: isContainer,
+    },
+    {
+      id: "gen-fast",
+      tag: bi("极速模式", "Fast"),
+      tone: "neutral",
+      title: bi("极速核心拓扑（10 秒内）", "Fast Core Topology (<10s)"),
+      desc: bi("跳过耗时目录扫描，快采主机、版本、端口与核心参数", "Skip heavy scans; grab hosts, version, ports & params"),
+      prompt: "保持极速精简（10 秒内完成），跳过耗时目录扫描，仅采主机、版本、角色、端口与核心参数",
+    },
+  ];
 }
 
 function ProbeCodeBlock({
   script,
   filename,
+  componentId,
+  componentName,
+  deployMethod,
   safe = true,
   source = "template",
   mode = "full",
@@ -922,6 +1480,9 @@ function ProbeCodeBlock({
 }: {
   script: string;
   filename: string;
+  componentId?: string;
+  componentName?: string;
+  deployMethod?: string;
   safe?: boolean;
   source?: "template" | "ai";
   mode?: "gap" | "full";
@@ -938,145 +1499,374 @@ function ProbeCodeBlock({
 }) {
   const [expanded, setExpanded] = useState(false);
   const [aiBarOpen, setAiBarOpen] = useState(false);
+  const [selectedPresetIds, setSelectedPresetIds] = useState<string[]>([]);
   const [focusText, setFocusText] = useState("");
-  const previewLimit = compact ? 9 : 12;
+  const [copied, setCopied] = useState(false);
+  const [scriptStamp, setScriptStamp] = useState(() => formatProbeStamp());
   const lines = useMemo(() => (script ? script.split("\n") : []), [script]);
-  const previewText = useMemo(
-    () =>
-      expanded || lines.length <= previewLimit
-        ? script
-        : lines.slice(0, previewLimit).join("\n") + `\n# ... (${lines.length - previewLimit} more lines)`,
-    [expanded, lines, previewLimit, script],
+
+  useEffect(() => {
+    if (script) {
+      setScriptStamp(formatProbeStamp());
+    }
+  }, [script, source, mode]);
+
+  useEffect(() => {
+    // Reset selections if the user switches middleware type in Step 1.
+    setSelectedPresetIds([]);
+  }, [componentId]);
+
+  useEffect(() => {
+    // Auto-fold panels when AI probe generation starts so the AIProcessCard takes focus.
+    if (aiBusy) {
+      setExpanded(false);
+      setAiBarOpen(false);
+    }
+  }, [aiBusy]);
+
+  const tailorPresets = useMemo(
+    () => getProbeTailorSuggestions(componentId, deployMethod),
+    [componentId, deployMethod],
+  );
+
+  const displayFilename = useMemo(
+    () => buildTimestampedProbeFilename(filename, source, mode, scriptStamp),
+    [filename, source, mode, scriptStamp],
   );
 
   const downloadScript = () => {
+    const stampedName = buildTimestampedProbeFilename(
+      filename,
+      source,
+      mode,
+      formatProbeStamp(),
+    );
     const blob = new Blob([script], { type: "text/x-shellscript;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = filename;
+    a.download = stampedName;
     a.click();
-    URL.revokeObjectURL(url);
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    Message.success(
+      bi(`已下载 ${stampedName}`, `Downloaded ${stampedName}`),
+    );
   };
 
+  const handleCopy = () => {
+    void copy(
+      script,
+      bi("已复制 100% 只读采集脚本", "100% read-only probe script copied"),
+    );
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
+  };
+
+  const togglePreset = (id: string) => {
+    setSelectedPresetIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  };
+
+  const handleRunTailor = () => {
+    if (!onCustomizeWithAI || aiBusy) return;
+    const pickedPrompts = tailorPresets
+      .filter((p) => selectedPresetIds.includes(p.id))
+      .map((p) => p.prompt);
+    const custom = focusText.trim();
+    const combined = [...pickedPrompts, ...(custom ? [custom] : [])].join("；");
+    setAiBarOpen(false);
+    void onCustomizeWithAI(combined);
+  };
+
+  const hasSubMeta = coveredGaps.length > 0 || Boolean(runHint) || Boolean(modelName);
+  const selectedCount = selectedPresetIds.length;
+
   return (
-    <div className="imp-probe-box">
-      <div className="imp-probe-bar">
-        <div className="imp-probe-bar-l">
-          <span className="imp-probe-shield">
-            <IconCheckCircle />
-            <span>
-              {safe
-                ? bi("100% 静态只读安全校验", "100% Static Read-Only Verified")
-                : bi("只读探针脚本", "Read-Only Probe")}
-            </span>
-          </span>
-          <span className={`imp-probe-mode-tag ${source === "ai" ? "is-ai" : ""}`}>
-            {source === "ai" && <Spark size={11} />}
-            {source === "ai"
-              ? mode === "gap"
-                ? bi("AI 专项补采", "AI Gap Probe")
-                : bi("AI 精炼定制", "AI Tailored")
-              : mode === "gap"
-                ? bi("缺口补采探针", "Gap Probe")
-                : bi("标准全量探针", "Standard Probe")}
-          </span>
-          <span className="imp-probe-lines num">
-            {lines.length} {bi("行", "lines")}
-          </span>
-        </div>
-        <div className="imp-probe-actions">
-          {!hideTailorBar && onCustomizeWithAI && aiEnabled && (
-            <Button
-              size="mini"
-              type={aiBarOpen ? "secondary" : "outline"}
-              loading={aiBusy}
-              icon={<Spark size={12} rainbow={!aiBarOpen} />}
-              onClick={() => setAiBarOpen((v) => !v)}
-            >
-              {bi("AI 定制", "AI Tailor")}
-            </Button>
-          )}
-          {lines.length > previewLimit && (
-            <Button
-              size="mini"
-              type="text"
-              icon={expanded ? <IconUp /> : <IconDown />}
-              onClick={() => setExpanded((v) => !v)}
-            >
-              {expanded ? bi("收起", "Collapse") : bi("展开全部", "Expand")}
-            </Button>
-          )}
-          <Button size="mini" type="outline" icon={<IconDownload />} onClick={downloadScript}>
-            {bi("下载", "Download")}
-          </Button>
-          <Button
-            size="mini"
-            type="secondary"
-            icon={<IconCopy />}
-            onClick={() => {
-              copy(script);
-              Message.success(bi("已复制 100% 只读采集脚本", "100% read-only probe script copied"));
-            }}
-          >
-            {bi("复制脚本", "Copy")}
-          </Button>
-        </div>
-      </div>
-
-      <div className="imp-probe-meta-strip">
-        <code className="imp-probe-fname" title={filename}>
-          {filename}
-        </code>
-        {coveredGaps.length > 0 && (
-          <div className="imp-probe-cov">
-            <span>{bi("覆盖：", "Covers:")}</span>
-            {coveredGaps.map((g, i) => (
-              <em key={i}>{g}</em>
-            ))}
-          </div>
-        )}
-        {modelName && <span className="imp-probe-model mono">{modelName}</span>}
-        {runHint && <span className="imp-probe-hint">{runHint}</span>}
-      </div>
-
+    <div className="imp-probe-stack">
       {!hideTailorBar && aiBarOpen && onCustomizeWithAI && (
-        <div className="imp-probe-ai-bar">
-          <Input
-            size="small"
-            allowClear
-            disabled={aiBusy}
-            value={focusText}
-            onChange={setFocusText}
-            onPressEnter={() => void onCustomizeWithAI(focusText)}
-            placeholder={bi(
-              "可选：说明现场特点（如容器部署、带 HAProxy/Keepalived、重点采 TLS 证书与备份状态）",
-              "Optional: describe environment hints (e.g. Docker, HAProxy/Keepalived, TLS certs & backup)",
-            )}
-          />
-          <Button
-            size="small"
-            shape="round"
-            className="ai-pill"
-            loading={aiBusy}
-            icon={<Spark size={12} rainbow />}
-            onClick={() => void onCustomizeWithAI(focusText)}
-          >
-            {bi("生成精炼只读探针", "Generate Probe")}
-          </Button>
-          {source === "ai" && onResetTemplate && (
-            <Button size="small" type="text" disabled={aiBusy} onClick={onResetTemplate}>
-              {bi("恢复标准", "Reset")}
-            </Button>
-          )}
+        <div
+          className="imp-tailor-card enter"
+          role="region"
+          aria-label={bi("AI 智能定制只读探针", "AI Read-Only Probe Tailor")}
+        >
+          <div className="imp-tailor-head">
+            <div className="imp-tailor-head-l">
+              <span className="imp-tailor-spark-badge" aria-hidden>
+                <Spark size={14} rainbow />
+              </span>
+              <div className="imp-tailor-title-group">
+                <div className="imp-tailor-title-row">
+                  <b>{bi("AI 智能定制只读探针", "AI Read-Only Probe Tailor")}</b>
+                  {componentName && (
+                    <span className="imp-tailor-scope-pill">
+                      {bi(`${componentName} 场景推荐`, `${componentName} Presets`)}
+                    </span>
+                  )}
+                </div>
+                <p>
+                  {bi(
+                    "点选现场特征卡片（可多选），或补充自定义需求，AI 将精炼生成 100% 只读专属脚本。",
+                    "Select scenario cards below (multi-select) or add custom hints; AI crafts a 100% read-only script.",
+                  )}
+                </p>
+              </div>
+            </div>
+            <div className="imp-tailor-head-r">
+              {selectedCount > 0 && (
+                <>
+                  <span className="imp-tailor-sel-pill num">
+                    {bi(`已选 ${selectedCount} 项`, `${selectedCount} selected`)}
+                  </span>
+                  <Button
+                    size="mini"
+                    type="text"
+                    disabled={aiBusy}
+                    onClick={() => setSelectedPresetIds([])}
+                  >
+                    {bi("清空", "Clear")}
+                  </Button>
+                </>
+              )}
+              <Button
+                size="mini"
+                type="text"
+                icon={<IconClose />}
+                onClick={() => setAiBarOpen(false)}
+                aria-label={bi("收起 AI 定制面板", "Close AI tailor panel")}
+              />
+            </div>
+          </div>
+
+          <div className="imp-tailor-grid" role="group" aria-label={bi("AI 推荐现场场景", "AI Recommended Scenarios")}>
+            {tailorPresets.map((item) => {
+              const on = selectedPresetIds.includes(item.id);
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={`imp-tailor-opt ${on ? "is-selected" : ""}`}
+                  aria-pressed={on}
+                  disabled={aiBusy}
+                  onClick={() => togglePreset(item.id)}
+                >
+                  <div className="imp-tailor-opt-top">
+                    <div className="imp-tailor-opt-tags">
+                      <span className={`imp-tailor-tag is-${item.tone}`}>{item.tag}</span>
+                      {item.recommended && (
+                        <span className="imp-tailor-rec">
+                          <Spark size={9} /> {bi("推荐", "Pick")}
+                        </span>
+                      )}
+                    </div>
+                    <span className={`imp-tailor-check ${on ? "is-on" : ""}`} aria-hidden>
+                      {on && <IconCheck />}
+                    </span>
+                  </div>
+                  <b>{item.title}</b>
+                  <p>{item.desc}</p>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="imp-tailor-foot">
+            <Input
+              allowClear
+              disabled={aiBusy}
+              value={focusText}
+              onChange={setFocusText}
+              onPressEnter={handleRunTailor}
+              placeholder={bi(
+                "可选：补充其他现场特点（如自定义端口 15432、指定配置目录 /data/conf、过滤敏感目录…）",
+                "Optional: add custom hints (e.g. custom port 15432, config dir /data/conf…)",
+              )}
+              aria-label={bi("补充自定义探针要求", "Custom probe instructions")}
+            />
+            <div className="imp-tailor-foot-acts">
+              {source === "ai" && onResetTemplate && (
+                <Button size="small" disabled={aiBusy} onClick={onResetTemplate}>
+                  {bi("恢复标准探针", "Reset Standard")}
+                </Button>
+              )}
+              <Button
+                size="small"
+                type="primary"
+                loading={aiBusy}
+                icon={<Spark size={12} />}
+                onClick={handleRunTailor}
+              >
+                {selectedCount > 0
+                  ? bi(`生成专属探针 (${selectedCount})`, `Generate Tailored (${selectedCount})`)
+                  : bi("生成精炼探针", "Generate Probe")}
+              </Button>
+            </div>
+          </div>
         </div>
       )}
 
-      <ProbeGeneratingBanner active={aiBusy} gapCount={gapCount} />
+      <div className={`imp-probe-box ${!expanded && !hasSubMeta ? "is-folded" : ""}`}>
+        <div className="imp-probe-bar">
+          <div className="imp-probe-bar-l">
+            <code className="imp-probe-fname" title={displayFilename}>
+              {displayFilename}
+            </code>
+            <Tooltip
+              content={
+                safe
+                  ? bi("已通过 100% 静态只读安全校验，绝不修改任何线上配置或进程", "Passed 100% static read-only safety verification")
+                  : bi("只读探针采集脚本", "Read-only probe script")
+              }
+              mini
+            >
+              <span className="imp-probe-shield">
+                <IconCheckCircle />
+                <span>{safe ? bi("只读校验", "Read-Only") : bi("只读", "RO")}</span>
+              </span>
+            </Tooltip>
+            <span className={`imp-probe-mode-tag ${source === "ai" ? "is-ai" : ""}`}>
+              {source === "ai" && <Spark size={10} />}
+              {source === "ai"
+                ? mode === "gap"
+                  ? bi("AI 补采", "AI Gap")
+                  : bi("AI 定制", "AI Tailored")
+                : mode === "gap"
+                  ? bi("缺口补采", "Gap")
+                  : bi("标准探针", "Standard")}
+            </span>
+            <span className="imp-probe-lines num">
+              {lines.length > 0
+                ? `${lines.length} ${bi("行", "lines")}`
+                : bi("加载中…", "Loading…")}
+            </span>
+          </div>
 
-      <pre className={`imp-probe-pre ${expanded ? "is-expanded" : ""}`}>
-        {previewText || bi("正在生成只读采集脚本…", "Generating read-only probe script...")}
-      </pre>
+          <div className="imp-probe-actions">
+            {!hideTailorBar && onCustomizeWithAI && aiEnabled && (
+              <button
+                type="button"
+                className={`imp-probe-act is-ai ${aiBarOpen ? "is-on" : ""}`}
+                disabled={aiBusy}
+                onClick={() => setAiBarOpen((v) => !v)}
+              >
+                <Spark size={11} rainbow={!aiBarOpen} />
+                <span>
+                  {selectedCount > 0 && !aiBarOpen
+                    ? bi(`AI 定制 · ${selectedCount}`, `AI Tailor · ${selectedCount}`)
+                    : bi("AI 定制", "AI Tailor")}
+                </span>
+              </button>
+            )}
+            {lines.length > 0 && (
+              <button
+                type="button"
+                className="imp-probe-act"
+                aria-expanded={expanded}
+                onClick={() => setExpanded((v) => !v)}
+              >
+                {expanded ? <IconUp /> : <IconDown />}
+                <span>{expanded ? bi("收起脚本", "Hide Script") : bi("查看脚本", "View Script")}</span>
+              </button>
+            )}
+            <button type="button" className="imp-probe-act" disabled={!script} onClick={downloadScript}>
+              <IconDownload />
+              <span>{bi("下载", "Download")}</span>
+            </button>
+            <button
+              type="button"
+              className={`imp-probe-act is-primary ${copied ? "is-copied" : ""}`}
+              disabled={!script}
+              onClick={handleCopy}
+            >
+              {copied ? <IconCheck /> : <IconCopy />}
+              <span>{copied ? bi("已复制", "Copied") : bi("复制脚本", "Copy")}</span>
+            </button>
+          </div>
+        </div>
+
+        {hasSubMeta && (
+          <div className="imp-probe-meta-strip">
+            {coveredGaps.length > 0 && (
+              <div className="imp-probe-cov">
+                <span>{bi("覆盖：", "Covers:")}</span>
+                {coveredGaps.map((g, i) => (
+                  <em key={i}>{g}</em>
+                ))}
+              </div>
+            )}
+            {modelName && <span className="imp-probe-model mono">{modelName}</span>}
+            {runHint && <span className="imp-probe-hint">{runHint}</span>}
+          </div>
+        )}
+
+        {expanded && (
+          <pre className="imp-probe-pre is-expanded">
+            {script || bi("正在生成只读采集脚本…", "Generating read-only probe script...")}
+          </pre>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ImportParseFocusBar({
+  collapsed,
+  onToggle,
+  includesProbe = false,
+  textLength,
+  imageCount,
+  isRunning,
+}: {
+  collapsed: boolean;
+  onToggle: () => void;
+  includesProbe?: boolean;
+  textLength: number;
+  imageCount: number;
+  isRunning: boolean;
+}) {
+  const parts: string[] = [];
+  if (textLength > 0) {
+    parts.push(bi(`${textLength.toLocaleString()} 字回显`, `${textLength.toLocaleString()} chars`));
+  }
+  if (imageCount > 0) {
+    parts.push(bi(`${imageCount} 张截图`, `${imageCount} image(s)`));
+  }
+  return (
+    <div className={`imp-parse-focus-bar ${collapsed ? "is-collapsed" : "is-open"}`}>
+      <div className="imp-parse-focus-l">
+        <span className={`imp-parse-focus-dot ${isRunning ? "is-live" : ""}`} aria-hidden />
+        <span className="imp-parse-focus-title">
+          {collapsed
+            ? includesProbe
+              ? bi("探针脚本与现场回显输入已收起", "Probe script & input folded")
+              : bi("现场回显录入区已收起", "Input composer folded")
+            : includesProbe
+              ? bi("已展开探针脚本与现场回显输入", "Probe script & input expanded")
+              : bi("已展开现场回显录入区", "Input composer expanded")}
+        </span>
+        {parts.length > 0 && (
+          <span className="imp-parse-focus-meta num">{parts.join(" · ")}</span>
+        )}
+        <span className="imp-parse-focus-shield">
+          <IconCheckCircle />
+          <span>{bi("口令已脱敏", "Redacted")}</span>
+        </span>
+      </div>
+      <button
+        type="button"
+        className="imp-parse-focus-btn"
+        aria-expanded={!collapsed}
+        onClick={onToggle}
+      >
+        {collapsed ? <IconDown /> : <IconUp />}
+        <span>
+          {collapsed
+            ? includesProbe
+              ? bi("展开脚本与输入", "Expand Script & Input")
+              : bi("展开查看输入", "Expand Input")
+            : bi("收起聚焦解析", "Fold to Focus")}
+        </span>
+      </button>
     </div>
   );
 }
@@ -1161,24 +1951,18 @@ function ImportEvidenceComposer({
     async (files: FileList | File[] | null) => {
       if (!files) return;
       const list = Array.from(files);
-      let imgRoom = Math.max(0, 4 - images.length);
       const addedTexts: string[] = [];
       let imgAdded = 0;
 
       for (const f of list) {
         if (f.type.startsWith("image/")) {
-          if (imgRoom <= 0) {
-            Message.warning(bi("单次最多上传 4 张截图", "Up to 4 screenshots allowed"));
-            continue;
-          }
           if (f.size > 16 * 1024 * 1024) {
             Message.warning(bi(`${f.name} 超过 16MB，请裁剪后重试`, `${f.name} exceeds 16MB limit`));
             continue;
           }
           try {
             const dataUrl = await compressImportImageIfNeeded(f);
-            onImagesChange((prev) => (prev.length < 4 ? [...prev, dataUrl] : prev));
-            imgRoom -= 1;
+            onImagesChange((prev) => [...prev, dataUrl]);
             imgAdded += 1;
           } catch {
             // ignore
@@ -1312,13 +2096,13 @@ function ImportEvidenceComposer({
           <button
             type="button"
             className="imp-attach-btn"
-            disabled={busy || images.length >= 4}
+            disabled={busy}
             onClick={() => imgInputRef.current?.click()}
           >
             <IconImage />
             <span>
               {imageBtnLabel || bi("上传截图", "Upload Image")}
-              {images.length > 0 ? ` (${images.length}/4)` : ""}
+              {images.length > 0 ? ` (${images.length})` : ""}
             </span>
           </button>
           <button
@@ -1405,52 +2189,498 @@ function ImportEvidenceComposer({
   );
 }
 
-function ParsingStagePanel({ active, aiEnabled }: { active: boolean; aiEnabled: boolean }) {
-  const [elapsed, setElapsed] = useState(0);
-  useEffect(() => {
-    if (!active) {
-      setElapsed(0);
-      return;
-    }
-    const started = Date.now();
-    const timer = window.setInterval(() => {
-      setElapsed((Date.now() - started) / 1000);
-    }, 200);
-    return () => window.clearInterval(timer);
-  }, [active]);
+function RuntimePathListCard({
+  title,
+  items,
+  onChange,
+  placeholder,
+  kind,
+  twoCol = false,
+}: {
+  title: string;
+  items: string[];
+  onChange: (next: string[]) => void;
+  placeholder: string;
+  kind: "service" | "file" | "dir";
+  twoCol?: boolean;
+}) {
+  const [draft, setDraft] = useState("");
+  const commit = () => {
+    const parts = draft
+      .split(/[\r\n,;]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (parts.length === 0) return;
+    onChange(normalizeTagList([...items, ...parts]));
+    setDraft("");
+  };
+  const removeAt = (idx: number) => {
+    onChange(items.filter((_, i) => i !== idx));
+  };
 
-  if (!active) return null;
-
-  const stages = [
-    bi("凭据脱敏与规范化", "Redacting secrets"),
-    bi("识别主机、版本与磁盘", "Parsing hosts & OS"),
-    bi("识别伴生架构组件栈", "Detecting companions"),
-    bi("合成多组件运行拓扑", "Synthesizing topology"),
-  ];
-  const currentIdx = elapsed < 0.8 ? 0 : elapsed < 2.4 ? 1 : elapsed < 5.5 ? 2 : 3;
+  if (kind === "service") {
+    return (
+      <div className="imp-rpath-card is-service">
+        <div className="imp-rpath-head">
+          <span className="imp-rpath-title">{title}</span>
+          <span className="imp-rpath-count num">{items.length}</span>
+        </div>
+        <div className="imp-rpath-chips">
+          {items.map((sv, idx) => (
+            <span key={`${sv}-${idx}`} className="imp-rpath-svc-chip mono">
+              <span>{sv}</span>
+              <button
+                type="button"
+                aria-label={bi(`移除 ${sv}`, `Remove ${sv}`)}
+                onClick={() => removeAt(idx)}
+              >
+                <IconClose />
+              </button>
+            </span>
+          ))}
+          <div className="imp-rpath-inline-add">
+            <Input
+              size="mini"
+              className="mono"
+              value={draft}
+              placeholder={placeholder}
+              onChange={setDraft}
+              onPressEnter={commit}
+              onBlur={commit}
+            />
+            <button
+              type="button"
+              className="imp-rpath-add-btn"
+              disabled={!draft.trim()}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={commit}
+              aria-label={bi("添加服务单元", "Add service unit")}
+            >
+              <IconPlus />
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="imp-ai-stage" role="status" aria-live="polite">
-      <div className="imp-ai-stage-head">
-        <span className="imp-ai-stage-title">
-          <span className="imp-ai-pulse" />
-          {aiEnabled
-            ? bi("AI 正在解析现场回显并识别多组件架构…", "AI is analyzing input & detecting companion stack...")
-            : bi("内置规则引擎正在提取基线与伴生组件…", "Rule engine is extracting baseline & companions...")}
-        </span>
-        <span className="mono small muted num">{elapsed.toFixed(1)}s</span>
+    <div className="imp-rpath-card">
+      <div className="imp-rpath-head">
+        <span className="imp-rpath-title">{title}</span>
+        <span className="imp-rpath-count num">{items.length}</span>
       </div>
-      <div className="imp-ai-steps">
-        {stages.map((label, idx) => {
-          const done = idx < currentIdx;
-          const on = idx === currentIdx;
-          return (
-            <div key={idx} className={`imp-ai-step ${done ? "is-done" : on ? "is-active" : ""}`}>
-              <span className="imp-ai-step-dot" />
-              <span>{label}</span>
+      {items.length > 0 && (
+        <div className={`imp-rpath-rows ${twoCol ? "is-two-col" : ""}`}>
+          {items.map((p, idx) => (
+            <div key={`${p}-${idx}`} className="imp-rpath-row">
+              <span className="imp-rpath-ic" aria-hidden>
+                {kind === "file" ? <IconFile /> : <IconFolder />}
+              </span>
+              <Tooltip content={p} mini>
+                <span className="imp-rpath-val mono">{p}</span>
+              </Tooltip>
+              <button
+                type="button"
+                className="imp-rpath-del"
+                aria-label={bi(`移除 ${p}`, `Remove ${p}`)}
+                onClick={() => removeAt(idx)}
+              >
+                <IconClose />
+              </button>
             </div>
-          );
-        })}
+          ))}
+        </div>
+      )}
+      <div className="imp-rpath-foot-add">
+        <Input
+          size="small"
+          className="mono"
+          value={draft}
+          placeholder={placeholder}
+          onChange={setDraft}
+          onPressEnter={commit}
+        />
+        <Button size="small" icon={<IconPlus />} disabled={!draft.trim()} onClick={commit}>
+          {bi("添加", "Add")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function RuntimePathsEditor({
+  serviceUnits,
+  onServiceUnitsChange,
+  configPaths,
+  onConfigPathsChange,
+  dataDirs,
+  onDataDirsChange,
+  logDirs,
+  onLogDirsChange,
+  servicePlaceholder,
+  configPlaceholder,
+  dataPlaceholder,
+  logPlaceholder,
+}: {
+  serviceUnits: string[];
+  onServiceUnitsChange: (v: string[]) => void;
+  configPaths: string[];
+  onConfigPathsChange: (v: string[]) => void;
+  dataDirs: string[];
+  onDataDirsChange: (v: string[]) => void;
+  logDirs: string[];
+  onLogDirsChange: (v: string[]) => void;
+  servicePlaceholder?: string;
+  configPlaceholder?: string;
+  dataPlaceholder?: string;
+  logPlaceholder?: string;
+}) {
+  return (
+    <div className="imp-rpath-grid">
+      <RuntimePathListCard
+        title={bi("系统服务单元", "Service Units")}
+        items={serviceUnits}
+        onChange={onServiceUnitsChange}
+        placeholder={servicePlaceholder || "patroni.service"}
+        kind="service"
+      />
+      <RuntimePathListCard
+        title={bi("配置文件路径", "Config Paths")}
+        items={configPaths}
+        onChange={onConfigPathsChange}
+        placeholder={configPlaceholder || "/etc/patroni/patroni.yml"}
+        kind="file"
+        twoCol
+      />
+      <div className="imp-rpath-dirs">
+        <RuntimePathListCard
+          title={bi("数据目录", "Data Directories")}
+          items={dataDirs}
+          onChange={onDataDirsChange}
+          placeholder={dataPlaceholder || "/data/pg"}
+          kind="dir"
+        />
+        <RuntimePathListCard
+          title={bi("日志目录", "Log Directories")}
+          items={logDirs}
+          onChange={onLogDirsChange}
+          placeholder={logPlaceholder || "/var/log/postgresql"}
+          kind="dir"
+        />
+      </div>
+    </div>
+  );
+}
+
+const COMPANION_GENERAL_ICONS = [
+  "balance",
+  "vip",
+  "gateway",
+  "cloud",
+  "storage",
+  "database",
+  "cache",
+  "queue",
+  "monitor",
+  "cluster",
+  "server",
+  "network",
+  "key",
+  "file",
+];
+
+const COMPANION_BRAND_ICONS = [
+  "haproxy",
+  "keepalived",
+  "nginx",
+  "elb",
+  "envoy",
+  "traefik",
+  "patroni",
+  "etcd",
+  "zookeeper",
+  "consul",
+  "prometheus",
+  "grafana",
+  "zabbix",
+  "docker",
+  "kubernetes",
+  "minio",
+];
+
+const COMPANION_QUICK_ICONS = [
+  "balance",
+  "vip",
+  "elb",
+  "haproxy",
+  "nginx",
+  "keepalived",
+  "storage",
+  "monitor",
+  "cloud",
+  "server",
+];
+
+function defaultGlyphForCompanionKind(kind: string): { icon: string; color: string } {
+  switch (kind) {
+    case "proxy":
+      return { icon: "balance", color: "blue" };
+    case "vip":
+      return { icon: "vip", color: "teal" };
+    case "ha_manager":
+      return { icon: "cluster", color: "indigo" };
+    case "dcs":
+      return { icon: "kv", color: "blue" };
+    case "pooler":
+      return { icon: "network", color: "indigo" };
+    case "backup":
+      return { icon: "storage", color: "green" };
+    case "monitoring":
+      return { icon: "monitor", color: "coral" };
+    case "os_component":
+      return { icon: "server", color: "slate" };
+    default:
+      return { icon: "cloud", color: "blue" };
+  }
+}
+
+function CompanionIconPicker({
+  icon,
+  color,
+  onSelect,
+  children,
+}: {
+  icon: string;
+  color: string;
+  onSelect: (next: { icon: string; color: string }) => void;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const brandSelected = isBrandIcon(icon);
+  return (
+    <Popover
+      trigger="click"
+      position="bl"
+      popupVisible={open}
+      onVisibleChange={setOpen}
+      content={
+        <div className="imp-icon-pop">
+          <div className="imp-icon-pop-sec">
+            <span className="imp-icon-pop-lbl">{bi("通用架构图标", "General Icons")}</span>
+            <div className="imp-icon-pop-grid">
+              {COMPANION_GENERAL_ICONS.map((ic) => (
+                <button
+                  key={ic}
+                  type="button"
+                  className={`imp-icon-pop-btn ${icon === ic ? "on" : ""}`}
+                  title={ic}
+                  onClick={() => onSelect({ icon: ic, color })}
+                >
+                  <AppGlyph id={`pick-${ic}`} icon={ic} color={color} size={24} />
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="imp-icon-pop-sec">
+            <span className="imp-icon-pop-lbl">{bi("常见品牌 / 组件图标", "Brand & Component Logos")}</span>
+            <div className="imp-icon-pop-grid">
+              {COMPANION_BRAND_ICONS.map((ic) => (
+                <button
+                  key={ic}
+                  type="button"
+                  className={`imp-icon-pop-btn ${icon === ic ? "on" : ""}`}
+                  title={ic}
+                  onClick={() => {
+                    onSelect({ icon: ic, color });
+                    setOpen(false);
+                  }}
+                >
+                  <AppGlyph id={`pick-${ic}`} icon={ic} color={color} size={24} />
+                </button>
+              ))}
+            </div>
+          </div>
+          {!brandSelected && (
+            <div className="imp-icon-pop-sec">
+              <span className="imp-icon-pop-lbl">{bi("图标配色", "Tile Color")}</span>
+              <div className="imp-color-swatches">
+                {COLORS.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    className={`imp-color-swatch ${color === c.id ? "on" : ""}`}
+                    style={{ background: `linear-gradient(180deg, ${c.tile[0]}, ${c.tile[1]})` }}
+                    title={c.label}
+                    onClick={() => onSelect({ icon, color: c.id })}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      }
+    >
+      {children}
+    </Popover>
+  );
+}
+
+type EndpointPreset = {
+  value: string;
+  label: string;
+  group: "lb" | "direct";
+  defaultRole: "readwrite" | "readonly" | "admin";
+  short?: string;
+};
+
+function getEndpointPresets(): EndpointPreset[] {
+  return [
+    { value: "vip", label: bi("VIP 虚拟 IP（Keepalived）", "Virtual IP (VIP)"), group: "lb", defaultRole: "readwrite", short: "VIP" },
+    { value: "eip", label: bi("EIP 弹性公网 IP", "Elastic IP (EIP)"), group: "lb", defaultRole: "readwrite", short: "EIP" },
+    { value: "f5", label: bi("F5 负载均衡", "F5 Load Balancer"), group: "lb", defaultRole: "readwrite", short: "F5" },
+    { value: "elb", label: bi("ELB 云负载均衡", "Cloud ELB"), group: "lb", defaultRole: "readwrite", short: "ELB" },
+    { value: "slb", label: bi("SLB 云负载均衡", "Cloud SLB"), group: "lb", defaultRole: "readwrite", short: "SLB" },
+    { value: "lvs", label: bi("LVS 四层均衡", "LVS L4 LB"), group: "lb", defaultRole: "readwrite", short: "LVS" },
+    { value: "haproxy", label: bi("HAProxy 代理入口", "HAProxy Proxy"), group: "lb", defaultRole: "readwrite", short: "HAProxy" },
+    { value: "nginx", label: bi("Nginx 代理入口", "Nginx Proxy"), group: "lb", defaultRole: "readwrite", short: "Nginx" },
+    { value: "pooler", label: bi("连接池入口（PgBouncer）", "Connection Pooler"), group: "lb", defaultRole: "readwrite", short: bi("连接池", "Pooler") },
+    { value: "dns", label: bi("DNS 域名入口", "DNS Endpoint"), group: "lb", defaultRole: "readwrite", short: "DNS" },
+    { value: "writer", label: bi("主库读写入口", "Primary Read/Write"), group: "direct", defaultRole: "readwrite", short: bi("主库读写", "Primary") },
+    { value: "reader", label: bi("从库只读入口", "Replica Read-Only"), group: "direct", defaultRole: "readonly", short: bi("从库只读", "Replica") },
+    { value: "admin", label: bi("管理 / 控制台入口", "Admin / Console"), group: "direct", defaultRole: "admin", short: bi("管理入口", "Admin") },
+    { value: "metrics", label: bi("监控指标入口", "Metrics Endpoint"), group: "direct", defaultRole: "admin", short: bi("监控指标", "Metrics") },
+  ];
+}
+
+function EndpointListEditor({
+  endpoints,
+  defaultPort,
+  onChange,
+}: {
+  endpoints: ImportedEndpoint[];
+  defaultPort?: number;
+  onChange: (next: ImportedEndpoint[]) => void;
+}) {
+  useLang();
+  const presets = getEndpointPresets();
+  const presetByVal = new Map(presets.map((p) => [p.value, p]));
+  const lbPresets = presets.filter((p) => p.group === "lb");
+  const directPresets = presets.filter((p) => p.group === "direct");
+  const quickAdds = ["vip", "eip", "f5", "elb", "writer", "reader"];
+
+  const addPreset = (val: string) => {
+    const p = presetByVal.get(val);
+    onChange([
+      ...endpoints,
+      { name: val, address: "", role: p?.defaultRole || "readwrite" },
+    ]);
+  };
+
+  return (
+    <div className="imp-ep-editor">
+      {endpoints.length > 0 && (
+        <div className="imp-table-rows">
+          <div className="imp-ep-row imp-col-heads">
+            <span>{bi("入口类型 / 名称（可选或自填）", "Entry Type / Name")}</span>
+            <span>{bi("访问地址 : 端口", "Address : Port")}</span>
+            <span>{bi("入口用途", "Role")}</span>
+            <span />
+          </div>
+          {endpoints.map((ep, idx) => {
+            const rawName = (ep.name || "").trim();
+            const hasInPresets = presetByVal.has(rawName);
+            return (
+              <div key={idx} className="imp-ep-row">
+                <Select
+                  allowCreate
+                  showSearch
+                  allowClear
+                  value={rawName || undefined}
+                  placeholder={bi("选择 VIP / EIP / F5 或自填…", "Pick VIP / EIP / F5 or type…")}
+                  onChange={(v) => {
+                    const nextVal = String(v || "").trim();
+                    const matched = presetByVal.get(nextVal.toLowerCase());
+                    onChange(
+                      endpoints.map((r, i) =>
+                        i === idx
+                          ? {
+                              ...r,
+                              name: nextVal,
+                              role: matched ? matched.defaultRole : r.role,
+                            }
+                          : r,
+                      ),
+                    );
+                  }}
+                >
+                  {rawName && !hasInPresets && (
+                    <Select.Option value={rawName}>{rawName}</Select.Option>
+                  )}
+                  <Select.OptGroup label={bi("外部 / 负载均衡入口", "External & Load Balancers")}>
+                    {lbPresets.map((p) => (
+                      <Select.Option key={p.value} value={p.value}>
+                        {p.label}
+                      </Select.Option>
+                    ))}
+                  </Select.OptGroup>
+                  <Select.OptGroup label={bi("节点直连 / 管理用途", "Direct & Management")}>
+                    {directPresets.map((p) => (
+                      <Select.Option key={p.value} value={p.value}>
+                        {p.label}
+                      </Select.Option>
+                    ))}
+                  </Select.OptGroup>
+                </Select>
+                <Input
+                  className="mono"
+                  placeholder={`10.0.1.100:${defaultPort || 5432}`}
+                  value={ep.address}
+                  onChange={(v) =>
+                    onChange(endpoints.map((r, i) => (i === idx ? { ...r, address: v } : r)))
+                  }
+                />
+                <Select
+                  value={normalizeEndpointRole(ep.role)}
+                  onChange={(v) =>
+                    onChange(endpoints.map((r, i) => (i === idx ? { ...r, role: v } : r)))
+                  }
+                >
+                  <Select.Option value="readwrite">{bi("读写入口", "Read/Write")}</Select.Option>
+                  <Select.Option value="readonly">{bi("只读入口", "Read-Only")}</Select.Option>
+                  <Select.Option value="admin">{bi("管理入口", "Admin")}</Select.Option>
+                </Select>
+                <Button
+                  size="small"
+                  type="text"
+                  status="danger"
+                  icon={<IconDelete />}
+                  onClick={() => onChange(endpoints.filter((_, i) => i !== idx))}
+                />
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="imp-quick-add">
+        <span className="imp-quick-add-lbl">{bi("快捷添加入口：", "Quick add:")}</span>
+        <div className="imp-quick-add-pills">
+          {quickAdds.map((id) => {
+            const p = presetByVal.get(id)!;
+            return (
+              <button
+                key={id}
+                type="button"
+                className="imp-quick-chip"
+                onClick={() => addPreset(id)}
+              >
+                <IconPlus style={{ fontSize: 10 }} />
+                {p.short || p.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
@@ -1483,7 +2713,9 @@ function CompanionStackEditor({
 }) {
   const [customOpen, setCustomOpen] = useState(false);
   const [customName, setCustomName] = useState("");
-  const [customKind, setCustomKind] = useState("companion");
+  const [customKind, setCustomKind] = useState("proxy");
+  const [customIcon, setCustomIcon] = useState("balance");
+  const [customColor, setCustomColor] = useState("blue");
   const [customPort, setCustomPort] = useState("");
 
   const catalogByID = useMemo(() => new Map(catalog.map((c) => [c.id, c])), [catalog]);
@@ -1509,6 +2741,13 @@ function CompanionStackEditor({
     [hosts],
   );
 
+  const handleCustomKindChange = (nextKind: string) => {
+    setCustomKind(nextKind);
+    const defGlyph = defaultGlyphForCompanionKind(nextKind);
+    setCustomIcon(defGlyph.icon);
+    setCustomColor(defGlyph.color);
+  };
+
   const addCatalogCompanion = (id: string) => {
     const def = catalogByID.get(id);
     if (!def || activeIDs.has(id)) return;
@@ -1516,6 +2755,8 @@ function CompanionStackEditor({
     const nextItem: ImportedCompanion = {
       component: def.id,
       display_name: def.name,
+      icon: def.icon,
+      color: def.color,
       kind: def.kind,
       role: def.default_role,
       hosts: validHostNames,
@@ -1530,22 +2771,30 @@ function CompanionStackEditor({
 
   const addCustomCompanion = () => {
     const name = customName.trim();
-    if (!name) return;
-    const id = name.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "") || "companion";
+    if (!name) {
+      Message.warning(bi("请填写伴生组件名称", "Please enter a component name"));
+      return;
+    }
+    const id = name.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "") || `comp-${Date.now()}`;
     if (activeIDs.has(id)) {
       Message.warning(bi("该伴生组件已存在", "Companion already added"));
       return;
     }
-    const pn = parseInt(customPort.trim(), 10);
+    const ports = customPort
+      .split(/[,，\s]+/)
+      .map((s) => parseInt(s.trim(), 10))
+      .filter((n) => Number.isFinite(n) && n > 0 && n <= 65535);
     onChange([
       ...companions,
       {
         component: id,
         display_name: name,
+        icon: customIcon,
+        color: customColor,
         kind: customKind,
         role: "node",
         hosts: validHostNames,
-        ports: Number.isFinite(pn) && pn > 0 ? [pn] : [],
+        ports,
         evidence: bi("手工添加", "Added manually"),
       },
     ]);
@@ -1579,10 +2828,10 @@ function CompanionStackEditor({
               {primaryVersion && <span className="mono small muted">{primaryVersion}</span>}
             </div>
             <div className="imp-stack-meta">
-              <span>{bi(`${validHostNames.length} 台节点`, `${validHostNames.length} host(s)`)}</span>
+              <span className="imp-stack-hosts">{bi(`${validHostNames.length} 台节点`, `${validHostNames.length} host(s)`)}</span>
             </div>
           </div>
-          <span className="small muted">{bi("核心组件", "Core")}</span>
+          <span className="small muted imp-stack-core-lbl">{bi("核心组件", "Core")}</span>
         </div>
 
         {/* Companion component rows */}
@@ -1590,31 +2839,48 @@ function CompanionStackEditor({
           const def = catalogByID.get(cm.component);
           const effKind = effectiveCompanionKind(cm.component, cm.kind);
           const km = companionKindMeta(effKind);
+          const fallbackGlyph = defaultGlyphForCompanionKind(effKind);
+          const curIcon = cm.icon || def?.icon || companionIcon(cm.component) || fallbackGlyph.icon;
+          const curColor = cm.color || (def?.color === "emerald" ? "green" : def?.color) || fallbackGlyph.color;
           const hostCount = cm.placement
             ? new Set(Object.values(cm.placement).flat()).size
             : cm.hosts?.length || validHostNames.length;
           return (
             <div key={`${cm.component}-${idx}`} className="imp-stack-item">
-              <AppGlyph
-                id={cm.component}
-                icon={def?.icon || companionIcon(cm.component)}
-                color={def?.color || "slate"}
-                size={28}
-              />
+              <CompanionIconPicker
+                icon={curIcon}
+                color={curColor}
+                onSelect={({ icon: nextIc, color: nextCol }) =>
+                  onChange(
+                    companions.map((item, i) =>
+                      i === idx ? { ...item, icon: nextIc, color: nextCol } : item,
+                    ),
+                  )
+                }
+              >
+                <button
+                  type="button"
+                  className="imp-stack-icon-btn"
+                  title={bi("点击更换图标与配色", "Click to customize icon & color")}
+                >
+                  <AppGlyph id={cm.component} icon={curIcon} color={curColor} size={30} />
+                </button>
+              </CompanionIconPicker>
               <div className="imp-stack-main">
                 <div className="imp-stack-top">
-                  <strong>{cm.display_name || def?.name || cm.component}</strong>
+                  <strong>{canonicalCompanionTitle(cm.component, cm.display_name || def?.name)}</strong>
                   <span className={`imp-kind-pill ${km.tone}`}>{km.label}</span>
                   {cm.ports && cm.ports.length > 0 && (
-                    <span className="mono small muted">:{cm.ports.join(", :")}</span>
+                    <span className="mono small muted imp-stack-ports">:{cm.ports.join(", :")}</span>
                   )}
                 </div>
                 <div className="imp-stack-meta">
-                  <span>{bi(`${hostCount} 台节点`, `${hostCount} host(s)`)}</span>
+                  <span className="imp-stack-hosts">{bi(`${hostCount} 台节点`, `${hostCount} host(s)`)}</span>
                   {validHostNames.length > 1 && hostCount < validHostNames.length && effKind !== "backup" && effKind !== "monitoring" && effKind !== "os_component" && (
                     <button
                       type="button"
                       className="cl-imp-notes-toggle"
+                      style={{ flexShrink: 0 }}
                       onClick={() =>
                         onChange(
                           companions.map((item, i) =>
@@ -1628,7 +2894,14 @@ function CompanionStackEditor({
                       {bi(`展开至全部 ${validHostNames.length} 节点`, `Expand to all ${validHostNames.length} hosts`)}
                     </button>
                   )}
-                  {cm.evidence && <span>· {cm.evidence}</span>}
+                  {cm.evidence && (
+                    <>
+                      <span className="imp-meta-sep" aria-hidden>·</span>
+                      <span className="imp-stack-ev" title={cm.evidence}>
+                        {cm.evidence}
+                      </span>
+                    </>
+                  )}
                 </div>
               </div>
               <div className="imp-stack-controls">
@@ -1673,7 +2946,7 @@ function CompanionStackEditor({
           })}
           <button
             type="button"
-            className="imp-quick-chip"
+            className={`imp-quick-chip ${customOpen ? "is-open" : ""}`}
             onClick={() => setCustomOpen((v) => !v)}
           >
             <IconPlus style={{ fontSize: 10 }} />
@@ -1683,33 +2956,86 @@ function CompanionStackEditor({
       </div>
 
       {customOpen && (
-        <div className="imp-ep-row" style={{ paddingTop: 4 }}>
-          <Input
-            size="small"
-            placeholder={bi("组件名，如 Keepalived", "Name, e.g. Keepalived")}
-            value={customName}
-            onChange={setCustomName}
-          />
-          <Select size="small" value={customKind} onChange={setCustomKind}>
-            <Select.Option value="ha_manager">{bi("高可用管理", "HA Manager")}</Select.Option>
-            <Select.Option value="dcs">{bi("分布式协调 DCS", "DCS / Quorum")}</Select.Option>
-            <Select.Option value="proxy">{bi("代理 / 均衡", "Proxy / LB")}</Select.Option>
-            <Select.Option value="vip">{bi("虚拟 IP", "VIP")}</Select.Option>
-            <Select.Option value="pooler">{bi("连接池", "Pooler")}</Select.Option>
-            <Select.Option value="backup">{bi("备份工具", "Backup")}</Select.Option>
-            <Select.Option value="monitoring">{bi("监控采集", "Monitoring")}</Select.Option>
-            <Select.Option value="os_component">{bi("OS 组件", "OS Component")}</Select.Option>
-            <Select.Option value="companion">{bi("其他伴生组件", "Companion")}</Select.Option>
-          </Select>
-          <Input
-            size="small"
-            placeholder={bi("端口", "Port")}
-            value={customPort}
-            onChange={setCustomPort}
-          />
-          <Button size="small" type="primary" onClick={addCustomCompanion}>
-            {bi("加", "Add")}
-          </Button>
+        <div className="imp-custom-comp-box">
+          <div className="imp-custom-comp-grid">
+            <CompanionIconPicker
+              icon={customIcon}
+              color={customColor}
+              onSelect={({ icon: ic, color: col }) => {
+                setCustomIcon(ic);
+                setCustomColor(col);
+              }}
+            >
+              <button
+                type="button"
+                className="imp-custom-icon-trigger"
+                title={bi("点击选择图标与配色", "Choose icon & color")}
+              >
+                <AppGlyph id="custom-preview" icon={customIcon} color={customColor} size={32} />
+              </button>
+            </CompanionIconPicker>
+            <Input
+              placeholder={bi("组件名，如 F5 / Keepalived / Zabbix", "Name, e.g. F5 / Keepalived / Zabbix")}
+              value={customName}
+              onChange={setCustomName}
+              onPressEnter={addCustomCompanion}
+            />
+            <Select value={customKind} onChange={handleCustomKindChange}>
+              <Select.Option value="proxy">{bi("代理 / 均衡", "Proxy / LB")}</Select.Option>
+              <Select.Option value="vip">{bi("虚拟 IP / VIP", "VIP / VRRP")}</Select.Option>
+              <Select.Option value="ha_manager">{bi("高可用管理", "HA Manager")}</Select.Option>
+              <Select.Option value="dcs">{bi("分布式协调 DCS", "DCS / Quorum")}</Select.Option>
+              <Select.Option value="pooler">{bi("连接池", "Pooler")}</Select.Option>
+              <Select.Option value="backup">{bi("备份工具", "Backup")}</Select.Option>
+              <Select.Option value="monitoring">{bi("监控采集", "Monitoring")}</Select.Option>
+              <Select.Option value="os_component">{bi("OS 组件", "OS Component")}</Select.Option>
+              <Select.Option value="companion">{bi("其他伴生组件", "Companion")}</Select.Option>
+            </Select>
+            <Input
+              className="mono"
+              placeholder={bi("端口(选填)", "Port")}
+              value={customPort}
+              onChange={setCustomPort}
+              onPressEnter={addCustomCompanion}
+            />
+          </div>
+
+          <div className="imp-custom-comp-foot">
+            <div className="imp-custom-icon-strip">
+              <span className="imp-custom-icon-lbl">{bi("图标：", "Icon:")}</span>
+              {COMPANION_QUICK_ICONS.map((ic) => (
+                <button
+                  key={ic}
+                  type="button"
+                  className={`imp-icon-pop-btn ${customIcon === ic ? "on" : ""}`}
+                  title={ic}
+                  onClick={() => setCustomIcon(ic)}
+                >
+                  <AppGlyph id={`q-${ic}`} icon={ic} color={customColor} size={22} />
+                </button>
+              ))}
+              <CompanionIconPicker
+                icon={customIcon}
+                color={customColor}
+                onSelect={({ icon: ic, color: col }) => {
+                  setCustomIcon(ic);
+                  setCustomColor(col);
+                }}
+              >
+                <button type="button" className="imp-icon-more-btn">
+                  {bi("更多 / 配色", "More")}
+                </button>
+              </CompanionIconPicker>
+            </div>
+            <div className="imp-custom-comp-acts">
+              <Button size="small" onClick={() => setCustomOpen(false)}>
+                {bi("取消", "Cancel")}
+              </Button>
+              <Button size="small" type="primary" icon={<IconPlus />} onClick={addCustomCompanion}>
+                {bi("添加组件", "Add Component")}
+              </Button>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -1731,8 +3057,16 @@ export function ImportClusterPage({
   const [loadingPresets, setLoadingPresets] = useState(true);
 
   const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [maxStepReached, setMaxStepReached] = useState<1 | 2 | 3>(1);
+  const [reviewTraceOpen, setReviewTraceOpen] = useState(false);
+  const [reviewDetailsOpen, setReviewDetailsOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [catFilter, setCatFilter] = useState("all");
+
+  const goStep = useCallback((next: 1 | 2 | 3) => {
+    setStep(next);
+    setMaxStepReached((prev) => (next > prev ? next : prev));
+  }, []);
 
   // Step 1: Middleware & Cluster identity
   const [isCustom, setIsCustom] = useState(false);
@@ -1755,10 +3089,25 @@ export function ImportClusterPage({
   const [probeSafe, setProbeSafe] = useState(true);
   const [probeSource, setProbeSource] = useState<"template" | "ai">("template");
   const [probeGenerating, setProbeGenerating] = useState(false);
+  const [probeLive, setProbeLive] = useState<LiveAIState<ImportLiveKind> | null>(null);
+  const [probeTrace, setProbeTrace] = useState<RehearsalTrace | null>(null);
+  const [lastProbeFocus, setLastProbeFocus] = useState("");
+  const probeAbortRef = useRef<AbortController | null>(null);
   const [pasteText, setPasteText] = useState("");
   const [images, setImages] = useState<string[]>([]);
   const [parsing, setParsing] = useState(false);
+  const [parseLive, setParseLive] = useState<LiveAIState<ImportLiveKind> | null>(null);
+  const [parseTrace, setParseTrace] = useState<RehearsalTrace | null>(null);
+  const [parseInputsCollapsed, setParseInputsCollapsed] = useState(false);
+  const parseAbortRef = useRef<AbortController | null>(null);
   const [parseInfo, setParseInfo] = useState<{ parser: string; warnings: string[]; missing: string[]; companionCount: number } | null>(null);
+
+  useEffect(() => {
+    return () => {
+      probeAbortRef.current?.abort();
+      parseAbortRef.current?.abort();
+    };
+  }, []);
 
   // Step 2 manual & Step 3 editable baseline
   const [hosts, setHosts] = useState<HostRow[]>([{ name: "node-1", ip: "", role: "primary", disk: "" }]);
@@ -1842,51 +3191,94 @@ export function ImportClusterPage({
     ];
   }, [isCustom, selectedPreset]);
 
-  const wizardModelPick = useModelPick("chat");
+  const wizardModelPick = useModelPick("assistant");
   const wizardAIOpts = useAIOptions();
 
   const fetchImportProbe = useCallback(
     async (opts?: { useAI?: boolean; focus?: string }) => {
-      if (opts?.useAI) setProbeGenerating(true);
+      type ProbeResp = {
+        script: string;
+        filename: string;
+        safe: boolean;
+        source?: "template" | "ai";
+        ai_note?: string;
+        trace?: RehearsalTrace;
+      };
+      const payload = {
+        component: effectiveCompID,
+        display_name: effectiveDisplayName,
+        deploy_method: deployMethod,
+        use_ai: Boolean(opts?.useAI),
+        focus: opts?.focus?.trim() || undefined,
+        model: wizardModelPick.ref || undefined,
+        think: wizardAIOpts.pref.think || undefined,
+      };
+      if (!opts?.useAI) {
+        try {
+          const res = await api<ProbeResp>("/api/clusters/import/probe-script", {
+            method: "POST",
+            body: JSON.stringify(payload),
+          });
+          setProbeScript(res.script);
+          setProbeFilename(res.filename);
+          setProbeSafe(res.safe);
+          setProbeSource(res.source === "ai" ? "ai" : "template");
+          setProbeLive(null);
+          setProbeTrace(null);
+        } catch {
+          /* ignore silent template refresh failure */
+        }
+        return;
+      }
+
+      probeAbortRef.current?.abort();
+      const ac = new AbortController();
+      probeAbortRef.current = ac;
+      setLastProbeFocus(opts.focus || "");
+      setProbeGenerating(true);
+      const modelHint = wizardModelPick.current?.model || wizardModelPick.ref?.split("|")[1];
+      setProbeLive(
+        buildImportInitialLive(
+          "import-probe",
+          bi("AI 正在定制 100% 只读采集探针", "AI Tailoring 100% Read-Only Probe"),
+          modelHint
+            ? { model: modelHint, provider: wizardModelPick.current?.provider }
+            : undefined,
+        ),
+      );
       try {
-        const res = await api<{
-          script: string;
-          filename: string;
-          safe: boolean;
-          source?: "template" | "ai";
-          ai_note?: string;
-        }>("/api/clusters/import/probe-script", {
-          method: "POST",
-          body: JSON.stringify({
-            component: effectiveCompID,
-            display_name: effectiveDisplayName,
-            deploy_method: deployMethod,
-            use_ai: Boolean(opts?.useAI),
-            focus: opts?.focus?.trim() || undefined,
-            model: wizardModelPick.ref || undefined,
-            think: wizardAIOpts.pref.think || undefined,
-          }),
-        });
+        const res = await streamPipelineSSE<ProbeResp, ImportLiveKind>(
+          "/api/clusters/import/probe-script",
+          payload,
+          (updater) => setProbeLive((prev) => (prev ? updater(prev) : prev)),
+          ac.signal,
+        );
+        if (ac.signal.aborted) return;
         setProbeScript(res.script);
         setProbeFilename(res.filename);
         setProbeSafe(res.safe);
         setProbeSource(res.source === "ai" ? "ai" : "template");
-        if (opts?.useAI) {
-          if (res.source === "ai") {
-            Message.success(bi("AI 已按现场特点定制精炼只读探针（已通过安全扫描）", "AI tailored a concise read-only probe (verified safe)"));
-          } else if (res.ai_note) {
-            Message.warning(res.ai_note);
-          }
+        setProbeTrace(res.trace || null);
+        setProbeLive(null);
+        if (res.source === "ai") {
+          Message.success(bi("AI 已按现场特点定制精炼只读探针（已通过安全扫描）", "AI tailored a concise read-only probe (verified safe)"));
+        } else if (res.ai_note) {
+          Message.warning(res.ai_note);
         }
       } catch (e) {
-        if (opts?.useAI) {
-          Message.error((e as Error).message || bi("AI 定制探针失败", "AI probe generation failed"));
+        if (ac.signal.aborted || (e as Error)?.name === "AbortError") {
+          setProbeLive(null);
+          return;
         }
+        setProbeLive((prev) => (prev ? markLiveStateError(prev, e) : prev));
       } finally {
-        if (opts?.useAI) setProbeGenerating(false);
+        if (probeAbortRef.current === ac) {
+          probeAbortRef.current = null;
+        }
+        setProbeGenerating(false);
       }
     },
-    [effectiveCompID, effectiveDisplayName, deployMethod],
+    [effectiveCompID, effectiveDisplayName, deployMethod, wizardModelPick.ref, wizardAIOpts.pref.think],
   );
 
   // Fetch read-only probe script when entering Step 2 in probe mode
@@ -1929,20 +3321,30 @@ export function ImportClusterPage({
   const filteredCatalog = useMemo(() => filterList(presetsData?.catalog || []), [presetsData, search, catFilter]);
   const filteredPresets = useMemo(() => filterList(presetsData?.presets || []), [presetsData, search, catFilter]);
 
-  const selectPreset = useCallback((item: ImportPresetItem) => {
-    setIsCustom(false);
-    setSelectedPreset(item);
-    setVersion(item.versions?.[0] || "");
-    setExactVersion("");
-    if (item.roles?.length) {
-      setHosts((prev) =>
-        prev.map((h, i) => ({
-          ...h,
-          role: item.roles[Math.min(i, item.roles.length - 1)]?.id || item.roles[0].id,
-        })),
-      );
-    }
-  }, []);
+  const selectPreset = useCallback(
+    (item: ImportPresetItem) => {
+      if (!isCustom && selectedPreset?.id === item.id) {
+        return;
+      }
+      setIsCustom(false);
+      setSelectedPreset(item);
+      setVersion((cur) => (cur.trim() ? cur : item.versions?.[0] || ""));
+      if (!parseInfo) {
+        setExactVersion("");
+      }
+      if (item.roles?.length) {
+        setHosts((prev) => {
+          const hasPopulatedHosts = prev.some((h) => h.ip.trim().length > 0);
+          if (hasPopulatedHosts) return prev;
+          return prev.map((h, i) => ({
+            ...h,
+            role: item.roles[Math.min(i, item.roles.length - 1)]?.id || item.roles[0].id,
+          }));
+        });
+      }
+    },
+    [isCustom, parseInfo, selectedPreset?.id],
+  );
 
   const handlePlatformChange = useCallback((v: string) => setPlatform(v), []);
   const handleDeployMethodChange = useCallback((v: string) => setDeployMethod(v), []);
@@ -1954,27 +3356,57 @@ export function ImportClusterPage({
 
   const validHosts = useMemo(() => hosts.filter((h) => h.name.trim() || h.ip.trim()), [hosts]);
 
-  const runParseAndProceed = async () => {
+  const runParseAndProceed = async (opts?: { useAI?: boolean }) => {
     if (parsing) return;
     if (!pasteText.trim() && images.length === 0) {
       Message.warning(bi("请先粘贴采集脚本输出或文档文本，或上传截图", "Paste probe output / text or upload screenshots first"));
       return;
     }
+    const useAI = opts?.useAI ?? Boolean(presetsData?.ai_enabled);
+    parseAbortRef.current?.abort();
+    const ac = new AbortController();
+    parseAbortRef.current = ac;
     setParsing(true);
+    const modelHint = wizardModelPick.current?.model || wizardModelPick.ref?.split("|")[1];
+    if (useAI) {
+      setParseInputsCollapsed(true);
+      setParseLive(
+        buildImportInitialLive(
+          "import-parse",
+          bi("AI 正在解析现场回显与多组件架构", "AI Parsing Evidence & Multi-Component Stack"),
+          modelHint
+            ? { model: modelHint, provider: wizardModelPick.current?.provider }
+            : undefined,
+        ),
+      );
+    } else {
+      setParseInputsCollapsed(false);
+      setParseLive(null);
+    }
     try {
-      const res = await api<ParseResp>("/api/clusters/import/parse", {
-        method: "POST",
-        body: JSON.stringify({
-          component: effectiveCompID,
-          display_name: effectiveDisplayName,
-          source_kind: inputMode === "probe" ? "probe" : "ai_doc",
-          text: pasteText,
-          images,
-          use_ai: true,
-          model: wizardModelPick.ref || undefined,
-          think: wizardAIOpts.pref.think || undefined,
-        }),
-      });
+      const payload = {
+        component: effectiveCompID,
+        display_name: effectiveDisplayName,
+        source_kind: inputMode === "probe" ? "probe" : "ai_doc",
+        text: pasteText,
+        images,
+        use_ai: useAI,
+        model: wizardModelPick.ref || undefined,
+        think: wizardAIOpts.pref.think || undefined,
+      };
+      const res = useAI
+        ? await streamPipelineSSE<ParseResp, ImportLiveKind>(
+            "/api/clusters/import/parse",
+            payload,
+            (updater) => setParseLive((prev) => (prev ? updater(prev) : prev)),
+            ac.signal,
+          )
+        : await api<ParseResp>("/api/clusters/import/parse", {
+            method: "POST",
+            body: JSON.stringify(payload),
+            signal: ac.signal,
+          });
+      if (ac.signal.aborted) return;
       const d = res.draft;
       if (d.suggested_id && !clusterId.trim() && CLUSTER_ID_RE.test(d.suggested_id)) {
         setClusterId(d.suggested_id);
@@ -2007,6 +3439,9 @@ export function ImportClusterPage({
       if (d.packages?.length) setPackages(d.packages);
       if (d.notes) setNotes(d.notes);
 
+      setParseLive(null);
+      setParseInputsCollapsed(false);
+      setParseTrace(res.trace || null);
       setParseInfo({
         parser: res.parser,
         warnings: res.warnings || [],
@@ -2021,10 +3456,24 @@ export function ImportClusterPage({
             )
           : bi("已按内置规则提取基线草稿，请核对后建档", "Baseline extracted by built-in parser; please review"),
       );
-      setStep(3);
+      setReviewTraceOpen(false);
+      setReviewDetailsOpen(false);
+      goStep(3);
     } catch (e) {
-      Message.error((e as Error).message || bi("解析失败", "Parse failed"));
+      if (ac.signal.aborted || (e as Error)?.name === "AbortError") {
+        setParseLive(null);
+        setParseInputsCollapsed(false);
+        return;
+      }
+      if (useAI) {
+        setParseLive((prev) => (prev ? markLiveStateError(prev, e) : prev));
+      } else {
+        Message.error((e as Error).message || bi("解析失败", "Parse failed"));
+      }
     } finally {
+      if (parseAbortRef.current === ac) {
+        parseAbortRef.current = null;
+      }
       setParsing(false);
     }
   };
@@ -2176,6 +3625,7 @@ export function ImportClusterPage({
   }, [effectiveCompID, companionCatalog]);
 
   const idValid = CLUSTER_ID_RE.test(clusterId.trim());
+  const hasReviewDraft = maxStepReached >= 3 || Boolean(parseInfo);
 
   return (
     <div className="imp-page">
@@ -2207,24 +3657,34 @@ export function ImportClusterPage({
               { n: 1 as const, label: bi("识别中间件", "Middleware") },
               { n: 2 as const, label: bi("采集录入节点", "Capture") },
               { n: 3 as const, label: bi("核对基线拓扑", "Review") },
-            ].map((st, i) => (
-              <React.Fragment key={st.n}>
-                {i > 0 && <IconRight className="imp-step-sep" aria-hidden="true" />}
-                <button
-                  type="button"
-                  className={`imp-step-btn ${step === st.n ? "is-active" : step > st.n ? "is-done" : ""}`}
-                  disabled={st.n > step && !(st.n === 2 && canProceedStep1)}
-                  onClick={() => {
-                    if (st.n <= step || (st.n === 2 && canProceedStep1)) setStep(st.n);
-                  }}
-                >
-                  <span className="imp-step-num">
-                    {step > st.n ? <IconCheck /> : st.n}
-                  </span>
-                  <span>{st.label}</span>
-                </button>
-              </React.Fragment>
-            ))}
+            ].map((st, i) => {
+              const unlocked =
+                !parsing &&
+                (st.n === 1 ||
+                  (st.n === 2 && canProceedStep1) ||
+                  (st.n === 3 && canProceedStep1 && (hasReviewDraft || step === 3)));
+              const isDone =
+                st.n !== step &&
+                (st.n < step || (st.n === 3 && hasReviewDraft && canProceedStep1) || (st.n === 2 && maxStepReached >= 2 && canProceedStep1));
+              return (
+                <React.Fragment key={st.n}>
+                  {i > 0 && <IconRight className="imp-step-sep" aria-hidden="true" />}
+                  <button
+                    type="button"
+                    className={`imp-step-btn ${step === st.n ? "is-active" : isDone ? "is-done" : ""}`}
+                    disabled={!unlocked}
+                    onClick={() => {
+                      if (unlocked) goStep(st.n);
+                    }}
+                  >
+                    <span className="imp-step-num">
+                      {isDone ? <IconCheck /> : st.n}
+                    </span>
+                    <span>{st.label}</span>
+                  </button>
+                </React.Fragment>
+              );
+            })}
           </nav>
         </header>
 
@@ -2454,10 +3914,24 @@ export function ImportClusterPage({
                   long
                   size="large"
                   disabled={!canProceedStep1}
-                  onClick={() => setStep(2)}
+                  onClick={() => goStep(2)}
                 >
                   {bi("下一步：采集与识别节点", "Next: Capture & Recognize")} <IconRight />
                 </Button>
+                {hasReviewDraft && canProceedStep1 && (
+                  <Button
+                    long
+                    size="default"
+                    type="secondary"
+                    onClick={() => goStep(3)}
+                  >
+                    {bi(
+                      `直接返回第 3 步核对草稿（${validHosts.length} 台节点）`,
+                      `Return to Step 3 Review (${validHosts.length} hosts)`,
+                    )}{" "}
+                    <IconRight />
+                  </Button>
+                )}
                 {!canProceedStep1 && (
                   <span className="imp-cta-hint">
                     {bi("填写合规的集群标识后即可进入下一步", "Enter a valid Cluster ID to continue")}
@@ -2469,7 +3943,12 @@ export function ImportClusterPage({
         )}
 
         {/* ---------------- STEP 2: 3-in-1 Capture / Parse / Manual ---------------- */}
-        {step === 2 && (
+        {step === 2 && (() => {
+          const focusParseView =
+            (inputMode === "probe" || inputMode === "ai_doc") &&
+            Boolean(parseLive) &&
+            parseInputsCollapsed;
+          return (
           <section className="imp-card imp-step-pane">
             <div className="imp-ctx-strip">
               <div className="imp-ctx-left">
@@ -2483,91 +3962,146 @@ export function ImportClusterPage({
                 <span className="imp-ctx-chip">{effectiveDisplayName}</span>
                 {version && <span className="imp-ctx-chip mono">{version}</span>}
               </div>
-              <Button size="mini" type="text" onClick={() => setStep(1)}>
-                <IconEdit /> {bi("修改中间件或标识", "Change Middleware / ID")}
-              </Button>
-            </div>
-
-            <div className="imp-card-head">
-              <div className="imp-card-head-title">
-                <h2>{bi("选择录入方式（三选一，随时切换）", "Choose Onboarding Input Mode")}</h2>
-                <p>
-                  {bi(
-                    "无需打通 SSH 网络；支持离线只读探针自动识别全栈（主中间件 + Patroni / etcd / LB / 备份）、粘贴文档截图，或手工登记。",
-                    "No SSH network needed: run read-only probe for full-stack discovery, paste docs/screenshots, or enter hosts manually.",
-                  )}
-                </p>
+              <div className="imp-ctx-right">
+                {hasReviewDraft && !parsing && (
+                  <Button
+                    size="mini"
+                    type="secondary"
+                    className="imp-draft-return-btn"
+                    onClick={() => goStep(3)}
+                  >
+                    <IconCheckCircle />
+                    <span>
+                      {bi(
+                        `已保留草稿（${validHosts.length} 节点）· 返回第 3 步`,
+                        `Draft Kept (${validHosts.length} hosts) · Step 3`,
+                      )}
+                    </span>
+                    <IconRight />
+                  </Button>
+                )}
+                <Button size="mini" type="text" disabled={parsing} onClick={() => goStep(1)}>
+                  <IconEdit /> {bi("修改中间件或标识", "Change Middleware / ID")}
+                </Button>
               </div>
             </div>
 
-            <div className="imp-mode-tabs">
-              <button
-                type="button"
-                className={`imp-mode-tab ${inputMode === "probe" ? "on" : ""}`}
-                onClick={() => setInputMode("probe")}
-              >
-                <div className="imp-mode-tab-head">
-                  <span className="imp-mode-tab-title">
-                    <span className="imp-mode-ic"><IconCode /></span>
-                    {bi("一键只读采集脚本", "Read-Only Probe Script")}
-                  </span>
-                  <span className="imp-rec-tag">{bi("推荐 · 全栈识别", "Full-Stack")}</span>
-                </div>
-                <span className="imp-mode-desc">
-                  {bi(
-                    "自动采集主节点/从节点、Patroni/etcd/LB 伴生组件、数据盘、路径与 CVE 软件包清单。",
-                    "Auto-collects hosts, Patroni/etcd/LB companions, data disks, paths, and CVE packages.",
-                  )}
-                </span>
-              </button>
-
-              <button
-                type="button"
-                className={`imp-mode-tab ${inputMode === "ai_doc" ? "on" : ""}`}
-                onClick={() => setInputMode("ai_doc")}
-              >
-                <div className="imp-mode-tab-head">
-                  <span className="imp-mode-tab-title">
-                    <span className="imp-mode-ic"><IconFile /></span>
-                    {bi("粘贴文档 / 配置 / 截图", "Paste Docs / Config / Image")}
-                  </span>
-                  {presetsData?.ai_enabled && (
-                    <span className="imp-rec-tag">{bi("AI 多模态", "AI Vision")}</span>
-                  )}
-                </div>
-                <span className="imp-mode-desc">
-                  {bi(
-                    "直接粘贴 CMDB 资产表、交接文档、patroni.yml / etcd.conf 或架构拓扑截图（支持 Ctrl+V）。",
-                    "Paste CMDB tables, handover docs, patroni.yml / etcd.conf, or architecture screenshots.",
-                  )}
-                </span>
-              </button>
-
-              <button
-                type="button"
-                className={`imp-mode-tab ${inputMode === "manual" ? "on" : ""}`}
-                onClick={() => setInputMode("manual")}
-              >
-                <div className="imp-mode-tab-head">
-                  <span className="imp-mode-tab-title">
-                    <span className="imp-mode-ic"><IconEdit /></span>
-                    {bi("极简手工建档", "Quick Manual Entry")}
-                  </span>
-                </div>
-                <span className="imp-mode-desc">
-                  {bi(
-                    "只需填写主机名、IP 与角色（支持批量粘贴），下一步可一键勾选 Patroni / etcd 等伴生组件。",
-                    "Enter hostnames, IPs, and roles (batch paste supported); add companions in the next step.",
-                  )}
-                </span>
-              </button>
-            </div>
-
-            {inputMode === "probe" && (
+            {!focusParseView && (
               <>
+                <div className="imp-card-head">
+                  <div className="imp-card-head-title">
+                    <h2>{bi("选择录入方式（三选一，随时切换）", "Choose Onboarding Input Mode")}</h2>
+                    <p>
+                      {bi(
+                        "无需打通 SSH 网络；支持离线只读探针自动识别全栈（主中间件 + Patroni / etcd / LB / 备份）、粘贴文档截图，或手工登记。",
+                        "No SSH network needed: run read-only probe for full-stack discovery, paste docs/screenshots, or enter hosts manually.",
+                      )}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="imp-mode-tabs">
+                  <button
+                    type="button"
+                    className={`imp-mode-tab ${inputMode === "probe" ? "on" : ""}`}
+                    disabled={parsing}
+                    onClick={() => setInputMode("probe")}
+                  >
+                    <div className="imp-mode-tab-head">
+                      <span className="imp-mode-tab-title">
+                        <span className="imp-mode-ic"><IconCode /></span>
+                        {bi("一键只读采集脚本", "Read-Only Probe Script")}
+                      </span>
+                      <span className="imp-rec-tag">{bi("推荐 · 全栈识别", "Full-Stack")}</span>
+                    </div>
+                    <span className="imp-mode-desc">
+                      {bi(
+                        "自动采集主节点/从节点、Patroni/etcd/LB 伴生组件、数据盘、路径与 CVE 软件包清单。",
+                        "Auto-collects hosts, Patroni/etcd/LB companions, data disks, paths, and CVE packages.",
+                      )}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={`imp-mode-tab ${inputMode === "ai_doc" ? "on" : ""}`}
+                    disabled={parsing}
+                    onClick={() => setInputMode("ai_doc")}
+                  >
+                    <div className="imp-mode-tab-head">
+                      <span className="imp-mode-tab-title">
+                        <span className="imp-mode-ic"><IconFile /></span>
+                        {bi("粘贴文档 / 配置 / 截图", "Paste Docs / Config / Image")}
+                      </span>
+                      {presetsData?.ai_enabled && (
+                        <span className="imp-rec-tag">{bi("AI 多模态", "AI Vision")}</span>
+                      )}
+                    </div>
+                    <span className="imp-mode-desc">
+                      {bi(
+                        "直接粘贴 CMDB 资产表、交接文档、patroni.yml / etcd.conf 或架构拓扑截图（支持 Ctrl+V）。",
+                        "Paste CMDB tables, handover docs, patroni.yml / etcd.conf, or architecture screenshots.",
+                      )}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={`imp-mode-tab ${inputMode === "manual" ? "on" : ""}`}
+                    disabled={parsing}
+                    onClick={() => setInputMode("manual")}
+                  >
+                    <div className="imp-mode-tab-head">
+                      <span className="imp-mode-tab-title">
+                        <span className="imp-mode-ic"><IconEdit /></span>
+                        {bi("极简手工建档", "Quick Manual Entry")}
+                      </span>
+                    </div>
+                    <span className="imp-mode-desc">
+                      {bi(
+                        "只需填写主机名、IP 与角色（支持批量粘贴），下一步可一键勾选 Patroni / etcd 等伴生组件。",
+                        "Enter hostnames, IPs, and roles (batch paste supported); add companions in the next step.",
+                      )}
+                    </span>
+                  </button>
+                </div>
+              </>
+            )}
+
+            {(inputMode === "probe" || inputMode === "ai_doc") && parseLive && (
+              <ImportParseFocusBar
+                collapsed={parseInputsCollapsed}
+                onToggle={() => setParseInputsCollapsed((v) => !v)}
+                includesProbe={inputMode === "probe"}
+                textLength={pasteText.trim().length}
+                imageCount={images.length}
+                isRunning={parsing}
+              />
+            )}
+
+            {inputMode === "probe" && !focusParseView && (
+              <>
+                {(probeLive || probeTrace) && (
+                  <AIProcessCard
+                    live={probeLive}
+                    trace={probeLive ? null : probeTrace}
+                    title={bi("AI 定制只读探针推演记录", "AI Read-Only Probe Generation Trace")}
+                    onAbort={() => {
+                      probeAbortRef.current?.abort();
+                      setProbeLive(null);
+                      setProbeGenerating(false);
+                    }}
+                    onRetry={() => void fetchImportProbe({ useAI: true, focus: lastProbeFocus })}
+                    onDismiss={() => setProbeLive(null)}
+                  />
+                )}
+
                 <ProbeCodeBlock
                   script={probeScript}
                   filename={probeFilename}
+                  componentId={effectiveCompID}
+                  componentName={effectiveDisplayName}
+                  deployMethod={deployMethod}
                   safe={probeSafe}
                   source={probeSource}
                   aiEnabled={Boolean(presetsData?.ai_enabled)}
@@ -2613,7 +4147,7 @@ export function ImportClusterPage({
               </>
             )}
 
-            {inputMode === "ai_doc" && (
+            {inputMode === "ai_doc" && !focusParseView && (
               <ImportEvidenceComposer
                 title={bi("CMDB 表格 / 交接文档 / 配置文件 / 架构截图", "CMDB Tables / Handover Docs / Configs / Diagrams")}
                 placeholder={docPlaceholderFor(effectiveCompID, effectiveDisplayName, selectedPreset?.default_port)}
@@ -2642,8 +4176,33 @@ export function ImportClusterPage({
               />
             )}
 
-            {(inputMode === "probe" || inputMode === "ai_doc") && (
-              <ParsingStagePanel active={parsing} aiEnabled={Boolean(presetsData?.ai_enabled)} />
+            {(inputMode === "probe" || inputMode === "ai_doc") && parseLive && (
+              <AIProcessCard
+                live={parseLive}
+                title={bi("AI 现场回显与多组件架构解析", "AI Evidence & Multi-Component Stack Parsing")}
+                onAbort={() => {
+                  parseAbortRef.current?.abort();
+                  setParseLive(null);
+                  setParseInputsCollapsed(false);
+                  setParsing(false);
+                }}
+                onRetry={() => void runParseAndProceed({ useAI: true })}
+                onDismiss={() => {
+                  setParseLive(null);
+                  setParseInputsCollapsed(false);
+                }}
+                extraErrorActions={
+                  pasteText.trim() ? (
+                    <Button
+                      size="small"
+                      type="secondary"
+                      onClick={() => void runParseAndProceed({ useAI: false })}
+                    >
+                      {bi("改用内置规则引擎提取", "Use Built-in Rule Parser")}
+                    </Button>
+                  ) : null
+                }
+              />
             )}
 
             {inputMode === "manual" && (
@@ -2769,7 +4328,7 @@ export function ImportClusterPage({
                   <Button
                     type="primary"
                     disabled={validHosts.length === 0}
-                    onClick={() => setStep(3)}
+                    onClick={() => goStep(3)}
                   >
                     {bi("下一步：核对基线与拓扑预览", "Next: Review & Live Topology")} <IconRight />
                   </Button>
@@ -2777,79 +4336,152 @@ export function ImportClusterPage({
               </>
             )}
           </section>
-        )}
+          );
+        })()}
 
-        {/* ---------------- STEP 3: Multi-Component Baseline Review & Live Topology ---------------- */}
-        {step === 3 && (
+        {/* ---------------- STEP 3: Focused Baseline Review & Live Topology ---------------- */}
+        {step === 3 && (() => {
+          const validEndpoints = endpoints.filter((e) => e.address.trim());
+          const hostsWithIP = validHosts.filter((h) => h.ip.trim()).length;
+          const pathTotal =
+            serviceUnits.length + configPaths.length + dataDirs.length + logDirs.length;
+          const clueCount = splitNotesToClues(notes).length;
+          const hasAttention =
+            Boolean(parseInfo?.missing?.length) ||
+            Boolean(parseInfo?.warnings?.length) ||
+            !idValid ||
+            validHosts.length === 0 ||
+            hostsWithIP < validHosts.length;
+
+          return (
           <div className="imp-review-grid imp-step-pane">
             <div className="imp-review-main">
-              {parseInfo && (
-                <div className="imp-parse-banner">
-                  <div>
-                    <b>
-                      {parseInfo.parser === "ai"
-                        ? bi("✓ 已由 AI 提取多组件基线草稿", "✓ Multi-component baseline extracted by AI")
-                        : bi("✓ 已由内置规则提取多组件基线草稿", "✓ Multi-component baseline extracted by rules")}
-                    </b>
-                    {parseInfo.companionCount > 0 && (
-                      <span className="imp-kind-pill t-brand" style={{ marginLeft: 8 }}>
-                        {bi(`已识别 ${parseInfo.companionCount} 个伴生组件`, `${parseInfo.companionCount} companion(s) detected`)}
-                      </span>
+              {/* Calm Readiness Strip (replaces noisy banner + open trace wall) */}
+              <section className={`imp-review-hero ${hasAttention ? "has-warn" : ""}`}>
+                <div className="imp-review-hero-top">
+                  <div className="imp-review-hero-l">
+                    <span className={`imp-review-status-ic ${hasAttention ? "is-warn" : "is-ok"}`}>
+                      <IconCheckCircle />
+                    </span>
+                    <div className="imp-review-hero-txt">
+                      <div className="imp-review-hero-title">
+                        <b>
+                          {parseInfo
+                            ? parseInfo.parser === "ai"
+                              ? bi("AI 已提取多组件基线草稿", "AI Multi-Component Baseline Ready")
+                              : bi("规则引擎已提取基线草稿", "Baseline Draft Extracted")
+                            : bi("核对集群基线草稿", "Review Cluster Baseline Draft")}
+                        </b>
+                        <div className="imp-review-kpis">
+                          <span className="imp-review-kpi num">
+                            {validHosts.length} {bi("台节点", "hosts")}
+                          </span>
+                          <span className="imp-review-kpi num">
+                            {1 + companions.length} {bi("个组件", "components")}
+                          </span>
+                          <span className="imp-review-kpi num">
+                            {validEndpoints.length} {bi("个入口", "endpoints")}
+                          </span>
+                          {packages.length > 0 && (
+                            <span className="imp-review-kpi num">
+                              {packages.length} {bi("软件包", "pkgs")}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <p className="imp-review-hero-sub">
+                        {bi(
+                          "只需重点核对 ① 身份与节点 IP、② 访问入口与组件栈，确认右侧拓扑无误即可建档。",
+                          "Verify ① Identity & Hosts and ② Endpoints & Stack, confirm the live topology on the right, then complete onboarding.",
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="imp-review-hero-r">
+                    {parseTrace && (
+                      <button
+                        type="button"
+                        className={`imp-review-ghost-btn ${reviewTraceOpen ? "is-on" : ""}`}
+                        aria-expanded={reviewTraceOpen}
+                        onClick={() => setReviewTraceOpen((v) => !v)}
+                      >
+                        <Spark size={11} />
+                        <span>{reviewTraceOpen ? bi("收起推演", "Hide Trace") : bi("推演过程", "AI Trace")}</span>
+                        {reviewTraceOpen ? <IconUp /> : <IconDown />}
+                      </button>
                     )}
+                    <button
+                      type="button"
+                      className="imp-review-ghost-btn"
+                      onClick={() => goStep(2)}
+                    >
+                      <IconArrowLeft />
+                      <span>{bi("返回补充采集", "Back to Capture")}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {(parseInfo?.missing?.length || parseInfo?.warnings?.length) ? (
+                  <div className="imp-review-attention">
                     {parseInfo.missing.length > 0 && (
-                      <div className="muted small" style={{ marginTop: 3 }}>
-                        {bi("建议核对补齐：", "Suggested to review: ")}
-                        {parseInfo.missing.join(" · ")}
+                      <div>
+                        <b>{bi("待核对补齐：", "Suggested to verify: ")}</b>
+                        <span>{parseInfo.missing.join(" · ")}</span>
                       </div>
                     )}
                     {parseInfo.warnings.map((w, i) => (
-                      <div key={i} className="muted small" style={{ marginTop: 2 }}>
+                      <div key={i} className="imp-review-warn-line">
                         {w}
                       </div>
                     ))}
                   </div>
-                  <Button size="mini" onClick={() => setStep(2)}>
-                    {bi("返回补充采集", "Re-parse")}
-                  </Button>
-                </div>
-              )}
-
-              {/* NEW: First-Class Multi-Component Architecture Stack Editor */}
-              <section className="imp-card">
-                <div className="imp-card-head">
-                  <div className="imp-card-head-title">
-                    <h2>
-                      {bi("架构组件栈（主中间件 + 伴生组件）", "Architecture Stack (Primary + Companions)")}
-                      <span className="imp-count-badge">{1 + companions.length}</span>
-                    </h2>
-                    <p>
-                      {bi(
-                        "Patroni、etcd、HAProxy、Keepalived 等高可用/协调/代理组件将作为真实实例建入运行拓扑与端口清单。",
-                        "HA, DCS, proxy, and VIP companions are modeled as real topology instances with ports and flows.",
-                      )}
-                    </p>
-                  </div>
-                </div>
-                <CompanionStackEditor
-                  primaryCompID={effectiveCompID}
-                  primaryDisplayName={effectiveDisplayName}
-                  primaryVersion={exactVersion || version}
-                  primaryIcon={isCustom ? customIcon : selectedPreset?.icon || "server"}
-                  primaryColor={isCustom ? customColor : selectedPreset?.color || "blue"}
-                  hosts={validHosts}
-                  companions={companions}
-                  catalog={companionCatalog}
-                  onChange={setCompanions}
-                />
+                ) : null}
               </section>
 
-              {/* Identity & Version Review (Zero Overflow!) */}
-              <section className="imp-card">
+              {parseTrace && reviewTraceOpen && (
+                <AIProcessCard
+                  trace={parseTrace}
+                  title={bi("AI 架构识别与推演过程", "AI Architecture Parsing Trace")}
+                />
+              )}
+
+              {/* Focus ①: Cluster Identity + Host Inventory (Unified Primary Card) */}
+              <section className="imp-card imp-review-sec">
                 <div className="imp-card-head">
-                  <div className="imp-card-head-title">
-                    <h2>{bi("集群身份与版本基线", "Identity & Version Baseline")}</h2>
+                  <div className="imp-review-sec-title">
+                    <span className="imp-sec-index">1</span>
+                    <div className="imp-card-head-title">
+                      <h2>
+                        {bi("集群身份与主机节点", "Cluster Identity & Hosts")}
+                        <span className="imp-count-badge">{validHosts.length}</span>
+                      </h2>
+                      <p>
+                        {bi(
+                          "确认集群标识、主精确版本以及每台节点的主机名、业务 IP 与主从角色。",
+                          "Verify Cluster ID, version, and each host's hostname, IP address, and role.",
+                        )}
+                      </p>
+                    </div>
                   </div>
+                  <Button
+                    size="small"
+                    icon={<IconPlus />}
+                    onClick={() =>
+                      setHosts((prev) => [
+                        ...prev,
+                        {
+                          name: `node-${prev.length + 1}`,
+                          ip: "",
+                          role: effectiveRoles[Math.min(1, effectiveRoles.length - 1)]?.id || "node",
+                          disk: "",
+                        },
+                      ])
+                    }
+                  >
+                    {bi("添加节点", "Add Host")}
+                  </Button>
                 </div>
+
                 <div className="imp-form-grid-2">
                   <div className="imp-field">
                     <label>
@@ -2857,18 +4489,9 @@ export function ImportClusterPage({
                     </label>
                     <Input
                       className="mono"
+                      status={clusterId && !idValid ? "error" : undefined}
                       value={clusterId}
                       onChange={(v) => setClusterId(v.toLowerCase().replace(/[^a-z0-9-]/g, ""))}
-                    />
-                  </div>
-                  <div className="imp-field">
-                    <label>
-                      <span className="imp-lbl-left">{bi("架构形态摘要", "Architecture Summary")}</span>
-                    </label>
-                    <Input
-                      placeholder={bi("例如：3节点 Patroni + etcd 高可用集群", "e.g. 3-node Patroni + etcd HA cluster")}
-                      value={archSummary}
-                      onChange={setArchSummary}
                     />
                   </div>
                   <div className="imp-field">
@@ -2918,36 +4541,20 @@ export function ImportClusterPage({
                       </Select>
                     </div>
                   </div>
-                </div>
-              </section>
-
-              {/* Hosts Review with Explicit Column Headers */}
-              <section className="imp-card">
-                <div className="imp-card-head">
-                  <div className="imp-card-head-title">
-                    <h2>
-                      {bi("主机节点清单", "Cluster Hosts")}
-                      <span className="imp-count-badge">{validHosts.length}</span>
-                    </h2>
+                  <div className="imp-field">
+                    <label>
+                      <span className="imp-lbl-left">{bi("架构形态摘要", "Architecture Summary")}</span>
+                    </label>
+                    <Input
+                      placeholder={bi("例如：3节点 Patroni + etcd 高可用集群", "e.g. 3-node Patroni + etcd HA cluster")}
+                      value={archSummary}
+                      onChange={setArchSummary}
+                    />
                   </div>
-                  <Button
-                    size="small"
-                    icon={<IconPlus />}
-                    onClick={() =>
-                      setHosts((prev) => [
-                        ...prev,
-                        {
-                          name: `node-${prev.length + 1}`,
-                          ip: "",
-                          role: effectiveRoles[Math.min(1, effectiveRoles.length - 1)]?.id || "node",
-                          disk: "",
-                        },
-                      ])
-                    }
-                  >
-                    {bi("添加节点", "Add Host")}
-                  </Button>
                 </div>
+
+                <div className="imp-sec-divider" />
+
                 <div className="imp-table-rows">
                   <div className="imp-host-row imp-col-heads">
                     <span>{bi("主机名", "Hostname")}</span>
@@ -3007,11 +4614,23 @@ export function ImportClusterPage({
                 </div>
               </section>
 
-              {/* Access Endpoints & Runtime Paths (Tag Chips - Never Concatenates!) */}
-              <section className="imp-card">
+              {/* Focus ②: Access Endpoints + Multi-Component Architecture Stack */}
+              <section className="imp-card imp-review-sec">
                 <div className="imp-card-head">
-                  <div className="imp-card-head-title">
-                    <h2>{bi("访问入口、运行路径与关键参数（选填）", "Endpoints, Paths & Key Params")}</h2>
+                  <div className="imp-review-sec-title">
+                    <span className="imp-sec-index">2</span>
+                    <div className="imp-card-head-title">
+                      <h2>
+                        {bi("访问入口与架构组件栈", "Endpoints & Architecture Stack")}
+                        <span className="imp-count-badge">{1 + companions.length}</span>
+                      </h2>
+                      <p>
+                        {bi(
+                          "确认业务入口（VIP / EIP / F5 / 域名）及 Patroni、etcd、HAProxy、备份等伴生高可用组件。",
+                          "Verify business endpoints (VIP / EIP / domain) and co-located HA, DCS, LB, and backup components.",
+                        )}
+                      </p>
+                    </div>
                   </div>
                   <Button
                     size="small"
@@ -3027,180 +4646,167 @@ export function ImportClusterPage({
                   </Button>
                 </div>
 
-                {endpoints.length > 0 && (
-                  <div className="imp-table-rows">
-                    <div className="imp-ep-row imp-col-heads">
-                      <span>{bi("入口标识", "Label")}</span>
-                      <span>{bi("访问地址 : 端口", "Address : Port")}</span>
-                      <span>{bi("入口用途", "Role")}</span>
-                      <span />
-                    </div>
-                    {endpoints.map((ep, idx) => (
-                      <div key={idx} className="imp-ep-row">
-                        <Input
-                          placeholder="writer"
-                          value={ep.name || ""}
-                          onChange={(v) =>
-                            setEndpoints((prev) => prev.map((r, i) => (i === idx ? { ...r, name: v } : r)))
-                          }
-                        />
-                        <Input
-                          className="mono"
-                          placeholder={`vip.internal:${selectedPreset?.default_port || 5432}`}
-                          value={ep.address}
-                          onChange={(v) =>
-                            setEndpoints((prev) => prev.map((r, i) => (i === idx ? { ...r, address: v } : r)))
-                          }
-                        />
-                        <Select
-                          value={normalizeEndpointRole(ep.role)}
-                          onChange={(v) =>
-                            setEndpoints((prev) => prev.map((r, i) => (i === idx ? { ...r, role: v } : r)))
-                          }
-                        >
-                          <Select.Option value="readwrite">{bi("读写入口", "Read/Write")}</Select.Option>
-                          <Select.Option value="readonly">{bi("只读入口", "Read-Only")}</Select.Option>
-                          <Select.Option value="admin">{bi("管理入口", "Admin")}</Select.Option>
-                        </Select>
-                        <Button
-                          size="small"
-                          type="text"
-                          status="danger"
-                          icon={<IconDelete />}
-                          onClick={() => setEndpoints((prev) => prev.filter((_, i) => i !== idx))}
-                        />
+                <EndpointListEditor
+                  endpoints={endpoints}
+                  defaultPort={selectedPreset?.default_port}
+                  onChange={setEndpoints}
+                />
+
+                <div className="imp-sec-divider" />
+
+                <CompanionStackEditor
+                  primaryCompID={effectiveCompID}
+                  primaryDisplayName={effectiveDisplayName}
+                  primaryVersion={exactVersion || version}
+                  primaryIcon={isCustom ? customIcon : selectedPreset?.icon || "server"}
+                  primaryColor={isCustom ? customColor : selectedPreset?.color || "blue"}
+                  hosts={validHosts}
+                  companions={companions}
+                  catalog={companionCatalog}
+                  onChange={setCompanions}
+                />
+              </section>
+
+              {/* Progressive Disclosure ③: Runtime Paths, Parameters, Packages & Field Clues (Collapsed by Default) */}
+              <section className={`imp-card imp-review-adv ${reviewDetailsOpen ? "is-open" : ""}`}>
+                <div
+                  className="imp-review-adv-head"
+                  role="button"
+                  tabIndex={0}
+                  aria-expanded={reviewDetailsOpen}
+                  onClick={() => setReviewDetailsOpen((v) => !v)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setReviewDetailsOpen((v) => !v);
+                    }
+                  }}
+                >
+                  <div className="imp-review-sec-title">
+                    <span className="imp-sec-index is-soft">3</span>
+                    <div className="imp-card-head-title">
+                      <h2>{bi("运行路径、参数与现场档案", "Runtime Paths, Params & Field Notes")}</h2>
+                      <div className="imp-review-adv-pills">
+                        <span className="imp-review-kpi num">
+                          {bi(`服务/路径 ${pathTotal}`, `Paths ${pathTotal}`)}
+                        </span>
+                        <span className="imp-review-kpi num">
+                          {bi(`运行参数 ${paramRows.length}`, `Params ${paramRows.length}`)}
+                        </span>
+                        <span className="imp-review-kpi num">
+                          {bi(`CVE 软件包 ${packages.length}`, `Packages ${packages.length}`)}
+                        </span>
+                        <span className="imp-review-kpi num">
+                          {bi(`现场线索 ${clueCount}`, `Notes ${clueCount}`)}
+                        </span>
                       </div>
-                    ))}
-                  </div>
-                )}
-
-                <div className="imp-form-grid-2">
-                  <div className="imp-field">
-                    <label>
-                      <span className="imp-lbl-left">{bi("系统服务单元", "Service Units")}</span>
-                    </label>
-                    <InputTag
-                      saveOnBlur
-                      placeholder={selectedPreset?.service_hints?.join(", ") || "patroni.service"}
-                      value={serviceUnits}
-                      onChange={(vals) => setServiceUnits(normalizeTagList(vals as string[]))}
-                    />
-                  </div>
-                  <div className="imp-field">
-                    <label>
-                      <span className="imp-lbl-left">{bi("配置文件路径", "Config Paths")}</span>
-                    </label>
-                    <InputTag
-                      saveOnBlur
-                      placeholder={selectedPreset?.config_hints?.[0] || "/etc/patroni/patroni.yml"}
-                      value={configPaths}
-                      onChange={(vals) => setConfigPaths(normalizeTagList(vals as string[]))}
-                    />
-                  </div>
-                  <div className="imp-field">
-                    <label>
-                      <span className="imp-lbl-left">{bi("数据目录", "Data Directories")}</span>
-                    </label>
-                    <InputTag
-                      saveOnBlur
-                      placeholder={selectedPreset?.data_hints?.[0] || "/data/pg"}
-                      value={dataDirs}
-                      onChange={(vals) => setDataDirs(normalizeTagList(vals as string[]))}
-                    />
-                  </div>
-                  <div className="imp-field">
-                    <label>
-                      <span className="imp-lbl-left">{bi("日志目录", "Log Directories")}</span>
-                    </label>
-                    <InputTag
-                      saveOnBlur
-                      placeholder={selectedPreset?.log_hints?.[0] || "/var/log/postgresql"}
-                      value={logDirs}
-                      onChange={(vals) => setLogDirs(normalizeTagList(vals as string[]))}
-                    />
-                  </div>
-                </div>
-
-                <div className="imp-field">
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <label>
-                      <span className="imp-lbl-left">{bi("关键运行参数（键值对）", "Key Runtime Parameters")}</span>
-                    </label>
-                    <Button
-                      size="mini"
-                      icon={<IconPlus />}
-                      onClick={() => setParamRows((prev) => [...prev, { key: "", value: "" }])}
-                    >
-                      {bi("添加参数", "Add Param")}
-                    </Button>
-                  </div>
-                  {paramRows.length > 0 && (
-                    <div className="imp-table-rows">
-                      {paramRows.map((pr, idx) => (
-                        <div key={idx} className="imp-kv-row">
-                          <Input
-                            className="mono"
-                            placeholder="max_connections"
-                            value={pr.key}
-                            onChange={(v) =>
-                              setParamRows((prev) => prev.map((r, i) => (i === idx ? { ...r, key: v } : r)))
-                            }
-                          />
-                          <Input
-                            className="mono"
-                            placeholder="500"
-                            value={pr.value}
-                            onChange={(v) =>
-                              setParamRows((prev) => prev.map((r, i) => (i === idx ? { ...r, value: v } : r)))
-                            }
-                          />
-                          <Button
-                            size="small"
-                            type="text"
-                            status="danger"
-                            icon={<IconDelete />}
-                            onClick={() => setParamRows((prev) => prev.filter((_, i) => i !== idx))}
-                          />
-                        </div>
-                      ))}
                     </div>
-                  )}
+                  </div>
+                  <span className="imp-review-adv-toggle">
+                    <span>{reviewDetailsOpen ? bi("收起细节", "Fold") : bi("展开微调", "Inspect / Edit")}</span>
+                    {reviewDetailsOpen ? <IconUp /> : <IconDown />}
+                  </span>
                 </div>
 
-                {packages.length > 0 && (
-                  <div className="imp-field">
-                    <label>
-                      <span className="imp-lbl-left">
-                        {bi(`已采集软件包（${packages.length} 项，纳入安全 CVE 扫描）`, `Collected Packages (${packages.length}, CVE indexed)`)}
-                      </span>
-                    </label>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                      {packages.slice(0, 12).map((pk, idx) => (
-                        <Tag key={idx} size="small" className="mono">
-                          {pk.name}={pk.version}
-                        </Tag>
-                      ))}
-                      {packages.length > 12 && (
-                        <Tag size="small" color="gray">
-                          +{packages.length - 12}
-                        </Tag>
+                {reviewDetailsOpen && (
+                  <div className="imp-review-adv-body">
+                    <RuntimePathsEditor
+                      serviceUnits={serviceUnits}
+                      onServiceUnitsChange={setServiceUnits}
+                      configPaths={configPaths}
+                      onConfigPathsChange={setConfigPaths}
+                      dataDirs={dataDirs}
+                      onDataDirsChange={setDataDirs}
+                      logDirs={logDirs}
+                      onLogDirsChange={setLogDirs}
+                      servicePlaceholder={selectedPreset?.service_hints?.join(", ") || "patroni.service"}
+                      configPlaceholder={selectedPreset?.config_hints?.[0] || "/etc/patroni/patroni.yml"}
+                      dataPlaceholder={selectedPreset?.data_hints?.[0] || "/data/pg"}
+                      logPlaceholder={selectedPreset?.log_hints?.[0] || "/var/log/postgresql"}
+                    />
+
+                    <div className="imp-field">
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <label>
+                          <span className="imp-lbl-left">{bi("关键运行参数（键值对）", "Key Runtime Parameters")}</span>
+                        </label>
+                        <Button
+                          size="mini"
+                          icon={<IconPlus />}
+                          onClick={() => setParamRows((prev) => [...prev, { key: "", value: "" }])}
+                        >
+                          {bi("添加参数", "Add Param")}
+                        </Button>
+                      </div>
+                      {paramRows.length > 0 && (
+                        <div className="imp-table-rows">
+                          {paramRows.map((pr, idx) => (
+                            <div key={idx} className="imp-kv-row">
+                              <Input
+                                className="mono"
+                                placeholder="max_connections"
+                                value={pr.key}
+                                onChange={(v) =>
+                                  setParamRows((prev) => prev.map((r, i) => (i === idx ? { ...r, key: v } : r)))
+                                }
+                              />
+                              <Input
+                                className="mono"
+                                placeholder="500"
+                                value={pr.value}
+                                onChange={(v) =>
+                                  setParamRows((prev) => prev.map((r, i) => (i === idx ? { ...r, value: v } : r)))
+                                }
+                              />
+                              <Button
+                                size="small"
+                                type="text"
+                                status="danger"
+                                icon={<IconDelete />}
+                                onClick={() => setParamRows((prev) => prev.filter((_, i) => i !== idx))}
+                              />
+                            </div>
+                          ))}
+                        </div>
                       )}
                     </div>
+
+                    {packages.length > 0 && (
+                      <div className="imp-field">
+                        <label>
+                          <span className="imp-lbl-left">
+                            {bi(`已采集软件包（${packages.length} 项，纳入安全 CVE 扫描）`, `Collected Packages (${packages.length}, CVE indexed)`)}
+                          </span>
+                        </label>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                          {packages.slice(0, 16).map((pk, idx) => (
+                            <Tag key={idx} size="small" className="mono">
+                              {pk.name}={pk.version}
+                            </Tag>
+                          ))}
+                          {packages.length > 16 && (
+                            <Tag size="small" color="gray">
+                              +{packages.length - 16}
+                            </Tag>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    <FieldCluesEditor
+                      title={bi("现场线索与运维约束", "Field Clues & Maintenance Window")}
+                      value={notes}
+                      onChange={setNotes}
+                    />
                   </div>
                 )}
-
-                <FieldCluesEditor
-                  title={bi("现场线索与运维约束", "Field Clues & Maintenance Window")}
-                  value={notes}
-                  onChange={setNotes}
-                />
               </section>
             </div>
 
-            {/* Right Sticky Live Multi-Component Topology Preview & Submit */}
+            {/* Right Sticky Live Topology Preview & Readiness Commit Card */}
             <aside className="imp-review-side">
-              <section className="imp-card">
-                <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
+              <section className="imp-card imp-review-commit-card">
+                <div className="imp-review-commit-head">
                   <AppGlyph
                     id={effectiveCompID}
                     icon={isCustom ? customIcon : selectedPreset?.icon}
@@ -3208,43 +4814,14 @@ export function ImportClusterPage({
                     size={36}
                   />
                   <div style={{ minWidth: 0, flex: 1 }}>
-                    <div className="mono" style={{ fontSize: 15, fontWeight: 650, color: "var(--ink)" }}>
+                    <div className="mono imp-review-commit-id">
                       {clusterId || "—"}
                     </div>
                     <div className="small muted">
-                      {effectiveDisplayName} {exactVersion || version} · {validHosts.length} {bi("台节点", "hosts")}
+                      {effectiveDisplayName} {exactVersion || version} · {validHosts.length} {bi("台节点", "hosts")} · {1 + companions.length} {bi("组件", "components")}
                     </div>
                   </div>
                 </div>
-
-                {companions.length > 0 && (
-                  <div className="cl-imp-stack">
-                    <span className="cl-imp-stack-lbl">{bi("架构组件栈", "Stack")}</span>
-                    <div className="cl-imp-stack-pills">
-                      <span className="cl-imp-comp-pill is-primary">
-                        <AppGlyph
-                          id={effectiveCompID}
-                          icon={isCustom ? customIcon : selectedPreset?.icon}
-                          color={isCustom ? customColor : selectedPreset?.color}
-                          size={15}
-                        />
-                        <b>{effectiveDisplayName}</b>
-                        {(exactVersion || version) && (
-                          <span className="cl-imp-comp-ver">{exactVersion || version}</span>
-                        )}
-                        <span className="cl-imp-comp-kind">{bi("主组件", "Primary")}</span>
-                      </span>
-                      {companions.map((cm) => (
-                        <span key={cm.component} className="cl-imp-comp-pill">
-                          <AppGlyph id={cm.component} icon={companionIcon(cm.component)} size={15} />
-                          <b>{cm.display_name || cm.component}</b>
-                          {cm.version && <span className="cl-imp-comp-ver">{cm.version}</span>}
-                          <span className="cl-imp-comp-kind">{companionKindMeta(effectiveCompanionKind(cm.component, cm.kind)).label}</span>
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
 
                 <div className="imp-topo-wrap">
                   {previewHosts.length > 0 ? (
@@ -3261,42 +4838,59 @@ export function ImportClusterPage({
                   )}
                 </div>
 
-                <div className="imp-footer-bar" style={{ paddingTop: 12 }}>
-                  <Button onClick={() => setStep(2)}>
-                    <IconArrowLeft /> {bi("返回修改", "Back")}
-                  </Button>
-                  <Button type="primary" loading={submitting} onClick={submitImport}>
+                <div className="imp-ready-checks">
+                  <div className={`imp-ready-item ${idValid ? "is-ok" : "is-warn"}`}>
+                    <IconCheckCircle />
+                    <span>
+                      {idValid
+                        ? bi("集群标识合规", "Cluster ID valid")
+                        : bi("请填写合规集群标识", "Valid Cluster ID required")}
+                    </span>
+                  </div>
+                  <div className={`imp-ready-item ${validHosts.length > 0 && hostsWithIP === validHosts.length ? "is-ok" : "is-warn"}`}>
+                    <IconCheckCircle />
+                    <span>
+                      {validHosts.length === 0
+                        ? bi("至少需要 1 台主机节点", "At least 1 host required")
+                        : hostsWithIP === validHosts.length
+                          ? bi(`已核对 ${validHosts.length} 台节点与业务 IP`, `${validHosts.length} host(s) with IPs ready`)
+                          : bi(
+                              `共 ${validHosts.length} 台节点，其中 ${validHosts.length - hostsWithIP} 台待补 IP`,
+                              `${validHosts.length - hostsWithIP} of ${validHosts.length} host(s) missing IP`,
+                            )}
+                    </span>
+                  </div>
+                  <div className="imp-ready-item is-ok">
+                    <IconCheckCircle />
+                    <span>
+                      {bi(
+                        `已就绪 ${1 + companions.length} 个组件 · ${validEndpoints.length} 个入口 · ${packages.length} 项软件包`,
+                        `${1 + companions.length} component(s) · ${validEndpoints.length} endpoint(s) · ${packages.length} pkg(s)`,
+                      )}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="imp-review-commit-acts">
+                  <Button
+                    type="primary"
+                    size="large"
+                    long
+                    loading={submitting}
+                    disabled={!idValid || validHosts.length === 0}
+                    onClick={submitImport}
+                  >
                     <IconCheck /> {bi("完成纳管建档", "Complete Onboarding")}
                   </Button>
+                  <Button long type="text" size="small" onClick={() => goStep(2)}>
+                    <IconArrowLeft /> {bi("返回第 2 步补充采集（保留当前数据）", "Back to Step 2 (keeps draft)")}
+                  </Button>
                 </div>
-              </section>
-
-              <section className="imp-card">
-                <div className="imp-card-head">
-                  <h2>{bi("建档后立即解锁", "Unlocked Immediately")}</h2>
-                </div>
-                <ul className="imp-unlock-list">
-                  <li>
-                    <span className="imp-unlock-dot" />
-                    {bi("多组件运行拓扑与完整纳管基线档案", "Multi-component topology & baseline archive")}
-                  </li>
-                  <li>
-                    <span className="imp-unlock-dot" />
-                    {bi("AI 变更演练工作台 & 导出 Word 实施方案", "AI Change Rehearsal & Word SOP export")}
-                  </li>
-                  <li>
-                    <span className="imp-unlock-dot" />
-                    {bi("同类中间件跨集群变更推广", "Cross-cluster change rollout")}
-                  </li>
-                  <li>
-                    <span className="imp-unlock-dot" />
-                    {bi("安全 CVE 漏洞扫描与升级演练联动", "CVE scanning & upgrade rehearsal")}
-                  </li>
-                </ul>
               </section>
             </aside>
           </div>
-        )}
+          );
+        })()}
       </div>
     </div>
   );
@@ -3312,14 +4906,14 @@ export function ImportedBaselineModal({
   onSaved,
 }: {
   visible: boolean;
-  mode?: "edit" | "probe";
+  mode?: "edit" | "notes" | "probe";
   cluster: ClusterView;
   onClose: () => void;
   onSaved: () => Promise<void>;
 }) {
   const lang = useLang();
   const isEn = lang === "en-US";
-  const [tab, setTab] = useState<"edit" | "probe">(mode);
+  const [tab, setTab] = useState<"edit" | "notes" | "probe">(mode);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [data, setData] = useState<ImportPayload | null>(null);
@@ -3343,8 +4937,13 @@ export function ImportedBaselineModal({
 
   // Re-probe & Gap Diagnosis state
   const [health, setHealth] = useState<BaselineHealth | null>(null);
+  const [dismissedGaps, setDismissedGaps] = useState<string[]>([]);
+  const [gapBusyID, setGapBusyID] = useState<string | null>(null);
   const [selectedGapIDs, setSelectedGapIDs] = useState<string[]>([]);
   const [diagnosingGaps, setDiagnosingGaps] = useState(false);
+  const [diagLive, setDiagLive] = useState<LiveAIState<ImportLiveKind> | null>(null);
+  const [diagTrace, setDiagTrace] = useState<RehearsalTrace | null>(null);
+  const diagAbortRef = useRef<AbortController | null>(null);
   const [aiGapDone, setAiGapDone] = useState(false);
   const [aiGapModel, setAiGapModel] = useState("");
   const [aiGapAdded, setAiGapAdded] = useState(0);
@@ -3357,21 +4956,41 @@ export function ImportedBaselineModal({
   const [probeCoveredGaps, setProbeCoveredGaps] = useState<string[]>([]);
   const [probeRunHint, setProbeRunHint] = useState("");
   const [probeModelName, setProbeModelName] = useState("");
+  const [templateGenerating, setTemplateGenerating] = useState(false);
   const [probeGenerating, setProbeGenerating] = useState(false);
+  const [probeLive, setProbeLive] = useState<LiveAIState<ImportLiveKind> | null>(null);
+  const [probeTrace, setProbeTrace] = useState<RehearsalTrace | null>(null);
+  const probeAbortRef = useRef<AbortController | null>(null);
   const [probeOutput, setProbeOutput] = useState("");
   const [probeImages, setProbeImages] = useState<string[]>([]);
   const [parsing, setParsing] = useState(false);
+  const [parseLive, setParseLive] = useState<LiveAIState<ImportLiveKind> | null>(null);
+  const [drawerParseCollapsed, setDrawerParseCollapsed] = useState(false);
+  const [parseTrace, setParseTrace] = useState<RehearsalTrace | null>(null);
+  const parseAbortRef = useRef<AbortController | null>(null);
   const [mergeDiff, setMergeDiff] = useState<string[]>([]);
-  // Progressive 3-step collapsible flow: Step 1 expanded by default; Step 2 & Step 3 collapsed until needed.
-  const [step1Open, setStep1Open] = useState(true);
-  const [step2Open, setStep2Open] = useState(false);
-  const [step3Open, setStep3Open] = useState(false);
+
+  useEffect(() => {
+    if (!visible) {
+      diagAbortRef.current?.abort();
+      probeAbortRef.current?.abort();
+      parseAbortRef.current?.abort();
+    }
+    return () => {
+      diagAbortRef.current?.abort();
+      probeAbortRef.current?.abort();
+      parseAbortRef.current?.abort();
+    };
+  }, [visible]);
+  // Focused 3-step horizontal flow: 1 (Scope) -> 2 (Generated Probe) -> 3 (Paste & Merge).
+  // No probe script is generated until the user explicitly requests one in Step 1.
+  const [probeStep, setProbeStep] = useState<1 | 2 | 3>(1);
   const [autoSummary, setAutoSummary] = useState<ClusterAutomationSummary | null>(null);
-  const [autoDrawerOpen, setAutoDrawerOpen] = useState(false);
+  const [agentModalOpen, setAgentModalOpen] = useState(false);
   const [autoProbeBusy, setAutoProbeBusy] = useState(false);
   const [autoProbeTask, setAutoProbeTask] = useState<RehearsalExecTask | null>(null);
   const autoProbeAbortRef = useRef<AbortController | null>(null);
-  const modelPick = useModelPick("chat");
+  const modelPick = useModelPick("assistant");
   const aiOpts = useAIOptions();
 
   const roleOptions = useMemo<RolePreset[]>(() => {
@@ -3434,21 +5053,22 @@ export function ImportedBaselineModal({
         );
         setPackages(res.packages || []);
         setNotes(res.notes || "");
+        setDismissedGaps(res.dismissed_gaps || []);
         setHealth(res.health || null);
         const defaultGaps = (res.health?.gaps || []).filter((g) => g.selected).map((g) => g.id);
-        const fallbackGaps =
-          defaultGaps.length > 0
-            ? defaultGaps
-            : (res.health?.gaps || []).slice(0, 3).map((g) => g.id);
-        setSelectedGapIDs(fallbackGaps);
-        setProbeMode(res.health && res.health.gaps.length > 0 ? "gap" : "full");
+        setSelectedGapIDs(defaultGaps);
+        setProbeMode("gap");
+        setProbeScript("");
+        setProbeCoveredGaps([]);
+        setProbeRunHint("");
+        setProbeModelName("");
+        setProbeTrace(null);
+        setProbeLive(null);
+        setProbeStep(1);
         setMergeDiff([]);
         setAiGapDone(false);
         setAiGapModel("");
         setAiGapAdded(0);
-        setStep1Open(true);
-        setStep2Open(false);
-        setStep3Open(false);
       })
       .catch((e: Error) => Message.error(e.message))
       .finally(() => alive && setLoading(false));
@@ -3472,40 +5092,82 @@ export function ImportedBaselineModal({
         targetMode === "gap"
           ? sourceGaps.filter((g) => g.source === "ai" && targetGaps.includes(g.id))
           : [];
-      if (opts?.useAI) {
-        setProbeGenerating(true);
-        setStep1Open(false);
-        setStep2Open(true);
+      type DrawerProbeResp = {
+        script: string;
+        filename: string;
+        safe?: boolean;
+        source?: "template" | "ai";
+        mode?: "gap" | "full";
+        covered_gaps?: string[];
+        run_hint?: string;
+        model?: string;
+        ai_note?: string;
+        trace?: RehearsalTrace;
+      };
+      const payload = {
+        cluster_id: cluster.id,
+        component: cluster.app_id,
+        display_name: cluster.app_name,
+        deploy_method: deployMethod,
+        service_units: serviceUnits,
+        config_paths: configPaths,
+        mode: targetMode,
+        missing_gaps: targetMode === "gap" ? targetGaps : [],
+        custom_gaps: customGaps,
+        use_ai: Boolean(opts?.useAI),
+        focus: (opts?.focus ?? probeFocus).trim() || undefined,
+        model: modelPick.ref || undefined,
+        think: aiOpts.pref.think || undefined,
+      };
+      if (!opts?.useAI) {
+        setTemplateGenerating(true);
+        try {
+          const res = await api<DrawerProbeResp>("/api/clusters/import/probe-script", {
+            method: "POST",
+            body: JSON.stringify(payload),
+          });
+          setProbeScript(res.script);
+          setProbeFilename(res.filename);
+          setProbeSafe(res.safe !== false);
+          setProbeSource(res.source === "ai" ? "ai" : "template");
+          setProbeCoveredGaps(res.covered_gaps || []);
+          setProbeRunHint(res.run_hint || "");
+          setProbeModelName(res.model || "");
+          setProbeTrace(null);
+          setProbeLive(null);
+          setProbeStep(2);
+          Message.success(
+            bi("已生成 100% 只读标准探针，可在目标节点执行", "Generated 100% read-only template probe"),
+          );
+        } catch (e) {
+          Message.error((e as Error).message || bi("生成只读探针失败", "Failed to generate probe script"));
+        } finally {
+          setTemplateGenerating(false);
+        }
+        return;
       }
+
+      probeAbortRef.current?.abort();
+      const ac = new AbortController();
+      probeAbortRef.current = ac;
+      setProbeGenerating(true);
+      setProbeStep(2);
+      const modelHint = modelPick.current?.model || modelPick.ref?.split("|")[1];
+      setProbeLive(
+        buildImportInitialLive(
+          "import-probe",
+          bi("AI 正在生成专项 100% 只读探针", "AI Generating Targeted 100% Read-Only Probe"),
+          modelHint ? { model: modelHint, provider: modelPick.current?.provider } : undefined,
+        ),
+      );
       try {
-        const res = await api<{
-          script: string;
-          filename: string;
-          safe?: boolean;
-          source?: "template" | "ai";
-          mode?: "gap" | "full";
-          covered_gaps?: string[];
-          run_hint?: string;
-          model?: string;
-          ai_note?: string;
-        }>("/api/clusters/import/probe-script", {
-          method: "POST",
-          body: JSON.stringify({
-            cluster_id: cluster.id,
-            component: cluster.app_id,
-            display_name: cluster.app_name,
-            deploy_method: deployMethod,
-            service_units: serviceUnits,
-            config_paths: configPaths,
-            mode: targetMode,
-            missing_gaps: targetMode === "gap" ? targetGaps : [],
-            custom_gaps: customGaps,
-            use_ai: Boolean(opts?.useAI),
-            focus: (opts?.focus ?? probeFocus).trim() || undefined,
-            model: modelPick.ref || undefined,
-            think: aiOpts.pref.think || undefined,
-          }),
-        });
+        const res = await streamPipelineSSE<DrawerProbeResp, ImportLiveKind>(
+          "/api/clusters/import/probe-script",
+          payload,
+          (updater) => setProbeLive((prev) => (prev ? updater(prev) : prev)),
+          ac.signal,
+        );
+        if (ac.signal.aborted) return;
         setProbeScript(res.script);
         setProbeFilename(res.filename);
         setProbeSafe(res.safe !== false);
@@ -3513,24 +5175,29 @@ export function ImportedBaselineModal({
         setProbeCoveredGaps(res.covered_gaps || []);
         setProbeRunHint(res.run_hint || "");
         setProbeModelName(res.model || "");
-        if (opts?.useAI) {
-          if (res.source === "ai") {
-            Message.success(
-              bi(
-                "AI 已按所选需求生成专项 100% 只读探针（已通过静态安全门禁）",
-                "AI generated targeted 100% read-only probe (verified safe)",
-              ),
-            );
-          } else if (res.ai_note) {
-            Message.warning(res.ai_note);
-          }
+        setProbeTrace(res.trace || null);
+        setProbeLive(null);
+        if (res.source === "ai") {
+          Message.success(
+            bi(
+              "AI 已按所选需求生成专项 100% 只读探针（已通过静态安全门禁）",
+              "AI generated targeted 100% read-only probe (verified safe)",
+            ),
+          );
+        } else if (res.ai_note) {
+          Message.warning(res.ai_note);
         }
       } catch (e) {
-        if (opts?.useAI) {
-          Message.error((e as Error).message || bi("AI 生成只读探针失败", "AI probe generation failed"));
+        if (ac.signal.aborted || (e as Error)?.name === "AbortError") {
+          setProbeLive(null);
+          return;
         }
+        setProbeLive((prev) => (prev ? markLiveStateError(prev, e) : prev));
       } finally {
-        if (opts?.useAI) setProbeGenerating(false);
+        if (probeAbortRef.current === ac) {
+          probeAbortRef.current = null;
+        }
+        setProbeGenerating(false);
       }
     },
     [
@@ -3551,23 +5218,39 @@ export function ImportedBaselineModal({
 
   const runAIDiagnoseGaps = useCallback(async () => {
     if (diagnosingGaps) return;
+    type DiagResp = {
+      health: BaselineHealth;
+      ai_used?: boolean;
+      ai_added?: number;
+      model?: string;
+      ai_note?: string;
+      trace?: RehearsalTrace;
+    };
+    diagAbortRef.current?.abort();
+    const ac = new AbortController();
+    diagAbortRef.current = ac;
     setDiagnosingGaps(true);
+    const modelHint = modelPick.current?.model || modelPick.ref?.split("|")[1];
+    setDiagLive(
+      buildImportInitialLive(
+        "import-diagnose",
+        bi("AI 正在深度排查架构基线盲区", "AI Deep Baseline Gap Diagnosis"),
+        modelHint ? { model: modelHint, provider: modelPick.current?.provider } : undefined,
+      ),
+    );
     try {
-      const res = await api<{
-        health: BaselineHealth;
-        ai_used?: boolean;
-        ai_added?: number;
-        model?: string;
-        ai_note?: string;
-      }>("/api/clusters/import/diagnose-gaps", {
-        method: "POST",
-        body: JSON.stringify({
+      const res = await streamPipelineSSE<DiagResp, ImportLiveKind>(
+        "/api/clusters/import/diagnose-gaps",
+        {
           cluster_id: cluster.id,
           focus: probeFocus.trim() || undefined,
           model: modelPick.ref || undefined,
           think: aiOpts.pref.think || undefined,
-        }),
-      });
+        },
+        (updater) => setDiagLive((prev) => (prev ? updater(prev) : prev)),
+        ac.signal,
+      );
+      if (ac.signal.aborted) return;
       if (res.health) {
         setHealth(res.health);
         const newAISelected = (res.health.gaps || [])
@@ -3581,6 +5264,8 @@ export function ImportedBaselineModal({
       setAiGapDone(Boolean(res.ai_used));
       setAiGapModel(res.model || "");
       setAiGapAdded(res.ai_added || 0);
+      setDiagTrace(res.trace || null);
+      setDiagLive(null);
       if (res.ai_used) {
         if ((res.ai_added || 0) > 0) {
           Message.success(
@@ -3601,8 +5286,15 @@ export function ImportedBaselineModal({
         Message.warning(res.ai_note);
       }
     } catch (e) {
-      Message.error((e as Error).message || bi("AI 深度发现遗漏项失败", "AI gap diagnosis failed"));
+      if (ac.signal.aborted || (e as Error)?.name === "AbortError") {
+        setDiagLive(null);
+        return;
+      }
+      setDiagLive((prev) => (prev ? markLiveStateError(prev, e) : prev));
     } finally {
+      if (diagAbortRef.current === ac) {
+        diagAbortRef.current = null;
+      }
       setDiagnosingGaps(false);
     }
   }, [diagnosingGaps, cluster.id, probeFocus, modelPick.ref, aiOpts.pref.think]);
@@ -3613,17 +5305,74 @@ export function ImportedBaselineModal({
     );
   };
 
-  const selectedGapKey = selectedGapIDs.join(",");
+  const handleGapDismissAction = useCallback(
+    async (gap: BaselineGap, action: "dismiss" | "restore") => {
+      if (gapBusyID) return;
+      // Transient AI-discovered gaps only live in the current session
+      if (gap.source === "ai" && action === "dismiss") {
+        setHealth((prev) =>
+          prev
+            ? {
+                ...prev,
+                gaps: (prev.gaps || []).filter((g) => g.id !== gap.id),
+              }
+            : prev,
+        );
+        setSelectedGapIDs((prev) => prev.filter((id) => id !== gap.id));
+        Message.success(bi(`已关闭推荐项「${gap.category}」`, `Dismissed "${gap.category}"`));
+        return;
+      }
+      setGapBusyID(gap.id);
+      try {
+        const res = await api<{
+          dismissed_gaps?: string[];
+          health?: BaselineHealth;
+        }>(`/api/clusters/${encodeURIComponent(cluster.id)}/baseline/gaps`, {
+          method: "POST",
+          body: JSON.stringify({ action, gap_id: gap.id }),
+        });
+        const nextDismissed = res.dismissed_gaps || [];
+        setDismissedGaps(nextDismissed);
+        setData((prev) => (prev ? { ...prev, dismissed_gaps: nextDismissed } : prev));
+        if (res.health) {
+          setHealth((prev) => {
+            const existingAIGaps = (prev?.gaps || []).filter((g) => g.source === "ai");
+            return {
+              ...res.health!,
+              gaps: [...(res.health!.gaps || []), ...existingAIGaps],
+            };
+          });
+        }
+        if (action === "dismiss") {
+          setSelectedGapIDs((prev) => prev.filter((id) => id !== gap.id));
+          Message.success(
+            bi(
+              `已忽略「${gap.category}」，后续不再推荐（可随时在下方恢复）`,
+              `Dismissed "${gap.category}" (can be restored anytime below)`,
+            ),
+          );
+        } else {
+          Message.success(bi(`已恢复「${gap.category}」核验项`, `Restored "${gap.category}" check`));
+        }
+      } catch (e) {
+        Message.error((e as Error).message || bi("更新缺口状态失败", "Failed to update gap state"));
+      } finally {
+        setGapBusyID(null);
+      }
+    },
+    [cluster.id, gapBusyID],
+  );
 
-  useEffect(() => {
-    if (!visible || tab !== "probe" || loading) return;
-    void fetchDrawerProbe({ mode: probeMode, gapIDs: selectedGapIDs });
-  }, [visible, tab, loading, probeMode, cluster.id]);
-
-  useEffect(() => {
-    if (!visible || tab !== "probe" || loading || probeGenerating || probeSource === "ai") return;
-    void fetchDrawerProbe({ mode: probeMode, gapIDs: selectedGapIDs });
-  }, [selectedGapKey]);
+  const jumpToBaselineSection = useCallback((target: string) => {
+    setTab("edit");
+    window.setTimeout(() => {
+      const el = document.getElementById(`imp-sec-${target}`);
+      if (!el) return;
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.add("is-jump-flash");
+      window.setTimeout(() => el.classList.remove("is-jump-flash"), 1600);
+    }, 80);
+  }, []);
 
   useEffect(() => {
     if (!visible || tab !== "probe") return;
@@ -3637,26 +5386,34 @@ export function ImportedBaselineModal({
     };
   }, [visible, tab, cluster.id]);
 
-  const runAutoBaselineProbe = async () => {
+  const runAutoBaselineProbe = async (choice: ExecutionAgentChoice) => {
     if (!probeScript.trim() || autoProbeBusy) return;
+    setAgentModalOpen(false);
     autoProbeAbortRef.current?.abort();
     const ctrl = new AbortController();
     autoProbeAbortRef.current = ctrl;
-    setStep2Open(true);
+    setProbeStep(2);
     setAutoProbeBusy(true);
     try {
       const task = await api<RehearsalExecTask>(
         `/api/clusters/${encodeURIComponent(cluster.id)}/automation/probe`,
         {
           method: "POST",
-          body: JSON.stringify({ script: probeScript }),
+          body: JSON.stringify({
+            script: probeScript,
+            agent_id: choice.agent_id,
+            targets: choice.targets,
+            node_exec_method: choice.node_exec_method,
+            ssh_user: choice.ssh_user,
+            ssh_port: choice.ssh_port,
+          }),
         },
       );
       setAutoProbeTask(task);
       const fin = await pollRehearsalExecTask(cluster.id, task.id, setAutoProbeTask, ctrl.signal);
       if (fin.combined_output?.trim()) {
         setProbeOutput(fin.combined_output);
-        setStep3Open(true);
+        setProbeStep(3);
         Message.success(
           bi(
             "只读探针已自动采集完成并填入下方回显框，点击「AI 解析并增量合并基线」即可合入",
@@ -3699,28 +5456,57 @@ export function ImportedBaselineModal({
     return () => window.removeEventListener("keydown", onKey);
   }, [visible, saving, parsing, onClose]);
 
-  const parseAndMergeProbe = async () => {
+  const parseAndMergeProbe = async (opts?: { useAI?: boolean }) => {
     if (parsing) return;
     if (!probeOutput.trim() && probeImages.length === 0) {
       Message.warning(bi("请先粘贴采集脚本终端输出或上传截图", "Paste probe terminal output or upload screenshots first"));
       return;
     }
+    const useAI = opts?.useAI ?? true;
+    parseAbortRef.current?.abort();
+    const ac = new AbortController();
+    parseAbortRef.current = ac;
     setParsing(true);
+    const modelHint = modelPick.current?.model || modelPick.ref?.split("|")[1];
+    if (useAI) {
+      setProbeStep(3);
+      setDrawerParseCollapsed(true);
+      setParseLive(
+        buildImportInitialLive(
+          "import-parse",
+          bi("AI 正在解析回显并增量合并基线", "AI Parsing Evidence & Merging Baseline"),
+          modelHint ? { model: modelHint, provider: modelPick.current?.provider } : undefined,
+        ),
+      );
+    } else {
+      setDrawerParseCollapsed(false);
+      setParseLive(null);
+    }
     try {
-      const res = await api<ParseResp>("/api/clusters/import/parse", {
-        method: "POST",
-        body: JSON.stringify({
-          cluster_id: cluster.id,
-          component: cluster.app_id,
-          display_name: cluster.app_name,
-          source_kind: "probe",
-          text: probeOutput,
-          images: probeImages,
-          use_ai: true,
-          model: modelPick.ref || undefined,
-          think: aiOpts.pref.think || undefined,
-        }),
-      });
+      const payload = {
+        cluster_id: cluster.id,
+        component: cluster.app_id,
+        display_name: cluster.app_name,
+        source_kind: "probe",
+        text: probeOutput,
+        images: probeImages,
+        use_ai: useAI,
+        model: modelPick.ref || undefined,
+        think: aiOpts.pref.think || undefined,
+      };
+      const res = useAI
+        ? await streamPipelineSSE<ParseResp, ImportLiveKind>(
+            "/api/clusters/import/parse",
+            payload,
+            (updater) => setParseLive((prev) => (prev ? updater(prev) : prev)),
+            ac.signal,
+          )
+        : await api<ParseResp>("/api/clusters/import/parse", {
+            method: "POST",
+            body: JSON.stringify(payload),
+            signal: ac.signal,
+          });
+      if (ac.signal.aborted) return;
       const d = res.draft;
       const changes: string[] = [];
       const unionStrings = (cur: string[], incoming?: string[], label?: string) => {
@@ -3871,6 +5657,9 @@ export function ImportedBaselineModal({
       }
 
       setMergeDiff(changes);
+      setParseLive(null);
+      setDrawerParseCollapsed(false);
+      setParseTrace(res.trace || null);
       Message.success(
         changes.length > 0
           ? bi(`已增量合并：${changes.join(" · ")}，请核对后保存基线`, `Merged: ${changes.join(" · ")}; review and save`)
@@ -3878,8 +5667,20 @@ export function ImportedBaselineModal({
       );
       setTab("edit");
     } catch (e) {
-      Message.error((e as Error).message);
+      if (ac.signal.aborted || (e as Error)?.name === "AbortError") {
+        setParseLive(null);
+        setDrawerParseCollapsed(false);
+        return;
+      }
+      if (useAI) {
+        setParseLive((prev) => (prev ? markLiveStateError(prev, e) : prev));
+      } else {
+        Message.error((e as Error).message);
+      }
     } finally {
+      if (parseAbortRef.current === ac) {
+        parseAbortRef.current = null;
+      }
       setParsing(false);
     }
   };
@@ -3914,6 +5715,7 @@ export function ImportedBaselineModal({
           params: paramsObj,
           packages,
           notes: notes.trim() || undefined,
+          dismissed_gaps: dismissedGaps,
           last_probed_at: probeOutput.trim() ? new Date().toISOString() : data?.last_probed_at,
         }),
       });
@@ -3951,12 +5753,22 @@ export function ImportedBaselineModal({
             </button>
             <button
               type="button"
+              className={`imp-drawer-tab ${tab === "notes" ? "on" : ""}`}
+              onClick={() => setTab("notes")}
+            >
+              {bi("线索与约束", "Clues & Guardrails")}
+              {splitNotesToClues(notes).length > 0 && (
+                <em className="imp-tab-dot is-muted">{splitNotesToClues(notes).length}</em>
+              )}
+            </button>
+            <button
+              type="button"
               className={`imp-drawer-tab ${tab === "probe" ? "on" : ""}`}
               onClick={() => setTab("probe")}
             >
               {bi("AI 只读补采", "AI Read-Only Probe")}
-              {health && health.gaps.length > 0 && (
-                <em className="imp-tab-dot">{health.gaps.length}</em>
+              {(health?.gaps?.length ?? 0) > 0 && (
+                <em className="imp-tab-dot">{health!.gaps!.length}</em>
               )}
             </button>
           </div>
@@ -3968,7 +5780,10 @@ export function ImportedBaselineModal({
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, width: "100%" }}>
             <Button onClick={onClose}>{bi("取消", "Cancel")}</Button>
             <Button type="primary" loading={saving} onClick={saveBaseline}>
-              <IconCheck /> {bi("保存基线并刷新拓扑", "Save & Rebuild Topology")}
+              <IconCheck />{" "}
+              {tab === "notes"
+                ? bi("保存线索与约束", "Save Clues & Guardrails")
+                : bi("保存基线并刷新拓扑", "Save & Rebuild Topology")}
             </Button>
           </div>
         )
@@ -3976,366 +5791,501 @@ export function ImportedBaselineModal({
     >
       {loading ? (
         <Skeleton text={{ rows: 9 }} animation />
+      ) : tab === "notes" ? (
+        <div className="imp-notes-tab">
+          <div className="imp-notes-tab-banner">
+            <Spark size={13} />
+            <span>
+              {bi(
+                "沉淀在此的维护窗口、切主红线与环境特殊说明会自动注入 AI 变更演练与排障上下文，无需每次重复提醒。",
+                "Maintenance windows, failover guardrails, and field notes saved here are automatically injected into AI Change Rehearsal & troubleshooting.",
+              )}
+            </span>
+          </div>
+          <FieldCluesEditor
+            title={bi("现场线索与运维约束", "Field Clues & Operational Guardrails")}
+            value={notes}
+            onChange={setNotes}
+            fullHeight
+            showTemplates
+          />
+        </div>
       ) : tab === "probe" ? (
         (() => {
           const allGaps = health?.gaps || [];
+          const dismissedList = health?.dismissed_gaps || [];
           const selectedGapObjs = allGaps.filter((g) => selectedGapIDs.includes(g.id));
-          const aiGapCount = allGaps.filter((g) => g.source === "ai").length;
-          const ruleGapCount = allGaps.length - aiGapCount;
-          const probeLineCount = probeScript ? probeScript.split("\n").length : 0;
+          const hasProbe = Boolean(probeScript.trim()) || probeGenerating;
+          const canGenerate =
+            probeMode === "full" ||
+            selectedGapObjs.length > 0 ||
+            probeFocus.trim().length > 0;
           const isMac =
             typeof navigator !== "undefined" &&
             /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent);
-          const triggerGenerateProbe = () =>
+          const triggerGenerateProbe = (useAI: boolean) => {
+            if (!canGenerate) {
+              Message.info(
+                bi(
+                  "请先勾选需要补采的缺口，或输入自定义核查需求，或切换「全量标准探针」",
+                  "Select gap item(s), enter custom focus, or switch to Full Standard Probe first",
+                ),
+              );
+              return;
+            }
             void fetchDrawerProbe({
-              useAI: true,
+              useAI,
               focus: probeFocus,
               mode: probeMode,
               gapIDs: selectedGapIDs,
               gapsList: allGaps,
             });
+          };
+
+          const manualLabelFor = (target?: string) => {
+            if (target === "endpoints") return bi("去基线填写入口", "Fill Endpoint");
+            if (target === "paths") return bi("去基线填写路径", "Edit Paths");
+            if (target === "params") return bi("去基线填写参数", "Edit Params");
+            return bi("去基线手工填写", "Fill Manually");
+          };
 
           return (
             <div className="imp-probe-studio">
-              {/* Step 1: Define Probe Requirements (Rule Baseline + AI Deep Discovery + Flowing AI Intent Composer) */}
-              <section className={`imp-step-card ${step1Open ? "is-open" : ""}`}>
-                <div
-                  className="imp-step-head"
-                  role="button"
-                  tabIndex={0}
-                  aria-expanded={step1Open}
-                  onClick={() => setStep1Open((v) => !v)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      setStep1Open((v) => !v);
+              {/* Clean 3-Step Horizontal Stepper: One Focused Workspace at a Time */}
+              <div className="imp-pflow-bar" role="tablist" aria-label={bi("只读补采流程", "Read-Only Probe Flow")}>
+                <div className="imp-pflow-steps">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={probeStep === 1}
+                    className={`imp-pflow-step ${probeStep === 1 ? "is-active" : hasProbe ? "is-done" : ""}`}
+                    onClick={() => setProbeStep(1)}
+                  >
+                    <span className="imp-pflow-num">{probeStep > 1 && hasProbe ? <IconCheck /> : "1"}</span>
+                    <span>{bi("选择补采项", "Select Scope")}</span>
+                  </button>
+                  <span className="imp-pflow-sep" aria-hidden>›</span>
+                  <Tooltip
+                    position="bottom"
+                    content={
+                      !hasProbe
+                        ? bi("请先在第 1 步确认补采项并点击生成探针", "Confirm scope and generate a probe in Step 1 first")
+                        : ""
                     }
-                  }}
-                >
-                  <div className="imp-step-head-l">
-                    <span className={`imp-step-num ${!step1Open && (selectedGapObjs.length > 0 || probeFocus.trim()) ? "is-done" : "is-active"}`}>
-                      {!step1Open && (selectedGapObjs.length > 0 || probeFocus.trim()) ? <IconCheck /> : "1"}
-                    </span>
-                    {health && (
-                      <span
-                        className={`imp-gap-score xs num ${
-                          health.score >= 85 ? "is-ok" : health.score >= 55 ? "is-warn" : "is-low"
-                        }`}
+                    disabled={hasProbe}
+                    mini
+                  >
+                    <span className="imp-tip-anchor">
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={probeStep === 2}
+                        disabled={!hasProbe}
+                        className={`imp-pflow-step ${probeStep === 2 ? "is-active" : hasProbe && probeStep > 2 ? "is-done" : ""}`}
+                        onClick={() => hasProbe && setProbeStep(2)}
                       >
-                        {health.score}%
-                      </span>
-                    )}
-                    <div className="imp-step-titles">
-                      <div className="imp-step-title-row">
-                        <h4>{bi("明确补采需求", "Define Probe Scope")}</h4>
-                        <span className="imp-iron-badge">
-                          <IconCheckCircle /> {bi("100% 只读铁律", "100% Read-Only")}
-                        </span>
-                        {aiGapCount > 0 && (
+                        <span className="imp-pflow-num">{probeStep > 2 && hasProbe ? <IconCheck /> : "2"}</span>
+                        <span>{bi("获取并执行探针", "Run Probe")}</span>
+                      </button>
+                    </span>
+                  </Tooltip>
+                  <span className="imp-pflow-sep" aria-hidden>›</span>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={probeStep === 3}
+                    className={`imp-pflow-step ${probeStep === 3 ? "is-active" : ""}`}
+                    onClick={() => setProbeStep(3)}
+                  >
+                    <span className="imp-pflow-num">3</span>
+                    <span>{bi("回填合并基线", "Merge Output")}</span>
+                  </button>
+                </div>
+
+                <div className="imp-pflow-meta">
+                  <span className="imp-iron-badge">
+                    <IconCheckCircle /> {bi("100% 只读", "100% RO")}
+                  </span>
+                  {health && (
+                    <span
+                      className={`imp-gap-score xs num ${
+                        health.score >= 85 ? "is-ok" : health.score >= 55 ? "is-warn" : "is-low"
+                      }`}
+                    >
+                      {health.score}%
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* ===================== STEP 1: Scope & Gap Management ===================== */}
+              {probeStep === 1 && (
+                <div className="imp-pflow-panel enter">
+                  <div className="imp-pflow-status">
+                    <div className="imp-pflow-status-l">
+                      <div className="imp-pflow-status-title">
+                        <b>
+                          {allGaps.length > 0
+                            ? bi(
+                                `基线已齐备 ${health?.passed ?? 0}/${health?.total ?? 0} 项 · 还有 ${allGaps.length} 项待确认`,
+                                `Baseline ${health?.passed ?? 0}/${health?.total ?? 0} complete · ${allGaps.length} item(s) to review`,
+                              )
+                            : bi(
+                                `基线核验已全部齐备（${health?.passed ?? 0}/${health?.total ?? 0}）`,
+                                `All applicable baseline checks complete (${health?.passed ?? 0}/${health?.total ?? 0})`,
+                              )}
+                        </b>
+                        {aiGapDone && aiGapAdded > 0 && (
                           <span className="imp-gap-ai-tag">
                             <Spark size={10} rainbow />
-                            {bi(`含 ${aiGapCount} 项 AI 发现`, `${aiGapCount} AI-found`)}
+                            {bi(`含 ${aiGapAdded} 项 AI 发现`, `+${aiGapAdded} AI-found`)}
                           </span>
                         )}
                       </div>
-                      {!step1Open && (
-                        <div className="imp-step-summary">
-                          {probeMode === "full"
-                            ? bi("全量标准基线探针", "Full standard baseline probe")
-                            : selectedGapObjs.length > 0
-                              ? bi(
-                                  `已选 ${selectedGapObjs.length} 项缺口：${selectedGapObjs.map((g) => g.category).slice(0, 4).join("、")}${selectedGapObjs.length > 4 ? " 等" : ""}`,
-                                  `${selectedGapObjs.length} gap(s): ${selectedGapObjs.map((g) => g.category).slice(0, 4).join(", ")}`,
-                                )
-                              : bi("自定义只读核查需求", "Custom read-only verification scope")}
-                          {probeFocus.trim() ? ` · 「${probeFocus.trim().slice(0, 32)}${probeFocus.trim().length > 32 ? "…" : ""}」` : ""}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  <div className="imp-step-head-r">
-                    <span className="imp-step-toggle">
-                      {step1Open ? bi("收起", "Collapse") : bi("修改需求", "Edit Scope")}
-                      {step1Open ? <IconUp /> : <IconDown />}
-                    </span>
-                  </div>
-                </div>
-
-                {step1Open && (
-                  <div className="imp-step-body">
-                    <div className="imp-gap-toolbar">
-                      <div className="imp-gap-toolbar-l">
-                        <p className="imp-gap-sub">
-                          {health?.summary ||
-                            bi(
-                              "先通过规则初检定位标准基线缺失项，可进一步让 AI 结合架构栈与变更历史深度发现专属盲区。",
-                              "Start with baseline rule checks, or let AI deeply inspect stack & change history for hidden blind spots.",
-                            )}
-                        </p>
-                        <div className="imp-gap-src-meta">
-                          <span>{bi(`规则初检 ${ruleGapCount} 项`, `${ruleGapCount} rule check(s)`)}</span>
-                          {aiGapDone && (
-                            <span className="is-ai">
-                              <Spark size={11} rainbow />
-                              {bi(
-                                `AI 深度发现 +${aiGapAdded} 项${aiGapModel ? ` · ${aiGapModel}` : ""}`,
-                                `AI discovered +${aiGapAdded}${aiGapModel ? ` · ${aiGapModel}` : ""}`,
-                              )}
-                            </span>
+                      <p className="imp-gap-sub">
+                        {health?.summary ||
+                          bi(
+                            "勾选需要探测的缺口后按需生成只读脚本；对于不在主机侧配置的项目（如前端 F5 / 云 LB / VIP）可直接手工填写或关闭。",
+                            "Select items to probe and generate a script on demand, or dismiss items configured outside the hosts (e.g. F5 / Cloud LB / VIP).",
                           )}
-                        </div>
-                      </div>
-                      <div className="imp-gap-toolbar-r">
-                        <Button
-                          size="small"
-                          shape="round"
-                          type={aiGapDone ? "outline" : "secondary"}
-                          className="imp-ai-discover-btn"
-                          loading={diagnosingGaps}
-                          disabled={probeGenerating}
-                          icon={<Spark size={12} rainbow />}
-                          onClick={() => void runAIDiagnoseGaps()}
+                      </p>
+                    </div>
+                    <div className="imp-gap-toolbar-r">
+                      <Button
+                        size="small"
+                        shape="round"
+                        type={aiGapDone ? "outline" : "secondary"}
+                        className="imp-ai-discover-btn"
+                        loading={diagnosingGaps}
+                        disabled={probeGenerating || templateGenerating}
+                        icon={<Spark size={12} rainbow />}
+                        onClick={() => void runAIDiagnoseGaps()}
+                      >
+                        {aiGapDone
+                          ? bi("重新排查遗漏", "Re-scan Gaps")
+                          : bi("AI 深度排查遗漏", "AI Deep Gap Scan")}
+                      </Button>
+                      <div className="imp-gap-mode-sw">
+                        <button
+                          type="button"
+                          className={probeMode === "gap" ? "on" : ""}
+                          onClick={() => setProbeMode("gap")}
                         >
-                          {aiGapDone
-                            ? bi("AI 重新深度发现", "Re-run AI Discovery")
-                            : bi("AI 深度发现遗漏项", "AI Deep Gap Discovery")}
-                        </Button>
-                        <div className="imp-gap-mode-sw">
-                          <button
-                            type="button"
-                            className={probeMode === "gap" ? "on" : ""}
-                            onClick={() => setProbeMode("gap")}
-                            disabled={allGaps.length === 0}
-                          >
-                            {bi("专项缺口补采", "Gap Probe")}
-                          </button>
-                          <button
-                            type="button"
-                            className={probeMode === "full" ? "on" : ""}
-                            onClick={() => setProbeMode("full")}
-                          >
-                            {bi("全量标准探针", "Full Standard")}
-                          </button>
-                        </div>
+                          {bi("按缺口补采", "By Gap")}
+                        </button>
+                        <button
+                          type="button"
+                          className={probeMode === "full" ? "on" : ""}
+                          onClick={() => setProbeMode("full")}
+                        >
+                          {bi("全量标准探针", "Full Standard")}
+                        </button>
                       </div>
                     </div>
+                  </div>
 
-                    <GapDiagnosingBanner active={diagnosingGaps} />
+                  {(diagLive || diagTrace) && (
+                    <AIProcessCard
+                      live={diagLive}
+                      trace={diagLive ? null : diagTrace}
+                      title={bi("AI 深度基线盲区诊断推演", "AI Deep Baseline Gap Diagnosis")}
+                      onAbort={() => {
+                        diagAbortRef.current?.abort();
+                        setDiagLive(null);
+                        setDiagnosingGaps(false);
+                      }}
+                      onRetry={() => void runAIDiagnoseGaps()}
+                      onDismiss={() => setDiagLive(null)}
+                    />
+                  )}
 
-                    {probeMode === "gap" && allGaps.length > 0 && (
-                      <div className="imp-gap-grid">
+                  {probeMode === "gap" ? (
+                    allGaps.length > 0 ? (
+                      <div className="imp-gap-list">
                         {allGaps.map((g) => {
                           const picked = selectedGapIDs.includes(g.id);
                           const isAI = g.source === "ai";
+                          const busyThis = gapBusyID === g.id;
                           return (
-                            <button
+                            <div
                               key={g.id}
-                              type="button"
-                              className={`imp-gap-item ${picked ? "is-on" : ""} ${isAI ? "is-ai" : ""}`}
-                              onClick={() => toggleGapID(g.id)}
+                              className={`imp-gap-card ${picked ? "is-on" : ""} ${isAI ? "is-ai" : ""}`}
                             >
-                              <div className="imp-gap-item-top">
+                              <button
+                                type="button"
+                                className="imp-gap-card-main"
+                                aria-pressed={picked}
+                                onClick={() => toggleGapID(g.id)}
+                              >
                                 <span className={`imp-gap-chk ${picked ? "is-on" : ""}`}>
                                   {picked && <IconCheck />}
                                 </span>
-                                <span className={`imp-gap-sev is-${g.severity}`}>
-                                  {g.severity === "high"
-                                    ? bi("建议优先", "High")
-                                    : g.severity === "medium"
-                                      ? bi("建议完善", "Medium")
-                                      : bi("可选", "Optional")}
-                                </span>
-                                <span className="imp-gap-cat">{g.category}</span>
-                                {isAI && (
-                                  <span className="imp-gap-ai-tag">
-                                    <Spark size={10} rainbow />
-                                    {bi("AI 发现", "AI Found")}
-                                  </span>
+                                <div className="imp-gap-card-body">
+                                  <div className="imp-gap-item-top">
+                                    <span className={`imp-gap-sev is-${g.severity}`}>
+                                      {g.severity === "high"
+                                        ? bi("建议优先", "High")
+                                        : g.severity === "medium"
+                                          ? bi("建议完善", "Medium")
+                                          : bi("可选", "Optional")}
+                                    </span>
+                                    <span className="imp-gap-cat">{g.category}</span>
+                                    {isAI && (
+                                      <span className="imp-gap-ai-tag">
+                                        <Spark size={10} rainbow />
+                                        {bi("AI 发现", "AI Found")}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="imp-gap-item-title">{g.title}</div>
+                                  <div className="imp-gap-item-act">{g.probe_action}</div>
+                                  {g.dismiss_hint && (
+                                    <div className="imp-gap-item-hint">{g.dismiss_hint}</div>
+                                  )}
+                                </div>
+                              </button>
+                              <div className="imp-gap-card-acts">
+                                {g.manual_target && (
+                                  <button
+                                    type="button"
+                                    className="imp-gap-act-btn is-link"
+                                    onClick={() => jumpToBaselineSection(g.manual_target!)}
+                                  >
+                                    <IconEdit />
+                                    <span>{manualLabelFor(g.manual_target)}</span>
+                                  </button>
                                 )}
+                                <Tooltip
+                                  position="bottom"
+                                  content={
+                                    g.dismiss_hint ||
+                                    bi(
+                                      "如该项目不在主机侧配置或当前无需探测，点击后将关闭推荐，随时可在下方恢复",
+                                      "Dismiss this recommendation if not applicable on hosts; can be restored anytime",
+                                    )
+                                  }
+                                  mini
+                                >
+                                  <span className="imp-tip-anchor">
+                                    <button
+                                      type="button"
+                                      className="imp-gap-act-btn is-dismiss"
+                                      disabled={busyThis || Boolean(gapBusyID)}
+                                      onClick={() => void handleGapDismissAction(g, "dismiss")}
+                                    >
+                                      <IconClose />
+                                      <span>{busyThis ? bi("处理中…", "Saving…") : bi("无需探测", "Dismiss")}</span>
+                                    </button>
+                                  </span>
+                                </Tooltip>
                               </div>
-                              <div className="imp-gap-item-title">{g.title}</div>
-                              <div className="imp-gap-item-act">{g.probe_action}</div>
-                            </button>
+                            </div>
                           );
                         })}
                       </div>
-                    )}
-
-                    {/* Flagship Flowing-Rim AI Intent Composer */}
-                    <div className={`imp-intent-box ${probeGenerating || diagnosingGaps ? "is-busy" : ""}`}>
-                      <div className="imp-intent-head">
-                        <div className="imp-intent-chips">
-                          <span className="imp-intent-lbl">
-                            <Spark size={12} rainbow />
-                            {probeMode === "full"
-                              ? bi("全量标准基线模式", "Full Standard Baseline Mode")
-                              : bi("本次补采范围", "Selected Scope")}
+                    ) : (
+                      <div className="imp-gap-allclear">
+                        <span className="imp-gap-allclear-ic" aria-hidden>
+                          <IconCheckCircle />
+                        </span>
+                        <div className="imp-gap-allclear-txt">
+                          <b>{bi("当前基线已完备，无需例行补采", "Baseline is complete — no routine probe needed")}</b>
+                          <span>
+                            {bi(
+                              "如需临时核查特定配置或运行水位，可在下方输入自定义核查需求，或切换到「全量标准探针」。",
+                              "Need an ad-hoc check? Describe what to inspect below or switch to Full Standard Probe.",
+                            )}
                           </span>
-                          {probeMode === "gap" && selectedGapObjs.length > 0 ? (
-                            <>
-                              {selectedGapObjs.map((g) => (
-                                <span
-                                  key={g.id}
-                                  className={`imp-intent-chip ${g.source === "ai" ? "is-ai" : ""}`}
-                                >
-                                  {g.source === "ai" && <Spark size={10} rainbow />}
-                                  <span>{g.category}</span>
-                                  <button
-                                    type="button"
-                                    aria-label={bi("移除", "Remove")}
-                                    onClick={() => toggleGapID(g.id)}
-                                  >
-                                    <IconClose />
-                                  </button>
-                                </span>
-                              ))}
-                              <button
-                                type="button"
-                                className="imp-inline-clear"
-                                onClick={() => setSelectedGapIDs([])}
+                        </div>
+                      </div>
+                    )
+                  ) : (
+                    <div className="imp-gap-full-note">
+                      <IconCheckCircle />
+                      <span>
+                        {bi(
+                          "全量标准探针将一次只读采集主机 OS、精确版本、伴生组件栈、运行目录、核心参数与 CVE 软件包清单（零修改、自动脱敏）。",
+                          "Full standard probe collects OS, exact versions, companion stack, paths, core params & CVE packages in one 100% read-only pass.",
+                        )}
+                      </span>
+                    </div>
+                  )}
+
+                  {dismissedList.length > 0 && (
+                    <div className="imp-gap-dismissed-bar">
+                      <span className="imp-gap-dismissed-lbl">
+                        {bi(
+                          `已忽略 ${dismissedList.length} 项（不在主机侧 / 无需探测）：`,
+                          `Dismissed ${dismissedList.length} item(s):`,
+                        )}
+                      </span>
+                      <div className="imp-gap-dismissed-chips">
+                        {dismissedList.map((dg) => (
+                          <span key={dg.id} className="imp-gap-dismissed-chip">
+                            <span>{dg.category}</span>
+                            <button
+                              type="button"
+                              disabled={Boolean(gapBusyID)}
+                              onClick={() => void handleGapDismissAction(dg, "restore")}
+                            >
+                              {gapBusyID === dg.id ? "…" : bi("恢复", "Restore")}
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Intent Composer & Explicit On-Demand Probe Generation */}
+                  <div className={`imp-intent-box ${probeGenerating || templateGenerating || diagnosingGaps ? "is-busy" : ""}`}>
+                    <div className="imp-intent-head">
+                      <div className="imp-intent-chips">
+                        <span className="imp-intent-lbl">
+                          <Spark size={12} rainbow />
+                          {probeMode === "full"
+                            ? bi("本次采集范围：全量标准基线", "Scope: Full Standard Baseline")
+                            : bi("本次采集范围", "Probe Scope")}
+                        </span>
+                        {probeMode === "gap" && selectedGapObjs.length > 0 ? (
+                          <>
+                            {selectedGapObjs.map((g) => (
+                              <span
+                                key={g.id}
+                                className={`imp-intent-chip ${g.source === "ai" ? "is-ai" : ""}`}
                               >
-                                {bi("清空", "Clear")}
-                              </button>
-                            </>
-                          ) : probeMode === "gap" ? (
-                            <span className="imp-intent-empty-hint">
-                              {bi("未勾选上方卡片，可直接用自然语言指定你想核查的项目", "No cards selected — describe what to inspect below")}
-                            </span>
-                          ) : null}
-                        </div>
+                                {g.source === "ai" && <Spark size={10} rainbow />}
+                                <span>{g.category}</span>
+                                <button
+                                  type="button"
+                                  aria-label={bi("移除", "Remove")}
+                                  onClick={() => toggleGapID(g.id)}
+                                >
+                                  <IconClose />
+                                </button>
+                              </span>
+                            ))}
+                            <button
+                              type="button"
+                              className="imp-inline-clear"
+                              onClick={() => setSelectedGapIDs([])}
+                            >
+                              {bi("清空", "Clear")}
+                            </button>
+                          </>
+                        ) : probeMode === "gap" ? (
+                          <span className="imp-intent-empty-hint">
+                            {allGaps.length > 0
+                              ? bi("请勾选上方缺口，或在下方输入自定义只读核查需求", "Select gap cards above or enter a custom check below")
+                              : bi("输入自定义只读核查需求，或切换上方「全量标准探针」", "Describe a custom read-only check below, or switch to Full Standard")}
+                          </span>
+                        ) : null}
                       </div>
+                    </div>
 
-                      <Input.TextArea
-                        className="imp-intent-area"
-                        value={probeFocus}
-                        onChange={setProbeFocus}
-                        disabled={probeGenerating}
-                        autoSize={{ minRows: 2, maxRows: 5 }}
-                        onKeyDown={(e) => {
-                          if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-                            e.preventDefault();
-                            if (!probeGenerating) triggerGenerateProbe();
+                    <Input.TextArea
+                      className="imp-intent-area"
+                      value={probeFocus}
+                      onChange={setProbeFocus}
+                      disabled={probeGenerating || templateGenerating}
+                      autoSize={{ minRows: 2, maxRows: 4 }}
+                      onKeyDown={(e) => {
+                        if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                          e.preventDefault();
+                          if (!probeGenerating && !templateGenerating && canGenerate) {
+                            triggerGenerateProbe(true);
                           }
-                        }}
-                        placeholder={bi(
-                          "补充本次想重点核查的现场诉求（可选）… 例如：核查 VIP 172.30.2.120 承载位置、Patroni 切换保护参数与备库复制槽状态",
-                          "Optional natural-language focus… e.g. verify VIP 172.30.2.120 binding, Patroni failover TTL, and replica slot status",
-                        )}
-                      />
-
-                      <div className="imp-intent-foot">
-                        <div className="imp-intent-foot-l">
-                          <ThinkLevel
-                            compact
-                            levels={modelPick.current?.effort}
-                            value={aiOpts.pref.think}
-                            onChange={(v) => aiOpts.update({ think: v })}
-                          />
-                          <ModelPicker compact pick={modelPick} />
-                          <span className="imp-foot-note">
-                            {isMac ? "⌘" : "Ctrl"} + Enter
-                          </span>
-                        </div>
-                        <div className="imp-intent-foot-r">
-                          <Button
-                            size="small"
-                            shape="round"
-                            className="ai-pill"
-                            loading={probeGenerating}
-                            disabled={diagnosingGaps}
-                            icon={<Spark size={13} rainbow />}
-                            onClick={triggerGenerateProbe}
-                          >
-                            {probeMode === "gap" && selectedGapObjs.length > 0
-                              ? bi(
-                                  `AI 生成专项 100% 只读探针（${selectedGapObjs.length} 项）`,
-                                  `AI Generate Targeted Probe (${selectedGapObjs.length})`,
-                                )
-                              : bi("AI 生成 100% 只读探针", "AI Generate Read-Only Probe")}
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </section>
-
-              {/* Step 2: 100% Read-Only Probe Script (Collapsed by default; auto-expands on AI generation) */}
-              <section className={`imp-step-card ${step2Open ? "is-open" : ""}`}>
-                <div
-                  className="imp-step-head"
-                  role="button"
-                  tabIndex={0}
-                  aria-expanded={step2Open}
-                  onClick={() => setStep2Open((v) => !v)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      setStep2Open((v) => !v);
-                    }
-                  }}
-                >
-                  <div className="imp-step-head-l">
-                    <span className={`imp-step-num ${probeSource === "ai" ? "is-done" : step2Open ? "is-active" : ""}`}>
-                      {probeSource === "ai" && !probeGenerating ? <IconCheck /> : "2"}
-                    </span>
-                    <div className="imp-step-titles">
-                      <div className="imp-step-title-row">
-                        <h4>{bi("获取并执行 100% 只读探针", "Get & Run 100% Read-Only Probe")}</h4>
-                        {probeGenerating ? (
-                          <span className="imp-gap-ai-tag">
-                            <Spark size={10} rainbow />
-                            {bi("AI 正在生成并做安全校验…", "AI generating & verifying…")}
-                          </span>
-                        ) : (
-                          <span className={`imp-probe-mode-tag ${probeSource === "ai" ? "is-ai" : ""}`}>
-                            {probeSource === "ai" && <Spark size={10} />}
-                            {probeSource === "ai"
-                              ? bi("AI 专项已就绪", "AI Probe Ready")
-                              : bi("模板探针就绪", "Template Ready")}
-                            {probeLineCount > 0 ? ` · ${probeLineCount} ${bi("行", "lines")}` : ""}
-                          </span>
-                        )}
-                      </div>
-                      {!step2Open && (
-                        <div className="imp-step-summary">
-                          {probeCoveredGaps.length > 0
-                            ? bi(
-                                `覆盖 ${probeCoveredGaps.join("、")} · 通过静态只读安全门禁，可直接复制或展开查看`,
-                                `Covers ${probeCoveredGaps.join(", ")} · Static read-only verified`,
-                              )
-                            : bi(
-                                "已通过 100% 静态只读校验（零写入、零重启），先定需求后再展开或直接复制执行",
-                                "100% static read-only verified (zero writes/restarts); expand when ready",
-                              )}
-                        </div>
+                        }
+                      }}
+                      placeholder={bi(
+                        "补充本次想重点核查的现场诉求（可选）… 例如：核查 Patroni 切换超时、备库复制槽状态与日志轮转配置",
+                        "Optional focus… e.g. inspect Patroni failover TTL, replication slots, and log rotation",
                       )}
+                    />
+
+                    <div className="imp-intent-foot">
+                      <div className="imp-intent-foot-l">
+                        <ThinkLevel
+                          compact
+                          levels={modelPick.current?.effort}
+                          value={aiOpts.pref.think}
+                          onChange={(v) => aiOpts.update({ think: v })}
+                        />
+                        <ModelPicker compact pick={modelPick} />
+                        <span className="imp-foot-note">
+                          {isMac ? "⌘" : "Ctrl"} + Enter
+                        </span>
+                      </div>
+                      <div className="imp-intent-foot-r">
+                        <Button
+                          size="small"
+                          shape="round"
+                          type="secondary"
+                          loading={templateGenerating}
+                          disabled={!canGenerate || probeGenerating || diagnosingGaps}
+                          onClick={() => triggerGenerateProbe(false)}
+                        >
+                          {bi("生成标准模板探针", "Standard Template")}
+                        </Button>
+                        <Button
+                          size="small"
+                          shape="round"
+                          className="ai-pill"
+                          loading={probeGenerating}
+                          disabled={!canGenerate || templateGenerating || diagnosingGaps}
+                          icon={<Spark size={13} rainbow />}
+                          onClick={() => triggerGenerateProbe(true)}
+                        >
+                          {probeMode === "gap" && selectedGapObjs.length > 0
+                            ? bi(
+                                `AI 生成专项探针（${selectedGapObjs.length} 项）`,
+                                `AI Generate Probe (${selectedGapObjs.length})`,
+                              )
+                            : bi("AI 生成只读探针", "AI Generate Probe")}
+                        </Button>
+                      </div>
                     </div>
                   </div>
-                  <div className="imp-step-head-r">
-                    {!step2Open && probeScript && !probeGenerating && (
-                      <Button
-                        size="mini"
-                        type="secondary"
-                        icon={<IconCopy />}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          copy(probeScript);
-                          Message.success(bi("已复制 100% 只读采集脚本", "100% read-only probe script copied"));
-                        }}
-                      >
-                        {bi("复制脚本", "Copy")}
-                      </Button>
-                    )}
-                    <span className="imp-step-toggle">
-                      {step2Open ? bi("收起", "Collapse") : bi("展开脚本", "Expand")}
-                      {step2Open ? <IconUp /> : <IconDown />}
+
+                  {/* Direct skip shortcut for engineers who already have terminal output / screenshots */}
+                  <div className="imp-pflow-skip">
+                    <span className="small muted">
+                      {bi(
+                        "已经在节点终端手动采集过输出，或有配置截图？",
+                        "Already collected terminal output or screenshots?",
+                      )}
                     </span>
+                    <button
+                      type="button"
+                      className="imp-pflow-skip-btn"
+                      onClick={() => setProbeStep(3)}
+                    >
+                      <span>{bi("跳过生成，直接粘贴回显合并", "Skip to Step 3: Paste Output")}</span>
+                      <IconArrowRight />
+                    </button>
                   </div>
                 </div>
+              )}
 
-                {step2Open && (
-                  <div className="imp-step-body">
+              {/* ===================== STEP 2: Generated Probe Execution ===================== */}
+              {probeStep === 2 && (
+                <div className="imp-pflow-panel enter">
+                  {(probeLive || probeTrace) && (
+                    <AIProcessCard
+                      live={probeLive}
+                      trace={probeLive ? null : probeTrace}
+                      title={bi("AI 定制只读探针推演记录", "AI Read-Only Probe Generation Trace")}
+                      onAbort={() => {
+                        probeAbortRef.current?.abort();
+                        setProbeLive(null);
+                        setProbeGenerating(false);
+                        if (!probeScript.trim()) setProbeStep(1);
+                      }}
+                      onRetry={() => triggerGenerateProbe(true)}
+                      onDismiss={() => setProbeLive(null)}
+                    />
+                  )}
+
+                  {probeScript && (
                     <ProbeCodeBlock
                       script={probeScript}
                       filename={probeFilename}
@@ -4350,121 +6300,76 @@ export function ImportedBaselineModal({
                       aiBusy={probeGenerating}
                       gapCount={selectedGapIDs.length}
                     />
-                    {autoProbeTask && (
-                      <LiveExecLogCard
-                        task={autoProbeTask}
-                        clusterId={cluster.id}
-                        compact
-                        onCancelled={setAutoProbeTask}
-                      />
-                    )}
-                    <div className="imp-step-next">
-                      <span className="imp-step-next-hint">
-                        {bi(
-                          "在目标主/备节点终端执行后复制完整回显；若已配置自动化通道也可直接一键采集",
-                          "Run on target terminals and copy output, or use 1-click automated collection if configured",
-                        )}
-                      </span>
-                      <div className="imp-step-next-acts">
-                        {can("delivery.execute") && (
-                          autoSummary?.ready ? (
-                            <Button
-                              size="small"
-                              type="secondary"
-                              loading={autoProbeBusy}
-                              disabled={probeGenerating || !probeScript}
-                              icon={<IconThunderbolt style={{ color: "var(--ok)" }} />}
-                              onClick={() => void runAutoBaselineProbe()}
-                            >
-                              {bi("自动执行只读探针", "Auto-Run Probe")}
-                            </Button>
-                          ) : (
-                            <Button
-                              size="small"
-                              type="outline"
-                              icon={<IconThunderbolt style={{ color: "var(--warn)" }} />}
-                              onClick={() => setAutoDrawerOpen(true)}
-                            >
-                              {bi("配置自动采集", "Setup Automation")}
-                            </Button>
-                          )
-                        )}
-                        <Button
-                          size="small"
-                          type="text"
-                          onClick={() => {
-                            setStep1Open(true);
-                            setStep2Open(false);
-                          }}
-                        >
-                          {bi("调整补采需求", "Edit Scope")}
-                        </Button>
-                        <Button
-                          size="small"
-                          type="primary"
-                          disabled={probeGenerating}
-                          onClick={() => {
-                            setStep2Open(false);
-                            setStep3Open(true);
-                          }}
-                        >
-                          {bi("已执行完毕，去粘贴回显", "Done — Paste Output")} <IconArrowRight />
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </section>
+                  )}
 
-              {/* Step 3: Paste Output / Screenshots & Incremental Merge (Collapsed by default) */}
-              <section className={`imp-step-card ${step3Open ? "is-open" : ""}`}>
-                <div
-                  className="imp-step-head"
-                  role="button"
-                  tabIndex={0}
-                  aria-expanded={step3Open}
-                  onClick={() => setStep3Open((v) => !v)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      setStep3Open((v) => !v);
-                    }
-                  }}
-                >
-                  <div className="imp-step-head-l">
-                    <span className={`imp-step-num ${step3Open ? "is-active" : ""}`}>3</span>
-                    <div className="imp-step-titles">
-                      <div className="imp-step-title-row">
-                        <h4>{bi("粘贴回显与截图 · AI 增量合并基线", "Paste Output / Screenshots · AI Incremental Merge")}</h4>
-                        {(probeOutput.trim() || probeImages.length > 0) && (
-                          <span className="imp-gap-ai-tag">
-                            {bi(
-                              `已待解析${probeOutput.trim() ? ` ${probeOutput.trim().length} 字` : ""}${probeImages.length > 0 ? ` · ${probeImages.length} 张图` : ""}`,
-                              `Draft ready${probeOutput.trim() ? ` (${probeOutput.trim().length} chars)` : ""}${probeImages.length > 0 ? ` · ${probeImages.length} img` : ""}`,
-                            )}
-                          </span>
-                        )}
-                      </div>
-                      {!step3Open && (
-                        <div className="imp-step-summary">
-                          {bi(
-                            "支持直接粘贴回显、拖拽 .log/.txt 或 Ctrl+V 截图；自动脱敏并增量合并，不覆盖已有基线",
-                            "Paste terminal output, drop .log/.txt, or Ctrl+V screenshots; auto-redacted additive merge",
-                          )}
-                        </div>
+                  {autoProbeTask && (
+                    <LiveExecLogCard
+                      task={autoProbeTask}
+                      clusterId={cluster.id}
+                      compact
+                      onCancelled={setAutoProbeTask}
+                    />
+                  )}
+
+                  <div className="imp-pflow-foot">
+                    <Button
+                      size="small"
+                      type="text"
+                      disabled={probeGenerating}
+                      onClick={() => setProbeStep(1)}
+                    >
+                      <IconArrowLeft /> {bi("返回调整补采项", "Back to Scope")}
+                    </Button>
+                    <div className="imp-step-next-acts">
+                      {can("delivery.execute") && (
+                        <Button
+                          size="small"
+                          type="secondary"
+                          loading={autoProbeBusy}
+                          disabled={probeGenerating || !probeScript}
+                          icon={<IconThunderbolt style={{ color: "var(--brand)" }} />}
+                          onClick={() => setAgentModalOpen(true)}
+                        >
+                          {bi("选择 Agent 自动采集", "Run with Agent")}
+                        </Button>
                       )}
+                      <SelectExecutionAgentModal
+                        visible={agentModalOpen}
+                        clusterId={cluster.id}
+                        taskTitle={bi("存量集群 100% 只读基线探针", "100% Read-Only Baseline Probe")}
+                        readOnly
+                        hostsFallback={autoSummary?.hosts}
+                        confirmLoading={autoProbeBusy}
+                        onCancel={() => setAgentModalOpen(false)}
+                        onConfirm={(choice) => void runAutoBaselineProbe(choice)}
+                        onSummaryUpdated={setAutoSummary}
+                      />
+                      <Button
+                        size="small"
+                        type="primary"
+                        disabled={probeGenerating || !probeScript}
+                        onClick={() => setProbeStep(3)}
+                      >
+                        {bi("已执行完毕，去粘贴回显", "Next: Paste Output")} <IconArrowRight />
+                      </Button>
                     </div>
-                  </div>
-                  <div className="imp-step-head-r">
-                    <span className="imp-step-toggle">
-                      {step3Open ? bi("收起", "Collapse") : bi("展开粘贴", "Expand")}
-                      {step3Open ? <IconUp /> : <IconDown />}
-                    </span>
                   </div>
                 </div>
+              )}
 
-                {step3Open && (
-                  <div className="imp-step-body">
+              {/* ===================== STEP 3: Paste Output & Incremental Merge ===================== */}
+              {probeStep === 3 && (
+                <div className="imp-pflow-panel enter">
+                  {parseLive && (
+                    <ImportParseFocusBar
+                      collapsed={drawerParseCollapsed}
+                      onToggle={() => setDrawerParseCollapsed((v) => !v)}
+                      textLength={probeOutput.trim().length}
+                      imageCount={probeImages.length}
+                      isRunning={parsing}
+                    />
+                  )}
+                  {!(parseLive && drawerParseCollapsed) && (
                     <ImportEvidenceComposer
                       title={bi("回显文本 / 截图（自动增量合并，不覆盖已有基线）", "Probe Output / Screenshots (Additive Merge)")}
                       placeholder={bi(
@@ -4479,22 +6384,55 @@ export function ImportedBaselineModal({
                       aiEnabled
                       modelPick={modelPick}
                       aiOpts={aiOpts}
-                      minRows={6}
-                      maxRows={15}
+                      minRows={7}
+                      maxRows={16}
                       imageBtnLabel={bi("上传回显截图", "Upload Image")}
                       footHint={bi("支持拖拽 .log/.txt/截图", "Drag & drop .log/.txt/images")}
                       leftSlot={
-                        <Button size="small" type="text" onClick={() => setTab("edit")} disabled={parsing}>
-                          <IconArrowLeft /> {bi("返回基线编辑", "Back to Edit")}
+                        <Button
+                          size="small"
+                          type="text"
+                          onClick={() => setProbeStep(hasProbe ? 2 : 1)}
+                          disabled={parsing}
+                        >
+                          <IconArrowLeft />{" "}
+                          {hasProbe ? bi("返回探针脚本", "Back to Script") : bi("返回选择补采项", "Back to Scope")}
                         </Button>
                       }
                       submitLabel={bi("AI 解析并增量合并基线", "AI Parse & Merge")}
-                      onSubmit={() => void parseAndMergeProbe()}
+                      onSubmit={() => void parseAndMergeProbe({ useAI: true })}
                     />
-                    <ParsingStagePanel active={parsing} aiEnabled />
-                  </div>
-                )}
-              </section>
+                  )}
+                  {parseLive && (
+                    <AIProcessCard
+                      live={parseLive}
+                      title={bi("AI 现场回显与多组件架构解析", "AI Evidence & Multi-Component Stack Parsing")}
+                      onAbort={() => {
+                        parseAbortRef.current?.abort();
+                        setParseLive(null);
+                        setDrawerParseCollapsed(false);
+                        setParsing(false);
+                      }}
+                      onRetry={() => void parseAndMergeProbe({ useAI: true })}
+                      onDismiss={() => {
+                        setParseLive(null);
+                        setDrawerParseCollapsed(false);
+                      }}
+                      extraErrorActions={
+                        probeOutput.trim() ? (
+                          <Button
+                            size="small"
+                            type="secondary"
+                            onClick={() => void parseAndMergeProbe({ useAI: false })}
+                          >
+                            {bi("改用内置规则引擎提取", "Use Built-in Rule Parser")}
+                          </Button>
+                        ) : null
+                      }
+                    />
+                  )}
+                </div>
+              )}
             </div>
           );
         })()
@@ -4514,26 +6452,32 @@ export function ImportedBaselineModal({
               </Button>
             </div>
           )}
+          {parseTrace && (
+            <AIProcessCard
+              trace={parseTrace}
+              title={bi("AI 增量补采解析推演记录", "AI Incremental Merge Trace")}
+            />
+          )}
 
-          {health && health.gaps.length > 0 && mergeDiff.length === 0 && (
+          {(health?.gaps?.length ?? 0) > 0 && mergeDiff.length === 0 && (
             <div className="imp-health-strip">
               <div className="imp-health-strip-l">
-                <span className={`imp-gap-score sm num ${health.score >= 85 ? "is-ok" : health.score >= 55 ? "is-warn" : "is-low"}`}>
-                  {health.score}%
+                <span className={`imp-gap-score sm num ${health!.score >= 85 ? "is-ok" : health!.score >= 55 ? "is-warn" : "is-low"}`}>
+                  {health!.score}%
                 </span>
                 <div className="imp-health-strip-t">
                   <b>
                     {bi(
-                      `标准基线已齐备 ${health.passed}/${health.total} 项 · 发现 ${health.gaps.length} 项待补采`,
-                      `Standard baseline ${health.passed}/${health.total} complete · ${health.gaps.length} gap(s)`,
+                      `标准基线已齐备 ${health!.passed}/${health!.total} 项 · 发现 ${(health!.gaps || []).length} 项待补采`,
+                      `Standard baseline ${health!.passed}/${health!.total} complete · ${(health!.gaps || []).length} gap(s)`,
                     )}
                   </b>
                   <span className="small muted">
-                    {health.gaps
+                    {(health!.gaps || [])
                       .slice(0, 2)
                       .map((g) => g.title)
                       .join("；")}
-                    {health.gaps.length > 2 ? bi(" 等", "…") : ""}
+                    {(health!.gaps || []).length > 2 ? bi(" 等", "…") : ""}
                   </span>
                 </div>
               </div>
@@ -4682,7 +6626,7 @@ export function ImportedBaselineModal({
           </div>
 
           {/* Section 4: Endpoints */}
-          <div className="imp-drawer-sec">
+          <div id="imp-sec-endpoints" className="imp-drawer-sec">
             <div className="imp-drawer-sec-h">
               <h4>{bi("访问入口（VIP / LB / 域名）", "Access Endpoints")}</h4>
               <Button
@@ -4695,109 +6639,35 @@ export function ImportedBaselineModal({
                 {bi("添加入口", "Add Endpoint")}
               </Button>
             </div>
-            {endpoints.length > 0 && (
-              <div className="imp-table-rows">
-                <div className="imp-ep-row imp-col-heads">
-                  <span>{bi("入口标识", "Label")}</span>
-                  <span>{bi("访问地址 : 端口", "Address : Port")}</span>
-                  <span>{bi("用途", "Role")}</span>
-                  <span />
-                </div>
-                {endpoints.map((ep, idx) => (
-                  <div key={idx} className="imp-ep-row">
-                    <Input
-                      value={ep.name || ""}
-                      placeholder="writer"
-                      onChange={(v) =>
-                        setEndpoints((prev) => prev.map((r, i) => (i === idx ? { ...r, name: v } : r)))
-                      }
-                    />
-                    <Input
-                      className="mono"
-                      value={ep.address}
-                      placeholder="10.0.0.100:5432"
-                      onChange={(v) =>
-                        setEndpoints((prev) => prev.map((r, i) => (i === idx ? { ...r, address: v } : r)))
-                      }
-                    />
-                    <Select
-                      value={normalizeEndpointRole(ep.role)}
-                      onChange={(v) =>
-                        setEndpoints((prev) => prev.map((r, i) => (i === idx ? { ...r, role: v } : r)))
-                      }
-                    >
-                      <Select.Option value="readwrite">{bi("读写入口", "Read/Write")}</Select.Option>
-                      <Select.Option value="readonly">{bi("只读入口", "Read-Only")}</Select.Option>
-                      <Select.Option value="admin">{bi("管理入口", "Admin")}</Select.Option>
-                    </Select>
-                    <Button
-                      size="small"
-                      type="text"
-                      status="danger"
-                      icon={<IconDelete />}
-                      onClick={() => setEndpoints((prev) => prev.filter((_, i) => i !== idx))}
-                    />
-                  </div>
-                ))}
-              </div>
-            )}
+            <EndpointListEditor
+              endpoints={endpoints}
+              onChange={setEndpoints}
+            />
           </div>
 
-          {/* Section 5: Paths & Service Units (Tag Chips - ZERO concatenation bug!) */}
-          <div className="imp-drawer-sec">
+          {/* Section 5: Structured Runtime Paths & Service Units Editor */}
+          <div id="imp-sec-paths" className="imp-drawer-sec">
             <div className="imp-drawer-sec-h">
               <h4>{bi("服务单元与运行路径", "Service Units & Paths")}</h4>
             </div>
-            <div className="imp-form-grid-2">
-              <div className="imp-field">
-                <label>
-                  <span className="imp-lbl-left">{bi("系统服务单元", "Service Units")}</span>
-                </label>
-                <InputTag
-                  saveOnBlur
-                  value={serviceUnits}
-                  placeholder="patroni.service, etcd.service"
-                  onChange={(vals) => setServiceUnits(normalizeTagList(vals as string[]))}
-                />
-              </div>
-              <div className="imp-field">
-                <label>
-                  <span className="imp-lbl-left">{bi("配置文件路径", "Config Paths")}</span>
-                </label>
-                <InputTag
-                  saveOnBlur
-                  value={configPaths}
-                  placeholder="/etc/patroni/patroni.yml"
-                  onChange={(vals) => setConfigPaths(normalizeTagList(vals as string[]))}
-                />
-              </div>
-              <div className="imp-field">
-                <label>
-                  <span className="imp-lbl-left">{bi("数据目录", "Data Dirs")}</span>
-                </label>
-                <InputTag
-                  saveOnBlur
-                  value={dataDirs}
-                  placeholder="/data/pg, /data/etcd"
-                  onChange={(vals) => setDataDirs(normalizeTagList(vals as string[]))}
-                />
-              </div>
-              <div className="imp-field">
-                <label>
-                  <span className="imp-lbl-left">{bi("日志目录", "Log Dirs")}</span>
-                </label>
-                <InputTag
-                  saveOnBlur
-                  value={logDirs}
-                  placeholder="/var/log/postgresql"
-                  onChange={(vals) => setLogDirs(normalizeTagList(vals as string[]))}
-                />
-              </div>
-            </div>
+            <RuntimePathsEditor
+              serviceUnits={serviceUnits}
+              onServiceUnitsChange={setServiceUnits}
+              configPaths={configPaths}
+              onConfigPathsChange={setConfigPaths}
+              dataDirs={dataDirs}
+              onDataDirsChange={setDataDirs}
+              logDirs={logDirs}
+              onLogDirsChange={setLogDirs}
+              servicePlaceholder="patroni.service, etcd.service"
+              configPlaceholder="/etc/patroni/patroni.yml"
+              dataPlaceholder="/data/pg, /data/etcd"
+              logPlaceholder="/var/log/postgresql"
+            />
           </div>
 
           {/* Section 6: Key Parameters & Notes */}
-          <div className="imp-drawer-sec">
+          <div id="imp-sec-params" className="imp-drawer-sec">
             <div className="imp-drawer-sec-h">
               <h4>{bi("关键运行参数", "Key Parameters")}</h4>
               <Button
@@ -4839,23 +6709,10 @@ export function ImportedBaselineModal({
                 ))}
               </div>
             )}
-            <div style={{ marginTop: 6 }}>
-              <FieldCluesEditor
-                title={bi("现场线索与运维约束", "Field Clues & Operational Notes")}
-                value={notes}
-                onChange={setNotes}
-              />
-            </div>
           </div>
           {lang ? null : null}
         </div>
       )}
-      <ClusterAutomationDrawer
-        visible={autoDrawerOpen}
-        clusterId={cluster.id}
-        onClose={() => setAutoDrawerOpen(false)}
-        onChanged={setAutoSummary}
-      />
     </Drawer>
   );
 }

@@ -121,7 +121,7 @@ func (s *storeServer) isLegacyChangeJob(j storeJob) bool {
 	if j.Seq <= 0 {
 		return false
 	}
-	b, err := os.ReadFile(filepath.Join(s.jobDir(j.ID), "deployment.yml"))
+	b, err := s.readJobSpecBytes(j.ID)
 	if err != nil {
 		return false
 	}
@@ -136,13 +136,11 @@ func (s *storeServer) mergeLegacyChangeIntoBase(base *storeJob, leg storeJob) er
 	baseDir := s.jobDir(base.ID)
 	legDir := s.jobDir(leg.ID)
 
-	baseSpecPath := filepath.Join(baseDir, "deployment.yml")
-	legSpecPath := filepath.Join(legDir, "deployment.yml")
-	baseBytes, err := os.ReadFile(baseSpecPath)
+	baseBytes, err := s.readJobSpecBytes(base.ID)
 	if err != nil {
 		return err
 	}
-	legBytes, err := os.ReadFile(legSpecPath)
+	legBytes, err := s.readJobSpecBytes(leg.ID)
 	if err != nil {
 		return err
 	}
@@ -165,7 +163,7 @@ func (s *storeServer) mergeLegacyChangeIntoBase(base *storeJob, leg storeJob) er
 	if err != nil {
 		return err
 	}
-	if err := writeBytesAtomic(baseSpecPath, mergedYAML, 0o600); err != nil {
+	if err := s.writeJobSpecBytes(base.ID, base.ClusterID, mergedYAML); err != nil {
 		return err
 	}
 	baseOutSpecPath := filepath.Join(baseDir, "output", "部署规格.yml")

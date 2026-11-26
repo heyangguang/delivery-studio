@@ -214,6 +214,7 @@ type clusterView struct {
 	AppID        string                `json:"app_id"`
 	AppName      string                `json:"app_name"`
 	Owner        string                `json:"owner"`
+	AccessLevel  string                `json:"access_level,omitempty"`
 	// Version, Platform and Hosts describe the cluster as it is now (see clusterCurrent).
 	Version  string      `json:"version"`
 	Platform string      `json:"platform,omitempty"`
@@ -223,11 +224,12 @@ type clusterView struct {
 	Current  string      `json:"current,omitempty"`
 	Head     string      `json:"head,omitempty"`
 	Holder   string      `json:"holder,omitempty"`
-	Plans               []planEntry `json:"plans"` // newest first
-	Blocked             string      `json:"blocked,omitempty"`
-	AppliedChangesCount int         `json:"applied_changes_count,omitempty"`
-	LastChangeAt        string      `json:"last_change_at,omitempty"`
-	LastChangeTitle     string      `json:"last_change_title,omitempty"`
+	Plans               []planEntry         `json:"plans"` // newest first
+	Blocked             string              `json:"blocked,omitempty"`
+	AppliedChangesCount int                 `json:"applied_changes_count,omitempty"`
+	LastChangeAt        string              `json:"last_change_at,omitempty"`
+	LastChangeTitle     string              `json:"last_change_title,omitempty"`
+	LiveSummary         *clusterLiveSummary `json:"live_summary,omitempty"`
 }
 
 func entryOf(j storeJob) planEntry {
@@ -264,7 +266,7 @@ func effectiveDeliveryMode(jobID, raw string, autoJobs map[string]bool) string {
 
 // clusters lists the clusters the user can see.
 func (s *storeServer) clusters(w http.ResponseWriter, r *http.Request, session storeSession) {
-	vis := s.visibleJobs(session.User)
+	lvlFn := s.clusterAccess(session.User)
 	only := r.URL.Query().Get("id")
 	s.mu.Lock()
 	by := map[string][]storeJob{}
@@ -276,11 +278,13 @@ func (s *storeServer) clusters(w http.ResponseWriter, r *http.Request, session s
 	var views []clusterView
 	for id, jobs := range by {
 		sortJobs(jobs)
-		seen := false
+		level := ""
 		for _, j := range jobs {
-			seen = seen || vis(j.Owner)
+			if l := lvlFn(j.Owner, id); clusterLevelRank[l] > clusterLevelRank[level] {
+				level = l
+			}
 		}
-		if !seen {
+		if level == "" {
 			continue
 		}
 		first := jobs[0]
@@ -290,7 +294,7 @@ func (s *storeServer) clusters(w http.ResponseWriter, r *http.Request, session s
 				break
 			}
 		}
-		v := clusterView{Purpose: first.Purpose, VerifyTarget: first.VerifyTarget, Scheme: first.Scheme, ID: id, AppID: first.AppID, AppName: first.AppName, Owner: first.Owner, Version: first.Version, Created: first.Created, Plans: []planEntry{}}
+		v := clusterView{Purpose: first.Purpose, VerifyTarget: first.VerifyTarget, Scheme: first.Scheme, ID: id, AppID: first.AppID, AppName: first.AppName, Owner: first.Owner, AccessLevel: level, Version: first.Version, Created: first.Created, Plans: []planEntry{}}
 		for i := len(jobs) - 1; i >= 0; i-- {
 			j := jobs[i]
 			v.Plans = append(v.Plans, entryOf(j))
@@ -375,6 +379,11 @@ func (s *storeServer) clusters(w http.ResponseWriter, r *http.Request, session s
 			if v.LastChangeAt > v.Updated {
 				v.Updated = v.LastChangeAt
 			}
+		}
+		ls := s.buildClusterLiveSummary(v.ID, lang, v.Hosts)
+		v.LiveSummary = &ls
+		if ls.LastProbedAt > v.Updated {
+			v.Updated = ls.LastProbedAt
 		}
 	}
 	sort.Slice(views, func(a, b int) bool { return views[a].Updated > views[b].Updated })

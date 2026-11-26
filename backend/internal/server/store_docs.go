@@ -69,16 +69,28 @@ type docMeta struct {
 	Confidential string `json:"confidential,omitempty"`
 }
 
+type docClarifyItem struct {
+	ID          string   `json:"id"`
+	Topic       string   `json:"topic"`
+	Question    string   `json:"question"`
+	Options     []string `json:"options,omitempty"`
+	Default     string   `json:"default,omitempty"`
+	Optional    bool     `json:"optional,omitempty"`
+	Placeholder string   `json:"placeholder,omitempty"`
+	Answer      string   `json:"answer,omitempty"`
+}
+
 type clusterDoc struct {
-	ID       string      `json:"id"`
-	Kind     string      `json:"kind"` // delivery | change | kt | rca | assess
-	Title    string      `json:"title"`
-	Subtitle string      `json:"subtitle,omitempty"`
-	Cluster  string      `json:"cluster"`
-	Job      string      `json:"job,omitempty"`
-	Cover    [][2]string `json:"cover"`
-	Meta     docMeta     `json:"meta,omitempty"`
-	Blocks   []docBlock  `json:"blocks"`
+	ID             string           `json:"id"`
+	Kind           string           `json:"kind"` // delivery | change | kt | rca | assess
+	Title          string           `json:"title"`
+	Subtitle       string           `json:"subtitle,omitempty"`
+	Cluster        string           `json:"cluster"`
+	Job            string           `json:"job,omitempty"`
+	Cover          [][2]string      `json:"cover"`
+	Meta           docMeta          `json:"meta,omitempty"`
+	Clarifications []docClarifyItem `json:"clarifications,omitempty"`
+	Blocks         []docBlock       `json:"blocks"`
 	// Counts over the sections: how many there are, how many are empty, how many are assistant drafts nobody has
 	// confirmed yet.
 	Sections int    `json:"sections"`
@@ -175,10 +187,27 @@ type rcaEntry struct {
 
 func (s *storeServer) docIndex(cluster string) docIndex {
 	var x docIndex
+	if s.repo != nil {
+		if b, ok, err := s.repo.getClusterDoc(cluster, "index"); err == nil && ok {
+			_ = json.Unmarshal(b, &x)
+		}
+		return x
+	}
 	if b, err := os.ReadFile(filepath.Join(s.cfg.DataDir, "docs", cluster, "index.json")); err == nil {
 		_ = json.Unmarshal(b, &x)
 	}
 	return x
+}
+
+func (s *storeServer) docIndexSave(cluster string, idx docIndex) error {
+	if s.repo != nil {
+		b, err := json.Marshal(idx)
+		if err != nil {
+			return err
+		}
+		return s.repo.saveClusterDoc(cluster, "index", b)
+	}
+	return writeJSONFile(filepath.Join(s.cfg.DataDir, "docs", cluster, "index.json"), idx)
 }
 
 func (x docIndex) rca(id string) (rcaEntry, bool) {
@@ -202,7 +231,11 @@ func (s *storeServer) docPath(cluster, doc string) string {
 
 func (s *storeServer) docLoad(cluster, doc string) docSaved {
 	out := docSaved{Sections: map[string]docSection{}}
-	if b, err := os.ReadFile(s.docPath(cluster, doc)); err == nil {
+	if s.repo != nil {
+		if b, ok, err := s.repo.getClusterDoc(cluster, doc); err == nil && ok {
+			_ = json.Unmarshal(b, &out)
+		}
+	} else if b, err := os.ReadFile(s.docPath(cluster, doc)); err == nil {
 		_ = json.Unmarshal(b, &out)
 	}
 	if out.Sections == nil {
@@ -212,7 +245,22 @@ func (s *storeServer) docLoad(cluster, doc string) docSaved {
 }
 
 func (s *storeServer) docSave(cluster, doc string, d docSaved) error {
+	if s.repo != nil {
+		b, err := json.Marshal(d)
+		if err != nil {
+			return err
+		}
+		return s.repo.saveClusterDoc(cluster, doc, b)
+	}
 	return writeJSONFile(s.docPath(cluster, doc), d)
+}
+
+func (s *storeServer) docDelete(cluster, doc string) {
+	if s.repo != nil {
+		_ = s.repo.deleteClusterDoc(cluster, doc)
+		return
+	}
+	_ = os.Remove(s.docPath(cluster, doc))
 }
 
 func (s *storeServer) clusterDocMetaPath(cluster string) string {
@@ -221,6 +269,12 @@ func (s *storeServer) clusterDocMetaPath(cluster string) string {
 
 func (s *storeServer) clusterDocMetaLoad(cluster string) docMeta {
 	var m docMeta
+	if s.repo != nil {
+		if b, ok, err := s.repo.getClusterDoc(cluster, "meta"); err == nil && ok {
+			_ = json.Unmarshal(b, &m)
+		}
+		return m
+	}
 	if b, err := os.ReadFile(s.clusterDocMetaPath(cluster)); err == nil {
 		_ = json.Unmarshal(b, &m)
 	}
@@ -228,6 +282,13 @@ func (s *storeServer) clusterDocMetaLoad(cluster string) docMeta {
 }
 
 func (s *storeServer) clusterDocMetaSave(cluster string, m docMeta) error {
+	if s.repo != nil {
+		b, err := json.Marshal(m)
+		if err != nil {
+			return err
+		}
+		return s.repo.saveClusterDoc(cluster, "meta", b)
+	}
 	return writeJSONFile(s.clusterDocMetaPath(cluster), m)
 }
 
@@ -277,7 +338,7 @@ func resolveReportSigner(rawUser string, meta docMeta, role, lang string) string
 		if !isGenericSystemUser(raw) {
 			return raw
 		}
-		return firstNonEmptyStr(strings.TrimSpace(meta.Author), strings.TrimSpace(meta.Confirmer), tr(lang, "交付负责人", "Delivery Lead"))
+		return tr(lang, "交付负责人", "Delivery Lead")
 	case "author":
 		if strings.TrimSpace(meta.Author) != "" {
 			return strings.TrimSpace(meta.Author)
@@ -376,7 +437,7 @@ func (s *storeServer) clusterFactsFor(user, id string) (clusterFacts, bool) {
 	f := clusterFacts{ID: id}
 	seen := false
 	for _, j := range all {
-		seen = seen || vis(j.Owner)
+		seen = seen || vis(j.Owner, id)
 		if j.State == "succeeded" {
 			f.Jobs = append(f.Jobs, j)
 		}
@@ -610,7 +671,11 @@ func topology(b *docBuilder, p *mwpack.Plan, langOpt ...string) {
 		}
 		note := ""
 		if inst.Auto {
-			note = tr(lang, "自动配套组件：", "Auto-provisioned companion: ") + mwpack.TranslateCatalogText(lang, inst.AutoReason)
+			if strings.TrimSpace(inst.AutoReason) != "" {
+				note = tr(lang, "自动配套组件：", "Auto-provisioned companion: ") + mwpack.TranslateCatalogText(lang, inst.AutoReason)
+			} else {
+				note = tr(lang, "伴生支撑组件", "Companion component")
+			}
 		}
 		rows = append(rows, []string{inst.ID, mwpack.TranslateCatalogText(lang, inst.Title) + " " + inst.Version, place, note})
 	}
@@ -808,7 +873,7 @@ func (s *storeServer) buildDelivery(f clusterFacts) *clusterDoc {
 	d := &clusterDoc{ID: "delivery", Kind: "delivery", Title: tr(lang, "交付报告", "Delivery Report"), Subtitle: f.ID, Cluster: f.ID,
 		Cover: f.cover([2]string{tr(lang, "首次部署", "Initial Deploy"), day(first.Created)}, [2]string{tr(lang, "交付负责人", "Delivery Lead"), ownerName})}
 	b := &docBuilder{}
-	b.section(1, "summary", tr(lang, "1 概述", "1 Overview"), tr(lang, "阐述本集群的业务定位、服务对象、高可用部署架构及当前投产运行状态。", "Business role, served workloads, HA deployment architecture, and current operational status."), true)
+	b.section(1, "summary", tr(lang, "1 概述", "1 Overview"), tr(lang, "凝练陈述本集群的部署架构、组件版本、核心高可用策略与当前运行状态；仅在已知时写入业务系统/归属，未知信息直接省略，严禁写【待补充】。", "Concise overview of deployment architecture, component versions, HA policy, and current status. Omit unknown business metadata instead of writing placeholders."), true)
 	b.h(1, tr(lang, "2 架构与拓扑", "2 Architecture & Topology"))
 	b.p(tr(lang, fmt.Sprintf("本节呈现本次「%s」的标准架构拓扑与接入规范，实际运行状态详见后续实施验证与变更台账。", jobTitleLang(f.Current, lang)), fmt.Sprintf("Standard architecture topology and access specification for %q; verified operational status is recorded in the execution and change sections below.", jobTitleLang(f.Current, lang))))
 	topology(b, f.Plan, lang)
@@ -886,7 +951,7 @@ func (s *storeServer) buildDelivery(f clusterFacts) *clusterDoc {
 			}, deltaRows)
 		}
 	}
-	b.section(1, "risks", tr(lang, "6 风险与遗留问题", "6 Risks & Open Issues"), tr(lang, "客观呈现当前存在的架构隐患、实施偏差、安全合规及备份监控短板，并给出可落地的分级治理建议。", "Objective assessment of architecture risks, deviations, security compliance, and backup/monitoring gaps with actionable recommendations."), true)
+	b.section(1, "risks", tr(lang, "6 风险与遗留问题", "6 Risks & Open Issues"), tr(lang, "仅客观记录经确认的真实未闭环风险与遗留事项；验收阶段正常测试清理及客户按需选定的架构口径不得误列为风险。若无阻断风险，简明给出无未闭环风险的交接结论。", "Record only verified open risks or blockers. Never flag normal acceptance test cleanup or intentional customer architecture choices as risks; state a concise clean handover closure when no blockers exist."), true)
 	b.section(1, "acceptance", tr(lang, "7 验收结论", "7 Acceptance Conclusion"), tr(lang, "基于实际部署验证、功能测试及安全基线结果，形成客观、可签字的最终交付验收结论。", "Final sign-off acceptance conclusion grounded in deployment verification, testing, and security baseline checks."), true)
 	d.Blocks = b.blocks
 	return d
@@ -913,7 +978,7 @@ func (s *storeServer) buildImportedBaselineDoc(f clusterFacts, first storeJob) *
 		),
 	}
 	b := &docBuilder{}
-	b.section(1, "summary", tr(lang, "1 集群概述", "1 Cluster Overview"), tr(lang, "概述本集群承载的核心业务、高可用架构形态、关键组件版本及运维管理边界。", "Overview of core workloads, HA architecture, component versions, and day-2 operational boundaries."), true)
+	b.section(1, "summary", tr(lang, "1 集群概述", "1 Cluster Overview"), tr(lang, "凝练概述本集群的高可用架构形态、关键组件版本及运维管理边界；若未提供业务系统名称则直接省略，严禁写【待补充】。", "Concise overview of HA architecture, component versions, and operational boundaries. Omit unknown business metadata instead of writing placeholders."), true)
 	b.h(1, tr(lang, "2 架构与拓扑", "2 Architecture & Topology"))
 	b.p(tr(lang, "本节汇总该生产集群的节点拓扑、访问入口与伴生组件栈配置基线。", "Node topology, access endpoints, and companion component stack baseline for this production cluster."))
 	topology(b, f.Plan, lang)
@@ -1015,8 +1080,23 @@ func (s *storeServer) buildImportedBaselineDoc(f clusterFacts, first storeJob) *
 		if len(rows) > 0 {
 			b.table([]string{tr(lang, "基线项", "Baseline Field"), tr(lang, "配置基线", "Recorded Value")}, rows)
 		}
-		if meta.Notes != "" {
-			b.note(tr(lang, "架构补充说明：", "Architecture Notes: ") + meta.Notes)
+		if strings.TrimSpace(meta.Notes) != "" {
+			rawLines := strings.Split(strings.ReplaceAll(strings.TrimSpace(meta.Notes), "\r\n", "\n"), "\n")
+			var bulletItems []string
+			for _, ln := range rawLines {
+				t := strings.TrimSpace(ln)
+				t = strings.TrimLeft(t, "•-*· ")
+				t = strings.TrimSpace(t)
+				if t != "" {
+					bulletItems = append(bulletItems, t)
+				}
+			}
+			if len(bulletItems) > 1 {
+				b.h(2, tr(lang, "架构补充说明", "Architecture Notes"))
+				b.list(bulletItems)
+			} else if len(bulletItems) == 1 {
+				b.note(tr(lang, "架构补充说明：", "Architecture Notes: ") + bulletItems[0])
+			}
 		}
 	}
 	b.h(2, tr(lang, "3.1 关键运行参数", "3.1 Key Parameters"))
@@ -1091,10 +1171,36 @@ func (s *storeServer) buildKT(f clusterFacts) *clusterDoc {
 		b.h(2, tr(lang, "2.1 端口", "2.1 Ports"))
 		b.table([]string{tr(lang, "实例", "Instance"), tr(lang, "用途", "Purpose"), tr(lang, "端口", "Port"), tr(lang, "主机节点", "Hosts")}, rows)
 		b.h(2, tr(lang, "2.2 交付资产与凭据位置", "2.2 Deployment Assets & Credentials"))
-		b.list([]string{
-			tr(lang, "自动化部署工程位于控制节点 "+f.Plan.Controller+" 的 "+f.Plan.RuntimeRoot()+"/projects/"+f.Plan.ProjectName()+" 目录。", "Automation project resides on controller "+f.Plan.Controller+" under "+f.Plan.RuntimeRoot()+"/projects/"+f.Plan.ProjectName()+"."),
-			tr(lang, "敏感凭据存放于项目 secrets/ 受控目录（仅限 root 权限访问），本文档已做脱敏处理，交接时请同步完成访问权限移交。", "Credentials are stored in the project's secrets/ directory (root-only permissions) and redacted from this document; verify authorized access during handover."),
-		})
+		if f.Current.DeliveryMode == "imported" && f.Plan.Dep != nil && f.Plan.Dep.Imported != nil {
+			im := f.Plan.Dep.Imported
+			var assetItems []string
+			assetItems = append(assetItems, tr(lang,
+				"本集群为存量生产环境纳管集群，沿用主机既有运行目录与系统服务，未生成平台初始部署工程目录。",
+				"This cluster is an imported existing environment using its original host paths and services (no platform initial-deployment directory).",
+			))
+			if len(im.ConfigPaths) > 0 {
+				assetItems = append(assetItems, tr(lang, "配置文件路径：", "Configuration paths: ")+strings.Join(im.ConfigPaths, "、"))
+			}
+			if len(im.DataDirs) > 0 {
+				assetItems = append(assetItems, tr(lang, "数据目录：", "Data directories: ")+strings.Join(im.DataDirs, "、"))
+			}
+			if len(im.LogDirs) > 0 {
+				assetItems = append(assetItems, tr(lang, "日志目录：", "Log directories: ")+strings.Join(im.LogDirs, "、"))
+			}
+			if len(im.ServiceUnits) > 0 {
+				assetItems = append(assetItems, tr(lang, "托管服务单元：", "Service units: ")+strings.Join(im.ServiceUnits, "、"))
+			}
+			assetItems = append(assetItems, tr(lang,
+				"数据库/组件访问凭据由现场运维凭据库或主机受控配置维护，本文档已做脱敏处理，交接时请同步核实权限移交。",
+				"Component credentials are managed via existing on-site vault/host configurations and redacted here; verify authorized access during handover.",
+			))
+			b.list(assetItems)
+		} else {
+			b.list([]string{
+				tr(lang, "自动化部署工程位于控制节点 "+f.Plan.Controller+" 的 "+f.Plan.RuntimeRoot()+"/projects/"+f.Plan.ProjectName()+" 目录。", "Automation project resides on controller "+f.Plan.Controller+" under "+f.Plan.RuntimeRoot()+"/projects/"+f.Plan.ProjectName()+"."),
+				tr(lang, "敏感凭据存放于项目 secrets/ 受控目录（仅限 root 权限访问），本文档已做脱敏处理，交接时请同步完成访问权限移交。", "Credentials are stored in the project's secrets/ directory (root-only permissions) and redacted from this document; verify authorized access during handover."),
+			})
+		}
 	}
 	ops := 0
 	if f.Plan != nil {
@@ -1361,7 +1467,7 @@ func (s *storeServer) upsertChangeNoteDoc(clusterID string, rep aiReport) string
 			idx.Changes[i].Model = rep.Model
 			idx.Changes[i].Updated = now
 			idx.Changes[i].By = rep.By
-			_ = writeJSONFile(filepath.Join(s.cfg.DataDir, "docs", clusterID, "index.json"), idx)
+			_ = s.docIndexSave(clusterID, idx)
 			return idx.Changes[i].ID
 		}
 	}
@@ -1381,7 +1487,7 @@ func (s *storeServer) upsertChangeNoteDoc(clusterID string, rep aiReport) string
 		By:        rep.By,
 	}
 	idx.Changes = append([]changeNoteEntry{e}, idx.Changes...)
-	if err := writeJSONFile(filepath.Join(s.cfg.DataDir, "docs", clusterID, "index.json"), idx); err != nil {
+	if err := s.docIndexSave(clusterID, idx); err != nil {
 		return ""
 	}
 	return e.ID
@@ -1570,6 +1676,9 @@ func (s *storeServer) buildDoc(f clusterFacts, id string) (*clusterDoc, bool) {
 		d.Manual = true
 	}
 	saved := s.docLoad(f.ID, id)
+	if d.Kind == "delivery" {
+		d.Clarifications = s.detectDeliveryClarifications(f, saved, f.Lang)
+	}
 	if (d.Kind == "rca" || d.Kind == "assess") && len(saved.Answers) > 0 {
 		var items []string
 		for _, a := range saved.Answers {
@@ -1584,7 +1693,13 @@ func (s *storeServer) buildDoc(f clusterFacts, id string) (*clusterDoc, bool) {
 		}
 		d.Sections++
 		if sec, ok := saved.Sections[b.Key]; ok && strings.TrimSpace(sec.Text) != "" {
-			b.Text, b.Source, b.Confirmed, b.By, b.At = sec.Text, sec.Source, sec.Confirmed, formatSectionBy(sec.By, f.Meta, f.Lang), sec.At
+			txt := sec.Text
+			if d.Kind == "change" && b.Key == "signoff" {
+				signer := resolveReportSigner(sec.By, f.Meta, "confirmer", f.Lang)
+				txt = strings.ReplaceAll(txt, "本方案已由 admin ", "本方案已由 "+signer+" ")
+				txt = strings.ReplaceAll(txt, "in staging by admin.", "in staging by "+signer+".")
+			}
+			b.Text, b.Source, b.Confirmed, b.By, b.At = txt, sec.Source, sec.Confirmed, formatSectionBy(sec.By, f.Meta, f.Lang), sec.At
 			if sec.Source == "ai" && !sec.Confirmed {
 				d.Drafts++
 			}
@@ -1655,9 +1770,7 @@ func (s *storeServer) reportSettings() reportSettings {
 		Header:       "{cluster} · {title}",
 		Footer:       "{org}",
 	}
-	if b, err := os.ReadFile(filepath.Join(s.cfg.DataDir, "settings", "report.json")); err == nil {
-		_ = json.Unmarshal(b, &r)
-	}
+	_ = s.loadSettingDoc("report_settings", filepath.Join(s.cfg.DataDir, "settings", "report.json"), &r)
 	r.Theme = themeOf(r.Theme).ID
 	if strings.TrimSpace(r.DocVersion) == "" {
 		r.DocVersion = "V1.0"
@@ -1773,7 +1886,7 @@ func (s *storeServer) handleReportSettings(w http.ResponseWriter, r *http.Reques
 		in.Template = cur.Template
 		in.Banner = cur.Banner
 		in.UseTemplate = in.UseTemplate && cur.Template != ""
-		if err := writeJSONFile(filepath.Join(s.cfg.DataDir, "settings", "report.json"), in); err != nil {
+		if err := s.saveSettingDoc("report_settings", filepath.Join(s.cfg.DataDir, "settings", "report.json"), in); err != nil {
 			s.fail(w, 500, "保存失败，请稍后重试")
 			return
 		}
@@ -1792,11 +1905,24 @@ func (s *storeServer) handleReportSummary(w http.ResponseWriter, r *http.Request
 	lang := wLang(w)
 	rs := s.reportSettingsFor(lang)
 	th := themeOf(rs.Theme)
+	themeName := th.Name
+	if isEnLang(lang) {
+		switch th.ID {
+		case "teal":
+			themeName = "Teal Standard"
+		case "navy":
+			themeName = "Classic Navy"
+		case "indigo":
+			themeName = "Tech Indigo"
+		case "slate":
+			themeName = "Graphite Slate"
+		}
+	}
 	s.writeJSON(w, 200, map[string]any{
 		"use_template": rs.UseTemplate,
 		"template":     rs.Template,
 		"theme":        th.ID,
-		"theme_name":   th.Name,
+		"theme_name":   themeName,
 		"org":          rs.Org,
 		"doc_version":  firstNonEmptyStr(rs.DocVersion, "V1.0"),
 		"has_banner":   rs.Banner != "",
@@ -1868,7 +1994,7 @@ func (s *storeServer) handleReportBanner(w http.ResponseWriter, r *http.Request,
 		}
 		rs := s.reportSettings()
 		rs.Banner = truncRunes(filepath.Base(header.Filename), 120)
-		if err := writeJSONFile(filepath.Join(s.cfg.DataDir, "settings", "report.json"), rs); err != nil {
+		if err := s.saveSettingDoc("report_settings", filepath.Join(s.cfg.DataDir, "settings", "report.json"), rs); err != nil {
 			s.fail(w, 500, "保存失败，请稍后重试")
 			return
 		}
@@ -1878,7 +2004,7 @@ func (s *storeServer) handleReportBanner(w http.ResponseWriter, r *http.Request,
 		_ = os.Remove(s.reportBannerPath())
 		rs := s.reportSettings()
 		rs.Banner = ""
-		if err := writeJSONFile(filepath.Join(s.cfg.DataDir, "settings", "report.json"), rs); err != nil {
+		if err := s.saveSettingDoc("report_settings", filepath.Join(s.cfg.DataDir, "settings", "report.json"), rs); err != nil {
 			s.fail(w, 500, "保存失败，请稍后重试")
 			return
 		}
@@ -1926,7 +2052,7 @@ func (s *storeServer) handleReportTemplate(w http.ResponseWriter, r *http.Reques
 		}
 		rs := s.reportSettings()
 		rs.Template, rs.UseTemplate = truncRunes(filepath.Base(header.Filename), 120), true
-		if err := writeJSONFile(filepath.Join(s.cfg.DataDir, "settings", "report.json"), rs); err != nil {
+		if err := s.saveSettingDoc("report_settings", filepath.Join(s.cfg.DataDir, "settings", "report.json"), rs); err != nil {
 			s.fail(w, 500, "保存失败，请稍后重试")
 			return
 		}
@@ -1936,7 +2062,7 @@ func (s *storeServer) handleReportTemplate(w http.ResponseWriter, r *http.Reques
 		_ = os.Remove(s.reportTemplatePath())
 		rs := s.reportSettings()
 		rs.Template, rs.UseTemplate = "", false
-		if err := writeJSONFile(filepath.Join(s.cfg.DataDir, "settings", "report.json"), rs); err != nil {
+		if err := s.saveSettingDoc("report_settings", filepath.Join(s.cfg.DataDir, "settings", "report.json"), rs); err != nil {
 			s.fail(w, 500, "保存失败，请稍后重试")
 			return
 		}
@@ -2182,6 +2308,11 @@ func (s *storeServer) handleCluster(w http.ResponseWriter, r *http.Request, sess
 		s.fail(w, 404, "找不到这个集群，或它还没有生成成功的交付")
 		return
 	}
+	isPropagatePull := len(parts) == 4 && parts[1] == "rehearsals" && parts[3] == "propagate" && r.Method == "POST"
+	if r.Method != "GET" && r.Method != "HEAD" && !isPropagatePull && !s.clusterCanOperate(session.User, f.Current.Owner, f.ID) {
+		s.fail(w, 403, "你对集群「"+f.ID+"」仅有只读查看权限，无法执行修改或变更操作")
+		return
+	}
 	f.Lang = wLang(w)
 	switch {
 	case len(parts) == 2 && parts[1] == "docs" && r.Method == "GET":
@@ -2197,10 +2328,14 @@ func (s *storeServer) handleCluster(w http.ResponseWriter, r *http.Request, sess
 		s.handleRehearsals(w, r, session, f, parts[2:])
 	case len(parts) >= 2 && parts[1] == "automation":
 		s.handleClusterAutomation(w, r, session, f, parts[2:])
+	case len(parts) >= 2 && parts[1] == "live-state":
+		s.handleClusterLiveState(w, r, session, f, parts[2:])
 	case len(parts) >= 2 && parts[1] == "security":
 		s.handleClusterSecurity(w, r, session, f, parts[2:])
 	case len(parts) == 2 && parts[1] == "baseline":
 		s.handleClusterBaseline(w, r, session, f)
+	case len(parts) == 3 && parts[1] == "baseline" && parts[2] == "gaps":
+		s.handleClusterBaselineGaps(w, r, session, f)
 	case len(parts) == 2 && parts[1] == "docs" && r.Method == "POST":
 		s.startRCA(w, r, session, f)
 	case len(parts) == 3 && parts[1] == "docs" && (strings.HasPrefix(parts[2], "rca-") || strings.HasPrefix(parts[2], "assess-") || strings.HasPrefix(parts[2], "chg-")) && r.Method == "DELETE":
@@ -2416,7 +2551,7 @@ func (s *storeServer) startRCA(w http.ResponseWriter, r *http.Request, session s
 		}
 		e := assessEntry{ID: "assess-" + randomStoreToken(6), Type: in.Type, Question: q, Created: time.Now().UTC().Format(time.RFC3339Nano), By: session.User}
 		idx.Assess = append(idx.Assess, e)
-		if err := writeJSONFile(filepath.Join(s.cfg.DataDir, "docs", f.ID, "index.json"), idx); err != nil {
+		if err := s.docIndexSave(f.ID, idx); err != nil {
 			s.fail(w, 500, "保存失败，请稍后重试")
 			return
 		}
@@ -2447,7 +2582,7 @@ func (s *storeServer) startRCA(w http.ResponseWriter, r *http.Request, session s
 		e.ID = "rca-x" + randomStoreToken(6)
 	}
 	idx.RCA = append(idx.RCA, e)
-	if err := writeJSONFile(filepath.Join(s.cfg.DataDir, "docs", f.ID, "index.json"), idx); err != nil {
+	if err := s.docIndexSave(f.ID, idx); err != nil {
 		s.fail(w, 500, "保存失败，请稍后重试")
 		return
 	}
@@ -2492,11 +2627,11 @@ func (s *storeServer) dropRCA(w http.ResponseWriter, r *http.Request, session st
 		return
 	}
 	idx.RCA = keep
-	if err := writeJSONFile(filepath.Join(s.cfg.DataDir, "docs", f.ID, "index.json"), idx); err != nil {
+	if err := s.docIndexSave(f.ID, idx); err != nil {
 		s.fail(w, 500, "删除失败，请稍后重试")
 		return
 	}
-	_ = os.Remove(s.docPath(f.ID, id))
+	s.docDelete(f.ID, id)
 	s.auditReq(r, "doc-rca-delete", session.User, f.ID+" "+id)
 	s.writeJSON(w, 200, map[string]bool{"ok": true})
 }

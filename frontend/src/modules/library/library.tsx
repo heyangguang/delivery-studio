@@ -467,11 +467,13 @@ export function LibraryPage({
                       {t.variant && <div className="row-sub">{t.variant}</div>}
                       <div className="row-sub">
                         <span
-                          className={`plat-state ${p.deployable ? "ok" : "warn"}`}
+                          className={`plat-state ${p.deployable && p.stats.closures > 0 ? "ok" : "warn"}`}
                         >
-                          {p.deployable
+                          {p.deployable && p.stats.closures > 0
                             ? bi("可生成交付", "Ready")
-                            : bi("暂无运行环境", "No runtime")}
+                            : p.deployable
+                              ? bi("待入库软件包", "No packages")
+                              : bi("暂无运行环境", "No runtime")}
                         </span>
                         <span>
                           {" "}
@@ -856,13 +858,18 @@ function PlatformDetail({
             {t.variant && <span className="lib-tag">{t.variant}</span>}
             {t.arch && <span className="lib-tag mono">{t.arch}</span>}
             <span className="lib-tag">{FAMILY[p.family]}</span>
-            <span className={`plat-state pill ${p.deployable ? "ok" : "warn"}`}>
-              {p.deployable
+            <span className={`plat-state pill ${p.deployable && p.stats.closures > 0 ? "ok" : "warn"}`}>
+              {p.deployable && p.stats.closures > 0
                 ? bi("可生成离线交付", "Ready for offline delivery")
-                : bi(
-                    "还没有 Ansible 运行环境，暂时不能生成交付",
-                    "No Ansible runtime selected; cannot build deliveries yet",
-                  )}
+                : p.deployable
+                  ? bi(
+                      "运行环境已就绪，请先拉取或导入软件包后再生成交付",
+                      "Runtime ready; fetch or import packages before building deliveries",
+                    )
+                  : bi(
+                      "还没有 Ansible 运行环境，暂时不能生成交付",
+                      "No Ansible runtime selected; cannot build deliveries yet",
+                    )}
             </span>
           </div>
         </div>
@@ -960,12 +967,18 @@ function PlatformDetail({
                 `${p.runtime.packages.length} wheels · ${size(p.runtime.size)}`,
               )
             : bi("点此前往运行环境库配置", "Click to configure runtime");
-          const readyVal = p.deployable
-            ? bi("就绪 · 可生成交付", "Ready to build")
-            : bi("待补齐环境", "Needs runtime");
-          const readySub = p.deployable
-            ? bi("目标机与控制节点均无需联网", "Air-gapped targets & controller")
-            : bi("缺少 Ansible 离线运行环境", "Missing offline Ansible runtime");
+          const readyVal =
+            p.deployable && p.stats.closures > 0
+              ? bi("就绪 · 可生成交付", "Ready to build")
+              : p.deployable
+                ? bi("运行环境就绪 · 待入库软件", "Runtime ready · Add packages")
+                : bi("待补齐环境", "Needs runtime");
+          const readySub =
+            p.deployable && p.stats.closures > 0
+              ? bi("目标机与控制节点均无需联网", "Air-gapped targets & controller")
+              : p.deployable
+                ? bi("点击「添加软件版本」拉取离线包", "Click Add packages to populate offline repo")
+                : bi("缺少 Ansible 离线运行环境", "Missing offline Ansible runtime");
           return (
             <>
               <button

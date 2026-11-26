@@ -304,9 +304,7 @@ type skillSettings struct {
 
 func (s *storeServer) loadSkillSettings() skillSettings {
 	var st skillSettings
-	if b, err := os.ReadFile(s.aiFile("ai-skills.json")); err == nil {
-		_ = json.Unmarshal(b, &st)
-	}
+	_ = s.loadSettingDoc("ai_skills", s.aiFile("ai-skills.json"), &st)
 	return st
 }
 
@@ -535,9 +533,7 @@ func (s *storeServer) mcpFor(user string) []mcpServer {
 
 func (s *storeServer) loadMCP() []mcpServer {
 	var out []mcpServer
-	if b, err := os.ReadFile(s.aiFile("ai-mcp.json")); err == nil {
-		_ = json.Unmarshal(b, &out)
-	}
+	_ = s.loadSettingDoc("ai_mcp", s.aiFile("ai-mcp.json"), &out)
 	if out == nil {
 		out = []mcpServer{}
 	}
@@ -545,7 +541,7 @@ func (s *storeServer) loadMCP() []mcpServer {
 }
 
 func (s *storeServer) saveMCP(all []mcpServer) error {
-	return writeJSONFile(s.aiFile("ai-mcp.json"), all)
+	return s.saveSettingDoc("ai_mcp", s.aiFile("ai-mcp.json"), all)
 }
 
 type mcpClient struct {
@@ -1103,7 +1099,7 @@ func (s *storeServer) handleAIExt(w http.ResponseWriter, r *http.Request, sessio
 			s.fail(w, 400, msg)
 			return
 		}
-		if err := writeJSONFile(s.aiFile("ai-skills.json"), in); err != nil {
+		if err := s.saveSettingDoc("ai_skills", s.aiFile("ai-skills.json"), in); err != nil {
 			s.fail(w, 500, "保存失败，请稍后重试")
 			return
 		}

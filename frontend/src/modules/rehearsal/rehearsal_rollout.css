@@ -1,5 +1,97 @@
 /* Cross-Cluster Change Propagation & Rollout Board (Stripe/Linear-grade restrained enterprise UI) */
 
+/* Compact inline rollout pill inside rehearsal session header meta bar */
+.ro-inline-pill {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-size: 12px;
+  font-weight: 520;
+  white-space: nowrap;
+  flex-shrink: 0;
+  max-width: 100%;
+  transition:
+    background-color 0.16s ease,
+    border-color 0.16s ease,
+    color 0.16s ease;
+}
+.ro-inline-pill:hover {
+  background: var(--surface);
+  border-color: var(--brand-line);
+  color: var(--ink);
+}
+.ro-inline-pill:focus-visible {
+  box-shadow: var(--ring);
+}
+.ro-inline-pill.is-done {
+  background: color-mix(in srgb, var(--ok) 8%, var(--surface));
+  border-color: color-mix(in srgb, var(--ok) 26%, var(--line));
+}
+.ro-inline-pill.is-warn {
+  border-color: color-mix(in srgb, var(--warn) 38%, var(--line));
+}
+.ro-inline-origin {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.ro-inline-origin code {
+  font-size: 11.5px;
+  color: var(--ink);
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ro-inline-sep {
+  color: var(--faint);
+}
+.ro-inline-bar {
+  width: 30px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+  flex: none;
+}
+.ro-inline-bar > i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--ok);
+}
+.ro-inline-stat {
+  font-size: 11.5px;
+  color: var(--mute);
+  font-variant-numeric: tabular-nums;
+}
+.ro-inline-warn {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--warn);
+}
+.ro-inline-chev {
+  font-size: 11px;
+  color: var(--faint);
+  flex: none;
+}
+.ro-inline-pill:hover .ro-inline-chev {
+  color: var(--brand-ink);
+}
+
 .ro-strip {
   display: flex;
   align-items: center;

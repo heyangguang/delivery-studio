@@ -1748,3 +1748,68 @@ body[arco-theme="dark"] .cx-origin-badge.is-embedded {
     transform: none;
   }
 }
+
+/* ---------- Live Machine Telemetry & Config Drift Overlay ---------- */
+.cx-live-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  margin-top: 10px;
+  padding: 10px 14px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+}
+.cx-live-strip.is-live {
+  border-color: var(--ok-line);
+  background: color-mix(in srgb, var(--ok-soft) 45%, var(--surface));
+}
+.cx-live-strip.is-drift {
+  border-color: var(--warn-line);
+  background: color-mix(in srgb, var(--warn-soft) 48%, var(--surface));
+}
+.cx-live-strip-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+.cx-live-strip-acts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.cx-spec-row.is-drifted {
+  background: color-mix(in srgb, var(--warn-soft) 35%, transparent);
+}
+.cx-val-drift {
+  color: var(--warn);
+  font-weight: 600;
+  font-size: 12.5px;
+  line-height: 1.5;
+  background: var(--warn-soft);
+  border: 1px solid var(--warn-line);
+  padding: 2px 8px;
+  border-radius: 6px;
+  overflow-wrap: anywhere;
+}
+.cx-origin-pill.is-drift {
+  border: 1px solid var(--warn-line);
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.cx-origin-pill.is-live {
+  border: 1px solid var(--ok-line);
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+.cx-filter-pill.is-drift.on {
+  background: var(--warn-soft);
+  border-color: var(--warn-line);
+  color: var(--warn);
+}

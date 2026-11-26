@@ -1696,6 +1696,40 @@ func TestRehearsalExtractQuotedPatroniParamsAndHBARuleAndNoFalseCollision(t *tes
 			t.Fatalf("expected NO false conflict between logging_collector plan and pg_hba plan, got %+v", al)
 		}
 	}
+
+	// Patroni long flags (--set / --parameter) and dotted postgresql.parameters.* keys must also extract cleanly.
+	longFlagPlan := changeRehearsal{
+		ID:    "longflag1",
+		Title: "在线调整慢查询阈值至500ms",
+		Drift: &rehearsalDrift{
+			ParamDiffs: []rehearsalDriftParam{
+				{Key: "log_min_duration_statement", Initial: "1000", Actual: "1000"},
+			},
+		},
+		Steps: []rehearsalStep{
+			{
+				ID:      "s1",
+				Phase:   "execute",
+				Status:  "passed",
+				Title:   "在线修改集群慢查询阈值",
+				Command: `patronictl -c /etc/patroni/patroni.yml edit-config pg-ha-live-qa-pg --set postgresql.parameters.log_min_duration_statement=500 --parameter max_connections=1000 --set=ttl=40 --force`,
+			},
+		},
+	}
+	_, lfChanges := extractDefaultAppliedChanges(longFlagPlan)
+	gotKV := map[string]rehearsalAppliedChange{}
+	for _, ch := range lfChanges {
+		gotKV[ch.Key] = ch
+	}
+	if ch, ok := gotKV["log_min_duration_statement"]; !ok || ch.After != "500" || ch.Before != "1000" {
+		t.Fatalf("expected --set postgresql.parameters.log_min_duration_statement=500 with before=1000, got %+v", lfChanges)
+	}
+	if ch, ok := gotKV["max_connections"]; !ok || ch.After != "1000" {
+		t.Fatalf("expected --parameter max_connections=1000, got %+v", lfChanges)
+	}
+	if ch, ok := gotKV["ttl"]; !ok || ch.After != "40" {
+		t.Fatalf("expected --set=ttl=40, got %+v", lfChanges)
+	}
 }
 
 func TestRehearsalIntentUnclearGateAndRefineGoal(t *testing.T) {
@@ -1991,5 +2025,204 @@ func TestRehearsalPatchStepEditsProposalCommand(t *testing.T) {
 	}
 	if got.Steps[0].Command != "psql -c 'SELECT 1;'" {
 		t.Fatalf("expected original step.Command unchanged, got %q", got.Steps[0].Command)
+	}
+}
+
+func TestRehearsalExtraScopePersistedAndHonoredInProbeReplan(t *testing.T) {
+	s, _ := testStore(t)
+	alice, csrf := storeLogin(t, s, "alice")
+	spec := `{"id":"pg-extra-scope","hosts":[{"name":"node-1","ip":"10.0.9.11"},{"name":"node-2","ip":"10.0.9.12"},{"name":"node-3","ip":"10.0.9.13"}],"instances":[{"id":"etcd","component":"etcd","placement":{"member":["node-1","node-2","node-3"]}}]}`
+	cw := storeCreate(t, s, alice, csrf, spec, nil)
+	s.wg.Wait()
+	if cw.Code != 202 {
+		t.Fatalf("create job: %d %s", cw.Code, cw.Body.String())
+	}
+	var job storeJob
+	_ = json.Unmarshal(cw.Body.Bytes(), &job)
+	_ = storeRequest(s, "PATCH", "/api/jobs/"+job.ID, strings.NewReader(`{"outcome":"done"}`), alice, csrf)
+
+	rid := "c1d2e3f4a509"
+	rh := changeRehearsal{
+		ID:          rid,
+		ClusterID:   "pg-extra-scope",
+		Title:       "调整 PostgreSQL 日志轮转",
+		Goal:        "修改 logging_collector 并重启生效",
+		Stage:       "rehearsing",
+		Mode:        "full",
+		Owner:       "alice",
+		ProbeOutput: "HOST=node-1 ROLE=Leader PG=17.11 logging_collector=off",
+		ScopeQuestions: []rehearsalScopeQuestion{
+			{ID: "q1", Question: "是否允许短暂业务闪断？", Answer: "尽量无感"},
+		},
+		CreatedAt: nowStamp(),
+		UpdatedAt: nowStamp(),
+	}
+	rehearsalMu.Lock()
+	if err := s.saveRehearsal(rh); err != nil {
+		rehearsalMu.Unlock()
+		t.Fatalf("save seed rehearsal: %v", err)
+	}
+	rehearsalMu.Unlock()
+
+	planResp := `{"thinking":"遵循工程师补充约束直接操作主库，不切主","probe_status":"valid","drift":{"summary":"拓扑与基线一致","drifted":false,"hosts":[{"name":"node-1","ip":"10.0.9.11","initial_role":"主库","actual_role":"主库","version":"17.11","status":"正常"}]},"steps":[{"id":"s1","phase":"execute","order":1,"title":"直接重启主库生效","target_role":"当前主库 node-1","command":"systemctl restart patroni","expect":"服务恢复正常","risk_note":"短暂闪断数秒"}]}`
+	srv, bodies := fakeModel(t, planResp)
+	enableAI(t, s, srv.URL, 1)
+
+	// Re-plan from Stage 1 with updated extra_scope & answer and EMPTY probe_output (must reuse saved ProbeOutput!).
+	body := `{"answers":[{"id":"q1","question":"是否允许短暂业务闪断？","answer":"允许短暂闪断"}],"extra":"直接对主操作就行可以接受闪断"}`
+	w := storeRequest(s, "POST", "/api/clusters/pg-extra-scope/rehearsals/"+rid+"/probe", strings.NewReader(body), alice, csrf)
+	if w.Code != 200 {
+		t.Fatalf("POST /probe replan failed: %d %s", w.Code, w.Body.String())
+	}
+	var updated changeRehearsal
+	if err := json.Unmarshal(w.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("decode updated rehearsal: %v", err)
+	}
+	if updated.ExtraScope != "直接对主操作就行可以接受闪断" {
+		t.Fatalf("expected extra_scope persisted, got %q", updated.ExtraScope)
+	}
+	if len(updated.ScopeQuestions) != 1 || updated.ScopeQuestions[0].Answer != "允许短暂闪断" {
+		t.Fatalf("expected updated scope answer persisted, got %+v", updated.ScopeQuestions)
+	}
+	if updated.ProbeOutput != rh.ProbeOutput {
+		t.Fatalf("expected saved probe_output reused, got %q", updated.ProbeOutput)
+	}
+	if len(*bodies) != 1 {
+		t.Fatalf("expected 1 AI request, got %d", len(*bodies))
+	}
+	reqPrompt := (*bodies)[0]
+	for _, must := range []string{
+		"直接对主操作就行可以接受闪断",
+		"工程师特别补充的现场背景与操作指令",
+		"工程师已确认边界与补充现场背景最高优先级",
+		"HOST=node-1 ROLE=Leader PG=17.11 logging_collector=off",
+	} {
+		if !strings.Contains(reqPrompt, must) {
+			t.Fatalf("expected probe AI request to contain %q, got:\n%s", must, reqPrompt)
+		}
+	}
+}
+
+func TestRehearsalConfirmOverrideAndFeedImportedBaseline(t *testing.T) {
+	s, _ := testStore(t)
+	admin, csrf := storeLogin(t, s, "admin")
+
+	// Import a PostgreSQL cluster whose baseline initially recorded stale VIP port 5432.
+	impBody := `{
+		"id": "pg-port-corr",
+		"component": "postgresql",
+		"version": "17.11",
+		"hosts": [
+			{"name": "db-node-01", "ip": "172.30.2.58", "role": "primary"},
+			{"name": "db-node-03", "ip": "172.30.2.60", "role": "replica"}
+		],
+		"endpoints": [
+			{"name": "读写 VIP", "address": "jfrog-artifactory.postgresql.private.toolchain.cn.vwgroup.com:5432"}
+		]
+	}`
+	iw := storeRequest(s, "POST", "/api/clusters/import", strings.NewReader(impBody), admin, csrf)
+	if iw.Code != 200 && iw.Code != 201 {
+		t.Fatalf("import cluster failed: %d %s", iw.Code, iw.Body.String())
+	}
+
+	rid := "d4e5f6a1b209"
+	rh := changeRehearsal{
+		ID:        rid,
+		ClusterID: "pg-port-corr",
+		Title:     "验证入口路由验收",
+		Goal:      "验证读写 VIP 路由至原主库",
+		Stage:     "rehearsing",
+		Mode:      "full",
+		Owner:     "admin",
+		Steps: []rehearsalStep{
+			{
+				ID:         "s1",
+				Phase:      "verify",
+				Order:      1,
+				Title:      "验收业务读写入口",
+				TargetRole: "仅在从库 db-node-03 (172.30.2.60) 执行",
+				Command:    `psql -X -W "host=jfrog-artifactory.postgresql.private.toolchain.cn.vwgroup.com port=5432 dbname=postgres user=postgres"`,
+				Expect:     "VIP:5432 返回 172.30.2.58|f|off",
+				Status:     "pending",
+			},
+		},
+		CreatedAt: nowStamp(),
+		UpdatedAt: nowStamp(),
+	}
+	rehearsalMu.Lock()
+	if err := s.saveRehearsal(rh); err != nil {
+		rehearsalMu.Unlock()
+		t.Fatalf("save seed rehearsal: %v", err)
+	}
+	rehearsalMu.Unlock()
+
+	verifyResp := `{
+		"thinking": "工程师改用 port=5433 已成功连到原主库 172.30.2.58 且可读写，原基线 5432 大概率登记有误，应征询工程师确认而非强迫重测 5432。",
+		"verdict": "failed",
+		"action": "confirm_override",
+		"diagnosis": "检测到现场改用 5433 已验证连通原主库且可读写，但原步骤与集群基线登记的是 5432。请确认是否以现场实测 5433 为准直接通过并反哺基线？",
+		"confirm_summary": "db-node-03 经读写 VIP:5433 成功路由至原主库 172.30.2.58 且 transaction_read_only=off，验收通过。",
+		"verified_facts": ["db-node-03 经 jfrog-artifactory...:5433 返回 172.30.2.58|f|off"],
+		"missing_items": [],
+		"target_role": "仅在从库 db-node-03 (172.30.2.60) 执行",
+		"command": "psql -X -W \"host=jfrog-artifactory.postgresql.private.toolchain.cn.vwgroup.com port=5433 dbname=postgres user=postgres\"",
+		"expect": "VIP:5433 返回 172.30.2.58|f|off",
+		"baseline_corrections": [
+			{
+				"kind": "endpoint",
+				"label": "访问入口端口",
+				"old_value": "jfrog-artifactory.postgresql.private.toolchain.cn.vwgroup.com:5432",
+				"new_value": "jfrog-artifactory.postgresql.private.toolchain.cn.vwgroup.com:5433",
+				"reason": "现场实测真实读写入口端口为 5433"
+			}
+		]
+	}`
+	srv, _ := fakeModel(t, verifyResp)
+	enableAI(t, s, srv.URL, 1)
+
+	vw := storeRequest(s, "POST", "/api/clusters/pg-port-corr/rehearsals/"+rid+"/steps/s1/verify",
+		strings.NewReader(`{"output":"psql host=... port=5433 -> 172.30.2.58|f|off"}`), admin, csrf)
+	if vw.Code != 200 {
+		t.Fatalf("verify failed: %d %s", vw.Code, vw.Body.String())
+	}
+	var afterVerify changeRehearsal
+	_ = json.Unmarshal(vw.Body.Bytes(), &afterVerify)
+	if afterVerify.Steps[0].Proposal == nil || afterVerify.Steps[0].Proposal.Action != "confirm_override" {
+		t.Fatalf("expected confirm_override proposal, got: %+v", afterVerify.Steps[0].Proposal)
+	}
+	if len(afterVerify.Steps[0].Proposal.BaselineCorrections) != 1 {
+		t.Fatalf("expected 1 baseline correction, got: %+v", afterVerify.Steps[0].Proposal.BaselineCorrections)
+	}
+
+	// Engineer confirms live 5433 & feeds back into cluster baseline!
+	aw := storeRequest(s, "POST", "/api/clusters/pg-port-corr/rehearsals/"+rid+"/steps/s1/apply",
+		strings.NewReader(`{"accept_passed":true,"feed_baseline":true}`), admin, csrf)
+	if aw.Code != 200 {
+		t.Fatalf("apply confirm_override failed: %d %s", aw.Code, aw.Body.String())
+	}
+	var afterApply changeRehearsal
+	_ = json.Unmarshal(aw.Body.Bytes(), &afterApply)
+	st := afterApply.Steps[0]
+	if st.Status != "passed" || !st.VerifiedByAI || st.Proposal != nil {
+		t.Fatalf("expected step passed & proposal cleared, got status=%q verified=%v proposal=%+v", st.Status, st.VerifiedByAI, st.Proposal)
+	}
+	if !strings.Contains(st.Command, "port=5433") || !strings.Contains(st.Expect, "5433") {
+		t.Fatalf("expected step command & expect updated to 5433, got cmd=%q expect=%q", st.Command, st.Expect)
+	}
+	if len(afterApply.BaselineEnriched) == 0 {
+		t.Fatalf("expected baseline_enriched summary after feed_baseline=true")
+	}
+
+	// Verify cluster baseline endpoint was actually updated in-place from :5432 to :5433!
+	facts, ok := s.clusterFactsFor("admin", "pg-port-corr")
+	if !ok {
+		t.Fatalf("cluster facts missing")
+	}
+	dep := s.readSpec(facts.Current.ID)
+	if dep == nil || dep.Imported == nil || len(dep.Imported.Endpoints) != 1 {
+		t.Fatalf("unexpected imported baseline: %+v", dep)
+	}
+	if dep.Imported.Endpoints[0].Address != "jfrog-artifactory.postgresql.private.toolchain.cn.vwgroup.com:5433" {
+		t.Fatalf("expected cluster baseline endpoint updated to :5433, got %q", dep.Imported.Endpoints[0].Address)
 	}
 }

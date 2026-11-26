@@ -6,7 +6,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { Button, Input, Message, Modal, Popover, Tooltip } from "@arco-design/web-react";
+import { Button, Checkbox, Input, Message, Modal, Popover, Tooltip } from "@arco-design/web-react";
 import {
   IconAlignLeft,
   IconArrowDown,
@@ -21,6 +21,7 @@ import {
   IconDownload,
   IconEdit,
   IconExclamationCircleFill,
+  IconFilter,
   IconInfoCircle,
   IconLaunch,
   IconList,
@@ -57,9 +58,14 @@ import {
   putCached,
   useAIStatus,
   useMedia,
+  useStored,
 } from "../../shared/shared";
-import { AppGlyph, Segmented, StatusBadge, StatusDot } from "../../design/ui";
-import { dispatchExecLaunchIntent, StepHotfixDrawer } from "../projects/stephotfix";
+import { AppGlyph, FilterChip, Kbd, Segmented, StatusBadge, StatusDot } from "../../design/ui";
+import {
+  dispatchExecLaunchIntent,
+  StepHotfixDrawer,
+  type OpenStepHotfixDetail,
+} from "../projects/stephotfix";
 import "./monitor.css";
 
 /* ---------- Types ---------- */
@@ -1011,7 +1017,7 @@ function AIDiagnoseButton({
                 ? `异常主机：${diag.failedHosts.join("、")}`
                 : "",
               `核心报错：\n${diag.errorDetail}`,
-              "请帮我判断：1）这是目标主机/现场环境问题，还是组件脚本/断言问题？2）若属于组件脚本/断言问题，请先通过 component_sync_status 核对当前已发布组件和草稿是否已经修复、本次交付能否直接「同步组件更新」：如果当前组件已经没问题，直接告诉我无需再去组件工作台修改，以及同步并重跑前需要核对的现场前置状态；只有确认当前组件尚未修复时，再给出组件工作台的最小修改方案。",
+              "请帮我完成诊断并给出可直接落地的修复方案：\n1）先判断根因：这是目标主机/现场环境问题，还是本次交付脚本/断言/参数问题？请讲清具体原因和修复方案（改哪个文件、删除/新增哪段内容、如何验证）。\n2）若属于脚本/剧本/断言问题，请先通过 component_sync_status 核对当前已发布组件和草稿是否已经修复：如果最新已发布组件已经修复且可直接同步，直接告诉我无需再去组件工作台修改，以及点击「同步组件/草稿更新」与重跑前需要核对的现场状态；如果当前组件尚未修复且修改本次交付里的脚本即可解决，请先用 read_file 看清原文，再主动调用 propose_file_change 提交「修改本次交付脚本」热修补丁卡片（带增删高亮差异），让我确认后一键写入本次交付热修并在「脚本查看与热修」里直接查看改动高亮与重跑；若属通用组件缺陷，可一并输出组件改进建议。",
               tail ? `\n最近终端日志：\n\`\`\`\n${tail}\n\`\`\`` : "",
             ]
               .filter(Boolean)
@@ -1025,7 +1031,7 @@ function AIDiagnoseButton({
                 ? `Affected hosts: ${diag.failedHosts.join(", ")}`
                 : "",
               `Error:\n${diag.errorDetail}`,
-              "Please diagnose: (1) whether this is an environment/host issue or a component playbook/assertion issue; (2) if it is a component issue, FIRST call component_sync_status to check whether the latest published component or draft has already fixed it and whether this delivery can simply click 'Sync Fix' — tell me clearly if no component edit is needed (plus any host state to verify before rerunning), and only suggest component workbench edits if the current component is still unfixed.",
+              "Please provide a full diagnosis and actionable fix plan:\n(1) Identify whether this is a host/environment issue or a delivery script/playbook/assertion issue, and explain the exact fix (which file, what to delete/add, and how to verify).\n(2) If it is a script/playbook/assertion issue, FIRST call component_sync_status to check whether the latest published component or draft already fixed it: if published component already fixed it and can sync, tell me no component edit is needed and list any host state to verify before syncing & rerunning; if not yet fixed and editing this delivery's script resolves the issue, inspect the file with read_file and proactively call propose_file_change to submit a delivery script hotfix patch card (with highlighted diff) so I can apply it in one click and review the highlighted changes in Step Hotfix (and also emit a component improvement suggestion if it is a general component bug).",
               tail ? `\nRecent log output:\n\`\`\`\n${tail}\n\`\`\`` : "",
             ]
               .filter(Boolean)
@@ -1140,10 +1146,12 @@ function prefetchExecDetail(jobId: string): Promise<ExecDetailData | null> {
 }
 
 export function ExecutionMonitorPage({
+  centerNav,
   selectedJob,
   initialRun,
   initialStep,
 }: {
+  centerNav?: React.ReactNode;
   selectedJob?: string;
   initialRun?: string;
   initialStep?: string;
@@ -1160,11 +1168,85 @@ export function ExecutionMonitorPage({
   const [railHidden, setRailHidden] = useState(() => compact);
   const prevCompactRef = useRef(compact);
   const prevNarrowRef = useRef(narrow);
-  const [railSearch, setRailSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<RailStatusFilter>("all");
-  const [appFilter, setAppFilter] = useState<string>("all");
+
+  type MonitorRange = "all" | "today" | "7d" | "30d";
+  type MonitorSort = "new" | "old" | "name";
+  type MonitorGroup = "day" | "app" | "none";
+  type MonitorFilter = {
+    q: string;
+    status: RailStatusFilter;
+    apps: string[];
+    range: MonitorRange;
+    sort: MonitorSort;
+    group: MonitorGroup;
+  };
+  const MF0: MonitorFilter = useMemo(
+    () => ({
+      q: "",
+      status: "all",
+      apps: [],
+      range: "all",
+      sort: "new",
+      group: "day",
+    }),
+    [],
+  );
+  const [storedFilter, setStoredFilter] = useStored<MonitorFilter>("mh-mon-filters", MF0);
+  const mf: MonitorFilter = useMemo(
+    () => ({
+      ...MF0,
+      ...storedFilter,
+      q: typeof storedFilter.q === "string" ? storedFilter.q : "",
+      apps: Array.isArray(storedFilter.apps) ? storedFilter.apps : [],
+      status: ["all", "active", "failed", "done"].includes(storedFilter.status)
+        ? storedFilter.status
+        : "all",
+      range: ["all", "today", "7d", "30d"].includes(storedFilter.range)
+        ? storedFilter.range
+        : "all",
+      sort: ["new", "old", "name"].includes(storedFilter.sort)
+        ? storedFilter.sort
+        : "new",
+      group: ["day", "app", "none"].includes(storedFilter.group)
+        ? storedFilter.group
+        : "day",
+    }),
+    [MF0, storedFilter],
+  );
+  const setMF = (patch: Partial<MonitorFilter>) =>
+    setStoredFilter((cur) => ({ ...MF0, ...cur, ...patch }));
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [appSearch, setAppSearch] = useState("");
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const listBodyRef = useRef<HTMLDivElement>(null);
   const [ind, setInd] = useState<{ y: number; h: number } | null>(null);
+
+  const rangeLabel: Record<MonitorRange, string> = {
+    all: bi("不限", "Any time"),
+    today: bi("今天", "Today"),
+    "7d": bi("近 7 天", "Last 7d"),
+    "30d": bi("近 30 天", "Last 30d"),
+  };
+
+  useEffect(() => {
+    const onSlash = (e: KeyboardEvent) => {
+      if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (
+        t &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.isContentEditable ||
+          t.closest(".arco-modal,.arco-drawer"))
+      )
+        return;
+      e.preventDefault();
+      if (railHidden) setRailHidden(false);
+      requestAnimationFrame(() => searchInputRef.current?.focus());
+    };
+    window.addEventListener("keydown", onSlash);
+    return () => window.removeEventListener("keydown", onSlash);
+  }, [railHidden]);
 
   useEffect(() => {
     // Auto-collapse rail when resizing into narrow/compact viewports; auto-restore above 1100px.
@@ -1229,44 +1311,102 @@ export function ExecutionMonitorPage({
     }
   }, [selectedJob, items]);
 
+  const matchMonitorItem = useCallback(
+    (it: MonitorListItem, f: typeof mf, skip?: "status" | "apps") => {
+      const q = f.q.trim().toLowerCase();
+      if (
+        q &&
+        !(
+          it.cluster.toLowerCase().includes(q) ||
+          it.app_name.toLowerCase().includes(q) ||
+          (it.executor_name || "").toLowerCase().includes(q)
+        )
+      ) {
+        return false;
+      }
+      if (skip !== "status") {
+        if (f.status === "active" && !it.active) return false;
+        if (f.status === "failed" && it.state !== "failed") return false;
+        if (f.status === "done" && (it.active || it.state === "failed")) return false;
+      }
+      const appKey = it.app_id || it.app_name;
+      if (skip !== "apps" && f.apps.length > 0 && !f.apps.includes(appKey)) {
+        return false;
+      }
+      if (f.range !== "all") {
+        const now = new Date();
+        const since =
+          f.range === "today"
+            ? new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+            : f.range === "7d"
+              ? now.getTime() - 7 * 86400000
+              : now.getTime() - 30 * 86400000;
+        const ts = Date.parse(it.updated || it.created);
+        if (Number.isFinite(ts) && ts < since) return false;
+      }
+      return true;
+    },
+    [],
+  );
+
   const statusCounts = useMemo(() => {
+    const base = items.filter((it) => matchMonitorItem(it, mf, "status"));
     let active = 0;
     let failed = 0;
     let done = 0;
-    for (const it of items) {
+    for (const it of base) {
       if (it.active) active++;
       else if (it.state === "failed") failed++;
       else done++;
     }
-    return { all: items.length, active, failed, done };
-  }, [items]);
+    return { all: base.length, active, failed, done };
+  }, [items, mf, matchMonitorItem]);
 
-  const appCounts = useMemo(() => {
-    const m = new Map<string, { id: string; name: string; count: number }>();
+  const allApps = useMemo(() => {
+    const m = new Map<string, { id: string; name: string; total: number }>();
     for (const it of items) {
       const id = it.app_id || it.app_name;
       const cur = m.get(id);
-      if (cur) cur.count++;
-      else m.set(id, { id, name: it.app_name || id, count: 1 });
+      if (cur) cur.total++;
+      else m.set(id, { id, name: it.app_name || id, total: 1 });
     }
-    return [...m.values()].sort((a, b) => b.count - a.count);
+    return [...m.values()].sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
   }, [items]);
 
+  const appNameMap = useMemo(
+    () => new Map(allApps.map((a) => [a.id, a.name])),
+    [allApps],
+  );
+
+  const facetAppCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    items
+      .filter((it) => matchMonitorItem(it, mf, "apps"))
+      .forEach((it) => {
+        const id = it.app_id || it.app_name;
+        m.set(id, (m.get(id) || 0) + 1);
+      });
+    return m;
+  }, [items, mf, matchMonitorItem]);
+
   const filteredItems = useMemo(() => {
-    const q = railSearch.trim().toLowerCase();
-    return items.filter((it) => {
-      if (statusFilter === "active" && !it.active) return false;
-      if (statusFilter === "failed" && it.state !== "failed") return false;
-      if (statusFilter === "done" && (it.active || it.state === "failed")) return false;
-      if (appFilter !== "all" && (it.app_id || it.app_name) !== appFilter) return false;
-      if (!q) return true;
-      return (
-        it.cluster.toLowerCase().includes(q) ||
-        it.app_name.toLowerCase().includes(q) ||
-        (it.executor_name || "").toLowerCase().includes(q)
-      );
-    });
-  }, [items, statusFilter, appFilter, railSearch]);
+    const matched = items.filter((it) => matchMonitorItem(it, mf));
+    return matched.sort(
+      mf.sort === "name"
+        ? (a, b) => a.cluster.localeCompare(b.cluster)
+        : mf.sort === "old"
+          ? (a, b) => (a.updated || a.created).localeCompare(b.updated || b.created)
+          : (a, b) => (b.updated || b.created).localeCompare(a.updated || a.created),
+    );
+  }, [items, mf, matchMonitorItem]);
+
+  const extraFilters =
+    mf.apps.length +
+    (mf.range !== "all" ? 1 : 0) +
+    (mf.sort !== "new" ? 1 : 0) +
+    (mf.group !== "day" ? 1 : 0);
+  const isFiltered = Boolean(mf.q.trim()) || mf.status !== "all" || extraFilters > 0;
+  const clearAllFilters = () => setStoredFilter(MF0);
 
   const canManageNodes = can("execution.manage");
 
@@ -1360,13 +1500,13 @@ export function ExecutionMonitorPage({
       >
         <div className="list-head">
           <div className="list-title">
-            <h1>{bi("执行监控", "Executions")}</h1>
+            <h1>{centerNav ? bi("执行中心", "Execution Center") : bi("任务监控", "Task Monitor")}</h1>
             <div className="mon-list-title-right">
               {listData && (
                 <Tooltip
                   content={bi(
-                    `在线执行节点 ${listData.online_runners} / ${listData.total_runners}${canManageNodes ? " · 点击管理执行节点" : ""}`,
-                    `${listData.online_runners} / ${listData.total_runners} runners online`,
+                    `在线控制机 ${listData.online_runners} / ${listData.total_runners}${canManageNodes ? " · 点击切换至 Agent" : ""}`,
+                    `${listData.online_runners} / ${listData.total_runners} control agents online`,
                   )}
                   mini
                 >
@@ -1374,13 +1514,13 @@ export function ExecutionMonitorPage({
                     type="button"
                     className={`mon-runner-pill num ${listData.online_runners > 0 ? "on" : ""} ${canManageNodes ? "clickable" : ""}`}
                     onClick={() =>
-                      canManageNodes && go({ name: "settings", id: "execution-nodes" })
+                      canManageNodes && go({ name: "executions", view: "nodes" })
                     }
                   >
                     <i aria-hidden />
                     {bi(
-                      `在线节点 ${listData.online_runners}/${listData.total_runners}`,
-                      `${listData.online_runners}/${listData.total_runners} online`,
+                      `控制机 ${listData.online_runners}/${listData.total_runners}`,
+                      `Ctrl ${listData.online_runners}/${listData.total_runners}`,
                     )}
                   </button>
                 </Tooltip>
@@ -1398,54 +1538,214 @@ export function ExecutionMonitorPage({
             </div>
           </div>
 
-          <Input
-            prefix={<IconSearch />}
-            allowClear
-            value={railSearch}
-            onChange={setRailSearch}
-            placeholder={bi("搜索集群、组件或节点", "Search clusters, apps, runners")}
-            aria-label={bi("搜索集群", "Search clusters")}
-          />
+          {centerNav}
 
-          <div className="mon-status-seg">
-            <Segmented<RailStatusFilter>
-              size="sm"
-              label={bi("按执行状态筛选", "Filter by execution status")}
-              value={statusFilter}
-              onChange={setStatusFilter}
-              options={[
-                { value: "all", label: bi("全部", "All"), count: statusCounts.all },
-                { value: "active", label: bi("运行", "Live"), count: statusCounts.active },
-                { value: "failed", label: bi("失败", "Fail"), count: statusCounts.failed },
-                { value: "done", label: bi("通过", "Pass"), count: statusCounts.done },
-              ]}
+          <div className="search-row">
+            <Input
+              ref={(r) => {
+                searchInputRef.current =
+                  (r as unknown as { dom?: HTMLInputElement })?.dom ?? null;
+              }}
+              prefix={<IconSearch />}
+              suffix={!mf.q ? <Kbd>/</Kbd> : undefined}
+              allowClear
+              value={mf.q}
+              onChange={(v) => setMF({ q: v })}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && filteredItems[0]) {
+                  go({ name: "executions", id: filteredItems[0].job_id });
+                }
+                if (e.key === "Escape") {
+                  setMF({ q: "" });
+                  (e.target as HTMLInputElement).blur();
+                }
+              }}
+              placeholder={bi("搜索集群、应用或节点", "Search clusters, apps, nodes…")}
+              aria-label={bi("搜索执行任务", "Search execution tasks")}
             />
+            <Popover
+              className="fpanel-pop"
+              trigger="click"
+              position="bl"
+              triggerProps={{ autoFitPosition: true }}
+              popupVisible={filterOpen}
+              onVisibleChange={(vis) => {
+                setFilterOpen(vis);
+                if (!vis) setAppSearch("");
+              }}
+              unmountOnExit
+              content={
+                <div
+                  className="fpanel"
+                  role="dialog"
+                  aria-label={bi("筛选执行任务", "Filter execution tasks")}
+                >
+                  {allApps.length > 0 && (
+                    <section>
+                      <h4>{bi("应用", "Application")}</h4>
+                      {allApps.length > 6 && (
+                        <Input
+                          size="small"
+                          allowClear
+                          prefix={<IconSearch />}
+                          placeholder={bi("找应用", "Find app")}
+                          value={appSearch}
+                          onChange={setAppSearch}
+                          aria-label={bi("在应用中查找", "Filter applications")}
+                        />
+                      )}
+                      <div className="fpanel-apps">
+                        {allApps
+                          .filter((a) =>
+                            `${a.name} ${a.id}`
+                              .toLowerCase()
+                              .includes(appSearch.trim().toLowerCase()),
+                          )
+                          .map((a) => (
+                            <Checkbox
+                              key={a.id}
+                              checked={mf.apps.includes(a.id)}
+                              onChange={(c) =>
+                                setMF({
+                                  apps: c
+                                    ? [...mf.apps, a.id]
+                                    : mf.apps.filter((x) => x !== a.id),
+                                })
+                              }
+                            >
+                              <span className="fpanel-app">
+                                <AppGlyph id={a.id} size={18} />
+                                <span>{a.name}</span>
+                                <em className="num">{facetAppCounts.get(a.id) || 0}</em>
+                              </span>
+                            </Checkbox>
+                          ))}
+                      </div>
+                    </section>
+                  )}
+                  <section>
+                    <h4>{bi("更新时间", "Updated")}</h4>
+                    <Segmented<MonitorRange>
+                      size="sm"
+                      label={bi("更新时间", "Updated")}
+                      value={mf.range}
+                      onChange={(v) => setMF({ range: v })}
+                      options={(["all", "today", "7d", "30d"] as MonitorRange[]).map(
+                        (v) => ({ value: v, label: rangeLabel[v] }),
+                      )}
+                    />
+                  </section>
+                  <section>
+                    <h4>{bi("排序", "Sort")}</h4>
+                    <Segmented<MonitorSort>
+                      size="sm"
+                      label={bi("排序", "Sort")}
+                      value={mf.sort}
+                      onChange={(v) => setMF({ sort: v })}
+                      options={[
+                        { value: "new", label: bi("最新", "Newest") },
+                        { value: "old", label: bi("最早", "Oldest") },
+                        { value: "name", label: bi("名称", "Name") },
+                      ]}
+                    />
+                  </section>
+                  <section>
+                    <h4>{bi("分组", "Group by")}</h4>
+                    <Segmented<MonitorGroup>
+                      size="sm"
+                      label={bi("分组", "Group by")}
+                      value={mf.sort === "name" && mf.group === "day" ? "none" : mf.group}
+                      onChange={(v) => setMF({ group: v })}
+                      options={[
+                        {
+                          value: "day",
+                          label: bi("按日期", "Date"),
+                          disabled: mf.sort === "name",
+                        },
+                        { value: "app", label: bi("按应用", "Application") },
+                        { value: "none", label: bi("不分组", "None") },
+                      ]}
+                    />
+                  </section>
+                  <footer>
+                    <button
+                      type="button"
+                      className="link quiet"
+                      onClick={() =>
+                        setMF({ apps: [], range: "all", sort: "new", group: "day" })
+                      }
+                    >
+                      {bi("恢复默认", "Reset")}
+                    </button>
+                    <Button
+                      size="small"
+                      type="primary"
+                      onClick={() => setFilterOpen(false)}
+                    >
+                      {bi("完成", "Done")}
+                    </Button>
+                  </footer>
+                </div>
+              }
+            >
+              <Button
+                className={`filter-btn ${extraFilters > 0 ? "on" : ""}`}
+                icon={<IconFilter />}
+                aria-label={bi(
+                  `筛选${extraFilters ? `，已设置 ${extraFilters} 项` : ""}`,
+                  `Filter${extraFilters ? ` (${extraFilters} active)` : ""}`,
+                )}
+                aria-expanded={filterOpen}
+              >
+                {extraFilters > 0 && <em className="num">{extraFilters}</em>}
+              </Button>
+            </Popover>
           </div>
 
-          {appCounts.length > 1 && (
-            <div
-              className="mon-app-strip"
-              role="group"
-              aria-label={bi("按组件快捷筛选", "Quick filter by component")}
-            >
-              <button
-                type="button"
-                className={`mon-app-chip ${appFilter === "all" ? "on" : ""}`}
-                onClick={() => setAppFilter("all")}
-              >
-                {bi("全部", "All")}
-              </button>
-              {appCounts.map((a) => (
-                <button
-                  key={a.id}
-                  type="button"
-                  className={`mon-app-chip ${appFilter === a.id ? "on" : ""}`}
-                  onClick={() => setAppFilter(appFilter === a.id ? "all" : a.id)}
-                >
-                  <span>{a.name}</span>
-                  <em className="num">{a.count}</em>
-                </button>
+          <Segmented<RailStatusFilter>
+            size="sm"
+            label={bi("按执行状态筛选", "Filter by execution status")}
+            value={mf.status}
+            onChange={(v) => setMF({ status: v })}
+            options={[
+              { value: "all", label: bi("全部", "All"), count: statusCounts.all },
+              { value: "active", label: bi("运行", "Live"), count: statusCounts.active },
+              { value: "failed", label: bi("失败", "Fail"), count: statusCounts.failed },
+              { value: "done", label: bi("通过", "Pass"), count: statusCounts.done },
+            ]}
+          />
+
+          {(mf.apps.length > 0 || mf.range !== "all") && (
+            <div className="active-filters tight">
+              {mf.apps.map((id) => (
+                <FilterChip
+                  key={id}
+                  size="small"
+                  label={appNameMap.get(id) || id}
+                  onClose={() => setMF({ apps: mf.apps.filter((x) => x !== id) })}
+                />
               ))}
+              {mf.range !== "all" && (
+                <FilterChip
+                  size="small"
+                  label={rangeLabel[mf.range]}
+                  onClose={() => setMF({ range: "all" })}
+                />
+              )}
+            </div>
+          )}
+
+          {isFiltered && listData && (
+            <div className="result-line num" aria-live="polite">
+              {bi(
+                `显示 ${filteredItems.length} / ${items.length} 个任务`,
+                `Showing ${filteredItems.length} of ${items.length} runs`,
+              )}
+              {filteredItems.length > 0 && (
+                <button type="button" className="link quiet" onClick={clearAllFilters}>
+                  {bi("清除筛选", "Clear filters")}
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -1472,34 +1772,44 @@ export function ExecutionMonitorPage({
                     )
                   : bi("没有符合当前筛选条件的集群", "No matching clusters")}
               </p>
-              {(statusFilter !== "all" || appFilter !== "all" || railSearch) && (
-                <Button
-                  size="small"
-                  onClick={() => {
-                    setStatusFilter("all");
-                    setAppFilter("all");
-                    setRailSearch("");
-                  }}
-                >
+              {isFiltered && (
+                <Button size="small" onClick={clearAllFilters}>
                   {bi("重置筛选", "Reset filters")}
                 </Button>
               )}
             </div>
           ) : (
             (() => {
+              const effGroup: MonitorGroup =
+                mf.sort === "name" && mf.group === "day" ? "none" : mf.group;
               const groups: { key: string; items: MonitorListItem[] }[] = [];
-              for (const it of filteredItems) {
-                const key = dayLabel(it.updated);
-                let g = groups[groups.length - 1];
-                if (!g || g.key !== key) {
-                  g = { key, items: [] };
-                  groups.push(g);
+              if (effGroup === "none") {
+                groups.push({ key: "", items: filteredItems });
+              } else if (effGroup === "app") {
+                const byApp = new Map<string, MonitorListItem[]>();
+                for (const it of filteredItems) {
+                  const key = it.app_name || it.app_id || bi("其他", "Other");
+                  const list = byApp.get(key) || [];
+                  list.push(it);
+                  byApp.set(key, list);
                 }
-                g.items.push(it);
+                for (const [key, list] of byApp.entries()) {
+                  groups.push({ key, items: list });
+                }
+              } else {
+                for (const it of filteredItems) {
+                  const key = dayLabel(it.updated);
+                  let g = groups[groups.length - 1];
+                  if (!g || g.key !== key) {
+                    g = { key, items: [] };
+                    groups.push(g);
+                  }
+                  g.items.push(it);
+                }
               }
               return groups.map((g) => (
-                <div key={g.key} role="group" aria-label={g.key}>
-                  <div className="list-day">{g.key}</div>
+                <div key={g.key || "__all"} role="group" aria-label={g.key || bi("全部任务", "All runs")}>
+                  {g.key && <div className="list-day">{g.key}</div>}
                   {g.items.map((it) => {
                     const pct =
                       it.total_steps > 0
@@ -1612,6 +1922,7 @@ export function ExecutionMonitorPage({
       {activeJobId ? (
         <AIDock
           scope={{ kind: "job", jobId: activeJobId }}
+          onChanged={loadList}
           start={{
             key: "review",
             title: bi("执行诊断助手", "Execution Assistant"),
@@ -1726,8 +2037,10 @@ function MonitorWorkspace({
   const [logTailLimit, setLogTailLimit] = useState(LOG_WINDOW_STEP);
   const [resizingPipe, setResizingPipe] = useState(false);
   const [hotfixStep, setHotfixStep] = useState<{
-    key: string;
-    title: string;
+    key?: string;
+    title?: string;
+    path?: string;
+    view?: "edit" | "diff";
   } | null>(null);
 
   const workspaceRef = useRef<HTMLDivElement>(null);
@@ -1890,6 +2203,31 @@ function MonitorWorkspace({
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, [activeRun, loadDetail]);
+
+  useEffect(() => {
+    const onPatched = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ jobId?: string }>).detail;
+      if (detail?.jobId && detail.jobId !== jobId) return;
+      void loadDetail();
+      void onListRefresh();
+    };
+    const onOpenHotfix = (ev: Event) => {
+      const detail = (ev as CustomEvent<OpenStepHotfixDetail>).detail;
+      if (detail?.jobId && detail.jobId !== jobId) return;
+      setHotfixStep({
+        key: detail?.stepKey,
+        title: detail?.stepTitle,
+        path: detail?.path,
+        view: detail?.view || "diff",
+      });
+    };
+    window.addEventListener("mh-delivery-patched", onPatched);
+    window.addEventListener("mh-open-step-hotfix", onOpenHotfix);
+    return () => {
+      window.removeEventListener("mh-delivery-patched", onPatched);
+      window.removeEventListener("mh-open-step-hotfix", onOpenHotfix);
+    };
+  }, [jobId, loadDetail, onListRefresh]);
 
   useEffect(() => {
     return () => {
@@ -3008,14 +3346,33 @@ function MonitorWorkspace({
                       )}
                     </span>
                   )}
-                {(data?.patches?.length || 0) > 0 && (
-                  <span style={{ color: "var(--brand-ink)", fontWeight: 560 }}>
-                    {bi(
-                      `· 本交付已热修 ${new Set(data!.patches!.map((p) => p.path)).size} 个脚本（续跑自动推送）`,
-                      `· ${new Set(data!.patches!.map((p) => p.path)).size} hotfixed (auto-pushed)`,
-                    )}
-                  </span>
-                )}
+                {(data?.patches?.length || 0) > 0 && (() => {
+                  const uniquePatched = new Set(data!.patches!.map((p) => p.path));
+                  const latestPatch = data!.patches![data!.patches!.length - 1];
+                  return (
+                    <button
+                      type="button"
+                      className="mon-patched-link"
+                      title={bi(
+                        "点击打开脚本热修抽屉，查看所有已修改文件与增删高亮差异",
+                        "Open Step Hotfix to inspect modified files and highlighted diff",
+                      )}
+                      onClick={() =>
+                        setHotfixStep({
+                          key: activeStepRef?.step.key,
+                          title: activeStepRef?.step.title,
+                          path: latestPatch?.path,
+                          view: "diff",
+                        })
+                      }
+                    >
+                      {bi(
+                        `· 本交付已热修 ${uniquePatched.size} 个脚本（查看改动高亮）`,
+                        `· ${uniquePatched.size} script(s) hotfixed (view diff)`,
+                      )}
+                    </button>
+                  );
+                })()}
               </div>
             </div>
           </div>
@@ -4119,7 +4476,12 @@ function MonitorWorkspace({
                                   })
                                 }
                               >
-                                {bi("直接热修本步脚本", "Hotfix Step Script")}
+                                {(data?.patches?.length || 0) > 0
+                                  ? bi(
+                                      `直接热修本步脚本（已改 ${new Set(data!.patches!.map((p) => p.path)).size}）`,
+                                      `Hotfix Script (${new Set(data!.patches!.map((p) => p.path)).size} patched)`,
+                                    )
+                                  : bi("直接热修本步脚本", "Hotfix Step Script")}
                               </Button>
                             )}
                             {can("component.edit") && (
@@ -4620,6 +4982,8 @@ function MonitorWorkspace({
         jobId={jobId}
         stepKey={hotfixStep?.key}
         stepTitle={hotfixStep?.title}
+        initialPath={hotfixStep?.path}
+        initialView={hotfixStep?.view}
         deliveryMode={shownSummary?.delivery_mode || "automatic"}
         onClose={() => setHotfixStep(null)}
         onPatched={() => {

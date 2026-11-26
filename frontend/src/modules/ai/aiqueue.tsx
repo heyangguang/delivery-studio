@@ -472,26 +472,30 @@ function MessageQueueTrayInner<
                     {items.length > 1 && (
                       <>
                         <Tooltip content={bi("提高优先级（上移）", "Move up (higher priority)")} mini>
-                          <button
-                            type="button"
-                            className="aq-act"
-                            disabled={isFirst}
-                            onClick={() => onMoveUp(item.id)}
-                            aria-label={bi("上移优先级", "Move up")}
-                          >
-                            <IconUp />
-                          </button>
+                          <span style={{ display: "inline-flex" }}>
+                            <button
+                              type="button"
+                              className="aq-act"
+                              disabled={isFirst}
+                              onClick={() => onMoveUp(item.id)}
+                              aria-label={bi("上移优先级", "Move up")}
+                            >
+                              <IconUp />
+                            </button>
+                          </span>
                         </Tooltip>
                         <Tooltip content={bi("降低优先级（下移）", "Move down (lower priority)")} mini>
-                          <button
-                            type="button"
-                            className="aq-act"
-                            disabled={isLast}
-                            onClick={() => onMoveDown(item.id)}
-                            aria-label={bi("下移优先级", "Move down")}
-                          >
-                            <IconDown />
-                          </button>
+                          <span style={{ display: "inline-flex" }}>
+                            <button
+                              type="button"
+                              className="aq-act"
+                              disabled={isLast}
+                              onClick={() => onMoveDown(item.id)}
+                              aria-label={bi("下移优先级", "Move down")}
+                            >
+                              <IconDown />
+                            </button>
+                          </span>
                         </Tooltip>
                       </>
                     )}

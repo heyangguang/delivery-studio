@@ -11,6 +11,8 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { Message } from "@arco-design/web-react";
 import { bi, biv, getLang, withLang } from "../app/i18n";
 
+export type ClusterAccessLevel = "view" | "operate";
+
 export type Session = {
   username: string;
   role: string;
@@ -21,6 +23,7 @@ export type Session = {
   role_names?: string[];
   teams?: string[];
   team_names?: string[];
+  clusters?: Record<string, ClusterAccessLevel>;
   session_id?: string;
   auth_type?: string;
   issued_at?: string;
@@ -745,6 +748,104 @@ export type Lineage = {
   source_gone?: boolean;
   revision?: boolean;
 };
+export type ClusterProbePolicy = {
+  auto_inspect_enabled: boolean;
+  auto_inspect_interval_sec: number;
+  inspect_on_bind: boolean;
+};
+
+export type ClusterLiveSummary = {
+  data_source: "static_spec" | "applied_baseline" | "manual_probe" | "live_agent" | string;
+  data_source_label: string;
+  has_bound_agent: boolean;
+  has_online_agent: boolean;
+  last_probed_at?: string;
+  probed_hosts?: number;
+  total_hosts?: number;
+  agent_name?: string;
+  active_inspect_task_id?: string;
+  drift_count?: number;
+  role_drift_count?: number;
+  stopped_service_count?: number;
+  probe_policy: ClusterProbePolicy;
+};
+
+export type ClusterParamDrift = {
+  key: string;
+  instance?: string;
+  expected: string;
+  actual: string;
+  expected_from: string;
+  measured_at?: string;
+};
+
+export type ClusterRoleDrift = {
+  host: string;
+  ip?: string;
+  expected_role: string;
+  actual_role: string;
+};
+
+export type ClusterDriftReport = {
+  has_drift: boolean;
+  param_drifts: ClusterParamDrift[];
+  role_drifts: ClusterRoleDrift[];
+  stopped_services?: string[];
+  computed_at: string;
+};
+
+export type ClusterHostLive = {
+  host: string;
+  ip: string;
+  probed_at: string;
+  online: boolean;
+  os_detail?: string;
+  kernel?: string;
+  role?: string;
+  replication_state?: string;
+  services?: { unit: string; active_state: string; sub_state?: string; healthy: boolean }[];
+  listening_ports?: number[];
+  vips?: string[];
+  exact_version?: string;
+  params?: Record<string, string>;
+};
+
+export type ClusterEffectiveView = {
+  cluster_id: string;
+  summary: ClusterLiveSummary;
+  overrides?: {
+    params?: Record<string, string>;
+    entries?: {
+      key: string;
+      before?: string;
+      after: string;
+      source_id?: string;
+      source_title?: string;
+      by?: string;
+      at?: string;
+    }[];
+    updated_at?: string;
+    updated_by?: string;
+  };
+  live?: {
+    source: string;
+    task_id?: string;
+    agent_id?: string;
+    agent_name?: string;
+    collected_at: string;
+    probed_hosts: number;
+    total_hosts: number;
+    exact_version?: string;
+    hosts?: Record<string, ClusterHostLive>;
+    merged_params?: Record<string, string>;
+  } | null;
+  drift?: ClusterDriftReport | null;
+  effective_params: Record<string, unknown>;
+  param_sources: Record<string, string>;
+  effective_roles: Record<string, string>;
+  host_liveness?: Record<string, boolean>;
+};
+
 export type JobFile = { name: string; bytes: number; url: string };
 export type JobDetail = {
   job: Job;
@@ -753,12 +854,14 @@ export type JobDetail = {
   plan?: DeliveryPlan | null;
   lineage?: Lineage | null;
   verification_promote?: JobPromoteTarget[];
+  effective_state?: ClusterEffectiveView | null;
 };
 export type Account = {
   username: string;
   role: string;
   roles?: string[];
   teams?: string[];
+  clusters?: Record<string, ClusterAccessLevel>;
   deliveries?: number;
   active?: number;
   last_delivery?: string;
@@ -1009,6 +1112,8 @@ export type ImportedEndpoint = {
 export type ImportedCompanion = {
   component: string;
   display_name?: string;
+  icon?: string;
+  color?: string;
   version?: string;
   kind?: "ha_manager" | "dcs" | "proxy" | "vip" | "pooler" | "backup" | "monitoring" | "companion" | string;
   role?: string;
@@ -1040,6 +1145,7 @@ export type ImportedMeta = {
   companions?: ImportedCompanion[];
   packages?: ImportedPkg[];
   notes?: string;
+  dismissed_gaps?: string[];
   last_probed_at?: string;
   baseline_updated_at?: string;
   baseline_updated_by?: string;
@@ -1055,6 +1161,7 @@ export type ClusterView = {
   app_id: string;
   app_name: string;
   owner: string;
+  access_level?: ClusterAccessLevel;
   version: string;
   platform?: string;
   hosts: number;
@@ -1068,6 +1175,7 @@ export type ClusterView = {
   applied_changes_count?: number;
   last_change_at?: string;
   last_change_title?: string;
+  live_summary?: ClusterLiveSummary;
 };
 
 /* ---------- cluster documents (store_docs.go) ---------- */
@@ -1116,6 +1224,17 @@ export type DocMeta = {
   doc_version?: string;
   confidential?: string;
 };
+export type DocClarifyItem = {
+  id: string;
+  topic: string;
+  question: string;
+  options?: string[];
+  default?: string;
+  optional?: boolean;
+  placeholder?: string;
+  answer?: string;
+};
+
 export type ClusterDoc = {
   id: string;
   kind: "delivery" | "change" | "kt" | "rca" | "assess";
@@ -1125,6 +1244,7 @@ export type ClusterDoc = {
   job?: string;
   cover?: [string, string][];
   meta?: DocMeta;
+  clarifications?: DocClarifyItem[];
   blocks?: DocBlock[];
   sections: number;
   empty: number;
@@ -1442,7 +1562,7 @@ export const typing = (e: KeyboardEvent) => {
   );
 };
 
-export async function copy(text: string) {
+export async function copy(text: string, toastLabel?: string | false) {
   try {
     await navigator.clipboard.writeText(text);
   } catch {
@@ -1455,7 +1575,12 @@ export async function copy(text: string) {
     document.execCommand("copy");
     t.remove();
   }
-  Message.success({ content: bi("已复制", "Copied"), duration: 1200 });
+  if (toastLabel !== false) {
+    Message.success({
+      content: toastLabel || bi("已复制", "Copied"),
+      duration: 1400,
+    });
+  }
 }
 
 const RE_CLOSE_SUBSHELL = /^\)\s*(<\s*\/dev\/null\s*)?(2>&1\s*)?$/;
@@ -1706,11 +1831,63 @@ export function useAIStatus(): AIStatus {
     () => aiSnapshot,
   );
   useEffect(() => {
-    if (!aiLoaded && !aiInflight) {
+    if (!aiLoaded && !aiInflight && csrf) {
       void refreshAIStatus();
     }
   }, []);
   return st;
+}
+
+/** Downloads a protected API file reliably via fetch -> Blob -> <a download>, with visible feedback. */
+export async function downloadFile(url: string, fallbackName?: string): Promise<boolean> {
+  try {
+    const tok = authToken();
+    const res = await fetch(url, {
+      credentials: "same-origin",
+      headers: {
+        "X-Lang": getLang(),
+        ...(tok ? { Authorization: `Bearer ${tok}` } : {}),
+      },
+    });
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}`;
+      try {
+        const j = await res.json();
+        if (j?.error) msg = j.error;
+      } catch {
+        /* ignore */
+      }
+      Message.error(bi(`导出失败：${msg}`, `Export failed: ${msg}`));
+      return false;
+    }
+    const cd = res.headers.get("Content-Disposition") || "";
+    let filename = fallbackName || "download";
+    const mUtf8 = /filename\*=UTF-8''([^;\s]+)/i.exec(cd);
+    const mPlain = /filename="?([^";]+)"?/i.exec(cd);
+    if (mUtf8?.[1]) {
+      try {
+        filename = decodeURIComponent(mUtf8[1]);
+      } catch {
+        filename = mUtf8[1];
+      }
+    } else if (mPlain?.[1]) {
+      filename = mPlain[1];
+    }
+    const blob = await res.blob();
+    const objUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = objUrl;
+    a.download = filename;
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.setTimeout(() => URL.revokeObjectURL(objUrl), 5000);
+    return true;
+  } catch (e) {
+    err(e);
+    return false;
+  }
 }
 
 /** Whether one AI feature is on for this person (reactive to the global master switch). */
@@ -1754,15 +1931,35 @@ export type DriftSummary = {
   recommendations?: string[];
 };
 
+export type BaselineCorrection = {
+  kind:
+    | "endpoint"
+    | "port"
+    | "config_path"
+    | "service_unit"
+    | "data_dir"
+    | "log_dir"
+    | "param"
+    | "note"
+    | string;
+  label?: string;
+  key?: string;
+  old_value?: string;
+  new_value: string;
+  reason?: string;
+};
+
 export type StepProposal = {
   diagnosis: string;
-  action: "replace" | "insert_before" | "retry";
+  action: "replace" | "insert_before" | "retry" | "confirm_override";
   title?: string;
   target_role?: string;
   command: string;
   expect?: string;
   rollback?: string;
   risk_note?: string;
+  confirm_summary?: string;
+  baseline_corrections?: BaselineCorrection[];
   verified_facts?: string[];
   missing_items?: string[];
 };

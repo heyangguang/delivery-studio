@@ -26,7 +26,7 @@ var compMu sync.Mutex // serialises draft writes and publishes
 var reservedNames = map[string]bool{sharedPlatformName: true, "new": true, "import": true, "validate": true, "templates": true, "cross-check": true, "ansible": true, "guide": true}
 
 func (s *storeServer) comps() *compStore {
-	return &compStore{root: s.plat.componentsDir, builtin: builtinFS()}
+	return &compStore{root: s.plat.componentsDir, builtin: builtinFS(), repo: s.repo}
 }
 
 func (s *storeServer) ansible() ansibleEnv { return detectAnsible(s.cfg.AnsibleBin, s.cfg.DataDir) }
@@ -403,7 +403,7 @@ func (s *storeServer) draftAction(w http.ResponseWriter, r *http.Request, sessio
 		if !in.Undo {
 			out = append(out, compIgnore{File: in.File, Message: in.Message, Reason: truncRunes(strings.TrimSpace(in.Reason), 200), By: session.User, At: now()})
 		}
-		if err := writeJSONFile(s.compIgnorePath(name), out); err != nil {
+		if err := s.saveCompIgnores(name, out); err != nil {
 			s.fail(w, 500, "无法保存")
 			return
 		}

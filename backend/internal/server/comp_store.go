@@ -22,8 +22,9 @@ import (
 //	<components>/.work/<name>/            the draft: meta.json and files/
 //	<components>/.history/<name>/<0001>/  a revision: meta.json and files/
 type compStore struct {
-	root    string // the components directory
+	root    string // the components directory (fallback when repo == nil)
 	builtin fs.FS  // the built-in components
+	repo    *storeRepository
 }
 
 type draftMeta struct {
@@ -59,6 +60,35 @@ func (c *compStore) work(name string) string    { return filepath.Join(c.root, "
 func (c *compStore) history(name string) string { return filepath.Join(c.root, ".history", name) }
 func now() string                               { return time.Now().UTC().Format(time.RFC3339Nano) }
 
+func (c *compStore) hasLive(name string) bool {
+	if c.repo != nil {
+		return c.repo.hasComponentSlot(name, "live")
+	}
+	st, err := os.Stat(filepath.Join(c.live(name), "component.yaml"))
+	return err == nil && st.Mode().IsRegular()
+}
+
+func (c *compStore) draftNames() []string {
+	if c.repo != nil {
+		names, _ := c.repo.listDraftComponentNames()
+		return names
+	}
+	if c.root == "" {
+		return nil
+	}
+	entries, err := os.ReadDir(filepath.Join(c.root, ".work"))
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, d := range entries {
+		if d.IsDir() && !strings.HasPrefix(d.Name(), ".") && c.hasDraft(d.Name()) {
+			out = append(out, d.Name())
+		}
+	}
+	return out
+}
+
 // liveSet reads the component as published: the custom one if there is one, otherwise the built-in. source is
 // "custom", "builtin" or "override".
 func (c *compStore) liveSet(name string) (fileSet, string, error) {
@@ -66,7 +96,18 @@ func (c *compStore) liveSet(name string) (fileSet, string, error) {
 	if name == sharedPlatformName {
 		isBuiltin = true
 	}
-	if st, err := os.Stat(filepath.Join(c.live(name), "component.yaml")); err == nil && st.Mode().IsRegular() {
+	if c.repo != nil {
+		if row, ok, err := c.repo.getComponentSlot(name, "live"); err == nil && ok && len(row.Files) > 0 {
+			set := row.Files.clone()
+			if name == sharedPlatformName {
+				refreshSharedManagedFiles(set)
+			}
+			if isBuiltin {
+				return set, "override", nil
+			}
+			return set, "custom", nil
+		}
+	} else if st, err := os.Stat(filepath.Join(c.live(name), "component.yaml")); err == nil && st.Mode().IsRegular() {
 		set, err := readFileSetDir(c.live(name))
 		if err != nil {
 			return nil, "", err
@@ -117,6 +158,15 @@ func builtinNamesIn(fsys fs.FS) map[string]struct{} {
 // ---- revisions ----
 
 func (c *compStore) revNumbers(name string) []int {
+	if c.repo != nil {
+		revs, _ := c.repo.listComponentRevisions(name)
+		var out []int
+		for _, r := range revs {
+			out = append(out, r.Rev)
+		}
+		sort.Ints(out)
+		return out
+	}
 	entries, _ := os.ReadDir(c.history(name))
 	var out []int
 	for _, e := range entries {
@@ -138,6 +188,10 @@ func (c *compStore) liveRev(name string) int {
 }
 
 func (c *compStore) revisions(name string) []revMeta {
+	if c.repo != nil {
+		out, _ := c.repo.listComponentRevisions(name)
+		return out
+	}
 	var out []revMeta
 	for _, n := range c.revNumbers(name) {
 		var m revMeta
@@ -149,6 +203,13 @@ func (c *compStore) revisions(name string) []revMeta {
 }
 
 func (c *compStore) revisionSet(name string, rev int) (fileSet, error) {
+	if c.repo != nil {
+		row, ok, err := c.repo.getComponentSlot(name, fmt.Sprintf("history:%04d", rev))
+		if err != nil || !ok {
+			return nil, fs.ErrNotExist
+		}
+		return row.Files.clone(), nil
+	}
 	dir := filepath.Join(c.history(name), fmt.Sprintf("%04d", rev), "files")
 	if _, err := os.Stat(dir); err != nil {
 		return nil, fs.ErrNotExist
@@ -159,12 +220,15 @@ func (c *compStore) revisionSet(name string, rev int) (fileSet, error) {
 // snapshot stores a revision and returns its number. prev is what the component was before, for the change counts.
 func (c *compStore) snapshot(name string, files, prev fileSet, user, note string) (int, error) {
 	rev := c.liveRev(name) + 1
+	a, r, ch := diffSets(prev, files)
+	meta := revMeta{Rev: rev, Time: now(), User: user, Note: note, Files: len(files), Added: len(a), Removed: len(r), Changed: len(ch)}
+	if c.repo != nil {
+		return rev, c.repo.saveComponentSlot(name, fmt.Sprintf("history:%04d", rev), rev, files, meta)
+	}
 	dir := filepath.Join(c.history(name), fmt.Sprintf("%04d", rev))
 	if err := writeFileSet(filepath.Join(dir, "files"), files); err != nil {
 		return 0, err
 	}
-	a, r, ch := diffSets(prev, files)
-	meta := revMeta{Rev: rev, Time: now(), User: user, Note: note, Files: len(files), Added: len(a), Removed: len(r), Changed: len(ch)}
 	b, _ := json.MarshalIndent(meta, "", "  ")
 	return rev, os.WriteFile(filepath.Join(dir, "meta.json"), b, 0o600)
 }
@@ -172,12 +236,29 @@ func (c *compStore) snapshot(name string, files, prev fileSet, user, note string
 // ---- the draft ----
 
 func (c *compStore) hasDraft(name string) bool {
+	if c.repo != nil {
+		return c.repo.hasComponentSlot(name, "draft")
+	}
 	_, err := os.Stat(filepath.Join(c.work(name), "meta.json"))
 	return err == nil
 }
 
 func (c *compStore) readDraft(name string) (fileSet, draftMeta, error) {
 	var meta draftMeta
+	if c.repo != nil {
+		row, ok, err := c.repo.getComponentSlot(name, "draft")
+		if err != nil || !ok {
+			return nil, meta, errNoDraft
+		}
+		if err := json.Unmarshal(row.Meta, &meta); err != nil {
+			return nil, meta, fmt.Errorf("草稿信息损坏：%w", err)
+		}
+		set := row.Files.clone()
+		if name == sharedPlatformName {
+			refreshSharedManagedFiles(set)
+		}
+		return set, meta, nil
+	}
 	b, err := os.ReadFile(filepath.Join(c.work(name), "meta.json"))
 	if err != nil {
 		return nil, meta, errNoDraft
@@ -196,6 +277,9 @@ func (c *compStore) readDraft(name string) (fileSet, draftMeta, error) {
 func (c *compStore) writeDraft(name string, files fileSet, meta draftMeta) error {
 	if err := files.check(); err != nil {
 		return err
+	}
+	if c.repo != nil {
+		return c.repo.saveComponentSlot(name, "draft", meta.BaseRev, files, meta)
 	}
 	parent := filepath.Join(c.root, ".work")
 	if err := os.MkdirAll(parent, 0o700); err != nil {
@@ -232,11 +316,35 @@ func (c *compStore) writeDraft(name string, files fileSet, meta draftMeta) error
 	return nil
 }
 
-func (c *compStore) discardDraft(name string) error { return os.RemoveAll(c.work(name)) }
+func (c *compStore) discardDraft(name string) error {
+	if c.repo != nil {
+		return c.repo.deleteComponentSlot(name, "draft")
+	}
+	return os.RemoveAll(c.work(name))
+}
 
 // publishFiles installs a validated set as the published component. The caller has already proved the catalog loads
 // with it; install only swaps directories, and reload (called by the caller through done) can still undo it.
 func (c *compStore) installLive(name string, files fileSet, reload func() error) (restore func(), err error) {
+	if c.repo != nil {
+		prev, hadPrev, _ := c.repo.getComponentSlot(name, "live")
+		if err := c.repo.saveComponentSlot(name, "live", c.liveRev(name), files, nil); err != nil {
+			return nil, err
+		}
+		undo := func() {
+			if hadPrev {
+				_ = c.repo.saveComponentSlot(name, "live", prev.Rev, prev.Files, prev.Meta)
+			} else {
+				_ = c.repo.deleteComponentSlot(name, "live")
+			}
+		}
+		if err := reload(); err != nil {
+			undo()
+			_ = reload()
+			return nil, err
+		}
+		return func() {}, nil
+	}
 	scratch := filepath.Dir(c.root)
 	stage, err := os.MkdirTemp(scratch, ".component-stage-")
 	if err != nil {
@@ -278,6 +386,9 @@ func (c *compStore) installLive(name string, files fileSet, reload func() error)
 
 // removeAll deletes a custom component with its draft and history.
 func (c *compStore) removeAll(name string) error {
+	if c.repo != nil {
+		return c.repo.deleteComponentAll(name)
+	}
 	for _, d := range []string{c.live(name), c.work(name), c.history(name)} {
 		if err := os.RemoveAll(d); err != nil {
 			return err

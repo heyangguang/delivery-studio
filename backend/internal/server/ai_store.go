@@ -9,7 +9,6 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -369,9 +368,7 @@ func (st *aiSettings) pruneDeletedRefs() bool {
 
 func (s *storeServer) aiLoad() aiSettings {
 	st := aiSettings{Providers: []aiProvider{}, Features: map[string]aiFeature{}}
-	if b, err := os.ReadFile(s.aiFile("ai.json")); err == nil {
-		_ = json.Unmarshal(b, &st)
-	}
+	_ = s.loadSettingDoc("ai_settings", s.aiFile("ai.json"), &st)
 	if st.Providers == nil {
 		st.Providers = []aiProvider{}
 	}
@@ -391,24 +388,21 @@ func (s *storeServer) aiLoad() aiSettings {
 }
 
 func (s *storeServer) aiSave(st aiSettings) error {
-	return writeJSONFile(s.aiFile("ai.json"), st)
+	return s.saveSettingDoc("ai_settings", s.aiFile("ai.json"), st)
 }
 
 // ---- keys ----
 
 func (s *storeServer) aiKey() ([]byte, error) {
 	path := s.aiFile("ai.key")
-	if b, err := os.ReadFile(path); err == nil && len(b) == 32 {
+	if b, ok := s.loadBinaryKeySetting("ai_encryption_key", path, 32); ok {
 		return b, nil
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return nil, err
 	}
 	k := make([]byte, 32)
 	if _, err := rand.Read(k); err != nil {
 		return nil, err
 	}
-	return k, os.WriteFile(path, k, 0o600)
+	return k, s.saveBinaryKeySetting("ai_encryption_key", path, k)
 }
 
 func (s *storeServer) aiEncrypt(plain string) (string, error) {
@@ -545,25 +539,45 @@ func (st aiSettings) aiProvidersFor(feature string) []aiProvider {
 // aiProvidersForPick is aiProvidersFor with the person's own choice of model first, when it is one they may use.
 func (st aiSettings) aiProvidersForPick(feature, pick string) []aiProvider {
 	base := st.aiProvidersFor(feature)
+	pick = strings.TrimSpace(pick)
 	if pick == "" {
 		return base
 	}
-	allowed := false
+	f := st.Features[feature]
+	allowed := pick == f.Primary || pick == f.Backup
 	for _, r := range st.UserModels {
 		allowed = allowed || r == pick
 	}
 	if !allowed {
 		return base
 	}
+	return st.promotePickedProvider(base, pick)
+}
+
+func (st aiSettings) promotePickedProvider(base []aiProvider, pick string) []aiProvider {
 	pid, mid, _ := strings.Cut(pick, "|")
 	for _, p := range st.Providers {
 		if p.ID != pid || !p.Enabled || (p.KeyEnc == "" && !p.Private) || (st.PrivateOnly && !p.Private) {
 			continue
 		}
-		if m, ok := p.model(mid); ok && m.Enabled {
-			out := []aiProvider{p.withModel(m)}
+		var chosen aiModel
+		found := false
+		if mid != "" {
+			if m, ok := p.model(mid); ok && m.Enabled {
+				chosen, found = m, true
+			}
+		} else {
+			for _, m := range p.Models {
+				if m.Enabled {
+					chosen, found = m, true
+					break
+				}
+			}
+		}
+		if found {
+			out := []aiProvider{p.withModel(chosen)}
 			for _, b := range base {
-				if b.ID != pid || b.Model != mid {
+				if b.ID != p.ID || b.Model != chosen.ID {
 					out = append(out, b)
 				}
 			}
@@ -571,6 +585,18 @@ func (st aiSettings) aiProvidersForPick(feature, pick string) []aiProvider {
 		}
 	}
 	return base
+}
+
+// aiProvidersForUser resolves the ordered provider list for a specific user & feature,
+// honoring user-picked models in UserModels, feature Primary/Backup, and any enabled
+// model selected by an AI administrator (ai.settings).
+func (s *storeServer) aiProvidersForUser(st aiSettings, user, feature, pick string) []aiProvider {
+	pick = strings.TrimSpace(pick)
+	providers := st.aiProvidersForPick(feature, pick)
+	if pick != "" && s.can(user, "ai.settings") {
+		providers = st.promotePickedProvider(providers, pick)
+	}
+	return providers
 }
 
 // pickable is what one person sees in the model menu of a conversation.
@@ -615,7 +641,7 @@ func (s *storeServer) aiModels() map[string]any {
 	for _, ref := range st.UserModels {
 		pid, mid, _ := strings.Cut(ref, "|")
 		for _, p := range st.Providers {
-			if p.ID != pid || !p.Enabled {
+			if p.ID != pid || !p.Enabled || (p.KeyEnc == "" && !p.Private) || (st.PrivateOnly && !p.Private) {
 				continue
 			}
 			if m, ok := p.model(mid); ok && m.Enabled {

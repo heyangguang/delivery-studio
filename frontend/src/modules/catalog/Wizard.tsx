@@ -271,48 +271,60 @@ function clean(d: Deployment): Deployment {
 
 /* ---------------------------------------------------------------- sections */
 
-const getSections = (): { id: string; title: string; lead: string }[] => [
-  {
-    id: "basics",
-    title: bi("集群与架构方案", "Cluster & Scheme"),
-    lead: bi(
-      "命名集群，选择系统版本与高可用部署方案",
-      "Name the cluster and select OS, version, and HA deployment scheme",
-    ),
-  },
-  {
-    id: "hosts",
-    title: bi("主机与执行通道", "Hosts & Execution"),
-    lead: bi(
-      "填写目标机器 IPv4、数据盘与控制节点免密执行通道",
-      "Enter target IPv4 addresses, data disks, and passwordless execution path",
-    ),
-  },
-  {
-    id: "placement",
-    title: bi("角色与拓扑放置", "Roles & Topology"),
-    lead: bi(
-      "核对各角色节点分布，平台自动补齐依赖组件",
-      "Review role placement per host; dependencies are added automatically",
-    ),
-  },
-  {
-    id: "params",
-    title: bi("关键参数", "Parameters"),
-    lead: bi(
-      "按需调整核心运行参数，未改动项保持推荐默认值",
-      "Tune core runtime parameters; unchanged settings keep recommended defaults",
-    ),
-  },
-  {
-    id: "access",
-    title: bi("入口与证书", "Access & TLS"),
-    lead: bi(
-      "配置负载均衡、虚拟 IP 与传输加密证书",
-      "Configure load balancing, virtual IPs, and TLS certificates",
-    ),
-  },
-];
+const getSections = (
+  deliveryMode?: string,
+): { id: string; title: string; lead: string }[] => {
+  const isAuto = (deliveryMode || "offline") === "automatic";
+  return [
+    {
+      id: "basics",
+      title: bi("集群与架构方案", "Cluster & Scheme"),
+      lead: bi(
+        "命名集群，选择系统版本与高可用部署方案",
+        "Name the cluster and select OS, version, and HA deployment scheme",
+      ),
+    },
+    {
+      id: "hosts",
+      title: isAuto
+        ? bi("主机与执行通道", "Hosts & Execution")
+        : bi("机器与存储配置", "Hosts & Storage"),
+      lead: isAuto
+        ? bi(
+            "填写目标机器 IPv4、数据盘与自动化执行节点",
+            "Enter target IPv4 addresses, data disks, and automated executor",
+          )
+        : bi(
+            "填写目标机器 IPv4 地址与数据盘挂载设置",
+            "Enter target host IPv4 addresses and data disk settings",
+          ),
+    },
+    {
+      id: "placement",
+      title: bi("角色与拓扑放置", "Roles & Topology"),
+      lead: bi(
+        "核对各角色节点分布，平台自动补齐依赖组件",
+        "Review role placement per host; dependencies are added automatically",
+      ),
+    },
+    {
+      id: "params",
+      title: bi("关键参数", "Parameters"),
+      lead: bi(
+        "按需调整核心运行参数，未改动项保持推荐默认值",
+        "Tune core runtime parameters; unchanged settings keep recommended defaults",
+      ),
+    },
+    {
+      id: "access",
+      title: bi("入口与证书", "Access & TLS"),
+      lead: bi(
+        "配置负载均衡、虚拟 IP 与传输加密证书",
+        "Configure load balancing, virtual IPs, and TLS certificates",
+      ),
+    },
+  ];
+};
 
 const uploadKey = (instance: string, name: string, part: string) =>
   `tls:${instance}:${name}:${part}`;
@@ -621,7 +633,10 @@ function DeliveryForm({
   const [files, setFiles] = useState<Record<string, File | undefined>>({});
   const [res, setRes] = useState<Resolution | null>(null);
   const [resolving, setResolving] = useState(false);
-  const sections = useMemo(() => getSections(), [lang]);
+  const sections = useMemo(
+    () => getSections(dep.delivery_mode),
+    [lang, dep.delivery_mode],
+  );
   const initialSection = sections.some((s) => s.id === resume?.section)
     ? resume!.section!
     : sections[0].id;
@@ -782,8 +797,13 @@ function DeliveryForm({
     if (!ready) return;
     const n = ++seq.current;
     const ac = new AbortController();
-    const t = setTimeout(() => {
-      setResolving(true);
+    let spinTimer: number | null = null;
+    const t = window.setTimeout(() => {
+      // Only show the resolving spinner if the server takes >180ms so fast local solves
+      // never cause a double full-Wizard re-render on every toggle click.
+      spinTimer = window.setTimeout(() => {
+        if (n === seq.current) setResolving(true);
+      }, 180);
       api<Resolution>(
         verify ? "/api/resolve?purpose=verification" : "/api/resolve",
         {
@@ -797,10 +817,14 @@ function DeliveryForm({
           if ((e as Error)?.name === "AbortError") return;
           if (n === seq.current) err(e);
         })
-        .finally(() => n === seq.current && setResolving(false));
-    }, 250);
+        .finally(() => {
+          if (spinTimer !== null) window.clearTimeout(spinTimer);
+          if (n === seq.current) setResolving(false);
+        });
+    }, 100);
     return () => {
-      clearTimeout(t);
+      window.clearTimeout(t);
+      if (spinTimer !== null) window.clearTimeout(spinTimer);
       ac.abort();
     };
   }, [dep, ready, appsTick, review, lang, verify]);
@@ -1257,6 +1281,59 @@ function DeliveryForm({
 
   /* ---- render helpers ---- */
 
+  /** Evaluates simple `params.<key>` `when` guards locally for 0ms optimistic show/hide on switch/enum toggles. */
+  function evalOptimisticWhen(
+    expr: string | undefined,
+    params: Record<string, unknown>,
+    serverVisible: boolean,
+  ): boolean {
+    if (!expr) return serverVisible;
+    const parts = expr
+      .split("&&")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (!parts.length) return serverVisible;
+    let evaluatedAny = false;
+    let sawComplex = false;
+    for (const part of parts) {
+      let m = /^params\.([A-Za-z0-9_]+)$/.exec(part);
+      if (m) {
+        evaluatedAny = true;
+        if (!params[m[1]]) return false;
+        continue;
+      }
+      m = /^!params\.([A-Za-z0-9_]+)$/.exec(part);
+      if (m) {
+        evaluatedAny = true;
+        if (params[m[1]]) return false;
+        continue;
+      }
+      m = /^params\.([A-Za-z0-9_]+)\s*(==|!=)\s*['"]([^'"]*)['"]$/.exec(part);
+      if (m) {
+        evaluatedAny = true;
+        const actual = String(params[m[1]] ?? "");
+        const eq = actual === m[3];
+        if (m[2] === "==" ? !eq : eq) return false;
+        continue;
+      }
+      sawComplex = true;
+    }
+    if (!evaluatedAny) return serverVisible;
+    return sawComplex ? serverVisible : true;
+  }
+
+  /** Extracts boolean feature-toggle keys referenced positively in `when` (e.g. `params.log_to_file`). */
+  function whenBoolGates(expr: string | undefined): string[] {
+    if (!expr) return [];
+    const out: string[] = [];
+    const re = /(?:^|&&)\s*params\.([A-Za-z0-9_]+)(?=\s*(?:&&|$))/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(expr)) !== null) {
+      out.push(m[1]);
+    }
+    return out;
+  }
+
   /** All parameter groups of one instance, tabbed when the component declares tabs. */
   function paramsPanel(
     id: string,
@@ -1271,12 +1348,44 @@ function DeliveryForm({
     const sc = inst && schemaOf(inst.component, inst.version);
     if (!inst || !sc) return <Spin />;
     const revInst = revBase?.instances.find((i) => i.id === id);
-    const visible = (d: ParamDef) =>
-      !app.plans?.some(
-        (p) => p.params?.[d.key] !== undefined && d.key === "deployment_mode",
-      ) && view?.visible?.[d.key] !== false;
     const value = (d: ParamDef) =>
-      view?.params ? view.params[d.key] : d.default;
+      inst.params?.[d.key] !== undefined
+        ? inst.params[d.key]
+        : view?.params && view.params[d.key] !== undefined
+          ? view.params[d.key]
+          : d.default;
+    const resolvedParams: Record<string, unknown> = {};
+    const defsByKey = new Map<string, ParamDef>();
+    for (const d of sc.params) {
+      defsByKey.set(d.key, d);
+      resolvedParams[d.key] = value(d);
+    }
+    const visible = (d: ParamDef) => {
+      if (
+        app.plans?.some(
+          (p) => p.params?.[d.key] !== undefined && d.key === "deployment_mode",
+        )
+      ) {
+        return false;
+      }
+      return evalOptimisticWhen(
+        d.when,
+        resolvedParams,
+        view?.visible?.[d.key] !== false,
+      );
+    };
+    const revealedByGroupToggle = (d: ParamDef, groupId: string): boolean => {
+      if (!d.advanced || !d.when) return false;
+      return whenBoolGates(d.when).some((gk) => {
+        const gDef = defsByKey.get(gk);
+        return (
+          !!gDef &&
+          gDef.type === "bool" &&
+          (gDef.group || "") === groupId &&
+          resolvedParams[gk] === true
+        );
+      });
+    };
     const changedKey = (d: ParamDef) => inst.params?.[d.key] !== undefined;
     const q = opts.tabbed ? query.trim().toLowerCase() : "";
     const filterChanged = Boolean(opts.tabbed && opts.onlyChanged);
@@ -1362,17 +1471,26 @@ function DeliveryForm({
         (d) => (d.group || "") === g.id && visible(d),
       );
       if (!list.length) return null;
-      const adv = list.filter((d) => d.advanced);
+      const collapsibleAdv = list.filter(
+        (d) => d.advanced && !revealedByGroupToggle(d, g.id),
+      );
       const k = `${id}/${g.id}`;
       const shown = list.filter(
-        (d) => !d.advanced || advanced[k] || changedKey(d),
+        (d) =>
+          !d.advanced ||
+          revealedByGroupToggle(d, g.id) ||
+          advanced[k] ||
+          changedKey(d),
+      );
+      const hiddenAdv = collapsibleAdv.filter(
+        (d) => !advanced[k] && !changedKey(d),
       );
       return (
         <div className="pgroup" key={g.id}>
           <div className="pgroup-head">
             <h4>{g.label}</h4>
             {g.scope && <span className="scope">{g.scope}</span>}
-            {adv.length > 0 && (
+            {collapsibleAdv.length > 0 && (
               <button
                 type="button"
                 className="link"
@@ -1381,11 +1499,27 @@ function DeliveryForm({
               >
                 {advanced[k]
                   ? bi("收起高级参数", "Hide advanced")
-                  : bi(`显示高级参数 ${adv.length}`, `Show advanced (${adv.length})`)}
+                  : bi(`显示高级参数 ${collapsibleAdv.length}`, `Show advanced (${collapsibleAdv.length})`)}
               </button>
             )}
           </div>
-          <div className="params">{shown.map(field)}</div>
+          <div className="params">
+            {shown.map(field)}
+            {hiddenAdv.length > 0 && (
+              <button
+                type="button"
+                className="pgroup-more"
+                onClick={() => setAdvanced((a) => ({ ...a, [k]: true }))}
+              >
+                <span>
+                  {bi(
+                    `展开其余 ${hiddenAdv.length} 项高级参数：${hiddenAdv.slice(0, 3).map((d) => d.label).join("、")}${hiddenAdv.length > 3 ? "…" : ""}`,
+                    `Show ${hiddenAdv.length} more advanced: ${hiddenAdv.slice(0, 3).map((d) => d.label).join(", ")}${hiddenAdv.length > 3 ? "…" : ""}`,
+                  )}
+                </span>
+              </button>
+            )}
+          </div>
         </div>
       );
     };
@@ -1526,13 +1660,89 @@ function DeliveryForm({
             ),
           )
         : sc.roles;
+    const toggleRoleHost = (
+      role: (typeof allowedRoles)[number],
+      hostName: string,
+    ) => {
+      edit(inst.id, (i) => {
+        const prevMap = { ...(i.placement || {}) };
+        const curList = prevMap[role.name] || [];
+        const isSelected = curList.includes(hostName);
+
+        // Fixed single-host cluster: always keep the sole host bound
+        if (dep.hosts.length === 1 && role.min === 1 && role.max === 1) {
+          return {
+            ...i,
+            placement: { ...prevMap, [role.name]: [hostName] },
+          };
+        }
+
+        // Single-target role (e.g., Primary max === 1): radio switch + smart swap with exclusive sibling roles
+        if (role.max === 1) {
+          if (isSelected) {
+            if ((role.min || 0) >= 1) return i;
+            return { ...i, placement: { ...prevMap, [role.name]: [] } };
+          }
+          const displaced = curList[0];
+          const nextMap: Record<string, string[]> = {
+            ...prevMap,
+            [role.name]: [hostName],
+          };
+          if (role.exclusive) {
+            for (const other of allowedRoles) {
+              if (other.name === role.name || !other.exclusive) continue;
+              const oList = nextMap[other.name] || [];
+              if (oList.includes(hostName)) {
+                const filtered = oList.filter((x) => x !== hostName);
+                nextMap[other.name] =
+                  displaced && !filtered.includes(displaced)
+                    ? [...filtered, displaced]
+                    : filtered;
+              }
+            }
+          }
+          return { ...i, placement: nextMap };
+        }
+
+        // Multi-host role: toggle checkbox; if exclusive, remove from conflicting exclusive sibling roles
+        if (isSelected) {
+          return {
+            ...i,
+            placement: {
+              ...prevMap,
+              [role.name]: curList.filter((x) => x !== hostName),
+            },
+          };
+        }
+        if (role.max && curList.length >= role.max) {
+          return i;
+        }
+        const nextMap: Record<string, string[]> = {
+          ...prevMap,
+          [role.name]: [...curList, hostName],
+        };
+        if (role.exclusive) {
+          for (const other of allowedRoles) {
+            if (other.name === role.name || !other.exclusive) continue;
+            const oList = nextMap[other.name] || [];
+            if (oList.includes(hostName)) {
+              nextMap[other.name] = oList.filter((x) => x !== hostName);
+            }
+          }
+        }
+        return { ...i, placement: nextMap };
+      });
+    };
+
+    const useChipPicker = dep.hosts.length > 0 && dep.hosts.length <= 8;
+
     return (
       <div className="place">
         {contract?.series === "basic" && (
-          <p className="muted small">
+          <p className="muted small" style={{ margin: "0 0 2px" }}>
             {bi(
-              "基础系列只放置一个节点；需要从节点请先切换部署方案。",
-              "Basic tier places only one node; switch deployment scheme to add replicas.",
+              "当前为单节点方案；如需主从高可用，可在第 1 步切换架构方案。",
+              "Single-node scheme selected; switch scheme in Step 1 to add replicas.",
             )}
           </p>
         )}
@@ -1546,6 +1756,20 @@ function DeliveryForm({
               ? bi(`至少 ${r.min} 台`, `Min ${r.min}`)
               : bi("可不放置", "Optional");
           const bad = issueFor(`instances[${inst.id}].placement.${r.name}`);
+          const isLockedSingle =
+            dep.hosts.length === 1 &&
+            r.min === 1 &&
+            r.max === 1 &&
+            cur.length === 1 &&
+            cur[0] === dep.hosts[0].name;
+          const isSingleChoice = r.max === 1;
+          const canSelectAll =
+            useChipPicker &&
+            !isSingleChoice &&
+            !r.exclusive &&
+            dep.hosts.length > 1 &&
+            (!r.max || r.max >= dep.hosts.length);
+
           return (
             <div className={`place-row ${bad ? "is-bad" : ""}`} key={r.name}>
               <div className="place-role">
@@ -1554,39 +1778,116 @@ function DeliveryForm({
                   <span
                     className={`wz-role-cnt num ${bad ? "bad" : cur.length > 0 ? "ok" : ""}`}
                   >
-                    {bi(`已选 ${cur.length} 台`, `${cur.length} selected`)}
+                    {isLockedSingle
+                      ? bi("已自动绑定", "Auto-bound")
+                      : bi(`已选 ${cur.length} 台`, `${cur.length} selected`)}
                   </span>
                 </div>
                 <small>
                   {range}
                   {r.odd ? bi(" · 建议奇数", " · Odd preferred") : ""}
-                  {r.exclusive ? bi(" · 独占机器", " · Exclusive host") : ""}
+                  {r.exclusive && allowedRoles.length > 1
+                    ? bi(" · 角色互斥", " · Exclusive")
+                    : ""}
                 </small>
               </div>
-              <Select
-                mode="multiple"
-                value={cur}
-                triggerProps={{ autoFitPosition: true }}
-                options={dep.hosts.map((h) => ({
-                  value: h.name,
-                  label: `${h.name}${h.ip ? ` (${h.ip})` : ""}`,
-                }))}
-                placeholder={bi("选择机器", "Select hosts")}
-                onChange={(v) =>
-                  edit(inst.id, (i) => ({
-                    ...i,
-                    placement: {
-                      ...(i.placement || {}),
-                      [r.name]: v as string[],
-                    },
-                  }))
-                }
-                aria-label={bi(
-                  `${inst.id} ${r.title || r.name} 放置`,
-                  `${inst.id} ${r.title || r.name} placement`,
-                )}
-                status={bad ? "error" : undefined}
-              />
+
+              {useChipPicker ? (
+                <div
+                  className="wz-place-chips"
+                  role={isSingleChoice ? "radiogroup" : "group"}
+                  aria-label={bi(
+                    `${inst.id} ${r.title || r.name} 放置`,
+                    `${inst.id} ${r.title || r.name} placement`,
+                  )}
+                >
+                  {dep.hosts.map((h) => {
+                    const active = cur.includes(h.name);
+                    const occupiedBy =
+                      !active && r.exclusive && allowedRoles.length > 1
+                        ? allowedRoles.find(
+                            (o) =>
+                              o.name !== r.name &&
+                              o.exclusive &&
+                              (inst.placement?.[o.name] || []).includes(h.name),
+                          )
+                        : undefined;
+                    return (
+                      <button
+                        key={h.name}
+                        type="button"
+                        role={isSingleChoice ? "radio" : "checkbox"}
+                        aria-checked={active}
+                        className={`wz-hchip ${active ? "on" : ""} ${isLockedSingle ? "is-locked" : ""}`}
+                        onClick={() => toggleRoleHost(r, h.name)}
+                      >
+                        <span
+                          className={`wz-hchip-mark ${isSingleChoice ? "is-radio" : ""}`}
+                          aria-hidden
+                        >
+                          {active && <IconCheck />}
+                        </span>
+                        <span className="wz-hchip-name">{h.name}</span>
+                        <span className={`wz-hchip-ip mono ${h.ip ? "" : "is-empty"}`}>
+                          {h.ip || bi("待填 IP", "IP pending")}
+                        </span>
+                        {occupiedBy && (
+                          <span className="wz-hchip-occ">
+                            {occupiedBy.title || occupiedBy.name}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                  {canSelectAll && (
+                    <button
+                      type="button"
+                      className="wz-hchip-all"
+                      onClick={() =>
+                        edit(inst.id, (i) => ({
+                          ...i,
+                          placement: {
+                            ...(i.placement || {}),
+                            [r.name]:
+                              cur.length === dep.hosts.length
+                                ? []
+                                : dep.hosts.map((h) => h.name),
+                          },
+                        }))
+                      }
+                    >
+                      {cur.length === dep.hosts.length
+                        ? bi("清空", "Clear")
+                        : bi("全选", "All")}
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <Select
+                  mode="multiple"
+                  value={cur}
+                  triggerProps={{ autoFitPosition: true }}
+                  options={dep.hosts.map((h) => ({
+                    value: h.name,
+                    label: `${h.name}${h.ip ? ` (${h.ip})` : ""}`,
+                  }))}
+                  placeholder={bi("选择机器", "Select hosts")}
+                  onChange={(v) =>
+                    edit(inst.id, (i) => ({
+                      ...i,
+                      placement: {
+                        ...(i.placement || {}),
+                        [r.name]: v as string[],
+                      },
+                    }))
+                  }
+                  aria-label={bi(
+                    `${inst.id} ${r.title || r.name} 放置`,
+                    `${inst.id} ${r.title || r.name} placement`,
+                  )}
+                  status={bad ? "error" : undefined}
+                />
+              )}
               {bad && <span className="place-bad">{bad}</span>}
             </div>
           );
@@ -2429,7 +2730,14 @@ function DeliveryForm({
                   aria-checked={active}
                   disabled={opt.disabled}
                   className={`wz-mode-card ${active ? "on" : ""}`}
-                  onClick={() => set({ delivery_mode: opt.value })}
+                  onClick={() =>
+                    set({
+                      delivery_mode: opt.value,
+                      ...(opt.value !== "automatic"
+                        ? { execution_host: undefined }
+                        : {}),
+                    })
+                  }
                 >
                   <b>{opt.title}</b>
                   <span>{opt.desc}</span>
@@ -2452,7 +2760,19 @@ function DeliveryForm({
               className="cluster-in"
               value={dep.id}
               onChange={(v) => set({ id: v.trim() })}
-              placeholder="pg-order-prod"
+              placeholder={
+                app.id === "redis"
+                  ? "redis-cache-prod"
+                  : app.id === "nginx"
+                    ? "nginx-edge-prod"
+                    : app.id === "haproxy"
+                      ? "haproxy-lb-prod"
+                      : app.id === "etcd"
+                        ? "etcd-dcs-prod"
+                        : app.id === "keepalived"
+                          ? "keepalived-vip-prod"
+                          : `${app.id}-order-prod`
+              }
               aria-label={bi("集群标识", "Cluster ID")}
               autoFocus={!origin}
               disabled={!!revise}
@@ -2578,7 +2898,15 @@ function DeliveryForm({
             <Input
               value={dep.title || ""}
               onChange={(v) => set({ title: v })}
-              placeholder={bi("订单库生产集群", "Orders production cluster")}
+              placeholder={
+                app.id === "redis"
+                  ? bi("核心缓存集群", "Core cache cluster")
+                  : app.id === "nginx" || app.id === "haproxy"
+                    ? bi("生产四层转发入口", "Production load balancer")
+                    : app.id === "etcd"
+                      ? bi("核心配置协调集群", "Core DCS cluster")
+                      : bi("订单库生产集群", "Orders production cluster")
+              }
               aria-label={bi("说明", "Description")}
             />
           </Row>
@@ -2880,13 +3208,41 @@ function DeliveryForm({
             )}
           </div>
         )}
-        {dep.delivery_mode !== "configuration" && (
+        {(dep.delivery_mode || "offline") === "automatic" ? (
           <ExecutionPlacement
             dep={dep}
             controller={pv?.controller}
             onChange={set}
           />
-        )}
+        ) : dep.delivery_mode !== "configuration" && dep.hosts.length > 1 ? (
+          <div className="wz-offline-ctrl">
+            <div className="wz-offline-ctrl-info">
+              <b>{bi("离线控制节点", "Offline Control Host")}</b>
+              <span>
+                {bi(
+                  "多节点离线部署时，在此机器解压并运行 Ansible 剧本分发到全集群",
+                  "Unpack and run Ansible playbooks from this host during multi-node offline deployment",
+                )}
+              </span>
+            </div>
+            <Select
+              size="small"
+              style={{ width: 220 }}
+              value={dep.controller || undefined}
+              allowClear
+              placeholder={
+                pv?.controller
+                  ? bi(`默认：${pv.controller}`, `Default: ${pv.controller}`)
+                  : bi("自动选择首节点", "Auto first host")
+              }
+              options={dep.hosts.map((h) => ({
+                value: h.name,
+                label: `${h.name}${h.ip ? ` · ${h.ip}` : ""}`,
+              }))}
+              onChange={(v) => set({ controller: v || undefined })}
+            />
+          </div>
+        ) : null}
       </>
     ),
     placement: (

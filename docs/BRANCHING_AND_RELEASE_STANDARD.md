@@ -1,30 +1,27 @@
 # Kyndryl Delivery Studio — 分支管理、PR 评审与 SemVer 发版规范
 
 > **状态**：**正式生效（v1.x+ 团队研发与交付基线）**
-> 本规范统一约定 GitFlow 分支模型、Pull Request 强制门禁、CI 自动化检查、Conventional Commits、语义化版本号（SemVer 2.0）与发版流程，确保 `main` 始终对应已验证正式版本、`develop` 保持高水准集成质量。
+> 本规范统一约定「**`develop` 日常直推 + `main` 强制 PR 门禁**」分支模型、CI 自动化检查、Conventional Commits、语义化版本号（SemVer 2.0）与发版流程，在保证日常研发高频顺畅迭代的同时，确保 `main` 始终对应严格验收通过的正式基线。
 
 ---
 
-## 1. 分支模型（GitFlow + PR Gate）
+## 1. 分支模型（`develop` 直推 + `main` PR Gate）
 
-采用标准的「**开发集成主干（`develop`）+ 正式发布主干（`main`）+ 版本维护分支（`release/*`）+ 全流程 Pull Request**」模型：
+采用轻量高效的「**开发主干（`develop` 直推）+ 正式发布主干（`main` 强制 PR & CI 门禁）+ 版本维护分支（`release/*`）**」模型：
 
 | 分支类型 | 命名格式 | 生命周期 | 职责与合入规则 |
 | :--- | :--- | :--- | :--- |
-| **正式发布主干** | `main` | 永久保护 | **只对应已通过完整验收的正式发布版本**（对应 `vX.Y.Z` Tag）。**严禁直接 push**，仅通过 `release/*` → `main` 或 `hotfix/*` → `main` 的 PR 合入。 |
-| **开发集成主干** | `develop` | 永久保护 | **日常研发、联调与全量回归测试主线**。所有新功能、优化、普通修复均从 `develop` 拉出短期分支，完成后提 PR 合入 `develop`。**严禁直接 push**。 |
-| **版本预备/维护分支** | `release/<major>.<minor>`<br>例：`release/1.0`、`release/1.1` | 长期维护（至该版本停止支持） | 某大/次版本的稳定基线分支。从 `develop` 切出准备发版；正式发布后**冻结新特性**，仅接收 `hotfix/*` 或 `cherry-pick` 的缺陷/安全修补 PR。 |
-| **特性分支** | `feat/<scope>-<slug>`<br>例：`feat/rehearsal-automation` | 短期（合入即自动删） | **从 `develop` 拉出**，开发新能力；推远端并提 PR 到 `develop`，由维护者审阅且 CI 全绿后合入。 |
-| **缺陷修复分支** | `fix/<scope>-<slug>`<br>例：`fix/import-exporter-icon` | 短期（合入即自动删） | **从 `develop` 拉出**，修复缺陷；推远端并提 PR 到 `develop`。 |
-| **紧急热修分支** | `hotfix/<ver>-<slug>`<br>例：`hotfix/1.0-pg-tls` | 短期（合入即自动删） | 当已发布版本（如 `release/1.0`）出现线上紧急故障时，**从对应 `release/*` 拉出**；分别提 PR 合入 `release/*`（发 `v1.0.x`）与 `develop` / `main`。 |
-| **工程 / 重构 / 样式 / 文档** | `refactor/<slug>`、`style/<slug>`<br>`docs/<slug>`、`chore/<slug>` | 短期（合入即自动删） | 目录治理、视觉调优、CI 流水线、文档规范与脚本调整，均从 `develop` 拉出并提 PR 到 `develop`。 |
+| **正式发布主干** | `main` | 永久保护（强制 PR + CI） | **只对应已通过完整验收的正式发布版本**（对应 `vX.Y.Z` Tag）。**严禁直接 push**，仅通过 `develop` → `main`、`release/*` → `main` 或 `hotfix/*` → `main` 的 PR，经 CI 全绿与审查通过后合入。 |
+| **开发集成主干** | `develop` | 长期保留（防强推、防误删） | **日常研发、联调与增量迭代主线**。**允许直接 commit 并 `git push origin develop`**（不再强求切短期分支和提 PR），推送前在本地跑通受影响模块的定向测试与前端构建即可。 |
+| **版本预备/维护分支** | `release/<major>.<minor>`<br>例：`release/1.0`、`release/1.1` | 长期维护（至该版本停止支持） | 某大/次版本的稳定基线分支。从 `develop` 切出准备发版；正式发布后**冻结新特性**，仅接收 `hotfix/*` 或 `cherry-pick` 的缺陷/安全修补。 |
+| **可选短期/热修分支** | `feat/<scope>-<slug>`、`fix/<scope>-<slug>`<br>`hotfix/<ver>-<slug>` | 按需短期使用 | 仅在跨天大型实验性改动或基于 `release/*` 的紧急线上热修时按需使用；日常常规开发无需建短期分支。 |
 
 ### 分支与 PR 铁律（硬红线）
-1. **禁止直推保护分支**：严禁向 `main`、`develop`、`release/*` 直接执行 `git push` 或 `git push --force`，所有改动**必须走 GitHub Pull Request**。
-2. **必须通过 CI 门禁**：PR 必须等待 `.github/workflows/ci.yml` 全部检查项（`Backend CI`、`Frontend Build & Typecheck`、`Repo Standard & Contracts`）绿灯。
-3. **人工审阅合入（Owner Merge）**：AI 助手负责完成开发、本地验证、推送远端分支并创建结构化 PR（`gh pr create`），**严禁未经用户明确授权擅自合并 PR**，统一由仓库维护者审阅 Diff 后亲自在 GitHub 点击 Merge。
-4. **合并后自动清理临时分支**：仓库开启 `delete_branch_on_merge`，PR 合入后自动删除远端短期分支；本地拉取最新 `develop` 并清理已合并分支。
-5. **维护分支冻结新特性**：已发版的 `release/1.0` 绝不再合入新 `feat/*` 特性，新特性统一在 `develop` 演进并于下一小版本（如 `release/1.1` → `v1.1.0`）随 PR 正式合入 `main`。
+1. **仅 `main` 强制走 Pull Request**：严禁向 `main` 直接 `git push`；所有合入 `main` 的变更必须创建 PR 并通过 `.github/workflows/ci.yml` 全部检查项（`Backend CI`、`Frontend Build & Typecheck`、`Repo Standard & Contracts`）。
+2. **`develop` 保持高速直推**：日常功能、修复、样式与文档改动直接在 `develop` 提交并推送，本地做好定向测试与 `npm run build` 验证即可，不再反复开 PR 空等 CI。
+3. **防强推与防误删**：严禁对 `main`、`develop`、`release/*` 执行 `git push --force` 或删除分支（除非用户显式要求重置历史）。
+4. **`main` PR 审查与自动合入**：指向 `main` 的 PR 由受控的 **`Delivery Studio PR Auto-Reviewer`** 自动化工作流（或仓库维护者）进行代码/安全/规范深度审查；通过且 CI 全绿后自动合并并写入中文分析 Commit；若存在阻断缺陷则打回并支持隔离 Worktree 自动修复重推复审。日常编码 AI 助手不得擅自合并 `main` PR。
+5. **维护分支冻结新特性**：已发版的 `release/1.0` 绝不再合入新 `feat/*` 特性，新特性统一在 `develop` 演进，阶段稳定后通过 PR（`develop` → `main` 或 `release/1.x` → `main`）合入 `main`。
 
 ---
 
@@ -67,19 +64,16 @@
 
 ## 4. 标准开发与发版全流程
 
-### 4.1 日常开发（必走 PR → `develop`）
+### 4.1 日常开发（直接在 `develop` 提交与推送）
 ```powershell
 git checkout develop; git pull origin develop
-git checkout -b feat/<scope>-<slug>
 # ... 编码 + 定向测试 + 前端构建验证 ...
 git add -A; git commit -m "feat(<scope>): <简明描述>"
-git push -u origin feat/<scope>-<slug>
-gh pr create --base develop --title "feat(<scope>): <简明描述>" --body-file ...
-# 等待 GitHub Actions CI 全绿 -> 维护者在 GitHub 亲自审阅并 Merge
+git push origin develop
 ```
 
-### 4.2 正式发版（`develop` → `release/X.Y` → PR → `main` → Tag）
-1. 从已全量测试通过的 `develop` 切出 `release/<major>.<minor>`（如 `release/1.1`），执行 `& ".\scripts\release.ps1"` 生成版本变更提交（不直接强推 `main`）；
-2. 推送 `release/1.1` 并创建发布 PR（`release/1.1` → `main`），等待 CI 绿灯；
-3. 维护者审阅并合并至 `main` 后，在 `main` 对应提交打正式 Tag `v1.1.0` 并推送，再提 PR 将版本元数据同步回 `develop`；
-4. 在 GitHub Releases 基于 `v1.1.0` 发布正式版本与双端构建产物。
+### 4.2 合入 `main` 与正式发版（`develop` / `release/X.Y` → PR → `main` → Tag）
+1. 当 `develop` 达到阶段验收基线时，直接提 PR（`develop` → `main`），或从 `develop` 切出 `release/<major>.<minor>` 执行 `& ".\scripts\release.ps1"` 生成版本提交后提 PR（`release/1.1` → `main`）；
+2. PR 创建后自动触发 GitHub Actions CI（`Backend CI`、`Frontend Build & Typecheck`、`Repo Standard & Contracts`）及 **`Delivery Studio PR Auto-Reviewer`** 深度代码审查；
+3. 审查通过且 CI 全绿后合入 `main`（并保留中文审查分析 Commit；若被拒将自动修复推送并触发复审）；
+4. 正式发版时，在 `main` 对应提交打正式 Tag `v1.1.0` 并推送，并在 GitHub Releases 发布正式版本与双端构建产物。

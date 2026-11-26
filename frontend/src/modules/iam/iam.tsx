@@ -590,6 +590,13 @@ export function ClusterGrantPicker({
   disabled,
   ownedBy,
   inherited,
+  summaryMode = false,
+  subjectLabel,
+  modalOpen,
+  onModalOpenChange,
+  onSaveModal,
+  savingModal = false,
+  modalDirty = false,
 }: {
   clusters: IAMCluster[];
   value: Record<string, ClusterAccessLevel>;
@@ -597,9 +604,22 @@ export function ClusterGrantPicker({
   disabled?: boolean;
   ownedBy?: string;
   inherited?: Record<string, { level: ClusterAccessLevel; from: string[] }>;
+  summaryMode?: boolean;
+  subjectLabel?: string;
+  modalOpen?: boolean;
+  onModalOpenChange?: (open: boolean) => void;
+  onSaveModal?: () => void;
+  savingModal?: boolean;
+  modalDirty?: boolean;
 }) {
   useLang();
   const [appFilter, setAppFilter] = useState("all");
+  const [innerOpen, setInnerOpen] = useState(false);
+  const isModalOpen = modalOpen !== undefined ? modalOpen : innerOpen;
+  const setModalOpen = (next: boolean) => {
+    if (onModalOpenChange) onModalOpenChange(next);
+    else setInnerOpen(next);
+  };
 
   const ownedClusters = useMemo(
     () => (ownedBy ? clusters.filter((c) => c.owner === ownedBy) : []),
@@ -749,6 +769,75 @@ export function ClusterGrantPicker({
     );
   }
 
+  const renderTransfer = (height: number) => (
+    <ProTransfer
+      height={height}
+      leftTitle={bi("未授权集群", "Available Clusters")}
+      rightTitle={bi("已授权集群", "Granted Clusters")}
+      leftItems={leftItems}
+      rightItems={rightItems}
+      leftPlaceholder={bi(
+        "空格组合检索：集群名、节点 IP、系统或创建者…",
+        "Multi-keyword search: cluster, IP, OS, owner…",
+      )}
+      rightPlaceholder={bi("筛选已授权集群…", "Filter granted clusters…")}
+      leftEmptyText={
+        unassigned.length === 0
+          ? bi("全部可分配集群均已授权", "All assignable clusters are granted")
+          : bi("没有匹配的未授权集群", "No matching clusters")
+      }
+      topBar={
+        appOptions.length > 1 ? (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              width: "100%",
+              gap: 8,
+            }}
+          >
+            <span className="faint small">
+              {bi("按中间件快速筛选未授权集群：", "Filter by middleware:")}
+            </span>
+            <Select
+              size="mini"
+              style={{ width: 168 }}
+              value={appFilter}
+              onChange={setAppFilter}
+              getPopupContainer={() => document.body}
+              triggerProps={{ autoFitPosition: true }}
+              options={[
+                { value: "all", label: bi("全部中间件", "All Apps") },
+                ...appOptions.map(([app, n]) => ({
+                  value: app,
+                  label: `${app} (${n})`,
+                })),
+              ]}
+            />
+          </div>
+        ) : undefined
+      }
+      dualAddActions={[
+        {
+          label: bi("设为运维", "Operate"),
+          type: "primary",
+          onTrigger: (keys) => batchGrant(keys, "operate"),
+        },
+        {
+          label: bi("设为只读", "Read-only"),
+          type: "secondary",
+          onTrigger: (keys) => batchGrant(keys, "view"),
+        },
+      ]}
+      onRemove={batchRevoke}
+    />
+  );
+
+  const visibleSummaryRows = assignable.filter(
+    (c) => value[c.id] || inherited?.[c.id],
+  );
+
   return (
     <div className="iam-cl-picker">
       {ownedClusters.length > 0 && (
@@ -776,16 +865,31 @@ export function ClusterGrantPicker({
             "All existing clusters were created by this user and are accessible by default.",
           )}
         </p>
-      ) : disabled ? (
-        <div className="iam-cl-picker-list">
-          {assignable.filter((c) => value[c.id] || inherited?.[c.id]).length === 0 ? (
-            <div className="iam-cl-picker-empty faint small">
-              {bi("暂未额外授权其他集群", "No extra clusters granted")}
-            </div>
-          ) : (
-            assignable
-              .filter((c) => value[c.id] || inherited?.[c.id])
-              .map((c) => {
+      ) : disabled || summaryMode ? (
+        <>
+          <div className="iam-cl-picker-list">
+            {visibleSummaryRows.length === 0 ? (
+              <div className="iam-cl-summary-empty">
+                <span className="faint small">
+                  {disabled
+                    ? bi("暂未额外授权其他集群", "No extra clusters granted")
+                    : bi(
+                        `暂未额外分配跨集群权限（可从 ${assignable.length} 个集群中按名称或机器 IP 批量分配只读/运维）`,
+                        `No extra clusters assigned yet (${assignable.length} clusters available)`,
+                      )}
+                </span>
+                {!disabled && (
+                  <Button
+                    size="small"
+                    type="primary"
+                    onClick={() => setModalOpen(true)}
+                  >
+                    + {bi("配置附加集群权限", "Assign Clusters")}
+                  </Button>
+                )}
+              </div>
+            ) : (
+              visibleSummaryRows.map((c) => {
                 const direct = value[c.id] || "";
                 const inh = inherited?.[c.id];
                 return (
@@ -805,72 +909,107 @@ export function ClusterGrantPicker({
                           </span>
                         )}
                       </span>
+                      {(c.host_ips?.length || c.owner) && (
+                        <small className="iam-cl-picker-sub faint">
+                          {buildClusterSub(c)}
+                        </small>
+                      )}
                     </div>
-                    {direct && (
-                      <em className={`iam-lvl-tag is-${direct}`}>
-                        {clusterLevelLabel(direct)}
-                      </em>
-                    )}
+                    {disabled ? (
+                      direct && (
+                        <em className={`iam-lvl-tag is-${direct}`}>
+                          {clusterLevelLabel(direct)}
+                        </em>
+                      )
+                    ) : direct ? (
+                      <div className="iam-cl-row-acts">
+                        <span className="iam-lvl-seg">
+                          <button
+                            type="button"
+                            className={direct === "view" ? "on is-view" : ""}
+                            onClick={() => setOne(c.id, "view")}
+                          >
+                            {bi("只读", "View")}
+                          </button>
+                          <button
+                            type="button"
+                            className={direct === "operate" ? "on is-op" : ""}
+                            onClick={() => setOne(c.id, "operate")}
+                          >
+                            {bi("运维", "Op")}
+                          </button>
+                        </span>
+                        <button
+                          type="button"
+                          className="iam-cl-rm-btn"
+                          onClick={() => setOne(c.id, "")}
+                          title={bi("移除此集群附加授权", "Remove cluster grant")}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 );
               })
+            )}
+          </div>
+
+          {!disabled && (
+            <Modal
+              visible={isModalOpen}
+              onCancel={() => setModalOpen(false)}
+              style={{ width: 920, maxWidth: "calc(100vw - 32px)" }}
+              unmountOnExit
+              title={
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span>{bi("配置跨集群附加权限", "Configure Per-Cluster Access")}</span>
+                  {subjectLabel && (
+                    <span className="iam-app-pill mono">{subjectLabel}</span>
+                  )}
+                </div>
+              }
+              footer={
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    width: "100%",
+                  }}
+                >
+                  <span className="faint small">
+                    {bi(
+                      `已选择 ${granted.length} 个附加授权集群`,
+                      `${granted.length} cluster(s) selected`,
+                    )}
+                  </span>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <Button onClick={() => setModalOpen(false)}>
+                      {onSaveModal && modalDirty
+                        ? bi("暂不保存关闭", "Close")
+                        : bi("完成", "Done")}
+                    </Button>
+                    {onSaveModal && (
+                      <Button
+                        type="primary"
+                        loading={savingModal}
+                        disabled={!modalDirty}
+                        onClick={onSaveModal}
+                      >
+                        {bi("保存权限配置", "Save Access")}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              }
+            >
+              {renderTransfer(380)}
+            </Modal>
           )}
-        </div>
+        </>
       ) : (
-        <ProTransfer
-          height={310}
-          leftTitle={bi("未授权集群", "Available Clusters")}
-          rightTitle={bi("已授权集群", "Granted Clusters")}
-          leftItems={leftItems}
-          rightItems={rightItems}
-          leftPlaceholder={bi(
-            "空格组合检索：集群名、节点 IP、系统或创建者…",
-            "Multi-keyword search: cluster, IP, OS, owner…",
-          )}
-          rightPlaceholder={bi("筛选已授权集群…", "Filter granted clusters…")}
-          leftEmptyText={
-            unassigned.length === 0
-              ? bi("全部可分配集群均已授权", "All assignable clusters are granted")
-              : bi("没有匹配的未授权集群", "No matching clusters")
-          }
-          topBar={
-            appOptions.length > 1 ? (
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", gap: 8 }}>
-                <span className="faint small">
-                  {bi("按中间件快速筛选未授权集群：", "Filter by middleware:")}
-                </span>
-                <Select
-                  size="mini"
-                  style={{ width: 156 }}
-                  value={appFilter}
-                  onChange={setAppFilter}
-                  getPopupContainer={() => document.body}
-                  triggerProps={{ autoFitPosition: true }}
-                  options={[
-                    { value: "all", label: bi("全部中间件", "All Apps") },
-                    ...appOptions.map(([app, n]) => ({
-                      value: app,
-                      label: `${app} (${n})`,
-                    })),
-                  ]}
-                />
-              </div>
-            ) : undefined
-          }
-          dualAddActions={[
-            {
-              label: bi("设为运维", "Operate"),
-              type: "primary",
-              onTrigger: (keys) => batchGrant(keys, "operate"),
-            },
-            {
-              label: bi("设为只读", "Read-only"),
-              type: "secondary",
-              onTrigger: (keys) => batchGrant(keys, "view"),
-            },
-          ]}
-          onRemove={batchRevoke}
-        />
+        renderTransfer(340)
       )}
     </div>
   );
@@ -1058,6 +1197,7 @@ export function GrantEditor({
     () => ({ ...(g.clusters || {}) }),
   );
   const [busy, setBusy] = useState(false);
+  const [clusterModalOpen, setClusterModalOpen] = useState(false);
 
   useEffect(() => {
     setRoles(g.roles);
@@ -1103,7 +1243,7 @@ export function GrantEditor({
 
   const editable = can("iam.user");
 
-  const save = async () => {
+  const save = async (closeModal = false) => {
     if (busy || !dirty || roles.length === 0) return;
     setBusy(true);
     try {
@@ -1117,6 +1257,7 @@ export function GrantEditor({
           "Permissions saved and applied immediately",
         ),
       );
+      if (closeModal) setClusterModalOpen(false);
       void refreshAIStatus();
       onSaved();
     } catch (e) {
@@ -1185,6 +1326,19 @@ export function GrantEditor({
           <section className="iam-cont-sec">
             <div className="iam-cont-sec-h">
               <h2>{bi("跨集群附加授权", "Per-Cluster Access")}</h2>
+              {editable &&
+                eff.scope !== "all" &&
+                (iam.clusters?.filter((c) => c.owner !== user).length || 0) > 0 && (
+                  <Button
+                    size="small"
+                    type={Object.keys(clusters).length > 0 ? "secondary" : "primary"}
+                    onClick={() => setClusterModalOpen(true)}
+                  >
+                    {Object.keys(clusters).length > 0
+                      ? bi("调整附加集群", "Manage Clusters")
+                      : `+ ${bi("配置附加集群权限", "Assign Clusters")}`}
+                  </Button>
+                )}
             </div>
             {eff.scope === "all" ? (
               <div className="iam-cl-all-note">
@@ -1204,6 +1358,13 @@ export function GrantEditor({
                 disabled={!editable}
                 ownedBy={user}
                 inherited={inheritedClusters}
+                summaryMode
+                subjectLabel={user}
+                modalOpen={clusterModalOpen}
+                onModalOpenChange={setClusterModalOpen}
+                onSaveModal={() => void save(true)}
+                savingModal={busy}
+                modalDirty={dirty && roles.length > 0}
               />
             )}
           </section>
@@ -1257,7 +1418,7 @@ export function GrantEditor({
               type="primary"
               loading={busy}
               disabled={!dirty || roles.length === 0}
-              onClick={save}
+              onClick={() => void save(false)}
             >
               {bi("保存权限配置", "Save Changes")}
             </Button>
@@ -2430,7 +2591,7 @@ export function TeamsPane({
       )}
 
       <Drawer
-        width={760}
+        width={900}
         style={{ maxWidth: "100vw" }}
         visible={!!edit}
         title={

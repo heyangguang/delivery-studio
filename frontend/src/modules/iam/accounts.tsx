@@ -1931,6 +1931,7 @@ function AddAccount({
                 clusters={iam.clusters || []}
                 value={clusters}
                 onChange={setClusters}
+                summaryMode
               />
             ) : (
               <Skeleton animation text={{ rows: 4 }} />

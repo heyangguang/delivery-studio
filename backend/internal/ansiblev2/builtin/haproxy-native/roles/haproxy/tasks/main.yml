@@ -1,0 +1,27 @@
+---
+- name: 安装 HAProxy 软件包
+  ansible.builtin.package:
+    name: haproxy
+    state: present
+  tags:
+    - install
+
+- name: 写入标准 haproxy.cfg 主配置
+  ansible.builtin.template:
+    src: haproxy.cfg.j2
+    dest: /etc/haproxy/haproxy.cfg
+    owner: root
+    group: root
+    mode: "0644"
+    validate: haproxy -c -f %s
+  notify: reload haproxy
+  tags:
+    - configure
+
+- name: 启动并设为开机自启
+  ansible.builtin.service:
+    name: haproxy
+    state: started
+    enabled: true
+  tags:
+    - start

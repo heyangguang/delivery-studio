@@ -1,0 +1,40 @@
+---
+- name: 校验 etcd 集群健康状态与 Raft 多数派成员
+  hosts: etcd
+  become: true
+  tags:
+    - verify
+  tasks:
+    - name: 等待客户端监听端口就绪
+      ansible.builtin.wait_for:
+        host: "{{ hostvars[inventory_hostname]['ansible_host'] | default('127.0.0.1') }}"
+        port: "{{ etcd_client_port | default(2379) }}"
+        timeout: 30
+
+    - name: 校验所有节点 endpoint health
+      ansible.builtin.command: >
+        etcdctl
+        --endpoints={% for h in groups['etcd'] %}http://{{ hostvars[h]['ansible_host'] | default(h) }}:{{ etcd_client_port | default(2379) }}{% if not loop.last %},{% endif %}{% endfor %}
+        endpoint health
+      environment:
+        ETCDCTL_API: "3"
+      register: etcd_health
+      changed_when: false
+      run_once: true
+      failed_when: etcd_health.rc != 0
+
+    - name: 检查成员列表与 Leader 选举状态
+      ansible.builtin.command: >
+        etcdctl
+        --endpoints={% for h in groups['etcd'] %}http://{{ hostvars[h]['ansible_host'] | default(h) }}:{{ etcd_client_port | default(2379) }}{% if not loop.last %},{% endif %}{% endfor %}
+        endpoint status --write-out=table
+      environment:
+        ETCDCTL_API: "3"
+      register: etcd_status
+      changed_when: false
+      run_once: true
+
+    - name: 输出集群健康摘要
+      ansible.builtin.debug:
+        var: etcd_status.stdout_lines
+      run_once: true

@@ -1,0 +1,37 @@
+schema: studio/v2
+name: keepalived-native
+title: Keepalived VIP 高可用（原生 Ansible 2.0）
+title_en: Keepalived VRRP VIP HA (Native Ansible 2.0)
+category: 高可用
+version: "2.2"
+summary: 100% 标准 Ansible Role 驱动的 Keepalived VRRP 单播虚拟 IP 漂移组件，自动区分主备优先级并支持业务进程健康探活。
+summary_en: 100% standard Ansible Role-driven Keepalived VRRP unicast VIP failover component with automatic MASTER/BACKUP priority.
+icon: keepalived
+color: teal
+asset_kind: playbook_project
+delivery_modes:
+  - offline
+  - automatic
+entrypoints:
+  deploy: playbooks/deploy.yml
+  verify: playbooks/verify.yml
+  probe: playbooks/probe.yml
+  cleanup: playbooks/cleanup.yml
+groups:
+  - name: keepalived
+    title: Keepalived VRRP 节点
+    title_en: Keepalived VRRP Nodes
+    min: 2
+    max: 4
+    default_count: 2
+schemes:
+  - id: ha-2
+    title: 双节点主备 VIP 漂移
+    title_en: 2-Node Active/Standby VIP
+    summary: 首节点自动设为 MASTER（权重 110），备节点为 BACKUP（权重 100），单播 VRRP 适配云主机与虚拟化网络
+    group_counts:
+      keepalived: 2
+tags:
+  - 高可用
+  - VRRP
+  - 原生 Ansible

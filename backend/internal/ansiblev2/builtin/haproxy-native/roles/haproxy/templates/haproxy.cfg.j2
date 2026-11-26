@@ -1,0 +1,35 @@
+global
+    log /dev/log local0
+    log /dev/log local1 notice
+    maxconn {{ haproxy_maxconn }}
+    user haproxy
+    group haproxy
+    daemon
+
+defaults
+    log     global
+    mode    {{ haproxy_mode }}
+    option  dontlognull
+    retries 3
+    timeout connect {{ haproxy_timeout_connect }}
+    timeout client  {{ haproxy_timeout_client }}
+    timeout server  {{ haproxy_timeout_server }}
+
+listen stats
+    bind *:{{ haproxy_stats_port }}
+    mode http
+    stats enable
+    stats uri /stats
+    stats refresh 10s
+
+frontend app_frontend
+    bind {{ haproxy_bind_address }}:{{ haproxy_frontend_port }}
+    mode {{ haproxy_mode }}
+    default_backend app_backend
+
+backend app_backend
+    mode {{ haproxy_mode }}
+    balance {{ haproxy_balance }}
+{% for srv in haproxy_backend_servers %}
+    server srv{{ loop.index }} {{ srv }} check inter 3s fall 3 rise 2
+{% endfor %}

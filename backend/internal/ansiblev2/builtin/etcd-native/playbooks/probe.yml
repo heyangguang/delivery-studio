@@ -1,0 +1,30 @@
+---
+- name: 只读采集线上 etcd 版本、成员与 Leader 信息
+  hosts: etcd
+  become: true
+  tags:
+    - probe
+  tasks:
+    - name: 读取 etcd 版本
+      ansible.builtin.command: etcd --version
+      register: etcd_ver
+      changed_when: false
+      failed_when: false
+
+    - name: 查询成员列表
+      ansible.builtin.command: >
+        etcdctl
+        --endpoints=http://{{ hostvars[inventory_hostname]['ansible_host'] | default('127.0.0.1') }}:{{ etcd_client_port | default(2379) }}
+        member list
+      environment:
+        ETCDCTL_API: "3"
+      register: etcd_members
+      changed_when: false
+      failed_when: false
+
+    - name: 输出只读探测摘要
+      ansible.builtin.debug:
+        msg:
+          host: "{{ inventory_hostname }}"
+          version: "{{ (etcd_ver.stdout_lines | default(['']))[0] | trim }}"
+          members: "{{ etcd_members.stdout_lines | default([]) }}"

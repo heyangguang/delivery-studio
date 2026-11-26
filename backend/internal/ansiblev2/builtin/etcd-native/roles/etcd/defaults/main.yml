@@ -1,0 +1,7 @@
+---
+etcd_cluster_token: "delivery-studio-etcd"
+etcd_client_port: 2379
+etcd_peer_port: 2380
+etcd_data_dir: "/var/lib/etcd/studio"
+etcd_quota_backend_bytes: 4294967296
+etcd_auto_compaction_retention: "1"

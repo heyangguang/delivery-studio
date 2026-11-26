@@ -1,0 +1,8 @@
+---
+- name: 安装并配置 etcd Raft 协调集群
+  hosts: etcd
+  become: true
+  tags:
+    - deploy
+  roles:
+    - role: etcd

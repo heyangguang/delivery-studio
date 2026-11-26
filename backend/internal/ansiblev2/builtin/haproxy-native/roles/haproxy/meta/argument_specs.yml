@@ -1,0 +1,47 @@
+---
+argument_specs:
+  main:
+    short_description: Deploy and configure HAProxy L4/L7 load balancer
+    options:
+      haproxy_bind_address:
+        type: str
+        default: "0.0.0.0"
+        description: 前端监听地址（默认 0.0.0.0）
+      haproxy_frontend_port:
+        type: int
+        default: 5000
+        description: 对外业务入口端口
+      haproxy_stats_port:
+        type: int
+        default: 8404
+        description: 内置 Stats 监控面板端口（/stats）
+      haproxy_mode:
+        type: str
+        default: "tcp"
+        choices: ["tcp", "http"]
+        description: 转发模式：tcp（四层，适配 PG/Redis 等）或 http（七层）
+      haproxy_balance:
+        type: str
+        default: "roundrobin"
+        choices: ["roundrobin", "leastconn", "source"]
+        description: 后端负载均衡调度算法
+      haproxy_maxconn:
+        type: int
+        default: 4096
+        description: 全局最大并发连接数
+      haproxy_backend_servers:
+        type: list
+        default: ["127.0.0.1:8080"]
+        description: 后端目标服务器地址列表（每行 IP:Port）
+      haproxy_timeout_connect:
+        type: str
+        default: "5s"
+        description: 连接后端超时时间
+      haproxy_timeout_client:
+        type: str
+        default: "60s"
+        description: 客户端空闲超时时间
+      haproxy_timeout_server:
+        type: str
+        default: "60s"
+        description: 服务端响应超时时间

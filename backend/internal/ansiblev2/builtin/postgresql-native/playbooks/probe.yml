@@ -1,0 +1,32 @@
+---
+- name: 只读采集线上 PostgreSQL 版本、主从角色与流复制详情
+  hosts: primary:replica
+  become: true
+  tags:
+    - probe
+  tasks:
+    - name: 查询数据库版本与角色
+      become_user: postgres
+      ansible.builtin.command: >
+        psql -p {{ postgresql_port | default(5432) }} -tAc
+        "SELECT version() || ' | recovery=' || pg_is_in_recovery();"
+      register: pg_info
+      changed_when: false
+      failed_when: false
+
+    - name: 主库查询流复制同步详情
+      become_user: postgres
+      ansible.builtin.command: >
+        psql -p {{ postgresql_port | default(5432) }} -tAc
+        "SELECT client_addr, state, sync_state, sent_lsn, replay_lsn FROM pg_stat_replication;"
+      register: pg_repl
+      changed_when: false
+      failed_when: false
+      when: inventory_hostname in (groups['primary'] | default([]))
+
+    - name: 输出只读探测摘要
+      ansible.builtin.debug:
+        msg:
+          host: "{{ inventory_hostname }}"
+          info: "{{ pg_info.stdout | default('') | trim }}"
+          replicas: "{{ pg_repl.stdout_lines | default([]) }}"

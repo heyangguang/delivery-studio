@@ -1,0 +1,73 @@
+schema: studio/v2
+name: postgresql-native
+title: PostgreSQL 关系型数据库（原生 Ansible 2.0）
+title_en: PostgreSQL Database Cluster (Native Ansible 2.0)
+category: 数据库
+version: "16"
+summary: 100% 标准 Ansible Role 驱动的 PostgreSQL 单机与物理流复制主从集群组件，内置参数调优、pg_basebackup 从库初始化与复制状态校验。
+summary_en: 100% standard Ansible Role-driven PostgreSQL standalone & streaming replication cluster with pg_basebackup and live verification.
+icon: postgresql
+color: blue
+asset_kind: playbook_project
+delivery_modes:
+  - offline
+  - automatic
+entrypoints:
+  deploy: playbooks/deploy.yml
+  verify: playbooks/verify.yml
+  probe: playbooks/probe.yml
+  cleanup: playbooks/cleanup.yml
+groups:
+  - name: primary
+    title: 数据库主库
+    title_en: Primary DB
+    min: 1
+    max: 1
+    default_count: 1
+    exclusive: true
+  - name: replica
+    title: 只读从库（物理流复制）
+    title_en: Streaming Replicas
+    min: 0
+    max: 4
+    default_count: 1
+    exclusive: true
+schemes:
+  - id: single
+    title: 单节点数据库
+    title_en: Standalone PostgreSQL
+    summary: 1 台 PostgreSQL 实例，无从库，适用于开发测试或轻量业务
+    group_counts:
+      primary: 1
+      replica: 0
+    vars:
+      postgresql_shared_buffers: "512MB"
+      postgresql_max_connections: 200
+  - id: primary-replica
+    title: 一主一从物理流复制
+    title_en: Primary + 1 Streaming Replica
+    summary: 1 台主库 + 1 台实时 WAL 物理流复制只读从库（pg_basebackup 自动初始化）
+    group_counts:
+      primary: 1
+      replica: 1
+    vars:
+      postgresql_shared_buffers: "1GB"
+      postgresql_max_connections: 300
+  - id: primary-2replicas
+    title: 一主二从高可用读扩展
+    title_en: Primary + 2 Streaming Replicas
+    summary: 1 台主库 + 2 台物理流复制从库，支撑高并发读写分离与同城容灾
+    group_counts:
+      primary: 1
+      replica: 2
+    vars:
+      postgresql_shared_buffers: "1GB"
+      postgresql_max_connections: 400
+ports:
+  - name: postgres
+    var: postgresql_port
+    protocol: tcp
+tags:
+  - 数据库
+  - 流复制
+  - 原生 Ansible

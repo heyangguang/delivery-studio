@@ -1,0 +1,8 @@
+---
+- name: 安装并配置 HAProxy 负载均衡服务
+  hosts: haproxy
+  become: true
+  tags:
+    - deploy
+  roles:
+    - role: haproxy

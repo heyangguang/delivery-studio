@@ -493,15 +493,8 @@ export function AnsibleV2Studio({
                     type="button"
                     role="option"
                     aria-selected={c.name === selected}
-                    className={`row ${c.name === selected ? "on" : ""}`}
+                    className={`row av2-rail-row ${c.name === selected ? "on" : ""}`}
                     onClick={() => setSelected(c.name)}
-                    style={{
-                      width: "100%",
-                      textAlign: "left",
-                      background: c.name === selected ? undefined : "transparent",
-                      border: 0,
-                      cursor: "pointer",
-                    }}
                   >
                     <AppGlyph
                       id={c.name}

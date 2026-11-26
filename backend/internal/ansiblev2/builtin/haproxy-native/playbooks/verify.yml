@@ -1,0 +1,22 @@
+---
+- name: 校验 HAProxy 配置语法、服务与监控端口
+  hosts: haproxy
+  become: true
+  tags:
+    - verify
+  tasks:
+    - name: 校验 haproxy.cfg 语法
+      ansible.builtin.command: haproxy -c -f /etc/haproxy/haproxy.cfg
+      changed_when: false
+
+    - name: 验证业务前端端口监听就绪
+      ansible.builtin.wait_for:
+        host: "{{ '127.0.0.1' if (haproxy_bind_address | default('0.0.0.0')) in ['0.0.0.0', '::', ''] else haproxy_bind_address }}"
+        port: "{{ haproxy_frontend_port | default(5000) }}"
+        timeout: 15
+
+    - name: 验证 Stats 监控端口监听就绪
+      ansible.builtin.wait_for:
+        host: "127.0.0.1"
+        port: "{{ haproxy_stats_port | default(8404) }}"
+        timeout: 15

@@ -1,0 +1,13 @@
+---
+- name: 停止 PostgreSQL 服务
+  hosts: primary:replica
+  become: true
+  tags:
+    - cleanup
+  tasks:
+    - name: 停止 postgresql 服务
+      ansible.builtin.service:
+        name: postgresql
+        state: stopped
+        enabled: false
+      failed_when: false

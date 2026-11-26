@@ -1,0 +1,47 @@
+{% set kp_hosts = groups['keepalived'] | default([inventory_hostname]) %}
+{% set my_idx = kp_hosts.index(inventory_hostname) if inventory_hostname in kp_hosts else 0 %}
+{% set my_ip = hostvars[inventory_hostname]['ansible_host'] | default(ansible_default_ipv4.address) %}
+{% set iface = ansible_default_ipv4.interface if (keepalived_interface == 'auto' or keepalived_interface == '') else keepalived_interface %}
+global_defs {
+    router_id {{ inventory_hostname }}
+    enable_script_security
+    script_user root
+}
+
+{% if keepalived_check_process | default('') | length > 0 %}
+vrrp_script chk_service {
+    script "/usr/bin/pgrep -x {{ keepalived_check_process }}"
+    interval 2
+    weight -20
+    fall 2
+    rise 2
+}
+{% endif %}
+
+vrrp_instance VI_STUDIO {
+    state {{ 'MASTER' if my_idx == 0 else 'BACKUP' }}
+    interface {{ iface }}
+    virtual_router_id {{ keepalived_router_id }}
+    priority {{ 110 - (my_idx * 10) }}
+    advert_int {{ keepalived_advert_int }}
+    unicast_src_ip {{ my_ip }}
+    unicast_peer {
+{% for h in kp_hosts %}
+{% if h != inventory_hostname %}
+        {{ hostvars[h]['ansible_host'] | default(h) }}
+{% endif %}
+{% endfor %}
+    }
+    authentication {
+        auth_type PASS
+        auth_pass {{ keepalived_auth_pass[:8] }}
+    }
+    virtual_ipaddress {
+        {{ keepalived_vip }}
+    }
+{% if keepalived_check_process | default('') | length > 0 %}
+    track_script {
+        chk_service
+    }
+{% endif %}
+}

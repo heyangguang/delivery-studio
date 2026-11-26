@@ -1,0 +1,50 @@
+schema: studio/v2
+name: etcd-native
+title: etcd 分布式协调集群（原生 Ansible 2.0）
+title_en: etcd Raft Quorum Cluster (Native Ansible 2.0)
+category: 协调存储
+version: "3.4"
+summary: 100% 标准 Ansible Role 驱动的 etcd Raft 多数派协调集群组件，自动根据 Inventory 生成 peer 拓扑并完成健康与选主校验。
+summary_en: 100% standard Ansible Role-driven etcd Raft quorum cluster with automatic peer discovery and health verification.
+icon: etcd
+color: purple
+asset_kind: playbook_project
+delivery_modes:
+  - offline
+  - automatic
+entrypoints:
+  deploy: playbooks/deploy.yml
+  verify: playbooks/verify.yml
+  probe: playbooks/probe.yml
+  cleanup: playbooks/cleanup.yml
+groups:
+  - name: etcd
+    title: etcd 集群节点
+    title_en: etcd Quorum Nodes
+    min: 1
+    max: 5
+    default_count: 3
+schemes:
+  - id: single
+    title: 单节点 etcd
+    title_en: Single Node etcd
+    summary: 1 台节点，仅适用于开发测试环境
+    group_counts:
+      etcd: 1
+  - id: ha-3
+    title: 三节点 Raft 多数派集群
+    title_en: 3-Node Raft Quorum
+    summary: 3 台节点组成 Raft 多数派，容忍任意单节点故障（推荐生产标准）
+    group_counts:
+      etcd: 3
+ports:
+  - name: client
+    var: etcd_client_port
+    protocol: tcp
+  - name: peer
+    var: etcd_peer_port
+    protocol: tcp
+tags:
+  - 协调存储
+  - Raft
+  - 原生 Ansible

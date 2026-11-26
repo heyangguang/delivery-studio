@@ -1,0 +1,24 @@
+---
+- name: 校验 Keepalived 服务状态与 VIP 绑定归属
+  hosts: keepalived
+  become: true
+  tags:
+    - verify
+  tasks:
+    - name: 确认 keepalived 服务处于运行状态
+      ansible.builtin.command: systemctl is-active keepalived
+      register: kp_active
+      changed_when: false
+      failed_when: kp_active.stdout | trim != 'active'
+
+    - name: 检查当前节点是否持有虚拟 IP
+      ansible.builtin.shell: "ip -4 addr show | grep -F '{{ (keepalived_vip | default('192.168.31.199/24')).split('/')[0] }}' || true"
+      register: vip_check
+      changed_when: false
+
+    - name: 断言主节点已成功绑定虚拟 IP
+      ansible.builtin.assert:
+        that:
+          - vip_check.stdout | trim != ''
+        fail_msg: "主节点 {{ inventory_hostname }} 未检测到 VIP {{ keepalived_vip }}"
+      when: inventory_hostname == groups['keepalived'][0]

@@ -1,0 +1,12 @@
+# Kyndryl Delivery Studio 2.0 — PostgreSQL Baseline Parameters
+listen_addresses = '{{ postgresql_listen_addresses }}'
+port = {{ postgresql_port }}
+max_connections = {{ postgresql_max_connections }}
+shared_buffers = '{{ postgresql_shared_buffers }}'
+work_mem = '{{ postgresql_work_mem }}'
+password_encryption = 'scram-sha-256'
+wal_level = 'replica'
+max_wal_senders = 10
+max_replication_slots = 10
+hot_standby = on
+wal_keep_size = '256MB'

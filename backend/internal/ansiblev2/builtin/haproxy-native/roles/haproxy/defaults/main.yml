@@ -1,0 +1,12 @@
+---
+haproxy_bind_address: "0.0.0.0"
+haproxy_frontend_port: 5000
+haproxy_stats_port: 8404
+haproxy_mode: "tcp"
+haproxy_balance: "roundrobin"
+haproxy_maxconn: 4096
+haproxy_backend_servers:
+  - "127.0.0.1:8080"
+haproxy_timeout_connect: "5s"
+haproxy_timeout_client: "60s"
+haproxy_timeout_server: "60s"

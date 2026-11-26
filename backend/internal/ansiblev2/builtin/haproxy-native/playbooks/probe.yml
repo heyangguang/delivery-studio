@@ -1,0 +1,26 @@
+---
+- name: 只读采集线上 HAProxy 版本与运行状态
+  hosts: haproxy
+  become: true
+  tags:
+    - probe
+  tasks:
+    - name: 读取 HAProxy 版本
+      ansible.builtin.command: haproxy -v
+      register: hap_ver
+      changed_when: false
+
+    - name: 检查 systemd 服务状态
+      ansible.builtin.command: systemctl is-active haproxy
+      register: hap_active
+      changed_when: false
+      failed_when: false
+
+    - name: 输出只读探测摘要
+      ansible.builtin.debug:
+        msg:
+          host: "{{ inventory_hostname }}"
+          version: "{{ (hap_ver.stdout_lines | default(['']))[0] | trim }}"
+          service: "{{ hap_active.stdout | default('unknown') | trim }}"
+          frontend_port: "{{ haproxy_frontend_port | default(5000) }}"
+          stats_port: "{{ haproxy_stats_port | default(8404) }}"

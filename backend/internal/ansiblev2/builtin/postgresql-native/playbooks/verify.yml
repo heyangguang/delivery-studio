@@ -1,0 +1,31 @@
+---
+- name: 校验 PostgreSQL 服务可用性与物理流复制状态
+  hosts: primary:replica
+  become: true
+  tags:
+    - verify
+  tasks:
+    - name: 核对 pg_isready 连接就绪
+      ansible.builtin.command: "pg_isready -h 127.0.0.1 -p {{ postgresql_port | default(5432) }}"
+      register: pg_ready
+      changed_when: false
+      failed_when: pg_ready.rc != 0
+
+    - name: 核对主库非恢复模式且读写正常
+      become_user: postgres
+      ansible.builtin.command: "psql -p {{ postgresql_port | default(5432) }} -tAc 'SELECT pg_is_in_recovery();'"
+      register: pg_recovery
+      changed_when: false
+      failed_when: >
+        (inventory_hostname in (groups['primary'] | default([])) and (pg_recovery.stdout | trim) != 'f')
+        or (inventory_hostname in (groups['replica'] | default([])) and (pg_recovery.stdout | trim) != 't')
+
+    - name: 主库核对物理流复制连接数
+      become_user: postgres
+      ansible.builtin.command: "psql -p {{ postgresql_port | default(5432) }} -tAc \"SELECT count(*) FROM pg_stat_replication WHERE state = 'streaming';\""
+      register: repl_cnt
+      changed_when: false
+      when:
+        - inventory_hostname in (groups['primary'] | default([]))
+        - (groups['replica'] | default([])) | length > 0
+      failed_when: (repl_cnt.stdout | trim | int) < ((groups['replica'] | default([])) | length)

@@ -1,0 +1,13 @@
+---
+- name: 停止并清理 etcd 集群服务
+  hosts: etcd
+  become: true
+  tags:
+    - cleanup
+  tasks:
+    - name: 停止并禁用 etcd 服务
+      ansible.builtin.service:
+        name: etcd
+        state: stopped
+        enabled: false
+      failed_when: false

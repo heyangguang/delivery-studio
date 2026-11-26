@@ -1,0 +1,29 @@
+---
+argument_specs:
+  main:
+    short_description: Deploy Keepalived VRRP unicast VIP failover
+    options:
+      keepalived_vip:
+        type: str
+        default: "192.168.31.199/24"
+        description: 漂移虚拟 IP 及掩码（CIDR 格式，例如 192.168.31.199/24）
+      keepalived_interface:
+        type: str
+        default: "auto"
+        description: 绑定网卡名称（auto 自动探测默认路由网卡）
+      keepalived_router_id:
+        type: int
+        default: 51
+        description: VRRP 虚拟路由 ID（同网段唯一，1-255）
+      keepalived_auth_pass:
+        type: str
+        default: "KdsVrrp1"
+        description: VRRP 认证口令（最多 8 位字符）
+      keepalived_check_process:
+        type: str
+        default: ""
+        description: 可选联动探活的进程名（如 haproxy 或 nginx；留空则仅保活节点）
+      keepalived_advert_int:
+        type: int
+        default: 1
+        description: VRRP 心跳通告间隔（秒）

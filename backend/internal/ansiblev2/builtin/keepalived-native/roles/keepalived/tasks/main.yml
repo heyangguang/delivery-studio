@@ -1,0 +1,35 @@
+---
+- name: 安装 Keepalived 软件包
+  ansible.builtin.package:
+    name: keepalived
+    state: present
+  tags:
+    - install
+
+- name: 允许绑定非本地虚拟 IP（ip_nonlocal_bind）
+  ansible.builtin.sysctl:
+    name: net.ipv4.ip_nonlocal_bind
+    value: "1"
+    sysctl_file: /etc/sysctl.d/99-keepalived.conf
+    reload: true
+  tags:
+    - configure
+
+- name: 写入标准 keepalived.conf（单播 VRRP）
+  ansible.builtin.template:
+    src: keepalived.conf.j2
+    dest: /etc/keepalived/keepalived.conf
+    owner: root
+    group: root
+    mode: "0640"
+  notify: restart keepalived
+  tags:
+    - configure
+
+- name: 启动并设为开机自启
+  ansible.builtin.service:
+    name: keepalived
+    state: started
+    enabled: true
+  tags:
+    - start

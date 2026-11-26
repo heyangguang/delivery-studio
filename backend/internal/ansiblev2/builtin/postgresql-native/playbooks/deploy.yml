@@ -1,0 +1,16 @@
+---
+- name: 部署并初始化 PostgreSQL 主库
+  hosts: primary
+  become: true
+  tags:
+    - primary
+  roles:
+    - role: postgresql
+
+- name: 部署并接入 PostgreSQL 物理流复制从库
+  hosts: replica
+  become: true
+  tags:
+    - replica
+  roles:
+    - role: postgresql

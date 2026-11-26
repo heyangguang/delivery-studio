@@ -1,0 +1,41 @@
+---
+argument_specs:
+  main:
+    short_description: Deploy PostgreSQL standalone or streaming replication cluster
+    options:
+      postgresql_port:
+        type: int
+        default: 5432
+        description: PostgreSQL 数据库监听端口
+      postgresql_listen_addresses:
+        type: str
+        default: "*"
+        description: 监听网卡地址（* 表示全网卡）
+      postgresql_max_connections:
+        type: int
+        default: 200
+        description: 最大客户端并发连接数
+      postgresql_shared_buffers:
+        type: str
+        default: "512MB"
+        description: 共享内存缓冲区大小（推荐总内存的 25%）
+      postgresql_work_mem:
+        type: str
+        default: "16MB"
+        description: 单次排序/哈希操作内存上限
+      postgresql_client_cidr:
+        type: str
+        default: "0.0.0.0/0"
+        description: 允许客户端接入的网段（写入 pg_hba.conf）
+      postgresql_superuser_password:
+        type: str
+        default: "ChangeMePg2026!"
+        description: postgres 超级用户密码（scram-sha-256 认证）
+      postgresql_replication_user:
+        type: str
+        default: "replicator"
+        description: 主从物理流复制专用账号
+      postgresql_replication_password:
+        type: str
+        default: "ChangeMeRepl2026!"
+        description: 物理流复制账号密码

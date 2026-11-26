@@ -1,0 +1,53 @@
+schema: studio/v2
+name: haproxy-native
+title: HAProxy 负载均衡（原生 Ansible 2.0）
+title_en: HAProxy Load Balancer (Native Ansible 2.0)
+category: 负载均衡
+version: "2.8"
+summary: 100% 标准 Ansible Role 驱动的 HAProxy 四层/七层高性能负载均衡与健康检查组件，内置 Stats 监控面板。
+summary_en: 100% standard Ansible Role-driven HAProxy L4/L7 load balancer with built-in health checks and Stats UI.
+icon: haproxy
+color: blue
+asset_kind: playbook_project
+delivery_modes:
+  - offline
+  - automatic
+entrypoints:
+  deploy: playbooks/deploy.yml
+  verify: playbooks/verify.yml
+  probe: playbooks/probe.yml
+  cleanup: playbooks/cleanup.yml
+groups:
+  - name: haproxy
+    title: HAProxy 负载均衡节点
+    title_en: HAProxy Nodes
+    min: 1
+    max: 6
+    default_count: 2
+schemes:
+  - id: single
+    title: 单节点代理
+    title_en: Single HAProxy
+    summary: 1 台 HAProxy 实例，适用于开发测试或单入口流量转发
+    group_counts:
+      haproxy: 1
+    vars:
+      haproxy_maxconn: 4096
+  - id: ha
+    title: 双节点高可用负载均衡
+    title_en: 2-Node HA Load Balancer
+    summary: 2 台 HAProxy 节点（可搭配 Keepalived VIP 实现无单点故障入口）
+    group_counts:
+      haproxy: 2
+    vars:
+      haproxy_maxconn: 8192
+ports:
+  - name: frontend
+    var: haproxy_frontend_port
+    protocol: tcp
+  - name: stats
+    var: haproxy_stats_port
+    protocol: tcp
+tags:
+  - 负载均衡
+  - 原生 Ansible

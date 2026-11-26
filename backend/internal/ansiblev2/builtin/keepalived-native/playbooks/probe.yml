@@ -1,0 +1,25 @@
+---
+- name: 只读采集线上 Keepalived 版本与 VIP 持有节点
+  hosts: keepalived
+  become: true
+  tags:
+    - probe
+  tasks:
+    - name: 读取 Keepalived 版本
+      ansible.builtin.command: keepalived --version
+      register: kp_ver
+      changed_when: false
+      failed_when: false
+
+    - name: 检查是否持有 VIP
+      ansible.builtin.shell: "ip -4 addr show | grep -F '{{ (keepalived_vip | default('192.168.31.199/24')).split('/')[0] }}' || true"
+      register: vip_check
+      changed_when: false
+
+    - name: 输出只读探测摘要
+      ansible.builtin.debug:
+        msg:
+          host: "{{ inventory_hostname }}"
+          version: "{{ ((kp_ver.stderr | default('')) ~ (kp_ver.stdout | default(''))).splitlines()[0] | default('') | trim }}"
+          holds_vip: "{{ (vip_check.stdout | trim) != '' }}"
+          vip: "{{ keepalived_vip | default('') }}"

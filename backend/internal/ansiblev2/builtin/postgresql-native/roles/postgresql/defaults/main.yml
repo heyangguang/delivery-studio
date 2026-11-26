@@ -1,0 +1,10 @@
+---
+postgresql_port: 5432
+postgresql_listen_addresses: "*"
+postgresql_max_connections: 200
+postgresql_shared_buffers: "512MB"
+postgresql_work_mem: "16MB"
+postgresql_client_cidr: "0.0.0.0/0"
+postgresql_superuser_password: "ChangeMePg2026!"
+postgresql_replication_user: "replicator"
+postgresql_replication_password: "ChangeMeRepl2026!"

@@ -1,0 +1,13 @@
+---
+- name: 停止并清理 HAProxy 服务
+  hosts: haproxy
+  become: true
+  tags:
+    - cleanup
+  tasks:
+    - name: 停止并禁用 haproxy 服务
+      ansible.builtin.service:
+        name: haproxy
+        state: stopped
+        enabled: false
+      failed_when: false

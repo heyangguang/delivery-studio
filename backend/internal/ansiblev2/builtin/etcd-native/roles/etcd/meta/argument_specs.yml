@@ -1,0 +1,29 @@
+---
+argument_specs:
+  main:
+    short_description: Deploy etcd Raft quorum cluster
+    options:
+      etcd_cluster_token:
+        type: str
+        default: "delivery-studio-etcd"
+        description: 集群初始化唯一标识 Token
+      etcd_client_port:
+        type: int
+        default: 2379
+        description: 客户端访问端口（默认 2379）
+      etcd_peer_port:
+        type: int
+        default: 2380
+        description: 集群节点间 Raft 通信端口（默认 2380）
+      etcd_data_dir:
+        type: str
+        default: "/var/lib/etcd/studio"
+        description: WAL 与数据持久化目录
+      etcd_quota_backend_bytes:
+        type: int
+        default: 4294967296
+        description: 后端存储空间配额（字节，默认 4GB）
+      etcd_auto_compaction_retention:
+        type: str
+        default: "1"
+        description: 自动压缩保留周期（小时）

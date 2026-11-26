@@ -1,0 +1,8 @@
+---
+- name: 安装并配置 Keepalived VRRP 高可用集群
+  hosts: keepalived
+  become: true
+  tags:
+    - deploy
+  roles:
+    - role: keepalived

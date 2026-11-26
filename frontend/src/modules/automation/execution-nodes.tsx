@@ -307,6 +307,19 @@ journalctl -u middleware-execution -n 60 --no-pager`}
         </Command>
       </section>
       <section>
+        <h3>{bi("目标机直连 Agent 状态与日志", "Direct Target Agent Status & Logs")}</h3>
+        <p>
+          {bi(
+            "目标机直连 Agent 以独立 systemd 服务运行，可在目标业务主机上检查服务状态与最近日志：",
+            "Direct Target Agents run as dedicated systemd units on the target host:",
+          )}
+        </p>
+        <Command title={bi("检查目标机 Agent 服务与日志", "Check Target Agent service & logs")}>
+          {`sudo systemctl status 'middleware-target-agent-*' --no-pager
+sudo journalctl -u 'middleware-target-agent-*' -n 60 --no-pager`}
+        </Command>
+      </section>
+      <section>
         <h3>{bi("卸载执行器", "Uninstall Runner")}</h3>
         <p>
           {bi(
@@ -1527,8 +1540,6 @@ sudo systemctl status middleware-execution --no-pager`;
               const targetVer = bootInfo?.version
                 ? `v${bootInfo.version.replace(/^v/, "")}`
                 : "";
-              const nodeStatusCmd = `sudo systemctl status middleware-execution --no-pager\nsudo journalctl -u middleware-execution -n 40 --no-pager`;
-              const nodeCheckCmd = `/usr/local/bin/middleware-store execution-node \\\n  --config /etc/middleware-execution/execution-node.json --check`;
               return (
                 <article
                   className="detail enter ec-detail-article"
@@ -1565,10 +1576,12 @@ sudo systemctl status middleware-execution --no-pager`;
                         <button
                           type="button"
                           className="ec-meta-copy mono"
-                          onClick={() => {
-                            copy(activeNode.controller_ip);
-                            Message.success(bi("已复制控制机 IP", "Controller IP copied"));
-                          }}
+                          onClick={() =>
+                            void copy(
+                              activeNode.controller_ip,
+                              bi("已复制控制机 IP", "Controller IP copied"),
+                            )
+                          }
                           title={bi("点击复制 IP", "Copy IP")}
                         >
                           <span>{activeNode.controller_ip}</span>
@@ -1762,10 +1775,12 @@ sudo systemctl status middleware-execution --no-pager`;
                                 size="small"
                                 type="outline"
                                 icon={<IconCopy />}
-                                onClick={() => {
-                                  copy(upgradeCmd);
-                                  Message.success(bi("已复制升级命令", "Upgrade commands copied"));
-                                }}
+                                onClick={() =>
+                                  void copy(
+                                    upgradeCmd,
+                                    bi("已复制升级命令", "Upgrade commands copied"),
+                                  )
+                                }
                               >
                                 {bi("复制命令", "Copy")}
                               </Button>
@@ -1794,10 +1809,12 @@ sudo systemctl status middleware-execution --no-pager`;
                                 <button
                                   type="button"
                                   className="ec-code-copy"
-                                  onClick={() => {
-                                    copy(upgradeCmd);
-                                    Message.success(bi("已复制升级命令", "Upgrade commands copied"));
-                                  }}
+                                  onClick={() =>
+                                    void copy(
+                                      upgradeCmd,
+                                      bi("已复制升级命令", "Upgrade commands copied"),
+                                    )
+                                  }
                                 >
                                   <IconCopy />
                                   <span>{bi("复制", "Copy")}</span>
@@ -2017,10 +2034,9 @@ sudo systemctl status middleware-execution --no-pager`;
                                       key={ip}
                                       type="button"
                                       className={`ec-host-tile ${isCtrl ? "is-ctrl" : ""}`}
-                                      onClick={() => {
-                                        copy(ip);
-                                        Message.success(bi(`已复制 ${ip}`, `Copied ${ip}`));
-                                      }}
+                                      onClick={() =>
+                                        void copy(ip, bi(`已复制 ${ip}`, `Copied ${ip}`))
+                                      }
                                       title={bi("点击复制主机 IP", "Click to copy IP")}
                                     >
                                       <div className="ec-host-tile-l">
@@ -2066,136 +2082,6 @@ sudo systemctl status middleware-execution --no-pager`;
                         </div>
                       )}
                     </div>
-
-                    {/* Right Sticky Inspector Rail */}
-                    <aside className="ec-detail-side">
-                      <section className="ec-side-card">
-                        <div className="ec-side-card-head">
-                          <h3>{bi("节点档案与运行参数", "Node Profile & Runtime")}</h3>
-                        </div>
-                        <dl className="ec-facts">
-                          <div>
-                            <dt>{bi("节点标识", "Node ID")}</dt>
-                            <dd>
-                              <button
-                                type="button"
-                                className="ec-fact-copy mono"
-                                onClick={() => {
-                                  copy(activeNode.id);
-                                  Message.success(bi("已复制节点 ID", "Node ID copied"));
-                                }}
-                              >
-                                <span>{activeNode.id}</span>
-                                <IconCopy />
-                              </button>
-                            </dd>
-                          </div>
-                          <div>
-                            <dt>{bi("控制机 IP", "Control IP")}</dt>
-                            <dd>
-                              <button
-                                type="button"
-                                className="ec-fact-copy mono"
-                                onClick={() => {
-                                  copy(activeNode.controller_ip);
-                                  Message.success(bi("已复制控制机 IP", "Control IP copied"));
-                                }}
-                              >
-                                <span>{activeNode.controller_ip}</span>
-                                <IconCopy />
-                              </button>
-                            </dd>
-                          </div>
-                          <div>
-                            <dt>{bi("部署位置", "Placement")}</dt>
-                            <dd>{placementLabel}</dd>
-                          </div>
-                          <div>
-                            <dt>{bi("执行器版本", "Runner Version")}</dt>
-                            <dd className="mono">
-                              {activeNode.version ? `v${activeNode.version}` : "—"}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt>{bi("通信协议", "Protocol")}</dt>
-                            <dd className="mono">
-                              {activeNode.protocol ? `Protocol v${activeNode.protocol}` : "—"}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt>{bi("最近心跳", "Last Heartbeat")}</dt>
-                            <dd className="num">
-                              {activeNode.last_seen ? fullTime(activeNode.last_seen) : "—"}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt>{bi("systemd 服务", "Systemd Unit")}</dt>
-                            <dd>
-                              <code className="mono">middleware-execution</code>
-                            </dd>
-                          </div>
-                          <div>
-                            <dt>{bi("配置文件", "Config Path")}</dt>
-                            <dd>
-                              <code className="mono">/etc/middleware-execution/execution-node.json</code>
-                            </dd>
-                          </div>
-                        </dl>
-                      </section>
-
-                      <section className="ec-side-card">
-                        <div className="ec-side-card-head">
-                          <h3>{bi("常用运维命令", "Quick Ops Commands")}</h3>
-                        </div>
-                        <div className="ec-side-ops-body">
-                          <div className="ec-side-cmd">
-                            <div className="ec-side-cmd-head">
-                              <span>{bi("服务状态与近期日志", "Service Status & Logs")}</span>
-                              <button
-                                type="button"
-                                className="ec-side-cmd-copy"
-                                onClick={() => {
-                                  copy(nodeStatusCmd);
-                                  Message.success(bi("已复制命令", "Command copied"));
-                                }}
-                              >
-                                <IconCopy />
-                                <span>{bi("复制", "Copy")}</span>
-                              </button>
-                            </div>
-                            <pre className="ec-side-cmd-pre mono">{nodeStatusCmd}</pre>
-                          </div>
-
-                          <div className="ec-side-cmd">
-                            <div className="ec-side-cmd-head">
-                              <span>{bi("连通性即时自检", "Connectivity Self-Check")}</span>
-                              <button
-                                type="button"
-                                className="ec-side-cmd-copy"
-                                onClick={() => {
-                                  copy(nodeCheckCmd);
-                                  Message.success(bi("已复制自检命令", "Check command copied"));
-                                }}
-                              >
-                                <IconCopy />
-                                <span>{bi("复制", "Copy")}</span>
-                              </button>
-                            </div>
-                            <pre className="ec-side-cmd-pre mono">{nodeCheckCmd}</pre>
-                          </div>
-
-                          <Button
-                            size="small"
-                            type="outline"
-                            long
-                            icon={<IconBook />}
-                            onClick={() => setGuide("maintain")}
-                          >
-                            {bi("打开维护与故障排查手册", "Open Maintenance Guide")}
-                          </Button>
-                        </div>
-                      </section>
-                    </aside>
                   </div>
                 </article>
               );
@@ -2219,7 +2105,6 @@ sudo systemctl status middleware-execution --no-pager`;
                   ? "is-online"
                   : "is-offline";
               const agentSvc = `middleware-target-agent-${activeAgent.id}`;
-              const agentStatusCmd = `sudo systemctl status ${agentSvc} --no-pager\nsudo journalctl -u ${agentSvc} -n 40 --no-pager`;
               return (
                 <article
                   className="detail enter ec-detail-article"
@@ -2253,10 +2138,12 @@ sudo systemctl status middleware-execution --no-pager`;
                         <button
                           type="button"
                           className="ec-meta-copy mono"
-                          onClick={() => {
-                            copy(activeAgent.ip);
-                            Message.success(bi("已复制目标主机 IP", "Target IP copied"));
-                          }}
+                          onClick={() =>
+                            void copy(
+                              activeAgent.ip,
+                              bi("已复制目标主机 IP", "Target IP copied"),
+                            )
+                          }
                           title={bi("点击复制 IP", "Copy IP")}
                         >
                           <span>{activeAgent.ip}</span>
@@ -2307,6 +2194,16 @@ sudo systemctl status middleware-execution --no-pager`;
                           }
                         >
                           {bi("打开集群自动化", "Cluster Automation")}
+                        </Button>
+                      )}
+                      {!isRevoked && (
+                        <Button
+                          size="small"
+                          type="outline"
+                          icon={<IconBook />}
+                          onClick={() => setGuide("maintain")}
+                        >
+                          {bi("维护指南", "Guide")}
                         </Button>
                       )}
                       {canManage && isRevoked && (
@@ -2390,15 +2287,27 @@ sudo systemctl status middleware-execution --no-pager`;
                       </div>
                       <div className="ec-kpi-val">
                         <b>
-                          {activeAgent.allow_mutating
-                            ? bi("读写就绪", "Read & Write")
-                            : bi("仅只读探针", "Read-Only")}
+                          {isRevoked
+                            ? bi("授权已失效", "Token Revoked")
+                            : activeAgent.allow_mutating
+                              ? bi("读写就绪", "Read & Write")
+                              : bi("仅只读探针", "Read-Only")}
                         </b>
                       </div>
-                      <span className={`ec-kpi-sub ${activeAgent.allow_mutating ? "is-ok" : ""}`}>
-                        {activeAgent.allow_mutating
-                          ? bi("允许探针、变更执行与回滚", "Probes, mutations & rollbacks allowed")
-                          : bi("仅放行 100% 只读采集命令", "Strictly 100% read-only probes")}
+                      <span
+                        className={`ec-kpi-sub ${
+                          isRevoked
+                            ? "is-warn"
+                            : activeAgent.allow_mutating
+                              ? "is-ok"
+                              : ""
+                        }`}
+                      >
+                        {isRevoked
+                          ? bi("重新签发接入后恢复探针与变更执行", "Re-enroll host to restore execution")
+                          : activeAgent.allow_mutating
+                            ? bi("允许探针、变更执行与回滚", "Probes, mutations & rollbacks allowed")
+                            : bi("仅放行 100% 只读采集命令", "Strictly 100% read-only probes")}
                       </span>
                     </div>
 
@@ -2448,29 +2357,39 @@ sudo systemctl status middleware-execution --no-pager`;
                             </p>
                           </div>
                           <span className="ec-sec-badge">
-                            {activeAgent.allow_mutating ? bi("读写模式", "Read / Write") : bi("只读模式", "Read-Only")}
+                            {isRevoked
+                              ? bi("已撤销授权", "Revoked")
+                              : activeAgent.allow_mutating
+                                ? bi("读写模式", "Read / Write")
+                                : bi("只读模式", "Read-Only")}
                           </span>
                         </div>
 
                         <div className="ec-surface-card">
                           <div className="ec-cap-item">
                             <div
-                              className={`ec-cap-ic ${activeAgent.allow_mutating ? "is-on" : ""}`}
+                              className={`ec-cap-ic ${!isRevoked && activeAgent.allow_mutating ? "is-on" : ""}`}
                               aria-hidden
                             >
-                              {activeAgent.allow_mutating ? <IconThunderbolt /> : <IconSafe />}
+                              {!isRevoked && activeAgent.allow_mutating ? <IconThunderbolt /> : <IconSafe />}
                             </div>
                             <div className="ec-cap-body">
                               <div className="ec-cap-title-row">
                                 <b>{bi("允许执行变更写操作", "Allow Mutating Steps")}</b>
                                 <span
                                   className={`ec-cap-state ${
-                                    activeAgent.allow_mutating ? "is-ok" : ""
+                                    isRevoked
+                                      ? "is-warn"
+                                      : activeAgent.allow_mutating
+                                        ? "is-ok"
+                                        : ""
                                   }`}
                                 >
-                                  {activeAgent.allow_mutating
-                                    ? bi("已允许", "Allowed")
-                                    : bi("仅只读", "Read-Only")}
+                                  {isRevoked
+                                    ? bi("已撤销", "Revoked")
+                                    : activeAgent.allow_mutating
+                                      ? bi("已允许", "Allowed")
+                                      : bi("仅只读", "Read-Only")}
                                 </span>
                               </div>
                               <p>
@@ -2576,124 +2495,6 @@ sudo systemctl status middleware-execution --no-pager`;
                         </div>
                       )}
                     </div>
-
-                    {/* Right Sticky Inspector Rail */}
-                    <aside className="ec-detail-side">
-                      <section className="ec-side-card">
-                        <div className="ec-side-card-head">
-                          <h3>{bi("Agent 档案与连接信息", "Agent Profile & Connection")}</h3>
-                        </div>
-                        <dl className="ec-facts">
-                          <div>
-                            <dt>{bi("Agent 标识", "Agent ID")}</dt>
-                            <dd>
-                              <button
-                                type="button"
-                                className="ec-fact-copy mono"
-                                onClick={() => {
-                                  copy(activeAgent.id);
-                                  Message.success(bi("已复制 Agent ID", "Agent ID copied"));
-                                }}
-                              >
-                                <span>{activeAgent.id}</span>
-                                <IconCopy />
-                              </button>
-                            </dd>
-                          </div>
-                          <div>
-                            <dt>{bi("目标主机 IP", "Target IP")}</dt>
-                            <dd>
-                              <button
-                                type="button"
-                                className="ec-fact-copy mono"
-                                onClick={() => {
-                                  copy(activeAgent.ip);
-                                  Message.success(bi("已复制目标主机 IP", "Target IP copied"));
-                                }}
-                              >
-                                <span>{activeAgent.ip}</span>
-                                <IconCopy />
-                              </button>
-                            </dd>
-                          </div>
-                          <div>
-                            <dt>{bi("接入模式", "Transport")}</dt>
-                            <dd>{bi("HTTPS 主动外连（免 SSH）", "Outbound HTTPS")}</dd>
-                          </div>
-                          <div>
-                            <dt>{bi("签发时间", "Created")}</dt>
-                            <dd className="num">
-                              {activeAgent.created ? fullTime(activeAgent.created) : "—"}
-                            </dd>
-                          </div>
-                          {activeAgent.expires && (
-                            <div>
-                              <dt>{bi("凭证有效期", "Expires")}</dt>
-                              <dd className="num">{fullTime(activeAgent.expires)}</dd>
-                            </div>
-                          )}
-                          <div>
-                            <dt>{bi("最近心跳", "Last Heartbeat")}</dt>
-                            <dd className="num">
-                              {activeAgent.last_seen ? fullTime(activeAgent.last_seen) : "—"}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt>{bi("systemd 服务", "Systemd Unit")}</dt>
-                            <dd>
-                              <code className="mono">{agentSvc}</code>
-                            </dd>
-                          </div>
-                        </dl>
-                      </section>
-
-                      <section className="ec-side-card">
-                        <div className="ec-side-card-head">
-                          <h3>{bi("常用运维命令", "Quick Ops Commands")}</h3>
-                        </div>
-                        <div className="ec-side-ops-body">
-                          <div className="ec-side-cmd">
-                            <div className="ec-side-cmd-head">
-                              <span>{bi("服务状态与近期日志", "Service Status & Logs")}</span>
-                              <button
-                                type="button"
-                                className="ec-side-cmd-copy"
-                                onClick={() => {
-                                  copy(agentStatusCmd);
-                                  Message.success(bi("已复制命令", "Command copied"));
-                                }}
-                              >
-                                <IconCopy />
-                                <span>{bi("复制", "Copy")}</span>
-                              </button>
-                            </div>
-                            <pre className="ec-side-cmd-pre mono">{agentStatusCmd}</pre>
-                          </div>
-
-                          {canManage && isRevoked && (
-                            <Button
-                              size="small"
-                              type="primary"
-                              long
-                              icon={<IconPlus />}
-                              onClick={() => reEnrollTarget(activeAgent)}
-                            >
-                              {bi("为此主机重新签发 Agent", "Re-Enroll This Host")}
-                            </Button>
-                          )}
-
-                          <Button
-                            size="small"
-                            type="outline"
-                            long
-                            icon={<IconBook />}
-                            onClick={() => setGuide("maintain")}
-                          >
-                            {bi("打开维护与故障排查手册", "Open Maintenance Guide")}
-                          </Button>
-                        </div>
-                      </section>
-                    </aside>
                   </div>
                 </article>
               );
@@ -3285,9 +3086,11 @@ sudo systemctl status middleware-execution --no-pager`;
                     type="outline"
                     icon={<IconCopy />}
                     onClick={() => {
-                      copy(targetConfigJSON);
+                      void copy(
+                        targetConfigJSON,
+                        bi("已复制 target-agent.json 配置", "Copied target-agent.json"),
+                      );
                       setDownloaded(true);
-                      Message.success(bi("已复制 target-agent.json 配置", "Copied target-agent.json"));
                     }}
                   >
                     {bi("复制配置文件 JSON", "Copy Config JSON")}

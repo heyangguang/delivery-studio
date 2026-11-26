@@ -1462,7 +1462,7 @@ export const typing = (e: KeyboardEvent) => {
   );
 };
 
-export async function copy(text: string) {
+export async function copy(text: string, toastLabel?: string | false) {
   try {
     await navigator.clipboard.writeText(text);
   } catch {
@@ -1475,7 +1475,12 @@ export async function copy(text: string) {
     document.execCommand("copy");
     t.remove();
   }
-  Message.success({ content: bi("已复制", "Copied"), duration: 1200 });
+  if (toastLabel !== false) {
+    Message.success({
+      content: toastLabel || bi("已复制", "Copied"),
+      duration: 1400,
+    });
+  }
 }
 
 const RE_CLOSE_SUBSHELL = /^\)\s*(<\s*\/dev\/null\s*)?(2>&1\s*)?$/;

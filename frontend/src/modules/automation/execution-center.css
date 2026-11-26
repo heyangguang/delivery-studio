@@ -603,13 +603,10 @@
   font-weight: 560;
 }
 
-/* Full-Width 2-Column Workspace (Main + Sticky Inspector Rail) */
+/* Full-Width Single-Column Workspace (clean, uncluttered, zero redundant right rail) */
 
 .ec-detail-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) clamp(310px, 28%, 440px);
-  gap: 24px clamp(24px, 2.6vw, 40px);
-  align-items: start;
+  display: block;
   border-top: 1px solid var(--line);
   padding-top: 22px;
 }
@@ -618,15 +615,6 @@
   display: flex;
   flex-direction: column;
   gap: 22px;
-  min-width: 0;
-}
-
-.ec-detail-side {
-  position: sticky;
-  top: 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
   min-width: 0;
 }
 
@@ -1181,174 +1169,31 @@
   color: var(--brand-ink);
 }
 
-/* Right Sticky Inspector Side Cards */
+/* Enroll Agent Modal Spacing & Helpers */
 
-.ec-side-card {
-  border-radius: 13px;
-  border: 1px solid var(--line);
-  background: var(--surface);
-  overflow: hidden;
-}
-
-.ec-side-card-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 11px 15px;
-  border-bottom: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
-  background: var(--surface-2);
-}
-
-.ec-side-card-head h3 {
-  margin: 0;
-  font-size: 12.5px;
-  font-weight: 650;
-  color: var(--ink);
-}
-
-.ec-facts {
-  margin: 0;
-  padding: 4px 15px 6px;
-  display: flex;
-  flex-direction: column;
-}
-
-.ec-facts > div {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
-  font-size: 12.5px;
-}
-
-.ec-facts > div:last-child {
-  border-bottom: 0;
-}
-
-.ec-facts dt {
-  color: var(--mute);
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.ec-facts dd {
-  margin: 0;
-  color: var(--ink);
-  font-weight: 540;
-  text-align: right;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.ec-facts dd code {
-  font-size: 12px;
-  color: var(--ink-2);
-  background: transparent;
-  padding: 0;
-}
-
-.ec-fact-copy {
-  all: unset;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--ink);
-  cursor: pointer;
-  max-width: 100%;
-  word-break: break-all;
-}
-
-.ec-fact-copy svg {
-  font-size: 11px;
-  color: var(--faint);
-  flex-shrink: 0;
-}
-
-.ec-fact-copy:hover {
-  color: var(--brand-ink);
-}
-
-.ec-fact-copy:hover svg {
-  color: var(--brand-ink);
-}
-
-.ec-side-ops-body {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 13px 14px 14px;
-}
-
-.ec-side-cmd {
-  border-radius: 9px;
-  border: 1px solid var(--line);
-  background: var(--surface);
-  overflow: hidden;
-}
-
-.ec-side-cmd-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 6px 10px;
+.en-modal .en-setup-steps {
+  margin-bottom: 20px;
+  padding-bottom: 16px;
   border-bottom: 1px solid var(--line);
-  background: var(--surface-2);
-  font-size: 11.5px;
-  font-weight: 560;
-  color: var(--mute);
 }
 
-.ec-side-cmd-head > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.en-modal .en-form {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
 }
 
-.ec-side-cmd-copy {
-  all: unset;
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 2px 6px;
-  border-radius: 5px;
-  font-size: 11px;
-  font-weight: 560;
-  color: var(--ink-2);
-  cursor: pointer;
-  white-space: nowrap;
-  flex-shrink: 0;
-  transition: color 0.14s ease, background-color 0.14s ease;
+.en-modal .en-form-grid {
+  gap: 20px 18px;
 }
-
-.ec-side-cmd-copy:hover {
-  color: var(--brand-ink);
-  background: var(--brand-soft);
-}
-
-.ec-side-cmd-pre {
-  margin: 0;
-  padding: 9px 10px;
-  font-size: 11.5px;
-  line-height: 1.58;
-  color: var(--ink-2);
-  background: var(--code-bg);
-  overflow-x: auto;
-  white-space: pre;
-}
-
-/* Modal & Legacy Shared Helpers */
 
 .ec-modal-switch-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 14px;
-  padding: 11px 13px;
-  border-radius: 9px;
+  padding: 12px 14px;
+  border-radius: 10px;
   border: 1px solid var(--line);
   background: var(--surface-2);
 }
@@ -1460,18 +1305,6 @@
 }
 
 /* Container-Aware Fluid Breakpoints */
-
-@container ec-agent-detail (max-width: 980px) {
-  .ec-detail-grid {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 22px 0;
-  }
-  .ec-detail-side {
-    position: static;
-    border-top: 1px solid var(--line);
-    padding-top: 20px;
-  }
-}
 
 @container ec-agent-detail (max-width: 860px) {
   .ec-kpi-strip {

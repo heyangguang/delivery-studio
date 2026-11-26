@@ -1553,9 +1553,11 @@ function ProbeCodeBlock({
   };
 
   const handleCopy = () => {
-    copy(script);
+    void copy(
+      script,
+      bi("已复制 100% 只读采集脚本", "100% read-only probe script copied"),
+    );
     setCopied(true);
-    Message.success(bi("已复制 100% 只读采集脚本", "100% read-only probe script copied"));
     window.setTimeout(() => setCopied(false), 1600);
   };
 

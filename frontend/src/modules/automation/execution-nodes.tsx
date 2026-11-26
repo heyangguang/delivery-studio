@@ -8,6 +8,7 @@ import {
   Modal,
   Popconfirm,
   Popover,
+  Select,
   Skeleton,
   Switch,
   Tooltip,
@@ -18,6 +19,7 @@ import {
   IconBook,
   IconCheck,
   IconCheckCircle,
+  IconClose,
   IconCode,
   IconCopy,
   IconDelete,
@@ -38,6 +40,7 @@ import {
   IconUp,
 } from "@arco-design/web-react/icon";
 import {
+  ClusterView,
   ago,
   api,
   authToken,
@@ -53,6 +56,7 @@ import { go } from "../../app/router";
 import { FilterChip, Kbd, Segmented, StatusBadge } from "../../design/ui";
 import { bi, biv, getLang, useLang, withLang } from "../../app/i18n";
 import {
+  AgentHostProbe,
   AutomationAgentView,
   ExecutionNode,
   consumeAgentEnrollPrefill,
@@ -343,6 +347,154 @@ const nodeStatusLabel = (key: string, fallback: string) =>
           ? bi("等待连接", "Awaiting connection")
           : fallback;
 
+function formatProbeMem(mb?: number): string {
+  if (!mb || mb <= 0) return "—";
+  if (mb >= 1024) return `${(mb / 1024).toFixed(mb % 1024 === 0 ? 0 : 1)} GB`;
+  return `${mb} MB`;
+}
+
+function formatProbeUptime(sec?: number): string {
+  if (!sec || sec <= 0) return "—";
+  const days = Math.floor(sec / 86400);
+  const hours = Math.floor((sec % 86400) / 3600);
+  const mins = Math.max(1, Math.floor((sec % 3600) / 60));
+  if (days > 0) return bi(`${days} 天 ${hours} 小时`, `${days}d ${hours}h`);
+  if (hours > 0) return bi(`${hours} 小时 ${mins} 分`, `${hours}h ${mins}m`);
+  return bi(`${mins} 分钟`, `${mins}m`);
+}
+
+function AgentLiveProbeSection({
+  probe,
+  online,
+  lastSeen,
+  inactive,
+  defaultIntervalSec,
+}: {
+  probe?: AgentHostProbe;
+  online: boolean;
+  lastSeen?: string;
+  inactive?: boolean;
+  defaultIntervalSec: number;
+}) {
+  const interval = probe?.interval_sec || defaultIntervalSec;
+  const memPct = Math.min(100, Math.max(0, probe?.mem_used_pct || 0));
+  const diskPct = Math.min(100, Math.max(0, probe?.disk_used_pct || 0));
+  return (
+    <section className="ec-sec">
+      <div className="ec-sec-head">
+        <div>
+          <h2 className="ec-sec-title">
+            {bi("实时心跳与主机探针", "Live Heartbeat & Host Probe")}
+          </h2>
+          <p className="ec-sec-sub">
+            {bi(
+              `Agent 守护进程在后台每 ${interval} 秒主动上报实时心跳，并每 15 秒零子进程采集本机系统负载、内存与磁盘健康指标（超过 35 秒未收到心跳自动判定离线）。`,
+              `Agent daemon reports live heartbeats every ${interval}s and samples zero-fork host load, memory, and disk telemetry every 15s (marked offline after 35s timeout).`,
+            )}
+          </p>
+        </div>
+        <span
+          className={`ec-sec-badge ${
+            inactive ? "" : online ? "is-live" : lastSeen ? "is-warn" : ""
+          }`}
+        >
+          {inactive
+            ? bi("已停用 / 已撤销", "Inactive")
+            : online
+              ? bi(`● 每 ${interval}s 实时上报`, `● Live · Every ${interval}s`)
+              : lastSeen
+                ? bi("心跳超时中断", "Heartbeat Lost")
+                : bi("等待探针上线", "Awaiting Agent")}
+        </span>
+      </div>
+
+      <div className="ec-surface-card">
+        {probe ? (
+          <div className="ec-probe-grid">
+            <div className="ec-probe-item">
+              <span className="ec-probe-lbl">{bi("CPU 负载 (1m / 5m)", "CPU Load (1m / 5m)")}</span>
+              <div className="ec-probe-val num">
+                <b>{(probe.load1 ?? 0).toFixed(2)}</b>
+                <span>
+                  / {(probe.load5 ?? 0).toFixed(2)}
+                  {probe.cpu_cores ? ` · ${probe.cpu_cores}C` : ""}
+                </span>
+              </div>
+              <small className="ec-probe-sub">
+                {probe.arch ? `${probe.arch.toUpperCase()} · ` : ""}
+                {lastSeen
+                  ? bi(`最近探针 ${ago(lastSeen)}`, `Sampled ${ago(lastSeen)}`)
+                  : bi("实时采集中", "Live sampling")}
+              </small>
+            </div>
+
+            <div className="ec-probe-item">
+              <span className="ec-probe-lbl">{bi("内存使用率", "Memory Usage")}</span>
+              <div className="ec-probe-val num">
+                <b>{probe.mem_total_mb ? `${memPct.toFixed(1)}%` : "—"}</b>
+                <span>{formatProbeMem(probe.mem_total_mb)}</span>
+              </div>
+              <div className="ec-probe-bar" aria-hidden>
+                <i
+                  className={memPct >= 88 ? "is-bad" : memPct >= 75 ? "is-warn" : ""}
+                  style={{ width: `${memPct}%` }}
+                />
+              </div>
+            </div>
+
+            <div className="ec-probe-item">
+              <span className="ec-probe-lbl">{bi("根分区磁盘", "Root Disk")}</span>
+              <div className="ec-probe-val num">
+                <b>{probe.disk_total_gb ? `${diskPct.toFixed(1)}%` : "—"}</b>
+                <span>
+                  {probe.disk_total_gb ? `${probe.disk_total_gb.toFixed(0)} GB` : "—"}
+                </span>
+              </div>
+              <div className="ec-probe-bar" aria-hidden>
+                <i
+                  className={diskPct >= 90 ? "is-bad" : diskPct >= 80 ? "is-warn" : ""}
+                  style={{ width: `${diskPct}%` }}
+                />
+              </div>
+            </div>
+
+            <div className="ec-probe-item">
+              <span className="ec-probe-lbl">{bi("系统与运行时长", "OS & Uptime")}</span>
+              <div className="ec-probe-val">
+                <b title={probe.os || ""}>{probe.os || "Linux"}</b>
+              </div>
+              <small className="ec-probe-sub num">
+                {probe.uptime_sec
+                  ? bi(`持续运行 ${formatProbeUptime(probe.uptime_sec)}`, `Up ${formatProbeUptime(probe.uptime_sec)}`)
+                  : probe.kernel || "—"}
+              </small>
+            </div>
+          </div>
+        ) : (
+          <div className="ec-scope-block">
+            <p className="ec-scope-hint">
+              {inactive
+                ? bi(
+                    "当前 Agent 已停用或已撤销授权，不再接收实时心跳上报。",
+                    "This Agent is paused or revoked and no longer accepts live heartbeats.",
+                  )
+                : lastSeen
+                  ? bi(
+                      `最近心跳时间：${fullTime(lastSeen)}（每 ${interval}s 持续上报；升级至新版 Agent 二进制后可同步展示 CPU、内存、磁盘等实时探针指标）。`,
+                      `Last heartbeat: ${fullTime(lastSeen)} (reported every ${interval}s; upgrade the Agent binary to stream live CPU, memory, and disk probe metrics).`,
+                    )
+                  : bi(
+                      `尚未收到实时心跳；在目标主机执行一键安装脚本启动 systemd 守护服务后，Agent 将每 ${interval} 秒自动上报心跳与主机健康探针。`,
+                      `No live heartbeat received yet; once installed via systemd, the Agent automatically streams heartbeats every ${interval}s along with host health telemetry.`,
+                    )}
+            </p>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 export function ExecutionNodes({
   centerNav,
   initialRole = "all",
@@ -359,6 +511,9 @@ export function ExecutionNodes({
   );
   const [agents, setAgents] = useState<AutomationAgentView[] | null>(
     () => cached<AutomationAgentView[]>("/api/executions/agents") ?? null,
+  );
+  const [clusters, setClusters] = useState<ClusterView[]>(
+    () => cached<ClusterView[]>("/api/clusters") ?? [],
   );
   const [bootInfo, setBootInfo] = useState<BootstrapInfo | null>(null);
   const [error, setError] = useState("");
@@ -385,6 +540,7 @@ export function ExecutionNodes({
   const [targetHost, setTargetHost] = useState("");
   const [targetIP, setTargetIP] = useState("");
   const [targetAllowMutating, setTargetAllowMutating] = useState(true);
+  const [targetClusters, setTargetClusters] = useState<string[]>([]);
   const [createError, setCreateError] = useState("");
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -458,13 +614,30 @@ export function ExecutionNodes({
           if (mounted.current) setAgentsError((e as Error).message);
         }),
     );
+    jobs.push(
+      api<ClusterView[]>("/api/clusters")
+        .then((result) => {
+          const list = Array.isArray(result) ? result : [];
+          putCached("/api/clusters", list);
+          if (mounted.current) setClusters(list);
+        })
+        .catch(() => {
+          /* non-blocking */
+        }),
+    );
     await Promise.all(jobs);
     if (mounted.current) setRefreshing(false);
   };
 
   const updateGlobalAgent = async (
     ag: AutomationAgentView,
-    payload: { action: "update" | "revoke" | "delete"; allow_mutating?: boolean },
+    payload: {
+      action: "update" | "revoke" | "delete";
+      allow_mutating?: boolean;
+      clusters?: string[];
+      add_cluster?: string;
+      remove_cluster?: string;
+    },
   ) => {
     if (updatingAgentLockRef.current) return;
     updatingAgentLockRef.current = ag.id;
@@ -485,7 +658,13 @@ export function ExecutionNodes({
           ? bi(`已删除目标机「${ag.host}」的 Agent 记录`, `Deleted target agent "${ag.host}"`)
           : payload.action === "revoke"
             ? bi(`已撤销目标机「${ag.host}」的 Agent 授权`, `Revoked agent on "${ag.host}"`)
-            : bi(`已更新目标机「${ag.host}」写操作权限`, `Updated write permission for "${ag.host}"`),
+            : payload.add_cluster
+              ? bi(`已关联集群「${payload.add_cluster}」`, `Bound cluster "${payload.add_cluster}"`)
+              : payload.remove_cluster
+                ? bi(`已解除集群「${payload.remove_cluster}」关联`, `Unbound cluster "${payload.remove_cluster}"`)
+                : payload.clusters !== undefined
+                  ? bi(`已更新目标机「${ag.host}」关联授权集群`, `Updated bound clusters for "${ag.host}"`)
+                  : bi(`已更新目标机「${ag.host}」写操作权限`, `Updated write permission for "${ag.host}"`),
       );
     } catch (e) {
       Message.error((e as Error).message);
@@ -541,6 +720,7 @@ export function ExecutionNodes({
         setTargetHost(prefill.host || "");
         setTargetIP(prefill.ip || "");
         setTargetAllowMutating(true);
+        setTargetClusters(prefill.cluster ? [prefill.cluster] : []);
       }
       setRegistration(null);
       setTargetRegistration(null);
@@ -555,7 +735,7 @@ export function ExecutionNodes({
   }, []);
 
   useEffect(() => {
-    const intervalMs = fastPoll ? 1500 : 10000;
+    const intervalMs = fastPoll ? 1500 : 5000;
     const onVisible = () => {
       if (document.visibilityState === "visible") void load();
     };
@@ -580,6 +760,7 @@ export function ExecutionNodes({
       setTargetHost("");
       setTargetIP("");
       setTargetAllowMutating(true);
+      setTargetClusters([]);
       setCreateError("");
       setBundleError("");
     }
@@ -594,6 +775,7 @@ export function ExecutionNodes({
     setTargetHost("");
     setTargetIP("");
     setTargetAllowMutating(true);
+    setTargetClusters([]);
     setDownloaded(false);
     setCreateError("");
     setBundleError("");
@@ -616,6 +798,7 @@ export function ExecutionNodes({
             host: targetHost.trim(),
             ip: targetIP.trim(),
             allow_mutating: targetAllowMutating,
+            clusters: targetClusters,
           }),
         });
         setTargetRegistration({ agent: res.agent, token: res.enrollment_token });
@@ -978,7 +1161,7 @@ export function ExecutionNodes({
         a.host,
         a.ip,
         a.cluster || "",
-        ...(a.matched_clusters || []),
+        ...(a.clusters || a.matched_clusters || []),
       ].some((s) => s.toLowerCase().includes(q));
     });
     if (agentSort === "name") {
@@ -1027,10 +1210,16 @@ export function ExecutionNodes({
 
   const activeAgentClusters = useMemo(() => {
     if (!activeAgent) return [];
-    const list = activeAgent.matched_clusters || [];
+    const list = activeAgent.clusters ?? activeAgent.matched_clusters ?? [];
     if (list.length > 0) return list;
     return activeAgent.cluster ? [activeAgent.cluster] : [];
   }, [activeAgent]);
+
+  const clusterById = useMemo(() => {
+    const m = new Map<string, ClusterView>();
+    for (const c of clusters) m.set(c.id, c);
+    return m;
+  }, [clusters]);
 
   useEffect(() => {
     setUpgradeCmdOpen(false);
@@ -1043,6 +1232,8 @@ export function ExecutionNodes({
     setTargetHost(ag.host || "");
     setTargetIP(ag.ip || "");
     setTargetAllowMutating(ag.allow_mutating !== false);
+    const prevBound = ag.clusters ?? ag.matched_clusters ?? (ag.cluster ? [ag.cluster] : []);
+    setTargetClusters(prevBound);
     setDownloaded(false);
     setCreateError("");
     setBundleError("");
@@ -1382,12 +1573,9 @@ sudo systemctl status middleware-execution --no-pager`;
                           ? "is-online"
                           : "is-offline";
                       const isSel = activeAgent?.id === ag.id;
+                      const boundList = ag.clusters ?? ag.matched_clusters ?? [];
                       const matchCnt =
-                        ag.matched_clusters && ag.matched_clusters.length > 0
-                          ? ag.matched_clusters.length
-                          : ag.cluster
-                            ? 1
-                            : 0;
+                        boundList.length > 0 ? boundList.length : ag.cluster ? 1 : 0;
                       return (
                         <button
                           key={ag.id}
@@ -1660,10 +1848,23 @@ sudo systemctl status middleware-execution --no-pager`;
                       <div className="ec-kpi-val">
                         <b>{nodeStatusLabel(st.key, st.label)}</b>
                       </div>
-                      <span className="ec-kpi-sub num">
-                        {activeNode.last_seen
-                          ? fullTime(activeNode.last_seen)
-                          : bi("等待节点首次上报心跳", "Awaiting first heartbeat")}
+                      <span
+                        className={`ec-kpi-sub num ${
+                          st.key === "online"
+                            ? "is-ok"
+                            : st.key === "offline"
+                              ? "is-warn"
+                              : ""
+                        }`}
+                      >
+                        {st.key === "online" && activeNode.last_seen
+                          ? bi(
+                              `每 ${activeNode.probe?.interval_sec || 3}s 实时上报 · ${ago(activeNode.last_seen)}`,
+                              `Every ${activeNode.probe?.interval_sec || 3}s · ${ago(activeNode.last_seen)}`,
+                            )
+                          : activeNode.last_seen
+                            ? fullTime(activeNode.last_seen)
+                            : bi("启动服务后每 3s 实时上报心跳", "Streams live heartbeat every 3s")}
                       </span>
                     </div>
 
@@ -1825,6 +2026,15 @@ sudo systemctl status middleware-execution --no-pager`;
                           )}
                         </section>
                       )}
+
+                      {/* Live Heartbeat & Host Telemetry */}
+                      <AgentLiveProbeSection
+                        probe={activeNode.probe}
+                        online={st.key === "online"}
+                        lastSeen={activeNode.last_seen}
+                        inactive={activeNode.disabled}
+                        defaultIntervalSec={3}
+                      />
 
                       {/* Capability Permissions */}
                       <section className="ec-sec">
@@ -2152,10 +2362,10 @@ sudo systemctl status middleware-execution --no-pager`;
                         <span>
                           {activeAgentClusters.length > 0
                             ? bi(
-                                `已自动匹配 ${activeAgentClusters.length} 个集群`,
-                                `Matched ${activeAgentClusters.length} cluster(s)`,
+                                `已关联授权 ${activeAgentClusters.length} 个集群`,
+                                `Bound to ${activeAgentClusters.length} cluster(s)`,
                               )
-                            : bi("按主机 IP 自动匹配集群", "Auto-matches clusters by IP")}
+                            : bi("暂未关联集群", "No cluster bound yet")}
                         </span>
                         {activeAgent.version && (
                           <span className="mono">v{activeAgent.version}</span>
@@ -2163,18 +2373,28 @@ sudo systemctl status middleware-execution --no-pager`;
                         <Tooltip
                           content={
                             activeAgent.last_seen
-                              ? fullTime(activeAgent.last_seen)
-                              : bi("尚未上报心跳", "No heartbeat yet")
+                              ? bi(
+                                  `每 ${activeAgent.probe?.interval_sec || 5}s 实时探针上报 · 最近上报 ${fullTime(activeAgent.last_seen)}`,
+                                  `Live probe every ${activeAgent.probe?.interval_sec || 5}s · Last seen ${fullTime(activeAgent.last_seen)}`,
+                                )
+                              : bi("安装启动后每 5s 自动实时上报心跳与探针", "Streams live heartbeats every 5s once started")
                           }
                           mini
                         >
                           <span>
-                            {activeAgent.last_seen
+                            {activeAgent.online && activeAgent.last_seen
                               ? bi(
-                                  `最近心跳 ${ago(activeAgent.last_seen)}`,
-                                  `Heartbeat ${ago(activeAgent.last_seen)}`,
+                                  `实时心跳正常 · ${ago(activeAgent.last_seen)}`,
+                                  `Live heartbeat · ${ago(activeAgent.last_seen)}`,
                                 )
-                              : bi("尚未上报心跳", "No heartbeat yet")}
+                              : activeAgent.last_seen
+                                ? bi(
+                                    `最近心跳 ${ago(activeAgent.last_seen)}`,
+                                    `Last heartbeat ${ago(activeAgent.last_seen)}`,
+                                  )
+                                : isRevoked
+                                  ? bi("未部署上线", "Never connected")
+                                  : bi("待启动服务（每 5s 实时上报）", "Pending start (5s live poll)")}
                           </span>
                         </Tooltip>
                       </div>
@@ -2268,16 +2488,31 @@ sudo systemctl status middleware-execution --no-pager`;
                   <div className="ec-kpi-strip">
                     <div className="ec-kpi-card">
                       <div className="ec-kpi-top">
-                        <span className="ec-kpi-label">{bi("运行与授权状态", "Runtime & Auth")}</span>
+                        <span className="ec-kpi-label">{bi("实时心跳与运行状态", "Live Heartbeat & State")}</span>
                         <span className={`ec-state-dot ${dotCls}`} aria-hidden />
                       </div>
                       <div className="ec-kpi-val">
                         <b>{badgeLabel}</b>
                       </div>
-                      <span className="ec-kpi-sub num">
-                        {activeAgent.last_seen
-                          ? fullTime(activeAgent.last_seen)
-                          : bi("尚未上报首次心跳", "No heartbeat recorded")}
+                      <span
+                        className={`ec-kpi-sub num ${
+                          activeAgent.online
+                            ? "is-ok"
+                            : !isRevoked && activeAgent.last_seen
+                              ? "is-warn"
+                              : ""
+                        }`}
+                      >
+                        {activeAgent.online && activeAgent.last_seen
+                          ? bi(
+                              `每 ${activeAgent.probe?.interval_sec || 5}s 实时上报 · ${ago(activeAgent.last_seen)}`,
+                              `Every ${activeAgent.probe?.interval_sec || 5}s · ${ago(activeAgent.last_seen)}`,
+                            )
+                          : activeAgent.last_seen
+                            ? fullTime(activeAgent.last_seen)
+                            : isRevoked
+                              ? bi("授权已撤销 · 未部署运行", "Revoked before deployment")
+                              : bi("启动后每 5s 实时上报心跳", "Streams live heartbeat every 5s")}
                       </span>
                     </div>
 
@@ -2313,14 +2548,14 @@ sudo systemctl status middleware-execution --no-pager`;
 
                     <div className="ec-kpi-card">
                       <div className="ec-kpi-top">
-                        <span className="ec-kpi-label">{bi("自动匹配集群", "Matched Clusters")}</span>
+                        <span className="ec-kpi-label">{bi("关联授权集群", "Authorized Clusters")}</span>
                       </div>
                       <div className="ec-kpi-val num">
                         <b>{activeAgentClusters.length}</b>
                         <span className="ec-kpi-unit">{bi("个集群", "clusters")}</span>
                       </div>
                       <span className="ec-kpi-sub">
-                        {bi("按主机 IP 自动关联并跨集群复用", "Auto-discovered by host IP")}
+                        {bi("手动选择关联集群，严格跨集群隔离", "Explicitly selected by customer")}
                       </span>
                     </div>
 
@@ -2339,9 +2574,18 @@ sudo systemctl status middleware-execution --no-pager`;
                     </div>
                   </div>
 
-                  {/* Full-Width Dual-Column Workspace */}
+                  {/* Full-Width Single-Column Workspace */}
                   <div className="ec-detail-grid">
                     <div className="ec-detail-main">
+                      {/* Live Heartbeat & Host Telemetry */}
+                      <AgentLiveProbeSection
+                        probe={activeAgent.probe}
+                        online={activeAgent.online}
+                        lastSeen={activeAgent.last_seen}
+                        inactive={isRevoked}
+                        defaultIntervalSec={5}
+                      />
+
                       {/* Permissions Card */}
                       <section className="ec-sec">
                         <div className="ec-sec-head">
@@ -2415,17 +2659,17 @@ sudo systemctl status middleware-execution --no-pager`;
                         </div>
                       </section>
 
-                      {/* Auto-Matched Clusters */}
+                      {/* Customer-Selected Bound Clusters */}
                       <section className="ec-sec">
                         <div className="ec-sec-head">
                           <div>
                             <h2 className="ec-sec-title">
-                              {bi("自动匹配的集群", "Auto-Matched Clusters")}
+                              {bi("关联授权集群", "Authorized Clusters")}
                             </h2>
                             <p className="ec-sec-sub">
                               {bi(
-                                "1 台主机仅需接入 1 次目标机 Agent；任意集群的节点列表包含此 IP 时，将在集群「自动化 → 方式 B」中自动识别并复用。",
-                                "Enroll each host once; any cluster referencing this IP automatically matches and reuses this Agent in Automation → Mode B.",
+                                "由您自主选择允许调用该目标机 Agent 的集群（不再按 IP 自动关联），保障多套集群之间的严格权限隔离。",
+                                "Explicitly choose which clusters are authorized to dispatch tasks to this Target Agent (never auto-matched by IP alone).",
                               )}
                             </p>
                           </div>
@@ -2434,36 +2678,114 @@ sudo systemctl status middleware-execution --no-pager`;
 
                         <div className="ec-surface-card">
                           <div className="ec-scope-block">
+                            {canManage && !isRevoked && (
+                              <div className="ec-bind-picker-row">
+                                <Select
+                                  showSearch
+                                  value={undefined}
+                                  disabled={updatingAgent === activeAgent.id}
+                                  placeholder={bi(
+                                    "选择集群添加到此 Agent（可输入集群名称搜索）…",
+                                    "Select a cluster to authorize on this Agent…",
+                                  )}
+                                  notFoundContent={bi("没有更多可关联的集群", "No more clusters available")}
+                                  filterOption={(inputValue, option) => {
+                                    const q = inputValue.trim().toLowerCase();
+                                    if (!q) return true;
+                                    const val = String((option as { props?: { value?: string } })?.props?.value || "").toLowerCase();
+                                    const meta = clusterById.get(val);
+                                    return (
+                                      val.includes(q) ||
+                                      (meta?.app_name || "").toLowerCase().includes(q)
+                                    );
+                                  }}
+                                  onChange={(cid) => {
+                                    if (!cid) return;
+                                    void updateGlobalAgent(activeAgent, {
+                                      action: "update",
+                                      add_cluster: String(cid),
+                                    });
+                                  }}
+                                >
+                                  {clusters
+                                    .filter((c) => !activeAgentClusters.includes(c.id))
+                                    .map((c) => (
+                                      <Select.Option key={c.id} value={c.id}>
+                                        <span className="mono" style={{ fontWeight: 600 }}>
+                                          {c.id}
+                                        </span>
+                                        {c.app_name ? (
+                                          <span style={{ color: "var(--mute)", marginLeft: 8, fontSize: 12 }}>
+                                            {c.app_name} {c.version || ""}
+                                          </span>
+                                        ) : null}
+                                      </Select.Option>
+                                    ))}
+                                </Select>
+                              </div>
+                            )}
+
                             {activeAgentClusters.length === 0 ? (
                               <p className="ec-scope-hint">
-                                {bi(
-                                  `暂未匹配到已有集群；纳管或交付包含 ${activeAgent.ip} 的集群后将自动关联。`,
-                                  `No clusters reference ${activeAgent.ip} yet; it will associate automatically once a cluster includes this IP.`,
-                                )}
+                                {isRevoked
+                                  ? bi("该 Agent 已撤销授权，当前未关联任何集群。", "This Agent is revoked and has no bound clusters.")
+                                  : canManage
+                                    ? bi(
+                                        "尚未关联任何集群；请在上方下拉框中手动选择需要使用此目标机 Agent 的集群。",
+                                        "No clusters bound yet; select the cluster(s) above to authorize this Agent.",
+                                      )
+                                    : bi("尚未关联任何集群。", "No clusters bound yet.")}
                               </p>
                             ) : (
                               <div className="ec-cluster-grid">
-                                {activeAgentClusters.map((cid) => (
-                                  <button
-                                    key={cid}
-                                    type="button"
-                                    className="ec-cluster-card"
-                                    onClick={() =>
-                                      go({ name: "deliveries", id: cid, tab: "automation" })
-                                    }
-                                  >
-                                    <div className="ec-cluster-card-l">
-                                      <span className="ec-cluster-ic" aria-hidden>
-                                        <IconStorage />
-                                      </span>
-                                      <div className="ec-cluster-card-txt">
-                                        <b className="mono">{cid}</b>
-                                        <small>{bi("打开集群自动化与演练", "Open cluster automation")}</small>
-                                      </div>
+                                {activeAgentClusters.map((cid) => {
+                                  const meta = clusterById.get(cid);
+                                  return (
+                                    <div key={cid} className="ec-cluster-card is-bound-item">
+                                      <button
+                                        type="button"
+                                        className="ec-cluster-card-nav"
+                                        onClick={() =>
+                                          go({ name: "deliveries", id: cid, tab: "automation" })
+                                        }
+                                      >
+                                        <span className="ec-cluster-ic" aria-hidden>
+                                          <IconStorage />
+                                        </span>
+                                        <div className="ec-cluster-card-txt">
+                                          <b className="mono">{cid}</b>
+                                          <small>
+                                            {meta?.app_name
+                                              ? `${meta.app_name} ${meta.version || ""} · ${bi("打开自动化", "Automation")}`
+                                              : bi("打开集群自动化与演练", "Open cluster automation")}
+                                          </small>
+                                        </div>
+                                        <IconRight className="ec-cluster-card-arrow" />
+                                      </button>
+                                      {canManage && !isRevoked && (
+                                        <Tooltip
+                                          content={bi(`解除与集群 ${cid} 的关联`, `Unbind ${cid}`)}
+                                          mini
+                                        >
+                                          <button
+                                            type="button"
+                                            className="ec-cluster-unbind"
+                                            disabled={updatingAgent === activeAgent.id}
+                                            onClick={() =>
+                                              void updateGlobalAgent(activeAgent, {
+                                                action: "update",
+                                                remove_cluster: cid,
+                                              })
+                                            }
+                                            aria-label={bi(`解除关联 ${cid}`, `Unbind ${cid}`)}
+                                          >
+                                            <IconClose />
+                                          </button>
+                                        </Tooltip>
+                                      )}
                                     </div>
-                                    <IconRight className="ec-cluster-card-arrow" />
-                                  </button>
-                                ))}
+                                  );
+                                })}
                               </div>
                             )}
                           </div>
@@ -2657,8 +2979,8 @@ sudo systemctl status middleware-execution --no-pager`;
                       value: "target" as const,
                       title: bi("目标机 Agent（免密直连）", "Target Agent (Direct HTTPS)"),
                       desc: bi(
-                        "直接装在业务目标机上（主动外连 HTTPS），无需 SSH 密码，1 台主机接入一次即可跨集群自动匹配",
-                        "Install on each target host (outbound HTTPS, no SSH). Enroll once, auto-matched by IP across clusters",
+                        "直接装在业务目标机上（主动外连 HTTPS，每 5s 实时探针心跳），无需 SSH 密码，由您自由选择关联集群",
+                        "Install on target host (outbound HTTPS, 5s live probe heartbeat, no SSH). Explicitly choose bound clusters",
                       ),
                     },
                   ] as const
@@ -2733,8 +3055,48 @@ sudo systemctl status middleware-execution --no-pager`;
                   />
                   <small>
                     {bi(
-                      "需与目标机实际网卡 IP 一致，集群将按此 IP 自动匹配",
-                      "Must match an interface IP on the host; clusters auto-match by this IP",
+                      "需与目标机实际网卡 IP 一致，接入时将核验本机网卡地址",
+                      "Must match an active network interface IP on the target host",
+                    )}
+                  </small>
+                </div>
+                <div className="en-field en-field-wide">
+                  <label>{bi("关联授权集群（可选，支持多选）", "Authorized Clusters (Optional, Multi-Select)")}</label>
+                  <Select
+                    mode="multiple"
+                    allowClear
+                    showSearch
+                    value={targetClusters}
+                    onChange={(vals) => setTargetClusters(vals as string[])}
+                    placeholder={bi(
+                      "选择允许使用该目标机 Agent 的集群（可留空，接入后随时在详情页添加）",
+                      "Select cluster(s) authorized to use this Agent (optional; editable anytime)",
+                    )}
+                    filterOption={(inputValue, option) => {
+                      const q = inputValue.trim().toLowerCase();
+                      if (!q) return true;
+                      const val = String((option as { props?: { value?: string } })?.props?.value || "").toLowerCase();
+                      const meta = clusterById.get(val);
+                      return val.includes(q) || (meta?.app_name || "").toLowerCase().includes(q);
+                    }}
+                  >
+                    {clusters.map((c) => (
+                      <Select.Option key={c.id} value={c.id}>
+                        <span className="mono" style={{ fontWeight: 600 }}>
+                          {c.id}
+                        </span>
+                        {c.app_name ? (
+                          <span style={{ color: "var(--mute)", marginLeft: 8, fontSize: 12 }}>
+                            {c.app_name} {c.version || ""}
+                          </span>
+                        ) : null}
+                      </Select.Option>
+                    ))}
+                  </Select>
+                  <small>
+                    {bi(
+                      "仅被选中的集群可向该 Agent 下发只读探针与变更步骤，不再按 IP 自动跨集群匹配",
+                      "Only explicitly selected clusters can dispatch tasks to this Agent",
                     )}
                   </small>
                 </div>
@@ -2918,11 +3280,17 @@ sudo systemctl status middleware-execution --no-pager`;
                     : biv(
                         <>
                           目标机 <code>{targetRegistration!.agent.ip}</code> ·{" "}
-                          1 台主机接入一次，任意包含该 IP 的集群将自动识别并复用
+                          {targetRegistration!.agent.clusters &&
+                          targetRegistration!.agent.clusters.length > 0
+                            ? `已授权关联 ${targetRegistration!.agent.clusters.join("、")}`
+                            : "上线后将每 5s 实时上报心跳，可在详情页按需关联集群"}
                         </>,
                         <>
                           Target host <code>{targetRegistration!.agent.ip}</code> ·{" "}
-                          Enroll once and auto-match across all clusters referencing this IP
+                          {targetRegistration!.agent.clusters &&
+                          targetRegistration!.agent.clusters.length > 0
+                            ? `Bound to ${targetRegistration!.agent.clusters.join(", ")}`
+                            : "Streams live heartbeats every 5s; bind clusters anytime"}
                         </>,
                       )}
                 </span>

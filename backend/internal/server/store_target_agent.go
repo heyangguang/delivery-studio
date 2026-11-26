@@ -3,36 +3,214 @@ package server
 import (
 	"errors"
 	"golang.org/x/crypto/ssh"
+	"math"
 	"net/http"
+	"os"
+	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
 
-// A target identity is deliberately scoped to a delivery and an executor. No
-// machine matching by IP alone, shared enrollment token, or arbitrary commands.
+type agentHostProbe struct {
+	Hostname    string  `json:"hostname,omitempty"`
+	OS          string  `json:"os,omitempty"`
+	Kernel      string  `json:"kernel,omitempty"`
+	Arch        string  `json:"arch,omitempty"`
+	CPUCores    int     `json:"cpu_cores,omitempty"`
+	Load1       float64 `json:"load1,omitempty"`
+	Load5       float64 `json:"load5,omitempty"`
+	MemTotalMB  uint64  `json:"mem_total_mb,omitempty"`
+	MemUsedPct  float64 `json:"mem_used_pct,omitempty"`
+	DiskTotalGB float64 `json:"disk_total_gb,omitempty"`
+	DiskUsedPct float64 `json:"disk_used_pct,omitempty"`
+	UptimeSec   uint64  `json:"uptime_sec,omitempty"`
+	IntervalSec int     `json:"interval_sec,omitempty"`
+}
+
+func roundProbeMetric(v float64) float64 {
+	if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
+		return 0
+	}
+	return math.Round(v*10) / 10
+}
+
+// collectAgentHostProbe gathers lightweight real-time host telemetry purely via
+// Go runtime, /proc, and Statfs with zero subprocess execution.
+func collectAgentHostProbe(intervalSec int) *agentHostProbe {
+	p := &agentHostProbe{
+		Arch:        runtime.GOARCH,
+		CPUCores:    runtime.NumCPU(),
+		IntervalSec: intervalSec,
+	}
+	if hn, err := os.Hostname(); err == nil {
+		p.Hostname = truncRunes(strings.TrimSpace(hn), 80)
+	}
+	if b, err := os.ReadFile("/etc/os-release"); err == nil {
+		for _, line := range strings.Split(string(b), "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "PRETTY_NAME=") {
+				val := strings.Trim(strings.TrimPrefix(line, "PRETTY_NAME="), `"'`)
+				p.OS = truncRunes(strings.TrimSpace(val), 80)
+				break
+			}
+		}
+	}
+	if p.OS == "" {
+		p.OS = runtime.GOOS + "/" + runtime.GOARCH
+	}
+	if b, err := os.ReadFile("/proc/sys/kernel/osrelease"); err == nil {
+		p.Kernel = truncRunes(strings.TrimSpace(string(b)), 64)
+	}
+	if b, err := os.ReadFile("/proc/loadavg"); err == nil {
+		fields := strings.Fields(string(b))
+		if len(fields) >= 2 {
+			if v1, e1 := strconv.ParseFloat(fields[0], 64); e1 == nil {
+				p.Load1 = math.Round(v1*100) / 100
+			}
+			if v5, e5 := strconv.ParseFloat(fields[1], 64); e5 == nil {
+				p.Load5 = math.Round(v5*100) / 100
+			}
+		}
+	}
+	if b, err := os.ReadFile("/proc/meminfo"); err == nil {
+		var totalKB, availKB, freeKB, bufKB, cacheKB uint64
+		var hasAvail bool
+		for _, line := range strings.Split(string(b), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) < 2 {
+				continue
+			}
+			val, err := strconv.ParseUint(fields[1], 10, 64)
+			if err != nil {
+				continue
+			}
+			switch fields[0] {
+			case "MemTotal:":
+				totalKB = val
+			case "MemAvailable:":
+				availKB = val
+				hasAvail = true
+			case "MemFree:":
+				freeKB = val
+			case "Buffers:":
+				bufKB = val
+			case "Cached:":
+				cacheKB = val
+			}
+		}
+		if totalKB > 0 {
+			p.MemTotalMB = totalKB / 1024
+			if !hasAvail {
+				availKB = freeKB + bufKB + cacheKB
+			}
+			if availKB < totalKB {
+				p.MemUsedPct = roundProbeMetric((float64(totalKB-availKB) / float64(totalKB)) * 100)
+			}
+		}
+	}
+	if b, err := os.ReadFile("/proc/uptime"); err == nil {
+		fields := strings.Fields(string(b))
+		if len(fields) >= 1 {
+			if up, err := strconv.ParseFloat(fields[0], 64); err == nil && up > 0 {
+				p.UptimeSec = uint64(up)
+			}
+		}
+	}
+	if totGB, usedPct := diskStatFS("/"); totGB > 0 {
+		p.DiskTotalGB = roundProbeMetric(totGB)
+		p.DiskUsedPct = roundProbeMetric(usedPct)
+	}
+	return p
+}
+
+func sanitizeAgentHostProbe(in *agentHostProbe) *agentHostProbe {
+	if in == nil {
+		return nil
+	}
+	out := &agentHostProbe{
+		Hostname:    truncRunes(strings.TrimSpace(in.Hostname), 80),
+		OS:          truncRunes(strings.TrimSpace(in.OS), 80),
+		Kernel:      truncRunes(strings.TrimSpace(in.Kernel), 64),
+		Arch:        truncRunes(strings.TrimSpace(in.Arch), 24),
+		CPUCores:    in.CPUCores,
+		Load1:       math.Round(math.Max(0, math.Min(in.Load1, 9999))*100) / 100,
+		Load5:       math.Round(math.Max(0, math.Min(in.Load5, 9999))*100) / 100,
+		MemTotalMB:  in.MemTotalMB,
+		MemUsedPct:  roundProbeMetric(math.Min(in.MemUsedPct, 100)),
+		DiskTotalGB: roundProbeMetric(math.Min(in.DiskTotalGB, 1_000_000)),
+		DiskUsedPct: roundProbeMetric(math.Min(in.DiskUsedPct, 100)),
+		UptimeSec:   in.UptimeSec,
+		IntervalSec: in.IntervalSec,
+	}
+	if out.CPUCores < 0 || out.CPUCores > 4096 {
+		out.CPUCores = 0
+	}
+	if out.IntervalSec < 0 || out.IntervalSec > 3600 {
+		out.IntervalSec = 0
+	}
+	return out
+}
+
+// A target identity is deliberately scoped to explicitly authorized cluster(s) or a delivery/executor.
+// No silent machine matching by IP alone, shared enrollment token, or arbitrary commands.
 type targetAgent struct {
-	ID             string   `json:"id"`
-	Job            string   `json:"job,omitempty"`
-	Cluster        string   `json:"cluster"`
-	Node           string   `json:"node,omitempty"`
-	Mode           string   `json:"mode,omitempty"` // "" / "ssh_trust" | "direct" (direct execution without SSH/control host)
-	AllowMutating  bool     `json:"allow_mutating,omitempty"`
-	Capabilities   []string `json:"capabilities,omitempty"`
-	Host           string   `json:"host"`
-	IP             string   `json:"ip"`
-	Created        string   `json:"created"`
-	Expires        string   `json:"expires"`
-	EnrollmentHash string   `json:"enrollment_hash,omitempty"`
-	TokenHash      string   `json:"token_hash,omitempty"`
-	MachineID      string   `json:"machine_id,omitempty"`
-	LastSeen       string   `json:"last_seen,omitempty"`
-	Version        string   `json:"version,omitempty"`
-	Desired        string   `json:"desired"`
-	Applied        string   `json:"applied,omitempty"`
-	PublicKey      string   `json:"public_key,omitempty"`
-	HostKeys       []string `json:"host_keys,omitempty"`
-	Message        string   `json:"message,omitempty"`
+	ID             string          `json:"id"`
+	Job            string          `json:"job,omitempty"`
+	Cluster        string          `json:"cluster,omitempty"`
+	Clusters       []string        `json:"clusters,omitempty"`
+	Node           string          `json:"node,omitempty"`
+	Mode           string          `json:"mode,omitempty"` // "" / "ssh_trust" | "direct" (direct execution without SSH/control host)
+	AllowMutating  bool            `json:"allow_mutating,omitempty"`
+	Capabilities   []string        `json:"capabilities,omitempty"`
+	Host           string          `json:"host"`
+	IP             string          `json:"ip"`
+	Created        string          `json:"created"`
+	Expires        string          `json:"expires"`
+	EnrollmentHash string          `json:"enrollment_hash,omitempty"`
+	TokenHash      string          `json:"token_hash,omitempty"`
+	MachineID      string          `json:"machine_id,omitempty"`
+	LastSeen       string          `json:"last_seen,omitempty"`
+	Version        string          `json:"version,omitempty"`
+	Desired        string          `json:"desired"`
+	Applied        string          `json:"applied,omitempty"`
+	PublicKey      string          `json:"public_key,omitempty"`
+	HostKeys       []string        `json:"host_keys,omitempty"`
+	Message        string          `json:"message,omitempty"`
+	Probe          *agentHostProbe `json:"probe,omitempty"`
+}
+
+func targetAgentClusters(a targetAgent) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	add := func(cid string) {
+		cid = strings.TrimSpace(cid)
+		if cid == "" || seen[cid] {
+			return
+		}
+		seen[cid] = true
+		out = append(out, cid)
+	}
+	for _, cid := range a.Clusters {
+		add(cid)
+	}
+	if a.Cluster != "" {
+		add(a.Cluster)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	sort.Strings(out)
+	return out
+}
+
+func targetAgentAllowsCluster(a targetAgent, clusterID string) bool {
+	cid := strings.TrimSpace(clusterID)
+	if cid == "" {
+		return false
+	}
+	return contains(targetAgentClusters(a), cid)
 }
 
 func publicTargetAgent(a targetAgent) targetAgent {
@@ -315,16 +493,17 @@ func (s *storeServer) handleTargetAgent(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	var req struct {
-		MachineID    string   `json:"machine_id"`
-		Version      string   `json:"version"`
-		Applied      string   `json:"applied"`
-		PublicKey    string   `json:"public_key"`
-		HostKeys     []string `json:"host_keys"`
-		Message      string   `json:"message"`
-		Heartbeat    bool     `json:"heartbeat"`
-		Capabilities []string `json:"capabilities"`
+		MachineID    string          `json:"machine_id"`
+		Version      string          `json:"version"`
+		Applied      string          `json:"applied"`
+		PublicKey    string          `json:"public_key"`
+		HostKeys     []string        `json:"host_keys"`
+		Message      string          `json:"message"`
+		Heartbeat    bool            `json:"heartbeat"`
+		Capabilities []string        `json:"capabilities"`
+		Probe        *agentHostProbe `json:"probe"`
 	}
-	if decodeBody(w, r, 16384, &req) != nil || req.MachineID != a.MachineID {
+	if decodeBody(w, r, 32768, &req) != nil || req.MachineID != a.MachineID {
 		s.fail(w, 403, "目标 Agent 身份不符")
 		return
 	}
@@ -343,6 +522,9 @@ func (s *storeServer) handleTargetAgent(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	a.LastSeen = executionNow()
+	if p := sanitizeAgentHostProbe(req.Probe); p != nil {
+		a.Probe = p
+	}
 	n := d.Nodes[a.Node]
 	if a.Mode != "direct" {
 		if a.Desired == "active" && !targetAgentInScope(a, n) {

@@ -521,18 +521,24 @@ func executeTargetAgentTask(
 	go func() {
 		tick := time.NewTicker(3 * time.Second)
 		defer tick.Stop()
+		ticks := 0
 		for {
 			select {
 			case <-hbDone:
 				return
 			case <-tick.C:
-				var hbResp targetAgentInstruction
-				if err := call("poll", token, map[string]any{
+				ticks++
+				payload := map[string]any{
 					"machine_id":   machineID,
 					"version":      version,
 					"heartbeat":    true,
 					"capabilities": []string{"ssh_trust", "rehearsal_exec"},
-				}, &hbResp); err == nil && hbResp.CancelTask == d.TaskID {
+				}
+				if ticks%5 == 1 {
+					payload["probe"] = collectAgentHostProbe(3)
+				}
+				var hbResp targetAgentInstruction
+				if err := call("poll", token, payload, &hbResp); err == nil && hbResp.CancelTask == d.TaskID {
 					cancelOnce.Do(func() {
 						userCancelled = true
 						cancel()

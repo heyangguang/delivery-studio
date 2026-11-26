@@ -116,7 +116,7 @@ func executionNodeCommand(args []string) error {
 	}
 	if *check {
 		start := time.Now()
-		if e = runner.call("poll", map[string]any{"version": version, "protocol": 3, "heartbeat": true}, nil); e != nil {
+		if e = runner.call("poll", map[string]any{"version": version, "protocol": 3, "heartbeat": true, "probe": collectAgentHostProbe(3)}, nil); e != nil {
 			return fmt.Errorf("platform connectivity check failed (%s): %w", runner.cfg.URL, e)
 		}
 		logAgent("INFO", "connectivity check passed version=%s url=%s latency=%dms", version, runner.cfg.URL, time.Since(start).Milliseconds())
@@ -156,11 +156,17 @@ func executionNodeCommand(args []string) error {
 		}
 		connected = false
 	}
+	var cachedProbe *agentHostProbe
+	var probeAt time.Time
 	for !runner.stop.Load() {
 		if e = runner.recoverOutbox(); e != nil {
 			logPollErr("outbox recovery pending", e)
 			time.Sleep(5 * time.Second)
 			continue
+		}
+		if cachedProbe == nil || time.Since(probeAt) >= 15*time.Second {
+			cachedProbe = collectAgentHostProbe(3)
+			probeAt = time.Now()
 		}
 		var resp struct {
 			Work          *executionWork         `json:"work"`
@@ -169,7 +175,7 @@ func executionNodeCommand(args []string) error {
 			CancelTasks   []string               `json:"cancel_tasks"`
 		}
 		pollStart := time.Now()
-		e = runner.call("poll", map[string]any{"version": version, "protocol": 3}, &resp)
+		e = runner.call("poll", map[string]any{"version": version, "protocol": 3, "probe": cachedProbe}, &resp)
 		if e != nil {
 			logPollErr("platform poll failed", e)
 		} else {

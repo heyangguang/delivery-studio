@@ -355,7 +355,9 @@ export function ClusterAutomationPanel({
   const checkAbortRef = useRef<AbortController | null>(null);
   const initializedForClusterRef = useRef("");
 
-  const canManage = can("delivery.execute") || can("execution.manage");
+  const [bindingAgentId, setBindingAgentId] = useState("");
+  const canManageGlobal = can("execution.manage");
+  const canManage = can("delivery.execute") || canManageGlobal;
   const returnCtx = useMemo(() => readAutomationReturnContext(clusterId), [clusterId]);
 
   const goBackToRehearsal = () => {
@@ -549,6 +551,46 @@ export function ClusterAutomationPanel({
     }
   };
 
+  const bindExistingAgent = async (agent: AutomationAgentView) => {
+    if (bindingAgentId) return;
+    setBindingAgentId(agent.id);
+    try {
+      await api(`/api/clusters/${encodeURIComponent(clusterId)}/automation/agents`, {
+        method: "PATCH",
+        body: JSON.stringify({ id: agent.id, action: "bind" }),
+      });
+      await load(true);
+      Message.success(
+        bi(
+          `已将目标机 Agent「${agent.host}」关联到当前集群`,
+          `Bound Target Agent "${agent.host}" to this cluster`,
+        ),
+      );
+    } catch (e) {
+      err(e);
+    } finally {
+      setBindingAgentId("");
+    }
+  };
+
+  const unbindAgentFromCluster = async (agent: AutomationAgentView) => {
+    try {
+      await api(`/api/clusters/${encodeURIComponent(clusterId)}/automation/agents`, {
+        method: "PATCH",
+        body: JSON.stringify({ id: agent.id, action: "unbind" }),
+      });
+      await load(true);
+      Message.success(
+        bi(
+          `已解除「${agent.host}」与当前集群的关联`,
+          `Unbound "${agent.host}" from this cluster`,
+        ),
+      );
+    } catch (e) {
+      err(e);
+    }
+  };
+
   const revokeAgent = async (agent: AutomationAgentView) => {
     try {
       await api(`/api/clusters/${encodeURIComponent(clusterId)}/automation/agents`, {
@@ -640,6 +682,18 @@ export function ClusterAutomationPanel({
     }
     return map;
   }, [summary?.agents]);
+
+  const unboundAgentsByIP = useMemo(() => {
+    const map = new Map<string, AutomationAgentView>();
+    for (const a of summary?.unbound_agents || []) {
+      if (a.mode !== "direct" || a.desired !== "active") continue;
+      const cur = map.get(a.ip);
+      if (!cur || (a.online && !cur.online)) {
+        map.set(a.ip, a);
+      }
+    }
+    return map;
+  }, [summary?.unbound_agents]);
 
   const onlineAgentHostCount = useMemo(
     () => effectiveHosts.filter((h) => activeAgentsByIP.get(h.ip)?.online).length,
@@ -1016,8 +1070,8 @@ export function ClusterAutomationPanel({
             <div className="rha-agents-head">
               <span>
                 {bi(
-                  `目标主机自动匹配状态（${onlineAgentHostCount}/${effectiveHosts.length} 台 Agent 在线）`,
-                  `Matched Target Hosts (${onlineAgentHostCount}/${effectiveHosts.length} Agents Online)`,
+                  `目标主机 Agent 关联状态（${onlineAgentHostCount}/${effectiveHosts.length} 台在线）`,
+                  `Bound Target Hosts (${onlineAgentHostCount}/${effectiveHosts.length} Agents Online)`,
                 )}
               </span>
               <div style={{ display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
@@ -1042,8 +1096,8 @@ export function ClusterAutomationPanel({
             <div className="rha-field-hint" style={{ marginTop: 0 }}>
               <span>
                 {bi(
-                  "按主机 IP 自动匹配「执行中心 → Agent」中已接入的目标机；1 台主机仅需接入 1 次即可跨集群复用。",
-                  "Auto-matches Direct Target Agents enrolled in Execution Center → Agent by host IP; enroll each machine once.",
+                  "仅使用由您显式关联到本集群的目标机直连 Agent（不再按 IP 自动跨集群匹配）；下方可直接就地签发，或将已接入的同 IP 主机一键关联到本集群。",
+                  "Only uses Direct Target Agents explicitly bound to this cluster; issue directly below or bind an existing host Agent in 1 click.",
                 )}
               </span>
             </div>
@@ -1056,10 +1110,15 @@ export function ClusterAutomationPanel({
               ) : (
                 effectiveHosts.map((h) => {
                   const ag = activeAgentsByIP.get(h.ip);
+                  const unbound = !ag ? unboundAgentsByIP.get(h.ip) : undefined;
                   return (
                     <div key={`${h.name}-${h.ip}`} className="rha-agent-row">
                       <div className="rha-agent-row-l">
-                        <span className={`rha-dot ${ag?.online ? "is-on" : ag ? "is-wait" : ""}`} />
+                        <span
+                          className={`rha-dot ${
+                            ag?.online ? "is-on" : ag || unbound ? "is-wait" : ""
+                          }`}
+                        />
                         <div>
                           <div className="rha-agent-host">
                             <b>{h.name}</b>
@@ -1067,17 +1126,22 @@ export function ClusterAutomationPanel({
                             {h.role && <span className="rha-role-tag">{h.role}</span>}
                           </div>
                           <div className="rha-agent-meta">
-                            {!ag
-                              ? bi("执行中心尚未接入该主机 IP 的直连 Agent", "Not enrolled in Execution Center yet")
-                              : ag.online
+                            {ag
+                              ? ag.online
                                 ? bi(
-                                    `已匹配并在线 · 免密直连 · 最近心跳 ${fullTime(ag.last_seen || "")}`,
-                                    `Matched & Online · Direct HTTPS · Last seen ${fullTime(ag.last_seen || "")}`,
+                                    `已关联本集群并在线 · 每 ${ag.probe?.interval_sec || 5}s 实时心跳 · 最近 ${fullTime(ag.last_seen || "")}`,
+                                    `Bound & Online · ${ag.probe?.interval_sec || 5}s heartbeat · ${fullTime(ag.last_seen || "")}`,
                                   )
                                 : bi(
-                                    "已在执行中心签发，等待在目标机启动 Agent 服务…",
-                                    "Enrolled in Execution Center; waiting for target-agent daemon…",
-                                  )}
+                                    "已关联本集群，等待目标机启动 Agent 服务上报实时心跳…",
+                                    "Bound to this cluster; waiting for target-agent daemon heartbeat…",
+                                  )
+                              : unbound
+                                ? bi(
+                                    `执行中心已有该 IP 的 Agent（${unbound.host}${unbound.online ? " · 在线" : " · 离线"}），尚未关联授权本集群`,
+                                    `Existing Agent "${unbound.host}" (${unbound.online ? "Online" : "Offline"}) in Execution Center; not bound to this cluster yet`,
+                                  )
+                                : bi("尚未接入或关联该主机 IP 的直连 Agent", "No Direct Target Agent enrolled for this IP yet")}
                           </div>
                         </div>
                       </div>
@@ -1101,10 +1165,19 @@ export function ClusterAutomationPanel({
                               </label>
                             </Tooltip>
                             {canManage && (
+                              <Button
+                                size="mini"
+                                type="text"
+                                onClick={() => void unbindAgentFromCluster(ag)}
+                              >
+                                {bi("解除关联", "Unbind")}
+                              </Button>
+                            )}
+                            {canManage && (
                               <Popconfirm
                                 title={bi(
-                                  "确定撤销该目标机的直连 Agent 授权？",
-                                  "Revoke direct agent on this host?",
+                                  "确定撤销该目标机的直连 Agent 授权？（撤销后所有关联集群均需重新签发）",
+                                  "Revoke direct agent token on this host?",
                                 )}
                                 onOk={() => void revokeAgent(ag)}
                               >
@@ -1114,6 +1187,27 @@ export function ClusterAutomationPanel({
                               </Popconfirm>
                             )}
                           </>
+                        ) : unbound ? (
+                          <div style={{ display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                            {canManageGlobal ? (
+                              <Button
+                                size="mini"
+                                type="primary"
+                                loading={bindingAgentId === unbound.id}
+                                onClick={() => void bindExistingAgent(unbound)}
+                              >
+                                {bi("关联到本集群", "Bind to Cluster")}
+                              </Button>
+                            ) : (
+                              <Button
+                                size="mini"
+                                type="outline"
+                                onClick={() => go({ name: "executions", view: "nodes", fleet: "agents" })}
+                              >
+                                {bi("前往执行中心关联", "Open Execution Center")}
+                              </Button>
+                            )}
+                          </div>
                         ) : (
                           canManage && (
                             <div style={{ display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
@@ -1126,6 +1220,7 @@ export function ClusterAutomationPanel({
                                     role: "target",
                                     host: h.name,
                                     ip: h.ip,
+                                    cluster: clusterId,
                                   });
                                   go({ name: "executions", view: "nodes", fleet: "agents" });
                                 }}

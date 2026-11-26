@@ -56,6 +56,7 @@ type executionNode struct {
 	AllowDelivery  *bool               `json:"allow_delivery,omitempty"`
 	AllowProbe     *bool               `json:"allow_probe,omitempty"`
 	AllowRehearsal *bool               `json:"allow_rehearsal,omitempty"`
+	Probe          *agentHostProbe     `json:"probe,omitempty"`
 }
 type executionStep struct {
 	ID        string         `json:"id"`
@@ -1505,17 +1506,21 @@ func (s *storeServer) handleExecutionAgent(w http.ResponseWriter, r *http.Reques
 		s.writeJSON(w, 200, map[string]any{"ack": ev.Seq, "state": state})
 	case "/api/execution-agent/poll":
 		var req struct {
-			Protocol  int    `json:"protocol"`
-			Version   string `json:"version"`
-			Heartbeat bool   `json:"heartbeat"`
+			Protocol  int             `json:"protocol"`
+			Version   string          `json:"version"`
+			Heartbeat bool            `json:"heartbeat"`
+			Probe     *agentHostProbe `json:"probe"`
 		}
-		if decodeBody(w, r, 4096, &req) != nil {
+		if decodeBody(w, r, 16384, &req) != nil {
 			s.fail(w, 400, "请求无效")
 			return
 		}
 		n.LastSeen = executionNow()
 		n.Version = truncRunes(req.Version, 80)
 		n.Protocol = req.Protocol
+		if p := sanitizeAgentHostProbe(req.Probe); p != nil {
+			n.Probe = p
+		}
 		d.Nodes[n.ID] = n
 		if !n.Disabled && !req.Heartbeat && n.Protocol >= 2 {
 			if p := pendingExecutionPreparation(d, n); p != nil {

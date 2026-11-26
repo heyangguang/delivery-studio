@@ -1,5 +1,21 @@
 import { bi } from "../../app/i18n";
 
+export type AgentHostProbe = {
+  hostname?: string;
+  os?: string;
+  kernel?: string;
+  arch?: string;
+  cpu_cores?: number;
+  load1?: number;
+  load5?: number;
+  mem_total_mb?: number;
+  mem_used_pct?: number;
+  disk_total_gb?: number;
+  disk_used_pct?: number;
+  uptime_sec?: number;
+  interval_sec?: number;
+};
+
 export type ExecutionNode = {
   kind?: "independent" | "embedded";
   protocol?: number;
@@ -17,6 +33,7 @@ export type ExecutionNode = {
   allow_delivery?: boolean;
   allow_probe?: boolean;
   allow_rehearsal?: boolean;
+  probe?: AgentHostProbe;
 };
 
 export type ExecutionPreparation = {
@@ -75,7 +92,8 @@ export type AutomationNodeView = ExecutionNode & {
 export type AutomationAgentView = {
   id: string;
   job?: string;
-  cluster: string;
+  cluster?: string;
+  clusters?: string[];
   node?: string;
   mode?: string; // "" / "ssh_trust" | "direct"
   allow_mutating?: boolean;
@@ -89,7 +107,9 @@ export type AutomationAgentView = {
   desired: string;
   applied?: string;
   matched_clusters?: string[];
+  suggested_clusters?: string[];
   message?: string;
+  probe?: AgentHostProbe;
   online: boolean;
 };
 
@@ -97,6 +117,7 @@ export type AgentEnrollPrefill = {
   role?: "controller" | "target";
   host?: string;
   ip?: string;
+  cluster?: string;
   ts?: number;
 };
 
@@ -219,6 +240,7 @@ export type ClusterAutomationSummary = {
   hosts: ClusterAutomationHost[];
   nodes: AutomationNodeView[];
   agents: AutomationAgentView[];
+  unbound_agents?: AutomationAgentView[];
   online_agents: number;
   ready: boolean;
   ready_reason?: string;

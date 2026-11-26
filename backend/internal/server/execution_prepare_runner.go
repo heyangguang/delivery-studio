@@ -17,6 +17,27 @@ import (
 	"time"
 )
 
+func (r *executionRunner) resolveAnsiblePlaybook(snap executionSnapshot) (string, string, error) {
+	if root, err := r.matchingRoot(snap); err == nil {
+		return root, filepath.Join(root, "bin", "ansible-playbook"), nil
+	} else if snap.Schema != "studio/v2" {
+		return "", "", err
+	}
+	// Studio 2.0 pure-Ansible deliveries can run with either bundled bin/ansible-playbook or system ansible-playbook.
+	bin, err := exec.LookPath("ansible-playbook")
+	if err != nil {
+		return "", "", errors.New("控制节点未找到 ansible-playbook（请安装 ansible-core 或准备离线运行环境）")
+	}
+	root := r.cfg.Root
+	if root == "" {
+		root = "/opt/delivery-studio"
+	}
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return "", "", err
+	}
+	return root, bin, nil
+}
+
 func (r *executionRunner) matchingRoot(snap executionSnapshot) (string, error) {
 	for _, root := range append([]string{r.cfg.Root}, r.cfg.Roots...) {
 		if !filepath.IsAbs(root) || (snap.RuntimeRoot != "" && filepath.Clean(root) != filepath.Clean(snap.RuntimeRoot)) {
@@ -191,6 +212,9 @@ func fileSHA256(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 func checkExecutionMaterials(snap executionSnapshot, root string) error {
+	if snap.Schema == "studio/v2" {
+		return nil
+	}
 	var vars map[string]any
 	if e := yaml.Unmarshal(snap.Files["inventory/group_vars/all.yml"], &vars); e != nil {
 		return errors.New("交付材料声明不可读")
@@ -310,10 +334,10 @@ func (r *executionRunner) checkPreparation(p executionPreparation) error {
 		identity = r.probeWithHosts(h, true, p.Snapshot.Platform, nil, nil)
 	}
 	add("executor", "执行机器与系统", h.Name, identity)
-	root, runtimeErr := r.matchingRoot(p.Snapshot)
+	root, ansibleBin, runtimeErr := r.resolveAnsiblePlaybook(p.Snapshot)
 	if runtimeErr == nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		cmd := exec.CommandContext(ctx, filepath.Join(root, "bin/ansible-playbook"), "--version")
+		cmd := exec.CommandContext(ctx, ansibleBin, "--version")
 		cmd.Dir = root
 		b, e := cmd.CombinedOutput()
 		cancel()
@@ -326,6 +350,11 @@ func (r *executionRunner) checkPreparation(p executionPreparation) error {
 		root = r.cfg.Root
 	}
 	add("materials", "软件材料与已有凭据", h.Name, checkExecutionMaterials(p.Snapshot, root))
+	peerHosts := p.Snapshot.Hosts
+	if p.Snapshot.Schema == "studio/v2" {
+		// Standard Ansible 2.0 connects via ansible_host IP directly; /etc/hosts peer resolution is not mandatory.
+		peerHosts = nil
+	}
 	for _, target := range p.Snapshot.Hosts {
 		var e error
 		var warns []string
@@ -337,8 +366,10 @@ func (r *executionRunner) checkPreparation(p executionPreparation) error {
 			args := []string{}
 			if a, ok := access[target.Name]; ok {
 				args = []string{"-i", a.PrivateKey, "-oIdentitiesOnly=yes", "-oUserKnownHostsFile=" + a.KnownHosts}
+			} else if p.Snapshot.Schema == "studio/v2" {
+				args = []string{"-oStrictHostKeyChecking=accept-new"}
 			}
-			pr, pe := r.probeDetailed(target, target.IP == p.Snapshot.ControllerIP, p.Snapshot.Platform, args, p.Snapshot.Hosts)
+			pr, pe := r.probeDetailed(target, target.IP == p.Snapshot.ControllerIP, p.Snapshot.Platform, args, peerHosts)
 			e = pe
 			if pe == nil {
 				if len(pr.DataDirs) > 0 {

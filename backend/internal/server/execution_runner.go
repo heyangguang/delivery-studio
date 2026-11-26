@@ -521,14 +521,25 @@ func (r *executionRunner) prepare(w executionWork) (string, error) {
 	if w.Snapshot.RuntimeRoot != "" && filepath.Clean(w.Snapshot.RuntimeRoot) != filepath.Clean(r.cfg.Root) {
 		return "", errors.New("执行目录与这份交付不一致，请先登记本集群的运行目录")
 	}
+	if w.Snapshot.Schema == "studio/v2" {
+		if err := os.MkdirAll(r.cfg.Root, 0o755); err != nil {
+			return "", err
+		}
+	}
 	rootInfo, e := os.Lstat(r.cfg.Root)
 	if e != nil || !rootInfo.IsDir() || rootInfo.Mode()&os.ModeSymlink != 0 {
 		return "", errors.New("运行包根目录无效或为符号链接")
 	}
-	binary := filepath.Join(r.cfg.Root, "bin", "ansible-playbook")
-	info, e := os.Stat(binary)
-	if e != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
-		return "", errors.New("请先在控制节点按交付手册完成离线运行环境安装，缺少 bin/ansible-playbook")
+	if w.Snapshot.Schema == "studio/v2" {
+		if _, _, e := r.resolveAnsiblePlaybook(w.Snapshot); e != nil {
+			return "", e
+		}
+	} else {
+		binary := filepath.Join(r.cfg.Root, "bin", "ansible-playbook")
+		info, e := os.Stat(binary)
+		if e != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
+			return "", errors.New("请先在控制节点按交付手册完成离线运行环境安装，缺少 bin/ansible-playbook")
+		}
 	}
 	for path, expected := range w.Snapshot.RuntimeFiles {
 		if !executionRelative(path) {
@@ -540,7 +551,7 @@ func (r *executionRunner) prepare(w executionWork) (string, error) {
 		}
 	}
 	project := filepath.Join(r.cfg.Root, "projects", ".hub-"+w.Run.ID)
-	if e = os.MkdirAll(project, 0700); e != nil {
+	if e = os.MkdirAll(filepath.Join(project, "logs"), 0700); e != nil {
 		return "", e
 	}
 	for p, content := range w.Snapshot.Files {
@@ -657,19 +668,47 @@ func (r *executionRunner) execute(w executionWork) error {
 		return e
 	}
 	binary := filepath.Join(r.cfg.Root, "bin", "ansible-playbook")
+	if w.Snapshot.Schema == "studio/v2" {
+		if _, resolved, err := r.resolveAnsiblePlaybook(w.Snapshot); err != nil {
+			return err
+		} else {
+			binary = resolved
+		}
+	}
 	runtimeBytes, e := os.ReadFile(binary)
 	if e != nil {
 		return e
 	}
-	if e = r.emit(j, "started", "", "运行器 "+version+"；bin/ansible-playbook sha256="+digest(runtimeBytes), nil); e != nil {
+	if e = r.emit(j, "started", "", "运行器 "+version+"；ansible-playbook sha256="+digest(runtimeBytes), nil); e != nil {
 		return e
 	}
 	if e = r.flush(id); e != nil {
 		return e
 	} // No acknowledgement, no process launch.
-	cmd := exec.Command(binary, "-i", "inventory/hosts.yml", w.Step.Playbook, "-e", "@.execution-vars.json")
+	argv := []string{"-i", "inventory/hosts.yml", w.Step.Playbook, "-e", "@.execution-vars.json"}
+	if tag, _ := w.Step.ExtraVars["__ansible_tags"].(string); strings.TrimSpace(tag) != "" {
+		argv = append(argv, "--tags", strings.TrimSpace(tag))
+	}
+	cmd := exec.Command(binary, argv...)
 	cmd.Dir = project
-	cmd.Env = []string{"PATH=" + filepath.Join(r.cfg.Root, "bin") + ":/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "HOME=/root", "LANG=C.UTF-8", "ANSIBLE_CONFIG=" + filepath.Join(project, "ansible.cfg"), "ANSIBLE_NOCOLOR=1", "ANSIBLE_HOST_KEY_CHECKING=True", "ANSIBLE_SSH_USETTY=False"}
+	hostKeyCheck := "True"
+	if w.Snapshot.Schema == "studio/v2" && len(w.Snapshot.AgentAccess) == 0 {
+		hostKeyCheck = "False"
+	}
+	stepLogPath := filepath.Join(project, "logs", w.Step.ID+".log")
+	eventLogPath := filepath.Join(project, "logs", w.Step.ID+".jsonl")
+	cmd.Env = []string{
+		"PATH=" + filepath.Join(r.cfg.Root, "bin") + ":/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+		"HOME=/root",
+		"LANG=C.UTF-8",
+		"ANSIBLE_CONFIG=" + filepath.Join(project, "ansible.cfg"),
+		"ANSIBLE_NOCOLOR=1",
+		"ANSIBLE_HOST_KEY_CHECKING=" + hostKeyCheck,
+		"ANSIBLE_SSH_USETTY=False",
+		"DELIVERY_STUDIO_PLAYBOOK=" + w.Step.Playbook,
+		"DELIVERY_STUDIO_STEP_LOG=" + stepLogPath,
+		"DELIVERY_STUDIO_EVENT_LOG=" + eventLogPath,
+	}
 	setProcessGroup(cmd)
 	// Only callback output (honours no_log) is uploaded, never raw stdout.
 	diagnostic, err := os.OpenFile(filepath.Join(r.dir(id), "runner-output.log"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
@@ -769,6 +808,9 @@ func (r *executionRunner) collect(j *executionJournal, project string, final boo
 	paths, _ := filepath.Glob(filepath.Join(project, "logs", "*.log"))
 	sort.Strings(paths)
 	for _, p := range paths {
+		if j.Work.Snapshot.Schema == "studio/v2" && filepath.Base(p) != j.Work.Step.ID+".log" {
+			continue
+		}
 		b, e := os.ReadFile(p)
 		if e != nil {
 			return e

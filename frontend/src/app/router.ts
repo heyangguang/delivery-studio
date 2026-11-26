@@ -35,7 +35,7 @@ export type Route =
       run?: string;
       step?: string;
     }
-  | { name: "components"; id?: string; edit?: string }
+  | { name: "components"; id?: string; edit?: string; v2?: string; tab?: string; scheme?: string }
   | { name: "library"; id?: string }
   | {
       name: "security";
@@ -128,7 +128,13 @@ export function parse(hash: string): Route {
   if (p[0] === "components")
     return p[2] === "edit"
       ? { name: "components", id: p[1], edit: p[3] || "overview" }
-      : { name: "components", id: p[1] };
+      : {
+          name: "components",
+          id: p[1],
+          v2: q.get("v2") || undefined,
+          tab: q.get("tab") || undefined,
+          scheme: q.get("scheme") || undefined,
+        };
   if (p[0] === "accounts" || p[0] === "iam")
     return { name: "accounts", id: p[1] };
   if (p[0] === "me") return { name: "me", id: p[1] };
@@ -203,10 +209,18 @@ export const href = (r: Route): string => {
       if (r.q) sq.set("q", r.q);
       return `#/security${r.tab && r.tab !== "overview" ? `/${r.tab}` : ""}${sq.size ? `?${sq}` : ""}`;
     }
-    case "components":
+    case "components": {
+      if (r.v2) {
+        const cq = new URLSearchParams();
+        cq.set("v2", r.v2);
+        if (r.tab) cq.set("tab", r.tab);
+        if (r.scheme) cq.set("scheme", r.scheme);
+        return `#/components?${cq}`;
+      }
       return r.id
         ? `#/components/${encodeURIComponent(r.id)}${r.edit !== undefined ? `/edit/${encodeURIComponent(r.edit)}` : ""}`
         : "#/components";
+    }
     case "accounts":
       return r.id ? `#/iam/${encodeURIComponent(r.id)}` : "#/iam";
     case "me":

@@ -147,6 +147,7 @@ const ACTION_DATA: Record<string, [string, string, string, string]> = {
   "ansible-v2-edit": ["编辑原生 Ansible 2.0 组件", "组件", "Update native Ansible 2.0 component", "Component"],
   "ansible-v2-delete": ["删除/重置原生 Ansible 2.0 组件", "组件", "Delete/reset native Ansible 2.0 component", "Component"],
   "ansible-v2-deliver": ["生成 Ansible 2.0 标准化交付", "交付", "Generate native Ansible 2.0 delivery", "Delivery"],
+  "ansible-v2-ai-save": ["AI 写入 Ansible 2.0 组件", "组件", "AI save Ansible 2.0 component", "Components"],
   "cluster-live-inspect": ["发起集群主机只读实测采集", "交付", "Trigger cluster live host inspection", "Delivery"],
   "cluster-probe-ingest": ["导入离线只读探针实测快照", "交付", "Import offline read-only probe snapshot", "Delivery"],
   "cluster-drift-accept": ["采纳主机实测漂移为基线", "交付", "Accept live config drift into baseline", "Delivery"],

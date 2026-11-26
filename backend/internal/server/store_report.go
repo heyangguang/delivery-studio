@@ -49,6 +49,7 @@ type planStepDoc struct {
 }
 
 type planDocJSON struct {
+	Schema       string        `json:"schema"`
 	DeliveryMode string        `json:"delivery_mode"`
 	StepFormat   int           `json:"step_format"`
 	Controller   string        `json:"controller"`
@@ -137,7 +138,7 @@ func (s *storeServer) runbookStepsOfLang(raw []byte, jobID, lang string) []repor
 	tabs = append(tabs, prep)
 	label := tr(lang, "部署", "Deploy")
 	dep := reportTab{Label: label}
-	if p.DeliveryMode != "automatic" {
+	if p.DeliveryMode != "automatic" && p.Schema != "studio/v2" {
 		rootDir := path.Dir(path.Dir(strings.ReplaceAll(cd, "\\", "/")))
 		dep.Steps = append(dep.Steps, reportStep{
 			Key: "deploy/deploy-bootstrap", Title: tr(lang, "离线安装 Ansible 并核对清单", "Install Ansible Offline & Verify Inventory"), Purpose: tr(lang, "引导脚本只使用随包的离线材料，不访问外网。", "Bootstrap script uses only bundled offline artifacts with zero external network access."), Effect: "change",

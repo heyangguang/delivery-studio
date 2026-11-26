@@ -356,8 +356,14 @@ export function EngineSwitcher({
 
 export function AnsibleV2Studio({
   onSwitchEngine,
+  initialName,
+  initialTab,
+  initialScheme,
 }: {
   onSwitchEngine: (next: "v2" | "v1") => void;
+  initialName?: string;
+  initialTab?: string;
+  initialScheme?: string;
 }) {
   const lang = useLang();
   const narrow = useMedia("(max-width: 900px)");
@@ -368,8 +374,12 @@ export function AnsibleV2Studio({
   const [load, setLoad] = useState<"loading" | "ready" | "error">("loading");
   const [loadErr, setLoadErr] = useState("");
   const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState<string>("");
+  const [selected, setSelected] = useState<string>(() => initialName || "");
   const [importOpen, setImportOpen] = useState(false);
+
+  useEffect(() => {
+    if (initialName) setSelected(initialName);
+  }, [initialName]);
 
   const reload = useCallback(async (selectAfter?: string) => {
     try {
@@ -381,6 +391,9 @@ export function AnsibleV2Studio({
         if (selectAfter && items.some((x) => x.name === selectAfter)) {
           return selectAfter;
         }
+        if (initialName && items.some((x) => x.name === initialName) && !cur) {
+          return initialName;
+        }
         if (cur && items.some((x) => x.name === cur)) return cur;
         return items[0]?.name || "";
       });
@@ -388,7 +401,7 @@ export function AnsibleV2Studio({
       setLoadErr(errMsg(e));
       setLoad((s) => (s === "ready" ? s : "error"));
     }
-  }, []);
+  }, [initialName]);
 
   useEffect(() => {
     void reload();
@@ -532,10 +545,12 @@ export function AnsibleV2Studio({
         <section className="md-detail">
           {activeSummary ? (
             <AnsibleV2DetailPane
-              key={activeSummary.name}
+              key={`${activeSummary.name}:${initialTab || ""}:${initialScheme || ""}`}
               name={activeSummary.name}
               canEdit={canEdit}
               narrow={narrow}
+              initialTab={activeSummary.name === initialName ? initialTab : undefined}
+              initialScheme={activeSummary.name === initialName ? initialScheme : undefined}
               onBack={() => setSelected("")}
               onChanged={(nextSelect) => void reload(nextSelect)}
             />
@@ -585,20 +600,26 @@ function AnsibleV2DetailPane({
   name,
   canEdit,
   narrow,
+  initialTab,
+  initialScheme,
   onBack,
   onChanged,
 }: {
   name: string;
   canEdit: boolean;
   narrow: boolean;
+  initialTab?: string;
+  initialScheme?: string;
   onBack: () => void;
   onChanged: (nextSelect?: string) => void;
 }) {
-  const lang = useLang();
+  useLang();
   const [detail, setDetail] = useState<AnsibleV2Detail | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadErr, setLoadErr] = useState("");
-  const [tab, setTab] = useState<"overview" | "files" | "deliver">("overview");
+  const [tab, setTab] = useState<"overview" | "files" | "deliver">(() =>
+    initialTab === "deliver" || initialTab === "files" ? initialTab : "overview",
+  );
   const deletingRef = useRef(false);
 
   const loadDetail = useCallback(async () => {
@@ -812,7 +833,7 @@ function AnsibleV2DetailPane({
           key="deliver"
           title={bi("配置预览与生成交付", "Configure, Preview & Deliver")}
         >
-          <DeliverTab detail={detail} />
+          <DeliverTab detail={detail} initialScheme={initialScheme} />
         </Tabs.TabPane>
       </Tabs>
     </div>
@@ -1409,24 +1430,66 @@ function buildInitialVars(vars: VarSpec[], scheme?: SchemeSpec): Record<string, 
   return out;
 }
 
-function DeliverTab({ detail }: { detail: AnsibleV2Detail }) {
+type ExecNodeItem = {
+  id: string;
+  name: string;
+  kind?: string;
+  controller_ip: string;
+  last_seen?: string;
+  disabled?: boolean;
+};
+
+function isNodeOnline(n: ExecNodeItem): boolean {
+  if (n.disabled || !n.last_seen) return false;
+  const ts = Date.parse(n.last_seen);
+  return !Number.isNaN(ts) && Date.now() - ts < 90_000;
+}
+
+function DeliverTab({
+  detail,
+  initialScheme,
+}: {
+  detail: AnsibleV2Detail;
+  initialScheme?: string;
+}) {
   useLang();
   const m = detail.report.manifest;
   const groups = m.groups && m.groups.length > 0 ? m.groups : [{ name: "targets", title: "目标主机" }];
   const schemes = m.schemes || [];
+  const startScheme =
+    schemes.find((s) => s.id === initialScheme) || schemes[0];
 
   const [clusterId, setClusterId] = useState(
     () => `${detail.name}-prod`,
   );
   const [platform, setPlatform] = useState("ubuntu-24.04-amd64");
   const [deliveryMode, setDeliveryMode] = useState<"offline" | "automatic">("offline");
-  const [activeScheme, setActiveScheme] = useState<string>(schemes[0]?.id || "");
+  const [execNodes, setExecNodes] = useState<ExecNodeItem[]>([]);
+  const [selectedNodeId, setSelectedNodeId] = useState<string>("");
+  const [activeScheme, setActiveScheme] = useState<string>(startScheme?.id || "");
   const [hosts, setHosts] = useState<RenderHost[]>(() =>
-    buildInitialHosts(m, schemes[0]),
+    buildInitialHosts(m, startScheme),
   );
   const [vars, setVars] = useState<Record<string, unknown>>(() =>
-    buildInitialVars(detail.report.vars || [], schemes[0]),
+    buildInitialVars(detail.report.vars || [], startScheme),
   );
+
+  useEffect(() => {
+    if (deliveryMode !== "automatic") return;
+    api<ExecNodeItem[]>("/api/settings/execution-nodes")
+      .then((nodes) => {
+        const list = Array.isArray(nodes) ? nodes : [];
+        setExecNodes(list);
+        setSelectedNodeId((cur) => {
+          if (cur && list.some((n) => n.id === cur)) return cur;
+          const online = list.find((n) => isNodeOnline(n));
+          return online?.id || list[0]?.id || "";
+        });
+      })
+      .catch(() => {
+        setExecNodes([]);
+      });
+  }, [deliveryMode]);
 
   const [preview, setPreview] = useState<RenderResult | null>(null);
   const [previewErr, setPreviewErr] = useState("");
@@ -1500,6 +1563,31 @@ function DeliverTab({ detail }: { detail: AnsibleV2Detail }) {
   const handleDeliver = async () => {
     const validHosts = hosts.filter((h) => h.ip.trim() !== "");
     if (!validHosts.length || delivering) return;
+    const chosenNode =
+      deliveryMode === "automatic"
+        ? execNodes.find((n) => n.id === selectedNodeId)
+        : undefined;
+    const payload: Record<string, unknown> = {
+      cluster_id: clusterId.trim() || `${detail.name}-prod`,
+      platform,
+      delivery_mode: deliveryMode,
+      scheme: activeScheme,
+      hosts: validHosts,
+      vars,
+    };
+    if (chosenNode) {
+      if (chosenNode.kind === "independent") {
+        payload.execution_host = {
+          name: chosenNode.name,
+          ip: chosenNode.controller_ip,
+        };
+      } else {
+        const matchHost = validHosts.find(
+          (h) => h.ip.trim() === chosenNode.controller_ip,
+        );
+        if (matchHost) payload.controller = matchHost.name;
+      }
+    }
     setDelivering(true);
     try {
       const res = await api<{
@@ -1510,14 +1598,7 @@ function DeliverTab({ detail }: { detail: AnsibleV2Detail }) {
         steps_count: number;
       }>(`/api/v2/ansible/components/${encodeURIComponent(detail.name)}/deliver`, {
         method: "POST",
-        body: JSON.stringify({
-          cluster_id: clusterId.trim() || `${detail.name}-prod`,
-          platform,
-          delivery_mode: deliveryMode,
-          scheme: activeScheme,
-          hosts: validHosts,
-          vars,
-        }),
+        body: JSON.stringify(payload),
       });
       Message.success(
         bi(
@@ -1606,6 +1687,64 @@ function DeliverTab({ detail }: { detail: AnsibleV2Detail }) {
             </Radio.Group>
           </div>
         </div>
+
+        {deliveryMode === "automatic" && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+              flexWrap: "wrap",
+              padding: "10px 12px",
+              borderRadius: "var(--r)",
+              background: "var(--surface-2)",
+              border: "1px solid var(--line)",
+            }}
+          >
+            <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 220 }}>
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ink)" }}>
+                {bi("执行节点（自动化控制机）", "Execution Node (Controller)")}
+              </span>
+              <span className="av2-card-sub">
+                {execNodes.length > 0
+                  ? bi(
+                      "选择已接入的 Linux 控制节点，交付生成后可直接一键触发全自动 Ansible 执行与实时日志回传",
+                      "Select a connected Linux execution node for one-click automated Ansible runs with live telemetry",
+                    )
+                  : bi(
+                      "尚未检测到已登记的执行节点，可先前往「执行中心 → 节点管理」接入控制节点",
+                      "No execution nodes registered yet; register one under Execution Center → Nodes",
+                    )}
+              </span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              {execNodes.length > 0 ? (
+                <Select
+                  size="small"
+                  style={{ width: 380, maxWidth: "100%" }}
+                  value={selectedNodeId || undefined}
+                  onChange={setSelectedNodeId}
+                  placeholder={bi("选择执行节点", "Choose execution node")}
+                >
+                  {execNodes.map((n) => (
+                    <Select.Option key={n.id} value={n.id}>
+                      {n.name} · {n.controller_ip} ({isNodeOnline(n) ? bi("在线", "Online") : bi("离线", "Offline")} ·{" "}
+                      {n.kind === "independent" ? bi("独立主控", "Independent") : bi("同机主控", "Embedded")})
+                    </Select.Option>
+                  ))}
+                </Select>
+              ) : (
+                <Button
+                  size="small"
+                  onClick={() => go({ name: "executions", view: "nodes" })}
+                >
+                  {bi("前往接入执行节点", "Register Execution Node")}
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
 
         {schemes.length > 0 && (
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>

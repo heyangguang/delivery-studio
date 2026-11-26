@@ -489,6 +489,9 @@ func (s *storeServer) executionSnapshotFor(j storeJob) (executionSnapshot, error
 		return executionSnapshot{}, errors.New("交付规格不可读")
 	}
 	snap := executionSnapshot{Schema: "mwexecution/v1", Job: j.ID, Cluster: j.ClusterID, Project: p.Project, Hosts: d.Hosts, Platform: d.Platform}
+	if d.Schema == "studio/v2" {
+		snap.Schema = "studio/v2"
+	}
 	if p.Platform != "" {
 		snap.Platform = p.Platform
 	}
@@ -514,6 +517,10 @@ func (s *storeServer) executionSnapshotFor(j storeJob) (executionSnapshot, error
 	}
 	if len(snap.Files["inventory/hosts.yml"]) == 0 || len(snap.Files["ansible.cfg"]) == 0 || snap.ControllerIP == "" {
 		return snap, errors.New("交付包缺少 inventory、运行配置或控制节点")
+	}
+	if snap.Schema == "studio/v2" {
+		snap.RuntimeFiles = map[string]string{}
+		return snap, nil
 	}
 	snap.RuntimeFiles, e = s.executionRuntimeFiles(j.ID)
 	if e != nil {
@@ -1211,6 +1218,12 @@ func (s *storeServer) handleExecutions(w http.ResponseWriter, r *http.Request, s
 				vars := map[string]any{}
 				if p.Confirm || st.Effect != "read-only" {
 					vars["confirm_cluster"] = j.ClusterID
+				}
+				if idxTag := strings.Index(p.Command, "--tags "); idxTag >= 0 {
+					fields := strings.Fields(p.Command[idxTag+len("--tags "):])
+					if len(fields) > 0 {
+						vars["__ansible_tags"] = strings.TrimSpace(fields[0])
+					}
 				}
 				for _, k := range p.ConfirmVars {
 					if !nameRE.MatchString(strings.ReplaceAll(k, "_", "-")) {

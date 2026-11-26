@@ -225,11 +225,11 @@ func (s *storeServer) handleExecutionPreparation(w http.ResponseWriter, r *http.
 			s.fail(w, 409, "请使用新版节点接入，旧节点授权保持不变")
 			return true
 		}
-		if e := context.ExecutionHost; e != nil {
+		if e := context.ExecutionHost; e != nil && e.RepositoryPort > 0 {
 			for _, other := range d.Nodes {
 				if other.ControllerIP == n.ControllerIP {
 					for cluster, port := range other.Repositories {
-						if cluster != j.ClusterID && port == e.RepositoryPort {
+						if cluster != j.ClusterID && port > 0 && port == e.RepositoryPort {
 							s.fail(w, 409, "这个执行机的软件源端口已用于集群 "+cluster+"，请在新交付中选择另一端口")
 							return true
 						}

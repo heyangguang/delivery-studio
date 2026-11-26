@@ -38,9 +38,10 @@ type ansibleV2Summary struct {
 	VarCount      int                   `json:"var_count"`
 	StepCount     int                   `json:"step_count"`
 	PackageCount  int                   `json:"package_count"`
-	FileCount     int                   `json:"file_count"`
-	Valid         bool                  `json:"valid"`
-	Tags          []string              `json:"tags,omitempty"`
+	FileCount     int                    `json:"file_count"`
+	Valid         bool                   `json:"valid"`
+	Tags          []string               `json:"tags,omitempty"`
+	Schemes       []ansiblev2.SchemeSpec `json:"schemes,omitempty"`
 }
 
 type ansibleV2Detail struct {
@@ -233,6 +234,7 @@ func (s *storeServer) listAnsibleV2Components(w http.ResponseWriter) {
 			FileCount:     rep.FileCount,
 			Valid:         rep.Valid,
 			Tags:          m.Tags,
+			Schemes:       m.Schemes,
 		})
 	}
 	s.writeJSON(w, 200, out)
@@ -636,7 +638,10 @@ func (s *storeServer) deliverAnsibleV2(w http.ResponseWriter, r *http.Request, s
 		s.fail(w, 404, "组件不存在："+name)
 		return
 	}
-	var req ansiblev2.RenderRequest
+	var req struct {
+		ansiblev2.RenderRequest
+		ExecutionHost *mwpack.ExecutionHost `json:"execution_host,omitempty"`
+	}
 	if err := decodeBody(w, r, 4<<20, &req); err != nil {
 		s.fail(w, 400, "参数无效："+err.Error())
 		return
@@ -652,8 +657,11 @@ func (s *storeServer) deliverAnsibleV2(w http.ResponseWriter, r *http.Request, s
 		s.fail(w, 409, takenMsg)
 		return
 	}
+	if req.ExecutionHost != nil && strings.TrimSpace(req.ExecutionHost.Name) != "" && req.Controller == "" {
+		req.Controller = strings.TrimSpace(req.ExecutionHost.Name)
+	}
 	rep := ansiblev2.Inspect(files, name, src)
-	res, err := ansiblev2.Render(files, rep.Manifest, req)
+	res, err := ansiblev2.Render(files, rep.Manifest, req.RenderRequest)
 	if err != nil {
 		s.fail(w, 400, err.Error())
 		return
@@ -703,13 +711,14 @@ func (s *storeServer) deliverAnsibleV2(w http.ResponseWriter, r *http.Request, s
 		}
 	}
 	dep := mwpack.Deployment{
-		Schema:       ansiblev2.SchemaVersion,
-		ID:           res.ClusterID,
-		Title:        rep.Manifest.Title,
-		Platform:     firstNonEmptyStr(req.Platform, "ubuntu-24.04-amd64"),
-		DeliveryMode: res.DeliveryMode,
-		Controller:   res.Controller,
-		Hosts:        depHosts,
+		Schema:        ansiblev2.SchemaVersion,
+		ID:            res.ClusterID,
+		Title:         rep.Manifest.Title,
+		Platform:      firstNonEmptyStr(req.Platform, "ubuntu-24.04-amd64"),
+		DeliveryMode:  res.DeliveryMode,
+		Controller:    res.Controller,
+		ExecutionHost: req.ExecutionHost,
+		Hosts:         depHosts,
 		Instances: []mwpack.InstanceSpec{
 			{
 				ID:        name,
@@ -722,13 +731,28 @@ func (s *storeServer) deliverAnsibleV2(w http.ResponseWriter, r *http.Request, s
 	}
 	specYAML, _ := yaml.Marshal(dep)
 
-	// Map Ansible 2.0 PlaySteps into standard plan.json structure consumed by Runbook UI
+	// Map Ansible 2.0 PlaySteps into standard plan.json structure consumed by Runbook UI & Execution Center
+	knownGroups := map[string]bool{}
+	for _, gs := range rep.Manifest.Groups {
+		if gn := strings.TrimSpace(gs.Name); gn != "" {
+			knownGroups[gn] = true
+		}
+	}
 	deploySteps := []*mwpack.PlanStep{}
 	testSteps := []*mwpack.PlanStep{}
 	cleanupSteps := []*mwpack.PlanStep{}
+	stepController := res.Controller
+	if req.ExecutionHost != nil && strings.TrimSpace(req.ExecutionHost.Name) != "" {
+		stepController = strings.TrimSpace(req.ExecutionHost.Name)
+	}
 	for _, st := range res.Steps {
+		stepHosts, active := resolveV2StepHosts(st.Hosts, placement, knownGroups, hostNames)
+		if !active {
+			continue
+		}
 		ps := &mwpack.PlanStep{
 			Automatic: true,
+			Timeout:   1800,
 			Section:   st.Phase,
 			Phase:     st.Phase,
 			Instance:  name,
@@ -737,7 +761,7 @@ func (s *storeServer) deliverAnsibleV2(w http.ResponseWriter, r *http.Request, s
 			Desc:      fmt.Sprintf("标准 Ansible Playbook（%s · hosts: %s），支持 --check --diff 预演", st.Playbook, st.Hosts),
 			Effect:    st.Effect,
 			Expect:    "Ansible Playbook 执行汇总 failed=0、unreachable=0。",
-			Hosts:     []string{res.Controller},
+			Hosts:     stepHosts,
 			Playbook:  st.Playbook,
 			Command:   st.Command,
 		}
@@ -756,13 +780,16 @@ func (s *storeServer) deliverAnsibleV2(w http.ResponseWriter, r *http.Request, s
 		planHosts = append(planHosts, map[string]any{"name": h.Name, "ip": h.IP})
 	}
 	planDoc := map[string]any{
-		"step_format":   2,
-		"cluster":       res.ClusterID,
-		"platform":      dep.Platform,
-		"delivery_mode": res.DeliveryMode,
-		"controller":    res.Controller,
-		"project_dir":   projectDir,
-		"hosts":         planHosts,
+		"schema":         ansiblev2.SchemaVersion,
+		"step_format":    2,
+		"project":        res.ClusterID,
+		"cluster":        res.ClusterID,
+		"platform":       dep.Platform,
+		"delivery_mode":  res.DeliveryMode,
+		"controller":     stepController,
+		"execution_host": req.ExecutionHost,
+		"project_dir":    projectDir,
+		"hosts":          planHosts,
 		"instances": []map[string]any{
 			{
 				"id":        name,
@@ -861,12 +888,78 @@ func (s *storeServer) deliverAnsibleV2(w http.ResponseWriter, r *http.Request, s
 	_ = s.writeJobPlanAndLock(jobID, res.ClusterID, planJSON, lockJSON)
 	s.jobPersistMu.Unlock()
 
+	activeSteps := len(deploySteps) + len(testSteps) + len(cleanupSteps)
 	s.auditReq(r, "ansible-v2-deliver", session.User, fmt.Sprintf("%s -> cluster %s (%s)", name, res.ClusterID, jobID))
 	s.writeJSON(w, 201, map[string]any{
 		"job_id":      jobID,
 		"cluster_id":  res.ClusterID,
 		"archive":     archiveName,
 		"sha256":      sha,
-		"steps_count": len(res.Steps),
+		"steps_count": activeSteps,
 	})
+}
+
+// resolveV2StepHosts maps an Ansible play hosts pattern (e.g. "nginx", "primary:replica", "all", "localhost")
+// into the exact inventory host names expected in PLAY RECAP. Returns active=false when a play only targets
+// declared inventory groups that have zero hosts assigned in the current topology (e.g. replica on single-node).
+func resolveV2StepHosts(pattern string, placement map[string][]string, knownGroups map[string]bool, allHosts []string) ([]string, bool) {
+	p := strings.TrimSpace(pattern)
+	if p == "" || p == "all" || p == "*" {
+		return append([]string(nil), allHosts...), len(allHosts) > 0
+	}
+	if p == "localhost" || p == "127.0.0.1" {
+		return []string{"localhost"}, true
+	}
+	allSet := make(map[string]bool, len(allHosts))
+	for _, h := range allHosts {
+		allSet[h] = true
+	}
+	parts := strings.FieldsFunc(p, func(r rune) bool { return r == ':' || r == ',' || r == ' ' })
+	seen := map[string]bool{}
+	out := []string{}
+	allTokensKnownEmpty := len(parts) > 0
+	for _, rawTok := range parts {
+		tok := strings.TrimSpace(rawTok)
+		if tok == "" || strings.HasPrefix(tok, "!") || strings.HasPrefix(tok, "&") {
+			continue
+		}
+		if tok == "all" || tok == "*" {
+			allTokensKnownEmpty = false
+			for _, h := range allHosts {
+				if !seen[h] {
+					seen[h] = true
+					out = append(out, h)
+				}
+			}
+			continue
+		}
+		if hosts, ok := placement[tok]; ok && len(hosts) > 0 {
+			allTokensKnownEmpty = false
+			for _, h := range hosts {
+				if !seen[h] {
+					seen[h] = true
+					out = append(out, h)
+				}
+			}
+			continue
+		}
+		if allSet[tok] {
+			allTokensKnownEmpty = false
+			if !seen[tok] {
+				seen[tok] = true
+				out = append(out, tok)
+			}
+			continue
+		}
+		if !knownGroups[tok] {
+			allTokensKnownEmpty = false
+		}
+	}
+	if len(out) > 0 {
+		return out, true
+	}
+	if allTokensKnownEmpty {
+		return nil, false
+	}
+	return append([]string(nil), allHosts...), len(allHosts) > 0
 }

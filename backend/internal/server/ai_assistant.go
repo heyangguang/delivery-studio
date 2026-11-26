@@ -110,6 +110,7 @@ func assistantTools() []aiToolDef {
 			tools = append(tools, t)
 		}
 	}
+	tools = append(tools, ansibleV2AITools()...)
 	return tools
 }
 
@@ -129,6 +130,8 @@ func (c assistCtx) run(name, args string) string {
 	switch name {
 	case "component_guide", "list_components", "example_component":
 		return compToolCtx{s: c.s}.run(name, args)
+	case "list_ansible_v2_components", "inspect_ansible_v2_component", "validate_ansible_v2_files", "save_ansible_v2_component":
+		return c.s.runAnsibleV2AITool(c.user, name, args)
 	case "library_runtimes":
 		rtID, _ := a["runtime_id"].(string)
 		return c.s.libraryRuntimesSummary(strings.TrimSpace(rtID))

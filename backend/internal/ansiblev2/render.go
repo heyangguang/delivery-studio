@@ -52,8 +52,9 @@ type RenderResult struct {
 }
 
 const studioCallbackPluginPy = `# -*- coding: utf-8 -*-
-# Kyndryl Delivery Studio 2.0 — Standard Ansible JSON Event Callback Plugin
-# Optional: only writes structured task telemetry when DELIVERY_STUDIO_EVENT_LOG is set.
+# Kyndryl Delivery Studio 2.0 — Standard Ansible Callback Plugin
+# Optional: emits structured JSONL when DELIVERY_STUDIO_EVENT_LOG is set and
+# Delivery Studio Execution Center streaming step logs when DELIVERY_STUDIO_STEP_LOG is set.
 # Completely silent and zero-overhead when running ansible-playbook standalone.
 from __future__ import absolute_import, division, print_function
 __metaclass__ = type
@@ -73,6 +74,9 @@ class CallbackModule(CallbackBase):
     def __init__(self):
         super(CallbackModule, self).__init__()
         self._log_path = os.environ.get("DELIVERY_STUDIO_EVENT_LOG", "").strip()
+        self._step_log = os.environ.get("DELIVERY_STUDIO_STEP_LOG", "").strip()
+        self._playbook = os.environ.get("DELIVERY_STUDIO_PLAYBOOK", "").strip()
+        self._header_written = False
 
     def _emit(self, event_type, payload):
         if not self._log_path:
@@ -85,36 +89,151 @@ class CallbackModule(CallbackBase):
         except Exception:
             pass
 
+    def _write_step(self, text):
+        if not self._step_log:
+            return
+        try:
+            parent = os.path.dirname(self._step_log)
+            if parent and not os.path.isdir(parent):
+                os.makedirs(parent, exist_ok=True)
+            with open(self._step_log, "a", encoding="utf-8") as f:
+                f.write(text)
+                f.flush()
+        except Exception:
+            pass
+
+    def _ensure_header(self, playbook_name=""):
+        if self._header_written or not self._step_log:
+            return
+        self._header_written = True
+        pb = self._playbook or playbook_name or "playbooks/deploy.yml"
+        self._playbook = pb
+        now = time.strftime("%Y-%m-%d %H:%M:%S +0000", time.gmtime())
+        self._write_step("playbook %s\nstarted %s\n" % (pb, now))
+
+    def _is_no_log(self, result):
+        try:
+            res = result._result or {}
+            if res.get("_ansible_no_log"):
+                return True
+            if getattr(result, "_task", None) is not None and getattr(result._task, "no_log", False):
+                return True
+        except Exception:
+            pass
+        return False
+
+    def v2_playbook_on_start(self, playbook):
+        pb = ""
+        try:
+            pb = getattr(playbook, "_file_name", "") or ""
+        except Exception:
+            pass
+        self._ensure_header(pb)
+
     def v2_playbook_on_play_start(self, play):
+        self._ensure_header()
         self._emit("play_start", {"play": play.get_name()})
 
+    def v2_playbook_on_task_start(self, task, is_conditional):
+        self._ensure_header()
+        tname = ""
+        try:
+            tname = task.get_name().strip()
+        except Exception:
+            tname = str(task)
+        self._write_step("TASK  %s\n" % tname)
+
+    def v2_playbook_on_handler_task_start(self, task):
+        self._ensure_header()
+        tname = ""
+        try:
+            tname = task.get_name().strip()
+        except Exception:
+            tname = str(task)
+        self._write_step("TASK  [HANDLER] %s\n" % tname)
+
     def v2_runner_on_ok(self, result):
+        host = result._host.get_name()
+        changed = bool(result._result.get("changed", False))
         self._emit("task_ok", {
-            "host": result._host.get_name(),
+            "host": host,
             "task": result.task_name,
-            "changed": bool(result._result.get("changed", False)),
+            "changed": changed,
         })
+        kind = "changed" if changed else "ok"
+        self._write_step("  %s %s\n" % (kind, host))
+        if not self._is_no_log(result):
+            msg = result._result.get("msg")
+            if msg and isinstance(msg, (str, dict, list)):
+                s = json.dumps(msg, ensure_ascii=False) if not isinstance(msg, str) else msg
+                for line in str(s).splitlines()[:8]:
+                    self._write_step("    %s\n" % line[:400])
+
+    def v2_runner_on_skipped(self, result):
+        host = result._host.get_name()
+        self._write_step("  skipped %s\n" % host)
 
     def v2_runner_on_failed(self, result, ignore_errors=False):
+        host = result._host.get_name()
+        msg = "" if self._is_no_log(result) else str(result._result.get("msg", ""))[:500]
         self._emit("task_failed", {
-            "host": result._host.get_name(),
+            "host": host,
             "task": result.task_name,
             "ignore_errors": bool(ignore_errors),
-            "msg": str(result._result.get("msg", ""))[:500],
+            "msg": msg,
         })
+        tag = "FAILED (ignored)" if ignore_errors else "FAILED"
+        self._write_step("  %s %s\n" % (tag, host))
+        if msg:
+            for line in msg.splitlines()[:10]:
+                self._write_step("    %s\n" % line[:400])
+        if not self._is_no_log(result):
+            stderr = str(result._result.get("stderr", "")).strip()
+            if stderr:
+                for line in stderr.splitlines()[:10]:
+                    self._write_step("    %s\n" % line[:400])
 
     def v2_runner_on_unreachable(self, result):
+        host = result._host.get_name()
+        msg = str(result._result.get("msg", ""))[:500]
         self._emit("host_unreachable", {
-            "host": result._host.get_name(),
+            "host": host,
             "task": result.task_name,
-            "msg": str(result._result.get("msg", ""))[:500],
+            "msg": msg,
         })
+        self._write_step("  UNREACHABLE %s\n" % host)
+        if msg:
+            for line in msg.splitlines()[:6]:
+                self._write_step("    %s\n" % line[:400])
 
     def v2_playbook_on_stats(self, stats):
         summary = {}
+        any_bad = False
+        recap_lines = ["RECAP\n"]
         for h in sorted(stats.processed.keys()):
-            summary[h] = stats.summarize(h)
+            s = stats.summarize(h)
+            summary[h] = s
+            if s.get("failures", 0) > 0 or s.get("unreachable", 0) > 0:
+                any_bad = True
+            recap_lines.append("%s ok=%d changed=%d unreachable=%d failed=%d skipped=%d\n" % (
+                h, s.get("ok", 0), s.get("changed", 0), s.get("unreachable", 0), s.get("failures", 0), s.get("skipped", 0)
+            ))
         self._emit("stats", {"hosts": summary})
+        if self._step_log:
+            self._ensure_header()
+            now_h = time.strftime("%Y-%m-%d %H:%M:%S +0000", time.gmtime())
+            now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            status = "failed" if any_bad else "passed"
+            res_word = "FAILED" if any_bad else "PASSED"
+            recap_lines.append("finished %s\n" % now_h)
+            recap_lines.append("RESULT %s\n" % res_word)
+            recap_lines.append("STEP_RESULT %s\n" % json.dumps({
+                "schema": "mwstep-result/v1",
+                "step": self._playbook or "playbooks/deploy.yml",
+                "status": status,
+                "finished": now_iso,
+            }, ensure_ascii=False))
+            self._write_step("".join(recap_lines))
 `
 
 // Render compiles a 2.0 pure-Ansible component + user inputs into a 100% standard,

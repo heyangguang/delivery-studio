@@ -193,14 +193,21 @@ tests:
 export function ComponentsPage({
   me,
   selected,
+  v2,
+  tab,
+  scheme,
 }: {
   me: Session;
   selected?: string;
+  v2?: string;
+  tab?: string;
+  scheme?: string;
 }) {
   const lang = useLang();
   const narrow = useMedia("(max-width: 900px)");
   const admin = can("component.edit");
   const [engine, setEngine] = useState<"v2" | "v1">(() => {
+    if (v2) return "v2";
     if (selected) return "v1";
     try {
       const saved = window.sessionStorage.getItem("ds_components_engine");
@@ -211,8 +218,9 @@ export function ComponentsPage({
     return "v2";
   });
   useEffect(() => {
-    if (selected) setEngine("v1");
-  }, [selected]);
+    if (v2) setEngine("v2");
+    else if (selected) setEngine("v1");
+  }, [selected, v2]);
   const switchEngine = (next: "v2" | "v1") => {
     setEngine(next);
     try {
@@ -329,7 +337,14 @@ export function ComponentsPage({
   const current = list.find((c) => c.id === shownId);
   const slowList = useDelayed(load === "loading");
   if (engine === "v2") {
-    return <AnsibleV2Studio onSwitchEngine={switchEngine} />;
+    return (
+      <AnsibleV2Studio
+        onSwitchEngine={switchEngine}
+        initialName={v2}
+        initialTab={tab}
+        initialScheme={scheme}
+      />
+    );
   }
   return (
     <div className="md-split">

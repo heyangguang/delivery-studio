@@ -133,6 +133,7 @@ type AddonSel struct {
 const (
 	ComponentSchema  = "mwpack/v1"
 	DeploymentSchema = "mwdeploy/v1"
+	AnsibleV2Schema  = "studio/v2"
 )
 
 // ParseDeployment reads a deployment from YAML or JSON (JSON is valid YAML).
@@ -153,10 +154,16 @@ func ParseDeployment(data []byte) (*Deployment, error) {
 }
 
 // ParseSavedDeployment reads an already-persisted deployment.yml from disk,
-// ignoring retired historical keys (change, pins, derived_from) written by older releases.
+// supporting both v1 (ignoring retired historical keys) and studio/v2 native Ansible deployments.
 func ParseSavedDeployment(data []byte) (*Deployment, error) {
 	if d, err := ParseDeployment(data); err == nil {
 		return d, nil
+	}
+	var v2 Deployment
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(&v2); err == nil && v2.Schema == AnsibleV2Schema {
+		return &v2, nil
 	}
 	var raw map[string]any
 	if err := yaml.Unmarshal(data, &raw); err == nil && raw != nil {

@@ -1962,7 +1962,15 @@ function App() {
       />
     );
   else if (route.name === "components")
-    page = <ComponentsPage me={user} selected={route.id} />;
+    page = (
+      <ComponentsPage
+        me={user}
+        selected={route.id}
+        v2={route.v2}
+        tab={route.tab}
+        scheme={route.scheme}
+      />
+    );
   else if (route.name === "library")
     page = <LibraryPage me={user} selected={route.id} />;
   else if (route.name === "security")

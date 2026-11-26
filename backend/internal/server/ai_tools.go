@@ -104,6 +104,7 @@ func (s *storeServer) deliveryTar(id string) string {
 	sort.Strings(files)
 	// the controller's package carries the project; a plan has no package for most other machines
 	var p struct {
+		Schema        string                `json:"schema"`
 		ExecutionHost *mwpack.ExecutionHost `json:"execution_host"`
 		Controller    string                `json:"controller"`
 		Hosts         []struct {
@@ -112,6 +113,13 @@ func (s *storeServer) deliveryTar(id string) string {
 		} `json:"hosts"`
 	}
 	if b, err := s.readJobPlanBytes(id); err == nil && json.Unmarshal(b, &p) == nil {
+		if p.Schema == "studio/v2" {
+			for _, f := range files {
+				if strings.HasSuffix(filepath.Base(f), "-ansible-v2.tar.gz") {
+					return f
+				}
+			}
+		}
 		if e := p.ExecutionHost; e != nil {
 			for _, f := range files {
 				if strings.HasSuffix(filepath.Base(f), "-"+e.IP+".tar.gz") {
@@ -141,7 +149,8 @@ func (s *storeServer) deliveryTar(id string) string {
 
 func (s *storeServer) projectPrefix(id string) string {
 	var p struct {
-		Dir string `json:"project_dir"`
+		Schema string `json:"schema"`
+		Dir    string `json:"project_dir"`
 	}
 	if b, err := s.readJobPlanBytes(id); err == nil {
 		_ = json.Unmarshal(b, &p)
@@ -149,6 +158,9 @@ func (s *storeServer) projectPrefix(id string) string {
 	name := path.Base(p.Dir)
 	if name == "" || name == "." || name == "/" {
 		return ""
+	}
+	if p.Schema == "studio/v2" || strings.HasSuffix(filepath.Base(s.deliveryTar(id)), "-ansible-v2.tar.gz") {
+		return name + "/"
 	}
 	return "middleware-automation/projects/" + name + "/"
 }

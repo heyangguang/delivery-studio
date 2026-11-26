@@ -716,9 +716,8 @@ function AgentClusterTransferDrawer({
   const someRightChecked = validRightIds.length > 0 && !allRightChecked;
 
   return (
-    <Drawer
-      width={880}
-      style={{ maxWidth: "100vw" }}
+    <Modal
+      style={{ width: 860, maxWidth: "96vw" }}
       visible={visible && !!agent}
       onCancel={onClose}
       footer={null}
@@ -838,7 +837,7 @@ function AgentClusterTransferDrawer({
                 />
               </div>
 
-              <div className="ds-tf-list" style={{ height: 390 }}>
+              <div className="ds-tf-list">
                 {availableList.length === 0 ? (
                   <div className="ds-tf-empty">
                     {lq || scopeFilter !== "all" || appFilter !== "all"
@@ -1002,7 +1001,7 @@ function AgentClusterTransferDrawer({
                 />
               </div>
 
-              <div className="ds-tf-list" style={{ height: 429 }}>
+              <div className="ds-tf-list">
                 {boundList.length === 0 ? (
                   <div className="ds-tf-empty">
                     {rq
@@ -1110,9 +1109,21 @@ function AgentClusterTransferDrawer({
               </div>
             </div>
           </div>
+
+          <div className="eam-foot" style={{ paddingTop: 10, borderTop: "1px solid var(--line)" }}>
+            <span className="faint small" style={{ marginRight: "auto" }}>
+              {bi(
+                `当前已关联 ${agent.clusters.length} 个集群（穿梭操作实时保存生效）`,
+                `${agent.clusters.length} cluster(s) associated (changes save automatically)`,
+              )}
+            </span>
+            <Button type="primary" onClick={onClose}>
+              {bi("完成", "Done")}
+            </Button>
+          </div>
         </div>
       )}
-    </Drawer>
+    </Modal>
   );
 }
 

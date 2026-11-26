@@ -3588,7 +3588,7 @@
 .iam-transfer {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-  align-items: center;
+  align-items: stretch;
   gap: 12px;
 }
 
@@ -3654,14 +3654,22 @@
 }
 
 .iam-tf-list {
-  height: 280px;
+  flex: 1;
+  min-height: 176px;
+  max-height: min(320px, 45vh);
   overflow-y: auto;
   display: flex;
   flex-direction: column;
 }
 
-.iam-tf-list.is-tall {
-  height: 380px;
+.iam-tf-modal-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  flex-wrap: wrap;
 }
 
 .iam-tf-empty {
@@ -3766,6 +3774,7 @@
   display: flex;
   flex-direction: column;
   align-items: stretch;
+  align-self: center;
   gap: 7px;
 }
 

@@ -1333,9 +1333,8 @@ export function ClusterAutomationPanel({
         onEnrolled={() => void load(true)}
       />
 
-      <Drawer
-        width={840}
-        style={{ maxWidth: "100vw" }}
+      <Modal
+        style={{ width: 840, maxWidth: "96vw" }}
         visible={transferOpen && canOperateCluster}
         onCancel={() => setTransferOpen(false)}
         footer={null}
@@ -1421,7 +1420,7 @@ export function ClusterAutomationPanel({
                 />
               </div>
 
-              <div className="ds-tf-list" style={{ height: 360 }}>
+              <div className="ds-tf-list" style={{ minHeight: 196, maxHeight: 320 }}>
                 {filteredAvailable.length === 0 ? (
                   <div className="ds-tf-empty">
                     {available.length === 0
@@ -1564,7 +1563,7 @@ export function ClusterAutomationPanel({
                 />
               </div>
 
-              <div className="ds-tf-list" style={{ height: 399 }}>
+              <div className="ds-tf-list" style={{ flex: 1, minHeight: 196, maxHeight: 356 }}>
                 {filteredBound.length === 0 ? (
                   <div className="ds-tf-empty">
                     {bound.length === 0
@@ -1629,8 +1628,20 @@ export function ClusterAutomationPanel({
               </div>
             </div>
           </div>
+
+          <div className="eam-foot">
+            <span className="faint small" style={{ marginRight: "auto" }}>
+              {bi(
+                `当前已关联 ${bound.length} 台执行 Agent（操作实时保存生效）`,
+                `${bound.length} Agent(s) associated (changes save automatically)`,
+              )}
+            </span>
+            <Button type="primary" onClick={() => setTransferOpen(false)}>
+              {bi("完成", "Done")}
+            </Button>
+          </div>
         </div>
-      </Drawer>
+      </Modal>
 
       {liveCheckTask && (
         <LiveExecLogCard

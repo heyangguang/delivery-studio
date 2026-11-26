@@ -3967,9 +3967,8 @@ export function ClustersAccessPane({
         </>
       )}
 
-      <Drawer
-        width={780}
-        style={{ maxWidth: "100vw" }}
+      <Modal
+        style={{ width: 820, maxWidth: "96vw" }}
         visible={!!drawerCluster}
         onCancel={() => setDrawerClusterId("")}
         footer={null}
@@ -4105,7 +4104,7 @@ export function ClustersAccessPane({
                       placeholder={bi("搜索成员姓名、角色或团队…", "Search user or team…")}
                     />
                   </div>
-                  <div className="iam-tf-list is-tall">
+                  <div className="iam-tf-list">
                     {filteredDrawerLeft.length === 0 ? (
                       <div className="iam-tf-empty">
                         {drawerUnassigned.length === 0
@@ -4283,7 +4282,7 @@ export function ClustersAccessPane({
                       placeholder={bi("筛选已授权成员或团队…", "Filter authorized…")}
                     />
                   </div>
-                  <div className="iam-tf-list is-tall">
+                  <div className="iam-tf-list">
                     {filteredDrawerRight.length === 0 ? (
                       <div className="iam-tf-empty">
                         {drawerGranted.length === 0
@@ -4390,10 +4389,22 @@ export function ClustersAccessPane({
                   </div>
                 </div>
               </div>
+
+              <div className="iam-tf-modal-foot">
+                <span className="faint small">
+                  {bi(
+                    "只读：浏览集群配置、文档与记录 · 运维：可执行探针、变更演练与关联执行 Agent",
+                    "Read-only: view config & docs · Operate: run probes, rehearsals & associate Agents",
+                  )}
+                </span>
+                <Button type="primary" onClick={() => setDrawerClusterId("")}>
+                  {bi("完成", "Done")}
+                </Button>
+              </div>
             </div>
           );
         })()}
-      </Drawer>
+      </Modal>
     </article>
   );
 }

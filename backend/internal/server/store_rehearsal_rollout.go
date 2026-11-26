@@ -764,6 +764,12 @@ type remapToken struct {
 }
 
 type clusterRemapper struct {
+	originID              string
+	targetID              string
+	allOrigIPs            map[string]bool // all origin host IPs (for recognizing IP-set regexes/braces)
+	origOnlyIPs           []string        // origin host IPs NOT present on target cluster (for leak audit)
+	targetIPSet           map[string]bool
+	origAddrs             []string // origin-only endpoint/VIP domains (for leak audit)
 	tokens                []remapToken
 	endpointRules         []endpointRemapRule
 	targetIPToName        map[string]string
@@ -776,9 +782,37 @@ type clusterRemapper struct {
 	lang                  string
 }
 
+type ipSetMatcher struct {
+	sep      string
+	re3      *regexp.Regexp
+	re2      *regexp.Regexp
+	re1      *regexp.Regexp
+	reFullP  *regexp.Regexp
+	reFullNP *regexp.Regexp
+}
+
 var (
 	reAwkSubnetIPGroup  = regexp.MustCompile(`(\d{1,3}\\\.\d{1,3}\\\.\d{1,3}\\\.\(\d{1,3}(?:\|\d{1,3})+\))`)
 	reAwkFullIPGroup    = regexp.MustCompile(`(\(\d{1,3}\\\.\d{1,3}\\\.\d{1,3}\\\.\d{1,3}(?:\|\d{1,3}\\\.\d{1,3}\\\.\d{1,3}\\\.\d{1,3})+\))`)
+	compiledIPSetMatchers = func() []ipSetMatcher {
+		seps := []string{`\\.`, `\.`, `.`}
+		out := make([]ipSetMatcher, 0, len(seps))
+		for _, sep := range seps {
+			q := regexp.QuoteMeta(sep)
+			ipPat := `\d{1,3}` + q + `\d{1,3}` + q + `\d{1,3}` + q + `\d{1,3}`
+			out = append(out, ipSetMatcher{
+				sep:      sep,
+				re3:      regexp.MustCompile(`(\d{1,3})` + q + `(\d{1,3})` + q + `(\d{1,3})` + q + `\((?:\?:)?(\d{1,3}(?:\|\d{1,3})+)\)`),
+				re2:      regexp.MustCompile(`(\d{1,3})` + q + `(\d{1,3})` + q + `\((?:\?:)?(\d{1,3}` + q + `\d{1,3}(?:\|\d{1,3}` + q + `\d{1,3})+)\)`),
+				re1:      regexp.MustCompile(`(\d{1,3})` + q + `\((?:\?:)?(\d{1,3}` + q + `\d{1,3}` + q + `\d{1,3}(?:\|\d{1,3}` + q + `\d{1,3}` + q + `\d{1,3})+)\)`),
+				reFullP:  regexp.MustCompile(`\((?:\?:)?(` + ipPat + `(?:\|` + ipPat + `)+)\)`),
+				reFullNP: regexp.MustCompile(`(` + ipPat + `(?:\|` + ipPat + `)+)`),
+			})
+		}
+		return out
+	}()
+	reIPBrace3          = regexp.MustCompile(`(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.\{(\d{1,3}(?:,\d{1,3})+)\}`)
+	reIPBraceFull       = regexp.MustCompile(`\{(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?:,\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})+)\}`)
 	reLogVerifySlug     = regexp.MustCompile(`(^|[^a-z0-9_])([a-z][a-z0-9]{1,31})(_log_verify)`)
 	reOrphanNodeIPPair  = regexp.MustCompile(`\b(00[1-9])\s*/\s*(\d{1,3}(?:\.\d{1,3}){3})\b`)
 	rePortFlagSpace     = regexp.MustCompile(`(-p[ \t]+)(\d{2,5})\b`)
@@ -1089,54 +1123,150 @@ func extractClusterSlug(clusterID string) string {
 	return ""
 }
 
+func normalizeIPv4(raw string) ([4]string, string, bool) {
+	ip := net.ParseIP(strings.TrimSpace(raw))
+	if ip == nil {
+		return [4]string{}, "", false
+	}
+	v4 := ip.To4()
+	if v4 == nil {
+		return [4]string{}, "", false
+	}
+	oct := [4]string{
+		strconv.Itoa(int(v4[0])),
+		strconv.Itoa(int(v4[1])),
+		strconv.Itoa(int(v4[2])),
+		strconv.Itoa(int(v4[3])),
+	}
+	return oct, fmt.Sprintf("%d.%d.%d.%d", v4[0], v4[1], v4[2], v4[3]), true
+}
+
+func formatTargetIPSetRegex(targetIPs []string, dotSep string) string {
+	if len(targetIPs) == 0 {
+		return ""
+	}
+	parsed := make([][4]string, 0, len(targetIPs))
+	for _, raw := range targetIPs {
+		if oct, _, ok := normalizeIPv4(raw); ok {
+			parsed = append(parsed, oct)
+		}
+	}
+	if len(parsed) == 0 {
+		return ""
+	}
+	if len(parsed) == 1 {
+		o := parsed[0]
+		return o[0] + dotSep + o[1] + dotSep + o[2] + dotSep + o[3]
+	}
+	same3 := true
+	same2 := true
+	for i := 1; i < len(parsed); i++ {
+		if parsed[i][0] != parsed[0][0] || parsed[i][1] != parsed[0][1] {
+			same2 = false
+			same3 = false
+			break
+		}
+		if parsed[i][2] != parsed[0][2] {
+			same3 = false
+		}
+	}
+	if same3 {
+		last := make([]string, len(parsed))
+		for i, o := range parsed {
+			last[i] = o[3]
+		}
+		return parsed[0][0] + dotSep + parsed[0][1] + dotSep + parsed[0][2] + dotSep + "(" + strings.Join(last, "|") + ")"
+	}
+	if same2 {
+		tail := make([]string, len(parsed))
+		for i, o := range parsed {
+			tail[i] = o[2] + dotSep + o[3]
+		}
+		return parsed[0][0] + dotSep + parsed[0][1] + dotSep + "(" + strings.Join(tail, "|") + ")"
+	}
+	full := make([]string, len(parsed))
+	for i, o := range parsed {
+		full[i] = o[0] + dotSep + o[1] + dotSep + o[2] + dotSep + o[3]
+	}
+	return "(" + strings.Join(full, "|") + ")"
+}
+
+func formatTargetIPSetBrace(targetIPs []string) string {
+	if len(targetIPs) == 0 {
+		return ""
+	}
+	parsed := make([][4]string, 0, len(targetIPs))
+	for _, raw := range targetIPs {
+		if oct, _, ok := normalizeIPv4(raw); ok {
+			parsed = append(parsed, oct)
+		}
+	}
+	if len(parsed) == 0 {
+		return ""
+	}
+	if len(parsed) == 1 {
+		o := parsed[0]
+		return o[0] + "." + o[1] + "." + o[2] + "." + o[3]
+	}
+	same3 := true
+	for i := 1; i < len(parsed); i++ {
+		if parsed[i][0] != parsed[0][0] || parsed[i][1] != parsed[0][1] || parsed[i][2] != parsed[0][2] {
+			same3 = false
+			break
+		}
+	}
+	if same3 {
+		last := make([]string, len(parsed))
+		for i, o := range parsed {
+			last[i] = o[3]
+		}
+		return parsed[0][0] + "." + parsed[0][1] + "." + parsed[0][2] + ".{" + strings.Join(last, ",") + "}"
+	}
+	return "{" + strings.Join(targetIPs, ",") + "}"
+}
+
 func escapeIPv4ForRegex(ip string) string {
 	return strings.ReplaceAll(strings.TrimSpace(ip), ".", `\.`)
 }
 
 func buildTargetIPv4Regex(ips []string) string {
-	var clean []string
-	for _, ip := range ips {
-		ip = strings.TrimSpace(ip)
-		if net.ParseIP(ip) != nil && strings.Contains(ip, ".") {
-			clean = append(clean, ip)
+	return formatTargetIPSetRegex(ips, `\.`)
+}
+
+func extractClusterClientCIDRs(f clusterFacts) []string {
+	if f.Plan == nil {
+		return nil
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, inst := range f.Plan.Instances {
+		if inst.Params == nil {
+			continue
+		}
+		if cidr := strings.TrimSpace(fmt.Sprint(inst.Params["client_cidr"])); cidr != "" && cidr != "<nil>" && strings.Contains(cidr, "/") && !seen[cidr] {
+			seen[cidr] = true
+			out = append(out, cidr)
 		}
 	}
-	if len(clean) == 0 {
-		return ""
-	}
-	// Check if all target IPs share the same /24 prefix (A.B.C).
-	prefix := ""
-	var lastOctets []string
-	sameSlash24 := true
-	for _, ip := range clean {
-		parts := strings.Split(ip, ".")
-		if len(parts) != 4 {
-			sameSlash24 = false
-			break
-		}
-		p := parts[0] + "." + parts[1] + "." + parts[2]
-		if prefix == "" {
-			prefix = p
-		} else if prefix != p {
-			sameSlash24 = false
-			break
-		}
-		lastOctets = append(lastOctets, parts[3])
-	}
-	if sameSlash24 && len(lastOctets) > 1 {
-		return escapeIPv4ForRegex(prefix) + `\.(` + strings.Join(lastOctets, "|") + `)`
-	}
-	escaped := make([]string, len(clean))
-	for i, ip := range clean {
-		escaped[i] = escapeIPv4ForRegex(ip)
-	}
-	return `(` + strings.Join(escaped, "|") + `)`
+	return out
 }
 
 func (s *storeServer) newClusterRemapper(originFacts, targetFacts clusterFacts, lang string) *clusterRemapper {
-	oDep := s.readSpec(originFacts.Current.ID)
-	tDep := s.readSpec(targetFacts.Current.ID)
+	return buildClusterRemapperWithDeps(
+		originFacts,
+		targetFacts,
+		s.readSpec(originFacts.Current.ID),
+		s.readSpec(targetFacts.Current.ID),
+		lang,
+	)
+}
+
+func buildClusterRemapperWithDeps(originFacts, targetFacts clusterFacts, oDep, tDep *mwpack.Deployment, lang string) *clusterRemapper {
 	r := &clusterRemapper{
+		originID:          strings.TrimSpace(originFacts.ID),
+		targetID:          strings.TrimSpace(targetFacts.ID),
+		allOrigIPs:        map[string]bool{},
+		targetIPSet:       map[string]bool{},
 		targetIPToName:    map[string]string{},
 		targetSlug:        extractClusterSlug(targetFacts.ID),
 		originLocalPGPort: clusterLocalPGPort(originFacts, oDep),
@@ -1153,6 +1283,24 @@ func (s *storeServer) newClusterRemapper(originFacts, targetFacts clusterFacts, 
 		seen[from] = true
 		r.tokens = append(r.tokens, remapToken{From: from, To: to, Boundary: boundary})
 	}
+	addIPVariants := func(fromIP, toIP string) {
+		fromIP = strings.TrimSpace(fromIP)
+		toIP = strings.TrimSpace(toIP)
+		if fromIP == "" || toIP == "" || fromIP == toIP {
+			return
+		}
+		add(fromIP, toIP, "ip")
+		if _, _, ok := normalizeIPv4(fromIP); ok {
+			escTo := toIP
+			dblTo := toIP
+			if _, _, okTo := normalizeIPv4(toIP); okTo {
+				escTo = strings.ReplaceAll(toIP, ".", `\.`)
+				dblTo = strings.ReplaceAll(toIP, ".", `\\.`)
+			}
+			add(strings.ReplaceAll(fromIP, ".", `\.`), escTo, "ip")
+			add(strings.ReplaceAll(fromIP, ".", `\\.`), dblTo, "ip")
+		}
+	}
 
 	add(originFacts.ID, targetFacts.ID, "word")
 
@@ -1160,31 +1308,63 @@ func (s *storeServer) newClusterRemapper(originFacts, targetFacts clusterFacts, 
 	oHosts := alignedClusterHosts(originFacts, oDep)
 	tHosts := alignedClusterHosts(targetFacts, tDep)
 	for _, th := range tHosts {
-		if th.IP != "" {
+		if _, canon, ok := normalizeIPv4(th.IP); ok {
+			if !r.targetIPSet[canon] {
+				r.targetIPSet[canon] = true
+				r.targetIPs = append(r.targetIPs, canon)
+			}
+			if th.Name != "" {
+				r.targetIPToName[canon] = th.Name
+			}
+		} else if th.IP != "" {
 			r.targetIPs = append(r.targetIPs, th.IP)
 			if th.Name != "" {
 				r.targetIPToName[th.IP] = th.Name
 			}
 		}
 	}
+	for _, oh := range oHosts {
+		if _, canon, ok := normalizeIPv4(oh.IP); ok {
+			if !r.allOrigIPs[canon] {
+				r.allOrigIPs[canon] = true
+				if !r.targetIPSet[canon] {
+					r.origOnlyIPs = append(r.origOnlyIPs, canon)
+				}
+			}
+		}
+	}
 	for i, oh := range oHosts {
 		if i < len(tHosts) {
 			if oh.IP != "" && tHosts[i].IP != "" {
-				add(oh.IP, tHosts[i].IP, "ip")
-				add(escapeIPv4ForRegex(oh.IP), escapeIPv4ForRegex(tHosts[i].IP), "")
+				addIPVariants(oh.IP, tHosts[i].IP)
 			}
 			if oh.Name != "" && tHosts[i].Name != "" {
 				add(oh.Name, tHosts[i].Name, "word")
 			}
-		} else if oh.IP != "" {
-			add(oh.IP, "<目标节点IP>", "ip")
-			add(escapeIPv4ForRegex(oh.IP), "<目标节点IP>", "")
+		} else {
+			if oh.IP != "" {
+				addIPVariants(oh.IP, "<目标节点IP>")
+			}
+			if oh.Name != "" {
+				add(oh.Name, "<目标节点名>", "word")
+			}
 		}
 	}
 
 	// 2. Endpoint / VIP / ELB host + port + resolveIP matching (exact name -> role -> primary fallback).
 	oEps := extractClusterEndpoints(originFacts, oDep)
 	tEps := extractClusterEndpoints(targetFacts, tDep)
+	tAddrSet := map[string]bool{}
+	for _, te := range tEps {
+		if te.Host != "" {
+			tAddrSet[te.Host] = true
+		}
+	}
+	for _, oe := range oEps {
+		if oe.Host != "" && !tAddrSet[oe.Host] {
+			r.origAddrs = append(r.origAddrs, oe.Host)
+		}
+	}
 	usedTarget := map[int]bool{}
 	matchEndpoint := func(oe clusterEndpointInfo) (clusterEndpointInfo, bool) {
 		// Pass 1: exact (component, name)
@@ -1222,8 +1402,11 @@ func (s *storeServer) newClusterRemapper(originFacts, targetFacts clusterFacts, 
 				add(fmt.Sprintf("%s:%d", oe.Host, oe.Port), fmt.Sprintf("%s:%d", te.Host, te.Port), "")
 			}
 			add(oe.Host, te.Host, "")
+			if strings.Contains(oe.Host, ".") {
+				add(strings.ReplaceAll(oe.Host, ".", `\.`), strings.ReplaceAll(te.Host, ".", `\.`), "")
+			}
 			if oe.ResolveIP != "" && te.ResolveIP != "" && oe.ResolveIP != te.ResolveIP {
-				add(oe.ResolveIP, te.ResolveIP, "ip")
+				addIPVariants(oe.ResolveIP, te.ResolveIP)
 			}
 			r.endpointRules = append(r.endpointRules, endpointRemapRule{
 				OldHost:      oe.Host,
@@ -1242,6 +1425,9 @@ func (s *storeServer) newClusterRemapper(originFacts, targetFacts clusterFacts, 
 				add(fmt.Sprintf("%s:%d", oe.Host, oe.Port), placeholderHost+":"+placeholderPort, "")
 			}
 			add(oe.Host, placeholderHost, "")
+			if strings.Contains(oe.Host, ".") {
+				add(strings.ReplaceAll(oe.Host, ".", `\.`), placeholderHost, "")
+			}
 			r.endpointRules = append(r.endpointRules, endpointRemapRule{
 				OldHost:       oe.Host,
 				OldPort:       oe.Port,
@@ -1250,6 +1436,13 @@ func (s *storeServer) newClusterRemapper(originFacts, targetFacts clusterFacts, 
 				MissingTarget: true,
 			})
 		}
+	}
+
+	// Explicit client_cidr remapping when both clusters define a single distinct CIDR.
+	oCIDRs := extractClusterClientCIDRs(originFacts)
+	tCIDRs := extractClusterClientCIDRs(targetFacts)
+	if len(oCIDRs) == 1 && len(tCIDRs) == 1 {
+		add(oCIDRs[0], tCIDRs[0], "")
 	}
 
 	// 3. Config path & data dir remapping when origin and target differ.
@@ -1377,11 +1570,150 @@ func rewriteEndpointPortsInLine(line string, rule endpointRemapRule, lang string
 	return out
 }
 
+func (r *clusterRemapper) isOriginIPSet(candidates []string) bool {
+	if len(candidates) == 0 || len(r.allOrigIPs) == 0 {
+		return false
+	}
+	differsFromTarget := false
+	seen := map[string]bool{}
+	for _, raw := range candidates {
+		_, canon, ok := normalizeIPv4(raw)
+		if !ok || !r.allOrigIPs[canon] {
+			return false
+		}
+		seen[canon] = true
+		if !r.targetIPSet[canon] {
+			differsFromTarget = true
+		}
+	}
+	if len(seen) != len(r.targetIPSet) {
+		differsFromTarget = true
+	}
+	return differsFromTarget
+}
+
+func (r *clusterRemapper) remapIPSetPatterns(text string) (string, [][2]string) {
+	if text == "" || len(r.allOrigIPs) == 0 || len(r.targetIPs) == 0 {
+		return text, nil
+	}
+	var placeholders [][2]string
+	makePlaceholder := func(replacement string) string {
+		tok := fmt.Sprintf("\x00MWIPSET%d\x00", len(placeholders))
+		placeholders = append(placeholders, [2]string{tok, replacement})
+		return tok
+	}
+	apply := func(in string, re *regexp.Regexp, checkRight bool, expand func(m []int) ([]string, string)) string {
+		matches := re.FindAllStringSubmatchIndex(in, -1)
+		if len(matches) == 0 {
+			return in
+		}
+		var b strings.Builder
+		b.Grow(len(in))
+		last := 0
+		changed := false
+		for _, m := range matches {
+			start, end := m[0], m[1]
+			if (start > 0 && isIPBoundaryChar(in[start-1])) || (checkRight && end < len(in) && isIPBoundaryChar(in[end])) {
+				continue
+			}
+			cands, repl := expand(m)
+			if repl == "" || !r.isOriginIPSet(cands) {
+				continue
+			}
+			b.WriteString(in[last:start])
+			b.WriteString(makePlaceholder(repl))
+			last = end
+			changed = true
+		}
+		if !changed {
+			return in
+		}
+		b.WriteString(in[last:])
+		return b.String()
+	}
+
+	out := text
+	for _, mx := range compiledIPSetMatchers {
+		sep := mx.sep
+		// 1) 3-octet factored regex: 172\.30\.2\.(67|82|91)
+		out = apply(out, mx.re3, false, func(m []int) ([]string, string) {
+			a, b, c := out[m[2]:m[3]], out[m[4]:m[5]], out[m[6]:m[7]]
+			alts := strings.Split(out[m[8]:m[9]], "|")
+			cands := make([]string, len(alts))
+			for i, alt := range alts {
+				cands[i] = a + "." + b + "." + c + "." + alt
+			}
+			return cands, formatTargetIPSetRegex(r.targetIPs, sep)
+		})
+		// 2) 2-octet factored regex: 172\.30\.(2\.67|2\.82|2\.91)
+		out = apply(out, mx.re2, false, func(m []int) ([]string, string) {
+			a, b := out[m[2]:m[3]], out[m[4]:m[5]]
+			alts := strings.Split(out[m[6]:m[7]], "|")
+			cands := make([]string, len(alts))
+			for i, alt := range alts {
+				cands[i] = a + "." + b + "." + strings.ReplaceAll(alt, sep, ".")
+			}
+			return cands, formatTargetIPSetRegex(r.targetIPs, sep)
+		})
+		// 3) 1-octet factored regex: 172\.(30\.2\.67|30\.2\.82)
+		out = apply(out, mx.re1, false, func(m []int) ([]string, string) {
+			a := out[m[2]:m[3]]
+			alts := strings.Split(out[m[4]:m[5]], "|")
+			cands := make([]string, len(alts))
+			for i, alt := range alts {
+				cands[i] = a + "." + strings.ReplaceAll(alt, sep, ".")
+			}
+			return cands, formatTargetIPSetRegex(r.targetIPs, sep)
+		})
+		// 4) Parenthesized full-IP alternation: (172\.30\.2\.67|172\.30\.2\.82|172\.30\.2\.91)
+		out = apply(out, mx.reFullP, false, func(m []int) ([]string, string) {
+			alts := strings.Split(out[m[2]:m[3]], "|")
+			cands := make([]string, len(alts))
+			for i, alt := range alts {
+				cands[i] = strings.ReplaceAll(alt, sep, ".")
+			}
+			return cands, formatTargetIPSetRegex(r.targetIPs, sep)
+		})
+		// 5) Unparenthesized full-IP alternation / bash case: 172.30.2.67|172.30.2.82
+		out = apply(out, mx.reFullNP, true, func(m []int) ([]string, string) {
+			alts := strings.Split(out[m[2]:m[3]], "|")
+			cands := make([]string, len(alts))
+			for i, alt := range alts {
+				cands[i] = strings.ReplaceAll(alt, sep, ".")
+			}
+			if sep == "." {
+				return cands, strings.Join(r.targetIPs, "|")
+			}
+			return cands, formatTargetIPSetRegex(r.targetIPs, sep)
+		})
+	}
+
+	// 6) Shell brace expansions: 172.30.2.{67,82,91} and {172.30.2.67,172.30.2.82,172.30.2.91}
+	out = apply(out, reIPBrace3, false, func(m []int) ([]string, string) {
+		a, b, c := out[m[2]:m[3]], out[m[4]:m[5]], out[m[6]:m[7]]
+		alts := strings.Split(out[m[8]:m[9]], ",")
+		cands := make([]string, len(alts))
+		for i, alt := range alts {
+			cands[i] = a + "." + b + "." + c + "." + alt
+		}
+		return cands, formatTargetIPSetBrace(r.targetIPs)
+	})
+	out = apply(out, reIPBraceFull, false, func(m []int) ([]string, string) {
+		alts := strings.Split(out[m[2]:m[3]], ",")
+		return alts, formatTargetIPSetBrace(r.targetIPs)
+	})
+	return out, placeholders
+}
+
 func (r *clusterRemapper) RemapText(text string) string {
 	if text == "" {
 		return ""
 	}
-	out := applySinglePassTokens(text, r.tokens)
+	out, placeholders := r.remapIPSetPatterns(text)
+	out = applySinglePassTokens(out, r.tokens)
+	for _, ph := range placeholders {
+		out = strings.ReplaceAll(out, ph[0], ph[1])
+	}
 
 	// Contextual port rewriting (line-by-line so external VIP ports and local PG ports never cross-contaminate).
 	if len(r.endpointRules) > 0 || (r.originLocalPGPort > 0 && r.targetLocalPGPort > 0 && r.originLocalPGPort != r.targetLocalPGPort) {
@@ -1448,10 +1780,87 @@ func (r *clusterRemapper) RemapProbeScript(script string) string {
 	out := r.RemapText(script)
 	targetIPRegex := buildTargetIPv4Regex(r.targetIPs)
 	if targetIPRegex != "" {
-		out = reAwkSubnetIPGroup.ReplaceAllString(out, targetIPRegex)
-		out = reAwkFullIPGroup.ReplaceAllString(out, targetIPRegex)
+		replaceNonLoopback := func(m string) string {
+			if strings.HasPrefix(m, `127\.`) || strings.HasPrefix(m, `(127\.`) || strings.HasPrefix(m, `0\.0\.0\.`) {
+				return m
+			}
+			return targetIPRegex
+		}
+		out = reAwkSubnetIPGroup.ReplaceAllStringFunc(out, replaceNonLoopback)
+		out = reAwkFullIPGroup.ReplaceAllStringFunc(out, replaceNonLoopback)
 	}
 	return out
+}
+
+// detectResidualOriginRefs checks whether any origin-only IP (literal, escaped, or factored),
+// origin cluster ID, or origin-only endpoint domain survived remapping.
+func (r *clusterRemapper) detectResidualOriginRefs(text string) []string {
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	var leaks []string
+	seen := map[string]bool{}
+	add := func(s string) {
+		if s != "" && !seen[s] {
+			seen[s] = true
+			leaks = append(leaks, s)
+		}
+	}
+	for _, ip := range r.origOnlyIPs {
+		for _, form := range []string{ip, strings.ReplaceAll(ip, ".", `\.`), strings.ReplaceAll(ip, ".", `\\.`)} {
+			re := regexp.MustCompile(regexp.QuoteMeta(form))
+			for _, loc := range re.FindAllStringIndex(text, -1) {
+				if (loc[0] == 0 || !isIPBoundaryChar(text[loc[0]-1])) && (loc[1] == len(text) || !isIPBoundaryChar(text[loc[1]])) {
+					add(ip)
+					break
+				}
+			}
+		}
+	}
+	for _, mx := range compiledIPSetMatchers {
+		sep := mx.sep
+		for _, m := range mx.re3.FindAllStringSubmatchIndex(text, -1) {
+			a, b, c := text[m[2]:m[3]], text[m[4]:m[5]], text[m[6]:m[7]]
+			for _, alt := range strings.Split(text[m[8]:m[9]], "|") {
+				cand := a + "." + b + "." + c + "." + alt
+				if r.allOrigIPs[cand] && !r.targetIPSet[cand] {
+					add(text[m[0]:m[1]])
+					break
+				}
+			}
+		}
+		for _, m := range mx.re2.FindAllStringSubmatchIndex(text, -1) {
+			a, b := text[m[2]:m[3]], text[m[4]:m[5]]
+			for _, alt := range strings.Split(text[m[6]:m[7]], "|") {
+				cand := a + "." + b + "." + strings.ReplaceAll(alt, sep, ".")
+				if r.allOrigIPs[cand] && !r.targetIPSet[cand] {
+					add(text[m[0]:m[1]])
+					break
+				}
+			}
+		}
+	}
+	if r.originID != "" && r.originID != r.targetID {
+		re := regexp.MustCompile(regexp.QuoteMeta(r.originID))
+		for _, loc := range re.FindAllStringIndex(text, -1) {
+			if (loc[0] == 0 || !isWordBoundaryChar(text[loc[0]-1])) && (loc[1] == len(text) || !isWordBoundaryChar(text[loc[1]])) {
+				add(r.originID)
+				break
+			}
+		}
+	}
+	for _, addr := range r.origAddrs {
+		re := regexp.MustCompile(regexp.QuoteMeta(addr))
+		for _, loc := range re.FindAllStringIndex(text, -1) {
+			leftOK := loc[0] == 0 || (!isWordBoundaryChar(text[loc[0]-1]) && text[loc[0]-1] != '.')
+			rightOK := loc[1] == len(text) || (!isWordBoundaryChar(text[loc[1]]) && text[loc[1]] != '.')
+			if leftOK && rightOK {
+				add(addr)
+				break
+			}
+		}
+	}
+	return leaks
 }
 
 func (r *clusterRemapper) containsMissingEndpointPlaceholder(s string) bool {
@@ -1750,15 +2159,19 @@ func (s *storeServer) buildPropagatedRehearsal(
 	now := time.Now().UTC().Format(time.RFC3339)
 	rid := randomStoreToken(6)
 
-	// Inherit aligned scope questions & answers cleanly.
+	// Inherit aligned scope questions & answers cleanly (with cluster references remapped).
 	var scopeQs []rehearsalScopeQuestion
 	for _, q := range origin.ScopeQuestions {
+		opts := make([]string, len(q.Options))
+		for i, o := range q.Options {
+			opts[i] = remapper.RemapText(o)
+		}
 		scopeQs = append(scopeQs, rehearsalScopeQuestion{
 			ID:       q.ID,
 			Label:    q.Label,
-			Question: q.Question,
-			Options:  append([]string(nil), q.Options...),
-			Answer:   q.Answer,
+			Question: remapper.RemapText(q.Question),
+			Options:  opts,
+			Answer:   remapper.RemapText(q.Answer),
 		})
 	}
 	var secCopy *rehearsalSecurityContext
@@ -1779,6 +2192,13 @@ func (s *storeServer) buildPropagatedRehearsal(
 	}
 	probeScript = ensureProbeBashGuard(probeScript)
 	probeSafe, probeWarns := validateReadOnlyProbeScriptLang(probeScript, lang)
+	if leaks := remapper.detectResidualOriginRefs(probeScript); len(leaks) > 0 {
+		warn := tr(lang,
+			fmt.Sprintf("检测到探针脚本仍残留样板集群标识/地址（%s），请核对目标集群基线 IP 后再执行", strings.Join(leaks, "、")),
+			fmt.Sprintf("Probe script still references pilot cluster identifiers/IPs (%s); verify target cluster baseline before running", strings.Join(leaks, ", ")))
+		probeWarns = append(probeWarns, warn)
+		probeSafe = false
+	}
 
 	var probeNotes []string
 	probeNotes = append(probeNotes, tr(lang,

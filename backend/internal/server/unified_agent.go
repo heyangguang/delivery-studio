@@ -349,6 +349,113 @@ func validateAgentClusterModeDiff(
 	return cleaned, 200, ""
 }
 
+type agentClusterCatalogItem struct {
+	ID        string   `json:"id"`
+	AppName   string   `json:"app_name"`
+	Version   string   `json:"version,omitempty"`
+	Platform  string   `json:"platform,omitempty"`
+	Owner     string   `json:"owner,omitempty"`
+	HostIPs   []string `json:"host_ips,omitempty"`
+	HostNames []string `json:"host_names,omitempty"`
+	CanOp     bool     `json:"can_op"`
+}
+
+// clusterHostMeta extracts OS platform, unique host IPs, and hostnames for a cluster without holding locks.
+func (s *storeServer) clusterHostMeta(cid, jobID string) (string, []string, []string) {
+	platform := ""
+	seenIP := map[string]bool{}
+	seenName := map[string]bool{}
+	var ips []string
+	var names []string
+	addHost := func(rawName, rawIP string) {
+		name := strings.TrimSpace(rawName)
+		if p := net.ParseIP(strings.TrimSpace(rawIP)); p != nil {
+			ip := p.String()
+			if !seenIP[ip] {
+				seenIP[ip] = true
+				ips = append(ips, ip)
+			}
+		}
+		if name != "" && !seenName[name] {
+			seenName[name] = true
+			names = append(names, name)
+		}
+	}
+	if jobID != "" {
+		if dep := s.readSpec(jobID); dep != nil {
+			platform = strings.TrimSpace(dep.Platform)
+			for _, h := range dep.Hosts {
+				addHost(h.Name, h.IP)
+			}
+		}
+	}
+	cfg := s.loadClusterAutomationConfig(cid)
+	for _, ch := range cfg.CustomHosts {
+		addHost(ch.Name, ch.IP)
+	}
+	return platform, ips, names
+}
+
+func (s *storeServer) buildAgentClusterCatalog(
+	user string,
+	canManageGlobal bool,
+	actorCanOp func(string) bool,
+) []agentClusterCatalogItem {
+	vis := s.visibleJobs(user)
+	byCluster := map[string][]storeJob{}
+	s.mu.Lock()
+	for _, j := range s.jobs {
+		if j.State != "succeeded" {
+			continue
+		}
+		cid := j.ClusterID
+		if cid == "" {
+			cid = j.ID
+		}
+		if !canManageGlobal && !vis(j.Owner, cid) {
+			continue
+		}
+		byCluster[cid] = append(byCluster[cid], j)
+	}
+	s.mu.Unlock()
+
+	out := make([]agentClusterCatalogItem, 0, len(byCluster))
+	for cid, jobs := range byCluster {
+		sortJobs(jobs)
+		first := jobs[0]
+		for _, j := range jobs {
+			if j.Seq == 0 && j.live() {
+				first = j
+				break
+			}
+		}
+		specJob := first
+		ver := first.Version
+		if cur, ok := clusterCurrent(jobs); ok {
+			specJob = cur
+			if cur.AppID == first.AppID && cur.Version != "" {
+				ver = cur.Version
+			}
+		}
+		ver = s.deliveryAppVersion(specJob.ID, first.AppID, ver)
+		plat, ips, names := s.clusterHostMeta(cid, specJob.ID)
+		out = append(out, agentClusterCatalogItem{
+			ID:        cid,
+			AppName:   first.AppName,
+			Version:   ver,
+			Platform:  plat,
+			Owner:     first.Owner,
+			HostIPs:   ips,
+			HostNames: names,
+			CanOp:     actorCanOp(cid),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].ID < out[j].ID
+	})
+	return out
+}
+
 func (s *storeServer) handleUnifiedAgents(w http.ResponseWriter, r *http.Request, session storeSession) {
 	rest := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/executions/unified-agents"), "/")
 	if rest == "bundle" && r.Method == "POST" {
@@ -373,8 +480,12 @@ func (s *storeServer) handleUnifiedAgents(w http.ResponseWriter, r *http.Request
 		return canManageGlobal || access(owners[cid], cid) == "operate"
 	}
 	var ipClusters map[string][]string
+	var catalog []agentClusterCatalogItem
 	if r.Method == "GET" || r.Method == "POST" || r.Method == "PATCH" {
 		ipClusters = s.clusterIPIndex(session.User)
+	}
+	if r.Method == "GET" {
+		catalog = s.buildAgentClusterCatalog(session.User, canManageGlobal, actorCanOp)
 	}
 
 	executionMu.Lock()
@@ -404,6 +515,7 @@ func (s *storeServer) handleUnifiedAgents(w http.ResponseWriter, r *http.Request
 		s.writeJSON(w, 200, map[string]any{
 			"agents":              list,
 			"manageable_clusters": manageable,
+			"cluster_catalog":     catalog,
 			"bootstrap":           s.executionBootstrapInfo(r),
 		})
 

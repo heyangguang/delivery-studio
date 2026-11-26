@@ -517,6 +517,9 @@ func (s *storeServer) iamView(st iamState, actorCanOp func(string) bool) map[str
 		AppID        string            `json:"app_id"`
 		AppName      string            `json:"app_name"`
 		Version      string            `json:"version"`
+		Platform     string            `json:"platform,omitempty"`
+		HostIPs      []string          `json:"host_ips,omitempty"`
+		HostNames    []string          `json:"host_names,omitempty"`
 		Owner        string            `json:"owner"`
 		DeliveryMode string            `json:"delivery_mode,omitempty"`
 		Created      string            `json:"created"`
@@ -536,9 +539,11 @@ func (s *storeServer) iamView(st iamState, actorCanOp func(string) bool) map[str
 				break
 			}
 		}
+		specJob := first
 		ver := first.Version
 		mode := first.DeliveryMode
 		if cur, ok := clusterCurrent(jobs); ok {
+			specJob = cur
 			if cur.AppID == first.AppID && cur.Version != "" {
 				ver = cur.Version
 			}
@@ -546,11 +551,15 @@ func (s *storeServer) iamView(st iamState, actorCanOp func(string) bool) map[str
 				mode = cur.DeliveryMode
 			}
 		}
+		plat, hostIPs, hostNames := s.clusterHostMeta(cid, specJob.ID)
 		clusters = append(clusters, iamClusterView{
 			ID:           cid,
 			AppID:        first.AppID,
 			AppName:      first.AppName,
 			Version:      ver,
+			Platform:     plat,
+			HostIPs:      hostIPs,
+			HostNames:    hostNames,
 			Owner:        first.Owner,
 			DeliveryMode: mode,
 			Created:      first.Created,

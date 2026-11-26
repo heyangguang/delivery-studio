@@ -72,6 +72,17 @@ export type AgentHeartbeatSample = {
   disk_pct?: number;
 };
 
+export type AgentClusterCatalogItem = {
+  id: string;
+  app_name: string;
+  version?: string;
+  platform?: string;
+  owner?: string;
+  host_ips?: string[];
+  host_names?: string[];
+  can_op: boolean;
+};
+
 export type UnifiedAgentView = {
   id: string;
   backing: "node" | "direct";

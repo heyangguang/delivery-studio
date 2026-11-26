@@ -3645,6 +3645,9 @@
 }
 
 .iam-tf-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   padding: 8px 10px;
   border-bottom: 1px solid var(--line);
   background: var(--surface);

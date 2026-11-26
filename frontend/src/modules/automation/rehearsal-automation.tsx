@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Button,
   Checkbox,
+  Drawer,
   Input,
   InputNumber,
   Message,
@@ -755,6 +756,8 @@ export function ClusterAutomationPanel({
   const [summary, setSummary] = useState<ClusterAutomationSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [scopeFilter, setScopeFilter] = useState<"all" | "online" | "local">("all");
   const [leftQ, setLeftQ] = useState("");
   const [rightQ, setRightQ] = useState("");
   const [leftChecked, setLeftChecked] = useState<Set<string>>(() => new Set());
@@ -843,18 +846,41 @@ export function ClusterAutomationPanel({
   const recent = summary?.recent_tasks || [];
   const lkw = leftQ.trim().toLowerCase();
   const rkw = rightQ.trim().toLowerCase();
-  const filteredAvailable = available.filter(
-    (a) => !lkw || a.name.toLowerCase().includes(lkw) || a.ip.toLowerCase().includes(lkw),
-  );
-  const filteredBound = bound.filter(
-    (a) => !rkw || a.name.toLowerCase().includes(rkw) || a.ip.toLowerCase().includes(rkw),
-  );
-  const validLeftChecked = filteredAvailable.filter((a) => leftChecked.has(a.id));
-  const validRightChecked = filteredBound.filter((a) => rightChecked.has(a.id));
 
   const isLocalAgent = (a: UnifiedAgentView) =>
     a.backing === "direct" ||
     Boolean(summary?.hosts?.some((h) => h.ip.trim() === a.ip.trim()));
+
+  const matchAgent = (a: UnifiedAgentView, kw: string) => {
+    if (!kw) return true;
+    return (
+      a.name.toLowerCase().includes(kw) ||
+      a.ip.toLowerCase().includes(kw) ||
+      (a.probe?.hostname || "").toLowerCase().includes(kw) ||
+      (a.probe?.os || "").toLowerCase().includes(kw)
+    );
+  };
+
+  const filteredAvailable = available.filter((a) => {
+    if (scopeFilter === "online" && (a.disabled || !a.online)) return false;
+    if (scopeFilter === "local" && !isLocalAgent(a)) return false;
+    return matchAgent(a, lkw);
+  });
+  const filteredBound = bound.filter((a) => matchAgent(a, rkw));
+  const validLeftChecked = filteredAvailable.filter((a) => leftChecked.has(a.id));
+  const validRightChecked = filteredBound.filter((a) => rightChecked.has(a.id));
+  const localAvailCount = available.filter((a) => isLocalAgent(a)).length;
+  const onlineAvailCount = available.filter((a) => a.online && !a.disabled).length;
+
+  const fmtAgentProbe = (a: UnifiedAgentView) => {
+    const parts: string[] = [];
+    if (a.probe?.os) parts.push(a.probe.os);
+    else if (a.probe?.hostname) parts.push(a.probe.hostname);
+    if (a.probe?.cpu_cores) parts.push(`${a.probe.cpu_cores} vCPU`);
+    if (a.probe?.mem_used_pct !== undefined)
+      parts.push(`Mem ${a.probe.mem_used_pct.toFixed(0)}%`);
+    return parts.join(" · ");
+  };
 
   return (
     <div className="rha-clean-panel">
@@ -867,8 +893,8 @@ export function ClusterAutomationPanel({
             </h2>
             <p className="faint small">
               {bi(
-                "在集群中运行只读探针或变更演练步骤时，直接从已关联的 Agent 中选择执行。",
-                "Pick from associated Agents when running probes or change steps in this cluster.",
+                "在集群中运行只读探针或变更演练步骤时，直接从下方已关联的 Agent 中选择执行。",
+                "Pick from associated Agents below when running probes or change steps in this cluster.",
               )}
             </p>
           </div>
@@ -881,6 +907,23 @@ export function ClusterAutomationPanel({
                 onClick={() => setCheckModalOpen(true)}
               >
                 {bi("连通测试", "Test Connectivity")}
+              </Button>
+            )}
+            {canOperateCluster && (available.length > 0 || bound.length > 0) && (
+              <Button
+                size="small"
+                type={bound.length === 0 ? "primary" : "secondary"}
+                icon={bound.length === 0 ? <IconPlus /> : <IconSettings />}
+                onClick={() => {
+                  setScopeFilter("all");
+                  setLeftQ("");
+                  setRightQ("");
+                  setTransferOpen(true);
+                }}
+              >
+                {bound.length === 0
+                  ? bi("关联 Agent", "Associate Agent")
+                  : bi("配置关联 Agent", "Configure Agents")}
               </Button>
             )}
             <Button
@@ -905,87 +948,209 @@ export function ClusterAutomationPanel({
           </div>
         </div>
 
-        {canOperateCluster ? (
-          bound.length === 0 && available.length === 0 ? (
-            <div className="ua-cluster-empty">
-              <span className="faint">
-                {canEnrollAgent
+        {bound.length === 0 ? (
+          <div className="ua-cluster-empty">
+            <span className="faint">
+              {canOperateCluster
+                ? available.length > 0
                   ? bi(
+                      `当前集群尚未关联执行 Agent（平台共有 ${available.length} 台可用 Agent）；点击右上角「关联 Agent」即可批量选择。`,
+                      `No Agent associated yet (${available.length} available on platform). Click "Associate Agent" above.`,
+                    )
+                  : bi(
                       "平台尚未接入任何执行 Agent；可前往「执行中心 → Agent」接入机器后再关联。",
                       "No Agents enrolled on the platform yet.",
                     )
-                  : bi(
-                      "平台尚未接入可用的执行 Agent，请联系管理员先部署并接入 Agent。",
-                      "No Agents enrolled yet. Contact an administrator.",
-                    )}
+                : bi(
+                    "当前集群尚未关联执行 Agent（你对本集群为只读权限，需集群创建者或运维成员配置关联）。",
+                    "No Agent associated yet (read-only access on this cluster).",
+                  )}
+            </span>
+          </div>
+        ) : (
+          <div className="rha-ag-ledger" role="table">
+            <div className="rha-ag-head" role="row">
+              <span>{bi("Agent 名称", "Agent")}</span>
+              <span>{bi("机器 IP", "Host IP")}</span>
+              <span>{bi("主机系统与探针负载", "OS & Probe Telemetry")}</span>
+              <span>{bi("执行链路", "Execution Path")}</span>
+              <span style={{ justifyContent: "flex-end" }}>
+                {bi("状态与操作", "Status & Action")}
               </span>
             </div>
-          ) : (
-            <div className="ds-transfer">
-              <div className="ds-tf-pane">
-                <div className="ds-tf-head">
-                  <label className="ds-tf-head-chk">
-                    <Checkbox
-                      checked={
-                        filteredAvailable.length > 0 &&
-                        validLeftChecked.length === filteredAvailable.length
-                      }
-                      indeterminate={
-                        validLeftChecked.length > 0 &&
-                        validLeftChecked.length < filteredAvailable.length
-                      }
-                      disabled={busy || filteredAvailable.length === 0}
-                      onChange={(chk) => {
-                        const next = new Set(leftChecked);
-                        for (const a of filteredAvailable) {
-                          if (chk) next.add(a.id);
-                          else next.delete(a.id);
-                        }
-                        setLeftChecked(next);
-                      }}
+            {bound.map((a) => {
+              const local = isLocalAgent(a);
+              const probeSummary = fmtAgentProbe(a);
+              return (
+                <div key={a.id} className="rha-ag-row" role="row">
+                  <div>
+                    <span
+                      className={`iam-ag-dot ${
+                        a.disabled
+                          ? "is-disabled"
+                          : a.online
+                            ? "is-online"
+                            : "is-offline"
+                      }`}
                     />
-                    <b>{bi("可关联 Agent", "Available Agents")}</b>
-                  </label>
-                  <span className="ds-tf-cnt num">
-                    {validLeftChecked.length > 0
-                      ? `${validLeftChecked.length} / ${available.length}`
-                      : available.length}
-                  </span>
+                    <b className="ds-tf-id">{a.name}</b>
+                  </div>
+                  <div>
+                    <code className="mono small">{a.ip}</code>
+                  </div>
+                  <div>
+                    <span className="small faint" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {probeSummary || bi("等待探针上报", "Awaiting probe")}
+                    </span>
+                  </div>
+                  <div>
+                    <span className={`ua-path-badge ${local ? "is-local" : ""}`}>
+                      {local
+                        ? bi("本机免密直连", "Local Direct")
+                        : bi("SSH 远程代管", "Jumpbox SSH")}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="small faint">
+                      {a.disabled
+                        ? bi("已禁用", "Disabled")
+                        : a.online
+                          ? bi("在线", "Online")
+                          : bi("离线", "Offline")}
+                    </span>
+                    {canOperateCluster && (
+                      <Button
+                        size="mini"
+                        type="secondary"
+                        status="danger"
+                        disabled={busy}
+                        onClick={() => void batchSetAgentsBound([a.id], false)}
+                      >
+                        {bi("解除关联", "Unbind")}
+                      </Button>
+                    )}
+                  </div>
                 </div>
-                <div className="ds-tf-search">
-                  <Input
-                    size="small"
-                    prefix={<IconSearch />}
-                    allowClear
-                    value={leftQ}
-                    onChange={setLeftQ}
-                    placeholder={bi("搜索 Agent 名称或机器 IP…", "Search Agent or IP…")}
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      <Drawer
+        width={840}
+        style={{ maxWidth: "100vw" }}
+        visible={transferOpen && canOperateCluster}
+        onCancel={() => setTransferOpen(false)}
+        footer={null}
+        title={
+          <span className="iam-drawer-title">
+            <span>{bi("配置本集群关联 Agent", "Configure Associated Agents")}</span>
+            <code className="mono">{clusterId}</code>
+          </span>
+        }
+      >
+        <div className="rha-clean-panel rha-tf-drawer">
+          <div className="ds-transfer">
+            <div className="ds-tf-pane">
+              <div className="ds-tf-head">
+                <label className="ds-tf-head-chk">
+                  <Checkbox
+                    checked={
+                      filteredAvailable.length > 0 &&
+                      validLeftChecked.length === filteredAvailable.length
+                    }
+                    indeterminate={
+                      validLeftChecked.length > 0 &&
+                      validLeftChecked.length < filteredAvailable.length
+                    }
+                    disabled={busy || filteredAvailable.length === 0}
+                    onChange={(chk) => {
+                      const next = new Set(leftChecked);
+                      for (const a of filteredAvailable) {
+                        if (chk) next.add(a.id);
+                        else next.delete(a.id);
+                      }
+                      setLeftChecked(next);
+                    }}
                   />
+                  <b>{bi("可关联 Agent", "Available Agents")}</b>
+                </label>
+                <span className="ds-tf-cnt num">
+                  {validLeftChecked.length > 0
+                    ? `${validLeftChecked.length} / ${filteredAvailable.length}`
+                    : filteredAvailable.length}
+                </span>
+              </div>
+
+              <div className="ds-tf-facets">
+                <div className="ds-tf-scope-pills">
+                  <button
+                    type="button"
+                    className={`ds-tf-pill ${scopeFilter === "all" ? "on" : ""}`}
+                    onClick={() => setScopeFilter("all")}
+                  >
+                    {bi("全部", "All")} ({available.length})
+                  </button>
+                  <button
+                    type="button"
+                    className={`ds-tf-pill ${scopeFilter === "online" ? "on" : ""}`}
+                    onClick={() => setScopeFilter("online")}
+                  >
+                    {bi("在线", "Online")} ({onlineAvailCount})
+                  </button>
+                  {localAvailCount > 0 && (
+                    <button
+                      type="button"
+                      className={`ds-tf-pill ${scopeFilter === "local" ? "on" : ""}`}
+                      onClick={() => setScopeFilter("local")}
+                    >
+                      {bi("同机直连", "Same IP")} ({localAvailCount})
+                    </button>
+                  )}
                 </div>
-                <div className="ds-tf-list" style={{ height: 240 }}>
-                  {filteredAvailable.length === 0 ? (
-                    <div className="ds-tf-empty">
-                      {available.length === 0
-                        ? bi("全部可用 Agent 已关联至本集群", "All available Agents are associated")
-                        : bi("无匹配的 Agent", "No matching Agents")}
-                    </div>
-                  ) : (
-                    filteredAvailable.map((a) => {
-                      const checked = leftChecked.has(a.id);
-                      const local = isLocalAgent(a);
-                      return (
-                        <div
-                          key={a.id}
-                          className={`ds-tf-row ${checked ? "is-checked" : ""}`}
-                          onClick={() => {
-                            if (busy) return;
-                            const next = new Set(leftChecked);
-                            if (checked) next.delete(a.id);
-                            else next.add(a.id);
-                            setLeftChecked(next);
-                          }}
-                        >
-                          <Checkbox checked={checked} disabled={busy} />
+              </div>
+
+              <div className="ds-tf-search">
+                <Input
+                  size="small"
+                  prefix={<IconSearch />}
+                  allowClear
+                  value={leftQ}
+                  onChange={setLeftQ}
+                  placeholder={bi(
+                    "搜索 Agent 名称、机器 IP、主机名或操作系统…",
+                    "Search Agent name, IP, hostname, or OS…",
+                  )}
+                />
+              </div>
+
+              <div className="ds-tf-list" style={{ height: 360 }}>
+                {filteredAvailable.length === 0 ? (
+                  <div className="ds-tf-empty">
+                    {available.length === 0
+                      ? bi("全部可用 Agent 已关联至本集群", "All available Agents are associated")
+                      : bi("没有符合筛选条件的 Agent", "No matching Agents")}
+                  </div>
+                ) : (
+                  filteredAvailable.map((a) => {
+                    const checked = leftChecked.has(a.id);
+                    const local = isLocalAgent(a);
+                    const sub = fmtAgentProbe(a);
+                    return (
+                      <div
+                        key={a.id}
+                        className={`ds-tf-row ${checked ? "is-checked" : ""}`}
+                        onClick={() => {
+                          if (busy) return;
+                          const next = new Set(leftChecked);
+                          if (checked) next.delete(a.id);
+                          else next.add(a.id);
+                          setLeftChecked(next);
+                        }}
+                      >
+                        <Checkbox checked={checked} disabled={busy} />
+                        <div className="ds-tf-item-col">
                           <div className="ds-tf-item-main">
                             <span
                               className={`iam-ag-dot ${
@@ -1004,119 +1169,131 @@ export function ClusterAutomationPanel({
                               </span>
                             )}
                           </div>
-                          <button
-                            type="button"
-                            className="ds-tf-quick-btn"
-                            disabled={busy}
-                            title={bi("立即关联", "Associate")}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              void batchSetAgentsBound([a.id], true);
-                            }}
-                          >
-                            <IconPlus />
-                          </button>
+                          {sub && <div className="ds-tf-item-sub">{sub}</div>}
                         </div>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-
-              <div className="ds-tf-mid">
-                <Button
-                  type="primary"
-                  size="small"
-                  disabled={busy || validLeftChecked.length === 0}
-                  loading={busy && validLeftChecked.length > 0}
-                  onClick={() =>
-                    void batchSetAgentsBound(
-                      validLeftChecked.map((a) => a.id),
-                      true,
-                    )
-                  }
-                >
-                  {bi("关联", "Add")} <IconRight />
-                </Button>
-                <Button
-                  size="small"
-                  disabled={busy || validRightChecked.length === 0}
-                  loading={busy && validRightChecked.length > 0}
-                  onClick={() =>
-                    void batchSetAgentsBound(
-                      validRightChecked.map((a) => a.id),
-                      false,
-                    )
-                  }
-                >
-                  <IconLeft /> {bi("移除", "Remove")}
-                </Button>
-              </div>
-
-              <div className="ds-tf-pane is-target">
-                <div className="ds-tf-head">
-                  <label className="ds-tf-head-chk">
-                    <Checkbox
-                      checked={
-                        filteredBound.length > 0 &&
-                        validRightChecked.length === filteredBound.length
-                      }
-                      indeterminate={
-                        validRightChecked.length > 0 &&
-                        validRightChecked.length < filteredBound.length
-                      }
-                      disabled={busy || filteredBound.length === 0}
-                      onChange={(chk) => {
-                        const next = new Set(rightChecked);
-                        for (const a of filteredBound) {
-                          if (chk) next.add(a.id);
-                          else next.delete(a.id);
-                        }
-                        setRightChecked(next);
-                      }}
-                    />
-                    <b>{bi("已关联 Agent", "Associated Agents")}</b>
-                  </label>
-                  <span className="ds-tf-cnt is-brand num">
-                    {validRightChecked.length > 0
-                      ? `${validRightChecked.length} / ${bound.length}`
-                      : bound.length}
-                  </span>
-                </div>
-                <div className="ds-tf-search">
-                  <Input
-                    size="small"
-                    prefix={<IconSearch />}
-                    allowClear
-                    value={rightQ}
-                    onChange={setRightQ}
-                    placeholder={bi("筛选已关联 Agent…", "Filter associated Agents…")}
-                  />
-                </div>
-                <div className="ds-tf-list" style={{ height: 240 }}>
-                  {filteredBound.length === 0 ? (
-                    <div className="ds-tf-empty">
-                      {bound.length === 0
-                        ? bi("从左侧勾选要用于本集群执行的 Agent", "Select Agents from the left pane")
-                        : bi("无匹配的已关联 Agent", "No matching Agents")}
-                    </div>
-                  ) : (
-                    filteredBound.map((a) => {
-                      const checked = rightChecked.has(a.id);
-                      const local = isLocalAgent(a);
-                      return (
-                        <div
-                          key={a.id}
-                          className={`ds-tf-row ${checked ? "is-checked" : ""}`}
-                          onClick={() => {
-                            if (busy) return;
-                            const next = new Set(rightChecked);
-                            if (checked) next.delete(a.id);
-                            else next.add(a.id);
-                            setRightChecked(next);
+                        <button
+                          type="button"
+                          className="ds-tf-quick-btn"
+                          disabled={busy}
+                          title={bi("立即关联", "Associate")}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void batchSetAgentsBound([a.id], true);
                           }}
                         >
-                          <Checkbox checked={checked} disabled={busy} />
+                          <IconPlus />
+                        </button>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            <div className="ds-tf-mid">
+              <Button
+                type="primary"
+                size="small"
+                disabled={busy || validLeftChecked.length === 0}
+                loading={busy && validLeftChecked.length > 0}
+                onClick={() =>
+                  void batchSetAgentsBound(
+                    validLeftChecked.map((a) => a.id),
+                    true,
+                  )
+                }
+              >
+                {validLeftChecked.length > 0
+                  ? bi(`关联 (${validLeftChecked.length})`, `Add (${validLeftChecked.length})`)
+                  : bi("关联", "Add")}{" "}
+                <IconRight />
+              </Button>
+              <Button
+                size="small"
+                disabled={busy || validRightChecked.length === 0}
+                loading={busy && validRightChecked.length > 0}
+                onClick={() =>
+                  void batchSetAgentsBound(
+                    validRightChecked.map((a) => a.id),
+                    false,
+                  )
+                }
+              >
+                <IconLeft />{" "}
+                {validRightChecked.length > 0
+                  ? bi(`移除 (${validRightChecked.length})`, `Remove (${validRightChecked.length})`)
+                  : bi("移除", "Remove")}
+              </Button>
+            </div>
+
+            <div className="ds-tf-pane is-target">
+              <div className="ds-tf-head">
+                <label className="ds-tf-head-chk">
+                  <Checkbox
+                    checked={
+                      filteredBound.length > 0 &&
+                      validRightChecked.length === filteredBound.length
+                    }
+                    indeterminate={
+                      validRightChecked.length > 0 &&
+                      validRightChecked.length < filteredBound.length
+                    }
+                    disabled={busy || filteredBound.length === 0}
+                    onChange={(chk) => {
+                      const next = new Set(rightChecked);
+                      for (const a of filteredBound) {
+                        if (chk) next.add(a.id);
+                        else next.delete(a.id);
+                      }
+                      setRightChecked(next);
+                    }}
+                  />
+                  <b>{bi("已关联 Agent", "Associated Agents")}</b>
+                </label>
+                <span className="ds-tf-cnt is-brand num">
+                  {validRightChecked.length > 0
+                    ? `${validRightChecked.length} / ${bound.length}`
+                    : bound.length}
+                </span>
+              </div>
+
+              <div className="ds-tf-search">
+                <Input
+                  size="small"
+                  prefix={<IconSearch />}
+                  allowClear
+                  value={rightQ}
+                  onChange={setRightQ}
+                  placeholder={bi("按名称、IP、主机名或系统筛选…", "Filter by name, IP, or OS…")}
+                />
+              </div>
+
+              <div className="ds-tf-list" style={{ height: 399 }}>
+                {filteredBound.length === 0 ? (
+                  <div className="ds-tf-empty">
+                    {bound.length === 0
+                      ? bi("从左侧勾选要用于本集群执行的 Agent", "Select Agents from the left pane")
+                      : bi("无匹配的已关联 Agent", "No matching Agents")}
+                  </div>
+                ) : (
+                  filteredBound.map((a) => {
+                    const checked = rightChecked.has(a.id);
+                    const local = isLocalAgent(a);
+                    const sub = fmtAgentProbe(a);
+                    return (
+                      <div
+                        key={a.id}
+                        className={`ds-tf-row ${checked ? "is-checked" : ""}`}
+                        onClick={() => {
+                          if (busy) return;
+                          const next = new Set(rightChecked);
+                          if (checked) next.delete(a.id);
+                          else next.add(a.id);
+                          setRightChecked(next);
+                        }}
+                      >
+                        <Checkbox checked={checked} disabled={busy} />
+                        <div className="ds-tf-item-col">
                           <div className="ds-tf-item-main">
                             <span
                               className={`iam-ag-dot ${
@@ -1135,74 +1312,29 @@ export function ClusterAutomationPanel({
                                 : bi("SSH 远程代管", "Jumpbox SSH")}
                             </span>
                           </div>
-                          <button
-                            type="button"
-                            className="ds-tf-quick-btn is-rm"
-                            disabled={busy}
-                            title={bi("解除关联", "Unbind")}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              void batchSetAgentsBound([a.id], false);
-                            }}
-                          >
-                            <IconClose />
-                          </button>
+                          {sub && <div className="ds-tf-item-sub">{sub}</div>}
                         </div>
-                      );
-                    })
-                  )}
-                </div>
+                        <button
+                          type="button"
+                          className="ds-tf-quick-btn is-rm"
+                          disabled={busy}
+                          title={bi("解除关联", "Unbind")}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void batchSetAgentsBound([a.id], false);
+                          }}
+                        >
+                          <IconClose />
+                        </button>
+                      </div>
+                    );
+                  })
+                )}
               </div>
             </div>
-          )
-        ) : bound.length === 0 ? (
-          <div className="ua-cluster-empty">
-            <span className="faint">
-              {bi(
-                "当前集群尚未关联执行 Agent（你对本集群为只读权限，需集群创建者或运维成员配置关联）。",
-                "No Agent associated yet (read-only access on this cluster).",
-              )}
-            </span>
           </div>
-        ) : (
-          <div className="ds-tf-pane">
-            <div className="ds-tf-head">
-              <b style={{ fontSize: 13 }}>{bi("已关联的执行 Agent", "Associated Agents")}</b>
-              <span className="ds-tf-cnt num">{bound.length}</span>
-            </div>
-            <div className="ds-tf-list" style={{ height: "auto", maxHeight: 260 }}>
-              {bound.map((a) => {
-                const local = isLocalAgent(a);
-                return (
-                  <div key={a.id} className="ds-tf-row" style={{ cursor: "default" }}>
-                    <div className="ds-tf-item-main">
-                      <span
-                        className={`iam-ag-dot ${
-                          a.disabled ? "is-disabled" : a.online ? "is-online" : "is-offline"
-                        }`}
-                      />
-                      <b className="ds-tf-id">{a.name}</b>
-                      <code className="mono faint small">{a.ip}</code>
-                      <span className={`ua-path-badge ${local ? "is-local" : ""}`}>
-                        {local
-                          ? bi("本机免密直连", "Local Direct")
-                          : bi("SSH 远程代管", "Jumpbox SSH")}
-                      </span>
-                    </div>
-                    <span className="small faint">
-                      {a.disabled
-                        ? bi("已禁用", "Disabled")
-                        : a.online
-                          ? bi("在线", "Online")
-                          : bi("离线", "Offline")}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-      </section>
+        </div>
+      </Drawer>
 
       {liveCheckTask && (
         <LiveExecLogCard

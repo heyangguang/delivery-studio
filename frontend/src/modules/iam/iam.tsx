@@ -32,6 +32,7 @@ import {
   can,
   err,
   fullTime,
+  platformShort,
   refreshAIStatus,
   typing,
 } from "../../shared/shared";
@@ -340,12 +341,32 @@ export type IAMCluster = {
   app_id: string;
   app_name: string;
   version: string;
+  platform?: string;
+  host_ips?: string[];
+  host_names?: string[];
   owner: string;
   delivery_mode?: string;
   created: string;
   users: Record<string, ClusterAccessLevel>;
   teams: Record<string, ClusterAccessLevel>;
 };
+
+function matchIAMClusterSearch(c: IAMCluster, kw: string): boolean {
+  if (!kw) return true;
+  if (
+    c.id.toLowerCase().includes(kw) ||
+    c.app_name.toLowerCase().includes(kw) ||
+    c.version.toLowerCase().includes(kw) ||
+    c.owner.toLowerCase().includes(kw) ||
+    (c.platform || "").toLowerCase().includes(kw) ||
+    platformShort(c.platform).toLowerCase().includes(kw)
+  ) {
+    return true;
+  }
+  if (c.host_ips?.some((ip) => ip.toLowerCase().includes(kw))) return true;
+  if (c.host_names?.some((h) => h.toLowerCase().includes(kw))) return true;
+  return false;
+}
 export type Deleted = {
   username: string;
   at: string;
@@ -579,6 +600,7 @@ export function ClusterGrantPicker({
   useLang();
   const [leftQ, setLeftQ] = useState("");
   const [rightQ, setRightQ] = useState("");
+  const [appFilter, setAppFilter] = useState("all");
   const [leftSel, setLeftSel] = useState<Set<string>>(() => new Set());
   const [rightSel, setRightSel] = useState<Set<string>>(() => new Set());
 
@@ -603,26 +625,25 @@ export function ClusterGrantPicker({
     [assignable, value],
   );
 
+  const appOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const c of unassigned) {
+      counts.set(c.app_name, (counts.get(c.app_name) || 0) + 1);
+    }
+    return Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
+  }, [unassigned]);
+
   const filteredLeft = useMemo(
     () =>
       unassigned.filter(
         (c) =>
-          !lkw ||
-          c.id.toLowerCase().includes(lkw) ||
-          c.app_name.toLowerCase().includes(lkw) ||
-          c.owner.toLowerCase().includes(lkw),
+          (appFilter === "all" || c.app_name === appFilter) &&
+          matchIAMClusterSearch(c, lkw),
       ),
-    [unassigned, lkw],
+    [unassigned, appFilter, lkw],
   );
   const filteredRight = useMemo(
-    () =>
-      granted.filter(
-        (c) =>
-          !rkw ||
-          c.id.toLowerCase().includes(rkw) ||
-          c.app_name.toLowerCase().includes(rkw) ||
-          c.owner.toLowerCase().includes(rkw),
-      ),
+    () => granted.filter((c) => matchIAMClusterSearch(c, rkw)),
     [granted, rkw],
   );
 
@@ -766,8 +787,28 @@ export function ClusterGrantPicker({
                 allowClear
                 value={leftQ}
                 onChange={setLeftQ}
-                placeholder={bi("搜索集群、中间件或创建者…", "Search cluster, app, or owner…")}
+                placeholder={bi(
+                  "搜索集群、节点 IP、系统或创建者…",
+                  "Search cluster, IP, OS, or owner…",
+                )}
               />
+              {appOptions.length > 1 && (
+                <Select
+                  size="small"
+                  style={{ width: 132, flexShrink: 0 }}
+                  value={appFilter}
+                  onChange={setAppFilter}
+                  getPopupContainer={() => document.body}
+                  triggerProps={{ autoFitPosition: true }}
+                  options={[
+                    { value: "all", label: bi("全部组件", "All Apps") },
+                    ...appOptions.map(([app, n]) => ({
+                      value: app,
+                      label: `${app} (${n})`,
+                    })),
+                  ]}
+                />
+              )}
             </div>
             <div className="iam-tf-list">
               {filteredLeft.length === 0 ? (
@@ -780,6 +821,7 @@ export function ClusterGrantPicker({
                 filteredLeft.map((c) => {
                   const checked = leftSel.has(c.id);
                   const inh = inherited?.[c.id];
+                  const ips = c.host_ips || [];
                   return (
                     <div
                       key={c.id}
@@ -800,6 +842,12 @@ export function ClusterGrantPicker({
                           <span className="iam-app-pill">{c.app_name}</span>
                         </div>
                         <small className="iam-tf-sub">
+                          {ips.length > 0
+                            ? `IP: ${ips.slice(0, 2).join(", ")}${
+                                ips.length > 2 ? ` +${ips.length - 2}` : ""
+                              } · `
+                            : ""}
+                          {c.platform ? `${platformShort(c.platform)} · ` : ""}
                           {bi(`创建者 ${c.owner}`, `Owner ${c.owner}`)}
                           {inh
                             ? bi(

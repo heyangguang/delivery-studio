@@ -1740,7 +1740,7 @@ func securityContextPrompt(sc *rehearsalSecurityContext, stage string) string {
 const rehearsalLightCreateSystem = `你是资深中间件运维与变更专家。用户对一个已投产集群发起了「简单推演（light）」——跳过繁琐的维护窗口多选题，直接生成一份 **100% 纯只读、极简一屏** 的 Bash 现场状态采集脚本（probe_script），以便先核实生产真实状态再做 3～5 步快速验证。
 
 核心采集约束（克制聚焦、一屏可截图，严禁发散）：
-1. **固定 1～2 行基础身份头（必采，对齐下游「节点角色与状态」表的 节点/地址/角色/版本/状态 5 列）**：无论本次变更是否涉及升级，脚本开头都必须用 1～2 行精简输出本机 hostname -s、本机业务 IP、**主组件及关键伴随组件的实测版本号**（如 PostgreSQL server_version + patroni --version、Redis redis-server -v、Nginx nginx -v、HAProxy haproxy -v、Keepalived keepalived -v、etcd etcd --version 等，单行合并输出，绝不遗漏导致下游表出现「待采集」）以及当前真实主从/集群健康状态；
+1. **固定 1～2 行基础身份头（必采，对齐下游「节点角色与状态」表的 节点/地址/角色/版本/状态 5 列）**：无论本次变更是否涉及升级，脚本开头都必须用 1～2 行精简输出本机 hostname -s、本机业务 IP、**主组件及关键伴随组件的实测版本号**（如 PostgreSQL server_version + patroni --version、Redis redis-server -v、Nginx nginx -v、HAProxy haproxy -v、Keepalived keepalived -v、etcd etcd --version 等，单行合并输出，绝不遗漏导致下游表出现「待采集」）以及当前真实主从/集群健康状态；采集本机 IP 时必须使用通用动态探测（如 hostname -I | awk '{print $1}' 或 ip -o -4 addr show scope global | awk '{split($4,a,"/"); print a[1]; exit}'），**严禁把当前集群节点 IP 写死为正则白名单过滤条件**，确保后续跨集群推广复用时不会误报未找到 IP；
 2. 除上述基础身份头外，只采本次变更真正需要知道的 2～3 个核心配置项、参数或目录状态，严禁做成全量巡检脚本；
 3. 终端总输出严格控制在约 12～28 行以内（单屏可完整截图），脚本总行数尽量不超过 40 行，严禁 cat 整份配置文件或打印无过滤长列表；
 4. 规避 ELB / 四层负载均衡回环（Hairpinning）：后端节点本机采集脚本严禁访问指向自身的云 ELB / SLB / LVS VIP，本机只查本地监听与 127.0.0.1/本机 IP；如需测 VIP 请在 probe_notes 说明在集群外客户端验证。
@@ -2364,7 +2364,7 @@ func normalizeScopeQuestionsLang(in []rehearsalScopeQuestion, lang string) []reh
 const rehearsalProbeSystem = `你是资深中间件运维与变更专家。请根据「集群初始交付基线」「变更目标」「已确认的变更边界」以及下方注入的平台技能规范，生成一份在生产节点执行的 **100% 纯只读、极简聚焦** Bash 现场状态采集脚本（probe_script）。
 
 核心采集约束（克制聚焦、一屏可截图，严禁发散）：
-1. **固定 1～2 行基础身份头（必采，与下游「节点角色与状态」表 5 列强对齐）**：无论本次变更是否涉及升级，脚本开头必须用 1～2 行紧凑输出本机 hostname -s、本机业务 IP、**主组件及关键伴随组件的实测版本号**（如 PostgreSQL server_version + patroni --version、Redis redis-server -v、Nginx nginx -v、HAProxy haproxy -v、Keepalived keepalived -v、etcd etcd --version 等，单行合并输出，绝不遗漏导致下游漂移表出现「待采集」），并输出当前真实主从/集群角色与健康状态；
+1. **固定 1～2 行基础身份头（必采，与下游「节点角色与状态」表 5 列强对齐）**：无论本次变更是否涉及升级，脚本开头必须用 1～2 行紧凑输出本机 hostname -s、本机业务 IP、**主组件及关键伴随组件的实测版本号**（如 PostgreSQL server_version + patroni --version、Redis redis-server -v、Nginx nginx -v、HAProxy haproxy -v、Keepalived keepalived -v、etcd etcd --version 等，单行合并输出，绝不遗漏导致下游漂移表出现「待采集」），并输出当前真实主从/集群角色与健康状态；采集本机 IP 时必须使用通用动态探测（如 hostname -I | awk '{print $1}' 或 ip -o -4 addr show scope global | awk '{split($4,a,"/"); print a[1]; exit}'），**严禁把当前集群节点 IP 写死为正则白名单过滤条件**，确保后续跨集群推广复用时不会误报未找到 IP；
 2. **业务核查项克制聚焦**：除上述基础身份头外，只采本次变更直接涉及的 2～5 个核心参数/配置项/目标目录权限或目标路径磁盘余量。**严禁发散做成大而全的巡检脚本**！与本次变更无关的项（如全量 pg_hba、全量已安装包、全量 sysctl/ss/ps、大段 journalctl 日志、AppArmor/SELinux 冗长输出、无关备份历史等）一律不查。
 2. **输出严格控制在 1 屏以内（目标总输出约 15～35 行，适配堡垒机/VDI 单张截图或复制受限环境）**：
    - 脚本本身保持简短清晰（通常 3～5 个核心检查块、总行数尽量不超过 45 行），不要堆砌大段辅助函数或重复样板；

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"delivery-studio/mwpack"
 )
 
 func TestRehearsalRolloutPropagateGateStrictPrecheckAndBoard(t *testing.T) {
@@ -894,5 +896,123 @@ func TestRolloutHardenedRemapperPortsRolesProbeScriptAndDedup(t *testing.T) {
 	}
 	if !strings.Contains(noepS3.RiskNote, "尚未登记访问入口") {
 		t.Fatalf("expected missing-endpoint warning added to RiskNote, got: %q", noepS3.RiskNote)
+	}
+}
+
+func TestRehearsalRolloutRemapsFactoredIPRegexAndImportedEndpoints(t *testing.T) {
+	originDep := &mwpack.Deployment{
+		Schema: mwpack.DeploymentSchema,
+		ID:     "pg-gitlab-private-prod",
+		Hosts: []mwpack.Host{
+			{Name: "db-node-01", IP: "172.30.2.67"},
+			{Name: "db-node-02", IP: "172.30.2.82"},
+			{Name: "db-node-03", IP: "172.30.2.91"},
+		},
+		Imported: &mwpack.ImportedMeta{
+			DisplayName: "PostgreSQL",
+			Endpoints:   []mwpack.ImportedEndpoint{{Name: "", Address: "gitlab.postgresql.private.toolchain.cn.vwgroup.com", Role: "readwrite"}},
+		},
+	}
+	targetDep := &mwpack.Deployment{
+		Schema: mwpack.DeploymentSchema,
+		ID:     "pg-jfrog-artifactory-private-prod",
+		Hosts: []mwpack.Host{
+			{Name: "ecs-jfrog-pg-001", IP: "172.30.2.58"},
+			{Name: "ecs-jfrog-pg-002", IP: "172.30.2.38"},
+			{Name: "ecs-jfrog-pg-003", IP: "172.30.2.60"},
+		},
+		Imported: &mwpack.ImportedMeta{
+			DisplayName: "PostgreSQL",
+			Endpoints:   []mwpack.ImportedEndpoint{{Name: "eip", Address: "jfrog-artifactory.postgresql.private.toolchain.cn.vwgroup.com", Role: "readwrite"}},
+		},
+	}
+	originFacts := clusterFacts{ID: originDep.ID, Current: storeJob{AppID: "postgresql"}, Plan: mwpack.SolveImported(nil, originDep)}
+	targetFacts := clusterFacts{ID: targetDep.ID, Current: storeJob{AppID: "postgresql"}, Plan: mwpack.SolveImported(nil, targetDep)}
+	rm := buildClusterRemapperWithDeps(originFacts, targetFacts, originDep, targetDep, "zh-CN")
+
+	rawScript := strings.Join([]string{
+		`#!/usr/bin/env bash`,
+		`ip=$(ip -o -4 addr show scope global | awk '$4 ~ /^172\.30\.2\.(67|82|91)\// {split($4,a,"/"); print a[1]; exit}')`,
+		`echo "escaped-single=172\.30\.2\.67 double=172\\.30\\.2\\.(67|82|91) unesc=172.30.2.(67|82|91)"`,
+		`echo "two-octet=172\.30\.(2\.67|2\.82|2\.91) full=(172\.30\.2\.67|172\.30\.2\.82|172\.30\.2\.91)"`,
+		`echo "brace=172.30.2.{67,82,91} case=172.30.2.67|172.30.2.82|172.30.2.91"`,
+		`echo "keep-loopback=127\.0\.0\.(1|2) keep-prefix=172.30.2.670"`,
+		`psql "host=gitlab.postgresql.private.toolchain.cn.vwgroup.com" --stanza=pg-gitlab-private-prod # db-node-01 db-node-02 db-node-03`,
+	}, "\n")
+	got := rm.RemapProbeScript(rawScript)
+
+	for _, want := range []string{
+		`awk '$4 ~ /^172\.30\.2\.(58|38|60)\//`,
+		`escaped-single=172\.30\.2\.58`,
+		`double=172\\.30\\.2\\.(58|38|60)`,
+		`unesc=172.30.2.(58|38|60)`,
+		`two-octet=172\.30\.2\.(58|38|60)`,
+		`full=172\.30\.2\.(58|38|60)`,
+		`brace=172.30.2.{58,38,60}`,
+		`case=172.30.2.58|172.30.2.38|172.30.2.60`,
+		`keep-loopback=127\.0\.0\.(1|2)`,
+		`keep-prefix=172.30.2.670`,
+		`host=jfrog-artifactory.postgresql.private.toolchain.cn.vwgroup.com`,
+		`--stanza=pg-jfrog-artifactory-private-prod`,
+		`ecs-jfrog-pg-001 ecs-jfrog-pg-002 ecs-jfrog-pg-003`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("remapped script missing %q:\n%s", want, got)
+		}
+	}
+	if leaks := rm.detectResidualOriginRefs(got); len(leaks) != 0 {
+		t.Fatalf("expected zero residual origin refs, got %+v:\n%s", leaks, got)
+	}
+
+	// Cross-subnet target wraps multi-subnet alternation in (...) for safe anchoring.
+	crossTarget := &mwpack.Deployment{
+		Schema: mwpack.DeploymentSchema,
+		ID:     "pg-cross-subnet",
+		Hosts:  []mwpack.Host{{Name: "n1", IP: "10.10.1.5"}, {Name: "n2", IP: "192.168.50.6"}},
+	}
+	rmCross := buildClusterRemapperWithDeps(originFacts, clusterFacts{ID: crossTarget.ID, Plan: &mwpack.Plan{Hosts: crossTarget.Hosts}}, originDep, crossTarget, "zh-CN")
+	gotCross := rmCross.RemapProbeScript(`awk '$4 ~ /^172\.30\.2\.(67|82|91)\//'`)
+	if gotCross != `awk '$4 ~ /^(10\.10\.1\.5|192\.168\.50\.6)\//'` {
+		t.Fatalf("expected safe anchored cross-subnet regex, got: %s", gotCross)
+	}
+
+	// Single-node target collapses factored IP-set regex into single escaped IP.
+	singleTarget := &mwpack.Deployment{
+		Schema: mwpack.DeploymentSchema,
+		ID:     "pg-single",
+		Hosts:  []mwpack.Host{{Name: "solo-1", IP: "10.88.0.9"}},
+	}
+	rmSingle := buildClusterRemapperWithDeps(originFacts, clusterFacts{ID: singleTarget.ID, Plan: &mwpack.Plan{Hosts: singleTarget.Hosts}}, originDep, singleTarget, "zh-CN")
+	gotSingle := rmSingle.RemapProbeScript(`awk '$4 ~ /^172\.30\.2\.(67|82|91)\//'`)
+	if gotSingle != `awk '$4 ~ /^10\.88\.0\.9\//'` {
+		t.Fatalf("expected single-node escaped IP, got: %s", gotSingle)
+	}
+
+	// Simultaneous swap safety & role alignment without cascade corruption.
+	swapOrig := clusterFacts{ID: "c-a", Plan: &mwpack.Plan{
+		Hosts: []mwpack.Host{{Name: "node-1", IP: "10.0.0.1"}, {Name: "node-2", IP: "10.0.0.2"}},
+		Instances: []*mwpack.Instance{{
+			Component: "postgresql",
+			Roles:     map[string][]string{"primary": {"node-1"}, "replica": {"node-2"}},
+		}},
+	}}
+	swapTgt := clusterFacts{ID: "c-b", Plan: &mwpack.Plan{
+		Hosts: []mwpack.Host{{Name: "node-1", IP: "10.0.0.1"}, {Name: "node-2", IP: "10.0.0.2"}},
+		Instances: []*mwpack.Instance{{
+			Component: "postgresql",
+			Roles:     map[string][]string{"primary": {"node-2"}, "replica": {"node-1"}},
+		}},
+	}}
+	rmSwap := buildClusterRemapperWithDeps(swapOrig, swapTgt, nil, nil, "zh-CN")
+	gotSwap := rmSwap.RemapText(`leader=node-1 (10.0.0.1) replica=node-2 (10.0.0.2) keep=node-10 (10.0.0.10)`)
+	if gotSwap != `leader=node-2 (10.0.0.2) replica=node-1 (10.0.0.1) keep=node-10 (10.0.0.10)` {
+		t.Fatalf("expected non-cascading role-aligned swap with boundary protection, got: %s", gotSwap)
+	}
+
+	// Residual leak detector catches unremapped origin IP when target has no baseline IPs.
+	emptyTarget := clusterFacts{ID: "pg-no-ips", Plan: &mwpack.Plan{}}
+	rmEmpty := buildClusterRemapperWithDeps(originFacts, emptyTarget, originDep, nil, "zh-CN")
+	if leaks := rmEmpty.detectResidualOriginRefs(`awk '$4 ~ /^172\.30\.2\.(67|82|91)\//'`); len(leaks) == 0 {
+		t.Fatalf("expected residual origin IP leak detected when target has no IPs")
 	}
 }

@@ -1453,7 +1453,8 @@ export function RolesPane({
   const [draft, setDraft] = useState<Draft | null>(null);
   const [compare, setCompare] = useState(false);
   const [matrixMod, setMatrixMod] = useState<string>("all");
-  const [onlyDiff, setOnlyDiff] = useState(false);
+  const [matrixFilter, setMatrixFilter] = useState<"all" | "diff" | "same">("all");
+  const [excludedCmpRoles, setExcludedCmpRoles] = useState<string[]>([]);
   const [permModFilter, setPermModFilter] = useState<string>("all");
   const [permQ, setPermQ] = useState("");
   const [onlyGranted, setOnlyGranted] = useState(false);
@@ -1592,15 +1593,32 @@ export function RolesPane({
     });
   };
 
-  const filteredMatrixModules = permModules
-    .filter(([m]) => matrixMod === "all" || m === matrixMod)
+  const comparedRoles = useMemo(() => {
+    const kept = iam.roles.filter((r) => !excludedCmpRoles.includes(r.id));
+    return kept.length >= 2 ? kept : iam.roles;
+  }, [iam.roles, excludedCmpRoles]);
+
+  const isPermDiff = (p: Perm) => {
+    if (comparedRoles.length < 2) return false;
+    const firstHas = comparedRoles[0].perms.includes(p.id);
+    return comparedRoles.some((r) => r.perms.includes(p.id) !== firstHas);
+  };
+
+  const scopedModulePairs = permModules.filter(
+    ([m]) => matrixMod === "all" || m === matrixMod,
+  );
+  const scopedAllPerms = scopedModulePairs.flatMap(([, ps]) => ps);
+  const scopedDiffCount = scopedAllPerms.filter(isPermDiff).length;
+  const scopedSameCount = scopedAllPerms.length - scopedDiffCount;
+
+  const filteredMatrixModules = scopedModulePairs
     .map(([m, ps]) => {
-      const rows = onlyDiff
-        ? ps.filter((p) => {
-            const firstHas = iam.roles[0]?.perms.includes(p.id);
-            return iam.roles.some((r) => r.perms.includes(p.id) !== firstHas);
-          })
-        : ps;
+      const rows =
+        matrixFilter === "diff"
+          ? ps.filter(isPermDiff)
+          : matrixFilter === "same"
+            ? ps.filter((p) => !isPermDiff(p))
+            : ps;
       return [m, rows] as [string, Perm[]];
     })
     .filter(([, rows]) => rows.length > 0);
@@ -1680,6 +1698,58 @@ export function RolesPane({
 
       {compare ? (
         <div className="iam-matrix-sec">
+          {iam.roles.length > 2 && (
+            <div className="iam-cmp-role-bar">
+              <div className="iam-cmp-role-checks">
+                <span className="iam-cmp-role-lbl">
+                  {bi("参与对比角色：", "Compare Roles:")}
+                </span>
+                {iam.roles.map((r) => {
+                  const checked = comparedRoles.some((x) => x.id === r.id);
+                  const disableUncheck = checked && comparedRoles.length <= 2;
+                  return (
+                    <Checkbox
+                      key={r.id}
+                      checked={checked}
+                      disabled={disableUncheck}
+                      onChange={(v) => {
+                        setExcludedCmpRoles((prev) => {
+                          if (v) return prev.filter((id) => id !== r.id);
+                          if (iam.roles.length - (prev.length + 1) < 2) return prev;
+                          return [...prev, r.id];
+                        });
+                      }}
+                    >
+                      {roleTitle(r)}
+                    </Checkbox>
+                  );
+                })}
+              </div>
+              <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                {iam.roles.some((r) => r.id === "sysadmin") &&
+                  iam.roles.length >= 3 && (
+                    <Button
+                      size="mini"
+                      type="secondary"
+                      onClick={() => {
+                        const sysExcluded = excludedCmpRoles.includes("sysadmin");
+                        if (sysExcluded) {
+                          setExcludedCmpRoles([]);
+                        } else {
+                          setExcludedCmpRoles(["sysadmin"]);
+                          setMatrixFilter("diff");
+                        }
+                      }}
+                    >
+                      {excludedCmpRoles.includes("sysadmin")
+                        ? bi("恢复全部角色", "Include All Roles")
+                        : bi("排除系统管理员看差异", "Exclude Sysadmin & Diff")}
+                    </Button>
+                  )}
+              </div>
+            </div>
+          )}
+
           <div className="iam-toolbar">
             <div className="iam-pills" role="tablist">
               <button
@@ -1700,10 +1770,32 @@ export function RolesPane({
                 </button>
               ))}
             </div>
-            <label className="iam-inline-switch">
-              <Switch size="small" checked={onlyDiff} onChange={setOnlyDiff} />
-              <span>{bi("仅显示角色间差异项", "Differences only")}</span>
-            </label>
+
+            <Radio.Group
+              type="button"
+              size="small"
+              value={matrixFilter}
+              onChange={(v) => setMatrixFilter(v as "all" | "diff" | "same")}
+            >
+              <Radio value="all">
+                {bi(
+                  `全部 (${scopedAllPerms.length})`,
+                  `All (${scopedAllPerms.length})`,
+                )}
+              </Radio>
+              <Radio value="diff">
+                {bi(
+                  `差异项 (${scopedDiffCount})`,
+                  `Diff (${scopedDiffCount})`,
+                )}
+              </Radio>
+              <Radio value="same">
+                {bi(
+                  `相同项 (${scopedSameCount})`,
+                  `Same (${scopedSameCount})`,
+                )}
+              </Radio>
+            </Radio.Group>
           </div>
 
           <div className="iam-ledger iam-matrix-wrap">
@@ -1722,7 +1814,7 @@ export function RolesPane({
                         </small>
                       </div>
                     </th>
-                    {iam.roles.map((r) => (
+                    {comparedRoles.map((r) => (
                       <th key={r.id} className="iam-cmp-role-col">
                         <button
                           type="button"
@@ -1738,13 +1830,8 @@ export function RolesPane({
                           )}
                         >
                           <b>{roleTitle(r)}</b>
-                          <span className="iam-cmp-rmeta">
-                            <span className="iam-cmp-scope">
-                              {scopeName(r.scope)}
-                            </span>
-                            <small className="num">
-                              {bi(`${r.holders} 人`, `${r.holders}`)}
-                            </small>
+                          <span className="iam-cmp-scope num">
+                            {scopeName(r.scope)} · {bi(`${r.holders} 人`, `${r.holders}`)}
                           </span>
                         </button>
                       </th>
@@ -1755,20 +1842,25 @@ export function RolesPane({
                   {filteredMatrixModules.length === 0 ? (
                     <tr>
                       <td
-                        colSpan={iam.roles.length + 1}
+                        colSpan={comparedRoles.length + 1}
                         className="iam-cmp-empty"
                       >
-                        {bi(
-                          "当前模块下所有角色权限一致，无差异项",
-                          "All roles share identical permissions in this view",
-                        )}
+                        {matrixFilter === "diff"
+                          ? bi(
+                              "当前模块下所选角色权限完全一致，无差异项",
+                              "Selected roles share identical permissions in this view",
+                            )
+                          : bi(
+                              "当前模块下所选角色没有全部相同的权限项（因系统管理员默认开启全部权限，可点击上方「排除系统管理员看差异」对比业务角色）",
+                              "No identical permissions across all selected roles in this module",
+                            )}
                       </td>
                     </tr>
                   ) : (
                     filteredMatrixModules.map(([m, ps]) => (
                       <React.Fragment key={m}>
                         <tr className="iam-cmp-m">
-                          <td colSpan={iam.roles.length + 1}>
+                          <td colSpan={comparedRoles.length + 1}>
                             <span>{permModule(m)}</span>
                             <em className="num">{ps.length}</em>
                           </td>
@@ -1779,7 +1871,7 @@ export function RolesPane({
                               <b>{permTitle(p)}</b>
                               <small>{permDesc(p)}</small>
                             </td>
-                            {iam.roles.map((r) => {
+                            {comparedRoles.map((r) => {
                               const has = r.perms.includes(p.id);
                               return (
                                 <td

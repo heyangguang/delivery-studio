@@ -1827,7 +1827,9 @@
 
 .iam-cmp th.iam-cmp-role-col,
 .iam-cmp td.iam-cmp-val-cell {
-  border-left: 1px solid var(--line);
+  padding: 10px 8px;
+  text-align: center;
+  border-left: 1px solid var(--line-strong);
 }
 
 .iam-cmp tbody tr:last-child td {
@@ -1847,7 +1849,7 @@
 }
 
 .iam-cmp th.iam-cmp-perm-col {
-  width: 36%;
+  width: 34%;
   text-align: left;
 }
 
@@ -1871,55 +1873,80 @@
 }
 
 .iam-cmp-rhead-btn {
-  all: unset;
   box-sizing: border-box;
   width: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding: 4px 6px;
+  justify-content: center;
+  gap: 5px;
+  padding: 5px 6px;
+  border: 0;
   border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: center;
   cursor: pointer;
   transition: background-color 0.14s ease, color 0.14s ease;
 }
 
 .iam-cmp-rhead-btn:hover {
   background: var(--hover);
-  color: var(--brand-ink);
+  color: var(--ink);
 }
 
 .iam-cmp-rhead-btn b {
-  font-size: 13px;
-  font-weight: 640;
+  display: block;
+  font-size: 13.5px;
+  font-weight: 650;
+  text-align: center;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.iam-cmp-rmeta {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
 .iam-cmp-scope {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  gap: 4px;
   height: 20px;
-  padding: 0 7px;
-  border-radius: 5px;
+  padding: 0 8px;
+  border-radius: 999px;
   font-size: 11px;
   font-weight: 560;
-  color: var(--brand-ink);
-  background: var(--brand-soft);
+  color: var(--ink-2);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
   white-space: nowrap;
 }
 
-.iam-cmp-rmeta small {
-  color: var(--faint);
-  font-size: 11px;
-  font-weight: 500;
+.iam-cmp-role-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 14px;
+  padding: 9px 14px;
+  margin-bottom: 12px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  font-size: 12.5px;
+}
+
+.iam-cmp-role-checks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+}
+
+.iam-cmp-role-lbl {
+  font-weight: 620;
+  color: var(--ink-2);
+  white-space: nowrap;
 }
 
 .iam-cmp-perm-cell {

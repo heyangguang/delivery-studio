@@ -1511,3 +1511,248 @@
   background: var(--warn-soft);
   color: var(--warn);
 }
+
+
+/* ---------------------------------------------------------------- On-Demand SelectExecutionAgentModal (sea-*) */
+
+.rha-clean-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.sea-modal-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 650;
+}
+
+.sea-modal-title > svg {
+  color: var(--brand);
+}
+
+.sea-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.sea-task-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 13px;
+  border-radius: 9px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+
+.sea-task-name {
+  font-size: 13px;
+  font-weight: 620;
+  color: var(--ink);
+  min-width: 0;
+}
+
+.sea-kind-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 21px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.sea-kind-badge.is-ro {
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok-soft) 65%, var(--surface));
+}
+
+.sea-kind-badge.is-rw {
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+}
+
+.sea-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sea-sec-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sea-sec-head > b {
+  font-size: 12.5px;
+  font-weight: 630;
+  color: var(--ink);
+}
+
+.sea-empty-box {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  border: 1px dashed var(--line);
+  background: var(--surface);
+}
+
+.sea-empty-box > p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.sea-quick-bind {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sea-quick-bind-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sea-quick-bind-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  font-size: 12.5px;
+}
+
+.sea-agent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.sea-agent-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 13px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  cursor: pointer;
+  transition: border-color 0.14s ease, background-color 0.14s ease;
+}
+
+.sea-agent-card:hover {
+  border-color: color-mix(in srgb, var(--brand) 45%, var(--line));
+}
+
+.sea-agent-card.is-selected {
+  border-color: var(--brand);
+  background: color-mix(in srgb, var(--brand-soft) 32%, var(--surface));
+  box-shadow: 0 0 0 1px var(--brand);
+}
+
+.sea-agent-card.is-muted {
+  opacity: 0.62;
+}
+
+.sea-agent-main,
+.sea-agent-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.sea-agent-main > b {
+  font-size: 13px;
+  font-weight: 630;
+  color: var(--ink);
+}
+
+.sea-host-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.sea-host-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.sea-host-chip.on {
+  border-color: color-mix(in srgb, var(--brand) 45%, var(--line));
+  background: color-mix(in srgb, var(--brand-soft) 24%, var(--surface));
+}
+
+.sea-host-chip em {
+  font-style: normal;
+  color: var(--mute);
+}
+
+.sea-ssh-box {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+}
+
+.sea-ssh-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sea-ssh-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.sea-ssh-grid > label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--ink-2);
+}
+
+@media (max-width: 640px) {
+  .sea-ssh-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

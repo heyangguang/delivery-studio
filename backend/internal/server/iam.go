@@ -522,6 +522,8 @@ var routePerms = []routePerm{
 	rp("POST", `/api/ai/toggle`, "ai.settings"),
 
 	rp("GET", `/api/executions/runs`, "delivery.view"),
+	rp("GET", `/api/executions/unified-agents`, "execution.manage|delivery.view|iam.user|iam.team"),
+	rp("W", `/api/executions/unified-agents(/.*)?`, "execution.manage|iam.user|iam.team"),
 	rp("GET", `/api/executions/agents`, "execution.manage|delivery.view"),
 	rp("W", `/api/executions/agents(/.*)?`, "execution.manage"),
 	rp("GET", `/api/jobs`, "delivery.view"),
@@ -600,10 +602,10 @@ var routePerms = []routePerm{
 
 	rp("GET", `/api/audit(/sessions)?(/export)?`, "audit.view"),
 	rp("DELETE", `/api/audit/sessions/[^/]+`, "iam.user"),
-	rp("GET", `/api/iam(/.*)?`, "iam.user|iam.role|iam.team"),
+	rp("GET", `/api/iam(/.*)?`, "iam.user|iam.role|iam.team|execution.manage"),
 	rp("W", `/api/iam/roles(/.*)?`, "iam.role"),
 	rp("W", `/api/iam/teams(/.*)?`, "iam.team"),
-	rp("W", `/api/iam/clusters/[^/]+`, "iam.user|iam.team"),
+	rp("W", `/api/iam/clusters/[^/]+`, "iam.user|iam.team|execution.manage"),
 	rp("W", `/api/iam/deleted/.*`, "iam.user"),
 	rp("*", `/api/users(/.*)?`, "iam.user"),
 

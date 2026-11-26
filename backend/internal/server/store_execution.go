@@ -56,6 +56,7 @@ type executionNode struct {
 	AllowDelivery  *bool               `json:"allow_delivery,omitempty"`
 	AllowProbe     *bool               `json:"allow_probe,omitempty"`
 	AllowRehearsal *bool               `json:"allow_rehearsal,omitempty"`
+	ClusterModes   map[string]string   `json:"cluster_modes,omitempty"`
 	Probe          *agentHostProbe     `json:"probe,omitempty"`
 }
 type executionStep struct {
@@ -205,6 +206,12 @@ func cloneExecutionDB(src executionDB) executionDB {
 	if len(src.Agents) > 0 {
 		dst.Agents = make(map[string]targetAgent, len(src.Agents))
 		for k, v := range src.Agents {
+			if len(v.Clusters) > 0 {
+				v.Clusters = append([]string(nil), v.Clusters...)
+			}
+			if len(v.ClusterModes) > 0 {
+				v.ClusterModes = cloneStringMap(v.ClusterModes)
+			}
 			dst.Agents[k] = v
 		}
 	}
@@ -241,6 +248,9 @@ func cloneExecutionDB(src executionDB) executionDB {
 				m[rk] = append([]string(nil), rv...)
 			}
 			n.Grants = m
+		}
+		if len(n.ClusterModes) > 0 {
+			n.ClusterModes = cloneStringMap(n.ClusterModes)
 		}
 		dst.Nodes[k] = n
 	}
@@ -825,7 +835,7 @@ func (s *storeServer) handleExecutions(w http.ResponseWriter, r *http.Request, s
 		nodes := []executionNodeOption{}
 		context := s.executionContext(j)
 		for _, n := range nodesSnapshot {
-			if contains(n.Clusters, j.ClusterID) || s.can(session.User, "execution.manage") {
+			if contains(n.Clusters, j.ClusterID) || nodeClusterMode(n, j.ClusterID) != "" || s.can(session.User, "execution.manage") {
 				nodes = append(nodes, executionNodeOptionFor(n, context))
 			}
 		}
@@ -1018,6 +1028,12 @@ func (s *storeServer) handleExecutions(w http.ResponseWriter, r *http.Request, s
 		n, ok := d.Nodes[req.Node]
 		if !ok || !executionOnline(n) {
 			s.fail(w, 409, "执行节点未连接或已停用")
+			return
+		}
+		if nodeClusterMode(n, j.ClusterID) == "readonly" {
+			s.failBi(w, 403,
+				"该 Agent 在本集群仅授予「只读」权限，请在「IAM → 集群权限」中切换为「读写」后再执行部署",
+				"This Agent only has read-only access on this cluster; switch it to read-write in IAM → Cluster Permissions before running deployments")
 			return
 		}
 		snap, e := s.executionSnapshotFor(j)

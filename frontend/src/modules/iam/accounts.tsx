@@ -216,7 +216,7 @@ export function AccountsPage({
 
   useEffect(() => {
     if (!can("iam.user") && !selected) {
-      const target = can("iam.team")
+      const target = can("iam.team|execution.manage")
         ? "~clusters"
         : can("iam.role")
           ? "~roles"
@@ -226,7 +226,7 @@ export function AccountsPage({
   }, [selected]);
 
   const hasIAMAccess =
-    me.role === "admin" || can("iam.user|iam.role|iam.team|audit.view");
+    me.role === "admin" || can("iam.user|iam.role|iam.team|audit.view|execution.manage");
 
   const adding = selected === "+new";
   const rolesView = selected === "~roles";
@@ -290,12 +290,12 @@ export function AccountsPage({
     }
 
     const accessItems: typeof orgItems = [];
-    if (can("iam.user|iam.team")) {
+    if (can("iam.user|iam.team|execution.manage")) {
       accessItems.push({
         id: "~clusters",
         routeId: "~clusters",
         icon: AccIcons.clusters,
-        title: bi("集群授权", "Cluster Access"),
+        title: bi("集群权限", "Cluster Access"),
         count: iam?.clusters?.length,
       });
     }

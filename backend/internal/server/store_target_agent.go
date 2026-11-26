@@ -158,11 +158,13 @@ func sanitizeAgentHostProbe(in *agentHostProbe) *agentHostProbe {
 type targetAgent struct {
 	ID             string          `json:"id"`
 	Job            string          `json:"job,omitempty"`
-	Cluster        string          `json:"cluster,omitempty"`
-	Clusters       []string        `json:"clusters,omitempty"`
-	Node           string          `json:"node,omitempty"`
-	Mode           string          `json:"mode,omitempty"` // "" / "ssh_trust" | "direct" (direct execution without SSH/control host)
-	AllowMutating  bool            `json:"allow_mutating,omitempty"`
+	Cluster        string            `json:"cluster,omitempty"`
+	Clusters       []string          `json:"clusters,omitempty"`
+	ClusterModes   map[string]string `json:"cluster_modes,omitempty"`
+	Node           string            `json:"node,omitempty"`
+	Mode           string            `json:"mode,omitempty"` // "" / "ssh_trust" | "direct" (direct execution without SSH/control host)
+	Disabled       bool              `json:"disabled,omitempty"`
+	AllowMutating  bool              `json:"allow_mutating,omitempty"`
 	Capabilities   []string        `json:"capabilities,omitempty"`
 	Host           string          `json:"host"`
 	IP             string          `json:"ip"`
@@ -193,6 +195,9 @@ func targetAgentClusters(a targetAgent) []string {
 		out = append(out, cid)
 	}
 	for _, cid := range a.Clusters {
+		add(cid)
+	}
+	for cid := range a.ClusterModes {
 		add(cid)
 	}
 	if a.Cluster != "" {
@@ -583,7 +588,7 @@ func (s *storeServer) handleTargetAgent(w http.ResponseWriter, r *http.Request) 
 
 func targetAgentInScope(a targetAgent, n executionNode) bool {
 	if a.Mode == "direct" {
-		return a.Desired == "active"
+		return !a.Disabled && a.Desired == "active"
 	}
 	if n.ID == "" || !contains(n.Clusters, a.Cluster) || a.IP == n.ControllerIP {
 		return false

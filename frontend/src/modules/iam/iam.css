@@ -3291,3 +3291,38 @@
     transform: none !important;
   }
 }
+
+
+/* ---- Agent Pill & Status Dot in Cluster Access ---- */
+
+.iam-ag-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--mute);
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
+.iam-ag-dot.is-online {
+  background: var(--ok);
+}
+
+.iam-ag-dot.is-offline {
+  background: var(--warn);
+}
+
+.iam-ag-dot.is-disabled {
+  background: var(--mute);
+  opacity: 0.5;
+}
+
+.iam-grant-pill.is-agent {
+  border-color: color-mix(in srgb, var(--brand) 24%, var(--line));
+  background: color-mix(in srgb, var(--brand-soft) 28%, var(--surface));
+}
+
+.iam-grant-pill.is-agent .iam-gp-ic {
+  color: var(--brand);
+}

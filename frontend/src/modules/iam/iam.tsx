@@ -25,6 +25,7 @@ import {
   IconRight,
   IconSearch,
   IconStorage,
+  IconThunderbolt,
   IconUser,
   IconUserGroup,
 } from "@arco-design/web-react/icon";
@@ -336,6 +337,15 @@ export type Team = {
   members: string[];
   clusters?: Record<string, ClusterAccessLevel>;
 };
+export type IAMAgentMode = "readonly" | "readwrite";
+export type IAMAgentBrief = {
+  id: string;
+  backing: string;
+  name: string;
+  ip: string;
+  online: boolean;
+  disabled: boolean;
+};
 export type IAMCluster = {
   id: string;
   app_id: string;
@@ -346,6 +356,7 @@ export type IAMCluster = {
   created: string;
   users: Record<string, ClusterAccessLevel>;
   teams: Record<string, ClusterAccessLevel>;
+  agents?: Record<string, IAMAgentMode>;
 };
 export type Deleted = {
   username: string;
@@ -369,6 +380,7 @@ export type IAM = {
     }
   >;
   clusters?: IAMCluster[];
+  agents?: IAMAgentBrief[];
   deleted?: Deleted[];
 };
 
@@ -382,6 +394,11 @@ export const clusterLevelLabel = (lvl: ClusterAccessLevel) =>
 const stableClusterEntries = (m?: Record<string, ClusterAccessLevel>) =>
   Object.entries(m || {})
     .filter(([, v]) => v === "view" || v === "operate")
+    .sort(([a], [b]) => a.localeCompare(b));
+
+const stableAgentEntries = (m?: Record<string, IAMAgentMode>) =>
+  Object.entries(m || {})
+    .filter(([, v]) => v === "readonly" || v === "readwrite")
     .sort(([a], [b]) => a.localeCompare(b));
 
 const sameClusterMap = (
@@ -437,6 +454,9 @@ export const scopeName = (s: string) =>
   SCOPES.find((x) => x.id === s)?.title || s;
 
 let memo: IAM | null = null;
+export function invalidateIAMCache() {
+  memo = null;
+}
 if (typeof window !== "undefined") {
   window.addEventListener("mh-lang-change", () => {
     memo = null;
@@ -553,6 +573,59 @@ function TriAccessSwitch({
         onClick={() => onChange("operate")}
       >
         {bi("运维", "Operate")}
+      </button>
+    </span>
+  );
+}
+
+/** Apple-inspired gliding 3-state inline access switch for Cluster Agents: Disabled / Read-only / Read-write */
+function TriAgentSwitch({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: "" | IAMAgentMode;
+  onChange: (next: "" | IAMAgentMode) => void;
+  disabled?: boolean;
+}) {
+  useLang();
+  const idx = value === "readwrite" ? 2 : value === "readonly" ? 1 : 0;
+  return (
+    <span
+      className={`iam-tri-switch ${disabled ? "is-disabled" : ""} idx-${idx}`}
+      style={{ "--tri-idx": idx } as React.CSSProperties}
+      role="radiogroup"
+      aria-label={bi("Agent 集群权限", "Agent cluster access")}
+    >
+      <button
+        type="button"
+        role="radio"
+        aria-checked={value === ""}
+        disabled={disabled}
+        className={value === "" ? "on is-none" : ""}
+        onClick={() => onChange("")}
+      >
+        {bi("禁用", "Off")}
+      </button>
+      <button
+        type="button"
+        role="radio"
+        aria-checked={value === "readonly"}
+        disabled={disabled}
+        className={value === "readonly" ? "on is-view" : ""}
+        onClick={() => onChange("readonly")}
+      >
+        {bi("只读", "RO")}
+      </button>
+      <button
+        type="button"
+        role="radio"
+        aria-checked={value === "readwrite"}
+        disabled={disabled}
+        className={value === "readwrite" ? "on is-op" : ""}
+        onClick={() => onChange("readwrite")}
+      >
+        {bi("读写", "RW")}
       </button>
     </span>
   );
@@ -2373,8 +2446,10 @@ function QuickClusterGrantPopover({
   cluster,
   users,
   teams,
+  agents,
   canUsers,
   canTeams,
+  canAgents,
   userHasGlobalScope,
   busy,
   onGrant,
@@ -2382,14 +2457,16 @@ function QuickClusterGrantPopover({
   cluster: IAMCluster;
   users: Account[];
   teams: Team[];
+  agents: IAMAgentBrief[];
   canUsers: boolean;
   canTeams: boolean;
+  canAgents: boolean;
   userHasGlobalScope: (uname: string) => boolean;
   busy: boolean;
   onGrant: (
-    kind: "u" | "t",
+    kind: "u" | "t" | "a",
     id: string,
-    lvl: ClusterAccessLevel,
+    lvl: string,
     close: () => void,
   ) => void;
 }) {
@@ -2398,6 +2475,15 @@ function QuickClusterGrantPopover({
   const [kw, setKw] = useState("");
   const q = kw.trim().toLowerCase();
 
+  const candAgents = canAgents
+    ? agents.filter(
+        (a) =>
+          !cluster.agents?.[a.id] &&
+          (!q ||
+            a.name.toLowerCase().includes(q) ||
+            a.ip.toLowerCase().includes(q)),
+      )
+    : [];
   const candUsers = canUsers
     ? users.filter(
         (u) =>
@@ -2431,28 +2517,61 @@ function QuickClusterGrantPopover({
           onClick={(e) => e.stopPropagation()}
         >
           <div className="iam-quick-pop-head">
-            <b>{bi(`授权访问 ${cluster.id}`, `Grant on ${cluster.id}`)}</b>
+            <b>{bi(`授权 ${cluster.id}`, `Grant on ${cluster.id}`)}</b>
           </div>
-          {users.length + teams.length > 4 && (
+          {users.length + teams.length + agents.length > 4 && (
             <Input
               size="small"
               prefix={<IconSearch />}
               allowClear
               value={kw}
               onChange={setKw}
-              placeholder={bi("搜索成员或团队…", "Filter user or team…")}
+              placeholder={bi("搜索 Agent、成员或团队…", "Filter Agent, user, or team…")}
             />
           )}
           <div className="iam-quick-pop-list">
-            {candUsers.length === 0 && candTeams.length === 0 ? (
+            {candAgents.length === 0 &&
+            candUsers.length === 0 &&
+            candTeams.length === 0 ? (
               <p className="faint small" style={{ margin: "10px 4px", textAlign: "center" }}>
                 {bi(
-                  "无可新增的普通成员或团队",
-                  "No unassigned non-global users or teams",
+                  "无可新增的 Agent、普通成员或团队",
+                  "No unassigned Agents, users, or teams",
                 )}
               </p>
             ) : (
               <>
+                {candAgents.map((a) => (
+                  <div key={`a:${a.id}`} className="iam-quick-pop-row">
+                    <span className="iam-quick-pop-who">
+                      <IconThunderbolt />
+                      <b>{a.name}</b>
+                      <small className="mono faint">{a.ip}</small>
+                    </span>
+                    <span className="iam-quick-pop-btns">
+                      <button
+                        type="button"
+                        disabled={busy}
+                        className="iam-lvl-tag is-view is-btn"
+                        onClick={() =>
+                          onGrant("a", a.id, "readonly", () => setOpen(false))
+                        }
+                      >
+                        {bi("+ 只读", "+ RO")}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        className="iam-lvl-tag is-operate is-btn"
+                        onClick={() =>
+                          onGrant("a", a.id, "readwrite", () => setOpen(false))
+                        }
+                      >
+                        {bi("+ 读写", "+ RW")}
+                      </button>
+                    </span>
+                  </div>
+                ))}
                 {candUsers.map((u) => (
                   <div key={`u:${u.username}`} className="iam-quick-pop-row">
                     <span className="iam-quick-pop-who">
@@ -2607,6 +2726,10 @@ export function ClustersAccessPane({
     () => new Map((iam?.teams || []).map((t) => [t.id, t])),
     [iam?.teams],
   );
+  const agentMap = useMemo(
+    () => new Map((iam?.agents || []).map((a) => [a.id, a])),
+    [iam?.agents],
+  );
 
   const userHasGlobalScope = (uname: string) => {
     const rids =
@@ -2642,7 +2765,8 @@ export function ClustersAccessPane({
       clusters.filter(
         (c) =>
           Object.keys(c.users || {}).length +
-            Object.keys(c.teams || {}).length >
+            Object.keys(c.teams || {}).length +
+            Object.keys(c.agents || {}).length >
           0,
       ).length,
     [clusters],
@@ -2677,7 +2801,9 @@ export function ClustersAccessPane({
     () =>
       clusters.filter((c) => {
         const grantTotal =
-          Object.keys(c.users || {}).length + Object.keys(c.teams || {}).length;
+          Object.keys(c.users || {}).length +
+          Object.keys(c.teams || {}).length +
+          Object.keys(c.agents || {}).length;
         if (shareFilter === "shared" && grantTotal === 0) return false;
         if (shareFilter === "private" && grantTotal > 0) return false;
         if (appFilter !== "all" && c.app_name !== appFilter) return false;
@@ -2698,9 +2824,19 @@ export function ClustersAccessPane({
           )
         )
           return true;
+        if (
+          Object.keys(c.agents || {}).some((aid) => {
+            const ag = agentMap.get(aid);
+            return (
+              (ag?.name || "").toLowerCase().includes(q) ||
+              (ag?.ip || "").toLowerCase().includes(q)
+            );
+          })
+        )
+          return true;
         return false;
       }),
-    [clusters, shareFilter, appFilter, memberFilter, q, teamMap, iam], // eslint-disable-line react-hooks/exhaustive-deps
+    [clusters, shareFilter, appFilter, memberFilter, q, teamMap, agentMap, iam], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   const drawerCluster = drawerClusterId
@@ -2730,14 +2866,36 @@ export function ClustersAccessPane({
       ),
     [iam?.teams, dq],
   );
+  const eligibleDrawerAgents = useMemo(
+    () =>
+      (iam?.agents || []).filter(
+        (a) =>
+          !dq ||
+          a.name.toLowerCase().includes(dq) ||
+          a.ip.toLowerCase().includes(dq),
+      ),
+    [iam?.agents, dq],
+  );
 
   const canUsers = can("iam.user");
   const canTeams = can("iam.team");
-  const editable = canUsers || canTeams;
+  const canAgents = can("execution.manage|iam.user|iam.team");
+  const editable = canUsers || canTeams || canAgents;
 
   const batchTargetOptions = useMemo(() => {
     const opts: { label: string; value: string }[] = [];
     if (!iam) return opts;
+    if (canAgents) {
+      for (const a of iam.agents || []) {
+        opts.push({
+          value: `a:${a.id}`,
+          label: bi(
+            `Agent · ${a.name} (${a.ip})`,
+            `Agent · ${a.name} (${a.ip})`,
+          ),
+        });
+      }
+    }
     if (canUsers) {
       for (const u of users) {
         if (u.disabled || userHasGlobalScope(u.username)) continue;
@@ -2759,7 +2917,7 @@ export function ClustersAccessPane({
       }
     }
     return opts;
-  }, [users, iam, canUsers, canTeams]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [users, iam, canUsers, canTeams, canAgents]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (iamError && !iam) {
     return (
@@ -2787,6 +2945,7 @@ export function ClustersAccessPane({
     nextUsers: Record<string, ClusterAccessLevel>,
     nextTeams: Record<string, ClusterAccessLevel>,
     keyHint: string,
+    nextAgents?: Record<string, IAMAgentMode>,
   ) => {
     if (savingKey) return;
     setSavingKey(keyHint);
@@ -2794,6 +2953,7 @@ export function ClustersAccessPane({
       const payload: Record<string, unknown> = {};
       if (canUsers) payload.users = nextUsers;
       if (canTeams) payload.teams = nextTeams;
+      if (canAgents && nextAgents !== undefined) payload.agents = nextAgents;
       const next = await api<IAM>(
         `/api/iam/clusters/${encodeURIComponent(c.id)}`,
         { method: "PUT", body: JSON.stringify(payload) },
@@ -2824,8 +2984,17 @@ export function ClustersAccessPane({
         const nextT: Record<string, ClusterAccessLevel> = {
           ...(c.teams || {}),
         };
+        const nextA: Record<string, IAMAgentMode> = {
+          ...(c.agents || {}),
+        };
+        let touchedAgents = false;
         for (const target of batchTargets) {
-          if (target.startsWith("u:") && canUsers) {
+          if (target.startsWith("a:") && canAgents) {
+            const aid = target.slice(2);
+            touchedAgents = true;
+            if (batchAction === "revoke") delete nextA[aid];
+            else nextA[aid] = batchAction === "operate" ? "readwrite" : "readonly";
+          } else if (target.startsWith("u:") && canUsers) {
             const uname = target.slice(2);
             if (uname === c.owner) continue;
             if (batchAction === "revoke") delete nextU[uname];
@@ -2839,6 +3008,7 @@ export function ClustersAccessPane({
         const payload: Record<string, unknown> = {};
         if (canUsers) payload.users = nextU;
         if (canTeams) payload.teams = nextT;
+        if (canAgents && touchedAgents) payload.agents = nextA;
         latest = await api<IAM>(
           `/api/iam/clusters/${encodeURIComponent(cid)}`,
           { method: "PUT", body: JSON.stringify(payload) },
@@ -2915,8 +3085,8 @@ export function ClustersAccessPane({
           </div>
           <p>
             {bi(
-              "集群默认归创建者本人运维，全局角色自动可见全部；可在行内一键增删协作成员、点击标签切换「运维 / 只读」，或勾选多行批量分配。",
-              "Creators operate their own clusters by default and global roles see all. Add collaborators inline, click badges to toggle Operate / View, or select rows for bulk assignment.",
+              "集中管理每个集群的执行 Agent（启用/禁用 · 只读/读写）以及协作成员与团队权限；点击标签可就地切换级别，勾选多行可批量分配。",
+              "Manage each cluster's execution Agents (Enable/Disable · Read-only/Read-write) alongside user & team access.",
             )}
           </p>
         </div>
@@ -3152,8 +3322,8 @@ export function ClustersAccessPane({
                         `${memberFilter}'s Access & Collaborators`,
                       )
                     : bi(
-                        "协作成员与团队（点击权限标签可切换）",
-                        "Authorized Collaborators & Teams",
+                        "执行 Agent、协作成员与团队（点击标签可切换）",
+                        "Agents, Collaborators & Teams",
                       )}
                 </span>
                 <span className="is-right">{bi("操作", "Actions")}</span>
@@ -3161,6 +3331,7 @@ export function ClustersAccessPane({
 
               <div className="iam-cl-lbody">
                 {filtered.map((c) => {
+                  const aEntries = stableAgentEntries(c.agents);
                   const uEntries = stableClusterEntries(c.users);
                   const tEntries = stableClusterEntries(c.teams);
                   const checked = selectedIds.has(c.id);
@@ -3226,14 +3397,91 @@ export function ClustersAccessPane({
                           </span>
                         )}
 
-                        {uEntries.length === 0 && tEntries.length === 0 ? (
+                        {aEntries.length === 0 &&
+                        uEntries.length === 0 &&
+                        tEntries.length === 0 ? (
                           !effView && (
                             <span className="faint small">
-                              {bi("仅创建者与全局角色", "Creator & global roles")}
+                              {bi("仅创建者与全局角色 · 未关联 Agent", "Creator & global roles · No Agent")}
                             </span>
                           )
                         ) : (
                           <>
+                            {aEntries.map(([aid, mode]) => {
+                              const ag = agentMap.get(aid);
+                              const nextMode: IAMAgentMode =
+                                mode === "readwrite" ? "readonly" : "readwrite";
+                              const busyThis = savingKey === `${c.id}:a:${aid}`;
+                              const dotCls = ag?.disabled
+                                ? "is-disabled"
+                                : ag?.online
+                                  ? "is-online"
+                                  : "is-offline";
+                              return (
+                                <span
+                                  key={`a:${aid}`}
+                                  className={`iam-grant-pill is-agent ${busyThis ? "is-busy" : ""}`}
+                                >
+                                  <span className={`iam-ag-dot ${dotCls}`} />
+                                  <IconThunderbolt className="iam-gp-ic" />
+                                  <b className="iam-gp-name">{ag?.name || aid}</b>
+                                  <Tooltip
+                                    mini
+                                    content={
+                                      canAgents
+                                        ? bi(
+                                            `点击切换 Agent 为「${nextMode === "readwrite" ? "读写" : "只读"}」`,
+                                            `Switch Agent to ${nextMode === "readwrite" ? "Read-write" : "Read-only"}`,
+                                          )
+                                        : undefined
+                                    }
+                                  >
+                                    <button
+                                      type="button"
+                                      disabled={!canAgents || !!savingKey}
+                                      className={`iam-lvl-tag is-${mode === "readwrite" ? "operate" : "view"} is-btn`}
+                                      onClick={() =>
+                                        void updateClusterAccess(
+                                          c,
+                                          c.users || {},
+                                          c.teams || {},
+                                          `${c.id}:a:${aid}`,
+                                          { ...(c.agents || {}), [aid]: nextMode },
+                                        )
+                                      }
+                                    >
+                                      {mode === "readwrite"
+                                        ? bi("读写", "RW")
+                                        : bi("只读", "RO")}
+                                    </button>
+                                  </Tooltip>
+                                  {canAgents && (
+                                    <button
+                                      type="button"
+                                      disabled={!!savingKey}
+                                      className="iam-gp-rm"
+                                      aria-label={bi(
+                                        `禁用移除 Agent ${ag?.name || aid}`,
+                                        `Disable Agent ${ag?.name || aid}`,
+                                      )}
+                                      onClick={() => {
+                                        const nextA = { ...(c.agents || {}) };
+                                        delete nextA[aid];
+                                        void updateClusterAccess(
+                                          c,
+                                          c.users || {},
+                                          c.teams || {},
+                                          `${c.id}:a:${aid}`,
+                                          nextA,
+                                        );
+                                      }}
+                                    >
+                                      <IconClose />
+                                    </button>
+                                  )}
+                                </span>
+                              );
+                            })}
                             {uEntries.map(([uname, lvl]) => {
                               const nextLvl: ClusterAccessLevel =
                                 lvl === "operate" ? "view" : "operate";
@@ -3378,16 +3626,32 @@ export function ClustersAccessPane({
                             cluster={c}
                             users={users}
                             teams={iam.teams || []}
+                            agents={iam.agents || []}
                             canUsers={canUsers}
                             canTeams={canTeams}
+                            canAgents={canAgents}
                             userHasGlobalScope={userHasGlobalScope}
                             busy={Boolean(savingKey)}
                             onGrant={(kind, id, lvl, close) => {
                               close();
-                              if (kind === "u") {
+                              if (kind === "a") {
                                 void updateClusterAccess(
                                   c,
-                                  { ...(c.users || {}), [id]: lvl },
+                                  c.users || {},
+                                  c.teams || {},
+                                  `${c.id}:a:${id}`,
+                                  {
+                                    ...(c.agents || {}),
+                                    [id]: lvl as IAMAgentMode,
+                                  },
+                                );
+                              } else if (kind === "u") {
+                                void updateClusterAccess(
+                                  c,
+                                  {
+                                    ...(c.users || {}),
+                                    [id]: lvl as ClusterAccessLevel,
+                                  },
                                   c.teams || {},
                                   `${c.id}:u:${id}`,
                                 );
@@ -3395,7 +3659,10 @@ export function ClustersAccessPane({
                                 void updateClusterAccess(
                                   c,
                                   c.users || {},
-                                  { ...(c.teams || {}), [id]: lvl },
+                                  {
+                                    ...(c.teams || {}),
+                                    [id]: lvl as ClusterAccessLevel,
+                                  },
                                   `${c.id}:t:${id}`,
                                 );
                               }
@@ -3414,7 +3681,7 @@ export function ClustersAccessPane({
                               setDrawerClusterId(c.id);
                             }}
                           >
-                            {bi("全部成员", "Manage")}
+                            {bi("管理权限", "Manage")}
                           </Button>
                         )}
                         <button
@@ -3482,6 +3749,85 @@ export function ClustersAccessPane({
                 )}
               />
             )}
+
+            <div className="iam-cl-drawer-sec">
+              <div className="iam-cl-drawer-sec-h">
+                <h4>
+                  {bi("执行 Agent（启用/禁用 · 只读/读写）", "Execution Agents")}{" "}
+                  <em className="num">{eligibleDrawerAgents.length}</em>
+                </h4>
+                <button
+                  type="button"
+                  className="iam-text-act"
+                  onClick={() => {
+                    setDrawerClusterId("");
+                    go({ name: "executions", view: "nodes" });
+                  }}
+                >
+                  {bi("管理 / 接入 Agent →", "Manage Agents →")}
+                </button>
+              </div>
+              {eligibleDrawerAgents.length === 0 ? (
+                <p className="iam-inline-empty">
+                  {bi(
+                    "尚未接入任何执行 Agent；前往「执行中心 → Agent」部署后即可在此按集群设置启用与只读/读写权限。",
+                    "No Agents enrolled yet. Add one in Execution Center → Agent first.",
+                  )}
+                </p>
+              ) : (
+                <div className="iam-cl-drawer-list">
+                  {eligibleDrawerAgents.map((a) => {
+                    const curMode = drawerCluster.agents?.[a.id] || "";
+                    const rowBusy = savingKey === `${drawerCluster.id}:a:${a.id}`;
+                    const statusTxt = a.disabled
+                      ? bi("全局已禁用", "Globally Disabled")
+                      : a.online
+                        ? bi("在线", "Online")
+                        : bi("离线", "Offline");
+                    return (
+                      <div
+                        key={a.id}
+                        className={`iam-cl-drawer-row ${rowBusy ? "is-busy" : ""}`}
+                      >
+                        <div className="iam-cl-drawer-who">
+                          <b>
+                            <span
+                              className={`iam-ag-dot ${
+                                a.disabled
+                                  ? "is-disabled"
+                                  : a.online
+                                    ? "is-online"
+                                    : "is-offline"
+                              }`}
+                            />{" "}
+                            {a.name}
+                          </b>
+                          <small className="mono">
+                            {a.ip} · {statusTxt}
+                          </small>
+                        </div>
+                        <TriAgentSwitch
+                          value={curMode}
+                          disabled={!canAgents || !!savingKey}
+                          onChange={(nextMode) => {
+                            const nextA = { ...(drawerCluster.agents || {}) };
+                            if (!nextMode) delete nextA[a.id];
+                            else nextA[a.id] = nextMode;
+                            void updateClusterAccess(
+                              drawerCluster,
+                              drawerCluster.users || {},
+                              drawerCluster.teams || {},
+                              `${drawerCluster.id}:a:${a.id}`,
+                              nextA,
+                            );
+                          }}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
 
             <div className="iam-cl-drawer-sec">
               <h4>

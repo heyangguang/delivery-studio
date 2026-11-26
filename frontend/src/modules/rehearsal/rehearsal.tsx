@@ -51,7 +51,9 @@ import {
   IconUpload,
 } from "@arco-design/web-react/icon";
 import {
+  type ExecutionAgentChoice,
   LiveExecLogCard,
+  SelectExecutionAgentModal,
   navigateToClusterAutomation,
   pollRehearsalExecTask,
 } from "../automation/rehearsal-automation";
@@ -3176,13 +3178,7 @@ export function ClusterRehearsal({
           {(can("delivery.execute") || can("execution.manage")) && (
             <button
               type="button"
-              className={`rh-nav-pill rh-auto-pill ${
-                autoSummary?.config.enabled
-                  ? autoSummary.ready
-                    ? "is-ready"
-                    : "is-warn"
-                  : ""
-              }`}
+              className={`rh-nav-pill rh-auto-pill ${autoSummary?.ready ? "is-ready" : ""}`}
               onClick={() =>
                 navigateToClusterAutomation(c.id, {
                   tab: "rehearsal",
@@ -3190,27 +3186,17 @@ export function ClusterRehearsal({
                 })
               }
               title={bi(
-                "前往当前集群的「自动化」标签页查看或配置执行通道",
-                "Open the Cluster → Automation tab to configure execution channel",
+                "查看本集群已关联的执行 Agent 与近期自动执行记录",
+                "View authorized Agents & recent automation tasks for this cluster",
               )}
             >
               <IconThunderbolt />
-              <span>
-                {autoSummary?.config.enabled
-                  ? autoSummary.ready
-                    ? autoSummary.config.transport === "agent"
-                      ? bi("自动化 · Agent", "Auto · Agent")
-                      : bi("自动化 · 控制机", "Auto · Node")
-                    : bi("自动化 · 待接入", "Auto · Setup")
-                  : bi("自动化执行", "Automation")}
-              </span>
-              {autoSummary?.config.enabled && (
+              <span>{bi("执行 Agent", "Agents")}</span>
+              {autoSummary && (
                 <em className="num">
-                  {autoSummary.ready
-                    ? autoSummary.config.transport === "agent"
-                      ? `${autoSummary.online_agents}/${autoSummary.hosts.length}`
-                      : bi("就绪", "Ready")
-                    : bi("离线", "Off")}
+                  {(autoSummary.unified_agents || []).length > 0
+                    ? `${(autoSummary.unified_agents || []).filter((a) => a.online && !a.disabled).length}/${(autoSummary.unified_agents || []).length}`
+                    : "0"}
                 </em>
               )}
             </button>
@@ -5790,6 +5776,13 @@ function RehearsalSessionView({
   );
   const [prodConfirmInput, setProdConfirmInput] = useState("");
   const [prodUnlocked, setProdUnlocked] = useState(false);
+  const [execPrompt, setExecPrompt] = useState<{
+    title: string;
+    readOnly: boolean;
+    targets?: RehearsalExecTarget[];
+    onRun: (choice: ExecutionAgentChoice) => void;
+  } | null>(null);
+  const lastChoiceRef = useRef<ExecutionAgentChoice | null>(null);
   const [autoRunning, setAutoRunning] = useState(false);
   const [runningStepId, setRunningStepId] = useState("");
   const [verifyingStepId, setVerifyingStepId] = useState("");
@@ -6816,10 +6809,23 @@ function RehearsalSessionView({
     });
   };
 
-  const runAutoRehearsalProbe = async () => {
+  const runAutoRehearsalProbe = async (choice?: ExecutionAgentChoice) => {
     if (!r || autoProbeRunning) return;
-    if (!autoSummary?.ready) {
-      onOpenAutoDrawer?.();
+    if (!choice) {
+      setExecPrompt({
+        title: bi("演练前 100% 只读状态探针", "Pre-Rehearsal Read-Only Probe"),
+        readOnly: true,
+        targets: autoSummary?.hosts?.map((h) => ({
+          host: h.name,
+          ip: h.ip,
+          role: h.role,
+        })),
+        onRun: (picked) => {
+          setExecPrompt(null);
+          lastChoiceRef.current = picked;
+          void runAutoRehearsalProbe(picked);
+        },
+      });
       return;
     }
     execAbortRef.current?.abort();
@@ -6829,7 +6835,16 @@ function RehearsalSessionView({
     try {
       const task = await api<RehearsalExecTask>(
         `/api/clusters/${encodeURIComponent(c.id)}/rehearsals/${encodeURIComponent(r.id)}/exec/probe`,
-        { method: "POST", body: JSON.stringify({}) },
+        {
+          method: "POST",
+          body: JSON.stringify({
+            agent_id: choice.agent_id,
+            targets: choice.targets,
+            node_exec_method: choice.node_exec_method,
+            ssh_user: choice.ssh_user,
+            ssh_port: choice.ssh_port,
+          }),
+        },
       );
       setProbeExecTask(task);
       upsertExecTask(task);
@@ -6877,34 +6892,46 @@ function RehearsalSessionView({
       kind?: "step" | "rollback";
       targets?: RehearsalExecTarget[];
       autoVerify?: boolean;
+      choice?: ExecutionAgentChoice;
     },
   ): Promise<{ task?: RehearsalExecTask; passed: boolean; stopped?: boolean }> => {
     const curR = latestRRef.current;
-    if (!curR || !autoSummary) return { passed: false };
-    if (!autoSummary.ready) {
-      onOpenAutoDrawer?.();
-      return { passed: false };
-    }
+    if (!curR) return { passed: false };
     const kind = opts?.kind || "step";
-    const isProd = autoSummary.config.env_kind === "prod";
     const isPureReadOnlyPhase =
       kind === "step" && (step.phase === "precheck" || step.phase === "verify");
-    if (isProd && !isPureReadOnlyPhase && autoSummary.config.allow_prod_mutate && !prodUnlocked) {
-      Message.warning(
-        bi(
-          `生产环境执行变更步骤前，请先在上方自动化控制条输入集群标识「${c.id}」解锁`,
-          `Enter cluster ID "${c.id}" in the automation bar above to unlock production step execution`,
-        ),
-      );
+
+    const defaultTargets =
+      opts?.targets && opts.targets.length > 0
+        ? opts.targets
+        : resolveStepTargets(step.target_role, autoSummary?.hosts || [], curR.drift?.hosts);
+
+    const activeChoice = opts?.choice;
+    if (!activeChoice) {
+      setExecPrompt({
+        title:
+          kind === "rollback"
+            ? bi(`回滚步骤 #${step.order} · ${step.title}`, `Rollback #${step.order} · ${step.title}`)
+            : bi(`步骤 #${step.order} · ${step.title}`, `Step #${step.order} · ${step.title}`),
+        readOnly: isPureReadOnlyPhase,
+        targets: defaultTargets,
+        onRun: (picked) => {
+          setExecPrompt(null);
+          lastChoiceRef.current = picked;
+          void runSingleStepAndVerify(step, {
+            ...opts,
+            targets: picked.targets,
+            choice: picked,
+          });
+        },
+      });
       return { passed: false };
     }
 
     const targets =
-      opts?.targets && opts.targets.length > 0
-        ? opts.targets
-        : resolveStepTargets(step.target_role, autoSummary.hosts, curR.drift?.hosts);
+      activeChoice.targets.length > 0 ? activeChoice.targets : defaultTargets;
     if (targets.length === 0) {
-      Message.warning(bi("未匹配到可执行的目标主机，请在自动化配置中核对节点列表", "No target hosts resolved"));
+      Message.warning(bi("未匹配到可执行的目标主机", "No target hosts resolved"));
       return { passed: false };
     }
 
@@ -6922,7 +6949,11 @@ function RehearsalSessionView({
             step_id: step.id,
             kind,
             targets,
-            confirm_cluster: prodUnlocked ? c.id : "",
+            confirm_cluster: c.id,
+            agent_id: activeChoice.agent_id,
+            node_exec_method: activeChoice.node_exec_method,
+            ssh_user: activeChoice.ssh_user,
+            ssh_port: activeChoice.ssh_port,
           }),
         },
       );
@@ -7025,12 +7056,32 @@ function RehearsalSessionView({
     }
   };
 
-  const startAIGatedAutoRun = async (bypassBreakpointStepId?: string) => {
-    if (!autoSummary?.ready) {
-      onOpenAutoDrawer?.();
+  const startAIGatedAutoRun = async (
+    bypassBreakpointStepId?: string,
+    batchChoice?: ExecutionAgentChoice,
+  ) => {
+    if (autoRunning || runningStepId || verifyingStepId) return;
+    const chosen = batchChoice || (bypassBreakpointStepId ? lastChoiceRef.current || undefined : undefined);
+    if (!chosen) {
+      const hasMutate = (latestRRef.current?.steps || []).some(
+        (s) => s.phase === "execute" && s.status !== "passed" && s.status !== "skipped",
+      );
+      setExecPrompt({
+        title: bi("连续自动执行正向演练步骤（AI 逐单步验收）", "AI-Gated Auto Rehearsal Run"),
+        readOnly: !hasMutate,
+        targets: autoSummary?.hosts?.map((h) => ({
+          host: h.name,
+          ip: h.ip,
+          role: h.role,
+        })),
+        onRun: (picked) => {
+          setExecPrompt(null);
+          lastChoiceRef.current = picked;
+          void startAIGatedAutoRun(bypassBreakpointStepId, picked);
+        },
+      });
       return;
     }
-    if (autoRunning || runningStepId || verifyingStepId) return;
     autoStopRef.current = false;
     setAutoRunning(true);
     setAutoPauseReason(null);
@@ -7053,7 +7104,7 @@ function RehearsalSessionView({
           break;
         }
         if (
-          autoSummary.config.pause_before_mutate &&
+          autoSummary?.config.pause_before_mutate &&
           nextPending.phase === "execute" &&
           nextPending.id !== bypassID
         ) {
@@ -7070,7 +7121,16 @@ function RehearsalSessionView({
           break;
         }
         bypassID = "";
-        const res = await runSingleStepAndVerify(nextPending, { autoVerify: true });
+        const stepTargets = resolveStepTargets(
+          nextPending.target_role,
+          autoSummary?.hosts || [],
+          curR.drift?.hosts,
+        );
+        const res = await runSingleStepAndVerify(nextPending, {
+          autoVerify: true,
+          targets: stepTargets,
+          choice: { ...chosen, targets: stepTargets },
+        });
         if (res.stopped || autoStopRef.current) {
           break;
         }
@@ -8078,14 +8138,14 @@ function RehearsalSessionView({
               />
             )}
 
-            {can("delivery.execute") && autoSummary?.ready && (
+            {can("delivery.execute") && Boolean(r.probe_script) && (
               <div className="rha-probe-auto-bar">
                 <div className="rha-probe-auto-l">
                   <IconThunderbolt />
                   <span>
                     {bi(
-                      `自动化采集通道已就绪（${autoSummary.config.transport === "agent" ? `目标机 Agent ${autoSummary.online_agents}/${autoSummary.hosts.length} 在线` : `控制机直连`}），可一键自动运行 100% 只读探针并直接送交 AI 解析漂移`,
-                      `Automation ready (${autoSummary.config.transport === "agent" ? `Direct Agent ${autoSummary.online_agents}/${autoSummary.hosts.length}` : "Controller"}) — run 100% read-only probe & analyze drift in 1 click`,
+                      "无需手动登录机器复制粘贴：点击右侧按钮直接选择已授权的 Agent 自动采集 100% 只读探针并送交 AI 解析",
+                      "Skip manual copy-paste: select an authorized Agent to run the 100% read-only probe and analyze drift automatically",
                     )}
                   </span>
                 </div>
@@ -8098,15 +8158,7 @@ function RehearsalSessionView({
                     icon={<IconPlayArrow />}
                     onClick={() => void runAutoRehearsalProbe()}
                   >
-                    {bi("自动采集并 AI 解析", "Auto-Collect & Analyze")}
-                  </Button>
-                  <Button
-                    size="small"
-                    type="text"
-                    icon={<IconSettings />}
-                    onClick={onOpenAutoDrawer}
-                  >
-                    {bi("管理通道", "Manage Channel")}
+                    {bi("选择 Agent 自动采集", "Run Probe with Agent")}
                   </Button>
                 </div>
               </div>
@@ -9176,25 +9228,21 @@ function RehearsalSessionView({
               </div>
             )}
 
-            {can("delivery.execute") && autoSummary?.config.enabled && phaseFilter !== "rollback" && (
+            {can("delivery.execute") && autoSummary && phaseFilter !== "rollback" && (
               <section className="rha-ribbon" aria-label={bi("演练自动化执行控制条", "Rehearsal automation control bar")}>
                 <div className="rha-ribbon-top">
                   <div className="rha-ribbon-l">
                     <span className="rha-ribbon-title">
                       <IconThunderbolt />
-                      {bi("变更演练自动化执行", "Automated Rehearsal Execution")}
+                      {bi("Agent 自动化执行", "Agent Execution")}
                     </span>
                     <span className={`rha-ready-dot ${autoSummary.ready ? "is-ok" : "is-warn"}`}>
-                      {autoSummary.ready
-                        ? autoSummary.config.transport === "agent"
-                          ? bi(`Agent 直连 · ${autoSummary.online_agents}/${autoSummary.hosts.length} 在线`, `Direct Agent · ${autoSummary.online_agents}/${autoSummary.hosts.length}`)
-                          : bi(`控制机直连 · ${autoSummary.config.node_exec_method === "ansible" ? "Ansible" : "SSH/自动"}`, "Controller Online")
-                        : bi("通道未就绪", "Not Ready")}
-                    </span>
-                    <span className="rha-transport-tag">
-                      {autoSummary.config.env_kind === "prod"
-                        ? bi("生产环境", "Production")
-                        : bi("测试/演练环境", "Test Env")}
+                      {(autoSummary.unified_agents || []).length > 0
+                        ? bi(
+                            `已授权 ${(autoSummary.unified_agents || []).length} 台 Agent（${(autoSummary.unified_agents || []).filter((a) => a.online && !a.disabled).length} 在线）`,
+                            `${(autoSummary.unified_agents || []).filter((a) => a.online && !a.disabled).length}/${(autoSummary.unified_agents || []).length} Agents online`,
+                          )
+                        : bi("点击执行时可关联选择 Agent", "Select Agent when running")}
                     </span>
                   </div>
                   <div className="rha-ribbon-r">
@@ -9203,8 +9251,8 @@ function RehearsalSessionView({
                       value={pacingMode}
                       onChange={(v) => setPacingMode(v as "step_confirm" | "ai_gated_auto")}
                       options={[
-                        { value: "step_confirm", label: bi("逐单步人工点击", "Step Confirm") },
-                        { value: "ai_gated_auto", label: bi("AI 验收通过自动推进", "AI-Gated Auto") },
+                        { value: "step_confirm", label: bi("逐单步选择执行", "Per-Step") },
+                        { value: "ai_gated_auto", label: bi("连续自动推进", "Auto-Advance") },
                       ]}
                     />
                     {pacingMode === "ai_gated_auto" && (
@@ -9225,66 +9273,15 @@ function RehearsalSessionView({
                         <Button
                           size="small"
                           type="primary"
-                          disabled={!autoSummary.ready || Boolean(runningStepId) || Boolean(verifyingStepId) || gateReady}
+                          disabled={Boolean(runningStepId) || Boolean(verifyingStepId) || gateReady}
                           icon={<IconPlayArrow />}
                           onClick={() => void startAIGatedAutoRun()}
                         >
-                          {bi("启动 AI 把关自动推进", "Start AI-Gated Run")}
+                          {bi("选择 Agent 连续执行", "Select Agent & Run All")}
                         </Button>
                       )
                     )}
-                    <Button size="small" type="text" icon={<IconSettings />} onClick={onOpenAutoDrawer}>
-                      {bi("配置", "Setup")}
-                    </Button>
                   </div>
-                </div>
-
-                <div className="rha-ribbon-bot">
-                  <div className="rha-map-pills">
-                    <span>{bi("目标节点映射：", "Target Map:")}</span>
-                    {autoSummary.hosts.map((h) => {
-                      const dh = r.drift?.hosts?.find((d) => d.ip === h.ip || d.name === h.name);
-                      const roleTxt = dh?.actual_role || dh?.initial_role || h.role || "";
-                      return (
-                        <span key={`${h.name}-${h.ip}`} className="rha-map-pill">
-                          <b>{h.name}</b>
-                          <span className="mono">{h.ip}</span>
-                          {roleTxt && <em>· {roleTxt}</em>}
-                        </span>
-                      );
-                    })}
-                  </div>
-
-                  {autoSummary.config.env_kind === "prod" && autoSummary.config.allow_prod_mutate && (
-                    <div className="rha-prod-lock">
-                      {prodUnlocked ? (
-                        <span className="rha-ro-tag">
-                          <IconSafe /> {bi("已确认生产集群标识 · 可执行变更步骤", "Prod Confirmed")}
-                        </span>
-                      ) : (
-                        <>
-                          <Input
-                            size="mini"
-                            className="mono"
-                            value={prodConfirmInput}
-                            onChange={setProdConfirmInput}
-                            placeholder={bi(`输入 ${c.id} 解锁生产写步骤`, `Type ${c.id} to unlock`)}
-                          />
-                          <Button
-                            size="mini"
-                            type="primary"
-                            disabled={prodConfirmInput.trim() !== c.id}
-                            onClick={() => {
-                              setProdUnlocked(true);
-                              Message.success(bi(`已确认生产集群 ${c.id}，现可执行变更步骤`, `Production unlocked for ${c.id}`));
-                            }}
-                          >
-                            {bi("确认解锁", "Unlock")}
-                          </Button>
-                        </>
-                      )}
-                    </div>
-                  )}
                 </div>
 
                 {autoPauseReason && (
@@ -9311,6 +9308,17 @@ function RehearsalSessionView({
                 )}
               </section>
             )}
+            <SelectExecutionAgentModal
+              visible={Boolean(execPrompt)}
+              clusterId={c.id}
+              taskTitle={execPrompt?.title || ""}
+              readOnly={Boolean(execPrompt?.readOnly)}
+              initialTargets={execPrompt?.targets}
+              hostsFallback={autoSummary?.hosts}
+              confirmLoading={Boolean(runningStepId || autoProbeRunning)}
+              onCancel={() => setExecPrompt(null)}
+              onConfirm={(picked) => execPrompt?.onRun(picked)}
+            />
 
             {shownSteps.length === 0 ? (
               <div className="rh-empty-filter muted small">
@@ -11133,11 +11141,11 @@ const StepRow = React.memo(function StepRow({
           )}
         </dl>
 
-        {can("delivery.execute") && autoSummary?.config.enabled && (
+        {can("delivery.execute") && autoSummary && (
           <div className="rha-step-exec-bar">
             <div className="rha-step-exec-l">
               <IconThunderbolt />
-              <span>{bi("自动目标机：", "Auto Targets:")}</span>
+              <span>{bi("目标机器：", "Targets:")}</span>
               <Select
                 mode="multiple"
                 size="mini"
@@ -11160,53 +11168,33 @@ const StepRow = React.memo(function StepRow({
               )}
             </div>
             <div className="rha-step-exec-r">
-              {autoSummary.ready ? (
-                <>
-                  <Button
-                    size="mini"
-                    type="primary"
-                    loading={isAutoRunningThis || isAutoVerifyingThis}
-                    disabled={
-                      offline ||
-                      anyAutoBusy ||
-                      effectiveStepTargets.length === 0
-                    }
-                    icon={<IconPlayArrow />}
-                    onClick={() => onAutoExecStep?.(effectiveStepTargets, "step")}
-                  >
-                    {isAutoRunningThis
-                      ? bi("正在执行…", "Running…")
-                      : isAutoVerifyingThis
-                        ? bi("AI 验收中…", "AI Verifying…")
-                        : bi("自动执行并 AI 验收", "Auto-Run & AI Verify")}
-                  </Button>
-                  {step.rollback && (
-                    <Popconfirm
-                      title={bi(
-                        `确认在选中节点执行步骤 #${num} 的回滚命令？`,
-                        `Execute rollback command for step #${num} on selected host(s)?`,
-                      )}
-                      onOk={() => onAutoExecStep?.(effectiveStepTargets, "rollback")}
-                    >
-                      <Button
-                        size="mini"
-                        status="warning"
-                        type="outline"
-                        disabled={anyAutoBusy || effectiveStepTargets.length === 0}
-                      >
-                        {bi("执行回滚", "Run Rollback")}
-                      </Button>
-                    </Popconfirm>
-                  )}
-                </>
-              ) : (
+              <Button
+                size="mini"
+                type="primary"
+                loading={isAutoRunningThis || isAutoVerifyingThis}
+                disabled={
+                  offline ||
+                  anyAutoBusy ||
+                  effectiveStepTargets.length === 0
+                }
+                icon={<IconPlayArrow />}
+                onClick={() => onAutoExecStep?.(effectiveStepTargets, "step")}
+              >
+                {isAutoRunningThis
+                  ? bi("正在执行…", "Running…")
+                  : isAutoVerifyingThis
+                    ? bi("AI 验收中…", "AI Verifying…")
+                    : bi("选择 Agent 执行", "Run with Agent")}
+              </Button>
+              {step.rollback && (
                 <Button
                   size="mini"
+                  status="warning"
                   type="outline"
-                  icon={<IconSettings />}
-                  onClick={onOpenAutoDrawer}
+                  disabled={anyAutoBusy || effectiveStepTargets.length === 0}
+                  onClick={() => onAutoExecStep?.(effectiveStepTargets, "rollback")}
                 >
-                  {bi("通道离线 · 前往配置", "Channel Offline · Setup")}
+                  {bi("执行回滚", "Run Rollback")}
                 </Button>
               )}
             </div>
@@ -11834,7 +11822,7 @@ const StepRow = React.memo(function StepRow({
                       </>
                     ) : (
                       <>
-                        {can("delivery.execute") && autoSummary?.ready && (
+                        {can("delivery.execute") && autoSummary && (
                           <Button
                             size="small"
                             type="primary"
@@ -11842,7 +11830,7 @@ const StepRow = React.memo(function StepRow({
                             disabled={anyAutoBusy || offline || effectiveStepTargets.length === 0}
                             onClick={() => onAutoExecStep?.(effectiveStepTargets, "step")}
                           >
-                            {bi("自动重跑并 AI 验收", "Auto-Retry & Verify")}
+                            {bi("选择 Agent 重跑", "Re-run with Agent")}
                           </Button>
                         )}
                         <Button

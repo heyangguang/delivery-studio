@@ -63,11 +63,33 @@ export type ClusterAutomationHost = {
   role?: string;
 };
 
+export type AgentClusterMode = "readonly" | "readwrite";
+
+export type UnifiedAgentView = {
+  id: string;
+  backing: "node" | "direct";
+  name: string;
+  ip: string;
+  online: boolean;
+  disabled: boolean;
+  revoked?: boolean;
+  last_seen?: string;
+  version?: string;
+  protocol?: number;
+  supports_exec: boolean;
+  cluster_modes: Record<string, AgentClusterMode>;
+  clusters: string[];
+  suggested_clusters?: string[];
+  probe?: AgentHostProbe;
+  service_name?: string;
+};
+
 export type ClusterAutomationConfig = {
   cluster_id: string;
   enabled: boolean;
   transport: "node" | "agent";
   node_id?: string;
+  last_agent_id?: string;
   node_exec_method?: "auto" | "ansible" | "ssh";
   ssh_user?: string;
   ssh_port?: number;
@@ -241,6 +263,9 @@ export type ClusterAutomationSummary = {
   nodes: AutomationNodeView[];
   agents: AutomationAgentView[];
   unbound_agents?: AutomationAgentView[];
+  unified_agents?: UnifiedAgentView[];
+  available_agents?: UnifiedAgentView[];
+  last_agent_id?: string;
   online_agents: number;
   ready: boolean;
   ready_reason?: string;

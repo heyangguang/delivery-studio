@@ -684,6 +684,8 @@ func (s *storeServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.handleExecutionNodes(w, r, session)
 	case r.URL.Path == "/api/executions/runs" && r.Method == "GET":
 		s.handleExecutionRunsList(w, r, session)
+	case r.URL.Path == "/api/executions/unified-agents" || strings.HasPrefix(r.URL.Path, "/api/executions/unified-agents/"):
+		s.handleUnifiedAgents(w, r, session)
 	case r.URL.Path == "/api/executions/agents" || strings.HasPrefix(r.URL.Path, "/api/executions/agents/"):
 		s.handleGlobalExecutionAgents(w, r, session)
 	case r.URL.Path == "/api/settings/sandbox" || r.URL.Path == "/api/settings/sandbox/check":

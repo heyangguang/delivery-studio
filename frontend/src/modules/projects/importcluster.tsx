@@ -39,8 +39,9 @@ import { ModelPicker, useModelPick } from "../ai/modelpick";
 import { ThinkLevel, useAIOptions } from "../ai/aitools";
 import { api, can, copy } from "../../shared/shared";
 import {
+  ExecutionAgentChoice,
   LiveExecLogCard,
-  navigateToClusterAutomation,
+  SelectExecutionAgentModal,
   pollRehearsalExecTask,
 } from "../automation/rehearsal-automation";
 import type {
@@ -4985,6 +4986,7 @@ export function ImportedBaselineModal({
   // No probe script is generated until the user explicitly requests one in Step 1.
   const [probeStep, setProbeStep] = useState<1 | 2 | 3>(1);
   const [autoSummary, setAutoSummary] = useState<ClusterAutomationSummary | null>(null);
+  const [agentModalOpen, setAgentModalOpen] = useState(false);
   const [autoProbeBusy, setAutoProbeBusy] = useState(false);
   const [autoProbeTask, setAutoProbeTask] = useState<RehearsalExecTask | null>(null);
   const autoProbeAbortRef = useRef<AbortController | null>(null);
@@ -5384,8 +5386,9 @@ export function ImportedBaselineModal({
     };
   }, [visible, tab, cluster.id]);
 
-  const runAutoBaselineProbe = async () => {
+  const runAutoBaselineProbe = async (choice: ExecutionAgentChoice) => {
     if (!probeScript.trim() || autoProbeBusy) return;
+    setAgentModalOpen(false);
     autoProbeAbortRef.current?.abort();
     const ctrl = new AbortController();
     autoProbeAbortRef.current = ctrl;
@@ -5396,7 +5399,14 @@ export function ImportedBaselineModal({
         `/api/clusters/${encodeURIComponent(cluster.id)}/automation/probe`,
         {
           method: "POST",
-          body: JSON.stringify({ script: probeScript }),
+          body: JSON.stringify({
+            script: probeScript,
+            agent_id: choice.agent_id,
+            targets: choice.targets,
+            node_exec_method: choice.node_exec_method,
+            ssh_user: choice.ssh_user,
+            ssh_port: choice.ssh_port,
+          }),
         },
       );
       setAutoProbeTask(task);
@@ -6306,31 +6316,28 @@ export function ImportedBaselineModal({
                     </Button>
                     <div className="imp-step-next-acts">
                       {can("delivery.execute") && (
-                        autoSummary?.ready ? (
-                          <Button
-                            size="small"
-                            type="secondary"
-                            loading={autoProbeBusy}
-                            disabled={probeGenerating || !probeScript}
-                            icon={<IconThunderbolt style={{ color: "var(--ok)" }} />}
-                            onClick={() => void runAutoBaselineProbe()}
-                          >
-                            {bi("自动执行只读探针", "Auto-Run Probe")}
-                          </Button>
-                        ) : (
-                          <Button
-                            size="small"
-                            type="outline"
-                            icon={<IconThunderbolt style={{ color: "var(--warn)" }} />}
-                            onClick={() => {
-                              onClose();
-                              navigateToClusterAutomation(cluster.id);
-                            }}
-                          >
-                            {bi("配置自动采集", "Setup Automation")}
-                          </Button>
-                        )
+                        <Button
+                          size="small"
+                          type="secondary"
+                          loading={autoProbeBusy}
+                          disabled={probeGenerating || !probeScript}
+                          icon={<IconThunderbolt style={{ color: "var(--brand)" }} />}
+                          onClick={() => setAgentModalOpen(true)}
+                        >
+                          {bi("选择 Agent 自动采集", "Run with Agent")}
+                        </Button>
                       )}
+                      <SelectExecutionAgentModal
+                        visible={agentModalOpen}
+                        clusterId={cluster.id}
+                        taskTitle={bi("存量集群 100% 只读基线探针", "100% Read-Only Baseline Probe")}
+                        readOnly
+                        hostsFallback={autoSummary?.hosts}
+                        confirmLoading={autoProbeBusy}
+                        onCancel={() => setAgentModalOpen(false)}
+                        onConfirm={(choice) => void runAutoBaselineProbe(choice)}
+                        onSummaryUpdated={setAutoSummary}
+                      />
                       <Button
                         size="small"
                         type="primary"

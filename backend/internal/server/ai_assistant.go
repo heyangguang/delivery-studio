@@ -65,13 +65,13 @@ func (s *storeServer) ownJob(user, ref string) (storeJob, bool) {
 	vis := s.visibleJobs(user)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if j, ok := s.jobs[ref]; ok && vis(j.Owner) {
+	if j, ok := s.jobs[ref]; ok && vis(j.Owner, j.ClusterID) {
 		return j, true
 	}
 	var best storeJob
 	found := false
 	for _, j := range s.jobs {
-		if vis(j.Owner) && j.State == "succeeded" && (j.ClusterID == ref || strings.HasPrefix(j.ID, ref) && len(ref) >= 6) && (!found || j.Created > best.Created) {
+		if vis(j.Owner, j.ClusterID) && j.State == "succeeded" && (j.ClusterID == ref || strings.HasPrefix(j.ID, ref) && len(ref) >= 6) && (!found || j.Created > best.Created) {
 			best, found = j, true
 		}
 	}
@@ -205,7 +205,7 @@ func (c assistCtx) run(name, args string) string {
 		var rows []storeJob
 		byCluster := map[string][]storeJob{}
 		for _, j := range c.s.jobs {
-			if vis(j.Owner) {
+			if vis(j.Owner, j.ClusterID) {
 				rows = append(rows, j)
 				if j.ClusterID != "" {
 					byCluster[j.ClusterID] = append(byCluster[j.ClusterID], j)

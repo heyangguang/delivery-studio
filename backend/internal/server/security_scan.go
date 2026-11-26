@@ -1790,7 +1790,7 @@ func (s *storeServer) scopedScanReport(rep *secScanReport, user string) *secScan
 
 	clusterMap := map[string]*secClusterSummary{}
 	for _, cs := range rep.Clusters {
-		if !vis(cs.Owner) {
+		if !vis(cs.Owner, cs.ClusterID) {
 			continue
 		}
 		cp := cs
@@ -1823,7 +1823,7 @@ func (s *storeServer) scopedScanReport(rep *secScanReport, user string) *secScan
 		f.PkgRole = classifySecPkgRole(f.AssetType, f.Package, f.Closures, primarySet)
 		var visCls []secClusterImpact
 		for _, cl := range orig.Clusters {
-			if vis(cl.Owner) {
+			if vis(cl.Owner, cl.ClusterID) {
 				visCls = append(visCls, cl)
 			}
 		}

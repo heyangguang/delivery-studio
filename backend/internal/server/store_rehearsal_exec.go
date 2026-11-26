@@ -457,7 +457,7 @@ func (s *storeServer) clusterIPIndex(user string) map[string][]string {
 	byCluster := map[string][]storeJob{}
 	s.mu.Lock()
 	for _, j := range s.jobs {
-		if j.State != "succeeded" || !vis(j.Owner) {
+		if j.State != "succeeded" || !vis(j.Owner, j.ClusterID) {
 			continue
 		}
 		cid := j.ClusterID

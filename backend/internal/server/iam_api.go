@@ -83,10 +83,33 @@ func permOrder(id string) int {
 	return len(perms)
 }
 
+func validateClusterGrantDiff(actorCanOp func(string) bool, oldMap, newMap map[string]string) (map[string]string, string, int) {
+	cleaned, ok := cleanClusterGrants(newMap)
+	if !ok {
+		return nil, "集群标识或权限级别无效（仅支持 view 或 operate）", 400
+	}
+	for cid, lvl := range cleaned {
+		if oldMap[cid] != lvl && !actorCanOp(cid) {
+			return nil, "你自己没有集群「" + cid + "」的运维管理权限，不能分配该集群权限", 403
+		}
+	}
+	for cid := range oldMap {
+		if _, exists := cleaned[cid]; !exists && !actorCanOp(cid) {
+			return nil, "你自己没有集群「" + cid + "」的运维管理权限，不能回收该集群权限", 403
+		}
+	}
+	return cleaned, "", 200
+}
+
 func (s *storeServer) handleIAM(w http.ResponseWriter, r *http.Request, session storeSession) {
 	rest := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/iam"), "/")
 	parts := strings.Split(rest, "/")
 	actor := s.accessOf(session.User)
+	// Precompute actor's cluster access BEFORE acquiring iamMu to avoid iamMu -> s.mu / s.mu -> iamMu inversion.
+	actorClusterLvl := s.clusterAccess(session.User)
+	actorCanOp := func(cid string) bool {
+		return actorClusterLvl("", cid) == "operate"
+	}
 	iamMu.Lock()
 	defer iamMu.Unlock()
 	st := s.iamLoad()
@@ -100,11 +123,11 @@ func (s *storeServer) handleIAM(w http.ResponseWriter, r *http.Request, session 
 			return
 		}
 		s.auditReq(r, action, session.User, target)
-		s.writeJSON(w, 200, s.iamView(next))
+		s.writeJSON(w, 200, s.iamView(next, actorCanOp))
 	}
 	switch {
 	case rest == "" && r.Method == "GET":
-		s.writeJSON(w, 200, s.iamView(st))
+		s.writeJSON(w, 200, s.iamView(st, actorCanOp))
 
 	case parts[0] == "roles" && (len(parts) == 1 && r.Method == "POST" || len(parts) == 2 && r.Method == "PUT"):
 		var in role
@@ -189,15 +212,16 @@ func (s *storeServer) handleIAM(w http.ResponseWriter, r *http.Request, session 
 
 	case parts[0] == "teams" && (len(parts) == 1 && r.Method == "POST" || len(parts) == 2 && r.Method == "PUT"):
 		var in struct {
-			team
-			Members *[]string `json:"members"`
+			Name     string             `json:"name"`
+			Desc     string             `json:"desc"`
+			Members  *[]string          `json:"members"`
+			Clusters *map[string]string `json:"clusters"`
 		}
-		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<14)).Decode(&in) != nil {
+		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&in) != nil {
 			s.fail(w, 400, "提交的内容有问题，请刷新页面后重试")
 			return
 		}
-		t := in.team
-		t.Name, t.Desc = strings.TrimSpace(t.Name), strings.TrimSpace(t.Desc)
+		t := team{Name: strings.TrimSpace(in.Name), Desc: strings.TrimSpace(in.Desc)}
 		if t.Name == "" || utf8.RuneCountInString(t.Name) > 30 || utf8.RuneCountInString(t.Desc) > 200 {
 			s.fail(w, 400, "请填写团队名（30 字内）")
 			return
@@ -213,6 +237,14 @@ func (s *storeServer) handleIAM(w http.ResponseWriter, r *http.Request, session 
 				s.fail(w, 409, "最多 100 个团队")
 				return
 			}
+			if in.Clusters != nil {
+				cleaned, msg, code := validateClusterGrantDiff(actorCanOp, nil, *in.Clusters)
+				if msg != "" {
+					s.fail(w, code, msg)
+					return
+				}
+				t.Clusters = cleaned
+			}
 			t.ID = "t" + randomStoreToken(4)
 			st.Teams = append(st.Teams, t)
 		} else {
@@ -220,6 +252,16 @@ func (s *storeServer) handleIAM(w http.ResponseWriter, r *http.Request, session 
 			for i := range st.Teams {
 				if st.Teams[i].ID == parts[1] {
 					t.ID = parts[1]
+					if in.Clusters != nil {
+						cleaned, msg, code := validateClusterGrantDiff(actorCanOp, st.Teams[i].Clusters, *in.Clusters)
+						if msg != "" {
+							s.fail(w, code, msg)
+							return
+						}
+						t.Clusters = cleaned
+					} else {
+						t.Clusters = cloneStringMap(st.Teams[i].Clusters)
+					}
 					st.Teams[i], found = t, true
 				}
 			}
@@ -258,6 +300,109 @@ func (s *storeServer) handleIAM(w http.ResponseWriter, r *http.Request, session 
 			}
 		}
 		save(st, map[bool]string{true: "iam-team-add", false: "iam-team-edit"}[len(parts) == 1], t.Name)
+	case parts[0] == "clusters" && len(parts) == 2 && r.Method == "PUT":
+		cid := strings.TrimSpace(parts[1])
+		if cid == "" || len(cid) > 120 || !docClusterID.MatchString(cid) {
+			s.fail(w, 400, "集群标识格式无效")
+			return
+		}
+		if !actorCanOp(cid) {
+			s.fail(w, 403, "你自己没有集群「"+cid+"」的运维管理权限，不能管理该集群的访问权限")
+			return
+		}
+		var in struct {
+			Users *map[string]string `json:"users"`
+			Teams *map[string]string `json:"teams"`
+		}
+		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&in) != nil {
+			s.fail(w, 400, "提交的内容有问题，请刷新页面后重试")
+			return
+		}
+		if in.Users != nil {
+			if !actor.can("iam.user") {
+				s.fail(w, 403, "没有「管理用户」权限，不能调整用户集群授权")
+				return
+			}
+			s.mu.Lock()
+			legacy := make(map[string]string, len(s.users))
+			for n, u := range s.users {
+				legacy[n] = u.Role
+			}
+			s.mu.Unlock()
+			wantUsers := map[string]string{}
+			for rawUser, rawLvl := range *in.Users {
+				uname := strings.TrimSpace(rawUser)
+				lvl := strings.ToLower(strings.TrimSpace(rawLvl))
+				if _, ok := legacy[uname]; !ok {
+					s.fail(w, 400, "没有这个用户："+uname)
+					return
+				}
+				if lvl != "view" && lvl != "operate" {
+					s.fail(w, 400, "无效的集群权限级别："+rawLvl)
+					return
+				}
+				wantUsers[uname] = lvl
+			}
+			for n, lr := range legacy {
+				g := st.grantOf(n, lr)
+				curLvl := ""
+				if g.Clusters != nil {
+					curLvl = g.Clusters[cid]
+				}
+				nextLvl := wantUsers[n]
+				if curLvl == nextLvl {
+					continue
+				}
+				if nextLvl == "" {
+					delete(g.Clusters, cid)
+				} else {
+					if g.Clusters == nil {
+						g.Clusters = map[string]string{}
+					}
+					g.Clusters[cid] = nextLvl
+				}
+				st.Grants[n] = g
+			}
+		}
+		if in.Teams != nil {
+			if !actor.can("iam.team") {
+				s.fail(w, 403, "没有「管理团队」权限，不能调整团队集群授权")
+				return
+			}
+			validTeams := make(map[string]bool, len(st.Teams))
+			for _, t := range st.Teams {
+				validTeams[t.ID] = true
+			}
+			wantTeams := map[string]string{}
+			for rawTID, rawLvl := range *in.Teams {
+				tid := strings.TrimSpace(rawTID)
+				lvl := strings.ToLower(strings.TrimSpace(rawLvl))
+				if !validTeams[tid] {
+					s.fail(w, 400, "没有这个团队："+tid)
+					return
+				}
+				if lvl != "view" && lvl != "operate" {
+					s.fail(w, 400, "无效的集群权限级别："+rawLvl)
+					return
+				}
+				wantTeams[tid] = lvl
+			}
+			for i := range st.Teams {
+				tid := st.Teams[i].ID
+				nextLvl := wantTeams[tid]
+				if nextLvl == "" {
+					if st.Teams[i].Clusters != nil {
+						delete(st.Teams[i].Clusters, cid)
+					}
+				} else {
+					if st.Teams[i].Clusters == nil {
+						st.Teams[i].Clusters = map[string]string{}
+					}
+					st.Teams[i].Clusters[cid] = nextLvl
+				}
+			}
+		}
+		save(st, "iam-cluster-grant", cid)
 	case parts[0] == "deleted" && len(parts) == 3 && parts[2] == "move" && r.Method == "POST":
 		iamMu.Unlock()
 		s.moveDeleted(w, r, session, parts[1])
@@ -297,22 +442,30 @@ func without(list []string, x string) []string {
 	return out
 }
 
-// iamView is the catalogue, the roles with how many hold each, the teams with their members, and every grant.
-func (s *storeServer) iamView(st iamState) map[string]any {
+// iamView is the catalogue, the roles with how many hold each, the teams with their members, every grant, and clusters.
+func (s *storeServer) iamView(st iamState, actorCanOp func(string) bool) map[string]any {
 	s.mu.Lock()
 	users := map[string]storeUser{}
 	for n, u := range s.users {
 		users[n] = u
 	}
+	byCluster := map[string][]storeJob{}
+	for _, j := range s.jobs {
+		if j.ClusterID != "" {
+			byCluster[j.ClusterID] = append(byCluster[j.ClusterID], j)
+		}
+	}
 	s.mu.Unlock()
 	grants := map[string]grant{}
 	holders := map[string]int{}
 	members := map[string][]string{}
+	clusterUsers := map[string]map[string]string{}
 	for n, u := range users {
 		g := st.grantOf(n, u.Role)
 		if g.Teams == nil {
 			g.Teams = []string{}
 		}
+		g.Clusters = cloneStringMap(g.Clusters)
 		grants[n] = g
 		for _, r := range g.Roles {
 			if !u.Disabled {
@@ -321,6 +474,12 @@ func (s *storeServer) iamView(st iamState) map[string]any {
 		}
 		for _, t := range g.Teams {
 			members[t] = append(members[t], n)
+		}
+		for cid, lvl := range g.Clusters {
+			if clusterUsers[cid] == nil {
+				clusterUsers[cid] = map[string]string{}
+			}
+			clusterUsers[cid][n] = lvl
 		}
 	}
 	type roleView struct {
@@ -337,14 +496,74 @@ func (s *storeServer) iamView(st iamState) map[string]any {
 		Members []string `json:"members"`
 	}
 	teams := []teamView{}
+	clusterTeams := map[string]map[string]string{}
 	for _, t := range st.Teams {
 		m := members[t.ID]
 		if m == nil {
 			m = []string{}
 		}
 		sort.Strings(m)
+		t.Clusters = cloneStringMap(t.Clusters)
 		teams = append(teams, teamView{t, m})
+		for cid, lvl := range t.Clusters {
+			if clusterTeams[cid] == nil {
+				clusterTeams[cid] = map[string]string{}
+			}
+			clusterTeams[cid][t.ID] = lvl
+		}
 	}
+	type iamClusterView struct {
+		ID           string            `json:"id"`
+		AppID        string            `json:"app_id"`
+		AppName      string            `json:"app_name"`
+		Version      string            `json:"version"`
+		Owner        string            `json:"owner"`
+		DeliveryMode string            `json:"delivery_mode,omitempty"`
+		Created      string            `json:"created"`
+		Users        map[string]string `json:"users"`
+		Teams        map[string]string `json:"teams"`
+	}
+	clusters := []iamClusterView{}
+	for cid, jobs := range byCluster {
+		if actorCanOp != nil && !actorCanOp(cid) {
+			continue
+		}
+		sortJobs(jobs)
+		first := jobs[0]
+		for _, j := range jobs {
+			if j.Seq == 0 && j.live() {
+				first = j
+				break
+			}
+		}
+		ver := first.Version
+		mode := first.DeliveryMode
+		if cur, ok := clusterCurrent(jobs); ok {
+			if cur.AppID == first.AppID && cur.Version != "" {
+				ver = cur.Version
+			}
+			if cur.DeliveryMode != "" {
+				mode = cur.DeliveryMode
+			}
+		}
+		clusters = append(clusters, iamClusterView{
+			ID:           cid,
+			AppID:        first.AppID,
+			AppName:      first.AppName,
+			Version:      ver,
+			Owner:        first.Owner,
+			DeliveryMode: mode,
+			Created:      first.Created,
+			Users:        nonNilStringMap(clusterUsers[cid]),
+			Teams:        nonNilStringMap(clusterTeams[cid]),
+		})
+	}
+	sort.Slice(clusters, func(i, j int) bool {
+		if clusters[i].Created != clusters[j].Created {
+			return clusters[i].Created > clusters[j].Created
+		}
+		return clusters[i].ID < clusters[j].ID
+	})
 	deleted := st.Deleted
 	if deleted == nil {
 		deleted = []deletedUser{}
@@ -360,11 +579,12 @@ func (s *storeServer) iamView(st iamState) map[string]any {
 		deleted[i].Jobs = n
 	}
 	s.mu.Unlock()
-	return map[string]any{"perms": perms, "roles": roles, "teams": teams, "grants": grants, "deleted": deleted}
+	return map[string]any{"perms": perms, "roles": roles, "teams": teams, "grants": grants, "clusters": clusters, "deleted": deleted}
 }
 
 // setGrant changes what one person holds, within what the actor may hand out.
-func (s *storeServer) setGrant(actor access, user, legacyRole string, roles, teams []string) (string, int) {
+// Pass clusters == nil to preserve existing per-cluster grants.
+func (s *storeServer) setGrant(actor access, actorCanOp func(string) bool, user, legacyRole string, roles, teams []string, clusters *map[string]string) (string, int) {
 	iamMu.Lock()
 	defer iamMu.Unlock()
 	st := s.iamLoad()
@@ -410,7 +630,18 @@ func (s *storeServer) setGrant(actor access, user, legacyRole string, roles, tea
 			ts = append(ts, id)
 		}
 	}
-	st.Grants[user] = grant{Roles: clean, Teams: ts}
+	nextClusters := cloneStringMap(old.Clusters)
+	if clusters != nil {
+		if actorCanOp == nil {
+			actorCanOp = func(string) bool { return actor.Scope == "all" }
+		}
+		cleaned, msg, code := validateClusterGrantDiff(actorCanOp, old.Clusters, *clusters)
+		if msg != "" {
+			return msg, code
+		}
+		nextClusters = cleaned
+	}
+	st.Grants[user] = grant{Roles: clean, Teams: ts, Clusters: nextClusters}
 	if s.keepers(st) == 0 {
 		return "这样改之后就没有人能管理用户和角色了，已拒绝", 409
 	}

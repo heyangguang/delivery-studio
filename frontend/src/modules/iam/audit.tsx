@@ -41,7 +41,18 @@ const ACTION_DATA: Record<string, [string, string, string, string]> = {
   "user-disable": ["停用账户", "账户", "Disable user", "Account"],
   "user-enable": ["启用账户", "账户", "Enable user", "Account"],
   "user-delete": ["删除账户", "账户", "Delete user", "Account"],
-  "user-grant": ["分配角色和团队", "账户", "Assign roles & teams", "Account"],
+  "user-grant": [
+    "分配角色、团队与集群权限",
+    "账户",
+    "Assign roles, teams & cluster access",
+    "Account",
+  ],
+  "iam-cluster-grant": [
+    "分配集群访问权限",
+    "账户",
+    "Assign cluster access",
+    "Account",
+  ],
   "user-deliveries-move": [
     "转交已删除账户的交付",
     "账户",

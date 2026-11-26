@@ -3,7 +3,7 @@
 <!-- 简要说明本次 PR 解决的问题、核心改动及涉及模块 -->
 
 - **变更类型**：`feat` / `fix` / `refactor` / `style` / `docs` / `chore`
-- **合入目标**：`develop`（日常开发） / `main`（正式发版） / `release/1.x`（维护热修）
+- **合入目标**：`main`（阶段合入 / 正式发版） / `release/1.x`（维护热修）
 
 ## 关键改动清单 (Changes)
 

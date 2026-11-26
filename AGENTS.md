@@ -30,19 +30,15 @@
 
 完整规范见 [`docs/BRANCHING_AND_RELEASE_STANDARD.md`](./docs/BRANCHING_AND_RELEASE_STANDARD.md)。
 
-### 2.1 分支模型与 PR 强制门禁（GitFlow + Owner Merge）
-- `main`：**正式发布主干**（永久保护，仅对应已验证正式版本与 `vX.Y.Z` Tag）；**严禁直接 push**，仅通过 `release/*` 或 `hotfix/*` 的 PR 合入。
-- `develop`：**日常开发与集成测试主干**（永久保护）；**严禁直接 push**，所有新功能、修复与工程改动必须从 `develop` 切出短期分支并提 PR 合入。
-- `release/<major>.<minor>`（如 `release/1.0`、`release/1.1`）：对应大/次版本的预备与长期维护分支；正式发版后**冻结新特性**，仅通过 PR 接收 Bugfix/安全补丁。
-- 短期工作分支按类型命名（**严禁本地直接合入主干**）：
-  - `feat/<scope>-<slug>`（新特性，基于 `develop`）
-  - `fix/<scope>-<slug>`（普通缺陷修复，基于 `develop`）
-  - `hotfix/<ver>-<slug>`（紧急热修，基于对应 `release/*`）
-  - `refactor/<slug>`、`style/<slug>`、`docs/<slug>`、`chore/<slug>`（重构/样式/文档/工程，基于 `develop`）
-- **PR 与合入红线（最高优先级）**：
-  1. 任何代码或文档改动完成后，必须推送短期分支至 `origin` 并使用 `gh pr create --base develop`（发版/热修除外）创建结构化 Pull Request；
-  2. **AI 严禁擅自 Merge PR 或直推 `main`/`develop`/`release/*`**，等待 GitHub Actions CI 全绿后，统一由用户亲自审阅并在 GitHub 点击 Merge（合并后远端分支自动清理）；
-  3. **严禁对 `main`、`develop`、`release/*` 执行 `git push --force`**（除非用户显式要求重置历史）。
+### 2.1 分支模型与 `main` PR 门禁（`develop` 直推 + `main` 强制 PR）
+- `main`：**正式发布主干**（永久保护，仅对应已验证正式版本与 `vX.Y.Z` Tag）；**严禁直接 push**，所有合入（`develop` → `main`、`release/*` → `main` 或 `hotfix/*` → `main`）**必须走 GitHub Pull Request**，等待 GitHub Actions CI 全绿并由 **`Delivery Studio PR Auto-Reviewer`**（或维护者）审查通过后合入。
+- `develop`：**日常开发与联调主干**（防强推、防误删）；**允许直接提交并 `git push origin develop`**，不再要求为日常开发强制切短期分支和提 PR，本地跑完定向测试与前端构建验证后即可直接推送。
+- `release/<major>.<minor>`（如 `release/1.0`、`release/1.1`）：对应大/次版本的预备与长期维护分支；正式发版后**冻结新特性**，仅接收 Bugfix/安全补丁。
+- 短期分支按需可选（跨天大型实验功能或紧急热修时可使用，如 `feat/<scope>-<slug>`、`fix/<scope>-<slug>`、`hotfix/<ver>-<slug>`），不再作为合入 `develop` 的强制门槛。
+- **分支与合入红线（最高优先级）**：
+  1. 日常研发直接在 `develop` 提交并推送（遵循 Conventional Commits，并确保改动范围的定向单测与前端 `npm run build` 绿灯）；
+  2. **合入 `main` 必走 PR**：严禁直推 `main`，必须创建指向 `main` 的 Pull Request，经 GitHub Actions CI 全绿与 PR 自动审查/维护者确认后合并；日常编码 AI 助手不得擅自合并 `main` PR（由受控的 `Delivery Studio PR Auto-Reviewer` 工作流或维护者执行合入）；
+  3. **严禁对 `main`、`develop`、`release/*` 执行 `git push --force`**（除非用户显式要求重置历史），禁止删除长期主干分支。
 
 ### 2.2 Commit 规范
 - 统一采用 Conventional Commits：`<type>(<scope>): <简明描述>`（`feat`/`fix`/`refactor`/`perf`/`style`/`docs`/`test`/`chore`）。

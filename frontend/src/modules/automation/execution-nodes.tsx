@@ -18,9 +18,11 @@ import {
   IconBook,
   IconCheck,
   IconCheckCircle,
+  IconCode,
   IconCopy,
   IconDelete,
   IconDesktop,
+  IconDown,
   IconDownload,
   IconExclamationCircle,
   IconFilter,
@@ -29,8 +31,11 @@ import {
   IconPlus,
   IconRefresh,
   IconRight,
+  IconSafe,
   IconSearch,
+  IconStorage,
   IconThunderbolt,
+  IconUp,
 } from "@arco-design/web-react/icon";
 import {
   ago,
@@ -374,6 +379,7 @@ export function ExecutionNodes({
   const [onlyWritable, setOnlyWritable] = useState(false);
   const [agentSort, setAgentSort] = useState<"status" | "name" | "heartbeat">("status");
   const [filterOpen, setFilterOpen] = useState(false);
+  const [upgradeCmdOpen, setUpgradeCmdOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   useEffect(() => {
     if (initialRole === "target") {
@@ -1013,6 +1019,24 @@ export function ExecutionNodes({
     return activeAgent.cluster ? [activeAgent.cluster] : [];
   }, [activeAgent]);
 
+  useEffect(() => {
+    setUpgradeCmdOpen(false);
+  }, [activeSelection?.role, activeSelection?.id]);
+
+  const reEnrollTarget = (ag: AutomationAgentView) => {
+    setRegistration(null);
+    setTargetRegistration(null);
+    setEnrollRole("target");
+    setTargetHost(ag.host || "");
+    setTargetIP(ag.ip || "");
+    setTargetAllowMutating(ag.allow_mutating !== false);
+    setDownloaded(false);
+    setCreateError("");
+    setBundleError("");
+    void loadBootInfo();
+    setOpen(true);
+  };
+
   const loadingList = (!nodes && !error && canManage) || (!agents && !agentsError);
 
   const upgradeCmd = `${bi(
@@ -1203,22 +1227,14 @@ sudo systemctl status middleware-execution --no-pager`;
             />
 
             <div
-              className="dm-filter-bar"
+              className="ec-role-pills"
               role="group"
               aria-label={bi("按 Agent 角色筛选", "Filter by Agent role")}
             >
-              <button
-                type="button"
-                className={`dm-filter-pill ${roleFilter === "all" ? "on" : ""}`}
-                aria-pressed={roleFilter === "all"}
-                onClick={() => setRoleFilter("all")}
-              >
-                {bi("全部", "All")}
-              </button>
               {(canManage || all.length > 0) && (
                 <button
                   type="button"
-                  className={`dm-filter-pill is-auto ${roleFilter === "controller" ? "on" : ""}`}
+                  className={`ec-role-pill ${roleFilter === "controller" ? "on" : ""}`}
                   aria-pressed={roleFilter === "controller"}
                   onClick={() =>
                     setRoleFilter(roleFilter === "controller" ? "all" : "controller")
@@ -1231,7 +1247,7 @@ sudo systemctl status middleware-execution --no-pager`;
               )}
               <button
                 type="button"
-                className={`dm-filter-pill is-imported ${roleFilter === "target" ? "on" : ""}`}
+                className={`ec-role-pill is-target ${roleFilter === "target" ? "on" : ""}`}
                 aria-pressed={roleFilter === "target"}
                 onClick={() =>
                   setRoleFilter(roleFilter === "target" ? "all" : "target")
@@ -1244,7 +1260,7 @@ sudo systemctl status middleware-execution --no-pager`;
               {upgradeCount > 0 && (
                 <button
                   type="button"
-                  className={`dm-filter-pill ${roleFilter === "upgrade" ? "on" : ""}`}
+                  className={`ec-role-pill is-upgrade ${roleFilter === "upgrade" ? "on" : ""}`}
                   aria-pressed={roleFilter === "upgrade"}
                   onClick={() =>
                     setRoleFilter(roleFilter === "upgrade" ? "all" : "upgrade")
@@ -1417,7 +1433,7 @@ sudo systemctl status middleware-execution --no-pager`;
       {showDetail && (
         <section className="md-detail" aria-live="polite">
           {error && canManage && (
-            <div className="detail enter ec-detail-article" style={{ paddingBottom: 0 }}>
+            <div className="ec-detail-banner-wrap enter">
               <div className="en-error" role="alert">
                 <IconExclamationCircle />
                 <div>
@@ -1432,7 +1448,7 @@ sudo systemctl status middleware-execution --no-pager`;
           )}
 
           {agentsError && (
-            <div className="detail enter ec-detail-article" style={{ paddingBottom: 0 }}>
+            <div className="ec-detail-banner-wrap enter">
               <div className="en-error" role="alert">
                 <IconExclamationCircle />
                 <div>
@@ -1447,7 +1463,7 @@ sudo systemctl status middleware-execution --no-pager`;
           )}
 
           {activeStep2 && !open && (
-            <div className="detail enter ec-detail-article" style={{ paddingBottom: 0 }}>
+            <div className="ec-detail-banner-wrap enter">
               <div className="en-pending" role="status">
                 <IconInfoCircle />
                 <span>
@@ -1492,6 +1508,27 @@ sudo systemctl status middleware-execution --no-pager`;
                   : st.key === "offline"
                     ? "failed"
                     : "pending";
+              const deliveryOn = activeNode.allow_delivery !== false;
+              const probeOn = activeNode.allow_probe !== false;
+              const rehearsalOn = Boolean(activeNode.allow_rehearsal) && !oldProto;
+              const enabledCaps =
+                (deliveryOn ? 1 : 0) + (probeOn ? 1 : 0) + (rehearsalOn ? 1 : 0);
+              const enabledCapSummary = [
+                deliveryOn ? bi("交付", "Delivery") : null,
+                probeOn ? bi("探针", "Probe") : null,
+                rehearsalOn ? bi("演练", "Rehearsal") : null,
+              ]
+                .filter(Boolean)
+                .join(" · ");
+              const placementLabel =
+                activeNode.kind === "independent"
+                  ? bi("独立管理机", "Dedicated Host")
+                  : bi("集群内执行机", "In-Cluster Host");
+              const targetVer = bootInfo?.version
+                ? `v${bootInfo.version.replace(/^v/, "")}`
+                : "";
+              const nodeStatusCmd = `sudo systemctl status middleware-execution --no-pager\nsudo journalctl -u middleware-execution -n 40 --no-pager`;
+              const nodeCheckCmd = `/usr/local/bin/middleware-store execution-node \\\n  --config /etc/middleware-execution/execution-node.json --check`;
               return (
                 <article
                   className="detail enter ec-detail-article"
@@ -1507,285 +1544,662 @@ sudo systemctl status middleware-execution --no-pager`;
                       {bi("Agent 列表", "Agents")}
                     </Button>
                   )}
-                  <header className="detail-head">
-                    <div className="detail-title">
-                      <h1>{activeNode.name}</h1>
-                      <span className="ec-micro-pill is-brand">
-                        {bi("控制机 Agent", "Control Agent")}
-                      </span>
-                      <StatusBadge
-                        state={badgeState}
-                        label={nodeStatusLabel(st.key, st.label)}
-                      />
-                      <span className="ec-micro-pill">
-                        {activeNode.kind === "independent"
-                          ? bi("独立管理机", "Dedicated Host")
-                          : bi("集群内执行机", "In-Cluster Host")}
-                      </span>
-                      {oldProto ? (
-                        <span className="ec-micro-pill is-upgrade">
-                          {bi("可升级", "Upgrade")}
-                        </span>
-                      ) : (activeNode.protocol || 0) >= 3 ? (
-                        <span className="ec-micro-pill is-ok">
-                          {bi("完整自动化就绪", "Full Automation Ready")}
-                        </span>
-                      ) : null}
+
+                  {/* Full-Width Hero Header */}
+                  <header className="detail-head app-head ec-hero-head">
+                    <div className="ec-hero-glyph is-controller" aria-hidden>
+                      <IconDesktop />
                     </div>
-                    <div className="detail-meta">
-                      <code className="mono">{activeNode.controller_ip}</code>
-                      {activeNode.version && (
-                            <span className="mono">v{activeNode.version}</span>
-                          )}
+                    <div className="app-head-main">
+                      <div className="detail-title">
+                        <h1>{activeNode.name}</h1>
+                        <StatusBadge
+                          state={badgeState}
+                          label={nodeStatusLabel(st.key, st.label)}
+                        />
+                        <span className="ec-micro-pill is-brand">
+                          {bi("控制机 Agent", "Control Agent")}
+                        </span>
+                      </div>
+                      <div className="detail-meta">
+                        <button
+                          type="button"
+                          className="ec-meta-copy mono"
+                          onClick={() => {
+                            copy(activeNode.controller_ip);
+                            Message.success(bi("已复制控制机 IP", "Controller IP copied"));
+                          }}
+                          title={bi("点击复制 IP", "Copy IP")}
+                        >
+                          <span>{activeNode.controller_ip}</span>
+                          <IconCopy />
+                        </button>
+                        <span>{placementLabel}</span>
+                        {activeNode.version && (
+                          <span className="mono">v{activeNode.version}</span>
+                        )}
+                        <Tooltip
+                          content={
+                            activeNode.last_seen
+                              ? fullTime(activeNode.last_seen)
+                              : bi("尚未上报心跳", "No heartbeat yet")
+                          }
+                          mini
+                        >
                           <span>
                             {activeNode.last_seen
                               ? bi(
-                                  `最近心跳 ${fullTime(activeNode.last_seen)}`,
-                                  `Last heartbeat ${fullTime(activeNode.last_seen)}`,
+                                  `最近心跳 ${ago(activeNode.last_seen)}`,
+                                  `Heartbeat ${ago(activeNode.last_seen)}`,
                                 )
-                              : bi("等待首次心跳", "Waiting for first heartbeat")}
+                              : bi("等待首次心跳", "Awaiting first heartbeat")}
                           </span>
-                        </div>
-                        <div className="detail-actions">
+                        </Tooltip>
+                      </div>
+                    </div>
+                    <div className="detail-actions">
+                      {canManage && (
+                        <Button
+                          size="small"
+                          type={activeNode.disabled ? "primary" : "outline"}
+                          loading={updating === activeNode.id}
+                          disabled={!!updating && updating !== activeNode.id}
+                          onClick={() => void toggle(activeNode)}
+                        >
+                          {activeNode.disabled
+                            ? bi("恢复接单", "Resume")
+                            : bi("暂停接单", "Pause")}
+                        </Button>
+                      )}
+                      <Button
+                        size="small"
+                        type="outline"
+                        icon={<IconBook />}
+                        onClick={() => setGuide("install")}
+                      >
+                        {bi("接入指南", "Guide")}
+                      </Button>
+                      {canManage && (
+                        <Tooltip content={bi("删除节点", "Delete node")} mini>
                           <Button
                             size="small"
-                            icon={<IconBook />}
-                            onClick={() => setGuide("install")}
-                          >
-                            {bi("接入指南", "Guide")}
-                          </Button>
-                          {canManage && (
-                            <>
-                              <Button
-                                size="small"
-                                loading={updating === activeNode.id}
-                                disabled={!!updating && updating !== activeNode.id}
-                                onClick={() => void toggle(activeNode)}
-                              >
-                                {activeNode.disabled
-                                  ? bi("恢复接单", "Resume")
-                                  : bi("暂停接单", "Pause")}
-                              </Button>
-                              <Tooltip content={bi("删除节点", "Delete node")}>
-                                <Button
-                                  size="small"
-                                  status="danger"
-                                  icon={<IconDelete />}
-                                  disabled={!!updating}
-                                  onClick={() => remove(activeNode)}
-                                  aria-label={bi(
-                                    `删除执行节点 ${activeNode.name}`,
-                                    `Delete execution node ${activeNode.name}`,
-                                  )}
-                                />
-                              </Tooltip>
-                            </>
-                          )}
-                        </div>
-                      </header>
+                            status="danger"
+                            icon={<IconDelete />}
+                            disabled={!!updating}
+                            onClick={() => remove(activeNode)}
+                            aria-label={bi(
+                              `删除执行节点 ${activeNode.name}`,
+                              `Delete execution node ${activeNode.name}`,
+                            )}
+                          />
+                        </Tooltip>
+                      )}
+                    </div>
+                  </header>
 
-                      <div className="ec-detail-sections">
+                  {/* 4-Column Responsive Telemetry Strip */}
+                  <div className="ec-kpi-strip">
+                    <div className="ec-kpi-card">
+                      <div className="ec-kpi-top">
+                        <span className="ec-kpi-label">{bi("连接与接单状态", "Connection & Dispatch")}</span>
+                        <span className={`ec-state-dot is-${st.key}`} aria-hidden />
+                      </div>
+                      <div className="ec-kpi-val">
+                        <b>{nodeStatusLabel(st.key, st.label)}</b>
+                      </div>
+                      <span className="ec-kpi-sub num">
+                        {activeNode.last_seen
+                          ? fullTime(activeNode.last_seen)
+                          : bi("等待节点首次上报心跳", "Awaiting first heartbeat")}
+                      </span>
+                    </div>
+
+                    <div className="ec-kpi-card">
+                      <div className="ec-kpi-top">
+                        <span className="ec-kpi-label">{bi("执行器版本与协议", "Runner & Protocol")}</span>
                         {oldProto && (
-                          <div className="ec-upgrade-box">
-                            <div className="ec-upgrade-head">
-                              <div>
-                                <b>
-                                  {bi(
-                                    "升级节点执行器以支持变更演练自动执行",
-                                    "Upgrade Runner to Unlock Rehearsal Automation",
-                                  )}
-                                </b>
+                          <span className="ec-micro-pill is-upgrade">
+                            {bi("可升级", "Upgrade")}
+                          </span>
+                        )}
+                      </div>
+                      <div className="ec-kpi-val">
+                        <b className="mono">
+                          {activeNode.version ? `v${activeNode.version}` : bi("待上报", "Pending")}
+                        </b>
+                        {activeNode.protocol ? (
+                          <span className="ec-kpi-unit mono">v{activeNode.protocol}</span>
+                        ) : null}
+                      </div>
+                      <span
+                        className={`ec-kpi-sub ${
+                          oldProto
+                            ? "is-warn"
+                            : (activeNode.protocol || 0) >= 3
+                              ? "is-ok"
+                              : ""
+                        }`}
+                      >
+                        {oldProto
+                          ? bi("旧版协议，升级至 v3 解锁演练自动执行", "Upgrade to v3 to unlock rehearsal automation")
+                          : (activeNode.protocol || 0) >= 3
+                            ? bi("协议 v3 · 完整自动化就绪", "Protocol v3 · Full automation ready")
+                            : bi("上线后自动识别协议版本", "Protocol detected on first check-in")}
+                      </span>
+                    </div>
+
+                    <div className="ec-kpi-card">
+                      <div className="ec-kpi-top">
+                        <span className="ec-kpi-label">{bi("能力授权进度", "Capabilities Active")}</span>
+                      </div>
+                      <div className="ec-kpi-val num">
+                        <b>{enabledCaps} / 3</b>
+                        <span className="ec-kpi-unit">{bi("已开启", "active")}</span>
+                      </div>
+                      <span className="ec-kpi-sub">
+                        {enabledCapSummary || bi("全部能力均已关闭", "All capabilities disabled")}
+                      </span>
+                    </div>
+
+                    <div className="ec-kpi-card">
+                      <div className="ec-kpi-top">
+                        <span className="ec-kpi-label">{bi("授权纳管范围", "Authorized Scope")}</span>
+                      </div>
+                      <div className="ec-kpi-val num">
+                        <b>
+                          {bi(
+                            `${activeNode.clusters.length} 集群 · ${activeNode.ips.length} 主机`,
+                            `${activeNode.clusters.length} cl · ${activeNode.ips.length} hosts`,
+                          )}
+                        </b>
+                      </div>
+                      <span className="ec-kpi-sub">{placementLabel}</span>
+                    </div>
+                  </div>
+
+                  {/* Full-Width Dual-Column Workspace */}
+                  <div className="ec-detail-grid">
+                    <div className="ec-detail-main">
+                      {oldProto && (
+                        <section className="ec-upgrade-card" id="ec-upgrade-section">
+                          <div className="ec-upgrade-top">
+                            <div className="ec-upgrade-top-l">
+                              <span className="ec-upgrade-ic" aria-hidden>
+                                <IconDownload />
+                              </span>
+                              <div className="ec-upgrade-copy">
+                                <div className="ec-upgrade-title-row">
+                                  <b>
+                                    {bi(
+                                      "升级执行器以解锁变更演练自动执行",
+                                      "Upgrade Runner to Unlock Rehearsal Automation",
+                                    )}
+                                  </b>
+                                  <span className="ec-ver-diff mono">
+                                    {activeNode.version && targetVer
+                                      ? `v${activeNode.version} → ${targetVer}`
+                                      : bi("协议 v2 → v3", "Protocol v2 → v3")}
+                                  </span>
+                                </div>
                                 <p>
                                   {bi(
-                                    "当前控制机运行旧版二进制，仅支持首次交付与只读探针；替换为新版二进制并重启 systemd 服务即可平滑升级（保留原有凭据）。",
-                                    "Replace the runner binary and restart systemd to unlock automated rehearsal execution without re-enrolling.",
+                                    "当前仅支持首次交付与只读探针；替换 Linux amd64 二进制并重启 systemd 即可平滑升级，原有凭据与配置自动保留。",
+                                    "Currently limited to initial delivery & read-only probes. Replace the Linux amd64 binary and restart systemd to upgrade in place.",
                                   )}
                                 </p>
                               </div>
-                              <div className="ec-row-acts">
-                                <Button
-                                  size="mini"
-                                  type="primary"
-                                  icon={<IconDownload />}
-                                  href={withLang("/api/settings/execution-nodes/binary")}
-                                >
-                                  {bi("下载新版二进制", "Download Binary")}
-                                </Button>
-                                <Button
-                                  size="mini"
-                                  type="outline"
-                                  icon={<IconCopy />}
+                            </div>
+                            <div className="ec-upgrade-acts">
+                              <Button
+                                size="small"
+                                type="secondary"
+                                icon={<IconDownload />}
+                                href={withLang("/api/settings/execution-nodes/binary")}
+                              >
+                                {bi("下载新版二进制", "Download Binary")}
+                              </Button>
+                              <Button
+                                size="small"
+                                type="outline"
+                                icon={<IconCopy />}
+                                onClick={() => {
+                                  copy(upgradeCmd);
+                                  Message.success(bi("已复制升级命令", "Upgrade commands copied"));
+                                }}
+                              >
+                                {bi("复制命令", "Copy")}
+                              </Button>
+                              <button
+                                type="button"
+                                className="ec-upgrade-toggle"
+                                aria-expanded={upgradeCmdOpen}
+                                onClick={() => setUpgradeCmdOpen((v) => !v)}
+                              >
+                                <span>
+                                  {upgradeCmdOpen
+                                    ? bi("收起步骤", "Hide Steps")
+                                    : bi("查看升级步骤", "View Steps")}
+                                </span>
+                                {upgradeCmdOpen ? <IconUp /> : <IconDown />}
+                              </button>
+                            </div>
+                          </div>
+                          {upgradeCmdOpen && (
+                            <div className="ec-code-card enter">
+                              <div className="ec-code-bar">
+                                <span className="mono">
+                                  <IconCode />
+                                  {bi("控制机平滑升级命令 · bash", "Control Host Upgrade · bash")}
+                                </span>
+                                <button
+                                  type="button"
+                                  className="ec-code-copy"
                                   onClick={() => {
                                     copy(upgradeCmd);
                                     Message.success(bi("已复制升级命令", "Upgrade commands copied"));
                                   }}
                                 >
-                                  {bi("复制命令", "Copy")}
-                                </Button>
+                                  <IconCopy />
+                                  <span>{bi("复制", "Copy")}</span>
+                                </button>
                               </div>
+                              <pre className="ec-code-pre mono">{upgradeCmd}</pre>
                             </div>
-                            <pre className="ec-upgrade-cmd mono">{upgradeCmd}</pre>
-                          </div>
-                        )}
-
-                        <section className="cx-spec-card">
-                          <div className="cx-spec-card-head">
-                            <h3>{bi("能力授权", "Capability Permissions")}</h3>
-                          </div>
-                          <div className="ec-cap-list">
-                            <div className="ec-cap-row">
-                              <div className="ec-cap-row-l">
-                                <b>{bi("首次交付部署", "Delivery Runs")}</b>
-                                <p>
-                                  {bi(
-                                    "允许承接集群首次部署、扩缩容及配置交付的 Ansible 执行批次。",
-                                    "Allow claiming initial deployment, scaling, and config delivery runs.",
-                                  )}
-                                </p>
-                              </div>
-                              <Switch
-                                size="small"
-                                checked={activeNode.allow_delivery !== false}
-                                loading={updating === activeNode.id}
-                                disabled={!canManage || updating === activeNode.id}
-                                onChange={(v) =>
-                                  void updateNodeCap(activeNode, { allow_delivery: v })
-                                }
-                              />
-                            </div>
-
-                            <div className="ec-cap-row">
-                              <div className="ec-cap-row-l">
-                                <b>{bi("只读探针采集", "Read-Only Probes")}</b>
-                                <p>
-                                  {bi(
-                                    "允许自动下发 100% 只读基线与变更前状态探针（经静态安全门禁校验）。",
-                                    "Allow dispatching 100% read-only baseline and pre-change probe scripts.",
-                                  )}
-                                </p>
-                              </div>
-                              <Switch
-                                size="small"
-                                checked={activeNode.allow_probe !== false}
-                                loading={updating === activeNode.id}
-                                disabled={!canManage || updating === activeNode.id}
-                                onChange={(v) =>
-                                  void updateNodeCap(activeNode, { allow_probe: v })
-                                }
-                              />
-                            </div>
-
-                            <div className="ec-cap-row">
-                              <div className="ec-cap-row-l">
-                                <b>{bi("变更演练步骤执行", "Rehearsal Step Execution")}</b>
-                                <p>
-                                  {bi(
-                                    "允许在变更演练工作台执行变更写操作与回滚步骤（受集群生产门禁约束）。",
-                                    "Allow executing mutating and rollback steps during rehearsals.",
-                                  )}
-                                </p>
-                                {oldProto && (
-                                  <span className="ec-cap-row-warn">
-                                    {bi(
-                                      "请先在上方升级节点执行器版本后再开启",
-                                      "Upgrade the runner binary above before enabling",
-                                    )}
-                                  </span>
-                                )}
-                              </div>
-                              <Switch
-                                size="small"
-                                checked={Boolean(activeNode.allow_rehearsal)}
-                                loading={updating === activeNode.id}
-                                disabled={!canManage || oldProto || updating === activeNode.id}
-                                onChange={(v) =>
-                                  void updateNodeCap(activeNode, { allow_rehearsal: v })
-                                }
-                              />
-                            </div>
-                          </div>
+                          )}
                         </section>
+                      )}
 
-                        <section className="cx-spec-card">
-                          <div className="cx-spec-card-head">
-                            <h3>
-                              <span>{bi("授权集群与目标主机", "Authorized Clusters & Hosts")}</span>
-                              <span className="cx-card-cnt num">
-                                {bi(
-                                  `${activeNode.clusters.length} 集群 · ${activeNode.ips.length} 主机`,
-                                  `${activeNode.clusters.length} cl · ${activeNode.ips.length} hosts`,
-                                )}
-                              </span>
-                            </h3>
+                      {/* Capability Permissions */}
+                      <section className="ec-sec">
+                        <div className="ec-sec-head">
+                          <div>
+                            <h2 className="ec-sec-title">
+                              {bi("能力授权与安全边界", "Capabilities & Guardrails")}
+                            </h2>
+                            <p className="ec-sec-sub">
+                              {bi(
+                                "按需独立启停该控制机可承接的任务类型，所有变更写操作均受集群生产安全门禁二次约束。",
+                                "Control which task classes this runner may claim; mutating steps remain guarded by cluster safety gates.",
+                              )}
+                            </p>
                           </div>
-                          <div className="ec-scope-body">
-                            <div className="ec-chip-wrap">
-                              {activeNode.clusters.length === 0 ? (
-                                <span style={{ fontSize: 12, color: "var(--faint)" }}>
-                                  {bi(
-                                    "尚未绑定集群；可在交付或集群「自动化」标签页选择此控制机。",
-                                    "No clusters bound yet; select this node in a cluster's Automation tab.",
-                                  )}
+                          <span className="ec-sec-badge num">
+                            {bi(`${enabledCaps} / 3 已开启`, `${enabledCaps} / 3 active`)}
+                          </span>
+                        </div>
+
+                        <div className="ec-surface-card">
+                          <div className="ec-cap-item">
+                            <div className={`ec-cap-ic ${deliveryOn ? "is-on" : ""}`} aria-hidden>
+                              <IconStorage />
+                            </div>
+                            <div className="ec-cap-body">
+                              <div className="ec-cap-title-row">
+                                <b>{bi("首次交付部署", "Delivery Runs")}</b>
+                                <span className={`ec-cap-state ${deliveryOn ? "is-ok" : ""}`}>
+                                  {deliveryOn ? bi("已开启", "Enabled") : bi("已关闭", "Disabled")}
                                 </span>
-                              ) : (
-                                activeNode.clusters.map((cid) => (
+                              </div>
+                              <p>
+                                {bi(
+                                  "允许承接集群首次部署、扩缩容及配置交付的 Ansible 执行批次。",
+                                  "Allow claiming initial deployment, scaling, and config delivery runs.",
+                                )}
+                              </p>
+                            </div>
+                            <Switch
+                              size="small"
+                              checked={deliveryOn}
+                              loading={updating === activeNode.id}
+                              disabled={!canManage || updating === activeNode.id}
+                              onChange={(v) =>
+                                void updateNodeCap(activeNode, { allow_delivery: v })
+                              }
+                            />
+                          </div>
+
+                          <div className="ec-cap-item">
+                            <div className={`ec-cap-ic ${probeOn ? "is-on" : ""}`} aria-hidden>
+                              <IconSafe />
+                            </div>
+                            <div className="ec-cap-body">
+                              <div className="ec-cap-title-row">
+                                <b>{bi("只读探针采集", "Read-Only Probes")}</b>
+                                <span className={`ec-cap-state ${probeOn ? "is-ok" : ""}`}>
+                                  {probeOn ? bi("已开启", "Enabled") : bi("已关闭", "Disabled")}
+                                </span>
+                              </div>
+                              <p>
+                                {bi(
+                                  "允许自动下发 100% 只读基线与变更前状态探针（经静态只读安全门禁校验）。",
+                                  "Allow dispatching 100% read-only baseline and pre-change probe scripts.",
+                                )}
+                              </p>
+                            </div>
+                            <Switch
+                              size="small"
+                              checked={probeOn}
+                              loading={updating === activeNode.id}
+                              disabled={!canManage || updating === activeNode.id}
+                              onChange={(v) =>
+                                void updateNodeCap(activeNode, { allow_probe: v })
+                              }
+                            />
+                          </div>
+
+                          <div className="ec-cap-item">
+                            <div
+                              className={`ec-cap-ic ${
+                                rehearsalOn ? "is-on" : oldProto ? "is-warn" : ""
+                              }`}
+                              aria-hidden
+                            >
+                              <IconThunderbolt />
+                            </div>
+                            <div className="ec-cap-body">
+                              <div className="ec-cap-title-row">
+                                <b>{bi("变更演练步骤执行", "Rehearsal Step Execution")}</b>
+                                <span
+                                  className={`ec-cap-state ${
+                                    oldProto ? "is-warn" : rehearsalOn ? "is-ok" : ""
+                                  }`}
+                                >
+                                  {oldProto
+                                    ? bi("需升级至 v3", "Requires v3")
+                                    : rehearsalOn
+                                      ? bi("已开启", "Enabled")
+                                      : bi("已关闭", "Disabled")}
+                                </span>
+                              </div>
+                              <p>
+                                {bi(
+                                  "允许在变更演练工作台执行变更写操作与回滚步骤（受集群生产门禁约束）。",
+                                  "Allow executing mutating and rollback steps during rehearsals.",
+                                )}
+                              </p>
+                              {oldProto && (
+                                <button
+                                  type="button"
+                                  className="ec-cap-action-link"
+                                  onClick={() => setUpgradeCmdOpen(true)}
+                                >
+                                  <span>{bi("查看控制机平滑升级命令", "View in-place upgrade steps")}</span>
+                                  <IconArrowRight />
+                                </button>
+                              )}
+                            </div>
+                            <Switch
+                              size="small"
+                              checked={Boolean(activeNode.allow_rehearsal)}
+                              loading={updating === activeNode.id}
+                              disabled={!canManage || oldProto || updating === activeNode.id}
+                              onChange={(v) =>
+                                void updateNodeCap(activeNode, { allow_rehearsal: v })
+                              }
+                            />
+                          </div>
+                        </div>
+                      </section>
+
+                      {/* Authorized Clusters & Target Hosts */}
+                      <section className="ec-sec">
+                        <div className="ec-sec-head">
+                          <div>
+                            <h2 className="ec-sec-title">
+                              {bi("授权集群与放行目标主机", "Authorized Clusters & Target Hosts")}
+                            </h2>
+                            <p className="ec-sec-sub">
+                              {bi(
+                                "控制机仅允许对下方已绑定集群及放行列表内的主机下发自动化任务，点击集群直达自动化配置，点击主机可复制 IP。",
+                                "This controller can only target bound clusters and allowed hosts below. Click a cluster to open Automation or a host to copy its IP.",
+                              )}
+                            </p>
+                          </div>
+                          <span className="ec-sec-badge num">
+                            {bi(
+                              `${activeNode.clusters.length} 集群 · ${activeNode.ips.length} 主机`,
+                              `${activeNode.clusters.length} cl · ${activeNode.ips.length} hosts`,
+                            )}
+                          </span>
+                        </div>
+
+                        <div className="ec-surface-card">
+                          <div className="ec-scope-block">
+                            <div className="ec-scope-subhead">
+                              <span>{bi("已授权集群", "Bound Clusters")}</span>
+                              <span className="num">{activeNode.clusters.length}</span>
+                            </div>
+                            {activeNode.clusters.length === 0 ? (
+                              <p className="ec-scope-hint">
+                                {bi(
+                                  "尚未绑定集群；可在任意集群的「自动化」标签页或交付执行中选择此控制机。",
+                                  "No clusters bound yet; select this node in any cluster's Automation tab.",
+                                )}
+                              </p>
+                            ) : (
+                              <div className="ec-cluster-grid">
+                                {activeNode.clusters.map((cid) => (
                                   <button
                                     key={cid}
                                     type="button"
-                                    className="ec-cluster-link mono"
+                                    className="ec-cluster-card"
                                     onClick={() =>
                                       go({ name: "deliveries", id: cid, tab: "automation" })
                                     }
                                   >
-                                    <span>{cid}</span>
-                                    <IconRight />
+                                    <div className="ec-cluster-card-l">
+                                      <span className="ec-cluster-ic" aria-hidden>
+                                        <IconStorage />
+                                      </span>
+                                      <div className="ec-cluster-card-txt">
+                                        <b className="mono">{cid}</b>
+                                        <small>{bi("打开集群自动化与演练", "Open cluster automation")}</small>
+                                      </div>
+                                    </div>
+                                    <IconRight className="ec-cluster-card-arrow" />
                                   </button>
-                                ))
-                              )}
-                            </div>
-                            {activeNode.ips.length > 0 && (
-                              <div className="ec-chip-wrap">
-                                {activeNode.ips.map((ip) => (
-                                  <span key={ip} className="ec-ip-chip mono">
-                                    {ip}
-                                    {ip === activeNode.controller_ip && (
-                                      <small>{bi("控制", "Ctrl")}</small>
-                                    )}
-                                  </span>
                                 ))}
                               </div>
                             )}
                           </div>
-                        </section>
 
-                        {(st.key === "offline" || st.key === "waiting") && (
-                          <div className="ec-diag-bar">
-                            <span>
-                              {bi(
-                                "节点未连上？可让 AI 结合当前地址、CA 证书与 systemd 状态快速生成排查命令。",
-                                "Node offline? Let AI generate quick diagnostic commands for URL, CA cert, and systemd.",
-                              )}
-                            </span>
-                            <AIHelpButton
-                              variant="pill"
-                              topic={`node-offline-${activeNode.id}`}
-                              title={bi(`排查节点「${activeNode.name}」未连接`, `Troubleshoot "${activeNode.name}"`)}
-                              page={bi("执行中心 · 控制机", "Execution Center · Nodes")}
-                              summary={bi(
-                                `节点 ${activeNode.name} (${activeNode.controller_ip})，位置=${activeNode.kind}，状态=${st.key}`,
-                                `Node ${activeNode.name} (${activeNode.controller_ip}), kind=${activeNode.kind}, state=${st.key}`,
-                              )}
-                              prompt={bi(
-                                `执行节点「${activeNode.name}」(${activeNode.controller_ip}) 当前状态为「${nodeStatusLabel(st.key, st.label)}」，请帮我列出最快定位原因的检查命令和常见坑。`,
-                                `Execution node "${activeNode.name}" (${activeNode.controller_ip}) is ${st.key}. Give the quickest diagnostic commands.`,
-                              )}
-                            />
+                          {activeNode.ips.length > 0 && (
+                            <div className="ec-scope-block">
+                              <div className="ec-scope-subhead">
+                                <span>{bi("放行目标主机 IP", "Allowed Host IPs")}</span>
+                                <span className="num">{activeNode.ips.length}</span>
+                              </div>
+                              <div className="ec-host-grid">
+                                {activeNode.ips.map((ip) => {
+                                  const isCtrl = ip === activeNode.controller_ip;
+                                  return (
+                                    <button
+                                      key={ip}
+                                      type="button"
+                                      className={`ec-host-tile ${isCtrl ? "is-ctrl" : ""}`}
+                                      onClick={() => {
+                                        copy(ip);
+                                        Message.success(bi(`已复制 ${ip}`, `Copied ${ip}`));
+                                      }}
+                                      title={bi("点击复制主机 IP", "Click to copy IP")}
+                                    >
+                                      <div className="ec-host-tile-l">
+                                        <code className="mono">{ip}</code>
+                                        {isCtrl && (
+                                          <span className="ec-host-tag">
+                                            {bi("控制本机", "Ctrl")}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <IconCopy className="ec-host-copy" />
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </section>
+
+                      {(st.key === "offline" || st.key === "waiting") && (
+                        <div className="ec-diag-bar">
+                          <span>
+                            {bi(
+                              "节点未连上？可让 AI 结合当前地址、CA 证书与 systemd 状态快速生成排查命令。",
+                              "Node offline? Let AI generate quick diagnostic commands for URL, CA cert, and systemd.",
+                            )}
+                          </span>
+                          <AIHelpButton
+                            variant="pill"
+                            topic={`node-offline-${activeNode.id}`}
+                            title={bi(`排查节点「${activeNode.name}」未连接`, `Troubleshoot "${activeNode.name}"`)}
+                            page={bi("执行中心 · 控制机", "Execution Center · Nodes")}
+                            summary={bi(
+                              `节点 ${activeNode.name} (${activeNode.controller_ip})，位置=${activeNode.kind}，状态=${st.key}`,
+                              `Node ${activeNode.name} (${activeNode.controller_ip}), kind=${activeNode.kind}, state=${st.key}`,
+                            )}
+                            prompt={bi(
+                              `执行节点「${activeNode.name}」(${activeNode.controller_ip}) 当前状态为「${nodeStatusLabel(st.key, st.label)}」，请帮我列出最快定位原因的检查命令和常见坑。`,
+                              `Execution node "${activeNode.name}" (${activeNode.controller_ip}) is ${st.key}. Give the quickest diagnostic commands.`,
+                            )}
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Right Sticky Inspector Rail */}
+                    <aside className="ec-detail-side">
+                      <section className="ec-side-card">
+                        <div className="ec-side-card-head">
+                          <h3>{bi("节点档案与运行参数", "Node Profile & Runtime")}</h3>
+                        </div>
+                        <dl className="ec-facts">
+                          <div>
+                            <dt>{bi("节点标识", "Node ID")}</dt>
+                            <dd>
+                              <button
+                                type="button"
+                                className="ec-fact-copy mono"
+                                onClick={() => {
+                                  copy(activeNode.id);
+                                  Message.success(bi("已复制节点 ID", "Node ID copied"));
+                                }}
+                              >
+                                <span>{activeNode.id}</span>
+                                <IconCopy />
+                              </button>
+                            </dd>
                           </div>
-                        )}
-                      </div>
-                    </article>
-                  );
-                })()
+                          <div>
+                            <dt>{bi("控制机 IP", "Control IP")}</dt>
+                            <dd>
+                              <button
+                                type="button"
+                                className="ec-fact-copy mono"
+                                onClick={() => {
+                                  copy(activeNode.controller_ip);
+                                  Message.success(bi("已复制控制机 IP", "Control IP copied"));
+                                }}
+                              >
+                                <span>{activeNode.controller_ip}</span>
+                                <IconCopy />
+                              </button>
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>{bi("部署位置", "Placement")}</dt>
+                            <dd>{placementLabel}</dd>
+                          </div>
+                          <div>
+                            <dt>{bi("执行器版本", "Runner Version")}</dt>
+                            <dd className="mono">
+                              {activeNode.version ? `v${activeNode.version}` : "—"}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>{bi("通信协议", "Protocol")}</dt>
+                            <dd className="mono">
+                              {activeNode.protocol ? `Protocol v${activeNode.protocol}` : "—"}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>{bi("最近心跳", "Last Heartbeat")}</dt>
+                            <dd className="num">
+                              {activeNode.last_seen ? fullTime(activeNode.last_seen) : "—"}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>{bi("systemd 服务", "Systemd Unit")}</dt>
+                            <dd>
+                              <code className="mono">middleware-execution</code>
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>{bi("配置文件", "Config Path")}</dt>
+                            <dd>
+                              <code className="mono">/etc/middleware-execution/execution-node.json</code>
+                            </dd>
+                          </div>
+                        </dl>
+                      </section>
+
+                      <section className="ec-side-card">
+                        <div className="ec-side-card-head">
+                          <h3>{bi("常用运维命令", "Quick Ops Commands")}</h3>
+                        </div>
+                        <div className="ec-side-ops-body">
+                          <div className="ec-side-cmd">
+                            <div className="ec-side-cmd-head">
+                              <span>{bi("服务状态与近期日志", "Service Status & Logs")}</span>
+                              <button
+                                type="button"
+                                className="ec-side-cmd-copy"
+                                onClick={() => {
+                                  copy(nodeStatusCmd);
+                                  Message.success(bi("已复制命令", "Command copied"));
+                                }}
+                              >
+                                <IconCopy />
+                                <span>{bi("复制", "Copy")}</span>
+                              </button>
+                            </div>
+                            <pre className="ec-side-cmd-pre mono">{nodeStatusCmd}</pre>
+                          </div>
+
+                          <div className="ec-side-cmd">
+                            <div className="ec-side-cmd-head">
+                              <span>{bi("连通性即时自检", "Connectivity Self-Check")}</span>
+                              <button
+                                type="button"
+                                className="ec-side-cmd-copy"
+                                onClick={() => {
+                                  copy(nodeCheckCmd);
+                                  Message.success(bi("已复制自检命令", "Check command copied"));
+                                }}
+                              >
+                                <IconCopy />
+                                <span>{bi("复制", "Copy")}</span>
+                              </button>
+                            </div>
+                            <pre className="ec-side-cmd-pre mono">{nodeCheckCmd}</pre>
+                          </div>
+
+                          <Button
+                            size="small"
+                            type="outline"
+                            long
+                            icon={<IconBook />}
+                            onClick={() => setGuide("maintain")}
+                          >
+                            {bi("打开维护与故障排查手册", "Open Maintenance Guide")}
+                          </Button>
+                        </div>
+                      </section>
+                    </aside>
+                  </div>
+                </article>
+              );
+            })()
           ) : activeAgent ? (
             (() => {
               const isRevoked = activeAgent.desired !== "active";
@@ -1799,6 +2213,13 @@ sudo systemctl status middleware-execution --no-pager`;
                 : activeAgent.online
                   ? bi("在线运行中", "Online")
                   : bi("离线 / 待启动", "Offline");
+              const dotCls = isRevoked
+                ? "is-revoked"
+                : activeAgent.online
+                  ? "is-online"
+                  : "is-offline";
+              const agentSvc = `middleware-target-agent-${activeAgent.id}`;
+              const agentStatusCmd = `sudo systemctl status ${agentSvc} --no-pager\nsudo journalctl -u ${agentSvc} -n 40 --no-pager`;
               return (
                 <article
                   className="detail enter ec-detail-article"
@@ -1814,38 +2235,62 @@ sudo systemctl status middleware-execution --no-pager`;
                       {bi("Agent 列表", "Agents")}
                     </Button>
                   )}
-                  <header className="detail-head">
-                    <div className="detail-title">
-                      <h1>{activeAgent.host}</h1>
-                      <span className="ec-micro-pill is-ok">
-                        {bi("目标机 Agent", "Target Agent")}
-                      </span>
-                      <StatusBadge state={badgeState} label={badgeLabel} />
-                      <span className="ec-micro-pill">
-                        {bi("免密直连", "Direct HTTPS")}
-                      </span>
+
+                  {/* Full-Width Hero Header */}
+                  <header className="detail-head app-head ec-hero-head">
+                    <div className="ec-hero-glyph is-target" aria-hidden>
+                      <IconLink />
                     </div>
-                    <div className="detail-meta">
-                      <code className="mono">{activeAgent.ip}</code>
-                      <span>
-                        {activeAgentClusters.length > 0
-                          ? bi(
-                              `已自动匹配 ${activeAgentClusters.length} 个集群`,
-                              `Matched ${activeAgentClusters.length} cluster(s)`,
-                            )
-                          : bi("按主机 IP 自动匹配集群", "Auto-matches clusters by IP")}
-                      </span>
-                      {activeAgent.version && (
-                        <span className="mono">v{activeAgent.version}</span>
-                      )}
-                      <span>
-                        {activeAgent.last_seen
-                          ? bi(
-                              `最近心跳 ${fullTime(activeAgent.last_seen)}`,
-                              `Last heartbeat ${fullTime(activeAgent.last_seen)}`,
-                            )
-                          : bi("尚未上报心跳", "No heartbeat yet")}
-                      </span>
+                    <div className="app-head-main">
+                      <div className="detail-title">
+                        <h1>{activeAgent.host}</h1>
+                        <StatusBadge state={badgeState} label={badgeLabel} />
+                        <span className="ec-micro-pill is-ok">
+                          {bi("目标机 Agent · 免密直连", "Target Agent · Direct")}
+                        </span>
+                      </div>
+                      <div className="detail-meta">
+                        <button
+                          type="button"
+                          className="ec-meta-copy mono"
+                          onClick={() => {
+                            copy(activeAgent.ip);
+                            Message.success(bi("已复制目标主机 IP", "Target IP copied"));
+                          }}
+                          title={bi("点击复制 IP", "Copy IP")}
+                        >
+                          <span>{activeAgent.ip}</span>
+                          <IconCopy />
+                        </button>
+                        <span>
+                          {activeAgentClusters.length > 0
+                            ? bi(
+                                `已自动匹配 ${activeAgentClusters.length} 个集群`,
+                                `Matched ${activeAgentClusters.length} cluster(s)`,
+                              )
+                            : bi("按主机 IP 自动匹配集群", "Auto-matches clusters by IP")}
+                        </span>
+                        {activeAgent.version && (
+                          <span className="mono">v{activeAgent.version}</span>
+                        )}
+                        <Tooltip
+                          content={
+                            activeAgent.last_seen
+                              ? fullTime(activeAgent.last_seen)
+                              : bi("尚未上报心跳", "No heartbeat yet")
+                          }
+                          mini
+                        >
+                          <span>
+                            {activeAgent.last_seen
+                              ? bi(
+                                  `最近心跳 ${ago(activeAgent.last_seen)}`,
+                                  `Heartbeat ${ago(activeAgent.last_seen)}`,
+                                )
+                              : bi("尚未上报心跳", "No heartbeat yet")}
+                          </span>
+                        </Tooltip>
+                      </div>
                     </div>
                     <div className="detail-actions">
                       {activeAgentClusters.length === 1 && (
@@ -1862,6 +2307,16 @@ sudo systemctl status middleware-execution --no-pager`;
                           }
                         >
                           {bi("打开集群自动化", "Cluster Automation")}
+                        </Button>
+                      )}
+                      {canManage && isRevoked && (
+                        <Button
+                          size="small"
+                          type="primary"
+                          icon={<IconPlus />}
+                          onClick={() => reEnrollTarget(activeAgent)}
+                        >
+                          {bi("重新签发接入", "Re-Enroll")}
                         </Button>
                       )}
                       {canManage && !isRevoked && (
@@ -1912,119 +2367,333 @@ sudo systemctl status middleware-execution --no-pager`;
                     </div>
                   </header>
 
-                  <div className="ec-detail-sections">
-                    <section className="cx-spec-card">
-                      <div className="cx-spec-card-head">
-                        <h3>{bi("Agent 权限与连接信息", "Agent Permissions & Info")}</h3>
+                  {/* 4-Column Responsive Telemetry Strip */}
+                  <div className="ec-kpi-strip">
+                    <div className="ec-kpi-card">
+                      <div className="ec-kpi-top">
+                        <span className="ec-kpi-label">{bi("运行与授权状态", "Runtime & Auth")}</span>
+                        <span className={`ec-state-dot ${dotCls}`} aria-hidden />
                       </div>
-                      <div className="ec-kv-grid">
-                        <div className="ec-kv">
-                          <span>{bi("目标主机 IP", "Target IP")}</span>
-                          <code className="mono">{activeAgent.ip}</code>
-                        </div>
-                        <div className="ec-kv">
-                          <span>{bi("接入模式", "Connection Mode")}</span>
-                          <b>{bi("HTTPS 主动外连（无需 SSH 密码）", "Outbound HTTPS (No SSH)")}</b>
-                        </div>
-                        <div className="ec-kv">
-                          <span>{bi("签发时间", "Created")}</span>
-                          <b>{activeAgent.created ? fullTime(activeAgent.created) : "—"}</b>
-                        </div>
-                        <div className="ec-kv">
-                          <span>{bi("Agent 标识", "Agent ID")}</span>
-                          <code className="mono">{activeAgent.id}</code>
-                        </div>
+                      <div className="ec-kpi-val">
+                        <b>{badgeLabel}</b>
                       </div>
-                      <div className="ec-cap-row">
-                        <div className="ec-cap-row-l">
-                          <b>{bi("允许执行变更写操作", "Allow Mutating Steps")}</b>
-                          <p>
-                            {bi(
-                              "关闭后该 Agent 仅放行 100% 只读基线与演练前探针，拒绝任何写操作与回滚命令。",
-                              "When off, this agent only accepts 100% read-only probes and blocks mutating commands.",
-                            )}
-                          </p>
-                        </div>
-                        <Switch
-                          size="small"
-                          checked={Boolean(activeAgent.allow_mutating)}
-                          loading={updatingAgent === activeAgent.id}
-                          disabled={!canManage || isRevoked}
-                          onChange={(v) =>
-                            void updateGlobalAgent(activeAgent, {
-                              action: "update",
-                              allow_mutating: v,
-                            })
-                          }
-                        />
-                      </div>
-                    </section>
+                      <span className="ec-kpi-sub num">
+                        {activeAgent.last_seen
+                          ? fullTime(activeAgent.last_seen)
+                          : bi("尚未上报首次心跳", "No heartbeat recorded")}
+                      </span>
+                    </div>
 
-                    <section className="cx-spec-card">
-                      <div className="cx-spec-card-head">
-                        <h3>
-                          <span>{bi("自动匹配的集群", "Auto-Matched Clusters")}</span>
-                          <span className="cx-card-cnt num">{activeAgentClusters.length}</span>
-                        </h3>
+                    <div className="ec-kpi-card">
+                      <div className="ec-kpi-top">
+                        <span className="ec-kpi-label">{bi("执行权限边界", "Execution Guardrail")}</span>
                       </div>
-                      <div className="ec-scope-body">
-                        <p className="ec-scope-hint">
-                          {bi(
-                            "1 台主机仅需接入 1 次目标机 Agent；任意集群的节点列表包含此 IP 时，将在集群「自动化 → 方式 B」中自动识别并复用。",
-                            "Enroll each host once; any cluster referencing this IP automatically matches and reuses this Agent in Automation → Mode B.",
-                          )}
-                        </p>
-                        <div className="ec-chip-wrap">
-                          {activeAgentClusters.length === 0 ? (
-                            <span style={{ fontSize: 12, color: "var(--faint)" }}>
+                      <div className="ec-kpi-val">
+                        <b>
+                          {activeAgent.allow_mutating
+                            ? bi("读写就绪", "Read & Write")
+                            : bi("仅只读探针", "Read-Only")}
+                        </b>
+                      </div>
+                      <span className={`ec-kpi-sub ${activeAgent.allow_mutating ? "is-ok" : ""}`}>
+                        {activeAgent.allow_mutating
+                          ? bi("允许探针、变更执行与回滚", "Probes, mutations & rollbacks allowed")
+                          : bi("仅放行 100% 只读采集命令", "Strictly 100% read-only probes")}
+                      </span>
+                    </div>
+
+                    <div className="ec-kpi-card">
+                      <div className="ec-kpi-top">
+                        <span className="ec-kpi-label">{bi("自动匹配集群", "Matched Clusters")}</span>
+                      </div>
+                      <div className="ec-kpi-val num">
+                        <b>{activeAgentClusters.length}</b>
+                        <span className="ec-kpi-unit">{bi("个集群", "clusters")}</span>
+                      </div>
+                      <span className="ec-kpi-sub">
+                        {bi("按主机 IP 自动关联并跨集群复用", "Auto-discovered by host IP")}
+                      </span>
+                    </div>
+
+                    <div className="ec-kpi-card">
+                      <div className="ec-kpi-top">
+                        <span className="ec-kpi-label">{bi("版本与通道", "Version & Transport")}</span>
+                      </div>
+                      <div className="ec-kpi-val">
+                        <b className="mono">
+                          {activeAgent.version ? `v${activeAgent.version}` : bi("待上线", "Pending")}
+                        </b>
+                      </div>
+                      <span className="ec-kpi-sub">
+                        {bi("HTTPS 主动外连 · 无需 SSH 密码", "Outbound HTTPS · Passwordless")}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Full-Width Dual-Column Workspace */}
+                  <div className="ec-detail-grid">
+                    <div className="ec-detail-main">
+                      {/* Permissions Card */}
+                      <section className="ec-sec">
+                        <div className="ec-sec-head">
+                          <div>
+                            <h2 className="ec-sec-title">
+                              {bi("执行权限与安全边界", "Permissions & Guardrails")}
+                            </h2>
+                            <p className="ec-sec-sub">
                               {bi(
-                                `暂未匹配到已有集群；纳管或交付包含 ${activeAgent.ip} 的集群后将自动关联。`,
-                                `No clusters reference ${activeAgent.ip} yet; it will associate automatically once a cluster includes this IP.`,
+                                "目标机 Agent 通过 HTTPS 主动外连平台拉取已授权步骤，可随时按安全策略切换只读或可写模式。",
+                                "Target Agent polls authorized steps over outbound HTTPS. Toggle read-only vs. mutating policy anytime.",
                               )}
-                            </span>
-                          ) : (
-                            activeAgentClusters.map((cid) => (
-                              <button
-                                key={cid}
-                                type="button"
-                                className="ec-cluster-link mono"
-                                onClick={() =>
-                                  go({ name: "deliveries", id: cid, tab: "automation" })
-                                }
-                              >
-                                <span>{cid}</span>
-                                <IconRight />
-                              </button>
-                            ))
-                          )}
+                            </p>
+                          </div>
+                          <span className="ec-sec-badge">
+                            {activeAgent.allow_mutating ? bi("读写模式", "Read / Write") : bi("只读模式", "Read-Only")}
+                          </span>
                         </div>
-                      </div>
-                    </section>
 
-                    {!isRevoked && !activeAgent.online && (
-                      <div className="ec-diag-bar">
-                        <span>
-                          {bi(
-                            "目标机 Agent 暂未上线？检查 systemd 服务状态、HTTPS 连通性或让 AI 快速排查。",
-                            "Target Agent offline? Inspect systemd status, HTTPS reachability, or ask AI to troubleshoot.",
+                        <div className="ec-surface-card">
+                          <div className="ec-cap-item">
+                            <div
+                              className={`ec-cap-ic ${activeAgent.allow_mutating ? "is-on" : ""}`}
+                              aria-hidden
+                            >
+                              {activeAgent.allow_mutating ? <IconThunderbolt /> : <IconSafe />}
+                            </div>
+                            <div className="ec-cap-body">
+                              <div className="ec-cap-title-row">
+                                <b>{bi("允许执行变更写操作", "Allow Mutating Steps")}</b>
+                                <span
+                                  className={`ec-cap-state ${
+                                    activeAgent.allow_mutating ? "is-ok" : ""
+                                  }`}
+                                >
+                                  {activeAgent.allow_mutating
+                                    ? bi("已允许", "Allowed")
+                                    : bi("仅只读", "Read-Only")}
+                                </span>
+                              </div>
+                              <p>
+                                {bi(
+                                  "关闭后该 Agent 仅放行 100% 只读基线与演练前探针，拒绝任何写操作与回滚命令。",
+                                  "When off, this agent only accepts 100% read-only probes and blocks mutating commands.",
+                                )}
+                              </p>
+                            </div>
+                            <Switch
+                              size="small"
+                              checked={Boolean(activeAgent.allow_mutating)}
+                              loading={updatingAgent === activeAgent.id}
+                              disabled={!canManage || isRevoked}
+                              onChange={(v) =>
+                                void updateGlobalAgent(activeAgent, {
+                                  action: "update",
+                                  allow_mutating: v,
+                                })
+                              }
+                            />
+                          </div>
+                        </div>
+                      </section>
+
+                      {/* Auto-Matched Clusters */}
+                      <section className="ec-sec">
+                        <div className="ec-sec-head">
+                          <div>
+                            <h2 className="ec-sec-title">
+                              {bi("自动匹配的集群", "Auto-Matched Clusters")}
+                            </h2>
+                            <p className="ec-sec-sub">
+                              {bi(
+                                "1 台主机仅需接入 1 次目标机 Agent；任意集群的节点列表包含此 IP 时，将在集群「自动化 → 方式 B」中自动识别并复用。",
+                                "Enroll each host once; any cluster referencing this IP automatically matches and reuses this Agent in Automation → Mode B.",
+                              )}
+                            </p>
+                          </div>
+                          <span className="ec-sec-badge num">{activeAgentClusters.length}</span>
+                        </div>
+
+                        <div className="ec-surface-card">
+                          <div className="ec-scope-block">
+                            {activeAgentClusters.length === 0 ? (
+                              <p className="ec-scope-hint">
+                                {bi(
+                                  `暂未匹配到已有集群；纳管或交付包含 ${activeAgent.ip} 的集群后将自动关联。`,
+                                  `No clusters reference ${activeAgent.ip} yet; it will associate automatically once a cluster includes this IP.`,
+                                )}
+                              </p>
+                            ) : (
+                              <div className="ec-cluster-grid">
+                                {activeAgentClusters.map((cid) => (
+                                  <button
+                                    key={cid}
+                                    type="button"
+                                    className="ec-cluster-card"
+                                    onClick={() =>
+                                      go({ name: "deliveries", id: cid, tab: "automation" })
+                                    }
+                                  >
+                                    <div className="ec-cluster-card-l">
+                                      <span className="ec-cluster-ic" aria-hidden>
+                                        <IconStorage />
+                                      </span>
+                                      <div className="ec-cluster-card-txt">
+                                        <b className="mono">{cid}</b>
+                                        <small>{bi("打开集群自动化与演练", "Open cluster automation")}</small>
+                                      </div>
+                                    </div>
+                                    <IconRight className="ec-cluster-card-arrow" />
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </section>
+
+                      {!isRevoked && !activeAgent.online && (
+                        <div className="ec-diag-bar">
+                          <span>
+                            {bi(
+                              "目标机 Agent 暂未上线？检查 systemd 服务状态、HTTPS 连通性或让 AI 快速排查。",
+                              "Target Agent offline? Inspect systemd status, HTTPS reachability, or ask AI to troubleshoot.",
+                            )}
+                          </span>
+                          <AIHelpButton
+                            variant="pill"
+                            topic={`target-agent-offline-${activeAgent.id}`}
+                            title={bi(`排查目标机「${activeAgent.host}」Agent 未上线`, `Troubleshoot "${activeAgent.host}"`)}
+                            page={bi("执行中心 · 目标机 Agent", "Execution Center · Target Agent")}
+                            summary={bi(
+                              `目标机 ${activeAgent.host} (${activeAgent.ip})，Agent ID=${activeAgent.id}，上次心跳=${activeAgent.last_seen || "无"}`,
+                              `Target ${activeAgent.host} (${activeAgent.ip}), ID=${activeAgent.id}, lastSeen=${activeAgent.last_seen || "none"}`,
+                            )}
+                            prompt={bi(
+                              `目标机直连 Agent「${activeAgent.host}」(${activeAgent.ip}) 当前未上线，服务名为 ${agentSvc}，请给出最快排查日志和网络连通的命令。`,
+                              `Direct Target Agent "${activeAgent.host}" (${activeAgent.ip}, service ${agentSvc}) is offline. Give the fastest diagnostic commands.`,
+                            )}
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Right Sticky Inspector Rail */}
+                    <aside className="ec-detail-side">
+                      <section className="ec-side-card">
+                        <div className="ec-side-card-head">
+                          <h3>{bi("Agent 档案与连接信息", "Agent Profile & Connection")}</h3>
+                        </div>
+                        <dl className="ec-facts">
+                          <div>
+                            <dt>{bi("Agent 标识", "Agent ID")}</dt>
+                            <dd>
+                              <button
+                                type="button"
+                                className="ec-fact-copy mono"
+                                onClick={() => {
+                                  copy(activeAgent.id);
+                                  Message.success(bi("已复制 Agent ID", "Agent ID copied"));
+                                }}
+                              >
+                                <span>{activeAgent.id}</span>
+                                <IconCopy />
+                              </button>
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>{bi("目标主机 IP", "Target IP")}</dt>
+                            <dd>
+                              <button
+                                type="button"
+                                className="ec-fact-copy mono"
+                                onClick={() => {
+                                  copy(activeAgent.ip);
+                                  Message.success(bi("已复制目标主机 IP", "Target IP copied"));
+                                }}
+                              >
+                                <span>{activeAgent.ip}</span>
+                                <IconCopy />
+                              </button>
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>{bi("接入模式", "Transport")}</dt>
+                            <dd>{bi("HTTPS 主动外连（免 SSH）", "Outbound HTTPS")}</dd>
+                          </div>
+                          <div>
+                            <dt>{bi("签发时间", "Created")}</dt>
+                            <dd className="num">
+                              {activeAgent.created ? fullTime(activeAgent.created) : "—"}
+                            </dd>
+                          </div>
+                          {activeAgent.expires && (
+                            <div>
+                              <dt>{bi("凭证有效期", "Expires")}</dt>
+                              <dd className="num">{fullTime(activeAgent.expires)}</dd>
+                            </div>
                           )}
-                        </span>
-                        <AIHelpButton
-                          variant="pill"
-                          topic={`target-agent-offline-${activeAgent.id}`}
-                          title={bi(`排查目标机「${activeAgent.host}」Agent 未上线`, `Troubleshoot "${activeAgent.host}"`)}
-                          page={bi("执行中心 · 目标机 Agent", "Execution Center · Target Agent")}
-                          summary={bi(
-                            `目标机 ${activeAgent.host} (${activeAgent.ip})，Agent ID=${activeAgent.id}，上次心跳=${activeAgent.last_seen || "无"}`,
-                            `Target ${activeAgent.host} (${activeAgent.ip}), ID=${activeAgent.id}, lastSeen=${activeAgent.last_seen || "none"}`,
+                          <div>
+                            <dt>{bi("最近心跳", "Last Heartbeat")}</dt>
+                            <dd className="num">
+                              {activeAgent.last_seen ? fullTime(activeAgent.last_seen) : "—"}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>{bi("systemd 服务", "Systemd Unit")}</dt>
+                            <dd>
+                              <code className="mono">{agentSvc}</code>
+                            </dd>
+                          </div>
+                        </dl>
+                      </section>
+
+                      <section className="ec-side-card">
+                        <div className="ec-side-card-head">
+                          <h3>{bi("常用运维命令", "Quick Ops Commands")}</h3>
+                        </div>
+                        <div className="ec-side-ops-body">
+                          <div className="ec-side-cmd">
+                            <div className="ec-side-cmd-head">
+                              <span>{bi("服务状态与近期日志", "Service Status & Logs")}</span>
+                              <button
+                                type="button"
+                                className="ec-side-cmd-copy"
+                                onClick={() => {
+                                  copy(agentStatusCmd);
+                                  Message.success(bi("已复制命令", "Command copied"));
+                                }}
+                              >
+                                <IconCopy />
+                                <span>{bi("复制", "Copy")}</span>
+                              </button>
+                            </div>
+                            <pre className="ec-side-cmd-pre mono">{agentStatusCmd}</pre>
+                          </div>
+
+                          {canManage && isRevoked && (
+                            <Button
+                              size="small"
+                              type="primary"
+                              long
+                              icon={<IconPlus />}
+                              onClick={() => reEnrollTarget(activeAgent)}
+                            >
+                              {bi("为此主机重新签发 Agent", "Re-Enroll This Host")}
+                            </Button>
                           )}
-                          prompt={bi(
-                            `目标机直连 Agent「${activeAgent.host}」(${activeAgent.ip}) 当前未上线，服务名为 middleware-target-agent-${activeAgent.id}，请给出最快排查日志和网络连通的命令。`,
-                            `Direct Target Agent "${activeAgent.host}" (${activeAgent.ip}, service middleware-target-agent-${activeAgent.id}) is offline. Give the fastest diagnostic commands.`,
-                          )}
-                        />
-                      </div>
-                    )}
+
+                          <Button
+                            size="small"
+                            type="outline"
+                            long
+                            icon={<IconBook />}
+                            onClick={() => setGuide("maintain")}
+                          >
+                            {bi("打开维护与故障排查手册", "Open Maintenance Guide")}
+                          </Button>
+                        </div>
+                      </section>
+                    </aside>
                   </div>
                 </article>
               );

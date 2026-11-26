@@ -1013,46 +1013,6 @@ button.rh-ledger-card:focus-visible {
   padding-right: 14px;
 }
 
-/* Reserve clear workspace gutter when the floating AI dock is open so Stage 3 step controls stay uncovered */
-body:has(.ad-win:not(.hidden):not(.min):not(.big)) .rh-work-col {
-  padding-bottom: 120px;
-}
-
-@media (min-width: 1360px) {
-  body:has(.ad-win:not(.hidden):not(.min):not(.big))
-    .rh-stage-grid:not(.with-aside)
-    .rh-work-col {
-    padding-right: 432px;
-  }
-  body:has(.ad-win:not(.hidden):not(.min):not(.big))
-    .rh-stage-grid.with-aside
-    .rh-work-col {
-    padding-right: 44px;
-  }
-  body:has(.ad-win:not(.hidden):not(.min):not(.big))
-    .rh-stage-grid:not(.with-aside)
-    .rh-gate {
-    margin-right: 0;
-    padding-right: 8px;
-  }
-}
-
-@media (min-width: 1120px) and (max-width: 1359px) {
-  body:has(.ad-win:not(.hidden):not(.min):not(.big))
-    .rh-workbench.is-focused
-    .rh-stage-grid:not(.with-aside):not(.with-ledger)
-    .rh-work-col {
-    padding-right: 432px;
-  }
-  body:has(.ad-win:not(.hidden):not(.min):not(.big))
-    .rh-workbench.is-focused
-    .rh-stage-grid:not(.with-aside):not(.with-ledger)
-    .rh-gate {
-    margin-right: 0;
-    padding-right: 8px;
-  }
-}
-
 /* Right Collapsible Delivery Baseline: Single-property monotonic width glide (zero bounce) */
 .rh-aside-shell {
   flex: 0 0 auto;

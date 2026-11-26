@@ -9,7 +9,6 @@ argument_specs:
         description: 监听网卡地址（默认 0.0.0.0）
       nginx_listen_port:
         type: int
-        required: true
         default: 8080
         description: 对外监听端口
       nginx_worker_processes:

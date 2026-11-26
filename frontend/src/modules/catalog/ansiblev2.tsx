@@ -235,6 +235,8 @@ const varSourceLabel = (s?: string) => {
       return "group_vars/all.yml";
     case "manifest":
       return "delivery-studio.yaml";
+    case "playbook_vars":
+      return "playbook vars";
     default:
       return s || "ansible";
   }
@@ -830,6 +832,11 @@ function OverviewTab({ detail }: { detail: AnsibleV2Detail }) {
   useLang();
   const r = detail.report;
   const m = r.manifest;
+  const steps = r.steps || [];
+  const vars = r.vars || [];
+  const packages = r.packages || [];
+  const problems = r.problems || [];
+  const roles = r.roles || [];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14, paddingTop: 12 }}>
@@ -869,10 +876,10 @@ function OverviewTab({ detail }: { detail: AnsibleV2Detail }) {
               </div>
             )}
           </div>
-          {r.roles && r.roles.length > 0 && (
+          {roles.length > 0 && (
             <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
               <span className="av2-card-sub">{bi("内置 Roles：", "Included Roles:")}</span>
-              {r.roles.map((rl) => (
+              {roles.map((rl) => (
                 <span key={rl} className="av2-slug">
                   roles/{rl}
                 </span>
@@ -930,11 +937,11 @@ function OverviewTab({ detail }: { detail: AnsibleV2Detail }) {
             {bi("自动解析的 Ansible 执行步骤", "Auto-Parsed Ansible Play Steps")}
           </h3>
           <span className="av2-card-sub">
-            {r.steps.length} {bi("个步骤（支持 --check --diff）", "steps")}
+            {steps.length} {bi("个步骤（支持 --check --diff）", "steps")}
           </span>
         </div>
         <div className="av2-steps">
-          {r.steps.map((st) => (
+          {steps.map((st) => (
             <div key={st.id} className="av2-step">
               <div className="av2-step-main">
                 <div className="av2-step-title">
@@ -963,10 +970,10 @@ function OverviewTab({ detail }: { detail: AnsibleV2Detail }) {
             {bi("原生 Ansible 变量契约", "Native Ansible Variables")}
           </h3>
           <span className="av2-card-sub">
-            {r.vars.length} {bi("个自动提取变量", "discovered variables")}
+            {vars.length} {bi("个自动提取变量", "discovered variables")}
           </span>
         </div>
-        {r.vars.length === 0 ? (
+        {vars.length === 0 ? (
           <div className="av2-card-sub">
             {bi(
               "未在 meta/argument_specs.yml 或 defaults/main.yml 中发现声明变量，交付时仍可按需传入自定义变量。",
@@ -986,7 +993,7 @@ function OverviewTab({ detail }: { detail: AnsibleV2Detail }) {
                 </tr>
               </thead>
               <tbody>
-                {r.vars.map((v) => (
+                {vars.map((v) => (
                   <tr key={v.key}>
                     <td>
                       <div style={{ fontFamily: "var(--mono)", fontWeight: 600 }}>
@@ -1035,10 +1042,10 @@ function OverviewTab({ detail }: { detail: AnsibleV2Detail }) {
               {bi("静态扫描的 OS 离线软件包", "Auto-Detected OS Packages")}
             </h3>
             <span className="av2-card-sub">
-              {r.packages.length} {bi("个包", "pkgs")}
+              {packages.length} {bi("个包", "pkgs")}
             </span>
           </div>
-          {r.packages.length === 0 ? (
+          {packages.length === 0 ? (
             <div className="av2-card-sub">
               {bi(
                 "未静态扫描到 apt/yum/dnf/package 安装项（或由外部变量动态决定）。",
@@ -1047,7 +1054,7 @@ function OverviewTab({ detail }: { detail: AnsibleV2Detail }) {
             </div>
           ) : (
             <div className="av2-pkg-wrap">
-              {r.packages.map((p) => (
+              {packages.map((p) => (
                 <span key={p.name} className="av2-pkg-tag">
                   <span>{p.name}</span>
                   {p.detected_from && (
@@ -1068,7 +1075,7 @@ function OverviewTab({ detail }: { detail: AnsibleV2Detail }) {
               {r.valid ? bi("通过", "Valid") : bi("需修正", "Errors")}
             </span>
           </div>
-          {r.problems.length === 0 ? (
+          {problems.length === 0 ? (
             <div className="av2-problem-ok">
               <IconCheck />
               {bi(
@@ -1078,7 +1085,7 @@ function OverviewTab({ detail }: { detail: AnsibleV2Detail }) {
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {r.problems.map((p, i) => (
+              {problems.map((p, i) => (
                 <div key={i} className={`av2-problem is-${p.severity}`}>
                   <IconExclamationCircle style={{ marginTop: 2, flexShrink: 0 }} />
                   <div>
@@ -1346,17 +1353,43 @@ function SourceEditorTab({
 
 function buildInitialHosts(manifest: Manifest, scheme?: SchemeSpec): RenderHost[] {
   const groups = manifest.groups || [];
+  const groupByName = new Map(groups.map((g) => [g.name, g]));
+  const prefix = manifest.name.split("-")[0] || "node";
   if (scheme?.group_counts && Object.keys(scheme.group_counts).length > 0) {
     const out: RenderHost[] = [];
+    const entries = Object.entries(scheme.group_counts).filter(([, c]) => c > 0);
+    // Place exclusive groups first (or all groups if none marked exclusive), then co-locate non-exclusive groups (e.g. sentinel) onto existing nodes.
+    const hasAnyExclusive = entries.some(([g]) => groupByName.get(g)?.exclusive);
+    const primaryEntries = hasAnyExclusive
+      ? entries.filter(([g]) => groupByName.get(g)?.exclusive)
+      : entries;
+    const colocateEntries = hasAnyExclusive
+      ? entries.filter(([g]) => !groupByName.get(g)?.exclusive)
+      : [];
+
     let seq = 1;
-    Object.entries(scheme.group_counts).forEach(([grp, count]) => {
-      for (let i = 0; i < Math.max(0, count); i++) {
+    primaryEntries.forEach(([grp, count]) => {
+      for (let i = 0; i < count; i++) {
         out.push({
-          name: `${manifest.name.split("-")[0] || "node"}-${String(seq).padStart(2, "0")}`,
+          name: `${prefix}-${String(seq).padStart(2, "0")}`,
           ip: `10.10.0.${10 + seq}`,
           groups: [grp],
         });
         seq++;
+      }
+    });
+    colocateEntries.forEach(([grp, count]) => {
+      for (let i = 0; i < count; i++) {
+        if (i < out.length) {
+          if (!out[i].groups.includes(grp)) out[i].groups.push(grp);
+        } else {
+          out.push({
+            name: `${prefix}-${String(seq).padStart(2, "0")}`,
+            ip: `10.10.0.${10 + seq}`,
+            groups: [grp],
+          });
+          seq++;
+        }
       }
     });
     if (out.length > 0) return out;
@@ -1364,7 +1397,7 @@ function buildInitialHosts(manifest: Manifest, scheme?: SchemeSpec): RenderHost[
   const firstGroup = groups[0]?.name || "targets";
   const count = Math.max(1, groups[0]?.default_count || groups[0]?.min || 1);
   return Array.from({ length: count }, (_, idx) => ({
-    name: `${manifest.name.split("-")[0] || "node"}-${String(idx + 1).padStart(2, "0")}`,
+    name: `${prefix}-${String(idx + 1).padStart(2, "0")}`,
     ip: `10.10.0.${11 + idx}`,
     groups: [firstGroup],
   }));
@@ -1399,7 +1432,7 @@ function DeliverTab({ detail }: { detail: AnsibleV2Detail }) {
     buildInitialHosts(m, schemes[0]),
   );
   const [vars, setVars] = useState<Record<string, unknown>>(() =>
-    buildInitialVars(detail.report.vars, schemes[0]),
+    buildInitialVars(detail.report.vars || [], schemes[0]),
   );
 
   const [preview, setPreview] = useState<RenderResult | null>(null);
@@ -1413,7 +1446,7 @@ function DeliverTab({ detail }: { detail: AnsibleV2Detail }) {
   const applyScheme = (sc: SchemeSpec) => {
     setActiveScheme(sc.id);
     setHosts(buildInitialHosts(m, sc));
-    setVars(buildInitialVars(detail.report.vars, sc));
+    setVars(buildInitialVars(detail.report.vars || [], sc));
   };
 
   const runPreview = useCallback(async () => {
@@ -1697,16 +1730,16 @@ function DeliverTab({ detail }: { detail: AnsibleV2Detail }) {
                 {bi("标准 Ansible 变量 (group_vars/all.yml)", "Ansible Variables")}
               </h3>
               <span className="av2-card-sub">
-                {detail.report.vars.length} {bi("项", "vars")}
+                {(detail.report.vars || []).length} {bi("项", "vars")}
               </span>
             </div>
-            {detail.report.vars.length === 0 ? (
+            {(detail.report.vars || []).length === 0 ? (
               <div className="av2-card-sub">
                 {bi("该组件无需额外变量，可直接生成标准交付。", "No configurable variables needed.")}
               </div>
             ) : (
               <div className="av2-vars-form">
-                {detail.report.vars.map((v) => {
+                {(detail.report.vars || []).map((v) => {
                   const val = vars[v.key];
                   const label = bi(v.label || v.key, v.label_en || v.label || v.key);
                   const setVal = (nv: unknown) =>
@@ -1742,14 +1775,34 @@ function DeliverTab({ detail }: { detail: AnsibleV2Detail }) {
                         <InputNumber
                           size="small"
                           value={
-                            typeof val === "number"
-                              ? val
-                              : Number(val || 0)
+                            val === undefined || val === null || val === ""
+                              ? undefined
+                              : Number(val)
                           }
-                          min={v.type === "port" ? 1 : undefined}
+                          min={v.type === "port" ? 1 : 0}
                           max={v.type === "port" ? 65535 : undefined}
                           onChange={(nv) => setVal(nv)}
                           style={{ width: "100%" }}
+                        />
+                      ) : v.type === "list" ? (
+                        <Input.TextArea
+                          autoSize={{ minRows: 1, maxRows: 4 }}
+                          style={{ fontSize: 12.5, fontFamily: "var(--mono)" }}
+                          placeholder={bi("每行一项（如 10.10.0.11:5432）", "One item per line")}
+                          value={
+                            Array.isArray(val)
+                              ? val.map((x) => String(x)).join("\n")
+                              : val === undefined || val === null
+                                ? ""
+                                : String(val)
+                          }
+                          onChange={(nv) => {
+                            const items = nv
+                              .split(/\r?\n/)
+                              .map((s) => s.trim())
+                              .filter(Boolean);
+                            setVal(items);
+                          }}
                         />
                       ) : v.type === "secret" ? (
                         <Input.Password
@@ -1789,10 +1842,10 @@ function DeliverTab({ detail }: { detail: AnsibleV2Detail }) {
               <div className="av2-preview-tab-list">
                 {(
                   [
-                    ["inventory", "inventory/hosts.yml"],
-                    ["vars", "group_vars/all.yml"],
+                    ["inventory", "hosts.yml"],
+                    ["vars", "all.yml"],
                     ["cfg", "ansible.cfg"],
-                    ["steps", bi("执行命令与清单", "Commands")],
+                    ["steps", bi("命令清单", "Commands")],
                   ] as const
                 ).map(([k, lbl]) => (
                   <button
@@ -2256,18 +2309,18 @@ function AnsibleV2ImportModal({
               <span className="av2-stat-lbl">{bi("Inventory 分组", "Groups")}</span>
             </div>
             <div className="av2-stat-tile">
-              <span className="av2-stat-num">{inspected.report.vars.length}</span>
+              <span className="av2-stat-num">{(inspected.report.vars || []).length}</span>
               <span className="av2-stat-lbl">{bi("提取变量", "Variables")}</span>
             </div>
             <div className="av2-stat-tile">
-              <span className="av2-stat-num">{inspected.report.packages.length}</span>
+              <span className="av2-stat-num">{(inspected.report.packages || []).length}</span>
               <span className="av2-stat-lbl">{bi("探测 OS 包", "OS Packages")}</span>
             </div>
           </div>
 
-          {inspected.report.problems.length > 0 && (
+          {(inspected.report.problems || []).length > 0 && (
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {inspected.report.problems.map((p, i) => (
+              {(inspected.report.problems || []).map((p, i) => (
                 <div key={i} className={`av2-problem is-${p.severity}`}>
                   <IconExclamationCircle style={{ marginTop: 2, flexShrink: 0 }} />
                   <span>

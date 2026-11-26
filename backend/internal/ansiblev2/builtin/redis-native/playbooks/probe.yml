@@ -10,8 +10,8 @@
       register: redis_ver
       changed_when: false
 
-    - name: 采集实时主从角色与内存配置
-      ansible.builtin.command: "redis-cli -p {{ redis_port }} {% if redis_password %}-a {{ redis_password }} --no-auth-warning{% endif %} INFO server replication memory"
+    - name: 采集实时主从角色与复制状态
+      ansible.builtin.command: "redis-cli -p {{ redis_port }} {% if redis_password %}-a {{ redis_password }} --no-auth-warning{% endif %} INFO replication"
       register: redis_info
       changed_when: false
       failed_when: false

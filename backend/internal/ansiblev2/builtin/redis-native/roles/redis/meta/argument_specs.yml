@@ -9,7 +9,6 @@ argument_specs:
         description: Redis 实例绑定监听地址
       redis_port:
         type: int
-        required: true
         default: 6379
         description: Redis 服务端口
       redis_sentinel_port:

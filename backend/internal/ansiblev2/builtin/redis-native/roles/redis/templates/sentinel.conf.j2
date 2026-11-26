@@ -1,4 +1,6 @@
 port {{ redis_sentinel_port }}
+daemonize no
+supervised auto
 dir /tmp
 {% set primary_host = hostvars[groups['primary'][0]]['ansible_host'] | default(groups['primary'][0]) %}
 sentinel monitor {{ redis_sentinel_master_name }} {{ primary_host }} {{ redis_port }} {{ redis_sentinel_quorum }}

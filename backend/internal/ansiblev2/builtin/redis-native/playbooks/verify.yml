@@ -15,3 +15,19 @@
       ansible.builtin.command: "redis-cli -p {{ redis_port }} {% if redis_password %}-a {{ redis_password }} --no-auth-warning{% endif %} INFO replication"
       register: redis_repl
       changed_when: false
+      failed_when: >
+        (inventory_hostname in (groups['primary'] | default([])) and 'role:master' not in redis_repl.stdout)
+        or (inventory_hostname in (groups['replica'] | default([])) and 'master_link_status:up' not in redis_repl.stdout)
+
+- name: 校验 Redis Sentinel 哨兵仲裁状态
+  hosts: sentinel
+  become: true
+  tags:
+    - verify
+    - sentinel
+  tasks:
+    - name: 查询 Sentinel 识别的主节点地址
+      ansible.builtin.command: "redis-cli -p {{ redis_sentinel_port | default(26379) }} SENTINEL get-master-addr-by-name {{ redis_sentinel_master_name | default('mymaster') }}"
+      register: sentinel_master
+      changed_when: false
+      failed_when: sentinel_master.rc != 0 or (sentinel_master.stdout | trim) == ''

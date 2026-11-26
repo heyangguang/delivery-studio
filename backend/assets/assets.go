@@ -2,7 +2,7 @@ package assets
 
 import "embed"
 
-//go:embed store_assets/*
+//go:embed all:store_assets
 var StoreAssets embed.FS
 
 //go:embed ai_skills/*.md

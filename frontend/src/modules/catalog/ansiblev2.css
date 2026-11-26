@@ -101,7 +101,7 @@
 
 /* Detail Container */
 .av2-detail {
-  padding: 20px 28px 40px;
+  padding: 20px 28px 88px;
   max-width: 1360px;
   margin: 0 auto;
   display: flex;
@@ -775,18 +775,20 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 8px 12px;
+  gap: 6px;
+  padding: 7px 10px;
   background: var(--term-head);
   border-bottom: 1px solid var(--term-line);
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 .av2-preview-tab-list {
   display: flex;
   align-items: center;
-  gap: 4px;
-  flex-wrap: wrap;
+  gap: 3px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  min-width: 0;
 }
 
 .av2-ptab {

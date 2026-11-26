@@ -812,6 +812,26 @@ func (s *storeServer) deliverAnsibleV2(w http.ResponseWriter, r *http.Request, s
 		"generated_at": time.Now().UTC().Format(time.RFC3339),
 	}, "", "  ")
 
+	var schemeSummary *mwpack.SchemeSummary
+	if strings.TrimSpace(req.Scheme) != "" {
+		for _, sc := range rep.Manifest.Schemes {
+			if sc.ID == req.Scheme {
+				schemeSummary = &mwpack.SchemeSummary{
+					ID:    sc.ID,
+					Name:  firstNonEmptyStr(sc.Title, sc.ID),
+					Nodes: len(depHosts),
+				}
+				break
+			}
+		}
+	}
+	if schemeSummary == nil {
+		schemeSummary = &mwpack.SchemeSummary{
+			Name:  rep.Manifest.Title,
+			Nodes: len(depHosts),
+		}
+	}
+
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	job := storeJob{
 		ID:           jobID,
@@ -821,6 +841,7 @@ func (s *storeServer) deliverAnsibleV2(w http.ResponseWriter, r *http.Request, s
 		Version:      rep.Manifest.Version,
 		ClusterID:    res.ClusterID,
 		DeliveryMode: res.DeliveryMode,
+		Scheme:       schemeSummary,
 		State:        "succeeded",
 		Stage:        "已生成原生 Ansible 2.0 交付包",
 		Created:      now,

@@ -1,5 +1,7 @@
 bind {{ redis_bind_address }}
 port {{ redis_port }}
+daemonize no
+supervised auto
 protected-mode yes
 dir {{ redis_data_dir }}
 maxmemory {{ redis_maxmemory }}

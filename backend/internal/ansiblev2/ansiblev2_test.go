@@ -94,7 +94,6 @@ func TestInspectAllFourMarketAnsibleFormats(t *testing.T) {
     options:
       kafka_port:
         type: int
-        required: true
         default: 9092
         description: Broker listen port
       kafka_mode:

@@ -141,6 +141,29 @@ func Validate(files map[string][]byte, m Manifest) []Problem {
 				Message:  "检测到 v1 私有变量前缀（mw.params / mw.roles），2.0 建议改为标准 Ansible 变量以实现零魔改独立运行",
 			})
 		}
+		if strings.ToLower(path.Base(p)) == "argument_specs.yml" || strings.ToLower(path.Base(p)) == "argument_specs.yaml" {
+			var specDoc struct {
+				ArgumentSpecs map[string]struct {
+					Options map[string]struct {
+						Required bool `yaml:"required"`
+						Default  any  `yaml:"default"`
+					} `yaml:"options"`
+				} `yaml:"argument_specs"`
+			}
+			if yaml.Unmarshal(files[p], &specDoc) == nil {
+				for ep, spec := range specDoc.ArgumentSpecs {
+					for optKey, opt := range spec.Options {
+						if opt.Required && opt.Default != nil {
+							out = append(out, Problem{
+								Severity: "error",
+								Path:     p,
+								Message:  fmt.Sprintf("argument_specs.%s.options.%s 同时声明了 required: true 与 default（ansible-core 2.11+ 互斥报错），请移除其一", ep, optKey),
+							})
+						}
+					}
+				}
+			}
+		}
 		if path.Base(p) == "main.yml" && strings.Contains(p, "/tasks/") {
 			if strings.Contains(body, "BEGIN RSA PRIVATE KEY") || strings.Contains(body, "BEGIN PRIVATE KEY") {
 				out = append(out, Problem{

@@ -241,6 +241,8 @@ ssh_args = -o ControlMaster=auto -o ControlPersist=60s
 	}
 	outFiles["ansible.cfg"] = []byte(ansibleCfg)
 	outFiles["inventory/hosts.yml"] = invBytes
+	// Ansible loads inventory-adjacent group_vars/host_vars for ALL playbooks regardless of subdirectory (e.g. playbooks/deploy.yml)
+	outFiles["inventory/group_vars/all.yml"] = gvBytes
 	outFiles["group_vars/all.yml"] = gvBytes
 	outFiles["callback_plugins/delivery_studio.py"] = []byte(studioCallbackPluginPy)
 
@@ -248,7 +250,9 @@ ssh_args = -o ControlMaster=auto -o ControlPersist=60s
 		if len(h.Vars) > 0 && strings.TrimSpace(h.Name) != "" {
 			hv, herr := marshalYAMLDoc("# Host-specific Ansible variables for "+h.Name, h.Vars)
 			if herr == nil {
-				outFiles["host_vars/"+strings.TrimSpace(h.Name)+".yml"] = hv
+				hn := strings.TrimSpace(h.Name)
+				outFiles["inventory/host_vars/"+hn+".yml"] = hv
+				outFiles["host_vars/"+hn+".yml"] = hv
 			}
 		}
 	}

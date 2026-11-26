@@ -13,16 +13,23 @@
   tags:
     - sentinel
   tasks:
+    - name: 安装 Redis Sentinel 软件包
+      ansible.builtin.package:
+        name: redis-sentinel
+        state: present
+      when: ansible_facts['os_family'] == 'Debian'
+
     - name: 写入 Sentinel 配置文件
       ansible.builtin.template:
         src: ../roles/redis/templates/sentinel.conf.j2
         dest: /etc/redis/sentinel.conf
         owner: redis
         group: redis
-        mode: "0640"
+        mode: "0660"
+      register: sentinel_cfg
 
     - name: 启动并启用 redis-sentinel 服务
       ansible.builtin.service:
         name: redis-sentinel
-        state: started
+        state: "{{ 'restarted' if sentinel_cfg.changed else 'started' }}"
         enabled: true

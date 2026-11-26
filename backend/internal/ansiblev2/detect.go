@@ -337,6 +337,24 @@ func InspectNormalized(files map[string][]byte, kind AssetKind, hintName, source
 		}
 	}
 
+	if playbooks == nil {
+		playbooks = []string{}
+	}
+	if roles == nil {
+		roles = []string{}
+	}
+	if steps == nil {
+		steps = []PlayStep{}
+	}
+	if mergedVars == nil {
+		mergedVars = []VarSpec{}
+	}
+	if mergedPkgs == nil {
+		mergedPkgs = []PackageHint{}
+	}
+	if problems == nil {
+		problems = []Problem{}
+	}
 	return InspectionReport{
 		AssetKind:       m.AssetKind,
 		Manifest:        m,
@@ -874,6 +892,50 @@ func extractAllVars(files map[string][]byte) []VarSpec {
 				Default: m[k],
 				Source:  "group_vars",
 			})
+		}
+	}
+
+	// 4. Top-level play vars: inside playbooks (makes standalone single playbooks immediately parameterized!)
+	for _, p := range paths {
+		if !isYAML(p) || p == ManifestFileName {
+			continue
+		}
+		lp := strings.ToLower(p)
+		if strings.Contains(lp, "/tasks/") || strings.Contains(lp, "/handlers/") ||
+			strings.Contains(lp, "/defaults/") || strings.Contains(lp, "/vars/") ||
+			strings.Contains(lp, "/meta/") || strings.Contains(lp, "/group_vars/") ||
+			strings.Contains(lp, "/host_vars/") {
+			continue
+		}
+		var plays []map[string]any
+		if err := yaml.Unmarshal(files[p], &plays); err != nil {
+			continue
+		}
+		for _, play := range plays {
+			if _, hasHosts := play["hosts"]; !hasHosts {
+				continue
+			}
+			vm, ok := play["vars"].(map[string]any)
+			if !ok {
+				continue
+			}
+			keys := make([]string, 0, len(vm))
+			for k := range vm {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, k := range keys {
+				if strings.HasPrefix(k, "_") || strings.HasPrefix(k, "ansible_") {
+					continue
+				}
+				record(VarSpec{
+					Key:     k,
+					Label:   humanizeVarKey(k),
+					Type:    normalizeAnsibleType("", k, vm[k], nil),
+					Default: vm[k],
+					Source:  "playbook_vars",
+				})
+			}
 		}
 	}
 

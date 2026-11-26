@@ -22,7 +22,7 @@ func (s *storeServer) listJobs(w http.ResponseWriter, session storeSession) {
 	s.mu.Lock()
 	jobs := []storeJob{}
 	for _, j := range s.jobs {
-		if vis(j.Owner) {
+		if vis(j.Owner, j.ClusterID) {
 			jobs = append(jobs, j)
 		}
 	}
@@ -127,6 +127,10 @@ func (s *storeServer) handleJob(w http.ResponseWriter, r *http.Request, session 
 	s.mu.Unlock()
 	if !ok || !s.jobVisible(session.User, j) {
 		s.fail(w, 404, "任务不存在")
+		return
+	}
+	if r.Method != "GET" && r.Method != "HEAD" && !s.clusterCanOperate(session.User, j.Owner, j.ClusterID) {
+		s.fail(w, 403, "你对集群「"+firstNonEmptyStr(j.ClusterID, j.ID)+"」仅有只读查看权限，无法执行修改或操作")
 		return
 	}
 	mutatesExecution := len(parts) == 1 || (len(parts) > 1 && (parts[1] == "executions" || parts[1] == "sync" || parts[1] == "progress" || parts[1] == "scripts" || parts[1] == "patches" || (parts[1] == "ai" && len(parts) > 2 && (parts[2] == "proposals" || parts[2] == "resolve"))))

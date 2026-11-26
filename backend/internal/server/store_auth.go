@@ -365,7 +365,7 @@ func (s *storeServer) handleUsers(w http.ResponseWriter, r *http.Request, sessio
 		users := []map[string]any{}
 		for _, u := range rawUsers {
 			g := st.grantOf(u.Username, u.Role)
-			entry := map[string]any{"username": u.Username, "role": u.Role, "roles": g.Roles, "teams": nz(g.Teams), "deliveries": 0, "active": 0, "disabled": u.Disabled}
+			entry := map[string]any{"username": u.Username, "role": u.Role, "roles": g.Roles, "teams": nz(g.Teams), "clusters": nonNilStringMap(g.Clusters), "deliveries": 0, "active": 0, "disabled": u.Disabled}
 			if st := stats[u.Username]; st != nil {
 				entry["deliveries"], entry["active"], entry["last_delivery"] = st.Total, st.Active, st.Last
 			}
@@ -380,10 +380,11 @@ func (s *storeServer) handleUsers(w http.ResponseWriter, r *http.Request, sessio
 	}
 	var input struct {
 		Username, Role, Password string
-		Roles                    []string `json:"roles"`
-		Teams                    []string `json:"teams"`
+		Roles                    []string           `json:"roles"`
+		Teams                    []string           `json:"teams"`
+		Clusters                 *map[string]string `json:"clusters"`
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		s.fail(w, 400, "用户名或密码填得不对，请检查后再提交")
 		return
@@ -393,6 +394,14 @@ func (s *storeServer) handleUsers(w http.ResponseWriter, r *http.Request, sessio
 	}
 	input.Role = map[bool]string{true: "admin", false: "operator"}[contains(input.Roles, "sysadmin")]
 	actor := s.accessOf(session.User)
+	actorClusterLvl := s.clusterAccess(session.User)
+	actorCanOp := func(cid string) bool { return actorClusterLvl("", cid) == "operate" }
+	if input.Clusters != nil {
+		if _, msg, code := validateClusterGrantDiff(actorCanOp, nil, *input.Clusters); msg != "" {
+			s.fail(w, code, msg)
+			return
+		}
+	}
 	iamMu.Lock()
 	st := s.iamLoad()
 	iamMu.Unlock()
@@ -435,7 +444,7 @@ func (s *storeServer) handleUsers(w http.ResponseWriter, r *http.Request, sessio
 		return
 	}
 	s.mu.Unlock()
-	if msg, code := s.setGrant(actor, u.Username, u.Role, input.Roles, input.Teams); code != 200 {
+	if msg, code := s.setGrant(actor, actorCanOp, u.Username, u.Role, input.Roles, input.Teams, input.Clusters); code != 200 {
 		s.fail(w, code, "账户已创建，但角色没有保存："+msg)
 		return
 	}
@@ -467,18 +476,26 @@ func (s *storeServer) handleUser(w http.ResponseWriter, r *http.Request, session
 	}
 	if len(rest) == 1 && rest[0] == "grant" && r.Method == "PUT" {
 		var in struct {
-			Roles []string `json:"roles"`
-			Teams []string `json:"teams"`
+			Roles    []string           `json:"roles"`
+			Teams    []string           `json:"teams"`
+			Clusters *map[string]string `json:"clusters"`
 		}
-		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&in) != nil {
+		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&in) != nil {
 			s.fail(w, 400, "提交的内容有问题，请刷新页面后重试")
 			return
 		}
-		if msg, code := s.setGrant(s.accessOf(session.User), name, u.Role, in.Roles, in.Teams); code != 200 {
+		actor := s.accessOf(session.User)
+		actorClusterLvl := s.clusterAccess(session.User)
+		actorCanOp := func(cid string) bool { return actorClusterLvl("", cid) == "operate" }
+		if msg, code := s.setGrant(actor, actorCanOp, name, u.Role, in.Roles, in.Teams, in.Clusters); code != 200 {
 			s.fail(w, code, msg)
 			return
 		}
-		s.auditReq(r, "user-grant", session.User, name+" "+strings.Join(in.Roles, ","))
+		target := name + " " + strings.Join(in.Roles, ",")
+		if in.Clusters != nil && len(*in.Clusters) > 0 {
+			target += fmt.Sprintf(" (+%d clusters)", len(*in.Clusters))
+		}
+		s.auditReq(r, "user-grant", session.User, target)
 		s.writeJSON(w, 200, map[string]bool{"ok": true})
 		return
 	}
@@ -512,7 +529,7 @@ func (s *storeServer) handleUser(w http.ResponseWriter, r *http.Request, session
 			return
 		}
 		s.mu.Unlock()
-		msg, code := s.setGrant(s.accessOf(session.User), name, u.Role, []string{map[bool]string{true: "sysadmin", false: "engineer"}[*in.Role == "admin"]}, s.accessOf(name).Teams)
+		msg, code := s.setGrant(s.accessOf(session.User), nil, name, u.Role, []string{map[bool]string{true: "sysadmin", false: "engineer"}[*in.Role == "admin"]}, s.accessOf(name).Teams, nil)
 		s.mu.Lock()
 		if code != 200 {
 			s.fail(w, code, msg)

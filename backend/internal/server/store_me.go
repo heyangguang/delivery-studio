@@ -65,7 +65,7 @@ func (s *storeServer) handleMe(w http.ResponseWriter, r *http.Request, session s
 		}
 		view := s.sessionView(session)
 		s.writeJSON(w, 200, map[string]any{
-			"access":   map[string]any{"perms": held, "scope": a.Scope, "roles": view["role_names"], "teams": view["team_names"]},
+			"access":   map[string]any{"perms": held, "scope": a.Scope, "roles": view["role_names"], "teams": view["team_names"], "clusters": nonNilStringMap(a.Clusters)},
 			"username": me, "role": u.Role,
 			"skills": len(s.userSkills(me)), "mcp": len(s.loadUserMCP(me)), "kb": len(s.kbList(me)),
 			"user_mcp": st.UserMCP(), "ai": st.Enabled,

@@ -47,14 +47,18 @@ import type { Account, Session } from "../../shared/shared";
 import { go } from "../../app/router";
 import { Kbd, UnderlineTabs } from "../../design/ui";
 import {
+  ClusterGrantPicker,
+  ClustersAccessPane,
   DeletedPane,
   GrantEditor,
   RolePicker,
   RolesPane,
   TeamsPane,
+  effective,
   roleTitle,
   useIAM,
 } from "./iam";
+import type { ClusterAccessLevel } from "./iam";
 import { bi, getLang, useLang } from "../../app/i18n";
 
 export const roleName = (r: string) =>
@@ -95,6 +99,24 @@ const AccIcons = {
       <path d="M2.4 12.8c0-2 1.7-3.4 3.8-3.4s3.8 1.4 3.8 3.4" />
       <circle cx="11.2" cy="6.1" r="1.7" />
       <path d="M11.4 9.6c1.4.2 2.4 1.3 2.4 2.9" />
+    </svg>
+  ),
+  clusters: (
+    <svg
+      width={14}
+      height={14}
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.55}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ display: "block", flex: "none" }}
+      aria-hidden="true"
+    >
+      <ellipse cx="8" cy="4.2" rx="4.8" ry="2" />
+      <path d="M3.2 4.2v3.6c0 1.1 2.15 2 4.8 2s4.8-.9 4.8-2V4.2" />
+      <path d="M3.2 7.8v3.8c0 1.1 2.15 2 4.8 2s4.8-.9 4.8-2V7.8" />
     </svg>
   ),
   audit: (
@@ -226,6 +248,12 @@ const AccountListItem = React.memo(function AccountListItem({
                 `${u.deliveries} ${u.deliveries === 1 ? "delivery" : "deliveries"}${u.last_delivery ? ` · ${ago(u.last_delivery)}` : ""}`,
               )
             : bi("还没有交付", "No deliveries")}
+          {u.clusters && Object.keys(u.clusters).length > 0
+            ? bi(
+                ` · ${Object.keys(u.clusters).length} 授权集群`,
+                ` · ${Object.keys(u.clusters).length} assigned`,
+              )
+            : ""}
         </div>
       </div>
     </a>
@@ -383,11 +411,11 @@ export function AccountsPage({
     return () => window.removeEventListener("keydown", onKey);
   }, [list, selected]);
 
-  if (me.role !== "admin")
+  if (me.role !== "admin" && !can("iam.user|iam.role|iam.team|audit.view"))
     return (
       <div className="page-empty enter">
         <h1>
-          {bi("只有管理员可以管理账户", "Administrator access required")}
+          {bi("只有管理员或授权负责人可以访问 IAM", "IAM access required")}
         </h1>
       </div>
     );
@@ -395,6 +423,7 @@ export function AccountsPage({
   const adding = selected === "+new";
   const roles = selected === "~roles";
   const teamsView = selected === "~teams";
+  const clustersView = selected === "~clusters";
   const auditView = selected === "~audit";
   const deletedView = selected === "~deleted";
   const current = users.find((u) => u.username === selected);
@@ -465,6 +494,21 @@ export function AccountsPage({
                       : bi("还没有团队", "No teams yet")
                     : bi("一起看、一起做交付", "Collaborate on deliveries"),
                 },
+                ...(can("iam.user|iam.team")
+                  ? [
+                      {
+                        id: "~clusters",
+                        icon: AccIcons.clusters,
+                        title: bi("集群权限", "Cluster Access"),
+                        sub: iam
+                          ? bi(
+                              `${(iam.clusters || []).length} 个集群 · 按集群分配成员`,
+                              `${(iam.clusters || []).length} clusters · per-cluster grants`,
+                            )
+                          : bi("按集群分配运维或只读权限", "Assign per-cluster access"),
+                      },
+                    ]
+                  : []),
                 ...(can("audit.view")
                   ? [
                       {
@@ -623,6 +667,14 @@ export function AccountsPage({
             <RolesPane narrow={narrow} />
           ) : teamsView ? (
             <TeamsPane narrow={narrow} users={users.map((u) => u.username)} />
+          ) : clustersView ? (
+            <ClustersAccessPane
+              narrow={narrow}
+              users={users}
+              onSaved={() => {
+                if (can("iam.user")) void reload();
+              }}
+            />
           ) : adding ? (
             <AddAccount
               key="new"
@@ -1188,6 +1240,9 @@ function AddAccount({
   const { iam } = useIAM();
   const [roles, setRoles] = useState<string[]>(["engineer"]);
   const [teams, setTeams] = useState<string[]>([]);
+  const [clusters, setClusters] = useState<Record<string, ClusterAccessLevel>>(
+    {},
+  );
   const [password, setPassword] = useState(generate);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -1196,6 +1251,10 @@ function AddAccount({
     password: string;
     role: string;
   } | null>(null);
+  const effScope = useMemo(
+    () => (iam ? effective(iam, roles).scope : "own"),
+    [iam, roles],
+  );
   const nameError = !name
     ? ""
     : !NAME.test(name)
@@ -1215,7 +1274,13 @@ function AddAccount({
     try {
       await api("/api/users", {
         method: "POST",
-        body: JSON.stringify({ username: name, roles, teams, password }),
+        body: JSON.stringify({
+          username: name,
+          roles,
+          teams,
+          clusters: effScope === "all" ? {} : clusters,
+          password,
+        }),
       });
       setCreated({
         name,
@@ -1383,6 +1448,20 @@ function AddAccount({
               aria-label={bi("团队", "Teams")}
               style={{ maxWidth: 520 }}
             />
+          </div>
+        )}
+        {iam && (iam.clusters?.length || 0) > 0 && effScope !== "all" && (
+          <div className="frow">
+            <span className="frow-label">
+              {bi("初始授权集群（可选）", "Initial Cluster Access (Optional)")}
+            </span>
+            <div style={{ maxWidth: 560 }}>
+              <ClusterGrantPicker
+                clusters={iam.clusters || []}
+                value={clusters}
+                onChange={setClusters}
+              />
+            </div>
           </div>
         )}
         <div className="frow">

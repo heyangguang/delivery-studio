@@ -11,6 +11,8 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { Message } from "@arco-design/web-react";
 import { bi, biv, getLang, withLang } from "../app/i18n";
 
+export type ClusterAccessLevel = "view" | "operate";
+
 export type Session = {
   username: string;
   role: string;
@@ -21,6 +23,7 @@ export type Session = {
   role_names?: string[];
   teams?: string[];
   team_names?: string[];
+  clusters?: Record<string, ClusterAccessLevel>;
   session_id?: string;
   auth_type?: string;
   issued_at?: string;
@@ -759,6 +762,7 @@ export type Account = {
   role: string;
   roles?: string[];
   teams?: string[];
+  clusters?: Record<string, ClusterAccessLevel>;
   deliveries?: number;
   active?: number;
   last_delivery?: string;
@@ -1058,6 +1062,7 @@ export type ClusterView = {
   app_id: string;
   app_name: string;
   owner: string;
+  access_level?: ClusterAccessLevel;
   version: string;
   platform?: string;
   hosts: number;

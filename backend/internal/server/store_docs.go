@@ -388,7 +388,7 @@ func (s *storeServer) clusterFactsFor(user, id string) (clusterFacts, bool) {
 	f := clusterFacts{ID: id}
 	seen := false
 	for _, j := range all {
-		seen = seen || vis(j.Owner)
+		seen = seen || vis(j.Owner, id)
 		if j.State == "succeeded" {
 			f.Jobs = append(f.Jobs, j)
 		}
@@ -2259,6 +2259,11 @@ func (s *storeServer) handleCluster(w http.ResponseWriter, r *http.Request, sess
 	f, ok := s.clusterFactsFor(session.User, parts[0])
 	if !ok {
 		s.fail(w, 404, "找不到这个集群，或它还没有生成成功的交付")
+		return
+	}
+	isPropagatePull := len(parts) == 4 && parts[1] == "rehearsals" && parts[3] == "propagate" && r.Method == "POST"
+	if r.Method != "GET" && r.Method != "HEAD" && !isPropagatePull && !s.clusterCanOperate(session.User, f.Current.Owner, f.ID) {
+		s.fail(w, 403, "你对集群「"+f.ID+"」仅有只读查看权限，无法执行修改或变更操作")
 		return
 	}
 	f.Lang = wLang(w)

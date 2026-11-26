@@ -395,7 +395,7 @@ func (s *storeServer) visibleClusterIDs(user string) []string {
 	s.mu.Lock()
 	seen := map[string]bool{}
 	for _, j := range s.jobs {
-		if j.ClusterID == "" || !j.live() || !vis(j.Owner) {
+		if j.ClusterID == "" || !j.live() || !vis(j.Owner, j.ClusterID) {
 			continue
 		}
 		seen[j.ClusterID] = true
@@ -2471,6 +2471,7 @@ func (s *storeServer) handlePropagateRehearsal(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	canOpOrigin := s.clusterCanOperate(session.User, f.Current.Owner, f.ID)
 	rehearsalMu.Lock()
 	origin, ok := s.loadRehearsal(f.ID, rid)
 	if !ok {
@@ -2495,10 +2496,12 @@ func (s *storeServer) handlePropagateRehearsal(w http.ResponseWriter, r *http.Re
 			OriginRehearsalID: origin.ID,
 			OriginTitle:       origin.Title,
 		}
-		if err := s.saveRehearsal(origin); err != nil {
-			rehearsalMu.Unlock()
-			s.fail(w, 500, "保存样板批次标识失败")
-			return
+		if canOpOrigin {
+			if err := s.saveRehearsal(origin); err != nil {
+				rehearsalMu.Unlock()
+				s.fail(w, 500, "保存样板批次标识失败")
+				return
+			}
 		}
 	}
 	rehearsalMu.Unlock()
@@ -2529,6 +2532,10 @@ func (s *storeServer) handlePropagateRehearsal(w http.ResponseWriter, r *http.Re
 		tf, ok := s.clusterFactsFor(session.User, cid)
 		if !ok {
 			skipped = append(skipped, skippedEntry{ClusterID: cid, Reason: tr(lang, "集群不存在或无权限", "Cluster not found or unauthorized")})
+			continue
+		}
+		if !s.clusterCanOperate(session.User, tf.Current.Owner, cid) {
+			skipped = append(skipped, skippedEntry{ClusterID: cid, Reason: tr(lang, "对该目标集群仅有只读权限，无法写入变更演练", "Read-only access on target cluster")})
 			continue
 		}
 		if tf.Current.DeliveryMode == "configuration" {

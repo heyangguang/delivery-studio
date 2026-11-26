@@ -88,6 +88,50 @@ var permIndex = func() map[string]perm {
 // scopes, narrowest first.
 var scopeRank = map[string]int{"own": 0, "team": 1, "all": 2}
 
+// clusterLevelRank orders per-cluster access levels from narrowest to widest.
+var clusterLevelRank = map[string]int{"": 0, "view": 1, "operate": 2}
+
+func cloneStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func nonNilStringMap(in map[string]string) map[string]string {
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func cleanClusterGrants(in map[string]string) (map[string]string, bool) {
+	if len(in) == 0 {
+		return nil, true
+	}
+	out := make(map[string]string, len(in))
+	for rawID, rawLvl := range in {
+		cid := strings.TrimSpace(rawID)
+		lvl := strings.ToLower(strings.TrimSpace(rawLvl))
+		if cid == "" || len(cid) > 120 || !docClusterID.MatchString(cid) {
+			return nil, false
+		}
+		if lvl != "view" && lvl != "operate" {
+			return nil, false
+		}
+		out[cid] = lvl
+	}
+	if len(out) == 0 {
+		return nil, true
+	}
+	return out, true
+}
+
 // aiFeaturePerms lists all granular per-module AI usage permissions controlled under ai.use.
 var aiFeaturePerms = []string{
 	"ai.feat.assistant",
@@ -177,14 +221,16 @@ var builtinRoles = []role{
 }
 
 type team struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Desc string `json:"desc,omitempty"`
+	ID       string            `json:"id"`
+	Name     string            `json:"name"`
+	Desc     string            `json:"desc,omitempty"`
+	Clusters map[string]string `json:"clusters,omitempty"`
 }
 
 type grant struct {
-	Roles []string `json:"roles"`
-	Teams []string `json:"teams"`
+	Roles    []string          `json:"roles"`
+	Teams    []string          `json:"teams"`
+	Clusters map[string]string `json:"clusters,omitempty"`
 }
 
 // iamState is what is stored: roles of the organisation's own, teams, and who holds what.
@@ -229,8 +275,15 @@ func (s *storeServer) iamLoad() iamState {
 		}
 		iamCache[f] = st
 	}
-	out := iamState{Roles: append([]role{}, st.Roles...), Teams: append([]team{}, st.Teams...), Grants: map[string]grant{}, Deleted: append([]deletedUser{}, st.Deleted...)}
+	out := iamState{Roles: append([]role{}, st.Roles...), Teams: make([]team, len(st.Teams)), Grants: map[string]grant{}, Deleted: append([]deletedUser{}, st.Deleted...)}
+	for i, t := range st.Teams {
+		t.Clusters = cloneStringMap(t.Clusters)
+		out.Teams[i] = t
+	}
 	for k, v := range st.Grants {
+		v.Roles = append([]string{}, v.Roles...)
+		v.Teams = append([]string{}, v.Teams...)
+		v.Clusters = cloneStringMap(v.Clusters)
 		out.Grants[k] = v
 	}
 	return out
@@ -274,10 +327,11 @@ func (st iamState) grantOf(user, legacyRole string) grant {
 
 // access is what one person may do right now.
 type access struct {
-	Perms map[string]bool
-	Scope string
-	Teams []string
-	Roles []string
+	Perms    map[string]bool
+	Scope    string
+	Teams    []string
+	Roles    []string
+	Clusters map[string]string // explicit per-cluster grants (merged from user + user's teams, widest level wins)
 }
 
 func (a access) can(p string) bool { return a.Perms[p] }
@@ -288,7 +342,7 @@ func (s *storeServer) accessOf(user string) access {
 	u, ok := s.users[user]
 	s.mu.Unlock()
 	if !ok {
-		return access{Perms: map[string]bool{}, Scope: "own", Teams: []string{}, Roles: []string{}}
+		return access{Perms: map[string]bool{}, Scope: "own", Teams: []string{}, Roles: []string{}, Clusters: map[string]string{}}
 	}
 	iamMu.Lock()
 	st := s.iamLoad()
@@ -297,7 +351,7 @@ func (s *storeServer) accessOf(user string) access {
 }
 
 func (st iamState) accessFrom(u storeUser) access {
-	a := access{Perms: map[string]bool{}, Scope: "own", Teams: []string{}, Roles: []string{}}
+	a := access{Perms: map[string]bool{}, Scope: "own", Teams: []string{}, Roles: []string{}, Clusters: map[string]string{}}
 	if u.Disabled {
 		return a
 	}
@@ -316,6 +370,27 @@ func (st iamState) accessFrom(u storeUser) access {
 		}
 	}
 	a.Teams = append(a.Teams, g.Teams...)
+	mergeCluster := func(cid, lvl string) {
+		if clusterLevelRank[lvl] > clusterLevelRank[a.Clusters[cid]] {
+			a.Clusters[cid] = lvl
+		}
+	}
+	for cid, lvl := range g.Clusters {
+		mergeCluster(cid, lvl)
+	}
+	if len(g.Teams) > 0 {
+		teamMap := make(map[string]team, len(st.Teams))
+		for _, t := range st.Teams {
+			teamMap[t.ID] = t
+		}
+		for _, tid := range g.Teams {
+			if t, ok := teamMap[tid]; ok {
+				for cid, lvl := range t.Clusters {
+					mergeCluster(cid, lvl)
+				}
+			}
+		}
+	}
 	return a
 }
 
@@ -346,23 +421,20 @@ func (s *storeServer) need(w http.ResponseWriter, user, p string) bool {
 	return false
 }
 
-// jobVisible says whether a delivery is within what someone may see: theirs, their team's, or all, as their roles say.
+// clusterAccess returns a lock-free predicate returning the user's effective access level on a delivery/cluster:
+//   - ""        : not visible
+//   - "view"    : read-only access via explicit per-cluster grant
+//   - "operate" : full role-permitted access (global scope, creator/owner, team scope, or explicit operate grant)
 // Like visibleJobs it takes s.mu itself, so it must not be called while holding it.
-func (s *storeServer) jobVisible(user string, j storeJob) bool {
-	return s.visibleJobs(user)(j.Owner)
-}
-
-// visibleJobs returns a filter by owner for lists. Everything it needs is worked out here, so the filter itself takes no
-// locks and may be used while holding s.mu.
-func (s *storeServer) visibleJobs(user string) func(owner string) bool {
+func (s *storeServer) clusterAccess(user string) func(owner, clusterID string) string {
 	a := s.accessOf(user)
 	if !a.can("delivery.view") {
-		return func(string) bool { return false }
+		return func(string, string) string { return "" }
 	}
 	if a.Scope == "all" {
-		return func(string) bool { return true }
+		return func(string, string) string { return "operate" }
 	}
-	ok := map[string]bool{user: true}
+	okOwner := map[string]bool{user: true}
 	if a.Scope == "team" && len(a.Teams) > 0 {
 		mine := map[string]bool{}
 		for _, t := range a.Teams {
@@ -380,12 +452,51 @@ func (s *storeServer) visibleJobs(user string) func(owner string) bool {
 		for _, u := range users {
 			for _, t := range st.grantOf(u.Username, u.Role).Teams {
 				if mine[t] {
-					ok[u.Username] = true
+					okOwner[u.Username] = true
 				}
 			}
 		}
 	}
-	return func(owner string) bool { return ok[owner] }
+	// Any cluster containing a job owned by user (or teammate under scope=="team") belongs to them at cluster level,
+	// so creators always keep full visibility over subsequent revisions created by collaborators on their cluster.
+	ownedClusters := map[string]bool{}
+	s.mu.Lock()
+	for _, j := range s.jobs {
+		if j.ClusterID != "" && okOwner[j.Owner] {
+			ownedClusters[j.ClusterID] = true
+		}
+	}
+	s.mu.Unlock()
+	explicit := a.Clusters
+	return func(owner, clusterID string) string {
+		if (owner != "" && okOwner[owner]) || (clusterID != "" && ownedClusters[clusterID]) {
+			return "operate"
+		}
+		if clusterID != "" && len(explicit) > 0 {
+			if lvl := explicit[clusterID]; lvl != "" {
+				return lvl
+			}
+		}
+		return ""
+	}
+}
+
+// jobVisible says whether a delivery is within what someone may see: theirs, their team's, explicitly granted by cluster, or all.
+// Like visibleJobs it takes s.mu itself, so it must not be called while holding it.
+func (s *storeServer) jobVisible(user string, j storeJob) bool {
+	return s.clusterAccess(user)(j.Owner, j.ClusterID) != ""
+}
+
+// clusterCanOperate says whether user may perform mutating actions (within their role permissions) on the cluster.
+func (s *storeServer) clusterCanOperate(user, owner, clusterID string) bool {
+	return s.clusterAccess(user)(owner, clusterID) == "operate"
+}
+
+// visibleJobs returns a lock-free filter by (owner, clusterID) for lists. Everything it needs is worked out here, so
+// the filter itself takes no locks and may be used while holding s.mu.
+func (s *storeServer) visibleJobs(user string) func(owner, clusterID string) bool {
+	lvl := s.clusterAccess(user)
+	return func(owner, clusterID string) bool { return lvl(owner, clusterID) != "" }
 }
 
 // ---- which permission each request needs ----
@@ -492,6 +603,7 @@ var routePerms = []routePerm{
 	rp("GET", `/api/iam(/.*)?`, "iam.user|iam.role|iam.team"),
 	rp("W", `/api/iam/roles(/.*)?`, "iam.role"),
 	rp("W", `/api/iam/teams(/.*)?`, "iam.team"),
+	rp("W", `/api/iam/clusters/[^/]+`, "iam.user|iam.team"),
 	rp("W", `/api/iam/deleted/.*`, "iam.user"),
 	rp("*", `/api/users(/.*)?`, "iam.user"),
 
@@ -589,6 +701,7 @@ func (s *storeServer) sessionView(session storeSession) map[string]any {
 		"role_names":     names,
 		"teams":          a.Teams,
 		"team_names":     teams,
+		"clusters":       nonNilStringMap(a.Clusters),
 		"session_id":     sess.ID,
 		"auth_type":      authType,
 		"issued_at":      sess.CreatedAt.UTC().Format(time.RFC3339),

@@ -47,6 +47,7 @@ import {
   IconCheck,
   IconExclamationCircle,
   IconLoading,
+  IconLock,
   IconRefresh,
   IconRight,
 } from "@arco-design/web-react/icon";
@@ -408,6 +409,7 @@ export function ClusterDetail({
     .replace(/^Initial Deploy\b/, "Deploy");
   const app = appMap.get(c.app_id);
   const owner = c.owner && c.owner !== meName() ? c.owner : "";
+  const readOnly = c.access_level === "view";
   const entry = resolvedPlan
     ? c.plans.find((p) => p.id === resolvedPlan)
     : undefined;
@@ -651,6 +653,20 @@ export function ClusterDetail({
             </div>
             <div className="detail-meta">
               {owner && <span className="row-owner">{bi(`${owner} 的集群`, `${owner}'s cluster`)}</span>}
+              {readOnly && (
+                <Tooltip
+                  content={bi(
+                    "你对该集群拥有只读查看权限，可浏览配置、文档与演练记录，不可执行变更或删除",
+                    "You have read-only access to this cluster; viewing and exports are allowed, mutations are restricted",
+                  )}
+                  mini
+                >
+                  <span className="cl-ro-chip">
+                    <IconLock />
+                    <span>{bi("只读授权", "Read-only")}</span>
+                  </span>
+                </Tooltip>
+              )}
               <span>
                 {c.app_name} {c.version}
               </span>
@@ -688,7 +704,14 @@ export function ClusterDetail({
                   <Menu
                     onClickMenuItem={(k) => {
                       if (k === "copy") copy(c.id);
-                      else if (k === "edit-baseline") setBaselineModal("edit");
+                      else if (k === "cluster-access") {
+                        try {
+                          sessionStorage.setItem("ds:iam-cluster-focus", c.id);
+                        } catch {
+                          /* ignore */
+                        }
+                        go({ name: "accounts", id: "~clusters" });
+                      } else if (k === "edit-baseline") setBaselineModal("edit");
                       else if (k === "reprobe") setBaselineModal("probe");
                       else if (k === "delete-imported" && c.current) {
                         Modal.confirm({
@@ -722,7 +745,12 @@ export function ClusterDetail({
                     <Menu.Item key="copy">
                       <IconCopy /> {bi("复制集群标识", "Copy Cluster ID")}
                     </Menu.Item>
-                    {isImported && can("delivery.create") && (
+                    {!readOnly && can("iam.user|iam.team") && (
+                      <Menu.Item key="cluster-access">
+                        <IconLock /> {bi("集群权限设置", "Cluster Access")}
+                      </Menu.Item>
+                    )}
+                    {!readOnly && isImported && can("delivery.create") && (
                       <>
                         <Menu.Item key="edit-baseline">
                           <IconEdit /> {bi("编辑纳管基线", "Edit Baseline")}

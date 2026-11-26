@@ -1791,7 +1791,7 @@ func (s *storeServer) handleExecutionRunsList(w http.ResponseWriter, r *http.Req
 	s.mu.Lock()
 	jobByID := make(map[string]storeJob, len(runsByJob))
 	for id, j := range s.jobs {
-		if !vis(j.Owner) {
+		if !vis(j.Owner, j.ClusterID) {
 			continue
 		}
 		visibleClusters[j.ClusterID] = true

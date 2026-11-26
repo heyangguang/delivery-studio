@@ -483,11 +483,15 @@ func (s *storeServer) sourceCertificates(id string) map[string][]byte {
 
 // reviseBlocker says why the first deployment id cannot be revised into a delivery for cluster; empty when it can.
 func (s *storeServer) reviseBlocker(id, user, cluster string) string {
-	vis := s.visibleJobs(user)
+	lvlFn := s.clusterAccess(user)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if src, ok := s.jobs[id]; !ok || !vis(src.Owner) {
+	src, ok := s.jobs[id]
+	if !ok || lvlFn(src.Owner, src.ClusterID) == "" {
 		return "找不到要修改的首次部署"
+	}
+	if lvlFn(src.Owner, src.ClusterID) != "operate" {
+		return "你对集群「" + src.ClusterID + "」仅有只读查看权限，无法修订配置"
 	}
 	return s.reviseBlockerLocked(id, user, cluster)
 }

@@ -56,6 +56,7 @@ import {
   UnifiedAgentView,
   consumeAgentEnrollPrefill,
 } from "./execution-types";
+import { EnrollAgentModal } from "./enroll-agent-modal";
 import "./executions.css";
 import "./execution-center.css";
 import "./rehearsal-automation.css";
@@ -2271,138 +2272,30 @@ export function ExecutionNodes({
         onClose={() => setProbeDrawerOpen(false)}
       />
 
-      <Modal
+      <EnrollAgentModal
         visible={enrollOpen}
-        onCancel={() => setEnrollOpen(false)}
-        footer={null}
-        style={{ width: 560, maxWidth: "94vw" }}
-        title={
-          enrollment
-            ? bi("安装并启动 Agent", "Install & Start Agent")
-            : bi("接入 Agent", "Enroll Agent")
+        onClose={() => setEnrollOpen(false)}
+        defaultClusterId={enrollClusters[0]}
+        defaultHostName={enrollName}
+        defaultHostIP={enrollIP}
+        initialCatalog={
+          rawCatalog.length > 0
+            ? rawCatalog
+            : clusters.map((c) => ({
+                id: c.id,
+                app_name: c.app_name,
+                version: c.version,
+                platform: c.platform,
+                owner: c.owner,
+                can_op: manageableSet.has(c.id),
+              }))
         }
-      >
-        {!enrollment ? (
-          <div className="ua-enroll-form">
-            <p className="ua-enroll-lead">
-              {bi(
-                "装在 1 台管理机上可远程代管多个集群；直接装在业务目标机上则自动走本机免密直连。",
-                "Install on a management host to manage multiple clusters, or directly on a target host for passwordless local execution.",
-              )}
-            </p>
-            <div className="ua-form-grid">
-              <label className="ua-field">
-                <span>{bi("Agent 名称", "Agent Name")}</span>
-                <Input
-                  value={enrollName}
-                  onChange={setEnrollName}
-                  placeholder={bi("如 prod-jumpbox-01 或 db-node-01", "e.g. prod-jumpbox-01 or db-node-01")}
-                />
-              </label>
-              <label className="ua-field">
-                <span>{bi("机器 IP 地址", "Host IP Address")}</span>
-                <Input
-                  value={enrollIP}
-                  onChange={setEnrollIP}
-                  placeholder={bi("部署该 Agent 的机器网卡 IP", "IP address of the machine")}
-                />
-              </label>
-            </div>
-
-            {clusters.length > 0 && (
-              <label className="ua-field">
-                <span>{bi("初始关联集群（可选）", "Associated Clusters (Optional)")}</span>
-                <Select
-                  mode="multiple"
-                  allowClear
-                  showSearch
-                  maxTagCount={3}
-                  value={enrollClusters}
-                  onChange={setEnrollClusters}
-                  getPopupContainer={() => document.body}
-                  triggerProps={{ autoFitPosition: true }}
-                  placeholder={bi("也可接入后在页面穿梭框中批量关联…", "Or associate in bulk via the transfer box after enrollment…")}
-                  options={clusters
-                    .filter((c) => manageableSet.has(c.id))
-                    .map((c) => ({
-                      value: c.id,
-                      label: `${c.id} · ${c.app_name} ${c.version}`,
-                    }))}
-                />
-              </label>
-            )}
-
-            <div className="ua-modal-foot">
-              <Button onClick={() => setEnrollOpen(false)}>{bi("取消", "Cancel")}</Button>
-              <Button
-                type="primary"
-                loading={enrollBusy}
-                onClick={() => void submitEnroll()}
-              >
-                {bi("下一步：生成安装命令", "Next: Generate Installer")}
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <div className="ua-enroll-step2">
-            <div className={`ua-live-banner ${enrolledLive ? "is-ok" : ""}`}>
-              {enrolledLive ? <IconCheckCircle /> : <IconLoading />}
-              <div>
-                <b>
-                  {enrolledLive
-                    ? bi("Agent 已成功连接上线！", "Agent Connected & Online!")
-                    : bi("等待机器执行安装脚本并上报首次心跳…", "Waiting for Agent installation & first heartbeat…")}
-                </b>
-                <small>
-                  {enrollment.agent.name} ({enrollment.agent.ip})
-                </small>
-              </div>
-            </div>
-
-            <label className="ua-field">
-              <span>{bi("Agent 回连平台的 HTTPS 地址", "Platform HTTPS URL")}</span>
-              <Input
-                value={hubURL}
-                onChange={setHubURL}
-                placeholder="https://192.168.1.10:8443"
-              />
-              {isLoopbackURL(hubURL) && (
-                <small className="warn">
-                  {bi(
-                    "注意：127.0.0.1 仅适用于本机测试，远程机器请改为平台实际内网 IP 地址。",
-                    "127.0.0.1 only works on the same host; use a reachable LAN IP for remote machines.",
-                  )}
-                </small>
-              )}
-            </label>
-
-            <div className="ua-bundle-box">
-              <Button
-                type="primary"
-                icon={<IconDownload />}
-                loading={bundleBusy}
-                onClick={() => void downloadBundle()}
-              >
-                {bi("1. 下载自包含安装包 (.tar.gz)", "1. Download Installer Bundle (.tar.gz)")}
-              </Button>
-              <span className="faint small">
-                {bi("内含 Linux amd64 二进制、0600 凭证与 systemd 服务脚本", "Includes binary, 0600 credentials & systemd unit")}
-              </span>
-            </div>
-
-            <CommandBlock
-              title={bi("2. 上传至目标机器后执行一键安装命令", "2. Upload to machine and run installer")}
-              code={installCmd}
-            />
-
-            <div className="ua-modal-foot">
-              <Button type="primary" onClick={() => setEnrollOpen(false)}>
-                {enrolledLive ? bi("完成", "Done") : bi("稍后在后台自动连接", "Close")}
-              </Button>
-            </div>
-          </div>
-        )}
-      </Modal>
+        initialBootstrap={bootInfo}
+        onEnrolled={(ag) => {
+          void loadAll(true);
+          setSelectedId(ag.id);
+        }}
+      />
 
       <Drawer
         width={480}

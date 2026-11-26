@@ -2631,15 +2631,10 @@ export function TeamsPane({
             </div>
             <div className="st-field">
               <span>{bi("团队成员", "Team Members")}</span>
-              <Select
-                mode="multiple"
+              <TeamMemberTransfer
+                users={sorted}
                 value={edit.members}
                 onChange={(v) => setEdit({ ...edit, members: v })}
-                getPopupContainer={() => document.body}
-                triggerProps={{ autoFitPosition: true }}
-                options={sorted.map((u) => ({ value: u, label: u }))}
-                placeholder={bi("选择加入该团队的成员…", "Select members…")}
-                allowClear
               />
             </div>
             {(iam.clusters?.length || 0) > 0 && (
@@ -2665,6 +2660,228 @@ export function TeamsPane({
 }
 
 /* ---------------------------------------------------------------- cluster access ledger */
+
+function TeamMemberTransfer({
+  users,
+  value,
+  onChange,
+}: {
+  users: string[];
+  value: string[];
+  onChange: (next: string[]) => void;
+}) {
+  useLang();
+  const [lq, setLq] = useState("");
+  const [rq, setRq] = useState("");
+  const [lSel, setLSel] = useState<Set<string>>(() => new Set());
+  const [rSel, setRSel] = useState<Set<string>>(() => new Set());
+
+  const valSet = useMemo(() => new Set(value), [value]);
+  const avail = useMemo(() => users.filter((u) => !valSet.has(u)), [users, valSet]);
+
+  const lkw = lq.trim().toLowerCase();
+  const rkw = rq.trim().toLowerCase();
+  const fLeft = useMemo(
+    () => avail.filter((u) => !lkw || u.toLowerCase().includes(lkw)),
+    [avail, lkw],
+  );
+  const fRight = useMemo(
+    () => value.filter((u) => !rkw || u.toLowerCase().includes(rkw)),
+    [value, rkw],
+  );
+
+  const vLeft = fLeft.filter((u) => lSel.has(u));
+  const vRight = fRight.filter((u) => rSel.has(u));
+
+  const addMembers = (us: string[]) => {
+    if (!us.length) return;
+    onChange(Array.from(new Set([...value, ...us])));
+    setLSel(new Set());
+  };
+
+  const rmMembers = (us: string[]) => {
+    if (!us.length) return;
+    const s = new Set(us);
+    onChange(value.filter((u) => !s.has(u)));
+    setRSel(new Set());
+  };
+
+  return (
+    <div className="iam-cl-picker">
+      <div className="iam-transfer">
+        <div className="iam-tf-pane">
+          <div className="iam-tf-head">
+            <label className="iam-tf-head-chk">
+              <Checkbox
+                checked={fLeft.length > 0 && vLeft.length === fLeft.length}
+                indeterminate={vLeft.length > 0 && vLeft.length < fLeft.length}
+                disabled={fLeft.length === 0}
+                onChange={(chk) => {
+                  const next = new Set(lSel);
+                  for (const u of fLeft) {
+                    if (chk) next.add(u);
+                    else next.delete(u);
+                  }
+                  setLSel(next);
+                }}
+              />
+              <b>{bi("可添加成员", "Available Users")}</b>
+            </label>
+            <span className="iam-tf-cnt num">{fLeft.length}</span>
+          </div>
+          <div className="iam-tf-search">
+            <Input
+              size="small"
+              prefix={<IconSearch />}
+              allowClear
+              value={lq}
+              onChange={setLq}
+              placeholder={bi("搜索账户名…", "Search user…")}
+            />
+          </div>
+          <div className="iam-tf-list" style={{ height: 190 }}>
+            {fLeft.length === 0 ? (
+              <div className="iam-tf-empty">
+                {avail.length === 0
+                  ? bi("全部成员已加入团队", "All users added")
+                  : bi("无匹配成员", "No match")}
+              </div>
+            ) : (
+              fLeft.map((u) => {
+                const checked = lSel.has(u);
+                return (
+                  <div
+                    key={u}
+                    className={`iam-tf-row ${checked ? "is-checked" : ""}`}
+                    onClick={() => {
+                      const next = new Set(lSel);
+                      if (checked) next.delete(u);
+                      else next.add(u);
+                      setLSel(next);
+                    }}
+                  >
+                    <Checkbox checked={checked} />
+                    <span className="iam-mini-ava" aria-hidden>
+                      {u.slice(0, 1).toUpperCase()}
+                    </span>
+                    <div className="iam-tf-main">
+                      <b className="iam-tf-id">{u}</b>
+                    </div>
+                    <button
+                      type="button"
+                      className="iam-tf-rm"
+                      title={bi("加入团队", "Add")}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        addMembers([u]);
+                      }}
+                    >
+                      <IconPlus />
+                    </button>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        <div className="iam-tf-mid">
+          <Button
+            type="primary"
+            size="small"
+            disabled={vLeft.length === 0}
+            onClick={() => addMembers(vLeft)}
+          >
+            {bi("加入", "Add")} <IconRight />
+          </Button>
+          <Button
+            size="small"
+            disabled={vRight.length === 0}
+            onClick={() => rmMembers(vRight)}
+          >
+            <IconLeft /> {bi("移除", "Remove")}
+          </Button>
+        </div>
+
+        <div className="iam-tf-pane is-target">
+          <div className="iam-tf-head">
+            <label className="iam-tf-head-chk">
+              <Checkbox
+                checked={fRight.length > 0 && vRight.length === fRight.length}
+                indeterminate={vRight.length > 0 && vRight.length < fRight.length}
+                disabled={fRight.length === 0}
+                onChange={(chk) => {
+                  const next = new Set(rSel);
+                  for (const u of fRight) {
+                    if (chk) next.add(u);
+                    else next.delete(u);
+                  }
+                  setRSel(next);
+                }}
+              />
+              <b>{bi("团队成员", "Team Members")}</b>
+            </label>
+            <span className="iam-tf-cnt is-brand num">{value.length}</span>
+          </div>
+          <div className="iam-tf-search">
+            <Input
+              size="small"
+              prefix={<IconSearch />}
+              allowClear
+              value={rq}
+              onChange={setRq}
+              placeholder={bi("筛选已加入成员…", "Filter members…")}
+            />
+          </div>
+          <div className="iam-tf-list" style={{ height: 190 }}>
+            {fRight.length === 0 ? (
+              <div className="iam-tf-empty">
+                {value.length === 0
+                  ? bi("从左侧勾选成员加入团队", "Select users from the left pane")
+                  : bi("无匹配成员", "No match")}
+              </div>
+            ) : (
+              fRight.map((u) => {
+                const checked = rSel.has(u);
+                return (
+                  <div
+                    key={u}
+                    className={`iam-tf-row ${checked ? "is-checked" : ""}`}
+                    onClick={() => {
+                      const next = new Set(rSel);
+                      if (checked) next.delete(u);
+                      else next.add(u);
+                      setRSel(next);
+                    }}
+                  >
+                    <Checkbox checked={checked} />
+                    <span className="iam-mini-ava" aria-hidden>
+                      {u.slice(0, 1).toUpperCase()}
+                    </span>
+                    <div className="iam-tf-main">
+                      <b className="iam-tf-id">{u}</b>
+                    </div>
+                    <button
+                      type="button"
+                      className="iam-tf-rm"
+                      title={bi("移出团队", "Remove")}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        rmMembers([u]);
+                      }}
+                    >
+                      <IconClose />
+                    </button>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 const ClusterAccessLedgerRow = React.memo(function ClusterAccessLedgerRow({
   cluster: c,

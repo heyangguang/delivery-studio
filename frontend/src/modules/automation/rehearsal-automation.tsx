@@ -39,8 +39,8 @@ import {
   RehearsalExecTask,
   UnifiedAgentView,
   isRehearsalTaskTerminal,
-  saveAgentEnrollPrefill,
 } from "./execution-types";
+import { EnrollAgentModal } from "./enroll-agent-modal";
 import "./rehearsal-automation.css";
 
 export type ExecutionAgentChoice = {
@@ -452,17 +452,16 @@ export function SelectExecutionAgentModal({
             <div className="sea-sec">
               <div className="sea-sec-head">
                 <b>{bi("1. 选择本集群关联的 Agent", "1. Associated Cluster Agents")}</b>
-                {canBindCluster && (
-                  <button
-                    type="button"
-                    className="iam-text-act"
-                    onClick={() => {
-                      onCancel();
-                      go({ name: "executions", view: "nodes" });
+                {canEnrollAgent && !readOnly && (
+                  <InPlaceEnrollButton
+                    asText
+                    clusterId={clusterId}
+                    hosts={hosts}
+                    label={bi("+ 接入新 Agent", "+ Enroll Agent")}
+                    onEnrolled={(ag) => {
+                      void refreshSummary().then(() => setSelectedAgentId(ag.id));
                     }}
-                  >
-                    {bi("前往 Agent 关联集群 →", "Associate in Agent →")}
-                  </button>
+                  />
                 )}
               </div>
 
@@ -503,22 +502,14 @@ export function SelectExecutionAgentModal({
                     </div>
                   )}
                   {canEnrollAgent && (
-                    <Button
-                      size="small"
-                      type="outline"
-                      icon={<IconPlus />}
-                      onClick={() => {
-                        saveAgentEnrollPrefill({
-                          cluster: clusterId,
-                          host: hosts[0]?.name,
-                          ip: hosts[0]?.ip,
-                        });
-                        onCancel();
-                        go({ name: "executions", view: "nodes" });
+                    <InPlaceEnrollButton
+                      clusterId={clusterId}
+                      hosts={hosts}
+                      label={bi("就地接入新 Agent", "Enroll New Agent")}
+                      onEnrolled={(ag) => {
+                        void refreshSummary().then(() => setSelectedAgentId(ag.id));
                       }}
-                    >
-                      {bi("接入新 Agent", "Enroll New Agent")}
-                    </Button>
+                    />
                   )}
                 </div>
               ) : (
@@ -735,6 +726,55 @@ export function SelectExecutionAgentModal({
   );
 }
 
+function InPlaceEnrollButton({
+  clusterId,
+  hosts,
+  label,
+  size = "small",
+  type = "outline",
+  asText = false,
+  onEnrolled,
+}: {
+  clusterId: string;
+  hosts?: ClusterAutomationHost[];
+  label: string;
+  size?: "mini" | "small" | "default";
+  type?: "primary" | "secondary" | "outline";
+  asText?: boolean;
+  onEnrolled: (ag: UnifiedAgentView) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      {asText ? (
+        <button
+          type="button"
+          className="iam-text-act"
+          onClick={() => setOpen(true)}
+        >
+          {label}
+        </button>
+      ) : (
+        <Button
+          size={size}
+          type={type}
+          icon={<IconPlus />}
+          onClick={() => setOpen(true)}
+        >
+          {label}
+        </Button>
+      )}
+      <EnrollAgentModal
+        visible={open}
+        onClose={() => setOpen(false)}
+        defaultClusterId={clusterId}
+        clusterHosts={hosts}
+        onEnrolled={onEnrolled}
+      />
+    </>
+  );
+}
+
 /**
  * Clean Cluster Automation Panel (under Cluster Detail -> Automation tab).
  */
@@ -757,6 +797,11 @@ export function ClusterAutomationPanel({
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
+  const [enrollOpen, setEnrollOpen] = useState(false);
+  const [enrollHostPrefill, setEnrollHostPrefill] = useState<{
+    name?: string;
+    ip?: string;
+  }>({});
   const [scopeFilter, setScopeFilter] = useState<"all" | "online" | "local">("all");
   const [leftQ, setLeftQ] = useState("");
   const [rightQ, setRightQ] = useState("");
@@ -841,6 +886,7 @@ export function ClusterAutomationPanel({
     return <Skeleton animation text={{ rows: 6 }} />;
   }
 
+  const clusterHosts = summary?.hosts || [];
   const bound = summary?.unified_agents || [];
   const available = summary?.available_agents || [];
   const recent = summary?.recent_tasks || [];
@@ -849,7 +895,7 @@ export function ClusterAutomationPanel({
 
   const isLocalAgent = (a: UnifiedAgentView) =>
     a.backing === "direct" ||
-    Boolean(summary?.hosts?.some((h) => h.ip.trim() === a.ip.trim()));
+    Boolean(clusterHosts.some((h) => h.ip.trim() === a.ip.trim()));
 
   const matchAgent = (a: UnifiedAgentView, kw: string) => {
     if (!kw) return true;
@@ -869,8 +915,23 @@ export function ClusterAutomationPanel({
   const filteredBound = bound.filter((a) => matchAgent(a, rkw));
   const validLeftChecked = filteredAvailable.filter((a) => leftChecked.has(a.id));
   const validRightChecked = filteredBound.filter((a) => rightChecked.has(a.id));
-  const localAvailCount = available.filter((a) => isLocalAgent(a)).length;
+  const localAvail = available.filter((a) => isLocalAgent(a));
+  const localAvailCount = localAvail.length;
   const onlineAvailCount = available.filter((a) => a.online && !a.disabled).length;
+
+  const onlineJumpbox = bound.find(
+    (a) => !a.disabled && a.online && a.backing !== "direct" && !clusterHosts.some((h) => h.ip.trim() === a.ip.trim()),
+  );
+  const onlineSameHostFallback = bound.find(
+    (a) => !a.disabled && a.online && a.backing !== "direct",
+  );
+
+  const readyHostCount = clusterHosts.filter((h) => {
+    const directHit = bound.some(
+      (a) => !a.disabled && a.online && a.ip.trim() === h.ip.trim(),
+    );
+    return directHit || Boolean(onlineJumpbox || onlineSameHostFallback);
+  }).length;
 
   const fmtAgentProbe = (a: UnifiedAgentView) => {
     const parts: string[] = [];
@@ -882,8 +943,123 @@ export function ClusterAutomationPanel({
     return parts.join(" · ");
   };
 
+  const openEnrollInPlace = (host?: { name?: string; ip?: string }) => {
+    setEnrollHostPrefill(host || {});
+    setEnrollOpen(true);
+  };
+
   return (
     <div className="rha-clean-panel">
+      {clusterHosts.length > 0 && (
+        <section className="rha-hosts-card">
+          <div className="rha-hosts-head">
+            <span className="rha-hosts-title">
+              <span>{bi("集群目标机器与自动化覆盖", "Cluster Target Nodes & Coverage")}</span>
+              <span
+                className={`rha-cov-pill num ${
+                  readyHostCount === clusterHosts.length
+                    ? "is-ok"
+                    : readyHostCount > 0
+                      ? "is-warn"
+                      : ""
+                }`}
+              >
+                {bi(
+                  `${readyHostCount} / ${clusterHosts.length} 台就绪`,
+                  `${readyHostCount} / ${clusterHosts.length} ready`,
+                )}
+              </span>
+            </span>
+            <span className="faint small">
+              {bi(
+                "支持在业务机本机部署免密直连 Agent，或关联 1 台跳板机 Agent 统一调度全集群节点",
+                "Deploy local passwordless Agents on hosts, or associate one jumpbox Agent for all nodes",
+              )}
+            </span>
+          </div>
+          <div className="rha-hosts-grid">
+            {clusterHosts.map((h) => {
+              const directOnline = bound.find(
+                (a) => !a.disabled && a.online && a.ip.trim() === h.ip.trim(),
+              );
+              const directOffline = bound.find(
+                (a) => (a.disabled || !a.online) && a.ip.trim() === h.ip.trim(),
+              );
+              const jumpCover = onlineJumpbox || onlineSameHostFallback;
+              const unboundSameIP = available.find(
+                (a) => a.ip.trim() === h.ip.trim(),
+              );
+              return (
+                <div key={`${h.name}-${h.ip}`} className="rha-host-tile">
+                  <div className="rha-host-meta">
+                    <div className="rha-host-line1">
+                      <b title={h.name}>{h.name}</b>
+                      {h.role && <span className="rha-host-role">{h.role}</span>}
+                    </div>
+                    <code
+                      className="rha-host-ip mono"
+                      title={bi("点击复制机器 IP", "Click to copy IP")}
+                      onClick={() => copy(h.ip, bi("已复制 IP", "Copied IP"))}
+                    >
+                      {h.ip}
+                    </code>
+                  </div>
+                  <div className="rha-host-right">
+                    {directOnline ? (
+                      <span className="rha-host-cov is-direct">
+                        ● {bi("本机直连", "Direct")} · {directOnline.name}
+                      </span>
+                    ) : jumpCover ? (
+                      <span className="rha-host-cov is-jump">
+                        ● {bi("跳板代管", "Jumpbox")} · {jumpCover.name}
+                      </span>
+                    ) : directOffline ? (
+                      <span className="rha-host-cov is-off">
+                        ● {bi("Agent 离线", "Offline")} · {directOffline.name}
+                      </span>
+                    ) : (
+                      <>
+                        <span className="rha-host-cov is-none">
+                          ○ {bi("待关联执行器", "Unassigned")}
+                        </span>
+                        {canOperateCluster && unboundSameIP ? (
+                          <button
+                            type="button"
+                            className="iam-text-act"
+                            disabled={busy}
+                            onClick={() =>
+                              void batchSetAgentsBound([unboundSameIP.id], true)
+                            }
+                          >
+                            {bi(
+                              `一键关联 ${unboundSameIP.name}`,
+                              `Bind ${unboundSameIP.name}`,
+                            )}
+                          </button>
+                        ) : (
+                          canEnrollAgent &&
+                          !readOnly && (
+                            <button
+                              type="button"
+                              className="iam-text-act"
+                              onClick={() =>
+                                openEnrollInPlace({ name: h.name, ip: h.ip })
+                              }
+                            >
+                              +{bi("在此机接入 Agent", "Enroll on Host")}
+                            </button>
+                          )
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
       <section className="ua-sec">
         <div className="ua-sec-head">
           <div>
@@ -912,8 +1088,8 @@ export function ClusterAutomationPanel({
             {canOperateCluster && (available.length > 0 || bound.length > 0) && (
               <Button
                 size="small"
-                type={bound.length === 0 ? "primary" : "secondary"}
-                icon={bound.length === 0 ? <IconPlus /> : <IconSettings />}
+                type={bound.length === 0 && available.length > 0 ? "primary" : "secondary"}
+                icon={<IconSettings />}
                 onClick={() => {
                   setScopeFilter("all");
                   setLeftQ("");
@@ -922,51 +1098,154 @@ export function ClusterAutomationPanel({
                 }}
               >
                 {bound.length === 0
-                  ? bi("关联 Agent", "Associate Agent")
+                  ? bi(`关联已有 Agent (${available.length})`, `Associate (${available.length})`)
                   : bi("配置关联 Agent", "Configure Agents")}
               </Button>
             )}
-            <Button
-              size="small"
-              type="outline"
-              icon={<IconSettings />}
-              onClick={() => {
-                if (canEnrollAgent) {
-                  saveAgentEnrollPrefill({
-                    cluster: clusterId,
-                    host: summary?.hosts?.[0]?.name,
-                    ip: summary?.hosts?.[0]?.ip,
-                  });
+            {canEnrollAgent && !readOnly && (
+              <Button
+                size="small"
+                type={
+                  bound.length === 0 && available.length === 0
+                    ? "primary"
+                    : "outline"
                 }
-                go({ name: "executions", view: "nodes" });
-              }}
-            >
-              {canEnrollAgent
-                ? bi("管理 / 接入 Agent", "Manage Agents")
-                : bi("前往 Agent 中心", "Open Agents")}
-            </Button>
+                icon={<IconPlus />}
+                onClick={() =>
+                  openEnrollInPlace({
+                    name: clusterHosts[0]?.name,
+                    ip: clusterHosts[0]?.ip,
+                  })
+                }
+              >
+                {bi("接入新 Agent", "Enroll Agent")}
+              </Button>
+            )}
           </div>
         </div>
 
         {bound.length === 0 ? (
-          <div className="ua-cluster-empty">
-            <span className="faint">
-              {canOperateCluster
-                ? available.length > 0
-                  ? bi(
-                      `当前集群尚未关联执行 Agent（平台共有 ${available.length} 台可用 Agent）；点击右上角「关联 Agent」即可批量选择。`,
-                      `No Agent associated yet (${available.length} available on platform). Click "Associate Agent" above.`,
-                    )
-                  : bi(
-                      "平台尚未接入任何执行 Agent；可前往「执行中心 → Agent」接入机器后再关联。",
-                      "No Agents enrolled on the platform yet.",
-                    )
-                : bi(
-                    "当前集群尚未关联执行 Agent（你对本集群为只读权限，需集群创建者或运维成员配置关联）。",
-                    "No Agent associated yet (read-only access on this cluster).",
+          canOperateCluster ? (
+            <div className="rha-onboard-grid">
+              <div className="rha-onboard-card">
+                <div className="rha-onboard-top">
+                  <div className="rha-onboard-title">
+                    <b>{bi("方式一：关联平台已有 Agent", "Option 1: Associate Existing Agent")}</b>
+                    <span className="ds-tf-cnt num">
+                      {bi(`${available.length} 台可用`, `${available.length} available`)}
+                    </span>
+                  </div>
+                  <p>
+                    {available.length > 0
+                      ? bi(
+                          "平台已部署有执行 Agent，通过双栏穿梭框一键关联至本集群即可复用，无需重复安装。",
+                          "Reuse existing Agents already deployed on your hosts or jumpboxes.",
+                        )
+                      : bi(
+                          "平台暂未发现其他已接入的空闲 Agent；请先通过右侧接入一台机器。",
+                          "No existing Agents available on the platform yet.",
+                        )}
+                  </p>
+                  {available.length > 0 && (
+                    <div className="rha-onboard-pills">
+                      {available.slice(0, 3).map((a) => (
+                        <span key={a.id} className="rha-onboard-pill">
+                          <span
+                            className={`iam-ag-dot ${
+                              a.online && !a.disabled ? "is-online" : "is-offline"
+                            }`}
+                          />
+                          <b>{a.name}</b>
+                          <code className="mono faint">{a.ip}</code>
+                        </span>
+                      ))}
+                      {available.length > 3 && (
+                        <span className="rha-onboard-pill faint">
+                          +{available.length - 3}
+                        </span>
+                      )}
+                    </div>
                   )}
-            </span>
-          </div>
+                </div>
+                <div className="rha-onboard-foot">
+                  <Button
+                    size="small"
+                    type="primary"
+                    disabled={available.length === 0}
+                    onClick={() => {
+                      setScopeFilter("all");
+                      setLeftQ("");
+                      setRightQ("");
+                      setTransferOpen(true);
+                    }}
+                  >
+                    {bi("打开穿梭框选择 Agent", "Select Existing Agents")}
+                  </Button>
+                  {localAvail.length > 0 && (
+                    <Button
+                      size="small"
+                      type="outline"
+                      loading={busy}
+                      onClick={() =>
+                        void batchSetAgentsBound(
+                          localAvail.map((a) => a.id),
+                          true,
+                        )
+                      }
+                    >
+                      {bi(
+                        `一键关联同机 IP (${localAvail.length})`,
+                        `Bind Same-IP (${localAvail.length})`,
+                      )}
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              {canEnrollAgent && (
+                <div className="rha-onboard-card is-primary">
+                  <div className="rha-onboard-top">
+                    <div className="rha-onboard-title">
+                      <b>{bi("方式二：就地部署并接入新 Agent", "Option 2: Enroll a New Agent")}</b>
+                      <span className="ua-path-badge is-local">
+                        {bi("当前页弹窗完成", "In-Place Setup")}
+                      </span>
+                    </div>
+                    <p>
+                      {bi(
+                        "直接在当前页面生成离线自包含安装包，装在目标机走免密直连，装在管理机可跨集群远程代管。",
+                        "Generate a self-contained bundle right here without leaving this cluster.",
+                      )}
+                    </p>
+                  </div>
+                  <div className="rha-onboard-foot">
+                    <Button
+                      size="small"
+                      type="outline"
+                      icon={<IconPlus />}
+                      onClick={() =>
+                        openEnrollInPlace({
+                          name: clusterHosts[0]?.name,
+                          ip: clusterHosts[0]?.ip,
+                        })
+                      }
+                    >
+                      {bi("立即接入新 Agent", "Enroll New Agent")}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="ua-cluster-empty">
+              <span className="faint">
+                {bi(
+                  "当前集群尚未关联执行 Agent（你对本集群为只读权限，需集群创建者或运维成员配置关联）。",
+                  "No Agent associated yet (read-only access on this cluster).",
+                )}
+              </span>
+            </div>
+          )
         ) : (
           <div className="rha-ag-ledger" role="table">
             <div className="rha-ag-head" role="row">
@@ -999,7 +1278,14 @@ export function ClusterAutomationPanel({
                     <code className="mono small">{a.ip}</code>
                   </div>
                   <div>
-                    <span className="small faint" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <span
+                      className="small faint"
+                      style={{
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
                       {probeSummary || bi("等待探针上报", "Awaiting probe")}
                     </span>
                   </div>
@@ -1036,6 +1322,16 @@ export function ClusterAutomationPanel({
           </div>
         )}
       </section>
+
+      <EnrollAgentModal
+        visible={enrollOpen}
+        onClose={() => setEnrollOpen(false)}
+        defaultClusterId={clusterId}
+        defaultHostName={enrollHostPrefill.name}
+        defaultHostIP={enrollHostPrefill.ip}
+        clusterHosts={clusterHosts}
+        onEnrolled={() => void load(true)}
+      />
 
       <Drawer
         width={840}
